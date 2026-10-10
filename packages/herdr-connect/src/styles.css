@@ -2225,7 +2225,8 @@
     padding-inline: var(--rly-space-12);
   }
 
-  .connect-pins-more-wrap {
+  /* The list behind "+N" is placed against the whole set, so it never covers the chips. */
+  .connect-pins[data-placement="bar"] {
     position: relative;
   }
 
@@ -2242,7 +2243,7 @@
     margin: 0;
     max-block-size: min(60dvh, 24rem);
     max-inline-size: min(20rem, calc(100vw - var(--rly-space-32)));
-    overflow: auto;
+    overflow: clip auto;
     padding: var(--rly-space-8);
     position: absolute;
     z-index: 3;
@@ -2259,6 +2260,11 @@
     justify-content: start;
   }
 
+  .connect-pin-text {
+    display: grid;
+    min-inline-size: 0;
+  }
+
   .connect-pins-entry[data-away] .connect-pin-open {
     cursor: default;
     opacity: 0.6;
@@ -2266,7 +2272,6 @@
 
   .connect-pin-since {
     color: var(--rly-color-text-2);
-    white-space: nowrap;
   }
 
   /* Over the directory: a stack in the end corner, clear of the safe area; the list opens above it. */
@@ -2292,6 +2297,13 @@
     inset-inline-end: 0;
   }
 
+  /* On a phone the corner stays small: characters only; their names are in their labels and the list. */
+  @media (max-width: 47.99rem) {
+    .connect-pins[data-placement="float"] .connect-pin :is(.connect-pin-name, .connect-pin-state) {
+      display: none;
+    }
+  }
+
   /* Room at the end of the directory, so the last row can scroll clear of the stack: one row per chip. */
   .connect-agents[data-pinned] {
     padding-block-end: calc(
@@ -2300,10 +2312,25 @@
   }
 
   /* In the terminal's bar: characters only, side by side; the list opens below, over the output only while open. */
-  .connect-pins[data-placement="bar"] {
-    flex: none;
-    margin-inline-start: auto;
+  .terminal-bar[data-pinned] {
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
+  }
+
+  .terminal-bar > .connect-pins {
+    display: flex;
+    justify-self: end;
     min-inline-size: 0;
+  }
+
+  /* A phone's bar has no room beside the name: the pins take a line of their own under it. */
+  @media (max-width: 47.99rem) {
+    .terminal-bar[data-pinned] {
+      grid-template-columns: auto minmax(0, 1fr) auto;
+    }
+
+    .terminal-bar > .connect-pins {
+      grid-column: 1 / -1;
+    }
   }
 
   .connect-pins[data-placement="bar"] .connect-pin :is(.connect-pin-name, .connect-pin-state) {

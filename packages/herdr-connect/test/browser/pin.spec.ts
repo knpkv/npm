@@ -118,4 +118,48 @@ test.describe("Connect pin", () => {
     await expect(chip).toBeHidden()
     await expect.poll(stored).not.toContain("FIXTURE:agent-fixture")
   })
+
+  // The list behind "+N" opens clear of the chips, and in a phone's terminal bar the pins keep to one line.
+  test("opens the +N list clear of the chips, and keeps the bar's pins on one line on a phone", async ({ page }) => {
+    await page.setViewportSize({ height: 700, width: 320 })
+    await page.goto("/")
+    await page.evaluate(() => {
+      const pin = (host: string, id: string, name: string) => ({ host, id, key: `${host}:${id}`, name, seenAt: 0 })
+      window.localStorage.setItem(
+        "fleet-connect-pins",
+        JSON.stringify({
+          pins: [
+            pin("FIXTURE", "agent-fixture", "fixture-pane"),
+            pin("gone", "agent-one", "away-agent-one"),
+            pin("gone", "agent-two", "away-agent-two")
+          ],
+          v: 1
+        })
+      )
+    })
+    await page.reload()
+    const float = page.locator(".connect-pins[data-placement='float']")
+    await float.getByRole("button", { name: "2 more pinned" }).click()
+    const list = await float.locator(".connect-pins-overflow").boundingBox()
+    const chip = await float.locator(".connect-pin").first().boundingBox()
+    expect(list).not.toBeNull()
+    expect(chip).not.toBeNull()
+    if (list !== null && chip !== null) expect(list.y + list.height).toBeLessThanOrEqual(chip.y)
+    // A long "not seen since" wraps inside the list instead of scrolling it sideways.
+    expect(await float.locator(".connect-pins-overflow").evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(
+      true
+    )
+
+    await page.keyboard.press("Escape")
+    await page.locator(".connect-agent", { hasText: "fixture-pane" }).click()
+    await page.getByRole("button", { name: "Open terminal" }).click()
+    await expect(page.getByText("connected", { exact: true })).toBeVisible()
+    const bar = page.locator(".terminal-bar .connect-pins")
+    await expect(bar.getByRole("button", { name: "2 more pinned" })).toBeVisible()
+    const rows = await bar.locator("button").evaluateAll((buttons) =>
+      new Set(buttons.map((b) => Math.round(b.getBoundingClientRect().top))).size
+    )
+    expect(rows).toBe(1)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320)
+  })
 })

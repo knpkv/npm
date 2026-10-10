@@ -1114,6 +1114,13 @@ export const ConnectSurface = ({
     (key) => key === stageKey
   )
   const floatRows = floatPins.shown.length + (floatPins.overflow.length > 0 ? 1 : 0)
+  const barPins = arrangePins(
+    pins,
+    (key) => agentByKey.get(key),
+    PIN_ROOM.bar,
+    (key) => key === selectedKey
+  )
+  const barPinned = barPins.shown.length + barPins.overflow.length > 0
   const pinRows: CSSProperties & Record<"--connect-pin-rows", string> = { "--connect-pin-rows": String(floatRows) }
   const stageCrew =
     stageAgent === null
@@ -1422,7 +1429,8 @@ export const ConnectSurface = ({
 
   const terminalScreen = (
     <Surface as="section" padding="none" className="terminal-stage">
-      <div className="terminal-bar">
+      {/* Pins take a column of their own, set here rather than with :has(), which Firefox 120 lacks. */}
+      <div className="terminal-bar" data-pinned={barPinned ? "" : undefined}>
         <button className="terminal-back" onClick={disconnect} ref={terminalBackRef} type="button">
           Agents
         </button>
