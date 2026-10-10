@@ -102,6 +102,7 @@ import { ReleaseSynchronizationStartup } from "../../src/server/runtime/ReleaseS
 import { ServerLifecycle } from "../../src/server/runtime/ServerLifecycle.js"
 import { SecretRoot, SecretStore } from "../../src/server/secrets/SecretStore.js"
 import { decodeBindConfig } from "../../src/server/security/BindConfig.js"
+import { makeStaticFixture } from "../fixtures/staticRoot.js"
 import {
   ACTION_ID as AUTHORIZED_ACTION_ID,
   CONNECTION_ID as AUTHORIZED_CONNECTION_ID,
@@ -283,21 +284,6 @@ const acquireEphemeralPort = Effect.tryPromise({
       })
     }),
   catch: () => new EphemeralPortFixtureError({ message: "could not reserve an ephemeral test port" })
-})
-
-const makeStaticFixture = Effect.gen(function*() {
-  const fileSystem = yield* FileSystem.FileSystem
-  const path = yield* Path.Path
-  const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-runtime-static-" })
-  yield* fileSystem.makeDirectory(path.join(root, ".vite"))
-  yield* fileSystem.makeDirectory(path.join(root, "assets"))
-  yield* fileSystem.writeFileString(path.join(root, "index.html"), "<main>Runtime fixture</main>")
-  yield* fileSystem.writeFileString(path.join(root, "assets", "app.js"), "export const ready = true")
-  yield* fileSystem.writeFileString(
-    path.join(root, ".vite", "manifest.json"),
-    JSON.stringify({ "src/client/main.tsx": { file: "assets/app.js", isEntry: true } })
-  )
-  return root
 })
 
 const makeCodexCliFixture = Effect.gen(function*() {
@@ -529,7 +515,7 @@ describe("Control Center closed runtime", () => {
     Effect.gen(function*() {
       const fileSystem = yield* FileSystem.FileSystem
       const path = yield* Path.Path
-      const staticRoot = yield* makeStaticFixture
+      const staticRoot = yield* makeStaticFixture()
       const dataRoot = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-runtime-data-" })
       yield* fileSystem.chmod(dataRoot, 0o700)
       const port = yield* acquireEphemeralPort
@@ -694,7 +680,7 @@ describe("Control Center closed runtime", () => {
     Effect.gen(function*() {
       const fileSystem = yield* FileSystem.FileSystem
       const path = yield* Path.Path
-      const staticRoot = yield* makeStaticFixture
+      const staticRoot = yield* makeStaticFixture()
       const dataRoot = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-runtime-drain-pair-" })
       yield* fileSystem.chmod(dataRoot, 0o700)
       const port = yield* acquireEphemeralPort
@@ -752,7 +738,7 @@ describe("Control Center closed runtime", () => {
       yield* TestClock.setTime(DateTime.toEpochMillis(GOVERNED_FIXTURE_TIME))
       const fileSystem = yield* FileSystem.FileSystem
       const path = yield* Path.Path
-      const staticRoot = yield* makeStaticFixture
+      const staticRoot = yield* makeStaticFixture()
       const codexExecutable = yield* makeCodexCliFixture
       const dataRoot = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-runtime-sync-" })
       yield* fileSystem.chmod(dataRoot, 0o700)
@@ -1006,7 +992,7 @@ describe("Control Center closed runtime", () => {
       yield* TestClock.setTime(DateTime.toEpochMillis(FIXTURE_TIME))
       const fileSystem = yield* FileSystem.FileSystem
       const path = yield* Path.Path
-      const staticRoot = yield* makeStaticFixture
+      const staticRoot = yield* makeStaticFixture()
       const codexExecutable = yield* makeCodexCliFixture
       const dataRoot = yield* fileSystem.makeTempDirectoryScoped({
         prefix: "control-center-runtime-release-agent-no-bootstrap-"
@@ -1115,7 +1101,7 @@ describe("Control Center closed runtime", () => {
       yield* TestClock.setTime(DateTime.toEpochMillis(FIXTURE_TIME))
       const fileSystem = yield* FileSystem.FileSystem
       const path = yield* Path.Path
-      const staticRoot = yield* makeStaticFixture
+      const staticRoot = yield* makeStaticFixture()
       const dataRoot = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-runtime-review-" })
       yield* fileSystem.chmod(dataRoot, 0o700)
       const port = yield* acquireEphemeralPort
@@ -1549,7 +1535,7 @@ describe("Control Center closed runtime", () => {
       yield* TestClock.setTime(DateTime.toEpochMillis(FIXTURE_TIME))
       const fileSystem = yield* FileSystem.FileSystem
       const path = yield* Path.Path
-      const staticRoot = yield* makeStaticFixture
+      const staticRoot = yield* makeStaticFixture()
       const dataRoot = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-runtime-disabled-" })
       yield* fileSystem.chmod(dataRoot, 0o700)
       const port = yield* acquireEphemeralPort
