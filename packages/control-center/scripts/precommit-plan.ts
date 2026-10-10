@@ -6,19 +6,31 @@ export type PrecommitCommand = {
 
 export type PrecommitPlan = {
   readonly commands: ReadonlyArray<PrecommitCommand>
-  readonly mode: "control-center" | "docs" | "full" | "none"
+  readonly mode: "changed" | "full" | "none"
   readonly reason: string
 }
 
 const normalizePath = (file: string): string => file.replaceAll("\\", "/").replace(/^\.\//, "")
 
-const isDocumentationPath = (file: string): boolean =>
-  file.endsWith(".md") || file.endsWith(".mdx") || file.startsWith("docs/")
+/** Repository inputs whose changes can affect packages outside the workspace dependency graph. */
+const isRepositoryInput = (file: string): boolean =>
+  /^packages\/.*\/(?:vitest[^/]*\.config\.[^/]+|tsconfig[^/]*\.jsonc?)$/u.test(file) ||
+  file.startsWith("scripts/") || file.startsWith("ast-grep/") ||
+  file.startsWith(".github/") || file.startsWith(".husky/") ||
+  file.startsWith("repos/") || file.startsWith("patches/") ||
+  (!file.startsWith("packages/") && !file.endsWith(".md") && !file.endsWith(".mdx"))
 
-const isDocumentationApplicationPath = (file: string): boolean => file.startsWith("packages/docs/")
+export type PrecommitEnvironment = {
+  readonly PRECOMMIT_MODE?: string | undefined
+}
 
-const isFocusedDocumentationPath = (file: string): boolean =>
-  isDocumentationPath(file) && !isDocumentationApplicationPath(file)
+/** Half of the available cores, rounded down, with at least one worker. Invalid overrides are rejected. */
+export const precommitMaxWorkers = (cores: number, override?: string): number | null => {
+  if (override === undefined) return Math.max(1, Math.floor(cores / 2))
+  if (!/^[1-9][0-9]*$/u.test(override)) return null
+  const workers = Number(override)
+  return Number.isSafeInteger(workers) ? workers : null
+}
 
 export type StagedPathSelection = {
   readonly formattableFiles: ReadonlyArray<string>
@@ -53,69 +65,38 @@ export const parseStagedNameStatus = (output: string): StagedPathSelection | nul
   return { formattableFiles, stagedFiles }
 }
 
-const stagedFormat = (files: ReadonlyArray<string>): PrecommitCommand => ({
-  args: ["exec", "prettier", "--check", "--ignore-unknown", "--", ...files],
-  command: "pnpm",
-  label: "format staged files"
-})
-
-/** Select the smallest safe pre-commit gate for the staged paths. */
+/** Select a staged incremental gate, or every repository check for shared inputs and explicit overrides. */
 export const planPrecommit = (
   stagedFiles: ReadonlyArray<string>,
-  formattableFiles: ReadonlyArray<string> = stagedFiles
+  environment: PrecommitEnvironment = {},
+  maxWorkers: number = 1,
+  sharedFiles: ReadonlyArray<string> = []
 ): PrecommitPlan => {
   const files = Array.from(new Set(stagedFiles.map(normalizePath).filter((file) => file.length > 0))).sort()
-  const formatFiles = Array.from(
-    new Set(formattableFiles.map(normalizePath).filter((file) => file.length > 0))
-  ).sort()
   if (files.length === 0) return { commands: [], mode: "none", reason: "no staged files" }
 
-  if (files.every(isDocumentationPath) && !files.some(isDocumentationApplicationPath)) {
-    return {
-      commands: formatFiles.length === 0 ? [] : [stagedFormat(formatFiles)],
-      mode: "docs",
-      reason: "only documentation files are staged"
-    }
-  }
-
-  const isControlCenterChange = files.some((file) => file.startsWith("packages/control-center/"))
-  const isControlCenterScope = files.every(
-    (file) => file.startsWith("packages/control-center/") || isFocusedDocumentationPath(file)
-  )
-  if (isControlCenterChange && isControlCenterScope) {
+  const repositoryInput = files.find((file) => isRepositoryInput(file) || sharedFiles.includes(file))
+  if (environment.PRECOMMIT_MODE === "full" || repositoryInput !== undefined) {
     return {
       commands: [
-        ...(formatFiles.length === 0 ? [] : [stagedFormat(formatFiles)]),
-        { args: ["lint:ast"], command: "pnpm", label: "run Effect static checks" },
-        {
-          args: ["--filter", "@knpkv/control-center", "lint"],
-          command: "pnpm",
-          label: "lint Control Center"
-        },
-        {
-          args: ["--filter", "@knpkv/control-center", "build"],
-          command: "pnpm",
-          label: "build Control Center"
-        },
-        {
-          args: ["--filter", "@knpkv/control-center", "check"],
-          command: "pnpm",
-          label: "type-check Control Center"
-        },
-        {
-          args: ["--filter", "@knpkv/control-center", "test"],
-          command: "pnpm",
-          label: "test Control Center"
-        }
+        { args: ["format"], command: "pnpm", label: "format repository" },
+        { args: ["lint"], command: "pnpm", label: "lint repository" },
+        { args: ["check"], command: "pnpm", label: "build and type-check repository" },
+        { args: ["test:unit", "--run", "--maxWorkers", String(maxWorkers)], command: "pnpm", label: "test repository" },
+        { args: ["test:pack"], command: "pnpm", label: "test packed packages" }
       ],
-      mode: "control-center",
-      reason: "only Control Center and documentation files are staged"
+      mode: "full",
+      reason: environment.PRECOMMIT_MODE === "full" ? "PRECOMMIT_MODE=full" : `repository input: ${repositoryInput}`
     }
   }
 
   return {
-    commands: [{ args: ["verify:full"], command: "pnpm", label: "run full repository gate" }],
-    mode: "full",
-    reason: "staged paths are outside the first focused scopes"
+    commands: [{
+      args: ["check:changed", "--staged", "--max-workers", String(maxWorkers)],
+      command: "pnpm",
+      label: "check staged files and affected packages"
+    }],
+    mode: "changed",
+    reason: "staged files and their workspace dependents"
   }
 }

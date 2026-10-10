@@ -17,7 +17,7 @@ export interface ResourceSummary extends Schema.Schema.Type<typeof ResourceSumma
 export const StackState = Schema.Struct({
   app: Schema.NonEmptyString,
   stage: Schema.NonEmptyString,
-  backend: Schema.Literal("local"),
+  backend: Schema.Literals(["local", "s3"]),
   alchemyVersion: Schema.NullOr(Schema.String),
   lastDeploy: Schema.NullOr(Schema.String),
   resources: Schema.Array(ResourceSummary)

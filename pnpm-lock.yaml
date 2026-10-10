@@ -331,6 +331,12 @@ importers:
 
   packages/alchemy-console:
     dependencies:
+      '@aws-sdk/credential-provider-sso':
+        specifier: ^3.973.16
+        version: 3.973.16
+      '@distilled.cloud/aws':
+        specifier: ^1.0.0-rc.13
+        version: 1.0.0-rc.13(effect@4.0.0)
       '@knpkv/bounded-io':
         specifier: workspace:^
         version: link:../bounded-io
@@ -1068,6 +1074,9 @@ importers:
       '@knpkv/ai-runtime':
         specifier: workspace:^
         version: link:../ai-runtime
+      '@playwright/test':
+        specifier: 1.63.0
+        version: 1.63.0
       '@types/node':
         specifier: ^26.6.4
         version: 26.6.4

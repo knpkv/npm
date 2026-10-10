@@ -164,6 +164,91 @@ describe("Dialog", () => {
     expect(document.body.getAttribute("data-scroll-locked")).toBeNull()
   })
 
+  it.each([true, false])(
+    "lets the host handle restoration when it returns %s, otherwise restores the opener",
+    async (handled) => {
+      const destination = document.createElement("button")
+      destination.textContent = "Route destination"
+      document.body.append(destination)
+      const restoreFocus = vi.fn((opener: HTMLElement | null): boolean => {
+        expect(opener).toBe(trigger)
+        expect(document.querySelector('[role="dialog"]')).toBeNull()
+        expect(destination.inert).toBe(false)
+        expect(destination.closest('[aria-hidden="true"]')).toBeNull()
+        if (handled) destination.focus()
+        return handled
+      })
+      const { host, portal } = await mount(
+        <Dialog.Root>
+          <Dialog.Trigger>Open details</Dialog.Trigger>
+          <Dialog.Content restoreFocus={restoreFocus} title="Details">
+            <Dialog.Close>Done</Dialog.Close>
+          </Dialog.Content>
+        </Dialog.Root>
+      )
+      const trigger = host.querySelector<HTMLButtonElement>("button")
+      await act(async () => trigger?.click())
+      await act(async () => portal.querySelector<HTMLButtonElement>("button")?.click())
+      await vi.waitFor(() => expect(restoreFocus).toHaveBeenCalledOnce())
+      expect(document.activeElement).toBe(handled ? destination : trigger)
+    }
+  )
+
+  it("gives focus restoration to the latest of two sequential dialog closes", async () => {
+    const first = document.createElement("button")
+    const last = document.createElement("button")
+    document.body.append(first, last)
+    const restoreFirst = vi.fn(() => {
+      first.focus()
+      return true
+    })
+    const restoreLast = vi.fn(() => {
+      last.focus()
+      return true
+    })
+    const dialogs = (firstOpen: boolean, lastOpen: boolean): ReactElement => (
+      <>
+        <Dialog.Root onOpenChange={() => undefined} open={firstOpen}>
+          <Dialog.Content restoreFocus={restoreFirst} title="First">
+            First
+          </Dialog.Content>
+        </Dialog.Root>
+        <Dialog.Root onOpenChange={() => undefined} open={lastOpen}>
+          <Dialog.Content restoreFocus={restoreLast} title="Last">
+            Last
+          </Dialog.Content>
+        </Dialog.Root>
+      </>
+    )
+    const entry = await mount(dialogs(true, true))
+    await act(async () =>
+      entry.root.render(<PortalProvider container={entry.portal}>{dialogs(false, true)}</PortalProvider>)
+    )
+    await act(async () =>
+      entry.root.render(<PortalProvider container={entry.portal}>{dialogs(false, false)}</PortalProvider>)
+    )
+    await vi.waitFor(() => expect(document.activeElement).toBe(last))
+    expect(restoreFirst).not.toHaveBeenCalled()
+    expect(restoreLast).toHaveBeenCalledOnce()
+  })
+
+  it("restores the external opener when an open dialog owner unmounts", async () => {
+    const opener = document.createElement("button")
+    opener.textContent = "Open details"
+    document.body.append(opener)
+    opener.focus()
+    const entry = await mount(
+      <Dialog.Root defaultOpen>
+        <Dialog.Content title="Details">
+          <Dialog.Close>Done</Dialog.Close>
+        </Dialog.Content>
+      </Dialog.Root>
+    )
+    expect(document.activeElement).not.toBe(opener)
+    await act(async () => entry.root.unmount())
+    await vi.waitFor(() => expect(document.activeElement).toBe(opener))
+  })
+
   it("dismisses on an outside pointer", async () => {
     const dismissible = await mount(
       <Dialog.Root defaultOpen>

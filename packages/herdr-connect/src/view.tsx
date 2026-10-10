@@ -10,7 +10,9 @@ import {
   serializeTerminalKey,
   terminalKeyDescriptors,
   terminalModifiers,
+  terminalModifierIsActive,
   type TerminalModifier,
+  type TerminalModifiers,
   type TerminalRailKey
 } from "./terminal-keyboard.js"
 import { nextTerminalRailIndex } from "./terminal-rail-navigation.js"
@@ -768,7 +770,7 @@ export const ConnectWorkspace = ({
 )
 
 type TerminalKeyRailProps = {
-  readonly modifier: TerminalModifier | null
+  readonly modifier: TerminalModifiers
   readonly onFocusTerminal: () => void
   readonly onModifierChange: (modifier: TerminalModifier) => void
   readonly onKey: (key: TerminalRailKey) => void
@@ -794,7 +796,8 @@ type TerminalKeyRailProps = {
   readonly onPaste?: () => void
 }
 
-const modifierLabel = (modifier: TerminalModifier): string => (modifier === "ctrl" ? "Ctrl" : "Alt")
+const modifierLabel = (modifier: TerminalModifier): string =>
+  modifier === "ctrl" ? "Ctrl" : modifier === "alt" ? "Alt" : "Shift"
 
 /** A fixed, keyboard-accessible set of terminal controls for touch layouts. */
 export const TerminalKeyRail = ({
@@ -903,7 +906,7 @@ export const TerminalKeyRail = ({
         >
           {terminalModifiers.map((item, index) => (
             <button
-              aria-pressed={modifier === item}
+              aria-pressed={terminalModifierIsActive(modifier, item)}
               className="terminal-key terminal-key-modifier"
               data-terminal-key={item}
               disabled={disabled || keysHidden}
@@ -935,9 +938,10 @@ export const TerminalKeyRail = ({
             const railIndex = modifierCount + index
             return (
               <button
-                aria-label={
-                  modifier === null ? descriptor.ariaLabel : `${modifierLabel(modifier)} ${descriptor.ariaLabel}`
-                }
+                aria-label={[
+                  ...terminalModifiers.filter((item) => terminalModifierIsActive(modifier, item)).map(modifierLabel),
+                  descriptor.ariaLabel
+                ].join(" ")}
                 className="terminal-key"
                 data-terminal-key={descriptor.key}
                 disabled={disabled || keysHidden || unavailable}

@@ -81,6 +81,12 @@ confirmation cards, and a composer. The host owns opening: it runs `useRelaySumm
 right after its launcher while open, and passes `regionRef` and `composerRef` through. While
 the panel is open its transcript announces runs; the host's status line should announce
 only while it is closed.
+Optional `avatar` and `transcriptAvatar({ live })` pass decorative images to rly's
+header and Relay prose turns. Omitted slots retain the default header mark and
+unadorned turns. The host owns size, pose updates, entry/exit, reduced motion and
+forced colours. `avatarStatus` adds plain status text inside the panel, without
+adding a live region. `onComposerFocusChange` reports textarea focus, false when
+focus leaves it, and false on panel close or unmount; omitting it adds no wrapper.
 
 - **The transcript** (`relayTranscriptItems`) is in the order things happened: each message,
   then the tool work after it as one burst, then each run's end (finished, cancelled, or

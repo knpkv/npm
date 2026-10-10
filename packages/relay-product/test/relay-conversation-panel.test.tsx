@@ -21,7 +21,7 @@ import {
   type RelayConversationState,
   type RelayOutgoingMessage
 } from "../src/client.js"
-import { RelayConversationPanel } from "../src/relay-conversation-panel.js"
+import { RelayConversationPanel, type RelayConversationPanelProps } from "../src/relay-conversation-panel.js"
 
 Object.defineProperty(window, "IS_REACT_ACT_ENVIRONMENT", { configurable: true, value: true })
 
@@ -73,7 +73,17 @@ const fakeConversations = (
   return { conversations, decisions, emit, retries, sent }
 }
 
-const Hub = ({ conversations }: { readonly conversations: RelayConversations }): ReactElement => {
+type Appearance = Pick<
+  RelayConversationPanelProps,
+  "avatar" | "avatarStatus" | "transcriptAvatar" | "onComposerFocusChange"
+>
+const Hub = ({
+  appearance,
+  conversations
+}: {
+  readonly conversations: RelayConversations
+  readonly appearance?: Appearance
+}): ReactElement => {
   const launcher = useRef<HTMLButtonElement>(null)
   return (
     <>
@@ -81,6 +91,7 @@ const Hub = ({ conversations }: { readonly conversations: RelayConversations }):
         Relay
       </button>
       <RelayConversationPanel
+        {...appearance}
         composerRef={() => undefined}
         conversation={fleet}
         conversations={conversations}
@@ -107,13 +118,17 @@ const Hub = ({ conversations }: { readonly conversations: RelayConversations }):
   )
 }
 
-const mount = async (conversations: RelayConversations) => {
+const mount = async (conversations: RelayConversations, appearance?: Appearance) => {
   const host = document.createElement("div")
   const portal = document.createElement("div")
   document.body.append(host, portal)
   const root = createRoot(host)
   await act(async () =>
-    root.render(<PortalProvider container={portal}>{<Hub conversations={conversations} />}</PortalProvider>)
+    root.render(
+      <PortalProvider container={portal}>
+        {<Hub conversations={conversations} {...(appearance === undefined ? {} : { appearance })} />}
+      </PortalProvider>
+    )
   )
   const text = () => `${host.textContent ?? ""}${portal.textContent ?? ""}`
   const find = <E extends Element>(selector: string) =>
@@ -144,10 +159,63 @@ const mount = async (conversations: RelayConversations) => {
     await act(async () => button.click())
   }
   const unmount = () => act(async () => root.unmount())
-  return { click, find, press, text, type, unmount }
+  const rerender = (appearance: Appearance) =>
+    act(async () =>
+      root.render(
+        <PortalProvider container={portal}>
+          <Hub conversations={conversations} appearance={appearance} />
+        </PortalProvider>
+      )
+    )
+  return { click, find, press, text, type, unmount, rerender }
 }
 
 describe("RelayConversationPanel", () => {
+  it("does not report a blur when a focused composer receives a new inline focus callback", async () => {
+    const { conversations, emit } = fakeConversations(() => Exit.void)
+    emit(live)
+    const reports: Array<boolean> = []
+    const custom = await mount(conversations, { onComposerFocusChange: (focused) => reports.push(focused) })
+    const field = custom.find<HTMLTextAreaElement>("textarea")
+    await act(async () => field?.focus())
+    expect(reports).toEqual([true])
+    await custom.rerender({ onComposerFocusChange: (focused) => reports.push(focused) })
+    expect(document.activeElement).toBe(field)
+    expect(reports).toEqual([true])
+    await custom.unmount()
+    expect(reports).toEqual([true, false])
+  })
+
+  it("forwards decorative avatars and plain status without adding announcements, and clears input focus on close and unmount", async () => {
+    const { conversations, emit } = fakeConversations(() => Exit.void)
+    emit({ ...live, messages: [{ id: "reply-1", role: "relay", text: "A reply" }] })
+    const original = await mount(conversations)
+    const liveRegions = document.querySelectorAll("[aria-live]").length
+    await original.unmount()
+    const focus: Array<boolean> = []
+    const custom = await mount(conversations, {
+      avatar: <svg data-character="header" />,
+      avatarStatus: "Listening",
+      transcriptAvatar: ({ live }) => <svg data-character="turn" data-live={String(live)} />,
+      onComposerFocusChange: (focused) => focus.push(focused)
+    })
+    expect(custom.find('[data-rly-relay-avatar="panel"] [data-character="header"]')).not.toBeNull()
+    expect(custom.find('[data-rly-relay-avatar="turn"] [data-character="turn"]')).not.toBeNull()
+    expect(custom.text()).toContain("Listening")
+    expect(document.querySelectorAll("[aria-live]")).toHaveLength(liveRegions)
+    await act(async () => custom.find<HTMLTextAreaElement>("textarea")?.focus())
+    expect(focus.at(-1)).toBe(true)
+    await act(async () => custom.find<HTMLButtonElement>('[aria-label="Close Relay"]')?.click())
+    expect(focus.at(-1)).toBe(false)
+    await act(async () => {
+      custom.find<HTMLTextAreaElement>("textarea")?.blur()
+      custom.find<HTMLTextAreaElement>("textarea")?.focus()
+    })
+    expect(focus.at(-1)).toBe(true)
+    await custom.unmount()
+    expect(focus.at(-1)).toBe(false)
+  })
+
   it("says why Send would lose the message, and clears it once the stream is live", async () => {
     const { conversations, emit } = fakeConversations(() => Exit.void)
     const panel = await mount(conversations)

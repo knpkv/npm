@@ -32,7 +32,7 @@ const declaresEffect = (manifest) =>
     Object.keys(manifest[section] ?? {}).some((name) => name === "effect" || name.startsWith("@effect/"))
   )
 
-const checkCoversTsconfig = (checkScript, expectedProject = "tsconfig.json") => {
+export const checkCoversTsconfig = (checkScript, expectedProject = "tsconfig.json") => {
   if (!Predicate.isString(checkScript)) return false
   const normalizedExpectedProject = expectedProject.replaceAll(/["']/gu, "").replace(/^\.\//u, "")
   for (const segment of checkScript.split(/&&|\|\||;/u)) {
@@ -57,7 +57,7 @@ const checkCoversTsconfig = (checkScript, expectedProject = "tsconfig.json") => 
   return false
 }
 
-const validatePackageRecords = (records) => {
+export const validatePackageRecords = (records) => {
   const diagnostics = []
   for (const record of records) {
     if (!record.effectPackage) continue
@@ -451,4 +451,4 @@ const program = Effect.gen(function* () {
   )
 })
 
-NodeRuntime.runMain(program.pipe(Effect.provide(NodeServices.layer)))
+if (import.meta.main) NodeRuntime.runMain(program.pipe(Effect.provide(NodeServices.layer)))

@@ -64,10 +64,12 @@ import { nextConnectAgentIndex } from "./keyboard.js"
 import {
   applyTerminalModifierToInput,
   dispatchTerminalKey,
+  noTerminalModifiers,
   toggleTerminalModifier,
   type TerminalInputApplication,
   type TerminalCursorMode,
   type TerminalModifier,
+  type TerminalModifiers,
   type TerminalRailKey
 } from "./terminal-keyboard.js"
 import { WorkSnapshots, WorkSnapshotsNewerVersion } from "@knpkv/herdr-work/model"
@@ -418,8 +420,8 @@ const socketUrl = (agent: ConnectAgent, dimensions: TerminalDimensions): string 
 type TerminalInputCommand = Extract<TerminalClientCommand, { readonly type: "terminal.input" }>
 
 type TerminalKeyboardCallbacks = {
-  readonly getModifier: () => TerminalModifier | null
-  readonly setModifier: (modifier: TerminalModifier | null) => void
+  readonly getModifier: () => TerminalModifiers
+  readonly setModifier: (modifier: TerminalModifiers) => void
   readonly setTerminalFocus: (target: HTMLElement, focus: () => void) => () => void
   readonly reportError: (error: TerminalInputApplication) => void
   readonly setInputSender: (sendInput: (command: TerminalInputCommand) => boolean) => () => void
@@ -726,8 +728,8 @@ export const ConnectSurface = ({
   const terminalFocusRef = useRef<() => void>(() => {})
   const terminalCursorModeReaderRef = useRef<() => TerminalCursorMode>(() => "normal")
   const terminalCursorModeOwnerRef = useRef<symbol | null>(null)
-  const terminalModifierRef = useRef<TerminalModifier | null>(null)
-  const [terminalModifier, setTerminalModifier] = useState<TerminalModifier | null>(null)
+  const terminalModifierRef = useRef<TerminalModifiers>(noTerminalModifiers)
+  const [terminalModifier, setTerminalModifier] = useState<TerminalModifiers>(noTerminalModifiers)
   const [terminalKeyError, setTerminalKeyError] = useState<string | null>(null)
   // Follows the terminal input's real focus, so the Keyboard button matches what iOS shows.
   const [keyboardOpen, setKeyboardOpen] = useState(false)
@@ -744,8 +746,8 @@ export const ConnectSurface = ({
               return
             }
             // A latched Ctrl or Alt would be applied to the pasted text; pasting releases it.
-            terminalModifierRef.current = null
-            setTerminalModifier(null)
+            terminalModifierRef.current = noTerminalModifiers
+            setTerminalModifier(noTerminalModifiers)
             setTerminalKeyError(null)
             paste(text)
           })
@@ -777,8 +779,8 @@ export const ConnectSurface = ({
     // A latched Ctrl or Alt would stay applied with no visible indicator or way to cancel it, so a
     // plain "c" would arrive as Ctrl-C. Hiding the keys releases it.
     if (hidden) {
-      terminalModifierRef.current = null
-      setTerminalModifier(null)
+      terminalModifierRef.current = noTerminalModifiers
+      setTerminalModifier(noTerminalModifiers)
     }
     Effect.runFork(
       storeTerminalKeysHidden(hidden).pipe(
@@ -1180,9 +1182,9 @@ export const ConnectSurface = ({
     terminalFocusTargetRef.current = null
     terminalCursorModeOwnerRef.current = null
     terminalCursorModeReaderRef.current = () => "normal"
-    terminalModifierRef.current = null
+    terminalModifierRef.current = noTerminalModifiers
     terminalActiveRequestRef.current = null
-    setTerminalModifier(null)
+    setTerminalModifier(noTerminalModifiers)
     setTerminalKeyError(null)
     setWorkspaceFocusFailure(null)
     setSelectedKey(key)
@@ -1263,8 +1265,8 @@ export const ConnectSurface = ({
     terminalFocusTargetRef.current = null
     terminalCursorModeOwnerRef.current = null
     terminalCursorModeReaderRef.current = () => "normal"
-    terminalModifierRef.current = null
-    setTerminalModifier(null)
+    terminalModifierRef.current = noTerminalModifiers
+    setTerminalModifier(noTerminalModifiers)
     setTerminalKeyError(null)
     setWorkspaceFocusFailure(nextFocusFailure)
   }

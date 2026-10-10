@@ -3,12 +3,15 @@ import { expect, test } from "@playwright/test"
 test("Work navigation links use intentional hover and keyboard focus affordances", async ({ page }) => {
   await page.goto("/test/browser/fixture.html?navigation")
 
-  // The first snapshot link is the current one (underlined); check the resting style on the next.
+  // The current snapshot has a flat tint; other links keep their hover and focus affordances.
   const timeLink = page.locator(".work-time-option").first()
   const otherTimeLink = page.locator(".work-time-option").nth(1)
   const rowLink = page.locator(".work-board-row").first()
 
-  await expect(timeLink).toHaveCSS("text-decoration-line", "underline")
+  await expect(timeLink).toHaveCSS("text-decoration-line", "none")
+  expect(await timeLink.evaluate((element) => getComputedStyle(element).backgroundColor)).not.toBe(
+    await otherTimeLink.evaluate((element) => getComputedStyle(element).backgroundColor)
+  )
   await expect(otherTimeLink).toHaveCSS("text-decoration-line", "none")
   await expect(rowLink).toHaveCSS("text-decoration-line", "none")
 

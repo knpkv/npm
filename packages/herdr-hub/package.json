@@ -69,6 +69,7 @@
     "lint": "eslint \"{src,test}/**/*.{ts,tsx}\"",
     "pack:deterministic": "pnpm build && node ../../scripts/pack-herdr.mjs .",
     "test": "vitest run",
+    "test:browser:superapp": "playwright test --config playwright.superapp.config.ts",
     "test:pack": "tsx scripts/test-packed-packages.ts",
     "render:icons": "tsx scripts/render-icons.ts"
   },
@@ -93,6 +94,7 @@
   "devDependencies": {
     "@effect/vitest": "4.0.0",
     "@knpkv/ai-runtime": "workspace:^",
+    "@playwright/test": "1.63.0",
     "@types/node": "^26.6.4",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",

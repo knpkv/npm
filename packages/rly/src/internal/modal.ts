@@ -195,14 +195,22 @@ export const useModalScrollLock = (layerRef: RefObject<HTMLDivElement | null>, i
 }
 
 /** Invalidates an older deferred restoration whenever a newer modal transition starts. */
-export const invalidateModalFocusRestore = (): void => {
-  focusTransitionGeneration += 1
-}
+export const invalidateModalFocusRestore = (): number => ++focusTransitionGeneration
 
-/** Restores focus only after modal cleanup and only while this remains the newest transition. */
-export const restoreModalFocusAfterCleanup = (target: HTMLElement | null): void => {
-  const generation = ++focusTransitionGeneration
+/**
+ * Restores after cleanup only for the latest transition; two sequential closes give ownership to the last.
+ * Dialog captures its token at logical close, before exit. Token-less callers keep their immediate-close semantics.
+ */
+export const restoreModalFocusAfterCleanup = (
+  target: HTMLElement | null,
+  restoreFocus?: (opener: HTMLElement | null) => boolean,
+  closeGeneration?: number
+): void => {
+  const generation = closeGeneration ?? ++focusTransitionGeneration
+  if (focusTransitionGeneration !== generation) return
   setTimeout(() => {
-    if (focusTransitionGeneration === generation && target !== null && target.isConnected === true) target.focus()
+    if (focusTransitionGeneration !== generation) return
+    if (restoreFocus?.(target) === true) return
+    if (target !== null && target.isConnected === true) target.focus()
   }, 0)
 }

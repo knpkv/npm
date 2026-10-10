@@ -5,6 +5,7 @@
   "exclude": ["fixtures", "node_modules"],
   "compilerOptions": {
     "noEmit": true,
+    "types": ["node"],
     "declaration": false,
     "declarationMap": false,
     "composite": false,

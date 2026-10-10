@@ -15,16 +15,53 @@
  * @module
  */
 import type { ObjectRef } from "@knpkv/relay/wire"
+import { Creature } from "@knpkv/herdr-connect/surface"
 import {
   type RelayConversations,
   RelayConversationPanel,
   type RelayStatusView,
+  type RelayConversationState,
   useRelayConversation,
   useRelayStatus
 } from "@knpkv/relay-product/client"
 import { RelayLauncher, useRelayPresentation, useRelayShortcut, useRelaySummon } from "@knpkv/rly/patterns"
 import { Button, Text } from "@knpkv/rly/primitives"
-import { type ReactElement, useRef, useState } from "react"
+import { type ReactElement, useCallback, useRef, useState } from "react"
+
+type RelayPhase = "idle" | "listening" | "thinking" | "answering" | "needs-you"
+
+/** Use status precedence without interpreting its display words; a quiet focused input means listening. */
+const relayPhase = (state: RelayConversationState, status: RelayStatusView, focused: boolean): RelayPhase => {
+  const phases = {
+    attention: (): RelayPhase => "needs-you",
+    working: (): RelayPhase => {
+      if (state.runIds.length > 0 && state.tools.some((tool) => tool.state === "running")) return "thinking"
+      if (state.runIds.length > 0 && state.messages.at(-1)?.streaming === true) return "answering"
+      return "thinking"
+    },
+    unread: (): RelayPhase => "idle",
+    idle: (): RelayPhase => (state.connection === "live" && state.failure === null && focused ? "listening" : "idle")
+  } satisfies Record<RelayStatusView["activity"], () => RelayPhase>
+  return phases[status.activity]()
+}
+
+/** Creature understands Fleet states; every Relay phase maps explicitly, never through its string fallback. */
+const creatureState = (phase: RelayPhase): "idle" | "ready" | "working" | "waiting" => {
+  const states = {
+    idle: "idle",
+    listening: "ready",
+    thinking: "working",
+    answering: "working",
+    "needs-you": "waiting"
+  } satisfies Record<RelayPhase, "idle" | "ready" | "working" | "waiting">
+  return states[phase]
+}
+
+const RelayAvatar = ({ phase }: { readonly phase: RelayPhase }): ReactElement => (
+  <span className="hub-relay-avatar" data-relay-phase={phase}>
+    <Creature host="relay" id="assistant" size="row" state={creatureState(phase)} />
+  </span>
+)
 
 /** What the shell needs to show Relay: the page's conversations and the hub's one conversation. */
 export interface HubRelayConversation {
@@ -75,14 +112,22 @@ const useSpokenStatus = (
 
 /** Relay's launcher, status and panel for the masthead. */
 export const HubRelay = ({
+  launcherLabels,
   relay,
   terminalOwnsKeys
 }: {
   readonly relay: HubRelayConversation
   /** The Connect tab shows: its terminal keeps Ctrl/⌘+J. */
   readonly terminalOwnsKeys: boolean
+  /** Optional shell names: desktop button and phone brand. Both announce the desktop action name. */
+  readonly launcherLabels?: { readonly desktop: string; readonly phone: string }
 }): ReactElement => {
   const [open, setOpen] = useState(false)
+  const [composerFocused, setComposerFocused] = useState(false)
+  const changeOpen = useCallback((open: boolean): void => {
+    if (!open) setComposerFocused(false)
+    setOpen(open)
+  }, [])
   const launcher = useRef<HTMLButtonElement>(null)
   const keys = useRelayShortcut()
   const shortcut = terminalOwnsKeys ? null : keys
@@ -90,18 +135,28 @@ export const HubRelay = ({
   const { composerRef, regionRef } = useRelaySummon({
     fullscreen: presentation === "fullscreen",
     launcher,
-    onOpenChange: setOpen,
+    onOpenChange: changeOpen,
     open,
     shortcut
   })
   const status = useRelayStatus(relay.conversations, relay.conversation, open)
-  const spoken = useSpokenStatus(status, useRelayConversation(relay.conversations, relay.conversation).runIds)
+  const state = useRelayConversation(relay.conversations, relay.conversation)
+  const spoken = useSpokenStatus(status, state.runIds)
+  const phase = relayPhase(state, status, open && composerFocused)
+  const avatar = <RelayAvatar phase={phase} />
   return (
     <div className="fleet-shell-relay">
       <RelayLauncher
         activity={status.activity}
+        avatar={avatar}
+        {...(launcherLabels === undefined
+          ? {}
+          : {
+              label: presentation === "fullscreen" ? launcherLabels.phone : launcherLabels.desktop,
+              "aria-label": launcherLabels.desktop
+            })}
         expanded={open}
-        onClick={() => setOpen(!open)}
+        onClick={() => changeOpen(!open)}
         ref={launcher}
         shortcut={shortcut}
       />
@@ -124,11 +179,20 @@ export const HubRelay = ({
       </span>
       {open ? (
         <RelayConversationPanel
+          avatar={avatar}
+          {...(launcherLabels === undefined ? {} : { title: launcherLabels.desktop })}
+          {...(status.words !== null
+            ? { avatarStatus: status.words }
+            : phase === "listening"
+              ? { avatarStatus: "Listening" }
+              : {})}
+          transcriptAvatar={({ live }) => <RelayAvatar phase={live ? phase : "idle"} />}
+          onComposerFocusChange={setComposerFocused}
           composerRef={composerRef}
           conversation={relay.conversation}
           conversations={relay.conversations}
           launcher={launcher}
-          onClose={() => setOpen(false)}
+          onClose={() => changeOpen(false)}
           placeholder="Ask Relay about your agents, approvals or work"
           presentation={presentation}
           regionRef={regionRef}

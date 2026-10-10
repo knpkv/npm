@@ -58,3 +58,7 @@ scratchpad/**/*.ts
 .design-sync/node_modules
 .ds-sync/
 ds-bundle/
+# per-product design-sync homes under packages/<pkg>/.design-sync/
+packages/*/.design-sync/.cache/
+packages/*/.design-sync/learnings/
+packages/*/.design-sync/node_modules

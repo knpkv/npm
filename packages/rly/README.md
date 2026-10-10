@@ -191,7 +191,17 @@ and `Close`; `Sheet` also provides `Body` and `Footer`). Both require an
 available `PortalProvider` target, isolate the background with native inert
 state, contain and restore focus, lock document scrolling, and become
 full-screen at compact widths. Titles are always visible and required, while
-motion is governed by the central theme tokens.
+motion is governed by the central theme tokens. Dialog retains its portal layer
+through the intrinsic exit, then removes it. Reduced motion removes it immediately.
+A host overriding content exit duration must keep the layer exit duration at least
+as long, so portal removal cannot cut the surface animation short.
+
+`Dialog.Content.restoreFocus` defaults to restoring the opener. A route owner can
+return `true` after focusing its destination, or `false` to keep opener restoration.
+The callback runs after exit and modal cleanup, only for the latest modal transition.
+Reduced motion skips the exit animation but keeps the same cleanup ordering. Use a
+stable callback reading the current destination, and clear pending destinations
+whenever the dialog opens again so cancelled closes cannot focus an old page.
 
 ## Limits and chart keys
 
@@ -468,6 +478,10 @@ assistive technology. `shortcut` is required: pass `useRelayShortcut()` (Ctrl/�
 the platform) only when the host binds that key and prevents the browser's own Ctrl+J,
 or `null` where it binds none, such as a live terminal that keeps its chords.
 The hint hides at 40rem and below, and the button is 32px tall, 44px for a coarse pointer.
+Optional `avatar` replaces only the launcher mark in an `aria-hidden` wrapper;
+omitting it keeps the default markup. The host sizes the image and conveys status
+in text. Rly forwards `activity` on the wrapper and leaves the avatar's motion to
+the host, including reduced motion and forced colours.
 
 `RelayTranscript` shows a Relay conversation: your turns as bubbles at the inline
 end, Relay's turns as selectable prose whose code blocks scroll in place, each burst of
@@ -477,6 +491,12 @@ announcer outside the content says when a run starts, finishes, stops or fails, 
 per token; "Relay is writing…" is visible only. Inside `RelayPanel` it follows new
 content only while you are at the end; reading earlier turns, "New messages" appears
 instead, and jumps are instant under reduced motion.
+Optional `avatar({ live })` renders a decorative image before each Relay prose
+turn, never a user, activity or outcome row. No avatar is added by default.
+Only the last Relay prose turn after the latest user turn is live while
+`streaming` is true; before its first text, previous replies remain idle.
+The host should keep historical avatars still. Rly adds no avatar animation or exit animation;
+the host supplies size, motion, reduced-motion and forced-colour behavior.
 
 `RelayComposer` is Relay's message box: it grows with its text up to 12 lines or 40%
 of the viewport, Enter adds a line and Ctrl/⌘+Enter sends (said beside Send), and an
@@ -536,6 +556,10 @@ sticky header's height and `--app-bottom-inset` to any bar docked at the bottom.
 Full screen portals through `PortalProvider`, so render Relay inside one, and set
 `interactive-widget=resizes-content` in the viewport meta so the full-screen footer
 stays above a phone's on-screen keyboard.
+Optional `avatar` replaces only the header mark, hidden from assistive technology.
+Omitting it retains the default mark and its entrance. The host sizes custom
+avatars, updates their pose and owns entry/exit and reduced-motion behavior;
+status words remain in the panel's plain `freshness` line or adjacent text.
 
 `useRelaySummon` binds that shortcut. From the page it opens Relay and focuses the composer (or, if
 Relay is already open, moves focus to the composer); from inside Relay it takes focus back to where it

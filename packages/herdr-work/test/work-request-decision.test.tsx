@@ -128,6 +128,52 @@ describe("workRequestClockText", () => {
 })
 
 describe("Work requests decided in place", () => {
+  it("labels settled request ages as request time, retaining the open request label", async () => {
+    for (const state of ["approved", "rejected", "fulfilled"] satisfies ReadonlyArray<WorkRequest["state"]>) {
+      const oldRequest = request("r1", "job-1", state)
+      const snapshots = snapshotsOf([oldRequest])
+      const asOf = NOW + 5 * 60 * 60_000
+      const host = await mount({
+        snapshots: {
+          ...snapshots,
+          observedAt: asOf,
+          now: { ...snapshots.now, asOf, observedAt: asOf, goals: [{ ...goal([oldRequest]), updatedAt: asOf }] }
+        }
+      })
+      expect(host.querySelector(".work-request-heading")?.textContent).toContain("requested 5h ago")
+    }
+    const open = await mount({ snapshots: snapshotsOf([request("r1", "job-1")]) })
+    expect(open.querySelector(".work-request-meta")?.textContent).toBe("requested 1m ago")
+  })
+
+  it("dates retained requests without attributing them to the replacement owner", async () => {
+    const retained = request("r1", "job-1")
+    const original = snapshotsOf([retained])
+    const reassigned = {
+      ...original,
+      now: {
+        ...original.now,
+        goals: [
+          {
+            ...goal([retained]),
+            owner: { id: "replacement-owner", name: "Replacement owner" },
+            updatedAt: NOW - 30_000
+          }
+        ]
+      }
+    }
+    const { decisions, sent } = decisionsOf({ "job-1": NOW + 60_000 })
+    const host = await mount({ decisions, snapshots: reassigned })
+    expect(host.querySelector(".work-request-meta")?.textContent).toBe("Openrequested 1m ago")
+    expect(host.querySelector(".work-request-meta")?.textContent).not.toContain("Replacement owner")
+    const approve = button(host, "Approve: Apply r1")
+    expect(approve?.getAttribute("aria-disabled")).toBeNull()
+    await act(async () => approve?.click())
+    expect(sent).toEqual([{ decision: "approve", jobId: "job-1" }])
+    const ordinary = await mount({ snapshots: original })
+    expect(ordinary.querySelector(".work-request-meta")?.textContent).toBe("requested 1m ago")
+  })
+
   it("keeps the hub link when the host gives no decisions", async () => {
     const host = await mount({ snapshots: snapshotsOf([request("r1", "job-1")]) })
     expect(host.querySelector("a[href='https://hub.example.test/?approvalJob=job-1']")).not.toBeNull()
@@ -137,7 +183,7 @@ describe("Work requests decided in place", () => {
   it("decides a request the hub lists as pending, with its clock, and sends only that job", async () => {
     const { decisions, sent } = decisionsOf({ "job-1": NOW + 4 * 60_000 + 12_000 })
     const host = await mount({ decisions, snapshots: snapshotsOf([request("r1", "job-1")]) })
-    expect(host.querySelector(".work-row-caption")?.textContent).toBe("Needs approval: Apply r1, 4m 12s left")
+    expect(host.querySelector(".work-row-caption")?.textContent).toContain("Apply r1, 4m 12s left")
     expect(host.querySelector("[aria-label='Goal details'], .work-detail")?.textContent).toContain("4m 12s left")
     const approve = button(host, "Approve: Apply r1")
     expect(approve?.getAttribute("aria-disabled")).toBeNull()
@@ -150,6 +196,33 @@ describe("Work requests decided in place", () => {
     const host = await mount({ decisions, snapshots: snapshotsOf([request("r1", "job-1")]) })
     expect(button(host, "Approve: Apply r1")).toBeUndefined()
     expect(host.querySelector("a[href='https://hub.example.test/?approvalJob=job-1']")).not.toBeNull()
+  })
+
+  it("keeps a pending job inert in a week checkpoint, then permits it back in Now", async () => {
+    const { decisions, sent } = decisionsOf({ "job-1": NOW + 60_000 })
+    const host = await mount({ decisions, initialWindow: "week", snapshots: snapshotsOf([request("r1", "job-1")]) })
+    const approve = button(host, "Approve: Apply r1")
+    const reject = button(host, "Reject: Apply r1")
+    expect(approve).toBeDefined()
+    expect(reject).toBeDefined()
+    await act(async () => {
+      approve?.click()
+      reject?.click()
+    })
+    expect(sent).toEqual([])
+    expect(approve?.getAttribute("aria-disabled")).toBe("true")
+    expect(reject?.getAttribute("aria-disabled")).toBe("true")
+    expect(reasonAndStatus(host).reason).toBe("Decisions are off in the past.")
+    expect(host.querySelector(".work-row-caption")?.textContent).not.toContain("left")
+
+    const back = [...host.querySelectorAll("button")].find((candidate) => candidate.textContent === "Back to now")
+    await act(async () => back?.click())
+    // Returning to Now closes details; reopen the same goal before deciding its current request.
+    await act(async () => host.querySelector<HTMLButtonElement>(".work-board-row")?.click())
+    const currentApprove = button(host, "Approve: Apply r1")
+    expect(currentApprove?.getAttribute("aria-disabled")).toBeNull()
+    await act(async () => currentApprove?.click())
+    expect(sent).toEqual([{ decision: "approve", jobId: "job-1" }])
   })
 
   it("holds every other bar off while one decision waits for the hub", async () => {
@@ -172,7 +245,7 @@ describe("Work requests decided in place", () => {
     )
     const host = await mount({ decisions, snapshots: snapshotsOf([request("r1", "job-1", "approved")]) })
     expect(button(host, "Approve: Apply r1")).toBeUndefined()
-    expect(host.querySelector(".work-request-heading")?.textContent).toBe("Apply r1Approved")
+    expect(host.querySelector(".work-request-heading")?.textContent).toContain("ApprovedApply r1")
     expect(host.querySelector(".work-request-announcement")?.textContent).toBe("Apply r1: Approved.")
     expect(host.textContent).not.toContain("The hub recorded your approval.")
   })

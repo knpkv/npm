@@ -1,11 +1,18 @@
 /// <reference types="vite/client" />
 import "@knpkv/rly/styles.css"
 import "../../src/styles.css"
+import fidelityFonts from "../../../rly/src/styles/fonts.css?inline"
 import { Schema } from "effect"
 import { createRoot } from "react-dom/client"
 import type { WorkGoal, WorkGoalObservedEntry, WorkPullRequestObservation, WorkSnapshot } from "../../src/model.js"
 import { WorkSnapshots } from "../../src/model.js"
 import { WorkBoard } from "../../src/view.js"
+import {
+  workFidelityDecisions,
+  workFidelitySelection,
+  workFidelitySnapshots,
+  workFidelityStates
+} from "./work-fidelity-fixture.js"
 
 class MissingWorkFixtureRootError extends Schema.TaggedError<MissingWorkFixtureRootError>()(
   "MissingWorkFixtureRootError",
@@ -32,6 +39,16 @@ const goal = (index: number): WorkGoal => {
 }
 
 const searchParams = new URL(window.location.href).searchParams
+const fidelityState = workFidelityStates.find((state) => state === searchParams.get("fidelity"))
+
+// Fidelity shots always draw Geist; the real shell retains its optional-font loading policy.
+if (fidelityState !== undefined) {
+  const fonts = document.createElement("style")
+  fonts.textContent = [...fidelityFonts.matchAll(/@font-face\s*\{[^}]*\}/g)]
+    .map(([face]) => face.replace(/font-display:\s*optional/g, "font-display: block"))
+    .join("\n")
+  document.head.append(fonts)
+}
 
 // `?long` gives the first listed goal (goal-2, blocked) an unbroken branch and a long title, to prove they wrap inside the page.
 const longNames = new URL(window.location.href).searchParams.has("long")
@@ -112,25 +129,42 @@ if (rootElement === null) throw new MissingWorkFixtureRootError({ selector: "#ro
 const selectedGoalId = searchParams.get("goal")
 const requestedWindow = searchParams.get("window")
 const initialWindow: WorkSnapshot["window"] =
-  requestedWindow === "day" || requestedWindow === "week" || requestedWindow === "month" ? requestedWindow : "now"
-const navigation = searchParams.has("navigation")
-  ? ({
-      goalId,
-      window: snapshotWindow
-    }: {
-      readonly goalId: string | null
-      readonly window: WorkSnapshot["window"]
-    }) => {
-      const target = new URLSearchParams({ navigation: "", window: snapshotWindow })
-      if (goalId !== null) target.set("goal", goalId)
-      return `?${target.toString()}`
-    }
-  : undefined
+  fidelityState !== undefined
+    ? workFidelitySelection(fidelityState).window
+    : requestedWindow === "day" || requestedWindow === "week" || requestedWindow === "month"
+      ? requestedWindow
+      : "now"
+const navigation =
+  searchParams.has("navigation") || fidelityState === "3n"
+    ? ({
+        goalId,
+        window: snapshotWindow
+      }: {
+        readonly goalId: string | null
+        readonly window: WorkSnapshot["window"]
+      }) => {
+        const target = new URLSearchParams({ navigation: "", window: snapshotWindow })
+        if (fidelityState !== undefined) target.set("fidelity", fidelityState)
+        if (goalId !== null) target.set("goal", goalId)
+        return `?${target.toString()}`
+      }
+    : undefined
 
 const render = (boardSnapshots: typeof WorkSnapshots.Type) =>
   createRoot(rootElement).render(
     <WorkBoard
-      initialGoalId={selectedGoalId}
+      {...(fidelityState === undefined || fidelityState === "3n" ? {} : { host: "atlas" })}
+      externalLinks={fidelityState === "3n" ? "disabled" : "enabled"}
+      {...(fidelityState === undefined ||
+      fidelityState === "3n" ||
+      fidelityState === "3h" ||
+      fidelityState === "3h-v2" ||
+      fidelityState === "3f"
+        ? {}
+        : { decisions: workFidelityDecisions })}
+      initialGoalId={
+        selectedGoalId ?? (fidelityState === undefined ? null : workFidelitySelection(fidelityState).goalId)
+      }
       initialWindow={initialWindow}
       {...(navigation === undefined ? {} : { navigation })}
       snapshots={boardSnapshots}
@@ -142,4 +176,10 @@ const render = (boardSnapshots: typeof WorkSnapshots.Type) =>
 // file the glob is empty and the fixture data renders.
 const liveFiles = import.meta.glob<unknown>("./zz-live-work.json", { eager: true, import: "default" })
 const live = Object.values(liveFiles)[0]
-render(searchParams.has("live") && live !== undefined ? Schema.decodeUnknownSync(WorkSnapshots)(live) : snapshots)
+render(
+  fidelityState === undefined
+    ? searchParams.has("live") && live !== undefined
+      ? Schema.decodeUnknownSync(WorkSnapshots)(live)
+      : snapshots
+    : workFidelitySnapshots(fidelityState)
+)

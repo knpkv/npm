@@ -1,9 +1,10 @@
 // @vitest-environment happy-dom
 
-import { act } from "react"
+import { act, useState } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, describe, expect, it } from "vitest"
 import { TerminalKeyRail } from "../src/view.js"
+import { dispatchTerminalKey, noTerminalModifiers, toggleTerminalModifier } from "../src/terminal-keyboard.js"
 
 const roots: Array<Root> = []
 
@@ -16,6 +17,70 @@ afterEach(async () => {
 })
 
 describe("TerminalKeyRail", () => {
+  it("uses the existing modifier chip for Shift and releases it after back-tab", async () => {
+    const host = document.createElement("div")
+    document.body.append(host)
+    const root = createRoot(host)
+    roots.push(root)
+    const sent: Array<string> = []
+    const Fixture = () => {
+      const [modifier, setModifier] = useState(noTerminalModifiers)
+      return (
+        <TerminalKeyRail
+          modifier={modifier}
+          onFocusTerminal={() => undefined}
+          onKey={(key) => {
+            const dispatch = dispatchTerminalKey(key, modifier)
+            if (dispatch._tag !== "sent") return
+            sent.push(dispatch.command.text)
+            setModifier(dispatch.nextModifier)
+          }}
+          onModifierChange={(key) => setModifier(toggleTerminalModifier(modifier, key))}
+        />
+      )
+    }
+    await act(async () => root.render(<Fixture />))
+    const shift = host.querySelector<HTMLButtonElement>('[data-terminal-key="shift"]')
+    const tab = host.querySelector<HTMLButtonElement>('[data-terminal-key="tab"]')
+    expect(shift?.className).toBe("terminal-key terminal-key-modifier")
+    expect(shift?.textContent).toBe("Shift")
+    expect(shift?.getAttribute("aria-pressed")).toBe("false")
+    await act(async () => shift?.click())
+    expect(shift?.getAttribute("aria-pressed")).toBe("true")
+    expect(tab?.getAttribute("aria-label")).toBe("Shift Tab")
+    await act(async () => tab?.click())
+    expect(sent).toEqual(["\u001b[Z"])
+    expect(shift?.getAttribute("aria-pressed")).toBe("false")
+    expect(tab?.getAttribute("aria-label")).toBe("Tab")
+    await act(async () => tab?.click())
+    expect(sent).toEqual(["\u001b[Z", "\t"])
+  })
+
+  it("announces both latched modifiers and disables unsupported keys", async () => {
+    const host = document.createElement("div")
+    document.body.append(host)
+    const root = createRoot(host)
+    roots.push(root)
+    await act(async () =>
+      root.render(
+        <TerminalKeyRail
+          modifier={{ base: "ctrl", shift: true }}
+          onFocusTerminal={() => undefined}
+          onKey={() => undefined}
+          onModifierChange={() => undefined}
+        />
+      )
+    )
+    for (const key of ["ctrl", "shift"]) {
+      expect(host.querySelector(`[data-terminal-key="${key}"]`)?.getAttribute("aria-pressed")).toBe("true")
+    }
+    expect(host.querySelector('[data-terminal-key="alt"]')?.getAttribute("aria-pressed")).toBe("false")
+    expect(host.querySelector('[data-terminal-key="arrowUp"]')?.getAttribute("aria-label")).toBe("Ctrl Shift Arrow up")
+    for (const key of ["escape", "tab"]) {
+      expect(host.querySelector<HTMLButtonElement>(`[data-terminal-key="${key}"]`)?.disabled).toBe(true)
+    }
+  })
+
   it("moves the sequential tab stop when the focused key becomes unavailable", async () => {
     const host = document.createElement("div")
     document.body.append(host)
@@ -25,7 +90,7 @@ describe("TerminalKeyRail", () => {
     await act(async () => {
       root.render(
         <TerminalKeyRail
-          modifier={null}
+          modifier={{ base: null, shift: false }}
           onFocusTerminal={() => undefined}
           onKey={() => undefined}
           onModifierChange={() => undefined}
@@ -45,7 +110,7 @@ describe("TerminalKeyRail", () => {
     await act(async () => {
       root.render(
         <TerminalKeyRail
-          modifier="ctrl"
+          modifier={{ base: "ctrl", shift: false }}
           onFocusTerminal={() => undefined}
           onKey={() => undefined}
           onModifierChange={() => undefined}
@@ -70,7 +135,7 @@ describe("TerminalKeyRail", () => {
         root.render(
           <TerminalKeyRail
             keysHidden={keysHidden}
-            modifier={null}
+            modifier={{ base: null, shift: false }}
             onFocusTerminal={() => undefined}
             onJumpToLatest={() => undefined}
             onKey={() => undefined}
@@ -103,7 +168,7 @@ describe("TerminalKeyRail", () => {
       root.render(
         <TerminalKeyRail
           keysHidden
-          modifier={null}
+          modifier={{ base: null, shift: false }}
           onFocusTerminal={() => undefined}
           onJumpToLatest={() => undefined}
           onKey={() => undefined}
@@ -138,7 +203,7 @@ describe("TerminalKeyRail", () => {
         root.render(
           <TerminalKeyRail
             keyboardOpen={keyboardOpen}
-            modifier={null}
+            modifier={{ base: null, shift: false }}
             onFocusTerminal={() => undefined}
             onKey={() => undefined}
             {...(withToggle ? { onKeyboardToggle: (open: boolean) => requests.push(open) } : {})}
@@ -173,7 +238,7 @@ describe("TerminalKeyRail", () => {
         root.render(
           <TerminalKeyRail
             keysHidden
-            modifier={null}
+            modifier={{ base: null, shift: false }}
             onFocusTerminal={() => undefined}
             onKey={() => undefined}
             onKeysHiddenChange={() => undefined}

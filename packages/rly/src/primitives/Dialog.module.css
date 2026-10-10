@@ -80,6 +80,15 @@
 
   /* Under reduced motion the dialog appears and leaves at once. */
   @media (prefers-reduced-motion: no-preference) {
+    /* Portal presence observes this wrapper: its exit duration must be >= every child exit, including host overrides. */
+    .layer[data-state="closed"] {
+      animation: dialog-layer-exit var(--rly-motion-fast-duration);
+    }
+    @keyframes dialog-layer-exit {
+      to {
+        opacity: 1;
+      }
+    }
     .overlay[data-state="open"] {
       animation: dialog-fade-in var(--rly-motion-standard-duration) var(--rly-easing-out);
     }

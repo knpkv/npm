@@ -32,6 +32,76 @@ const render = async (element: React.ReactNode): Promise<void> => {
 }
 
 describe("iPhone fleet shell regressions", () => {
+  it("keeps an approval answer while leaving Connect and returning to its selected tab", async () => {
+    let connectionOpen = false
+    const Connection = () => {
+      useEffect(() => {
+        connectionOpen = true
+        return () => {
+          connectionOpen = false
+        }
+      }, [])
+      return <span>Live terminal</span>
+    }
+    const Approval = () => {
+      const [answer, setAnswer] = useState("Waiting")
+      return (
+        <button onClick={() => setAnswer("Approved")} type="button">
+          {answer}
+        </button>
+      )
+    }
+    const host = document.createElement("div")
+    document.body.append(host)
+    const root = createRoot(host)
+    roots.push(root)
+    const show = async (active: boolean, tab: "approvals" | "connect") => {
+      await act(async () =>
+        root.render(
+          <FleetShell
+            active={active}
+            embedded
+            navigation={{ tab, onTabChange: () => undefined }}
+            approvals={<Approval />}
+            connect={<Connection />}
+            hostCount={1}
+            usage={null}
+            work={null}
+          />
+        )
+      )
+    }
+    await show(true, "approvals")
+    await act(async () => host.querySelector<HTMLButtonElement>("button:not([role=tab])")?.click())
+    await show(true, "connect")
+    expect(connectionOpen).toBe(true)
+    await show(false, "connect")
+    expect(connectionOpen).toBe(false)
+    expect(host.textContent).toContain("Approved")
+    await show(true, "connect")
+    expect(connectionOpen).toBe(true)
+    expect(host.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe("Connect")
+    expect(host.textContent).toContain("Approved")
+  })
+
+  it("uses the parent's page while embedded, without adding Fleet chrome", async () => {
+    window.history.replaceState(null, "", "/?tab=approvals#fleet/work")
+    await render(
+      <FleetShell
+        approvals={<section>Approval queue</section>}
+        connect={<section>Terminal</section>}
+        hostCount={1}
+        usage={null}
+        work={<section>Selected work</section>}
+        embedded
+        navigation={{ tab: "work", onTabChange: () => undefined }}
+      />
+    )
+    expect(document.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe("Work")
+    expect(document.querySelector(".fleet-shell-masthead")).toBeNull()
+    expect(document.body.textContent).toContain("Selected work")
+  })
+
   const shell = (
     <FleetShell
       usage={null}

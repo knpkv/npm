@@ -41,6 +41,8 @@ export type RlyRelayTranscriptItem =
 
 /** Inputs for the transcript. */
 export interface RelayTranscriptProps {
+  /** Decorative avatar at each Relay prose turn; omitted adds none. While streaming, only the last Relay turn after the latest user turn is live. */
+  readonly avatar?: (turn: { readonly live: boolean }) => ReactNode
   readonly items: ReadonlyArray<RlyRelayTranscriptItem>
   /** A run is in flight; shows "Relay is writing…" (not announced; the announcer covers start and end). */
   readonly streaming: boolean
@@ -144,7 +146,13 @@ const AT_END_SLACK = 24
  * turn is yours; reading earlier turns, a "New messages" button appears instead, so scroll is never
  * taken. Citations route through LinkProvider, so a host keeps its own navigation.
  */
-export const RelayTranscript = ({ items, streaming }: RelayTranscriptProps): ReactElement => {
+export const RelayTranscript = ({ avatar, items, streaming }: RelayTranscriptProps): ReactElement => {
+  const liveTurn = streaming
+    ? items.reduce<string | undefined>(
+        (latest, item) => (item._tag === "You" ? undefined : item._tag === "Relay" ? item.id : latest),
+        undefined
+      )
+    : undefined
   const root = useRef<HTMLDivElement | null>(null)
   const atEnd = useRef(true)
   const [behind, setBehind] = useState(false)
@@ -242,6 +250,11 @@ export const RelayTranscript = ({ items, streaming }: RelayTranscriptProps): Rea
               </li>
             ) : item._tag === "Relay" ? (
               <li className={style("relay")}>
+                {avatar === undefined ? null : (
+                  <span aria-hidden="true" data-rly-relay-avatar="turn">
+                    {avatar({ live: item.id === liveTurn })}
+                  </span>
+                )}
                 <span className={style("speaker")}>Relay: </span>
                 <Prose text={item.text} />
               </li>

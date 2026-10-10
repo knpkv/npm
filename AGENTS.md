@@ -100,6 +100,34 @@ reported as such, never as gated.
 
 ### Before Committing
 
+The hook (`pnpm precommit`) defaults to staged `changed` mode. It checks formatting and lint without
+rewriting files, builds affected packages and workspace dependencies, and typechecks and tests affected
+packages plus transitive workspace dependents. Deleted paths and both sides of renames stay in scope.
+Both modes reject every unstaged tracked edit and untracked check inputs before running checks:
+stage or stash; the gate checks staged content only. Inputs include configured workspaces from
+`pnpm-workspace.yaml`, shared tooling, root configs, `.changeset/**` and `docs/debt*`.
+Recreated staged deletions are rejected in every directory, even when Git ignores the path.
+Other ignored build outputs and unrelated scratch files stay out. Branch-wide changeset coverage still runs.
+Every focused scope runs changed Effect diagnostics, including Control Center test edits. The hook selects
+staged TS files and checks their changed lines against the branch or pending-merge base.
+Unit-test membership comes from root Vitest registration, regardless of package test scripts. Affected
+workspace executable smoke cases also run. Changed mode always runs focus-ring, test-typecheck coverage,
+script portability, workspace-export and security-documentation checks repo-wide. Package manifest
+edits also run Effect tsconfig coverage.
+
+Root configs, lockfiles, workspace definitions, `scripts/`, `ast-grep/`, `.github/`, `.husky/`, vendored
+references, patches and package Vitest/tsconfig files run the full gate. Files reached by cross-package
+relative JS/TS imports, including their same-package relative-import and re-export closure, also run full.
+Other files in those packages stay incremental. Standard source extensions and directory indexes are resolved.
+TypeScript parses literal specifiers, including comments; generated/vendor importers are excluded.
+Computed/dynamic paths, custom loaders, arbitrary file reads and non-JS/TS importers are not followed.
+`PRECOMMIT_MODE=full` forces it; `PRECOMMIT_MODE=changed` cannot
+bypass shared inputs. Local Vitest workers default to half the available cores, rounded down with a
+minimum of one. `PRECOMMIT_MAX_WORKERS` overrides the cap with a positive integer. CI is unchanged.
+
+Main requires Check's Format, Lint, Audit, Types, Test, Edge runtimes and Browser status checks through
+its active ruleset, with strict up-to-date checking disabled. These enforce the full repository gate.
+
 `pnpm check:changed` (`scripts/precheck.mjs`) is the focused gate. It runs these steps one at a time and stops at the
 first failure:
 

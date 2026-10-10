@@ -18,7 +18,7 @@
     "test:pack": "node scripts/test-workspace-bins.mjs && pnpm --workspace-concurrency=1 --recursive --filter \"./packages/**/*\" --if-present run test:pack",
     "test:browser": "pnpm --workspace-concurrency=1 --recursive --filter \"./packages/**/*\" --if-present run test:browser",
     "coverage": "vitest --configLoader native --coverage",
-    "check": "tsc -p tsconfig.json --noEmit && pnpm build && pnpm --recursive --config.enable-pre-post-scripts=false --filter \"./packages/**/*\" run check",
+    "check": "tsc -p tsconfig.json --noEmit && tsc -p scripts/tsconfig.json --noEmit && pnpm build && pnpm --recursive --config.enable-pre-post-scripts=false --filter \"./packages/**/*\" run check",
     "lint": "pnpm lint:static && pnpm lint:changeset-coverage",
     "lint:static": "pnpm --recursive --sort --config.enable-pre-post-scripts=false --filter \"@knpkv/herdr-hub^...\" --filter \"@knpkv/relay-product\" --filter \"@knpkv/browser-pairing\" --filter \"@knpkv/review\" run build && pnpm lint:config:static && pnpm lint:security-doc-examples && pnpm lint:live-aws && pnpm lint:eslint && pnpm lint:oxlint && pnpm lint:ast && pnpm lint:rly-colors && pnpm lint:rly-focus-rings && pnpm lint:rly-stripes && pnpm lint:rly-css-tokens",
     "lint:config": "pnpm lint:config:static && pnpm lint:changeset-coverage",

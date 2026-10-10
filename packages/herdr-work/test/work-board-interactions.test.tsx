@@ -104,6 +104,56 @@ const linkNamed = (host: HTMLElement, name: string): HTMLAnchorElement | null =>
   [...host.querySelectorAll<HTMLAnchorElement>("a")].find(({ textContent }) => textContent?.trim() === name) ?? null
 
 describe("WorkBoard interactions", () => {
+  it("reads navigation-owned selection on rerender without replacing focused controls", async () => {
+    const host = document.createElement("div")
+    document.body.append(host)
+    const root = createRoot(host)
+    roots.push(root)
+    const render = async (window: WorkSnapshot["window"], initialGoalId?: string) =>
+      act(async () =>
+        root.render(
+          <WorkBoard
+            snapshots={snapshots}
+            navigation={workNavigationHref}
+            initialWindow={window}
+            {...(initialGoalId === undefined ? {} : { initialGoalId })}
+          />
+        )
+      )
+    await render("now")
+    const previousWeek = linkNamed(host, "7 days ago")
+    expect(previousWeek).not.toBeNull()
+    previousWeek?.focus()
+    await render("week")
+    expect(linkNamed(host, "7 days ago")).toBe(previousWeek)
+    expect(previousWeek?.getAttribute("aria-current")).toBe("page")
+    expect(document.activeElement).toBe(previousWeek)
+    await render("now")
+    expect(linkNamed(host, "Now")?.getAttribute("aria-current")).toBe("page")
+    await render(
+      "now",
+      encodeWorkBoardNavigationGoal({
+        detailsOpen: true,
+        goalId: "goal-2",
+        statusFilter: "blocked",
+        visibleGoalCount: 20
+      })
+    )
+    expect(linkNamed(host, "Blocked")?.getAttribute("aria-current")).toBe("page")
+    expect(host.querySelector('[aria-label="Goal details"]')?.textContent).toContain("Goal 2 detail")
+    await render(
+      "now",
+      encodeWorkBoardNavigationGoal({
+        detailsOpen: false,
+        goalId: "goal-2",
+        statusFilter: "blocked",
+        visibleGoalCount: 20
+      })
+    )
+    expect(host.querySelector('[aria-label="Goal details"]')).toBeNull()
+    expect(document.activeElement).toBe(host.querySelector('.work-board-row[aria-current="true"]'))
+  })
+
   // The goal's agent opens on its Connect stage: who it is and what it's saying, its terminal one tap away.
   it("links a goal's agent to its stage in Connect, by name", async () => {
     const owned: WorkGoal = {
@@ -132,7 +182,7 @@ describe("WorkBoard interactions", () => {
     await act(async () => goalRow.click())
     const details = host.querySelector<HTMLElement>('[aria-label="Goal details"]')
     expect(details?.textContent).toContain("Goal 2 detail")
-    expect(host.querySelector('[aria-label="Delivery of Goal 2"]')?.textContent).toContain("Local now")
+    expect(host.querySelector('[aria-label="Delivery of Goal 2"]')?.textContent).toContain("In progress")
     // Opening a goal focuses its heading, so the detail is announced by name.
     expect(document.activeElement).toBe(details?.querySelector("h2"))
 
@@ -400,7 +450,8 @@ describe("Work summary per snapshot window", () => {
     const live = await mountBoard({ boardSnapshots })
     expect(summary(live)).toContain("Nothing needs you")
     const day = await mountBoard({ boardSnapshots, initialWindow: "day" })
-    expect(summary(day)).toMatch(/^As of .+, 1 goal needed you/)
+    expect(summary(day)).toMatch(/^1 goal needed you/)
+    expect(day.querySelector(".work-history-note")?.textContent).toContain("24 hours ago")
     expect(summary(day)).not.toContain("needs you")
   })
 })

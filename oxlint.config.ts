@@ -24,6 +24,8 @@ export default defineConfig({
     // the claude.ai/design sync anchor, so a lint-driven rewrite re-grades every component.
     ".design-sync/overrides/**",
     ".design-sync/previews/**",
+    "packages/*/.design-sync/overrides/**",
+    "packages/*/.design-sync/previews/**",
     "tools/oxlint/anti-slop/**"
   ],
   jsPlugins: [

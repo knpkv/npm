@@ -12,6 +12,9 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 import {
   changedFiles,
+  changedLines,
+  diagnosticScope,
+  diagnosticsOnChangedLines,
   decodeInspectionOutput,
   inspectFile,
   inspectFiles,
@@ -44,6 +47,41 @@ const spawner = (stdout, exitCode = 0) => ({
       stderr: Stream.empty,
       exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(exitCode))
     })
+})
+
+test("staged diagnostics inspect the selected Control Center test and preserve blocking changed-line diagnostics", async () => {
+  const file = "packages/control-center/test/unit/new.test.ts"
+  const calls = []
+  const git = (args) =>
+    Effect.sync(() => {
+      calls.push(args)
+      return args.includes("--name-only") ? `${file}\0README.md\0` : `+++ b/${file}\n@@ -0,0 +1,2 @@\n+first\n+second\n`
+    })
+  const files = await Effect.runPromise(changedFiles(git, "branch-base", true))
+  assert.deepEqual(files, [file])
+  assert.deepEqual(calls[0], ["diff", "--cached", "--name-only", "-z", "--diff-filter=ACMR"])
+  const lines = await Effect.runPromise(changedLines(git, "branch-base", files, true))
+  assert.ok(calls[1].includes("--cached"))
+  assert.ok(calls[1].includes("branch-base"))
+  const failure = {
+    line: 2,
+    column: 1,
+    name: "strictEffectProvide",
+    message: "Provide only required services.",
+    severity: "error"
+  }
+  const record = decodeInspectionOutput(
+    file,
+    JSON.stringify({ diagnostics: [{ file, ...failure }] }),
+    "",
+    ChildProcessSpawner.ExitCode(1)
+  )
+  assert.deepEqual(diagnosticsOnChangedLines([record], lines)[0].diagnostics, [{ file, ...failure }])
+  assert.deepEqual(diagnosticsOnChangedLines([record], new Map([[file, new Set([1])]]))[0].diagnostics, [])
+  assert.equal(diagnosticScope([]), "branch")
+  assert.equal(diagnosticScope(["--staged"]), "staged")
+  assert.equal(diagnosticScope(["--unknown"]), undefined)
+  assert.equal(diagnosticScope(["--staged", "--unknown"]), undefined)
 })
 
 test("empty selection starts no diagnostic wave", async () => {
@@ -190,9 +228,18 @@ test("during a merge only this branch's own lines count as changed, not the inco
       const base = yield* resolveMergeBase(git).pipe(
         Effect.provideService(ConfigProvider.ConfigProvider, ConfigProvider.fromUnknown({}))
       )
-      return { base, main: yield* git(["rev-parse", "main"]), files: yield* changedFiles(git, base) }
+      const stagedFiles = yield* changedFiles(git, base, true)
+      return {
+        base,
+        main: yield* git(["rev-parse", "main"]),
+        files: yield* changedFiles(git, base),
+        stagedFiles,
+        stagedLines: yield* changedLines(git, base, stagedFiles, true)
+      }
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer))
   )
   assert.equal(outcome.base, outcome.main)
   assert.deepEqual(outcome.files, ["packages/demo/src/feature.ts"])
+  assert.deepEqual(outcome.stagedFiles, ["packages/demo/src/main.ts"])
+  assert.equal(outcome.stagedLines.size, 0)
 })

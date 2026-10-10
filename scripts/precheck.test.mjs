@@ -1,16 +1,33 @@
 import assert from "node:assert/strict"
 import { matchesGlob } from "node:path"
 import test from "node:test"
-import { fileURLToPath } from "node:url"
+import { fileURLToPath, URL } from "node:url"
 
 import { NodeServices } from "@effect/platform-node"
 
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
+import * as FileSystem from "effect/FileSystem"
+import * as Path from "effect/Path"
+import * as Stream from "effect/Stream"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
+
+import {
+  relativeImportTargets,
+  crossPackageImportClosure,
+  crossPackageInputs,
+  isWorkspaceDirectory,
+  stagedInputProblem
+} from "./staged-inputs.ts"
+import { parseBinArguments, selectBinCases, workspaceBinCases } from "./test-workspace-bins.mjs"
+import { planPrecommit } from "../packages/control-center/scripts/precommit-plan.ts"
+import { checkCoversTsconfig, validatePackageRecords } from "./check-effect-tsconfig-coverage.mjs"
+import { coverageFailures } from "./check-test-typecheck-coverage.mjs"
+import { findFocusRingViolations } from "../packages/rly/scripts/tokens/focus-rings.ts"
 
 import rootManifest from "../package.json" with { type: "json" }
 import {
+  affectedPackages,
   chooseBase,
   eslintPartition,
   hooksProblem,
@@ -19,6 +36,7 @@ import {
   untrackedNotice
 } from "./precheck.mjs"
 
+const workspacePatterns = ["scratchpad", "scripts", "packages/*", "tools/*", "!tools/excluded"]
 const rootScripts = rootManifest.scripts
 const repositoryRoot = fileURLToPath(new URL("..", import.meta.url))
 const eslintPartitions = ["lint:eslint:control-center", "lint:eslint:workspace"].map((name) =>
@@ -39,13 +57,30 @@ const plan = (overrides) =>
 
 const labels = (steps) => steps.map((step) => step.label)
 
+/** Git variables a pre-commit hook exports for the real repository; mapped to undefined they are removed from a child. */
+const hookGitEnvironment = {
+  GIT_DIR: undefined,
+  GIT_WORK_TREE: undefined,
+  GIT_INDEX_FILE: undefined,
+  GIT_COMMON_DIR: undefined,
+  GIT_OBJECT_DIRECTORY: undefined,
+  GIT_ALTERNATE_OBJECT_DIRECTORIES: undefined
+}
+
 test("precheck takes --base and --dry-run, accepts --changed, and rejects anything else", () => {
   for (const argv of [[], ["--changed"]]) {
-    assert.deepEqual(Effect.runSync(parseArguments(argv)), { base: undefined, dryRun: false })
+    assert.deepEqual(Effect.runSync(parseArguments(argv)), {
+      base: undefined,
+      dryRun: false,
+      staged: false,
+      maxWorkers: undefined
+    })
   }
   assert.deepEqual(Effect.runSync(parseArguments(["--changed", "--base", "origin/main", "--dry-run"])), {
     base: "origin/main",
-    dryRun: true
+    dryRun: true,
+    staged: false,
+    maxWorkers: undefined
   })
   for (const argv of [
     ["--changed", "--base"],
@@ -226,4 +261,670 @@ test("untracked files are named, never formatted or skipped silently", () => {
     untrackedNotice(["diff:", "scratch/a.ts"]),
     "[precheck] skipping 2 untracked files (git add -N <file> to check one): diff:, scratch/a.ts"
   )
+})
+
+test("staged mode needs a bounded worker count and rejects invalid values", () => {
+  assert.deepEqual(Effect.runSync(parseArguments(["--staged", "--max-workers", "3", "--dry-run"])), {
+    base: undefined,
+    dryRun: true,
+    staged: true,
+    maxWorkers: 3
+  })
+  for (const argv of [
+    ["--staged"],
+    ["--max-workers", "3"],
+    ["--staged", "--max-workers", "0"],
+    ["--staged", "--max-workers", "bad"]
+  ]) {
+    assert.ok(Exit.isFailure(Effect.runSyncExit(parseArguments(argv))))
+  }
+})
+
+test("staged checks include transitive dependents, build prerequisites first, and cap one shared test pool", () => {
+  const packages = new Map([
+    ["packages/base", { name: "@knpkv/base", hasCheck: true, hasTest: true, dependencies: [] }],
+    ["packages/consumer", { name: "@knpkv/consumer", hasCheck: true, hasTest: true, dependencies: ["@knpkv/base"] }],
+    ["packages/app", { name: "@knpkv/app", hasCheck: true, hasTest: true, dependencies: ["@knpkv/consumer"] }],
+    ["packages/unrelated", { name: "@knpkv/unrelated", hasCheck: true, hasTest: true, dependencies: [] }]
+  ])
+  const touched = ["packages/base/src/deleted.ts"]
+  assert.deepEqual(affectedPackages(touched, packages), ["packages/app", "packages/base", "packages/consumer"])
+  const steps = plan({ staged: true, maxWorkers: 2, touched, packages })
+  assert.ok(steps[0].label.startsWith("build affected"))
+  assert.ok(steps[0].args.includes("@knpkv/base..."))
+  assert.deepEqual(
+    labels(steps).filter((label) => label.endsWith(" check")),
+    ["@knpkv/app check", "@knpkv/base check", "@knpkv/consumer check"]
+  )
+  assert.deepEqual(steps.find((step) => step.label === "test affected packages").args, [
+    "exec",
+    "vitest",
+    "run",
+    "--configLoader",
+    "native",
+    "--maxWorkers",
+    "2",
+    "--passWithNoTests",
+    "packages/app/",
+    "packages/base/",
+    "packages/consumer/"
+  ])
+  assert.deepEqual(steps.find((step) => step.label === "test affected packages").env, { VITEST_MAX_WORKERS: "2" })
+  assert.ok(!steps.some((step) => step.args.includes("packages/unrelated/")))
+  assert.deepEqual(
+    affectedPackages(["packages/base/src/old.ts", "packages/unrelated/src/new.ts"], packages),
+    [...packages.keys()].toSorted()
+  )
+})
+
+test("staged formatting and lint never rewrite the worktree", () => {
+  const steps = plan({ staged: true, maxWorkers: 2, files: ["packages/rly/src/Button.tsx"] })
+  assert.ok(steps.find((step) => step.args.includes("prettier")).args.includes("--check"))
+  assert.ok(steps.every((step) => !step.args.includes("--fix") && !step.args.includes("--write")))
+  assert.ok(labels(steps).includes("changeset coverage"))
+})
+
+test("staged dry runs use the index, include consumers of deleted packages, and reject partial staging", async () => {
+  await Effect.runPromise(
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "precheck-staged-" })
+      const command = Effect.fn("precheckTest.command")(function* (executable, args, extraEnv = {}) {
+        const handle = yield* spawner.spawn(
+          ChildProcess.make(executable, args, {
+            cwd: root,
+            env: {
+              ...hookGitEnvironment,
+              PRECOMMIT_MAX_WORKERS: "1",
+              VITEST_MAX_WORKERS: "1",
+              ...extraEnv
+            },
+            extendEnv: true
+          })
+        )
+        const [stdout, stderr, status] = yield* Effect.all(
+          [
+            Stream.decodeText(handle.stdout).pipe(Stream.mkString),
+            Stream.decodeText(handle.stderr).pipe(Stream.mkString),
+            handle.exitCode
+          ],
+          { concurrency: "unbounded" }
+        )
+        return { stdout, stderr, status }
+      })
+      const git = Effect.fn("precheckTest.git")(function* (...args) {
+        const result = yield* command("git", args)
+        assert.equal(result.status, 0, result.stderr)
+        return result.stdout
+      })
+      const write = Effect.fn("precheckTest.write")(function* (file, contents) {
+        const destination = path.join(root, file)
+        yield* fs.makeDirectory(path.dirname(destination), { recursive: true })
+        yield* fs.writeFileString(destination, contents)
+      })
+      yield* git("init", "--initial-branch=main")
+      yield* git("config", "core.hooksPath", ".husky/_")
+      yield* git("config", "user.name", "Gate fixture")
+      yield* git("config", "user.email", "fixture@example.invalid")
+      yield* write(".husky/_/pre-commit", "")
+      yield* write("package.json", JSON.stringify({ scripts: {} }))
+      yield* write("pnpm-workspace.yaml", "packages:\n  - packages/*\n  - scripts\n  - scratchpad\n  - tools/*\n")
+      yield* write("scratchpad/package.json", JSON.stringify({ name: "@knpkv/scratchpad", scripts: { check: "tsc" } }))
+      yield* write("tools/custom/package.json", JSON.stringify({ name: "@knpkv/custom", scripts: { check: "tsc" } }))
+      yield* write("docs/debt.baseline.json", "{}\n")
+      yield* write("notes/guide.txt", "tracked notes\n")
+      yield* write("notes/ignored.txt", "tracked ignored path\n")
+      for (const [name, dependencies] of [
+        ["base", {}],
+        ["consumer", { "@knpkv/base": "workspace:*" }],
+        ["unrelated", {}]
+      ]) {
+        yield* write(
+          `packages/${name}/package.json`,
+          JSON.stringify({
+            name: `@knpkv/${name}`,
+            dependencies,
+            scripts: { check: "tsc", test: "vitest", "test:pack": "node pack.mjs" }
+          })
+        )
+        yield* write(`packages/${name}/src/index.ts`, "export {}\n")
+      }
+      yield* write("packages/base/test/expectations.test.ts", "export {}\n")
+      yield* write("packages/base/src/helper.mjs", "export const value = () => 1\n")
+      yield* write("packages/base/src/entry.mjs", 'export { value } from "./helper.mjs"\n')
+      yield* write("packages/base/src/cjs/entry.cjs", 'exports.value = require("./value.shared").value;\n')
+      yield* write("packages/base/src/cjs/value.shared.js", "exports.value = 1;\n")
+      yield* write(
+        "packages/base/src/ts/entry.ts",
+        'export { value } from "./value.shared"; export { other } from "./fixtures.shared";\n'
+      )
+      yield* write("packages/base/src/ts/value.shared.ts", "export const value = 1;\n")
+      yield* write("packages/base/src/ts/fixtures.shared/index.ts", "export const other = 1;\n")
+      yield* write("packages/base/src/private.shared.ts", "export {}\n")
+      yield* write(
+        "packages/unrelated/test/import.test.mjs",
+        'import { value } from /* context */ "../../base/src/entry.mjs"; import "../../base/src/cjs/entry.cjs"; import "../../base/src/ts/entry.ts";\n'
+      )
+      yield* write(".gitignore", "node_modules\nnotes/ignored.txt\n")
+      for (const file of [
+        "scripts/precheck.mjs",
+        "scripts/staged-inputs.ts",
+        "scripts/test-workspace-bins.mjs",
+        "scripts/workspace-manifests.mjs",
+        "packages/control-center/scripts/precommit-plan.ts",
+        "packages/control-center/scripts/run-precommit.ts"
+      ]) {
+        yield* fs.makeDirectory(path.dirname(path.join(root, file)), { recursive: true })
+        yield* fs.copyFile(path.join(repositoryRoot, file), path.join(root, file))
+      }
+      yield* fs.symlink(path.join(repositoryRoot, "node_modules"), path.join(root, "node_modules"))
+      yield* git("add", ".")
+      yield* git("add", "-f", "notes/ignored.txt")
+      yield* git("-c", "core.hooksPath=/dev/null", "commit", "-m", "fixture")
+      yield* git("update-ref", "refs/remotes/origin/main", "HEAD")
+      yield* write("notes/scratch.txt", "unrelated scratch\n")
+      for (const mode of ["changed", "full"]) {
+        const empty = yield* command(
+          path.join(repositoryRoot, "node_modules/.bin/tsx"),
+          ["packages/control-center/scripts/run-precommit.ts"],
+          { PRECOMMIT_MODE: mode }
+        )
+        assert.equal(empty.status, 0, empty.stderr)
+        assert.match(empty.stdout, /mode=none/u)
+      }
+      yield* write("packages/base/src/index.ts", "export {} // staged\n")
+      yield* git("add", "packages/base/src/index.ts")
+      const run = () => command("node", ["scripts/precheck.mjs", "--staged", "--max-workers", "2", "--dry-run"])
+      const staged = yield* run()
+      assert.equal(staged.status, 0, staged.stderr)
+      assert.match(staged.stdout, /@knpkv\/consumer check/u)
+      assert.match(staged.stdout, /--maxWorkers 2/u)
+      assert.match(staged.stdout, /check-changed-effect-diagnostics\.mjs --staged/u)
+      assert.match(staged.stdout, /test affected packed packages/u)
+      assert.doesNotMatch(staged.stdout, /@knpkv\/unrelated check/u)
+      const rejectsEveryMode = Effect.fn("precheckTest.rejectsEveryMode")(function* () {
+        const direct = yield* run()
+        assert.notEqual(direct.status, 0)
+        assert.match(direct.stderr, /stage or stash; gate checks staged content only/u)
+        for (const mode of ["changed", "full"]) {
+          const result = yield* command(
+            path.join(repositoryRoot, "node_modules/.bin/tsx"),
+            ["packages/control-center/scripts/run-precommit.ts"],
+            { PRECOMMIT_MODE: mode }
+          )
+          assert.notEqual(result.status, 0)
+          assert.match(result.stderr, /stage or stash; gate checks staged content only/u)
+          assert.doesNotMatch(result.stdout, /\[pre-commit\] mode=/u)
+        }
+      })
+      yield* write(".changeset/not-staged.md", '---\n"@knpkv/base": patch\n---\nFixture release.\n')
+      yield* rejectsEveryMode()
+      yield* git("add", ".changeset/not-staged.md")
+      const stagedChangeset = yield* run()
+      assert.equal(stagedChangeset.status, 0, stagedChangeset.stderr)
+      yield* git("rm", "-f", ".changeset/not-staged.md")
+      for (const file of ["scratchpad/new.ts", "tools/custom/new.ts"]) {
+        yield* write(file, "export {}\n")
+        yield* rejectsEveryMode()
+        yield* git("add", file)
+        const stagedWorkspace = yield* run()
+        assert.equal(stagedWorkspace.status, 0, stagedWorkspace.stderr)
+        assert.match(
+          stagedWorkspace.stdout,
+          file.startsWith("scratchpad/") ? /@knpkv\/scratchpad check/u : /@knpkv\/custom check/u
+        )
+        yield* git("rm", "-f", file)
+      }
+      for (const file of ["docs/debt.baseline.json", "notes/guide.txt", "notes/ignored.txt"]) {
+        yield* git("rm", "-f", file)
+        yield* write(file, "recreated staged deletion\n")
+        yield* rejectsEveryMode()
+        yield* fs.remove(path.join(root, file))
+        if (file === "notes/ignored.txt") {
+          yield* fs.symlink(path.join(root, "missing-target"), path.join(root, file))
+          yield* rejectsEveryMode()
+          yield* fs.remove(path.join(root, file))
+        }
+        const cleanDeletion = yield* run()
+        assert.equal(cleanDeletion.status, 0, cleanDeletion.stderr)
+        yield* git("restore", "--staged", "--worktree", "--", file)
+      }
+      yield* write("packages/base/src/helper.mjs", "export const value = () => 2\n")
+      yield* git("add", "packages/base/src/helper.mjs")
+      // In-process Git calls inherit the hook's index and directories; point them at the scratch repository.
+      const scratchSpawner = {
+        ...spawner,
+        string: (command, options) =>
+          spawner.string(
+            ChildProcess.make(command.command, command.args, {
+              ...command.options,
+              env: { ...command.options.env, ...hookGitEnvironment },
+              extendEnv: true
+            }),
+            options
+          )
+      }
+      for (const [file, contents] of [
+        ["packages/base/src/cjs/value.shared.js", "exports.value = 2;\n"],
+        ["packages/base/src/ts/value.shared.ts", "export const value = 2;\n"],
+        ["packages/base/src/ts/fixtures.shared/index.ts", "export const other = 2;\n"]
+      ]) {
+        yield* write(file, contents)
+        yield* git("add", file)
+      }
+      const imported = yield* crossPackageInputs(scratchSpawner, root)
+      for (const file of [
+        "packages/base/src/cjs/value.shared.js",
+        "packages/base/src/ts/value.shared.ts",
+        "packages/base/src/ts/fixtures.shared/index.ts"
+      ]) {
+        assert.equal(planPrecommit([file], {}, 1, imported).mode, "full", file)
+      }
+      assert.equal(planPrecommit(["packages/base/src/private.shared.ts"], {}, 1, imported).mode, "changed")
+      assert.equal(planPrecommit(["packages/base/src/helper.mjs"], {}, 1, imported).mode, "full")
+      assert.equal(planPrecommit(["packages/unrelated/src/index.ts"], {}, 1, imported).mode, "changed")
+      assert.equal(planPrecommit(["packages/base/src/index.ts"], {}, 1, imported).mode, "changed")
+      yield* git("rm", "-f", "packages/base/src/helper.mjs")
+      const deletedImports = yield* crossPackageInputs(scratchSpawner, root)
+      assert.equal(planPrecommit(["packages/base/src/helper.mjs"], {}, 1, deletedImports).mode, "full")
+      yield* git("restore", "--staged", "--worktree", "--", "packages/base/src/helper.mjs")
+      yield* write("packages/consumer/package.json", JSON.stringify({ name: "@knpkv/consumer", dependencies: {} }))
+      yield* rejectsEveryMode()
+      yield* git("restore", "--", "packages/consumer/package.json")
+      yield* write("packages/base/test/expectations.test.ts", "export {} // unstaged expectation\n")
+      yield* rejectsEveryMode()
+      yield* git("restore", "--", "packages/base/test/expectations.test.ts")
+      yield* write("packages/base/src/index.ts", "export {} // partial\n")
+      yield* rejectsEveryMode()
+      yield* git("restore", "--", "packages/base/src/index.ts")
+      yield* git("rm", "-f", "packages/base/src/index.ts")
+      yield* write("packages/base/src/index.ts", "export {} // untracked recreation\n")
+      yield* rejectsEveryMode()
+      yield* fs.remove(path.join(root, "packages/base/src/index.ts"))
+      yield* git("rm", "-rf", "packages/base")
+      const deleted = yield* run()
+      assert.equal(deleted.status, 0, deleted.stderr)
+      assert.match(deleted.stdout, /@knpkv\/consumer check/u)
+      assert.doesNotMatch(deleted.stdout, /@knpkv\/base check/u)
+
+      // Root Vitest registration, independent of a package test script.
+      yield* write("vitest.config.mjs", 'export default { test: { projects: ["packages/probe/vitest.config.mjs"] } }')
+      yield* write("packages/probe/package.json", JSON.stringify({ name: "@knpkv/probe" }))
+      yield* write("packages/probe/vitest.config.mjs", 'export default { test: { include: ["test/*.test.mjs"] } }')
+      yield* write(
+        "packages/probe/test/failing.test.mjs",
+        'import { it, expect } from "vitest"; it("registered regression", () => expect(true).toBe(false))'
+      )
+      const registered = plan({
+        staged: true,
+        maxWorkers: 1,
+        touched: ["packages/probe/package.json"],
+        packages: new Map([["packages/probe", { name: "@knpkv/probe", exists: true, dependencies: [] }]])
+      }).find((step) => step.label === "test affected packages")
+      const vitest = path.join(repositoryRoot, "node_modules/vitest/vitest.mjs")
+      const regression = yield* command("node", [vitest, ...registered.args.slice(2)])
+      assert.notEqual(regression.status, 0)
+      assert.match(`${regression.stdout}${regression.stderr}`, /registered regression/u)
+      yield* write("packages/empty/package.json", JSON.stringify({ name: "@knpkv/empty" }))
+      const absent = plan({
+        staged: true,
+        maxWorkers: 1,
+        touched: ["packages/empty/package.json"],
+        packages: new Map([["packages/empty", { name: "@knpkv/empty", exists: true, dependencies: [] }]])
+      }).find((step) => step.label === "test affected packages")
+      const noTests = yield* command("node", [vitest, ...absent.args.slice(2)])
+      assert.equal(noTests.status, 0, noTests.stderr)
+
+      // The scoped binary runner rejects a broken ready line, then accepts the maintained line.
+      yield* write("packages/codecommit-mock/package.json", JSON.stringify({ name: "@knpkv/codecommit-mock" }))
+      yield* write("packages/codecommit-mock/dist/cli.js", 'console.log("Wrong ready line")')
+      const brokenBin = yield* command("node", [
+        "scripts/test-workspace-bins.mjs",
+        "--package",
+        "@knpkv/codecommit-mock"
+      ])
+      assert.notEqual(brokenBin.status, 0)
+      assert.match(brokenBin.stderr, /exited before printing its ready line/u)
+      yield* write(
+        "packages/codecommit-mock/dist/cli.js",
+        'console.log("CodeCommit mock listening at http://127.0.0.1:1234")'
+      )
+      const validBin = yield* command("node", [
+        "scripts/test-workspace-bins.mjs",
+        "--package",
+        "@knpkv/codecommit-mock"
+      ])
+      assert.equal(validBin.status, 0, validBin.stderr)
+      assert.match(validBin.stdout, /codecommit-mock: loads under Node/u)
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer))
+  )
+})
+
+test("a deleted package without consumers cannot broaden the build to the whole workspace", () => {
+  const packages = new Map([
+    ["packages/gone", { name: "@knpkv/gone", exists: false, hasCheck: false, hasTest: false, dependencies: [] }]
+  ])
+  const steps = plan({ staged: true, maxWorkers: 2, touched: ["packages/gone/package.json"], packages })
+  assert.ok(!steps.some((step) => step.args.includes("build")))
+})
+
+test("unstaged inputs cannot mask staged changes, while unrelated scratch files are allowed", () => {
+  for (const [unstaged, untracked] of [
+    [["packages/consumer/package.json"], []],
+    [[], ["packages/base/src/deleted.ts"]],
+    [["packages/base/test/expectations.test.ts"], []],
+    [["docs/guide.md"], []],
+    [[], ["scripts/tool.ts"]],
+    [[], ["vitest.config.ts"]],
+    [[], [".changeset/config.json"]],
+    [[], [".changeset/not-staged.md"]],
+    [[], ["docs/debt.baseline.json"]],
+    [[], ["docs/debt.md"]],
+    [[], ["scratchpad/new.ts"]],
+    [[], ["tools/custom/new.ts"]],
+    [[], [".gitignore"]],
+    [[], [".eslintrc.cjs"]]
+  ])
+    assert.match(
+      stagedInputProblem(unstaged, untracked, workspacePatterns),
+      /stage or stash; gate checks staged content only/u
+    )
+  assert.equal(stagedInputProblem([], ["notes/scratch.txt"], workspacePatterns), undefined)
+})
+
+test("workspace patterns and recreated staged deletions define the input boundary", () => {
+  assert.equal(isWorkspaceDirectory("scratchpad", workspacePatterns), true)
+  assert.equal(isWorkspaceDirectory("tools/custom", workspacePatterns), true)
+  assert.equal(isWorkspaceDirectory("tools/excluded", workspacePatterns), false)
+  assert.equal(stagedInputProblem([], ["tools/excluded/scratch.txt"], workspacePatterns), undefined)
+  assert.match(stagedInputProblem([], [], workspacePatterns, ["notes/deleted.txt"]), /notes\/deleted.txt/u)
+  assert.equal(stagedInputProblem([], [], workspacePatterns, []), undefined)
+})
+
+test("literal cross-package imports and re-exports retain targets through comments", () => {
+  const importer = "packages/consumer/test/guard.test.ts"
+  for (const [source, target] of [
+    ['import config from /* context */ "../../base/vitest.config.ts"', "packages/base/vitest.config.ts"],
+    ['export { helper } from /* context */ "../../base/src/helper.js"', "packages/base/src/helper.js"],
+    ['import(/* context */ "../../base/src/directory")', "packages/base/src/directory"],
+    ['require(/* context */ "../../base/src/entry.cjs")', "packages/base/src/entry.cjs"],
+    ['import config from "../../base"', "packages/base"]
+  ])
+    assert.deepEqual(relativeImportTargets(importer, source), [target])
+  assert.deepEqual(relativeImportTargets("scratchpad/main.ts", 'import "../packages/base/src/entry.js"'), [
+    "packages/base/src/entry.js"
+  ])
+  assert.deepEqual(relativeImportTargets("packages/base/src/index.ts", 'export { helper } from "./helper.js"'), [
+    "packages/base/src/helper.js"
+  ])
+  for (const source of [
+    'import { lib } from "@knpkv/lib"',
+    '// import value from "../../consumer/src/entry.js"',
+    "const text = 'import(\"../../consumer/src/entry.js\")'",
+    "import(prefix + name)"
+  ])
+    assert.deepEqual(relativeImportTargets(importer, source), [])
+})
+
+test("cross-package entry closure covers helper chains and cycles, while excluding unrelated same-package files", () => {
+  const directories = ["packages/consumer", "packages/base", "packages/jira-cli"]
+  const sources = new Map([
+    [
+      "packages/consumer/test/import.test.ts",
+      'import { value } from "../../base/src/entry.js"; import config from "../../jira-cli/vitest.config.js"'
+    ],
+    ["packages/base/src/entry.ts", 'export { value } from /* helper */ "./directory"'],
+    ["packages/base/src/directory/index.ts", 'export { value } from "../helper.mjs"'],
+    ["packages/base/src/helper.mts", 'import config from "./settings.json"; export { value } from "./cycle.cjs"'],
+    ["packages/base/src/cycle.cts", 'export { value } from "./entry.js"'],
+    ["packages/base/src/private.ts", 'import "./other-private.js"'],
+    ["packages/base/src/other-private.ts", "export {}"],
+    ["packages/base/src/settings.json", "{}"],
+    ["packages/jira-cli/vitest.config.ts", "export default {}"],
+    ["packages/jira-cli/src/AttachmentService.ts", "export {}"]
+  ])
+  const imports = new Map([...sources].map(([file, source]) => [file, relativeImportTargets(file, source)]))
+  const closure = crossPackageImportClosure(imports, directories, [...sources.keys()])
+  assert.deepEqual(closure, [
+    "packages/base/src/cycle.cts",
+    "packages/base/src/directory/index.ts",
+    "packages/base/src/entry.ts",
+    "packages/base/src/helper.mts",
+    "packages/base/src/settings.json",
+    "packages/jira-cli/vitest.config.ts"
+  ])
+  assert.equal(planPrecommit(["packages/base/src/helper.mts"], {}, 1, closure).mode, "full")
+  assert.equal(planPrecommit(["packages/base/src/private.ts"], {}, 1, closure).mode, "changed")
+  assert.equal(planPrecommit(["packages/jira-cli/src/AttachmentService.ts"], {}, 1, closure).mode, "changed")
+  assert.deepEqual(
+    crossPackageImportClosure(
+      new Map([["packages/base/src/private.ts", ["packages/base/src/other-private.js"]]]),
+      directories,
+      [...sources.keys()]
+    ),
+    []
+  )
+  assert.deepEqual(
+    crossPackageImportClosure(
+      new Map([
+        ["packages/consumer/src/index.ts", ["packages/base"]],
+        ["packages/base/index.ts", ["packages/base/src/entry.js"]]
+      ]),
+      directories,
+      [...sources.keys(), "packages/base/index.ts"]
+    ),
+    ["packages/base/index.ts", "packages/base/src/entry.ts"]
+  )
+})
+
+for (const [language, entryExtension, helperExtension, entrySource, helperSource] of [
+  ["CJS", "cjs", "js", 'exports.value = require("./value.shared").value;', "exports.value = 2;"],
+  ["TS", "ts", "ts", 'export { value } from "./value.shared";', "export const value = 2;"]
+]) {
+  test(`dotted ${language} helper remains in a cross-package entry closure`, () => {
+    const entry = `packages/base/src/entry.${entryExtension}`
+    const helper = `packages/base/src/value.shared.${helperExtension}`
+    const sources = new Map([
+      ["packages/consumer/test/value.test.mjs", `import { value } from "../../base/src/entry.${entryExtension}"`],
+      [entry, entrySource],
+      [helper, helperSource],
+      ["packages/base/src/private.shared.ts", "export {}"]
+    ])
+    const imports = new Map([...sources].map(([file, source]) => [file, relativeImportTargets(file, source)]))
+    const closure = crossPackageImportClosure(imports, ["packages/base", "packages/consumer"], [...sources.keys()])
+    assert.deepEqual(closure, [entry, helper].toSorted())
+    assert.equal(planPrecommit([helper], {}, 1, closure).mode, "full")
+    assert.equal(planPrecommit(["packages/base/src/private.shared.ts"], {}, 1, closure).mode, "changed")
+  })
+}
+
+test("dotted direct seeds and directory edges try extensions and indexes while retaining exact leaves", () => {
+  const files = [
+    "packages/base/src/value.shared.ts",
+    "packages/base/src/value.shared.js",
+    "packages/base/src/fixtures.shared/index.ts",
+    "packages/base/src/exact.shared",
+    "packages/base/src/data.json",
+    "packages/base/src/styles.css",
+    "packages/base/src/private.shared.ts"
+  ]
+  const imports = new Map([
+    [
+      "packages/consumer/src/index.ts",
+      [
+        "packages/base/src/value.shared",
+        "packages/base/src/exact.shared",
+        "packages/base/src/data.json",
+        "packages/base/src/styles.css"
+      ]
+    ],
+    ["packages/base/src/value.shared.ts", ["packages/base/src/fixtures.shared"]]
+  ])
+  const closure = crossPackageImportClosure(imports, ["packages/base", "packages/consumer"], files)
+  assert.deepEqual(closure, files.filter((file) => !file.endsWith("private.shared.ts")).toSorted())
+  const directDirectory = crossPackageImportClosure(
+    new Map([["packages/consumer/src/index.ts", ["packages/base/src/fixtures.shared"]]]),
+    ["packages/base", "packages/consumer"],
+    files
+  )
+  assert.deepEqual(directDirectory, ["packages/base/src/fixtures.shared/index.ts"])
+})
+
+test("changed mode always schedules the existing repository static guards", () => {
+  const steps = plan({ staged: true, maxWorkers: 1, files: ["packages/jcf-web/src/client/example.css"] })
+  for (const label of [
+    "rly focus rings",
+    "test typecheck coverage",
+    "package script portability",
+    "workspace exports",
+    "security documentation examples"
+  ]) {
+    assert.ok(labels(steps).includes(label), label)
+  }
+  assert.deepEqual(
+    findFocusRingViolations(
+      "packages/jcf-web/src/client/example.css",
+      ".probe:focus-visible { outline-offset: var(--rly-focus-ring-offset); }"
+    ),
+    []
+  )
+  assert.equal(
+    findFocusRingViolations(
+      "packages/jcf-web/src/client/example.css",
+      ".probe:focus-visible { outline-offset: 13px; }"
+    )[0].rule,
+    "focus-offset"
+  )
+  assert.equal(coverageFailures(new Map([["@knpkv/probe", ["test/missing.test.tsx"]]]), {}, {})[0]._tag, "Uncovered")
+  assert.deepEqual(coverageFailures(new Map([["@knpkv/probe", []]]), {}, {}), [])
+})
+
+test("manifest edits schedule existing Effect coverage even when scripts.check is removed", () => {
+  const coveredConfig = {
+    path: "tsconfig.json",
+    hasEffectPlugin: true,
+    includesEffectNamespaces: true,
+    ignoreWarnings: false,
+    ignoreErrors: false,
+    includeSuggestions: false,
+    ignoreSuggestions: false,
+    diagnosticSeverity: {
+      overriddenSchemaConstructor: "off",
+      strictBooleanExpressions: "suggestion",
+      strictEffectProvide: "suggestion"
+    }
+  }
+  for (const checkScript of [undefined, "tsc --noEmit"]) {
+    const record = {
+      name: "@knpkv/agent-skills",
+      effectPackage: true,
+      sourceConfigs: [coveredConfig],
+      checkCoversRoot: checkCoversTsconfig(checkScript)
+    }
+    assert.deepEqual(
+      validatePackageRecords([record]),
+      checkScript === undefined
+        ? ["@knpkv/agent-skills: scripts.check must type-check the package root tsconfig.json"]
+        : []
+    )
+    const steps = plan({
+      staged: true,
+      maxWorkers: 1,
+      touched: ["packages/agent-skills/package.json"],
+      packages: new Map([
+        [
+          "packages/agent-skills",
+          { name: record.name, exists: true, hasCheck: checkScript !== undefined, dependencies: [] }
+        ]
+      ])
+    })
+    assert.deepEqual(steps.find((step) => step.label === "Effect tsconfig coverage").args, [
+      "scripts/check-effect-tsconfig-coverage.mjs"
+    ])
+  }
+  assert.equal(checkCoversTsconfig(rootScripts.check, "scripts/tsconfig.json"), true)
+  const source = plan({
+    staged: true,
+    maxWorkers: 1,
+    touched: ["packages/agent-skills/src/index.ts"],
+    packages: new Map([
+      ["packages/agent-skills", { name: "@knpkv/agent-skills", exists: true, hasCheck: true, dependencies: [] }]
+    ])
+  })
+  assert.ok(labels(source).includes("@knpkv/agent-skills check"))
+  assert.ok(!labels(source).includes("Effect tsconfig coverage"))
+  assert.equal(planPrecommit(["packages/agent-skills/src/index.ts"]).mode, "changed")
+})
+
+test("a single Control Center test edit always schedules Effect diagnostics in each focused scope", () => {
+  const file = "packages/control-center/test/unit/new.test.ts"
+  const packages = new Map([
+    ["packages/control-center", { name: "@knpkv/control-center", exists: true, hasCheck: true, dependencies: [] }]
+  ])
+  assert.equal(planPrecommit([file]).mode, "changed")
+  for (const staged of [true, false]) {
+    const steps = plan({ files: [file], touched: [file], staged, maxWorkers: 1, packages })
+    assert.deepEqual(steps.find((step) => step.label === "changed Effect diagnostics").args, [
+      "scripts/check-changed-effect-diagnostics.mjs",
+      ...(staged ? ["--staged"] : [])
+    ])
+  }
+})
+
+test("registered Vitest suites cannot be disabled by removing scripts.test", () => {
+  const steps = plan({
+    staged: true,
+    maxWorkers: 1,
+    touched: ["packages/codecommit-mock/package.json"],
+    packages: new Map([
+      [
+        "packages/codecommit-mock",
+        { name: "@knpkv/codecommit-mock", exists: true, hasCheck: true, hasTest: false, dependencies: [] }
+      ]
+    ])
+  })
+  const tests = steps.find((step) => step.label === "test affected packages")
+  assert.ok(tests.args.includes("packages/codecommit-mock/"))
+  assert.ok(tests.args.includes("--passWithNoTests"))
+  assert.ok(
+    !plan({ staged: true, maxWorkers: 1, touched: ["README.md"] }).some(
+      (step) => step.label === "test affected packages"
+    )
+  )
+})
+
+test("workspace executable cases are filtered by affected owners and retain readiness checks", () => {
+  assert.equal(selectBinCases().length, workspaceBinCases.length)
+  assert.deepEqual(parseBinArguments([]), undefined)
+  assert.equal(parseBinArguments(["--package"]), null)
+  assert.equal(parseBinArguments(["--all"]), null)
+  assert.equal(parseBinArguments(["--package", ""]), null)
+  assert.deepEqual(parseBinArguments(["--package", "@knpkv/codecommit-mock"]), ["@knpkv/codecommit-mock"])
+  const cases = selectBinCases(["@knpkv/codecommit-mock"])
+  assert.equal(cases.length, 1)
+  assert.ok(cases[0].ready.test("CodeCommit mock listening at http://127.0.0.1:1234"))
+  assert.ok(!cases[0].ready.test("Different startup line"))
+  assert.deepEqual(selectBinCases(["@knpkv/bounded-io"]), [])
+  const steps = plan({
+    staged: true,
+    maxWorkers: 1,
+    touched: ["packages/codecommit-mock/src/cli.ts"],
+    packages: new Map([
+      ["packages/codecommit-mock", { name: "@knpkv/codecommit-mock", exists: true, dependencies: [] }]
+    ])
+  })
+  assert.deepEqual(steps.find((step) => step.label === "test affected workspace executables").args, [
+    "scripts/test-workspace-bins.mjs",
+    "--package",
+    "@knpkv/codecommit-mock"
+  ])
+  const unrelated = plan({
+    staged: true,
+    maxWorkers: 1,
+    touched: ["packages/library/src/index.ts"],
+    packages: new Map([["packages/library", { name: "@knpkv/library", exists: true, dependencies: [] }]])
+  })
+  assert.ok(!unrelated.some((step) => step.label === "test affected workspace executables"))
 })

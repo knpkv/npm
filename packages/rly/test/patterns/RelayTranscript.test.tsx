@@ -2,7 +2,7 @@
 
 import { act, type ReactElement } from "react"
 import { createRoot, type Root } from "react-dom/client"
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { LinkProvider, type RlyLinkComponent } from "../../src/foundations/LinkProvider.js"
 import { RelayTranscript, type RlyRelayTranscriptItem } from "../../src/patterns/RelayTranscript.js"
 
@@ -10,11 +10,13 @@ import { RelayTranscript, type RlyRelayTranscriptItem } from "../../src/patterns
 const nextFrame = (): Promise<void> => act(async () => new Promise((resolve) => requestAnimationFrame(() => resolve())))
 
 let root: Root | undefined
+beforeEach(() => vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true))
 
 afterEach(async () => {
   await act(async () => root?.unmount())
   root = undefined
   document.body.replaceChildren()
+  vi.unstubAllGlobals()
 })
 
 const conversation: ReadonlyArray<RlyRelayTranscriptItem> = [
@@ -70,6 +72,62 @@ const fakeGeometry = (
 }
 
 describe("RelayTranscript", () => {
+  it("keeps the previous reply idle until the new run has a reply after the latest user turn", async () => {
+    const items: ReadonlyArray<RlyRelayTranscriptItem> = [
+      { _tag: "Relay", id: "previous", text: "Finished reply" },
+      { _tag: "You", id: "question", text: "New question" }
+    ]
+    const avatar = ({ live }: { readonly live: boolean }) => <svg data-live={String(live)} />
+    await mount(<RelayTranscript items={items} streaming avatar={avatar} />)
+    expect(document.querySelectorAll('[data-live="true"]')).toHaveLength(0)
+    expect(document.querySelectorAll('[data-live="false"]')).toHaveLength(1)
+    await act(async () =>
+      root?.render(
+        <RelayTranscript
+          items={[...items, { _tag: "Relay", id: "current", text: "First text" }]}
+          streaming
+          avatar={avatar}
+        />
+      )
+    )
+    expect(document.querySelectorAll('[data-live="true"]')).toHaveLength(1)
+    expect(document.querySelector('[data-live="true"]')?.closest("li")?.textContent).toContain("First text")
+    expect(document.querySelector('[data-live="false"]')?.closest("li")?.textContent).toContain("Finished reply")
+  })
+
+  it("gives only the last Relay turn a live avatar and leaves user turns unadorned", async () => {
+    const items: ReadonlyArray<RlyRelayTranscriptItem> = [
+      { _tag: "Relay", id: "r1", text: "First reply" },
+      { _tag: "You", id: "u1", text: "Next question" },
+      { _tag: "Relay", id: "r2", text: "Second reply" },
+      { _tag: "You", id: "u2", text: "One more question" },
+      { _tag: "Relay", id: "r3", text: "Current reply" }
+    ]
+    await mount(
+      <RelayTranscript items={items} streaming avatar={({ live }) => <svg data-pose={live ? "working" : "idle"} />} />
+    )
+    expect(document.querySelectorAll('[data-pose="working"]')).toHaveLength(1)
+    expect(document.querySelectorAll('[data-pose="idle"]')).toHaveLength(2)
+    expect(document.querySelector('[data-pose="working"]')?.closest("li")?.textContent).toContain("Current reply")
+    for (const avatar of document.querySelectorAll("[data-pose]")) {
+      expect(avatar.parentElement?.getAttribute("aria-hidden")).toBe("true")
+      expect(avatar.closest("li")?.textContent).not.toContain("question")
+    }
+    const lives = document.querySelectorAll("[aria-live]").length
+    await act(async () =>
+      root?.render(
+        <RelayTranscript
+          items={items}
+          streaming={false}
+          avatar={({ live }) => <svg data-pose={live ? "working" : "idle"} />}
+        />
+      )
+    )
+    expect(document.querySelectorAll('[data-pose="working"]')).toHaveLength(0)
+    expect(document.querySelectorAll('[data-pose="idle"]')).toHaveLength(3)
+    expect(document.querySelectorAll("[aria-live]")).toHaveLength(lives)
+  })
+
   it("renders your turns, Relay's prose with a scrolling code block, and tool activity with citations", async () => {
     await mount(<Scroller items={conversation} streaming={false} />)
     expect(document.querySelector("li p")?.textContent).toBe("Why is the trailing context line skipped?")
