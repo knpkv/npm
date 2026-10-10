@@ -468,4 +468,11 @@ describe("host dashboard page", () => {
     // hydrating client then finds different text.
     expect(root).toContain("<!-- -->")
   })
+
+  it("asks the browser to resize the page for an on-screen keyboard, so Relay's composer stays above it", () => {
+    const page = dashboardPage(snapshot(true), "")
+    expect(page).toContain(
+      '<meta name="viewport" content="width=device-width,initial-scale=1,interactive-widget=resizes-content">'
+    )
+  })
 })

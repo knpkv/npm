@@ -195,6 +195,21 @@ export const RelayConversationPanel = (props: RelayConversationPanelProps): Reac
   const [attempts, setAttempts] = useState<Readonly<Record<string, number>>>({})
   const [decisionNotes, setDecisionNotes] = useState<Readonly<Record<string, string>>>({})
   const [found, setFound] = useState<Readonly<Record<string, RlyRelayDecisionState>>>({})
+  // The remount drops focus from the button that was pressed; it goes to the new card's first action, unless
+  // the person has already moved it somewhere else.
+  const cardNodes = useRef(new Map<string, HTMLElement>())
+  const refocus = useRef<string | null>(null)
+  useEffect(() => {
+    const call = refocus.current
+    refocus.current = null
+    const card = call === null ? undefined : cardNodes.current.get(call)
+    if (card === undefined) return
+    // Lost: on the page itself, or still on the pressed button the remount took out of the document.
+    const active = card.ownerDocument.activeElement
+    if (active !== null && active !== card.ownerDocument.body && active.isConnected) return
+    const first = [...card.querySelectorAll("button")].find((button) => !button.disabled)
+    first?.focus()
+  }, [attempts])
 
   const send = (): void => {
     const submission = draft.submission()
@@ -230,6 +245,7 @@ export const RelayConversationPanel = (props: RelayConversationPanelProps): Reac
       }
       const why = failure === undefined ? stoppedText : refusalText(failure)
       setDecisionNotes((current) => ({ ...current, [card.call]: `${why} Answer again.` }))
+      refocus.current = card.call
       setAttempts((current) => ({ ...current, [card.call]: (current[card.call] ?? 0) + 1 }))
     })
   }
@@ -271,7 +287,13 @@ export const RelayConversationPanel = (props: RelayConversationPanelProps): Reac
               <p key={card.call}>Relay asks to {card.action.verb}. This page can't confirm it.</p>
             ) : null
           ) : (
-            <div key={card.call}>
+            <div
+              key={card.call}
+              ref={(node) => {
+                if (node === null) cardNodes.current.delete(card.call)
+                else cardNodes.current.set(card.call, node)
+              }}
+            >
               {decisionNotes[card.call] === undefined ? null : <p role="alert">{decisionNotes[card.call]}</p>}
               <RelayDecision
                 body={words.body}

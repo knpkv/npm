@@ -2,6 +2,7 @@ import { PortalProvider } from "@knpkv/rly/foundations"
 import { RelayMark } from "@knpkv/rly/patterns"
 import { Button, Dialog, StatePanel, Tabs, Text, type RlyTabItem } from "@knpkv/rly/primitives"
 import { Cause, Option, Predicate } from "effect"
+import { HubRelay, type HubRelayConversation } from "./hub-relay.js"
 import type * as AsyncResult from "effect/reactivity/AsyncResult"
 import { useEffect, useLayoutEffect, useRef, useState, type ReactElement, type ReactNode } from "react"
 
@@ -230,6 +231,21 @@ const ShortcutsDialog = ({
   </Dialog.Root>
 )
 
+/**
+ * How much of the page the on-screen keyboard covers: the layout viewport below the visual one. Zero where
+ * the browser resizes the page for the keyboard (`interactive-widget=resizes-content`) and while the page is
+ * pinch-zoomed, where the difference is the zoom rather than a keyboard.
+ */
+export const keyboardHeight = (view: {
+  readonly innerHeight: number
+  /** Missing where the browser has no Visual Viewport API. */
+  readonly visualViewport?: { readonly height: number; readonly offsetTop: number; readonly scale: number } | null
+}): number => {
+  const visual = view.visualViewport
+  if (visual === undefined || visual === null || Math.abs(visual.scale - 1) > 0.01) return 0
+  return Math.max(0, Math.round(view.innerHeight - visual.offsetTop - visual.height))
+}
+
 /** How long Ctrl+K keeps trying to reach agent search while the Connect tab shows and loads. */
 const SEARCH_FOCUS_MS = 3000
 
@@ -280,6 +296,7 @@ export const FleetShell = ({
   connect,
   hostCount,
   notice = null,
+  relay,
   usage,
   work
 }: {
@@ -288,6 +305,8 @@ export const FleetShell = ({
   readonly hostCount: number
   /** A page-level notice (such as a failed refresh): under the masthead, in the gutter, above the tabs. */
   readonly notice?: ReactNode
+  /** Relay's conversation, on the canonical hub only: the brand becomes Relay's launcher and status. */
+  readonly relay?: HubRelayConversation
   /** The Usage tab's content; mounted only while it shows, so its polls stop when it doesn't. */
   readonly usage: ReactNode
   readonly work: ReactNode
@@ -296,6 +315,7 @@ export const FleetShell = ({
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
   const prefix = useRef<FleetShortcutPrefix>(null)
   const shellRef = useRef<HTMLDivElement>(null)
+  const mastheadRef = useRef<HTMLElement>(null)
   const tabsRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const candidate = new URLSearchParams(window.location.search).get("tab")
@@ -307,11 +327,21 @@ export const FleetShell = ({
     if (shell === null || tabsRoot === null) return
     const tabList = tabsRoot.querySelector<HTMLElement>(':scope > [role="tablist"]')
     if (tabList === null) return
+    const masthead = mastheadRef.current
     const updateTerminalInset = (): void => {
       shell.style.setProperty(
         "--fleet-shell-tab-bottom",
         `${String(Math.max(0, tabList.getBoundingClientRect().bottom))}px`
       )
+      // Relay's overlay starts below the masthead while any of it shows, at the top once it has scrolled away.
+      if (masthead !== null) {
+        shell.style.setProperty(
+          "--rly-relay-panel-offset",
+          `${String(Math.max(0, masthead.getBoundingClientRect().bottom))}px`
+        )
+      }
+      // On the root: the full-screen panel is portaled outside the shell.
+      document.documentElement.style.setProperty("--fleet-shell-keyboard", `${String(keyboardHeight(window))}px`)
     }
     let animationFrame: number | null = null
     const scheduleTerminalInsetUpdate = (): void => {
@@ -325,6 +355,8 @@ export const FleetShell = ({
     const resizeObserver = "ResizeObserver" in window ? new window.ResizeObserver(scheduleTerminalInsetUpdate) : null
     resizeObserver?.observe(shell)
     resizeObserver?.observe(tabList)
+    // Relay's status can wrap and grow the masthead without either of them resizing.
+    if (masthead !== null) resizeObserver?.observe(masthead)
     window.addEventListener("resize", scheduleTerminalInsetUpdate)
     window.addEventListener("scroll", scheduleTerminalInsetUpdate, true)
     window.visualViewport?.addEventListener("resize", scheduleTerminalInsetUpdate)
@@ -336,6 +368,7 @@ export const FleetShell = ({
       window.removeEventListener("scroll", scheduleTerminalInsetUpdate, true)
       window.visualViewport?.removeEventListener("resize", scheduleTerminalInsetUpdate)
       window.visualViewport?.removeEventListener("scroll", scheduleTerminalInsetUpdate)
+      document.documentElement.style.removeProperty("--fleet-shell-keyboard")
     }
   }, [tab])
   // On a phone the tabs scroll as one row; the selected one is always brought into it, so a page
@@ -459,12 +492,18 @@ export const FleetShell = ({
     // rly overlays (the shortcuts dialog) render into a portal target; without a provider they don't mount.
     <PortalProvider>
       <div className="fleet-shell" ref={shellRef}>
-        <header className="fleet-shell-masthead">
+        <header className="fleet-shell-masthead" ref={mastheadRef}>
           <div className="fleet-shell-brand">
-            <RelayMark.Tile className="fleet-shell-mark" size={32} />
-            <Text as="strong" variant="label">
-              Relay
-            </Text>
+            {relay === undefined ? (
+              <>
+                <RelayMark.Tile className="fleet-shell-mark" size={32} />
+                <Text as="strong" variant="label">
+                  Relay
+                </Text>
+              </>
+            ) : (
+              <HubRelay relay={relay} terminalOwnsKeys={tab === "connect"} />
+            )}
           </div>
           <div className="fleet-shell-meta">
             {/* Configured, not reachable: the shell doesn't know which hosts answer, so it doesn't say. */}

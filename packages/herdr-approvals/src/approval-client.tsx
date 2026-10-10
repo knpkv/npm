@@ -1,9 +1,10 @@
 import { dashboardRefreshView } from "./internal/dashboard-refresh.js"
 import { RegistryProvider, useAtom, useAtomRefresh, useAtomSet, useAtomValue } from "@effect/atom-react"
-import { BrowserHttpClient } from "@effect/platform-browser"
+import { BrowserCrypto, BrowserHttpClient } from "@effect/platform-browser"
+import { makeRelayClient, makeRelayConversations } from "@knpkv/relay-product/client"
 import { ConnectSurface, makeConnectAtoms } from "@knpkv/herdr-connect/surface"
 import { makeUsageAtoms, UsageSurface } from "@knpkv/herdr-connect/usage"
-import { Cause, Effect, Exit, Option, Result, Schema } from "effect"
+import { Cause, Effect, Exit, Layer, ManagedRuntime, Option, Result, Schema } from "effect"
 import * as AsyncResult from "effect/reactivity/AsyncResult"
 import * as Atom from "effect/reactivity/Atom"
 import * as HttpClient from "effect/http/HttpClient"
@@ -31,6 +32,7 @@ import {
   type PendingApprovalTarget as PendingApprovalTargetType
 } from "./dashboard-model.js"
 import { DashboardView, type ApprovalDecision } from "./dashboard-view.js"
+import { type HubRelayConversation, watchRelayPage } from "./hub-relay.js"
 import {
   dashboardHistoryState,
   dashboardHasPendingApprovalTarget,
@@ -674,6 +676,7 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
         {canonical ? (
           <FleetShell
             approvals={dashboardView}
+            relay={relay}
             connect={<ConnectSurface atoms={atoms.connect} embedded />}
             hostCount={current.directory === null ? 1 : current.directory.links.length + 1}
             notice={refreshNotice}
@@ -714,6 +717,19 @@ if (Result.isFailure(initialResult)) {
 }
 const initial = initialResult.success
 const atoms = makeDashboardAtoms(initial)
+/**
+ * Relay's one fleet conversation, on the canonical hub (the only listener that serves `/v1/relay`): one
+ * stream for the page, closed when the page goes away for good.
+ */
+const relayConversations = makeRelayConversations(
+  makeRelayClient({ base: "/v1/relay", origin: window.location.href }),
+  ManagedRuntime.make(Layer.merge(BrowserHttpClient.layerFetch, BrowserCrypto.layer))
+)
+const relay: HubRelayConversation = {
+  conversations: relayConversations,
+  conversation: { product: "herdr", kind: "fleet", id: initial.host }
+}
+watchRelayPage(window, relay)
 const application = (
   <RegistryProvider>
     <DashboardApp atoms={atoms} />

@@ -198,7 +198,8 @@ export const getWorkBoard = defineContract({
   description: "The goals on the Work board as it stands now: title, state, owner agent, repository and branch, " +
     "delivery stage, and what blocks it. At most 30, in the board's order. `total` counts every goal on the board, " +
     "including older goals a large board leaves out of its view; `notShown` counts every goal missing from this " +
-    "answer, so say how many older goals are not shown.",
+    "answer, so say how many older goals are not shown. Goals that finished more than a day ago have left the " +
+    "board and are not counted.",
   access: "read",
   input: Schema.Struct({}),
   output: Schema.Struct({ goals: Schema.Array(GoalSummary), total: Schema.Number, notShown: Schema.Number }),
@@ -294,7 +295,8 @@ export const hubCapabilities = (reads: HubRelayReads) => ({
           blocker: goal.blocker === null ? null : clip(goal.blocker.summary)
         })),
         (kept) => {
-          // The board itself leaves its older goals out when it is large (`goalsOmitted`); they still count.
+          // The board itself leaves its older goals out when it is large (`goalsOmitted`); they still count. Goals
+          // finished more than a day ago (`finishedOmitted`) left the triage view, so they don't.
           const total = goals.length + goalsOmitted
           return { goals: kept, total, notShown: total - kept.length }
         }

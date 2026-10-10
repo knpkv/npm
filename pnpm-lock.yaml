@@ -1015,6 +1015,9 @@ importers:
       '@knpkv/relay':
         specifier: workspace:^
         version: link:../relay
+      '@knpkv/relay-product':
+        specifier: workspace:^
+        version: link:../relay-product
       '@knpkv/rly':
         specifier: workspace:^
         version: link:../rly
