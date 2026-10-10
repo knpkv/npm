@@ -108,4 +108,4 @@ Relay's sibling `@knpkv` packages.
 
 `pnpm test:pack` holds the package to that: the bundle may import only declared dependencies and Node
 built-ins, and a dynamic import may reach nothing but a Node built-in. The bundle is temporary, until upstream
-makes those dependencies optional (ADR-0009, amendment of 2026-10-07).
+makes those dependencies optional.

@@ -72,7 +72,7 @@ const fixtureCss = [
   readCss(resolve(workspaceRoot, "packages/rly/src/styles/base.css")),
   readCss(resolve(workspaceRoot, "packages/rly/src/primitives/Tabs.module.css")),
   connectorCss,
-  readCss(resolve(workspaceRoot, "packages/herdr-approvals/src/styles.css")),
+  readCss(resolve(workspaceRoot, "packages/herdr-hub/src/styles.css")),
   `
     html, body { margin: 0; }
     *, *::before, *::after { box-sizing: border-box; }

@@ -9,8 +9,10 @@ import * as DateTime from "effect/DateTime"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
+import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
+import * as Path from "effect/Path"
 import * as ChildProcess from "effect/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import * as Ref from "effect/Ref"
@@ -27,6 +29,7 @@ import {
   type ReviewCommandArtifactRepositoryService,
   type ReviewCommandArtifactStream
 } from "../../persistence/repositories/reviewCommandArtifactRepository.js"
+import { makePrReviewRevisionReader, type PrReviewRevisionReader } from "./PrReviewRevisionReader.js"
 import { PrReviewSourceError, type PrReviewSourceRequest, PrReviewSourceWorkspace } from "./PrReviewSourceWorkspace.js"
 import { emitPrReviewTelemetry } from "./PrReviewTelemetry.js"
 import { PR_REVIEW_AUTHORITY_CONFIG_PATTERN } from "./PrReviewWorkspaceProtocol.js"
@@ -287,6 +290,8 @@ export interface PrReviewSandboxSession {
   readonly baseRevision: string
   readonly headRevision: string
   readonly jobId: JobId
+  /** Host-side reads of the exact base and head; evidence validation uses these, never `runCommand`. */
+  readonly revisions: PrReviewRevisionReader
   readonly readFile: (
     path: string,
     offset?: number,
@@ -522,6 +527,8 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
   const sourceWorkspace = yield* PrReviewSourceWorkspace
   const artifacts = yield* ReviewCommandArtifactRepository
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+  const fileSystem = yield* FileSystem.FileSystem
+  const pathService = yield* Path.Path
   const home = yield* Config.String("HOME").pipe(
     Effect.mapError(() => sessionError("invalid-configuration"))
   )
@@ -758,8 +765,9 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
                     "LANG=C",
                     "LC_ALL=C",
                     "PATH=/usr/local/bin:/usr/bin:/bin",
+                    // A non-login shell: startup files the agent writes under HOME never run.
                     "/bin/sh",
-                    "-lc",
+                    "-c",
                     commandText
                   ],
                   MAXIMUM_COMMAND_OUTPUT_BYTES,
@@ -977,6 +985,7 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
                 baseRevision: request.baseRevision,
                 headRevision: request.headRevision,
                 jobId: request.jobId,
+                revisions: makePrReviewRevisionReader(spawner, fileSystem, pathService, sourceRoot, path),
                 runCommand,
                 readFile: (unknownPath, offset = 0, limit = 32_768) =>
                   Effect.gen(function*() {
@@ -1158,7 +1167,11 @@ export const prReviewSandboxSessionsLayer = (
 ): Layer.Layer<
   PrReviewSandboxSessions,
   PrReviewSandboxSessionError,
-  ReviewCommandArtifactRepository | PrReviewSourceWorkspace | ChildProcessSpawner.ChildProcessSpawner
+  | ReviewCommandArtifactRepository
+  | PrReviewSourceWorkspace
+  | ChildProcessSpawner.ChildProcessSpawner
+  | FileSystem.FileSystem
+  | Path.Path
 > => Layer.effect(PrReviewSandboxSessions, makeSessions(options))
 
 const ToolOutput = Schema.Struct({

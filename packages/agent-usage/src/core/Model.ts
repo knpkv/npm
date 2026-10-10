@@ -4,7 +4,7 @@
  * **Mental model**
  *
  * - **Facts, not conclusions.** A Usage Event carries token counts and Attribution Inputs; its
- *   Booking and API-Equivalent Cost are derived when read (ADR 0002).
+ *   Booking and API-Equivalent Cost are derived when read.
  * - **Unknown is a value.** A limit or balance that could not be read is stored as `Unknown` with a
  *   reason, so a gap on a graph is a gap and never a zero.
  *

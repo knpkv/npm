@@ -4,7 +4,7 @@
  *
  * **Mental model**
  *
- * - **Facts only** (ADR 0002). Rows hold token counts and Attribution Inputs; Bookings and costs are
+ * - **Facts only.** Rows hold token counts and Attribution Inputs; Bookings and costs are
  *   derived by callers. No column can hold prompt or response text.
  * - **A chunk commits whole.** A file chunk's events, observations and the cursor past them land in
  *   one transaction, so a pass killed mid-backfill neither loses nor double-counts: the next pass
@@ -71,7 +71,7 @@ export interface Range {
   readonly to: number
 }
 
-/** A range on one Machine: every read is scoped to the Machine this server runs as (ADR 0001). */
+/** A range on one Machine: every read is scoped to the Machine this server runs as. */
 export interface MachineRange extends Range {
   readonly machine: string
 }

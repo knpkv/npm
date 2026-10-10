@@ -1125,10 +1125,11 @@
   }
 
   /*
-   * At 24rem and below the state sits over the name, with the time beside it; the column heads go. The
-   * creature stays at the front, across both lines.
+   * On a phone (every iPhone is wider than 24rem) the state sits over the name, with the time beside it, so
+   * the name and work get the row's whole width; the column heads go. The creature stays at the front, across
+   * both lines.
    */
-  @media (max-width: 24rem) {
+  @media (max-width: 640px) {
     .connect-agent {
       grid-template-columns: var(--connect-creature-track) minmax(0, 1fr) auto;
       row-gap: var(--rly-space-4);
@@ -1149,8 +1150,9 @@
     }
   }
 
-  /* The narrowest phones give the options the whole row; the groups keep their names through aria-labelledby. */
-  @media (max-width: 360px) {
+  /* Phones give the options the whole row, so the status words fit one line; the groups keep their names
+     through aria-labelledby. */
+  @media (max-width: 640px) {
     .connect-filter-set {
       grid-template-columns: minmax(0, 1fr);
     }
@@ -1674,6 +1676,13 @@
     display: grid;
     gap: var(--rly-space-16);
     padding: var(--rly-space-24) var(--rly-space-20);
+  }
+
+  /* A phone's stage keeps the page's one 16px gutter. */
+  @media (max-width: 640px) {
+    .connect-stage {
+      padding-inline: var(--rly-space-16);
+    }
   }
 
   .connect-stage-hero {

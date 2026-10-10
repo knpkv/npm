@@ -140,6 +140,16 @@ fits the durable report envelope. The projection reserves space for subject
 identity, resolved anchors, lifecycle state, suggestion IDs, and note IDs before
 the executor performs evidence validation.
 
+Evidence validation never reads the sandbox copy. The agent can rewrite refs,
+replacement refs, and object files there without changing any revision ID, so
+the executor reads the exact base and head from the host's own checkout, which
+the sandbox mounts read-only. Those reads run `git` as argv without a shell,
+with replacement objects disabled and no global or system Git configuration,
+and the executor slices evidence lines itself. Replacement patches are checked
+in a throwaway index outside the checkout. Contained commands run in a
+non-login shell, so startup files the agent writes under the sandbox HOME never
+run.
+
 ### Confidence
 
 - High: directly reproduced or proven by deterministic analysis.
@@ -456,18 +466,20 @@ environment values, and provider-native references remain server-only.
 8. Add grouped publication splitting and complete the CodeCommit comment create/update/reply contract journey.
 9. Add browser coverage and the opt-in real Codex smoke test.
 
-## Decision records
+## Decisions
 
-- [0001 — Keep review suggestions draft until published](./adr/0001-keep-review-suggestions-draft-until-published.md)
-- [0002 — Isolate review in an ephemeral writable sandbox](./adr/0002-isolate-agent-review-in-an-ephemeral-writable-sandbox.md)
-- [0003 — Own review conversation history in Control Center](./adr/0003-own-review-conversation-history-in-control-center.md)
-- [0004 — Trust review instructions only from the base revision](./adr/0004-trust-review-instructions-only-from-the-base-revision.md)
-- [0005 — Integrate agent review into the diff workspace](./adr/0005-integrate-agent-review-into-the-diff-workspace.md)
-- [0006 — Retain decisions longer than execution data](./adr/0006-retain-review-decisions-longer-than-execution-data.md)
-- [0007 — Keep review content out of telemetry](./adr/0007-keep-review-content-out-of-telemetry.md)
-- [0008 — Share CodeCommit mechanisms, not sandbox policy](./adr/0008-share-codecommit-mechanisms-not-sandbox-policy.md)
-- [0009 — Use a provider-neutral agent tool loop](./adr/0009-use-a-provider-neutral-agent-tool-loop.md)
-- [0010 — Test agent review through its public seams](./adr/0010-test-agent-review-through-its-public-seams.md)
-- [0011 — Replace the pre-stable review model without migration](./adr/0011-replace-the-pre-stable-review-model-without-migration.md)
-- [0012 — Own managed review in Control Center](./adr/0012-own-managed-review-in-control-center.md)
-- [0013 — Auto-prepare watched reviews without write authority](./adr/0013-auto-prepare-watched-reviews-without-write-authority.md)
+The design rests on these decisions, each recorded with the package:
+
+- Keep review suggestions draft until published.
+- Isolate review in an ephemeral writable sandbox.
+- Own review conversation history in Control Center.
+- Trust review instructions only from the base revision.
+- Integrate agent review into the diff workspace.
+- Retain decisions longer than execution data.
+- Keep review content out of telemetry.
+- Share CodeCommit mechanisms, not sandbox policy.
+- Use a provider-neutral agent tool loop.
+- Test agent review through its public seams.
+- Replace the pre-stable review model without migration.
+- Own managed review in Control Center.
+- Auto-prepare watched reviews without write authority.

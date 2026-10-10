@@ -16,7 +16,7 @@ The implementation replaces the bounded analyzer/report path without migration. 
 
 ## Delivery rules
 
-- Start a fresh branch from current main and carry the approved specification, glossary, and ADRs onto it.
+- Start a fresh branch from current main and carry the approved specification, glossary, and decision records onto it.
 - Keep each pull request independently buildable and testable.
 - Add package changesets with the pull request that changes each published package.
 - Run deterministic package gates before one consolidated review pass.

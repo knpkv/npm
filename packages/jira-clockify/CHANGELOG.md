@@ -481,7 +481,7 @@ start` already sent.
   settled: every window a prompt will ever produce now exists the moment the prompt does.
 
   A day therefore credits up to one Idle Cap more per session than before, which is the behaviour
-  ADR-0006 already described — "the most time credited after a final prompt".
+  the design already described — "the most time credited after a final prompt".
 
   Attribute each stretch of a session to the branch it actually ran under. A transcript is now read as
   one segment per `(working directory, branch)`: taking the last line's branch for the whole file

@@ -169,7 +169,7 @@ jcf watch claude --interval 60
 - It writes a block once it has been quiet for one idle cap, so work in progress is never written.
   Nothing is written twice _on this machine_ — a proposal is always the gap the two sides still have,
   and the lease keeps a second local watch out. Two machines watching one Clockify account can still
-  duplicate: see ADR-0007.
+  duplicate, because the lease is local to one machine.
 - It covers time since it started, plus any stretch a previous watch reached but had not written —
   it leaves a cursor, so a restart resumes rather than dropping the block. A first run reaches back
   for nothing. Earlier work in the same day needs `jcf sync reconcile`.

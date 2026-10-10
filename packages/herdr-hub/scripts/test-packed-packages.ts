@@ -31,13 +31,13 @@ const herdrPackages = [
   "herdr-connect",
   "herdr-coordinator",
   "herdr-work",
-  "herdr-approvals"
+  "herdr-hub"
 ]
 
 const reactSurfacePeers = new Map<string, ReadonlyArray<string>>([
   ["@knpkv/herdr-connect", ["react", "react-dom"]],
   ["@knpkv/herdr-work", ["react"]],
-  ["@knpkv/herdr-approvals", ["react", "react-dom"]]
+  ["@knpkv/herdr-hub", ["react", "react-dom"]]
 ])
 
 const sameBytes = (left: Uint8Array, right: Uint8Array): boolean =>
@@ -382,7 +382,7 @@ const program = Effect.scoped(
       yield* assertManifestDependencies(sourceManifest.name, packedManifest)
       yield* assertReactSurfaceManifest(sourceManifest.name, packedManifest, false)
       if (
-        sourceManifest.name === "@knpkv/herdr-approvals" &&
+        sourceManifest.name === "@knpkv/herdr-hub" &&
         (!Schema.is(PackageSideEffects)(packedManifest.sideEffects) ||
           !packedManifest.sideEffects.includes("./dist/bin.js") ||
           !packedManifest.sideEffects.includes("./dist/fleetctl.js"))
@@ -419,12 +419,12 @@ const program = Effect.scoped(
       })
     }
 
-    const approvalsArchive = archives.get("@knpkv/herdr-approvals")
+    const approvalsArchive = archives.get("@knpkv/herdr-hub")
     if (approvalsArchive === undefined) {
       return yield* new HerdrPackContractError({ reason: "Approval archive was not packed" })
     }
     const consumer = path.join(first, "consumer")
-    const installed = path.join(consumer, "node_modules", "@knpkv", "herdr-approvals")
+    const installed = path.join(consumer, "node_modules", "@knpkv", "herdr-hub")
     yield* fileSystem.makeDirectory(installed, { recursive: true })
     yield* run(
       spawner,
@@ -440,7 +440,7 @@ const program = Effect.scoped(
       [
         "--input-type=module",
         "--eval",
-        "console.log(import.meta.resolve('@knpkv/herdr-approvals/hostd')); console.log(import.meta.resolve('@knpkv/herdr-approvals/hostd-runtime')); console.log(import.meta.resolve('@knpkv/herdr-approvals/fleetctl'))"
+        "console.log(import.meta.resolve('@knpkv/herdr-hub/hostd')); console.log(import.meta.resolve('@knpkv/herdr-hub/hostd-runtime')); console.log(import.meta.resolve('@knpkv/herdr-hub/fleetctl'))"
       ],
       consumer
     )

@@ -26,6 +26,7 @@ export class AuthPersistenceError extends Schema.TaggedError<AuthPersistenceErro
       "issue-pairing-code",
       "consume-pairing-code",
       "authenticate-session",
+      "validate-session",
       "list-sessions",
       "revoke-session",
       "list-pairing-codes",

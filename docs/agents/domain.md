@@ -5,7 +5,7 @@ How the engineering skills should consume this repo's domain documentation when 
 ## Before exploring, read these
 
 - `CONTEXT.md` at the repo root for the project glossary.
-- `docs/adr/` for architectural decisions that touch the area being changed.
+- The numbered decision records for architectural decisions that touch the area being changed.
 
 If a file does not exist, proceed silently. Producer skills create domain docs lazily when terms or decisions are resolved.
 
@@ -16,13 +16,13 @@ This is a single-context repo:
 ```text
 /
 ├── CONTEXT.md
-└── docs/adr/
+└── docs/        (numbered decision records)
 ```
 
 ## Use the glossary's vocabulary
 
 When output names a domain concept, use the term as defined in `CONTEXT.md`. Do not drift to synonyms the glossary explicitly avoids.
 
-## Flag ADR conflicts
+## Flag decision conflicts
 
-If output contradicts an existing ADR, surface it explicitly instead of silently overriding it.
+If output contradicts an existing decision record, surface it explicitly instead of silently overriding it.

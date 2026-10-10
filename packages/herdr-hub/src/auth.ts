@@ -21,6 +21,24 @@ export const authorizeLoopback = (
       })
     )
 
+/**
+ * Admits a peer of the Work-only listener. That listener binds a configured
+ * 127.0.0.0/8 address and has no authentication of its own, so any other peer
+ * is refused even if the listener were reachable from it.
+ */
+export const authorizeLoopbackPeer = (
+  identity: RequestIdentity
+): Effect.Effect<LoopbackActor, FleetAuthorizationError> => {
+  const address = identity.remoteAddress?.replace(/^::ffff:/u, "") ?? ""
+  return /^127(?:\.\d{1,3}){3}$/u.test(address) && identity.login === undefined
+    ? Effect.succeed("local")
+    : Effect.fail(
+      new FleetAuthorizationError({
+        actor: identity.login ?? identity.remoteAddress ?? "unknown"
+      })
+    )
+}
+
 export const authorize = (
   identity: RequestIdentity,
   allowedUsers: ReadonlyArray<string>,

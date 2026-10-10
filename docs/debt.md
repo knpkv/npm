@@ -485,27 +485,6 @@ Counts ratchet per package and kind: `pnpm debt:check` fails when one rises, and
 | [packages/control-center-sql/scripts/test-packed-package.ts](../packages/control-center-sql/scripts/test-packed-package.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
 | [packages/control-center-sql/scripts/vendor-effect-qb.ts](../packages/control-center-sql/scripts/vendor-effect-qb.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
 
-## herdr-approvals
-
-14 directives (ast-grep 1, effect-diagnostics 13), 3 without a reason.
-
-| File | Kind | Directive | Reason |
-| --- | --- | --- | --- |
-| [packages/herdr-approvals/test/http.test.ts](../packages/herdr-approvals/test/http.test.ts) | ast-grep | `ast-grep-ignore: no-released-ephemeral-test-port -- one test must probe a port before hostd binds it (see its use).` | yes |
-| [packages/herdr-approvals/scripts/test-packed-packages.ts](../packages/herdr-approvals/scripts/test-packed-packages.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
-| [packages/herdr-approvals/src/bin.ts](../packages/herdr-approvals/src/bin.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
-| [packages/herdr-approvals/src/fleetctl.ts](../packages/herdr-approvals/src/fleetctl.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
-| [packages/herdr-approvals/test/config-path.test.ts](../packages/herdr-approvals/test/config-path.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
-| [packages/herdr-approvals/test/hostd-runtime.test.ts](../packages/herdr-approvals/test/hostd-runtime.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
-| [packages/herdr-approvals/test/hostd-runtime.test.ts](../packages/herdr-approvals/test/hostd-runtime.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
-| [packages/herdr-approvals/test/hostd-runtime.test.ts](../packages/herdr-approvals/test/hostd-runtime.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
-| [packages/herdr-approvals/test/http.test.ts](../packages/herdr-approvals/test/http.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
-| [packages/herdr-approvals/test/lan-work.test.ts](../packages/herdr-approvals/test/lan-work.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | **missing** |
-| [packages/herdr-approvals/test/operations.test.ts](../packages/herdr-approvals/test/operations.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
-| [packages/herdr-approvals/test/outstanding-work-job.test.ts](../packages/herdr-approvals/test/outstanding-work-job.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | **missing** |
-| [packages/herdr-approvals/test/push-worker.test.ts](../packages/herdr-approvals/test/push-worker.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
-| [packages/herdr-approvals/test/state-files.test.ts](../packages/herdr-approvals/test/state-files.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | **missing** |
-
 ## herdr-connect
 
 8 directives (ast-grep 1, effect-diagnostics 6, eslint 1), 4 without a reason.
@@ -544,6 +523,26 @@ Counts ratchet per package and kind: `pnpm debt:check` fails when one rises, and
 | --- | --- | --- | --- |
 | [packages/herdr-fleet/test/fleet.test.ts](../packages/herdr-fleet/test/fleet.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
 | [packages/herdr-fleet/test/sqlite.test.ts](../packages/herdr-fleet/test/sqlite.test.ts) | effect-diagnostics | `@effect-diagnostics strictEffectProvide:skip-file` | **missing** |
+
+## herdr-hub
+
+13 directives (ast-grep 1, effect-diagnostics 12), 3 without a reason.
+
+| File | Kind | Directive | Reason |
+| --- | --- | --- | --- |
+| [packages/herdr-hub/test/http.test.ts](../packages/herdr-hub/test/http.test.ts) | ast-grep | `ast-grep-ignore: no-released-ephemeral-test-port -- one test must probe a port before hostd binds it (see its use).` | yes |
+| [packages/herdr-hub/scripts/test-packed-packages.ts](../packages/herdr-hub/scripts/test-packed-packages.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
+| [packages/herdr-hub/src/fleetctl.ts](../packages/herdr-hub/src/fleetctl.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
+| [packages/herdr-hub/test/config-path.test.ts](../packages/herdr-hub/test/config-path.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
+| [packages/herdr-hub/test/hostd-runtime.test.ts](../packages/herdr-hub/test/hostd-runtime.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
+| [packages/herdr-hub/test/hostd-runtime.test.ts](../packages/herdr-hub/test/hostd-runtime.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
+| [packages/herdr-hub/test/hostd-runtime.test.ts](../packages/herdr-hub/test/hostd-runtime.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
+| [packages/herdr-hub/test/http.test.ts](../packages/herdr-hub/test/http.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
+| [packages/herdr-hub/test/lan-work.test.ts](../packages/herdr-hub/test/lan-work.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | **missing** |
+| [packages/herdr-hub/test/operations.test.ts](../packages/herdr-hub/test/operations.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
+| [packages/herdr-hub/test/outstanding-work-job.test.ts](../packages/herdr-hub/test/outstanding-work-job.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | **missing** |
+| [packages/herdr-hub/test/push-worker.test.ts](../packages/herdr-hub/test/push-worker.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
+| [packages/herdr-hub/test/state-files.test.ts](../packages/herdr-hub/test/state-files.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | **missing** |
 
 ## herdr-monitor
 

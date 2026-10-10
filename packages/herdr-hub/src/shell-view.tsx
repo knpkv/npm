@@ -152,7 +152,7 @@ const sequenceTabs: ReadonlyMap<string, FleetShellTab> = new Map([
 
 /**
  * The shortcut for one key press, and the `g` prefix it leaves. No single bare key acts on its own:
- * Andrey's window manager owns Alt, so tabs are `g` then `a` / `c` / `w` / `u` within
+ * a tiling window manager may own Alt, so tabs are `g` then `a` / `c` / `w` / `u` within
  * {@link FLEET_SEQUENCE_MS}, agent search is Ctrl+K (Cmd+K), and `?` lists the shortcuts. Only
  * Ctrl+K works inside a field; nothing else takes a key while one has focus.
  */
