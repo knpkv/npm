@@ -1,5 +1,29 @@
 # @knpkv/control-center
 
+## 0.13.0
+
+### Minor Changes
+
+- [#756](https://github.com/knpkv/npm/pull/756) [`fed0841`](https://github.com/knpkv/npm/commit/fed084126ca45b2d553d7c8e7813445edff04c56) Thanks [@konopkov](https://github.com/konopkov)! - PR-review evidence validation now reads the exact base and head from the host's own source checkout instead of the agent-writable sandbox copy. Refs, replacement refs, or object files rewritten inside the sandbox can no longer change what validation sees. The host reads run `git` as argv without a shell, with replacement objects disabled and no global or system configuration. Sandbox commands now run in a non-login shell. Review sandbox sessions expose these reads as `revisions`, and the sessions layer now requires `FileSystem` and `Path`.
+
+- [#760](https://github.com/knpkv/npm/pull/760) [`82073e5`](https://github.com/knpkv/npm/commit/82073e5e01563e943a7c4d55b6041d2551278b4b) Thanks [@konopkov](https://github.com/konopkov)! - Live event streams now re-check their session with a validation-only lookup (token, revocation, idle and absolute expiry) that records no activity. A browser tab left open no longer keeps an idle session alive past its 12-hour idle limit. Adds `Auth.validateSession` and the `validate-session` persistence operation.
+
+- [#761](https://github.com/knpkv/npm/pull/761) [`1142447`](https://github.com/knpkv/npm/commit/1142447e58fe4359d5cdb584029f189ef7e9715f) Thanks [@konopkov](https://github.com/konopkov)! - Timeline CSV and JSON exports are now `POST` requests that require an allowed `Origin` and the session's CSRF token. Each download records an export audit row, so it can no longer be triggered by a cross-site `GET`. API clients must switch `exportCsv` and `exportJson` calls to the mutation client.
+
+### Patch Changes
+
+- [#763](https://github.com/knpkv/npm/pull/763) [`bc2d9ad`](https://github.com/knpkv/npm/commit/bc2d9adcdeef47937a76748ae4e1c60ba2866fd4) Thanks [@konopkov](https://github.com/konopkov)! - AWS credential resolution now passes every profile name, `default` included, explicitly to the SDK. When a profile has no SSO configuration, resolution reads only that profile from shared configuration (`fromIni`). Ambient environment, web-identity, and instance credentials can no longer stand in for a named profile, so the identity used always matches the profile shown in the UI and audit records.
+
+- [`4ebe301`](https://github.com/knpkv/npm/commit/4ebe30154220bff53ec507a0d70c5f8f4a543c5a) Thanks [@konopkov](https://github.com/konopkov)! - Docs and comments state each rule and its reason directly instead of pointing at internal decision records.
+
+- [#778](https://github.com/knpkv/npm/pull/778) [`8b38b38`](https://github.com/knpkv/npm/commit/8b38b38f654f1a0842f49794ad8bbff6023ae718) Thanks [@konopkov](https://github.com/konopkov)! - Each plugin connection now uses only its own credentials. Connection tests check credential isolation and authentication failures so a connection cannot report healthy using another connection's credentials.
+- Updated dependencies [[`bc2d9ad`](https://github.com/knpkv/npm/commit/bc2d9adcdeef47937a76748ae4e1c60ba2866fd4), [`6644cb7`](https://github.com/knpkv/npm/commit/6644cb74218d7daf7f618f1da69dc30e4aa3d93a), [`4ebe301`](https://github.com/knpkv/npm/commit/4ebe30154220bff53ec507a0d70c5f8f4a543c5a)]:
+  - @knpkv/codecommit-core@0.25.1
+  - @knpkv/rly@0.20.0
+  - @knpkv/browser-pairing@0.4.1
+  - @knpkv/relay-product@0.5.2
+  - @knpkv/review@0.4.10
+
 ## 0.12.4
 
 ### Patch Changes

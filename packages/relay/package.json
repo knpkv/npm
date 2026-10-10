@@ -1,6 +1,6 @@
 {
   "name": "@knpkv/relay",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Relay agent harness: durable sessions per product object, typed capabilities, a central permission gate, and model turns through the user's own Claude Code or Codex CLI login",
   "license": "MIT",
   "author": "knpkv",
