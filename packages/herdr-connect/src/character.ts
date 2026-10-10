@@ -16,11 +16,16 @@
 
 /** One agent's drawn identity. Numbers are in the creature's 100-unit viewBox. */
 export interface AgentCharacter {
-  /** The body's outline: a closed path of cubic curves. */
+  /** The body's outline: a closed path of cubic curves, centred on x 50 and standing on {@link FOOT}. */
   readonly body: string
+  /**
+   * The box of the outline's points: left, top, width, height, its bottom on {@link FOOT}. The curves between
+   * the points can bulge past it by under half a unit.
+   */
+  readonly bounds: readonly [number, number, number, number]
   /** Light, mid and deep hues (OKLCH degrees), close enough to read as one creature. */
   readonly hues: readonly [number, number, number]
-  /** Eye half-width and half-height. */
+  /** Eye half-width and half-height. Never wider than tall, so a squint never reads as a frown. */
   readonly eye: readonly [number, number]
   /** Distance of each eye from the centre line, and the eyes' height. */
   readonly eyeGap: number
@@ -30,6 +35,18 @@ export interface AgentCharacter {
   readonly blink: number
   readonly phase: number
 }
+
+/** Where every body stands: its lowest point, and the point its squash and stretch pivot on. */
+export const FOOT = 88
+
+/** The iris's radius as a share of the eye's shorter half-axis. What's left over is the gaze's room. */
+export const IRIS_SHARE = 0.66
+
+/**
+ * How far any gaze moves the iris from the eye's centre, in viewBox units. The stylesheet's gaze keyframes stay
+ * inside it, and every eye leaves at least this much room round its iris, so a look never leaves the eye.
+ */
+export const GAZE_REACH = 1.6
 
 const fnv1a = (text: string): number => {
   let hash = 2166136261
@@ -72,12 +89,17 @@ const smoothClosedPath = (points: ReadonlyArray<readonly [number, number]>): str
   return `M${fixed(startX)} ${fixed(startY)}${spans.join("")}Z`
 }
 
-const EYE_PROPORTIONS: ReadonlyArray<readonly [number, number]> = [
-  [5.2, 5.6],
-  [4.4, 6.2],
-  [6, 5],
-  [4.8, 4.8]
-]
+/** How much of the wobble each lobe count keeps, from two lobes to five. */
+const LOBE_WOBBLE: ReadonlyArray<number> = [1, 1, 0.75, 0.6]
+
+/** Eye height over width: round to gently tall. */
+const EYE_ASPECTS: ReadonlyArray<number> = [1, 1.08, 1.16, 1.24]
+
+/** The largest box a body may fill, so every creature reads as the same size whatever its proportions. */
+const MAX_WIDTH = 78
+const MAX_HEIGHT = 72
+
+const clamp = (value: number, low: number, high: number): number => Math.min(high, Math.max(low, value))
 
 /** The character drawn for the agent `id` on `host`. Pure: the same pair always gives the same character. */
 export const agentCharacter = (host: string, id: string): AgentCharacter => {
@@ -85,21 +107,42 @@ export const agentCharacter = (host: string, id: string): AgentCharacter => {
   // Twelve hue families 30° apart plus a small offset, then analogous neighbours, so the body stays one colour story.
   const hue = (field(seed, 0, 12) * 30 + field(seed, 4, 14)) % 360
   const spread = 18 + field(seed, 9, 30)
-  const lobes = 2 + field(seed, 3, 5)
-  const wobble = 0.04 + field(seed, 6, 14) / 100
-  const tall = 0.82 + field(seed, 28, 4) / 10
-  const turn = field(seed, 12, 628) / 100
-  const points = Array.from({ length: POINTS }, (_, index): readonly [number, number] => {
+  // Two to five soft lobes; more lobes get less wobble, so a lobed outline stays a soft flower, never a star.
+  const lobes = 2 + field(seed, 3, 4)
+  const wobble = (0.04 + field(seed, 6, 10) / 100) * (LOBE_WOBBLE[lobes - 2] ?? 0.6)
+  const tall = 0.9 + field(seed, 28, 4) * 0.07
+  // Lobes placed symmetrically about the vertical axis, with only a slight lean of their own: a free rotation
+  // tilts the whole outline, and a tilted creature reads as skewed. An odd count always puts a trough at the
+  // base, so the creature sits flat instead of on a point; an even count may turn either way.
+  const flip = lobes % 2 === 1 ? 1 : field(seed, 12, 2)
+  const turn = (Math.PI * (1 - lobes)) / 2 - flip * Math.PI + (field(seed, 13, 7) - 3) * 0.04
+  const raw = Array.from({ length: POINTS }, (_, index): readonly [number, number] => {
     const angle = (index / POINTS) * Math.PI * 2
     const radius = 34 * (1 + wobble * Math.sin(lobes * angle + turn)) * (1 + 0.06 * Math.cos(angle * 2))
-    return [50 + (radius / Math.sqrt(tall)) * Math.cos(angle), 56 + radius * tall * 0.92 * Math.sin(angle)]
+    return [(radius / Math.sqrt(tall)) * Math.cos(angle), radius * tall * Math.sin(angle)]
   })
+  // Fit the outline to one box, centred and standing on the foot: transforms pivot on the same point for every
+  // creature, and an asymmetric outline no longer moves its own pivot.
+  const xs = raw.map(([x]) => x)
+  const ys = raw.map(([, y]) => y)
+  const [minX, maxX, minY, maxY] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)]
+  const scale = Math.min(MAX_WIDTH / (maxX - minX), MAX_HEIGHT / (maxY - minY))
+  const width = (maxX - minX) * scale
+  const height = (maxY - minY) * scale
+  const points = raw.map(([x, y]): readonly [number, number] => [
+    50 + (x - (minX + maxX) / 2) * scale,
+    FOOT - (maxY - y) * scale
+  ])
+  const top = FOOT - height
+  const eyeWidth = 5.2 + field(seed, 16, 5) * 0.2
+  const aspect = EYE_ASPECTS[field(seed, 19, EYE_ASPECTS.length)] ?? 1
   return {
     blink: 13 + field(seed, 25, 5),
     body: smoothClosedPath(points),
-    eye: EYE_PROPORTIONS[field(seed, 16, EYE_PROPORTIONS.length)] ?? [5, 5],
-    eyeGap: 9 + field(seed, 18, 5),
-    eyeY: 46 + field(seed, 21, 6),
+    bounds: [50 - width / 2, top, width, height],
+    eye: [eyeWidth, eyeWidth * aspect],
+    eyeGap: clamp(width * 0.135, 9.2, 11.2) + (field(seed, 18, 3) - 1) * 0.4,
+    eyeY: top + height * 0.4 + (field(seed, 21, 3) - 1) * 0.8,
     hues: [hue, (hue + spread) % 360, (hue + 360 - Math.round(spread / 2)) % 360],
     pace: 9 + field(seed, 23, 6),
     phase: -field(seed, 27, 20)

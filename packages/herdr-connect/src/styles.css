@@ -1176,6 +1176,8 @@
   }
 
   .connect-creature {
+    /* How far the upper lid rests down the eye: relaxed, a little over the iris, never startled. */
+    --connect-creature-open: 0.2;
     --connect-creature-tone: var(--rly-color-text-2);
     display: block;
     flex: none;
@@ -1198,28 +1200,39 @@
     --connect-creature-tone: var(--rly-color-success-ink);
   }
 
-  .connect-creature-shine {
-    fill: oklch(100% 0 none / 28%);
-  }
-
   .connect-creature-core {
     opacity: 0.35;
   }
 
-  .connect-creature-eye {
-    fill: oklch(99% 0.005 90);
+  /* A shallow socket the eye sits in, in the body's own shade. */
+  .connect-creature-socket {
+    fill: oklch(25% 0.05 260 / 14%);
   }
 
   .connect-creature-pupil {
-    fill: oklch(20% 0.03 260);
+    fill: oklch(14% 0.02 260);
   }
 
-  .connect-creature-closed {
+  .connect-creature-glint {
+    fill: oklch(100% 0 none / 92%);
+  }
+
+  /* At row size the second glint is a speck that muddies the eye. */
+  .connect-creature[data-size="row"] .connect-creature-glint[data-small] {
     display: none;
+  }
+
+  /* The lash marks a lid that is down; on an open eye it would read as a frown. */
+  .connect-creature-lash {
     fill: none;
-    stroke: oklch(20% 0.03 260);
+    opacity: 0;
+    stroke: oklch(22% 0.04 260 / 85%);
     stroke-linecap: round;
-    stroke-width: 2.2;
+    stroke-width: 0.9;
+  }
+
+  .connect-creature[data-size="row"] .connect-creature-lash {
+    stroke-width: 1.4;
   }
 
   /* Needs you: a halo in the state's tone, off the face; the row's word says which kind. */
@@ -1254,25 +1267,43 @@
     stroke-width: 1.3;
   }
 
-  .connect-creature-breath,
-  .connect-creature-gaze,
-  .connect-creature-lids,
-  .connect-creature-orbit {
-    transform-box: fill-box;
-    transform-origin: center;
+  /*
+   * The body squashes and stretches about its foot, the same point for every creature (character.ts fits each
+   * outline to stand on it), and keeps its area: a stretch of s is paired with 1/s. The face never scales; it
+   * rides the body by the lever, its height above the foot.
+   */
+  .connect-creature-squash,
+  .connect-creature-breath {
+    transform-box: view-box;
+    transform-origin: 50px 88px;
   }
 
-  .connect-creature-lean {
+  .connect-creature-orbit,
+  .connect-creature-pupil,
+  .connect-creature-shadow {
     transform-box: fill-box;
-    transform-origin: 50% 100%;
+    transform-origin: center;
   }
 
   .connect-creature[data-bucket="needs-you"] .connect-creature-halo {
     opacity: 0.9;
   }
 
+  .connect-creature-lid:not([data-low]) {
+    translate: 0 calc(var(--connect-creature-lid) * var(--connect-creature-open) * 1px);
+  }
+
+  /* Needs you: it looks up at you, eyes and pupils wide. */
+  .connect-creature[data-bucket="needs-you"] {
+    --connect-creature-open: 0;
+  }
+
   .connect-creature[data-bucket="needs-you"] .connect-creature-gaze {
-    scale: 1.12;
+    translate: 0 -0.6px;
+  }
+
+  .connect-creature[data-bucket="needs-you"] .connect-creature-pupil {
+    scale: 1.22;
   }
 
   .connect-creature[data-bucket="working"] .connect-creature-orbit {
@@ -1285,24 +1316,34 @@
 
   /* Eyes down at the work. */
   .connect-creature[data-bucket="working"] .connect-creature-gaze {
-    translate: 0 2.2px;
+    translate: 0 1.2px;
   }
 
-  /* Done: awake and settled, half-lidded. */
-  .connect-creature[data-bucket="finished"]:not([data-stale]) .connect-creature-lids {
-    scale: 1 0.55;
+  /* Done: awake and settled, the upper lids half down. */
+  .connect-creature[data-bucket="finished"]:not([data-stale]) .connect-creature-lid:not([data-low]) {
+    translate: 0 calc(var(--connect-creature-lid) * 0.5px);
   }
 
   /* Its host stopped answering: eyes closed, colour drained, no life. */
-  .connect-creature[data-stale] .connect-creature-eyes {
-    display: none;
+  .connect-creature[data-stale] .connect-creature-lid {
+    translate: 0 calc(var(--connect-creature-lid) * 1px);
   }
 
-  .connect-creature[data-stale] .connect-creature-closed {
-    display: inline;
+  .connect-creature[data-bucket="finished"] .connect-creature-lash,
+  .connect-creature[data-stale] .connect-creature-lash {
+    opacity: 1;
   }
 
-  .connect-creature[data-stale] .connect-creature-body {
+  .connect-creature[data-stale] .connect-creature-lid[data-low] {
+    translate: 0 calc(var(--connect-creature-lid-low) * 1px);
+  }
+
+  .connect-creature[data-stale] .connect-creature-gaze {
+    translate: 0 0;
+  }
+
+  .connect-creature[data-stale] .connect-creature-breath,
+  .connect-creature[data-stale] .connect-creature-eye {
     filter: grayscale(1);
     opacity: 0.7;
   }
@@ -1316,21 +1357,37 @@
   }
 
   @media (prefers-reduced-motion: no-preference) {
-    .connect-creature:not([data-stale]) .connect-creature-breath {
+    /* Breath and the face riding it share one clock, so the eyes stay put on the body. */
+    .connect-creature:not([data-stale]) .connect-creature-breath,
+    .connect-creature:not([data-stale]) .connect-creature-bob {
       animation: connect-creature-breathe calc(var(--rly-motion-slow-duration) * var(--connect-creature-pace))
         var(--rly-easing-in-out) infinite alternate;
       animation-delay: calc(var(--rly-motion-slow-duration) * var(--connect-creature-phase));
     }
 
-    .connect-creature:not([data-stale], [data-bucket="finished"]) .connect-creature-lids {
+    .connect-creature:not([data-stale]) .connect-creature-bob {
+      animation-name: connect-creature-bob;
+    }
+
+    .connect-creature:not([data-stale], [data-bucket="finished"]) .connect-creature-lid {
       animation: connect-creature-blink calc(var(--rly-motion-slow-duration) * var(--connect-creature-blink)) linear
         infinite;
       animation-delay: calc(var(--rly-motion-slow-duration) * var(--connect-creature-phase));
     }
 
+    .connect-creature:not([data-stale], [data-bucket="finished"]) .connect-creature-lid[data-low] {
+      animation-name: connect-creature-blink-low;
+    }
+
+    .connect-creature:not([data-stale], [data-bucket="finished"]) .connect-creature-lash {
+      animation: connect-creature-lash calc(var(--rly-motion-slow-duration) * var(--connect-creature-blink)) linear
+        infinite;
+      animation-delay: calc(var(--rly-motion-slow-duration) * var(--connect-creature-phase));
+    }
+
     .connect-creature[data-bucket="ready"]:not([data-stale]) .connect-creature-gaze {
-      animation: connect-creature-wander calc(var(--rly-motion-slow-duration) * var(--connect-creature-pace) * 5)
-        var(--rly-easing-in-out) infinite;
+      animation: connect-creature-wander calc(var(--rly-motion-slow-duration) * var(--connect-creature-pace) * 5) linear
+        infinite;
       animation-delay: calc(var(--rly-motion-slow-duration) * var(--connect-creature-phase));
     }
 
@@ -1342,60 +1399,125 @@
       animation: connect-creature-turn calc(var(--rly-motion-slow-duration) * 6) linear infinite;
     }
 
-    .connect-creature[data-bucket="finished"]:not([data-stale]) .connect-creature-breath {
+    .connect-creature[data-bucket="finished"]:not([data-stale]) .connect-creature-breath,
+    .connect-creature[data-bucket="finished"]:not([data-stale]) .connect-creature-bob {
       animation-duration: calc(var(--rly-motion-slow-duration) * var(--connect-creature-pace) * 1.6);
     }
   }
 
+  /* Area-preserving: each scale's two factors multiply to 1. */
   @keyframes connect-creature-breathe {
     from {
-      scale: 1 0.985;
+      scale: 1.012 0.988;
     }
 
     to {
-      scale: 1.015 1.03;
+      scale: 0.988 1.012;
     }
   }
 
+  @keyframes connect-creature-bob {
+    from {
+      translate: 0 calc(var(--connect-creature-lever) * 0.012px);
+    }
+
+    to {
+      translate: 0 calc(var(--connect-creature-lever) * -0.012px);
+    }
+  }
+
+  /* The lid eases down a little, snaps shut, holds a beat, and lifts slower than it fell. */
   @keyframes connect-creature-blink {
     0%,
-    95.5%,
+    93%,
     100% {
-      scale: 1 1;
+      translate: 0 calc(var(--connect-creature-lid) * var(--connect-creature-open) * 1px);
     }
 
-    97.5% {
-      scale: 1 0.08;
+    94.2% {
+      animation-timing-function: cubic-bezier(0.5, 0, 1, 0.6);
+      translate: 0 calc(var(--connect-creature-lid) * (var(--connect-creature-open) + 0.12) * 1px);
+    }
+
+    95.4%,
+    96.2% {
+      animation-timing-function: cubic-bezier(0.2, 0, 0.2, 1);
+      translate: 0 calc(var(--connect-creature-lid) * 1px);
+    }
+
+    98.8% {
+      translate: 0 calc(var(--connect-creature-lid) * var(--connect-creature-open) * 1px);
     }
   }
 
-  @keyframes connect-creature-wander {
+  @keyframes connect-creature-blink-low {
     0%,
-    20%,
-    80%,
+    94.2%,
     100% {
       translate: 0 0;
     }
 
-    30%,
-    45% {
-      translate: 2px -1px;
+    95.4%,
+    96.2% {
+      animation-timing-function: cubic-bezier(0.2, 0, 0.2, 1);
+      translate: 0 calc(var(--connect-creature-lid-low) * 1px);
     }
 
-    55%,
-    70% {
-      translate: -2px 0.5px;
+    98.8% {
+      translate: 0 0;
+    }
+  }
+
+  @keyframes connect-creature-lash {
+    0%,
+    94.2%,
+    98.8%,
+    100% {
+      opacity: 0;
+    }
+
+    95%,
+    96.6% {
+      opacity: 1;
+    }
+  }
+
+  /*
+   * Glances, not drifts: the eyes jump to a spot and hold there, the way eyes move. Every offset stays inside
+   * GAZE_REACH (character.ts), which every eye leaves room for round its iris.
+   */
+  @keyframes connect-creature-wander {
+    0%,
+    18%,
+    82%,
+    100% {
+      translate: 0 0;
+    }
+
+    20%,
+    40% {
+      translate: 1.1px -0.5px;
+    }
+
+    42%,
+    60% {
+      translate: -1.1px 0.3px;
+    }
+
+    62%,
+    80% {
+      translate: 0.3px 0.9px;
     }
   }
 
   @keyframes connect-creature-read {
     0%,
     100% {
-      translate: -1.6px 2.2px;
+      translate: -1px 1.2px;
     }
 
     50% {
-      translate: 1.6px 2.2px;
+      translate: 1px 1.2px;
     }
   }
 
@@ -1414,20 +1536,27 @@
 
     .connect-creature-core,
     .connect-creature-shine,
-    .connect-creature-shadow {
+    .connect-creature-shade,
+    .connect-creature-shadow,
+    .connect-creature-socket {
       display: none;
     }
 
-    .connect-creature-eye {
+    .connect-creature-white {
       fill: Canvas;
       stroke: CanvasText;
     }
 
+    .connect-creature-iris,
     .connect-creature-pupil {
       fill: CanvasText;
     }
 
-    .connect-creature-closed,
+    .connect-creature-glint {
+      fill: Canvas;
+    }
+
+    .connect-creature-lash,
     .connect-creature-orbit {
       stroke: CanvasText;
     }
@@ -1445,20 +1574,27 @@
 
   :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .connect-creature-core,
   :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .connect-creature-shine,
-  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .connect-creature-shadow {
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .connect-creature-shade,
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .connect-creature-shadow,
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .connect-creature-socket {
     display: none;
   }
 
-  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .connect-creature-eye {
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .connect-creature-white {
     fill: Canvas;
     stroke: CanvasText;
   }
 
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .connect-creature-iris,
   :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .connect-creature-pupil {
     fill: CanvasText;
   }
 
-  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .connect-creature-closed,
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .connect-creature-glint {
+    fill: Canvas;
+  }
+
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .connect-creature-lash,
   :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .connect-creature-orbit {
     stroke: CanvasText;
   }
@@ -1490,6 +1626,8 @@
     flex: none;
     font: inherit;
     gap: var(--rly-space-2);
+    /* One track as wide as the button, so a long name ellipses instead of widening it over its neighbours. */
+    grid-template-columns: minmax(0, 1fr);
     inline-size: 5.5rem;
     justify-items: center;
     min-block-size: 44px;
@@ -1617,14 +1755,44 @@
   }
 
   @media (prefers-reduced-motion: no-preference) {
-    /* It started needing you on this poll: it turns to you once. Later polls keep the halo, not the lean. */
+    /*
+     * It started needing you on this poll: it hops to you once. The hop moves body and face together; the body
+     * alone gathers, stretches and lands, and the face follows by its lever instead of stretching.
+     * Later polls keep the halo, not the hop.
+     */
     .connect-creature[data-arrived]:not([data-stale]) .connect-creature-lean {
-      animation: connect-creature-lean calc(var(--rly-motion-slow-duration) * 3) var(--connect-spring);
+      animation: connect-creature-hop calc(var(--rly-motion-slow-duration) * 3) var(--rly-easing-in-out);
     }
 
-    /* On its stage it keeps checking in: one lean at the start of each 3.6s cycle, then rest. */
+    .connect-creature[data-arrived]:not([data-stale]) .connect-creature-squash {
+      animation: connect-creature-hop-squash calc(var(--rly-motion-slow-duration) * 3) var(--rly-easing-in-out);
+    }
+
+    .connect-creature[data-arrived]:not([data-stale]) .connect-creature-face {
+      animation: connect-creature-hop-face calc(var(--rly-motion-slow-duration) * 3) var(--rly-easing-in-out);
+    }
+
+    .connect-creature[data-arrived]:not([data-stale]) .connect-creature-shadow {
+      animation: connect-creature-hop-shadow calc(var(--rly-motion-slow-duration) * 3) var(--rly-easing-in-out);
+    }
+
+    /* On its stage it keeps checking in: one hop at the start of each 3.6s cycle, then rest. */
     .connect-stage:not([data-stale]) .connect-creature[data-bucket="needs-you"] .connect-creature-lean {
-      animation: connect-creature-call calc(var(--rly-motion-slow-duration) * 12) var(--connect-spring) infinite;
+      animation: connect-creature-call calc(var(--rly-motion-slow-duration) * 12) var(--rly-easing-in-out) infinite;
+    }
+
+    .connect-stage:not([data-stale]) .connect-creature[data-bucket="needs-you"] .connect-creature-squash {
+      animation: connect-creature-call-squash calc(var(--rly-motion-slow-duration) * 12) var(--rly-easing-in-out)
+        infinite;
+    }
+
+    .connect-stage:not([data-stale]) .connect-creature[data-bucket="needs-you"] .connect-creature-face {
+      animation: connect-creature-call-face calc(var(--rly-motion-slow-duration) * 12) var(--rly-easing-in-out) infinite;
+    }
+
+    .connect-stage:not([data-stale]) .connect-creature[data-bucket="needs-you"] .connect-creature-shadow {
+      animation: connect-creature-call-shadow calc(var(--rly-motion-slow-duration) * 12) var(--rly-easing-in-out)
+        infinite;
     }
 
     .connect-stage:not([data-stale]) .connect-stage-mote {
@@ -1638,47 +1806,214 @@
     }
   }
 
-  @keyframes connect-creature-lean {
-    0%,
+  @keyframes connect-creature-hop {
+    0% {
+      translate: 0 0;
+    }
+
+    14% {
+      translate: 0 0;
+    }
+
+    36% {
+      translate: 0 -3px;
+    }
+
+    56% {
+      translate: 0 0;
+    }
+
+    74% {
+      translate: 0 0;
+    }
+
+    100% {
+      translate: 0 0;
+    }
+  }
+
+  @keyframes connect-creature-hop-squash {
+    0% {
+      scale: 1;
+    }
+
+    14% {
+      scale: 1.05 0.952;
+    }
+
+    36% {
+      scale: 0.965 1.036;
+    }
+
+    56% {
+      scale: 1.03 0.971;
+    }
+
+    74% {
+      scale: 0.995 1.005;
+    }
+
     100% {
       scale: 1;
+    }
+  }
+
+  @keyframes connect-creature-hop-face {
+    0% {
       translate: 0 0;
     }
 
-    28% {
-      scale: 1.06 1.1;
-      translate: 0 -6%;
+    14% {
+      translate: 0 calc(var(--connect-creature-lever) * 0.048px);
     }
 
-    52% {
-      scale: 1.02 0.96;
+    36% {
+      translate: 0 calc(var(--connect-creature-lever) * -0.036px);
+    }
+
+    56% {
+      translate: 0 calc(var(--connect-creature-lever) * 0.029px);
+    }
+
+    74% {
+      translate: 0 calc(var(--connect-creature-lever) * -0.005px);
+    }
+
+    100% {
       translate: 0 0;
     }
+  }
 
-    70% {
+  @keyframes connect-creature-hop-shadow {
+    0% {
+      scale: 1;
+    }
+
+    14% {
+      scale: 1.04;
+    }
+
+    36% {
+      scale: 0.82;
+    }
+
+    56% {
+      scale: 1.03;
+    }
+
+    74% {
+      scale: 1;
+    }
+
+    100% {
       scale: 1;
     }
   }
 
   @keyframes connect-creature-call {
-    0%,
+    0% {
+      translate: 0 0;
+    }
+
+    4.2% {
+      translate: 0 0;
+    }
+
+    10.8% {
+      translate: 0 -3px;
+    }
+
+    16.8% {
+      translate: 0 0;
+    }
+
+    22.2% {
+      translate: 0 0;
+    }
+
+    30%,
+    100% {
+      translate: 0 0;
+    }
+  }
+
+  @keyframes connect-creature-call-squash {
+    0% {
+      scale: 1;
+    }
+
+    4.2% {
+      scale: 1.05 0.952;
+    }
+
+    10.8% {
+      scale: 0.965 1.036;
+    }
+
+    16.8% {
+      scale: 1.03 0.971;
+    }
+
+    22.2% {
+      scale: 0.995 1.005;
+    }
+
     30%,
     100% {
       scale: 1;
+    }
+  }
+
+  @keyframes connect-creature-call-face {
+    0% {
       translate: 0 0;
     }
 
-    7% {
-      scale: 1.06 1.1;
-      translate: 0 -6%;
+    4.2% {
+      translate: 0 calc(var(--connect-creature-lever) * 0.048px);
     }
 
-    14% {
-      scale: 1.02 0.96;
+    10.8% {
+      translate: 0 calc(var(--connect-creature-lever) * -0.036px);
+    }
+
+    16.8% {
+      translate: 0 calc(var(--connect-creature-lever) * 0.029px);
+    }
+
+    22.2% {
+      translate: 0 calc(var(--connect-creature-lever) * -0.005px);
+    }
+
+    30%,
+    100% {
       translate: 0 0;
     }
+  }
 
-    20% {
+  @keyframes connect-creature-call-shadow {
+    0% {
+      scale: 1;
+    }
+
+    4.2% {
+      scale: 1.04;
+    }
+
+    10.8% {
+      scale: 0.82;
+    }
+
+    16.8% {
+      scale: 1.03;
+    }
+
+    22.2% {
+      scale: 1;
+    }
+
+    30%,
+    100% {
       scale: 1;
     }
   }
