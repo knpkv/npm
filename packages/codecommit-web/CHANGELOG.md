@@ -1,5 +1,15 @@
 # @knpkv/codecommit-web
 
+## 0.30.2
+
+### Patch Changes
+
+- [`4ebe301`](https://github.com/knpkv/npm/commit/4ebe30154220bff53ec507a0d70c5f8f4a543c5a) Thanks [@konopkov](https://github.com/konopkov)! - Docs and comments state each rule and its reason directly instead of pointing at internal decision records.
+- Updated dependencies [[`bc2d9ad`](https://github.com/knpkv/npm/commit/bc2d9adcdeef47937a76748ae4e1c60ba2866fd4), [`4ebe301`](https://github.com/knpkv/npm/commit/4ebe30154220bff53ec507a0d70c5f8f4a543c5a)]:
+  - @knpkv/codecommit-core@0.25.1
+  - @knpkv/browser-pairing@0.4.1
+  - @knpkv/relay@0.2.2
+
 ## 0.30.1
 
 ### Patch Changes
