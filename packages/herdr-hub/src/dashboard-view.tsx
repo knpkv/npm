@@ -13,7 +13,7 @@ import { AgentStateLabel } from "@knpkv/herdr-connect/surface"
 
 export { type ApprovalDecision, approvalShortcutFor } from "./approval-decision.js"
 
-type DashboardViewProps = {
+export type DashboardViewProps = {
   readonly approvalOnly?: boolean
   readonly busyJobId: string | null
   /** The hub's answer to the last decision, shown on that request in the Approvals countdown. */
