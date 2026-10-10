@@ -218,6 +218,13 @@ describe("orchestrator event model", () => {
       )
         .toBe("Failure")
     }
+    const newWork = { branch: "fix/new-work", title: "Create a goal" }
+    const withNewWork = Schema.decodeUnknownResult(OrchestratorSolEscalationSubmission)({
+      ...submission,
+      command: { ...submission.command, payload: { ...submission.command.payload, newWork } }
+    })
+    expect(withNewWork._tag).toBe("Success")
+    if (withNewWork._tag === "Success") expect(withNewWork.success.command.payload.newWork).toStrictEqual(newWork)
   })
 
   it("binds every delegate mode to its exact model route", () => {
