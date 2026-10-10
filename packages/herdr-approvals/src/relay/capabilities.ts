@@ -196,10 +196,12 @@ const GoalSummary = Schema.Struct({
 export const getWorkBoard = defineContract({
   name: "get_work_board",
   description: "The goals on the Work board as it stands now: title, state, owner agent, repository and branch, " +
-    "delivery stage, and what blocks it. At most 30, in the board's order; `total` counts them all.",
+    "delivery stage, and what blocks it. At most 30, in the board's order. `total` counts every goal on the board, " +
+    "including older goals a large board leaves out of its view; `notShown` counts every goal missing from this " +
+    "answer, so say how many older goals are not shown.",
   access: "read",
   input: Schema.Struct({}),
-  output: Schema.Struct({ goals: Schema.Array(GoalSummary), total: Schema.Number }),
+  output: Schema.Struct({ goals: Schema.Array(GoalSummary), total: Schema.Number, notShown: Schema.Number }),
   failure: HubReadFailed,
   cites: () => []
 })
@@ -279,7 +281,7 @@ export const hubCapabilities = (reads: HubRelayReads) => ({
       }
     })),
   getWorkBoard: implement(getWorkBoard, () =>
-    Effect.map(reads.work, ({ goals }) =>
+    Effect.map(reads.work, ({ goals, goalsOmitted = 0 }) =>
       withinBytes(
         goals.slice(0, 30).map((goal) => ({
           id: goal.id,
@@ -291,6 +293,10 @@ export const hubCapabilities = (reads: HubRelayReads) => ({
           delivery: goal.delivery,
           blocker: goal.blocker === null ? null : clip(goal.blocker.summary)
         })),
-        (kept) => ({ goals: kept, total: goals.length })
+        (kept) => {
+          // The board itself leaves its older goals out when it is large (`goalsOmitted`); they still count.
+          const total = goals.length + goalsOmitted
+          return { goals: kept, total, notShown: total - kept.length }
+        }
       )))
 })

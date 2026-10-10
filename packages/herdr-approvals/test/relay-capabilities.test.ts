@@ -224,15 +224,26 @@ describe("Relay's hub capabilities", () => {
       expect(unknownLocal).toMatchObject({ _tag: "CapabilityFailed", tag: "JobNotFound" })
     }))
 
+  it.effect("counts the older goals a large board leaves out, so Relay can say they are not shown", () =>
+    Effect.gen(function*() {
+      const cut = { ...board(2), goalsOmitted: 40 }
+      const { output } = yield* invoke(hubCapabilities(reads({ work: Effect.succeed(cut) })).getWorkBoard, {})
+      expect(output).toMatchObject({ total: 42, notShown: 40 })
+      const whole = yield* invoke(hubCapabilities(reads()).getWorkBoard, {})
+      expect(whole.output).toMatchObject({ total: 2, notShown: 0 })
+    }))
+
   it.effect("summarizes at most 30 goals of the Work board as it stands now", () =>
     Effect.gen(function*() {
       const { output } = yield* invoke(hubCapabilities(reads({ work: Effect.succeed(board(40)) })).getWorkBoard, {})
       const answer = Schema.decodeUnknownSync(Schema.Struct({
         goals: Schema.Array(Schema.Struct({ id: Schema.String, blocker: Schema.NullOr(Schema.String) })),
-        total: Schema.Number
+        total: Schema.Number,
+        notShown: Schema.Number
       }))(output)
       expect(answer.goals).toHaveLength(30)
       expect(answer.total).toBe(40)
+      expect(answer.notShown).toBe(10)
       expect(answer.goals[0]?.blocker).toBe("Waiting on CI")
     }))
 })
