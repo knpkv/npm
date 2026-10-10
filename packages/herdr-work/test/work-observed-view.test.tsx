@@ -134,6 +134,15 @@ describe("Work board with the observed overlay", () => {
     expect((await mount(snapshotOf([goal("g1")], { observed: [] }))).textContent).not.toContain("not shown")
   })
 
+  it("reads as whole sentences when live state and a cut board are both reported", async () => {
+    for (const overlay of [{ goalsOmitted: 12, observed: [], observedOmitted: 3 }, { goalsOmitted: 12 }]) {
+      const header =
+        (await mount(snapshotOf([goal("g1")], overlay))).querySelector(".work-page-intro")?.textContent ?? ""
+      expect(header).toContain("12 older goals not shown.")
+      expect(header).not.toContain("..")
+    }
+  })
+
   it("shows the observed state on the row and names the recorded one in the detail", async () => {
     const host = await mount(snapshotOf([goal("g1")], { observed: [merged("g1", NOW - 2 * HOUR)] }), "g1")
     expect(host.querySelector(".work-board-row .work-row-state")?.textContent).toBe("Completed")
