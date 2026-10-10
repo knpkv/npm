@@ -7,11 +7,12 @@
  *   so no Pi package, provider SDK or esbuild is imported;
  * - every dynamic import can only reach a Node built-in;
  * - no declaration names a Pi package;
+ * - Bun can import the bundle (codecommit's TUI loads Relay under Bun), when `bun` is on PATH;
  * - `dist/wire.js` (`@knpkv/relay/wire`) imports only `effect` and `@knpkv/capability`, and a browser consumer
  *   that imports `@knpkv/relay/wire` by package name bundles for the browser.
  */
 import { build } from "esbuild"
-import { execFileSync } from "node:child_process"
+import { execFileSync, spawnSync } from "node:child_process"
 import console from "node:console"
 import {
   existsSync,
@@ -125,6 +126,21 @@ try {
     }
   } catch (error) {
     fail(`a browser page can't bundle @knpkv/relay/wire: ${error instanceof Error ? error.message : String(error)}`)
+  }
+
+  // codecommit's TUI runs on Bun and imports Relay through codecommit-web, so a Node-only import at module load
+  // (such as `node:sqlite`, which Bun lacks before 1.4) would stop it. Checked where Bun is installed.
+  const bun = spawnSync("bun", ["--version"], { encoding: "utf8" })
+  if (bun.error === undefined && bun.status === 0) {
+    const imported = spawnSync(
+      "bun",
+      ["--eval", `await import(${JSON.stringify(join(process.cwd(), "dist", "index.js"))})`],
+      { encoding: "utf8" }
+    )
+    if (imported.status !== 0)
+      fail(`Bun ${bun.stdout.trim()} can't import the bundle: ${imported.stderr.slice(0, 400)}`)
+  } else {
+    console.log("Bun import check skipped: bun is not on PATH")
   }
 
   for (const file of dist.filter((name) => name.endsWith(".d.ts"))) {

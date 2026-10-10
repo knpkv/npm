@@ -9,9 +9,11 @@
  *   and a write that was interrupted is never repeated.
  * - **This service is the only door.** Products and the dock call {@link RelayHarnessService}; nothing
  *   outside this package imports Pi. Replacing Pi with an Effect-native store changes this module only.
- * - **One process owns a store.** The SQLite connection runs in exclusive locking mode, so a second
- *   process fails to open the same store with {@link RelayStoreLocked}, and the OS releases the lock if
- *   the owner dies, even on `kill -9`.
+ * - **One process owns a store.** The owner holds an exclusive SQLite lock on `<store>.lock`, opened with
+ *   `node:sqlite` and used only through `exec`, so closing it frees the store at once, on Node and on Bun.
+ *   A second owner fails with {@link RelayStoreLocked}, and the OS releases the lock if the owner dies,
+ *   even on `kill -9`. The store's own libsql connection can't be the lock: libsql keeps a closed
+ *   connection, and whatever it locked, until its statements are garbage-collected.
  * - **A run is named by the `requestId`s it answers.** `send` takes the dock's `requestId`; events that
  *   end a run, and the Snapshot of a run in flight, list them, and `cancel` stops a run only by one of them.
  * - **A person's message is the stream's, not the sender's.** A Snapshot lists the messages still queued;
@@ -36,6 +38,7 @@ import type {
 import { SqliteStorage } from "@earendil-works/pi-durable/storage/sqlite"
 import * as Capability from "@knpkv/capability"
 import { createClient } from "@libsql/client"
+import type * as BunSqlite from "bun:sqlite"
 import {
   Clock,
   Context,
@@ -51,12 +54,14 @@ import {
   Queue,
   Ref,
   Schema,
+  Scope,
   Semaphore,
   Stream
 } from "effect"
 import { AiError } from "effect/ai"
 import type { LanguageModel } from "effect/ai"
 import type { PlatformError } from "effect/PlatformError"
+import { createRequire } from "node:module"
 import { libsqlDatabase } from "./libsqlDatabase.js"
 import { entryText, makeMessageTracker } from "./messages.js"
 import type { MessageEvent } from "./messages.js"
@@ -209,6 +214,75 @@ const notALink = (error: PlatformError): boolean =>
   (error.reason._tag !== "BadArgument" && Predicate.hasProperty(error.reason.cause, "code") &&
     error.reason.cause.code === "EINVAL")
 
+/** What the ownership lock needs of a SQLite driver: `exec` and `close`, never a prepared statement. */
+interface LockConnection {
+  readonly exec: (sql: string) => void
+  readonly close: () => void
+}
+
+/**
+ * Opens the lock file with the runtime's own SQLite: `node:sqlite` on Node, `bun:sqlite` on Bun (which has no
+ * `node:sqlite` before 1.4). Loaded only when a store opens, so importing Relay never needs either.
+ */
+const lockDriver = Effect.tryPromise({
+  try: async (): Promise<(path: string) => LockConnection> => {
+    try {
+      const { DatabaseSync } = await import("node:sqlite")
+      return (path) => new DatabaseSync(path)
+    } catch {
+      // Through `require`, not `import()`: bundlers resolve a literal `import()` at build time and refuse a
+      // Bun built-in, while Bun's `require` loads it when this runs.
+      const bun: typeof BunSqlite = createRequire(import.meta.url)("bun:sqlite")
+      return (path) => new bun.Database(path)
+    }
+  },
+  catch: (cause) =>
+    new RelayStoreFailed({
+      operation: "load SQLite for the Relay store lock",
+      message: `load SQLite for the Relay store lock failed: ${String(cause)}`
+    })
+})
+
+/** SQLITE_BUSY, as `node:sqlite` (`errcode`) and `bun:sqlite` (`errno`, `code`) report it. */
+const isBusy = (cause: unknown): boolean =>
+  (Predicate.hasProperty(cause, "errcode") && cause.errcode === 5) ||
+  (Predicate.hasProperty(cause, "errno") && cause.errno === 5) ||
+  (Predicate.hasProperty(cause, "code") && cause.code === "SQLITE_BUSY")
+
+/**
+ * Takes the store's ownership lock, or fails with {@link RelayStoreLocked} while another process holds it.
+ * Released when the scope closes. The connection only ever runs `exec`: a prepared statement would keep it,
+ * and its lock, alive after `close` on Bun until it is garbage-collected.
+ */
+const acquireStoreLock = (path: string) =>
+  Effect.acquireRelease(
+    Effect.flatMap(lockDriver, (open) =>
+      Effect.try({
+        try: () => {
+          const lock = open(path)
+          try {
+            // Exclusive locking keeps the lock after the commit, for as long as this connection is open.
+            lock.exec("PRAGMA locking_mode = EXCLUSIVE; BEGIN IMMEDIATE; COMMIT")
+            return lock
+          } catch (failure) {
+            lock.close()
+            throw failure
+          }
+        },
+        catch: (cause): RelayStoreFailed | RelayStoreLocked =>
+          isBusy(cause)
+            ? new RelayStoreLocked({
+              path,
+              message: `Another process owns the Relay store at ${path.replace(/\.lock$/u, "")}. Stop it, then retry.`
+            })
+            : new RelayStoreFailed({
+              operation: "lock the Relay store",
+              message: `lock the Relay store failed: ${String(cause)}`
+            })
+      })),
+    (lock) => Effect.sync(() => lock.close())
+  )
+
 const openStore = (path: string) =>
   Effect.acquireRelease(
     Effect.gen(function*() {
@@ -249,18 +323,17 @@ const openStore = (path: string) =>
       yield* fs.makeDirectory(directory, { recursive: true, mode: 0o700 }).pipe(
         ownerOnly("create the Relay store directory")
       )
-      yield* Effect.forEach([path, `${path}-wal`, `${path}-shm`], (file) => refuseLink(file, "store"), {
+      yield* Effect.forEach([path, `${path}-wal`, `${path}-shm`, `${path}.lock`], (file) => refuseLink(file, "store"), {
         discard: true
       })
       yield* fs.chmod(directory, 0o700).pipe(ownerOnly("restrict the Relay store directory"))
+      yield* acquireStoreLock(`${path}.lock`)
+      yield* fs.chmod(`${path}.lock`, 0o600).pipe(ownerOnly("restrict the Relay store lock"))
       const client = createClient({ url: `file:${path}` })
       const database = libsqlDatabase(client)
       yield* promise("open the Relay store", async () => {
-        // Exclusive locking: the first write takes a lock this connection keeps until it closes or dies.
-        await database.exec("PRAGMA locking_mode = EXCLUSIVE")
         await database.exec("PRAGMA journal_mode = WAL")
         await database.exec("PRAGMA synchronous = NORMAL")
-        await database.exec("BEGIN IMMEDIATE; COMMIT")
       }).pipe(
         Effect.andThen(fs.chmod(path, 0o600).pipe(ownerOnly("restrict the Relay store"))),
         Effect.catchTag("RelayStoreFailed", (failure): Effect.Effect<never, RelayStoreFailed | RelayStoreLocked> =>
@@ -281,8 +354,21 @@ const openStore = (path: string) =>
       )
   )
 
-/** Build the harness for one product. */
+/**
+ * Build the harness for one product. One attempt's resources (the store lock, the store, the harness) live in
+ * their own scope: an attempt that fails releases them at once, so a retry in the same scope can take the
+ * store; one that succeeds keeps them until the caller's scope closes.
+ */
 export const make = Effect.fn("RelayHarness.make")(function*<Requirements>(options: RelayHarnessOptions<Requirements>) {
+  const owner = yield* Scope.Scope
+  const attempt = yield* Scope.fork(owner, "sequential")
+  return yield* build(options).pipe(
+    Scope.provide(attempt),
+    Effect.onExit((exit) => (Exit.isFailure(exit) ? Scope.close(attempt, exit) : Effect.void))
+  )
+})
+
+const build = Effect.fn("RelayHarness.build")(function*<Requirements>(options: RelayHarnessOptions<Requirements>) {
   const services = yield* Effect.context<Requirements>()
   const runEffect: EffectRunner<Requirements> = (effect, signal) =>
     Effect.runPromiseExitWith(services)(effect, signal === undefined ? undefined : { signal })
