@@ -33,6 +33,7 @@ import {
   type TerminalOutputBoundary,
   writeTerminalOutput
 } from "./terminal-output.js"
+import { agentBucketsOf, type AgentBuckets, arrivalsBetween } from "./arrivals.js"
 import { AgentCast, AgentStage } from "./stage.js"
 import {
   AgentDirectory,
@@ -969,6 +970,19 @@ export const ConnectSurface = ({
   useEffect(() => {
     if (stageKey !== null && stageAgent === null && current !== null) setStageKey(null)
   }, [current, stageAgent, stageKey])
+  // Who started needing you since the last poll; the first list a surface sees is history, not news.
+  const previousBuckets = useRef<AgentBuckets | null>(null)
+  const [arrivals, setArrivals] = useState<ReadonlySet<string>>(() => new Set())
+  useEffect(() => {
+    if (current === null) return
+    const buckets = agentBucketsOf(current.agents)
+    setArrivals(arrivalsBetween(previousBuckets.current, buckets))
+    previousBuckets.current = buckets
+  }, [current])
+  const stageCrew =
+    stageAgent === null
+      ? []
+      : agents.filter((agent) => agent.host === stageAgent.host && agent.relationship?.parentAgentId === stageAgent.id)
   const selectAgent = (agent: ConnectAgent): void => {
     preferenceApplied.current = true
     const key = connectAgentKey(agent)
@@ -1176,6 +1190,7 @@ export const ConnectSurface = ({
           <>
             <AgentCast
               agents={agents}
+              arrivals={arrivals}
               onOpen={(agent) => setStageKey(connectAgentKey(agent))}
               stale={staleSince !== null}
             />
@@ -1188,12 +1203,15 @@ export const ConnectSurface = ({
               onSelect={(agent) => setStageKey(connectAgentKey(agent))}
               query={query}
               selectedKey={selectedKey}
+              arrivals={arrivals}
               silentHosts={offlineHosts}
               stale={staleSince !== null}
             />
             <AgentStage
               agent={stageAgent}
+              crew={stageCrew}
               onClose={() => setStageKey(null)}
+              onOpen={(agent) => setStageKey(connectAgentKey(agent))}
               onOpenTerminal={(agent) => {
                 setStageKey(null)
                 selectAgent(agent)

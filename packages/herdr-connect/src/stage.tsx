@@ -9,7 +9,7 @@
  */
 import { PortalProvider } from "@knpkv/rly/foundations"
 import { Button, Sheet } from "@knpkv/rly/primitives"
-import { type CSSProperties, type KeyboardEvent, type ReactElement, useState } from "react"
+import { type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactElement, useState } from "react"
 
 import { AgentStateLabel, agentBuckets, agentStageLead, agentStatePresentation } from "./agent-state.js"
 import { agentCharacter } from "./character.js"
@@ -20,10 +20,13 @@ import { connectAgentKey } from "./view.js"
 /** The fleet as a strip of characters, the ones that need you first; each opens its agent's stage. */
 export const AgentCast = ({
   agents,
+  arrivals = new Set(),
   onOpen,
   stale
 }: {
   readonly agents: ReadonlyArray<ConnectAgent>
+  /** Agents that started needing you on this poll: they turn to you once. */
+  readonly arrivals?: ReadonlySet<string>
   readonly onOpen: (agent: ConnectAgent) => void
   readonly stale: boolean
 }): ReactElement => {
@@ -59,7 +62,14 @@ export const AgentCast = ({
           onClick={() => onOpen(agent)}
           type="button"
         >
-          <Creature host={agent.host} id={String(agent.id)} size="cast" stale={stale} state={agent.state} />
+          <Creature
+            arrived={arrivals.has(connectAgentKey(agent))}
+            host={agent.host}
+            id={String(agent.id)}
+            size="cast"
+            stale={stale}
+            state={agent.state}
+          />
           <span className="connect-cast-name">{agent.name}</span>
           <AgentStateLabel state={agent.state} />
         </button>
@@ -68,15 +78,39 @@ export const AgentCast = ({
   )
 }
 
+const MOTES: ReadonlyArray<string> = ["one", "two", "three", "four", "five"]
+
+/**
+ * Shifts the stage's field a little against the pointer, for depth. Written to a custom property the
+ * stylesheet only reads while motion is allowed, so reduced motion and a stale stage stay put.
+ */
+const parallax = (event: PointerEvent<HTMLDivElement>): void => {
+  const box = event.currentTarget.getBoundingClientRect()
+  if (box.width === 0 || box.height === 0) return
+  event.currentTarget.style.setProperty(
+    "--connect-stage-px",
+    `${String(((event.clientX - box.left) / box.width - 0.5) * -24)}px`
+  )
+  event.currentTarget.style.setProperty(
+    "--connect-stage-py",
+    `${String(((event.clientY - box.top) / box.height - 0.5) * -18)}px`
+  )
+}
+
 /** The open agent's stage, or nothing; closing it hands focus back to whatever opened it. */
 export const AgentStage = ({
   agent,
+  crew,
   onClose,
+  onOpen,
   onOpenTerminal,
   stale
 }: {
   readonly agent: ConnectAgent | null
+  /** The agents it started, each a way to its own stage. */
+  readonly crew: ReadonlyArray<ConnectAgent>
   readonly onClose: () => void
+  readonly onOpen: (agent: ConnectAgent) => void
   readonly onOpenTerminal: (agent: ConnectAgent) => void
   readonly stale: boolean
 }): ReactElement => {
@@ -92,7 +126,18 @@ export const AgentStage = ({
       <Sheet.Root onOpenChange={(open) => (open ? undefined : onClose())} open={agent !== null}>
         {agent === null ? null : (
           <Sheet.Content className="connect-stage-sheet" closeLabel="Close" title={agent.name}>
-            <Sheet.Body className="connect-stage" data-stale={stale ? "" : undefined} style={field}>
+            <Sheet.Body
+              className="connect-stage"
+              data-stale={stale ? "" : undefined}
+              onPointerMove={parallax}
+              style={field}
+            >
+              {/* Drifting light in the agent's hues; it holds still with reduced motion or a stale directory. */}
+              <div aria-hidden="true" className="connect-stage-field">
+                {MOTES.map((mote) => (
+                  <span className="connect-stage-mote" key={mote} />
+                ))}
+              </div>
               <div className="connect-stage-hero">
                 <Creature host={agent.host} id={String(agent.id)} size="stage" stale={stale} state={agent.state} />
               </div>
@@ -106,6 +151,28 @@ export const AgentStage = ({
                   {agent.kind} on {agent.host}
                 </span>
               </p>
+              {crew.length === 0 ? null : (
+                <nav aria-label={`Agents ${agent.name} started`} className="connect-stage-crew">
+                  {crew.map((member) => (
+                    <button
+                      className="connect-stage-crew-member"
+                      key={connectAgentKey(member)}
+                      onClick={() => onOpen(member)}
+                      type="button"
+                    >
+                      <Creature
+                        host={member.host}
+                        id={String(member.id)}
+                        size="row"
+                        stale={stale}
+                        state={member.state}
+                      />
+                      <span>{member.name}</span>
+                      <AgentStateLabel state={member.state} />
+                    </button>
+                  ))}
+                </nav>
+              )}
             </Sheet.Body>
             <Sheet.Footer className="connect-stage-actions">
               <Button onClick={() => onOpenTerminal(agent)} variant="primary">

@@ -25,11 +25,13 @@ export interface CreatureProps {
   readonly state: string
   /** The agent's host stopped answering: the last known state shows, without life. */
   readonly stale?: boolean
+  /** It started needing you on this poll: it turns to you once. */
+  readonly arrived?: boolean
   readonly size: CreatureSize
 }
 
 /** The agent's character, decorative and hidden from assistive technology. */
-export const Creature = ({ host, id, size, stale = false, state }: CreatureProps): ReactElement => {
+export const Creature = ({ arrived = false, host, id, size, stale = false, state }: CreatureProps): ReactElement => {
   const character = agentCharacter(host, id)
   const presentation = agentStatePresentation(state)
   const [light, mid, deep] = character.hues
@@ -49,6 +51,7 @@ export const Creature = ({ host, id, size, stale = false, state }: CreatureProps
     <svg
       aria-hidden="true"
       className="connect-creature"
+      data-arrived={arrived ? "" : undefined}
       data-bucket={presentation.bucket}
       data-size={size}
       data-stale={stale ? "" : undefined}

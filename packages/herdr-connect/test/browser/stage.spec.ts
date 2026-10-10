@@ -39,4 +39,28 @@ test.describe("Connect stage", () => {
     await expect(page.getByRole("dialog", { name: "fixture-pane" })).toBeVisible()
     expect(await width()).toBeLessThanOrEqual(320)
   })
+
+  // The field's light drifts only when the reader allows motion.
+  test("drifts its field only when motion is allowed", async ({ page }) => {
+    const motes = () =>
+      page
+        .locator(".connect-stage-mote")
+        .evaluateAll(
+          (nodes) =>
+            nodes.flatMap((node) => node.getAnimations()).filter((animation) => animation.playState === "running")
+              .length
+        )
+    for (
+      const [motion, expected] of [
+        ["no-preference", 5],
+        ["reduce", 0]
+      ] satisfies ReadonlyArray<readonly ["no-preference" | "reduce", number]>
+    ) {
+      await page.emulateMedia({ reducedMotion: motion })
+      await page.goto("/")
+      await page.locator(".connect-agent", { hasText: "fixture-pane" }).click()
+      await expect(page.getByRole("dialog", { name: "fixture-pane" })).toBeVisible()
+      expect(await motes()).toBe(expected)
+    }
+  })
 })

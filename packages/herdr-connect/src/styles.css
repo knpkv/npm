@@ -1609,4 +1609,204 @@
     background: Canvas;
     border-color: CanvasText;
   }
+
+  /* One soft overshoot, then rest: a spring as a linear() curve. */
+  .connect-creature,
+  .connect-stage {
+    --connect-spring: linear(0, 0.13 5%, 0.47 12%, 0.86 21%, 1.05 29%, 1.09 34%, 1.06 41%, 1.01 52%, 0.995 64%, 1);
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    /* It started needing you on this poll: it turns to you once. Later polls keep the halo, not the lean. */
+    .connect-creature[data-arrived]:not([data-stale]) .connect-creature-lean {
+      animation: connect-creature-lean calc(var(--rly-motion-slow-duration) * 3) var(--connect-spring);
+    }
+
+    /* On its stage it keeps checking in: one lean at the start of each 3.6s cycle, then rest. */
+    .connect-stage:not([data-stale]) .connect-creature[data-bucket="needs-you"] .connect-creature-lean {
+      animation: connect-creature-call calc(var(--rly-motion-slow-duration) * 12) var(--connect-spring) infinite;
+    }
+
+    .connect-stage:not([data-stale]) .connect-stage-mote {
+      animation: connect-stage-drift calc(var(--rly-motion-slow-duration) * var(--connect-mote-pace))
+        var(--rly-easing-in-out) infinite alternate;
+    }
+
+    .connect-stage:not([data-stale]) .connect-stage-field {
+      transition: translate calc(var(--rly-motion-slow-duration) * 2) var(--rly-easing-out);
+      translate: var(--connect-stage-px, 0) var(--connect-stage-py, 0);
+    }
+  }
+
+  @keyframes connect-creature-lean {
+    0%,
+    100% {
+      scale: 1;
+      translate: 0 0;
+    }
+
+    28% {
+      scale: 1.06 1.1;
+      translate: 0 -6%;
+    }
+
+    52% {
+      scale: 1.02 0.96;
+      translate: 0 0;
+    }
+
+    70% {
+      scale: 1;
+    }
+  }
+
+  @keyframes connect-creature-call {
+    0%,
+    30%,
+    100% {
+      scale: 1;
+      translate: 0 0;
+    }
+
+    7% {
+      scale: 1.06 1.1;
+      translate: 0 -6%;
+    }
+
+    14% {
+      scale: 1.02 0.96;
+      translate: 0 0;
+    }
+
+    20% {
+      scale: 1;
+    }
+  }
+
+  @keyframes connect-stage-drift {
+    to {
+      translate: var(--connect-mote-dx) var(--connect-mote-dy);
+    }
+  }
+
+  /* The stage's field: soft lights in the agent's hues, drifting behind the character. */
+  .connect-stage {
+    isolation: isolate;
+    position: relative;
+  }
+
+  .connect-stage-field {
+    inset: -24px;
+    overflow: clip;
+    pointer-events: none;
+    position: absolute;
+    z-index: -1;
+  }
+
+  .connect-stage-mote {
+    background: radial-gradient(closest-side, oklch(80% 0.12 var(--connect-stage-h1) / 50%), transparent);
+    block-size: var(--connect-mote-size);
+    border-radius: 50%;
+    inline-size: var(--connect-mote-size);
+    inset-block-start: var(--connect-mote-y);
+    inset-inline-start: var(--connect-mote-x);
+    position: absolute;
+  }
+
+  .connect-stage-mote:nth-child(1) {
+    --connect-mote-dx: 30px;
+    --connect-mote-dy: -24px;
+    --connect-mote-pace: 27;
+    --connect-mote-size: 9rem;
+    --connect-mote-x: 8%;
+    --connect-mote-y: 12%;
+  }
+
+  .connect-stage-mote:nth-child(2) {
+    --connect-mote-dx: -26px;
+    --connect-mote-dy: 20px;
+    --connect-mote-pace: 33;
+    --connect-mote-size: 6rem;
+    --connect-mote-x: 70%;
+    --connect-mote-y: 22%;
+  }
+
+  .connect-stage-mote:nth-child(3) {
+    --connect-mote-dx: 18px;
+    --connect-mote-dy: 28px;
+    --connect-mote-pace: 39;
+    --connect-mote-size: 11rem;
+    --connect-mote-x: 40%;
+    --connect-mote-y: 48%;
+  }
+
+  .connect-stage-mote:nth-child(4) {
+    --connect-mote-dx: -30px;
+    --connect-mote-dy: -18px;
+    --connect-mote-pace: 45;
+    --connect-mote-size: 5rem;
+    --connect-mote-x: 14%;
+    --connect-mote-y: 70%;
+  }
+
+  .connect-stage-mote:nth-child(5) {
+    --connect-mote-dx: 24px;
+    --connect-mote-dy: -26px;
+    --connect-mote-pace: 51;
+    --connect-mote-size: 7rem;
+    --connect-mote-x: 76%;
+    --connect-mote-y: 78%;
+  }
+
+  /* Its crew: the agents it started, each a way to its own stage. */
+  .connect-stage-crew {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--rly-space-8);
+    justify-content: center;
+  }
+
+  .connect-stage-crew-member {
+    align-items: center;
+    background: oklch(100% 0 none / 10%);
+    border: 1px solid oklch(100% 0 none / 18%);
+    border-radius: 999px;
+    color: inherit;
+    cursor: pointer;
+    display: inline-flex;
+    font: inherit;
+    gap: var(--rly-space-8);
+    min-block-size: 44px;
+    padding: var(--rly-space-4) var(--rly-space-16) var(--rly-space-4) var(--rly-space-4);
+  }
+
+  .connect-stage-crew-member .connect-creature {
+    block-size: auto;
+    inline-size: 28px;
+  }
+
+  .connect-stage-crew-member:focus-visible {
+    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+    outline-offset: var(--rly-focus-ring-offset);
+  }
+
+  @media (forced-colors: active) {
+    .connect-stage-field {
+      display: none;
+    }
+
+    .connect-stage-crew-member {
+      background: Canvas;
+      border-color: CanvasText;
+    }
+  }
+
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .connect-stage-field {
+    display: none;
+  }
+
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .connect-stage-crew-member {
+    background: Canvas;
+    border-color: CanvasText;
+  }
 }
