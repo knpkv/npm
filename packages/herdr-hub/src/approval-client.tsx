@@ -625,6 +625,7 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
   const workContent =
     current.work === null ? null : (
       <WorkBoard
+        host={current.host}
         {...(workSelection.goalId === null ? {} : { initialGoalId: workSelection.goalId })}
         decisions={workRequestDecisionsFor({
           now: workNow,

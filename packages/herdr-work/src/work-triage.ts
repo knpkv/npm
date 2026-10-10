@@ -13,7 +13,7 @@
  * you looked"; older finished goals stay listed last, as "Finished earlier", so a status filter
  * still finds them.
  */
-import type { WorkDisplayState, WorkGoal, WorkRequest, WorkSnapshot } from "./model.js"
+import type { WorkDisplayState, WorkGoal, WorkGoalObserved, WorkRequest, WorkSnapshot } from "./model.js"
 
 const DAY_MS = 86_400_000
 
@@ -74,6 +74,10 @@ const terminalState = {
   abandoned: true
 } satisfies Readonly<Record<WorkDisplayState, boolean>>
 
+/** Recorded terminal work finished at its checkpoint; an observation-only finish uses the PR close time. */
+export const workGoalFinishedAt = (goal: WorkGoal, observed: WorkGoalObserved | null): number =>
+  terminalState[goal.state] ? goal.updatedAt : (observed?.pullRequest?.fact.closedAt ?? goal.updatedAt)
+
 const openRequestsOf = (goal: WorkGoal): ReadonlyArray<WorkRequest> =>
   (goal.requests ?? []).filter((request) => request.state === "open").toSorted((a, b) => a.requestedAt - b.requestedAt)
 
@@ -129,15 +133,10 @@ export const workTriage = (snapshot: Pick<WorkSnapshot, "asOf" | "goals" | "obse
       const openRequests = openRequestsOf(goal)
       const observed = overlay.get(goal.id) ?? null
       const displayState = observed?.displayState ?? goal.state
-      // A goal its owner already recorded as finished finished then; one finished only by its observed
-      // pull request finished when that pull request closed.
-      const finishedAt = terminalState[goal.state]
-        ? goal.updatedAt
-        : (observed?.pullRequest?.fact.closedAt ?? goal.updatedAt)
       return {
         displayState,
         goal,
-        group: groupOf(finishedAt, displayState, openRequests, snapshot.asOf),
+        group: groupOf(workGoalFinishedAt(goal, observed), displayState, openRequests, snapshot.asOf),
         index,
         openRequests
       }
