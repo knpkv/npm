@@ -6,7 +6,7 @@
  */
 import { Text } from "@knpkv/rly/primitives"
 import { useEffect, useState } from "react"
-import type { LiveState } from "./useLiveUpdates.js"
+import type { LiveState } from "../client/useLiveUpdates.js"
 
 const ago = (since: number, now: number): string => {
   const seconds = Math.max(0, Math.floor((now - since) / 1_000))
@@ -15,7 +15,11 @@ const ago = (since: number, now: number): string => {
   return minutes < 60 ? `${minutes}m ago` : `${Math.floor(minutes / 60)}h ago`
 }
 
-export const LiveIndicator = (props: { readonly state: LiveState }) => {
+export interface LiveIndicatorProps {
+  readonly state: LiveState
+}
+
+export const LiveIndicator = (props: LiveIndicatorProps) => {
   const [now, setNow] = useState(() => performance.timeOrigin + performance.now())
   useEffect(() => {
     const timer = window.setInterval(() => setNow(performance.timeOrigin + performance.now()), 1_000)

@@ -27,11 +27,13 @@ const describeSamples = (source: Source): string => {
   return skipped === 0 ? "claude-statusline limits: read" : `claude-statusline limits: ${skipped} lines skipped`
 }
 
-export const StatusStrip = (props: {
+export interface StatusStripProps {
   readonly status: ServerStatus
   readonly ignoredKeys: UsageReport["ignoredKeys"]
   readonly now: number
-}) => {
+}
+
+export const StatusStrip = (props: StatusStripProps) => {
   const { ingest } = props.status
   const unreadable =
     ingest === null
