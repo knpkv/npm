@@ -183,7 +183,8 @@ export const AgentStage = ({
               <Button onClick={() => onOpenTerminal(agent)} variant="primary">
                 Open terminal
               </Button>
-              <Button aria-pressed={pinned} onClick={() => onPinChange(!pinned)} variant="secondary">
+              {/* The label says the action; no aria-pressed as well, or it reads "Unpin, pressed". */}
+              <Button onClick={() => onPinChange(!pinned)} variant="secondary">
                 {pinned ? "Unpin" : "Pin"}
               </Button>
             </Sheet.Footer>

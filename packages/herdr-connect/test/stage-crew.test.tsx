@@ -58,6 +58,10 @@ describe("AgentStage crew", () => {
       expect(member?.textContent).toContain("Waiting")
       await act(async () => member?.click())
       expect(opened).toHaveBeenCalledWith(child)
+      // The pin's label says the action, without also being a pressed toggle.
+      const pin = [...document.querySelectorAll("button")].find((button) => button.textContent === "Pin")
+      expect(pin).toBeDefined()
+      expect(pin?.hasAttribute("aria-pressed")).toBe(false)
     } finally {
       await act(async () => root.unmount())
       host.remove()
