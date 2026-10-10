@@ -1,14 +1,12 @@
 import { Button, StateLabel, Text, type RlyStateTone } from "@knpkv/rly/primitives"
-import type { RlyIconName } from "@knpkv/rly/foundations"
+import { Icon, type RlyIconName } from "@knpkv/rly/foundations"
 import {
   DecisionBar,
   Hero,
+  HeroWord,
   Region,
-  StageRail,
-  TimelineRow,
   type RlyDecisionBarState,
-  type RlyTimelineEvent,
-  type RlyStage
+  type RlyTimelineEvent
 } from "@knpkv/rly/patterns"
 import { useEffect, useRef, useState, type ReactElement } from "react"
 import type {
@@ -28,7 +26,7 @@ import type {
   WorkSnapshotWindow,
   WorkBlocker
 } from "./model.js"
-import { activityShownOf, finishedNotShown } from "./model.js"
+import { activityShownOf } from "./model.js"
 import { decodeWorkBoardNavigationGoal, encodeWorkBoardNavigationGoal } from "./navigation.js"
 import { workRequestClockText, workRequestDecidability, type WorkRequestDecisions } from "./request-decision.js"
 import { displayStateOf, observedFor } from "./display-state.js"
@@ -46,7 +44,6 @@ export type { WorkRequestAnswer, WorkRequestDecision, WorkRequestDecisions } fro
 export { workRequestClockText } from "./request-decision.js"
 
 const windows: ReadonlyArray<WorkSnapshotWindow> = ["now", "day", "week", "month"]
-const stageOrder: ReadonlyArray<DeliveryStage> = ["local", "review", "pull_request", "merged", "deployed"]
 const initialVisibleGoalCount = 10
 const selectedGoalFragment = "work-selected-goal"
 const goalStates: ReadonlyArray<WorkGoal["state"]> = [
@@ -119,25 +116,29 @@ const deliveryLabel = {
 } satisfies Readonly<Record<DeliveryStage, string>>
 
 const reviewPresentation = {
-  not_requested: { label: "Not requested", tone: "neutral" },
-  requested: { label: "Requested", tone: "caution" },
-  changes_requested: { label: "Changes requested", tone: "critical" },
-  approved: { label: "Approved", tone: "positive" }
-} satisfies Readonly<Record<NonNullable<WorkReview>["state"], { readonly label: string; readonly tone: RlyStateTone }>>
+  not_requested: { label: "Not requested", evidence: "no review yet", tone: "neutral" },
+  requested: { label: "Requested", evidence: "review requested", tone: "caution" },
+  changes_requested: { label: "Changes requested", evidence: "changes requested", tone: "critical" },
+  approved: { label: "Approved", evidence: "approved", tone: "positive" }
+} satisfies Readonly<
+  Record<
+    NonNullable<WorkReview>["state"],
+    {
+      readonly label: string
+      readonly evidence: string
+      readonly tone: RlyStateTone
+    }
+  >
+>
 
 const checksPresentation = {
-  none: { label: "No checks", tone: "neutral" },
-  pending: { label: "Running", tone: "progress" },
-  passing: { label: "Passing", tone: "positive" },
-  failing: { label: "Failing", tone: "critical" }
+  none: { label: "no checks", tone: "neutral" },
+  pending: { label: "checks running", tone: "progress" },
+  passing: { label: "checks passing", tone: "positive" },
+  failing: { label: "checks failing", tone: "critical" }
 } satisfies Readonly<
   Record<WorkPullRequestObservation["checks"], { readonly label: string; readonly tone: RlyStateTone }>
 >
-
-const unknownPresentation = { label: "Unknown", tone: "neutral" } satisfies {
-  readonly label: string
-  readonly tone: RlyStateTone
-}
 
 const stateIcon = {
   neutral: "minus",
@@ -160,6 +161,18 @@ const formatTimestamp = (timestamp: number): string =>
     timeStyle: "short"
   }).format(timestamp)
 
+/** The board's timestamp formatter supplies the clock too, with the full timestamp retained in a tooltip. */
+const formatClock = (timestamp: number): string =>
+  formatTimestamp(timestamp).split(", ").at(-1) ?? formatTimestamp(timestamp)
+
+const ageOf = (timestamp: number, asOf: number): string => {
+  const minutes = Math.max(0, Math.floor((asOf - timestamp) / 60_000))
+  if (minutes < 60) return `${minutes}m ago`
+  if (minutes < 1_440) return `${Math.floor(minutes / 60)}h ago`
+  const days = Math.floor(minutes / 1_440)
+  return `${days} ${days === 1 ? "day" : "days"} ago`
+}
+
 const formatSpend = (goal: WorkGoal): string =>
   goal.spend === null
     ? "Not recorded"
@@ -176,12 +189,6 @@ const blockersFor = (goal: WorkGoal): ReadonlyArray<WorkBlocker> => {
 const activityFor = (goal: WorkGoal): ReadonlyArray<WorkActivity> => goal.activity ?? []
 
 const requestsFor = (goal: WorkGoal): ReadonlyArray<WorkRequest> => goal.requests ?? []
-
-const hierarchyLabel = (goal: WorkGoal): string => {
-  const hierarchy = goal.agentHierarchy
-  if (hierarchy === undefined || hierarchy === null) return "No agent hierarchy recorded"
-  return `${hierarchy.agent.host} / ${hierarchy.agent.name}`
-}
 
 /** Renders the persisted approval deep link after its origin is bound at ingress. */
 const exactLink = (target: WorkApprovalTarget, label: string): ReactElement => (
@@ -210,17 +217,6 @@ const reviewLabel = (review: WorkReview | null | undefined): ReactElement => {
   )
 }
 
-/** Delivery as words: past stages are done, the current one is "now" in the goal's state ink. */
-const stagesFor = (goal: WorkGoal, shown: WorkDisplayState): ReadonlyArray<RlyStage> => {
-  const current = stageOrder.indexOf(goal.delivery)
-  return stageOrder.map((stage, index) => ({
-    id: `${goal.id}-${stage}`,
-    name: deliveryLabel[stage],
-    state: index < current ? "done" : index === current ? "now" : "not yet",
-    tone: index === current ? displayPresentation[shown].tone : "neutral"
-  }))
-}
-
 /** Four goal steps. Completion alone cannot prove a pull request merged; abandoned work stops at its last step. */
 const GoalProgress = ({
   goal,
@@ -244,19 +240,42 @@ const GoalProgress = ({
   const names = ["Planned", "In progress", "In review", hasPullRequest ? "Merged" : "Done"]
   const abandoned = shown === "abandoned"
   return (
-    <ol aria-label={`Progress of ${goal.title}`} className="work-row-progress" role="list">
-      {names.map((name, index) => (
-        <li
-          aria-current={!abandoned && index === current ? "step" : undefined}
-          aria-label={abandoned && index === current ? `${name}, abandoned here` : undefined}
-          data-reached={index < current || (!abandoned && index === current)}
-          data-stopped={abandoned && index === current}
-          key={name}
-        >
-          {name}
-        </li>
-      ))}
-    </ol>
+    <section aria-labelledby="work-delivery-title" className="work-delivery">
+      <h3 className="work-group-title" id="work-delivery-title">
+        Delivery
+      </h3>
+      <ol aria-label={`Delivery of ${goal.title}`} className="work-row-progress" role="list">
+        {names.map((name, index) => (
+          <li
+            aria-current={!abandoned && index === current ? "step" : undefined}
+            aria-label={abandoned && index === current ? `${name}, abandoned here` : undefined}
+            data-reached={index < current || (!abandoned && index === current)}
+            data-stopped={abandoned && index === current}
+            data-tone={displayPresentation[shown].tone}
+            key={name}
+          >
+            <span aria-hidden="true" className="work-step-number">
+              {index + 1}
+            </span>
+            <span className="work-step-name">{name}</span>
+            {abandoned && index === current ? (
+              <span className="work-step-status">Abandoned</span>
+            ) : !abandoned && index === current && current !== 3 ? (
+              <StateLabel
+                icon={stateIcon[displayPresentation[shown].tone]}
+                label="Now"
+                size="compact"
+                tone={displayPresentation[shown].tone}
+              />
+            ) : (
+              <span className="work-step-status">
+                {index < current || (!abandoned && index === current) ? "Done" : "Not yet"}
+              </span>
+            )}
+          </li>
+        ))}
+      </ol>
+    </section>
   )
 }
 
@@ -270,57 +289,64 @@ const GoalEvidence = ({
 }): ReactElement | null => {
   const pullRequest = observed?.pullRequest
   if (pullRequest == null && goal.delivery !== "pull_request" && goal.delivery !== "merged") return null
-  const ci = pullRequest == null ? unknownPresentation : checksPresentation[pullRequest.fact.checks]
-  const review = pullRequest == null ? unknownPresentation : reviewPresentation[pullRequest.fact.review]
+  const ci =
+    pullRequest == null
+      ? ({ label: "checks unknown", tone: "neutral" } satisfies { readonly label: string; readonly tone: RlyStateTone })
+      : checksPresentation[pullRequest.fact.checks]
+  const review =
+    pullRequest == null
+      ? ({ evidence: "review unknown", tone: "neutral" } satisfies {
+          readonly evidence: string
+          readonly tone: RlyStateTone
+        })
+      : reviewPresentation[pullRequest.fact.review]
   return (
     <div className="work-row-evidence">
-      {pullRequest == null ? null : (
-        <span>
-          #{pullRequest.fact.pullRequest} {pullRequestStateLabel[pullRequest.fact.state]}
+      <span className="work-evidence-chip">
+        <StateLabel className="work-ci-fact" icon={stateIcon[ci.tone]} label={ci.label} size="compact" tone={ci.tone} />
+        <span className="work-row-read">
+          {pullRequest == null ? (
+            " · Not read"
+          ) : (
+            <>
+              {observed?.unknown?.source === "github" ? " · last read " : " · read "}
+              <time
+                dateTime={new Date(pullRequest.confirmedAt).toISOString()}
+                title={formatTimestamp(pullRequest.confirmedAt)}
+              >
+                {formatClock(pullRequest.confirmedAt)}
+              </time>
+            </>
+          )}
         </span>
-      )}
-      <StateLabel
-        className="work-ci-fact"
-        icon={stateIcon[ci.tone]}
-        label={`CI ${ci.label}`}
-        size="compact"
-        tone={ci.tone}
-      />
-      <StateLabel
-        className="work-review-fact"
-        icon={stateIcon[review.tone]}
-        label={`Review ${review.label}`}
-        size="compact"
-        tone={review.tone}
-      />
-      <span className="work-row-read">
-        {pullRequest == null ? (
-          "Not read"
-        ) : (
-          <>
-            {observed?.unknown?.source === "github" ? "Last read" : "Read"}{" "}
-            <time
-              dateTime={new Date(pullRequest.confirmedAt).toISOString()}
-              title={formatTimestamp(pullRequest.confirmedAt)}
-            >
-              {formatTimestamp(pullRequest.confirmedAt)}
-            </time>
-          </>
-        )}
+      </span>
+      <span className="work-evidence-chip">
+        <StateLabel
+          className="work-review-fact"
+          icon={stateIcon[review.tone]}
+          label={review.evidence}
+          size="compact"
+          tone={review.tone}
+        />
+        <span className="work-row-read">
+          {pullRequest == null ? (
+            " · Not read"
+          ) : (
+            <>
+              {observed?.unknown?.source === "github" ? " · last read" : " · read"}{" "}
+              <time
+                dateTime={new Date(pullRequest.confirmedAt).toISOString()}
+                title={formatTimestamp(pullRequest.confirmedAt)}
+              >
+                {formatClock(pullRequest.confirmedAt)}
+              </time>
+            </>
+          )}
+        </span>
       </span>
     </div>
   )
 }
-
-/**
- * The repository as a row names it: its last path segment ("npm" for a checkout at
- * /home/…/knpkv.dev/npm, or for "knpkv/npm"). The detail keeps the full value.
- */
-const repositoryName = (repository: string): string =>
-  repository
-    .split("/")
-    .filter((segment) => segment.length > 0)
-    .at(-1) ?? repository
 
 /** A row's caption: the one fact that explains its group, and whether that fact blocks. */
 /** The one line under a goal row; `blocking` gives it the blocked ink. */
@@ -351,16 +377,13 @@ const rowCaption = (
         : `, ${workRequestClockText(soonest.expiresAt, decisions.now)}${soonest.expiresAt > decisions.now ? " left" : ""}`
     return {
       blocking: false,
-      text:
-        open.length === 1
-          ? `Needs approval: ${open[0]?.summary ?? ""}${clock}`
-          : `${open.length} requests need approval${clock}`
+      text: open.length === 1 ? `${open[0]?.summary ?? ""}${clock}` : `${open.length} requests need approval${clock}`
     }
   }
   const blockers = blockersFor(goal)
   if (blockers.length > 0) return { blocking: true, text: blockers[0]?.summary ?? "Blocked" }
   if (observed?.stale === true && observed.agent !== null) {
-    return { blocking: false, text: `Owner gone since ${formatTimestamp(observed.agent.observedAt)}` }
+    return { blocking: false, text: `Owner gone since ${formatClock(observed.agent.observedAt)}` }
   }
   if (observed?.unknown != null) {
     return {
@@ -374,25 +397,34 @@ const rowCaption = (
 }
 
 /** The caption under the hero: the request waiting longest, or the latest change. */
-const summaryCaption = (summary: WorkTriageSummary, tense: WorkTriageTense): string | undefined => {
+const summaryCaption = (
+  summary: WorkTriageSummary,
+  tense: WorkTriageTense,
+  snapshot: WorkSnapshot
+): string | undefined => {
   switch (summary._tag) {
     case "Attention":
       return summary.oldestRequest === null
         ? undefined
-        : `${tense === "present" ? "Waiting longest" : "Waiting longest then"}: ${summary.oldestRequest.request.summary} on ${summary.oldestRequest.goal.title}, requested ${formatTimestamp(summary.oldestRequest.request.requestedAt)}.`
-    case "Clear":
-      return summary.latest === null
-        ? undefined
-        : `${summary.moving} moving. Last change: ${summary.latest.title}, ${formatTimestamp(summary.latest.updatedAt)}.`
+        : `${tense === "present" ? "Waiting longest" : "Waiting longest then"}: ${summary.oldestRequest.request.summary} on ${summary.oldestRequest.goal.title}${tense === "past" ? "." : `, requested ${ageOf(summary.oldestRequest.request.requestedAt, snapshot.asOf)}.`}`
+    case "Clear": {
+      const rows = workTriage(snapshot).rows
+      const planned = rows.filter((row) => row.group === "planned").length
+      const finished = rows
+        .filter((row) => row.group === "done" || row.group === "earlier")
+        .map(({ goal }) => ({ goal, at: observedFor(snapshot, goal.id)?.pullRequest?.fact.closedAt ?? goal.updatedAt }))
+        .toSorted((left, right) => right.at - left.at)[0]
+      return `${summary.moving} ${summary.moving === 1 ? "goal" : "goals"} ${tense === "past" ? "were " : ""}moving, ${planned} planned.${finished === undefined ? "" : ` Last finished: ${finished.goal.title}, ${ageOf(finished.at, snapshot.asOf)}.`}`
+    }
     case "Empty":
-      return "Delegate work to an agent and its goal appears here once the hub admits it."
+      return undefined
   }
 }
 
 /**
  * What the timeline shows for one goal, newest first: the owner's recorded activity, plus what the
  * reconciler observed (a pull request, the owner's agent) and any source it could not read. Observed
- * events carry their provenance as a shape and words; an unreadable source is drawn hatched.
+ * events keep source detail and provenance in their accessible descriptions beside terse visible titles.
  */
 const timelineFor = (goal: WorkGoal, observed: WorkGoalObserved | null): ReadonlyArray<RlyTimelineEvent> => {
   const recorded = activityFor(goal).map((entry): RlyTimelineEvent => ({
@@ -400,7 +432,7 @@ const timelineFor = (goal: WorkGoal, observed: WorkGoalObserved | null): Readonl
     dateTime: new Date(entry.occurredAt).toISOString(),
     detail: activityKindLabel[entry.kind],
     id: entry.id,
-    time: formatTimestamp(entry.occurredAt),
+    time: formatClock(entry.occurredAt),
     title: entry.summary
   }))
   const seen: Array<RlyTimelineEvent> = []
@@ -413,7 +445,7 @@ const timelineFor = (goal: WorkGoal, observed: WorkGoalObserved | null): Readonl
       detail: `${checksLabel[fact.checks]}, last read ${formatTimestamp(confirmedAt)}`,
       id: `observed-pull-request-${fact.repository}-${fact.pullRequest}`,
       provenance: { kind: "auto", label: "Observed on GitHub" },
-      time: formatTimestamp(at),
+      time: formatClock(at),
       title: `Pull request #${fact.pullRequest} ${pullRequestStateLabel[fact.state]}`
     })
   }
@@ -425,7 +457,7 @@ const timelineFor = (goal: WorkGoal, observed: WorkGoalObserved | null): Readonl
       detail: `${fact.host}, last read ${formatTimestamp(confirmedAt)}`,
       id: `observed-agent-${fact.host}-${fact.agentId}`,
       provenance: { kind: "auto", label: "Observed in herdr" },
-      time: formatTimestamp(observedAt),
+      time: formatClock(observedAt),
       title: `Agent ${agentStatusLabel[fact.status]}`
     })
   }
@@ -440,7 +472,7 @@ const timelineFor = (goal: WorkGoal, observed: WorkGoalObserved | null): Readonl
         kind: "unknown",
         label: lastGoodAt === null ? "Never read" : `Last good read ${formatTimestamp(lastGoodAt)}`
       },
-      time: formatTimestamp(since),
+      time: formatClock(since),
       title: `Couldn't read ${sourceLabel[source]}`
     })
   }
@@ -507,12 +539,16 @@ const requestDecisionFor = (request: WorkRequest, decisions: WorkRequestDecision
 
 /** One request in a goal's detail: its title once, then the bar, the hub link or the outcome. */
 const RequestItem = ({
+  asOf,
   decisions,
   externalLinks,
+  owner,
   request
 }: {
   readonly decisions: WorkRequestDecisions | undefined
   readonly externalLinks: "disabled" | "enabled"
+  readonly owner: string
+  readonly asOf: number
   readonly request: WorkRequest
 }): ReactElement => {
   const decision = requestDecisionFor(request, externalLinks === "enabled" ? decisions : undefined)
@@ -522,12 +558,31 @@ const RequestItem = ({
       {/* While a bar is shown its target names the request, so the heading would say it twice. */}
       {decision._tag === "Bar" ? null : (
         <span className="work-request-heading">
-          <Text>{request.summary}</Text>
-          <span className="work-row-state" data-tone={presentation.tone}>
-            {presentation.label}
-          </span>
+          <StateLabel
+            className="work-row-state"
+            icon={request.state === "rejected" ? "close" : stateIcon[presentation.tone]}
+            label={presentation.label}
+            size="compact"
+            tone={presentation.tone}
+          />
+          <Text as="strong" variant="meta">
+            {request.summary}
+          </Text>
+          {request.state === "open" ? null : (
+            <Text tone="secondary" variant="meta">
+              {ageOf(request.requestedAt, asOf)}
+            </Text>
+          )}
         </span>
       )}
+      {request.state === "open" ? (
+        <div className="work-request-meta">
+          {decision._tag === "Bar" ? <StateLabel icon="clock" label="Open" size="compact" tone="caution" /> : null}
+          <Text tone="secondary" variant="meta">
+            requested by {owner}, {ageOf(request.requestedAt, asOf)}
+          </Text>
+        </div>
+      ) : null}
       {decision._tag === "Bar" ? (
         decision.bar
       ) : decision._tag === "Settled" ? (
@@ -562,11 +617,13 @@ const RequestItem = ({
 
 /** Everything about one goal, in reading order: what it is, where it is, what blocks it, what happened. */
 const GoalDetail = ({
+  closeControl,
   decisions,
   externalLinks,
   goal,
   snapshot
 }: {
+  readonly closeControl: ReactElement
   readonly decisions: WorkRequestDecisions | undefined
   readonly externalLinks: "disabled" | "enabled"
   readonly goal: WorkGoal
@@ -576,6 +633,9 @@ const GoalDetail = ({
   const observed = observedFor(snapshot, goal.id)
   const shown = observed?.displayState ?? goal.state
   const activity = timelineFor(goal, observed)
+  const agent = goal.agentHierarchy?.agent
+  const agentName = agent?.name ?? goal.owner.name
+  const agentIdentity = agent === undefined ? agentName : `${agent.host} / ${agentName}`
   // Only the live window carries the overlay; there "nothing observed" is itself a reading.
   const overlay = snapshot.observed !== undefined
   // A goal-level approval target (older checkpoints carry one without requests); skipped when a
@@ -588,76 +648,95 @@ const GoalDetail = ({
       : goal.approvalTarget
   return (
     <div className="work-detail">
-      <Text tone="secondary">{goal.detail}</Text>
-      <StageRail heading={`Delivery of ${goal.title}`} size="words" stages={stagesFor(goal, shown)} />
+      <div className="work-detail-heading">
+        <Text as="h3" variant="card-title">
+          {goal.title}
+        </Text>
+        <StateLabel
+          icon={stateIcon[displayPresentation[shown].tone]}
+          label={displayPresentation[shown].label}
+          size="compact"
+          tone={displayPresentation[shown].tone}
+        />
+        {shown === goal.state ? null : (
+          <Text className="work-fact-note" tone="secondary" variant="meta">
+            Observed; recorded as {statePresentation[goal.state].label.toLowerCase()}
+          </Text>
+        )}
+      </div>
+      {observed?.stale === true && observed.agent !== null ? (
+        <p className="work-note" data-tone="held">
+          <b>Owner gone</b> since {formatClock(observed.agent.observedAt)}: this unfinished goal has no live agent.
+        </p>
+      ) : null}
+      <GoalProgress goal={goal} observed={observed} />
+      {overlay ? <GoalEvidence goal={goal} observed={observed} /> : null}
       <dl className="work-facts">
         <div>
-          <dt>State</dt>
+          <dt>Pull request</dt>
           <dd>
-            {displayPresentation[shown].label}
-            {shown === goal.state ? null : (
+            {observed?.pullRequest == null
+              ? observed === null && snapshot.observedOmitted !== undefined
+                ? "Not in this read: live state was trimmed to the most recently updated goals"
+                : "None known"
+              : `#${observed.pullRequest.fact.pullRequest} ${pullRequestStateLabel[observed.pullRequest.fact.state]}${observed.stale ? `, ${checksLabel[observed.pullRequest.fact.checks]}` : ""}`}
+            {observed?.pullRequest == null ? null : (
               <Text as="p" className="work-fact-note" tone="secondary" variant="meta">
-                Observed; recorded as {statePresentation[goal.state].label.toLowerCase()}
+                Observed on GitHub
               </Text>
             )}
           </dd>
         </div>
-        {overlay ? (
+        {goal.review == null ? null : (
           <div>
-            <dt>Pull request</dt>
+            <dt>Review</dt>
             <dd>
-              {observed?.pullRequest == null
-                ? observed === null && snapshot.observedOmitted !== undefined
-                  ? "Not in this read: live state was trimmed to the most recently updated goals"
-                  : "None known"
-                : `#${observed.pullRequest.fact.pullRequest} ${pullRequestStateLabel[observed.pullRequest.fact.state]}, ${checksLabel[observed.pullRequest.fact.checks]}`}
+              {reviewLabel(goal.review)}
+              {overlay ? null : ", as recorded"}
+              {goal.review?.url === null || goal.review?.url === undefined ? null : externalLinks ===
+                "disabled" ? null : (
+                <> {reviewLink(goal.review.url)}</>
+              )}
+              {goal.review?.summary === null || goal.review?.summary === undefined ? null : (
+                <Text tone="secondary" variant="meta">
+                  {goal.review.summary}
+                </Text>
+              )}
             </dd>
           </div>
-        ) : null}
+        )}
         <div>
-          <dt>Owner</dt>
-          <dd>{goal.owner.name}</dd>
+          <dt>Repository</dt>
+          <dd>{goal.repository.repository}</dd>
+        </div>
+        <div>
+          <dt>Branch</dt>
+          <dd>{goal.repository.branch}</dd>
         </div>
         <div>
           <dt>Agent</dt>
           <dd>
-            {hierarchyLabel(goal)}
+            {observed?.agent == null
+              ? `${agentIdentity}, as recorded`
+              : `${agentIdentity}, ${agentStatusLabel[observed.agent.fact.status]}${observed.agent.fact.status === "gone" ? ` since ${formatClock(observed.agent.observedAt)}` : ""}`}
+            {observed?.agent == null ? null : (
+              <Text as="p" className="work-fact-note" tone="secondary" variant="meta">
+                Observed in herdr
+              </Text>
+            )}
             {goal.agentHierarchy?.agent.relationship === undefined || goal.agentHierarchy === null
               ? null
               : `, ${goal.agentHierarchy.agent.relationship.relation} from ${goal.agentHierarchy.agent.relationship.parentAgentId}`}
           </dd>
         </div>
-        <div>
-          <dt>Repository</dt>
-          <dd>
-            {goal.repository.repository}, <code>{goal.repository.branch}</code>
-          </dd>
-        </div>
-        <div>
-          <dt>Review</dt>
-          <dd>
-            {reviewLabel(goal.review)}
-            {goal.review?.url === null || goal.review?.url === undefined ? null : externalLinks ===
-              "disabled" ? null : (
-              <> {reviewLink(goal.review.url)}</>
-            )}
-            {goal.review?.summary === null || goal.review?.summary === undefined ? null : (
-              <Text tone="secondary" variant="meta">
-                {goal.review.summary}
-              </Text>
-            )}
-          </dd>
-        </div>
-        <div>
-          <dt>Spend</dt>
-          <dd>{formatSpend(goal)}</dd>
-        </div>
+        {goal.spend === null ? null : (
+          <div>
+            <dt>Spend</dt>
+            <dd>{formatSpend(goal)}</dd>
+          </div>
+        )}
       </dl>
-      {observed?.stale === true && observed.agent !== null ? (
-        <p className="work-note" data-tone="held">
-          <b>Owner gone</b> since {formatTimestamp(observed.agent.observedAt)}: this unfinished goal has no live agent.
-        </p>
-      ) : null}
+      {goal.detail === goal.title ? null : <Text tone="secondary">{goal.detail}</Text>}
       {observed?.unknown == null ? null : (
         <p className="work-note" data-tone="unknown">
           <b>Couldn't read {sourceLabel[observed.unknown.source]}</b> since {formatTimestamp(observed.unknown.since)}:{" "}
@@ -683,7 +762,14 @@ const GoalDetail = ({
         ) : (
           <ul className="work-detail-list">
             {requestsFor(goal).map((request) => (
-              <RequestItem decisions={decisions} externalLinks={externalLinks} key={request.id} request={request} />
+              <RequestItem
+                asOf={snapshot.asOf}
+                decisions={decisions}
+                externalLinks={externalLinks}
+                key={request.id}
+                owner={goal.owner.name}
+                request={request}
+              />
             ))}
           </ul>
         )}
@@ -701,9 +787,28 @@ const GoalDetail = ({
           <Text tone="secondary">{goal.activity === undefined ? "No activity recorded." : "Activity is clear."}</Text>
         ) : (
           <ol aria-label={`Activity on ${goal.title}`} className="work-activity">
-            {activity.map((event, index) => (
-              <TimelineRow continued={index < activity.length - 1} event={event} key={event.id} />
-            ))}
+            {activity.map((event) => {
+              const descriptionId = `work-activity-${goal.id}-${event.id}`
+              return (
+                <li
+                  aria-describedby={descriptionId}
+                  className="work-activity-row"
+                  data-rly-timeline-event-id={event.id}
+                  key={event.id}
+                >
+                  <time dateTime={event.dateTime}>{event.time}</time>
+                  <span>{event.title}</span>
+                  <span
+                    className="work-accessible-detail"
+                    data-rly-timeline-provenance={event.provenance?.kind}
+                    id={descriptionId}
+                  >
+                    {event.detail}
+                    {event.provenance === undefined ? "" : `. ${event.provenance.label}`}
+                  </span>
+                </li>
+              )
+            })}
           </ol>
         )}
       </section>
@@ -753,7 +858,8 @@ const GoalDetail = ({
         ) : (
           // The agent's stage first: who it is and what it's saying, with its terminal one tap away.
           <a className="work-connect-link" href={`${goal.connectTarget.url}&open=stage`}>
-            Open {goal.owner.name} in Connect
+            {observed?.stale === true ? "Find" : "Open"} {agentName} in Connect
+            <Icon decorative name="arrow-right" size="small" />
           </a>
         )}
         {goalApproval === null ? null : externalLinks === "disabled" ? (
@@ -763,6 +869,7 @@ const GoalDetail = ({
         ) : (
           exactLink(goalApproval, `Open ${goalApproval.host} approval`)
         )}
+        {closeControl}
       </div>
     </div>
   )
@@ -782,29 +889,24 @@ const snapshotFor = (snapshots: WorkSnapshots, window: WorkSnapshotWindow): Work
 /** How many older activities the snapshot left out of this goal's timeline. */
 const activityOmittedFor = (snapshot: WorkSnapshot, goal: WorkGoal): number => snapshot.activityOmitted?.[goal.id] ?? 0
 
-/**
- * The board header's line, as whole sentences joined by a space, so each piece ends in exactly one period:
- * the window and its time, then what the live window could not show, then any finished or older goals it left out.
- */
-const headerSentences = (window: WorkSnapshotWindow, snapshot: WorkSnapshot): ReadonlyArray<string> => {
-  const when = `${window === "now" ? "Live" : windowLabel[window]}, as of ${formatTimestamp(snapshot.asOf)}.`
+/** Header read time and live-read limitations. Omitted goal counts belong to the board. */
+const headerSentences = (
+  window: WorkSnapshotWindow,
+  snapshot: WorkSnapshot,
+  host: string | undefined
+): ReadonlyArray<string> => {
+  const when = `Durable goals${host === undefined ? "" : ` on ${host}`}, read ${formatClock(snapshot.observedAt)}.`
   const live =
     window !== "now"
       ? []
       : snapshot.observed === undefined
         ? [
-            "Live state not available: this hub sends no observed facts (its herdr-work predates the reconciler, or the overlay did not fit the response), so states are as recorded.",
-            "Update herdr-work on the hub to see them."
+            "Live state not available: this hub sends no observed facts, so owner and pull request lines show only what each goal recorded. Update herdr-work on the hub to see them."
           ]
         : snapshot.observedOmitted === undefined
           ? []
           : [`Live state shown for the most recently updated goals; ${String(snapshot.observedOmitted)} left out.`]
-  const finished = snapshot.finishedOmitted === undefined ? [] : [`${finishedNotShown(snapshot.finishedOmitted)}.`]
-  const cut =
-    snapshot.goalsOmitted === undefined
-      ? []
-      : [`${snapshot.goalsOmitted} more ${snapshot.goalsOmitted === 1 ? "goal" : "goals"} not in this read.`]
-  return [when, ...live, ...finished, ...cut]
+  return [when, ...live]
 }
 
 const familyForGoal = (snapshot: WorkSnapshot, goalId: string): WorkGoalFamilyGroup | null =>
@@ -825,6 +927,7 @@ const withFragment = (href: string, fragment: string): string => {
 export const WorkBoard = ({
   decisions,
   externalLinks = "enabled",
+  host,
   initialGoalId,
   initialWindow = "now",
   navigation,
@@ -837,6 +940,8 @@ export const WorkBoard = ({
    */
   readonly decisions?: WorkRequestDecisions
   readonly externalLinks?: "disabled" | "enabled"
+  /** The application supplies its own host; goal owners may be on other hosts. Omit when unknown. */
+  readonly host?: string
   readonly initialGoalId?: string | null
   readonly initialWindow?: WorkSnapshotWindow
   readonly navigation?: (selection: { readonly goalId: string | null; readonly window: WorkSnapshotWindow }) => string
@@ -879,9 +984,21 @@ export const WorkBoard = ({
   const tense: WorkTriageTense = window === "now" ? "present" : "past"
   const sentence = workTriageSentence(triage.summary, tense)
   const heroFact =
-    tense === "present"
-      ? sentence
-      : `As of ${formatTimestamp(snapshot.asOf)}, ${sentence.charAt(0).toLowerCase()}${sentence.slice(1)}`
+    triage.summary._tag === "Attention" && triage.summary.blocked > 0 ? (
+      <>
+        {sentence.slice(0, -`${triage.summary.blocked} blocked`.length)}
+        <HeroWord tone="blocked">{`${triage.summary.blocked} blocked`}</HeroWord>
+      </>
+    ) : tense === "past" && triage.summary._tag === "Attention" ? (
+      <>
+        {sentence.split("needed you")[0]}
+        <HeroWord tone="held">needed you</HeroWord>
+      </>
+    ) : triage.summary._tag === "Empty" && tense === "past" ? (
+      "Nothing needed you"
+    ) : (
+      sentence
+    )
   const groupById = new Map(triage.rows.map((row) => [row.goal.id, row.group]))
   const ordered = triage.rows.map((row) => row.goal)
   // Filters match what each row shows: the observed state where there is one.
@@ -916,26 +1033,56 @@ export const WorkBoard = ({
   }, [selectedFilteredGoalIndex, selectedId])
 
   const goalRow = (goal: WorkGoal): ReactElement => {
-    const caption = rowCaption(goal, observedOf(goal), externalLinks === "enabled" ? decisions : undefined)
+    const observed = observedOf(goal)
+    const shown = shownOf(goal)
+    const caption = rowCaption(goal, observed, externalLinks === "enabled" ? decisions : undefined)
+    const open = requestsFor(goal).filter((request) => request.state === "open")
+    const host = observed?.agent?.fact.host ?? goal.connectTarget?.host ?? goal.agentHierarchy?.agent.host
+    const agentName = goal.agentHierarchy?.agent.name ?? goal.owner.name
+    const pr = observed?.pullRequest?.fact
+    const terminal = shown === "completed" || shown === "deployed" || shown === "abandoned"
+    const stage =
+      pr === undefined
+        ? `Stage: ${deliveryLabel[goal.delivery]}`
+        : `PR #${pr.pullRequest} ${pullRequestStateLabel[pr.state]}, ${checksLabel[pr.checks]}${pr.review === "not_requested" ? "" : ` · Review ${reviewPresentation[pr.review].label.toLowerCase()}`}`
+    const metadata =
+      goal.owner.name === "Unassigned"
+        ? `Unassigned · ${goal.repository.repository}`
+        : terminal
+          ? `${agentName} · ${shown === "abandoned" ? "" : goal.delivery === "merged" || pr?.state === "merged" ? "Merged · " : "Done · "}${displayPresentation[shown].label} ${ageOf(pr?.closedAt ?? goal.updatedAt, snapshot.asOf)}`
+          : `${agentName}${host === undefined ? "" : ` on ${host}`} · ${stage}${blockersFor(goal).length === 0 || open.length > 0 ? "" : ` · ${blockersFor(goal)[0]?.summary ?? "Blocked"}`}`
+    const hasCaption = open.length > 0 || observed?.stale === true || observed?.unknown != null
     const content = (
       <>
-        <span className="work-row-title">
-          <span className="work-row-meta">
-            {repositoryName(goal.repository.repository)}, <code>{goal.repository.branch}</code>
-          </span>
-          {goal.title}
-        </span>
+        <span className="work-row-title">{goal.title}</span>
         <StateLabel
           className="work-row-state"
-          icon={stateIcon[displayPresentation[shownOf(goal)].tone]}
-          label={displayPresentation[shownOf(goal)].label}
+          icon={stateIcon[displayPresentation[shown].tone]}
+          label={displayPresentation[shown].label}
           size="compact"
-          tone={displayPresentation[shownOf(goal)].tone}
+          tone={displayPresentation[shown].tone}
         />
-        <span className="work-row-caption" data-blocking={caption.blocking}>
-          {caption.text}
-          {familyLabelForGoal(snapshot, goal) === null ? null : `, ${familyLabelForGoal(snapshot, goal)}`}
+        <span className="work-row-meta">
+          {metadata}
+          {familyLabelForGoal(snapshot, goal) === null ? null : ` · ${familyLabelForGoal(snapshot, goal)}`}
         </span>
+        {hasCaption ? (
+          <span className="work-row-caption" data-blocking={caption.blocking}>
+            {open.length === 0 ? (
+              caption.text
+            ) : (
+              <>
+                <span className="work-request-line">
+                  <StateLabel className="work-row-state" icon="clock" label="Open" size="compact" tone="caution" />{" "}
+                  <span className="work-request-title">{caption.text}</span>
+                </span>{" "}
+                <span className="work-request-age">
+                  {window === "now" ? ageOf(open[0]?.requestedAt ?? snapshot.asOf, snapshot.asOf) : "was open then"}
+                </span>
+              </>
+            )}
+          </span>
+        ) : null}
       </>
     )
     const control =
@@ -977,13 +1124,7 @@ export const WorkBoard = ({
           {content}
         </a>
       )
-    return (
-      <div className="work-goal-card" data-selected={selected?.id === goal.id}>
-        {control}
-        <GoalProgress goal={goal} observed={observedOf(goal)} />
-        <GoalEvidence goal={goal} observed={observedOf(goal)} />
-      </div>
-    )
+    return control
   }
 
   const timeTravel = (
@@ -1053,6 +1194,7 @@ export const WorkBoard = ({
             aria-pressed={statusFilter === state}
             className="work-status-filter"
             key={state}
+            onFocus={({ currentTarget }) => currentTarget.scrollIntoView({ block: "nearest", inline: "nearest" })}
             onClick={() => {
               setDetailsOpen(false)
               setSelectedId(null)
@@ -1067,6 +1209,7 @@ export const WorkBoard = ({
           <a
             aria-current={statusFilter === state ? "page" : undefined}
             className="work-status-filter"
+            onFocus={({ currentTarget }) => currentTarget.scrollIntoView({ block: "nearest", inline: "nearest" })}
             href={navigation({
               goalId: encodeWorkBoardNavigationGoal({
                 detailsOpen: false,
@@ -1085,43 +1228,176 @@ export const WorkBoard = ({
     </div>
   )
 
+  const closeControl = (label: string): ReactElement =>
+    navigation === undefined ? (
+      <Button
+        onClick={() => {
+          setDetailsOpen(false)
+          ;(selectedRowRef.current ?? selectedLinkRowRef.current)?.focus()
+        }}
+        className={label === "Close" ? "work-close-heading" : undefined}
+        variant={label === "Close" ? "quiet" : "secondary"}
+      >
+        {label}
+      </Button>
+    ) : (
+      <a
+        className={`work-exact-link work-close-control${label === "Close" ? " work-close-heading" : ""}`}
+        href={withFragment(
+          navigation({
+            goalId: encodeWorkBoardNavigationGoal({
+              detailsOpen: false,
+              goalId: selectedId,
+              statusFilter,
+              visibleGoalCount
+            }),
+            window
+          }),
+          selectedGoalFragment
+        )}
+      >
+        {label}
+      </a>
+    )
+
   return (
     <section className="work-page" aria-labelledby="work-board-title">
       <header className="work-page-intro">
-        <Text as="h1" id="work-board-title" variant="card-title">
+        <Text as="h1" id="work-board-title" variant="section-title">
           Work
         </Text>
         <Text tone="secondary" variant="meta">
-          {headerSentences(window, snapshot).join(" ")}
+          {headerSentences(window, snapshot, host)[0]}
         </Text>
       </header>
-      <Hero caption={summaryCaption(triage.summary, tense)} fact={heroFact} label="Work summary" />
-      {timeTravel}
+      {headerSentences(window, snapshot, host)
+        .slice(1)
+        .map((sentence) => (
+          <p className="work-note work-overlay-note" data-tone="held" key={sentence}>
+            <Icon decorative name="clock" size="small" />
+            <span>{sentence}</span>
+          </p>
+        ))}
+      {externalLinks === "disabled" ? (
+        <p className="work-note">Read-only on the local network. Requests are decided on the hub.</p>
+      ) : null}
+      {window === "now" ? null : (
+        <div className="work-note work-history-note">
+          <span>
+            Work as it was {windowLabel[window].toLowerCase()}, {formatTimestamp(snapshot.asOf)}. Decisions are off in
+            the past.
+          </span>
+          {navigation === undefined ? (
+            <Button
+              onClick={() => {
+                setWindow("now")
+                setDetailsOpen(false)
+                setSelectedId(null)
+                setStatusFilter("all")
+                setVisibleGoalCount(initialVisibleGoalCount)
+              }}
+              variant="secondary"
+            >
+              Back to now
+            </Button>
+          ) : (
+            <a className="work-exact-link" href={navigation({ goalId: null, window: "now" })}>
+              Back to now
+            </a>
+          )}
+        </div>
+      )}
+      {snapshot.goals.length === 0 && window === "now" ? null : (
+        <Hero
+          caption={summaryCaption(triage.summary, tense, snapshot)}
+          fact={heroFact}
+          label="Work summary"
+          size="heading"
+        />
+      )}
+      <div className="work-board-controls">
+        {timeTravel}
+        {statusFilterControls}
+      </div>
       {snapshot.goals.length === 0 ? (
-        <Region title="Goals">
-          <Text tone="secondary">
-            {window === "now" ? (
-              <>
-                No goals yet. Delegate work to an agent with{" "}
-                <code>fleetctl submit HOST agent.delegate work REPOSITORY PROMPT</code> (HOST is a name from{" "}
-                <code>fleetctl hosts</code>); its goal appears here once the hub admits it.
-              </>
-            ) : (
-              "No goals at this checkpoint."
-            )}
-          </Text>
+        <Region className="work-empty-board" count={0} title="Goals">
+          <div className="work-empty-copy">
+            {window === "now" ? <Text as="strong">No goals yet.</Text> : null}
+            <Text tone="secondary">
+              {window === "now" ? (
+                <>
+                  Delegate work to an agent with <code>fleetctl submit HOST agent.delegate work REPOSITORY PROMPT</code>{" "}
+                  (HOST is a name from <code>fleetctl hosts</code>); its goal appears here once the hub admits it.
+                </>
+              ) : (
+                "No goals at this checkpoint."
+              )}
+            </Text>
+          </div>
         </Region>
       ) : (
         <div className="work-board-layout" data-has-detail={selected !== null && detailsOpen}>
-          <Region actions={statusFilterControls} className="work-board-list" count={filteredGoals.length} title="Goals">
-            <Text aria-live="polite" tone="secondary" variant="meta">
-              Showing {visibleGoals.length} of {filteredGoals.length} goals
-            </Text>
-            {filteredGoals.length === 0 ? <Text tone="secondary">No goals match this status.</Text> : null}
+          {selected === null || !detailsOpen ? null : (
+            <Region
+              actions={closeControl("Close")}
+              aria-label="Goal details"
+              className="work-inspector"
+              headingId="work-goal-details-title"
+              id="work-goal-details"
+              ref={detailsRef}
+              title="Goal details"
+            >
+              <GoalDetail
+                closeControl={closeControl("Close details")}
+                decisions={decisions}
+                externalLinks={externalLinks}
+                goal={selected}
+                snapshot={snapshot}
+              />
+            </Region>
+          )}
+          <Region
+            actions={
+              filteredGoals.length === 0 ? undefined : (
+                <Text aria-live="polite" tone="secondary" variant="meta">
+                  Showing {visibleGoals.length} of{" "}
+                  {filteredGoals.length + (statusFilter === "all" ? (snapshot.goalsOmitted ?? 0) : 0)} goals
+                </Text>
+              )
+            }
+            className="work-board-list"
+            count={
+              statusFilter === "all"
+                ? filteredGoals.length + (snapshot.goalsOmitted ?? 0)
+                : filteredGoals.length === 0
+                  ? `0 of ${snapshot.goals.length + (snapshot.goalsOmitted ?? 0)}`
+                  : filteredGoals.length
+            }
+            title="Goals"
+          >
+            {filteredGoals.length === 0 ? (
+              <div className="work-filter-empty">
+                <Text tone="secondary">No goals match this status.</Text>
+                {navigation === undefined ? (
+                  <Button onClick={() => setStatusFilter("all")} variant="secondary">
+                    Show all
+                  </Button>
+                ) : (
+                  <a className="work-exact-link" href={navigation({ goalId: null, window })}>
+                    Show all
+                  </a>
+                )}
+              </div>
+            ) : null}
             {visibleGroups.map(({ goals, group }) => (
               <section aria-labelledby={`work-group-${group}`} className="work-group" key={group}>
                 <h3 className="work-group-title" id={`work-group-${group}`}>
-                  {workTriageGroupTitle[group]} <span className="work-group-count">({goals.length})</span>
+                  {group === "planned"
+                    ? "Planned"
+                    : group === "needs-you" && tense === "past"
+                      ? "Needed you"
+                      : workTriageGroupTitle[group]}{" "}
+                  <span className="work-group-count">({goals.length})</span>
                 </h3>
                 <ul className="work-rows">
                   {goals.map((goal) => (
@@ -1130,11 +1406,12 @@ export const WorkBoard = ({
                 </ul>
               </section>
             ))}
-            <Text className="work-finished-count" tone="secondary" variant="meta">
-              {finishedGoalCount} finished {finishedGoalCount === 1 ? "goal" : "goals"}
-              {(snapshot.finishedOmitted ?? 0) > 0 ? ` · ${snapshot.finishedOmitted} older not shown` : null}
-              {(snapshot.goalsOmitted ?? 0) > 0 ? ` · ${snapshot.goalsOmitted} more not in this read` : null}
-            </Text>
+            {filteredGoals.length > 0 && (finishedGoalCount > 0 || (snapshot.finishedOmitted ?? 0) > 0) ? (
+              <Text className="work-finished-count" tone="secondary" variant="meta">
+                {finishedGoalCount} finished {finishedGoalCount === 1 ? "goal" : "goals"}
+                {(snapshot.finishedOmitted ?? 0) > 0 ? ` · ${snapshot.finishedOmitted} older not shown` : null}
+              </Text>
+            ) : null}
             {visibleGoals.length < filteredGoals.length ? (
               navigation === undefined ? (
                 <Button
@@ -1162,50 +1439,6 @@ export const WorkBoard = ({
               )
             ) : null}
           </Region>
-          {selected === null || !detailsOpen ? null : (
-            <Region
-              actions={
-                navigation === undefined ? (
-                  <Button
-                    onClick={() => {
-                      setDetailsOpen(false)
-                      const selectedRow = selectedRowRef.current ?? selectedLinkRowRef.current
-                      selectedRow?.focus()
-                    }}
-                    variant="secondary"
-                  >
-                    Close details
-                  </Button>
-                ) : (
-                  <a
-                    className="work-exact-link"
-                    href={withFragment(
-                      navigation({
-                        goalId: encodeWorkBoardNavigationGoal({
-                          detailsOpen: false,
-                          goalId: selectedId,
-                          statusFilter,
-                          visibleGoalCount
-                        }),
-                        window
-                      }),
-                      selectedGoalFragment
-                    )}
-                  >
-                    Close details
-                  </a>
-                )
-              }
-              aria-label="Goal details"
-              className="work-inspector"
-              headingId="work-goal-details-title"
-              id="work-goal-details"
-              ref={detailsRef}
-              title={selected.title}
-            >
-              <GoalDetail decisions={decisions} externalLinks={externalLinks} goal={selected} snapshot={snapshot} />
-            </Region>
-          )}
         </div>
       )}
     </section>

@@ -391,10 +391,13 @@ describe("Work control app", () => {
 
   it("renders activity, requests, review, shipment, and exact links beside the hierarchy", () => {
     const markup = renderToStaticMarkup(
-      createElement(WorkBoard, { initialGoalId: workGoal.id, snapshots })
+      createElement(WorkBoard, { host: "Hub host", initialGoalId: workGoal.id, snapshots })
     )
     expect(markup).toContain("Daily fleet Work")
     expect(markup).toContain("SER8 / Work owner")
+    expect(markup).toContain("Work owner on SER8 · Stage")
+    expect(markup).toContain("Open Work owner in Connect")
+    expect(markup).not.toContain("Coordinator on Hub host")
     expect(markup).toContain("agent-coordinator")
     expect(markup).toContain("Activity")
     expect(markup).toContain("Approve the package shipment")
@@ -543,7 +546,8 @@ describe("Work control app", () => {
     )
     expect(snapshotsValue.now.goals.map(({ id }) => id)).toEqual(["goal-connect-v3"])
     expect(snapshotsValue.now.families?.[0]?.superseded).toHaveLength(2)
-    expect(markup).toContain("goal-connect-v3")
+    // The design names the canonical goal by its title; its id stays in the snapshot contract.
+    expect(markup).toContain("Connect terminal special keys v3")
     expect(markup).not.toContain("goal-connect-v1\"")
     expect(markup).toContain("2 superseded")
     expect(markup).toContain("Superseded history")

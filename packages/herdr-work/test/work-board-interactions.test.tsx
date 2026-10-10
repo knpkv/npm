@@ -132,7 +132,7 @@ describe("WorkBoard interactions", () => {
     await act(async () => goalRow.click())
     const details = host.querySelector<HTMLElement>('[aria-label="Goal details"]')
     expect(details?.textContent).toContain("Goal 2 detail")
-    expect(host.querySelector('[aria-label="Delivery of Goal 2"]')?.textContent).toContain("Local now")
+    expect(host.querySelector('[aria-label="Delivery of Goal 2"]')?.textContent).toContain("In progress")
     // Opening a goal focuses its heading, so the detail is announced by name.
     expect(document.activeElement).toBe(details?.querySelector("h2"))
 
@@ -400,7 +400,8 @@ describe("Work summary per snapshot window", () => {
     const live = await mountBoard({ boardSnapshots })
     expect(summary(live)).toContain("Nothing needs you")
     const day = await mountBoard({ boardSnapshots, initialWindow: "day" })
-    expect(summary(day)).toMatch(/^As of .+, 1 goal needed you/)
+    expect(summary(day)).toMatch(/^1 goal needed you/)
+    expect(day.querySelector(".work-history-note")?.textContent).toContain("24 hours ago")
     expect(summary(day)).not.toContain("needs you")
   })
 })

@@ -137,7 +137,7 @@ describe("Work requests decided in place", () => {
   it("decides a request the hub lists as pending, with its clock, and sends only that job", async () => {
     const { decisions, sent } = decisionsOf({ "job-1": NOW + 4 * 60_000 + 12_000 })
     const host = await mount({ decisions, snapshots: snapshotsOf([request("r1", "job-1")]) })
-    expect(host.querySelector(".work-row-caption")?.textContent).toBe("Needs approval: Apply r1, 4m 12s left")
+    expect(host.querySelector(".work-row-caption")?.textContent).toContain("Apply r1, 4m 12s left")
     expect(host.querySelector("[aria-label='Goal details'], .work-detail")?.textContent).toContain("4m 12s left")
     const approve = button(host, "Approve: Apply r1")
     expect(approve?.getAttribute("aria-disabled")).toBeNull()
@@ -172,7 +172,7 @@ describe("Work requests decided in place", () => {
     )
     const host = await mount({ decisions, snapshots: snapshotsOf([request("r1", "job-1", "approved")]) })
     expect(button(host, "Approve: Apply r1")).toBeUndefined()
-    expect(host.querySelector(".work-request-heading")?.textContent).toBe("Apply r1Approved")
+    expect(host.querySelector(".work-request-heading")?.textContent).toContain("ApprovedApply r1")
     expect(host.querySelector(".work-request-announcement")?.textContent).toBe("Apply r1: Approved.")
     expect(host.textContent).not.toContain("The hub recorded your approval.")
   })
