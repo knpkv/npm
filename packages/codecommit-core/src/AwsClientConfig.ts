@@ -20,7 +20,7 @@
  * @category Config
  * @module
  */
-import { fromNodeProviderChain, fromSSO } from "@aws-sdk/credential-providers"
+import { fromIni, fromSSO } from "@aws-sdk/credential-providers"
 import type { Duration } from "effect"
 import { Context, Layer } from "effect"
 
@@ -70,7 +70,7 @@ export class AwsClientConfig extends Context.Service<
 
 const profileCredentialProvider = makeProfileCredentialProvider({
   sso: fromSSO,
-  fallback: fromNodeProviderChain
+  fallback: fromIni
 })
 
 const defaults: AwsClientConfigContract = {

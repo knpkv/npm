@@ -250,7 +250,7 @@ const validateProbeWorkflow = (workflow) => {
         }
       },
       {
-        name: "Probe through the Control Center default credential chain",
+        name: "Probe through the Control Center default profile",
         shell: "bash",
         env: {
           CONTROL_CENTER_LIVE_AWS_PROBE: "1",
@@ -273,8 +273,8 @@ const validateProbeWorkflow = (workflow) => {
     ["Verify sealed AWS probe runner", "5a84a92f8adb4b83c4820fcab6a3b7c39db11cc9ef33d8bc7d0c8d184a386744"],
     ["Probe stable read-only fixtures", "32baf1272ba5e5497ebb5d0121a043a16a54fef371d7b9a8706512da1d3342fe"],
     [
-      "Probe through the Control Center default credential chain",
-      "f8503e3fae81a4c057fdc8298eaed75def97635d7916bf2bb3302a787ce3db6e"
+      "Probe through the Control Center default profile",
+      "adfb81ea0cd8068d7bbd0ca655fd8f315cc4cba7b964bdb1ae8a7c873787ec76"
     ]
   ])
   for (const step of [...prepareSteps, ...protectedSteps]) {
@@ -807,7 +807,7 @@ const program = Effect.gen(function* () {
   assert.ok(!liveProbeTest.includes("aws-cn"), "Control Center live AWS test must reject unsupported China audiences")
   assert.ok(
     !liveProbeTest.includes("CONTROL_CENTER_TEST_AWS_PROFILE"),
-    "the live AWS profile must remain fixed to the standard default chain"
+    "the live AWS profile must remain fixed to the default shared-config profile"
   )
   assert.ok(
     !liveProbeTest.includes("assert."),
