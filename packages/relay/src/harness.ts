@@ -38,6 +38,7 @@ import type {
 import { SqliteStorage } from "@earendil-works/pi-durable/storage/sqlite"
 import * as Capability from "@knpkv/capability"
 import { createClient } from "@libsql/client"
+import type * as BunSqlite from "bun:sqlite"
 import {
   Clock,
   Context,
@@ -60,7 +61,7 @@ import {
 import { AiError } from "effect/ai"
 import type { LanguageModel } from "effect/ai"
 import type { PlatformError } from "effect/PlatformError"
-import { DatabaseSync } from "node:sqlite"
+import { createRequire } from "node:module"
 import { libsqlDatabase } from "./libsqlDatabase.js"
 import { entryText, makeMessageTracker } from "./messages.js"
 import type { MessageEvent } from "./messages.js"
@@ -213,35 +214,72 @@ const notALink = (error: PlatformError): boolean =>
   (error.reason._tag !== "BadArgument" && Predicate.hasProperty(error.reason.cause, "code") &&
     error.reason.cause.code === "EINVAL")
 
+/** What the ownership lock needs of a SQLite driver: `exec` and `close`, never a prepared statement. */
+interface LockConnection {
+  readonly exec: (sql: string) => void
+  readonly close: () => void
+}
+
+/**
+ * Opens the lock file with the runtime's own SQLite: `node:sqlite` on Node, `bun:sqlite` on Bun (which has no
+ * `node:sqlite` before 1.4). Loaded only when a store opens, so importing Relay never needs either.
+ */
+const lockDriver = Effect.tryPromise({
+  try: async (): Promise<(path: string) => LockConnection> => {
+    try {
+      const { DatabaseSync } = await import("node:sqlite")
+      return (path) => new DatabaseSync(path)
+    } catch {
+      // Through `require`, not `import()`: bundlers resolve a literal `import()` at build time and refuse a
+      // Bun built-in, while Bun's `require` loads it when this runs.
+      const bun: typeof BunSqlite = createRequire(import.meta.url)("bun:sqlite")
+      return (path) => new bun.Database(path)
+    }
+  },
+  catch: (cause) =>
+    new RelayStoreFailed({
+      operation: "load SQLite for the Relay store lock",
+      message: `load SQLite for the Relay store lock failed: ${String(cause)}`
+    })
+})
+
+/** SQLITE_BUSY, as `node:sqlite` (`errcode`) and `bun:sqlite` (`errno`, `code`) report it. */
+const isBusy = (cause: unknown): boolean =>
+  (Predicate.hasProperty(cause, "errcode") && cause.errcode === 5) ||
+  (Predicate.hasProperty(cause, "errno") && cause.errno === 5) ||
+  (Predicate.hasProperty(cause, "code") && cause.code === "SQLITE_BUSY")
+
 /**
  * Takes the store's ownership lock, or fails with {@link RelayStoreLocked} while another process holds it.
- * Released when the scope closes.
+ * Released when the scope closes. The connection only ever runs `exec`: a prepared statement would keep it,
+ * and its lock, alive after `close` on Bun until it is garbage-collected.
  */
 const acquireStoreLock = (path: string) =>
   Effect.acquireRelease(
-    Effect.try({
-      try: () => {
-        const lock = new DatabaseSync(path)
-        try {
-          // Exclusive locking keeps the lock after the commit, for as long as this connection is open.
-          lock.exec("PRAGMA locking_mode = EXCLUSIVE; BEGIN IMMEDIATE; COMMIT")
-          return lock
-        } catch (failure) {
-          lock.close()
-          throw failure
-        }
-      },
-      catch: (cause): RelayStoreFailed | RelayStoreLocked =>
-        /database is locked|SQLITE_BUSY/u.test(String(cause))
-          ? new RelayStoreLocked({
-            path,
-            message: `Another process owns the Relay store at ${path.replace(/\.lock$/u, "")}. Stop it, then retry.`
-          })
-          : new RelayStoreFailed({
-            operation: "lock the Relay store",
-            message: `lock the Relay store failed: ${String(cause)}`
-          })
-    }),
+    Effect.flatMap(lockDriver, (open) =>
+      Effect.try({
+        try: () => {
+          const lock = open(path)
+          try {
+            // Exclusive locking keeps the lock after the commit, for as long as this connection is open.
+            lock.exec("PRAGMA locking_mode = EXCLUSIVE; BEGIN IMMEDIATE; COMMIT")
+            return lock
+          } catch (failure) {
+            lock.close()
+            throw failure
+          }
+        },
+        catch: (cause): RelayStoreFailed | RelayStoreLocked =>
+          isBusy(cause)
+            ? new RelayStoreLocked({
+              path,
+              message: `Another process owns the Relay store at ${path.replace(/\.lock$/u, "")}. Stop it, then retry.`
+            })
+            : new RelayStoreFailed({
+              operation: "lock the Relay store",
+              message: `lock the Relay store failed: ${String(cause)}`
+            })
+      })),
     (lock) => Effect.sync(() => lock.close())
   )
 

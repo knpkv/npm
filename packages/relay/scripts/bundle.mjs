@@ -31,8 +31,9 @@ const result = await build({
   target: "node26",
   sourcemap: "linked",
   metafile: true,
-  // A declared package and its subpaths stay imports; Node's built-ins are external on this platform.
-  external: imported.flatMap((name) => [name, `${name}/*`]),
+  // A declared package and its subpaths stay imports; Node's built-ins are external on this platform, and so is
+  // Bun's SQLite, which the store lock loads only when it runs on Bun.
+  external: [...imported.flatMap((name) => [name, `${name}/*`]), "bun:sqlite"],
   logLevel: "warning"
 })
 

@@ -92,9 +92,9 @@ the bundle reaches anything else, and `pnpm test:pack` checks the packed `dist/w
   it is never logged, never sent to telemetry, and never served on unauthenticated routes.
 - One process owns a store: it holds an exclusive SQLite lock on `<store>.lock` (owner-only), so a second
   owner fails with `RelayStoreLocked`. Closing the harness frees the store at once, so the same process can
-  open it again; the OS releases the lock if the owner dies. The lock is a `node:sqlite` connection used
-  only through `exec`, because libsql keeps a closed connection, and its locks, until its statements are
-  garbage-collected.
+  open it again; the OS releases the lock if the owner dies. The lock is the runtime's own SQLite
+  (`node:sqlite` on Node, `bun:sqlite` on Bun), loaded when a store opens and used only through `exec`,
+  because libsql keeps a closed connection, and its locks, until its statements are garbage-collected.
 - Provider credentials stay with the user's CLI. Relay only spawns `claude`/`codex` with all of their tools
   withheld.
 
