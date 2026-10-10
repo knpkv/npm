@@ -195,7 +195,7 @@ The `AwsClientLive` layer captures config + httpClient once, then provides them 
 export const acquireCredentials = (profile: string, region: string) =>
   Effect.flatMap(AwsClientConfig, (config) =>
     Effect.tryPromise({
-      try: () => fromNodeProviderChain(profile === "default" ? {} : { profile })(),
+      try: () => config.credentialProvider({ profile, region }),
       catch: (cause) => new AwsCredentialError({ profile, region, cause })
     }).pipe(
       Effect.map(Credentials.fromAwsCredentialIdentity),

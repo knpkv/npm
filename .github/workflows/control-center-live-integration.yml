@@ -118,8 +118,12 @@ jobs:
           CONFLUENCE_EMAIL: ${{ secrets.CONFLUENCE_EMAIL }}
           CONFLUENCE_API_KEY: ${{ secrets.CONFLUENCE_API_KEY }}
         run: |
+          set -euo pipefail
           control_center_root="${CONTROL_CENTER_LIVE_RUNNER}/packages/control-center"
-          "${CONTROL_CENTER_LIVE_RUNNER}/node-runtime/bin/node" \
+          # Control Center reads the default profile from shared config only, never ambient keys.
+          bash "${control_center_root}/scripts/live-aws-default-profile.sh" \
+            "${RUNNER_TEMP}/aws/credentials" \
+            "${CONTROL_CENTER_LIVE_RUNNER}/node-runtime/bin/node" \
             "${CONTROL_CENTER_LIVE_RUNNER}/node_modules/vitest/vitest.mjs" \
             run \
             --root "${control_center_root}" \

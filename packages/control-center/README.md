@@ -572,8 +572,11 @@ It requires `CONTROL_CENTER_LIVE_INTEGRATION=1` plus the complete protected fixt
 
 - AWS: `CONTROL_CENTER_TEST_AWS_ROLE_ARN`, `CONTROL_CENTER_TEST_AWS_REGION`,
   `CONTROL_CENTER_TEST_CODECOMMIT_REPOSITORY`, and
-  `CONTROL_CENTER_TEST_CODEPIPELINE_PIPELINE`. The `default` standard credential chain must already
-  resolve temporary read-only credentials; the GitHub workflow obtains them through OIDC. The role
+  `CONTROL_CENTER_TEST_CODEPIPELINE_PIPELINE`. The `default` shared-config profile must already
+  resolve temporary read-only credentials; Control Center never falls back to ambient environment
+  or instance credentials. The GitHub workflow obtains an OIDC session and
+  `scripts/live-aws-default-profile.sh` writes it to a private runner-temp credentials file as
+  `[default]` before running the tests without the session environment variables. The role
   ARN is persisted as an owner-visible GitHub environment variable that repository and environment
   administrators may read. At workflow runtime its security boundary is server-private, and its
   permitted authenticated exposure is limited to GitHub environment configuration, protected role

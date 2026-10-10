@@ -904,6 +904,15 @@
       padding: var(--rly-space-8) var(--rly-space-12);
     }
 
+    /*
+     * Inside the hub the shell already gives a phone its 16px gutter, so the embedded directory adds none:
+     * its search field and rows line up on the shell's edge.
+     */
+    .connect-shell-embedded .connect-agents,
+    .connect-shell-embedded .connect-embedded-intro {
+      padding-inline: var(--rly-space-0);
+    }
+
     .connect-header > div > :first-child {
       display: none;
     }
@@ -1153,6 +1162,17 @@
   /* Phones give the options the whole row, so the status words fit one line; the groups keep their names
      through aria-labelledby. */
   @media (max-width: 640px) {
+    /*
+     * The status words keep to one line whatever their counts, scrolling sideways rather than wrapping; host
+     * names still wrap, since a long one must stay readable whole.
+     */
+    .connect-status-filter {
+      flex-wrap: nowrap;
+      overflow-x: auto;
+      overscroll-behavior-inline: contain;
+      scrollbar-width: none;
+    }
+
     .connect-filter-set {
       grid-template-columns: minmax(0, 1fr);
     }
