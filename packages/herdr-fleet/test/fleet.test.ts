@@ -803,7 +803,10 @@ describe("fleet local authority", () => {
         "0.0.0.00",
         "000.000.000.000",
         "010.0.0.1",
-        "192.168.001.024"
+        "192.168.001.024",
+        "192.168.1.24",
+        "100.64.0.1",
+        "10.0.0.1"
       ]
     ) {
       expect(Result.isFailure(
@@ -816,7 +819,7 @@ describe("fleet local authority", () => {
     expect(Result.isSuccess(
       Schema.decodeUnknownResult(HostConfiguration)({
         ...valid,
-        workBindAddress: "192.168.1.24"
+        workBindAddress: "127.0.0.2"
       })
     )).toBe(true)
     expect(Result.isSuccess(

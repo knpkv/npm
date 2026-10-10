@@ -72,7 +72,7 @@ const fixtureCss = [
   readCss(resolve(workspaceRoot, "packages/rly/src/styles/base.css")),
   readCss(resolve(workspaceRoot, "packages/rly/src/primitives/Tabs.module.css")),
   connectorCss,
-  readCss(resolve(workspaceRoot, "packages/herdr-approvals/src/styles.css")),
+  readCss(resolve(workspaceRoot, "packages/herdr-hub/src/styles.css")),
   `
     html, body { margin: 0; }
     *, *::before, *::after { box-sizing: border-box; }
@@ -564,12 +564,21 @@ for (
     expect(
       await page.locator(".connect-group-filter").evaluate((element) => element.scrollWidth - element.clientWidth)
     ).toBe(0)
-    for (const button of await buttons.all()) await expect(button).toBeInViewport()
+    // Host options wrap and stay in view; status options keep to one line and scroll sideways, so each comes
+    // into view as it takes focus.
+    for (const button of await filterRow.locator(".connect-group-filter").getByRole("button").all()) {
+      await expect(button).toBeInViewport()
+    }
+    const statusTops = await filterRow
+      .locator(".connect-status-filter button")
+      .evaluateAll((nodes) => new Set(nodes.map((node) => Math.round(node.getBoundingClientRect().top))).size)
+    expect(statusTops).toBe(1)
 
     await buttons.first().focus()
     for (let index = 1; index < 9; index += 1) {
       await page.keyboard.press("Tab")
       await expect(buttons.nth(index)).toBeFocused()
+      await expect(buttons.nth(index)).toBeInViewport()
     }
     await expect(page.locator(".connect-agent")).toHaveCount(3)
   })

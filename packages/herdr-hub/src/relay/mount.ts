@@ -85,7 +85,7 @@ export const makeRelayHubMount = Effect.fn("RelayHub.makeMount")(function*(optio
       catch: (cause) =>
         unavailable(
           `Relay could not load: ${Predicate.isError(cause) ? cause.message : String(cause)}`,
-          "Reinstall herdr-approvals so @knpkv/relay and its SQLite driver are present, then restart hostd."
+          "Reinstall herdr-hub so @knpkv/relay and its SQLite driver are present, then restart hostd."
         )
     })
     const fileSystem = yield* FileSystem.FileSystem

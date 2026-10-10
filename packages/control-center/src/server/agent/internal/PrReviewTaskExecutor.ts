@@ -57,6 +57,7 @@ import {
 } from "../../persistence/repositories/agentJobModels.js"
 import { AgentRuntimeRegistry } from "../AgentRuntimeRegistry.js"
 import { nativeReviewMaximumDurationMillis } from "../PrReviewTiming.js"
+import type { PrReviewRevisionReadError } from "./PrReviewRevisionReader.js"
 import {
   type PrReviewSandboxCommandResult,
   type PrReviewSandboxOutput,
@@ -386,7 +387,33 @@ const utf8Bytes = (
     Effect.mapError(() => providerFailure(providerId, "protocol", "PR review text could not be encoded.", false))
   )
 
-const shellQuote = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`
+// Evidence validation reads the host's checkout through `session.revisions`; a failed read is
+// classified like the contained command it replaced, keeping timeouts retryable.
+const revisionReadFailure = (providerId: ClaimedAgentJob["providerId"]) => (failure: PrReviewRevisionReadError) =>
+  resultValidationSandboxFailure(
+    providerId,
+    new PrReviewSandboxSessionError({
+      reason: failure.reason === "timeout"
+        ? "command-timeout"
+        : failure.reason === "output-rejected"
+        ? "output-rejected"
+        : "source-unavailable"
+    })
+  )
+
+const sourceTextDecoder = new TextDecoder("utf-8", { fatal: false })
+
+/** Splits file text into lines the way `sed -n` numbers them: a final newline ends, not starts, a line. */
+const sourceLines = (text: string): ReadonlyArray<string> => {
+  if (text.length === 0) return []
+  const lines = text.split("\n")
+  if (text.endsWith("\n")) lines.pop()
+  return lines
+}
+
+/** Lines `startLine` through `endLine` (1-based, inclusive) that exist in `lines`. */
+const lineRange = (lines: ReadonlyArray<string>, startLine: number, endLine: number): ReadonlyArray<string> =>
+  lines.slice(startLine - 1, endLine)
 const textEncoder = new TextEncoder()
 const ARTIFACT_PAGE_BYTES = 64 * 1_024
 const MAXIMUM_ARTIFACT_PAGES = 1_025
@@ -442,10 +469,10 @@ const fileExistsInHead = Effect.fn("PrReviewTaskExecutor.fileExistsInHead")(func
   session: PrReviewSandboxSession,
   path: string
 ) {
-  const check = yield* session.runCommand(
-    `git cat-file -e ${shellQuote(`${session.headRevision}:${path}`)}`
-  ).pipe(Effect.mapError((failure) => resultValidationSandboxFailure(providerId, failure)))
-  return check.exitCode === 0
+  const objectType = yield* session.revisions.objectType(session.headRevision, path).pipe(
+    Effect.mapError(revisionReadFailure(providerId))
+  )
+  return objectType !== null
 })
 
 const exactEvidence = Effect.fn("PrReviewTaskExecutor.exactEvidence")(function*(
@@ -454,18 +481,12 @@ const exactEvidence = Effect.fn("PrReviewTaskExecutor.exactEvidence")(function*(
   suggestion: PrReviewSuggestionDraftType
 ) {
   const path = suggestion.evidence.path
-  const diff = yield* session.runCommand(
-    `git -c core.quotePath=false diff --unified=0 --no-ext-diff --no-textconv --no-color ` +
-      `--inter-hunk-context=0 ` +
-      `${shellQuote(session.baseRevision)} ${shellQuote(session.headRevision)} -- ${shellQuote(path)}`
-  ).pipe(Effect.mapError((failure) => resultValidationSandboxFailure(providerId, failure)))
-  if (diff.exitCode !== 0) {
-    return yield* providerFailure(providerId, "protocol", "Suggestion diff evidence was unavailable.", false)
-  }
-  const completeDiff = yield* completeOutputText(session, diff.stdout)
-  if (completeDiff === null) {
-    return yield* providerFailure(providerId, "protocol", "Suggestion diff evidence was unavailable.", false)
-  }
+  const completeDiff = yield* session.revisions.diff({
+    base: session.baseRevision,
+    head: session.headRevision,
+    paths: [path],
+    findRenames: false
+  }).pipe(Effect.mapError(revisionReadFailure(providerId)))
   const isAddedEvidence = rangeIsChanged(
     diffLineIntervals(completeDiff, "head"),
     suggestion.evidence.startLine,
@@ -490,16 +511,17 @@ const exactEvidence = Effect.fn("PrReviewTaskExecutor.exactEvidence")(function*(
   const evidenceRevision = isAddedEvidence
     ? session.headRevision
     : session.baseRevision
-  const source = yield* session.runCommand(
-    `git show ${shellQuote(`${evidenceRevision}:${path}`)} | ` +
-      `sed -n '${String(suggestion.evidence.startLine)},${String(suggestion.evidence.endLine)}p'`
-  ).pipe(Effect.mapError((failure) => resultValidationSandboxFailure(providerId, failure)))
-  if (source.exitCode !== 0 || source.stdout.truncated || source.stdout.artifact !== null) {
+  const source = yield* session.revisions.blob(evidenceRevision, path).pipe(
+    Effect.mapError(revisionReadFailure(providerId))
+  )
+  if (source === null) {
     return yield* providerFailure(providerId, "protocol", "Suggestion source evidence was unavailable.", false)
   }
-  const excerpt = source.stdout.text.endsWith("\n")
-    ? source.stdout.text.slice(0, -1)
-    : source.stdout.text
+  const excerpt = lineRange(
+    sourceLines(sourceTextDecoder.decode(source)),
+    suggestion.evidence.startLine,
+    suggestion.evidence.endLine
+  ).join("\n")
   if (excerpt !== suggestion.evidence.excerpt) {
     return yield* providerFailure(
       providerId,
@@ -520,14 +542,11 @@ const exactEvidence = Effect.fn("PrReviewTaskExecutor.exactEvidence")(function*(
     )
   }
   if (suggestion.replacement !== undefined) {
-    const replacementCheck = yield* session.runCommand(
-      `replacement_index=$(mktemp) && rm -f "$replacement_index" && ` +
-        `trap 'rm -f "$replacement_index"' EXIT && ` +
-        `GIT_INDEX_FILE="$replacement_index" git read-tree ${shellQuote(session.headRevision)} && ` +
-        `printf '%s\\n' ${shellQuote(suggestion.replacement.unifiedDiff)} | ` +
-        `GIT_INDEX_FILE="$replacement_index" git apply --check --cached -`
-    ).pipe(Effect.mapError((failure) => resultValidationSandboxFailure(providerId, failure)))
-    if (replacementCheck.exitCode !== 0) {
+    const applies = yield* session.revisions.patchApplies(
+      session.headRevision,
+      suggestion.replacement.unifiedDiff
+    ).pipe(Effect.mapError(revisionReadFailure(providerId)))
+    if (!applies) {
       return yield* providerFailure(
         providerId,
         "protocol",
@@ -554,16 +573,13 @@ const resolveAnchor = Effect.fn("PrReviewTaskExecutor.resolveAnchor")(function*(
     }
     return anchor
   }
-  const diff = yield* session.runCommand(
-    `git -c core.quotePath=false diff --unified=0 --no-ext-diff --no-textconv --no-color ` +
-      `--inter-hunk-context=0 ` +
-      `${shellQuote(session.baseRevision)} ${shellQuote(session.headRevision)} -- ${shellQuote(suggestion.anchor.path)}`
-  ).pipe(Effect.mapError((failure) => resultValidationSandboxFailure(providerId, failure)))
-  if (diff.exitCode !== 0) {
-    return yield* providerFailure(providerId, "protocol", "File suggestion anchor was unavailable.", false)
-  }
-  const completeDiff = yield* completeOutputText(session, diff.stdout)
-  if (completeDiff === null || completeDiff.trim().length === 0) {
+  const completeDiff = yield* session.revisions.diff({
+    base: session.baseRevision,
+    head: session.headRevision,
+    paths: [suggestion.anchor.path],
+    findRenames: false
+  }).pipe(Effect.mapError(revisionReadFailure(providerId)))
+  if (completeDiff.trim().length === 0) {
     return yield* providerFailure(providerId, "protocol", "File suggestion anchor was unavailable.", false)
   }
   const headLine = diffLineIntervals(completeDiff, "head")[0]?.startLine
@@ -607,14 +623,13 @@ const locationExistsInHead = Effect.fn("PrReviewTaskExecutor.locationExistsInHea
   }
 ) {
   const expectedLines = location.endLine - location.startLine + 1
-  const source = shellQuote(`${session.headRevision}:${location.path}`)
-  const check = yield* session.runCommand(
-    `git show ${source} | LC_ALL=C grep -Iq '' && ` +
-      `git show ${source} | ` +
-      `sed -n '${String(location.startLine)},${String(location.endLine)}p' | ` +
-      `awk 'END { exit NR == ${String(expectedLines)} ? 0 : 1 }'`
-  ).pipe(Effect.mapError((failure) => resultValidationSandboxFailure(providerId, failure)))
-  return check.exitCode === 0
+  const source = yield* session.revisions.blob(session.headRevision, location.path).pipe(
+    Effect.mapError(revisionReadFailure(providerId))
+  )
+  // A non-empty text blob (no NUL byte) holding every line of the range.
+  if (source === null || source.byteLength === 0 || source.includes(0)) return false
+  return lineRange(sourceLines(sourceTextDecoder.decode(source)), location.startLine, location.endLine).length ===
+    expectedLines
 })
 
 const changedHeadLineIntervals = Effect.fn("PrReviewTaskExecutor.changedHeadLineIntervals")(function*(
@@ -622,29 +637,20 @@ const changedHeadLineIntervals = Effect.fn("PrReviewTaskExecutor.changedHeadLine
   session: PrReviewSandboxSession,
   path: string
 ) {
-  const source = shellQuote(`${session.headRevision}:${path}`)
-  const objectType = yield* session.runCommand(
-    `git cat-file -t ${source}`
-  ).pipe(Effect.mapError((failure) => resultValidationSandboxFailure(providerId, failure)))
-  if (objectType.exitCode !== 0) return null
-  const completeObjectType = yield* completeOutputText(session, objectType.stdout)
-  if (completeObjectType?.trim() !== "blob") return null
-  const baseRevision = shellQuote(session.baseRevision)
-  const headRevision = shellQuote(session.headRevision)
-  const targetPath = shellQuote(path)
-  const diff = yield* session.runCommand(
-    `previous_path=$(git -c core.quotePath=false diff --name-status --find-renames ${baseRevision} ${headRevision} | ` +
-      `awk -F '\t' -v target=${targetPath} '$1 ~ /^R[0-9]+$/ && $3 == target { print $2; exit }') && ` +
-      `if [ -n "$previous_path" ]; then ` +
-      `git --literal-pathspecs -c core.quotePath=false diff --find-renames --unified=0 --no-ext-diff ` +
-      `--no-textconv --no-color --inter-hunk-context=0 ${baseRevision} ${headRevision} -- ` +
-      `${targetPath} "$previous_path"; else ` +
-      `git --literal-pathspecs -c core.quotePath=false diff --find-renames --unified=0 --no-ext-diff ` +
-      `--no-textconv --no-color --inter-hunk-context=0 ${baseRevision} ${headRevision} -- ${targetPath}; fi`
-  ).pipe(Effect.mapError((failure) => resultValidationSandboxFailure(providerId, failure)))
-  if (diff.exitCode !== 0) return null
-  const completeDiff = yield* completeOutputText(session, diff.stdout)
-  return completeDiff === null ? null : diffLineIntervals(completeDiff, "head")
+  const objectType = yield* session.revisions.objectType(session.headRevision, path).pipe(
+    Effect.mapError(revisionReadFailure(providerId))
+  )
+  if (objectType !== "blob") return null
+  const range = { base: session.baseRevision, head: session.headRevision }
+  const previousPath = yield* session.revisions.renamedFrom({ ...range, path }).pipe(
+    Effect.mapError(revisionReadFailure(providerId))
+  )
+  const diff = yield* session.revisions.diff({
+    ...range,
+    paths: previousPath === null ? [path] : [path, previousPath],
+    findRenames: true
+  }).pipe(Effect.mapError(revisionReadFailure(providerId)))
+  return diffLineIntervals(diff, "head")
 })
 
 const locationIsChangedInHead = Effect.fn("PrReviewTaskExecutor.locationIsChangedInHead")(function*(

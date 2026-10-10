@@ -148,12 +148,12 @@ describe("fleetctl work commands", () => {
         "http://127.0.0.1:4777/v1/work/admission-preflight"
       )
       expect(yield* workRecoveryPreflightUrl(config, "alpha")).toBe("http://127.0.0.1:4777/v1/work/recovery-preflight")
-      const lanConfig = { ...config, workBindAddress: "192.168.1.24" }
+      const lanConfig = { ...config, workBindAddress: "127.0.0.2" }
       expect(yield* workCheckpointUrl(lanConfig, "ALPHA")).toBe(
-        "http://192.168.1.24:4778/v1/work/checkpoints"
+        "http://127.0.0.2:4778/v1/work/checkpoints"
       )
       expect(yield* workSnapshotUrl(lanConfig, "ALPHA")).toBe(
-        "http://192.168.1.24:4778/v1/work"
+        "http://127.0.0.2:4778/v1/work"
       )
       expect(workDefaultTarget(config)).toBe("ALPHA")
       expect(workSnapshotTarget(config, undefined)).toBe("ALPHA")

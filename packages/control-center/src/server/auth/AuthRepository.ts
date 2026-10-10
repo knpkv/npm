@@ -318,6 +318,35 @@ const makeAuthRepository = Effect.gen(function*() {
     return outcome.value
   })
 
+  /**
+   * Checks a session token against revocation, idle expiry and absolute expiry without
+   * recording activity. Used for periodic re-checks that are not user activity, so they
+   * neither touch `last_seen_at` nor extend `idle_expires_at`.
+   */
+  const validate = Effect.fn("AuthRepository.validate")(function*(input: {
+    readonly tokenHash: string
+    readonly now: typeof UtcTimestamp.Type
+  }) {
+    const rows = yield* sql.unsafe(
+      `SELECT ${sessionSelection} FROM sessions
+       WHERE token_hash = ? AND revoked_at IS NULL
+         AND idle_expires_at > ? AND absolute_expires_at > ?`,
+      [input.tokenHash, timestamp(input.now), timestamp(input.now)]
+    ).pipe(
+      Effect.catchTag("SqlError", () => Effect.fail(new AuthPersistenceError({ operation: "validate-session" })))
+    )
+    const candidate = rows[0]
+    if (candidate === undefined) return yield* new CredentialRejectedError()
+    const decoded = Schema.decodeUnknownResult(SessionRow)(candidate)
+    if (Result.isFailure(decoded)) {
+      yield* quarantineSession(candidate, null, input.now).pipe(
+        Effect.mapError(() => new CredentialRejectedError())
+      )
+      return yield* new CredentialRejectedError()
+    }
+    return sessionSummary(decoded.success)
+  })
+
   return {
     issueFirstRun: Effect.fn("AuthRepository.issueFirstRun")(function*(input: NewPairingCode) {
       yield* database.transaction(
@@ -421,6 +450,8 @@ const makeAuthRepository = Effect.gen(function*() {
     }),
 
     authenticate,
+
+    validate,
 
     listSessions: Effect.fn("AuthRepository.listSessions")(function*(workspaceId: WorkspaceId) {
       const rows = yield* sql.unsafe(

@@ -4638,6 +4638,93 @@ esac
       provideNodeServices
     )
   }, { timeout: 10_000 })
+  it.effect("refuses browser upgrades on the tailnet terminal", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-http-terminal-origin-test-"))
+    const tailscaleCommand = join(root, "tailscale-test")
+    writeFileSync(
+      tailscaleCommand,
+      `#!/bin/sh
+case "$1" in
+  ip) printf '%s\n' '127.0.0.1' ;;
+  whois) printf '%s\n' '{"Node":{"StableID":"node-ser8"},"UserProfile":{"LoginName":"andrey@example.com"}}' ;;
+  status) printf '%s\n' '{"Peer":{},"Self":{"HostName":"ALPHA","ID":"node-alpha","Online":true,"TailscaleIPs":["127.0.0.1"]}}' ;;
+esac
+`,
+      { mode: 0o700 }
+    )
+    const hostConfig = {
+      ...config(root),
+      approvalPort: 0,
+      crossHost: true,
+      port: 0,
+      tailscaleCommand
+    }
+    let opens = 0
+    const connector: TerminalConnector = {
+      open: () =>
+        Effect.sync(() => {
+          opens += 1
+          return { events: Stream.never, send: () => Effect.void }
+        })
+    }
+    return Effect.acquireUseRelease(
+      JobStore.open(join(root, "jobs.sqlite")),
+      (store) =>
+        Effect.scoped(Effect.gen(function*() {
+          const fleet = yield* makeFleetService({
+            approvalEnabled: false,
+            host: hostConfig.host,
+            operations,
+            store
+          })
+          const server = yield* Effect.acquireRelease(
+            Effect.promise(() =>
+              startHttpServer(hostConfig, fleet, assets, {
+                terminalConnector: connector
+              })
+            ),
+            (running) => Effect.promise(running.close)
+          )
+          if (server.tailnetUrl === null) {
+            return yield* Effect.die("tailnet listener missing")
+          }
+          const url = new URL("/v1/connect/terminal", server.tailnetUrl)
+          url.protocol = "ws:"
+          url.searchParams.set("agent", "agent-1")
+          url.searchParams.set("cols", "100")
+          url.searchParams.set("host", hostConfig.host)
+          url.searchParams.set("rows", "30")
+          const upgrade = (headers: Record<string, string>) =>
+            Effect.acquireRelease(
+              Effect.sync(() => new WebSocketClient(url, { headers })),
+              (client) => Effect.sync(() => client.terminate())
+            ).pipe(
+              Effect.flatMap((socket) =>
+                Effect.promise(() =>
+                  new Promise<string>((resolve) => {
+                    socket.once("open", () => resolve("open"))
+                    socket.once("unexpected-response", (_request, response) => {
+                      response.resume()
+                      resolve(`status:${response.statusCode}`)
+                    })
+                    socket.once("error", (error) => resolve(`error:${String(error)}`))
+                  })
+                )
+              )
+            )
+          expect(yield* upgrade({ origin: server.tailnetUrl })).toBe("status:403")
+          expect(yield* upgrade({ origin: "https://elsewhere.example.test" })).toBe("status:403")
+          expect(yield* upgrade({ "sec-fetch-site": "cross-site" })).toBe("status:403")
+          expect(opens).toBe(0)
+          // The hub's own relay sends neither header.
+          expect(yield* upgrade({})).toBe("open")
+        })),
+      (store) => Effect.sync(() => store.close())
+    ).pipe(
+      Effect.ensuring(Effect.sync(() => rmSync(root, { force: true, recursive: true }))),
+      provideNodeServices
+    )
+  }, { timeout: 10_000 })
 })
 
 describe("approval URL resolution", () => {

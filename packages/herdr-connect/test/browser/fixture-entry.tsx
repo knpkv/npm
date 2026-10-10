@@ -3,7 +3,7 @@ import "@knpkv/rly/styles.css"
 import "../../src/styles.css"
 import "@knpkv/herdr-work/styles.css"
 // The hub's own sheet styles Connect's header nav, so the fixture shows the header that ships.
-import "../../../herdr-approvals/src/styles.css"
+import "../../../herdr-hub/src/styles.css"
 import { RegistryProvider } from "@effect/atom-react"
 import { createRoot } from "react-dom/client"
 import { ConnectSurface, makeConnectAtoms } from "../../src/client.js"

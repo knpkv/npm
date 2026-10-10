@@ -93,7 +93,7 @@ The trusted local `sbx` executable and optional sandbox template used to create 
 _Avoid_: Repository Dockerfile, raw Docker container, agent image
 
 **Review Checkout Broker**:
-The trusted host-side component that reuses the connected CodeCommit profile to fetch and verify the exact base and head commits. The Review Sandbox clones that exact checkout into its isolated sbx filesystem, removes authenticated remotes and credential configuration, and deletes host staging data when the scoped run ends.
+The trusted host-side component that reuses the connected CodeCommit profile to fetch and verify the exact base and head commits. The Review Sandbox clones that exact checkout into its isolated sbx filesystem, removes authenticated remotes and credential configuration, and deletes host staging data when the scoped run ends. Evidence validation reads the broker's host checkout, never the sandbox copy.
 _Avoid_: Git clone in the sandbox, repository mount, AWS credentials
 
 **Review Sandbox**:

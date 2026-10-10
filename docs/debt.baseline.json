@@ -2641,104 +2641,6 @@
       "reasoned": true
     },
     {
-      "package": "herdr-approvals",
-      "kind": "ast-grep",
-      "file": "packages/herdr-approvals/test/http.test.ts",
-      "text": "ast-grep-ignore: no-released-ephemeral-test-port -- one test must probe a port before hostd binds it (see its use).",
-      "reasoned": true
-    },
-    {
-      "package": "herdr-approvals",
-      "kind": "effect-diagnostics",
-      "file": "packages/herdr-approvals/scripts/test-packed-packages.ts",
-      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
-      "reasoned": true
-    },
-    {
-      "package": "herdr-approvals",
-      "kind": "effect-diagnostics",
-      "file": "packages/herdr-approvals/src/bin.ts",
-      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
-      "reasoned": true
-    },
-    {
-      "package": "herdr-approvals",
-      "kind": "effect-diagnostics",
-      "file": "packages/herdr-approvals/src/fleetctl.ts",
-      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
-      "reasoned": true
-    },
-    {
-      "package": "herdr-approvals",
-      "kind": "effect-diagnostics",
-      "file": "packages/herdr-approvals/test/config-path.test.ts",
-      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
-      "reasoned": true
-    },
-    {
-      "package": "herdr-approvals",
-      "kind": "effect-diagnostics",
-      "file": "packages/herdr-approvals/test/hostd-runtime.test.ts",
-      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
-      "reasoned": true
-    },
-    {
-      "package": "herdr-approvals",
-      "kind": "effect-diagnostics",
-      "file": "packages/herdr-approvals/test/hostd-runtime.test.ts",
-      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
-      "reasoned": true
-    },
-    {
-      "package": "herdr-approvals",
-      "kind": "effect-diagnostics",
-      "file": "packages/herdr-approvals/test/hostd-runtime.test.ts",
-      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
-      "reasoned": true
-    },
-    {
-      "package": "herdr-approvals",
-      "kind": "effect-diagnostics",
-      "file": "packages/herdr-approvals/test/http.test.ts",
-      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
-      "reasoned": true
-    },
-    {
-      "package": "herdr-approvals",
-      "kind": "effect-diagnostics",
-      "file": "packages/herdr-approvals/test/lan-work.test.ts",
-      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
-      "reasoned": false
-    },
-    {
-      "package": "herdr-approvals",
-      "kind": "effect-diagnostics",
-      "file": "packages/herdr-approvals/test/operations.test.ts",
-      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
-      "reasoned": true
-    },
-    {
-      "package": "herdr-approvals",
-      "kind": "effect-diagnostics",
-      "file": "packages/herdr-approvals/test/outstanding-work-job.test.ts",
-      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
-      "reasoned": false
-    },
-    {
-      "package": "herdr-approvals",
-      "kind": "effect-diagnostics",
-      "file": "packages/herdr-approvals/test/push-worker.test.ts",
-      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
-      "reasoned": true
-    },
-    {
-      "package": "herdr-approvals",
-      "kind": "effect-diagnostics",
-      "file": "packages/herdr-approvals/test/state-files.test.ts",
-      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
-      "reasoned": false
-    },
-    {
       "package": "herdr-connect",
       "kind": "ast-grep",
       "file": "packages/herdr-connect/src/internal/terminal-release.ts",
@@ -2862,6 +2764,97 @@
       "kind": "effect-diagnostics",
       "file": "packages/herdr-fleet/test/sqlite.test.ts",
       "text": "@effect-diagnostics strictEffectProvide:skip-file",
+      "reasoned": false
+    },
+    {
+      "package": "herdr-hub",
+      "kind": "ast-grep",
+      "file": "packages/herdr-hub/test/http.test.ts",
+      "text": "ast-grep-ignore: no-released-ephemeral-test-port -- one test must probe a port before hostd binds it (see its use).",
+      "reasoned": true
+    },
+    {
+      "package": "herdr-hub",
+      "kind": "effect-diagnostics",
+      "file": "packages/herdr-hub/scripts/test-packed-packages.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "herdr-hub",
+      "kind": "effect-diagnostics",
+      "file": "packages/herdr-hub/src/fleetctl.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "herdr-hub",
+      "kind": "effect-diagnostics",
+      "file": "packages/herdr-hub/test/config-path.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "herdr-hub",
+      "kind": "effect-diagnostics",
+      "file": "packages/herdr-hub/test/hostd-runtime.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "herdr-hub",
+      "kind": "effect-diagnostics",
+      "file": "packages/herdr-hub/test/hostd-runtime.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "herdr-hub",
+      "kind": "effect-diagnostics",
+      "file": "packages/herdr-hub/test/hostd-runtime.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "herdr-hub",
+      "kind": "effect-diagnostics",
+      "file": "packages/herdr-hub/test/http.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "herdr-hub",
+      "kind": "effect-diagnostics",
+      "file": "packages/herdr-hub/test/lan-work.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "herdr-hub",
+      "kind": "effect-diagnostics",
+      "file": "packages/herdr-hub/test/operations.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "herdr-hub",
+      "kind": "effect-diagnostics",
+      "file": "packages/herdr-hub/test/outstanding-work-job.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "herdr-hub",
+      "kind": "effect-diagnostics",
+      "file": "packages/herdr-hub/test/push-worker.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "herdr-hub",
+      "kind": "effect-diagnostics",
+      "file": "packages/herdr-hub/test/state-files.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
       "reasoned": false
     },
     {

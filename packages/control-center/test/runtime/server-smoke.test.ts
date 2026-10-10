@@ -658,7 +658,7 @@ describe("Control Center closed runtime", () => {
       if (Result.isFailure(rejectedMutation)) {
         assert.strictEqual(rejectedMutation.failure._tag, "ServiceUnavailableApiError")
       }
-      const rejectedExport = yield* authenticatedClient.timeline.exportJson({
+      const rejectedExport = yield* mutationClient.timeline.exportJson({
         query: { limit: 1 }
       }).pipe(Effect.result)
       assert.isTrue(Result.isFailure(rejectedExport))
@@ -1379,6 +1379,16 @@ describe("Control Center closed runtime", () => {
         baseRevision: subject.baseRevision,
         headRevision: subject.headRevision,
         jobId,
+        revisions: {
+          objectType: () => Effect.succeed("blob"),
+          blob: () =>
+            Effect.succeed(
+              new TextEncoder().encode(`${"// filler\n".repeat(41)}${evidenceExcerpt}\n`)
+            ),
+          diff: () => Effect.succeed(`@@ -0,0 +42 @@\n+${evidenceExcerpt}\n`),
+          renamedFrom: () => Effect.succeed(null),
+          patchApplies: () => Effect.succeed(true)
+        },
         listFiles: () =>
           Effect.sync(() => {
             sandboxOperations.push("listFiles")

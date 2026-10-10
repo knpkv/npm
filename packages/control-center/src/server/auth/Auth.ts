@@ -223,6 +223,16 @@ const makeAuth = Effect.gen(function*() {
       return (yield* authenticateRecord(sessionToken)).summary
     }),
 
+    /** Re-checks a session without recording activity; see `AuthRepository.validate`. */
+    validateSession: Effect.fn("Auth.validateSession")(function*(
+      sessionToken: Redacted.Redacted<SessionToken>
+    ) {
+      return yield* repository.validate({
+        tokenHash: yield* hashCredential(sessionToken),
+        now: yield* now
+      })
+    }),
+
     recoverCsrfToken: Effect.fn("Auth.recoverCsrfToken")(function*(
       sessionToken: Redacted.Redacted<SessionToken>
     ) {

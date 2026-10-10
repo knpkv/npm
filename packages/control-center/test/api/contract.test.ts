@@ -196,10 +196,11 @@ describe("ControlCenterApi contract", () => {
 
     const csvExportPath = specification.paths["/api/v1/timeline/export.csv"]
     assert.isDefined(csvExportPath)
-    assert.isDefined(csvExportPath.get)
-    assert.isDefined(csvExportPath.get.responses["200"]?.content?.["text/csv; charset=utf-8"])
+    assert.isUndefined(csvExportPath.get)
+    assert.isDefined(csvExportPath.post)
+    assert.isDefined(csvExportPath.post.responses["200"]?.content?.["text/csv; charset=utf-8"])
     assert.deepStrictEqual(
-      csvExportPath.get.parameters?.map(({ in: location, name, required }) => ({ location, name, required })),
+      csvExportPath.post.parameters?.map(({ in: location, name, required }) => ({ location, name, required })),
       [
         { location: "query", name: "actor", required: false },
         { location: "query", name: "from", required: false },
@@ -209,8 +210,9 @@ describe("ControlCenterApi contract", () => {
     )
     const jsonExportPath = specification.paths["/api/v1/timeline/export.json"]
     assert.isDefined(jsonExportPath)
-    assert.isDefined(jsonExportPath.get)
-    assert.isDefined(jsonExportPath.get.responses["200"]?.content?.["application/json; charset=utf-8"])
+    assert.isUndefined(jsonExportPath.get)
+    assert.isDefined(jsonExportPath.post)
+    assert.isDefined(jsonExportPath.post.responses["200"]?.content?.["application/json; charset=utf-8"])
 
     const submitClockifyActionPath = specification.paths["/api/v1/items/{entityId}/clockify-actions"]
     assert.isDefined(submitClockifyActionPath)
@@ -511,8 +513,8 @@ describe("ControlCenterApi contract", () => {
       [
         ["page", "GET", "/api/v1/timeline"],
         ["detail", "GET", "/api/v1/timeline/events/:eventKey"],
-        ["exportCsv", "GET", "/api/v1/timeline/export.csv"],
-        ["exportJson", "GET", "/api/v1/timeline/export.json"]
+        ["exportCsv", "POST", "/api/v1/timeline/export.csv"],
+        ["exportJson", "POST", "/api/v1/timeline/export.json"]
       ]
     )
     assert.deepStrictEqual(
@@ -680,8 +682,8 @@ describe("ControlCenterApi contract", () => {
     assert.deepStrictEqual(middlewareByEndpoint(TimelineApiGroup.endpoints), {
       page: [SessionCookieAuth.key],
       detail: [SessionCookieAuth.key],
-      exportCsv: [SessionCookieAuth.key],
-      exportJson: [SessionCookieAuth.key]
+      exportCsv: [SessionCookieAuth.key, SessionMutationAuth.key],
+      exportJson: [SessionCookieAuth.key, SessionMutationAuth.key]
     })
     assert.deepStrictEqual(middlewareByEndpoint(AgentApiGroup.endpoints), {
       providers: [SessionCookieAuth.key],

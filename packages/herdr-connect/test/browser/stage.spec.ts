@@ -63,4 +63,50 @@ test.describe("Connect stage", () => {
       expect(await motes()).toBe(expected)
     }
   })
+
+  // Every iPhone is wider than the old 24rem phone layout: the name and work must get the row's width there,
+  // not a four-column table, and the stage keeps the page's one 16px gutter.
+  for (const width of [390, 393, 430]) {
+    test(`gives the name and work the row on a ${String(width)}px iPhone`, async ({ page }) => {
+      await page.setViewportSize({ height: 844, width })
+      await page.goto("/")
+      const row = page.locator(".connect-agent", { hasText: "fixture-pane" })
+      const [rowBox, copyBox] = await Promise.all([row.boundingBox(), row.locator(".connect-agent-copy").boundingBox()])
+      expect(rowBox).not.toBeNull()
+      expect(copyBox).not.toBeNull()
+      if (rowBox !== null && copyBox !== null) expect(copyBox.width).toBeGreaterThanOrEqual(rowBox.width * 0.75)
+      const statusRows = await page
+        .locator(".connect-status-filter button")
+        .evaluateAll((buttons) => new Set(buttons.map((button) => Math.round(button.getBoundingClientRect().top))).size)
+      expect(statusRows).toBe(1)
+      await row.click()
+      const padding = await page
+        .locator(".connect-stage")
+        .evaluate((stage) => [getComputedStyle(stage).paddingInlineStart, getComputedStyle(stage).paddingInlineEnd])
+      expect(padding).toEqual(["16px", "16px"])
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
+    })
+  }
+
+  // In the hub the shell gives a phone its one 16px gutter and the directory adds none, so an agent's row spans
+  // the screen less 32px; the status options keep to one line whatever their counts.
+  for (const width of [390, 393, 430]) {
+    test(`spans the hub's one gutter and keeps the status options on one line at ${String(width)}px`, async ({ page }) => {
+      await page.setViewportSize({ height: 844, width })
+      await page.goto("/?embedded")
+      // The hub mounts Connect inside its shell's main column; give the fixture's root that column's class.
+      await page.locator("#fleet-connect-root").evaluate((root) => root.classList.add("fleet-shell-main"))
+      const row = await page.locator(".connect-agent").first().boundingBox()
+      expect(row).not.toBeNull()
+      if (row !== null) {
+        expect(row.x).toBe(16)
+        expect(row.width).toBe(width - 32)
+      }
+      const rows = await page
+        .locator(".connect-status-filter button")
+        .evaluateAll((buttons) => new Set(buttons.map((button) => Math.round(button.getBoundingClientRect().top))).size)
+      expect(rows).toBe(1)
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
+    })
+  }
 })

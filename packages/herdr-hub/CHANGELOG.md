@@ -1,6 +1,19 @@
-# @knpkv/herdr-approvals
+# @knpkv/herdr-hub
 
-## 0.18.0
+Released as `@knpkv/herdr-approvals` up to 0.18.0; the headings below are that package's history.
+
+## 0.19.0
+
+### Minor Changes
+
+- [#750](https://github.com/knpkv/npm/pull/750) [`1e3fa2c`](https://github.com/knpkv/npm/commit/1e3fa2c7edc1b33f5a870fc63e7e0e00b7724436) Thanks [@konopkov](https://github.com/konopkov)! - `@knpkv/herdr-approvals` is now `@knpkv/herdr-hub`: the package serves the whole hub (Approvals, Connect, Work, Usage and Relay), not approvals alone. The `hostd` and `fleetctl` binaries and every export path (`.`, `./fleetctl`, `./hostd`, `./hostd-runtime`) are unchanged; install `@knpkv/herdr-hub` in place of `@knpkv/herdr-approvals`, which is deprecated.
+
+### Patch Changes
+
+- Updated dependencies [[`928f3e2`](https://github.com/knpkv/npm/commit/928f3e2f70fc7dc3074502b0558f55b178ce475f), [`99cf00e`](https://github.com/knpkv/npm/commit/99cf00e9738d3c617ad6c95dc5076ca18767f77e)]:
+  - @knpkv/herdr-connect@0.11.1
+
+## 0.18.0 (@knpkv/herdr-approvals)
 
 ### Minor Changes
 
@@ -15,7 +28,7 @@
   - @knpkv/relay-product@0.5.1
   - @knpkv/relay@0.2.1
 
-## 0.17.0
+## 0.17.0 (@knpkv/herdr-approvals)
 
 ### Minor Changes
 
@@ -45,7 +58,7 @@
   - @knpkv/rly@0.19.0
   - @knpkv/herdr-coordinator@0.3.9
 
-## 0.16.0
+## 0.16.0 (@knpkv/herdr-approvals)
 
 ### Minor Changes
 
@@ -58,7 +71,7 @@
   - @knpkv/herdr-connect@0.10.2
   - @knpkv/herdr-work@0.9.5
 
-## 0.15.0
+## 0.15.0 (@knpkv/herdr-approvals)
 
 ### Minor Changes
 
@@ -78,7 +91,7 @@
   - @knpkv/herdr-coordinator@0.3.8
   - @knpkv/herdr-work@0.9.4
 
-## 0.14.0
+## 0.14.0 (@knpkv/herdr-approvals)
 
 ### Minor Changes
 
@@ -96,7 +109,7 @@
   - @knpkv/rly@0.16.0
   - @knpkv/herdr-work@0.9.3
 
-## 0.13.0
+## 0.13.0 (@knpkv/herdr-approvals)
 
 ### Minor Changes
 
@@ -112,7 +125,7 @@
   - @knpkv/rly@0.15.0
   - @knpkv/herdr-work@0.9.2
 
-## 0.12.0
+## 0.12.0 (@knpkv/herdr-approvals)
 
 ### Minor Changes
 
@@ -146,7 +159,7 @@
   - @knpkv/rly@0.14.0
   - @knpkv/herdr-work@0.9.1
 
-## 0.11.1
+## 0.11.1 (@knpkv/herdr-approvals)
 
 ### Patch Changes
 
@@ -156,7 +169,7 @@
   - @knpkv/rly@0.13.0
   - @knpkv/herdr-coordinator@0.3.6
 
-## 0.11.0
+## 0.11.0 (@knpkv/herdr-approvals)
 
 ### Minor Changes
 
@@ -170,7 +183,7 @@
   - @knpkv/herdr-connect@0.7.2
   - @knpkv/herdr-coordinator@0.3.5
 
-## 0.10.0
+## 0.10.0 (@knpkv/herdr-approvals)
 
 ### Minor Changes
 
@@ -191,7 +204,7 @@
   - @knpkv/herdr-work@0.8.0
   - @knpkv/herdr-coordinator@0.3.4
 
-## 0.9.0
+## 0.9.0 (@knpkv/herdr-approvals)
 
 ### Minor Changes
 
@@ -205,7 +218,7 @@
   - @knpkv/herdr-work@0.7.2
   - @knpkv/rly@0.12.0
 
-## 0.8.0
+## 0.8.0 (@knpkv/herdr-approvals)
 
 ### Minor Changes
 
@@ -221,7 +234,7 @@
   - @knpkv/rly@0.11.0
   - @knpkv/herdr-work@0.7.1
 
-## 0.7.0
+## 0.7.0 (@knpkv/herdr-approvals)
 
 ### Minor Changes
 
@@ -237,7 +250,7 @@
   - @knpkv/rly@0.10.0
   - @knpkv/herdr-coordinator@0.3.3
 
-## 0.6.0
+## 0.6.0 (@knpkv/herdr-approvals)
 
 ### Minor Changes
 
@@ -254,7 +267,7 @@
   - @knpkv/herdr-work@0.6.0
   - @knpkv/herdr-coordinator@0.3.2
 
-## 0.5.4
+## 0.5.4 (@knpkv/herdr-approvals)
 
 ### Patch Changes
 
@@ -263,7 +276,7 @@
   - @knpkv/herdr-work@0.5.3
   - @knpkv/herdr-connect@0.4.4
 
-## 0.5.3
+## 0.5.3 (@knpkv/herdr-approvals)
 
 ### Patch Changes
 
@@ -272,7 +285,7 @@
   - @knpkv/herdr-connect@0.4.3
   - @knpkv/herdr-work@0.5.2
 
-## 0.5.2
+## 0.5.2 (@knpkv/herdr-approvals)
 
 ### Patch Changes
 
@@ -283,7 +296,7 @@
   - @knpkv/herdr-fleet@0.5.1
   - @knpkv/herdr-tailscale@0.3.1
 
-## 0.5.1
+## 0.5.1 (@knpkv/herdr-approvals)
 
 ### Patch Changes
 
@@ -294,7 +307,7 @@
   - @knpkv/herdr-connect@0.4.1
   - @knpkv/herdr-coordinator@0.3.1
 
-## 0.5.0
+## 0.5.0 (@knpkv/herdr-approvals)
 
 ### Minor Changes
 
@@ -333,7 +346,7 @@
   - @knpkv/herdr-fleet@0.4.0
   - @knpkv/herdr-tailscale@0.3.0
 
-## 0.4.0
+## 0.4.0 (@knpkv/herdr-approvals)
 
 ### Minor Changes
 
@@ -352,7 +365,7 @@
   - @knpkv/herdr-connect@0.3.1
   - @knpkv/herdr-coordinator@0.2.1
 
-## 0.3.0
+## 0.3.0 (@knpkv/herdr-approvals)
 
 ### Minor Changes
 
@@ -367,7 +380,7 @@
   - @knpkv/herdr-connect@0.3.0
   - @knpkv/rly@0.5.0
 
-## 0.2.0
+## 0.2.0 (@knpkv/herdr-approvals)
 
 ### Minor Changes
 

@@ -3,7 +3,7 @@
  *
  * **Mental model**
  *
- * - **Priced when read** (ADR 0002). Nothing here is persisted, so updating a rate or adding a model
+ * - **Priced when read.** Nothing here is persisted, so updating a rate or adding a model
  *   reprices every event already stored, past ones included. The UI says so.
  * - **Unknown is not free.** A model missing from the table, or a cache rate the table lacks for
  *   tokens that were actually cached, yields `Option.none()`.

@@ -32,4 +32,4 @@ files:
 
 note: |
   herdr-fleet/response, which reads HTTP bodies through bounded-io, is bundled
-  into the herdr-connect and herdr-approvals browser clients.
+  into the herdr-connect and herdr-hub browser clients.

@@ -244,7 +244,8 @@ credential proxy while disabling project-document and exec-policy loading from t
 Claude disables project, local, and user setting sources so its `CLAUDE.md` files are
 review content rather than executable instructions, and safe mode disables automatic project-memory
 discovery. Every path validates structured output and exact
-diff evidence on the trusted host. Sandbox names use a server-private compact workspace-scoped prefix and remain within sbx's 63-character
+diff evidence on the trusted host, reading the base and head from the host's own checkout rather
+than the agent-writable sandbox copy. Sandbox names use a server-private compact workspace-scoped prefix and remain within sbx's 63-character
 limit, and begin with the configured worker workspace's
 `cc-pr-review-<compact-workspace-id>-` prefix. Startup retains live names in that owned namespace
 for recovery inspection and never removes foreign-workspace or legacy unscoped names automatically.
@@ -571,8 +572,11 @@ It requires `CONTROL_CENTER_LIVE_INTEGRATION=1` plus the complete protected fixt
 
 - AWS: `CONTROL_CENTER_TEST_AWS_ROLE_ARN`, `CONTROL_CENTER_TEST_AWS_REGION`,
   `CONTROL_CENTER_TEST_CODECOMMIT_REPOSITORY`, and
-  `CONTROL_CENTER_TEST_CODEPIPELINE_PIPELINE`. The `default` standard credential chain must already
-  resolve temporary read-only credentials; the GitHub workflow obtains them through OIDC. The role
+  `CONTROL_CENTER_TEST_CODEPIPELINE_PIPELINE`. The `default` shared-config profile must already
+  resolve temporary read-only credentials; Control Center never falls back to ambient environment
+  or instance credentials. The GitHub workflow obtains an OIDC session and
+  `scripts/live-aws-default-profile.sh` writes it to a private runner-temp credentials file as
+  `[default]` before running the tests without the session environment variables. The role
   ARN is persisted as an owner-visible GitHub environment variable that repository and environment
   administrators may read. At workflow runtime its security boundary is server-private, and its
   permitted authenticated exposure is limited to GitHub environment configuration, protected role
@@ -648,7 +652,10 @@ watchers cannot read the Timeline. CSV and JSON download endpoints reuse that
 default-redacted projection and stable cursor, require an explicit event limit,
 and cap every export at 1,000 events with explicit truncation metadata. Every
 successful download records immutable human/session attribution, filters,
-format, counts, truncation, and timestamp before streaming begins. Owners
+format, counts, truncation, and timestamp before streaming begins. Because a
+download writes that audit row, both endpoints are `POST` mutations that require
+an allowed `Origin` and the session's `x-csrf-token`; a plain `GET` is not
+routed. Owners
 can deliberately expand one exact event to inspect its durable identifiers and
 agent-job reference in a focused browser sheet with a Timeline-aware Relay
 entry; approvers retain the ordinary redacted page and receive no inspect

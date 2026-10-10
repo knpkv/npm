@@ -1,7 +1,7 @@
 # Herdr package boundaries
 
 ```text
-@knpkv/herdr-approvals
+@knpkv/herdr-hub
 ├── @knpkv/herdr-tailscale
 ├── @knpkv/herdr-connect
 │   ├── @knpkv/herdr-fleet
@@ -25,7 +25,7 @@
 
 `herdr-work` owns complete durable goal checkpoints, four historical projections, and the Rly departure board. It imports the fleet-owned exact Connect target contract, but not terminal or approval runtime code. A checkpoint is the only source of historical state. Missing history stays absent.
 
-`herdr-approvals` is the executable composition root and shared Rly shell. HTTP, PWA, push, CLI parsing, and concrete Git, Nix, and Herdr operations need several lower packages at once, so placing them here keeps the graph acyclic. Its three tabs compose Approvals decisions, the Connect terminal and chat, and the Work departure board without moving their models into the shell.
+`herdr-hub` is the executable composition root and shared Rly shell. HTTP, PWA, push, CLI parsing, and concrete Git, Nix, and Herdr operations need several lower packages at once, so placing them here keeps the graph acyclic. Its three tabs compose Approvals decisions, the Connect terminal and chat, and the Work departure board without moving their models into the shell.
 
 ## Deliberately outside npm
 

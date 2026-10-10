@@ -75,6 +75,7 @@ test("default lint retains every original check and both CI partitions", () => {
     "node --test scripts/check-test-partition.test.mjs",
     "node --test scripts/check-browser-target.test.mjs",
     "node --test scripts/check-release-workflow.test.mjs",
+    "node scripts/check-no-decision-record-mentions.mjs",
     "node --test scripts/changeset-publish.test.mjs",
     "node --test scripts/check-version-bumps.test.mjs",
     "node scripts/check-test-typecheck-coverage.mjs",
@@ -91,7 +92,7 @@ test("default lint retains every original check and both CI partitions", () => {
   )
   assert.equal(
     staticCommands[0],
-    'pnpm --recursive --sort --config.enable-pre-post-scripts=false --filter "@knpkv/herdr-approvals^..." --filter "@knpkv/relay-product" --filter "@knpkv/browser-pairing" --filter "@knpkv/review" run build'
+    'pnpm --recursive --sort --config.enable-pre-post-scripts=false --filter "@knpkv/herdr-hub^..." --filter "@knpkv/relay-product" --filter "@knpkv/browser-pairing" --filter "@knpkv/review" run build'
   )
   for (const required of [
     "check-eslint-config.mjs",

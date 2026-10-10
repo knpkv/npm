@@ -4,7 +4,8 @@
  *
  * With `--agent claude` the same command switches to a different *source of evidence*: local
  * Claude Code Agent Sessions become Proposed Worklogs for the time neither side recorded. Agent
- * Sessions are never a third side of the reconciliation — see ADR-0006.
+ * Sessions are never a third side of the reconciliation: a transcript shows when work happened, never how
+ * long it lasted, so it can propose a worklog but is never a side to bring "in sync".
  *
  * @module
  */

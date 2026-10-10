@@ -107,7 +107,7 @@ export const SessionsQuery = Schema.Struct({
 })
 export type SessionsQuery = typeof SessionsQuery.Type
 
-/** One agent session's usage on one Booking within a range. Never a share of a limit (ADR-0003). */
+/** One agent session's usage on one Booking within a range. Never a share of a limit: limits are the account's. */
 export const SessionSummary = Schema.Struct({
   agent: Agent,
   sessionId: Schema.String,

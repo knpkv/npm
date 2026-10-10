@@ -107,7 +107,7 @@ import WebSocketClient, { WebSocketServer } from "ws"
 import type { SanitizedJobRecord } from "./approval-request.js"
 import { sanitizeJobPayload, sanitizeJobRecord } from "./approval-request.js"
 import { resolveApprovalPage } from "./approval-url.js"
-import { authorize, authorizeLoopback } from "./auth.js"
+import { authorize, authorizeLoopback, authorizeLoopbackPeer } from "./auth.js"
 import {
   type ApprovalDirectory,
   type DashboardHistoryPage,
@@ -2793,6 +2793,10 @@ export const startHttpServer = async (
             login: header(request, "tailscale-user-login"),
             remoteAddress: request.socket.remoteAddress
           })
+          const workPeerAuthorized = authorizeLoopbackPeer({
+            login: header(request, "tailscale-user-login"),
+            remoteAddress: request.socket.remoteAddress
+          })
 
           if (
             mode === "serve" &&
@@ -3109,7 +3113,7 @@ export const startHttpServer = async (
             url.pathname === workSnapshotPath
           ) {
             const workAuthorization = mode === "work"
-              ? Effect.succeed("lan")
+              ? Effect.as(workPeerAuthorized, "lan")
               : mode === "local"
               ? loopbackAuthorized
               : authorized
@@ -3123,7 +3127,7 @@ export const startHttpServer = async (
             url.pathname === workCheckpointPath
           ) {
             const workAuthorization = mode === "work"
-              ? Effect.succeed("lan")
+              ? Effect.as(workPeerAuthorized, "lan")
               : mode === "local"
               ? loopbackAuthorized
               : authorized
@@ -3627,6 +3631,10 @@ export const startHttpServer = async (
             yield* tailnetActor(request, config, null)
             yield* sameOrigin(request, expectedOrigin())
           } else {
+            // Only the hub's own WebSocket client dials this path, and it sends no Origin. Every
+            // browser upgrade carries one, so a page open in a browser on the hub node is refused
+            // even though its socket peer is the hub.
+            yield* authorizeOriginlessMutation(request)
             yield* tailnetActor(request, config, [config.approvalHub.nodeId])
           }
           return yield* terminalSelectionFromUrl(url)
