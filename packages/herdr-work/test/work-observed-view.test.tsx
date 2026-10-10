@@ -90,12 +90,18 @@ const snapshotOf = (
   }
 }
 
-const mount = async (snapshots: WorkSnapshots, initialGoalId?: string): Promise<HTMLElement> => {
+const mount = async (
+  snapshots: WorkSnapshots,
+  initialGoalId?: string,
+  initialWindow: WorkSnapshot["window"] = "now"
+): Promise<HTMLElement> => {
   const host = document.createElement("div")
   document.body.append(host)
   const root = createRoot(host)
   roots.push(root)
-  await act(async () => root.render(<WorkBoard initialGoalId={initialGoalId ?? null} snapshots={snapshots} />))
+  await act(async () =>
+    root.render(<WorkBoard initialGoalId={initialGoalId ?? null} initialWindow={initialWindow} snapshots={snapshots} />)
+  )
   return host
 }
 
@@ -462,6 +468,58 @@ describe("Work board with the observed overlay", () => {
     expect((await mount(snapshotOf([goal("g1")], { observed: [], observedOmitted: 3 }))).textContent).toContain(
       "Live state shown for the most recently updated goals; 3 left out."
     )
+  })
+
+  it("keeps omission counts when an empty read cannot establish that no goals exist", async () => {
+    for (const omitted of [{ goalsOmitted: 12 }, { finishedOmitted: 9 }, { goalsOmitted: 12, finishedOmitted: 9 }]) {
+      const snapshots = snapshotOf([], omitted)
+      for (const window of ["now", "week"] satisfies ReadonlyArray<WorkSnapshot["window"]>) {
+        const host = await mount({ ...snapshots, week: { ...snapshots.week, ...omitted } }, undefined, window)
+        expect(host.textContent).toContain("No goals in this read.")
+        expect(host.textContent).not.toContain("No goals yet.")
+        expect(host.textContent).not.toContain("No goals at this checkpoint.")
+        expect(host.querySelector('[aria-label="Work summary"]')).toBeNull()
+        if (omitted.goalsOmitted !== undefined) expect(host.textContent).toContain("Showing 0 of 12 goals")
+        if (omitted.finishedOmitted !== undefined) expect(host.textContent).toContain("9 older not shown")
+      }
+    }
+    expect((await mount(snapshotOf([], {}))).textContent).toContain("No goals yet.")
+  })
+
+  it("keeps visible activity clocks terse while older dates remain in their accessible descriptions", async () => {
+    vi.stubEnv("TZ", "UTC")
+    try {
+      const readAt = Date.parse("2026-10-10T14:02:00Z")
+      const snapshots = snapshotOf(
+        [
+          goal("dated", {
+            createdAt: readAt - 4 * 24 * HOUR,
+            updatedAt: readAt,
+            activity: [
+              { id: "older", kind: "note", summary: "Older note", occurredAt: readAt - 2 * 24 * HOUR },
+              { id: "yesterday", kind: "note", summary: "Yesterday note", occurredAt: readAt - 24 * HOUR },
+              { id: "today", kind: "note", summary: "Today note", occurredAt: readAt }
+            ]
+          })
+        ],
+        { observed: [] }
+      )
+      const host = await mount({ ...snapshots, now: { ...snapshots.now, asOf: readAt, observedAt: readAt } }, "dated")
+      for (const [id, date] of [
+        ["older", "8 Oct 2026, 14:02"],
+        ["yesterday", "9 Oct 2026, 14:02"]
+      ]) {
+        const row = host.querySelector(`[data-rly-timeline-event-id="${id}"]`)
+        expect(row?.querySelector("time")?.textContent).toBe("14:02")
+        expect(row?.querySelector(".work-accessible-detail")?.textContent).toContain(date)
+        expect(row?.getAttribute("aria-describedby")).toBe(row?.querySelector(".work-accessible-detail")?.id)
+      }
+      const today = host.querySelector('[data-rly-timeline-event-id="today"]')
+      expect(today?.querySelector("time")?.textContent).toBe("14:02")
+      expect(today?.querySelector(".work-accessible-detail")?.textContent).toBe("Note")
+    } finally {
+      vi.unstubAllEnvs()
+    }
   })
 
   it("says how many older goals a large board left out, so a goal leaving the view is never silent", async () => {

@@ -162,7 +162,7 @@ const formatTimestamp = (timestamp: number): string =>
     timeStyle: "short"
   }).format(timestamp)
 
-/** The board's timestamp formatter supplies the clock too, with the full timestamp retained in a tooltip. */
+/** The board's timestamp formatter also supplies compact clocks. */
 const formatClock = (timestamp: number): string =>
   formatTimestamp(timestamp).split(", ").at(-1) ?? formatTimestamp(timestamp)
 
@@ -599,7 +599,7 @@ const RequestItem = ({
           </Text>
           {request.state === "open" ? null : (
             <Text tone="secondary" variant="meta">
-              {ageOf(request.requestedAt, asOf)}
+              requested {ageOf(request.requestedAt, asOf)}
             </Text>
           )}
         </span>
@@ -662,6 +662,7 @@ const GoalDetail = ({
   const observed = observedFor(snapshot, goal.id)
   const shown = observed?.displayState ?? goal.state
   const activity = timelineFor(goal, observed)
+  const readDay = new Date(snapshot.observedAt).toDateString()
   const agent = goal.agentHierarchy?.agent
   const agentName = agent?.name ?? goal.owner.name
   const agentIdentity = agent === undefined ? agentName : `${agent.host} / ${agentName}`
@@ -824,6 +825,8 @@ const GoalDetail = ({
           <ol aria-label={`Activity on ${goal.title}`} className="work-activity">
             {activity.map((event) => {
               const descriptionId = `work-activity-${goal.id}-${event.id}`
+              const eventAt = Date.parse(event.dateTime)
+              const date = new Date(eventAt).toDateString() === readDay ? null : formatTimestamp(eventAt)
               return (
                 <li
                   aria-describedby={descriptionId}
@@ -840,6 +843,7 @@ const GoalDetail = ({
                   >
                     {event.detail}
                     {event.provenance === undefined ? "" : `. ${event.provenance.label}`}
+                    {date === null ? "" : `. ${date}`}
                   </span>
                 </li>
               )
@@ -1009,6 +1013,14 @@ export const WorkBoard = ({
   const finishedGoalCount = triage.rows.filter(
     ({ displayState }) => displayState === "completed" || displayState === "deployed" || displayState === "abandoned"
   ).length
+  const hasGoalOmissions = (snapshot.goalsOmitted ?? 0) > 0 || (snapshot.finishedOmitted ?? 0) > 0
+  const finishedCount =
+    finishedGoalCount > 0 || (snapshot.finishedOmitted ?? 0) > 0 ? (
+      <Text className="work-finished-count" tone="secondary" variant="meta">
+        {finishedGoalCount} finished {finishedGoalCount === 1 ? "goal" : "goals"}
+        {(snapshot.finishedOmitted ?? 0) > 0 ? ` · ${snapshot.finishedOmitted} older not shown` : null}
+      </Text>
+    ) : null
   // The overlay by goal, built once per snapshot: rows, captions and filters all read it.
   const overlay: ReadonlyMap<string, WorkGoalObserved> = new Map(
     (snapshot.observed ?? []).map((entry) => [entry.goalId, entry])
@@ -1342,7 +1354,7 @@ export const WorkBoard = ({
           )}
         </div>
       )}
-      {snapshot.goals.length === 0 && window === "now" ? null : (
+      {snapshot.goals.length === 0 && (window === "now" || hasGoalOmissions) ? null : (
         <Hero
           caption={summaryCaption(triage.summary, tense, snapshot)}
           fact={heroFact}
@@ -1355,19 +1367,38 @@ export const WorkBoard = ({
         {statusFilterControls}
       </div>
       {snapshot.goals.length === 0 ? (
-        <Region className="work-empty-board" count={0} title="Goals">
+        <Region
+          actions={
+            (snapshot.goalsOmitted ?? 0) > 0 ? (
+              <Text aria-live="polite" tone="secondary" variant="meta">
+                Showing 0 of {snapshot.goalsOmitted} goals
+              </Text>
+            ) : undefined
+          }
+          className="work-empty-board"
+          count={snapshot.goalsOmitted ?? 0}
+          title="Goals"
+        >
           <div className="work-empty-copy">
-            {window === "now" ? <Text as="strong">No goals yet.</Text> : null}
-            <Text tone="secondary">
-              {window === "now" ? (
-                <>
-                  Delegate work to an agent with <code>fleetctl submit HOST agent.delegate work REPOSITORY PROMPT</code>{" "}
-                  (HOST is a name from <code>fleetctl hosts</code>); its goal appears here once the hub admits it.
-                </>
-              ) : (
-                "No goals at this checkpoint."
-              )}
-            </Text>
+            {hasGoalOmissions ? (
+              <Text as="strong">No goals in this read.</Text>
+            ) : window === "now" ? (
+              <Text as="strong">No goals yet.</Text>
+            ) : null}
+            {hasGoalOmissions ? null : (
+              <Text tone="secondary">
+                {window === "now" ? (
+                  <>
+                    Delegate work to an agent with{" "}
+                    <code>fleetctl submit HOST agent.delegate work REPOSITORY PROMPT</code> (HOST is a name from{" "}
+                    <code>fleetctl hosts</code>); its goal appears here once the hub admits it.
+                  </>
+                ) : (
+                  "No goals at this checkpoint."
+                )}
+              </Text>
+            )}
+            {finishedCount}
           </div>
         </Region>
       ) : (
@@ -1441,12 +1472,7 @@ export const WorkBoard = ({
                 </ul>
               </section>
             ))}
-            {filteredGoals.length > 0 && (finishedGoalCount > 0 || (snapshot.finishedOmitted ?? 0) > 0) ? (
-              <Text className="work-finished-count" tone="secondary" variant="meta">
-                {finishedGoalCount} finished {finishedGoalCount === 1 ? "goal" : "goals"}
-                {(snapshot.finishedOmitted ?? 0) > 0 ? ` · ${snapshot.finishedOmitted} older not shown` : null}
-              </Text>
-            ) : null}
+            {filteredGoals.length > 0 ? finishedCount : null}
             {visibleGoals.length < filteredGoals.length ? (
               navigation === undefined ? (
                 <Button

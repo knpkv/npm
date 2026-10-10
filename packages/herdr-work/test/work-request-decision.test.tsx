@@ -128,6 +128,24 @@ describe("workRequestClockText", () => {
 })
 
 describe("Work requests decided in place", () => {
+  it("labels settled request ages as request time, retaining the open request label", async () => {
+    for (const state of ["approved", "rejected", "fulfilled"] satisfies ReadonlyArray<WorkRequest["state"]>) {
+      const oldRequest = request("r1", "job-1", state)
+      const snapshots = snapshotsOf([oldRequest])
+      const asOf = NOW + 5 * 60 * 60_000
+      const host = await mount({
+        snapshots: {
+          ...snapshots,
+          observedAt: asOf,
+          now: { ...snapshots.now, asOf, observedAt: asOf, goals: [{ ...goal([oldRequest]), updatedAt: asOf }] }
+        }
+      })
+      expect(host.querySelector(".work-request-heading")?.textContent).toContain("requested 5h ago")
+    }
+    const open = await mount({ snapshots: snapshotsOf([request("r1", "job-1")]) })
+    expect(open.querySelector(".work-request-meta")?.textContent).toBe("requested 1m ago")
+  })
+
   it("dates retained requests without attributing them to the replacement owner", async () => {
     const retained = request("r1", "job-1")
     const original = snapshotsOf([retained])
