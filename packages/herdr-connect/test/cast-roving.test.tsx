@@ -33,8 +33,8 @@ describe("AgentCast keyboard stop", () => {
     const stops = () => [...host.querySelectorAll('[tabindex="0"]')].map((node) => node.getAttribute("data-agent-key"))
     try {
       const three = (third: string) => [
-        agent("agent-one", "working"),
-        agent("agent-two", "working"),
+        agent("agent-one", "waiting"),
+        agent("agent-two", "blocked"),
         agent("agent-three", third)
       ]
       await render(three("working"))
@@ -48,8 +48,8 @@ describe("AgentCast keyboard stop", () => {
       await render(three("blocked"))
       expect(stops()).toEqual(["nix:agent-two"])
       // When the agent holding the stop leaves, the stop goes back to the first member.
-      await render([agent("agent-one", "working"), agent("agent-three", "blocked")])
-      expect(stops()).toEqual(["nix:agent-three"])
+      await render([agent("agent-one", "waiting"), agent("agent-three", "blocked")])
+      expect(stops()).toEqual(["nix:agent-one"])
     } finally {
       await act(async () => root.unmount())
       host.remove()

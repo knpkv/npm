@@ -61,8 +61,10 @@ describe("AgentDirectory rows", () => {
     )
     expect(markup).not.toContain("agent-presence")
     // The shared state language: a blocked agent counts as needing you and reads "Blocked" beside its icon.
-    expect(markup).toMatch(/class="connect-agent-state" data-activity="needs-you"><span[^>]*>.*<svg.*Blocked</)
-    expect(markup).toContain(">Working<")
+    expect(markup).not.toContain('class="connect-agent-state"')
+    expect(markup).toContain('class="connect-creature-state" data-tone="critical"')
+    expect(markup).toContain('class="connect-visually-hidden">Blocked, </span>')
+    expect(markup).toContain('class="connect-visually-hidden">Working, </span>')
     // The label beside it carries the state; the work line names only relation and work.
     expect(markup).not.toMatch(/(Working|Ready|Needs attention|Last active) in /)
   })
@@ -93,7 +95,7 @@ describe("AgentDirectory rows", () => {
         />
       )
     expect(render([parent, child])).toContain(
-      'review for <span class="connect-token">Agent agent-1f49bd901df108248299</span>'
+      'Reviewer for <span class="connect-token">Agent agent-1f49bd901df108248299</span>'
     )
     const orphan = render([child])
     expect(orphan).toContain('<span class="connect-token">agent-1f49bd90…</span>')
@@ -148,10 +150,13 @@ describe("one agents surface", () => {
     )
 
   it("keeps each row's content as its name: state first, then name and work, last active, and the action", () => {
-    const row = /<button[^>]*class="connect-agent"[^>]*>(.*?)<\/button>/.exec(directory())?.[1] ?? ""
+    const row =
+      /<button[^>]*class="connect-agent"[^>]*data-agent-key="SER8:agent-a"[^>]*>(.*?)<\/button>/.exec(
+        directory()
+      )?.[1] ?? ""
     expect(row).not.toBe("")
     const text = row.replaceAll(/<[^>]+>/g, "")
-    expect(text).toMatch(/^Working.*Agent agent-a.*npm, last active at \d\d:\d\d, open terminal$/)
+    expect(text).toMatch(/^Working.*Agent agent-a.*npm.*last active at \d\d:\d\d, open stage$/)
     expect(/<button[^>]*class="connect-agent"[^>]*>/.exec(directory())?.[0]).not.toContain("aria-label")
   })
 

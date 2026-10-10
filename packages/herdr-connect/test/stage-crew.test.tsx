@@ -52,7 +52,7 @@ describe("AgentStage crew", () => {
           />
         )
       )
-      const crew = document.querySelector("nav[aria-label='Agents agent-coordinator started']")
+      const crew = document.querySelector("nav[aria-label='Workers and reviewers']")
       expect(crew).not.toBeNull()
       const member = crew?.querySelector("button")
       expect(member?.textContent).toContain("agent-reviewer")

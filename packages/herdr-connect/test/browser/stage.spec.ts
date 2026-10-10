@@ -15,6 +15,25 @@ test.describe("Connect stage", () => {
   })
 
   test("opens from the cast too", async ({ page }) => {
+    await page.route(
+      "**/v1/connect/agents",
+      (route) =>
+        route.fulfill({
+          json: {
+            agents: [{
+              host: "FIXTURE",
+              id: "agent-fixture",
+              kind: "codex",
+              lastActivityAt: 1_000,
+              name: "fixture-pane",
+              state: "waiting",
+              work: "npm"
+            }],
+            failures: [],
+            nextCursor: null
+          }
+        })
+    )
     await page.goto("/")
     await page.getByRole("navigation", { name: "Agents at a glance" }).getByRole("button", { name: /fixture-pane/ })
       .click()
@@ -32,7 +51,7 @@ test.describe("Connect stage", () => {
   test("fits a 320px phone without sideways scroll, stage open or closed", async ({ page }) => {
     await page.setViewportSize({ height: 700, width: 320 })
     await page.goto("/")
-    await expect(page.locator(".connect-cast-member")).toHaveCount(1)
+    await expect(page.locator(".connect-cast-member")).toHaveCount(0)
     const width = () => page.evaluate(() => document.documentElement.scrollWidth)
     expect(await width()).toBeLessThanOrEqual(320)
     await page.locator(".connect-agent", { hasText: "fixture-pane" }).click()
@@ -75,6 +94,7 @@ test.describe("Connect stage", () => {
       expect(rowBox).not.toBeNull()
       expect(copyBox).not.toBeNull()
       if (rowBox !== null && copyBox !== null) expect(copyBox.width).toBeGreaterThanOrEqual(rowBox.width * 0.75)
+      await page.getByRole("button", { name: "Filters", exact: true }).click()
       const statusRows = await page
         .locator(".connect-status-filter button")
         .evaluateAll((buttons) => new Set(buttons.map((button) => Math.round(button.getBoundingClientRect().top))).size)
@@ -102,6 +122,7 @@ test.describe("Connect stage", () => {
         expect(row.x).toBe(16)
         expect(row.width).toBe(width - 32)
       }
+      await page.getByRole("button", { name: "Filters", exact: true }).click()
       const rows = await page
         .locator(".connect-status-filter button")
         .evaluateAll((buttons) => new Set(buttons.map((button) => Math.round(button.getBoundingClientRect().top))).size)

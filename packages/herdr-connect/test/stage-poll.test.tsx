@@ -1,12 +1,13 @@
 // @vitest-environment happy-dom
 
 import { RegistryProvider } from "@effect/atom-react"
-import { Predicate } from "effect"
+import { Predicate, Schema } from "effect"
 import { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest"
 
 import { ConnectSurface, makeConnectAtoms } from "../src/client.js"
+import { StoredPins } from "../src/pins.js"
 
 declare global {
   interface Window {
@@ -62,6 +63,7 @@ afterEach(async () => {
   })
   roots.length = 0
   document.body.replaceChildren()
+  window.localStorage.clear()
   vi.useRealTimers()
 })
 
@@ -107,5 +109,83 @@ describe("Connect stage across polls", () => {
     await settle(5_000)
     expect(host.querySelector('.connect-agent[data-agent-key="SER8:agent-reviewer"]')).not.toBeNull()
     expect(stageOpen()).toBe(false)
+  })
+
+  it("retains agents only while their host misses a poll, labels old readings, then removes genuinely closed agents", async () => {
+    vi.useFakeTimers()
+    agentsBody = listed([reviewer])
+    const host = document.createElement("div")
+    document.body.append(host)
+    const root = createRoot(host)
+    roots.push(root)
+    await act(async () =>
+      root.render(
+        <RegistryProvider>
+          <ConnectSurface atoms={makeConnectAtoms()} />
+        </RegistryProvider>
+      )
+    )
+    await settle()
+    expect(host.querySelector(".connect-agent")).not.toBeNull()
+    agentsBody = JSON.stringify({ agents: [], failures: [{ host: "SER8", reason: "timeout" }], nextCursor: null })
+    await settle(5_000)
+    const retained = host.querySelector(".connect-agent")
+    expect(retained?.textContent).toContain("Old reading")
+    expect(retained?.querySelector(".connect-creature")?.hasAttribute("data-stale")).toBe(true)
+    expect(host.querySelector(".connect-failures")?.textContent).toContain("its readings are old")
+    agentsBody = listed([])
+    await settle(5_000)
+    expect(host.querySelector(".connect-agent")).toBeNull()
+  })
+
+  // Old directory rows are context, not a new sighting: pins keep their last-seen minute and wait in overflow.
+  it("does not record a retained silent-host agent as a freshly observed pin", async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(120_000)
+    window.localStorage.setItem(
+      "fleet-connect-pins",
+      JSON.stringify({
+        pins: [
+          {
+            host: reviewer.host,
+            id: reviewer.id,
+            key: `${reviewer.host}:${reviewer.id}`,
+            name: reviewer.name,
+            seenAt: 0
+          }
+        ],
+        v: 1
+      })
+    )
+    agentsBody = listed([reviewer])
+    const host = document.createElement("div")
+    document.body.append(host)
+    const root = createRoot(host)
+    roots.push(root)
+    await act(async () =>
+      root.render(
+        <RegistryProvider>
+          <ConnectSurface atoms={makeConnectAtoms()} />
+        </RegistryProvider>
+      )
+    )
+    await settle()
+    const stored = () =>
+      Schema.decodeUnknownSync(Schema.fromJsonString(StoredPins))(window.localStorage.getItem("fleet-connect-pins"))
+    expect(stored().pins[0]?.seenAt).toBe(120_000)
+    agentsBody = JSON.stringify({
+      agents: [],
+      failures: [{ host: reviewer.host, reason: "timeout" }],
+      nextCursor: null
+    })
+    await settle(65_000)
+    expect(host.querySelector(".connect-agent")?.textContent).toContain("Old reading")
+    expect(stored().pins[0]?.seenAt).toBe(120_000)
+    expect(host.querySelector(".connect-pins .connect-pin")).toBeNull()
+    const more = host.querySelector<HTMLButtonElement>(".connect-pins-more")
+    expect(more?.textContent).toBe("Pins 1")
+    await act(async () => more?.click())
+    await settle()
+    expect(host.querySelector(".connect-pins-entry[data-away]")?.textContent).toContain("not seen since")
   })
 })

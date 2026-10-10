@@ -558,15 +558,20 @@ for (
     expect(await filterRow.evaluate((element) => getComputedStyle(element).overflowX)).toBe("visible")
     expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBe(0)
     const longHost = page.locator("[data-long-host]")
+    await buttons.first().focus()
+    for (let index = 1; index < 4; index += 1) await page.keyboard.press("Tab")
+    await expect(longHost).toBeFocused()
+    // This option now lives in a one-line scroller. Reveal it before measuring its full button boundary.
+    await longHost.scrollIntoViewIfNeeded()
     const longHostBox = await longHost.boundingBox()
     expect(longHostBox).not.toBeNull()
     expect((longHostBox?.x ?? viewport.width) + (longHostBox?.width ?? 0)).toBeLessThanOrEqual(viewport.width)
     expect(
       await page.locator(".connect-group-filter").evaluate((element) => element.scrollWidth - element.clientWidth)
-    ).toBe(0)
-    // Host options wrap and stay in view; status options keep to one line and scroll sideways, so each comes
-    // into view as it takes focus.
+    ).toBeGreaterThan(0)
+    // Both option groups keep one line and scroll their focused button into view.
     for (const button of await filterRow.locator(".connect-group-filter").getByRole("button").all()) {
+      await button.focus()
       await expect(button).toBeInViewport()
     }
     const statusTops = await filterRow

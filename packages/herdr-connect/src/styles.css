@@ -229,24 +229,6 @@
     font-size: var(--rly-type-meta-size);
   }
 
-  .connect-intro-caption {
-    color: var(--rly-color-text-2);
-    margin: var(--rly-space-0);
-  }
-
-  /* On a narrow screen the summary takes up to three lines once the fleet loads; reserve them so the list does not jump. */
-  @media (max-width: 700px) {
-    .connect-embedded-intro [data-rly-hero] {
-      /* Three lines of the Hero's heading-size sentence (its section-title type), measured from the token. */
-      min-block-size: calc(3 * var(--rly-type-section-title-line-height));
-    }
-
-    /* Phones keep the sentence and drop its caption, as the directory needs the room. */
-    .connect-intro-caption {
-      display: none;
-    }
-  }
-
   /*
    * In the hub, until the first directory list arrives (failed attempts and their retries included),
    * hold a screen of space: the list that arrives is
@@ -418,9 +400,7 @@
     font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
       var(--rly-type-meta-font);
     gap: var(--rly-space-12);
-    grid-template-columns: var(--connect-creature-track) var(--connect-state-track) minmax(0, 1fr) var(
-        --connect-time-track
-      );
+    grid-template-columns: var(--connect-creature-track) minmax(0, 1fr) var(--connect-time-track);
     padding: 0 var(--rly-space-12) var(--rly-space-6);
   }
 
@@ -455,9 +435,7 @@
     cursor: pointer;
     display: grid;
     font: inherit;
-    grid-template-columns: var(--connect-creature-track) var(--connect-state-track) minmax(0, 1fr) var(
-        --connect-time-track
-      );
+    grid-template-columns: var(--connect-creature-track) minmax(0, 1fr) var(--connect-time-track);
     gap: var(--rly-space-12);
     min-inline-size: 0;
     padding: var(--rly-space-12);
@@ -1140,7 +1118,7 @@
    */
   @media (max-width: 640px) {
     .connect-agent {
-      grid-template-columns: var(--connect-creature-track) minmax(0, 1fr) auto;
+      grid-template-columns: var(--connect-creature-track) minmax(0, 1fr);
       row-gap: var(--rly-space-4);
     }
 
@@ -1151,7 +1129,7 @@
 
     .connect-agent-copy {
       grid-column: 2 / -1;
-      grid-row: 2;
+      grid-row: 1;
     }
 
     .connect-list-head {
@@ -1162,10 +1140,7 @@
   /* Phones give the options the whole row, so the status words fit one line; the groups keep their names
      through aria-labelledby. */
   @media (max-width: 640px) {
-    /*
-     * The status words keep to one line whatever their counts, scrolling sideways rather than wrapping; host
-     * names still wrap, since a long one must stay readable whole.
-     */
+    /* Filter options scroll within the disclosure, never widening or wrapping the page. */
     .connect-status-filter {
       flex-wrap: nowrap;
       overflow-x: auto;
@@ -1682,6 +1657,340 @@
       scale: 0.97;
       transition: scale var(--rly-motion-fast-duration) var(--rly-easing-out);
     }
+  }
+
+  /* Families carry the outline; individual rows keep their own state and a single reading action. */
+  .connect-family {
+    border-radius: var(--rly-radius-overlay);
+    min-inline-size: 0;
+    outline: 1px solid var(--rly-color-border-1);
+    outline-offset: -1px;
+  }
+
+  .connect-family .connect-agent {
+    inline-size: 100%;
+    min-block-size: 44px;
+  }
+
+  .connect-family .connect-agent:last-child {
+    border-block-end: 0;
+  }
+
+  .connect-agent[data-depth="1"],
+  .connect-agent[data-depth="2"] {
+    padding-inline-start: var(--rly-space-24);
+  }
+
+  .connect-agent[data-depth="2"] {
+    padding-inline-start: var(--rly-space-32);
+  }
+
+  .connect-agent > .connect-creature,
+  .connect-agent > .connect-creature-state {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .connect-agent > .connect-creature-state {
+    align-self: center;
+    justify-self: center;
+    translate: 0.75rem 0.75rem;
+  }
+
+  .connect-creature-state {
+    background: var(--rly-color-surface-1);
+    border-radius: 50%;
+    color: var(--rly-color-text-2);
+    display: none;
+    block-size: 1rem;
+    inline-size: 1rem;
+  }
+
+  .connect-creature-state[data-tone="progress"] {
+    color: var(--rly-color-deploying-ink);
+  }
+  .connect-creature-state[data-tone="caution"] {
+    color: var(--rly-color-held-ink);
+  }
+  .connect-creature-state[data-tone="critical"] {
+    color: var(--rly-color-blocked-ink);
+  }
+  .connect-creature-state[data-tone="positive"] {
+    color: var(--rly-color-success-ink);
+  }
+
+  .connect-agent-work {
+    font-size: var(--rly-type-body-size);
+    overflow-wrap: break-word;
+  }
+
+  .connect-agent-copy {
+    gap: var(--rly-space-4);
+  }
+
+  .connect-agent-copy strong {
+    font-size: 1rem;
+  }
+
+  .connect-agent-list {
+    align-items: start;
+    gap: var(--rly-space-12);
+  }
+
+  .connect-directory-toolbar {
+    align-items: center;
+    display: flex;
+    gap: var(--rly-space-8);
+    margin-block-start: var(--rly-space-16);
+  }
+
+  .connect-directory-toolbar .connect-search {
+    flex: 1;
+    min-inline-size: 0;
+    padding-block-end: 0;
+    position: static;
+  }
+
+  .connect-search > span {
+    block-size: 1px;
+    clip-path: inset(50%);
+    inline-size: 1px;
+    overflow: hidden;
+    position: absolute;
+    white-space: nowrap;
+  }
+
+  .connect-search input,
+  .connect-filters-toggle,
+  .connect-filters-clear,
+  .connect-family-more {
+    min-block-size: 44px;
+  }
+
+  .connect-filters-toggle,
+  .connect-filters-clear,
+  .connect-family-more {
+    background: transparent;
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-control);
+    color: var(--rly-color-text-1);
+    cursor: pointer;
+    font: inherit;
+    padding-inline: var(--rly-space-12);
+  }
+
+  .connect-family-more {
+    border: 0;
+    color: var(--rly-color-text-2);
+    inline-size: 100%;
+    text-align: start;
+  }
+
+  .connect-filters-toggle:focus-visible,
+  .connect-filters-clear:focus-visible,
+  .connect-family-more:focus-visible {
+    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+    outline-offset: var(--rly-focus-ring-offset);
+  }
+
+  .connect-filter-row {
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-control);
+    grid-template-columns: minmax(0, 1fr);
+    margin-block: var(--rly-space-8) 0;
+    padding: var(--rly-space-8);
+  }
+
+  .connect-filter-row[hidden] {
+    display: none;
+  }
+
+  .connect-filter-set {
+    align-items: center;
+    grid-template-columns: 3rem minmax(0, 1fr);
+  }
+
+  .connect-filter-label {
+    block-size: auto;
+    clip-path: none;
+    inline-size: auto;
+    overflow: visible;
+    position: static;
+    white-space: normal;
+  }
+
+  .connect-group-filter,
+  .connect-status-filter {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    scrollbar-width: thin;
+  }
+
+  .connect-group-filter button,
+  .connect-status-filter button {
+    min-block-size: 44px;
+    overflow: clip;
+    position: relative;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .connect-filter-summary {
+    align-items: center;
+    color: var(--rly-color-text-3);
+    display: flex;
+    flex-wrap: wrap;
+    font-size: var(--rly-type-meta-size);
+    gap: var(--rly-space-4);
+    margin-block: var(--rly-space-8) var(--rly-space-12);
+  }
+
+  .connect-embedded-intro {
+    align-items: baseline;
+    display: flex;
+    gap: var(--rly-space-12);
+    justify-content: start;
+  }
+
+  .connect-header {
+    gap: var(--rly-space-12);
+    justify-content: start;
+  }
+
+  .connect-header,
+  .connect-embedded-intro {
+    flex-wrap: wrap;
+  }
+
+  .connect-attention-count {
+    min-inline-size: 0;
+  }
+
+  .connect-attention-count,
+  .connect-failures {
+    color: var(--rly-color-text-2);
+    font-size: var(--rly-type-meta-size);
+  }
+
+  .connect-directory-secondary {
+    display: grid;
+    gap: var(--rly-space-12);
+    padding-block-start: var(--rly-space-24);
+  }
+
+  .connect-cast-family {
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-control);
+    display: flex;
+    flex: none;
+    scroll-snap-align: start;
+  }
+
+  .connect-cast-member {
+    grid-template-columns: minmax(0, 1fr);
+    position: relative;
+  }
+
+  .connect-cast-member .connect-creature-state {
+    position: absolute;
+    inset-block-start: 3.5rem;
+    inset-inline-end: var(--rly-space-12);
+  }
+
+  .connect-cast-member small {
+    color: var(--rly-color-text-3);
+    font-size: 0.75rem;
+  }
+
+  .connect-stage-lineage,
+  .connect-stage-prs {
+    display: grid;
+    gap: var(--rly-space-8);
+    min-inline-size: 0;
+  }
+
+  .connect-stage-lineage h2,
+  .connect-stage-prs h2 {
+    font-size: 1rem;
+    margin: 0;
+  }
+
+  .connect-stage-lineage p,
+  .connect-stage-prs p {
+    font-size: var(--rly-type-meta-size);
+    margin: 0;
+    overflow-wrap: break-word;
+  }
+
+  .connect-stage-prs h2 {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--rly-space-12);
+  }
+
+  .connect-stage-prs a {
+    color: inherit;
+    min-block-size: 44px;
+    overflow-wrap: break-word;
+  }
+
+  .connect-stage-crew-member > span {
+    display: grid;
+    gap: var(--rly-space-4);
+  }
+  .connect-stage-crew-member small {
+    font-size: 0.75rem;
+  }
+  .connect-stage-lineage .connect-stage-crew {
+    display: grid;
+  }
+  .connect-stage-lineage .connect-stage-crew-member {
+    justify-content: start;
+    text-align: start;
+  }
+
+  @media (min-width: 60rem) {
+    .connect-agent-list {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  @media (max-width: 640px) {
+    .connect-agents {
+      padding-inline: var(--rly-space-16);
+    }
+    .connect-intro-caption {
+      display: none;
+    }
+    .connect-header {
+      padding-inline: var(--rly-space-16);
+    }
+    .connect-agent > time {
+      grid-column: 2;
+      grid-row: 2;
+    }
+  }
+
+  @media (forced-colors: active) {
+    .connect-creature-state[data-tone] {
+      background: Canvas;
+      color: CanvasText;
+      display: inline-flex;
+    }
+    .connect-cast-family,
+    .connect-filter-row {
+      border-color: CanvasText;
+    }
+    .connect-family {
+      outline-color: CanvasText;
+    }
+  }
+
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .connect-creature-state {
+    background: Canvas;
+    color: CanvasText;
+    display: inline-flex;
   }
 
   /* The stage: the character large on a deep field in its own hues, its work as what it is saying. */
