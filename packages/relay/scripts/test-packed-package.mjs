@@ -7,7 +7,8 @@
  *   so no Pi package, provider SDK or esbuild is imported;
  * - every dynamic import can only reach a Node built-in;
  * - no declaration names a Pi package;
- * - Bun can import the bundle (codecommit's TUI loads Relay under Bun), when `bun` is on PATH;
+ * - Bun can import the bundle (codecommit's TUI loads Relay under Bun), and its store lock refuses a second owner
+ *   and frees the store on close, when `bun` is on PATH;
  * - `dist/wire.js` (`@knpkv/relay/wire`) imports only `effect` and `@knpkv/capability`, and a browser consumer
  *   that imports `@knpkv/relay/wire` by package name bundles for the browser.
  */
@@ -128,6 +129,15 @@ try {
     fail(`a browser page can't bundle @knpkv/relay/wire: ${error instanceof Error ? error.message : String(error)}`)
   }
 
+  // With no SQLite driver at all, the store's failure keeps the Node driver's cause, not only Bun's.
+  const blocked = spawnSync(
+    process.execPath,
+    ["scripts/no-sqlite-driver-probe.mjs", join(process.cwd(), "dist", "index.js"), join(temporary, "no-driver")],
+    { encoding: "utf8" }
+  )
+  if (blocked.status !== 0)
+    fail(`a store without SQLite misreports it: ${(blocked.stderr || blocked.stdout).slice(0, 400)}`)
+
   // codecommit's TUI runs on Bun and imports Relay through codecommit-web, so a Node-only import at module load
   // (such as `node:sqlite`, which Bun lacks before 1.4) would stop it. Checked where Bun is installed.
   const bun = spawnSync("bun", ["--version"], { encoding: "utf8" })
@@ -139,6 +149,15 @@ try {
     )
     if (imported.status !== 0)
       fail(`Bun ${bun.stdout.trim()} can't import the bundle: ${imported.stderr.slice(0, 400)}`)
+    // The store lock on Bun's own SQLite: a second owner is refused as RelayStoreLocked, and closing frees it.
+    const probe = spawnSync(
+      "bun",
+      ["scripts/bun-store-lock-probe.mjs", join(process.cwd(), "dist", "index.js"), join(temporary, "bun-store")],
+      { encoding: "utf8" }
+    )
+    if (probe.status !== 0) {
+      fail(`Bun ${bun.stdout.trim()}'s store lock misbehaves: ${(probe.stderr || probe.stdout).slice(0, 400)}`)
+    }
   } else {
     console.log("Bun import check skipped: bun is not on PATH")
   }

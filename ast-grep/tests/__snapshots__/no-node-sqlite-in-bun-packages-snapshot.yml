@@ -1,0 +1,46 @@
+id: no-node-sqlite-in-bun-packages
+snapshots:
+  ? |
+    const { Database } = await import("bun:sqlite")
+  : labels:
+      - source: import("bun:sqlite")
+        style: primary
+        start: 27
+        end: 47
+      - source: '"bun:sqlite"'
+        style: secondary
+        start: 34
+        end: 46
+  ? |
+    export { DatabaseSync } from "node:sqlite"
+  : labels:
+      - source: export { DatabaseSync } from "node:sqlite"
+        style: primary
+        start: 0
+        end: 42
+      - source: '"node:sqlite"'
+        style: secondary
+        start: 29
+        end: 42
+  ? |
+    import * as sqlite from "node:sqlite"
+  : labels:
+      - source: import * as sqlite from "node:sqlite"
+        style: primary
+        start: 0
+        end: 37
+      - source: '"node:sqlite"'
+        style: secondary
+        start: 24
+        end: 37
+  ? |
+    import { DatabaseSync } from "node:sqlite"
+  : labels:
+      - source: import { DatabaseSync } from "node:sqlite"
+        style: primary
+        start: 0
+        end: 42
+      - source: '"node:sqlite"'
+        style: secondary
+        start: 29
+        end: 42
