@@ -1264,6 +1264,8 @@ const makeRegistry = Effect.fn("FirstPartyPluginRuntime.makeRegistry")(function*
   )
 
   return {
+    // LayerMap shares a memo map across keys. Isolate the complete connection graph,
+    // including adapters that capture clients, while LayerMap still caches each key.
     layer: (scope) =>
       Layer.unwrap(
         Effect.gen(function*() {
@@ -1282,7 +1284,7 @@ const makeRegistry = Effect.fn("FirstPartyPluginRuntime.makeRegistry")(function*
           // @effect-diagnostics-next-line strictEffectProvide:off
           Effect.provide(requirements)
         )
-      )
+      ).pipe(Layer.fresh)
   } satisfies PluginRuntimeRegistryV1
 })
 
