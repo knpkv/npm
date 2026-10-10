@@ -260,7 +260,7 @@ jobs:
 
           printf '%s\n' "Control Center live AWS fixtures are readable"
 
-      - name: Probe through the Control Center default credential chain
+      - name: Probe through the Control Center default profile
         shell: bash
         env:
           CONTROL_CENTER_LIVE_AWS_PROBE: "1"
@@ -269,8 +269,12 @@ jobs:
           CONTROL_CENTER_TEST_CODECOMMIT_REPOSITORY: ${{ vars.CONTROL_CENTER_TEST_CODECOMMIT_REPOSITORY }}
           CONTROL_CENTER_TEST_CODEPIPELINE_PIPELINE: ${{ vars.CONTROL_CENTER_TEST_CODEPIPELINE_PIPELINE }}
         run: |
+          set -euo pipefail
           control_center_root="${CONTROL_CENTER_LIVE_AWS_RUNNER}/packages/control-center"
-          "${CONTROL_CENTER_LIVE_AWS_RUNNER}/node-runtime/bin/node" \
+          # Control Center reads the default profile from shared config only, never ambient keys.
+          bash "${control_center_root}/scripts/live-aws-default-profile.sh" \
+            "${RUNNER_TEMP}/aws/credentials" \
+            "${CONTROL_CENTER_LIVE_AWS_RUNNER}/node-runtime/bin/node" \
             "${CONTROL_CENTER_LIVE_AWS_RUNNER}/node_modules/vitest/vitest.mjs" \
             run \
             --root "${control_center_root}" \

@@ -3,24 +3,34 @@
 id: no-direct-aws-node-provider-chain
 language: tsx
 severity: error
-message: "Resolve AWS profiles through makeProfileCredentialProvider, not fromNodeProviderChain directly"
+message: "Resolve AWS profiles through makeProfileCredentialProvider with fromIni, never fromNodeProviderChain"
 
 rule:
   any:
-    - pattern: fromNodeProviderChain($$$ARGS)
-    - pattern: fromNodeProviderChain($$$ARGS)($$$CALL)
+    - pattern: fromNodeProviderChain
+    - kind: import_specifier
+      has:
+        field: name
+        regex: "^fromNodeProviderChain$"
+    - kind: property_identifier
+      regex: "^fromNodeProviderChain$"
+    - kind: subscript_expression
+      has:
+        field: index
+        kind: string
+        regex: '^["''`]fromNodeProviderChain["''`]$'
 
 files:
   - "packages/**/src/**/*.ts"
   - "packages/**/src/**/*.tsx"
 
 ignores:
-  - "packages/codecommit-core/src/AwsProfileCredentials.ts"
   - "**/generated/**"
 
 note: |
   The SDK's standard chain reads ~/.aws/credentials before the SSO settings in ~/.aws/config, so a
-  leftover static section silently shadows a fresh `aws sso login`. Call
-  `makeProfileCredentialProvider({ sso: fromSSO, fallback: fromNodeProviderChain })` from
-  `@knpkv/codecommit-core/AwsProfileCredentials.js`; passing `fromNodeProviderChain` as the fallback
-  reference stays allowed.
+  leftover static section silently shadows a fresh `aws sso login`. It also resolves environment,
+  web-identity and instance credentials, so the identity used can differ from the named profile the
+  UI and audit records show. Call
+  `makeProfileCredentialProvider({ sso: fromSSO, fallback: fromIni })` from
+  `@knpkv/codecommit-core/AwsProfileCredentials.js`; it names every profile, `default` included.

@@ -8,7 +8,7 @@
  * @internal
  */
 import { CodePipelineClient, GetPipelineStateCommand } from "@aws-sdk/client-codepipeline"
-import { fromNodeProviderChain, fromSSO } from "@aws-sdk/credential-providers"
+import { fromIni, fromSSO } from "@aws-sdk/credential-providers"
 import * as cloudwatchLogs from "@distilled.cloud/aws/cloudwatch-logs"
 import * as codepipeline from "@distilled.cloud/aws/codepipeline"
 import * as DistilledCredentials from "@distilled.cloud/aws/Credentials"
@@ -397,7 +397,7 @@ export const mapCodePipelineAwsFailure = Effect.fn("CodePipelineReadProvider.map
  * Resolve a profile SSO-first, like the CodeCommit adapter, so a leftover static section in
  * `~/.aws/credentials` cannot shadow a fresh `aws sso login`.
  */
-const resolveProfileCredentials = makeProfileCredentialProvider({ sso: fromSSO, fallback: fromNodeProviderChain })
+const resolveProfileCredentials = makeProfileCredentialProvider({ sso: fromSSO, fallback: fromIni })
 
 /** Live AWS profile credential acquisition. @internal */
 export const CodePipelineCredentialResolverLive = Layer.succeed(

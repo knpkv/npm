@@ -1,8 +1,13 @@
 id: no-direct-aws-node-provider-chain
 valid:
-  - "makeProfileCredentialProvider({ sso: fromSSO, fallback: fromNodeProviderChain })"
-  - "const fallback = fromNodeProviderChain"
+  - "makeProfileCredentialProvider({ sso: fromSSO, fallback: fromIni })"
+  - 'import { fromIni, fromSSO } from "@aws-sdk/credential-providers"'
+  - "const provider = providers.fromIni({ profile })"
+  - 'const provider = providers["fromIni"]({ profile })'
 invalid:
+  - "makeProfileCredentialProvider({ sso: fromSSO, fallback: fromNodeProviderChain })"
+  - 'import { fromNodeProviderChain, fromSSO } from "@aws-sdk/credential-providers"'
   - "fromNodeProviderChain({ profile })()"
   - "const provider = fromNodeProviderChain(options)"
-  - "const raw = fromNodeProviderChain(codePipelineCredentialProviderOptions(account.profile))()"
+  - "const provider = providers.fromNodeProviderChain()"
+  - 'const provider = providers["fromNodeProviderChain"]()'

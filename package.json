@@ -28,7 +28,7 @@
     "debt:update": "node scripts/check-debt-ledger.mjs --update",
     "lint:changeset-coverage": "node --max-old-space-size=1536 scripts/check-changeset-coverage.mjs",
     "lint:security-doc-examples": "node scripts/check-security-doc-examples.mjs",
-    "lint:live-aws": "node scripts/check-control-center-live-aws.mjs && bash infra/control-center-live-aws/bootstrap.test.sh && bash infra/control-center-live-aws/probe.test.sh && bash infra/control-center-live-aws/pr-review-eval.test.sh",
+    "lint:live-aws": "node scripts/check-control-center-live-aws.mjs && bash infra/control-center-live-aws/bootstrap.test.sh && bash infra/control-center-live-aws/probe.test.sh && bash infra/control-center-live-aws/pr-review-eval.test.sh && bash packages/control-center/scripts/live-aws-default-profile.test.sh",
     "lint:eslint": "pnpm lint:eslint:control-center && pnpm lint:eslint:workspace",
     "lint:eslint:control-center": "eslint --no-error-on-unmatched-pattern \"packages/control-center/{src,test,e2e}/**/*.{ts,tsx,mjs}\" \"packages/control-center/scripts/**/*.{ts,tsx}\" \"packages/control-center/{vite,vitest,vitest.live,vitest.live-aws,playwright,playwright.atlassian-oauth}.config.ts\"",
     "lint:eslint:workspace": "eslint --no-error-on-unmatched-pattern --ignore-pattern \"packages/control-center/**\" \"**/{src,test,e2e,examples,dtslint}/**/*.{ts,tsx,mjs}\" \"**/scripts/**/*.{ts,tsx}\" \"scripts/check-{control-center-live-aws,effect-reference-alignment,security-doc-examples}.mjs\" \"scripts/pack-herdr.mjs\"",

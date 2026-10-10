@@ -2,10 +2,26 @@ id: no-direct-aws-node-provider-chain
 snapshots:
   const provider = fromNodeProviderChain(options):
     labels:
-      - source: fromNodeProviderChain(options)
+      - source: fromNodeProviderChain
         style: primary
         start: 17
-        end: 47
+        end: 38
+  const provider = providers.fromNodeProviderChain():
+    labels:
+      - source: fromNodeProviderChain
+        style: primary
+        start: 27
+        end: 48
+  const provider = providers["fromNodeProviderChain"]():
+    labels:
+      - source: providers["fromNodeProviderChain"]
+        style: primary
+        start: 17
+        end: 51
+      - source: '"fromNodeProviderChain"'
+        style: secondary
+        start: 27
+        end: 50
   const raw = fromNodeProviderChain(codePipelineCredentialProviderOptions(account.profile))():
     labels:
       - source: fromNodeProviderChain(codePipelineCredentialProviderOptions(account.profile))()
@@ -14,7 +30,23 @@ snapshots:
         end: 91
   fromNodeProviderChain({ profile })():
     labels:
-      - source: fromNodeProviderChain({ profile })()
+      - source: fromNodeProviderChain
         style: primary
         start: 0
-        end: 36
+        end: 21
+  import { fromNodeProviderChain, fromSSO } from "@aws-sdk/credential-providers":
+    labels:
+      - source: fromNodeProviderChain
+        style: primary
+        start: 9
+        end: 30
+      - source: fromNodeProviderChain
+        style: secondary
+        start: 9
+        end: 30
+  "makeProfileCredentialProvider({ sso: fromSSO, fallback: fromNodeProviderChain })":
+    labels:
+      - source: fromNodeProviderChain
+        style: primary
+        start: 56
+        end: 77
