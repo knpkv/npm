@@ -257,7 +257,11 @@
   }
   /* The open badge belongs to the request text; only its age is a separate line on phones. */
   .work-request-line {
+    display: -webkit-box;
     min-inline-size: var(--rly-space-0);
+    overflow: clip;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
   }
   .work-request-line > .work-row-state {
     display: inline-flex;
@@ -309,6 +313,10 @@
     position: relative;
   }
 
+  .work-row-progress[data-steps="3"] {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .work-step-number {
     align-items: center;
     background: var(--rly-color-surface-1);
@@ -341,7 +349,8 @@
   }
 
   @container work-page (width < 40rem) {
-    .work-row-progress {
+    .work-row-progress,
+    .work-row-progress[data-steps="3"] {
       gap: var(--rly-space-8);
       grid-template-columns: minmax(0, 1fr);
     }

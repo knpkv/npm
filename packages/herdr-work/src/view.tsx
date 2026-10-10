@@ -108,8 +108,8 @@ const agentStatusLabel = {
 } satisfies Readonly<Record<WorkAgentObservation["status"], string>>
 
 const deliveryLabel = {
-  local: "Local",
-  review: "Review",
+  local: "In progress",
+  review: "In review",
   pull_request: "Pull request",
   merged: "Merged",
   deployed: "Deployed"
@@ -217,7 +217,7 @@ const reviewLabel = (review: WorkReview | null | undefined): ReactElement => {
   )
 }
 
-/** Four goal steps. Completion alone cannot prove a pull request merged; abandoned work stops at its last step. */
+/** PR delivery includes review; local work includes it only when recorded. Abandoned work stops at its last step. */
 const GoalProgress = ({
   goal,
   observed
@@ -228,23 +228,24 @@ const GoalProgress = ({
   const shown = observed?.displayState ?? goal.state
   const merged = observed?.pullRequest?.fact.state === "merged" || goal.delivery === "merged"
   const hasPullRequest = merged || observed?.pullRequest != null || goal.delivery === "pull_request"
+  const hasReview =
+    hasPullRequest ||
+    goal.delivery === "review" ||
+    shown === "review" ||
+    (goal.review != null && goal.review.state !== "not_requested")
   const finished = !hasPullRequest && (shown === "completed" || shown === "deployed")
-  const current =
-    merged || finished
-      ? 3
-      : hasPullRequest || goal.delivery === "review" || shown === "review"
-        ? 2
-        : shown === "planned"
-          ? 0
-          : 1
-  const names = ["Planned", "In progress", "In review", hasPullRequest ? "Merged" : "Done"]
+  const names = hasReview
+    ? ["Planned", "In progress", "In review", hasPullRequest ? "Merged" : "Done"]
+    : ["Planned", "In progress", "Done"]
+  const finalStep = names.length - 1
+  const current = merged || finished ? finalStep : hasReview ? 2 : shown === "planned" ? 0 : 1
   const abandoned = shown === "abandoned"
   return (
     <section aria-labelledby="work-delivery-title" className="work-delivery">
       <h3 className="work-group-title" id="work-delivery-title">
         Delivery
       </h3>
-      <ol aria-label={`Delivery of ${goal.title}`} className="work-row-progress" role="list">
+      <ol aria-label={`Delivery of ${goal.title}`} className="work-row-progress" data-steps={names.length} role="list">
         {names.map((name, index) => (
           <li
             aria-current={!abandoned && index === current ? "step" : undefined}
@@ -260,7 +261,7 @@ const GoalProgress = ({
             <span className="work-step-name">{name}</span>
             {abandoned && index === current ? (
               <span className="work-step-status">Abandoned</span>
-            ) : !abandoned && index === current && current !== 3 ? (
+            ) : !abandoned && index === current && current !== finalStep ? (
               <StateLabel
                 icon={stateIcon[displayPresentation[shown].tone]}
                 label="Now"
@@ -275,6 +276,11 @@ const GoalProgress = ({
           </li>
         ))}
       </ol>
+      {hasPullRequest ? null : (
+        <Text tone="secondary" variant="meta">
+          No pull request
+        </Text>
+      )}
     </section>
   )
 }
@@ -702,7 +708,7 @@ const GoalDetail = ({
             {observed?.pullRequest == null
               ? observed === null && snapshot.observedOmitted !== undefined
                 ? "Not in this read: live state was trimmed to the most recently updated goals"
-                : "None known"
+                : "None yet"
               : `#${observed.pullRequest.fact.pullRequest} ${pullRequestStateLabel[observed.pullRequest.fact.state]}${observed.stale ? `, ${checksLabel[observed.pullRequest.fact.checks]}` : ""}`}
             {observed?.pullRequest == null ? null : (
               <Text as="p" className="work-fact-note" tone="secondary" variant="meta">

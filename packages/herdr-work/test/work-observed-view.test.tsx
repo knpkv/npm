@@ -100,6 +100,14 @@ const mount = async (snapshots: WorkSnapshots, initialGoalId?: string): Promise<
 }
 
 describe("Work triage with the observed overlay", () => {
+  it("names local and review stages with readable board labels", async () => {
+    const host = await mount(
+      snapshotOf([goal("local", { delivery: "local" }), goal("review", { delivery: "review" })], { observed: [] })
+    )
+    const metadata = [...host.querySelectorAll(".work-row-meta")].map(({ textContent }) => textContent)
+    expect(metadata).toContain("ui2-b · Stage: In progress")
+    expect(metadata).toContain("ui2-b · Stage: In review")
+  })
   it("groups by the observed state and dates done from the pull request's close", () => {
     const rows = workTriage({
       asOf: NOW,
@@ -211,11 +219,16 @@ describe("Work board with the observed overlay", () => {
     expect(host.querySelector(".work-finished-count")).toBeNull()
   })
 
-  it("shows four goal steps, using merge evidence and Done for completed non-PR work", async () => {
+  it("shows three steps for non-PR work, retains recorded review, and uses merge evidence for PR work", async () => {
     const snapshots = snapshotOf(
       [
         goal("planned", { delivery: "local", state: "planned" }),
         goal("working", { delivery: "local" }),
+        goal("local-review", { delivery: "review", state: "review" }),
+        goal("recorded-local-review", {
+          delivery: "local",
+          review: { state: "approved", summary: null, updatedAt: NOW, url: null }
+        }),
         goal("review", { state: "review" }),
         goal("merged"),
         goal("done", { delivery: "local", state: "completed" }),
@@ -234,10 +247,20 @@ describe("Work board with the observed overlay", () => {
     const progress = (id: string) => progressById.get(id)
     expect(
       [...(progress("planned")?.querySelectorAll(".work-step-name") ?? [])].map(({ textContent }) => textContent)
-    ).toEqual(["Planned", "In progress", "In review", "Done"])
+    ).toEqual(["Planned", "In progress", "Done"])
+    for (const id of ["local-review", "recorded-local-review"]) {
+      expect(
+        [...(progress(id)?.querySelectorAll(".work-step-name") ?? [])].map(({ textContent }) => textContent)
+      ).toEqual(["Planned", "In progress", "In review", "Done"])
+    }
+    expect((await mount(snapshots, "working")).querySelector(".work-delivery")?.textContent).toContain(
+      "No pull request"
+    )
     for (const [id, current] of [
       ["planned", "Planned"],
       ["working", "In progress"],
+      ["local-review", "In review"],
+      ["recorded-local-review", "In review"],
       ["review", "In review"],
       ["merged", "Merged"],
       ["done", "Done"],
@@ -442,9 +465,9 @@ describe("Work board with the observed overlay", () => {
     expect(event?.querySelector(".work-accessible-detail")?.textContent).toContain("last read")
   })
 
-  it("says no pull request is known when the overlay has none for the goal", async () => {
+  it("says None yet when the overlay has no pull request for the goal", async () => {
     const host = await mount(snapshotOf([goal("g1")], { observed: [] }), "g1")
-    expect(host.querySelector(".work-facts")?.textContent).toContain("Pull requestNone known")
+    expect(host.querySelector(".work-facts")?.textContent).toContain("Pull requestNone yet")
   })
 
   it("says a pull request is not in this read only for a goal the trimmed overlay left out", async () => {
@@ -453,7 +476,7 @@ describe("Work board with the observed overlay", () => {
       snapshotOf([goal("kept"), goal("left")], { observed: [agentOnly], observedOmitted: 1 }),
       "kept"
     )
-    expect(host.querySelector(".work-facts")?.textContent).toContain("Pull requestNone known")
+    expect(host.querySelector(".work-facts")?.textContent).toContain("Pull requestNone yet")
     const trimmed = await mount(
       snapshotOf([goal("kept"), goal("left")], { observed: [agentOnly], observedOmitted: 1 }),
       "left"

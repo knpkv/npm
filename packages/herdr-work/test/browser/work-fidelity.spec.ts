@@ -21,29 +21,34 @@ for (const width of [390, 1280]) {
         await page.evaluate(() => document.fonts.ready)
         expect(
           await page.evaluate(() =>
-            [...document.fonts].some((face) =>
-              face.family.replaceAll("\"", "") === "Geist Variable" && face.display === "block" &&
-              face.status === "loaded"
+            [...document.fonts].some(
+              (face) =>
+                face.family.replaceAll("\"", "") === "Geist Variable" &&
+                face.display === "block" &&
+                face.status === "loaded"
             )
           )
         ).toBe(true)
         await expect(page.getByRole("heading", { name: "Work", exact: true })).toBeVisible()
         expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width + 2)
-        await expect(page.locator(".work-board-list .work-row-progress, .work-board-list .work-row-evidence"))
-          .toHaveCount(0)
+        await expect(
+          page.locator(".work-board-list .work-row-progress, .work-board-list .work-row-evidence")
+        ).toHaveCount(0)
         expect(
-          await page.locator(".work-row-meta").evaluateAll((metadata) =>
-            metadata.every((element) => getComputedStyle(element).fontSize === "12px")
-          )
+          await page
+            .locator(".work-row-meta")
+            .evaluateAll((metadata) => metadata.every((element) => getComputedStyle(element).fontSize === "12px"))
         ).toBe(true)
         if (state === "3e") {
           const emptyTitle = page.locator(".work-empty-copy > strong")
-          expect(await emptyTitle.evaluate((element) => Number(getComputedStyle(element).fontWeight)))
-            .toBeGreaterThanOrEqual(600)
           expect(
-            await page.locator(".work-empty-copy code").first().evaluate((element) =>
-              getComputedStyle(element).backgroundColor
-            )
+            await emptyTitle.evaluate((element) => Number(getComputedStyle(element).fontWeight))
+          ).toBeGreaterThanOrEqual(600)
+          expect(
+            await page
+              .locator(".work-empty-copy code")
+              .first()
+              .evaluate((element) => getComputedStyle(element).backgroundColor)
           ).not.toBe("rgba(0, 0, 0, 0)")
         }
         if (state === "3b") {
@@ -52,17 +57,18 @@ for (const width of [390, 1280]) {
           await expect(page.locator(".work-connect-link")).toHaveCSS("text-decoration-line", "underline")
           await expect(page.locator(".work-connect-link svg.lucide-arrow-right")).toHaveCount(1)
           await expect(
-            page.locator(".work-detail-list > li").filter({ hasText: "Skip snapshot tests" })
-              .locator("svg.lucide-x")
+            page.locator(".work-detail-list > li").filter({ hasText: "Skip snapshot tests" }).locator("svg.lucide-x")
           ).toHaveCount(1)
           expect(
-            await page.locator(".work-step-name").evaluateAll((names) =>
-              names.every((name) => getComputedStyle(name).overflowWrap === "normal")
-            )
+            await page
+              .locator(".work-step-name")
+              .evaluateAll((names) => names.every((name) => getComputedStyle(name).overflowWrap === "normal"))
           ).toBe(true)
-          const circles = await page.locator(".work-step-number").evaluateAll((numbers) =>
-            numbers.map((number) => ({ x: number.getBoundingClientRect().x, y: number.getBoundingClientRect().y }))
-          )
+          const circles = await page
+            .locator(".work-step-number")
+            .evaluateAll((numbers) =>
+              numbers.map((number) => ({ x: number.getBoundingClientRect().x, y: number.getBoundingClientRect().y }))
+            )
           if (width === 390) {
             expect(new Set(circles.map((circle) => circle.x)).size).toBe(1)
             expect(new Set(circles.map((circle) => circle.y)).size).toBe(4)
@@ -72,6 +78,36 @@ for (const width of [390, 1280]) {
           }
         }
         if (state === "3c") await expect(page.locator(".work-detail").getByText(/^Owner gone/)).toBeVisible()
+        if (state === "3o") {
+          await expect(page.getByText("Showing 13 of 23 goals")).toBeVisible()
+          await expect(page.locator(".work-board-row")).toHaveCount(13)
+          await expect(page.locator(".work-detail .work-step-number")).toHaveCount(3)
+          await expect(page.locator(".work-delivery")).toContainText("No pull request")
+          await expect(page.locator(".work-facts")).toContainText("None yet")
+          const positions = await page
+            .locator(".work-step-number")
+            .evaluateAll((numbers) =>
+              numbers.map((number) => ({ x: number.getBoundingClientRect().x, y: number.getBoundingClientRect().y }))
+            )
+          expect(new Set(positions.map((number) => (width === 390 ? number.x : number.y))).size).toBe(1)
+          expect(new Set(positions.map((number) => (width === 390 ? number.y : number.x))).size).toBe(3)
+          const longRow = page
+            .locator(".work-board-row")
+            .filter({ hasText: "Reconcile the nightly dependency refresh" })
+          const fullRequest =
+            "Approve rebasing release/2026.10-freeze-candidate onto main@4f2c1e0 and force-pushing the result"
+          await expect(longRow).toHaveAccessibleName(new RegExp(fullRequest.replaceAll(".", "\\.")))
+          await expect(page.locator(".work-detail")).toContainText(fullRequest)
+          const clamp = await longRow.locator(".work-request-line").evaluate((element) => ({
+            height: element.getBoundingClientRect().height,
+            lineHeight: Number.parseFloat(getComputedStyle(element).lineHeight),
+            lines: getComputedStyle(element).webkitLineClamp,
+            overflow: getComputedStyle(element).overflow
+          }))
+          expect(clamp.lines).toBe("2")
+          expect(clamp.overflow).toBe("clip")
+          expect(clamp.height).toBeLessThanOrEqual(2 * clamp.lineHeight + 1)
+        }
         if (state === "3n") await expect(page.locator("button.work-board-row")).toHaveCount(0)
         // Reproduce the reference's hovered row as well as its selected inspector row.
         const hoveredTitle = state === "3a" && width === 390
@@ -80,10 +116,15 @@ for (const width of [390, 1280]) {
           ? "Approvals countdown copy"
           : state === "3c" && width === 390
           ? "Fix offline-backup flake"
+          : state === "3o" && width === 1280
+          ? "Connect characters polish"
           : undefined
         if (state === "3h" && width === 390) {
           await page.locator(".work-board-row").filter({ hasText: "Fix offline-backup flake" }).hover()
-        } else if (theme === "light" && hoveredTitle !== undefined) {
+        } else if (
+          hoveredTitle !== undefined &&
+          (theme === "light" || (width === 1280 && (state === "3b" || state === "3o")))
+        ) {
           await page.locator(".work-board-row").filter({ hasText: hoveredTitle }).hover()
         }
         const screenshot = await page.locator("main").screenshot({
@@ -136,7 +177,7 @@ for (const state of ["3a", "3n"]) {
     expect(geometry.height - geometry.scrollbarHeight).toBeCloseTo(geometry.chipHeight, 0)
     expect(geometry.minHeight).toBeGreaterThanOrEqual(44)
     await chips.first().focus()
-    for (let index = 0; index < await chips.count(); index++) {
+    for (let index = 0; index < (await chips.count()); index++) {
       if (index > 0) await page.keyboard.press("Tab")
       const chip = chips.nth(index)
       await expect(chip).toBeFocused()

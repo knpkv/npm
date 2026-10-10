@@ -16,7 +16,7 @@ export const workFidelityStates = [
   "3n",
   "3o"
 ] satisfies ReadonlyArray<string>
-export type WorkFidelityState = typeof workFidelityStates[number]
+export type WorkFidelityState = (typeof workFidelityStates)[number]
 
 const NOW = Date.parse("2026-10-10T14:02:31Z")
 const MINUTE = 60_000
@@ -137,30 +137,38 @@ const goals: ReadonlyArray<WorkGoal> = seeds.map((seed) => ({
     : null,
   connectTarget: seed.host === null
     ? null
-    : { agentId: `agent-${seed.owner}`, host: seed.host, url: `/connect/?agent=agent-${seed.owner}&host=${seed.host}` },
+    : {
+      agentId: `agent-${seed.owner}`,
+      host: seed.host,
+      url: `/connect/?agent=agent-${seed.owner}&host=${seed.host}`
+    },
   createdAt: NOW - 10 * DAY,
   delivery: seed.delivery,
   detail: seed.title,
   id: seed.id,
   owner: { id: seed.owner, name: seed.owner },
   repository: {
-    branch: seed.id === "usage" ? "rev-usage/usage-tab-reviewer" : `feat/${seed.id}`,
+    branch: seed.id === "usage"
+      ? "rev-usage/usage-tab-reviewer"
+      : seed.id === "push"
+      ? "pair-codex/hub-push-retries"
+      : `feat/${seed.id}`,
     repository: "knpkv/example"
   },
-  requests: seed.id === "backup" ?
-    [request("reassign", "Approve reassign to pair-codex", 18 * MINUTE)]
-    : seed.id === "usage" ?
-    [
+  requests: seed.id === "backup"
+    ? [request("reassign", "Approve reassign to pair-codex", 18 * MINUTE)]
+    : seed.id === "usage"
+    ? [
       request("merge", "Approve PR #712 for merge", 6 * MINUTE),
       request("fixtures", "Run usage fixtures on birch", HOUR, "fulfilled"),
       request("skip", "Skip snapshot tests", 2 * HOUR, "rejected"),
       request("draft", "Open a draft pull request", 3 * HOUR, "approved")
-    ] :
-    seed.id === "push"
+    ]
+    : seed.id === "push"
     ? [request("retry", "Retry push to birch with backoff", 5 * HOUR, "approved")]
     : [],
-  activity: seed.id === "usage" ?
-    [
+  activity: seed.id === "usage"
+    ? [
       {
         id: "request",
         kind: "request",
@@ -168,10 +176,20 @@ const goals: ReadonlyArray<WorkGoal> = seeds.map((seed) => ({
         summary: "rev-usage asked: Approve PR #712 for merge"
       },
       { id: "checks", kind: "review", occurredAt: NOW - 10 * MINUTE, summary: "Checks passed on PR #712" },
-      { id: "agent", kind: "status", occurredAt: NOW - 21 * MINUTE, summary: "rev-usage blocked, waiting for review" },
-      { id: "delegated", kind: "note", occurredAt: NOW - 92 * MINUTE, summary: "Goal delegated to rev-usage by coord" }
-    ] :
-    [],
+      {
+        id: "agent",
+        kind: "status",
+        occurredAt: NOW - 21 * MINUTE,
+        summary: "rev-usage blocked, waiting for review"
+      },
+      {
+        id: "delegated",
+        kind: "note",
+        occurredAt: NOW - 92 * MINUTE,
+        summary: "Goal delegated to rev-usage by coord"
+      }
+    ]
+    : [],
   spend: null,
   state: seed.state,
   summary: seed.title,
@@ -215,7 +233,7 @@ const observations: ReadonlyArray<WorkGoalObservedEntry> = [
       observedAt: NOW - 322 * MINUTE,
       fact: {
         _tag: "pull_request",
-        branch: "feat/push",
+        branch: "pair-codex/hub-push-retries",
         checks: "pending",
         closedAt: null,
         head: "b".repeat(40),
@@ -248,7 +266,7 @@ export const workFidelitySelection = (state: WorkFidelityState): WorkFidelitySel
         ? "usage"
         : null,
       statusFilter: state === "3g" ? "deployed" : "all",
-      visibleGoalCount: 12
+      visibleGoalCount: state === "3o" ? 13 : 12
     })
   }
 }
@@ -257,7 +275,7 @@ export const workFidelityDecisions: WorkRequestDecisions = {
   answer: null,
   sending: null,
   now: NOW,
-  expiresAt: (id) => id === "merge" || id === "long-request" ? NOW + 41 * MINUTE : undefined,
+  expiresAt: (id) => (id === "merge" || id === "long-request" ? NOW + 41 * MINUTE : undefined),
   onDecision: () => undefined
 }
 
@@ -268,11 +286,12 @@ export const workFidelitySnapshots = (state: WorkFidelityState): WorkSnapshots =
   if (state === "3d") entries = goals.filter((goal) => !["backup", "usage", "cache"].includes(goal.id))
   if (state === "3g") entries = goals.filter((goal) => goal.state !== "deployed")
   if (state === "3h" || state === "3h-v2") {
-    entries = goals.filter((goal) =>
-      (state === "3h-v2"
-        ? ["connect", "push", "security"]
-        : ["backup", "usage", "countdown", "connect", "push", "security"]).includes(goal.id)
-    )
+    entries = goals
+      .filter((goal) =>
+        (state === "3h-v2"
+          ? ["connect", "push", "security"]
+          : ["backup", "usage", "countdown", "connect", "push", "security"]).includes(goal.id)
+      )
       .map((goal) => ({
         ...goal,
         createdAt: NOW - 20 * DAY,
@@ -298,12 +317,15 @@ export const workFidelitySnapshots = (state: WorkFidelityState): WorkSnapshots =
         ? {
           ...goal,
           review: { state: "requested", summary: null, updatedAt: NOW - MINUTE, url: null },
-          activity: [...(goal.activity ?? []), {
-            id: "opened",
-            kind: "note",
-            occurredAt: NOW - 52 * MINUTE,
-            summary: "PR #712 opened on knpkv/example"
-          }]
+          activity: [
+            ...(goal.activity ?? []),
+            {
+              id: "opened",
+              kind: "note",
+              occurredAt: NOW - 52 * MINUTE,
+              summary: "PR #712 opened on knpkv/example"
+            }
+          ]
         }
         : goal
     )
@@ -311,49 +333,55 @@ export const workFidelitySnapshots = (state: WorkFidelityState): WorkSnapshots =
   if (state === "3o") {
     const first = goals[0]
     if (first !== undefined) {
-      entries = [{
-        ...first,
-        id: "long",
-        state: "working",
-        delivery: "local",
-        blocker: null,
-        title:
-          "Reconcile the nightly dependency refresh across every workspace package, rebase the release branch, and publish derivations to birch",
-        detail:
-          "Reconcile the nightly dependency refresh across every workspace package, rebase the release branch, and publish derivations to birch",
-        owner: {
-          id: "coordinator-for-monster-banana-builder-review",
-          name: "coordinator-for-monster-banana-builder-review"
+      entries = [
+        {
+          ...first,
+          id: "long",
+          state: "working",
+          delivery: "local",
+          blocker: null,
+          title:
+            "Reconcile the nightly dependency refresh across every workspace package, rebase the release branch, and publish derivations to birch",
+          detail:
+            "Reconcile the nightly dependency refresh across every workspace package, rebase the release branch, and publish derivations to birch",
+          owner: {
+            id: "coordinator-for-monster-banana-builder-review",
+            name: "coordinator-for-monster-banana-builder-review"
+          },
+          repository: {
+            repository: "knpkv/relay-infrastructure-monorepo-with-nix-flakes-and-hub-services",
+            branch:
+              "coordinator-for-monster-banana-builder-review/nightly-dependency-refresh-and-lockfile-reconciliation"
+          },
+          connectTarget: {
+            agentId: "agent-coordinator-for-monster-banana-builder-review",
+            host: "monster-banana-builder",
+            url: "/connect/?agent=agent-coordinator-for-monster-banana-builder-review&host=monster-banana-builder"
+          },
+          requests: [
+            request(
+              "long-request",
+              "Approve rebasing release/2026.10-freeze-candidate onto main@4f2c1e0 and force-pushing the result",
+              4 * MINUTE
+            )
+          ],
+          activity: [
+            {
+              id: "delegated",
+              kind: "note",
+              occurredAt: NOW - 42 * MINUTE,
+              summary: "Goal delegated to coordinator-for-monster-banana-builder-review by coord"
+            }
+          ]
         },
-        repository: {
-          repository: "knpkv/relay-infrastructure-monorepo-with-nix-flakes-and-hub-services",
-          branch: "coordinator-for-monster-banana-builder-review/nightly-dependency-refresh-and-lockfile-reconciliation"
-        },
-        connectTarget: {
-          agentId: "agent-coordinator-for-monster-banana-builder-review",
-          host: "monster-banana-builder",
-          url: "/connect/?agent=agent-coordinator-for-monster-banana-builder-review&host=monster-banana-builder"
-        },
-        requests: [
-          request(
-            "long-request",
-            "Approve rebasing release/2026.10-freeze-candidate onto main@4f2c1e0 and force-pushing the result",
-            4 * MINUTE
-          )
-        ],
-        activity: [{
-          id: "delegated",
-          kind: "note",
-          occurredAt: NOW - 42 * MINUTE,
-          summary: "Goal delegated to coordinator-for-monster-banana-builder-review by coord"
-        }]
-      }, ...goals.filter((goal) => goal.id === "backup" || goal.id === "connect")]
+        ...goals
+      ]
     }
   }
-  const observed = state === "3c" ?
-    observations.map((entry) =>
-      entry.goalId === "push" ?
-        {
+  const observed = state === "3c"
+    ? observations.map((entry) =>
+      entry.goalId === "push"
+        ? ({
           ...entry,
           stale: true,
           agent: {
@@ -361,10 +389,10 @@ export const workFidelitySnapshots = (state: WorkFidelityState): WorkSnapshots =
             observedAt: Date.parse("2026-10-10T09:14:00Z"),
             fact: { _tag: "agent", agentId: "agent-pair-codex", host: "atlas", status: "gone" }
           }
-        } satisfies WorkGoalObservedEntry :
-        entry
-    ) :
-    observations.filter((entry) => entries.some((goal) => goal.id === entry.goalId))
+        } satisfies WorkGoalObservedEntry)
+        : entry
+    )
+    : observations.filter((entry) => entries.some((goal) => goal.id === entry.goalId))
   const window = (name: WorkSnapshot["window"]): WorkSnapshot => {
     let snapshot: WorkSnapshot = {
       window: name,
@@ -375,10 +403,10 @@ export const workFidelitySnapshots = (state: WorkFidelityState): WorkSnapshots =
     if (entries.length > 0 && state !== "3h-v2") {
       snapshot = {
         ...snapshot,
-        goalsOmitted: state === "3d" ? 9 : state === "3h" ? 3 : state === "3g" ? 3 : state === "3o" ? 19 : 10
+        goalsOmitted: state === "3d" ? 9 : state === "3h" ? 3 : state === "3g" ? 3 : 10
       }
     }
-    if (entries.length > 0 && state !== "3h" && state !== "3h-v2" && state !== "3o") {
+    if (entries.length > 0 && state !== "3h" && state !== "3h-v2") {
       snapshot = { ...snapshot, finishedOmitted: 9 }
     }
     if (state !== "3l" && name === "now") snapshot = { ...snapshot, observed }
