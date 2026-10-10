@@ -27,6 +27,7 @@ import type {
   WorkSnapshotWindow,
   WorkBlocker
 } from "./model.js"
+import { goalsNotShown } from "./model.js"
 import { decodeWorkBoardNavigationGoal, encodeWorkBoardNavigationGoal } from "./navigation.js"
 import { workRequestClockText, workRequestDecidability, type WorkRequestDecisions } from "./request-decision.js"
 import { displayStateOf, observedFor } from "./display-state.js"
@@ -658,6 +659,27 @@ const activityKindLabel = {
 
 const snapshotFor = (snapshots: WorkSnapshots, window: WorkSnapshotWindow): WorkSnapshot => snapshots[window]
 
+/**
+ * The board header's line, as whole sentences joined by a space, so each piece ends in exactly one period:
+ * the window and its time, then what the live window could not show, then any goals the board left out.
+ */
+const headerSentences = (window: WorkSnapshotWindow, snapshot: WorkSnapshot): ReadonlyArray<string> => {
+  const when = `${window === "now" ? "Live" : windowLabel[window]}, as of ${formatTimestamp(snapshot.asOf)}.`
+  const live =
+    window !== "now"
+      ? []
+      : snapshot.observed === undefined
+        ? [
+            "Live state not available: this hub sends no observed facts (its herdr-work predates the reconciler, or the overlay did not fit the response), so states are as recorded.",
+            "Update herdr-work on the hub to see them."
+          ]
+        : snapshot.observedOmitted === undefined
+          ? []
+          : [`Live state shown for the most recently updated goals; ${String(snapshot.observedOmitted)} left out.`]
+  const cut = snapshot.goalsOmitted === undefined ? [] : [`${goalsNotShown(snapshot.goalsOmitted)}.`]
+  return [when, ...live, ...cut]
+}
+
 const familyForGoal = (snapshot: WorkSnapshot, goalId: string): WorkGoalFamilyGroup | null =>
   (snapshot.families ?? []).find((group) => group.canonicalGoalId === goalId) ?? null
 
@@ -928,14 +950,7 @@ export const WorkBoard = ({
           Work
         </Text>
         <Text tone="secondary" variant="meta">
-          {window === "now" ? "Live" : windowLabel[window]}, as of {formatTimestamp(snapshot.asOf)}
-          {window !== "now"
-            ? null
-            : snapshot.observed === undefined
-              ? ". Live state not available: this hub sends no observed facts (its herdr-work predates the reconciler, or the overlay did not fit the response), so states are as recorded. Update herdr-work on the hub to see them."
-              : snapshot.observedOmitted === undefined
-                ? null
-                : `. Live state shown for the most recently updated goals; ${snapshot.observedOmitted} left out.`}
+          {headerSentences(window, snapshot).join(" ")}
         </Text>
       </header>
       <Hero caption={summaryCaption(triage.summary, tense)} fact={heroFact} label="Work summary" />

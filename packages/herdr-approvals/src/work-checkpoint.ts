@@ -1,5 +1,13 @@
 import { FleetValidationError, type HostConfiguration } from "@knpkv/herdr-fleet"
-import { WorkGoalCheckpoint, WorkGoalId, WorkSnapshots } from "@knpkv/herdr-work/model"
+import {
+  goalsNotShown,
+  WorkGoalCheckpoint,
+  WorkGoalId,
+  WorkSnapshots,
+  WorkSnapshotsNewerVersion,
+  workSnapshotsVersion,
+  workSnapshotWindows
+} from "@knpkv/herdr-work/model"
 import { Effect, Schema } from "effect"
 
 export const workSnapshotPath = "/v1/work"
@@ -43,14 +51,28 @@ export const workSnapshotFromJson = Effect.fn("Fleetctl.workSnapshotFromJson")(f
       })
   })
   return yield* Schema.decodeUnknownEffect(WorkSnapshots)(input).pipe(
-    Effect.mapError(
-      (cause) =>
-        new FleetValidationError({
-          detail: `invalid work snapshot: ${String(cause)}`
-        })
-    )
+    Effect.mapError((cause) => {
+      // A newer format that no longer decodes is named as such: the fix is an upgrade, not a broken hub.
+      const newer = Schema.decodeUnknownOption(WorkSnapshotsNewerVersion)(input)
+      return new FleetValidationError({
+        detail: newer._tag === "Some"
+          ? `the hub sends Work snapshot version ${String(newer.value.version)}; this fleetctl reads version ` +
+            `${String(workSnapshotsVersion)}: upgrade fleetctl with the hub`
+          : `invalid work snapshot: ${String(cause)}`
+      })
+    })
   )
 })
+
+/**
+ * The lines `fleetctl work snapshot` adds on stderr, one per window a large board cut: stdout stays the
+ * snapshot alone, and an open goal leaving the view is never silent.
+ */
+export const workSnapshotNotes = (snapshot: WorkSnapshots): ReadonlyArray<string> =>
+  workSnapshotWindows.flatMap((window) => {
+    const omitted = snapshot[window].goalsOmitted
+    return omitted === undefined ? [] : [`${window}: ${goalsNotShown(omitted)}`]
+  })
 
 const workLocalBaseUrl = Effect.fn("Fleetctl.workLocalBaseUrl")(function*(
   config: HostConfiguration,

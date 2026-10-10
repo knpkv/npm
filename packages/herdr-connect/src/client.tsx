@@ -57,7 +57,7 @@ import {
   type TerminalModifier,
   type TerminalRailKey
 } from "./terminal-keyboard.js"
-import { WorkSnapshots } from "@knpkv/herdr-work/model"
+import { WorkSnapshots, WorkSnapshotsNewerVersion } from "@knpkv/herdr-work/model"
 import { ConnectAgentIdentity } from "./work-goal-link-view.js"
 import { resolveConnectWorkGoal, workSnapshotForAssociation, type ConnectWorkGoalResolution } from "./work-goal-link.js"
 import { WorkPollMount } from "./work-poll.js"
@@ -270,7 +270,11 @@ const loadWork = Effect.gen(function* () {
   if (response.status < 200 || response.status >= 300) {
     return yield* new ConnectStatusError({ status: response.status })
   }
-  return yield* decodeBoundedResponseJson(response, WorkSnapshots).pipe(
+  // A newer hub format that no longer decodes is named as such: this tab predates the hub, so reloading fixes it.
+  const decoded = yield* decodeBoundedResponseJson(
+    response,
+    Schema.Union([WorkSnapshots, WorkSnapshotsNewerVersion])
+  ).pipe(
     Effect.mapError(
       (cause) =>
         new ConnectProtocolError({
@@ -279,6 +283,11 @@ const loadWork = Effect.gen(function* () {
         })
     )
   )
+  if (Schema.is(WorkSnapshots)(decoded)) return decoded
+  return yield* new ConnectProtocolError({
+    detail: `the hub sends Work snapshot version ${String(decoded.version)}, newer than this page reads: reload the page`,
+    cause: decoded
+  })
 })
 
 const browserRuntime = Atom.runtime(BrowserHttpClient.layerFetch)

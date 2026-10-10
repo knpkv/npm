@@ -50,6 +50,7 @@ import {
   workRecoveryContextUrl,
   workRecoveryPreflightUrl,
   workSnapshotFromJson,
+  workSnapshotNotes,
   workSnapshotTarget,
   workSnapshotUrl
 } from "./work-checkpoint.js"
@@ -444,6 +445,7 @@ const main = Effect.gen(function*() {
       if (operation === "snapshot" && (rest.length === 1 || rest.length === 2)) {
         const snapshot = yield* snapshotWork(config, workSnapshotTarget(config, rest[1]))
         yield* Console.log(JSON.stringify(snapshot, null, 2))
+        for (const note of workSnapshotNotes(snapshot)) yield* Console.error(note)
         return
       }
       return yield* new FleetctlUsageError({

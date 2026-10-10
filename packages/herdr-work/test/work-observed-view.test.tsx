@@ -71,7 +71,7 @@ const merged = (goalId: string, closedAt: number): WorkGoalObservedEntry => ({
 
 const snapshotOf = (
   goals: ReadonlyArray<WorkGoal>,
-  overlay: Pick<WorkSnapshot, "observed" | "observedOmitted">
+  overlay: Pick<WorkSnapshot, "goalsOmitted" | "observed" | "observedOmitted">
 ): WorkSnapshots => {
   const window = (name: WorkSnapshot["window"]): WorkSnapshot => ({ asOf: NOW, goals, observedAt: NOW, window: name })
   return {
@@ -122,6 +122,25 @@ describe("Work board with the observed overlay", () => {
     expect((await mount(snapshotOf([goal("g1")], { observed: [], observedOmitted: 3 }))).textContent).toContain(
       "Live state shown for the most recently updated goals; 3 left out."
     )
+  })
+
+  it("says how many older goals a large board left out, so a goal leaving the view is never silent", async () => {
+    expect((await mount(snapshotOf([goal("g1")], { goalsOmitted: 12, observed: [] }))).textContent).toContain(
+      "12 older goals not shown."
+    )
+    expect((await mount(snapshotOf([goal("g1")], { goalsOmitted: 1, observed: [] }))).textContent).toContain(
+      "1 older goal not shown."
+    )
+    expect((await mount(snapshotOf([goal("g1")], { observed: [] }))).textContent).not.toContain("not shown")
+  })
+
+  it("reads as whole sentences when live state and a cut board are both reported", async () => {
+    for (const overlay of [{ goalsOmitted: 12, observed: [], observedOmitted: 3 }, { goalsOmitted: 12 }]) {
+      const header =
+        (await mount(snapshotOf([goal("g1")], overlay))).querySelector(".work-page-intro")?.textContent ?? ""
+      expect(header).toContain("12 older goals not shown.")
+      expect(header).not.toContain("..")
+    }
   })
 
   it("shows the observed state on the row and names the recorded one in the detail", async () => {
