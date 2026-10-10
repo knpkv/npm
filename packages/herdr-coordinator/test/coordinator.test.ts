@@ -50,7 +50,7 @@ const lifecycleEvent = (
   })
 
 const config = (stateDirectory: string): HostConfiguration => ({
-  allowedUsers: ["andrey@example.com"],
+  allowedUsers: ["owner@example.com"],
   applyCommand: null,
   browserMcpRecoverCommand: null,
   applyMachines: ["SER8"],
@@ -70,7 +70,7 @@ const config = (stateDirectory: string): HostConfiguration => ({
   machines: [{ host: "SER8", nodeId: "node-ser8" }],
   port: 4778,
   pushAllowedOrigins: ["https://push.example.test"],
-  pushSubject: "mailto:andrey@example.com",
+  pushSubject: "mailto:owner@example.com",
   repository: "/repo",
   approvalTls: null,
   stateDirectory,

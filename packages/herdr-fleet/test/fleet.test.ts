@@ -113,9 +113,9 @@ describe("fleet local authority", () => {
             },
             store
           })
-          const job = yield* service.submit({ payload: { kind: "nix.check" } }, "andrey")
+          const job = yield* service.submit({ payload: { kind: "nix.check" } }, "owner")
           yield* service.run(job.id)
-          expect(accepted).toEqual({ actor: "andrey", jobId: "job-accepted" })
+          expect(accepted).toEqual({ actor: "owner", jobId: "job-accepted" })
         }),
       (store) =>
         Effect.sync(() => {
@@ -143,7 +143,7 @@ describe("fleet local authority", () => {
             },
             store
           })
-          const queued = yield* service.submit({ payload: { kind: "nix.check" } }, "andrey")
+          const queued = yield* service.submit({ payload: { kind: "nix.check" } }, "owner")
           expect(yield* Effect.result(service.run(queued.id))).toMatchObject({
             failure: {
               _tag: "FleetOperationError",
@@ -197,7 +197,7 @@ describe("fleet local authority", () => {
         },
         store: firstStore
       })
-      const queued = yield* first.submit({ payload: { kind: "nix.check" } }, "andrey")
+      const queued = yield* first.submit({ payload: { kind: "nix.check" } }, "owner")
       expect(yield* Effect.result(first.run(queued.id))).toMatchObject({
         failure: { operation: "test.pre_acceptance_failure" }
       })
@@ -290,7 +290,7 @@ describe("fleet local authority", () => {
           prompt: "resume durable work",
           repository: "/repo"
         }
-      }, "andrey")
+      }, "owner")
       expect(yield* first.run(queued.id)).toMatchObject({
         acceptedReceipt: "durable-receipt",
         result: "durable-receipt",
@@ -387,7 +387,7 @@ describe("fleet local authority", () => {
         },
         store: firstStore
       })
-      const queued = yield* first.submit({ payload: { kind: "nix.check" } }, "andrey")
+      const queued = yield* first.submit({ payload: { kind: "nix.check" } }, "owner")
       const failedRun = yield* Effect.result(first.run(queued.id))
       expect(failedRun).toMatchObject({
         failure: { _tag: "FleetOperationError", operation: "test.attach_observer" }
@@ -462,7 +462,7 @@ describe("fleet local authority", () => {
         },
         store: firstStore
       })
-      const queued = yield* first.submit({ payload: { kind: "nix.check" } }, "andrey")
+      const queued = yield* first.submit({ payload: { kind: "nix.check" } }, "owner")
       expect(yield* Effect.result(first.run(queued.id))).toMatchObject({
         failure: { _tag: "FleetOperationError", operation: "fleet.operation_accepted" }
       })
@@ -521,7 +521,7 @@ describe("fleet local authority", () => {
         id: "job-pending-receipt",
         createdAt: 1_000,
         updatedAt: 1_000,
-        actor: "andrey",
+        actor: "owner",
         hash: Schema.decodeUnknownSync(JobHash)("a".repeat(64)),
         approvalNonce: null,
         approvalExpiresAt: null,
@@ -608,7 +608,7 @@ describe("fleet local authority", () => {
             },
             store
           })
-          const queued = yield* service.submit({ payload: { kind: "nix.check" } }, "andrey")
+          const queued = yield* service.submit({ payload: { kind: "nix.check" } }, "owner")
           expect(yield* service.run(queued.id)).toMatchObject({
             acceptedReceipt: "coordinator-request-max",
             result: summary,
@@ -634,7 +634,7 @@ describe("fleet local authority", () => {
 
   it("rejects duplicate and unknown apply targets at config decoding", () => {
     const valid = {
-      allowedUsers: ["andrey@example.com"],
+      allowedUsers: ["owner@example.com"],
       applyCommand: null,
       browserMcpRecoverCommand: null,
       applyMachines: ["SER8", "PI"],
@@ -657,7 +657,7 @@ describe("fleet local authority", () => {
       ],
       port: 4_778,
       pushAllowedOrigins: ["https://push.example.test"],
-      pushSubject: "mailto:andrey@example.com",
+      pushSubject: "mailto:owner@example.com",
       repository: "/repo",
       approvalTls: null,
       stateDirectory: "/state",
@@ -1626,7 +1626,7 @@ describe("fleet local authority", () => {
       })
       if (baseline.kind !== "work.recover") return
       expect(requiresApproval(baseline)).toBe(true)
-      const original = yield* jobHash("SER8", "andrey", baseline)
+      const original = yield* jobHash("SER8", "owner", baseline)
       const changes = [
         {
           repository: "other/npm",
@@ -1675,14 +1675,14 @@ describe("fleet local authority", () => {
           ...baseline,
           ...change
         })
-        expect(yield* jobHash("SER8", "andrey", changed)).not.toBe(original)
+        expect(yield* jobHash("SER8", "owner", changed)).not.toBe(original)
       }
-      expect(yield* jobHash("OTHER", "andrey", baseline)).not.toBe(original)
+      expect(yield* jobHash("OTHER", "owner", baseline)).not.toBe(original)
       expect(yield* jobHash("SER8", "other-actor", baseline)).not.toBe(original)
       expect(
         yield* jobHash(
           "SER8",
-          "andrey",
+          "owner",
           Schema.decodeUnknownSync(JobPayload)({
             ...baseline,
             owner: { name: baseline.owner.name, id: baseline.owner.id },
@@ -1750,9 +1750,9 @@ describe("fleet local authority", () => {
           const pending = yield* service.submit({ payload }, "coord")
           expect(pending.status).toBe("pending_approval")
           expect((yield* Effect.result(service.run(pending.id)))._tag).toBe("Failure")
-          yield* service.approve(pending.id, { hash: pending.hash, nonce: "nonce-reassign" }, "andrey")
+          yield* service.approve(pending.id, { hash: pending.hash, nonce: "nonce-reassign" }, "owner")
           yield* service.run(pending.id)
-          expect(approvals).toEqual([{ approvedBy: "andrey", approvedAt: 1_000, hash: pending.hash }])
+          expect(approvals).toEqual([{ approvedBy: "owner", approvedAt: 1_000, hash: pending.hash }])
         }),
       (store) =>
         Effect.sync(() => {
@@ -1790,7 +1790,7 @@ describe("fleet local authority", () => {
             expect((yield* service.run(local.id)).status).toBe("succeeded")
           }
           for (const payload of payloads.filter(requiresApproval)) {
-            const remote = yield* service.submit({ payload }, "andrey@example.com", "authenticated_remote")
+            const remote = yield* service.submit({ payload }, "owner@example.com", "authenticated_remote")
             expect(remote).toMatchObject({ approvalNonce: "remote-nonce", status: "pending_approval" })
             const unstated = yield* service.submit({ payload }, "local")
             expect(unstated.status).toBe("pending_approval")
@@ -1845,7 +1845,7 @@ describe("fleet local authority", () => {
     kind: "work.abandon",
     goalId: "fix-iphone-live-ui-polish",
     owner: { id: "owner-host-coordinator", name: "Codex host coordinator" },
-    reason: "abandoned by Andrey 2026-10-06: no PR, no branch, no owner",
+    reason: "abandoned by Owner 2026-10-06: no PR, no branch, no owner",
     expectedGoalEventId: "goal-event-7",
     expectedGoalUpdatedAt: 500
   }

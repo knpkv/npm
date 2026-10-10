@@ -16,7 +16,7 @@ const provideNodeServices = Effect.provide(NodeServices.layer)
 const provideTestClock = Effect.provide(TestClock.layer())
 
 const configuration = (root: string): HostConfiguration => ({
-  allowedUsers: ["andrey@example.com"],
+  allowedUsers: ["owner@example.com"],
   applyCommand: ["true"],
   browserMcpRecoverCommand: null,
   applyMachines: ["SER8"],
@@ -32,7 +32,7 @@ const configuration = (root: string): HostConfiguration => ({
   machines: [{ host: "SER8", nodeId: "node-ser8" }],
   port: 4777,
   pushAllowedOrigins: ["https://push.example.test"],
-  pushSubject: "mailto:andrey@example.com",
+  pushSubject: "mailto:owner@example.com",
   repository: root,
   approvalTls: null,
   stateDirectory: root,

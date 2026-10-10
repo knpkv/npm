@@ -94,7 +94,7 @@ describe("Tailscale fleet boundary", () => {
     const command = join(root, "tailscale-test")
     const script = (exitCode: number) =>
       `#!/bin/sh
-printf '%s\n' '{"Node":{"StableID":"node-a"},"UserProfile":{"LoginName":"andrey@example.com"}}'
+printf '%s\n' '{"Node":{"StableID":"node-a"},"UserProfile":{"LoginName":"owner@example.com"}}'
 exit ${exitCode}
 `
     writeFileSync(command, script(7), { mode: 0o700 })
@@ -223,8 +223,8 @@ exit ${exitCode}
 
   it.effect("requires both the allowed login and the expected node", () =>
     authorizeWhois(
-      { Node: { StableID: "node-a" }, UserProfile: { LoginName: "andrey@example.com" } },
-      ["andrey@example.com"],
+      { Node: { StableID: "node-a" }, UserProfile: { LoginName: "owner@example.com" } },
+      ["owner@example.com"],
       ["node-b"]
     ).pipe(
       Effect.flip,

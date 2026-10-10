@@ -264,19 +264,19 @@ describe("AdfWalker", () => {
   it("does not double the @ on mentions whose text already starts with @", () => {
     const r = walk(doc([{
       type: "paragraph",
-      content: [{ type: "mention", attrs: { id: "557057:abc", text: "@Andrey Konopkov" } }]
+      content: [{ type: "mention", attrs: { id: "557057:abc", text: "@Owner User" } }]
     }]))
-    expect(r.markdown).toContain("@Andrey Konopkov")
+    expect(r.markdown).toContain("@Owner User")
     expect(r.markdown).not.toContain("@@")
   })
 
   it("encodes the mention accountId in a custom-scheme link", () => {
     const r = walk(doc([{
       type: "paragraph",
-      content: [{ type: "mention", attrs: { id: "557057:abc-123", text: "@Andrey Konopkov" } }]
+      content: [{ type: "mention", attrs: { id: "557057:abc-123", text: "@Owner User" } }]
     }]))
     // ":" gets percent-encoded by encodeURIComponent so the URL is unambiguous.
-    expect(r.markdown).toContain("[@Andrey Konopkov](confluence-mention://557057%3Aabc-123)")
+    expect(r.markdown).toContain("[@Owner User](confluence-mention://557057%3Aabc-123)")
   })
 
   it("falls back to plain @text when the mention has no id", () => {

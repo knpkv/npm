@@ -71,7 +71,7 @@ const request = {
   expectedGoalUpdatedAt: original.goal.updatedAt,
   approvalJobId: "job-reassign-1",
   approvalActor: "coord",
-  approvalApprovedBy: "andrey",
+  approvalApprovedBy: "owner",
   approvalApprovedAt: 900,
   approvalHash: "c".repeat(64)
 } satisfies WorkGoalReassignment
@@ -360,7 +360,7 @@ describe("approved goal reassignment", () => {
       expectedHistoryToken: preflight.historyToken,
       approvalJobId: "job-recover-433",
       approvalActor: "coord",
-      approvalApprovedBy: "andrey",
+      approvalApprovedBy: "owner",
       approvalApprovedAt: 800,
       approvalHash: "d".repeat(64)
     }

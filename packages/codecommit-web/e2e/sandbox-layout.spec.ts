@@ -75,7 +75,7 @@ const appState = JSON.stringify({
       approvalRules: [],
       approvedBy: [],
       approvedByArns: [],
-      author: "andrey",
+      author: "owner",
       commentCount: 3,
       commentedBy: [],
       creationDate: "2026-08-07T09:30:00.000Z",

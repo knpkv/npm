@@ -8,7 +8,7 @@ describe("dashboard model", () => {
       {
         _tag: "local",
         record: {
-          actor: "andrey@example.com",
+          actor: "owner@example.com",
           approvedBy: null,
           createdAt: 1,
           id: "job-1",
@@ -22,7 +22,7 @@ describe("dashboard model", () => {
         _tag: "remote",
         remote: {
           approval: {
-            actor: "andrey@example.com",
+            actor: "owner@example.com",
             approvalExpiresAt: null,
             createdAt: 1,
             id: "job-2",

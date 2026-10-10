@@ -5,7 +5,7 @@ const pullRequest = {
   approvalRules: [],
   approvedBy: [],
   approvedByArns: [],
-  author: "andrey",
+  author: "owner",
   commentedBy: [],
   creationDate: "2026-08-01T00:00:00.000Z",
   destinationBranch: "main",
@@ -118,7 +118,7 @@ test("stats keeps its h1 and main when the stats read fails", async ({ page }) =
 test("the author link in the pull request sentence is underlined", async ({ page }) => {
   await stubSession(page)
   await page.goto("/accounts/production/prs/42?repository=example-repository&region=eu-west-1")
-  const author = page.getByRole("main").getByRole("link", { name: "andrey", exact: true }).first()
+  const author = page.getByRole("main").getByRole("link", { name: "owner", exact: true }).first()
   await expect(author).toBeVisible()
   await expect(author).toHaveCSS("text-decoration-line", "underline")
 })
@@ -155,8 +155,8 @@ for (const colorScheme of colorSchemes) {
     await page.emulateMedia({ colorScheme })
     await stubSession(page)
     await page.goto("/accounts/production/prs/42?repository=example-repository&region=eu-west-1")
-    await expect(page.getByRole("main").getByRole("link", { name: "andrey", exact: true }).first()).toBeVisible()
-    expect(await underlineContrast(page, "andrey")).toBeGreaterThanOrEqual(3)
+    await expect(page.getByRole("main").getByRole("link", { name: "owner", exact: true }).first()).toBeVisible()
+    expect(await underlineContrast(page, "owner")).toBeGreaterThanOrEqual(3)
   })
 }
 
