@@ -45,6 +45,30 @@ describe("DecisionBar", () => {
     )
   })
 
+  it("leads the status region with a decided outcome as a toned word, the status quiet beside it", () => {
+    const markup = bar({
+      outcome: { label: "Approved", tone: "positive" },
+      state: { _tag: "off", reason: "Approved." },
+      status: "by arch, 2m ago"
+    })
+    const region = /<p[^>]*role="status"[^>]*>(.*?)<\/p>/.exec(markup)?.[1] ?? ""
+    expect(region).toContain("Approved")
+    expect(region).toContain("by arch, 2m ago")
+    expect(region.indexOf("Approved")).toBeLessThan(region.indexOf("by arch"))
+    // The reason stays as the inert actions' description, hidden because the outcome says it.
+    const reason = /<p class="([^"]*)" id="([^"]+)">Approved\.<\/p>/.exec(markup)
+    expect(reason?.[1]?.split(" ")).toHaveLength(2)
+    expect(markup.match(new RegExp(`aria-describedby="${reason?.[2]}"`, "g"))).toHaveLength(2)
+  })
+
+  it("shows no outcome while sending, only the waiting line", () => {
+    const markup = bar({
+      outcome: { label: "Approved", tone: "positive" },
+      state: { _tag: "sending", action: "approve" }
+    })
+    expect(markup).toMatch(/role="status"[^>]*>Approve sent; waiting for the server&#x27;s answer\.<\/p>/)
+  })
+
   it("applies the sticky placement only when asked", () => {
     expect(bar()).toContain(RLY_DECISION_BAR_VARIANTS.placement.inline.className)
     expect(bar({ placement: "sticky" })).toContain(RLY_DECISION_BAR_VARIANTS.placement.sticky.className)

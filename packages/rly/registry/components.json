@@ -853,6 +853,10 @@
         },
         {
           "kind": "type",
+          "name": "RlyDecisionBarOutcome"
+        },
+        {
+          "kind": "type",
           "name": "RlyDecisionBarPlacement"
         },
         {

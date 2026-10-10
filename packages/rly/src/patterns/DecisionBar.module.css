@@ -46,8 +46,10 @@
     cursor: not-allowed;
   }
 
-  /* Kept in the accessibility tree while empty, so its first message is announced. */
-  .status:empty {
+  /* Kept in the accessibility tree while empty, so its first message is announced; a reason the
+     outcome already says stays only as the inert actions' description. */
+  .status:empty,
+  .hidden {
     block-size: 1px;
     clip-path: inset(50%);
     inline-size: 1px;
@@ -64,6 +66,18 @@
     font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
       var(--rly-type-meta-font);
     margin: var(--rly-space-0);
+  }
+
+  /* The outcome word leads, the quiet who-and-when line follows and wraps under it when narrow. */
+  .withOutcome {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--rly-space-4) var(--rly-space-8);
+  }
+
+  .outcomeDetail {
+    min-inline-size: 0;
   }
 
   /* Forced colours flatten the muted ink of an off action, so mark it with a dashed border too. */

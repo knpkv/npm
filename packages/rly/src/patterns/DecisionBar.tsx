@@ -1,6 +1,8 @@
 import { type ComponentPropsWithRef, type ReactElement, type ReactNode, useId } from "react"
 import { classNames, cssClass, defineVariants, requireText } from "../internal/component.js"
+import type { RlyIconName } from "../foundations/Icon.js"
 import { Button } from "../primitives/Button.js"
+import { type RlyStateTone, StateLabel } from "../primitives/StateLabel.js"
 import styles from "./DecisionBar.module.css"
 
 const style = (name: string): string => cssClass(styles, name)
@@ -36,6 +38,14 @@ export type RlyDecisionBarState =
   | { readonly _tag: "off"; readonly reason: string }
   | { readonly _tag: "sending"; readonly action: "approve" | "reject" }
 
+/** How a decided target ended, shown as a toned word in the bar's status line. */
+export interface RlyDecisionBarOutcome {
+  readonly label: string
+  readonly tone: RlyStateTone
+  /** Defaults to the tone's icon. */
+  readonly icon?: RlyIconName
+}
+
 /** Presentation-only DecisionBar props. */
 export type DecisionBarProps = Omit<ComponentPropsWithRef<"div">, "children" | "title"> & {
   /** Visible approve label. Defaults to "Approve". */
@@ -44,6 +54,12 @@ export type DecisionBarProps = Omit<ComponentPropsWithRef<"div">, "children" | "
   readonly clock?: ReactNode
   /** One line under the actions, such as what happens if the request expires first. */
   readonly note?: ReactNode
+  /**
+   * How the target ended once it is decided ("Approved", positive). It leads the status line as a
+   * toned word, `status` becomes the quiet line beside it (who and when), and an `off` reason is
+   * kept only for the inert actions' descriptions, since the outcome already says it.
+   */
+  readonly outcome?: RlyDecisionBarOutcome
   readonly onApprove: () => void
   readonly onReject: () => void
   /** Defaults to `inline`. */
@@ -75,6 +91,7 @@ export const DecisionBar = ({
   note,
   onApprove,
   onReject,
+  outcome,
   placement = RLY_DECISION_BAR_DEFAULT_VARIANTS.placement,
   rejectLabel = "Reject",
   state,
@@ -90,10 +107,11 @@ export const DecisionBar = ({
   const reason = state._tag === "off" ? state.reason : undefined
   // Mounted in every state, so a screen reader announces what lands in it: the waiting line while
   // sending, then the caller's `status` with the server's answer.
-  const statusText =
+  const sendingText =
     state._tag === "sending"
       ? `${state.action === "approve" ? approveLabel : rejectLabel} sent; waiting for the server's answer.`
-      : (status ?? "")
+      : null
+  const shownOutcome = sendingText === null ? outcome : undefined
   const describedBy = reason !== undefined ? reasonId : state._tag === "sending" ? statusId : undefined
   const guarded = (action: () => void) => () => {
     if (!inert) action()
@@ -136,12 +154,32 @@ export const DecisionBar = ({
         </Button>
       </div>
       {reason === undefined ? null : (
-        <p className={style("reason")} id={reasonId}>
+        <p
+          className={classNames(style("reason"), shownOutcome === undefined ? undefined : style("hidden"))}
+          id={reasonId}
+        >
           {reason}
         </p>
       )}
-      <p className={style("status")} id={statusId} role="status">
-        {statusText}
+      {/* Always the same element, so a screen reader announces what lands in it, outcome included. */}
+      <p
+        className={classNames(style("status"), shownOutcome === undefined ? undefined : style("withOutcome"))}
+        id={statusId}
+        role="status"
+      >
+        {sendingText ??
+          (shownOutcome === undefined ? (
+            (status ?? "")
+          ) : (
+            <>
+              <StateLabel
+                {...(shownOutcome.icon === undefined ? {} : { icon: shownOutcome.icon })}
+                label={shownOutcome.label}
+                tone={shownOutcome.tone}
+              />
+              {status === undefined ? null : <span className={style("outcomeDetail")}>{status}</span>}
+            </>
+          ))}
       </p>
       {note === undefined ? null : <p className={style("note")}>{note}</p>}
     </div>
