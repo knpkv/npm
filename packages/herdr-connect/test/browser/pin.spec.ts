@@ -120,7 +120,7 @@ test.describe("Connect pin", () => {
   })
 
   // The list behind "+N" opens clear of the chips, and in a phone's terminal bar the pins keep to one line.
-  test("opens the +N list clear of the chips, and keeps the bar's pins on one line on a phone", async ({ page }) => {
+  test("opens the +N list clear of the chips, and keeps the phone bar to one line", async ({ page }) => {
     await page.setViewportSize({ height: 700, width: 320 })
     await page.goto("/")
     await page.evaluate(() => {
@@ -154,12 +154,16 @@ test.describe("Connect pin", () => {
     await page.locator(".connect-agent", { hasText: "fixture-pane" }).click()
     await page.getByRole("button", { name: "Open terminal" }).click()
     await expect(page.getByText("connected", { exact: true })).toBeVisible()
-    const bar = page.locator(".terminal-bar .connect-pins")
-    await expect(bar.getByRole("button", { name: "2 more pinned" })).toBeVisible()
-    const rows = await bar.locator("button").evaluateAll((buttons) =>
-      new Set(buttons.map((b) => Math.round(b.getBoundingClientRect().top))).size
-    )
-    expect(rows).toBe(1)
+    // On a phone the bar keeps one line: every pin waits behind one button, beside the way back.
+    const pins = page.locator(".terminal-bar").getByRole("button", { name: "2 pinned" })
+    await expect(pins).toBeVisible()
+    const [pinsBox, backBox] = await Promise.all([
+      pins.boundingBox(),
+      page.locator(".terminal-bar .terminal-back").boundingBox()
+    ])
+    expect(pinsBox).not.toBeNull()
+    expect(backBox).not.toBeNull()
+    if (pinsBox !== null && backBox !== null) expect(Math.abs(pinsBox.y - backBox.y)).toBeLessThan(backBox.height)
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320)
   })
 
@@ -174,5 +178,24 @@ test.describe("Connect pin", () => {
       .evaluateAll((chips) => chips.map((chip) => getComputedStyle(chip).backgroundColor))
     expect(backgrounds.length).toBeGreaterThan(0)
     for (const background of backgrounds) expect(background).toMatch(/^rgb\(/)
+  })
+
+  // Unpinning with the × keeps the reader in the set, as Delete does, instead of dropping focus on the page.
+  test("keeps focus in the set after unpinning with the ×", async ({ page }) => {
+    await page.goto("/")
+    await page.evaluate(() => {
+      const pin = (host: string, id: string, name: string) => ({ host, id, key: `${host}:${id}`, name, seenAt: 0 })
+      window.localStorage.setItem(
+        "fleet-connect-pins",
+        JSON.stringify({
+          pins: [pin("FIXTURE", "agent-fixture", "fixture-pane"), pin("gone", "agent-one", "away")],
+          v: 1
+        })
+      )
+    })
+    await page.reload()
+    await page.getByRole("button", { name: "Unpin fixture-pane" }).click()
+    await expect(page.getByRole("button", { name: /^Pinned: fixture-pane/ })).toBeHidden()
+    expect(await page.evaluate(() => document.activeElement?.closest(".connect-pins") !== null)).toBe(true)
   })
 })

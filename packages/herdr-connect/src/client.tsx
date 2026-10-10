@@ -2,7 +2,7 @@ import { useAtom, useAtomMount, useAtomValue } from "@effect/atom-react"
 import { BrowserHttpClient } from "@effect/platform-browser"
 import { StateLabel, Surface, Text } from "@knpkv/rly/primitives"
 import { decodeBoundedResponseJson } from "@knpkv/herdr-fleet/response"
-import { Cause, Clock, Effect, Fiber, Predicate, Result, Schedule, Schema } from "effect"
+import { Cause, Effect, Fiber, Predicate, Result, Schedule, Schema } from "effect"
 import * as AsyncResult from "effect/reactivity/AsyncResult"
 import * as Atom from "effect/reactivity/Atom"
 import * as HttpClient from "effect/http/HttpClient"
@@ -15,6 +15,7 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  useSyncExternalStore,
   type KeyboardEvent,
   type ReactNode
 } from "react"
@@ -43,7 +44,7 @@ import {
   writeTerminalOutput
 } from "./terminal-output.js"
 import { agentBucketsOf, type AgentBuckets, arrivalsBetween, nextAgentBuckets } from "./arrivals.js"
-import { arrangePins, observePins, pin, type Pins, StoredPins, unpin } from "./pins.js"
+import { arrangePins, observePins, pin, type Pin, type Pins, StoredPins, unpin } from "./pins.js"
 import { AgentCast, AgentStage, PIN_ROOM, PinnedAgents } from "./stage.js"
 import {
   AgentDirectory,
@@ -190,6 +191,19 @@ const storeRememberedAgent = (key: string) =>
     )
   )
 
+/** Whether the window is phone-narrow (below 48rem), following resizes. */
+const narrowQuery = "(max-width: 47.99rem)"
+const useNarrowScreen = (): boolean =>
+  useSyncExternalStore(
+    (onChange) => {
+      const query = window.matchMedia(narrowQuery)
+      query.addEventListener("change", onChange)
+      return () => query.removeEventListener("change", onChange)
+    },
+    () => window.matchMedia(narrowQuery).matches,
+    () => false
+  )
+
 /** The agents this device keeps pinned, in pin order (`Pins`); nothing stored means none. */
 const pinsStorageKey = "fleet-connect-pins"
 /** Before pins were a set, one pinned agent's key was stored here; it is read once and carried over. */
@@ -214,12 +228,12 @@ const loadPins = Effect.gen(function* () {
   const key = yield* Schema.decodeUnknownEffect(RememberedAgentKey)(legacy).pipe(
     Effect.mapError((cause) => new ConnectPreferenceError({ operation: "local_storage.decode", cause }))
   )
-  // The old key held only `host:id`; the name and last-seen minute fill in on the first poll that lists it.
+  // The old key held only `host:id`; the name and last-seen minute fill in on the first poll that lists it,
+  // and until then the pin says it hasn't been seen rather than inventing a time.
   const split = key.indexOf(":")
-  const host = split > 0 ? key.slice(0, split) : key
   const id = split > 0 ? key.slice(split + 1) : key
-  const now = yield* Clock.currentTimeMillis
-  return Result.getOrElse(pin([], { host, id, key, name: id }, now), () => [])
+  const carried: Pin = { host: split > 0 ? key.slice(0, split) : key, id, key, name: id, seenAt: null }
+  return [carried]
 })
 
 /** Writes the pins, and drops the old single-pin key once they are stored. */
@@ -1114,10 +1128,14 @@ export const ConnectSurface = ({
     (key) => key === stageKey
   )
   const floatRows = floatPins.shown.length + (floatPins.overflow.length > 0 ? 1 : 0)
+  // A phone's terminal bar has no room for chips beside the name: there the pins sit behind one button, so the
+  // bar never takes a second line from the terminal.
+  const narrow = useNarrowScreen()
+  const barRoom = narrow ? 0 : PIN_ROOM.bar
   const barPins = arrangePins(
     pins,
     (key) => agentByKey.get(key),
-    PIN_ROOM.bar,
+    barRoom,
     (key) => key === selectedKey
   )
   const barPinned = barPins.shown.length + barPins.overflow.length > 0
@@ -1465,6 +1483,7 @@ export const ConnectSurface = ({
           onUnpin={removePin}
           pins={pins}
           placement="bar"
+          room={barRoom}
           stale={staleSince !== null}
         />
       </div>

@@ -12,6 +12,7 @@ import { Button, Sheet } from "@knpkv/rly/primitives"
 import {
   type CSSProperties,
   type KeyboardEvent,
+  type MouseEvent,
   type PointerEvent,
   type ReactElement,
   useId,
@@ -216,8 +217,9 @@ const otherDayTime = new Intl.DateTimeFormat("en", {
   month: "short"
 })
 
-/** "not seen since 14:05", with the date when it wasn't today. */
-const sinceLabel = (at: number, now: number): string => {
+/** "not seen since 14:05", with the date when it wasn't today; a pin no poll has seen yet says so. */
+const sinceLabel = (at: number | null, now: number): string => {
+  if (at === null) return "not seen yet"
   const sameDay = new Date(at).toDateString() === new Date(now).toDateString()
   return `not seen since ${(sameDay ? sameDayTime : otherDayTime).format(at)}`
 }
@@ -239,7 +241,7 @@ const PinChip = ({
 }: {
   readonly agent: ConnectAgent
   readonly onOpen: () => void
-  readonly onUnpin: () => void
+  readonly onUnpin: (event: MouseEvent<HTMLButtonElement>) => void
   readonly pinKey: string
   /** The open and unpin buttons' places in the set's single tab stop. */
   readonly roving: readonly [RovingStop, RovingStop]
@@ -291,9 +293,12 @@ export const PinnedAgents = ({
   onUnpin,
   pins,
   placement,
+  room = PIN_ROOM[placement],
   stale
 }: {
   readonly pins: Pins
+  /** How many chips show before the rest go behind the overflow button; a phone's terminal bar shows none. */
+  readonly room?: number | undefined
   readonly agentFor: (key: string) => ConnectAgent | undefined
   /** The agent whose stage or terminal is open: its own pin isn't repeated beside it. */
   readonly hiddenKey?: string | null
@@ -303,7 +308,7 @@ export const PinnedAgents = ({
   readonly placement: "bar" | "float"
   readonly stale: boolean
 }): ReactElement | null => {
-  const { overflow, shown } = arrangePins(pins, agentFor, PIN_ROOM[placement], (key) => key === hiddenKey)
+  const { overflow, shown } = arrangePins(pins, agentFor, room, (key) => key === hiddenKey)
   const [expanded, setExpanded] = useState(false)
   const [active, setActive] = useState(0)
   const group = useRef<HTMLDivElement>(null)
@@ -321,6 +326,14 @@ export const PinnedAgents = ({
     setActive(all.indexOf(target))
     target.focus()
   }
+  // Unpinning with the × keeps focus in the set, as Delete does: on the control now in its place, or search.
+  const unpinFrom =
+    (key: string) =>
+    (event: MouseEvent<HTMLButtonElement>): void => {
+      const index = buttons().indexOf(event.currentTarget)
+      onUnpin(key)
+      requestAnimationFrame(() => focusAt(index))
+    }
   const keyDown = (event: KeyboardEvent<HTMLElement>): void => {
     const all = buttons()
     const index = all.findIndex((button) => button === document.activeElement)
@@ -380,7 +393,7 @@ export const PinnedAgents = ({
             agent={agent}
             key={pin.key}
             onOpen={() => onOpen(agent)}
-            onUnpin={() => onUnpin(pin.key)}
+            onUnpin={unpinFrom(pin.key)}
             pinKey={pin.key}
             roving={[stop(index * 2), stop(index * 2 + 1)]}
             stale={stale}
@@ -392,13 +405,15 @@ export const PinnedAgents = ({
           <button
             aria-controls={listId}
             aria-expanded={open}
-            aria-label={`${String(overflow.length)} more pinned`}
+            aria-label={
+              shown.length === 0 ? `${String(overflow.length)} pinned` : `${String(overflow.length)} more pinned`
+            }
             className="connect-pins-more"
             onClick={toggle}
             type="button"
             {...stop(stops - 1)}
           >
-            +{overflow.length}
+            {shown.length === 0 ? `Pins ${String(overflow.length)}` : `+${String(overflow.length)}`}
           </button>
           {open ? (
             <ul className="connect-pins-overflow" id={listId}>
@@ -434,7 +449,7 @@ export const PinnedAgents = ({
                     aria-label={`Unpin ${pin.name}`}
                     className="connect-pin-unpin"
                     data-pin-key={pin.key}
-                    onClick={() => onUnpin(pin.key)}
+                    onClick={unpinFrom(pin.key)}
                     tabIndex={-1}
                     type="button"
                   >

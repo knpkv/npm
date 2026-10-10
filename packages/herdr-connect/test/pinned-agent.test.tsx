@@ -32,7 +32,8 @@ const render = (
   pins: Pins,
   present: ReadonlyArray<ReturnType<typeof agent>>,
   placement: "bar" | "float",
-  hiddenKey: string | null = null
+  hiddenKey: string | null = null,
+  room?: number
 ) => {
   const byKey = new Map(present.map((each) => [connectAgentKey(each), each]))
   return renderToStaticMarkup(
@@ -44,6 +45,7 @@ const render = (
       onUnpin={() => undefined}
       pins={pins}
       placement={placement}
+      room={room}
       stale={false}
     />
   )
@@ -82,5 +84,14 @@ describe("PinnedAgents", () => {
     expect(markup).toContain('aria-label="Pinned: agent-here, Waiting"')
     expect(markup).toContain('aria-label="1 more pinned"')
     expect(render(pinned([here]), [here], "float", connectAgentKey(here))).toBe("")
+  })
+
+  // A phone's terminal bar keeps every pin behind one button, so the bar never takes a line from the terminal.
+  it("puts every pin behind one named button when there is no room for chips", () => {
+    const fleet = ["a", "b"].map((name) => agent(`agent-${name}`))
+    const markup = render(pinned(fleet), fleet, "bar", null, 0)
+    expect(markup).not.toContain('aria-label="Pinned: ')
+    expect(markup).toContain('aria-label="2 pinned"')
+    expect(markup).toContain(">Pins 2</button>")
   })
 })

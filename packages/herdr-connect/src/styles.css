@@ -2351,17 +2351,6 @@
     min-inline-size: 0;
   }
 
-  /* A phone's bar has no room beside the name: the pins take a line of their own under it. */
-  @media (max-width: 47.99rem) {
-    .terminal-bar[data-pinned] {
-      grid-template-columns: auto minmax(0, 1fr) auto;
-    }
-
-    .terminal-bar > .connect-pins {
-      grid-column: 1 / -1;
-    }
-  }
-
   .connect-pins[data-placement="bar"] .connect-pin :is(.connect-pin-name, .connect-pin-state) {
     display: none;
   }

@@ -74,5 +74,11 @@ describe("pins", () => {
       Result.isFailure(decode(pinAll(Array.from({ length: MAX_PINS }, (_, i) => String(i))).concat(pinAll(["x"]))))
     ).toBe(true)
     expect(Result.isFailure(decode([{ key: "", host: "nix", id: "a", name: "a", seenAt: 0 }]))).toBe(true)
+    // One agent pinned twice, or a last-seen time no Date can show, is not a stored pin list.
+    const one = { host: "nix", id: "a", key: "nix:a", name: "a", seenAt: 0 }
+    expect(Result.isFailure(decode([one, one]))).toBe(true)
+    expect(Result.isFailure(decode([{ ...one, seenAt: 8.64e15 + 1 }]))).toBe(true)
+    // A pin no poll has seen yet says so, instead of claiming a time.
+    expect(Result.isSuccess(decode([{ ...one, seenAt: null }]))).toBe(true)
   })
 })

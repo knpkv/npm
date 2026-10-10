@@ -18,6 +18,9 @@ import { Data, Result, Schema } from "effect"
 /** How many agents one device can keep pinned. */
 export const MAX_PINS = 8
 
+/** The latest instant a JavaScript Date can represent. */
+const MAX_DATE = 8_640_000_000_000_000
+
 /** One pinned agent, as remembered on this device. */
 export const Pin = Schema.Struct({
   /** The agent's `connectAgentKey`: host and stable ID. */
@@ -26,13 +29,23 @@ export const Pin = Schema.Struct({
   id: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(256)),
   /** Its name when last seen, to label the pin while the agent is away. */
   name: Schema.String.check(Schema.isMaxLength(256)),
-  /** When Connect last saw it in the directory, epoch milliseconds, to the minute. */
-  seenAt: Schema.Number.check(Schema.isFinite(), Schema.isGreaterThanOrEqualTo(0))
+  /**
+   * When Connect last saw it in the directory, epoch milliseconds to the minute, within the range a Date can
+   * show; `null` until a poll has seen it (a pin carried over from the single-pin version starts there).
+   */
+  seenAt: Schema.NullOr(
+    Schema.Number.check(Schema.isFinite(), Schema.isGreaterThanOrEqualTo(0), Schema.isLessThanOrEqualTo(MAX_DATE))
+  )
 })
 export type Pin = typeof Pin.Type
 
 /** Every pin, in the order they were pinned. Keys are unique. */
-export const Pins = Schema.Array(Pin).check(Schema.isMaxLength(MAX_PINS))
+export const Pins = Schema.Array(Pin).check(
+  Schema.isMaxLength(MAX_PINS),
+  Schema.makeFilter((pins) => new Set(pins.map(({ key }) => key)).size === pins.length, {
+    expected: "pins with unique keys"
+  })
+)
 export type Pins = typeof Pins.Type
 
 /** What a device stores: the pins under a version, so a later shape can be told apart and carried over. */
