@@ -19,6 +19,7 @@ import {
   WorkAdmissionTarget,
   WorkGoalCheckpoint,
   type WorkGoalCheckpoint as WorkGoalCheckpointType,
+  type WorkPullRequestAttach,
   WorkRecoveryContext,
   WorkRecoveryPreflight,
   WorkRecoveryTarget,
@@ -48,6 +49,8 @@ import {
   workAdmissionPreflightUrl,
   workCheckpointFromJson,
   workCheckpointUrl,
+  workPullRequestAttachFromJson,
+  workPullRequestAttachUrl,
   workRecoveryContextUrl,
   workRecoveryPreflightUrl,
   workSnapshotFromJson,
@@ -108,7 +111,7 @@ const schemaResponseDecoder = <A>(
 const requestAt = Effect.fn("Fleetctl.requestAt")(function*<A>(
   url: string,
   schema: Schema.Codec<A, unknown, never, never>,
-  body?: JobRequestType | WorkGoalCheckpointType,
+  body?: JobRequestType | WorkGoalCheckpointType | WorkPullRequestAttach,
   decode: ResponseDecoder<A> = schemaResponseDecoder(schema)
 ) {
   const client = yield* HttpClient.HttpClient
@@ -423,6 +426,21 @@ const main = Effect.gen(function*() {
           WorkAdmissionPreflight
         )
         yield* Console.log(JSON.stringify(preflight, null, 2))
+        return
+      }
+      if (operation === "attach-pr") {
+        const host = rest[1]
+        const json = rest[2]
+        if (host === undefined || json === undefined || rest.length !== 3) {
+          return yield* new FleetctlUsageError({
+            reason: "work attach-pr needs HOST and ATTACH_JSON",
+            usage: workUsage
+          })
+        }
+        const input = yield* workPullRequestAttachFromJson(json)
+        const url = yield* workPullRequestAttachUrl(config, host)
+        const recorded = yield* requestAt(url, WorkGoalCheckpoint, input)
+        yield* Console.log(JSON.stringify(recorded, null, 2))
         return
       }
       if (operation === "record") {

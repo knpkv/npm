@@ -50,6 +50,7 @@ export const formatJobRecord = (record: JobRecord, approvalUrl?: string): string
 
 const workLines = [
   "  work record HOST CHECKPOINT_JSON",
+  "  work attach-pr HOST ATTACH_JSON",
   "  work snapshot [HOST]",
   "  work admission-preflight HOST TARGET_JSON",
   "  work recovery-preflight HOST TARGET_JSON",
