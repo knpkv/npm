@@ -9,6 +9,7 @@ import { Hero, HeroWord } from "@knpkv/rly/patterns"
 import { Text } from "@knpkv/rly/primitives"
 import { Schema } from "effect"
 import { useId, useState, type ReactNode, type Ref } from "react"
+import { Creature } from "./creature.js"
 import type { ConnectAgent, ConnectPeerFailure } from "./model.js"
 import {
   serializeTerminalKey,
@@ -254,6 +255,8 @@ type AgentDirectoryProps = {
   readonly onSelect: (agent: ConnectAgent) => void
   readonly now?: number
   readonly query: string
+  /** The directory couldn't refresh: its agents show their last known state, without life. */
+  readonly stale?: boolean
   readonly selectedKey: string | null
   /** Hosts that didn't answer this read; the Host filter names them so the gap in the list is visible. */
   readonly silentHosts?: ReadonlyArray<string>
@@ -360,6 +363,7 @@ export const AgentDirectory = ({
   query,
   selectedKey,
   silentHosts = [],
+  stale = false,
   timeZone
 }: AgentDirectoryProps) => {
   const hostFilterLabelId = useId()
@@ -427,6 +431,7 @@ export const AgentDirectory = ({
         {rows.length === 0 ? <Text tone="secondary">No agents match “{query.trim()}”.</Text> : null}
         {rows.length === 0 ? null : (
           <div aria-hidden="true" className="connect-list-head">
+            <span />
             <span>State</span>
             <span>Agent</span>
             <span>Active</span>
@@ -447,6 +452,8 @@ export const AgentDirectory = ({
                 key={`${key}:${String(index)}`}
                 onClick={() => onSelect(agent)}
               >
+                {/* Its character: decorative, since the state's word beside it says the same. */}
+                <Creature host={agent.host} id={String(agent.id)} size="row" stale={stale} state={agent.state} />
                 {/* The state leads in a fixed track, so names line up whatever the state's word. */}
                 <span className="connect-agent-state" data-activity={activity}>
                   <AgentStateLabel state={agent.state} />

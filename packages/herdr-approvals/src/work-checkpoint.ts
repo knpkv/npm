@@ -29,6 +29,11 @@ export const workCheckpointFromJson = Effect.fn("Fleetctl.workCheckpointFromJson
   )
 })
 
+/**
+ * Decodes a Work snapshot read from a hub, which may run a newer version. Keys this version doesn't know
+ * are dropped, never passed on, so a newer hub's additions can't fail the read and only the known shape
+ * is returned. Checkpoints sent to a hub stay strict (`workCheckpointFromJson`).
+ */
 export const workSnapshotFromJson = Effect.fn("Fleetctl.workSnapshotFromJson")(function*(text: string) {
   const input = yield* Effect.try({
     try: () => JSON.parse(text),
@@ -37,9 +42,7 @@ export const workSnapshotFromJson = Effect.fn("Fleetctl.workSnapshotFromJson")(f
         detail: `invalid work snapshot JSON: ${String(cause)}`
       })
   })
-  return yield* Schema.decodeUnknownEffect(WorkSnapshots, {
-    onExcessProperty: "error"
-  })(input).pipe(
+  return yield* Schema.decodeUnknownEffect(WorkSnapshots)(input).pipe(
     Effect.mapError(
       (cause) =>
         new FleetValidationError({

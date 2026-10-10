@@ -1,9 +1,4 @@
-import {
-  agentConnectTarget,
-  fleetResponseBodyMaxBytes,
-  workAbandonActivitySummary,
-  workReassignActivitySummary
-} from "@knpkv/herdr-fleet"
+import { agentConnectTarget, workAbandonActivitySummary, workReassignActivitySummary } from "@knpkv/herdr-fleet"
 import { openPrivateSqlite, type PrivateDatabaseError, type PrivateSqlite } from "@knpkv/herdr-fleet/sqlite"
 import { Clock, Crypto, Effect, Equal, Option, Result, Schema } from "effect"
 import { Hex } from "effect/encoding"
@@ -38,10 +33,7 @@ import { validateGoalFamilyHistory } from "./goal-family.js"
 import {
   agentBindingAdmissionError,
   workAgentBindingLaneOperationMaxBytes,
-  workAgentBindingLaneOperationMaxRecords,
-  workAgentBindingMaximumSnapshotBytes,
-  workAgentBindingSnapshotEnvelopeMaxBytes,
-  workMaximumSnapshotBytesForHistory
+  workAgentBindingLaneOperationMaxRecords
 } from "./internal/agent-binding-admission.js"
 import {
   AgentBindingGoalEventRow,
@@ -1416,7 +1408,6 @@ type HandoffDecision =
   }
 
 const utf8 = new TextEncoder()
-const encodedBytes = (value: typeof Schema.Json.Type): number => utf8.encode(JSON.stringify(value)).byteLength
 const maximumTimestamp = 8_640_000_000_000_000
 const workTransactionMaxRecords = 16_384
 const workTransactionMaxBytes = 2 * 1024 * 1024
@@ -1427,14 +1418,9 @@ const workLaneOperationMaxBytes = workAgentBindingLaneOperationMaxBytes
 const workDecisionMaxRecords = 16_384
 const workDecisionMaxBytes = 2 * 1024 * 1024
 const workStoreBusyTimeoutMillis = 5_000
-const workSnapshotEnvelopeMaxBytes = workAgentBindingSnapshotEnvelopeMaxBytes
-const maximumSnapshotBytes = workAgentBindingMaximumSnapshotBytes
 
 const transactionContent = (events: ReadonlyArray<WorkGoalCheckpointType>) => JSON.stringify(events)
 
-export const __herdrWorkMaximumSnapshotBytesForTest = maximumSnapshotBytes
-export const __herdrWorkEncodedBytesForTest = encodedBytes
-export const __herdrWorkSnapshotEnvelopeMaxBytesForTest = workSnapshotEnvelopeMaxBytes
 export const __herdrWorkLaneOperationMaxBytesForTest = workLaneOperationMaxBytes
 
 const decodeRow = (row: Readonly<Record<string, SQLOutputValue>>) =>
@@ -3547,7 +3533,6 @@ export class WorkStore implements WorkStoreService {
           if (lanes._tag === "invalid") throw lanes.error
           if (
             capacity !== undefined || lanes.entries.length >= workLaneMaxRecords ||
-            new Set(history.map(({ goal: previous }) => previous.id)).size >= workSnapshotMaxGoals ||
             claimBytes + utf8.encode(decoded.laneId).byteLength + utf8.encode(laneRecord).byteLength > workLaneMaxBytes
           ) {
             this.#database.exec("ROLLBACK")
@@ -4109,15 +4094,6 @@ export class WorkStore implements WorkStoreService {
             .concat(planned)
           const familyError = validateGoalFamilyHistory([...history, decoded])
           if (familyError !== undefined) return reject(familyError)
-          if (maximumSnapshotBytes(history, decoded) > fleetResponseBodyMaxBytes) {
-            return reject(
-              new WorkProjectionError({
-                cause: decoded,
-                detail: `work snapshots cannot exceed ${fleetResponseBodyMaxBytes} encoded bytes`,
-                reason: "capacity_exceeded"
-              })
-            )
-          }
           const firstGoalRow = this.#database.prepare(
             "SELECT record FROM work_goal_events WHERE goal_id = ? ORDER BY occurred_at ASC, event_id ASC LIMIT 1"
           ).get(decoded.goal.id)
@@ -4128,18 +4104,6 @@ export class WorkStore implements WorkStoreService {
                   cause: decoded,
                   detail: `goal ${decoded.goal.id} must begin at its creation timestamp`,
                   reason: "inconsistent_history"
-                })
-              )
-            }
-            const goalCount = Schema.decodeUnknownSync(CountRow)(
-              this.#database.prepare("SELECT COUNT(DISTINCT goal_id) AS count FROM work_goal_events").get()
-            ).count
-            if (goalCount >= workSnapshotMaxGoals) {
-              return reject(
-                new WorkProjectionError({
-                  cause: decoded,
-                  detail: `work snapshots cannot exceed ${workSnapshotMaxGoals} goals`,
-                  reason: "capacity_exceeded"
                 })
               )
             }
@@ -4557,32 +4521,6 @@ export class WorkStore implements WorkStoreService {
             this.#database.exec("ROLLBACK")
             inTransaction = false
             return { _tag: "rejected", error: familyError } satisfies AppendManyDecision
-          }
-          if (workMaximumSnapshotBytesForHistory(prospective) > fleetResponseBodyMaxBytes) {
-            this.#database.exec("ROLLBACK")
-            inTransaction = false
-            return {
-              _tag: "rejected",
-              error: new WorkProjectionError({
-                cause: decoded,
-                detail: `work snapshots cannot exceed ${fleetResponseBodyMaxBytes} encoded bytes`,
-                reason: "capacity_exceeded"
-              })
-            } satisfies AppendManyDecision
-          }
-          const goalIds = new Set(history.map(({ goal }) => goal.id))
-          for (const event of newEvents) goalIds.add(event.goal.id)
-          if (goalIds.size > workSnapshotMaxGoals) {
-            this.#database.exec("ROLLBACK")
-            inTransaction = false
-            return {
-              _tag: "rejected",
-              error: new WorkProjectionError({
-                cause: decoded,
-                detail: `work snapshots cannot exceed ${workSnapshotMaxGoals} goals`,
-                reason: "capacity_exceeded"
-              })
-            } satisfies AppendManyDecision
           }
           const creationTimes = new Map<string, number>()
           for (const event of prospective) {

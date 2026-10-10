@@ -418,7 +418,9 @@
     font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
       var(--rly-type-meta-font);
     gap: var(--rly-space-12);
-    grid-template-columns: var(--connect-state-track) minmax(0, 1fr) var(--connect-time-track);
+    grid-template-columns: var(--connect-creature-track) var(--connect-state-track) minmax(0, 1fr) var(
+        --connect-time-track
+      );
     padding: 0 var(--rly-space-12) var(--rly-space-6);
   }
 
@@ -438,6 +440,7 @@
 
   /* Fixed tracks: the longest state word with its icon, and an hh:mm time. */
   .connect-agent-tree {
+    --connect-creature-track: 36px;
     --connect-state-track: 7rem;
     --connect-time-track: 3.25rem;
   }
@@ -452,7 +455,9 @@
     cursor: pointer;
     display: grid;
     font: inherit;
-    grid-template-columns: var(--connect-state-track) minmax(0, 1fr) var(--connect-time-track);
+    grid-template-columns: var(--connect-creature-track) var(--connect-state-track) minmax(0, 1fr) var(
+        --connect-time-track
+      );
     gap: var(--rly-space-12);
     min-inline-size: 0;
     padding: var(--rly-space-12);
@@ -1002,6 +1007,7 @@
     }
 
     .connect-agent-tree {
+      --connect-creature-track: 28px;
       --connect-state-track: 6.25rem;
       --connect-time-track: 2.75rem;
     }
@@ -1118,15 +1124,23 @@
     }
   }
 
-  /* At 24rem and below the state sits over the name, with the time beside it; the column heads go. */
+  /*
+   * At 24rem and below the state sits over the name, with the time beside it; the column heads go. The
+   * creature stays at the front, across both lines.
+   */
   @media (max-width: 24rem) {
     .connect-agent {
-      grid-template-columns: minmax(0, 1fr) auto;
+      grid-template-columns: var(--connect-creature-track) minmax(0, 1fr) auto;
       row-gap: var(--rly-space-4);
     }
 
+    .connect-agent > .connect-creature {
+      align-self: center;
+      grid-row: 1 / span 2;
+    }
+
     .connect-agent-copy {
-      grid-column: 1 / -1;
+      grid-column: 2 / -1;
       grid-row: 2;
     }
 
@@ -1149,5 +1163,295 @@
       position: absolute;
       white-space: nowrap;
     }
+  }
+
+  /*
+   * The agent's character (creature.tsx). Its look is fixed by host and ID; these rules set only behaviour per
+   * state bucket. Paces are multiples of the slow motion token, so the in-app reduced-motion setting stops them.
+   */
+  /* In a row it fills the creature track, whatever size it was drawn at. */
+  .connect-agent .connect-creature {
+    block-size: auto;
+    inline-size: var(--connect-creature-track);
+  }
+
+  .connect-creature {
+    --connect-creature-tone: var(--rly-color-text-2);
+    display: block;
+    flex: none;
+    overflow: visible;
+  }
+
+  .connect-creature[data-tone="progress"] {
+    --connect-creature-tone: var(--rly-color-deploying-ink);
+  }
+
+  .connect-creature[data-tone="caution"] {
+    --connect-creature-tone: var(--rly-color-held-ink);
+  }
+
+  .connect-creature[data-tone="critical"] {
+    --connect-creature-tone: var(--rly-color-blocked-ink);
+  }
+
+  .connect-creature[data-tone="positive"] {
+    --connect-creature-tone: var(--rly-color-success-ink);
+  }
+
+  .connect-creature-shine {
+    fill: oklch(100% 0 none / 28%);
+  }
+
+  .connect-creature-core {
+    opacity: 0.35;
+  }
+
+  .connect-creature-eye {
+    fill: oklch(99% 0.005 90);
+  }
+
+  .connect-creature-pupil {
+    fill: oklch(20% 0.03 260);
+  }
+
+  .connect-creature-closed {
+    display: none;
+    fill: none;
+    stroke: oklch(20% 0.03 260);
+    stroke-linecap: round;
+    stroke-width: 2.2;
+  }
+
+  /* Needs you: a halo in the state's tone, off the face; the row's word says which kind. */
+  .connect-creature-halo {
+    fill: none;
+    opacity: 0;
+    stroke: var(--connect-creature-tone);
+    stroke-width: 2.5px;
+    vector-effect: non-scaling-stroke;
+  }
+
+  /* Working: a short light that travels round the body, never across the face. */
+  .connect-creature-orbit {
+    fill: none;
+    opacity: 0;
+    stroke: var(--connect-creature-tone);
+    stroke-dasharray: 9 91;
+    stroke-linecap: round;
+    stroke-width: 2.5px;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .connect-creature-breath,
+  .connect-creature-gaze,
+  .connect-creature-lids,
+  .connect-creature-orbit {
+    transform-box: fill-box;
+    transform-origin: center;
+  }
+
+  .connect-creature-lean {
+    transform-box: fill-box;
+    transform-origin: 50% 100%;
+  }
+
+  .connect-creature[data-bucket="needs-you"] .connect-creature-halo {
+    opacity: 0.9;
+  }
+
+  .connect-creature[data-bucket="needs-you"] .connect-creature-gaze {
+    scale: 1.12;
+  }
+
+  .connect-creature[data-bucket="working"] .connect-creature-orbit {
+    opacity: 1;
+  }
+
+  .connect-creature[data-bucket="working"] .connect-creature-core {
+    opacity: 0.9;
+  }
+
+  /* Eyes down at the work. */
+  .connect-creature[data-bucket="working"] .connect-creature-gaze {
+    translate: 0 2.2px;
+  }
+
+  /* Done: awake and settled, half-lidded. */
+  .connect-creature[data-bucket="finished"]:not([data-stale]) .connect-creature-lids {
+    scale: 1 0.55;
+  }
+
+  /* Its host stopped answering: eyes closed, colour drained, no life. */
+  .connect-creature[data-stale] .connect-creature-eyes {
+    display: none;
+  }
+
+  .connect-creature[data-stale] .connect-creature-closed {
+    display: inline;
+  }
+
+  .connect-creature[data-stale] .connect-creature-body {
+    filter: grayscale(1);
+    opacity: 0.7;
+  }
+
+  .connect-creature[data-stale] .connect-creature-halo {
+    opacity: 0.35;
+  }
+
+  .connect-creature[data-stale] .connect-creature-orbit {
+    opacity: 0;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .connect-creature:not([data-stale]) .connect-creature-breath {
+      animation: connect-creature-breathe calc(var(--rly-motion-slow-duration) * var(--connect-creature-pace))
+        var(--rly-easing-in-out) infinite alternate;
+      animation-delay: calc(var(--rly-motion-slow-duration) * var(--connect-creature-phase));
+    }
+
+    .connect-creature:not([data-stale], [data-bucket="finished"]) .connect-creature-lids {
+      animation: connect-creature-blink calc(var(--rly-motion-slow-duration) * var(--connect-creature-blink)) linear
+        infinite;
+      animation-delay: calc(var(--rly-motion-slow-duration) * var(--connect-creature-phase));
+    }
+
+    .connect-creature[data-bucket="ready"]:not([data-stale]) .connect-creature-gaze {
+      animation: connect-creature-wander calc(var(--rly-motion-slow-duration) * var(--connect-creature-pace) * 5)
+        var(--rly-easing-in-out) infinite;
+      animation-delay: calc(var(--rly-motion-slow-duration) * var(--connect-creature-phase));
+    }
+
+    .connect-creature[data-bucket="working"]:not([data-stale]) .connect-creature-gaze {
+      animation: connect-creature-read calc(var(--rly-motion-slow-duration) * 10) var(--rly-easing-in-out) infinite;
+    }
+
+    .connect-creature[data-bucket="working"]:not([data-stale]) .connect-creature-orbit {
+      animation: connect-creature-turn calc(var(--rly-motion-slow-duration) * 6) linear infinite;
+    }
+
+    .connect-creature[data-bucket="finished"]:not([data-stale]) .connect-creature-breath {
+      animation-duration: calc(var(--rly-motion-slow-duration) * var(--connect-creature-pace) * 1.6);
+    }
+  }
+
+  @keyframes connect-creature-breathe {
+    from {
+      scale: 1 0.985;
+    }
+
+    to {
+      scale: 1.015 1.03;
+    }
+  }
+
+  @keyframes connect-creature-blink {
+    0%,
+    95.5%,
+    100% {
+      scale: 1 1;
+    }
+
+    97.5% {
+      scale: 1 0.08;
+    }
+  }
+
+  @keyframes connect-creature-wander {
+    0%,
+    20%,
+    80%,
+    100% {
+      translate: 0 0;
+    }
+
+    30%,
+    45% {
+      translate: 2px -1px;
+    }
+
+    55%,
+    70% {
+      translate: -2px 0.5px;
+    }
+  }
+
+  @keyframes connect-creature-read {
+    0%,
+    100% {
+      translate: -1.6px 2.2px;
+    }
+
+    50% {
+      translate: 1.6px 2.2px;
+    }
+  }
+
+  @keyframes connect-creature-turn {
+    to {
+      rotate: 360deg;
+    }
+  }
+
+  @media (forced-colors: active) {
+    .connect-creature-body {
+      fill: Canvas;
+      stroke: CanvasText;
+      stroke-width: 2;
+    }
+
+    .connect-creature-core,
+    .connect-creature-shine,
+    .connect-creature-shadow {
+      display: none;
+    }
+
+    .connect-creature-eye {
+      fill: Canvas;
+      stroke: CanvasText;
+    }
+
+    .connect-creature-pupil {
+      fill: CanvasText;
+    }
+
+    .connect-creature-closed,
+    .connect-creature-orbit {
+      stroke: CanvasText;
+    }
+
+    .connect-creature-halo {
+      stroke: Highlight;
+    }
+  }
+
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .connect-creature-body {
+    fill: Canvas;
+    stroke: CanvasText;
+    stroke-width: 2;
+  }
+
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .connect-creature-core,
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .connect-creature-shine,
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .connect-creature-shadow {
+    display: none;
+  }
+
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .connect-creature-eye {
+    fill: Canvas;
+    stroke: CanvasText;
+  }
+
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .connect-creature-pupil {
+    fill: CanvasText;
+  }
+
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .connect-creature-closed,
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .connect-creature-orbit {
+    stroke: CanvasText;
+  }
+
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .connect-creature-halo {
+    stroke: Highlight;
   }
 }

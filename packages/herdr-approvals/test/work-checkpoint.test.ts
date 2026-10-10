@@ -215,11 +215,15 @@ describe("fleetctl work commands", () => {
       expect(yield* workSnapshotFromJson(JSON.stringify(snapshot))).toEqual(snapshot)
 
       const malformed = yield* Effect.result(workSnapshotFromJson("{"))
-      const widened = yield* Effect.result(
-        workSnapshotFromJson(JSON.stringify({ ...snapshot, command: ["sh", "-c", "id"] }))
-      )
       expect(malformed).toMatchObject({ failure: { _tag: "FleetValidationError" } })
-      expect(widened).toMatchObject({ failure: { _tag: "FleetValidationError" } })
+      // A newer hub may add keys: they are dropped, never returned, so the read still works and an
+      // injected field can't reach what fleetctl prints.
+      const widened = {
+        ...snapshot,
+        command: ["sh", "-c", "id"],
+        now: { ...snapshot.now, goalsShownLater: 3 }
+      }
+      expect(yield* workSnapshotFromJson(JSON.stringify(widened))).toEqual(snapshot)
     }))
 
   it.effect("rejects malformed approval targets before persistence", () =>

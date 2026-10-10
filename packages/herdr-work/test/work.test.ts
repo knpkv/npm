@@ -30,12 +30,7 @@ import {
   WorkSnapshots,
   WorkStore
 } from "../src/index.js"
-import {
-  __herdrWorkEncodedBytesForTest,
-  __herdrWorkLaneOperationMaxBytesForTest,
-  __herdrWorkMaximumSnapshotBytesForTest,
-  __herdrWorkSnapshotEnvelopeMaxBytesForTest
-} from "../src/store.js"
+import { __herdrWorkLaneOperationMaxBytesForTest } from "../src/store.js"
 
 /**
  * Opens a fixture connection that skips fsync on its own writes, so seeding and
@@ -1515,50 +1510,60 @@ database.close()`,
       expect(yield* store.list()).toEqual([history[0]])
     }).pipe(provideNodeServices))
 
-  it.effect("rejects appendMany when family projection exceeds the snapshot budget", () =>
-    Effect.gen(function*() {
-      const directory = mkdtempSync(join(tmpdir(), "herdr-work-family-batch-budget-"))
-      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(directory, { force: true, recursive: true })))
-      const store = yield* WorkStore.open(join(directory, "work.sqlite"))
-      yield* Effect.addFinalizer(() => Effect.sync(() => store.close()))
-      const service = yield* makeWorkService(store)
-      const large = (goalId: string, eventId: string, occurredAt: number): WorkGoalCheckpointType => {
-        const base = maximumTextCheckpoint(0)
-        return {
-          ...base,
-          eventId,
-          goal: { ...base.goal, createdAt: 0, id: goalId, updatedAt: occurredAt },
-          occurredAt
+  it.effect(
+    "records a family batch past the snapshot budget, and the snapshot drops lone goals first",
+    () =>
+      Effect.gen(function*() {
+        const directory = mkdtempSync(join(tmpdir(), "herdr-work-family-batch-budget-"))
+        yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(directory, { force: true, recursive: true })))
+        const store = yield* WorkStore.open(join(directory, "work.sqlite"))
+        yield* Effect.addFinalizer(() => Effect.sync(() => store.close()))
+        const service = yield* makeWorkService(store)
+        const large = (goalId: string, eventId: string, occurredAt: number): WorkGoalCheckpointType => {
+          const base = maximumTextCheckpoint(0)
+          return {
+            ...base,
+            eventId,
+            goal: { ...base.goal, createdAt: 0, id: goalId, updatedAt: occurredAt },
+            occurredAt
+          }
         }
-      }
-      const canonicalId = "goal-family-batch-canonical"
-      const supersededId = "goal-family-batch-superseded"
-      const unrelated = Array.from({ length: 12 }, (_, index) =>
-        large(`goal-family-batch-${index}`, `event-family-batch-${index}`, 0))
-      const canonicalBase = large(canonicalId, "event-family-batch-canonical-base", 0)
-      const supersededBase = large(supersededId, "event-family-batch-superseded-base", 0)
-      const canonical = familyCheckpoint(
-        canonicalBase,
-        "event-family-batch-canonical",
-        1,
-        canonicalId,
-        "canonical"
-      )
-      const superseded = familyCheckpoint(
-        supersededBase,
-        "event-family-batch-superseded",
-        1,
-        canonicalId,
-        "superseded"
-      )
-      const events = [...unrelated, canonicalBase, supersededBase, canonical, superseded]
-      const projected = yield* projectWorkSnapshots(events, 2)
-      expect(Buffer.byteLength(JSON.stringify(projected))).toBeGreaterThan(fleetResponseBodyMaxBytes)
-      expect(yield* Effect.result(service.recordMany("transaction-family-batch-budget", events))).toMatchObject({
-        failure: { _tag: "WorkProjectionError", reason: "capacity_exceeded" }
-      })
-      expect(yield* store.list()).toEqual([])
-    }).pipe(provideNodeServices), 30_000)
+        const canonicalId = "goal-family-batch-canonical"
+        const supersededId = "goal-family-batch-superseded"
+        const unrelated = Array.from(
+          { length: 12 },
+          (_, index) => large(`goal-family-batch-${index}`, `event-family-batch-${index}`, 0)
+        )
+        const canonicalBase = large(canonicalId, "event-family-batch-canonical-base", 0)
+        const supersededBase = large(supersededId, "event-family-batch-superseded-base", 0)
+        const canonical = familyCheckpoint(
+          canonicalBase,
+          "event-family-batch-canonical",
+          1,
+          canonicalId,
+          "canonical"
+        )
+        const superseded = familyCheckpoint(
+          supersededBase,
+          "event-family-batch-superseded",
+          1,
+          canonicalId,
+          "superseded"
+        )
+        const events = [...unrelated, canonicalBase, supersededBase, canonical, superseded]
+        yield* service.recordMany("transaction-family-batch-budget", events)
+        expect(yield* store.list()).toHaveLength(events.length)
+        const snapshots = yield* service.snapshots(2)
+        expect(Buffer.byteLength(JSON.stringify(snapshots))).toBeLessThanOrEqual(fleetResponseBodyMaxBytes)
+        // The family stays whole; lone goals made the room.
+        expect(snapshots.now.families?.map(({ canonicalGoalId }) => canonicalGoalId)).toEqual([canonicalId])
+        expect(snapshots.now.goals.some(({ id }) => id === canonicalId)).toBe(true)
+        // Twelve lone goals and the canonical one are visible goals; superseded members live in the group.
+        expect(snapshots.now.goalsOmitted).toBeGreaterThan(0)
+        expect(snapshots.now.goals.length + (snapshots.now.goalsOmitted ?? 0)).toBe(unrelated.length + 1)
+      }).pipe(provideNodeServices),
+    30_000
+  )
 
   it.effect("bounds replay transaction storage separately from transaction row count", () =>
     Effect.gen(function*() {
@@ -4807,36 +4812,43 @@ database.close()`,
     30_000
   )
 
-  it.effect("keeps the largest snapshot projectable and rejects a new goal", () =>
-    Effect.gen(function*() {
-      const directory = mkdtempSync(join(tmpdir(), "herdr-work-goal-capacity-"))
-      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(directory, { force: true, recursive: true })))
-      const path = join(directory, "work.sqlite")
-      const events = Array.from({ length: workSnapshotMaxGoals }, (_, index) =>
-        checkpointForGoal(`goal-${index}`, `event-${index}`, index, index))
-      yield* Effect.sync(() =>
-        seedWorkDatabase(path, events)
-      )
-      const store = yield* WorkStore.open(path)
-      yield* Effect.addFinalizer(() => Effect.sync(() => store.close()))
-      const service = yield* makeWorkService(store)
+  it.effect(
+    "records a goal past the snapshot goal limit and shows the most recently updated ones",
+    () =>
+      Effect.gen(function*() {
+        const directory = mkdtempSync(join(tmpdir(), "herdr-work-goal-capacity-"))
+        yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(directory, { force: true, recursive: true })))
+        const path = join(directory, "work.sqlite")
+        const events = Array.from(
+          { length: workSnapshotMaxGoals },
+          (_, index) => checkpointForGoal(`goal-${index}`, `event-${index}`, index, index)
+        )
+        yield* Effect.sync(() => seedWorkDatabase(path, events))
+        const store = yield* WorkStore.open(path)
+        yield* Effect.addFinalizer(() => Effect.sync(() => store.close()))
+        const service = yield* makeWorkService(store)
 
-      expect((yield* service.snapshots(workSnapshotMaxGoals)).now.goals).toHaveLength(
-        workSnapshotMaxGoals
-      )
-      const overflow = checkpointForGoal(
-        `goal-${workSnapshotMaxGoals}`,
-        `event-${workSnapshotMaxGoals}`,
-        workSnapshotMaxGoals,
-        workSnapshotMaxGoals
-      )
-      expect(yield* Effect.result(service.record(overflow))).toMatchObject({
-        failure: { _tag: "WorkProjectionError", reason: "capacity_exceeded" }
-      })
-      expect(yield* store.list()).toHaveLength(workSnapshotMaxGoals)
-    }).pipe(provideNodeServices), 30_000)
+        expect((yield* service.snapshots(workSnapshotMaxGoals)).now.goals).toHaveLength(
+          workSnapshotMaxGoals
+        )
+        const overflow = checkpointForGoal(
+          `goal-${workSnapshotMaxGoals}`,
+          `event-${workSnapshotMaxGoals}`,
+          workSnapshotMaxGoals,
+          workSnapshotMaxGoals
+        )
+        yield* service.record(overflow)
+        expect(yield* store.list()).toHaveLength(workSnapshotMaxGoals + 1)
+        const now = (yield* service.snapshots(workSnapshotMaxGoals + 1)).now
+        expect(now.goals).toHaveLength(workSnapshotMaxGoals)
+        expect(now.goalsOmitted).toBe(1)
+        expect(now.goals.some(({ id }) => id === "goal-0")).toBe(false)
+        expect(now.goals[0]?.id).toBe(`goal-${workSnapshotMaxGoals}`)
+      }).pipe(provideNodeServices),
+    30_000
+  )
 
-  it.effect("rejects maximum-text goals before snapshots exceed the response budget", () => {
+  it.effect("records maximum-text goals past the response budget; snapshots stay within it", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-work-byte-capacity-"))
     const path = join(root, "work.sqlite")
     return Effect.acquireUseRelease(
@@ -4844,21 +4856,16 @@ database.close()`,
       (store) =>
         Effect.gen(function*() {
           const service = yield* makeWorkService(store)
-          for (let index = 0; index < 10; index += 1) {
-            yield* Effect.result(service.record(maximumTextCheckpoint(index)))
+          for (let index = 0; index < 11; index += 1) {
+            yield* service.record(maximumTextCheckpoint(index))
           }
-          const persistedBeforeFinalAttempt = yield* store.list()
-          expect(
-            yield* Effect.result(service.record(maximumTextCheckpoint(10)))
-          ).toMatchObject({
-            failure: { _tag: "WorkProjectionError", reason: "capacity_exceeded" }
-          })
-          expect(yield* store.list()).toEqual(persistedBeforeFinalAttempt)
-          expect(persistedBeforeFinalAttempt.length).toBeLessThan(11)
+          expect(yield* store.list()).toHaveLength(11)
           const snapshots = yield* service.snapshots(30 * day)
           expect(Buffer.byteLength(JSON.stringify(snapshots))).toBeLessThanOrEqual(
             fleetResponseBodyMaxBytes
           )
+          expect(snapshots.now.goalsOmitted).toBeGreaterThan(0)
+          expect(snapshots.now.goals.length + (snapshots.now.goalsOmitted ?? 0)).toBe(11)
         }),
       (store) =>
         Effect.sync(() => {
@@ -5148,137 +5155,6 @@ database.close()`,
       const activeSnapshots = yield* projectWorkSnapshots([activeAuml, activeZ], 6)
       expect(activeSnapshots.now.goals.map(({ title }) => title)).toEqual(["z", "ä"])
     }))
-
-  it.effect("maximumSnapshotBytes covers encoded family overhead including escaped canonicalGoalId", () =>
-    Effect.gen(function*() {
-      const escapedId = "\u0001".repeat(256)
-      const canonicalBaseRaw = checkpointForGoal(escapedId, "event-canonical-max-created", 0, 0)
-      const canonicalBase: WorkGoalCheckpointType = {
-        ...canonicalBaseRaw,
-        goal: {
-          ...canonicalBaseRaw.goal,
-          title: "Canonical max goal",
-          summary: "Canonical max summary",
-          detail: "Canonical max detail"
-        }
-      }
-      const canonical: WorkGoalCheckpointType = {
-        ...canonicalBase,
-        eventId: "event-canonical-max",
-        occurredAt: 10,
-        goal: { ...canonicalBase.goal, goalFamily: { canonicalGoalId: escapedId, role: "canonical" }, updatedAt: 10 }
-      }
-      const supersededBase = checkpointForGoal("goal-superseded", "event-superseded-created", 0, 0)
-      const superseded: WorkGoalCheckpointType = {
-        ...supersededBase,
-        eventId: "event-superseded",
-        occurredAt: 10,
-        goal: { ...supersededBase.goal, goalFamily: { canonicalGoalId: escapedId, role: "superseded" }, updatedAt: 10 }
-      }
-      const events = [canonicalBase, supersededBase, canonical, superseded]
-      const snapshots = yield* projectWorkSnapshots(events, 11)
-      const actualBytes = Buffer.byteLength(JSON.stringify(snapshots))
-      const history = events.slice(0, -1)
-      const candidate = events[events.length - 1]!
-      const estimated = __herdrWorkMaximumSnapshotBytesForTest(history, candidate)
-      expect(estimated).toBeGreaterThanOrEqual(actualBytes)
-      const encodedIdBytes = __herdrWorkEncodedBytesForTest(escapedId)
-      expect(encodedIdBytes).toBe(1_538)
-      // Fixed 64-byte overhead would undercount this family: prove estimate includes escaped id bound
-      const fixedOverheadEstimate = 64
-      expect(encodedIdBytes + 64).toBeGreaterThan(fixedOverheadEstimate)
-      expect(estimated).toBeGreaterThan(actualBytes - 1)
-
-      const unrelatedEvents = Array.from(
-        { length: 3 },
-        (_, index) => checkpointForGoal(`goal-unrelated-${index}`, `event-unrelated-${index}`, index, index)
-      )
-      const unrelatedSnapshots = yield* projectWorkSnapshots(unrelatedEvents, 10)
-      const unrelatedActual = Buffer.byteLength(JSON.stringify(unrelatedSnapshots))
-      const unrelatedEstimated = __herdrWorkMaximumSnapshotBytesForTest(
-        unrelatedEvents.slice(0, -1),
-        unrelatedEvents[unrelatedEvents.length - 1]!
-      )
-      expect(unrelatedEstimated).toBeGreaterThanOrEqual(unrelatedActual)
-    }))
-
-  it.effect("allows valid append with long unrelated ID and small family groups", () =>
-    Effect.gen(function*() {
-      const directory = mkdtempSync(join(tmpdir(), "herdr-work-long-unrelated-"))
-      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(directory, { force: true, recursive: true })))
-      const store = yield* WorkStore.open(join(directory, "work.sqlite"))
-      yield* Effect.addFinalizer(() => Effect.sync(() => store.close()))
-      const service = yield* makeWorkService(store)
-
-      const escapedId = "\u0001".repeat(256)
-      const longUnrelated: WorkGoalCheckpointType = {
-        ...checkpointForGoal(escapedId, "event-long-created", 0, 0),
-        goal: {
-          ...checkpointForGoal(escapedId, "event-long-created", 0, 0).goal,
-          title: "long unrelated",
-          summary: "long unrelated summary",
-          detail: "long unrelated detail"
-        }
-      }
-      const smallCount = 138
-      const smallGoals = Array.from(
-        { length: smallCount },
-        (_, index) => checkpointForGoal(`goal-small-${index}`, `event-small-${index}`, index + 1, index + 1)
-      )
-      const canonicalBase = checkpointForGoal("goal-family-canonical", "event-canonical-base", 0, 0)
-      const supersededBase = checkpointForGoal("goal-family-superseded", "event-superseded-base", 0, 0)
-      const canonical = familyCheckpoint(
-        canonicalBase,
-        "event-canonical",
-        10_000,
-        "goal-family-canonical",
-        "canonical"
-      )
-      const superseded = familyCheckpoint(
-        supersededBase,
-        "event-superseded",
-        10_000,
-        "goal-family-canonical",
-        "superseded"
-      )
-
-      const history = [...smallGoals, longUnrelated, canonicalBase, supersededBase, canonical]
-      for (const event of history) yield* store.append(event)
-
-      const snapshotsBefore = yield* service.snapshots(20_000)
-      expect(Buffer.byteLength(JSON.stringify(snapshotsBefore))).toBeLessThanOrEqual(
-        fleetResponseBodyMaxBytes
-      )
-
-      const estimated = __herdrWorkMaximumSnapshotBytesForTest(history, superseded)
-      const snapshotsAfter = yield* projectWorkSnapshots([...history, superseded], 20_001)
-      const actualAfter = Buffer.byteLength(JSON.stringify(snapshotsAfter))
-      expect(estimated).toBeGreaterThanOrEqual(actualAfter)
-      expect(estimated).toBeLessThanOrEqual(fleetResponseBodyMaxBytes)
-
-      // Must remain appendable despite long unrelated ID inflating previous max*size bound
-      yield* store.append(superseded)
-      expect(yield* store.list()).toHaveLength(history.length + 1)
-
-      // Prove previous max*size amplification would have rejected this valid history
-      const maximumGoalBytes = new Map<string, number>()
-      for (const { goal } of [...history, superseded]) {
-        const bytes = __herdrWorkEncodedBytesForTest(goal)
-        maximumGoalBytes.set(goal.id, Math.max(maximumGoalBytes.get(goal.id) ?? 0, bytes))
-      }
-      const encodedGoals = [...maximumGoalBytes.values()].reduce((total, bytes) => total + bytes, 0)
-      const separators = Math.max(0, maximumGoalBytes.size - 1)
-      const maxEncodedId = Math.max(
-        0,
-        ...Array.from(maximumGoalBytes.keys(), (id) => __herdrWorkEncodedBytesForTest(id))
-      )
-      const oldFamiliesPerWindow = 2 * encodedGoals + separators +
-        (maxEncodedId + 64) * Math.max(1, maximumGoalBytes.size)
-      const oldEstimated = __herdrWorkSnapshotEnvelopeMaxBytesForTest +
-        4 * Math.max(encodedGoals + separators, oldFamiliesPerWindow)
-      expect(oldEstimated).toBeGreaterThan(fleetResponseBodyMaxBytes)
-      expect(oldEstimated).toBeGreaterThan(estimated)
-    }).pipe(provideNodeServices), 30_000)
 
   it.effect("rejects family snapshots where the canonical payload diverges from the active goal", () =>
     Effect.gen(function*() {
