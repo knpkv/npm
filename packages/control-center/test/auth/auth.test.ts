@@ -295,7 +295,7 @@ describe("Auth", () => {
       Effect.scoped
     ))
 
-  it.effect("enforces sliding idle and non-sliding absolute session expiry", () =>
+  it.effect("enforces sliding idle and non-sliding absolute session expiry, and validation does not slide", () =>
     Effect.gen(function*() {
       const config = yield* makePersistenceTestConfig("control-center-auth-expiry-")
       yield* Effect.gen(function*() {
@@ -308,7 +308,15 @@ describe("Auth", () => {
           actor: ownerActor
         })
         const idleSession = yield* auth.consumePairingCode(idleCode.pairingCode)
-        yield* TestClock.adjust("13 hours")
+        yield* TestClock.adjust("11 hours")
+        // Validation is not activity: it must leave the idle deadline where it was.
+        const validated = yield* auth.validateSession(idleSession.sessionToken)
+        assert.strictEqual(validated.sessionId, idleSession.session.sessionId)
+        assert.deepStrictEqual(validated.lastSeenAt, idleSession.session.lastSeenAt)
+        assert.deepStrictEqual(validated.idleExpiresAt, idleSession.session.idleExpiresAt)
+        yield* TestClock.adjust("2 hours")
+        const idleValidation = yield* auth.validateSession(idleSession.sessionToken).pipe(Effect.result)
+        assert.isTrue(Result.isFailure(idleValidation))
         const idleResult = yield* auth.authenticate(idleSession.sessionToken).pipe(Effect.result)
         assert.isTrue(Result.isFailure(idleResult))
         if (Result.isFailure(idleResult)) {
