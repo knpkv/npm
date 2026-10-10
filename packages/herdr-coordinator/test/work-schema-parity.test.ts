@@ -867,7 +867,8 @@ describe("Work schema parity between WorkStore and the SQL bridge", () => {
         const legacy = join(root, "oversized.sqlite")
         writeFixture(legacy, (database) => {
           writePreV2WorkFile(database)
-          addOversizedLegacyHandoffs(database, 260)
+          // Migration duplicates each 12 KiB summary into contextDelta; 90 handoffs exceed 2 MiB with margin.
+          addOversizedLegacyHandoffs(database, 90)
         })
         const before = { rows: tableRows(legacy), schema: schemaSnapshot(legacy) }
         const storePath = join(root, "store.sqlite")
