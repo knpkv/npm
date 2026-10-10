@@ -232,6 +232,91 @@ describe("Relay in the hub's masthead", () => {
     expect(page.panel()).not.toBeNull()
   })
 
+  it("announces a run once when it starts working, not at every tool boundary, and again when it needs you", async () => {
+    const { conversations, emit } = fakeConversations()
+    const page = await mount(conversations)
+    const at = { seq: 0, session: "s1" }
+    const visible = () => document.querySelector(".fleet-shell-relay-status")?.textContent ?? ""
+    await act(async () => emit(working))
+    expect(page.live()).toBe("Working…")
+    await act(async () =>
+      emit({ _tag: "ToolStarted", ...at, call: "t1", capability: "list_agents", summary: "Reading agents", input: {} })
+    )
+    // The words beside the mark follow the run; the live region doesn't repeat them.
+    expect(visible()).toContain("Reading…")
+    expect(page.live()).toBe("Working…")
+    await act(async () =>
+      emit({ _tag: "ToolFinished", ...at, call: "t1", ok: true, summary: "Read agents", cites: [] })
+    )
+    await act(async () =>
+      emit({ _tag: "ToolStarted", ...at, call: "t2", capability: "get_job", summary: "Reading job 7", input: {} })
+    )
+    expect(page.live()).toBe("Working…")
+    await act(async () =>
+      emit({
+        _tag: "ConfirmationRequired",
+        ...at,
+        call: "c1",
+        action: { verb: "prompt_agent", target: fleet, args: {} },
+        reversible: false
+      })
+    )
+    expect(page.live()).toBe("Relay needs you")
+  })
+
+  it("announces the run a queued message starts, and each new run", async () => {
+    const { conversations, emit } = fakeConversations()
+    const page = await mount(conversations)
+    const at = { seq: 0, session: "s1" }
+    await act(async () => emit({ _tag: "Snapshot", ...at, messages: [], runIds: [], queued: [] }))
+    await act(async () => emit({ _tag: "MessageQueued", ...at, requestId: "q1" }))
+    expect(page.live()).toBe("Sending…")
+    await act(async () => {
+      emit({ _tag: "MessagePlaced", ...at, id: "m1", requestId: "q1", text: "Status?" })
+      emit({ _tag: "RunStarted", ...at, runIds: ["q1"] })
+    })
+    expect(page.live()).toBe("Working…")
+    await act(async () => {
+      emit({ _tag: "RunFinished", ...at, runIds: ["q1"] })
+      emit({ _tag: "MessagePlaced", ...at, id: "m2", requestId: "q2", text: "And now?" })
+      emit({ _tag: "RunStarted", ...at, runIds: ["q2"] })
+      emit({ _tag: "ToolStarted", ...at, call: "t1", capability: "list_agents", summary: "Reading agents", input: {} })
+    })
+    // A new run, already reading when it is first seen: announced in its own words.
+    expect(page.live()).toBe("Reading…")
+  })
+
+  it("says a second run again even when its words are the same, and stays silent between its tools", async () => {
+    const { conversations, emit } = fakeConversations()
+    const page = await mount(conversations)
+    const at = { seq: 0, session: "s1" }
+    await act(async () => emit(working))
+    const region = document.querySelector(".fleet-shell-relay-live")
+    if (region === null) throw new Error("no live region")
+    let changes = 0
+    const observer = new MutationObserver((records) => {
+      changes += records.length
+    })
+    observer.observe(region, { characterData: true, childList: true, subtree: true })
+    // Tools within the run: the words beside the mark change, the region doesn't.
+    await act(async () =>
+      emit({ _tag: "ToolStarted", ...at, call: "t1", capability: "list_agents", summary: "Reading agents", input: {} })
+    )
+    await act(async () =>
+      emit({ _tag: "ToolFinished", ...at, call: "t1", ok: true, summary: "Read agents", cites: [] })
+    )
+    await Promise.resolve()
+    expect(changes).toBe(0)
+    await act(async () => {
+      emit({ _tag: "RunFinished", ...at, runIds: ["r1"] })
+      emit({ _tag: "RunStarted", ...at, runIds: ["r2"] })
+    })
+    await Promise.resolve()
+    expect(page.live()).toBe("Working…")
+    expect(changes).toBeGreaterThan(0)
+    observer.disconnect()
+  })
+
   it("announces Relay's status only while the panel is closed; the transcript speaks once it is open", async () => {
     const { conversations, emit } = fakeConversations()
     const page = await mount(conversations)
