@@ -1,0 +1,60 @@
+{
+  "projectId": "1683c09c-cdac-4364-85e5-251e548a5cba",
+  "pkg": "@knpkv/rly",
+  "globalName": "Rly",
+  "shape": "storybook",
+  "storybookConfigDir": "packages/rly/.storybook",
+  "storybookStatic": ".design-sync/sb-reference",
+  "entry": "packages/rly/dist/index.js",
+  "buildCmd": "pnpm --filter \"@knpkv/rly...\" build",
+  "extraEntries": [
+    "./dist/diff/index.js",
+    "./dist/diff/patch/index.js",
+    "./dist/diff/bounded/index.js",
+    "../../.design-sync/entries/styles.mjs"
+  ],
+  "titleMap": {
+    "Overview": null,
+    "FontFaces": null,
+    "Tokens": null
+  },
+  "libOverrides": {
+    "preview-gen-storybook.mjs": "applies per-story Storybook globals (theme, forced colours) by re-running the project decorators; upstream passes globals: {}",
+    "source-storybook.mjs": "decorator gate misses a preview that re-exports a shared config; exposes decorators + initial globals for the preview-gen fork"
+  },
+  "extraFonts": ["../../.design-sync/entries/geist-aliases.css"],
+  "overrides": {
+    "AgentDrawer": {
+      "cardMode": "single"
+    },
+    "RelayDock": {
+      "cardMode": "single"
+    },
+    "RelayPanel": {
+      "cardMode": "single"
+    },
+    "RelayTranscript": {
+      "cardMode": "single"
+    },
+    "ReleasePreview": {
+      "cardMode": "single"
+    },
+    "ReleaseRow": {
+      "cardMode": "column"
+    },
+    "TimelineRow": {
+      "cardMode": "column"
+    },
+    "Dialog": {
+      "cardMode": "single",
+      "primaryStory": "NestedIsolation"
+    },
+    "Tabs": {
+      "cardMode": "column"
+    },
+    "DiffCodeView": {
+      "skip": ["diff-diffcodeview--theme-transition", "diff-diffcodeview--worker-states"]
+    }
+  },
+  "readmeHeader": ".design-sync/conventions.md"
+}

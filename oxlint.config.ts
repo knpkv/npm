@@ -20,6 +20,10 @@ export default defineConfig({
     "**/docs/**",
     "**/generated/**",
     "repos/**",
+    // design-sync inputs: forks of the converter's lib modules and story ports. Their bytes key
+    // the claude.ai/design sync anchor, so a lint-driven rewrite re-grades every component.
+    ".design-sync/overrides/**",
+    ".design-sync/previews/**",
     "tools/oxlint/anti-slop/**"
   ],
   jsPlugins: [

@@ -6,3 +6,6 @@ packages/rly/generated/
 packages/rly/registry/
 repos/
 docs/debt.md
+# design-sync inputs: their bytes key the claude.ai/design sync anchor (see oxlint.config.ts)
+.design-sync/overrides/
+.design-sync/previews/
