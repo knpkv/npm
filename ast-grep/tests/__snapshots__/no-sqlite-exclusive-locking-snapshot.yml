@@ -1,0 +1,23 @@
+id: no-sqlite-exclusive-locking
+snapshots:
+  ? |
+    await client.execute("pragma LOCKING_MODE=exclusive")
+  : labels:
+      - source: '"pragma LOCKING_MODE=exclusive"'
+        style: primary
+        start: 21
+        end: 52
+  ? |
+    await database.exec("PRAGMA locking_mode = EXCLUSIVE")
+  : labels:
+      - source: '"PRAGMA locking_mode = EXCLUSIVE"'
+        style: primary
+        start: 20
+        end: 53
+  ? |
+    const pragmas = `PRAGMA locking_mode = EXCLUSIVE; PRAGMA journal_mode = WAL`
+  : labels:
+      - source: "`PRAGMA locking_mode = EXCLUSIVE; PRAGMA journal_mode = WAL`"
+        style: primary
+        start: 16
+        end: 76

@@ -1,0 +1,33 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-sqlite-exclusive-locking
+language: tsx
+severity: error
+message: "libsql keeps a closed connection, and an EXCLUSIVE lock it took, until its statements are garbage-collected: don't use locking_mode = EXCLUSIVE on a libsql connection"
+
+rule:
+  all:
+    - any:
+        - kind: string
+        - kind: template_string
+    - regex: '(?i)locking_mode\s*=\s*exclusive'
+    # Relay's ownership lock runs on the runtime's own SQLite (node:sqlite or bun:sqlite) through exec only,
+    # which releases on close; it is the one exclusive lock these packages take.
+    - not:
+        inside:
+          stopBy: end
+          kind: variable_declarator
+          has:
+            field: name
+            regex: "^acquireStoreLock$"
+
+files:
+  - "packages/relay/src/**/*.ts"
+  - "packages/codecommit-core/src/**/*.ts"
+  - "packages/control-center/src/**/*.ts"
+
+note: |
+  These packages talk to SQLite through libsql (@libsql/client). Native libsql 0.5 keeps a closed connection
+  alive while any statement prepared on it is reachable, and in EXCLUSIVE locking mode that connection keeps the
+  file lock, so the same process can't reopen the database until garbage collection (#736). Own a file with a
+  lock connection that only uses exec (Relay's acquireStoreLock), not with libsql's locking mode.

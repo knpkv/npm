@@ -1,0 +1,19 @@
+id: no-sqlite-exclusive-locking
+valid:
+  - |
+    await database.exec("PRAGMA journal_mode = WAL")
+  - |
+    const acquireStoreLock = (path) => {
+      const lock = open(path)
+      lock.exec("PRAGMA locking_mode = EXCLUSIVE")
+      return lock
+    }
+  - |
+    await client.execute("PRAGMA locking_mode = NORMAL")
+invalid:
+  - |
+    await database.exec("PRAGMA locking_mode = EXCLUSIVE")
+  - |
+    await client.execute("pragma LOCKING_MODE=exclusive")
+  - |
+    const pragmas = `PRAGMA locking_mode = EXCLUSIVE; PRAGMA journal_mode = WAL`

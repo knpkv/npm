@@ -1,0 +1,42 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-node-sqlite-in-bun-packages
+language: tsx
+severity: error
+message: 'Bun-loaded packages must load SQLite lazily: no static `node:sqlite` import, no literal `import("bun:sqlite")`'
+
+rule:
+  any:
+    # Bun before 1.4 has no node:sqlite, so a value import fails the whole module graph at load.
+    - all:
+        - kind: import_statement
+        - not:
+            regex: '^import\s+type\s'
+        - has:
+            field: source
+            regex: '^["'']node:sqlite["'']$'
+    - kind: export_statement
+      has:
+        field: source
+        regex: '^["'']node:sqlite["'']$'
+    # Vite resolves a literal dynamic import at transform time and refuses a Bun built-in; load it through
+    # createRequire(import.meta.url)("bun:sqlite") instead.
+    - pattern: import($SOURCE)
+      has:
+        stopBy: end
+        kind: string
+        regex: '^["'']bun:sqlite["'']$'
+
+files:
+  - "packages/relay/src/**/*.ts"
+  - "packages/codecommit/src/**/*.ts"
+  - "packages/codecommit/src/**/*.tsx"
+  - "packages/codecommit-core/src/**/*.ts"
+  - "packages/codecommit-web/src/**/*.ts"
+  - "packages/codecommit-web/src/**/*.tsx"
+
+note: |
+  codecommit's CLI (its TUI runs on Bun) imports codecommit-web, which imports @knpkv/relay, so every module
+  these packages load must also load on Bun. #736: a top-level `import { DatabaseSync } from "node:sqlite"` in
+  Relay's harness made Bun 1.3 fail with "No such built-in module: node:sqlite". Load node:sqlite with a
+  dynamic import where it is used, and bun:sqlite through `createRequire`.

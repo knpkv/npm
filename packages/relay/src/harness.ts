@@ -9,8 +9,9 @@
  *   and a write that was interrupted is never repeated.
  * - **This service is the only door.** Products and the dock call {@link RelayHarnessService}; nothing
  *   outside this package imports Pi. Replacing Pi with an Effect-native store changes this module only.
- * - **One process owns a store.** The owner holds an exclusive SQLite lock on `<store>.lock`, opened with
- *   `node:sqlite` and used only through `exec`, so closing it frees the store at once, on Node and on Bun.
+ * - **One process owns a store.** The owner holds an exclusive SQLite lock on `<store>.lock`, opened with the
+ *   runtime's own SQLite (`node:sqlite` on Node, `bun:sqlite` on Bun) and used only through `exec`, so closing
+ *   it frees the store at once.
  *   A second owner fails with {@link RelayStoreLocked}, and the OS releases the lock if the owner dies,
  *   even on `kill -9`. The store's own libsql connection can't be the lock: libsql keeps a closed
  *   connection, and whatever it locked, until its statements are garbage-collected.
@@ -229,11 +230,18 @@ const lockDriver = Effect.tryPromise({
     try {
       const { DatabaseSync } = await import("node:sqlite")
       return (path) => new DatabaseSync(path)
-    } catch {
-      // Through `require`, not `import()`: bundlers resolve a literal `import()` at build time and refuse a
-      // Bun built-in, while Bun's `require` loads it when this runs.
-      const bun: typeof BunSqlite = createRequire(import.meta.url)("bun:sqlite")
-      return (path) => new bun.Database(path)
+    } catch (nodeFailure) {
+      try {
+        // Through `require`, not `import()`: bundlers resolve a literal `import()` at build time and refuse a
+        // Bun built-in, while Bun's `require` loads it when this runs.
+        const bun: typeof BunSqlite = createRequire(import.meta.url)("bun:sqlite")
+        return (path) => new bun.Database(path)
+      } catch (bunFailure) {
+        // Both causes: on Node the first is the one that matters, on Bun the second.
+        throw new AggregateError([nodeFailure, bunFailure], "neither node:sqlite nor bun:sqlite could load", {
+          cause: bunFailure
+        })
+      }
     }
   },
   catch: (cause) =>
@@ -261,8 +269,12 @@ const acquireStoreLock = (path: string) =>
         try: () => {
           const lock = open(path)
           try {
-            // Exclusive locking keeps the lock after the commit, for as long as this connection is open.
-            lock.exec("PRAGMA locking_mode = EXCLUSIVE; BEGIN IMMEDIATE; COMMIT")
+            // Exclusive locking keeps the lock after the commit, for as long as this connection is open. One
+            // statement per call: Bun's multi-statement exec reports a refused BEGIN as a failed COMMIT, which
+            // would hide a second owner.
+            lock.exec("PRAGMA locking_mode = EXCLUSIVE")
+            lock.exec("BEGIN IMMEDIATE")
+            lock.exec("COMMIT")
             return lock
           } catch (failure) {
             lock.close()

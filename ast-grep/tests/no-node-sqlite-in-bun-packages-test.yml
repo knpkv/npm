@@ -1,0 +1,21 @@
+id: no-node-sqlite-in-bun-packages
+valid:
+  - |
+    const { DatabaseSync } = await import("node:sqlite")
+  - |
+    import type * as BunSqlite from "bun:sqlite"
+  - |
+    import type { DatabaseSync } from "node:sqlite"
+  - |
+    const bun = createRequire(import.meta.url)("bun:sqlite")
+  - |
+    import { createClient } from "@libsql/client"
+invalid:
+  - |
+    import { DatabaseSync } from "node:sqlite"
+  - |
+    import * as sqlite from "node:sqlite"
+  - |
+    export { DatabaseSync } from "node:sqlite"
+  - |
+    const { Database } = await import("bun:sqlite")
