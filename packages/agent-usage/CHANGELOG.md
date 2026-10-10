@@ -1,5 +1,18 @@
 # @knpkv/agent-usage
 
+## 0.9.0
+
+### Minor Changes
+
+- [#782](https://github.com/knpkv/npm/pull/782) [`d3530ad`](https://github.com/knpkv/npm/commit/d3530ad9473b768a637603dc6ad023ca05347373) Thanks [@konopkov](https://github.com/konopkov)! - Add a browser-safe views entry for page components and their props types.
+
+### Patch Changes
+
+- [`4ebe301`](https://github.com/knpkv/npm/commit/4ebe30154220bff53ec507a0d70c5f8f4a543c5a) Thanks [@konopkov](https://github.com/konopkov)! - Docs and comments state each rule and its reason directly instead of pointing at internal decision records.
+- Updated dependencies [[`6644cb7`](https://github.com/knpkv/npm/commit/6644cb74218d7daf7f618f1da69dc30e4aa3d93a), [`4ebe301`](https://github.com/knpkv/npm/commit/4ebe30154220bff53ec507a0d70c5f8f4a543c5a)]:
+  - @knpkv/rly@0.20.0
+  - @knpkv/browser-pairing@0.4.1
+
 ## 0.8.1
 
 ### Patch Changes

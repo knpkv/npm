@@ -1,5 +1,11 @@
 # @knpkv/codecommit-core
 
+## 0.25.1
+
+### Patch Changes
+
+- [#763](https://github.com/knpkv/npm/pull/763) [`bc2d9ad`](https://github.com/knpkv/npm/commit/bc2d9adcdeef47937a76748ae4e1c60ba2866fd4) Thanks [@konopkov](https://github.com/konopkov)! - AWS credential resolution now passes every profile name, `default` included, explicitly to the SDK. When a profile has no SSO configuration, resolution reads only that profile from shared configuration (`fromIni`). Ambient environment, web-identity, and instance credentials can no longer stand in for a named profile, so the identity used always matches the profile shown in the UI and audit records.
+
 ## 0.25.0
 
 ### Minor Changes

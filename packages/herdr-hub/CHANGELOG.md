@@ -2,6 +2,45 @@
 
 Released as `@knpkv/herdr-approvals` up to 0.18.0; the headings below are that package's history.
 
+## 0.20.0
+
+### Minor Changes
+
+- [#764](https://github.com/knpkv/npm/pull/764) [`b08f713`](https://github.com/knpkv/npm/commit/b08f713a08f44c11a0f90528996faf162e7a96c6) Thanks [@konopkov](https://github.com/konopkov)! - Retain compact closed-agent records after two complete host reads confirm at least five minutes of absence. Expose bounded archive pages through the authenticated hub listener and remove records when the same agent returns. Older peers remain visible but supply no closure evidence until they report complete inventories. Failed writes restart that host's closure grace period after recovery; restarting the store requires fresh absence evidence and retains existing archive records.
+
+- [#787](https://github.com/knpkv/npm/pull/787) [`3ba4e78`](https://github.com/knpkv/npm/commit/3ba4e78663b026f101f929ef41294a48b6bafc5a) Thanks [@konopkov](https://github.com/konopkov)! - Check explicit durable operation rejection before settling an unaccepted Fleet job, including on restart recovery. Store bounded cause-tagged errors for definitively uncommitted failures while preserving recovery for uncertain outcomes and accepted receipts.
+
+  Validate optional delegate `newWork` branches and goal titles, bind both fields into the approval hash, and show the proposed goal in approvals, the dashboard, and fleetctl output so approval covers the goal that delegation will create. Failed job and follow output retain the operation error.
+
+  Keep credential-redacted Unicode titles decodable at the length boundary, and escape terminal controls in shared fleetctl job, follow, and pending-submit output so untrusted fields cannot alter terminal presentation.
+
+- [#772](https://github.com/knpkv/npm/pull/772) [`a947727`](https://github.com/knpkv/npm/commit/a9477277535a0543caf5d70babc41acda60ee315) Thanks [@konopkov](https://github.com/konopkov)! - Add a browser-safe views entry for the hub UI.
+
+- [#765](https://github.com/knpkv/npm/pull/765) [`bd86c66`](https://github.com/knpkv/npm/commit/bd86c6696678b8c5469727d646096381406f1179) Thanks [@konopkov](https://github.com/konopkov)! - Show goal delivery steps and observed checks and review with their read time in the Work inspector. Group the board as plain rows, keep phone status filters on one scrolling line, and distinguish retained finished goals from response and retention omissions. The hub supplies its own host to the board header.
+
+- [#771](https://github.com/knpkv/npm/pull/771) [`27bd371`](https://github.com/knpkv/npm/commit/27bd3714a526256705da5147872a0e7b68dae8c5) Thanks [@konopkov](https://github.com/konopkov)! - Expose the dashboard, activity, approval, refresh, and conversation UI through the public API.
+  Expose the character, agent stage, pinned agents, limits, and usage UI through the public API.
+
+- [#776](https://github.com/knpkv/npm/pull/776) [`4bd33fa`](https://github.com/knpkv/npm/commit/4bd33fa1acb480976631f33267ed68b1299b78fa) Thanks [@konopkov](https://github.com/konopkov)! - Add browser-safe Relay module descriptors and hash navigation, with a separate Effect server registration and authenticated route dispatcher. Preserve legacy Fleet tab links and their object-selection parameters when canonicalizing URLs.
+
+### Patch Changes
+
+- [#766](https://github.com/knpkv/npm/pull/766) [`6644cb7`](https://github.com/knpkv/npm/commit/6644cb74218d7daf7f618f1da69dc30e4aa3d93a) Thanks [@konopkov](https://github.com/konopkov)! - A decided request reads at a glance. `DecisionBar` takes an optional `outcome` (label, tone, icon) that leads its status line as a toned word, with `status` as the quiet who-and-when line beside it. The status region stays the same element, so the answer is still announced, and an `off` reason the outcome already says is kept only as the inert actions' description. The hub's approvals bar uses it: Approved (positive, check), Rejected (critical, close), Expired (neutral, clock: nothing happened). Activity history now shows expired as neutral with a clock too, so the hub says it one way.
+
+- [#762](https://github.com/knpkv/npm/pull/762) [`29c8bc1`](https://github.com/knpkv/npm/commit/29c8bc1212de8592f30462a0e86280a05afcf27b) Thanks [@konopkov](https://github.com/konopkov)! - Connect in the hub uses a phone's full width. On screens up to 40rem the hub shell keeps one 16px gutter instead of 32px, and the embedded Connect panel adds none of its own, so an agent's row spans the screen less 32px. The Status options keep to one line whatever their counts, scrolling sideways rather than wrapping; host names still wrap so a long one stays readable.
+
+- [#757](https://github.com/knpkv/npm/pull/757) [`77d046d`](https://github.com/knpkv/npm/commit/77d046da38d5bfec6f69d33cef1beb6e0948fe90) Thanks [@konopkov](https://github.com/konopkov)! - Refuse browser WebSocket upgrades on the tailnet terminal endpoint. Only the hub's own relay dials `/v1/connect/terminal`, and it sends no `Origin`; an upgrade carrying an `Origin` or a cross-site `Sec-Fetch-Site` is now rejected before the Tailscale identity check, so a web page open on the hub node cannot drive a peer's terminal.
+
+- [#759](https://github.com/knpkv/npm/pull/759) [`8017b49`](https://github.com/knpkv/npm/commit/8017b490395ea15e3949b946ebe8f5313b5d165b) Thanks [@konopkov](https://github.com/konopkov)! - Restrict the unauthenticated Work-only listener to loopback. `workBindAddress` now accepts only `127.0.0.0/8` addresses, and the listener refuses Work snapshot and checkpoint requests from any non-loopback peer. Paired LAN access remains available through `lanWork`.
+- Updated dependencies [[`b08f713`](https://github.com/knpkv/npm/commit/b08f713a08f44c11a0f90528996faf162e7a96c6), [`241c5c7`](https://github.com/knpkv/npm/commit/241c5c7af802fb427fca1ac4e40a86151b8527f0), [`20cb874`](https://github.com/knpkv/npm/commit/20cb8746e9b9519b3a0dc371ec654c79a874df95), [`05281e2`](https://github.com/knpkv/npm/commit/05281e2b90cd59c4373cb6e5aa79dcb8242c49a9), [`6644cb7`](https://github.com/knpkv/npm/commit/6644cb74218d7daf7f618f1da69dc30e4aa3d93a), [`4ebe301`](https://github.com/knpkv/npm/commit/4ebe30154220bff53ec507a0d70c5f8f4a543c5a), [`3ba4e78`](https://github.com/knpkv/npm/commit/3ba4e78663b026f101f929ef41294a48b6bafc5a), [`a947727`](https://github.com/knpkv/npm/commit/a9477277535a0543caf5d70babc41acda60ee315), [`29c8bc1`](https://github.com/knpkv/npm/commit/29c8bc1212de8592f30462a0e86280a05afcf27b), [`bd86c66`](https://github.com/knpkv/npm/commit/bd86c6696678b8c5469727d646096381406f1179), [`27bd371`](https://github.com/knpkv/npm/commit/27bd3714a526256705da5147872a0e7b68dae8c5), [`09eb563`](https://github.com/knpkv/npm/commit/09eb56339ed68e9ac6c420947e9f617c4aa6a36d), [`5013de5`](https://github.com/knpkv/npm/commit/5013de5bee7f341bc11d86ef3194eb8a37912777), [`8017b49`](https://github.com/knpkv/npm/commit/8017b490395ea15e3949b946ebe8f5313b5d165b)]:
+  - @knpkv/herdr-connect@0.12.0
+  - @knpkv/rly@0.20.0
+  - @knpkv/relay@0.2.2
+  - @knpkv/herdr-fleet@0.10.0
+  - @knpkv/herdr-work@0.11.0
+  - @knpkv/relay-product@0.5.2
+  - @knpkv/herdr-coordinator@0.3.10
+
 ## 0.19.0
 
 ### Minor Changes

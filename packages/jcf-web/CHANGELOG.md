@@ -1,5 +1,14 @@
 # @knpkv/jcf-web
 
+## 0.8.3
+
+### Patch Changes
+
+- Updated dependencies [[`6644cb7`](https://github.com/knpkv/npm/commit/6644cb74218d7daf7f618f1da69dc30e4aa3d93a), [`4ebe301`](https://github.com/knpkv/npm/commit/4ebe30154220bff53ec507a0d70c5f8f4a543c5a)]:
+  - @knpkv/rly@0.20.0
+  - @knpkv/jira-clockify@1.9.1
+  - @knpkv/browser-pairing@0.4.1
+
 ## 0.8.2
 
 ### Patch Changes
