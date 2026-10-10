@@ -34,7 +34,7 @@ const describeColumn = (column: Column, label: string, measure: Measure, labelOf
   return `${label}: ${formatMeasure(measure, column.total)} total${parts.length === 0 ? "" : `; ${parts.join(", ")}`}`
 }
 
-export const UsageChart = (props: {
+export interface UsageChartProps {
   /** The range's periods, oldest first: one column each. */
   readonly periods: ReadonlyArray<Period>
   readonly stacked: StackedUsage
@@ -44,7 +44,9 @@ export const UsageChart = (props: {
   readonly labelOf: (id: string) => string
   /** The chart's accessible name: what a column is per, and what it is stacked by. */
   readonly label: string
-}) => {
+}
+
+export const UsageChart = (props: UsageChartProps) => {
   const [width, container] = useWidth(960)
   // Hover and focus open the breakdown independently; each ends only its own, so moving the pointer
   // off the chart keeps a focused column's breakdown and leaving focus keeps a hovered one.
