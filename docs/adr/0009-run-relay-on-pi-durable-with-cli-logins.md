@@ -36,3 +36,18 @@ package denylist and a size budget.
 The bundle is temporary. It goes once upstream makes the SDKs optional peers of pi-ai and esbuild an optional
 peer of chord; a pull request upstream proposes that. If upstream declines, the fallback in the paragraph above
 still holds: an Effect-native store behind the same `RelayHarness` service.
+
+## Amendment (2026-10-10): Relay in the Herdr hub, read-only
+
+The Herdr hub (herdr-approvals) mounts Relay for one conversation, `{ product: "herdr", kind: "fleet", id: <hub
+host> }`, on its canonical listener only, never on the tailnet, approval, LAN Work or local listeners. Every
+`/v1/relay/*` request passes the listener's Tailscale identity check, and every POST its origin check, before
+Relay starts. Its capabilities only read: the fleet's agents, the jobs waiting for approval, one job's state
+(never its output) and the work board, each answer capped in items and bytes. Relay has no capability that
+approves, declines, prompts an agent or submits a job; decisions stay in the Approvals tab.
+
+hostd loads `@knpkv/relay` with a dynamic import when the first Relay request arrives, in a start the server
+owns: a broken install, a store another hostd holds, or a linked store directory answers `RelayUnavailableError`
+with the fix, and Approvals, Connect and Work keep running. A failed start is retried on the next request.
+Sessions live in hostd's state directory, `<stateDirectory>/relay/sessions.sqlite`, owner-only, not under
+`~/.config/fleet`: they are state, kept beside the hub's other SQLite files.

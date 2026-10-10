@@ -1,5 +1,6 @@
 import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it, vi } from "@effect/vitest"
+import { makeDeterministicLanguageModel } from "@knpkv/ai-runtime"
 import {
   connectAgentPageMaxRecords,
   FleetConnectAgentPage,
@@ -38,6 +39,7 @@ import {
   WorkSnapshots,
   WorkStore
 } from "@knpkv/herdr-work"
+import type { RelayBackend } from "@knpkv/relay"
 import { Data, Deferred, Effect, Fiber, Result, Schema, Stream } from "effect"
 import { HttpClient } from "effect/http"
 import { spawn } from "node:child_process"
@@ -77,6 +79,7 @@ import {
   terminalBufferLimitBytes
 } from "../src/internal/websocket.js"
 import { commandOutputMaxBytes } from "../src/operations.js"
+import { makeRelayHubMount, type RelayHubBackends } from "../src/relay/mount.js"
 
 // Each test effect is an application boundary; @effect/vitest scopes its Node services.
 // @effect-diagnostics-next-line strictEffectProvide:off
@@ -4669,5 +4672,389 @@ describe("approval URL resolution", () => {
         "https://ser8.example.test:4779/"
       )
     })
+  })
+})
+
+describe("Relay in the hub", () => {
+  /** A Claude Code backend over a scripted model that answers every turn with `reply`. */
+  const scriptedBackends = (reply: string, onStart: Effect.Effect<void> = Effect.void): RelayHubBackends => () =>
+    Effect.gen(function*() {
+      yield* onStart
+      const backend: RelayBackend = {
+        id: "claude-code",
+        name: "Claude Code",
+        model: makeDeterministicLanguageModel(() => ({
+          _tag: "response",
+          parts: [{ type: "text", text: JSON.stringify({ reply, toolCalls: [] }) }]
+        })).layer,
+        probe: Effect.succeed("2.1.0 (Claude Code)"),
+        signInFix: "Run claude and sign in with /login."
+      }
+      const backends: readonly [RelayBackend] = [backend]
+      return backends
+    })
+
+  /** One request to the hub's TLS listener, with its whole body. */
+  const hubRequest = (
+    url: string,
+    options: { readonly method?: string; readonly headers: Readonly<Record<string, string>>; readonly body?: string }
+  ): Promise<{ readonly status: number; readonly body: string }> =>
+    new Promise((resolve, reject) => {
+      const request = httpsRequest(
+        url,
+        { headers: options.headers, method: options.method ?? "GET", rejectUnauthorized: false },
+        (response) => {
+          let body = ""
+          response.setEncoding("utf8")
+          response.on("data", (chunk: string) => {
+            body += chunk
+          })
+          response.once("end", () => resolve({ body, status: response.statusCode ?? 0 }))
+        }
+      )
+      request.once("error", reject)
+      request.end(options.body)
+    })
+
+  /** Reads `data:` frames from the hub's event stream until `done` says stop, then leaves. */
+  const readFrames = (
+    url: string,
+    headers: Readonly<Record<string, string>>,
+    done: (frames: ReadonlyArray<{ readonly _tag: string }>) => boolean,
+    onOpen: () => void = () => undefined
+  ): Promise<ReadonlyArray<{ readonly _tag: string }>> =>
+    new Promise((resolve, reject) => {
+      const frames: Array<{ readonly _tag: string }> = []
+      const request = httpsRequest(url, { headers, rejectUnauthorized: false }, (response) => {
+        let buffer = ""
+        response.setEncoding("utf8")
+        response.on("data", (chunk: string) => {
+          buffer += chunk
+          const parts = buffer.split("\n\n")
+          buffer = parts.pop() ?? ""
+          for (const part of parts) {
+            if (!part.startsWith("data: ")) continue
+            frames.push(Schema.decodeUnknownSync(Schema.Struct({ _tag: Schema.String }))(JSON.parse(part.slice(6))))
+            if (frames.length === 1) onOpen()
+          }
+          if (done(frames)) {
+            request.destroy()
+            resolve(frames)
+          }
+        })
+      })
+      request.once("error", (error) => (frames.length > 0 && done(frames) ? resolve(frames) : reject(error)))
+      request.end()
+    })
+
+  /** A hub whose canonical listener serves Relay from `relayDirectory`, signed in as `identity`. */
+  const startHub = (
+    root: string,
+    relayDirectory: string,
+    backends: RelayHubBackends,
+    seed: (store: JobStore) => Effect.Effect<void, unknown> = () => Effect.void
+  ) =>
+    Effect.gen(function*() {
+      const identityMode = join(root, "identity-mode")
+      const tailscaleCommand = join(root, "tailscale-test")
+      writeFileSync(identityMode, "allowed")
+      writeFileSync(
+        tailscaleCommand,
+        `#!/bin/sh
+case "$1" in
+  ip) printf '%s\\n' '127.0.0.1' ;;
+  whois)
+    if [ "$(cat '${identityMode}')" = allowed ]; then
+      printf '%s\\n' '{"Node":{"StableID":"node-phone"},"UserProfile":{"LoginName":"andrey@example.com"}}'
+    else
+      printf '%s\\n' '{"Node":{"StableID":"node-phone"},"UserProfile":{"LoginName":"mallory@example.com"}}'
+    fi ;;
+  status) printf '%s\\n' '{"Peer":{},"Self":{"HostName":"SER8","ID":"node-ser8","Online":true,"TailscaleIPs":["127.0.0.1"]}}' ;;
+esac
+`,
+        { mode: 0o700 }
+      )
+      const store = yield* Effect.acquireRelease(
+        JobStore.open(join(root, "jobs.sqlite")),
+        (opened) => Effect.sync(() => opened.close())
+      )
+      yield* Effect.orDie(seed(store))
+      const fleet = yield* makeFleetService({ approvalEnabled: true, host: "SER8", operations, store })
+      const { approvalPort, server } = yield* Effect.acquireRelease(
+        startWithApprovalPort(async (approvalPort) => {
+          const hubConfig: HostConfiguration = {
+            ...config(root),
+            approvalHub: { host: "SER8", nodeId: "node-ser8", url: `https://127.0.0.1:${approvalPort}/` },
+            approvalPort,
+            approvalTls: directTls,
+            applyMachines: ["SER8"],
+            crossHost: true,
+            host: "SER8",
+            machines: [{ host: "SER8", nodeId: "node-ser8" }],
+            port: 0,
+            tailscaleCommand
+          }
+          const server = await startHttpServer(hubConfig, fleet, assets, {
+            relay: { directory: relayDirectory, backends },
+            terminalConnector: unusedTerminal
+          })
+          return { approvalPort, server }
+        }),
+        (running) => Effect.promise(running.server.close)
+      )
+      if (server.serveUrl === null) return yield* Effect.die("serve URL missing")
+      const origin = `https://127.0.0.1:${approvalPort}`
+      return {
+        server,
+        serveUrl: server.serveUrl,
+        headers: { host: `127.0.0.1:${approvalPort}` },
+        origin,
+        deny: () => writeFileSync(identityMode, "denied"),
+        allow: () => writeFileSync(identityMode, "allowed")
+      }
+    })
+
+  const conversation = "product=herdr&kind=fleet&id=SER8"
+  const hubRef = { product: "herdr", kind: "fleet", id: "SER8" }
+
+  it.effect("refuses before Relay starts, and serves only the hub's conversation on the canonical listener", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-relay-routes-"))
+    const relayDirectory = join(root, "relay")
+    return Effect.gen(function*() {
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { force: true, recursive: true })))
+      const hub = yield* startHub(root, relayDirectory, scriptedBackends("Nothing waits."))
+      const get = (path: string) => Effect.promise(() => hubRequest(`${hub.serveUrl}${path}`, { headers: hub.headers }))
+
+      hub.deny()
+      expect((yield* get(`/v1/relay/session?${conversation}`)).status).toBe(403)
+      hub.allow()
+      const otherHost = yield* get("/v1/relay/session?product=herdr&kind=fleet&id=ALPHA")
+      expect(otherHost.status).toBe(400)
+      expect(JSON.parse(otherHost.body)).toMatchObject({ _tag: "RelayBadRequestError" })
+      const message = JSON.stringify({ ref: hubRef, text: "Hi", requestId: "r-1" })
+      const crossOrigin = yield* Effect.promise(() =>
+        hubRequest(`${hub.serveUrl}/v1/relay/messages`, {
+          method: "POST",
+          headers: { ...hub.headers, "content-type": "application/json", origin: "https://evil.example.test" },
+          body: message
+        })
+      )
+      expect(crossOrigin.status).toBe(403)
+      // Nothing above was allowed to use Relay, so its store was never opened.
+      expect(existsSync(relayDirectory)).toBe(false)
+
+      const session = yield* get(`/v1/relay/session?${conversation}`)
+      expect(session.status).toBe(200)
+      expect(
+        Schema.decodeUnknownSync(Schema.Struct({ tools: Schema.Array(Schema.Struct({ name: Schema.String })) }))(
+          JSON.parse(session.body)
+        ).tools.map(({ name }) => name)
+      ).toEqual(["list_agents", "list_pending_approvals", "get_job", "get_work_board"])
+      expect(existsSync(join(relayDirectory, "sessions.sqlite"))).toBe(true)
+
+      for (const url of [hub.server.url, hub.server.workUrl, hub.server.tailnetUrl, hub.server.approvalUrl]) {
+        if (url === null || url === hub.serveUrl) continue
+        const elsewhere = yield* Effect.promise(() =>
+          url.startsWith("https:")
+            ? hubRequest(`${url}/v1/relay/session?${conversation}`, { headers: hub.headers })
+            : fetch(`${url}/v1/relay/session?${conversation}`).then(async (response) => ({
+              status: response.status,
+              body: await response.text()
+            }))
+        )
+        expect(elsewhere.status, url).not.toBe(200)
+      }
+    }).pipe(Effect.scoped, provideNodeServices)
+  })
+
+  it.effect("answers a message on the event stream: the Snapshot, the person's message, then Relay's reply", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-relay-stream-"))
+    return Effect.gen(function*() {
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { force: true, recursive: true })))
+      const hub = yield* startHub(root, join(root, "relay"), scriptedBackends("Nothing waits for approval."))
+      let accepted: Promise<{ readonly status: number; readonly body: string }> | undefined
+      const frames = yield* Effect.promise(() =>
+        readFrames(
+          `${hub.serveUrl}/v1/relay/events?${conversation}`,
+          hub.headers,
+          (seen) => seen.some(({ _tag }) => _tag === "RunFinished"),
+          () => {
+            accepted = hubRequest(`${hub.serveUrl}/v1/relay/messages`, {
+              method: "POST",
+              headers: { ...hub.headers, "content-type": "application/json", origin: hub.origin },
+              body: JSON.stringify({ ref: hubRef, text: "What waits?", requestId: "r-1" })
+            })
+          }
+        )
+      )
+      const sent = accepted
+      if (sent === undefined) return yield* Effect.die("the message was never sent")
+      const answer = yield* Effect.promise(() => sent)
+      expect(answer.status).toBe(202)
+      expect(JSON.parse(answer.body)).toEqual({ runId: "r-1" })
+      const tags = frames.map(({ _tag }) => _tag)
+      expect(tags[0]).toBe("Snapshot")
+      expect(tags.indexOf("MessagePlaced")).toBeGreaterThan(0)
+      expect(tags.indexOf("MessagePlaced")).toBeLessThan(tags.indexOf("RunStarted"))
+      expect(tags).toContain("TextDelta")
+      expect(tags.at(-1)).toBe("RunFinished")
+    }).pipe(Effect.scoped, provideNodeServices)
+  })
+
+  it.effect("reads every pending job past the first page into Relay's answer", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-relay-pending-"))
+    const prompts: Array<string> = []
+    // Calls list_pending_approvals once, then answers; every prompt is kept so the tool result can be read.
+    const backends: RelayHubBackends = () =>
+      Effect.sync(() => {
+        const backend: RelayBackend = {
+          id: "claude-code",
+          name: "Claude Code",
+          model: makeDeterministicLanguageModel((request) => {
+            const prompt = JSON.stringify(request.prompt.content)
+            prompts.push(prompt)
+            const turn = /TOOL (RESULT|ERROR) \w+ \(/u.test(prompt)
+              ? { reply: "Twelve wait.", toolCalls: [] }
+              : { reply: "", toolCalls: [{ name: "list_pending_approvals", arguments: {} }] }
+            return { _tag: "response", parts: [{ type: "text", text: JSON.stringify(turn) }] }
+          }).layer,
+          probe: Effect.succeed("2.1.0 (Claude Code)"),
+          signInFix: "Run claude and sign in with /login."
+        }
+        const all: readonly [RelayBackend] = [backend]
+        return all
+      })
+    return Effect.gen(function*() {
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { force: true, recursive: true })))
+      const hub = yield* startHub(
+        root,
+        join(root, "relay"),
+        backends,
+        (store) =>
+          Effect.forEach(
+            Array.from({ length: 12 }, (_, index) => pendingRecord("SER8", index)),
+            (record) => store.put(record)
+          )
+      )
+      yield* Effect.promise(() =>
+        readFrames(
+          `${hub.serveUrl}/v1/relay/events?${conversation}`,
+          hub.headers,
+          (seen) => seen.some(({ _tag }) => _tag === "RunFinished"),
+          () => {
+            void hubRequest(`${hub.serveUrl}/v1/relay/messages`, {
+              method: "POST",
+              headers: { ...hub.headers, "content-type": "application/json", origin: hub.origin },
+              body: JSON.stringify({ ref: hubRef, text: "What waits?", requestId: "r-1" })
+            })
+          }
+        )
+      )
+      const result = prompts.find((prompt) => /TOOL RESULT list_pending_approvals \(/u.test(prompt)) ?? ""
+      // A page holds eight; all twelve reach the model.
+      for (let index = 0; index < 12; index += 1) {
+        expect(result).toContain(`ser8-job-${String(index).padStart(2, "0")}`)
+      }
+    }).pipe(Effect.scoped, provideNodeServices)
+  })
+
+  /** Another process holding the store's exclusive lock, as a second hostd's Relay does, until `release`. */
+  const holdStore = (directory: string) =>
+    Effect.acquireRelease(
+      Effect.promise(() =>
+        new Promise<{ readonly release: () => Promise<void> }>((resolve, reject) => {
+          mkdirSync(directory, { recursive: true, mode: 0o700 })
+          const child = spawn(process.execPath, [
+            "-e",
+            `const { DatabaseSync } = require("node:sqlite")
+const database = new DatabaseSync(${JSON.stringify(join(directory, "sessions.sqlite"))})
+database.exec("PRAGMA locking_mode = EXCLUSIVE; PRAGMA journal_mode = WAL; BEGIN IMMEDIATE; COMMIT")
+process.stdout.write("locked\\n")
+process.stdin.resume()
+process.stdin.on("end", () => process.exit(0))`
+          ], { stdio: ["pipe", "pipe", "inherit"] })
+          const exited = new Promise<void>((done) => child.once("exit", () => done()))
+          child.once("error", reject)
+          child.stdout.once("data", () =>
+            resolve({
+              release: () => {
+                child.stdin.end()
+                return exited
+              }
+            }))
+        })
+      ),
+      (holder) => Effect.promise(holder.release)
+    )
+
+  it.effect("says Relay is unavailable, with the fix, while another process holds its store, and starts once it is free", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-relay-locked-"))
+    const relayDirectory = join(root, "relay")
+    return Effect.gen(function*() {
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { force: true, recursive: true })))
+      const holder = yield* holdStore(relayDirectory)
+      const hub = yield* startHub(root, relayDirectory, scriptedBackends("Here."))
+      const session = () =>
+        Effect.promise(() => hubRequest(`${hub.serveUrl}/v1/relay/session?${conversation}`, { headers: hub.headers }))
+      const locked = yield* session()
+      expect(locked.status).toBe(503)
+      expect(JSON.parse(locked.body)).toMatchObject({
+        _tag: "RelayUnavailableError",
+        fix: expect.stringContaining("Another hostd owns Relay's sessions")
+      })
+      // The rest of the hub keeps working.
+      const manifest = yield* Effect.promise(() =>
+        hubRequest(`${hub.serveUrl}/manifest.webmanifest`, { headers: hub.headers })
+      )
+      expect(manifest.status).toBe(200)
+      // The other process stops: the next request starts Relay here, without a restart.
+      yield* Effect.promise(holder.release)
+      const freed = yield* session()
+      expect(freed.status, freed.body).toBe(200)
+    }).pipe(Effect.scoped, provideNodeServices)
+  })
+})
+
+describe("Relay mount", () => {
+  it.effect("starts once for concurrent and cancelled requests, and retries a start that failed", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-relay-mount-"))
+    const directory = join(root, "relay")
+    return Effect.gen(function*() {
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { force: true, recursive: true })))
+      // A file where the directory should be: the first start fails.
+      writeFileSync(directory, "")
+      let starts = 0
+      const release = yield* Deferred.make<void>()
+      const backends: RelayHubBackends = () =>
+        Effect.gen(function*() {
+          starts += 1
+          yield* Deferred.await(release)
+          const backend: RelayBackend = {
+            id: "claude-code",
+            name: "Claude Code",
+            model: makeDeterministicLanguageModel([]).layer,
+            probe: Effect.succeed("2.1.0 (Claude Code)"),
+            signInFix: "Run claude and sign in with /login."
+          }
+          const all: readonly [RelayBackend] = [backend]
+          return all
+        })
+      const mount = yield* makeRelayHubMount({ directory, instructions: "Test.", capabilities: () => [], backends })
+
+      const failed = yield* Effect.flip(mount.harness)
+      expect(failed.fix).toContain(directory)
+      expect(starts).toBe(0)
+
+      rmSync(directory)
+      const cancelled = yield* Effect.forkChild(mount.harness)
+      const waiting = yield* Effect.forkChild(mount.harness)
+      yield* Effect.yieldNow
+      yield* Fiber.interrupt(cancelled)
+      yield* Deferred.succeed(release, undefined)
+      const harness = yield* Fiber.join(waiting)
+      expect(yield* harness.backends).toHaveLength(1)
+      expect(yield* mount.harness).toBe(harness)
+      expect(starts).toBe(1)
+    }).pipe(Effect.scoped, provideNodeServices)
   })
 })

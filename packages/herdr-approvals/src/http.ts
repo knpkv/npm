@@ -163,6 +163,9 @@ import { generateVapidKeys, makePushSender } from "./push-sender.js"
 import { validatePushEndpoint } from "./push-subscription.js"
 import { type ApprovalNotificationBatch, makePushWorker } from "./push-worker.js"
 import { relayIconSvg } from "./relay-icon.js"
+import { hubCapabilities, HubReadFailed, type HubRelayReads, type PendingJob } from "./relay/capabilities.js"
+import { cliBackends, makeRelayHubMount, type RelayHubBackends, type RelayHubMount } from "./relay/mount.js"
+import { handleRelayRoute } from "./relay/routes.js"
 import { ApprovalAppStore } from "./store.js"
 import { workCheckpointPath, workSnapshotPath } from "./work-checkpoint.js"
 
@@ -236,6 +239,16 @@ const decodeJobPathSegment = Effect.fn("ApprovalHttp.decodeJobPathSegment")((seg
   )
 )
 
+/** What Relay is told about itself in the hub. */
+const relayInstructions = [
+  "You are Relay, the assistant inside the Herdr hub, where the person runs a fleet of coding agents.",
+  "You help them see what the fleet is doing, using only the tools listed: the agents, the jobs waiting for",
+  "approval, one job's state, and the work board.",
+  "You can only read. You can't approve or decline a job, prompt an agent or submit a job: say so, and point the",
+  "person at the Approvals tab for decisions. Answer from tool results, and name the host and job or agent each",
+  "answer is about."
+].join("\n")
+
 const peerPendingTimeoutMs = 1_500
 const terminalFrameMaxPayload = terminalFrameMaxEncodedBytes
 
@@ -304,8 +317,16 @@ type TlsCredentials = {
 
 type PushSender = ReturnType<typeof makePushSender>
 
+/** Relay in the hub: where its sessions live, and the backends its turns run on (the host's CLIs by default). */
+export type HubRelayOptions = {
+  readonly directory: string
+  readonly backends?: RelayHubBackends
+}
+
 export type HttpServerOptions = {
   readonly lanWork?: LanWorkListenerOptions
+  /** Mounts Relay at `/v1/relay/*` on the canonical listener. */
+  readonly relay?: HubRelayOptions
   readonly now?: () => number
   readonly pushSender?: PushSender
   readonly terminalConnector?: TerminalConnector
@@ -971,6 +992,27 @@ const fetchAllPeerPending = Effect.fn("HostHttp.fetchAllPeerPending")(
     return { approvals, host: peer.host, nextCursor: null } satisfies PendingApprovalSummary
   }
 )
+
+/** Pages of pending jobs Relay reads per host: eight records each, so up to 64 jobs a host. */
+const relayPendingPagesPerHost = 8
+
+/** Reads up to `maxPages` pages, following each page's cursor; says whether a host had more than that. */
+const readPages = Effect.fn("HostHttp.readPages")(function*<Item, Cursor, E, R>(
+  page: (
+    cursor: Cursor | null
+  ) => Effect.Effect<{ readonly items: ReadonlyArray<Item>; readonly next: Cursor | null }, E, R>,
+  maxPages: number
+) {
+  const items: Array<Item> = []
+  let cursor: Cursor | null = null
+  for (let read = 0; read < maxPages; read += 1) {
+    const current: { readonly items: ReadonlyArray<Item>; readonly next: Cursor | null } = yield* page(cursor)
+    for (const item of current.items) items.push(item)
+    cursor = current.next
+    if (cursor === null) return { items, more: false }
+  }
+  return { items, more: true }
+})
 
 const pendingFailureReason = (
   error: PeerPendingError
@@ -1646,6 +1688,124 @@ export const startHttpServer = async (
     const workStore = await httpRuntime.runPromise(WorkStore.open(statePath))
     finalizers.unshift(() => Promise.resolve().then(() => workStore.close()))
     const work = await httpRuntime.runPromise(makeWorkService(workStore))
+    // Relay's harness lives in this scope; closing the server closes it (and its store) before the stores
+    // its capabilities read.
+    const relayScope = await httpRuntime.runPromise(Scope.make())
+    finalizers.unshift(() => httpRuntime.runPromise(Scope.close(relayScope, Exit.void)))
+    const relayOptions = options.relay
+    const relayMount: RelayHubMount | null = relayOptions === undefined
+      ? null
+      : await httpRuntime.runPromise(
+        Effect.gen(function*() {
+          const remote = yield* Effect.context<HttpClient.HttpClient | Tailscale>()
+          /** A read failure as the model sees it; the cause goes to hostd's log. */
+          const asRead = (what: string) => <A, X>(effect: Effect.Effect<A, X, HttpClient.HttpClient | Tailscale>) =>
+            effect.pipe(
+              Effect.tapError((cause) => Effect.logWarning(`Relay could not read ${what}`, cause)),
+              Effect.mapError(() =>
+                new HubReadFailed({
+                  message: `The hub could not read ${what}.`,
+                  fix: "Retry; if it repeats, check hostd's log on the hub."
+                })
+              ),
+              Effect.provide(remote)
+            )
+          const reads: HubRelayReads = {
+            host: config.host,
+            agents: asRead("the fleet's agents")(
+              Effect.gen(function*() {
+                const peers = yield* fleetPeers(config)
+                return yield* fleetConnectAgents(
+                  localConnectAgents(config, service, activityStore, relationshipStore, now()).pipe(
+                    Effect.provideService(Crypto.Crypto, cryptoService)
+                  ),
+                  peers.map((peer) => ({
+                    agentsUrl: peer.connectAgentsUrl,
+                    host: peer.host,
+                    online: peer.online,
+                    terminalUrl: peer.terminalUrl
+                  }))
+                )
+              })
+            ),
+            pendingJobs: asRead("the pending approvals")(
+              Effect.gen(function*() {
+                const local = yield* readPages(
+                  (cursor: PendingApprovalCursor | null) =>
+                    Effect.map(service.pendingApprovalPage(cursor), (page) => ({
+                      items: page.records.map(sanitizeJobRecord),
+                      next: page.nextCursor
+                    })),
+                  relayPendingPagesPerHost
+                )
+                const peers = yield* fleetPeers(config)
+                const remote = yield* Effect.forEach(
+                  peers,
+                  (peer) =>
+                    Effect.result(
+                      readPages(
+                        (cursor: typeof PendingApprovalCursor.Type | null) =>
+                          Effect.map(fetchPeerPending(peer, cursor), (page) => ({
+                            items: page.approvals.map(sanitizePendingApproval),
+                            next: page.nextCursor
+                          })),
+                        relayPendingPagesPerHost
+                      )
+                    ).pipe(Effect.map((result) => ({ peer, result }))),
+                  { concurrency: 4 }
+                )
+                const jobs: Array<PendingJob> = [
+                  ...local.items.map((record) => ({
+                    host: config.host,
+                    jobId: record.id,
+                    kind: record.payload.kind,
+                    actor: record.actor,
+                    createdAt: record.createdAt,
+                    expiresAt: record.approvalExpiresAt ?? null
+                  })),
+                  ...remote.flatMap(({ peer, result }) =>
+                    Result.isSuccess(result)
+                      ? result.success.items.map((approval) => ({
+                        host: peer.host,
+                        jobId: approval.id,
+                        kind: approval.payload.kind,
+                        actor: approval.actor,
+                        createdAt: approval.createdAt,
+                        expiresAt: approval.approvalExpiresAt
+                      }))
+                      : []
+                  )
+                ]
+                return {
+                  jobs,
+                  more: local.more || remote.some(({ result }) => Result.isSuccess(result) && result.success.more),
+                  unreachable: remote.flatMap(({ peer, result }) => (Result.isFailure(result) ? [peer.host] : []))
+                }
+              })
+            ),
+            localJob: (jobId) =>
+              asRead(`job ${jobId}`)(
+                service.get(jobId).pipe(
+                  Effect.map(sanitizeJobRecord),
+                  Effect.catchTag("FleetJobNotFoundError", () => Effect.succeed(null))
+                )
+              ),
+            work: asRead("the work board")(Effect.map(work.snapshots(), ({ now }) => now))
+          }
+          const capabilities = hubCapabilities(reads)
+          return yield* makeRelayHubMount({
+            directory: relayOptions.directory,
+            instructions: relayInstructions,
+            backends: relayOptions.backends ?? cliBackends,
+            capabilities: (relay) => [
+              relay.register(capabilities.listAgents),
+              relay.register(capabilities.listPendingApprovals),
+              relay.register(capabilities.getJob),
+              relay.register(capabilities.getWorkBoard)
+            ]
+          })
+        }).pipe(Effect.provideService(Scope.Scope, relayScope))
+      )
     const now = options.now ?? (() => httpRuntime.runSync(Clock.currentTimeMillis))
     const approvalProofSessions = new Map<string, ApprovalProofSession>()
     let pendingApprovalProofSnapshot: {
@@ -2633,6 +2793,25 @@ export const startHttpServer = async (
             login: header(request, "tailscale-user-login"),
             remoteAddress: request.socket.remoteAddress
           })
+
+          if (
+            mode === "serve" &&
+            relayMount !== null &&
+            await handleRelayRoute<ApiError, HttpClient.HttpClient | Tailscale>(request, response, url, {
+              host: config.host,
+              mount: relayMount,
+              authorize: authorized,
+              sameOrigin: sameOrigin(request, expectedOrigin()),
+              readJson: (schema) => readJson(request, schema),
+              refuse: (target, error) => {
+                const mapped = apiError(error)
+                json(target, mapped.status, mapped.body)
+              },
+              runtime: httpRuntime
+            })
+          ) {
+            return
+          }
 
           const approvalSurface = mode === "approval" || mode === "serve"
           const dashboard = Effect.fn("HostHttp.dashboard")(function*(request: IncomingMessage) {
