@@ -1,14 +1,9 @@
-import {
-  AgentStateLabel,
-  agentBucketLabel,
-  agentBuckets,
-  type AgentBucket,
-  agentStatePresentation
-} from "./agent-state.js"
-import { Hero, HeroWord } from "@knpkv/rly/patterns"
+import { agentBucketLabel, agentBuckets, type AgentBucket, agentStatePresentation } from "./agent-state.js"
+import { HeroWord } from "@knpkv/rly/patterns"
+import { Icon } from "@knpkv/rly/foundations"
 import { Text } from "@knpkv/rly/primitives"
 import { Schema } from "effect"
-import { useId, useState, type ReactNode, type Ref } from "react"
+import { Fragment, useId, useState, type ReactNode, type Ref } from "react"
 import { Creature } from "./creature.js"
 import type { ConnectAgent, ConnectPeerFailure } from "./model.js"
 import {
@@ -62,6 +57,11 @@ class ConnectCalendarFormatError extends Schema.TaggedError<ConnectCalendarForma
 
 export const connectAgentKey = (agent: ConnectAgent): string => `${agent.host}:${agent.id}`
 
+/** A bad lineage edge still names an agent; a repeated own identity cannot choose a unique terminal. */
+export const connectAgentIdentityAmbiguous = (agents: ReadonlyArray<ConnectAgent>, agent: ConnectAgent): boolean =>
+  agents.filter((candidate) => candidate.host.toLowerCase() === agent.host.toLowerCase() && candidate.id === agent.id)
+    .length > 1
+
 export const connectAgentHosts = (agents: ReadonlyArray<ConnectAgent>): ReadonlyArray<string> =>
   [...new Set(agents.map(({ host }) => host))].toSorted(naturalOrder.compare)
 
@@ -98,6 +98,7 @@ export const connectLineageRows = (agents: ReadonlyArray<ConnectAgent>): Readonl
         const foreign = agents.some((candidate) => candidate.id === current.relationship?.parentAgentId)
         return { agent, depth, issue: foreign ? "cross_host" : "unknown_parent" }
       }
+      if ((counts.get(parentKey) ?? 0) > 1) return { agent, depth: 0, issue: "ambiguous" }
       if (path.has(parentKey)) return { agent, depth, issue: "cycle" }
       path.add(parentKey)
       depth += 1
@@ -133,7 +134,7 @@ const shortAgentId = (id: string): string => (id.length > 14 ? `${id.slice(0, 14
 
 /**
  * How an agent relates to its parent, naming the parent by its name when the directory lists it
- * (`names` maps agent id to name); an unlisted parent is shown by a short id, never the full hash.
+ * (`names` maps host:id to name); an unlisted parent is shown by a short id, never the full hash.
  */
 const relationLabel = (
   agent: ConnectAgent,
@@ -141,24 +142,122 @@ const relationLabel = (
   names: ReadonlyMap<string, string>
 ): ReactNode => {
   const parentAgentId = agent.relationship?.parentAgentId
-  const parentName = parentAgentId === undefined ? undefined : (names.get(parentAgentId) ?? shortAgentId(parentAgentId))
+  const parentName =
+    parentAgentId === undefined
+      ? undefined
+      : (names.get(`${agent.host.toLowerCase()}:${parentAgentId}`) ?? shortAgentId(parentAgentId))
   const parent = parentName === undefined ? undefined : <span className="connect-token">{parentName}</span>
-  if (issue === "unknown_parent" || issue === "cross_host") {
-    if (parent === undefined) return "Malformed relationship"
-    return (
-      <>
-        {issue === "unknown_parent" ? "Unknown parent" : "Cross-host parent"} {parent}
-      </>
-    )
-  }
-  if (issue === "cycle") return "Cyclic relationship"
-  if (issue === "ambiguous") return "Ambiguous ownership"
-  if (agent.relationship === undefined || parent === undefined) return "Root agent"
+  if (issue !== null) return "Relationship unresolved"
+  if (agent.relationship === undefined || parent === undefined) return "Primary"
   return (
     <>
-      {agent.relationship.relation} for {parent}
+      {connectRelationLabel(agent.relationship.relation)} of {parent}
     </>
   )
+}
+
+/** A recorded lineage problem, distinct from metadata and never a claim that its edge is valid. */
+const lineageIssueLabel = (
+  agent: ConnectAgent,
+  issue: ConnectLineageIssue,
+  agents: ReadonlyArray<ConnectAgent>
+): ReactNode => {
+  if (issue === "cycle") return "Cyclic relationship"
+  if (issue === "ambiguous") return "Ambiguous ownership"
+  const parentId = agent.relationship?.parentAgentId
+  if (parentId === undefined) return "Malformed relationship"
+  const parents = agents.filter((candidate) => candidate.id === parentId)
+  const parent = parents.length === 1 ? parents[0] : undefined
+  return (
+    <>
+      {issue === "unknown_parent" ? "Unknown parent" : "Cross-host parent"}{" "}
+      <span className="connect-token">{parent?.name ?? shortAgentId(parentId)}</span>
+      {issue === "cross_host" && parent !== undefined ? ` on ${parent.host}` : null}
+    </>
+  )
+}
+
+/** Forced colours replace the creature’s colour cues with the shared static state glyph. */
+export const AgentStateGlyph = ({ state }: { readonly state: string }) => (
+  <span aria-hidden="true" className="connect-creature-state" data-tone={agentStatePresentation(state).tone}>
+    <Icon decorative name={agentStatePresentation(state).icon} size="small" />
+  </span>
+)
+
+/** Words for recorded relationships, shared by rows and the stage. */
+export const connectRelationLabel = (relation: NonNullable<ConnectAgent["relationship"]>["relation"]): string =>
+  relation === "pair" ? "Pair partner" : relation === "review" ? "Reviewer" : "Worker"
+
+export interface ConnectAgentFamily {
+  readonly key: string
+  readonly rows: ReadonlyArray<ConnectLineageRow>
+  readonly missingParent?: { readonly host: string; readonly id: string }
+}
+
+/** Keeps validated ancestry together, with families needing attention first. Invalid edges stay standalone. */
+export const connectAgentFamilies = (agents: ReadonlyArray<ConnectAgent>): ReadonlyArray<ConnectAgentFamily> => {
+  const families: Array<{ key: string; rows: Array<ConnectLineageRow>; missingParent?: { host: string; id: string } }> =
+    []
+  const occurrences = new Map<string, number>()
+  for (const row of connectLineageRows(agents)) {
+    // Only direct siblings of an absent same-host parent share this group. Invalid known edges never attach.
+    const parentId = row.agent.relationship?.parentAgentId
+    if (row.issue === "unknown_parent" && row.depth === 0 && parentId !== undefined) {
+      const key = `missing:${row.agent.host.toLowerCase()}:${parentId}`
+      const group = families.find((family) => family.key === key)
+      if (group === undefined)
+        families.push({ key, rows: [row], missingParent: { host: row.agent.host, id: parentId } })
+      else group.rows.push(row)
+      continue
+    }
+    const last = families.at(-1)
+    if (row.depth > 0 && row.issue === null && last !== undefined) {
+      last.rows.push(row)
+    } else {
+      const key = connectAgentKey(row.agent)
+      const occurrence = occurrences.get(key) ?? 0
+      occurrences.set(key, occurrence + 1)
+      families.push({ key: `${key}:${String(occurrence)}`, rows: [row] })
+    }
+  }
+  const needsYou = (family: ConnectAgentFamily): boolean =>
+    family.missingParent !== undefined ||
+    family.rows.some(({ agent }) => agentStatePresentation(agent.state).bucket === "needs-you")
+  return families.toSorted(
+    (left, right) =>
+      Number(right.missingParent !== undefined) - Number(left.missingParent !== undefined) ||
+      Number(needsYou(right)) - Number(needsYou(left)) ||
+      naturalOrder.compare(left.key, right.key)
+  )
+}
+
+/** A filtered child brings its ancestors as context; unrelated siblings do not become matches. */
+const filterFamily = (family: ConnectAgentFamily, filters: AgentFilters) => {
+  const matches = new Set(
+    family.rows
+      .filter(
+        ({ agent }) =>
+          matchesQuery(agent, filters.query) &&
+          (filters.host === null || filters.host === agent.host) &&
+          (filters.activity === "all" || agentStatePresentation(agent.state).bucket === filters.activity)
+      )
+      .map(({ agent }) => connectAgentKey(agent))
+  )
+  const included = new Set(matches)
+  for (const row of family.rows) {
+    if (!matches.has(connectAgentKey(row.agent))) continue
+    let current = row.agent
+    while (current.relationship !== undefined && row.issue === null) {
+      const parent = family.rows.find(
+        ({ agent }) =>
+          agent.host.toLowerCase() === current.host.toLowerCase() && agent.id === current.relationship?.parentAgentId
+      )?.agent
+      if (parent === undefined) break
+      included.add(connectAgentKey(parent))
+      current = parent
+    }
+  }
+  return { ...family, matches, rows: family.rows.filter(({ agent }) => included.has(connectAgentKey(agent))) }
 }
 
 interface CalendarParts {
@@ -255,6 +354,8 @@ type AgentDirectoryProps = {
   readonly onSelect: (agent: ConnectAgent) => void
   readonly now?: number
   readonly query: string
+  readonly search?: ReactNode
+  readonly onClearQuery?: () => void
   /** The directory couldn't refresh: its agents show their last known state, without life. */
   readonly stale?: boolean
   /** Agents that started needing you on this poll, by `connectAgentKey`. */
@@ -299,9 +400,15 @@ const failureReasonLabel = (reason: ConnectPeerFailure["reason"]): string => {
 }
 
 /** One line naming the hosts that didn't answer, each with its cause, and what that means for the list. */
-export const silentHostsSentence = (failures: ReadonlyArray<ConnectPeerFailure>): string | null => {
+export const silentHostsSentence = (
+  failures: ReadonlyArray<ConnectPeerFailure>,
+  retainedHosts: ReadonlyArray<string> = []
+): string | null => {
   if (failures.length === 0) return null
   const named = failures.map(({ host, reason }) => `${host} (${failureReasonLabel(reason)})`).join(", ")
+  if (failures.every(({ host }) => retainedHosts.includes(host))) {
+    return `${named} didn't answer; ${failures.length === 1 ? "its readings are" : "their readings are"} old.`
+  }
   return failures.length === 1
     ? `${named} didn't answer; its agents aren't listed.`
     : `${named} didn't answer; their agents aren't listed.`
@@ -310,8 +417,8 @@ export const silentHostsSentence = (failures: ReadonlyArray<ConnectPeerFailure>)
 const plural = (count: number, one: string, many: string): string => `${String(count)} ${count === 1 ? one : many}`
 
 /**
- * The Connect directory's one sentence: how many agents are listed, how many are working, and how
- * many need you. Hosts that didn't answer are named once, by the line above the list, not here.
+ * The title's attention count; total agents and families belong to the list below.
+ * Hosts that didn't answer are named once above the list. The separator is decorative CSS.
  * `agents` is null while the first list loads or when it failed.
  */
 export const ConnectSummary = ({
@@ -323,35 +430,25 @@ export const ConnectSummary = ({
 }) => {
   const needAttention =
     agents?.filter((agent) => agentStatePresentation(agent.state).bucket === "needs-you").length ?? 0
-  const working = agents?.filter((agent) => agentStatePresentation(agent.state).bucket === "working").length ?? 0
-  const total = agents?.length ?? 0
   return (
-    <>
-      <Hero
-        fact={
-          agents === null ? (
-            unavailable ? (
-              "The fleet directory didn't answer"
-            ) : (
-              "Loading the fleet…"
-            )
-          ) : (
-            <>
-              {plural(total, "agent", "agents")}, {String(working)} working
-              {needAttention === 0 ? null : (
-                <>
-                  ,{" "}
-                  <HeroWord tone="held">{`${String(needAttention)} need${needAttention === 1 ? "s" : ""} you`}</HeroWord>
-                </>
-              )}
-            </>
-          )
-        }
-        label="Connect summary"
-      />
-      {/* Connect's own caption, so narrow screens can drop it without reaching into the Hero's markup. */}
-      <p className="connect-intro-caption">Choose a worker, reviewer, or coordinator to open its exact terminal.</p>
-    </>
+    <span
+      aria-label="Connect summary"
+      className="connect-attention-count"
+      data-attention={agents !== null && needAttention > 0 ? "" : undefined}
+    >
+      {agents === null ? (
+        unavailable ? (
+          "The fleet directory didn't answer"
+        ) : (
+          "Loading the fleet…"
+        )
+      ) : needAttention === 0 ? null : (
+        <>
+          {" "}
+          <HeroWord tone="held">{`${String(needAttention)} need${needAttention === 1 ? "s" : ""} you`}</HeroWord>
+        </>
+      )}
+    </span>
   )
 }
 
@@ -361,9 +458,11 @@ export const AgentDirectory = ({
   arrivals = new Set(),
   hostFilter,
   onActivityFilter,
+  onClearQuery,
   onHostFilter,
   onSelect,
   query,
+  search,
   selectedKey,
   silentHosts = [],
   stale = false,
@@ -371,23 +470,51 @@ export const AgentDirectory = ({
 }: AgentDirectoryProps) => {
   const hostFilterLabelId = useId()
   const statusFilterLabelId = useId()
+  const filtersId = useId()
+  const [filtersOpen, setFiltersOpen] = useState(false)
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set())
   const hosts = connectAgentHosts(agents)
-  const names: ReadonlyMap<string, string> = new Map(agents.map((entry) => [String(entry.id), entry.name]))
-  // With one host the filter already names it; rows repeat it only when it tells agents apart.
-  const severalHosts = hosts.length > 1
+  const names = new Map(agents.map((entry) => [`${entry.host.toLowerCase()}:${entry.id}`, entry.name]))
   const counts = agentBucketCounts(agents, hostFilter)
-  const occurrences = new Map<string, number>()
-  const rows = connectLineageRows(agents).filter(({ agent }) => {
-    const activity = agentStatePresentation(agent.state).bucket
-    return (
-      matchesQuery(agent, query) &&
-      (hostFilter === null || agent.host === hostFilter) &&
-      (activityFilter === "all" || activity === activityFilter)
-    )
-  })
+  const filterCount = Number(hostFilter !== null) + Number(activityFilter !== "all")
+  const scoped = filterCount > 0 || query.trim().length > 0
+  const families = connectAgentFamilies(agents)
+    .map((family) => filterFamily(family, { activity: activityFilter, host: hostFilter, query }))
+    .filter((family) => family.matches.size > 0)
+  const matchingCount = families.reduce((total, family) => total + family.matches.size, 0)
+  const clear = (): void => {
+    onHostFilter(null)
+    onActivityFilter("all")
+    onClearQuery?.()
+  }
   return (
     <>
-      <div className="connect-filter-row">
+      <div className="connect-directory-toolbar">
+        {search}
+        <button
+          aria-controls={filtersId}
+          aria-expanded={filtersOpen}
+          className="connect-filters-toggle"
+          onClick={() => setFiltersOpen(!filtersOpen)}
+          type="button"
+        >
+          Filters{filterCount === 0 ? "" : ` ${String(filterCount)}`}
+        </button>
+      </div>
+      <p className="connect-filter-summary">
+        <span>{hostFilter ?? "All hosts"}</span>
+        <span>{activityFilter === "all" ? "All states" : activityFilterLabel(activityFilter)}</span>
+        {scoped ? (
+          <>
+            {" "}
+            <span>{plural(matchingCount, "matching agent", "matching agents")}</span>{" "}
+            <button className="connect-filters-clear" onClick={clear} type="button">
+              Clear filters
+            </button>
+          </>
+        ) : null}
+      </p>
+      <div className="connect-filter-row" hidden={!filtersOpen} id={filtersId}>
         <div className="connect-filter-set">
           <span className="connect-filter-label" id={hostFilterLabelId}>
             Host
@@ -397,11 +524,16 @@ export const AgentDirectory = ({
               All hosts
             </button>
             {hosts.map((host) => (
-              <button aria-pressed={hostFilter === host} key={host} onClick={() => onHostFilter(host)} type="button">
+              <button
+                aria-pressed={hostFilter === host}
+                key={host}
+                onClick={() => onHostFilter(host)}
+                title={host}
+                type="button"
+              >
                 {host}
               </button>
             ))}
-            {/* A host that didn't answer has no agents to filter to; it is named, not offered. */}
             {silentHosts
               .filter((host) => !hosts.includes(host))
               .map((host) => (
@@ -432,70 +564,163 @@ export const AgentDirectory = ({
         </div>
       </div>
       <div className="connect-agent-tree">
-        {rows.length === 0 ? <Text tone="secondary">No agents match “{query.trim()}”.</Text> : null}
-        {rows.length === 0 ? null : (
-          <div aria-hidden="true" className="connect-list-head">
-            <span />
-            <span>State</span>
-            <span>Agent</span>
-            <span>Active</span>
+        {families.length === 0 ? (
+          <div className="connect-empty">
+            <Text tone="secondary">No agents match “{query.trim()}”.</Text>
+            <button className="connect-filters-clear" onClick={clear} type="button">
+              Clear filters
+            </button>
           </div>
+        ) : (
+          <p className="connect-family-count">
+            {plural(matchingCount, "agent", "agents")} in {plural(families.length, "family", "families")}
+          </p>
         )}
         <div className="connect-agent-list">
-          {/* Counted while the rows render, so each row's key is its agent plus the times it came before. */}
-          {rows.map(({ agent, depth, issue }) => {
-            const key = connectAgentKey(agent)
-            // Keyed by agent and its occurrence, never its place: a poll that re-sorts the list keeps every row,
-            // so its creature's breath and blink carry on. An ambiguous agent listed twice gets 0 and 1.
-            const occurrence = occurrences.get(key) ?? 0
-            occurrences.set(key, occurrence + 1)
-            const activity = agentStatePresentation(agent.state).bucket
+          {families.map((family) => {
+            const shown = new Set(
+              family.rows
+                .filter(
+                  (row, index) =>
+                    expanded.has(family.key) ||
+                    index <= 2 ||
+                    row.depth > 2 ||
+                    scoped ||
+                    agentStatePresentation(row.agent.state).bucket === "needs-you"
+                )
+                .map(({ agent }) => connectAgentKey(agent))
+            )
+            // A visible descendant keeps the ancestry that makes its place in this family readable.
+            for (const row of family.rows) {
+              if (!shown.has(connectAgentKey(row.agent))) continue
+              let current = row.agent
+              while (current.relationship !== undefined && row.issue === null) {
+                const parent = family.rows.find(({ agent }) => agent.id === current.relationship?.parentAgentId)?.agent
+                if (parent === undefined) break
+                shown.add(connectAgentKey(parent))
+                current = parent
+              }
+            }
+            const hiddenCount = family.rows.filter(({ agent }) => !shown.has(connectAgentKey(agent))).length
             return (
-              <button
-                aria-pressed={selectedKey === key}
-                className="connect-agent"
-                data-activity={activity}
-                data-agent-key={key}
-                data-lineage-issue={issue ?? "none"}
-                data-selected={selectedKey === key}
-                key={`${key}:${String(occurrence)}`}
-                onClick={() => onSelect(agent)}
+              <section
+                aria-label={`${family.rows[0]?.agent.name ?? "Agent"} family`}
+                className="connect-family"
+                key={family.key}
               >
-                {/* Its character: decorative, since the state's word beside it says the same. */}
-                <Creature
-                  arrived={arrivals.has(key)}
-                  host={agent.host}
-                  id={String(agent.id)}
-                  size="row"
-                  stale={stale}
-                  state={agent.state}
-                />
-                {/* The state leads in a fixed track, so names line up whatever the state's word. */}
-                <span className="connect-agent-state" data-activity={activity}>
-                  <AgentStateLabel state={agent.state} />
-                </span>
-                {/* Lineage indents the name, not the state, so the state column stays straight. */}
-                <span className="connect-agent-copy" style={{ paddingInlineStart: `${String(depth * 20)}px` }}>
-                  <Text as="strong" variant="label">
-                    {agent.name}
-                  </Text>
-                  <Text as="small" variant="meta" tone="secondary">
-                    {/* Host and work names are identifiers: each moves to the next line whole rather than splitting at a hyphen. */}
-                    {severalHosts ? (
-                      <>
-                        <span className="connect-token">{agent.host}</span>,{" "}
-                      </>
-                    ) : null}
-                    {relationLabel(agent, issue, names)}, <span className="connect-token">{agent.work}</span>
-                  </Text>
-                </span>
-                <time dateTime={new Date(agent.lastActivityAt).toISOString()}>
-                  <span className="connect-visually-hidden">, last active at </span>
-                  {timeLabel(agent.lastActivityAt, timeZone)}
-                </time>
-                {/* The row's own content names it; the action is added, never put in its place. */}
-                <span className="connect-visually-hidden">, open terminal</span>
-              </button>
+                {family.missingParent === undefined ? null : (
+                  <div className="connect-family-missing">
+                    <span>
+                      <Icon decorative name="alert" size="small" /> Primary not listed
+                    </span>
+                    <p>
+                      {shortAgentId(family.missingParent.id)} on {family.missingParent.host} isn't in the directory; its
+                      children are shown here.
+                    </p>
+                  </div>
+                )}
+                {family.rows
+                  .filter(({ agent }) => shown.has(connectAgentKey(agent)))
+                  .map(({ agent, depth, issue }) => {
+                    const key = connectAgentKey(agent)
+                    const activity = agentStatePresentation(agent.state).bucket
+                    const context = !family.matches.has(key)
+                    const ambiguousIdentity = connectAgentIdentityAmbiguous(agents, agent)
+                    return (
+                      <Fragment key={key}>
+                        <button
+                          aria-pressed={selectedKey === key}
+                          className="connect-agent"
+                          data-activity={activity}
+                          data-agent-key={key}
+                          data-context={context ? "true" : undefined}
+                          data-depth={String(
+                            family.missingParent !== undefined ? 1 : issue === null ? Math.min(depth, 2) : 0
+                          )}
+                          data-lineage-issue={issue ?? "none"}
+                          data-selected={selectedKey === key}
+                          disabled={ambiguousIdentity}
+                          key={key}
+                          onClick={() => onSelect(agent)}
+                          type="button"
+                        >
+                          <Creature
+                            arrived={arrivals.has(key)}
+                            host={agent.host}
+                            id={String(agent.id)}
+                            size="row"
+                            stale={stale || silentHosts.includes(agent.host)}
+                            state={agent.state}
+                          />
+                          <AgentStateGlyph state={agent.state} />
+                          <span className="connect-visually-hidden">{agentStatePresentation(agent.state).word}, </span>
+                          <span className="connect-agent-copy">
+                            <Text as="strong" variant="label">
+                              {agent.name}
+                            </Text>
+                            <span className="connect-agent-work">{agent.work}</span>
+                            <Text as="small" variant="meta" tone="secondary">
+                              {relationLabel(agent, family.missingParent === undefined ? issue : null, names)}
+                              {hosts.length > 1 ? (
+                                <>
+                                  {agent.relationship === undefined ? (
+                                    " on "
+                                  ) : (
+                                    <span aria-hidden="true" className="connect-row-separator" />
+                                  )}
+                                  <span className="connect-token">{agent.host}</span>
+                                </>
+                              ) : null}
+                              <span aria-hidden="true" className="connect-row-separator" />
+                              <time dateTime={new Date(agent.lastActivityAt).toISOString()}>
+                                <span className="connect-visually-hidden"> last active at </span>
+                                {timeLabel(agent.lastActivityAt, timeZone)}
+                              </time>
+                              {context ? ", context" : ""}
+                              {stale || silentHosts.includes(agent.host) ? ", Old reading" : ""}
+                            </Text>
+                            {issue === null && !ambiguousIdentity ? null : (
+                              <span className="connect-agent-issue" data-tone="caution">
+                                <Icon decorative name="alert" size="small" />
+                                <span>
+                                  {issue === null ? null : lineageIssueLabel(agent, issue, agents)}
+                                  {ambiguousIdentity
+                                    ? ". Can't open: this host lists the same agent identity more than once."
+                                    : ""}
+                                </span>
+                              </span>
+                            )}
+                          </span>
+                          <span className="connect-visually-hidden">, open stage</span>
+                        </button>
+                        {depth <= 2 || issue !== null ? null : (
+                          <button
+                            className="connect-deep-parent"
+                            type="button"
+                            onClick={() => {
+                              const parent = family.rows.find(
+                                ({ agent: candidate }) => candidate.id === agent.relationship?.parentAgentId
+                              )?.agent
+                              if (parent !== undefined) onSelect(parent)
+                            }}
+                          >
+                            Nested deeper: open{" "}
+                            {names.get(`${agent.host.toLowerCase()}:${agent.relationship?.parentAgentId}`)} →
+                          </button>
+                        )}
+                      </Fragment>
+                    )
+                  })}
+                {hiddenCount === 0 ? null : (
+                  <button
+                    className="connect-family-more"
+                    onClick={() => setExpanded(new Set([...expanded, family.key]))}
+                    type="button"
+                  >
+                    Show {String(hiddenCount)} more
+                  </button>
+                )}
+              </section>
             )
           })}
         </div>

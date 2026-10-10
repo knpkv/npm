@@ -229,24 +229,6 @@
     font-size: var(--rly-type-meta-size);
   }
 
-  .connect-intro-caption {
-    color: var(--rly-color-text-2);
-    margin: var(--rly-space-0);
-  }
-
-  /* On a narrow screen the summary takes up to three lines once the fleet loads; reserve them so the list does not jump. */
-  @media (max-width: 700px) {
-    .connect-embedded-intro [data-rly-hero] {
-      /* Three lines of the Hero's heading-size sentence (its section-title type), measured from the token. */
-      min-block-size: calc(3 * var(--rly-type-section-title-line-height));
-    }
-
-    /* Phones keep the sentence and drop its caption, as the directory needs the room. */
-    .connect-intro-caption {
-      display: none;
-    }
-  }
-
   /*
    * In the hub, until the first directory list arrives (failed attempts and their retries included),
    * hold a screen of space: the list that arrives is
@@ -319,7 +301,7 @@
   .connect-filter-row {
     display: grid;
     gap: var(--rly-space-8);
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: minmax(0, 1fr);
     margin-block-end: var(--rly-space-20);
   }
 
@@ -418,9 +400,7 @@
     font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
       var(--rly-type-meta-font);
     gap: var(--rly-space-12);
-    grid-template-columns: var(--connect-creature-track) var(--connect-state-track) minmax(0, 1fr) var(
-        --connect-time-track
-      );
+    grid-template-columns: var(--connect-creature-track) minmax(0, 1fr) var(--connect-time-track);
     padding: 0 var(--rly-space-12) var(--rly-space-6);
   }
 
@@ -455,9 +435,7 @@
     cursor: pointer;
     display: grid;
     font: inherit;
-    grid-template-columns: var(--connect-creature-track) var(--connect-state-track) minmax(0, 1fr) var(
-        --connect-time-track
-      );
+    grid-template-columns: var(--connect-creature-track) minmax(0, 1fr);
     gap: var(--rly-space-12);
     min-inline-size: 0;
     padding: var(--rly-space-12);
@@ -490,6 +468,15 @@
     background: color-mix(in srgb, var(--rly-color-agent) 12%, var(--rly-color-surface-2));
     outline: 1px solid var(--rly-color-border-2);
     outline-offset: -1px;
+  }
+
+  .connect-attention-count[data-attention]::before {
+    content: " ·";
+    white-space: pre;
+  }
+  .connect-row-separator::before {
+    content: " · ";
+    white-space: pre;
   }
 
   .connect-agent time {
@@ -1140,7 +1127,7 @@
    */
   @media (max-width: 640px) {
     .connect-agent {
-      grid-template-columns: var(--connect-creature-track) minmax(0, 1fr) auto;
+      grid-template-columns: var(--connect-creature-track) minmax(0, 1fr);
       row-gap: var(--rly-space-4);
     }
 
@@ -1151,7 +1138,7 @@
 
     .connect-agent-copy {
       grid-column: 2 / -1;
-      grid-row: 2;
+      grid-row: 1;
     }
 
     .connect-list-head {
@@ -1162,10 +1149,7 @@
   /* Phones give the options the whole row, so the status words fit one line; the groups keep their names
      through aria-labelledby. */
   @media (max-width: 640px) {
-    /*
-     * The status words keep to one line whatever their counts, scrolling sideways rather than wrapping; host
-     * names still wrap, since a long one must stay readable whole.
-     */
+    /* Filter options scroll within the disclosure, never widening or wrapping the page. */
     .connect-status-filter {
       flex-wrap: nowrap;
       overflow-x: auto;
@@ -1768,15 +1752,654 @@
     }
   }
 
-  /* The stage: the character large on a deep field in its own hues, its work as what it is saying. */
+  /* Families carry the outline; individual rows keep their own state and a single reading action. */
+  .connect-family {
+    background: var(--rly-color-surface-1);
+    border-radius: var(--rly-space-16);
+    min-inline-size: 0;
+    outline: 1px solid var(--rly-color-border-1);
+    outline-offset: -1px;
+  }
+
+  .connect-family .connect-agent {
+    inline-size: 100%;
+    min-block-size: 44px;
+  }
+
+  .connect-family .connect-agent:last-child {
+    border-block-end: 0;
+  }
+
+  .connect-agent[data-depth="1"],
+  .connect-agent[data-depth="2"] {
+    padding-inline-start: var(--rly-space-24);
+  }
+
+  .connect-agent[data-depth="2"] {
+    padding-inline-start: var(--rly-space-32);
+  }
+
+  .connect-agent > .connect-creature,
+  .connect-agent > .connect-creature-state {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .connect-agent > .connect-creature-state {
+    align-self: center;
+    justify-self: center;
+    translate: 0.75rem 0.75rem;
+  }
+
+  .connect-creature-state {
+    background: var(--rly-color-surface-1);
+    border-radius: 50%;
+    color: var(--rly-color-text-2);
+    display: none;
+    block-size: 1rem;
+    inline-size: 1rem;
+  }
+
+  .connect-creature-state[data-tone="progress"] {
+    color: var(--rly-color-deploying-ink);
+  }
+  .connect-creature-state[data-tone="caution"] {
+    color: var(--rly-color-held-ink);
+  }
+  .connect-creature-state[data-tone="critical"] {
+    color: var(--rly-color-blocked-ink);
+  }
+  .connect-creature-state[data-tone="positive"] {
+    color: var(--rly-color-success-ink);
+  }
+
+  .connect-agent-work {
+    font-size: var(--rly-type-body-size);
+    overflow-wrap: break-word;
+  }
+
+  .connect-agent-copy {
+    gap: var(--rly-space-4);
+  }
+
+  .connect-agent-copy strong {
+    font-size: 1rem;
+  }
+
+  .connect-agent-list {
+    align-items: start;
+    gap: var(--rly-space-8);
+  }
+
+  .connect-directory-toolbar {
+    align-items: center;
+    display: flex;
+    gap: var(--rly-space-8);
+    margin-block-start: var(--rly-space-16);
+  }
+
+  .connect-directory-toolbar .connect-search {
+    flex: 1;
+    min-inline-size: 0;
+    padding-block-end: 0;
+    position: static;
+  }
+
+  .connect-search > span {
+    block-size: 1px;
+    clip-path: inset(50%);
+    inline-size: 1px;
+    overflow: hidden;
+    position: absolute;
+    white-space: nowrap;
+  }
+
+  .connect-search input,
+  .connect-filters-toggle,
+  .connect-filters-clear,
+  .connect-family-more {
+    min-block-size: 44px;
+  }
+
+  .connect-filters-toggle,
+  .connect-filters-clear,
+  .connect-family-more {
+    background: transparent;
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-control);
+    color: var(--rly-color-text-1);
+    cursor: pointer;
+    font: inherit;
+    padding-inline: var(--rly-space-12);
+  }
+
+  .connect-family-more {
+    justify-self: start;
+    position: relative;
+    background: var(--rly-color-surface-2);
+    border: 0;
+    color: var(--rly-color-text-1);
+    font-size: var(--rly-type-meta-size);
+    font-weight: var(--rly-type-label-weight);
+    margin: var(--rly-space-8) var(--rly-space-24);
+    min-block-size: 40px;
+    padding-inline: var(--rly-space-16);
+    text-align: start;
+  }
+
+  .connect-family-more::after {
+    content: "";
+    inset: min(0px, (100% - 2.75rem) / 2);
+    position: absolute;
+  }
+
+  .connect-filters-toggle:focus-visible,
+  .connect-filters-clear:focus-visible,
+  .connect-family-more:focus-visible {
+    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+    outline-offset: var(--rly-focus-ring-offset);
+  }
+
+  .connect-filter-row {
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-control);
+    grid-template-columns: minmax(0, 1fr);
+    margin-block: var(--rly-space-8) 0;
+    padding: var(--rly-space-8);
+  }
+
+  .connect-filter-row[hidden] {
+    display: none;
+  }
+
+  .connect-filter-set {
+    align-items: center;
+    grid-template-columns: 3rem minmax(0, 1fr);
+  }
+
+  .connect-filter-label {
+    block-size: auto;
+    clip-path: none;
+    inline-size: auto;
+    overflow: visible;
+    position: static;
+    white-space: normal;
+  }
+
+  .connect-group-filter,
+  .connect-status-filter {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    scrollbar-width: thin;
+  }
+
+  .connect-group-filter button,
+  .connect-status-filter button {
+    min-block-size: 44px;
+    overflow: clip;
+    position: relative;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .connect-filter-summary {
+    align-items: center;
+    color: var(--rly-color-text-3);
+    display: flex;
+    flex-wrap: wrap;
+    font-size: var(--rly-type-meta-size);
+    gap: var(--rly-space-4);
+    margin-block: var(--rly-space-8) var(--rly-space-12);
+  }
+
+  .connect-embedded-intro {
+    align-items: baseline;
+    display: flex;
+    gap: var(--rly-space-12);
+    justify-content: start;
+  }
+
+  .connect-header {
+    gap: var(--rly-space-12);
+    justify-content: start;
+  }
+
+  .connect-header,
+  .connect-embedded-intro {
+    flex-wrap: wrap;
+  }
+
+  .connect-attention-count {
+    min-inline-size: 0;
+  }
+
+  .connect-failures {
+    color: var(--rly-color-text-2);
+    font-size: var(--rly-type-meta-size);
+  }
+
+  .connect-directory-secondary {
+    border-block-start: 1px solid var(--rly-color-border-1);
+    margin-block-start: var(--rly-space-24);
+    display: grid;
+    gap: var(--rly-space-12);
+    padding-block-start: var(--rly-space-24);
+  }
+
+  .connect-cast-family {
+    border: 0;
+    border-radius: var(--rly-radius-control);
+    display: flex;
+    flex: none;
+    scroll-snap-align: start;
+  }
+
+  .connect-cast-member {
+    grid-template-columns: minmax(0, 1fr);
+    position: relative;
+  }
+
+  .connect-cast-member .connect-creature-state {
+    position: absolute;
+    inset-block-start: 3.5rem;
+    inset-inline-end: var(--rly-space-12);
+  }
+
+  .connect-cast-member small {
+    color: var(--rly-color-text-3);
+    font-size: 0.75rem;
+  }
+
+  .connect-stage-lineage,
+  .connect-stage-prs {
+    display: grid;
+    gap: var(--rly-space-8);
+    min-inline-size: 0;
+  }
+
+  .connect-stage-lineage h2,
+  .connect-stage-prs h2 {
+    font-size: 1rem;
+    margin: 0;
+  }
+
+  .connect-stage-lineage p,
+  .connect-stage-prs p {
+    font-size: var(--rly-type-meta-size);
+    margin: 0;
+    overflow-wrap: break-word;
+  }
+
+  .connect-stage-prs h2 {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--rly-space-12);
+  }
+
+  .connect-stage-prs a {
+    color: inherit;
+    min-block-size: 44px;
+    overflow-wrap: break-word;
+  }
+
+  .connect-stage-crew-member > span {
+    display: grid;
+    gap: var(--rly-space-4);
+  }
+  .connect-stage-crew-member small {
+    font-size: 0.75rem;
+  }
+  .connect-stage-lineage .connect-stage-crew {
+    display: grid;
+  }
+  .connect-stage-lineage .connect-stage-crew-member {
+    justify-content: start;
+    text-align: start;
+  }
+
+  @media (min-width: 60rem) {
+    .connect-agent-list {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+
+  @media (max-width: 640px) {
+    .connect-agents {
+      padding-inline: var(--rly-space-16);
+    }
+    .connect-intro-caption {
+      display: none;
+    }
+    .connect-header {
+      padding-inline: var(--rly-space-16);
+    }
+    .connect-agent > time {
+      grid-column: 2;
+      grid-row: 2;
+    }
+  }
+
+  @media (forced-colors: active) {
+    .connect-creature-state[data-tone] {
+      background: Canvas;
+      color: CanvasText;
+      display: inline-flex;
+    }
+    .connect-cast-family,
+    .connect-filter-row {
+      border-color: CanvasText;
+    }
+    .connect-family {
+      outline-color: CanvasText;
+    }
+  }
+
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .connect-creature-state {
+    background: Canvas;
+    color: CanvasText;
+    display: inline-flex;
+  }
+
+  .connect-shell-embedded {
+    padding-block-start: 0;
+  }
+
+  .connect-shell-embedded .connect-directory-screen {
+    background: var(--rly-color-canvas);
+  }
+
+  .connect-shell-embedded .connect-embedded-intro,
+  .connect-shell-embedded .connect-agents {
+    inline-size: 100%;
+    padding-inline: 0;
+  }
+
+  .connect-shell-embedded .connect-embedded-intro {
+    align-items: start;
+    flex-direction: column;
+    gap: var(--rly-space-4);
+    padding-block: var(--rly-space-20) 0;
+  }
+
+  .connect-shell-embedded .connect-embedded-intro h1,
+  .connect-attention-count {
+    font: inherit;
+  }
+
+  .connect-shell-embedded .connect-embedded-intro h1 {
+    font: var(--rly-type-card-title-weight) var(--rly-type-card-title-size) / var(--rly-type-card-title-line-height)
+      var(--rly-type-card-title-font);
+  }
+
+  .connect-shell-embedded .connect-agents {
+    overflow: auto;
+    padding-block: 0 var(--rly-space-24);
+  }
+
+  @media (max-width: 640px) {
+    .connect-shell-embedded .connect-agents {
+      overflow: visible;
+    }
+  }
+
+  .connect-updated {
+    margin-block-end: var(--rly-space-16);
+  }
+
+  .connect-cast {
+    gap: var(--rly-space-12);
+    margin: 0;
+    padding: 0;
+  }
+
+  .connect-cast-member {
+    inline-size: 72px;
+    gap: var(--rly-space-4);
+    padding: var(--rly-space-8) 0;
+  }
+
+  .connect-cast-member .connect-creature[data-size="cast"] {
+    block-size: 48px;
+    inline-size: 48px;
+  }
+
+  .connect-directory-toolbar {
+    margin-block-start: var(--rly-space-16);
+  }
+
+  .connect-search input {
+    background: var(--rly-color-surface-1);
+    border-radius: var(--rly-space-8);
+  }
+
+  .connect-filter-row {
+    background: var(--rly-color-surface-1);
+    border-radius: var(--rly-space-16);
+    margin-block-start: var(--rly-space-12);
+    padding: var(--rly-space-12);
+  }
+
+  .connect-filters-toggle {
+    background: var(--rly-color-surface-1);
+    border-radius: var(--rly-space-8);
+    font-size: var(--rly-type-meta-size);
+    font-weight: var(--rly-type-label-weight);
+  }
+
+  .connect-filters-toggle[aria-expanded="true"] {
+    background: var(--rly-color-surface-3);
+  }
+
+  .connect-filter-summary {
+    gap: var(--rly-space-4);
+    margin-block: var(--rly-space-12) var(--rly-space-20);
+  }
+
+  .connect-filter-summary > span + span::before {
+    content: "· ";
+  }
+
+  .connect-family-count {
+    color: var(--rly-color-text-2);
+    font-size: var(--rly-type-meta-size);
+    font-weight: var(--rly-type-label-weight);
+    margin-block: 0 var(--rly-space-8);
+  }
+
+  .connect-attention-count[data-attention]::before {
+    content: " ·";
+    white-space: pre;
+  }
+  .connect-row-separator::before {
+    content: " · ";
+    white-space: pre;
+  }
+
+  .connect-agent time {
+    font: inherit;
+  }
+
+  .connect-agent-copy {
+    gap: var(--rly-space-2);
+  }
+
+  .connect-agent > .connect-creature {
+    align-self: start;
+  }
+
+  .connect-family .connect-agent[data-depth]:not([data-depth="0"]) {
+    background: var(--rly-color-surface-3);
+  }
+
+  .connect-family .connect-agent:first-child {
+    border-start-start-radius: inherit;
+    border-start-end-radius: inherit;
+  }
+  .connect-family .connect-agent:last-child {
+    border-end-start-radius: inherit;
+    border-end-end-radius: inherit;
+  }
+
+  .connect-empty,
+  .connect-status-message[data-tone="caution"],
+  .connect-failures {
+    background: var(--rly-color-surface-1);
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-space-16);
+    display: grid;
+    gap: var(--rly-space-12);
+    padding: var(--rly-space-16);
+  }
+
+  .connect-empty {
+    margin: 0;
+  }
+  .connect-empty p {
+    margin: 0;
+  }
+  .connect-empty button {
+    justify-self: start;
+  }
+
+  .connect-status-message[data-tone="caution"],
+  .connect-failures {
+    border-color: var(--rly-color-held-ink);
+    margin-block: 0 var(--rly-space-16);
+  }
+
+  .connect-loading-skeletons {
+    display: grid;
+    gap: var(--rly-space-12);
+  }
+  .connect-loading-skeletons > div {
+    background: var(--rly-color-surface-3);
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-space-16);
+    block-size: 76px;
+  }
+  .connect-loading-skeletons > div:first-child {
+    block-size: 96px;
+  }
+  .connect-embedded-intro > .connect-attention-count,
+  .connect-header > .connect-attention-count {
+    color: var(--rly-color-text-2);
+    font-size: var(--rly-type-meta-size);
+  }
+  .connect-loading-copy {
+    font-size: var(--rly-type-meta-size);
+    margin-block: var(--rly-space-16);
+  }
+
+  .connect-agent-tree {
+    gap: 0;
+  }
+  .connect-family .connect-agent-copy strong {
+    line-height: 20px;
+  }
+  .connect-family .connect-agent-work {
+    font-size: 0.875rem;
+    line-height: 21px;
+  }
+  .connect-family .connect-agent-copy small {
+    line-height: 18px;
+  }
+  .connect-search {
+    background: transparent;
+  }
+  .connect-cast-name {
+    font-size: 0.75rem;
+  }
+
+  .connect-family .connect-agent {
+    gap: var(--rly-space-16);
+    grid-template-columns: 36px minmax(0, 1fr);
+    padding-block: var(--rly-space-12);
+    padding-inline: 13px;
+  }
+  .connect-family .connect-agent[data-depth="1"] {
+    padding-inline-start: 29px;
+  }
+  .connect-family .connect-agent[data-depth="2"] {
+    padding-inline-start: 45px;
+  }
+  .connect-search > svg {
+    color: var(--rly-color-text-2);
+    grid-area: 1 / 1;
+    align-self: center;
+    margin-inline-start: var(--rly-space-12);
+    pointer-events: none;
+    z-index: 1;
+  }
+  .connect-search > input {
+    grid-area: 1 / 1;
+    padding-inline-start: 36px;
+  }
+
+  .connect-family-missing {
+    background: var(--rly-color-surface-3);
+    border-start-start-radius: inherit;
+    border-start-end-radius: inherit;
+    border-block-end: 1px solid var(--rly-color-border-1);
+    display: grid;
+    font-size: var(--rly-type-meta-size);
+    gap: var(--rly-space-4);
+    padding: var(--rly-space-12);
+  }
+  .connect-family-missing > span {
+    align-items: center;
+    color: var(--rly-color-held-ink);
+    display: flex;
+    gap: var(--rly-space-8);
+  }
+  .connect-family-missing p {
+    color: var(--rly-color-text-2);
+    margin: 0;
+  }
+
+  .connect-directory-toolbar {
+    margin-block-start: var(--rly-space-12);
+  }
+  .connect-filter-summary {
+    line-height: 18px;
+    margin-block: var(--rly-space-12) var(--rly-space-16);
+  }
+  .connect-family-count {
+    line-height: 18px;
+  }
+  .connect-filter-row {
+    margin-block: 0 var(--rly-space-16);
+    gap: 0;
+  }
+  .connect-group-filter,
+  .connect-status-filter {
+    gap: 0;
+  }
+  .connect-group-filter button,
+  .connect-status-filter button {
+    border-radius: 0;
+    border-inline-end: 1px solid var(--rly-color-border-1);
+    font-size: var(--rly-type-meta-size);
+    font-weight: var(--rly-type-meta-weight);
+    padding-inline: var(--rly-space-8);
+    padding-block: var(--rly-space-6);
+    background-clip: content-box;
+  }
+  .connect-group-filter button:last-child,
+  .connect-status-filter button:last-child {
+    border-inline-end: 0;
+  }
+  .connect-group-filter button[aria-pressed="true"],
+  .connect-status-filter button[aria-pressed="true"] {
+    background-color: var(--rly-color-surface-3);
+    text-decoration: none;
+  }
+
+  /* The stage keeps the character on a bounded field and the evidence on the shared surface. */
   .connect-stage {
     align-content: end;
-    background:
-      radial-gradient(70% 55% at 50% 40%, oklch(55% 0.16 var(--connect-stage-h1) / 55%), transparent 70%),
-      radial-gradient(60% 50% at 15% 10%, oklch(42% 0.13 var(--connect-stage-h3) / 55%), transparent 70%),
-      radial-gradient(70% 60% at 90% 95%, oklch(40% 0.14 var(--connect-stage-h2) / 70%), transparent 70%),
-      oklch(18% 0.05 var(--connect-stage-h2));
-    color: oklch(97% 0.01 var(--connect-stage-h1));
+    background: var(--rly-color-surface-1);
+    color: var(--rly-color-text-1);
     display: grid;
     gap: var(--rly-space-16);
     padding: var(--rly-space-24) var(--rly-space-20);
@@ -1915,16 +2538,6 @@
     .connect-stage:not([data-stale]) .connect-creature[data-bucket="needs-you"] .connect-creature-shadow {
       animation: connect-creature-call-shadow calc(var(--rly-motion-slow-duration) * 12) var(--rly-easing-in-out)
         infinite;
-    }
-
-    .connect-stage:not([data-stale]) .connect-stage-mote {
-      animation: connect-stage-drift calc(var(--rly-motion-slow-duration) * var(--connect-mote-pace))
-        var(--rly-easing-in-out) infinite alternate;
-    }
-
-    .connect-stage:not([data-stale]) .connect-stage-field {
-      transition: translate calc(var(--rly-motion-slow-duration) * 2) var(--rly-easing-out);
-      translate: var(--connect-stage-px, 0) var(--connect-stage-py, 0);
     }
   }
 
@@ -2140,81 +2753,11 @@
     }
   }
 
-  @keyframes connect-stage-drift {
-    to {
-      translate: var(--connect-mote-dx) var(--connect-mote-dy);
-    }
-  }
-
-  /* The stage's field: soft lights in the agent's hues, drifting behind the character. */
-  /* The field reaches past the edges for the parallax; the sheet must not scroll sideways to it. */
+  /* A long goal or family name must not make the sheet scroll sideways. */
   .connect-stage {
     isolation: isolate;
     overflow-x: hidden;
     position: relative;
-  }
-
-  .connect-stage-field {
-    inset: -24px;
-    overflow: clip;
-    pointer-events: none;
-    position: absolute;
-    z-index: -1;
-  }
-
-  .connect-stage-mote {
-    background: radial-gradient(closest-side, oklch(80% 0.12 var(--connect-stage-h1) / 50%), transparent);
-    block-size: var(--connect-mote-size);
-    border-radius: 50%;
-    inline-size: var(--connect-mote-size);
-    inset-block-start: var(--connect-mote-y);
-    inset-inline-start: var(--connect-mote-x);
-    position: absolute;
-  }
-
-  .connect-stage-mote:nth-child(1) {
-    --connect-mote-dx: 30px;
-    --connect-mote-dy: -24px;
-    --connect-mote-pace: 27;
-    --connect-mote-size: 9rem;
-    --connect-mote-x: 8%;
-    --connect-mote-y: 12%;
-  }
-
-  .connect-stage-mote:nth-child(2) {
-    --connect-mote-dx: -26px;
-    --connect-mote-dy: 20px;
-    --connect-mote-pace: 33;
-    --connect-mote-size: 6rem;
-    --connect-mote-x: 70%;
-    --connect-mote-y: 22%;
-  }
-
-  .connect-stage-mote:nth-child(3) {
-    --connect-mote-dx: 18px;
-    --connect-mote-dy: 28px;
-    --connect-mote-pace: 39;
-    --connect-mote-size: 11rem;
-    --connect-mote-x: 40%;
-    --connect-mote-y: 48%;
-  }
-
-  .connect-stage-mote:nth-child(4) {
-    --connect-mote-dx: -30px;
-    --connect-mote-dy: -18px;
-    --connect-mote-pace: 45;
-    --connect-mote-size: 5rem;
-    --connect-mote-x: 14%;
-    --connect-mote-y: 70%;
-  }
-
-  .connect-stage-mote:nth-child(5) {
-    --connect-mote-dx: 24px;
-    --connect-mote-dy: -26px;
-    --connect-mote-pace: 51;
-    --connect-mote-size: 7rem;
-    --connect-mote-x: 76%;
-    --connect-mote-y: 78%;
   }
 
   /* Its crew: the agents it started, each a way to its own stage. */
@@ -2250,18 +2793,10 @@
   }
 
   @media (forced-colors: active) {
-    .connect-stage-field {
-      display: none;
-    }
-
     .connect-stage-crew-member {
       background: Canvas;
       border-color: CanvasText;
     }
-  }
-
-  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .connect-stage-field {
-    display: none;
   }
 
   :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .connect-stage-crew-member {
@@ -2506,5 +3041,252 @@
     backdrop-filter: none;
     background: Canvas;
     border-color: CanvasText;
+  }
+}
+
+/* The hub owns the gutter; this selector also beats its legacy embedded top padding in the fleet layer. */
+@layer fleet {
+  .fleet-shell-main .connect-shell-embedded {
+    padding-block-start: 0;
+  }
+  /* The legacy hub auto-height override must not expand a bounded desktop directory past its scroll owner. */
+  @media (min-width: 701px) {
+    .connect-shell.connect-shell-embedded .connect-workspace,
+    .connect-shell.connect-shell-embedded .connect-directory-screen {
+      block-size: 100%;
+      min-block-size: 0;
+    }
+  }
+}
+
+@layer connect {
+  /* The character's colour belongs to its field; the stage's evidence reads on the common surface. */
+  .connect-stage-sheet {
+    inline-size: 100%;
+  }
+  .connect-stage {
+    align-content: start;
+    background: var(--rly-color-surface-1);
+    color: var(--rly-color-text-1);
+    gap: var(--rly-space-8);
+    padding: var(--rly-space-20) var(--rly-space-16);
+  }
+  @media (min-width: 641px) {
+    .connect-stage-sheet {
+      inline-size: 30rem;
+    }
+    .connect-stage {
+      padding-inline: var(--rly-space-24);
+    }
+  }
+  .connect-stage-hero {
+    background: var(--rly-color-surface-3);
+    border-radius: var(--rly-space-16);
+    block-size: 176px;
+    margin: 0 0 var(--rly-space-8);
+    place-items: center;
+  }
+  .connect-stage-hero .connect-creature {
+    inline-size: 128px;
+  }
+  .connect-stage-hero[data-tone="progress"] {
+    background: var(--rly-color-deploying-tint);
+  }
+  .connect-stage-hero[data-tone="caution"] {
+    background: var(--rly-color-held-tint);
+  }
+  .connect-stage-hero[data-tone="critical"] {
+    background: var(--rly-color-blocked-tint);
+  }
+  .connect-stage-hero[data-tone="positive"] {
+    background: var(--rly-color-success-tint);
+  }
+
+  .connect-stage-speech {
+    align-items: center;
+    backdrop-filter: none;
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0;
+    justify-self: stretch;
+    padding: 0;
+    text-align: start;
+  }
+  .connect-stage-work {
+    font-size: var(--rly-type-label-size);
+    font-weight: var(--rly-type-label-weight);
+    white-space: pre-wrap;
+  }
+  .connect-stage-speech[data-tone="progress"] {
+    color: var(--rly-color-deploying-ink);
+  }
+  .connect-stage-speech[data-tone="caution"] {
+    color: var(--rly-color-held-ink);
+  }
+  .connect-stage-speech[data-tone="critical"] {
+    color: var(--rly-color-blocked-ink);
+  }
+  .connect-stage-speech[data-tone="positive"] {
+    color: var(--rly-color-success-ink);
+  }
+  .connect-stage-goal-state {
+    font-size: var(--rly-type-meta-size);
+  }
+  .connect-stage-goal-state p {
+    color: var(--rly-color-text-2);
+    margin: 0;
+  }
+  .connect-stage-goal {
+    gap: var(--rly-space-8);
+    min-block-size: 0;
+    font-weight: var(--rly-type-label-weight);
+    text-decoration-color: currentColor;
+  }
+  .connect-stage-details {
+    display: grid;
+    grid-template-columns: 70px minmax(0, 1fr);
+    gap: var(--rly-space-6) var(--rly-space-12);
+    justify-content: start;
+    opacity: 1;
+    font-size: var(--rly-type-meta-size);
+    line-height: 18px;
+  }
+  .connect-stage-details dt {
+    color: var(--rly-color-text-2);
+  }
+  .connect-stage-details dd {
+    margin: 0;
+    overflow-wrap: break-word;
+  }
+  .connect-stage-prs {
+    padding-block-start: var(--rly-space-8);
+  }
+  .connect-stage-prs h2 {
+    font-size: 0.875rem;
+    font-weight: var(--rly-type-body-weight);
+    gap: var(--rly-space-4);
+  }
+  .connect-stage-lineage h2 {
+    font-size: 0.875rem;
+  }
+  .connect-stage-lineage {
+    border-block-start: 1px solid var(--rly-color-border-1);
+    padding-block-start: var(--rly-space-12);
+  }
+  .connect-stage-crew-member {
+    background: transparent;
+    border-color: var(--rly-color-border-1);
+    border-radius: var(--rly-space-8);
+    font-size: var(--rly-type-meta-size);
+  }
+  .connect-stage-actions {
+    gap: var(--rly-space-8);
+  }
+  .connect-stage-actions > button {
+    border-radius: var(--rly-space-16);
+  }
+  .connect-stage-actions > button:last-child {
+    flex: 1;
+  }
+  .connect-stage-sheet > div:first-child {
+    padding-block: var(--rly-space-12);
+  }
+  .connect-stage-sheet > div:first-child > div {
+    gap: var(--rly-space-4);
+  }
+  .connect-stage-sheet > div:first-child h2 {
+    line-height: var(--rly-space-24);
+  }
+  .connect-stage-sheet > div:first-child p {
+    font-size: var(--rly-type-meta-size);
+    line-height: 18px;
+  }
+  .connect-stage-sheet > div:first-child > button {
+    background: var(--rly-color-surface-3);
+    border: 0;
+    border-radius: var(--rly-space-6);
+    min-block-size: var(--rly-space-32);
+    min-inline-size: var(--rly-space-32);
+  }
+  .connect-stage-sheet > div:first-child > button svg {
+    block-size: var(--rly-space-16);
+    inline-size: var(--rly-space-16);
+  }
+}
+
+@layer connect {
+  .connect-deep-parent {
+    background: transparent;
+    border: 0;
+    color: var(--rly-color-text-1);
+    cursor: pointer;
+    font: inherit;
+    font-size: var(--rly-type-meta-size);
+    justify-self: start;
+    margin-inline-start: 97px;
+    min-block-size: 44px;
+    padding-inline: var(--rly-space-12);
+    text-decoration: underline;
+  }
+  .connect-deep-parent:focus-visible {
+    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+    outline-offset: var(--rly-focus-ring-offset);
+  }
+  .connect-family .connect-agent:disabled {
+    cursor: not-allowed;
+  }
+  .connect-stage-goal {
+    position: relative;
+  }
+  .connect-stage-goal::after {
+    content: "";
+    inset: min(0px, (100% - 2.75rem) / 2);
+    position: absolute;
+  }
+}
+
+@layer connect {
+  .connect-agent-issue {
+    align-items: start;
+    color: var(--rly-color-held-ink);
+    display: flex;
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / 18px var(--rly-type-meta-font);
+    gap: var(--rly-space-6);
+    margin-block-start: var(--rly-space-4);
+  }
+  .connect-agent-issue > svg {
+    flex: none;
+  }
+  .connect-search-shortcut {
+    display: none;
+  }
+  @media (min-width: 701px) {
+    .connect-filters-toggle {
+      block-size: 44px;
+      padding-inline: var(--rly-space-16);
+    }
+    .connect-search-shortcut {
+      align-self: center;
+      background: var(--rly-color-surface-3);
+      border: 1px solid var(--rly-color-border-1);
+      border-radius: var(--rly-space-4);
+      color: var(--rly-color-text-2);
+      display: block;
+      font: 10px / 14px var(--rly-font-mono);
+      grid-area: 1 / 1;
+      justify-self: end;
+      margin-inline-end: var(--rly-space-12);
+      padding: var(--rly-space-2) var(--rly-space-4);
+      pointer-events: none;
+    }
+    .connect-shell-embedded .connect-search input {
+      padding-inline-end: var(--rly-space-64);
+    }
+    .connect-family .connect-agent[data-depth]:not([data-depth="0"]) {
+      background: var(--rly-color-surface-1);
+    }
   }
 }

@@ -15,6 +15,25 @@ test.describe("Connect stage", () => {
   })
 
   test("opens from the cast too", async ({ page }) => {
+    await page.route(
+      "**/v1/connect/agents",
+      (route) =>
+        route.fulfill({
+          json: {
+            agents: [{
+              host: "FIXTURE",
+              id: "agent-fixture",
+              kind: "codex",
+              lastActivityAt: 1_000,
+              name: "fixture-pane",
+              state: "waiting",
+              work: "npm"
+            }],
+            failures: [],
+            nextCursor: null
+          }
+        })
+    )
     await page.goto("/")
     await page.getByRole("navigation", { name: "Agents at a glance" }).getByRole("button", { name: /fixture-pane/ })
       .click()
@@ -32,7 +51,7 @@ test.describe("Connect stage", () => {
   test("fits a 320px phone without sideways scroll, stage open or closed", async ({ page }) => {
     await page.setViewportSize({ height: 700, width: 320 })
     await page.goto("/")
-    await expect(page.locator(".connect-cast-member")).toHaveCount(1)
+    await expect(page.locator(".connect-cast-member")).toHaveCount(0)
     const width = () => page.evaluate(() => document.documentElement.scrollWidth)
     expect(await width()).toBeLessThanOrEqual(320)
     await page.locator(".connect-agent", { hasText: "fixture-pane" }).click()
@@ -40,27 +59,36 @@ test.describe("Connect stage", () => {
     expect(await width()).toBeLessThanOrEqual(320)
   })
 
-  // The field's light drifts only when the reader allows motion.
-  test("drifts its field only when motion is allowed", async ({ page }) => {
-    const motes = () =>
-      page
-        .locator(".connect-stage-mote")
-        .evaluateAll(
-          (nodes) =>
-            nodes.flatMap((node) => node.getAnimations()).filter((animation) => animation.playState === "running")
-              .length
-        )
-    for (
-      const [motion, expected] of [
-        ["no-preference", 5],
-        ["reduce", 0]
-      ] satisfies ReadonlyArray<readonly ["no-preference" | "reduce", number]>
-    ) {
+  // A desktop width must not shrink the sheet at the larger end of Rly's full-width phone breakpoint.
+  test("stage remains full width at the phone breakpoint", async ({ page }) => {
+    for (const width of [480, 540, 640]) {
+      await page.setViewportSize({ height: 844, width })
+      await page.goto("/")
+      await page.locator(".connect-agent", { hasText: "fixture-pane" }).click()
+      await expect(page.getByRole("dialog", { name: "fixture-pane" })).toBeVisible()
+      expect((await page.locator(".connect-stage-sheet").boundingBox())?.width).toBe(width)
+      expect(await page.locator(".connect-stage").evaluate((node) => getComputedStyle(node).paddingInlineStart)).toBe(
+        "16px"
+      )
+    }
+  })
+
+  // The design confines the character's colour to its hero, while the character still owns opt-in motion.
+  test("bounds the colour field and animates only the character when motion is allowed", async ({ page }) => {
+    for (const motion of ["no-preference", "reduce"] satisfies ReadonlyArray<"no-preference" | "reduce">) {
       await page.emulateMedia({ reducedMotion: motion })
       await page.goto("/")
       await page.locator(".connect-agent", { hasText: "fixture-pane" }).click()
       await expect(page.getByRole("dialog", { name: "fixture-pane" })).toBeVisible()
-      expect(await motes()).toBe(expected)
+      const field = page.locator(".connect-stage-hero")
+      expect((await field.boundingBox())?.height).toBe(176)
+      expect(await field.evaluate((node) => getComputedStyle(node).backgroundImage)).toBe("none")
+      const animations = await field.locator(".connect-creature").evaluate((node) =>
+        node.getAnimations({ subtree: true }).filter((animation) => animation.playState === "running").length
+      )
+      if (motion === "reduce") expect(animations).toBe(0)
+      else expect(animations).toBeGreaterThan(0)
+      await expect(page.locator(".connect-stage-field")).toHaveCount(0)
     }
   })
 
@@ -75,6 +103,7 @@ test.describe("Connect stage", () => {
       expect(rowBox).not.toBeNull()
       expect(copyBox).not.toBeNull()
       if (rowBox !== null && copyBox !== null) expect(copyBox.width).toBeGreaterThanOrEqual(rowBox.width * 0.75)
+      await page.getByRole("button", { name: "Filters", exact: true }).click()
       const statusRows = await page
         .locator(".connect-status-filter button")
         .evaluateAll((buttons) => new Set(buttons.map((button) => Math.round(button.getBoundingClientRect().top))).size)
@@ -102,6 +131,7 @@ test.describe("Connect stage", () => {
         expect(row.x).toBe(16)
         expect(row.width).toBe(width - 32)
       }
+      await page.getByRole("button", { name: "Filters", exact: true }).click()
       const rows = await page
         .locator(".connect-status-filter button")
         .evaluateAll((buttons) => new Set(buttons.map((button) => Math.round(button.getBoundingClientRect().top))).size)

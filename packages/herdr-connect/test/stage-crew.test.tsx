@@ -52,7 +52,7 @@ describe("AgentStage crew", () => {
           />
         )
       )
-      const crew = document.querySelector("nav[aria-label='Agents agent-coordinator started']")
+      const crew = document.querySelector("nav[aria-label='Workers and reviewers']")
       expect(crew).not.toBeNull()
       const member = crew?.querySelector("button")
       expect(member?.textContent).toContain("agent-reviewer")
@@ -98,7 +98,7 @@ describe("AgentStage crew", () => {
         )
       )
       const link = document.querySelector<HTMLAnchorElement>("a.connect-stage-goal")
-      expect(link?.textContent).toBe("Work goal: Pin more than one agent")
+      expect(link?.textContent?.trim()).toBe("Goal: Pin more than one agent")
       expect(link?.getAttribute("href")).toBe("/work/?goal=pr-knpkv_npm-752")
     } finally {
       await act(async () => root.unmount())

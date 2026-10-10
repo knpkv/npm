@@ -40,11 +40,11 @@ describe("AgentCast", () => {
       />
     )
     const order = [...markup.matchAll(/data-agent-key="nix:([^"]+)"/g)].map((match) => match[1])
-    expect(order).toEqual(["agent-two", "agent-one", "agent-three"])
-    expect(markup.match(/<button/g)).toHaveLength(3)
-    expect(markup.match(/class="connect-creature"/g)).toHaveLength(3)
+    expect(order).toEqual(["agent-two"])
+    expect(markup.match(/<button/g)).toHaveLength(1)
+    expect(markup.match(/class="connect-creature"/g)).toHaveLength(1)
     // One tab stop for the strip: the rows below already give every agent its own.
     expect(markup.match(/tabindex="0"/g)).toHaveLength(1)
-    expect(markup.match(/tabindex="-1"/g)).toHaveLength(2)
+    expect(markup.match(/tabindex="-1"/g)).toBeNull()
   })
 })

@@ -1,6 +1,7 @@
-import { useAtom, useAtomMount, useAtomValue } from "@effect/atom-react"
+import { useAtom, useAtomMount, useAtomRefresh, useAtomValue } from "@effect/atom-react"
 import { BrowserHttpClient } from "@effect/platform-browser"
 import { StateLabel, Surface, Text } from "@knpkv/rly/primitives"
+import { Icon } from "@knpkv/rly/foundations"
 import { decodeBoundedResponseJson } from "@knpkv/herdr-fleet/response"
 import { Cause, Effect, Fiber, Predicate, Result, Schedule, Schema } from "effect"
 import * as AsyncResult from "effect/reactivity/AsyncResult"
@@ -19,7 +20,6 @@ import {
   type KeyboardEvent,
   type ReactNode
 } from "react"
-import { buildConnectForest } from "./forest.js"
 import { applyTerminalInputIdentity, focusTerminalInput, trackTerminalInputFocus } from "./terminal-input-identity.js"
 import { clampTerminalDimensions, type TerminalDimensions, terminalResizeCommand } from "./terminal-dimensions.js"
 import {
@@ -49,6 +49,7 @@ import { AgentCast, AgentStage, PIN_ROOM, PinnedAgents } from "./stage.js"
 import {
   AgentDirectory,
   connectAgentKey,
+  connectAgentIdentityAmbiguous,
   ConnectSummary,
   silentHostsSentence,
   ConnectWorkspace,
@@ -278,7 +279,11 @@ const storeTerminalKeysHidden = (hidden: boolean) =>
 /** One line for a failure a person reads: the error's own message, never a stack trace. */
 const causeSummary = (cause: Cause.Cause<unknown>): string => {
   const error = Cause.squash(cause)
-  return Predicate.hasProperty(error, "message") && Predicate.isString(error.message) ? error.message : String(error)
+  if (Schema.is(ConnectStatusError)(error)) return `HTTP ${String(error.status)}`
+  if (Schema.is(ConnectNetworkError)(error) || Schema.is(ConnectProtocolError)(error)) return error.detail
+  return Predicate.hasProperty(error, "message") && Predicate.isString(error.message) && error.message.length > 0
+    ? error.message
+    : String(error)
 }
 
 const loadAgents = Effect.gen(function* () {
@@ -322,15 +327,7 @@ const loadAgents = Effect.gen(function* () {
         })
     )
   )
-  yield* buildConnectForest(directory.agents).pipe(
-    Effect.mapError(
-      (cause) =>
-        new ConnectProtocolError({
-          detail: "invalid fleet agent relationship forest",
-          cause
-        })
-    )
-  )
+  // Lineage issues are labelled per row. They must not hide independently valid agent identities.
   return directory
 })
 
@@ -697,6 +694,7 @@ export const ConnectSurface = ({
 }) => {
   const [activityFilter, setActivityFilter] = useAtom(atoms.activityFilter)
   const directory = useAtomValue(atoms.agents)
+  const refreshDirectory = useAtomRefresh(atoms.agents)
   const remembered = useAtomValue(atoms.preference)
   const [connection, setConnection] = useAtom(atoms.connection)
   const [connectionRequest, setConnectionRequest] = useAtom(atoms.connectionRequest)
@@ -827,7 +825,7 @@ export const ConnectSurface = ({
     if (directoryScreen === null) return null
     const key = connectAgentKey(agent)
     return (
-      [...directoryScreen.querySelectorAll<HTMLButtonElement>(".connect-agent")].find(
+      [...directoryScreen.querySelectorAll<HTMLButtonElement>(".connect-agent:not(:disabled)")].find(
         (button) => button.dataset.agentKey === key
       ) ??
       directorySearchRef.current ??
@@ -1021,14 +1019,28 @@ export const ConnectSurface = ({
     : directory._tag === "Failure" && directory.previousSuccess._tag === "Some"
       ? directory.previousSuccess.value.value
       : null
-  const agents = current?.agents ?? []
+  const lastAgents = useRef<ReadonlyArray<ConnectAgent>>([])
+  const missingHosts = new Set((current?.failures ?? []).map(({ host }) => host))
+  const retainedAgents = lastAgents.current.filter((agent) => missingHosts.has(agent.host))
+  const agents = [
+    ...(current?.agents ?? []),
+    ...retainedAgents.filter(
+      (old) => !(current?.agents ?? []).some((agent) => connectAgentKey(agent) === connectAgentKey(old))
+    )
+  ]
+  useEffect(() => {
+    if (current !== null) lastAgents.current = agents
+  }, [current])
   // A failed refresh keeps the last good list; say how old it is rather than presenting it as live.
   const staleSince =
     directory._tag === "Failure" && directory.previousSuccess._tag === "Some"
       ? directory.previousSuccess.value.timestamp
       : null
   const offlineHosts = (current?.failures ?? []).map((failure) => failure.host)
-  const silentHosts = silentHostsSentence(current?.failures ?? [])
+  const silentHosts = silentHostsSentence(
+    current?.failures ?? [],
+    retainedAgents.map(({ host }) => host)
+  )
   // The directory's own read time: it changes only when a poll lands, so nothing ticks between reads.
   const updatedAt = AsyncResult.isSuccess(directory) ? directory.timestamp : staleSince
   const selected =
@@ -1045,7 +1057,10 @@ export const ConnectSurface = ({
         : resolveConnectWorkGoal(selected, currentWork)
   // The agent whose stage is open: a row or the cast opens it, Open terminal leaves it for the terminal.
   const [stageKey, setStageKey] = useState<string | null>(null)
-  const stageAgent = stageKey === null ? null : (agents.find((agent) => connectAgentKey(agent) === stageKey) ?? null)
+  const stageCandidate =
+    stageKey === null ? null : (agents.find((agent) => connectAgentKey(agent) === stageKey) ?? null)
+  const stageAgent =
+    stageCandidate === null || connectAgentIdentityAmbiguous(agents, stageCandidate) ? null : stageCandidate
   // An agent that leaves the directory closes its stage for good: it must not reopen, uninvited, when the
   // agent comes back on a later poll. Only a loaded list counts; a list still loading keeps the stage.
   useEffect(() => {
@@ -1078,7 +1093,12 @@ export const ConnectSurface = ({
       )
     )
   }
-  const agentByKey = new Map(agents.map((agent) => [connectAgentKey(agent), agent]))
+  // Retained rows explain a silent host; pins treat only this poll's agents as present.
+  const agentByKey = new Map(
+    (current?.agents ?? [])
+      .filter((agent) => !connectAgentIdentityAmbiguous(current?.agents ?? [], agent))
+      .map((agent) => [connectAgentKey(agent), agent])
+  )
   const pinnable = (agent: ConnectAgent) => ({
     host: agent.host,
     id: String(agent.id),
@@ -1101,8 +1121,9 @@ export const ConnectSurface = ({
     setPinError(null)
     savePins(unpin(pins, key))
   }
-  // Each poll records which pinned agents it listed, so an away pin can say when it was last seen. Only a new
-  // poll observes; the pins it reads are the latest, through a ref, so a pin change doesn't re-run it.
+  // Each poll records only agents it listed, excluding retained silent-host rows, so an away pin can say when
+  // it was last seen. Only a new poll observes; the pins it reads are the latest, through a ref, so a pin
+  // change doesn't re-run it.
   const pinsNow = useRef(pins)
   pinsNow.current = pins
   const observeRef = useRef(savePins)
@@ -1145,6 +1166,7 @@ export const ConnectSurface = ({
       ? []
       : agents.filter((agent) => agent.host === stageAgent.host && agent.relationship?.parentAgentId === stageAgent.id)
   const selectAgent = (agent: ConnectAgent): void => {
+    if (connectAgentIdentityAmbiguous(agents, agent)) return
     preferenceApplied.current = true
     const key = connectAgentKey(agent)
     terminalInputOwnerRef.current = null
@@ -1201,7 +1223,7 @@ export const ConnectSurface = ({
     }
   }, [current, remembered, setPreferenceError, setSelectedKey])
   const moveAgentFocus = (event: KeyboardEvent<HTMLElement>): void => {
-    const buttons = [...event.currentTarget.querySelectorAll<HTMLButtonElement>(".connect-agent")]
+    const buttons = [...event.currentTarget.querySelectorAll<HTMLButtonElement>(".connect-agent:not(:disabled)")]
     const currentIndex = buttons.findIndex((button) => button === event.target)
     if (currentIndex < 0) return
     const nextIndex = nextConnectAgentIndex(event.key, currentIndex, buttons.length)
@@ -1266,32 +1288,13 @@ export const ConnectSurface = ({
 
   const directoryScreen = (
     <>
-      {embedded ? (
-        <header className="connect-embedded-intro">
-          <Text as="h1" variant="card-title">
-            Connect
-          </Text>
-          <ConnectSummary
-            agents={current === null ? null : agents}
-            unavailable={current === null && directory._tag === "Failure"}
-          />
-          <ConnectLimits problem={limits.problem} view={limits.view} />
-        </header>
-      ) : (
-        <header className="connect-header">
-          <Text as="h1" variant="page-title">
-            Connect
-          </Text>
-          <nav className="fleet-app-nav" aria-label="Fleet applications">
-            <a href="/">Approvals</a>
-            <a href="/connect/" aria-current="page">
-              Connect
-            </a>
-          </nav>
-        </header>
-      )}
-      {/* The standalone header is one row; the limits take their own line under it. */}
-      {embedded ? null : <ConnectLimits problem={limits.problem} view={limits.view} />}
+      <header className={embedded ? "connect-embedded-intro" : "connect-header"}>
+        <Text as="h1" variant="card-title">
+          Connect
+          {current === null ? null : <ConnectSummary agents={agents} unavailable={false} />}
+        </Text>
+        {current === null ? <ConnectSummary agents={null} unavailable={directory._tag === "Failure"} /> : null}
+      </header>
       <section
         aria-label="Herdr agents"
         className="connect-agents"
@@ -1301,34 +1304,6 @@ export const ConnectSurface = ({
         style={pinRows}
         onKeyDown={moveAgentFocus}
       >
-        <label className="connect-search">
-          <span>Find agent</span>
-          <input
-            autoComplete="off"
-            id="connect-agent-search"
-            name="agent-search"
-            onChange={(event) => setQuery(event.currentTarget.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Escape") {
-                event.preventDefault()
-                setQuery("")
-                event.currentTarget.blur()
-                return
-              }
-              if (event.key !== "ArrowDown") return
-              const firstAgent = event.currentTarget
-                .closest(".connect-agents")
-                ?.querySelector<HTMLButtonElement>(".connect-agent")
-              if (firstAgent === undefined || firstAgent === null) return
-              event.preventDefault()
-              firstAgent.focus()
-            }}
-            placeholder="Name, host, state…"
-            ref={directorySearchRef}
-            type="search"
-            value={query}
-          />
-        </label>
         {updatedAt === null ? null : (
           <small className="connect-updated" data-stale={staleSince === null ? undefined : "true"}>
             {staleSince === null ? "Updated " : "Stale, last updated "}
@@ -1337,20 +1312,37 @@ export const ConnectSurface = ({
             </time>
           </small>
         )}
+        {staleSince === null || directory._tag !== "Failure" ? null : (
+          <small className="connect-status-message" data-tone="caution">
+            The list is stale. Couldn't refresh the directory: {causeSummary(directory.cause)}. Showing the list from{" "}
+            {new Date(staleSince).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}; retrying every 5
+            seconds.
+          </small>
+        )}
         {silentHosts === null ? null : (
           <p className="connect-failures" role="status">
             {silentHosts}
           </p>
         )}
         {current === null ? (
-          <Text tone="secondary">
+          <Text
+            className={directory._tag === "Failure" ? "connect-empty connect-directory-error" : "connect-loading-copy"}
+            tone="secondary"
+          >
             {directory._tag === "Failure"
               ? `The fleet directory didn't answer: ${causeSummary(directory.cause)}. Retrying every 5 seconds.`
               : "Loading fleet agents…"}
+            {directory._tag === "Failure" ? (
+              <button className="connect-filters-clear" onClick={refreshDirectory} type="button">
+                Retry directory
+              </button>
+            ) : null}
           </Text>
         ) : agents.length === 0 ? (
           silentHosts === null ? (
-            <Text tone="secondary">No agents running on any host.</Text>
+            <Text className="connect-empty" tone="secondary">
+              No agents running on any host.
+            </Text>
           ) : null
         ) : (
           <>
@@ -1358,9 +1350,47 @@ export const ConnectSurface = ({
               agents={agents}
               arrivals={arrivals}
               onOpen={(agent) => setStageKey(connectAgentKey(agent))}
+              silentHosts={offlineHosts}
               stale={staleSince !== null}
             />
             <AgentDirectory
+              search={
+                <label className="connect-search">
+                  <span>Find agent</span>
+                  <Icon decorative name="search" size="small" />
+                  <input
+                    autoComplete="off"
+                    id="connect-agent-search"
+                    name="agent-search"
+                    onChange={(event) => setQuery(event.currentTarget.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Escape") {
+                        event.preventDefault()
+                        setQuery("")
+                        event.currentTarget.blur()
+                        return
+                      }
+                      if (event.key !== "ArrowDown") return
+                      const firstAgent = event.currentTarget
+                        .closest(".connect-agents")
+                        ?.querySelector<HTMLButtonElement>(".connect-agent:not(:disabled)")
+                      if (firstAgent === undefined || firstAgent === null) return
+                      event.preventDefault()
+                      firstAgent.focus()
+                    }}
+                    placeholder="Name, host, state…"
+                    ref={directorySearchRef}
+                    type="search"
+                    value={query}
+                  />
+                  {embedded ? (
+                    <kbd aria-hidden="true" className="connect-search-shortcut">
+                      Ctrl K
+                    </kbd>
+                  ) : null}
+                </label>
+              }
+              onClearQuery={() => setQuery("")}
               activityFilter={activityFilter}
               agents={agents}
               hostFilter={hostFilter}
@@ -1375,6 +1405,8 @@ export const ConnectSurface = ({
             />
             <AgentStage
               agent={stageAgent}
+              agents={agents}
+              workSnapshots={currentWork}
               crew={stageCrew}
               onClose={() => {
                 const closing = stageKey
@@ -1384,9 +1416,11 @@ export const ConnectSurface = ({
                 window.setTimeout(() => {
                   if (closing === null || (document.activeElement !== null && document.activeElement !== document.body))
                     return
-                  document
-                    .querySelector<HTMLButtonElement>(`.connect-agent[data-agent-key="${CSS.escape(closing)}"]`)
-                    ?.focus()
+                  const target =
+                    document.querySelector<HTMLButtonElement>(
+                      `.connect-agent[data-agent-key="${CSS.escape(closing)}"]`
+                    ) ?? directorySearchRef.current
+                  target?.focus()
                 }, 0)
               }}
               onOpen={(agent) => setStageKey(connectAgentKey(agent))}
@@ -1401,7 +1435,7 @@ export const ConnectSurface = ({
                 setStageKey(null)
                 selectAgent(agent)
               }}
-              stale={staleSince !== null}
+              stale={staleSince !== null || (stageAgent !== null && offlineHosts.includes(stageAgent.host))}
             />
             <PinnedAgents
               agentFor={(key) => agentByKey.get(key)}
@@ -1441,12 +1475,25 @@ export const ConnectSurface = ({
             Terminal focus transition failed: {workspaceFocusFailure}
           </small>
         )}
-        {staleSince === null || directory._tag !== "Failure" ? null : (
-          <small className="connect-status-message" data-tone="caution">
-            The list is stale. Couldn't refresh the directory: {causeSummary(directory.cause)}. Showing the list from{" "}
-            {new Date(staleSince).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}; retrying every 5
-            seconds.
-          </small>
+        {current === null && directory._tag !== "Failure" ? (
+          <div aria-hidden="true" className="connect-loading-skeletons">
+            {[0, 1, 2, 3, 4].map((index) => (
+              <div key={index} />
+            ))}
+          </div>
+        ) : null}
+        {current === null && directory._tag !== "Failure" ? null : (
+          <div className="connect-directory-secondary">
+            <ConnectLimits problem={limits.problem} view={limits.view} />
+            {embedded ? null : (
+              <nav className="fleet-app-nav" aria-label="Fleet applications">
+                <a href="/">Approvals</a>
+                <a href="/connect/" aria-current="page">
+                  Connect
+                </a>
+              </nav>
+            )}
+          </div>
         )}
       </section>
     </>

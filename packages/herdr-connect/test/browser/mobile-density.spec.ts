@@ -285,6 +285,13 @@ test("desktop keeps its spacious hierarchy and scroll ownership", async ({ page 
   expect(await page.locator(".connect-agents").evaluate((element) => getComputedStyle(element).overflowY)).toBe(
     "auto"
   )
+  // An auto overflow value alone does not prove ownership when the parent expands to fit every row.
+  await expect
+    .poll(() => page.locator(".connect-agents").evaluate((element) => element.scrollHeight - element.clientHeight))
+    .toBeGreaterThan(0)
+  await page.locator(".connect-agent").last().scrollIntoViewIfNeeded()
+  expect(await page.locator(".connect-agents").evaluate((element) => element.scrollTop)).toBeGreaterThan(0)
+  await expect(page.locator(".connect-agent").last()).toBeInViewport()
 })
 
 test("390x844 keeps the terminal rail reachable with truthful button semantics", async ({ page }) => {

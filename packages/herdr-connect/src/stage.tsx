@@ -1,5 +1,5 @@
 /**
- * An agent's stage and the cast strip that opens it: the character large on a field in its own hues, its
+ * An agent's stage and the cast strip that opens it: the character large on a field in its state tone, its
  * work as what it is saying, quiet details, and the way into its terminal.
  *
  * A row or a cast member opens the stage; Open terminal leaves it for the terminal. The stage is an rly
@@ -7,25 +7,24 @@
  *
  * @module
  */
-import { PortalProvider } from "@knpkv/rly/foundations"
+import { Icon, PortalProvider } from "@knpkv/rly/foundations"
+import { workNavigationHref } from "@knpkv/herdr-work/navigation"
 import { Button, Sheet } from "@knpkv/rly/primitives"
-import {
-  type CSSProperties,
-  type KeyboardEvent,
-  type MouseEvent,
-  type PointerEvent,
-  type ReactElement,
-  useId,
-  useRef,
-  useState
-} from "react"
+import { type KeyboardEvent, type MouseEvent, type ReactElement, useId, useRef, useState } from "react"
 
-import { AgentStateLabel, agentBuckets, agentStageLead, agentStatePresentation } from "./agent-state.js"
-import { agentCharacter } from "./character.js"
+import { AgentStateLabel, agentStatePresentation } from "./agent-state.js"
 import { Creature } from "./creature.js"
 import type { ConnectAgent } from "./model.js"
 import { arrangePins, type Pins } from "./pins.js"
-import { connectAgentKey } from "./view.js"
+import {
+  AgentStateGlyph,
+  connectAgentFamilies,
+  connectAgentKey,
+  connectAgentIdentityAmbiguous,
+  connectLineageRows,
+  connectRelationLabel
+} from "./view.js"
+import type { WorkSnapshots } from "@knpkv/herdr-work/model"
 import type { ConnectWorkGoalResolution } from "./work-goal-link.js"
 
 /** The fleet as a strip of characters, the ones that need you first; each opens its agent's stage. */
@@ -33,6 +32,7 @@ export const AgentCast = ({
   agents,
   arrivals = new Set(),
   onOpen,
+  silentHosts = [],
   stale
 }: {
   readonly agents: ReadonlyArray<ConnectAgent>
@@ -40,17 +40,20 @@ export const AgentCast = ({
   readonly arrivals?: ReadonlySet<string>
   readonly onOpen: (agent: ConnectAgent) => void
   readonly stale: boolean
+  readonly silentHosts?: ReadonlyArray<string>
 }): ReactElement => {
-  const order = ["needs-you", ...agentBuckets.filter((bucket) => bucket !== "needs-you")]
-  const cast = [...agents].sort(
-    (left, right) =>
-      order.indexOf(agentStatePresentation(left.state).bucket) -
-      order.indexOf(agentStatePresentation(right.state).bucket)
+  const families = connectAgentFamilies(agents).filter((family) =>
+    family.rows.some(({ agent }) => agentStatePresentation(agent.state).bucket === "needs-you")
+  )
+  const cast = families.flatMap((family) =>
+    family.rows
+      .filter((row, index) => index === 0 || agentStatePresentation(row.agent.state).bucket === "needs-you")
+      .map(({ agent }) => agent)
   )
   // One tab stop for the whole strip, so the cast doesn't double every row's stop; arrows move along it.
   // The stop is held by agent key, so a poll that re-sorts the cast keeps exactly one, falling back to the first.
   const [active, setActive] = useState<string | null>(null)
-  const keys = cast.map(connectAgentKey)
+  const keys = cast.filter((agent) => !connectAgentIdentityAmbiguous(agents, agent)).map(connectAgentKey)
   const activeKey = active !== null && keys.includes(active) ? active : (keys[0] ?? null)
   const move = (event: KeyboardEvent<HTMLElement>): void => {
     const step = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0
@@ -61,56 +64,166 @@ export const AgentCast = ({
     setActive(next)
     event.currentTarget.querySelector<HTMLButtonElement>(`[data-agent-key="${CSS.escape(next)}"]`)?.focus()
   }
+  if (families.length === 0) return <></>
   return (
     <nav aria-label="Agents at a glance" className="connect-cast" onKeyDown={move}>
-      {cast.map((agent) => (
-        <button
-          className="connect-cast-member"
-          onFocus={() => setActive(connectAgentKey(agent))}
-          tabIndex={connectAgentKey(agent) === activeKey ? 0 : -1}
-          data-agent-key={connectAgentKey(agent)}
-          key={connectAgentKey(agent)}
-          onClick={() => onOpen(agent)}
-          type="button"
+      {families.map((family) => (
+        <div
+          aria-label={`${family.rows[0]?.agent.name ?? "Agent"} family`}
+          className="connect-cast-family"
+          key={family.key}
+          role="group"
         >
-          <Creature
-            arrived={arrivals.has(connectAgentKey(agent))}
-            host={agent.host}
-            id={String(agent.id)}
-            size="cast"
-            stale={stale}
-            state={agent.state}
-          />
-          <span className="connect-cast-name">{agent.name}</span>
-          <AgentStateLabel state={agent.state} />
-        </button>
+          {family.rows
+            .filter((row, index) => index === 0 || agentStatePresentation(row.agent.state).bucket === "needs-you")
+            .map(({ agent }) => (
+              <button
+                aria-haspopup="dialog"
+                className="connect-cast-member"
+                onFocus={() => setActive(connectAgentKey(agent))}
+                tabIndex={connectAgentKey(agent) === activeKey ? 0 : -1}
+                data-agent-key={connectAgentKey(agent)}
+                key={connectAgentKey(agent)}
+                onClick={() => onOpen(agent)}
+                type="button"
+                disabled={connectAgentIdentityAmbiguous(agents, agent)}
+              >
+                <Creature
+                  arrived={arrivals.has(connectAgentKey(agent))}
+                  host={agent.host}
+                  id={String(agent.id)}
+                  size="cast"
+                  stale={stale || silentHosts.includes(agent.host)}
+                  state={agent.state}
+                />
+                <AgentStateGlyph state={agent.state} />
+                <span className="connect-visually-hidden">{agentStatePresentation(agent.state).word}, </span>
+                <span className="connect-cast-name">{agent.name}</span>
+              </button>
+            ))}
+        </div>
       ))}
     </nav>
   )
 }
 
-const MOTES: ReadonlyArray<string> = ["one", "two", "three", "four", "five"]
+/** PR ownership comes only from a bound Work goal with an actual PR URL, deduplicated across windows. */
+export const connectOwnedPullRequests = (agent: ConnectAgent, snapshots: WorkSnapshots): ReadonlyArray<string> => {
+  const latest = new Map<string, WorkSnapshots["now"]["goals"][number]>()
+  for (const snapshot of [snapshots.now, snapshots.day, snapshots.week, snapshots.month]) {
+    for (const goal of snapshot.goals) {
+      const previous = latest.get(goal.id)
+      if (previous === undefined || goal.updatedAt > previous.updatedAt) latest.set(goal.id, goal)
+    }
+  }
+  const urls = new Set<string>()
+  for (const goal of latest.values()) {
+    const identity = goal.agentHierarchy?.agent ?? goal.connectTarget
+    if (identity?.agentId !== agent.id || identity.host.toLowerCase() !== agent.host.toLowerCase()) continue
+    const url = goal.review?.url
+    if (url !== undefined && url !== null && /^https:\/\/github\.com\/[^/]+\/[^/]+\/pull\/[1-9]\d*$/.test(url))
+      urls.add(url)
+  }
+  return [...urls]
+}
 
-/**
- * Shifts the stage's field a little against the pointer, for depth. Written to a custom property the
- * stylesheet only reads while motion is allowed, so reduced motion and a stale stage stay put.
- */
-const parallax = (event: PointerEvent<HTMLDivElement>): void => {
-  const box = event.currentTarget.getBoundingClientRect()
-  if (box.width === 0 || box.height === 0) return
-  event.currentTarget.style.setProperty(
-    "--connect-stage-px",
-    `${String(((event.clientX - box.left) / box.width - 0.5) * -24)}px`
+/** The stage follows recorded lineage, with partners distinguished from workers and reviewers. */
+const AgentLineage = ({
+  agent,
+  agents,
+  onOpen,
+  stale
+}: {
+  readonly agent: ConnectAgent
+  readonly agents: ReadonlyArray<ConnectAgent>
+  readonly onOpen: (agent: ConnectAgent) => void
+  readonly stale: boolean
+}) => {
+  const [expanded, setExpanded] = useState(false)
+  const rows = connectLineageRows(agents)
+  const row = rows.find((row) => connectAgentKey(row.agent) === connectAgentKey(agent))
+  const ancestors: Array<ConnectAgent> = []
+  let current = agent
+  while (current.relationship !== undefined && row?.issue === null) {
+    const parent = agents.find(
+      (candidate) =>
+        candidate.host.toLowerCase() === current.host.toLowerCase() &&
+        candidate.id === current.relationship?.parentAgentId
+    )
+    if (parent === undefined) break
+    ancestors.push(parent)
+    current = parent
+  }
+  const children =
+    row?.issue === null
+      ? agents.filter(
+          (candidate) =>
+            candidate.host.toLowerCase() === agent.host.toLowerCase() &&
+            candidate.relationship?.parentAgentId === agent.id &&
+            rows.find((entry) => connectAgentKey(entry.agent) === connectAgentKey(candidate))?.issue === null
+        )
+      : []
+  const workers = children.filter((child) => child.relationship?.relation !== "pair")
+  const visibleWorkers = workers.filter(
+    (child, index) => expanded || index < 3 || agentStatePresentation(child.state).bucket === "needs-you"
   )
-  event.currentTarget.style.setProperty(
-    "--connect-stage-py",
-    `${String(((event.clientY - box.top) / box.height - 0.5) * -18)}px`
+  const hiddenWorkers = workers.length - visibleWorkers.length
+  const member = (member: ConnectAgent, role: string) => (
+    <button
+      className="connect-stage-crew-member"
+      key={connectAgentKey(member)}
+      onClick={() => onOpen(member)}
+      type="button"
+    >
+      <Creature host={member.host} id={String(member.id)} size="row" stale={stale} state={member.state} />
+      <span>
+        {member.name}
+        <small>{role}</small>
+      </span>
+      <AgentStateLabel state={member.state} />
+    </button>
+  )
+  return (
+    <section aria-label="Lineage" className="connect-stage-lineage">
+      <h2>{agent.relationship?.relation === "pair" ? "Paired with" : "Crew"}</h2>
+      {row?.issue === "unknown_parent" ? <p>Primary not listed: {agent.relationship?.parentAgentId}</p> : null}
+      {row?.issue === "cross_host" ? <p>Cross-host parent. Relationship unavailable.</p> : null}
+      {row?.issue === "cycle" ? <p>Cyclic relationship. Lineage unavailable.</p> : null}
+      {row?.issue === "ambiguous" ? <p>Ambiguous ownership. Lineage unavailable.</p> : null}
+      {ancestors.map((ancestor, index) => member(ancestor, index === 0 ? "Primary" : "Ancestor"))}
+      {ancestors.length === 0 && children.length === 0 && row?.issue === null ? (
+        <p>No crew. This agent has no children.</p>
+      ) : null}
+      {children.filter((child) => child.relationship?.relation === "pair").length === 0 ? null : (
+        <nav aria-label="Pair partners" className="connect-stage-crew">
+          {children
+            .filter((child) => child.relationship?.relation === "pair")
+            .map((child) => member(child, "Pair partner"))}
+        </nav>
+      )}
+      {workers.length === 0 ? null : (
+        <nav aria-label="Workers and reviewers" className="connect-stage-crew">
+          {visibleWorkers.map((child) =>
+            member(
+              child,
+              child.relationship === undefined ? "Worker" : connectRelationLabel(child.relationship.relation)
+            )
+          )}
+          {hiddenWorkers === 0 ? null : (
+            <button className="connect-family-more" onClick={() => setExpanded(true)} type="button">
+              Show {String(hiddenWorkers)} more
+            </button>
+          )}
+        </nav>
+      )}
+    </section>
   )
 }
 
 /** The open agent's stage, or nothing; closing it hands focus back to whatever opened it. */
 export const AgentStage = ({
   agent,
+  agents,
   crew,
   onClose,
   onOpen,
@@ -118,93 +231,116 @@ export const AgentStage = ({
   onPinChange,
   pinned,
   stale,
-  workGoal
+  workGoal,
+  workSnapshots = null
 }: {
   readonly agent: ConnectAgent | null
+  readonly agents?: ReadonlyArray<ConnectAgent>
+  readonly workSnapshots?: WorkSnapshots | null
   /** The open agent's goal on the Work board, linked from its stage when there is exactly one. */
   readonly workGoal: ConnectWorkGoalResolution
-  /** Whether this agent is the one this device keeps pinned. */
+  /** Whether this agent is pinned on this device. */
   readonly pinned: boolean
   readonly onPinChange: (pinned: boolean) => void
-  /** The agents it started, each a way to its own stage. */
+  /** Its direct children, used when a complete directory is not supplied. */
   readonly crew: ReadonlyArray<ConnectAgent>
   readonly onClose: () => void
   readonly onOpen: (agent: ConnectAgent) => void
   readonly onOpenTerminal: (agent: ConnectAgent) => void
   readonly stale: boolean
 }): ReactElement => {
-  const hues = agent === null ? [0, 0, 0] : agentCharacter(agent.host, String(agent.id)).hues
-  const field: CSSProperties & Record<"--connect-stage-h1" | "--connect-stage-h2" | "--connect-stage-h3", string> = {
-    "--connect-stage-h1": String(hues[0]),
-    "--connect-stage-h2": String(hues[1]),
-    "--connect-stage-h3": String(hues[2])
-  }
   return (
     // Its own portal target: Connect runs standalone and inside the hub, and neither provides one.
     <PortalProvider>
       <Sheet.Root onOpenChange={(open) => (open ? undefined : onClose())} open={agent !== null}>
         {agent === null ? null : (
-          <Sheet.Content className="connect-stage-sheet" closeLabel="Close" title={agent.name}>
-            <Sheet.Body
-              className="connect-stage"
-              data-stale={stale ? "" : undefined}
-              onPointerMove={parallax}
-              style={field}
-            >
-              {/* Drifting light in the agent's hues; it holds still with reduced motion or a stale directory. */}
-              <div aria-hidden="true" className="connect-stage-field">
-                {MOTES.map((mote) => (
-                  <span className="connect-stage-mote" key={mote} />
-                ))}
-              </div>
-              <div className="connect-stage-hero">
+          <Sheet.Content
+            className="connect-stage-sheet"
+            closeLabel="Close"
+            description={`${agent.kind} on ${agent.host}`}
+            title={agent.name}
+          >
+            <Sheet.Body className="connect-stage" data-stale={stale ? "" : undefined}>
+              <div className="connect-stage-hero" data-tone={agentStatePresentation(agent.state).tone}>
                 <Creature host={agent.host} id={String(agent.id)} size="stage" stale={stale} state={agent.state} />
               </div>
-              <p className="connect-stage-speech">
-                <span className="connect-stage-lead">{agentStageLead(agent.state, stale)}</span>
-                <span className="connect-stage-work">{agent.work}</span>
-              </p>
-              <p className="connect-stage-details">
+              <p className="connect-stage-speech" data-tone={agentStatePresentation(agent.state).tone}>
+                {stale ? "Last known: " : null}
                 <AgentStateLabel state={agent.state} />
-                <span>
-                  {agent.kind} on {agent.host}
-                </span>
+                {stale ? null : (
+                  <span className="connect-stage-work">
+                    {agentStatePresentation(agent.state).icon === "clock" ? " for you on " : " on "}
+                    {agent.work}
+                  </span>
+                )}
+              </p>
+              <div className="connect-stage-goal-state">
                 {workGoal._tag === "available" ? (
                   <a className="connect-stage-goal" href={workGoal.href}>
-                    Work goal: {workGoal.title}
+                    Goal: {workGoal.title} <Icon decorative name="arrow-right" size="small" />
                   </a>
-                ) : null}
-              </p>
-              {crew.length === 0 ? null : (
-                <nav aria-label={`Agents ${agent.name} started`} className="connect-stage-crew">
-                  {crew.map((member) => (
-                    <button
-                      className="connect-stage-crew-member"
-                      key={connectAgentKey(member)}
-                      onClick={() => onOpen(member)}
-                      type="button"
-                    >
-                      <Creature
-                        host={member.host}
-                        id={String(member.id)}
-                        size="row"
-                        stale={stale}
-                        state={member.state}
-                      />
-                      <span>{member.name}</span>
-                      <AgentStateLabel state={member.state} />
-                    </button>
-                  ))}
-                </nav>
-              )}
+                ) : workGoal._tag === "missing" ? (
+                  <p>No Work goal linked</p>
+                ) : workGoal._tag === "ambiguous" ? (
+                  <>
+                    <a className="connect-stage-goal" href={workNavigationHref({ goalId: null, window: "now" })}>
+                      Choose one in Work <Icon decorative name="arrow-right" size="small" />
+                    </a>
+                    <p>Several Work goals match this agent</p>
+                  </>
+                ) : (
+                  <p>Work goals unavailable right now</p>
+                )}
+              </div>
+              <dl className="connect-stage-details">
+                <dt>Host</dt>
+                <dd>{agent.host}</dd>
+                <dt>Kind</dt>
+                <dd>{agent.kind}</dd>
+                <dt>Parent</dt>
+                <dd>{agent.relationship?.parentAgentId ?? "None, primary"}</dd>
+                <dt>Last active</dt>
+                <dd>{new Date(agent.lastActivityAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</dd>
+              </dl>
+              <section aria-label="Pull requests" className="connect-stage-prs">
+                <h2>
+                  Pull requests
+                  {workSnapshots === null ? (
+                    ""
+                  ) : (
+                    <span>
+                      <span aria-hidden="true" className="connect-row-separator" />
+                      owned {String(connectOwnedPullRequests(agent, workSnapshots).length)}
+                    </span>
+                  )}
+                </h2>
+                {workSnapshots === null ? (
+                  <p>Work snapshot unavailable.</p>
+                ) : (
+                  <>
+                    <p>Owned in this Work snapshot.</p>
+                    {connectOwnedPullRequests(agent, workSnapshots).map((url) => (
+                      <a href={url} key={url} rel="noreferrer" target="_blank">
+                        {url.replace("https://github.com/", "")}
+                      </a>
+                    ))}
+                  </>
+                )}
+              </section>
+              <AgentLineage
+                key={connectAgentKey(agent)}
+                agent={agent}
+                agents={agents ?? [agent, ...crew]}
+                onOpen={onOpen}
+                stale={stale}
+              />
             </Sheet.Body>
             <Sheet.Footer className="connect-stage-actions">
-              <Button onClick={() => onOpenTerminal(agent)} variant="primary">
-                Open terminal
-              </Button>
-              {/* The label says the action; no aria-pressed as well, or it reads "Unpin, pressed". */}
-              <Button onClick={() => onPinChange(!pinned)} variant="secondary">
+              <Button leadingIcon="pin" onClick={() => onPinChange(!pinned)} size="default" variant="secondary">
                 {pinned ? "Unpin" : "Pin"}
+              </Button>
+              <Button onClick={() => onOpenTerminal(agent)} size="default" variant="primary">
+                Open terminal
               </Button>
             </Sheet.Footer>
           </Sheet.Content>
