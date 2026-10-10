@@ -175,11 +175,11 @@ Every lint, type and Effect-diagnostics escape (`@effect-diagnostics*`, `@ts-exp
 Manual acceptance checklists must contain one explicit item for every manually named SC flow; a grouped
 row may cover several flows only when each is named, and a checklist cannot pass while any item is
 `PENDING`, failed, or unresolved. Capability-boundary decisions must stay synchronized across the
-owning plugin/barrels, runtime documentation, package README, source requirements, and governing ADR;
+owning plugin/barrels, runtime documentation, package README, source requirements, and governing decision record;
 an alternate authorization path must not contradict a provider-enforced prerequisite.
 For rly viewer-preference persistence, keep `packages/rly/README.md`,
 `packages/rly/src/foundations/ThemeProvider.tsx` and its `index.ts` barrel,
-`.specs/control-center/{requirements,design}.md`, and any governing ADR aligned on
+`.specs/control-center/{requirements,design}.md`, and any governing decision record aligned on
 the opt-in, application-supplied storage boundary. Generated/vendor files are excluded.
 
 Keep Herdr worker-relationship behavior synchronized across
@@ -404,7 +404,7 @@ When writing Effect code:
   `packages/control-center/src/server/agent/internal/PrReviewSandboxSession.ts`,
   update `packages/control-center/README.md` and
   `packages/control-center/docs/agentic-pr-review.md` in the same change, and
-  append an amendment to the governing ADR when earlier rationale changes.
+  append an amendment to the governing decision record when earlier rationale changes.
   Current docs must describe the server-private compact workspace-scoped prefix,
   its 63-character sbx limit, and state that foreign-workspace and legacy names
   are not automatically removed; a claim that startup removes all
@@ -412,14 +412,14 @@ When writing Effect code:
   proving that the invalid full-UUID shape exceeds the limit while the bounded
   compact name and foreign-workspace fixture pass. Generated and vendor docs are
   excluded. Clearly historical implementation plans may remain unchanged, but
-  ADR history requires an amendment rather than a silent rewrite.
+  decision-record history requires an amendment rather than a silent rewrite.
 - When PR-review execution placement, provider-network authority, or retained
   provider user configuration changes in
   `packages/control-center/src/server/agent/internal/PrReviewSandboxSession.ts`,
   update `packages/control-center/CONTEXT.md`,
   `packages/control-center/README.md`, and
   `packages/control-center/docs/agentic-pr-review.md`, and append an amendment
-  to `packages/control-center/docs/adr/0009-use-a-provider-neutral-agent-tool-loop.md`.
+  to Control Center's provider-neutral agent tool loop decision record (number 0009).
   Typed-tool review keeps its provider on the host and denies sandbox network
   access. Native Codex and Claude execute inside sbx with only the selected
   provider connection; authentication remains behind sbx-owned configuration

@@ -58,7 +58,7 @@ export const proposalTargets = (proposal: Pick<SessionProposal, "blocks" | "cloc
 /**
  * What a written entry claims about itself.
  *
- * The distinctions are not decoration. `session` evidence is the claim ADR-0006 lets the tool make —
+ * The distinctions are not decoration. `session` evidence is the only claim a transcript supports —
  * a transcript recorded that this work happened for this long. Every flag here is a place a person
  * overruled that, and a row where they did must not keep citing evidence for the part they chose.
  * Which is why this is three independent facts and not one label: an amount typed over a proposal

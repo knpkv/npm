@@ -4,7 +4,7 @@
  * **Mental model**
  *
  * - **Read-only evidence**: transcripts are never written, moved, or modified. This service only
- *   reports what a session touched, when, and where — see ADR-0006.
+ *   reports what a session touched, when, and where.
  * - **Opt-in scope**: a session becomes evidence only when its working directory sits inside a
  *   configured Session Root. Claude project names allow a pre-read filter; Codex date directories
  *   do not, so Codex working directories are checked after local decoding. Out-of-scope text never
@@ -16,7 +16,7 @@
  *   the agent's work counts as Session Activity only inside one — until the agent ends the turn, a
  *   turn nobody typed takes over, or the agent falls silent for longer than the Idle Cap. Agent
  *   output outside a turn the person started measures how long the agent was busy, not how long
- *   anyone was working, so it never counts. See ADR-0006's 2026-10-03 amendment.
+ *   anyone was working, so it never counts.
  *
  * **Gotchas**
  *

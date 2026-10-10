@@ -456,18 +456,20 @@ environment values, and provider-native references remain server-only.
 8. Add grouped publication splitting and complete the CodeCommit comment create/update/reply contract journey.
 9. Add browser coverage and the opt-in real Codex smoke test.
 
-## Decision records
+## Decisions
 
-- [0001 — Keep review suggestions draft until published](./adr/0001-keep-review-suggestions-draft-until-published.md)
-- [0002 — Isolate review in an ephemeral writable sandbox](./adr/0002-isolate-agent-review-in-an-ephemeral-writable-sandbox.md)
-- [0003 — Own review conversation history in Control Center](./adr/0003-own-review-conversation-history-in-control-center.md)
-- [0004 — Trust review instructions only from the base revision](./adr/0004-trust-review-instructions-only-from-the-base-revision.md)
-- [0005 — Integrate agent review into the diff workspace](./adr/0005-integrate-agent-review-into-the-diff-workspace.md)
-- [0006 — Retain decisions longer than execution data](./adr/0006-retain-review-decisions-longer-than-execution-data.md)
-- [0007 — Keep review content out of telemetry](./adr/0007-keep-review-content-out-of-telemetry.md)
-- [0008 — Share CodeCommit mechanisms, not sandbox policy](./adr/0008-share-codecommit-mechanisms-not-sandbox-policy.md)
-- [0009 — Use a provider-neutral agent tool loop](./adr/0009-use-a-provider-neutral-agent-tool-loop.md)
-- [0010 — Test agent review through its public seams](./adr/0010-test-agent-review-through-its-public-seams.md)
-- [0011 — Replace the pre-stable review model without migration](./adr/0011-replace-the-pre-stable-review-model-without-migration.md)
-- [0012 — Own managed review in Control Center](./adr/0012-own-managed-review-in-control-center.md)
-- [0013 — Auto-prepare watched reviews without write authority](./adr/0013-auto-prepare-watched-reviews-without-write-authority.md)
+The design rests on these decisions, each recorded with the package:
+
+- Keep review suggestions draft until published.
+- Isolate review in an ephemeral writable sandbox.
+- Own review conversation history in Control Center.
+- Trust review instructions only from the base revision.
+- Integrate agent review into the diff workspace.
+- Retain decisions longer than execution data.
+- Keep review content out of telemetry.
+- Share CodeCommit mechanisms, not sandbox policy.
+- Use a provider-neutral agent tool loop.
+- Test agent review through its public seams.
+- Replace the pre-stable review model without migration.
+- Own managed review in Control Center.
+- Auto-prepare watched reviews without write authority.
