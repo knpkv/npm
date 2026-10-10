@@ -1,0 +1,14 @@
+id: no-server-imports-in-hub-browser
+valid:
+  - 'import { fleetModule } from "./module-contract.js"'
+  - 'import type { ReactNode } from "react"'
+  - 'export * from "./module-navigation.js"'
+  - 'import { FleetShell } from "@knpkv/herdr-hub/views"'
+  - 'import { data } from "./module-server-browser.js"'
+invalid:
+  - 'import { ModuleRegistry } from "./module-server.js"'
+  - 'export * from "@knpkv/herdr-hub/modules/server"'
+  - 'import { Server } from "node:http"'
+  - 'const server = await import("./module-server.js")'
+  - 'import { DashboardView } from "@knpkv/herdr-hub"'
+  - 'import { readFile } from "fs/promises"'

@@ -1,0 +1,33 @@
+id: no-server-imports-in-hub-browser
+language: tsx
+severity: error
+message: "Hub browser entries must use browser-safe modules, never the server entry or Node builtins."
+rule:
+  any:
+    - kind: import_statement
+      has:
+        field: source
+        regex: '^["''](node:|@knpkv/herdr-hub["'']|@knpkv/herdr-hub/modules/server|.*[/]module-server([.]js|[.]ts)?["'']|[.]/(http|store|hostd|auth)[.]|(assert|buffer|child_process|crypto|events|fs|http|https|module|net|os|path|process|stream|timers|url|util|worker_threads)(/|["'']))'
+    - kind: export_statement
+      has:
+        field: source
+        regex: '^["''](node:|@knpkv/herdr-hub["'']|@knpkv/herdr-hub/modules/server|.*[/]module-server([.]js|[.]ts)?["'']|[.]/(http|store|hostd|auth)[.]|(assert|buffer|child_process|crypto|events|fs|http|https|module|net|os|path|process|stream|timers|url|util|worker_threads)(/|["'']))'
+    - pattern: import($SOURCE)
+      has:
+        stopBy: end
+        kind: string
+        regex: '^["''](node:|@knpkv/herdr-hub["'']|@knpkv/herdr-hub/modules/server|.*[/]module-server([.]js|[.]ts)?["'']|[.]/(http|store|hostd|auth)[.]|(assert|buffer|child_process|crypto|events|fs|http|https|module|net|os|path|process|stream|timers|url|util|worker_threads)(/|["'']))'
+files:
+  - "packages/herdr-hub/src/*-view.tsx"
+  - "packages/herdr-hub/src/*-client.tsx"
+  - "packages/herdr-hub/src/connect-entry.ts"
+  - "packages/herdr-hub/src/hub-relay.tsx"
+  - "packages/herdr-hub/src/views.ts"
+  - "packages/herdr-hub/src/modules.ts"
+  - "packages/herdr-hub/src/module-contract.ts"
+  - "packages/herdr-hub/src/module-navigation.ts"
+note: |
+  This extends the bounded-io browser import guard to the hub's browser entries and direct
+  view imports. The browser bundle tests enforce transitive imports, including bare Node
+  builtin names. Product views may import their shared schema or type-only React contracts.
+  Generated and vendor files are outside these globs.
