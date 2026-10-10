@@ -63,4 +63,28 @@ test.describe("Connect stage", () => {
       expect(await motes()).toBe(expected)
     }
   })
+
+  // Every iPhone is wider than the old 24rem phone layout: the name and work must get the row's width there,
+  // not a four-column table, and the stage keeps the page's one 16px gutter.
+  for (const width of [390, 393, 430]) {
+    test(`gives the name and work the row on a ${String(width)}px iPhone`, async ({ page }) => {
+      await page.setViewportSize({ height: 844, width })
+      await page.goto("/")
+      const row = page.locator(".connect-agent", { hasText: "fixture-pane" })
+      const [rowBox, copyBox] = await Promise.all([row.boundingBox(), row.locator(".connect-agent-copy").boundingBox()])
+      expect(rowBox).not.toBeNull()
+      expect(copyBox).not.toBeNull()
+      if (rowBox !== null && copyBox !== null) expect(copyBox.width).toBeGreaterThanOrEqual(rowBox.width * 0.75)
+      const statusRows = await page
+        .locator(".connect-status-filter button")
+        .evaluateAll((buttons) => new Set(buttons.map((button) => Math.round(button.getBoundingClientRect().top))).size)
+      expect(statusRows).toBe(1)
+      await row.click()
+      const padding = await page
+        .locator(".connect-stage")
+        .evaluate((stage) => [getComputedStyle(stage).paddingInlineStart, getComputedStyle(stage).paddingInlineEnd])
+      expect(padding).toEqual(["16px", "16px"])
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
+    })
+  }
 })
