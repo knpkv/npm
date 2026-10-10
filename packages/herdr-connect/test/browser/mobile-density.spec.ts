@@ -11,7 +11,7 @@ const connectorCss = readCss(resolve(packageRoot, "src/styles.css")).replace(
   "@import \"@knpkv/rly/styles.css\";",
   ""
 )
-const approvalsCss = readCss(resolve(workspaceRoot, "packages/herdr-approvals/src/styles.css"))
+const approvalsCss = readCss(resolve(workspaceRoot, "packages/herdr-hub/src/styles.css"))
 const terminalRailNavigationSource = transpileModule(
   readFileSync(resolve(packageRoot, "src/terminal-rail-navigation.ts"), "utf8"),
   {

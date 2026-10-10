@@ -17,8 +17,8 @@ files:
   - "packages/rly/src/**/*.ts"
   - "packages/herdr-connect/src/**/*.tsx"
   - "packages/herdr-connect/src/**/*.ts"
-  - "packages/herdr-approvals/src/**/*.tsx"
-  - "packages/herdr-approvals/src/**/*.ts"
+  - "packages/herdr-hub/src/**/*.tsx"
+  - "packages/herdr-hub/src/**/*.ts"
   - "packages/codecommit-web/src/client/**/*.tsx"
   - "packages/codecommit-web/src/client/**/*.ts"
 

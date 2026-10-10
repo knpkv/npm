@@ -980,7 +980,7 @@ importers:
         specifier: npm:@typescript/typescript6@^6.0.2
         version: '@typescript/typescript6@6.0.2'
 
-  packages/herdr-approvals:
+  packages/herdr-hub:
     dependencies:
       '@effect/atom-react':
         specifier: 4.0.0

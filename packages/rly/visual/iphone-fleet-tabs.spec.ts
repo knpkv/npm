@@ -16,7 +16,7 @@ const connectorCss = readFileSync(resolve(workspaceRoot, "packages/herdr-connect
   "@import \"@knpkv/rly/styles.css\";",
   ""
 )
-const approvalsCss = readFileSync(resolve(workspaceRoot, "packages/herdr-approvals/src/styles.css"), "utf8")
+const approvalsCss = readFileSync(resolve(workspaceRoot, "packages/herdr-hub/src/styles.css"), "utf8")
 
 const mobileViewports = [
   { height: 844, width: 390 },

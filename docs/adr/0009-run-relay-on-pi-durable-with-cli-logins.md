@@ -39,7 +39,7 @@ still holds: an Effect-native store behind the same `RelayHarness` service.
 
 ## Amendment (2026-10-10): Relay in the Herdr hub, read-only
 
-The Herdr hub (herdr-approvals) mounts Relay for one conversation, `{ product: "herdr", kind: "fleet", id: <hub
+The Herdr hub (herdr-hub) mounts Relay for one conversation, `{ product: "herdr", kind: "fleet", id: <hub
 host> }`, on its canonical listener only, never on the tailnet, approval, LAN Work or local listeners. Every
 `/v1/relay/*` request passes the listener's Tailscale identity check, and every POST its origin check, before
 Relay starts. Its capabilities only read: the fleet's agents, the jobs waiting for approval, one job's state

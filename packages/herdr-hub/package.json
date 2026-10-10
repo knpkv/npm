@@ -1,5 +1,5 @@
 {
-  "name": "@knpkv/herdr-approvals",
+  "name": "@knpkv/herdr-hub",
   "version": "0.17.0",
   "description": "Authenticated fleet approvals, PWA, coordinator, and hostd runtime",
   "license": "MIT",
@@ -7,7 +7,7 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/knpkv/npm.git",
-    "directory": "packages/herdr-approvals"
+    "directory": "packages/herdr-hub"
   },
   "type": "module",
   "sideEffects": [

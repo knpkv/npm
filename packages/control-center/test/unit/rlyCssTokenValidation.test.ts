@@ -18,7 +18,7 @@ describe("workspace rly CSS token validation", () => {
       yield* fileSystem.makeDirectory(controlCenterSource, { recursive: true })
       yield* fileSystem.makeDirectory(codeCommitWebSource, { recursive: true })
       // A consumer nobody listed is still scanned; a package without src is skipped.
-      const herdrSource = path.join(workspaceRoot, "packages", "herdr-approvals", "src")
+      const herdrSource = path.join(workspaceRoot, "packages", "herdr-hub", "src")
       yield* fileSystem.makeDirectory(herdrSource, { recursive: true })
       yield* fileSystem.makeDirectory(path.join(workspaceRoot, "packages", "no-source"), { recursive: true })
       yield* fileSystem.writeFileString(path.join(workspaceRoot, "packages", "notes.md"), "not a package")
@@ -26,7 +26,7 @@ describe("workspace rly CSS token validation", () => {
       const strayCss = path.join(workspaceRoot, "packages", "not-a-package", "src")
       yield* fileSystem.makeDirectory(strayCss, { recursive: true })
       yield* fileSystem.writeFileString(path.join(strayCss, "stray.css"), ".x { gap: var(--rly-space-stray); }")
-      for (const name of ["rly", "control-center", "codecommit-web", "herdr-approvals"]) {
+      for (const name of ["rly", "control-center", "codecommit-web", "herdr-hub"]) {
         yield* fileSystem.writeFileString(path.join(workspaceRoot, "packages", name, "package.json"), "{}")
       }
       yield* fileSystem.writeFileString(
@@ -62,7 +62,7 @@ describe("workspace rly CSS token validation", () => {
             token: "--rly-space-missing"
           },
           {
-            sourcePath: "packages/herdr-approvals/src/styles.css",
+            sourcePath: "packages/herdr-hub/src/styles.css",
             token: "--rly-space-10"
           },
           {

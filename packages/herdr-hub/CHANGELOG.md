@@ -1,4 +1,4 @@
-# @knpkv/herdr-approvals
+# @knpkv/herdr-hub
 
 ## 0.17.0
 
