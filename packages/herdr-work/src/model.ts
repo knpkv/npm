@@ -1066,6 +1066,9 @@ export interface WorkActivityProvenance extends Schema.Schema.Type<typeof WorkAc
 export const WorkSnapshotWindow = Schema.Literals(["now", "day", "week", "month"])
 export type WorkSnapshotWindow = typeof WorkSnapshotWindow.Type
 
+/** The windows a snapshot carries, newest first. */
+export const workSnapshotWindows: ReadonlyArray<WorkSnapshotWindow> = WorkSnapshotWindow.literals
+
 export const WorkSnapshot = Schema.Struct({
   window: WorkSnapshotWindow,
   observedAt: Timestamp,
@@ -1139,7 +1142,28 @@ export const WorkSnapshot = Schema.Struct({
 )
 export interface WorkSnapshot extends Schema.Schema.Type<typeof WorkSnapshot> {}
 
+/**
+ * The snapshot format this version writes. Readers accept any version and ignore keys they don't know, so a
+ * newer hub that only adds keys still reads; when a newer format no longer decodes, a reader names it with
+ * {@link WorkSnapshotsNewerVersion} and asks for an upgrade instead of reporting a malformed snapshot.
+ */
+export const workSnapshotsVersion = 1
+
+/** A snapshot written in a newer format than this version reads, recognised by its `version` alone. */
+export const WorkSnapshotsNewerVersion = Schema.Struct({
+  version: Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(workSnapshotsVersion))
+})
+
+/**
+ * How many goals a large board left out of this window (`goalsOmitted`): finished goals first, the least
+ * recently updated first. Said on the board so an open goal leaving the view is never silent.
+ */
+export const goalsNotShown = (count: number): string =>
+  count === 1 ? "1 older goal not shown" : `${String(count)} older goals not shown`
+
 export const WorkSnapshots = Schema.Struct({
+  /** The format version; absent from hubs older than versioned snapshots, which wrote version 1. */
+  version: Schema.optionalKey(Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(1))),
   observedAt: Timestamp,
   now: WorkSnapshot,
   day: WorkSnapshot,

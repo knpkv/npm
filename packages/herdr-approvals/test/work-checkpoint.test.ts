@@ -10,6 +10,7 @@ import {
   workRecoveryContextUrl,
   workRecoveryPreflightUrl,
   workSnapshotFromJson,
+  workSnapshotNotes,
   workSnapshotTarget,
   workSnapshotUrl
 } from "../src/work-checkpoint.js"
@@ -224,6 +225,31 @@ describe("fleetctl work commands", () => {
         now: { ...snapshot.now, goalsShownLater: 3 }
       }
       expect(yield* workSnapshotFromJson(JSON.stringify(widened))).toEqual(snapshot)
+    }))
+
+  it("notes on stderr how many older goals each cut window left out, and nothing for a whole board", () => {
+    expect(workSnapshotNotes(snapshot)).toEqual([])
+    expect(workSnapshotNotes({
+      ...snapshot,
+      now: { ...snapshot.now, goalsOmitted: 12 },
+      month: { ...snapshot.month, goalsOmitted: 1 }
+    })).toEqual(["now: 12 older goals not shown", "month: 1 older goal not shown"])
+  })
+
+  it.effect("names a newer hub format instead of calling the snapshot malformed", () =>
+    Effect.gen(function*() {
+      const newer = yield* Effect.result(workSnapshotFromJson(JSON.stringify({ version: 2, goals: [] })))
+      expect(newer).toMatchObject({
+        failure: {
+          _tag: "FleetValidationError",
+          detail: "the hub sends Work snapshot version 2; this fleetctl reads version 1: upgrade fleetctl with the hub"
+        }
+      })
+      // A newer version that still decodes is just read.
+      expect(yield* workSnapshotFromJson(JSON.stringify({ ...snapshot, version: 2 }))).toEqual({
+        ...snapshot,
+        version: 2
+      })
     }))
 
   it.effect("rejects malformed approval targets before persistence", () =>

@@ -11,6 +11,7 @@ import {
   type WorkSnapshot,
   workSnapshotMaxGoals,
   WorkSnapshots,
+  workSnapshotsVersion,
   type WorkSnapshotWindow
 } from "./model.js"
 
@@ -259,7 +260,11 @@ export const projectWorkSnapshots = Effect.fn("HerdrWork.projectSnapshots")(func
     },
     workSnapshotGoalBudgetBytes
   )
-  return yield* Schema.decodeUnknownEffect(WorkSnapshots)({ observedAt: timestamp, ...bounded }).pipe(
+  return yield* Schema.decodeUnknownEffect(WorkSnapshots)({
+    version: workSnapshotsVersion,
+    observedAt: timestamp,
+    ...bounded
+  }).pipe(
     Effect.mapError((cause) => projectionError("malformed", "work snapshots could not be encoded", cause))
   )
 })

@@ -27,6 +27,7 @@ import type {
   WorkSnapshotWindow,
   WorkBlocker
 } from "./model.js"
+import { goalsNotShown } from "./model.js"
 import { decodeWorkBoardNavigationGoal, encodeWorkBoardNavigationGoal } from "./navigation.js"
 import { workRequestClockText, workRequestDecidability, type WorkRequestDecisions } from "./request-decision.js"
 import { displayStateOf, observedFor } from "./display-state.js"
@@ -936,6 +937,7 @@ export const WorkBoard = ({
               : snapshot.observedOmitted === undefined
                 ? null
                 : `. Live state shown for the most recently updated goals; ${snapshot.observedOmitted} left out.`}
+          {snapshot.goalsOmitted === undefined ? null : `. ${goalsNotShown(snapshot.goalsOmitted)}.`}
         </Text>
       </header>
       <Hero caption={summaryCaption(triage.summary, tense)} fact={heroFact} label="Work summary" />
