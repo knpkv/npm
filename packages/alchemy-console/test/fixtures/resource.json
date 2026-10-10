@@ -1,0 +1,30 @@
+{
+  "kind": "resource",
+  "resourceType": "AWS.S3.Bucket",
+  "fqn": "Storage/Assets",
+  "logicalId": "Assets",
+  "instanceId": "fixture-instance",
+  "providerVersion": 1,
+  "status": "created",
+  "downstream": [],
+  "bindings": [],
+  "props": {
+    "credential": {
+      "__redacted__": "fixture-secret"
+    },
+    "nested": [
+      {
+        "__redacted__": {
+          "token": "fixture-secret"
+        }
+      }
+    ]
+  },
+  "attr": {
+    "bucketName": "fixture-assets",
+    "unmarked": "fixture-secret"
+  },
+  "namespace": {
+    "Id": "Storage"
+  }
+}

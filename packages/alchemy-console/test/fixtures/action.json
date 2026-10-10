@@ -1,0 +1,14 @@
+{
+  "kind": "action",
+  "actionType": "FixtureTask",
+  "fqn": "Task",
+  "logicalId": "Task",
+  "status": "ran",
+  "inputHash": "fixture-hash",
+  "input": {
+    "__redacted__": "fixture-secret"
+  },
+  "output": {
+    "__redacted__": "fixture-secret"
+  }
+}

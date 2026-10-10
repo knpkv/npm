@@ -1,0 +1,50 @@
+{
+  "name": "@knpkv/alchemy-console",
+  "version": "0.0.0",
+  "description": "Read-only discovery and state readers for local Alchemy stacks",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/knpkv/npm.git",
+    "directory": "packages/alchemy-console"
+  },
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -b tsconfig.build.json --force",
+    "check": "tsc -b tsconfig.json && tsc -p test/tsconfig.json --noEmit",
+    "lint": "eslint src test",
+    "test": "vitest run"
+  },
+  "peerDependencies": {
+    "effect": "4.0.0"
+  },
+  "devDependencies": {
+    "@effect/platform-node": "4.0.0",
+    "@effect/vitest": "4.0.0",
+    "@types/node": "^26.6.4",
+    "effect": "4.0.0",
+    "typescript": "npm:@typescript/typescript6@^6.0.2",
+    "vitest": "catalog:"
+  },
+  "dependencies": {
+    "@knpkv/bounded-io": "workspace:^",
+    "jsonc-parser": "^3.3.1",
+    "yaml": "^2.9.1"
+  }
+}
