@@ -69,6 +69,21 @@ describe("agentCharacter", () => {
       expect(eyeY + height).toBeLessThan(top + bodyHeight * 0.7)
     }
   })
+
+  it("seeds tapered brows in the approved ranges for every character in the 64-seed grid", () => {
+    for (const { brow } of grid) {
+      expect(brow).toBeDefined()
+      expect(brow.width).toBeGreaterThanOrEqual(0.9)
+      expect(brow.width).toBeLessThanOrEqual(1.1)
+      expect(brow.arch).toBeGreaterThanOrEqual(1.2)
+      expect(brow.arch).toBeLessThanOrEqual(2.2)
+      expect(brow.thick).toBeGreaterThanOrEqual(1.1)
+      expect(brow.thick).toBeLessThanOrEqual(1.5)
+      expect(brow.gap).toBeGreaterThanOrEqual(1.6)
+      expect(brow.gap).toBeLessThanOrEqual(2.4 + 1e-9)
+      expect(Math.abs(brow.tilt)).toBeLessThanOrEqual(0.5)
+    }
+  })
 })
 
 /** Each `@keyframes name { … }` block of Connect's stylesheet, by name. */
@@ -80,6 +95,29 @@ const keyframes = (): Map<string, string> => {
 }
 
 describe("creature keyframes", () => {
+  it("scales only stale brow paths, never a live brow or the face group", () => {
+    const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8")
+    const browRules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+      .filter(([, selector]) => selector?.includes(".connect-creature-brow"))
+    expect(browRules.length).toBeGreaterThan(0)
+    for (const [, selector, declarations] of browRules) {
+      expect(declarations).not.toMatch(/\b(?:transform|skew)\s*:/)
+      if (/\bscale\s*:/.test(declarations ?? "")) {
+        expect(selector?.trim()).toBe(".connect-creature[data-stale] .connect-creature-brow")
+        expect(declarations).toContain("scale: 1 0.45;")
+      }
+    }
+  })
+
+  it("lifts ready brows with translation only, on the same moments as the glance", () => {
+    const lift = keyframes().get("connect-creature-brow-lift")
+    expect(lift).toBeDefined()
+    expect(lift).toContain("20%")
+    expect(lift).toContain("42%")
+    expect(lift).toContain("62%")
+    expect(lift).toContain("translate: 0 -0.8px")
+    expect(lift).not.toMatch(/(?:scale|transform|skew|rotate):/)
+  })
   // A stretch without the matching squash grows or shrinks the body, and reads as a skew rather than a breath.
   it("keep the body's area whenever it squashes or stretches", () => {
     const frames = keyframes()

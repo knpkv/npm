@@ -33,6 +33,7 @@ export interface CreatureProps {
 /** Lengths the stylesheet's keyframes read, in viewBox units. */
 type Rig = Record<
   | "--connect-creature-blink"
+  | "--connect-creature-brow-hue"
   | "--connect-creature-lever"
   | "--connect-creature-lid"
   | "--connect-creature-lid-low"
@@ -63,6 +64,7 @@ export const Creature = ({ arrived = false, host, id, size, stale = false, state
   // Multiples of the slow motion token, and lengths for the face to follow the body; the stylesheet reads both.
   const rig: CSSProperties & Rig = {
     "--connect-creature-blink": String(character.blink),
+    "--connect-creature-brow-hue": String(mid),
     // The face rides the body's squash: a stretch of s lifts it by (s - 1) times its height above the foot.
     "--connect-creature-lever": (FOOT - eyeY).toFixed(2),
     "--connect-creature-lid": (shut - upperRest).toFixed(2),
@@ -80,6 +82,18 @@ export const Creature = ({ arrived = false, host, id, size, stale = false, state
     const from = x - reach
     const far = above ? edge - eyeHeight * 3.4 : edge + eyeHeight * 3.4
     return `M${fixed(from)} ${fixed(far)}V${fixed(edge - sag)}Q${fixed(x)} ${fixed(edge + sag)} ${fixed(x + reach)} ${fixed(edge - sag)}V${fixed(far)}Z`
+  }
+  /** Two quadratic arcs meet at tapered ends, with the inner end's gentle seeded tilt. */
+  const brow = (x: number, side: "l" | "r"): string => {
+    const half = eyeWidth * character.brow.width
+    const y = eyeY - eyeHeight - socket - character.brow.gap
+    const inner = side === "l" ? x + half : x - half
+    const outer = side === "l" ? x - half : x + half
+    const yIn = y + character.brow.tilt
+    const yOut = y - character.brow.tilt * 0.3
+    const top = y - character.brow.arch * 2
+    const under = top + character.brow.thick * 2
+    return `M${fixed(outer)} ${fixed(yOut)}Q${fixed(x)} ${fixed(top)} ${fixed(inner)} ${fixed(yIn)}Q${fixed(x)} ${fixed(under)} ${fixed(outer)} ${fixed(yOut)}Z`
   }
   return (
     <svg
@@ -258,6 +272,14 @@ export const Creature = ({ arrived = false, host, id, size, stale = false, state
                   </g>
                 </g>
               </g>
+            ))}
+            {eyes.map((x, index) => (
+              <path
+                className="connect-creature-brow"
+                data-side={index === 0 ? "l" : "r"}
+                d={brow(x, index === 0 ? "l" : "r")}
+                key={x}
+              />
             ))}
           </g>
         </g>
