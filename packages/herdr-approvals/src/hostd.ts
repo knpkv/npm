@@ -85,7 +85,8 @@ export const makeHostdProgram = Effect.fn("Hostd.makeProgram")(function*(
   })
   const directory = paths.dirname(yield* paths.fromFileUrl(new URL(import.meta.url)))
   const assets = yield* loadUiAssets(directory)
-  const serverOptions = config.lanWork === undefined ? {} : { lanWork: config.lanWork }
+  const relay = { directory: paths.join(config.stateDirectory, "relay") }
+  const serverOptions = config.lanWork === undefined ? { relay } : { lanWork: config.lanWork, relay }
   const server = yield* Effect.acquireRelease(
     Effect.tryPromise({
       try: () => startHttpServer(config, service, assets, serverOptions),
