@@ -1,5 +1,5 @@
 import { Button, StatePanel, Text } from "@knpkv/rly/primitives"
-import { useId, type ReactElement } from "react"
+import { useId, useRef, type ReactElement } from "react"
 
 import type {
   PipelineReleaseTarget,
@@ -26,11 +26,20 @@ export const ReleaseTargetsEditor = ({
   readonly onRefresh: () => void
 }): ReactElement => {
   const prefix = useId()
+  const rangeKeys = useRef(new WeakMap<ReleaseEnvironmentRange, string>())
+  const nextKey = useRef(0)
+  const rangeKey = (range: ReleaseEnvironmentRange) => {
+    const existing = rangeKeys.current.get(range)
+    if (existing !== undefined) return existing
+    const key = `${prefix}-range-${nextKey.current++}`
+    rangeKeys.current.set(range, key)
+    return key
+  }
   const choices = catalogue?.pipelines ?? []
   const update = (index: number, next: PipelineReleaseTarget) =>
     onChange(mappings.map((mapping, mappingIndex) => (mappingIndex === index ? next : mapping)))
   return (
-    <div className={styles.fields} id="release-targets">
+    <div className={styles.targetEditor} id="release-targets">
       <Text as="h3" variant="section-title">
         Release targets
       </Text>
@@ -56,11 +65,13 @@ export const ReleaseTargetsEditor = ({
         )
         const stale =
           pipeline === undefined || pipeline.state !== "current" || pipeline.topologyDigest !== mapping.topologyDigest
-        const patchRange = (rangeIndex: number, range: ReleaseEnvironmentRange) =>
+        const patchRange = (previous: ReleaseEnvironmentRange, range: ReleaseEnvironmentRange) => {
+          rangeKeys.current.set(range, rangeKey(previous))
           update(index, {
             ...mapping,
-            environments: mapping.environments.map((previous, i) => (i === rangeIndex ? range : previous))
+            environments: mapping.environments.map((entry) => (entry === previous ? range : entry))
           })
+        }
         const field = (rangeIndex: number, name: "key" | "name" | "firstStage" | "lastStage") => {
           const invalid = error?.mappingIndex === index && error.environmentIndex === rangeIndex && error.field === name
           return {
@@ -70,7 +81,13 @@ export const ReleaseTargetsEditor = ({
           }
         }
         return (
-          <div className={styles.fields} key={`${mapping.pluginConnectionId}-${mapping.pipelineName}`}>
+          <div
+            className={styles.targetMapping}
+            key={`${mapping.pluginConnectionId}-${mapping.pipelineName}`}
+            aria-describedby={
+              error?.mappingIndex === index && error.environmentIndex === null ? `${prefix}-error` : undefined
+            }
+          >
             <Text as="h4">{mapping.pipelineName}</Text>
             <Text as="p" tone="secondary">
               {pipeline?.displayName ?? "Saved followed pipeline"}
@@ -99,7 +116,7 @@ export const ReleaseTargetsEditor = ({
               </Button>
             ) : null}
             {mapping.environments.map((range, rangeIndex) => (
-              <div className={styles.fields} key={rangeIndex}>
+              <div className={styles.targetRange} key={rangeKey(range)}>
                 <Text as="p">Environment {rangeIndex + 1}</Text>
                 <label className={styles.field}>
                   <span>Environment key</span>
@@ -108,7 +125,7 @@ export const ReleaseTargetsEditor = ({
                     className={styles.control}
                     disabled={disabled}
                     value={range.key}
-                    onChange={(event) => patchRange(rangeIndex, { ...range, key: event.currentTarget.value })}
+                    onChange={(event) => patchRange(range, { ...range, key: event.currentTarget.value })}
                   />
                 </label>
                 <label className={styles.field}>
@@ -118,7 +135,7 @@ export const ReleaseTargetsEditor = ({
                     className={styles.control}
                     disabled={disabled}
                     value={range.name}
-                    onChange={(event) => patchRange(rangeIndex, { ...range, name: event.currentTarget.value })}
+                    onChange={(event) => patchRange(range, { ...range, name: event.currentTarget.value })}
                   />
                 </label>
                 {(["firstStage", "lastStage"] satisfies ReadonlyArray<"firstStage" | "lastStage">).map((name) => (
@@ -129,7 +146,7 @@ export const ReleaseTargetsEditor = ({
                       className={styles.control}
                       disabled={disabled}
                       value={range[name]}
-                      onChange={(event) => patchRange(rangeIndex, { ...range, [name]: event.currentTarget.value })}
+                      onChange={(event) => patchRange(range, { ...range, [name]: event.currentTarget.value })}
                     >
                       {pipeline?.stages.some((stage) => stage.name === range[name]) !== true ? (
                         <option value={range[name]}>{range[name]} (unavailable)</option>
@@ -148,7 +165,7 @@ export const ReleaseTargetsEditor = ({
                     disabled={disabled}
                     type="checkbox"
                     onChange={(event) =>
-                      patchRange(rangeIndex, { ...range, requiresManualGate: event.currentTarget.checked })
+                      patchRange(range, { ...range, requiresManualGate: event.currentTarget.checked })
                     }
                   />
                   <span>Require manual approval gate</span>
@@ -171,7 +188,8 @@ export const ReleaseTargetsEditor = ({
                 const firstStage = pipeline?.stages[0]?.name
                 const lastStage = pipeline?.stages.at(-1)?.name
                 if (firstStage === undefined || lastStage === undefined) return
-                const count = mapping.environments.length + 1
+                let count = mapping.environments.length + 1
+                while (mapping.environments.some((range) => range.key === `environment-${count}`)) count++
                 update(index, {
                   ...mapping,
                   environments: [

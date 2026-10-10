@@ -33,7 +33,7 @@ The Jira items selected for one release together with their pull-request and pip
 _Avoid_: Ticket list, sprint board
 
 **Release Target**:
-A named workspace environment explicitly mapped to an inclusive, ordered range of stages in a followed CodePipeline pipeline. Its stable environment key determines identity; display-name changes preserve it. Pipeline topology changes require review. Each range records whether readiness requires a manual approval gate, defaulting to true. A release without a configured delivering pipeline is held with no target environment; synchronization never invents production.
+A named workspace environment explicitly mapped to an inclusive, ordered range of stages in a followed CodePipeline pipeline. Its stable environment key determines identity; display-name changes preserve it. Added or edited mappings require complete, current pipeline topology. Unchanged stale mappings remain saved, and removing a mapping needs no topology validation. Pipeline topology changes require review. Each range records whether readiness requires a manual approval gate, defaulting to true. A release without a configured delivering pipeline is held with no target environment; synchronization never invents production.
 _Avoid_: Implicit production environment, pipeline name as environment
 
 **Local Operator**:

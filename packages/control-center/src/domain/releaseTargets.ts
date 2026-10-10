@@ -92,10 +92,13 @@ export class ReleaseTargetConfigurationError extends Schema.TaggedError<ReleaseT
   }
 ) {}
 
-/** Validate ranges against the provider's ordered topology; gate policy belongs to readiness. */
+const sameMapping = Schema.toEquivalence(PipelineReleaseTarget)
+
+/** Validate changed mappings against current topology; preserve unchanged policy even when its provider is stale. */
 export const validateReleaseTargets = Effect.fn("ReleaseTargets.validate")(function*(
   mappings: ReadonlyArray<PipelineReleaseTarget>,
-  catalogue: ReleaseTargetCatalog
+  catalogue: ReleaseTargetCatalog,
+  previousMappings: ReadonlyArray<PipelineReleaseTarget> = []
 ): Effect.fn.Return<void, ReleaseTargetConfigurationError> {
   const pipelines = new Set<string>()
   const names = new Map<string, string>()
@@ -108,17 +111,23 @@ export const validateReleaseTargets = Effect.fn("ReleaseTargets.validate")(funct
     const identity = `${mapping.pluginConnectionId}\u0000${mapping.pipelineName}`
     if (pipelines.has(identity)) return yield* fail("duplicate-pipeline")
     pipelines.add(identity)
+    const previous = previousMappings.find((entry) =>
+      entry.pluginConnectionId === mapping.pluginConnectionId && entry.pipelineName === mapping.pipelineName
+    )
+    const unchanged = previous !== undefined && sameMapping(previous, mapping)
     const pipeline = catalogue.pipelines.find((entry) =>
       entry.pluginConnectionId === mapping.pluginConnectionId && entry.pipelineName === mapping.pipelineName
     )
-    if (!catalogue.complete) return yield* fail("catalogue-incomplete")
-    if (pipeline === undefined) return yield* fail("unknown-pipeline")
-    if (pipeline.state === "unavailable") return yield* fail("pipeline-unavailable")
-    if (pipeline.state !== "current" || pipeline.topologyDigest !== mapping.topologyDigest) {
-      return yield* fail("stale-topology")
+    if (!unchanged) {
+      if (!catalogue.complete) return yield* fail("catalogue-incomplete")
+      if (pipeline === undefined) return yield* fail("unknown-pipeline")
+      if (pipeline.state === "unavailable") return yield* fail("pipeline-unavailable")
+      if (pipeline.state !== "current" || pipeline.topologyDigest !== mapping.topologyDigest) {
+        return yield* fail("stale-topology")
+      }
     }
-    const stages = pipeline.stages.map(({ name }) => name)
-    if (new Set(stages).size !== stages.length) return yield* fail("stale-topology")
+    const stages = pipeline?.stages.map(({ name }) => name) ?? []
+    if (!unchanged && new Set(stages).size !== stages.length) return yield* fail("stale-topology")
     const environments = new Set<string>()
     let previousStart = -1
     let previousEnd = -1
@@ -130,6 +139,7 @@ export const validateReleaseTargets = Effect.fn("ReleaseTargets.validate")(funct
       }
       names.set(range.key, range.name)
       if (names.size > 50) return yield* fail("too-many-environments", "key", environmentIndex)
+      if (unchanged) continue
       const start = stages.indexOf(range.firstStage)
       const end = stages.indexOf(range.lastStage)
       if (start === -1) return yield* fail("unknown-stage", "firstStage", environmentIndex)

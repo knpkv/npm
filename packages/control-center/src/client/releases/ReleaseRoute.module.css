@@ -12,6 +12,12 @@
     var(--rly-type-label-font);
 }
 
+.back {
+  display: inline-flex;
+  align-items: center;
+  min-block-size: 2.75rem;
+}
+
 .releaseAction {
   display: inline-flex;
   min-block-size: var(--rly-space-48);

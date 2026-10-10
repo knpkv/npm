@@ -3,7 +3,11 @@ import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 
 import { PluginConnectionId } from "../../src/domain/identifiers.js"
-import { PipelineReleaseTarget, validateReleaseTargets } from "../../src/domain/releaseTargets.js"
+import {
+  PipelineReleaseTarget,
+  type ReleaseTargetPipeline,
+  validateReleaseTargets
+} from "../../src/domain/releaseTargets.js"
 import { DEFAULT_WORKSPACE_SETTINGS, WorkspaceSettingsV1 } from "../../src/domain/workspaceSettings.js"
 
 const connectionId = PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-000000000091")
@@ -55,6 +59,40 @@ describe("release target configuration", () => {
       })
       assert.deepStrictEqual(settings.pipeline.releaseTargets, [target])
       yield* validateReleaseTargets([target], catalogue)
+    }))
+
+  it.effect("preserves stale A when editing B, rejects edits to stale A, and allows its removal", () =>
+    Effect.gen(function*() {
+      const a = mapping()
+      const b = { ...a, pipelineName: "second-pipeline" }
+      const before = [a, b]
+      const staleCatalogue = {
+        ...catalogue,
+        pipelines: [
+          ...catalogue.pipelines.map((entry) => ({ ...entry, state: "stale" } satisfies ReleaseTargetPipeline)),
+          ...catalogue.pipelines.map((entry) => ({ ...entry, pipelineName: b.pipelineName }))
+        ]
+      } satisfies Parameters<typeof validateReleaseTargets>[1]
+      const editedB = { ...b, environments: b.environments.map((range) => ({ ...range, requiresManualGate: false })) }
+      yield* validateReleaseTargets([a, editedB], staleCatalogue, before)
+      const failure = yield* Effect.flip(validateReleaseTargets(
+        [
+          { ...a, environments: a.environments.map((range) => ({ ...range, requiresManualGate: false })) },
+          b
+        ],
+        staleCatalogue,
+        before
+      ))
+      assert.strictEqual(failure.reason, "stale-topology")
+      assert.strictEqual(failure.mappingIndex, 0)
+      yield* validateReleaseTargets([b], { complete: false, pipelines: [] }, before)
+      yield* validateReleaseTargets([a], { complete: false, pipelines: [] }, before)
+      const incomplete = yield* Effect.flip(validateReleaseTargets([a, editedB], {
+        complete: false,
+        pipelines: []
+      }, before))
+      assert.strictEqual(incomplete.reason, "catalogue-incomplete")
+      assert.strictEqual(incomplete.mappingIndex, 1)
     }))
 
   for (

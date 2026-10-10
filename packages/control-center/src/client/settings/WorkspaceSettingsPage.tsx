@@ -19,11 +19,14 @@ import styles from "./WorkspaceSettingsPage.module.css"
 import { useWorkspaceSettings } from "./useWorkspaceSettings.js"
 import { ReleaseTargetsEditor } from "./ReleaseTargetsEditor.js"
 import {
+  PipelineReleaseTargets,
   validateReleaseTargets,
   type ReleaseTargetCatalog,
   type ReleaseTargetConfigurationError
 } from "../../domain/releaseTargets.js"
 import { browserWorkspaceSettingsTransport, type WorkspaceSettingsTransport } from "./workspaceSettingsTransport.js"
+
+const sameReleaseTargets = Schema.toEquivalence(PipelineReleaseTargets)
 
 const integerValue = (event: ChangeEvent<HTMLInputElement>, fallback: number): number => {
   const parsed = Number.parseInt(event.currentTarget.value, 10)
@@ -100,7 +103,7 @@ const governedChangeDetails = (
       return [
         ...governedChange("Retry policy", before.pipeline.retryMode, after.pipeline.retryMode),
         ...governedChange("Maximum attempts", before.pipeline.maximumAttempts, after.pipeline.maximumAttempts),
-        ...(JSON.stringify(before.pipeline.releaseTargets ?? []) === JSON.stringify(after.pipeline.releaseTargets ?? [])
+        ...(sameReleaseTargets(before.pipeline.releaseTargets ?? [], after.pipeline.releaseTargets ?? [])
           ? []
           : [
               {
@@ -776,15 +779,17 @@ export const WorkspaceSettingsPage = ({
     isGovernedWorkspaceSettingsSection
   )
   const requiresGovernedConfirmation = governedChanges.length > 0
-  const targetsChanged =
-    JSON.stringify(server.settings.pipeline.releaseTargets ?? []) !==
-    JSON.stringify(draft.pipeline.releaseTargets ?? [])
+  const targetsChanged = !sameReleaseTargets(
+    server.settings.pipeline.releaseTargets ?? [],
+    draft.pipeline.releaseTargets ?? []
+  )
   const targetValidation = targetsChanged
     ? Effect.runSync(
         Effect.result(
           validateReleaseTargets(
             draft.pipeline.releaseTargets ?? [],
-            targetCatalogue ?? { complete: false, pipelines: [] }
+            targetCatalogue ?? { complete: false, pipelines: [] },
+            server.settings.pipeline.releaseTargets ?? []
           )
         )
       )

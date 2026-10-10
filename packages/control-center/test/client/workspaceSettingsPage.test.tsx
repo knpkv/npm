@@ -17,10 +17,18 @@ import {
 } from "../../src/api/workspaceSettings.js"
 import { BrowserSessionProvider, useBrowserSession } from "../../src/client/BrowserSession.js"
 import { SettingsForm, WorkspaceSettingsPage } from "../../src/client/settings/WorkspaceSettingsPage.js"
+import { ReleaseTargetsEditor } from "../../src/client/settings/ReleaseTargetsEditor.js"
 import type { BrowserSessionAdministrationTransport } from "../../src/client/settings/browserSessionTransport.js"
 import type { WorkspaceSettingsTransport } from "../../src/client/settings/workspaceSettingsTransport.js"
-import { PersonId, SessionId, WorkspaceId, WorkspaceSettingsMutationId } from "../../src/domain/identifiers.js"
+import {
+  PersonId,
+  SessionId,
+  WorkspaceId,
+  WorkspaceSettingsMutationId,
+  PluginConnectionId
+} from "../../src/domain/identifiers.js"
 import { DEFAULT_WORKSPACE_SETTINGS, WorkspaceSettingsV1 } from "../../src/domain/workspaceSettings.js"
+import type { PipelineReleaseTarget } from "../../src/domain/releaseTargets.js"
 
 Reflect.set(window, "IS_REACT_ACT_ENVIRONMENT", true)
 
@@ -156,6 +164,56 @@ const changeInput = async (input: HTMLInputElement, value: string): Promise<void
     input.dispatchEvent(new Event("change", { bubbles: true }))
   })
 }
+
+it("keeps surviving environment inputs and focus attached to their range after removal and key editing", async () => {
+  const Harness = (): ReactElement => {
+    const [mappings, setMappings] = useState<ReadonlyArray<PipelineReleaseTarget>>([
+      {
+        pluginConnectionId: PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-000000000091"),
+        pipelineName: "fixture-pipeline",
+        topologyDigest: `sha256:${"a".repeat(64)}`,
+        environments: ["First", "Second", "Third"].map((name) => ({
+          key: name.toLowerCase(),
+          name,
+          firstStage: "Build",
+          lastStage: "Deploy",
+          requiresManualGate: true
+        }))
+      }
+    ])
+    return (
+      <ReleaseTargetsEditor
+        mappings={mappings}
+        onChange={setMappings}
+        catalogue={null}
+        error={null}
+        disabled={false}
+        onRefresh={() => undefined}
+      />
+    )
+  }
+  const host = await mount(<Harness />)
+  const second = host.querySelector<HTMLInputElement>('input[value="Second"]')
+  const third = host.querySelector<HTMLInputElement>('input[value="Third"]')
+  const key = host.querySelector<HTMLInputElement>('input[value="third"]')
+  if (second === null || third === null || key === null) throw new Error("Expected three environment ranges")
+  third.focus()
+  const removeFirst = Array.from(host.querySelectorAll("button")).find(
+    (button) => button.textContent === "Remove environment First"
+  )
+  if (removeFirst === undefined) throw new Error("Expected range removal control")
+  await act(async () => removeFirst.click())
+  expect(second.isConnected).toBe(true)
+  expect(third.isConnected).toBe(true)
+  expect(document.activeElement).toBe(third)
+  expect(second.value).toBe("Second")
+  expect(third.value).toBe("Third")
+  key.focus()
+  await changeInput(key, "third-edited")
+  expect(key.isConnected).toBe(true)
+  expect(document.activeElement).toBe(key)
+  expect(key.value).toBe("third-edited")
+})
 
 const renderGovernedRetentionChange = async (): Promise<{
   readonly confirm: HTMLButtonElement

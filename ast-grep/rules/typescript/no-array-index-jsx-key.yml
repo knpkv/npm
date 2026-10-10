@@ -1,0 +1,27 @@
+id: no-array-index-jsx-key
+language: tsx
+severity: error
+message: "Use stable item identity for JSX keys; a removable list's callback index transfers input state to another item."
+rule:
+  pattern:
+    context: <div key={$IDX} />
+    selector: jsx_attribute
+  inside:
+    pattern: ($VALUE, $IDX) => $BODY
+    stopBy:
+      all:
+        - kind: arrow_function
+        - not:
+            pattern: ($VALUE, $IDX) => $BODY
+    inside:
+      kind: arguments
+      inside:
+        pattern: $LIST.map($CALLBACK)
+files:
+  - "packages/control-center/src/client/**/*.tsx"
+ignores:
+  - "**/generated/**"
+  - "**/vendor/**"
+note: |
+  Reject direct map-index keys in client JSX. Stable item keys and draft identities remain valid.
+  Composite keys and aliases still require review; this rule deliberately avoids name-based guesses.

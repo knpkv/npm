@@ -78,6 +78,14 @@
   gap: var(--rly-space-32);
 }
 
+.targetEditor,
+.targetMapping,
+.targetRange {
+  display: grid;
+  gap: var(--rly-space-32);
+  min-inline-size: 0;
+}
+
 .field {
   display: grid;
   font-size: var(--rly-type-label-size);
@@ -106,6 +114,7 @@
   border-radius: var(--rly-radius-tag);
   color: var(--rly-color-text-1);
   font: inherit;
+  font-size: max(16px, 1rem);
   inline-size: 100%;
   min-block-size: var(--rly-control-height-dense);
   min-inline-size: 0;
@@ -131,6 +140,13 @@
 .checkbox > input {
   block-size: 1rem;
   inline-size: 1rem;
+}
+
+@media (pointer: coarse) {
+  .control,
+  .checkbox {
+    min-block-size: 2.75rem;
+  }
 }
 
 @media (max-width: 52rem) {

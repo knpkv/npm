@@ -1,10 +1,59 @@
-import { expect, test } from "@playwright/test"
+import { expect, type Page, test, type TestInfo } from "@playwright/test"
 import * as Schema from "effect/Schema"
 
+import { RelationshipRepairProposalList, ReleaseDeliveryGraphInspection } from "../src/api/deliveryGraph.js"
+import { PortfolioSnapshot } from "../src/api/portfolio.js"
 import { UpdateWorkspaceSettingsRequest } from "../src/api/workspaceSettings.js"
 import type { WorkspaceSettingsV1 } from "../src/domain/workspaceSettings.js"
 import { auditProductionRoutePresentation, seriousAxeViolations } from "./presentationAudit.js"
 import { productionRouteAuditCase, requiredProductionRouteAuditsFor } from "./productionRouteInventory.js"
+import { releasePortfolioFixture } from "./releasePortfolioFixture.js"
+
+interface TouchControlElement {
+  readonly ownerDocument: {
+    readonly defaultView: null | {
+      readonly getComputedStyle: <Element>(element: Element) => { readonly fontSize: string }
+    }
+  }
+}
+
+const captureTargetAcceptance = async (page: Page, testInfo: TestInfo, name: string): Promise<void> => {
+  const editorOnly = name.startsWith("targets-settings-")
+  const metadata = Schema.decodeUnknownSync(Schema.Struct({
+    buildRevision: Schema.optionalKey(Schema.String),
+    builtAt: Schema.optionalKey(Schema.String)
+  }))(testInfo.config.metadata)
+  const stamp = `Build ${metadata.buildRevision ?? "local working tree"} · ${
+    metadata.builtAt ?? "build time not supplied"
+  }`
+  await page.evaluate(`(() => {
+    let stamp = document.getElementById("target-acceptance-stamp");
+    if (!stamp) {
+      stamp = document.createElement("p"); stamp.id = "target-acceptance-stamp";
+      const root = ${editorOnly} ? document.getElementById("release-targets")?.parentElement?.parentElement : document.body;
+      if (!root) throw new Error("Expected capture surface");
+      root.append(stamp);
+    }
+    stamp.textContent = ${JSON.stringify(stamp)};
+    stamp.style.cssText = "display:block;margin:0;padding:.5rem;font:12px monospace;background:Canvas;color:CanvasText;overflow-wrap:break-word";
+  })()`)
+  const path = testInfo.outputPath(`${name}.png`)
+  if (editorOnly) {
+    const panel = page.getByRole("heading", { name: "Pipeline", exact: true }).locator("../..")
+    const viewport = page.viewportSize()
+    const bounds = await panel.boundingBox()
+    if (viewport === null || bounds === null) throw new Error("Expected target editor capture bounds")
+    // Layout acceptance runs at the original viewport; give the panel capture enough height to clear sticky chrome.
+    await page.setViewportSize({ width: viewport.width, height: Math.ceil(bounds.height) + 300 })
+    try {
+      await panel.scrollIntoViewIfNeeded()
+      await panel.screenshot({ path })
+    } finally {
+      await page.setViewportSize(viewport)
+    }
+  } else await page.screenshot({ path, fullPage: true })
+  await testInfo.attach(name, { path, contentType: "image/png" })
+}
 
 const workspaceId = "01890f6f-6d6a-7cc0-98d2-000000000001"
 const personId = "01890f6f-6d6a-7cc0-98d2-000000000003"
@@ -65,6 +114,210 @@ const readModel = {
   createdAt: "2026-07-30T09:00:00.000Z",
   updatedAt: "2026-07-30T09:00:00.000Z",
   updatedByPersonId: null
+}
+
+for (const width of [390, 1280]) {
+  for (const colorScheme of ["light", "dark"] satisfies ReadonlyArray<"light" | "dark">) {
+    test.describe(`release targets ${width}px ${colorScheme}`, () => {
+      test.use({ viewport: { width, height: 900 }, hasTouch: width === 390, isMobile: width === 390, colorScheme })
+      test("accepts target editor and held targetless release presentations", async ({ context, page }, testInfo) => {
+        test.setTimeout(60_000)
+        const pageErrors: Array<string> = []
+        const failedRequests: Array<string> = []
+        page.on("pageerror", (error) => pageErrors.push(error.message))
+        page.on("requestfailed", (request) => {
+          if (!new URL(request.url()).pathname.startsWith("/api/v1/events")) failedRequests.push(request.url())
+        })
+        await page.clock.install({ time: new Date("2026-07-30T10:00:00.000Z") })
+        await context.addCookies([{ name: "cc_session", value: "ab".repeat(32), url: "http://127.0.0.1:4173" }])
+        await page.addInitScript((token) => sessionStorage.setItem("cc_csrf", token), csrfToken)
+        await context.route("**/api/v1/session/current", (route) =>
+          route.fulfill({
+            body: JSON.stringify({ csrfToken, session }),
+            contentType: "application/json",
+            status: 200
+          }))
+        await context.route("**/api/v1/session", (route) =>
+          route.fulfill({
+            body: JSON.stringify([session]),
+            contentType: "application/json",
+            status: 200
+          }))
+        const pluginConnectionId = "01890f6f-6d6a-7cc0-98d2-000000000091"
+        const topologyDigest = `sha256:${"a".repeat(64)}`
+        const configured = {
+          ...settings,
+          pipeline: {
+            ...settings.pipeline,
+            releaseTargets: [{
+              pluginConnectionId,
+              pipelineName: "fixture-pipeline",
+              topologyDigest,
+              environments: [
+                {
+                  key: "staging",
+                  name: "Staging",
+                  firstStage: "Build",
+                  lastStage: "Verify",
+                  requiresManualGate: false
+                },
+                {
+                  key: "production",
+                  name: "Production",
+                  firstStage: "Approve",
+                  lastStage: "Deploy",
+                  requiresManualGate: true
+                }
+              ]
+            }]
+          }
+        }
+        await context.route("**/api/v1/settings", (route) =>
+          route.fulfill({
+            body: JSON.stringify({ ...readModel, settings: configured }),
+            contentType: "application/json",
+            status: 200
+          }))
+        await context.route("**/api/v1/settings/release-target-catalog", (route) =>
+          route.fulfill({
+            body: JSON.stringify({
+              complete: true,
+              pipelines: [{
+                pluginConnectionId,
+                pipelineName: "fixture-pipeline",
+                displayName: "Fixture delivery",
+                topologyDigest,
+                state: "current",
+                observedAt: "2026-07-30T09:00:00.000Z",
+                stages: ["Build", "Verify", "Approve", "Deploy"].map((name) => ({ name, actions: [] }))
+              }]
+            }),
+            contentType: "application/json",
+            status: 200
+          }))
+        const snapshot = Schema.encodeSync(PortfolioSnapshot)({
+          ...releasePortfolioFixture,
+          releases: releasePortfolioFixture.releases.slice(0, 1).map((release) => ({
+            ...release,
+            collaborators: [],
+            collaboratorCount: 0,
+            readiness: null,
+            targetEnvironmentIds: [],
+            targetConfiguration: {
+              state: "unconfigured",
+              targets: [],
+              verdict: "held",
+              reason: "no-target-environment"
+            }
+          }))
+        })
+        const release = snapshot.releases[0]
+        if (release === undefined) throw new Error("Expected targetless release fixture")
+        await context.route("**/api/v1/portfolio/snapshot", (route) =>
+          route.fulfill({
+            body: JSON.stringify(snapshot),
+            contentType: "application/json",
+            status: 200
+          }))
+        await context.route("**/api/v1/events**", (route) => route.abort("failed"))
+        await context.route("**/api/v1/relationships/releases/**", (route) => {
+          const body = new URL(route.request().url()).pathname.endsWith("/repair-proposals")
+            ? Schema.encodeSync(RelationshipRepairProposalList)(
+              Schema.decodeUnknownSync(RelationshipRepairProposalList)({
+                releaseId: release.releaseId,
+                environmentId: null,
+                status: null,
+                proposals: [],
+                applications: [],
+                truncated: false
+              })
+            )
+            : Schema.encodeSync(ReleaseDeliveryGraphInspection)(
+              Schema.decodeUnknownSync(ReleaseDeliveryGraphInspection)({
+                releaseId: release.releaseId,
+                environmentId: null,
+                truncated: false,
+                nodes: [],
+                relationships: [],
+                entityProjections: [],
+                evidenceItems: [],
+                evidenceClaims: []
+              })
+            )
+          return route.fulfill({ body: JSON.stringify(body), contentType: "application/json", status: 200 })
+        })
+        await page.goto(`/w/${workspaceId}/settings#release-targets`)
+        const editor = page.locator("#release-targets")
+        await expect(editor.getByLabel("Environment name", { exact: true })).toHaveCount(2)
+        await expect(editor.locator("[class*=\"_fields_\"]")).toHaveCount(0)
+        await editor.getByRole("combobox", { name: "First stage", exact: true }).nth(1).selectOption("Verify")
+        const invalid = editor.getByRole("combobox", { name: "First stage", exact: true }).nth(1)
+        await expect(invalid).toHaveAttribute("aria-invalid", "true")
+        const description = await invalid.getAttribute("aria-describedby")
+        expect(description).not.toBeNull()
+        await expect(page.locator(`[id="${description}"]`)).toContainText("overlapping range")
+        expect(await seriousAxeViolations(page)).toEqual([])
+        if (width === 390) {
+          expect(await page.evaluate<boolean>("matchMedia('(pointer: coarse)').matches")).toBe(true)
+          const controls = editor.locator("input:not([type=checkbox]), select, button")
+          expect(await controls.count()).toBeGreaterThan(0)
+          for (const control of await controls.all()) {
+            const box = await control.boundingBox()
+            expect(box?.height).toBeGreaterThanOrEqual(44)
+            expect(box?.width).toBeGreaterThanOrEqual(44)
+          }
+          for (const input of await editor.locator("input:not([type=checkbox]), select").all()) {
+            expect(
+              await input.evaluate((node: TouchControlElement) => {
+                const view = node.ownerDocument.defaultView
+                if (view === null) throw new Error("Expected a rendered control window")
+                return Number.parseFloat(view.getComputedStyle(node).fontSize)
+              })
+            )
+              .toBeGreaterThanOrEqual(16)
+          }
+          const gates = editor.getByText("Require manual approval gate", { exact: true }).locator("..")
+          await expect(gates).toHaveCount(2)
+          for (const gate of await gates.all()) expect((await gate.boundingBox())?.height).toBeGreaterThanOrEqual(44)
+        }
+        expect(await page.evaluate<boolean>("document.documentElement.scrollWidth <= window.innerWidth")).toBe(true)
+        await captureTargetAcceptance(page, testInfo, `targets-settings-${width}-${colorScheme}`)
+        await page.goto(`/w/${workspaceId}/overview`)
+        const row = page.locator(`[data-portfolio-release-id="${release.releaseId}"]`)
+        await expect(row).toBeVisible()
+        await expect(row.getByText("Held", { exact: true })).toBeVisible()
+        await expect(row.getByText("No target environment", { exact: true })).toBeVisible()
+        await expect(row.getByRole("link", { name: "Configure targets" })).toHaveAttribute(
+          "href",
+          `/w/${workspaceId}/settings#release-targets`
+        )
+        if (width === 390) {
+          const box = await row.getByRole("link", { name: "Configure targets" }).boundingBox()
+          expect(box?.height).toBeGreaterThanOrEqual(44)
+          expect(box?.width).toBeGreaterThanOrEqual(44)
+        }
+        expect(await seriousAxeViolations(page)).toEqual([])
+        await captureTargetAcceptance(page, testInfo, `targets-overview-${width}-${colorScheme}`)
+        await page.goto(`/w/${workspaceId}/releases/${release.releaseId}`)
+        const full = page.locator(`[data-release-full-id="${release.releaseId}"]`)
+        await expect(full.getByText("No target environment", { exact: true })).toBeVisible()
+        await expect(full.getByRole("link", { name: "Configure targets" })).toBeVisible()
+        if (width === 390) {
+          const box = await full.getByRole("link", { name: "Configure targets" }).boundingBox()
+          expect(box?.height).toBeGreaterThanOrEqual(44)
+          expect(box?.width).toBeGreaterThanOrEqual(44)
+        }
+        expect(await seriousAxeViolations(page)).toEqual([])
+        expect(await page.evaluate<boolean>("document.documentElement.scrollWidth <= window.innerWidth")).toBe(true)
+        await captureTargetAcceptance(page, testInfo, `targets-release-${width}-${colorScheme}`)
+        await full.getByRole("link", { name: "Configure targets" }).click()
+        await expect(page).toHaveURL(new RegExp(`/w/${workspaceId}/settings#release-targets$`))
+        await expect(page.getByRole("heading", { name: "Release targets", exact: true })).toBeVisible()
+        expect(pageErrors).toEqual([])
+        expect(failedRequests).toEqual([])
+      })
+    })
+  }
 }
 
 test("configures ordered environment ranges through the governed pipeline settings flow", async ({ context, page }) => {
@@ -131,19 +384,22 @@ test("configures ordered environment ranges through the governed pipeline settin
   await page.getByLabel("Add followed pipeline").selectOption(`${connectionId}:fixture-pipeline`)
   await page.getByLabel("Environment key", { exact: true }).fill("staging")
   await page.getByLabel("Environment name", { exact: true }).fill("Staging")
-  await page.getByLabel("Last stage", { exact: true }).selectOption("Verify")
+  await page.getByRole("combobox", { name: "Last stage", exact: true }).selectOption("Verify")
   await page.getByRole("button", { name: "Add environment range" }).click()
   await expect(page.getByText("Cannot save target configuration: overlapping range.")).toBeVisible()
   await expect(page.getByRole("button", { name: "Save settings" })).toBeDisabled()
   await page.getByLabel("Environment key", { exact: true }).nth(1).fill("production")
   await page.getByLabel("Environment name", { exact: true }).nth(1).fill("Production")
-  await page.getByLabel("First stage", { exact: true }).nth(1).selectOption("Approve")
+  await page.getByRole("combobox", { name: "First stage", exact: true }).nth(1).selectOption("Approve")
   await page.getByLabel("Require manual approval gate").nth(0).uncheck()
   await page.getByRole("button", { name: "Save settings" }).click()
   await expect(page.getByRole("dialog", { name: "Review governed changes" })).toBeVisible()
   await page.getByRole("button", { name: "Save governed changes" }).click()
   await expect(page.getByText("Cannot save target configuration: unknown stage.")).toBeVisible()
-  await expect(page.getByLabel("First stage", { exact: true }).nth(1)).toHaveAttribute("aria-invalid", "true")
+  await expect(page.getByRole("combobox", { name: "First stage", exact: true }).nth(1)).toHaveAttribute(
+    "aria-invalid",
+    "true"
+  )
   await page.getByLabel("Environment name", { exact: true }).nth(1).fill("Production target")
   await page.getByRole("button", { name: "Save settings" }).click()
   await page.getByRole("button", { name: "Save governed changes" }).click()
