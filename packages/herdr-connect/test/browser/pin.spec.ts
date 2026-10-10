@@ -162,4 +162,17 @@ test.describe("Connect pin", () => {
     expect(rows).toBe(1)
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320)
   })
+
+  // In forced colours the floating pins must be opaque, or the rows under them show through their text.
+  test("draws the floating pins opaque in forced colours", async ({ page }) => {
+    await page.emulateMedia({ forcedColors: "active", reducedMotion: "reduce" })
+    await page.goto("/")
+    await page.evaluate(() => window.localStorage.setItem("fleet-connect-pinned", "FIXTURE:agent-fixture"))
+    await page.reload()
+    const backgrounds = await page
+      .locator(".connect-pins[data-placement='float'] .connect-pin")
+      .evaluateAll((chips) => chips.map((chip) => getComputedStyle(chip).backgroundColor))
+    expect(backgrounds.length).toBeGreaterThan(0)
+    for (const background of backgrounds) expect(background).toMatch(/^rgb\(/)
+  })
 })

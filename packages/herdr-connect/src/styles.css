@@ -2375,17 +2375,19 @@
   }
 
   @media (forced-colors: active) {
-    .connect-pin,
-    .connect-pins-more,
-    .connect-pins-overflow {
+    /* As specific as the floating glass it replaces. */
+    .connect-pins[data-placement] :is(.connect-pin, .connect-pins-more, .connect-pins-overflow) {
       backdrop-filter: none;
+      background: Canvas;
       border-color: CanvasText;
     }
   }
 
   :where([data-forced-colors="active"], [data-rly-forced-colors="active"])
+    .connect-pins[data-placement]
     :is(.connect-pin, .connect-pins-more, .connect-pins-overflow) {
     backdrop-filter: none;
+    background: Canvas;
     border-color: CanvasText;
   }
 }
