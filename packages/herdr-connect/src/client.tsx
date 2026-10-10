@@ -8,7 +8,17 @@ import * as Atom from "effect/reactivity/Atom"
 import * as HttpClient from "effect/http/HttpClient"
 import type * as HttpClientResponse from "effect/http/HttpClientResponse"
 import { FitAddon, init, Terminal } from "ghostty-web"
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react"
+import {
+  type CSSProperties,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type KeyboardEvent,
+  type ReactNode
+} from "react"
 import { buildConnectForest } from "./forest.js"
 import { applyTerminalInputIdentity, focusTerminalInput, trackTerminalInputFocus } from "./terminal-input-identity.js"
 import { clampTerminalDimensions, type TerminalDimensions, terminalResizeCommand } from "./terminal-dimensions.js"
@@ -34,7 +44,8 @@ import {
   writeTerminalOutput
 } from "./terminal-output.js"
 import { agentBucketsOf, type AgentBuckets, arrivalsBetween, nextAgentBuckets } from "./arrivals.js"
-import { AgentCast, AgentStage, PinnedAgent } from "./stage.js"
+import { arrangePins, observePins, pin, type Pin, type Pins, StoredPins, unpin } from "./pins.js"
+import { AgentCast, AgentStage, PIN_ROOM, PinnedAgents } from "./stage.js"
 import {
   AgentDirectory,
   connectAgentKey,
@@ -180,30 +191,65 @@ const storeRememberedAgent = (key: string) =>
     )
   )
 
-/** The agent this device keeps pinned, by `connectAgentKey`; nothing stored means none. */
-const pinnedAgentStorageKey = "fleet-connect-pinned"
-
-const loadPinnedAgent = Effect.try({
-  try: () => window.localStorage.getItem(pinnedAgentStorageKey),
-  catch: (cause) => new ConnectPreferenceError({ operation: "local_storage.read", cause })
-}).pipe(
-  Effect.flatMap((value) =>
-    value === null
-      ? Effect.succeed(null)
-      : Schema.decodeUnknownEffect(RememberedAgentKey)(value).pipe(
-          Effect.mapError((cause) => new ConnectPreferenceError({ operation: "local_storage.decode", cause }))
-        )
+/** Whether the window is phone-narrow (below 48rem), following resizes. */
+const narrowQuery = "(max-width: 47.99rem)"
+const useNarrowScreen = (): boolean =>
+  useSyncExternalStore(
+    (onChange) => {
+      const query = window.matchMedia(narrowQuery)
+      query.addEventListener("change", onChange)
+      return () => query.removeEventListener("change", onChange)
+    },
+    () => window.matchMedia(narrowQuery).matches,
+    () => false
   )
-)
 
-const storePinnedAgent = (key: string | null) =>
+/** The agents this device keeps pinned, in pin order (`Pins`); nothing stored means none. */
+const pinsStorageKey = "fleet-connect-pins"
+/** Before pins were a set, one pinned agent's key was stored here; it is read once and carried over. */
+const legacyPinStorageKey = "fleet-connect-pinned"
+
+const readStorage = (key: string) =>
   Effect.try({
-    try: () =>
-      key === null
-        ? window.localStorage.removeItem(pinnedAgentStorageKey)
-        : window.localStorage.setItem(pinnedAgentStorageKey, key),
-    catch: (cause) => new ConnectPreferenceError({ operation: "local_storage.write", cause })
+    try: () => window.localStorage.getItem(key),
+    catch: (cause) => new ConnectPreferenceError({ operation: "local_storage.read", cause })
   })
+
+const loadPins = Effect.gen(function* () {
+  const stored = yield* readStorage(pinsStorageKey)
+  if (stored !== null) {
+    const decoded = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(StoredPins))(stored).pipe(
+      Effect.mapError((cause) => new ConnectPreferenceError({ operation: "local_storage.decode", cause }))
+    )
+    return decoded.pins
+  }
+  const legacy = yield* readStorage(legacyPinStorageKey)
+  if (legacy === null) return []
+  const key = yield* Schema.decodeUnknownEffect(RememberedAgentKey)(legacy).pipe(
+    Effect.mapError((cause) => new ConnectPreferenceError({ operation: "local_storage.decode", cause }))
+  )
+  // The old key held only `host:id`; the name and last-seen minute fill in on the first poll that lists it,
+  // and until then the pin says it hasn't been seen rather than inventing a time.
+  const split = key.indexOf(":")
+  const id = split > 0 ? key.slice(split + 1) : key
+  const carried: Pin = { host: split > 0 ? key.slice(0, split) : key, id, key, name: id, seenAt: null }
+  return [carried]
+})
+
+/** Writes the pins, and drops the old single-pin key once they are stored. */
+const storePins = (pins: Pins) =>
+  Schema.encodeEffect(Schema.fromJsonString(StoredPins))({ pins, v: 1 }).pipe(
+    Effect.mapError((cause) => new ConnectPreferenceError({ operation: "local_storage.encode", cause })),
+    Effect.flatMap((encoded) =>
+      Effect.try({
+        try: () => {
+          window.localStorage.setItem(pinsStorageKey, encoded)
+          window.localStorage.removeItem(legacyPinStorageKey)
+        },
+        catch: (cause) => new ConnectPreferenceError({ operation: "local_storage.write", cause })
+      })
+    )
+  )
 
 /** Whether this device hides the terminal key rail's keys; nothing stored means shown, as before. */
 const TerminalKeysVisibility = Schema.Literals(["shown", "hidden"])
@@ -344,7 +390,7 @@ export const makeConnectAtoms = () => {
     limitsPoll: browserRuntime.atom(Atom.refresh(limits).pipe(Effect.repeat(Schedule.spaced("60 seconds")))),
     preference: Atom.make(loadRememberedAgent),
     terminalKeysHidden: Atom.make(loadTerminalKeysHidden),
-    pinned: Atom.make(loadPinnedAgent),
+    pinned: Atom.make(loadPins),
     preferenceError: Atom.make<string | null>(null),
     query: Atom.make(""),
     selectedKey: Atom.make<string | null>(null),
@@ -1016,24 +1062,84 @@ export const ConnectSurface = ({
     const silent = new Set(current.failures.map((failure) => failure.host))
     previousBuckets.current = nextAgentBuckets(previousBuckets.current, buckets, silent)
   }, [current])
-  // The stored pin seeds it; this session's choice wins once made. Unreadable storage pins nothing.
-  const storedPin = useAtomValue(atoms.pinned)
-  const [pinChoice, setPinChoice] = useState<{ readonly key: string | null } | null>(null)
-  // An explicit unpin is a choice too: only "no choice yet" falls back to what was stored.
-  const pinnedKey = pinChoice !== null ? pinChoice.key : AsyncResult.isSuccess(storedPin) ? storedPin.value : null
-  const pinnedAgent = pinnedKey === null ? null : (agents.find((agent) => connectAgentKey(agent) === pinnedKey) ?? null)
+  // The stored pins seed them; this session's choices win once made. Unreadable storage pins nothing.
+  const storedPins = useAtomValue(atoms.pinned)
+  const [pinsChoice, setPinsChoice] = useState<Pins | null>(null)
+  // Unpinning the last one is a choice too: only "no choice yet" falls back to what was stored.
+  const pins: Pins = pinsChoice ?? (AsyncResult.isSuccess(storedPins) ? storedPins.value : [])
   const [pinError, setPinError] = useState<string | null>(null)
-  const changePin = (key: string | null): void => {
-    setPinChoice({ key })
-    setPinError(null)
+  const savePins = (next: Pins): void => {
+    setPinsChoice(next)
     Effect.runFork(
-      storePinnedAgent(key).pipe(
+      storePins(next).pipe(
         Effect.catch(() =>
-          Effect.sync(() => setPinError("Couldn't remember the pin on this device; it applies until you reload."))
+          Effect.sync(() => setPinError("Couldn't remember the pins on this device; they apply until you reload."))
         )
       )
     )
   }
+  const agentByKey = new Map(agents.map((agent) => [connectAgentKey(agent), agent]))
+  const pinnable = (agent: ConnectAgent) => ({
+    host: agent.host,
+    id: String(agent.id),
+    key: connectAgentKey(agent),
+    name: agent.name
+  })
+  const changePin = (agent: ConnectAgent, pinned: boolean): void => {
+    setPinError(null)
+    if (!pinned) {
+      savePins(unpin(pins, connectAgentKey(agent)))
+      return
+    }
+    Result.match(pin(pins, pinnable(agent), Date.now()), {
+      onFailure: (refused) =>
+        setPinError(`You can pin up to ${String(refused.limit)} agents. Unpin one to pin ${agent.name}.`),
+      onSuccess: savePins
+    })
+  }
+  const removePin = (key: string): void => {
+    setPinError(null)
+    savePins(unpin(pins, key))
+  }
+  // Each poll records which pinned agents it listed, so an away pin can say when it was last seen. Only a new
+  // poll observes; the pins it reads are the latest, through a ref, so a pin change doesn't re-run it.
+  const pinsNow = useRef(pins)
+  pinsNow.current = pins
+  const observeRef = useRef(savePins)
+  observeRef.current = savePins
+  useEffect(() => {
+    if (current === null) return
+    const observed = observePins(
+      pinsNow.current,
+      current.agents.map((agent) => ({
+        host: agent.host,
+        id: String(agent.id),
+        key: connectAgentKey(agent),
+        name: agent.name
+      })),
+      Date.now()
+    )
+    if (observed !== pinsNow.current) observeRef.current(observed)
+  }, [current])
+  const floatPins = arrangePins(
+    pins,
+    (key) => agentByKey.get(key),
+    PIN_ROOM.float,
+    (key) => key === stageKey
+  )
+  const floatRows = floatPins.shown.length + (floatPins.overflow.length > 0 ? 1 : 0)
+  // A phone's terminal bar has no room for chips beside the name: there the pins sit behind one button, so the
+  // bar never takes a second line from the terminal.
+  const narrow = useNarrowScreen()
+  const barRoom = narrow ? 0 : PIN_ROOM.bar
+  const barPins = arrangePins(
+    pins,
+    (key) => agentByKey.get(key),
+    barRoom,
+    (key) => key === selectedKey
+  )
+  const barPinned = barPins.shown.length + barPins.overflow.length > 0
+  const pinRows: CSSProperties & Record<"--connect-pin-rows", string> = { "--connect-pin-rows": String(floatRows) }
   const stageCrew =
     stageAgent === null
       ? []
@@ -1190,8 +1296,9 @@ export const ConnectSurface = ({
         aria-label="Herdr agents"
         className="connect-agents"
         data-loading={current === null ? "true" : undefined}
-        // Room for the floating pin, set here rather than with :has(), which Firefox 120 (in BROWSER_TARGET) lacks.
-        data-pinned={pinnedAgent !== null && stageKey !== pinnedKey ? "" : undefined}
+        // Room for the floating pins, set here rather than with :has(), which Firefox 120 (in BROWSER_TARGET) lacks.
+        data-pinned={floatRows > 0 ? "" : undefined}
+        style={pinRows}
         onKeyDown={moveAgentFocus}
       >
         <label className="connect-search">
@@ -1283,27 +1390,29 @@ export const ConnectSurface = ({
                 }, 0)
               }}
               onOpen={(agent) => setStageKey(connectAgentKey(agent))}
-              onPinChange={(pinned) => changePin(pinned && stageAgent !== null ? connectAgentKey(stageAgent) : null)}
+              onPinChange={(pinned) => (stageAgent === null ? undefined : changePin(stageAgent, pinned))}
+              pinned={stageKey !== null && pins.some((each) => each.key === stageKey)}
               workGoal={
                 stageAgent === null || currentWork === null
                   ? { _tag: "unavailable", reason: "snapshot_unavailable" }
                   : resolveConnectWorkGoal(stageAgent, currentWork)
               }
-              pinned={stageAgent !== null && connectAgentKey(stageAgent) === pinnedKey}
               onOpenTerminal={(agent) => {
                 setStageKey(null)
                 selectAgent(agent)
               }}
               stale={staleSince !== null}
             />
-            {pinnedAgent === null || stageKey === pinnedKey ? null : (
-              <PinnedAgent
-                agent={pinnedAgent}
-                onOpen={() => setStageKey(pinnedKey)}
-                placement="float"
-                stale={staleSince !== null}
-              />
-            )}
+            <PinnedAgents
+              agentFor={(key) => agentByKey.get(key)}
+              hiddenKey={stageKey}
+              now={Date.now()}
+              onOpen={(agent) => setStageKey(connectAgentKey(agent))}
+              onUnpin={removePin}
+              pins={pins}
+              placement="float"
+              stale={staleSince !== null}
+            />
             {pinError === null ? null : (
               <small className="connect-status-message" data-tone="caution" role="status">
                 {pinError}
@@ -1345,7 +1454,8 @@ export const ConnectSurface = ({
 
   const terminalScreen = (
     <Surface as="section" padding="none" className="terminal-stage">
-      <div className="terminal-bar">
+      {/* Pins take a column of their own, set here rather than with :has(), which Firefox 120 lacks. */}
+      <div className="terminal-bar" data-pinned={barPinned ? "" : undefined}>
         <button className="terminal-back" onClick={disconnect} ref={terminalBackRef} type="button">
           Agents
         </button>
@@ -1368,18 +1478,21 @@ export const ConnectSurface = ({
           tone={connection._tag === "connected" ? "positive" : connection._tag === "failed" ? "critical" : "neutral"}
           size="compact"
         />
-        {/* In the terminal the pin sits in this bar, never over the output or the key rail. */}
-        {pinnedAgent === null || pinnedKey === selectedKey ? null : (
-          <PinnedAgent
-            agent={pinnedAgent}
-            onOpen={() => {
-              disconnect()
-              setStageKey(pinnedKey)
-            }}
-            placement="bar"
-            stale={staleSince !== null}
-          />
-        )}
+        {/* In the terminal the pins sit in this bar, never over the output or the key rail. */}
+        <PinnedAgents
+          agentFor={(key) => agentByKey.get(key)}
+          hiddenKey={selectedKey}
+          now={Date.now()}
+          onOpen={(agent) => {
+            disconnect()
+            setStageKey(connectAgentKey(agent))
+          }}
+          onUnpin={removePin}
+          pins={pins}
+          placement="bar"
+          room={barRoom}
+          stale={staleSince !== null}
+        />
       </div>
       {workspaceFocusFailure === "focus_rejected" ? (
         <small className="connect-status-message" data-tone="critical" role="alert">
