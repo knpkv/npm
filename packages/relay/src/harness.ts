@@ -107,6 +107,39 @@ export class RelayRunNotActive extends Schema.TaggedError<RelayRunNotActive>()("
   runId: Schema.String
 }) {}
 
+/** A failed run's cause and fix, as the stream's RunFailed carries them. */
+interface RunFailure {
+  readonly cause: string
+  readonly fix: string
+}
+
+/**
+ * Why a run failed and what to do, in Relay's own words, for Pi's `reason` code. rly reads the cause aloud,
+ * so it is always one of these sentences: the backend's own message (Pi's `detail`) can carry provider or
+ * model text and is never used.
+ */
+const runFailure = (reason: string): RunFailure => {
+  switch (reason) {
+    case "model_error":
+      return {
+        cause: "The backend returned an error.",
+        fix: "Check the backend in Relay setup (installed and signed in), then send the message again."
+      }
+    case "no_model":
+      return {
+        cause: "No backend is set up for Relay.",
+        fix: "Choose a backend in Relay setup, then send the message again."
+      }
+    case "reset":
+      return { cause: "The conversation was reset before Relay answered.", fix: "Send the message again." }
+    default:
+      return {
+        cause: "The run stopped on an error.",
+        fix: "Send the message again; if it fails again, check the backend in Relay setup."
+      }
+  }
+}
+
 /** The session asked for a backend this product did not configure. */
 export class RelayBackendNotConfigured extends Schema.TaggedError<RelayBackendNotConfigured>()(
   "RelayBackendNotConfigured",
@@ -816,13 +849,7 @@ const sessionEvents = (
         }]
       }
       case "task_failed":
-        return [{
-          _tag: "RunFailed",
-          session,
-          runIds,
-          cause: "The run stopped on an error",
-          fix: "Retry the message; if it fails again, check the backend in setup."
-        }]
+        return [{ _tag: "RunFailed", session, runIds, ...runFailure("task_failed") }]
       default:
         return []
     }
@@ -863,14 +890,7 @@ const sessionEvents = (
       // An abort is the person's cancellation; any other reason is a failure the dock must explain.
       return /abort/iu.test(unanswered.reason)
         ? { _tag: "Cancelled", session, runIds }
-        : {
-          _tag: "RunFailed",
-          session,
-          runIds,
-          // `reason` is Pi's code (`model_error`); `detail` carries the backend's own message when there is one.
-          cause: Predicate.isString(unanswered.detail) ? unanswered.detail : unanswered.reason,
-          fix: "Check the backend in Relay setup (installed and signed in), then send the message again."
-        }
+        : { _tag: "RunFailed", session, runIds, ...runFailure(unanswered.reason) }
     })
   const gate = Stream.fromPubSub(confirmations).pipe(
     Stream.filter(({ conversationId }) => conversationId === session),

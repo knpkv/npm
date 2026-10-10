@@ -134,8 +134,17 @@ const mount = async (conversations: RelayConversations) => {
     if (button === undefined) throw new Error(`no button ${label}`)
     await act(async () => button.click())
   }
+  /** A keyboard or pointer press: the button takes focus, then is clicked. */
+  const press = async (label: string) => {
+    const button = [...host.querySelectorAll("button"), ...portal.querySelectorAll("button")].find(
+      (element) => element.textContent?.trim() === label
+    )
+    if (button === undefined) throw new Error(`no button ${label}`)
+    button.focus()
+    await act(async () => button.click())
+  }
   const unmount = () => act(async () => root.unmount())
-  return { click, find, text, type, unmount }
+  return { click, find, press, text, type, unmount }
 }
 
 describe("RelayConversationPanel", () => {
@@ -323,8 +332,13 @@ describe("RelayConversationPanel", () => {
         reversible: false
       })
     })
-    await panel.click("Prompt agent")
+    await panel.press("Prompt agent")
     expect(panel.text()).toContain("The server didn't answer. Answer again.")
+    // The card remounted under the pressed button: focus goes to its first action, not the page.
+    const focused = document.activeElement
+    expect(focused?.tagName).toBe("BUTTON")
+    expect(focused?.isConnected).toBe(true)
+    expect(focused?.closest('section[role="group"]')).not.toBeNull()
     await panel.click("Prompt agent")
     expect(decisions).toEqual([
       { allow: true, call: "c1" },

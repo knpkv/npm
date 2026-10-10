@@ -38,6 +38,43 @@
   .fleet-shell-brand > .fleet-shell-mark {
     flex: none;
   }
+  /* Relay's launcher, then its status words, centred on the launcher. */
+  .fleet-shell-relay {
+    align-items: center;
+    display: flex;
+    gap: var(--rly-space-12);
+    min-inline-size: var(--rly-space-0);
+  }
+  /* The overlay renders inside the brand; it wraps its own text, never the brand's single line. */
+  .fleet-shell-relay > [data-rly-relay-panel] {
+    white-space: normal;
+  }
+  .fleet-shell-relay-status {
+    display: grid;
+    min-inline-size: var(--rly-space-0);
+  }
+  .fleet-shell-relay-status > * {
+    min-inline-size: var(--rly-space-0);
+    overflow: clip;
+    text-overflow: ellipsis;
+  }
+  /*
+   * Full screen, Relay's composer stays above an on-screen keyboard that covers the page instead of resizing
+   * it (Safari); where the page resizes, --fleet-shell-keyboard is 0. The panel is portaled, so the shell
+   * sets the variable on the root.
+   */
+  [data-rly-relay-panel="fullscreen"] {
+    block-size: calc(100dvh - var(--fleet-shell-keyboard, 0px));
+  }
+  /* Read aloud while the panel is closed; never seen, since the words are already beside the mark. */
+  .fleet-shell-relay-live {
+    block-size: 1px;
+    clip-path: inset(50%);
+    inline-size: 1px;
+    overflow: clip;
+    position: absolute;
+    white-space: nowrap;
+  }
   .fleet-shell-meta {
     align-items: center;
     display: flex;
