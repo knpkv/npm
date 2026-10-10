@@ -3627,6 +3627,10 @@ export const startHttpServer = async (
             yield* tailnetActor(request, config, null)
             yield* sameOrigin(request, expectedOrigin())
           } else {
+            // Only the hub's own WebSocket client dials this path, and it sends no Origin. Every
+            // browser upgrade carries one, so a page open in a browser on the hub node is refused
+            // even though its socket peer is the hub.
+            yield* authorizeOriginlessMutation(request)
             yield* tailnetActor(request, config, [config.approvalHub.nodeId])
           }
           return yield* terminalSelectionFromUrl(url)
