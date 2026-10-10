@@ -1,0 +1,17 @@
+/* rly's font stacks name "Geist" and "Geist Mono" after the shipped variable faces; these aliases
+   point the plain names at the same files so no stack entry resolves to a missing face. */
+@font-face {
+  font-display: optional;
+  font-family: "Geist";
+  font-style: normal;
+  font-weight: 100 900;
+  src: url("../../packages/rly/dist/fonts/geist-latin-wght-normal.woff2") format("woff2-variations");
+}
+
+@font-face {
+  font-display: optional;
+  font-family: "Geist Mono";
+  font-style: normal;
+  font-weight: 100 900;
+  src: url("../../packages/rly/dist/fonts/geist-mono-latin-wght-normal.woff2") format("woff2-variations");
+}
