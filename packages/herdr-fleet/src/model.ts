@@ -155,6 +155,31 @@ export const AgentDelegate = Schema.Struct({
   repository: JobPath,
   prompt: JobText,
   mode: DelegateMode,
+  /** Approval-bound request to create a Work goal before delegation. */
+  newWork: Schema.optionalKey(Schema.Struct({
+    branch: Schema.String.check(
+      Schema.isNonEmpty(),
+      Schema.isMaxLength(256),
+      Schema.isPattern(/^[A-Za-z0-9._/-]+$/),
+      Schema.makeFilter(
+        (value) =>
+          value !== "HEAD" &&
+          !value.startsWith("-") &&
+          !value.startsWith("/") &&
+          !value.endsWith("/") &&
+          !value.endsWith(".") &&
+          !value.includes("//") &&
+          !value.includes("..") &&
+          value.split("/").every((part) => !part.startsWith(".") && !part.endsWith(".lock")),
+        { expected: "a valid Git branch ref" }
+      )
+    ),
+    title: Schema.String.check(
+      Schema.isNonEmpty(),
+      Schema.isMaxLength(4_096),
+      Schema.isPattern(/^[^\p{Cc}\p{Cs}\u2028\u2029]+$/u)
+    )
+  })),
   channel: Schema.optionalKey(Schema.Literal("coordinator_chat"))
 })
 export type AgentDelegate = typeof AgentDelegate.Type

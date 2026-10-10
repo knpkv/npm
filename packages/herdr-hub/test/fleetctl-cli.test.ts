@@ -1,6 +1,9 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Effect } from "effect"
+import { type AgentDelegate, JobPayload, type JobRecord } from "@knpkv/herdr-fleet"
+import { Effect, Schema } from "effect"
 import {
+  formatJobRecord,
+  formatNewWorkGoal,
   formatUsageError,
   jobKinds,
   oneLine,
@@ -13,6 +16,97 @@ import {
 } from "../src/internal/fleetctl-cli.js"
 
 describe("fleetctl invocation", () => {
+  it("escapes terminal controls in New Work summaries for job, follow, and pending submit", () => {
+    const repository = "/repo\u001b[2J\u001b[HFAKE APPROVED\nsecond line\r\u007f\u0085"
+    const payload = Schema.decodeUnknownSync(JobPayload)({
+      kind: "agent.delegate",
+      mode: "work",
+      repository,
+      prompt: "ship",
+      newWork: { branch: "fix/new-work", title: "Create a 🦊 goal" }
+    })
+    const record: JobRecord = {
+      actor: "owner",
+      approvalNonce: null,
+      approvedBy: null,
+      createdAt: 1_000,
+      updatedAt: 2_000,
+      hash: "a".repeat(64),
+      id: "failed-delegate",
+      status: "failed",
+      result: null,
+      error: "operation rejected",
+      payload
+    }
+    const output = formatJobRecord(record)
+    expect(output.replaceAll("\n", "")).not.toMatch(/\p{Cc}/u)
+    const summary = formatNewWorkGoal(payload)
+    expect(summary).toBe(
+      "New Work goal: /repo\\u001b[2J\\u001b[HFAKE APPROVED\\nsecond line\\r\\u007f\\u0085@fix/new-work — Create a 🦊 goal"
+    )
+    expect(output.endsWith(`\n${summary}`)).toBe(true)
+    expect(JSON.parse(output.slice(0, output.lastIndexOf("\n")))).toEqual(record)
+    expect(output.split("\n").length).toBe(JSON.stringify(record, null, 2).split("\n").length + 1)
+    expect(summary).not.toMatch(/\p{Cc}/u)
+    const pending = { ...record, status: "pending_approval", error: null } satisfies JobRecord
+    const approvalUrl = "https://host.example.test/"
+    const pendingOutput = formatJobRecord(pending, approvalUrl)
+    expect(pendingOutput.endsWith(`\n${summary}`)).toBe(true)
+    expect(pendingOutput.replaceAll("\n", "")).not.toMatch(/\p{Cc}/u)
+    expect(JSON.parse(pendingOutput.slice(0, pendingOutput.lastIndexOf("\n")))).toEqual({ ...pending, approvalUrl })
+    expect(formatNewWorkGoal({
+      kind: "agent.delegate",
+      mode: "work",
+      repository: "/repo",
+      prompt: "ship",
+      newWork: { branch: "fix/new-work", title: "Create a 🦊 goal" }
+    })).toBe("New Work goal: /repo@fix/new-work — Create a 🦊 goal")
+    // Defense at the terminal boundary also covers fields supplied directly by typed callers.
+    const controls = Array.from({ length: 32 }, (_, code) => String.fromCharCode(code)).join("") +
+      Array.from({ length: 33 }, (_, code) => String.fromCharCode(127 + code)).join("")
+    expect(formatNewWorkGoal({
+      kind: "agent.delegate",
+      mode: "work",
+      repository: controls,
+      prompt: "ship",
+      newWork: { branch: controls, title: controls }
+    })).not.toMatch(/\p{Cc}/u)
+
+    expect(formatNewWorkGoal({
+      kind: "agent.delegate",
+      mode: "work",
+      repository: "/repo",
+      prompt: "ship",
+      newWork: { branch: "fix/\u0007branch", title: "title\t\u009b" }
+    })).toBe("New Work goal: /repo@fix/\\u0007branch — title\\t\\u009b")
+  })
+
+  it("prints failed job errors for job and follow, including proposed Work goals", () => {
+    const delegate: AgentDelegate = { kind: "agent.delegate", mode: "work", repository: "/repo", prompt: "ship" }
+    const record: JobRecord = {
+      actor: "owner",
+      approvalNonce: null,
+      approvedBy: null,
+      createdAt: 1_000,
+      updatedAt: 2_000,
+      hash: "a".repeat(64),
+      id: "failed-delegate",
+      status: "failed",
+      result: null,
+      error: "CoordinatorWorkGoalUnavailable: no Work goal for this repository",
+      payload: delegate
+    }
+    expect(JSON.parse(formatJobRecord(record))).toMatchObject({ status: "failed", error: record.error })
+    expect(formatJobRecord({
+      ...record,
+      payload: {
+        ...delegate,
+        newWork: { branch: "fix/new-work", title: "Create a goal" }
+      }
+    })).toContain("New Work goal: /repo@fix/new-work — Create a goal")
+    expect(formatJobRecord(record)).toContain(record.error ?? "")
+  })
+
   // Help is a successful answer, not a validation error: plain usage on stdout, exit 0.
   it("treats --help, -h and help as help, for the whole tool and for work", () => {
     for (const args of [["--help"], ["-h"], ["help"], ["status", "--help"]]) {
