@@ -519,6 +519,7 @@ const portfolioHandlersTestLayer = portfolioHandlersLayer.pipe(
 
 const timelineHandlersTestLayer = timelineHandlersLayer.pipe(
   Layer.provide(sessionMiddlewareLayer),
+  Layer.provide(mutationMiddlewareLayer),
   Layer.provide(timelineApplicationLayer)
 )
 
@@ -2172,6 +2173,7 @@ describe("Control Center API handlers", () => {
       })
       const approverLayer = timelineHandlersLayer.pipe(
         Layer.provide(approverMiddlewareLayer),
+        Layer.provide(mutationMiddlewareLayer),
         Layer.provide(Layer.succeed(TimelineReads, {
           detail: () => Effect.die("approver reached Timeline detail application work"),
           page: () => Effect.die("approver reached Timeline page application work")
@@ -2232,6 +2234,7 @@ describe("Control Center API handlers", () => {
       >([])
       const handler = timelineHandlersLayer.pipe(
         Layer.provide(sessionMiddlewareLayer),
+        Layer.provide(mutationMiddlewareLayer),
         Layer.provide(timelineLayer),
         Layer.provide(Layer.succeed(TimelineExportAudits, {
           record: (input) => Ref.update(recorded, (all) => [...all, input])
@@ -2283,6 +2286,7 @@ describe("Control Center API handlers", () => {
       const auditCount = yield* Ref.make(0)
       const handler = timelineHandlersLayer.pipe(
         Layer.provide(sessionMiddlewareLayer),
+        Layer.provide(mutationMiddlewareLayer),
         Layer.provide(Layer.succeed(TimelineReads, {
           detail: () => Effect.die("failed export collection reached Timeline detail work"),
           page: () => Effect.fail(new ApplicationServiceUnavailable({ retryAt: null }))
@@ -2306,7 +2310,13 @@ describe("Control Center API handlers", () => {
     }))
 
   it("applies Timeline download security and attachment headers to web responses", async () => {
-    const authentication = streamAuthentication
+    const csrfToken = "cd".repeat(32)
+    const authentication = Auth.of({
+      ...streamAuthentication,
+      authorizeMutation: (_sessionToken, presented) =>
+        Redacted.value(presented) === csrfToken ? Effect.succeed(session) : Effect.fail(new CredentialRejectedError())
+    })
+    const exportAudits: Array<Parameters<TimelineExportAudits["Service"]["record"]>[0]> = []
     const plugins = PluginAdministration.of({
       configuration: () => Effect.die("not used"),
       configurationMetadata: () => Effect.die("not used"),
@@ -2348,7 +2358,10 @@ describe("Control Center API handlers", () => {
           liveEventsLayer,
           authorizedSharesLayer,
           portfolioLayer,
-          timelineApplicationLayer,
+          timelineLayer,
+          Layer.succeed(TimelineExportAudits, {
+            record: (input) => Effect.sync(() => exportAudits.push(input))
+          }),
           deliveryGraphApplicationLayer,
           agentLayer,
           NodeHttpServer.layerHttpServices,
@@ -2357,14 +2370,21 @@ describe("Control Center API handlers", () => {
       )
     )
     const webHandler = HttpRouter.toWebHandler(webHandlerLayer, { disableLogger: true })
-    const request = (format: "csv" | "json") =>
-      new Request(`http://127.0.0.1:4173/api/v1/timeline/export.${format}?limit=25`, {
-        headers: {
-          cookie: `cc_session=${"ab".repeat(32)}`,
-          host: "127.0.0.1:4173",
-          origin: "http://127.0.0.1:4173"
-        }
+    const request = (
+      format: "csv" | "json",
+      options: { readonly method?: string; readonly origin?: string; readonly csrf?: boolean } = {}
+    ) => {
+      const headers = new Headers({
+        cookie: `cc_session=${"ab".repeat(32)}`,
+        host: "127.0.0.1:4173",
+        origin: options.origin ?? "http://127.0.0.1:4173"
       })
+      if (options.csrf !== false) headers.set("x-csrf-token", csrfToken)
+      return new Request(`http://127.0.0.1:4173/api/v1/timeline/export.${format}?limit=25`, {
+        method: options.method ?? "POST",
+        headers
+      })
+    }
     const artifactRequest = (offset: number) =>
       new Request("http://127.0.0.1:4173/api/v1/codepipeline/artifact", {
         method: "POST",
@@ -2394,6 +2414,15 @@ describe("Control Center API handlers", () => {
         })
       })
     try {
+      // An export writes an audit row, so nothing short of a same-origin, CSRF-proven POST may run it.
+      const rejected = [
+        await webHandler.handler(request("csv", { method: "GET", csrf: false }), requestContext),
+        await webHandler.handler(request("json", { csrf: false }), requestContext),
+        await webHandler.handler(request("json", { origin: "http://attacker.example" }), requestContext)
+      ]
+      assert.deepStrictEqual(rejected.map(({ status }) => status === 200), [false, false, false])
+      assert.deepStrictEqual(exportAudits, [])
+
       const csvResponse = await webHandler.handler(request("csv"), requestContext)
       const jsonResponse = await webHandler.handler(request("json"), requestContext)
       const artifactResponse = await webHandler.handler(artifactRequest(3), requestContext)
@@ -2416,6 +2445,7 @@ describe("Control Center API handlers", () => {
         metadata: { eventCount: 0, eventLimit: 25, truncated: false },
         events: []
       })
+      assert.deepStrictEqual(exportAudits.map(({ format }) => format), ["csv", "json"])
       assert.strictEqual(artifactResponse.headers.get("content-type"), "application/octet-stream")
       assert.strictEqual(
         artifactResponse.headers.get("content-disposition"),
@@ -2446,6 +2476,7 @@ describe("Control Center API handlers", () => {
       const auditCount = yield* Ref.make(0)
       const handler = timelineHandlersLayer.pipe(
         Layer.provide(sessionMiddlewareLayer),
+        Layer.provide(mutationMiddlewareLayer),
         Layer.provide(Layer.succeed(TimelineExportAudits, {
           record: () => Ref.update(auditCount, (count) => count + 1)
         })),
@@ -2478,6 +2509,7 @@ describe("Control Center API handlers", () => {
       })
       const handler = timelineHandlersLayer.pipe(
         Layer.provide(watcherMiddlewareLayer),
+        Layer.provide(mutationMiddlewareLayer),
         Layer.provide(timelineExportAuditsLayer),
         Layer.provide(Layer.succeed(TimelineReads, {
           detail: () => Effect.die("watcher reached Timeline detail work"),
@@ -2505,6 +2537,7 @@ describe("Control Center API handlers", () => {
       })
       const handler = timelineHandlersLayer.pipe(
         Layer.provide(watcherMiddlewareLayer),
+        Layer.provide(mutationMiddlewareLayer),
         Layer.provide(Layer.succeed(TimelineExportAudits, {
           record: () => Ref.update(auditCount, (count) => count + 1)
         })),
@@ -2535,6 +2568,7 @@ describe("Control Center API handlers", () => {
       })
       const handler = timelineHandlersLayer.pipe(
         Layer.provide(agentMiddlewareLayer),
+        Layer.provide(mutationMiddlewareLayer),
         Layer.provide(Layer.succeed(TimelineReads, {
           detail: () => Effect.die("agent owner reached Timeline detail application work"),
           page: () => Effect.die("agent owner reached Timeline export application work")
