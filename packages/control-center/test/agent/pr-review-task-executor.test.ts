@@ -12,8 +12,10 @@ import { Config, Effect, FileSystem, Layer, Path, Result, Schema, Stream, Tracer
 import * as LanguageModel from "effect/ai/LanguageModel"
 import type * as Response from "effect/ai/Response"
 import * as ChildProcess from "effect/process/ChildProcess"
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 
 import * as Predicate from "effect/Predicate"
+import { deflateSync } from "node:zlib"
 import {
   AgentModelId,
   DurableAgentProviderId,
@@ -30,6 +32,11 @@ import {
 } from "../../src/domain/prReview.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
 import { AgentRuntimeRegistry } from "../../src/server/agent/AgentRuntimeRegistry.js"
+import {
+  makePrReviewRevisionReader,
+  type PrReviewRevisionReader,
+  PrReviewRevisionReadError
+} from "../../src/server/agent/internal/PrReviewRevisionReader.js"
 import {
   PrReviewCommandArtifactHandle,
   PrReviewCommandArtifactId,
@@ -375,17 +382,58 @@ const assertSharedNativeReviewContract = (
   )
 }
 
-const makeRealGitSessionLayer = (
+// Records each host-side revision read in `observation.commands` as a readable line.
+const recordRevisions = (
+  observation: SessionObservation,
+  reader: PrReviewRevisionReader
+): PrReviewRevisionReader => {
+  const record = (command: string) => Effect.sync(() => observation.commands.push(command))
+  return {
+    objectType: (revision, path) =>
+      record(`revisions.objectType ${revision}:${path}`).pipe(Effect.andThen(reader.objectType(revision, path))),
+    blob: (revision, path) =>
+      record(`revisions.blob ${revision}:${path}`).pipe(Effect.andThen(reader.blob(revision, path))),
+    diff: (input) =>
+      record(
+        `revisions.diff ${input.base}..${input.head} renames=${String(input.findRenames)} -- ${input.paths.join(" ")}`
+      )
+        .pipe(Effect.andThen(reader.diff(input))),
+    renamedFrom: (input) =>
+      record(`revisions.renamedFrom ${input.base}..${input.head} -- ${input.path}`).pipe(
+        Effect.andThen(reader.renamedFrom(input))
+      ),
+    patchApplies: (revision, patch) =>
+      record(`revisions.patchApplies ${revision}`).pipe(Effect.andThen(reader.patchApplies(revision, patch)))
+  }
+}
+
+/**
+ * A session whose contained commands run in `cwd` and whose revision reads use the host reader over
+ * `revisionRoot` (the same checkout unless a test separates the sandbox copy from the host source).
+ */
+const makeRealGitSessionLayer = Effect.fnUntraced(function*(
   observation: SessionObservation,
   cwd: string,
   baseRevision: string,
-  headRevision: string
-) => {
+  headRevision: string,
+  revisionRoot: string = cwd
+) {
+  const revisions = recordRevisions(
+    observation,
+    makePrReviewRevisionReader(
+      yield* ChildProcessSpawner.ChildProcessSpawner,
+      yield* FileSystem.FileSystem,
+      yield* Path.Path,
+      revisionRoot,
+      yield* Config.String("PATH").pipe(Effect.orDie)
+    )
+  )
   const session: PrReviewSandboxSession = {
     attemptId: "0123456789ab",
     baseRevision,
     headRevision,
     jobId: JOB_ID,
+    revisions,
     listFiles: () => Effect.succeed(output("AGENTS.md\npackages\n")),
     readFile: () => Effect.succeed(output("# Review instructions\n")),
     searchFiles: () => Effect.succeed(output()),
@@ -411,7 +459,7 @@ const makeRealGitSessionLayer = (
       reconcile: () => Effect.succeed({ removedSandboxes: [] })
     })
   )
-}
+})
 
 const makeSessionLayer = (
   observation: SessionObservation,
@@ -486,11 +534,43 @@ const makeSessionLayer = (
       ? output("# Review instructions\n")
       : output("1 file changed\n")
   }
+  const unavailablePath = (path: string) => path.includes("missing.ts") || path.includes("deleted.ts")
+  // Every present blob carries `sourceExcerpt` at the evidence line and filler elsewhere.
+  const presentBlob = new TextEncoder().encode(
+    Array.from({ length: 500 }, (_, index) => index === 41 ? sourceExcerpt : `// line ${String(index + 1)}`)
+      .join("\n") + "\n"
+  )
+  const revisions = recordRevisions(observation, {
+    objectType: (_revision, path) => Effect.succeed(unavailablePath(path) || path === "packages" ? "tree" : "blob"),
+    blob: (_revision, path) => Effect.succeed(unavailablePath(path) ? null : presentBlob),
+    diff: ({ paths }) =>
+      Effect.succeed(
+        paths.some(unavailablePath)
+          ? ""
+          : retainedDiff !== undefined && (retainPrimaryDiff || paths.some((path) => path.includes("paged.ts")))
+          ? retainedDiff
+          : diff
+      ),
+    renamedFrom: () => Effect.succeed(null),
+    patchApplies: () =>
+      replacementFailure === undefined
+        ? Effect.succeed(true)
+        : Effect.fail(
+          new PrReviewRevisionReadError({
+            reason: replacementFailure.reason === "command-timeout"
+              ? "timeout"
+              : replacementFailure.reason === "output-rejected"
+              ? "output-rejected"
+              : "unavailable"
+          })
+        )
+  })
   const session: PrReviewSandboxSession = {
     attemptId: "0123456789ab",
     baseRevision: subject.baseRevision,
     headRevision: subject.headRevision,
     jobId: JOB_ID,
+    revisions,
     listFiles: () =>
       Effect.sync(() => {
         observation.operations.push("listFiles")
@@ -1185,13 +1265,16 @@ describe("PR review task executor", () => {
             })
           )
           assert.isTrue(
-            observation.commands.some((command) => command === `git cat-file -t '${HEAD_REVISION}:packages'`)
+            observation.commands.some((command) => command === `revisions.objectType ${HEAD_REVISION}:packages`)
           )
           assert.isTrue(
             observation.commands.some((command) =>
-              command.startsWith("previous_path=$(git -c core.quotePath=false diff --name-status --find-renames") &&
-              command.includes(`-v target='${EVIDENCE_PATH}'`) &&
-              command.includes(`-- '${EVIDENCE_PATH}' "$previous_path"`)
+              command === `revisions.renamedFrom ${subject.baseRevision}..${HEAD_REVISION} -- ${EVIDENCE_PATH}`
+            )
+          )
+          assert.isTrue(
+            observation.commands.some((command) =>
+              command === `revisions.diff ${subject.baseRevision}..${HEAD_REVISION} renames=true -- ${EVIDENCE_PATH}`
             )
           )
         })
@@ -1286,7 +1369,7 @@ describe("PR review task executor", () => {
         }
       } satisfies ClaimedAgentJob
       const observation: SessionObservation = { commands: [], operations: [], requests: [] }
-      const sessionLayer = makeRealGitSessionLayer(observation, root, baseRevision, headRevision)
+      const sessionLayer = yield* makeRealGitSessionLayer(observation, root, baseRevision, headRevision)
       const executed = yield* runExecutor(
         completeScript({
           schemaVersion: 3,
@@ -1656,11 +1739,7 @@ describe("PR review task executor", () => {
           assert.strictEqual(result.suggestions[0]?.relatedLocations.length, 1)
           assert.strictEqual(result.suggestions[0]?.replacement?.reviewedHead, HEAD_REVISION)
           assert.isTrue(
-            observation.commands.some((command) =>
-              command.includes(`git read-tree '${HEAD_REVISION}'`) &&
-              command.includes("printf '%s\\n' ") &&
-              command.includes("git apply --check --cached")
-            )
+            observation.commands.some((command) => command === `revisions.patchApplies ${HEAD_REVISION}`)
           )
           assert.match(result.notes[0]?.noteId ?? "", /^sha256:[0-9a-f]{64}$/u)
           assert.strictEqual(result.notes[0]?.reason, "low-confidence")
@@ -1671,12 +1750,10 @@ describe("PR review task executor", () => {
           })
           assert.isUndefined(result.notes[1]?.location)
           assert.isUndefined(result.notes[2]?.location)
-          const diffCommands = observation.commands.filter((command) =>
-            command.startsWith("git -c core.quotePath=false diff --unified=0")
-          )
-          assert.isAbove(diffCommands.length, 0)
           assert.isTrue(
-            diffCommands.every((command) => command.includes("--inter-hunk-context=0"))
+            observation.commands.some((command) =>
+              command === `revisions.diff ${subject.baseRevision}..${HEAD_REVISION} renames=false -- ${EVIDENCE_PATH}`
+            )
           )
         })
       ),
@@ -1756,7 +1833,7 @@ describe("PR review task executor", () => {
         operations: [],
         requests: []
       }
-      const sessionLayer = makeRealGitSessionLayer(
+      const sessionLayer = yield* makeRealGitSessionLayer(
         observation,
         root,
         baseRevision,
@@ -1977,12 +2054,10 @@ describe("PR review task executor", () => {
             ["listFiles", "runCommand", "runCommand"]
           )
           assert.isTrue(
-            observation.commands.some((command) => command.startsWith("git -c core.quotePath=false diff --unified=0"))
+            observation.commands.some((command) => command.startsWith("revisions.diff "))
           )
           assert.isTrue(
-            observation.commands.some((command) =>
-              command.startsWith(`git show '${HEAD_REVISION}:${EVIDENCE_PATH}' | sed -n '42,42p'`)
-            )
+            observation.commands.some((command) => command === `revisions.blob ${HEAD_REVISION}:${EVIDENCE_PATH}`)
           )
           assert.strictEqual(observation.requests.length, 1)
           assert.strictEqual(fake.requests.length, 4)
@@ -2052,7 +2127,7 @@ describe("PR review task executor", () => {
     )
   })
 
-  it.effect("propagates a typed sandbox timeout during replacement validation", () => {
+  it.effect("propagates a typed revision-read timeout during replacement validation", () => {
     const observation: SessionObservation = {
       commands: [],
       operations: [],
@@ -2159,7 +2234,7 @@ describe("PR review task executor", () => {
     )
   })
 
-  it.effect("classifies rejected sandbox output as result validation", () => {
+  it.effect("classifies rejected revision-read output as result validation", () => {
     const observation: SessionObservation = {
       commands: [],
       operations: [],
@@ -2438,41 +2513,6 @@ describe("PR review task executor", () => {
     )
   })
 
-  it.effect("fails closed when retained primary evidence cannot be paged", () => {
-    const observation: SessionObservation = {
-      commands: [],
-      operations: [],
-      requests: []
-    }
-    const retainedDiff = `@@ -0,0 +42 @@\n+${EVIDENCE_EXCERPT}\n`
-    return runExecutor(
-      completeScript(),
-      observation,
-      Effect.gen(function*() {
-        const executor = yield* PrReviewTaskExecutor
-        return yield* executor.execute(claim)
-      }),
-      undefined,
-      undefined,
-      makeSessionLayer(
-        observation,
-        undefined,
-        undefined,
-        undefined,
-        retainedDiff,
-        true,
-        new PrReviewSandboxSessionError({ reason: "artifact-unavailable" })
-      )
-    ).pipe(
-      Effect.tap(({ result }) =>
-        Effect.sync(() => {
-          assert.deepStrictEqual(result.suggestions, [])
-        })
-      ),
-      Effect.asVoid
-    )
-  })
-
   it.effect("reads evidence from the immutable head and drops excerpt mismatches", () => {
     const observation: SessionObservation = {
       commands: [],
@@ -2607,5 +2647,108 @@ describe("PR review task executor", () => {
       ),
       Effect.asVoid
     )
+  })
+
+  it.layer(NodeServices.layer)((it) => {
+    it.effect("validates evidence against the host checkout, not the agent-writable sandbox copy", () =>
+      Effect.scoped(
+        Effect.gen(function*() {
+          const fileSystem = yield* FileSystem.FileSystem
+          const path = yield* Path.Path
+          const root = yield* fileSystem.realPath(
+            yield* fileSystem.makeTempDirectoryScoped({ prefix: "pr-review-tamper-" })
+          )
+          const git = (cwd: string, command: string) =>
+            runShellCommand(cwd, command).pipe(
+              Effect.tap((result) => Effect.sync(() => assert.strictEqual(result.exitCode, 0, result.stderr.text))),
+              Effect.map((result) => result.stdout.text.trim())
+            )
+          const commit = "git -c user.name=Review -c user.email=review@example.invalid commit --quiet"
+          const source = (value: string) =>
+            `${Array.from({ length: 41 }, (_, index) => `// line ${String(index + 1)}`).join("\n")}\n` +
+            `const unsafe = ${value}\n`
+          const forgedLine = "const unsafe = forged"
+
+          // The host's source checkout: the sandbox mounts it read-only.
+          const hostSource = path.join(root, "source")
+          yield* fileSystem.makeDirectory(path.join(hostSource, path.dirname(EVIDENCE_PATH)), { recursive: true })
+          yield* fileSystem.writeFileString(path.join(hostSource, "AGENTS.md"), "# Review instructions\n")
+          yield* fileSystem.writeFileString(path.join(hostSource, EVIDENCE_PATH), source("false"))
+          yield* git(hostSource, `git init --quiet && git add --all && ${commit} -m base`)
+          const baseRevision = yield* git(hostSource, "git rev-parse HEAD")
+          yield* fileSystem.writeFileString(path.join(hostSource, EVIDENCE_PATH), source("true"))
+          yield* git(hostSource, `git add --all && ${commit} -m head`)
+          const headRevision = yield* git(hostSource, "git rev-parse HEAD")
+          const headBlob = yield* git(hostSource, `git rev-parse '${headRevision}:${EVIDENCE_PATH}'`)
+          const forgedContent = source("forged")
+
+          // The agent's writable copy, tampered two ways that leave every revision id unchanged.
+          const copy = (name: string) => {
+            const target = path.join(root, name)
+            return git(root, `git clone --quiet --no-hardlinks '${hostSource}' '${target}'`).pipe(Effect.as(target))
+          }
+          const replaced = yield* copy("replaced")
+          yield* fileSystem.writeFileString(path.join(root, "forged.ts"), forgedContent)
+          const forgedBlob = yield* git(replaced, `git hash-object -w '${path.join(root, "forged.ts")}'`)
+          yield* git(replaced, `git replace '${headBlob}' '${forgedBlob}'`)
+          const overwritten = yield* copy("overwritten")
+          const looseObject = path.join(overwritten, ".git", "objects", headBlob.slice(0, 2), headBlob.slice(2))
+          yield* fileSystem.chmod(looseObject, 0o644)
+          yield* fileSystem.writeFile(
+            looseObject,
+            deflateSync(
+              new TextEncoder().encode(
+                `blob ${String(new TextEncoder().encode(forgedContent).byteLength)}\0${forgedContent}`
+              )
+            )
+          )
+          for (const sandboxCopy of [replaced, overwritten]) {
+            assert.include(yield* git(sandboxCopy, `git show '${headRevision}:${EVIDENCE_PATH}'`), forgedLine)
+          }
+
+          const reviewSubject = { ...subject, baseRevision, headRevision }
+          const actualClaim = {
+            ...claim,
+            context: {
+              ...claim.context,
+              subjectRevision: headRevision,
+              task: { ...claim.context.task, subject: reviewSubject }
+            }
+          } satisfies ClaimedAgentJob
+          const review = (sandboxCopy: string, excerpt: string) =>
+            Effect.gen(function*() {
+              const observation: SessionObservation = { commands: [], operations: [], requests: [] }
+              const sessionLayer = yield* makeRealGitSessionLayer(
+                observation,
+                sandboxCopy,
+                baseRevision,
+                headRevision,
+                hostSource
+              )
+              const executed = yield* runExecutor(
+                completeScript({
+                  schemaVersion: 3,
+                  completion: { status: "complete" },
+                  suggestions: [{ ...suggestion, evidence: { ...suggestion.evidence, excerpt } }],
+                  notes: []
+                }, reviewSubject),
+                observation,
+                Effect.gen(function*() {
+                  const executor = yield* PrReviewTaskExecutor
+                  return yield* executor.execute(actualClaim)
+                }),
+                undefined,
+                undefined,
+                sessionLayer
+              )
+              return executed.result.suggestions.length
+            })
+
+          for (const sandboxCopy of [replaced, overwritten]) {
+            assert.strictEqual(yield* review(sandboxCopy, forgedLine), 0, sandboxCopy)
+            assert.strictEqual(yield* review(sandboxCopy, EVIDENCE_EXCERPT), 1, sandboxCopy)
+          }
+        })
+      ))
   })
 })

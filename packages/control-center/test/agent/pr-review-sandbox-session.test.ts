@@ -1,7 +1,11 @@
 /** @effect-diagnostics strictEffectProvide:skip-file */
+import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
+import * as NodePath from "@effect/platform-node/NodePath"
+import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
-import { DateTime, Effect, Layer, Logger, Result, Schema, Sink, Stream, Tracer } from "effect"
+import { DateTime, Effect, FileSystem, Layer, Logger, Path, Result, Schema, Sink, Stream, Tracer } from "effect"
 import * as ConfigProvider from "effect/ConfigProvider"
+import type * as PlatformError from "effect/PlatformError"
 import * as ChildProcess from "effect/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import * as TestClock from "effect/testing/TestClock"
@@ -74,6 +78,43 @@ const makeHandle = (
     unref: Effect.succeed(Effect.void)
   })
 
+const fixtureGitEnvironment = {
+  GIT_AUTHOR_EMAIL: "review-fixture@example.invalid",
+  GIT_AUTHOR_NAME: "Review Fixture",
+  GIT_COMMITTER_EMAIL: "review-fixture@example.invalid",
+  GIT_COMMITTER_NAME: "Review Fixture",
+  GIT_CONFIG_GLOBAL: "/dev/null",
+  GIT_CONFIG_NOSYSTEM: "1",
+  HOME: "/nonexistent",
+  LANG: "C",
+  LC_ALL: "C",
+  PATH: "/usr/bin:/bin"
+} satisfies Readonly<Record<string, string>>
+
+const runFixtureGit = (args: ReadonlyArray<string>): Effect.Effect<
+  string,
+  PlatformError.PlatformError,
+  ChildProcessSpawner.ChildProcessSpawner
+> =>
+  Effect.scoped(
+    Effect.gen(function*() {
+      const handle = yield* ChildProcess.make("git", args, {
+        env: fixtureGitEnvironment,
+        extendEnv: false,
+        stderr: "pipe",
+        stdin: "ignore",
+        stdout: "pipe"
+      })
+      const [exitCode, stderr, stdout] = yield* Effect.all([
+        handle.exitCode,
+        handle.stderr.pipe(Stream.decodeText(), Stream.mkString),
+        handle.stdout.pipe(Stream.decodeText(), Stream.mkString)
+      ])
+      assert.strictEqual(exitCode, ChildProcessSpawner.ExitCode(0), stderr)
+      return stdout.trim()
+    })
+  )
+
 const fakeSbxLayer = (
   calls: Array<ChildProcess.StandardCommand>,
   responseRules: ReadonlyArray<FakeResponseRule> = [],
@@ -125,7 +166,8 @@ const testLayer = (
   }).pipe(
     Layer.provide(fakeSbxLayer(calls, responseRules, listedSandboxes)),
     Layer.provide(reviewCommandArtifactTestLayer()),
-    Layer.provide(reviewSourceLayer)
+    Layer.provide(reviewSourceLayer),
+    Layer.provide([NodeFileSystem.layer, NodePath.layer])
   )
 
 const request = {
@@ -863,4 +905,78 @@ describe("PrReviewSandboxSessions", () => {
         assert.deepStrictEqual(calls, [])
       }
     }))
+
+  it.effect("runs contained commands without agent-written HOME startup files", () =>
+    Effect.scoped(
+      Effect.gen(function*() {
+        const fileSystem = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const hostSpawner = yield* ChildProcessSpawner.ChildProcessSpawner
+        const fixture = yield* fileSystem.realPath(
+          yield* fileSystem.makeTempDirectoryScoped({ prefix: "pr-review-replace-refs-" })
+        )
+        const repository = path.join(fixture, "repository")
+        yield* fileSystem.makeDirectory(repository)
+        const git = (...args: ReadonlyArray<string>) => runFixtureGit(["-C", repository, ...args])
+        yield* git("init", "--quiet")
+        yield* fileSystem.writeFileString(path.join(repository, "review.ts"), "export const value = 1\n")
+        yield* git("add", "review.ts")
+        yield* git("commit", "--quiet", "-m", "base")
+        const baseRevision = yield* git("rev-parse", "HEAD")
+        yield* fileSystem.writeFileString(path.join(repository, "review.ts"), "export const value = 2\n")
+        yield* git("commit", "--quiet", "-am", "head")
+        const headRevision = yield* git("rev-parse", "HEAD")
+        // HOME is agent-writable; a login shell would run this before every command.
+        const home = path.join(fixture, "home")
+        yield* fileSystem.makeDirectory(home)
+        yield* fileSystem.writeFileString(
+          path.join(home, ".profile"),
+          "git() { printf 'export const value = 3\\n'; }\n"
+        )
+
+        // Runs each contained command's argv, from `env -i` onwards, in the fixture clone and HOME.
+        const containedSpawner = ChildProcessSpawner.make((command) => {
+          if (!ChildProcess.isStandardCommand(command)) return Effect.die("expected a standard command")
+          const environmentStart = command.args.indexOf("env")
+          if (command.args[0] !== "exec" || environmentStart < 0) return Effect.succeed(makeHandle({}))
+          const contained = command.args
+            .slice(environmentStart + 1)
+            .map((argument) => argument === "HOME=/tmp" ? `HOME=${home}` : argument)
+          assert.include(contained, `HOME=${home}`)
+          return hostSpawner.spawn(
+            ChildProcess.make(command.args[environmentStart]!, contained, {
+              ...command.options,
+              cwd: repository
+            })
+          )
+        })
+        const observed = yield* Effect.gen(function*() {
+          const sessions = yield* PrReviewSandboxSessions
+          return yield* sessions.withSession(
+            { ...request, baseRevision, headRevision },
+            (session) =>
+              Effect.all([
+                session.runCommand(`git cat-file -p '${headRevision}:review.ts'`),
+                session.runCommand(
+                  `git diff --no-ext-diff --no-textconv --no-color ${baseRevision} ${headRevision} -- review.ts`
+                )
+              ])
+          )
+        }).pipe(
+          Effect.provide(
+            prReviewSandboxSessionsLayer({ executable: "sbx", template: "review-template" }).pipe(
+              Layer.provide(Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, containedSpawner)),
+              Layer.provide(reviewCommandArtifactTestLayer()),
+              Layer.provide(sourceLayer),
+              Layer.provide([NodeFileSystem.layer, NodePath.layer])
+            )
+          )
+        )
+
+        const [content, diff] = observed
+        assert.strictEqual(content.exitCode, 0, content.stderr.text)
+        assert.strictEqual(content.stdout.text, "export const value = 2\n")
+        assert.include(diff.stdout.text, "+export const value = 2")
+      })
+    ).pipe(Effect.provide(NodeServices.layer)))
 })
