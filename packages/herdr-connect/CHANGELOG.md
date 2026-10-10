@@ -1,5 +1,37 @@
 # @knpkv/herdr-connect
 
+## 0.12.0
+
+### Minor Changes
+
+- [#764](https://github.com/knpkv/npm/pull/764) [`b08f713`](https://github.com/knpkv/npm/commit/b08f713a08f44c11a0f90528996faf162e7a96c6) Thanks [@konopkov](https://github.com/konopkov)! - Retain compact closed-agent records after two complete host reads confirm at least five minutes of absence. Expose bounded archive pages through the authenticated hub listener and remove records when the same agent returns. Older peers remain visible but supply no closure evidence until they report complete inventories. Failed writes restart that host's closure grace period after recovery; restarting the store requires fresh absence evidence and retains existing archive records.
+
+- [#767](https://github.com/knpkv/npm/pull/767) [`241c5c7`](https://github.com/knpkv/npm/commit/241c5c7af802fb427fca1ac4e40a86151b8527f0) Thanks [@konopkov](https://github.com/konopkov)! - Group agents by recorded family, keep filtered ancestry visible, and show lineage and owned pull requests on the stage. Compact the phone directory and its filters; creatures carry row state with accessible words and forced-colour glyphs.
+
+  Match the Connect design with an attention heading, one-column outlined families, inline activity times and shared missing-primary groups. A bad lineage edge no longer blanks the directory: each issue is labelled, while duplicate own identities alone cannot open a stage or terminal.
+
+- [#752](https://github.com/knpkv/npm/pull/752) [`20cb874`](https://github.com/knpkv/npm/commit/20cb8746e9b9519b3a0dc371ec654c79a874df95) Thanks [@konopkov](https://github.com/konopkov)! - Connect pins more than one agent. Each pin is its own chip, in the order you pinned them, with its own unpin button; Delete or Backspace on a focused chip unpins it too. Over the directory the chips stack in the corner, clear of the phone's safe area; in the terminal they sit in its bar as characters only, or on a phone behind a single "Pins N" button, so the bar never takes a line from the terminal and never covers the output. Past three chips (two in the terminal's bar) the rest wait behind a "+N" button, and a pinned agent that has left the directory shows there, dimmed, with when it was last seen, so a pin never disappears. Up to eight agents can be pinned; pinning a ninth asks you to unpin one first. A pin saved by the earlier single-pin version carries over and says it hasn't been seen until a poll lists its agent.
+
+- [#779](https://github.com/knpkv/npm/pull/779) [`05281e2`](https://github.com/knpkv/npm/commit/05281e2b90cd59c4373cb6e5aa79dcb8242c49a9) Thanks [@konopkov](https://github.com/konopkov)! - Add a one-shot Shift modifier to the terminal key rail. Shift+Tab cycles modes, shifted arrows preserve their modifiers, Shift+Enter inserts a newline with CSI-u, and Shift uppercases a typed letter. Shift combines with Ctrl or Alt; existing Ctrl and Alt sequences stay unchanged.
+
+- [#772](https://github.com/knpkv/npm/pull/772) [`a947727`](https://github.com/knpkv/npm/commit/a9477277535a0543caf5d70babc41acda60ee315) Thanks [@konopkov](https://github.com/konopkov)! - Export the reusable Connect UI components from the browser-safe surface entry.
+
+- [#771](https://github.com/knpkv/npm/pull/771) [`27bd371`](https://github.com/knpkv/npm/commit/27bd3714a526256705da5147872a0e7b68dae8c5) Thanks [@konopkov](https://github.com/konopkov)! - Expose the dashboard, activity, approval, refresh, and conversation UI through the public API.
+  Expose the character, agent stage, pinned agents, limits, and usage UI through the public API.
+
+- [#769](https://github.com/knpkv/npm/pull/769) [`09eb563`](https://github.com/knpkv/npm/commit/09eb56339ed68e9ac6c420947e9f617c4aa6a36d) Thanks [@konopkov](https://github.com/konopkov)! - Add seeded tapered brows to agent creatures, with state expressions, synchronized glance motion, static reduced motion, and opaque forced-colour rendering.
+
+- [#754](https://github.com/knpkv/npm/pull/754) [`5013de5`](https://github.com/knpkv/npm/commit/5013de5bee7f341bc11d86ef3194eb8a37912777) Thanks [@konopkov](https://github.com/konopkov)! - Work and Connect link both ways. A Work goal's "Open <agent> in Connect" link now opens that agent's stage in Connect, its terminal one tap away; a Connect link with `open=stage` opens the stage, and links without it still open the terminal. An agent's stage links back to its Work goal when the board has exactly one.
+
+### Patch Changes
+
+- [#762](https://github.com/knpkv/npm/pull/762) [`29c8bc1`](https://github.com/knpkv/npm/commit/29c8bc1212de8592f30462a0e86280a05afcf27b) Thanks [@konopkov](https://github.com/konopkov)! - Connect in the hub uses a phone's full width. On screens up to 40rem the hub shell keeps one 16px gutter instead of 32px, and the embedded Connect panel adds none of its own, so an agent's row spans the screen less 32px. The Status options keep to one line whatever their counts, scrolling sideways rather than wrapping; host names still wrap so a long one stays readable.
+- Updated dependencies [[`d3530ad`](https://github.com/knpkv/npm/commit/d3530ad9473b768a637603dc6ad023ca05347373), [`6644cb7`](https://github.com/knpkv/npm/commit/6644cb74218d7daf7f618f1da69dc30e4aa3d93a), [`4ebe301`](https://github.com/knpkv/npm/commit/4ebe30154220bff53ec507a0d70c5f8f4a543c5a), [`3ba4e78`](https://github.com/knpkv/npm/commit/3ba4e78663b026f101f929ef41294a48b6bafc5a), [`bd86c66`](https://github.com/knpkv/npm/commit/bd86c6696678b8c5469727d646096381406f1179), [`5013de5`](https://github.com/knpkv/npm/commit/5013de5bee7f341bc11d86ef3194eb8a37912777), [`8017b49`](https://github.com/knpkv/npm/commit/8017b490395ea15e3949b946ebe8f5313b5d165b)]:
+  - @knpkv/agent-usage@0.9.0
+  - @knpkv/rly@0.20.0
+  - @knpkv/herdr-fleet@0.10.0
+  - @knpkv/herdr-work@0.11.0
+
 ## 0.11.1
 
 ### Patch Changes

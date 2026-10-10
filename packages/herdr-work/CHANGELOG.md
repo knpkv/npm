@@ -1,5 +1,18 @@
 # @knpkv/herdr-work
 
+## 0.11.0
+
+### Minor Changes
+
+- [#765](https://github.com/knpkv/npm/pull/765) [`bd86c66`](https://github.com/knpkv/npm/commit/bd86c6696678b8c5469727d646096381406f1179) Thanks [@konopkov](https://github.com/konopkov)! - Show goal delivery steps and observed checks and review with their read time in the Work inspector. Group the board as plain rows, keep phone status filters on one scrolling line, and distinguish retained finished goals from response and retention omissions. The hub supplies its own host to the board header.
+
+### Patch Changes
+
+- [#754](https://github.com/knpkv/npm/pull/754) [`5013de5`](https://github.com/knpkv/npm/commit/5013de5bee7f341bc11d86ef3194eb8a37912777) Thanks [@konopkov](https://github.com/konopkov)! - Work and Connect link both ways. A Work goal's "Open <agent> in Connect" link now opens that agent's stage in Connect, its terminal one tap away; a Connect link with `open=stage` opens the stage, and links without it still open the terminal. An agent's stage links back to its Work goal when the board has exactly one.
+- Updated dependencies [[`6644cb7`](https://github.com/knpkv/npm/commit/6644cb74218d7daf7f618f1da69dc30e4aa3d93a), [`3ba4e78`](https://github.com/knpkv/npm/commit/3ba4e78663b026f101f929ef41294a48b6bafc5a), [`8017b49`](https://github.com/knpkv/npm/commit/8017b490395ea15e3949b946ebe8f5313b5d165b)]:
+  - @knpkv/rly@0.20.0
+  - @knpkv/herdr-fleet@0.10.0
+
 ## 0.10.0
 
 ### Minor Changes
