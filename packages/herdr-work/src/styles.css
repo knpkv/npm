@@ -97,17 +97,31 @@
   }
 
   .work-rows {
-    border-block-start: 1px solid var(--rly-color-border-1);
     display: grid;
+    gap: var(--rly-space-12);
     list-style: none;
     margin: var(--rly-space-0);
     padding: var(--rly-space-0);
   }
 
+  .work-goal-card {
+    background: var(--rly-color-surface-1);
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-overlay);
+    display: grid;
+    gap: var(--rly-space-8);
+    min-inline-size: var(--rly-space-0);
+    padding: var(--rly-space-12) var(--rly-space-16);
+  }
+
+  .work-goal-card[data-selected="true"] {
+    background: var(--rly-color-surface-2);
+    border-color: var(--rly-color-border-2);
+  }
+
   .work-board-row {
     background: none;
     border: 0;
-    border-block-end: 1px solid var(--rly-color-border-1);
     color: inherit;
     cursor: pointer;
     display: grid;
@@ -116,15 +130,9 @@
     grid-template-areas: "title state" "caption caption";
     grid-template-columns: minmax(0, 1fr) auto;
     inline-size: 100%;
-    padding: var(--rly-space-12) var(--rly-space-8);
+    padding: var(--rly-space-0);
     text-align: start;
     text-decoration: none;
-  }
-
-  .work-board-row:is([aria-pressed="true"], [aria-current="true"]) {
-    background: var(--rly-color-surface-2);
-    outline: 1px solid var(--rly-color-border-2);
-    outline-offset: -1px;
   }
 
   /* Long unbroken values (branch names, titles) wrap inside their column. The grids below bound
@@ -173,12 +181,68 @@
     color: var(--rly-color-blocked-ink);
   }
 
-  /* State as a word, quiet in rows. */
+  /* StateLabel owns the shared state ink and icon. */
   .work-row-state {
-    color: var(--rly-color-text-2);
-    font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
-      var(--rly-type-label-font);
+    align-self: start;
     grid-area: state;
+  }
+
+  .work-row-progress {
+    display: grid;
+    gap: var(--rly-space-4);
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    list-style: none;
+    margin: var(--rly-space-0);
+    padding: var(--rly-space-0);
+  }
+
+  .work-row-progress > li {
+    color: var(--rly-color-text-2);
+    display: grid;
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+      var(--rly-type-meta-font);
+    gap: var(--rly-space-4);
+    overflow-wrap: break-word;
+  }
+
+  .work-row-progress > li::before {
+    background: var(--rly-color-surface-3);
+    block-size: var(--rly-space-4);
+    border-radius: var(--rly-radius-tag);
+    content: "";
+  }
+
+  .work-row-progress > li[data-reached="true"]::before {
+    background: var(--rly-color-text-2);
+  }
+
+  .work-row-progress > li:is([aria-current="step"], [data-stopped="true"]) {
+    color: var(--rly-color-text-1);
+    font-weight: var(--rly-type-label-weight);
+  }
+
+  .work-row-evidence {
+    align-items: center;
+    color: var(--rly-color-text-2);
+    display: flex;
+    flex-wrap: wrap;
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+      var(--rly-type-meta-font);
+    gap: var(--rly-space-4) var(--rly-space-12);
+  }
+
+  .work-row-read {
+    font-variant-numeric: tabular-nums;
+  }
+
+  @media (forced-colors: active) {
+    .work-row-progress > li::before {
+      border: 1px solid GrayText;
+    }
+
+    .work-row-progress > li[data-reached="true"]::before {
+      background: CanvasText;
+    }
   }
 
   /* In the detail the state word takes its ink; in a row the group title and caption already say it. */

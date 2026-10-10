@@ -3,7 +3,13 @@
 import { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, describe, expect, it } from "vitest"
-import type { WorkGoal, WorkGoalObservedEntry, WorkSnapshot, WorkSnapshots } from "../src/model.js"
+import type {
+  WorkGoal,
+  WorkGoalObservedEntry,
+  WorkPullRequestObservation,
+  WorkSnapshot,
+  WorkSnapshots
+} from "../src/model.js"
 import { encodeWorkBoardNavigationGoal } from "../src/navigation.js"
 import { WorkBoard } from "../src/view.js"
 import { workTriage } from "../src/work-triage.js"
@@ -114,6 +120,189 @@ describe("Work triage with the observed overlay", () => {
 })
 
 describe("Work board with the observed overlay", () => {
+  it("shows four goal steps, using merge evidence and Done for completed non-PR work", async () => {
+    const host = await mount(
+      snapshotOf(
+        [
+          goal("planned", { delivery: "local", state: "planned" }),
+          goal("working", { delivery: "local" }),
+          goal("review", { state: "review" }),
+          goal("merged"),
+          goal("done", { delivery: "local", state: "completed" }),
+          goal("closed", { state: "abandoned" }),
+          goal("stopped-local", { delivery: "local", state: "abandoned" }),
+          goal("recorded-merge", { delivery: "merged", state: "completed" }),
+          goal("completed-pr", { state: "completed" })
+        ],
+        { observed: [merged("merged", NOW - 2 * HOUR)] }
+      )
+    )
+    const progress = (id: string) =>
+      [...host.querySelectorAll(".work-goal-card")]
+        .find((card) => card.querySelector(".work-board-row")?.textContent?.includes(`Goal ${id}`))
+        ?.querySelector(".work-row-progress")
+    expect([...(progress("planned")?.querySelectorAll("li") ?? [])].map(({ textContent }) => textContent)).toEqual([
+      "Planned",
+      "In progress",
+      "In review",
+      "Done"
+    ])
+    for (const [id, current] of [
+      ["planned", "Planned"],
+      ["working", "In progress"],
+      ["review", "In review"],
+      ["merged", "Merged"],
+      ["done", "Done"],
+      ["recorded-merge", "Merged"],
+      ["completed-pr", "In review"]
+    ] satisfies ReadonlyArray<readonly [string, string]>) {
+      expect(progress(id)?.querySelector('[aria-current="step"]')?.textContent).toBe(current)
+    }
+    expect(progress("closed")?.querySelector('[aria-current="step"]')).toBeNull()
+    expect(progress("closed")?.querySelector('[data-stopped="true"]')?.getAttribute("aria-label")).toBe(
+      "In review, abandoned here"
+    )
+    expect(progress("closed")?.querySelector('[data-stopped="true"]')?.getAttribute("data-reached")).toBe("false")
+    expect(progress("closed")?.querySelector("li:last-child")?.getAttribute("data-reached")).toBe("false")
+    expect(progress("stopped-local")?.querySelector('[aria-current="step"]')).toBeNull()
+    expect(progress("stopped-local")?.querySelector('[data-stopped="true"]')?.getAttribute("aria-label")).toBe(
+      "In progress, abandoned here"
+    )
+  })
+
+  it("shows CI and review facts with their confirmation time, and Unknown without observations", async () => {
+    const read = merged("read", NOW - 2 * HOUR)
+    const host = await mount(
+      snapshotOf(
+        [
+          goal("read"),
+          goal("unread", {
+            review: { state: "approved", summary: null, updatedAt: NOW, url: null }
+          })
+        ],
+        { observed: [read] }
+      )
+    )
+    const evidence = (id: string) =>
+      [...host.querySelectorAll(".work-goal-card")]
+        .find((card) => card.querySelector(".work-board-row")?.textContent?.includes(`Goal ${id}`))
+        ?.querySelector(".work-row-evidence")
+    expect(evidence("read")?.textContent).toContain("CI Passing")
+    expect(evidence("read")?.textContent).toContain("Review Approved")
+    expect(evidence("read")?.querySelector("time")?.getAttribute("datetime")).toBe(new Date(NOW - HOUR).toISOString())
+    expect(evidence("unread")?.textContent).toContain("CI Unknown")
+    expect(evidence("unread")?.textContent).toContain("Review Unknown")
+    expect(evidence("unread")?.textContent).toContain("Not read")
+    expect(evidence("unread")?.querySelector("time")).toBeNull()
+  })
+
+  it("counts retained finished goals and both distinct omission sources, regardless of the active filter", async () => {
+    const host = await mount(
+      snapshotOf(
+        [
+          goal("working"),
+          goal("done", { state: "completed" }),
+          goal("abandoned", { state: "abandoned" }),
+          goal("merged")
+        ],
+        { finishedOmitted: 5, goalsOmitted: 12, observed: [merged("merged", NOW - 2 * HOUR)] }
+      )
+    )
+    expect(host.querySelector(".work-finished-count")?.textContent).toBe(
+      "3 finished goals · 5 older not shown · 12 more not in this read"
+    )
+    const working = [...host.querySelectorAll<HTMLButtonElement>(".work-status-filter")].find(
+      ({ textContent }) => textContent === "Working"
+    )
+    await act(async () => working?.click())
+    expect(host.querySelector(".work-finished-count")?.textContent).toBe(
+      "3 finished goals · 5 older not shown · 12 more not in this read"
+    )
+  })
+
+  it("keeps non-PR work quiet and hides zero omission counts", async () => {
+    const host = await mount(
+      snapshotOf([goal("local", { delivery: "local" })], { observed: [], finishedOmitted: 0, goalsOmitted: 0 })
+    )
+    expect(host.querySelector(".work-row-evidence")).toBeNull()
+    expect(host.querySelector(".work-finished-count")?.textContent).toBe("0 finished goals")
+  })
+
+  it("keeps observed CI and review words in their shared tones, including an unreadable source's last read", async () => {
+    const cases: ReadonlyArray<{
+      readonly checks: WorkPullRequestObservation["checks"]
+      readonly review: WorkPullRequestObservation["review"]
+      readonly ciWord: string
+      readonly reviewWord: string
+      readonly ciTone: string
+      readonly reviewTone: string
+    }> = [
+      {
+        checks: "none",
+        review: "not_requested",
+        ciWord: "No checks",
+        reviewWord: "Not requested",
+        ciTone: "neutral",
+        reviewTone: "neutral"
+      },
+      {
+        checks: "pending",
+        review: "requested",
+        ciWord: "Running",
+        reviewWord: "Requested",
+        ciTone: "progress",
+        reviewTone: "caution"
+      },
+      {
+        checks: "failing",
+        review: "changes_requested",
+        ciWord: "Failing",
+        reviewWord: "Changes requested",
+        ciTone: "critical",
+        reviewTone: "critical"
+      },
+      {
+        checks: "passing",
+        review: "approved",
+        ciWord: "Passing",
+        reviewWord: "Approved",
+        ciTone: "positive",
+        reviewTone: "positive"
+      }
+    ]
+    for (const entry of cases) {
+      const observed: WorkGoalObservedEntry = {
+        ...nothing,
+        displayState: "review",
+        goalId: "g1",
+        pullRequest: {
+          confirmedAt: NOW - HOUR,
+          observedAt: NOW - 2 * HOUR,
+          fact: {
+            _tag: "pull_request",
+            branch: "feat/g1",
+            checks: entry.checks,
+            closedAt: null,
+            head: "a".repeat(40),
+            pullRequest: 42,
+            repository: "knpkv/npm",
+            review: entry.review,
+            state: "open"
+          }
+        },
+        unknown: { lastGoodAt: NOW - HOUR, reason: "rate limited", since: NOW, source: "github" }
+      }
+      const host = await mount(snapshotOf([goal("g1")], { observed: [observed] }))
+      const evidence = host.querySelector(".work-row-evidence")
+      expect(evidence?.querySelector(".work-ci-fact")?.textContent).toBe(`CI ${entry.ciWord}`)
+      expect(evidence?.querySelector(".work-ci-fact")?.className).toContain(entry.ciTone)
+      expect(evidence?.querySelector(".work-review-fact")?.textContent).toBe(`Review ${entry.reviewWord}`)
+      expect(evidence?.querySelector(".work-review-fact")?.className).toContain(entry.reviewTone)
+      expect(evidence?.textContent).toContain("Last read")
+      expect(evidence?.querySelector("time")?.getAttribute("datetime")).toBe(new Date(NOW - HOUR).toISOString())
+    }
+  })
+
   it("says when live state is missing or trimmed, and only on the live window", async () => {
     expect((await mount(snapshotOf([goal("g1")], {}))).textContent).toContain(
       "Live state not available: this hub sends no observed facts"
@@ -126,19 +315,21 @@ describe("Work board with the observed overlay", () => {
 
   it("says how many older goals a large board left out, so a goal leaving the view is never silent", async () => {
     expect((await mount(snapshotOf([goal("g1")], { goalsOmitted: 12, observed: [] }))).textContent).toContain(
-      "12 older goals not shown."
+      "12 more goals not in this read."
     )
     expect((await mount(snapshotOf([goal("g1")], { goalsOmitted: 1, observed: [] }))).textContent).toContain(
-      "1 older goal not shown."
+      "1 more goal not in this read."
     )
-    expect((await mount(snapshotOf([goal("g1")], { observed: [] }))).textContent).not.toContain("not shown")
+    expect(
+      (await mount(snapshotOf([goal("g1")], { observed: [] }))).querySelector(".work-page-intro")?.textContent
+    ).not.toContain("not shown")
   })
 
   it("reads as whole sentences when live state and a cut board are both reported", async () => {
     for (const overlay of [{ goalsOmitted: 12, observed: [], observedOmitted: 3 }, { goalsOmitted: 12 }]) {
       const header =
         (await mount(snapshotOf([goal("g1")], overlay))).querySelector(".work-page-intro")?.textContent ?? ""
-      expect(header).toContain("12 older goals not shown.")
+      expect(header).toContain("12 more goals not in this read.")
       expect(header).not.toContain("..")
     }
   })

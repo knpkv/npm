@@ -1,4 +1,5 @@
 import { Button, StateLabel, Text, type RlyStateTone } from "@knpkv/rly/primitives"
+import type { RlyIconName } from "@knpkv/rly/foundations"
 import {
   DecisionBar,
   Hero,
@@ -27,7 +28,7 @@ import type {
   WorkSnapshotWindow,
   WorkBlocker
 } from "./model.js"
-import { activityShownOf, finishedNotShown, goalsNotShown } from "./model.js"
+import { activityShownOf, finishedNotShown } from "./model.js"
 import { decodeWorkBoardNavigationGoal, encodeWorkBoardNavigationGoal } from "./navigation.js"
 import { workRequestClockText, workRequestDecidability, type WorkRequestDecisions } from "./request-decision.js"
 import { displayStateOf, observedFor } from "./display-state.js"
@@ -124,6 +125,28 @@ const reviewPresentation = {
   approved: { label: "Approved", tone: "positive" }
 } satisfies Readonly<Record<NonNullable<WorkReview>["state"], { readonly label: string; readonly tone: RlyStateTone }>>
 
+const checksPresentation = {
+  none: { label: "No checks", tone: "neutral" },
+  pending: { label: "Running", tone: "progress" },
+  passing: { label: "Passing", tone: "positive" },
+  failing: { label: "Failing", tone: "critical" }
+} satisfies Readonly<
+  Record<WorkPullRequestObservation["checks"], { readonly label: string; readonly tone: RlyStateTone }>
+>
+
+const unknownPresentation = { label: "Unknown", tone: "neutral" } satisfies {
+  readonly label: string
+  readonly tone: RlyStateTone
+}
+
+const stateIcon = {
+  neutral: "minus",
+  positive: "check",
+  critical: "alert",
+  caution: "clock",
+  progress: "loader"
+} satisfies Readonly<Record<RlyStateTone, RlyIconName>>
+
 const requestPresentation = {
   open: { label: "Open", tone: "caution" },
   approved: { label: "Approved", tone: "positive" },
@@ -196,6 +219,97 @@ const stagesFor = (goal: WorkGoal, shown: WorkDisplayState): ReadonlyArray<RlySt
     state: index < current ? "done" : index === current ? "now" : "not yet",
     tone: index === current ? displayPresentation[shown].tone : "neutral"
   }))
+}
+
+/** Four goal steps. Completion alone cannot prove a pull request merged; abandoned work stops at its last step. */
+const GoalProgress = ({
+  goal,
+  observed
+}: {
+  readonly goal: WorkGoal
+  readonly observed: WorkGoalObserved | null
+}): ReactElement => {
+  const shown = observed?.displayState ?? goal.state
+  const merged = observed?.pullRequest?.fact.state === "merged" || goal.delivery === "merged"
+  const hasPullRequest = merged || observed?.pullRequest != null || goal.delivery === "pull_request"
+  const finished = !hasPullRequest && (shown === "completed" || shown === "deployed")
+  const current =
+    merged || finished
+      ? 3
+      : hasPullRequest || goal.delivery === "review" || shown === "review"
+        ? 2
+        : shown === "planned"
+          ? 0
+          : 1
+  const names = ["Planned", "In progress", "In review", hasPullRequest ? "Merged" : "Done"]
+  const abandoned = shown === "abandoned"
+  return (
+    <ol aria-label={`Progress of ${goal.title}`} className="work-row-progress" role="list">
+      {names.map((name, index) => (
+        <li
+          aria-current={!abandoned && index === current ? "step" : undefined}
+          aria-label={abandoned && index === current ? `${name}, abandoned here` : undefined}
+          data-reached={index < current || (!abandoned && index === current)}
+          data-stopped={abandoned && index === current}
+          key={name}
+        >
+          {name}
+        </li>
+      ))}
+    </ol>
+  )
+}
+
+/** CI and review come only from an observed PR. Its confirmation time says when those facts were last read. */
+const GoalEvidence = ({
+  goal,
+  observed
+}: {
+  readonly goal: WorkGoal
+  readonly observed: WorkGoalObserved | null
+}): ReactElement | null => {
+  const pullRequest = observed?.pullRequest
+  if (pullRequest == null && goal.delivery !== "pull_request" && goal.delivery !== "merged") return null
+  const ci = pullRequest == null ? unknownPresentation : checksPresentation[pullRequest.fact.checks]
+  const review = pullRequest == null ? unknownPresentation : reviewPresentation[pullRequest.fact.review]
+  return (
+    <div className="work-row-evidence">
+      {pullRequest == null ? null : (
+        <span>
+          #{pullRequest.fact.pullRequest} {pullRequestStateLabel[pullRequest.fact.state]}
+        </span>
+      )}
+      <StateLabel
+        className="work-ci-fact"
+        icon={stateIcon[ci.tone]}
+        label={`CI ${ci.label}`}
+        size="compact"
+        tone={ci.tone}
+      />
+      <StateLabel
+        className="work-review-fact"
+        icon={stateIcon[review.tone]}
+        label={`Review ${review.label}`}
+        size="compact"
+        tone={review.tone}
+      />
+      <span className="work-row-read">
+        {pullRequest == null ? (
+          "Not read"
+        ) : (
+          <>
+            {observed?.unknown?.source === "github" ? "Last read" : "Read"}{" "}
+            <time
+              dateTime={new Date(pullRequest.confirmedAt).toISOString()}
+              title={formatTimestamp(pullRequest.confirmedAt)}
+            >
+              {formatTimestamp(pullRequest.confirmedAt)}
+            </time>
+          </>
+        )}
+      </span>
+    </div>
+  )
 }
 
 /**
@@ -686,7 +800,10 @@ const headerSentences = (window: WorkSnapshotWindow, snapshot: WorkSnapshot): Re
           ? []
           : [`Live state shown for the most recently updated goals; ${String(snapshot.observedOmitted)} left out.`]
   const finished = snapshot.finishedOmitted === undefined ? [] : [`${finishedNotShown(snapshot.finishedOmitted)}.`]
-  const cut = snapshot.goalsOmitted === undefined ? [] : [`${goalsNotShown(snapshot.goalsOmitted)}.`]
+  const cut =
+    snapshot.goalsOmitted === undefined
+      ? []
+      : [`${snapshot.goalsOmitted} more ${snapshot.goalsOmitted === 1 ? "goal" : "goals"} not in this read.`]
   return [when, ...live, ...finished, ...cut]
 }
 
@@ -749,6 +866,9 @@ export const WorkBoard = ({
   const selectedLinkRowRef = useRef<HTMLAnchorElement | null>(null)
   const selectedRowRef = useRef<HTMLButtonElement | null>(null)
   const triage = workTriage(snapshot)
+  const finishedGoalCount = triage.rows.filter(
+    ({ displayState }) => displayState === "completed" || displayState === "deployed" || displayState === "abandoned"
+  ).length
   // The overlay by goal, built once per snapshot: rows, captions and filters all read it.
   const overlay: ReadonlyMap<string, WorkGoalObserved> = new Map(
     (snapshot.observed ?? []).map((entry) => [entry.goalId, entry])
@@ -805,52 +925,64 @@ export const WorkBoard = ({
           </span>
           {goal.title}
         </span>
-        <span className="work-row-state" data-tone={displayPresentation[shownOf(goal)].tone}>
-          {displayPresentation[shownOf(goal)].label}
-        </span>
+        <StateLabel
+          className="work-row-state"
+          icon={stateIcon[displayPresentation[shownOf(goal)].tone]}
+          label={displayPresentation[shownOf(goal)].label}
+          size="compact"
+          tone={displayPresentation[shownOf(goal)].tone}
+        />
         <span className="work-row-caption" data-blocking={caption.blocking}>
           {caption.text}
           {familyLabelForGoal(snapshot, goal) === null ? null : `, ${familyLabelForGoal(snapshot, goal)}`}
         </span>
       </>
     )
-    return navigation === undefined ? (
-      <button
-        aria-controls={detailsOpen && selected?.id === goal.id ? "work-goal-details" : undefined}
-        aria-expanded={detailsOpen && selected?.id === goal.id}
-        aria-pressed={selected?.id === goal.id}
-        className="work-board-row"
-        id={selected?.id === goal.id ? selectedGoalFragment : undefined}
-        onClick={() => {
-          setDetailsOpen(true)
-          setSelectedId(goal.id)
-        }}
-        ref={selected?.id === goal.id ? selectedRowRef : undefined}
-        type="button"
-      >
-        {content}
-      </button>
-    ) : (
-      <a
-        aria-current={selected?.id === goal.id ? "true" : undefined}
-        className="work-board-row"
-        href={navigation({
-          goalId:
-            statusFilter === "all" && visibleGoalCount === initialVisibleGoalCount
-              ? goal.id
-              : encodeWorkBoardNavigationGoal({
-                  detailsOpen: true,
-                  goalId: goal.id,
-                  statusFilter,
-                  visibleGoalCount
-                }),
-          window
-        })}
-        id={selected?.id === goal.id ? selectedGoalFragment : undefined}
-        ref={selected?.id === goal.id ? selectedLinkRowRef : undefined}
-      >
-        {content}
-      </a>
+    const control =
+      navigation === undefined ? (
+        <button
+          aria-controls={detailsOpen && selected?.id === goal.id ? "work-goal-details" : undefined}
+          aria-expanded={detailsOpen && selected?.id === goal.id}
+          aria-pressed={selected?.id === goal.id}
+          className="work-board-row"
+          id={selected?.id === goal.id ? selectedGoalFragment : undefined}
+          onClick={() => {
+            setDetailsOpen(true)
+            setSelectedId(goal.id)
+          }}
+          ref={selected?.id === goal.id ? selectedRowRef : undefined}
+          type="button"
+        >
+          {content}
+        </button>
+      ) : (
+        <a
+          aria-current={selected?.id === goal.id ? "true" : undefined}
+          className="work-board-row"
+          href={navigation({
+            goalId:
+              statusFilter === "all" && visibleGoalCount === initialVisibleGoalCount
+                ? goal.id
+                : encodeWorkBoardNavigationGoal({
+                    detailsOpen: true,
+                    goalId: goal.id,
+                    statusFilter,
+                    visibleGoalCount
+                  }),
+            window
+          })}
+          id={selected?.id === goal.id ? selectedGoalFragment : undefined}
+          ref={selected?.id === goal.id ? selectedLinkRowRef : undefined}
+        >
+          {content}
+        </a>
+      )
+    return (
+      <div className="work-goal-card" data-selected={selected?.id === goal.id}>
+        {control}
+        <GoalProgress goal={goal} observed={observedOf(goal)} />
+        <GoalEvidence goal={goal} observed={observedOf(goal)} />
+      </div>
     )
   }
 
@@ -998,6 +1130,11 @@ export const WorkBoard = ({
                 </ul>
               </section>
             ))}
+            <Text className="work-finished-count" tone="secondary" variant="meta">
+              {finishedGoalCount} finished {finishedGoalCount === 1 ? "goal" : "goals"}
+              {(snapshot.finishedOmitted ?? 0) > 0 ? ` · ${snapshot.finishedOmitted} older not shown` : null}
+              {(snapshot.goalsOmitted ?? 0) > 0 ? ` · ${snapshot.goalsOmitted} more not in this read` : null}
+            </Text>
             {visibleGoals.length < filteredGoals.length ? (
               navigation === undefined ? (
                 <Button

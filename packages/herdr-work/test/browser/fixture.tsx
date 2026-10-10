@@ -6,6 +6,7 @@ import { createRoot } from "react-dom/client"
 import type { WorkGoal, WorkGoalObservedEntry, WorkPullRequestObservation, WorkSnapshot } from "../../src/model.js"
 import { WorkSnapshots } from "../../src/model.js"
 import { WorkBoard } from "../../src/view.js"
+import { workFidelitySnapshots, workFidelityStates } from "./work-fidelity-fixture.js"
 
 class MissingWorkFixtureRootError extends Schema.TaggedError<MissingWorkFixtureRootError>()(
   "MissingWorkFixtureRootError",
@@ -32,6 +33,7 @@ const goal = (index: number): WorkGoal => {
 }
 
 const searchParams = new URL(window.location.href).searchParams
+const fidelityState = workFidelityStates.find((state) => state === searchParams.get("fidelity"))
 
 // `?long` gives the first listed goal (goal-2, blocked) an unbroken branch and a long title, to prove they wrap inside the page.
 const longNames = new URL(window.location.href).searchParams.has("long")
@@ -112,25 +114,32 @@ if (rootElement === null) throw new MissingWorkFixtureRootError({ selector: "#ro
 const selectedGoalId = searchParams.get("goal")
 const requestedWindow = searchParams.get("window")
 const initialWindow: WorkSnapshot["window"] =
-  requestedWindow === "day" || requestedWindow === "week" || requestedWindow === "month" ? requestedWindow : "now"
-const navigation = searchParams.has("navigation")
-  ? ({
-      goalId,
-      window: snapshotWindow
-    }: {
-      readonly goalId: string | null
-      readonly window: WorkSnapshot["window"]
-    }) => {
-      const target = new URLSearchParams({ navigation: "", window: snapshotWindow })
-      if (goalId !== null) target.set("goal", goalId)
-      return `?${target.toString()}`
-    }
-  : undefined
+  fidelityState === "historical"
+    ? "day"
+    : requestedWindow === "day" || requestedWindow === "week" || requestedWindow === "month"
+      ? requestedWindow
+      : "now"
+const navigation =
+  searchParams.has("navigation") || fidelityState === "read-only"
+    ? ({
+        goalId,
+        window: snapshotWindow
+      }: {
+        readonly goalId: string | null
+        readonly window: WorkSnapshot["window"]
+      }) => {
+        const target = new URLSearchParams({ navigation: "", window: snapshotWindow })
+        if (fidelityState !== undefined) target.set("fidelity", fidelityState)
+        if (goalId !== null) target.set("goal", goalId)
+        return `?${target.toString()}`
+      }
+    : undefined
 
 const render = (boardSnapshots: typeof WorkSnapshots.Type) =>
   createRoot(rootElement).render(
     <WorkBoard
-      initialGoalId={selectedGoalId}
+      externalLinks={fidelityState === "read-only" ? "disabled" : "enabled"}
+      initialGoalId={selectedGoalId ?? (fidelityState === "detail" ? "usage" : null)}
       initialWindow={initialWindow}
       {...(navigation === undefined ? {} : { navigation })}
       snapshots={boardSnapshots}
@@ -142,4 +151,10 @@ const render = (boardSnapshots: typeof WorkSnapshots.Type) =>
 // file the glob is empty and the fixture data renders.
 const liveFiles = import.meta.glob<unknown>("./zz-live-work.json", { eager: true, import: "default" })
 const live = Object.values(liveFiles)[0]
-render(searchParams.has("live") && live !== undefined ? Schema.decodeUnknownSync(WorkSnapshots)(live) : snapshots)
+render(
+  fidelityState === undefined
+    ? searchParams.has("live") && live !== undefined
+      ? Schema.decodeUnknownSync(WorkSnapshots)(live)
+      : snapshots
+    : workFidelitySnapshots(fidelityState)
+)
