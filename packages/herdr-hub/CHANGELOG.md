@@ -1,5 +1,20 @@
 # @knpkv/herdr-hub
 
+## 0.18.0
+
+### Minor Changes
+
+- [#743](https://github.com/knpkv/npm/pull/743) [`646b0f0`](https://github.com/knpkv/npm/commit/646b0f0aa3082cbdfe916e9c9ba22de2882cbc3a) Thanks [@konopkov](https://github.com/konopkov)! - The hub's masthead mark is now Relay's launcher. It shows what Relay is doing and opens the fleet conversation in rly's panel with a click or Ctrl/⌘+J (left to the terminal while Connect shows). Relay's status is announced only while the panel is closed. `get_work_board` says that goals finished more than a day ago are not counted.
+
+### Patch Changes
+
+- [#747](https://github.com/knpkv/npm/pull/747) [`375d10f`](https://github.com/knpkv/npm/commit/375d10fcd34d3b2a3e411251a4acfb314f01ce2a) Thanks [@konopkov](https://github.com/konopkov)! - The closed Relay launcher announces each run once, when it starts (including the run a queued message starts), instead of at every tool boundary as its words change between "Reading…", "Answering…" and "Working…". The words beside the mark still follow the run.
+
+- [#746](https://github.com/knpkv/npm/pull/746) [`8a3fec2`](https://github.com/knpkv/npm/commit/8a3fec2e72fda7e61c4fbc8d4e9f83ec48e75fd2) Thanks [@konopkov](https://github.com/konopkov)! - Republish: npm left 0.17.0 staged and never made it visible, so this release carries the same code.
+- Updated dependencies [[`646b0f0`](https://github.com/knpkv/npm/commit/646b0f0aa3082cbdfe916e9c9ba22de2882cbc3a), [`646b0f0`](https://github.com/knpkv/npm/commit/646b0f0aa3082cbdfe916e9c9ba22de2882cbc3a)]:
+  - @knpkv/relay-product@0.5.1
+  - @knpkv/relay@0.2.1
+
 ## 0.17.0
 
 ### Minor Changes

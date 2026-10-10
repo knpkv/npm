@@ -63,9 +63,32 @@ describe("Creature", () => {
         <Creature host="a_b" id="x" size="row" state="working" />
       </>
     )
-    const ids = [...markup.matchAll(/<radialGradient[^>]* id="([^"]+)"/g)].map((match) => match[1])
-    expect(ids).toHaveLength(6)
-    expect(new Set(ids).size).toBe(6)
+    const ids = [...markup.matchAll(/<(?:radialGradient|linearGradient|clipPath)[^>]* id="([^"]+)"/g)].map(
+      (match) => match[1]
+    )
+    expect(ids.length).toBeGreaterThan(2)
+    expect(new Set(ids).size).toBe(ids.length)
+  })
+
+  // A face inside a scaling group stretches with the body: that is the squashed-eye look this rig exists to avoid.
+  it("keeps the face out of every group that scales", () => {
+    const markup = renderToStaticMarkup(<Creature arrived host="nix" id="a1" size="stage" state="waiting" />)
+    const face = markup.indexOf('class="connect-creature-face"')
+    const squash = markup.indexOf('class="connect-creature-squash"')
+    expect(face).toBeGreaterThan(-1)
+    expect(squash).toBeGreaterThan(-1)
+    // The body's groups close before the face opens: the face is their sibling, not their child.
+    const body = markup.slice(squash, face)
+    expect(body.split("<g").length).toBe(body.split("</g>").length)
+  })
+
+  // A gaze not clipped to its eye paints iris over skin when it looks aside; lids painted over the eye show as
+  // discs in another shade, so each eye closes as an aperture onto the body beneath.
+  it("clips each eye's gaze to its white and closes the eye as an aperture", () => {
+    const markup = renderToStaticMarkup(<Creature host="nix" id="a1" size="stage" state="ready" />)
+    for (const clip of ["eye", "upper", "lower", "socket"]) {
+      expect(markup.match(new RegExp(`clip-path="url\\(#[^)]+-${clip}-\\d\\)"`, "g")), clip).toHaveLength(2)
+    }
   })
 
   it("draws every row's agent, and marks them all stale when the directory couldn't refresh", () => {

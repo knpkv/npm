@@ -1,5 +1,13 @@
 # @knpkv/relay-product
 
+## 0.5.1
+
+### Patch Changes
+
+- [#743](https://github.com/knpkv/npm/pull/743) [`646b0f0`](https://github.com/knpkv/npm/commit/646b0f0aa3082cbdfe916e9c9ba22de2882cbc3a) Thanks [@konopkov](https://github.com/konopkov)! - After a confirmation's answer fails and its card resets, focus moves to the card's first action instead of falling to the page, unless the person has already moved it elsewhere.
+- Updated dependencies [[`646b0f0`](https://github.com/knpkv/npm/commit/646b0f0aa3082cbdfe916e9c9ba22de2882cbc3a)]:
+  - @knpkv/relay@0.2.1
+
 ## 0.5.0
 
 ### Minor Changes
