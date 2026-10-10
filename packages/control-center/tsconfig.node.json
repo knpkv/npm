@@ -26,7 +26,8 @@
     "../../browser-target.ts",
     "../../vite-font-preload.ts",
     "../rly/src/tokens/fonts.ts",
-    "../../vitest.workspace-sources.ts"
+    "../../vitest.workspace-sources.ts",
+    "../../scripts/staged-inputs.ts"
   ],
   "exclude": ["dist", "node_modules", "test/client"],
   "references": [{ "path": "../ai-runtime/tsconfig.json" }, { "path": "../control-center-sql/tsconfig.build.json" }]

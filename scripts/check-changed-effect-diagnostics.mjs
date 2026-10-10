@@ -13,6 +13,7 @@ import * as Option from "effect/Option"
 import * as Path from "effect/Path"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
+import * as Stdio from "effect/Stdio"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 class ChangedEffectDiagnosticsError extends Data.TaggedError("ChangedEffectDiagnosticsError") {
@@ -301,17 +302,34 @@ export const resolveMergeBase = Effect.fn("ChangedEffectDiagnostics.resolveMerge
   return yield* fail("Could not resolve a merge base for changed Effect diagnostics")
 })
 
-export const changedFiles = Effect.fn("ChangedEffectDiagnostics.changedFiles")(function* (git, mergeBase) {
-  // The working tree against the base: committed, staged and unstaged changes alike, the same comparison
-  // changedLines makes.
-  const output = yield* git(["diff", "--name-only", "-z", "--diff-filter=ACMR", mergeBase])
+/** Local staged scope selects index changes against HEAD; branch/CI scope retains all changes against the base. */
+export const changedFiles = Effect.fn("ChangedEffectDiagnostics.changedFiles")(function* (
+  git,
+  mergeBase,
+  staged = false
+) {
+  const output = yield* git([
+    "diff",
+    ...(staged ? ["--cached"] : []),
+    "--name-only",
+    "-z",
+    "--diff-filter=ACMR",
+    ...(staged ? [] : [mergeBase])
+  ])
   return [...new Set(output.split("\0").filter(isCheckedSource))].toSorted()
 })
 
-export const changedLines = Effect.fn("ChangedEffectDiagnostics.changedLines")(function* (git, mergeBase, files) {
+/** Staged files retain the branch/merge line baseline, so incoming merge lines do not count as this branch's edits. */
+export const changedLines = Effect.fn("ChangedEffectDiagnostics.changedLines")(function* (
+  git,
+  mergeBase,
+  files,
+  staged = false
+) {
   if (files.length === 0) return new Map()
   const diff = yield* git([
     "diff",
+    ...(staged ? ["--cached"] : []),
     "--unified=0",
     "--no-color",
     "--no-ext-diff",
@@ -372,7 +390,14 @@ export const inspectFiles = Effect.fn("ChangedEffectDiagnostics.inspectFiles")(
   }
 )
 
+/** Only the local staged flag changes selection; reject unknown flags rather than silently checking another scope. */
+export const diagnosticScope = (args) =>
+  args.length === 0 ? "branch" : args.length === 1 && args[0] === "--staged" ? "staged" : undefined
+
 const program = Effect.gen(function* () {
+  const scope = diagnosticScope(yield* (yield* Stdio.Stdio).args)
+  if (scope === undefined) return yield* fail("usage: node scripts/check-changed-effect-diagnostics.mjs [--staged]")
+  const staged = scope === "staged"
   const path = yield* Path.Path
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
   const scriptPath = yield* path.fromFileUrl(new URL(import.meta.url))
@@ -380,7 +405,7 @@ const program = Effect.gen(function* () {
   const executable = path.join(repositoryRoot, "node_modules", ".bin", "effect-language-service")
   const git = yield* makeGit(repositoryRoot)
   const mergeBase = yield* resolveMergeBase(git)
-  const files = yield* changedFiles(git, mergeBase)
+  const files = yield* changedFiles(git, mergeBase, staged)
   const records = yield* inspectFiles(
     files,
     (file) => inspectFile(spawner, executable, repositoryRoot, file),
@@ -388,7 +413,7 @@ const program = Effect.gen(function* () {
     Console.error
   )
   const diagnostics = validateDiagnostics(
-    diagnosticsOnChangedLines(records, yield* changedLines(git, mergeBase, files))
+    diagnosticsOnChangedLines(records, yield* changedLines(git, mergeBase, files, staged))
   )
   if (diagnostics.length > 0) {
     return yield* fail(`Changed Effect diagnostics failed:\n- ${diagnostics.join("\n- ")}`)

@@ -5,7 +5,7 @@
  * tsx or Bun, so its linked executable used to crash with ERR_MODULE_NOT_FOUND before printing a
  * line. Each case waits for a line only the program itself prints, on stdout or stderr, which proves
  * its whole import graph resolved. Run after `pnpm build`; an executable that is not built is
- * reported as one "build … first" line.
+ * reported as one "build … first" line. Repeat --package <workspace-name> to scope cases by owner.
  */
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime"
 import * as NodeServices from "@effect/platform-node/NodeServices"
@@ -19,6 +19,7 @@ import * as Path from "effect/Path"
 import * as Predicate from "effect/Predicate"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import * as Stream from "effect/Stream"
+import * as Stdio from "effect/Stdio"
 import { createServer } from "node:net"
 
 import { packagesRoot, workspacePackages } from "./workspace-manifests.mjs"
@@ -47,26 +48,72 @@ const freePort = Effect.callback((resume) => {
  * Each case's ready line names its program, so Node's own crash trailer ("Node.js v24.0.0") never
  * matches.
  */
-const cases = [
-  { name: "codecommit", bin: "codecommit/dist/src/bin.js", args: ["--version"], ready: /^codecommit v\d+\.\d+\.\d+$/ },
-  { name: "jcf", bin: "jira-clockify/dist/src/bin.js", args: ["--version"], ready: /^jcf v\d+\.\d+\.\d+$/ },
-  { name: "agent-usage", bin: "agent-usage/dist/main.js", args: ["--version"], ready: /^agent-usage v\d+\.\d+\.\d+$/ },
+export const workspaceBinCases = [
   {
+    owner: "@knpkv/codecommit",
+    name: "codecommit",
+    bin: "codecommit/dist/src/bin.js",
+    args: ["--version"],
+    ready: /^codecommit v\d+\.\d+\.\d+$/
+  },
+  {
+    owner: "@knpkv/jira-clockify",
+    name: "jcf",
+    bin: "jira-clockify/dist/src/bin.js",
+    args: ["--version"],
+    ready: /^jcf v\d+\.\d+\.\d+$/
+  },
+  {
+    owner: "@knpkv/agent-usage",
+    name: "agent-usage",
+    bin: "agent-usage/dist/main.js",
+    args: ["--version"],
+    ready: /^agent-usage v\d+\.\d+\.\d+$/
+  },
+  {
+    owner: "@knpkv/jcf-web",
     name: "jcf-web",
     bin: "jcf-web/dist/main.js",
     args: [],
     ready: /^jcf week view: http:\/\/127\.0\.0\.1:\d+\//,
     env: (port) => ({ PORT: String(port) })
   },
-  { name: "codecommit-mock", bin: "codecommit-mock/dist/cli.js", args: [], ready: /^CodeCommit mock listening at / },
+  {
+    owner: "@knpkv/codecommit-mock",
+    name: "codecommit-mock",
+    bin: "codecommit-mock/dist/cli.js",
+    args: [],
+    ready: /^CodeCommit mock listening at /
+  },
   // An argument it does not take: it prints its usage and exits without touching any state.
   {
+    owner: "@knpkv/control-center",
     name: "control-center",
     bin: "control-center/dist/server/server/cli.js",
     args: ["--version"],
     ready: /^Usage: control-center /
   }
 ]
+
+/** No filter runs every executable; an explicit owning-package list runs only its cases. */
+export const selectBinCases = (owners) =>
+  owners === undefined ? workspaceBinCases : workspaceBinCases.filter((binCase) => owners.includes(binCase.owner))
+
+/** Repeated --package flags scope the local gate; malformed arguments fail closed. */
+export const parseBinArguments = (args) => {
+  const owners = []
+  for (let index = 0; index < args.length; index += 2) {
+    if (
+      args[index] !== "--package" ||
+      args[index + 1] === undefined ||
+      args[index + 1] === "" ||
+      args[index + 1].startsWith("--")
+    )
+      return null
+    owners.push(args[index + 1])
+  }
+  return args.length === 0 ? undefined : owners
+}
 
 const lines = (bytes) => Stream.splitLines(Stream.decodeText(bytes))
 
@@ -123,8 +170,12 @@ const runCase = (binCase) =>
   )
 
 const program = Effect.gen(function* () {
+  const stdio = yield* Stdio.Stdio
+  const owners = parseBinArguments(yield* stdio.args)
+  if (owners === null)
+    return yield* new BinsFailed({ reason: "usage: node scripts/test-workspace-bins.mjs [--package <name>]..." })
   const failures = []
-  for (const binCase of cases) {
+  for (const binCase of selectBinCases(owners)) {
     const reason = yield* runCase(binCase).pipe(Effect.catch((error) => Effect.succeed(error.message ?? String(error))))
     if (reason === undefined) yield* Console.log(`${binCase.name}: loads under Node`)
     else failures.push(`${binCase.name} (${binCase.bin}) ${reason}`)
