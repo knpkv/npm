@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "@effect/vitest"
 import { makeDeterministicLanguageModel } from "@knpkv/ai-runtime"
 import {
   connectAgentPageMaxRecords,
+  ConnectArchivePage,
   FleetConnectAgentPage,
   FleetLimits,
   FleetUsage,
@@ -1854,6 +1855,172 @@ esac
           rmSync(root, { force: true, recursive: true })
         })
     ).pipe(provideNodeServices)
+  })
+
+  it.effect("archives confirmed closures through the authenticated listener and rejects other listeners and malformed cursors", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-http-archive-"))
+    const tailscaleCommand = join(root, "tailscale-test")
+    const identityMode = join(root, "identity-mode")
+    writeFileSync(identityMode, "allowed")
+    writeFileSync(
+      tailscaleCommand,
+      `#!/bin/sh
+case "$1" in
+  ip) printf '%s\n' '127.0.0.1' ;;
+  whois)
+    if [ "$(cat '${identityMode}')" = allowed ]; then
+      printf '%s\n' '{"Node":{"StableID":"node-phone"},"UserProfile":{"LoginName":"user@example.test"}}'
+    else
+      printf '%s\n' '{"Node":{"StableID":"node-phone"},"UserProfile":{"LoginName":"outsider@example.test"}}'
+    fi ;;
+  status) printf '%s\n' '{"Peer":{},"Self":{"HostName":"SER8","ID":"node-ser8","Online":true,"TailscaleIPs":["127.0.0.1"]}}' ;;
+esac
+`,
+      { mode: 0o700 }
+    )
+    const hostConfig: HostConfiguration = {
+      ...config(root),
+      allowedUsers: ["user@example.test"],
+      approvalHub: { host: "SER8", nodeId: "node-ser8", url: "https://ser8.example.test:0/" },
+      approvalPort: 0,
+      approvalTls: directTls,
+      applyMachines: ["SER8"],
+      crossHost: true,
+      host: "SER8",
+      machines: [{ host: "SER8", nodeId: "node-ser8" }],
+      tailscaleCommand
+    }
+    let observedAt = 0
+    let present = true
+    let partial = false
+    const archiveOperations: HostOperations = {
+      ...operations,
+      listAgents: () =>
+        Effect.succeed({
+          available: true,
+          error: partial ? "incomplete inventory" : null,
+          agents: [
+            {
+              activityRevision: 1,
+              agentId: "agent-staying",
+              kind: "codex",
+              name: "staying",
+              paneId: "w1:p2",
+              parentAgentId: null,
+              relation: null,
+              status: "working",
+              work: "project"
+            },
+            ...(present ?
+              [{
+                activityRevision: 1,
+                agentId: "agent-archive",
+                kind: "codex",
+                name: "worker",
+                paneId: "w1:p1",
+                parentAgentId: null,
+                relation: null,
+                status: "working",
+                work: "project"
+              }] :
+              [])
+          ]
+        })
+    }
+    return Effect.scoped(Effect.gen(function*() {
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { force: true, recursive: true })))
+      const store = yield* Effect.acquireRelease(
+        JobStore.open(join(root, "jobs.sqlite")),
+        (opened) => Effect.sync(() => opened.close())
+      )
+      const fleet = yield* makeFleetService({
+        approvalEnabled: true,
+        host: "SER8",
+        operations: archiveOperations,
+        store
+      })
+      const server = yield* Effect.acquireRelease(
+        Effect.promise(() =>
+          startHttpServer(hostConfig, fleet, assets, {
+            terminalConnector: unusedTerminal,
+            now: () => observedAt,
+            lanWork: { address: "127.0.0.1", port: 0 }
+          })
+        ),
+        (running) => Effect.promise(running.close)
+      )
+      if (server.serveUrl === null || server.lanWorkUrl === null || server.tailnetUrl === null) {
+        return yield* Effect.die("archive listener fixture missing")
+      }
+      const canonicalUrl = server.serveUrl
+      const headers = { host: "ser8.example.test:0" }
+      const get = (path: string) => Effect.promise(() => secureRequestBody(`${canonicalUrl}${path}`, headers))
+      const page = Effect.fn("ArchiveHttpTest.page")(function*() {
+        const response = yield* get("/v1/connect/archive")
+        expect(response.status).toBe(200)
+        return Schema.decodeUnknownSync(Schema.fromJsonString(ConnectArchivePage))(response.body)
+      })
+      expect((yield* page()).agents).toEqual([])
+      expect((yield* get("/v1/connect/agents")).status).toBe(200)
+      present = false
+      observedAt = 1
+      yield* get("/v1/connect/agents")
+      observedAt = 300_001
+      partial = true
+      const partialDirectory = yield* get("/v1/connect/agents")
+      expect(partialDirectory.status).toBe(200)
+      expect(
+        Schema.decodeUnknownSync(Schema.fromJsonString(FleetConnectAgentPage))(partialDirectory.body).agents.map((
+          { id }
+        ) => id)
+      ).toEqual(["agent-staying"])
+      expect((yield* page()).agents).toEqual([])
+      partial = false
+      observedAt = 300_002
+      yield* get("/v1/connect/agents")
+      expect((yield* page()).agents).toEqual([])
+      observedAt = 600_002
+      yield* get("/v1/connect/agents")
+      expect((yield* page()).agents).toEqual([{
+        host: "ser8",
+        agentId: "agent-archive",
+        name: "worker",
+        kind: "codex",
+        work: "project",
+        state: "working",
+        firstSeenAt: 0,
+        closedAt: 600_002
+      }])
+      const continuation = encodeURIComponent(
+        JSON.stringify({ host: "SER8", agentId: "agent-archive", closedAt: 600_002 })
+      )
+      const afterLast = yield* get(`/v1/connect/archive?cursor=${continuation}`)
+      expect(afterLast.status).toBe(200)
+      expect(Schema.decodeUnknownSync(Schema.fromJsonString(ConnectArchivePage))(afterLast.body).agents).toEqual([])
+      for (
+        const cursor of [
+          "",
+          "null",
+          "{",
+          "{}",
+          "x".repeat(1_025),
+          JSON.stringify({ host: "SER8", agentId: "agent-archive", closedAt: -1 })
+        ]
+      ) {
+        const invalid = yield* get(`/v1/connect/archive?cursor=${encodeURIComponent(cursor)}`)
+        expect(invalid.status, cursor).toBe(400)
+      }
+      for (const listener of [server.url, server.tailnetUrl, server.lanWorkUrl]) {
+        expect((yield* Effect.promise(() => fetch(`${listener}/v1/connect/archive`))).status).toBe(404)
+      }
+      writeFileSync(identityMode, "denied")
+      expect((yield* get("/v1/connect/archive")).status).toBe(403)
+      writeFileSync(identityMode, "allowed")
+      present = true
+      observedAt = 600_003
+      yield* get("/v1/connect/agents")
+      expect((yield* page()).agents).toEqual([])
+    })).pipe(provideNodeServices)
   })
 
   it.effect("serves this host's usage for the asked range and zone, and refuses a query it cannot pass on", () => {

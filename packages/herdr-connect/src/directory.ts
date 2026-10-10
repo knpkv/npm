@@ -9,6 +9,7 @@ import { decodeBoundedResponseJson } from "@knpkv/herdr-fleet"
 import { Effect, Result, Schema } from "effect"
 import * as HttpClient from "effect/http/HttpClient"
 import type { AgentActivityStore } from "./activity-store.js"
+import type { AgentArchiveStore } from "./archive-store.js"
 import { ConnectPeerError } from "./errors.js"
 import { buildConnectForest } from "./forest.js"
 import { connectAgentId } from "./id.js"
@@ -179,7 +180,11 @@ export const localConnectAgents = Effect.fn("HerdrConnect.localAgents")(function
           relationship: relationship.relationship
         } satisfies ConnectAgent
     }))
-  const local = yield* Schema.decodeUnknownEffect(LocalConnectAgents)({ agents, host: config.host }).pipe(
+  const local = yield* Schema.decodeUnknownEffect(LocalConnectAgents)({
+    agents,
+    host: config.host,
+    complete: inventory.error === null
+  }).pipe(
     Effect.mapError((cause) => new ConnectPeerError({ cause, host: config.host, reason: "invalid_response" }))
   )
   yield* buildConnectForest(local.agents).pipe(
@@ -188,8 +193,16 @@ export const localConnectAgents = Effect.fn("HerdrConnect.localAgents")(function
   return local
 })
 
+// The host endpoint is unpaged: it validates the entire inventory and rejects lists over 256.
+// Preserve older peers' rows, but require their explicit full-list assertion for closure evidence.
+const PeerConnectAgents = Schema.Struct({
+  ...LocalConnectAgents.fields,
+  nextCursor: Schema.optionalKey(Schema.Unknown),
+  truncated: Schema.optionalKey(Schema.Boolean)
+})
+
 export const fetchPeerConnectAgents = Effect.fn("HerdrConnect.fetchPeerAgents")(
-  function*(peer: ConnectPeerTarget) {
+  function*(peer: ConnectPeerTarget): Effect.fn.Return<LocalConnectAgents, ConnectPeerError, HttpClient.HttpClient> {
     if (!peer.online) {
       return yield* new ConnectPeerError({ cause: peer.host, host: peer.host, reason: "offline" })
     }
@@ -207,7 +220,7 @@ export const fetchPeerConnectAgents = Effect.fn("HerdrConnect.fetchPeerAgents")(
         reason: "request_failed"
       })
     }
-    const summary = yield* decodeBoundedResponseJson(response, LocalConnectAgents).pipe(
+    const summary = yield* decodeBoundedResponseJson(response, PeerConnectAgents).pipe(
       Effect.mapError((cause) => new ConnectPeerError({ cause, host: peer.host, reason: "invalid_response" }))
     )
     if (summary.host.toLowerCase() !== peer.host.toLowerCase()) {
@@ -230,7 +243,13 @@ export const fetchPeerConnectAgents = Effect.fn("HerdrConnect.fetchPeerAgents")(
     yield* buildConnectForest(summary.agents).pipe(
       Effect.mapError((cause) => new ConnectPeerError({ cause, host: peer.host, reason: "invalid_response" }))
     )
-    return summary
+    const agents = { host: summary.host, agents: summary.agents }
+    if (summary.complete === undefined) return agents
+    return {
+      ...agents,
+      complete: summary.complete === true &&
+        (summary.nextCursor === undefined || summary.nextCursor === null) && summary.truncated !== true
+    }
   },
   (effect, peer) =>
     effect.pipe(
@@ -246,7 +265,8 @@ export const fetchPeerConnectAgents = Effect.fn("HerdrConnect.fetchPeerAgents")(
 
 export const fleetConnectAgents = Effect.fn("HerdrConnect.fleetAgents")(function*(
   local: Effect.Effect<LocalConnectAgents, ConnectPeerError>,
-  peers: ReadonlyArray<ConnectPeerTarget>
+  peers: ReadonlyArray<ConnectPeerTarget>,
+  archive?: { readonly store: AgentArchiveStore; readonly observedAt: number }
 ) {
   const localResult = yield* Effect.result(local)
   const agents = Result.isSuccess(localResult) ? [...localResult.success.agents] : []
@@ -277,5 +297,25 @@ export const fleetConnectAgents = Effect.fn("HerdrConnect.fleetAgents")(function
       (cause) => new ConnectPeerError({ cause, host: "fleet", reason: "invalid_response" })
     )
   )
+  if (archive !== undefined) {
+    const observations = [
+      Result.isSuccess(localResult)
+        ? { ...localResult.success, complete: localResult.success.complete === true }
+        : { host: localResult.failure.host, agents: [], complete: false },
+      ...results.map(({ peer, result }) =>
+        Result.isSuccess(result)
+          ? { ...result.success, complete: result.success.complete === true }
+          : { host: peer.host, agents: [], complete: false }
+      )
+    ]
+    for (const observation of observations) {
+      yield* archive.store.observe({ ...observation, observedAt: archive.observedAt }).pipe(
+        Effect.catchTag(
+          "ConnectArchiveStoreError",
+          (cause) => Effect.logWarning("Connect archive observation failed", { host: observation.host, cause })
+        )
+      )
+    }
+  }
   return fleet
 })

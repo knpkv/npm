@@ -63,3 +63,8 @@ export class TerminalTransportError extends Schema.TaggedError<TerminalTransport
   "TerminalTransportError",
   { cause: Schema.Defect(), detail: Schema.String, operation: Schema.String }
 ) {}
+
+export class ConnectArchiveStoreError extends Schema.TaggedError<ConnectArchiveStoreError>()(
+  "ConnectArchiveStoreError",
+  { cause: Schema.Defect(), operation: Schema.String }
+) {}
