@@ -39,7 +39,7 @@ jobs:
           runner_root="${RUNNER_TEMP}/control-center-live-aws-runner"
           mkdir -p "${runner_root}"
           cp -R node_modules packages "${runner_root}/"
-          cp package.json tsconfig.base.jsonc "${runner_root}/"
+          cp package.json tsconfig.base.jsonc vitest.workspace-sources.ts "${runner_root}/"
           node_root="$(dirname "$(dirname "$(command -v node)")")"
           cp -R "${node_root}" "${runner_root}/node-runtime"
           tar --create --gzip \
@@ -47,6 +47,33 @@ jobs:
             --directory "${runner_root}" .
           runner_sha256="$(sha256sum "${RUNNER_TEMP}/control-center-live-aws-runner.tgz" | cut -d ' ' -f 1)"
           echo "sha256=${runner_sha256}" >> "${GITHUB_OUTPUT}"
+
+      - name: Verify sealed runner loads the live tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          verification_root="$(mktemp -d "${RUNNER_TEMP}/control-center-live-aws-verify.XXXXXX")"
+          trap 'rm -rf "${verification_root}"' EXIT
+          tar --extract --gzip \
+            --file "${RUNNER_TEMP}/control-center-live-aws-runner.tgz" \
+            --directory "${verification_root}"
+          mkdir "${verification_root}/verification-home"
+          cd "${verification_root}"
+          control_center_root="${verification_root}/packages/control-center"
+          env -i \
+            HOME="${verification_root}/verification-home" \
+            PATH="${verification_root}/node-runtime/bin:/usr/bin:/bin" \
+            TMPDIR="${verification_root}" \
+            "${verification_root}/node-runtime/bin/node" \
+            "${verification_root}/node_modules/vitest/vitest.mjs" \
+            list --no-static-parse --json="${verification_root}/collected-tests.json" \
+            --root "${control_center_root}" \
+            --config "${control_center_root}/vitest.live-aws.config.ts"
+          jq --exit-status --arg expected "packages/control-center/test/integration/live-aws-probe.test.ts" '
+            type == "array" and any(.[];
+              (.file | gsub("\\\\"; "/")) as $file
+              | $file == $expected or ($file | endswith("/" + $expected)))
+          ' "${verification_root}/collected-tests.json" >/dev/null
 
       - name: Upload sealed AWS probe runner
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7

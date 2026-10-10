@@ -13,6 +13,9 @@ const templatePath = fileURLToPath(new URL("../infra/control-center-live-aws/tem
 const probeWorkflowPath = fileURLToPath(
   new URL("../.github/workflows/control-center-live-aws-probe.yml", import.meta.url)
 )
+const integrationWorkflowPath = fileURLToPath(
+  new URL("../.github/workflows/control-center-live-integration.yml", import.meta.url)
+)
 const bootstrapPath = fileURLToPath(new URL("../infra/control-center-live-aws/bootstrap.sh", import.meta.url))
 const bootstrapTestPath = fileURLToPath(new URL("../infra/control-center-live-aws/bootstrap.test.sh", import.meta.url))
 const probeTestPath = fileURLToPath(new URL("../infra/control-center-live-aws/probe.test.sh", import.meta.url))
@@ -108,6 +111,32 @@ const validateFixtureCoordinateDocumentation = (documents) => {
   }
 }
 
+const validateIntegrationRunnerVerification = (workflow) => {
+  const prepareJob = parse(workflow).jobs["prepare-live-runner"]
+  assert.deepEqual(prepareJob.permissions, { contents: "read" })
+  const steps = prepareJob.steps
+  const index = steps.findIndex((step) => step.name === "Verify sealed runner loads the live tests")
+  assert.ok(index > 0, "live integration prepare job must verify the sealed runner loads the live tests")
+  assert.equal(steps[index - 1].id, "package-runner")
+  assert.match(steps[index + 1]?.uses ?? "", /^actions\/upload-artifact@/u)
+  const step = steps[index]
+  assertStepContract(step, ["name", "run", "shell"])
+  assert.equal(step.shell, "bash")
+  assert.equal(
+    runDigest(step.run),
+    "f73b8a73a203241e0a72bfbfc22553635ceee74211c509235b4f86a5e4189c0f",
+    "live integration sealed runner verification must match reviewed run digest"
+  )
+}
+
+const withoutRunnerVerification = (workflow) => {
+  const fixture = parse(workflow)
+  fixture.jobs["prepare-live-runner"].steps = fixture.jobs["prepare-live-runner"].steps.filter(
+    (step) => step.name !== "Verify sealed runner loads the live tests"
+  )
+  return JSON.stringify(fixture)
+}
+
 const validateProbeWorkflow = (workflow) => {
   const parsed = parse(workflow)
   assert.deepEqual(objectKeys(parsed), ["concurrency", "jobs", "name", "on", "permissions"])
@@ -161,6 +190,7 @@ const validateProbeWorkflow = (workflow) => {
     ["name", "uses", "with"],
     ["name", "run"],
     ["id", "name", "run", "shell"],
+    ["name", "run", "shell"],
     ["name", "uses", "with"]
   ]
   const protectedStepKeys = [
@@ -196,6 +226,10 @@ const validateProbeWorkflow = (workflow) => {
       {
         name: "Package sealed AWS probe runner",
         id: "package-runner",
+        shell: "bash"
+      },
+      {
+        name: "Verify sealed runner loads the live tests",
         shell: "bash"
       },
       {
@@ -269,7 +303,8 @@ const validateProbeWorkflow = (workflow) => {
       "Build Control Center and workspace dependencies",
       "88cf32b2cb19e95cace7bc646e06cb91934420e73a9dc32524880b02d77883e8"
     ],
-    ["Package sealed AWS probe runner", "4234a86218c975e5f1e9c42632b72926d1127e119f5c6591b2af283095450102"],
+    ["Package sealed AWS probe runner", "b4fe47989b896ea3c10bd4891ed2fd080c66c5464f9411b8db22f7b5a805d036"],
+    ["Verify sealed runner loads the live tests", "e317888571815934f7562577dc3b685b3e2ef810e7a3208d2c4bd80551409278"],
     ["Verify sealed AWS probe runner", "5a84a92f8adb4b83c4820fcab6a3b7c39db11cc9ef33d8bc7d0c8d184a386744"],
     ["Probe stable read-only fixtures", "32baf1272ba5e5497ebb5d0121a043a16a54fef371d7b9a8706512da1d3342fe"],
     [
@@ -700,7 +735,22 @@ const program = Effect.gen(function* () {
   validatePortableContractTest(yield* fileSystem.readFileString(probeTestPath))
 
   const probeWorkflow = yield* fileSystem.readFileString(probeWorkflowPath)
+  const integrationWorkflow = yield* fileSystem.readFileString(integrationWorkflowPath)
+  validateIntegrationRunnerVerification(integrationWorkflow)
+  assert.throws(() => validateIntegrationRunnerVerification(withoutRunnerVerification(integrationWorkflow)))
+  const weakenedIntegration = parse(integrationWorkflow)
+  const verification = weakenedIntegration.jobs["prepare-live-runner"].steps.find(
+    (step) => step.name === "Verify sealed runner loads the live tests"
+  )
+  const originalRun = verification.run
+  verification.run = verification.run.replace(
+    '--config "${control_center_root}/vitest.live.config.ts"',
+    '--config "${control_center_root}/vitest.live.config.ts" || true'
+  )
+  assert.notEqual(verification.run, originalRun, "integration weakening fixture must change its run block")
+  assert.throws(() => validateIntegrationRunnerVerification(JSON.stringify(weakenedIntegration)))
   validateProbeWorkflow(probeWorkflow)
+  expectWorkflowInvalid(probeWorkflow, withoutRunnerVerification)
   expectWorkflowInvalid(probeWorkflow, (fixture) =>
     fixture.replace("      contents: read", "      contents: read\n      id-token: write")
   )
