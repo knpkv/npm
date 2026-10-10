@@ -9,12 +9,21 @@
  */
 import { PortalProvider } from "@knpkv/rly/foundations"
 import { Button, Sheet } from "@knpkv/rly/primitives"
-import { type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactElement, useState } from "react"
+import {
+  type CSSProperties,
+  type KeyboardEvent,
+  type PointerEvent,
+  type ReactElement,
+  useId,
+  useRef,
+  useState
+} from "react"
 
 import { AgentStateLabel, agentBuckets, agentStageLead, agentStatePresentation } from "./agent-state.js"
 import { agentCharacter } from "./character.js"
 import { Creature } from "./creature.js"
 import type { ConnectAgent } from "./model.js"
+import { arrangePins, type Pins } from "./pins.js"
 import { connectAgentKey } from "./view.js"
 
 /** The fleet as a strip of characters, the ones that need you first; each opens its agent's stage. */
@@ -195,31 +204,245 @@ export const AgentStage = ({
   )
 }
 
-/**
- * The agent this device keeps pinned, small and always to hand: its character, name and state, opening its
- * stage. It floats over the directory's corner, and sits inside the terminal's bar there, never over the
- * output or the key rail.
- */
-export const PinnedAgent = ({
+/** How many chips each placement shows before the rest go behind "+N". */
+export const PIN_ROOM = { bar: 2, float: 3 } satisfies Record<"bar" | "float", number>
+
+const sameDayTime = new Intl.DateTimeFormat("en", { hour: "2-digit", hourCycle: "h23", minute: "2-digit" })
+const otherDayTime = new Intl.DateTimeFormat("en", {
+  day: "numeric",
+  hour: "2-digit",
+  hourCycle: "h23",
+  minute: "2-digit",
+  month: "short"
+})
+
+/** "not seen since 14:05", with the date when it wasn't today. */
+const sinceLabel = (at: number, now: number): string => {
+  const sameDay = new Date(at).toDateString() === new Date(now).toDateString()
+  return `not seen since ${(sameDay ? sameDayTime : otherDayTime).format(at)}`
+}
+
+/** A button's place in a roving group: the one stop has tab index 0, the rest -1. */
+interface RovingStop {
+  readonly onFocus: () => void
+  readonly tabIndex: 0 | -1
+}
+
+/** A pinned agent that is here this poll: its character, name and state, opening its stage, and its unpin. */
+const PinChip = ({
   agent,
   onOpen,
-  placement,
+  onUnpin,
+  pinKey,
+  roving,
   stale
 }: {
   readonly agent: ConnectAgent
   readonly onOpen: () => void
-  readonly placement: "bar" | "float"
+  readonly onUnpin: () => void
+  readonly pinKey: string
+  /** The open and unpin buttons' places in the set's single tab stop. */
+  readonly roving: readonly [RovingStop, RovingStop]
   readonly stale: boolean
 }): ReactElement => (
-  <button
-    aria-label={`Pinned: ${agent.name}, ${agentStatePresentation(agent.state).word}`}
-    className="connect-pin"
-    data-placement={placement}
-    onClick={onOpen}
-    type="button"
-  >
-    <Creature host={agent.host} id={String(agent.id)} size="row" stale={stale} state={agent.state} />
-    <span className="connect-pin-name">{agent.name}</span>
-    <AgentStateLabel state={agent.state} />
-  </button>
+  // Two sibling buttons, never one inside the other: open is the chip, unpin its own small control.
+  <span className="connect-pin">
+    <button
+      aria-label={`Pinned: ${agent.name}, ${agentStatePresentation(agent.state).word}`}
+      className="connect-pin-open"
+      data-pin-key={pinKey}
+      onClick={onOpen}
+      type="button"
+      {...roving[0]}
+    >
+      <Creature host={agent.host} id={String(agent.id)} size="row" stale={stale} state={agent.state} />
+      <span className="connect-pin-name">{agent.name}</span>
+      <span className="connect-pin-state">
+        <AgentStateLabel state={agent.state} />
+      </span>
+    </button>
+    <button
+      aria-label={`Unpin ${agent.name}`}
+      className="connect-pin-unpin"
+      data-pin-key={pinKey}
+      onClick={onUnpin}
+      type="button"
+      {...roving[1]}
+    >
+      <span aria-hidden="true">×</span>
+    </button>
+  </span>
 )
+
+/**
+ * The agents this device keeps pinned, small and always to hand, in the order they were pinned. The first
+ * few that are here show as chips; the rest, and any pinned agent this poll didn't list, wait behind a "+N"
+ * button, the away ones dimmed with when they were last seen, so a pin never seems lost. Over the directory
+ * they stack in the end corner, clear of the safe area; in the terminal they sit inside its bar, never over
+ * the output or the key rail.
+ *
+ * One tab stop for the whole set; arrows move through it, and Delete or Backspace unpins the focused pin.
+ */
+export const PinnedAgents = ({
+  agentFor,
+  hiddenKey = null,
+  now,
+  onOpen,
+  onUnpin,
+  pins,
+  placement,
+  stale
+}: {
+  readonly pins: Pins
+  readonly agentFor: (key: string) => ConnectAgent | undefined
+  /** The agent whose stage or terminal is open: its own pin isn't repeated beside it. */
+  readonly hiddenKey?: string | null
+  readonly now: number
+  readonly onOpen: (agent: ConnectAgent) => void
+  readonly onUnpin: (key: string) => void
+  readonly placement: "bar" | "float"
+  readonly stale: boolean
+}): ReactElement | null => {
+  const { overflow, shown } = arrangePins(pins, agentFor, PIN_ROOM[placement], (key) => key === hiddenKey)
+  const [expanded, setExpanded] = useState(false)
+  const [active, setActive] = useState(0)
+  const group = useRef<HTMLDivElement>(null)
+  const listId = `connect-pins-${useId().replace(/[^a-zA-Z0-9]/g, "")}`
+  const open = expanded && overflow.length > 0
+  if (shown.length === 0 && overflow.length === 0) return null
+  const buttons = (): ReadonlyArray<HTMLButtonElement> => [...(group.current?.querySelectorAll("button") ?? [])]
+  const focusAt = (index: number): void => {
+    const all = buttons()
+    const target = all[Math.min(Math.max(index, 0), all.length - 1)]
+    if (target === undefined) {
+      document.querySelector<HTMLElement>("#connect-agent-search")?.focus()
+      return
+    }
+    setActive(all.indexOf(target))
+    target.focus()
+  }
+  const keyDown = (event: KeyboardEvent<HTMLElement>): void => {
+    const all = buttons()
+    const index = all.findIndex((button) => button === document.activeElement)
+    if (index === -1) return
+    if (event.key === "Escape" && open) {
+      event.preventDefault()
+      setExpanded(false)
+      group.current?.querySelector<HTMLButtonElement>(".connect-pins-more")?.focus()
+      return
+    }
+    const pinKey = all[index]?.dataset.pinKey
+    if ((event.key === "Delete" || event.key === "Backspace") && pinKey !== undefined) {
+      event.preventDefault()
+      onUnpin(pinKey)
+      // The pin's buttons leave on the next render; focus the control now at its place, or search if none.
+      requestAnimationFrame(() => focusAt(index))
+      return
+    }
+    const step =
+      event.key === "ArrowRight" || event.key === "ArrowDown"
+        ? 1
+        : event.key === "ArrowLeft" || event.key === "ArrowUp"
+          ? -1
+          : 0
+    if (step === 0) return
+    event.preventDefault()
+    focusAt((index + step + all.length) % all.length)
+  }
+  // Chip i's open and unpin buttons are stops 2i and 2i + 1, and "+N" comes last. The list behind "+N" is
+  // reached with the arrows once open, and takes focus when it opens.
+  const stops = shown.length * 2 + (overflow.length > 0 ? 1 : 0)
+  const stop = (index: number): RovingStop => ({
+    onFocus: () => setActive(index),
+    tabIndex: index === Math.min(active, stops - 1) ? 0 : -1
+  })
+  const toggle = (): void => {
+    setExpanded(!open)
+    if (!open)
+      requestAnimationFrame(() => group.current?.querySelector<HTMLElement>(".connect-pins-overflow button")?.focus())
+  }
+  return (
+    <div
+      aria-label="Pinned agents"
+      className="connect-pins"
+      data-placement={placement}
+      // Light dismiss: focus leaving the set, by a press elsewhere or Tab, closes the list.
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) setExpanded(false)
+      }}
+      onKeyDown={keyDown}
+      ref={group}
+      role="group"
+    >
+      {shown.map(({ agent, pin }, index) =>
+        agent === undefined ? null : (
+          <PinChip
+            agent={agent}
+            key={pin.key}
+            onOpen={() => onOpen(agent)}
+            onUnpin={() => onUnpin(pin.key)}
+            pinKey={pin.key}
+            roving={[stop(index * 2), stop(index * 2 + 1)]}
+            stale={stale}
+          />
+        )
+      )}
+      {overflow.length === 0 ? null : (
+        <div className="connect-pins-more-wrap">
+          <button
+            aria-controls={listId}
+            aria-expanded={open}
+            aria-label={`${String(overflow.length)} more pinned`}
+            className="connect-pins-more"
+            onClick={toggle}
+            type="button"
+            {...stop(stops - 1)}
+          >
+            +{overflow.length}
+          </button>
+          {open ? (
+            <ul className="connect-pins-overflow" id={listId}>
+              {overflow.map(({ agent, pin }) => (
+                <li className="connect-pins-entry" data-away={agent === undefined ? "" : undefined} key={pin.key}>
+                  {agent === undefined ? (
+                    <span className="connect-pin-open">
+                      <Creature host={pin.host} id={pin.id} size="row" stale state="unknown" />
+                      <span className="connect-pin-name">{pin.name}</span>
+                      <small className="connect-pin-since">{sinceLabel(pin.seenAt, now)}</small>
+                    </span>
+                  ) : (
+                    <button
+                      aria-label={`Pinned: ${agent.name}, ${agentStatePresentation(agent.state).word}`}
+                      className="connect-pin-open"
+                      data-pin-key={pin.key}
+                      onClick={() => {
+                        setExpanded(false)
+                        onOpen(agent)
+                      }}
+                      tabIndex={-1}
+                      type="button"
+                    >
+                      <Creature host={agent.host} id={String(agent.id)} size="row" stale={stale} state={agent.state} />
+                      <span className="connect-pin-name">{agent.name}</span>
+                      <AgentStateLabel state={agent.state} />
+                    </button>
+                  )}
+                  <button
+                    aria-label={`Unpin ${pin.name}`}
+                    className="connect-pin-unpin"
+                    data-pin-key={pin.key}
+                    onClick={() => onUnpin(pin.key)}
+                    tabIndex={-1}
+                    type="button"
+                  >
+                    <span aria-hidden="true">×</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      )}
+    </div>
+  )
+}

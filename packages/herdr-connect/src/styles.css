@@ -2141,23 +2141,46 @@
     border-color: CanvasText;
   }
 
-  /* The pinned agent: one character kept to hand. */
+  /* The pinned agents: characters kept to hand, in pin order, the rest behind "+N". */
+  .connect-pins {
+    align-items: center;
+    display: flex;
+    gap: var(--rly-space-8);
+  }
+
+  /* One chip: open and unpin, two sibling buttons in one pill. */
   .connect-pin {
     align-items: center;
     background: var(--rly-color-surface-1);
     border: 1px solid var(--rly-color-border-1);
     border-radius: 999px;
-    color: inherit;
-    cursor: pointer;
     display: inline-flex;
-    font: inherit;
-    gap: var(--rly-space-8);
-    min-block-size: 44px;
-    padding: var(--rly-space-4) var(--rly-space-16) var(--rly-space-4) var(--rly-space-4);
+    min-inline-size: 0;
   }
 
-  .connect-pin .connect-creature {
+  .connect-pin-open,
+  .connect-pin-unpin,
+  .connect-pins-more {
+    background: transparent;
+    border: 0;
+    color: inherit;
+    cursor: pointer;
+    font: inherit;
+  }
+
+  .connect-pin-open {
+    align-items: center;
+    border-radius: 999px;
+    display: inline-flex;
+    gap: var(--rly-space-8);
+    min-block-size: 44px;
+    min-inline-size: 0;
+    padding: var(--rly-space-4) var(--rly-space-4) var(--rly-space-4) var(--rly-space-4);
+  }
+
+  .connect-pin-open .connect-creature {
     block-size: auto;
+    flex: none;
     inline-size: 32px;
   }
 
@@ -2170,11 +2193,86 @@
     white-space: nowrap;
   }
 
-  /* Over the directory: the end corner, clear of the safe area. */
-  .connect-pin[data-placement="float"] {
-    backdrop-filter: blur(16px) saturate(1.4);
-    background: color-mix(in oklch, var(--rly-color-surface-1) 82%, transparent);
+  /* A full 44px to press, reaching into the margin after it and never over the open button before it. */
+  .connect-pin-unpin {
+    block-size: 36px;
+    border-radius: 999px;
+    color: var(--rly-color-text-2);
+    display: grid;
+    flex: none;
+    font-size: 1.1rem;
+    inline-size: 36px;
+    line-height: 1;
+    margin-inline-end: var(--rly-space-8);
+    place-items: center;
+    position: relative;
+  }
+
+  .connect-pin-unpin::after {
+    content: "";
+    inset: -4px -8px -4px 0;
+    position: absolute;
+  }
+
+  .connect-pins-more {
+    background: var(--rly-color-surface-1);
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: 999px;
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+    min-block-size: 44px;
+    min-inline-size: 44px;
+    padding-inline: var(--rly-space-12);
+  }
+
+  .connect-pins-more-wrap {
+    position: relative;
+  }
+
+  /* The rest of the pins, opened from "+N"; away ones dimmed, with when they were last seen. */
+  .connect-pins-overflow {
+    background: var(--rly-color-surface-1);
+    border: 1px solid var(--rly-color-border-2);
+    border-radius: var(--rly-radius-overlay);
     box-shadow: 0 16px 40px -18px oklch(0% 0 none / 50%);
+    display: grid;
+    gap: var(--rly-space-4);
+    inline-size: max-content;
+    list-style: none;
+    margin: 0;
+    max-block-size: min(60dvh, 24rem);
+    max-inline-size: min(20rem, calc(100vw - var(--rly-space-32)));
+    overflow: auto;
+    padding: var(--rly-space-8);
+    position: absolute;
+    z-index: 3;
+  }
+
+  .connect-pins-entry {
+    align-items: center;
+    display: flex;
+    justify-content: space-between;
+  }
+
+  .connect-pins-entry .connect-pin-open {
+    flex: 1;
+    justify-content: start;
+  }
+
+  .connect-pins-entry[data-away] .connect-pin-open {
+    cursor: default;
+    opacity: 0.6;
+  }
+
+  .connect-pin-since {
+    color: var(--rly-color-text-2);
+    white-space: nowrap;
+  }
+
+  /* Over the directory: a stack in the end corner, clear of the safe area; the list opens above it. */
+  .connect-pins[data-placement="float"] {
+    align-items: end;
+    flex-direction: column;
     inset-block-end: calc(var(--rly-space-16) + env(safe-area-inset-bottom, 0px));
     /* Both sides' insets: inline-end is the left edge in right-to-left text. */
     inset-inline-end: calc(var(--rly-space-16) + max(env(safe-area-inset-left, 0px), env(safe-area-inset-right, 0px)));
@@ -2182,46 +2280,84 @@
     z-index: 2;
   }
 
-  /* Room at the end of the directory, so the last row can scroll clear of the floating pin. */
-  .connect-agents[data-pinned] {
-    padding-block-end: calc(var(--rly-space-80) + env(safe-area-inset-bottom, 0px));
+  .connect-pins[data-placement="float"] .connect-pin,
+  .connect-pins[data-placement="float"] .connect-pins-more {
+    backdrop-filter: blur(16px) saturate(1.4);
+    background: color-mix(in oklch, var(--rly-color-surface-1) 82%, transparent);
+    box-shadow: 0 16px 40px -18px oklch(0% 0 none / 50%);
   }
 
-  /* In the terminal's bar: compact, the state's word carries it. */
-  .connect-pin[data-placement="bar"] {
+  .connect-pins[data-placement="float"] .connect-pins-overflow {
+    inset-block-end: calc(100% + var(--rly-space-8));
+    inset-inline-end: 0;
+  }
+
+  /* Room at the end of the directory, so the last row can scroll clear of the stack: one row per chip. */
+  .connect-agents[data-pinned] {
+    padding-block-end: calc(
+      var(--rly-space-24) + var(--connect-pin-rows, 1) * (44px + var(--rly-space-8)) + env(safe-area-inset-bottom, 0px)
+    );
+  }
+
+  /* In the terminal's bar: characters only, side by side; the list opens below, over the output only while open. */
+  .connect-pins[data-placement="bar"] {
+    flex: none;
     margin-inline-start: auto;
     min-inline-size: 0;
   }
 
-  .connect-pin[data-placement="bar"] .connect-pin-name {
-    max-inline-size: 7em;
+  .connect-pins[data-placement="bar"] .connect-pin :is(.connect-pin-name, .connect-pin-state) {
+    display: none;
   }
 
-  .connect-pin:focus-visible {
+  .connect-pins[data-placement="bar"] .connect-pin-unpin {
+    margin-inline-end: var(--rly-space-4);
+  }
+
+  .connect-pins[data-placement="bar"] .connect-pins-overflow {
+    inset-block-start: calc(100% + var(--rly-space-8));
+    inset-inline-end: 0;
+  }
+
+  .connect-pin-open:focus-visible,
+  .connect-pin-unpin:focus-visible,
+  .connect-pins-more:focus-visible {
     outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
     outline-offset: var(--rly-focus-ring-offset);
   }
 
   @media (hover: hover) and (pointer: fine) {
-    .connect-pin:hover {
+    .connect-pin-open:hover,
+    .connect-pin-unpin:hover,
+    .connect-pins-more:hover {
       background: var(--rly-color-surface-2);
+    }
+
+    .connect-pins-entry[data-away] .connect-pin-open:hover {
+      background: transparent;
     }
   }
 
-  @media (max-width: 24rem) {
-    .connect-pin[data-placement="bar"] .connect-pin-name {
-      display: none;
+  @media (prefers-reduced-motion: no-preference) {
+    .connect-pin-open:active,
+    .connect-pin-unpin:active,
+    .connect-pins-more:active {
+      scale: 0.97;
+      transition: scale var(--rly-motion-fast-duration) var(--rly-easing-out);
     }
   }
 
   @media (forced-colors: active) {
-    .connect-pin {
+    .connect-pin,
+    .connect-pins-more,
+    .connect-pins-overflow {
       backdrop-filter: none;
       border-color: CanvasText;
     }
   }
 
-  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .connect-pin {
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"])
+    :is(.connect-pin, .connect-pins-more, .connect-pins-overflow) {
     backdrop-filter: none;
     border-color: CanvasText;
   }

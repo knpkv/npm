@@ -9,7 +9,10 @@ test.describe("Connect pin", () => {
   // A pinned agent stays to hand on this device: over the directory, through a reload, and in the terminal.
   test("pins from the stage, survives a reload, and unpins", async ({ page }) => {
     await page.goto("/")
-    await page.evaluate(() => window.localStorage.removeItem("fleet-connect-pinned"))
+    await page.evaluate(() => {
+      window.localStorage.removeItem("fleet-connect-pinned")
+      window.localStorage.removeItem("fleet-connect-pins")
+    })
     await page.reload()
     await openStage(page)
     await page.getByRole("button", { name: "Pin" }).click()
@@ -36,7 +39,7 @@ test.describe("Connect pin", () => {
     await page.getByRole("button", { name: "Open terminal" }).click()
     await expect(page.getByText("connected", { exact: true })).toBeVisible()
     await expect(page.locator(".terminal-bar .connect-pin")).toHaveCount(0)
-    await expect(page.locator(".connect-pin[data-placement='float']")).toBeHidden()
+    await expect(page.locator(".connect-pins[data-placement='float']")).toBeHidden()
   })
 
   // The floating pin must never sit over the last row once the list is scrolled to its end.
@@ -46,7 +49,7 @@ test.describe("Connect pin", () => {
       await page.goto("/")
       await page.evaluate(() => window.localStorage.setItem("fleet-connect-pinned", "FIXTURE:agent-fixture"))
       await page.reload()
-      const pin = page.locator(".connect-pin[data-placement='float']")
+      const pin = page.locator(".connect-pins[data-placement='float']")
       await expect(pin).toBeVisible()
       await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight))
       const row = await page.locator(".connect-agent").last().boundingBox()
@@ -67,5 +70,52 @@ test.describe("Connect pin", () => {
     await expect(page.getByRole("dialog", { name: "fixture-pane" })).toBeVisible()
     await page.keyboard.press("Escape")
     await expect(page.locator(".connect-agent[data-agent-key=\"FIXTURE:agent-fixture\"]")).toBeFocused()
+  })
+
+  // Pins are a set: one stored by the single-pin version carries over, and pins whose agents this poll didn't
+  // list wait behind "+N", dimmed, with when they were last seen. Delete on a chip unpins it.
+  test("carries over the old pin, keeps away pins behind +N, and unpins with Delete", async ({ page }) => {
+    await page.goto("/")
+    await page.evaluate(() => {
+      window.localStorage.removeItem("fleet-connect-pins")
+      window.localStorage.setItem("fleet-connect-pinned", "FIXTURE:agent-fixture")
+    })
+    await page.reload()
+    const chip = page.getByRole("button", { name: /^Pinned: fixture-pane/ })
+    await expect(chip).toBeVisible()
+    const stored = () => page.evaluate(() => window.localStorage.getItem("fleet-connect-pins"))
+    await expect.poll(stored).toContain("FIXTURE:agent-fixture")
+    expect(await page.evaluate(() => window.localStorage.getItem("fleet-connect-pinned"))).toBeNull()
+
+    // Two agents that have left, pinned before the one that is here.
+    await page.evaluate(() => {
+      const pin = (host: string, id: string, name: string) => ({ host, id, key: `${host}:${id}`, name, seenAt: 0 })
+      window.localStorage.setItem(
+        "fleet-connect-pins",
+        JSON.stringify({
+          pins: [
+            pin("gone", "agent-one", "away-agent-one"),
+            pin("gone", "agent-two", "away-agent-two"),
+            pin("FIXTURE", "agent-fixture", "fixture-pane")
+          ],
+          v: 1
+        })
+      )
+    })
+    await page.reload()
+    await expect(chip).toBeVisible()
+    const more = page.getByRole("button", { name: "2 more pinned" })
+    await more.click()
+    await expect(more).toHaveAttribute("aria-expanded", "true")
+    await expect(page.getByText("away-agent-one")).toBeVisible()
+    await expect(page.getByText(/not seen since/).first()).toBeVisible()
+    await page.keyboard.press("Escape")
+    await expect(more).toHaveAttribute("aria-expanded", "false")
+    await expect(more).toBeFocused()
+
+    await chip.focus()
+    await page.keyboard.press("Delete")
+    await expect(chip).toBeHidden()
+    await expect.poll(stored).not.toContain("FIXTURE:agent-fixture")
   })
 })
