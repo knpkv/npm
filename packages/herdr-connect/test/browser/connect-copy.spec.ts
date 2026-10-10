@@ -40,7 +40,8 @@ const open = async (
     await page.request.post(`/__test/scroll-state?${query.toString()}`)
   }
   await page.goto("/")
-  await page.getByRole("button", { name: /fixture-pane/ }).click()
+  await page.locator(".connect-agent", { hasText: "fixture-pane" }).click()
+  await page.getByRole("button", { name: "Open terminal" }).click()
   await expect(page.getByText("connected", { exact: true })).toBeVisible()
   // A session that starts scrolled back never shows the newest line, so wait for any screen instead.
   const newest = (scrollState?.start ?? 0) > 0 ? "" : "300 "
@@ -196,7 +197,8 @@ test.describe("touch", () => {
     await expect(page.getByRole("button", { name: "Jump to latest output" })).toBeVisible()
 
     await page.reload()
-    await page.getByRole("button", { name: /fixture-pane/ }).click()
+    await page.locator(".connect-agent", { hasText: "fixture-pane" }).click()
+    await page.getByRole("button", { name: "Open terminal" }).click()
     await expect(page.getByRole("button", { name: "Show terminal keys" })).toBeVisible()
     await expect(page.getByRole("group", { name: "Terminal keys" })).toBeHidden()
     await page.getByRole("button", { name: "Show terminal keys" }).tap()

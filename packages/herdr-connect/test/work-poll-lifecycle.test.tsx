@@ -181,10 +181,19 @@ describe("Connect Work polling ownership", () => {
     })
     expect(workRequests).toBe(2)
 
-    const agentButton = host.querySelector('[data-agent-key="SER8:agent-reviewer"]')
+    // The row opens the agent's stage; Open terminal there selects it.
+    const agentButton = host.querySelector('.connect-agent[data-agent-key="SER8:agent-reviewer"]')
     expect(agentButton).not.toBeNull()
     await act(async () => {
       agentButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
+      for (let index = 0; index < 12; index += 1) await Promise.resolve()
+    })
+    const openTerminal = [...document.querySelectorAll("button")].find(
+      (button) => button.textContent === "Open terminal"
+    )
+    expect(openTerminal).toBeDefined()
+    await act(async () => {
+      openTerminal?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
       for (let index = 0; index < 12; index += 1) await Promise.resolve()
     })
     expect(host.querySelector('[data-work-goal-state="available"]')).not.toBeNull()

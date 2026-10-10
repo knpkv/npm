@@ -165,7 +165,7 @@ describe("ConnectSurface terminal viewport lifecycle", () => {
     const workspace = host.querySelector<HTMLElement>(".connect-workspace")
     const directory = host.querySelector<HTMLElement>(".connect-directory-screen")
     const terminal = host.querySelector<HTMLElement>(".connect-terminal-screen")
-    const agentButton = host.querySelector<HTMLButtonElement>('[data-agent-key="SER8:agent-reviewer"]')
+    const agentButton = host.querySelector<HTMLButtonElement>('.connect-agent[data-agent-key="SER8:agent-reviewer"]')
     const back = host.querySelector<HTMLButtonElement>(".terminal-back")
     expect(shell).not.toBeNull()
     expect(workspace).not.toBeNull()
