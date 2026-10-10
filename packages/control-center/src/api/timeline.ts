@@ -11,7 +11,7 @@ import {
   ServiceUnavailableApiError,
   UnauthorizedApiError
 } from "./errors.js"
-import { SessionCookieAuth } from "./session.js"
+import { SessionCookieAuth, SessionMutationAuth } from "./session.js"
 import { CanonicalNonNegativeIntegerFromString } from "./wire.js"
 
 const TimelinePageSizeFromString = CanonicalNonNegativeIntegerFromString.pipe(
@@ -90,17 +90,23 @@ const detail = HttpApiEndpoint.get("detail", "/api/v1/timeline/events/:eventKey"
   ]
 }).middleware(SessionCookieAuth)
 
-const exportCsv = HttpApiEndpoint.get("exportCsv", "/api/v1/timeline/export.csv", {
+// Each download durably records an export audit row, so it is a CSRF-guarded mutation rather
+// than a safe read: a GET could be triggered cross-site by navigation or an image tag.
+const exportCsv = HttpApiEndpoint.post("exportCsv", "/api/v1/timeline/export.csv", {
   query: exportQuery,
   success: HttpApiSchema.StreamUint8Array({ contentType: "text/csv; charset=utf-8" }),
   error: timelineErrors
-}).middleware(SessionCookieAuth)
+})
+  .middleware(SessionCookieAuth)
+  .middleware(SessionMutationAuth)
 
-const exportJson = HttpApiEndpoint.get("exportJson", "/api/v1/timeline/export.json", {
+const exportJson = HttpApiEndpoint.post("exportJson", "/api/v1/timeline/export.json", {
   query: exportQuery,
   success: HttpApiSchema.StreamUint8Array({ contentType: "application/json; charset=utf-8" }),
   error: timelineErrors
-}).middleware(SessionCookieAuth)
+})
+  .middleware(SessionCookieAuth)
+  .middleware(SessionMutationAuth)
 
 /** Authenticated, workspace-scoped durable activity Timeline. */
 export class TimelineApiGroup extends HttpApiGroup.make("timeline")

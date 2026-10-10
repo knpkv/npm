@@ -648,7 +648,10 @@ watchers cannot read the Timeline. CSV and JSON download endpoints reuse that
 default-redacted projection and stable cursor, require an explicit event limit,
 and cap every export at 1,000 events with explicit truncation metadata. Every
 successful download records immutable human/session attribution, filters,
-format, counts, truncation, and timestamp before streaming begins. Owners
+format, counts, truncation, and timestamp before streaming begins. Because a
+download writes that audit row, both endpoints are `POST` mutations that require
+an allowed `Origin` and the session's `x-csrf-token`; a plain `GET` is not
+routed. Owners
 can deliberately expand one exact event to inspect its durable identifiers and
 agent-job reference in a focused browser sheet with a Timeline-aware Relay
 entry; approvers retain the ordinary redacted page and receive no inspect

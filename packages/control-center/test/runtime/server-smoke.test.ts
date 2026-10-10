@@ -658,7 +658,7 @@ describe("Control Center closed runtime", () => {
       if (Result.isFailure(rejectedMutation)) {
         assert.strictEqual(rejectedMutation.failure._tag, "ServiceUnavailableApiError")
       }
-      const rejectedExport = yield* authenticatedClient.timeline.exportJson({
+      const rejectedExport = yield* mutationClient.timeline.exportJson({
         query: { limit: 1 }
       }).pipe(Effect.result)
       assert.isTrue(Result.isFailure(rejectedExport))
