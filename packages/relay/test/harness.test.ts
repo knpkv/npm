@@ -6,7 +6,8 @@ import { Context, Deferred, Effect, Fiber, FileSystem, Layer, Path, Predicate, S
 import { AiError } from "effect/ai"
 import type { LanguageModel } from "effect/ai"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
-import { layer, ObjectRef, objectRefKey, register, RelayBackendUnavailable, RelayHarness } from "../src/index.js"
+import { DatabaseSync } from "node:sqlite"
+import { layer, make, ObjectRef, objectRefKey, register, RelayBackendUnavailable, RelayHarness } from "../src/index.js"
 import type { RelayBackend, RelayEvent } from "../src/index.js"
 import { relayModels, relayProvider } from "../src/piProvider.js"
 
@@ -316,6 +317,59 @@ testLayer(NodeServices.layer, { excludeTestServices: true })("relay", (it) => {
         const path = yield* Path.Path
         expect((yield* fs.stat(store)).mode & 0o777).toBe(0o600)
         expect((yield* fs.stat(path.dirname(store))).mode & 0o777).toBe(0o700)
+      }).pipe(Effect.scoped))
+  })
+
+  describe("store release", () => {
+    it.effect("releases its store when its scope closes, so the same process can open it again", () =>
+      Effect.gen(function*() {
+        const store = yield* tempStore
+        const model = toolThenAnswer("get_approvals", { pr: "42" })
+        yield* Effect.scoped(
+          Effect.gen(function*() {
+            yield* relayIn(harnessLayer(model.layer, store))
+            // A second owner is refused while the first holds the store, as a retrying hostd would be.
+            const refused = yield* Effect.scoped(relayIn(harnessLayer(model.layer, store))).pipe(Effect.flip)
+            expect(refused._tag).toBe("RelayStoreLocked")
+          })
+        )
+        const reopened = yield* Effect.scoped(relayIn(harnessLayer(model.layer, store))).pipe(Effect.result)
+        expect(reopened._tag === "Failure" ? reopened.failure._tag : "Opened").toBe("Opened")
+        const fs = yield* FileSystem.FileSystem
+        expect((yield* fs.stat(`${store}.lock`)).mode & 0o777).toBe(0o600)
+      }).pipe(Effect.scoped))
+  })
+
+  describe("store release on a failed build", () => {
+    it.effect("releases what a failed build took, so a retry in the same scope opens the store", () =>
+      Effect.gen(function*() {
+        const store = yield* tempStore
+        const model = toolThenAnswer("get_approvals", { pr: "42" })
+        const backends: readonly [RelayBackend] = [claude(model.layer)]
+        const options = {
+          storePath: store,
+          instructions: "You are Relay.",
+          capabilities: [register(approvals)],
+          backends
+        }
+        // A table Pi expects, with the wrong shape: the build fails after it has taken the lock.
+        const fs = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        yield* fs.makeDirectory(path.dirname(store), { recursive: true, mode: 0o700 })
+        const seeded = new DatabaseSync(store)
+        seeded.exec("CREATE TABLE durable_metadata (nonsense TEXT)")
+        seeded.close()
+        const failed = yield* make(options).pipe(Effect.flip)
+        expect(failed._tag).toBe("RelayStoreFailed")
+
+        const repaired = new DatabaseSync(store)
+        repaired.exec("DROP TABLE durable_metadata")
+        repaired.close()
+        const harness = yield* make(options).pipe(Effect.result)
+        expect(harness._tag).toBe("Success")
+        // The successful build owns the store until this scope closes.
+        const second = yield* make(options).pipe(Effect.flip)
+        expect(second._tag).toBe("RelayStoreLocked")
       }).pipe(Effect.scoped))
   })
 
