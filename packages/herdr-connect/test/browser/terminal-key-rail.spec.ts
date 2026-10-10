@@ -64,6 +64,37 @@ const terminalOutputSource = transpileModule(
 
 const ReceivedCommands = Schema.Array(Schema.Struct({ at: Schema.Number, command: TerminalClientCommand }))
 
+for (const width of [390, 320]) {
+  test(`phone terminal keys fit two rows with 44px targets at ${width}px`, async ({ page, request }) => {
+    await request.post("/__test/reset")
+    await page.setViewportSize({ width, height: 844 })
+    await page.goto("/")
+    await page.locator(".connect-agent", { hasText: "fixture-pane" }).click()
+    await page.getByRole("button", { name: "Open terminal" }).click()
+    await expect(page.getByText("connected", { exact: true })).toBeVisible()
+    const rail = page.getByRole("toolbar", { name: "Terminal keyboard controls" })
+    const keys = rail.locator(".terminal-key-group:not(.terminal-key-group-pinned) button")
+    await expect(keys).toHaveCount(9)
+    const rowTops = await keys.evaluateAll((buttons) => buttons.map((button) => button.getBoundingClientRect().top))
+    const rows = [...new Set(rowTops)]
+    expect(rows).toHaveLength(2)
+    expect(rows.map((top) => rowTops.filter((rowTop) => rowTop === top).length)).toEqual([5, 4])
+    const targets = await rail.getByRole("button").evaluateAll((buttons) =>
+      buttons.map((button) => {
+        const { height, width } = button.getBoundingClientRect()
+        return { height, label: button.textContent, width }
+      })
+    )
+    for (const target of targets) {
+      expect(target.width, `${target.label} width`).toBeGreaterThanOrEqual(44)
+      expect(target.height, `${target.label} height`).toBeGreaterThanOrEqual(44)
+    }
+    await rail.screenshot({
+      path: resolve(packageRoot, `test-results/fidelity/key-rail-${width}-two-rows.png`)
+    })
+  })
+}
+
 for (const width of [390, 1280]) {
   for (const theme of ["light", "dark"] satisfies ReadonlyArray<"light" | "dark">) {
     test(`Shift then Tab sends back-tab once at ${width}px in ${theme}`, async ({ page, request }) => {
