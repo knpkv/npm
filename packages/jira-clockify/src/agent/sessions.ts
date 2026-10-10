@@ -8,7 +8,7 @@ import * as SourceConsumption from "./sourceConsumption.js"
  *
  * - **Evidence, not a side**: a transcript records that work happened at particular moments,
  *   never how long it lasted. Everything here derives a *proposal*; nothing here is
- *   authoritative and nothing here writes. See ADR-0006.
+ *   authoritative and nothing here writes.
  * - **Last-touch partition**: every instant between two adjacent Session Activity events is
  *   credited to the *earlier* event's session, and only if the gap is within the Idle Cap.
  *   Each interval is therefore credited exactly once, so the sum over all Issue Keys can never

@@ -2,7 +2,7 @@
 
 Label: `ready-for-agent`
 Package: `@knpkv/jira-clockify` (`jcf`)
-Related: [ADR-0006](../../docs/adr/0006-treat-agent-sessions-as-reconciliation-evidence.md), [CONTEXT.md](../../CONTEXT.md)
+Related: the decision to treat agent sessions as reconciliation evidence, not a reconciliation side; [CONTEXT.md](../../CONTEXT.md)
 
 ## Problem Statement
 
@@ -173,8 +173,8 @@ transcript, and the tool never claims a session's derived duration is authoritat
 - The window flags (`--day`, `--week`, `--since`, `--until`) and the local-day, half-open `[from, to)`
   period resolution are reused unchanged from `reconcile`.
 - Considered and rejected: a sibling `jcf sync sessions` command, and a `jcf session propose` Resource
-  Command. Both were cleaner against ADR-0002's resource-first posture, but the mode flag keeps one
-  reconciliation entry point. ADR-0002 is not violated: `reconcile` remains a Sync Workflow Command.
+  Command. Both were cleaner against the resource-first command surface, but the mode flag keeps one
+  reconciliation entry point. The surface still holds: `reconcile` remains a Sync Workflow Command.
 - The command is a Remote Write Command. It obeys the JSON Output Contract: `--json` emits exactly one
   JSON value on stdout, sends everything human-facing to stderr, and performs no writes. Absence of a
   TTY is treated the same way — report only.
@@ -331,7 +331,7 @@ are never read by tests, and no fixture contains a real Issue Key or employer na
   Jira worklogs. Reconciliation only ever adds.
 - **Reading transcripts from other machines**, or any sync of Session Roots between machines.
 - **Automatic Session Root discovery.** Opt-in only.
-- **Calibrating derived time to a target workday length.** Rejected in ADR-0006.
+- **Calibrating derived time to a target workday length.** Rejected: derived time must never be scaled to fill a day.
 
 ## Further Notes
 

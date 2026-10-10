@@ -4,7 +4,7 @@
  *
  * **Mental model**
  *
- * - **A Booking is computed, never stored** (ADR 0002): {@link bookingOf} is pure, so a sharper
+ * - **A Booking is computed, never stored**: {@link bookingOf} is pure, so a sharper
  *   rule reaches every event already recorded, including those whose transcripts were pruned.
  * - **Branch, then path, then Active Ticket.** Naming a branch or a worktree is deliberate; a key
  *   typed into a shared session is the weakest signal and only counts when it is the only one and

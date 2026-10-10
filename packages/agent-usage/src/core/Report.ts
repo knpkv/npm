@@ -7,7 +7,7 @@
  * - **Periods are the viewer's.** The browser sends its IANA zone; hours, days and weeks start at
  *   local midnight (weeks on Monday), so a daylight-saving day is 23 or 25 hours long. Each stored
  *   15-minute bucket belongs to exactly one period, because every zone offset is a multiple of 15.
- * - **Bookings and costs are derived here** (ADR 0002), from Attribution Inputs, the Known
+ * - **Bookings and costs are derived here**, from Attribution Inputs, the Known
  *   Projects and today's prices. Typed keys of unknown projects are counted by prefix, not hidden.
  *   Unpriced tokens are carried beside the cost, never folded into it as zero.
  * - **A step line needs its starting value.** Each limit series begins at the range's left edge

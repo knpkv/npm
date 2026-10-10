@@ -1,9 +1,9 @@
 /**
  * One Booking's sessions within a range: which agent sessions spent on it, when, and how much.
- * The Booking is derived per group at read time (ADR 0002), the same way the usage report books it,
+ * The Booking is derived per group at read time, the same way the usage report books it,
  * so a session's cost here adds up to its share of that Booking's cost there. A session that worked
  * on two Bookings appears under each with only that Booking's part. Limits are never split by
- * session (ADR 0003).
+ * session: a limit is the account's percentage, and nothing a session spent can claim a share of it.
  *
  * @module
  */

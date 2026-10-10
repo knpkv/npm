@@ -34,7 +34,7 @@ the owner, CSRF, and bootstrap credentials; the bootstrap credential is valid fo
 owner cookie is HttpOnly and SameSite=Strict. This intentionally differs from
 Control Center's durable workspace session (12-hour idle and 30-day absolute
 lifetimes). The policy is the shared single-operator Owner Session from
-`@knpkv/browser-pairing/owner-session` (ADR-0008); CodeCommit web keeps its API
+`@knpkv/browser-pairing/owner-session`; CodeCommit web keeps its API
 middleware, wire errors, `cc_owner` cookie name, and dev-proxy model.
 
 Origin checks use the configured loopback authority captured at bind time. The

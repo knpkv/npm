@@ -1099,7 +1099,7 @@ describe("jcf watch claude", () => {
 
   // The resume is only ever as far as a previous run got. A first-ever watch has no cursor and so no
   // reach at all — otherwise every start would quietly back-date a settle window of unreviewed work,
-  // which is not what the README, the skills, CONTEXT.md or ADR-0007 say this command does.
+  // which is not what the README, the skills or CONTEXT.md say this command does.
   it.effect("writes nothing from before a first-ever start", () =>
     Effect.gen(function*() {
       const { fiber, world } = yield* startWatch({ startMs: at(10, 30), fake: branchWork() })
