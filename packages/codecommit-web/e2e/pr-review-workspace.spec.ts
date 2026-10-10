@@ -103,7 +103,7 @@ const pullRequest = {
   approvalRules: [],
   approvedBy: [],
   approvedByArns: [],
-  author: "andrey",
+  author: "owner",
   commentCount: 0,
   commentedBy: [],
   creationDate: "2026-08-07T09:30:00.000Z",
@@ -2133,7 +2133,7 @@ test("invalidates approver refreshes once per observed head without polling chur
   expect(diffRequestCount).toBe(1)
   const initialRefreshRequestCount = refreshRequestCount
 
-  await page.getByRole("button", { name: "andrey" }).first().click()
+  await page.getByRole("button", { name: "owner" }).first().click()
   await expect.poll(() => approvalRequests).toBe(1)
   await page.clock.fastForward(501)
   await expect.poll(() => refreshRequestCount).toBeGreaterThan(initialRefreshRequestCount)

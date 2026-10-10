@@ -421,9 +421,14 @@ const sanitizeRequestText = (value: string, maximumLength: number): string => {
     : encoded?._tag === "overflow"
     ? redactedCredential
     : sanitizeCredentialText(sanitizeUriQueryParameters(value))
-  return sanitized.length <= maximumLength
-    ? sanitized
-    : `${sanitized.slice(0, maximumLength - redactedCredential.length)}${redactedCredential}`
+  if (sanitized.length <= maximumLength) return sanitized
+  const prefixLimit = maximumLength - redactedCredential.length
+  let prefixLength = 0
+  for (const character of sanitized) {
+    if (prefixLength + character.length > prefixLimit) break
+    prefixLength += character.length
+  }
+  return `${sanitized.slice(0, prefixLength)}${redactedCredential}`
 }
 
 const field = (key: string, label: string, value: string, redacted = false): ApprovalRequestField => ({
@@ -483,6 +488,16 @@ export const approvalRequestFor = (payload: JobPayloadType): ApprovalRequest => 
         fields: [
           field("mode", "Mode", payload.mode),
           field("repository", "Repository", sanitizeRequestText(payload.repository, 2 * 1_024)),
+          ...(payload.newWork === undefined ? [] : [
+            field(
+              "newWork",
+              "New Work goal",
+              sanitizeRequestText(
+                `${payload.repository}@${payload.newWork.branch} — ${payload.newWork.title}`,
+                requestTextMaxLength
+              )
+            )
+          ]),
           ...(payload.channel === undefined ? [] : [field("channel", "Channel", payload.channel)]),
           field("prompt", "Prompt", redactedInternalPrompt, true)
         ],
@@ -630,12 +645,17 @@ export const sanitizeJobPayload = (payload: JobPayloadType): JobPayloadType => {
       return payload
     case "nix.apply":
       return { ...payload, ref: sanitizeRequestText(payload.ref, 4 * 1_024) }
-    case "agent.delegate":
-      return {
+    case "agent.delegate": {
+      const sanitized = {
         ...payload,
         prompt: redactedInternalPrompt,
         repository: sanitizeRequestText(payload.repository, 2 * 1_024)
       }
+      return payload.newWork === undefined ? sanitized : {
+        ...sanitized,
+        newWork: { ...payload.newWork, title: sanitizeRequestText(payload.newWork.title, 4_096) }
+      }
+    }
     case "agent.message":
       return { ...payload, message: redactedInternalPrompt }
     case "work.reconcile":

@@ -36,7 +36,7 @@ const pending = (count: number): ReadonlyArray<PendingJob> =>
     host: "ALPHA",
     jobId: `alpha-job-${index}`,
     kind: "nix.check",
-    actor: "andrey@example.com",
+    actor: "owner@example.com",
     createdAt: 1_000 - index,
     expiresAt: null
   }))
@@ -45,8 +45,8 @@ const localRecord = Schema.decodeUnknownSync(SanitizedJobRecord)({
   id: "ser8-job-1",
   createdAt: 10,
   updatedAt: 20,
-  actor: "andrey@example.com",
-  approvedBy: "andrey@example.com",
+  actor: "owner@example.com",
+  approvedBy: "owner@example.com",
   status: "succeeded",
   approvalAvailable: false,
   payload: { kind: "nix.check" }
@@ -210,10 +210,10 @@ describe("Relay's hub capabilities", () => {
         jobId: "ser8-job-1",
         kind: "nix.check",
         status: "succeeded",
-        requestedBy: "andrey@example.com",
+        requestedBy: "owner@example.com",
         createdAt: 10,
         updatedAt: 20,
-        approvedBy: "andrey@example.com",
+        approvedBy: "owner@example.com",
         rejectedBy: null
       })
       const remote = yield* invoke(capabilities.getJob, { host: "ALPHA", jobId: "alpha-job-1" })

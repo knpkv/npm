@@ -51,7 +51,7 @@
     "node": ">=26"
   },
   "scripts": {
-    "build": "rimraf dist && tsc -b --force",
+    "build": "node ../../scripts/build-typescript.mjs",
     "check": "tsc -b tsconfig.json && tsc -p test/tsconfig.json --noEmit",
     "clean": "rimraf dist *.tsbuildinfo",
     "lint": "eslint \"{src,test}/**/*.{ts,tsx}\"",

@@ -4,7 +4,7 @@ import { Effect } from "effect"
 import { submitToHost } from "../src/fleetctl-submission.js"
 
 const pending: JobRecord = {
-  actor: "andrey@example.com",
+  actor: "owner@example.com",
   approvalExpiresAt: 61_000,
   approvalNonce: "nonce-1",
   approvedAt: null,

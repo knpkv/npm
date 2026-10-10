@@ -16,7 +16,7 @@ const raw = {
   expectedGoalUpdatedAt: 500
 }
 const payload = Schema.decodeUnknownSync(JobPayload)(raw)
-const approval = { approvedBy: "andrey", approvedAt: 900, hash: "c".repeat(64) }
+const approval = { approvedBy: "owner", approvedAt: 900, hash: "c".repeat(64) }
 
 describe("work.reassign executor", () => {
   it.effect("submits the exact payload with the persisted approval provenance", () =>
@@ -65,7 +65,7 @@ describe("work.reassign executor", () => {
         ...raw,
         approvalJobId: "job-reassign",
         approvalActor: "coord",
-        approvalApprovedBy: "andrey",
+        approvalApprovedBy: "owner",
         approvalApprovedAt: 900,
         approvalHash: approval.hash
       }])

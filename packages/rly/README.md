@@ -196,6 +196,9 @@ through the intrinsic exit, then removes it. Reduced motion removes it immediate
 A host overriding content exit duration must keep the layer exit duration at least
 as long, so portal removal cannot cut the surface animation short.
 
+Dialog returns focus to its opener after exit and modal cleanup, rather than immediately
+on close. Consumer tests must wait for cleanup and the restored focus.
+
 `Dialog.Content.restoreFocus` defaults to restoring the opener. A route owner can
 return `true` after focusing its destination, or `false` to keep opener restoration.
 The callback runs after exit and modal cleanup, only for the latest modal transition.

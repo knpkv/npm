@@ -48,12 +48,12 @@ const request = {
   kind: "work.abandon",
   goalId: original.goal.id,
   owner,
-  reason: "abandoned by Andrey 2026-10-06: no PR, no branch, no owner",
+  reason: "abandoned by Owner 2026-10-06: no PR, no branch, no owner",
   expectedGoalEventId: original.eventId,
   expectedGoalUpdatedAt: original.goal.updatedAt,
   approvalJobId: "job-abandon-1",
   approvalActor: "coord",
-  approvalApprovedBy: "andrey",
+  approvalApprovedBy: "owner",
   approvalApprovedAt: 900,
   approvalHash: "c".repeat(64)
 } satisfies WorkGoalAbandonment

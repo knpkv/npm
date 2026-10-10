@@ -1,4 +1,4 @@
-import { Clock, Crypto, Effect, Ref, Result, Schema, Semaphore } from "effect"
+import { Clock, Crypto, Effect, Predicate, Ref, Result, Schema, Semaphore } from "effect"
 import { Base64Url } from "effect/encoding"
 import {
   FleetApprovalError,
@@ -104,6 +104,7 @@ export type HostOperationRecovery = {
    * Rejoins or idempotently completes submission, including before Fleet persisted a receipt.
    * A running job's exact persisted worker is supplied for authoritative replay without discovery.
    * It must attach observation in its owning scope and return without waiting for terminal work.
+   * A rejected failure settles an unaccepted job; all other failures remain recoverable.
    */
   readonly resume: ResumeHostOperation
 }
@@ -548,6 +549,27 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
     return { accepted, current, lifecycle, transitions, workerStarted }
   })
 
+  const failOperation = Effect.fn("FleetService.failOperation")(function*(
+    latest: JobRecord,
+    error: FleetOperationError | FleetValidationError
+  ) {
+    const causeTag = error._tag === "FleetOperationError" &&
+        Predicate.hasProperty(error.cause, "_tag") && Predicate.isString(error.cause._tag)
+      ? error.cause._tag
+      : error._tag
+    const detail = error._tag === "FleetOperationError" && error.disposition === "rejected"
+      ? summarizeHostOperationTerminalDetail(`${causeTag}: ${error.detail}`)
+      : error.detail
+    const timestamp = yield* now
+    const failed: JobChange = latest.worker === undefined
+      ? { status: "failed", result: null, error: detail }
+      : { status: "failed", result: null, error: detail, workerTerminalObservedAt: timestamp }
+    return yield* options.store.transition(
+      latest,
+      updated(latest, timestamp, failed)
+    )
+  })
+
   const runWith = Effect.fn("FleetService.runWith")(function*(
     jobId: string,
     execute: (
@@ -625,7 +647,10 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
         yield* Ref.set(current, persisted)
         return yield* result.failure
       }
-      if (durableOperation && Result.isFailure(result)) {
+      if (
+        durableOperation && Result.isFailure(result) &&
+        !(result.failure._tag === "FleetOperationError" && result.failure.disposition === "rejected")
+      ) {
         return yield* result.failure
       }
       if (durableOperation && Result.isSuccess(result)) {
@@ -636,8 +661,8 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
         })
       }
       if (latest.status !== "running") return latest
-      const terminalObservedAt = yield* now
       if (Result.isSuccess(result)) {
+        const terminalObservedAt = yield* now
         const succeeded: JobChange = latest.worker === undefined
           ? { status: "succeeded", result: result.success, error: null }
           : {
@@ -651,18 +676,7 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
           updated(latest, terminalObservedAt, succeeded)
         )
       }
-      const failed: JobChange = latest.worker === undefined
-        ? { status: "failed", result: null, error: result.failure.detail }
-        : {
-          status: "failed",
-          result: null,
-          error: result.failure.detail,
-          workerTerminalObservedAt: terminalObservedAt
-        }
-      return yield* options.store.transition(
-        latest,
-        updated(latest, terminalObservedAt, failed)
-      )
+      return yield* failOperation(latest, result.failure)
     }))
   })
 
@@ -888,7 +902,7 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
             })
           }
           const resumed = yield* makeOperationLifecycle(record, receipt !== null, true)
-          yield* options.operations.recovery.resume(
+          const result = yield* Effect.result(options.operations.recovery.resume(
             record.payload,
             resumed.workerStarted,
             record.id,
@@ -896,7 +910,19 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
             receipt,
             resumed.lifecycle,
             record.worker ?? null
-          )
+          ))
+          if (Result.isFailure(result)) {
+            yield* resumed.transitions.withPermit(Effect.gen(function*() {
+              const latest = yield* Ref.get(resumed.current)
+              if (
+                result.failure.disposition !== "rejected" ||
+                latest.acceptedReceipt !== null && latest.acceptedReceipt !== undefined
+              ) return yield* result.failure
+              if (latest.status !== "running") return
+              const failed = yield* failOperation(latest, result.failure)
+              yield* Ref.set(resumed.current, failed)
+            }))
+          }
           continue
         }
         const terminalObservedAt = yield* now

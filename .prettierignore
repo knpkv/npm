@@ -11,3 +11,4 @@ docs/debt.md
 .design-sync/previews/
 packages/*/.design-sync/overrides/
 packages/*/.design-sync/previews/
+packages/*/.design-sync/fixtures/*.json

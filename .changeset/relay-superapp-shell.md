@@ -16,3 +16,5 @@ Add decorative avatar slots to Relay's launcher, panel and transcript, forwarded
 Retain the Dialog portal layer until its exit motion completes.
 
 Allow Dialog hosts to restore a navigation destination after modal cleanup, with opener restoration as the default.
+
+Dialog now returns focus to the opener after its exit and modal cleanup instead of immediately on close; downstream tests must wait for cleanup.

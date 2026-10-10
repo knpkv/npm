@@ -141,6 +141,7 @@ describe("Dialog", () => {
       </Dialog.Root>
     )
     const trigger = host.querySelector<HTMLButtonElement>("button")
+    if (trigger === null) throw new Error("Expected dialog opener")
     await act(async () => trigger?.click())
     const dialog = portal.querySelector<HTMLElement>('[role="dialog"]')
     const title = portal.querySelector<HTMLElement>("h2")
@@ -157,11 +158,13 @@ describe("Dialog", () => {
         new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Escape" })
       )
     })
-    await act(async () => new Promise<void>((resolve) => setTimeout(resolve, 0)))
-    expect(portal.querySelector('[role="dialog"]')).toBeNull()
-    expect(document.activeElement).toBe(trigger)
-    expect(background.inert).toBe(false)
-    expect(document.body.getAttribute("data-scroll-locked")).toBeNull()
+    await vi.waitFor(() => {
+      expect(portal.querySelector('[role="dialog"]')).toBeNull()
+      expect(document.activeElement).toBe(trigger)
+      expect(background.inert).toBe(false)
+      expect(trigger.closest('[aria-hidden="true"]')).toBeNull()
+      expect(document.body.getAttribute("data-scroll-locked")).toBeNull()
+    })
   })
 
   it.each([true, false])(

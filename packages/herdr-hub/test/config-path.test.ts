@@ -17,8 +17,8 @@ describe("fleet configuration path", () => {
       expect(
         yield* loadWith({ FLEET_CONFIG_PATH: "/explicit/config.json" })
       ).toBe("/explicit/config.json")
-      expect(yield* loadWith({ HOME: "/home/andrey" })).toBe(
-        "/home/andrey/.config/fleet/config.json"
+      expect(yield* loadWith({ HOME: "/home/owner" })).toBe(
+        "/home/owner/.config/fleet/config.json"
       )
       expect(Result.isFailure(yield* Effect.result(loadWith({})))).toBe(true)
     }))

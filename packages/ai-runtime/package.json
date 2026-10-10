@@ -30,7 +30,7 @@
     "node": ">=26"
   },
   "scripts": {
-    "build": "rimraf dist && tsc -b --force",
+    "build": "node ../../scripts/build-typescript.mjs",
     "check": "tsc --noEmit && tsc -p tsconfig.test.json --noEmit && tsc -p tsconfig.contract.json && tsc6 -p tsconfig.contract-fixture.json && pnpm check:contract-invalid",
     "check:contract-invalid": "node scripts/check-invalid-contract.mjs && node --test scripts/check-invalid-contract.test.mjs",
     "clean": "rimraf dist *.tsbuildinfo",

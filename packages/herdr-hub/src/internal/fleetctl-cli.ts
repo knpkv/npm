@@ -7,6 +7,7 @@
 import {
   FleetValidationError,
   JobPayload,
+  type JobRecord,
   WorkAbandon,
   WorkAdmit,
   type WorkJobKind,
@@ -15,6 +16,37 @@ import {
   WorkRecover
 } from "@knpkv/herdr-fleet"
 import { Data, Effect, Predicate, Schema, SchemaIssue } from "effect"
+
+/** Makes field-supplied terminal controls visible without changing ordinary Unicode text. */
+const terminalText = (value: string): string =>
+  value.replace(/\p{Cc}/gu, (character) => {
+    switch (character) {
+      case "\n":
+        return "\\n"
+      case "\r":
+        return "\\r"
+      case "\t":
+        return "\\t"
+      default:
+        return `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`
+    }
+  })
+
+/** The terminal-safe New Work line shared by job, follow, and pending-submit output. */
+export const formatNewWorkGoal = (payload: JobRecord["payload"]): string | null => {
+  if (payload.kind !== "agent.delegate" || payload.newWork === undefined) return null
+  return `New Work goal: ${terminalText(payload.repository)}@${terminalText(payload.newWork.branch)} — ${
+    terminalText(payload.newWork.title)
+  }`
+}
+
+/** Raw job output retains terminal errors; delegation also names the proposed Work goal. */
+export const formatJobRecord = (record: JobRecord, approvalUrl?: string): string => {
+  const body = approvalUrl === undefined ? record : { ...record, approvalUrl }
+  const value = JSON.stringify(body, null, 2).split("\n").map(terminalText).join("\n")
+  const newWork = formatNewWorkGoal(record.payload)
+  return newWork === null ? value : `${value}\n${newWork}`
+}
 
 const workLines = [
   "  work record HOST CHECKPOINT_JSON",

@@ -43,7 +43,7 @@ const observation = (overrides: Partial<PullRequestAtomicObservation> = {}): Pul
     }
   ],
   formalReview: { requiredApprovals: 0, requiresCodeOwnerReview: false, decision: null },
-  owner: { id: "owner:andrey", name: "Andrey" },
+  owner: { id: "owner:owner", name: "Owner" },
   pullRequest: 417,
   repository: "knpkv/npm",
   requiredChecks: ["Types"],

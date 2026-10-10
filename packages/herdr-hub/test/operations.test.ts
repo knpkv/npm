@@ -27,7 +27,7 @@ const config = (
   repository: string,
   checkCommand: ReadonlyArray<string>
 ): HostConfiguration => ({
-  allowedUsers: ["andrey@example.com"],
+  allowedUsers: ["owner@example.com"],
   applyCommand: null,
   browserMcpRecoverCommand: null,
   applyMachines: ["SER8"],
@@ -47,7 +47,7 @@ const config = (
   machines: [{ host: "SER8", nodeId: "node-ser8" }],
   port: 4778,
   pushAllowedOrigins: ["https://push.example.test"],
-  pushSubject: "mailto:andrey@example.com",
+  pushSubject: "mailto:owner@example.com",
   repository,
   approvalTls: null,
   stateDirectory: repository,
@@ -587,7 +587,7 @@ printf '%s\\n' '{"result":{"agents":[{"launch_pending":false,"agent_status":"wor
                 session: "agent-1"
               }
             },
-            "andrey@example.com"
+            "owner@example.com"
           )
           if (submitted.approvalNonce === null) {
             return yield* Effect.die("approval nonce missing")
@@ -595,7 +595,7 @@ printf '%s\\n' '{"result":{"agents":[{"launch_pending":false,"agent_status":"wor
           yield* fleet.approve(
             submitted.id,
             { hash: submitted.hash, nonce: submitted.approvalNonce },
-            "andrey@example.com"
+            "owner@example.com"
           )
           const completed = yield* fleet.run(submitted.id)
           const body = JSON.stringify(completed)
@@ -644,7 +644,7 @@ printf '%s\\n' '{"result":{"agents":[{"launch_pending":false,"agent_status":"wor
           ]
         ) {
           const record = Schema.decodeUnknownSync(JobRecord)({
-            actor: "andrey@example.com",
+            actor: "owner@example.com",
             approvalNonce: null,
             approvedBy: null,
             createdAt: 1_000,

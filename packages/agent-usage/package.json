@@ -20,6 +20,10 @@
       "types": "./src/index.ts",
       "default": "./dist/index.js"
     },
+    "./views": {
+      "types": "./src/views.ts",
+      "default": "./dist/views.js"
+    },
     "./limits": {
       "types": "./src/limits/index.ts",
       "default": "./dist/limits/index.js"
@@ -43,6 +47,10 @@
       ".": {
         "types": "./dist/index.d.ts",
         "default": "./dist/index.js"
+      },
+      "./views": {
+        "types": "./dist/views.d.ts",
+        "default": "./dist/views.js"
       },
       "./limits": {
         "types": "./dist/limits/index.d.ts",

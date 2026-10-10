@@ -60,13 +60,15 @@ const NumberCell = (props: { readonly value: string; readonly title?: string | u
   </span>
 )
 
-export const BookingTable = (props: {
+export interface BookingTableProps {
   readonly bookings: ReadonlyArray<BookingSummary>
   readonly named: ReadonlySet<string>
   readonly slots: ReadonlyMap<string, number>
   readonly selected: string | null
   readonly onSelect: (id: string | null) => void
-}) => {
+}
+
+export const BookingTable = (props: BookingTableProps) => {
   const [sort, setSort] = useState<BookingSort>(DEFAULT_SORT)
   const [breakdown, setBreakdown] = useState(false)
   const shown = bookingColumns(props.bookings, breakdown)

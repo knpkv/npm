@@ -20,7 +20,7 @@ import { startHttpServer, type UiAssets } from "../src/http.js"
 const provideNodeServices = Effect.provide(NodeServices.layer)
 
 const config = (stateDirectory: string): HostConfiguration => ({
-  allowedUsers: ["andrey@example.com"],
+  allowedUsers: ["owner@example.com"],
   applyCommand: null,
   browserMcpRecoverCommand: null,
   applyMachines: ["SER8"],
@@ -36,7 +36,7 @@ const config = (stateDirectory: string): HostConfiguration => ({
   machines: [{ host: "SER8", nodeId: "node-ser8" }],
   port: 0,
   pushAllowedOrigins: [],
-  pushSubject: "mailto:andrey@example.com",
+  pushSubject: "mailto:owner@example.com",
   repository: "/repo",
   approvalTls: null,
   stateDirectory,

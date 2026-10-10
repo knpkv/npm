@@ -1,4 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
+import type { BookingSummary } from "../src/shared/contracts.js"
 import {
   bookingColumns,
   type BookingSort,
@@ -6,8 +7,7 @@ import {
   nextSort,
   sortBookings,
   visibleSort
-} from "../src/client/bookingModel.js"
-import type { BookingSummary } from "../src/shared/contracts.js"
+} from "../src/ui/bookingModel.js"
 
 const tokens = { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite5m: 0, cacheWrite1h: 0 }
 

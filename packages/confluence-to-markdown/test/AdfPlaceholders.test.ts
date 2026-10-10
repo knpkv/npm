@@ -541,7 +541,7 @@ describe("revertPlaceholders", () => {
         type: "paragraph",
         content: [{
           type: "text",
-          text: "@Andrey Konopkov",
+          text: "@Owner User",
           marks: [{ type: "link", attrs: { href: "confluence-mention://557057%3Aabc-123" } }]
         }]
       }])
@@ -549,7 +549,7 @@ describe("revertPlaceholders", () => {
 
     expect(out.content?.[0]?.content?.[0]).toMatchObject({
       type: "mention",
-      attrs: { id: "557057:abc-123", text: "@Andrey Konopkov" }
+      attrs: { id: "557057:abc-123", text: "@Owner User" }
     })
   })
 

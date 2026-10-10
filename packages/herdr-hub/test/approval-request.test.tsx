@@ -5,7 +5,7 @@ import { JobPayload } from "@knpkv/herdr-fleet/model"
 import type { JobPayload as JobPayloadType, JobRecord, WorkReassignAgent } from "@knpkv/herdr-fleet/model"
 import { Schema } from "effect"
 import { ApprovalRequestDisclosure } from "../src/approval-request-view.js"
-import type { DashboardSnapshot } from "../src/dashboard-model.js"
+import { DashboardSnapshot } from "../src/dashboard-model.js"
 import { DashboardView } from "../src/dashboard-view.js"
 import {
   approvalRequestFor,
@@ -79,10 +79,10 @@ const dashboardFor = (record: JobRecord): DashboardSnapshot => ({
   work: null
 })
 
-const renderDashboard = (record: JobRecord): string =>
+const renderDashboard = (record: JobRecord, approvalOnly = true): string =>
   renderToStaticMarkup(
     <DashboardView
-      approvalOnly
+      approvalOnly={approvalOnly}
       busyJobId={null}
       notificationState="disabled"
       onDecision={() => undefined}
@@ -95,6 +95,74 @@ const renderDashboard = (record: JobRecord): string =>
   )
 
 describe("sanitized approval requests", () => {
+  it("keeps bounded Unicode titles decodable after credential redaction", () => {
+    const overflowingTitle = "🦊".repeat(2_043) + " token=xy"
+    expect(overflowingTitle.length).toBe(4_095)
+    for (const { expected, title } of [
+      { title: overflowingTitle, expected: "🦊".repeat(2_037) + "[redacted credential]" },
+      { title: "🦊 token=xy", expected: "🦊 token=[redacted credential]" },
+      { title: "a".repeat(4_096), expected: "a".repeat(4_096) }
+    ]) {
+      const payload = Schema.decodeUnknownSync(JobPayload)({
+        kind: "agent.delegate",
+        mode: "work",
+        repository: "/repo",
+        prompt: "ship",
+        newWork: { branch: "fix/new-work", title }
+      })
+      const projected = sanitizeJobPayload(payload)
+      expect(Schema.decodeUnknownResult(JobPayload)(projected)._tag).toBe("Success")
+      expect(projected).toMatchObject({ newWork: { title: expected } })
+      expect(expected.length).toBeLessThanOrEqual(4_096)
+      expect(JSON.stringify(projected)).not.toContain("xy")
+      expect(Schema.decodeUnknownSync(JobPayload)(projected)).toEqual(projected)
+      const record = { ...recordFor("pending_approval"), payload }
+      const projectedRecord = sanitizeJobRecord(record)
+      expect(Schema.decodeUnknownSync(SanitizedJobRecord)(projectedRecord)).toEqual(projectedRecord)
+      const snapshot = dashboardFor(record)
+      expect(Schema.decodeUnknownSync(DashboardSnapshot)(snapshot)).toEqual(snapshot)
+    }
+  })
+
+  it("redacts credential assignments in proposed Work titles before browser projection", () => {
+    const payload: JobPayloadType = {
+      kind: "agent.delegate",
+      mode: "work",
+      repository: "/repo",
+      prompt: "ship",
+      newWork: { branch: "fix/new-work", title: "Repair token=synthetic-secret" }
+    }
+    const projected = sanitizeJobPayload(payload)
+    expect(JSON.stringify({ request: approvalRequestFor(payload), projected })).not.toContain("synthetic-secret")
+    expect(projected).toMatchObject({ newWork: { title: "Repair token=[redacted credential]" } })
+    expect(Schema.decodeUnknownSync(JobPayload)(projected)).toEqual(projected)
+  })
+
+  it("shows the proposed Work goal in approvals and the dashboard", () => {
+    const payload: JobPayloadType = {
+      kind: "agent.delegate",
+      mode: "work",
+      repository: "/repo",
+      prompt: "ship",
+      newWork: { branch: "fix/new-work", title: "Create a goal" }
+    }
+    const request = approvalRequestFor(payload)
+    expect(request.fields).toContainEqual({
+      key: "newWork",
+      label: "New Work goal",
+      redacted: false,
+      value: "/repo@fix/new-work — Create a goal"
+    })
+    const disclosure = renderToStaticMarkup(<ApprovalRequestDisclosure id="new-work" payload={payload} />)
+    expect(disclosure).toContain("New Work goal")
+    expect(disclosure).toContain("/repo@fix/new-work — Create a goal")
+    expect(renderDashboard({ ...recordFor("pending_approval"), payload }, false)).toContain(
+      "New Work goal: /repo@fix/new-work — Create a goal"
+    )
+    expect(sanitizeJobPayload(payload)).toMatchObject({ newWork: payload.newWork })
+    expect(approvalRequestFor(approvalPayload).fields.some((item) => item.key === "newWork")).toBe(false)
+  })
+
   it("redacts spaced credential labels without hiding nearby prose", () => {
     for (const ref of [
       "api key: leaked-canary",

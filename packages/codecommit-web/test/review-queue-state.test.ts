@@ -16,7 +16,7 @@ import {
 const pullRequest = Schema.decodeSync(PullRequest)({
   id: "42",
   title: "feat(queue): align account filtering",
-  author: "andrey",
+  author: "owner",
   repositoryName: "codecommit-web",
   creationDate: new Date("2026-08-01T00:00:00Z"),
   lastModifiedDate: new Date("2026-08-02T00:00:00Z"),
@@ -33,18 +33,18 @@ const pullRequest = Schema.decodeSync(PullRequest)({
 
 describe("resolveQueueMode", () => {
   it("shows Review when an old URL contains both review and hot flags", () => {
-    expect(resolveQueueMode({ filters: [], hot: true, review: true }, "andrey")).toBe("review")
+    expect(resolveQueueMode({ filters: [], hot: true, review: true }, "owner")).toBe("review")
   })
 
   it("keeps ordinary updated queues in Hot mode", () => {
-    expect(resolveQueueMode({ filters: [], hot: true, review: false }, "andrey")).toBe("hot")
+    expect(resolveQueueMode({ filters: [], hot: true, review: false }, "owner")).toBe("hot")
   })
 
   it("recognizes the current-user author filter as Mine", () => {
     expect(
       resolveQueueMode(
-        { filters: [{ key: "author", value: "andrey" }], hot: false, review: false },
-        "andrey"
+        { filters: [{ key: "author", value: "owner" }], hot: false, review: false },
+        "owner"
       )
     ).toBe("mine")
   })

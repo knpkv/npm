@@ -1943,8 +1943,12 @@ describe("PullRequestReviewPanel", () => {
       preview: PREVIEW,
       publication: PUBLICATION
     })
-    await act(async () => vi.dynamicImportSettled())
-    expect(document.activeElement).toBe(postComment)
+    await vi.waitFor(() => {
+      expect(host.querySelector("[role=dialog]")).toBeNull()
+      expect(document.activeElement).toBe(postComment)
+      expect(document.body.getAttribute("data-scroll-locked")).toBeNull()
+      expect(postComment.closest('[aria-hidden="true"]')).toBeNull()
+    })
   })
 
   it("renders the durable provider receipt after publication", async () => {
