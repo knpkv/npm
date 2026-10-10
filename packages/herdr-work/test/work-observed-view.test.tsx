@@ -189,6 +189,53 @@ describe("Work board with the observed overlay", () => {
     )
   })
 
+  it("ranks a recorded completion by its checkpoint even when its PR closed earlier", async () => {
+    const host = await mount(
+      snapshotOf(
+        [
+          goal("latest", { state: "completed", updatedAt: NOW - HOUR }),
+          goal("older", { state: "completed", updatedAt: NOW - 5 * HOUR })
+        ],
+        { observed: [merged("latest", NOW - 10 * HOUR)] }
+      )
+    )
+    expect(host.querySelector('[aria-label="Work summary"]')?.textContent).toContain(
+      "Last finished: Goal latest, 1h ago."
+    )
+  })
+
+  it("shows a distinct owner alongside the recorded worker without duplicating a matching identity", async () => {
+    for (const ownerName of ["Coordinator", "Worker"]) {
+      const host = await mount(
+        snapshotOf(
+          [
+            goal("assigned", {
+              agentHierarchy: {
+                agent: {
+                  agentId: "worker-1",
+                  host: "host-a",
+                  name: "Worker",
+                  paneId: "pane-1",
+                  relationship: { parentAgentId: "coordinator-1", relation: "delegated" }
+                }
+              },
+              owner: { id: "owner-1", name: ownerName }
+            })
+          ],
+          { observed: [] }
+        ),
+        "assigned"
+      )
+      const facts = [...host.querySelectorAll(".work-facts > div")]
+      const ownerFact = facts.find((fact) => fact.querySelector("dt")?.textContent === "Owner")
+      expect(facts.find((fact) => fact.querySelector("dt")?.textContent === "Agent")?.textContent).toContain(
+        "host-a / Worker, as recorded"
+      )
+      if (ownerName === "Coordinator") expect(ownerFact?.querySelector("dd")?.textContent).toBe("Coordinator")
+      else expect(ownerFact).toBeUndefined()
+    }
+  })
+
   it("summarizes clear work by moving and planned goals, then the last finished goal", async () => {
     const clear = await mount(workFidelitySnapshots("3d"))
     expect(clear.querySelector('[aria-label="Work summary"]')?.textContent).toContain(

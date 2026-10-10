@@ -32,6 +32,7 @@ import { workRequestClockText, workRequestDecidability, type WorkRequestDecision
 import { displayStateOf, observedFor } from "./display-state.js"
 import {
   type WorkTriageSummary,
+  workGoalFinishedAt,
   workTriage,
   workTriageGroups,
   workTriageGroupTitle,
@@ -418,7 +419,7 @@ const summaryCaption = (
       const planned = rows.filter((row) => row.group === "planned").length
       const finished = rows
         .filter((row) => row.group === "done" || row.group === "earlier")
-        .map(({ goal }) => ({ goal, at: observedFor(snapshot, goal.id)?.pullRequest?.fact.closedAt ?? goal.updatedAt }))
+        .map(({ goal }) => ({ goal, at: workGoalFinishedAt(goal, observedFor(snapshot, goal.id)) }))
         .toSorted((left, right) => right.at - left.at)[0]
       return `${summary.moving} ${summary.moving === 1 ? "goal" : "goals"} ${tense === "past" ? "were " : ""}moving, ${planned} planned.${finished === undefined ? "" : ` Last finished: ${finished.goal.title}, ${ageOf(finished.at, snapshot.asOf)}.`}`
     }
@@ -567,13 +568,11 @@ const RequestItem = ({
   decisions,
   externalLinks,
   historical,
-  owner,
   request
 }: {
   readonly decisions: WorkRequestDecisions | undefined
   readonly externalLinks: "disabled" | "enabled"
   readonly historical: boolean
-  readonly owner: string
   readonly asOf: number
   readonly request: WorkRequest
 }): ReactElement => {
@@ -609,7 +608,7 @@ const RequestItem = ({
         <div className="work-request-meta">
           {decision._tag === "Bar" ? <StateLabel icon="clock" label="Open" size="compact" tone="caution" /> : null}
           <Text tone="secondary" variant="meta">
-            requested by {owner}, {ageOf(request.requestedAt, asOf)}
+            requested {ageOf(request.requestedAt, asOf)}
           </Text>
         </div>
       ) : null}
@@ -743,6 +742,12 @@ const GoalDetail = ({
           <dt>Branch</dt>
           <dd>{goal.repository.branch}</dd>
         </div>
+        {goal.owner.name === agentName ? null : (
+          <div>
+            <dt>Owner</dt>
+            <dd>{goal.owner.name}</dd>
+          </div>
+        )}
         <div>
           <dt>Agent</dt>
           <dd>
@@ -798,7 +803,6 @@ const GoalDetail = ({
                 externalLinks={externalLinks}
                 historical={snapshot.window !== "now"}
                 key={request.id}
-                owner={goal.owner.name}
                 request={request}
               />
             ))}

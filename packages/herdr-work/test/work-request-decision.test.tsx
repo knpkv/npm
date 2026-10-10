@@ -128,6 +128,34 @@ describe("workRequestClockText", () => {
 })
 
 describe("Work requests decided in place", () => {
+  it("dates retained requests without attributing them to the replacement owner", async () => {
+    const retained = request("r1", "job-1")
+    const original = snapshotsOf([retained])
+    const reassigned = {
+      ...original,
+      now: {
+        ...original.now,
+        goals: [
+          {
+            ...goal([retained]),
+            owner: { id: "replacement-owner", name: "Replacement owner" },
+            updatedAt: NOW - 30_000
+          }
+        ]
+      }
+    }
+    const { decisions, sent } = decisionsOf({ "job-1": NOW + 60_000 })
+    const host = await mount({ decisions, snapshots: reassigned })
+    expect(host.querySelector(".work-request-meta")?.textContent).toBe("Openrequested 1m ago")
+    expect(host.querySelector(".work-request-meta")?.textContent).not.toContain("Replacement owner")
+    const approve = button(host, "Approve: Apply r1")
+    expect(approve?.getAttribute("aria-disabled")).toBeNull()
+    await act(async () => approve?.click())
+    expect(sent).toEqual([{ decision: "approve", jobId: "job-1" }])
+    const ordinary = await mount({ snapshots: original })
+    expect(ordinary.querySelector(".work-request-meta")?.textContent).toBe("requested 1m ago")
+  })
+
   it("keeps the hub link when the host gives no decisions", async () => {
     const host = await mount({ snapshots: snapshotsOf([request("r1", "job-1")]) })
     expect(host.querySelector("a[href='https://hub.example.test/?approvalJob=job-1']")).not.toBeNull()
