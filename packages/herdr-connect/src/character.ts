@@ -3,7 +3,7 @@
  *
  * **Mental model**
  *
- * - **The look is identity, never state.** Body outline, hues, eye shape, breathing pace, blink rhythm and
+ * - **The look is identity, never state.** Body outline, hues, eye and brow shapes, breathing pace, blink rhythm and
  *   phase come only from `host:id`, so an agent looks the same on every poll, page and device. Its state
  *   changes how the creature behaves (see `Creature`), never what it looks like.
  * - **Seeds use unsigned bit fields.** The hash is FNV-1a mixed with the murmur3 finaliser, so neighbouring
@@ -30,6 +30,14 @@ export interface AgentCharacter {
   /** Distance of each eye from the centre line, and the eyes' height. */
   readonly eyeGap: number
   readonly eyeY: number
+  /** Tapered crescent proportions relative to the eye: half-width, arch, thickness, socket clearance and inner tilt. */
+  readonly brow: {
+    readonly width: number
+    readonly arch: number
+    readonly thick: number
+    readonly gap: number
+    readonly tilt: number
+  }
   /** Breath, blink and phase as multiples of `--rly-motion-slow-duration`; phase is negative, a head start. */
   readonly pace: number
   readonly blink: number
@@ -140,6 +148,13 @@ export const agentCharacter = (host: string, id: string): AgentCharacter => {
     blink: 13 + field(seed, 25, 5),
     body: smoothClosedPath(points),
     bounds: [50 - width / 2, top, width, height],
+    brow: {
+      width: 0.9 + field(seed, 7, 5) * 0.05,
+      arch: 1.2 + field(seed, 10, 6) * 0.2,
+      thick: 1.1 + field(seed, 15, 5) * 0.1,
+      gap: 1.6 + field(seed, 20, 5) * 0.2,
+      tilt: (field(seed, 26, 5) - 2) * 0.25
+    },
     eye: [eyeWidth, eyeWidth * aspect],
     eyeGap: clamp(width * 0.135, 9.2, 11.2) + (field(seed, 18, 3) - 1) * 0.4,
     eyeY: top + height * 0.4 + (field(seed, 21, 3) - 1) * 0.8,

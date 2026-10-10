@@ -82,6 +82,21 @@ describe("Creature", () => {
     expect(body.split("<g").length).toBe(body.split("</g>").length)
   })
 
+  it("draws two closed tapered brows in the face's bob group, with the body's middle hue", () => {
+    const markup = renderToStaticMarkup(<Creature host="nix" id="a1" size="stage" state="working" />)
+    const brows = [...markup.matchAll(/<path class="connect-creature-brow"[^>]*>/g)].map(([path]) => path)
+    expect(brows).toHaveLength(2)
+    expect(brows[0]).toContain('data-side="l"')
+    expect(brows[1]).toContain('data-side="r"')
+    for (const path of brows) expect(path).toMatch(/d="M[\d. ]+Q[\d. ]+Q[\d. ]+Z"/)
+    const bob = markup.indexOf('class="connect-creature-bob"')
+    expect(bob).toBeGreaterThan(-1)
+    const face = markup.slice(bob)
+    expect(face.match(/class="connect-creature-brow"/g)).toHaveLength(2)
+    expect(face).not.toContain('class="connect-creature-breath"')
+    expect(markup).toContain("--connect-creature-brow-hue:")
+  })
+
   // A gaze not clipped to its eye paints iris over skin when it looks aside; lids painted over the eye show as
   // discs in another shade, so each eye closes as an aperture onto the body beneath.
   it("clips each eye's gaze to its white and closes the eye as an aperture", () => {

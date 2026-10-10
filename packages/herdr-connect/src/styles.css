@@ -1257,6 +1257,49 @@
     stroke-width: 1.4;
   }
 
+  /* Tapered brows sit on the face: state changes translate or turn them without scaling with the body. */
+  .connect-creature-brow {
+    fill: oklch(0.36 0.09 var(--connect-creature-brow-hue));
+    stroke: oklch(0.36 0.09 var(--connect-creature-brow-hue));
+    stroke-linejoin: round;
+    stroke-width: 0.6;
+    transform-box: fill-box;
+    transform-origin: center;
+  }
+
+  .connect-creature[data-size="row"] .connect-creature-brow {
+    stroke-width: 1.4;
+  }
+
+  .connect-creature[data-bucket="needs-you"]:not([data-stale]) .connect-creature-brow[data-side="l"] {
+    translate: -0.4px -1.4px;
+  }
+
+  .connect-creature[data-bucket="needs-you"]:not([data-stale]) .connect-creature-brow[data-side="r"] {
+    translate: 0.4px -1.4px;
+  }
+
+  .connect-creature[data-bucket="working"]:not([data-stale]) .connect-creature-brow[data-side="l"] {
+    rotate: 3deg;
+    translate: 0 0.6px;
+  }
+
+  .connect-creature[data-bucket="working"]:not([data-stale]) .connect-creature-brow[data-side="r"] {
+    rotate: -3deg;
+    translate: 0 0.6px;
+  }
+
+  .connect-creature[data-bucket="finished"]:not([data-stale]) .connect-creature-brow {
+    translate: 0 0.3px;
+  }
+
+  .connect-creature[data-stale] .connect-creature-brow {
+    opacity: 0.45;
+    rotate: 0deg;
+    scale: 1 0.45;
+    translate: 0 0.4px;
+  }
+
   /* Needs you: a halo in the state's tone, off the face; the row's word says which kind. */
   .connect-creature-halo {
     fill: none;
@@ -1413,6 +1456,13 @@
       animation-delay: calc(var(--rly-motion-slow-duration) * var(--connect-creature-phase));
     }
 
+    /* The brief brow lift and wandering eyes share a duration and phase. */
+    .connect-creature[data-bucket="ready"]:not([data-stale]) .connect-creature-brow {
+      animation: connect-creature-brow-lift calc(var(--rly-motion-slow-duration) * var(--connect-creature-pace) * 5)
+        linear infinite;
+      animation-delay: calc(var(--rly-motion-slow-duration) * var(--connect-creature-phase));
+    }
+
     .connect-creature[data-bucket="working"]:not([data-stale]) .connect-creature-gaze {
       animation: connect-creature-read calc(var(--rly-motion-slow-duration) * 10) var(--rly-easing-in-out) infinite;
     }
@@ -1543,6 +1593,25 @@
     }
   }
 
+  @keyframes connect-creature-brow-lift {
+    0%,
+    18%,
+    23%,
+    40%,
+    45%,
+    60%,
+    65%,
+    100% {
+      translate: 0 0;
+    }
+
+    20%,
+    42%,
+    62% {
+      translate: 0 -0.8px;
+    }
+  }
+
   @keyframes connect-creature-turn {
     to {
       rotate: 360deg;
@@ -1550,6 +1619,12 @@
   }
 
   @media (forced-colors: active) {
+    .connect-creature .connect-creature-brow,
+    .connect-creature[data-stale] .connect-creature-brow {
+      fill: CanvasText;
+      opacity: 1;
+      stroke: CanvasText;
+    }
     .connect-creature-body {
       fill: Canvas;
       stroke: CanvasText;
@@ -1592,6 +1667,15 @@
     fill: Canvas;
     stroke: CanvasText;
     stroke-width: 2;
+  }
+
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .connect-creature .connect-creature-brow,
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"])
+    .connect-creature[data-stale]
+    .connect-creature-brow {
+    fill: CanvasText;
+    opacity: 1;
+    stroke: CanvasText;
   }
 
   :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .connect-creature-core,

@@ -1,4 +1,12 @@
 import { expect, type Page, test } from "@playwright/test"
+import { agentStatePresentation } from "../../src/agent-state.js"
+
+/** The actual SVG paths for the contact-sheet seeds, under the app's creature stylesheet. */
+const openBrowGrid = async (page: Page): Promise<void> => {
+  await page.emulateMedia({ reducedMotion: "no-preference" })
+  await page.goto("/?brows")
+  await expect(page.locator("[data-brow-grid] svg.connect-creature")).toHaveCount(64)
+}
 
 /** Names of the animations running on the fixture agent's creature. */
 const running = (page: Page): Promise<ReadonlyArray<string>> =>
@@ -45,7 +53,7 @@ const freeze = (page: Page, names: ReadonlyArray<string>, share: number): Promis
       [names, share] satisfies readonly [ReadonlyArray<string>, number]
     )
 
-/** The body's current scale and the first pupil's drawn size. */
+/** The body's current scale and the first pupil's and brow's drawn sizes. */
 const measure = (page: Page) =>
   page
     .locator(".connect-agent svg.connect-creature")
@@ -56,7 +64,14 @@ const measure = (page: Page) =>
         return group === null ? "" : getComputedStyle(group).scale
       })
       const pupil = svg.querySelector(".connect-creature-pupil")?.getBoundingClientRect()
-      return { body: scales.join(" / "), height: pupil?.height ?? 0, width: pupil?.width ?? 0 }
+      const brow = svg.querySelector(".connect-creature-brow")?.getBoundingClientRect()
+      return {
+        body: scales.join(" / "),
+        height: pupil?.height ?? 0,
+        width: pupil?.width ?? 0,
+        browWidth: brow?.width ?? 0,
+        browHeight: brow?.height ?? 0
+      }
     })
 
 test.describe("Connect creatures", () => {
@@ -87,6 +102,7 @@ test.describe("Connect creatures", () => {
     await freeze(page, [], 0)
     const rest = await measure(page)
     expect(rest.width).toBeGreaterThan(0)
+    expect(rest.browWidth).toBeGreaterThan(0)
     // The fixture agent is working; an arrival plays only when one starts needing you, so add its marker.
     await page
       .locator(".connect-agent svg.connect-creature")
@@ -104,6 +120,8 @@ test.describe("Connect creatures", () => {
       expect(moment.body, names.join()).not.toBe(rest.body)
       expect(moment.width).toBeCloseTo(moment.height, 2)
       expect(moment.width).toBeCloseTo(rest.width, 2)
+      expect(moment.browWidth).toBeCloseTo(rest.browWidth, 2)
+      expect(moment.browHeight).toBeCloseTo(rest.browHeight, 2)
     }
   })
 
@@ -179,4 +197,188 @@ test.describe("Connect creatures", () => {
     expect(drawn.body).not.toBe("none")
     expect(drawn.pupil).not.toBe("none")
   })
+
+  for (const size of ["row", "cast", "stage"]) {
+    for (const state of ["ready", "working", "needs-you", "finished", "stale"]) {
+      test(`${size} brows clear sockets, silhouette and centre line across 64 seeds while ${state}`, async ({ page }) => {
+        test.setTimeout(30_000)
+        await openBrowGrid(page)
+        const failures = await page.locator("[data-brow-grid]").evaluate((grid, [drawnSize, shown]) => {
+          const failures: Array<string> = []
+          for (const [index, svg] of [...grid.querySelectorAll<SVGSVGElement>("svg")].entries()) {
+            svg.setAttribute("data-size", drawnSize)
+            svg.setAttribute("data-bucket", shown === "stale" ? "working" : shown)
+            if (shown === "stale") svg.setAttribute("data-stale", "")
+            for (const animation of svg.getAnimations({ subtree: true })) {
+              animation.pause()
+              const timing = animation.effect?.getTiming()
+              const duration = Number(timing?.duration ?? 0)
+              const delay = Number(timing?.delay ?? 0)
+              const name = "animationName" in animation ? String(animation.animationName) : ""
+              if (duration > 0) {
+                animation.currentTime = delay + Math.ceil(-delay / duration / 2) * 2 * duration
+                  + duration * (name === "connect-creature-brow-lift" ? 0.2 : 0.001)
+              }
+            }
+            const body = svg.querySelector<SVGPathElement>(".connect-creature-body")
+            const bob = svg.querySelector<SVGGElement>(".connect-creature-bob")
+            const brows = [...svg.querySelectorAll<SVGPathElement>(".connect-creature-brow")]
+            const sockets = [...svg.querySelectorAll<SVGEllipseElement>(".connect-creature-socket")]
+            const bodyInverse = body?.getCTM()?.inverse()
+            const bobInverse = bob?.getCTM()?.inverse()
+            if (
+              body === null || bodyInverse === undefined || bobInverse === undefined || brows.length !== 2 ||
+              sockets.length !== 2
+            ) {
+              failures.push(`Seed ${index}: incomplete face`)
+              continue
+            }
+            for (const [side, brow] of brows.entries()) {
+              const matrix = brow.getCTM()
+              const socket = sockets[side]
+              const socketInverse = socket?.getCTM()?.inverse()
+              if (matrix === null || socket === undefined || socketInverse === undefined) {
+                failures.push(`Seed ${index}: missing transform`)
+                continue
+              }
+              const halfStroke = Number.parseFloat(getComputedStyle(brow).strokeWidth) / 2
+              const length = brow.getTotalLength()
+              let clearance = Infinity
+              for (let sample = 0; sample <= 32; sample++) {
+                const point = brow.getPointAtLength(length * sample / 32)
+                // The round stroke extends in every direction. Check its perimeter as well as the fill.
+                for (let edge = 0; edge < 8; edge++) {
+                  const angle = edge * Math.PI / 4
+                  const world = new DOMPoint(
+                    point.x + halfStroke * Math.cos(angle),
+                    point.y + halfStroke * Math.sin(angle)
+                  ).matrixTransform(matrix)
+                  const skin = world.matrixTransform(bodyInverse)
+                  const face = world.matrixTransform(bobInverse)
+                  const eye = world.matrixTransform(socketInverse)
+                  if (!body.isPointInFill(skin)) failures.push(`Seed ${index}, side ${side}: outside silhouette`)
+                  if (side === 0 ? face.x >= 50 : face.x <= 50) {
+                    failures.push(`Seed ${index}, side ${side}: crossed centre`)
+                  }
+                  const x = (eye.x - socket.cx.baseVal.value) / socket.rx.baseVal.value
+                  if (Math.abs(x) <= 1) {
+                    const top = socket.cy.baseVal.value - socket.ry.baseVal.value * Math.sqrt(1 - x * x)
+                    clearance = Math.min(clearance, top - eye.y)
+                  }
+                }
+              }
+              if (!(clearance > 0.01 && Number.isFinite(clearance))) {
+                failures.push(`Seed ${index}, side ${side}: socket clearance ${clearance}`)
+              }
+            }
+          }
+          return [...new Set(failures)]
+        }, [size, state] satisfies readonly [string, string])
+        expect(failures).toEqual([])
+      })
+    }
+  }
+
+  test("ready brows share the wander clock and stay static under reduced motion", async ({ page }) => {
+    await open(page, "no-preference")
+    const svg = page.locator(".connect-agent svg.connect-creature").first()
+    await svg.evaluate((node) => node.setAttribute("data-bucket", "ready"))
+    const clocks = await svg.evaluate((node) => {
+      const style = (selector: string) => getComputedStyle(node.querySelector(selector) ?? node)
+      const brow = style(".connect-creature-brow")
+      const gaze = style(".connect-creature-gaze")
+      return {
+        brow: [brow.animationDuration, brow.animationDelay],
+        gaze: [gaze.animationDuration, gaze.animationDelay]
+      }
+    })
+    expect(clocks.brow).toEqual(clocks.gaze)
+    expect(clocks.brow[0]).not.toBe("0s")
+    await page.emulateMedia({ reducedMotion: "reduce" })
+    expect(await running(page)).toEqual([])
+  })
+
+  test("stale brows flatten without inheriting working tilt, and forced colours make them opaque", async ({ page }) => {
+    await open(page, "reduce")
+    const svg = page.locator(".connect-agent svg.connect-creature").first()
+    await svg.evaluate((node) => node.setAttribute("data-stale", ""))
+    const brow = svg.locator(".connect-creature-brow").first()
+    await expect(brow).toHaveCSS("opacity", "0.45")
+    await expect(brow).toHaveCSS("rotate", "0deg")
+    await expect(brow).toHaveCSS("scale", "1 0.45")
+    await expect(brow).toHaveCSS("translate", "0px 0.4px")
+    await page.emulateMedia({ forcedColors: "active" })
+    await expect(brow).toHaveCSS("opacity", "1")
+    expect(await brow.evaluate((node) => getComputedStyle(node).fill)).toBe(
+      await svg.locator(".connect-creature-pupil").first().evaluate((node) => getComputedStyle(node).fill)
+    )
+    await page.emulateMedia({ forcedColors: "none" })
+    await page.evaluate(() => document.body.setAttribute("data-rly-forced-colors", "active"))
+    await expect(brow).toHaveCSS("opacity", "1")
+    expect(await brow.evaluate((node) => getComputedStyle(node).fill)).toBe(
+      await svg.locator(".connect-creature-pupil").first().evaluate((node) => getComputedStyle(node).fill)
+    )
+  })
+
+  // Same 64 seeds as the geometry checks, held still for design/live contact-sheet comparisons.
+  for (const size of ["row", "cast", "stage"] satisfies ReadonlyArray<"row" | "cast" | "stage">) {
+    for (const theme of ["light", "dark"] satisfies ReadonlyArray<"light" | "dark">) {
+      for (const width of [390, 1280]) {
+        for (const state of ["ready", "working", "needs-you", "finished", "stale"]) {
+          test(`brow fidelity ${size} ${state} ${theme} ${width}`, async ({ page }, testInfo) => {
+            await page.setViewportSize({ height: 844, width })
+            await page.emulateMedia({ colorScheme: theme })
+            await openBrowGrid(page)
+            const presentation = agentStatePresentation(
+              state === "stale" ? "working" : state === "finished" ? "done" : state === "needs-you" ? "waiting" : state
+            )
+            const pixels = { row: 36, cast: 60, stage: 240 }[size]
+            await page.locator("[data-brow-grid]").evaluate(
+              (grid, [shown, scheme, tone, drawnSize, edge]) => {
+                document.documentElement.style.colorScheme = scheme
+                document.body.setAttribute("data-rly-theme", scheme)
+                document.body.replaceChildren(grid)
+                document.body.style.overflow = "auto"
+                grid.setAttribute(
+                  "style",
+                  `display:grid;grid-template-columns:repeat(auto-fit,${edge}px);gap:16px;padding:16px`
+                )
+                for (const svg of grid.querySelectorAll<SVGSVGElement>("svg")) {
+                  svg.setAttribute("width", String(edge))
+                  svg.setAttribute("height", String(edge))
+                  svg.setAttribute("data-size", drawnSize)
+                  svg.setAttribute("data-bucket", shown === "stale" ? "working" : shown)
+                  svg.setAttribute("data-tone", tone)
+                  if (shown === "stale") svg.setAttribute("data-stale", "")
+                  for (const animation of svg.getAnimations({ subtree: true })) {
+                    animation.pause()
+                    const timing = animation.effect?.getTiming()
+                    const duration = Number(timing?.duration ?? 0)
+                    const delay = Number(timing?.delay ?? 0)
+                    const name = "animationName" in animation ? String(animation.animationName) : ""
+                    if (duration > 0) {
+                      animation.currentTime = delay + Math.ceil(-delay / duration / 2) * 2 * duration
+                        + duration * (name === "connect-creature-brow-lift" ? 0.2 : 0.001)
+                    }
+                  }
+                }
+              },
+              [state, theme, presentation.tone, size, pixels] satisfies readonly [
+                string,
+                string,
+                string,
+                string,
+                number
+              ]
+            )
+            await expect(page.locator("[data-brow-grid] .connect-creature-brow")).toHaveCount(128)
+            await page.screenshot({
+              fullPage: true,
+              path: testInfo.outputPath(`brows-${size}-${state}-${theme}-${width}.png`)
+            })
+          })
+        }
+      }
+    }
+  }
 })
