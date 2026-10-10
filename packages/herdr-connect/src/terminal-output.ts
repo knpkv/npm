@@ -1,5 +1,5 @@
 import type { PendingTerminalInput } from "./terminal-input.js"
-import type { TerminalInputApplication, TerminalModifier } from "./terminal-keyboard.js"
+import type { TerminalInputApplication, TerminalModifiers } from "./terminal-keyboard.js"
 
 export type TerminalOutputBoundary = {
   readonly isActive: () => boolean
@@ -44,7 +44,7 @@ export type TerminalInputHandlerOptions = {
   readonly outputBoundary: TerminalOutputBoundary
   readonly pendingInput: PendingTerminalInput
   readonly sendInput: (text: string) => boolean
-  readonly setModifier: (modifier: TerminalModifier | null) => void
+  readonly setModifier: (modifier: TerminalModifiers) => void
 }
 
 /** Route Ghostty data by provenance so terminal replies bypass user modifiers. */

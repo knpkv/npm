@@ -1,8 +1,18 @@
 import { Schema } from "effect"
 import type { TerminalClientCommand } from "./model.js"
 
-export const TerminalModifier = Schema.Literals(["ctrl", "alt"])
+export const TerminalModifier = Schema.Literals(["ctrl", "alt", "shift"])
 export type TerminalModifier = typeof TerminalModifier.Type
+
+export type TerminalModifiers = {
+  readonly base: "ctrl" | "alt" | null
+  readonly shift: boolean
+}
+
+export const noTerminalModifiers: TerminalModifiers = { base: null, shift: false }
+
+export const terminalModifierIsActive = (modifiers: TerminalModifiers, key: TerminalModifier): boolean =>
+  key === "shift" ? modifiers.shift : modifiers.base === key
 
 export const TerminalCursorMode = Schema.Literals(["normal", "application"])
 export type TerminalCursorMode = typeof TerminalCursorMode.Type
@@ -23,7 +33,7 @@ export type TerminalKeyDescriptor = {
   readonly ariaLabel: string
 }
 
-export const terminalModifiers: ReadonlyArray<TerminalModifier> = ["ctrl", "alt"]
+export const terminalModifiers: ReadonlyArray<TerminalModifier> = ["ctrl", "alt", "shift"]
 
 export const terminalKeyDescriptors: ReadonlyArray<TerminalKeyDescriptor> = [
   { key: "escape", label: "Esc", ariaLabel: "Escape" },
@@ -95,23 +105,25 @@ const arrowDefinitions: ReadonlyArray<ArrowDefinition> = [
 /** Serialize one fixed terminal key without accepting arbitrary command text. */
 export const serializeTerminalKey = (
   key: TerminalRailKey,
-  modifier: TerminalModifier | null,
+  modifier: TerminalModifiers,
   cursorMode: TerminalCursorMode = "normal"
 ): TerminalKeySerialization => {
   switch (key) {
     case "escape":
-      return modifier === null ? supported("\u001b") : unsupported()
+      return modifier.base === null && !modifier.shift ? supported("\u001b") : unsupported()
     case "tab":
-      return modifier === "ctrl" ? unsupported() : supported(modifier === "alt" ? "\u001b\t" : "\t")
+      if (modifier.base === "ctrl") return unsupported()
+      if (modifier.shift) return modifier.base === null ? supported("\u001b[Z") : unsupported()
+      return supported(modifier.base === "alt" ? "\u001b\t" : "\t")
     case "arrowLeft":
     case "arrowUp":
     case "arrowDown":
     case "arrowRight": {
       const code = arrowCode(key)
       return supported(
-        modifier === null
+        modifier.base === null && !modifier.shift
           ? arrowSequence(code, cursorMode)
-          : `\u001b[1;${modifier === "ctrl" ? "5" : "3"}${code}`
+          : modifiedArrowSequence(code, modifier)
       )
     }
     default:
@@ -123,18 +135,18 @@ export type TerminalKeyDispatch =
   | {
     readonly _tag: "sent"
     readonly command: TerminalInputCommand
-    readonly nextModifier: null
+    readonly nextModifier: TerminalModifiers
   }
   | {
     readonly _tag: "unsupported"
     readonly reason: "modifier_combination_not_supported"
-    readonly nextModifier: TerminalModifier | null
+    readonly nextModifier: TerminalModifiers
   }
 
 /** Apply a rail key and clear a successful one-shot modifier. */
 export const dispatchTerminalKey = (
   key: TerminalRailKey,
-  modifier: TerminalModifier | null,
+  modifier: TerminalModifiers,
   cursorMode: TerminalCursorMode = "normal"
 ): TerminalKeyDispatch => {
   const serialization = serializeTerminalKey(key, modifier, cursorMode)
@@ -142,7 +154,7 @@ export const dispatchTerminalKey = (
     ? {
       _tag: "sent",
       command: { type: "terminal.input", text: serialization.text },
-      nextModifier: null
+      nextModifier: noTerminalModifiers
     }
     : {
       _tag: "unsupported",
@@ -152,24 +164,34 @@ export const dispatchTerminalKey = (
 }
 
 export const toggleTerminalModifier = (
-  current: TerminalModifier | null,
+  current: TerminalModifiers,
   next: TerminalModifier
-): TerminalModifier | null => (current === next ? null : next)
+): TerminalModifiers =>
+  next === "shift"
+    ? { ...current, shift: !current.shift }
+    : { ...current, base: current.base === next ? null : next }
 
 export type TerminalInputApplication =
-  | { readonly _tag: "supported"; readonly text: string; readonly nextModifier: null }
+  | { readonly _tag: "supported"; readonly text: string; readonly nextModifier: TerminalModifiers }
   | {
     readonly _tag: "unsupported"
     readonly reason: "modifier_combination_not_supported"
-    readonly nextModifier: TerminalModifier
+    readonly nextModifier: TerminalModifiers
   }
+
+const modifiedArrowSequence = (code: "A" | "B" | "C" | "D", modifiers: TerminalModifiers): string => {
+  const parameter = 1 + (modifiers.shift ? 1 : 0) + (modifiers.base === "ctrl" ? 4 : modifiers.base === "alt" ? 2 : 0)
+  return `\u001b[1;${parameter}${code}`
+}
 
 const arrowInputs: ReadonlyArray<{
   readonly plain: string
   readonly application: string
   readonly ctrl: string
   readonly alt: string
+  readonly code: "A" | "B" | "C" | "D"
 }> = arrowDefinitions.map(({ code }) => ({
+  code,
   plain: `\u001b[${code}`,
   application: `\u001bO${code}`,
   ctrl: `\u001b[1;5${code}`,
@@ -185,25 +207,40 @@ const modifierCharacterInputs: ReadonlyArray<{
 }))
 
 const terminalInputWithModifier = (
-  modifier: TerminalModifier,
+  modifier: TerminalModifiers,
   text: string
 ): TerminalInputApplication => {
   const arrow = arrowInputs.find(
-    (candidate) => candidate.plain === text || candidate.application === text || candidate[modifier] === text
+    (candidate) =>
+      candidate.plain === text || candidate.application === text ||
+      (modifier.base !== null && candidate[modifier.base] === text) ||
+      modifiedArrowSequence(candidate.code, modifier) === text
   )
   if (arrow !== undefined) {
-    return { _tag: "supported", text: arrow[modifier], nextModifier: null }
+    return { _tag: "supported", text: modifiedArrowSequence(arrow.code, modifier), nextModifier: noTerminalModifiers }
   }
-  if (modifier === "ctrl") {
+  if (modifier.shift && modifier.base === null) {
+    if (text === "\t" || text === "\u001b[Z") {
+      return { _tag: "supported", text: "\u001b[Z", nextModifier: noTerminalModifiers }
+    }
+    // CSI-u preserves Shift+Enter through the PTY and is Claude Code's newline key.
+    if (text === "\r" || text === "\u001b[13;2u") {
+      return { _tag: "supported", text: "\u001b[13;2u", nextModifier: noTerminalModifiers }
+    }
+    if (/^[a-z]$/i.test(text)) {
+      return { _tag: "supported", text: text.toUpperCase(), nextModifier: noTerminalModifiers }
+    }
+  }
+  if (modifier.base === "ctrl") {
     if (text === "\u0003" || text === "\u0004" || text === "\u000c" || text === "\u001a") {
-      return { _tag: "supported", text, nextModifier: null }
+      return { _tag: "supported", text, nextModifier: noTerminalModifiers }
     }
     const controlKey = text.length === 1 ? text.toLowerCase() : text
     if (controlKey === "c" || controlKey === "d" || controlKey === "l" || controlKey === "z") {
-      return { _tag: "supported", text: controlCharacter(controlKey), nextModifier: null }
+      return { _tag: "supported", text: controlCharacter(controlKey), nextModifier: noTerminalModifiers }
     }
   }
-  if (modifier === "alt") {
+  if (modifier.base === "alt") {
     const normalized = text.length === 1
       ? text.toLowerCase()
       : text.length === 2 && text.startsWith("\u001b")
@@ -215,12 +252,16 @@ const terminalInputWithModifier = (
     if (character !== undefined) {
       return {
         _tag: "supported",
-        text: text.length === 1 ? `\u001b${text}` : text,
-        nextModifier: null
+        text: modifier.shift
+          ? `\u001b${text.slice(text.startsWith("\u001b") ? 1 : 0).toUpperCase()}`
+          : text.length === 1
+          ? `\u001b${text}`
+          : text,
+        nextModifier: noTerminalModifiers
       }
     }
-    if (text === "\t" || text === "\u001b\t") {
-      return { _tag: "supported", text: "\u001b\t", nextModifier: null }
+    if (!modifier.shift && (text === "\t" || text === "\u001b\t")) {
+      return { _tag: "supported", text: "\u001b\t", nextModifier: noTerminalModifiers }
     }
   }
   return { _tag: "unsupported", reason: "modifier_combination_not_supported", nextModifier: modifier }
@@ -228,9 +269,9 @@ const terminalInputWithModifier = (
 
 /** Apply a latched modifier to one Ghostty input chunk using only known encodings. */
 export const applyTerminalModifierToInput = (
-  modifier: TerminalModifier | null,
+  modifier: TerminalModifiers,
   text: string
 ): TerminalInputApplication =>
-  modifier === null
-    ? { _tag: "supported", text, nextModifier: null }
+  modifier.base === null && !modifier.shift
+    ? { _tag: "supported", text, nextModifier: noTerminalModifiers }
     : terminalInputWithModifier(modifier, text)
