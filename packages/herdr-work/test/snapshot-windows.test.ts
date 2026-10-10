@@ -98,6 +98,36 @@ describe("snapshot windows", () => {
       expect(snapshots.now.families?.[0]?.canonical).toEqual(listed)
     }))
 
+  it.effect("keep a finished canonical goal with its group while a goal it superseded is still open", () =>
+    Effect.gen(function*() {
+      const longAgo = NOW - 3 * workSnapshotFinishedRetentionMs
+      const family = (memberState: WorkGoal["state"], memberAt: number) =>
+        projectWorkSnapshots(
+          [
+            checkpoint(goalAt("canonical", 0, "planned")),
+            checkpoint(goalAt("member", 0, "planned")),
+            checkpoint({
+              ...goalAt("canonical", longAgo, "completed"),
+              goalFamily: { canonicalGoalId: "canonical", role: "canonical" }
+            }),
+            checkpoint({
+              ...goalAt("member", memberAt, memberState),
+              goalFamily: { canonicalGoalId: "canonical", role: "superseded" }
+            })
+          ],
+          NOW
+        )
+      const open = yield* family("working", NOW - HOUR)
+      expect(open.now.goals.map(({ id }) => id)).toEqual(["canonical"])
+      expect(open.now.families?.[0]?.superseded.map(({ id }) => id)).toEqual(["member"])
+      expect(open.now.finishedOmitted).toBeUndefined()
+      // The whole family finished long ago: it leaves as one, counted once.
+      const done = yield* family("abandoned", longAgo + 1)
+      expect(done.now.goals).toEqual([])
+      expect(done.now.families).toBeUndefined()
+      expect(done.now.finishedOmitted).toBe(1)
+    }))
+
   it.effect("say nothing when nothing was left out", () =>
     Effect.gen(function*() {
       const snapshots = yield* projectWorkSnapshots(history("open", NOW - HOUR, "working"), NOW)

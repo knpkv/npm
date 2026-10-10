@@ -126,10 +126,18 @@ const snapshotAt = (
   for (const event of events.toSorted((left, right) => left.occurredAt - right.occurredAt)) {
     if (event.occurredAt <= asOf) recorded.set(event.goal.id, event.goal)
   }
-  // A goal that finished more than a day before this window's time has left it; the window counts it.
+  // A goal that finished more than a day before this window's time has left it; the window counts it. A family
+  // leaves only as a whole: a canonical goal stays, with its group, while any goal it superseded is still open or
+  // recently finished, so no open goal leaves with it. A family that leaves counts once, as its canonical goal.
+  const doneLongAgo = (goal: WorkGoal): boolean =>
+    isTerminalWorkState(goal.state) && asOf - goal.updatedAt > workSnapshotFinishedRetentionMs
+  const familiesStillOpen = new Set(
+    [...recorded.values()].flatMap((goal) =>
+      goal.goalFamily?.role === "superseded" && !doneLongAgo(goal) ? [goal.goalFamily.canonicalGoalId] : []
+    )
+  )
   const finishedLongAgo = (goal: WorkGoal): boolean =>
-    goal.goalFamily?.role !== "superseded" && isTerminalWorkState(goal.state) &&
-    asOf - goal.updatedAt > workSnapshotFinishedRetentionMs
+    goal.goalFamily?.role !== "superseded" && doneLongAgo(goal) && !familiesStillOpen.has(goal.id)
   // Activity is trimmed here, before families are built, so a group's canonical stays equal to its listed goal.
   const latest = new Map<string, WorkGoal>()
   const activityOmitted = new Map<string, number>()

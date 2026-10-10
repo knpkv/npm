@@ -1083,7 +1083,8 @@ export const WorkSnapshot = Schema.Struct({
   goalsOmitted: Schema.optionalKey(Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0))),
   /**
    * How many finished goals (completed, deployed, abandoned) left this window because they finished more than
-   * `workSnapshotFinishedRetentionMs` before its `asOf`. The window is a triage view; the count keeps the cut visible.
+   * `workSnapshotFinishedRetentionMs` before its `asOf`. A family leaves only once all of it has, and counts once
+   * (as its canonical goal). The window is a triage view; the count keeps the cut visible.
    */
   finishedOmitted: Schema.optionalKey(Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0))),
   /**
