@@ -21,6 +21,12 @@ import * as Stream from "effect/Stream"
 // - each staged version's git tag is on origin. The run that staged it reported success and tagged it; when
 //   that tag is missing, this fails and names the tag and GitHub release to create by hand.
 // Anything else keeps the failure.
+//
+// Publishing runs no lifecycle scripts. `changeset:publish` builds the whole workspace first, then changesets
+// publishes up to ten packages at once, ordering them only by runtime dependencies. A `prepack` that rebuilds
+// (`pnpm build` starts with `rimraf dist`) can then delete a dist that another package's concurrent prepack is
+// reading through a devDependency: codecommit-web's `tsc -b && vite build` read rly's and relay-product's while
+// they were rebuilt, and failed with exit 2 and no output. The packages ship what the build just made.
 
 class PublishFailed extends Data.TaggedError("PublishFailed") {
   get message() {
@@ -124,11 +130,17 @@ const tagOnOrigin = Effect.fn("tagOnOrigin")(function* (tag) {
   return yield* new PublishFailed({ reason: `git ls-remote could not check ${tag} (exit code ${exitCode})` })
 })
 
+/**
+ * Skips every lifecycle script of the `pnpm publish` changesets runs per package: pnpm 11 reads
+ * `pnpm_config_*`, earlier pnpm and npm read `npm_config_*`.
+ */
+export const publishEnv = { npm_config_ignore_scripts: "true", pnpm_config_ignore_scripts: "true" }
+
 const main = Effect.gen(function* () {
   const stdout = (yield* Stdio.Stdio).stdout({ endOnDone: false })
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
   const handle = yield* spawner.spawn(
-    ChildProcess.make("changeset", ["publish"], { extendEnv: true, stderr: "inherit" })
+    ChildProcess.make("changeset", ["publish"], { env: publishEnv, extendEnv: true, stderr: "inherit" })
   )
   const [output, exitCode] = yield* Effect.all(
     [

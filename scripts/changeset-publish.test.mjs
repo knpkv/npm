@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { readPublishOutput } from "./changeset-publish.mjs"
+import { publishEnv, readPublishOutput } from "./changeset-publish.mjs"
 
 const staged = (name, version) =>
   `└ E409: 409 Conflict - PUT https://registry.npmjs.org/${name.replace("/", "%2f")} - ` +
@@ -90,4 +90,9 @@ test("a tag step that fails after the failure block fails the run", () => {
   )
   assert.deepEqual(readPublishOutput(tagFailure), { staged: null })
   assert.deepEqual(readPublishOutput(rlyStaged.replace("\n🦋 Exited with code 1", "")), { staged: null })
+})
+
+test("publishing runs no package's lifecycle scripts, for pnpm 11 and earlier", () => {
+  // The workspace is built before publishing; a concurrent prepack rebuild deleted a dist another package read.
+  assert.deepEqual(publishEnv, { npm_config_ignore_scripts: "true", pnpm_config_ignore_scripts: "true" })
 })
