@@ -2,6 +2,17 @@
 
 Released as `@knpkv/herdr-approvals` up to 0.18.0; the headings below are that package's history.
 
+## 0.19.0
+
+### Minor Changes
+
+- [#750](https://github.com/knpkv/npm/pull/750) [`1e3fa2c`](https://github.com/knpkv/npm/commit/1e3fa2c7edc1b33f5a870fc63e7e0e00b7724436) Thanks [@konopkov](https://github.com/konopkov)! - `@knpkv/herdr-approvals` is now `@knpkv/herdr-hub`: the package serves the whole hub (Approvals, Connect, Work, Usage and Relay), not approvals alone. The `hostd` and `fleetctl` binaries and every export path (`.`, `./fleetctl`, `./hostd`, `./hostd-runtime`) are unchanged; install `@knpkv/herdr-hub` in place of `@knpkv/herdr-approvals`, which is deprecated.
+
+### Patch Changes
+
+- Updated dependencies [[`928f3e2`](https://github.com/knpkv/npm/commit/928f3e2f70fc7dc3074502b0558f55b178ce475f), [`99cf00e`](https://github.com/knpkv/npm/commit/99cf00e9738d3c617ad6c95dc5076ca18767f77e)]:
+  - @knpkv/herdr-connect@0.11.1
+
 ## 0.18.0 (@knpkv/herdr-approvals)
 
 ### Minor Changes

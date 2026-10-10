@@ -1,5 +1,17 @@
 # @knpkv/herdr-connect
 
+## 0.11.1
+
+### Patch Changes
+
+- [#749](https://github.com/knpkv/npm/pull/749) [`928f3e2`](https://github.com/knpkv/npm/commit/928f3e2f70fc7dc3074502b0558f55b178ce475f) Thanks [@konopkov](https://github.com/konopkov)! - Connect's characters keep their shape when they move: only the body squashes and stretches, keeping its area, and the face rides along without stretching. Eyes sit in shallow sockets with a lit iris, pupil and glints, look round without leaving the eye, and blink with lids that close onto the body's own skin. Outlines stand upright on a flat base, every combination of host and ID stays within one size, and the face's proportions stay in a range that never looks broken.
+
+  A long agent name in the cast now ends in an ellipsis instead of spreading over its neighbours.
+
+  The stage no longer shows a sideways scrollbar for the light field drifting past its edges.
+
+- [#753](https://github.com/knpkv/npm/pull/753) [`99cf00e`](https://github.com/knpkv/npm/commit/99cf00e9738d3c617ad6c95dc5076ca18767f77e) Thanks [@konopkov](https://github.com/konopkov)! - Connect uses an iPhone's full width. Rows switch to the phone layout at 640px instead of 384px, so on every iPhone the state sits over the name and the name and work get the whole row instead of a 162px column. The Host and Status options take the full width, so the status words fit one line, and the stage keeps the page's 16px gutter.
+
 ## 0.11.0
 
 ### Minor Changes
