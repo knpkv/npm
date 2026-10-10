@@ -87,4 +87,26 @@ test.describe("Connect stage", () => {
       expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
     })
   }
+
+  // In the hub the shell gives a phone its one 16px gutter and the directory adds none, so an agent's row spans
+  // the screen less 32px; the status options keep to one line whatever their counts.
+  for (const width of [390, 393, 430]) {
+    test(`spans the hub's one gutter and keeps the status options on one line at ${String(width)}px`, async ({ page }) => {
+      await page.setViewportSize({ height: 844, width })
+      await page.goto("/?embedded")
+      // The hub mounts Connect inside its shell's main column; give the fixture's root that column's class.
+      await page.locator("#fleet-connect-root").evaluate((root) => root.classList.add("fleet-shell-main"))
+      const row = await page.locator(".connect-agent").first().boundingBox()
+      expect(row).not.toBeNull()
+      if (row !== null) {
+        expect(row.x).toBe(16)
+        expect(row.width).toBe(width - 32)
+      }
+      const rows = await page
+        .locator(".connect-status-filter button")
+        .evaluateAll((buttons) => new Set(buttons.map((button) => Math.round(button.getBoundingClientRect().top))).size)
+      expect(rows).toBe(1)
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
+    })
+  }
 })

@@ -125,6 +125,14 @@
     max-inline-size: 100rem;
     padding: var(--rly-space-24) var(--rly-space-32) var(--rly-space-96);
   }
+
+  /* A phone gets one 16px gutter, here; the panels inside add none of their own on top of it. */
+  @media (max-width: 40rem) {
+    .fleet-shell-main {
+      padding-inline: max(var(--rly-space-16), env(safe-area-inset-left, 0px))
+        max(var(--rly-space-16), env(safe-area-inset-right, 0px));
+    }
+  }
   .fleet-shortcuts dt span,
   .keyboard-hints span {
     align-items: center;
