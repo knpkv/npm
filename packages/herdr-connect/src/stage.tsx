@@ -9,7 +9,7 @@
  */
 import { PortalProvider } from "@knpkv/rly/foundations"
 import { Button, Sheet } from "@knpkv/rly/primitives"
-import type { CSSProperties, KeyboardEvent, ReactElement } from "react"
+import { type CSSProperties, type KeyboardEvent, type ReactElement, useState } from "react"
 
 import { AgentStateLabel, agentBuckets, agentStageLead, agentStatePresentation } from "./agent-state.js"
 import { agentCharacter } from "./character.js"
@@ -34,23 +34,26 @@ export const AgentCast = ({
       order.indexOf(agentStatePresentation(right.state).bucket)
   )
   // One tab stop for the whole strip, so the cast doesn't double every row's stop; arrows move along it.
+  // The stop is held by agent key, so a poll that re-sorts the cast keeps exactly one, falling back to the first.
+  const [active, setActive] = useState<string | null>(null)
+  const keys = cast.map(connectAgentKey)
+  const activeKey = active !== null && keys.includes(active) ? active : (keys[0] ?? null)
   const move = (event: KeyboardEvent<HTMLElement>): void => {
     const step = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0
-    if (step === 0) return
-    const members = [...event.currentTarget.querySelectorAll<HTMLButtonElement>(".connect-cast-member")]
-    const index = members.findIndex((member) => member === event.target)
-    const next = members[(index + step + members.length) % members.length]
-    if (index === -1 || next === undefined) return
+    if (step === 0 || activeKey === null) return
+    const next = keys[(keys.indexOf(activeKey) + step + keys.length) % keys.length]
+    if (next === undefined) return
     event.preventDefault()
-    for (const member of members) member.tabIndex = member === next ? 0 : -1
-    next.focus()
+    setActive(next)
+    event.currentTarget.querySelector<HTMLButtonElement>(`[data-agent-key="${CSS.escape(next)}"]`)?.focus()
   }
   return (
     <nav aria-label="Agents at a glance" className="connect-cast" onKeyDown={move}>
-      {cast.map((agent, index) => (
+      {cast.map((agent) => (
         <button
           className="connect-cast-member"
-          tabIndex={index === 0 ? 0 : -1}
+          onFocus={() => setActive(connectAgentKey(agent))}
+          tabIndex={connectAgentKey(agent) === activeKey ? 0 : -1}
           data-agent-key={connectAgentKey(agent)}
           key={connectAgentKey(agent)}
           onClick={() => onOpen(agent)}
