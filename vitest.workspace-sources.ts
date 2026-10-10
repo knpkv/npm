@@ -35,7 +35,7 @@
  *
  * Suites that resolve `@knpkv/*` outside vitest still need a fresh `pnpm build`;
  * their test process runs source while the code they start runs `dist/`:
- * - herdr-hub `test/http.test.ts`: spawns node/tsx, needs a fresh `pnpm build`.
+ * - herdr-hub `test/http.test.ts`: lazily bundles fleetctl with esbuild; CLI tests need a fresh `pnpm build`.
  * - herdr-hub `test/browser-bundle.test.ts`: bundles with esbuild, needs a fresh `pnpm build`.
  * - agent-usage `test/login.test.ts`, `test/version.test.ts`: spawn node/tsx, need a fresh `pnpm build`.
  * - control-center `test/runtime/offline-backup.test.ts`: runs the built CLI by design.
