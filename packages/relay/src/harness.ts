@@ -237,10 +237,12 @@ const lockDriver = Effect.tryPromise({
         const bun: typeof BunSqlite = createRequire(import.meta.url)("bun:sqlite")
         return (path) => new bun.Database(path)
       } catch (bunFailure) {
-        // Both causes: on Node the first is the one that matters, on Bun the second.
-        throw new AggregateError([nodeFailure, bunFailure], "neither node:sqlite nor bun:sqlite could load", {
-          cause: bunFailure
-        })
+        // Both causes, in the message too: on Node the first is the one that matters, on Bun the second.
+        throw new AggregateError(
+          [nodeFailure, bunFailure],
+          `neither node:sqlite (${String(nodeFailure)}) nor bun:sqlite (${String(bunFailure)}) could load`,
+          { cause: bunFailure }
+        )
       }
     }
   },

@@ -129,6 +129,15 @@ try {
     fail(`a browser page can't bundle @knpkv/relay/wire: ${error instanceof Error ? error.message : String(error)}`)
   }
 
+  // With no SQLite driver at all, the store's failure keeps the Node driver's cause, not only Bun's.
+  const blocked = spawnSync(
+    process.execPath,
+    ["scripts/no-sqlite-driver-probe.mjs", join(process.cwd(), "dist", "index.js"), join(temporary, "no-driver")],
+    { encoding: "utf8" }
+  )
+  if (blocked.status !== 0)
+    fail(`a store without SQLite misreports it: ${(blocked.stderr || blocked.stdout).slice(0, 400)}`)
+
   // codecommit's TUI runs on Bun and imports Relay through codecommit-web, so a Node-only import at module load
   // (such as `node:sqlite`, which Bun lacks before 1.4) would stop it. Checked where Bun is installed.
   const bun = spawnSync("bun", ["--version"], { encoding: "utf8" })
