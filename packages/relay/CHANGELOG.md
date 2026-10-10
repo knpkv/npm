@@ -1,5 +1,11 @@
 # @knpkv/relay
 
+## 0.2.1
+
+### Patch Changes
+
+- [#743](https://github.com/knpkv/npm/pull/743) [`646b0f0`](https://github.com/knpkv/npm/commit/646b0f0aa3082cbdfe916e9c9ba22de2882cbc3a) Thanks [@konopkov](https://github.com/konopkov)! - A failed run's `cause` is always one of Relay's own sentences, chosen by Pi's reason code (`model_error`, `no_model`, `reset`, anything else); the backend's message is never forwarded, because rly reads the cause aloud.
+
 ## 0.2.0
 
 ### Minor Changes
