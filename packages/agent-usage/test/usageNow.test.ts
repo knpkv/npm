@@ -91,7 +91,7 @@ describe("readUsageNow", () => {
       ]])
     }))
 
-  // Andrey's rule for the hub: tokens per agent and model cross the tailnet; nothing that books,
+  // The hub's boundary: tokens per agent and model cross the tailnet; nothing that books,
   // prices or locates a request does. The store fails if anything else is read at all.
   it.effect("encodes no cost, Booking, ticket, repo, path or balance", () =>
     Effect.gen(function*() {

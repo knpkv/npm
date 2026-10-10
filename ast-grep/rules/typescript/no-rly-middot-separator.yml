@@ -23,6 +23,6 @@ files:
   - "packages/codecommit-web/src/client/**/*.ts"
 
 note: |
-  "A · B · C" is template chrome (Andrey's visual bar, item 3). Write the facts as a
+  "A · B · C" is template chrome: it lists facts without saying how they relate. Write the facts as a
   phrase ("Agent finding, not an approval"), or lay them out as separate elements.
   Stories and packages not listed are covered by the family pass, not this rule.
