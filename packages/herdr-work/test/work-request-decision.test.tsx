@@ -152,6 +152,33 @@ describe("Work requests decided in place", () => {
     expect(host.querySelector("a[href='https://hub.example.test/?approvalJob=job-1']")).not.toBeNull()
   })
 
+  it("keeps a pending job inert in a week checkpoint, then permits it back in Now", async () => {
+    const { decisions, sent } = decisionsOf({ "job-1": NOW + 60_000 })
+    const host = await mount({ decisions, initialWindow: "week", snapshots: snapshotsOf([request("r1", "job-1")]) })
+    const approve = button(host, "Approve: Apply r1")
+    const reject = button(host, "Reject: Apply r1")
+    expect(approve).toBeDefined()
+    expect(reject).toBeDefined()
+    await act(async () => {
+      approve?.click()
+      reject?.click()
+    })
+    expect(sent).toEqual([])
+    expect(approve?.getAttribute("aria-disabled")).toBe("true")
+    expect(reject?.getAttribute("aria-disabled")).toBe("true")
+    expect(reasonAndStatus(host).reason).toBe("Decisions are off in the past.")
+    expect(host.querySelector(".work-row-caption")?.textContent).not.toContain("left")
+
+    const back = [...host.querySelectorAll("button")].find((candidate) => candidate.textContent === "Back to now")
+    await act(async () => back?.click())
+    // Returning to Now closes details; reopen the same goal before deciding its current request.
+    await act(async () => host.querySelector<HTMLButtonElement>(".work-board-row")?.click())
+    const currentApprove = button(host, "Approve: Apply r1")
+    expect(currentApprove?.getAttribute("aria-disabled")).toBeNull()
+    await act(async () => currentApprove?.click())
+    expect(sent).toEqual([{ decision: "approve", jobId: "job-1" }])
+  })
+
   it("holds every other bar off while one decision waits for the hub", async () => {
     const { decisions, sent } = decisionsOf(
       { "job-1": NOW + 60_000, "job-2": NOW + 60_000 },

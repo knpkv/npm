@@ -490,7 +490,25 @@ type RequestDecision =
   | { readonly _tag: "Bar"; readonly bar: ReactElement }
   | { readonly _tag: "Settled"; readonly announcement: string; readonly refusal: string | null }
 
-const requestDecisionFor = (request: WorkRequest, decisions: WorkRequestDecisions | undefined): RequestDecision => {
+const requestDecisionFor = (
+  request: WorkRequest,
+  decisions: WorkRequestDecisions | undefined,
+  historical: boolean
+): RequestDecision => {
+  // A recorded open request is never a live approval target; no current queue, clock or handler reaches this bar.
+  if (historical && request.state === "open" && request.approvalTarget !== null) {
+    return {
+      _tag: "Bar",
+      bar: (
+        <DecisionBar
+          onApprove={() => undefined}
+          onReject={() => undefined}
+          state={{ _tag: "off", reason: "Decisions are off in the past." }}
+          target={request.summary}
+        />
+      )
+    }
+  }
   const decidability = workRequestDecidability(request, decisions)
   if (decidability._tag === "Elsewhere" || decisions === undefined) return { _tag: "Elsewhere" }
   const { expiresAt, jobId } = decidability
@@ -542,16 +560,22 @@ const RequestItem = ({
   asOf,
   decisions,
   externalLinks,
+  historical,
   owner,
   request
 }: {
   readonly decisions: WorkRequestDecisions | undefined
   readonly externalLinks: "disabled" | "enabled"
+  readonly historical: boolean
   readonly owner: string
   readonly asOf: number
   readonly request: WorkRequest
 }): ReactElement => {
-  const decision = requestDecisionFor(request, externalLinks === "enabled" ? decisions : undefined)
+  const decision = requestDecisionFor(
+    request,
+    externalLinks === "enabled" ? decisions : undefined,
+    historical && externalLinks === "enabled"
+  )
   const presentation = requestPresentation[request.state]
   return (
     <li>
@@ -766,6 +790,7 @@ const GoalDetail = ({
                 asOf={snapshot.asOf}
                 decisions={decisions}
                 externalLinks={externalLinks}
+                historical={snapshot.window !== "now"}
                 key={request.id}
                 owner={goal.owner.name}
                 request={request}
@@ -1035,7 +1060,7 @@ export const WorkBoard = ({
   const goalRow = (goal: WorkGoal): ReactElement => {
     const observed = observedOf(goal)
     const shown = shownOf(goal)
-    const caption = rowCaption(goal, observed, externalLinks === "enabled" ? decisions : undefined)
+    const caption = rowCaption(goal, observed, externalLinks === "enabled" && window === "now" ? decisions : undefined)
     const open = requestsFor(goal).filter((request) => request.state === "open")
     const host = observed?.agent?.fact.host ?? goal.connectTarget?.host ?? goal.agentHierarchy?.agent.host
     const agentName = goal.agentHierarchy?.agent.name ?? goal.owner.name
@@ -1349,7 +1374,7 @@ export const WorkBoard = ({
             >
               <GoalDetail
                 closeControl={closeControl("Close details")}
-                decisions={decisions}
+                decisions={snapshot.window === "now" ? decisions : undefined}
                 externalLinks={externalLinks}
                 goal={selected}
                 snapshot={snapshot}
