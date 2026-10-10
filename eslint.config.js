@@ -319,7 +319,8 @@ export default tseslint.config(
     // semantic and safety rules.
     files: [
       "scripts/check-{control-center-live-aws,effect-reference-alignment,security-doc-examples}.mjs",
-      "scripts/pack-herdr.mjs"
+      "scripts/pack-herdr.mjs",
+      "scripts/{build-typescript,run-eslint}{,.test}.mjs"
     ],
     rules: {
       "@effect/dprint": "off"
