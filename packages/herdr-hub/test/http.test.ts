@@ -1,5 +1,5 @@
 import { NodeServices } from "@effect/platform-node"
-import { describe, expect, it, vi } from "@effect/vitest"
+import { afterAll, describe, expect, it, vi } from "@effect/vitest"
 import { makeDeterministicLanguageModel } from "@knpkv/ai-runtime"
 import {
   connectAgentPageMaxRecords,
@@ -43,6 +43,7 @@ import {
 import type { RelayBackend } from "@knpkv/relay"
 import { Data, Deferred, Effect, Fiber, Result, Schema, Stream } from "effect"
 import { HttpClient } from "effect/http"
+import { build } from "esbuild"
 import { spawn } from "node:child_process"
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { createServer, request as httpRequest } from "node:http"
@@ -285,23 +286,40 @@ type StartedHttpServer = Awaited<ReturnType<typeof startHttpServer>>
 /** The port a started listener actually bound, read from its URL; a listener that did not start throws. */
 const boundPort = (url: string | null): number => Number(new URL(url ?? "").port)
 
-const workPreflightFromFleetctl = (
+let fleetctlEntry: Promise<string> | undefined
+let fleetctlFixtureDirectory: string | undefined
+
+afterAll(() => {
+  if (fleetctlFixtureDirectory !== undefined) rmSync(fleetctlFixtureDirectory, { force: true, recursive: true })
+})
+
+/** Builds the shared CLI fixture only when a test first needs a CLI process. */
+const buildFleetctlEntry = async (): Promise<string> => {
+  const suppliedEntry = process.env.FLEETCTL_TEST_ENTRY
+  if (suppliedEntry !== undefined) return suppliedEntry
+  fleetctlFixtureDirectory = mkdtempSync(join(tmpdir(), "herdr-http-fleetctl-"))
+  const entry = join(fleetctlFixtureDirectory, "fleetctl.cjs")
+  // Reuse one bundle: repeated node/tsx dependency loading dominates the CLI integration tests.
+  await build({
+    bundle: true,
+    entryPoints: [join(import.meta.dirname, "../src/fleetctl.ts")],
+    format: "cjs",
+    outfile: entry,
+    platform: "node"
+  })
+  return entry
+}
+
+const workPreflightFromFleetctl = async (
   operation: "admission-preflight" | "recovery-preflight" | "recovery-context",
   configPath: string,
   targetJson: string | undefined,
   host = "SER8"
-): Promise<{ readonly code: number; readonly stdout: string; readonly stderr: string }> =>
-  new Promise((resolve, reject) => {
-    const bundledEntry = process.env.FLEETCTL_TEST_ENTRY
-    const entryArgs = bundledEntry === undefined
-      ? [
-        "--import",
-        join(import.meta.dirname, "../../../node_modules/tsx/dist/loader.mjs"),
-        join(import.meta.dirname, "../src/fleetctl.ts")
-      ]
-      : [bundledEntry]
+): Promise<{ readonly code: number; readonly stdout: string; readonly stderr: string }> => {
+  const entry = await (fleetctlEntry ??= buildFleetctlEntry())
+  return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [
-      ...entryArgs,
+      entry,
       "work",
       operation,
       host,
@@ -325,6 +343,7 @@ const workPreflightFromFleetctl = (
     child.once("error", reject)
     child.once("close", (code) => resolve({ code: code ?? -1, stdout, stderr }))
   })
+}
 
 const workCheckpoint: WorkGoalCheckpointType = {
   eventId: "event-work-created",
