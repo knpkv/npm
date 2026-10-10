@@ -646,6 +646,7 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
   const dashboardView = (
     <DashboardView
       approvalOnly={canonical}
+      refreshFailed={refreshFailed}
       busyJobId={busyJobId}
       decisionStatus={decisionStatus}
       sendingDecision={sendingDecision}

@@ -378,6 +378,8 @@ export {
   agentStatePresentation
 } from "./agent-state.js"
 
+export { Creature as AgentCreature } from "./creature.js"
+
 export const makeConnectAtoms = () => {
   const agents = browserRuntime.atom(loadAgents)
   const work = browserRuntime.atom(loadWork)

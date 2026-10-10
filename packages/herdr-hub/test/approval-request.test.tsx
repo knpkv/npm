@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 import { describe, expect, it } from "@effect/vitest"
 import { canonicalJobPayload } from "@knpkv/herdr-fleet"
 import { renderToStaticMarkup } from "react-dom/server"
@@ -1144,6 +1146,61 @@ describe("sanitized approval requests", () => {
       expectedGoalUpdatedAt: 500
     }
   ]
+  const jsonKinds = {
+    "browser.mcp.recover": true,
+    "nix.check": true,
+    "nix.apply": true,
+    "agent.delegate": true,
+    "agent.message": true,
+    "work.reconcile": true,
+    "work.admit": true,
+    "work.recover": true,
+    "work.reassign": true,
+    "work.abandon": true
+  } satisfies Record<JobPayloadType["kind"], boolean>
+  const jsonPayloads = [
+    { kind: "browser.mcp.recover" },
+    { kind: "nix.check" },
+    { kind: "nix.apply", ref: "main?token=private-canary" },
+    approvalPayload,
+    { kind: "agent.message", session: "test-agent", message: "private message canary" },
+    ...workPayloads,
+    {
+      kind: "work.abandon",
+      goalId: "example-goal",
+      owner: { id: "owner-1", name: "Owner" },
+      reason: "Release ownership",
+      expectedGoalEventId: "event-1",
+      expectedGoalUpdatedAt: 500
+    }
+  ]
+  it("covers each request kind in the normalized JSON allowlist guard", () => {
+    expect(jsonPayloads.map(({ kind }) => kind).sort()).toEqual(Object.keys(jsonKinds).sort())
+  })
+  for (const raw of jsonPayloads) {
+    it(`limits ${raw.kind} JSON keys and values to the default view's normalized fields`, () => {
+      const payload = Schema.decodeUnknownSync(JobPayload)(raw)
+      const request = { ...approvalRequestFor(payload), rawSecret: "raw-request-canary" }
+      const fieldView = document.createElement("div")
+      fieldView.innerHTML = renderToStaticMarkup(<ApprovalRequestDisclosure id="fields" request={request} />)
+      const jsonView = document.createElement("div")
+      jsonView.innerHTML = renderToStaticMarkup(<ApprovalRequestDisclosure id="json" request={request} format="json" />)
+      const jsonText = jsonView.querySelector(".approval-request-json")?.textContent ?? ""
+      const decoded = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Record(Schema.String, Schema.String)))(
+        jsonText
+      )
+      const defaultFields = [...fieldView.querySelectorAll<HTMLElement>("[data-approval-field]")].map((element) => [
+        element.dataset["approvalField"],
+        element.querySelector("dd")?.textContent
+      ])
+      expect(decoded).toEqual({ kind: payload.kind, ...Object.fromEntries(defaultFields) })
+      expect(jsonText).not.toContain("raw-request-canary")
+      expect(jsonText).not.toContain("private-canary")
+      expect(jsonText).not.toContain("private message canary")
+      expect(jsonText).not.toContain("secret-value")
+    })
+  }
+
   // Canonical leaf paths whose display key differs from the path itself.
   const displayKeyFor = new Map([
     ["expectedAbsenceToken", "absenceToken"],
@@ -1370,8 +1427,8 @@ describe("sanitized approval requests", () => {
     "keeps the complete redacted request in the approval dashboard for %s",
     (status) => {
       const html = renderDashboard(recordFor(status))
-      expect(html).toContain("View full request")
-      expect(html).toContain("Repository")
+      expect(html).toContain(status === "pending_approval" ? "Full request" : "View full request")
+      expect(html).toContain("/srv/npm")
       expect(html).toContain("[redacted internal prompt]")
       expect(html).not.toContain("raw terminal result")
       expect(html).not.toContain("raw terminal output")

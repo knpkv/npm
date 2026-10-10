@@ -10,6 +10,9 @@
  *
  * @module
  */
+import type { JobPayload } from "@knpkv/herdr-fleet/model"
+import { AgentCreature } from "@knpkv/herdr-connect/surface"
+import { Icon } from "@knpkv/rly/foundations"
 import {
   DecisionBar,
   Hero,
@@ -18,17 +21,18 @@ import {
   type RlyDecisionBarState,
   Region
 } from "@knpkv/rly/patterns"
-import { Button, LimitTrack, Notice, TrackKey } from "@knpkv/rly/primitives"
+import { Button, LimitTrack, Notice, StateLabel, TrackKey } from "@knpkv/rly/primitives"
 import { Predicate } from "effect"
 import { type KeyboardEvent, type ReactElement, type ReactNode, useEffect, useRef, useState } from "react"
 import { jobTitle } from "./activity-history.js"
+import { approvalRequestFor } from "./approval-request.js"
 import { ApprovalRequestDisclosure } from "./approval-request-view.js"
 import {
   agoText,
   clockText,
   crossedIntoLastMinute,
   decidedOf,
-  factsOf,
+  factsOf as pendingFactsOf,
   itemKey,
   type PendingFacts,
   type PendingItem,
@@ -58,6 +62,22 @@ export interface DecisionStatus {
   readonly expiresAt: number | null | undefined
 }
 
+/** Show safe request targets in the title; private delegation prompts never supply display text. */
+const requestTitle = (payload: JobPayload): string => {
+  const fields = approvalRequestFor(payload).fields
+  if (payload.kind === "nix.apply")
+    return `Apply nix ref ${fields.find(({ key }) => key === "ref")?.value ?? "Revision unreadable"}`
+  if (payload.kind === "work.admit") return fields.find(({ key }) => key === "title")?.value ?? "Goal title unreadable"
+  if (payload.kind === "work.reassign")
+    return `Reassign ${payload.goalId} from ${payload.from.name} to ${payload.to.name}`
+  return jobTitle({ payload })
+}
+
+const factsOf = (item: PendingItem, host: string): PendingFacts => ({
+  ...pendingFactsOf(item, host),
+  title: requestTitle(item._tag === "Local" ? item.record.payload : item.approval.payload)
+})
+
 const failureText = (failure: PendingApprovalFailure): string => {
   switch (failure.reason) {
     case "offline":
@@ -78,13 +98,11 @@ const plural = (count: number, one: string, many: string): string => `${String(c
 const ApprovalHero = ({
   now,
   snapshot,
-  soonest,
-  waiting
+  soonest
 }: {
   readonly now: number
   readonly snapshot: DashboardSnapshot
   readonly soonest: PendingFacts | undefined
-  readonly waiting: number
 }) => {
   const unchecked = snapshot.pendingApprovals.failures.length
   if (soonest === undefined) {
@@ -120,14 +138,15 @@ const ApprovalHero = ({
   }
   const clock = clockText(soonest.expiresAt, now)
   const urgency = soonest.expiresAt === null ? "calm" : urgencyOf(soonest.expiresAt - now)
-  const more = waiting - 1
   // Pages come newest first, so a request on a page not loaded yet may expire sooner than this one.
   const partial = snapshot.pendingApprovals.nextCursors.length > 0
   return (
     <Hero
-      caption={`${factsLabel(soonest.kind, soonest.host)}.${more > 0 ? ` ${plural(more, "more", "more")} waiting.` : ""}${
-        unchecked > 0 ? ` ${plural(unchecked, "host", "hosts")} unchecked.` : ""
-      }${partial ? " More requests aren't loaded yet; one of them may expire sooner." : ""}`}
+      caption={
+        unchecked > 0 || partial
+          ? `${unchecked > 0 ? `${plural(unchecked, "host", "hosts")} unchecked.` : ""}${partial ? " More requests aren't loaded yet; one of them may expire sooner." : ""}`
+          : undefined
+      }
       fact={
         clock === null ? (
           <>{soonest.title} is waiting for you</>
@@ -264,10 +283,112 @@ const departureOf = (snapshot: DashboardSnapshot, item: PendingItem): Departure 
           word: `${decided.outcome}.`
         }
   }
-  // Only another page of this host's queue can still hold it; a remote host's pages cannot.
-  return snapshot.pendingApprovals.nextCursors.some(({ host }) => host.toLowerCase() === snapshot.host.toLowerCase())
+  // A failed read or another page of this host's queue can still hold it.
+  return snapshot.pendingApprovals.failures.some(({ host }) => host.toLowerCase() === snapshot.host.toLowerCase()) ||
+    snapshot.pendingApprovals.nextCursors.some(({ host }) => host.toLowerCase() === snapshot.host.toLowerCase())
     ? null
     : { text: "This request left the queue.", word: "Left the queue." }
+}
+
+/**
+ * Resolve a requester from its recorded actor; a target worker is not the submitter.
+ * Names are unique per host in the current inventory. A name-only actor uses its current holder,
+ * so name reuse can change that portrait; only an exact stable ID preserves submission identity.
+ */
+const requesterOf = (
+  item: PendingItem,
+  snapshot: DashboardSnapshot
+): { readonly host: string; readonly id: string } | undefined => {
+  const actor = factsOf(item, snapshot.host).actor
+  if (item._tag !== "Local") return undefined
+  const matches = snapshot.status.herdr.agents.filter((agent) => agent.agentId === actor || agent.name === actor)
+  if (matches.length > 1) return undefined
+  const agent = matches[0]
+  if (agent?.agentId !== null && agent?.agentId !== undefined) return { host: snapshot.host, id: agent.agentId }
+  const worker = item.record.worker
+  return worker !== undefined && worker.agentId === actor ? { host: worker.host, id: worker.agentId } : undefined
+}
+
+/** The same Connect identity in the list and header; unknown identities keep a neutral placeholder. */
+const RequesterPortrait = ({
+  item,
+  snapshot,
+  stale,
+  waiting
+}: {
+  readonly item: PendingItem
+  readonly snapshot: DashboardSnapshot
+  readonly stale: boolean
+  readonly waiting: boolean
+}) => {
+  const identity = requesterOf(item, snapshot)
+  const [entered, setEntered] = useState(false)
+  return (
+    <span
+      className="countdown-requester"
+      data-enter={!entered && waiting && !stale ? "" : undefined}
+      onAnimationEnd={(event) => {
+        if (event.animationName === "countdown-requester-entry") setEntered(true)
+      }}
+    >
+      {identity === undefined ? (
+        <span aria-label="Requester portrait unavailable" className="countdown-requester-placeholder" role="img">
+          ?
+        </span>
+      ) : (
+        <AgentCreature
+          host={identity.host}
+          id={identity.id}
+          size="row"
+          stale={stale}
+          state={waiting ? "waiting" : "done"}
+        />
+      )}
+    </span>
+  )
+}
+
+/** Arguments and identity approved by the reader, compared again after a stale read. */
+const requestIdentity = (item: PendingItem): string =>
+  item._tag === "Local"
+    ? JSON.stringify({
+        actor: item.record.actor,
+        createdAt: item.record.createdAt,
+        expiresAt: item.record.approvalExpiresAt ?? null,
+        payload: item.record.payload,
+        worker: item.record.worker
+      })
+    : JSON.stringify(item.approval)
+
+/** The sanitized primary target stays visible while full arguments remain folded. */
+const requestTarget = (payload: JobPayload, host: string): string =>
+  approvalRequestFor(payload).fields.find((field) => ["ref", "repository", "session", "goalId"].includes(field.key))
+    ?.value ?? host
+
+/** What approving this kind of request authorizes, beside its exact arguments. */
+const requestConsequence = (payload: JobPayload, host: string): string => {
+  switch (payload.kind) {
+    case "nix.apply":
+      return `Applies this Nix revision on ${host}.`
+    case "nix.check":
+      return `Checks the Nix configuration on ${host}.`
+    case "browser.mcp.recover":
+      return `Recovers the configured browser connection on ${host}.`
+    case "agent.delegate":
+      return `Delegates this agent work on ${host}.`
+    case "agent.message":
+      return `Sends this message to the selected agent session on ${host}.`
+    case "work.reconcile":
+      return `Reconciles the existing Work owner with this pull request on ${host}.`
+    case "work.admit":
+      return `Admits this existing Work owner on ${host}.`
+    case "work.recover":
+      return `Links this existing Work goal to its owner on ${host}.`
+    case "work.reassign":
+      return `Reassigns this Work goal to the specified owner on ${host}.`
+    case "work.abandon":
+      return `Abandons this Work goal on ${host}.`
+  }
 }
 
 const RequestDetail = ({
@@ -278,6 +399,7 @@ const RequestDetail = ({
   now,
   onDecision,
   snapshot,
+  stale,
   state
 }: {
   readonly answer: string | undefined
@@ -288,6 +410,7 @@ const RequestDetail = ({
   readonly now: number
   readonly onDecision: (item: PendingItem, decision: ApprovalDecision["decision"]) => void
   readonly snapshot: DashboardSnapshot
+  readonly stale: boolean
   readonly state: RlyDecisionBarState
 }) => {
   const facts = factsOf(item, snapshot.host)
@@ -298,20 +421,42 @@ const RequestDetail = ({
   const payload = item._tag === "Local" ? item.record.payload : item.approval.payload
   return (
     <article aria-label={facts.title} className="countdown-detail">
-      <p className="countdown-kicker">
-        <code>{facts.id}</code>, {facts.host}
-      </p>
-      <h3 className="countdown-detail-title">{facts.title}</h3>
-      <p className="countdown-requested">
-        Requested by {facts.actor}, <span className="countdown-nowrap">{agoText(facts.createdAt, now)}</span>
-      </p>
-      <ApprovalRequestDisclosure id={facts.id} payload={payload} />
+      <header className="countdown-request-header">
+        <h3 className="countdown-detail-title">{facts.title}</h3>
+        <p className="countdown-kicker">
+          <code>{facts.id}</code> <span>on {facts.host}</span>
+        </p>
+        <p
+          className={`countdown-request-target${payload.kind === "nix.apply" || payload.kind === "work.reassign" ? " countdown-visually-hidden" : ""}`}
+        >
+          {requestTarget(payload, facts.host)}
+        </p>
+        <div className="countdown-request-heading">
+          <RequesterPortrait item={item} snapshot={snapshot} stale={stale} waiting={!gone} />
+          <p className="countdown-requested">
+            Requested by{" "}
+            <span className="countdown-requester-name">
+              {facts.actor.trim() === "" ? "Requester unreadable" : facts.actor}
+            </span>
+            , <span className="countdown-nowrap">{agoText(facts.createdAt, now)}</span>
+          </p>
+        </div>
+      </header>
+      <ApprovalRequestDisclosure
+        id={facts.id}
+        key={`${facts.host}:${facts.id}`}
+        request={{ ...approvalRequestFor(payload), title: facts.title }}
+        format="json"
+        summary="Full request"
+        consequence={requestConsequence(payload, facts.host)}
+      />
       {item._tag === "Local" && item.record.connectTarget !== undefined && item.record.worker !== undefined ? (
         <a
           className="worker-connect-link"
           href={new URL(item.record.connectTarget.url, snapshot.approvalApp.canonicalUrl).href}
         >
           Open {item.record.worker.name} in Connect
+          <Icon decorative name="arrow-right" size="small" />
         </a>
       ) : null}
       {item._tag === "Remote" ? (
@@ -355,7 +500,7 @@ const RequestDetail = ({
             : answer === undefined
               ? {}
               : { status: answer })}
-          target={`${facts.kind} on ${facts.host}`}
+          target={facts.title}
         />
       )}
     </article>
@@ -371,6 +516,7 @@ export const ApprovalsCountdown = ({
   onLoadPending,
   onRevalidate,
   pendingLoading,
+  refreshFailed = false,
   sending,
   snapshot
 }: {
@@ -382,6 +528,7 @@ export const ApprovalsCountdown = ({
   /** Re-reads the hub; called once per request when its deadline passes, so the hub decides expiry. */
   readonly onRevalidate: (() => void) | undefined
   readonly pendingLoading: boolean
+  readonly refreshFailed?: boolean
   readonly sending: ApprovalDecision | null
   readonly snapshot: DashboardSnapshot
 }): ReactElement => {
@@ -392,7 +539,20 @@ export const ApprovalsCountdown = ({
   // decision target changes only when the reader selects (or focuses) another row, never because the
   // queue moved under a focused button.
   const [picked, setPicked] = useState<{ readonly key: string; readonly item: PendingItem } | null>(null)
-  const pick = (item: PendingItem): void => setPicked({ item, key: itemKey(factsOf(item, snapshot.host)) })
+  const [verification, setVerification] = useState<{
+    readonly item: PendingItem
+    readonly decision: ApprovalDecision["decision"]
+    readonly observedAt: number
+  } | null>(null)
+  const [verificationNote, setVerificationNote] = useState("")
+  const pick = (item: PendingItem): void => {
+    const key = itemKey(factsOf(item, snapshot.host))
+    if (key !== picked?.key) {
+      setVerification(null)
+      setVerificationNote("")
+    }
+    setPicked({ item, key })
+  }
   const first = items[0]
   useEffect(() => {
     if (picked === null && first !== undefined) setPicked({ item: first, key: itemKey(factsOf(first, snapshot.host)) })
@@ -417,9 +577,18 @@ export const ApprovalsCountdown = ({
     tracked.map(({ expiresAt }) => expiresAt)
   )
 
+  const stale = now - snapshot.observedAt >= 30_000
+  const localReadFailed = snapshot.pendingApprovals.failures.some(
+    ({ host }) => host.toLowerCase() === snapshot.host.toLowerCase()
+  )
   const stateOf = (item: PendingItem, itemGone: Departure | null): RlyDecisionBarState => {
     if (onDecision === undefined) return { _tag: "off", reason: "Decisions are unavailable here." }
     const id = factsOf(item, snapshot.host).id
+    if (itemGone === null && item._tag === "Local" && (localReadFailed || refreshFailed))
+      return { _tag: "off", reason: "Couldn't check this request. Retry before deciding." }
+    if (verification !== null) return { _tag: "off", reason: "Checking this request before deciding." }
+    if (stale && onRevalidate === undefined)
+      return { _tag: "off", reason: "This request is stale. Refresh before deciding." }
     return decisionState({
       approvalsEnabled: snapshot.approvalsEnabled,
       gone: itemGone,
@@ -508,8 +677,54 @@ export const ApprovalsCountdown = ({
   const decideItem = (item: PendingItem, decision: ApprovalDecision["decision"]): void => {
     if (onDecision === undefined || item._tag !== "Local") return
     pick(item)
+    if (stale) {
+      if (onRevalidate === undefined) return
+      setVerification({ decision, item, observedAt: snapshot.observedAt })
+      setVerificationNote("Checking this request before deciding.")
+      onRevalidate()
+      return
+    }
     onDecision({ decision, jobId: item.record.id })
   }
+
+  useEffect(() => {
+    if (verification === null) return
+    if (refreshFailed) {
+      setVerification(null)
+      setVerificationNote("Couldn't check this request. Retry before deciding.")
+      return
+    }
+    if (snapshot.observedAt <= verification.observedAt) return
+    setVerification(null)
+    const current = items.find(
+      (item) => itemKey(factsOf(item, snapshot.host)) === itemKey(factsOf(verification.item, snapshot.host))
+    )
+    if (localReadFailed) {
+      setVerificationNote("Couldn't check this request. Retry before deciding.")
+    } else if (current === undefined) {
+      setVerificationNote("This request is no longer waiting. Nothing was sent.")
+    } else if (requestIdentity(current) !== requestIdentity(verification.item)) {
+      setVerificationNote("This request changed. Read the full request before deciding again.")
+    } else if (
+      current._tag === "Local" &&
+      onDecision !== undefined &&
+      decisionState({
+        approvalsEnabled: snapshot.approvalsEnabled,
+        gone: null,
+        item: current,
+        sending,
+        settled:
+          decisionStatus?.jobId === current.record.id &&
+          decisionStatus.settles &&
+          snapshot.observedAt <= decisionStatus.observedAt
+      })._tag === "ready"
+    ) {
+      setVerificationNote("")
+      onDecision({ decision: verification.decision, jobId: current.record.id })
+    } else {
+      setVerificationNote("This request can't be decided from here. Nothing was sent.")
+    }
+  }, [snapshot, verification, onDecision, sending, decisionStatus, refreshFailed])
 
   // A shortcut on a row decides that row's request (and selects it); anywhere else in the page it
   // decides the selected request. Either way it obeys the same state as the bar.
@@ -566,18 +781,58 @@ export const ApprovalsCountdown = ({
 
   return (
     <div className="countdown" onKeyDown={onShortcut}>
-      <h1 className="countdown-title">Approvals</h1>
-      <ApprovalHero now={now} snapshot={snapshot} soonest={facts[0]} waiting={items.length} />
+      <header className="countdown-page-heading countdown-visually-hidden">
+        <h1 className="countdown-title">Approvals</h1>
+        <p className="countdown-pending-count">
+          {items.length === 0 && unchecked.length === 0 && snapshot.pendingApprovals.nextCursors.length === 0
+            ? "No requests waiting"
+            : items.length === 0 && unchecked.length > 0
+              ? `Requests on ${plural(unchecked.length, "host", "hosts")} unchecked`
+              : items.length === 0
+                ? "More requests haven't loaded yet"
+                : `${String(items.length)} waiting on you${unchecked.length > 0 ? "; some hosts unchecked" : ""}`}
+        </p>
+      </header>
+      <ApprovalHero now={now} snapshot={snapshot} soonest={facts[0]} />
       <p aria-atomic="true" aria-live="polite" className="countdown-announcer">
         {announcement}
+      </p>
+      <p
+        className={`countdown-freshness${stale ? "" : " countdown-visually-hidden"}`}
+        data-stale={stale ? "true" : undefined}
+      >
+        {stale ? "Stale. " : ""}Last checked {agoText(snapshot.observedAt, now)}.
+        {stale ? " Your decision rechecks the request first." : ""}
+      </p>
+      <p aria-atomic="true" className="countdown-verification" role="status">
+        {verificationNote}
       </p>
       {snapshot.approvalsEnabled
         ? null
         : regionNote("Approvals are turned off on this host, so Approve and Reject are off.", "caution")}
-      {unchecked.length === 0
+      {unchecked.length === 0 && !refreshFailed
         ? null
         : regionNote(
-            `Couldn't check ${unchecked.map(failureText).join(", ")}. Requests on reachable hosts are listed; local approvals still work.`,
+            <>
+              <p>
+                {refreshFailed
+                  ? "Couldn't refresh requests."
+                  : `Couldn't check ${unchecked.map(failureText).join(", ")}.`}{" "}
+                Retained requests stay here; retry before deciding on an unchecked host.
+              </p>
+              <Button
+                onClick={() => {
+                  setVerification(null)
+                  setVerificationNote("")
+                  onRevalidate?.()
+                }}
+                disabled={onRevalidate === undefined}
+                type="button"
+                variant="quiet"
+              >
+                Retry
+              </Button>
+            </>,
             "critical"
           )}
       <div className="countdown-regions" data-has-selection={selected !== undefined}>
@@ -594,7 +849,7 @@ export const ApprovalsCountdown = ({
                 ? "Nothing is waiting on the hosts that answered."
                 : snapshot.pendingApprovals.nextCursors.length > 0
                   ? "Nothing on the first page. Load more to see the rest."
-                  : "Nothing is waiting for your decision."}
+                  : "No requests waiting"}
             </p>
           ) : (
             <ul className="countdown-rows" onKeyDown={moveRowFocus} role="list">
@@ -618,9 +873,19 @@ export const ApprovalsCountdown = ({
                       type="button"
                     >
                       <span className="countdown-row-meta">
-                        <code>{row.kind}</code>, {row.host}
+                        <code>{row.kind}</code> {row.host}
                       </span>
-                      <span className="countdown-row-title">{row.title}</span>
+                      <span className="countdown-row-title">
+                        {row.title}
+                        {row.kind === "nix.apply" || row.kind === "work.reassign" ? null : (
+                          <span className="countdown-row-target">
+                            {requestTarget(
+                              item._tag === "Local" ? item.record.payload : item.approval.payload,
+                              row.host
+                            )}
+                          </span>
+                        )}
+                      </span>
                       {/* A request without an expiry says so, instead of leaving the clock's place empty. */}
                       <span
                         className="countdown-row-clock"
@@ -638,8 +903,14 @@ export const ApprovalsCountdown = ({
                         <LimitTrack className="countdown-row-track" near={used.near} size="slim" value={used.value} />
                       )}
                       <small className="countdown-row-caption">
-                        from {row.actor}
-                        {item._tag === "Remote" ? `, decided on ${item.host}` : ""}
+                        <RequesterPortrait item={item} snapshot={snapshot} stale={stale} waiting />
+                        <span>
+                          {row.actor.trim() === "" ? "" : "from "}
+                          <span className="countdown-requester-name">
+                            {row.actor.trim() === "" ? "Requester unreadable" : row.actor}
+                          </span>
+                          {item._tag === "Remote" ? `, decided on ${item.host}` : ""}
+                        </span>
                       </small>
                     </button>
                   </li>
@@ -673,29 +944,47 @@ export const ApprovalsCountdown = ({
               now={now}
               onDecision={decideItem}
               snapshot={snapshot}
+              stale={stale}
               state={stateOf(selected, departure)}
             />
           </Region>
         )}
-        <Region className="countdown-decided" count={decided.length} title="Recently decided">
+        <Region className="countdown-decided" tone="tray" count={decided.length} title="Recently decided">
           {decided.length === 0 ? (
             <p className="countdown-empty">No decisions yet.</p>
           ) : (
             <ul className="countdown-rows countdown-decided-rows" role="list">
               {decided.map(({ at, by, outcome, record }) => (
                 <li className="countdown-decided-row" key={record.id}>
+                  <code className="countdown-decided-kind">{record.payload.kind}</code>
                   <span className="countdown-outcome" data-outcome={outcome}>
-                    {outcome}
+                    <StateLabel {...outcomeBadge(outcome)} />
                   </span>
-                  <span className="countdown-row-title">{jobTitle(record)}</span>
+                  <span className="countdown-row-title">{requestTitle(record.payload)}</span>
                   <small className="countdown-row-caption">
-                    <code>{record.payload.kind}</code>
-                    {by === null ? "" : `, by ${by}`}, <span className="countdown-nowrap">{agoText(at, now)}</span>
+                    <span>
+                      {by === null ? "expired" : `by ${by}`},{" "}
+                      <span className="countdown-nowrap">{agoText(at, now)}</span>
+                    </span>
                   </small>
-                  <ApprovalRequestDisclosure id={record.id} payload={record.payload} />
                 </li>
               ))}
             </ul>
+          )}
+          {decided.length === 0 ? null : (
+            <details className="countdown-history-audit">
+              <summary>Decision request arguments</summary>
+              <div className="countdown-history-arguments">
+                {decided.map(({ record }) => (
+                  <div key={record.id}>
+                    <p>
+                      <code>{record.id}</code>: {requestTitle(record.payload)}
+                    </p>
+                    <ApprovalRequestDisclosure id={record.id} payload={record.payload} />
+                  </div>
+                ))}
+              </div>
+            </details>
           )}
           {snapshot.historyNextCursor === null ? null : (
             <div className="countdown-more">

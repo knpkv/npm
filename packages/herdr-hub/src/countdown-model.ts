@@ -142,14 +142,14 @@ export const crossedIntoLastMinute = (
       expiresAt !== null && expiresAt - previousNow >= IMMINENT_MS && expiresAt - now < IMMINENT_MS && expiresAt > now
   )
 
-/** "52s ago", "4m ago", "2h 5m ago", for decisions and request ages. */
+/** Whole seconds, minutes, hours or days, for decisions and request ages. */
 export const agoText = (at: number, now: number): string => {
   const seconds = Math.max(0, Math.floor((now - at) / 1000))
   if (seconds < 60) return `${seconds}s ago`
   const minutes = Math.floor(seconds / 60)
   if (minutes < 60) return `${minutes}m ago`
   const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}h ${minutes % 60}m ago`
+  if (hours < 24) return `${hours}h ago`
   return `${Math.floor(hours / 24)}d ago`
 }
 
