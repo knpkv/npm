@@ -4,9 +4,9 @@ import { isBuiltin } from "node:module"
 
 const isNodeBuiltin: (specifier: string) => boolean = isBuiltin
 
-it("bundles ./views for the browser without Node built-ins", async () => {
+it.each(["views", "modules"])("bundles ./%s for the browser without Node built-ins", async (entry) => {
   const result = await build({
-    entryPoints: [new URL("../src/views.ts", import.meta.url).pathname],
+    entryPoints: [new URL(`../src/${entry}.ts`, import.meta.url).pathname],
     platform: "browser",
     bundle: true,
     write: false,

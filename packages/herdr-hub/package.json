@@ -42,6 +42,14 @@
     "./hostd-runtime": {
       "types": "./dist/hostd.d.ts",
       "import": "./dist/hostd.js"
+    },
+    "./modules": {
+      "types": "./dist/modules.d.ts",
+      "import": "./dist/modules.js"
+    },
+    "./modules/server": {
+      "types": "./dist/module-server.d.ts",
+      "import": "./dist/module-server.js"
     }
   },
   "files": [

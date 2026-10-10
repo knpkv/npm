@@ -1,0 +1,62 @@
+id: no-server-imports-in-hub-browser
+snapshots:
+  const server = await import("./module-server.js"):
+    labels:
+      - source: import("./module-server.js")
+        style: primary
+        start: 21
+        end: 49
+      - source: '"./module-server.js"'
+        style: secondary
+        start: 28
+        end: 48
+  export * from "@knpkv/herdr-hub/modules/server":
+    labels:
+      - source: export * from "@knpkv/herdr-hub/modules/server"
+        style: primary
+        start: 0
+        end: 47
+      - source: '"@knpkv/herdr-hub/modules/server"'
+        style: secondary
+        start: 14
+        end: 47
+  import { DashboardView } from "@knpkv/herdr-hub":
+    labels:
+      - source: import { DashboardView } from "@knpkv/herdr-hub"
+        style: primary
+        start: 0
+        end: 48
+      - source: '"@knpkv/herdr-hub"'
+        style: secondary
+        start: 30
+        end: 48
+  import { ModuleRegistry } from "./module-server.js":
+    labels:
+      - source: import { ModuleRegistry } from "./module-server.js"
+        style: primary
+        start: 0
+        end: 51
+      - source: '"./module-server.js"'
+        style: secondary
+        start: 31
+        end: 51
+  import { Server } from "node:http":
+    labels:
+      - source: import { Server } from "node:http"
+        style: primary
+        start: 0
+        end: 34
+      - source: '"node:http"'
+        style: secondary
+        start: 23
+        end: 34
+  import { readFile } from "fs/promises":
+    labels:
+      - source: import { readFile } from "fs/promises"
+        style: primary
+        start: 0
+        end: 38
+      - source: '"fs/promises"'
+        style: secondary
+        start: 25
+        end: 38
