@@ -136,6 +136,30 @@ const tagOnOrigin = Effect.fn("tagOnOrigin")(function* (tag) {
  */
 export const publishEnv = { npm_config_ignore_scripts: "true", pnpm_config_ignore_scripts: "true" }
 
+const publishLifecycle = ["prepare", "prepack", "postpack", "prepublish", "prepublishOnly", "publish", "postpublish"]
+const buildOfWorkspacePackage = /^pnpm --filter @knpkv\/[a-z0-9-]+ build && (.+)$/
+
+/**
+ * Why a published package's lifecycle script would be lost by publishing with scripts off, or null. A
+ * script may only repeat what `changeset:publish`'s workspace build already did: the package's own
+ * `build`, `pnpm build`, or another workspace package's build followed by its own.
+ */
+export const publishLifecycleViolation = (name, scripts) => {
+  for (const hook of publishLifecycle) {
+    const script = scripts[hook]
+    if (script === undefined) continue
+    const ownBuild = scripts.build
+    const repeatsBuild =
+      script === "pnpm build" ||
+      (ownBuild !== undefined && script === ownBuild) ||
+      (ownBuild !== undefined && buildOfWorkspacePackage.exec(script)?.[1] === ownBuild)
+    if (hook === "prepare" || !repeatsBuild) {
+      return `${name}: "${hook}": "${script}" does more than build, and publish runs with ignore-scripts; move this work into build`
+    }
+  }
+  return null
+}
+
 const main = Effect.gen(function* () {
   const stdout = (yield* Stdio.Stdio).stdout({ endOnDone: false })
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
