@@ -48,6 +48,7 @@ describe("AgentStage crew", () => {
             onPinChange={() => undefined}
             pinned={false}
             stale={false}
+            workGoal={{ _tag: "missing" }}
           />
         )
       )
@@ -62,6 +63,43 @@ describe("AgentStage crew", () => {
       const pin = [...document.querySelectorAll("button")].find((button) => button.textContent === "Pin")
       expect(pin).toBeDefined()
       expect(pin?.hasAttribute("aria-pressed")).toBe(false)
+      // No goal on the board, no link to one.
+      expect(document.querySelector(".connect-stage-goal")).toBeNull()
+    } finally {
+      await act(async () => root.unmount())
+      host.remove()
+    }
+  })
+
+  // From an agent's stage, its goal on the Work board is one tap away, as the board links back to the stage.
+  it("links to the agent's Work goal when the board has exactly one", async () => {
+    const host = document.createElement("div")
+    document.body.append(host)
+    const root = createRoot(host)
+    try {
+      await act(async () =>
+        root.render(
+          <AgentStage
+            agent={agent("agent-coordinator", "running")}
+            crew={[]}
+            onClose={() => undefined}
+            onOpen={() => undefined}
+            onOpenTerminal={() => undefined}
+            onPinChange={() => undefined}
+            pinned={false}
+            stale={false}
+            workGoal={{
+              _tag: "available",
+              goalId: "pr-knpkv_npm-752",
+              href: "/work/?goal=pr-knpkv_npm-752",
+              title: "Pin more than one agent"
+            }}
+          />
+        )
+      )
+      const link = document.querySelector<HTMLAnchorElement>("a.connect-stage-goal")
+      expect(link?.textContent).toBe("Work goal: Pin more than one agent")
+      expect(link?.getAttribute("href")).toBe("/work/?goal=pr-knpkv_npm-752")
     } finally {
       await act(async () => root.unmount())
       host.remove()

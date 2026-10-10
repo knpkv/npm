@@ -109,4 +109,17 @@ test.describe("Connect stage", () => {
       expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
     })
   }
+
+  // Work links to an agent with `open=stage`: the stage opens, its terminal one tap away. A plain deep link
+  // still opens the terminal, as approval links expect.
+  test("opens the stage from a Work link, and the terminal from a plain one", async ({ page }) => {
+    await page.goto("/?host=FIXTURE&agent=agent-fixture&open=stage")
+    const stage = page.getByRole("dialog", { name: "fixture-pane" })
+    await expect(stage).toBeVisible()
+    await expect(stage.getByRole("button", { name: "Open terminal" })).toBeVisible()
+    await expect(page.getByText("connected", { exact: true })).toBeHidden()
+    await page.goto("/?host=FIXTURE&agent=agent-fixture")
+    await expect(page.getByText("connected", { exact: true })).toBeVisible()
+    await expect(page.getByRole("dialog", { name: "fixture-pane" })).toBeHidden()
+  })
 })

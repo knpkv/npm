@@ -400,7 +400,8 @@ describe("Work control app", () => {
     expect(markup).toContain("Approve the package shipment")
     expect(markup).toContain("Waiting for the fresh package review")
     expect(markup).toContain("aria-label=\"Delivery of Daily fleet Work\"")
-    expect(markup).toContain("href=\"/connect/?agent=agent-work-owner&amp;host=SER8\"")
+    // The goal opens its agent on the Connect stage.
+    expect(markup).toContain("href=\"/connect/?agent=agent-work-owner&amp;host=SER8&amp;open=stage\"")
     expect(markup).toContain(
       "href=\"https://ser8.example.test/?tab=approvals&amp;approvalHost=SER8&amp;approvalJob=approval-job-42\""
     )

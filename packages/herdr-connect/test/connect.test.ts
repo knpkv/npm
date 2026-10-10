@@ -621,7 +621,9 @@ describe("Connect public seams", () => {
           "?host=PI",
           "?agent=agent-worker",
           "?host=PI&agent=agent-worker&agent=agent-remembered",
-          "?host=PI&agent=%2Fraw%2Fsession"
+          "?host=PI&agent=%2Fraw%2Fsession",
+          "?host=PI&agent=agent-worker&open=terminal",
+          "?host=PI&agent=agent-worker&open=stage&open=stage"
         ]
       ) {
         expect(yield* Effect.result(resolveConnectTarget(search, [remembered, remote])))
@@ -656,6 +658,14 @@ describe("Connect public seams", () => {
           { _tag: "unavailable" }
         )
       ).toEqual({ _tag: "connect", target: remote })
+      // Work's link asks for the stage: the agent first, its terminal one tap away.
+      expect(
+        yield* resolveConnectPreferenceDecision(
+          "?host=PI&agent=agent-worker&open=stage",
+          [remote],
+          { _tag: "unavailable" }
+        )
+      ).toEqual({ _tag: "stage", target: remote })
       expect(
         yield* resolveConnectPreferenceDecision("", [remote], {
           _tag: "available",

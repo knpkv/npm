@@ -1081,6 +1081,8 @@ export const ConnectSurface = ({
             if (decision._tag === "select") {
               setSelectedKey(decision.key)
               setPreferenceError(decision.error)
+            } else if (decision._tag === "stage") {
+              setStageKey(connectAgentKey(decision.target))
             } else {
               selectAgent(decision.target)
             }
@@ -1282,6 +1284,11 @@ export const ConnectSurface = ({
               }}
               onOpen={(agent) => setStageKey(connectAgentKey(agent))}
               onPinChange={(pinned) => changePin(pinned && stageAgent !== null ? connectAgentKey(stageAgent) : null)}
+              workGoal={
+                stageAgent === null || currentWork === null
+                  ? { _tag: "unavailable", reason: "snapshot_unavailable" }
+                  : resolveConnectWorkGoal(stageAgent, currentWork)
+              }
               pinned={stageAgent !== null && connectAgentKey(stageAgent) === pinnedKey}
               onOpenTerminal={(agent) => {
                 setStageKey(null)
