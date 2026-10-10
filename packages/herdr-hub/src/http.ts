@@ -9,8 +9,10 @@ import type {
 } from "@knpkv/herdr-connect"
 import {
   AgentActivityStore,
+  AgentArchiveStore,
   AgentRelationshipStore,
   ConnectAgentCursor,
+  ConnectArchiveCursor,
   fleetConnectAgents,
   fleetLimits,
   fleetUsage,
@@ -889,6 +891,17 @@ const decodeConnectAgentCursor = Effect.fn(
   )
 })
 
+const decodeConnectArchiveCursor = Effect.fn("HostHttp.decodeConnectArchiveCursor")(function*(url: URL) {
+  const value = url.searchParams.get("cursor")
+  if (value === null) return null
+  const bounded = yield* Schema.decodeUnknownEffect(Schema.String.check(Schema.isMaxLength(1_024)))(value).pipe(
+    Effect.mapError(() => new FleetValidationError({ detail: "invalid Connect archive cursor" }))
+  )
+  return yield* Schema.decodeUnknownEffect(Schema.fromJsonString(ConnectArchiveCursor))(bounded).pipe(
+    Effect.mapError(() => new FleetValidationError({ detail: "invalid Connect archive cursor" }))
+  )
+})
+
 const fetchPeerPending = Effect.fn("HostHttp.fetchPeerPending")(
   function*(
     peer: PeerTarget,
@@ -1685,6 +1698,8 @@ export const startHttpServer = async (
       AgentRelationshipStore.open(statePath)
     )
     finalizers.unshift(() => Promise.resolve().then(() => relationshipStore.close()))
+    const archiveStore = await httpRuntime.runPromise(AgentArchiveStore.open(statePath))
+    finalizers.unshift(() => Promise.resolve().then(() => archiveStore.close()))
     const workStore = await httpRuntime.runPromise(WorkStore.open(statePath))
     finalizers.unshift(() => Promise.resolve().then(() => workStore.close()))
     const work = await httpRuntime.runPromise(makeWorkService(workStore))
@@ -1714,9 +1729,10 @@ export const startHttpServer = async (
             host: config.host,
             agents: asRead("the fleet's agents")(
               Effect.gen(function*() {
+                const observedAt = now()
                 const peers = yield* fleetPeers(config)
                 return yield* fleetConnectAgents(
-                  localConnectAgents(config, service, activityStore, relationshipStore, now()).pipe(
+                  localConnectAgents(config, service, activityStore, relationshipStore, observedAt).pipe(
                     Effect.provideService(Crypto.Crypto, cryptoService)
                   ),
                   peers.map((peer) => ({
@@ -1724,7 +1740,8 @@ export const startHttpServer = async (
                     host: peer.host,
                     online: peer.online,
                     terminalUrl: peer.terminalUrl
-                  }))
+                  })),
+                  { store: archiveStore, observedAt }
                 )
               })
             ),
@@ -3380,6 +3397,7 @@ export const startHttpServer = async (
                 authorized,
                 Effect.gen(function*() {
                   const cursor = yield* decodeConnectAgentCursor(url)
+                  const observedAt = now()
                   const peers = yield* fleetPeers(config)
                   const directory = yield* fleetConnectAgents(
                     localConnectAgents(
@@ -3387,7 +3405,7 @@ export const startHttpServer = async (
                       service,
                       activityStore,
                       relationshipStore,
-                      now()
+                      observedAt
                     ).pipe(
                       Effect.provideService(Crypto.Crypto, cryptoService)
                     ),
@@ -3396,9 +3414,32 @@ export const startHttpServer = async (
                       host: peer.host,
                       online: peer.online,
                       terminalUrl: peer.terminalUrl
-                    }))
+                    })),
+                    { store: archiveStore, observedAt }
                   )
                   return yield* pageFleetConnectAgents(directory, cursor)
+                })
+              )
+            )
+            return
+          }
+
+          if (mode === "serve" && request.method === "GET" && url.pathname === "/v1/connect/archive") {
+            await respond(
+              response,
+              Effect.andThen(
+                authorized,
+                Effect.gen(function*() {
+                  const cursor = yield* decodeConnectArchiveCursor(url)
+                  return yield* archiveStore.page(cursor).pipe(
+                    Effect.mapError((cause) =>
+                      new FleetOperationError({
+                        operation: "connect.archive",
+                        detail: "could not read agent archive",
+                        cause
+                      })
+                    )
+                  )
                 })
               )
             )

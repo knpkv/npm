@@ -1,4 +1,5 @@
 export * from "./activity-store.js"
+export * from "./archive-store.js"
 export * from "./directory.js"
 export * from "./errors.js"
 export * from "./forest.js"

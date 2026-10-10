@@ -40,7 +40,9 @@ export type ConnectAgent = typeof ConnectAgent.Type
 
 export const LocalConnectAgents = Schema.Struct({
   host: BoundedString,
-  agents: Schema.Array(ConnectAgent).check(Schema.isMaxLength(256))
+  agents: Schema.Array(ConnectAgent).check(Schema.isMaxLength(256)),
+  // Only full, error-free inventory producers assert this. Older peers supply no closure evidence.
+  complete: Schema.optionalKey(Schema.Boolean)
 })
 export type LocalConnectAgents = typeof LocalConnectAgents.Type
 
@@ -77,6 +79,37 @@ export const FleetConnectAgentPage = Schema.Struct({
   nextCursor: Schema.NullOr(ConnectAgentCursor)
 })
 export type FleetConnectAgentPage = typeof FleetConnectAgentPage.Type
+
+/** Compact closed-agent record. Usage totals and transcripts are never persisted here. */
+export const ArchivedConnectAgent = Schema.Struct({
+  host: ConnectAgent.fields.host,
+  agentId: ConnectAgent.fields.id,
+  name: ConnectAgent.fields.name,
+  kind: ConnectAgent.fields.kind,
+  work: ConnectAgent.fields.work,
+  state: ConnectAgent.fields.state,
+  firstSeenAt: ActivityTimestamp,
+  closedAt: ActivityTimestamp,
+  relationship: Schema.optionalKey(ConnectAgentRelationship)
+}).check(Schema.makeFilter(
+  (agent) => agent.closedAt >= agent.firstSeenAt,
+  { expected: "closure at or after first observation" }
+))
+export type ArchivedConnectAgent = typeof ArchivedConnectAgent.Type
+
+export const ConnectArchiveCursor = Schema.Struct({
+  closedAt: ActivityTimestamp,
+  host: ConnectAgent.fields.host,
+  agentId: ConnectAgent.fields.id
+})
+export type ConnectArchiveCursor = typeof ConnectArchiveCursor.Type
+
+export const connectArchivePageMaxRecords = 64
+export const ConnectArchivePage = Schema.Struct({
+  agents: Schema.Array(ArchivedConnectAgent).check(Schema.isMaxLength(connectArchivePageMaxRecords)),
+  nextCursor: Schema.NullOr(ConnectArchiveCursor)
+})
+export type ConnectArchivePage = typeof ConnectArchivePage.Type
 
 const TerminalColumns = Schema.Number.check(
   Schema.isInt(),
