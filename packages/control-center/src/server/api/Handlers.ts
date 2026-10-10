@@ -314,6 +314,15 @@ export const workspaceSettingsHandlersLayer = HttpApiBuilder.group(
       const administration = yield* Effect.serviceOption(WorkspaceSettingsAdministration)
       const lifecycle = yield* ServerLifecycle
       return handlers
+        .handle("releaseTargetCatalog", () =>
+          lifecycle.runMutation(Effect.gen(function*() {
+            const session = yield* CurrentSession
+            yield* requireWorkspaceRead(session)
+            if (Option.isNone(administration)) return yield* Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
+            return yield* administration.value.releaseTargetCatalog(session.workspaceId).pipe(
+              Effect.catchTag("ApplicationServiceUnavailable", mapApplicationUnavailable)
+            )
+          })).pipe(Effect.catchTag("ServerDraining", () => Effect.flatMap(serviceUnavailableApiError(), Effect.fail))))
         .handle("read", () =>
           lifecycle.runMutation(
             Effect.gen(function*() {

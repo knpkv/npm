@@ -3,7 +3,7 @@ import * as Schema from "effect/Schema"
 
 import { UpdateWorkspaceSettingsRequest } from "../src/api/workspaceSettings.js"
 import type { WorkspaceSettingsV1 } from "../src/domain/workspaceSettings.js"
-import { auditProductionRoutePresentation } from "./presentationAudit.js"
+import { auditProductionRoutePresentation, seriousAxeViolations } from "./presentationAudit.js"
 import { productionRouteAuditCase, requiredProductionRouteAuditsFor } from "./productionRouteInventory.js"
 
 const workspaceId = "01890f6f-6d6a-7cc0-98d2-000000000001"
@@ -66,6 +66,108 @@ const readModel = {
   updatedAt: "2026-07-30T09:00:00.000Z",
   updatedByPersonId: null
 }
+
+test("configures ordered environment ranges through the governed pipeline settings flow", async ({ context, page }) => {
+  await context.addCookies([{ name: "cc_session", value: "ab".repeat(32), url: "http://127.0.0.1:4173" }])
+  await page.addInitScript((token) => sessionStorage.setItem("cc_csrf", token), csrfToken)
+  await context.route("**/api/v1/session/current", (route) =>
+    route.fulfill({
+      body: JSON.stringify({ csrfToken, session }),
+      contentType: "application/json",
+      status: 200
+    }))
+  const connectionId = "01890f6f-6d6a-7cc0-98d2-000000000091"
+  const digest = `sha256:${"a".repeat(64)}`
+  let stale = false
+  let rejectOnce = true
+  let saved = settings
+  await context.route("**/api/v1/settings/release-target-catalog", (route) =>
+    route.fulfill({
+      body: JSON.stringify({
+        complete: true,
+        pipelines: [{
+          pluginConnectionId: connectionId,
+          displayName: "Fixture delivery",
+          pipelineName: "fixture-pipeline",
+          topologyDigest: digest,
+          state: stale ? "stale" : "current",
+          observedAt: "2026-07-30T09:00:00.000Z",
+          stages: ["Build", "Verify", "Approve", "Deploy"].map((name) => ({ name, actions: [] }))
+        }]
+      }),
+      contentType: "application/json",
+      status: 200
+    }))
+  await context.route("**/api/v1/settings", async (route) => {
+    if (route.request().method() === "PUT") {
+      const request = Schema.decodeUnknownSync(UpdateWorkspaceSettingsRequest)(route.request().postDataJSON())
+      expect(request.acknowledgedGovernedSections).toEqual(["pipeline"])
+      if (rejectOnce) {
+        rejectOnce = false
+        await route.fulfill({
+          status: 422,
+          contentType: "application/json",
+          body: JSON.stringify({
+            _tag: "ReleaseTargetConfigurationError",
+            reason: "unknown-stage",
+            mappingIndex: 0,
+            environmentIndex: 1,
+            field: "firstStage"
+          })
+        })
+        return
+      }
+      saved = request.settings
+    }
+    await route.fulfill({
+      body: JSON.stringify({ ...readModel, settings: saved }),
+      contentType: "application/json",
+      status: 200
+    })
+  })
+  await page.goto(`/w/${workspaceId}/settings#release-targets`)
+  await expect(page.getByText("No target environments configured. Select a followed pipeline after synchronization."))
+    .toBeVisible()
+  await page.getByLabel("Add followed pipeline").selectOption(`${connectionId}:fixture-pipeline`)
+  await page.getByLabel("Environment key", { exact: true }).fill("staging")
+  await page.getByLabel("Environment name", { exact: true }).fill("Staging")
+  await page.getByLabel("Last stage", { exact: true }).selectOption("Verify")
+  await page.getByRole("button", { name: "Add environment range" }).click()
+  await expect(page.getByText("Cannot save target configuration: overlapping range.")).toBeVisible()
+  await expect(page.getByRole("button", { name: "Save settings" })).toBeDisabled()
+  await page.getByLabel("Environment key", { exact: true }).nth(1).fill("production")
+  await page.getByLabel("Environment name", { exact: true }).nth(1).fill("Production")
+  await page.getByLabel("First stage", { exact: true }).nth(1).selectOption("Approve")
+  await page.getByLabel("Require manual approval gate").nth(0).uncheck()
+  await page.getByRole("button", { name: "Save settings" }).click()
+  await expect(page.getByRole("dialog", { name: "Review governed changes" })).toBeVisible()
+  await page.getByRole("button", { name: "Save governed changes" }).click()
+  await expect(page.getByText("Cannot save target configuration: unknown stage.")).toBeVisible()
+  await expect(page.getByLabel("First stage", { exact: true }).nth(1)).toHaveAttribute("aria-invalid", "true")
+  await page.getByLabel("Environment name", { exact: true }).nth(1).fill("Production target")
+  await page.getByRole("button", { name: "Save settings" }).click()
+  await page.getByRole("button", { name: "Save governed changes" }).click()
+  await expect(page.getByText("Saved", { exact: true })).toBeVisible()
+  expect(
+    saved.pipeline.releaseTargets?.[0]?.environments.map(({ firstStage, lastStage, requiresManualGate }) => ({
+      firstStage,
+      lastStage,
+      requiresManualGate
+    }))
+  )
+    .toEqual([{ firstStage: "Build", lastStage: "Verify", requiresManualGate: false }, {
+      firstStage: "Approve",
+      lastStage: "Deploy",
+      requiresManualGate: true
+    }])
+  expect(await seriousAxeViolations(page)).toEqual([])
+  await page.setViewportSize({ width: 320, height: 900 })
+  expect(await page.evaluate<boolean>("document.documentElement.scrollWidth <= window.innerWidth")).toBe(true)
+  stale = true
+  await page.getByRole("button", { name: "Refresh pipeline catalogue" }).click()
+  await expect(page.getByText("Saved pipeline topology is stale", { exact: true })).toBeVisible()
+  expect(await seriousAxeViolations(page)).toEqual([])
+})
 
 test("validates, persists, and reflows workspace settings in a real browser", async ({ context, page }) => {
   await context.addCookies([

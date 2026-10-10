@@ -32,6 +32,10 @@ _Avoid_: Name match, UI link
 The Jira items selected for one release together with their pull-request and pipeline dimensions.
 _Avoid_: Ticket list, sprint board
 
+**Release Target**:
+A named workspace environment explicitly mapped to an inclusive, ordered range of stages in a followed CodePipeline pipeline. Its stable environment key determines identity; display-name changes preserve it. Pipeline topology changes require review. Each range records whether readiness requires a manual approval gate, defaulting to true. A release without a configured delivering pipeline is held with no target environment; synchronization never invents production.
+_Avoid_: Implicit production environment, pipeline name as environment
+
 **Local Operator**:
 The single person running and using the local Control Center instance. Connected-service collaborators remain visible as Jira, CodeCommit, or Confluence identities but are not Control Center users. Actor identifiers are retained for audit and future evolution, not real-time multi-user collaboration.
 _Avoid_: Workspace member, tenant user, collaborator

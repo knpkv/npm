@@ -314,6 +314,11 @@ const FullRelease = ({ selection }: { readonly selection: ReleaseRouteSelection 
           verdict={release.release.verdict}
         />
         <ReleaseAction release={release} />
+        {release.targetSettingsPath === undefined ? null : (
+          <Link className={styles.back} to={release.targetSettingsPath}>
+            Configure targets
+          </Link>
+        )}
       </header>
 
       <StageRail heading="Build, verify, production" stages={release.stages} />

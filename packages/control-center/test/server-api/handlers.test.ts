@@ -557,6 +557,7 @@ describe("Control Center API handlers", () => {
         Layer.provide(mutationMiddlewareLayer),
         Layer.provide(
           Layer.succeed(WorkspaceSettingsAdministration, {
+            releaseTargetCatalog: () => Effect.succeed({ complete: true, pipelines: [] }),
             read: () => Ref.update(reads, (count) => count + 1).pipe(Effect.as(readModel)),
             update: () => Effect.die("not used")
           })
@@ -610,6 +611,7 @@ describe("Control Center API handlers", () => {
         Layer.provide(mutationMiddlewareLayer),
         Layer.provide(
           Layer.succeed(WorkspaceSettingsAdministration, {
+            releaseTargetCatalog: () => Effect.succeed({ complete: true, pipelines: [] }),
             read: () => Ref.update(reads, (count) => count + 1).pipe(Effect.as(readModel)),
             update: () => Effect.die("not used")
           })
@@ -654,6 +656,7 @@ describe("Control Center API handlers", () => {
         updatedByPersonId: null
       }
       const settings = Layer.succeed(WorkspaceSettingsAdministration, {
+        releaseTargetCatalog: () => Effect.succeed({ complete: true, pipelines: [] }),
         read: () => Effect.succeed(readModel),
         update: (input) =>
           Ref.set(received, input).pipe(

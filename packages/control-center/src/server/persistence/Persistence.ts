@@ -607,6 +607,11 @@ const makePersistence = Effect.gen(function*() {
         publicOperation("plugin-runtime.complete-sync-attempt", pluginRuntime.completeSyncAttempt(...args)),
       getCache: (...args: Parameters<PluginRuntimeRepositoryService["getCache"]>) =>
         publicOperation("plugin-runtime.get-cache", pluginRuntime.getCache(...args)),
+      getCodePipelineDefinitions: (...args: Parameters<PluginRuntimeRepositoryService["getCodePipelineDefinitions"]>) =>
+        publicOperation(
+          "plugin-runtime.get-codepipeline-definitions",
+          pluginRuntime.getCodePipelineDefinitions(...args)
+        ),
       getCodePipelineCacheBeforeTombstones: (
         ...args: Parameters<PluginRuntimeRepositoryService["getCodePipelineCacheBeforeTombstones"]>
       ) =>
@@ -705,6 +710,8 @@ const makePersistence = Effect.gen(function*() {
         )
     },
     releases: {
+      listForReconciliation: (...args: Parameters<ReleaseRepositoryService["listForReconciliation"]>) =>
+        publicOperation("release.list-for-reconciliation", releases.listForReconciliation(...args)),
       append: (...args: Parameters<ReleaseRepositoryService["append"]>) =>
         publicOperation("release.append", releases.append(...args)),
       create: (...args: Parameters<ReleaseRepositoryService["create"]>) =>
@@ -764,8 +771,7 @@ const makePersistence = Effect.gen(function*() {
       readAtomically: workspaceSettings.readAtomically,
       update: (...args: Parameters<WorkspaceSettingsRepositoryService["update"]>) =>
         publicOperation("workspace-settings.update", workspaceSettings.update(...args)),
-      updateAtomically: (...args: Parameters<WorkspaceSettingsRepositoryService["updateAtomically"]>) =>
-        publicOperation("workspace-settings.update-atomically", workspaceSettings.updateAtomically(...args))
+      updateAtomically: workspaceSettings.updateAtomically
     }
   }
 })

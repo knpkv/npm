@@ -137,6 +137,7 @@ import {
   releaseSynchronizationStartupLayer,
   type ReleaseSynchronizationStartupOptions
 } from "./ReleaseSynchronizationStartup.js"
+import { releaseTargetsStartupLayer } from "./ReleaseTargetsStartup.js"
 import { requestUrlBoundaryLayer } from "./RequestUrlBoundary.js"
 import { retentionStartupLayer } from "./RetentionStartup.js"
 import { ServerLifecycle } from "./ServerLifecycle.js"
@@ -629,6 +630,7 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
     governedActionExecution,
     releaseAgentWorker,
     retention,
+    releaseTargetsStartupLayer.pipe(Layer.provide(bootstrap)),
     prReviewWorker,
     releaseSynchronizationStartupLayer(options.releaseSynchronization ?? null).pipe(
       Layer.provideMerge(bootstrap)

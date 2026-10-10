@@ -14,6 +14,7 @@ import { hasMaximumPluginJsonBytes } from "../domain/plugins/bounds.js"
 import { ReadinessFinding, ReadinessStages, ReadinessVerdict } from "../domain/readiness/model.js"
 import { ReleaseLifecycle, ReleaseServiceName, ReleaseVersion } from "../domain/release.js"
 import { ReleaseRelayProjection } from "../domain/releaseRelay.js"
+import { ReleaseTargetConfiguration } from "../domain/releaseTargets.js"
 import { UtcTimestamp } from "../domain/utcTimestamp.js"
 import {
   ForbiddenApiError,
@@ -111,6 +112,7 @@ export const PortfolioReleaseSummary = Schema.Struct({
     })
   ),
   collaborators: BoundedReleaseCollaborators,
+  targetConfiguration: Schema.optionalKey(ReleaseTargetConfiguration),
   collaboratorCount: BoundedCount,
   readiness: Schema.NullOr(PortfolioReadinessSummary),
   relationships: PortfolioRelationshipCounts,

@@ -75,6 +75,7 @@ const workspaceSettingsLayer = (
 ): Layer.Layer<WorkspaceSettingsAdministration> => {
   const readModel = workspaceSettingsReadModel(allowedProviders)
   return Layer.succeed(WorkspaceSettingsAdministration, {
+    releaseTargetCatalog: () => Effect.succeed({ complete: true, pipelines: [] }),
     read: () => Effect.succeed(readModel),
     update: () => Effect.die("workspace settings updates are outside this test")
   })
@@ -114,6 +115,7 @@ const admissionPolicyScenario = (
       "codex"
     ])
     const settings = WorkspaceSettingsAdministration.of({
+      releaseTargetCatalog: () => Effect.succeed({ complete: true, pipelines: [] }),
       read: () => Ref.get(allowedProviders).pipe(Effect.map(workspaceSettingsReadModel)),
       update: () => Effect.die("workspace settings updates are outside this test")
     })

@@ -71,6 +71,7 @@ export interface PortfolioReleasePresentation {
   readonly lifecycleTone: RlyStateTone
   readonly readinessVerdict: ReadinessVerdict | "unknown"
   readonly readinessReason: string
+  readonly targetSettingsPath?: string
   readonly release: RlyReleasePresentation
   readonly relay: {
     readonly algorithm: string
@@ -381,7 +382,8 @@ const verdictReason = (verdict: ReadinessVerdict): string => {
 
 const releasePresentation = (
   release: PortfolioSnapshot["releases"][number],
-  plugins: PortfolioSnapshot["plugins"]
+  plugins: PortfolioSnapshot["plugins"],
+  workspaceId: PortfolioSnapshot["workspaceId"]
 ): PortfolioReleasePresentation => {
   const lifecycle = lifecyclePresentation[release.lifecycle]
   const source = sourcePresentation(release, plugins)
@@ -401,14 +403,25 @@ const releasePresentation = (
     { id: "gaps", label: "Gaps", value: String(release.readiness?.gapCount ?? 0) }
   ]
   const readiness = release.readiness
-  const readinessReason = readiness === null
+  const configurationHeld = release.targetConfiguration?.verdict === "held"
+  const readinessReason = configurationHeld
+    ? release.targetConfiguration?.reason === "no-target-environment" ?
+      "No target environment" :
+      release.targetConfiguration?.reason === "stale-topology"
+      ? "Pipeline target configuration is stale"
+      : "Target pipeline is unavailable"
+    : readiness === null
     ? "No readiness evidence has been evaluated yet."
     : readiness.authority === "pending"
     ? "Evidence changed. Rechecking this release."
     : readiness.primaryFinding === null
     ? verdictReason(readiness.verdict)
     : findingReason(readiness.primaryFinding)
-  const verdict = readiness === null ? null : verdictPresentation[readiness.verdict]
+  const verdict: { readonly label: string; readonly tone: RlyStateTone } | null = configurationHeld
+    ? { label: "Held", tone: "caution" }
+    : readiness === null
+    ? null
+    : verdictPresentation[readiness.verdict]
   return {
     collaborators,
     collaboratorCount: release.collaboratorCount,
@@ -417,7 +430,8 @@ const releasePresentation = (
     releasePageAwareness: release.releasePageAwareness,
     lifecycleLabel: lifecycle.label,
     lifecycleTone: lifecycle.tone,
-    readinessVerdict: readiness?.verdict ?? "unknown",
+    readinessVerdict: configurationHeld ? "held" : readiness?.verdict ?? "unknown",
+    ...(configurationHeld && { targetSettingsPath: `/w/${workspaceId}/settings#release-targets` }),
     readinessReason,
     release: {
       algorithm: release.relay.algorithm,
@@ -430,7 +444,7 @@ const releasePresentation = (
       id: release.releaseId,
       ...(!(owner === undefined) && { owner }),
       reason: readinessReason,
-      state: readiness?.verdict ?? "unknown",
+      state: configurationHeld ? "held" : readiness?.verdict ?? "unknown",
       symbolIndices: release.relay.symbolIndices,
       tone: verdict?.tone ?? "neutral",
       verdict: verdict?.label ?? "Readiness not evaluated",
@@ -443,7 +457,7 @@ const releasePresentation = (
     },
     serviceName: release.serviceName,
     source,
-    stages: readiness === null ? unevaluatedStages() : readinessStages(readiness.stages),
+    stages: configurationHeld || readiness === null ? unevaluatedStages() : readinessStages(readiness.stages),
     targetEnvironmentIds: release.targetEnvironmentIds,
     version: release.version
   }
@@ -469,6 +483,6 @@ export const presentPortfolio = (snapshot: PortfolioSnapshot): PortfolioPresenta
   connectedProviders: connectedProvidersOf(snapshot.plugins),
   generatedAt: DateTime.formatIso(snapshot.generatedAt),
   generatedTime: formattedTime(snapshot.generatedAt),
-  releases: snapshot.releases.map((release) => releasePresentation(release, snapshot.plugins)),
+  releases: snapshot.releases.map((release) => releasePresentation(release, snapshot.plugins, snapshot.workspaceId)),
   workspaceId: snapshot.workspaceId
 })

@@ -305,6 +305,11 @@ const ReleaseDossier = ({ onPreview, release, transitionNames }: ReleaseDossierP
       {...(transitionNames === undefined ? {} : { transitionNames })}
     />
     <StageRail className={styles.stageRail} heading="Delivery" size="compact" stages={release.stages} />
+    {release.targetSettingsPath === undefined ? null : (
+      <Link className={styles.pairAction} to={release.targetSettingsPath}>
+        Configure targets
+      </Link>
+    )}
     {release.source.warning === null ? null : (
       <StatePanel
         announce="polite"

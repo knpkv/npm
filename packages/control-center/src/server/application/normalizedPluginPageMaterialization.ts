@@ -58,6 +58,7 @@ import {
   verifyPluginSynchronizationAuthority
 } from "./pluginSynchronizationAuthority.js"
 import { materializeRelationshipInference } from "./relationshipInferenceMaterialization.js"
+import { reconcileReleaseTargets } from "./releaseTargetConfiguration.js"
 
 type EntityUpsert = Extract<NormalizedPluginEventV1, { readonly _tag: "UpsertEntity" }>
 type PageDetails = Extract<DeliveryEntityDetails, { readonly _tag: "page" }>
@@ -2080,6 +2081,14 @@ export const materializeNormalizedPluginPage = Effect.fn(
       evidenceItemCount += inference.evidenceItemCount
       nodeCount += inference.nodeCount
       relationshipCount += inference.relationshipCount
+    }
+    if (
+      (settings.pipeline.releaseTargets?.length ?? 0) > 0 &&
+      (acceptedEvents.length > 0 || entityProjectionCount > 0)
+    ) {
+      yield* reconcileReleaseTargets(persistence, scope.workspaceId, settings, scope.committedAt).pipe(
+        Effect.provideService(Crypto.Crypto, cryptoService)
+      )
     }
     return {
       pageCommitted: committed.pageCommitted,

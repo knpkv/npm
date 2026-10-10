@@ -841,3 +841,11 @@ The implementation plan must:
 | Dependencies/tooling/testing      | TC3.1–TC3.16, DEP6.1–DEP6.10, SC7.21, SC7.23                                      |
 
 All nine required Phase 3 decisions are resolved above. No Phase 2 requirement is intentionally weakened.
+
+## Amendment: explicit release targets
+
+First-party Jira releases do not imply a production environment. Workspace V1 settings now carry optional `pipeline.releaseTargets`: normalized connection identity, safe pipeline name, reviewed topology digest, and ordered inclusive stage ranges with stable environment keys, display names, and `requiresManualGate` (decoding default `true`). A governed settings mutation validates ranges against a bounded persisted pipeline catalogue in the same transaction as the settings revision, audit, and release-target reconciliation. Unknown, stale, unavailable, overlapping, or out-of-order topology produces a field-addressed tagged HTTP 422 failure and rolls the mutation back.
+
+Environment identity derives deterministically from workspace and environment key. A changed key retires the previous target; immutable release and assessment history remains available. Startup and successful plugin materialization backfill targets from configured delivering pipelines. Missing delivering-pipeline configuration is a separate server-owned held/no-target state with a settings link, never an invented readiness assessment. Stale or unavailable configured topology suppresses historical green presentation. Manual-gate policy is recorded here and enforced by readiness evaluation, not by configuration validation.
+
+Legacy settings omission remains omission on read, preserving existing canonical JSON and audit digests. New defaults use an empty target array. No SQL schema migration is required. Only safe pipeline topology and normalized authenticated client-visible connection identifiers cross the catalogue boundary; private provider locators and credentials do not.

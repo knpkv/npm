@@ -4,6 +4,22 @@ import { presentPortfolio } from "../../src/client/portfolio/presentPortfolio.js
 import { makePortfolioSnapshot } from "./portfolioFixtures.js"
 
 describe("portfolio presenter", () => {
+  it("holds a targetless release and links directly to pipeline target configuration", () => {
+    const snapshot = makePortfolioSnapshot()
+    const presented = presentPortfolio({
+      ...snapshot,
+      releases: snapshot.releases.map((release) => ({
+        ...release,
+        targetConfiguration: { state: "unconfigured", targets: [], verdict: "held", reason: "no-target-environment" }
+      }))
+    })
+    expect(presented.releases[0]?.readinessVerdict).toBe("held")
+    expect(presented.releases[0]?.release.verdict).toBe("Held")
+    expect(presented.releases[0]?.readinessReason).toBe("No target environment")
+    expect(presented.releases[0]?.targetSettingsPath).toBe(`/w/${snapshot.workspaceId}/settings#release-targets`)
+    expect(presented.releases[0]?.stages.every(({ tone }) => tone === "neutral")).toBe(true)
+  })
+
   it("maps authoritative release, people, source, and identity facts without inventing readiness", () => {
     const presented = presentPortfolio(makePortfolioSnapshot())
     const release = presented.releases[0]

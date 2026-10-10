@@ -4,11 +4,19 @@ import { Effect, Layer, Result, Schema } from "effect"
 import * as Crypto from "effect/Crypto"
 import * as DateTime from "effect/DateTime"
 import { Hex } from "effect/encoding"
+import * as TestClock from "effect/testing/TestClock"
 
 import * as Predicate from "effect/Predicate"
 import { SessionSummary } from "../../src/api/session.js"
 import { WorkspaceSettingsRevision } from "../../src/api/workspaceSettings.js"
-import { PersonId, SessionId, WorkspaceId, WorkspaceSettingsMutationId } from "../../src/domain/identifiers.js"
+import {
+  PersonId,
+  PluginConnectionId,
+  SessionId,
+  WorkspaceId,
+  WorkspaceSettingsMutationId
+} from "../../src/domain/identifiers.js"
+import { PipelineReleaseTarget } from "../../src/domain/releaseTargets.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
 import {
   DEFAULT_WORKSPACE_SETTINGS,
@@ -146,6 +154,96 @@ const seedAuthority = Effect.gen(function*() {
 })
 
 describe("WorkspaceSettingsRepository", () => {
+  it.effect("round-trips governed release targets without changing the SQL schema", () =>
+    withPersistence(Effect.gen(function*() {
+      yield* seedAuthority
+      const persistence = yield* Persistence
+      const original = yield* persistence.workspaceSettings.get(workspaceId)
+      const target = PipelineReleaseTarget.make({
+        pluginConnectionId: PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-000000000178"),
+        pipelineName: "fixture-pipeline",
+        topologyDigest: `sha256:${"a".repeat(64)}`,
+        environments: [{
+          key: "production",
+          name: "Production",
+          firstStage: "Build",
+          lastStage: "Deploy",
+          requiresManualGate: false
+        }]
+      })
+      const request = {
+        workspaceId,
+        mutationId: firstMutation,
+        expectedRevision: original.revision,
+        settings: { ...original.settings, pipeline: { ...original.settings.pipeline, releaseTargets: [target] } },
+        acknowledgedGovernedSections: ["pipeline"] satisfies ReadonlyArray<"pipeline">,
+        actorPersonId: ownerOne,
+        sessionId: sessionOne
+      }
+      const governanceAuthority = yield* authorizeWorkspaceSettingsGovernanceRequest(
+        ownerSession,
+        request,
+        firstUpdateAt
+      )
+      const { workspaceId: requestWorkspaceId, ...input } = request
+      yield* persistence.workspaceSettings.update(requestWorkspaceId, {
+        ...input,
+        governanceAuthority,
+        updatedAt: firstUpdateAt
+      })
+      const stored = yield* persistence.workspaceSettings.get(workspaceId)
+      assert.deepStrictEqual(stored.settings.pipeline.releaseTargets, [target])
+      assert.deepStrictEqual((yield* persistence.workspaceSettings.audits(workspaceId))[0]?.changedSections, [
+        "pipeline"
+      ])
+    })))
+
+  it.effect("returns field-addressed unknown-pipeline failure and rolls back the head and audit", () =>
+    withPersistence(Effect.gen(function*() {
+      yield* TestClock.setTime(DateTime.toEpochMillis(firstUpdateAt))
+      yield* seedAuthority
+      const persistence = yield* Persistence
+      const administration = yield* makeWorkspaceSettingsAdministration
+      const original = yield* persistence.workspaceSettings.get(workspaceId)
+      const result = yield* administration.update({
+        workspaceId,
+        session: ownerSession,
+        request: {
+          mutationId: firstMutation,
+          expectedRevision: WorkspaceSettingsRevision.make(original.revision),
+          settings: {
+            ...original.settings,
+            pipeline: {
+              ...original.settings.pipeline,
+              releaseTargets: [{
+                pluginConnectionId: PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-000000000178"),
+                pipelineName: "fixture-pipeline",
+                topologyDigest: `sha256:${"a".repeat(64)}`,
+                environments: [{
+                  key: "production",
+                  name: "Production",
+                  firstStage: "Build",
+                  lastStage: "Deploy",
+                  requiresManualGate: true
+                }]
+              }]
+            }
+          },
+          acknowledgedGovernedSections: ["pipeline"]
+        }
+      }).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(result))
+      if (Result.isFailure(result)) {
+        assert.strictEqual(result.failure._tag, "ReleaseTargetConfigurationError")
+        if (result.failure._tag === "ReleaseTargetConfigurationError") {
+          assert.strictEqual(result.failure.reason, "unknown-pipeline")
+        }
+      }
+      assert.strictEqual((yield* persistence.workspaceSettings.get(workspaceId)).revision, original.revision)
+      assert.lengthOf(yield* persistence.workspaceSettings.audits(workspaceId), 0)
+      assert.deepStrictEqual(yield* administration.releaseTargetCatalog(workspaceId), { complete: true, pipelines: [] })
+    })))
+
   it.effect("updates a fresh workspace without a settings read preflight", () =>
     withPersistence(
       Effect.gen(function*() {

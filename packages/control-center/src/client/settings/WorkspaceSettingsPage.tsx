@@ -1,5 +1,7 @@
 import { Button, Dialog, StateLabel, StatePanel, Surface, Text } from "@knpkv/rly/primitives"
 import * as Schema from "effect/Schema"
+import * as Effect from "effect/Effect"
+import * as Result from "effect/Result"
 import { type ChangeEvent, type ReactElement, type ReactNode, useEffect, useId, useRef, useState } from "react"
 import { useParams } from "react-router"
 
@@ -15,6 +17,12 @@ import { BrowserSessionsPanel } from "./BrowserSessionsPanel.js"
 import type { BrowserSessionAdministrationTransport } from "./browserSessionTransport.js"
 import styles from "./WorkspaceSettingsPage.module.css"
 import { useWorkspaceSettings } from "./useWorkspaceSettings.js"
+import { ReleaseTargetsEditor } from "./ReleaseTargetsEditor.js"
+import {
+  validateReleaseTargets,
+  type ReleaseTargetCatalog,
+  type ReleaseTargetConfigurationError
+} from "../../domain/releaseTargets.js"
 import { browserWorkspaceSettingsTransport, type WorkspaceSettingsTransport } from "./workspaceSettingsTransport.js"
 
 const integerValue = (event: ChangeEvent<HTMLInputElement>, fallback: number): number => {
@@ -51,6 +59,16 @@ const governedChange = (
 ): ReadonlyArray<GovernedSettingChange> =>
   before === after ? [] : [{ after: presentedValue(after), before: presentedValue(before), label }]
 
+const presentReleaseTargets = (pipeline: WorkspaceSettingsV1["pipeline"]): string =>
+  (pipeline.releaseTargets?.length ?? 0) === 0
+    ? "No targets"
+    : (pipeline.releaseTargets ?? [])
+        .map(
+          (mapping) =>
+            `${mapping.pipelineName}: ${mapping.environments.map((range) => `${range.name} (${range.key}), ${range.firstStage} through ${range.lastStage}, manual gate ${range.requiresManualGate ? "required" : "optional"}`).join("; ")}`
+        )
+        .join("; ")
+
 const governedChangeDetails = (
   section: GovernedWorkspaceSettingsSection,
   before: WorkspaceSettingsV1,
@@ -81,7 +99,16 @@ const governedChangeDetails = (
     case "pipeline":
       return [
         ...governedChange("Retry policy", before.pipeline.retryMode, after.pipeline.retryMode),
-        ...governedChange("Maximum attempts", before.pipeline.maximumAttempts, after.pipeline.maximumAttempts)
+        ...governedChange("Maximum attempts", before.pipeline.maximumAttempts, after.pipeline.maximumAttempts),
+        ...(JSON.stringify(before.pipeline.releaseTargets ?? []) === JSON.stringify(after.pipeline.releaseTargets ?? [])
+          ? []
+          : [
+              {
+                label: "Release targets and reviewed pipeline topology",
+                before: presentReleaseTargets(before.pipeline),
+                after: presentReleaseTargets(after.pipeline)
+              }
+            ])
       ]
     case "retention":
       return [
@@ -256,11 +283,17 @@ const NumberField = ({
 export const SettingsForm = ({
   canEdit,
   draft,
-  onChange
+  onChange,
+  onRefreshTargetCatalogue = () => {},
+  targetCatalogue = null,
+  targetError = null
 }: {
   readonly canEdit: boolean
   readonly draft: WorkspaceSettingsV1
   readonly onChange: (draft: WorkspaceSettingsV1) => void
+  readonly targetCatalogue?: ReleaseTargetCatalog | null
+  readonly targetError?: ReleaseTargetConfigurationError | null
+  readonly onRefreshTargetCatalogue?: () => void
 }): ReactElement => {
   const disabled = !canEdit
   const canonicalAllowedProvidersText = draft.agent.allowedProviders.join(", ")
@@ -470,6 +503,14 @@ export const SettingsForm = ({
           onChange={(maximumAttempts) => update("pipeline", { ...draft.pipeline, maximumAttempts })}
           value={draft.pipeline.maximumAttempts}
         />
+        <ReleaseTargetsEditor
+          catalogue={targetCatalogue}
+          disabled={disabled}
+          error={targetError}
+          mappings={draft.pipeline.releaseTargets ?? []}
+          onRefresh={onRefreshTargetCatalogue}
+          onChange={(releaseTargets) => update("pipeline", { ...draft.pipeline, releaseTargets })}
+        />
       </SettingsSection>
 
       <SettingsSection
@@ -626,6 +667,22 @@ export const WorkspaceSettingsPage = ({
   const controller = useWorkspaceSettings(sessionKey, browserSession.invalidateSession, transport)
   const theme = useAppTheme()
   const [governedDialogOpen, setGovernedDialogOpen] = useState(false)
+  const [targetCatalogue, setTargetCatalogue] = useState<ReleaseTargetCatalog | null>(null)
+  const [targetCatalogueRevision, setTargetCatalogueRevision] = useState(0)
+  useEffect(() => {
+    setTargetCatalogue(null)
+    if (sessionKey === null || transport.loadTargetCatalog === undefined) return
+    const request = new AbortController()
+    transport.loadTargetCatalog(request.signal).then(
+      (catalogue) => {
+        if (!request.signal.aborted) setTargetCatalogue(catalogue)
+      },
+      () => {
+        if (!request.signal.aborted) setTargetCatalogue(null)
+      }
+    )
+    return () => request.abort()
+  }, [sessionKey, transport, targetCatalogueRevision])
   const canEdit = browserSession.state._tag === "authenticated" && session?.permission === "workspace-owner"
 
   if (!routeMatchesSession) {
@@ -719,7 +776,23 @@ export const WorkspaceSettingsPage = ({
     isGovernedWorkspaceSettingsSection
   )
   const requiresGovernedConfirmation = governedChanges.length > 0
-  const draftIsValid = Schema.is(WorkspaceSettingsV1)(draft)
+  const targetsChanged =
+    JSON.stringify(server.settings.pipeline.releaseTargets ?? []) !==
+    JSON.stringify(draft.pipeline.releaseTargets ?? [])
+  const targetValidation = targetsChanged
+    ? Effect.runSync(
+        Effect.result(
+          validateReleaseTargets(
+            draft.pipeline.releaseTargets ?? [],
+            targetCatalogue ?? { complete: false, pipelines: [] }
+          )
+        )
+      )
+    : null
+  const targetError =
+    controller.state.targetError ??
+    (targetValidation !== null && Result.isFailure(targetValidation) ? targetValidation.failure : null)
+  const draftIsValid = Schema.is(WorkspaceSettingsV1)(draft) && targetError === null
   const localProfileUnavailable = draft.agent.profilePolicy === "local-profile"
   return (
     <div className={styles.page}>
@@ -848,6 +921,9 @@ export const WorkspaceSettingsPage = ({
       <SettingsForm
         canEdit={canEdit && status !== "saving"}
         draft={draft}
+        targetCatalogue={targetCatalogue}
+        targetError={targetError}
+        onRefreshTargetCatalogue={() => setTargetCatalogueRevision((value) => value + 1)}
         onChange={(nextDraft) => {
           setGovernedDialogOpen(false)
           controller.edit(nextDraft)

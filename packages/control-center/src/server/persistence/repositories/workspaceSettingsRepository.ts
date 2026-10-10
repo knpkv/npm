@@ -434,99 +434,100 @@ const makeWorkspaceSettingsRepository = Effect.gen(function*() {
     )
   })
 
-  const updateWithinTransaction = Effect.fn("WorkspaceSettingsRepository.updateWithinTransaction")(function*(
-    workspaceId: WorkspaceId,
-    input: UpdateWorkspaceSettingsInput,
-    afterUpdate: (
-      before: WorkspaceSettingsRecord,
-      current: WorkspaceSettingsRecord
-    ) => Effect.Effect<unknown, unknown>
-  ) {
-    const { governanceAuthority, ...untrustedInput } = input
-    const decodedInput = yield* Schema.decodeUnknownEffect(
-      Schema.toType(UpdateWorkspaceSettingsInput),
-      { onExcessProperty: "error" }
-    )(untrustedInput).pipe(
-      Effect.mapError(() => new PersistenceOperationError({ operation: "workspace-settings.update-input" }))
-    )
-    const settingsJson = yield* encodeSettings(decodedInput.settings).pipe(
-      Effect.mapError(() => new PersistenceOperationError({ operation: "workspace-settings.encode-update" }))
-    )
-    const settingsDigest = yield* digestText(settingsJson)
-    const requestDigest = yield* digestWorkspaceSettingsGovernanceRequest({
-      workspaceId,
-      mutationId: decodedInput.mutationId,
-      expectedRevision: decodedInput.expectedRevision,
-      settings: decodedInput.settings,
-      acknowledgedGovernedSections: decodedInput.acknowledgedGovernedSections,
-      actorPersonId: decodedInput.actorPersonId,
-      sessionId: decodedInput.sessionId
-    }).pipe(
-      Effect.provideService(Crypto.Crypto, cryptoService),
-      Effect.mapError(() => new PersistenceOperationError({ operation: "workspace-settings.digest-mutation" }))
-    )
-    const encodedUpdatedAt = encodeTimestamp(decodedInput.updatedAt)
-    yield* ensureDefault(workspaceId).pipe(mapPersistenceOperation("workspace-settings.ensure-default"))
+  const updateWithinTransaction = Effect.fn("WorkspaceSettingsRepository.updateWithinTransaction")(
+    function*<Failure, Requirements>(
+      workspaceId: WorkspaceId,
+      input: UpdateWorkspaceSettingsInput,
+      afterUpdate: (
+        before: WorkspaceSettingsRecord,
+        current: WorkspaceSettingsRecord
+      ) => Effect.Effect<unknown, Failure, Requirements>
+    ) {
+      const { governanceAuthority, ...untrustedInput } = input
+      const decodedInput = yield* Schema.decodeUnknownEffect(
+        Schema.toType(UpdateWorkspaceSettingsInput),
+        { onExcessProperty: "error" }
+      )(untrustedInput).pipe(
+        Effect.mapError(() => new PersistenceOperationError({ operation: "workspace-settings.update-input" }))
+      )
+      const settingsJson = yield* encodeSettings(decodedInput.settings).pipe(
+        Effect.mapError(() => new PersistenceOperationError({ operation: "workspace-settings.encode-update" }))
+      )
+      const settingsDigest = yield* digestText(settingsJson)
+      const requestDigest = yield* digestWorkspaceSettingsGovernanceRequest({
+        workspaceId,
+        mutationId: decodedInput.mutationId,
+        expectedRevision: decodedInput.expectedRevision,
+        settings: decodedInput.settings,
+        acknowledgedGovernedSections: decodedInput.acknowledgedGovernedSections,
+        actorPersonId: decodedInput.actorPersonId,
+        sessionId: decodedInput.sessionId
+      }).pipe(
+        Effect.provideService(Crypto.Crypto, cryptoService),
+        Effect.mapError(() => new PersistenceOperationError({ operation: "workspace-settings.digest-mutation" }))
+      )
+      const encodedUpdatedAt = encodeTimestamp(decodedInput.updatedAt)
+      yield* ensureDefault(workspaceId).pipe(mapPersistenceOperation("workspace-settings.ensure-default"))
 
-    return yield* database.transaction(
-      Effect.gen(function*() {
-        const before = yield* readCurrent(workspaceId, "deferred")
-        const existingAuditRows = yield* readAuditRows(workspaceId, decodedInput.mutationId)
-        if (existingAuditRows.length > 1) {
-          return yield* new WorkspaceSettingsMutationConflictError()
-        }
-        const existingAuditRow = existingAuditRows[0]
-        if (existingAuditRow !== undefined) {
-          const existingAudit = yield* decodeAudit(existingAuditRow)
-          const replayed = yield* replayCommittedMutation(workspaceId, existingAudit, requestDigest)
-          yield* afterUpdate(before, replayed)
-          return replayed
-        }
+      return yield* database.transaction(
+        Effect.gen(function*() {
+          const before = yield* readCurrent(workspaceId, "deferred")
+          const existingAuditRows = yield* readAuditRows(workspaceId, decodedInput.mutationId)
+          if (existingAuditRows.length > 1) {
+            return yield* new WorkspaceSettingsMutationConflictError()
+          }
+          const existingAuditRow = existingAuditRows[0]
+          if (existingAuditRow !== undefined) {
+            const existingAudit = yield* decodeAudit(existingAuditRow)
+            const replayed = yield* replayCommittedMutation(workspaceId, existingAudit, requestDigest)
+            yield* afterUpdate(before, replayed)
+            return replayed
+          }
 
-        const current = before
-        if (current.revision !== decodedInput.expectedRevision) {
-          return yield* new RevisionConflictError({
-            workspaceId,
-            recordKind: "workspace-settings",
-            recordKey: workspaceId,
-            expectedRevision: decodedInput.expectedRevision,
-            actualRevision: current.revision
-          })
-        }
+          const current = before
+          if (current.revision !== decodedInput.expectedRevision) {
+            return yield* new RevisionConflictError({
+              workspaceId,
+              recordKind: "workspace-settings",
+              recordKey: workspaceId,
+              expectedRevision: decodedInput.expectedRevision,
+              actualRevision: current.revision
+            })
+          }
 
-        const changedSections = changedWorkspaceSettingsSections(
-          current.settings,
-          decodedInput.settings
-        )
-        if (changedSections.length === 0) {
-          return yield* new WorkspaceSettingsNoChangesError()
-        }
-        const governedSections = changedSections.filter(isGovernedWorkspaceSettingsSection)
-        if (
-          !governedSectionsEqual(
-            governedSections,
-            decodedInput.acknowledgedGovernedSections
-          ) ||
-          (
-            governedSections.length > 0 &&
-            !workspaceSettingsGovernanceAuthorityMatches(
-              governanceAuthority,
-              requestDigest,
-              decodedInput.updatedAt
+          const changedSections = changedWorkspaceSettingsSections(
+            current.settings,
+            decodedInput.settings
+          )
+          if (changedSections.length === 0) {
+            return yield* new WorkspaceSettingsNoChangesError()
+          }
+          const governedSections = changedSections.filter(isGovernedWorkspaceSettingsSection)
+          if (
+            !governedSectionsEqual(
+              governedSections,
+              decodedInput.acknowledgedGovernedSections
+            ) ||
+            (
+              governedSections.length > 0 &&
+              !workspaceSettingsGovernanceAuthorityMatches(
+                governanceAuthority,
+                requestDigest,
+                decodedInput.updatedAt
+              )
+            )
+          ) {
+            return yield* new WorkspaceSettingsGovernanceError()
+          }
+          const changedSectionsJson = yield* encodeChangedSections(changedSections).pipe(
+            Effect.mapError(() =>
+              new PersistenceOperationError({
+                operation: "workspace-settings.encode-changed-sections"
+              })
             )
           )
-        ) {
-          return yield* new WorkspaceSettingsGovernanceError()
-        }
-        const changedSectionsJson = yield* encodeChangedSections(changedSections).pipe(
-          Effect.mapError(() =>
-            new PersistenceOperationError({
-              operation: "workspace-settings.encode-changed-sections"
-            })
-          )
-        )
 
-        yield* sql`UPDATE workspace_settings
+          yield* sql`UPDATE workspace_settings
           SET revision = revision + 1,
               policy_revision = policy_revision + ${governedSections.length === 0 ? 0 : 1},
               settings_json = ${settingsJson},
@@ -535,26 +536,28 @@ const makeWorkspaceSettingsRepository = Effect.gen(function*() {
               updated_at = ${encodedUpdatedAt}
           WHERE workspace_id = ${workspaceId}
             AND revision = ${decodedInput.expectedRevision}`
-        const changes = yield* readChanges(sql)
-        if (changes === 0) {
-          const replayRows = yield* readAuditRows(workspaceId, decodedInput.mutationId)
-          const replayRow = replayRows[0]
-          if (replayRow !== undefined && replayRows.length === 1) {
-            const replayAudit = yield* decodeAudit(replayRow)
-            return yield* replayCommittedMutation(workspaceId, replayAudit, requestDigest)
+          const changes = yield* readChanges(sql).pipe(
+            Effect.mapError(() => new PersistenceOperationError({ operation: "workspace-settings.read-changes" }))
+          )
+          if (changes === 0) {
+            const replayRows = yield* readAuditRows(workspaceId, decodedInput.mutationId)
+            const replayRow = replayRows[0]
+            if (replayRow !== undefined && replayRows.length === 1) {
+              const replayAudit = yield* decodeAudit(replayRow)
+              return yield* replayCommittedMutation(workspaceId, replayAudit, requestDigest)
+            }
+            const latest = yield* readCurrent(workspaceId, "deferred")
+            return yield* new RevisionConflictError({
+              workspaceId,
+              recordKind: "workspace-settings",
+              recordKey: workspaceId,
+              expectedRevision: decodedInput.expectedRevision,
+              actualRevision: latest.revision
+            })
           }
-          const latest = yield* readCurrent(workspaceId, "deferred")
-          return yield* new RevisionConflictError({
-            workspaceId,
-            recordKind: "workspace-settings",
-            recordKey: workspaceId,
-            expectedRevision: decodedInput.expectedRevision,
-            actualRevision: latest.revision
-          })
-        }
 
-        const toRevision = RecordRevision.make(decodedInput.expectedRevision + 1)
-        yield* sql`INSERT INTO workspace_settings_versions (
+          const toRevision = RecordRevision.make(decodedInput.expectedRevision + 1)
+          yield* sql`INSERT INTO workspace_settings_versions (
           workspace_id, schema_version, revision, settings_json, settings_digest,
           policy_revision, created_at, updated_at, updated_by_person_id
         )
@@ -563,7 +566,7 @@ const makeWorkspaceSettingsRepository = Effect.gen(function*() {
         FROM workspace_settings
         WHERE workspace_id = ${workspaceId}
           AND revision = ${toRevision}`
-        yield* sql`INSERT INTO workspace_settings_audits (
+          yield* sql`INSERT INTO workspace_settings_audits (
           workspace_id, mutation_id, request_digest, from_revision, to_revision,
           actor_person_id, session_id, changed_sections_json, governed, governance_authority_digest,
           before_digest, after_digest, occurred_at
@@ -575,21 +578,22 @@ const makeWorkspaceSettingsRepository = Effect.gen(function*() {
           ${governedSections.length === 0 ? null : requestDigest},
           ${current.settingsDigest}, ${settingsDigest}, ${encodedUpdatedAt}
         )`
-        const updated = yield* readCurrent(workspaceId, "deferred")
-        yield* afterUpdate(before, updated)
-        return updated
-      })
-    ).pipe(
-      Effect.result,
-      Effect.flatMap((result) =>
-        Result.isFailure(result) &&
-          isMalformedWorkspaceSettingsRecord(result.failure)
-          ? quarantineAfterRollback(result.failure)
-          : Effect.fromResult(result)
-      ),
-      mapPersistenceOperation("workspace-settings.update")
-    )
-  })
+          const updated = yield* readCurrent(workspaceId, "deferred")
+          yield* afterUpdate(before, updated)
+          return updated
+        })
+      ).pipe(
+        Effect.result,
+        Effect.flatMap((result) => {
+          if (Result.isSuccess(result)) return Effect.succeed(result.success)
+          return isMalformedWorkspaceSettingsRecord(result.failure)
+            ? quarantineAfterRollback(result.failure)
+            : Effect.fail(result.failure)
+        }),
+        mapPersistenceOperation("workspace-settings.update")
+      )
+    }
+  )
 
   const update = Effect.fn("WorkspaceSettingsRepository.update")(function*(
     workspaceId: WorkspaceId,
@@ -642,13 +646,13 @@ const makeWorkspaceSettingsRepository = Effect.gen(function*() {
    * update. Keeping transaction ownership here lets malformed-row quarantine
    * run only after the complete transaction has rolled back.
    */
-  const updateAtomically = Effect.fn("WorkspaceSettingsRepository.updateAtomically")(function*(
+  const updateAtomically = Effect.fn("WorkspaceSettingsRepository.updateAtomically")(function*<Failure, Requirements>(
     workspaceId: WorkspaceId,
     input: UpdateWorkspaceSettingsInput,
     afterUpdate: (
       before: WorkspaceSettingsRecord,
       current: WorkspaceSettingsRecord
-    ) => Effect.Effect<unknown, unknown>
+    ) => Effect.Effect<unknown, Failure, Requirements>
   ) {
     return yield* updateWithinTransaction(workspaceId, input, afterUpdate)
   })
