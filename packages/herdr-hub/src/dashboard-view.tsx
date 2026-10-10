@@ -4,7 +4,7 @@ import type { FormEvent, KeyboardEvent, ReactElement, ReactNode } from "react"
 import type { DashboardSnapshot, PendingApproval, PendingApprovalFailure } from "./dashboard-model.js"
 import { connectWorkerHref, NotificationPanel, type NotificationState } from "./approval-app-view.js"
 import { requiresApproval } from "@knpkv/herdr-fleet/model"
-import { ActivityHistory, jobTitle, statusLabel, statusTone } from "./activity-history.js"
+import { ActivityHistory, jobTitle, statusIcon, statusLabel, statusTone } from "./activity-history.js"
 import { ApprovalRequestDisclosure } from "./approval-request-view.js"
 import type { SanitizedJobRecord } from "./approval-request.js"
 import { type ApprovalDecision, approvalShortcutFor } from "./approval-decision.js"
@@ -198,7 +198,12 @@ const AgendaItem = ({
             {jobSummary(record)}
           </Text>
         </div>
-        <StateLabel label={statusLabel(record.status)} tone={statusTone(record.status)} size="compact" />
+        <StateLabel
+          {...statusIcon(record.status)}
+          label={statusLabel(record.status)}
+          tone={statusTone(record.status)}
+          size="compact"
+        />
       </div>
       <JobTimeline record={record} />
       {requiresApproval(record.payload) ? <ApprovalRequestDisclosure id={record.id} payload={record.payload} /> : null}

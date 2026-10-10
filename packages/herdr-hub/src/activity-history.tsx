@@ -87,6 +87,10 @@ export const statusLabel = (status: JobStatus): string => {
   }
 }
 
+/** Spread into a `StateLabel`: an expired job is neutral but still says why with a clock, as the decision bar's badge does. */
+export const statusIcon = (status: JobStatus): { readonly icon?: "clock" } =>
+  status === "expired" ? { icon: "clock" } : {}
+
 export const statusTone = (status: JobStatus): "neutral" | "positive" | "critical" | "caution" | "progress" => {
   switch (status) {
     case "succeeded":
@@ -95,9 +99,9 @@ export const statusTone = (status: JobStatus): "neutral" | "positive" | "critica
     case "rejected":
       return "critical"
     case "interrupted":
+    case "expired":
       return "neutral"
     case "pending_approval":
-    case "expired":
       return "caution"
     case "queued":
     case "running":
@@ -322,7 +326,12 @@ const ActivityRow = ({
       >
         <time dateTime={iso(item.timestamp)}>{item.time}</time>
         <span className="activity-status">
-          <StateLabel label={statusLabel(item.status)} size="compact" tone={statusTone(item.status)} />
+          <StateLabel
+            {...statusIcon(item.status)}
+            label={statusLabel(item.status)}
+            size="compact"
+            tone={statusTone(item.status)}
+          />
         </span>
         <span className="activity-row-copy">
           <Text as="strong" variant="label">

@@ -10,7 +10,14 @@
  *
  * @module
  */
-import { DecisionBar, Hero, HeroWord, type RlyDecisionBarState, Region } from "@knpkv/rly/patterns"
+import {
+  DecisionBar,
+  Hero,
+  HeroWord,
+  type RlyDecisionBarOutcome,
+  type RlyDecisionBarState,
+  Region
+} from "@knpkv/rly/patterns"
 import { Button, LimitTrack, Notice, TrackKey } from "@knpkv/rly/primitives"
 import { Predicate } from "effect"
 import { type KeyboardEvent, type ReactElement, type ReactNode, useEffect, useRef, useState } from "react"
@@ -194,11 +201,41 @@ const decisionState = ({
 /** What a request the hub expired says, wherever it is shown. */
 const EXPIRED_TEXT = "Expired just now. Nothing was applied."
 
-/** How a request left the queue: a short word for the bar's reason, and the full sentence. */
+/** A request the hub decided: its outcome as a toned word, and who decided it, when. */
+interface Decided {
+  readonly badge: RlyDecisionBarOutcome
+  readonly by: string | null
+  readonly at: number
+}
+
+/**
+ * How a request left the queue: a short word for the bar's reason, and the full sentence. A decided
+ * request also carries its outcome, which the bar shows as a badge with who and when beside it.
+ */
 interface Departure {
   readonly word: string
   readonly text: string
+  readonly decided?: Decided
 }
+
+/** Expired is neutral: nothing happened, so nothing to celebrate or alarm about. */
+const outcomeBadge = (outcome: "Approved" | "Rejected" | "Expired"): RlyDecisionBarOutcome => {
+  switch (outcome) {
+    case "Approved":
+      return { icon: "check", label: "Approved", tone: "positive" }
+    case "Rejected":
+      return { icon: "close", label: "Rejected", tone: "critical" }
+    case "Expired":
+      return { icon: "clock", label: "Expired", tone: "neutral" }
+  }
+}
+
+/**
+ * The quiet line beside a decided request's badge. An expiry says what it means rather than when:
+ * a record without its own expiry time falls back to its last update, which would mislead.
+ */
+const decidedLine = ({ at, badge, by }: Decided, now: number): string =>
+  badge.label === "Expired" ? "Nothing was applied." : by === null ? agoText(at, now) : `by ${by}, ${agoText(at, now)}`
 
 /**
  * Why a request the reader was looking at is no longer listed, or `null` when its absence proves
@@ -218,9 +255,14 @@ const departureOf = (snapshot: DashboardSnapshot, item: PendingItem): Departure 
   if (record !== undefined && record.status === "pending_approval") return null
   const decided = record === undefined ? null : decidedOf(record)
   if (decided !== null) {
+    const outcome = { at: decided.at, badge: outcomeBadge(decided.outcome), by: decided.by }
     return decided.outcome === "Expired"
-      ? { text: EXPIRED_TEXT, word: "Expired." }
-      : { text: `${decided.outcome}${decided.by === null ? "" : ` by ${decided.by}`}.`, word: `${decided.outcome}.` }
+      ? { decided: outcome, text: EXPIRED_TEXT, word: "Expired." }
+      : {
+          decided: outcome,
+          text: `${decided.outcome}${decided.by === null ? "" : ` by ${decided.by}`}.`,
+          word: `${decided.outcome}.`
+        }
   }
   // Only another page of this host's queue can still hold it; a remote host's pages cannot.
   return snapshot.pendingApprovals.nextCursors.some(({ host }) => host.toLowerCase() === snapshot.host.toLowerCase())
@@ -230,6 +272,7 @@ const departureOf = (snapshot: DashboardSnapshot, item: PendingItem): Departure 
 
 const RequestDetail = ({
   answer,
+  decided,
   gone,
   item,
   now,
@@ -238,6 +281,8 @@ const RequestDetail = ({
   state
 }: {
   readonly answer: string | undefined
+  /** Set when the answer is the hub's record of how the request was decided. */
+  readonly decided: Decided | undefined
   readonly gone: boolean
   readonly item: PendingItem
   readonly now: number
@@ -305,7 +350,11 @@ const RequestDetail = ({
           onApprove={decide("approve")}
           onReject={decide("reject")}
           state={state}
-          {...(answer === undefined ? {} : { status: answer })}
+          {...(decided !== undefined
+            ? { outcome: decided.badge, status: decidedLine(decided, now) }
+            : answer === undefined
+              ? {}
+              : { status: answer })}
           target={`${facts.kind} on ${facts.host}`}
         />
       )}
@@ -442,16 +491,18 @@ export const ApprovalsCountdown = ({
 
   // Your own decision keeps the hub's answer, also after the request leaves the queue, unless the
   // answer was uncertain and a later read proves what happened; any other departure says why.
-  const answer =
+  const answerFrom =
     selected === undefined || selectedId === null
       ? undefined
       : selected._tag === "Local" && decisionStatus?.jobId === selectedId
         ? // A later read that proves the outcome beats an uncertain answer, and a confirmed expiry
           // beats an earlier refusal (a decision that reached the hub after its deadline).
           departure !== null && (!decisionStatus.settles || departure.text === EXPIRED_TEXT)
-          ? departure.text
-          : decisionStatus.text
-        : departure?.text
+          ? departure
+          : decisionStatus
+        : (departure ?? undefined)
+  const answer = answerFrom?.text
+  const answerDecided = answerFrom !== undefined && answerFrom === departure ? departure.decided : undefined
 
   // Deciding pins the decided request, so the bar and its status stay on it when it leaves the queue.
   const decideItem = (item: PendingItem, decision: ApprovalDecision["decision"]): void => {
@@ -616,6 +667,7 @@ export const ApprovalsCountdown = ({
           <Region className="countdown-selected" title="Selected request">
             <RequestDetail
               answer={answer}
+              decided={answerDecided}
               gone={departure !== null}
               item={selected}
               now={now}

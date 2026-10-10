@@ -230,6 +230,7 @@ export const componentManifest = {
         { kind: "value", name: "RLY_DECISION_BAR_DEFAULT_VARIANTS" },
         { kind: "value", name: "RLY_DECISION_BAR_VARIANTS" },
         { kind: "type", name: "DecisionBarProps" },
+        { kind: "type", name: "RlyDecisionBarOutcome" },
         { kind: "type", name: "RlyDecisionBarPlacement" },
         { kind: "type", name: "RlyDecisionBarState" }
       ],

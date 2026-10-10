@@ -209,6 +209,30 @@ describe("ApprovalsCountdown", () => {
     view.unmount()
   })
 
+  const decidedElsewhere: ReadonlyArray<readonly [string, Partial<JobRecord>]> = [
+    ["Approved", { approvedAt: Date.now() - 2 * 60_000, approvedBy: "owner@example.com", status: "queued" }],
+    ["Rejected", { rejectedAt: Date.now() - 2 * 60_000, rejectedBy: "owner@example.com", status: "rejected" }]
+  ]
+  it.each(decidedElsewhere)(
+    "shows a request decided elsewhere as a %s badge, who and when beside it",
+    (word, decided) => {
+      const view = mount({ snapshot: snapshot() })
+      act(() => view.container.querySelector<HTMLButtonElement>("[data-countdown-row]")?.click())
+      view.render({
+        snapshot: snapshot({
+          pendingApprovals: { failures: [], local: [], nextCursors: [], remote: [] },
+          records: [record("job-1", decided)]
+        })
+      })
+      const status = view.bar()?.querySelector("[role='status']")
+      const badge = status?.firstElementChild
+      expect(badge?.textContent).toBe(word)
+      expect(badge?.querySelector("svg")).not.toBeNull()
+      expect(status?.lastElementChild?.textContent).toBe("by owner@example.com, 2m ago")
+      view.unmount()
+    }
+  )
+
   it("keeps the bar mounted and announces an expiry the hub reports", () => {
     const view = mount({ snapshot: snapshot() })
     act(() => view.container.querySelector<HTMLButtonElement>("[data-countdown-row]")?.click())
@@ -219,7 +243,7 @@ describe("ApprovalsCountdown", () => {
       })
     })
     expect(view.bar()?.dataset["state"]).toBe("off")
-    expect(view.bar()?.querySelector("[role='status']")?.textContent).toBe("Expired just now. Nothing was applied.")
+    expect(view.bar()?.querySelector("[role='status']")?.textContent).toBe("ExpiredNothing was applied.")
     view.unmount()
   })
 
@@ -313,7 +337,7 @@ describe("ApprovalsCountdown", () => {
     })
     expect(view.container.querySelector(".countdown-kicker")?.textContent).toContain("job-1")
     expect(view.bar()?.dataset["state"]).toBe("off")
-    expect(view.bar()?.querySelector("[role='status']")?.textContent).toBe("Expired just now. Nothing was applied.")
+    expect(view.bar()?.querySelector("[role='status']")?.textContent).toBe("ExpiredNothing was applied.")
     view.press("Enter")
     expect(view.decisions).toEqual([])
     view.unmount()
@@ -595,7 +619,7 @@ describe("ApprovalsCountdown", () => {
         records: [record("job-1", { expiredAt: Date.now(), status: "expired" })]
       })
     })
-    expect(view.bar()?.querySelector("[role='status']")?.textContent).toBe("Expired just now. Nothing was applied.")
+    expect(view.bar()?.querySelector("[role='status']")?.textContent).toBe("ExpiredNothing was applied.")
     view.unmount()
   })
 
@@ -646,7 +670,7 @@ describe("ApprovalsCountdown", () => {
         records: [record("job-1", { expiredAt: Date.now(), status: "expired" })]
       })
     })
-    expect(view.bar()?.querySelector("[role='status']")?.textContent).toBe("Expired just now. Nothing was applied.")
+    expect(view.bar()?.querySelector("[role='status']")?.textContent).toBe("ExpiredNothing was applied.")
     view.unmount()
   })
 

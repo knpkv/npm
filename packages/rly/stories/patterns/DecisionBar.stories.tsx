@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
 import { useState } from "react"
 import { expect, userEvent } from "storybook/test"
-import { DecisionBar, type RlyDecisionBarState } from "../../src/patterns/DecisionBar.js"
+import { DecisionBar, type RlyDecisionBarOutcome, type RlyDecisionBarState } from "../../src/patterns/DecisionBar.js"
 
 const meta = {
   component: DecisionBar,
@@ -71,4 +71,37 @@ export const States: Story = {
     await expect(off).toHaveFocus()
   },
   render: () => <Example />
+}
+
+const decided: ReadonlyArray<{ readonly by: string; readonly outcome: RlyDecisionBarOutcome }> = [
+  { by: "by owner@example.com, 2m ago", outcome: { icon: "check", label: "Approved", tone: "positive" } },
+  { by: "by owner@example.com, 5m ago", outcome: { icon: "close", label: "Rejected", tone: "critical" } },
+  { by: "Nothing was applied.", outcome: { icon: "clock", label: "Expired", tone: "neutral" } }
+]
+
+/** A decided target: its outcome as a toned word, who and when quiet beside it. */
+export const Outcomes: Story = {
+  args: { onApprove: () => undefined, onReject: () => undefined, state: { _tag: "ready" }, target },
+  play: async ({ canvas }) => {
+    const statuses = canvas.getAllByRole("status")
+    await expect(statuses).toHaveLength(3)
+    await expect(statuses[0]).toHaveTextContent("Approvedby owner@example.com, 2m ago")
+    const off = canvas.getAllByRole("button", { name: `Approve: ${target}` })[2]
+    await expect(off).toHaveAccessibleDescription("Expired.")
+  },
+  render: () => (
+    <div style={{ display: "grid", gap: "var(--rly-space-32)", maxInlineSize: "36rem" }}>
+      {decided.map(({ by, outcome }) => (
+        <DecisionBar
+          key={outcome.label}
+          onApprove={() => undefined}
+          onReject={() => undefined}
+          outcome={outcome}
+          state={{ _tag: "off", reason: `${outcome.label}.` }}
+          status={by}
+          target={target}
+        />
+      ))}
+    </div>
+  )
 }
