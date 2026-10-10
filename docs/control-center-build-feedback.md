@@ -77,8 +77,10 @@ Gitignored files reachable from staged code are visible to local checks; CI chec
 Root configuration, lockfiles, workspace definitions, `scripts/`, `ast-grep/`,
 `.github/`, `.husky/`, vendored references and patches select the full repository
 gate. Package `vitest*.config.*` and `tsconfig*.json` or `.jsonc` files also select
-full. Any edit inside a package targeted by a cross-package relative JS/TS import
-selects full, covering its private helpers too. TypeScript parses literal
+full. A cross-package relative JS/TS import selects its target files and their
+same-package relative-import/re-export closure for full checks. Unrelated files in
+that package stay incremental. Standard source extensions and directory indexes
+are resolved against tracked files. TypeScript parses literal
 specifiers, including comments. The scan excludes generated/vendor importers;
 computed/dynamic paths, custom loaders, arbitrary file reads, aliases without
 manifest dependencies and non-JS/TS importers are not followed. `PRECOMMIT_MODE=full pnpm precommit` also selects

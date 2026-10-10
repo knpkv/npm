@@ -60,10 +60,17 @@ describe("pre-commit plan", () => {
     expect(planPrecommit(["packages/jira-cli/src/index.ts"]).mode).toBe("changed")
   })
 
-  it("runs full for any edit in a cross-imported package, including private helpers and deletions", () => {
-    const inputs = ["packages/jira-cli", "packages/rly"]
+  it("runs full only for files in the cross-import closure, including helpers and deletions", () => {
+    const inputs = [
+      "packages/jira-cli/vitest.config.ts",
+      "packages/rly/src/shared.ts",
+      "packages/rly/src/helper.ts",
+      "packages/rly/src/deleted.ts"
+    ]
     expect(planPrecommit(["packages/rly/src/shared.ts"], {}, 2, inputs).mode).toBe("full")
-    expect(planPrecommit(["packages/rly/src/private.ts"], {}, 2, inputs).mode).toBe("full")
+    expect(planPrecommit(["packages/rly/src/helper.ts"], {}, 2, inputs).mode).toBe("full")
+    expect(planPrecommit(["packages/rly/src/private.ts"], {}, 2, inputs).mode).toBe("changed")
+    expect(planPrecommit(["packages/jira-cli/src/AttachmentService.ts"], {}, 2, inputs).mode).toBe("changed")
     expect(planPrecommit(["packages/rly/src/deleted.ts"], {}, 2, inputs).mode).toBe("full")
     expect(planPrecommit(["packages/agent-skills/src/index.ts"], {}, 2, inputs).mode).toBe("changed")
     expect(planPrecommit(["packages/rly-other/src/private.ts"], {}, 2, inputs).mode).toBe("changed")

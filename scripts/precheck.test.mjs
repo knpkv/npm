@@ -13,7 +13,8 @@ import * as Stream from "effect/Stream"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 import {
-  crossPackageImportTargets,
+  relativeImportTargets,
+  crossPackageImportClosure,
   crossPackageInputs,
   isWorkspaceDirectory,
   stagedInputProblem
@@ -393,9 +394,18 @@ test("staged dry runs use the index, include consumers of deleted packages, and 
       yield* write("packages/base/test/expectations.test.ts", "export {}\n")
       yield* write("packages/base/src/helper.mjs", "export const value = () => 1\n")
       yield* write("packages/base/src/entry.mjs", 'export { value } from "./helper.mjs"\n')
+      yield* write("packages/base/src/cjs/entry.cjs", 'exports.value = require("./value.shared").value;\n')
+      yield* write("packages/base/src/cjs/value.shared.js", "exports.value = 1;\n")
+      yield* write(
+        "packages/base/src/ts/entry.ts",
+        'export { value } from "./value.shared"; export { other } from "./fixtures.shared";\n'
+      )
+      yield* write("packages/base/src/ts/value.shared.ts", "export const value = 1;\n")
+      yield* write("packages/base/src/ts/fixtures.shared/index.ts", "export const other = 1;\n")
+      yield* write("packages/base/src/private.shared.ts", "export {}\n")
       yield* write(
         "packages/unrelated/test/import.test.mjs",
-        'import { value } from /* context */ "../../base/src/entry.mjs"\n'
+        'import { value } from /* context */ "../../base/src/entry.mjs"; import "../../base/src/cjs/entry.cjs"; import "../../base/src/ts/entry.ts";\n'
       )
       yield* write(".gitignore", "node_modules\nnotes/ignored.txt\n")
       for (const file of [
@@ -496,10 +506,29 @@ test("staged dry runs use the index, include consumers of deleted packages, and 
             options
           )
       }
+      for (const [file, contents] of [
+        ["packages/base/src/cjs/value.shared.js", "exports.value = 2;\n"],
+        ["packages/base/src/ts/value.shared.ts", "export const value = 2;\n"],
+        ["packages/base/src/ts/fixtures.shared/index.ts", "export const other = 2;\n"]
+      ]) {
+        yield* write(file, contents)
+        yield* git("add", file)
+      }
       const imported = yield* crossPackageInputs(scratchSpawner, root)
-      assert.ok(imported.includes("packages/base"))
+      for (const file of [
+        "packages/base/src/cjs/value.shared.js",
+        "packages/base/src/ts/value.shared.ts",
+        "packages/base/src/ts/fixtures.shared/index.ts"
+      ]) {
+        assert.equal(planPrecommit([file], {}, 1, imported).mode, "full", file)
+      }
+      assert.equal(planPrecommit(["packages/base/src/private.shared.ts"], {}, 1, imported).mode, "changed")
       assert.equal(planPrecommit(["packages/base/src/helper.mjs"], {}, 1, imported).mode, "full")
       assert.equal(planPrecommit(["packages/unrelated/src/index.ts"], {}, 1, imported).mode, "changed")
+      assert.equal(planPrecommit(["packages/base/src/index.ts"], {}, 1, imported).mode, "changed")
+      yield* git("rm", "-f", "packages/base/src/helper.mjs")
+      const deletedImports = yield* crossPackageInputs(scratchSpawner, root)
+      assert.equal(planPrecommit(["packages/base/src/helper.mjs"], {}, 1, deletedImports).mode, "full")
       yield* git("restore", "--staged", "--worktree", "--", "packages/base/src/helper.mjs")
       yield* write("packages/consumer/package.json", JSON.stringify({ name: "@knpkv/consumer", dependencies: {} }))
       yield* rejectsEveryMode()
@@ -614,30 +643,133 @@ test("workspace patterns and recreated staged deletions define the input boundar
   assert.equal(stagedInputProblem([], [], workspacePatterns, []), undefined)
 })
 
-test("literal cross-package imports select the entire target package, including comment-separated specifiers", () => {
-  const directories = ["packages/consumer", "packages/base", "scratchpad"]
+test("literal cross-package imports and re-exports retain targets through comments", () => {
+  const importer = "packages/consumer/test/guard.test.ts"
+  for (const [source, target] of [
+    ['import config from /* context */ "../../base/vitest.config.ts"', "packages/base/vitest.config.ts"],
+    ['export { helper } from /* context */ "../../base/src/helper.js"', "packages/base/src/helper.js"],
+    ['import(/* context */ "../../base/src/directory")', "packages/base/src/directory"],
+    ['require(/* context */ "../../base/src/entry.cjs")', "packages/base/src/entry.cjs"],
+    ['import config from "../../base"', "packages/base"]
+  ])
+    assert.deepEqual(relativeImportTargets(importer, source), [target])
+  assert.deepEqual(relativeImportTargets("scratchpad/main.ts", 'import "../packages/base/src/entry.js"'), [
+    "packages/base/src/entry.js"
+  ])
+  assert.deepEqual(relativeImportTargets("packages/base/src/index.ts", 'export { helper } from "./helper.js"'), [
+    "packages/base/src/helper.js"
+  ])
   for (const source of [
-    'import config from /* context */ "../../base/vitest.config.ts"',
-    'export { helper } from /* context */ "../../base/src/helper.js"',
-    'import(/* context */ "../../base/src/directory")',
-    'require(/* context */ "../../base/src/entry.cjs")',
-    'import config from "../../base"'
-  ]) {
-    assert.deepEqual(crossPackageImportTargets("packages/consumer/test/guard.test.ts", source, directories), [
-      "packages/base"
-    ])
-  }
-  assert.deepEqual(
-    crossPackageImportTargets("scratchpad/main.ts", 'import "../packages/base/src/entry.js"', directories),
-    ["packages/base"]
-  )
-  for (const source of [
-    'import { helper } from "./helper.js"; import { lib } from "@knpkv/lib"',
+    'import { lib } from "@knpkv/lib"',
     '// import value from "../../consumer/src/entry.js"',
     "const text = 'import(\"../../consumer/src/entry.js\")'",
     "import(prefix + name)"
   ])
-    assert.deepEqual(crossPackageImportTargets("packages/base/src/index.ts", source, directories), [])
+    assert.deepEqual(relativeImportTargets(importer, source), [])
+})
+
+test("cross-package entry closure covers helper chains and cycles, while excluding unrelated same-package files", () => {
+  const directories = ["packages/consumer", "packages/base", "packages/jira-cli"]
+  const sources = new Map([
+    [
+      "packages/consumer/test/import.test.ts",
+      'import { value } from "../../base/src/entry.js"; import config from "../../jira-cli/vitest.config.js"'
+    ],
+    ["packages/base/src/entry.ts", 'export { value } from /* helper */ "./directory"'],
+    ["packages/base/src/directory/index.ts", 'export { value } from "../helper.mjs"'],
+    ["packages/base/src/helper.mts", 'import config from "./settings.json"; export { value } from "./cycle.cjs"'],
+    ["packages/base/src/cycle.cts", 'export { value } from "./entry.js"'],
+    ["packages/base/src/private.ts", 'import "./other-private.js"'],
+    ["packages/base/src/other-private.ts", "export {}"],
+    ["packages/base/src/settings.json", "{}"],
+    ["packages/jira-cli/vitest.config.ts", "export default {}"],
+    ["packages/jira-cli/src/AttachmentService.ts", "export {}"]
+  ])
+  const imports = new Map([...sources].map(([file, source]) => [file, relativeImportTargets(file, source)]))
+  const closure = crossPackageImportClosure(imports, directories, [...sources.keys()])
+  assert.deepEqual(closure, [
+    "packages/base/src/cycle.cts",
+    "packages/base/src/directory/index.ts",
+    "packages/base/src/entry.ts",
+    "packages/base/src/helper.mts",
+    "packages/base/src/settings.json",
+    "packages/jira-cli/vitest.config.ts"
+  ])
+  assert.equal(planPrecommit(["packages/base/src/helper.mts"], {}, 1, closure).mode, "full")
+  assert.equal(planPrecommit(["packages/base/src/private.ts"], {}, 1, closure).mode, "changed")
+  assert.equal(planPrecommit(["packages/jira-cli/src/AttachmentService.ts"], {}, 1, closure).mode, "changed")
+  assert.deepEqual(
+    crossPackageImportClosure(
+      new Map([["packages/base/src/private.ts", ["packages/base/src/other-private.js"]]]),
+      directories,
+      [...sources.keys()]
+    ),
+    []
+  )
+  assert.deepEqual(
+    crossPackageImportClosure(
+      new Map([
+        ["packages/consumer/src/index.ts", ["packages/base"]],
+        ["packages/base/index.ts", ["packages/base/src/entry.js"]]
+      ]),
+      directories,
+      [...sources.keys(), "packages/base/index.ts"]
+    ),
+    ["packages/base/index.ts", "packages/base/src/entry.ts"]
+  )
+})
+
+for (const [language, entryExtension, helperExtension, entrySource, helperSource] of [
+  ["CJS", "cjs", "js", 'exports.value = require("./value.shared").value;', "exports.value = 2;"],
+  ["TS", "ts", "ts", 'export { value } from "./value.shared";', "export const value = 2;"]
+]) {
+  test(`dotted ${language} helper remains in a cross-package entry closure`, () => {
+    const entry = `packages/base/src/entry.${entryExtension}`
+    const helper = `packages/base/src/value.shared.${helperExtension}`
+    const sources = new Map([
+      ["packages/consumer/test/value.test.mjs", `import { value } from "../../base/src/entry.${entryExtension}"`],
+      [entry, entrySource],
+      [helper, helperSource],
+      ["packages/base/src/private.shared.ts", "export {}"]
+    ])
+    const imports = new Map([...sources].map(([file, source]) => [file, relativeImportTargets(file, source)]))
+    const closure = crossPackageImportClosure(imports, ["packages/base", "packages/consumer"], [...sources.keys()])
+    assert.deepEqual(closure, [entry, helper].toSorted())
+    assert.equal(planPrecommit([helper], {}, 1, closure).mode, "full")
+    assert.equal(planPrecommit(["packages/base/src/private.shared.ts"], {}, 1, closure).mode, "changed")
+  })
+}
+
+test("dotted direct seeds and directory edges try extensions and indexes while retaining exact leaves", () => {
+  const files = [
+    "packages/base/src/value.shared.ts",
+    "packages/base/src/value.shared.js",
+    "packages/base/src/fixtures.shared/index.ts",
+    "packages/base/src/exact.shared",
+    "packages/base/src/data.json",
+    "packages/base/src/styles.css",
+    "packages/base/src/private.shared.ts"
+  ]
+  const imports = new Map([
+    [
+      "packages/consumer/src/index.ts",
+      [
+        "packages/base/src/value.shared",
+        "packages/base/src/exact.shared",
+        "packages/base/src/data.json",
+        "packages/base/src/styles.css"
+      ]
+    ],
+    ["packages/base/src/value.shared.ts", ["packages/base/src/fixtures.shared"]]
+  ])
+  const closure = crossPackageImportClosure(imports, ["packages/base", "packages/consumer"], files)
+  assert.deepEqual(closure, files.filter((file) => !file.endsWith("private.shared.ts")).toSorted())
+  const directDirectory = crossPackageImportClosure(
+    new Map([["packages/consumer/src/index.ts", ["packages/base/src/fixtures.shared"]]]),
+    ["packages/base", "packages/consumer"],
+    files
+  )
+  assert.deepEqual(directDirectory, ["packages/base/src/fixtures.shared/index.ts"])
 })
 
 test("changed mode always schedules the existing repository static guards", () => {

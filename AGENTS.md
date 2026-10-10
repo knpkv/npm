@@ -116,8 +116,9 @@ script portability, workspace-export and security-documentation checks repo-wide
 edits also run Effect tsconfig coverage.
 
 Root configs, lockfiles, workspace definitions, `scripts/`, `ast-grep/`, `.github/`, `.husky/`, vendored
-references, patches and package Vitest/tsconfig files run the full gate. Any edit inside a package
-that another workspace imports through a relative JS/TS path also runs full, covering private helpers.
+references, patches and package Vitest/tsconfig files run the full gate. Files reached by cross-package
+relative JS/TS imports, including their same-package relative-import and re-export closure, also run full.
+Other files in those packages stay incremental. Standard source extensions and directory indexes are resolved.
 TypeScript parses literal specifiers, including comments; generated/vendor importers are excluded.
 Computed/dynamic paths, custom loaders, arbitrary file reads and non-JS/TS importers are not followed.
 `PRECOMMIT_MODE=full` forces it; `PRECOMMIT_MODE=changed` cannot

@@ -122,16 +122,8 @@ export const assertStagedInputs = Effect.fn("stagedInputs.assertStagedInputs")(f
   if (reason !== undefined) return yield* new StagedInputsError({ reason })
 })
 
-/** Parse literal specifiers, including comments. Any edit in a cross-imported package selects full to cover its helpers. */
-export const crossPackageImportTargets = (
-  importer: string,
-  source: string,
-  directories: ReadonlyArray<string>
-): ReadonlyArray<string> => {
-  const ownerOf = (file: string) =>
-    directories.find((directory) => file === directory || file.startsWith(`${directory}/`))
-  const owner = ownerOf(importer)
-  if (owner === undefined) return []
+/** Parse literal relative imports and re-exports, retaining comments and emitted JS spellings. */
+export const relativeImportTargets = (importer: string, source: string): ReadonlyArray<string> => {
   const targets = new Set<string>()
   for (const { fileName: specifier } of TypeScript.preProcessFile(source, true, true).importedFiles) {
     if (!specifier.startsWith("./") && !specifier.startsWith("../")) continue
@@ -141,32 +133,85 @@ export const crossPackageImportTargets = (
       if (segment === "..") resolved.pop()
       else if (segment !== "." && segment !== "") resolved.push(segment)
     }
-    const targetOwner = ownerOf(resolved.join("/"))
-    if (targetOwner !== undefined && targetOwner !== owner) targets.add(targetOwner)
+    targets.add(resolved.join("/"))
   }
   return [...targets]
 }
 
-/** Scan tracked workspace JS/TS sources, excluding generated/vendor trees, without starting a build or test runner. */
+/** Resolve standard source extensions and directory indexes against Git's file inventory, without loading modules. */
+const importCandidates = (target: string, files: ReadonlySet<string>): ReadonlyArray<string> => {
+  const candidates = [target]
+  const sourceExtensions = ["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs", "json", "d.ts", "d.mts", "d.cts"]
+  for (const extension of sourceExtensions) candidates.push(`${target}.${extension}`)
+  for (const extension of sourceExtensions) candidates.push(`${target}/index.${extension}`)
+  const emitted = /\.(mjs|cjs|jsx?)$/u.exec(target)
+  if (emitted !== null) {
+    const base = target.slice(0, -emitted[0].length)
+    const extensions = emitted[1] === "mjs" ?
+      ["mts", "d.mts"] :
+      emitted[1] === "cjs"
+      ? ["cts", "d.cts"]
+      : ["ts", "tsx", "d.ts"]
+    for (const extension of extensions) candidates.push(`${base}.${extension}`)
+  }
+  return candidates.filter((candidate) => files.has(candidate))
+}
+
+/** Cross-package targets seed a same-package relative-import closure; unrelated files in that package stay incremental. */
+export const crossPackageImportClosure = (
+  imports: ReadonlyMap<string, ReadonlyArray<string>>,
+  directories: ReadonlyArray<string>,
+  trackedFiles: ReadonlyArray<string>
+): ReadonlyArray<string> => {
+  const owners = [...directories].sort((left, right) => right.length - left.length)
+  const ownerOf = (file: string) => owners.find((directory) => file.startsWith(`${directory}/`))
+  const files = new Set(trackedFiles)
+  const edges = new Map<string, ReadonlyArray<string>>()
+  const pending: Array<string> = []
+  for (const [importer, targets] of imports) {
+    const owner = ownerOf(importer)
+    if (owner === undefined) continue
+    const local: Array<string> = []
+    for (const target of targets.flatMap((target) => importCandidates(target, files))) {
+      const targetOwner = ownerOf(target)
+      if (targetOwner === undefined) continue
+      if (targetOwner === owner) local.push(target)
+      else pending.push(target)
+    }
+    edges.set(importer, local)
+  }
+  const closure = new Set<string>()
+  while (pending.length > 0) {
+    const file = pending.pop()
+    if (file === undefined || closure.has(file)) continue
+    closure.add(file)
+    for (const target of edges.get(file) ?? []) pending.push(target)
+  }
+  return [...closure].sort()
+}
+
+/** Scan tracked workspace sources. Keep deleted files' HEAD imports so deleting or renaming a reachable helper stays full. */
 export const crossPackageInputs = Effect.fn("stagedInputs.crossPackageInputs")(function*(
   spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
   root: string
 ) {
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
-  const directories = (yield* workspaceDirectories(spawner, root)).sort((left, right) => right.length - left.length)
-  const files = yield* gitPaths(spawner, root, ["ls-files", "-z"])
-  const targets = new Set<string>()
+  const directories = yield* workspaceDirectories(spawner, root)
+  const current = yield* gitPaths(spawner, root, ["ls-files", "-z"])
+  const previous = yield* gitPaths(spawner, root, ["ls-tree", "-r", "--name-only", "-z", "HEAD"])
+  const files = [...new Set([...current, ...previous])]
+  const imports = new Map<string, ReadonlyArray<string>>()
   for (const file of files) {
     if (
       !directories.some((directory) => file.startsWith(`${directory}/`)) ||
       !/\.(?:[cm]?[jt]sx?)$/u.test(file) || /\/(?:generated|vendor|node_modules|dist)\//u.test(file)
     ) continue
     const absolute = path.join(root, file)
-    if (!(yield* fs.exists(absolute))) continue
-    for (const target of crossPackageImportTargets(file, yield* fs.readFileString(absolute), directories)) {
-      targets.add(target)
-    }
+    const source = (yield* fs.exists(absolute)) ?
+      yield* fs.readFileString(absolute) :
+      yield* spawner.string(ChildProcess.make("git", ["show", `HEAD:${file}`], { cwd: root }))
+    imports.set(file, relativeImportTargets(file, source))
   }
-  return [...targets]
+  return crossPackageImportClosure(imports, directories, files)
 })

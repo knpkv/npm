@@ -70,14 +70,12 @@ export const planPrecommit = (
   stagedFiles: ReadonlyArray<string>,
   environment: PrecommitEnvironment = {},
   maxWorkers: number = 1,
-  sharedPackages: ReadonlyArray<string> = []
+  sharedFiles: ReadonlyArray<string> = []
 ): PrecommitPlan => {
   const files = Array.from(new Set(stagedFiles.map(normalizePath).filter((file) => file.length > 0))).sort()
   if (files.length === 0) return { commands: [], mode: "none", reason: "no staged files" }
 
-  const repositoryInput = files.find((file) =>
-    isRepositoryInput(file) || sharedPackages.some((directory) => file.startsWith(`${directory}/`))
-  )
+  const repositoryInput = files.find((file) => isRepositoryInput(file) || sharedFiles.includes(file))
   if (environment.PRECOMMIT_MODE === "full" || repositoryInput !== undefined) {
     return {
       commands: [
