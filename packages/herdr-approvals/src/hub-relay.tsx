@@ -15,7 +15,13 @@
  * @module
  */
 import type { ObjectRef } from "@knpkv/relay/wire"
-import { type RelayConversations, RelayConversationPanel, useRelayStatus } from "@knpkv/relay-product/client"
+import {
+  type RelayConversations,
+  RelayConversationPanel,
+  type RelayStatusView,
+  useRelayConversation,
+  useRelayStatus
+} from "@knpkv/relay-product/client"
 import { RelayLauncher, useRelayPresentation, useRelayShortcut, useRelaySummon } from "@knpkv/rly/patterns"
 import { Button, Text } from "@knpkv/rly/primitives"
 import { type ReactElement, useRef, useState } from "react"
@@ -49,6 +55,24 @@ export const watchRelayPage = (
   }
 }
 
+/**
+ * What the closed launcher's live region says: the status words, re-said only when what Relay is doing changes.
+ * While a run works, its words flip between "Reading…", "Answering…" and "Working…" at every tool boundary;
+ * the words beside the mark follow them, but each run is announced once, when it starts. A message waiting to
+ * be sent ("Sending…") is not a run, so the run it starts is announced too.
+ */
+const useSpokenStatus = (
+  status: RelayStatusView,
+  runIds: ReadonlyArray<string>
+): { readonly key: string; readonly words: string } => {
+  const key =
+    status.activity === "working" && runIds.length > 0 ? `run:${JSON.stringify(runIds)}` : (status.words ?? "")
+  const [spoken, setSpoken] = useState({ key, words: status.words ?? "" })
+  // Stored during render when the key changes, so the region never renders the old words for a new state.
+  if (spoken.key !== key) setSpoken({ key, words: status.words ?? "" })
+  return spoken.key === key ? spoken : { key, words: status.words ?? "" }
+}
+
 /** Relay's launcher, status and panel for the masthead. */
 export const HubRelay = ({
   relay,
@@ -71,6 +95,7 @@ export const HubRelay = ({
     shortcut
   })
   const status = useRelayStatus(relay.conversations, relay.conversation, open)
+  const spoken = useSpokenStatus(status, useRelayConversation(relay.conversations, relay.conversation).runIds)
   return (
     <div className="fleet-shell-relay">
       <RelayLauncher
@@ -94,7 +119,8 @@ export const HubRelay = ({
       )}
       {/* The status is announced here only while the panel is closed; once open, its transcript speaks. */}
       <span aria-live="polite" className="fleet-shell-relay-live" role="status">
-        {open ? "" : (status.words ?? "")}
+        {/* Keyed by what is announced: a new run with the same words is a new node, so it is said again. */}
+        {open ? null : <span key={spoken.key}>{spoken.words}</span>}
       </span>
       {open ? (
         <RelayConversationPanel
