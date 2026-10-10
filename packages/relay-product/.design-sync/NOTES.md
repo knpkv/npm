@@ -41,8 +41,9 @@ A UI component that should appear here must first be public on one of those entr
   aggregator every component is "another package" -> fork `overrides/dts.mjs`: files outside
   `node_modules` count as own API.
 - Every card threw `[SCHEDULER_MISSING]` -> `@effect/atom-react` imports `scheduler` directly for
-  low-priority registry callbacks; the converter shims `scheduler` to a throw -> `app/tsconfig.json`
-  maps `scheduler` to the real package through the converter's tsconfig-paths hook, which runs before
+  low-priority registry callbacks; the converter shims `scheduler` to a throw ->
+  `app/esbuild-paths.json` (tsconfig-shaped, `cfg.tsconfig`; not named tsconfig.json so the repo's
+  tsconfig coverage check skips it) maps `scheduler` to the real package through the converter's tsconfig-paths hook, which runs before
   the shim. A second scheduler instance is harmless here: atom-react only schedules its own callbacks.
 - Previews threw "Sync adapter can only throw schema errors" -> a preview decoded fixtures with its own
   copy of `effect` against schemas from the bundle's copy -> previews never call `Schema.decode*` on a
