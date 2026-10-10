@@ -294,8 +294,8 @@ export const writePreV2WorkFile = (
 }
 
 /**
- * Adds `count` running legacy dispatches with 4 KiB handoffs to a pre-v2 file,
- * enough to exceed the decision ledger's byte capacity when migrated.
+ * Adds `count` running legacy dispatches with maximum-length handoff summaries.
+ * Three-byte UTF-8 characters reach the migrated ledger's byte bound with fewer rows.
  */
 export const addOversizedLegacyHandoffs = (database: DatabaseSync, count: number): void => {
   database.exec("BEGIN")
@@ -305,7 +305,7 @@ export const addOversizedLegacyHandoffs = (database: DatabaseSync, count: number
       ...legacyHandoff,
       id: `handoff:legacy-capacity:${String(index)}`,
       occurredAt,
-      summary: "x".repeat(4_096)
+      summary: "界".repeat(4_096)
     }
     const dispatchRequestId = `dispatch:legacy-capacity:${String(index)}`
     const dispatchLineage = [`dispatch:legacy-luna:${String(index)}`]
