@@ -58,6 +58,17 @@ describe("Connect families", () => {
     expect(markup).not.toContain("agent-independent")
   })
 
+  it("groups siblings of the same unlisted primary without inventing a live parent", () => {
+    const one = agent("agent-one", "ready", "agent-missing", "pair")
+    const two = agent("agent-two", "working", "agent-missing", "review")
+    const markup = renderToStaticMarkup(directory({ agents: [one, two] }))
+    expect(markup.match(/class="connect-family"/g)).toHaveLength(1)
+    expect(markup).toContain("Primary not listed")
+    expect(markup).toContain("Pair partner of")
+    expect(markup).toContain("Reviewer of")
+    expect(markup).not.toContain('data-agent-key="SER8:agent-missing"')
+  })
+
   it("names a missing primary and holds stale creatures still", () => {
     const markup = renderToStaticMarkup(
       directory({ agents: [agent("agent-orphan", "ready", "agent-absent")], stale: true })
@@ -78,9 +89,9 @@ describe("Connect families", () => {
     const root = createRoot(host)
     try {
       await act(async () => root.render(directory({ agents: [primary, ...children, needy] })))
-      expect(host.querySelectorAll(".connect-agent")).toHaveLength(5)
+      expect(host.querySelectorAll(".connect-agent")).toHaveLength(4)
       const more = host.querySelector<HTMLButtonElement>(".connect-family-more")
-      expect(more?.textContent).toBe("Show 2 more")
+      expect(more?.textContent).toBe("Show 3 more")
       await act(async () => more?.click())
       expect(host.querySelectorAll(".connect-agent")).toHaveLength(7)
       await act(async () => root.render(directory({ agents: [...children, needy, primary] })))
@@ -110,7 +121,19 @@ describe("Connect families", () => {
     expect(markup.match(/class="connect-family"/g)).toHaveLength(1)
     expect(markup.match(/data-context="true"/g)).toHaveLength(3)
     expect(markup).not.toContain('data-depth="3"')
-    expect(markup).toContain('Reviewer for <span class="connect-token">agent-grandchild</span>')
+    expect(markup).toContain('Reviewer of <span class="connect-token">agent-grandchild</span>')
+  })
+
+  it("blocks repeated own identities but keeps a child with an ambiguous parent openable", () => {
+    const duplicate = Schema.decodeUnknownSync(ConnectAgent)({ ...primary, host: "alpha" })
+    const child = agent("agent-child", "working", primary.id)
+    const markup = renderToStaticMarkup(directory({ agents: [primary, duplicate, child] }))
+    expect(markup.match(/disabled=""/g)).toHaveLength(2)
+    expect(markup.match(/Can&#x27;t open: this host lists the same agent identity more than once/g)).toHaveLength(2)
+    const childButton = /<button[^>]*data-agent-key="ALPHA:agent-child"[^>]*>/.exec(markup)?.[0]
+    expect(childButton).toBeDefined()
+    expect(childButton).not.toContain("disabled")
+    expect(markup).toContain("Ambiguous ownership")
   })
 
   it("opens the filter disclosure and clears its active scope", async () => {

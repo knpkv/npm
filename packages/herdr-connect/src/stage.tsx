@@ -1,5 +1,5 @@
 /**
- * An agent's stage and the cast strip that opens it: the character large on a field in its own hues, its
+ * An agent's stage and the cast strip that opens it: the character large on a field in its state tone, its
  * work as what it is saying, quiet details, and the way into its terminal.
  *
  * A row or a cast member opens the stage; Open terminal leaves it for the terminal. The stage is an rly
@@ -7,21 +7,12 @@
  *
  * @module
  */
-import { PortalProvider } from "@knpkv/rly/foundations"
+import { Icon, PortalProvider } from "@knpkv/rly/foundations"
+import { workNavigationHref } from "@knpkv/herdr-work/navigation"
 import { Button, Sheet } from "@knpkv/rly/primitives"
-import {
-  type CSSProperties,
-  type KeyboardEvent,
-  type MouseEvent,
-  type PointerEvent,
-  type ReactElement,
-  useId,
-  useRef,
-  useState
-} from "react"
+import { type KeyboardEvent, type MouseEvent, type ReactElement, useId, useRef, useState } from "react"
 
-import { AgentStateLabel, agentStageLead, agentStatePresentation } from "./agent-state.js"
-import { agentCharacter } from "./character.js"
+import { AgentStateLabel, agentStatePresentation } from "./agent-state.js"
 import { Creature } from "./creature.js"
 import type { ConnectAgent } from "./model.js"
 import { arrangePins, type Pins } from "./pins.js"
@@ -29,6 +20,7 @@ import {
   AgentStateGlyph,
   connectAgentFamilies,
   connectAgentKey,
+  connectAgentIdentityAmbiguous,
   connectLineageRows,
   connectRelationLabel
 } from "./view.js"
@@ -61,7 +53,7 @@ export const AgentCast = ({
   // One tab stop for the whole strip, so the cast doesn't double every row's stop; arrows move along it.
   // The stop is held by agent key, so a poll that re-sorts the cast keeps exactly one, falling back to the first.
   const [active, setActive] = useState<string | null>(null)
-  const keys = cast.map(connectAgentKey)
+  const keys = cast.filter((agent) => !connectAgentIdentityAmbiguous(agents, agent)).map(connectAgentKey)
   const activeKey = active !== null && keys.includes(active) ? active : (keys[0] ?? null)
   const move = (event: KeyboardEvent<HTMLElement>): void => {
     const step = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0
@@ -94,6 +86,7 @@ export const AgentCast = ({
                 key={connectAgentKey(agent)}
                 onClick={() => onOpen(agent)}
                 type="button"
+                disabled={connectAgentIdentityAmbiguous(agents, agent)}
               >
                 <Creature
                   arrived={arrivals.has(connectAgentKey(agent))}
@@ -106,9 +99,6 @@ export const AgentCast = ({
                 <AgentStateGlyph state={agent.state} />
                 <span className="connect-visually-hidden">{agentStatePresentation(agent.state).word}, </span>
                 <span className="connect-cast-name">{agent.name}</span>
-                <small>
-                  {agent.relationship === undefined ? "Primary" : connectRelationLabel(agent.relationship.relation)}
-                </small>
               </button>
             ))}
         </div>
@@ -195,13 +185,15 @@ const AgentLineage = ({
   )
   return (
     <section aria-label="Lineage" className="connect-stage-lineage">
-      <h2>{agent.relationship?.relation === "pair" ? "Paired with" : "This family"}</h2>
+      <h2>{agent.relationship?.relation === "pair" ? "Paired with" : "Crew"}</h2>
       {row?.issue === "unknown_parent" ? <p>Primary not listed: {agent.relationship?.parentAgentId}</p> : null}
       {row?.issue === "cross_host" ? <p>Cross-host parent. Relationship unavailable.</p> : null}
       {row?.issue === "cycle" ? <p>Cyclic relationship. Lineage unavailable.</p> : null}
       {row?.issue === "ambiguous" ? <p>Ambiguous ownership. Lineage unavailable.</p> : null}
       {ancestors.map((ancestor, index) => member(ancestor, index === 0 ? "Primary" : "Ancestor"))}
-      {ancestors.length === 0 && children.length === 0 && row?.issue === null ? <p>Independent agent</p> : null}
+      {ancestors.length === 0 && children.length === 0 && row?.issue === null ? (
+        <p>No crew. This agent has no children.</p>
+      ) : null}
       {children.filter((child) => child.relationship?.relation === "pair").length === 0 ? null : (
         <nav aria-label="Pair partners" className="connect-stage-crew">
           {children
@@ -228,25 +220,6 @@ const AgentLineage = ({
   )
 }
 
-const MOTES: ReadonlyArray<string> = ["one", "two", "three", "four", "five"]
-
-/**
- * Shifts the stage's field a little against the pointer, for depth. Written to a custom property the
- * stylesheet only reads while motion is allowed, so reduced motion and a stale stage stay put.
- */
-const parallax = (event: PointerEvent<HTMLDivElement>): void => {
-  const box = event.currentTarget.getBoundingClientRect()
-  if (box.width === 0 || box.height === 0) return
-  event.currentTarget.style.setProperty(
-    "--connect-stage-px",
-    `${String(((event.clientX - box.left) / box.width - 0.5) * -24)}px`
-  )
-  event.currentTarget.style.setProperty(
-    "--connect-stage-py",
-    `${String(((event.clientY - box.top) / box.height - 0.5) * -18)}px`
-  )
-}
-
 /** The open agent's stage, or nothing; closing it hands focus back to whatever opened it. */
 export const AgentStage = ({
   agent,
@@ -266,7 +239,7 @@ export const AgentStage = ({
   readonly workSnapshots?: WorkSnapshots | null
   /** The open agent's goal on the Work board, linked from its stage when there is exactly one. */
   readonly workGoal: ConnectWorkGoalResolution
-  /** Whether this agent is the one this device keeps pinned. */
+  /** Whether this agent is pinned on this device. */
   readonly pinned: boolean
   readonly onPinChange: (pinned: boolean) => void
   /** Its direct children, used when a complete directory is not supplied. */
@@ -276,62 +249,69 @@ export const AgentStage = ({
   readonly onOpenTerminal: (agent: ConnectAgent) => void
   readonly stale: boolean
 }): ReactElement => {
-  const hues = agent === null ? [0, 0, 0] : agentCharacter(agent.host, String(agent.id)).hues
-  const field: CSSProperties & Record<"--connect-stage-h1" | "--connect-stage-h2" | "--connect-stage-h3", string> = {
-    "--connect-stage-h1": String(hues[0]),
-    "--connect-stage-h2": String(hues[1]),
-    "--connect-stage-h3": String(hues[2])
-  }
   return (
     // Its own portal target: Connect runs standalone and inside the hub, and neither provides one.
     <PortalProvider>
       <Sheet.Root onOpenChange={(open) => (open ? undefined : onClose())} open={agent !== null}>
         {agent === null ? null : (
-          <Sheet.Content className="connect-stage-sheet" closeLabel="Close" title={agent.name}>
-            <Sheet.Body
-              className="connect-stage"
-              data-stale={stale ? "" : undefined}
-              onPointerMove={parallax}
-              style={field}
-            >
-              {/* Drifting light in the agent's hues; it holds still with reduced motion or a stale directory. */}
-              <div aria-hidden="true" className="connect-stage-field">
-                {MOTES.map((mote) => (
-                  <span className="connect-stage-mote" key={mote} />
-                ))}
-              </div>
-              <div className="connect-stage-hero">
+          <Sheet.Content
+            className="connect-stage-sheet"
+            closeLabel="Close"
+            description={`${agent.kind} on ${agent.host}`}
+            title={agent.name}
+          >
+            <Sheet.Body className="connect-stage" data-stale={stale ? "" : undefined}>
+              <div className="connect-stage-hero" data-tone={agentStatePresentation(agent.state).tone}>
                 <Creature host={agent.host} id={String(agent.id)} size="stage" stale={stale} state={agent.state} />
               </div>
-              <p className="connect-stage-speech">
-                <span className="connect-stage-lead">{agentStageLead(agent.state, stale)}</span>
-                <span className="connect-stage-work">{agent.work}</span>
-              </p>
-              <p className="connect-stage-details">
+              <p className="connect-stage-speech" data-tone={agentStatePresentation(agent.state).tone}>
+                {stale ? "Last known: " : null}
                 <AgentStateLabel state={agent.state} />
-                <span>
-                  {agent.kind} on {agent.host}
-                </span>
+                {stale ? null : (
+                  <span className="connect-stage-work">
+                    {agentStatePresentation(agent.state).icon === "clock" ? " for you on " : " on "}
+                    {agent.work}
+                  </span>
+                )}
+              </p>
+              <div className="connect-stage-goal-state">
                 {workGoal._tag === "available" ? (
                   <a className="connect-stage-goal" href={workGoal.href}>
-                    Work goal: {workGoal.title}
+                    Goal: {workGoal.title} <Icon decorative name="arrow-right" size="small" />
                   </a>
-                ) : null}
-              </p>
-              <AgentLineage
-                key={connectAgentKey(agent)}
-                agent={agent}
-                agents={agents ?? [agent, ...crew]}
-                onOpen={onOpen}
-                stale={stale}
-              />
+                ) : workGoal._tag === "missing" ? (
+                  <p>No Work goal linked</p>
+                ) : workGoal._tag === "ambiguous" ? (
+                  <>
+                    <a className="connect-stage-goal" href={workNavigationHref({ goalId: null, window: "now" })}>
+                      Choose one in Work <Icon decorative name="arrow-right" size="small" />
+                    </a>
+                    <p>Several Work goals match this agent</p>
+                  </>
+                ) : (
+                  <p>Work goals unavailable right now</p>
+                )}
+              </div>
+              <dl className="connect-stage-details">
+                <dt>Host</dt>
+                <dd>{agent.host}</dd>
+                <dt>Kind</dt>
+                <dd>{agent.kind}</dd>
+                <dt>Parent</dt>
+                <dd>{agent.relationship?.parentAgentId ?? "None, primary"}</dd>
+                <dt>Last active</dt>
+                <dd>{new Date(agent.lastActivityAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</dd>
+              </dl>
               <section aria-label="Pull requests" className="connect-stage-prs">
                 <h2>
                   Pull requests
                   {workSnapshots === null ? (
                     ""
                   ) : (
-                    <span>owned {String(connectOwnedPullRequests(agent, workSnapshots).length)}</span>
+                    <span>
+                      <span aria-hidden="true" className="connect-row-separator" />
+                      owned {String(connectOwnedPullRequests(agent, workSnapshots).length)}
+                    </span>
                   )}
                 </h2>
                 {workSnapshots === null ? (
@@ -347,14 +327,20 @@ export const AgentStage = ({
                   </>
                 )}
               </section>
+              <AgentLineage
+                key={connectAgentKey(agent)}
+                agent={agent}
+                agents={agents ?? [agent, ...crew]}
+                onOpen={onOpen}
+                stale={stale}
+              />
             </Sheet.Body>
             <Sheet.Footer className="connect-stage-actions">
-              <Button onClick={() => onOpenTerminal(agent)} variant="primary">
-                Open terminal
-              </Button>
-              {/* The label says the action; no aria-pressed as well, or it reads "Unpin, pressed". */}
-              <Button onClick={() => onPinChange(!pinned)} variant="secondary">
+              <Button leadingIcon="pin" onClick={() => onPinChange(!pinned)} size="default" variant="secondary">
                 {pinned ? "Unpin" : "Pin"}
+              </Button>
+              <Button onClick={() => onOpenTerminal(agent)} size="default" variant="primary">
+                Open terminal
               </Button>
             </Sheet.Footer>
           </Sheet.Content>

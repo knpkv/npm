@@ -59,27 +59,36 @@ test.describe("Connect stage", () => {
     expect(await width()).toBeLessThanOrEqual(320)
   })
 
-  // The field's light drifts only when the reader allows motion.
-  test("drifts its field only when motion is allowed", async ({ page }) => {
-    const motes = () =>
-      page
-        .locator(".connect-stage-mote")
-        .evaluateAll(
-          (nodes) =>
-            nodes.flatMap((node) => node.getAnimations()).filter((animation) => animation.playState === "running")
-              .length
-        )
-    for (
-      const [motion, expected] of [
-        ["no-preference", 5],
-        ["reduce", 0]
-      ] satisfies ReadonlyArray<readonly ["no-preference" | "reduce", number]>
-    ) {
+  // A desktop width must not shrink the sheet at the larger end of Rly's full-width phone breakpoint.
+  test("stage remains full width at the phone breakpoint", async ({ page }) => {
+    for (const width of [480, 540, 640]) {
+      await page.setViewportSize({ height: 844, width })
+      await page.goto("/")
+      await page.locator(".connect-agent", { hasText: "fixture-pane" }).click()
+      await expect(page.getByRole("dialog", { name: "fixture-pane" })).toBeVisible()
+      expect((await page.locator(".connect-stage-sheet").boundingBox())?.width).toBe(width)
+      expect(await page.locator(".connect-stage").evaluate((node) => getComputedStyle(node).paddingInlineStart)).toBe(
+        "16px"
+      )
+    }
+  })
+
+  // The design confines the character's colour to its hero, while the character still owns opt-in motion.
+  test("bounds the colour field and animates only the character when motion is allowed", async ({ page }) => {
+    for (const motion of ["no-preference", "reduce"] satisfies ReadonlyArray<"no-preference" | "reduce">) {
       await page.emulateMedia({ reducedMotion: motion })
       await page.goto("/")
       await page.locator(".connect-agent", { hasText: "fixture-pane" }).click()
       await expect(page.getByRole("dialog", { name: "fixture-pane" })).toBeVisible()
-      expect(await motes()).toBe(expected)
+      const field = page.locator(".connect-stage-hero")
+      expect((await field.boundingBox())?.height).toBe(176)
+      expect(await field.evaluate((node) => getComputedStyle(node).backgroundImage)).toBe("none")
+      const animations = await field.locator(".connect-creature").evaluate((node) =>
+        node.getAnimations({ subtree: true }).filter((animation) => animation.playState === "running").length
+      )
+      if (motion === "reduce") expect(animations).toBe(0)
+      else expect(animations).toBeGreaterThan(0)
+      await expect(page.locator(".connect-stage-field")).toHaveCount(0)
     }
   })
 

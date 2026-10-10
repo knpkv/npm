@@ -98,7 +98,7 @@ describe("AgentStage crew", () => {
         )
       )
       const link = document.querySelector<HTMLAnchorElement>("a.connect-stage-goal")
-      expect(link?.textContent).toBe("Work goal: Pin more than one agent")
+      expect(link?.textContent?.trim()).toBe("Goal: Pin more than one agent")
       expect(link?.getAttribute("href")).toBe("/work/?goal=pr-knpkv_npm-752")
     } finally {
       await act(async () => root.unmount())
