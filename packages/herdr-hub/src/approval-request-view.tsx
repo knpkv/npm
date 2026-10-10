@@ -2,7 +2,7 @@ import type { JobPayload } from "@knpkv/herdr-fleet/model"
 import { useId, type ReactElement } from "react"
 import { approvalRequestFor, type ApprovalRequest } from "./approval-request.js"
 
-type ApprovalRequestDisclosureProps = {
+export type ApprovalRequestDisclosureProps = {
   readonly id: string
 } & ({ readonly payload: JobPayload } | { readonly request: ApprovalRequest })
 

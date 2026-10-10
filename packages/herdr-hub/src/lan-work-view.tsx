@@ -1,6 +1,7 @@
 import { Button, Field, Surface, Text } from "@knpkv/rly/primitives"
 import type { ReactElement } from "react"
-import { WorkBoard, type WorkSnapshotWindow, type WorkSnapshots } from "@knpkv/herdr-work"
+import type { WorkSnapshotWindow, WorkSnapshots } from "@knpkv/herdr-work/model"
+import { WorkBoard } from "@knpkv/herdr-work/react"
 
 /** The LAN boundary is a plain form so the pairing code never enters a URL or client storage. */
 export const LanWorkPairPage = ({ error }: { readonly error?: string }): ReactElement => (
