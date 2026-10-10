@@ -33,6 +33,7 @@ import {
   type TerminalOutputBoundary,
   writeTerminalOutput
 } from "./terminal-output.js"
+import { AgentCast, AgentStage } from "./stage.js"
 import {
   AgentDirectory,
   connectAgentKey,
@@ -960,6 +961,9 @@ export const ConnectSurface = ({
       : currentWork === null
         ? { _tag: "unavailable", reason: "snapshot_unavailable" }
         : resolveConnectWorkGoal(selected, currentWork)
+  // The agent whose stage is open: a row or the cast opens it, Open terminal leaves it for the terminal.
+  const [stageKey, setStageKey] = useState<string | null>(null)
+  const stageAgent = stageKey === null ? null : (agents.find((agent) => connectAgentKey(agent) === stageKey) ?? null)
   const selectAgent = (agent: ConnectAgent): void => {
     preferenceApplied.current = true
     const key = connectAgentKey(agent)
@@ -1164,18 +1168,34 @@ export const ConnectSurface = ({
             <Text tone="secondary">No agents running on any host.</Text>
           ) : null
         ) : (
-          <AgentDirectory
-            activityFilter={activityFilter}
-            agents={agents}
-            hostFilter={hostFilter}
-            onActivityFilter={setActivityFilter}
-            onHostFilter={setHostFilter}
-            onSelect={selectAgent}
-            query={query}
-            selectedKey={selectedKey}
-            silentHosts={offlineHosts}
-            stale={staleSince !== null}
-          />
+          <>
+            <AgentCast
+              agents={agents}
+              onOpen={(agent) => setStageKey(connectAgentKey(agent))}
+              stale={staleSince !== null}
+            />
+            <AgentDirectory
+              activityFilter={activityFilter}
+              agents={agents}
+              hostFilter={hostFilter}
+              onActivityFilter={setActivityFilter}
+              onHostFilter={setHostFilter}
+              onSelect={(agent) => setStageKey(connectAgentKey(agent))}
+              query={query}
+              selectedKey={selectedKey}
+              silentHosts={offlineHosts}
+              stale={staleSince !== null}
+            />
+            <AgentStage
+              agent={stageAgent}
+              onClose={() => setStageKey(null)}
+              onOpenTerminal={(agent) => {
+                setStageKey(null)
+                selectAgent(agent)
+              }}
+              stale={staleSince !== null}
+            />
+          </>
         )}
         {connection._tag === "connecting" ? (
           <small className="connect-status-message">Connecting to {connection.agent.name}…</small>

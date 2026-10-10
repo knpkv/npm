@@ -50,6 +50,7 @@ export const Creature = ({ host, id, size, stale = false, state }: CreatureProps
       aria-hidden="true"
       className="connect-creature"
       data-bucket={presentation.bucket}
+      data-size={size}
       data-stale={stale ? "" : undefined}
       data-tone={presentation.tone}
       focusable="false"

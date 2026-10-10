@@ -1232,14 +1232,26 @@
   }
 
   /* Working: a short light that travels round the body, never across the face. */
+  /*
+   * The dash is a share of the path (pathLength 100), so the stroke scales with the drawing: a non-scaling
+   * stroke would measure the dash in screen pixels and break one light into several on a large creature.
+   * Each size sets a width that draws about 2.5px.
+   */
   .connect-creature-orbit {
     fill: none;
     opacity: 0;
     stroke: var(--connect-creature-tone);
     stroke-dasharray: 9 91;
     stroke-linecap: round;
-    stroke-width: 2.5px;
-    vector-effect: non-scaling-stroke;
+    stroke-width: 7;
+  }
+
+  .connect-creature[data-size="cast"] .connect-creature-orbit {
+    stroke-width: 4.2;
+  }
+
+  .connect-creature[data-size="stage"] .connect-creature-orbit {
+    stroke-width: 1.3;
   }
 
   .connect-creature-breath,
@@ -1453,5 +1465,148 @@
 
   :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .connect-creature-halo {
     stroke: Highlight;
+  }
+
+  /* The cast: every agent as a character in one swipeable strip, the ones that need you first. */
+  .connect-cast {
+    display: flex;
+    gap: var(--rly-space-4);
+    margin-inline: calc(var(--rly-space-4) * -1);
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    padding: var(--rly-space-4);
+    scroll-snap-type: x mandatory;
+    scrollbar-width: none;
+  }
+
+  .connect-cast-member {
+    align-items: center;
+    background: transparent;
+    border: 0;
+    border-radius: var(--rly-radius-field);
+    color: inherit;
+    cursor: pointer;
+    display: grid;
+    flex: none;
+    font: inherit;
+    gap: var(--rly-space-2);
+    inline-size: 5.5rem;
+    justify-items: center;
+    min-block-size: 44px;
+    padding: var(--rly-space-8) var(--rly-space-4);
+    scroll-snap-align: start;
+  }
+
+  .connect-cast-name {
+    font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
+      var(--rly-type-label-font);
+    max-inline-size: 100%;
+    overflow: clip;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .connect-cast-member:hover {
+      background: var(--rly-color-surface-2);
+    }
+  }
+
+  .connect-cast-member:focus-visible {
+    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+    outline-offset: var(--rly-focus-ring-offset);
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .connect-cast-member:active {
+      scale: 0.97;
+      transition: scale var(--rly-motion-fast-duration) var(--rly-easing-out);
+    }
+  }
+
+  /* The stage: the character large on a deep field in its own hues, its work as what it is saying. */
+  .connect-stage {
+    align-content: end;
+    background:
+      radial-gradient(70% 55% at 50% 40%, oklch(55% 0.16 var(--connect-stage-h1) / 55%), transparent 70%),
+      radial-gradient(60% 50% at 15% 10%, oklch(42% 0.13 var(--connect-stage-h3) / 55%), transparent 70%),
+      radial-gradient(70% 60% at 90% 95%, oklch(40% 0.14 var(--connect-stage-h2) / 70%), transparent 70%),
+      oklch(18% 0.05 var(--connect-stage-h2));
+    color: oklch(97% 0.01 var(--connect-stage-h1));
+    display: grid;
+    gap: var(--rly-space-16);
+    padding: var(--rly-space-24) var(--rly-space-20);
+  }
+
+  .connect-stage-hero {
+    display: grid;
+    margin-block-end: calc(var(--rly-space-24) * -1);
+    place-items: end center;
+  }
+
+  .connect-stage-hero .connect-creature {
+    block-size: auto;
+    inline-size: min(15rem, 60vw);
+  }
+
+  .connect-stage-speech {
+    backdrop-filter: blur(12px);
+    background: oklch(100% 0 none / 8%);
+    border: 1px solid oklch(100% 0 none / 12%);
+    border-radius: var(--rly-radius-overlay);
+    display: grid;
+    gap: var(--rly-space-6);
+    justify-self: center;
+    margin: 0;
+    max-inline-size: 34em;
+    padding: var(--rly-space-16) var(--rly-space-20);
+    text-align: center;
+  }
+
+  .connect-stage-lead {
+    font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
+      var(--rly-type-label-font);
+    opacity: 0.75;
+  }
+
+  .connect-stage-work {
+    font-size: 1.2rem;
+    font-weight: 500;
+    line-height: 1.35;
+    overflow-wrap: break-word;
+  }
+
+  .connect-stage-details {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--rly-space-8) var(--rly-space-12);
+    justify-content: center;
+    margin: 0;
+    opacity: 0.8;
+  }
+
+  @media (forced-colors: active) {
+    .connect-stage {
+      background: Canvas;
+      color: CanvasText;
+    }
+
+    .connect-stage-speech {
+      backdrop-filter: none;
+      background: Canvas;
+      border-color: CanvasText;
+    }
+  }
+
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .connect-stage {
+    background: Canvas;
+    color: CanvasText;
+  }
+
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .connect-stage-speech {
+    backdrop-filter: none;
+    background: Canvas;
+    border-color: CanvasText;
   }
 }

@@ -55,6 +55,25 @@ export const agentStatePresentation = (state: string): AgentStatePresentation =>
   }
 }
 
+/**
+ * What an agent's stage says before its work, in the state's fixed words: "Working on" a working agent's
+ * work, "Waiting for you" when it waits on a person. A stale directory says when the state was last seen.
+ */
+export const agentStageLead = (state: string, stale: boolean): string => {
+  const presentation = agentStatePresentation(state)
+  if (stale) return `Last seen ${presentation.word.toLocaleLowerCase("en-US")}`
+  switch (presentation.bucket) {
+    case "working":
+      return "Working on"
+    case "needs-you":
+      return presentation.icon === "clock" ? "Waiting for you" : presentation.word
+    case "ready":
+      return "Ready"
+    case "finished":
+      return "Done"
+  }
+}
+
 /** The Status filter's name for a bucket. */
 export const agentBucketLabel = (bucket: AgentBucket): string => {
   switch (bucket) {
