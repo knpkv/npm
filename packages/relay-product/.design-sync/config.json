@@ -1,0 +1,113 @@
+{
+  "projectId": "1e2e7162-8e3e-4942-9713-150785fa1576",
+  "pkg": "@knpkv/relay-app-design-system",
+  "globalName": "RelayApp",
+  "shape": "package",
+  "buildCmd": "pnpm --filter \"@knpkv/herdr-hub...\" build",
+  "extraEntries": ["../../.design-sync/entries/styles.mjs"],
+  "extraFonts": ["../entries/geist-aliases.css"],
+  "componentSrcMap": {
+    "AgenticProduct": null,
+    "ContinuePullRequestConversationRequest": null,
+    "InvalidRelaySelectorState": null,
+    "ProductAuthorization": null,
+    "PullRequestContinuationMessage": null,
+    "PullRequestConversation": null,
+    "PullRequestConversationAmbiguous": null,
+    "PullRequestConversationContinuation": null,
+    "PullRequestConversationContinuationFailed": null,
+    "PullRequestConversationContinuationRejected": null,
+    "PullRequestConversationLocator": null,
+    "PullRequestConversationLookupFailed": null,
+    "PullRequestConversationNotFound": null,
+    "PullRequestConversationRedirectFailed": null,
+    "PullRequestThreadIdentity": null,
+    "RelayAuthenticationRequired": null,
+    "RelayAuthenticationUnavailable": null,
+    "RelayAuthorizationDenied": null,
+    "RelayDockState": null,
+    "RelayProduct": null,
+    "RelayProductAdapterContractError": null,
+    "RelayProductContinuationReceiptMismatch": null,
+    "RelayProductDockChromeBoundary": null,
+    "RelayProductDockInvariantViolation": null,
+    "RelayProductDockProviderMissing": null,
+    "RelayProductOperation": null,
+    "RelayProductSummonClaimed": null,
+    "RelaySelectorOption": null,
+    "RelaySelectorState": null,
+    "RelayState": null,
+    "RelayConversationPanel": "../../src/relay-conversation-panel.tsx",
+    "FleetShell": "../../../herdr-hub/src/shell-view.tsx",
+    "FleetWorkPanel": "../../../herdr-hub/src/shell-view.tsx",
+    "DashboardView": "../../../herdr-hub/src/dashboard-view.tsx",
+    "AgentActivity": "../../../herdr-hub/src/dashboard-view.tsx",
+    "ActivityHistory": "../../../herdr-hub/src/activity-history.tsx",
+    "NotificationPanel": "../../../herdr-hub/src/approval-app-view.tsx",
+    "ApprovalsCountdown": "../../../herdr-hub/src/countdown-view.tsx",
+    "RefreshStatus": "../../../herdr-hub/src/refresh-status.tsx",
+    "HubRelay": "../../../herdr-hub/src/hub-relay.tsx",
+    "ApprovalRequestDisclosure": "../../../herdr-hub/src/approval-request-view.tsx",
+    "LanWorkPage": "../../../herdr-hub/src/lan-work-view.tsx",
+    "LanWorkPairPage": "../../../herdr-hub/src/lan-work-view.tsx",
+    "ConnectSurface": "../../../herdr-connect/src/client.tsx",
+    "AgentStateLabel": "../../../herdr-connect/src/agent-state.tsx",
+    "Creature": "../../../herdr-connect/src/creature.tsx",
+    "AgentCast": "../../../herdr-connect/src/stage.tsx",
+    "AgentStage": "../../../herdr-connect/src/stage.tsx",
+    "PinnedAgents": "../../../herdr-connect/src/stage.tsx",
+    "ConnectLimits": "../../../herdr-connect/src/limits-view.tsx",
+    "UsageTab": "../../../herdr-connect/src/usage-view.tsx",
+    "UsageSurface": "../../../herdr-connect/src/usage-client.tsx",
+    "WorkBoard": "../../../herdr-work/src/view.tsx",
+    "RelayTransportFailed": null,
+    "RelayUnauthorized": null,
+    "SendIdUnavailable": null,
+    "ThemeProvider": null,
+    "PortalProvider": null
+  },
+  "entry": "./.design-sync/app/index.js",
+  "tsconfig": "./esbuild-paths.json",
+  "libOverrides": {
+    "dts.mjs": "components live in four workspace packages behind an aggregator entry; their own callback/aria props were dropped as inherited DOM noise"
+  },
+  "provider": {
+    "component": "ThemeProvider",
+    "props": {
+      "theme": "light"
+    },
+    "inner": {
+      "component": "PortalProvider"
+    }
+  },
+  "readmeHeader": ".design-sync/conventions.md",
+  "overrides": {
+    "AgentStage": {
+      "cardMode": "single"
+    },
+    "ApprovalsCountdown": {
+      "cardMode": "column"
+    },
+    "DashboardView": {
+      "cardMode": "single"
+    },
+    "FleetShell": {
+      "cardMode": "single"
+    },
+    "PinnedAgents": {
+      "cardMode": "single"
+    },
+    "RelayConversationPanel": {
+      "cardMode": "single"
+    },
+    "RelayProductDock": {
+      "cardMode": "single"
+    },
+    "RelayProductDockChrome": {
+      "cardMode": "single"
+    },
+    "RelayProductPanel": {
+      "cardMode": "single"
+    }
+  }
+}

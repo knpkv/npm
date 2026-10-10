@@ -1,0 +1,8 @@
+{
+  // Read by the design-sync converter's esbuild pass only. @effect/atom-react imports `scheduler`
+  // directly for low-priority registry callbacks; the converter otherwise shims it to a throw.
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": { "scheduler": ["../../../../node_modules/.pnpm/node_modules/scheduler/index.js"] }
+  }
+}
