@@ -56,4 +56,16 @@ test.describe("Connect pin", () => {
       if (row !== null && chip !== null) expect(row.y + row.height).toBeLessThanOrEqual(chip.y)
     }
   })
+
+  // The pin hides while its own stage is open, so the control that opened it is gone when the stage closes;
+  // focus must land on the agent's row, not the page.
+  test("returns focus to the agent's row when the control that opened the stage is gone", async ({ page }) => {
+    await page.goto("/")
+    await page.evaluate(() => window.localStorage.setItem("fleet-connect-pinned", "FIXTURE:agent-fixture"))
+    await page.reload()
+    await page.getByRole("button", { name: /^Pinned: fixture-pane/ }).click()
+    await expect(page.getByRole("dialog", { name: "fixture-pane" })).toBeVisible()
+    await page.keyboard.press("Escape")
+    await expect(page.locator(".connect-agent[data-agent-key=\"FIXTURE:agent-fixture\"]")).toBeFocused()
+  })
 })

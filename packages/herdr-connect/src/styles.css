@@ -1845,13 +1845,14 @@
     background: color-mix(in oklch, var(--rly-color-surface-1) 82%, transparent);
     box-shadow: 0 16px 40px -18px oklch(0% 0 none / 50%);
     inset-block-end: calc(var(--rly-space-16) + env(safe-area-inset-bottom, 0px));
-    inset-inline-end: calc(var(--rly-space-16) + env(safe-area-inset-right, 0px));
+    /* Both sides' insets: inline-end is the left edge in right-to-left text. */
+    inset-inline-end: calc(var(--rly-space-16) + max(env(safe-area-inset-left, 0px), env(safe-area-inset-right, 0px)));
     position: fixed;
     z-index: 2;
   }
 
   /* Room at the end of the directory, so the last row can scroll clear of the floating pin. */
-  .connect-agents:has(> .connect-pin[data-placement="float"]) {
+  .connect-agents[data-pinned] {
     padding-block-end: calc(var(--rly-space-80) + env(safe-area-inset-bottom, 0px));
   }
 

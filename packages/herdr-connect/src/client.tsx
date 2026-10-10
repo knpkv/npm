@@ -1188,6 +1188,8 @@ export const ConnectSurface = ({
         aria-label="Herdr agents"
         className="connect-agents"
         data-loading={current === null ? "true" : undefined}
+        // Room for the floating pin, set here rather than with :has(), which Firefox 120 (in BROWSER_TARGET) lacks.
+        data-pinned={pinnedAgent !== null && stageKey !== pinnedKey ? "" : undefined}
         onKeyDown={moveAgentFocus}
       >
         <label className="connect-search">
@@ -1265,7 +1267,19 @@ export const ConnectSurface = ({
             <AgentStage
               agent={stageAgent}
               crew={stageCrew}
-              onClose={() => setStageKey(null)}
+              onClose={() => {
+                const closing = stageKey
+                setStageKey(null)
+                // The control that opened the stage may be gone (the pin hides while its stage is open, the
+                // terminal's bar chip unmounts on the way here); focus then goes to the agent's row, not the page.
+                window.setTimeout(() => {
+                  if (closing === null || (document.activeElement !== null && document.activeElement !== document.body))
+                    return
+                  document
+                    .querySelector<HTMLButtonElement>(`.connect-agent[data-agent-key="${CSS.escape(closing)}"]`)
+                    ?.focus()
+                }, 0)
+              }}
               onOpen={(agent) => setStageKey(connectAgentKey(agent))}
               onPinChange={(pinned) => changePin(pinned && stageAgent !== null ? connectAgentKey(stageAgent) : null)}
               pinned={stageAgent !== null && connectAgentKey(stageAgent) === pinnedKey}
