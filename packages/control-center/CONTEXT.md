@@ -32,6 +32,14 @@ _Avoid_: Name match, UI link
 The Jira items selected for one release together with their pull-request and pipeline dimensions.
 _Avoid_: Ticket list, sprint board
 
+**Release Freshness**:
+The server's assessment of preserved release facts against their age and the latest health of every source Plugin Connection. Any failed health check immediately makes the source unavailable, with its failure class and retry time. The last successful read remains visible. A healthy sync restores Current while the facts are within their age threshold.
+_Avoid_: Sync status, readiness verdict
+
+**Source Unavailable Since**:
+The first failed health event after the connection's most recent healthy event. Repeated failures retain that time. Bounded or legacy event history that cannot prove the start shows Last checked instead.
+_Avoid_: Last read, source update time
+
 **Local Operator**:
 The single person running and using the local Control Center instance. Connected-service collaborators remain visible as Jira, CodeCommit, or Confluence identities but are not Control Center users. Actor identifiers are retained for audit and future evolution, not real-time multi-user collaboration.
 _Avoid_: Workspace member, tenant user, collaborator

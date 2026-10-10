@@ -11,6 +11,7 @@ import {
 } from "../src/api/agent.js"
 import { ReleaseDeliveryGraphInspection, WorkspaceEntityInspection } from "../src/api/deliveryGraph.js"
 import { AtlassianOAuthGrantExchangeResponse, DiscoveredAtlassianProfile } from "../src/api/plugins.js"
+import { PortfolioSnapshot } from "../src/api/portfolio.js"
 import { PrReviewReport, PrReviewSubject } from "../src/domain/prReview.js"
 import { PrReviewSuggestionRevision, PrReviewSuggestionRevisionPage } from "../src/domain/prReviewRevision.js"
 import { RelationshipRepairProposal } from "../src/domain/relationshipRepair.js"
@@ -950,6 +951,62 @@ test("canonicalizes the root before any release activation renders", async ({ pa
   await page.goto("/")
   await expect(page).toHaveURL(overviewPath)
   await expect(page.getByRole("button", { name: "Preview Solar Grove" })).toBeVisible()
+})
+
+test("shows source availability and the last good read in every release presentation", async ({ context, page }) => {
+  const encoded = Schema.encodeSync(PortfolioSnapshot)(snapshot)
+  const health = {
+    _tag: "unavailable",
+    checkedAt: "2026-07-14T10:15:00.000Z",
+    failureClass: "authentication",
+    retryAt: null,
+    safeMessage: "Fixture credentials were rejected."
+  }
+  const failedSnapshot = Schema.decodeUnknownSync(PortfolioSnapshot)({
+    ...encoded,
+    plugins: encoded.plugins.map((plugin) => ({ ...plugin, health })),
+    releases: encoded.releases.map((item) => {
+      const freshness = item.freshness
+      if (freshness._tag !== "current" || freshness.provenance._tag !== "provider") return item
+      return {
+        ...item,
+        freshness: {
+          ...freshness,
+          _tag: "source-unavailable",
+          evaluatedAt: "2026-07-14T10:16:00.000Z",
+          pluginHealth: health,
+          provenance: {
+            _tag: "cache",
+            cachedAt: freshness.synchronizedAt,
+            sourceRevision: freshness.provenance.sourceRevision
+          },
+          unavailableSince: health.checkedAt,
+          lastReadAt: freshness.synchronizedAt,
+          failedSources: [{
+            pluginConnectionId: freshness.provenance.sourceRevision.pluginConnectionId,
+            health,
+            unavailableSince: health.checkedAt
+          }]
+        }
+      }
+    })
+  })
+  await context.route("**/api/v1/portfolio/snapshot", async (route) => {
+    await route.fulfill({ body: JSON.stringify(failedSnapshot), contentType: "application/json", status: 200 })
+  })
+  const warning = "Source unavailable since 14 Jul, 10:15 UTC · authentication · last read 14 Jul, 10:03 UTC."
+  await page.goto(overviewPath)
+  const row = page.locator(`[data-portfolio-release-id="${release.releaseId}"]`)
+  await expect(row.getByText(warning, { exact: true })).toBeVisible()
+  await expect(row.getByText("Current", { exact: true })).toHaveCount(0)
+  await page.getByRole("button", { name: "Preview Solar Grove" }).click()
+  await expect(page.getByRole("dialog").getByText(warning, { exact: true })).toBeVisible()
+  await page.getByRole("button", { name: "Open Solar Grove full view" }).click()
+  await expect(page).toHaveURL(fullPath)
+  await expect(page.getByRole("heading", { level: 1, name: "payments-api" })).toBeVisible()
+  await expect(page.getByRole("main").getByText(warning, { exact: true })).toBeVisible()
+  await page.goto(`/w/${snapshot.workspaceId}/work?release=${release.releaseId}`)
+  await expect(page.getByRole("main").getByText(warning, { exact: true })).toBeVisible()
 })
 
 test("filters all six release states through keyboard-accessible persistent URLs", async ({ page }) => {

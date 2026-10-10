@@ -457,7 +457,8 @@ const setConnectionEnabled = Effect.fn("PluginAdministration.setConnectionEnable
         pluginConnectionId,
         releaseId: null,
         occurredAt: updatedAt,
-        reason: "plugin-health"
+        reason: "plugin-health",
+        ...(!isEnabled && { health: { _tag: "disabled", checkedAt: updatedAt } satisfies PluginHealth })
       }).pipe(
         Effect.provideService(Crypto.Crypto, cryptoService),
         Effect.provideService(Persistence, persistence)
@@ -1189,7 +1190,8 @@ const persistSetupTestHealth = Effect.fn("PluginAdministration.persistSetupTestH
       pluginConnectionId,
       releaseId: null,
       occurredAt: test.checkedAt,
-      reason: "plugin-health"
+      reason: "plugin-health",
+      health
     }).pipe(
       Effect.provideService(Crypto.Crypto, cryptoService),
       Effect.provideService(Persistence, persistence)
@@ -1604,7 +1606,8 @@ export const makePluginAdministrationWithConnections = Effect.fn("PluginAdminist
         pluginConnectionId,
         releaseId: null,
         occurredAt: updatedAt,
-        reason: "plugin-health"
+        reason: "plugin-health",
+        health: { _tag: "disabled", checkedAt: updatedAt }
       }).pipe(
         Effect.provideService(Crypto.Crypto, cryptoService),
         Effect.provideService(Persistence, persistence)

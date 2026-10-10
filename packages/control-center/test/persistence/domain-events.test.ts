@@ -2,7 +2,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Layer, Result, Schema } from "effect"
 
-import { DomainEventId, EventCursor } from "../../src/domain/identifiers.js"
+import { DomainEventId, EventCursor, PluginConnectionId } from "../../src/domain/identifiers.js"
 import { Database, databaseLayer } from "../../src/server/persistence/Database.js"
 import { SourceIdentityMismatchError } from "../../src/server/persistence/errors.js"
 import { Persistence, persistenceLayer } from "../../src/server/persistence/Persistence.js"
@@ -11,7 +11,8 @@ import {
   DomainEventDedupeKey
 } from "../../src/server/persistence/repositories/domainEventModels.js"
 import { DomainEventRepository } from "../../src/server/persistence/repositories/domainEventRepository.js"
-import { WorkspaceName } from "../../src/server/persistence/repositories/models.js"
+import { PluginConnectionDisplayName, WorkspaceName } from "../../src/server/persistence/repositories/models.js"
+import { PluginConnectionRepository } from "../../src/server/persistence/repositories/pluginConnectionRepository.js"
 import { QuarantineRepository } from "../../src/server/persistence/repositories/quarantineRepository.js"
 import { WorkspaceRepository } from "../../src/server/persistence/repositories/workspaceRepository.js"
 import { fixtureTimestamps, fixtureWorkspaceIds, makePersistenceTestConfig } from "./fixtures.js"
@@ -54,7 +55,7 @@ const withEventRepositories = <Success, Failure>(
   use: Effect.Effect<
     Success,
     Failure,
-    Database | DomainEventRepository | QuarantineRepository | WorkspaceRepository
+    Database | DomainEventRepository | PluginConnectionRepository | QuarantineRepository | WorkspaceRepository
   >
 ) =>
   Effect.gen(function*() {
@@ -63,10 +64,52 @@ const withEventRepositories = <Success, Failure>(
     const foundation = QuarantineRepository.layer.pipe(Layer.provideMerge(database))
     const events = DomainEventRepository.layer.pipe(Layer.provide(foundation))
     const workspaces = WorkspaceRepository.layer.pipe(Layer.provide(foundation))
-    return yield* use.pipe(Effect.provide(Layer.mergeAll(foundation, events, workspaces)))
+    const connections = PluginConnectionRepository.layer.pipe(Layer.provide(foundation))
+    const services = yield* Layer.build(Layer.mergeAll(foundation, events, workspaces, connections))
+    return yield* use.pipe(Effect.provide(services))
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped)
 
 describe("DomainEventRepository", () => {
+  it.effect("reads a bounded newest-first health history without crossing connections", () =>
+    withEventRepositories(Effect.gen(function*() {
+      yield* createWorkspaces
+      const events = yield* DomainEventRepository
+      const connectionId = PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-000000000091")
+      const otherConnectionId = PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-000000000092")
+      const connections = yield* PluginConnectionRepository
+      for (const pluginConnectionId of [connectionId, otherConnectionId]) {
+        yield* connections.create(WORKSPACE_A, {
+          pluginConnectionId,
+          providerId: "jira",
+          displayName: PluginConnectionDisplayName.make("Fixture source"),
+          isEnabled: true,
+          createdAt: CREATED_AT
+        })
+      }
+      for (const index of [1, 2, 3]) {
+        yield* events.append(WORKSPACE_A, {
+          ...makeEventInput(String(index).padStart(12, "0"), `health-${index}`, "plugin-health"),
+          metadata: { pluginConnectionId: connectionId },
+          payload: {
+            reason: "plugin-health",
+            pluginHealth: index === 1
+              ? { healthState: "healthy", failureClass: null }
+              : { healthState: "unavailable", failureClass: "authentication" }
+          }
+        })
+      }
+      yield* events.append(WORKSPACE_A, {
+        ...makeEventInput("000000000004", "other-connection", "plugin-health"),
+        metadata: { pluginConnectionId: otherConnectionId }
+      })
+      const bounded = yield* events.readPluginHealthHistory(WORKSPACE_A, connectionId, 2)
+      assert.deepStrictEqual(bounded.events.map((event) => event.eventCursor), [3, 2])
+      assert.isFalse(bounded.isComplete)
+      const complete = yield* events.readPluginHealthHistory(WORKSPACE_A, connectionId, 128)
+      assert.deepStrictEqual(complete.events.map((event) => event.eventCursor), [3, 2, 1])
+      assert.isTrue(complete.isComplete)
+    })))
+
   it.effect("assigns ordered workspace-local cursors and starts absent streams at zero", () =>
     withEventRepositories(
       Effect.gen(function*() {

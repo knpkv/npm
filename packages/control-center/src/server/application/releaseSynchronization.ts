@@ -159,7 +159,8 @@ const persistHealth = Effect.fn("ReleaseSynchronization.persistHealth")(function
         pluginConnectionId: input.pluginConnectionId,
         releaseId: null,
         occurredAt: health.checkedAt,
-        reason: "plugin-health"
+        reason: "plugin-health",
+        health
       })
       return updated
     })

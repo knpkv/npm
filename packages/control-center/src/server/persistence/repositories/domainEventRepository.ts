@@ -9,7 +9,7 @@ import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 
 import { PortfolioInvalidatedEventV1, PortfolioInvalidatedPayloadV1 } from "../../../domain/domainEvent.js"
-import type { WorkspaceId } from "../../../domain/identifiers.js"
+import type { PluginConnectionId, WorkspaceId } from "../../../domain/identifiers.js"
 import { DomainEventId, EventCursor } from "../../../domain/identifiers.js"
 import { UtcTimestamp } from "../../../domain/utcTimestamp.js"
 import { Database } from "../Database.js"
@@ -519,7 +519,48 @@ const makeDomainEventRepository = Effect.gen(function*() {
     ).pipe(mapPersistenceOperation("domain-event.prune"))
   })
 
-  return { append, pageAfter, prune, streamState: readStreamState }
+  const readPluginHealthHistory = Effect.fn("DomainEventRepository.readPluginHealthHistory")(function*(
+    workspaceId: typeof WorkspaceId.Type,
+    pluginConnectionId: typeof PluginConnectionId.Type,
+    requestedLimit: number
+  ) {
+    const limit = yield* Schema.decodeUnknownEffect(DomainEventPageSize)(requestedLimit).pipe(
+      Effect.mapError(() => new PersistenceOperationError({ operation: "domain-event.health-history-size" }))
+    )
+    const snapshot = yield* database.transaction(Effect.gen(function*() {
+      const state = yield* readStreamState(workspaceId)
+      const rows = yield* sql<SqlRow>`SELECT
+        workspace_id AS workspaceId,
+        event_cursor AS eventCursor,
+        event_id AS eventId,
+        schema_version AS schemaVersion,
+        event_type AS eventType,
+        dedupe_key AS dedupeKey,
+        release_id AS releaseId,
+        plugin_connection_id AS pluginConnectionId,
+        entity_id AS entityId,
+        job_id AS jobId,
+        occurred_at AS occurredAt,
+        ingested_at AS ingestedAt,
+        causation_id AS causationId,
+        correlation_id AS correlationId,
+        payload_json AS payloadJson,
+        payload_digest AS payloadDigest
+      FROM domain_events
+      WHERE workspace_id = ${workspaceId}
+        AND plugin_connection_id = ${pluginConnectionId}
+      ORDER BY event_cursor DESC
+      LIMIT ${limit + 1}`
+      return { state, rows }
+    })).pipe(mapPersistenceOperation("domain-event.health-history"))
+    const decoded = yield* Effect.forEach(snapshot.rows.slice(0, limit), (row) => decodeRow(workspaceId, row))
+    return {
+      events: decoded.map(({ event }) => event),
+      isComplete: snapshot.rows.length <= limit && snapshot.state.prunedThroughCursor === 0
+    }
+  })
+
+  return { append, pageAfter, prune, readPluginHealthHistory, streamState: readStreamState }
 })
 
 /** Workspace-local durable event outbox with bounded replay and retention. */

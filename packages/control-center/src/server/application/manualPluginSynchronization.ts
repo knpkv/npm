@@ -403,7 +403,8 @@ export const makeManualPluginSynchronization = Effect.fn(
         pluginConnectionId: bound.pluginConnectionId,
         releaseId: null,
         occurredAt: health.checkedAt,
-        reason: "plugin-health"
+        reason: "plugin-health",
+        health
       }).pipe(
         Effect.provideService(Crypto.Crypto, cryptoService),
         Effect.provideService(Persistence, persistence)
