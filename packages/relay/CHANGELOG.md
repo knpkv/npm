@@ -1,5 +1,19 @@
 # @knpkv/relay
 
+## 0.2.0
+
+### Minor Changes
+
+- [#723](https://github.com/knpkv/npm/pull/723) [`94d8fdd`](https://github.com/knpkv/npm/commit/94d8fdd38022e2aa68f8bf4dd87924a542e9a7ea) Thanks [@konopkov](https://github.com/konopkov)! - Adds `@knpkv/relay/wire`, a browser-safe entry with Relay's event and session schemas and the HTTP contract every product's `/…/relay` routes speak (`RelayStreamFrame`, the write bodies, and `RelayUnavailableError`, `RelayConflictError` and `RelayBadRequestError`). It imports only `effect` and `@knpkv/capability`; the build and `test:pack` fail if it reaches anything else.
+
+  The event stream now reports a person's messages: a Snapshot lists the ones still `queued`, and `MessageQueued`, `MessagePlaced` and `MessageWithdrawn` follow each one, so a client never guesses from its own send. `Snapshot.queued` is a new required field.
+
+### Patch Changes
+
+- [#739](https://github.com/knpkv/npm/pull/739) [`0728c72`](https://github.com/knpkv/npm/commit/0728c72870f6c648626da0493cc00d8c65c47d60) Thanks [@konopkov](https://github.com/konopkov)! - On Bun, a second owner of a Relay store is refused as `RelayStoreLocked` again, not as a failed commit: the store lock runs its pragma, `BEGIN IMMEDIATE` and `COMMIT` one call at a time, because Bun's multi-statement `exec` reported the refused `BEGIN` as `cannot commit - no transaction is active`. When neither `node:sqlite` nor `bun:sqlite` can load, the lock's error message now names both failures, so a Node without `node:sqlite` reports its own failure, not only "Cannot find module bun:sqlite".
+
+- [#736](https://github.com/knpkv/npm/pull/736) [`f925ee2`](https://github.com/knpkv/npm/commit/f925ee27ba3689acb941187cce4ee808301f5f95) Thanks [@konopkov](https://github.com/konopkov)! - Closing a Relay harness now frees its store at once, so the same process can open it again. Ownership moves from the libsql connection's exclusive mode to an exclusive lock on `<store>.lock`, held through the runtime's own SQLite (`node:sqlite` on Node, `bun:sqlite` on Bun) with `exec` only. libsql keeps a closed connection, and the lock it took, until its prepared statements are garbage-collected, so a store that had been opened once could not be reopened in that process. The driver loads when a store opens, never at import, so Relay still loads on Bun versions without `node:sqlite`.
+
 ## 0.1.0
 
 ### Minor Changes

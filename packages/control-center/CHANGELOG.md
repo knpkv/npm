@@ -1,5 +1,15 @@
 # @knpkv/control-center
 
+## 0.12.4
+
+### Patch Changes
+
+- [#721](https://github.com/knpkv/npm/pull/721) [`8ec9f2a`](https://github.com/knpkv/npm/commit/8ec9f2adc73078131f322272bd484f6c53d115d0) Thanks [@konopkov](https://github.com/konopkov)! - Offline backups no longer publish a snapshot older than its WAL. A SQLite connection closing after the database was copied checkpoints the WAL into the database and deletes it, so the copy missed what the WAL held while every sidecar check passed. The capture now compares the database and its sidecars before the copy and after the sidecar copies, and starts the attempt again when anything changed.
+- Updated dependencies [[`e6fd46d`](https://github.com/knpkv/npm/commit/e6fd46d85a2f109da9b80ff4aa96cee4ae4f5bf5), [`94d8fdd`](https://github.com/knpkv/npm/commit/94d8fdd38022e2aa68f8bf4dd87924a542e9a7ea), [`116c0c2`](https://github.com/knpkv/npm/commit/116c0c2d47b6f739f33b47473b03b4874d961e31), [`5f0ec77`](https://github.com/knpkv/npm/commit/5f0ec779cffd2bbb3a9b8b2ce4bb00cbfc814db6), [`ea0c0ed`](https://github.com/knpkv/npm/commit/ea0c0ed700cb69dd86e56fba425dd16d9869a577)]:
+  - @knpkv/relay-product@0.5.0
+  - @knpkv/rly@0.19.0
+  - @knpkv/review@0.4.9
+
 ## 0.12.3
 
 ### Patch Changes

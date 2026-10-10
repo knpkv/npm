@@ -1,5 +1,12 @@
 # @knpkv/codecommit-web
 
+## 0.30.1
+
+### Patch Changes
+
+- Updated dependencies [[`0728c72`](https://github.com/knpkv/npm/commit/0728c72870f6c648626da0493cc00d8c65c47d60), [`f925ee2`](https://github.com/knpkv/npm/commit/f925ee27ba3689acb941187cce4ee808301f5f95), [`94d8fdd`](https://github.com/knpkv/npm/commit/94d8fdd38022e2aa68f8bf4dd87924a542e9a7ea)]:
+  - @knpkv/relay@0.2.0
+
 ## 0.30.0
 
 ### Minor Changes
