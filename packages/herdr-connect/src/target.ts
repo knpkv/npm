@@ -2,10 +2,19 @@ import { Effect, Schema } from "effect"
 import { ConnectTargetError } from "./errors.js"
 import { ConnectAgent } from "./model.js"
 
+/**
+ * A deep link to one agent: `?host=…&agent=…`, opening its terminal. `&open=stage` opens its stage instead,
+ * as Work's link does, so the reader sees the agent before choosing the terminal.
+ */
 const ConnectTarget = Schema.Struct({
   agent: ConnectAgent.fields.id,
-  host: ConnectAgent.fields.host
+  host: ConnectAgent.fields.host,
+  open: Schema.optional(Schema.Literal("stage"))
 })
+
+/** What a deep link opens: the agent's terminal, or its stage when the link says `open=stage`. */
+export const connectTargetOpens = (search: string): "stage" | "terminal" =>
+  new URLSearchParams(search).get("open") === "stage" ? "stage" : "terminal"
 
 export const resolveConnectTarget = Effect.fn("HerdrConnect.resolveTarget")(function*(
   search: string,
@@ -14,13 +23,15 @@ export const resolveConnectTarget = Effect.fn("HerdrConnect.resolveTarget")(func
   const parameters = new URLSearchParams(search)
   const agent = parameters.getAll("agent")
   const host = parameters.getAll("host")
+  const open = parameters.getAll("open")
   if (agent.length === 0 && host.length === 0) return null
-  if (agent.length !== 1 || host.length !== 1) {
+  if (agent.length !== 1 || host.length !== 1 || open.length > 1) {
     return yield* new ConnectTargetError({ reason: "malformed" })
   }
   const target = yield* Schema.decodeUnknownEffect(ConnectTarget)({
     agent: agent[0],
-    host: host[0]
+    host: host[0],
+    open: open[0]
   }).pipe(
     Effect.mapError(() => new ConnectTargetError({ reason: "malformed" }))
   )
@@ -45,6 +56,7 @@ export type RememberedConnectPreference =
 
 export type ConnectPreferenceDecision =
   | { readonly _tag: "connect"; readonly target: ConnectAgent }
+  | { readonly _tag: "stage"; readonly target: ConnectAgent }
   | { readonly _tag: "retry"; readonly error: "connect_target.unknown"; readonly key: string | null }
   | { readonly _tag: "select"; readonly error: "connect_target.malformed" | null; readonly key: string | null }
 
@@ -67,7 +79,8 @@ export const resolveConnectPreference = Effect.fn("HerdrConnect.resolvePreferenc
 
 const connectPreferenceDecision = (
   resolution: ConnectPreferenceResolution,
-  rememberedKey: string | null
+  rememberedKey: string | null,
+  opens: "stage" | "terminal"
 ): ConnectPreferenceDecision => {
   if (resolution._tag === "retry") {
     return {
@@ -85,7 +98,7 @@ const connectPreferenceDecision = (
   }
   return resolution.target === null
     ? { _tag: "select", error: null, key: rememberedKey }
-    : { _tag: "connect", target: resolution.target }
+    : { _tag: opens === "stage" ? "stage" : "connect", target: resolution.target }
 }
 
 export const resolveConnectPreferenceDecision = Effect.fn("HerdrConnect.resolvePreferenceDecision")(function*(
@@ -95,5 +108,5 @@ export const resolveConnectPreferenceDecision = Effect.fn("HerdrConnect.resolveP
 ) {
   const rememberedKey = remembered._tag === "available" ? remembered.key : null
   const resolution = yield* resolveConnectPreference(search, agents)
-  return connectPreferenceDecision(resolution, rememberedKey)
+  return connectPreferenceDecision(resolution, rememberedKey, connectTargetOpens(search))
 })

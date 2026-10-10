@@ -16,6 +16,7 @@ import { agentCharacter } from "./character.js"
 import { Creature } from "./creature.js"
 import type { ConnectAgent } from "./model.js"
 import { connectAgentKey } from "./view.js"
+import type { ConnectWorkGoalResolution } from "./work-goal-link.js"
 
 /** The fleet as a strip of characters, the ones that need you first; each opens its agent's stage. */
 export const AgentCast = ({
@@ -106,9 +107,12 @@ export const AgentStage = ({
   onOpenTerminal,
   onPinChange,
   pinned,
-  stale
+  stale,
+  workGoal
 }: {
   readonly agent: ConnectAgent | null
+  /** The open agent's goal on the Work board, linked from its stage when there is exactly one. */
+  readonly workGoal: ConnectWorkGoalResolution
   /** Whether this agent is the one this device keeps pinned. */
   readonly pinned: boolean
   readonly onPinChange: (pinned: boolean) => void
@@ -155,6 +159,11 @@ export const AgentStage = ({
                 <span>
                   {agent.kind} on {agent.host}
                 </span>
+                {workGoal._tag === "available" ? (
+                  <a className="connect-stage-goal" href={workGoal.href}>
+                    Work goal: {workGoal.title}
+                  </a>
+                ) : null}
               </p>
               {crew.length === 0 ? null : (
                 <nav aria-label={`Agents ${agent.name} started`} className="connect-stage-crew">

@@ -1724,6 +1724,21 @@
     opacity: 0.8;
   }
 
+  /* Back to the board: the stage's goal, as a link the stage's light text can carry. */
+  .connect-stage-goal {
+    align-items: center;
+    color: inherit;
+    display: inline-flex;
+    min-block-size: 44px;
+    text-decoration-color: oklch(100% 0 none / 45%);
+    text-underline-offset: 3px;
+  }
+
+  .connect-stage-goal:focus-visible {
+    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+    outline-offset: var(--rly-focus-ring-offset);
+  }
+
   @media (forced-colors: active) {
     .connect-stage {
       background: Canvas;

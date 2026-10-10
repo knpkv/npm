@@ -104,6 +104,21 @@ const linkNamed = (host: HTMLElement, name: string): HTMLAnchorElement | null =>
   [...host.querySelectorAll<HTMLAnchorElement>("a")].find(({ textContent }) => textContent?.trim() === name) ?? null
 
 describe("WorkBoard interactions", () => {
+  // The goal's agent opens on its Connect stage: who it is and what it's saying, its terminal one tap away.
+  it("links a goal's agent to its stage in Connect, by name", async () => {
+    const owned: WorkGoal = {
+      ...goal(2),
+      connectTarget: { agentId: "agent-coordinator", host: "SER8", url: "/connect/?agent=agent-coordinator&host=SER8" }
+    }
+    const withTarget = { ...snapshot("now"), goals: [owned] }
+    const host = await mountBoard({
+      boardSnapshots: { ...snapshots, now: withTarget },
+      initialGoalId: owned.id
+    })
+    const link = linkNamed(host, "Open Coordinator in Connect")
+    expect(link?.getAttribute("href")).toBe("/connect/?agent=agent-coordinator&host=SER8&open=stage")
+  })
+
   it("opens goal details only on selection and closes them explicitly", async () => {
     const host = await mountBoard()
 

@@ -637,8 +637,9 @@ const GoalDetail = ({
             Connect target recorded.
           </Text>
         ) : (
-          <a className="work-connect-link" href={goal.connectTarget.url}>
-            Open the agent in Connect
+          // The agent's stage first: who it is and what it's saying, with its terminal one tap away.
+          <a className="work-connect-link" href={`${goal.connectTarget.url}&open=stage`}>
+            Open {goal.owner.name} in Connect
           </a>
         )}
         {goalApproval === null ? null : externalLinks === "disabled" ? (
