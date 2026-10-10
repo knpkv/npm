@@ -257,6 +257,8 @@ type AgentDirectoryProps = {
   readonly query: string
   /** The directory couldn't refresh: its agents show their last known state, without life. */
   readonly stale?: boolean
+  /** Agents that started needing you on this poll, by `connectAgentKey`. */
+  readonly arrivals?: ReadonlySet<string>
   readonly selectedKey: string | null
   /** Hosts that didn't answer this read; the Host filter names them so the gap in the list is visible. */
   readonly silentHosts?: ReadonlyArray<string>
@@ -356,6 +358,7 @@ export const ConnectSummary = ({
 export const AgentDirectory = ({
   activityFilter,
   agents,
+  arrivals = new Set(),
   hostFilter,
   onActivityFilter,
   onHostFilter,
@@ -373,6 +376,7 @@ export const AgentDirectory = ({
   // With one host the filter already names it; rows repeat it only when it tells agents apart.
   const severalHosts = hosts.length > 1
   const counts = agentBucketCounts(agents, hostFilter)
+  const occurrences = new Map<string, number>()
   const rows = connectLineageRows(agents).filter(({ agent }) => {
     const activity = agentStatePresentation(agent.state).bucket
     return (
@@ -438,8 +442,13 @@ export const AgentDirectory = ({
           </div>
         )}
         <div className="connect-agent-list">
-          {rows.map(({ agent, depth, issue }, index) => {
+          {/* Counted while the rows render, so each row's key is its agent plus the times it came before. */}
+          {rows.map(({ agent, depth, issue }) => {
             const key = connectAgentKey(agent)
+            // Keyed by agent and its occurrence, never its place: a poll that re-sorts the list keeps every row,
+            // so its creature's breath and blink carry on. An ambiguous agent listed twice gets 0 and 1.
+            const occurrence = occurrences.get(key) ?? 0
+            occurrences.set(key, occurrence + 1)
             const activity = agentStatePresentation(agent.state).bucket
             return (
               <button
@@ -449,11 +458,18 @@ export const AgentDirectory = ({
                 data-agent-key={key}
                 data-lineage-issue={issue ?? "none"}
                 data-selected={selectedKey === key}
-                key={`${key}:${String(index)}`}
+                key={`${key}:${String(occurrence)}`}
                 onClick={() => onSelect(agent)}
               >
                 {/* Its character: decorative, since the state's word beside it says the same. */}
-                <Creature host={agent.host} id={String(agent.id)} size="row" stale={stale} state={agent.state} />
+                <Creature
+                  arrived={arrivals.has(key)}
+                  host={agent.host}
+                  id={String(agent.id)}
+                  size="row"
+                  stale={stale}
+                  state={agent.state}
+                />
                 {/* The state leads in a fixed track, so names line up whatever the state's word. */}
                 <span className="connect-agent-state" data-activity={activity}>
                   <AgentStateLabel state={agent.state} />
