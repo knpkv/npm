@@ -2,6 +2,7 @@ import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it, vi } from "@effect/vitest"
 import { Effect, FileSystem, Path, Result, Schema } from "effect"
 import { HttpClient, HttpClientResponse } from "effect/http"
+import { DatabaseSync } from "node:sqlite"
 import { AgentArchiveStore, ConnectArchiveObservation } from "../src/archive-store.js"
 import { fleetConnectAgents } from "../src/directory.js"
 import { ConnectArchiveStoreError, ConnectPeerError } from "../src/errors.js"
@@ -41,6 +42,21 @@ const observe = (
   complete = true,
   host = "HOST-A"
 ) => store.observe({ host, agents, observedAt, complete })
+
+const withDatabaseLock = Effect.fn("ArchiveTest.withDatabaseLock")(
+  function*<A, E, R>(store: AgentArchiveStore, effect: Effect.Effect<A, E, R>) {
+    const database = yield* Effect.acquireRelease(
+      Effect.sync(() => new DatabaseSync(store.path)),
+      (opened) => Effect.sync(() => opened.close())
+    )
+    yield* Effect.acquireRelease(
+      Effect.sync(() => database.exec("BEGIN IMMEDIATE")),
+      () => Effect.sync(() => database.exec("ROLLBACK"))
+    )
+    return yield* effect
+  },
+  Effect.scoped
+)
 
 const seedClosure = Effect.fn("ArchiveTest.seedClosure")(function*(store: AgentArchiveStore) {
   yield* observe(store, 0, [agent()])
@@ -189,6 +205,75 @@ describe("closed agent archive", () => {
           Effect.provideService(HttpClient.HttpClient, HttpClient.make(() => Effect.die("unexpected peer request")))
         )
         expect(directory).toEqual({ agents: local.agents, failures: [] })
+      }).pipe(Effect.scoped))
+
+    for (const complete of [true, false]) {
+      it.effect(`failed ${complete ? "positive" : "partial"} reads restart absence evidence after SQLite recovers`, () =>
+        Effect.gen(function*() {
+          const store = yield* openStore()
+          yield* observe(store, 0, [agent()])
+          yield* observe(store, 1, [])
+          const local = { host: "HOST-A", agents: complete ? [agent()] : [], complete }
+          const directory = yield* withDatabaseLock(
+            store,
+            fleetConnectAgents(Effect.succeed(local), [], { store, observedAt: 150_000 }).pipe(
+              Effect.provideService(HttpClient.HttpClient, HttpClient.make(() => Effect.die("unexpected peer request")))
+            )
+          )
+          expect(directory).toEqual({ agents: local.agents, failures: [] })
+          yield* observe(store, 300_001, [])
+          expect((yield* store.page()).agents).toEqual([])
+          yield* observe(store, 600_001, [])
+          expect((yield* store.page()).agents[0]).toMatchObject({
+            agentId: "agent-one",
+            firstSeenAt: 0,
+            closedAt: 600_001
+          })
+        }).pipe(Effect.scoped))
+    }
+
+    it.effect("older recovery reads cannot reuse evidence from before a failed later sighting", () =>
+      Effect.gen(function*() {
+        const store = yield* openStore()
+        yield* observe(store, 0, [agent()])
+        yield* observe(store, 1, [])
+        yield* withDatabaseLock(store, Effect.result(observe(store, 150_000, [agent()])))
+        yield* observe(store, 100_000, [])
+        yield* observe(store, 400_000, [])
+        expect((yield* store.page()).agents).toEqual([])
+        yield* observe(store, 700_000, [])
+        expect((yield* store.page()).agents[0]?.closedAt).toBe(700_000)
+      }).pipe(Effect.scoped))
+
+    it.effect("a failed write resets only its host while other hosts retain valid absence evidence", () =>
+      Effect.gen(function*() {
+        const store = yield* openStore()
+        yield* observe(store, 0, [agent()])
+        yield* observe(store, 0, [agent("agent-two", "HOST-B")], true, "HOST-B")
+        yield* observe(store, 1, [])
+        yield* observe(store, 1, [], true, "HOST-B")
+        const failed = yield* withDatabaseLock(store, Effect.result(observe(store, 150_000, [agent()])))
+        expect(Result.isFailure(failed) && failed.failure.operation).toBe("observe.transaction")
+        yield* observe(store, 300_001, [])
+        yield* observe(store, 300_001, [], true, "HOST-B")
+        expect((yield* store.page()).agents.map(({ host }) => host)).toEqual(["host-b"])
+      }).pipe(Effect.scoped))
+
+    it.effect("reopening requires fresh absence evidence and retains already archived rows", () =>
+      Effect.gen(function*() {
+        const store = yield* openStore()
+        yield* seedClosure(store)
+        yield* observe(store, 300_002, [agent("agent-later")])
+        yield* observe(store, 300_003, [])
+        const reopened = yield* Effect.acquireRelease(
+          AgentArchiveStore.open(store.path),
+          (opened) => Effect.sync(() => opened.close())
+        )
+        yield* observe(reopened, 600_003, [])
+        expect((yield* reopened.page()).agents.map(({ agentId }) => agentId)).toEqual(["agent-one"])
+        yield* observe(reopened, 900_003, [])
+        expect((yield* reopened.page()).agents.map(({ agentId }) => agentId)).toEqual(["agent-later", "agent-one"])
+        expect((yield* reopened.page()).agents.find(({ agentId }) => agentId === "agent-one")?.closedAt).toBe(300_001)
       }).pipe(Effect.scoped))
 
     it.effect("paged, truncated and legacy peer lists cannot supply absence evidence", () =>

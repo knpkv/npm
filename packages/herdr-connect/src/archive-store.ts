@@ -85,8 +85,17 @@ const recordSighting = (database: DatabaseSync, agent: ConnectAgent, observedAt:
     .run(agent.host.toLowerCase(), agent.id)
 }
 
-const recordObservation = (database: DatabaseSync, observation: ConnectArchiveObservation): void => {
+const recordObservation = (
+  database: DatabaseSync,
+  observation: ConnectArchiveObservation,
+  resetAbsence: boolean
+): void => {
   const host = observation.host.toLowerCase()
+  if (resetAbsence) {
+    database.prepare(
+      "UPDATE connect_archive_observations SET missing_since = NULL, missing_reads = 0 WHERE host = ?"
+    ).run(host)
+  }
   const previous = database.prepare("SELECT observed_at FROM connect_archive_hosts WHERE host = ?").get(host)
   if (previous !== undefined && Schema.decodeUnknownSync(HostRow)(previous).observed_at >= observation.observedAt) {
     return
@@ -118,8 +127,11 @@ const recordObservation = (database: DatabaseSync, observation: ConnectArchiveOb
   ).run(observation.observedAt, host, observation.observedAt - connectArchiveClosureDelayMillis)
 }
 
-/** Track host sightings and retain one compact record per confirmed closure until reappearance. */
+/**
+ * Retain compact records until reappearance. Failed writes and reopening require fresh absence evidence.
+ */
 export class AgentArchiveStore {
+  readonly #taintedHosts = new Map<string, number>()
   readonly #database: DatabaseSync
   readonly #transactions: Semaphore.Semaphore
   readonly #secureFiles: PrivateSqlite["secureFiles"]
@@ -155,6 +167,7 @@ export class AgentArchiveStore {
         );
         CREATE INDEX IF NOT EXISTS connect_archive_order
           ON connect_agent_archive (closed_at DESC, host, agent_id);
+        UPDATE connect_archive_observations SET missing_since = NULL, missing_reads = 0;
       `)
     }).pipe(Effect.mapError(fromPrivateDatabaseError))
     const transactions = yield* Semaphore.make(1)
@@ -169,12 +182,15 @@ export class AgentArchiveStore {
     const observation = yield* Schema.decodeUnknownEffect(ConnectArchiveObservation)(input).pipe(
       Effect.mapError(failWith("observe.decode"))
     )
-    return yield* this.#transactions.withPermits(1)(
-      Effect.try({
+    const host = observation.host.toLowerCase()
+    return yield* this.#transactions.withPermits(1)(Effect.suspend(() => {
+      const failedAt = this.#taintedHosts.get(host)
+      if (failedAt !== undefined && observation.observedAt < failedAt) return Effect.void
+      return Effect.try({
         try: () => {
           this.#database.exec("BEGIN IMMEDIATE")
           try {
-            recordObservation(this.#database, observation)
+            recordObservation(this.#database, observation, failedAt !== undefined)
             this.#database.exec("COMMIT")
           } catch (cause) {
             this.#database.exec("ROLLBACK")
@@ -182,8 +198,12 @@ export class AgentArchiveStore {
           }
         },
         catch: failWith("observe.transaction")
-      }).pipe(Effect.andThen(this.#secureFiles.pipe(Effect.mapError(fromPrivateDatabaseError))))
-    )
+      }).pipe(
+        Effect.andThen(this.#secureFiles.pipe(Effect.mapError(fromPrivateDatabaseError))),
+        Effect.tap(() => Effect.sync(() => this.#taintedHosts.delete(host))),
+        Effect.tapError(() => Effect.sync(() => this.#taintedHosts.set(host, observation.observedAt)))
+      )
+    }))
   })
 
   /** Newest closure first, then host and stable identity; the cursor names the last returned row. */
