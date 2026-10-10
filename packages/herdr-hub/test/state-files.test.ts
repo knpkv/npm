@@ -84,7 +84,7 @@ const startOn = (root: string, stateDirectory: string) =>
 
 const tempRoot = Effect.acquireRelease(
   Effect.sync(() => {
-    const root = mkdtempSync(join(tmpdir(), "herdr-approvals-state-"))
+    const root = mkdtempSync(join(tmpdir(), "herdr-hub-state-"))
     chmodSync(root, 0o700)
     return root
   }),

@@ -15,12 +15,12 @@ rule:
 files:
   - "packages/herdr-connect/src/**/*.tsx"
   - "packages/herdr-connect/src/**/*.ts"
-  - "packages/herdr-approvals/src/**/*.tsx"
-  - "packages/herdr-approvals/src/**/*.ts"
+  - "packages/herdr-hub/src/**/*.tsx"
+  - "packages/herdr-hub/src/**/*.ts"
 
 ignores:
   - "packages/herdr-connect/src/agent-state.tsx"
-  - "packages/herdr-approvals/src/**/work-*"
+  - "packages/herdr-hub/src/**/work-*"
 
 note: |
   One state language for agents (workers/ui2.agents-merge.plan.md, D2): the word, icon, tone,

@@ -43,7 +43,7 @@ rule:
 files:
   - "packages/control-center/src/**/*.css"
   - "packages/codecommit-web/src/**/*.css"
-  - "packages/herdr-approvals/src/**/*.css"
+  - "packages/herdr-hub/src/**/*.css"
   - "packages/jcf-web/src/**/*.css"
 
 note: |

@@ -42,10 +42,10 @@ const openWithBridge = (path: string) =>
   )
 
 const drivers = { bridge: openWithBridge, store: openWithStore }
-/** Either way of opening a Work database: the WorkStore itself or the SQL bridge herdr-approvals uses. */
+/** Either way of opening a Work database: the WorkStore itself or the SQL bridge herdr-hub uses. */
 type Driver = (typeof drivers)[keyof typeof drivers]
 
-/** Runs `effect` while a WorkStore connection holds `path` open, as herdr-approvals does in production. */
+/** Runs `effect` while a WorkStore connection holds `path` open, as herdr-hub does in production. */
 const whileStoreHolds = <A, E, R>(path: string, effect: Effect.Effect<A, E, R>) =>
   Effect.scoped(
     Effect.gen(function*() {

@@ -2,7 +2,7 @@
  * Renders the hub's PNG icons from `src/relay-icon.ts` with `rsvg-convert` and records, per icon, the
  * hash of the SVG it came from and of the PNG it produced. CI has no rasteriser, so the PNGs are
  * committed; `test/relay-icon.test.ts` fails when either hash no longer matches. Run after changing the
- * icons or rly's mark: `pnpm --filter @knpkv/herdr-approvals render:icons`.
+ * icons or rly's mark: `pnpm --filter @knpkv/herdr-hub render:icons`.
  */
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime"
 import * as NodeServices from "@effect/platform-node/NodeServices"

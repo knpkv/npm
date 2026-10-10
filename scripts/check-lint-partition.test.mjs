@@ -91,7 +91,7 @@ test("default lint retains every original check and both CI partitions", () => {
   )
   assert.equal(
     staticCommands[0],
-    'pnpm --recursive --sort --config.enable-pre-post-scripts=false --filter "@knpkv/herdr-approvals^..." --filter "@knpkv/relay-product" --filter "@knpkv/browser-pairing" --filter "@knpkv/review" run build'
+    'pnpm --recursive --sort --config.enable-pre-post-scripts=false --filter "@knpkv/herdr-hub^..." --filter "@knpkv/relay-product" --filter "@knpkv/browser-pairing" --filter "@knpkv/review" run build'
   )
   for (const required of [
     "check-eslint-config.mjs",
