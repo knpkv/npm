@@ -57,11 +57,11 @@ export const agentStatePresentation = (state: string): AgentStatePresentation =>
 
 /**
  * What an agent's stage says before its work, in the state's fixed words: "Working on" a working agent's
- * work, "Waiting for you" when it waits on a person. A stale directory says when the state was last seen.
+ * work, "Waiting for you" when it waits on a person. A stale directory names the last state it knew.
  */
 export const agentStageLead = (state: string, stale: boolean): string => {
   const presentation = agentStatePresentation(state)
-  if (stale) return `Last seen ${presentation.word.toLocaleLowerCase("en-US")}`
+  if (stale) return `Last known: ${presentation.word}`
   switch (presentation.bucket) {
     case "working":
       return "Working on"

@@ -9,7 +9,7 @@
  */
 import { PortalProvider } from "@knpkv/rly/foundations"
 import { Button, Sheet } from "@knpkv/rly/primitives"
-import type { CSSProperties, ReactElement } from "react"
+import type { CSSProperties, KeyboardEvent, ReactElement } from "react"
 
 import { AgentStateLabel, agentBuckets, agentStageLead, agentStatePresentation } from "./agent-state.js"
 import { agentCharacter } from "./character.js"
@@ -33,11 +33,24 @@ export const AgentCast = ({
       order.indexOf(agentStatePresentation(left.state).bucket) -
       order.indexOf(agentStatePresentation(right.state).bucket)
   )
+  // One tab stop for the whole strip, so the cast doesn't double every row's stop; arrows move along it.
+  const move = (event: KeyboardEvent<HTMLElement>): void => {
+    const step = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0
+    if (step === 0) return
+    const members = [...event.currentTarget.querySelectorAll<HTMLButtonElement>(".connect-cast-member")]
+    const index = members.findIndex((member) => member === event.target)
+    const next = members[(index + step + members.length) % members.length]
+    if (index === -1 || next === undefined) return
+    event.preventDefault()
+    for (const member of members) member.tabIndex = member === next ? 0 : -1
+    next.focus()
+  }
   return (
-    <nav aria-label="Agents at a glance" className="connect-cast">
-      {cast.map((agent) => (
+    <nav aria-label="Agents at a glance" className="connect-cast" onKeyDown={move}>
+      {cast.map((agent, index) => (
         <button
           className="connect-cast-member"
+          tabIndex={index === 0 ? 0 : -1}
           data-agent-key={connectAgentKey(agent)}
           key={connectAgentKey(agent)}
           onClick={() => onOpen(agent)}

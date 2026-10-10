@@ -26,7 +26,7 @@ describe("agentStageLead", () => {
     expect(agentStageLead("blocked", false)).toBe("Blocked")
     expect(agentStageLead("ready", false)).toBe("Ready")
     expect(agentStageLead("done", false)).toBe("Done")
-    expect(agentStageLead("working", true)).toBe("Last seen working")
+    expect(agentStageLead("working", true)).toBe("Last known: Working")
   })
 })
 
@@ -43,5 +43,8 @@ describe("AgentCast", () => {
     expect(order).toEqual(["agent-two", "agent-one", "agent-three"])
     expect(markup.match(/<button/g)).toHaveLength(3)
     expect(markup.match(/class="connect-creature"/g)).toHaveLength(3)
+    // One tab stop for the strip: the rows below already give every agent its own.
+    expect(markup.match(/tabindex="0"/g)).toHaveLength(1)
+    expect(markup.match(/tabindex="-1"/g)).toHaveLength(2)
   })
 })

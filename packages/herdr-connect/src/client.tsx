@@ -964,6 +964,11 @@ export const ConnectSurface = ({
   // The agent whose stage is open: a row or the cast opens it, Open terminal leaves it for the terminal.
   const [stageKey, setStageKey] = useState<string | null>(null)
   const stageAgent = stageKey === null ? null : (agents.find((agent) => connectAgentKey(agent) === stageKey) ?? null)
+  // An agent that leaves the directory closes its stage for good: it must not reopen, uninvited, when the
+  // agent comes back on a later poll. Only a loaded list counts; a list still loading keeps the stage.
+  useEffect(() => {
+    if (stageKey !== null && stageAgent === null && current !== null) setStageKey(null)
+  }, [current, stageAgent, stageKey])
   const selectAgent = (agent: ConnectAgent): void => {
     preferenceApplied.current = true
     const key = connectAgentKey(agent)
