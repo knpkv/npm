@@ -1,98 +1,135 @@
 import { describe, expect, it } from "vitest"
-import { parseStagedNameStatus, planPrecommit } from "../../scripts/precommit-plan.js"
+import { parseStagedNameStatus, planPrecommit, precommitMaxWorkers } from "../../scripts/precommit-plan.js"
 
 describe("pre-commit plan", () => {
-  it("formats documentation-only commits without building the workspace", () => {
-    const plan = planPrecommit(["docs/control-center-build-feedback.md", "packages/control-center/README.md"])
-
-    expect(plan.mode).toBe("docs")
-    expect(plan.commands).toHaveLength(1)
-    expect(plan.commands[0]).toMatchObject({ command: "pnpm", label: "format staged files" })
+  it("checks a single package incrementally, including executable documentation", () => {
+    for (
+      const file of [
+        "packages/rly/src/Button.tsx",
+        "packages/control-center/src/server/index.ts",
+        "packages/docs/src/content/docs/example.mdx",
+        "README.md"
+      ]
+    ) {
+      expect(planPrecommit([file], {}, 3)).toMatchObject({
+        mode: "changed",
+        commands: [{ command: "pnpm", args: ["check:changed", "--staged", "--max-workers", "3"] }]
+      })
+    }
   })
 
-  it("selects the Control Center and its dependencies for a narrow product change", () => {
-    const plan = planPrecommit([
-      ".changeset/fast-control-center.md",
-      "packages/control-center/src/server/index.ts"
-    ])
-
-    expect(plan.mode).toBe("control-center")
-    expect(plan.commands.map(({ label }) => label)).toEqual([
-      "format staged files",
-      "run Effect static checks",
-      "lint Control Center",
-      "build Control Center",
-      "type-check Control Center",
-      "test Control Center"
-    ])
-    expect(plan.commands).not.toContainEqual(expect.objectContaining({ args: ["verify:full"] }))
+  it("runs the full gate for repository inputs, even with an explicit changed preference", () => {
+    for (
+      const file of [
+        "pnpm-lock.yaml",
+        "pnpm-workspace.yaml",
+        "package.json",
+        "tsconfig.base.jsonc",
+        "eslint.config.mjs",
+        "eslint-local-rules.cjs",
+        "oxlint.config.ts",
+        ".prettierrc",
+        "vitest.config.ts",
+        "scripts/precheck.mjs",
+        "ast-grep/rules/effect/example.yml",
+        ".github/workflows/check.yml",
+        ".github/actions/setup/action.yml",
+        ".husky/pre-commit",
+        "repos/effect/README.md",
+        "patches/example.patch",
+        "infra/shared/setup.sh",
+        ".changeset/config.json"
+      ]
+    ) {
+      expect(planPrecommit([file], { PRECOMMIT_MODE: "changed" }).mode, file).toBe("full")
+    }
   })
 
-  it("fails closed to the explicit full gate for other package or root changes", () => {
-    expect(planPrecommit(["packages/rly/src/Button.tsx"]).commands).toEqual([
-      { args: ["verify:full"], command: "pnpm", label: "run full repository gate" }
-    ])
-    expect(planPrecommit(["package.json", "packages/control-center/src/index.ts"]).mode).toBe("full")
+  it("treats package test and typecheck configuration as repository inputs", () => {
+    for (
+      const file of [
+        "packages/jira-cli/vitest.config.ts",
+        "packages/control-center/vitest.live-aws.config.ts",
+        "packages/rly/test/tsconfig.json",
+        "packages/rly/tsconfig.build.json",
+        "packages/rly/tsconfig.node.jsonc"
+      ]
+    ) {
+      expect(planPrecommit([file]).mode).toBe("full")
+    }
+    expect(planPrecommit(["packages/jira-cli/src/index.ts"]).mode).toBe("changed")
   })
 
-  it("runs the full gate for executable documentation application content", () => {
-    expect(planPrecommit(["packages/docs/src/content/docs/broken.mdx"]).mode).toBe("full")
-    expect(
-      planPrecommit([
-        "packages/control-center/src/index.ts",
-        "packages/docs/src/content/docs/control-center.mdx"
-      ]).mode
-    ).toBe("full")
-    expect(
-      planPrecommit(["packages/control-center/src/index.ts", "docs/control-center-build-feedback.md"])
-        .mode
-    ).toBe("control-center")
-    expect(planPrecommit(["docs/control-center-build-feedback.md"]).mode).toBe("docs")
+  it("runs full for any edit in a cross-imported package, including private helpers and deletions", () => {
+    const inputs = ["packages/jira-cli", "packages/rly"]
+    expect(planPrecommit(["packages/rly/src/shared.ts"], {}, 2, inputs).mode).toBe("full")
+    expect(planPrecommit(["packages/rly/src/private.ts"], {}, 2, inputs).mode).toBe("full")
+    expect(planPrecommit(["packages/rly/src/deleted.ts"], {}, 2, inputs).mode).toBe("full")
+    expect(planPrecommit(["packages/agent-skills/src/index.ts"], {}, 2, inputs).mode).toBe("changed")
+    expect(planPrecommit(["packages/rly-other/src/private.ts"], {}, 2, inputs).mode).toBe("changed")
   })
 
-  it("retains both sides of renames for scope selection and formats only the destination", () => {
-    const crossing = parseStagedNameStatus(
-      "R100\0packages/control-center/src/server/old.ts\0docs/old.ts\0"
-    )
-    expect(crossing).toEqual({
-      stagedFiles: ["packages/control-center/src/server/old.ts", "docs/old.ts"],
-      formattableFiles: ["docs/old.ts"]
+  it("routes a single Control Center test edit through the shared staged precheck", () => {
+    expect(planPrecommit(["packages/control-center/test/unit/new.test.ts"], {}, 2)).toMatchObject({
+      mode: "changed",
+      commands: [{ command: "pnpm", args: ["check:changed", "--staged", "--max-workers", "2"] }]
     })
-    expect(planPrecommit(crossing?.stagedFiles ?? [], crossing?.formattableFiles ?? []).mode).toBe(
-      "control-center"
-    )
-
-    const internal = parseStagedNameStatus(
-      "R100\0packages/control-center/src/a.ts\0packages/control-center/src/b.ts\0"
-    )
-    expect(planPrecommit(internal?.stagedFiles ?? [], internal?.formattableFiles ?? []).mode).toBe(
-      "control-center"
-    )
   })
 
-  it("does no work when Git reports no staged files", () => {
-    expect(planPrecommit([])).toEqual({ commands: [], mode: "none", reason: "no staged files" })
+  it("honors PRECOMMIT_MODE=full and caps the full gate's Vitest workers", () => {
+    const plan = planPrecommit(["packages/rly/src/Button.tsx"], { PRECOMMIT_MODE: "full" }, 4)
+    expect(plan.mode).toBe("full")
+    expect(plan.commands.map(({ args }) => args)).toEqual([
+      ["format"],
+      ["lint"],
+      ["check"],
+      ["test:unit", "--run", "--maxWorkers", "4"],
+      ["test:pack"]
+    ])
   })
 
-  it("plans type changes and deletions without formatting deleted paths", () => {
-    const staged = parseStagedNameStatus(
-      "T\0packages/control-center/src/server/retyped.ts\0D\0packages/control-center/src/server/removed.ts\0"
-    )
+  it("retains both sides of cross-package renames and formats only the destination", () => {
+    const staged = parseStagedNameStatus("R100\0packages/rly/src/old.ts\0packages/control-center/src/new.ts\0")
     expect(staged).toEqual({
-      stagedFiles: [
-        "packages/control-center/src/server/retyped.ts",
-        "packages/control-center/src/server/removed.ts"
-      ],
-      formattableFiles: ["packages/control-center/src/server/retyped.ts"]
+      stagedFiles: ["packages/rly/src/old.ts", "packages/control-center/src/new.ts"],
+      formattableFiles: ["packages/control-center/src/new.ts"]
     })
+    expect(planPrecommit(staged?.stagedFiles ?? []).mode).toBe("changed")
+    expect(
+      planPrecommit(parseStagedNameStatus("R100\0scripts/tool.mjs\0packages/rly/src/tool.mjs\0")?.stagedFiles ?? [])
+        .mode
+    ).toBe("full")
+  })
 
-    const plan = planPrecommit(staged?.stagedFiles ?? [], staged?.formattableFiles ?? [])
-
-    expect(plan.mode).toBe("control-center")
-    expect(plan.commands[0]).toMatchObject({
-      args: expect.not.arrayContaining(["packages/control-center/src/server/removed.ts"]),
-      label: "format staged files"
+  it("handles deletions, type changes, copies, and malformed Git output", () => {
+    expect(parseStagedNameStatus("T\0packages/rly/src/retyped.ts\0D\0packages/rly/src/removed.ts\0")).toEqual({
+      stagedFiles: ["packages/rly/src/retyped.ts", "packages/rly/src/removed.ts"],
+      formattableFiles: ["packages/rly/src/retyped.ts"]
     })
-    expect(plan.commands.map(({ label }) => label)).toContain("build Control Center")
+    expect(planPrecommit(["packages/rly/src/removed.ts"]).mode).toBe("changed")
+    expect(parseStagedNameStatus("C100\0scripts/tool.mjs\0packages/rly/src/tool.mjs\0")?.stagedFiles).toEqual([
+      "packages/rly/src/tool.mjs"
+    ])
+    expect(parseStagedNameStatus("R100\0old.ts\0")).toBeNull()
+    expect(parseStagedNameStatus("M\0")).toBeNull()
+  })
+
+  it("normalizes paths and does no work for empty staging, even with a full override", () => {
+    expect(planPrecommit(["./packages\\rly\\src\\Button.tsx"]).mode).toBe("changed")
+    expect(planPrecommit([], { PRECOMMIT_MODE: "full" })).toEqual({
+      commands: [],
+      mode: "none",
+      reason: "no staged files"
+    })
+  })
+
+  it("defaults workers to half the available cores and rejects invalid overrides", () => {
+    expect(precommitMaxWorkers(8)).toBe(4)
+    expect(precommitMaxWorkers(3)).toBe(1)
+    expect(precommitMaxWorkers(1)).toBe(1)
+    expect(precommitMaxWorkers(8, "2")).toBe(2)
+    for (const override of ["", "0", "-1", "1.5", "50%", "many", "9007199254740992"]) {
+      expect(precommitMaxWorkers(8, override)).toBeNull()
+    }
   })
 })

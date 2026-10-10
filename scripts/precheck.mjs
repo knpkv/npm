@@ -1,5 +1,5 @@
 // `pnpm check:changed`: the focused gate to run before committing, on exactly the files this branch changed.
-// It runs per file eslint --fix → prettier --write → eslint → oxlint → ast-grep, then each touched package's own
+// Branch mode runs per file eslint --fix → prettier --write → eslint → oxlint → ast-grep, then each touched package's own
 // `check`, then the repository checks CI runs on every change (debt ledger, changed Effect diagnostics, changeset
 // coverage, rly stripes). Steps run one at a time and the first failure stops it with that step's exit code.
 //
@@ -7,11 +7,18 @@
 //   pnpm check:changed --base <ref>  against <ref>
 //   pnpm check:changed --dry-run     print the plan without running it
 //
+// `--staged --max-workers <n>` is the local hook path, without source rewrites: build affected packages and their dependencies,
+// check affected packages and workspace dependents, then run registered tests and executable cases.
+// Both local modes reject unstaged tracked changes and untracked check inputs before dispatch.
+// Every scope runs changed Effect diagnostics; staged mode selects staged files.
+// Staged mode also runs the cheap root static checks and Effect tsconfig coverage for manifest edits; Vitest uses one bounded worker pool.
 // Not named `precheck`: pnpm runs a `precheck` script before every `pnpm check`.
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime"
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { matchesGlob } from "node:path"
 import { URL } from "node:url"
+import { assertStagedInputs, workspaceDirectories } from "./staged-inputs.ts"
+import { selectBinCases } from "./test-workspace-bins.mjs"
 
 import * as Console from "effect/Console"
 import * as Data from "effect/Data"
@@ -57,30 +64,46 @@ export class PrecheckStepFailed extends Data.TaggedError("PrecheckStepFailed") {
   }
 }
 
-const usage = "usage: pnpm check:changed [--base <ref>] [--dry-run]"
+const usage = "usage: pnpm check:changed [--base <ref>] [--dry-run] [--staged --max-workers <n>]"
 
 /** Decodes the command line. `--changed` is accepted and changes nothing: changed files are the only scope. */
 export const parseArguments = (argv) => {
   let dryRun = false
   let base = undefined
+  let staged = false
+  let maxWorkers = undefined
   for (let index = 0; index < argv.length; index++) {
     const argument = argv[index]
     if (argument === "--changed") continue
     else if (argument === "--dry-run") dryRun = true
-    else if (argument === "--base") {
+    else if (argument === "--staged") staged = true
+    else if (argument === "--max-workers") {
+      const value = argv[++index]
+      if (value === undefined || !/^[1-9][0-9]*$/u.test(value) || !Number.isSafeInteger(Number(value))) {
+        return Effect.fail(new PrecheckUsageError({ reason: `--max-workers needs a positive integer\n${usage}` }))
+      }
+      maxWorkers = Number(value)
+    } else if (argument === "--base") {
       base = argv[++index]
       if (base === undefined || base.startsWith("--")) {
         return Effect.fail(new PrecheckUsageError({ reason: `--base needs a ref\n${usage}` }))
       }
     } else return Effect.fail(new PrecheckUsageError({ reason: `unknown argument ${argument}\n${usage}` }))
   }
-  return Effect.succeed({ base, dryRun })
+  if ((staged && maxWorkers === undefined) || (!staged && maxWorkers !== undefined)) {
+    return Effect.fail(new PrecheckUsageError({ reason: `--staged requires --max-workers and vice versa\n${usage}` }))
+  }
+  return Effect.succeed({ base, dryRun, staged, maxWorkers })
 }
 
 const RootManifest = Schema.Struct({ scripts: Schema.Record(Schema.String, Schema.String) })
 const PackageManifest = Schema.Struct({
   name: Schema.String,
-  scripts: Schema.optional(Schema.Record(Schema.String, Schema.String))
+  scripts: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+  dependencies: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+  devDependencies: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+  optionalDependencies: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+  peerDependencies: Schema.optional(Schema.Record(Schema.String, Schema.String))
 })
 
 /**
@@ -146,13 +169,39 @@ export const chooseBase = ({ explicit, mergeHeads }) => {
   return Effect.succeed({ kind: "fork", ref: "origin/main" })
 }
 
+/** Include every transitive workspace dependent, including development and peer dependencies. */
+export const affectedPackages = (touched, packages) => {
+  const selected = new Set(
+    [...packages.keys()].filter((prefix) => touched.some((file) => file.startsWith(`${prefix}/`)))
+  )
+  let previousSize = -1
+  while (selected.size !== previousSize) {
+    previousSize = selected.size
+    const names = new Set([...selected].map((prefix) => packages.get(prefix).name))
+    for (const [prefix, manifest] of packages) {
+      if ((manifest.dependencies ?? []).some((name) => names.has(name))) selected.add(prefix)
+    }
+  }
+  return [...selected].toSorted()
+}
+
 /**
  * The ordered steps for a change. Pure: `files` exist in the worktree, `touched` also holds deletions (they still
- * make a package's check run), `packages` maps a `packages/<dir>` prefix to its manifest name and whether it has a
+ * make a package's check run), `packages` maps a workspace directory prefix to its manifest name and whether it has a
  * `check` script, and `base` is the comparison base with how it was chosen (see `checkBases`).
  */
 
-export const planPrecheck = ({ base, eslintPartitions, files, matchesGlob, packages, scriptTests, touched }) => {
+export const planPrecheck = ({
+  base,
+  eslintPartitions,
+  files,
+  matchesGlob,
+  packages,
+  scriptTests,
+  staged = false,
+  touched,
+  maxWorkers
+}) => {
   const pinned = checkBases(base)
   const lintable = eslintPartitions
     .map((partition) => ({
@@ -170,12 +219,12 @@ export const planPrecheck = ({ base, eslintPartitions, files, matchesGlob, packa
     }))
   const scripts = files.filter(isScript)
 
-  const steps = eslint(true)
+  const steps = staged ? [] : eslint(true)
   if (files.length > 0) {
     steps.push({
-      label: `prettier --write (${files.length} files)`,
+      label: `prettier ${staged ? "--check" : "--write"} (${files.length} files)`,
       command: "pnpm",
-      args: ["exec", "prettier", "--write", "--ignore-unknown", "--", ...files]
+      args: ["exec", "prettier", staged ? "--check" : "--write", "--ignore-unknown", "--", ...files]
     })
   }
   for (const step of eslint(false)) steps.push(step)
@@ -199,10 +248,27 @@ export const planPrecheck = ({ base, eslintPartitions, files, matchesGlob, packa
   for (const test of new Set(touched.map((file) => scriptTestFor(file, scriptTests)).filter(Boolean))) {
     steps.push({ label: `node --test ${test}`, command: "node", args: ["--test", test] })
   }
-  const touchedPackages = new Set(
-    touched.map((file) => /^packages\/[^/]+/u.exec(file)?.[0]).filter((prefix) => packages.has(prefix))
-  )
-  for (const prefix of [...touchedPackages].toSorted()) {
+  const selected = staged
+    ? affectedPackages(touched, packages)
+    : [...packages.keys()].filter((prefix) => touched.some((file) => file.startsWith(`${prefix}/`))).toSorted()
+  const buildPrefixes = selected.filter((prefix) => packages.get(prefix).exists !== false)
+  if (staged && buildPrefixes.length > 0) {
+    steps.unshift({
+      label: "build affected packages and workspace dependencies",
+      command: "pnpm",
+      args: [
+        "--recursive",
+        "--workspace-concurrency=1",
+        "--sort",
+        "--config.enable-pre-post-scripts=false",
+        ...buildPrefixes.flatMap((prefix) => ["--filter", `${packages.get(prefix).name}...`]),
+        "--if-present",
+        "run",
+        "build"
+      ]
+    })
+  }
+  for (const prefix of selected) {
     const manifest = packages.get(prefix)
     if (!manifest.hasCheck) continue
     steps.push({
@@ -211,12 +277,72 @@ export const planPrecheck = ({ base, eslintPartitions, files, matchesGlob, packa
       args: ["--filter", manifest.name, "--config.enable-pre-post-scripts=false", "run", "check"]
     })
   }
+  const testPrefixes = selected.filter((prefix) => packages.get(prefix).exists !== false)
+  if (staged && testPrefixes.length > 0) {
+    steps.push({
+      label: "test affected packages",
+      command: "pnpm",
+      env: { VITEST_MAX_WORKERS: String(maxWorkers) },
+      args: [
+        "exec",
+        "vitest",
+        "run",
+        "--configLoader",
+        "native",
+        "--maxWorkers",
+        String(maxWorkers),
+        "--passWithNoTests",
+        ...testPrefixes.map((prefix) => `${prefix}/`)
+      ]
+    })
+  }
+  const packedPrefixes = selected.filter((prefix) => packages.get(prefix).hasPackTest)
+  if (staged && packedPrefixes.length > 0) {
+    steps.push({
+      label: "test affected packed packages",
+      command: "pnpm",
+      env: { VITEST_MAX_WORKERS: String(maxWorkers) },
+      args: [
+        "--recursive",
+        "--workspace-concurrency=1",
+        "--config.enable-pre-post-scripts=false",
+        ...packedPrefixes.flatMap((prefix) => ["--filter", packages.get(prefix).name]),
+        "--if-present",
+        "run",
+        "test:pack"
+      ]
+    })
+  }
+  const binOwners = selectBinCases(selected.map((prefix) => packages.get(prefix).name)).map((binCase) => binCase.owner)
+  if (staged && binOwners.length > 0) {
+    steps.push({
+      label: "test affected workspace executables",
+      command: "node",
+      args: ["scripts/test-workspace-bins.mjs", ...binOwners.flatMap((owner) => ["--package", owner])]
+    })
+  }
+  if (staged) {
+    steps.push(
+      { label: "rly focus rings", command: "pnpm", args: ["--filter", "@knpkv/rly", "run", "lint:focus-rings"] },
+      { label: "test typecheck coverage", command: "node", args: ["scripts/check-test-typecheck-coverage.mjs"] },
+      { label: "package script portability", command: "node", args: ["scripts/check-package-script-portability.mjs"] },
+      { label: "workspace exports", command: "node", args: ["scripts/check-workspace-exports.mjs"] },
+      { label: "security documentation examples", command: "node", args: ["scripts/check-security-doc-examples.mjs"] }
+    )
+  }
+  if (staged && touched.some((file) => file.endsWith("/package.json"))) {
+    steps.push({
+      label: "Effect tsconfig coverage",
+      command: "node",
+      args: ["scripts/check-effect-tsconfig-coverage.mjs"]
+    })
+  }
   steps.push(
     { label: "debt ledger", command: "node", args: ["scripts/check-debt-ledger.mjs"] },
     {
       label: "changed Effect diagnostics",
       command: "node",
-      args: ["scripts/check-changed-effect-diagnostics.mjs"],
+      args: ["scripts/check-changed-effect-diagnostics.mjs", ...(staged ? ["--staged"] : [])],
       env: pinned
     },
     {
@@ -277,15 +403,28 @@ const resolveBase = Effect.fn("Precheck.resolveBase")(function* (git, fs, explic
   return { commit: (yield* git(["rev-parse", "--verify", `${chosen.ref}^{commit}`])).trim(), kind: chosen.kind }
 })
 
-const readPackages = Effect.fn("Precheck.readPackages")(function* (fs, path, root, prefixes) {
+const readPackages = Effect.fn("Precheck.readPackages")(function* (fs, path, root, prefixes, git) {
   const packages = new Map()
   for (const prefix of prefixes) {
     const manifestPath = path.join(root, prefix, "package.json")
-    if (!(yield* fs.exists(manifestPath))) continue
+    const exists = yield* fs.exists(manifestPath)
+    if (!exists && (yield* git(["ls-tree", "--name-only", "HEAD", "--", `${prefix}/package.json`])).trim() === "")
+      continue
     const manifest = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(PackageManifest))(
-      yield* fs.readFileString(manifestPath)
+      exists ? yield* fs.readFileString(manifestPath) : yield* git(["show", `HEAD:${prefix}/package.json`])
     )
-    packages.set(prefix, { name: manifest.name, hasCheck: manifest.scripts?.check !== undefined })
+    packages.set(prefix, {
+      name: manifest.name,
+      hasCheck: exists && manifest.scripts?.check !== undefined,
+      exists,
+      hasPackTest: exists && manifest.scripts?.["test:pack"] !== undefined,
+      dependencies: Object.keys({
+        ...manifest.dependencies,
+        ...manifest.devDependencies,
+        ...manifest.optionalDependencies,
+        ...manifest.peerDependencies
+      })
+    })
   }
   return packages
 })
@@ -315,6 +454,8 @@ const program = Effect.gen(function* () {
   const root = path.dirname(path.dirname(yield* path.fromFileUrl(new URL(import.meta.url))))
   const git = makeGit(spawner, root)
 
+  if (options.staged) yield* assertStagedInputs(spawner, root)
+
   const problem = hooksProblem({
     hooksPath: (yield* git(["config", "core.hooksPath"]).pipe(
       Effect.catchTag("PrecheckGitError", () => Effect.succeed(""))
@@ -325,8 +466,9 @@ const program = Effect.gen(function* () {
 
   const base = yield* resolveBase(git, fs, options.base)
   const untracked = nulList(yield* git(["ls-files", "-z", "--others", "--exclude-standard"])).toSorted()
-  const files = nulList(yield* git(["diff", "-z", "--name-only", "--diff-filter=ACMRT", base.commit])).toSorted()
-  const touched = nulList(yield* git(["diff", "-z", "--name-only", "--no-renames", base.commit])).toSorted()
+  const comparison = options.staged ? ["--cached"] : [base.commit]
+  const files = nulList(yield* git(["diff", ...comparison, "-z", "--name-only", "--diff-filter=ACMRT"])).toSorted()
+  const touched = nulList(yield* git(["diff", ...comparison, "-z", "--name-only", "--no-renames"])).toSorted()
   const notice = untrackedNotice(untracked)
   if (notice !== undefined) yield* Console.log(notice)
   if (touched.length === 0) {
@@ -340,7 +482,12 @@ const program = Effect.gen(function* () {
   const eslintPartitions = ["lint:eslint:control-center", "lint:eslint:workspace"].map((name) =>
     eslintPartition(name, rootManifest.scripts[name] ?? "")
   )
-  const prefixes = new Set(touched.map((file) => /^packages\/[^/]+/u.exec(file)?.[0]).filter(Boolean))
+  const directories = yield* workspaceDirectories(spawner, root)
+  const prefixes = new Set(
+    options.staged
+      ? directories
+      : directories.filter((directory) => touched.some((file) => file.startsWith(`${directory}/`)))
+  )
   const scriptTests = new Set(
     (yield* fs.readDirectory(path.join(root, "scripts")))
       .filter((name) => name.endsWith(".test.mjs"))
@@ -351,9 +498,11 @@ const program = Effect.gen(function* () {
     eslintPartitions,
     files,
     matchesGlob,
-    packages: yield* readPackages(fs, path, root, prefixes),
+    packages: yield* readPackages(fs, path, root, prefixes, git),
     scriptTests,
-    touched
+    touched,
+    staged: options.staged,
+    maxWorkers: options.maxWorkers
   })
 
   yield* Console.log(
@@ -377,7 +526,9 @@ const program = Effect.gen(function* () {
 if (import.meta.main) {
   NodeRuntime.runMain(
     program.pipe(
-      Effect.tapError((error) => Console.error(`[precheck] ${error.message}`)),
+      Effect.tapError((error) =>
+        Console.error(`[precheck] ${error._tag === "StagedInputsError" ? error.reason : error.message}`)
+      ),
       Effect.scoped,
       Effect.provide(NodeServices.layer)
     ),
