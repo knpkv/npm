@@ -1171,7 +1171,7 @@ describe("durable coordinator orchestrator", () => {
       }))
   }
 
-  it.effect("applies the Work snapshot byte bound before dispatch activation", () =>
+  it.effect("activates a dispatch even when the Work board is past the old snapshot byte bound", () =>
     withTemporaryRoot("herdr-orchestrator-worker-start-snapshot-capacity-", (root) => {
       const path = join(root, "orchestrator.sqlite")
       const submission = makeSolSubmission(null, "dispatch:worker-start:snapshot-capacity")
@@ -1219,28 +1219,24 @@ describe("durable coordinator orchestrator", () => {
         }
         database.exec("COMMIT")
         database.close()
-        expect(
-          yield* Effect.result(withDatabase(
-            path,
-            Effect.gen(function*() {
-              const orchestrator = yield* Orchestrator
-              return yield* orchestrator.workerStarted({
-                dispatchRequestId: receipt.dispatchRequestId,
-                expectedRevision: lane.revision,
-                laneId: lane.laneId,
-                version: "herdr.work.agent-binding-request.v1",
-                worker: startedWorker
-              })
+        // The Work board's size never blocks a write; its snapshot bounds itself at read time.
+        const activation = yield* withDatabase(
+          path,
+          Effect.gen(function*() {
+            const orchestrator = yield* Orchestrator
+            return yield* orchestrator.workerStarted({
+              dispatchRequestId: receipt.dispatchRequestId,
+              expectedRevision: lane.revision,
+              laneId: lane.laneId,
+              version: "herdr.work.agent-binding-request.v1",
+              worker: startedWorker
             })
-          ))
-        ).toMatchObject({ failure: { _tag: "OrchestratorStorageError" } })
-        const readback = fixtureDatabase(path)
-        expect(
-          readback.prepare(
-            "SELECT status FROM orchestrator_dispatches WHERE dispatch_request_id = ?"
-          ).get(receipt.dispatchRequestId)
-        ).toEqual({ status: "queued" })
-        readback.close()
+          })
+        )
+        expect(activation).toMatchObject({
+          binding: { lane: { expectedRevision: lane.revision, revision: lane.revision + 1 } },
+          event: { type: "running" }
+        })
       })
     }))
 

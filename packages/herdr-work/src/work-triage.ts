@@ -118,9 +118,9 @@ const compareRows = (left: WorkTriageRow, right: WorkTriageRow): number => {
 }
 
 /**
- * Sorts one snapshot's goals into the triage groups and states the summary. The snapshot holds
- * every goal (the model rejects a snapshot over `workSnapshotMaxGoals` rather than truncating it),
- * so a zero here is a real zero.
+ * Sorts one snapshot's goals into the triage groups and states the summary. A bounded snapshot
+ * leaves out finished goals first (counted in `goalsOmitted`), so open goals are all here unless
+ * finished ones alone could not make room; only then can a zero undercount.
  */
 export const workTriage = (snapshot: Pick<WorkSnapshot, "asOf" | "goals" | "observed">): WorkTriage => {
   const overlay = new Map((snapshot.observed ?? []).map((entry) => [entry.goalId, entry]))

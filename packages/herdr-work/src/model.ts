@@ -1073,6 +1073,12 @@ export const WorkSnapshot = Schema.Struct({
   goals: Schema.Array(WorkGoal).check(Schema.isMaxLength(workSnapshotMaxGoals)),
   families: Schema.optionalKey(Schema.Array(WorkGoalFamilyGroup).check(Schema.isMaxLength(workSnapshotMaxGoals))),
   /**
+   * How many of this window's goals were left out to keep the snapshots within
+   * the response budget and the goal limit: finished goals first, the least
+   * recently updated first. Recording never fails for size; the read is bounded.
+   */
+  goalsOmitted: Schema.optionalKey(Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0))),
+  /**
    * Observed facts per goal, merged at read time; only the `now` window
    * carries them, and only for goals something was observed about.
    */

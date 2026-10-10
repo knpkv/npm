@@ -3595,7 +3595,8 @@ esac
               }),
             (workStore) => Effect.sync(() => workStore.close())
           )
-          expect(acceptedWorkCheckpoints).toBeLessThan(11)
+          // Recording never fails for size; the snapshot below bounds itself instead.
+          expect(acceptedWorkCheckpoints).toBe(11)
           yield* Effect.acquireUseRelease(
             ChatStore.open(join(root, "approval-app.sqlite")),
             (chatStore) =>
@@ -3658,9 +3659,9 @@ esac
           expect(Buffer.byteLength(workResponse.body)).toBeLessThanOrEqual(
             fleetResponseBodyMaxBytes
           )
-          expect(
-            Schema.decodeUnknownSync(WorkSnapshots)(JSON.parse(workResponse.body)).now.goals
-          ).toHaveLength(acceptedWorkCheckpoints)
+          const workNow = Schema.decodeUnknownSync(WorkSnapshots)(JSON.parse(workResponse.body)).now
+          expect(workNow.goalsOmitted).toBeGreaterThan(0)
+          expect(workNow.goals.length + (workNow.goalsOmitted ?? 0)).toBe(acceptedWorkCheckpoints)
           const missingLink = yield* Effect.promise(() =>
             secureRequestBody(
               `${server.serveUrl}/v1/work/pull-request-link?repository=knpkv%2Fnpm&pullRequest=433&goalId=missing-goal&laneId=missing-lane`,
