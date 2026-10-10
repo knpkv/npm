@@ -5,7 +5,8 @@
  *
  * - **A Snapshot replaces, never merges.** `seq` is not comparable across subscriptions, so a reconnect
  *   starts over from its Snapshot. Running tool rows and open confirmation cards then arrive again as their
- *   own events, so a card decided while the panel was away never returns.
+ *   own events, so a card decided while the panel was away never returns. Tool rows, decided cards and run
+ *   outcomes belong to the subscription that saw them: after a Snapshot the transcript is its messages alone.
  * - **A person's message is the server's.** It shows when the stream says so: queued (`MessageQueued`, or a
  *   Snapshot's `queued`), then placed in the transcript (`MessagePlaced`) or withdrawn. The page never adds
  *   a message on its own guess, so a Snapshot can't race a send. The only thing the page adds is the text of
@@ -55,6 +56,8 @@ export interface RelayToolRow {
   readonly state: "running" | "awaiting-approval" | "ok" | "failed"
   /** What a finished write made, when its capability reports one. */
   readonly receipt: WriteReceipt | null
+  /** The message the call came after, or null before any: where the transcript shows it. */
+  readonly after: string | null
 }
 
 export interface RelayConfirmationCard {
@@ -70,6 +73,21 @@ export interface RelayQueuedMessage {
   readonly text: string | null
 }
 
+/**
+ * How one run ended. `id` is the run's own (its request ids), so a second failure is a new item, not the
+ * first one again; `after` is the message it followed.
+ */
+export type RelayRunOutcome =
+  | { readonly _tag: "Finished"; readonly id: string; readonly after: string | null }
+  | { readonly _tag: "Cancelled"; readonly id: string; readonly after: string | null }
+  | {
+    readonly _tag: "Failed"
+    readonly id: string
+    readonly after: string | null
+    readonly cause: string
+    readonly fix: string
+  }
+
 export interface RelayConversationState {
   readonly connection: RelayConnection
   readonly messages: ReadonlyArray<RelayTranscriptMessage>
@@ -83,6 +101,10 @@ export interface RelayConversationState {
   readonly confirmations: ReadonlyArray<RelayConfirmationCard>
   /** Why the last run failed, until the next one starts. */
   readonly failure: { readonly cause: string; readonly fix: string } | null
+  /** How each run this subscription saw ended, where it ended: the transcript announces each once. */
+  readonly outcomes: ReadonlyArray<RelayRunOutcome>
+  /** Counts Snapshots: which subscription the state came from, so an id built from `seq` is never reused. */
+  readonly generation: number
   /** The session's backend, once the client has read it. */
   readonly backend: BackendStatus | null
 }
@@ -94,6 +116,8 @@ export const initialRelayConversation: RelayConversationState = {
   failure: null,
   messages: [],
   outbox: [],
+  outcomes: [],
+  generation: 0,
   queued: [],
   runIds: [],
   tools: []
@@ -134,6 +158,28 @@ const settle = (state: RelayConversationState, requestId: string): RelayConversa
   queued: state.queued.filter((queued) => queued.requestId !== requestId)
 })
 
+/**
+ * How a run ended, named by its session and request ids, encoded so no two lists collide (["a","b"] is not
+ * ["a,b"]). A run with no ids is named by its subscription and its place in that stream.
+ */
+const outcomeOf = (
+  state: RelayConversationState,
+  event: Extract<RelayEvent, { readonly _tag: "RunFinished" | "Cancelled" | "RunFailed" }>
+): RelayRunOutcome => {
+  const id = event.runIds.length > 0
+    ? `run:${JSON.stringify([event.session, ...event.runIds])}`
+    : `run:${JSON.stringify([event.session, state.generation, event.seq])}`
+  const after = state.messages.at(-1)?.id ?? null
+  switch (event._tag) {
+    case "RunFinished":
+      return { _tag: "Finished", after, id }
+    case "Cancelled":
+      return { _tag: "Cancelled", after, id }
+    case "RunFailed":
+      return { _tag: "Failed", after, cause: event.cause, fix: event.fix, id }
+  }
+}
+
 /** The conversation after one event. Pure: the same events always give the same state. */
 export const foldRelayConversation = (
   state: RelayConversationState,
@@ -146,6 +192,8 @@ export const foldRelayConversation = (
         confirmations: [],
         connection: "live",
         failure: null,
+        generation: state.generation + 1,
+        outcomes: [],
         // A turn that only called tools has no text to show.
         messages: event.messages.flatMap((message) =>
           message.role === "relay" && message.text === "" ? [] : [{ ...message, streaming: false }]
@@ -165,6 +213,7 @@ export const foldRelayConversation = (
           ...state,
           messages: endStreaming(state.messages),
           tools: [...state.tools, {
+            after: state.messages.at(-1)?.id ?? null,
             call: event.call,
             capability: event.capability,
             receipt: null,
@@ -172,18 +221,34 @@ export const foldRelayConversation = (
             summary: event.summary
           }]
         }
-    case "ToolFinished":
-      // A blocked or unoffered call finishes without having started; it still splits the reply.
+    case "ToolFinished": {
+      // A blocked or unoffered call finishes without having started: it still splits the reply, and gets its
+      // row here so the transcript shows it.
+      const finished = (row: RelayToolRow): RelayToolRow => ({
+        ...row,
+        receipt: event.receipt ?? null,
+        state: event.ok ? "ok" : "failed",
+        summary: event.summary
+      })
+      const started = state.tools.some(({ call }) => call === event.call)
       return {
         ...state,
         messages: endStreaming(state.messages),
-        tools: withTool(state.tools, event.call, (row) => ({
-          ...row,
-          receipt: event.receipt ?? null,
-          state: event.ok ? "ok" : "failed",
-          summary: event.summary
-        }))
+        tools: started
+          ? withTool(state.tools, event.call, finished)
+          : [
+            ...state.tools,
+            finished({
+              after: state.messages.at(-1)?.id ?? null,
+              call: event.call,
+              capability: "",
+              receipt: null,
+              state: "running",
+              summary: event.summary
+            })
+          ]
       }
+    }
     case "ApprovalPending":
       return { ...state, tools: withTool(state.tools, event.call, (row) => ({ ...row, state: "awaiting-approval" })) }
     case "ConfirmationRequired":
@@ -207,14 +272,16 @@ export const foldRelayConversation = (
       }
     case "RunFinished":
     case "Cancelled":
-      return { ...state, messages: endStreaming(state.messages), runIds: [] }
-    case "RunFailed":
+    case "RunFailed": {
+      const outcome = outcomeOf(state, event)
       return {
         ...state,
-        failure: { cause: event.cause, fix: event.fix },
+        failure: event._tag === "RunFailed" ? { cause: event.cause, fix: event.fix } : state.failure,
         messages: endStreaming(state.messages),
+        outcomes: state.outcomes.some(({ id }) => id === outcome.id) ? state.outcomes : [...state.outcomes, outcome],
         runIds: []
       }
+    }
     case "Sending":
       return state.outbox.some(({ requestId }) => requestId === event.requestId)
         ? state

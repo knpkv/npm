@@ -72,3 +72,25 @@ const state = useRelayConversation(conversations, { product: "herdr", kind: "fle
   background after each Snapshot, each run's end and each accepted send, so a failure can
   say "Sign in to Codex" and a slow read never holds back an event. A newer read interrupts
   an older one, and a read still running when the stream closes is interrupted with it.
+
+### The panel
+
+`RelayConversationPanel` shows one conversation in rly's `RelayPanel`: its transcript, any
+confirmation cards, and a composer. The host owns opening: it runs `useRelaySummon` (with
+`useRelayShortcut()`, or `null` where its own terminal owns Ctrl/⌘+J), renders the panel
+right after its launcher while open, and passes `regionRef` and `composerRef` through. While
+the panel is open its transcript announces runs; the host's status line should announce
+only while it is closed.
+
+- **The transcript** (`relayTranscriptItems`) is in the order things happened: each message,
+  then the tool work after it as one burst, then each run's end (finished, cancelled, or
+  failed with its fix), named by the run so every end is announced once. Queued messages show
+  as yours with a count of what waits. Tool bursts, decided cards and run ends belong to the
+  subscription that saw them: after a reconnect the transcript is its messages.
+- **Send is busy** while there is no request id yet, a send is in flight, a run is answering
+  (Stop cancels it) or the stream is not live, and the composer says which. A refused send
+  keeps the draft and its id, so sending again lands once.
+- **Signed out** shows the host's `signedOut` copy and action beside Retry; a stream that
+  stopped offers Retry.
+- **Confirmation cards** need the host's words (`decision`): rly conjugates nothing. Without
+  them a pending card says the page can't confirm it.

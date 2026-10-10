@@ -13,6 +13,11 @@ export {
   RelayUnauthorized
 } from "./relay-client.js"
 export {
+  RelayConversationPanel,
+  type RelayConversationPanelProps,
+  type RelayDecisionWords
+} from "./relay-conversation-panel.js"
+export {
   makeRelayConversations,
   type RelayConversationListener,
   type RelayConversations,
@@ -28,6 +33,7 @@ export {
   type RelayConnection,
   type RelayConversationState,
   type RelayQueuedMessage,
+  type RelayRunOutcome,
   type RelayToolRow,
   type RelayTranscriptMessage
 } from "./relay-fold.js"
@@ -40,5 +46,6 @@ export {
   relayStatusOf,
   type RelayStatusView
 } from "./relay-status.js"
+export { relayTranscriptItems } from "./relay-transcript.js"
 export { useRelayConversation } from "./use-relay-conversation.js"
 export { useRelayStatus } from "./use-relay-status.js"

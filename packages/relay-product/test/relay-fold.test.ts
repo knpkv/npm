@@ -201,6 +201,7 @@ describe("foldRelayConversation", () => {
       }
     ])
     expect(state.tools).toEqual([{
+      after: null,
       call: "t1",
       capability: "post_comment",
       receipt: { providerId: "op-1", summary: "Comment posted" },
