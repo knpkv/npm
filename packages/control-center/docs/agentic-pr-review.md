@@ -140,6 +140,16 @@ fits the durable report envelope. The projection reserves space for subject
 identity, resolved anchors, lifecycle state, suggestion IDs, and note IDs before
 the executor performs evidence validation.
 
+Evidence validation never reads the sandbox copy. The agent can rewrite refs,
+replacement refs, and object files there without changing any revision ID, so
+the executor reads the exact base and head from the host's own checkout, which
+the sandbox mounts read-only. Those reads run `git` as argv without a shell,
+with replacement objects disabled and no global or system Git configuration,
+and the executor slices evidence lines itself. Replacement patches are checked
+in a throwaway index outside the checkout. Contained commands run in a
+non-login shell, so startup files the agent writes under the sandbox HOME never
+run.
+
 ### Confidence
 
 - High: directly reproduced or proven by deterministic analysis.

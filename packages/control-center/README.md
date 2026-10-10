@@ -244,7 +244,8 @@ credential proxy while disabling project-document and exec-policy loading from t
 Claude disables project, local, and user setting sources so its `CLAUDE.md` files are
 review content rather than executable instructions, and safe mode disables automatic project-memory
 discovery. Every path validates structured output and exact
-diff evidence on the trusted host. Sandbox names use a server-private compact workspace-scoped prefix and remain within sbx's 63-character
+diff evidence on the trusted host, reading the base and head from the host's own checkout rather
+than the agent-writable sandbox copy. Sandbox names use a server-private compact workspace-scoped prefix and remain within sbx's 63-character
 limit, and begin with the configured worker workspace's
 `cc-pr-review-<compact-workspace-id>-` prefix. Startup retains live names in that owned namespace
 for recovery inspection and never removes foreign-workspace or legacy unscoped names automatically.
