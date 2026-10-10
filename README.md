@@ -73,6 +73,45 @@ pnpm check
 pnpm lint
 ```
 
+### Local checks
+
+Run `pnpm install` after dependency changes. Tool commands do not install dependencies automatically.
+
+```bash
+# Unit tests resolve workspace packages to source; no build or packed tests.
+pnpm test:changed origin/main
+pnpm test:related packages/herdr-fleet/src/service.ts
+
+# Limit a local unit run further on a shared machine.
+VITEST_MAX_WORKERS=2 pnpm test:unit run packages/herdr-fleet
+
+# Reuse transformed modules across full local unit runs.
+pnpm test:unit:cached run
+
+# Ignore local ESLint caches when investigating a lint result.
+ESLINT_CACHE=false pnpm lint:eslint
+```
+
+The root Vitest config uses half the available cores locally. `VITEST_MAX_WORKERS` or
+`--maxWorkers` overrides it; package-specific runs retain their own defaults.
+Per-file isolation stays enabled. CI retains its worker defaults and full required suites,
+including packed-package tests. `pnpm test` still runs unit and packed tests.
+`test:unit:cached`, `test:changed` and `test:related` cache transformed modules in
+`node_modules/.cache/vitest/modules`. These scripts pass CLI options because package projects
+do not inherit the root config's transform-cache setting. CI keeps using `test:unit`.
+Use `--no-fsModuleCache` to bypass it, or `pnpm exec vitest --clearCache` to clear it.
+
+Local ESLint partitions use content caches in `node_modules/.cache/eslint`, with separate
+files for each partition. Lint config, local rule code and lockfile changes invalidate them.
+CI disables these caches unless `ESLINT_CACHE=true` is explicit. For changes to imports or
+exported members, run uncached lint too: ESLint's file cache does not track imported modules.
+
+Compiler-only builds for `ai-runtime`, `herdr-connect`, `herdr-coordinator`, `herdr-fleet`,
+`herdr-tailscale` and `herdr-work` retain `.tsbuildinfo` locally. Deleted and renamed sources
+lose their old emitted files; missing outputs force a rebuild. CI forces a full emit.
+The helper assumes `src` emits to `dist` with declarations and JavaScript/declaration maps;
+packages with asset bundling retain their existing builds.
+
 ### Development Environment
 
 This repository uses [Nix flakes](https://nixos.wiki/wiki/Flakes) with [direnv](https://direnv.net) for reproducible development environments:

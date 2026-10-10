@@ -30,6 +30,57 @@ test("local pnpm test still runs both partitions", () => {
   assert.equal(scripts["test:unit"], "vitest --configLoader native")
 })
 
+test("local unit selection uses Vitest's changed and related graph without packed tests", () => {
+  const cache = "--fsModuleCache --fsModuleCachePath node_modules/.cache/vitest/modules"
+  assert.equal(scripts["test:unit:cached"], `vitest --configLoader native ${cache}`)
+  assert.equal(scripts["test:changed"], `vitest run --configLoader native ${cache} --changed`)
+  assert.equal(scripts["test:related"], `vitest related --run --configLoader native ${cache}`)
+})
+
+// Load the actual config in a fresh process so CI and local imports cannot share module state.
+const vitestConfig = (ci) =>
+  runtime.runPromise(
+    Effect.gen(function* () {
+      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+      const configUrl = new URL("../vitest.config.ts", import.meta.url).href
+      const handle = yield* spawner.spawn(
+        ChildProcess.make(
+          "node",
+          [
+            "--input-type=module",
+            "--eval",
+            `import config from ${JSON.stringify(configUrl)}; console.log(JSON.stringify(config.test))`
+          ],
+          {
+            env: { CI: ci },
+            extendEnv: true
+          }
+        )
+      )
+      const [stdout, stderr, exitCode] = yield* Effect.all(
+        [
+          Stream.mkString(Stream.decodeText(handle.stdout)),
+          Stream.mkString(Stream.decodeText(handle.stderr)),
+          handle.exitCode
+        ],
+        { concurrency: "unbounded" }
+      )
+      assert.equal(exitCode, ChildProcessSpawner.ExitCode(0), stderr)
+      return JSON.parse(stdout)
+    }).pipe(Effect.scoped)
+  )
+
+test("local worker defaults leave CI's defaults intact; project caches use explicit scripts", async () => {
+  const local = await vitestConfig(undefined)
+  assert.equal(local.maxWorkers, "50%")
+  assert.equal(local.fsModuleCache, undefined)
+  assert.equal(local.fsModuleCachePath, undefined)
+  const ci = await vitestConfig("true")
+  assert.equal(ci.maxWorkers, undefined)
+  assert.equal(ci.fsModuleCache, undefined)
+  assert.equal(ci.fsModuleCachePath, undefined)
+})
+
 test("unit tests and packed-package checks run as separate CI jobs with their own timeouts", () => {
   const runs = (job) => job.steps.flatMap((step) => (step.run === undefined ? [] : [step.run]))
   assert.equal(jobs["test-unit"].name, "Test unit")

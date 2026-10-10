@@ -1,0 +1,21 @@
+{
+  "extends": "../tsconfig.base.jsonc",
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": true,
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false,
+    "noEmit": true,
+    "types": ["node"],
+    "tsBuildInfoFile": "../node_modules/.cache/local-tools.tsbuildinfo"
+  },
+  "include": [
+    "build-typescript.mjs",
+    "build-typescript.test.mjs",
+    "run-eslint.mjs",
+    "run-eslint.test.mjs",
+    "../vitest.config.ts"
+  ]
+}
