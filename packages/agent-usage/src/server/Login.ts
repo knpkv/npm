@@ -6,8 +6,8 @@
  *
  * @module
  */
-import { Console, Effect, Runtime, Schema } from "effect"
-import { ChildProcess, ChildProcessSpawner } from "effect/process"
+import { openBrowser } from "@knpkv/browser-pairing/launch"
+import { Console, Effect, Option, Runtime, Schema } from "effect"
 import {
   type LoginReplyInvalid,
   requestLoginUrl,
@@ -42,39 +42,36 @@ export const describeLoginFailure = (failure: LoginFailure): string => {
   }
 }
 
-/** The command that opens a URL in the default browser, where there is one this tool knows. */
-export const openerFor = (platform: string): "open" | "xdg-open" | undefined =>
-  platform === "darwin" ? "open" : platform === "linux" ? "xdg-open" : undefined
-
-/**
- * Opens `url` in the browser. Reports a failure on stderr and carries on: the link is printed
- * either way. The link is on the opener's command line while it runs, visible to this machine's
- * process list for that moment; it is spent on first use and expires within the minute.
- */
-const openInBrowser = Effect.fnUntraced(function*(url: string, platform: string) {
-  const opener = openerFor(platform)
-  if (opener === undefined) {
-    return yield* Console.error(`agent-usage: cannot open a browser on ${platform}; open the link above.`)
-  }
-  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-  // In this process's group, not one of its own: the opener's group is killed when it is reaped,
-  // which would take the browser it just started with it. Its output is not ours to hold open
-  // either: the browser inherits it and would keep login waiting for as long as it runs.
-  const opening = ChildProcess.make(opener, [url], {
-    detached: false,
-    stdin: "ignore",
-    stdout: "ignore",
-    stderr: "ignore"
-  })
-  const code = yield* spawner.exitCode(opening).pipe(Effect.result)
-  if (code._tag === "Failure" || code.success !== 0) {
-    yield* Console.error(`agent-usage: ${opener} could not open the link; open it yourself.`)
-  }
-})
-
 /** Explains `failure` on stderr, then fails without the runtime reporting it again. */
 const reported = (sentence: string, reason: string) =>
   Console.error(`agent-usage: ${sentence}`).pipe(Effect.andThen(Effect.fail(new LoginFailed({ reason }))))
+
+/** Read login configuration with the same stderr-only failure used by both commands. */
+const loginSettings = Effect.fn("Login.settings")(function*<E extends { readonly message: string }, R>(
+  config: Effect.Effect<{ readonly storeDirectory: string }, E, R>
+) {
+  return yield* config.pipe(
+    Effect.catch((error: E) => reported(`its configuration could not be read: ${error.message}`, "ConfigError"))
+  )
+})
+
+/**
+ * Ask the running server for a fresh link. Only an absent listener returns None; configuration,
+ * unsafe socket and exchange failures are explained on stderr and fail without starting a server.
+ */
+export const existingLoginUrl = Effect.fn("Login.existingLoginUrl")(
+  function*<E extends { readonly message: string }, R>(
+    config: Effect.Effect<{ readonly storeDirectory: string }, E, R>,
+    self: number
+  ) {
+    const settings = yield* loginSettings(config)
+    return yield* requestLoginUrl(settings.storeDirectory, self).pipe(
+      Effect.map(Option.some),
+      Effect.catchTag("ServerNotRunning", () => Effect.succeed(Option.none<string>())),
+      Effect.catch((failure) => reported(describeLoginFailure(failure), failure._tag))
+    )
+  }
+)
 
 /**
  * Reads the store directory from `config`, asks the server running there for a link, prints it, and
@@ -84,15 +81,12 @@ const reported = (sentence: string, reason: string) =>
 export const login = Effect.fn("Login.login")(function*<E extends { readonly message: string }, R>(
   config: Effect.Effect<{ readonly storeDirectory: string }, E, R>,
   open: boolean,
-  platform: string,
   self: number
 ) {
-  const settings = yield* config.pipe(
-    Effect.catch((error: E) => reported(`its configuration could not be read: ${error.message}`, "ConfigError"))
-  )
+  const settings = yield* loginSettings(config)
   const url = yield* requestLoginUrl(settings.storeDirectory, self).pipe(
     Effect.catch((failure: LoginFailure) => reported(describeLoginFailure(failure), failure._tag))
   )
   yield* Console.log(url)
-  if (open) yield* openInBrowser(url, platform)
+  if (open) yield* openBrowser(url)
 })

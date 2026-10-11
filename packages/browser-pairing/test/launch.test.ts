@@ -171,7 +171,12 @@ describe("browser opener", () => {
             expect(command.args).toEqual(
               command.command === "rundll32.exe" ? ["url.dll,FileProtocolHandler", url] : [url]
             )
-            expect(command.options).toMatchObject({ stdin: "ignore", stdout: "ignore", stderr: "ignore" })
+            expect(command.options).toMatchObject({
+              detached: false,
+              stdin: "ignore",
+              stdout: "ignore",
+              stderr: "ignore"
+            })
           }
         }))
     })

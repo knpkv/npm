@@ -2,6 +2,8 @@
 /**
  * `agent-usage` — record Claude and Codex usage on this Machine and show it in a browser.
  *
+ * - `agent-usage [--no-open] [--port N]` signs in to the running server or starts a foreground
+ *   server, opens the browser, and prints the link. A reused server keeps running unchanged.
  * - `agent-usage serve` ingests every minute, polls Claude limits every five, and prints the URL
  *   that gets you in.
  * - `agent-usage login [--open]` asks the running server for a fresh one-time link and prints it.
@@ -13,12 +15,13 @@
  * @module
  */
 import { NodeRuntime, NodeServices } from "@effect/platform-node"
+import { browserLaunch, BrowserOpener, openOrServe } from "@knpkv/browser-pairing/launch"
 import { loopbackOrigin, serveWithBootstrapUrl } from "@knpkv/browser-pairing/owner-session"
-import { ConfigProvider, Console, Effect, Option, Schema } from "effect"
+import { Config, ConfigProvider, Console, Effect, Layer, Logger, Option, Schema } from "effect"
 import { Command, Flag } from "effect/cli"
 import * as Stdio from "effect/Stdio"
 import * as Stream from "effect/Stream"
-import { hostname, platform, userInfo } from "node:os"
+import { hostname, userInfo } from "node:os"
 // Read at run time from the package.json this file ships next to (`dist/../package.json`).
 import pkg from "../package.json" with { type: "json" }
 import { databaseLayer } from "./core/Database.js"
@@ -26,7 +29,7 @@ import { ingestOnce, type IngestStatus } from "./core/Ingest.js"
 import { loadConfig } from "./server/Config.js"
 import { describeIngest } from "./server/IngestSummary.js"
 import { limits as requestLimits } from "./server/Limits.js"
-import { login as requestLogin } from "./server/Login.js"
+import { existingLoginUrl, login as requestLogin } from "./server/Login.js"
 import { makeOwnerSession } from "./server/OwnerSession.js"
 import { makeServer, Port, PublicOrigin } from "./server/Server.js"
 import { usage as requestUsage } from "./server/Usage.js"
@@ -44,20 +47,31 @@ const osUserName = (): string => {
 // Empty values kept, for the one variable where an empty value means something.
 const config = loadConfig(hostname(), ConfigProvider.fromEnv({ preserveEmptyStrings: true }), osUserName())
 
+/** The same foreground server for root launch and print-only service startup. */
+const serveUsage = Effect.fn("AgentUsage.serve")(function*<E, R>(
+  chosenPort: Option.Option<number>,
+  announce: (url: string) => Effect.Effect<void, E, R>
+) {
+  const settings = yield* config
+  const port = Option.isSome(chosenPort) ? chosenPort.value : yield* Port
+  const configuredOrigin = yield* PublicOrigin
+  const security = yield* makeOwnerSession(
+    loopbackOrigin("127.0.0.1", port),
+    Option.getOrUndefined(configuredOrigin)
+  )
+  return yield* serveWithBootstrapUrl(
+    (ready) => makeServer({ config: settings, port, ready, security }),
+    announce
+  )
+})
+
 const serve = Command.make(
   "serve",
   {},
   Effect.fn(function*() {
     const stdio = yield* Stdio.Stdio
-    const settings = yield* config
-    const port = yield* Port
-    const configuredOrigin = yield* PublicOrigin
-    const security = yield* makeOwnerSession(
-      loopbackOrigin("127.0.0.1", port),
-      Option.getOrUndefined(configuredOrigin)
-    )
-    return yield* serveWithBootstrapUrl(
-      (ready) => makeServer({ config: settings, port, ready, security }),
+    return yield* serveUsage(
+      Option.none(),
       // On stdout and nowhere else: this line is the credential, so it is never logged.
       (url) => Stream.make(`agent usage: ${url}\n`).pipe(Stream.run(stdio.stdout()))
     )
@@ -89,7 +103,7 @@ const login = Command.make(
     open: Flag.Boolean("open").pipe(Flag.withDescription("Open the link in the browser too"), Flag.withDefault(false))
   },
   // The user id `login` trusts the socket to belong to; -1 (no POSIX ids) matches no owner.
-  ({ open }) => requestLogin(config, open, platform(), process.geteuid?.() ?? -1)
+  ({ open }) => requestLogin(config, open, process.geteuid?.() ?? -1)
 ).pipe(Command.withDescription("Print a fresh one-time link to the running server"))
 
 const limits = Command.make(
@@ -124,11 +138,45 @@ const usage = Command.make(
     )
 ).pipe(Command.withDescription("Print this Machine's tokens per model and limit series over a range, as JSON"))
 
-const cli = Command.make("agent-usage").pipe(
+const cli = Command.make(
+  "agent-usage",
+  {
+    noOpen: Flag.Boolean("no-open").pipe(
+      Flag.withDescription("Print the sign-in link without opening a browser"),
+      Flag.withDefault(false)
+    ),
+    port: Flag.Int("port").pipe(
+      Flag.withDescription(
+        "Port when starting a server (overrides PORT or 3112); ignored when reusing a running server"
+      ),
+      Flag.optional
+    )
+  },
+  Effect.fn(function*({ noOpen, port }) {
+    const stdio = yield* Stdio.Stdio
+    const launch = browserLaunch({
+      noOpen,
+      browser: Option.getOrUndefined(yield* Config.option(Config.String("BROWSER"))),
+      ci: Option.getOrUndefined(yield* Config.option(Config.String("CI"))),
+      interactive: yield* stdio.stdoutIsTerminal
+    })
+    return yield* openOrServe({
+      login: existingLoginUrl(config, process.geteuid?.() ?? -1),
+      serve: (onReady) => serveUsage(port, onReady),
+      launch
+    })
+  })
+).pipe(
   Command.withDescription("Claude and Codex subscription usage over time, per ticket and against limits"),
   Command.withSubcommands([serve, login, ingest, limits, usage]),
   Command.run({ version: pkg.version })
 )
 
 // Executable entry point: the host platform is provided once for this process.
-NodeRuntime.runMain(cli.pipe(Effect.provide(NodeServices.layer)))
+const runtime = Layer.mergeAll(
+  NodeServices.layer,
+  BrowserOpener.layer.pipe(Layer.provide(NodeServices.layer)),
+  // Shared opener warnings belong on stderr, leaving stdout for the credential and CLI data.
+  Layer.succeed(Logger.LogToStderr, true)
+)
+NodeRuntime.runMain(cli.pipe(Effect.provide(runtime)))
