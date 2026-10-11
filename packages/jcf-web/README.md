@@ -12,15 +12,29 @@ a timesheet is actually read.
 
 ```bash
 pnpm --filter "@knpkv/jcf-web..." build   # this package and jcf, which it imports
-pnpm --filter @knpkv/jcf-web start        # prints the URL that gets you in
+pnpm --filter @knpkv/jcf-web start        # signs in, starting the week view when needed
 ```
 
 `start` first rebuilds jcf if its source changed, then runs the built server;
-`scripts/test-workspace-start.ts` checks that it starts from a fresh HOME and serves the client.
+`scripts/test-workspace-start.ts` checks the print-only `pnpm start serve` from a fresh HOME and verifies
+that it serves the client.
 
 When installed from the published package, run `jcf-web` from the package's bin directory
 (`pnpm exec jcf-web` in a pnpm project). The archive includes the built server and client;
 it does not need the workspace source tree or `tsx` to start.
+
+Running `jcf-web` signs you in: it asks the running week view for a fresh link, or starts one if none
+answers, prints the bare URL and opens it in your browser. Reusing a server exits successfully and
+leaves that server running. A server started here stays in the foreground until SIGINT/SIGTERM;
+closing the browser tab does not stop it.
+
+`jcf-web --no-open` prints the link without opening it. Opening is also skipped for `BROWSER=none`,
+CI or a noninteractive stdout; the command prints the reason beside the link. `jcf-web --port 3115`
+overrides `PORT` when starting a server and is ignored when reusing one. A running server that refuses
+the login prints its failure on stderr and the command exits nonzero without starting another.
+
+Service managers can use `jcf-web serve` for the print-only foreground start. It keeps the
+`jcf week view: <url>` line. `jcf-web login` also keeps that print-only format.
 
 The printed URL carries a one-time code in its fragment. Opening it exchanges the code for a session
 cookie and strips it from the address bar; reloading afterwards works because the cookie is what
@@ -39,7 +53,9 @@ server never runs an old build of it, and runs the server and Vite together. It 
 URL on the dev origin, which proxies the API and the bootstrap exchange so the browser stays on one
 origin.
 
-`PORT` moves the server (3111 by default).
+`PORT` moves the server (3111 by default); the root command's `--port` takes precedence on startup.
+Sign-in URLs go only to stdout and, when opening is enabled, the browser opener. They are never
+logged; ordinary logs and browser-opening warnings go to stderr.
 
 ## What the calendar shows
 

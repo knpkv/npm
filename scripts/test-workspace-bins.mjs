@@ -81,7 +81,7 @@ export const workspaceBinCases = [
     owner: "@knpkv/jcf-web",
     name: "jcf-web",
     bin: "jcf-web/dist/main.js",
-    args: [],
+    args: ["serve"],
     ready: /^jcf week view: http:\/\/127\.0\.0\.1:\d+\//,
     env: (port) => ({ PORT: String(port) })
   },
