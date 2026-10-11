@@ -4137,18 +4137,28 @@ export const startHttpServer = async (
           loadObservations: () =>
             Effect.gen(function*() {
               const observedAt = now()
-              const peers = yield* fleetPeers(config)
-              return yield* loadBlockedPushObservations(
+              const local = yield* Effect.result(
                 localConnectAgents(config, service, activityStore, relationshipStore, observedAt).pipe(
                   Effect.provideService(Crypto.Crypto, cryptoService)
-                ),
-                config.host,
-                peers.map((peer) => ({
+                )
+              )
+              const peers = yield* Effect.result(fleetPeers(config))
+              if (Result.isFailure(peers)) {
+                yield* Effect.logWarning("BlockedPushWorker.peer_directory_unavailable", peers.failure)
+              }
+              const targets = Result.isSuccess(peers)
+                ? peers.success.map((peer) => ({
                   host: peer.host,
                   online: peer.online,
                   agentsUrl: peer.connectAgentsUrl,
                   terminalUrl: peer.terminalUrl
-                })),
+                }))
+                : config.machines.filter((machine) => machine.host.toLowerCase() !== config.host.toLowerCase())
+                  .map((machine) => ({ host: machine.host, online: false, agentsUrl: null, terminalUrl: null }))
+              return yield* loadBlockedPushObservations(
+                Effect.fromResult(local),
+                config.host,
+                targets,
                 postStore,
                 observedAt
               )

@@ -2,7 +2,7 @@ import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
 import { AgentPostStore, ConnectAgent } from "@knpkv/herdr-connect"
 import { openPrivateSqlite } from "@knpkv/herdr-fleet/sqlite"
-import { Clock, Effect, FileSystem, Path, Ref, Schema } from "effect"
+import { Clock, Deferred, Effect, Fiber, FileSystem, Path, Ref, Schema } from "effect"
 import { HttpClient } from "effect/http"
 import { TestClock } from "effect/testing"
 import { type BlockedObservation, type BlockedPushPayload, BlockedPushSettings } from "../src/blocked-push-model.js"
@@ -112,6 +112,108 @@ const setup = Effect.fn("BlockedPushTest.setup")(function*() {
 
 describe("blocked agent notifications", () => {
   it.layer(NodeServices.layer)((it) => {
+    it.effect("limits in-flight delivery to four subscriptions across multiple episodes", () =>
+      Effect.gen(function*() {
+        const test = yield* setup()
+        for (let index = 2; index <= 6; index += 1) {
+          yield* test.subscriptions.putSubscription({
+            endpoint: `https://push.example.test/${index}`,
+            expirationTime: null,
+            keys: { auth: "auth_key", p256dh: "public_key" }
+          }, "owner@example.test")
+        }
+        const release = yield* Deferred.make<void>()
+        const saturated = yield* Deferred.make<void>()
+        const overflow = yield* Deferred.make<void>()
+        const counts = yield* Ref.make({ active: 0, peak: 0, total: 0 })
+        const running = yield* Effect.forkScoped(runBlockedPushPass({
+          store: test.store,
+          subscriptions: test.subscriptions,
+          allowedUsers: ["owner@example.test"],
+          allowedPushOrigins: ["https://push.example.test"],
+          loadObservations: () =>
+            Effect.succeed([{
+              host: "HOST-A",
+              complete: true,
+              observedAt: 0,
+              agents: [agent("blocked"), { ...agent("blocked"), id: "agent-two" }]
+            }]),
+          send: () =>
+            Effect.gen(function*() {
+              const current = yield* Ref.updateAndGet(counts, ({ active, peak, total }) => ({
+                active: active + 1,
+                peak: Math.max(peak, active + 1),
+                total: total + 1
+              }))
+              if (current.active === 4) yield* Deferred.succeed(saturated, undefined)
+              if (current.active > 4) yield* Deferred.succeed(overflow, undefined)
+              yield* Deferred.await(release)
+            }).pipe(Effect.ensuring(Ref.update(counts, (current) => ({ ...current, active: current.active - 1 }))))
+        }))
+        yield* TestClock.withLive(Deferred.await(saturated).pipe(Effect.timeout("3 seconds")))
+        // Keep the first four sends open while the remaining subscriptions attempt admission through real SQLite I/O.
+        const extra = yield* TestClock.withLive(
+          Deferred.await(overflow).pipe(Effect.timeout("1 second"), Effect.result)
+        )
+        expect(extra).toMatchObject({ _tag: "Failure", failure: { _tag: "TimeoutError" } })
+        yield* Deferred.succeed(release, undefined)
+        yield* Fiber.join(running)
+        expect(yield* Ref.get(counts)).toEqual({ active: 0, peak: 4, total: 12 })
+      }))
+
+    it.effect("a stalled subscription does not delay healthy subscriptions and each keeps episode order", () =>
+      Effect.gen(function*() {
+        const test = yield* setup()
+        yield* test.subscriptions.putSubscription({
+          endpoint: "https://push.example.test/two",
+          expirationTime: null,
+          keys: { auth: "auth_key", p256dh: "public_key" }
+        }, "owner@example.test")
+        const release = yield* Deferred.make<void>()
+        const started = yield* Deferred.make<void>()
+        const healthy = yield* Deferred.make<void>()
+        const sent = yield* Ref.make<ReadonlyArray<{ readonly endpoint: string; readonly agentId: string }>>([])
+        const observations: ReadonlyArray<BlockedObservation> = [{
+          host: "HOST-A",
+          complete: true,
+          observedAt: 0,
+          agents: [agent("blocked"), { ...agent("blocked"), id: "agent-two" }, {
+            ...agent("blocked"),
+            id: "agent-three"
+          }]
+        }]
+        const pass = runBlockedPushPass({
+          store: test.store,
+          subscriptions: test.subscriptions,
+          allowedUsers: ["owner@example.test"],
+          allowedPushOrigins: ["https://push.example.test"],
+          loadObservations: () => Effect.succeed(observations),
+          send: (target, payload) =>
+            Effect.gen(function*() {
+              yield* Ref.update(sent, (values) => [...values, { endpoint: target.endpoint, agentId: payload.agentId }])
+              if (target.endpoint.endsWith("/one")) {
+                yield* Deferred.succeed(started, undefined)
+                yield* Deferred.await(release)
+              } else {
+                yield* Deferred.succeed(healthy, undefined)
+              }
+            })
+        })
+        const running = yield* Effect.forkScoped(pass)
+        yield* Deferred.await(started)
+        yield* TestClock.withLive(Deferred.await(healthy).pipe(Effect.timeout("3 seconds")))
+        expect((yield* Ref.get(sent)).filter((value) => value.endpoint.endsWith("/one"))).toHaveLength(1)
+        yield* Deferred.succeed(release, undefined)
+        yield* Fiber.join(running)
+        const deliveries = yield* Ref.get(sent)
+        for (const endpoint of ["https://push.example.test/one", "https://push.example.test/two"]) {
+          expect(deliveries.filter((value) => value.endpoint === endpoint).map((value) => value.agentId))
+            .toEqual(["agent-one", "agent-three", "agent-two"])
+        }
+        yield* pass
+        expect(yield* Ref.get(sent)).toHaveLength(6)
+      }))
+
     it.effect("waiting starts and preserves the same needs-you episode", () =>
       Effect.gen(function*() {
         const test = yield* setup()
