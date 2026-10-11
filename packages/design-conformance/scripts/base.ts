@@ -11,9 +11,10 @@ import * as Stdio from "effect/Stdio"
 import * as Stream from "effect/Stream"
 
 import { readJson } from "../src/references.js"
-import { Manifest, Name, RunnerFailure } from "../src/schema.js"
+import { BaseComparison, Manifest, Name, RunnerFailure } from "../src/schema.js"
+import { captureBaseProduct, isReferenceOnlyChange } from "./product.js"
 
-/** Capture the merge base with its own code and adapter, then remove this task's temporary checkout. */
+/** Capture merge-base application code using the PR's gate, refs and adapter. */
 const program = Effect.gen(function*() {
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
@@ -34,11 +35,19 @@ const program = Effect.gen(function*() {
   const revision = yield* run(["git", "merge-base", "HEAD", baseRef])
   yield* fs.makeDirectory(output, { recursive: true })
   const manifestFile = `design-refs/${product}/manifest.json`
-  const exists = yield* run(["git", "ls-tree", "--name-only", revision, "--", manifestFile])
+  const manifest = yield* readJson(path.join(repository, manifestFile), Manifest)
+  const changedFiles = yield* run(["git", "diff", "--name-only", "--no-renames", "-z", revision, "HEAD"])
+  yield* fs.writeFileString(
+    path.join(output, "comparison.json"),
+    yield* Schema.encodeEffect(Schema.fromJsonString(BaseComparison))({
+      referenceOnly: isReferenceOnlyChange(changedFiles.split("\0").filter((file) => file.length > 0))
+    })
+  )
+  const packageFile = `packages/${manifest.live.package.slice("@knpkv/".length)}/package.json`
+  const exists = yield* run(["git", "ls-tree", "--name-only", revision, "--", packageFile])
   if (exists.length === 0) {
     yield* fs.writeFileString(path.join(output, "captures.json"), "[]")
-    yield* fs.writeFileString(path.join(output, "new-product.txt"), revision)
-    yield* Console.log(`${product}: no base product; every current state is new`)
+    yield* Console.log(`${product}: no merge-base live package; live states are new`)
     return
   }
   const root = yield* fs.makeTempDirectoryScoped({ prefix: "design-conformance-base-" })
@@ -47,7 +56,7 @@ const program = Effect.gen(function*() {
     run(["git", "worktree", "add", "--detach", checkout, revision]),
     () => run(["git", "worktree", "remove", "--force", checkout]).pipe(Effect.orDie)
   )
-  const manifest = yield* readJson(path.join(checkout, manifestFile), Manifest)
+  // Local shared-machine policy: leave at least 3 GiB available before heavy base preparation.
   const memory = yield* fs.readFileString("/proc/meminfo")
   const available = Number(/MemAvailable:\s+(\d+)/u.exec(memory)?.[1])
   if (!Number.isFinite(available) || available < 3 * 1024 * 1024) {
@@ -55,17 +64,7 @@ const program = Effect.gen(function*() {
   }
   yield* run(["pnpm", "install", "--frozen-lockfile"], checkout)
   yield* run(["pnpm", "--filter", `${manifest.live.package}...`, "build"], checkout)
-  yield* run([
-    "pnpm",
-    "--filter",
-    "@knpkv/design-conformance",
-    "design:check",
-    "--product",
-    product,
-    "--capture-only",
-    "--output",
-    output
-  ], checkout)
+  yield* captureBaseProduct(repository, checkout, product, output)
 }).pipe(Effect.scoped)
 
 NodeRuntime.runMain(program.pipe(Effect.provide(NodeServices.layer)))

@@ -1,3 +1,5 @@
+import * as DateTime from "effect/DateTime"
+
 import { stateKey } from "./compare.js"
 import type { Failure, Finding, Identity, Manifest, Result, ShotResult, Waiver } from "./schema.js"
 
@@ -13,10 +15,11 @@ export const verdict = (
   failures: ReadonlyArray<Failure>,
   waivers: ReadonlyArray<Waiver>,
   shots: ReadonlyArray<ShotResult>,
-  now: string
+  now: DateTime.Utc
 ): Result => {
   const touched = new Set(shots.filter((shot) => shot.touched).map(stateKey))
-  const grace = manifest.enforcement.legacy !== "required" && now < manifest.enforcement.legacy.until
+  const grace = manifest.enforcement.legacy !== "required" &&
+    DateTime.isLessThan(now, manifest.enforcement.legacy.until)
   const findings: Array<Finding> = failures.map((failure) => {
     const waiver = waivers.findIndex((candidate) => waiverMatches(candidate, failure))
     if (waiver !== -1) return { ...failure, disposition: "waived", waiver }

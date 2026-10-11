@@ -1,4 +1,5 @@
 import { expect, it } from "@effect/vitest"
+import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 
 import { renderReport } from "../src/report.js"
@@ -11,7 +12,7 @@ it.effect("failure copy cannot inject report HTML", () =>
       ...identity,
       touched: true,
       artifacts: { ref: "ref.png", live: "live.png", "diff-frame": "diff.png" }
-    }], "2026-10-19T00:00:00.000Z")
+    }], DateTime.makeUnsafe("2026-10-19T00:00:00.000Z"))
     const html = renderReport(result)
     expect(html).toContain("&lt;script&gt;")
     expect(html).not.toContain("<script>")

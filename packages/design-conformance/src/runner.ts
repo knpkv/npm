@@ -15,6 +15,7 @@ import type { loadReferences } from "./references.js"
 import { readJson } from "./references.js"
 import { writeReport } from "./report.js"
 import {
+  BaseComparison,
   BrowserFailure,
   type Failure,
   Identity,
@@ -112,6 +113,10 @@ export const runConformance = Effect.fn("DesignConformance.run")(function*(refs:
   const baseIndex = options.base === undefined
     ? []
     : yield* readJson(path.join(options.base, "captures.json"), CaptureIndex)
+  const comparisonFile = options.base === undefined ? undefined : path.join(options.base, "comparison.json")
+  const referenceOnly = comparisonFile !== undefined && (yield* fs.exists(comparisonFile))
+    ? (yield* readJson(comparisonFile, BaseComparison)).referenceOnly
+    : false
   const captured: Array<Identity> = []
   const shots: Array<ShotResult> = []
   const failures: Array<Failure> = []
@@ -205,7 +210,7 @@ export const runConformance = Effect.fn("DesignConformance.run")(function*(refs:
           }
         }
       }
-      shots.push({ ...identity, touched: changed, artifacts })
+      shots.push({ ...identity, touched: !referenceOnly && changed, artifacts })
     }
   }
   yield* fs.writeFileString(
@@ -233,7 +238,7 @@ export const runConformance = Effect.fn("DesignConformance.run")(function*(refs:
   const waivers = options.state === undefined
     ? refs.waivers
     : refs.waivers.filter((waiver) => stateKey(waiver) === options.state)
-  const now = DateTime.formatIso(yield* DateTime.now)
+  const now = yield* DateTime.now
   const result = verdict(refs.manifest, failures, waivers, shots, now)
   yield* writeReport(options.output, result)
   return result

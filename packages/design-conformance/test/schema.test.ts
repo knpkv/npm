@@ -3,11 +3,11 @@ import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 
 import { Fixture, Manifest, Name, RelativeFile, Waivers } from "../src/schema.js"
-import { manifest, state, waiver } from "./models.js"
+import { manifest as decodedManifest, manifestInput as manifest, state, waiver } from "./models.js"
 
 it.effect("decodes manifest, fixture and review waiver boundaries", () =>
   Effect.gen(function*() {
-    expect(yield* Schema.decodeUnknownEffect(Manifest)(manifest)).toEqual(manifest)
+    expect(yield* Schema.decodeUnknownEffect(Manifest)(manifest)).toEqual(decodedManifest)
     expect(
       yield* Schema.decodeUnknownEffect(Fixture)({ version: 1, data: { role: "reviewer", account: "123456789012" } })
     ).toEqual({ version: 1, data: { role: "reviewer", account: "123456789012" } })

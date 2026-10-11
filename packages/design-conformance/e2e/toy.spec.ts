@@ -1,6 +1,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { expect, test } from "@playwright/test"
 import * as Clock from "effect/Clock"
+import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
@@ -65,7 +66,13 @@ test("toy refs prove required, waived, stale, coverage, legacy and touched decis
       expect(legacy.every((finding) => finding.disposition === "report-only")).toBe(true)
       expect(result.shots.every((shot) => !shot.touched)).toBe(true)
       const rawFailures = result.findings.filter((finding) => finding.rule !== "stale-waiver")
-      const expired = verdict(refs.manifest, rawFailures, refs.waivers, result.shots, "2026-10-18T00:00:00.000Z")
+      const expired = verdict(
+        refs.manifest,
+        rawFailures,
+        refs.waivers,
+        result.shots,
+        DateTime.makeUnsafe("2026-10-18T00:00:00.000Z")
+      )
       expect(
         expired.findings.filter((finding) => finding.state === "legacy").every((finding) =>
           finding.disposition === "required"
@@ -76,7 +83,7 @@ test("toy refs prove required, waived, stale, coverage, legacy and touched decis
         rawFailures,
         refs.waivers,
         result.shots.map((shot) => ({ ...shot, touched: true })),
-        "2026-10-17T00:00:00.000Z"
+        DateTime.makeUnsafe("2026-10-17T00:00:00.000Z")
       )
       expect(touched.findings.some((finding) => finding.state === "copy" && finding.disposition === "required")).toBe(
         true
@@ -86,7 +93,7 @@ test("toy refs prove required, waived, stale, coverage, legacy and touched decis
         [],
         [],
         result.shots.filter((shot) => shot.state === "passing"),
-        "2026-10-17T00:00:00.000Z"
+        DateTime.makeUnsafe("2026-10-17T00:00:00.000Z")
       )
       expect(passing.passed).toBe(true)
       const pixels = yield* fs.readFile(path.join(output, "toy--passing--390--light-live.png"))

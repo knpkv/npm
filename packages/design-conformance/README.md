@@ -4,7 +4,7 @@ Private workspace package. No changeset or npm publication.
 
 Every live state needs a reference. A touched state fails on unwaived copy,
 geometry, computed-style or pixel differences. Coverage and stale waivers always
-fail. Unchanged legacy drift may be report-only until the product's UTC deadline.
+fail. Unchanged legacy drift may be report-only until the product's deadline.
 Changing any viewport or theme makes the entire state touched.
 
 ## Reference contract
@@ -46,8 +46,15 @@ for the complete HTML example. Its enforcement block is:
 Use `"legacy": "required"` after migration. At the deadline, existing drift becomes
 required automatically. Touched means new state or live pixels differing from the
 merge-base capture by more than the #844 0.1% threshold, including size changes.
-Missing base product means all current states are new. A missing base capture file
-for an indexed shot is an infrastructure failure. Removed live states fail coverage.
+The PR's refs, fixture and adapter drive both captures. During onboarding, the base
+app is captured even when its checkout has no refs or gate package. A state is new
+only when absent from the base live inventory. A missing base live package means
+all current states are new. Ref-only PRs leave states untouched, while coverage,
+integrity and waiver checks still apply. A missing base capture file for an indexed
+shot is an infrastructure failure. Removed live states fail coverage.
+
+The deadline decodes to a UTC instant; ISO offsets and date-only values are accepted.
+Date-only values expire at UTC midnight. Impossible calendar dates fail decoding.
 
 ## PNG references
 
@@ -68,6 +75,10 @@ TypeScript adapter. Export `start: StartProduct`. Return `LiveProduct.of(...)` w
 an origin, independent route/state inventory, `seed(page, fixture, identity)` and
 `ready(page, identity)` effects. Acquire servers and other resources in the supplied
 scope. `seed` runs before navigation. `ready` runs afterward.
+
+`start(fixture, repository)` must load the live app and its inventory from that
+repository's built package. Base capture supplies the merge-base checkout here;
+a static import of PR application code would invalidate the comparison.
 
 The inventory must come from the application, independently of reference states.
 Each live route needs at least one state. Inventory states supply screen, state,
@@ -121,7 +132,7 @@ and reference/live/diff PNGs. Required findings exit nonzero. Legacy grace findi
 stay visible in the report and workflow summary.
 
 The workflow discovers one matrix job per manifest, builds the adapter's workspace
-dependencies, captures the merge base with its own adapter, then checks PR captures.
+dependencies, captures the merge-base app with the PR's adapter, then checks PR captures.
 It uses read-only repository permissions and uploads reports on success and failure.
 The phase-0 toy test takes two live passes plus one reference pass over 36 shots.
 Product runtime grows with states × viewports × themes; use one Chromium worker.

@@ -8,9 +8,11 @@ export const RelativeFile = Schema.String.check(
 )
 const Route = Schema.String.check(Schema.isPattern(/^\/(?!\/)[^\s#]*$/u))
 const Instant = Schema.String.check(Schema.makeFilter((value) => {
-  const parsed = DateTime.make(value)
-  return Option.isSome(parsed) && DateTime.formatIso(parsed.value) === value || "Expected canonical UTC ISO instant"
-}))
+  const day = value.slice(0, 10)
+  const parsed = DateTime.make(`${day}T00:00:00.000Z`)
+  return Option.isSome(parsed) && DateTime.formatIso(parsed.value).slice(0, 10) === day ||
+    "Expected a valid ISO calendar date"
+})).pipe(Schema.decodeTo(Schema.DateTimeUtcFromString))
 export const Theme = Schema.Literals(["light", "dark"])
 export const Viewport = Schema.Literals([390, 1280])
 const Themes = Schema.Array(Theme).check(Schema.isMinLength(1), Schema.isUnique())
@@ -38,6 +40,8 @@ export const Inventory = Schema.Struct({
     )
   )
 export interface Inventory extends Schema.Schema.Type<typeof Inventory> {}
+
+export const BaseComparison = Schema.Struct({ referenceOnly: Schema.Boolean })
 
 const StateFields = {
   ...LiveState.fields,

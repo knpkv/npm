@@ -1,3 +1,5 @@
+import * as Schema from "effect/Schema"
+
 import { type Failure, type Identity, Manifest, type Snapshot, type Waiver } from "../src/schema.js"
 
 export const identity: Identity = { screen: "toy", state: "passing", viewport: 390, theme: "light" }
@@ -12,7 +14,7 @@ export const state = {
   ref: "screens/screen.html",
   regions: ["content"]
 } satisfies Manifest["states"][number]
-export const manifest: Manifest = Manifest.make({
+export const manifestInput = {
   version: 1,
   product: "toy",
   fixture: "fixture.json",
@@ -20,7 +22,8 @@ export const manifest: Manifest = Manifest.make({
   files: { "fixture.json": "a".repeat(64), "screens/screen.html": "b".repeat(64) },
   states: [state],
   enforcement: { touched: "required", legacy: { mode: "report-only", until: "2026-10-18T00:00:00.000Z" } }
-})
+} satisfies Schema.Codec.Encoded<typeof Manifest>
+export const manifest: Manifest = Schema.decodeUnknownSync(Manifest)(manifestInput)
 export const failure: Failure = { ...identity, region: "content", rule: "copy", detail: "Copy differs" }
 export const waiver: Waiver = {
   screen: "toy",
