@@ -1,6 +1,6 @@
 import type { Effect } from "effect"
 import { Context, Schema } from "effect"
-import type { ResourceSummary, StateReadError } from "./schema.js"
+import type { OutputSummary, ResourceSummary, StateReadError } from "./schema.js"
 
 /** Server-private bucket name and routing region; memory only, never HTTP, browser storage, logs or telemetry. */
 export interface S3Bucket {
@@ -49,6 +49,10 @@ export class S3Reader extends Context.Service<S3Reader, {
   ) => Effect.Effect<S3VersionPage, S3ReadError>
   readonly resource: (bucket: S3Bucket, key: string, versionId: string) => Effect.Effect<
     ResourceSummary | null,
+    S3ReadError | StateReadError
+  >
+  readonly outputs: (bucket: S3Bucket, key: string, versionId: string) => Effect.Effect<
+    ReadonlyArray<OutputSummary>,
     S3ReadError | StateReadError
   >
 }>()("@knpkv/alchemy-console/S3Reader") {}

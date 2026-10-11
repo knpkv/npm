@@ -1,7 +1,7 @@
 import { Context, Crypto, Effect, Layer, Ref, Schema, Semaphore } from "effect"
 import { CatalogReadError, StackNotFound, StackSummary } from "../api.js"
 import type { DiscoveryIssue, StackDetail, StackId, StackList } from "../api.js"
-import { type ResourceSummary, type StackState } from "../schema.js"
+import { type OutputSummary, type ResourceSummary, type StackState } from "../schema.js"
 
 /** Server-private locator identity and read closure. Never serialize or retain in logs or browser storage. */
 export interface DiscoveredStack {
@@ -76,6 +76,11 @@ export class Catalog extends Context.Service<Catalog, {
           state.backend !== entry.summary.backend
         ) return yield* new CatalogReadError({ reason: "invalid-source" })
         if (state.resources.length > 50_000) return yield* new CatalogReadError({ reason: "limit" })
+        if (state.outputs !== null && state.outputs.length > 1000) {
+          return yield* new CatalogReadError({ reason: "limit" })
+        }
+        const edgeCount = state.resources.reduce((count, resource) => count + (resource.downstream?.length ?? 0), 0)
+        if (edgeCount > 100_000) return yield* new CatalogReadError({ reason: "limit" })
         return {
           id,
           state: {
@@ -84,7 +89,12 @@ export class Catalog extends Context.Service<Catalog, {
             backend: state.backend,
             alchemyVersion: state.alchemyVersion,
             lastDeploy: state.lastDeploy,
-            resources: state.resources.map(publicResource)
+            resources: state.resources.map(publicResource),
+            outputs: state.outputs === null ? null : state.outputs.map((output): OutputSummary => ({
+              key: output.key,
+              value: { _tag: "Hidden" },
+              description: null
+            }))
           }
         }
       })
@@ -103,5 +113,7 @@ const publicResource = (resource: ResourceSummary): ResourceSummary => ({
   providerId: resource.providerId,
   account: resource.account,
   region: resource.region,
-  consoleUrl: resource.consoleUrl
+  consoleUrl: resource.consoleUrl,
+  updatedAt: resource.updatedAt,
+  downstream: resource.downstream
 })

@@ -16,11 +16,14 @@ const resource: ResourceSummary = {
   providerId: null,
   account: null,
   region: null,
-  consoleUrl: null
+  consoleUrl: null,
+  updatedAt: null,
+  downstream: null
 }
 const reads: Array<{ key: string; versionId: string }> = []
 const cursors: Array<VersionCursor | null> = []
 const fixture = Layer.succeed(S3Reader, {
+  outputs: () => Effect.succeed([]),
   buckets: (cursor) =>
     Effect.succeed(
       cursor === null ?
@@ -114,6 +117,7 @@ layer(fixture)("S3 state catalog", (it) => {
 })
 
 layer(Layer.succeed(S3Reader, {
+  outputs: () => Effect.succeed([]),
   buckets: () => Effect.succeed({ buckets: [], next: "fixture-loop" }),
   versions: () => Effect.succeed({ versions: [], next: { key, versionId: "fixture-loop" } }),
   resource: () => Effect.fail(new S3ReadError({ reason: "denied" }))
@@ -126,6 +130,7 @@ layer(Layer.succeed(S3Reader, {
 })
 
 layer(Layer.succeed(S3Reader, {
+  outputs: () => Effect.succeed([]),
   buckets: () => Effect.fail(new S3ReadError({ reason: "denied" })),
   versions: () => Effect.fail(new S3ReadError({ reason: "denied" })),
   resource: () => Effect.fail(new S3ReadError({ reason: "denied" }))
@@ -139,6 +144,7 @@ layer(Layer.succeed(S3Reader, {
 
 let boundedCalls = 0
 layer(Layer.succeed(S3Reader, {
+  outputs: () => Effect.succeed([]),
   buckets: () => Effect.succeed({ buckets: [], next: null }),
   versions: (requestedBucket, prefix) =>
     Effect.sync(() => {
@@ -175,5 +181,51 @@ layer(Layer.succeed(S3Reader, {
         reason: "limit"
       })
       expect(boundedCalls).toBe(100)
+    }))
+})
+
+/** Current output selection must distinguish proven empty, unavailable and deletion, without reading historical values. */
+layer(Layer.succeed(S3Reader, {
+  buckets: () => Effect.succeed({ buckets: [], next: null }),
+  versions: (selected) =>
+    Effect.succeed({
+      versions: selected.name === "missing" ? [] : [
+        {
+          key: "fixture-prefix/fixture-app/prod/__stack_output__.json",
+          versionId: selected.name,
+          latest: true,
+          deleted: selected.name === "deleted"
+        },
+        {
+          key: "fixture-prefix/fixture-app/prod/__stack_output__.json",
+          versionId: "historical-secret",
+          latest: false,
+          deleted: false
+        }
+      ],
+      next: null
+    }),
+  resource: () => Effect.succeed(null),
+  outputs: (_selected, _key, version) =>
+    version === "empty" ?
+      Effect.succeed([])
+      : version === "denied" ?
+      Effect.fail(new S3ReadError({ reason: "denied" }))
+      : Effect.succeed([{ key: "apiUrl", value: { _tag: "Hidden" }, description: null }])
+}))("current output dictionary", (it) => {
+  it.effect("uses only a known-format latest version and never resurrects deleted outputs", () =>
+    Effect.gen(function*() {
+      for (const name of ["missing", "deleted", "denied"]) {
+        expect((yield* readS3State({ ...stack, bucket: { ...bucket, name } }, "2.0.0-beta.77")).outputs).toBeNull()
+      }
+      expect((yield* readS3State({ ...stack, bucket: { ...bucket, name: "empty" } }, "2.0.0-beta.74")).outputs).toEqual(
+        []
+      )
+      expect((yield* readS3State({ ...stack, bucket: { ...bucket, name: "known" } }, "2.0.0-beta.77")).outputs).toEqual(
+        [
+          { key: "apiUrl", value: { _tag: "Hidden" }, description: null }
+        ]
+      )
+      expect((yield* readS3State({ ...stack, bucket: { ...bucket, name: "known" } })).outputs).toBeNull()
     }))
 })
