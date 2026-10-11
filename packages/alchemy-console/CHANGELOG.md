@@ -1,5 +1,11 @@
 # @knpkv/alchemy-console
 
+## 0.4.0
+
+### Minor Changes
+
+- [#848](https://github.com/knpkv/npm/pull/848) [`b8dce18`](https://github.com/knpkv/npm/commit/b8dce18f90b48e04c563ef7c09b82c2a55b71b99) Thanks [@konopkov](https://github.com/konopkov)! - Add authenticated read-only stack and resource detail views, resource-own provider identity and console links, bounded dependencies, and hidden output-key discovery.
+
 ## 0.3.2
 
 ### Patch Changes

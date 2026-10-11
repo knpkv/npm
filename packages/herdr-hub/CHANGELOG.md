@@ -2,6 +2,14 @@
 
 Released as `@knpkv/herdr-approvals` up to 0.18.0; the headings below are that package's history.
 
+## 0.29.0
+
+### Minor Changes
+
+- [#846](https://github.com/knpkv/npm/pull/846) [`f47bcd8`](https://github.com/knpkv/npm/commit/f47bcd8cb0ff789a068cd6ad1eefb912f28a1f89) Thanks [@konopkov](https://github.com/konopkov)! - Use the approved static Chef logo in the module shell, with square 32px desktop and 24px phone marks. The existing expanded styling indicates whether Ask Relay is open; status announcements and the conversation's Creature poses retain their behavior. Legacy Fleet and dashboard marks remain unchanged. `HubRelay.launcherMark` defaults to `creature`; `chef` explicitly selects the static logo independently of launcher labels.
+
+  Update the app, maskable and notification icons, and serve a separate simplified favicon. Installed app identity and legacy icon URLs remain stable. Committed icon hashes and drawing parity guards verify the approved geometry.
+
 ## 0.28.0
 
 ### Minor Changes
