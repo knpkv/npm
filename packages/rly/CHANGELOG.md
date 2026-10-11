@@ -1,5 +1,11 @@
 # @knpkv/rly
 
+## 0.22.0
+
+### Minor Changes
+
+- [#806](https://github.com/knpkv/npm/pull/806) [`3c5bfb7`](https://github.com/knpkv/npm/commit/3c5bfb7fee6e8fb14fe64a28688be752a5cb60b9) Thanks [@konopkov](https://github.com/konopkov)! - Expose caller-controlled entity row selection and show the selected booking with a row tint.
+
 ## 0.21.0
 
 ### Minor Changes

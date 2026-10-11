@@ -1,5 +1,13 @@
 # @knpkv/herdr-work
 
+## 0.12.1
+
+### Patch Changes
+
+- [#805](https://github.com/knpkv/npm/pull/805) [`3865413`](https://github.com/knpkv/npm/commit/3865413011482749e76c23bf8e1066b63b6ed5b8) Thanks [@konopkov](https://github.com/konopkov)! - Use the recorded finish time for terminal goal rows and keep response and finished-retention omissions visible in filtered board counts.
+- Updated dependencies [[`3c5bfb7`](https://github.com/knpkv/npm/commit/3c5bfb7fee6e8fb14fe64a28688be752a5cb60b9)]:
+  - @knpkv/rly@0.22.0
+
 ## 0.12.0
 
 ### Minor Changes

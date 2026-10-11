@@ -1,5 +1,14 @@
 # @knpkv/control-center
 
+## 0.15.1
+
+### Patch Changes
+
+- Updated dependencies [[`3c5bfb7`](https://github.com/knpkv/npm/commit/3c5bfb7fee6e8fb14fe64a28688be752a5cb60b9)]:
+  - @knpkv/rly@0.22.0
+  - @knpkv/relay-product@0.6.1
+  - @knpkv/review@0.4.12
+
 ## 0.15.0
 
 ### Minor Changes
