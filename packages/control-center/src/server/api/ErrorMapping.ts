@@ -1,5 +1,8 @@
 import * as Context from "effect/Context"
+import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
+import * as HttpEffect from "effect/http/HttpEffect"
+import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Option from "effect/Option"
 
 import {
@@ -185,18 +188,37 @@ export const mapApplicationConflict = (_error: ApplicationConflict) =>
 export const mapApplicationInvalidRequest = (_error: ApplicationInvalidRequest) =>
   Effect.flatMap(invalidRequestApiError, Effect.fail)
 
-export const mapRequestRateLimitFailure = (_error: RequestRateLimitExceeded) =>
-  Effect.flatMap(
-    withCorrelation((correlationId) =>
-      new RateLimitedApiError({
-        code: "rate-limited",
-        correlationId,
-        message: "The request budget is exhausted.",
-        retryAt: null
-      })
-    ),
-    Effect.fail
+/** Mutable assembly of the optional budget field; the emitted error stays immutable. */
+interface RequestBudgetFields {
+  budget?: NonNullable<RateLimitedApiError["budget"]>
+}
+
+export const mapRequestRateLimitFailure = Effect.fn("ErrorMapping.requestRateLimit")(function*(
+  error: RequestRateLimitExceeded
+) {
+  const now = yield* DateTime.now
+  const budget: RequestBudgetFields = {}
+  if (error.budget !== undefined) budget.budget = error.budget
+  const failure = yield* withCorrelation((correlationId) =>
+    new RateLimitedApiError({
+      code: "rate-limited",
+      correlationId,
+      message: error.budget === undefined
+        ? "The request budget is exhausted."
+        : `The ${error.budget} synchronization request budget is exhausted.`,
+      retryAt: DateTime.add(now, { seconds: error.retryAfterSeconds }),
+      retryAfterSeconds: error.retryAfterSeconds,
+      ...budget
+    })
   )
+  return yield* HttpEffect.withPreResponseHandler(
+    Effect.fail(failure),
+    (_request, response) =>
+      Effect.succeed(
+        HttpServerResponse.setHeader(response, "retry-after", String(error.retryAfterSeconds))
+      )
+  )
+})
 
 export const mapRequestRateLimitUnavailable = (_error: RequestRateLimitUnavailable) =>
   Effect.flatMap(serviceUnavailableApiError(), Effect.fail)

@@ -1,15 +1,22 @@
 import { Button, StateLabel, Text } from "@knpkv/rly/primitives"
 import { type ReactElement, useEffect, useState } from "react"
 
+import type { RateLimitedApiError } from "../../api/errors.js"
 import type { PluginSynchronizationState } from "../../api/plugins.js"
 import styles from "./ServicesPage.module.css"
-import { isAccountSyncFailure, type SyncLine, syncFailureSentence, syncLine } from "./syncPresentation.js"
+import {
+  isAccountSyncFailure,
+  type SyncLine,
+  syncFailureSentence,
+  syncLine,
+  syncRequestBudgetSentence
+} from "./syncPresentation.js"
 
 /** Browser lifecycle for one connection's durable manual synchronization state. */
 export type ConnectionSynchronizationViewState =
   | { readonly _tag: "loading" }
   | { readonly _tag: "syncing"; readonly previous: PluginSynchronizationState | null }
-  | { readonly _tag: "failed" }
+  | { readonly _tag: "failed"; readonly requestBudget?: RateLimitedApiError }
   | { readonly _tag: "ready"; readonly synchronization: PluginSynchronizationState }
 
 /** The current time, refreshed every half minute so relative times ("2 min ago") stay true. */
@@ -86,7 +93,9 @@ export const ConnectionSynchronization = ({
       ) : null}
       {state._tag === "failed" ? (
         <Text as="p" className={styles.setupError} role="alert" variant="body">
-          Sync state is unavailable.
+          {state.requestBudget === undefined
+            ? "Sync state is unavailable."
+            : syncRequestBudgetSentence(state.requestBudget)}
         </Text>
       ) : null}
       <div className={styles.syncActions}>

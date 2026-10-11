@@ -1,6 +1,9 @@
 import { ServiceMark } from "@knpkv/rly/patterns"
 import { Button, Field, StateLabel, StatePanel, Surface, Text } from "@knpkv/rly/primitives"
 import * as Predicate from "effect/Predicate"
+import * as Schema from "effect/Schema"
+
+import { RateLimitedApiError } from "../../api/errors.js"
 import { type FormEvent, type ReactElement, useCallback, useEffect, useRef, useState } from "react"
 import { useNavigate, useSearchParams } from "react-router"
 
@@ -574,6 +577,24 @@ export const ServicesPage = ({
     [invalidateSession, sessionKey, transport]
   )
 
+  useEffect(() => {
+    if (sessionKey === null || transport.observeInvalidations === undefined) return
+    const request = new AbortController()
+    transport
+      .observeInvalidations({
+        sessionKey,
+        signal: request.signal,
+        onSessionExpired: invalidateSession,
+        onInvalidation: () => {
+          if (!request.signal.aborted) setRequestRevision((current) => current + 1)
+        }
+      })
+      .catch(() => {
+        if (!request.signal.aborted) setConnectionsState({ _tag: "failed" })
+      })
+    return () => request.abort()
+  }, [invalidateSession, sessionKey, transport])
+
   const refreshSynchronization = useCallback(
     (pluginConnectionId: PluginConnectionId): void => {
       if (sessionKey === null || transport.synchronization === undefined) return
@@ -627,7 +648,12 @@ export const ServicesPage = ({
           if (request.signal.aborted) return
           synchronizeRequests.current.delete(pluginConnectionId)
           if (Predicate.isTagged("UnauthorizedApiError")(failure)) invalidateSession(sessionKey)
-          setSynchronizationStates((current) => new Map(current).set(pluginConnectionId, { _tag: "failed" }))
+          setSynchronizationStates((current) =>
+            new Map(current).set(
+              pluginConnectionId,
+              Schema.is(RateLimitedApiError)(failure) ? { _tag: "failed", requestBudget: failure } : { _tag: "failed" }
+            )
+          )
         }
       )
     },
@@ -878,15 +904,6 @@ export const ServicesPage = ({
       const acceptResponse = (draftKey: string, response: CreatePluginConnectionResponse): void => {
         completed.add(draftKey)
         hasFailedTest = hasFailedTest || response.test._tag !== "healthy"
-        // A connected resource holds no data until it syncs: each healthy one that syncs starts its first
-        // sync as soon as it is accepted, so a later draft's failure can't skip it.
-        if (
-          response.test._tag === "healthy" &&
-          response.connection.isEnabled &&
-          response.connection.supportsSynchronization
-        ) {
-          synchronizeConnection(response.connection.pluginConnectionId)
-        }
         shouldRefreshOverview = shouldRefreshOverview || response.connection.providerAccountId !== null
         setConnectionsState((current) =>
           current._tag === "ready"
@@ -979,7 +996,7 @@ export const ServicesPage = ({
         return false
       }
     },
-    [invalidateSession, sessionKey, synchronizeConnection, transport]
+    [invalidateSession, sessionKey, transport]
   )
 
   const createConnection = useCallback(

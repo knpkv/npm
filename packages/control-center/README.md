@@ -697,6 +697,12 @@ The production runtime registry preserves historical read-only descriptors while
 
 The request boundary applies exact Host and Origin policy, session/CSRF/capability checks, correlation and security headers, bounded URL/header/body sizes, timeouts, and rate limits before API work. Static assets are captured into an immutable allowlisted map at startup and never resolved from request-controlled filesystem paths.
 
+Manual plugin sync has two independent request budgets: **2 per minute per authenticated workspace connection**, and **60 per minute per verified client peer** across connections. The connection must resolve inside the session's workspace before either manual bucket is charged. Unknown or unowned identifiers cannot create or drain a bucket. Trusted proxy policy determines the peer; spoofed forwarding headers cannot split it. A separate **120/minute per-peer ingress cap** applies before authentication on sync routes.
+
+Healthy connection creation starts its first sync on the server, with a separate **60/minute per-workspace onboarding bucket**. Creation succeeds even when that bucket is exhausted: the card shows **First sync queued** until admission. Onboarding never spends manual tokens. Drain interrupts queued admission; admitted syncs remain supervised by the server lifecycle. Services observes the existing resumable SSE stream rather than polling, and completion emits a portfolio invalidation after the attempt is durable. Startup synchronization retains its own existing lifecycle.
+
+HTTP 429 responses retain the typed `rate-limited` code and add the exhausted `budget` (`per-connection`, `global`, or `onboarding`), `retryAfterSeconds`, and `retryAt`, with a matching `Retry-After` header. Services names the manual budget and when to retry. Delayed onboarding does not return 429. Live clients refresh for future invalidation reasons; persisted event decoding stays strict.
+
 ## Network exposure
 
 `decodeBindConfig({})` resolves to `http://127.0.0.1:4173`. Non-loopback binds require an explicit public origin, exact Host and Origin allowlists, and exactly one transport policy:

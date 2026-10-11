@@ -108,7 +108,10 @@ export const clientRateLimitKey = (
   return `peer:${peer ?? "unknown"}`
 }
 
-const requestKey = (config: ApiBindConfiguration["Service"], request: HttpServerRequest.HttpServerRequest): string =>
+export const requestRateLimitKey = (
+  config: ApiBindConfiguration["Service"],
+  request: HttpServerRequest.HttpServerRequest
+): string =>
   clientRateLimitKey(
     config.trustedProxyAddresses,
     Option.getOrNull(request.remoteAddress),
@@ -142,11 +145,15 @@ const statusFor = (error: BoundaryApiError): number => {
   }
 }
 
-const apiErrorResponse = (error: BoundaryApiError): HttpServerResponse.HttpServerResponse =>
-  HttpServerResponse.jsonUnsafe(error, {
+const apiErrorResponse = (error: BoundaryApiError): HttpServerResponse.HttpServerResponse => {
+  const response = HttpServerResponse.jsonUnsafe(error, {
     status: statusFor(error),
     headers: { "cache-control": "no-store" }
   })
+  return error._tag === "RateLimitedApiError" && error.retryAfterSeconds !== undefined
+    ? HttpServerResponse.setHeader(response, "retry-after", String(error.retryAfterSeconds))
+    : response
+}
 
 const mapBodyPolicyFailure = (
   error: RequestBodyPolicyError
@@ -196,7 +203,7 @@ export const requestBoundaryLayer = HttpRouter.middleware(
             maximumBytes: policy.maximumBodyBytes,
             metadata: requestBodyMetadata(request)
           }).pipe(Effect.catchTag("RequestBodyPolicyError", mapBodyPolicyFailure))
-          yield* consumeRequestToken(profile, requestKey(bindConfig, request)).pipe(
+          yield* consumeRequestToken(profile, requestRateLimitKey(bindConfig, request)).pipe(
             Effect.catchTags({
               RequestRateLimitExceeded: mapRequestRateLimitFailure,
               RequestRateLimitUnavailable: mapRequestRateLimitUnavailable

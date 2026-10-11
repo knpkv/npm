@@ -108,12 +108,12 @@ import {
   TimelineReads,
   WorkspaceSettingsAdministration
 } from "../../src/server/api/ApplicationServices.js"
-import { controlCenterApiLayer } from "../../src/server/api/ControlCenterApiServer.js"
+import { controlCenterApiLayer as productionControlCenterApiLayer } from "../../src/server/api/ControlCenterApiServer.js"
 import {
   agentHandlersLayer,
   deliveryGraphHandlersLayer,
   liveEventHandlersLayer,
-  pluginHandlersLayer,
+  pluginHandlersLayer as productionPluginHandlersLayer,
   portfolioHandlersLayer,
   shareHandlersLayer,
   timelineHandlersLayer,
@@ -123,6 +123,7 @@ import {
   DEFAULT_MAXIMUM_LIVE_STREAMS_PER_SESSION,
   LiveStreamAdmission
 } from "../../src/server/api/LiveStreamAdmission.js"
+import { RequestLimitPolicy, requestRateLimiterLayer } from "../../src/server/api/RequestLimits.js"
 import {
   ClockifyActionSubmissionError,
   ClockifyActionSubmissions
@@ -528,6 +529,18 @@ const deliveryGraphHandlersTestLayer = deliveryGraphHandlersLayer.pipe(
   Layer.provide(mutationMiddlewareLayer),
   Layer.provide(deliveryGraphApplicationLayer)
 )
+
+const controlCenterApiLayer = productionControlCenterApiLayer.pipe(Layer.provide([
+  RequestLimitPolicy.defaultLayer,
+  requestRateLimiterLayer
+]))
+
+const pluginHandlersLayer = productionPluginHandlersLayer.pipe(Layer.provide([
+  RequestLimitPolicy.defaultLayer,
+  requestRateLimiterLayer,
+  Layer.effect(ApiBindConfiguration, decodeBindConfig({})),
+  ServerLifecycle.layer
+]))
 
 describe("Control Center API handlers", () => {
   it.effect("keeps governed settings private while sharing presentation with a reviewer", () =>
@@ -1478,7 +1491,10 @@ describe("Control Center API handlers", () => {
         health: () => Effect.die("not used"),
         list: () => Effect.die("not used"),
         patchConfiguration: () => Effect.die("not used"),
-        synchronization: () => Effect.die("not used"),
+        synchronization: (input) =>
+          input.workspaceId === session.workspaceId && input.pluginConnectionId === pluginConnectionId
+            ? Effect.succeed(expected)
+            : Effect.fail(new ApplicationResourceNotFound()),
         synchronizeConnection: (input) =>
           input.workspaceId === session.workspaceId && input.pluginConnectionId === pluginConnectionId
             ? Effect.succeed(expected)

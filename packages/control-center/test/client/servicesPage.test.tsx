@@ -20,7 +20,7 @@ import {
   PluginOverviewResponse,
   PluginSynchronizationState
 } from "../../src/api/plugins.js"
-import { UnauthorizedApiError } from "../../src/api/errors.js"
+import { RateLimitedApiError, UnauthorizedApiError } from "../../src/api/errors.js"
 import { CsrfToken, SessionSummary } from "../../src/api/session.js"
 import { BrowserSessionProvider, useBrowserSession } from "../../src/client/BrowserSession.js"
 import { ConnectionAdministration } from "../../src/client/services/ConnectionAdministration.js"
@@ -2976,6 +2976,54 @@ describe("ServicesPage connection tests", () => {
     expect(host.querySelectorAll("textarea")).toHaveLength(2)
   })
 
+  it("names the exhausted manual sync budget and its retry time", async () => {
+    const syncConnection = Schema.decodeUnknownSync(PluginConnectionSummary)({
+      ...Schema.encodeSync(PluginConnectionSummary)(connection),
+      providerId: "codecommit",
+      supportsSynchronization: true
+    })
+    const transport: ConnectionTestTransport = {
+      create: vi.fn(),
+      makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
+      overview: () => Promise.resolve({ ...overview, connections: [syncConnection] }),
+      setEnabled: vi.fn(),
+      test: vi.fn(),
+      synchronization: () =>
+        Promise.resolve(
+          Schema.decodeUnknownSync(PluginSynchronizationState)({
+            pluginConnectionId: syncConnection.pluginConnectionId,
+            providerId: "codecommit",
+            streamKey: "pull-requests",
+            lastAttemptAt: null,
+            lastSuccessAt: null,
+            result: "never",
+            pagesCommitted: 0
+          })
+        ),
+      synchronize: () =>
+        Promise.reject(
+          Schema.decodeUnknownSync(RateLimitedApiError)({
+            _tag: "RateLimitedApiError",
+            code: "rate-limited",
+            correlationId: "fixture-sync-budget",
+            message: "The per-connection synchronization request budget is exhausted.",
+            budget: "per-connection",
+            retryAfterSeconds: 30,
+            retryAt: "2026-07-14T12:00:30.000Z"
+          })
+        )
+    }
+    const host = await renderServices(transport)
+    await act(async () => undefined)
+    const button = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Sync now"
+    )
+    await act(async () => button?.click())
+    expect(host.textContent).toContain("Per-connection sync request budget exhausted")
+    expect(host.textContent).toContain("30 seconds")
+    expect(host.textContent).toContain("12:00:30 UTC")
+  })
+
   it("loads durable synchronization state and runs Sync now", async () => {
     const codeCommitConnection = Schema.decodeSync(PluginConnectionSummary)({
       ...Schema.encodeSync(PluginConnectionSummary)(connection),
@@ -3899,29 +3947,28 @@ describe("ServicesPage first sync", () => {
           }
     })
 
-  // A connected resource holds no data until it syncs: connecting starts that first sync, once,
-  // for each resource whose connection test passed.
-  it("starts one sync for each newly connected healthy resource, none for a failed one", async () => {
+  // Creation owns the first sync on the server. Services observes queued state and completion over SSE.
+  it("shows queued first sync and refreshes it on invalidation without a browser sync POST", async () => {
     const ids = [
       Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000161"),
       Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000162")
     ]
+    const createdConnections: Array<PluginConnectionSummary> = []
     const createBatch = vi.fn<NonNullable<ConnectionTestTransport["createBatch"]>>(async (request) =>
       Schema.decodeUnknownSync(CreatePluginConnectionsResponse)({
-        results: request.connections.map((connectionRequest, index) => ({
-          _tag: "succeeded",
-          response: Schema.encodeSync(CreatePluginConnectionResponse)(created(connectionRequest, index === 0))
-        }))
+        results: request.connections.map((connectionRequest, index) => {
+          const response = created(connectionRequest, index === 0)
+          createdConnections.push(response.connection)
+          return {
+            _tag: "succeeded",
+            response: Schema.encodeSync(CreatePluginConnectionResponse)(response)
+          }
+        })
       })
     )
-    // The first sync stays in flight while the page refreshes around it; it must not be aborted.
-    let finishSync: (() => void) | undefined
-    const synchronize = vi.fn<NonNullable<ConnectionTestTransport["synchronize"]>>(
-      (pluginConnectionId) =>
-        new Promise((resolve) => {
-          finishSync = () => resolve(syncState(pluginConnectionId, "synchronized", { pagesCommitted: 1 }))
-        })
-    )
+    let onInvalidate: (() => void) | undefined
+    let finished = false
+    const synchronize = vi.fn<NonNullable<ConnectionTestTransport["synchronize"]>>()
     const transport: ConnectionTestTransport = {
       create: vi.fn(),
       createBatch,
@@ -3932,10 +3979,22 @@ describe("ServicesPage first sync", () => {
           codeCommit: { _tag: "available", names: [], truncated: false },
           codePipeline: { _tag: "available", names: [], truncated: false }
         }),
-      overview: () => Promise.resolve(awsOverview),
+      overview: () => Promise.resolve({ ...awsOverview, connections: createdConnections }),
       makeConnectionId: vi.fn().mockResolvedValueOnce(ids[0]).mockResolvedValueOnce(ids[1]),
       setEnabled: vi.fn(),
-      synchronization: (pluginConnectionId) => Promise.resolve(syncState(pluginConnectionId, "never")),
+      synchronization: (pluginConnectionId) =>
+        Promise.resolve(
+          syncState(
+            pluginConnectionId,
+            pluginConnectionId === ids[0] ? (finished ? "synchronized" : "queued") : "never",
+            finished ? { lastSuccessAt: "2026-07-14T10:03:00.000Z" } : {}
+          )
+        ),
+      observeInvalidations: ({ onInvalidation, signal }) =>
+        new Promise((resolve) => {
+          onInvalidate = onInvalidation
+          signal.addEventListener("abort", () => resolve(), { once: true })
+        }),
       synchronize,
       test: vi.fn()
     }
@@ -3957,11 +4016,16 @@ describe("ServicesPage first sync", () => {
     await act(async () => undefined)
 
     expect(createBatch).toHaveBeenCalledTimes(1)
-    expect(synchronize.mock.calls.map(([pluginConnectionId]) => pluginConnectionId)).toEqual([ids[0]])
-    expect(synchronize.mock.calls[0]?.[1].aborted).toBe(false)
-    expect(host.textContent).toContain("Syncing…")
-    await act(async () => finishSync?.())
-    expect(host.textContent).not.toContain("Syncing…")
+    expect(synchronize).not.toHaveBeenCalled()
+    expect(host.textContent).toContain("First sync queued")
+    await act(async () => {
+      finished = true
+      onInvalidate?.()
+    })
+    await act(async () => undefined)
+    expect(host.textContent).toMatch(/Synced [^,]+, \d\d:\d\d/)
+    expect(host.textContent).not.toContain("First sync queued")
+    expect(synchronize).not.toHaveBeenCalled()
   })
 
   // Inside an account, a resource that hasn't synced shows Sync now without opening Controls, and a
@@ -4172,8 +4236,8 @@ describe("ServicesPage first sync", () => {
     expect(card()?.textContent).toContain("Sync state unknown")
   })
 
-  // Without batch create, one draft can connect and a later one fail: the one that connected still syncs.
-  it("syncs a connected resource even when a later draft in the same setup fails", async () => {
+  // Without batch create, partial setup leaves the healthy resource to its server-owned first sync.
+  it("keeps server-owned first sync when a later draft in the same setup fails", async () => {
     const ids = [
       Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000192"),
       Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000193")
@@ -4219,7 +4283,7 @@ describe("ServicesPage first sync", () => {
     await act(async () => undefined)
 
     expect(create).toHaveBeenCalledTimes(2)
-    expect(synchronize.mock.calls.map(([pluginConnectionId]) => pluginConnectionId)).toEqual([ids[0]])
+    expect(synchronize).not.toHaveBeenCalled()
   })
 
   // Opening Services never syncs anything by itself: only a connect or Sync now does.
