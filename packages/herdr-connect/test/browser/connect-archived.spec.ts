@@ -1,0 +1,406 @@
+/** Archived records are read through the real HTTP boundary and rendered without active-agent actions. */
+import { expect, type Locator, type Page, test } from "@playwright/test"
+import { Schema } from "effect"
+import {
+  ArchivedConnectAgent,
+  ConnectAgent,
+  ConnectArchivePage,
+  connectArchivePageMaxRecords
+} from "../../src/model.js"
+
+test.use({ locale: "en-GB", timezoneId: "UTC" })
+
+const now = Date.UTC(2026, 9, 11, 12, 40)
+const words =
+  "Approved the hub auth change with two nits left as review comments: the token refresh path should log the host name, and the retry ceiling belongs in config, not code. Nothing else blocks the merge."
+const closed = (
+  name: string,
+  host: string,
+  hours: number,
+  text?: string,
+  kind = "worker",
+  state = "working"
+) => {
+  const fields = {
+    host,
+    agentId: `agent-${name}`,
+    name,
+    kind,
+    work: name === "rev-auth" ? "auth-review" : "package-work",
+    state,
+    firstSeenAt: Date.UTC(2026, 9, name === "rev-auth" ? 9 : 7, 14, 2),
+    closedAt: now - hours * 3_600_000
+  }
+  const spoken = text === undefined
+    ? fields
+    : { ...fields, lastWords: { text, createdAt: now - hours * 3_600_000 - 60_000 } }
+  return Schema.decodeUnknownSync(ArchivedConnectAgent)(
+    name === "rev-auth"
+      ? { ...spoken, relationship: { parentAgentId: "agent-sec-cc", relation: "review" } }
+      : spoken
+  )
+}
+const reviewed = closed("rev-auth", "atlas", 3, words, "reviewer", "done")
+const records = [
+  reviewed,
+  closed(
+    "flake-hunt",
+    "birch",
+    5,
+    "Stopped: the offline-backup test still fails on the third retry. Log saved before closing.",
+    "worker",
+    "blocked"
+  ),
+  closed("lint-sub", "atlas", 6),
+  closed(
+    "pkg-bump",
+    "birch",
+    24,
+    "Waiting on a lockfile decision; closing so birch can be drained.",
+    "worker",
+    "waiting"
+  ),
+  closed("skills-nightly", "atlas", 25, undefined, "worker", "ready"),
+  closed("coord-old", "birch", 48, "Handed lint-sweep to lint-fix and rev-lint.", "coordinator"),
+  closed("cedar-probe", "cedar", 49, "cedar stopped answering; closing the probe.")
+]
+const historical = (name: string, host: string, days: number, text?: string, kind = "worker") => {
+  const fixture = closed(name, host, 1, text, kind)
+  const fields = { ...fixture, firstSeenAt: now - 50 * 86_400_000, closedAt: now - days * 86_400_000 }
+  return fixture.lastWords === undefined ? fields : {
+    ...fields,
+    lastWords: { text: fixture.lastWords.text, createdAt: fields.closedAt - 60_000 }
+  }
+}
+const fullPage = [
+  ...Array.from(
+    { length: 58 },
+    (_, index) => closed(`closed-worker-${String(index + 1)}`, index % 2 === 0 ? "atlas" : "birch", index + 1)
+  ),
+  historical("deps-audit", "atlas", 38, "Audit filed: three packages pinned, none vulnerable."),
+  historical("ci-cache", "birch", 39),
+  historical("docs-index", "atlas", 39, "Index rebuilt; search now covers the patterns folder."),
+  historical("rev-tokens", "atlas", 40, undefined, "reviewer"),
+  historical("fmt-pass", "birch", 41),
+  historical("release-notes", "atlas", 41, "Drafted notes for rly 0.17 and left them in Work.")
+]
+const live = Schema.decodeUnknownSync(ConnectAgent)({
+  host: "atlas",
+  id: "agent-sec-cc",
+  name: "sec-cc",
+  kind: "claude",
+  work: "sec-cc",
+  state: "waiting",
+  lastActivityAt: now
+})
+const pageOf = (agents: ReadonlyArray<ArchivedConnectAgent>, more = false): ConnectArchivePage => {
+  const last = agents.at(-1)
+  return Schema.decodeUnknownSync(ConnectArchivePage)({
+    agents,
+    nextCursor: more && last !== undefined
+      ? { host: last.host, agentId: last.agentId, closedAt: last.closedAt }
+      : null
+  })
+}
+
+/** Keep the same frame and font policy as the existing Connect reference captures. */
+const prepare = async (page: Page, width = 390, theme = "light") => {
+  await page.setViewportSize({ width: width + 2, height: 844 })
+  await page.emulateMedia({ reducedMotion: "reduce", colorScheme: theme === "dark" ? "dark" : "light" })
+  await page.clock.install({ time: now })
+  await page.clock.setFixedTime(now)
+  await page.route(
+    "**/v1/connect/agents*",
+    (route) => route.fulfill({ json: { agents: [live], failures: [], nextCursor: null } })
+  )
+  await page.route(
+    "**/v1/connect/limits",
+    (route) => route.fulfill({ json: { hosts: [], failures: [], peersListed: true } })
+  )
+  await page.route("**/assets/connect.css", async (route) => {
+    const response = await route.fetch()
+    await route.fulfill({
+      response,
+      body: (await response.text()).replaceAll(/font-display:\s*(?:swap|optional)/g, "font-display:block")
+    })
+  })
+}
+const mount = async (page: Page, theme = "light", archived = true) => {
+  await page.goto(archived ? "/?embedded&view=archived" : "/?embedded")
+  await page.locator("body").evaluate((body, value) => body.setAttribute("data-rly-theme", value), theme)
+  await page.locator("#fleet-connect-root").evaluate((root) => root.classList.add("fleet-shell-main"))
+  await page.addStyleTag({
+    content:
+      "#fleet-connect-root { border: 1px solid var(--rly-color-border-1); padding-block: 0; } body.connect-body { overflow: visible; }"
+  })
+  await page.evaluate(() => document.fonts.ready)
+}
+const rows = (page: Page) => page.locator(".connect-archive-agent")
+const rowNamed = (page: Page, name: string) => rows(page).filter({ has: page.getByText(name, { exact: true }) })
+const archiveRoute = (page: Page, data: ConnectArchivePage) =>
+  page.route("**/v1/connect/archive*", (route) => route.fulfill({ json: data }))
+
+/** A closed creature has fully shut apertures and no visible state ring or animation, even with motion allowed. */
+const expectClosed = async (creature: Locator) => {
+  const appearance = await creature.evaluate((svg) => {
+    const style = getComputedStyle(svg)
+    const upper = Number.parseFloat(style.getPropertyValue("--connect-creature-lid"))
+    const lower = Number.parseFloat(style.getPropertyValue("--connect-creature-lid-low"))
+    return {
+      animationCount: svg.getAnimations({ subtree: true }).length,
+      rings: [...svg.querySelectorAll(".connect-creature-halo, .connect-creature-orbit")].map((ring) => {
+        const current = getComputedStyle(ring)
+        return current.display === "none" || current.visibility === "hidden" ? 0 : Number(current.opacity)
+      }),
+      lids: [...svg.querySelectorAll("clipPath .connect-creature-lid")].map((lid) => ({
+        expected: lid.hasAttribute("data-low") ? lower : upper,
+        actual: Number.parseFloat(getComputedStyle(lid).translate.split(" ")[1] ?? "0")
+      })),
+      lashes: [...svg.querySelectorAll(".connect-creature-lash")].map((lash) => Number(getComputedStyle(lash).opacity))
+    }
+  })
+  expect(appearance.animationCount).toBe(0)
+  for (const opacity of appearance.rings) expect(opacity).toBe(0)
+  expect(appearance.lids).toHaveLength(4)
+  for (const lid of appearance.lids) expect(lid.actual).toBeCloseTo(lid.expected, 1)
+  for (const opacity of appearance.lashes) expect(opacity).toBe(1)
+}
+
+test("archive view survives Back and refresh while Active remains the default", async ({ page }) => {
+  await prepare(page)
+  await archiveRoute(page, pageOf(records))
+  await mount(page, "light", false)
+  await expect(page.getByRole("link", { name: "Active", exact: true })).toHaveAttribute("aria-current", "page")
+  await page.getByRole("link", { name: "Archived", exact: true }).click()
+  await expect(page).toHaveURL(/view=archived/)
+  await expect(rows(page)).toHaveCount(7)
+  await page.reload()
+  await expect(rows(page)).toHaveCount(7)
+  await page.getByRole("link", { name: "Active", exact: true }).click()
+  await expect(page.locator(".connect-agent")).toHaveCount(1)
+  await page.goBack()
+  await expect(page).toHaveURL(/view=archived/)
+  await expect(rows(page)).toHaveCount(7)
+})
+
+test("older page failure keeps loaded rows and Retry repeats its cursor", async ({ page }) => {
+  await prepare(page)
+  const first = pageOf(records, true)
+  const older = closed("older-worker", "atlas", 50, "Older page loaded.")
+  const requests: Array<string | null> = []
+  let fail = true
+  await page.route("**/v1/connect/archive*", async (route) => {
+    const cursor = new URL(route.request().url()).searchParams.get("cursor")
+    requests.push(cursor)
+    if (cursor !== null) await expect(page.getByRole("button", { name: "Show older", exact: true })).toBeDisabled()
+    return route.fulfill(cursor === null ? { json: first } : fail ? { status: 503 } : { json: pageOf([older]) })
+  })
+  await mount(page)
+  await expect(page.getByText("7+ closed agents in the last 90 days", { exact: true })).toBeVisible()
+  await page.getByRole("button", { name: "Show older", exact: true }).click()
+  await expect(rows(page)).toHaveCount(7)
+  const retry = page.getByRole("button", { name: "Retry", exact: true })
+  await expect(retry).toBeVisible()
+  fail = false
+  await retry.click()
+  await expect(rows(page)).toHaveCount(8)
+  await expect(rowNamed(page, "older-worker")).toBeVisible()
+  expect(requests[1]).not.toBeNull()
+  expect(requests[2]).toBe(requests[1])
+  await expect(page.getByText("8 closed agents in the last 90 days", { exact: true })).toBeVisible()
+})
+
+test("search covers loaded archive pages and keeps unloaded scope explicit", async ({ page }) => {
+  await prepare(page)
+  await archiveRoute(page, pageOf(records, true))
+  await mount(page)
+  const search = page.getByRole("searchbox")
+  await page.keyboard.press("Control+k")
+  await expect(search).toBeFocused()
+  const searches: ReadonlyArray<readonly [string, number]> = [["atlas", 3], ["reviewer", 1], ["auth-review", 1], [
+    "flake-hunt",
+    1
+  ]]
+  for (const [query, count] of searches) {
+    await search.fill(query)
+    await expect(rows(page)).toHaveCount(count)
+  }
+  await search.fill("zzz")
+  await expect(page.getByText("No loaded closed agents match \"zzz\" in Archived.", { exact: true })).toBeVisible()
+  await expect(page.getByText("Search covers loaded archived agents only.", { exact: true })).toBeVisible()
+  await page.getByRole("button", { name: "Clear search", exact: true }).click()
+  await expect(search).toHaveValue("")
+  await expect(rows(page)).toHaveCount(7)
+})
+
+test("separate closures and a live identity remain distinct; last words render as text", async ({ page }) => {
+  await prepare(page)
+  const collision = Schema.decodeUnknownSync(ArchivedConnectAgent)({
+    ...reviewed,
+    closedAt: now - 2 * 3_600_000,
+    lastWords: { text: "<img src=x onerror=\"alert(1)\">", createdAt: now - 2 * 3_600_000 - 60_000 }
+  })
+  const sameLive = Schema.decodeUnknownSync(ArchivedConnectAgent)({
+    ...reviewed,
+    agentId: live.id,
+    name: "closed-primary"
+  })
+  await archiveRoute(page, pageOf([collision, reviewed, sameLive]))
+  await mount(page)
+  await expect(rows(page)).toHaveCount(3)
+  await expect(rows(page).filter({ hasText: "rev-auth" })).toHaveCount(2)
+  await rows(page).filter({ hasText: "<img src=x" }).click()
+  await expect(page.getByRole("dialog")).toContainText("<img src=x onerror=\"alert(1)\">")
+  await expect(page.getByRole("dialog").locator("img")).toHaveCount(0)
+  await page.keyboard.press("Escape")
+  await rowNamed(page, "closed-primary").click()
+  await expect(page.getByRole("dialog")).toContainText("closed-primary")
+  await expect(page.getByRole("button", { name: "Open terminal", exact: true })).toHaveCount(0)
+})
+
+test("only loaded parents link to a read-only stage; malformed archive data shows Retry", async ({ page }) => {
+  await prepare(page)
+  await archiveRoute(
+    page,
+    pageOf([
+      Schema.decodeUnknownSync(ArchivedConnectAgent)({
+        ...reviewed,
+        relationship: { parentAgentId: "agent-missing-parent", relation: "review" }
+      }),
+      Schema.decodeUnknownSync(ArchivedConnectAgent)({
+        ...reviewed,
+        agentId: "agent-child-review",
+        name: "child-review",
+        relationship: { parentAgentId: reviewed.agentId, relation: "review" }
+      })
+    ])
+  )
+  await mount(page)
+  await rowNamed(page, "rev-auth").click()
+  await expect(page.getByRole("dialog").getByRole("link")).toHaveCount(0)
+  await expect(page.getByRole("dialog")).toContainText("agent-missing-parent")
+  await page.keyboard.press("Escape")
+  await rowNamed(page, "child-review").click()
+  await page.getByRole("dialog").getByRole("link", { name: "rev-auth", exact: true }).click()
+  await expect(page.getByRole("dialog")).toContainText("rev-auth")
+  await expect(page.getByRole("dialog").getByRole("link")).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Open terminal", exact: true })).toHaveCount(0)
+  await page.keyboard.press("Escape")
+  await page.route(
+    "**/v1/connect/archive*",
+    (route) => route.fulfill({ json: { agents: [{ name: "broken" }], nextCursor: null } })
+  )
+  await page.reload()
+  await expect(page.getByText("Couldn't load archived agents", { exact: true })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Retry", exact: true })).toBeVisible()
+  await expect(page.getByText("No closed agents in the last 90 days", { exact: true })).toHaveCount(0)
+})
+
+const frames = ["A1", "A2", "A3", "A3-v2", "A4", "A5", "A6"]
+for (const width of [390, 1280]) {
+  for (const theme of ["light", "dark"]) {
+    for (const frame of frames) {
+      test(`archived reference ${frame} ${String(width)} ${theme}`, async ({ page }, info) => {
+        await prepare(page, width, theme)
+        if (frame === "A3") await page.route("**/v1/connect/archive*", () => {})
+        else if (frame === "A3-v2") {
+          await page.route("**/v1/connect/archive*", (route) => route.fulfill({ status: 503 }))
+        } else {
+          await archiveRoute(
+            page,
+            frame === "A2" ? pageOf([]) : frame === "A5" ? pageOf(fullPage, true) : pageOf(records)
+          )
+        }
+        await mount(page, theme)
+        await expect(page.getByRole("link", { name: "Archived", exact: true })).toHaveAttribute("aria-current", "page")
+        if (frame === "A1") await expect(page.locator("header .connect-directory-switch")).toHaveCount(0)
+        if (frame === "A2") {
+          await expect(page.getByText("No closed agents in the last 90 days", { exact: true })).toBeVisible()
+        } else if (frame === "A3") {
+          await expect(page.getByText("Loading archived agents...", { exact: true })).toBeVisible()
+          await expect(page.locator(".connect-archive-skeleton")).toHaveCount(4)
+        } else if (frame === "A3-v2") {
+          await expect(page.getByText("Couldn't load archived agents", { exact: true })).toBeVisible()
+          await expect(page.getByRole("button", { name: "Retry", exact: true })).toBeVisible()
+        } else if (frame === "A6") {
+          await page.getByRole("searchbox").fill("zzz")
+          await expect(page.getByText("No closed agents match \"zzz\" in Archived.", { exact: true })).toBeVisible()
+          await expect(page.getByRole("button", { name: "Clear search", exact: true })).toBeVisible()
+          const clear = page.getByRole("button", { name: "Clear search", exact: true })
+          const clearBox = await clear.boundingBox()
+          const emptyBox = await page.locator(".connect-archive-empty").boundingBox()
+          expect(clearBox).not.toBeNull()
+          expect(emptyBox).not.toBeNull()
+          if (clearBox !== null && emptyBox !== null) expect(clearBox.width).toBeLessThan(emptyBox.width / 2)
+        } else if (frame === "A5") {
+          await expect(rows(page)).toHaveCount(64)
+          await expect(page.getByText("64+ closed agents in the last 90 days", { exact: true })).toBeVisible()
+          const helper = page.getByText(`Loads the next ${String(connectArchivePageMaxRecords)}.`, { exact: true })
+          await helper.scrollIntoViewIfNeeded()
+          await expect(helper).toBeVisible()
+          await expect(page.getByRole("button", { name: "Show older", exact: true })).toBeVisible()
+        } else if (frame === "A4") {
+          await rowNamed(page, "rev-auth").click()
+          const sheet = page.getByRole("dialog")
+          await expect(sheet).toContainText("First seen 9 Oct 2026 14:02 → Closed 11 Oct 2026 09:40")
+          await expect(sheet).toContainText("State at close")
+          await expect(sheet).toContainText("Done")
+          await expect(sheet).toContainText("auth-review")
+          await expect(sheet).toContainText(words)
+          await expect(sheet).toContainText("Said 11 Oct 2026 09:39")
+          await expect(sheet.getByRole("link", { name: /sec-cc/ })).toBeVisible()
+          expect(
+            await sheet.getByRole("link", { name: /sec-cc/ }).evaluate((node) =>
+              getComputedStyle(node).textDecorationLine
+            )
+          ).toContain("underline")
+          for (const name of ["Pin", "Open terminal", "Goal", "Notifications"]) {
+            await expect(sheet.getByRole("button", { name, exact: true })).toHaveCount(0)
+          }
+          await page.emulateMedia({ reducedMotion: "no-preference" })
+          await expectClosed(sheet.locator("svg.connect-creature"))
+          await page.emulateMedia({ forcedColors: "active" })
+          const outline = await sheet.locator(".connect-creature-body").evaluate((body) => ({
+            stroke: getComputedStyle(body).stroke,
+            width: Number.parseFloat(getComputedStyle(body).strokeWidth)
+          }))
+          expect(outline.stroke).not.toBe("none")
+          expect(outline.width).toBeGreaterThan(0)
+          await expectClosed(sheet.locator("svg.connect-creature"))
+          await page.emulateMedia({ forcedColors: "none", reducedMotion: "reduce" })
+        } else {
+          await expect(rows(page)).toHaveCount(7)
+          await expect(page.getByText("7 closed agents in the last 90 days", { exact: true })).toBeVisible()
+          await expect(rowNamed(page, "rev-auth").locator(".connect-archive-metadata > span")).toHaveText([
+            "reviewer",
+            "atlas",
+            "closed 3h ago"
+          ])
+          await expect(rowNamed(page, "lint-sub")).not.toContainText("Last words")
+          await page.emulateMedia({ reducedMotion: "no-preference" })
+          for (const creature of await rows(page).locator("svg.connect-creature").all()) await expectClosed(creature)
+          const lastWords = rowNamed(page, "rev-auth").locator(".connect-archive-last-words")
+          const truncation = await lastWords.evaluate((node) => ({
+            whiteSpace: getComputedStyle(node).whiteSpace,
+            overflow: getComputedStyle(node).textOverflow
+          }))
+          expect(truncation.whiteSpace).toBe("nowrap")
+          expect(truncation.overflow).toBe("ellipsis")
+          await page.emulateMedia({ reducedMotion: "reduce" })
+        }
+        await page.evaluate(() => document.fonts.ready)
+        if (frame === "A5") {
+          await page.screenshot({ path: info.outputPath(`fidelity/connect-${frame}-${String(width)}-${theme}.png`) })
+        } else {await page.locator(frame === "A4" ? ".connect-archive-stage" : "#fleet-connect-root").screenshot({
+            path: info.outputPath(`fidelity/connect-${frame}-${String(width)}-${theme}.png`)
+          })}
+        expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width + 2)
+        if (frame === "A3-v2") {
+          await archiveRoute(page, pageOf(records))
+          await page.getByRole("button", { name: "Retry", exact: true }).click()
+          await expect(rows(page)).toHaveCount(7)
+        }
+      })
+    }
+  }
+}

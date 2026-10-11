@@ -49,6 +49,11 @@ window.fetch = async (input) => {
   const path = new URL(url, "http://localhost").pathname
   if (path === "/v1/connect/agents")
     return new Response(agentsBody, { headers: { "content-type": "application/json" } })
+  if (path === "/v1/connect/archive")
+    return Response.json({
+      agents: [{ ...reviewer, agentId: reviewer.id, firstSeenAt: 1, closedAt: 2 }],
+      nextCursor: null
+    })
   if (path.startsWith("/v1/work")) return new Response(emptyWork, { headers: { "content-type": "application/json" } })
   return new Response("{}", { status: 404 })
 }
@@ -64,6 +69,7 @@ afterEach(async () => {
   roots.length = 0
   document.body.replaceChildren()
   window.localStorage.clear()
+  window.history.replaceState(null, "", "/")
   vi.useRealTimers()
 })
 
@@ -77,6 +83,30 @@ const settle = async (milliseconds = 0): Promise<void> => {
 const stageOpen = (): boolean => document.querySelector("[role='dialog']") !== null
 
 describe("Connect stage across polls", () => {
+  it("keeps archived closures out of the application's live-stage heartbeat observer", async () => {
+    agentsBody = listed([reviewer])
+    window.history.replaceState(null, "", "/?view=archived")
+    const targets: Array<{ readonly host: string; readonly id: string } | null> = []
+    const host = document.createElement("div")
+    document.body.append(host)
+    const root = createRoot(host)
+    roots.push(root)
+    await act(async () =>
+      root.render(
+        <RegistryProvider>
+          <ConnectSurface atoms={makeConnectAtoms()} onStageChange={(target) => targets.push(target)} />
+        </RegistryProvider>
+      )
+    )
+    await settle()
+    const archivedRow = host.querySelector<HTMLButtonElement>(".connect-archive-agent")
+    expect(archivedRow).not.toBeNull()
+    await act(async () => archivedRow?.click())
+    await settle()
+    expect(stageOpen()).toBe(true)
+    expect(document.querySelector(".connect-archive-stage")).not.toBeNull()
+    expect(targets.filter((target) => target !== null)).toEqual([])
+  })
   it("settles when an inline stage handler stores the target in parent state", async () => {
     agentsBody = listed([reviewer])
     const targets: Array<{ readonly host: string; readonly id: string } | null> = []

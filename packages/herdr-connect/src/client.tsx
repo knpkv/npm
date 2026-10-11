@@ -77,6 +77,9 @@ import { ConnectAgentIdentity } from "./work-goal-link-view.js"
 import { resolveConnectWorkGoal, workSnapshotForAssociation, type ConnectWorkGoalResolution } from "./work-goal-link.js"
 import { WorkPollMount } from "./work-poll.js"
 import { limitsState, loadLimits } from "./fleet-reads-client.js"
+import { ConnectArchiveSurface } from "./archive-view.js"
+import { loadConnectArchive } from "./archive-client.js"
+import { ConnectDirectorySwitch, useConnectDirectoryLocation } from "./directory-view.js"
 import { ConnectLimits } from "./limits-view.js"
 import { makeTerminalWorkerGuard } from "./terminal-worker-guard.js"
 import {
@@ -386,6 +389,7 @@ export const makeConnectAtoms = () => {
   const limits = browserRuntime.atom(loadLimits)
   return {
     activityFilter: Atom.make<AgentActivityFilter>("all"),
+    archivePage: browserRuntime.fn(loadConnectArchive),
     agents,
     agentsPoll: browserRuntime.atom(Atom.refresh(agents).pipe(Effect.repeat(Schedule.spaced("5 seconds")))),
     connection: Atom.make<ConnectionState>({ _tag: "idle" }),
@@ -692,18 +696,30 @@ const terminalWorker = (
     }).pipe(Effect.catch((error) => Effect.sync(() => update({ _tag: "failed", agent, detail: error.detail }))))
   )
 
-export const ConnectSurface = ({
-  atoms,
-  embedded = false,
-  onStageChange,
-  roomFooter
-}: {
+type ConnectSurfaceProps = {
   readonly atoms: ConnectAtoms
   readonly embedded?: boolean
   readonly roomFooter?: ReactNode
-  /** Optional host observer for the open stage identity; close and unmount report null. */
+  /** Optional host observer for the live stage; archive stages never report a live identity. */
   readonly onStageChange?: (target: Pick<ConnectAgent, "host" | "id"> | null) => void
-}) => {
+}
+
+/** URL-owned Active/Archived directory selection, shared with the containing hub's browser history. */
+export const ConnectSurface = (props: ConnectSurfaceProps) => {
+  const locationSearch = useConnectDirectoryLocation()
+  return new URLSearchParams(locationSearch).get("view") === "archived" ? (
+    <ConnectArchiveSurface
+      atoms={props.atoms}
+      embedded={props.embedded ?? false}
+      locationSearch={locationSearch}
+      roomFooter={props.roomFooter}
+    />
+  ) : (
+    <ActiveConnectSurface {...props} />
+  )
+}
+
+const ActiveConnectSurface = ({ atoms, embedded = false, onStageChange, roomFooter }: ConnectSurfaceProps) => {
   const [activityFilter, setActivityFilter] = useAtom(atoms.activityFilter)
   const directory = useAtomValue(atoms.agents)
   const refreshDirectory = useAtomRefresh(atoms.agents)
@@ -1310,13 +1326,28 @@ export const ConnectSurface = ({
 
   const directoryScreen = (
     <>
-      <header className={embedded ? "connect-embedded-intro" : "connect-header"}>
-        <Text as="h1" variant="card-title">
-          Connect
-          {current === null ? null : <ConnectSummary agents={agents} unavailable={false} />}
-        </Text>
-        {current === null ? <ConnectSummary agents={null} unavailable={directory._tag === "Failure"} /> : null}
-      </header>
+      <div className="connect-directory-heading">
+        <header
+          className={
+            embedded ? "connect-embedded-intro connect-directory-title" : "connect-header connect-directory-title"
+          }
+        >
+          <Text as="h1" variant="card-title">
+            Connect
+            {current === null ? null : <ConnectSummary agents={agents} unavailable={false} />}
+          </Text>
+          {current === null ? <ConnectSummary agents={null} unavailable={directory._tag === "Failure"} /> : null}
+          {updatedAt === null ? null : (
+            <small className="connect-updated" data-stale={staleSince === null ? undefined : "true"}>
+              {staleSince === null ? "Updated " : "Stale, last updated "}
+              <time dateTime={new Date(updatedAt).toISOString()}>
+                {new Date(updatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+              </time>
+            </small>
+          )}
+        </header>
+        <ConnectDirectorySwitch />
+      </div>
       <section
         aria-label="Herdr agents"
         className="connect-agents"
@@ -1326,14 +1357,6 @@ export const ConnectSurface = ({
         style={pinRows}
         onKeyDown={moveAgentFocus}
       >
-        {updatedAt === null ? null : (
-          <small className="connect-updated" data-stale={staleSince === null ? undefined : "true"}>
-            {staleSince === null ? "Updated " : "Stale, last updated "}
-            <time dateTime={new Date(updatedAt).toISOString()}>
-              {new Date(updatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
-            </time>
-          </small>
-        )}
         {staleSince === null || directory._tag !== "Failure" ? null : (
           <small className="connect-status-message" data-tone="caution">
             The list is stale. Couldn't refresh the directory: {causeSummary(directory.cause)}. Showing the list from{" "}
