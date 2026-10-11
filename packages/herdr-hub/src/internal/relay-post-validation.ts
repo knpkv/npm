@@ -20,7 +20,9 @@ const PostRequestTextPrecheck = Schema.Struct({ ...ConnectPostRequest.fields, te
 
 const invalidReport = (error: Schema.SchemaError): InvalidReport =>
   new InvalidReport({
-    detail: SchemaIssue.makeFormatterStandardSchemaV1()(error.issue).issues
+    detail: SchemaIssue.makeFormatterStandardSchemaV1({
+      leafHook: (issue) => issue._tag === "UnexpectedKey" ? "is unexpected" : SchemaIssue.defaultLeafHook(issue)
+    })(error.issue).issues
       .map(({ message, path }) => `${path?.map(String).join(".") || "post"} ${message}`)
       .join("; ")
   })
@@ -32,9 +34,9 @@ export const decodeRelayPostBody = Effect.fn("Relay.decodePostBody")(
   Effect.mapError(invalidReport)
 )
 
-/** Precheck text for precise HTTP diagnostics, then let the published schema validate the request. */
+/** Precheck HTTP text, then validate the published request, rejecting excess fields at both steps. */
 export const decodeRelayPostRequest = Effect.fn("Relay.decodePostRequest")(
-  Schema.decodeUnknownEffect(PostRequestTextPrecheck),
-  Effect.flatMap(Schema.decodeUnknownEffect(ConnectPostRequest)),
+  Schema.decodeUnknownEffect(PostRequestTextPrecheck, { onExcessProperty: "error" }),
+  Effect.flatMap(Schema.decodeUnknownEffect(ConnectPostRequest, { onExcessProperty: "error" })),
   Effect.mapError(invalidReport)
 )

@@ -2226,8 +2226,15 @@ esac
       const agents = Schema.decodeUnknownSync(Schema.fromJsonString(FleetConnectAgentPage))(directory.body).agents
       expect(agents.find(({ id }) => id === "agent-one")?.lastActivityAt).toBe(100)
       const withExtraField = yield* post({ ...body, eventId: "extra-field", extra: "ignored" })
-      expect(withExtraField.status).toBe(200)
-      expect(Schema.decodeUnknownSync(Schema.fromJsonString(ConnectPost))(withExtraField.body).text).toBe(body.text)
+      expect(withExtraField.status).toBe(400)
+      expect(
+        Schema.decodeUnknownSync(
+          Schema.fromJsonString(Schema.Struct({ error: Schema.String, detail: Schema.String }))
+        )(withExtraField.body)
+      ).toEqual({ error: "InvalidReport", detail: "extra is unexpected" })
+      const withoutExtraField = yield* post({ ...body, eventId: "extra-field" })
+      expect(withoutExtraField.status).toBe(200)
+      expect(Schema.decodeUnknownSync(Schema.fromJsonString(ConnectPost))(withoutExtraField.body).text).toBe(body.text)
       const urlText = "https://example.test/status ".padEnd(240, "x")
       const withUrl = yield* post({ ...body, eventId: "url-at-limit", text: urlText })
       expect(withUrl.status).toBe(200)
