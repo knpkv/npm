@@ -166,7 +166,7 @@ const base: DashboardSnapshot = {
             id: "decided-check",
             payload: { kind: "nix.check" },
             approvedAt: start - 4 * 60_000,
-            approvedBy: "avery",
+            approvedBy: "owner",
             status: "succeeded",
             approvalAvailable: false
           },
@@ -175,7 +175,7 @@ const base: DashboardSnapshot = {
             id: "decided-message",
             payload: { kind: "agent.message", session: "pair-agent", message: "[redacted internal prompt]" },
             rejectedAt: start - 60 * 60_000,
-            rejectedBy: "avery",
+            rejectedBy: "owner",
             status: "rejected",
             approvalAvailable: false
           },
