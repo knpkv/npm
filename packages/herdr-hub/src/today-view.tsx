@@ -3,6 +3,7 @@ import type { ReactElement, ReactNode } from "react"
 import { jobKindTitle } from "./activity-history.js"
 import {
   fleetModule,
+  usageModule,
   moduleHref,
   type NeedsYouDestination,
   type NeedsYouItem,
@@ -21,6 +22,8 @@ export interface TodayViewProps {
   readonly now: number
   readonly agents: ReactNode
   readonly history: ReactNode
+  /** Retarget Room to work only when the shell has installed Usage details. */
+  readonly usageDetails?: boolean
 }
 
 /** Each wire selector maps to the owning module's exact page; keys remain opaque. */
@@ -96,7 +99,7 @@ const RequestRow = ({ item, now }: { readonly item: NeedsYouItem; readonly now: 
 }
 
 /** Read-only, bounded discovery. A partial or old reading never claims the fleet is clear. */
-export const TodayView = ({ agents, history, now, state }: TodayViewProps): ReactElement => {
+export const TodayView = ({ agents, history, now, state, usageDetails = false }: TodayViewProps): ReactElement => {
   const result = state.reading?.result
   const items = result?.items ?? []
   const waiting = items.filter((item) => item.expiresAt === null || item.expiresAt > now)
@@ -196,9 +199,16 @@ export const TodayView = ({ agents, history, now, state }: TodayViewProps): Reac
           {history}
           <section className="today-rail-section">
             <h2>Room to work</h2>
-            <p>Read your current local usage and limits in Fleet.</p>
-            <a className="today-link" href={moduleHref(fleetModule, "usage")}>
-              Check local limits <span aria-hidden="true">›</span>
+            <p>
+              {usageDetails
+                ? "Read reported usage and limits in Usage details."
+                : "Read your current local usage and limits in Fleet."}
+            </p>
+            <a
+              className="today-link"
+              href={usageDetails ? moduleHref(usageModule, "limits") : moduleHref(fleetModule, "usage")}
+            >
+              {usageDetails ? "Check limits" : "Check local limits"} <span aria-hidden="true">›</span>
             </a>
           </section>
         </aside>

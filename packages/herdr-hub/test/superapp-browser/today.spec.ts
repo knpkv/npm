@@ -67,9 +67,9 @@ for (const theme of ["light", "dark"]) {
       expect(link.height).toBeGreaterThanOrEqual(44)
       expect(link.width).toBeGreaterThan(0)
     }
-    await today.getByRole("link", { name: "Check local limits", exact: true }).click()
-    await expect(page.getByRole("tab", { name: "Usage", exact: true })).toBeFocused()
-    expect(new URL(page.url()).hash).toBe("#fleet/usage")
+    await today.getByRole("link", { name: "Check limits", exact: true }).click()
+    await expect(page.locator("[data-module-page=\"limits\"]")).toBeFocused()
+    expect(new URL(page.url()).hash).toBe("#usage/limits")
   })
 }
 

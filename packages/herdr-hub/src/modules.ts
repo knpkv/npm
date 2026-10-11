@@ -10,11 +10,15 @@ import {
 export * from "./module-contract.js"
 export * from "./module-navigation.js"
 export * from "./module-needs-you.js"
+export * from "./usage-selection.js"
 
-/** The shell owns history; products build exact links with moduleHref before navigating. */
+/**
+ * The shell owns history. Build exact links with moduleHref; focus defaults to the destination
+ * page. Pass null for in-page selector updates to retain control focus, or search for Connect.
+ */
 export interface ModulePageMount {
   readonly active: boolean
-  readonly navigate: (href: string, history: "push" | "replace") => void
+  readonly navigate: (href: string, history: "push" | "replace", focus?: "page" | "search" | null) => void
 }
 
 /** Browser implementations import a product's browser entry and supply every declared page. */

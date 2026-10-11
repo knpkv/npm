@@ -99,6 +99,7 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
   host,
   hostCount,
   landing,
+  mobileModules,
   modules,
   notifications,
   onLocationChange,
@@ -106,6 +107,8 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
 }: {
   readonly modules: Views
   readonly landing: NoInfer<ModuleDestination<Views[number]["descriptor"]>>
+  /** Installed modules shown directly on the phone bar; defaults to every installed module. */
+  readonly mobileModules?: ReadonlyArray<NoInfer<Views[number]["descriptor"]["id"]>>
   readonly host: string
   readonly hostCount: number
   readonly notifications: ReactNode
@@ -214,12 +217,19 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
     }
     setLocation({ ...next, focus: panel.open ? "deferred" : focus })
   }
+  const cancelLocationFocus = useRef<(() => void) | null>(null)
   useLayoutEffect(() => {
+    // Query repairs retain the pending arrival focus, but never start another focus request.
+    if (location.focus === null) return
+    cancelLocationFocus.current?.()
+    cancelLocationFocus.current = null
     if (location.focus === "search") {
-      return focusWhenShown("connect-agent-search")
+      cancelLocationFocus.current = focusWhenShown("connect-agent-search")
     }
-    if (location.focus === "page") return focusModulePage(location.destination.module, location.destination.page)
+    if (location.focus === "page")
+      cancelLocationFocus.current = focusModulePage(location.destination.module, location.destination.page)
   }, [location])
+  useLayoutEffect(() => () => cancelLocationFocus.current?.(), [])
   useEffect(() => {
     const read = (): void =>
       setLocation((previous) =>
@@ -329,7 +339,7 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
   const landingModule = descriptors.find((module) => module.id === landing.module)
   if (landingModule === undefined)
     throw new ModuleRegistrationError({ module: landing.module, reason: "missing_default" })
-  const links = descriptors.map((module) => (
+  const moduleLink = (module: ModuleDescriptor) => (
     <a
       aria-label={module.label}
       aria-current={location.error === null && module.id === location.destination.module ? "page" : undefined}
@@ -343,7 +353,13 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
       <ShellIcon name={module.id === "fleet" ? "fleet" : "modules"} />
       <span>{module.label}</span>
     </a>
-  ))
+  )
+  const links = descriptors.map(moduleLink)
+  const mobileDescriptors = descriptors.filter(
+    (module) => mobileModules === undefined || mobileModules.includes(module.id)
+  )
+  const offBarModule =
+    currentModule !== undefined && !mobileDescriptors.some((module) => module.id === currentModule.id)
   return (
     <PortalProvider>
       <div className="superapp-shell">
@@ -441,8 +457,14 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
           ))}
         </main>
         <nav aria-label="Mobile modules" className="superapp-bottom" ref={bottomBar}>
-          {links}
-          <button type="button" className="superapp-control" onClick={() => openPanel("modules")}>
+          {mobileDescriptors.map(moduleLink)}
+          <button
+            type="button"
+            className="superapp-control"
+            aria-current={offBarModule ? "page" : undefined}
+            aria-label={offBarModule ? `All modules, current module ${currentModule.label}` : undefined}
+            onClick={() => openPanel("modules")}
+          >
             <ShellIcon name="modules" /> All modules
           </button>
         </nav>

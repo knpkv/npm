@@ -45,7 +45,7 @@ import { Data, Deferred, Effect, Fiber, Layer, Result, Schema, Stream } from "ef
 import { HttpClient } from "effect/http"
 import { build } from "esbuild"
 import { spawn } from "node:child_process"
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { createServer, request as httpRequest } from "node:http"
 import { request as httpsRequest } from "node:https"
 import { tmpdir } from "node:os"
@@ -5258,6 +5258,79 @@ esac
 
   const conversation = "product=herdr&kind=fleet&id=SER8"
   const hubRef = { product: "herdr", kind: "fleet", id: "SER8" }
+
+  it.effect("reuses authorized Usage reports and caches without forwarding local-only fields", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-usage-module-"))
+    return Effect.gen(function*() {
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { force: true, recursive: true })))
+      const calls = join(root, "command-calls")
+      const usage = {
+        v: 1,
+        machine: "SER8",
+        observedAt: 1_000,
+        range: { preset: "30d", timeZone: "Europe/Amsterdam", from: 0, to: 1_000, bucket: "day" },
+        periods: [{ key: "2026-10-08", start: 0 }],
+        tokens: [{ period: 0, agent: "claude", model: "claude-opus-5", tokens: 900 }],
+        limits: []
+      }
+      const localOnly = {
+        costUsd: 12,
+        balances: [42],
+        bookings: ["private-booking"],
+        sessions: ["private-session"],
+        path: "/private/store",
+        promptPrefix: "private-prompt"
+      }
+      const rawUsage = { ...usage, ...localOnly, tokens: usage.tokens.map((cell) => ({ ...cell, ...localOnly })) }
+      const limits = { v: 1, machine: "SER8", observedAt: 1_000, latest: [] }
+      const script = `printf '%s\\n' "$*" >> '${calls}'; case "$1" in usage) printf '%s' '${
+        JSON.stringify(rawUsage)
+      }' ;; limits) printf '%s' '${JSON.stringify({ ...limits, ...localOnly })}' ;; *) exit 2 ;; esac`
+      const hub = yield* startHub(
+        root,
+        join(root, "relay"),
+        scriptedBackends("No report actions."),
+        () => Effect.void,
+        [],
+        {
+          agentUsageLimitsCommand: ["sh", "-c", script, "agent-usage", "limits"]
+        }
+      )
+      const get = (path: string) => Effect.promise(() => hubRequest(`${hub.serveUrl}${path}`, { headers: hub.headers }))
+      hub.deny()
+      const dashboard = yield* get("/v1/dashboard")
+      for (const path of ["/v1/connect/usage?range=30d&timeZone=Europe%2FAmsterdam", "/v1/connect/limits"]) {
+        expect((yield* get(path)).status).toBe(dashboard.status)
+      }
+      expect(dashboard.status).toBe(403)
+      expect(existsSync(calls)).toBe(false)
+      hub.allow()
+      const report = yield* get("/v1/connect/usage?range=30d&timeZone=Europe%2FAmsterdam")
+      const currentLimits = yield* get("/v1/connect/limits")
+      expect(report.status).toBe(200)
+      expect(currentLimits.status).toBe(200)
+      expect(report.cookies).toEqual([])
+      expect(currentLimits.cookies).toEqual([])
+      const body = Schema.decodeUnknownSync(FleetUsage)(JSON.parse(report.body))
+      expect(body.hosts[0]?.reading).toEqual({ _tag: "Read", usage, skipped: 0 })
+      expect(Schema.decodeUnknownSync(FleetLimits)(JSON.parse(currentLimits.body)).hosts[0]?.reading).toEqual({
+        _tag: "Read",
+        limits,
+        skipped: 0
+      })
+      for (const field of Object.keys(localOnly)) {
+        expect(report.body).not.toContain(`"${field}"`)
+        expect(currentLimits.body).not.toContain(`"${field}"`)
+      }
+      yield* get("/v1/connect/usage?range=30d&timeZone=Europe%2FAmsterdam")
+      yield* get("/v1/connect/limits")
+      expect(readFileSync(calls, "utf8").trim().split("\n")).toEqual([
+        "usage --range 30d --time-zone Europe/Amsterdam",
+        "limits"
+      ])
+      expect((yield* get("/v1/modules/usage/report")).status).toBe(404)
+    }).pipe(Effect.scoped, provideNodeServices)
+  })
 
   it.effect("serves one bounded Today list without approval proofs or job payloads", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-today-list-"))

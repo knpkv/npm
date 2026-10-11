@@ -8,7 +8,7 @@ import { afterEach, beforeEach, expect, expectTypeOf, it, vi } from "vitest"
 import { fleetModule, type ModuleViews, moduleHref, type ModulePageMount } from "../src/modules.js"
 import { SuperappShell } from "../src/superapp-view.js"
 import { FleetShell, type FleetShellTab } from "../src/shell-view.js"
-import { defineModule } from "../src/modules.js"
+import { defineModule, usageModule } from "../src/modules.js"
 import { makeFleetModuleViews } from "../src/fleet-module-view.js"
 import { DashboardView } from "../src/dashboard-view.js"
 import type { DashboardSnapshot } from "../src/dashboard-model.js"
@@ -23,6 +23,7 @@ it("types the landing destination from the installed module registry", () => {
     readonly module: "fleet"
     readonly page: "approvals" | "connect" | "work" | "usage"
   }>()
+  expectTypeOf<Props["mobileModules"]>().toEqualTypeOf<ReadonlyArray<"fleet"> | undefined>()
 })
 afterEach(async () => {
   await act(async () => {
@@ -85,6 +86,7 @@ const render = async (modules: Parameters<typeof SuperappShell>[0]["modules"] = 
     root.render(
       <SuperappShell
         modules={modules}
+        mobileModules={["fleet"]}
         landing={{ module: "fleet", page: "approvals" }}
         host="hub"
         hostCount={1}
@@ -100,6 +102,51 @@ it("keeps a first-load document anchor while rendering the landing module", asyn
   expect(window.location.hash).toBe("#main")
   expect(document.querySelector("h1")?.textContent).toBe("Approval queue")
   expect(document.querySelector('[role="alert"]')).toBeNull()
+})
+
+it.each<"page" | null | undefined>([undefined, "page", null])(
+  "module navigation applies the %s focus policy",
+  async (focus) => {
+    window.history.replaceState(null, "", "/#fleet/usage")
+    const view: ModuleViews<typeof fleetModule> = {
+      ...fleet,
+      pages: {
+        ...fleet.pages,
+        usage: (_search, mount) => (
+          <>
+            <a href="#fleet/usage" data-module-page="usage">
+              Usage
+            </a>
+            <button onClick={() => mount.navigate("?range=30d#fleet/usage", "replace", focus)}>Range</button>
+          </>
+        )
+      }
+    }
+    await render([view])
+    const page = document.querySelector<HTMLElement>('[data-module-page="usage"]')
+    const button = document.querySelector<HTMLButtonElement>('[data-module="fleet"] button')
+    if (page === null || button === null) return expect.unreachable()
+    await vi.waitFor(() => expect(document.activeElement).toBe(page))
+    button.focus()
+    await act(async () => button.click())
+    await vi.waitFor(() => expect(document.activeElement).toBe(focus === null ? button : page))
+    expect(window.location.search).toBe("?range=30d")
+  }
+)
+
+it("keeps personal modules behind the mobile picker and announces its current module", async () => {
+  window.history.replaceState(null, "", "/#usage/limits")
+  await render([
+    fleet,
+    { descriptor: usageModule, pages: { limits: () => <h1>Limits</h1>, tokens: () => <h1>Tokens</h1> } }
+  ])
+  const bottom = document.querySelector('nav[aria-label="Mobile modules"]')
+  expect([...(bottom?.querySelectorAll("a") ?? [])].map((link) => link.textContent)).toEqual(["Fleet"])
+  const picker = bottom?.querySelector("button")
+  expect(picker?.getAttribute("aria-current")).toBe("page")
+  expect(picker?.getAttribute("aria-label")).toBe("All modules, current module Usage details")
+  expect(picker?.getAttribute("aria-label")?.startsWith(picker.textContent?.trim() ?? "")).toBe(true)
+  expect(document.querySelector('nav[aria-label="Modules"] a[aria-label="Usage details"]')).not.toBeNull()
 })
 
 it("starts the host button name with its visible label and keeps the host named when that label is hidden", async () => {

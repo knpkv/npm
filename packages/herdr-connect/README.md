@@ -16,6 +16,8 @@ Browser consumers can import `@knpkv/herdr-connect/client` for the mounting entr
 
 Browser contracts are available through `@knpkv/herdr-connect/model`; browser subpaths do not pull SQLite or Node process code into the bundle.
 
+`@knpkv/herdr-connect/usage` exports the existing `UsageSurface` and atoms, plus the stateless `UsageTab`, report loaders, selectors and view-state helpers for a host-owned page. `UsageTab` defaults to its Fleet presentation. Optional `presentation: { page: "limits" | "tokens", labelledBy }` omits its toolbar and h1; the owning page supplies the referenced h1, range control and conditional `AGENT_USAGE_PAGE` link using `onLoopback()`. Internal sections use h2 headings. Limits includes the current limit cards, tokens and limit history; Tokens includes its token chart and notes. The existing uncontrolled surface is unchanged. These reports carry only token and limit readings, with no cost, balance, booking, session, path or bot identity data.
+
 ## Agent voice
 
 Agents can report a short status, progress update, skill feedback, note, or blocker through the canonical hub's authenticated `POST /v1/connect/posts`. Reports contain `agentId`, `kind`, `text`, `eventId`, and optional `goalStep`. Status text is limited to 240 characters; other kinds to 1024. These are plain-text updates, never terminal transcripts or HTML. Consumers must render text as text.

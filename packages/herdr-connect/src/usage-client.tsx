@@ -37,7 +37,7 @@ const rememberRange = (range: UsagePreset): void => {
 }
 
 /** The page is open on the machine serving it, so agent-usage's loopback page is reachable from here. */
-const onLoopback = (): boolean => ["127.0.0.1", "localhost", "[::1]"].includes(window.location.hostname)
+export const onLoopback = (): boolean => ["127.0.0.1", "localhost", "[::1]"].includes(window.location.hostname)
 
 /** This browser's zone: every host is asked for periods local to it, so their days line up. */
 const viewerTimeZone = (): string => Intl.DateTimeFormat().resolvedOptions().timeZone

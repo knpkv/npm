@@ -12,6 +12,7 @@ interface TodayModuleContent {
   readonly now: number
   readonly agents: ReactNode
   readonly history: ReactNode
+  readonly usageDetails?: boolean
 }
 
 /** One serial poll only while Today is active and visible; interruption aborts an in-flight read. */
@@ -50,7 +51,15 @@ const TodayPage = ({
       Effect.runFork(Fiber.interrupt(fiber))
     }
   }, [active, visible, content.read])
-  return <TodayView state={state} now={content.now} agents={content.agents} history={content.history} />
+  return (
+    <TodayView
+      state={state}
+      now={content.now}
+      agents={content.agents}
+      history={content.history}
+      usageDetails={content.usageDetails ?? false}
+    />
+  )
 }
 
 /** The shell retains the page's last reading while another module is selected. */
