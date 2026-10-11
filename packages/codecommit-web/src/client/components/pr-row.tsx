@@ -29,7 +29,7 @@ import {
 import styles from "./review-queue.module.css"
 import { type Caller, needsYourReview } from "./workbench-queue.js"
 
-interface PRRowProps {
+export interface PRRowProps {
   readonly pr: PullRequest
   readonly to: string
   readonly showUpdated?: boolean

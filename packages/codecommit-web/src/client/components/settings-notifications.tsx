@@ -41,6 +41,8 @@ const INTERVALS = [
   { label: "4 hours", ms: 4 * 60 * 60 * 1000 }
 ]
 
+export type SettingsNotificationsProps = Record<string, never>
+
 export function SettingsNotifications() {
   const [desktopEnabled, setDesktopEnabled] = useState(() => readBool(StorageKeys.desktopNotifications, false))
   const [remindersEnabled, setRemindersEnabled] = useState(() => readBool(StorageKeys.reminders, true))

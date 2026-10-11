@@ -4,7 +4,7 @@ import { describe, expect, it } from "@effect/vitest"
 import { act, createElement } from "react"
 import { createRoot } from "react-dom/client"
 
-import { FilterSelectionIndicator } from "../src/client/components/filter-sidebar.js"
+import { FilterSelectionIndicator } from "../src/client/components/filter-selection-indicator.js"
 
 Object.assign(window, { IS_REACT_ACT_ENVIRONMENT: true })
 

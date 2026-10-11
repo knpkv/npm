@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Domain } from "@knpkv/codecommit-core"
-import { prListHref, prListKey } from "../src/client/components/pr-list.js"
+import { prListHref, prListKey } from "../src/client/components/pr-list-links.js"
 
 describe("PR list links", () => {
   it("retains repository and region coordinates for duplicate PR identifiers", () => {

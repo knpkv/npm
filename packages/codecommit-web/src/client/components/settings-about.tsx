@@ -9,6 +9,8 @@ const SHORTCUTS = [
   { key: "Cmd+P", desc: "Command palette" }
 ]
 
+export type SettingsAboutProps = Record<string, never>
+
 export function SettingsAbout() {
   return (
     <div className="space-y-4">
