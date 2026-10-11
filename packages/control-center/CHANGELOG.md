@@ -1,5 +1,20 @@
 # @knpkv/control-center
 
+## 0.14.0
+
+### Minor Changes
+
+- [#794](https://github.com/knpkv/npm/pull/794) [`dba7d9c`](https://github.com/knpkv/npm/commit/dba7d9cae83b8bdf6ad2dea3437921600b164169) Thanks [@konopkov](https://github.com/konopkov)! - Configure named release environments with ordered pipeline stage ranges in governed workspace settings. Show held releases with a configuration link when delivery targets are missing or stale.
+
+- [#795](https://github.com/knpkv/npm/pull/795) [`38c0caa`](https://github.com/knpkv/npm/commit/38c0caa1ee9f3c9a2cf4a8876aa115554754dbe2) Thanks [@konopkov](https://github.com/konopkov)! - Project release source availability from the latest connection health while preserving the last successful read. Add typed source-unavailable freshness and optional health outcomes to portfolio invalidation events, including stable failure-start and legacy-history fallback presentation.
+
+### Patch Changes
+
+- Updated dependencies [[`70f28c7`](https://github.com/knpkv/npm/commit/70f28c782bc8621513b9255e245533a7baa5d710)]:
+  - @knpkv/rly@0.21.0
+  - @knpkv/relay-product@0.6.0
+  - @knpkv/review@0.4.11
+
 ## 0.13.0
 
 ### Minor Changes

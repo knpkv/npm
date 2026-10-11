@@ -1,5 +1,23 @@
 # @knpkv/rly
 
+## 0.21.0
+
+### Minor Changes
+
+- [#791](https://github.com/knpkv/npm/pull/791) [`70f28c7`](https://github.com/knpkv/npm/commit/70f28c782bc8621513b9255e245533a7baa5d710) Thanks [@konopkov](https://github.com/konopkov)! - Mount the canonical hub in the Relay module shell with shared navigation, notifications and one conversation. Preserve Fleet deep links and approval state across module changes.
+
+  Allow the shared Relay launcher to use separate desktop and phone labels.
+
+  Use the current navigation selection in WorkBoard without remounting focused controls.
+
+  Add decorative avatar slots to Relay's launcher, panel and transcript, forwarded by the conversation panel. The hub supplies its shared character with typed phases and composer-focus tracking.
+
+  Retain the Dialog portal layer until its exit motion completes.
+
+  Allow Dialog hosts to restore a navigation destination after modal cleanup, with opener restoration as the default.
+
+  Dialog now returns focus to the opener after its exit and modal cleanup instead of immediately on close; downstream tests must wait for cleanup.
+
 ## 0.20.0
 
 ### Minor Changes

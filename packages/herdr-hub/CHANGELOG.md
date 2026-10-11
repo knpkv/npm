@@ -2,6 +2,41 @@
 
 Released as `@knpkv/herdr-approvals` up to 0.18.0; the headings below are that package's history.
 
+## 0.21.0
+
+### Minor Changes
+
+- [#789](https://github.com/knpkv/npm/pull/789) [`bdabf68`](https://github.com/knpkv/npm/commit/bdabf6855cf008d5b08ca00de775895cbed0fcaa) Thanks [@konopkov](https://github.com/konopkov)! - Approvals show the requesting bot's Connect portrait when its exact identity is known, retain requests after failed reads, and revalidate stale decisions before sending them. The Connect surface exports AgentCreature for shared requester portraits.
+
+  The request list and history follow the responsive Approvals layout. Full request disclosures can show JSON built from the same normalized fields as the default field view.
+
+- [#790](https://github.com/knpkv/npm/pull/790) [`57880bb`](https://github.com/knpkv/npm/commit/57880bbfb042d60bfed8a4465260e8b47c7e25c4) Thanks [@konopkov](https://github.com/konopkov)! - Add `WorkService.attachPullRequest` and `fleetctl work attach-pr` to attach a GitHub pull request to an existing goal. The latest event, stored repository and branch, active state, and existing review URL are checked in the same transaction that derives and appends the checkpoint. Concurrent goal changes produce `WorkPullRequestAttachConflict` instead of being overwritten. Reattaching the same URL is a no-op success that preserves later goal updates.
+
+- [#793](https://github.com/knpkv/npm/pull/793) [`4286d6b`](https://github.com/knpkv/npm/commit/4286d6b23fd9a0bbbca9bc15e06a8d641828ef32) Thanks [@konopkov](https://github.com/konopkov)! - Prevent a queued decision on a stale read from being sent after the request changed or left the pending queue. Keep refreshed pending pages and deep-link lookup results tied to their source snapshot before verifying a decision.
+
+- [#791](https://github.com/knpkv/npm/pull/791) [`70f28c7`](https://github.com/knpkv/npm/commit/70f28c782bc8621513b9255e245533a7baa5d710) Thanks [@konopkov](https://github.com/konopkov)! - Mount the canonical hub in the Relay module shell with shared navigation, notifications and one conversation. Preserve Fleet deep links and approval state across module changes.
+
+  Allow the shared Relay launcher to use separate desktop and phone labels.
+
+  Use the current navigation selection in WorkBoard without remounting focused controls.
+
+  Add decorative avatar slots to Relay's launcher, panel and transcript, forwarded by the conversation panel. The hub supplies its shared character with typed phases and composer-focus tracking.
+
+  Retain the Dialog portal layer until its exit motion completes.
+
+  Allow Dialog hosts to restore a navigation destination after modal cleanup, with opener restoration as the default.
+
+  Dialog now returns focus to the opener after its exit and modal cleanup instead of immediately on close; downstream tests must wait for cleanup.
+
+### Patch Changes
+
+- Updated dependencies [[`bdabf68`](https://github.com/knpkv/npm/commit/bdabf6855cf008d5b08ca00de775895cbed0fcaa), [`57880bb`](https://github.com/knpkv/npm/commit/57880bbfb042d60bfed8a4465260e8b47c7e25c4), [`70f28c7`](https://github.com/knpkv/npm/commit/70f28c782bc8621513b9255e245533a7baa5d710)]:
+  - @knpkv/herdr-connect@0.13.0
+  - @knpkv/herdr-work@0.12.0
+  - @knpkv/rly@0.21.0
+  - @knpkv/relay-product@0.6.0
+  - @knpkv/herdr-coordinator@0.4.1
+
 ## 0.20.0
 
 ### Minor Changes
