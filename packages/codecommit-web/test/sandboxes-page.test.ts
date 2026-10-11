@@ -4,7 +4,7 @@ import { describe, expect, it } from "@effect/vitest"
 import { act, createElement } from "react"
 import { createRoot } from "react-dom/client"
 
-import { SandboxesPageView } from "../src/client/components/sandboxes-page.js"
+import { SandboxesPageView } from "../src/client/components/sandboxes-page-view.js"
 
 Object.assign(window, { IS_REACT_ACT_ENVIRONMENT: true })
 

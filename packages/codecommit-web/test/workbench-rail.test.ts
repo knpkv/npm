@@ -7,9 +7,9 @@ import { act, createElement } from "react"
 import { createRoot } from "react-dom/client"
 import { MemoryRouter } from "react-router"
 
-import { prListKey } from "../src/client/components/pr-list.js"
+import { prListKey } from "../src/client/components/pr-list-links.js"
 import { workbenchQueue } from "../src/client/components/workbench-queue.js"
-import { WorkbenchRailView } from "../src/client/components/workbench-rail.js"
+import { WorkbenchRailView } from "../src/client/components/workbench-rail-view.js"
 
 Object.assign(window, { IS_REACT_ACT_ENVIRONMENT: true })
 

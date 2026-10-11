@@ -16,15 +16,13 @@ function formatShort(d: Date): string {
   return d.toLocaleDateString(undefined, { month: "short", day: "numeric" })
 }
 
-export function DateRangePicker({
-  from,
-  onChange,
-  to
-}: {
+export interface DateRangePickerProps {
   from: string | undefined
   to: string | undefined
   onChange: (from: string | undefined, to: string | undefined) => void
-}) {
+}
+
+export function DateRangePicker({ from, onChange, to }: DateRangePickerProps) {
   const fromDate = from ? new Date(from + "T00:00:00") : undefined
   const toDate = to ? new Date(to + "T00:00:00") : undefined
   const hasRange = !!from || !!to

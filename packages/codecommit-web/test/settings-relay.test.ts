@@ -15,7 +15,7 @@ import {
   SettingsRelayView,
   type SettingsRelayViewProps,
   updateReviewProfileSkills
-} from "../src/client/components/settings-relay.js"
+} from "../src/client/components/settings-relay-view.js"
 import { ApiError, ReviewSkillResponse } from "../src/server/Api.js"
 
 Object.assign(window, { IS_REACT_ACT_ENVIRONMENT: true })

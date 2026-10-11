@@ -83,6 +83,12 @@ const buildLayouts = new Map([
 /** Built assets with no one-to-one source file; tests import the built file. */
 const builtAssetExports = new Set(["@knpkv/review/guide/styles.css", "@knpkv/rly/styles.css"])
 
+/** Library bundles whose output filenames do not mirror their source entries. */
+const bundledEntrySources = new Map([
+  ["@knpkv/codecommit-web/views", "./src/views.ts"],
+  ["@knpkv/codecommit-web/views/style.css", "./src/views.css"]
+])
+
 /** Built extension and the source extensions it may come from. */
 const sourceExtensions = [[".js", [".ts", ".tsx"]], [".css", [".css"]], [".svg", [".svg"]]] as const
 
@@ -216,8 +222,12 @@ const aliasesFor = (directory: string): ReadonlyArray<SourceAlias> => {
       }
       continue
     }
-    const source = sourceFor(manifest.name, directory, target)
+    const bundledEntry = bundledEntrySources.get(specifier)
+    const source = bundledEntry === undefined
+      ? sourceFor(manifest.name, directory, target)
+      : join(directory, bundledEntry)
     if (source === undefined) throw new WorkspaceSourceAliasError(specifier, target, "no source file")
+    if (!existsSync(source)) throw new WorkspaceSourceAliasError(specifier, target, "no source file")
     aliases.push({ find: new RegExp(`^${escapeRegExp(specifier)}$`), replacement: source })
   }
   return aliases

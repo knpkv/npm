@@ -9,7 +9,7 @@
  */
 import { useAtomValue } from "@effect/atom-react"
 import { Button, Text } from "@knpkv/rly/primitives"
-import { CheckIcon, ChevronDownIcon } from "lucide-react"
+import { ChevronDownIcon } from "lucide-react"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { queuePullRequests } from "../utils/queuePullRequests.js"
 import { useSearchParams } from "react-router"
@@ -19,6 +19,7 @@ import { useFilterParams } from "../hooks/useFilterParams.js"
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "./ui/command.js"
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover.js"
 import styles from "./review-queue.module.css"
+import { FilterSelectionIndicator } from "./filter-selection-indicator.js"
 import {
   filterLabels,
   groupQueueFilters,
@@ -50,17 +51,6 @@ interface FilterComboboxProps {
   readonly onToggle: (key: FilterKey, value: string) => void
   readonly options: ReadonlyArray<string>
   readonly selected: ReadonlyArray<string>
-}
-
-export function FilterSelectionIndicator({ selected }: { readonly selected: boolean }) {
-  return (
-    <>
-      <span aria-hidden="true" className={styles.optionCheck} data-selected={selected ? "true" : undefined}>
-        {selected ? <CheckIcon /> : null}
-      </span>
-      <span className={styles.visuallyHidden}>{selected ? "Selected" : "Not selected"}</span>
-    </>
-  )
 }
 
 function FilterCombobox({ filterKey, groups, label, onToggle, options, selected }: FilterComboboxProps) {
