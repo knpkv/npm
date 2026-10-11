@@ -202,6 +202,7 @@ const confluenceConverter: MarkdownConverter["Service"] = {
 }
 
 const confluenceClient = (overrides: Partial<ConfluencePageClientContract> = {}): ConfluencePageClientContract => ({
+  getPageLabels: () => Effect.succeed({ results: [] }),
   getCurrentUser: Effect.succeed({ accountId: "account-author", displayName: "Avery" }),
   getSystemInfo: Effect.succeed({ cloudId: "site-acme", siteTitle: "Acme" }),
   getPage: () => Effect.succeed(confluencePage),

@@ -9,11 +9,13 @@ import type {
   PortfolioReleaseCollaborator,
   PortfolioReleasePageAwareness,
   PortfolioReleaseRole,
+  PortfolioReleaseSummary,
   PortfolioSnapshot
 } from "../../api/portfolio.js"
 import { derivePersonInitials, type Role } from "../../domain/actors.js"
 import { evaluateReleaseFreshnessAt, failureStreakStartedAt, type ReleaseSourceHealth } from "../../domain/freshness.js"
 import type { PluginConnectionId, ReleaseId } from "../../domain/identifiers.js"
+import { releaseGateWaivers } from "../../domain/readiness/model.js"
 import type { Release } from "../../domain/release.js"
 import { ApplicationServiceUnavailable, PortfolioSnapshots } from "../api/ApplicationServices.js"
 import { Persistence, type PersistenceService } from "../persistence/Persistence.js"
@@ -87,6 +89,7 @@ const summarizeReleaseReadiness = (
   current: CurrentReleaseReadinessAssessmentRecord
 ): PortfolioReadinessSummary => {
   const { assessment, authority } = current
+  const gateWaivers = releaseGateWaivers(assessment)
   return {
     authority,
     verdict: assessment.verdict,
@@ -94,6 +97,7 @@ const summarizeReleaseReadiness = (
     blockerCount: assessment.blockers.length,
     warningCount: assessment.warnings.length,
     gapCount: assessment.gaps.length,
+    ...(gateWaivers.length > 0 && { gateWaivers }),
     primaryFinding: assessment.blockers[0] ?? assessment.gaps[0] ?? assessment.warnings[0] ?? null,
     evaluatedAt: assessment.evaluatedAt
   }
@@ -269,6 +273,19 @@ export const makePortfolioSnapshots = Effect.gen(function*() {
             summarizeReleaseReadiness(record)
           ])
         )
+        const readinessOutcomes = yield* persistence.events.readLatestReadinessOutcomes(
+          workspaceId,
+          releases.map(({ release }) => release.id)
+        ).pipe(Effect.mapError(() => unavailable()))
+        const failures = new Map<ReleaseId, PortfolioReleaseSummary["readinessFailure"]>()
+        for (const event of readinessOutcomes) {
+          if (
+            event.metadata.releaseId !== undefined && event.payload.reason === "readiness-failed" &&
+            event.payload.readinessFailure !== undefined
+          ) {
+            failures.set(event.metadata.releaseId, { ...event.payload.readinessFailure, failedAt: event.occurredAt })
+          }
+        }
         const pageAwarenessByReleaseId = yield* loadReleasePageAwareness(
           persistence.governedActions,
           releases.map(({ release }) => release)
@@ -285,6 +302,7 @@ export const makePortfolioSnapshots = Effect.gen(function*() {
               .pipe(
                 Effect.mapError(() => unavailable())
               )
+            const readinessFailure = failures.get(release.id)
             const pageAwareness = pageAwarenessByReleaseId.get(release.id) ?? unknownPageAwareness()
             const targetSlice = release.sourceRevisions.some(({ providerId }) => providerId === "jira")
               ? yield* persistence.deliveryGraph.read(workspaceId, {
@@ -318,6 +336,7 @@ export const makePortfolioSnapshots = Effect.gen(function*() {
               collaborators: collaboratorProjection.collaborators,
               collaboratorCount: collaboratorProjection.collaboratorCount,
               readiness: readinessByReleaseId.get(release.id) ?? null,
+              ...(readinessFailure !== undefined && { readinessFailure }),
               relationships,
               sourceRevisionCount: release.sourceRevisions.length,
               releasePageAwareness: pageAwareness,

@@ -139,7 +139,7 @@
 }
 
 .targetError {
-  color: var(--rly-color-text-1);
+  color: var(--rly-color-blocked-ink);
 }
 
 .control[aria-invalid="true"] {
@@ -172,7 +172,7 @@
   overflow-wrap: break-word;
 }
 
-.field > small {
+.field > small:not(.targetError) {
   color: var(--rly-color-text-2);
 }
 

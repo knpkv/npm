@@ -17,6 +17,7 @@ import type {
 } from "../../api/agent.js"
 import type { PortfolioReleaseSummary } from "../../api/portfolio.js"
 import type { ReleaseId, WorkspaceId } from "../../domain/identifiers.js"
+import { describeReadinessGateWaiver } from "../../domain/readiness/model.js"
 import {
   ApplicationResourceNotFound,
   ApplicationServiceUnavailable,
@@ -73,6 +74,20 @@ Service: ${release.serviceName}
 Version: ${release.version}
 Lifecycle: ${release.lifecycle}
 Freshness: ${release.freshness._tag}
+Readiness: ${
+    release.readiness?.authority === "authoritative" && release.readinessFailure === undefined
+      ? release.readiness.verdict
+      : "held"
+  } (${release.readiness?.authority ?? "no assessment"})
+Readiness failure: ${JSON.stringify(release.readinessFailure ?? null)}
+Manual gate exemptions: ${
+    JSON.stringify(
+      (release.readiness?.gateWaivers ?? []).map((waiver) => ({
+        label: describeReadinessGateWaiver(waiver),
+        ...waiver
+      }))
+    )
+  }
 Target environments: ${release.targetEnvironmentIds.join(", ") || "none"}
 Source revisions: ${release.sourceRevisionCount}
 Collaborators (${release.collaboratorCount} total):

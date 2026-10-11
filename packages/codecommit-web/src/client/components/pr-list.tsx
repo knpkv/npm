@@ -17,7 +17,7 @@ import { queuePullRequests } from "../utils/queuePullRequests.js"
 import { useNavigate, useSearchParams } from "react-router"
 import { appStateAtom, notificationsSsoLoginAtom } from "../atoms/app.js"
 import { useFilterParams } from "../hooks/useFilterParams.js"
-import { codeCommitPullRequestHref } from "../codecommit-route.js"
+import { prListHref, prListKey } from "./pr-list-links.js"
 import { emptyQueueCause, streamConnectionAtom, streamRetryAtom, streamSnapshotSeenAtom } from "../connection.js"
 import { FilterSidebar } from "./filter-sidebar.js"
 import { PRRow } from "./pr-row.js"
@@ -35,12 +35,6 @@ import { SearchBar } from "./search-bar.js"
 import { callerOf, needsYourReview } from "./workbench-queue.js"
 
 type PullRequest = Domain.PullRequest
-
-export const prListHref = (pr: Pick<PullRequest, "account" | "id" | "repositoryName">): string =>
-  codeCommitPullRequestHref(pr.account.profile, String(pr.id), String(pr.repositoryName), String(pr.account.region))
-
-export const prListKey = (pr: Pick<PullRequest, "account" | "id" | "repositoryName">): string =>
-  `${pr.account.awsAccountId ?? pr.account.profile}:${String(pr.id)}:${String(pr.repositoryName)}:${String(pr.account.region)}`
 
 const replaceStatusFacet = (params: URLSearchParams, status: "approved" | "open" | "pending"): void => {
   const retained = params.getAll("f").filter((raw) => !raw.startsWith("status:") && raw !== "")

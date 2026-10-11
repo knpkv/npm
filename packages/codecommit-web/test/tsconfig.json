@@ -4,11 +4,12 @@
     "noEmit": true,
     "composite": false,
     "declaration": false,
+    "declarationDir": null,
     "declarationMap": false,
     "rootDir": "../../..",
     "outDir": null,
     "tsBuildInfoFile": null
   },
-  "include": ["../src", ".", "../e2e"],
+  "include": ["../src", ".", "../e2e", "../vite.views.config.ts"],
   "exclude": []
 }

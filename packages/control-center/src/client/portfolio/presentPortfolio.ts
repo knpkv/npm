@@ -11,12 +11,13 @@ import * as DateTime from "effect/DateTime"
 
 import type { PortfolioReleaseRole, PortfolioSnapshot } from "../../api/portfolio.js"
 import type { PluginFailureClass, PluginHealth, SourceUnavailableFreshness } from "../../domain/freshness.js"
+import { describeReadinessGateWaiver } from "../../domain/readiness/projections.js"
 import type {
   ReadinessFinding,
   ReadinessProgress,
   ReadinessStages,
   ReadinessVerdict
-} from "../../domain/readiness/model.js"
+} from "../../domain/readiness/projections.js"
 import type { ReleaseLifecycle } from "../../domain/release.js"
 
 const READINESS_STAGES: ReadonlyArray<string> = ["Build", "Verify", "Production"]
@@ -340,6 +341,10 @@ const verdictPresentation = {
 
 const findingReason = (finding: ReadinessFinding): string => {
   switch (finding.code) {
+    case "gate-waived":
+      return finding.waiver === undefined ?
+        "Gate waiver audit unavailable." :
+        describeReadinessGateWaiver(finding.waiver)
     case "input-incomplete":
       return "Readiness inputs are incomplete."
     case "relationship-missing":
@@ -442,7 +447,10 @@ const releasePresentation = (
   ]
   const readiness = release.readiness
   const configurationHeld = release.targetConfiguration?.verdict === "held"
-  const readinessReason = configurationHeld
+  const forcedHeld = configurationHeld || release.readinessFailure !== undefined || readiness?.authority === "pending"
+  const readinessReason = release.readinessFailure !== undefined
+    ? "Readiness evaluation failed. Retry pending."
+    : configurationHeld
     ? release.targetConfiguration?.reason === "no-target-environment" ?
       "No target environment" :
       release.targetConfiguration?.reason === "stale-topology"
@@ -455,7 +463,7 @@ const releasePresentation = (
     : readiness.primaryFinding === null
     ? verdictReason(readiness.verdict)
     : findingReason(readiness.primaryFinding)
-  const verdict: { readonly label: string; readonly tone: RlyStateTone } | null = configurationHeld
+  const verdict: { readonly label: string; readonly tone: RlyStateTone } | null = forcedHeld
     ? { label: "Held", tone: "caution" }
     : readiness === null
     ? null
@@ -468,7 +476,7 @@ const releasePresentation = (
     releasePageAwareness: release.releasePageAwareness,
     lifecycleLabel: lifecycle.label,
     lifecycleTone: lifecycle.tone,
-    readinessVerdict: configurationHeld ? "held" : readiness?.verdict ?? "unknown",
+    readinessVerdict: forcedHeld ? "held" : readiness?.verdict ?? "unknown",
     ...(configurationHeld && { targetSettingsPath: `/w/${workspaceId}/settings#release-targets` }),
     readinessReason,
     release: {
@@ -482,7 +490,7 @@ const releasePresentation = (
       id: release.releaseId,
       ...(!(owner === undefined) && { owner }),
       reason: readinessReason,
-      state: configurationHeld ? "held" : readiness?.verdict ?? "unknown",
+      state: forcedHeld ? "held" : readiness?.verdict ?? "unknown",
       symbolIndices: release.relay.symbolIndices,
       tone: verdict?.tone ?? "neutral",
       verdict: verdict?.label ?? "Readiness not evaluated",
@@ -495,7 +503,7 @@ const releasePresentation = (
     },
     serviceName: release.serviceName,
     source,
-    stages: configurationHeld || readiness === null ? unevaluatedStages() : readinessStages(readiness.stages),
+    stages: forcedHeld || readiness === null ? unevaluatedStages() : readinessStages(readiness.stages),
     targetEnvironmentIds: release.targetEnvironmentIds,
     version: release.version
   }

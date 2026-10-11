@@ -29,6 +29,33 @@ import {
   sortedReadinessUnique
 } from "./policy.js"
 
+import {
+  ReadinessCandidateDigest,
+  ReadinessFactId,
+  ReadinessFinding,
+  ReadinessGateWaiver,
+  ReadinessProgress,
+  ReadinessStages,
+  ReadinessVerdict
+} from "./projections.js"
+
+// Preserve the established domain surface while browser consumers import only response schemas.
+export {
+  BuildReadinessStage,
+  describeReadinessGateWaiver,
+  ProductionReadinessStage,
+  ReadinessCandidateDigest,
+  ReadinessFactId,
+  ReadinessFinding,
+  ReadinessFindingCode,
+  ReadinessFindingSubject,
+  ReadinessGateWaiver,
+  ReadinessProgress,
+  ReadinessStages,
+  ReadinessVerdict,
+  VerifyReadinessStage
+} from "./projections.js"
+
 const boundedIdentifier = (maximumLength: number, identifier: string) =>
   Schema.String.check(
     Schema.isTrimmed(),
@@ -51,23 +78,6 @@ export const MAX_READINESS_EVIDENCE_REFERENCES = 512
 
 /** Maximum blockers, warnings, or gaps retained in one assessment. */
 export const MAX_READINESS_FINDINGS = 1_025
-
-/** Stable identity of one V1 readiness fact, independent of display copy. */
-export const ReadinessFactId = boundedIdentifier(200, "ReadinessFactId").pipe(
-  Schema.check(Schema.isPattern(/^[a-z0-9][a-z0-9._:/-]*$/u)),
-  Schema.brand("ReadinessFactId")
-)
-
-/** Decoded readiness-fact identity. */
-export type ReadinessFactId = typeof ReadinessFactId.Type
-
-/** Hash of the complete canonical candidate input assembled by the application layer. */
-export const ReadinessCandidateDigest = Schema.String.check(
-  Schema.isPattern(/^sha256:[0-9a-f]{64}$/u)
-).pipe(Schema.brand("ReadinessCandidateDigest"))
-
-/** Decoded candidate digest. */
-export type ReadinessCandidateDigest = typeof ReadinessCandidateDigest.Type
 
 /** Positive version of the rule policy used for one assessment. */
 export const ReadinessRuleVersion = Schema.Int.check(Schema.isGreaterThan(0)).pipe(
@@ -159,19 +169,6 @@ export const ReadinessRuleReference = Schema.Struct({
 /** Decoded readiness rule reference. */
 export type ReadinessRuleReference = typeof ReadinessRuleReference.Type
 
-/** Canonical six-state readiness verdict. */
-export const ReadinessVerdict = Schema.Literals([
-  "blocked",
-  "ready",
-  "deploying",
-  "building",
-  "shipped",
-  "held"
-])
-
-/** Decoded readiness verdict. */
-export type ReadinessVerdict = typeof ReadinessVerdict.Type
-
 /** Closed provider-neutral fact categories understood by the V1 evaluator. */
 export const ReadinessFactKind = Schema.Literals([
   "relationship",
@@ -201,31 +198,6 @@ export const ReadinessFactDefinition = Schema.Struct({
 /** Decoded readiness-fact definition. */
 export type ReadinessFactDefinition = typeof ReadinessFactDefinition.Type
 
-const CountProgress = Schema.TaggedStruct("count", {
-  completed: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-  total: Schema.Int.check(Schema.isGreaterThan(0))
-}).check(
-  Schema.makeFilter(({ completed, total }) => completed <= total, {
-    expected: "readiness progress completed count not to exceed its total"
-  })
-)
-
-const PercentProgress = Schema.TaggedStruct("percent", {
-  value: Schema.Number.check(
-    Schema.makeFilter((value) => value >= 0 && value <= 100, {
-      expected: "readiness progress percentage between zero and one hundred"
-    })
-  )
-})
-
-/** Typed progress for builds and deployments without copied display text. */
-export const ReadinessProgress = Schema.Union([CountProgress, PercentProgress]).pipe(
-  Schema.toTaggedUnion("_tag")
-)
-
-/** Decoded readiness progress. */
-export type ReadinessProgress = typeof ReadinessProgress.Type
-
 /** Closed normalized observation states; vendor strings never enter rule evaluation. */
 export const ReadinessFactState = Schema.TaggedUnion({
   relationship: {
@@ -235,9 +207,11 @@ export const ReadinessFactState = Schema.TaggedUnion({
       "proposed",
       "verified",
       "governed",
+      "waived",
       "rejected",
       "superseded"
-    ])
+    ]),
+    waiver: Schema.optionalKey(ReadinessGateWaiver)
   },
   approval: {
     status: Schema.Literals(["missing", "pending", "approved", "rejected", "expired"])
@@ -256,7 +230,11 @@ export const ReadinessFactState = Schema.TaggedUnion({
     status: Schema.Literals(["not-started", "pending", "deploying", "succeeded", "failed", "rolled-back"]),
     progress: Schema.NullOr(ReadinessProgress)
   }
-})
+}).check(Schema.makeFilter((state) =>
+  state._tag !== "relationship" ||
+  (state.status === "waived") === (state.waiver !== undefined), {
+  expected: "a waived gate to retain its exact settings audit, without attaching waivers to observed relationships"
+}))
 
 /** Decoded normalized readiness observation state. */
 export type ReadinessFactState = typeof ReadinessFactState.Type
@@ -298,71 +276,20 @@ export const ReadinessFactObservation = Schema.Struct({
   }),
   Schema.makeFilter(({ evidence, state }) => !stateRequiresEvidence(state) || evidence.length > 0, {
     expected: "a non-empty readiness observation state to reference evidence"
-  })
+  }),
+  Schema.makeFilter(
+    ({ factId, state }) => state._tag !== "relationship" || state.status !== "waived" || factId === "pipeline.gate",
+    {
+      expected: "only the manual pipeline gate prerequisite to be waivable by target settings"
+    }
+  )
 )
 
 /** Decoded readiness-fact observation. */
 export type ReadinessFactObservation = typeof ReadinessFactObservation.Type
 
-/** Stable machine-readable reason emitted by the V1 rule policy. */
-export const ReadinessFindingCode = Schema.Literals([
-  "input-incomplete",
-  "relationship-missing",
-  "relationship-unverified",
-  "relationship-rejected",
-  "relationship-superseded",
-  "approval-missing",
-  "approval-pending",
-  "approval-rejected",
-  "approval-expired",
-  "check-missing",
-  "check-pending",
-  "check-failed",
-  "check-cancelled",
-  "execution-missing",
-  "execution-pending",
-  "execution-failed",
-  "execution-stopped",
-  "documentation-missing",
-  "documentation-draft",
-  "documentation-stale",
-  "documentation-superseded",
-  "deployment-missing",
-  "deployment-failed",
-  "deployment-rolled-back",
-  "source-stale",
-  "source-missing",
-  "source-unavailable",
-  "plugin-degraded",
-  "evidence-expired"
-])
-
-/** Decoded readiness finding code. */
-export type ReadinessFindingCode = typeof ReadinessFindingCode.Type
-
-/** Stable subject of a readiness finding. */
-export const ReadinessFindingSubject = Schema.TaggedUnion({
-  fact: { factId: ReadinessFactId },
-  source: { pluginConnectionId: PluginConnectionId },
-  candidate: {}
-})
-
-/** One blocker, warning, or evidence gap without presentation prose. */
-export const ReadinessFinding = Schema.Struct({
-  code: ReadinessFindingCode,
-  subject: ReadinessFindingSubject,
-  evidenceIds: Schema.Array(EvidenceId).check(Schema.isMaxLength(128))
-}).check(
-  Schema.makeFilter(({ evidenceIds }) => unique(evidenceIds), {
-    expected: "readiness finding evidence identifiers to be unique"
-  })
-)
-
-/** Decoded readiness finding. */
-export type ReadinessFinding = typeof ReadinessFinding.Type
-
 /** Outcome retained for every evaluated fact. */
-export const ReadinessFactResult = Schema.Literals(["verified", "pending", "failed", "gap", "advisory"])
+export const ReadinessFactResult = Schema.Literals(["verified", "waived", "pending", "failed", "gap", "advisory"])
 
 /** Decoded readiness-fact outcome. */
 export type ReadinessFactResult = typeof ReadinessFactResult.Type
@@ -401,48 +328,6 @@ export const ReadinessSourceSummary = Schema.Struct({
 
 /** Decoded source summary. */
 export type ReadinessSourceSummary = typeof ReadinessSourceSummary.Type
-
-const ReadinessStageBase = {
-  factIds: Schema.Array(ReadinessFactId).check(Schema.isMaxLength(512)),
-  evidenceIds: Schema.Array(EvidenceId).check(Schema.isMaxLength(512)),
-  progress: Schema.NullOr(ReadinessProgress)
-}
-
-/** Server-derived Build stage. */
-export const BuildReadinessStage = Schema.Struct({
-  ...ReadinessStageBase,
-  state: Schema.Literals(["not-started", "queued", "running", "succeeded", "failed", "held"])
-})
-
-/** Server-derived Verify stage. */
-export const VerifyReadinessStage = Schema.Struct({
-  ...ReadinessStageBase,
-  state: Schema.Literals(["not-started", "pending", "passed", "failed", "held"])
-})
-
-/** Server-derived Production stage. */
-export const ProductionReadinessStage = Schema.Struct({
-  ...ReadinessStageBase,
-  state: Schema.Literals([
-    "not-started",
-    "waiting",
-    "deploying",
-    "succeeded",
-    "failed",
-    "rolled-back",
-    "held"
-  ])
-})
-
-/** Exactly three authoritative delivery stages. */
-export const ReadinessStages = Schema.Struct({
-  build: BuildReadinessStage,
-  verify: VerifyReadinessStage,
-  production: ProductionReadinessStage
-})
-
-/** Decoded readiness stages. */
-export type ReadinessStages = typeof ReadinessStages.Type
 
 /** Complete, decoded input for one environment evaluation. */
 export const EnvironmentReadinessEvaluationInput = Schema.Struct({
@@ -876,3 +761,19 @@ export const ReleaseReadinessRollupInput = Schema.Struct({
 
 /** Decoded release-readiness roll-up input. */
 export type ReleaseReadinessRollupInput = typeof ReleaseReadinessRollupInput.Type
+
+/** Retain each exact settings audit and topology binding once in compact release context. */
+export const releaseGateWaivers = (
+  assessment: ReleaseReadinessAssessment
+): ReadonlyArray<ReadinessGateWaiver> => [
+  ...new Map(assessment.warnings.flatMap((finding) =>
+    finding.code === "gate-waived" && finding.waiver !== undefined
+      ? [
+        [`${finding.waiver.settingsAuditId}:${finding.waiver.topologyDigest}`, finding.waiver] satisfies readonly [
+          string,
+          ReadinessGateWaiver
+        ]
+      ]
+      : []
+  )).values()
+]

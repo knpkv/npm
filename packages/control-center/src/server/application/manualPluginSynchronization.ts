@@ -398,6 +398,12 @@ export const makeManualPluginSynchronization = Effect.fn(
         health,
         failed ? runtime.consecutiveFailures + 1 : 0
       )
+      yield* persistence.readiness.enqueueAffected({
+        _tag: "plugin",
+        workspaceId: bound.workspaceId,
+        pluginConnectionId: bound.pluginConnectionId,
+        enqueuedAt: health.checkedAt
+      })
       yield* appendPortfolioInvalidation({
         workspaceId: bound.workspaceId,
         pluginConnectionId: bound.pluginConnectionId,
@@ -547,14 +553,22 @@ export const makeManualPluginSynchronization = Effect.fn(
       return SOURCE_UNAVAILABLE_OUTCOME
     })
     const completedAt = DateTime.makeUnsafe(yield* Effect.clockWith((clock) => clock.currentTimeMillis))
-    yield* persistence.pluginRuntime.completeSyncAttempt(
-      bound.workspaceId,
-      bound.pluginConnectionId,
-      bound.streamKey,
-      attempt.attemptSequence,
-      outcome,
-      completedAt
-    ).pipe(Effect.mapError(() => unavailable()))
+    yield* persistence.transact(Effect.gen(function*() {
+      yield* persistence.pluginRuntime.completeSyncAttempt(
+        bound.workspaceId,
+        bound.pluginConnectionId,
+        bound.streamKey,
+        attempt.attemptSequence,
+        outcome,
+        completedAt
+      )
+      yield* persistence.readiness.enqueueAffected({
+        _tag: "plugin",
+        workspaceId: bound.workspaceId,
+        pluginConnectionId: bound.pluginConnectionId,
+        enqueuedAt: completedAt
+      })
+    })).pipe(Effect.mapError(() => unavailable()))
     // Services observes this existing invalidation only after the terminal attempt is readable.
     yield* appendPortfolioInvalidation({
       workspaceId: bound.workspaceId,

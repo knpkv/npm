@@ -25,7 +25,7 @@ The executable adapter binding that synchronizes one Followed Resource into a Wo
 _Avoid_: Provider account, credential profile
 
 **Delivery Relationship**:
-An evidence-backed association between normalized work, code, release, deployment, knowledge, or time entities.
+An evidence-backed association between normalized work, code, release, deployment, knowledge, or time entities. Exact Jira keys in code, exact head-commit execution matches, authoritative Jira fix-version membership, exact structured runbook release metadata, and governed release publication receipts are verified; fuzzy title or free-text matches require governed confirmation.
 _Avoid_: Name match, UI link
 
 **Release Workset**:
@@ -35,6 +35,14 @@ _Avoid_: Ticket list, sprint board
 **Release Target**:
 A named workspace environment explicitly mapped to an inclusive, ordered range of stages in a followed CodePipeline pipeline. Its stable environment key determines identity; display-name changes preserve it. Added or edited mappings require complete, current pipeline topology. Unchanged stale mappings remain saved, and removing a mapping needs no topology validation. Pipeline topology changes require review. Each range records whether readiness requires a manual approval gate, defaulting to true. A release without a configured delivering pipeline is held with no target environment; synchronization never invents production.
 _Avoid_: Implicit production environment, pipeline name as environment
+
+**Release Readiness**:
+The evidence-backed verdict for each configured target and its release: blocked, ready, deploying, building, shipped, or held. Missing, incomplete, stale, or unavailable evidence holds the release; pending evaluation preserves the previous assessment as history without presenting it as ready. Successful bounded catch-up retains healthy source freshness, but unfinished provider inventory holds readiness as input-incomplete until its persisted cursor is exhausted.
+_Avoid_: Provider pipeline status, sync success
+
+**Manual Gate Waiver**:
+An explicit target policy exemption tied to the reviewed settings audit and pipeline topology. It reads "waived by target settings" with its audit time, and never claims provider approval or verified gate evidence.
+_Avoid_: Approved gate, automatic approval
 
 **Release Freshness**:
 The server's assessment of preserved release facts against their age and the latest health of every source Plugin Connection. Any failed health check immediately makes the source unavailable, with its failure class and retry time. The last successful read remains visible. A healthy sync restores Current while the facts are within their age threshold.

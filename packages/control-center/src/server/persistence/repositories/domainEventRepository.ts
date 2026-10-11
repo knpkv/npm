@@ -10,7 +10,7 @@ import * as Schema from "effect/Schema"
 
 import { PortfolioInvalidatedEventV1, PortfolioInvalidatedPayloadV1 } from "../../../domain/domainEvent.js"
 import type { PluginConnectionId, WorkspaceId } from "../../../domain/identifiers.js"
-import { DomainEventId, EventCursor } from "../../../domain/identifiers.js"
+import { DomainEventId, EventCursor, ReleaseId } from "../../../domain/identifiers.js"
 import { UtcTimestamp } from "../../../domain/utcTimestamp.js"
 import { Database } from "../Database.js"
 import {
@@ -566,7 +566,45 @@ const makeDomainEventRepository = Effect.gen(function*() {
     }
   })
 
-  return { append, pageAfter, prune, readPluginHealthHistory, streamState: readStreamState }
+  /** Latest failure or successful publication per exact release, independent of intervening health events. */
+  const readLatestReadinessOutcomes = Effect.fn("DomainEventRepository.readLatestReadinessOutcomes")(function*(
+    workspaceId: typeof WorkspaceId.Type,
+    requestedReleaseIds: ReadonlyArray<typeof ReleaseId.Type>
+  ) {
+    const releaseIds = yield* Schema.decodeUnknownEffect(
+      Schema.Array(ReleaseId).check(Schema.isUnique(), Schema.isMaxLength(200))
+    )(requestedReleaseIds).pipe(
+      Effect.mapError(() => new PersistenceOperationError({ operation: "domain-event.readiness-outcomes-input" }))
+    )
+    if (releaseIds.length === 0) return []
+    const rows = yield* sql<SqlRow>`WITH latest AS (
+      SELECT release_id, MAX(event_cursor) AS latest_cursor FROM domain_events
+      WHERE workspace_id = ${workspaceId} AND release_id IN ${
+      sql.in(releaseIds)
+    } AND event_type = 'portfolio-invalidated'
+        AND (CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.reason') ELSE 'readiness-failed' END) IN ('readiness-failed', 'readiness-changed')
+      GROUP BY release_id
+    ) SELECT event.workspace_id AS workspaceId, event.event_cursor AS eventCursor, event.event_id AS eventId,
+      event.schema_version AS schemaVersion, event.event_type AS eventType, event.dedupe_key AS dedupeKey,
+      event.release_id AS releaseId, event.plugin_connection_id AS pluginConnectionId, event.entity_id AS entityId,
+      event.job_id AS jobId, event.occurred_at AS occurredAt, event.ingested_at AS ingestedAt,
+      event.causation_id AS causationId, event.correlation_id AS correlationId,
+      event.payload_json AS payloadJson, event.payload_digest AS payloadDigest
+      FROM domain_events event JOIN latest ON latest.release_id = event.release_id AND latest.latest_cursor = event.event_cursor
+      WHERE event.workspace_id = ${workspaceId} ORDER BY event.release_id`.pipe(
+      mapPersistenceOperation("domain-event.readiness-outcomes")
+    )
+    return yield* Effect.forEach(rows, (row) => decodeRow(workspaceId, row).pipe(Effect.map(({ event }) => event)))
+  })
+
+  return {
+    append,
+    pageAfter,
+    prune,
+    readPluginHealthHistory,
+    readLatestReadinessOutcomes,
+    streamState: readStreamState
+  }
 })
 
 /** Workspace-local durable event outbox with bounded replay and retention. */

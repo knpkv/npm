@@ -249,6 +249,53 @@ const makeReleaseAssessment = Effect.fn("ReadinessRepositoryTest.makeReleaseAsse
 })
 
 describe("readiness repository", () => {
+  it.effect("enumerates due work and fences unchanged-candidate acknowledgements", () =>
+    withReadiness(Effect.gen(function*() {
+      const readiness = yield* ReadinessRepository
+      yield* seedFoundations
+      const target = { _tag: "environment", workspaceId, releaseId, environmentId } satisfies {
+        readonly _tag: "environment"
+        readonly workspaceId: WorkspaceId
+        readonly releaseId: string
+        readonly environmentId: string
+      }
+      yield* readiness.enqueueInvalidation({ ...target, reason: "candidate-changed", enqueuedAt: firstAt })
+      const pending = yield* readiness.listPending({ workspaceId, dueAt: firstAt, limit: 10 })
+      assert.lengthOf(pending, 1)
+      const claimed = yield* readiness.claimInvalidation({
+        ...target,
+        expectedInvalidationRevision: pending[0]?.invalidationRevision,
+        leaseOwner: "fixture-worker",
+        leaseExpiresAt
+      })
+      if (claimed?.lease === null || claimed === null) return assert.fail("expected leased work")
+      assert.lengthOf(yield* readiness.listPending({ workspaceId, dueAt: firstAt, limit: 10 }), 0)
+      const acknowledgement = {
+        ...target,
+        invalidationRevision: claimed.invalidationRevision,
+        leaseOwner: claimed.lease.owner,
+        leaseToken: claimed.lease.token
+      }
+      yield* readiness.enqueueInvalidation({ ...target, reason: "evidence-changed", enqueuedAt: firstAt })
+      assert.isFalse(yield* readiness.acknowledgeInvalidation(acknowledgement))
+      const replacement = yield* readiness.claimInvalidation({
+        ...target,
+        expectedInvalidationRevision: 2,
+        leaseOwner: "fixture-worker",
+        leaseExpiresAt
+      })
+      if (replacement?.lease === null || replacement === null) return assert.fail("expected replacement lease")
+      assert.isTrue(
+        yield* readiness.acknowledgeInvalidation({
+          ...target,
+          invalidationRevision: replacement.invalidationRevision,
+          leaseOwner: replacement.lease.owner,
+          leaseToken: replacement.lease.token
+        })
+      )
+      assert.lengthOf(yield* readiness.listPending({ workspaceId, dueAt: firstAt, limit: 10 }), 0)
+    })))
+
   it("indexes each materialized dependency by assessment", () => {
     const evidence = Array.from({ length: 200 }, (_, index) => {
       const suffix = (index + 100).toString(16).padStart(12, "0")

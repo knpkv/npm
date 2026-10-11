@@ -33,14 +33,7 @@ export const findingsPlacement = (gridWidth: number | undefined, remPx: number):
   return gridWidth > 36 * remPx ? "drawer" : "inline"
 }
 
-/** The modal drawer; `open` is controlled, and Esc or Close report back through `onClose`. */
-export function FindingsDrawer({
-  children,
-  onClose,
-  open,
-  returnFocus,
-  title
-}: {
+export interface FindingsDrawerProps {
   readonly children: ReactNode
   readonly onClose: () => void
   readonly open: boolean
@@ -50,7 +43,10 @@ export function FindingsDrawer({
    */
   readonly returnFocus: () => HTMLElement | null
   readonly title: string
-}) {
+}
+
+/** The modal drawer; `open` is controlled, and Esc or Close report back through `onClose`. */
+export function FindingsDrawer({ children, onClose, open, returnFocus, title }: FindingsDrawerProps) {
   const dialog = useRef<HTMLDialogElement>(null)
   // The handoff below can outlive the render that opened the drawer (the layout may change while
   // another dialog is up), so it reads the newest return target, not the one it was created with.

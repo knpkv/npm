@@ -88,6 +88,21 @@ describe("resolved build graph contract", () => {
     )
   })
 
+  it("keeps readiness evaluation out of the browser while permitting decoded response contracts", () => {
+    for (const module of ["model", "policy"]) {
+      expect(inspectBuildGraph(graph("client", [
+        "index.html",
+        "src/client/main.tsx",
+        `src/domain/readiness/${module}.ts`
+      ]))).toContain("client graph contains readiness evaluation source")
+    }
+    expect(inspectBuildGraph(graph("client", [
+      "index.html",
+      "src/client/main.tsx",
+      "src/domain/readiness/projections.ts"
+    ]))).toEqual([])
+  })
+
   it("rejects malformed or version-skewed graph data", () => {
     expect(decodeBuildGraph({ modules: [], target: "client", version: 999 })).toBeUndefined()
     expect(decodeBuildGraph({ modules: "not-an-array", target: "server", version: 1 })).toBeUndefined()

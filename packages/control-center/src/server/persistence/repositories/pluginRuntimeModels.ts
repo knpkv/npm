@@ -105,6 +105,8 @@ export const PluginStreamRecord = Schema.Struct({
   checkpointJson: Schema.NullOr(jsonText(65_536)),
   checkpointDigest: Schema.NullOr(ContentBlobDigest),
   lastPageId: Schema.NullOr(PluginPageId),
+  /** Whether the exact persisted head page ended its invocation; retained provider cursors may still need catch-up. */
+  headPageTerminal: Schema.optionalKey(Schema.Boolean),
   synchronizedAt: Schema.NullOr(UtcTimestamp)
 }).check(
   Schema.makeFilter(

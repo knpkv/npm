@@ -5,7 +5,7 @@ import { act, createElement } from "react"
 import { createRoot } from "react-dom/client"
 
 import type { AppState } from "../src/client/atoms/app.js"
-import { SandboxViewContent } from "../src/client/components/sandbox-view.js"
+import { SandboxViewContent } from "../src/client/components/sandbox-view-content.js"
 
 Object.assign(window, { IS_REACT_ACT_ENVIRONMENT: true })
 

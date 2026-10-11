@@ -1,8 +1,14 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
-import { Effect, Layer, Result, Schema } from "effect"
+import type * as Crypto from "effect/Crypto"
+import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
+import * as Result from "effect/Result"
+import * as Schema from "effect/Schema"
 
-import { DomainEventId, EventCursor, PluginConnectionId } from "../../src/domain/identifiers.js"
+import { DomainEventId, EventCursor, PluginConnectionId, ReleaseId } from "../../src/domain/identifiers.js"
+import { Release } from "../../src/domain/release.js"
+import { deriveReleaseRelay } from "../../src/domain/releaseRelay.js"
 import { Database, databaseLayer } from "../../src/server/persistence/Database.js"
 import { SourceIdentityMismatchError } from "../../src/server/persistence/errors.js"
 import { Persistence, persistenceLayer } from "../../src/server/persistence/Persistence.js"
@@ -14,6 +20,7 @@ import { DomainEventRepository } from "../../src/server/persistence/repositories
 import { PluginConnectionDisplayName, WorkspaceName } from "../../src/server/persistence/repositories/models.js"
 import { PluginConnectionRepository } from "../../src/server/persistence/repositories/pluginConnectionRepository.js"
 import { QuarantineRepository } from "../../src/server/persistence/repositories/quarantineRepository.js"
+import { ReleaseRepository } from "../../src/server/persistence/repositories/releaseRepository.js"
 import { WorkspaceRepository } from "../../src/server/persistence/repositories/workspaceRepository.js"
 import { fixtureTimestamps, fixtureWorkspaceIds, makePersistenceTestConfig } from "./fixtures.js"
 
@@ -55,7 +62,13 @@ const withEventRepositories = <Success, Failure>(
   use: Effect.Effect<
     Success,
     Failure,
-    Database | DomainEventRepository | PluginConnectionRepository | QuarantineRepository | WorkspaceRepository
+    | Crypto.Crypto
+    | Database
+    | DomainEventRepository
+    | PluginConnectionRepository
+    | QuarantineRepository
+    | ReleaseRepository
+    | WorkspaceRepository
   >
 ) =>
   Effect.gen(function*() {
@@ -65,7 +78,8 @@ const withEventRepositories = <Success, Failure>(
     const events = DomainEventRepository.layer.pipe(Layer.provide(foundation))
     const workspaces = WorkspaceRepository.layer.pipe(Layer.provide(foundation))
     const connections = PluginConnectionRepository.layer.pipe(Layer.provide(foundation))
-    const services = yield* Layer.build(Layer.mergeAll(foundation, events, workspaces, connections))
+    const releases = ReleaseRepository.layer.pipe(Layer.provide(foundation))
+    const services = yield* Layer.build(Layer.mergeAll(foundation, events, workspaces, connections, releases))
     return yield* use.pipe(Effect.provide(services))
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped)
 
@@ -115,6 +129,83 @@ describe("DomainEventRepository", () => {
       assert.deepStrictEqual(complete.events.map((event) => event.eventCursor), [3, 2, 1])
       assert.isTrue(complete.isComplete)
     })))
+
+  it.effect("reads only the latest release-scoped readiness outcome and resolves failures after success", () =>
+    withEventRepositories(
+      Effect.gen(function*() {
+        yield* createWorkspaces
+        const events = yield* DomainEventRepository
+        const releaseId = ReleaseId.make("01890f6f-6d6a-7cc0-98d2-000000000951")
+        const otherReleaseId = ReleaseId.make("01890f6f-6d6a-7cc0-98d2-000000000952")
+        const releases = yield* ReleaseRepository
+        for (
+          const { id, workspaceId } of [{ workspaceId: WORKSPACE_A, id: releaseId }, {
+            workspaceId: WORKSPACE_A,
+            id: otherReleaseId
+          }, { workspaceId: WORKSPACE_B, id: releaseId }]
+        ) {
+          yield* releases.create(
+            workspaceId,
+            Schema.decodeUnknownSync(Schema.toType(Release))({
+              id,
+              workspaceId,
+              serviceName: "fixture-service",
+              version: "1.0.0",
+              lifecycle: "candidate",
+              relay: deriveReleaseRelay(id),
+              targetEnvironmentIds: [],
+              roleAssignments: [],
+              sourceRevisions: [],
+              createdAt: CREATED_AT,
+              updatedAt: CREATED_AT,
+              freshness: {
+                _tag: "unavailable",
+                pluginHealth: { _tag: "disabled", checkedAt: CREATED_AT },
+                provenance: {
+                  _tag: "none",
+                  pluginConnectionId: PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-000000000958")
+                },
+                sourceObservedAt: null,
+                staleAfterSeconds: 300,
+                synchronizedAt: null
+              }
+            })
+          )
+        }
+        const failure = {
+          ...makeEventInput("000000000953", "readiness-failure"),
+          metadata: { releaseId },
+          payload: {
+            reason: "readiness-failed",
+            readinessFailure: {
+              operation: "publish",
+              diagnosticCode: "readiness-publication-failed",
+              invalidationRevision: 1,
+              retryAt: CREATED_AT
+            }
+          }
+        } satisfies AppendDomainEventInput
+        yield* events.append(WORKSPACE_A, failure)
+        yield* events.append(WORKSPACE_B, { ...failure, eventId: eventId("000000000954") })
+        yield* events.append(WORKSPACE_A, {
+          ...makeEventInput("000000000955", "other-readiness", "readiness-changed"),
+          metadata: { releaseId: otherReleaseId }
+        })
+        yield* events.append(WORKSPACE_A, {
+          ...makeEventInput("000000000956", "later-health", "plugin-health"),
+          metadata: { releaseId }
+        })
+        const unresolved = yield* events.readLatestReadinessOutcomes(WORKSPACE_A, [releaseId])
+        assert.deepEqual(unresolved.map(({ eventId }) => eventId), [failure.eventId])
+        assert.isEmpty(yield* events.readLatestReadinessOutcomes(WORKSPACE_A, []))
+        const success = yield* events.append(WORKSPACE_A, {
+          ...makeEventInput("000000000957", "readiness-success", "readiness-changed"),
+          metadata: { releaseId }
+        })
+        const resolved = yield* events.readLatestReadinessOutcomes(WORKSPACE_A, [releaseId])
+        assert.deepEqual(resolved.map(({ eventId }) => eventId), [success.eventId])
+      })
+    ))
 
   it.effect("assigns ordered workspace-local cursors and starts absent streams at zero", () =>
     withEventRepositories(

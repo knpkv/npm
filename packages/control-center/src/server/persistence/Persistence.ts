@@ -502,6 +502,8 @@ const makePersistence = Effect.gen(function*() {
         publicOperation("domain-event.append", events.append(...args)),
       pageAfter: (...args: Parameters<DomainEventRepositoryService["pageAfter"]>) =>
         publicOperation("domain-event.page-after", events.pageAfter(...args)),
+      readLatestReadinessOutcomes: (...args: Parameters<DomainEventRepositoryService["readLatestReadinessOutcomes"]>) =>
+        publicOperation("domain-event.readiness-outcomes", events.readLatestReadinessOutcomes(...args)),
       readPluginHealthHistory: (...args: Parameters<DomainEventRepositoryService["readPluginHealthHistory"]>) =>
         publicOperation("domain-event.health-history", events.readPluginHealthHistory(...args)),
       prune: (...args: Parameters<DomainEventRepositoryService["prune"]>) =>
@@ -664,6 +666,12 @@ const makePersistence = Effect.gen(function*() {
         publicOperation("provider-account.update-resource", providerAccounts.updateResourceMetadata(...args))
     },
     readiness: {
+      acknowledgeInvalidation: (...args: Parameters<ReadinessRepositoryService["acknowledgeInvalidation"]>) =>
+        publicOperation("readiness.acknowledge-invalidation", readiness.acknowledgeInvalidation(...args)),
+      deferInvalidation: (...args: Parameters<ReadinessRepositoryService["deferInvalidation"]>) =>
+        publicOperation("readiness.defer-invalidation", readiness.deferInvalidation(...args)),
+      listPending: (...args: Parameters<ReadinessRepositoryService["listPending"]>) =>
+        publicOperation("readiness.list-pending", readiness.listPending(...args)),
       claimInvalidation: (...args: Parameters<ReadinessRepositoryService["claimInvalidation"]>) =>
         publicOperation("readiness.claim-invalidation", readiness.claimInvalidation(...args)),
       commitEnvironment: (...args: Parameters<ReadinessRepositoryService["commitEnvironment"]>) =>

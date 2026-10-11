@@ -1,13 +1,15 @@
+import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 
 import type { DeliveryNode, DeliveryRelationship, EvidenceItem } from "../../../../domain/deliveryGraph.js"
 import { DeliveryEntityKind, EvidenceClaim, LedgerRevision } from "../../../../domain/deliveryGraph.js"
 import type { EntityId, WorkspaceId } from "../../../../domain/identifiers.js"
-import { GraphNodeId, PluginConnectionId, ReleaseId } from "../../../../domain/identifiers.js"
+import { EnvironmentId, GraphNodeId, PluginConnectionId, ReleaseId } from "../../../../domain/identifiers.js"
 import { Database } from "../../Database.js"
 import { PersistenceOperationError, RevisionConflictError } from "../../errors.js"
 import { ContentBlobDigest } from "../models.js"
+import { makeReadinessQueue } from "../readiness/queue.js"
 import { DeliveryGraphInputError, DeliveryGraphWriteReceipt } from "./contract.js"
 import type { DeliveryGraphWriteBatch, EntityProjectionWrite } from "./contract.js"
 import { makeDeliveryGraphIntegrity } from "./integrity.js"
@@ -28,6 +30,7 @@ import {
 export const makeDeliveryGraphWriter = Effect.gen(function*() {
   const database = yield* Database
   const { digestText } = yield* makeDeliveryGraphIntegrity
+  const readinessQueue = yield* makeReadinessQueue
   const sql = database.sql
 
   const loadCanonicalEntity = Effect.fn("DeliveryGraphRepository.loadCanonicalEntity")(function*(
@@ -567,11 +570,62 @@ export const makeDeliveryGraphWriter = Effect.gen(function*() {
   const writeDecoded = Effect.fn("DeliveryGraphRepository.writeDecoded")(function*(
     batch: DeliveryGraphWriteBatch
   ) {
+    // Capture old scopes before a retired relationship or entity disappears from the current closure.
+    const affected = new Map<WorkspaceId, Set<ReleaseId>>()
+    const include = (workspaceId: WorkspaceId, releaseId: ReleaseId) => {
+      const releases = affected.get(workspaceId) ?? new Set<ReleaseId>()
+      releases.add(releaseId)
+      affected.set(workspaceId, releases)
+    }
+    for (const relationship of batch.relationships) {
+      if (relationship.scope !== null) include(relationship.workspaceId, relationship.scope.releaseId)
+    }
+    for (const { projection } of batch.entityProjections) {
+      const rows = yield* sql`SELECT DISTINCT relationship.release_id AS releaseId
+        FROM delivery_nodes node INNER JOIN relationship_revisions relationship
+        ON relationship.workspace_id = node.workspace_id
+        AND (relationship.source_node_id = node.node_id OR relationship.target_node_id = node.node_id)
+        INNER JOIN relationship_heads head ON head.workspace_id = relationship.workspace_id
+        AND head.relationship_id = relationship.relationship_id AND head.current_revision = relationship.revision
+        WHERE node.workspace_id = ${projection.workspaceId} AND node.entity_id = ${projection.entityId}
+        AND relationship.release_id IS NOT NULL AND relationship.lifecycle NOT IN ('superseded', 'rejected')`
+      for (const row of yield* decodeRows(Schema.Struct({ releaseId: ReleaseId }), rows)) {
+        include(projection.workspaceId, row.releaseId)
+      }
+    }
     yield* Effect.forEach(batch.entityProjections, appendEntityProjection, { discard: true })
     yield* Effect.forEach(batch.nodes, insertNode, { discard: true })
     yield* Effect.forEach(batch.evidenceItems, insertEvidence, { discard: true })
     yield* Effect.forEach(batch.evidenceClaims, insertClaim, { discard: true })
     yield* Effect.forEach(batch.relationships, appendRelationship, { discard: true })
+    const enqueuedAt = yield* DateTime.now
+    for (const [workspaceId, releaseIds] of affected) {
+      for (const releaseId of releaseIds) {
+        const targets = yield* decodeRows(
+          Schema.Struct({ environmentId: EnvironmentId }),
+          yield* sql`
+          SELECT environment_id AS environmentId FROM release_targets
+          WHERE workspace_id = ${workspaceId} AND release_id = ${releaseId} AND lifecycle_kind = 'active'`
+        )
+        for (const { environmentId } of targets) {
+          yield* readinessQueue.enqueue({
+            _tag: "environment",
+            workspaceId,
+            releaseId,
+            environmentId,
+            reason: "evidence-changed",
+            enqueuedAt
+          })
+        }
+        yield* readinessQueue.enqueue({
+          _tag: "release",
+          workspaceId,
+          releaseId,
+          reason: "candidate-changed",
+          enqueuedAt
+        })
+      }
+    }
     return DeliveryGraphWriteReceipt.make({
       entityProjectionCount: batch.entityProjections.length,
       nodeCount: batch.nodes.length,

@@ -11,7 +11,13 @@ import {
   WorkspaceId
 } from "../domain/identifiers.js"
 import { hasMaximumPluginJsonBytes } from "../domain/plugins/bounds.js"
-import { ReadinessFinding, ReadinessStages, ReadinessVerdict } from "../domain/readiness/model.js"
+import {
+  ReadinessFailureDetails,
+  ReadinessFinding,
+  ReadinessGateWaiver,
+  ReadinessStages,
+  ReadinessVerdict
+} from "../domain/readiness/projections.js"
 import { ReleaseLifecycle, ReleaseServiceName, ReleaseVersion } from "../domain/release.js"
 import { ReleaseRelayProjection } from "../domain/releaseRelay.js"
 import { ReleaseTargetConfiguration } from "../domain/releaseTargets.js"
@@ -63,6 +69,7 @@ export const PortfolioReadinessSummary = Schema.Struct({
   warningCount: BoundedCount,
   gapCount: BoundedCount,
   primaryFinding: Schema.NullOr(ReadinessFinding),
+  gateWaivers: Schema.optionalKey(Schema.Array(ReadinessGateWaiver).check(Schema.isMaxLength(50))),
   evaluatedAt: UtcTimestamp
 }).annotate({ identifier: "PortfolioReadinessSummary" })
 
@@ -115,6 +122,7 @@ export const PortfolioReleaseSummary = Schema.Struct({
   targetConfiguration: Schema.optionalKey(ReleaseTargetConfiguration),
   collaboratorCount: BoundedCount,
   readiness: Schema.NullOr(PortfolioReadinessSummary),
+  readinessFailure: Schema.optionalKey(Schema.Struct({ ...ReadinessFailureDetails.fields, failedAt: UtcTimestamp })),
   relationships: PortfolioRelationshipCounts,
   sourceRevisionCount: BoundedCount,
   releasePageAwareness: Schema.optionalKey(PortfolioReleasePageAwareness),

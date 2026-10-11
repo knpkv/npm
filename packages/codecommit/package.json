@@ -1,6 +1,6 @@
 {
   "name": "@knpkv/codecommit",
-  "version": "0.17.3",
+  "version": "0.17.4",
   "description": "TUI for browsing AWS CodeCommit PRs",
   "type": "module",
   "main": "dist/index.js",
@@ -38,6 +38,7 @@
     "@knpkv/agent-skills": "workspace:^",
     "@knpkv/ai-codex": "workspace:^",
     "@knpkv/bounded-io": "workspace:^",
+    "@knpkv/browser-pairing": "workspace:^",
     "@knpkv/codecommit-core": "workspace:^",
     "@knpkv/codecommit-web": "workspace:^",
     "@opentui/core": "0.5.14",
@@ -50,7 +51,7 @@
     "@effect/vitest": "4.0.0",
     "@storybook/react": "^10.6.1",
     "@types/bun": "^1.4.2",
-    "@types/node": "latest",
+    "@types/node": "catalog:",
     "@types/react": "^19.3.0",
     "storybook": "^10.6.1",
     "vitest": "catalog:"

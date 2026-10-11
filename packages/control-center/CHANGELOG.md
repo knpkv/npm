@@ -1,5 +1,16 @@
 # @knpkv/control-center
 
+## 0.15.0
+
+### Minor Changes
+
+- [#799](https://github.com/knpkv/npm/pull/799) [`593f7fe`](https://github.com/knpkv/npm/commit/593f7feb254a5206716bc8e418d91065d0b5859b) Thanks [@konopkov](https://github.com/konopkov)! - Evaluate configured release readiness after provider synchronization, with exact relationship evidence, audited gate waivers, durable failure recovery, and live portfolio updates.
+
+### Patch Changes
+
+- Updated dependencies [[`5373375`](https://github.com/knpkv/npm/commit/53733753079c8b439f1574ceb23cafc9718aba57)]:
+  - @knpkv/browser-pairing@0.5.0
+
 ## 0.14.1
 
 ### Patch Changes

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { browserLaunch, type BrowserLaunchInput, skippedLine } from "../src/BrowserLaunch.js"
+import { browserLaunch, type BrowserLaunchInput, skippedLine } from "@knpkv/browser-pairing/launch"
 
 const atTerminal: BrowserLaunchInput = { noOpen: false, browser: undefined, ci: undefined, interactive: true }
 

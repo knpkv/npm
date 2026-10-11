@@ -1,4 +1,5 @@
 import * as Schema from "effect/Schema"
+import { ReadinessFailureDetails } from "./readiness/projections.js"
 
 import { PluginFailureClass } from "./freshness.js"
 
@@ -12,6 +13,8 @@ import {
   WorkspaceId
 } from "./identifiers.js"
 import { UtcTimestamp } from "./utcTimestamp.js"
+
+export { ReadinessFailureDetails } from "./readiness/projections.js"
 
 const jsonEncoder = new TextEncoder()
 const hasMaximumJsonBytes = (maximumBytes: number) =>
@@ -50,7 +53,12 @@ export const DomainEventMetadataV1 = Schema.Struct({
 export type DomainEventMetadataV1 = typeof DomainEventMetadataV1.Type
 
 /** Portfolio projection that must be refreshed after a durable invalidation. */
-export const PortfolioInvalidationReason = Schema.Literals(["release-projection", "plugin-health"])
+export const PortfolioInvalidationReason = Schema.Literals([
+  "release-projection",
+  "plugin-health",
+  "readiness-changed",
+  "readiness-failed"
+])
 
 /** Decoded reason for invalidating an authoritative portfolio projection. */
 export type PortfolioInvalidationReason = typeof PortfolioInvalidationReason.Type
@@ -64,12 +72,19 @@ export const PortfolioPluginHealthOutcome = Schema.Union([
 /** Bounded typed payload persisted with a portfolio invalidation. */
 export const PortfolioInvalidatedPayloadV1 = Schema.Struct({
   reason: PortfolioInvalidationReason,
-  pluginHealth: Schema.optionalKey(PortfolioPluginHealthOutcome)
+  pluginHealth: Schema.optionalKey(PortfolioPluginHealthOutcome),
+  readinessFailure: Schema.optionalKey(ReadinessFailureDetails)
 }).check(
   hasMaximumJsonBytes(MaximumDomainEventPayloadBytes),
   Schema.makeFilter(({ pluginHealth, reason }) => pluginHealth === undefined || reason === "plugin-health", {
     expected: "health outcomes only on plugin-health invalidations"
-  })
+  }),
+  Schema.makeFilter(
+    ({ readinessFailure, reason }) => (readinessFailure !== undefined) === (reason === "readiness-failed"),
+    {
+      expected: "readiness failures only and always on readiness-failed invalidations"
+    }
+  )
 ).annotate({ identifier: "PortfolioInvalidatedPayloadV1" })
 
 /** Decoded bounded v1 portfolio-invalidation payload. */

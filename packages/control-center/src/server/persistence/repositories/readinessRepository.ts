@@ -16,15 +16,18 @@ import { makePersistedRowQuarantine } from "./persistedRowQuarantine.js"
 import { QuarantineRepository } from "./quarantineRepository.js"
 import { makeReadinessAssessments } from "./readiness/assessments.js"
 import {
+  AcknowledgeReadinessInvalidationRequest,
   ClaimReadinessInvalidationRequest,
   CommitEnvironmentReadinessAssessmentRequest,
   CommitReleaseReadinessAssessmentRequest,
   type CurrentEnvironmentReadinessAssessmentRecord,
   type CurrentReleaseReadinessAssessmentRecord,
+  DeferReadinessInvalidationRequest,
   EnqueueAffectedReadinessRequest,
   EnqueueDueReadinessEvaluationsRequest,
   EnqueueReadinessInvalidationRequest,
   type EnvironmentReadinessAssessmentRecord,
+  ListPendingReadinessRequest,
   ReadCurrentReadinessAssessmentRequest,
   type ReadCurrentReadinessAssessmentResult,
   ReadCurrentReleaseReadinessAssessmentsRequest,
@@ -326,13 +329,41 @@ const makeReadinessRepository = Effect.gen(function*() {
     return yield* database.transaction(queue.enqueueDue(request)).pipe(mapPersistenceOperation("readiness.enqueue-due"))
   })
 
+  const listPending = Effect.fn("ReadinessRepository.listPending")(function*<UnparsedInput>(input: UnparsedInput) {
+    const request = yield* decodeInput("list-pending", ListPendingReadinessRequest, input)
+    return yield* database.transaction(queue.listPending(request)).pipe(
+      mapPersistenceOperation("readiness.list-pending")
+    )
+  })
+
+  const acknowledgeInvalidation = Effect.fn("ReadinessRepository.acknowledgeInvalidation")(
+    function*<UnparsedInput>(input: UnparsedInput) {
+      const request = yield* decodeInput("acknowledge-invalidation", AcknowledgeReadinessInvalidationRequest, input)
+      return yield* database.transaction(queue.acknowledge(request)).pipe(
+        mapPersistenceOperation("readiness.acknowledge-invalidation")
+      )
+    }
+  )
+
+  const deferInvalidation = Effect.fn("ReadinessRepository.deferInvalidation")(
+    function*<UnparsedInput>(input: UnparsedInput) {
+      const request = yield* decodeInput("defer-invalidation", DeferReadinessInvalidationRequest, input)
+      return yield* database.transaction(queue.defer(request)).pipe(
+        mapPersistenceOperation("readiness.defer-invalidation")
+      )
+    }
+  )
+
   return {
+    acknowledgeInvalidation,
     claimInvalidation,
     commitEnvironment,
     commitRelease,
+    deferInvalidation,
     enqueueAffected,
     enqueueDue,
     enqueueInvalidation,
+    listPending,
     readCurrent,
     readCurrentReleases,
     readHistory,

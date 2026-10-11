@@ -21,8 +21,11 @@ const currentRelationship = (
 const approvalName = (value: string): boolean =>
   /(?:^|[\s_-])(?:approval|approve)(?:$|[\s_-])/iu.test(value) || /release[\s_-]*gate/iu.test(value)
 
-/** Prove that every pipeline delivering a release PR is stopped at its observed manual approval gate. */
-export const releasePipelineApprovalReadiness = (inspection: ReleasePipelineApprovalInspection) => {
+/** Prove observed manual gates, optionally restricted to the configured environment stage ranges. */
+export const releasePipelineApprovalReadiness = (
+  inspection: ReleasePipelineApprovalInspection,
+  configuredStages: ReadonlyMap<EntityId, ReadonlySet<string>> = new Map()
+) => {
   const nodeById = new Map(inspection.nodes.map((node) => [node.nodeId, node]))
   const projectionByEntityId = new Map(
     inspection.entityProjections.map(({ projection }) => [projection.entityId, projection])
@@ -58,8 +61,11 @@ export const releasePipelineApprovalReadiness = (inspection: ReleasePipelineAppr
       unverifiablePipelines += 1
       continue
     }
+    const allowedStages = configuredStages.get(entityId)
+    const withinRange = (stageName: string): boolean => allowedStages === undefined || allowedStages.has(stageName)
+    const actions = (details.actions ?? []).filter(({ stageName }) => withinRange(stageName))
     const approvalActionStages = new Set(
-      (details.actions ?? []).flatMap((action) =>
+      actions.flatMap((action) =>
         action.category?.toLocaleLowerCase("en-US") === "approval" ||
           action.provider?.toLocaleLowerCase("en-US") === "manual"
           ? [action.stageName]
@@ -67,11 +73,11 @@ export const releasePipelineApprovalReadiness = (inspection: ReleasePipelineAppr
       )
     )
     const approvalStages = (details.stages ?? []).filter((stage) =>
-      approvalActionStages.has(stage.name) || approvalName(stage.name)
+      withinRange(stage.name) && (approvalActionStages.has(stage.name) || approvalName(stage.name))
     )
     const waiting = approvalStages.some((stage) => {
       if (stage.status !== "running") return false
-      const explicitActions = (details.actions ?? []).filter((action) =>
+      const explicitActions = actions.filter((action) =>
         action.stageName === stage.name &&
         (
           action.category?.toLocaleLowerCase("en-US") === "approval" ||

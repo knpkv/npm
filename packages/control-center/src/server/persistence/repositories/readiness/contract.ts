@@ -84,7 +84,10 @@ export class ReadinessInputError extends Schema.TaggedError<ReadinessInputError>
     "enqueue-invalidation",
     "claim-invalidation",
     "enqueue-affected",
-    "enqueue-due"
+    "enqueue-due",
+    "list-pending",
+    "acknowledge-invalidation",
+    "defer-invalidation"
   ]),
   reason: Schema.Literals([
     "invalid-request",
@@ -437,6 +440,35 @@ export const ClaimReadinessInvalidationResult = Schema.NullOr(ReadinessInvalidat
 
 /** Decoded readiness-invalidation claim result. */
 export type ClaimReadinessInvalidationResult = typeof ClaimReadinessInvalidationResult.Type
+
+/** Bounded due, unclaimed work selection; leasing remains a separate fenced CAS. */
+export const ListPendingReadinessRequest = Schema.Struct({
+  workspaceId: WorkspaceId,
+  releaseId: Schema.optionalKey(ReleaseId),
+  dueAt: UtcTimestamp,
+  limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 500 }))
+})
+
+/** Exact lease consumed when unchanged facts need no new assessment. */
+export const AcknowledgeReadinessInvalidationRequest = Schema.TaggedUnion({
+  environment: {
+    workspaceId: WorkspaceId,
+    releaseId: ReleaseId,
+    environmentId: EnvironmentId,
+    ...ReadinessCommitLease.fields
+  },
+  release: {
+    workspaceId: WorkspaceId,
+    releaseId: ReleaseId,
+    ...ReadinessCommitLease.fields
+  }
+})
+
+/** Release a failed lease for a bounded later retry without discarding pending authority. */
+export const DeferReadinessInvalidationRequest = Schema.Struct({
+  target: AcknowledgeReadinessInvalidationRequest,
+  availableAt: UtcTimestamp
+})
 
 /** Bounded due-schedule sweep for one workspace. */
 export const EnqueueDueReadinessEvaluationsRequest = Schema.Struct({

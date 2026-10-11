@@ -145,6 +145,37 @@ const upsertPage = {
 }
 
 describe("plugin runtime persistence", () => {
+  it.effect("distinguishes a terminal head page from retained provider progress without changing health", () =>
+    withRuntime(Effect.gen(function*() {
+      const runtime = yield* PluginRuntimeRepository
+      yield* setup
+      yield* runtime.commitPage(WORKSPACE_ID, PLUGIN_ID, { ...upsertPage, hasMore: true })
+      assert.isFalse((yield* runtime.getStream(WORKSPACE_ID, PLUGIN_ID, STREAM)).headPageTerminal)
+      assert.deepStrictEqual(yield* runtime.getLastSuccessfulHealth(WORKSPACE_ID, PLUGIN_ID, STREAM), HEALTHY_AT_T1)
+      yield* runtime.commitPage(WORKSPACE_ID, PLUGIN_ID, {
+        ...upsertPage,
+        pageId: "page-2",
+        expectedRevision: 1,
+        events: []
+      })
+      assert.isTrue((yield* runtime.getStream(WORKSPACE_ID, PLUGIN_ID, STREAM)).headPageTerminal)
+      assert.deepStrictEqual(yield* runtime.getLastSuccessfulHealth(WORKSPACE_ID, PLUGIN_ID, STREAM), HEALTHY_AT_T1)
+    })))
+
+  it.effect("quarantines a stream whose head page no longer proves its exact committed revision", () =>
+    withRuntime(Effect.gen(function*() {
+      const database = yield* Database
+      const runtime = yield* PluginRuntimeRepository
+      const quarantine = yield* QuarantineRepository
+      yield* setup
+      yield* runtime.commitPage(WORKSPACE_ID, PLUGIN_ID, upsertPage)
+      yield* database.sql`UPDATE plugin_sync_streams SET revision = revision + 1`
+      const result = yield* runtime.getStream(WORKSPACE_ID, PLUGIN_ID, STREAM).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(result))
+      if (Result.isFailure(result)) assert.instanceOf(result.failure, PersistedRecordError)
+      assert.lengthOf(yield* quarantine.list(WORKSPACE_ID), 1)
+    })))
+
   it.effect("claims one synchronization owner transactionally and recovers an expired claim", () =>
     withRuntime(Effect.gen(function*() {
       const runtime = yield* PluginRuntimeRepository
