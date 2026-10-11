@@ -5,7 +5,7 @@ import {
   connectionLabel,
   emptyQueueCause,
   retryDelayMs
-} from "../src/client/connection.js"
+} from "../src/client/connection-presentation.js"
 
 describe("stream connection", () => {
   it("treats a refused session as not signed in, which retrying can't fix", () => {

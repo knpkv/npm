@@ -4,9 +4,11 @@ import { build, type Plugin } from "vite"
 import viewsConfig from "../vite.views.config.js"
 
 const isNodeBuiltin: (specifier: string) => boolean = isBuiltin
+const isApplicationRuntime = (id: string): boolean =>
+  /(?:^|\/)client\/atoms\//.test(id) || /(?:^|\/)ownerSession\.ts(?:\?|$)/.test(id)
 
-/** Views must bundle for browsers without starting the application's owner-session runtime. */
-it("bundles ./views without Node built-ins or the owner-session runtime", async () => {
+/** Views must bundle for browsers without importing application atoms or the owner-session runtime. */
+it("bundles ./views without Node built-ins, application atoms or the owner-session runtime", async () => {
   const moduleIds = new Set<string>()
   const browserBoundary: Plugin = {
     name: "reject-server-runtime",
@@ -24,20 +26,47 @@ it("bundles ./views without Node built-ins or the owner-session runtime", async 
     },
     moduleParsed(info) {
       moduleIds.add(info.id)
+      if (isApplicationRuntime(info.id)) {
+        this.error(`Browser entry imports application runtime "${info.id}"`)
+      }
     }
   }
 
-  await build({
+  const result = await build({
     ...viewsConfig,
     configFile: false,
     root: new URL("..", import.meta.url).pathname,
-    plugins: [...viewsConfig.plugins ?? [], browserBoundary],
+    plugins: [...(viewsConfig.plugins ?? []), browserBoundary],
     logLevel: "silent",
     build: {
       ...viewsConfig.build,
       write: false
     }
   })
+  const exportedNames = new Set<string>()
+  const collectExports = (output: Awaited<ReturnType<typeof build>>): void => {
+    if (Array.isArray(output)) {
+      for (const item of output) collectExports(item)
+    } else if ("output" in output) {
+      for (const chunk of output.output) {
+        if (chunk.type === "chunk" && chunk.isEntry) {
+          for (const name of chunk.exports) exportedNames.add(name)
+        }
+      }
+    }
+  }
+  collectExports(result)
+  for (const name of ["PRListView", "SearchBarView", "FilterSidebarView", "RecentActivityView"]) {
+    expect(exportedNames.has(name)).toBe(true)
+  }
   expect(moduleIds.size).toBeGreaterThan(0)
-  expect([...moduleIds].filter((id) => /(?:^|\/)(?:ownerSession\.ts|atoms\/runtime\.ts)$/.test(id))).toEqual([])
+  expect([...moduleIds].filter(isApplicationRuntime)).toEqual([])
+  expect(
+    [...moduleIds].filter((id) =>
+      /\/components\/(?:pr-list|search-bar|filter-sidebar|pr-review-workspace)\.tsx$/.test(id)
+    )
+  ).toEqual([])
+  for (const module of ["pr-list-view", "search-bar-view", "filter-sidebar-view", "recent-activity-view"]) {
+    expect([...moduleIds].some((id) => id.endsWith(`/components/${module}.tsx`))).toBe(true)
+  }
 })
