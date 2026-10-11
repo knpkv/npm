@@ -13,7 +13,9 @@ const resources = (count: number): ReadonlyArray<ResourceSummary> =>
     providerId: null,
     account: null,
     region: null,
-    consoleUrl: null
+    consoleUrl: null,
+    updatedAt: null,
+    downstream: null
   }))
 
 /** Synthetic, server-private fixture identity; no provider coordinates or credentials. */
@@ -27,7 +29,15 @@ const stack = (
 ): DiscoveredStack => ({
   key: `synthetic-${app}-${stage}`,
   summary: { app, stage, backend, alchemyVersion, lastDeploy, resourceCount },
-  read: Effect.succeed({ app, stage, backend, alchemyVersion, lastDeploy, resources: resources(resourceCount ?? 0) })
+  read: Effect.succeed({
+    app,
+    stage,
+    backend,
+    alchemyVersion,
+    lastDeploy,
+    resources: resources(resourceCount ?? 0),
+    outputs: null
+  })
 })
 
 export const populated: ReadonlyArray<DiscoveredStack> = [

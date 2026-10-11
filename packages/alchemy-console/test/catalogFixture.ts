@@ -9,6 +9,7 @@ export const state: StackState = {
   backend: "local",
   alchemyVersion: "2.0.0-beta.77",
   lastDeploy: null,
+  outputs: null,
   resources: [{
     fqn: "Storage/Assets",
     logicalId: "Assets",
@@ -18,7 +19,9 @@ export const state: StackState = {
     providerId: null,
     account: null,
     region: null,
-    consoleUrl: null
+    consoleUrl: null,
+    updatedAt: null,
+    downstream: null
   }]
 }
 

@@ -50,3 +50,21 @@ body {
   min-inline-size: 0;
   overflow: clip;
 }
+
+.ac-breadcrumbs {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--rly-space-8);
+  font-size: var(--rly-type-code-size);
+  margin-block-end: var(--rly-space-24);
+}
+
+.ac-breadcrumbs > :where(a, span) {
+  min-inline-size: 0;
+  overflow-wrap: break-word;
+}
+
+.ac-detail-read {
+  margin-inline-start: auto;
+}

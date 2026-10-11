@@ -2,6 +2,7 @@ import { NodeServices } from "@effect/platform-node"
 import { expect, layer } from "@effect/vitest"
 import { Effect, Layer, Ref } from "effect"
 import { CatalogReadError, StackId } from "../src/api.js"
+import { OutputSummary } from "../src/schema.js"
 import { Catalog } from "../src/server/Catalog.js"
 import { entry, FixtureSource, fixtureSourceLayer, state } from "./catalogFixture.js"
 
@@ -23,6 +24,34 @@ layer(fixtures)("owner catalog", (it) => {
       expect(detail).toEqual({ id, state })
       expect(JSON.stringify([first, detail])).not.toContain(entry.key)
       expect(JSON.stringify(detail)).not.toContain("fixture-secret")
+    }))
+
+  it.effect("projects output keys as Hidden even if a private reader adds value or description fields", () =>
+    Effect.gen(function*() {
+      const catalog = yield* Catalog
+      const fixture = yield* FixtureSource
+      yield* Ref.set(fixture.entries, [{
+        ...entry,
+        read: Effect.succeed({
+          ...state,
+          outputs: [{
+            key: "apiUrl",
+            value: {
+              ...OutputSummary.fields.value.make({ _tag: "Hidden" }),
+              text: "fixture-secret",
+              nested: { __redacted__: "fixture-secret" }
+            },
+            description: null
+          }]
+        })
+      }])
+      const list = yield* catalog.list
+      const id = list.stacks[0]?.id
+      if (id === undefined) return yield* Effect.die("fixture stack missing")
+      const detail = yield* catalog.get(id)
+      expect(detail.state.outputs).toEqual([{ key: "apiUrl", value: { _tag: "Hidden" }, description: null }])
+      expect(JSON.stringify(detail)).not.toContain("fixture-secret")
+      yield* Ref.set(fixture.entries, [entry])
     }))
 
   it.effect("removes disappeared identities, rejects client-supplied identities, and reports source failures", () =>
