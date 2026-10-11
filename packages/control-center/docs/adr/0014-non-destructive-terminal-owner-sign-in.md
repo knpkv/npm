@@ -1,4 +1,4 @@
-# ADR 0001: non-destructive terminal owner sign-in
+# Non-destructive terminal owner sign-in
 
 Status: accepted
 

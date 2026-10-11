@@ -784,7 +784,7 @@ The bearer-authenticated `POST /control/login` uses the running server's durable
 
 The sign-in URL contains the one-time code in `#bootstrap_token=`. The client reads and replaces the fragment before creating its router or rendering, then submits it once in the existing `/api/v1/session/pair` body. The code never enters browser storage, HTTP request URLs, referrers, logs or telemetry. The browser initially receives a fragment-bearing navigation; replacement clears that current history entry. Manual `/pair` remains available for normal ten-minute codes and failed/expired terminal handoffs.
 
-Terminal minting is limited to loopback HTTP. TLS, trusted-proxy and insecure-LAN configurations print `sign in through <configured origin>` without probing, minting, opening or starting another server. Their existing pairing/transport restrictions stay in force. A control refusal never triggers a second server; restart an older running server without a control registration, or use an existing paired browser. See the [terminal sign-in decision](../../.specs/control-center/adr/0001-terminal-owner-sign-in.md).
+Terminal minting is limited to loopback HTTP. TLS, trusted-proxy and insecure-LAN configurations print `sign in through <configured origin>` without probing, minting, opening or starting another server. Their existing pairing/transport restrictions stay in force. A control refusal never triggers a second server; restart an older running server without a control registration, or use an existing paired browser.
 
 ## Network exposure
 
