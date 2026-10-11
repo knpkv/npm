@@ -26,6 +26,7 @@ import { ControlCenterBootstrap } from "../../src/server/runtime/Bootstrap.js"
 import { makeControlCenterServer } from "../../src/server/runtime/ControlCenterServer.js"
 import { SecretRoot } from "../../src/server/secrets/SecretStore.js"
 import { decodeBindConfig } from "../../src/server/security/BindConfig.js"
+import { makeStaticFixture } from "../fixtures/staticRoot.js"
 import { type LiveConnectionConfiguration, loadLiveConnectionConfiguration } from "./liveConnectionConfiguration.js"
 import { opaqueProviderBindingEvidence, opaqueProviderIdentityEvidence } from "./liveEvidence.js"
 import {
@@ -147,12 +148,7 @@ const executeLiveJourney = Effect.fn("controlCenter.executeLiveConnectionJourney
         prefix: "control-center-live-integration-"
       })
       yield* fileSystem.chmod(dataRoot, 0o700)
-      const staticRoot = path.join(dataRoot, "static")
-      yield* fileSystem.makeDirectory(staticRoot)
-      yield* fileSystem.writeFileString(
-        path.join(staticRoot, "index.html"),
-        "<main>Control Center live integration</main>"
-      )
+      const staticRoot = yield* makeStaticFixture(path.join(dataRoot, "static"))
       const persistenceConfig: PersistenceConfig = {
         blobRoot: BlobRoot.make(path.join(dataRoot, "blobs")),
         busyTimeoutMilliseconds: 5_000,
@@ -282,13 +278,16 @@ const executeLiveJourney = Effect.fn("controlCenter.executeLiveConnectionJourney
     "atlassian",
     "aws"
   ])
+  // Jira API-token connections stay standalone: only an OAuth profile proves the shared site's cloud ID.
   assert.deepStrictEqual(
     overview.accounts.flatMap(({ resources }) => resources.map(({ providerId }) => providerId)).sort(),
-    ["codecommit", "codepipeline", "confluence", "jira"]
+    ["codecommit", "codepipeline", "confluence"]
   )
   assert.isTrue(
-    overview.connections.every(
-      ({ followedResourceId, providerAccountId }) => followedResourceId !== null && providerAccountId !== null
+    overview.connections.every(({ followedResourceId, providerAccountId, providerId }) =>
+      providerId === "jira"
+        ? followedResourceId === null && providerAccountId === null
+        : followedResourceId !== null && providerAccountId !== null
     )
   )
 
@@ -457,7 +456,7 @@ const executeLiveJourney = Effect.fn("controlCenter.executeLiveConnectionJourney
 })
 
 describe("Control Center live provider integration", () => {
-  it.effect("pairs an owner and materializes four production provider connections", () =>
+  it.live("pairs an owner and materializes four production provider connections", () =>
     Effect.gen(function*() {
       const configuration = yield* loadLiveConnectionConfiguration
       const evidence = yield* Effect.scoped(executeLiveJourney(configuration))

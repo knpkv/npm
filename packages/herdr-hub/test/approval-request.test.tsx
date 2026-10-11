@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 import { describe, expect, it } from "@effect/vitest"
 import { canonicalJobPayload } from "@knpkv/herdr-fleet"
 import { renderToStaticMarkup } from "react-dom/server"
@@ -5,7 +7,7 @@ import { JobPayload } from "@knpkv/herdr-fleet/model"
 import type { JobPayload as JobPayloadType, JobRecord, WorkReassignAgent } from "@knpkv/herdr-fleet/model"
 import { Schema } from "effect"
 import { ApprovalRequestDisclosure } from "../src/approval-request-view.js"
-import type { DashboardSnapshot } from "../src/dashboard-model.js"
+import { DashboardSnapshot } from "../src/dashboard-model.js"
 import { DashboardView } from "../src/dashboard-view.js"
 import {
   approvalRequestFor,
@@ -79,10 +81,10 @@ const dashboardFor = (record: JobRecord): DashboardSnapshot => ({
   work: null
 })
 
-const renderDashboard = (record: JobRecord): string =>
+const renderDashboard = (record: JobRecord, approvalOnly = true): string =>
   renderToStaticMarkup(
     <DashboardView
-      approvalOnly
+      approvalOnly={approvalOnly}
       busyJobId={null}
       notificationState="disabled"
       onDecision={() => undefined}
@@ -95,6 +97,74 @@ const renderDashboard = (record: JobRecord): string =>
   )
 
 describe("sanitized approval requests", () => {
+  it("keeps bounded Unicode titles decodable after credential redaction", () => {
+    const overflowingTitle = "🦊".repeat(2_043) + " token=xy"
+    expect(overflowingTitle.length).toBe(4_095)
+    for (const { expected, title } of [
+      { title: overflowingTitle, expected: "🦊".repeat(2_037) + "[redacted credential]" },
+      { title: "🦊 token=xy", expected: "🦊 token=[redacted credential]" },
+      { title: "a".repeat(4_096), expected: "a".repeat(4_096) }
+    ]) {
+      const payload = Schema.decodeUnknownSync(JobPayload)({
+        kind: "agent.delegate",
+        mode: "work",
+        repository: "/repo",
+        prompt: "ship",
+        newWork: { branch: "fix/new-work", title }
+      })
+      const projected = sanitizeJobPayload(payload)
+      expect(Schema.decodeUnknownResult(JobPayload)(projected)._tag).toBe("Success")
+      expect(projected).toMatchObject({ newWork: { title: expected } })
+      expect(expected.length).toBeLessThanOrEqual(4_096)
+      expect(JSON.stringify(projected)).not.toContain("xy")
+      expect(Schema.decodeUnknownSync(JobPayload)(projected)).toEqual(projected)
+      const record = { ...recordFor("pending_approval"), payload }
+      const projectedRecord = sanitizeJobRecord(record)
+      expect(Schema.decodeUnknownSync(SanitizedJobRecord)(projectedRecord)).toEqual(projectedRecord)
+      const snapshot = dashboardFor(record)
+      expect(Schema.decodeUnknownSync(DashboardSnapshot)(snapshot)).toEqual(snapshot)
+    }
+  })
+
+  it("redacts credential assignments in proposed Work titles before browser projection", () => {
+    const payload: JobPayloadType = {
+      kind: "agent.delegate",
+      mode: "work",
+      repository: "/repo",
+      prompt: "ship",
+      newWork: { branch: "fix/new-work", title: "Repair token=synthetic-secret" }
+    }
+    const projected = sanitizeJobPayload(payload)
+    expect(JSON.stringify({ request: approvalRequestFor(payload), projected })).not.toContain("synthetic-secret")
+    expect(projected).toMatchObject({ newWork: { title: "Repair token=[redacted credential]" } })
+    expect(Schema.decodeUnknownSync(JobPayload)(projected)).toEqual(projected)
+  })
+
+  it("shows the proposed Work goal in approvals and the dashboard", () => {
+    const payload: JobPayloadType = {
+      kind: "agent.delegate",
+      mode: "work",
+      repository: "/repo",
+      prompt: "ship",
+      newWork: { branch: "fix/new-work", title: "Create a goal" }
+    }
+    const request = approvalRequestFor(payload)
+    expect(request.fields).toContainEqual({
+      key: "newWork",
+      label: "New Work goal",
+      redacted: false,
+      value: "/repo@fix/new-work — Create a goal"
+    })
+    const disclosure = renderToStaticMarkup(<ApprovalRequestDisclosure id="new-work" payload={payload} />)
+    expect(disclosure).toContain("New Work goal")
+    expect(disclosure).toContain("/repo@fix/new-work — Create a goal")
+    expect(renderDashboard({ ...recordFor("pending_approval"), payload }, false)).toContain(
+      "New Work goal: /repo@fix/new-work — Create a goal"
+    )
+    expect(sanitizeJobPayload(payload)).toMatchObject({ newWork: payload.newWork })
+    expect(approvalRequestFor(approvalPayload).fields.some((item) => item.key === "newWork")).toBe(false)
+  })
+
   it("redacts spaced credential labels without hiding nearby prose", () => {
     for (const ref of [
       "api key: leaked-canary",
@@ -1144,6 +1214,61 @@ describe("sanitized approval requests", () => {
       expectedGoalUpdatedAt: 500
     }
   ]
+  const jsonKinds = {
+    "browser.mcp.recover": true,
+    "nix.check": true,
+    "nix.apply": true,
+    "agent.delegate": true,
+    "agent.message": true,
+    "work.reconcile": true,
+    "work.admit": true,
+    "work.recover": true,
+    "work.reassign": true,
+    "work.abandon": true
+  } satisfies Record<JobPayloadType["kind"], boolean>
+  const jsonPayloads = [
+    { kind: "browser.mcp.recover" },
+    { kind: "nix.check" },
+    { kind: "nix.apply", ref: "main?token=private-canary" },
+    approvalPayload,
+    { kind: "agent.message", session: "test-agent", message: "private message canary" },
+    ...workPayloads,
+    {
+      kind: "work.abandon",
+      goalId: "example-goal",
+      owner: { id: "owner-1", name: "Owner" },
+      reason: "Release ownership",
+      expectedGoalEventId: "event-1",
+      expectedGoalUpdatedAt: 500
+    }
+  ]
+  it("covers each request kind in the normalized JSON allowlist guard", () => {
+    expect(jsonPayloads.map(({ kind }) => kind).sort()).toEqual(Object.keys(jsonKinds).sort())
+  })
+  for (const raw of jsonPayloads) {
+    it(`limits ${raw.kind} JSON keys and values to the default view's normalized fields`, () => {
+      const payload = Schema.decodeUnknownSync(JobPayload)(raw)
+      const request = { ...approvalRequestFor(payload), rawSecret: "raw-request-canary" }
+      const fieldView = document.createElement("div")
+      fieldView.innerHTML = renderToStaticMarkup(<ApprovalRequestDisclosure id="fields" request={request} />)
+      const jsonView = document.createElement("div")
+      jsonView.innerHTML = renderToStaticMarkup(<ApprovalRequestDisclosure id="json" request={request} format="json" />)
+      const jsonText = jsonView.querySelector(".approval-request-json")?.textContent ?? ""
+      const decoded = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Record(Schema.String, Schema.String)))(
+        jsonText
+      )
+      const defaultFields = [...fieldView.querySelectorAll<HTMLElement>("[data-approval-field]")].map((element) => [
+        element.dataset["approvalField"],
+        element.querySelector("dd")?.textContent
+      ])
+      expect(decoded).toEqual({ kind: payload.kind, ...Object.fromEntries(defaultFields) })
+      expect(jsonText).not.toContain("raw-request-canary")
+      expect(jsonText).not.toContain("private-canary")
+      expect(jsonText).not.toContain("private message canary")
+      expect(jsonText).not.toContain("secret-value")
+    })
+  }
+
   // Canonical leaf paths whose display key differs from the path itself.
   const displayKeyFor = new Map([
     ["expectedAbsenceToken", "absenceToken"],
@@ -1370,8 +1495,8 @@ describe("sanitized approval requests", () => {
     "keeps the complete redacted request in the approval dashboard for %s",
     (status) => {
       const html = renderDashboard(recordFor(status))
-      expect(html).toContain("View full request")
-      expect(html).toContain("Repository")
+      expect(html).toContain(status === "pending_approval" ? "Full request" : "View full request")
+      expect(html).toContain("/srv/npm")
       expect(html).toContain("[redacted internal prompt]")
       expect(html).not.toContain("raw terminal result")
       expect(html).not.toContain("raw terminal output")

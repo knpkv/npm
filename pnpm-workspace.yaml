@@ -3,6 +3,9 @@ packages:
   - scripts
   - packages/*
 
+# Install explicitly. Running a tool must not rewrite the lockfile or node_modules.
+verifyDepsBeforeRun: false
+
 catalog:
   vitest: ^5.0.3
 

@@ -19,6 +19,7 @@ import {
   WorkAdmissionTarget,
   WorkGoalCheckpoint,
   type WorkGoalCheckpoint as WorkGoalCheckpointType,
+  type WorkPullRequestAttach,
   WorkRecoveryContext,
   WorkRecoveryPreflight,
   WorkRecoveryTarget,
@@ -34,6 +35,7 @@ import { followJob } from "./internal/fleet-follow.js"
 import { withFleetRequestTimeout } from "./internal/fleet-request.js"
 import {
   FleetctlUsageError,
+  formatJobRecord,
   formatUsageError,
   oneLine,
   parseInvocation,
@@ -47,6 +49,8 @@ import {
   workAdmissionPreflightUrl,
   workCheckpointFromJson,
   workCheckpointUrl,
+  workPullRequestAttachFromJson,
+  workPullRequestAttachUrl,
   workRecoveryContextUrl,
   workRecoveryPreflightUrl,
   workSnapshotFromJson,
@@ -107,7 +111,7 @@ const schemaResponseDecoder = <A>(
 const requestAt = Effect.fn("Fleetctl.requestAt")(function*<A>(
   url: string,
   schema: Schema.Codec<A, unknown, never, never>,
-  body?: JobRequestType | WorkGoalCheckpointType,
+  body?: JobRequestType | WorkGoalCheckpointType | WorkPullRequestAttach,
   decode: ResponseDecoder<A> = schemaResponseDecoder(schema)
 ) {
   const client = yield* HttpClient.HttpClient
@@ -329,21 +333,17 @@ const main = Effect.gen(function*() {
       return
     }
     case "status":
-    case "history":
-    case "job": {
+    case "history": {
       const host = rest[0] ?? config.host
       const value = command === "status"
         ? yield* request(config, tailscale, host, "/v1/status", HostStatus)
-        : command === "history"
-        ? yield* history(config, tailscale, host, rest[1] ?? "50")
-        : yield* request(
-          config,
-          tailscale,
-          host,
-          `/v1/jobs/${encodeURIComponent(rest[1] ?? "")}`,
-          JobRecord
-        )
+        : yield* history(config, tailscale, host, rest[1] ?? "50")
       yield* Console.log(JSON.stringify(value, null, 2))
+      return
+    }
+    case "job": {
+      const record = yield* getJob(config, tailscale, rest[0] ?? config.host, rest[1] ?? "")
+      yield* Console.log(formatJobRecord(record))
       return
     }
     case "follow": {
@@ -353,7 +353,7 @@ const main = Effect.gen(function*() {
         return yield* new FleetctlUsageError({ reason: "follow needs HOST and ID", usage })
       }
       const record = yield* follow(config, tailscale, host, id)
-      yield* Console.log(JSON.stringify(record, null, 2))
+      yield* Console.log(formatJobRecord(record))
       return
     }
     case "submit": {
@@ -364,12 +364,12 @@ const main = Effect.gen(function*() {
       const payload = yield* payloadFrom(rest.slice(1))
       const record = yield* submit(config, tailscale, host, payload)
       if (record.status !== "pending_approval") {
-        yield* Console.log(JSON.stringify(record, null, 2))
+        yield* Console.log(formatJobRecord(record))
         return
       }
       yield* Console.log(JSON.stringify({ id: record.id, status: record.status }, null, 2))
       const approvalUrl = yield* resolveApprovalPage(config, tailscale, host)
-      yield* Console.log(JSON.stringify({ ...record, approvalUrl }, null, 2))
+      yield* Console.log(formatJobRecord(record, approvalUrl))
       return
     }
     case "work": {
@@ -426,6 +426,21 @@ const main = Effect.gen(function*() {
           WorkAdmissionPreflight
         )
         yield* Console.log(JSON.stringify(preflight, null, 2))
+        return
+      }
+      if (operation === "attach-pr") {
+        const host = rest[1]
+        const json = rest[2]
+        if (host === undefined || json === undefined || rest.length !== 3) {
+          return yield* new FleetctlUsageError({
+            reason: "work attach-pr needs HOST and ATTACH_JSON",
+            usage: workUsage
+          })
+        }
+        const input = yield* workPullRequestAttachFromJson(json)
+        const url = yield* workPullRequestAttachUrl(config, host)
+        const recorded = yield* requestAt(url, WorkGoalCheckpoint, input)
+        yield* Console.log(JSON.stringify(recorded, null, 2))
         return
       }
       if (operation === "record") {

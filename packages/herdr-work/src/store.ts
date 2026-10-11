@@ -1,6 +1,6 @@
 import { agentConnectTarget, workAbandonActivitySummary, workReassignActivitySummary } from "@knpkv/herdr-fleet"
 import { openPrivateSqlite, type PrivateDatabaseError, type PrivateSqlite } from "@knpkv/herdr-fleet/sqlite"
-import { Clock, Crypto, Effect, Equal, Option, Result, Schema } from "effect"
+import { Clock, Crypto, Effect, Equal, Option, Predicate, Result, Schema } from "effect"
 import { Hex } from "effect/encoding"
 import type { DatabaseSync, SQLOutputValue } from "node:sqlite"
 import { makeWorkAgentBinding } from "./agent-binding.js"
@@ -25,6 +25,7 @@ import {
   WorkLaneGoalConflictError,
   WorkLaneOperationConflictError,
   WorkProjectionError,
+  WorkPullRequestAttachConflict,
   WorkPullRequestLinkError,
   WorkStoreError,
   WorkTransactionConflictError
@@ -116,6 +117,7 @@ import {
   workObservedFactMaxRecords,
   WorkObservedFailure,
   WorkProspectiveAdmission,
+  WorkPullRequestAttach,
   WorkPullRequestLink,
   WorkReconcileOptions,
   workReconcilerHeadroom,
@@ -143,6 +145,7 @@ import type {
   WorkObserveOutcome,
   WorkObserveReport,
   WorkProspectiveAdmission as WorkProspectiveAdmissionType,
+  WorkPullRequestAttach as WorkPullRequestAttachType,
   WorkPullRequestLink as WorkPullRequestLinkType,
   WorkPullRequestObservation as WorkPullRequestObservationType,
   WorkReconcileOutcome,
@@ -1323,10 +1326,10 @@ type ReconcileStep =
   | { readonly _tag: "conflict"; readonly goalId: string; readonly reason: "checkpoint" | "revision" }
 
 type AppendDecision =
-  | { readonly _tag: "inserted"; readonly changes: bigint | number }
-  | { readonly _tag: "checked" }
+  | { readonly _tag: "inserted"; readonly changes: bigint | number; readonly event: WorkGoalCheckpointType }
+  | { readonly _tag: "checked"; readonly event: WorkGoalCheckpointType }
   | { readonly _tag: "replayed"; readonly event: WorkGoalCheckpointType }
-  | { readonly _tag: "rejected"; readonly error: AppendRejection }
+  | { readonly _tag: "rejected"; readonly error: AppendRejection | WorkPullRequestAttachConflict }
 
 type AppendManyDecision =
   | { readonly _tag: "inserted"; readonly events: ReadonlyArray<WorkGoalCheckpointType> }
@@ -1942,6 +1945,12 @@ export interface WorkStoreService {
   readonly bindingDispatchesForLane: (
     laneId: string
   ) => Effect.Effect<ReadonlyArray<string>, WorkStoreError>
+  readonly attachPullRequest: (
+    input: WorkPullRequestAttachType
+  ) => Effect.Effect<
+    WorkGoalCheckpointType,
+    WorkPullRequestAttachConflict | WorkCheckpointConflictError | WorkProjectionError | WorkStoreError
+  >
   readonly append: (
     event: WorkGoalCheckpointType
   ) => Effect.Effect<
@@ -3955,40 +3964,50 @@ export class WorkStore implements WorkStoreService {
     return entries.map(({ dispatchRequestId }) => dispatchRequestId)
   })
 
+  /** Builds the checkpoint from the stored head under the append transaction's lock. */
+  readonly attachPullRequest = Effect.fn("WorkStore.attachPullRequest")(function*(
+    this: WorkStore,
+    input: WorkPullRequestAttachType
+  ) {
+    const decoded = yield* Schema.decodeUnknownEffect(WorkPullRequestAttach, { onExcessProperty: "error" })(input)
+      .pipe(Effect.mapError(storeError("attachPullRequest.decode")))
+    return yield* this.appendAt(decoded, null).pipe(
+      Effect.catchTag("WorkGoalRevisionConflictError", Effect.die)
+    )
+  })
+
   readonly append = (event: WorkGoalCheckpointType) =>
     this.appendAt(event, null).pipe(
-      // Only an expected head can raise it; a plain append never checks one.
-      Effect.catchTag("WorkGoalRevisionConflictError", Effect.die)
+      // Only guarded writes can raise these; a plain append checks neither.
+      Effect.catchTag(["WorkGoalRevisionConflictError", "WorkPullRequestAttachConflict"], Effect.die)
     )
 
   /**
-   * Appends one checkpoint. With `expectedHead`, the goal's latest checkpoint
-   * must still be that one when the write commits (an exact replay always
-   * succeeds), so a writer that planned from the head cannot bury a newer
-   * owner checkpoint.
-   */
-  /**
-   * Appends one checkpoint. With `mode` `check`, every check runs in the same
-   * transaction and it is rolled back instead of written: the checkpoint is
-   * returned when it would have been appended.
+   * Appends under one transaction. A reconciler guard compares the stored head
+   * and observed fact; an attachment derives its checkpoint from the stored
+   * head after checking the caller's expected event and repository identity.
+   * Same-URL attachments and exact checkpoint replays are no-op successes.
+   * In `check` mode every check runs, then rolls back instead of writing.
    */
   private readonly appendAt = Effect.fn("WorkStore.append")(function*(
     this: WorkStore,
-    event: WorkGoalCheckpointType,
+    event: WorkGoalCheckpointType | WorkPullRequestAttachType,
     guard: ReconcilerGuard | null,
     mode: "write" | "check" = "write",
     // In a check, the checkpoints earlier steps of the same plan would have
     // written: limits are checked as if they were already stored.
     planned: ReadonlyArray<WorkGoalCheckpointType> = []
   ) {
-    const decoded = yield* Schema.decodeUnknownEffect(WorkGoalCheckpoint)(event).pipe(
-      Effect.mapError(storeError("append.decode"))
-    )
+    const decode: Effect.Effect<WorkGoalCheckpointType | WorkPullRequestAttachType, WorkStoreError> = "goal" in event
+      ? Schema.decodeUnknownEffect(WorkGoalCheckpoint)(event).pipe(Effect.mapError(storeError("append.decode")))
+      : Schema.decodeUnknownEffect(WorkPullRequestAttach, { onExcessProperty: "error" })(event)
+        .pipe(Effect.mapError(storeError("append.decode")))
+    const input = yield* decode
     // The reconciler's event and activity ids are its provenance; no other
     // writer may use them.
-    if (guard === null && decoded.eventId.startsWith(reconcilerEventPrefix)) {
+    if (guard === null && input.eventId.startsWith(reconcilerEventPrefix)) {
       return yield* new WorkProjectionError({
-        cause: decoded.eventId,
+        cause: input.eventId,
         detail: `event ids starting with ${reconcilerEventPrefix} are reserved for the reconciler`,
         reason: "malformed"
       })
@@ -4001,10 +4020,69 @@ export class WorkStore implements WorkStoreService {
         try {
           this.#database.exec("BEGIN IMMEDIATE")
           transaction = true
-          const reject = (error: AppendRejection): AppendDecision => {
+          const reject = (error: AppendRejection | WorkPullRequestAttachConflict): AppendDecision => {
             abort()
             transaction = false
             return { _tag: "rejected", error }
+          }
+          const decoded = (() => {
+            if ("goal" in input) return input
+            const headRow = this.#database.prepare(
+              `SELECT record FROM work_goal_events WHERE goal_id = ?
+               ORDER BY occurred_at DESC, event_id DESC LIMIT 1`
+            ).get(input.goalId)
+            const head = headRow === undefined ? null : Schema.decodeUnknownSync(WorkGoalCheckpoint)(
+              JSON.parse(Schema.decodeUnknownSync(StoredEventRow)(headRow).record)
+            )
+            const conflict = (reason: WorkPullRequestAttachConflict["reason"]) =>
+              new WorkPullRequestAttachConflict({
+                goalId: input.goalId,
+                expectedGoalEventId: input.expectedGoalEventId,
+                actualGoalEventId: head?.eventId ?? null,
+                reason
+              })
+            if (head === null) return conflict("missing_goal")
+            if (
+              head.goal.repository.branch !== input.branch ||
+              head.goal.repository.repository !== input.repository
+            ) return conflict("identity_mismatch")
+            // A retry returns the stored checkpoint, preserving any later owner updates.
+            if (head.goal.review?.url === input.reviewUrl) {
+              return { _tag: "replayed", event: head } satisfies AppendDecision
+            }
+            if (head.eventId !== input.expectedGoalEventId) return conflict("stale_event")
+            if (isTerminalWorkState(head.goal.state) || head.goal.goalFamily?.role === "superseded") {
+              return conflict("inactive_goal")
+            }
+            if (head.goal.review?.url != null) return conflict("already_attached")
+            if (input.occurredAt <= head.occurredAt) {
+              return new WorkProjectionError({
+                cause: input,
+                detail: "pull request attachment must advance the goal timestamp",
+                reason: "inconsistent_history"
+              })
+            }
+            return Schema.decodeUnknownSync(WorkGoalCheckpoint)({
+              version: "herdr.work.event.v1",
+              eventId: input.eventId,
+              occurredAt: input.occurredAt,
+              goal: {
+                ...head.goal,
+                updatedAt: input.occurredAt,
+                review: { state: "requested", url: input.reviewUrl, summary: null, updatedAt: input.occurredAt }
+              }
+            })
+          })()
+          if (
+            Predicate.isTagged(decoded, "WorkPullRequestAttachConflict") ||
+            Predicate.isTagged(decoded, "WorkProjectionError")
+          ) {
+            return reject(decoded)
+          }
+          if (Predicate.hasProperty(decoded, "_tag")) {
+            abort()
+            transaction = false
+            return { _tag: "replayed", event: decoded.event } satisfies AppendDecision
           }
           const collisions = Schema.decodeUnknownSync(StoredEventRows)(
             this.#database
@@ -4124,7 +4202,7 @@ export class WorkStore implements WorkStoreService {
           if (mode === "check") {
             abort()
             transaction = false
-            return { _tag: "checked" } satisfies AppendDecision
+            return { _tag: "checked", event: decoded } satisfies AppendDecision
           }
           const result = this.#database.prepare(
             "INSERT INTO work_goal_events (event_id, goal_id, occurred_at, record) VALUES (?, ?, ?, ?)"
@@ -4139,7 +4217,7 @@ export class WorkStore implements WorkStoreService {
           }
           this.#database.exec("COMMIT")
           transaction = false
-          return { _tag: "inserted", changes: result.changes } satisfies AppendDecision
+          return { _tag: "inserted", changes: result.changes, event: decoded } satisfies AppendDecision
         } catch (error) {
           if (transaction) abort()
           throw error
@@ -4149,11 +4227,11 @@ export class WorkStore implements WorkStoreService {
     })
     if (decision._tag === "rejected") return yield* decision.error
     if (decision._tag === "replayed") return decision.event
-    if (decision._tag === "checked") return decoded
+    if (decision._tag === "checked") return decision.event
     if (decision.changes !== 1 && decision.changes !== 1n) {
       return yield* storeError("append.insert.count")(decision.changes)
     }
-    return decoded
+    return decision.event
   })
 
   readonly appendMany = Effect.fn("WorkStore.appendMany")(function*(
@@ -5443,6 +5521,7 @@ export class WorkStore implements WorkStoreService {
     const planned: Array<WorkGoalCheckpointType> = []
     const appendAt = (checkpoint: WorkGoalCheckpointType, guard: ReconcilerGuard) =>
       this.appendAt(checkpoint, guard, mode, planned).pipe(
+        Effect.catchTag("WorkPullRequestAttachConflict", Effect.die),
         Effect.tap(() =>
           Effect.sync(() => {
             if (mode === "check") planned.push(checkpoint)

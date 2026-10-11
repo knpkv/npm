@@ -3,6 +3,7 @@
 import { describe, expect, it, vi } from "@effect/vitest"
 import { act } from "react"
 import { createRoot } from "react-dom/client"
+import { AgentCreature } from "@knpkv/herdr-connect/surface"
 import type { ApprovalDecision } from "../src/approval-decision.js"
 import { ApprovalsCountdown, type DecisionStatus } from "../src/countdown-view.js"
 import type { DashboardSnapshot } from "../src/dashboard-model.js"
@@ -61,6 +62,7 @@ const snapshot = (overrides: Partial<DashboardSnapshot> = {}): DashboardSnapshot
 
 interface Props {
   readonly decisionStatus?: DecisionStatus | null
+  readonly refreshFailed?: boolean
   readonly sending?: ApprovalDecision | null
   readonly snapshot: DashboardSnapshot
 }
@@ -84,6 +86,7 @@ const mount = (initial: Props) => {
             revalidations.count += 1
           }}
           pendingLoading={false}
+          refreshFailed={props.refreshFailed ?? false}
           sending={props.sending ?? null}
           snapshot={props.snapshot}
         />
@@ -105,6 +108,65 @@ const mount = (initial: Props) => {
 }
 
 describe("ApprovalsCountdown", () => {
+  it("keeps history cards compact and folds complete audit arguments below them", () => {
+    const view = mount({
+      snapshot: snapshot({ records: [record("finished", { approvedAt: Date.now() - 3_600_000, approvedBy: "owner" })] })
+    })
+    const card = view.container.querySelector(".countdown-decided-row")
+    expect(card?.querySelector("details")).toBeNull()
+    expect(card?.querySelector(".countdown-row-caption")?.textContent).toBe("by owner, 1h ago")
+    const audit = view.container.querySelector<HTMLDetailsElement>(".countdown-history-audit")
+    expect(audit).not.toBeNull()
+    expect(audit?.open).toBe(false)
+    expect(audit?.querySelector("summary")?.textContent).toBe("Decision request arguments")
+    expect(audit?.textContent).toContain("main")
+    view.unmount()
+  })
+
+  it("shows normalized JSON arguments without private delegation prompt text", () => {
+    const view = mount({
+      snapshot: snapshot({
+        pendingApprovals: {
+          failures: [],
+          remote: [],
+          nextCursors: [],
+          local: [
+            record("review", {
+              payload: {
+                kind: "agent.delegate",
+                mode: "review",
+                repository: "/workspace/project",
+                prompt: "private instructions must stay private"
+              }
+            })
+          ]
+        }
+      })
+    })
+    const code = view.container.querySelector(".countdown-selected .approval-request-json")
+    expect(code).not.toBeNull()
+    expect(code?.textContent).toContain('"kind": "agent.delegate"')
+    expect(code?.textContent).toContain("[redacted internal prompt]")
+    expect(code?.textContent).not.toContain("private instructions must stay private")
+    view.unmount()
+  })
+
+  it("places requester identity beneath the window track and gives history its kind", () => {
+    const view = mount({
+      snapshot: snapshot({ records: [record("finished", { approvedAt: Date.now(), approvedBy: "owner" })] })
+    })
+    const caption = view.container.querySelector(".countdown-row-caption")
+    expect(caption?.querySelector(".countdown-requester")).not.toBeNull()
+    expect(caption?.textContent).toContain("from submitter@example.com")
+    expect(view.container.querySelector(".countdown-decided-row .countdown-decided-kind")?.textContent).toBe(
+      "nix.apply"
+    )
+    expect(view.container.querySelector(".countdown-request-header")?.textContent).toContain(
+      "Requested by submitter@example.com"
+    )
+    view.unmount()
+  })
+
   it("leads with the soonest request and mounts a single decision bar", () => {
     const view = mount({
       snapshot: snapshot({
@@ -120,7 +182,7 @@ describe("ApprovalsCountdown", () => {
       })
     })
     expect(view.container.querySelector("[aria-label='Approval summary'] p")?.textContent).toMatch(
-      /^\dm \d\ds left on Apply Nix configuration, expires soon$/
+      /^\dm \d\ds left on Apply nix ref main, expires soon$/
     )
     expect(view.container.querySelectorAll("[data-rly-decision-bar]")).toHaveLength(1)
     expect(view.container.querySelector("[aria-label='What the track marks mean']")?.textContent).toBe("5 minutes left")
@@ -136,6 +198,7 @@ describe("ApprovalsCountdown", () => {
     })
     const hero = view.container.querySelector("[aria-label='Approval summary']")
     expect(hero?.querySelector("p")?.textContent).toBe("Nothing to approve on reachable hosts; 1 host unchecked")
+    expect(view.container.querySelector(".countdown-pending-count")?.textContent).toBe("Requests on 1 host unchecked")
     view.unmount()
   })
 
@@ -454,7 +517,7 @@ describe("ApprovalsCountdown", () => {
       })
     })
     expect(view.container.querySelector(".countdown-announcer")?.textContent).toBe(
-      "Apply Nix configuration (job-2) on ALPHA expired. Nothing was applied."
+      "Apply nix ref main (job-2) on ALPHA expired. Nothing was applied."
     )
     view.unmount()
   })
@@ -712,7 +775,7 @@ describe("ApprovalsCountdown", () => {
       })
     })
     expect(view.container.querySelector("[aria-label='Approval summary'] p")?.textContent).toBe(
-      "Apply Nix configuration is expiring"
+      "Apply nix ref main is expiring"
     )
     view.unmount()
   })
@@ -810,5 +873,340 @@ describe("ApprovalsCountdown", () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+describe("approval request presentation", () => {
+  it("draws the exact requester identity only in the row and request header", () => {
+    const base = snapshot()
+    const view = mount({
+      snapshot: {
+        ...base,
+        pendingApprovals: { ...base.pendingApprovals, local: [record("job-1", { actor: "build-bot" })] },
+        status: {
+          ...base.status,
+          herdr: {
+            available: true,
+            error: null,
+            agents: [
+              {
+                agentId: "agent-builder",
+                activityRevision: 1,
+                kind: "codex",
+                name: "build-bot",
+                paneId: "w1:p1",
+                parentAgentId: null,
+                relation: null,
+                status: "working",
+                work: "release"
+              }
+            ]
+          }
+        }
+      }
+    })
+    const expectedContainer = document.createElement("div")
+    const expectedRoot = createRoot(expectedContainer)
+    act(() => expectedRoot.render(<AgentCreature host="ALPHA" id="agent-builder" size="row" state="waiting" />))
+    const expectedBody = expectedContainer.querySelector(".connect-creature-body")?.getAttribute("d")
+    const portraits = view.container.querySelectorAll(".countdown-requester .connect-creature")
+    expect(portraits).toHaveLength(2)
+    for (const portrait of portraits) {
+      expect(portrait.querySelector(".connect-creature-body")?.getAttribute("d")).toBe(expectedBody)
+      expect(portrait.getAttribute("data-bucket")).toBe("needs-you")
+    }
+    expect(view.bar()?.querySelector("svg.connect-creature")).toBeNull()
+    act(() => expectedRoot.unmount())
+    view.unmount()
+  })
+
+  it("retains a remote actor without inventing a creature identity", () => {
+    const view = mount({
+      snapshot: snapshot({
+        pendingApprovals: {
+          failures: [],
+          local: [],
+          nextCursors: [],
+          remote: [
+            {
+              host: "BETA",
+              approvalUrl: "https://beta.example.test/",
+              approval: {
+                actor: "remote-bot",
+                approvalExpiresAt: Date.now() + 60_000,
+                createdAt: Date.now(),
+                id: "remote-1",
+                payload: { kind: "nix.apply", ref: "main" },
+                status: "pending_approval"
+              }
+            }
+          ]
+        }
+      })
+    })
+    expect(view.container.querySelector(".countdown-requester-name")?.textContent).toBe("remote-bot")
+    expect(view.container.querySelector(".countdown-requester-placeholder")?.getAttribute("aria-label")).toBe(
+      "Requester portrait unavailable"
+    )
+    expect(view.container.querySelector(".connect-creature")).toBeNull()
+    view.unmount()
+  })
+
+  it("labels an unreadable requester instead of leaving the name blank", () => {
+    const view = mount({
+      snapshot: snapshot({
+        pendingApprovals: { failures: [], local: [record("job-1", { actor: " " })], nextCursors: [], remote: [] }
+      })
+    })
+    expect(view.container.querySelector(".countdown-requester-name")?.textContent).toBe("Requester unreadable")
+    view.unmount()
+  })
+
+  it("says No requests waiting for a fully read empty queue", () => {
+    const view = mount({
+      snapshot: snapshot({ pendingApprovals: { failures: [], local: [], nextCursors: [], remote: [] } })
+    })
+    expect(view.container.querySelector(".countdown-empty")?.textContent).toBe("No requests waiting")
+    view.unmount()
+  })
+
+  it("retains the selected request and retries a failed host read", () => {
+    const view = mount({ snapshot: snapshot() })
+    view.render({
+      snapshot: snapshot({
+        pendingApprovals: {
+          failures: [{ host: "ALPHA", reason: "request_failed" }],
+          local: [],
+          nextCursors: [],
+          remote: []
+        }
+      })
+    })
+    expect(view.container.querySelector(".countdown-kicker")?.textContent).toContain("job-1")
+    const retry = [...view.container.querySelectorAll("button")].find((button) => button.textContent === "Retry")
+    expect(retry).toBeDefined()
+    act(() => retry?.click())
+    expect(view.revalidations.count).toBe(1)
+    expect(view.decisions).toEqual([])
+    view.unmount()
+  })
+})
+
+describe("stale approval decisions", () => {
+  const age = () => {
+    for (let second = 0; second < 31; second += 1) act(() => vi.advanceTimersByTime(1_000))
+  }
+
+  it("revalidates before sending a stale decision and sends only the unchanged request", () => {
+    vi.useFakeTimers()
+    try {
+      const initial = snapshot()
+      const view = mount({ snapshot: initial })
+      age()
+      expect(view.container.querySelector(".countdown-freshness")?.textContent).toContain("Last checked")
+      view.press("Enter")
+      expect(view.revalidations.count).toBe(1)
+      expect(view.decisions).toEqual([])
+      view.press("Enter")
+      expect(view.revalidations.count).toBe(1)
+      view.render({ snapshot: { ...initial, observedAt: Date.now() } })
+      expect(view.decisions).toEqual([{ decision: "approve", jobId: "job-1" }])
+      view.unmount()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("shows changed arguments without sending the stale approval", () => {
+    vi.useFakeTimers()
+    try {
+      const initial = snapshot()
+      const view = mount({ snapshot: initial })
+      age()
+      view.press("Enter")
+      expect(view.decisions).toEqual([])
+      view.render({
+        snapshot: {
+          ...initial,
+          observedAt: Date.now(),
+          pendingApprovals: {
+            ...initial.pendingApprovals,
+            local: [record("job-1", { payload: { kind: "nix.apply", ref: "release" } })]
+          }
+        }
+      })
+      expect(view.decisions).toEqual([])
+      expect(view.container.querySelector(".countdown-verification")?.textContent).toContain("changed")
+      view.unmount()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("keeps an expired outcome inactive after the stale read", () => {
+    vi.useFakeTimers()
+    try {
+      const initial = snapshot()
+      const view = mount({ snapshot: initial })
+      age()
+      view.press("Enter")
+      expect(view.decisions).toEqual([])
+      view.render({
+        snapshot: {
+          ...initial,
+          observedAt: Date.now(),
+          pendingApprovals: {
+            failures: [],
+            local: [],
+            nextCursors: [],
+            remote: []
+          },
+          records: [record("job-1", { expiredAt: Date.now(), status: "expired" })]
+        }
+      })
+      expect(view.decisions).toEqual([])
+      expect(view.bar()?.dataset["state"]).toBe("off")
+      expect(view.bar()?.textContent).toContain("Expired")
+      view.unmount()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("cancels a stale decision when the reader selects another request", () => {
+    vi.useFakeTimers()
+    try {
+      const initial = snapshot({
+        pendingApprovals: { failures: [], local: [record("job-1"), record("job-2")], nextCursors: [], remote: [] }
+      })
+      const view = mount({ snapshot: initial })
+      age()
+      view.press("Enter")
+      act(() => view.container.querySelector<HTMLButtonElement>("[data-approval-job='job-2']")?.click())
+      view.render({ snapshot: { ...initial, observedAt: Date.now() } })
+      expect(view.decisions).toEqual([])
+      view.unmount()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
+describe("failed stale validation", () => {
+  it("cancels a pending stale decision when refresh fails, including after a later success", () => {
+    vi.useFakeTimers()
+    try {
+      const initial = snapshot()
+      const view = mount({ snapshot: initial })
+      for (let second = 0; second < 31; second += 1) act(() => vi.advanceTimersByTime(1_000))
+      view.press("Enter")
+      expect(view.decisions).toEqual([])
+      view.render({ snapshot: initial, refreshFailed: true })
+      expect(view.bar()?.dataset["state"]).toBe("off")
+      expect(view.container.querySelector(".countdown-verification")?.textContent).toContain("Couldn't check")
+      expect([...view.container.querySelectorAll("button")].some((button) => button.textContent === "Retry")).toBe(true)
+      view.render({ snapshot: { ...initial, observedAt: Date.now() } })
+      expect(view.decisions).toEqual([])
+      view.unmount()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
+describe("full approval request", () => {
+  it("keeps the visible target, disclosure arguments and decision on the selected request", () => {
+    const initial = snapshot({
+      pendingApprovals: {
+        failures: [],
+        local: [
+          record("job-1", { payload: { kind: "nix.apply", ref: "main@1234567" } }),
+          record("job-2", {
+            approvalExpiresAt: Date.now() + 20 * 60_000,
+            payload: { kind: "nix.apply", ref: "release@7654321" }
+          })
+        ],
+        nextCursors: [],
+        remote: []
+      }
+    })
+    const view = mount({ snapshot: initial })
+    expect(view.container.querySelector(".countdown-request-target")?.textContent).toBe("main@1234567")
+    const disclosure = view.container.querySelector<HTMLDetailsElement>(".countdown-selected details")
+    expect(disclosure?.querySelector("summary")?.textContent).toBe("Full request")
+    expect(disclosure?.textContent).toContain("Applies this Nix revision on ALPHA.")
+    act(() => {
+      if (disclosure !== null) disclosure.open = true
+    })
+    view.render({
+      snapshot: {
+        ...initial,
+        pendingApprovals: { ...initial.pendingApprovals, local: [...initial.pendingApprovals.local].reverse() }
+      }
+    })
+    expect(view.container.querySelector(".countdown-selected details")?.hasAttribute("open")).toBe(true)
+    expect(view.container.querySelector(".countdown-selected .approval-request-json")?.textContent).toContain(
+      '"ref": "main@1234567"'
+    )
+    view.press("Enter")
+    expect(view.decisions).toEqual([{ decision: "approve", jobId: "job-1" }])
+    view.unmount()
+  })
+
+  it("never draws a target worker as the requester", () => {
+    const view = mount({
+      snapshot: snapshot({
+        pendingApprovals: {
+          failures: [],
+          local: [
+            record("job-1", { worker: { agentId: "agent-target", host: "ALPHA", name: "target-bot", paneId: "w1:p1" } })
+          ],
+          nextCursors: [],
+          remote: []
+        }
+      })
+    })
+    expect(view.container.querySelector(".connect-creature")).toBeNull()
+    expect(view.container.querySelector(".countdown-requester-name")?.textContent).toBe("submitter@example.com")
+    view.unmount()
+  })
+
+  it("keeps ticking clocks outside live regions", () => {
+    vi.useFakeTimers()
+    try {
+      const view = mount({ snapshot: snapshot() })
+      const before = view.container.querySelector(".countdown-announcer")?.textContent
+      for (let second = 0; second < 3; second += 1) act(() => vi.advanceTimersByTime(1_000))
+      for (const clock of view.container.querySelectorAll(".countdown-row-clock")) {
+        expect(clock.closest("[aria-live], [role='status']")).toBeNull()
+      }
+      expect(view.container.querySelector(".countdown-announcer")?.textContent).toBe(before)
+      view.unmount()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
+describe("requester identity boundaries", () => {
+  it("does not infer a requester from a target worker sharing its name on another host", () => {
+    const view = mount({
+      snapshot: snapshot({
+        pendingApprovals: {
+          failures: [],
+          local: [
+            record("job-1", {
+              actor: "build-bot",
+              worker: { agentId: "agent-target", host: "BETA", name: "build-bot", paneId: "w1:p1" }
+            })
+          ],
+          nextCursors: [],
+          remote: []
+        }
+      })
+    })
+    expect(view.container.querySelector(".connect-creature")).toBeNull()
+    expect(view.container.querySelector(".countdown-requester-name")?.textContent).toBe("build-bot")
+    view.unmount()
   })
 })

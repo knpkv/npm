@@ -88,7 +88,7 @@ import { makeRelayHubMount, type RelayHubBackends } from "../src/relay/mount.js"
 const provideNodeServices = Effect.provide(NodeServices.layer)
 
 const config = (stateDirectory: string): HostConfiguration => ({
-  allowedUsers: ["andrey@example.com"],
+  allowedUsers: ["owner@example.com"],
   applyCommand: null,
   browserMcpRecoverCommand: null,
   applyMachines: ["ALPHA", "SER8"],
@@ -111,7 +111,7 @@ const config = (stateDirectory: string): HostConfiguration => ({
   ],
   port: 0,
   pushAllowedOrigins: ["https://push.example.test"],
-  pushSubject: "mailto:andrey@example.com",
+  pushSubject: "mailto:owner@example.com",
   repository: "/repo",
   approvalTls: null,
   stateDirectory,
@@ -138,7 +138,7 @@ const unusedTerminal: TerminalConnector = {
 }
 
 const pendingRecord = (host: string, index: number): JobRecord => ({
-  actor: "andrey@example.com",
+  actor: "owner@example.com",
   approvalNonce: `${host}-nonce-${index}`,
   approvedBy: null,
   createdAt: index + 1,
@@ -478,7 +478,7 @@ describe("host HTTP authority", () => {
       `#!/bin/sh
 case "$1" in
   ip) printf '%s\n' '127.0.0.1' ;;
-  whois) printf '%s\n' '{"Node":{"StableID":"node-ser8"},"UserProfile":{"LoginName":"andrey@example.com"}}' ;;
+  whois) printf '%s\n' '{"Node":{"StableID":"node-ser8"},"UserProfile":{"LoginName":"owner@example.com"}}' ;;
   status) printf '%s\n' '{"Peer":{},"Self":{"HostName":"ALPHA","ID":"node-alpha","Online":true,"TailscaleIPs":["127.0.0.1"]}}' ;;
 esac
 `,
@@ -565,7 +565,7 @@ esac
             return yield* Effect.die("approval listener missing")
           }
           const headers = {
-            "tailscale-user-login": "andrey@example.com"
+            "tailscale-user-login": "owner@example.com"
           }
           const dashboardResponse = yield* Effect.promise(() => fetch(`${approvalUrl}/v1/dashboard`, { headers }))
           const dashboard = yield* Effect.promise(() => dashboardResponse.text())
@@ -703,7 +703,7 @@ esac
       `#!/bin/sh
 case "$1" in
   ip) printf '%s\n' '127.0.0.1' ;;
-  whois) printf '%s\n' '{"Node":{"StableID":"node-ser8"},"UserProfile":{"LoginName":"andrey@example.com"}}' ;;
+  whois) printf '%s\n' '{"Node":{"StableID":"node-ser8"},"UserProfile":{"LoginName":"owner@example.com"}}' ;;
   status) printf '%s\n' '{"Peer":{},"Self":{"HostName":"ALPHA","ID":"node-alpha","Online":true,"TailscaleIPs":["127.0.0.1"]}}' ;;
 esac
 `,
@@ -775,7 +775,7 @@ esac
           if (approvalUrl === null) {
             return yield* new FleetValidationError({ detail: "approval listener missing" })
           }
-          const headers = { "tailscale-user-login": "andrey@example.com" }
+          const headers = { "tailscale-user-login": "owner@example.com" }
           const origin = new URL(approvalUrl).origin
           const dashboardA = yield* Effect.promise(() => fetch(`${approvalUrl}/v1/dashboard`, { headers }))
           const cookieA = dashboardA.headers.get("set-cookie")?.split(";", 1).join("")
@@ -1022,7 +1022,7 @@ esac
       `#!/bin/sh
 case "$1" in
   ip) printf '%s\n' '127.0.0.1' ;;
-  whois) printf '%s\n' '{"Node":{"StableID":"node-ser8"},"UserProfile":{"LoginName":"andrey@example.com"}}' ;;
+  whois) printf '%s\n' '{"Node":{"StableID":"node-ser8"},"UserProfile":{"LoginName":"owner@example.com"}}' ;;
   status) printf '%s\n' '{"Peer":{},"Self":{"HostName":"ALPHA","ID":"node-alpha","Online":true,"TailscaleIPs":["127.0.0.1"]}}' ;;
 esac
 `,
@@ -1035,7 +1035,7 @@ esac
       port: 0,
       tailscaleCommand
     }
-    const headers = { "tailscale-user-login": "andrey@example.com" }
+    const headers = { "tailscale-user-login": "owner@example.com" }
     let observedAt = 0
     return Effect.acquireUseRelease(
       JobStore.open(join(root, "jobs.sqlite")),
@@ -1216,7 +1216,7 @@ esac
       `#!/bin/sh
 case "$1" in
   ip) printf '%s\n' '127.0.0.1' ;;
-  whois) printf '%s\n' '{"Node":{"StableID":"node-ser8"},"UserProfile":{"LoginName":"andrey@example.com"}}' ;;
+  whois) printf '%s\n' '{"Node":{"StableID":"node-ser8"},"UserProfile":{"LoginName":"owner@example.com"}}' ;;
   status) printf '%s\n' '{"Peer":{},"Self":{"HostName":"ALPHA","ID":"node-alpha","Online":true,"TailscaleIPs":["127.0.0.1"]}}' ;;
 esac
 `,
@@ -1229,7 +1229,7 @@ esac
       port: 0,
       tailscaleCommand
     }
-    const headers = { "tailscale-user-login": "andrey@example.com" }
+    const headers = { "tailscale-user-login": "owner@example.com" }
     return Effect.acquireUseRelease(
       JobStore.open(join(root, "jobs.sqlite")),
       (store) =>
@@ -1302,7 +1302,7 @@ esac
       `#!/bin/sh
 case "$1" in
   ip) printf '%s\n' '127.0.0.1' ;;
-  whois) printf '%s\n' '{"Node":{"StableID":"node-ser8"},"UserProfile":{"LoginName":"andrey@example.com"}}' ;;
+  whois) printf '%s\n' '{"Node":{"StableID":"node-ser8"},"UserProfile":{"LoginName":"owner@example.com"}}' ;;
   status) printf '%s\n' '{"Peer":{},"Self":{"HostName":"ALPHA","ID":"node-alpha","Online":true,"TailscaleIPs":["127.0.0.1"]}}' ;;
 esac
 `,
@@ -1315,7 +1315,7 @@ esac
       port: 0,
       tailscaleCommand
     }
-    const headers = { "tailscale-user-login": "andrey@example.com" }
+    const headers = { "tailscale-user-login": "owner@example.com" }
     return Effect.acquireUseRelease(
       JobStore.open(join(root, "jobs.sqlite")),
       (store) =>
@@ -1520,7 +1520,7 @@ esac
           })
           yield* fleet.submit(
             { payload: { kind: "nix.apply", ref: "main" } },
-            "andrey@example.com"
+            "owner@example.com"
           )
           expect(
             yield* notificationCandidates(config(root), fleet).pipe(
@@ -1581,7 +1581,7 @@ esac
           nextCursors: [],
           remote: Array.from({ length: 16 }, (_, index) => ({
             approval: {
-              actor: "andrey@example.com",
+              actor: "owner@example.com",
               approvalExpiresAt: null,
               createdAt: index,
               id: `job-${index}`,
@@ -1623,7 +1623,7 @@ esac
   it.effect("refuses a dashboard when no history record fits the remaining envelope", () =>
     Effect.gen(function*() {
       const record = {
-        actor: "andrey@example.com",
+        actor: "owner@example.com",
         approvalNonce: null,
         approvedBy: null,
         createdAt: 1,
@@ -2214,7 +2214,7 @@ case "$1" in
   ip) printf '%s\n' '127.0.0.1' ;;
   whois)
     if [ "$(cat '${identityMode}')" = allowed ]; then
-      printf '%s\n' '{"Node":{"StableID":"node-phone"},"UserProfile":{"LoginName":"andrey@example.com"}}'
+      printf '%s\n' '{"Node":{"StableID":"node-phone"},"UserProfile":{"LoginName":"owner@example.com"}}'
     else
       printf '%s\n' '{"Node":{"StableID":"node-phone"},"UserProfile":{"LoginName":"mallory@example.com"}}'
     fi ;;
@@ -3033,7 +3033,7 @@ esac
       `#!/bin/sh
 case "$1" in
   ip) printf '%s\n' '127.0.0.1' ;;
-  whois) printf '%s\n' '{"Node":{"StableID":"node-ser8"},"UserProfile":{"LoginName":"andrey@example.com"}}' ;;
+  whois) printf '%s\n' '{"Node":{"StableID":"node-ser8"},"UserProfile":{"LoginName":"owner@example.com"}}' ;;
   status) printf '%s\n' '{"Peer":{},"Self":{"HostName":"ALPHA","ID":"node-alpha","Online":true,"TailscaleIPs":["127.0.0.1"]}}' ;;
 esac
 `,
@@ -3054,7 +3054,7 @@ esac
             Array.from({
               length: pendingApprovalPageMaxRecords + 2
             }, (_, index): JobRecord => ({
-              actor: "andrey@example.com",
+              actor: "owner@example.com",
               approvalNonce: `nonce-${index}`,
               approvedBy: null,
               createdAt: index + 1,
@@ -3199,7 +3199,7 @@ esac
       `#!/bin/sh
 case "$1" in
   ip) printf '%s\n' '127.0.0.1' ;;
-  whois) printf '%s\n' '{"Node":{"StableID":"node-alpha"},"UserProfile":{"LoginName":"andrey@example.com"}}' ;;
+  whois) printf '%s\n' '{"Node":{"StableID":"node-alpha"},"UserProfile":{"LoginName":"owner@example.com"}}' ;;
   status) printf '%s\n' '{"Peer":{"ser8":{"HostName":"SER8","ID":"node-ser8","Online":true,"TailscaleIPs":["127.0.0.2"]}},"Self":{"HostName":"ALPHA","ID":"node-alpha","Online":true,"TailscaleIPs":["127.0.0.1"]}}' ;;
 esac
 `,
@@ -3210,7 +3210,7 @@ esac
       `#!/bin/sh
 case "$1" in
   ip) printf '%s\n' '127.0.0.2' ;;
-  whois) printf '%s\n' '{"Node":{"StableID":"node-alpha"},"UserProfile":{"LoginName":"andrey@example.com"}}' ;;
+  whois) printf '%s\n' '{"Node":{"StableID":"node-alpha"},"UserProfile":{"LoginName":"owner@example.com"}}' ;;
   status) printf '%s\n' '{"Peer":{},"Self":{"HostName":"SER8","ID":"node-ser8","Online":true,"TailscaleIPs":["127.0.0.2"]}}' ;;
 esac
 `,
@@ -3328,7 +3328,7 @@ esac
               }
               const requestHeaders = {
                 host: `alpha.example.test:${approvalPort}`,
-                "tailscale-user-login": "andrey@example.com"
+                "tailscale-user-login": "owner@example.com"
               }
               const dashboardResponse = yield* Effect.promise(() =>
                 secureRequestBody(`${mainServer.serveUrl}/v1/dashboard`, requestHeaders)
@@ -3388,7 +3388,7 @@ esac
       `#!/bin/sh
 case "$1" in
   ip) printf '%s\n' '127.0.0.1' ;;
-  whois) printf '%s\n' '{"Node":{"StableID":"node-alpha"},"UserProfile":{"LoginName":"andrey@example.com"}}' ;;
+  whois) printf '%s\n' '{"Node":{"StableID":"node-alpha"},"UserProfile":{"LoginName":"owner@example.com"}}' ;;
   status) printf '%s\n' '{"Peer":{"ser8":{"HostName":"SER8","ID":"node-ser8","Online":true,"TailscaleIPs":["127.0.0.2"]}},"Self":{"HostName":"ALPHA","ID":"node-alpha","Online":true,"TailscaleIPs":["127.0.0.1"]}}' ;;
 esac
 `,
@@ -3409,7 +3409,7 @@ esac
                   {
                     id: "legacy-peer-job",
                     createdAt: 1,
-                    actor: "andrey@example.com",
+                    actor: "owner@example.com",
                     approvalExpiresAt: 10_000,
                     status: "pending_approval",
                     payload: {
@@ -3469,7 +3469,7 @@ esac
             }
             const requestHeaders = {
               host: `alpha.example.test:${approvalPort}`,
-              "tailscale-user-login": "andrey@example.com"
+              "tailscale-user-login": "owner@example.com"
             }
             const dashboardResponse = yield* Effect.promise(() =>
               secureRequestBody(`${server.serveUrl}/v1/dashboard`, requestHeaders)
@@ -3529,7 +3529,7 @@ esac
         Effect.gen(function*() {
           yield* Effect.forEach(
             Array.from({ length: 8 }, (_, index): JobRecord => ({
-              actor: "andrey@example.com",
+              actor: "owner@example.com",
               approvalNonce: null,
               approvedBy: null,
               createdAt: index + 1,
@@ -3611,7 +3611,7 @@ esac
       `#!/bin/sh
 case "$1" in
   ip) printf '%s\n' '127.0.0.1' ;;
-  whois) printf '%s\n' '{"Node":{"StableID":"node-ser8"},"UserProfile":{"LoginName":"andrey@example.com"}}' ;;
+  whois) printf '%s\n' '{"Node":{"StableID":"node-ser8"},"UserProfile":{"LoginName":"owner@example.com"}}' ;;
   status) printf '%s\n' '{"Peer":{"hub":{"HostName":"SER8","ID":"node-ser8","Online":true,"TailscaleIPs":["127.0.0.2"]},"worker":{"HostName":"PI","ID":"node-pi","Online":true,"TailscaleIPs":["127.0.0.3"]}},"Self":{"HostName":"ALPHA","ID":"node-alpha","Online":true,"TailscaleIPs":["127.0.0.1"]}}' ;;
 esac
 `,
@@ -3681,16 +3681,16 @@ esac
     Effect.gen(function*() {
       const forged = yield* Effect.result(
         authorize(
-          { login: "andrey@example.com", remoteAddress: "127.0.0.1" },
-          ["andrey@example.com"],
+          { login: "owner@example.com", remoteAddress: "127.0.0.1" },
+          ["owner@example.com"],
           false
         )
       )
       expect(Result.isFailure(forged)).toBe(true)
       const socketless = yield* Effect.result(
         authorize(
-          { login: "andrey@example.com", remoteAddress: undefined },
-          ["andrey@example.com"],
+          { login: "owner@example.com", remoteAddress: undefined },
+          ["owner@example.com"],
           false
         )
       )
@@ -3705,7 +3705,7 @@ esac
       `#!/bin/sh
 case "$1" in
   ip) printf '%s\n' '127.0.0.1' ;;
-  whois) printf '%s\n' '{"Node":{"StableID":"node-phone"},"UserProfile":{"LoginName":"andrey@example.com"}}' ;;
+  whois) printf '%s\n' '{"Node":{"StableID":"node-phone"},"UserProfile":{"LoginName":"owner@example.com"}}' ;;
   status) printf '%s\n' '{"Peer":{},"Self":{"HostName":"SER8","ID":"node-ser8","Online":true,"TailscaleIPs":["127.0.0.1"]}}' ;;
 esac
 `,
@@ -3801,7 +3801,7 @@ esac
                     mode: "ask"
                   }
                   const record: JobRecord = {
-                    actor: "andrey@example.com",
+                    actor: "owner@example.com",
                     approvalNonce: null,
                     approvedBy: null,
                     createdAt: index,
@@ -4036,7 +4036,7 @@ esac
       `#!/bin/sh
 case "$1" in
   ip) printf '%s\n' '127.0.0.1' ;;
-  whois) printf '%s\n' '{"Node":{"StableID":"node-ser8"},"UserProfile":{"LoginName":"andrey@example.com"}}' ;;
+  whois) printf '%s\n' '{"Node":{"StableID":"node-ser8"},"UserProfile":{"LoginName":"owner@example.com"}}' ;;
   status) printf '%s\n' '{"Peer":{},"Self":{"HostName":"ALPHA","ID":"node-alpha","Online":true,"TailscaleIPs":["127.0.0.1"]}}' ;;
 esac
 `,
@@ -4134,7 +4134,7 @@ esac
       `#!/bin/sh
 case "$1" in
   ip) printf '%s\n' '127.0.0.1' ;;
-  whois) printf '%s\n' '{"Node":{"StableID":"node-ser8"},"UserProfile":{"LoginName":"andrey@example.com"}}' ;;
+  whois) printf '%s\n' '{"Node":{"StableID":"node-ser8"},"UserProfile":{"LoginName":"owner@example.com"}}' ;;
   status) printf '%s\n' '{"Peer":{},"Self":{"HostName":"ALPHA","ID":"node-alpha","Online":true,"TailscaleIPs":["127.0.0.1"]}}' ;;
 esac
 `,
@@ -4356,7 +4356,7 @@ esac
       `#!/bin/sh
 case "$1" in
   ip) printf '%s\n' '127.0.0.1' ;;
-  whois) printf '%s\n' '{"Node":{"StableID":"node-alpha"},"UserProfile":{"LoginName":"andrey@example.com"}}' ;;
+  whois) printf '%s\n' '{"Node":{"StableID":"node-alpha"},"UserProfile":{"LoginName":"owner@example.com"}}' ;;
 esac
 `,
       { mode: 0o700 }
@@ -4483,7 +4483,7 @@ esac
       `#!/bin/sh
 case "$1" in
   ip) printf '%s\n' '127.0.0.1' ;;
-  whois) printf '%s\n' '{"Node":{"StableID":"node-ser8"},"UserProfile":{"LoginName":"andrey@example.com"}}' ;;
+  whois) printf '%s\n' '{"Node":{"StableID":"node-ser8"},"UserProfile":{"LoginName":"owner@example.com"}}' ;;
   status) printf '%s\n' '{"Peer":{},"Self":{"HostName":"ALPHA","ID":"node-alpha","Online":true,"TailscaleIPs":["127.0.0.1"]}}' ;;
 esac
 `,
@@ -4746,7 +4746,7 @@ case "$1" in
   whois)
     : > '${authorizationStarted}'
     while [ ! -e '${releaseAuthorization}' ]; do sleep 0.01; done
-    printf '%s\n' '{"Node":{"StableID":"node-ser8"},"UserProfile":{"LoginName":"andrey@example.com"}}'
+    printf '%s\n' '{"Node":{"StableID":"node-ser8"},"UserProfile":{"LoginName":"owner@example.com"}}'
     ;;
   status) printf '%s\n' '{"Peer":{},"Self":{"HostName":"ALPHA","ID":"node-alpha","Online":true,"TailscaleIPs":["127.0.0.1"]}}' ;;
 esac
@@ -4832,7 +4832,7 @@ esac
       `#!/bin/sh
 case "$1" in
   ip) printf '%s\n' '127.0.0.1' ;;
-  whois) printf '%s\n' '{"Node":{"StableID":"node-ser8"},"UserProfile":{"LoginName":"andrey@example.com"}}' ;;
+  whois) printf '%s\n' '{"Node":{"StableID":"node-ser8"},"UserProfile":{"LoginName":"owner@example.com"}}' ;;
   status) printf '%s\n' '{"Peer":{},"Self":{"HostName":"ALPHA","ID":"node-alpha","Online":true,"TailscaleIPs":["127.0.0.1"]}}' ;;
 esac
 `,
@@ -5039,7 +5039,7 @@ case "$1" in
   ip) printf '%s\\n' '127.0.0.1' ;;
   whois)
     if [ "$(cat '${identityMode}')" = allowed ]; then
-      printf '%s\\n' '{"Node":{"StableID":"node-phone"},"UserProfile":{"LoginName":"andrey@example.com"}}'
+      printf '%s\\n' '{"Node":{"StableID":"node-phone"},"UserProfile":{"LoginName":"owner@example.com"}}'
     else
       printf '%s\\n' '{"Node":{"StableID":"node-phone"},"UserProfile":{"LoginName":"mallory@example.com"}}'
     fi ;;

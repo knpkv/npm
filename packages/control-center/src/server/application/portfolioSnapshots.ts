@@ -12,8 +12,8 @@ import type {
   PortfolioSnapshot
 } from "../../api/portfolio.js"
 import { derivePersonInitials, type Role } from "../../domain/actors.js"
-import { evaluateFreshnessAt } from "../../domain/freshness.js"
-import type { ReleaseId } from "../../domain/identifiers.js"
+import { evaluateReleaseFreshnessAt, failureStreakStartedAt, type ReleaseSourceHealth } from "../../domain/freshness.js"
+import type { PluginConnectionId, ReleaseId } from "../../domain/identifiers.js"
 import type { Release } from "../../domain/release.js"
 import { ApplicationServiceUnavailable, PortfolioSnapshots } from "../api/ApplicationServices.js"
 import { Persistence, type PersistenceService } from "../persistence/Persistence.js"
@@ -39,6 +39,14 @@ const isPortfolioReleaseRole = (role: Role): role is PortfolioReleaseRole =>
 const roleOrder = (role: PortfolioReleaseRole): number => role === "release-owner" ? 0 : 1
 
 const compareText = (left: string, right: string): number => left < right ? -1 : left > right ? 1 : 0
+
+/** Include every retained revision source and the release's primary provenance. */
+const releaseSourceConnectionIds = (release: Release): ReadonlyArray<PluginConnectionId> => {
+  const primary = release.freshness.provenance._tag === "none"
+    ? release.freshness.provenance.pluginConnectionId
+    : release.freshness.provenance.sourceRevision.pluginConnectionId
+  return Array.from(new Set([primary, ...release.sourceRevisions.map(({ pluginConnectionId }) => pluginConnectionId)]))
+}
 
 const releaseCollaborators = Effect.fn("PortfolioSnapshots.releaseCollaborators")(function*(
   persistence: PersistenceService,
@@ -216,6 +224,41 @@ export const makePortfolioSnapshots = Effect.gen(function*() {
           Effect.provideService(Crypto.Crypto, cryptoService),
           Effect.mapError(() => unavailable())
         )
+        const sourceConnectionIds = new Set(releases.flatMap(({ release }) => releaseSourceConnectionIds(release)))
+        const sourceHealths = yield* Effect.forEach(
+          plugins.filter((plugin) => sourceConnectionIds.has(plugin.pluginConnectionId)),
+          (plugin) =>
+            Effect.gen(function*() {
+              const health = plugin.health
+              if (health === null) return null
+              const unavailableSince = health._tag === "degraded" || health._tag === "unavailable"
+                ? failureStreakStartedAt(
+                  yield* persistence.events.readPluginHealthHistory(
+                    workspaceId,
+                    plugin.pluginConnectionId,
+                    128
+                  )
+                )
+                : null
+              return {
+                pluginConnectionId: plugin.pluginConnectionId,
+                health,
+                unavailableSince
+              } satisfies ReleaseSourceHealth
+            })
+        )
+        const healthByConnectionId = new Map(
+          sourceHealths.flatMap((source) =>
+            source === null
+              ? []
+              : [
+                [source.pluginConnectionId, source] satisfies readonly [
+                  typeof source.pluginConnectionId,
+                  ReleaseSourceHealth
+                ]
+              ]
+          )
+        )
         const currentReadiness = yield* persistence.readiness.readCurrentReleases({
           workspaceId,
           releaseIds: releases.map(({ release }) => release.id)
@@ -234,9 +277,14 @@ export const makePortfolioSnapshots = Effect.gen(function*() {
           Effect.gen(function*() {
             const collaboratorProjection = yield* releaseCollaborators(persistence, release)
             const relationships = yield* releaseRelationships(persistence, release)
-            const freshness = yield* evaluateFreshnessAt(release.freshness, generatedAt).pipe(
-              Effect.mapError(() => unavailable())
-            )
+            const releaseSourceHealths = releaseSourceConnectionIds(release).flatMap((connectionId) => {
+              const health = healthByConnectionId.get(connectionId)
+              return health === undefined ? [] : [health]
+            })
+            const freshness = yield* evaluateReleaseFreshnessAt(release.freshness, generatedAt, releaseSourceHealths)
+              .pipe(
+                Effect.mapError(() => unavailable())
+              )
             const pageAwareness = pageAwarenessByReleaseId.get(release.id) ?? unknownPageAwareness()
             const targetSlice = release.sourceRevisions.some(({ providerId }) => providerId === "jira")
               ? yield* persistence.deliveryGraph.read(workspaceId, {

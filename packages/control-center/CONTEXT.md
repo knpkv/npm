@@ -36,6 +36,14 @@ _Avoid_: Ticket list, sprint board
 A named workspace environment explicitly mapped to an inclusive, ordered range of stages in a followed CodePipeline pipeline. Its stable environment key determines identity; display-name changes preserve it. Added or edited mappings require complete, current pipeline topology. Unchanged stale mappings remain saved, and removing a mapping needs no topology validation. Pipeline topology changes require review. Each range records whether readiness requires a manual approval gate, defaulting to true. A release without a configured delivering pipeline is held with no target environment; synchronization never invents production.
 _Avoid_: Implicit production environment, pipeline name as environment
 
+**Release Freshness**:
+The server's assessment of preserved release facts against their age and the latest health of every source Plugin Connection. Any failed health check immediately makes the source unavailable, with its failure class and retry time. The last successful read remains visible. A healthy sync restores Current while the facts are within their age threshold.
+_Avoid_: Sync status, readiness verdict
+
+**Source Unavailable Since**:
+The first failed health event after the connection's most recent retained healthy event. Repeated failures retain that time. Bounded, legacy or pruned event history without that healthy checkpoint shows Last checked instead, even when all remaining events fit in the read bound.
+_Avoid_: Last read, source update time
+
 **Local Operator**:
 The single person running and using the local Control Center instance. Connected-service collaborators remain visible as Jira, CodeCommit, or Confluence identities but are not Control Center users. Actor identifiers are retained for audit and future evolution, not real-time multi-user collaboration.
 _Avoid_: Workspace member, tenant user, collaborator

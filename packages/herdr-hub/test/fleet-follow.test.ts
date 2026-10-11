@@ -24,6 +24,12 @@ const record = (status: JobRecord["status"]): JobRecord => ({
 })
 
 describe("fleet follow polling", () => {
+  it.effect("returns a failed job with its operation error intact", () =>
+    Effect.gen(function*() {
+      const failed = { ...record("failed"), error: "CoordinatorWorkGoalUnavailable: no Work goal" }
+      expect(yield* followJob(Effect.succeed(failed))).toEqual(failed)
+    }))
+
   it.effect("stops after observing an interrupted job", () =>
     Effect.gen(function*() {
       let requests = 0

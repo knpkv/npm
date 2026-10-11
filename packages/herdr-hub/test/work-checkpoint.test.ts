@@ -45,7 +45,7 @@ const snapshot: WorkSnapshots = {
 }
 
 const config: HostConfiguration = {
-  allowedUsers: ["andrey@example.com"],
+  allowedUsers: ["owner@example.com"],
   applyCommand: null,
   applyMachines: ["SER8"],
   approvalHub: { host: "SER8", nodeId: "node-ser8", url: "https://ser8.example.test:4779/" },
@@ -64,7 +64,7 @@ const config: HostConfiguration = {
   ],
   port: 4_778,
   pushAllowedOrigins: ["https://push.example.test"],
-  pushSubject: "mailto:andrey@example.com",
+  pushSubject: "mailto:owner@example.com",
   repository: "/repo",
   approvalTls: null,
   stateDirectory: "/state",

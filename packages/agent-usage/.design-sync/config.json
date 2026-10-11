@@ -1,0 +1,45 @@
+{
+  "projectId": "9230c0c2-68df-4c2f-bd49-93db45a409f2",
+  "pkg": "@knpkv/agent-usage-design-system",
+  "globalName": "AgentUsage",
+  "shape": "package",
+  "entry": "./.design-sync/app/index.js",
+  "buildCmd": "pnpm --filter \"@knpkv/agent-usage...\" build",
+  "extraEntries": ["../../.design-sync/entries/styles.mjs"],
+  "extraFonts": ["../entries/geist-aliases.css"],
+  "provider": {
+    "component": "ThemeProvider",
+    "props": {
+      "theme": "light"
+    },
+    "inner": {
+      "component": "PortalProvider"
+    }
+  },
+  "componentSrcMap": {
+    "ThemeProvider": null,
+    "PortalProvider": null,
+    "BookingTable": "../../src/ui/BookingTable.tsx",
+    "StatusStrip": "../../src/ui/StatusStrip.tsx",
+    "LiveIndicator": "../../src/ui/LiveIndicator.tsx",
+    "UsageChart": "../../src/usage/UsageChart.tsx",
+    "LimitsSummary": "../../src/limits/LimitsSummary.tsx",
+    "LimitChart": "../../src/usage/LimitChart.tsx",
+    "TokenUsageChart": "../../src/usage/TokenUsageChart.tsx",
+    "Agent": null,
+    "Balance": null,
+    "BalanceReading": null,
+    "LimitReading": null,
+    "LimitSeries": null,
+    "LimitSnapshot": null,
+    "LimitsNow": null,
+    "TokenCell": null,
+    "UnknownReason": null,
+    "UsageNow": null,
+    "UsagePreset": null
+  },
+  "libOverrides": {
+    "dts.mjs": "components are re-exported through an aggregator entry; their own callback/aria props were dropped as inherited DOM noise"
+  },
+  "readmeHeader": ".design-sync/conventions.md"
+}

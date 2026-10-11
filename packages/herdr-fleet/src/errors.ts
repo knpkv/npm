@@ -63,6 +63,8 @@ export class FleetOperationError extends Schema.TaggedError<FleetOperationError>
   {
     operation: Schema.String,
     detail: Schema.String,
+    /** Only the operation may assert that it definitively committed nothing. */
+    disposition: Schema.optionalKey(Schema.Literal("rejected")),
     cause: Schema.Defect()
   }
 ) {}

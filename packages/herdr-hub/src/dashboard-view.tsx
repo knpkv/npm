@@ -1,3 +1,4 @@
+import type { PendingTargetCheck } from "./internal/use-dashboard-pending-target.js"
 import { Button, StateLabel, Surface, Text } from "@knpkv/rly/primitives"
 import { FreshnessStamp, RelayMark } from "@knpkv/rly/patterns"
 import type { FormEvent, KeyboardEvent, ReactElement, ReactNode } from "react"
@@ -6,7 +7,7 @@ import { connectWorkerHref, NotificationPanel, type NotificationState } from "./
 import { requiresApproval } from "@knpkv/herdr-fleet/model"
 import { ActivityHistory, jobTitle, statusIcon, statusLabel, statusTone } from "./activity-history.js"
 import { ApprovalRequestDisclosure } from "./approval-request-view.js"
-import type { SanitizedJobRecord } from "./approval-request.js"
+import { approvalRequestFor, type SanitizedJobRecord } from "./approval-request.js"
 import { type ApprovalDecision, approvalShortcutFor } from "./approval-decision.js"
 import { ApprovalsCountdown, type DecisionStatus } from "./countdown-view.js"
 import { AgentStateLabel } from "@knpkv/herdr-connect/surface"
@@ -22,6 +23,9 @@ export type DashboardViewProps = {
   readonly sendingDecision?: ApprovalDecision | null
   readonly notificationState: NotificationState
   readonly historyLoading?: boolean
+  readonly refreshFailed?: boolean
+  /** Read state of a deep-linked request outside the refreshed first page. */
+  readonly pendingTargetCheck?: PendingTargetCheck | null
   readonly pendingLoading?: boolean
   readonly onDecision: ((decision: ApprovalDecision) => void) | undefined
   readonly onDisableNotifications: (() => void) | undefined
@@ -197,6 +201,11 @@ const AgendaItem = ({
           <Text as="p" tone="secondary">
             {jobSummary(record)}
           </Text>
+          {record.payload.kind === "agent.delegate" && record.payload.newWork !== undefined && (
+            <Text as="p" tone="secondary">
+              New Work goal: {approvalRequestFor(record.payload).fields.find((item) => item.key === "newWork")?.value}
+            </Text>
+          )}
         </div>
         <StateLabel
           {...statusIcon(record.status)}
@@ -258,6 +267,11 @@ const RemoteAgendaItem = ({
         <Text as="p" tone="secondary">
           {jobSummary(approval)}
         </Text>
+        {approval.payload.kind === "agent.delegate" && approval.payload.newWork !== undefined && (
+          <Text as="p" tone="secondary">
+            New Work goal: {approvalRequestFor(approval.payload).fields.find((item) => item.key === "newWork")?.value}
+          </Text>
+        )}
       </div>
       <StateLabel label="Waiting" tone="caution" size="compact" />
     </div>
@@ -441,7 +455,9 @@ export const DashboardView = ({
   onLoadPending,
   onRefresh,
   pendingLoading = false,
+  pendingTargetCheck = null,
   pull,
+  refreshFailed = false,
   sendingDecision = null,
   showHeader = true,
   snapshot
@@ -549,6 +565,8 @@ export const DashboardView = ({
             onLoadPending={onLoadPending}
             onRevalidate={onRefresh}
             pendingLoading={pendingLoading}
+            refreshFailed={refreshFailed}
+            pendingTargetCheck={pendingTargetCheck}
             sending={sendingDecision}
             snapshot={snapshot}
           />

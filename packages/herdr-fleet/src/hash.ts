@@ -22,7 +22,11 @@ export const canonicalJobPayload = (payload: JobPayload): string => {
         text(
           payload.kind
         )
-      },"mode":${text(payload.mode)},"prompt":${text(payload.prompt)},"repository":${text(payload.repository)}}`
+      },"mode":${text(payload.mode)}${
+        payload.newWork === undefined
+          ? ""
+          : `,"newWork":${JSON.stringify({ branch: payload.newWork.branch, title: payload.newWork.title })}`
+      },"prompt":${text(payload.prompt)},"repository":${text(payload.repository)}}`
     case "agent.message":
       return `{"kind":${text(payload.kind)},"message":${text(payload.message)},"session":${text(payload.session)}}`
     case "work.reconcile":

@@ -9,8 +9,10 @@ import { join } from "node:path"
 import { DatabaseSync } from "node:sqlite"
 import {
   agentConnectTarget,
+  AgentDelegate,
   AgentWorkerIdentity,
   BrowserMcpRecover,
+  canonicalJobPayload,
   decodeBoundedResponseJson,
   FleetOperationError,
   fleetResponseBodyMaxBytes,
@@ -91,6 +93,189 @@ const seedJobRecords = (path: string, records: ReadonlyArray<JobRecord>): void =
 }
 
 describe("fleet local authority", () => {
+  for (const stage of ["run", "resume"]) {
+    for (const withWorker of [false, true]) {
+      it.effect(`settles rejected durable ${stage} failures, worker=${withWorker}`, () => {
+        const root = mkdtempSync(join(tmpdir(), "herdr-rejected-operation-test-"))
+        const rejected = new FleetOperationError({
+          cause: { _tag: "CoordinatorWorkGoalUnavailable" },
+          detail: "no Work goal for this repository",
+          disposition: "rejected",
+          operation: "test.delegate"
+        })
+        return Effect.acquireUseRelease(
+          JobStore.open(join(root, "jobs.sqlite")),
+          (store) =>
+            Effect.gen(function*() {
+              const first = yield* makeFleetService({
+                approvalEnabled: true,
+                host: "SER8",
+                id: Effect.succeed("job-rejected"),
+                nonce: Effect.succeed("rejected-approval"),
+                now: Effect.succeed(1_000),
+                operations: {
+                  ...operations,
+                  recovery: { matches: () => true, resume: () => Effect.void },
+                  run: (_payload, workerStarted) =>
+                    Effect.gen(function*() {
+                      if (withWorker) yield* workerStarted(remoteWorker)
+                      return yield* stage === "run" ? rejected : new FleetOperationError({
+                        cause: { _tag: "CoordinatorWorkGoalUnavailable" },
+                        detail: "submission outcome unknown",
+                        operation: "test.uncertain"
+                      })
+                    })
+                },
+                store
+              })
+              const queued = yield* first.submit({
+                payload: {
+                  kind: "agent.delegate",
+                  mode: "work",
+                  prompt: "ship",
+                  repository: "/repo"
+                }
+              }, "owner")
+              yield* first.approve(queued.id, { hash: queued.hash, nonce: "rejected-approval" }, "owner")
+              const result = yield* Effect.result(first.run(queued.id))
+              if (stage === "run") {
+                expect(result).toMatchObject({ success: { status: "failed" } })
+              } else {
+                expect(result).toMatchObject({ failure: { operation: "test.uncertain" } })
+                expect(yield* first.get(queued.id)).toMatchObject({ status: "running", error: null })
+                const recovered = yield* makeFleetService({
+                  approvalEnabled: false,
+                  host: "SER8",
+                  now: Effect.succeed(2_000),
+                  operations: {
+                    ...operations,
+                    recovery: { matches: () => true, resume: () => rejected }
+                  },
+                  store
+                })
+                expect(yield* recovered.recover()).toEqual([])
+              }
+              const failed = yield* first.get(queued.id)
+              expect(failed).toMatchObject({
+                acceptedReceipt: null,
+                durableOperation: true,
+                error: "CoordinatorWorkGoalUnavailable: no Work goal for this repository",
+                result: null,
+                status: "failed"
+              })
+              expect(failed.workerTerminalObservedAt).toBe(withWorker ? stage === "run" ? 1_000 : 2_000 : undefined)
+            }),
+          (store) =>
+            Effect.sync(() => {
+              store.close()
+              rmSync(root, { force: true, recursive: true })
+            })
+        ).pipe(provideNodeServices)
+      })
+    }
+  }
+
+  for (const acceptance of ["none", "run", "resume"]) {
+    it.effect(`preserves uncertain recovery and accepted receipts, acceptance=${acceptance}`, () => {
+      const root = mkdtempSync(join(tmpdir(), "herdr-recovery-disposition-test-"))
+      return Effect.acquireUseRelease(
+        JobStore.open(join(root, "jobs.sqlite")),
+        (store) =>
+          Effect.gen(function*() {
+            const errorFields = {
+              cause: "transport lost",
+              detail: "submission outcome unknown",
+              operation: "test.resume"
+            }
+            const failure = acceptance === "none"
+              ? new FleetOperationError(errorFields)
+              : new FleetOperationError({ ...errorFields, disposition: "rejected" })
+            const service = yield* makeFleetService({
+              approvalEnabled: false,
+              host: "SER8",
+              id: Effect.succeed("job-accepted-disposition"),
+              now: Effect.succeed(1_000),
+              operations: {
+                ...operations,
+                run: (_payload, _workerStarted, _jobId, _actor, lifecycle) =>
+                  Effect.gen(function*() {
+                    if (acceptance === "run") {
+                      yield* lifecycle.accepted("receipt")
+                      return yield* failure
+                    }
+                    return yield* new FleetOperationError({
+                      cause: "transport lost",
+                      detail: "uncertain",
+                      operation: "test.run"
+                    })
+                  }),
+                recovery: {
+                  matches: () => true,
+                  resume: (_payload, _workerStarted, _jobId, _actor, _receipt, lifecycle) =>
+                    Effect.gen(function*() {
+                      if (acceptance === "resume") yield* lifecycle.accepted("receipt")
+                      return yield* failure
+                    })
+                }
+              },
+              store
+            })
+            const queued = yield* service.submit({ payload: { kind: "nix.check" } }, "owner")
+            yield* Effect.result(service.run(queued.id))
+            expect(yield* Effect.result(service.recover())).toMatchObject({ failure: { operation: "test.resume" } })
+            expect(yield* service.get(queued.id)).toMatchObject({
+              status: "running",
+              acceptedReceipt: acceptance === "none" ? null : "receipt"
+            })
+          }),
+        (store) =>
+          Effect.sync(() => {
+            store.close()
+            rmSync(root, { force: true, recursive: true })
+          })
+      ).pipe(provideNodeServices)
+    })
+  }
+
+  it.effect("bounds rejected failure details and retains the error tag when no cause tag exists", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-rejected-detail-test-"))
+    return Effect.acquireUseRelease(
+      JobStore.open(join(root, "jobs.sqlite")),
+      (store) =>
+        Effect.gen(function*() {
+          const detail = "🦊".repeat(hostOperationTerminalDetailMaxLength)
+          const service = yield* makeFleetService({
+            approvalEnabled: false,
+            host: "SER8",
+            id: Effect.succeed("job-long-rejection"),
+            operations: {
+              ...operations,
+              recovery: { matches: () => true, resume: () => Effect.void },
+              run: () =>
+                new FleetOperationError({
+                  cause: "unavailable",
+                  detail,
+                  disposition: "rejected",
+                  operation: "test.rejected"
+                })
+            },
+            store
+          })
+          const queued = yield* service.submit({ payload: { kind: "nix.check" } }, "owner")
+          const failed = yield* service.run(queued.id)
+          expect(failed.error).toBe(summarizeHostOperationTerminalDetail(`FleetOperationError: ${detail}`))
+          expect(new TextEncoder().encode(failed.error ?? "").byteLength).toBeLessThanOrEqual(
+            hostOperationTerminalDetailMaxLength
+          )
+        }),
+      (store) =>
+        Effect.sync(() => {
+          store.close()
+          rmSync(root, { force: true, recursive: true })
+        })
+    ).pipe(provideNodeServices)
+  })
+
   it.effect("passes the accepted job identity to host operations", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-accepted-job-test-"))
     let accepted: { readonly actor: string; readonly jobId: string } | null = null
@@ -113,9 +298,9 @@ describe("fleet local authority", () => {
             },
             store
           })
-          const job = yield* service.submit({ payload: { kind: "nix.check" } }, "andrey")
+          const job = yield* service.submit({ payload: { kind: "nix.check" } }, "owner")
           yield* service.run(job.id)
-          expect(accepted).toEqual({ actor: "andrey", jobId: "job-accepted" })
+          expect(accepted).toEqual({ actor: "owner", jobId: "job-accepted" })
         }),
       (store) =>
         Effect.sync(() => {
@@ -143,7 +328,7 @@ describe("fleet local authority", () => {
             },
             store
           })
-          const queued = yield* service.submit({ payload: { kind: "nix.check" } }, "andrey")
+          const queued = yield* service.submit({ payload: { kind: "nix.check" } }, "owner")
           expect(yield* Effect.result(service.run(queued.id))).toMatchObject({
             failure: {
               _tag: "FleetOperationError",
@@ -197,7 +382,7 @@ describe("fleet local authority", () => {
         },
         store: firstStore
       })
-      const queued = yield* first.submit({ payload: { kind: "nix.check" } }, "andrey")
+      const queued = yield* first.submit({ payload: { kind: "nix.check" } }, "owner")
       expect(yield* Effect.result(first.run(queued.id))).toMatchObject({
         failure: { operation: "test.pre_acceptance_failure" }
       })
@@ -290,7 +475,7 @@ describe("fleet local authority", () => {
           prompt: "resume durable work",
           repository: "/repo"
         }
-      }, "andrey")
+      }, "owner")
       expect(yield* first.run(queued.id)).toMatchObject({
         acceptedReceipt: "durable-receipt",
         result: "durable-receipt",
@@ -387,7 +572,7 @@ describe("fleet local authority", () => {
         },
         store: firstStore
       })
-      const queued = yield* first.submit({ payload: { kind: "nix.check" } }, "andrey")
+      const queued = yield* first.submit({ payload: { kind: "nix.check" } }, "owner")
       const failedRun = yield* Effect.result(first.run(queued.id))
       expect(failedRun).toMatchObject({
         failure: { _tag: "FleetOperationError", operation: "test.attach_observer" }
@@ -462,7 +647,7 @@ describe("fleet local authority", () => {
         },
         store: firstStore
       })
-      const queued = yield* first.submit({ payload: { kind: "nix.check" } }, "andrey")
+      const queued = yield* first.submit({ payload: { kind: "nix.check" } }, "owner")
       expect(yield* Effect.result(first.run(queued.id))).toMatchObject({
         failure: { _tag: "FleetOperationError", operation: "fleet.operation_accepted" }
       })
@@ -521,7 +706,7 @@ describe("fleet local authority", () => {
         id: "job-pending-receipt",
         createdAt: 1_000,
         updatedAt: 1_000,
-        actor: "andrey",
+        actor: "owner",
         hash: Schema.decodeUnknownSync(JobHash)("a".repeat(64)),
         approvalNonce: null,
         approvalExpiresAt: null,
@@ -608,7 +793,7 @@ describe("fleet local authority", () => {
             },
             store
           })
-          const queued = yield* service.submit({ payload: { kind: "nix.check" } }, "andrey")
+          const queued = yield* service.submit({ payload: { kind: "nix.check" } }, "owner")
           expect(yield* service.run(queued.id)).toMatchObject({
             acceptedReceipt: "coordinator-request-max",
             result: summary,
@@ -634,7 +819,7 @@ describe("fleet local authority", () => {
 
   it("rejects duplicate and unknown apply targets at config decoding", () => {
     const valid = {
-      allowedUsers: ["andrey@example.com"],
+      allowedUsers: ["owner@example.com"],
       applyCommand: null,
       browserMcpRecoverCommand: null,
       applyMachines: ["SER8", "PI"],
@@ -657,7 +842,7 @@ describe("fleet local authority", () => {
       ],
       port: 4_778,
       pushAllowedOrigins: ["https://push.example.test"],
-      pushSubject: "mailto:andrey@example.com",
+      pushSubject: "mailto:owner@example.com",
       repository: "/repo",
       approvalTls: null,
       stateDirectory: "/state",
@@ -949,6 +1134,81 @@ describe("fleet local authority", () => {
       })
     )).toBe(true)
   })
+
+  it("validates new Work goal branch and title at the delegate boundary", () => {
+    const payload = { kind: "agent.delegate", mode: "work", prompt: "ship", repository: "/repo" }
+    type NewWorkTestInput = { readonly branch?: string; readonly title?: string } | null
+    const decode = (newWork: NewWorkTestInput) => Schema.decodeUnknownResult(JobPayload)({ ...payload, newWork })
+    expect(Result.isSuccess(decode({ branch: "fix/new-work", title: "Create a goal" }))).toBe(true)
+    expect(Result.isSuccess(decode({ branch: "b".repeat(256), title: "t".repeat(4_096) }))).toBe(true)
+    for (
+      const branch of [
+        "",
+        "HEAD",
+        "@",
+        "-flag",
+        "/leading",
+        "trailing/",
+        "trailing.",
+        "a//b",
+        "a..b",
+        ".hidden",
+        "a/.hidden",
+        "a.lock",
+        "a/b.lock",
+        "a@{b",
+        "a b",
+        "a\nb",
+        "b".repeat(257)
+      ]
+    ) {
+      expect(Result.isFailure(decode({ branch, title: "Create a goal" }))).toBe(true)
+    }
+    for (
+      const title of [
+        "",
+        "line\nbreak",
+        "tab\ttext",
+        "control\u0007",
+        "bad\ud800",
+        "line\u2028break",
+        "t".repeat(4_097)
+      ]
+    ) {
+      expect(Result.isFailure(decode({ branch: "fix/new-work", title }))).toBe(true)
+    }
+    expect(Result.isFailure(decode({ branch: "fix/new-work" }))).toBe(true)
+    expect(Result.isFailure(decode(null))).toBe(true)
+  })
+
+  it.effect("binds both new Work goal fields into the approval hash", () =>
+    Effect.gen(function*() {
+      const payload = Schema.decodeUnknownSync(AgentDelegate)({
+        kind: "agent.delegate",
+        mode: "work",
+        prompt: "ship",
+        repository: "/repo"
+      })
+      expect(canonicalJobPayload(payload)).toBe(
+        "{\"channel\":null,\"kind\":\"agent.delegate\",\"mode\":\"work\",\"prompt\":\"ship\",\"repository\":\"/repo\"}"
+      )
+      const hash = yield* jobHash("SER8", "owner", payload)
+      const withGoal = { ...payload, newWork: { branch: "fix/new-work", title: "Create a goal" } }
+      const goalHash = yield* jobHash("SER8", "owner", withGoal)
+      expect(goalHash).not.toBe(hash)
+      for (
+        const newWork of [
+          { branch: "fix/other-work", title: "Create a goal" },
+          { branch: "fix/new-work", title: "Another goal" }
+        ]
+      ) expect(yield* jobHash("SER8", "owner", { ...payload, newWork })).not.toBe(goalHash)
+      expect(
+        yield* jobHash("SER8", "owner", {
+          ...payload,
+          newWork: { title: "Create a goal", branch: "fix/new-work" }
+        })
+      ).toBe(goalHash)
+    }).pipe(provideNodeServices))
 
   it.effect("binds coordinator channel to the approval hash", () =>
     Effect.gen(function*() {
@@ -1626,7 +1886,7 @@ describe("fleet local authority", () => {
       })
       if (baseline.kind !== "work.recover") return
       expect(requiresApproval(baseline)).toBe(true)
-      const original = yield* jobHash("SER8", "andrey", baseline)
+      const original = yield* jobHash("SER8", "owner", baseline)
       const changes = [
         {
           repository: "other/npm",
@@ -1675,14 +1935,14 @@ describe("fleet local authority", () => {
           ...baseline,
           ...change
         })
-        expect(yield* jobHash("SER8", "andrey", changed)).not.toBe(original)
+        expect(yield* jobHash("SER8", "owner", changed)).not.toBe(original)
       }
-      expect(yield* jobHash("OTHER", "andrey", baseline)).not.toBe(original)
+      expect(yield* jobHash("OTHER", "owner", baseline)).not.toBe(original)
       expect(yield* jobHash("SER8", "other-actor", baseline)).not.toBe(original)
       expect(
         yield* jobHash(
           "SER8",
-          "andrey",
+          "owner",
           Schema.decodeUnknownSync(JobPayload)({
             ...baseline,
             owner: { name: baseline.owner.name, id: baseline.owner.id },
@@ -1750,9 +2010,9 @@ describe("fleet local authority", () => {
           const pending = yield* service.submit({ payload }, "coord")
           expect(pending.status).toBe("pending_approval")
           expect((yield* Effect.result(service.run(pending.id)))._tag).toBe("Failure")
-          yield* service.approve(pending.id, { hash: pending.hash, nonce: "nonce-reassign" }, "andrey")
+          yield* service.approve(pending.id, { hash: pending.hash, nonce: "nonce-reassign" }, "owner")
           yield* service.run(pending.id)
-          expect(approvals).toEqual([{ approvedBy: "andrey", approvedAt: 1_000, hash: pending.hash }])
+          expect(approvals).toEqual([{ approvedBy: "owner", approvedAt: 1_000, hash: pending.hash }])
         }),
       (store) =>
         Effect.sync(() => {
@@ -1790,7 +2050,7 @@ describe("fleet local authority", () => {
             expect((yield* service.run(local.id)).status).toBe("succeeded")
           }
           for (const payload of payloads.filter(requiresApproval)) {
-            const remote = yield* service.submit({ payload }, "andrey@example.com", "authenticated_remote")
+            const remote = yield* service.submit({ payload }, "owner@example.com", "authenticated_remote")
             expect(remote).toMatchObject({ approvalNonce: "remote-nonce", status: "pending_approval" })
             const unstated = yield* service.submit({ payload }, "local")
             expect(unstated.status).toBe("pending_approval")
@@ -1845,7 +2105,7 @@ describe("fleet local authority", () => {
     kind: "work.abandon",
     goalId: "fix-iphone-live-ui-polish",
     owner: { id: "owner-host-coordinator", name: "Codex host coordinator" },
-    reason: "abandoned by Andrey 2026-10-06: no PR, no branch, no owner",
+    reason: "abandoned by Owner 2026-10-06: no PR, no branch, no owner",
     expectedGoalEventId: "goal-event-7",
     expectedGoalUpdatedAt: 500
   }

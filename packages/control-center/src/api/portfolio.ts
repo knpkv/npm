@@ -1,7 +1,7 @@
 import { HttpApiEndpoint, HttpApiGroup } from "effect/http-api"
 import * as Schema from "effect/Schema"
 
-import { Freshness } from "../domain/freshness.js"
+import { ReleaseFreshness } from "../domain/freshness.js"
 import {
   EnvironmentId,
   EventCursor,
@@ -104,7 +104,7 @@ export const PortfolioReleaseSummary = Schema.Struct({
   version: ReleaseVersion,
   lifecycle: ReleaseLifecycle,
   relay: ReleaseRelayProjection,
-  freshness: Freshness,
+  freshness: ReleaseFreshness,
   targetEnvironmentIds: Schema.Array(EnvironmentId).check(
     Schema.isUnique(),
     Schema.makeFilter((environments) => environments.length <= MAXIMUM_TARGET_ENVIRONMENTS, {

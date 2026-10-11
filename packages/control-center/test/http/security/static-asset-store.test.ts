@@ -3,6 +3,7 @@ import { assert, describe, it } from "@effect/vitest"
 import { Effect, FileSystem, Option, Path, Result } from "effect"
 
 import { makeStaticAssetStore } from "../../../src/server/http/security/index.js"
+import { makeStaticFixture } from "../../fixtures/staticRoot.js"
 
 const MANIFEST = `{
   "src/client/main.tsx": {
@@ -26,6 +27,39 @@ const makeFixture = Effect.fn("StaticAssetStoreTest.makeFixture")(function*() {
 })
 
 describe("StaticAssetStore", () => {
+  it.layer(NodeServices.layer)((it) => {
+    it.effect("accepts the shared server static fixture in a caller-owned data root", () =>
+      Effect.gen(function*() {
+        const fileSystem = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const dataRoot = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-static-data-" })
+        const root = yield* makeStaticFixture(path.join(dataRoot, "static"))
+        const store = yield* makeStaticAssetStore({ root })
+        assert.strictEqual(store.assetCount, 2)
+        assert.isTrue(Option.isSome(store.resolve("/", "text/html")))
+        const script = store.resolve("/assets/app.js", "*/*")
+        assert.isTrue(Option.isSome(script))
+        if (Option.isSome(script)) {
+          assert.strictEqual(new TextDecoder().decode(script.value.bytes), "export const ready = true")
+        }
+      }).pipe(Effect.scoped))
+
+    it.effect("rejects an index-only root with the missing manifest error", () =>
+      Effect.gen(function*() {
+        const fileSystem = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-static-index-only-" })
+        yield* fileSystem.writeFileString(path.join(root, "index.html"), "<main>Control Center live integration</main>")
+        const result = yield* makeStaticAssetStore({ root }).pipe(Effect.result)
+        assert.isTrue(Result.isFailure(result))
+        if (Result.isFailure(result)) {
+          assert.strictEqual(result.failure._tag, "StaticAssetStoreError")
+          assert.strictEqual(result.failure.reason, "io-failure")
+          assert.strictEqual(result.failure.assetPath, ".vite/manifest.json")
+        }
+      }).pipe(Effect.scoped))
+  })
+
   it.effect("loads a closed immutable asset map and resolves exact and SPA requests", () =>
     Effect.gen(function*() {
       const { fileSystem, path, root } = yield* makeFixture()

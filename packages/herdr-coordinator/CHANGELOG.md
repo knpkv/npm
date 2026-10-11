@@ -1,5 +1,17 @@
 # @knpkv/herdr-coordinator
 
+## 0.4.0
+
+### Minor Changes
+
+- [#788](https://github.com/knpkv/npm/pull/788) [`138d1e6`](https://github.com/knpkv/npm/commit/138d1e6b9aaab4f4e50965a113f87c202c113d1a) Thanks [@konopkov](https://github.com/konopkov)! - Carry the delegate `newWork` goal through linked Sol escalation commands, so an escalated new-work job keeps the goal its approval covered.
+
+### Patch Changes
+
+- Updated dependencies [[`3ba4e78`](https://github.com/knpkv/npm/commit/3ba4e78663b026f101f929ef41294a48b6bafc5a), [`bd86c66`](https://github.com/knpkv/npm/commit/bd86c6696678b8c5469727d646096381406f1179), [`5013de5`](https://github.com/knpkv/npm/commit/5013de5bee7f341bc11d86ef3194eb8a37912777), [`8017b49`](https://github.com/knpkv/npm/commit/8017b490395ea15e3949b946ebe8f5313b5d165b)]:
+  - @knpkv/herdr-fleet@0.10.0
+  - @knpkv/herdr-work@0.11.0
+
 ## 0.3.9
 
 ### Patch Changes

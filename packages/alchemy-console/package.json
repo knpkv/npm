@@ -1,6 +1,6 @@
 {
   "name": "@knpkv/alchemy-console",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Read-only discovery and state readers for local Alchemy stacks",
   "license": "MIT",
   "repository": {

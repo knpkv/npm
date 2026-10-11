@@ -21,7 +21,7 @@ const decodePullRequest = Schema.decodeSync(PullRequest)
 const make = (id: string, overrides: Partial<Parameters<typeof decodePullRequest>[0]> = {}) =>
   decodePullRequest({
     account: { profile: "platform-prod", region: "eu-west-1" },
-    approvalRules: [{ poolMembers: ["andrey"], requiredApprovals: 1, ruleName: "Approvals", satisfied: false }],
+    approvalRules: [{ poolMembers: ["owner"], requiredApprovals: 1, ruleName: "Approvals", satisfied: false }],
     approvedBy: [],
     author: "ana",
     commentedBy: [],
@@ -78,8 +78,8 @@ const rowLinks = (host: HTMLElement) => [...host.querySelectorAll<HTMLAnchorElem
 describe("WorkbenchRailView", () => {
   it("says how many pull requests wait and lists them under titled groups", async () => {
     const host = await render(
-      [make("1", { creationDate: new Date(NOW.getTime() - 2 * DAY) }), make("2"), make("3", { author: "andrey" })],
-      "andrey"
+      [make("1", { creationDate: new Date(NOW.getTime() - 2 * DAY) }), make("2"), make("3", { author: "owner" })],
+      "owner"
     )
     expect(host.textContent).toContain("2 pull requests wait on your review.")
     expect(host.textContent).toContain("Oldest open for 2d.")
@@ -92,38 +92,38 @@ describe("WorkbenchRailView", () => {
   // No rules means nothing to approve: the ready caption must not claim someone approved it.
   it("says an own ready pull request without rules needs no approval, and keeps approved for a rule-backed one", async () => {
     const satisfied = [{ poolMembers: ["ana"], requiredApprovals: 1, ruleName: "Approvals", satisfied: true }]
-    const noRules = await render([make("5", { author: "andrey", isApproved: true, approvalRules: [] })], "andrey")
+    const noRules = await render([make("5", { author: "owner", isApproved: true, approvalRules: [] })], "owner")
     expect(noRules.textContent).toContain("no approval required, not merged")
     expect(noRules.textContent).not.toContain("approved, not merged")
     await act(async () => root?.unmount())
-    const ruled = await render([make("6", { author: "andrey", isApproved: true, approvalRules: satisfied })], "andrey")
+    const ruled = await render([make("6", { author: "owner", isApproved: true, approvalRules: satisfied })], "owner")
     expect(ruled.textContent).toContain("approved, not merged")
   })
 
   // A last known count could be a since-revoked approval: the caption says unknown, never 1/2.
   it("says approvers are unknown instead of last known rule progress", async () => {
-    const twoNeeded = [{ poolMembers: ["andrey", "jonas"], requiredApprovals: 2, ruleName: "Two", satisfied: false }]
+    const twoNeeded = [{ poolMembers: ["owner", "jonas"], requiredApprovals: 2, ruleName: "Two", satisfied: false }]
     const host = await render(
       [make("7", { approvalRules: twoNeeded, approvedBy: ["jonas"], approversUnknown: true })],
-      "andrey"
+      "owner"
     )
     expect(host.textContent).toContain("approvers unknown")
     expect(host.textContent).not.toContain("1/2")
   })
 
   it("uses the singular for one waiting pull request", async () => {
-    const host = await render([make("1")], "andrey")
+    const host = await render([make("1")], "owner")
     expect(host.textContent).toContain("1 pull request waits on your review.")
   })
 
   it("names the conflict on one's own pull request as the blocking fact", async () => {
-    const host = await render([make("9", { author: "andrey", isMergeable: false })], "andrey")
+    const host = await render([make("9", { author: "owner", isMergeable: false })], "owner")
     expect(host.textContent).toContain("you, conflicts with the destination")
     expect(host.textContent).toContain("Nothing waits on your review.")
   })
 
   it("inks only the conflict, not the approval count, on someone else's conflicting pull request", async () => {
-    const host = await render([make("4", { isMergeable: false })], "andrey")
+    const host = await render([make("4", { isMergeable: false })], "owner")
     expect([...host.querySelectorAll("[class*='blocking']")].map((span) => span.textContent)).toEqual(["conflicts"])
   })
 
@@ -138,7 +138,7 @@ describe("WorkbenchRailView", () => {
           satisfied: false
         }]
       })],
-      "andrey"
+      "owner"
     )
     expect(host.textContent).toContain(
       "Nothing waits on you by name. 1 pull request waits on a role pool you may be in."
@@ -149,7 +149,7 @@ describe("WorkbenchRailView", () => {
   it("says pull requests with approval unknown apart from the review count, with their shared reason", async () => {
     const unknown = (id: string, tag: "NotPermitted" | "Throttled") =>
       make(id, { approvalUnknown: { _tag: tag }, isApproved: true })
-    const host = await render([make("1"), unknown("2", "NotPermitted"), unknown("3", "NotPermitted")], "andrey")
+    const host = await render([make("1"), unknown("2", "NotPermitted"), unknown("3", "NotPermitted")], "owner")
     expect(host.textContent).toContain("1 pull request waits on your review.")
     expect(host.textContent).toContain(
       "2 pull requests with approval unknown: Not allowed to check approval rules (codecommit:EvaluatePullRequestApprovalRules)."
@@ -157,10 +157,10 @@ describe("WorkbenchRailView", () => {
     const row = rowLinks(host).find((link) => link.textContent?.includes("Change 2"))
     expect(row?.querySelector("[title]")?.getAttribute("title")).toContain("Not allowed to check approval rules")
 
-    await draw([make("1"), unknown("2", "NotPermitted"), unknown("3", "Throttled")], "andrey")
+    await draw([make("1"), unknown("2", "NotPermitted"), unknown("3", "Throttled")], "owner")
     expect(host.textContent).toContain("2 pull requests with approval unknown; open one to see why.")
 
-    await draw([make("1")], "andrey")
+    await draw([make("1")], "owner")
     expect(host.textContent).not.toContain("approval unknown")
   })
 
@@ -173,14 +173,14 @@ describe("WorkbenchRailView", () => {
 
   it("marks the open pull request and makes it the list's single tab stop", async () => {
     const two = make("2")
-    const host = await render([make("1"), two], "andrey", prListKey(two))
+    const host = await render([make("1"), two], "owner", prListKey(two))
     const rows = [...host.querySelectorAll<HTMLAnchorElement>("a[data-row]")]
     expect(rows.map((row) => row.getAttribute("aria-current"))).toEqual([null, "page"])
     expect(rows.map((row) => row.tabIndex)).toEqual([-1, 0])
   })
 
   it("moves focus between rows with the arrow keys", async () => {
-    const host = await render([make("1"), make("2"), make("3")], "andrey")
+    const host = await render([make("1"), make("2"), make("3")], "owner")
     const rows = [...host.querySelectorAll<HTMLAnchorElement>("a[data-row]")]
     rows[0]?.focus()
     await act(async () => {
@@ -196,17 +196,17 @@ describe("WorkbenchRailView", () => {
 
   it("keeps exactly one tab stop when the arrow-selected row leaves the queue or the route changes", async () => {
     const [one, two, three] = [make("1"), make("2"), make("3")]
-    const host = await render([one, two, three], "andrey", prListKey(one))
+    const host = await render([one, two, three], "owner", prListKey(one))
     rowLinks(host)[0]?.focus()
     await act(async () => {
       rowLinks(host)[0]?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "ArrowDown" }))
     })
     expect(rowLinks(host).map((row) => row.tabIndex)).toEqual([-1, 0, -1])
 
-    await draw([one, three], "andrey", prListKey(one))
+    await draw([one, three], "owner", prListKey(one))
     expect(rowLinks(host).map((row) => row.tabIndex)).toEqual([0, -1])
 
-    await draw([one, three], "andrey", prListKey(three))
+    await draw([one, three], "owner", prListKey(three))
     expect(rowLinks(host).map((row) => row.tabIndex)).toEqual([-1, 0])
   })
 })

@@ -502,6 +502,8 @@ const makePersistence = Effect.gen(function*() {
         publicOperation("domain-event.append", events.append(...args)),
       pageAfter: (...args: Parameters<DomainEventRepositoryService["pageAfter"]>) =>
         publicOperation("domain-event.page-after", events.pageAfter(...args)),
+      readPluginHealthHistory: (...args: Parameters<DomainEventRepositoryService["readPluginHealthHistory"]>) =>
+        publicOperation("domain-event.health-history", events.readPluginHealthHistory(...args)),
       prune: (...args: Parameters<DomainEventRepositoryService["prune"]>) =>
         publicOperation("domain-event.prune", events.prune(...args)),
       streamState: (...args: Parameters<DomainEventRepositoryService["streamState"]>) =>

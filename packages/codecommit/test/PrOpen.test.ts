@@ -30,7 +30,7 @@ const pullRequest = new Domain.PullRequest({
   approvalRules: [],
   approvedBy: [],
   approvedByArns: [],
-  author: "arn:aws:iam::111122223333:user/andrey",
+  author: "arn:aws:iam::111122223333:user/owner",
   commentedBy: [],
   creationDate: new Date(0),
   destinationBranch: "main",

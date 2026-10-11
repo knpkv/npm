@@ -71,7 +71,9 @@ describe("countdown model", () => {
 
   it("says how long ago in minutes, hours, then whole days", () => {
     expect(agoText(0, 45 * 60_000)).toBe("45m ago")
-    expect(agoText(0, (9 * 60 + 55) * 60_000)).toBe("9h 55m ago")
+    expect(agoText(0, 60 * 60_000)).toBe("1h ago")
+    expect(agoText(0, 120 * 60_000)).toBe("2h ago")
+    expect(agoText(0, (9 * 60 + 55) * 60_000)).toBe("9h ago")
     expect(agoText(0, (79 * 60 + 51) * 60_000)).toBe("3d ago")
   })
 

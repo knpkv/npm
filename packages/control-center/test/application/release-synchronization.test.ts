@@ -23,6 +23,7 @@ import {
 import { PluginSyncPageV1 } from "../../src/domain/plugins/events.js"
 import { VendorImmutableId } from "../../src/domain/sourceRevision.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
+import { appendPortfolioInvalidation } from "../../src/server/application/portfolioInvalidation.js"
 import {
   classifyReleasePageAwareness,
   makePortfolioSnapshots
@@ -260,6 +261,54 @@ const runScenarioFromMap = Effect.fn("ReleaseSynchronizationTest.runScenarioFrom
 })
 
 describe("fake release synchronization", () => {
+  it.effect("projects a failed source immediately, preserves its streak start, and recovers on a healthy sync", () =>
+    withPersistence(Effect.gen(function*() {
+      const persistence = yield* setup
+      yield* TestClock.setTime(epochMillis(SYNCHRONIZED_AT))
+      yield* runScenario(scenario(success(releasePage())))
+      const portfolio = yield* makePortfolioSnapshots
+      assert.strictEqual((yield* portfolio.snapshot(WORKSPACE_ID)).releases[0]?.freshness._tag, "current")
+      const original = yield* persistence.releases.get(WORKSPACE_ID, RELEASE_ID)
+      const failedAt = DateTime.add(Schema.decodeUnknownSync(UtcTimestamp)(SYNCHRONIZED_AT), { minutes: 1 })
+      yield* TestClock.setTime(DateTime.toEpochMillis(failedAt))
+      yield* runScenario({
+        ...scenario({ _tag: "authentication" }, DateTime.formatIso(failedAt), "checkpoint-1"),
+        health: { _tag: "authentication" }
+      })
+      const failed = (yield* portfolio.snapshot(WORKSPACE_ID)).releases[0]?.freshness
+      assert.strictEqual(failed?._tag, "source-unavailable")
+      if (failed?._tag !== "source-unavailable") return
+      assert.deepStrictEqual(failed.unavailableSince, failedAt)
+      assert.deepStrictEqual(failed.lastReadAt, original.release.freshness.synchronizedAt)
+      const againAt = DateTime.add(failedAt, { minutes: 1 })
+      yield* TestClock.setTime(DateTime.toEpochMillis(againAt))
+      yield* runScenario({
+        ...scenario({ _tag: "authentication" }, DateTime.formatIso(againAt), "checkpoint-1"),
+        health: { _tag: "authentication" }
+      })
+      const repeated = (yield* portfolio.snapshot(WORKSPACE_ID)).releases[0]?.freshness
+      assert.strictEqual(repeated?._tag, "source-unavailable")
+      if (repeated?._tag === "source-unavailable") assert.deepStrictEqual(repeated.unavailableSince, failedAt)
+      assert.deepStrictEqual(yield* persistence.releases.get(WORKSPACE_ID, RELEASE_ID), original)
+      yield* appendPortfolioInvalidation({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: PLUGIN_ID,
+        releaseId: null,
+        reason: "plugin-health",
+        occurredAt: againAt
+      })
+      const legacy = (yield* portfolio.snapshot(WORKSPACE_ID)).releases[0]?.freshness
+      assert.strictEqual(legacy?._tag, "source-unavailable")
+      if (legacy?._tag === "source-unavailable") {
+        assert.isNull(legacy.unavailableSince)
+        assert.deepStrictEqual(legacy.lastReadAt, original.release.freshness.synchronizedAt)
+      }
+      yield* runScenario(
+        scenario(success(releasePage(true, "checkpoint-2")), DateTime.formatIso(againAt), "checkpoint-1")
+      )
+      assert.strictEqual((yield* portfolio.snapshot(WORKSPACE_ID)).releases[0]?.freshness._tag, "current")
+    })))
+
   it.effect("persists one atomic page and idempotently projects its people and release", () =>
     withPersistence(Effect.gen(function*() {
       const persistence = yield* setup

@@ -35,7 +35,7 @@ const ThreadMarker = (): ReactElement => {
 const readyState: RlyRelayDockState = {
   content: (
     <div style={stackStyle}>
-      <Text tone="secondary">Andrey · 20:11</Text>
+      <Text tone="secondary">Owner · 20:11</Text>
       <Text>Check the approval rules and the stale inline finding.</Text>
       <Text tone="secondary">Relay · 20:12</Text>
       <Text>The review is ready. Two findings still need a human decision.</Text>

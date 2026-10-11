@@ -1,6 +1,7 @@
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
+import type { PortfolioInvalidatedPayloadV1 } from "./domainEvent.js"
 import { PluginConnectionId } from "./identifiers.js"
 import { SourceRevision } from "./sourceRevision.js"
 import { UtcTimestamp } from "./utcTimestamp.js"
@@ -200,5 +201,101 @@ export const evaluateFreshnessAt = Effect.fn("Freshness.evaluateAt")(function*(
     _tag: isStale ? "stale" : "current",
     evaluatedAt,
     provenance
+  })
+})
+
+const FailedPluginHealth = Schema.Union([DegradedPluginHealth, UnavailablePluginHealth])
+
+/** A failing source and the proven start of its uninterrupted failure streak. */
+export const FailedReleaseSource = Schema.Struct({
+  pluginConnectionId: PluginConnectionId,
+  health: FailedPluginHealth,
+  unavailableSince: Schema.NullOr(UtcTimestamp)
+})
+
+/** Read projection that preserves release facts while their source cannot be verified. */
+export const SourceUnavailableFreshness = Schema.TaggedStruct("source-unavailable", {
+  evaluatedAt: UtcTimestamp,
+  pluginHealth: FailedPluginHealth,
+  provenance: Schema.Union([CachedProvenance, NoCacheProvenance]),
+  sourceObservedAt: Schema.NullOr(UtcTimestamp),
+  synchronizedAt: Schema.NullOr(UtcTimestamp),
+  staleAfterSeconds: StaleAfterSeconds,
+  unavailableSince: Schema.NullOr(UtcTimestamp),
+  lastReadAt: Schema.NullOr(UtcTimestamp),
+  failedSources: Schema.NonEmptyArray(FailedReleaseSource)
+})
+
+/** Server-authoritative release freshness, including current source failures. */
+export const ReleaseFreshness = Schema.Union([Freshness, SourceUnavailableFreshness])
+export type ReleaseFreshness = typeof ReleaseFreshness.Type
+
+/** Latest source health with a failure start proven by durable event history. */
+export const ReleaseSourceHealth = Schema.Struct({
+  pluginConnectionId: PluginConnectionId,
+  health: PluginHealth,
+  unavailableSince: Schema.NullOr(UtcTimestamp)
+})
+
+/** Decoded latest source health used by the release projection. */
+export type ReleaseSourceHealth = typeof ReleaseSourceHealth.Type
+
+/** Only a retained healthy checkpoint proves the start of a newest-first failure streak. */
+export const failureStreakStartedAt = (history: {
+  readonly events: ReadonlyArray<{
+    readonly occurredAt: UtcTimestamp
+    readonly payload: PortfolioInvalidatedPayloadV1
+  }>
+  readonly isComplete: boolean
+}): UtcTimestamp | null => {
+  let earliestFailure: UtcTimestamp | null = null
+  for (const event of history.events) {
+    if (event.payload.reason !== "plugin-health") continue
+    const outcome = event.payload.pluginHealth
+    if (outcome === undefined || outcome.healthState === "disabled") return null
+    if (outcome.healthState === "healthy") return earliestFailure
+    earliestFailure = event.occurredAt
+  }
+  return null
+}
+
+/** Project source failures before evaluating the age of preserved release facts. */
+export const evaluateReleaseFreshnessAt = Effect.fn("Freshness.evaluateReleaseAt")(function*(
+  freshness: Freshness,
+  evaluatedAt: UtcTimestamp,
+  sources: ReadonlyArray<ReleaseSourceHealth>
+): Effect.fn.Return<ReleaseFreshness, Schema.SchemaError> {
+  const failedSources = sources.flatMap((source) =>
+    source.health._tag === "degraded" || source.health._tag === "unavailable"
+      ? [{ ...source, health: source.health }]
+      : []
+  )
+  const firstFailed = failedSources[0]
+  if (firstFailed === undefined) return yield* evaluateFreshnessAt(freshness, evaluatedAt)
+  const unavailableSince = failedSources.some((source) => source.unavailableSince === null)
+    ? null
+    : failedSources.reduce<UtcTimestamp | null>(
+      (earliest, source) =>
+        earliest === null || (source.unavailableSince !== null && DateTime.Order(source.unavailableSince, earliest) < 0)
+          ? source.unavailableSince
+          : earliest,
+      null
+    )
+  const provenance = freshness.provenance._tag === "provider"
+    ? {
+      _tag: "cache",
+      cachedAt: freshness.synchronizedAt,
+      sourceRevision: freshness.provenance.sourceRevision
+    }
+    : freshness.provenance
+  return yield* Schema.decodeUnknownEffect(Schema.toType(ReleaseFreshness))({
+    ...freshness,
+    _tag: "source-unavailable",
+    evaluatedAt,
+    pluginHealth: firstFailed.health,
+    provenance,
+    unavailableSince,
+    lastReadAt: freshness.synchronizedAt,
+    failedSources
   })
 })

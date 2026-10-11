@@ -1,6 +1,6 @@
 {
   "name": "@knpkv/herdr-hub",
-  "version": "0.19.0",
+  "version": "0.20.0",
   "description": "Authenticated fleet approvals, PWA, coordinator, and hostd runtime",
   "license": "MIT",
   "author": "knpkv",
@@ -70,7 +70,8 @@
     "pack:deterministic": "pnpm build && node ../../scripts/pack-herdr.mjs .",
     "test": "vitest run",
     "test:pack": "tsx scripts/test-packed-packages.ts",
-    "render:icons": "tsx scripts/render-icons.ts"
+    "render:icons": "tsx scripts/render-icons.ts",
+    "test:browser": "pnpm --filter \"@knpkv/herdr-hub^...\" --sort run build && playwright test --config playwright.config.ts"
   },
   "dependencies": {
     "@effect/atom-react": "4.0.0",
@@ -103,7 +104,8 @@
     "react-dom": "^19.3.0",
     "rimraf": "^6.1.3",
     "typescript": "npm:@typescript/typescript6@^6.0.2",
-    "vitest": "catalog:"
+    "vitest": "catalog:",
+    "@playwright/test": "1.63.0"
   },
   "peerDependencies": {
     "react": "^19.2.8",

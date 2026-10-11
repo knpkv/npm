@@ -1,5 +1,11 @@
 # @knpkv/relay
 
+## 0.2.2
+
+### Patch Changes
+
+- [`4ebe301`](https://github.com/knpkv/npm/commit/4ebe30154220bff53ec507a0d70c5f8f4a543c5a) Thanks [@konopkov](https://github.com/konopkov)! - Docs and comments state each rule and its reason directly instead of pointing at internal decision records.
+
 ## 0.2.1
 
 ### Patch Changes

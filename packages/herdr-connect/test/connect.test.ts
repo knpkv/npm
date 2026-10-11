@@ -82,7 +82,7 @@ describe("Connect public seams", () => {
   })
 
   const hostConfiguration = (root: string): HostConfiguration => ({
-    allowedUsers: ["andrey@example.com"],
+    allowedUsers: ["owner@example.com"],
     applyCommand: null,
     browserMcpRecoverCommand: null,
     applyMachines: ["SER8"],
@@ -98,7 +98,7 @@ describe("Connect public seams", () => {
     machines: [{ host: "SER8", nodeId: "node-ser8" }],
     port: 4_778,
     pushAllowedOrigins: ["https://push.example.test"],
-    pushSubject: "mailto:andrey@example.com",
+    pushSubject: "mailto:owner@example.com",
     repository: root,
     approvalTls: null,
     stateDirectory: root,
@@ -1542,7 +1542,7 @@ done
       runCoordinatorChat: () => Effect.succeed("ok")
     }
     const config: HostConfiguration = {
-      allowedUsers: ["andrey@example.com"],
+      allowedUsers: ["owner@example.com"],
       applyCommand: ["true"],
       browserMcpRecoverCommand: null,
       applyMachines: ["SER8"],
@@ -1562,7 +1562,7 @@ done
       machines: [{ host: "SER8", nodeId: "node-ser8" }],
       port: 4777,
       pushAllowedOrigins: ["https://push.example.test"],
-      pushSubject: "mailto:andrey@example.com",
+      pushSubject: "mailto:owner@example.com",
       repository: root,
       approvalTls: null,
       stateDirectory: root,
