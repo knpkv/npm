@@ -83,6 +83,10 @@ export interface ConfluencePageClientContract {
     pageId: string,
     cursor: string | null
   ) => Effect.Effect<unknown, ConfluencePageClientFailure>
+  readonly getPageLabels: (
+    pageId: string,
+    cursor: string | null
+  ) => Effect.Effect<unknown, ConfluencePageClientFailure>
   readonly getPageWatchers: (
     pageId: string,
     start: number
@@ -268,6 +272,13 @@ export const makeConfluencePageClient = (
           sort: "-modified-date",
           status: ["current"]
         }
+      })
+    ),
+  getPageLabels: (pageId, cursor) =>
+    bounded(
+      "confluence-page-labels",
+      api.v2.getPageLabels(pageId, {
+        params: { prefix: "global", limit: 100, ...(!(cursor === null) && { cursor }) }
       })
     ),
   getPageWatchers: (pageId, start) =>

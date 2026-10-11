@@ -75,6 +75,7 @@ import {
   timelineReadsLayer,
   workspaceSettingsAdministrationLayer
 } from "../application/index.js"
+import { ReadinessEvaluation } from "../application/readinessEvaluation.js"
 import { reviewSuggestionPublicationGatewayUnavailableLayer } from "../application/ReviewSuggestionPublicationGateway.js"
 import { authLayerFromDatabase } from "../auth/Auth.js"
 import {
@@ -131,6 +132,7 @@ import {
   nodeSecretPlatformLayer
 } from "./NodeTransport.js"
 import { prReviewWorkerStartupLayer, type PrReviewWorkerStartupOptions } from "./PrReviewWorkerStartup.js"
+import { readinessStartupLayer } from "./ReadinessStartup.js"
 import { releaseAgentWorkerStartupLayer } from "./ReleaseAgentWorkerStartup.js"
 import {
   type ReleaseSynchronizationStartupError,
@@ -630,7 +632,11 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
     governedActionExecution,
     releaseAgentWorker,
     retention,
-    releaseTargetsStartupLayer.pipe(Layer.provide(bootstrap)),
+    readinessStartupLayer.pipe(
+      Layer.provide(ReadinessEvaluation.layer),
+      Layer.provide(releaseTargetsStartupLayer.pipe(Layer.provide(bootstrap))),
+      Layer.provide(bootstrap)
+    ),
     prReviewWorker,
     releaseSynchronizationStartupLayer(options.releaseSynchronization ?? null).pipe(
       Layer.provideMerge(bootstrap)

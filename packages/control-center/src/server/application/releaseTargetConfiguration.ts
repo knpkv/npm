@@ -136,13 +136,11 @@ export const readReleaseTargetCatalog = Effect.fn("ReleaseTargetConfiguration.ca
   )
 })
 
-/** Resolve only pipelines actually delivering a release PR, retaining stale policy as a held state. */
-export const inspectReleaseTargets = Effect.fn("ReleaseTargetConfiguration.inspect")(function*(
+/** Exact current delivery edges select pipeline identities, independent of their settings validity. */
+const deliveringPipelineKeys = Effect.fn("ReleaseTargetConfiguration.deliveringPipelines")(function*(
   persistence: PersistenceService,
   release: Release,
-  inspection: ReleaseDeliveryGraphInspection,
-  mappings: ReadonlyArray<PipelineReleaseTarget>,
-  catalogue: ReleaseTargetCatalog
+  inspection: ReleaseDeliveryGraphInspection
 ) {
   const nodes = new Map(inspection.nodes.map((node) => [node.nodeId, node]))
   const projections = new Map(inspection.entityProjections.map(({ projection }) => [projection.entityId, projection]))
@@ -160,6 +158,18 @@ export const inspectReleaseTargets = Effect.fn("ReleaseTargetConfiguration.inspe
     const entity = yield* persistence.entities.get(release.workspaceId, projection.entityId)
     delivering.add(`${entity.sourceRevision.pluginConnectionId}\u0000${projection.details.pipelineName}`)
   }
+  return delivering
+})
+
+/** Resolve only pipelines actually delivering a release PR, retaining stale policy as a held state. */
+export const inspectReleaseTargets = Effect.fn("ReleaseTargetConfiguration.inspect")(function*(
+  persistence: PersistenceService,
+  release: Release,
+  inspection: ReleaseDeliveryGraphInspection,
+  mappings: ReadonlyArray<PipelineReleaseTarget>,
+  catalogue: ReleaseTargetCatalog
+) {
+  const delivering = yield* deliveringPipelineKeys(persistence, release, inspection)
   const selected = mappings.filter((mapping) =>
     delivering.has(`${mapping.pluginConnectionId}\u0000${mapping.pipelineName}`)
   )
@@ -200,7 +210,8 @@ export const reconcileReleaseTargets = Effect.fn("ReleaseTargetConfiguration.rec
   persistence: PersistenceService,
   workspaceId: WorkspaceId,
   settings: WorkspaceSettingsV1,
-  occurredAt: UtcTimestamp
+  occurredAt: UtcTimestamp,
+  changedMappings: ReadonlyArray<PipelineReleaseTarget> = []
 ): Effect.fn.Return<void, PersistenceOperationFailure, Crypto.Crypto> {
   const catalogue = yield* readReleaseTargetCatalog(persistence, workspaceId, settings)
   let after: ReleaseId | null = null
@@ -227,6 +238,28 @@ export const reconcileReleaseTargets = Effect.fn("ReleaseTargetConfiguration.rec
       // An incomplete slice cannot authorize retiring targets absent from its bounded prefix.
       if (result.value.truncated || !catalogue.complete || configuration.state === "unavailable") continue
       const desired = configuration.targets.map(({ environmentId }) => environmentId).sort()
+      const delivering = yield* deliveringPipelineKeys(persistence, record.release, result.value)
+      if (
+        changedMappings.some((mapping) => delivering.has(`${mapping.pluginConnectionId}\u0000${mapping.pipelineName}`))
+      ) {
+        for (const environmentId of record.release.targetEnvironmentIds) {
+          yield* persistence.readiness.enqueueInvalidation({
+            _tag: "environment",
+            workspaceId,
+            releaseId: record.release.id,
+            environmentId,
+            reason: "candidate-changed",
+            enqueuedAt: occurredAt
+          })
+        }
+        yield* persistence.readiness.enqueueInvalidation({
+          _tag: "release",
+          workspaceId,
+          releaseId: record.release.id,
+          reason: "candidate-changed",
+          enqueuedAt: occurredAt
+        })
+      }
       if (JSON.stringify([...record.release.targetEnvironmentIds].sort()) === JSON.stringify(desired)) continue
       yield* persistence.releases.append(workspaceId, {
         ...record.release,

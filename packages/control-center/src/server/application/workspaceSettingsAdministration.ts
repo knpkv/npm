@@ -117,7 +117,23 @@ export const makeWorkspaceSettingsAdministration = Effect.gen(function*() {
                 catalogue,
                 before.settings.pipeline.releaseTargets ?? []
               )
-              yield* reconcileReleaseTargets(persistence, input.workspaceId, current.settings, updatedAt)
+              const previousTargets = before.settings.pipeline.releaseTargets ?? []
+              const nextTargets = current.settings.pipeline.releaseTargets ?? []
+              const changedMappings = [
+                ...previousTargets.filter((mapping) =>
+                  !nextTargets.some((next) => sameReleaseTargets([mapping], [next]))
+                ),
+                ...nextTargets.filter((mapping) =>
+                  !previousTargets.some((previous) => sameReleaseTargets([mapping], [previous]))
+                )
+              ]
+              yield* reconcileReleaseTargets(
+                persistence,
+                input.workspaceId,
+                current.settings,
+                updatedAt,
+                changedMappings
+              )
             }
             if (
               before.settings.inference.enabled !== current.settings.inference.enabled ||

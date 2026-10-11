@@ -1004,6 +1004,15 @@ const checkpointFromSyncCursor = (cursor: SyncCursor | null, inventoryDigest: st
     : `${DURABLE_CLOSED_NEXT_CHECKPOINT_PREFIX}${inventoryDigest}:${cursor.nextToken}`
 }
 
+/** Only the completed inventory restarts at OPEN without a continuation token. @internal */
+export const codeCommitInventoryIsComplete = Effect.fn("CodeCommitPlugin.inventoryIsComplete")(function*(
+  checkpoint: PluginSyncRequestV1["checkpoint"]
+) {
+  if (checkpoint === null) return false
+  const cursor = yield* syncCursorFromCheckpoint(checkpoint)
+  return cursor.status === "OPEN" && cursor.nextToken === null
+})
+
 const nextSyncCursor = (
   status: PullRequestStatus,
   nextToken: string | null,

@@ -3170,8 +3170,8 @@ describe("normalized plugin page materialization", () => {
             persistenceWithWorkspaceSettings(persistence, settings)
           )
         )
-      const hasCurrentInferredImplementation = Effect.fn(
-        "NormalizedPluginPageMaterializationTest.hasCurrentInferredImplementation"
+      const hasCurrentVerifiedImplementation = Effect.fn(
+        "NormalizedPluginPageMaterializationTest.hasCurrentVerifiedImplementation"
       )(function*() {
         const release = (yield* persistence.releases.list(WORKSPACE_ID, 1))[0]?.release
         if (release === undefined) return yield* Effect.die("expected synchronized release")
@@ -3183,7 +3183,7 @@ describe("normalized plugin page materialization", () => {
         })
         if (slice._tag !== "releaseSlice") return yield* Effect.die("expected release slice")
         return slice.value.relationships.some(
-          ({ kind, lifecycle }) => kind === "implements" && lifecycle._tag === "inferred"
+          ({ kind, lifecycle }) => kind === "implements" && lifecycle._tag === "verified"
         )
       })
       const currentImplementationLifecycles = Effect.fn(
@@ -3200,7 +3200,7 @@ describe("normalized plugin page materialization", () => {
         if (slice._tag !== "releaseSlice") return yield* Effect.die("expected release slice")
         return slice.value.relationships.flatMap(({ kind, lifecycle }) =>
           kind === "implements" &&
-            (lifecycle._tag === "inferred" || lifecycle._tag === "missing")
+            (lifecycle._tag === "verified" || lifecycle._tag === "missing")
             ? [lifecycle._tag]
             : []
         )
@@ -3230,7 +3230,7 @@ describe("normalized plugin page materialization", () => {
         successfulHealth: { _tag: "healthy", checkedAt: T3 }
       }, inferenceJiraReleasePage)
       yield* synchronizeCodeCommit(0, T3, DEFAULT_WORKSPACE_SETTINGS, codeCommitRelationshipPage)
-      assert.isTrue(yield* hasCurrentInferredImplementation())
+      assert.isTrue(yield* hasCurrentVerifiedImplementation())
 
       yield* reconcilePolicy(
         {
@@ -3242,11 +3242,11 @@ describe("normalized plugin page materialization", () => {
         },
         T4
       )
-      assert.isFalse(yield* hasCurrentInferredImplementation())
-      assert.includeMembers(yield* currentImplementationLifecycles(), ["missing"])
+      assert.isTrue(yield* hasCurrentVerifiedImplementation())
+      assert.includeMembers(yield* currentImplementationLifecycles(), ["verified"])
 
       yield* reconcilePolicy(DEFAULT_WORKSPACE_SETTINGS, T5)
-      assert.isTrue(yield* hasCurrentInferredImplementation())
+      assert.isTrue(yield* hasCurrentVerifiedImplementation())
 
       const disabledAt = Schema.decodeSync(UtcTimestamp)("2026-07-19T09:08:00.000Z")
       yield* reconcilePolicy(
@@ -3259,15 +3259,159 @@ describe("normalized plugin page materialization", () => {
         },
         disabledAt
       )
-      assert.isFalse(yield* hasCurrentInferredImplementation())
+      assert.isFalse(yield* hasCurrentVerifiedImplementation())
       yield* reconcilePolicy(
         DEFAULT_WORKSPACE_SETTINGS,
         Schema.decodeSync(UtcTimestamp)("2026-07-19T09:09:00.000Z")
       )
-      assert.isTrue(yield* hasCurrentInferredImplementation())
+      assert.isTrue(yield* hasCurrentVerifiedImplementation())
     })))
 
-  it.effect("materializes inferred relationships across synchronized provider evidence", () =>
+  it.effect("upgrades a legacy provider-proposed Jira membership on replay without rewriting history", () =>
+    withMaterializer(Effect.gen(function*() {
+      const persistence = yield* Persistence
+      yield* setup
+      const events = yield* normalizeJiraIssueEvents({
+        comments: { values: [], total: 0, truncated: false },
+        changelogs: { values: [], total: 0, truncated: false },
+        observedAt: T1,
+        webBaseUrl: new URL("https://fixture.atlassian.net"),
+        issue: {
+          id: "10042",
+          key: "FIX-42",
+          fields: {
+            summary: "Verify provider membership",
+            updated: DateTime.formatIso(T1),
+            project: { id: "10000", key: "FIX", name: "Fixture service" },
+            fixVersions: [{ id: "20000", name: "2.18.0", released: false }]
+          }
+        }
+      })
+      const page = Schema.decodeUnknownSync(Schema.toType(PluginSyncPageV1))({
+        checkpointAfterPage: "fixture-membership-upgrade",
+        hasMore: false,
+        events
+      })
+      const scope: NormalizedPluginPageMaterializationScope = {
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: PLUGIN_ID,
+        providerId: "jira",
+        streamKey: MATERIALIZED_STREAM,
+        expectedRevision: 0,
+        committedAt: T2,
+        successfulHealth: { _tag: "healthy", checkedAt: T2 }
+      }
+      yield* materializeNormalizedPluginPage(scope, page)
+      const release = (yield* persistence.releases.list(WORKSPACE_ID, 1))[0]?.release
+      if (release === undefined) return assert.fail("expected provider release")
+      const slice = yield* persistence.deliveryGraph.read(WORKSPACE_ID, {
+        _tag: "releaseSlice",
+        releaseId: release.id,
+        environmentId: null,
+        limit: 100
+      })
+      if (slice._tag !== "releaseSlice") return assert.fail("expected release slice")
+      const membership = slice.value.relationships.find(({ kind }) => kind === "contains")
+      if (membership === undefined) return assert.fail("expected provider membership")
+      const legacy = DeliveryRelationship.make({
+        ...membership,
+        revision: LedgerRevision.make(membership.revision + 1),
+        supersedesRevision: membership.revision,
+        lifecycle: { _tag: "proposed", effectiveAt: T2 },
+        confidence: { _tag: "inferred", score: 1, rationale: "Legacy provider proposal" }
+      })
+      yield* persistence.deliveryGraph.write(WORKSPACE_ID, {
+        entityProjections: [],
+        nodes: [],
+        evidenceItems: [],
+        evidenceClaims: [],
+        relationships: [yield* Schema.encodeEffect(DeliveryRelationship)(legacy)]
+      })
+      yield* materializeNormalizedPluginPage({ ...scope, expectedRevision: 1, committedAt: T3 }, page)
+      const history = yield* persistence.deliveryGraph.read(WORKSPACE_ID, {
+        _tag: "relationshipHistory",
+        relationshipId: legacy.relationshipId,
+        limit: 10
+      })
+      if (history._tag !== "relationshipHistory") return assert.fail("expected membership history")
+      assert.strictEqual(history.value[0]?.lifecycle._tag, "verified")
+      assert.strictEqual(history.value[0]?.supersedesRevision, legacy.revision)
+      assert.strictEqual(history.value[1]?.lifecycle._tag, "proposed")
+      const revision = history.value[0]?.revision
+      yield* materializeNormalizedPluginPage({ ...scope, expectedRevision: 1, committedAt: T3 }, page)
+      const unchanged = yield* persistence.deliveryGraph.read(WORKSPACE_ID, {
+        _tag: "relationship",
+        relationshipId: legacy.relationshipId,
+        revision: null
+      })
+      if (unchanged._tag !== "relationship") return assert.fail("expected current membership")
+      assert.strictEqual(unchanged.value.revision, revision)
+    })))
+
+  it.effect("upgrades stored exact inferred links by appending a verified revision", () =>
+    withMaterializer(Effect.gen(function*() {
+      const persistence = yield* Persistence
+      yield* setup
+      yield* setupConnection(CODECOMMIT_PLUGIN_ID, "codecommit")
+      const synchronize = (
+        pluginConnectionId: PluginConnectionId,
+        providerId: "jira" | "codecommit",
+        expectedRevision: number,
+        page: PluginSyncPageV1
+      ) =>
+        materializeNormalizedPluginPage({
+          workspaceId: WORKSPACE_ID,
+          pluginConnectionId,
+          providerId,
+          streamKey: firstPartyStream(providerId),
+          expectedRevision,
+          committedAt: T3,
+          successfulHealth: { _tag: "healthy", checkedAt: T3 }
+        }, page)
+      yield* synchronize(PLUGIN_ID, "jira", 0, inferenceJiraReleasePage)
+      yield* synchronize(CODECOMMIT_PLUGIN_ID, "codecommit", 0, codeCommitRelationshipPage)
+      const release = (yield* persistence.releases.list(WORKSPACE_ID, 1))[0]?.release
+      if (release === undefined) return assert.fail("expected synchronized release")
+      const slice = yield* persistence.deliveryGraph.read(WORKSPACE_ID, {
+        _tag: "releaseSlice",
+        releaseId: release.id,
+        environmentId: null,
+        limit: 100
+      })
+      if (slice._tag !== "releaseSlice") return assert.fail("expected release slice")
+      const exact = slice.value.relationships.find(({ kind }) => kind === "implements")
+      if (exact === undefined) return assert.fail("expected exact implementation")
+      const legacy = DeliveryRelationship.make({
+        ...exact,
+        revision: LedgerRevision.make(exact.revision + 1),
+        supersedesRevision: exact.revision,
+        lifecycle: { _tag: "inferred", effectiveAt: T3 },
+        confidence: { _tag: "inferred", score: 0.92, rationale: "Legacy Jira-key inference" }
+      })
+      yield* persistence.deliveryGraph.write(WORKSPACE_ID, {
+        entityProjections: [],
+        nodes: [],
+        evidenceItems: [],
+        evidenceClaims: [],
+        relationships: [yield* Schema.encodeEffect(DeliveryRelationship)(legacy)]
+      })
+      yield* synchronize(CODECOMMIT_PLUGIN_ID, "codecommit", 1, codeCommitRelationshipPage)
+      const history = yield* persistence.deliveryGraph.read(WORKSPACE_ID, {
+        _tag: "relationshipHistory",
+        relationshipId: legacy.relationshipId,
+        limit: 10
+      })
+      if (history._tag !== "relationshipHistory") return assert.fail("expected relationship history")
+      assert.strictEqual(history.value[0]?.lifecycle._tag, "verified")
+      assert.strictEqual(history.value[0]?.supersedesRevision, legacy.revision)
+      assert.strictEqual(history.value[1]?.lifecycle._tag, "inferred")
+      assert.strictEqual(history.value[0]?.provenance._tag, "rule")
+      if (history.value[0]?.provenance._tag === "rule") {
+        assert.include(history.value[0].provenance.rationale, "PAY-42")
+      }
+    })))
+
+  it.effect("materializes exact verified and fuzzy inferred relationships across provider evidence", () =>
     withMaterializer(Effect.gen(function*() {
       const persistence = yield* Persistence
       yield* setup
@@ -3366,11 +3510,11 @@ describe("normalized plugin page materialization", () => {
         current.map(({ kind, lifecycle }) => `${kind}:${lifecycle._tag}`),
         [
           "contains:proposed",
-          "implements:inferred",
-          "delivered-by:inferred",
+          "implements:verified",
+          "delivered-by:verified",
           "tracks-time-for:inferred",
-          "documented-by:inferred",
-          "documented-by:inferred"
+          "documented-by:verified",
+          "documented-by:verified"
         ]
       )
       assert.isFalse(current.some(({ lifecycle }) => lifecycle._tag === "missing"))
@@ -3433,10 +3577,10 @@ describe("normalized plugin page materialization", () => {
         changedCurrent.some(({ kind, lifecycle }) => kind === "implements" && lifecycle._tag === "missing")
       )
       assert.isFalse(
-        changedCurrent.some(({ kind, lifecycle }) => kind === "implements" && lifecycle._tag === "inferred")
+        changedCurrent.some(({ kind, lifecycle }) => kind === "implements" && lifecycle._tag === "verified")
       )
       assert.isFalse(
-        changedCurrent.some(({ kind, lifecycle }) => kind === "delivered-by" && lifecycle._tag === "inferred")
+        changedCurrent.some(({ kind, lifecycle }) => kind === "delivered-by" && lifecycle._tag === "verified")
       )
       const deliveredHistory = yield* persistence.deliveryGraph.read(WORKSPACE_ID, {
         _tag: "relationshipHistory",
@@ -3954,7 +4098,7 @@ describe("normalized plugin page materialization", () => {
       })
       if (inferredSlice._tag !== "releaseSlice") return yield* Effect.die("expected inferred release slice")
       const inferred = inferredSlice.value.relationships.find(
-        ({ kind, lifecycle }) => kind === "implements" && lifecycle._tag === "inferred"
+        ({ kind, lifecycle }) => kind === "implements" && lifecycle._tag === "verified"
       )
       if (inferred === undefined) return yield* Effect.die("expected inferred implementation")
       const rejected = DeliveryRelationship.make({
@@ -4009,7 +4153,7 @@ describe("normalized plugin page materialization", () => {
       )
       assert.isFalse(
         repairedSlice.value.relationships.some(
-          ({ kind, lifecycle }) => kind === "implements" && lifecycle._tag === "inferred"
+          ({ kind, lifecycle }) => kind === "implements" && lifecycle._tag === "verified"
         )
       )
     })))
@@ -4050,7 +4194,7 @@ describe("normalized plugin page materialization", () => {
       })
       if (initialSlice._tag !== "releaseSlice") return yield* Effect.die("expected initial release slice")
       const delivered = initialSlice.value.relationships.find(
-        ({ kind, lifecycle }) => kind === "delivered-by" && lifecycle._tag === "inferred"
+        ({ kind, lifecycle }) => kind === "delivered-by" && lifecycle._tag === "verified"
       )
       if (delivered === undefined) return yield* Effect.die("expected inferred delivery relationship")
 
@@ -4164,7 +4308,7 @@ describe("normalized plugin page materialization", () => {
         })
         if (initialSlice._tag !== "releaseSlice") return yield* Effect.die("expected initial release slice")
         const inferred = initialSlice.value.relationships.find(
-          ({ kind, lifecycle }) => kind === "implements" && lifecycle._tag === "inferred"
+          ({ kind, lifecycle }) => kind === "implements" && lifecycle._tag === "verified"
         )
         if (inferred === undefined) return yield* Effect.die("expected inferred implementation relationship")
 
@@ -4176,7 +4320,7 @@ describe("normalized plugin page materialization", () => {
           revision: null
         })
         if (atBound._tag !== "relationship") return yield* Effect.die("expected relationship at candidate bound")
-        assert.strictEqual(atBound.value.lifecycle._tag, "inferred")
+        assert.strictEqual(atBound.value.lifecycle._tag, "verified")
 
         yield* synchronize(CONFLUENCE_PLUGIN_ID, "confluence", 1, documentationPage(55, 1, "candidate-cap-2001"))
         const beyondBound = yield* persistence.deliveryGraph.read(WORKSPACE_ID, {
@@ -4283,7 +4427,7 @@ describe("normalized plugin page materialization", () => {
         })
         if (initialSlice._tag !== "releaseSlice") return yield* Effect.die("expected initial release slice")
         const inferred = initialSlice.value.relationships.find(
-          ({ kind, lifecycle }) => kind === "implements" && lifecycle._tag === "inferred"
+          ({ kind, lifecycle }) => kind === "implements" && lifecycle._tag === "verified"
         )
         if (inferred === undefined) return yield* Effect.die("expected inferred implementation relationship")
 
@@ -4295,7 +4439,7 @@ describe("normalized plugin page materialization", () => {
           revision: null
         })
         if (atBound._tag !== "relationship") return yield* Effect.die("expected relationship at release slice bound")
-        assert.strictEqual(atBound.value.lifecycle._tag, "inferred")
+        assert.strictEqual(atBound.value.lifecycle._tag, "verified")
 
         yield* synchronize(PLUGIN_ID, "jira", 3, documentationRelationships(496, 1, "release-slice-bound-501"))
         const beyondBound = yield* persistence.deliveryGraph.read(WORKSPACE_ID, {
@@ -4368,7 +4512,7 @@ describe("normalized plugin page materialization", () => {
       })
       if (initialSlice._tag !== "releaseSlice") return yield* Effect.die("expected initial release slice")
       const inferred = initialSlice.value.relationships.find(
-        ({ kind, lifecycle }) => kind === "implements" && lifecycle._tag === "inferred"
+        ({ kind, lifecycle }) => kind === "implements" && lifecycle._tag === "verified"
       )
       if (inferred === undefined) return yield* Effect.die("expected inferred implementation relationship")
 
@@ -4379,7 +4523,7 @@ describe("normalized plugin page materialization", () => {
         revision: null
       })
       if (atBound._tag !== "relationship") return yield* Effect.die("expected relationship at release bound")
-      assert.strictEqual(atBound.value.lifecycle._tag, "inferred")
+      assert.strictEqual(atBound.value.lifecycle._tag, "verified")
 
       yield* synchronize(PLUGIN_ID, "jira", 2, releasePage(50, 1, "jira-release-bound-51"))
       const beyondBound = yield* persistence.deliveryGraph.read(WORKSPACE_ID, {
@@ -4948,7 +5092,7 @@ describe("normalized plugin page materialization", () => {
           limit: 10
         })
         if (history._tag !== "relationshipHistory") return yield* Effect.die("expected containment history")
-        assert.strictEqual(history.value[0]?.lifecycle._tag, "proposed")
+        assert.strictEqual(history.value[0]?.lifecycle._tag, "verified")
       })),
     { timeout: 30_000 }
   )
@@ -5165,7 +5309,7 @@ describe("normalized plugin page materialization", () => {
       })
       if (retainedHistory._tag !== "relationshipHistory") return yield* Effect.die("expected retained history")
       assert.lengthOf(retainedHistory.value, 1)
-      assert.strictEqual(retainedHistory.value[0]?.lifecycle._tag, "proposed")
+      assert.strictEqual(retainedHistory.value[0]?.lifecycle._tag, "verified")
 
       yield* materializeNormalizedPluginPage(
         { ...scope, expectedRevision: 2, committedAt: T3, successfulHealth: { _tag: "healthy", checkedAt: T3 } },
@@ -5335,7 +5479,7 @@ describe("normalized plugin page materialization", () => {
       })
       if (initialSlice._tag !== "releaseSlice") return yield* Effect.die("expected initial release slice")
       const inferred = initialSlice.value.relationships.find(
-        ({ kind, lifecycle }) => kind === "implements" && lifecycle._tag === "inferred"
+        ({ kind, lifecycle }) => kind === "implements" && lifecycle._tag === "verified"
       )
       if (inferred === undefined) return yield* Effect.die("expected inferred implementation")
       yield* materializeNormalizedPluginPage(
@@ -5352,7 +5496,7 @@ describe("normalized plugin page materialization", () => {
       if (slice._tag !== "releaseSlice") return yield* Effect.die("expected release slice")
       assert.isFalse(
         slice.value.relationships.some(
-          ({ kind, lifecycle }) => kind === "implements" && lifecycle._tag === "inferred"
+          ({ kind, lifecycle }) => kind === "implements" && lifecycle._tag === "verified"
         )
       )
       const history = yield* persistence.deliveryGraph.read(WORKSPACE_ID, {

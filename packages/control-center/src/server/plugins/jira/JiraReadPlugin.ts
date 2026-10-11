@@ -126,6 +126,17 @@ const JiraSyncCheckpointV3 = Schema.Struct({
 )
 const JiraSyncCheckpoint = Schema.Union([JiraSyncCheckpointV1, JiraSyncCheckpointV2, JiraSyncCheckpointV3])
 const JiraSyncCheckpointJson = Schema.fromJsonString(JiraSyncCheckpoint)
+
+/** Interpret the retained provider cursor independently of invocation termination. @internal */
+export const jiraInventoryIsComplete = Effect.fn("JiraReadPlugin.inventoryIsComplete")(function*(
+  checkpoint: PluginSyncRequestV1["checkpoint"]
+) {
+  if (checkpoint === null) return false
+  const decoded = yield* Schema.decodeUnknownEffect(JiraSyncCheckpointJson)(checkpoint).pipe(
+    Effect.mapError(() => new PluginConfigurationFailure({ diagnosticCode: "jira-sync-checkpoint-invalid" }))
+  )
+  return decoded.version !== 1 && decoded.nextPageToken === null
+})
 const JIRA_ISSUE_STREAM_KEY = "project-issues"
 // Jira enhanced-search cursors expire after seven days. Stop reusing them a day early.
 const JiraCursorReuseDays = 6

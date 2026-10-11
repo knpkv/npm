@@ -161,9 +161,27 @@ export const makeReleaseAgentJobs = Effect.gen(function*() {
       const release = yield* mapPersistenceRead(
         persistence.releases.get(input.workspaceId, input.releaseId)
       )
-      const subjectRevision = `release-revision:${release.revision}`
+      const readiness = yield* mapPersistenceRead(
+        persistence.readiness.readCurrent({
+          _tag: "release",
+          workspaceId: input.workspaceId,
+          releaseId: input.releaseId
+        })
+      )
+      if (readiness._tag !== "release") return yield* unavailable()
+      const lastReadinessOutcome = (yield* mapPersistenceRead(
+        persistence.events.readLatestReadinessOutcomes(input.workspaceId, [input.releaseId])
+      ))[0]
+      const readinessFailure = lastReadinessOutcome?.payload.reason === "readiness-failed"
+        ? lastReadinessOutcome.payload.readinessFailure ?? null
+        : null
+      const subjectRevision = `release-revision:${release.revision}${
+        readiness.record === null
+          ? ""
+          : `:readiness:${readiness.record.assessment.assessmentId}:${readiness.record.authority}`
+      }`
       const providerPrompt = yield* Schema.decodeUnknownEffect(AgentJobPrompt)(
-        renderDurableReleaseAgentPrompt(release.release, input.request.prompt)
+        renderDurableReleaseAgentPrompt(release.release, input.request.prompt, readiness.record, readinessFailure)
       ).pipe(Effect.mapError(unavailable))
       const jobId = yield* cryptoService.randomUUIDv7.pipe(
         Effect.flatMap(Schema.decodeUnknownEffect(JobId)),

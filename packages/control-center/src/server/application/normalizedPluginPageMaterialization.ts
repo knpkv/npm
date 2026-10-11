@@ -1571,7 +1571,9 @@ const materializeRelationship = Effect.fn(
   persistence: PersistenceService,
   cryptoService: Crypto.Crypto,
   scope: NormalizedPluginPageMaterializationScope,
-  event: RelationshipProposal
+  event: RelationshipProposal,
+  authoritativeMembership: boolean,
+  upgradeOnly: boolean = false
 ) {
   const resolveEndpoint = Effect.fn("NormalizedPluginPageMaterialization.resolveRelationshipEndpoint")(function*(
     reference: RelationshipProposal["from"]
@@ -1651,6 +1653,13 @@ const materializeRelationship = Effect.fn(
   const previous = Result.isSuccess(existing) && existing.success._tag === "relationship"
     ? existing.success.value
     : null
+  if (
+    upgradeOnly && (previous?.lifecycle._tag !== "proposed" || previous.provenance._tag !== "plugin" ||
+      previous.provenance.pluginConnectionId !== scope.pluginConnectionId ||
+      previous.provenance.sourceEntityId !== provenanceEntity.entityId)
+  ) {
+    return { nodeCount: 0, relationshipCount: 0 }
+  }
   const revision = LedgerRevision.make((previous?.revision ?? 0) + 1)
   const nodes: Array<DeliveryNode> = []
   if (source.node !== null) nodes.push(source.node)
@@ -1676,8 +1685,8 @@ const materializeRelationship = Effect.fn(
           targetNodeId: target.nodeId,
           targetNodeKind: target.kind,
           scope: relationshipScope,
-          lifecycle: { _tag: "proposed", effectiveAt: event.observedAt },
-          confidence: {
+          lifecycle: { _tag: authoritativeMembership ? "verified" : "proposed", effectiveAt: event.observedAt },
+          confidence: authoritativeMembership ? { _tag: "confirmed" } : {
             _tag: "inferred",
             score: event.confidence,
             rationale: `Proposed by ${scope.providerId} normalized synchronization.`
@@ -2056,9 +2065,25 @@ export const materializeNormalizedPluginPage = Effect.fn(
     }
     for (const event of acceptedEvents) {
       if (event._tag !== "ProposeRelationship") continue
-      const receipt = yield* materializeRelationship(persistence, cryptoService, scope, event)
+      const authoritativeMembership = scope.providerId === "jira" &&
+        acceptedEvents.some((issue) =>
+          hasAuthoritativeJiraFixVersions(issue) && isReleaseContainmentForIssue(event, issue)
+        )
+      const receipt = yield* materializeRelationship(persistence, cryptoService, scope, event, authoritativeMembership)
       nodeCount += receipt.nodeCount
       relationshipCount += receipt.relationshipCount
+    }
+    if (scope.providerId === "jira") {
+      for (const event of materializationPage.events) {
+        if (event._tag !== "ProposeRelationship" || accepted.has(event.eventId)) continue
+        const authoritativeMembership = materializationPage.events.some((issue) =>
+          hasAuthoritativeJiraFixVersions(issue) && isReleaseContainmentForIssue(event, issue)
+        )
+        if (!authoritativeMembership) continue
+        const receipt = yield* materializeRelationship(persistence, cryptoService, scope, event, true, true)
+        nodeCount += receipt.nodeCount
+        relationshipCount += receipt.relationshipCount
+      }
     }
     relationshipCount += yield* retireMissingJiraReleaseContainments(
       persistence,
@@ -2066,7 +2091,8 @@ export const materializeNormalizedPluginPage = Effect.fn(
       scope,
       acceptedEvents
     )
-    if (acceptedEvents.length > 0 || entityProjectionCount > 0) {
+    // Replayed provider material also upgrades legacy exact-match rule revisions.
+    {
       const inference = yield* materializeRelationshipInference(
         persistence,
         (identity) => stableUuid(cryptoService, identity, "relationship-inference"),

@@ -170,6 +170,48 @@ const boundedRawInput = (extraEvidence: boolean) => ({
 })
 
 describe("environment readiness evaluation", () => {
+  it("records a target-settings waiver without calling it a verified gate", () => {
+    const raw = rawInput()
+    const waiver = {
+      settingsRevision: 2,
+      settingsAuditId: "01890f6f-6d6a-7cc0-98d2-000000000221",
+      settingsDigest: `sha256:${"c".repeat(64)}`,
+      topologyDigest: `sha256:${"d".repeat(64)}`,
+      auditedAt: "2026-07-15T09:50:00.000Z"
+    }
+    const input = Schema.decodeUnknownSync(EnvironmentReadinessEvaluationInput)({
+      ...raw,
+      definitions: raw.definitions.map((definition) =>
+        definition.factId === "link.issue-pr" ? { ...definition, factId: "pipeline.gate" } : definition
+      ),
+      observations: raw.observations.map((observation) =>
+        observation.factId === "link.issue-pr" ?
+          {
+            ...observation,
+            factId: "pipeline.gate",
+            state: { _tag: "relationship", status: "waived", waiver },
+            evidence: [{
+              evidenceId: evidenceIds.relationship,
+              source: { _tag: "local", origin: "human" },
+              freshness: "current",
+              validity: "valid",
+              reevaluateAt: null
+            }]
+          } :
+          observation
+      )
+    })
+    const assessment = assessEnvironmentReadiness(input)
+    assert.strictEqual(assessment.verdict, "ready")
+    assert.strictEqual(
+      assessment.facts.find(({ definition }) => definition.factId === "pipeline.gate")?.result,
+      "waived"
+    )
+    assert.notInclude(assessment.verifiedFactIds.map(String), "pipeline.gate")
+    assert.strictEqual(assessment.warnings[0]?.code, "gate-waived")
+    assert.strictEqual(assessment.warnings[0]?.waiver?.settingsAuditId, waiver.settingsAuditId)
+  })
+
   it("derives the six canonical states from normalized facts", () => {
     const blocked = assess({ check: "failed" })
     const ready = assess()

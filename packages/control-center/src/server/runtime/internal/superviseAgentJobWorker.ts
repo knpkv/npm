@@ -1,4 +1,4 @@
-/** Shared lifecycle admission and polling loop for durable agent workers. @module */
+/** Shared lifecycle admission, wakeup and drain loop for durable workers. @module */
 import * as Cause from "effect/Cause"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
@@ -7,6 +7,14 @@ import * as Predicate from "effect/Predicate"
 import type { WorkspaceId } from "../../../domain/identifiers.js"
 import type { AgentJobWorkerService } from "../../agent/AgentJobWorker.js"
 import type { ServerLifecycle } from "../ServerLifecycle.js"
+
+interface BackgroundWorkerOptions<Failure, Requirements> {
+  readonly failurePollInterval: Duration.Duration
+  readonly logLabel: string
+  readonly lifecycle: ServerLifecycle["Service"]
+  readonly cycle: Effect.Effect<Duration.Duration, Failure, Requirements>
+  readonly awaitWork?: Effect.Effect<void, never, Requirements>
+}
 
 interface SuperviseAgentJobWorkerOptions {
   readonly failurePollInterval: Duration.Duration
@@ -18,11 +26,10 @@ interface SuperviseAgentJobWorkerOptions {
 }
 
 /** Admit only an active cycle, then stop polling as soon as drain begins. @internal */
-export const superviseAgentJobWorker = Effect.fn("AgentJobWorker.supervise")(function*(
-  options: SuperviseAgentJobWorkerOptions
+export const superviseBackgroundWorker = Effect.fn("BackgroundWorker.supervise")(function*<Failure, Requirements>(
+  options: BackgroundWorkerOptions<Failure, Requirements>
 ) {
-  const cycle = options.worker.runOnce(options.workspaceId).pipe(
-    Effect.map((result) => result._tag === "idle" ? options.idlePollInterval : Duration.zero),
+  const cycle = options.cycle.pipe(
     // eslint-disable-next-line local-rules/require-exact-cause-rethrow -- This lifecycle supervisor logs defects and continues; agent-job-worker.test.ts covers retry and scoped interruption.
     Effect.catchCause((cause) =>
       Cause.hasInterrupts(cause)
@@ -40,7 +47,9 @@ export const superviseAgentJobWorker = Effect.fn("AgentJobWorker.supervise")(fun
         (
           Duration.isZero(nextPollInterval)
             ? Effect.yieldNow
-            : Effect.sleep(nextPollInterval)
+            : options.awaitWork === undefined ?
+            Effect.sleep(nextPollInterval) :
+            Effect.raceFirst(options.awaitWork, Effect.sleep(nextPollInterval))
         ).pipe(Effect.as(false))
       )
       if (drainStarted) return
@@ -54,4 +63,16 @@ export const superviseAgentJobWorker = Effect.fn("AgentJobWorker.supervise")(fun
     )
   )
   yield* Effect.forkScoped(supervise)
+})
+
+/** Agent jobs share the same admission and graceful-drain loop as readiness work. */
+export const superviseAgentJobWorker = Effect.fn("AgentJobWorker.supervise")(function*(
+  options: SuperviseAgentJobWorkerOptions
+) {
+  yield* superviseBackgroundWorker({
+    ...options,
+    cycle: options.worker.runOnce(options.workspaceId).pipe(
+      Effect.map((result) => result._tag === "idle" ? options.idlePollInterval : Duration.zero)
+    )
+  })
 })

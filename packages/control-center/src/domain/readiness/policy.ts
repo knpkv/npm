@@ -64,7 +64,8 @@ export const readinessObservationIsPositive = (
 ): boolean => {
   switch (observation.state._tag) {
     case "relationship":
-      return observation.state.status === "verified" || observation.state.status === "governed"
+      return observation.state.status === "verified" || observation.state.status === "governed" ||
+        observation.state.status === "waived"
     case "approval":
       return observation.state.status === "approved"
     case "check":
@@ -193,6 +194,7 @@ export const readinessFactResult = (
       : "advisory"
   }
   if (readinessObservationIsPositive(observation) && readinessObservationIsCurrent(observation)) {
+    if (observation.state._tag === "relationship" && observation.state.status === "waived") return "waived"
     return "verified"
   }
   const code = readinessNonPositiveCode(observation)
@@ -299,6 +301,13 @@ export const deriveReadinessFindings = (
         gaps.push(factFinding(missingCode(definition), definition, observation))
       }
       continue
+    }
+
+    if (
+      observation.state._tag === "relationship" && observation.state.status === "waived" &&
+      observation.state.waiver !== undefined
+    ) {
+      warnings.push({ ...factFinding("gate-waived", definition, observation), waiver: observation.state.waiver })
     }
 
     const failure = readinessFailureCode(observation)
@@ -443,7 +452,7 @@ export const deriveReadinessStages = (
     ? "failed"
     : activeVerify !== undefined
     ? "pending"
-    : requiredVerify.every(({ result }) => result === "verified")
+    : requiredVerify.every(({ result }) => result === "verified" || result === "waived")
     ? "passed"
     : verify.some(({ observation }) => observation !== null)
     ? "held"
@@ -515,7 +524,9 @@ export const deriveEnvironmentReadinessVerdict = (input: {
     input.stages.build.state === "held" ||
     input.stages.verify.state === "held" ||
     input.stages.production.state === "held" ||
-    input.facts.some(({ definition, result }) => definition.requirement === "required" && result !== "verified")
+    input.facts.some(({ definition, result }) =>
+      definition.requirement === "required" && result !== "verified" && result !== "waived"
+    )
   ) return "held"
   return input.stages.production.state === "succeeded" ? "shipped" : "ready"
 }

@@ -103,6 +103,19 @@ export const RawConfluenceAttachmentPage = Schema.Struct({
 /** Decoded attachment metadata page. @internal */
 export type RawConfluenceAttachmentPage = typeof RawConfluenceAttachmentPage.Type
 
+/** One bounded inventory of provider-asserted global page labels. @internal */
+export const RawConfluenceLabelPage = Schema.Struct({
+  results: Schema.optionalKey(
+    Schema.Array(Schema.Struct({
+      name: boundedString(255),
+      prefix: Schema.Literal("global")
+    })).check(Schema.isMaxLength(100))
+  ),
+  _links: Schema.optionalKey(Schema.Struct({
+    next: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(4_096)))
+  }))
+})
+
 /** One bounded watcher page from the legacy page-notification read endpoint. @internal */
 export const RawConfluenceWatcherPage = Schema.Struct({
   results: Schema.Array(Schema.Struct({
@@ -221,6 +234,13 @@ export const ConfluencePageAttributesV1 = Schema.Struct({
     pagesFetched: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 2 }))
   })),
   taskUpdatesSafe: Schema.optionalKey(Schema.Boolean),
+  linkedReleaseVersions: Schema.optionalKey(
+    Schema.Array(boundedString(100)).check(
+      Schema.isUnique(),
+      Schema.isMaxLength(100)
+    )
+  ),
+  releaseMetadataComplete: Schema.optionalKey(Schema.Boolean),
   contentState: Schema.optionalKey(Schema.Literals(["loaded", "lazy"]))
 }).check(hasMaximumPluginJsonBytes(MaximumPluginPayloadBytes))
 

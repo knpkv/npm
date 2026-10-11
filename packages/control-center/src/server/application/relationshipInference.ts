@@ -5,7 +5,7 @@ import type {
   RelationshipEndpointKind,
   RelationshipKind
 } from "../../domain/deliveryGraph.js"
-import type { EntityId, GraphNodeId, ReleaseId } from "../../domain/identifiers.js"
+import type { EntityId, GovernedActionId, GraphNodeId, ReleaseId } from "../../domain/identifiers.js"
 
 /** One current canonical entity exposed to provider-neutral relationship rules. */
 export interface RelationshipInferenceEntity {
@@ -19,6 +19,12 @@ export interface RelationshipInferenceRelease {
   readonly nodeId: GraphNodeId
   readonly releaseId: ReleaseId
   readonly version: string
+}
+
+export interface PublishedRunbookRelationship {
+  readonly releaseId: ReleaseId
+  readonly pageEntityId: EntityId
+  readonly publicationActionId: GovernedActionId
 }
 
 export type RelationshipInferenceEndpoint =
@@ -36,7 +42,7 @@ export interface RelationshipInferenceCandidate {
   readonly evidenceEntityId: EntityId | null
   readonly identityKey: string
   readonly kind: RelationshipKind
-  readonly lifecycle: "inferred" | "missing"
+  readonly lifecycle: "verified" | "inferred" | "missing"
   readonly observationKey: string
   readonly releaseId: ReleaseId
   readonly ruleId: string
@@ -86,6 +92,10 @@ const OWNED_RULE_IDS = new Set([
   "release-in-confluence-metadata-v1"
 ])
 
+/** Distinguish synchronized rule observations from governed relationship decisions. */
+export const isRelationshipInferenceOwned = (relationship: DeliveryRelationship): boolean =>
+  relationship.provenance._tag === "rule" && OWNED_RULE_IDS.has(relationship.provenance.ruleId)
+
 const present = (entity: RelationshipInferenceEntity): boolean => entity.projection.entityState === "present"
 
 const resolved = (kind: RelationshipEndpointKind, nodeId: GraphNodeId): RelationshipInferenceEndpoint => ({
@@ -113,16 +123,12 @@ const currentRelationship = (relationship: DeliveryRelationship): boolean =>
 const currentExternalRelationship = (relationship: DeliveryRelationship): boolean =>
   currentRelationship(relationship) &&
   !(
-    relationship.lifecycle._tag === "inferred" &&
-    relationship.provenance._tag === "rule" &&
-    OWNED_RULE_IDS.has(relationship.provenance.ruleId)
+    isRelationshipInferenceOwned(relationship)
   )
 
 const currentOwnedRelationship = (relationship: DeliveryRelationship): boolean =>
   currentRelationship(relationship) &&
-  relationship.lifecycle._tag === "inferred" &&
-  relationship.provenance._tag === "rule" &&
-  OWNED_RULE_IDS.has(relationship.provenance.ruleId)
+  isRelationshipInferenceOwned(relationship)
 
 const currentInferenceRelationship = (relationship: DeliveryRelationship): boolean =>
   relationship.lifecycle._tag !== "rejected" &&
@@ -179,6 +185,11 @@ const observationKey = (...entities: ReadonlyArray<RelationshipInferenceEntity>)
 const inferred = (input: Omit<RelationshipInferenceCandidate, "lifecycle">): RelationshipInferenceCandidate => ({
   ...input,
   lifecycle: "inferred"
+})
+
+const verified = (input: Omit<RelationshipInferenceCandidate, "lifecycle">): RelationshipInferenceCandidate => ({
+  ...input,
+  lifecycle: "verified"
 })
 
 const gap = (input: {
@@ -285,7 +296,8 @@ const addIssueAndTimeCandidates = (
 const addDocumentationCandidates = (
   entities: ReadonlyArray<RelationshipInferenceEntity>,
   releases: ReadonlyArray<RelationshipInferenceRelease>,
-  accumulator: CandidateAccumulator
+  accumulator: CandidateAccumulator,
+  publications: ReadonlyArray<PublishedRunbookRelationship>
 ) => {
   const issues = entities.filter((entity) => entity.projection.details._tag === "issue")
   const releaseVersionCounts = new Map<string, number>()
@@ -310,7 +322,7 @@ const addDocumentationCandidates = (
       for (const releaseId of issue.releaseIds) {
         addCandidate(
           accumulator,
-          inferred({
+          (explicitLink ? verified : inferred)({
             confidence: {
               score: explicitLink ? 0.97 : 0.9,
               rationale: explicitLink
@@ -330,26 +342,37 @@ const addDocumentationCandidates = (
       }
     }
     for (const release of releases) {
-      if ((releaseVersionCounts.get(release.version.toUpperCase()) ?? 0) > 1) continue
+      const publication = publications.find(({ pageEntityId, releaseId }) =>
+        releaseId === release.releaseId && pageEntityId === page.projection.entityId
+      )
+      if (publication === undefined && (releaseVersionCounts.get(release.version.toUpperCase()) ?? 0) > 1) continue
       const explicitLink = pageDetails.linkedReleaseVersions?.some(
-        (version) => version.toUpperCase() === release.version.toUpperCase()
+        (version) => version === release.version
       ) ?? false
-      if (!explicitLink && !containsReleaseVersion(pageMetadata, release.version)) continue
+      if (publication === undefined && !explicitLink && !containsReleaseVersion(pageMetadata, release.version)) continue
       addCandidate(
         accumulator,
-        inferred({
+        (publication !== undefined || explicitLink ? verified : inferred)({
           confidence: {
-            score: explicitLink ? 0.96 : 0.88,
-            rationale: explicitLink
+            score: publication !== undefined ? 1 : explicitLink ? 0.96 : 0.88,
+            rationale: publication !== undefined
+              ? `Governed publication ${publication.publicationActionId} created this exact release runbook.`
+              : explicitLink
               ? `Confluence metadata links release ${release.version}.`
               : `Confluence page metadata contains release ${release.version}.`
           },
           evidenceEntityId: page.projection.entityId,
           identityKey: candidateIdentity("documented-by", release.releaseId, release.nodeId, page.nodeId),
           kind: "documented-by",
-          observationKey: observationKey(page),
+          observationKey: `${observationKey(page)}${
+            publication === undefined ? "" : `:publication:${publication.publicationActionId}`
+          }`,
           releaseId: release.releaseId,
-          ruleId: explicitLink ? "confluence-release-link-v1" : "release-in-confluence-metadata-v1",
+          ruleId: publication !== undefined
+            ? "governed-confluence-publication-v1"
+            : explicitLink
+            ? "confluence-release-link-v1"
+            : "release-in-confluence-metadata-v1",
           source: resolved("release", release.nodeId),
           target: resolved("page", page.nodeId)
         })
@@ -360,11 +383,12 @@ const addDocumentationCandidates = (
 
 /**
  * Infer a deterministic relationship set from current canonical facts. Rules
- * only propose `inferred` or `missing`; confirmation remains governed.
+ * verify exact identifiers; fuzzy matches remain inferred until governed confirmation.
  */
 export const deriveRelationshipInference = (input: {
   readonly entities: ReadonlyArray<RelationshipInferenceEntity>
   readonly minimumConfidenceScore?: number
+  readonly publishedRunbooks?: ReadonlyArray<PublishedRunbookRelationship>
   readonly rejectedCandidateIdentityKeys?: ReadonlySet<string>
   readonly releases: ReadonlyArray<RelationshipInferenceRelease>
   readonly relationships: ReadonlyArray<DeliveryRelationship>
@@ -415,15 +439,22 @@ export const deriveRelationshipInference = (input: {
     )
     for (const issue of issues) {
       const issueDetails = issue.projection.details
-      if (issueDetails._tag !== "issue" || !containsToken(metadata(pullRequest), issueDetails.key)) continue
+      if (issueDetails._tag !== "issue") continue
+      const titleMatch = containsToken(pullRequest.projection.title, issueDetails.key)
+      const branchMatch = containsToken(details.sourceBranch, issueDetails.key)
+      if (!titleMatch && !branchMatch) continue
       for (const releaseId of issue.releaseIds) {
         const identityKey = candidateIdentity("implements", releaseId, pullRequest.nodeId, issue.nodeId)
         const accepted = addCandidate(
           accumulator,
-          inferred({
+          verified({
             confidence: {
-              score: containsToken(pullRequest.projection.title, issueDetails.key) ? 0.98 : 0.94,
-              rationale: `The immutable pull-request metadata contains Jira key ${issueDetails.key}.`
+              score: 1,
+              rationale: titleMatch
+                ? `Exact Jira key ${issueDetails.key} in pull-request title: ${
+                  pullRequest.projection.title.slice(0, 800)
+                }`
+                : `Exact Jira key ${issueDetails.key} in source branch: ${details.sourceBranch.slice(0, 800)}`
             },
             evidenceEntityId: pullRequest.projection.entityId,
             identityKey,
@@ -496,9 +527,9 @@ export const deriveRelationshipInference = (input: {
         const identityKey = candidateIdentity("delivered-by", releaseId, pullRequest.nodeId, pipeline.nodeId)
         const accepted = addCandidate(
           accumulator,
-          inferred({
+          verified({
             confidence: {
-              score: 0.99,
+              score: 1,
               rationale:
                 `The pipeline trigger revision exactly matches pull-request head ${pullRequestDetails.headRevision}.`
             },
@@ -549,11 +580,11 @@ export const deriveRelationshipInference = (input: {
   }
 
   addIssueAndTimeCandidates(entities, accumulator)
-  addDocumentationCandidates(entities, input.releases, accumulator)
+  addDocumentationCandidates(entities, input.releases, accumulator, input.publishedRunbooks ?? [])
   const unique = new Map(accumulator.candidates.map((candidate) => [candidate.identityKey, candidate]))
   const candidateEdges = new Set(
     [...unique.values()].flatMap((candidate) =>
-      candidate.lifecycle === "inferred" && candidate.source._tag === "resolved" && candidate.target._tag === "resolved"
+      candidate.lifecycle !== "missing" && candidate.source._tag === "resolved" && candidate.target._tag === "resolved"
         ? [`${candidate.kind}:${candidate.releaseId}:${candidate.source.nodeId}:${candidate.target.nodeId}`]
         : []
     )
@@ -566,9 +597,7 @@ export const deriveRelationshipInference = (input: {
   )
   const obsoleteRelationshipIds = input.relationships.flatMap((relationship) => {
     const gapKey = relationshipGapKey(relationship)
-    const obsoleteInference = relationship.lifecycle._tag === "inferred" &&
-      relationship.provenance._tag === "rule" &&
-      OWNED_RULE_IDS.has(relationship.provenance.ruleId) &&
+    const obsoleteInference = currentOwnedRelationship(relationship) &&
       relationship.scope?._tag === "release" &&
       !candidateEdges.has(
         `${relationship.kind}:${relationship.scope.releaseId}:${relationship.sourceNodeId}:${relationship.targetNodeId}`
