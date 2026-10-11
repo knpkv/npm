@@ -21,14 +21,22 @@ export type ApprovalWorkerRegistration = {
   ) => Promise<void>
 }
 
-export type ApprovalWorkerClient = {
+/** A window the notification click may focus. */
+export type ApprovalWorkerFocusTarget = {
   readonly focus: () => Promise<void>
-  readonly navigate: (url: string) => Promise<void>
+}
+
+export type ApprovalWorkerClient = ApprovalWorkerFocusTarget & {
+  /** Return the navigated client to focus, or null when the browser cannot navigate this client. */
+  readonly navigate: (url: string) => Promise<ApprovalWorkerFocusTarget | null>
   readonly url: string
 }
 
 export type ApprovalWorkerClients = {
-  readonly matchAll: () => Promise<ReadonlyArray<ApprovalWorkerClient>>
+  /** Return only window clients controlled by the notification service worker. */
+  readonly matchAll: (
+    options: { readonly includeUncontrolled: false; readonly type: "window" }
+  ) => Promise<ReadonlyArray<ApprovalWorkerClient>>
   readonly openWindow: (url: string) => Promise<void>
 }
 
@@ -85,17 +93,20 @@ export const matchesApprovalDeepLink = (
   dataset.approvalHost?.toLowerCase() === target.host.toLowerCase() &&
   dataset.approvalJob === target.jobId
 
+/** Navigate before spending the click's sole interaction grant on focus or fallback opening. */
 export const handleNotificationClick = async (
   clients: ApprovalWorkerClients,
   deepLinkUrl: string
 ): Promise<void> => {
-  const windows = await clients.matchAll()
   const target = new URL(deepLinkUrl)
-  const canonical = windows.find((client) => new URL(client.url).origin === target.origin)
-  if (canonical !== undefined) {
-    await canonical.navigate(deepLinkUrl)
-    await canonical.focus()
+  const navigated = await Effect.runPromise(Effect.result(Effect.tryPromise(async () => {
+    const windows = await clients.matchAll({ includeUncontrolled: false, type: "window" })
+    const canonical = windows.find((client) => new URL(client.url).origin === target.origin)
+    return canonical === undefined ? null : await canonical.navigate(deepLinkUrl)
+  })))
+  if (Result.isFailure(navigated) || navigated.success === null) {
+    await clients.openWindow(deepLinkUrl)
     return
   }
-  await clients.openWindow(deepLinkUrl)
+  await navigated.success.focus()
 }

@@ -15,7 +15,8 @@ export const BlockedAgent = Schema.Struct({
   ...ConnectAgent.fields,
   firstLine: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(1024))),
   blocker: Schema.optionalKey(Schema.Boolean),
-  approvalJobId: Schema.optionalKey(Label)
+  approvalJobId: Schema.optionalKey(Label),
+  eventId: Schema.optionalKey(Label)
 })
 export const BlockedObservation = Schema.Struct({
   host: ConnectAgent.fields.host,
@@ -36,7 +37,8 @@ export const BlockedPushPayload = Schema.Struct({
   agentName: ConnectAgent.fields.name,
   state: Schema.Literals(["blocked", "needs-you"]),
   firstLine: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(240), Schema.isPattern(/^[^\p{Cc}]+$/u)),
-  approvalJobId: Schema.NullOr(Label)
+  approvalJobId: Schema.NullOr(Label),
+  eventId: Schema.optionalKey(Label)
 })
 export type BlockedPushPayload = typeof BlockedPushPayload.Type
 

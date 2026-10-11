@@ -10,6 +10,7 @@ export const blockedPushDeepLink = (canonicalUrl: string, payload: BlockedPushPa
   url.searchParams.set("host", payload.host)
   url.searchParams.set("agent", payload.agentId)
   url.searchParams.set("open", "stage")
+  if (payload.eventId !== undefined) url.searchParams.set("event", payload.eventId)
   return url.href
 }
 
