@@ -3,15 +3,27 @@
  * keep opaque edges for iOS and platform masks. The white outline badge carries only alpha.
  * @module
  */
+import { Data } from "effect"
 import { relayChefArt } from "./internal/relay-chef-art.js"
 
 export type RelayIconVariant = "badge" | "full-bleed" | "tile" | "favicon"
 
+class RelayIconGeometryError extends Data.TaggedError("RelayIconGeometryError") {}
+
+/** Remove corner rounding only from the tile background, refusing a changed drawing structure. */
+export const fullBleedChefTile = (source: string): string => {
+  const background = /<rect\b(?=[^>]*\bwidth="512")(?=[^>]*\bheight="512")[^>]*>/
+  if (!background.test(source)) throw new RelayIconGeometryError()
+  const fullBleed = source.replace(background, (rect) => rect.replace(/\s+rx="[^"]*"/, ""))
+  if (/\brx=/.test(background.exec(fullBleed)?.[0] ?? "")) throw new RelayIconGeometryError()
+  return fullBleed
+}
+
 /** Standalone Chef SVG. System colours are resolved before the monochrome badge is rasterised. */
 export const relayIconSvg = (variant: RelayIconVariant, size: number): string => {
   const source = {
-    badge: () => relayChefArt.contrast.replaceAll("currentColor", "#FFFFFF").replaceAll("Canvas", "none"),
-    "full-bleed": () => relayChefArt.tile.replace(" rx=\"115\"", ""),
+    badge: () => relayChefArt.contrastBadge.replaceAll("currentColor", "#FFFFFF").replaceAll("Canvas", "none"),
+    "full-bleed": () => fullBleedChefTile(size === 180 ? relayChefArt.tileApple : relayChefArt.tile),
     tile: () => relayChefArt.tile,
     favicon: () => relayChefArt.favicon
   } satisfies Record<RelayIconVariant, () => string>
