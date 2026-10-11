@@ -4,7 +4,13 @@ import { Effect, FileSystem, Path, Result, Schema } from "effect"
 import { DatabaseSync } from "node:sqlite"
 import { AgentArchiveStore } from "../src/archive-store.js"
 import { AgentPostStore } from "../src/post-store.js"
-import { ConnectPost, ConnectPostBody, ConnectPostRequest } from "../src/posts.js"
+import {
+  ConnectLastWords,
+  ConnectPost,
+  ConnectPostBody,
+  ConnectPostRequest,
+  connectPostTextLimit
+} from "../src/posts.js"
 
 const body: ConnectPostBody = { kind: "status", text: "Tests passing", eventId: "event-one" }
 const openStore = Effect.fn("PostTest.open")(function*() {
@@ -18,7 +24,23 @@ const openStore = Effect.fn("PostTest.open")(function*() {
 })
 
 describe("agent posts", () => {
+  it("rejects blank writes while preserving historical whitespace and valid text unchanged", () => {
+    for (const text of ["", " ", " \t\n "]) {
+      const request = { ...body, text, agentId: "agent-one" }
+      expect(Schema.is(ConnectPostBody)({ ...body, text })).toBe(false)
+      expect(Schema.is(ConnectPostRequest)(request)).toBe(false)
+    }
+    for (const text of [" ", " \t\n "]) {
+      const post = { ...body, text, agentId: "agent-one", host: "host-a", createdAt: 0, sequence: 1 }
+      expect(Schema.decodeUnknownSync(ConnectPost)(post).text).toBe(text)
+      expect(Schema.decodeUnknownSync(ConnectLastWords)({ text, createdAt: 0 }).text).toBe(text)
+    }
+    const text = " \thttps://example.test/status\n "
+    expect(Schema.decodeUnknownSync(ConnectPostBody)({ ...body, text }).text).toBe(text)
+  })
+
   it("bounds status at 240 characters and other kinds at 1024", () => {
+    expect(connectPostTextLimit).toEqual({ status: 240, other: 1024 })
     for (const kind of ["status", "progress", "skill-feedback", "note", "blocker"]) {
       const maximum = kind === "status" ? 240 : 1024
       expect(Schema.is(ConnectPostBody)({ ...body, kind, text: "x".repeat(maximum) })).toBe(true)
@@ -36,6 +58,57 @@ describe("agent posts", () => {
   })
 
   it.layer(NodeServices.layer)((it) => {
+    it.effect("keeps stored whitespace reports readable in pages, latest reads and archive last words", () =>
+      Effect.gen(function*() {
+        const store = yield* openStore()
+        const archive = yield* Effect.acquireRelease(
+          AgentArchiveStore.open(store.path),
+          (opened) => Effect.sync(() => opened.close())
+        )
+        yield* archive.observe({
+          host: "HOST-A",
+          complete: true,
+          observedAt: 0,
+          agents: [{
+            id: "agent-one",
+            host: "HOST-A",
+            name: "worker",
+            kind: "worker",
+            state: "working",
+            work: "project",
+            lastActivityAt: 0
+          }]
+        })
+        const database = yield* Effect.acquireRelease(
+          Effect.sync(() => new DatabaseSync(store.path)),
+          (opened) => Effect.sync(() => opened.close())
+        )
+        const text = " \t\n "
+        yield* Effect.sync(() =>
+          database.prepare(`INSERT INTO connect_posts
+            (host, agent_id, event_id, kind, text, goal_step, created_at)
+            VALUES ('host-a', 'agent-one', 'legacy-blank', 'status', ?, NULL, 1)`).run(text)
+        )
+        const page = yield* store.page("HOST-A", "agent-one", null, 2)
+        expect(page.posts).toHaveLength(1)
+        expect(page.posts[0]?.text).toBe(text)
+        expect((yield* store.latest("HOST-A", "agent-one", 2))?.text).toBe(text)
+        yield* archive.observe({ host: "HOST-A", complete: true, agents: [], observedAt: 3 })
+        yield* archive.observe({ host: "HOST-A", complete: true, agents: [], observedAt: 300_003 })
+        expect((yield* archive.page()).agents[0]).toMatchObject({ lastWords: { text, createdAt: 1 } })
+      }).pipe(Effect.scoped))
+
+    it.effect("rejects new whitespace-only posts with the text field detail", () =>
+      Effect.gen(function*() {
+        const store = yield* openStore()
+        for (const text of [" ", " \t\n "]) {
+          const result = yield* Effect.result(store.post("HOST-A", "agent-one", { ...body, text }, 1))
+          if (Result.isSuccess(result)) return yield* Effect.die("blank write accepted")
+          expect(result.failure).toMatchObject({ _tag: "InvalidReport", detail: "text is empty" })
+        }
+        expect((yield* store.page("HOST-A", "agent-one", null, 2)).posts).toEqual([])
+      }).pipe(Effect.scoped))
+
     it.effect("retries preserve the original post and changed event payloads conflict", () =>
       Effect.gen(function*() {
         const store = yield* openStore()

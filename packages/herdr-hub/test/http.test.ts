@@ -4,6 +4,7 @@ import { makeDeterministicLanguageModel } from "@knpkv/ai-runtime"
 import {
   connectAgentPageMaxRecords,
   ConnectArchivePage,
+  ConnectPost,
   FleetConnectAgentPage,
   FleetLimits,
   FleetUsage,
@@ -2192,6 +2193,27 @@ esac
       expect((yield* post(body)).body).toBe(first.body)
       expect((yield* post({ ...body, text: "Changed" })).status).toBe(409)
       expect((yield* post({ ...body, text: "x".repeat(241) })).status).toBe(400)
+      for (
+        const fixture of [
+          {
+            kind: "status",
+            text: "x".repeat(241),
+            detail: "text is 241 characters; status posts are limited to 240 (other kinds 1024)"
+          },
+          { kind: "note", text: "x".repeat(1025), detail: "text is 1025 characters; note posts are limited to 1024" },
+          { kind: "status", text: "", detail: "text is empty" },
+          { kind: "note", text: " \t\n ", detail: "text is empty" }
+        ]
+      ) {
+        const rejected = yield* post({ ...body, kind: fixture.kind, text: fixture.text })
+        expect(rejected.status).toBe(400)
+        expect(
+          Schema.decodeUnknownSync(
+            Schema.fromJsonString(Schema.Struct({ error: Schema.String, detail: Schema.String }))
+          )(rejected.body)
+        )
+          .toEqual({ error: "InvalidReport", detail: fixture.detail })
+      }
       expect((yield* post({ ...body, agentId: "agent-foreign" })).body).toContain("UnboundAgent")
       expect((yield* post({ ...body, agentId: "agent-sibling" })).status).toBe(200)
       const page = yield* Effect.promise(() =>
@@ -2203,6 +2225,13 @@ esac
       expect(directory.body).toContain("\"voice\":{\"text\":\"Tests passing\",\"createdAt\":100}")
       const agents = Schema.decodeUnknownSync(Schema.fromJsonString(FleetConnectAgentPage))(directory.body).agents
       expect(agents.find(({ id }) => id === "agent-one")?.lastActivityAt).toBe(100)
+      const withExtraField = yield* post({ ...body, eventId: "extra-field", extra: "ignored" })
+      expect(withExtraField.status).toBe(200)
+      expect(Schema.decodeUnknownSync(Schema.fromJsonString(ConnectPost))(withExtraField.body).text).toBe(body.text)
+      const urlText = "https://example.test/status ".padEnd(240, "x")
+      const withUrl = yield* post({ ...body, eventId: "url-at-limit", text: urlText })
+      expect(withUrl.status).toBe(200)
+      expect(Schema.decodeUnknownSync(Schema.fromJsonString(ConnectPost))(withUrl.body).text).toBe(urlText)
       partial = true
       expect((yield* post({ ...body, eventId: "event-two" })).body).toContain("Unavailable")
       partial = false

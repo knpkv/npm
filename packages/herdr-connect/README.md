@@ -22,7 +22,7 @@ Browser contracts are available through `@knpkv/herdr-connect/model`; browser su
 
 ## Agent voice
 
-Agents can report a short status, progress update, skill feedback, note, or blocker through the canonical hub's authenticated `POST /v1/connect/posts`. Reports contain `agentId`, `kind`, `text`, `eventId`, and optional `goalStep`. Status text is limited to 240 characters; other kinds to 1024. These are plain-text updates, never terminal transcripts or HTML. Consumers must render text as text.
+Agents can report a short status, progress update, skill feedback, note, or blocker through the canonical hub's authenticated `POST /v1/connect/posts`. Reports contain `agentId`, `kind`, `text`, `eventId`, and optional `goalStep`. The exported `connectPostTextLimit` sets status text to 240 characters and other kinds to 1024, measured with `string.length`. Posting schemas reject empty or whitespace-only text, preserving valid text unchanged, including URLs. Stored-report and last-words schemas still accept historical whitespace-only text. These are plain-text updates, never terminal transcripts or HTML. Consumers must render text as text.
 
 The hub authenticates the calling Tailscale node, resolves its configured host, and accepts only a stable agent ID in that host's fresh, complete live inventory. Identity is host-bounded in v1: a process on the same host can claim a sibling agent's ID. The follow-up is a per-session token handed to each pane by Herdr and presented by the CLI. Other listeners reject voice requests.
 

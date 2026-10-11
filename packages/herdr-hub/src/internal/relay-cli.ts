@@ -1,13 +1,6 @@
 import { collectBoundedText } from "@knpkv/bounded-io"
-import {
-  Conflict,
-  ConnectPost,
-  ConnectPostBody,
-  Denied,
-  InvalidReport,
-  Unavailable,
-  UnboundAgent
-} from "@knpkv/herdr-connect"
+import type { ConnectPostBody } from "@knpkv/herdr-connect"
+import { Conflict, ConnectPost, Denied, InvalidReport, Unavailable, UnboundAgent } from "@knpkv/herdr-connect"
 import { decodeBoundedResponseJson, loadConfiguration } from "@knpkv/herdr-fleet"
 import { AgentStableId, AgentWorkerIdentity, type HostConfiguration } from "@knpkv/herdr-fleet/model"
 import { Config, Console, Crypto, Effect, Option, Schema } from "effect"
@@ -15,6 +8,7 @@ import { Argument, Command, Flag } from "effect/cli"
 import { HttpClient, HttpClientRequest } from "effect/http"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { fleetConfigPath } from "./config-path.js"
+import { decodeRelayPostBody } from "./relay-post-validation.js"
 
 const ReportingPane = Schema.fromJsonString(Schema.Struct({
   result: Schema.Struct({
@@ -137,12 +131,8 @@ export const makeRelayPostCommand = <A, E, R>(report: (body: ConnectPostBody) =>
           Effect.mapError(() => new Unavailable({ operation: "post.event-id" }))
         )
       }
-      const body = yield* Schema.decodeUnknownEffect(ConnectPostBody)(
+      const body = yield* decodeRelayPostBody(
         Option.isSome(goalStep) ? { ...fields, goalStep: goalStep.value } : fields
-      ).pipe(
-        Effect.mapError(() =>
-          new InvalidReport({ detail: "status text is limited to 240 characters; other posts to 1024" })
-        )
       )
       yield* report(body)
     })

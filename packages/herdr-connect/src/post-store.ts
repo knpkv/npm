@@ -1,5 +1,5 @@
 import { openPrivateSqlite, type PrivateSqlite } from "@knpkv/herdr-fleet/sqlite"
-import { Effect, Schema, Semaphore } from "effect"
+import { Effect, Schema, SchemaIssue, Semaphore } from "effect"
 import type { DatabaseSync, SQLOutputValue } from "node:sqlite"
 import { initializePosts } from "./internal/post-database.js"
 import {
@@ -76,7 +76,13 @@ export class AgentPostStore {
     now: number
   ) {
     const body = yield* Schema.decodeUnknownEffect(ConnectPostBody)(input).pipe(
-      Effect.mapError(() => new InvalidReport({ detail: "invalid post body" }))
+      Effect.mapError((error) =>
+        new InvalidReport({
+          detail: SchemaIssue.makeFormatterStandardSchemaV1()(error.issue).issues
+            .map(({ message, path }) => `${path?.map(String).join(".") || "post"} ${message}`)
+            .join("; ")
+        })
+      )
     )
     yield* Schema.decodeUnknownEffect(ConnectPost)({ ...body, host, agentId, createdAt: now, sequence: 1 }).pipe(
       Effect.mapError(() => new InvalidReport({ detail: "invalid post identity or timestamp" }))

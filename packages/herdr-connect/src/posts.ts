@@ -2,24 +2,30 @@ import { AgentStableId, FleetHostName } from "@knpkv/herdr-fleet/model"
 import { Schema } from "effect"
 
 const Identifier = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(256))
-const Text = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(1024))
+/** Maximum text lengths, measured with string.length, for reports and their last words. */
+export const connectPostTextLimit = Object.freeze({ status: 240, other: 1024 })
+const Text = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(connectPostTextLimit.other))
+const nonBlankPost = Schema.makeFilter((post: { readonly text: string }) =>
+  post.text.trim().length > 0 ? undefined : { path: ["text"], issue: "is empty" }
+)
 export const ConnectPostKind = Schema.Literals(["status", "progress", "skill-feedback", "note", "blocker"])
 const statusBound = Schema.makeFilter(
   (post: { readonly kind: typeof ConnectPostKind.Type; readonly text: string }) =>
-    post.kind !== "status" || post.text.length <= 240,
-  { expected: "status text of at most 240 characters" }
+    post.kind !== "status" || post.text.length <= connectPostTextLimit.status,
+  { expected: `status text of at most ${connectPostTextLimit.status} characters` }
 )
 export const ConnectPostBody = Schema.Struct({
   kind: ConnectPostKind,
   text: Text,
   eventId: Identifier,
   goalStep: Schema.optionalKey(Identifier)
-}).check(statusBound)
+}).check(statusBound, nonBlankPost)
 export type ConnectPostBody = typeof ConnectPostBody.Type
 
 /** The host is derived from authenticated node identity, never supplied by the reporter. */
 export const ConnectPostRequest = Schema.Struct({ agentId: AgentStableId, ...ConnectPostBody.fields })
-  .check(statusBound)
+  .check(statusBound, nonBlankPost)
+/** Stored reports remain readable with whitespace accepted before the write-only blank check. */
 export const ConnectPost = Schema.Struct({
   host: FleetHostName,
   agentId: AgentStableId,

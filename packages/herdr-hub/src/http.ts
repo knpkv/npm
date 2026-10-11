@@ -17,7 +17,6 @@ import {
   ConnectArchiveCursor,
   ConnectPost,
   ConnectPostCursor,
-  ConnectPostRequest,
   Denied,
   fetchPeerConnectAgents,
   fleetConnectAgents,
@@ -144,6 +143,7 @@ import { readHostLimits, staleWhileRevalidate } from "./host-limits.js"
 import { readHostUsage, usageCache } from "./host-usage.js"
 import { dashboardPage } from "./internal/dashboard-page.js"
 import { type ListenerMode, listenerServesWork } from "./internal/listener.js"
+import { decodeRelayPostRequest } from "./internal/relay-post-validation.js"
 import { relayScrollState, remoteTerminalUrl, terminalSelectionInput } from "./internal/terminal-selection.js"
 import {
   isRelayedScrollState,
@@ -3692,9 +3692,10 @@ export const startHttpServer = async (
                   yield* authorizeWhois(identity, config.allowedUsers, null).pipe(Effect.mapError(() => new Denied()))
                   const machine = config.machines.find(({ nodeId }) => nodeId === identity.Node.StableID)
                   if (machine === undefined) return yield* new Denied()
-                  const body = yield* readJson(request, ConnectPostRequest).pipe(
-                    Effect.mapError(() => new InvalidReport({ detail: "invalid post body" }))
+                  const input = yield* readJson(request, Schema.Unknown).pipe(
+                    Effect.mapError((error) => new InvalidReport({ detail: error.detail }))
                   )
+                  const body = yield* decodeRelayPostRequest(input)
                   const observedAt = now()
                   const inventory = yield* (machine.host.toLowerCase() === config.host.toLowerCase()
                     ? localConnectAgents(config, service, activityStore, relationshipStore, observedAt).pipe(
