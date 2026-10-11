@@ -2,6 +2,21 @@
 
 Released as `@knpkv/herdr-approvals` up to 0.18.0; the headings below are that package's history.
 
+## 0.24.0
+
+### Minor Changes
+
+- [#808](https://github.com/knpkv/npm/pull/808) [`f5e574a`](https://github.com/knpkv/npm/commit/f5e574abb9dec49f205caeefad3d89400cdd9a0e) Thanks [@konopkov](https://github.com/konopkov)! - Register a read-only Usage details module with typed range, time-zone and host selectors. Keep legacy Fleet Usage destinations intact and reuse the hub's existing usage and limits reports.
+
+  SuperappShell accepts an optional typed mobileModules list for the phone bar, with off-bar modules announced on All modules. ModulePageMount.navigate accepts an optional focus destination. Page focus remains the default; null keeps focus on an in-page selector while its URL is replaced.
+
+  Expose the existing stateless UsageTab, browser report loaders, view-state helpers, loopback helpers and report/query types through herdr-connect's browser-safe usage entry. UsageTab's optional presentation selects Limits or Tokens beneath a host-supplied heading; its default Fleet markup and existing UsageSurface behaviour are unchanged. Reports carry no cost, balances, bookings, sessions, paths or prompt prefixes.
+
+### Patch Changes
+
+- Updated dependencies [[`f5e574a`](https://github.com/knpkv/npm/commit/f5e574abb9dec49f205caeefad3d89400cdd9a0e)]:
+  - @knpkv/herdr-connect@0.15.0
+
 ## 0.23.0
 
 ### Minor Changes
