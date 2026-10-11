@@ -85,13 +85,13 @@ worker.onnotificationclick = (event) => {
       try: () =>
         handleNotificationClick(
           {
-            matchAll: () =>
+            matchAll: (options) =>
               worker.clients
-                .matchAll({ includeUncontrolled: true, type: "window" })
+                .matchAll(options)
                 .then((clients) =>
                   clients.map((client) => ({
                     focus: () => client.focus().then(() => undefined),
-                    navigate: (url) => client.navigate(url).then(() => undefined),
+                    navigate: (url) => client.navigate(url).then((navigated) => navigated === null ? null : undefined),
                     url: client.url
                   }))
                 ),

@@ -166,7 +166,7 @@ export class BlockedPushStore {
             ).run(observation.observedAt, host, agent.id)
             continue
           }
-          const payload = Schema.decodeUnknownSync(BlockedPushPayload)({
+          const fields = {
             kind: "agent-blocked",
             host,
             agentId: agent.id,
@@ -176,7 +176,10 @@ export class BlockedPushStore {
               agent.firstLine ?? (bucket === "blocked" ? `${agent.name} is blocked` : `${agent.name} needs you`)
             ),
             approvalJobId: agent.approvalJobId ?? null
-          })
+          }
+          const payload = Schema.decodeUnknownSync(BlockedPushPayload)(
+            agent.eventId === undefined ? fields : { ...fields, eventId: agent.eventId }
+          )
           const current = db.prepare(
             "SELECT started_at FROM blocked_push_episodes WHERE host = ? AND agent_id = ? AND closed_at IS NULL"
           ).get(host, agent.id)
