@@ -42,7 +42,22 @@
     "RankingChart": "../../src/client/components/stats-charts.tsx",
     "SizeDistributionChart": "../../src/client/components/stats-charts.tsx",
     "StalePRs": "../../src/client/components/stats-charts.tsx",
-    "WorkbenchRailView": "../../src/client/components/workbench-rail-view.tsx"
+    "WorkbenchRailView": "../../src/client/components/workbench-rail-view.tsx",
+    "FilterSidebarView": "../../src/client/components/filter-sidebar-view.tsx",
+    "ApproversCard": "../../src/client/components/pr-approvals-view.tsx",
+    "PRApprovalsView": "../../src/client/components/pr-approvals-view.tsx",
+    "PRCommentsView": "../../src/client/components/pr-comments-view.tsx",
+    "PRDescriptionView": "../../src/client/components/pr-description-view.tsx",
+    "PRDetailHeaderView": "../../src/client/components/pr-detail-header-view.tsx",
+    "PRDetailView": "../../src/client/components/pr-detail-view.tsx",
+    "PRFilesDiffView": "../../src/client/components/pr-files-diff-view.tsx",
+    "PRHealthBreakdownView": "../../src/client/components/pr-health-breakdown-view.tsx",
+    "PRLifecycleView": "../../src/client/components/pr-lifecycle-view.tsx",
+    "PRListView": "../../src/client/components/pr-list-view.tsx",
+    "PRRequirementDialogsView": "../../src/client/components/pr-requirement-dialogs-view.tsx",
+    "PRRevisionView": "../../src/client/components/pr-revision-view.tsx",
+    "RecentActivityView": "../../src/client/components/recent-activity-view.tsx",
+    "SearchBarView": "../../src/client/components/search-bar-view.tsx"
   },
   "libOverrides": {
     "dts.mjs": "components are re-exported through an aggregator entry; their own callback/aria props were dropped as inherited DOM noise"
@@ -63,6 +78,24 @@
     },
     "PRRow": {
       "cardMode": "column"
+    },
+    "PRDetailHeaderView": {
+      "cardMode": "column"
+    },
+    "PRDetailView": {
+      "cardMode": "column"
+    },
+    "PRRequirementDialogsView": {
+      "cardMode": "single",
+      "primaryStory": "DockerRequired"
+    },
+    "PRListView": {
+      "cardMode": "column",
+      "viewport": "1100x1600"
+    },
+    "PRFilesDiffView": {
+      "cardMode": "column",
+      "viewport": "1200x700"
     }
   }
 }
