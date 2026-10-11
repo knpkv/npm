@@ -2,6 +2,52 @@
 
 Released as `@knpkv/herdr-approvals` up to 0.18.0; the headings below are that package's history.
 
+## 0.26.0
+
+### Minor Changes
+
+- [#821](https://github.com/knpkv/npm/pull/821) [`9ffdbef`](https://github.com/knpkv/npm/commit/9ffdbef7fe8493d241580043cb5cad4521174423) Thanks [@konopkov](https://github.com/konopkov)! - Notify subscribed users when agents need attention, with durable episode deduplication, one reminder, visible-stage acknowledgement, per-agent mute and quiet hours in a validated IANA time zone. Add application-owned stage observation and a pure shared state-bucket helper to Connect.
+
+- [#828](https://github.com/knpkv/npm/pull/828) [`4d9887b`](https://github.com/knpkv/npm/commit/4d9887baa4cc085bbba5f2c2ece864f1b33cc938) Thanks [@konopkov](https://github.com/konopkov)! - A failed `nix.check` or `nix.apply` now reports the tail of its stdout after its stderr, so an error a tool writes to stdout (such as `brew bundle`'s) is no longer lost. Parsed commands' failures are unchanged.
+
+- [#831](https://github.com/knpkv/npm/pull/831) [`a530ddf`](https://github.com/knpkv/npm/commit/a530ddffe40953328aa6e216d42e66a836ffd681) Thanks [@konopkov](https://github.com/konopkov)! - Add host-local, read-only Code contracts and saved-grant provider authority with mandatory
+  authenticated-caller audit before execution. Existing owner prompts and provider writes retain
+  their pairing and CSRF protection. Code content never enters peer/fleet aggregation or hub Relay.
+
+  Core adds fresh saved-permission checks, an existing-only private database verifier and a bounded
+  cache read/audit attachment that refuses unknown schemas without migration or permission repair.
+  The Code host factory reuses one provider and retries failed scoped attachments after two seconds.
+
+  Hub adds explicit credential-host configuration and read-only Code routes. Route callbacks receive
+  the decoded ModuleCaller; dispatch authorization now returns that typed caller rather than an
+  unknown value. Consumers must update authorization effects to return the authenticated login.
+
+  Code adds a controlled CodeHostView through the browser-safe views entry and a separate host
+  stylesheet. The hub mounts its queue, cached approvals and immutable diff pages with active-only
+  abortable reads, opaque target selectors and explicit unavailable states. ModuleViews accepts an
+  optional decorative navigationIcon; its absence retains the shell's default glyph.
+
+  The controlled Code view optionally delegates deliberate target navigation to its host while
+  modified anchors retain browser behavior. Immutable diff readings include their read time and
+  cached source timestamp; a changed cached PR warns that a retained diff may be outdated without
+  initiating another provider read.
+
+  The workspace views type entry uses built declarations to isolate owner source aliases. Build Code
+  web before checking hub consumers. Build and prepack force declaration emission after output cleanup;
+  published views types, runtime and stylesheet paths remain unchanged.
+
+### Patch Changes
+
+- [#830](https://github.com/knpkv/npm/pull/830) [`96bd47e`](https://github.com/knpkv/npm/commit/96bd47eb282ec5b9321e980f693574406072d41d) Thanks [@konopkov](https://github.com/konopkov)! - Keep local blocked notifications available when peer discovery fails, deliver to up to four subscriptions concurrently while preserving each subscription's episode order, and avoid repeated stage reports when an inline callback changes identity.
+
+- [#832](https://github.com/knpkv/npm/pull/832) [`9561de3`](https://github.com/knpkv/npm/commit/9561de3bcdc8cf21598087700dc742993d143cda) Thanks [@konopkov](https://github.com/konopkov)! - Report the text field, actual length and kind-specific limit when Relay posts are too long. CLI and HTTP validation share the same errors and reject empty or whitespace-only text while accepting URLs within the limit.
+
+  Export shared Connect post text limits and reject blank text only in the published posting schemas. Historical whitespace-only reports and last words stay readable. Hub validation uses the published schemas as its authority.
+
+- Updated dependencies [[`9ffdbef`](https://github.com/knpkv/npm/commit/9ffdbef7fe8493d241580043cb5cad4521174423), [`96bd47e`](https://github.com/knpkv/npm/commit/96bd47eb282ec5b9321e980f693574406072d41d), [`9561de3`](https://github.com/knpkv/npm/commit/9561de3bcdc8cf21598087700dc742993d143cda), [`1f5333d`](https://github.com/knpkv/npm/commit/1f5333d6b0aafb0baa5375c7659d7b26f1a3f180), [`a530ddf`](https://github.com/knpkv/npm/commit/a530ddffe40953328aa6e216d42e66a836ffd681)]:
+  - @knpkv/herdr-connect@0.16.0
+  - @knpkv/codecommit-web@0.33.0
+
 ## 0.25.0
 
 ### Minor Changes

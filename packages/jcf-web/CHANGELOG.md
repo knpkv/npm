@@ -1,5 +1,11 @@
 # @knpkv/jcf-web
 
+## 0.9.0
+
+### Minor Changes
+
+- [#829](https://github.com/knpkv/npm/pull/829) [`c2aac69`](https://github.com/knpkv/npm/commit/c2aac696f22073db888290e1106a92d66cfe7ed8) Thanks [@konopkov](https://github.com/konopkov)! - Running jcf-web with no arguments signs you in: reuses the running week view or starts one, opens the browser, and prints the link. `jcf-web serve` keeps the print-only start for services.
+
 ## 0.8.6
 
 ### Patch Changes
