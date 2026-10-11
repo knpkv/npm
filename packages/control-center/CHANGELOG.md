@@ -1,5 +1,11 @@
 # @knpkv/control-center
 
+## 0.14.1
+
+### Patch Changes
+
+- [#796](https://github.com/knpkv/npm/pull/796) [`140a9e6`](https://github.com/knpkv/npm/commit/140a9e67a56273e3411cd80256ab4ee79578f7df) Thanks [@konopkov](https://github.com/konopkov)! - Keep missing delivery links isolated across provider accounts whose repositories share pull-request numbers. No migration is required; existing placeholders are kept as-is.
+
 ## 0.14.0
 
 ### Minor Changes
