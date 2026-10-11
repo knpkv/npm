@@ -17,15 +17,27 @@ every model request in a private SQLite store, polls Claude's limits, and serves
 
 ## Running it
 
-Installed from npm, the binary is `agent-usage` (`agent-usage serve`, `agent-usage login`,
+Installed from npm, the binary is `agent-usage` (`agent-usage`, `agent-usage serve`, `agent-usage login`,
 `agent-usage ingest`, `agent-usage limits`). From this repository:
 
 ```bash
 pnpm build                                       # builds the workspace, this package included
+pnpm --filter @knpkv/agent-usage start           # signs in, reusing the server or starting one
 pnpm --filter @knpkv/agent-usage start serve     # prints the URL that gets you in
 pnpm --filter @knpkv/agent-usage start login     # a fresh URL from the running server; --open opens it
 pnpm --filter @knpkv/agent-usage start ingest    # one pass, then a summary; --json for one JSON value
 ```
+
+With no subcommand, `agent-usage` asks the running server for a fresh sign-in link. It prints the
+link, opens the browser, and exits, leaving that server untouched. If nothing is running on the
+store, it starts the server and stays in the foreground until SIGINT or SIGTERM. Closing the
+browser tab does not stop it. Unsafe sockets and failed exchanges stop the command rather than
+starting another server.
+
+Use `--no-open` to print the link without opening a browser. `BROWSER=none`, an active `CI` flag,
+or stdout without a terminal also skips opening and prints why. `--port N` overrides `PORT` or
+the default `3112` only when this run starts a server; it is ignored when reusing one. `serve`
+remains print-only for service managers, and `login [--open]` only asks a running server.
 
 `serve` ingests every minute and polls Claude's limits every five. The page stays current by
 itself: after each ingest pass and limit poll is stored, the server tells the page over a WebSocket
@@ -47,7 +59,8 @@ days. The list is capped at 200 rows, most cost first, with a count of the rest.
 ### Getting back in
 
 `agent-usage login` asks the running server for a fresh link and prints it; `agent-usage login
---open` also opens it in the browser (`xdg-open` on Linux, `open` on macOS). Each link follows the
+--open` also opens it using the shared browser opener. Browser failures are reported on stderr;
+the link stays on stdout for manual opening. Each link follows the
 startup link's rules: one use, one minute, and a newer link replaces one not yet used. Use it when
 the startup link has expired, the session cookie is gone, or the server runs as a service whose
 output you do not watch.
@@ -261,9 +274,9 @@ do not publish, so any split would be invented.
 - Nothing leaves the machine except the Claude limit poll to Anthropic and, when installed, `acli`
   lookups of ticket keys against your Jira.
 - The session cookie (`agent_usage_owner`, `HttpOnly`, `SameSite=Strict`, path `/api`) is minted per
-  process. One-time codes are minted at startup and on each `agent-usage login`; they reach only
-  stdout of `serve` or `login`, are never logged, and with `--open` are on the opener's command line
-  for the moment it runs.
+  process. One-time codes are minted at startup and on each sign-in request; they reach only
+  stdout of the root command, `serve` or `login`, are never logged, and when opening a browser are
+  on the opener's command line for the moment it runs.
 
 Each machine keeps its own store. Every row names its machine, so a combined view across machines
 can come later without migrating anything.

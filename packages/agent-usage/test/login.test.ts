@@ -5,7 +5,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { createServer } from "node:net"
 import { join } from "node:path"
 import { LoginReplyInvalid, ServerNotRunning, SocketPathUnsafe, SocketRefused } from "../src/server/ControlSocket.js"
-import { describeLoginFailure, openerFor } from "../src/server/Login.js"
+import { describeLoginFailure } from "../src/server/Login.js"
 
 describe("login messages", () => {
   it("tells the owner what to do about each failure", () => {
@@ -17,12 +17,6 @@ describe("login messages", () => {
       .toContain("it is a symbolic link")
     expect(describeLoginFailure(new SocketRefused({ path: "/s", reason: "EACCES" }))).toContain("EACCES")
     expect(describeLoginFailure(new LoginReplyInvalid({ reply: "nope" }))).toContain("did not answer with a link")
-  })
-
-  it("opens links with the platform's opener, and nowhere else", () => {
-    expect(openerFor("linux")).toBe("xdg-open")
-    expect(openerFor("darwin")).toBe("open")
-    expect(openerFor("win32")).toBeUndefined()
   })
 })
 
@@ -64,6 +58,7 @@ describe("agent-usage login against a running server", () => {
         PORT: String(await freePort())
       }
       const tsx = ["--import", "tsx", main]
+      const login = () => spawnSync(process.execPath, [...tsx, "login"], { env, encoding: "utf8" })
       // stdin from /dev/null and output to pipes: no TTY anywhere, as under systemd or launchd.
       const server = spawn(process.execPath, [...tsx, "serve"], { env, stdio: ["ignore", "pipe", "pipe"] })
       try {
@@ -77,13 +72,25 @@ describe("agent-usage login against a running server", () => {
           server.on("exit", (code) => reject(new Error(`serve exited with ${code}`)))
         })
         expect(startup).toContain("#bootstrap_token=")
-        const login = () => spawnSync(process.execPath, [...tsx, "login"], { env, encoding: "utf8" })
         const first = login()
         const second = login()
         expect(first.status).toBe(0)
         expect(second.status).toBe(0)
         expect(first.stdout.trim()).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/#bootstrap_token=/u)
         expect(second.stdout.trim()).not.toBe(first.stdout.trim())
+        // The root reuses this listener, ignores start-only port settings, and exits.
+        const reused = spawnSync(process.execPath, [...tsx, "--no-open", "--port", "1"], {
+          env: { ...env, PORT: "not-a-port" },
+          encoding: "utf8",
+          timeout: 10_000
+        })
+        expect(reused.status).toBe(0)
+        expect(reused.stdout.split("\n")[0]).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/#bootstrap_token=/u)
+        expect(reused.stdout).toContain("Not opening a browser (--no-open)")
+        expect(reused.stdout).not.toContain("agent usage:")
+        expect(reused.stderr).toBe("")
+        expect(server.exitCode).toBeNull()
+        expect(server.signalCode).toBeNull()
         // --open hands the link to the opener, and the browser it started outlives login.
         const opened = spawnSync(process.execPath, [...tsx, "login", "--open"], { env, encoding: "utf8" })
         expect(opened.status).toBe(0)
@@ -112,12 +119,54 @@ describe("agent-usage login against a running server", () => {
       expect(after.status).not.toBe(0)
       expect(after.stderr).toContain("agent-usage serve")
       expect(after.stdout).toBe("")
+      // The root starts a foreground listener when there is none; its flag outranks PORT.
+      const port = await freePort()
+      const started = spawn(process.execPath, [...tsx, "--no-open", "--port", String(port)], {
+        env: { ...env, PORT: "not-a-port" },
+        stdio: ["ignore", "pipe", "pipe"]
+      })
+      try {
+        const startup = await new Promise<string>((resolve, reject) => {
+          let out = ""
+          started.stdout.on("data", (chunk: Buffer) => {
+            out += chunk.toString()
+            if (out.includes("Not opening a browser (--no-open); open the link above.\n")) resolve(out)
+          })
+          started.on("exit", (code) => reject(new Error(`root exited before readiness with ${code}`)))
+        })
+        const lines = startup.trim().split("\n")
+        expect(lines).toHaveLength(2)
+        expect(lines[0]).toMatch(new RegExp(`^http://127\\.0\\.0\\.1:${port}/#bootstrap_token=`))
+        expect(lines[1]).toBe("Not opening a browser (--no-open); open the link above.")
+        expect(started.exitCode).toBeNull()
+        expect(started.signalCode).toBeNull()
+      } finally {
+        if (started.exitCode === null && started.signalCode === null) {
+          const exited = new Promise((resolve) => started.once("exit", resolve))
+          started.kill("SIGTERM")
+          await exited
+        }
+      }
+      const stopped = login()
+      expect(stopped.status).not.toBe(0)
+      expect(stopped.stdout).toBe("")
+      expect(stopped.stderr).toContain("agent-usage serve")
+      // An unsafe path is a refusal, never permission to start another listener.
+      writeFileSync(join(env.AGENT_USAGE_HOME, "serve.sock"), "not a socket", { mode: 0o600 })
+      const refused = spawnSync(process.execPath, [...tsx, "--no-open"], { env, encoding: "utf8", timeout: 10_000 })
+      expect(refused.status).not.toBe(0)
+      expect(refused.stdout).toBe("")
+      expect(refused.stderr).toContain("not a socket")
       // A configuration it cannot read is a failure like any other: stderr only.
       const { HOME: _home, ...withoutHome } = env
       const broken = spawnSync(process.execPath, [...tsx, "login"], { env: withoutHome, encoding: "utf8" })
       expect(broken.status).not.toBe(0)
       expect(broken.stdout).toBe("")
       expect(broken.stderr).toContain("agent-usage")
+      const brokenRoot = spawnSync(process.execPath, [...tsx, "--no-open"], { env: withoutHome, encoding: "utf8" })
+      expect(brokenRoot.status).not.toBe(0)
+      expect(brokenRoot.stdout).toBe("")
+      expect(brokenRoot.stderr).toContain("its configuration could not be read")
     } finally {
       rmSync(home, { recursive: true, force: true })
       rmSync(empty, { recursive: true, force: true })

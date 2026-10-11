@@ -65,15 +65,20 @@ export class BrowserOpener extends Context.Service<BrowserOpener, {
     BrowserOpener,
     Effect.gen(function*() {
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+      // In this process's group, not one of its own: an opener's group is killed when it is reaped,
+      // which would take the browser it just started with it. Output is ignored so a browser that
+      // inherits it cannot hold this process open.
+      const options = {
+        detached: false,
+        stdin: "ignore",
+        stdout: "ignore",
+        stderr: "ignore"
+      } satisfies ChildProcess.CommandOptions
       const open = Effect.fn("BrowserOpener.open")(function*(url: string) {
         const commands = [
-          ChildProcess.make("open", [url], { stdin: "ignore", stdout: "ignore", stderr: "ignore" }),
-          ChildProcess.make("xdg-open", [url], { stdin: "ignore", stdout: "ignore", stderr: "ignore" }),
-          ChildProcess.make("rundll32.exe", ["url.dll,FileProtocolHandler", url], {
-            stdin: "ignore",
-            stdout: "ignore",
-            stderr: "ignore"
-          })
+          ChildProcess.make("open", [url], options),
+          ChildProcess.make("xdg-open", [url], options),
+          ChildProcess.make("rundll32.exe", ["url.dll,FileProtocolHandler", url], options)
         ]
         for (const command of commands) {
           // Preserve the existing policy: retry process failures, not numeric exit codes.
