@@ -34,6 +34,11 @@ export interface PRRowProps {
   readonly to: string
   readonly showUpdated?: boolean
   readonly caller: Caller
+  /**
+   * Defaults to the current clock. Labels read it on each render; health samples it
+   * only when the PR object changes. Supplying a clock adds no ticking timer.
+   */
+  readonly now?: Date
 }
 
 const scoreClassName = (tier: ReturnType<typeof getScoreTier>): string => {
@@ -47,10 +52,10 @@ const scoreClassName = (tier: ReturnType<typeof getScoreTier>): string => {
   }
 }
 
-export function PRRow({ caller, pr, showUpdated, to }: PRRowProps) {
+export function PRRow({ caller, now, pr, showUpdated, to }: PRRowProps) {
   const reviewRequested = needsYourReview(pr, caller)
   const score: HealthScore | undefined = useMemo(
-    () => Option.getOrUndefined(calculateHealthScore(pr, new Date())),
+    () => Option.getOrUndefined(calculateHealthScore(pr, now ?? new Date())),
     [pr]
   )
   const status = pullRequestRowStatus(pr)
@@ -94,7 +99,7 @@ export function PRRow({ caller, pr, showUpdated, to }: PRRowProps) {
             tone="tertiary"
             variant="meta"
           >
-            {pullRequestRowTimeLabel(pr, showUpdated === true, new Date())}
+            {pullRequestRowTimeLabel(pr, showUpdated === true, now ?? new Date())}
           </Text>
           {pr.commentCount !== undefined && pr.commentCount > 0 ? (
             <span aria-label={`${pr.commentCount} comments`} className={styles.commentCount}>
