@@ -3,7 +3,7 @@ import { HttpRouter, HttpServerResponse, HttpStaticServer } from "effect/http"
 
 /** Auth handoff only. The design-backed stack UI will replace the JSON navigation in a later PR. */
 const document =
-  `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Alchemy console</title><body><p id="status">Signing in…</p><noscript>Enable JavaScript to sign in.</noscript><script type="module" src="/bootstrap.js"></script></body></html>`
+  `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Alchemy console</title><body><main><p id="status">Signing in…</p><noscript>Enable JavaScript to sign in.</noscript></main><script type="module" src="/bootstrap.js"></script></body></html>`
 
 export const BootstrapRoutes = Layer.mergeAll(
   HttpRouter.add("GET", "/", HttpServerResponse.html(document)),

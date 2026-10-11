@@ -54,6 +54,7 @@ test("a fresh link recovers the failed-login page and removes its fragment", asy
   expect(new URL(page.url()).hash).toBe("")
 
   await page.goto(login.url)
+  await expect(page.getByRole("main")).toHaveCount(1)
   await expect(page.locator("#status")).toHaveText(
     "Sign-in failed or link already used. Run alchemy-console login."
   )
