@@ -77,6 +77,28 @@ const settle = async (milliseconds = 0): Promise<void> => {
 const stageOpen = (): boolean => document.querySelector("[role='dialog']") !== null
 
 describe("Connect stage across polls", () => {
+  it("reports the open stage identity to its host and clears it on close", async () => {
+    agentsBody = listed([reviewer])
+    const targets: Array<{ readonly host: string; readonly id: string } | null> = []
+    const host = document.createElement("div")
+    document.body.append(host)
+    const root = createRoot(host)
+    roots.push(root)
+    await act(async () =>
+      root.render(
+        <RegistryProvider>
+          <ConnectSurface atoms={makeConnectAtoms()} onStageChange={(target) => targets.push(target)} />
+        </RegistryProvider>
+      )
+    )
+    await settle()
+    await act(async () => host.querySelector<HTMLButtonElement>(".connect-agent")?.click())
+    await settle()
+    expect(targets.at(-1)).toEqual({ host: "SER8", id: "agent-reviewer" })
+    await act(async () => document.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Escape" })))
+    await settle()
+    expect(targets.at(-1)).toBeNull()
+  })
   // A stage whose agent left the directory must stay closed when the agent comes back: it would otherwise
   // reopen uninvited and take focus from whatever the reader is doing.
   it("closes when its agent leaves the directory and stays closed when it returns", async () => {

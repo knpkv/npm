@@ -1979,6 +1979,70 @@ esac
       }
       const canonical = server.serveUrl
       const headers = { host: "ser8.example.test:0", "content-type": "application/json" }
+      const pushHeaders = { ...headers, origin: "https://ser8.example.test:0" }
+      const settingsUrl = `${canonical}/v1/push/blocked-settings`
+      const preferences = { mutedAgents: [{ host: "SER8", agentId: "agent-one" }], quietHours: null }
+      expect((yield* Effect.promise(() => secureRequestBody(settingsUrl, headers))).body.trim()).toBe(
+        JSON.stringify({ mutedAgents: [], quietHours: null })
+      )
+      expect(
+        (yield* Effect.promise(() => secureRequestBody(settingsUrl, pushHeaders, { method: "PUT", body: preferences })))
+          .status
+      ).toBe(200)
+      expect((yield* Effect.promise(() => secureRequestBody(settingsUrl, headers))).body.trim()).toBe(
+        JSON.stringify(preferences)
+      )
+      expect(
+        (yield* Effect.promise(() =>
+          secureRequestBody(settingsUrl, { ...pushHeaders, origin: "https://foreign.example.test" }, {
+            method: "PUT",
+            body: preferences
+          })
+        )).status
+      ).toBe(403)
+      expect(
+        (yield* Effect.promise(() =>
+          secureRequestBody(settingsUrl, pushHeaders, {
+            method: "PUT",
+            body: { ...preferences, quietHours: { startMinute: -1, endMinute: 300, timeZone: "America/New_York" } }
+          })
+        )).status
+      ).toBe(400)
+      expect(
+        (yield* Effect.promise(() =>
+          secureRequestBody(settingsUrl, pushHeaders, {
+            method: "PUT",
+            body: { ...preferences, quietHours: { startMinute: 60, endMinute: 120, timeZone: "Invalid/Zone" } }
+          })
+        )).status
+      ).toBe(400)
+      const zonedPreferences = {
+        ...preferences,
+        quietHours: { startMinute: 22 * 60, endMinute: 7 * 60, timeZone: "America/New_York" }
+      }
+      expect(
+        (yield* Effect.promise(() =>
+          secureRequestBody(settingsUrl, pushHeaders, { method: "PUT", body: zonedPreferences })
+        )).status
+      ).toBe(200)
+      expect((yield* Effect.promise(() => secureRequestBody(settingsUrl, headers))).body.trim()).toBe(
+        JSON.stringify(zonedPreferences)
+      )
+      const heartbeat = { clientId: "browser-one", target: { host: "SER8", agentId: "agent-one" } }
+      expect(
+        (yield* Effect.promise(() =>
+          secureRequestBody(`${canonical}/v1/push/stage-heartbeat`, pushHeaders, { method: "POST", body: heartbeat })
+        )).status
+      ).toBe(200)
+      expect(
+        (yield* Effect.promise(() =>
+          fetch(`${server.url}/v1/push/stage-heartbeat`, {
+            headers: pushHeaders,
+            method: "POST",
+            body: JSON.stringify(heartbeat)
+          })
+        )).status
+      ).not.toBe(200)
       const body = { agentId: "agent-one", kind: "status", text: "Tests passing", eventId: "event-one" }
       const post = (input: Readonly<Record<string, string>>) =>
         Effect.promise(() =>

@@ -1,7 +1,7 @@
 import { Effect, Result, Schema } from "effect"
 import webPush from "web-push"
 import { type ApprovalAppStoreError, PushDeliveryError } from "./errors.js"
-import type { ApprovalPushPayload, PushSubscriptionRecord, VapidKeyPair } from "./model.js"
+import type { PushPayload, PushSubscriptionRecord, VapidKeyPair } from "./model.js"
 import { pushDeliveryTtlSeconds } from "./push-policy.js"
 import { validatePushEndpoint } from "./push-subscription.js"
 import type { ApprovalAppStore } from "./store.js"
@@ -18,7 +18,7 @@ export const makePushSender = (
 ) =>
   Effect.fn("PushSender.send")(function*(
     subscription: PushSubscriptionRecord,
-    payload: ApprovalPushPayload
+    payload: PushPayload
   ) {
     yield* validatePushEndpoint(subscription.endpoint, allowedOrigins)
     yield* Effect.tryPromise({
