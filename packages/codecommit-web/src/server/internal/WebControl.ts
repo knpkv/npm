@@ -1,6 +1,7 @@
 /** Product path and messages for the shared owner-only control protocol. */
 import { type ControlFile, makeWebControl } from "@knpkv/browser-pairing/control"
-import { Config, Data, Effect, Path } from "effect"
+import { Config, Data, Effect, Path, Schema } from "effect"
+import { CodeOwnerUi } from "../../host-contract.js"
 
 export { ControlFile } from "@knpkv/browser-pairing/control"
 
@@ -37,6 +38,12 @@ const control = Effect.gen(function*() {
     }
   })
 })
+/** Read only the validated owner origin; never request a sign-in link or decode its token. */
+export const readCodeOwnerUi = Effect.flatMap(control, (control) => control.readOrigin).pipe(
+  Effect.flatMap(Schema.decodeUnknownEffect(CodeOwnerUi)),
+  Effect.mapError(() => new WebNotRunning())
+)
+
 export const writeControlFile = (value: ControlFile) =>
   Effect.flatMap(control, (control) => control.writeControlFile(value)).pipe(
     Effect.mapError(() => new ControlFileError())

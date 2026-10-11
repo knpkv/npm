@@ -48,7 +48,7 @@ callers still reach the runtime credential and attribute validation boundary.
 `@knpkv/browser-pairing/control` shares owner-only control files and the bearer
 login route. Call `makeWebControl({ directory, file, messages })` with resolved
 paths and optional product-specific error sentences. Its `writeControlFile`,
-`registerControlFile`, `removeControlFile` and `requestLoginUrl` operations use
+`registerControlFile`, `removeControlFile`, `requestLoginUrl` and `readOrigin` operations use
 Effect FileSystem, Path and HttpClient services. Register only once the
 listener is ready; scope cleanup removes the file only if its token still
 matches, leaving a newer server's registration intact.
@@ -61,6 +61,16 @@ refused, writes use exclusive temporary files and atomic rename, and a shared
 exclusive lock serializes publication and removal with stale-lock recovery.
 Callers choose a private control directory; unrelated configuration directories
 can keep their existing permissions. The helper does not migrate legacy files.
+
+`readOrigin` reuses these private-path checks and decodes only the origin field.
+It returns a canonical HTTP loopback origin, rejecting credentials, paths,
+queries, fragments and noncanonical spellings. This validated origin may appear
+in an authenticated client response. The credential-bearing persisted record,
+token and private file paths must never appear there or in logs. It does not
+decode the token, contact the server, request a login link, create files or
+repair permissions. Missing, malformed or unsafe registrations return
+`WebNotRunning` without their underlying cause. An origin reading does not
+prove that the listener is reachable or that its login token is valid.
 
 `requestLoginUrl` sends one bearer-authenticated POST to `/control/login`.
 `WebNotRunning` covers missing, invalid or unreachable registrations;

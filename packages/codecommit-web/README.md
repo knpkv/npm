@@ -34,6 +34,26 @@ You need [Bun](https://bun.sh) 1.3 or later and an AWS CLI profile that can read
 Settings live in `~/.codecommit/config.json`. Until the first setting is saved there is no file and the
 defaults apply.
 
+### Supervised owner process
+
+A deployment can keep the credential host's owner process running with
+`bun packages/codecommit-web/dist/main.js`, built from the same revision as hostd and its
+workspace dependencies. This entry stays running; `codecommit web` instead reuses a running
+owner and exits after requesting a sign-in link. The process needs Bun and its child commands
+on `PATH`. `PORT` chooses the first loopback port; the standalone entry retains its port retries.
+Do not set the development proxy's `CODECOMMIT_WEB_PUBLIC_ORIGIN` or `ALLOWED_ORIGINS` for this service.
+
+For a systemd user service, use `Restart=on-failure` and `StandardOutput=null`: the startup
+sign-in URL contains a single-use credential and must not reach the journal. Operational stderr
+may go to the journal. The owner-only control file records the actually bound origin, so
+`codecommit web` can obtain a fresh link even after a port retry.
+
+Only the owner process creates, repairs and migrates its cache and runs its configured refresh
+policy. Its permission gates stay in force. The hub verifies an existing private cache with the
+exact supported schema; it never creates, repairs, migrates or chmods that cache. An unreadable
+cache remains Unavailable. Check the owner service and the hub's private diagnostic log;
+the hub's existing poll or Read again retries attachment without restarting the hub.
+
 ## AWS calls ask first
 
 Every AWS call is gated. A fresh install asks before each one (`~/.codecommit/permissions.json` starts
@@ -73,8 +93,15 @@ do not traverse the owner view source aliases. Build this package before typeche
 Build and prepack force declaration emission even when `dist` was cleared with build-info retained.
 Removing those source aliases is a follow-up; published type, runtime and CSS paths are unchanged.
 
-The hub's machine-local owner link uses the owner's default loopback port 3000. An owner
-started on another port must be opened at its configured address on the credential host.
+The hub queue may add `ownerUi`, the validated direct HTTP loopback origin read afresh from the
+owner control file. It is a normalized authenticated client-visible origin, with no credential,
+path, query or fragment. The control file and its bearer token stay server-private and owner-only;
+neither enters the queue response or logs. Missing, linked, permissive or malformed files omit
+the field; there is no default-port fallback. The browser shows the link only when viewing the
+hub on this machine. Other devices receive the existing credential-host instructions.
+The product reader delegates private-path verification and origin-only projection to
+`makeWebControl.readOrigin`, then applies the stricter Code owner-origin schema. It never
+uses the credential-bearing login reader to produce this metadata.
 
 ## Pairing boundary
 

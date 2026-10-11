@@ -12,6 +12,13 @@ for (const motion of ["no-preference", "reduce"] satisfies ReadonlyArray<"no-pre
     await first.click()
     const dialog = page.getByRole("dialog", { name: "Cached pull request" })
     await expect(dialog).toBeVisible()
+    await page.evaluate(async () => {
+      await Promise.allSettled(
+        document.getAnimations()
+          .filter((animation) => animation.effect?.getComputedTiming().endTime !== Infinity)
+          .map((animation) => animation.finished)
+      )
+    })
     await page.evaluate(() => {
       const back = history.back.bind(history)
       history.back = () => {
@@ -23,7 +30,17 @@ for (const motion of ["no-preference", "reduce"] satisfies ReadonlyArray<"no-pre
     })
     await page.keyboard.press("Escape")
     // A second input event runs in a later task, before the delayed traversal delivers popstate.
-    await dialog.getByRole("button", { name: "Close pull request" }).click({ force: true })
+    const close = dialog.getByRole("button", { name: "Close pull request" })
+    await expect(close).toBeVisible()
+    await expect(close).toBeEnabled()
+    expect(
+      await close.evaluate((button) => {
+        const bounds = button.getBoundingClientRect()
+        const target = document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2)
+        return target === button || button.contains(target)
+      })
+    ).toBe(true)
+    await close.click()
     await expect(dialog).toHaveCount(0)
     await expect(first).toBeFocused()
     expect(await page.evaluate(() => document.documentElement.dataset.backCalls)).toBe("1")

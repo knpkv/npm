@@ -141,6 +141,27 @@ Route callbacks now receive the decoded `ModuleCaller` as their final argument, 
 listener's authorization result. `dispatchModuleRoute.authorize` must return that schema's
 `{ login }` value. Query selectors and spoofed identity headers cannot supply the caller.
 
+The owner process owns cache creation, permission repair, migration and configured refresh.
+The hub only verifies that the existing cache is private and has the exact supported schema;
+it never creates, repairs, migrates or chmods it. Keep a supervised owner process on the credential
+hub, built from the same revision as hostd. An unavailable cache points to the owner service and
+the hub log; the existing active, visible Code poll or Read again retries attachment.
+
+The existing queue/status response may carry `ownerUi` only on the configured credential hub.
+It is the validated direct HTTP loopback origin from the owner's private `web.json`, read on
+each queue poll independently of cache availability. This normalized authenticated client-visible
+origin contains no credential, path, query or fragment. The file and bearer token remain
+server-private and never enter HTTP responses or logs. Missing or invalid metadata omits the
+field, with no fixed-port fallback. Only a browser viewing this machine's hub uses the link;
+remote viewers retain the credential-host instructions. No extra route, poll or login request is added.
+
+Code reads bring a native SQLite dependency into hostd. A JavaScript bundle alone is insufficient:
+the installed `@libsql/client` native packages must match the host platform and runtime. Before
+restarting hostd, the deployment gate must load the installed driver and execute an in-memory
+SQLite query under hostd's actual runtime. Probe the owner runtime too. Repeat these probes when
+adding or updating native dependencies; a module-load failure can stop the process before it serves
+an Unavailable response.
+
 `code-references.sqlite` stores server-private account, region, repository and PR coordinates
 behind random persisted UUID references. Its directory/file require 0700/0600 permissions.
 Only the opaque reference is a normalized authenticated client-visible identifier; persisted

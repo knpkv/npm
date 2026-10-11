@@ -27,6 +27,10 @@ export const ControlFile = Schema.Struct({
 })
 export interface ControlFile extends Schema.Schema.Type<typeof ControlFile> {}
 const decodeControlFile = Schema.decodeUnknownEffect(Schema.fromJsonString(ControlFile))
+/** Origin-only projection; credential fields are deliberately not decoded. */
+const decodeOriginProjection = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(Schema.Struct({ origin: Schema.String }))
+)
 /** Credential-bearing response: the URL contains a one-time PairingCode. */
 const LoginAnswer = Schema.Struct({ url: Schema.URLFromString })
 
@@ -96,6 +100,27 @@ export const makeWebControl = ({
       return yield* new ControlFileError({ description: messages.controlFile })
     }
   })
+  const readPrivateControlText = Effect.gen(function*() {
+    const fs = yield* FileSystem.FileSystem
+    yield* requirePrivatePath(directory, "Directory", 0o700)
+    yield* requirePrivatePath(file, "File", 0o600)
+    return yield* fs.readFileString(file)
+  })
+
+  /**
+   * Read a canonical HTTP loopback origin without decoding the bearer token, contacting the
+   * server, or changing files. The origin may cross an authenticated client boundary; credentials
+   * and private paths never do. Missing or unsafe registrations fail without retaining their cause.
+   */
+  const readOrigin = Effect.gen(function*() {
+    const projection = yield* readPrivateControlText.pipe(Effect.flatMap(decodeOriginProjection))
+    const origin = yield* OwnerSession.requireLoopbackOrigin(projection.origin)
+    if (origin !== projection.origin) {
+      return yield* new WebNotRunning({ description: messages.notRunning })
+    }
+    return origin
+  }).pipe(Effect.mapError(() => new WebNotRunning({ description: messages.notRunning })))
+
   const prepareDirectory = Effect.gen(function*() {
     const fs = yield* FileSystem.FileSystem
     yield* refuseLink(directory)
@@ -167,12 +192,9 @@ export const makeWebControl = ({
 
   /** One owner-authenticated request; a refusal or malformed reply never permits a second server. */
   const requestLoginUrl = Effect.gen(function*() {
-    const fs = yield* FileSystem.FileSystem
     const client = yield* HttpClient.HttpClient
     const control = yield* Effect.gen(function*() {
-      yield* requirePrivatePath(directory, "Directory", 0o700)
-      yield* requirePrivatePath(file, "File", 0o600)
-      const value = yield* fs.readFileString(file).pipe(Effect.flatMap(decodeControlFile))
+      const value = yield* readPrivateControlText.pipe(Effect.flatMap(decodeControlFile))
       const origin = yield* OwnerSession.requireLoopbackOrigin(value.origin)
       return { origin, token: value.token }
     }).pipe(Effect.mapError(() => new WebNotRunning({ description: messages.notRunning })))
@@ -207,7 +229,7 @@ export const makeWebControl = ({
     return url.href
   })
 
-  return { writeControlFile, registerControlFile, removeControlFile, requestLoginUrl }
+  return { writeControlFile, registerControlFile, removeControlFile, requestLoginUrl, readOrigin }
 }
 
 /** Bearer-only, non-cacheable owner route. The reply contains a one-time credential URL. */

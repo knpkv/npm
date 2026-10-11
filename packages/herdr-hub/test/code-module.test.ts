@@ -1,7 +1,7 @@
 import { NodeHttpClient, NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
 import { FleetHostName } from "@knpkv/herdr-fleet/model"
-import { ConfigProvider, Effect, Layer, Result, Schema } from "effect"
+import { ConfigProvider, Effect, FileSystem, Layer, Logger, Result, Schema } from "effect"
 import { makeCodeModule, readCodeHost } from "../src/code-module.js"
 import { codeModule } from "../src/module-contract.js"
 import { dispatchModuleRoute, makeModuleLayer } from "../src/module-server.js"
@@ -32,6 +32,45 @@ const withModule = <A, E, R>(codeHost: FleetHostName | null, run: Effect.Effect<
   })
 
 describe("host-local Code module", () => {
+  it.layer(NodeServices.layer)((it) =>
+    it.effect("includes only the current private owner origin even when the credential host cache is unavailable", () =>
+      Effect.gen(function*() {
+        const fs = yield* FileSystem.FileSystem
+        const home = yield* fs.makeTempDirectoryScoped({ prefix: "code-hub-owner-" })
+        const directory = `${home}/.codecommit`
+        const file = `${directory}/web.json`
+        const token = "d4".repeat(32)
+        yield* fs.makeDirectory(directory, { mode: 0o700 })
+        yield* fs.writeFileString(file, JSON.stringify({ origin: "http://127.0.0.1:4780", token }), { mode: 0o600 })
+        const messages: Array<unknown> = []
+        const logger = Logger.make<unknown, void>((entry) => messages.push(entry.message))
+        yield* withModule(
+          host,
+          Effect.gen(function*() {
+            const first = yield* request("serve")
+            expect(first?.body).toEqual({
+              _tag: "Unavailable",
+              reason: "cache_unavailable",
+              host,
+              ownerUi: "http://127.0.0.1:4780"
+            })
+            yield* fs.writeFileString(file, JSON.stringify({ origin: "http://127.0.0.1:4781", token }))
+            expect((yield* request("serve"))?.body).toMatchObject({ ownerUi: "http://127.0.0.1:4781" })
+            expect(JSON.stringify(first?.body)).not.toContain(token)
+            yield* fs.chmod(file, 0o644)
+            expect((yield* request("serve"))?.body).not.toHaveProperty("ownerUi")
+            yield* fs.chmod(file, 0o600)
+            yield* fs.writeFileString(file, `{"token":"${token}",`)
+            expect((yield* request("serve"))?.body).not.toHaveProperty("ownerUi")
+          })
+        ).pipe(
+          Effect.provideService(ConfigProvider.ConfigProvider, ConfigProvider.fromUnknown({ HOME: home })),
+          Effect.withLogger(logger)
+        )
+        expect(JSON.stringify(messages)).not.toContain(token)
+      }))
+  )
+
   it.effect("requires explicit configuration and reports another credential host without opening its cache", () =>
     Effect.gen(function*() {
       expect((yield* withModule(null, request("serve")))?.body).toEqual({
