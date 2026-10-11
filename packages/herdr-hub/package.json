@@ -37,6 +37,10 @@
       "types": "./dist/fleetctl.d.ts",
       "import": "./dist/fleetctl.js"
     },
+    "./relay": {
+      "types": "./dist/relay.d.ts",
+      "import": "./dist/relay.js"
+    },
     "./hostd": {
       "types": "./dist/bin.d.ts",
       "import": "./dist/bin.js"
