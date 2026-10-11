@@ -1,7 +1,7 @@
 /** Reference fixtures use the design's recorded identities and times, mounted without a hub masthead. */
 import { agentConnectTarget, AgentWorkerIdentity } from "@knpkv/herdr-fleet/model"
 import { WorkGoal, WorkSnapshots } from "@knpkv/herdr-work/model"
-import { expect, type Page, test } from "@playwright/test"
+import { expect, type Locator, type Page, test } from "@playwright/test"
 import { Schema } from "effect"
 import { ConnectAgent } from "../../src/model.js"
 
@@ -165,6 +165,151 @@ const mount = async (page: Page, theme: string) => {
   })
   await page.evaluate(() => document.fonts.ready)
 }
+
+/** Mount the recorded directory for measured fidelity checks without taking a screenshot. */
+const openDirectory = async (page: Page, width: number, theme: string) => {
+  await prepare(page, width, theme)
+  await page.route(
+    "**/v1/connect/agents",
+    (route) => route.fulfill({ json: { agents: base, failures: [], nextCursor: null } })
+  )
+  await mount(page, theme)
+  await expect(page.locator(".connect-agent")).toHaveCount(base.length)
+}
+
+/** Read screen pixels, including SVG transforms, rather than the path's viewBox coordinates. */
+const drawnBox = (node: Locator) =>
+  node.evaluate((element) => {
+    const { height, width, x, y } = element.getBoundingClientRect()
+    return { height, width, x, y }
+  })
+
+test.describe("creature fill fidelity", () => {
+  for (const width of [390, 1280]) {
+    for (const theme of ["light", "dark"]) {
+      for (const surface of ["row", "stage"]) {
+        test(`working halo stays under its arc ${surface} ${String(width)} ${theme}`, async ({ page }) => {
+          await openDirectory(page, width, theme)
+          const row = page.locator(".connect-agent[data-agent-key=\"atlas:agent-ds-rly\"]")
+          if (surface === "stage") {
+            await row.click()
+            await expect(page.locator(".connect-stage-hero")).toBeVisible()
+          }
+          const creature = surface === "row"
+            ? row.locator("svg.connect-creature")
+            : page.locator(".connect-stage-hero svg.connect-creature")
+          const halo = creature.locator(".connect-creature-halo")
+          const orbit = creature.locator(".connect-creature-orbit")
+          expect(await halo.evaluate((node) => Number(getComputedStyle(node).opacity))).toBeGreaterThan(0)
+          expect(await orbit.evaluate((node) => Number(getComputedStyle(node).opacity))).toBeGreaterThan(0)
+          const neutral = await page.evaluate(() => {
+            const probe = document.createElement("span")
+            probe.style.color = "var(--rly-color-text-3)"
+            document.body.append(probe)
+            const colour = getComputedStyle(probe).color
+            probe.remove()
+            return colour
+          })
+          expect(await halo.evaluate((node) => getComputedStyle(node).stroke)).toBe(neutral)
+          expect(await halo.evaluate((node) => Number.parseFloat(getComputedStyle(node).strokeWidth))).toBeLessThan(2)
+          await page.emulateMedia({ forcedColors: "active" })
+          expect(await halo.evaluate((node) => Number(getComputedStyle(node).opacity))).toBeGreaterThan(0)
+          expect(await halo.evaluate((node) => getComputedStyle(node).stroke)).not.toBe("none")
+        })
+      }
+
+      test(`row bodies fill their tracks ${String(width)} ${theme}`, async ({ page }) => {
+        await openDirectory(page, width, theme)
+        const creatures = page.locator(".connect-agent > svg.connect-creature")
+        await expect(creatures).toHaveCount(base.length)
+        for (const creature of await creatures.all()) {
+          const track = await drawnBox(creature)
+          const body = await drawnBox(creature.locator(".connect-creature-body"))
+          expect(track.width).toBe(36)
+          expect(body.width).toBeGreaterThanOrEqual(30)
+          expect(body.x).toBeGreaterThanOrEqual(track.x - 1)
+          expect(body.x + body.width).toBeLessThanOrEqual(track.x + track.width + 1)
+          const ring = await drawnBox(creature.locator(".connect-creature-halo"))
+          expect(ring.width).toBeGreaterThanOrEqual(34)
+          expect(ring.width).toBeLessThanOrEqual(36)
+        }
+      })
+
+      test(`pinned body fills its chip ${String(width)} ${theme}`, async ({ page }) => {
+        await openDirectory(page, width, theme)
+        await page.locator(".connect-agent[data-agent-key=\"atlas:agent-ds-rly\"]").click()
+        await page.getByRole("button", { name: "Pin", exact: true }).click()
+        await page.keyboard.press("Escape")
+        const creature = page.locator(
+          ".connect-pins[data-placement=\"float\"] .connect-pin-open svg.connect-creature:visible"
+        )
+        await expect(creature).toHaveCount(1)
+        const track = await drawnBox(creature)
+        const body = await drawnBox(creature.locator(".connect-creature-body"))
+        expect(track.width).toBe(32)
+        expect(body.width).toBeGreaterThanOrEqual(track.width * 30 / 36)
+        expect(body.x).toBeGreaterThanOrEqual(track.x - 1)
+        expect(body.x + body.width).toBeLessThanOrEqual(track.x + track.width + 1)
+      })
+
+      for (const key of ["atlas:agent-ds-rly", "atlas:agent-sec-cc"]) {
+        test(`stage body and state ring keep their proportions ${key} ${String(width)} ${theme}`, async ({ page }) => {
+          await openDirectory(page, width, theme)
+          await page.locator(`.connect-agent[data-agent-key="${key}"]`).click()
+          const hero = page.locator(".connect-stage-hero")
+          await expect(hero).toBeVisible()
+          const heroBox = await drawnBox(hero)
+          expect(heroBox.height).toBe(width === 390 ? 272 : 176)
+          const creature = hero.locator("svg.connect-creature")
+          const body = await drawnBox(creature.locator(".connect-creature-body"))
+          const state = creature.locator(key.endsWith("ds-rly") ? ".connect-creature-orbit" : ".connect-creature-halo")
+          const ring = await drawnBox(state)
+          expect(await state.evaluate((node) => Number(getComputedStyle(node).opacity))).toBeGreaterThan(0)
+          expect(ring.width).toBeGreaterThan(body.width)
+          if (width === 390) {
+            expect(body.width).toBeGreaterThanOrEqual(150)
+            expect(ring.width).toBeGreaterThanOrEqual(180)
+            expect(ring.x - 2).toBeGreaterThanOrEqual(heroBox.x)
+            expect(ring.y - 2).toBeGreaterThanOrEqual(heroBox.y)
+            expect(ring.x + ring.width + 2).toBeLessThanOrEqual(heroBox.x + heroBox.width)
+            expect(ring.y + ring.height + 2).toBeLessThanOrEqual(heroBox.y + heroBox.height)
+          } else {
+            // The desktop stage already matches: enlarging every stage would regress it.
+            expect((await drawnBox(creature)).width).toBe(128)
+            expect(body.width).toBeGreaterThanOrEqual(70)
+            expect(body.width).toBeLessThanOrEqual(105)
+            expect(ring.width).toBeGreaterThanOrEqual(115)
+            expect(ring.width).toBeLessThanOrEqual(120)
+          }
+        })
+      }
+
+      test(`ok footer labels are plain secondary text with a usage arrow ${String(width)} ${theme}`, async ({ page }) => {
+        await openDirectory(page, width, theme)
+        const line = page.getByRole("list", { name: "Usage limits" })
+        await expect(line.locator("li")).toHaveCount(2)
+        for (const text of ["Claude 48% weekly", "Codex 31% weekly"]) {
+          const label = line.getByText(text, { exact: true })
+          await expect(label).toBeVisible()
+          const colours = await label.evaluate((node) => {
+            const probe = document.createElement("span")
+            probe.style.color = "var(--rly-color-text-2)"
+            node.append(probe)
+            const expected = getComputedStyle(probe).color
+            probe.remove()
+            return { actual: getComputedStyle(node).color, expected }
+          })
+          expect(colours.actual).toBe(colours.expected)
+        }
+        await expect(line.locator("svg")).toHaveCount(0)
+        const link = page.locator(".connect-limits-link")
+        await expect(link).toHaveAttribute("href", "/?tab=usage")
+        await expect(link.locator("svg")).toHaveCount(1)
+        await expect(link.locator("svg")).toHaveAttribute("aria-hidden", "true")
+      })
+    }
+  }
+})
 
 /** Export frame heights include the 98px masthead; capture the actual bounded directory below it. */
 const states = {
@@ -340,7 +485,7 @@ for (const width of [390, 1280]) {
             await page.addStyleTag({ content: ".connect-stage-sheet { border: 1px solid var(--rly-color-border-1); }" })
             const sheet = await page.locator(".connect-stage-sheet").boundingBox()
             expect(sheet?.width).toBe(Math.min(width + 2, 480))
-            expect((await page.locator(".connect-stage-hero").boundingBox())?.height).toBe(176)
+            expect((await page.locator(".connect-stage-hero").boundingBox())?.height).toBe(width === 390 ? 272 : 176)
           }
           if (state === "2t") {
             await expect(page.locator(".connect-agent[data-agent-key=\"atlas:agent-fmt-sub\"]")).toBeVisible()
