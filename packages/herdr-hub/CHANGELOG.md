@@ -2,6 +2,23 @@
 
 Released as `@knpkv/herdr-approvals` up to 0.18.0; the headings below are that package's history.
 
+## 0.27.0
+
+### Minor Changes
+
+- [#833](https://github.com/knpkv/npm/pull/833) [`56d9856`](https://github.com/knpkv/npm/commit/56d98569cf3c758a4e69f1331dc9048335192a26) Thanks [@konopkov](https://github.com/konopkov)! - Fix notification taps by navigating a controlled same-origin window, then focusing the returned client. Failed navigation opens the deep link with the click's remaining window-interaction grant. Preserve a bounded optional Voice blocker event ID in the push payload and stage URL. Connect opens the agent stage now; scrolling to the post waits for the posts view. Approval deep links keep their existing targets.
+
+- [#839](https://github.com/knpkv/npm/pull/839) [`012b752`](https://github.com/knpkv/npm/commit/012b752f033598df7d129f72bac3f3fcea36691c) Thanks [@konopkov](https://github.com/konopkov)! - Running `relay` without a subcommand opens the configured Relay UI when the tailnet hub answers. When it is unreachable, the command reports the local dashboard URL or that hostd is not running, without opening a browser or starting hostd.
+
+- [#834](https://github.com/knpkv/npm/pull/834) [`884a08c`](https://github.com/knpkv/npm/commit/884a08ca0583b2c9f4e5e7e189f0cb893d6aa083) Thanks [@konopkov](https://github.com/konopkov)! - Add `ModulePageMount.closeSelection(parentHref)` for targets opened through shell navigation. Code Close and Escape return through Back when the current shell opened the target from that exact parent; direct, reloaded or remounted targets close with replace instead. Other module-mount hosts must supply the new method.
+
+  Preserve foreign history-state keys and selection origin through query repairs. Closing dialogs retain focus ownership after cleanup, and Forward reopens the target without adding duplicate queue entries.
+
+### Patch Changes
+
+- Updated dependencies [[`a8e6ea2`](https://github.com/knpkv/npm/commit/a8e6ea23653950ac8d1c9b6e6bca337506f4972f)]:
+  - @knpkv/codecommit-web@0.34.0
+
 ## 0.26.0
 
 ### Minor Changes
