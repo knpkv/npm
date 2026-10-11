@@ -1,5 +1,11 @@
 # @knpkv/browser-pairing
 
+## 0.8.0
+
+### Minor Changes
+
+- [#850](https://github.com/knpkv/npm/pull/850) [`5db8146`](https://github.com/knpkv/npm/commit/5db8146fa812d17d2c2c630cde641be5d654bdac) Thanks [@konopkov](https://github.com/konopkov)! - Add non-destructive terminal sign-in that reuses or starts the local server, with a 60-second fragment handoff and an explicit foreground serve command. Allow the shared owner control route to use an application-owned pairing issuer.
+
 ## 0.7.0
 
 ### Minor Changes
