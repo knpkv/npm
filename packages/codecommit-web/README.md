@@ -132,6 +132,7 @@ notification explains the failure.
 
 ## Owner control route
 
+The shared `@knpkv/browser-pairing/control` protocol owns file locking and the bearer login route.
 After its authenticated listener is ready, each server publishes `~/.codecommit/web.json`:
 `{origin, token}` stores the direct loopback origin actually bound, including a port retry, and a
 server-private bearer credential rotated on every bind attempt. The directory is `0700`, the file

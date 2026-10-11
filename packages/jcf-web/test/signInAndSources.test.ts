@@ -4,12 +4,12 @@
  */
 import { NodeCrypto, NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
+import { loginControlRouter } from "@knpkv/browser-pairing/control"
 import * as OwnerSession from "@knpkv/browser-pairing/owner-session"
 import { makeFakeHeadless } from "@knpkv/jira-clockify/testing.js"
 import { Effect, Layer, Redacted } from "effect"
 import { Etag, HttpPlatform, HttpRouter } from "effect/http"
 import { application } from "../src/server/HttpApplication.js"
-import { loginControlRouter } from "../src/server/LoginControl.js"
 import { makeOwnerSession } from "../src/server/OwnerSession.js"
 
 // This test is an HTTP application entry point over isolated provider fixtures.
@@ -21,7 +21,7 @@ const controlToken = "c0".repeat(32)
 const serve = async (options: { readonly jiraLoggedIn: boolean }) => {
   const secrets = await Effect.runPromise(makeOwnerSession(origin).pipe(Effect.provide(NodeCrypto.layer)))
   const fake = makeFakeHeadless({ jiraLoggedIn: options.jiraLoggedIn })
-  const app = Layer.mergeAll(application, loginControlRouter(Redacted.make(controlToken))).pipe(
+  const app = Layer.mergeAll(application, loginControlRouter(Redacted.make(controlToken), secrets.browserOrigin)).pipe(
     Layer.provide(fake.layer),
     Layer.provideMerge(Layer.succeed(OwnerSession.OwnerSession, secrets)),
     Layer.provide(Etag.layer),

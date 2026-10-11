@@ -63,6 +63,7 @@
     "@knpkv/ai-claude": "workspace:^",
     "@knpkv/ai-codex": "workspace:^",
     "@knpkv/atlassian-common": "workspace:^",
+    "@knpkv/browser-pairing": "workspace:^",
     "@knpkv/clockify-api-client": "workspace:^",
     "@knpkv/jira-api-client": "workspace:^",
     "@knpkv/jira-cli": "workspace:^",
