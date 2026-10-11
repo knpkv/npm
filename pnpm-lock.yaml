@@ -1187,6 +1187,9 @@ importers:
       '@knpkv/bounded-io':
         specifier: workspace:^
         version: link:../bounded-io
+      '@knpkv/browser-pairing':
+        specifier: workspace:^
+        version: link:../browser-pairing
       '@knpkv/capability':
         specifier: workspace:^
         version: link:../capability
