@@ -65,6 +65,11 @@ export interface RlyEntityTableCell {
 export interface RlyEntityTableRow {
   readonly cells: ReadonlyArray<RlyEntityTableCell>
   readonly id: string
+  /**
+   * Caller-owned selection for table and card rows. True emits `data-selected="true"`;
+   * false or omitted removes it. The application owns styling and accessible control state.
+   */
+  readonly selected?: boolean
 }
 
 type RlyEntityTableRows = { readonly rows: ReadonlyArray<RlyEntityTableRow> }
@@ -305,7 +310,12 @@ export const EntityTable = ({
               {rows.map((row) => {
                 const cells = new Map(row.cells.map((cell) => [cell.columnId, cell.content]))
                 return (
-                  <tr className={style("row")} data-rly-entity-row-id={row.id} key={row.id}>
+                  <tr
+                    className={style("row")}
+                    data-rly-entity-row-id={row.id}
+                    data-selected={row.selected === true ? "true" : undefined}
+                    key={row.id}
+                  >
                     {columns.map((column) => (
                       <td className={style("cell")} data-label={columnById.get(column.id)?.label} key={column.id}>
                         {cells.get(column.id)}
