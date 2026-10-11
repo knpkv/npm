@@ -336,8 +336,8 @@ for (const width of [390, 1280]) {
         await page.goto(`/w/${workspaceId}/overview`)
         const row = page.locator(`[data-portfolio-release-id="${release.releaseId}"]`)
         await expect(row).toBeVisible()
-        await expect(row.getByText("Held", { exact: true })).toBeVisible()
-        await expect(row.getByText("No target environment", { exact: true })).toBeVisible()
+        await expect(row.getByRole("heading", { name: "No target environment", exact: true })).toBeVisible()
+        await expect(row.getByText("Choose a target environment in Settings.", { exact: true })).toBeVisible()
         await expect(row.getByRole("link", { name: "Configure targets" })).toHaveAttribute(
           "href",
           `/w/${workspaceId}/settings#release-targets`
@@ -355,7 +355,8 @@ for (const width of [390, 1280]) {
         await captureTargetAcceptance(page, testInfo, `targets-overview-${width}-${colorScheme}`)
         await page.goto(`/w/${workspaceId}/releases/${release.releaseId}`)
         const full = page.locator(`[data-release-full-id="${release.releaseId}"]`)
-        await expect(full.getByText("No target environment", { exact: true })).toBeVisible()
+        await expect(full.getByRole("heading", { name: "No target environment", exact: true })).toBeVisible()
+        await expect(full.getByText("Choose a target environment in Settings.", { exact: true })).toBeVisible()
         await expect(full.getByRole("link", { name: "Configure targets" })).toBeVisible()
         await expect(full.getByRole("link", { name: "Configure targets" })).toHaveClass(/releaseAction/u)
         await expect(full.getByRole("link", { name: "Repair missing links" })).toHaveClass(/back/u)

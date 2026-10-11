@@ -1,9 +1,61 @@
+import * as Schema from "effect/Schema"
 import { describe, expect, it } from "vitest"
 
 import { presentPortfolio } from "../../src/client/portfolio/presentPortfolio.js"
+import { ReadinessFinding } from "../../src/domain/readiness/projections.js"
 import { makePortfolioSnapshot } from "./portfolioFixtures.js"
 
 describe("portfolio presenter", () => {
+  const heldCases: ReadonlyArray<{
+    readonly finding: typeof ReadinessFinding.Encoded
+    readonly label: string
+    readonly reason: string
+  }> = [
+    {
+      finding: { code: "relationship-missing", subject: { _tag: "fact", factId: "pipeline.gate" }, evidenceIds: [] },
+      label: "Needs a manual approval gate",
+      reason: "A required manual approval gate is missing."
+    },
+    {
+      finding: { code: "input-incomplete", subject: { _tag: "candidate" }, evidenceIds: [] },
+      label: "Waiting for complete source data",
+      reason: "Some required source data is missing or incomplete."
+    },
+    {
+      finding: { code: "relationship-unverified", subject: { _tag: "candidate" }, evidenceIds: [] },
+      label: "Needs links",
+      reason: "A delivery link still needs verification."
+    },
+    {
+      finding: { code: "source-stale", subject: { _tag: "candidate" }, evidenceIds: [] },
+      label: "Needs fresh source data",
+      reason: "A required source is stale."
+    },
+    {
+      finding: { code: "documentation-missing", subject: { _tag: "candidate" }, evidenceIds: [] },
+      label: "Needs release documentation",
+      reason: "Required release documentation is missing."
+    }
+  ]
+
+  it.each(heldCases)("labels held releases as $label from the typed finding", ({ finding, label, reason }) => {
+    const snapshot = makePortfolioSnapshot("six-state")
+    const held = snapshot.releases.find(({ readiness }) => readiness?.verdict === "held")
+    if (held?.readiness === null || held === undefined) return expect.fail("Expected the held fixture")
+    const presented = presentPortfolio({
+      ...snapshot,
+      releases: [{
+        ...held,
+        collaborators: [],
+        collaboratorCount: 0,
+        readiness: { ...held.readiness, primaryFinding: Schema.decodeUnknownSync(ReadinessFinding)(finding) }
+      }]
+    }).releases[0]
+    expect(presented?.release.verdict).toBe(label)
+    expect(presented?.readinessReason).toBe(reason)
+    expect(presented?.readinessVerdict).toBe("held")
+  })
+
   it("holds a previously ready assessment while its evidence is being recomputed", () => {
     const snapshot = makePortfolioSnapshot("six-state")
     const ready = snapshot.releases.find(({ readiness }) => readiness?.verdict === "ready")
@@ -57,8 +109,8 @@ describe("portfolio presenter", () => {
       }))
     })
     expect(presented.releases[0]?.readinessVerdict).toBe("held")
-    expect(presented.releases[0]?.release.verdict).toBe("Held")
-    expect(presented.releases[0]?.readinessReason).toBe("No target environment")
+    expect(presented.releases[0]?.release.verdict).toBe("No target environment")
+    expect(presented.releases[0]?.readinessReason).toBe("Choose a target environment in Settings.")
     expect(presented.releases[0]?.targetSettingsPath).toBe(`/w/${snapshot.workspaceId}/settings#release-targets`)
     expect(presented.releases[0]?.stages.every(({ tone }) => tone === "neutral")).toBe(true)
   })

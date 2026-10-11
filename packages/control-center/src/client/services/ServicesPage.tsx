@@ -1,5 +1,6 @@
 import { ServiceMark } from "@knpkv/rly/patterns"
 import { Button, Field, StateLabel, StatePanel, Surface, Text } from "@knpkv/rly/primitives"
+import * as DateTime from "effect/DateTime"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 
@@ -63,7 +64,49 @@ type ConnectionsState =
   | { readonly _tag: "idle" }
   | { readonly _tag: "loading" }
   | { readonly _tag: "failed" }
-  | { readonly _tag: "ready"; readonly overview: PluginOverviewResponse }
+  | {
+      readonly _tag: "ready"
+      readonly overview: PluginOverviewResponse
+      readonly sessionKey: string
+      readonly refresh: "idle" | "pending" | "failed"
+    }
+
+/** Create and live reads can complete in either order; keep one row per id and the newest server timestamp. */
+const mergeConnections = (
+  current: ReadonlyArray<PluginConnectionSummary>,
+  incoming: ReadonlyArray<PluginConnectionSummary>
+): ReadonlyArray<PluginConnectionSummary> => {
+  const rows = new Map<PluginConnectionId, PluginConnectionSummary>()
+  for (const connection of [...current, ...incoming]) {
+    const existing = rows.get(connection.pluginConnectionId)
+    if (existing === undefined || DateTime.Order(existing.updatedAt, connection.updatedAt) <= 0) {
+      rows.set(connection.pluginConnectionId, connection)
+    }
+  }
+  return [...rows.values()]
+}
+
+/** Retain only this session's concurrent mutations when a live overview read completes. */
+const receiveOverview = (
+  current: ConnectionsState,
+  incoming: PluginOverviewResponse,
+  sessionKey: string
+): ConnectionsState => ({
+  _tag: "ready",
+  sessionKey,
+  refresh: "idle",
+  overview: {
+    ...incoming,
+    connections: mergeConnections(
+      current._tag === "ready" && current.sessionKey === sessionKey ? current.overview.connections : [],
+      incoming.connections
+    )
+  }
+})
+
+/** A failed refresh preserves the last read, but cannot conceal that the current read failed. */
+const overviewRefreshFailed = (current: ConnectionsState, sessionKey: string): ConnectionsState =>
+  current._tag === "ready" && current.sessionKey === sessionKey ? { ...current, refresh: "failed" } : { _tag: "failed" }
 
 const setupDraftKey = (draft: ServiceConnectionDraft): string => `${draft.catalog.providerId}\0${draft.displayName}`
 
@@ -590,7 +633,7 @@ export const ServicesPage = ({
         }
       })
       .catch(() => {
-        if (!request.signal.aborted) setConnectionsState({ _tag: "failed" })
+        if (!request.signal.aborted) setConnectionsState((current) => overviewRefreshFailed(current, sessionKey))
       })
     return () => request.abort()
   }, [invalidateSession, sessionKey, transport])
@@ -666,25 +709,29 @@ export const ServicesPage = ({
       return
     }
     const request = new AbortController()
-    setConnectionsState({ _tag: "loading" })
+    setConnectionsState((current) =>
+      current._tag === "ready" && current.sessionKey === sessionKey
+        ? { ...current, refresh: "pending" }
+        : { _tag: "loading" }
+    )
     transport.overview(request.signal).then(
       (overview) => {
-        if (!request.signal.aborted) setConnectionsState({ _tag: "ready", overview })
+        if (!request.signal.aborted) setConnectionsState((current) => receiveOverview(current, overview, sessionKey))
       },
       (failure) => {
         if (request.signal.aborted) return
         if (Predicate.isTagged("UnauthorizedApiError")(failure)) invalidateSession(sessionKey)
-        setConnectionsState({ _tag: "failed" })
+        setConnectionsState((current) => overviewRefreshFailed(current, sessionKey))
       }
     )
     return () => request.abort()
   }, [invalidateSession, requestRevision, sessionKey, transport])
 
+  const connectionRows = connectionsState._tag === "ready" ? connectionsState.overview.connections : null
+
   useEffect(() => {
-    if (connectionsState._tag !== "ready" || transport.synchronization === undefined) return
-    const synchronizable = connectionsState.overview.connections.filter(
-      ({ supportsSynchronization }) => supportsSynchronization
-    )
+    if (connectionRows === null || transport.synchronization === undefined) return
+    const synchronizable = connectionRows.filter(({ supportsSynchronization }) => supportsSynchronization)
     const synchronizableIds = new Set(synchronizable.map(({ pluginConnectionId }) => pluginConnectionId))
     for (const [pluginConnectionId, request] of synchronizationRequests.current) {
       if (synchronizableIds.has(pluginConnectionId)) continue
@@ -713,13 +760,11 @@ export const ServicesPage = ({
         synchronizationRequests.current.delete(connection.pluginConnectionId)
       }
     }
-  }, [connectionsState, refreshSynchronization, transport.synchronization])
+  }, [connectionRows, refreshSynchronization, transport.synchronization])
 
   useEffect(() => {
-    if (connectionsState._tag !== "ready" || transport.administration === undefined) return
-    const connectionIds = new Set(
-      connectionsState.overview.connections.map(({ pluginConnectionId }) => pluginConnectionId)
-    )
+    if (connectionRows === null || transport.administration === undefined) return
+    const connectionIds = new Set(connectionRows.map(({ pluginConnectionId }) => pluginConnectionId))
     for (const [pluginConnectionId, request] of administrationRequests.current) {
       if (connectionIds.has(pluginConnectionId)) continue
       request.abort()
@@ -742,7 +787,7 @@ export const ServicesPage = ({
         administrationRequests.current.delete(pluginConnectionId)
       }
     }
-  }, [connectionsState, refreshAdministration, transport.administration])
+  }, [connectionRows, refreshAdministration, transport.administration])
 
   useEffect(() => {
     if (sessionKey === null || (openProvider !== "codecommit" && openProvider !== "codepipeline")) return
@@ -908,10 +953,10 @@ export const ServicesPage = ({
         setConnectionsState((current) =>
           current._tag === "ready"
             ? {
-                _tag: "ready",
+                ...current,
                 overview: {
                   ...current.overview,
-                  connections: [...current.overview.connections, response.connection]
+                  connections: mergeConnections(current.overview.connections, [response.connection])
                 }
               }
             : current
@@ -976,10 +1021,13 @@ export const ServicesPage = ({
         if (shouldRefreshOverview) {
           try {
             const refreshedOverview = await transport.overview(request.signal)
-            if (!request.signal.aborted) setConnectionsState({ _tag: "ready", overview: refreshedOverview })
+            if (!request.signal.aborted) {
+              setConnectionsState((current) => receiveOverview(current, refreshedOverview, sessionKey))
+            }
           } catch (failure: unknown) {
             if (request.signal.aborted) return false
             if (Predicate.isTagged("UnauthorizedApiError")(failure)) invalidateSession(sessionKey)
+            setConnectionsState((current) => overviewRefreshFailed(current, sessionKey))
           }
         }
         if (hasSetupFailure) completedBatchDrafts.current.set(originProvider, completed)
@@ -1031,7 +1079,7 @@ export const ServicesPage = ({
           setConnectionsState((current) =>
             current._tag === "ready"
               ? {
-                  _tag: "ready",
+                  ...current,
                   overview: {
                     ...current.overview,
                     connections: current.overview.connections.map((candidate) =>
@@ -1090,7 +1138,7 @@ export const ServicesPage = ({
         setConnectionsState((current) =>
           current._tag === "ready"
             ? {
-                _tag: "ready",
+                ...current,
                 overview: {
                   ...current.overview,
                   connections: current.overview.connections.map((candidate) =>
@@ -1164,7 +1212,7 @@ export const ServicesPage = ({
         setConnectionsState((current) =>
           current._tag === "ready"
             ? {
-                _tag: "ready",
+                ...current,
                 overview: {
                   ...current.overview,
                   connections: current.overview.connections.map((candidate) =>
@@ -1211,7 +1259,7 @@ export const ServicesPage = ({
         setConnectionsState((current) =>
           current._tag === "ready"
             ? {
-                _tag: "ready",
+                ...current,
                 overview: {
                   ...current.overview,
                   accounts: current.overview.accounts.map((candidate) =>
@@ -1250,6 +1298,13 @@ export const ServicesPage = ({
             : "Configure first-party providers and verify the exact account each connection represents."}
         </Text>
       </header>
+      {connectionsState._tag !== "ready" || connectionsState.refresh === "idle" ? null : (
+        <Text as="p" role="status" tone="secondary" variant="meta">
+          {connectionsState.refresh === "pending"
+            ? "Refreshing connections…"
+            : "Could not refresh connections. Showing the last read."}
+        </Text>
+      )}
       {session === null && sessionState._tag !== "checking" ? (
         <div className={styles.grid}>
           {firstPartyServiceIdentities.map((service) => (

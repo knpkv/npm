@@ -3947,6 +3947,181 @@ describe("ServicesPage first sync", () => {
           }
     })
 
+  // The creation reply can arrive after a live read has already published that same connection.
+  it.each(["overview-first", "create-first"])(
+    "merges creation and live overview in %s order without duplicates or older metadata",
+    async (order) => {
+      const response = created(
+        {
+          pluginConnectionId: connection.pluginConnectionId,
+          providerId: "codecommit",
+          displayName: "Fixture repository",
+          values: []
+        },
+        true
+      )
+      const latest = Schema.decodeUnknownSync(PluginConnectionSummary)({
+        ...Schema.encodeSync(PluginConnectionSummary)(response.connection),
+        isEnabled: false,
+        updatedAt: order === "overview-first" ? "2026-07-14T10:04:00.000Z" : "2026-07-14T10:02:00.000Z"
+      })
+      let finishCreate: ((value: CreatePluginConnectionResponse) => void) | undefined
+      let finishOverview: ((value: PluginOverviewResponse) => void) | undefined
+      const refreshedOverview = new Promise<PluginOverviewResponse>((resolve) => {
+        finishOverview = resolve
+      })
+      let onInvalidate: (() => void) | undefined
+      let refreshed = false
+      const create = vi.fn<ConnectionTestTransport["create"]>(
+        () =>
+          new Promise((resolve) => {
+            finishCreate = resolve
+          })
+      )
+      const transport: ConnectionTestTransport = {
+        create,
+        makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
+        overview: () => (refreshed ? refreshedOverview : Promise.resolve(awsOverview)),
+        observeInvalidations: ({ onInvalidation, signal }) =>
+          new Promise((resolve) => {
+            onInvalidate = onInvalidation
+            signal.addEventListener("abort", () => resolve(), { once: true })
+          }),
+        setEnabled: vi.fn(),
+        test: vi.fn()
+      }
+      const host = await renderServices(transport, "/services?enable=codecommit")
+      const inputs = host.querySelectorAll<HTMLInputElement>("input")
+      const name = inputs[0]
+      const region = inputs[2]
+      const repository = host.querySelector<HTMLTextAreaElement>("textarea")
+      if (name === undefined || region === undefined || repository === null) return expect.fail("Expected AWS setup")
+      await setControlValue(name, "Fixture account")
+      await setControlValue(region, "us-east-1")
+      await setControlValue(repository, "fixture-repository")
+      const submit = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+        textContent?.includes("Connect AWS account")
+      )
+      if (submit === undefined) return expect.fail("Expected account connection action")
+      await act(async () => submit.click())
+      expect(create).toHaveBeenCalledTimes(1)
+      if (onInvalidate === undefined || finishCreate === undefined)
+        return expect.fail("Expected pending creation and live observer")
+      await act(async () => {
+        refreshed = true
+        onInvalidate?.()
+      })
+      if (order === "overview-first") {
+        await act(async () => finishOverview?.({ ...awsOverview, connections: [latest] }))
+        await act(async () => finishCreate?.(response))
+      } else {
+        await act(async () => finishCreate?.(response))
+        await act(async () => finishOverview?.({ ...awsOverview, connections: [latest] }))
+      }
+      const headings = [...host.querySelectorAll("h2")].filter(
+        ({ textContent }) => textContent === "Fixture repository"
+      )
+      expect(headings).toHaveLength(1)
+      expect(headings[0]?.closest("article")?.textContent?.includes("Disabled")).toBe(order === "overview-first")
+    }
+  )
+
+  it.each(["success", "failure"])(
+    "keeps the card and focused control during a refresh and after %s",
+    async (outcome) => {
+      const connectedOverview = {
+        ...overview,
+        connections: [{ ...connection, supportsSynchronization: true }]
+      }
+      const synchronization = vi
+        .fn<NonNullable<ConnectionTestTransport["synchronization"]>>()
+        .mockResolvedValue(syncState(connection.pluginConnectionId, "synchronized"))
+      let finishRefresh: ((value: PluginOverviewResponse) => void) | undefined
+      let failRefresh: (() => void) | undefined
+      let onInvalidate: (() => void) | undefined
+      const loadOverview = vi
+        .fn<ConnectionTestTransport["overview"]>()
+        .mockResolvedValueOnce(connectedOverview)
+        .mockImplementation(
+          () =>
+            new Promise((resolve, reject) => {
+              finishRefresh = resolve
+              failRefresh = () => reject({ _tag: "FixtureOverviewUnavailable" })
+            })
+        )
+      const transport: ConnectionTestTransport = {
+        create: vi.fn(),
+        makeConnectionId: vi.fn(),
+        overview: loadOverview,
+        observeInvalidations: ({ onInvalidation, signal }) =>
+          new Promise((resolve) => {
+            onInvalidate = onInvalidation
+            signal.addEventListener("abort", () => resolve(), { once: true })
+          }),
+        setEnabled: vi.fn(),
+        synchronization,
+        test: vi.fn()
+      }
+      const host = await renderServices(transport)
+      const heading = [...host.querySelectorAll("h2")].find(({ textContent }) => textContent === connection.displayName)
+      const card = heading?.closest("article")
+      const control = [...(card?.querySelectorAll<HTMLButtonElement>("button") ?? [])].find(({ textContent }) =>
+        textContent?.includes("Test connection")
+      )
+      if (card === undefined || card === null || control === undefined || onInvalidate === undefined) {
+        return expect.fail("Expected a connected card and live observer")
+      }
+      control.focus()
+      await act(async () => onInvalidate?.())
+      expect(card.isConnected).toBe(true)
+      expect(document.activeElement).toBe(control)
+      expect(host.textContent).toContain("Refreshing connections")
+      expect(synchronization).toHaveBeenCalledTimes(1)
+      if (finishRefresh === undefined) return expect.fail("Expected pending overview refresh")
+      if (outcome === "success") await act(async () => finishRefresh?.(connectedOverview))
+      else await act(async () => failRefresh?.())
+      expect(card.isConnected).toBe(true)
+      expect(document.activeElement).toBe(control)
+      expect(host.textContent).not.toContain("Refreshing connections")
+      expect(host.textContent?.includes("Could not refresh connections. Showing the last read.")).toBe(
+        outcome === "failure"
+      )
+    }
+  )
+
+  it("discards retained cards when a different browser session starts loading", async () => {
+    let finishOverview: ((value: PluginOverviewResponse) => void) | undefined
+    const loadOverview = vi
+      .fn<ConnectionTestTransport["overview"]>()
+      .mockResolvedValueOnce(overview)
+      .mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            finishOverview = resolve
+          })
+      )
+    const transport: ConnectionTestTransport = {
+      create: vi.fn(),
+      makeConnectionId: vi.fn(),
+      overview: loadOverview,
+      setEnabled: vi.fn(),
+      test: vi.fn()
+    }
+    const host = await renderServices(transport)
+    expect(host.textContent).toContain(connection.displayName)
+    const nextSession = Schema.decodeUnknownSync(SessionSummary)({
+      ...Schema.encodeSync(SessionSummary)(session),
+      sessionId: "01890f6f-6d6a-7cc0-98d2-000000000153",
+      workspaceId: "01890f6f-6d6a-7cc0-98d2-000000000154"
+    })
+    await act(async () => sessionControls?.establishSession(csrfToken, nextSession))
+    expect(host.textContent).not.toContain(connection.displayName)
+    expect(loadOverview).toHaveBeenCalledTimes(2)
+    if (finishOverview === undefined) return expect.fail("Expected new session overview")
+    await act(async () => finishOverview?.({ ...overview, connections: [] }))
+    expect(host.textContent).not.toContain(connection.displayName)
+  })
+
   // Creation owns the first sync on the server. Services observes queued state and completion over SSE.
   it("shows queued first sync and refreshes it on invalidation without a browser sync POST", async () => {
     const ids = [
