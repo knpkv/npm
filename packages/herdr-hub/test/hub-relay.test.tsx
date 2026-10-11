@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 
 import type { ObjectRef } from "@knpkv/relay/wire"
+import { PortalProvider } from "@knpkv/rly/foundations"
 import {
   foldRelayConversation,
   initialRelayConversation,
@@ -12,15 +13,17 @@ import {
 import { Exit } from "effect"
 import { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
-import { afterEach, describe, expect, it, vi } from "vitest"
-import { watchRelayPage } from "../src/hub-relay.js"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { HubRelay, watchRelayPage } from "../src/hub-relay.js"
 import { FleetShell, keyboardHeight } from "../src/shell-view.js"
+import { SuperappShell } from "../src/superapp-view.js"
+import { makeFleetModuleViews } from "../src/fleet-module-view.js"
 
 const fleet: ObjectRef = { product: "herdr", kind: "fleet", id: "hub.tail" }
 
 /** A conversation the test drives event by event; nothing reaches a server. */
-const fakeConversations = () => {
-  let state: RelayConversationState = initialRelayConversation
+const fakeConversations = (initial: RelayConversationState = initialRelayConversation) => {
+  let state: RelayConversationState = initial
   const listeners = new Set<RelayConversationListener>()
   const calls: Array<string> = []
   const conversations: RelayConversations = {
@@ -41,7 +44,11 @@ const fakeConversations = () => {
     state = foldRelayConversation(state, event)
     for (const listener of listeners) listener(state, event)
   }
-  return { calls, conversations, emit }
+  const publish = (next: RelayConversationState): void => {
+    state = next
+    for (const listener of listeners) listener(state, null)
+  }
+  return { calls, conversations, emit, publish }
 }
 
 /** A pagehide or pageshow, kept in the back/forward cache or not. */
@@ -61,6 +68,7 @@ const working: RelayClientEvent = {
 }
 
 let root: Root | null = null
+beforeEach(() => vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true))
 afterEach(async () => {
   const mounted = root
   root = null
@@ -106,6 +114,204 @@ const mount = async (conversations: RelayConversations) => {
 }
 
 describe("Relay in the hub's masthead", () => {
+  it.each([
+    { labels: undefined, title: "Relay" },
+    { labels: { desktop: "Ask Ops", phone: "Ops" }, title: "Ask Ops" }
+  ])("uses the launcher label as the panel title, or keeps the legacy title: $title", async ({ labels, title }) => {
+    const { conversations } = fakeConversations({ ...initialRelayConversation, connection: "live" })
+    const host = document.createElement("div")
+    document.body.append(host)
+    const created = createRoot(host)
+    root = created
+    await act(async () =>
+      created.render(
+        <PortalProvider>
+          <HubRelay
+            {...(labels === undefined ? {} : { launcherLabels: labels })}
+            relay={{ conversation: fleet, conversations }}
+            terminalOwnsKeys={false}
+          />
+        </PortalProvider>
+      )
+    )
+    const launcher = document.querySelector<HTMLButtonElement>("[data-rly-relay-launcher]")
+    expect(launcher).not.toBeNull()
+    await act(async () => launcher?.click())
+    const panel = document.querySelector("[data-rly-relay-panel]")
+    expect(panel).not.toBeNull()
+    const titleId = panel?.getAttribute("aria-labelledby")
+    expect(titleId).toBeTruthy()
+    expect(document.getElementById(titleId ?? "")?.textContent).toBe(title)
+  })
+
+  const liveState: RelayConversationState = { ...initialRelayConversation, connection: "live" }
+  const activeState: RelayConversationState = { ...liveState, runIds: ["run-1"] }
+  const streamingState: RelayConversationState = {
+    ...activeState,
+    messages: [{ id: "reply-1", role: "relay", text: "An answer", streaming: true }]
+  }
+  const toolState: RelayConversationState = {
+    ...streamingState,
+    tools: [
+      { call: "call-1", capability: "read", summary: "Reading files", state: "running", receipt: null, after: null }
+    ]
+  }
+  const confirmationState: RelayConversationState = {
+    ...toolState,
+    confirmations: [
+      {
+        call: "call-1",
+        action: { verb: "prompt_agent", target: fleet, args: {} },
+        reversible: false,
+        decision: "pending"
+      }
+    ]
+  }
+  const failedState: RelayConversationState = { ...liveState, failure: { cause: "Failed", fix: "Retry" } }
+  const phases: ReadonlyArray<{
+    readonly label: string
+    readonly state: RelayConversationState
+    readonly phase: string
+    readonly bucket: string
+    readonly words: string | null
+  }> = [
+    { label: "connecting", state: initialRelayConversation, phase: "idle", bucket: "ready", words: null },
+    { label: "quiet live", state: liveState, phase: "idle", bucket: "ready", words: null },
+    {
+      label: "disconnected overrides confirmation",
+      state: { ...confirmationState, connection: "disconnected" },
+      phase: "idle",
+      bucket: "ready",
+      words: "Relay status unknown"
+    },
+    {
+      label: "failed stream",
+      state: { ...confirmationState, connection: "failed" },
+      phase: "idle",
+      bucket: "ready",
+      words: "Relay status unknown"
+    },
+    {
+      label: "unauthorized",
+      state: { ...confirmationState, connection: "unauthorized" },
+      phase: "idle",
+      bucket: "ready",
+      words: "Sign in to use Relay"
+    },
+    {
+      label: "confirmation overrides tool",
+      state: confirmationState,
+      phase: "needs-you",
+      bucket: "needs-you",
+      words: "Relay needs you"
+    },
+    { label: "tool overrides streaming", state: toolState, phase: "thinking", bucket: "working", words: "Reading…" },
+    { label: "streaming run", state: streamingState, phase: "answering", bucket: "working", words: "Answering…" },
+    { label: "run with no text", state: activeState, phase: "thinking", bucket: "working", words: "Working…" },
+    {
+      label: "queued overrides failure",
+      state: { ...failedState, queued: [{ requestId: "queued-1", text: "Question" }] },
+      phase: "thinking",
+      bucket: "working",
+      words: "Sending…"
+    },
+    { label: "failure", state: failedState, phase: "idle", bucket: "ready", words: "Relay hit an error" },
+    {
+      label: "backend signed out",
+      state: {
+        ...failedState,
+        backend: { _tag: "Unavailable", backend: "codex-cli", label: "Backend", cause: "SignedOut", fix: "Sign in" }
+      },
+      phase: "idle",
+      bucket: "ready",
+      words: "Sign in to Backend"
+    },
+    {
+      label: "unread reply",
+      state: { ...liveState, messages: [{ id: "reply-1", role: "relay", text: "Finished", streaming: false }] },
+      phase: "idle",
+      bucket: "ready",
+      words: "Relay replied"
+    }
+  ]
+  it.each(phases)(
+    "renders the intended character for $label without changing status words",
+    async ({ bucket, phase, state, words }) => {
+      const { conversations, publish } = fakeConversations(liveState)
+      const page = await mount(conversations)
+      await act(async () => publish(state))
+      const avatar = page.launcher().querySelector("[data-relay-phase]")
+      expect(avatar?.getAttribute("data-relay-phase")).toBe(phase)
+      expect(avatar?.querySelector("svg")?.getAttribute("data-bucket")).toBe(bucket)
+      expect(page.live()).toBe(words ?? "")
+    }
+  )
+
+  it("uses the listening pose only while the composer is focused and clears it on close", async () => {
+    const { conversations } = fakeConversations({ ...initialRelayConversation, connection: "live" })
+    const page = await mount(conversations)
+    const pose = () => page.launcher().querySelector("[data-relay-phase]")?.getAttribute("data-relay-phase")
+    expect(pose()).toBe("idle")
+    await page.shortcut()
+    expect(document.activeElement?.tagName).toBe("TEXTAREA")
+    expect(pose()).toBe("listening")
+    expect(page.launcher().querySelector("svg")?.getAttribute("data-bucket")).toBe("ready")
+    expect(page.panel()?.textContent).toContain("Listening")
+    await act(async () => {
+      document.activeElement?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Escape" }))
+    })
+    expect(page.panel()).toBeNull()
+    expect(pose()).toBe("idle")
+  })
+
+  it("keeps one launcher and the open conversation across every Fleet route", async () => {
+    const { conversations } = fakeConversations()
+    const views = makeFleetModuleViews({
+      approvals: <p>Approvals</p>,
+      connect: <p>Connect</p>,
+      work: <p>Work</p>,
+      usage: <p>Usage</p>,
+      hostCount: 1,
+      notice: null,
+      gesture: {
+        onTouchStart: () => undefined,
+        onTouchMove: () => undefined,
+        onTouchEnd: () => undefined,
+        onTouchCancel: () => undefined
+      }
+    })
+    const host = document.createElement("div")
+    document.body.append(host)
+    root = createRoot(host)
+    const created = root
+    await act(async () =>
+      created.render(
+        <SuperappShell
+          modules={[views]}
+          landing={{ module: "fleet", page: "approvals" }}
+          host="hub"
+          hostCount={1}
+          notifications={null}
+          relay={{ conversation: fleet, conversations }}
+        />
+      )
+    )
+    const launcher = document.querySelector<HTMLButtonElement>("[data-rly-relay-launcher]")
+    await act(async () => launcher?.click())
+    const conversation = document.querySelector("[data-rly-relay-panel]")
+    expect(conversation).not.toBeNull()
+    for (const page of ["connect", "work", "usage", "approvals"]) {
+      await act(async () => {
+        window.location.hash = `#fleet/${page}`
+        window.dispatchEvent(new HashChangeEvent("hashchange"))
+      })
+      expect(document.querySelectorAll("[data-rly-relay-launcher]")).toHaveLength(1)
+      expect(document.querySelector("[data-rly-relay-launcher]")).toBe(launcher)
+      expect(document.querySelectorAll("[data-rly-relay-panel]")).toHaveLength(1)
+      expect(document.querySelector("[data-rly-relay-panel]")).toBe(conversation)
+    }
+  })
+
   it("starts the overlay below the masthead's visible bottom", async () => {
     const rect = (bottom: number) => DOMRect.fromRect({ height: bottom, width: 1280, x: 0, y: 0 })
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {

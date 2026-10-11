@@ -1,7 +1,8 @@
 import { PortalProvider } from "@knpkv/rly/foundations"
 import { RelayMark } from "@knpkv/rly/patterns"
-import { Button, Dialog, StatePanel, Tabs, Text, type RlyTabItem } from "@knpkv/rly/primitives"
+import { Button, StatePanel, Tabs, Text, type RlyTabItem } from "@knpkv/rly/primitives"
 import { Cause, Option, Predicate } from "effect"
+import { ShortcutsDialog, focusWhenShown, isEditableTarget } from "./internal/shell-keys.js"
 import { HubRelay, type HubRelayConversation } from "./hub-relay.js"
 import type * as AsyncResult from "effect/reactivity/AsyncResult"
 import { useEffect, useLayoutEffect, useRef, useState, type ReactElement, type ReactNode } from "react"
@@ -183,54 +184,6 @@ export const fleetShortcutFor = ({
   return { prefix: null, shortcut: null }
 }
 
-/** Every shortcut, as the `?` overlay lists them. */
-const shortcutList: ReadonlyArray<{ readonly keys: ReadonlyArray<string>; readonly action: string }> = [
-  { action: "Go to Approvals", keys: ["g", "a"] },
-  { action: "Go to Connect", keys: ["g", "c"] },
-  { action: "Go to Work", keys: ["g", "w"] },
-  { action: "Go to Usage", keys: ["g", "u"] },
-  { action: "Search agents", keys: ["Ctrl", "K"] },
-  { action: "Show these shortcuts", keys: ["?"] }
-]
-
-const ShortcutsDialog = ({
-  onOpenChange,
-  open
-}: {
-  readonly onOpenChange: (open: boolean) => void
-  readonly open: boolean
-}): ReactElement => (
-  <Dialog.Root onOpenChange={onOpenChange} open={open}>
-    <Dialog.Content
-      className="fleet-shortcuts-dialog"
-      description="Type a sequence with no field focused; Ctrl+K works anywhere. The tabs are also reachable with Tab, then the arrow keys."
-      title="Keyboard shortcuts"
-    >
-      <dl className="fleet-shortcuts">
-        {shortcutList.map(({ action, keys }) => (
-          <div key={action}>
-            <dt>
-              {keys.map((key, index) => (
-                <span key={key}>
-                  {index > 0 ? (keys[0] === "Ctrl" ? " + " : " then ") : null}
-                  <kbd>{key}</kbd>
-                </span>
-              ))}
-            </dt>
-            <dd>{action}</dd>
-          </div>
-        ))}
-      </dl>
-      {/* Esc closes it too, but a phone has no Esc: the close action is always on screen. */}
-      <div className="fleet-shortcuts-actions">
-        <Dialog.Close size="compact" variant="secondary">
-          Close
-        </Dialog.Close>
-      </div>
-    </Dialog.Content>
-  </Dialog.Root>
-)
-
 /**
  * How much of the page the on-screen keyboard covers: the layout viewport below the visual one. Zero where
  * the browser resizes the page for the keyboard (`interactive-widget=resizes-content`) and while the page is
@@ -244,30 +197,6 @@ export const keyboardHeight = (view: {
   const visual = view.visualViewport
   if (visual === undefined || visual === null || Math.abs(visual.scale - 1) > 0.01) return 0
   return Math.max(0, Math.round(view.innerHeight - visual.offsetTop - visual.height))
-}
-
-/** How long Ctrl+K keeps trying to reach agent search while the Connect tab shows and loads. */
-const SEARCH_FOCUS_MS = 3000
-
-/**
- * Focuses the element `id` once it is mounted and shown. Switching to Connect renders its panel a
- * frame or more later, and the search field can mount later still, so one attempt can land before
- * it exists or while it is hidden: keep trying each frame until it has focus, for a bounded time.
- */
-const focusWhenShown = (id: string, deadline: number = performance.now() + SEARCH_FOCUS_MS): void => {
-  window.requestAnimationFrame((now) => {
-    const element = document.getElementById(id)
-    element?.focus()
-    if (element !== null && document.activeElement === element) return
-    if (now < deadline) focusWhenShown(id, deadline)
-  })
-}
-
-const isEditableTarget = (target: EventTarget | null): boolean => {
-  if (!Predicate.hasProperty(target, "nodeName") || !Predicate.isString(target.nodeName)) return false
-  if (target.nodeName === "INPUT" || target.nodeName === "TEXTAREA" || target.nodeName === "SELECT") return true
-  if (Predicate.hasProperty(target, "isContentEditable") && target.isContentEditable === true) return true
-  return Predicate.hasProperty(target, "role") && target.role === "textbox"
 }
 
 const isAnchor = (node: EventTarget): node is HTMLAnchorElement =>
@@ -292,14 +221,23 @@ export const shellTabLinkTarget = (
 }
 
 export const FleetShell = ({
+  active = true,
   approvals,
   connect,
+  embedded = false,
   hostCount,
+  navigation,
   notice = null,
   relay,
   usage,
   work
 }: {
+  /** Defaults to true. Inactive Fleet keeps Approvals, while Connect, Work and Usage unmount. */
+  readonly active?: boolean
+  /** Defaults to false. The parent supplies the header, Relay and keyboard shortcuts when embedded. */
+  readonly embedded?: boolean
+  /** The parent owns URL/history and global shortcuts when supplied; otherwise legacy query tabs apply. */
+  readonly navigation?: { readonly tab: FleetShellTab; readonly onTabChange: (tab: FleetShellTab) => void }
   readonly approvals: ReactNode
   readonly connect: ReactNode
   readonly hostCount: number
@@ -311,16 +249,18 @@ export const FleetShell = ({
   readonly usage: ReactNode
   readonly work: ReactNode
 }): ReactElement => {
-  const [tab, setTab] = useState<FleetShellTab>("approvals")
+  const [localTab, setTab] = useState<FleetShellTab>("approvals")
+  const tab = navigation?.tab ?? localTab
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
   const prefix = useRef<FleetShortcutPrefix>(null)
   const shellRef = useRef<HTMLDivElement>(null)
   const mastheadRef = useRef<HTMLElement>(null)
   const tabsRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
+    if (navigation !== undefined) return
     const candidate = new URLSearchParams(window.location.search).get("tab")
     if (candidate !== null && isShellTab(candidate)) setTab(candidate)
-  }, [])
+  }, [navigation])
   useLayoutEffect(() => {
     const shell = shellRef.current
     const tabsRoot = tabsRef.current
@@ -370,7 +310,7 @@ export const FleetShell = ({
       window.visualViewport?.removeEventListener("scroll", scheduleTerminalInsetUpdate)
       document.documentElement.style.removeProperty("--fleet-shell-keyboard")
     }
-  }, [tab])
+  }, [tab, active])
   // On a phone the tabs scroll as one row; the selected one is always brought into it, so a page
   // opened on `?tab=usage` (the fourth tab) shows which tab it is on.
   useLayoutEffect(() => {
@@ -395,12 +335,17 @@ export const FleetShell = ({
     if (!isShellTab(value)) return
     const activePanel = tabsRef.current?.querySelector<HTMLElement>(':scope > [role="tabpanel"][data-state="active"]')
     if (activePanel?.contains(document.activeElement) === true) focusTab(value)
+    if (navigation !== undefined) {
+      navigation.onTabChange(value)
+      return
+    }
     setTab(value)
     const url = new URL(window.location.href)
     url.searchParams.set("tab", value)
     window.history.replaceState(null, "", url)
   }
   useEffect(() => {
+    if (navigation !== undefined || !active) return
     const handleShortcut = (event: KeyboardEvent): void => {
       const next = fleetShortcutFor({
         alt: event.altKey,
@@ -431,6 +376,7 @@ export const FleetShell = ({
   // A plain click on a same-page `?tab=` link switches tabs in place; a modified click (new tab,
   // new window) keeps the browser's own behaviour.
   useEffect(() => {
+    if (navigation !== undefined || !active) return
     const handleClick = (event: MouseEvent): void => {
       if (
         event.defaultPrevented ||
@@ -462,7 +408,8 @@ export const FleetShell = ({
     document.addEventListener("click", handleClick)
     return () => document.removeEventListener("click", handleClick)
     // Registered once: selectTab only reads refs and the state setter, both stable across renders.
-  }, [])
+  }, [navigation, active])
+  const Content = embedded ? "div" : "main"
   const items: ReadonlyArray<RlyTabItem> = [
     {
       content: approvals,
@@ -473,17 +420,17 @@ export const FleetShell = ({
       value: "approvals"
     },
     {
-      content: connect,
+      content: active ? connect : null,
       label: "Connect",
       value: "connect"
     },
     {
-      content: work,
+      content: active ? work : null,
       label: "Work",
       value: "work"
     },
     {
-      content: usage,
+      content: active ? usage : null,
       label: "Usage",
       value: "usage"
     }
@@ -492,36 +439,38 @@ export const FleetShell = ({
     // rly overlays (the shortcuts dialog) render into a portal target; without a provider they don't mount.
     <PortalProvider>
       <div className="fleet-shell" ref={shellRef}>
-        <header className="fleet-shell-masthead" ref={mastheadRef}>
-          <div className="fleet-shell-brand">
-            {relay === undefined ? (
-              <>
-                <RelayMark.Tile className="fleet-shell-mark" size={32} />
-                <Text as="strong" variant="label">
-                  Relay
-                </Text>
-              </>
-            ) : (
-              <HubRelay relay={relay} terminalOwnsKeys={tab === "connect"} />
-            )}
-          </div>
-          <div className="fleet-shell-meta">
-            {/* Configured, not reachable: the shell doesn't know which hosts answer, so it doesn't say. */}
-            <Text tone="secondary" variant="meta">
-              {hostCount === 1 ? "1 host" : `${String(hostCount)} hosts`}
-            </Text>
-            <Button
-              className="fleet-shell-shortcuts-button"
-              onClick={() => setShortcutsOpen(true)}
-              size="compact"
-              title="Or press ?"
-              variant="quiet"
-            >
-              Keyboard shortcuts
-            </Button>
-          </div>
-        </header>
-        <main className="fleet-shell-main">
+        {embedded ? null : (
+          <header className="fleet-shell-masthead" ref={mastheadRef}>
+            <div className="fleet-shell-brand">
+              {relay === undefined ? (
+                <>
+                  <RelayMark.Tile className="fleet-shell-mark" size={32} />
+                  <Text as="strong" variant="label">
+                    Relay
+                  </Text>
+                </>
+              ) : (
+                <HubRelay relay={relay} terminalOwnsKeys={tab === "connect"} />
+              )}
+            </div>
+            <div className="fleet-shell-meta">
+              {/* Configured, not reachable: the shell doesn't know which hosts answer, so it doesn't say. */}
+              <Text tone="secondary" variant="meta">
+                {hostCount === 1 ? "1 host" : `${String(hostCount)} hosts`}
+              </Text>
+              <Button
+                className="fleet-shell-shortcuts-button"
+                onClick={() => setShortcutsOpen(true)}
+                size="compact"
+                title="Or press ?"
+                variant="quiet"
+              >
+                Keyboard shortcuts
+              </Button>
+            </div>
+          </header>
+        )}
+        <Content className="fleet-shell-main">
           {notice}
           <Tabs
             aria-label="Relay applications"
@@ -532,8 +481,8 @@ export const FleetShell = ({
             size="large"
             value={tab}
           />
-        </main>
-        <ShortcutsDialog onOpenChange={setShortcutsOpen} open={shortcutsOpen} />
+        </Content>
+        {embedded ? null : <ShortcutsDialog onOpenChange={setShortcutsOpen} open={shortcutsOpen} />}
       </div>
     </PortalProvider>
   )

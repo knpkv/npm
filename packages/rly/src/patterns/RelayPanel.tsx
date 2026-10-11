@@ -54,6 +54,8 @@ export interface RlyRelayPanelPin {
 interface RelayPanelBaseProps {
   /** What Relay is doing, shown on the header mark; `idle` (still) unless given. Say it in words too. */
   readonly activity?: RlyRelayMarkActivity | undefined
+  /** Decorative replacement for the header mark; omitted keeps the default mark. Host-owned size, motion and status words. */
+  readonly avatar?: ReactNode
   /** Status line under the header (freshness of what Relay read); not a live region. */
   readonly freshness?: ReactNode
   /** Kept on screen under the body: the composer. */
@@ -245,7 +247,13 @@ const PanelChrome = (
     <>
       <header className={style("header")}>
         {/* The header mounts as the panel opens, so its mark plays the entrance once per opening. */}
-        <RelayMark.Tile activity={props.activity} entrance size={24} />
+        {props.avatar === undefined ? (
+          <RelayMark.Tile activity={props.activity} entrance size={24} />
+        ) : (
+          <span aria-hidden="true" data-rly-relay-avatar="panel" data-rly-relay-activity={props.activity ?? "idle"}>
+            {props.avatar}
+          </span>
+        )}
         <div className={style("heading")}>
           {heading}
           <p className={style("scope")}>

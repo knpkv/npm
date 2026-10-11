@@ -21,7 +21,7 @@ import {
   registerNewPushSubscription,
   unregisterPushSubscription
 } from "./push-subscription.js"
-import type { NotificationState } from "./approval-app-view.js"
+import { NotificationPanel, type NotificationState } from "./approval-app-view.js"
 import { ActivityHistory } from "./activity-history.js"
 import {
   DashboardSnapshot,
@@ -39,14 +39,17 @@ import {
   mergeDashboardHistoryPage,
   withPendingApprovalTarget
 } from "./internal/dashboard-pending-state.js"
-import { FleetShell, FleetWorkPanel, fleetWorkRequestStateFromResult, fleetWorkStateFromRequest } from "./shell-view.js"
-import { matchesApprovalDeepLink, readApprovalDeepLink } from "./pwa.js"
+import { FleetWorkPanel, fleetWorkRequestStateFromResult, fleetWorkStateFromRequest } from "./shell-view.js"
+import { readApprovalDeepLink } from "./pwa.js"
+import { useApprovalTargetFocus } from "./internal/approval-target-focus.js"
 import { SanitizedJobRecord } from "./approval-request.js"
 import { answerForStatus, answerSettles, answerText, DecisionAnswer } from "./countdown-model.js"
 import type { DecisionStatus } from "./countdown-view.js"
 import { useHubNow } from "./hub-clock.js"
 import { answerOutcome, decidableExpiry, workRequestDecisionsFor } from "./work-decisions.js"
 import { DashboardWorkPollOwner } from "./work-poll-owner.js"
+import { SuperappShell } from "./superapp-view.js"
+import { makeFleetModuleViews } from "./fleet-module-view.js"
 import { RefreshStatus } from "./refresh-status.js"
 import { dashboardPolls } from "./internal/dashboard-polls.js"
 import { useDashboardPending } from "./internal/use-dashboard-pending.js"
@@ -424,6 +427,7 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
   const [historyBusy, setHistoryBusy] = useState(false)
   const [historyState, setHistoryState] = useState(dashboardHistoryState(0, [], initial.historyNextCursor))
   const [pendingBusy, setPendingBusy] = useState(false)
+  const [routeSearch, setRouteSearch] = useState(window.location.search)
   const { state: pendingState, update: setPendingState } = useDashboardPending(snapshot)
   const loadTarget = useCallback(
     async (link: ApprovalNotificationCandidate): Promise<PendingApprovalTargetRevalidation> => {
@@ -437,7 +441,7 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
     },
     [runPendingTarget]
   )
-  const decodedDeepLink = readApprovalDeepLink(window.location.search)
+  const decodedDeepLink = readApprovalDeepLink(routeSearch)
   const { check: pendingTargetCheck, target: deepLinkTarget } = useDashboardPendingTarget(
     snapshot,
     Result.isSuccess(decodedDeepLink) ? decodedDeepLink.success : null,
@@ -579,26 +583,13 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
     setHistoryState((state) => dashboardHistoryState(state.generation + 1, [], snapshot.historyNextCursor))
   }, [snapshot])
   useEffect(() => {
-    const decoded = readApprovalDeepLink(window.location.search)
+    const decoded = readApprovalDeepLink(routeSearch)
     if (Result.isFailure(decoded)) {
       Effect.runFork(Effect.logWarning(decoded.failure))
       return
     }
-  }, [snapshot])
-  useEffect(() => {
-    const decoded = readApprovalDeepLink(window.location.search)
-    if (Result.isFailure(decoded) || decoded.success === null) return
-    const target = [...document.querySelectorAll<HTMLElement>("[data-agenda-item]")].find((item) =>
-      matchesApprovalDeepLink(item.dataset, decoded.success)
-    )
-    if (target === undefined) return
-    target.dataset.approvalTarget = "true"
-    target.focus({ preventScroll: true })
-    target.scrollIntoView({ behavior: "smooth", block: "center" })
-    return () => {
-      target.removeAttribute("data-approval-target")
-    }
-  }, [currentSnapshot.observedAt, deepLinkTarget])
+  }, [snapshot, routeSearch])
+  useApprovalTargetFocus(routeSearch, currentSnapshot.observedAt, deepLinkTarget)
   useEffect(() => {
     latestObservedAt.current = currentSnapshot.observedAt
   }, [currentSnapshot.observedAt])
@@ -608,7 +599,7 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
     currentSnapshot.pendingApprovals.local.map((record) => record.approvalExpiresAt ?? null)
   )
   const current = currentSnapshot
-  const workSelection = decodeWorkNavigationSelection(window.location.search)
+  const workSelection = decodeWorkNavigationSelection(routeSearch)
   const workContent =
     current.work === null ? null : (
       <WorkBoard
@@ -653,40 +644,71 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
       snapshot={current}
     />
   )
+  const hostCount = current.directory === null ? 1 : current.directory.links.length + 1
+  const gesture = { onTouchStart, onTouchMove, onTouchEnd, onTouchCancel: resetPull }
+  const connectSelection = new URLSearchParams(routeSearch)
+  const fleet = makeFleetModuleViews({
+    approvals: dashboardView,
+    connect: (
+      <ConnectSurface
+        key={JSON.stringify([
+          connectSelection.get("host"),
+          connectSelection.get("agent"),
+          connectSelection.get("open")
+        ])}
+        atoms={atoms.connect}
+        embedded
+      />
+    ),
+    hostCount,
+    notice: refreshNotice,
+    usage: <UsageSurface atoms={atoms.usage} />,
+    gesture,
+    work: (
+      <section className="fleet-workspace">
+        <FleetWorkPanel state={workState} />
+        <ActivityHistory
+          hasMore={current.historyNextCursor !== null}
+          loading={historyBusy}
+          onLoadMore={() => void onLoadHistory()}
+          records={current.records}
+        />
+      </section>
+    )
+  })
   return (
     <>
       <DashboardWorkPollOwner atom={atoms.work} poll={atoms.workPoll} />
-      <div
-        className="dashboard-gesture"
-        onTouchStart={onTouchStart}
-        onTouchMove={onTouchMove}
-        onTouchEnd={onTouchEnd}
-        onTouchCancel={resetPull}
-      >
-        {canonical ? (
-          <FleetShell
-            approvals={dashboardView}
-            relay={relay}
-            connect={<ConnectSurface atoms={atoms.connect} embedded />}
-            hostCount={current.directory === null ? 1 : current.directory.links.length + 1}
-            notice={refreshNotice}
-            usage={<UsageSurface atoms={atoms.usage} />}
-            work={
-              <section className="fleet-workspace">
-                <FleetWorkPanel state={workState} />
-                <ActivityHistory
-                  hasMore={current.historyNextCursor !== null}
-                  loading={historyBusy}
-                  onLoadMore={() => void onLoadHistory()}
-                  records={current.records}
-                />
-              </section>
-            }
-          />
-        ) : (
-          dashboardView
-        )}
-      </div>
+      {canonical ? (
+        <SuperappShell
+          modules={[fleet]}
+          landing={{ module: "fleet", page: "approvals" }}
+          host={current.host}
+          hostCount={hostCount}
+          relay={relay}
+          onLocationChange={setRouteSearch}
+          notifications={
+            <>
+              <NotificationPanel
+                canonicalUrl={current.approvalApp.canonicalUrl}
+                state={notificationState}
+                onEnable={() => void onNotificationAction(true)}
+                onDisable={() => void onNotificationAction(false)}
+              />
+              <ActivityHistory
+                hasMore={current.historyNextCursor !== null}
+                loading={historyBusy}
+                onLoadMore={() => void onLoadHistory()}
+                records={current.records}
+              />
+            </>
+          }
+        />
+      ) : (
+        <div className="dashboard-gesture" {...gesture}>
+          {dashboardView}
+        </div>
+      )}
     </>
   )
 }

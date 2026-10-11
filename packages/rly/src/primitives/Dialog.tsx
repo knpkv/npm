@@ -6,6 +6,7 @@ import {
   type Ref,
   type RefObject,
   useContext,
+  useCallback,
   useLayoutEffect,
   useRef,
   useState
@@ -30,6 +31,8 @@ import * as Predicate from "../internal/predicates.js"
 const style = (name: string): string => cssClass(styles, name)
 
 interface DialogState {
+  readonly closeGenerationRef: RefObject<number>
+  readonly layerRef: RefObject<HTMLDivElement | null>
   readonly open: boolean
   readonly requestOpenChange: (open: boolean) => void
   readonly restoreTargetRef: RefObject<HTMLElement | null>
@@ -110,28 +113,44 @@ export type DialogContentProps = Omit<
    */
   readonly entryMotion?: "external" | "intrinsic"
   readonly initialFocusRef?: RefObject<HTMLElement | null>
+  /**
+   * Defaults to returning focus to the opener after exit and modal cleanup. A host may handle a route
+   * destination instead: return true to own focus, false to use the default. Called only while this is
+   * the latest modal transition, including immediate cleanup under reduced motion.
+   */
+  readonly restoreFocus?: (opener: HTMLElement | null) => boolean
   readonly size?: RlyDialogSize
   readonly title: string
 }
 
 const DialogLayer = ({
   children,
-  entryMotion
+  entryMotion,
+  ref: portalRef
 }: {
   readonly children: ReactNode
+  readonly ref?: Ref<HTMLDivElement>
   readonly entryMotion: "external" | "intrinsic"
 }): ReactElement => {
   const state = useDialogState()
-  const ref = useRef<HTMLDivElement>(null)
+  const ref = state.layerRef
   useModalContentRegistration()
   useModalIsolation(ref, state.open)
+  const setLayerRef = useCallback(
+    (element: HTMLDivElement | null) => {
+      ref.current = element
+      assignRef(portalRef, element)
+    },
+    [portalRef]
+  )
   return (
     <div
       className={style("layer")}
       data-rly-dialog-entry-motion={entryMotion}
       data-rly-dialog-layer=""
       data-rly-modal-layer=""
-      ref={ref}
+      data-state={state.open ? "open" : "closed"}
+      ref={setLayerRef}
     >
       {children}
     </div>
@@ -145,12 +164,18 @@ const DialogRoot = ({ children, defaultOpen = false, onOpenChange, open }: Dialo
   const resolvedOpen = (open ?? defaultState) && isParentModalReady
   const previousOpenRef = useRef(resolvedOpen)
   const triggerRef = useRef<HTMLButtonElement>(null)
+  const layerRef = useRef<HTMLDivElement>(null)
+  const closeGenerationRef = useRef(0)
   const restoreTargetRef = useRef<HTMLElement | null>(resolvedOpen ? getActiveElement() : null)
   if (resolvedOpen && !previousOpenRef.current) {
-    restoreTargetRef.current = triggerRef.current ?? getActiveElement()
+    const active = getActiveElement()
+    if (layerRef.current?.contains(active) !== true) restoreTargetRef.current = triggerRef.current ?? active
   }
   const requestOpenChange = (nextOpen: boolean): void => {
-    if (nextOpen) restoreTargetRef.current = triggerRef.current ?? getActiveElement()
+    if (nextOpen) {
+      const active = getActiveElement()
+      if (layerRef.current?.contains(active) !== true) restoreTargetRef.current = triggerRef.current ?? active
+    }
     if (open === undefined) setDefaultState(nextOpen)
     onOpenChange?.(nextOpen)
   }
@@ -159,12 +184,21 @@ const DialogRoot = ({ children, defaultOpen = false, onOpenChange, open }: Dialo
     if (previousOpenRef.current === resolvedOpen) return
     previousOpenRef.current = resolvedOpen
     if (resolvedOpen) invalidateModalFocusRestore()
-    else restoreModalFocusAfterCleanup(restoreTargetRef.current)
+    else closeGenerationRef.current = invalidateModalFocusRestore()
   }, [resolvedOpen])
+
+  useLayoutEffect(
+    () => () => {
+      if (previousOpenRef.current) closeGenerationRef.current = invalidateModalFocusRestore()
+    },
+    []
+  )
 
   return (
     <ModalNestingBoundary>
-      <DialogStateContext.Provider value={{ open: resolvedOpen, requestOpenChange, restoreTargetRef, triggerRef }}>
+      <DialogStateContext.Provider
+        value={{ closeGenerationRef, layerRef, open: resolvedOpen, requestOpenChange, restoreTargetRef, triggerRef }}
+      >
         <RadixDialog.Root modal onOpenChange={requestOpenChange} open={resolvedOpen}>
           {children}
         </RadixDialog.Root>
@@ -203,6 +237,7 @@ const DialogContent = ({
   description,
   entryMotion = "intrinsic",
   initialFocusRef,
+  restoreFocus,
   size = "default",
   title,
   ...props
@@ -230,6 +265,11 @@ const DialogContent = ({
               className={classNames(style("content"), RLY_DIALOG_VARIANTS.size[size].className, className)}
               onCloseAutoFocus={(event) => {
                 event.preventDefault()
+                restoreModalFocusAfterCleanup(
+                  state.restoreTargetRef.current,
+                  restoreFocus,
+                  state.closeGenerationRef.current
+                )
               }}
               onOpenAutoFocus={(event) => {
                 const activeElement = getActiveElement()

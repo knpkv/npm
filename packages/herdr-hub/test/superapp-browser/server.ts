@@ -1,0 +1,291 @@
+/** Loopback fixture serving the real built hub clients against schema-checked API responses. */
+import { NodeRuntime, NodeServices } from "@effect/platform-node"
+import { FleetLimits, FleetUsage } from "@knpkv/herdr-connect"
+import { FleetConnectAgentPage } from "@knpkv/herdr-connect/model"
+import { type WorkGoal, WorkSnapshots } from "@knpkv/herdr-work/model"
+import { BackendStatus, RelayEvent, SessionInfo } from "@knpkv/relay/wire"
+import { Clock, Config, Effect, FileSystem, Schema } from "effect"
+import { createServer, type ServerResponse } from "node:http"
+import { DashboardSnapshot, PendingApprovalTarget } from "../../src/dashboard-model.js"
+import { dashboardPage } from "../../src/internal/dashboard-page.js"
+
+class FixtureServerError extends Schema.TaggedError<FixtureServerError>()("FixtureServerError", {
+  cause: Schema.Defect()
+}) {}
+
+const program = Effect.gen(function*() {
+  const fs = yield* FileSystem.FileSystem
+  const now = yield* Clock.currentTimeMillis
+  const port = yield* Config.Int("SUPERAPP_FIXTURE_PORT")
+  const dist = new URL("../../dist/", import.meta.url).pathname
+  const assets = new Map<string, Uint8Array>()
+  for (const name of yield* fs.readDirectory(dist)) {
+    if (/\.(js|css|woff2|png)$/.test(name)) assets.set(`/assets/${name}`, yield* fs.readFile(`${dist}${name}`))
+  }
+  const goal: WorkGoal = {
+    id: "goal-1",
+    title: "Check the module navigation",
+    detail: "One exact goal in the browser fixture.",
+    summary: "Review ready",
+    state: "working",
+    delivery: "local",
+    blocker: null,
+    owner: { id: "agent-1", name: "Agent" },
+    repository: { repository: "npm", branch: "feat/navigation" },
+    connectTarget: { agentId: "agent-1", host: "hub", url: "/connect/?agent=agent-1&host=hub" },
+    spend: null,
+    createdAt: now,
+    updatedAt: now
+  }
+  const window = (window: "now" | "day" | "week" | "month") => ({ window, asOf: now, observedAt: now, goals: [goal] })
+  const work = Schema.decodeUnknownSync(WorkSnapshots)({
+    observedAt: now,
+    now: window("now"),
+    day: window("day"),
+    week: window("week"),
+    month: window("month")
+  })
+  const record = {
+    id: "job-1",
+    actor: "Requester",
+    status: "pending_approval",
+    payload: { kind: "nix.apply", ref: "main" },
+    approvalAvailable: true,
+    approvalExpiresAt: now + 600_000,
+    approvedAt: null,
+    approvedBy: null,
+    createdAt: now,
+    expiredAt: null,
+    rejectedAt: null,
+    rejectedBy: null,
+    updatedAt: now
+  }
+  const snapshot = Schema.decodeUnknownSync(DashboardSnapshot)({
+    host: "hub",
+    observedAt: now,
+    approvalsEnabled: true,
+    approvalApp: {
+      canonical: true,
+      canonicalUrl: `http://127.0.0.1:${String(port)}/`,
+      pushEnabled: false,
+      workEnabled: true
+    },
+    work,
+    records: [],
+    historyNextCursor: null,
+    directory: null,
+    pendingApprovals: { local: [record], remote: [], failures: [], nextCursors: [] },
+    status: {
+      host: "hub",
+      applyConfigured: true,
+      branch: "main",
+      dirty: false,
+      repository: "npm",
+      revision: "abc123",
+      herdr: { agents: [], available: true, error: null }
+    }
+  })
+  // The target is absent from page one and must be resolved through the exact-target endpoint.
+  const offPageTarget = Schema.decodeUnknownSync(PendingApprovalTarget)({
+    _tag: "local",
+    record: { ...record, id: "job-off-page", actor: "Off-page requester" }
+  })
+  const responses = new Map([
+    ["/v1/dashboard", Schema.encodeSync(Schema.fromJsonString(DashboardSnapshot))(snapshot)],
+    ["/v1/work", Schema.encodeSync(Schema.fromJsonString(WorkSnapshots))(work)],
+    [
+      "/v1/connect/agents",
+      Schema.encodeSync(Schema.fromJsonString(FleetConnectAgentPage))({
+        agents: [
+          {
+            id: "agent-1",
+            host: "hub",
+            name: "Agent",
+            kind: "test",
+            state: "working",
+            work: "npm",
+            lastActivityAt: now
+          }
+        ],
+        failures: [],
+        nextCursor: null
+      })
+    ],
+    [
+      "/v1/connect/limits",
+      Schema.encodeSync(Schema.fromJsonString(FleetLimits))({ hosts: [], failures: [], peersListed: true })
+    ],
+    [
+      "/v1/connect/usage",
+      Schema.encodeSync(Schema.fromJsonString(FleetUsage))({ hosts: [], failures: [], peersListed: true })
+    ],
+    ["/v1/connect/archive", JSON.stringify({ agents: [], nextCursor: null })],
+    [
+      "/v1/relay/session",
+      Schema.encodeSync(Schema.fromJsonString(SessionInfo))({ tools: [], backend: "codex-cli", cancel: false })
+    ],
+    [
+      "/v1/relay/backends",
+      Schema.encodeSync(Schema.fromJsonString(Schema.Array(BackendStatus)))([
+        { _tag: "Ready", backend: "codex-cli", label: "Test backend", version: "1" }
+      ])
+    ],
+    ["/manifest.webmanifest", JSON.stringify({ name: "Relay", start_url: "/", display: "standalone" })]
+  ])
+  const noncanonical = { ...snapshot, approvalApp: { ...snapshot.approvalApp, canonical: false, workEnabled: false } }
+  const initialFrame = Schema.encodeSync(Schema.fromJsonString(RelayEvent))({
+    _tag: "Snapshot",
+    session: "session-1",
+    seq: 0,
+    messages: [],
+    runIds: [],
+    queued: []
+  })
+  const activeFrame = Schema.encodeSync(Schema.fromJsonString(RelayEvent))({
+    _tag: "Snapshot",
+    session: "session-1",
+    seq: 0,
+    messages: [
+      { id: "reply-1", role: "relay", text: "First reply" },
+      { id: "message-1", role: "user", text: "Another question" },
+      { id: "reply-2", role: "relay", text: "Second reply" },
+      { id: "message-2", role: "user", text: "Latest question" },
+      { id: "reply-3", role: "relay", text: "Current reply" }
+    ],
+    runIds: ["run-1"],
+    queued: []
+  })
+  const frameOf = (event: RelayEvent): string => Schema.encodeSync(Schema.fromJsonString(RelayEvent))(event)
+  const at = { session: "session-1", seq: 1 }
+  const idleFrame = frameOf({
+    _tag: "Snapshot",
+    session: "session-1",
+    seq: 0,
+    messages: [
+      { id: "message-1", role: "user", text: "What needs me across my tools?" },
+      { id: "reply-1", role: "relay", text: "No tool needs your decision. Open Fleet to review its current work." }
+    ],
+    runIds: [],
+    queued: []
+  })
+  const phaseFrames = new Map<string, ReadonlyArray<string>>([
+    ["idle", [idleFrame]],
+    ["listening", [idleFrame]],
+    ["thinking", [activeFrame]],
+    ["turns", [activeFrame]],
+    [
+      "answering",
+      [
+        activeFrame,
+        frameOf({ _tag: "TextDelta", ...at, text: "Reading the latest work and explaining the next step." })
+      ]
+    ],
+    [
+      "needs-you",
+      [
+        activeFrame,
+        frameOf({
+          _tag: "ConfirmationRequired",
+          ...at,
+          call: "call-1",
+          action: { verb: "prompt_agent", target: { product: "herdr", kind: "fleet", id: "hub" }, args: {} },
+          reversible: false
+        })
+      ]
+    ]
+  ])
+  const streams = new Set<ServerResponse>()
+  let relaySubscriptions = 0
+  const server = createServer((request, response) => {
+    const url = new URL(request.url ?? "/", "http://fixture.invalid")
+    const asset = assets.get(url.pathname)
+    if (asset !== undefined) {
+      const type = url.pathname.endsWith(".css")
+        ? "text/css"
+        : url.pathname.endsWith(".woff2")
+        ? "font/woff2"
+        : url.pathname.endsWith(".png")
+        ? "image/png"
+        : "text/javascript"
+      response.writeHead(200, { "content-type": type })
+      response.end(asset)
+      return
+    }
+    if (url.pathname === "/" || url.pathname === "/fleet") {
+      response.writeHead(200, { "content-type": "text/html" })
+      response.end(dashboardPage(url.searchParams.has("noncanonical") ? noncanonical : snapshot, ""))
+      return
+    }
+    if (url.pathname === "/connect/") {
+      response.writeHead(200, { "content-type": "text/html" })
+      response.end(
+        "<!doctype html><html lang=\"en\"><head><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><link rel=\"stylesheet\" href=\"/assets/index.css\"></head><body data-rly-root data-rly-theme=\"dark\" class=\"connect-body\"><div id=\"fleet-connect-root\"></div><script src=\"/assets/connect.js\"></script></body></html>"
+      )
+      return
+    }
+    if (url.pathname === "/v1/relay/events") {
+      relaySubscriptions += 1
+      streams.add(response)
+      response.on("close", () => streams.delete(response))
+      response.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" })
+      const source = request.headers.referer !== undefined && URL.canParse(request.headers.referer)
+        ? new URL(request.headers.referer)
+        : null
+      for (const frame of phaseFrames.get(source?.searchParams.get("relayFixture") ?? "") ?? [initialFrame]) {
+        response.write(`data: ${frame}\n\n`)
+      }
+      return
+    }
+    if (url.pathname === "/__fixture/relay-subscriptions") {
+      response.end(String(relaySubscriptions))
+      return
+    }
+    if (url.pathname === "/v1/pending-approval") {
+      if (url.searchParams.get("host") === "hub" && url.searchParams.get("jobId") === "job-off-page") {
+        response.writeHead(200, { "content-type": "application/json" })
+        response.end(Schema.encodeSync(Schema.fromJsonString(PendingApprovalTarget))(offPageTarget))
+      } else {
+        response.writeHead(404)
+        response.end()
+      }
+      return
+    }
+    if (url.pathname === "/assets/relay-icon.svg" || url.pathname === "/favicon.ico") {
+      response.writeHead(204)
+      response.end()
+      return
+    }
+    if (
+      url.pathname === "/v1/dashboard" &&
+      request.headers.referer !== undefined &&
+      URL.canParse(request.headers.referer) &&
+      new URL(request.headers.referer).searchParams.has("noncanonical")
+    ) {
+      response.writeHead(200, { "content-type": "application/json" })
+      response.end(Schema.encodeSync(Schema.fromJsonString(DashboardSnapshot))(noncanonical))
+      return
+    }
+    const json = responses.get(url.pathname)
+    if (json !== undefined) {
+      response.writeHead(200, { "content-type": "application/json" })
+      response.end(json)
+      return
+    }
+    response.writeHead(404)
+    response.end()
+  })
+  yield* Effect.acquireRelease(
+    Effect.callback<void, FixtureServerError>((resume) => {
+      server.once("error", (cause) => resume(Effect.fail(new FixtureServerError({ cause }))))
+      server.listen(port, "127.0.0.1", () => resume(Effect.void))
+    }),
+    () =>
+      Effect.sync(() => {
+        for (const stream of streams) stream.end()
+        server.closeAllConnections()
+        server.close()
+      })
+  )
+  return yield* Effect.never
+})
+NodeRuntime.runMain(program.pipe(Effect.scoped, Effect.provide(NodeServices.layer)))

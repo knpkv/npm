@@ -40,6 +40,12 @@
   .relay {
     min-inline-size: 0;
   }
+  .relay:has(> [data-rly-relay-avatar="turn"]) {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: start;
+    gap: var(--rly-space-8);
+  }
   .prose {
     display: grid;
     gap: var(--rly-space-8);

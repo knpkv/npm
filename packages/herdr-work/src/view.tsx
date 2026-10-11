@@ -981,11 +981,15 @@ export const WorkBoard = ({
   readonly externalLinks?: "disabled" | "enabled"
   /** The application supplies its own host; goal owners may be on other hosts. Omit when unknown. */
   readonly host?: string
+  /** Initial local selection; when navigation is supplied, the current URL-owned selection. */
   readonly initialGoalId?: string | null
+  /** Initial local window; when navigation is supplied, the current URL-owned window. */
   readonly initialWindow?: WorkSnapshotWindow
+  /** Uses URL-owned selection props on every render and renders links instead of local controls. */
   readonly navigation?: (selection: { readonly goalId: string | null; readonly window: WorkSnapshotWindow }) => string
 }): ReactElement => {
-  const [window, setWindow] = useState<WorkSnapshotWindow>(initialWindow)
+  const [localWindow, setWindow] = useState<WorkSnapshotWindow>(initialWindow)
+  const window = navigation === undefined ? localWindow : initialWindow
   const snapshot = snapshotFor(snapshots, window)
   const directInitialGoal = snapshot.goals.find(({ id }) => id === initialGoalId)
   const boardNavigation = directInitialGoal === undefined ? decodeWorkBoardNavigationGoal(initialGoalId ?? null) : null
@@ -999,16 +1003,24 @@ export const WorkBoard = ({
       ? requestedInitialSelectedGoal
       : undefined
   const initialSelectedId = initialSelectedGoal?.id ?? null
-  const [selectedId, setSelectedId] = useState<string | null>(initialSelectedId)
-  const [detailsOpen, setDetailsOpen] = useState(
+  const initialDetailsOpen =
     initialSelectedGoal !== undefined &&
-      (boardNavigation?.detailsOpen ?? (initialGoalId !== undefined && initialGoalId !== null))
+    (boardNavigation?.detailsOpen ?? (initialGoalId !== undefined && initialGoalId !== null))
+  const [localSelectedId, setSelectedId] = useState<string | null>(initialSelectedId)
+  const [localDetailsOpen, setDetailsOpen] = useState(initialDetailsOpen)
+  const [localStatusFilter, setStatusFilter] = useState<"all" | WorkGoal["state"]>(initialStatusFilter)
+  const [localVisibleGoalCount, setVisibleGoalCount] = useState(
+    boardNavigation?.visibleGoalCount ?? initialVisibleGoalCount
   )
-  const [statusFilter, setStatusFilter] = useState<"all" | WorkGoal["state"]>(initialStatusFilter)
-  const [visibleGoalCount, setVisibleGoalCount] = useState(boardNavigation?.visibleGoalCount ?? initialVisibleGoalCount)
+  const selectedId = navigation === undefined ? localSelectedId : initialSelectedId
+  const detailsOpen = navigation === undefined ? localDetailsOpen : initialDetailsOpen
+  const statusFilter = navigation === undefined ? localStatusFilter : initialStatusFilter
+  const visibleGoalCount =
+    navigation === undefined ? localVisibleGoalCount : (boardNavigation?.visibleGoalCount ?? initialVisibleGoalCount)
   const detailsRef = useRef<HTMLElement | null>(null)
   const selectedLinkRowRef = useRef<HTMLAnchorElement | null>(null)
   const selectedRowRef = useRef<HTMLButtonElement | null>(null)
+  const previousDetailsOpen = useRef(detailsOpen)
   const triage = workTriage(snapshot)
   const finishedGoalCount = triage.rows.filter(
     ({ displayState }) => displayState === "completed" || displayState === "deployed" || displayState === "abandoned"
@@ -1063,21 +1075,23 @@ export const WorkBoard = ({
     if (detailsOpen) detailsRef.current?.querySelector<HTMLElement>("h2")?.focus()
   }, [detailsOpen, selectedId])
   useEffect(() => {
+    const closing = previousDetailsOpen.current && !detailsOpen
+    previousDetailsOpen.current = detailsOpen
     if (
       navigation !== undefined &&
       !detailsOpen &&
       selectedId !== null &&
-      document.location.hash === `#${selectedGoalFragment}`
+      (closing || document.location.hash === `#${selectedGoalFragment}`)
     ) {
       selectedLinkRowRef.current?.focus()
     }
   }, [detailsOpen, navigation, selectedId])
   useEffect(() => {
-    if (selectedId === null || selectedFilteredGoalIndex !== -1) return
+    if (navigation !== undefined || selectedId === null || selectedFilteredGoalIndex !== -1) return
     setDetailsOpen(false)
     setSelectedId(null)
     setVisibleGoalCount(initialVisibleGoalCount)
-  }, [selectedFilteredGoalIndex, selectedId])
+  }, [navigation, selectedFilteredGoalIndex, selectedId])
 
   const goalRow = (goal: WorkGoal): ReactElement => {
     const observed = observedOf(goal)

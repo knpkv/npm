@@ -1,4 +1,4 @@
-import type { ComponentPropsWithRef, ReactElement, RefCallback, RefObject } from "react"
+import type { ComponentPropsWithRef, ReactElement, ReactNode, RefCallback, RefObject } from "react"
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react"
 import { classNames, cssClass, requireText } from "../internal/component.js"
 import { focusRestoreTarget, isWithinComposedElement } from "../internal/composedFocus.js"
@@ -198,6 +198,8 @@ const focusOutside = (region: HTMLElement | null, owner: Document): HTMLElement 
 export type RelayLauncherProps = Omit<ComponentPropsWithRef<"button">, "children" | "type"> & {
   /** What Relay is doing, shown on the mark; `idle` (still) unless given. Say it in words too. */
   readonly activity?: RlyRelayMarkActivity | undefined
+  /** Decorative replacement for the mark; omitted keeps the default mark. The host sizes it and supplies status words. */
+  readonly avatar?: ReactNode
   /** Whether Relay is open; announced as the button's expanded state. */
   readonly expanded: boolean
   /** The visible name, "Relay" unless the host names its Relay more specifically. */
@@ -217,6 +219,7 @@ export type RelayLauncherProps = Omit<ComponentPropsWithRef<"button">, "children
  */
 export const RelayLauncher = ({
   activity,
+  avatar,
   className,
   expanded,
   label = "Relay",
@@ -232,7 +235,18 @@ export const RelayLauncher = ({
       data-rly-relay-launcher=""
       type="button"
     >
-      <RelayMark activity={activity} className={style("mark")} size={20} />
+      {avatar === undefined ? (
+        <RelayMark activity={activity} className={style("mark")} size={20} />
+      ) : (
+        <span
+          aria-hidden="true"
+          className={style("mark")}
+          data-rly-relay-avatar="launcher"
+          data-rly-relay-activity={activity ?? "idle"}
+        >
+          {avatar}
+        </span>
+      )}
       <span className={style("label")}>{requireText(label, "RelayLauncher label")}</span>
       {shortcut === null ? null : (
         // The hint repeats aria-keyshortcuts for sighted users, so assistive technology hears it once.

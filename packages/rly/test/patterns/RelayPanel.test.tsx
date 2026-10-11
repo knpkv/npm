@@ -3,11 +3,12 @@
 import { act, type ReactElement, useRef, useState } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { renderToStaticMarkup } from "react-dom/server"
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { PortalProvider } from "../../src/foundations/PortalProvider.js"
 import { RelayPanel, type RlyRelayPanelPresentation, useRelayPresentation } from "../../src/patterns/RelayPanel.js"
 
 let root: Root | undefined
+beforeEach(() => vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true))
 
 afterEach(async () => {
   await act(async () => root?.unmount())
@@ -103,6 +104,33 @@ const press = async (target: Element | null, key: string, init: KeyboardEventIni
 }
 
 describe("RelayPanel", () => {
+  it("replaces the header mark with a decorative avatar without changing the panel label or controls", async () => {
+    const AvatarPanel = () => {
+      const launcher = useRef<HTMLButtonElement>(null)
+      return (
+        <RelayPanel
+          avatar={<svg data-character="relay" />}
+          launcher={launcher}
+          onClose={() => undefined}
+          presentation="overlay"
+          scope={scope}
+        >
+          <p>Conversation</p>
+        </RelayPanel>
+      )
+    }
+    await mount(<AvatarPanel />)
+    const region = panel()
+    expect(region?.querySelector('[data-character="relay"]')?.parentElement?.getAttribute("aria-hidden")).toBe("true")
+    expect(region?.querySelector("[data-rly-relay-mark]")).toBeNull()
+    const labelId = region?.getAttribute("aria-labelledby")
+    expect(labelId === null || labelId === undefined ? null : document.getElementById(labelId)?.textContent).toBe(
+      "Relay"
+    )
+    expect(button("Close Relay")).toBeDefined()
+    expect(region?.querySelectorAll("[aria-live]")).toHaveLength(0)
+  })
+
   it("is a labelled complementary region over the page, with no backdrop and no modal state", async () => {
     await mount(<Host />)
     const region = panel()

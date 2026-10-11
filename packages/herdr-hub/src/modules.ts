@@ -10,10 +10,18 @@ import {
 export * from "./module-contract.js"
 export * from "./module-navigation.js"
 
+/** The shell owns history; products build exact links with moduleHref before navigating. */
+export interface ModulePageMount {
+  readonly active: boolean
+  readonly navigate: (href: string, history: "push" | "replace") => void
+}
+
 /** Browser implementations import a product's browser entry and supply every declared page. */
 export interface ModuleViews<D extends ModuleDescriptor> {
   readonly descriptor: D
-  readonly pages: { readonly [P in D["pages"][number]["id"]]: (search: URLSearchParams) => ReactNode }
+  readonly pages: {
+    readonly [P in D["pages"][number]["id"]]: (search: URLSearchParams, mount: ModulePageMount) => ReactNode
+  }
 }
 
 /** Check page implementations and shared metadata before the shell renders a module. */

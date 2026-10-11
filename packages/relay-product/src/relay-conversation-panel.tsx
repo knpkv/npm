@@ -37,7 +37,16 @@ import {
 import { Button, StatePanel } from "@knpkv/rly/primitives"
 import * as Data from "effect/Data"
 import * as Exit from "effect/Exit"
-import { type ReactElement, type ReactNode, type RefCallback, type RefObject, useEffect, useRef, useState } from "react"
+import {
+  type ReactElement,
+  type ReactNode,
+  type RefCallback,
+  type RefObject,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState
+} from "react"
 
 import type { RelayRequestFailure } from "./relay-client.js"
 import type { RelayConversations } from "./relay-conversations.js"
@@ -55,6 +64,14 @@ export interface RelayDecisionWords {
 }
 
 export interface RelayConversationPanelProps {
+  /** Decorative panel-header avatar; omitted retains rly's mark. The host owns its size and motion. */
+  readonly avatar?: ReactNode
+  /** Plain status text beside the conversation, never a second live region. */
+  readonly avatarStatus?: string
+  /** Decorative Relay-turn avatar. Historical turns are not live; the host sizes each image. */
+  readonly transcriptAvatar?: (turn: { readonly live: boolean }) => ReactNode
+  /** Reports textarea focus, including false on close/unmount. Omitted adds no focus wrapper. */
+  readonly onComposerFocusChange?: (focused: boolean) => void
   readonly conversations: RelayConversations
   /** The conversation this panel shows. */
   readonly conversation: ObjectRef
@@ -172,6 +189,16 @@ export const RelayConversationPanel = (props: RelayConversationPanelProps): Reac
   const { conversation, conversations } = props
   const state = useRelayConversation(conversations, conversation)
   const status = useRelayStatus(conversations, conversation, true)
+  const focusChanged = props.onComposerFocusChange
+  const latestFocusChanged = useRef(focusChanged)
+  useLayoutEffect(() => {
+    latestFocusChanged.current = focusChanged
+  }, [focusChanged])
+  useEffect(() => () => latestFocusChanged.current?.(false), [])
+  const close = (): void => {
+    focusChanged?.(false)
+    props.onClose()
+  }
   const { prepared, take } = usePreparedRequestId(conversations)
   const draft = useRelayDraft(objectRefKey(conversation), { newRequestId: take })
   const [sending, setSending] = useState(false)
@@ -251,6 +278,17 @@ export const RelayConversationPanel = (props: RelayConversationPanelProps): Reac
   }
   const runId = state.runIds[0]
   const ended = state.connection === "unauthorized" || state.connection === "failed"
+  const composer = (
+    <RelayComposer
+      busyReason={busyReasonOf(state, prepared, sending, needsId)}
+      onSend={send}
+      {...(runId === undefined ? {} : { onStop: () => void conversations.cancel(conversation, runId) })}
+      onValueChange={edit}
+      placeholder={props.placeholder}
+      ref={props.composerRef}
+      value={draft.value}
+    />
+  )
 
   const body =
     state.connection === "unauthorized" ? (
@@ -279,7 +317,11 @@ export const RelayConversationPanel = (props: RelayConversationPanelProps): Reac
       />
     ) : (
       <>
-        <RelayTranscript items={relayTranscriptItems(state)} streaming={state.runIds.length > 0} />
+        <RelayTranscript
+          {...(props.transcriptAvatar === undefined ? {} : { avatar: props.transcriptAvatar })}
+          items={relayTranscriptItems(state)}
+          streaming={state.runIds.length > 0}
+        />
         {state.confirmations.map((card) => {
           const words = props.decision?.(card)
           return words === undefined ? (
@@ -317,7 +359,19 @@ export const RelayConversationPanel = (props: RelayConversationPanelProps): Reac
   return (
     <RelayPanel
       activity={status.activity}
-      {...(state.connection === "disconnected" ? { freshness: "Reconnecting…" } : {})}
+      {...(props.avatar === undefined ? {} : { avatar: props.avatar })}
+      {...(props.avatarStatus === undefined
+        ? state.connection === "disconnected"
+          ? { freshness: "Reconnecting…" }
+          : {}
+        : {
+            freshness: (
+              <>
+                {state.connection === "disconnected" ? <span>Reconnecting… </span> : null}
+                <span>{props.avatarStatus}</span>
+              </>
+            )
+          })}
       {...(ended
         ? {}
         : {
@@ -329,20 +383,21 @@ export const RelayConversationPanel = (props: RelayConversationPanelProps): Reac
                   </p>
                 ) : null}
                 {refusal === null ? null : <p role="alert">{refusal}</p>}
-                <RelayComposer
-                  busyReason={busyReasonOf(state, prepared, sending, needsId)}
-                  onSend={send}
-                  {...(runId === undefined ? {} : { onStop: () => void conversations.cancel(conversation, runId) })}
-                  onValueChange={edit}
-                  placeholder={props.placeholder}
-                  ref={props.composerRef}
-                  value={draft.value}
-                />
+                {focusChanged === undefined ? (
+                  composer
+                ) : (
+                  <div
+                    onFocusCapture={(event) => focusChanged(event.target.tagName === "TEXTAREA")}
+                    onBlurCapture={() => focusChanged(false)}
+                  >
+                    {composer}
+                  </div>
+                )}
               </>
             )
           })}
       launcher={props.launcher}
-      onClose={props.onClose}
+      onClose={close}
       {...(props.pin === undefined ? {} : { pin: props.pin })}
       presentation={props.presentation}
       ref={props.regionRef}

@@ -16,6 +16,30 @@ const parse = (markup: string): Element => {
 }
 
 describe("RelayLauncher", () => {
+  it("keeps the default mark markup unchanged when no avatar is supplied", () => {
+    expect(renderToStaticMarkup(<RelayLauncher expanded={false} shortcut={ctrlJ} />)).toMatchSnapshot()
+  })
+
+  it("replaces only the mark with a decorative avatar while retaining its action and status", () => {
+    const button = parse(
+      renderToStaticMarkup(
+        <RelayLauncher
+          activity="attention"
+          avatar={<svg data-character="relay" />}
+          expanded
+          label="Ask Relay"
+          shortcut={ctrlJ}
+        />
+      )
+    )
+    expect(button.querySelector('[data-character="relay"]')?.parentElement?.getAttribute("aria-hidden")).toBe("true")
+    expect(button.querySelector("[data-rly-relay-mark]")).toBeNull()
+    expect(button.querySelector("[data-rly-relay-activity]")?.getAttribute("data-rly-relay-activity")).toBe("attention")
+    expect(button.getAttribute("aria-expanded")).toBe("true")
+    expect(button.getAttribute("aria-keyshortcuts")).toBe("Control+J")
+    expect(button.textContent).toContain("Ask Relay")
+  })
+
   it("is a named button that reports whether Relay is open", () => {
     const closed = parse(renderToStaticMarkup(<RelayLauncher expanded={false} shortcut={ctrlJ} />))
     expect(closed.tagName).toBe("BUTTON")

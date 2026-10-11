@@ -1522,11 +1522,13 @@ describe("PullRequestReviewPanel", () => {
     expect(document.body.getAttribute("data-scroll-locked")).toBe("1")
 
     await act(async () => dialog.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Escape" })))
-    await act(async () => new Promise<void>((resolve) => setTimeout(resolve, 0)))
-
-    expect(host.querySelector("[role=dialog]")).toBeNull()
-    expect(document.activeElement).toBe(launch)
-    expect(document.body.getAttribute("data-scroll-locked")).toBeNull()
+    // Dialog returns focus after its exit and modal cleanup, rather than after one timer tick.
+    await vi.waitFor(() => {
+      expect(host.querySelector("[role=dialog]")).toBeNull()
+      expect(document.activeElement).toBe(launch)
+      expect(document.body.getAttribute("data-scroll-locked")).toBeNull()
+      expect(launch.closest('[aria-hidden="true"]')).toBeNull()
+    })
   })
 
   it("describes a failed full-review retry without mislabeling it as targeted", async () => {
@@ -1941,8 +1943,12 @@ describe("PullRequestReviewPanel", () => {
       preview: PREVIEW,
       publication: PUBLICATION
     })
-    await act(async () => vi.dynamicImportSettled())
-    expect(document.activeElement).toBe(postComment)
+    await vi.waitFor(() => {
+      expect(host.querySelector("[role=dialog]")).toBeNull()
+      expect(document.activeElement).toBe(postComment)
+      expect(document.body.getAttribute("data-scroll-locked")).toBeNull()
+      expect(postComment.closest('[aria-hidden="true"]')).toBeNull()
+    })
   })
 
   it("renders the durable provider receipt after publication", async () => {
