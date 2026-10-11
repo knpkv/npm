@@ -252,7 +252,10 @@ const CodePage = ({
         ownerUIHref={content.onHubMachine ? "http://127.0.0.1:3000/" : null}
         onSearch={(text) => change({ ...selection, search: text, offset: 0 }, "replace")}
         onFilter={(filter) => change({ ...selection, filter, offset: 0 }, "replace")}
-        onClose={() => change({ ...selection, ref: null, file: null }, "replace")}
+        onClose={() => {
+          setRepaired(false)
+          mount.closeSelection(moduleHref(codeModule, page, selectionSearch({ ...selection, ref: null, file: null })))
+        }}
         onRefresh={() => setRefresh((value) => value + 1)}
         restoreFocus={restoreFocus}
       />
