@@ -21,10 +21,14 @@ export type ApprovalWorkerRegistration = {
   ) => Promise<void>
 }
 
-export type ApprovalWorkerClient = {
+/** A window the notification click may focus. */
+export type ApprovalWorkerFocusTarget = {
   readonly focus: () => Promise<void>
-  /** Resolve null when the browser cannot navigate this client; void means success. */
-  readonly navigate: (url: string) => Promise<void | null>
+}
+
+export type ApprovalWorkerClient = ApprovalWorkerFocusTarget & {
+  /** Return the navigated client to focus, or null when the browser cannot navigate this client. */
+  readonly navigate: (url: string) => Promise<ApprovalWorkerFocusTarget | null>
   readonly url: string
 }
 
@@ -89,18 +93,20 @@ export const matchesApprovalDeepLink = (
   dataset.approvalHost?.toLowerCase() === target.host.toLowerCase() &&
   dataset.approvalJob === target.jobId
 
+/** Navigate before spending the click's sole interaction grant on focus or fallback opening. */
 export const handleNotificationClick = async (
   clients: ApprovalWorkerClients,
   deepLinkUrl: string
 ): Promise<void> => {
   const target = new URL(deepLinkUrl)
-  const reused = await Effect.runPromise(Effect.result(Effect.tryPromise(async () => {
+  const navigated = await Effect.runPromise(Effect.result(Effect.tryPromise(async () => {
     const windows = await clients.matchAll({ includeUncontrolled: false, type: "window" })
     const canonical = windows.find((client) => new URL(client.url).origin === target.origin)
-    if (canonical === undefined) return false
-    await canonical.focus()
-    return await canonical.navigate(deepLinkUrl) !== null
+    return canonical === undefined ? null : await canonical.navigate(deepLinkUrl)
   })))
-  if (Result.isSuccess(reused) && reused.success) return
-  await clients.openWindow(deepLinkUrl)
+  if (Result.isFailure(navigated) || navigated.success === null) {
+    await clients.openWindow(deepLinkUrl)
+    return
+  }
+  await navigated.success.focus()
 }

@@ -20,6 +20,15 @@ import {
 
 class ClientOperationFailed extends Data.TaggedError("ClientOperationFailed")<{ readonly operation: string }> {}
 
+/** A notification click permits one focus or open operation, even when that operation fails. */
+const windowInteractionGrant = () => {
+  let available = true
+  return () => {
+    if (!available) throw new DOMException("Window interaction already consumed", "InvalidAccessError")
+    available = false
+  }
+}
+
 /** A pending job as the dashboard receives it: the sanitized projection of the host's record. */
 const approvalRecord = (id: string): SanitizedJobRecord =>
   sanitizeJobRecord({
@@ -237,46 +246,57 @@ describe("approval PWA", () => {
     ).toBe(false)
   })
 
-  it("focuses before navigating an existing canonical approval window", async () => {
+  it("navigates before focusing the returned canonical approval window with one grant", async () => {
     const order: Array<string> = []
     const focused: Array<string> = []
     const navigated: Array<string> = []
     const opened: Array<string> = []
+    const consume = windowInteractionGrant()
     const clients: ApprovalWorkerClients = {
       matchAll: () =>
         Promise.resolve([
           {
             focus: () => {
-              order.push("focus")
-              focused.push("yes")
+              consume()
+              order.push("focus:original")
+              focused.push("original")
               return Promise.resolve()
             },
             navigate: (url) => {
               order.push("navigate")
               navigated.push(url)
-              return Promise.resolve()
+              return Promise.resolve({
+                focus: async () => {
+                  consume()
+                  order.push("focus:navigated")
+                  focused.push("navigated")
+                }
+              })
             },
             url: "https://ser8.example.ts.net/?tab=connect"
           }
         ]),
       openWindow: (url) => {
+        consume()
         opened.push(url)
         return Promise.resolve()
       }
     }
     const target = "https://ser8.example.ts.net/?tab=approvals&approvalHost=PI&approvalJob=job-7"
     await handleNotificationClick(clients, target)
-    expect(order).toEqual(["focus", "navigate"])
+    expect(order).toEqual(["navigate", "focus:navigated"])
     expect(navigated).toEqual([target])
-    expect(focused).toEqual(["yes"])
+    expect(focused).toEqual(["navigated"])
     expect(opened).toEqual([])
   })
 
   it("opens the individual approval deep link when the app is closed", async () => {
     const opened: Array<string> = []
+    const consume = windowInteractionGrant()
     const clients: ApprovalWorkerClients = {
       matchAll: () => Promise.resolve([]),
       openWindow: (url) => {
+        consume()
         opened.push(url)
         return Promise.resolve()
       }
@@ -311,10 +331,12 @@ describe("approval PWA", () => {
   })
   it.each(["rejected", "null"])("opens the deep link when navigation is %s", async (outcome) => {
     const events: Array<string> = []
+    const consume = windowInteractionGrant()
     const clients: ApprovalWorkerClients = {
       matchAll: async () => [{
         url: "https://hub.example.test/",
         focus: async () => {
+          consume()
           events.push("focus")
         },
         navigate: async () => {
@@ -324,11 +346,45 @@ describe("approval PWA", () => {
         }
       }],
       openWindow: async (url) => {
+        consume()
         events.push(url)
       }
     }
     const target = "https://hub.example.test/connect/?host=HOST-A&agent=agent-one&open=stage"
     await handleNotificationClick(clients, target)
-    expect(events).toEqual(["focus", "navigate", target])
+    expect(events).toEqual(["navigate", target])
+  })
+  it("surfaces a focus rejection after successful navigation without trying a second privileged operation", async () => {
+    const events: Array<string> = []
+    const consume = windowInteractionGrant()
+    const failure = new ClientOperationFailed({ operation: "focus" })
+    const clients: ApprovalWorkerClients = {
+      matchAll: async () => [{
+        url: "https://hub.example.test/",
+        focus: async () => {
+          consume()
+          events.push("focus:original")
+        },
+        navigate: async () => {
+          events.push("navigate")
+          return {
+            focus: async () => {
+              consume()
+              events.push("focus:navigated")
+              throw failure
+            }
+          }
+        }
+      }],
+      openWindow: async () => {
+        consume()
+        events.push("open")
+      }
+    }
+    await expect(
+      handleNotificationClick(clients, "https://hub.example.test/connect/?host=HOST-A&agent=agent-one&open=stage")
+    )
+      .rejects.toBe(failure)
+    expect(events).toEqual(["navigate", "focus:navigated"])
   })
 })

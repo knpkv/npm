@@ -91,7 +91,12 @@ worker.onnotificationclick = (event) => {
                 .then((clients) =>
                   clients.map((client) => ({
                     focus: () => client.focus().then(() => undefined),
-                    navigate: (url) => client.navigate(url).then((navigated) => navigated === null ? null : undefined),
+                    navigate: (url) =>
+                      client.navigate(url).then((navigated) =>
+                        navigated === null ? null : {
+                          focus: () => navigated.focus().then(() => undefined)
+                        }
+                      ),
                     url: client.url
                   }))
                 ),
