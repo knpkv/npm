@@ -13,13 +13,13 @@
  * @module
  */
 import { NodeHttpServer, NodeServices } from "@effect/platform-node"
+import { loginControlRouter } from "@knpkv/browser-pairing/control"
 import * as OwnerSession from "@knpkv/browser-pairing/owner-session"
 import { Layers } from "@knpkv/jira-clockify"
 import { Config, Deferred, Effect, Layer, type Redacted, Schema } from "effect"
 import { Etag, HttpPlatform, HttpRouter } from "effect/http"
 import { createServer } from "node:http"
 import { application } from "./HttpApplication.js"
-import { loginControlRouter } from "./LoginControl.js"
 
 const HttpPlatformLive = HttpPlatform.layer.pipe(Layer.provide(NodeServices.layer))
 
@@ -40,7 +40,9 @@ export const makeServer = (options: JcfWebServerOptions) =>
         HttpRouter.serve(
           Layer.mergeAll(
             application.pipe(Layer.provide(Layers.HeadlessLayer)),
-            options.controlToken === undefined ? Layer.empty : loginControlRouter(options.controlToken)
+            options.controlToken === undefined
+              ? Layer.empty
+              : loginControlRouter(options.controlToken, options.security.browserOrigin)
           )
         ).pipe(
           Layer.provide(

@@ -1535,6 +1535,9 @@ importers:
       '@knpkv/atlassian-common':
         specifier: workspace:^
         version: link:../atlassian-common
+      '@knpkv/browser-pairing':
+        specifier: workspace:^
+        version: link:../browser-pairing
       '@knpkv/clockify-api-client':
         specifier: workspace:^
         version: link:../clockify-api-client
