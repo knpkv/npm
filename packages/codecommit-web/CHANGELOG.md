@@ -1,5 +1,16 @@
 # @knpkv/codecommit-web
 
+## 0.31.0
+
+### Minor Changes
+
+- [#804](https://github.com/knpkv/npm/pull/804) [`622666e`](https://github.com/knpkv/npm/commit/622666e01015ce49eb960f3f761ab1653614c74a) Thanks [@konopkov](https://github.com/konopkov)! - Add a browser views entry with component props and bundled styles.
+
+### Patch Changes
+
+- Updated dependencies [[`3c5bfb7`](https://github.com/knpkv/npm/commit/3c5bfb7fee6e8fb14fe64a28688be752a5cb60b9)]:
+  - @knpkv/rly@0.22.0
+
 ## 0.30.3
 
 ### Patch Changes

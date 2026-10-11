@@ -2,6 +2,20 @@
 
 Released as `@knpkv/herdr-approvals` up to 0.18.0; the headings below are that package's history.
 
+## 0.23.0
+
+### Minor Changes
+
+- [#803](https://github.com/knpkv/npm/pull/803) [`0dfab65`](https://github.com/knpkv/npm/commit/0dfab650505c01d94184831b34aa99cc5c957ce3) Thanks [@konopkov](https://github.com/konopkov)! - Add bounded agent voice posts on the authenticated canonical hub, with host-bound live inventory checks, idempotent retries, paged retention, and archived last words. Add the relay post CLI.
+
+### Patch Changes
+
+- Updated dependencies [[`0dfab65`](https://github.com/knpkv/npm/commit/0dfab650505c01d94184831b34aa99cc5c957ce3), [`3c5bfb7`](https://github.com/knpkv/npm/commit/3c5bfb7fee6e8fb14fe64a28688be752a5cb60b9), [`3865413`](https://github.com/knpkv/npm/commit/3865413011482749e76c23bf8e1066b63b6ed5b8)]:
+  - @knpkv/herdr-connect@0.14.0
+  - @knpkv/rly@0.22.0
+  - @knpkv/herdr-work@0.12.1
+  - @knpkv/relay-product@0.6.1
+
 ## 0.22.0
 
 ### Minor Changes
