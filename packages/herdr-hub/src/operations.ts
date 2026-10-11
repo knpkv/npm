@@ -80,6 +80,33 @@ export const commandOutputTailBytes = 64 * 1024
  */
 type OutputPolicy = "whole" | "tail"
 
+const textEncoder = new TextEncoder()
+
+/** The last `maxBytes` of `text`, starting on a character boundary. */
+const lastBytes = (text: string, maxBytes: number): string => {
+  const bytes = textEncoder.encode(text)
+  if (bytes.byteLength <= maxBytes) return text
+  let start = bytes.byteLength - Math.max(0, maxBytes)
+  while (start < bytes.byteLength && ((bytes[start] ?? 0) & 0xc0) === 0x80) start += 1
+  return new TextDecoder().decode(bytes.subarray(start))
+}
+
+/**
+ * Why a command failed. A build log's failure carries its stdout tail too,
+ * where tools like `brew bundle` write the error that explains it; stdout
+ * gets whatever of {@link commandOutputMaxBytes} the rest leaves.
+ */
+const failureDetail = (exitCode: number, stderr: string, stdout: string, policy: OutputPolicy): string => {
+  const head = stderr.trim() === ""
+    ? `command exited with code ${String(exitCode)}`
+    : `command exited with code ${String(exitCode)}: ${stderr.trim()}`
+  const output = stdout.trim()
+  if (policy === "whole" || output === "") return head
+  const label = "\nstdout:\n"
+  const room = commandOutputMaxBytes - textEncoder.encode(head + label).byteLength
+  return room <= 0 ? head : `${head}${label}${lastBytes(output, room)}`
+}
+
 /** A kept tail, led by how much came before it when anything did. */
 const framedTail = ({ omittedBytes, text }: TextTail): string =>
   omittedBytes === 0 ? text : `[${String(omittedBytes)} earlier bytes omitted]\n${text}`
@@ -210,9 +237,7 @@ export const makeHostOperations = Effect.fn("HostOperations.make")(function*(
                 : Effect.fail(
                   new FleetOperationError({
                     cause: exitCode,
-                    detail: stderr.trim() === ""
-                      ? `command exited with code ${String(exitCode)}`
-                      : `command exited with code ${String(exitCode)}: ${stderr.trim()}`,
+                    detail: failureDetail(Number(exitCode), stderr, stdout, policy),
                     operation
                   })
                 )
