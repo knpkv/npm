@@ -19,7 +19,7 @@ const compactStyle: CSSProperties = { inlineSize: "100%", maxInlineSize: "320px"
 const eventAt = (index: number, actorKind: RlyTimelineActorKind = "system"): RlyTimelineEvent => ({
   actor:
     actorKind === "human" ? (
-      <Person person={{ id: `person-${index}`, name: "Maya Chen", role: "Release approver" }} size="compact" />
+      <Person person={{ id: `person-${index}`, name: "Owner User", role: "Release approver" }} size="compact" />
     ) : (
       <span>
         {actorKind === "agent" ? "Release Guardian" : actorKind === "plugin" ? "Jira sync" : "Control Center"}
@@ -69,7 +69,7 @@ const ActorKindsCatalog = (): ReactElement => (
   </main>
 )
 
-const CompactForcedColorsCatalog = (): ReactElement => (
+const CompactCatalog = (): ReactElement => (
   <main style={pageStyle}>
     <Text as="h1" variant="section-title">
       Compact activity timeline
@@ -119,20 +119,68 @@ export const ActorKinds: Story = {
   render: () => <ActorKindsCatalog />
 }
 
+/** Check painted text as well as row bounds: grid overflow can overlap siblings without scrolling. */
+const compactPlay = async ({ canvasElement }: { readonly canvasElement: HTMLElement }): Promise<void> => {
+  const compact = canvasElement.querySelector<HTMLElement>("[data-timeline-row-compact]")
+  if (compact === null) throw new Error("TimelineRow compact boundary did not mount")
+  await canvasElement.ownerDocument.fonts.ready
+  await expect(compact.scrollWidth).toBeLessThanOrEqual(compact.clientWidth)
+  const rows = compact.querySelectorAll<HTMLElement>("[data-rly-timeline-event-id]")
+  await expect(rows).toHaveLength(6)
+  await expect(compact.querySelectorAll("[data-rly-timeline-connector]")).toHaveLength(5)
+  for (const row of rows) {
+    const textBoxes: Array<{ readonly text: string; readonly rect: DOMRect }> = []
+    const walker = canvasElement.ownerDocument.createTreeWalker(row, NodeFilter.SHOW_TEXT)
+    for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+      const parent = node.parentElement
+      const text = node.textContent?.trim() ?? ""
+      if (parent === null || text === "" || parent.closest('[aria-hidden="true"], svg') !== null) continue
+      const range = canvasElement.ownerDocument.createRange()
+      range.selectNodeContents(node)
+      const rect = range.getBoundingClientRect()
+      await expect(rect.width, text).toBeGreaterThan(0)
+      await expect(rect.height, text).toBeGreaterThan(0)
+      textBoxes.push({ rect, text })
+      // Include every containing box, so clipping cannot make an otherwise overlapping row pass.
+      for (let ancestor: HTMLElement | null = parent; ancestor !== null; ancestor = ancestor.parentElement) {
+        const bounds = ancestor.getBoundingClientRect()
+        await expect(rect.left, `${text} starts inside its container`).toBeGreaterThanOrEqual(bounds.left - 1)
+        await expect(rect.right, `${text} ends inside its container`).toBeLessThanOrEqual(bounds.right + 1)
+        await expect(rect.top, `${text} starts inside its container`).toBeGreaterThanOrEqual(bounds.top - 1)
+        await expect(rect.bottom, `${text} ends inside its container`).toBeLessThanOrEqual(bounds.bottom + 1)
+        if (ancestor === compact) break
+      }
+    }
+    await expect(textBoxes.length).toBeGreaterThanOrEqual(5)
+    for (const [index, box] of textBoxes.entries()) {
+      for (const sibling of textBoxes.slice(index + 1)) {
+        const inlineIntersection =
+          Math.min(box.rect.right, sibling.rect.right) - Math.max(box.rect.left, sibling.rect.left)
+        const blockIntersection =
+          Math.min(box.rect.bottom, sibling.rect.bottom) - Math.max(box.rect.top, sibling.rect.top)
+        await expect(
+          inlineIntersection > 1 && blockIntersection > 1,
+          `${box.text} must not overlap ${sibling.text}`
+        ).toBe(false)
+      }
+    }
+  }
+  await userEvent.tab()
+  await expect(canvasElement.ownerDocument.activeElement?.tagName).toBe("A")
+  canvasElement.dataset.timelineRowCompactPlayComplete = "true"
+}
+
+export const Compact: Story = {
+  args: { continued: false, event: eventAt(0) },
+  play: compactPlay,
+  render: () => <CompactCatalog />
+}
+
 export const CompactForcedColors: Story = {
   args: { continued: false, event: eventAt(0) },
   globals: { forcedColors: "active", viewport: { isRotated: false, value: "mobile1" } },
-  play: async ({ canvasElement }) => {
-    const compact = canvasElement.querySelector<HTMLElement>("[data-timeline-row-compact]")
-    if (compact === null) throw new Error("TimelineRow compact boundary did not mount")
-    await expect(compact.scrollWidth).toBeLessThanOrEqual(compact.clientWidth)
-    await expect(compact.querySelectorAll("[data-rly-timeline-event-id]")).toHaveLength(6)
-    await expect(compact.querySelectorAll("[data-rly-timeline-connector]")).toHaveLength(5)
-    await userEvent.tab()
-    await expect(canvasElement.ownerDocument.activeElement?.tagName).toBe("A")
-    canvasElement.dataset.timelineRowCompactPlayComplete = "true"
-  },
-  render: () => <CompactForcedColorsCatalog />
+  play: compactPlay,
+  render: () => <CompactCatalog />
 }
 
 const provenanceEvents: ReadonlyArray<{
