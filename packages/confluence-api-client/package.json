@@ -60,7 +60,7 @@
     "@effect/openapi-generator": "4.0.0",
     "@effect/platform-node": "4.0.0",
     "@effect/vitest": "4.0.0",
-    "@types/node": "latest",
+    "@types/node": "catalog:",
     "effect": "4.0.0",
     "prettier": "^3.9.9",
     "tsx": "^4.23.15",
