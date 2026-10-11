@@ -31,3 +31,18 @@ test("a slow stylesheet still measures the fallback faces", async ({ page }) => 
   })
   expect(swap.sum, swap.report).toBeLessThanOrEqual(0.05)
 })
+
+// A failed stylesheet must not leave the stylesheet wait hanging: the missing fallback face is
+// reported at once instead of as a Playwright timeout.
+test("a failed stylesheet reports the missing fallback instead of hanging", async ({ page }) => {
+  await page.setViewportSize({ height: 900, width: 1440 })
+  const swap = measureFontSwapShift(page, {
+    probe: "h1",
+    ready: "h1",
+    load: async () => {
+      await page.route("**/board.css", (route) => route.abort())
+      await page.goto("/", { waitUntil: "commit" })
+    }
+  })
+  await expect(swap).rejects.toThrow("'Geist Mono Fallback' did not load")
+})
