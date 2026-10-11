@@ -14,6 +14,7 @@
     "e2e",
     "playwright.atlassian-oauth.config.ts",
     "playwright.config.ts",
+    "playwright.visual.config.ts",
     "scripts",
     "src/api",
     "src/domain",
