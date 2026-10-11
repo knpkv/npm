@@ -22,6 +22,7 @@ import { PersistenceOperationError } from "../persistence/errors.js"
 import { Persistence, type PersistenceOperationFailure, type PersistenceService } from "../persistence/Persistence.js"
 import { PluginStreamKey } from "../persistence/repositories/pluginRuntimeModels.js"
 import { firstPartySyncStreamKey } from "../plugins/firstPartySynchronization.js"
+import { stableUuid } from "./internal/stableUuid.js"
 import { appendPortfolioInvalidation } from "./portfolioInvalidation.js"
 
 const Definition = Schema.Struct({
@@ -50,12 +51,13 @@ export const releaseEnvironmentId = Effect.fn("ReleaseTargetConfiguration.enviro
   workspaceId: WorkspaceId,
   key: string
 ) {
-  const digest = yield* hash(`${workspaceId}\u0000release-environment-v1\u0000${key}`)
-  return EnvironmentId.make(
-    `${digest.slice(0, 8)}-${digest.slice(8, 12)}-5${digest.slice(13, 16)}-8${digest.slice(17, 20)}-${
-      digest.slice(20, 32)
-    }`
+  const cryptoService = yield* Crypto.Crypto
+  const identity = yield* stableUuid(
+    cryptoService,
+    `${workspaceId}\u0000release-environment-v1\u0000${key}`,
+    (operation) => new PersistenceOperationError({ operation: `release-targets.${operation}` })
   )
+  return EnvironmentId.make(identity)
 })
 
 /** Read only safe ordered topology from durable followed-pipeline snapshots. */
