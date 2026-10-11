@@ -240,7 +240,7 @@ export const ReleaseSourceHealth = Schema.Struct({
 /** Decoded latest source health used by the release projection. */
 export type ReleaseSourceHealth = typeof ReleaseSourceHealth.Type
 
-/** Find the first failure after recovery in bounded, newest-first health history. */
+/** Only a retained healthy checkpoint proves the start of a newest-first failure streak. */
 export const failureStreakStartedAt = (history: {
   readonly events: ReadonlyArray<{
     readonly occurredAt: UtcTimestamp
@@ -256,7 +256,7 @@ export const failureStreakStartedAt = (history: {
     if (outcome.healthState === "healthy") return earliestFailure
     earliestFailure = event.occurredAt
   }
-  return history.isComplete ? earliestFailure : null
+  return null
 }
 
 /** Project source failures before evaluating the age of preserved release facts. */

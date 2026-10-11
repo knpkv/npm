@@ -37,7 +37,7 @@ The server's assessment of preserved release facts against their age and the lat
 _Avoid_: Sync status, readiness verdict
 
 **Source Unavailable Since**:
-The first failed health event after the connection's most recent healthy event. Repeated failures retain that time. Bounded or legacy event history that cannot prove the start shows Last checked instead.
+The first failed health event after the connection's most recent retained healthy event. Repeated failures retain that time. Bounded, legacy or pruned event history without that healthy checkpoint shows Last checked instead, even when all remaining events fit in the read bound.
 _Avoid_: Last read, source update time
 
 **Local Operator**:

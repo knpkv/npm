@@ -519,6 +519,10 @@ const makeDomainEventRepository = Effect.gen(function*() {
     ).pipe(mapPersistenceOperation("domain-event.prune"))
   })
 
+  /**
+   * Bound newest-first plugin-health invalidations for one connection using the
+   * payload reason in SQL. failureStreakStartedAt checks it again in memory.
+   */
   const readPluginHealthHistory = Effect.fn("DomainEventRepository.readPluginHealthHistory")(function*(
     workspaceId: typeof WorkspaceId.Type,
     pluginConnectionId: typeof PluginConnectionId.Type,
@@ -549,6 +553,8 @@ const makeDomainEventRepository = Effect.gen(function*() {
       FROM domain_events
       WHERE workspace_id = ${workspaceId}
         AND plugin_connection_id = ${pluginConnectionId}
+        AND event_type = 'portfolio-invalidated'
+        AND json_extract(payload_json, '$.reason') = 'plugin-health'
       ORDER BY event_cursor DESC
       LIMIT ${limit + 1}`
       return { state, rows }

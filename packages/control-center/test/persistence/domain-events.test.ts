@@ -102,6 +102,12 @@ describe("DomainEventRepository", () => {
         ...makeEventInput("000000000004", "other-connection", "plugin-health"),
         metadata: { pluginConnectionId: otherConnectionId }
       })
+      for (const index of [5, 6, 7, 8]) {
+        yield* events.append(WORKSPACE_A, {
+          ...makeEventInput(String(index).padStart(12, "0"), `projection-${index}`),
+          metadata: { pluginConnectionId: connectionId }
+        })
+      }
       const bounded = yield* events.readPluginHealthHistory(WORKSPACE_A, connectionId, 2)
       assert.deepStrictEqual(bounded.events.map((event) => event.eventCursor), [3, 2])
       assert.isFalse(bounded.isComplete)

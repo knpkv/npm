@@ -53,6 +53,27 @@ describe("portfolio health invalidations", () => {
     }
     expect(failureStreakStartedAt({ events: [failed, legacy], isComplete: true })).toBeNull()
     expect(failureStreakStartedAt({ events: [failed], isComplete: false })).toBeNull()
-    expect(failureStreakStartedAt({ events: [failed], isComplete: true })).toEqual(occurredAt)
+    expect(failureStreakStartedAt({ events: [failed], isComplete: true })).toBeNull()
+  })
+
+  it("does not move since to the earliest retained failure after the streak start was pruned", () => {
+    const event = (time: string, healthState: "healthy" | "unavailable") => ({
+      occurredAt: Schema.decodeUnknownSync(UtcTimestamp)(time),
+      payload: Schema.decodeUnknownSync(PortfolioInvalidatedPayloadV1)({
+        reason: "plugin-health",
+        pluginHealth: { healthState, failureClass: healthState === "healthy" ? null : "authentication" }
+      })
+    })
+    const original = [
+      event("2026-07-14T12:03:00.000Z", "unavailable"),
+      event("2026-07-14T12:02:00.000Z", "unavailable"),
+      event("2026-07-14T12:01:00.000Z", "unavailable"),
+      event("2026-07-14T12:00:00.000Z", "healthy")
+    ]
+    const anchored = failureStreakStartedAt({ events: original, isComplete: true })
+    expect(anchored === null ? null : Schema.encodeSync(UtcTimestamp)(anchored))
+      .toBe("2026-07-14T12:01:00.000Z")
+    const retained = original.slice(0, 2)
+    expect(failureStreakStartedAt({ events: retained, isComplete: true })).toBeNull()
   })
 })
