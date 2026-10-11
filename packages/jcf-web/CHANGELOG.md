@@ -1,5 +1,12 @@
 # @knpkv/jcf-web
 
+## 0.8.5
+
+### Patch Changes
+
+- Updated dependencies [[`5373375`](https://github.com/knpkv/npm/commit/53733753079c8b439f1574ceb23cafc9718aba57)]:
+  - @knpkv/browser-pairing@0.5.0
+
 ## 0.8.4
 
 ### Patch Changes

@@ -1,5 +1,11 @@
 # @knpkv/browser-pairing
 
+## 0.5.0
+
+### Minor Changes
+
+- [#801](https://github.com/knpkv/npm/pull/801) [`5373375`](https://github.com/knpkv/npm/commit/53733753079c8b439f1574ceb23cafc9718aba57) Thanks [@konopkov](https://github.com/konopkov)! - Add shared browser-launch policy, an injectable opener, and scoped open-or-serve orchestration. Reuse the shared opener for the web command without exposing sign-in URLs in launch warnings.
+
 ## 0.4.1
 
 ### Patch Changes
