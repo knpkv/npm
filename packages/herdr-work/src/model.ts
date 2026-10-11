@@ -517,6 +517,24 @@ export interface WorkAgentBinding extends Schema.Schema.Type<typeof WorkAgentBin
 const PullRequestNumber = Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0))
 const RepositoryName = Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/))
 
+/** Attach a GitHub pull request to the stored goal, conditional on its latest event. */
+export const WorkPullRequestAttach = Schema.Struct({
+  goalId: WorkGoalId,
+  expectedGoalEventId: Identifier,
+  reviewUrl: WorkAdmit.fields.reviewUrl,
+  head: ExactHead,
+  branch: Branch,
+  repository: RepositoryName,
+  occurredAt: Timestamp,
+  eventId: Identifier
+}).check(
+  Schema.makeFilter(
+    ({ repository, reviewUrl }) => reviewUrl.startsWith(`https://github.com/${repository}/pull/`),
+    { expected: "a pull request URL belonging to the canonical repository" }
+  )
+)
+export interface WorkPullRequestAttach extends Schema.Schema.Type<typeof WorkPullRequestAttach> {}
+
 /** Exact authority requested by an existing-owner PR inspection. */
 export const WorkPullRequestLinkRequest = Schema.Struct({
   repository: RepositoryName,

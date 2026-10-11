@@ -21,6 +21,7 @@ import type {
   WorkLaneGoalConflictError,
   WorkLaneOperationConflictError,
   WorkProjectionError,
+  WorkPullRequestAttachConflict,
   WorkStoreError,
   WorkTransactionConflictError
 } from "./errors.js"
@@ -44,6 +45,7 @@ import type {
   WorkObservedAdmission,
   WorkObserveReport,
   WorkProspectiveAdmission,
+  WorkPullRequestAttach,
   WorkReconcileOptions,
   WorkReconcileOutcome,
   WorkReconcilePlanStep,
@@ -136,6 +138,17 @@ export interface WorkService {
   readonly agentBinding: (
     dispatchRequestId: string
   ) => Effect.Effect<Option.Option<WorkAgentBinding>, WorkStoreError>
+  /**
+   * Atomically checks the latest event and repository identity, then attaches to the stored active goal.
+   * The same URL already attached is a no-op success, even with an older expected event;
+   * it returns the latest stored checkpoint without overwriting later updates.
+   */
+  readonly attachPullRequest: (
+    input: WorkPullRequestAttach
+  ) => Effect.Effect<
+    WorkGoalCheckpoint,
+    WorkPullRequestAttachConflict | WorkCheckpointConflictError | WorkProjectionError | WorkStoreError
+  >
   readonly record: (
     event: WorkGoalCheckpoint
   ) => Effect.Effect<
@@ -346,6 +359,9 @@ export const makeWorkService = Effect.fn("HerdrWork.makeService")(function(store
   const agentBinding = Effect.fn("HerdrWork.agentBinding")((dispatchRequestId: string) =>
     store.agentBinding(dispatchRequestId)
   )
+  const attachPullRequest = Effect.fn("HerdrWork.attachPullRequest")((input: WorkPullRequestAttach) =>
+    store.attachPullRequest(input)
+  )
   const record = Effect.fn("HerdrWork.record")((event: WorkGoalCheckpoint) => store.append(event))
   const snapshots = Effect.fn("HerdrWork.snapshots")(function*(observedAt?: number) {
     const source = yield* store.snapshotInput()
@@ -409,6 +425,7 @@ export const makeWorkService = Effect.fn("HerdrWork.makeService")(function(store
       observe,
       reconcile,
       planReconcile,
+      attachPullRequest,
       record,
       recordMany,
       snapshots
