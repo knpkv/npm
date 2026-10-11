@@ -1,6 +1,6 @@
 import { NodeHttpServer } from "@effect/platform-node"
 import { assert, describe, it } from "@effect/vitest"
-import { Deferred, Effect, Layer, Option, Schema } from "effect"
+import { Deferred, Duration, Effect, Fiber, Layer, Option, Ref, Schema } from "effect"
 import { HttpApiTest } from "effect/http-api"
 import * as TestClock from "effect/testing/TestClock"
 
@@ -13,9 +13,17 @@ import {
 import { CurrentSession, SessionCookieAuth, SessionMutationAuth, SessionSummary } from "../../src/api/session.js"
 import { PluginConnectionId, WorkspaceId } from "../../src/domain/identifiers.js"
 import { ApiBindConfiguration } from "../../src/server/api/ApiConfiguration.js"
-import { ApplicationResourceNotFound, PluginAdministration } from "../../src/server/api/ApplicationServices.js"
+import {
+  ApplicationResourceNotFound,
+  ApplicationServiceUnavailable,
+  PluginAdministration
+} from "../../src/server/api/ApplicationServices.js"
 import { pluginHandlersLayer } from "../../src/server/api/Handlers.js"
-import { RequestLimitPolicy, requestRateLimiterLayer } from "../../src/server/api/RequestLimits.js"
+import {
+  DEFAULT_REQUEST_LIMIT_POLICY,
+  RequestLimitPolicy,
+  requestRateLimiterLayer
+} from "../../src/server/api/RequestLimits.js"
 import { ControlCenterBootstrap } from "../../src/server/runtime/Bootstrap.js"
 import { ServerLifecycle } from "../../src/server/runtime/ServerLifecycle.js"
 import { decodeBindConfig } from "../../src/server/security/BindConfig.js"
@@ -112,6 +120,288 @@ const createResponse = (id: PluginConnectionId) =>
   })
 
 describe("authenticated synchronization budgets", () => {
+  it.effect("joins a running first sync without another provider attempt or spending manual tokens", () =>
+    Effect.gen(function*() {
+      const started = yield* Deferred.make<void>()
+      const finish = yield* Deferred.make<void>()
+      const resolved = yield* Deferred.make<void>()
+      const calls = yield* Ref.make(0)
+      const joining = yield* Ref.make(false)
+      const joiningPlugins = PluginAdministration.of({
+        ...plugins,
+        connectAndTest: () => Effect.succeed(createResponse(connectionId(1))),
+        synchronization: ({ pluginConnectionId }) =>
+          Effect.gen(function*() {
+            if (yield* Ref.get(joining)) yield* Deferred.succeed(resolved, undefined)
+            return { ...state(pluginConnectionId), result: (yield* Ref.get(calls)) === 0 ? "never" : "running" }
+          }),
+        synchronizeConnection: ({ pluginConnectionId }) =>
+          Effect.gen(function*() {
+            const count = yield* Ref.updateAndGet(calls, (value) => value + 1)
+            if (count > 1 && Option.isNone(yield* Deferred.poll(finish))) {
+              return yield* new ApplicationServiceUnavailable({ retryAt: null })
+            }
+            yield* Deferred.succeed(started, undefined)
+            yield* Deferred.await(finish)
+            return state(pluginConnectionId)
+          })
+      })
+      const joiningHandler = pluginHandlersLayer.pipe(Layer.provide([
+        Layer.succeed(PluginAdministration, joiningPlugins),
+        Layer.effect(ApiBindConfiguration, decodeBindConfig({})),
+        RequestLimitPolicy.defaultLayer,
+        requestRateLimiterLayer,
+        ServerLifecycle.layer,
+        Layer.succeed(ControlCenterBootstrap, { _tag: "disabled" }),
+        sessionLayer,
+        mutationLayer
+      ]))
+      yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["plugins"])
+        yield* client.plugins.createConnection({
+          payload: {
+            pluginConnectionId: connectionId(1),
+            providerId: "jira",
+            displayName: "Fixture project",
+            values: []
+          }
+        })
+        yield* Deferred.await(started)
+        yield* Ref.set(joining, true)
+        const joined = yield* client.plugins.synchronizeConnection({ params: { pluginConnectionId: connectionId(1) } })
+          .pipe(Effect.forkChild({ startImmediately: true }))
+        yield* Deferred.await(resolved)
+        assert.strictEqual(yield* Ref.get(calls), 1)
+        yield* Deferred.succeed(finish, undefined)
+        assert.strictEqual((yield* Fiber.join(joined)).result, "synchronized")
+        for (let index = 0; index < 2; index++) {
+          assert.strictEqual(
+            (yield* client.plugins.synchronizeConnection({ params: { pluginConnectionId: connectionId(1) } })).result,
+            "synchronized"
+          )
+        }
+        assert.strictEqual(yield* Ref.get(calls), 3)
+        // Two manual owners above plus 58 more exhaust sixty global tokens; the joined call costs none.
+        for (let index = 2; index <= 59; index++) {
+          yield* client.plugins.synchronizeConnection({ params: { pluginConnectionId: connectionId(index) } })
+        }
+        const global = yield* client.plugins.synchronizeConnection({
+          params: { pluginConnectionId: connectionId(60) },
+          responseMode: "response-only"
+        })
+        assert.strictEqual(global.status, 429)
+        assert.deepInclude(yield* global.json, { budget: "global" })
+      }).pipe(Effect.provide([joiningHandler, sessionLayer, mutationLayer, NodeHttpServer.layerHttpServices]))
+    }))
+
+  it.effect("joins concurrent manual requests and charges only the attempt owner", () =>
+    Effect.gen(function*() {
+      const started = yield* Deferred.make<void>()
+      const finish = yield* Deferred.make<void>()
+      const resolved = yield* Deferred.make<void>()
+      const calls = yield* Ref.make(0)
+      const joining = yield* Ref.make(false)
+      const joiningPlugins = PluginAdministration.of({
+        ...plugins,
+        connectAndTest: () => Effect.succeed(createResponse(connectionId(1))),
+        synchronization: ({ pluginConnectionId }) =>
+          Effect.gen(function*() {
+            if (yield* Ref.get(joining)) yield* Deferred.succeed(resolved, undefined)
+            return { ...state(pluginConnectionId), result: (yield* Ref.get(calls)) === 0 ? "never" : "running" }
+          }),
+        synchronizeConnection: ({ pluginConnectionId }) =>
+          Effect.gen(function*() {
+            const count = yield* Ref.updateAndGet(calls, (value) => value + 1)
+            if (count > 1 && Option.isNone(yield* Deferred.poll(finish))) {
+              return yield* new ApplicationServiceUnavailable({ retryAt: null })
+            }
+            yield* Deferred.succeed(started, undefined)
+            yield* Deferred.await(finish)
+            return state(pluginConnectionId)
+          })
+      })
+      const joiningHandler = pluginHandlersLayer.pipe(Layer.provide([
+        Layer.succeed(PluginAdministration, joiningPlugins),
+        Layer.effect(ApiBindConfiguration, decodeBindConfig({})),
+        RequestLimitPolicy.defaultLayer,
+        requestRateLimiterLayer,
+        ServerLifecycle.layer,
+        Layer.succeed(ControlCenterBootstrap, { _tag: "disabled" }),
+        sessionLayer,
+        mutationLayer
+      ]))
+      yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["plugins"])
+        const owner = yield* client.plugins.synchronizeConnection({ params: { pluginConnectionId: connectionId(1) } })
+          .pipe(Effect.forkChild({ startImmediately: true }))
+        yield* Deferred.await(started)
+        yield* Ref.set(joining, true)
+        const joined = yield* client.plugins.synchronizeConnection({ params: { pluginConnectionId: connectionId(1) } })
+          .pipe(Effect.forkChild({ startImmediately: true }))
+        yield* Deferred.await(resolved)
+        assert.strictEqual(yield* Ref.get(calls), 1)
+        yield* Deferred.succeed(finish, undefined)
+        assert.strictEqual((yield* Fiber.join(joined)).result, "synchronized")
+        assert.strictEqual((yield* Fiber.join(owner)).result, "synchronized")
+        assert.strictEqual(
+          (yield* client.plugins.synchronizeConnection({ params: { pluginConnectionId: connectionId(1) } })).result,
+          "synchronized"
+        )
+        const exhausted = yield* client.plugins.synchronizeConnection({
+          params: { pluginConnectionId: connectionId(1) },
+          responseMode: "response-only"
+        })
+        assert.strictEqual(exhausted.status, 429)
+        assert.deepInclude(yield* exhausted.json, { budget: "per-connection" })
+        assert.strictEqual(yield* Ref.get(calls), 2)
+      }).pipe(Effect.provide([joiningHandler, sessionLayer, mutationLayer, NodeHttpServer.layerHttpServices]))
+    }))
+
+  it.effect("cancelling a joined request leaves its owner active until normal drain completes", () =>
+    Effect.gen(function*() {
+      const started = yield* Deferred.make<void>()
+      const finish = yield* Deferred.make<void>()
+      const resolved = yield* Deferred.make<void>()
+      const calls = yield* Ref.make(0)
+      const joining = yield* Ref.make(false)
+      const joiningPlugins = PluginAdministration.of({
+        ...plugins,
+        connectAndTest: () => Effect.succeed(createResponse(connectionId(1))),
+        synchronization: ({ pluginConnectionId }) =>
+          Effect.gen(function*() {
+            if (yield* Ref.get(joining)) yield* Deferred.succeed(resolved, undefined)
+            return { ...state(pluginConnectionId), result: (yield* Ref.get(calls)) === 0 ? "never" : "running" }
+          }),
+        synchronizeConnection: ({ pluginConnectionId }) =>
+          Effect.gen(function*() {
+            const count = yield* Ref.updateAndGet(calls, (value) => value + 1)
+            if (count > 1 && Option.isNone(yield* Deferred.poll(finish))) {
+              return yield* new ApplicationServiceUnavailable({ retryAt: null })
+            }
+            yield* Deferred.succeed(started, undefined)
+            yield* Deferred.await(finish)
+            return state(pluginConnectionId)
+          })
+      })
+      const lifecycleService = yield* ServerLifecycle.make
+      const joiningHandler = pluginHandlersLayer.pipe(Layer.provide([
+        Layer.succeed(PluginAdministration, joiningPlugins),
+        Layer.effect(ApiBindConfiguration, decodeBindConfig({})),
+        RequestLimitPolicy.defaultLayer,
+        requestRateLimiterLayer,
+        Layer.succeed(ServerLifecycle, lifecycleService),
+        Layer.succeed(ControlCenterBootstrap, { _tag: "disabled" }),
+        sessionLayer,
+        mutationLayer
+      ]))
+      yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["plugins"])
+        yield* client.plugins.createConnection({
+          payload: {
+            pluginConnectionId: connectionId(1),
+            providerId: "jira",
+            displayName: "Fixture project",
+            values: []
+          }
+        })
+        yield* Deferred.await(started)
+        yield* Ref.set(joining, true)
+        const joined = yield* client.plugins.synchronizeConnection({ params: { pluginConnectionId: connectionId(1) } })
+          .pipe(Effect.forkChild({ startImmediately: true }))
+        yield* Deferred.await(resolved)
+        assert.strictEqual(yield* Ref.get(calls), 1)
+        yield* Fiber.interrupt(joined)
+        const lifecycle = yield* ServerLifecycle
+        yield* lifecycle.beginDrain
+        const drained = yield* Deferred.make<void>()
+        const drain = yield* lifecycle.awaitWorkDrained.pipe(
+          Effect.andThen(Deferred.succeed(drained, undefined)),
+          Effect.forkChild({ startImmediately: true })
+        )
+        assert.isTrue(Option.isNone(yield* Deferred.poll(drained)))
+        yield* Deferred.succeed(finish, undefined)
+        yield* Fiber.join(drain)
+        assert.strictEqual(yield* Ref.get(calls), 1)
+      }).pipe(
+        Effect.provide([
+          joiningHandler,
+          Layer.succeed(ServerLifecycle, lifecycleService),
+          sessionLayer,
+          mutationLayer,
+          NodeHttpServer.layerHttpServices
+        ])
+      )
+    }))
+
+  it.effect("joins queued onboarding without taking over admission or spending manual tokens", () =>
+    Effect.gen(function*() {
+      const finished = new Set<PluginConnectionId>()
+      const calls = yield* Ref.make(0)
+      const resolved = yield* Deferred.make<void>()
+      const joining = yield* Ref.make(false)
+      const queuedPlugins = PluginAdministration.of({
+        ...plugins,
+        connectAndTest: ({ request }) => Effect.succeed(createResponse(request.pluginConnectionId)),
+        synchronization: ({ pluginConnectionId }) =>
+          Effect.gen(function*() {
+            if ((yield* Ref.get(joining)) && pluginConnectionId === connectionId(1)) {
+              yield* Deferred.succeed(resolved, undefined)
+            }
+            return finished.has(pluginConnectionId)
+              ? state(pluginConnectionId)
+              : { ...state(pluginConnectionId), result: "never", lastAttemptAt: null, lastSuccessAt: null }
+          }),
+        synchronizeConnection: ({ pluginConnectionId }) =>
+          Effect.gen(function*() {
+            finished.add(pluginConnectionId)
+            if (pluginConnectionId === connectionId(1)) yield* Ref.update(calls, (value) => value + 1)
+            return state(pluginConnectionId)
+          })
+      })
+      const queuedHandler = pluginHandlersLayer.pipe(Layer.provide([
+        Layer.succeed(PluginAdministration, queuedPlugins),
+        Layer.effect(ApiBindConfiguration, decodeBindConfig({})),
+        Layer.succeed(RequestLimitPolicy, {
+          ...DEFAULT_REQUEST_LIMIT_POLICY,
+          "sync-onboarding": { limit: 1, window: Duration.minutes(1) }
+        }),
+        requestRateLimiterLayer,
+        ServerLifecycle.layer,
+        Layer.succeed(ControlCenterBootstrap, { _tag: "disabled" }),
+        sessionLayer,
+        mutationLayer
+      ]))
+      yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["plugins"])
+        for (const id of [connectionId(2), connectionId(1)]) {
+          yield* client.plugins.createConnection({
+            payload: {
+              pluginConnectionId: id,
+              providerId: "jira",
+              displayName: "Fixture project",
+              values: []
+            }
+          })
+        }
+        assert.strictEqual(
+          (yield* client.plugins.synchronization({ params: { pluginConnectionId: connectionId(1) } })).result,
+          "queued"
+        )
+        yield* Ref.set(joining, true)
+        const joined = yield* client.plugins.synchronizeConnection({ params: { pluginConnectionId: connectionId(1) } })
+          .pipe(Effect.forkChild({ startImmediately: true }))
+        yield* Deferred.await(resolved)
+        assert.strictEqual(yield* Ref.get(calls), 0)
+        yield* TestClock.adjust("1 minute")
+        assert.strictEqual((yield* Fiber.join(joined)).result, "synchronized")
+        assert.strictEqual(yield* Ref.get(calls), 1)
+        for (let index = 0; index < 2; index++) {
+          yield* client.plugins.synchronizeConnection({ params: { pluginConnectionId: connectionId(1) } })
+        }
+        assert.strictEqual(yield* Ref.get(calls), 3)
+      }).pipe(Effect.provide([queuedHandler, sessionLayer, mutationLayer, NodeHttpServer.layerHttpServices]))
+    }))
+
   it.effect("starts healthy onboarding on the server without a manual browser POST", () =>
     Effect.gen(function*() {
       const started = yield* Deferred.make<void>()

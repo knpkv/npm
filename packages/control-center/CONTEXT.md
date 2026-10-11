@@ -21,7 +21,7 @@ A provider-owned resource selected for observation within a Provider Account, su
 _Avoid_: Account, service, plugin
 
 **Plugin Connection**:
-The executable adapter binding that synchronizes one Followed Resource into a Workspace. Multiple Plugin Connections may share one Provider Account. Manual sync admission is scoped to the authenticated Workspace and Plugin Connection, with a separate per-peer cap. A healthy newly created connection receives a server-owned first sync under an independent workspace onboarding budget; it remains visibly queued while admission waits.
+The executable adapter binding that synchronizes one Followed Resource into a Workspace. Multiple Plugin Connections may share one Provider Account. Manual sync admission is scoped to the authenticated Workspace and Plugin Connection, with a separate per-peer cap. A healthy newly created connection receives a server-owned first sync under an independent workspace onboarding budget; it remains visibly queued while admission waits. Manual requests join queued or running synchronization on the same Workspace and Plugin Connection; only a new manual attempt spends manual admission tokens. Joined callers share the durable outcome, while cancellation of a waiter leaves server-owned work intact.
 _Avoid_: Provider account, credential profile
 
 **Delivery Relationship**:

@@ -50,3 +50,41 @@ describe("ConnectionSynchronization", () => {
     expect(host.textContent).toContain("Synced 3 min ago")
   })
 })
+
+describe("server-owned synchronization presentation", () => {
+  const results: ReadonlyArray<PluginSynchronizationState["result"]> = ["queued", "running", "never", "synchronized"]
+  for (const result of results) {
+    it(`${result} shows its server state and permits Sync only when idle`, async () => {
+      const host = document.createElement("div")
+      document.body.append(host)
+      root = createRoot(host)
+      const onSynchronize = vi.fn()
+      const synchronization = Schema.decodeUnknownSync(PluginSynchronizationState)({
+        pluginConnectionId: "01890f6f-6d6a-7cc0-98d2-000000000171",
+        providerId: "jira",
+        streamKey: "project-issues",
+        lastAttemptAt: null,
+        lastSuccessAt: null,
+        result,
+        pagesCommitted: 0
+      })
+      await act(async () =>
+        root?.render(
+          <ConnectionSynchronization
+            canSynchronize
+            onRefresh={vi.fn()}
+            onSynchronize={onSynchronize}
+            state={{ _tag: "ready", synchronization }}
+          />
+        )
+      )
+      const button = host.querySelector<HTMLButtonElement>("button")
+      expect(button).not.toBeNull()
+      expect(button?.disabled).toBe(result === "queued" || result === "running")
+      if (result === "queued") expect(host.textContent).toContain("First sync queued")
+      if (result === "running") expect(host.textContent).toContain("Syncing")
+      await act(async () => button?.click())
+      expect(onSynchronize).toHaveBeenCalledTimes(result === "queued" || result === "running" ? 0 : 1)
+    })
+  }
+})

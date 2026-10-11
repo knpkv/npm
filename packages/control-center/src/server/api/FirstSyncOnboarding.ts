@@ -1,8 +1,6 @@
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as RateLimiter from "effect/persistence/RateLimiter"
-import * as Ref from "effect/Ref"
-import * as Scope from "effect/Scope"
 
 import type {
   CreatePluginConnectionResponse,
@@ -13,21 +11,24 @@ import type { PluginConnectionId, WorkspaceId } from "../../domain/identifiers.j
 import { ControlCenterBootstrap } from "../runtime/Bootstrap.js"
 import { superviseBackgroundWorker } from "../runtime/internal/superviseAgentJobWorker.js"
 import { ServerLifecycle } from "../runtime/ServerLifecycle.js"
-import type { PluginAdministration } from "./ApplicationServices.js"
-import { consumeRequestToken, RequestLimitPolicy } from "./RequestLimits.js"
+import { ApplicationServiceUnavailable, type PluginAdministration } from "./ApplicationServices.js"
+import { makePluginSynchronizationFlights } from "./PluginSynchronizationFlights.js"
+import {
+  consumeRequestToken,
+  RequestLimitPolicy,
+  type RequestRateLimitExceeded,
+  type RequestRateLimitUnavailable
+} from "./RequestLimits.js"
 
 /** Server-owned first sync: creation succeeds while admission waits, with a visible queued state. */
 export const makeFirstSyncOnboarding = Effect.fn("FirstSyncOnboarding.make")(function*(
   plugins: PluginAdministration["Service"]
 ) {
   const bootstrap = yield* ControlCenterBootstrap
-  const scope = yield* Scope.Scope
   const lifecycle = yield* ServerLifecycle
   const limiter = yield* RateLimiter.RateLimiter
   const policy = yield* RequestLimitPolicy
-  const pending = yield* Ref.make<ReadonlySet<string>>(new Set())
-  const key = (workspaceId: WorkspaceId, pluginConnectionId: PluginConnectionId) =>
-    `${workspaceId}:${pluginConnectionId}`
+  const flights = yield* makePluginSynchronizationFlights()
 
   const enqueueConnection = Effect.fn("FirstSyncOnboarding.enqueueConnection")(function*(
     workspaceId: WorkspaceId,
@@ -41,32 +42,20 @@ export const makeFirstSyncOnboarding = Effect.fn("FirstSyncOnboarding.make")(fun
       return
     }
     const input = { workspaceId, pluginConnectionId: connection.pluginConnectionId }
-    const identity = key(workspaceId, input.pluginConnectionId)
-    const added = yield* Ref.modify(
-      pending,
-      (current) => current.has(identity) ? [false, current] : [true, new Set(current).add(identity)]
-    )
-    if (!added) return
     const waitForAdmission = consumeRequestToken("sync-onboarding", workspaceId, "delay").pipe(
       Effect.provideService(RateLimiter.RateLimiter, limiter),
       Effect.provideService(RequestLimitPolicy, policy),
       // Drain cancels queued work; an already admitted durable sync finishes under runBackground.
       Effect.raceFirst(lifecycle.awaitDrain.pipe(Effect.andThen(Effect.interrupt)))
     )
-    const job = lifecycle.runBackground(Effect.gen(function*() {
-      yield* waitForAdmission
-      const current = yield* readState(input)
-      // A manual sync may have completed while onboarding was queued. Do not repeat it.
-      if (current.result === "never") yield* synchronize(input)
-    })).pipe(
-      Effect.catch((failure) => Effect.logError("First sync failed", failure)),
-      Effect.ensuring(Ref.update(pending, (current) => {
-        const next = new Set(current)
-        next.delete(identity)
-        return next
-      }))
+    yield* flights.enqueue(
+      input,
+      Effect.gen(function*() {
+        yield* waitForAdmission
+        const current = yield* readState(input)
+        return current.result === "never" ? yield* synchronize(input) : current
+      }).pipe(Effect.tapError((failure) => Effect.logError("First sync failed", failure)))
     )
-    yield* Effect.forkIn(job, scope, { startImmediately: true })
   })
 
   const enqueue = Effect.fn("FirstSyncOnboarding.enqueue")(function*(
@@ -103,10 +92,18 @@ export const makeFirstSyncOnboarding = Effect.fn("FirstSyncOnboarding.make")(fun
     workspaceId: WorkspaceId,
     state: PluginSynchronizationState
   ): Effect.fn.Return<PluginSynchronizationState> {
-    const queued = yield* Ref.get(pending)
-    return state.result === "never" && queued.has(key(workspaceId, state.pluginConnectionId))
+    return state.result === "never" &&
+        (yield* flights.hasOnboarding({ workspaceId, pluginConnectionId: state.pluginConnectionId }))
       ? { ...state, result: "queued" }
       : state
   })
-  return { enqueue, present }
+  const synchronize = Effect.fn("FirstSyncOnboarding.synchronize")(function*(
+    input: { readonly workspaceId: WorkspaceId; readonly pluginConnectionId: PluginConnectionId },
+    admit: Effect.Effect<void, RequestRateLimitExceeded | RequestRateLimitUnavailable>
+  ) {
+    const synchronizeConnection = plugins.synchronizeConnection
+    if (synchronizeConnection === undefined) return yield* new ApplicationServiceUnavailable({ retryAt: null })
+    return yield* flights.join(input, admit.pipe(Effect.andThen(synchronizeConnection(input))))
+  })
+  return { enqueue, present, synchronize }
 })

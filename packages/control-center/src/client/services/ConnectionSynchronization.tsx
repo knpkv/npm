@@ -77,6 +77,8 @@ export const ConnectionSynchronization = ({
   const isSyncing = state._tag === "syncing"
   const synchronization =
     state._tag === "ready" ? state.synchronization : state._tag === "syncing" ? state.previous : null
+  const isQueued = synchronization?.result === "queued"
+  const isServerSyncing = synchronization?.result === "running"
   return (
     <div className={styles.synchronization}>
       {synchronization === null ? (
@@ -84,7 +86,11 @@ export const ConnectionSynchronization = ({
           <StateLabel label="Syncing…" size="compact" tone="progress" />
         ) : null
       ) : (
-        <StateDetails hideAccountFailure={hideAccountFailure} isSyncing={isSyncing} synchronization={synchronization} />
+        <StateDetails
+          hideAccountFailure={hideAccountFailure}
+          isSyncing={isSyncing && !isQueued}
+          synchronization={synchronization}
+        />
       )}
       {state._tag === "loading" ? (
         <Text tone="secondary" variant="meta">
@@ -100,8 +106,8 @@ export const ConnectionSynchronization = ({
       ) : null}
       <div className={styles.syncActions}>
         <Button
-          disabled={!canSynchronize || state._tag === "loading" || state._tag === "syncing"}
-          loading={state._tag === "syncing"}
+          disabled={!canSynchronize || state._tag === "loading" || isSyncing || isQueued || isServerSyncing}
+          loading={(isSyncing || isServerSyncing) && !isQueued}
           onClick={onSynchronize}
           variant="secondary"
         >
