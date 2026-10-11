@@ -15,3 +15,13 @@ herdr owns the scrollback and scrolls in whole lines, so touch scrolling draws t
 Browser consumers can import `@knpkv/herdr-connect/client` for the mounting entry, `@knpkv/herdr-connect/surface` for the embeddable state and view, and `@knpkv/herdr-connect/styles.css` for package-owned styles. Exact `host` plus stable `agent` query parameters select that room. The relationship store keys metadata by exact host and stable agent ID. Trusted live inventory may replace a stored parent only for the same host, stable agent ID, and pane with a strictly newer observation; durable, stale, equal, or pane-changing observations cannot reparent an agent. The view renders reported roots and parent relations; missing, cross-host, cyclic, or ambiguous ownership stays explicit and is never guessed.
 
 Browser contracts are available through `@knpkv/herdr-connect/model`; browser subpaths do not pull SQLite or Node process code into the bundle.
+
+## Agent voice
+
+Agents can report a short status, progress update, skill feedback, note, or blocker through the canonical hub's authenticated `POST /v1/connect/posts`. Reports contain `agentId`, `kind`, `text`, `eventId`, and optional `goalStep`. Status text is limited to 240 characters; other kinds to 1024. These are plain-text updates, never terminal transcripts or HTML. Consumers must render text as text.
+
+The hub authenticates the calling Tailscale node, resolves its configured host, and accepts only a stable agent ID in that host's fresh, complete live inventory. Identity is host-bounded in v1: a process on the same host can claim a sibling agent's ID. The follow-up is a per-session token handed to each pane by Herdr and presented by the CLI. Other listeners reject voice requests.
+
+`AgentPostStore` persists reports in owner-only SQLite beside the agent archive. Retries use the exact host, stable agent ID, and event ID; changed content with the same identity returns `Conflict`. Reports retain 90 days and at most 128 entries per host and agent. `GET /v1/connect/posts?host=HOST&agentId=AGENT` returns the newest 64, with `nextCursor.sequence` supplied as `cursor` for the next page. Reads require canonical listener authentication. `InvalidReport`, `UnboundAgent`, `Denied`, `Conflict`, and `Unavailable` name the report failures.
+
+The newest retained report supplies the directory's optional `voice` text and timestamp. Confirmed closure snapshots those words as optional `lastWords` on the archive row. Existing archives migrate additively, and last words survive report eviction and reopening.

@@ -174,12 +174,13 @@ const directTls = {
 
 const secureRequestBody = (
   url: string,
-  headers: Readonly<Record<string, string>>
+  headers: Readonly<Record<string, string>>,
+  options: { readonly method?: string; readonly body?: unknown } = {}
 ): Promise<{ readonly body: string; readonly setCookie: string | undefined; readonly status: number }> =>
   new Promise((resolve, reject) => {
     const request = httpsRequest(
       url,
-      { headers, rejectUnauthorized: false },
+      { headers, rejectUnauthorized: false, method: options.method },
       (response) => {
         let body = ""
         response.setEncoding("utf8")
@@ -195,7 +196,7 @@ const secureRequestBody = (
       }
     )
     request.once("error", reject)
-    request.end()
+    request.end(options.body === undefined ? undefined : JSON.stringify(options.body))
   })
 
 /**
@@ -1880,6 +1881,141 @@ esac
           rmSync(root, { force: true, recursive: true })
         })
     ).pipe(provideNodeServices)
+  })
+
+  it.effect("accepts host-bound voice only on the canonical listener, including sibling claims on the same host", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-http-posts-"))
+    const tailscaleCommand = join(root, "tailscale-test")
+    const identityMode = join(root, "identity-mode")
+    writeFileSync(identityMode, "node-ser8")
+    writeFileSync(
+      tailscaleCommand,
+      `#!/bin/sh
+case "$1" in
+  ip) printf '%s\\n' '127.0.0.1' ;;
+  whois) printf '{"Node":{"StableID":"%s"},"UserProfile":{"LoginName":"user@example.test"}}\\n' "$(cat '${identityMode}')" ;;
+  status) printf '%s\\n' '{"Peer":{"alpha":{"HostName":"ALPHA","ID":"node-alpha","Online":true,"TailscaleIPs":["127.0.0.2"]}},"Self":{"HostName":"SER8","ID":"node-ser8","Online":true,"TailscaleIPs":["127.0.0.1"]}}' ;;
+esac
+`,
+      { mode: 0o700 }
+    )
+    const hostConfig: HostConfiguration = {
+      ...config(root),
+      allowedUsers: ["user@example.test"],
+      host: "SER8",
+      crossHost: true,
+      approvalHub: { host: "SER8", nodeId: "node-ser8", url: "https://ser8.example.test:0/" },
+      approvalPort: 0,
+      approvalTls: directTls,
+      machines: [{ host: "SER8", nodeId: "node-ser8" }, { host: "ALPHA", nodeId: "node-alpha" }],
+      tailscaleCommand
+    }
+    let partial = false
+    const postOperations: HostOperations = {
+      ...operations,
+      listAgents: () =>
+        Effect.succeed({
+          available: true,
+          error: partial ? "partial inventory" : null,
+          agents: ["agent-one", "agent-sibling"].map((agentId, index) => ({
+            activityRevision: 1,
+            agentId,
+            kind: "worker",
+            name: "worker",
+            paneId: `w1:p${index + 1}`,
+            parentAgentId: null,
+            relation: null,
+            status: "working",
+            work: "project"
+          }))
+        })
+    }
+    return Effect.scoped(Effect.gen(function*() {
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { force: true, recursive: true })))
+      const peerServer = createServer((request, response) => {
+        response.writeHead(request.url === "/v1/connect/agents/local" ? 200 : 404, {
+          "content-type": "application/json"
+        })
+        response.end(JSON.stringify({
+          host: "ALPHA",
+          complete: true,
+          agents: [{
+            id: "agent-remote",
+            host: "ALPHA",
+            name: "remote worker",
+            kind: "worker",
+            state: "working",
+            work: "project",
+            lastActivityAt: 0
+          }]
+        }))
+      })
+      const peerPort = yield* Effect.acquireRelease(
+        Effect.promise(() => listenOn(peerServer, "127.0.0.2")),
+        () =>
+          Effect.promise(() =>
+            new Promise<void>((resolve, reject) =>
+              peerServer.close((error) => error === undefined ? resolve() : reject(error))
+            )
+          )
+      )
+      const store = yield* Effect.acquireRelease(
+        JobStore.open(join(root, "jobs.sqlite")),
+        (opened) => Effect.sync(() => opened.close())
+      )
+      const fleet = yield* makeFleetService({ approvalEnabled: true, host: "SER8", operations: postOperations, store })
+      const server = yield* Effect.acquireRelease(
+        Effect.promise(() =>
+          startHttpServer({ ...hostConfig, port: peerPort }, fleet, assets, {
+            terminalConnector: unusedTerminal,
+            now: () => 100,
+            lanWork: { address: "127.0.0.1", port: 0 }
+          })
+        ),
+        (running) => Effect.promise(running.close)
+      )
+      if (server.serveUrl === null || server.tailnetUrl === null || server.lanWorkUrl === null) {
+        return yield* Effect.die("voice fixture listeners missing")
+      }
+      const canonical = server.serveUrl
+      const headers = { host: "ser8.example.test:0", "content-type": "application/json" }
+      const body = { agentId: "agent-one", kind: "status", text: "Tests passing", eventId: "event-one" }
+      const post = (input: Readonly<Record<string, string>>) =>
+        Effect.promise(() =>
+          secureRequestBody(`${canonical}/v1/connect/posts`, headers, { method: "POST", body: input })
+        )
+      const first = yield* post(body)
+      expect(first.status).toBe(200)
+      expect((yield* post(body)).body).toBe(first.body)
+      expect((yield* post({ ...body, text: "Changed" })).status).toBe(409)
+      expect((yield* post({ ...body, text: "x".repeat(241) })).status).toBe(400)
+      expect((yield* post({ ...body, agentId: "agent-foreign" })).body).toContain("UnboundAgent")
+      expect((yield* post({ ...body, agentId: "agent-sibling" })).status).toBe(200)
+      const page = yield* Effect.promise(() =>
+        secureRequestBody(`${canonical}/v1/connect/posts?host=SER8&agentId=agent-one`, headers)
+      )
+      expect(page.status).toBe(200)
+      expect(page.body).toContain("Tests passing")
+      const directory = yield* Effect.promise(() => secureRequestBody(`${canonical}/v1/connect/agents`, headers))
+      expect(directory.body).toContain("\"voice\":{\"text\":\"Tests passing\",\"createdAt\":100}")
+      const agents = Schema.decodeUnknownSync(Schema.fromJsonString(FleetConnectAgentPage))(directory.body).agents
+      expect(agents.find(({ id }) => id === "agent-one")?.lastActivityAt).toBe(100)
+      partial = true
+      expect((yield* post({ ...body, eventId: "event-two" })).body).toContain("Unavailable")
+      partial = false
+      writeFileSync(identityMode, "node-alpha")
+      expect((yield* post(body)).body).toContain("UnboundAgent")
+      expect((yield* post({ ...body, agentId: "agent-remote" })).status).toBe(200)
+      writeFileSync(identityMode, "node-foreign")
+      expect((yield* post(body)).body).toContain("Denied")
+      for (const listener of [server.url, server.tailnetUrl, server.lanWorkUrl]) {
+        expect(
+          (yield* Effect.promise(() =>
+            fetch(`${listener}/v1/connect/posts`, { method: "POST", body: JSON.stringify(body) })
+          )).status
+        ).toBe(403)
+      }
+    })).pipe(provideNodeServices)
   })
 
   it.effect("archives confirmed closures through the authenticated listener and rejects other listeners and malformed cursors", () => {
