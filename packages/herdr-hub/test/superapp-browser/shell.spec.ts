@@ -404,6 +404,37 @@ test("opens a legacy approval target and focuses the exact request", async ({ pa
   await expect(page.locator("[data-approval-target=\"true\"]")).toBeFocused()
 })
 
+for (const jobId of ["job-1", "job-off-page"]) {
+  test(`selects and focuses ${jobId} through an in-shell approval link`, async ({ page }) => {
+    await page.goto("/#missing/page")
+    const dashboard = await page.request.get("/v1/dashboard")
+    expect(await dashboard.text()).not.toContain("job-off-page")
+    await page.evaluate((jobId) => {
+      const link = document.createElement("a")
+      link.href = `/?tab=approvals&approvalHost=hub&approvalJob=${jobId}`
+      link.id = "incoming-approval"
+      link.textContent = "Open exact approval"
+      document.querySelector(".superapp-main")?.prepend(link)
+    }, jobId)
+    const fetchedTarget = jobId === "job-off-page"
+      ? page.waitForResponse((response) => {
+        const url = new URL(response.url())
+        return url.pathname === "/v1/pending-approval" &&
+          url.searchParams.get("host") === "hub" && url.searchParams.get("jobId") === jobId
+      })
+      : null
+    await page.locator("#incoming-approval").click()
+    if (fetchedTarget !== null) expect((await fetchedTarget).status()).toBe(200)
+    expect(new URL(page.url()).hash).toBe("#fleet/approvals")
+    expect(new URL(page.url()).searchParams.get("approvalJob")).toBe(jobId)
+    await expect(page.getByRole("tab", { name: "Approvals", exact: true })).toHaveAttribute("aria-selected", "true")
+    const target = page.locator("[data-approval-target=\"true\"]")
+    await expect(target).toHaveCount(1)
+    await expect(target).toHaveAttribute("data-approval-job", jobId)
+    await expect(target).toBeFocused()
+  })
+}
+
 test("restores useful focus when Back closes a Connect handoff stage", async ({ page }) => {
   await page.goto("/?agent=agent-1&host=hub#fleet/connect")
   await expect(page.locator("#connect-agent-search")).toBeVisible()

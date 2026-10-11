@@ -1,3 +1,4 @@
+import type { PendingTargetCheck } from "./internal/use-dashboard-pending-target.js"
 import { Button, StateLabel, Surface, Text } from "@knpkv/rly/primitives"
 import { FreshnessStamp, RelayMark } from "@knpkv/rly/patterns"
 import type { FormEvent, KeyboardEvent, ReactElement, ReactNode } from "react"
@@ -22,6 +23,9 @@ export type DashboardViewProps = {
   readonly sendingDecision?: ApprovalDecision | null
   readonly notificationState: NotificationState
   readonly historyLoading?: boolean
+  readonly refreshFailed?: boolean
+  /** Read state of a deep-linked request outside the refreshed first page. */
+  readonly pendingTargetCheck?: PendingTargetCheck | null
   readonly pendingLoading?: boolean
   readonly onDecision: ((decision: ApprovalDecision) => void) | undefined
   readonly onDisableNotifications: (() => void) | undefined
@@ -451,7 +455,9 @@ export const DashboardView = ({
   onLoadPending,
   onRefresh,
   pendingLoading = false,
+  pendingTargetCheck = null,
   pull,
+  refreshFailed = false,
   sendingDecision = null,
   showHeader = true,
   snapshot
@@ -559,6 +565,8 @@ export const DashboardView = ({
             onLoadPending={onLoadPending}
             onRevalidate={onRefresh}
             pendingLoading={pendingLoading}
+            refreshFailed={refreshFailed}
+            pendingTargetCheck={pendingTargetCheck}
             sending={sendingDecision}
             snapshot={snapshot}
           />

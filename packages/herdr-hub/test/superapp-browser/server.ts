@@ -6,7 +6,7 @@ import { type WorkGoal, WorkSnapshots } from "@knpkv/herdr-work/model"
 import { BackendStatus, RelayEvent, SessionInfo } from "@knpkv/relay/wire"
 import { Clock, Config, Effect, FileSystem, Schema } from "effect"
 import { createServer, type ServerResponse } from "node:http"
-import { DashboardSnapshot } from "../../src/dashboard-model.js"
+import { DashboardSnapshot, PendingApprovalTarget } from "../../src/dashboard-model.js"
 import { dashboardPage } from "../../src/internal/dashboard-page.js"
 
 class FixtureServerError extends Schema.TaggedError<FixtureServerError>()("FixtureServerError", {
@@ -84,6 +84,11 @@ const program = Effect.gen(function*() {
       revision: "abc123",
       herdr: { agents: [], available: true, error: null }
     }
+  })
+  // The target is absent from page one and must be resolved through the exact-target endpoint.
+  const offPageTarget = Schema.decodeUnknownSync(PendingApprovalTarget)({
+    _tag: "local",
+    record: { ...record, id: "job-off-page", actor: "Off-page requester" }
   })
   const responses = new Map([
     ["/v1/dashboard", Schema.encodeSync(Schema.fromJsonString(DashboardSnapshot))(snapshot)],
@@ -233,6 +238,16 @@ const program = Effect.gen(function*() {
     }
     if (url.pathname === "/__fixture/relay-subscriptions") {
       response.end(String(relaySubscriptions))
+      return
+    }
+    if (url.pathname === "/v1/pending-approval") {
+      if (url.searchParams.get("host") === "hub" && url.searchParams.get("jobId") === "job-off-page") {
+        response.writeHead(200, { "content-type": "application/json" })
+        response.end(Schema.encodeSync(Schema.fromJsonString(PendingApprovalTarget))(offPageTarget))
+      } else {
+        response.writeHead(404)
+        response.end()
+      }
       return
     }
     if (url.pathname === "/assets/relay-icon.svg" || url.pathname === "/favicon.ico") {

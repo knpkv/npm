@@ -117,15 +117,25 @@ export const Interaction: Story = {
     await expect(initialControl).toHaveFocus()
 
     await userEvent.keyboard("{Escape}")
-    await waitFor(() => expect(trigger).toHaveFocus())
-    await expect(canvas.queryByRole("dialog", { name: "Approve production deployment" })).not.toBeInTheDocument()
-    await expect(background.inert).toBe(false)
+    await waitFor(async () => {
+      await expect(canvas.queryByRole("dialog", { name: "Approve production deployment" })).not.toBeInTheDocument()
+      await expect(trigger).toHaveFocus()
+      await expect(background.inert).toBe(false)
+      await expect(document.body).not.toHaveAttribute("data-scroll-locked")
+      await expect(trigger.closest('[aria-hidden="true"]')).toBeNull()
+    })
 
     await userEvent.click(trigger)
     const reopenedOverlay = canvasElement.querySelector<HTMLElement>("[data-rly-dialog-overlay]")
     if (reopenedOverlay === null) throw new Error("Dialog overlay did not remount")
     await userEvent.click(reopenedOverlay)
-    await expect(canvas.queryByRole("dialog", { name: "Approve production deployment" })).not.toBeInTheDocument()
+    await waitFor(async () => {
+      await expect(canvas.queryByRole("dialog", { name: "Approve production deployment" })).not.toBeInTheDocument()
+      await expect(trigger).toHaveFocus()
+      await expect(background.inert).toBe(false)
+      await expect(document.body).not.toHaveAttribute("data-scroll-locked")
+      await expect(trigger.closest('[aria-hidden="true"]')).toBeNull()
+    })
     canvasElement.dataset.dialogPlayComplete = "true"
   },
   render: () => <DialogInteraction />

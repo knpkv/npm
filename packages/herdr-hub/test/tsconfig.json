@@ -8,6 +8,6 @@
     "tsBuildInfoFile": null,
     "lib": ["DOM", "DOM.Iterable", "ES2024"]
   },
-  "include": ["../src", ".", "../playwright.superapp.config.ts"],
+  "include": ["../src", ".", "../playwright.config.ts", "../playwright.superapp.config.ts"],
   "exclude": []
 }

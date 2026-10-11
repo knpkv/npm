@@ -28,6 +28,16 @@ export class WorkStoreError extends Schema.TaggedError<WorkStoreError>()(
   { cause: Schema.Defect(), operation: Schema.String }
 ) {}
 
+export class WorkPullRequestAttachConflict extends Schema.TaggedError<WorkPullRequestAttachConflict>()(
+  "WorkPullRequestAttachConflict",
+  {
+    goalId: Schema.String,
+    expectedGoalEventId: Schema.String,
+    actualGoalEventId: Schema.NullOr(Schema.String),
+    reason: Schema.Literals(["stale_event", "missing_goal", "inactive_goal", "already_attached", "identity_mismatch"])
+  }
+) {}
+
 export class WorkCheckpointConflictError extends Schema.TaggedError<WorkCheckpointConflictError>()(
   "WorkCheckpointConflictError",
   {

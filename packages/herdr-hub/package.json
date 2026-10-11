@@ -1,6 +1,6 @@
 {
   "name": "@knpkv/herdr-hub",
-  "version": "0.19.0",
+  "version": "0.20.0",
   "description": "Authenticated fleet approvals, PWA, coordinator, and hostd runtime",
   "license": "MIT",
   "author": "knpkv",
@@ -71,7 +71,8 @@
     "test": "vitest run",
     "test:browser:superapp": "playwright test --config playwright.superapp.config.ts",
     "test:pack": "tsx scripts/test-packed-packages.ts",
-    "render:icons": "tsx scripts/render-icons.ts"
+    "render:icons": "tsx scripts/render-icons.ts",
+    "test:browser": "pnpm --filter \"@knpkv/herdr-hub^...\" --sort run build && playwright test --config playwright.config.ts"
   },
   "dependencies": {
     "@effect/atom-react": "4.0.0",

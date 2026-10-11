@@ -63,6 +63,7 @@ import { authorizeWhois, discoverFleetPeers, layer as tailscaleLayer, Tailscale 
 import type {
   WorkCheckpointConflictError,
   WorkProjectionError,
+  WorkPullRequestAttachConflict,
   WorkPullRequestLinkError,
   WorkRecoveryContextError,
   WorkService,
@@ -74,6 +75,7 @@ import {
   WorkAdmissionTarget,
   WorkGoalCheckpoint,
   type WorkGoalCheckpoint as WorkGoalCheckpointType,
+  WorkPullRequestAttach,
   WorkPullRequestLinkRequest,
   WorkRecoveryTarget
 } from "@knpkv/herdr-work/model"
@@ -169,7 +171,7 @@ import { hubCapabilities, HubReadFailed, type HubRelayReads, type PendingJob } f
 import { cliBackends, makeRelayHubMount, type RelayHubBackends, type RelayHubMount } from "./relay/mount.js"
 import { handleRelayRoute } from "./relay/routes.js"
 import { ApprovalAppStore } from "./store.js"
-import { workCheckpointPath, workSnapshotPath } from "./work-checkpoint.js"
+import { workCheckpointPath, workPullRequestAttachPath, workSnapshotPath } from "./work-checkpoint.js"
 
 const Approval = Schema.Struct({ hash: JobHash, nonce: Schema.String })
 type Approval = typeof Approval.Type
@@ -291,6 +293,7 @@ type ApiError =
   | PushEndpointNotAllowedError
   | TerminalTransportError
   | WorkCheckpointConflictError
+  | WorkPullRequestAttachConflict
   | WorkPullRequestLinkError
   | WorkProjectionError
   | WorkRecoveryContextError
@@ -430,6 +433,28 @@ const apiError = (error: ApiError): ApiErrorResponse => {
       }
     case "WorkCheckpointConflictError":
       return { status: 409, body: { error: error._tag, eventId: error.eventId } }
+    case "WorkPullRequestAttachConflict":
+      // A missing goal has no latest event to report.
+      return error.actualGoalEventId === null
+        ? {
+          status: 404,
+          body: {
+            error: error._tag,
+            goalId: error.goalId,
+            expectedGoalEventId: error.expectedGoalEventId,
+            reason: error.reason
+          }
+        }
+        : {
+          status: 409,
+          body: {
+            error: error._tag,
+            goalId: error.goalId,
+            expectedGoalEventId: error.expectedGoalEventId,
+            actualGoalEventId: error.actualGoalEventId,
+            reason: error.reason
+          }
+        }
     case "WorkPullRequestLinkError":
       return { status: 409, body: { error: error._tag, reason: error.reason } }
     case "DashboardResponseBudgetError":
@@ -2517,7 +2542,8 @@ export const startHttpServer = async (
         try {
           const url = pathOf(request)
           const workRoute = (request.method === "GET" && url.pathname === workSnapshotPath) ||
-            (request.method === "POST" && url.pathname === workCheckpointPath)
+            (request.method === "POST" &&
+              (url.pathname === workCheckpointPath || url.pathname === workPullRequestAttachPath))
           if (mode === "work" && !workRoute) {
             json(response, 404, { error: "not_found" })
             return
@@ -3135,6 +3161,26 @@ export const startHttpServer = async (
               ? loopbackAuthorized
               : authorized
             await respond(response, Effect.andThen(workAuthorization, work.snapshots(now())))
+            return
+          }
+
+          if (
+            servesWork &&
+            request.method === "POST" &&
+            url.pathname === workPullRequestAttachPath
+          ) {
+            const workAuthorization = mode === "work"
+              ? Effect.as(workPeerAuthorized, "lan")
+              : mode === "local"
+              ? loopbackAuthorized
+              : authorized
+            const effect = Effect.gen(function*() {
+              yield* workAuthorization
+              yield* authorizeOriginlessMutation(request)
+              const input = yield* readJson(request, WorkPullRequestAttach)
+              return yield* work.attachPullRequest(input)
+            })
+            await respond(response, effect, 201)
             return
           }
 

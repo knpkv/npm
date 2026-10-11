@@ -4,6 +4,7 @@ import {
   goalsNotShown,
   WorkGoalCheckpoint,
   WorkGoalId,
+  WorkPullRequestAttach,
   WorkSnapshots,
   WorkSnapshotsNewerVersion,
   workSnapshotsVersion,
@@ -12,6 +13,7 @@ import {
 import { Effect, Schema } from "effect"
 
 export const workSnapshotPath = "/v1/work"
+export const workPullRequestAttachPath = "/v1/work/attach-pr"
 export const workCheckpointPath = "/v1/work/checkpoints"
 export const workAdmissionPreflightPath = "/v1/work/admission-preflight"
 export const workRecoveryPreflightPath = "/v1/work/recovery-preflight"
@@ -36,6 +38,24 @@ export const workCheckpointFromJson = Effect.fn("Fleetctl.workCheckpointFromJson
         })
     )
   )
+})
+
+export const workPullRequestAttachFromJson = Effect.fn("Fleetctl.workPullRequestAttachFromJson")(
+  (text: string) =>
+    Schema.decodeEffect(Schema.fromJsonString(WorkPullRequestAttach), {
+      onExcessProperty: "error"
+    })(text).pipe(
+      Effect.mapError((cause) =>
+        new FleetValidationError({ detail: `invalid pull request attachment: ${String(cause)}` })
+      )
+    )
+)
+
+export const workPullRequestAttachUrl = Effect.fn("Fleetctl.workPullRequestAttachUrl")(function*(
+  config: HostConfiguration,
+  target: string
+) {
+  return new URL(workPullRequestAttachPath, yield* workLocalBaseUrl(config, target)).href
 })
 
 /**

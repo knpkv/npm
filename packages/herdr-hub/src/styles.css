@@ -915,13 +915,37 @@
 
   /*
    * Approvals countdown: the hero, then "Waiting for you" beside the selected request on wide
-   * screens. On phones the request comes first, so the decision sits right under the hero.
+   * screens. On phones the list precedes the selected request, then decision history.
    */
   /* Equal-width figures: the 1s tick changes digits, never the width of a line. */
+  /* Flatten only the countdown's layout so the real notification strip follows its hero. */
+  .app:has(.countdown) {
+    display: flex;
+    flex-direction: column;
+    gap: var(--rly-space-24);
+  }
+
   .countdown {
-    display: grid;
-    font-variant-numeric: tabular-nums;
-    gap: var(--rly-space-16);
+    display: contents;
+  }
+  .countdown > [data-rly-hero] {
+    order: 1;
+  }
+  .countdown > [data-rly-hero] > p:first-child {
+    font-size: var(--rly-type-section-title-size);
+    font-weight: var(--rly-type-section-title-weight);
+    line-height: var(--rly-type-section-title-line-height);
+    letter-spacing: var(--rly-type-section-title-tracking);
+  }
+  .countdown-freshness,
+  .countdown-verification {
+    order: 1;
+  }
+  .app:has(.countdown) > .notification-status {
+    order: 2;
+  }
+  .countdown-regions {
+    order: 3;
   }
 
   .countdown-title {
@@ -944,19 +968,18 @@
   .countdown-regions {
     align-items: start;
     display: grid;
-    gap: var(--rly-space-16);
-    grid-template-columns: minmax(0, 1fr) minmax(20rem, 28rem);
+    gap: var(--rly-space-24);
+    grid-template-columns: 20rem minmax(0, 1fr);
+    grid-template-rows: min-content 1fr;
     grid-template-areas:
       "waiting selected"
-      "decided decided";
+      "decided selected";
   }
 
-  /* Nothing waiting: one column, so an empty queue doesn't sit as a short box beside history. */
+  /* Without a selection, history takes the detail column beside the bounded queue. */
   .countdown-regions[data-has-selection="false"] {
-    grid-template-areas:
-      "waiting"
-      "decided";
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "waiting decided";
+    grid-template-rows: auto;
   }
 
   .countdown-waiting {
@@ -986,22 +1009,212 @@
     background: transparent;
     border: 0;
     color: var(--rly-color-text-1);
-    column-gap: var(--rly-space-12);
+    column-gap: var(--rly-space-8);
     cursor: pointer;
     display: grid;
     font: inherit;
-    grid-template-areas:
-      "meta clock"
-      "title clock"
-      "track track"
-      "caption caption";
+    grid-template-areas: "meta clock" "title title" "track track" "caption caption";
     grid-template-columns: minmax(0, 1fr) auto;
     inline-size: 100%;
-    padding: var(--rly-space-12) var(--rly-space-16);
+    min-block-size: 44px;
+    padding: var(--rly-space-16);
+    row-gap: var(--rly-space-8);
     text-align: start;
   }
 
   /* Selection is the row's background and aria-current, never an edge stripe. */
+  .countdown-page-heading {
+    align-items: baseline;
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--rly-space-8) var(--rly-space-16);
+  }
+
+  .countdown-pending-count,
+  .countdown-freshness,
+  .countdown-verification {
+    color: var(--rly-color-text-2);
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+      var(--rly-type-meta-font);
+    margin: 0;
+  }
+
+  .countdown-verification:empty {
+    display: none;
+  }
+
+  .countdown-request-header {
+    display: grid;
+    gap: var(--rly-space-4);
+    min-inline-size: 0;
+    overflow-wrap: break-word;
+  }
+  .countdown-request-header > :where(h3, p),
+  .countdown-requested {
+    min-inline-size: 0;
+  }
+  .countdown-request-heading {
+    align-items: center;
+    display: flex;
+    gap: var(--rly-space-8);
+    min-inline-size: 0;
+  }
+  .countdown-requester {
+    display: grid;
+    flex: none;
+    inline-size: 2.25rem;
+    place-items: center;
+  }
+
+  .countdown-requester .connect-creature {
+    block-size: auto;
+    inline-size: 100%;
+  }
+
+  /* Approvals hold attention after one entry lean; polling never restarts it. */
+  .countdown-requester .connect-creature * {
+    animation: none;
+  }
+
+  .countdown-requester-placeholder {
+    align-items: center;
+    aspect-ratio: 1;
+    background: var(--rly-color-surface-2);
+    border: 1px solid var(--rly-color-border-2);
+    border-radius: var(--rly-radius-control);
+    color: var(--rly-color-text-2);
+    display: flex;
+    inline-size: 100%;
+    justify-content: center;
+  }
+
+  .countdown-row-target {
+    color: var(--rly-color-text-2);
+    display: block;
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+      var(--rly-type-meta-font);
+    min-inline-size: 0;
+    overflow-wrap: break-word;
+  }
+
+  .countdown-request-target {
+    color: var(--rly-color-text-2);
+    margin: 0;
+    min-inline-size: 0;
+    overflow-wrap: break-word;
+  }
+
+  .countdown-requester-name {
+    overflow-wrap: break-word;
+  }
+
+  .countdown-selected :where(button, summary, .worker-connect-link),
+  .countdown :where(.countdown-more button, .countdown-note button, .countdown-review-link) {
+    min-block-size: 44px;
+  }
+
+  .countdown-selected summary {
+    align-items: center;
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-control);
+    cursor: pointer;
+    color: var(--rly-color-text-1);
+    display: flex;
+    font-weight: var(--rly-type-label-weight);
+    list-style: none;
+    min-block-size: 44px;
+    padding-inline: var(--rly-space-12);
+  }
+  .countdown-selected summary::before {
+    content: "▸";
+    font-size: 1rem;
+    line-height: 1;
+    margin-inline-end: var(--rly-space-4);
+  }
+  .countdown-selected details[open] > summary::before {
+    content: "▾";
+  }
+  .countdown-selected summary::marker {
+    content: "";
+  }
+
+  .countdown-selected .worker-connect-link {
+    align-items: center;
+    display: inline-flex;
+    font: var(--rly-type-label-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+      var(--rly-type-meta-font);
+    gap: var(--rly-space-8);
+    justify-self: start;
+    text-decoration: underline;
+  }
+  .countdown-selected .worker-connect-link > svg {
+    flex: none;
+  }
+  .countdown-detail > [data-rly-decision-bar] {
+    border-block-start: 1px solid var(--rly-color-border-1);
+    padding-block-start: var(--rly-space-16);
+  }
+
+  .countdown-selected .approval-request-detail {
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-control);
+    overflow: clip;
+    min-inline-size: 0;
+  }
+  .approval-request-title {
+    font: var(--rly-type-label-weight) var(--rly-type-body-size) / var(--rly-type-body-line-height)
+      var(--rly-type-body-font);
+    margin: 0;
+    padding-block: var(--rly-space-12) 0;
+    padding-inline: var(--rly-space-12);
+  }
+  .countdown-selected .approval-request-consequence {
+    color: var(--rly-color-text-2);
+    padding-inline: var(--rly-space-12);
+  }
+  .approval-request-json {
+    background: var(--rly-color-surface-2);
+    border-block-start: 1px solid var(--rly-color-border-1);
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height) var(--rly-font-mono);
+    margin: 0;
+    min-inline-size: 0;
+    overflow-wrap: break-word;
+    padding: var(--rly-space-12);
+    white-space: pre-wrap;
+  }
+
+  .countdown-selected summary:focus-visible,
+  .countdown-history-audit > summary:focus-visible,
+  .countdown-selected .worker-connect-link:focus-visible {
+    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+    outline-offset: var(--rly-focus-ring-offset);
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .countdown-requester .connect-creature[data-bucket="needs-you"]:not([data-stale]) .connect-creature-lean {
+      rotate: -3deg;
+      transform-box: view-box;
+      transform-origin: 50px 88px;
+    }
+
+    .countdown-requester[data-enter]
+      .connect-creature[data-bucket="needs-you"]:not([data-stale])
+      .connect-creature-lean {
+      animation: countdown-requester-entry var(--rly-motion-deliberate-duration) var(--rly-easing-out) 1 forwards;
+      transform-box: view-box;
+      transform-origin: 50px 88px;
+    }
+  }
+
+  @keyframes countdown-requester-entry {
+    from {
+      rotate: 0deg;
+    }
+    to {
+      rotate: -3deg;
+    }
+  }
+
   .countdown-row[aria-current="true"] {
     background: var(--rly-color-surface-3);
   }
@@ -1020,6 +1233,7 @@
   }
 
   .countdown-row-meta {
+    min-inline-size: 0;
     color: var(--rly-color-text-2);
     font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
       var(--rly-type-meta-font);
@@ -1027,8 +1241,8 @@
   }
 
   .countdown-row-title {
-    font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
-      var(--rly-type-label-font);
+    font: var(--rly-type-body-weight) var(--rly-type-body-size) / var(--rly-type-body-line-height)
+      var(--rly-type-body-font);
     grid-area: title;
     min-inline-size: 0;
     /* Words wrap whole; only an unbreakable token (an email, a job id) may break. */
@@ -1045,7 +1259,7 @@
 
   .countdown-row-track {
     grid-area: track;
-    margin-block: var(--rly-space-6) var(--rly-space-2);
+    margin-block: 0;
   }
 
   .countdown-track-key {
@@ -1062,35 +1276,61 @@
     color: var(--rly-color-text-2);
     font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
       var(--rly-type-meta-font);
+    align-items: center;
+    display: flex;
+    gap: var(--rly-space-8);
     grid-area: caption;
   }
 
-  /* Outcome word first, then what was decided, who and when; the full request folds below. */
-  .countdown-decided-row {
-    column-gap: var(--rly-space-12);
-    display: grid;
-    grid-template-areas:
-      "outcome title"
-      "outcome caption"
-      "outcome request";
-    grid-template-columns: 5.5rem minmax(0, 1fr);
-    /* The disclosure's 32px target already leaves room below its label. */
-    padding-block: var(--rly-space-12) var(--rly-space-4);
-    row-gap: var(--rly-space-2);
+  /* Cards show recorded decision facts; complete arguments stay in one audit fold below the list. */
+  .countdown-decided-rows {
+    gap: var(--rly-space-8);
   }
-
+  .countdown-decided-rows > li + li {
+    border-block-start: 1px solid var(--rly-color-border-1);
+  }
+  .countdown-decided-row {
+    background: var(--rly-color-surface-1);
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-control);
+    display: grid;
+    column-gap: var(--rly-space-8);
+    grid-template-areas: "kind outcome" "title title" "caption caption";
+    grid-template-columns: minmax(0, 1fr) auto;
+    padding: var(--rly-space-16);
+    row-gap: var(--rly-space-8);
+  }
+  .countdown-decided-row > .countdown-row-title {
+    font-weight: var(--rly-type-label-weight);
+  }
+  .countdown-decided-kind {
+    color: var(--rly-color-text-2);
+    font-size: var(--rly-type-meta-size);
+    grid-area: kind;
+  }
   .countdown-outcome {
     font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
       var(--rly-type-meta-font);
     grid-area: outcome;
-    padding-block-start: var(--rly-space-2);
   }
-
-  .countdown-decided-row > .approval-request-disclosure {
-    border-block-start: 0;
-    grid-area: request;
-    margin-block-start: var(--rly-space-4);
-    padding-block-start: 0;
+  .countdown-history-audit {
+    margin-block-start: var(--rly-space-16);
+  }
+  .countdown-history-audit > summary {
+    align-content: center;
+    min-block-size: 44px;
+    color: var(--rly-color-text-2);
+    font-size: var(--rly-type-meta-size);
+    font-weight: var(--rly-type-label-weight);
+    cursor: pointer;
+  }
+  .countdown-history-arguments {
+    display: grid;
+    gap: var(--rly-space-16);
+  }
+  .countdown-history-arguments p {
+    font-size: var(--rly-type-meta-size);
+    margin: 0;
   }
 
   /* The selected request's disclosure sits between its facts and the decision, without a rule. */
@@ -1103,7 +1343,8 @@
   /* The Region body already pads its content; the detail aligns with the region title. */
   .countdown-detail {
     display: grid;
-    gap: var(--rly-space-12);
+    gap: var(--rly-space-16);
+    padding: var(--rly-space-16);
   }
 
   .countdown-nowrap {
@@ -1144,7 +1385,7 @@
     display: inline-flex;
     font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
       var(--rly-type-label-font);
-    min-block-size: 40px;
+    min-block-size: 44px;
     padding-inline: var(--rly-space-16);
     text-decoration: none;
   }
@@ -1180,18 +1421,6 @@
     padding-block: var(--rly-space-8) 0;
   }
 
-  /* On narrow screens the outcome word sits above what was decided, so titles keep their width. */
-  @media (max-width: 30rem) {
-    .countdown-decided-row {
-      grid-template-areas:
-        "outcome"
-        "title"
-        "caption"
-        "request";
-      grid-template-columns: minmax(0, 1fr);
-    }
-  }
-
   @media (max-width: 52rem) {
     .countdown-regions,
     .countdown-regions[data-has-selection="false"] {
@@ -1200,6 +1429,10 @@
         "selected"
         "decided";
       grid-template-columns: minmax(0, 1fr);
+      grid-template-rows: none;
+    }
+    .countdown-regions[data-has-selection="false"] {
+      grid-template-areas: "waiting" "decided";
     }
   }
 

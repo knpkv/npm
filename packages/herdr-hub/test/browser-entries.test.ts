@@ -4,7 +4,8 @@ import { isBuiltin } from "node:module"
 
 const isNodeBuiltin: (specifier: string) => boolean = isBuiltin
 
-it.each(["views", "modules"])("bundles ./%s for the browser without Node built-ins", async (entry) => {
+/** Browser entries reject Node imports and duplicate keys in package metadata. */
+it.each(["views", "modules"])("bundles ./%s without Node built-ins or duplicate package keys", async (entry) => {
   const result = await build({
     entryPoints: [new URL(`../src/${entry}.ts`, import.meta.url).pathname],
     platform: "browser",
@@ -13,6 +14,7 @@ it.each(["views", "modules"])("bundles ./%s for the browser without Node built-i
     format: "esm",
     loader: { ".css": "empty" },
     logLevel: "silent",
+    logOverride: { "duplicate-object-key": "error" },
     plugins: [
       {
         name: "reject-node-builtins",
