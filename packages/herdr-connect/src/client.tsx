@@ -695,11 +695,14 @@ const terminalWorker = (
 export const ConnectSurface = ({
   atoms,
   embedded = false,
+  onStageChange,
   roomFooter
 }: {
   readonly atoms: ConnectAtoms
   readonly embedded?: boolean
   readonly roomFooter?: ReactNode
+  /** Optional host observer for the open stage identity; close and unmount report null. */
+  readonly onStageChange?: (target: Pick<ConnectAgent, "host" | "id"> | null) => void
 }) => {
   const [activityFilter, setActivityFilter] = useAtom(atoms.activityFilter)
   const directory = useAtomValue(atoms.agents)
@@ -1070,6 +1073,12 @@ export const ConnectSurface = ({
     stageKey === null ? null : (agents.find((agent) => connectAgentKey(agent) === stageKey) ?? null)
   const stageAgent =
     stageCandidate === null || connectAgentIdentityAmbiguous(agents, stageCandidate) ? null : stageCandidate
+  const stageHost = stageAgent?.host ?? null
+  const stageId = stageAgent?.id ?? null
+  useEffect(() => {
+    onStageChange?.(stageHost === null || stageId === null ? null : { host: stageHost, id: stageId })
+    return () => onStageChange?.(null)
+  }, [onStageChange, stageHost, stageId])
   // An agent that leaves the directory closes its stage for good: it must not reopen, uninvited, when the
   // agent comes back on a later poll. Only a loaded list counts; a list still loading keeps the stage.
   useEffect(() => {

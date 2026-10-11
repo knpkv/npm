@@ -1,5 +1,5 @@
 /**
- * The documented way to run jcf-web from a checkout works: `pnpm start` in this package.
+ * The documented way to run jcf-web from a checkout works: `pnpm start serve` in this package.
  *
  * It runs with a fresh, empty HOME on a free loopback port, must print the one-time URL within a
  * minute, and must serve the built client at that origin. Run after `pnpm build`, as the README says.
@@ -39,9 +39,9 @@ const program = Effect.scoped(
     const home = yield* fs.makeTempDirectoryScoped({ prefix: "jcf-web-start-" })
     const port = yield* availableLoopbackPort
     const child = yield* Effect.acquireRelease(
-      spawner.spawn(ChildProcess.make("pnpm", ["start"], {
+      spawner.spawn(ChildProcess.make("pnpm", ["start", "serve"], {
         cwd: packageRoot,
-        // The caller's environment, as a person running `pnpm start` has it, with home, every XDG base
+        // The caller's environment, as a person running `pnpm start serve` has it, with home, every XDG base
         // directory (a shell profile may export them, and they outrank HOME) and the port isolated.
         env: {
           HOME: home,
@@ -55,8 +55,8 @@ const program = Effect.scoped(
         stdout: "pipe",
         stderr: "pipe"
       })),
-      (handle) => handle.kill().pipe(Effect.ignore({ log: "Warn", message: "Could not stop pnpm start" }))
-    ).pipe(Effect.mapError(() => new WorkspaceStartError({ message: "pnpm start could not run" })))
+      (handle) => handle.kill().pipe(Effect.ignore({ log: "Warn", message: "Could not stop pnpm start serve" }))
+    ).pipe(Effect.mapError(() => new WorkspaceStartError({ message: "pnpm start serve could not run" })))
 
     // Kept so a start that fails says why, not only that it failed.
     const stderr = yield* Stream.mkString(Stream.decodeText(child.stderr)).pipe(Effect.forkScoped)
@@ -65,20 +65,20 @@ const program = Effect.scoped(
       Stream.filter((text) => text.startsWith("jcf week view: ")),
       Stream.runHead,
       Effect.timeout("60 seconds"),
-      Effect.mapError(() => new WorkspaceStartError({ message: "pnpm start printed no URL within a minute" }))
+      Effect.mapError(() => new WorkspaceStartError({ message: "pnpm start serve printed no URL within a minute" }))
     )
     if (Option.isNone(line)) {
       const output = yield* Fiber.join(stderr).pipe(
         Effect.catch((error) => Effect.succeed(`(its stderr could not be read: ${String(error)})`))
       )
       return yield* new WorkspaceStartError({
-        message: `pnpm start exited before printing its URL. Its stderr ended with:\n${output.slice(-2000)}`
+        message: `pnpm start serve exited before printing its URL. Its stderr ended with:\n${output.slice(-2000)}`
       })
     }
     const advertised = new URL(line.value.slice("jcf week view: ".length))
     if (advertised.origin !== `http://127.0.0.1:${port}` || advertised.hash === "") {
       return yield* new WorkspaceStartError({
-        message: `pnpm start printed an unexpected URL origin: ${advertised.origin}`
+        message: `pnpm start serve printed an unexpected URL origin: ${advertised.origin}`
       })
     }
     const response = yield* HttpClient.get(advertised.origin)
@@ -86,7 +86,7 @@ const program = Effect.scoped(
     if (response.status !== 200 || !html.includes("id=\"root\"")) {
       return yield* new WorkspaceStartError({ message: `GET / answered ${response.status} without the client` })
     }
-    yield* Console.log("pnpm start in the workspace prints its URL and serves the client")
+    yield* Console.log("pnpm start serve in the workspace prints its URL and serves the client")
   })
 )
 

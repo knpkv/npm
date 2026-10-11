@@ -223,3 +223,5 @@ export const TerminalServerSignal = Schema.Union([
   TerminalScrollState
 ])
 export type TerminalServerSignal = typeof TerminalServerSignal.Type
+
+export { agentStateBucket } from "./agent-state-core.js"

@@ -268,7 +268,7 @@ void [request, result, invalidSeconds, invalidRoot, provider, invalidProvider, i
     yield* fs.makeDirectory(home, { recursive: true })
     const pathVariable = yield* Config.String("PATH")
     const child = yield* Effect.acquireRelease(
-      spawner.spawn(ChildProcess.make("node", [path.join(installed, executable)], {
+      spawner.spawn(ChildProcess.make("node", [path.join(installed, executable), "serve"], {
         cwd: consumer,
         env: { HOME: home, XDG_CONFIG_HOME: home, PATH: pathVariable, PORT: String(port) },
         extendEnv: false,

@@ -3,6 +3,7 @@ import { RegistryProvider, useAtom, useAtomRefresh, useAtomSet, useAtomValue } f
 import { BrowserCrypto, BrowserHttpClient } from "@effect/platform-browser"
 import { makeRelayClient, makeRelayConversations } from "@knpkv/relay-product/client"
 import { ConnectSurface, makeConnectAtoms } from "@knpkv/herdr-connect/surface"
+import { BlockedConnectSurface } from "./blocked-connect-surface.js"
 import { loadLimits, loadUsage, makeUsageAtoms, onLoopback, UsageSurface } from "@knpkv/herdr-connect/usage"
 import { Cause, Effect, Exit, Layer, ManagedRuntime, Option, Result, Schema } from "effect"
 import * as AsyncResult from "effect/reactivity/AsyncResult"
@@ -677,7 +678,17 @@ const DashboardApp = ({
   const connectSelection = new URLSearchParams(routeSearch)
   const fleet = makeFleetModuleViews({
     approvals: dashboardView,
-    connect: (
+    connect: canonical ? (
+      <BlockedConnectSurface
+        key={JSON.stringify([
+          connectSelection.get("host"),
+          connectSelection.get("agent"),
+          connectSelection.get("open")
+        ])}
+        atoms={atoms.connect}
+        embedded
+      />
+    ) : (
       <ConnectSurface
         key={JSON.stringify([
           connectSelection.get("host"),

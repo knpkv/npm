@@ -3,7 +3,7 @@
 id: no-duplicate-agent-state-mapping
 language: tsx
 severity: error
-message: "Map agent states only in herdr-connect's agent-state.tsx; read agentStatePresentation instead"
+message: "Map agent states only in herdr-connect's agent-state-core.ts; read agentStateBucket or agentStatePresentation instead"
 
 rule:
   kind: switch_case
@@ -19,7 +19,7 @@ files:
   - "packages/herdr-hub/src/**/*.ts"
 
 ignores:
-  - "packages/herdr-connect/src/agent-state.tsx"
+  - "packages/herdr-connect/src/agent-state-core.ts"
   - "packages/herdr-hub/src/**/work-*"
 
 note: |
