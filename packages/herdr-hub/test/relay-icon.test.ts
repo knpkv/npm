@@ -1,9 +1,8 @@
 import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
-import { RLY_RELAY_MARK_GLYPH } from "@knpkv/rly/patterns"
 import { Crypto, Effect, FileSystem, Path, Schema } from "effect"
-import { createRequire } from "node:module"
-import { relayIconAssets, relayIconSvg, relayIconTileColor } from "../src/relay-icon.js"
+import { relayChefArt } from "../src/internal/relay-chef-art.js"
+import { relayIconAssets, relayIconSvg } from "../src/relay-icon.js"
 
 const IconRecords = Schema.fromJsonString(
   Schema.Record(
@@ -38,7 +37,7 @@ const pngSize = (bytes: Uint8Array): { readonly height: number; readonly width: 
 }
 
 // The PNGs are committed because CI can't rasterise. These fail when the SVG they come from changes
-// (rly's mark or the icon layout) or when a PNG is replaced by hand: re-run `pnpm render:icons`.
+// (the approved Chef or icon layout) or when a PNG is replaced by hand: re-run `pnpm render:icons`.
 it.layer(NodeServices.layer)("Relay app icons", (it) => {
   it.effect("records exactly the icons the hub serves", () =>
     Effect.gen(function*() {
@@ -60,33 +59,31 @@ it.layer(NodeServices.layer)("Relay app icons", (it) => {
         expect(pngSize(png)).toEqual({ height: asset.size, width: asset.size })
       }))
   }
-
-  it.effect("draws rly's mark on the tile colour rly's own favicon uses", () =>
-    Effect.gen(function*() {
-      const fileSystem = yield* FileSystem.FileSystem
-      const favicon = yield* fileSystem.readFileString(
-        createRequire(import.meta.url).resolve("@knpkv/rly/relay-mark.svg")
-      )
-      expect(favicon).toContain(`fill="${relayIconTileColor}"`)
-      const svg = relayIconSvg("tile", 32)
-      for (const d of Object.values(RLY_RELAY_MARK_GLYPH.paths)) expect(svg).toContain(`d="${d}"`)
-    }))
 })
 
 describe("Relay icon geometry", () => {
-  it("keeps the glyph inside the maskable safe circle, stroke included", () => {
-    // The farthest stroked point from the centre is a hook's end, (4, 20), plus half the stroke.
-    const size = 512
-    const transform = /translate\(([\d.]+) ([\d.]+)\) scale\(([\d.]+)\)/.exec(relayIconSvg("full-bleed", size))
-    const [x, y, scale] = (transform?.slice(1) ?? []).map(Number)
-    expect([x, y, scale].every((value) => value !== undefined && Number.isFinite(value))).toBe(true)
-    const centre = size / 2
-    const reach = Math.hypot((x ?? 0) + 4 * (scale ?? 0) - centre, (y ?? 0) + 20 * (scale ?? 0) - centre) +
-      (RLY_RELAY_MARK_GLYPH.strokeWidth / 2) * (scale ?? 0)
-    expect(reach).toBeLessThanOrEqual(size * 0.4)
+  it("uses the approved tile and a separate simplified favicon", () => {
+    expect(relayIconSvg("tile", 512)).toContain("translate(64 64) scale(12)")
+    expect(relayIconSvg("tile", 512)).toContain("rx=\"115\"")
+    expect(relayIconSvg("favicon", 16)).toContain("width=\"16\" height=\"16\"")
+    expect(relayIconSvg("favicon", 16)).not.toContain("translate(64 64)")
+    expect(relayChefArt.tile).toContain("viewBox=\"0 0 512 512\"")
+  })
+
+  it("keeps the full-bleed glyph inside the maskable safe circle with opaque corners", () => {
+    const svg = relayIconSvg("full-bleed", 512)
+    expect(svg).toContain("<rect width=\"512\" height=\"512\" fill=\"url(#relay-chef-tile-tile)\"")
+    expect(svg).not.toContain("rx=\"115\"")
+    // The approved body's outer control points lie within [4.244,27.756] x [7.5,31].
+    // The toque reaches y=1.5 and x=6; after its 12x scale every extreme stays inside radius 204.8.
+    const reach = Math.max(Math.hypot(12 * (27.756 - 16), 12 * (18.253 - 16)), 12 * (31 - 16), 12 * (16 - 1.5) + 0.5)
+    expect(reach).toBeLessThanOrEqual(512 * 0.4)
+    expect(svg).toContain("translate(64 64) scale(12)")
   })
 
   it("draws the badge with no background, so Android reads its alpha", () => {
-    expect(relayIconSvg("badge", 96)).not.toContain("<rect")
+    expect(relayIconSvg("badge", 96)).not.toMatch(/<rect[^>]*width="(?:32|96)"/)
+    expect(relayIconSvg("badge", 96)).not.toMatch(/Canvas|currentColor/)
+    expect(relayIconSvg("badge", 96)).toContain("stroke=\"#FFFFFF\"")
   })
 })

@@ -1,0 +1,13 @@
+id: no-relay-tile-in-hub-shell
+language: tsx
+severity: error
+message: "The Relay module shell uses the approved Chef mark; legacy Fleet and dashboard marks are separate"
+rule:
+  pattern: <RelayMark.Tile $$$ />
+files:
+  - "packages/herdr-hub/src/superapp-view.tsx"
+note: |
+  Keep the module shell's header fallback and sidebar on the same approved
+  drawing as its launcher. Legacy shell-view and dashboard-view retain their
+  existing marks. This rule targets the existing RelayMark.Tile spelling;
+  imported aliases still need review.

@@ -1,5 +1,4 @@
 import { PortalProvider } from "@knpkv/rly/foundations"
-import { RelayMark } from "@knpkv/rly/patterns"
 import { Dialog, IconButton, StatePanel } from "@knpkv/rly/primitives"
 import { Predicate, Result, Schema } from "effect"
 import {
@@ -15,6 +14,7 @@ import {
 import { HubRelay, type HubRelayConversation } from "./hub-relay.js"
 import { hubModuleLinkTarget } from "./internal/hub-module-links.js"
 import { ShellIcon } from "./internal/shell-icon.js"
+import { RelayChefMark } from "./internal/relay-chef-mark.js"
 import { ShortcutsDialog, focusWhenShown, focusModulePage, isEditableTarget } from "./internal/shell-keys.js"
 import {
   canonicalModuleUrl,
@@ -446,13 +446,14 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
         <header className="superapp-header" ref={header}>
           {relay === undefined ? (
             <span className="superapp-brand">
-              <RelayMark.Tile size={32} />
+              <RelayChefMark />
               Relay
             </span>
           ) : (
             <HubRelay
               relay={relay}
               launcherLabels={{ desktop: "Ask Relay", phone: "Relay" }}
+              launcherMark="chef"
               terminalOwnsKeys={
                 location.error === null &&
                 location.destination.module === "fleet" &&
@@ -503,7 +504,7 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
         </header>
         <nav aria-label="Modules" className="superapp-sidebar">
           <div className="superapp-sidebar-brand">
-            <RelayMark.Tile size={32} />
+            <RelayChefMark />
             <div>
               <strong>Relay</strong>
               <p>Ask anything about your work</p>
