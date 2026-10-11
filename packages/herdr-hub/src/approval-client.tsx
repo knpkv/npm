@@ -9,7 +9,7 @@ import * as AsyncResult from "effect/reactivity/AsyncResult"
 import * as Atom from "effect/reactivity/Atom"
 import * as HttpClient from "effect/http/HttpClient"
 import * as HttpClientRequest from "effect/http/HttpClientRequest"
-import { useEffect, useRef, useState, type TouchEvent } from "react"
+import { useCallback, useEffect, useRef, useState, type TouchEvent } from "react"
 import { createRoot, hydrateRoot } from "react-dom/client"
 import { decodeBoundedResponseJson } from "@knpkv/herdr-fleet/response"
 import { decodeWorkNavigationSelection, workNavigationHref } from "@knpkv/herdr-work/navigation"
@@ -28,19 +28,15 @@ import {
   type DashboardSnapshot as DashboardSnapshotType,
   DashboardHistoryPage,
   FleetPendingApprovals,
-  PendingApprovalTarget,
-  type PendingApprovalTarget as PendingApprovalTargetType
+  PendingApprovalTarget
 } from "./dashboard-model.js"
 import { DashboardView, type ApprovalDecision } from "./dashboard-view.js"
 import { type HubRelayConversation, watchRelayPage } from "./hub-relay.js"
 import {
   dashboardHistoryState,
-  dashboardHasPendingApprovalTarget,
   dashboardPendingBadgeCount,
-  dashboardPendingState,
   loadDashboardPendingPage,
   mergeDashboardHistoryPage,
-  pendingApprovalTargetAfterRevalidation,
   withPendingApprovalTarget
 } from "./internal/dashboard-pending-state.js"
 import { FleetShell, FleetWorkPanel, fleetWorkRequestStateFromResult, fleetWorkStateFromRequest } from "./shell-view.js"
@@ -53,6 +49,10 @@ import { answerOutcome, decidableExpiry, workRequestDecisionsFor } from "./work-
 import { DashboardWorkPollOwner } from "./work-poll-owner.js"
 import { RefreshStatus } from "./refresh-status.js"
 import { dashboardPolls } from "./internal/dashboard-polls.js"
+import { useDashboardPending } from "./internal/use-dashboard-pending.js"
+import { useDashboardPendingTarget } from "./internal/use-dashboard-pending-target.js"
+import type { PendingApprovalTargetRevalidation } from "./internal/dashboard-pending-state.js"
+import type { ApprovalNotificationCandidate } from "./model.js"
 
 class BrowserNetworkError extends Schema.TaggedError<BrowserNetworkError>()("BrowserNetworkError", {
   detail: Schema.String
@@ -397,6 +397,7 @@ type DashboardAtoms = ReturnType<typeof makeDashboardAtoms>
 
 const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
   const result = useAtomValue(atoms.dashboard)
+  const { refreshFailed, snapshot } = dashboardRefreshView(result, atoms.bootstrap)
   const workResult = useAtomValue(atoms.work)
   const notificationResult = useAtomValue(atoms.notification)
   const refresh = useAtomRefresh(atoms.dashboard)
@@ -420,11 +421,28 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
   const [sendingDecision, setSendingDecision] = useState<ApprovalDecision | null>(null)
   const [decisionStatus, setDecisionStatus] = useState<DecisionStatus | null>(null)
   const [pull, setPull] = useAtom(atoms.pull)
-  const [deepLinkTarget, setDeepLinkTarget] = useState<PendingApprovalTargetType | null>(null)
   const [historyBusy, setHistoryBusy] = useState(false)
   const [historyState, setHistoryState] = useState(dashboardHistoryState(0, [], initial.historyNextCursor))
   const [pendingBusy, setPendingBusy] = useState(false)
-  const [pendingState, setPendingState] = useState(dashboardPendingState(0, initial.pendingApprovals))
+  const { state: pendingState, update: setPendingState } = useDashboardPending(snapshot)
+  const loadTarget = useCallback(
+    async (link: ApprovalNotificationCandidate): Promise<PendingApprovalTargetRevalidation> => {
+      const exit = await runPendingTarget(link)
+      if (Exit.isSuccess(exit)) return { _tag: "Found", target: exit.value }
+      const failure = Cause.findErrorOption(exit.cause)
+      const missing =
+        Option.isSome(failure) && failure.value._tag === "BrowserStatusError" && failure.value.status === 404
+      if (!missing) Effect.runFork(Effect.logWarning(Cause.pretty(exit.cause)))
+      return { _tag: missing ? "Missing" : "Retry" }
+    },
+    [runPendingTarget]
+  )
+  const decodedDeepLink = readApprovalDeepLink(window.location.search)
+  const { check: pendingTargetCheck, target: deepLinkTarget } = useDashboardPendingTarget(
+    snapshot,
+    Result.isSuccess(decodedDeepLink) ? decodedDeepLink.success : null,
+    loadTarget
+  )
   const start = useRef<number | null>(null)
 
   const resetPull = (): void => {
@@ -486,11 +504,7 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
       text: answerText(answer)
     })
     // Whatever the answer, the queue is re-read so the page shows the hub's own state next.
-    if (!Exit.isSuccess(exit)) refreshDashboard()
-    if (Exit.isSuccess(exit)) {
-      setDeepLinkTarget(null)
-      refreshDashboard()
-    }
+    refreshDashboard()
   }
   const onNotificationAction = async (enable: boolean): Promise<void> => {
     await runNotificationAction(enable)
@@ -521,7 +535,6 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
     }
   }
 
-  const { refreshFailed, snapshot } = dashboardRefreshView(result, atoms.bootstrap)
   // The page keeps working on the last snapshot; the cause goes to the log, not the screen.
   useEffect(() => {
     if (result._tag === "Failure")
@@ -564,7 +577,6 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
   }, [canonical, pendingBadgeCount, runBadge])
   useEffect(() => {
     setHistoryState((state) => dashboardHistoryState(state.generation + 1, [], snapshot.historyNextCursor))
-    setPendingState((state) => dashboardPendingState(state.generation + 1, snapshot.pendingApprovals))
   }, [snapshot])
   useEffect(() => {
     const decoded = readApprovalDeepLink(window.location.search)
@@ -572,32 +584,7 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
       Effect.runFork(Effect.logWarning(decoded.failure))
       return
     }
-    if (decoded.success === null) return
-    if (dashboardHasPendingApprovalTarget(snapshot, decoded.success)) {
-      setDeepLinkTarget(null)
-      return
-    }
-    let current = true
-    void runPendingTarget(decoded.success).then((exit) => {
-      if (!current) return
-      if (Exit.isSuccess(exit)) {
-        setDeepLinkTarget((target) =>
-          pendingApprovalTargetAfterRevalidation(target, { _tag: "Found", target: exit.value })
-        )
-        return
-      }
-      const failure = Cause.findErrorOption(exit.cause)
-      const missing =
-        Option.isSome(failure) && failure.value._tag === "BrowserStatusError" && failure.value.status === 404
-      setDeepLinkTarget((target) =>
-        pendingApprovalTargetAfterRevalidation(target, { _tag: missing ? "Missing" : "Retry" })
-      )
-      if (!missing) Effect.runFork(Effect.logWarning(Cause.pretty(exit.cause)))
-    })
-    return () => {
-      current = false
-    }
-  }, [snapshot, runPendingTarget])
+  }, [snapshot])
   useEffect(() => {
     const decoded = readApprovalDeepLink(window.location.search)
     if (Result.isFailure(decoded) || decoded.success === null) return
@@ -647,6 +634,7 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
     <DashboardView
       approvalOnly={canonical}
       refreshFailed={refreshFailed}
+      pendingTargetCheck={pendingTargetCheck}
       busyJobId={busyJobId}
       decisionStatus={decisionStatus}
       sendingDecision={sendingDecision}

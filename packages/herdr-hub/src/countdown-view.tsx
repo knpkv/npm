@@ -10,6 +10,7 @@
  *
  * @module
  */
+import type { PendingTargetCheck } from "./internal/use-dashboard-pending-target.js"
 import type { JobPayload } from "@knpkv/herdr-fleet/model"
 import { AgentCreature } from "@knpkv/herdr-connect/surface"
 import { Icon } from "@knpkv/rly/foundations"
@@ -516,6 +517,7 @@ export const ApprovalsCountdown = ({
   onLoadPending,
   onRevalidate,
   pendingLoading,
+  pendingTargetCheck = null,
   refreshFailed = false,
   sending,
   snapshot
@@ -527,6 +529,8 @@ export const ApprovalsCountdown = ({
   readonly onLoadPending: (() => void) | undefined
   /** Re-reads the hub; called once per request when its deadline passes, so the hub decides expiry. */
   readonly onRevalidate: (() => void) | undefined
+  /** Keeps only the affected deep-linked request off until its current lookup answers. */
+  readonly pendingTargetCheck?: PendingTargetCheck | null
   readonly pendingLoading: boolean
   readonly refreshFailed?: boolean
   readonly sending: ApprovalDecision | null
@@ -581,9 +585,21 @@ export const ApprovalsCountdown = ({
   const localReadFailed = snapshot.pendingApprovals.failures.some(
     ({ host }) => host.toLowerCase() === snapshot.host.toLowerCase()
   )
+  const targetCheckFor = (item: PendingItem): PendingTargetCheck["state"] | null => {
+    const facts = factsOf(item, snapshot.host)
+    return pendingTargetCheck !== null &&
+      pendingTargetCheck.jobId === facts.id &&
+      pendingTargetCheck.host.toLowerCase() === facts.host.toLowerCase()
+      ? pendingTargetCheck.state
+      : null
+  }
   const stateOf = (item: PendingItem, itemGone: Departure | null): RlyDecisionBarState => {
     if (onDecision === undefined) return { _tag: "off", reason: "Decisions are unavailable here." }
     const id = factsOf(item, snapshot.host).id
+    const check = targetCheckFor(item)
+    if (check === "checking") return { _tag: "off", reason: "Checking this request before deciding." }
+    if (check === "failed") return { _tag: "off", reason: "Couldn't check this request. Retry before deciding." }
+    if (check === "missing") return { _tag: "off", reason: "This request is no longer waiting." }
     if (itemGone === null && item._tag === "Local" && (localReadFailed || refreshFailed))
       return { _tag: "off", reason: "Couldn't check this request. Retry before deciding." }
     if (verification !== null) return { _tag: "off", reason: "Checking this request before deciding." }
@@ -689,11 +705,13 @@ export const ApprovalsCountdown = ({
 
   useEffect(() => {
     if (verification === null) return
-    if (refreshFailed) {
+    const check = targetCheckFor(verification.item)
+    if (refreshFailed || check === "failed") {
       setVerification(null)
       setVerificationNote("Couldn't check this request. Retry before deciding.")
       return
     }
+    if (check === "checking") return
     if (snapshot.observedAt <= verification.observedAt) return
     setVerification(null)
     const current = items.find(
@@ -724,7 +742,7 @@ export const ApprovalsCountdown = ({
     } else {
       setVerificationNote("This request can't be decided from here. Nothing was sent.")
     }
-  }, [snapshot, verification, onDecision, sending, decisionStatus, refreshFailed])
+  }, [snapshot, verification, onDecision, sending, decisionStatus, refreshFailed, pendingTargetCheck])
 
   // A shortcut on a row decides that row's request (and selects it); anywhere else in the page it
   // decides the selected request. Either way it obeys the same state as the bar.
@@ -810,14 +828,16 @@ export const ApprovalsCountdown = ({
       {snapshot.approvalsEnabled
         ? null
         : regionNote("Approvals are turned off on this host, so Approve and Reject are off.", "caution")}
-      {unchecked.length === 0 && !refreshFailed
+      {unchecked.length === 0 && !refreshFailed && pendingTargetCheck?.state !== "failed"
         ? null
         : regionNote(
             <>
               <p>
                 {refreshFailed
                   ? "Couldn't refresh requests."
-                  : `Couldn't check ${unchecked.map(failureText).join(", ")}.`}{" "}
+                  : pendingTargetCheck?.state === "failed"
+                    ? "Couldn't check this request."
+                    : `Couldn't check ${unchecked.map(failureText).join(", ")}.`}{" "}
                 Retained requests stay here; retry before deciding on an unchecked host.
               </p>
               <Button
