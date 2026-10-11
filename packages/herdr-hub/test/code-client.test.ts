@@ -48,7 +48,15 @@ it.effect("refuses malformed bodies and maps status failures without exposing re
           JSON.stringify({ _tag: "Ready", items: [{ title: "not a DTO" }], more: false, observedAt: 1 }),
           "invalid_response"
         ],
-        [200, "{" + " ".repeat(524_289), "invalid_response"]
+        [200, "{" + " ".repeat(524_289), "invalid_response"],
+        ...["https://127.0.0.1:4780", "http://user:pass@127.0.0.1:4780", "http://example.com:4780"].map(
+          (ownerUi) =>
+            [
+              200,
+              JSON.stringify({ _tag: "Unavailable", reason: "cache_unavailable", host: null, ownerUi }),
+              "invalid_response"
+            ] satisfies readonly [number, string, string]
+        )
       ] satisfies ReadonlyArray<readonly [number, string, string]>
     ) {
       const client = HttpClient.make((request) =>

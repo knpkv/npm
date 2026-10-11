@@ -1,8 +1,9 @@
 import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
 import { serveWithBootstrapUrl } from "@knpkv/browser-pairing/owner-session"
-import { ConfigProvider, Context, Deferred, Effect, Fiber, FileSystem, Layer, Ref } from "effect"
+import { ConfigProvider, Context, Deferred, Effect, Fiber, FileSystem, Layer, Logger, Ref } from "effect"
 import { HttpClient } from "effect/http"
+import * as CodeHost from "../src/server/host.js"
 import * as WebControl from "../src/server/internal/WebControl.js"
 
 class Home extends Context.Service<Home, { readonly path: string }>()("CodeCommitWeb/test/Home") {}
@@ -18,6 +19,73 @@ const fixture = Layer.unwrap(Effect.gen(function*() {
 const control = { origin: "http://127.0.0.1:3001", token: "a1".repeat(32) }
 
 describe("CodeCommit owner control file", () => {
+  it.layer(Layer.fresh(fixture))((it) =>
+    it.effect("projects only the current bound owner origin without requesting a sign-in link", () =>
+      Effect.gen(function*() {
+        yield* WebControl.writeControlFile({ ...control, origin: "http://127.0.0.1:4780" })
+        expect(yield* CodeHost.readCodeOwnerUi).toBe("http://127.0.0.1:4780")
+        yield* WebControl.writeControlFile({ ...control, origin: "http://127.0.0.1:4781" })
+        expect(yield* CodeHost.readCodeOwnerUi).toBe("http://127.0.0.1:4781")
+      }))
+  )
+
+  it.layer(Layer.fresh(fixture))((it) =>
+    it.effect("rejects unsafe origin projections without exposing the control credential in failures or logs", () =>
+      Effect.gen(function*() {
+        const fs = yield* FileSystem.FileSystem
+        const file = yield* WebControl.controlFilePath
+        const messages: Array<unknown> = []
+        const logger = Logger.make<unknown, void>((entry) => messages.push(entry.message))
+        yield* WebControl.writeControlFile(control)
+        for (const origin of ["http://127.0.0.1:4780", "http://localhost:4780", "http://[::1]:4780"]) {
+          yield* fs.writeFileString(file, JSON.stringify({ origin, token: control.token }))
+          expect(yield* CodeHost.readCodeOwnerUi).toBe(origin)
+        }
+        for (
+          const body of [
+            ...[
+              "https://127.0.0.1:4780",
+              "http://user:pass@127.0.0.1:4780",
+              "http://127.0.0.1:4780/x",
+              "http://127.0.0.1:4780?q",
+              "http://127.0.0.1:4780#f",
+              "http://127.0.0.1:4780/",
+              "http://example.com:4780",
+              "http://127.0.0.1:65536"
+            ].map((origin) => JSON.stringify({ origin, token: control.token })),
+            `{"token":"${control.token}",`
+          ]
+        ) {
+          yield* fs.writeFileString(file, body)
+          const failure = yield* Effect.flip(CodeHost.readCodeOwnerUi).pipe(
+            Effect.provideService(Logger.CurrentLoggers, new Set([logger]))
+          )
+          expect(failure._tag).toBe("WebNotRunning")
+          expect(JSON.stringify(failure)).not.toContain(control.token)
+        }
+        expect(JSON.stringify(messages)).not.toContain(control.token)
+      }))
+  )
+
+  it.layer(Layer.fresh(fixture))((it) =>
+    it.effect("refuses missing and permissive origin files without creating or repairing them", () =>
+      Effect.gen(function*() {
+        const fs = yield* FileSystem.FileSystem
+        const home = yield* Home
+        const file = yield* WebControl.controlFilePath
+        expect((yield* Effect.flip(CodeHost.readCodeOwnerUi))._tag).toBe("WebNotRunning")
+        expect(yield* fs.exists(`${home.path}/.codecommit`)).toBe(false)
+        yield* WebControl.writeControlFile(control)
+        yield* fs.chmod(file, 0o644)
+        expect((yield* Effect.flip(CodeHost.readCodeOwnerUi))._tag).toBe("WebNotRunning")
+        expect((yield* fs.stat(file)).mode & 0o777).toBe(0o644)
+        yield* fs.chmod(file, 0o600)
+        yield* fs.chmod(`${home.path}/.codecommit`, 0o755)
+        expect((yield* Effect.flip(CodeHost.readCodeOwnerUi))._tag).toBe("WebNotRunning")
+        expect((yield* fs.stat(`${home.path}/.codecommit`)).mode & 0o777).toBe(0o755)
+      }))
+  )
+
   it.layer(Layer.fresh(fixture))((it) =>
     it.effect("publishes atomically with owner-only permissions and removes only its own token", () =>
       Effect.gen(function*() {
@@ -64,6 +132,7 @@ describe("CodeCommit owner control file", () => {
         yield* fs.symlink(target, file)
         expect((yield* Effect.flip(WebControl.writeControlFile(control)))._tag).toBe("ControlFileError")
         expect((yield* Effect.flip(WebControl.requestLoginUrl))._tag).toBe("WebNotRunning")
+        expect((yield* Effect.flip(CodeHost.readCodeOwnerUi))._tag).toBe("WebNotRunning")
         expect(yield* fs.readFileString(target)).toBe("untouched")
         expect(yield* fs.readLink(file)).toBe(target)
       }))

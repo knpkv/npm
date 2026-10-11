@@ -95,7 +95,8 @@ it("renders only read controls and machine-local owner links for closed permissi
     )
     expect(remote).not.toContain("127.0.0.1")
     expect(remote).not.toMatch(/>Grant<|>Sign in<|>Publish<|>Approve</)
-    expect(remote).toContain("loopback address cannot be opened from this device")
+    expect(remote).toContain("Use the Code owner UI on the credential host.")
+    expect(remote).not.toContain("cannot be opened from this device")
     const local = renderToStaticMarkup(
       createElement(CodeHostView, {
         ...props,
@@ -107,6 +108,26 @@ it("renders only read controls and machine-local owner links for closed permissi
     )
     expect(local).toContain("href=\"http://127.0.0.1:3000/\"")
   }
+})
+
+it("points an unreadable owner cache at its service without offering hub repair authority", () => {
+  const markup = renderToStaticMarkup(
+    createElement(CodeHostView, {
+      ...props,
+      page: "pull-requests",
+      selected: null,
+      queue: {
+        value: { _tag: "Unavailable", reason: "cache_unavailable", host: null },
+        loading: false,
+        failure: null
+      }
+    })
+  )
+  expect(markup).toContain("Check the Code owner service and hub log on this host, then read again.")
+  expect(markup).toContain("Read again")
+  expect(markup).not.toContain("Start the Code owner UI")
+  expect(markup).not.toContain("cannot be opened from this device")
+  expect(markup).not.toMatch(/>Migrate<|>Repair<|>Start service<|>Grant</)
 })
 
 it("marks a deep-linked diff possibly outdated using the exact cached detail when absent from the queue", () => {

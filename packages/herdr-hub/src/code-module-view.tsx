@@ -249,7 +249,9 @@ const CodePage = ({
               )
             : null
         }
-        ownerUIHref={content.onHubMachine ? "http://127.0.0.1:3000/" : null}
+        ownerUIHref={
+          content.onHubMachine && !queue.loading && queue.failure === null ? (queue.value?.ownerUi ?? null) : null
+        }
         onSearch={(text) => change({ ...selection, search: text, offset: 0 }, "replace")}
         onFilter={(filter) => change({ ...selection, filter, offset: 0 }, "replace")}
         onClose={() => {

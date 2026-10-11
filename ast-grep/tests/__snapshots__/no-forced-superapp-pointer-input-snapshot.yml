@@ -1,0 +1,126 @@
+id: no-forced-superapp-pointer-input
+snapshots:
+  ? |
+    await button.click({ force: true })
+  : labels:
+      - source: "force: true"
+        style: primary
+        start: 21
+        end: 32
+      - source: "true"
+        style: secondary
+        start: 28
+        end: 32
+      - source: button.click
+        style: secondary
+        start: 6
+        end: 18
+      - source: "button.click({ force: true })"
+        style: secondary
+        start: 6
+        end: 35
+      - source: "({ force: true })"
+        style: secondary
+        start: 18
+        end: 35
+      - source: "{ force: true }"
+        style: secondary
+        start: 19
+        end: 34
+      - source: force
+        style: secondary
+        start: 21
+        end: 26
+  ? |
+    await button.click({ timeout: 1000, force: true })
+  : labels:
+      - source: "force: true"
+        style: primary
+        start: 36
+        end: 47
+      - source: "true"
+        style: secondary
+        start: 43
+        end: 47
+      - source: button.click
+        style: secondary
+        start: 6
+        end: 18
+      - source: "button.click({ timeout: 1000, force: true })"
+        style: secondary
+        start: 6
+        end: 50
+      - source: "({ timeout: 1000, force: true })"
+        style: secondary
+        start: 18
+        end: 50
+      - source: "{ timeout: 1000, force: true }"
+        style: secondary
+        start: 19
+        end: 49
+      - source: force
+        style: secondary
+        start: 36
+        end: 41
+  ? |
+    await button.dblclick({ force: true })
+  : labels:
+      - source: "force: true"
+        style: primary
+        start: 24
+        end: 35
+      - source: "true"
+        style: secondary
+        start: 31
+        end: 35
+      - source: button.dblclick
+        style: secondary
+        start: 6
+        end: 21
+      - source: "button.dblclick({ force: true })"
+        style: secondary
+        start: 6
+        end: 38
+      - source: "({ force: true })"
+        style: secondary
+        start: 21
+        end: 38
+      - source: "{ force: true }"
+        style: secondary
+        start: 22
+        end: 37
+      - source: force
+        style: secondary
+        start: 24
+        end: 29
+  ? |
+    await button.tap({ force: true })
+  : labels:
+      - source: "force: true"
+        style: primary
+        start: 19
+        end: 30
+      - source: "true"
+        style: secondary
+        start: 26
+        end: 30
+      - source: button.tap
+        style: secondary
+        start: 6
+        end: 16
+      - source: "button.tap({ force: true })"
+        style: secondary
+        start: 6
+        end: 33
+      - source: "({ force: true })"
+        style: secondary
+        start: 16
+        end: 33
+      - source: "{ force: true }"
+        style: secondary
+        start: 17
+        end: 32
+      - source: force
+        style: secondary
+        start: 19
+        end: 24

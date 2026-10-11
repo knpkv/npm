@@ -3,6 +3,7 @@
  * `~/.codecommit/web.json` persists {origin, token}: the direct bound loopback origin and a
  * server-private bearer credential. The directory is 0700, the file 0600; linked or permissive
  * paths are refused. Neither the token nor this file belongs in HTTP projections or logs.
+ * Host reads may project only its validated loopback origin to authenticated clients.
  * Login replies carry a one-time credential URL, emitted only on CLI stdout and to its opener.
  *
  * @module
@@ -11,6 +12,7 @@ import { PairingCode } from "@knpkv/browser-pairing"
 import { devPublicOrigin, requireLoopbackOrigin } from "@knpkv/browser-pairing/owner-session"
 import { Clock, Config, Data, Effect, FileSystem, Option, Path, Random, Schedule, Schema } from "effect"
 import { HttpClient, HttpClientRequest } from "effect/http"
+import { CodeOwnerUi } from "../../host-contract.js"
 
 /** Credential-bearing on-disk representation; the token stays server-private and owner-only. */
 export const ControlFile = Schema.Struct({
@@ -54,6 +56,19 @@ const requirePrivatePath = Effect.fn("CodeCommitWeb.requirePrivateControlPath")(
   const info = yield* fs.stat(file)
   if (info.type !== kind || (info.mode & 0o777) !== mode) return yield* new ControlFileError()
 })
+
+/** Read only the public origin projection; ignore credential keys and never mint a login link. */
+export const readCodeOwnerUi = Effect.gen(function*() {
+  const fs = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
+  const file = yield* controlFilePath
+  yield* requirePrivatePath(path.dirname(file), "Directory", 0o700)
+  yield* requirePrivatePath(file, "File", 0o600)
+  const projection = yield* fs.readFileString(file).pipe(
+    Effect.flatMap(Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Struct({ origin: CodeOwnerUi }))))
+  )
+  return projection.origin
+}).pipe(Effect.mapError(() => new WebNotRunning()))
 const prepareDirectory = Effect.gen(function*() {
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path

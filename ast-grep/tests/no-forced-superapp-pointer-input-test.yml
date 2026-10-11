@@ -1,0 +1,21 @@
+id: no-forced-superapp-pointer-input
+valid:
+  - |
+    await button.click()
+  - |
+    await button.click({ force: false })
+  - |
+    await button.click({ position: { x: 10, y: 10 } })
+  - |
+    await expect(button).toHaveCSS({ force: true })
+  - |
+    const settings = { force: true }
+invalid:
+  - |
+    await button.click({ force: true })
+  - |
+    await button.click({ timeout: 1000, force: true })
+  - |
+    await button.dblclick({ force: true })
+  - |
+    await button.tap({ force: true })
