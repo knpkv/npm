@@ -12,13 +12,18 @@ import { releasePortfolioFixture } from "./releasePortfolioFixture.js"
 interface TouchControlElement {
   readonly ownerDocument: {
     readonly defaultView: null | {
-      readonly getComputedStyle: <Element>(element: Element) => { readonly fontSize: string }
+      readonly getComputedStyle: <Element>(element: Element) => {
+        readonly fontSize: string
+        readonly borderBlockStartWidth: string
+      }
     }
   }
 }
 
 const captureTargetAcceptance = async (page: Page, testInfo: TestInfo, name: string): Promise<void> => {
   const editorOnly = name.startsWith("targets-settings-")
+  const overviewOnly = name.startsWith("targets-overview-")
+  const sectionCapture = editorOnly || overviewOnly
   const metadata = Schema.decodeUnknownSync(Schema.Struct({
     buildRevision: Schema.optionalKey(Schema.String),
     builtAt: Schema.optionalKey(Schema.String)
@@ -30,28 +35,42 @@ const captureTargetAcceptance = async (page: Page, testInfo: TestInfo, name: str
     let stamp = document.getElementById("target-acceptance-stamp");
     if (!stamp) {
       stamp = document.createElement("p"); stamp.id = "target-acceptance-stamp";
-      const root = ${editorOnly} ? document.getElementById("release-targets")?.parentElement?.parentElement : document.body;
+      const root = ${editorOnly} ? document.getElementById("release-targets")?.parentElement?.parentElement
+        : ${overviewOnly} ? document.querySelector("[data-portfolio-release-id]") : document.body;
       if (!root) throw new Error("Expected capture surface");
       root.append(stamp);
     }
     stamp.textContent = ${JSON.stringify(stamp)};
-    stamp.style.cssText = "display:block;margin:0;padding:.5rem;font:12px monospace;background:Canvas;color:CanvasText;overflow-wrap:break-word";
+    stamp.style.cssText = "display:block;margin:0;padding:.5rem;font:12px monospace;background:Canvas;color:CanvasText;overflow-wrap:break-word"
+      + (${sectionCapture} ? "" : ";position:fixed;inset-inline:0;inset-block-end:0;z-index:2147483647");
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
   })()`)
   const path = testInfo.outputPath(`${name}.png`)
-  if (editorOnly) {
-    const panel = page.getByRole("heading", { name: "Pipeline", exact: true }).locator("../..")
+  if (sectionCapture) {
+    const panel = editorOnly
+      ? page.getByRole("heading", { name: "Pipeline", exact: true }).locator("../..")
+      : page.locator("[data-portfolio-release-id]")
     const viewport = page.viewportSize()
     const bounds = await panel.boundingBox()
-    if (viewport === null || bounds === null) throw new Error("Expected target editor capture bounds")
+    if (viewport === null || bounds === null) throw new Error("Expected target acceptance capture bounds")
     // Layout acceptance runs at the original viewport; give the panel capture enough height to clear sticky chrome.
     await page.setViewportSize({ width: viewport.width, height: Math.ceil(bounds.height) + 300 })
     try {
       await panel.scrollIntoViewIfNeeded()
+      await page.evaluate(`(() => {
+        const panel = ${editorOnly} ? document.getElementById("release-targets")?.parentElement?.parentElement
+          : document.querySelector("[data-portfolio-release-id]");
+        if (!panel) throw new Error("Expected capture panel");
+        window.scrollTo({ top: Math.max(0, window.scrollY + panel.getBoundingClientRect().top - 96) });
+      })()`)
       await panel.screenshot({ path })
     } finally {
       await page.setViewportSize(viewport)
     }
-  } else await page.screenshot({ path, fullPage: true })
+  } else {
+    await page.evaluate("window.scrollTo({ top: 0 })")
+    await page.screenshot({ path })
+  }
   await testInfo.attach(name, { path, contentType: "image/png" })
 }
 
@@ -249,13 +268,45 @@ for (const width of [390, 1280]) {
         await page.goto(`/w/${workspaceId}/settings#release-targets`)
         const editor = page.locator("#release-targets")
         await expect(editor.getByLabel("Environment name", { exact: true })).toHaveCount(2)
+        await expect(editor.getByRole("group", { name: "Staging", exact: true })).toBeVisible()
+        await expect(editor.getByRole("group", { name: "Production", exact: true })).toBeVisible()
+        await expect(editor.getByRole("list", { name: "fixture-pipeline provider stage order" })).toBeVisible()
         await expect(editor.locator("[class*=\"_fields_\"]")).toHaveCount(0)
+        const stagePair = editor.getByRole("group", { name: "Production", exact: true })
+        const first = await stagePair.getByRole("combobox", { name: "First stage", exact: true }).boundingBox()
+        const last = await stagePair.getByRole("combobox", { name: "Last stage", exact: true }).boundingBox()
+        const key = await stagePair.getByLabel("Environment key", { exact: true }).boundingBox()
+        const environmentName = await stagePair.getByLabel("Environment name", { exact: true }).boundingBox()
+        if (width === 1280) {
+          expect(first?.y).toBe(last?.y)
+          expect(key?.y).toBe(environmentName?.y)
+        } else {
+          expect(first?.y).not.toBe(last?.y)
+          expect(key?.y).not.toBe(environmentName?.y)
+        }
         await editor.getByRole("combobox", { name: "First stage", exact: true }).nth(1).selectOption("Verify")
         const invalid = editor.getByRole("combobox", { name: "First stage", exact: true }).nth(1)
         await expect(invalid).toHaveAttribute("aria-invalid", "true")
+        expect(
+          await invalid.evaluate((node: TouchControlElement) => {
+            const view = node.ownerDocument.defaultView
+            if (view === null) throw new Error("Expected a rendered control window")
+            return Number.parseFloat(view.getComputedStyle(node).borderBlockStartWidth)
+          })
+        ).toBe(2)
         const description = await invalid.getAttribute("aria-describedby")
         expect(description).not.toBeNull()
-        await expect(page.locator(`[id="${description}"]`)).toContainText("overlapping range")
+        await expect(page.locator(`[id="${description}"]`)).toHaveText(
+          "Production starts at Verify, which Staging already covers."
+        )
+        await expect(editor.getByText("Overlap · Staging · Production", { exact: true })).toBeVisible()
+        if (width === 1280) {
+          expect((await invalid.boundingBox())?.y).toBe(
+            (await stagePair.getByRole("combobox", { name: "Last stage", exact: true }).boundingBox())?.y
+          )
+        }
+        await editor.getByRole("button", { name: "Review Production", exact: true }).click()
+        await expect(invalid).toBeFocused()
         expect(await seriousAxeViolations(page)).toEqual([])
         if (width === 390) {
           expect(await page.evaluate<boolean>("matchMedia('(pointer: coarse)').matches")).toBe(true)
@@ -291,6 +342,10 @@ for (const width of [390, 1280]) {
           "href",
           `/w/${workspaceId}/settings#release-targets`
         )
+        const configure = row.getByRole("link", { name: "Configure targets" })
+        await expect(configure.locator("xpath=ancestor::article")).toHaveCount(1)
+        const preview = row.getByRole("button", { name: /^Preview /u })
+        expect((await configure.boundingBox())?.height).toBe((await preview.boundingBox())?.height)
         if (width === 390) {
           const box = await row.getByRole("link", { name: "Configure targets" }).boundingBox()
           expect(box?.height).toBeGreaterThanOrEqual(44)
@@ -302,6 +357,8 @@ for (const width of [390, 1280]) {
         const full = page.locator(`[data-release-full-id="${release.releaseId}"]`)
         await expect(full.getByText("No target environment", { exact: true })).toBeVisible()
         await expect(full.getByRole("link", { name: "Configure targets" })).toBeVisible()
+        await expect(full.getByRole("link", { name: "Configure targets" })).toHaveClass(/releaseAction/u)
+        await expect(full.getByRole("link", { name: "Repair missing links" })).toHaveClass(/back/u)
         if (width === 390) {
           const box = await full.getByRole("link", { name: "Configure targets" }).boundingBox()
           expect(box?.height).toBeGreaterThanOrEqual(44)
@@ -310,6 +367,7 @@ for (const width of [390, 1280]) {
         expect(await seriousAxeViolations(page)).toEqual([])
         expect(await page.evaluate<boolean>("document.documentElement.scrollWidth <= window.innerWidth")).toBe(true)
         await captureTargetAcceptance(page, testInfo, `targets-release-${width}-${colorScheme}`)
+        await expect(full.locator("h1")).not.toBeFocused()
         await full.getByRole("link", { name: "Configure targets" }).click()
         await expect(page).toHaveURL(new RegExp(`/w/${workspaceId}/settings#release-targets$`))
         await expect(page.getByRole("heading", { name: "Release targets", exact: true })).toBeVisible()
@@ -386,7 +444,7 @@ test("configures ordered environment ranges through the governed pipeline settin
   await page.getByLabel("Environment name", { exact: true }).fill("Staging")
   await page.getByRole("combobox", { name: "Last stage", exact: true }).selectOption("Verify")
   await page.getByRole("button", { name: "Add environment range" }).click()
-  await expect(page.getByText("Cannot save target configuration: overlapping range.")).toBeVisible()
+  await expect(page.getByText("Environment 2 starts at Build, which Staging already covers.")).toBeVisible()
   await expect(page.getByRole("button", { name: "Save settings" })).toBeDisabled()
   await page.getByLabel("Environment key", { exact: true }).nth(1).fill("production")
   await page.getByLabel("Environment name", { exact: true }).nth(1).fill("Production")
@@ -395,7 +453,7 @@ test("configures ordered environment ranges through the governed pipeline settin
   await page.getByRole("button", { name: "Save settings" }).click()
   await expect(page.getByRole("dialog", { name: "Review governed changes" })).toBeVisible()
   await page.getByRole("button", { name: "Save governed changes" }).click()
-  await expect(page.getByText("Cannot save target configuration: unknown stage.")).toBeVisible()
+  await expect(page.getByText("Production: Approve is absent from the current pipeline.")).toBeVisible()
   await expect(page.getByRole("combobox", { name: "First stage", exact: true }).nth(1)).toHaveAttribute(
     "aria-invalid",
     "true"

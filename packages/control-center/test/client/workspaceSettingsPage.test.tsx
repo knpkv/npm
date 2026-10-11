@@ -28,7 +28,11 @@ import {
   PluginConnectionId
 } from "../../src/domain/identifiers.js"
 import { DEFAULT_WORKSPACE_SETTINGS, WorkspaceSettingsV1 } from "../../src/domain/workspaceSettings.js"
-import type { PipelineReleaseTarget } from "../../src/domain/releaseTargets.js"
+import {
+  type PipelineReleaseTarget,
+  ReleaseTargetCatalog,
+  ReleaseTargetConfigurationError
+} from "../../src/domain/releaseTargets.js"
 
 Reflect.set(window, "IS_REACT_ACT_ENVIRONMENT", true)
 
@@ -185,7 +189,20 @@ it("keeps surviving environment inputs and focus attached to their range after r
       <ReleaseTargetsEditor
         mappings={mappings}
         onChange={setMappings}
-        catalogue={null}
+        catalogue={Schema.decodeUnknownSync(ReleaseTargetCatalog)({
+          complete: true,
+          pipelines: [
+            {
+              pluginConnectionId: "01890f6f-6d6a-7cc0-98d2-000000000091",
+              pipelineName: "fixture-pipeline",
+              displayName: "Fixture delivery",
+              topologyDigest: `sha256:${"a".repeat(64)}`,
+              state: "current",
+              observedAt: null,
+              stages: ["Build", "Deploy"].map((name) => ({ name, actions: [] }))
+            }
+          ]
+        })}
         error={null}
         disabled={false}
         onRefresh={() => undefined}
@@ -213,6 +230,113 @@ it("keeps surviving environment inputs and focus attached to their range after r
   expect(key.isConnected).toBe(true)
   expect(document.activeElement).toBe(key)
   expect(key.value).toBe("third-edited")
+  await changeInput(third, " ")
+  expect(host.textContent).toContain("Unnamed environment")
+})
+
+it("marks the overlapping environment field, explains both ranges, and routes summary focus to that field", async () => {
+  const mapping: PipelineReleaseTarget = {
+    pluginConnectionId: PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-000000000091"),
+    pipelineName: "fixture-pipeline",
+    topologyDigest: `sha256:${"a".repeat(64)}`,
+    environments: [
+      { key: "staging", name: "Staging", firstStage: "Build", lastStage: "Verify", requiresManualGate: false },
+      { key: "production", name: "Production", firstStage: "Verify", lastStage: "Deploy", requiresManualGate: true }
+    ]
+  }
+  const host = await mount(
+    <ReleaseTargetsEditor
+      mappings={[mapping]}
+      catalogue={Schema.decodeUnknownSync(ReleaseTargetCatalog)({
+        complete: true,
+        pipelines: [
+          {
+            ...mapping,
+            displayName: "Fixture delivery",
+            state: "current",
+            observedAt: null,
+            stages: ["Build", "Verify", "Deploy", "Audit"].map((name) => ({ name, actions: [] }))
+          }
+        ]
+      })}
+      error={
+        new ReleaseTargetConfigurationError({
+          reason: "overlapping-range",
+          mappingIndex: 0,
+          environmentIndex: 1,
+          field: "firstStage"
+        })
+      }
+      disabled={false}
+      onChange={() => undefined}
+      onRefresh={() => undefined}
+    />
+  )
+  expect(Array.from(host.querySelectorAll("legend")).map((legend) => legend.textContent)).toEqual([
+    "fixture-pipeline Current",
+    "Staging",
+    "Production"
+  ])
+  const invalid = host.querySelector<HTMLSelectElement>('select[aria-invalid="true"]')
+  const summary = Array.from(host.querySelectorAll("button")).find(
+    (button) => button.textContent === "Review Production"
+  )
+  if (invalid === null || summary === undefined) throw new Error("Expected field error and summary focus control")
+  const description = invalid.getAttribute("aria-describedby")
+  if (description === null) throw new Error("Expected linked field error")
+  expect(document.getElementById(description)?.textContent).toBe(
+    "Production starts at Verify, which Staging already covers."
+  )
+  expect(host.textContent).toContain("Overlap · Staging · Production")
+  expect(host.textContent).toContain("Gap · no environment")
+  await act(async () => summary.click())
+  expect(document.activeElement).toBe(invalid)
+})
+
+it("disables only stale pipeline edits and keeps stale mapping removal available", async () => {
+  const mapping: PipelineReleaseTarget = {
+    pluginConnectionId: PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-000000000091"),
+    pipelineName: "fixture-stale",
+    topologyDigest: `sha256:${"a".repeat(64)}`,
+    environments: [
+      { key: "staging", name: "Staging", firstStage: "Build", lastStage: "Deploy", requiresManualGate: true }
+    ]
+  }
+  const current = {
+    ...mapping,
+    pipelineName: "fixture-current",
+    environments: mapping.environments.map((range) => ({ ...range, key: "production", name: "Production" }))
+  }
+  const onChange = vi.fn()
+  const host = await mount(
+    <ReleaseTargetsEditor
+      mappings={[mapping, current]}
+      catalogue={Schema.decodeUnknownSync(ReleaseTargetCatalog)({
+        complete: true,
+        pipelines: [mapping, current].map((entry) => ({
+          ...entry,
+          displayName: "Fixture delivery",
+          state: entry === mapping ? "stale" : "current",
+          observedAt: "2026-07-30T09:00:00.000Z",
+          stages: ["Build", "Deploy"].map((name) => ({ name, actions: [] }))
+        }))
+      })}
+      error={null}
+      disabled={false}
+      onChange={onChange}
+      onRefresh={() => undefined}
+    />
+  )
+  expect(host.querySelector<HTMLInputElement>('input[value="Staging"]')?.disabled).toBe(true)
+  expect(host.querySelector<HTMLInputElement>('input[value="Production"]')?.disabled).toBe(false)
+  expect(host.textContent).toContain("Stale since 2026-07-30T09:00:00.000Z")
+  const remove = Array.from(host.querySelectorAll("button")).find(
+    (button) => button.textContent === "Remove pipeline fixture-stale"
+  )
+  if (remove === undefined) throw new Error("Expected stale mapping removal control")
+  expect(remove.disabled).toBe(false)
+  await act(async () => remove.click())
+  expect(onChange).toHaveBeenCalledWith([current])
 })
 
 const renderGovernedRetentionChange = async (): Promise<{

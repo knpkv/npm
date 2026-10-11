@@ -135,13 +135,15 @@ const governedChangeDetails = (
 const SettingsSection = ({
   children,
   description,
-  title
+  title,
+  wide = false
 }: {
   readonly children: ReactNode
   readonly description: string
+  readonly wide?: boolean
   readonly title: string
 }): ReactElement => (
-  <Surface className={styles.section} padding="default" form="grouped">
+  <Surface className={`${styles.section}${wide ? ` ${styles.wideSection}` : ""}`} padding="default" form="grouped">
     <div className={styles.sectionHeading}>
       <Text as="h2" variant="section-title">
         {title}
@@ -482,7 +484,7 @@ export const SettingsForm = ({
         />
       </SettingsSection>
 
-      <SettingsSection description="Governed retry defaults for pipeline operations." title="Pipeline">
+      <SettingsSection description="Governed retry defaults for pipeline operations." title="Pipeline" wide>
         <SelectField
           disabled={disabled}
           label="Retry behavior"
