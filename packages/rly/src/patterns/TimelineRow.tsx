@@ -101,35 +101,39 @@ export const TimelineRow = ({
       data-rly-timeline-actor={event.actorKind}
       data-rly-timeline-event-id={event.id}
     >
-      <time className={style("time")} dateTime={event.dateTime}>
-        {event.time}
-      </time>
-      <span aria-hidden="true" className={style("marker")}>
-        <span
-          className={event.provenance === undefined ? style("dot") : style(provenanceMarkClass[event.provenance.kind])}
-          data-rly-timeline-provenance={event.provenance?.kind}
-        />
-        {continued ? <span className={style("connector")} data-rly-timeline-connector="" /> : null}
-      </span>
-      <article aria-labelledby={titleId} className={style("content")}>
-        {event.href === undefined ? (
-          title
-        ) : (
-          <RlyLink className={style("link")} href={event.href}>
-            {title}
-          </RlyLink>
-        )}
-        <p className={style("detail")}>{event.detail}</p>
-        {event.provenance === undefined ? null : (
-          <p className={style("provenance")} data-rly-timeline-provenance-label={event.provenance.kind}>
-            {event.provenance.label}
-          </p>
-        )}
-      </article>
-      <div className={style("meta")}>
-        <span className={style("actorKind")}>{actorLabels[event.actorKind]}</span>
-        {event.service === undefined ? null : <ServiceMark service={event.service} size="compact" />}
-        {event.actor === undefined ? null : <div className={style("actor")}>{event.actor}</div>}
+      <div className={style("layout")}>
+        <time className={style("time")} dateTime={event.dateTime}>
+          {event.time}
+        </time>
+        <span aria-hidden="true" className={style("marker")}>
+          <span
+            className={
+              event.provenance === undefined ? style("dot") : style(provenanceMarkClass[event.provenance.kind])
+            }
+            data-rly-timeline-provenance={event.provenance?.kind}
+          />
+          {continued ? <span className={style("connector")} data-rly-timeline-connector="" /> : null}
+        </span>
+        <article aria-labelledby={titleId} className={style("content")}>
+          {event.href === undefined ? (
+            title
+          ) : (
+            <RlyLink className={style("link")} href={event.href}>
+              {title}
+            </RlyLink>
+          )}
+          <p className={style("detail")}>{event.detail}</p>
+          {event.provenance === undefined ? null : (
+            <p className={style("provenance")} data-rly-timeline-provenance-label={event.provenance.kind}>
+              {event.provenance.label}
+            </p>
+          )}
+        </article>
+        <div className={style("meta")}>
+          <span className={style("actorKind")}>{actorLabels[event.actorKind]}</span>
+          {event.service === undefined ? null : <ServiceMark service={event.service} size="compact" />}
+          {event.actor === undefined ? null : <div className={style("actor")}>{event.actor}</div>}
+        </div>
       </div>
     </li>
   )

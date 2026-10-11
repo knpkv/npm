@@ -1,7 +1,14 @@
 @layer rly.components {
   .root {
-    align-items: start;
     color: var(--rly-color-text-1);
+    container-name: rly-timeline-row;
+    container-type: inline-size;
+    max-inline-size: 100%;
+    min-inline-size: var(--rly-space-0);
+  }
+
+  .layout {
+    align-items: start;
     display: grid;
     gap: var(--rly-space-16);
     grid-template-columns: 8rem var(--rly-space-24) minmax(var(--rly-space-0), 1fr) minmax(var(--rly-space-0), auto);
@@ -49,6 +56,7 @@
   .content {
     display: grid;
     gap: var(--rly-space-6);
+    grid-template-columns: minmax(var(--rly-space-0), 1fr);
   }
 
   .title {
@@ -106,8 +114,8 @@
     min-inline-size: var(--rly-space-0);
   }
 
-  @media (max-width: 30rem) {
-    .root {
+  @container rly-timeline-row (max-width: 30rem) {
+    .layout {
       gap: var(--rly-space-8) var(--rly-space-12);
       grid-template-columns: var(--rly-space-24) minmax(var(--rly-space-0), 1fr);
       padding-block: var(--rly-space-16);
