@@ -71,6 +71,13 @@ export const workspaceBinCases = [
     ready: /^agent-usage v\d+\.\d+\.\d+$/
   },
   {
+    owner: "@knpkv/alchemy-console",
+    name: "alchemy-console",
+    bin: "alchemy-console/dist/main.js",
+    args: ["--version"],
+    ready: /^alchemy-console v\d+\.\d+\.\d+$/
+  },
+  {
     owner: "@knpkv/jcf-web",
     name: "jcf-web",
     bin: "jcf-web/dist/main.js",
