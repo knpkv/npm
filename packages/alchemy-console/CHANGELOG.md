@@ -1,5 +1,11 @@
 # @knpkv/alchemy-console
 
+## 0.2.0
+
+### Minor Changes
+
+- [#810](https://github.com/knpkv/npm/pull/810) [`d7adebe`](https://github.com/knpkv/npm/commit/d7adebecc37849465a7dddad0248ccb0f29e044c) Thanks [@konopkov](https://github.com/konopkov)! - Add the owner-authenticated stack API and local CLI with single-use browser login and read-only local/S3 discovery.
+
 ## 0.1.0
 
 ### Minor Changes

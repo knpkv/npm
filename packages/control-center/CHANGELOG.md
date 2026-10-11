@@ -1,5 +1,11 @@
 # @knpkv/control-center
 
+## 0.16.0
+
+### Minor Changes
+
+- [#811](https://github.com/knpkv/npm/pull/811) [`9b94021`](https://github.com/knpkv/npm/commit/9b9402149415f3c6d1fa3f394820056d4438442c) Thanks [@konopkov](https://github.com/konopkov)! - Scope manual sync budgets to authenticated connections with a separate peer cap, queue server-owned onboarding independently, and show named retry guidance. Add a queued synchronization result and optional typed request-budget fields. Refresh Services from durable completion events and tolerate future live invalidation reasons.
+
 ## 0.15.1
 
 ### Patch Changes
