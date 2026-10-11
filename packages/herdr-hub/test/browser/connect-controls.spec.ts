@@ -4,7 +4,8 @@ import { agentConnectTarget, AgentWorkerIdentity } from "@knpkv/herdr-fleet/mode
 import { WorkSnapshots } from "@knpkv/herdr-work/model"
 import { expect, type Locator, type Page, test } from "@playwright/test"
 import { Schema } from "effect"
-import { BlockedPushSettings } from "../../src/blocked-push-model.js"
+import type { BlockedPushSettings } from "../../src/blocked-push-model.js"
+import { applyBlockedPushMutation, BlockedPushMutation } from "../../src/blocked-push-model.js"
 
 test.use({ locale: "en-GB", timezoneId: "Europe/Berlin" })
 const states: ReadonlyArray<"2v" | "2v-v2" | "2v-v3" | "2v-v4"> = ["2v", "2v-v2", "2v-v3", "2v-v4"]
@@ -76,7 +77,7 @@ const work = Schema.decodeUnknownSync(WorkSnapshots)({
   month: { ...windowReading, window: "month" }
 })
 
-/** Hold only the next PUT so pending/error tests control the real save boundary without sleeps. */
+/** Hold only the next PATCH so pending/error tests control the real save boundary without sleeps. */
 const mount = async (page: Page, state = "2v", width = 390, theme: "light" | "dark" = "light") => {
   let settings: BlockedPushSettings = {
     mutedAgents: state === "2v-v2" ? [other, selected] : [other],
@@ -104,14 +105,14 @@ const mount = async (page: Page, state = "2v", width = 390, theme: "light" | "da
   )
   await page.route("**/v1/push/stage-heartbeat", (route) => route.fulfill({ json: { accepted: true } }))
   await page.route("**/v1/push/blocked-settings", async (route) => {
-    if (route.request().method() !== "PUT") return route.fulfill({ json: settings })
-    const next = Schema.decodeUnknownSync(Schema.fromJsonString(BlockedPushSettings))(route.request().postData())
-    writes.push(next)
+    if (route.request().method() !== "PATCH") return route.fulfill({ json: settings })
+    const mutation = Schema.decodeUnknownSync(Schema.fromJsonString(BlockedPushMutation))(route.request().postData())
+    writes.push(applyBlockedPushMutation(settings, mutation))
     const gate = held
     held = null
     if (gate !== null) await gate
     if (reject) return route.fulfill({ status: 503, json: { error: "save unavailable" } })
-    settings = next
+    settings = applyBlockedPushMutation(settings, mutation)
     return route.fulfill({ json: settings })
   })
   await page.goto(`/connect-controls/?state=${state}&theme=${theme}`)
@@ -364,6 +365,8 @@ for (const width of [390, 1280]) {
       await expect(fixture.mute).toHaveAttribute("aria-pressed", "true")
       await fixture.from.fill("23:00")
       await fixture.until.focus()
+      await expect(fixture.from).toHaveValue("23:00")
+      await fixture.mute.focus()
       await expect(fixture.from).toHaveValue("22:00")
       await expect(fixture.until).toHaveValue("07:00")
       await fixture.clear.click()
@@ -371,15 +374,15 @@ for (const width of [390, 1280]) {
       await expect(fixture.clear).toBeEnabled()
       await expect(error).toBeInViewport()
     })
-    test("pending saves disable every control without changing the saved display", async ({ page }) => {
+    test("pending saves mark the saved display busy and accept further intents", async ({ page }) => {
       const fixture = await mount(page, "2v-v3", width)
       const release = fixture.holdNextSave()
       try {
         await fixture.mute.click()
-        await expect(fixture.mute).toBeDisabled()
-        await expect(fixture.from).toBeDisabled()
-        await expect(fixture.until).toBeDisabled()
-        await expect(fixture.clear).toBeDisabled()
+        await expect(fixture.panel).toHaveAttribute("aria-busy", "true")
+        await expect(fixture.from).toBeEnabled()
+        await expect(fixture.until).toBeEnabled()
+        await expect(fixture.clear).toBeEnabled()
         await expect(fixture.mute).toHaveAttribute("aria-pressed", "false")
         await expect(fixture.summary).toHaveText("Quiet 22:00–07:00 Europe/Berlin")
       } finally {
@@ -388,32 +391,76 @@ for (const width of [390, 1280]) {
       await expect(fixture.mute).toHaveAttribute("aria-pressed", "true")
       await expect(fixture.mute).toBeEnabled()
     })
-    test("blur plus a same-turn click cannot replace the in-flight quiet hours", async ({ page }) => {
+    for (const action of ["Mute", "Clear"]) {
+      test(`queues ${action} clicked during a blur save`, async ({ page }) => {
+        const fixture = await mount(page, "2v-v3", width)
+        await fixture.from.fill("23:00")
+        const release = fixture.holdNextSave()
+        try {
+          // A real click moves focus out of the time editor before dispatching its action.
+          await (action === "Mute" ? fixture.mute : fixture.clear).click()
+          await expect(fixture.panel).toHaveAttribute("aria-busy", "true")
+          await expect.poll(() => fixture.writes).toEqual([{
+            mutedAgents: [other],
+            quietHours: { ...quiet, startMinute: 1380 }
+          }])
+        } finally {
+          release()
+        }
+        await expect.poll(() => fixture.writes).toHaveLength(2)
+        expect(fixture.writes.at(-1)).toEqual({
+          mutedAgents: action === "Mute" ? [other, selected] : [other],
+          quietHours: action === "Mute" ? { ...quiet, startMinute: 1380 } : null
+        })
+        await expect(fixture.mute).toHaveAttribute("aria-pressed", action === "Mute" ? "true" : "false")
+        await expect(fixture.panel).toHaveAttribute("aria-busy", "false")
+      })
+    }
+    test("real Tab between times keeps focus and draft; Enter saves without remounting", async ({ page }) => {
       const fixture = await mount(page, "2v-v3", width)
       await fixture.from.fill("23:00")
+      await fixture.until.evaluate((input) => {
+        input.dataset.focusProbe = "original"
+      })
+      // Chromium time fields have separate hour/minute/meridiem Tab stops.
+      for (let stop = 0; stop < 5; stop += 1) {
+        await page.keyboard.press("Tab")
+        if (await fixture.until.evaluate((input) => input === document.activeElement)) break
+      }
+      await expect(fixture.until).toBeFocused()
+      expect(fixture.writes).toHaveLength(0)
+      await expect(fixture.from).toHaveValue("23:00")
+      await fixture.until.fill("08:00")
       const release = fixture.holdNextSave()
       try {
-        // Deliver both events before the pending render to protect the synchronous save reservation.
-        expect(
-          await fixture.from.evaluate((field) => {
-            const mute = document.querySelector<HTMLButtonElement>(".connect-stage-notification-mute")
-            if (mute === null) return false
-            field.dispatchEvent(new FocusEvent("focusout", { bubbles: true }))
-            mute.click()
-            return true
-          })
-        ).toBe(true)
-        await expect(fixture.mute).toBeDisabled()
-        await expect.poll(() => fixture.writes).toEqual([{
-          mutedAgents: [other],
-          quietHours: { ...quiet, startMinute: 1380 }
-        }])
+        await page.keyboard.press("Enter")
+        await expect(fixture.panel).toHaveAttribute("aria-busy", "true")
+        await expect(fixture.until).toBeFocused()
+        await expect(fixture.until).toBeEnabled()
+        await expect(fixture.until).toHaveAttribute("data-focus-probe", "original")
       } finally {
         release()
       }
-      await expect(fixture.summary).toHaveText("Quiet 23:00–07:00 Europe/Berlin")
-      await expect(fixture.mute).toHaveAttribute("aria-pressed", "false")
-      expect(fixture.writes).toHaveLength(1)
+      await expect(fixture.panel).toHaveAttribute("aria-busy", "false")
+      await expect(fixture.until).toBeFocused()
+      await expect(fixture.until).toHaveAttribute("data-focus-probe", "original")
+      await expect(fixture.until).toHaveValue("08:00")
+      expect(fixture.writes).toEqual([{
+        mutedAgents: [other],
+        quietHours: { ...quiet, startMinute: 1380, endMinute: 480 }
+      }])
+    })
+    test("unchanged times keep normal Tab order without saving", async ({ page }) => {
+      const fixture = await mount(page, "2v-v3", width)
+      await fixture.from.focus()
+      for (let stop = 0; stop < 5; stop += 1) {
+        await page.keyboard.press("Tab")
+        if (await fixture.until.evaluate((input) => input === document.activeElement)) break
+      }
+      await expect(fixture.until).toBeFocused()
+      expect(fixture.writes).toHaveLength(0)
+      await expect(fixture.from).toHaveValue("22:00")
+      await expect(fixture.until).toHaveValue("07:00")
     })
     test("targets do not overlap, keep keyboard focus visible, and work in forced colours", async ({ page }) => {
       const fixture = await mount(page, "2v-v3", width)

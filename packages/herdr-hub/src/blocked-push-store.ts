@@ -2,9 +2,11 @@ import { openPrivateSqlite, type PrivateSqlite } from "@knpkv/herdr-fleet/sqlite
 import { Clock, Effect, Schema, Semaphore } from "effect"
 import type { DatabaseSync } from "node:sqlite"
 import {
+  applyBlockedPushMutation,
   blockedAgentBucket,
   BlockedObservation,
   blockedPromptFirstLine,
+  BlockedPushMutation,
   BlockedPushPayload,
   blockedPushReminderMillis,
   BlockedPushSettings,
@@ -28,6 +30,13 @@ export type BlockedEpisode = {
   readonly payload: BlockedPushPayload
 }
 const failure = (operation: string) => (cause: unknown) => new BlockedPushStoreError({ operation, cause })
+
+const readSettings = (db: DatabaseSync, owner: string): BlockedPushSettings => {
+  const result = db.prepare("SELECT settings FROM blocked_push_settings WHERE owner = ?").get(owner)
+  if (result === undefined) return { mutedAgents: [], quietHours: null }
+  const row = Schema.decodeUnknownSync(Schema.Struct({ settings: Schema.String }))(result)
+  return Schema.decodeUnknownSync(Schema.fromJsonString(BlockedPushSettings))(row.settings)
+}
 
 /** Stores blocked episodes and delivery reservations in the owner's private hub database. */
 export class BlockedPushStore {
@@ -330,26 +339,24 @@ export class BlockedPushStore {
   )
 
   readonly settings = Effect.fn("BlockedPushStore.settings")(function*(this: BlockedPushStore, owner: string) {
-    return yield* this.#transaction("settings", (db): BlockedPushSettings => {
-      const result = db.prepare("SELECT settings FROM blocked_push_settings WHERE owner = ?").get(owner)
-      if (result === undefined) return { mutedAgents: [], quietHours: null }
-      const row = Schema.decodeUnknownSync(Schema.Struct({ settings: Schema.String }))(result)
-      return Schema.decodeUnknownSync(Schema.fromJsonString(BlockedPushSettings))(row.settings)
-    })
+    return yield* this.#transaction("settings", (db) => readSettings(db, owner))
   })
 
-  readonly putSettings = Effect.fn("BlockedPushStore.putSettings")(
-    function*(this: BlockedPushStore, owner: string, input: BlockedPushSettings) {
-      const settings = yield* Schema.decodeUnknownEffect(BlockedPushSettings)(input).pipe(
+  /** Read, merge and persist each preference intent under the same SQLite write transaction. */
+  readonly mutateSettings = Effect.fn("BlockedPushStore.mutateSettings")(
+    function*(this: BlockedPushStore, owner: string, input: BlockedPushMutation) {
+      const mutation = yield* Schema.decodeUnknownEffect(BlockedPushMutation)(input).pipe(
         Effect.mapError(failure("settings.decode"))
       )
-      yield* this.#transaction("settings.put", (db) => {
+      return yield* this.#transaction("settings.patch", (db) => {
+        const settings = Schema.decodeUnknownSync(BlockedPushSettings)(
+          applyBlockedPushMutation(readSettings(db, owner), mutation)
+        )
         db.prepare(
           "INSERT INTO blocked_push_settings VALUES (?, ?) ON CONFLICT(owner) DO UPDATE SET settings = excluded.settings"
-        )
-          .run(owner, JSON.stringify(settings))
+        ).run(owner, JSON.stringify(settings))
+        return settings
       })
-      return settings
     }
   )
 

@@ -124,7 +124,7 @@ import type { SanitizedJobRecord } from "./approval-request.js"
 import { sanitizeJobPayload, sanitizeJobRecord } from "./approval-request.js"
 import { resolveApprovalPage } from "./approval-url.js"
 import { authorize, authorizeLoopback, authorizeLoopbackPeer } from "./auth.js"
-import { BlockedPushSettings, StageHeartbeat } from "./blocked-push-model.js"
+import { BlockedPushMutation, StageHeartbeat } from "./blocked-push-model.js"
 import { loadBlockedPushObservations } from "./blocked-push-source.js"
 import { BlockedPushStore } from "./blocked-push-store.js"
 import { makeBlockedPushWorker } from "./blocked-push-worker.js"
@@ -3444,14 +3444,14 @@ export const startHttpServer = async (
               )
               return
             }
-            if (request.method === "PUT") {
+            if (request.method === "PATCH") {
               await respond(
                 response,
                 Effect.gen(function*() {
                   const who = yield* authorized
                   yield* sameOrigin(request, expectedOrigin())
-                  const settings = yield* readJson(request, BlockedPushSettings)
-                  return yield* blockedPushStore.putSettings(who, settings).pipe(
+                  const mutation = yield* readJson(request, BlockedPushMutation)
+                  return yield* blockedPushStore.mutateSettings(who, mutation).pipe(
                     Effect.mapError(() => new Unavailable({ operation: "push.settings" }))
                   )
                 })

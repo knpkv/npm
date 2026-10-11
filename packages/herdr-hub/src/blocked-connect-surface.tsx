@@ -12,17 +12,17 @@ import {
   loadBlockedDevicePushState,
   loadBlockedSettings,
   reportStageHeartbeat,
-  saveBlockedSettings
+  mutateBlockedSettings
 } from "./blocked-push-client.js"
 import type { NotificationState } from "./approval-app-view.js"
 import { fleetModule, moduleHref } from "./modules.js"
-import { type BlockedPushSettings, PushAgentKey } from "./blocked-push-model.js"
+import { type BlockedPushMutation, type BlockedPushSettings, PushAgentKey } from "./blocked-push-model.js"
 
 const browserRuntime = Atom.runtime(BrowserHttpClient.layerFetch)
 const makeNotificationAtoms = (state?: NotificationState) => ({
   device: browserRuntime.atom(state === undefined ? loadBlockedDevicePushState : Effect.succeed(state)),
   settings: browserRuntime.atom(loadBlockedSettings),
-  save: browserRuntime.fn(saveBlockedSettings),
+  save: browserRuntime.fn(mutateBlockedSettings),
   heartbeat: browserRuntime.fn(reportStageHeartbeat)
 })
 
@@ -35,65 +35,108 @@ const timeMinute = (text: string): number | null => {
   return hours === undefined || minutes === undefined ? null : hours * 60 + minutes
 }
 
-/** Editing either time stays local until a complete pair is committed on blur. */
+/** Keep time edits local until focus leaves the editor or Enter commits a complete pair. */
 const QuietHours = ({
-  disabled,
+  busy,
   save,
   settings
 }: {
   readonly settings: BlockedPushSettings
-  readonly save: (settings: BlockedPushSettings) => Promise<boolean>
-  readonly disabled: boolean
+  readonly save: (mutation: BlockedPushMutation) => Promise<boolean>
+  readonly busy: boolean
 }) => {
   const id = useId()
   const previousStart = settings.quietHours === null ? "" : timeLabel(settings.quietHours.startMinute)
   const previousEnd = settings.quietHours === null ? "" : timeLabel(settings.quietHours.endMinute)
   const [start, setStart] = useState(previousStart)
   const [end, setEnd] = useState(previousEnd)
+  const savedTimes = useRef({ start: previousStart, end: previousEnd })
+  const revision = useRef(0)
+  const settledRevision = useRef(0)
+  const submitted = useRef<string | null>(null)
+  useEffect(() => {
+    savedTimes.current = { start: previousStart, end: previousEnd }
+    if (revision.current !== settledRevision.current) return
+    setStart(previousStart)
+    setEnd(previousEnd)
+  }, [previousStart, previousEnd])
+
   const timeZone = settings.quietHours?.timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone
   const commit = async (): Promise<void> => {
     const startMinute = timeMinute(start)
     const endMinute = timeMinute(end)
     if (startMinute === null || endMinute === null) return
-    if (start === previousStart && end === previousEnd) return
-    if (!(await save({ ...settings, quietHours: { startMinute, endMinute, timeZone } }))) {
-      setStart(previousStart)
-      setEnd(previousEnd)
+    if (start === previousStart && end === previousEnd) {
+      settledRevision.current = revision.current
+      return
+    }
+    const pair = `${start}/${end}`
+    if (submitted.current === pair) return
+    submitted.current = pair
+    const edited = revision.current
+    const accepted = await save({ _tag: "SetQuietHours", quietHours: { startMinute, endMinute, timeZone } })
+    if (submitted.current === pair) submitted.current = null
+    if (revision.current !== edited) return
+    settledRevision.current = edited
+    if (!accepted) {
+      setStart(savedTimes.current.start)
+      setEnd(savedTimes.current.end)
     }
   }
+  const clear = async (): Promise<void> => {
+    const edited = ++revision.current
+    const accepted = await save({ _tag: "SetQuietHours", quietHours: null })
+    if (revision.current !== edited) return
+    settledRevision.current = edited
+    setStart(accepted ? "" : savedTimes.current.start)
+    setEnd(accepted ? "" : savedTimes.current.end)
+  }
   return (
-    <fieldset className="connect-stage-notification-quiet" disabled={disabled}>
+    <fieldset className="connect-stage-notification-quiet" aria-busy={busy}>
       <legend>Quiet hours</legend>
       <div className="connect-stage-notification-times">
-        <div className="connect-stage-notification-time">
-          <label htmlFor={`${id}-from`}>From</label>
-          <input
-            id={`${id}-from`}
-            aria-label="Quiet hours from"
-            type="time"
-            value={start}
-            onInput={(event) => setStart(event.currentTarget.value)}
-            onBlur={() => void commit()}
-          />
-        </div>
-        <div className="connect-stage-notification-time">
-          <label htmlFor={`${id}-until`}>Until</label>
-          <input
-            id={`${id}-until`}
-            aria-label="Quiet hours until"
-            type="time"
-            value={end}
-            onInput={(event) => setEnd(event.currentTarget.value)}
-            onBlur={() => void commit()}
-          />
+        <div
+          className="connect-stage-notification-time-editor"
+          onBlur={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget)) void commit()
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+              event.preventDefault()
+              void commit()
+            }
+          }}
+        >
+          <div className="connect-stage-notification-time">
+            <label htmlFor={`${id}-from`}>From</label>
+            <input
+              id={`${id}-from`}
+              aria-label="Quiet hours from"
+              type="time"
+              value={start}
+              onInput={(event) => {
+                revision.current += 1
+                setStart(event.currentTarget.value)
+              }}
+            />
+          </div>
+          <div className="connect-stage-notification-time">
+            <label htmlFor={`${id}-until`}>Until</label>
+            <input
+              id={`${id}-until`}
+              aria-label="Quiet hours until"
+              type="time"
+              value={end}
+              onInput={(event) => {
+                revision.current += 1
+                setEnd(event.currentTarget.value)
+              }}
+            />
+          </div>
         </div>
         <span className="connect-stage-notification-zone">{timeZone}</span>
         {settings.quietHours !== null ? (
-          <button
-            type="button"
-            className="connect-stage-notification-clear"
-            onClick={() => void save({ ...settings, quietHours: null })}
-          >
+          <button type="button" className="connect-stage-notification-clear" onClick={() => void clear()}>
             Clear
           </button>
         ) : null}
@@ -126,15 +169,11 @@ export const BlockedConnectSurface = ({
   const loaded = useAtomValue(notifications.settings)
   const saved = useAtomValue(notifications.save)
   const runSave = useAtomSet(notifications.save, { mode: "promiseExit" })
-  const saving = useRef(false)
-  const save = async (settings: BlockedPushSettings): Promise<boolean> => {
-    if (saving.current) return false
-    saving.current = true
-    try {
-      return Exit.isSuccess(await runSave(settings))
-    } finally {
-      saving.current = false
-    }
+  const saving = useRef(Promise.resolve())
+  const save = async (mutation: BlockedPushMutation): Promise<boolean> => {
+    const result = saving.current.then(() => runSave(mutation))
+    saving.current = result.then(() => undefined)
+    return Exit.isSuccess(await result)
   }
   const [heartbeat, report] = useAtom(notifications.heartbeat)
   const host = target?.host ?? null
@@ -171,12 +210,12 @@ export const BlockedConnectSurface = ({
   const name = AsyncResult.isSuccess(directory)
     ? directory.value.agents.find((agent) => agent.host === host && agent.id === agentId)?.name
     : undefined
-  const disabled = AsyncResult.isWaiting(saved)
+  const busy = AsyncResult.isWaiting(saved)
   const muted =
     settings !== null &&
     settings.mutedAgents.some((key) => key.host.toLowerCase() === host?.toLowerCase() && key.agentId === agentId)
   const footer = (
-    <section className="connect-stage-notifications" aria-label="Agent notifications">
+    <section className="connect-stage-notifications" aria-label="Agent notifications" aria-busy={busy}>
       <h3>Notifications</h3>
       {deviceState === "loading" || deviceState === "error" ? (
         <p className="connect-stage-notification-message" role="status">
@@ -203,18 +242,10 @@ export const BlockedConnectSurface = ({
             type="button"
             className="connect-stage-notification-mute"
             aria-pressed={muted}
-            disabled={disabled}
             onClick={() => {
               if (host === null || agentId === null) return
               const key = { host, agentId }
-              void save({
-                ...settings,
-                mutedAgents: muted
-                  ? settings.mutedAgents.filter(
-                      (entry) => entry.host.toLowerCase() !== host.toLowerCase() || entry.agentId !== agentId
-                    )
-                  : [...settings.mutedAgents, key]
-              })
+              void save({ _tag: "SetAgentMute", agent: key, muted: !muted })
             }}
           >
             <span>Mute this agent</span>
@@ -222,7 +253,7 @@ export const BlockedConnectSurface = ({
               <span />
             </span>
           </button>
-          <QuietHours key={JSON.stringify(settings.quietHours)} settings={settings} save={save} disabled={disabled} />
+          <QuietHours settings={settings} save={save} busy={busy} />
           <p className="connect-stage-notification-summary">
             {muted ? (
               <>

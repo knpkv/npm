@@ -8,7 +8,8 @@ import { createRoot, type Root } from "react-dom/client"
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest"
 import type { NotificationState } from "../src/approval-app-view.js"
 import { BlockedConnectSurface } from "../src/blocked-connect-surface.js"
-import { BlockedPushSettings, StageHeartbeat } from "../src/blocked-push-model.js"
+import type { BlockedPushSettings } from "../src/blocked-push-model.js"
+import { applyBlockedPushMutation, BlockedPushMutation, StageHeartbeat } from "../src/blocked-push-model.js"
 
 declare global {
   interface Window {
@@ -112,34 +113,47 @@ describe("canonical Connect stage notifications", () => {
   })
 })
 
+interface SettingsBackend {
+  settings: BlockedPushSettings
+}
+
 const openStage = async (
   initialSettings: BlockedPushSettings = { mutedAgents: [], quietHours: null },
   state: NotificationState | null = "enabled",
-  registered = true
+  registered = true,
+  options: { readonly agentId?: string; readonly backend?: SettingsBackend } = {}
 ) => {
   const writes: Array<BlockedPushSettings> = []
+  const backend = options.backend ?? { settings: initialSettings }
   let rejectSave = false
+  let rejectOnce = false
   let heldSave: Promise<void> | null = null
   fetchHandler = async (input, init) => {
     const url = Predicate.isString(input) ? input : "href" in input ? input.href : input.url
     const path = new URL(url, "http://localhost").pathname
     if (path === "/v1/push/blocked-settings") {
       if (
-        (init?.method ?? (Predicate.isString(input) || "href" in input ? "GET" : input.method)).toUpperCase() === "PUT"
+        (init?.method ?? (Predicate.isString(input) || "href" in input ? "GET" : input.method)).toUpperCase() ===
+        "PATCH"
       ) {
-        const settings = Schema.decodeUnknownSync(Schema.fromJsonString(BlockedPushSettings))(
+        const mutation = Schema.decodeUnknownSync(Schema.fromJsonString(BlockedPushMutation))(
           await new Response(init?.body).text()
         )
-        writes.push(settings)
+        writes.push(applyBlockedPushMutation(backend.settings, mutation))
         const held = heldSave
         heldSave = null
         if (held !== null) await held
-        return rejectSave ? new Response("{}", { status: 503 }) : new Response(JSON.stringify(settings))
+        if (rejectSave || rejectOnce) {
+          rejectOnce = false
+          return new Response("{}", { status: 503 })
+        }
+        backend.settings = applyBlockedPushMutation(backend.settings, mutation)
+        return new Response(JSON.stringify(backend.settings))
       }
-      return new Response(JSON.stringify(initialSettings))
+      return new Response(JSON.stringify(backend.settings))
     }
     if (path === "/v1/push/config")
-      return new Response(JSON.stringify({ canonicalUrl: "http://localhost/", enabled: true, publicKey: "test-key" }))
+      return new Response(JSON.stringify({ canonicalUrl: "http://localhost/", enabled: true, publicKey: "AQID" }))
     if (path === "/v1/push/subscriptions") return new Response(JSON.stringify({ subscribed: registered }))
     if (path === "/v1/push/stage-heartbeat") return new Response(JSON.stringify({ accepted: true }))
     if (path === "/v1/connect/agents")
@@ -148,7 +162,7 @@ const openStage = async (
           agents: [
             {
               host: "HOST-A",
-              id: "agent-one",
+              id: options.agentId ?? "agent-one",
               name: "worker",
               kind: "codex",
               state: "blocked",
@@ -187,8 +201,11 @@ const openStage = async (
       heldSave = gate.promise
       return gate.resolve
     },
-    rejectNextSave: () => {
+    rejectSaves: () => {
       rejectSave = true
+    },
+    rejectNextSave: () => {
+      rejectOnce = true
     }
   }
 }
@@ -224,6 +241,44 @@ describe("stage notification controls", () => {
     await settle()
     expect(fixture.writes.at(-1)?.mutedAgents).toEqual([{ host: "HOST-B", agentId: "agent-other" }])
     expect(muteButton()?.getAttribute("aria-pressed")).toBe("false")
+  })
+  it("preserves independent devices' agent mutes and quiet hours when their snapshots are stale", async () => {
+    const backend: SettingsBackend = { settings: { mutedAgents: [], quietHours: null } }
+    await openStage(undefined, "enabled", true, { backend, agentId: "agent-one" })
+    await openStage(undefined, "enabled", true, { backend, agentId: "agent-two" })
+    const panels = document.querySelectorAll("[aria-label='Agent notifications']")
+    expect(panels).toHaveLength(2)
+    const first = panels[0]
+    const second = panels[1]
+    await act(async () => first?.querySelector<HTMLButtonElement>("button[aria-pressed]")?.click())
+    await settle()
+    await act(async () => {
+      const from = first?.querySelector<HTMLInputElement>("input[aria-label='Quiet hours from']")
+      const until = first?.querySelector<HTMLInputElement>("input[aria-label='Quiet hours until']")
+      if (from !== null && from !== undefined && until !== null && until !== undefined) {
+        from.value = "22:00"
+        until.value = "07:00"
+        from.dispatchEvent(new Event("input", { bubbles: true }))
+        until.dispatchEvent(new Event("input", { bubbles: true }))
+      }
+    })
+    await settle()
+    await act(async () => first?.querySelector("input")?.dispatchEvent(new FocusEvent("focusout", { bubbles: true })))
+    await settle()
+    const quietHours = backend.settings.quietHours
+    expect(quietHours).not.toBeNull()
+    await act(async () => second?.querySelector<HTMLButtonElement>("button[aria-pressed]")?.click())
+    await settle()
+    expect(backend.settings).toEqual({
+      mutedAgents: [
+        { host: "HOST-A", agentId: "agent-one" },
+        { host: "HOST-A", agentId: "agent-two" }
+      ],
+      quietHours
+    })
+    await act(async () => second?.querySelector<HTMLButtonElement>("button[aria-pressed]")?.click())
+    await settle()
+    expect(backend.settings).toEqual({ mutedAgents: [{ host: "HOST-A", agentId: "agent-one" }], quietHours })
   })
   it("saves quiet hours in the user's zone only after both times are valid, then clears them", async () => {
     vi.spyOn(Intl.DateTimeFormat.prototype, "resolvedOptions").mockReturnValue({
@@ -306,7 +361,12 @@ describe("stage notification controls", () => {
       userAgent: "browser",
       serviceWorker: {
         getRegistration: async () => ({
-          pushManager: { getSubscription: async () => ({ endpoint: "https://push.example/subscription" }) }
+          pushManager: {
+            getSubscription: async () => ({
+              endpoint: "https://push.example/subscription",
+              options: { applicationServerKey: new Uint8Array([1, 2, 3]).buffer }
+            })
+          }
         })
       }
     })
@@ -321,7 +381,7 @@ describe("stage notification controls", () => {
     await act(async () => muteButton()?.click())
     await settle()
     expect(muteButton()?.getAttribute("aria-pressed")).toBe("true")
-    fixture.rejectNextSave()
+    fixture.rejectSaves()
     await act(async () => muteButton()?.click())
     await settle()
     expect(muteButton()?.getAttribute("aria-pressed")).toBe("true")
@@ -346,6 +406,40 @@ describe("stage notification controls", () => {
     expect(document.querySelector<HTMLInputElement>("input[aria-label='Quiet hours from']")?.value).toBe("22:00")
     expect(muteButton()?.getAttribute("aria-pressed")).toBe("true")
   })
+  it.each([null, new Uint8Array([3, 2, 1]).buffer])(
+    "treats a registered device with an older or missing push key as off",
+    async (applicationServerKey) => {
+      vi.stubGlobal("isSecureContext", true)
+      vi.stubGlobal("Notification", { permission: "granted" })
+      vi.stubGlobal("PushManager", function PushManager() {})
+      const unsubscribe = vi.fn(async () => true)
+      const subscribe = vi.fn()
+      vi.stubGlobal("navigator", {
+        language: "en",
+        userAgent: "browser",
+        serviceWorker: {
+          getRegistration: async () => ({
+            pushManager: {
+              subscribe,
+              getSubscription: async () => ({
+                endpoint: "https://push.example/subscription",
+                options: { applicationServerKey },
+                unsubscribe
+              })
+            }
+          })
+        }
+      })
+      const fixture = await openStage(undefined, null, true)
+      const panel = document.querySelector("[aria-label='Agent notifications']")
+      expect(muteButton()).toBeNull()
+      expect(panel?.textContent).toContain("Notifications are off on this device")
+      expect(panel?.querySelector("a")?.getAttribute("href")).toBe("/?#fleet/approvals")
+      expect(fixture.writes).toEqual([])
+      expect(unsubscribe).not.toHaveBeenCalled()
+      expect(subscribe).not.toHaveBeenCalled()
+    }
+  )
   it("omits controls for a standalone device whose subscription is not registered", async () => {
     vi.stubGlobal("isSecureContext", true)
     vi.stubGlobal("Notification", { permission: "granted" })
@@ -355,7 +449,12 @@ describe("stage notification controls", () => {
       userAgent: "browser",
       serviceWorker: {
         getRegistration: async () => ({
-          pushManager: { getSubscription: async () => ({ endpoint: "https://push.example/subscription" }) }
+          pushManager: {
+            getSubscription: async () => ({
+              endpoint: "https://push.example/subscription",
+              options: { applicationServerKey: new Uint8Array([1, 2, 3]).buffer }
+            })
+          }
         })
       }
     })
@@ -373,7 +472,122 @@ describe("stage notification controls", () => {
     expect(muteButton()).toBeNull()
   })
 
-  it("keeps the displayed state and disables controls while a save is pending", async () => {
+  it("applies a queued mute after a rejected blur without changing saved quiet hours", async () => {
+    const quietHours = { startMinute: 1320, endMinute: 420, timeZone: "Europe/Berlin" }
+    const fixture = await openStage({ mutedAgents: [], quietHours })
+    const from = document.querySelector<HTMLInputElement>("input[aria-label='Quiet hours from']")
+    await act(async () => {
+      if (from !== null) {
+        from.value = "23:00"
+        from.dispatchEvent(new Event("input", { bubbles: true }))
+      }
+    })
+    await settle()
+    fixture.rejectNextSave()
+    const release = fixture.holdNextSave()
+    try {
+      await act(async () => from?.dispatchEvent(new FocusEvent("focusout", { bubbles: true })))
+      await settle()
+      await act(async () => muteButton()?.click())
+      await settle()
+      expect(fixture.writes).toHaveLength(1)
+    } finally {
+      await act(async () => release())
+      await settle()
+    }
+    expect(fixture.writes).toHaveLength(2)
+    expect(fixture.writes.at(-1)).toEqual({
+      mutedAgents: [{ host: "HOST-A", agentId: "agent-one" }],
+      quietHours
+    })
+    expect(muteButton()?.getAttribute("aria-pressed")).toBe("true")
+    expect(from?.value).toBe("22:00")
+  })
+
+  it("keeps editor focus between times and across an Enter save without replacing inputs", async () => {
+    const fixture = await openStage({
+      mutedAgents: [],
+      quietHours: {
+        startMinute: 1320,
+        endMinute: 420,
+        timeZone: "Europe/Berlin"
+      }
+    })
+    const from = document.querySelector<HTMLInputElement>("input[aria-label='Quiet hours from']")
+    const until = document.querySelector<HTMLInputElement>("input[aria-label='Quiet hours until']")
+    await act(async () => {
+      from?.focus()
+      if (from !== null) {
+        from.value = "23:00"
+        from.dispatchEvent(new Event("input", { bubbles: true }))
+      }
+    })
+    await settle()
+    await act(async () => until?.focus())
+    await settle()
+    expect(fixture.writes).toHaveLength(0)
+    expect(document.activeElement).toBe(until)
+    const release = fixture.holdNextSave()
+    try {
+      await act(async () => until?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })))
+      await settle()
+      expect(fixture.writes).toHaveLength(1)
+      expect(document.activeElement).toBe(until)
+      expect(until?.disabled).toBe(false)
+      await act(async () => until?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })))
+      await settle()
+      expect(fixture.writes).toHaveLength(1)
+    } finally {
+      await act(async () => release())
+      await settle()
+    }
+    expect(document.querySelector("input[aria-label='Quiet hours from']")).toBe(from)
+    expect(document.querySelector("input[aria-label='Quiet hours until']")).toBe(until)
+    expect(document.activeElement).toBe(until)
+    expect(from?.value).toBe("23:00")
+  })
+
+  it("preserves a newer draft when an earlier save completes", async () => {
+    const fixture = await openStage({
+      mutedAgents: [],
+      quietHours: {
+        startMinute: 1320,
+        endMinute: 420,
+        timeZone: "Europe/Berlin"
+      }
+    })
+    const from = document.querySelector<HTMLInputElement>("input[aria-label='Quiet hours from']")
+    const change = async (value: string) => {
+      await act(async () => {
+        if (from !== null) {
+          from.value = value
+          from.dispatchEvent(new Event("input", { bubbles: true }))
+        }
+      })
+      await settle()
+    }
+    await change("23:00")
+    const release = fixture.holdNextSave()
+    try {
+      await act(async () => from?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })))
+      await settle()
+      expect(fixture.writes).toHaveLength(1)
+      await change("22:00")
+    } finally {
+      await act(async () => release())
+      await settle()
+    }
+    expect(from?.value).toBe("22:00")
+    expect(document.querySelector(".connect-stage-notification-summary")?.textContent).toBe(
+      "Quiet 23:00–07:00 Europe/Berlin"
+    )
+    await act(async () => from?.dispatchEvent(new FocusEvent("focusout", { bubbles: true })))
+    await settle()
+    expect(fixture.writes).toHaveLength(2)
+    expect(fixture.writes.at(-1)?.quietHours?.startMinute).toBe(1320)
+  })
+
+  it("keeps the saved display and marks it busy while controls accept further intents", async () => {
     const fixture = await openStage()
     const release = fixture.holdNextSave()
     try {
@@ -381,8 +595,8 @@ describe("stage notification controls", () => {
       await settle()
       expect(fixture.writes).toHaveLength(1)
       expect(muteButton()?.getAttribute("aria-pressed")).toBe("false")
-      expect(muteButton()?.disabled).toBe(true)
-      expect(document.querySelector<HTMLFieldSetElement>(".connect-stage-notification-quiet")?.disabled).toBe(true)
+      expect(muteButton()?.disabled).toBe(false)
+      expect(document.querySelector("[aria-label='Agent notifications']")?.getAttribute("aria-busy")).toBe("true")
       expect(document.querySelector("[aria-label='Agent notifications']")?.textContent).toContain(
         "Pushes on, no quiet hours"
       )
@@ -393,7 +607,7 @@ describe("stage notification controls", () => {
     expect(muteButton()?.getAttribute("aria-pressed")).toBe("true")
   })
 
-  it("keeps a blur save when another control is clicked before the pending render", async () => {
+  it.each(["Mute", "Clear"])("queues %s clicked during a blur save and preserves both intents", async (action) => {
     const fixture = await openStage({
       mutedAgents: [],
       quietHours: { startMinute: 1320, endMinute: 420, timeZone: "Europe/Berlin" }
@@ -410,7 +624,8 @@ describe("stage notification controls", () => {
     try {
       await act(async () => {
         from?.dispatchEvent(new FocusEvent("focusout", { bubbles: true }))
-        muteButton()?.click()
+        if (action === "Mute") muteButton()?.click()
+        else document.querySelector<HTMLButtonElement>(".connect-stage-notification-clear")?.click()
       })
       await settle()
       expect(fixture.writes).toEqual([
@@ -423,9 +638,11 @@ describe("stage notification controls", () => {
       await act(async () => release())
       await settle()
     }
-    expect(muteButton()?.getAttribute("aria-pressed")).toBe("false")
-    expect(document.querySelector("[aria-label='Agent notifications']")?.textContent).toContain(
-      "Quiet 23:00–07:00 Europe/Berlin"
-    )
+    expect(fixture.writes).toHaveLength(2)
+    expect(fixture.writes.at(-1)).toEqual({
+      mutedAgents: action === "Mute" ? [{ host: "HOST-A", agentId: "agent-one" }] : [],
+      quietHours: action === "Mute" ? { startMinute: 1380, endMinute: 420, timeZone: "Europe/Berlin" } : null
+    })
+    expect(muteButton()?.getAttribute("aria-pressed")).toBe(action === "Mute" ? "true" : "false")
   })
 })

@@ -2,8 +2,10 @@ import { decodeBoundedResponseJson } from "@knpkv/herdr-fleet/response"
 import { Effect, Schema } from "effect"
 import { HttpClient, HttpClientRequest } from "effect/http"
 import type { NotificationState } from "./approval-app-view.js"
+import type { BlockedPushMutation } from "./blocked-push-model.js"
 import { BlockedPushSettings, StageHeartbeat } from "./blocked-push-model.js"
 import { PushPublicConfiguration, PushSubscriptionStatus } from "./model.js"
+import { applicationServerKey, applicationServerKeysEqual } from "./push-subscription.js"
 
 export class BlockedNotificationClientError
   extends Schema.TaggedError<BlockedNotificationClientError>()("BlockedNotificationClientError", {
@@ -13,12 +15,12 @@ export class BlockedNotificationClientError
 {}
 const failed = (operation: string) => (cause: unknown) => new BlockedNotificationClientError({ operation, cause })
 
-const requestSettings = Effect.fn("BlockedNotificationClient.settings")(function*(settings?: BlockedPushSettings) {
+const requestSettings = Effect.fn("BlockedNotificationClient.settings")(function*(mutation?: BlockedPushMutation) {
   const client = yield* HttpClient.HttpClient
-  const request = settings === undefined
+  const request = mutation === undefined
     ? HttpClientRequest.get("/v1/push/blocked-settings")
-    : yield* HttpClientRequest.put("/v1/push/blocked-settings").pipe(
-      HttpClientRequest.bodyJson(settings),
+    : yield* HttpClientRequest.patch("/v1/push/blocked-settings").pipe(
+      HttpClientRequest.bodyJson(mutation),
       Effect.mapError(failed("settings.encode"))
     )
   const response = yield* client.execute(request).pipe(Effect.mapError(failed("settings.request")))
@@ -30,7 +32,7 @@ const requestSettings = Effect.fn("BlockedNotificationClient.settings")(function
   )
 })
 export const loadBlockedSettings = requestSettings()
-export const saveBlockedSettings = (settings: BlockedPushSettings) => requestSettings(settings)
+export const mutateBlockedSettings = (mutation: BlockedPushMutation) => requestSettings(mutation)
 
 export const reportStageHeartbeat = Effect.fn("BlockedNotificationClient.heartbeat")(function*(input: StageHeartbeat) {
   const body = yield* Schema.decodeUnknownEffect(StageHeartbeat)(input).pipe(
@@ -73,6 +75,12 @@ export const loadBlockedDevicePushState = Effect.gen(function*() {
     catch: failed("device.subscription")
   })
   if (subscription === null) return "disabled"
+  const publicKey = config.publicKey
+  const expectedKey = yield* Effect.try({
+    try: () => applicationServerKey(publicKey),
+    catch: failed("device.key")
+  })
+  if (!applicationServerKeysEqual(subscription.options.applicationServerKey, expectedKey)) return "disabled"
   const statusResponse = yield* client.get(
     `/v1/push/subscriptions?endpoint=${encodeURIComponent(subscription.endpoint)}`
   ).pipe(Effect.mapError(failed("device.status.request")))
