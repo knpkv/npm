@@ -687,6 +687,7 @@ const DashboardApp = ({
         ])}
         atoms={atoms.connect}
         embedded
+        notificationState={notificationState}
       />
     ) : (
       <ConnectSurface

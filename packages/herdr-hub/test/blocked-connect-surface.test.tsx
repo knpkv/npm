@@ -5,9 +5,10 @@ import { makeConnectAtoms } from "@knpkv/herdr-connect/surface"
 import { Predicate, Schema } from "effect"
 import { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest"
+import type { NotificationState } from "../src/approval-app-view.js"
 import { BlockedConnectSurface } from "../src/blocked-connect-surface.js"
-import { StageHeartbeat } from "../src/blocked-push-model.js"
+import { BlockedPushSettings, StageHeartbeat } from "../src/blocked-push-model.js"
 
 declare global {
   interface Window {
@@ -17,6 +18,11 @@ declare global {
 window.IS_REACT_ACT_ENVIRONMENT = true
 const roots: Array<Root> = []
 const originalFetch = window.fetch
+let fetchHandler: typeof window.fetch = originalFetch
+window.fetch = (...args) => fetchHandler(...args)
+afterAll(() => {
+  window.fetch = originalFetch
+})
 afterEach(async () => {
   await act(async () => {
     for (const root of roots) root.unmount()
@@ -24,8 +30,9 @@ afterEach(async () => {
   roots.length = 0
   document.body.replaceChildren()
   window.localStorage.clear()
-  window.fetch = originalFetch
+  fetchHandler = originalFetch
   vi.restoreAllMocks()
+  vi.unstubAllGlobals()
   vi.useRealTimers()
 })
 const settle = async (): Promise<void> => {
@@ -39,7 +46,7 @@ describe("canonical Connect stage notifications", () => {
     vi.useFakeTimers()
     const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible")
     const heartbeats: Array<typeof StageHeartbeat.Type> = []
-    window.fetch = async (input, init) => {
+    fetchHandler = async (input, init) => {
       const url = Predicate.isString(input) ? input : "href" in input ? input.href : input.url
       const path = new URL(url, "http://localhost").pathname
       if (path === "/v1/push/stage-heartbeat") {
@@ -87,7 +94,7 @@ describe("canonical Connect stage notifications", () => {
     expect(heartbeats.at(-1)?.target).toEqual({ host: "HOST-A", agentId: "agent-one" })
     expect(document.querySelector("[role='dialog']")?.textContent).not.toContain("Mute this agent")
     expect(document.querySelector("[role='dialog']")?.textContent).not.toContain("Quiet hours")
-    expect(document.querySelector("[aria-label='Agent notifications']")).toBeNull()
+    expect(document.querySelector("[aria-label='Agent notifications']")?.textContent).toContain("Notifications")
     visibility.mockReturnValue("hidden")
     await act(async () => document.dispatchEvent(new Event("visibilitychange")))
     await settle()
@@ -102,5 +109,323 @@ describe("canonical Connect stage notifications", () => {
     await act(async () => document.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Escape" })))
     await settle()
     expect(heartbeats.at(-1)?.target).toBeNull()
+  })
+})
+
+const openStage = async (
+  initialSettings: BlockedPushSettings = { mutedAgents: [], quietHours: null },
+  state: NotificationState | null = "enabled",
+  registered = true
+) => {
+  const writes: Array<BlockedPushSettings> = []
+  let rejectSave = false
+  let heldSave: Promise<void> | null = null
+  fetchHandler = async (input, init) => {
+    const url = Predicate.isString(input) ? input : "href" in input ? input.href : input.url
+    const path = new URL(url, "http://localhost").pathname
+    if (path === "/v1/push/blocked-settings") {
+      if (
+        (init?.method ?? (Predicate.isString(input) || "href" in input ? "GET" : input.method)).toUpperCase() === "PUT"
+      ) {
+        const settings = Schema.decodeUnknownSync(Schema.fromJsonString(BlockedPushSettings))(
+          await new Response(init?.body).text()
+        )
+        writes.push(settings)
+        const held = heldSave
+        heldSave = null
+        if (held !== null) await held
+        return rejectSave ? new Response("{}", { status: 503 }) : new Response(JSON.stringify(settings))
+      }
+      return new Response(JSON.stringify(initialSettings))
+    }
+    if (path === "/v1/push/config")
+      return new Response(JSON.stringify({ canonicalUrl: "http://localhost/", enabled: true, publicKey: "test-key" }))
+    if (path === "/v1/push/subscriptions") return new Response(JSON.stringify({ subscribed: registered }))
+    if (path === "/v1/push/stage-heartbeat") return new Response(JSON.stringify({ accepted: true }))
+    if (path === "/v1/connect/agents")
+      return new Response(
+        JSON.stringify({
+          agents: [
+            {
+              host: "HOST-A",
+              id: "agent-one",
+              name: "worker",
+              kind: "codex",
+              state: "blocked",
+              work: "project",
+              lastActivityAt: 0
+            }
+          ],
+          failures: [],
+          nextCursor: null
+        })
+      )
+    return new Response("{}", { status: 404 })
+  }
+  const host = document.createElement("div")
+  document.body.append(host)
+  const root = createRoot(host)
+  roots.push(root)
+  await act(async () =>
+    root.render(
+      <RegistryProvider>
+        {state === null ? (
+          <BlockedConnectSurface atoms={makeConnectAtoms()} />
+        ) : (
+          <BlockedConnectSurface atoms={makeConnectAtoms()} notificationState={state} />
+        )}
+      </RegistryProvider>
+    )
+  )
+  await settle()
+  await act(async () => host.querySelector<HTMLButtonElement>(".connect-agent")?.click())
+  await settle()
+  return {
+    writes,
+    holdNextSave: () => {
+      const gate = Promise.withResolvers<void>()
+      heldSave = gate.promise
+      return gate.resolve
+    },
+    rejectNextSave: () => {
+      rejectSave = true
+    }
+  }
+}
+
+const muteButton = () =>
+  document.querySelector<HTMLButtonElement>("[aria-label='Agent notifications'] button[aria-pressed]")
+
+describe("stage notification controls", () => {
+  it("saves the selected agent mute and renders its saved state without affecting other agents", async () => {
+    const fixture = await openStage({ mutedAgents: [{ host: "HOST-B", agentId: "agent-other" }], quietHours: null })
+    expect(muteButton()?.textContent).toBe("Mute this agent")
+    expect(muteButton()?.getAttribute("aria-pressed")).toBe("false")
+    await act(async () => muteButton()?.click())
+    await settle()
+    expect(fixture.writes).toEqual([
+      {
+        mutedAgents: [
+          { host: "HOST-B", agentId: "agent-other" },
+          { host: "HOST-A", agentId: "agent-one" }
+        ],
+        quietHours: null
+      }
+    ])
+    expect(muteButton()?.getAttribute("aria-pressed")).toBe("true")
+    expect(document.querySelector("[aria-label='Agent notifications']")?.textContent).toContain(
+      "Muted You won't get pushes from worker."
+    )
+    const summary = document.querySelector(".connect-stage-notification-summary")
+    expect(summary?.children).toHaveLength(2)
+    expect(summary?.children[0]?.textContent).toBe("Muted")
+    expect(summary?.children[1]?.textContent).toBe("You won't get pushes from worker.")
+    await act(async () => muteButton()?.click())
+    await settle()
+    expect(fixture.writes.at(-1)?.mutedAgents).toEqual([{ host: "HOST-B", agentId: "agent-other" }])
+    expect(muteButton()?.getAttribute("aria-pressed")).toBe("false")
+  })
+  it("saves quiet hours in the user's zone only after both times are valid, then clears them", async () => {
+    vi.spyOn(Intl.DateTimeFormat.prototype, "resolvedOptions").mockReturnValue({
+      locale: "en",
+      calendar: "gregory",
+      numberingSystem: "latn",
+      timeZone: "Europe/Berlin",
+      year: "numeric"
+    })
+    const fixture = await openStage()
+    const from = document.querySelector<HTMLInputElement>("input[aria-label='Quiet hours from']")
+    const until = document.querySelector<HTMLInputElement>("input[aria-label='Quiet hours until']")
+    expect(from?.value).toBe("")
+    expect(until?.value).toBe("")
+    await act(async () => {
+      if (from !== null) {
+        from.value = "22:00"
+        from.dispatchEvent(new Event("input", { bubbles: true }))
+      }
+    })
+    await settle()
+    await act(async () => from?.dispatchEvent(new FocusEvent("focusout", { bubbles: true })))
+    await settle()
+    expect(fixture.writes).toEqual([])
+    await act(async () => {
+      if (until !== null) {
+        until.value = "07:00"
+        until.dispatchEvent(new Event("input", { bubbles: true }))
+      }
+    })
+    await settle()
+    await act(async () => until?.dispatchEvent(new FocusEvent("focusout", { bubbles: true })))
+    await settle()
+    expect(fixture.writes.at(-1)).toEqual({
+      mutedAgents: [],
+      quietHours: { startMinute: 1320, endMinute: 420, timeZone: "Europe/Berlin" }
+    })
+    expect(document.querySelector("[aria-label='Agent notifications']")?.textContent).toContain(
+      "Quiet 22:00–07:00 Europe/Berlin"
+    )
+    await act(async () => document.querySelector<HTMLButtonElement>(".connect-stage-notification-clear")?.click())
+    await settle()
+    expect(fixture.writes.at(-1)?.quietHours).toBeNull()
+    expect(document.querySelector<HTMLInputElement>("input[aria-label='Quiet hours from']")?.value).toBe("")
+    expect(document.querySelector("[aria-label='Agent notifications']")?.textContent).toContain(
+      "Pushes on, no quiet hours"
+    )
+  })
+  it("omits controls when push is off and links to Approvals", async () => {
+    await openStage(undefined, "disabled")
+    const panel = document.querySelector("[aria-label='Agent notifications']")
+    expect(panel?.textContent).toContain("Notifications are off on this device")
+    expect(panel?.querySelector("button")).toBeNull()
+    expect(panel?.querySelector("input")).toBeNull()
+    const link = panel?.querySelector<HTMLAnchorElement>("a")
+    expect(link?.textContent).toContain("Turn on notifications in Approvals")
+    expect(link?.getAttribute("href")).toBe("/?#fleet/approvals")
+  })
+  it("keeps the off-device link arrow decorative and separate from its text", async () => {
+    await openStage(undefined, "disabled")
+    const link = document.querySelector<HTMLAnchorElement>(".connect-stage-notification-off a")
+    expect(link?.textContent).toBe("Turn on notifications in Approvals")
+    expect(link?.querySelector(":scope > span")?.textContent).toBe("Turn on notifications in Approvals")
+    expect(link?.querySelector(":scope > svg")?.getAttribute("aria-hidden")).toBe("true")
+  })
+  it("uses the plain decorative dash for an off-device state", async () => {
+    await openStage(undefined, "disabled")
+    const mark = document.querySelector(".connect-stage-notification-off-mark")
+    expect(mark?.tagName.toLowerCase()).toBe("svg")
+    expect(mark?.getAttribute("aria-hidden")).toBe("true")
+    expect(mark?.querySelector("circle")).toBeNull()
+    expect(mark?.textContent).toBe("")
+  })
+  it("checks the standalone device subscription before showing push controls", async () => {
+    vi.stubGlobal("isSecureContext", true)
+    vi.stubGlobal("Notification", { permission: "granted" })
+    vi.stubGlobal("PushManager", function PushManager() {})
+    vi.stubGlobal("navigator", {
+      language: "en",
+      userAgent: "browser",
+      serviceWorker: {
+        getRegistration: async () => ({
+          pushManager: { getSubscription: async () => ({ endpoint: "https://push.example/subscription" }) }
+        })
+      }
+    })
+    await openStage(undefined, null)
+    expect(muteButton()?.getAttribute("aria-pressed")).toBe("false")
+  })
+  it("keeps the last saved mute and quiet hours after rejected changes and shows the error", async () => {
+    const fixture = await openStage({
+      mutedAgents: [],
+      quietHours: { startMinute: 1320, endMinute: 420, timeZone: "Europe/Berlin" }
+    })
+    await act(async () => muteButton()?.click())
+    await settle()
+    expect(muteButton()?.getAttribute("aria-pressed")).toBe("true")
+    fixture.rejectNextSave()
+    await act(async () => muteButton()?.click())
+    await settle()
+    expect(muteButton()?.getAttribute("aria-pressed")).toBe("true")
+    expect(document.querySelector("[aria-label='Agent notifications']")?.textContent).toContain(
+      "Couldn't save notification settings."
+    )
+    const from = document.querySelector<HTMLInputElement>("input[aria-label='Quiet hours from']")
+    expect(from?.value).toBe("22:00")
+    await act(async () => {
+      if (from !== null) {
+        from.value = "23:00"
+        from.dispatchEvent(new Event("input", { bubbles: true }))
+      }
+    })
+    await settle()
+    await act(async () => from?.dispatchEvent(new FocusEvent("focusout", { bubbles: true })))
+    await settle()
+    expect(fixture.writes.at(-1)?.quietHours?.startMinute).toBe(1380)
+    expect(document.querySelector<HTMLInputElement>("input[aria-label='Quiet hours from']")?.value).toBe("22:00")
+    await act(async () => document.querySelector<HTMLButtonElement>(".connect-stage-notification-clear")?.click())
+    await settle()
+    expect(document.querySelector<HTMLInputElement>("input[aria-label='Quiet hours from']")?.value).toBe("22:00")
+    expect(muteButton()?.getAttribute("aria-pressed")).toBe("true")
+  })
+  it("omits controls for a standalone device whose subscription is not registered", async () => {
+    vi.stubGlobal("isSecureContext", true)
+    vi.stubGlobal("Notification", { permission: "granted" })
+    vi.stubGlobal("PushManager", function PushManager() {})
+    vi.stubGlobal("navigator", {
+      language: "en",
+      userAgent: "browser",
+      serviceWorker: {
+        getRegistration: async () => ({
+          pushManager: { getSubscription: async () => ({ endpoint: "https://push.example/subscription" }) }
+        })
+      }
+    })
+    await openStage(undefined, null, false)
+    expect(muteButton()).toBeNull()
+    expect(document.querySelector("[aria-label='Agent notifications']")?.textContent).toContain(
+      "Notifications are off on this device"
+    )
+  })
+  it("shows a failed device check without pretending push is enabled or off", async () => {
+    await openStage(undefined, "error")
+    const panel = document.querySelector("[aria-label='Agent notifications']")
+    expect(panel?.textContent).toContain("Couldn't check notifications on this device.")
+    expect(panel?.textContent).not.toContain("Notifications are off on this device")
+    expect(muteButton()).toBeNull()
+  })
+
+  it("keeps the displayed state and disables controls while a save is pending", async () => {
+    const fixture = await openStage()
+    const release = fixture.holdNextSave()
+    try {
+      await act(async () => muteButton()?.click())
+      await settle()
+      expect(fixture.writes).toHaveLength(1)
+      expect(muteButton()?.getAttribute("aria-pressed")).toBe("false")
+      expect(muteButton()?.disabled).toBe(true)
+      expect(document.querySelector<HTMLFieldSetElement>(".connect-stage-notification-quiet")?.disabled).toBe(true)
+      expect(document.querySelector("[aria-label='Agent notifications']")?.textContent).toContain(
+        "Pushes on, no quiet hours"
+      )
+    } finally {
+      await act(async () => release())
+      await settle()
+    }
+    expect(muteButton()?.getAttribute("aria-pressed")).toBe("true")
+  })
+
+  it("keeps a blur save when another control is clicked before the pending render", async () => {
+    const fixture = await openStage({
+      mutedAgents: [],
+      quietHours: { startMinute: 1320, endMinute: 420, timeZone: "Europe/Berlin" }
+    })
+    const from = document.querySelector<HTMLInputElement>("input[aria-label='Quiet hours from']")
+    await act(async () => {
+      if (from !== null) {
+        from.value = "23:00"
+        from.dispatchEvent(new Event("input", { bubbles: true }))
+      }
+    })
+    await settle()
+    const release = fixture.holdNextSave()
+    try {
+      await act(async () => {
+        from?.dispatchEvent(new FocusEvent("focusout", { bubbles: true }))
+        muteButton()?.click()
+      })
+      await settle()
+      expect(fixture.writes).toEqual([
+        {
+          mutedAgents: [],
+          quietHours: { startMinute: 1380, endMinute: 420, timeZone: "Europe/Berlin" }
+        }
+      ])
+    } finally {
+      await act(async () => release())
+      await settle()
+    }
+    expect(muteButton()?.getAttribute("aria-pressed")).toBe("false")
+    expect(document.querySelector("[aria-label='Agent notifications']")?.textContent).toContain(
+      "Quiet 23:00–07:00 Europe/Berlin"
+    )
   })
 })
