@@ -1,0 +1,68 @@
+{
+  "projectId": "131e6fac-c44d-4016-a1cb-f38e943dd304",
+  "pkg": "@knpkv/codecommit-web-design-system",
+  "globalName": "CodeCommitWeb",
+  "shape": "package",
+  "entry": "./.design-sync/app/index.js",
+  "buildCmd": "pnpm --filter \"@knpkv/codecommit-web...\" build",
+  "extraEntries": ["../../.design-sync/entries/styles.mjs"],
+  "extraFonts": ["../entries/geist-aliases.css"],
+  "provider": {
+    "component": "ThemeProvider",
+    "props": {
+      "theme": "light"
+    },
+    "inner": {
+      "component": "PortalProvider",
+      "inner": {
+        "component": "MemoryRouter"
+      }
+    }
+  },
+  "componentSrcMap": {
+    "ThemeProvider": null,
+    "PortalProvider": null,
+    "MemoryRouter": null,
+    "ConfigUnavailableView": "../../src/client/components/config-unavailable-view.tsx",
+    "DateRangePicker": "../../src/client/components/date-range-picker.tsx",
+    "FilterSelectionIndicator": "../../src/client/components/filter-selection-indicator.tsx",
+    "FindingsDrawer": "../../src/client/components/findings-drawer.tsx",
+    "PRRow": "../../src/client/components/pr-row.tsx",
+    "RollingStatus": "../../src/client/components/rolling-status.tsx",
+    "SandboxViewContent": "../../src/client/components/sandbox-view-content.tsx",
+    "SandboxesPageView": "../../src/client/components/sandboxes-page-view.tsx",
+    "SettingsAbout": "../../src/client/components/settings-about.tsx",
+    "SettingsNotifications": "../../src/client/components/settings-notifications.tsx",
+    "SettingsRelayView": "../../src/client/components/settings-relay-view.tsx",
+    "SettingsSandboxView": "../../src/client/components/settings-sandbox-view.tsx",
+    "SettingsTheme": "../../src/client/components/settings-theme.tsx",
+    "HealthCard": "../../src/client/components/stats-charts.tsx",
+    "KPICard": "../../src/client/components/stats-charts.tsx",
+    "MostActivePRs": "../../src/client/components/stats-charts.tsx",
+    "RankingChart": "../../src/client/components/stats-charts.tsx",
+    "SizeDistributionChart": "../../src/client/components/stats-charts.tsx",
+    "StalePRs": "../../src/client/components/stats-charts.tsx",
+    "WorkbenchRailView": "../../src/client/components/workbench-rail-view.tsx"
+  },
+  "libOverrides": {
+    "dts.mjs": "components are re-exported through an aggregator entry; their own callback/aria props were dropped as inherited DOM noise"
+  },
+  "readmeHeader": ".design-sync/conventions.md",
+  "overrides": {
+    "FindingsDrawer": {
+      "cardMode": "single",
+      "primaryStory": "TwoFindings"
+    },
+    "SettingsRelayView": {
+      "cardMode": "column",
+      "viewport": "900x1200"
+    },
+    "SettingsSandboxView": {
+      "cardMode": "column",
+      "viewport": "900x1200"
+    },
+    "PRRow": {
+      "cardMode": "column"
+    }
+  }
+}
