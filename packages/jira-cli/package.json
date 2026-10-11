@@ -77,7 +77,7 @@
   "devDependencies": {
     "@effect/vitest": "4.0.0",
     "@types/js-yaml": "^4.0.9",
-    "@types/node": "latest",
+    "@types/node": "catalog:",
     "effect": "4.0.0",
     "typescript": "npm:@typescript/typescript6@^6.0.2",
     "vitest": "catalog:"
