@@ -424,7 +424,10 @@ view, and preserves many-to-many Jira keys and missing links as data.
 CodePipeline, Confluence, and Clockify pages while leaving every page body and
 action application-owned. `EntityTable` provides controlled sorting and
 complete ready, loading, empty, not-found, stale, partial, error, and
-unavailable presentations. `TimelineRow` distinguishes human, agent, plugin,
+unavailable presentations. Set a row's optional `selected` field to expose
+`data-selected="true"` on its table or card row; false or omitted clears the
+attribute. Applications own the selection styling and accessible state on the
+row's controls. `TimelineRow` distinguishes human, agent, plugin,
 and system actors in a semantic activity list.
 
 ```tsx

@@ -78,6 +78,54 @@ test("picking a booking draws only it, and Show all brings the rest back", async
   await expect(page.getByTestId("usage-total")).toHaveText("$8.10")
 })
 
+for (const width of [320, 1440]) {
+  test(`only the selected booking is tinted, and pressing it again clears the tint at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 1000 })
+    await signIn(page)
+    const table = page.getByRole("table", { name: "Bookings" })
+    const ticket = table.getByRole("button", { name: "RPS-12", exact: true })
+    const repo = table.getByRole("button", { name: "tools (repo)", exact: true })
+    // `has` resolves relative to each row, so the inner locators start from the page.
+    const ticketRow = table.getByRole("row").filter({ has: page.getByRole("button", { name: "RPS-12", exact: true }) })
+    const repoRow = table.getByRole("row").filter({
+      has: page.getByRole("button", { name: "tools (repo)", exact: true })
+    })
+    const selectedRows = table.getByRole("row").filter({ has: page.getByRole("button", { pressed: true }) })
+    const markedRows = table.locator("tbody tr[data-selected=\"true\"]")
+    const ticketBackground = await ticketRow.evaluate((row) => getComputedStyle(row).backgroundColor)
+    const repoBackground = await repoRow.evaluate((row) => getComputedStyle(row).backgroundColor)
+    await expect(selectedRows).toHaveCount(0)
+    await expect(table.locator("tbody tr[data-selected]")).toHaveCount(0)
+
+    await ticket.click()
+    await expect(ticket).toHaveAttribute("aria-pressed", "true")
+    await expect(selectedRows).toHaveCount(1)
+    await expect(markedRows).toHaveCount(1)
+    await expect(ticketRow).toHaveAttribute("data-selected", "true")
+    await expect.poll(() => ticketRow.evaluate((row) => getComputedStyle(row).backgroundColor)).not.toBe(
+      ticketBackground
+    )
+    await expect(repoRow).toHaveCSS("background-color", repoBackground)
+
+    await repo.click()
+    await expect(repo).toHaveAttribute("aria-pressed", "true")
+    await expect(ticket).toHaveAttribute("aria-pressed", "false")
+    await expect(selectedRows).toHaveCount(1)
+    await expect(markedRows).toHaveCount(1)
+    await expect(repoRow).toHaveAttribute("data-selected", "true")
+    await expect(ticketRow).not.toHaveAttribute("data-selected")
+    await expect(ticketRow).toHaveCSS("background-color", ticketBackground)
+    await expect.poll(() => repoRow.evaluate((row) => getComputedStyle(row).backgroundColor)).not.toBe(repoBackground)
+
+    await repo.click()
+    await expect(repo).toHaveAttribute("aria-pressed", "false")
+    await expect(selectedRows).toHaveCount(0)
+    await expect(table.locator("tbody tr[data-selected]")).toHaveCount(0)
+    await expect(ticketRow).toHaveCSS("background-color", ticketBackground)
+    await expect(repoRow).toHaveCSS("background-color", repoBackground)
+  })
+}
+
 test("all-unpriced requests remain usage, with a warning and a token chart", async ({ page }) => {
   await replaceUsage(page, (report) => ({
     ...report,

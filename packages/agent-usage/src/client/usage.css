@@ -150,7 +150,7 @@
   font-weight: 500;
 }
 
-.usage-table tr[data-selected="true"] {
+.usage-bookings tr[data-selected="true"] {
   background: var(--rly-color-surface-2);
 }
 

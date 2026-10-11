@@ -33,6 +33,28 @@ const rowAt = (index: number): RlyEntityTableRow => ({
 const twenty = Array.from({ length: 20 }, (_, index) => rowAt(index))
 
 describe("EntityTable", () => {
+  it("marks only selected rows and clears the attribute when selection is removed", async () => {
+    const host = document.createElement("div")
+    document.body.append(host)
+    const root = createRoot(host)
+    const first = rowAt(0)
+    const second = rowAt(1)
+    const third = rowAt(2)
+    const table = (rows: ReadonlyArray<RlyEntityTableRow>) => (
+      <EntityTable columns={columns} data={{ rows, state: "ready" }} heading="Items" onSortChange={() => undefined} />
+    )
+    await act(async () => root.render(table([{ ...first, selected: true }, { ...second, selected: false }, third])))
+    expect(host.querySelectorAll('tbody tr[data-selected="true"]')).toHaveLength(1)
+    expect(host.querySelector('[data-rly-entity-row-id="entity-1"]')?.getAttribute("data-selected")).toBe("true")
+    expect(host.querySelector('[data-rly-entity-row-id="entity-2"]')?.hasAttribute("data-selected")).toBe(false)
+    expect(host.querySelector('[data-rly-entity-row-id="entity-3"]')?.hasAttribute("data-selected")).toBe(false)
+
+    await act(async () => root.render(table([{ ...first, selected: false }, second, third])))
+    expect(host.querySelectorAll("tbody tr")).toHaveLength(3)
+    expect(host.querySelectorAll("tbody tr[data-selected]")).toHaveLength(0)
+    await act(async () => root.unmount())
+  })
+
   it("renders a labelled native table with controlled sort semantics", async () => {
     const host = document.createElement("div")
     document.body.append(host)

@@ -132,6 +132,7 @@ export const BookingTable = (props: BookingTableProps) => {
   }
   const rows = sortBookings(props.bookings, effectiveSort).map((summary): RlyEntityTableRow => ({
     id: summary.id,
+    selected: props.selected === summary.id,
     cells: shown.map((column) => ({ columnId: column, content: cell(summary, column) }))
   }))
   if (first === undefined) return null
