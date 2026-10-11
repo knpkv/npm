@@ -271,6 +271,7 @@ jobs:
           - codecommit-web
           - control-center
           - herdr-connect
+          - herdr-hub
           - herdr-monitor
           - herdr-work
           - jcf-web

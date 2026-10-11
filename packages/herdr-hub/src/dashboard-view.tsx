@@ -22,6 +22,7 @@ export type DashboardViewProps = {
   readonly sendingDecision?: ApprovalDecision | null
   readonly notificationState: NotificationState
   readonly historyLoading?: boolean
+  readonly refreshFailed?: boolean
   readonly pendingLoading?: boolean
   readonly onDecision: ((decision: ApprovalDecision) => void) | undefined
   readonly onDisableNotifications: (() => void) | undefined
@@ -452,6 +453,7 @@ export const DashboardView = ({
   onRefresh,
   pendingLoading = false,
   pull,
+  refreshFailed = false,
   sendingDecision = null,
   showHeader = true,
   snapshot
@@ -559,6 +561,7 @@ export const DashboardView = ({
             onLoadPending={onLoadPending}
             onRevalidate={onRefresh}
             pendingLoading={pendingLoading}
+            refreshFailed={refreshFailed}
             sending={sendingDecision}
             snapshot={snapshot}
           />
