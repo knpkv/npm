@@ -17,5 +17,6 @@ const stdout =
 - `limitBytes(stream, limit)` passes chunks through and fails once the running total exceeds `limit`.
 - `collectBounded(stream, limit)` collects into one `Uint8Array`.
 - `collectBoundedText(stream, limit)` collects and decodes UTF-8 exactly like `Stream.decodeText` + `Stream.mkString`: invalid sequences become U+FFFD and a truncated sequence at the very end is dropped.
+- `collectTail(stream, limit)` and `collectTailText(stream, limit)` never fail for size. They read the stream to its end and keep only the last `limit` bytes, with `omittedBytes` counting the rest; the text form starts on a character boundary. Use them for output whose end matters and that nothing parses, such as a build log, when stopping the producer at the cap would be worse than dropping its beginning.
 
 `limit` is inclusive: exactly `limit` bytes succeed. `observedBytes` is the running total at the chunk that crossed it. The package has no Node imports and runs in browsers.

@@ -1,4 +1,4 @@
-import { collectBoundedText, limitBytes } from "@knpkv/bounded-io"
+import { collectBoundedText, collectTailText, limitBytes, type TextTail } from "@knpkv/bounded-io"
 import { AgentWorkLabel } from "@knpkv/herdr-connect"
 import { makeCoordinatorLifecycle } from "@knpkv/herdr-coordinator"
 import {
@@ -63,6 +63,26 @@ const operationError = (operation: string) => (cause: unknown) =>
  * six JSON bytes beside the largest accepted job payload.
  */
 export const commandOutputMaxBytes = 128 * 1024
+
+/**
+ * The end of a build's output kept per stream. Smaller than
+ * {@link commandOutputMaxBytes}, leaving room for the omission line and the
+ * exit code around it.
+ */
+export const commandOutputTailBytes = 64 * 1024
+
+/**
+ * How a command's output is read. `whole` is for output a caller parses: past
+ * {@link commandOutputMaxBytes} the job fails, and the command is stopped.
+ * `tail` is for a build log nothing parses: the command runs to completion,
+ * its exit code alone decides the outcome, and only the last
+ * {@link commandOutputTailBytes} of each stream are kept.
+ */
+type OutputPolicy = "whole" | "tail"
+
+/** A kept tail, led by how much came before it when anything did. */
+const framedTail = ({ omittedBytes, text }: TextTail): string =>
+  omittedBytes === 0 ? text : `[${String(omittedBytes)} earlier bytes omitted]\n${text}`
 
 type AgentLineage = Pick<
   typeof AgentSummary.Type,
@@ -146,9 +166,21 @@ export const makeHostOperations = Effect.fn("HostOperations.make")(function*(
       )
     )
 
+  const collectWithPolicy = (
+    policy: OutputPolicy,
+    operation: string,
+    stream: Stream.Stream<Uint8Array, unknown>
+  ) =>
+    policy === "whole"
+      ? collectOutput(operation, stream)
+      : collectTailText(stream.pipe(Stream.mapError(operationError(operation))), commandOutputTailBytes).pipe(
+        Effect.map(framedTail)
+      )
+
   const runCommand = Effect.fn("HostOperations.runCommand")(function*(
     operation: string,
-    commandLine: ReadonlyArray<string>
+    commandLine: ReadonlyArray<string>,
+    policy: OutputPolicy = "whole"
   ) {
     const command = commandLine[0]
     if (command === undefined) {
@@ -169,8 +201,8 @@ export const makeHostOperations = Effect.fn("HostOperations.make")(function*(
             exitCode: handle.exitCode.pipe(
               Effect.mapError(operationError(operation))
             ),
-            stderr: collectOutput(operation, handle.stderr),
-            stdout: collectOutput(operation, handle.stdout)
+            stderr: collectWithPolicy(policy, operation, handle.stderr),
+            stdout: collectWithPolicy(policy, operation, handle.stdout)
           }, { concurrency: "unbounded" }).pipe(
             Effect.flatMap(({ exitCode, stderr, stdout }) =>
               Number(exitCode) === 0
@@ -355,7 +387,7 @@ export const makeHostOperations = Effect.fn("HostOperations.make")(function*(
   const runPayload = (payload: CoreJobPayload, workerStarted: WorkerStarted, jobId: string) => {
     switch (payload.kind) {
       case "nix.check":
-        return runCommand("nix.check", config.checkCommand)
+        return runCommand("nix.check", config.checkCommand, "tail")
       case "nix.apply":
         return config.applyCommand === null
           ? Effect.fail(
@@ -367,7 +399,7 @@ export const makeHostOperations = Effect.fn("HostOperations.make")(function*(
           )
           // The job id lets the apply command record this job's own outcome,
           // which hostd reads to settle the job if the apply restarts it.
-          : runCommand("nix.apply", [...config.applyCommand, payload.ref, jobId])
+          : runCommand("nix.apply", [...config.applyCommand, payload.ref, jobId], "tail")
       case "agent.delegate":
         return runCoordinatorCommand(
           "agent.delegate",
