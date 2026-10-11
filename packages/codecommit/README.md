@@ -286,6 +286,8 @@ codecommit web [--port 3000] [--hostname 127.0.0.1] [--no-open]
 The sign-in link is always printed. A browser opens it only for a person at a
 terminal: `--no-open`, `BROWSER=none`, a set `CI`, or stdout that is not a
 terminal (scripts, test harnesses) print the link and say why no browser opened.
+The shared browser opener reports launch failures without sign-in URLs or
+subprocess error details.
 
 `--port` is the starting port: when it is taken, web mode tries the next one,
 up to ten times, and prints the URL it actually bound. During

@@ -10,6 +10,7 @@
  */
 import { NodeHttpClient, NodeRuntime, NodeServices } from "@effect/platform-node"
 import { makeInstallCommand } from "@knpkv/agent-skills"
+import { browserLaunch, BrowserOpener, openBrowser, skippedLine } from "@knpkv/browser-pairing/launch"
 import { AwsClient, AwsClientConfig, CacheService, ChildEnv, ConfigService } from "@knpkv/codecommit-core"
 import {
   codeCommitMockAwsClientConfig,
@@ -21,12 +22,10 @@ import { Config, Console, Data, Effect, Layer, Option } from "effect"
 import { Command, Flag as Options } from "effect/cli"
 import * as HttpClient from "effect/http/HttpClient"
 import * as ChildProcess from "effect/process/ChildProcess"
-import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import * as Runtime from "effect/Runtime"
 import * as Stdio from "effect/Stdio"
 import { fileURLToPath } from "node:url"
 import pkg from "../package.json" with { type: "json" }
-import { browserLaunch, skippedLine } from "./BrowserLaunch.js"
 import { reportFailure } from "./CliFailure.js"
 import { prCreateCommand } from "./PrCreate.js"
 import { prExportCommand } from "./PrExport.js"
@@ -99,7 +98,7 @@ const web = Command.make("web", {
 }, ({ hostname, noOpen, port }) =>
   Effect.gen(function*() {
     yield* requireLoopbackHostname(hostname)
-    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+    const opener = yield* BrowserOpener
     const launch = browserLaunch({
       noOpen,
       browser: Option.getOrUndefined(yield* Config.option(Config.String("BROWSER"))),
@@ -112,24 +111,10 @@ const web = Command.make("web", {
       onReady: (url) =>
         launch._tag === "Skip"
           ? Console.log(skippedLine(launch.reason))
-          : openBrowser(url).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner)),
+          : openBrowser(url).pipe(Effect.provideService(BrowserOpener, opener)),
       port
     })
   })).pipe(Command.withDescription("Serve the browser UI on this machine and open it"))
-
-/** Best effort: the URL is already printed, so a missing browser leaves nothing unfinished. */
-const openBrowser = (url: string) => {
-  const exitCode = (command: ChildProcess.Command) =>
-    Effect.scoped(command.pipe(Effect.flatMap((handle) => handle.exitCode)))
-  return exitCode(ChildProcess.make("open", [url])).pipe(
-    Effect.catchIf(() => true, () => exitCode(ChildProcess.make("xdg-open", [url]))),
-    Effect.catchIf(
-      () => true,
-      () => exitCode(ChildProcess.make("rundll32.exe", ["url.dll,FileProtocolHandler", url]))
-    ),
-    Effect.ignore({ log: true, message: "No browser could be opened; open the link above" })
-  )
-}
 
 // PR Command (parent)
 const pr = Command.make("pr", {}, () => Console.log("Usage: codecommit pr <command>")).pipe(
@@ -190,6 +175,7 @@ const ConfigServiceLayer = ConfigService.ConfigServiceLive.pipe(
 
 const AppRuntimeLayer = Layer.mergeAll(
   AwsRuntimeLayer,
+  BrowserOpener.layer,
   ConfigServiceLayer,
   HostEnvironmentLayer
 )
