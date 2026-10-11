@@ -1,5 +1,6 @@
 import { NodeFileSystem, NodeHttpServer, NodeServices } from "@effect/platform-node"
 import { issueCredential } from "@knpkv/browser-pairing"
+import { controlAwareCors, loginControlRouter } from "@knpkv/browser-pairing/control"
 import * as OwnerSession from "@knpkv/browser-pairing/owner-session"
 import {
   AwsClient,
@@ -42,7 +43,6 @@ import {
 } from "./handlers/index.js"
 import { BackgroundScopeLive } from "./internal/BackgroundScope.js"
 import { autoRefreshLayer, sandboxStartupLayer } from "./internal/BackgroundWorkers.js"
-import { controlAwareCors, loginControlRouter } from "./internal/LoginControl.js"
 import { makeOwnerSession, ownerSessionAuthLayer } from "./internal/OwnerSession.js"
 import { InnerCodeCommitReadClient, makePermissionedReadClient } from "./internal/PermissionedReadClient.js"
 import { updatePortOnConflict } from "./internal/PortRetry.js"
