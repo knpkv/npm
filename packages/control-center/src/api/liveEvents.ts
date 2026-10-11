@@ -1,7 +1,12 @@
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/http-api"
 import * as Schema from "effect/Schema"
+import * as SchemaGetter from "effect/SchemaGetter"
 
-import { PortfolioInvalidatedEventV1 } from "../domain/domainEvent.js"
+import {
+  PortfolioInvalidatedEventV1,
+  PortfolioInvalidationReason,
+  PortfolioPluginHealthOutcome
+} from "../domain/domainEvent.js"
 import { EventCursor } from "../domain/identifiers.js"
 import { UtcTimestamp } from "../domain/utcTimestamp.js"
 import {
@@ -49,11 +54,31 @@ export const PortfolioSnapshotLiveEvent = Schema.Struct({
 /** Decoded authoritative portfolio stream event. */
 export type PortfolioSnapshotLiveEvent = typeof PortfolioSnapshotLiveEvent.Type
 
+/** Live clients refresh on future reasons; persisted domain events retain their strict schema. */
+const RefreshablePortfolioInvalidation = Schema.Struct({
+  ...PortfolioInvalidatedEventV1.fields,
+  payload: Schema.Struct({
+    reason: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(128)),
+    pluginHealth: Schema.optionalKey(PortfolioPluginHealthOutcome)
+  })
+}).pipe(Schema.decodeTo(Schema.toType(PortfolioInvalidatedEventV1), {
+  decode: SchemaGetter.transform((event): PortfolioInvalidatedEventV1 => {
+    const reason = event.payload.reason
+    return {
+      ...event,
+      payload: Schema.is(PortfolioInvalidationReason)(reason)
+        ? { ...event.payload, reason }
+        : { reason: "release-projection" }
+    }
+  }),
+  encode: SchemaGetter.transform((event) => event)
+}))
+
 /** Durable notification that a browser should refresh its portfolio projection. */
 export const PortfolioInvalidatedLiveEvent = Schema.Struct({
   id: EventCursorFromString,
   event: Schema.Literal("portfolio.invalidated"),
-  data: Schema.fromJsonString(PortfolioInvalidatedEventV1)
+  data: Schema.fromJsonString(RefreshablePortfolioInvalidation)
 }).annotate({ identifier: "PortfolioInvalidatedLiveEvent" })
 
 /** Decoded portfolio invalidation stream event. */

@@ -30,9 +30,17 @@ import type {
 import type { DiscoveredAtlassianProfile, ProviderAccountSummary } from "../../api/plugins.js"
 import { PluginConnectionId, type ProviderAccountId } from "../../domain/identifiers.js"
 import { makeAuthenticatedMutationClient } from "../authenticatedMutationClient.js"
+import { observePortfolioInvalidations } from "../portfolio/usePortfolioSnapshot.js"
 
 /** Browser boundary for connection administration reads and live tests. */
 export interface ConnectionTestTransport {
+  /** Optional for injected transports; production observes the existing resumable SSE stream. */
+  readonly observeInvalidations?: (input: {
+    readonly sessionKey: string
+    readonly onInvalidation: () => void
+    readonly onSessionExpired: (sessionKey: string) => void
+    readonly signal: AbortSignal
+  }) => Promise<void>
   /** Optional only for injected legacy/test transports; the browser transport always discovers profiles. */
   readonly discoverAwsProfiles?: (signal: AbortSignal) => Promise<AwsProfileDiscoveryResponse>
   readonly discoverAwsResources?: (
@@ -103,6 +111,8 @@ export interface ConnectionTestTransport {
 
 /** Generated-client transport carrying cookies and the current tab's mutation proof. */
 export const browserConnectionTestTransport: ConnectionTestTransport = {
+  observeInvalidations: ({ signal, ...input }) =>
+    Effect.runPromise(observePortfolioInvalidations(input).pipe(Effect.provide([FetchHttpClient.layer])), { signal }),
   startAtlassianOAuthGrant: (providers, signal, configuration) =>
     Effect.runPromise(
       Effect.gen(function*() {

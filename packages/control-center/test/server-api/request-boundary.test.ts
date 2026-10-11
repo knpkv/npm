@@ -10,6 +10,7 @@ import { ApiBindConfiguration } from "../../src/server/api/ApiConfiguration.js"
 import { clientRateLimitKey, requestBoundaryLayer } from "../../src/server/api/RequestBoundary.js"
 import {
   consumeRequestToken,
+  DEFAULT_REQUEST_LIMIT_POLICY,
   RequestLimitPolicy,
   requestRateLimiterLayer,
   withRequestTimeout
@@ -18,6 +19,7 @@ import { decodeBindConfig } from "../../src/server/security/BindConfig.js"
 
 const bindLayer = Layer.effect(ApiBindConfiguration, decodeBindConfig({}))
 const limitPolicyLayer = Layer.succeed(RequestLimitPolicy, {
+  ...DEFAULT_REQUEST_LIMIT_POLICY,
   maximumBodyBytes: 256 * 1024,
   pairing: { limit: 1, window: Duration.minutes(1) },
   read: { limit: 1, window: Duration.minutes(1) },
@@ -75,6 +77,70 @@ const webHandlerLayer = Layer.mergeAll(
 )
 
 describe("API request boundary", () => {
+  it("limits synchronization ingress before an unauthenticated request reaches route authentication", async () => {
+    let authenticationAttempts = 0
+    const layer = Layer.mergeAll(
+      HttpRouter.add(
+        "POST",
+        "/api/v1/plugins/:connectionId/sync",
+        Effect.sync(() => {
+          authenticationAttempts++
+          return HttpServerResponse.empty({ status: 401 })
+        })
+      ),
+      requestBoundaryLayer,
+      HttpServer.layerServices
+    ).pipe(
+      Layer.provide([
+        bindLayer,
+        limitPolicyLayer,
+        requestRateLimiterLayer,
+        NodeHttpServer.layerHttpServices,
+        NodeServices.layer
+      ])
+    )
+    const webHandler = HttpRouter.toWebHandler(layer, { disableLogger: true })
+    try {
+      const url = "http://127.0.0.1:4173/api/v1/plugins/01890f6f-6d6a-7cc0-98d2-000000000204/sync"
+      assert.strictEqual((await webHandler.handler(new Request(url, { method: "POST" }))).status, 401)
+      const blocked = await webHandler.handler(new Request(url, { method: "POST" }))
+      assert.strictEqual(blocked.status, 429)
+      assert.strictEqual(blocked.headers.get("retry-after"), "60")
+      assert.strictEqual(authenticationAttempts, 1)
+      assert.strictEqual(DEFAULT_REQUEST_LIMIT_POLICY.synchronization.limit, 120)
+    } finally {
+      await webHandler.dispose()
+    }
+  })
+
+  it("admits ten connections through synchronization ingress within one minute", async () => {
+    const layer = Layer.mergeAll(
+      HttpRouter.add("POST", "/api/v1/plugins/:connectionId/sync", HttpServerResponse.text("ok")),
+      requestBoundaryLayer,
+      HttpServer.layerServices
+    ).pipe(Layer.provide([
+      bindLayer,
+      RequestLimitPolicy.defaultLayer,
+      requestRateLimiterLayer,
+      NodeHttpServer.layerHttpServices,
+      NodeServices.layer
+    ]))
+    const webHandler = HttpRouter.toWebHandler(layer, { disableLogger: true })
+    try {
+      for (let index = 1; index <= 10; index++) {
+        const response = await webHandler.handler(
+          new Request(
+            `http://127.0.0.1:4173/api/v1/plugins/01890f6f-6d6a-7cc0-98d2-${String(index).padStart(12, "0")}/sync`,
+            { method: "POST" }
+          )
+        )
+        assert.strictEqual(response.status, 200, `connection ${index} exhausted shared ingress`)
+      }
+    } finally {
+      await webHandler.dispose()
+    }
+  })
+
   it.effect("isolates trusted proxied clients while ignoring spoofed forwarding headers", () =>
     Effect.gen(function*() {
       const trustedProxy = "10.0.0.1"
@@ -156,6 +222,7 @@ describe("API request boundary", () => {
       assert.strictEqual(firstApiResponse.status, 200)
       assert.strictEqual(firstApiResponse.headers.get("cache-control"), "no-store")
       assert.strictEqual(secondApiResponse.status, 429)
+      assert.strictEqual(secondApiResponse.headers.get("retry-after"), "60")
     } finally {
       await webHandler.dispose()
     }

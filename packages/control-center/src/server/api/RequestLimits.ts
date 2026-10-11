@@ -7,12 +7,17 @@ import * as Layer from "effect/Layer"
 import * as RateLimiter from "effect/persistence/RateLimiter"
 import * as Schema from "effect/Schema"
 
+import type { PluginConnectionId, WorkspaceId } from "../../domain/identifiers.js"
+
 export const RequestLimitProfile = Schema.Literals([
   "pairing",
   "read",
   "agent-read",
   "mutation",
   "synchronization",
+  "sync-connection",
+  "sync-global",
+  "sync-onboarding",
   "agent",
   "media"
 ])
@@ -26,6 +31,9 @@ export interface RequestLimitPolicyValue {
   readonly "agent-read": { readonly limit: number; readonly window: Duration.Duration }
   readonly mutation: { readonly limit: number; readonly window: Duration.Duration }
   readonly synchronization: { readonly limit: number; readonly window: Duration.Duration }
+  readonly "sync-connection": { readonly limit: number; readonly window: Duration.Duration }
+  readonly "sync-global": { readonly limit: number; readonly window: Duration.Duration }
+  readonly "sync-onboarding": { readonly limit: number; readonly window: Duration.Duration }
   readonly agent: { readonly limit: number; readonly window: Duration.Duration }
   readonly media: { readonly limit: number; readonly window: Duration.Duration }
   readonly readTimeout: Duration.Duration
@@ -41,7 +49,10 @@ export const DEFAULT_REQUEST_LIMIT_POLICY: RequestLimitPolicyValue = {
   read: { limit: 120, window: Duration.minutes(1) },
   "agent-read": { limit: 120, window: Duration.minutes(1) },
   mutation: { limit: 30, window: Duration.minutes(1) },
-  synchronization: { limit: 8, window: Duration.minutes(1) },
+  synchronization: { limit: 120, window: Duration.minutes(1) },
+  "sync-connection": { limit: 2, window: Duration.minutes(1) },
+  "sync-global": { limit: 60, window: Duration.minutes(1) },
+  "sync-onboarding": { limit: 60, window: Duration.minutes(1) },
   agent: { limit: 8, window: Duration.minutes(1) },
   media: { limit: 60, window: Duration.minutes(1) },
   readTimeout: Duration.seconds(15),
@@ -69,7 +80,8 @@ export class RequestRateLimitExceeded extends Schema.TaggedError<RequestRateLimi
   "RequestRateLimitExceeded",
   {
     limit: Schema.Int.check(Schema.isGreaterThan(0)),
-    retryAfterSeconds: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))
+    retryAfterSeconds: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
+    budget: Schema.optionalKey(Schema.Literals(["per-connection", "global", "onboarding"]))
   }
 ) {}
 
@@ -95,10 +107,24 @@ const profilePolicy = (
   profile: RequestLimitProfile
 ): { readonly limit: number; readonly window: Duration.Duration } => policy[profile]
 
+/** Mutable assembly of the optional budget field; the emitted error stays immutable. */
+interface RequestBudgetFields {
+  budget?: NonNullable<RequestRateLimitExceeded["budget"]>
+}
+
+const synchronizationBudget = {
+  "sync-connection": "per-connection",
+  "sync-global": "global",
+  "sync-onboarding": "onboarding"
+} satisfies Readonly<
+  Record<"sync-connection" | "sync-global" | "sync-onboarding", "per-connection" | "global" | "onboarding">
+>
+
 /** Consume one request token without exposing the backing-store key in failures. */
 export const consumeRequestToken = Effect.fn("RequestLimits.consumeToken")(function*(
   profile: RequestLimitProfile,
-  key: string
+  key: string,
+  onExceeded: "delay" | "fail" = "fail"
 ) {
   const limiter = yield* RateLimiter.RateLimiter
   const policy = yield* RequestLimitPolicy
@@ -107,19 +133,32 @@ export const consumeRequestToken = Effect.fn("RequestLimits.consumeToken")(funct
     algorithm: "token-bucket",
     key: `${profile}:${key}`,
     limit: selected.limit,
-    onExceeded: "fail",
+    onExceeded,
     window: selected.window
   }).pipe(
-    Effect.mapError((failure) =>
-      failure.reason._tag === "RateLimitExceeded"
-        ? new RequestRateLimitExceeded({
-          limit: failure.reason.limit,
-          retryAfterSeconds: positiveCeilingSeconds(failure.reason.retryAfter)
-        })
-        : new RequestRateLimitUnavailable()
-    )
+    Effect.mapError((failure) => {
+      if (failure.reason._tag !== "RateLimitExceeded") return new RequestRateLimitUnavailable()
+      const budget: RequestBudgetFields = {}
+      if (profile === "sync-connection" || profile === "sync-global" || profile === "sync-onboarding") {
+        budget.budget = synchronizationBudget[profile]
+      }
+      return new RequestRateLimitExceeded({
+        limit: failure.reason.limit,
+        retryAfterSeconds: positiveCeilingSeconds(failure.reason.retryAfter),
+        ...budget
+      })
+    })
   )
+  if (onExceeded === "delay") yield* Effect.sleep(result.delay)
   return result
+})
+
+/** Consume manual budgets only after resolving the connection in the authenticated workspace. */
+export const consumeManualSynchronizationTokens = Effect.fn("RequestLimits.consumeManualSynchronization")(function*(
+  input: { readonly workspaceId: WorkspaceId; readonly pluginConnectionId: PluginConnectionId; readonly peer: string }
+) {
+  yield* consumeRequestToken("sync-global", input.peer)
+  yield* consumeRequestToken("sync-connection", `${input.workspaceId}:${input.pluginConnectionId}`)
 })
 
 /** Reject a declared oversized body and bound chunked/body decoding downstream. */

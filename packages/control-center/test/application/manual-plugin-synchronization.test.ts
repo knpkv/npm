@@ -7,7 +7,7 @@ import * as DateTime from "effect/DateTime"
 import * as TestClock from "effect/testing/TestClock"
 
 import { PluginHealth } from "../../src/domain/freshness.js"
-import { PluginConnectionId, WorkspaceId } from "../../src/domain/identifiers.js"
+import { EventCursor, PluginConnectionId, WorkspaceId } from "../../src/domain/identifiers.js"
 import { PluginSyncPageV1 } from "../../src/domain/plugins/events.js"
 import { type ProviderId, VendorImmutableId } from "../../src/domain/sourceRevision.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
@@ -311,6 +311,52 @@ const setupFixture = Effect.fn("ManualPluginSynchronizationTest.setupFixture")(f
 })
 
 describe("manual plugin synchronization", () => {
+  it.effect("notifies final portfolio invalidation only after sync completion is durable", () =>
+    withApplication(Effect.gen(function*() {
+      yield* TestClock.setTime(DateTime.toEpochMillis(SYNCHRONIZED_AT))
+      const fixture = fixtures.find(({ providerId }) => providerId === "codecommit")
+      if (fixture === undefined) return yield* Effect.die("codecommit fixture not found")
+      const { connections, persistence, streamKey } = yield* setupFixture(fixture)
+      const wakeups = yield* DomainEventWakeups
+      const observations: Array<{ readonly reason: string; readonly completed: boolean }> = []
+      const observedWakeups = DomainEventWakeups.of({
+        subscribe: wakeups.subscribe,
+        notify: (workspaceId) =>
+          Effect.gen(function*() {
+            const page = yield* persistence.events.pageAfter(workspaceId, EventCursor.make(0), 128).pipe(Effect.orDie)
+            if (page._tag === "page") {
+              const event = page.events.at(-1)
+              const attempts = yield* persistence.pluginRuntime.listSyncAttempts(
+                workspaceId,
+                fixture.pluginConnectionId,
+                streamKey
+              ).pipe(Effect.orDie)
+              if (event !== undefined) {
+                observations.push({
+                  reason: event.payload.reason,
+                  completed: attempts.at(-1)?.completedAt !== null && attempts.at(-1)?.completedAt !== undefined
+                })
+              }
+            }
+            yield* wakeups.notify(workspaceId)
+          })
+      })
+      const drivers = makeManualPluginSyncDriverRegistry([{
+        providerId: fixture.providerId,
+        streamKey: fixture.streamKey,
+        sync: () => Stream.succeed(pageFor(fixture))
+      }])
+      const synchronization = yield* makeManualPluginSynchronization(connections, drivers).pipe(
+        Effect.provideService(DomainEventWakeups, observedWakeups)
+      )
+      yield* synchronization.synchronize({ workspaceId: WORKSPACE_ID, pluginConnectionId: fixture.pluginConnectionId })
+      const final = observations.at(-1)
+      assert.deepEqual(final, { reason: "release-projection", completed: true })
+      assert.isTrue(
+        observations.every((observation) => observation.reason !== "release-projection" || observation.completed)
+      )
+    })))
+
   it("registers Jira only after its first-party adapter negotiates incremental synchronization", () => {
     const driver = firstPartyManualPluginSyncDrivers.get("jira")
     assert.isTrue(Option.isSome(driver))

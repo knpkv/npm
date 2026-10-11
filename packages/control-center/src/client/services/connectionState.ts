@@ -60,6 +60,8 @@ const syncStatus = (
   switch (synchronization.synchronization.result) {
     case "never":
       return { label: "Not synced yet", tone: "neutral" }
+    case "queued":
+      return { label: "First sync queued", tone: "progress" }
     case "running":
       return { label: "Syncing…", tone: "progress" }
     case "source-unavailable":

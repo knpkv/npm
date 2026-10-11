@@ -300,6 +300,28 @@ const runController = Effect.fn("PortfolioLiveController.run")(function*({
 export const runPortfolioLiveController = (options: RunPortfolioLiveControllerOptions): Effect.Effect<never> =>
   runController(options)
 
+/** Observe the shared snapshot/SSE controller, refreshing Services only when the durable cursor changes. */
+export const observePortfolioInvalidations = (input: {
+  readonly sessionKey: string
+  readonly onInvalidation: () => void
+  readonly onSessionExpired: (sessionKey: string) => void
+}) =>
+  Effect.flatMap(generatedTransport, (transport) => {
+    let cursor: EventCursor | null = null
+    return runPortfolioLiveController({
+      connectivity: browserConnectivity,
+      transport,
+      sessionKey: input.sessionKey,
+      onSessionExpired: input.onSessionExpired,
+      onState: (state) => {
+        if (state._tag !== "loaded") return
+        const changed = cursor !== null && cursor !== state.snapshot.eventCursor
+        cursor = state.snapshot.eventCursor
+        if (changed) input.onInvalidation()
+      }
+    })
+  })
+
 /** Load an authoritative portfolio and keep it current through the generated SSE client. */
 export const usePortfolioSnapshot = (
   sessionKey: string | null,

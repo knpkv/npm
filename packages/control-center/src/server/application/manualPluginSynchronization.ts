@@ -569,6 +569,18 @@ export const makeManualPluginSynchronization = Effect.fn(
         enqueuedAt: completedAt
       })
     })).pipe(Effect.mapError(() => unavailable()))
+    // Services observes this existing invalidation only after the terminal attempt is readable.
+    yield* appendPortfolioInvalidation({
+      workspaceId: bound.workspaceId,
+      pluginConnectionId: bound.pluginConnectionId,
+      releaseId: null,
+      occurredAt: completedAt,
+      reason: "release-projection"
+    }).pipe(
+      Effect.provideService(Crypto.Crypto, cryptoService),
+      Effect.provideService(Persistence, persistence),
+      Effect.mapError(() => unavailable())
+    )
     yield* wakeups.notify(bound.workspaceId)
     return yield* readState(input)
   })

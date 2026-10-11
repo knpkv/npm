@@ -102,7 +102,9 @@ export class RateLimitedApiError extends Schema.TaggedError<RateLimitedApiError>
   {
     ...commonErrorFields,
     code: Schema.Literal("rate-limited"),
-    retryAt: Schema.NullOr(UtcTimestamp)
+    retryAt: Schema.NullOr(UtcTimestamp),
+    budget: Schema.optionalKey(Schema.Literals(["per-connection", "global", "onboarding"])),
+    retryAfterSeconds: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)))
   },
   { httpApiStatus: 429 }
 ) {}

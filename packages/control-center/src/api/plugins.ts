@@ -571,9 +571,10 @@ export const PluginConnectionTestResult = Schema.Union([
 /** Decoded live connection test result. */
 export type PluginConnectionTestResult = typeof PluginConnectionTestResult.Type
 
-/** Durable result of the most recent bounded synchronization invocation. */
+/** Last durable sync outcome or the current server-owned queued first sync. */
 export const PluginSynchronizationResult = Schema.Literals([
   "never",
+  "queued",
   "running",
   "synchronized",
   "source-unavailable",
@@ -592,7 +593,7 @@ export const PluginSynchronizationFailure = Schema.Struct({
 /** Decoded sync failure. */
 export type PluginSynchronizationFailure = typeof PluginSynchronizationFailure.Type
 
-/** Secret-free durable synchronization state for one negotiated connection stream. */
+/** Secret-free synchronization state; queued first sync is scope-owned and re-derived from never-synced connections on restart. */
 export const PluginSynchronizationState = Schema.Struct({
   pluginConnectionId: PluginConnectionId,
   providerId: ProviderId,
@@ -613,7 +614,7 @@ export const PluginSynchronizationState = Schema.Struct({
   )
 }).annotate({ identifier: "PluginSynchronizationState" })
 
-/** Decoded manual synchronization state. */
+/** Decoded secret-free synchronization state. */
 export type PluginSynchronizationState = typeof PluginSynchronizationState.Type
 
 /** Redacted result of durable setup and its immediate live identity check. */

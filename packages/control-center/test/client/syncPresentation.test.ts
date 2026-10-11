@@ -30,6 +30,7 @@ describe("sync presentation", () => {
   })
 
   it("names each sync state in the Services vocabulary", () => {
+    expect(syncLine(state("queued"), NOW)).toEqual({ label: "First sync queued", tone: "progress" })
     expect(syncLine(state("never"), NOW)).toEqual({ label: "Not synced yet", tone: "neutral" })
     expect(syncLine(state("running"), NOW)).toEqual({ label: "Syncing…", tone: "progress" })
     expect(syncLine(state("synchronized", { lastSuccessAt: "2026-10-08T17:33:00.000Z" }), NOW).tone).toBe("positive")

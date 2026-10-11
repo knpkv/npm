@@ -10,7 +10,7 @@ import * as Tracer from "effect/Tracer"
 
 import {
   type ControlCenterLiveEvent,
-  type PortfolioInvalidatedLiveEvent,
+  PortfolioInvalidatedLiveEvent,
   type PortfolioSnapshotLiveEvent,
   StreamHeartbeat,
   type StreamHeartbeatLiveEvent,
@@ -88,6 +88,40 @@ const lastingStream = (events: ReadonlyArray<ControlCenterLiveEvent>): Stream.St
   Stream.fromIterable(events).pipe(Stream.concat(Stream.never))
 
 describe("live portfolio controller", () => {
+  it.effect("refreshes for known and future invalidation reasons without breaking the stream", () =>
+    Effect.gen(function*() {
+      for (const reason of ["plugin-health", "future-fixture-reason"]) {
+        const encoded = Schema.encodeSync(PortfolioInvalidatedEventV1)(invalidatedEvent(11).data)
+        const notification = Schema.decodeUnknownSync(PortfolioInvalidatedLiveEvent)({
+          id: "11",
+          event: "portfolio.invalidated",
+          data: JSON.stringify({ ...encoded, payload: { reason } })
+        })
+        const refreshed = yield* Deferred.make<void>()
+        let loads = 0
+        const states: Array<PortfolioSnapshotLoadState> = []
+        const fiber = yield* runPortfolioLiveController({
+          connectivity: onlineConnectivity,
+          onSessionExpired: () => undefined,
+          onState: (state) => {
+            states.push(state)
+            if (state._tag === "loaded" && state.snapshot.eventCursor === 11) {
+              Deferred.doneUnsafe(refreshed, Effect.void)
+            }
+          },
+          sessionKey: "fixture-session",
+          transport: {
+            loadSnapshot: Effect.sync(() => makePortfolioSnapshot("current", ++loads === 1 ? 10 : 11)),
+            openStream: () => Effect.succeed(lastingStream([heartbeatEvent(10), notification]))
+          }
+        }).pipe(Effect.forkChild({ startImmediately: true }))
+        yield* Deferred.await(refreshed)
+        assert.strictEqual(loads, 2)
+        assert.isFalse(states.some((state) => state._tag === "loaded" && state.connection._tag === "reconnecting"))
+        yield* Fiber.interrupt(fiber)
+      }
+    }))
+
   it.effect("keeps the initial connection pending until the stream proves catch-up", () =>
     Effect.gen(function*() {
       const streamOpened = yield* Deferred.make<void>()

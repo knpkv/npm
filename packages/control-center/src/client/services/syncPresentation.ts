@@ -1,6 +1,7 @@
 import type { RlyStateTone } from "@knpkv/rly/primitives"
 import * as DateTime from "effect/DateTime"
 
+import type { RateLimitedApiError } from "../../api/errors.js"
 import type { PluginSynchronizationState } from "../../api/plugins.js"
 import type { PluginFailureClass } from "../../domain/freshness.js"
 
@@ -38,6 +39,8 @@ export const syncLine = (state: PluginSynchronizationState, now: Date): SyncLine
   switch (state.result) {
     case "never":
       return { label: "Not synced yet", tone: "neutral" }
+    case "queued":
+      return { label: "First sync queued", tone: "progress" }
     case "running":
       return { label: "Syncing…", tone: "progress" }
     case "synchronized":
@@ -82,8 +85,28 @@ export const syncFailureSentence = (state: PluginSynchronizationState): string |
     case "source-unavailable":
       return failureSentences[state.failure?.failureClass ?? "unknown"]
     case "never":
+    case "queued":
     case "running":
     case "synchronized":
       return null
   }
+}
+
+/** A local API budget is distinct from provider throttling, with the server's authoritative retry time. */
+export const syncRequestBudgetSentence = (failure: RateLimitedApiError): string => {
+  const labels = { "per-connection": "Per-connection", global: "Global", onboarding: "Onboarding" }
+  const label = failure.budget === undefined ? "Sync" : `${labels[failure.budget]} sync`
+  const delay = failure.retryAfterSeconds === undefined ? "" : ` (in ${failure.retryAfterSeconds} seconds)`
+  const retry = failure.retryAt === null ?
+    `Retry later${delay}.` :
+    `Retry at ${
+      new Date(DateTime.toEpochMillis(failure.retryAt)).toLocaleTimeString("en-GB", {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
+        timeZone: "UTC"
+      })
+    } UTC${delay}.`
+  return `${label} request budget exhausted. ${retry}`
 }

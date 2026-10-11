@@ -7,6 +7,7 @@ import { HttpApiBuilder, HttpApiSecurity } from "effect/http-api"
 import * as HttpEffect from "effect/http/HttpEffect"
 import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Option from "effect/Option"
+import * as RateLimiter from "effect/persistence/RateLimiter"
 import * as Redacted from "effect/Redacted"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
@@ -79,11 +80,16 @@ import {
   mapApplicationUnavailable,
   mapAuthenticationFailures,
   mapCredentialAuthenticationFailures,
+  mapRequestRateLimitFailure,
+  mapRequestRateLimitUnavailable,
   notFoundApiError,
   serviceUnavailableApiError,
   unauthorizedApiError
 } from "./ErrorMapping.js"
+import { makeFirstSyncOnboarding } from "./FirstSyncOnboarding.js"
 import { LiveStreamAdmission } from "./LiveStreamAdmission.js"
+import { requestRateLimitKey } from "./RequestBoundary.js"
+import { consumeManualSynchronizationTokens, RequestLimitPolicy } from "./RequestLimits.js"
 
 const sessionCookie = HttpApiSecurity.apiKey({ in: "cookie", key: "cc_session" })
 
@@ -470,6 +476,10 @@ export const pluginHandlersLayer = HttpApiBuilder.group(
   (handlers) =>
     Effect.gen(function*() {
       const plugins = yield* PluginAdministration
+      const rateLimiter = yield* RateLimiter.RateLimiter
+      const limitPolicy = yield* RequestLimitPolicy
+      const bindConfig = yield* ApiBindConfiguration
+      const onboarding = yield* makeFirstSyncOnboarding(plugins)
       return handlers
         .handle("list", () =>
           Effect.gen(function*() {
@@ -633,7 +643,7 @@ export const pluginHandlersLayer = HttpApiBuilder.group(
             if (connectAndTest === undefined) {
               return yield* Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
             }
-            return yield* connectAndTest({
+            const response = yield* connectAndTest({
               request: payload,
               workspaceId: session.workspaceId
             }).pipe(Effect.catchTags({
@@ -643,6 +653,8 @@ export const pluginHandlersLayer = HttpApiBuilder.group(
               ApplicationResourceNotFound: mapApplicationNotFound,
               ApplicationServiceUnavailable: mapApplicationUnavailable
             }))
+            yield* onboarding.enqueue(session.workspaceId, response)
+            return response
           }))
         .handle("createConnections", ({ payload }) =>
           Effect.gen(function*() {
@@ -654,10 +666,15 @@ export const pluginHandlersLayer = HttpApiBuilder.group(
             if (connectAndTestBatch === undefined) {
               return yield* Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
             }
-            return yield* connectAndTestBatch({
+            const response = yield* connectAndTestBatch({
               requests: payload.connections,
               workspaceId: session.workspaceId
             })
+            yield* Effect.forEach(response.results, (result) =>
+              result._tag === "succeeded"
+                ? onboarding.enqueue(session.workspaceId, result.response)
+                : Effect.void, { discard: true })
+            return response
           }))
         .handle("setConnectionEnabled", ({ params, payload }) =>
           Effect.gen(function*() {
@@ -717,7 +734,7 @@ export const pluginHandlersLayer = HttpApiBuilder.group(
             if (synchronization === undefined) {
               return yield* Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
             }
-            return yield* synchronization({
+            const state = yield* synchronization({
               pluginConnectionId: params.pluginConnectionId,
               workspaceId: session.workspaceId
             }).pipe(Effect.catchTags({
@@ -726,17 +743,40 @@ export const pluginHandlersLayer = HttpApiBuilder.group(
               ApplicationResourceNotFound: mapApplicationNotFound,
               ApplicationServiceUnavailable: mapApplicationUnavailable
             }))
+            return yield* onboarding.present(session.workspaceId, state)
           }))
-        .handle("synchronizeConnection", ({ params }) =>
+        .handle("synchronizeConnection", ({ params, request }) =>
           Effect.gen(function*() {
             const session = yield* CurrentSession
             if (session.permission !== "workspace-owner") {
               return yield* Effect.flatMap(forbiddenApiError, Effect.fail)
             }
             const synchronizeConnection = plugins.synchronizeConnection
-            if (synchronizeConnection === undefined) {
+            const synchronization = plugins.synchronization
+            if (synchronizeConnection === undefined || synchronization === undefined) {
               return yield* Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
             }
+            const resolved = yield* synchronization({
+              pluginConnectionId: params.pluginConnectionId,
+              workspaceId: session.workspaceId
+            }).pipe(Effect.catchTags({
+              ApplicationInvalidRequest: mapApplicationInvalidRequest,
+              ApplicationRateLimited: mapApplicationRateLimited,
+              ApplicationResourceNotFound: mapApplicationNotFound,
+              ApplicationServiceUnavailable: mapApplicationUnavailable
+            }))
+            yield* consumeManualSynchronizationTokens({
+              workspaceId: session.workspaceId,
+              pluginConnectionId: resolved.pluginConnectionId,
+              peer: requestRateLimitKey(bindConfig, request)
+            }).pipe(
+              Effect.provideService(RateLimiter.RateLimiter, rateLimiter),
+              Effect.provideService(RequestLimitPolicy, limitPolicy),
+              Effect.catchTags({
+                RequestRateLimitExceeded: mapRequestRateLimitFailure,
+                RequestRateLimitUnavailable: mapRequestRateLimitUnavailable
+              })
+            )
             return yield* synchronizeConnection({
               pluginConnectionId: params.pluginConnectionId,
               workspaceId: session.workspaceId

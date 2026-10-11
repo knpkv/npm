@@ -625,7 +625,7 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
     databaseDrain
   )
   const routes = Layer.mergeAll(
-    controlCenterApiLayerWithLifecycle,
+    controlCenterApiLayerWithLifecycle.pipe(Layer.provide(bootstrap)),
     staticApplicationLayer,
     requestUrlBoundaryLayer,
     requestBoundaryLayer,

@@ -730,17 +730,26 @@ describe("offline backup commands", () => {
         const collectorScript = `
           import { writeFileSync } from "node:fs"
           import { createServer } from "node:http"
-          import { argv } from "node:process"
+          import { argv, kill, stdin } from "node:process"
+          import { createInterface } from "node:readline"
+
+          let draining = false
+          createInterface({ input: stdin }).on("line", (pid) => {
+            kill(Number(pid), "SIGTERM")
+            draining = true
+            console.log("SIGTERM_SENT")
+          })
 
           const server = createServer((request, response) => {
             request.resume()
             request.on("end", () => {
-              console.log("REQUEST_RECEIVED")
+              const finalExport = draining
+              console.log(finalExport ? "FINAL_EXPORT_RECEIVED" : "STARTUP_EXPORT_RECEIVED")
               setTimeout(() => {
-                writeFileSync(argv[2], "flushed")
+                if (finalExport) writeFileSync(argv[2], "flushed")
                 response.writeHead(200, { "content-type": "application/json" })
                 response.end("{}")
-                console.log("RESPONSE_SENT")
+                console.log(finalExport ? "FINAL_EXPORT_ACKNOWLEDGED" : "STARTUP_EXPORT_ACKNOWLEDGED")
               }, 250)
             })
           })
@@ -761,12 +770,16 @@ describe("offline backup commands", () => {
         const collectorOutput = yield* Ref.make("")
         const collectorError = yield* Ref.make("")
         const collectorReady = yield* Deferred.make<void>()
+        const terminationSent = yield* Deferred.make<void>()
         const collectorStdoutFiber = yield* collector.stdout.pipe(
           Stream.decodeText(),
           Stream.runForEach((chunk) =>
             Ref.updateAndGet(collectorOutput, (current) => current + chunk).pipe(
               Effect.flatMap((current) =>
-                current.includes("READY") ? Deferred.succeed(collectorReady, undefined) : Effect.void
+                Effect.gen(function*() {
+                  if (current.includes("READY")) yield* Deferred.succeed(collectorReady, undefined)
+                  if (current.includes("SIGTERM_SENT")) yield* Deferred.succeed(terminationSent, undefined)
+                })
               )
             )
           ),
@@ -840,12 +853,12 @@ describe("offline backup commands", () => {
           request.exitCode
         ], { concurrency: "unbounded" })
         assert.strictEqual(requestExitCode, ChildProcessSpawner.ExitCode(0), requestError)
-        assert.notInclude(yield* Ref.get(collectorOutput), "REQUEST_RECEIVED")
 
-        const terminateFiber = yield* server.kill({ killSignal: "SIGTERM" }).pipe(Effect.forkChild)
+        // The collector sends SIGTERM itself, so startup exports cannot satisfy the final-export sentinel.
+        yield* Stream.run(Stream.make(new TextEncoder().encode(`${server.pid}\n`)), collector.stdin)
+        yield* Deferred.await(terminationSent).pipe(Effect.timeout("5 seconds"))
         yield* Deferred.await(drained).pipe(Effect.timeout("5 seconds"))
         const exitCode = yield* server.exitCode
-        yield* Fiber.join(terminateFiber)
         yield* Fiber.join(stdoutFiber)
         yield* Fiber.join(stderrFiber)
 
@@ -858,8 +871,8 @@ describe("offline backup commands", () => {
 
         assert.strictEqual(exitCode, ChildProcessSpawner.ExitCode(130), serverError)
         assert.strictEqual(yield* Ref.get(drainedAfterFlush), true)
-        assert.include(capturedCollectorOutput, "REQUEST_RECEIVED")
-        assert.include(capturedCollectorOutput, "RESPONSE_SENT")
+        assert.include(capturedCollectorOutput, "FINAL_EXPORT_RECEIVED")
+        assert.include(capturedCollectorOutput, "FINAL_EXPORT_ACKNOWLEDGED")
         assert.strictEqual(serverError, "")
         assert.strictEqual(yield* Ref.get(collectorError), "")
       }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
