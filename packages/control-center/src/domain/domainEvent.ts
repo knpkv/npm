@@ -1,5 +1,7 @@
 import * as Schema from "effect/Schema"
 
+import { PluginFailureClass } from "./freshness.js"
+
 import {
   DomainEventId,
   EntityId,
@@ -53,10 +55,22 @@ export const PortfolioInvalidationReason = Schema.Literals(["release-projection"
 /** Decoded reason for invalidating an authoritative portfolio projection. */
 export type PortfolioInvalidationReason = typeof PortfolioInvalidationReason.Type
 
+/** Credential-free outcome retained to prove a source's uninterrupted failure streak. */
+export const PortfolioPluginHealthOutcome = Schema.Union([
+  Schema.Struct({ healthState: Schema.Literals(["healthy", "disabled"]), failureClass: Schema.Null }),
+  Schema.Struct({ healthState: Schema.Literals(["degraded", "unavailable"]), failureClass: PluginFailureClass })
+])
+
 /** Bounded typed payload persisted with a portfolio invalidation. */
 export const PortfolioInvalidatedPayloadV1 = Schema.Struct({
-  reason: PortfolioInvalidationReason
-}).check(hasMaximumJsonBytes(MaximumDomainEventPayloadBytes)).annotate({ identifier: "PortfolioInvalidatedPayloadV1" })
+  reason: PortfolioInvalidationReason,
+  pluginHealth: Schema.optionalKey(PortfolioPluginHealthOutcome)
+}).check(
+  hasMaximumJsonBytes(MaximumDomainEventPayloadBytes),
+  Schema.makeFilter(({ pluginHealth, reason }) => pluginHealth === undefined || reason === "plugin-health", {
+    expected: "health outcomes only on plugin-health invalidations"
+  })
+).annotate({ identifier: "PortfolioInvalidatedPayloadV1" })
 
 /** Decoded bounded v1 portfolio-invalidation payload. */
 export type PortfolioInvalidatedPayloadV1 = typeof PortfolioInvalidatedPayloadV1.Type

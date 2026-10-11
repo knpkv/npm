@@ -10,7 +10,7 @@ import type { RlyStateTone } from "@knpkv/rly/primitives"
 import * as DateTime from "effect/DateTime"
 
 import type { PortfolioReleaseRole, PortfolioSnapshot } from "../../api/portfolio.js"
-import type { PluginHealth } from "../../domain/freshness.js"
+import type { PluginFailureClass, PluginHealth, SourceUnavailableFreshness } from "../../domain/freshness.js"
 import type {
   ReadinessFinding,
   ReadinessProgress,
@@ -133,6 +133,7 @@ const freshnessState = (freshness: PortfolioSnapshot["releases"][number]["freshn
     case "missing":
       return "missing"
     case "unavailable":
+    case "source-unavailable":
       return "unavailable"
   }
 }
@@ -147,7 +148,9 @@ const sourceConnectionId = (
 const freshnessTimestamp = (
   release: PortfolioSnapshot["releases"][number]
 ): PortfolioSnapshot["releases"][number]["updatedAt"] | null =>
-  release.freshness.sourceObservedAt ?? release.freshness.synchronizedAt
+  release.freshness._tag === "source-unavailable"
+    ? release.freshness.lastReadAt
+    : release.freshness.sourceObservedAt ?? release.freshness.synchronizedAt
 
 const formattedTime = (timestamp: PortfolioSnapshot["generatedAt"]): string =>
   DateTime.formatUtc(timestamp, {
@@ -160,13 +163,46 @@ const formattedTime = (timestamp: PortfolioSnapshot["generatedAt"]): string =>
     timeZoneName: "short"
   })
 
+const failureClassLabels = {
+  authentication: "authentication",
+  authorization: "authorization",
+  "rate-limit": "rate-limited",
+  timeout: "timeout",
+  "malformed-response": "malformed response",
+  outage: "outage",
+  unknown: "unknown failure"
+} satisfies Readonly<Record<PluginFailureClass, string>>
+
+const sourceUnavailableWarning = (freshness: typeof SourceUnavailableFreshness.Type): string => {
+  const checkedAt = freshness.failedSources.reduce(
+    (latest, source) => DateTime.Order(source.health.checkedAt, latest) > 0 ? source.health.checkedAt : latest,
+    freshness.pluginHealth.checkedAt
+  )
+  const availability = freshness.unavailableSince === null
+    ? `Source unavailable · last checked ${formattedTime(checkedAt)}`
+    : `Source unavailable since ${formattedTime(freshness.unavailableSince)}`
+  const failures = Array.from(
+    new Set(freshness.failedSources.map(({ health }) =>
+      health.retryAt === null
+        ? failureClassLabels[health.failureClass]
+        : `${failureClassLabels[health.failureClass]}, retry ${formattedTime(health.retryAt)}`
+    ))
+  )
+  const lastRead = freshness.lastReadAt === null
+    ? "no successful read"
+    : `last read ${formattedTime(freshness.lastReadAt)}`
+  return `${availability} · ${failures.join("; ")} · ${lastRead}.`
+}
+
 const sourcePresentation = (
   release: PortfolioSnapshot["releases"][number],
   plugins: PortfolioSnapshot["plugins"]
 ): PortfolioSourcePresentation => {
   const connectionId = sourceConnectionId(release.freshness)
   const plugin = plugins.find(({ pluginConnectionId }) => pluginConnectionId === connectionId)
-  const health = plugin === undefined
+  const health = release.freshness._tag === "source-unavailable"
+    ? healthPresentation(release.freshness.pluginHealth)
+    : plugin === undefined
     ? {
       label: "Unavailable",
       message: "The source connection is missing from the current portfolio snapshot.",
@@ -179,7 +215,9 @@ const sourcePresentation = (
   const freshness = freshnessState(release.freshness)
   const timestamp = freshnessTimestamp(release)
   const hasStaleFacts = release.freshness._tag === "stale"
-  const warning = hasStaleFacts
+  const warning = release.freshness._tag === "source-unavailable"
+    ? sourceUnavailableWarning(release.freshness)
+    : hasStaleFacts
     ? health.message ?? "The source is not current. Preserved facts remain visible from the last successful sync."
     : health.isUnhealthy
     ? health.message ?? "The source needs attention. Saved release facts remain visible."

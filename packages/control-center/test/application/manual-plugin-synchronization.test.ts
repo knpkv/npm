@@ -788,6 +788,15 @@ describe("manual plugin synchronization", () => {
       assert.strictEqual(failed.failure?.failureClass, "timeout")
       assert.isTrue((failed.failure?.safeMessage.length ?? 0) > 0)
       assert.deepStrictEqual((yield* synchronization.state(input)).failure, failed.failure)
+      const failedHistory = yield* persistence.events.readPluginHealthHistory(
+        WORKSPACE_ID,
+        fixture.pluginConnectionId,
+        128
+      )
+      assert.deepStrictEqual(failedHistory.events[0]?.payload.pluginHealth, {
+        healthState: "unavailable",
+        failureClass: "timeout"
+      })
 
       // A later health write (a connection test after credentials expired) isn't this sync's cause.
       yield* TestClock.adjust("1 minute")
@@ -811,6 +820,15 @@ describe("manual plugin synchronization", () => {
       const recovered = yield* synchronization.synchronize(input)
       assert.strictEqual(recovered.result, "synchronized")
       assert.isNull(recovered.failure)
+      const recoveredHistory = yield* persistence.events.readPluginHealthHistory(
+        WORKSPACE_ID,
+        fixture.pluginConnectionId,
+        128
+      )
+      assert.deepStrictEqual(recoveredHistory.events[0]?.payload.pluginHealth, {
+        healthState: "healthy",
+        failureClass: null
+      })
     })))
 
   it.effect("commits a page observed after its health probe at the current clock time", () =>
