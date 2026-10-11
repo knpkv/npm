@@ -1,5 +1,20 @@
 # @knpkv/control-center
 
+## 0.16.1
+
+### Patch Changes
+
+- [#815](https://github.com/knpkv/npm/pull/815) [`3288f50`](https://github.com/knpkv/npm/commit/3288f503bab899a7a5199f2742b4e56494b96883) Thanks [@konopkov](https://github.com/konopkov)! - Join queued or running synchronization on the same workspace connection without spending another manual request budget. Keep server-owned sync progress visible and disable duplicate Sync actions.
+
+- [#823](https://github.com/knpkv/npm/pull/823) [`58a1d0d`](https://github.com/knpkv/npm/commit/58a1d0d50a97c0bc7db060dffd7ab4d2b9550965) Thanks [@konopkov](https://github.com/konopkov)! - Keep connected service cards and focus visible during refreshes, and reconcile concurrent creation and overview responses without duplicate or older connection data. Explain held releases using their actual readiness findings and target configuration.
+- Updated dependencies [[`c7fa96b`](https://github.com/knpkv/npm/commit/c7fa96be781457406e8de323bffdd9e137e66127), [`2dc1b33`](https://github.com/knpkv/npm/commit/2dc1b33cf3c27ee2cc61e5476a6665e574a46792), [`0fa3c3a`](https://github.com/knpkv/npm/commit/0fa3c3a81a4f1b30c43091f82a8ecdd68ddbfcd0)]:
+  - @knpkv/bounded-io@0.3.0
+  - @knpkv/browser-pairing@0.5.1
+  - @knpkv/rly@0.22.1
+  - @knpkv/ai-claude@0.4.4
+  - @knpkv/ai-codex@0.5.4
+  - @knpkv/ai-runtime@0.5.3
+
 ## 0.16.0
 
 ### Minor Changes

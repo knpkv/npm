@@ -1,5 +1,11 @@
 # @knpkv/bounded-io
 
+## 0.3.0
+
+### Minor Changes
+
+- [#822](https://github.com/knpkv/npm/pull/822) [`c7fa96b`](https://github.com/knpkv/npm/commit/c7fa96be781457406e8de323bffdd9e137e66127) Thanks [@konopkov](https://github.com/konopkov)! - Add `collectTail` and `collectTailText`: read a stream to its end and keep only its last `limit` bytes, reporting how many were dropped. The text form starts on a character boundary.
+
 ## 0.2.0
 
 ### Minor Changes

@@ -1,5 +1,11 @@
 # @knpkv/rly
 
+## 0.22.1
+
+### Patch Changes
+
+- [#824](https://github.com/knpkv/npm/pull/824) [`0fa3c3a`](https://github.com/knpkv/npm/commit/0fa3c3a81a4f1b30c43091f82a8ecdd68ddbfcd0) Thanks [@konopkov](https://github.com/konopkov)! - TimelineRow no longer overlaps its text at compact width.
+
 ## 0.22.0
 
 ### Minor Changes
