@@ -56,17 +56,53 @@ it("bundles ./views without Node built-ins, application atoms or the owner-sessi
     }
   }
   collectExports(result)
-  for (const name of ["PRListView", "SearchBarView", "FilterSidebarView", "RecentActivityView"]) {
+  for (
+    const name of [
+      "PRListView",
+      "SearchBarView",
+      "FilterSidebarView",
+      "RecentActivityView",
+      "PRDetailView",
+      "PRDetailHeaderView",
+      "PRRevisionView",
+      "PRDescriptionView",
+      "PRCommentsView",
+      "PRLifecycleView",
+      "PRApprovalsView",
+      "ApproversCard",
+      "PRHealthBreakdownView",
+      "PRRequirementDialogsView",
+      "PRFilesDiffView"
+    ]
+  ) {
     expect(exportedNames.has(name)).toBe(true)
   }
   expect(moduleIds.size).toBeGreaterThan(0)
   expect([...moduleIds].filter(isApplicationRuntime)).toEqual([])
   expect(
     [...moduleIds].filter((id) =>
-      /\/components\/(?:pr-list|search-bar|filter-sidebar|pr-review-workspace)\.tsx$/.test(id)
+      /\/components\/(?:pr-list|search-bar|filter-sidebar|pr-detail|pr-comments|pr-lifecycle|pr-review-workspace)\.tsx(?:\?|$)/
+        .test(id)
     )
   ).toEqual([])
-  for (const module of ["pr-list-view", "search-bar-view", "filter-sidebar-view", "recent-activity-view"]) {
+  for (
+    const module of [
+      "pr-list-view",
+      "search-bar-view",
+      "filter-sidebar-view",
+      "recent-activity-view",
+      "pr-detail-view",
+      "pr-detail-header-view",
+      "pr-revision-view",
+      "pr-description-view",
+      "pr-comments-view",
+      "pr-lifecycle-view",
+      "pr-approvals-view",
+      "pr-health-breakdown-view",
+      "pr-requirement-dialogs-view",
+      "pr-files-diff-view"
+    ]
+  ) {
     expect([...moduleIds].some((id) => id.endsWith(`/components/${module}.tsx`))).toBe(true)
   }
 })

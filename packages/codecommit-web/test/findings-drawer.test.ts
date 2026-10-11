@@ -5,7 +5,7 @@ import { act, createElement, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
 
 import { FindingsDrawer, findingsPlacement } from "../src/client/components/findings-drawer.js"
-import { insideOpenDialog } from "../src/client/components/pr-detail.js"
+import { insideOpenDialog } from "../src/client/components/pr-detail-helpers.js"
 
 Object.assign(window, { IS_REACT_ACT_ENVIRONMENT: true })
 

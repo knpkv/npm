@@ -11,12 +11,52 @@ export {
   type FindingsPlacement
 } from "./client/components/findings-drawer.js"
 export {
+  ApproversCard,
+  type ApproversCardProps,
+  type PRApprovalActions,
+  PRApprovalsView,
+  type PRApprovalsViewProps,
+  type PRApproverKind,
+  type RuleRemoval
+} from "./client/components/pr-approvals-view.js"
+export {
+  type PRCommentsResult,
+  PRCommentsView,
+  type PRCommentsViewProps
+} from "./client/components/pr-comments-view.js"
+export { PRDescriptionView, type PRDescriptionViewProps } from "./client/components/pr-description-view.js"
+export { PRDetailHeaderView, type PRDetailHeaderViewProps } from "./client/components/pr-detail-header-view.js"
+export {
+  type CommentCountSnapshot,
+  type PRCommentsSlotInput,
+  type PRDetailActions,
+  type PRDetailComments,
+  PRDetailView,
+  type PRDetailViewProps,
+  type PRHealthPresentation,
+  type PRReviewWorkspaceSlotInput,
+  type PullRequestLoadFailure
+} from "./client/components/pr-detail-view.js"
+export {
+  PRFilesDiffView,
+  type PRFilesDiffViewProps,
+  type PRFilesFindingsPresentation
+} from "./client/components/pr-files-diff-view.js"
+export { PRHealthBreakdownView, type PRHealthBreakdownViewProps } from "./client/components/pr-health-breakdown-view.js"
+export { PRLifecycleView, type PRLifecycleViewProps } from "./client/components/pr-lifecycle-view.js"
+export {
   type PRListActions,
   type PRListControlsInput,
   type PRListSnapshot,
   PRListView,
   type PRListViewProps
 } from "./client/components/pr-list-view.js"
+export {
+  type PRRequirementDialogState,
+  PRRequirementDialogsView,
+  type PRRequirementDialogsViewProps
+} from "./client/components/pr-requirement-dialogs-view.js"
+export { PRRevisionView, type PRRevisionViewProps } from "./client/components/pr-revision-view.js"
 export { PRRow, type PRRowProps } from "./client/components/pr-row.js"
 export { RecentActivityView, type RecentActivityViewProps } from "./client/components/recent-activity-view.js"
 export { RollingStatus, type RollingStatusProps } from "./client/components/rolling-status.js"

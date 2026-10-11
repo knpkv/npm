@@ -1,6 +1,9 @@
 import { describe, expect, it } from "@effect/vitest"
 
-import { normalizeApproverIdentity, refreshFailureDescription } from "../src/client/components/pr-detail.js"
+import {
+  normalizeApproverIdentity,
+  refreshFailureDescription
+} from "../src/client/components/pr-detail-presentation.js"
 import { fileIndexForFinding } from "../src/client/components/pr-review-workspace.js"
 import type { PullRequestDiffResponse, RelayReviewFinding } from "../src/server/Api.js"
 

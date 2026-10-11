@@ -1,72 +1,13 @@
-/**
- * PR detail page — full PR view with approval management.
- *
- * Renders PR metadata, status badges, health score breakdown, description,
- * comments (collapsible with Markdown), lifecycle metrics (time to merge,
- * first review, address feedback), and the {@link ApproversCard} for
- * managing approval pool membership.
- *
- * **Mental model**
- *
- * - ApproversCard: manages non-template approval rules (Required + Optional);
- *   remove = update rule (SSO roles lack delete permission),
- *   remove all = update to requiredApprovals:0, poolMembers:["*"]
- * - knownUserArns: all users (authors, approvers, commenters, pool members)
- *   → `CodeCommitApprovers:REPO_ACCT:username` format. Typing just a username auto-prefixes.
- * - Keyboard shortcuts: Enter/o = open, . = sandbox, Esc = back
- *
- * **Common tasks**
- *
- * - Show approvers: {@link ApproversCard}
- * - Managed rule names: {@link REQUIRED_RULE_NAME}, {@link OPTIONAL_RULE_NAME}
- *
- * @module
- */
+/** PR detail controller: owns route lookup, mutations, shortcuts, reminders and refresh timers. */
 import { useAtomSet, useAtomValue } from "@effect/atom-react"
-import * as DateUtils from "@knpkv/codecommit-core/DateUtils.js"
-import type * as Domain from "@knpkv/codecommit-core/Domain.js"
-import type { CommentThreadJsonEncoded } from "@knpkv/codecommit-core/Domain.js"
-import {
-  approvalNotRequiredLabel,
-  approvalOf,
-  approvalUnknownLabel,
-  approvalUnknownReasonText,
-  approversUnknownLabel,
-  AwsRegion,
-  currentApprovers,
-  identityMatches,
-  PullRequestId
-} from "@knpkv/codecommit-core/Domain.js"
-import {
-  calculateHealthScore,
-  type CategoryStatus,
-  getScoreTier,
-  type HealthScore,
-  type HealthScoreCategory,
-  healthUnknownReason
-} from "@knpkv/codecommit-core/HealthScore.js"
-import { ServiceMark } from "@knpkv/rly/patterns"
-import {
-  Button as RlyButton,
-  Field,
-  Notice,
-  StateLabel,
-  StatePanel,
-  Surface,
-  Text,
-  type RlyNoticeTone,
-  type RlyStateTone
-} from "@knpkv/rly/primitives"
+import { AwsRegion, currentApprovers, PullRequestId } from "@knpkv/codecommit-core/Domain.js"
+import { calculateHealthScore, type HealthScore, healthUnknownReason } from "@knpkv/codecommit-core/HealthScore.js"
 import { Exit, Option } from "effect"
 import * as Cause from "effect/Cause"
 import * as Predicate from "effect/Predicate"
 import * as AsyncResult from "effect/reactivity/AsyncResult"
-import { ArrowRightIcon, CheckIcon, ChevronDownIcon, CodeIcon, LoaderIcon, PlusIcon, TrashIcon } from "lucide-react"
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react"
-import Markdown from "react-markdown"
-import { Link, useNavigate, useParams, useSearchParams } from "react-router"
-import rehypeSanitize from "rehype-sanitize"
-import remarkGfm from "remark-gfm"
+import { lazy, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useNavigate, useParams, useSearchParams } from "react-router"
 import { toast } from "sonner"
 import {
   appStateAtom,
@@ -80,29 +21,34 @@ import {
   unsubscribeAtom,
   updateApprovalRuleAtom
 } from "../atoms/app.js"
-import { useComments } from "../hooks/useComments.js"
 import { useDismissable } from "../hooks/useDismissable.js"
 import { useOptimistic } from "../hooks/useOptimistic.js"
-import { useOptimisticSet } from "../hooks/useOptimisticSet.js"
-import {
-  matchesCodeCommitPullRequestRoute,
-  pullRequestRouteCoordinates,
-  type CodeCommitPullRequestRouteCoordinates
-} from "../codecommit-route.js"
-import { encodePullRequestCoordinates } from "../../pull-request-coordinates.js"
-import {
-  type ReviewCommentNavigation,
-  type ReviewCommentNavigationTarget,
-  reviewCommentNavigationTarget
-} from "../review-comment-navigation.js"
+import { pullRequestRouteCoordinates } from "../codecommit-route.js"
+import type { ReviewCommentNavigation, ReviewCommentNavigationTarget } from "../review-comment-navigation.js"
 import { StorageKeys } from "../storage-keys.js"
-import { extractScope } from "../utils/extractScope.js"
 import { makeInFlight, pullRequestRefreshKey } from "../utils/inFlight.js"
-import { Badge } from "./ui/badge.js"
-import { Button } from "./ui/button.js"
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "./ui/dialog.js"
-import { Separator } from "./ui/separator.js"
-import styles from "./pr-detail.module.css"
+import { PRDetailView, type CommentCountSnapshot } from "./pr-detail-view.js"
+import { CommentsSection } from "./pr-comments.js"
+import { LifecycleInfo } from "./pr-lifecycle.js"
+import { REQUIRED_RULE_NAME, OPTIONAL_RULE_NAME, type RuleRemoval } from "./pr-approvals-view.js"
+import {
+  sandboxAccountIdForPullRequest,
+  isReusableSandbox,
+  isStoppingSandbox,
+  hasFallbackSandboxCollision,
+  reviewApiAccountId,
+  commentNavigationIdentityForCoordinates,
+  selectCodeCommitPullRequest,
+  isTextInputTarget,
+  focusedElement,
+  ownsEnterKey,
+  insideOpenDialog
+} from "./pr-detail-helpers.js"
+import {
+  pullRequestLoadFailure,
+  refreshFailureDescription,
+  type PullRequestLoadFailure
+} from "./pr-detail-presentation.js"
 
 const PullRequestReviewWorkspace = lazy(() =>
   import("./pr-review-workspace.js").then((module) => ({
@@ -110,903 +56,12 @@ const PullRequestReviewWorkspace = lazy(() =>
   }))
 )
 
-/** Use the discovered account as the durable sandbox key, with profile identity for undiscovered accounts. */
-export const sandboxAccountIdForPullRequest = (pullRequest: Pick<Domain.PullRequest, "account">): string =>
-  pullRequest.account.awsAccountId !== undefined && pullRequest.account.awsAccountId.length > 0
-    ? pullRequest.account.awsAccountId
-    : pullRequest.account.profile
-
-export const sandboxMatchesPullRequest = (
-  sandbox: {
-    readonly awsAccountId: string
-    readonly pullRequestId: string
-    readonly repositoryName: string
-    readonly region?: string | null
-  },
-  pullRequest: Pick<Domain.PullRequest, "account" | "id" | "repositoryName">
-): boolean =>
-  sandbox.awsAccountId === sandboxAccountIdForPullRequest(pullRequest) &&
-  sandbox.pullRequestId === String(pullRequest.id) &&
-  sandbox.repositoryName === String(pullRequest.repositoryName) &&
-  sandbox.region === String(pullRequest.account.region)
-
-/** A sandbox is reusable only while it can still serve this pull request. */
-export const isReusableSandbox = (
-  sandbox: Parameters<typeof sandboxMatchesPullRequest>[0] & { readonly status: string },
-  pullRequest: Pick<Domain.PullRequest, "account" | "id" | "repositoryName">
-): boolean =>
-  sandbox.status !== "stopped" &&
-  sandbox.status !== "stopping" &&
-  sandbox.status !== "error" &&
-  sandboxMatchesPullRequest(sandbox, pullRequest)
-
-/** Detect a matching sandbox whose stop is still in flight. */
-export const isStoppingSandbox = (
-  sandbox: Parameters<typeof sandboxMatchesPullRequest>[0] & { readonly status: string },
-  pullRequest: Pick<Domain.PullRequest, "account" | "id" | "repositoryName">
-): boolean => sandbox.status === "stopping" && sandboxMatchesPullRequest(sandbox, pullRequest)
-
-/** Block fallback-account creation when an active numeric sandbox cannot be attributed safely. */
-export const hasFallbackSandboxCollision = (
-  sandboxes: ReadonlyArray<Parameters<typeof sandboxMatchesPullRequest>[0] & { readonly status?: string }>,
-  pullRequest: Pick<Domain.PullRequest, "account" | "id" | "repositoryName">
-): boolean =>
-  (pullRequest.account.awsAccountId === undefined || pullRequest.account.awsAccountId.length === 0) &&
-  sandboxes.some(
-    (sandbox) =>
-      /^\d{12}$/u.test(sandbox.awsAccountId) &&
-      sandbox.awsAccountId !== pullRequest.account.profile &&
-      sandbox.status !== "stopped" &&
-      sandbox.status !== "error" &&
-      sandbox.pullRequestId === String(pullRequest.id) &&
-      sandbox.repositoryName === String(pullRequest.repositoryName) &&
-      sandbox.region === String(pullRequest.account.region)
-  )
-
-/** Keep review API requests bound to the exact PR shown by this page. */
-export const reviewApiAccountId = (
-  pullRequest: Pick<Domain.PullRequest, "account" | "id" | "repositoryName">
-): string => {
-  if (pullRequest.account.awsAccountId === undefined || pullRequest.account.awsAccountId.length === 0) {
-    return pullRequest.account.profile
-  }
-  return encodePullRequestCoordinates({
-    accountId: pullRequest.account.awsAccountId,
-    pullRequestId: pullRequest.id,
-    repositoryName: pullRequest.repositoryName,
-    region: pullRequest.account.region
-  })
-}
-
-/** Keep optimistic comment state isolated to one exact pull-request coordinate. */
-export const commentNavigationIdentityForCoordinates = (
-  accountId: string | undefined,
-  pullRequestId: string | undefined,
-  repositoryName: string | undefined,
-  region: string | undefined
-): string => JSON.stringify([accountId ?? "", pullRequestId ?? "", repositoryName ?? "", region ?? ""])
-
-/** Select a cached PR only when the route identifies exactly one coordinate. */
-export const selectCodeCommitPullRequest = (
-  pullRequests: ReadonlyArray<Domain.PullRequest>,
-  route: CodeCommitPullRequestRouteCoordinates
-) => {
-  const matches = pullRequests.filter((candidate) => matchesCodeCommitPullRequestRoute(candidate, route))
-  return {
-    pullRequest: matches.length === 1 ? (matches[0] ?? null) : null,
-    ambiguous: matches.length > 1
-  }
-}
-
-const healthTone = (tier: ReturnType<typeof getScoreTier>): RlyStateTone =>
-  tier === "green" ? "positive" : tier === "yellow" ? "caution" : "critical"
-
-const categoryTone = (status: CategoryStatus): RlyStateTone =>
-  status === "positive" ? "positive" : status === "neutral" ? "neutral" : "critical"
-
-export const refreshFailureDescription = (cause: unknown): string => {
-  const message = Predicate.isError(cause) ? cause.message.trim() : ""
-  return message.length > 0 ? message : "Try the refresh again."
-}
-
-/** Why the first read of a pull request that is not cached failed, and whether Settings → Accounts fixes it. */
-export interface PullRequestLoadFailure {
-  readonly message: string
-  readonly fixInSettings: boolean
-}
-
-export const pullRequestLoadFailure = (cause: unknown): PullRequestLoadFailure => ({
-  message: refreshFailureDescription(cause),
-  fixInSettings:
-    Predicate.isTagged(cause, "AccountSwitchedOffApiError") || Predicate.isTagged(cause, "AccountUnknownApiError")
-})
-
-const isTextInputTarget = (target: EventTarget | null): boolean => {
-  const tagName = Predicate.hasProperty(target, "tagName") ? target.tagName : undefined
-  return tagName === "INPUT" || tagName === "TEXTAREA"
-}
-
-/** The focused element's tag, read from a key event's target; null when the target is not an element. */
-const focusedElement = (target: EventTarget | null): Pick<Element, "tagName"> | null =>
-  Predicate.hasProperty(target, "tagName") && Predicate.isString(target.tagName) ? { tagName: target.tagName } : null
-
-/**
- * Whether someone other than the author signed off, as review evidence for time to first review. Any
- * sign-off counts: one of two required, or a voluntary one where no rules apply. An unknown approval
- * holds only a last known one, so it doesn't; nor do approvers that couldn't be read.
- */
-export const signedOffByOthers = (pr: Domain.PullRequest): boolean =>
-  approvalOf(pr)._tag !== "Unknown" && currentApprovers(pr).some((approver) => !identityMatches(approver, pr.author))
-
-/**
- * True when Enter on the focused element already does something (follow a link, press a button),
- * so the page-wide Enter shortcut must not also fire. Used by the PR page's keydown handler.
- */
-export const ownsEnterKey = (target: Pick<Element, "tagName"> | null): boolean => {
-  const tagName = target?.tagName
-  return tagName === "A" || tagName === "BUTTON" || tagName === "SELECT" || tagName === "SUMMARY"
-}
-
-/**
- * True when a key event's path (`event.composedPath()`) crosses an open dialog, native `<dialog
- * open>` or an ARIA `role="dialog"` (Radix and rly Sheet render those): Esc there closes the
- * dialog, so the PR page's own shortcuts (Esc back to the queue, Enter/o console, `.` sandbox)
- * must stay out of it.
- */
-export const insideOpenDialog = (path: ReadonlyArray<EventTarget>): boolean =>
-  path.some(
-    (node) =>
-      (Predicate.hasProperty(node, "tagName") &&
-        node.tagName === "DIALOG" &&
-        Predicate.hasProperty(node, "open") &&
-        node.open === true) ||
-      (Predicate.hasProperty(node, "role") && (node.role === "dialog" || node.role === "alertdialog"))
-  )
-
-const formatRelativeDate = (dateStr: string): string => {
-  const date = new Date(dateStr)
-  const abs = date.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
-  const diffMs = Date.now() - date.getTime()
-  const diffMins = Math.floor(diffMs / 60_000)
-  if (diffMins < 1) return `${abs}, just now`
-  if (diffMins < 60) return `${abs}, ${diffMins}m ago`
-  const diffHours = Math.floor(diffMins / 60)
-  if (diffHours < 24) return `${abs}, ${diffHours}h ago`
-  const diffDays = Math.floor(diffHours / 24)
-  return `${abs}, ${diffDays}d ago`
-}
-
-const earliestDate = (loc: { readonly comments: ReadonlyArray<CommentThreadJsonEncoded> }): number => {
-  if (loc.comments.length === 0) return 0
-  return Math.min(...loc.comments.map((t) => new Date(t.root.creationDate).getTime()))
-}
-
-const countThread = (thread: CommentThreadJsonEncoded): number =>
-  1 + thread.replies.reduce((sum, reply) => sum + countThread(reply), 0)
-
-const countVisibleThread = (thread: CommentThreadJsonEncoded): number =>
-  thread.root.deleted ? 0 : 1 + thread.replies.reduce((sum, reply) => sum + countVisibleThread(reply), 0)
-
-const commentIdsInThread = (thread: CommentThreadJsonEncoded): ReadonlyArray<string> => [
-  thread.root.id,
-  ...thread.replies.flatMap(commentIdsInThread)
-]
-
-interface CommentCountSnapshot {
-  readonly commentIds: ReadonlyArray<string>
-  readonly count: number
-}
-
-function CommentsCountReporter({
-  onCountChange,
-  snapshot
-}: {
-  readonly snapshot: CommentCountSnapshot
-  readonly onCountChange: (snapshot: CommentCountSnapshot) => void
-}) {
-  const lastSnapshotKeyRef = useRef("")
-  useEffect(() => {
-    const snapshotKey = `${String(snapshot.count)}:${snapshot.commentIds.join("\u0000")}`
-    if (lastSnapshotKeyRef.current === snapshotKey) return
-    lastSnapshotKeyRef.current = snapshotKey
-    onCountChange(snapshot)
-  })
-  return null
-}
-
-function ScoreBadge({ score }: { readonly score: HealthScore | undefined }) {
-  // Unknown reads as a dash, never a red 0: the breakdown says which date is missing.
-  if (score === undefined) return <StateLabel label="Health —" size="compact" tone="neutral" />
-  const tier = getScoreTier(score.total)
-
-  return <StateLabel label={`Health ${score.total.toFixed(1)} / 10`} size="compact" tone={healthTone(tier)} />
-}
-
-function ScoreBreakdown({
-  score,
-  unknownReason
-}: {
-  readonly score: HealthScore | undefined
-  readonly unknownReason: Option.Option<string>
-}) {
-  if (score === undefined) {
-    return (
-      <Text tone="secondary" variant="meta">
-        {`Not enough data to score: ${Option.getOrElse(unknownReason, () => "no dates")}.`}
-      </Text>
-    )
-  }
-  const tier = getScoreTier(score.total)
-
-  return (
-    <div className={styles.scoreBreakdown}>
-      <div className={styles.scoreSummary}>
-        <strong data-tone={healthTone(tier)}>{score.total.toFixed(1)}</strong>
-        <span>/ 10</span>
-        <div
-          aria-label={`Health score ${score.total.toFixed(1)} out of 10`}
-          aria-valuemax={10}
-          aria-valuemin={0}
-          aria-valuenow={score.total}
-          className={styles.scoreTrack}
-          role="progressbar"
-        >
-          <div className={styles.scoreFill} data-tone={healthTone(tier)} style={{ width: `${score.total * 10}%` }} />
-        </div>
-      </div>
-      <ul className={styles.scoreCategories}>
-        {score.categories.map((cat: HealthScoreCategory) => (
-          <li key={cat.label} className={styles.scoreCategory}>
-            <span className={styles.scoreDelta} data-direction={cat.value > 0 ? "up" : cat.value < 0 ? "down" : "flat"}>
-              {cat.value > 0 ? `+${cat.value}` : cat.value}
-            </span>
-            <div className={styles.scoreCategoryCopy}>
-              <div>
-                <Text as="strong" variant="label">
-                  {cat.label}
-                </Text>
-                <StateLabel label={cat.statusLabel} size="compact" tone={categoryTone(cat.status)} />
-              </div>
-              <Text tone="secondary" variant="meta">
-                {cat.description}
-              </Text>
-            </div>
-          </li>
-        ))}
-      </ul>
-    </div>
-  )
-}
-
-interface CommentLocationCoordinates {
-  readonly afterCommitId?: string | undefined
-  readonly beforeCommitId?: string | undefined
-  readonly filePath?: string | undefined
-  readonly relativeFileVersion?: "AFTER" | "BEFORE" | undefined
-}
-
-function CommentThread({
-  depth,
-  location,
-  navigation,
-  onNavigateToDiff,
-  thread,
-  visible
-}: {
-  readonly thread: CommentThreadJsonEncoded
-  readonly depth: number
-  readonly location: CommentLocationCoordinates
-  readonly navigation: ReviewCommentNavigation | null
-  readonly onNavigateToDiff: (target: ReviewCommentNavigationTarget) => void
-  readonly visible: boolean
-}) {
-  const target = depth === 0 ? reviewCommentNavigationTarget(location, thread.root) : null
-  const active = navigation?.destination === "comment" && navigation.target.commentId === thread.root.id
-  const articleRef = useRef<HTMLElement>(null)
-
-  useEffect(() => {
-    if (!active || !visible || articleRef.current === null) return
-    articleRef.current.scrollIntoView({ behavior: "smooth", block: "center" })
-    articleRef.current.focus({ preventScroll: true })
-  }, [active, visible])
-
-  if (thread.root.deleted) return null
-
-  return (
-    <article
-      className={depth > 0 ? styles.commentReply : styles.comment}
-      data-active={active ? "true" : undefined}
-      ref={articleRef}
-      tabIndex={active ? -1 : undefined}
-    >
-      <div className={styles.commentBody}>
-        <div className={styles.commentMeta}>
-          <span>
-            <strong>{thread.root.author}</strong>,{" "}
-            <time dateTime={thread.root.creationDate}>{formatRelativeDate(thread.root.creationDate)}</time>
-          </span>
-          {target === null ? null : (
-            <button className={styles.commentJump} onClick={() => onNavigateToDiff(target)} type="button">
-              <CodeIcon aria-hidden="true" /> View in diff
-            </button>
-          )}
-        </div>
-        <div
-          className={`${styles.markdown ?? ""} prose prose-sm dark:prose-invert max-w-none break-words [&_a]:text-primary [&_img]:inline [&_img]:h-5 [&_img]:w-auto`}
-        >
-          <Markdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>
-            {thread.root.content}
-          </Markdown>
-        </div>
-      </div>
-      {thread.replies.map((reply) => (
-        <CommentThread
-          depth={depth + 1}
-          key={reply.root.id}
-          location={location}
-          navigation={navigation}
-          onNavigateToDiff={onNavigateToDiff}
-          thread={reply}
-          visible={visible}
-        />
-      ))}
-    </article>
-  )
-}
-
-function CommentsSection({
-  commentsRefreshGeneration,
-  navigation,
-  onCountChange,
-  onNavigateToDiff,
-  pr,
-  visible
-}: {
-  readonly commentsRefreshGeneration: number
-  readonly navigation: ReviewCommentNavigation | null
-  readonly onCountChange: (snapshot: CommentCountSnapshot) => void
-  readonly onNavigateToDiff: (target: ReviewCommentNavigationTarget) => void
-  readonly pr: Domain.PullRequest
-  readonly visible: boolean
-}) {
-  const commentsResult = useComments({
-    pullRequestId: pr.id,
-    repositoryName: pr.repositoryName,
-    profile: pr.account.profile,
-    region: pr.account.region,
-    refreshGeneration: commentsRefreshGeneration
-  })
-
-  return AsyncResult.builder(commentsResult)
-    .onInitialOrWaiting(() => (
-      <StatePanel
-        announce="polite"
-        description="Reading the current CodeCommit conversation."
-        title="Loading comments"
-        tone="progress"
-      />
-    ))
-    .onFailure(() => (
-      <StatePanel
-        announce="polite"
-        description="Refresh the pull request to try reading the conversation again."
-        title="Comments unavailable"
-        tone="critical"
-      />
-    ))
-    .onSuccess((comments) => {
-      const totalCount = comments.reduce((sum, loc) => sum + loc.comments.reduce((s, t) => s + countThread(t), 0), 0)
-      const commentIds = comments.flatMap((location) => location.comments.flatMap(commentIdsInThread)).sort()
-      const visibleCount = comments.reduce(
-        (sum, loc) => sum + loc.comments.reduce((locationSum, thread) => locationSum + countVisibleThread(thread), 0),
-        0
-      )
-
-      return (
-        <div className={styles.comments}>
-          <CommentsCountReporter onCountChange={onCountChange} snapshot={{ commentIds, count: totalCount }} />
-          {comments.length === 0 && (
-            <Text tone="secondary" variant="meta">
-              No comments
-            </Text>
-          )}
-          {visibleCount > 0 && (
-            <div className={styles.commentLocations}>
-              {[...comments]
-                .sort((a, b) => earliestDate(b) - earliestDate(a))
-                .map((loc, i) => (
-                  <section className={styles.commentLocation} key={loc.filePath ?? `loc-${i}`}>
-                    {loc.filePath && <code className={styles.commentPath}>{loc.filePath}</code>}
-                    {loc.comments.map((thread) => (
-                      <CommentThread
-                        depth={0}
-                        key={thread.root.id}
-                        location={loc}
-                        navigation={navigation}
-                        onNavigateToDiff={onNavigateToDiff}
-                        thread={thread}
-                        visible={visible}
-                      />
-                    ))}
-                    {i < comments.length - 1 && <Separator className="my-2" />}
-                  </section>
-                ))}
-            </div>
-          )}
-        </div>
-      )
-    })
-    .exhaustive()
-}
-
-function LifecycleInfo({ pr }: { readonly pr: Domain.PullRequest }) {
-  const commentsResult = useComments({
-    pullRequestId: pr.id,
-    repositoryName: pr.repositoryName,
-    profile: pr.account.profile,
-    region: pr.account.region
-  })
-
-  const timeToMerge = pr.status === "MERGED" ? pr.lastModifiedDate.getTime() - pr.creationDate.getTime() : null
-
-  const { timeToAddressFeedback, timeToFirstReview } = useMemo(() => {
-    if (!AsyncResult.isSuccess(commentsResult)) return { timeToFirstReview: null, timeToAddressFeedback: null }
-    const allComments: Array<{ author: string; date: Date }> = []
-    for (const loc of commentsResult.value) {
-      const walk = (threads: ReadonlyArray<CommentThreadJsonEncoded>) => {
-        for (const t of threads) {
-          allComments.push({ author: t.root.author, date: new Date(t.root.creationDate) })
-          walk(t.replies)
-        }
-      }
-      walk(loc.comments)
-    }
-    allComments.sort((a, b) => a.date.getTime() - b.date.getTime())
-
-    const firstComment = allComments.find((c) => c.author !== pr.author)
-    const commentMs = firstComment !== undefined ? firstComment.date.getTime() - pr.creationDate.getTime() : null
-    // Approval as review fallback: use lastModifiedDate as proxy for approval time
-    const hasNonAuthorApproval = signedOffByOthers(pr)
-    const approvalMs = hasNonAuthorApproval ? pr.lastModifiedDate.getTime() - pr.creationDate.getTime() : null
-    const ttfr = commentMs != null && approvalMs != null ? Math.min(commentMs, approvalMs) : (commentMs ?? approvalMs)
-
-    const feedbackDeltas: Array<number> = []
-    for (let i = 0; i < allComments.length; i++) {
-      if (allComments[i]!.author !== pr.author) {
-        const reply = allComments.slice(i + 1).find((c) => c.author === pr.author)
-        if (reply !== undefined) feedbackDeltas.push(reply.date.getTime() - allComments[i]!.date.getTime())
-      }
-    }
-    const ttaf = feedbackDeltas.length > 0 ? feedbackDeltas.reduce((a, b) => a + b, 0) / feedbackDeltas.length : null
-
-    return { timeToFirstReview: ttfr, timeToAddressFeedback: ttaf }
-  }, [commentsResult, pr])
-
-  const hasAny = timeToMerge != null || timeToFirstReview != null || timeToAddressFeedback != null
-  if (!hasAny) return null
-
-  return (
-    <>
-      {timeToMerge != null && (
-        <>
-          <dt>Time to merge</dt>
-          <dd>{DateUtils.formatDuration(timeToMerge)}</dd>
-        </>
-      )}
-      {timeToFirstReview != null && (
-        <>
-          <dt>Time to first review</dt>
-          <dd>{DateUtils.formatDuration(timeToFirstReview)}</dd>
-        </>
-      )}
-      {timeToAddressFeedback != null && (
-        <>
-          <dt>Time to address feedback</dt>
-          <dd>{DateUtils.formatDuration(timeToAddressFeedback)}</dd>
-        </>
-      )}
-    </>
-  )
-}
-
-function CollapsibleSection({
-  children,
-  count,
-  keepMounted = false,
-  openRequestKey,
-  title
-}: {
-  readonly title: string
-  readonly count?: number
-  readonly keepMounted?: boolean
-  readonly openRequestKey?: string
-  readonly children: (open: boolean) => React.ReactNode
-}) {
-  const [open, setOpen] = useState(false)
-  useEffect(() => {
-    if (openRequestKey !== undefined) setOpen(true)
-  }, [openRequestKey])
-  const content = children(open)
-  return (
-    <Surface as="section" className={styles.disclosure} padding="none" form="grouped">
-      <button aria-expanded={open} className={styles.disclosureTrigger} onClick={() => setOpen(!open)} type="button">
-        <ChevronDownIcon aria-hidden="true" className={styles.disclosureIcon} data-open={open ? "true" : "false"} />
-        <span>{title}</span>
-        {count !== undefined && <small>{count}</small>}
-      </button>
-      {(open || keepMounted) && (
-        <div className={styles.disclosureContent} hidden={!open}>
-          {content}
-        </div>
-      )}
-    </Surface>
-  )
-}
-
-const REQUIRED_RULE_NAME = "Required approvers"
-const OPTIONAL_RULE_NAME = "Optional approvers"
-
-export const normalizeApproverIdentity = (input: string, repoAccountId: string): string | undefined => {
-  const trimmed = input.trim()
-  if (trimmed.length === 0 || repoAccountId.length === 0) return undefined
-  return trimmed.startsWith("CodeCommitApprovers:") ? trimmed : `CodeCommitApprovers:${repoAccountId}:${trimmed}`
-}
-
-interface ApproversCardProps {
-  readonly title: string
-  readonly ruleName: string
-  readonly required: boolean
-  readonly approvalRules: ReadonlyArray<{
-    readonly ruleName: string
-    readonly requiredApprovals: number
-    readonly poolMembers: ReadonlyArray<string>
-    readonly poolMemberArns: ReadonlyArray<string>
-    readonly satisfied: boolean
-    readonly fromTemplate?: string | undefined
-  }>
-  /** Who approved as far as is known now ({@link currentApprovers}): marked with a check. */
-  readonly approvedBy: ReadonlyArray<string>
-  /** The last approver read failed, so nobody is marked approved and the card says so. */
-  readonly approversUnknown: boolean
-  /** The last evaluation failed, so each rule's `satisfied` is only its last known value. */
-  readonly approvalUnknown: boolean
-  readonly knownUserArns: ReadonlyMap<string, string>
-  readonly currentUser: string | undefined
-  readonly repoAccountId: string
-  readonly onSetApprovers: (arns: ReadonlyArray<string>) => void
-  /**
-   * Deletes this card's own rule (never a template rule), then refreshes the pull request. Says which
-   * step failed: a failed refresh is retried with `onRefresh`, never by deleting again.
-   */
-  readonly onRemoveRule: () => Promise<RuleRemoval>
-  readonly onRefresh: () => Promise<boolean>
-  readonly permissionPrompt: boolean
-}
-
-/** How removing a rule ended. */
-type RuleRemoval =
-  | { readonly _tag: "Removed" }
-  | { readonly _tag: "DeleteFailed"; readonly reason: string }
-  | { readonly _tag: "RefreshFailed" }
-
-function ApproversCard({
-  approvalRules,
-  approvalUnknown,
-  approvedBy,
-  approversUnknown,
-  currentUser,
-  knownUserArns,
-  onRefresh,
-  onRemoveRule,
-  onSetApprovers,
-  permissionPrompt,
-  repoAccountId,
-  required,
-  ruleName,
-  title
-}: ApproversCardProps) {
-  const [showPicker, setShowPicker] = useState(false)
-  const [manualArn, setManualArn] = useState("")
-  const poolKey = approvalRules.flatMap((r) => r.poolMembers).join(",")
-  const optimistic = useOptimisticSet({
-    items: approvalRules.flatMap((r) => r.poolMembers),
-    stableKey: poolKey,
-    permissionPrompt,
-    onRefresh
-  })
-  const { pendingAdd, pendingRemove } = optimistic
-  // Removing stays on until the refreshed rules drop the rule (the button goes with it), so it can't be
-  // clicked again against a rule that is already gone.
-  const [removal, setRemoval] = useState<{ readonly _tag: "Idle" } | { readonly _tag: "Removing" } | RuleRemoval>({
-    _tag: "Idle"
-  })
-
-  // Pool members for THIS card: template rules + this card's managed rule (not other managed rules)
-  const allPoolMembers = useMemo(() => {
-    const set = new Set<string>()
-    for (const rule of approvalRules) {
-      if (rule.fromTemplate !== undefined || rule.ruleName === ruleName) {
-        for (const m of rule.poolMembers) set.add(m)
-      }
-    }
-    return [...set]
-  }, [approvalRules, ruleName])
-
-  // Find the managed rule by name (non-template rule we can edit)
-  const managedRule = approvalRules.find((r) => r.ruleName === ruleName && r.fromTemplate === undefined)
-  const managedArns = managedRule?.poolMemberArns ?? []
-  const managedMembers = managedRule?.poolMembers ?? []
-  const hasManagedRule = managedRule !== undefined
-  useEffect(() => {
-    if (!hasManagedRule) setRemoval({ _tag: "Idle" })
-  }, [hasManagedRule])
-  const removeRule = () => {
-    setRemoval({ _tag: "Removing" })
-    void onRemoveRule().then(setRemoval)
-  }
-  const refreshAfterRemoval = () => {
-    setRemoval({ _tag: "Removing" })
-    void onRefresh().then((refreshed) => setRemoval(refreshed ? { _tag: "Removed" } : { _tag: "RefreshFailed" }))
-  }
-
-  // Users available to add (have known ARN + not already in pool)
-  const addable = useMemo(
-    () => [...knownUserArns.entries()].filter(([name]) => !allPoolMembers.includes(name) && name !== pendingAdd),
-    [knownUserArns, allPoolMembers, pendingAdd]
-  )
-
-  const prefix = repoAccountId.length > 0 ? `CodeCommitApprovers:${repoAccountId}:` : ""
-
-  const handleAdd = (input: string) => {
-    const value = normalizeApproverIdentity(input, repoAccountId)
-    if (value === undefined) return
-    const nameMatch = /^CodeCommitApprovers:[^:]*:(.+)$/.exec(value)
-    optimistic.add(nameMatch !== null ? nameMatch[1]! : input)
-    onSetApprovers([...managedArns, value])
-    setShowPicker(false)
-  }
-
-  const handleRemove = (user: string) => {
-    optimistic.remove(user)
-    const idx = managedMembers.indexOf(user)
-    if (idx >= 0) {
-      onSetApprovers(managedArns.filter((_, i) => i !== idx))
-    }
-  }
-
-  const isSatisfied = approvalRules.length > 0 && approvalRules.every((r) => r.satisfied)
-
-  return (
-    <Surface as="section" className={styles.approverCard} padding="default" form="grouped" tone="secondary">
-      <header className={styles.approverHeading}>
-        <div className={styles.approverTitle}>
-          <Text as="h3" variant="label">
-            {title}
-          </Text>
-          {required &&
-            approvalRules.length > 0 &&
-            (approvalUnknown ? (
-              <StateLabel label={approvalUnknownLabel} size="compact" tone="neutral" />
-            ) : isSatisfied ? (
-              <StateLabel label="Satisfied" size="compact" tone="positive" />
-            ) : (
-              <StateLabel label="Pending" size="compact" tone="caution" />
-            ))}
-          {approversUnknown && <StateLabel label={approversUnknownLabel} size="compact" tone="neutral" />}
-        </div>
-        <Button
-          aria-expanded={showPicker}
-          aria-label={showPicker ? `Close ${title.toLocaleLowerCase()} editor` : `Add ${title.toLocaleLowerCase()}`}
-          className={styles.iconAction}
-          onClick={() => setShowPicker(!showPicker)}
-          size="icon-sm"
-          variant="ghost"
-        >
-          <PlusIcon className="size-4" />
-        </Button>
-        {managedRule === undefined ? null : (
-          // Only the rule this page created can be removed; template rules belong to the repository.
-          <RlyButton
-            // Removed and waiting for the refreshed rules to drop it: no second delete.
-            disabled={removal._tag === "Removed" || removal._tag === "RefreshFailed"}
-            loading={removal._tag === "Removing"}
-            onClick={removeRule}
-            size="compact"
-            variant="quiet"
-          >
-            Remove rule
-          </RlyButton>
-        )}
-      </header>
-      {removal._tag === "DeleteFailed" ? (
-        <p className={styles.removeFailure} role="alert">
-          Couldn't remove the rule: {removal.reason}
-        </p>
-      ) : removal._tag === "RefreshFailed" ? (
-        <p className={styles.removeFailure} role="alert">
-          Removed the rule, but this page couldn't refresh to show it.{" "}
-          <RlyButton onClick={refreshAfterRemoval} size="compact" variant="quiet">
-            Refresh
-          </RlyButton>
-        </p>
-      ) : null}
-      <div className={styles.approverBody}>
-        {showPicker && (
-          <div className={styles.approverPicker}>
-            {addable.length > 0 && (
-              <div className={styles.approverSuggestions}>
-                {addable.map(([name]) => (
-                  <Button
-                    className={styles.suggestionChoice}
-                    key={name}
-                    onClick={() => setManualArn(name)}
-                    size="sm"
-                    variant="outline"
-                  >
-                    {name}
-                  </Button>
-                ))}
-              </div>
-            )}
-            <div className={styles.approverPickerActions}>
-              <Field
-                className={styles.approverField}
-                description="Enter a known user or the complete CodeCommit approver identity."
-                label="Approver"
-                size="compact"
-              >
-                {(controlProps) => (
-                  <input
-                    {...controlProps}
-                    className={`${controlProps.className} ${styles.approverInput ?? ""}`}
-                    onChange={(event) => setManualArn(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" && manualArn.trim().length > 0 && prefix.length > 0) {
-                        handleAdd(manualArn.trim())
-                        setManualArn("")
-                      }
-                    }}
-                    placeholder={prefix.length > 0 ? `${prefix}USERNAME` : "username"}
-                    value={manualArn}
-                  />
-                )}
-              </Field>
-              <RlyButton
-                disabled={manualArn.trim().length === 0 || prefix.length === 0}
-                onClick={() => {
-                  handleAdd(manualArn.trim())
-                  setManualArn("")
-                }}
-                size="compact"
-                variant="primary"
-              >
-                Add
-              </RlyButton>
-            </div>
-          </div>
-        )}
-        {!showPicker && prefix.length > 0 && addable.length > 0 && (
-          <div className={styles.suggestedApprovers}>
-            <Text tone="secondary" variant="meta">
-              Suggested
-            </Text>
-            {addable.slice(0, 5).map(([name, arn]) => (
-              <button className={styles.suggestedApprover} key={name} onClick={() => handleAdd(arn)} type="button">
-                <PlusIcon aria-hidden="true" />
-                {name}
-              </button>
-            ))}
-          </div>
-        )}
-        {(allPoolMembers.length > 0 || pendingAdd) && (
-          <div className={styles.approverMembers}>
-            {allPoolMembers.map((member) => {
-              const hasApproved = approvedBy.includes(member)
-              const isManaged = managedMembers.includes(member)
-              const isRemoving = member === pendingRemove
-              return (
-                <Badge
-                  className={`${styles.approverMember ?? ""} ${
-                    hasApproved ? "border-green-500/30 text-green-600 dark:text-green-400" : ""
-                  } ${isRemoving ? "opacity-50" : ""}`}
-                  key={member}
-                  variant={member === currentUser ? "default" : hasApproved ? "outline" : "secondary"}
-                >
-                  {isRemoving && <LoaderIcon className="size-3 animate-spin" />}
-                  {!isRemoving && hasApproved && <CheckIcon className="size-3" />}
-                  {member}
-                  {isManaged && !isRemoving && (
-                    <button
-                      aria-label={`Remove ${member} from ${title.toLocaleLowerCase()}`}
-                      className={styles.removeApprover}
-                      onClick={() => handleRemove(member)}
-                      type="button"
-                    >
-                      <TrashIcon className="size-3" />
-                    </button>
-                  )}
-                </Badge>
-              )
-            })}
-            {pendingAdd && !allPoolMembers.includes(pendingAdd) && (
-              <Badge className={`${styles.approverMember ?? ""} opacity-70`} variant="secondary">
-                <LoaderIcon className="size-3 animate-spin" />
-                {pendingAdd}
-              </Badge>
-            )}
-          </div>
-        )}
-      </div>
-    </Surface>
-  )
-}
-
-interface PullRequestDecisionPresentation {
-  readonly reason: string
-  readonly tone: RlyNoticeTone
-  readonly verdict: string
-}
-
 interface OptimisticCommentCount {
   readonly baseCount: number
   readonly count: number
   readonly identity: string
   readonly pendingCommentIds: ReadonlyArray<string>
 }
-
-const pullRequestDecision = (pr: Domain.PullRequest): PullRequestDecisionPresentation => {
-  switch (pr.status) {
-    case "MERGED":
-      return {
-        reason: `CodeCommit reports this pull request merged into ${pr.destinationBranch}.`,
-        tone: "positive",
-        verdict: "Merged."
-      }
-    case "CLOSED":
-      return {
-        reason: "CodeCommit reports this pull request closed without a merge.",
-        tone: "neutral",
-        verdict: "Closed."
-      }
-    case "OPEN": {
-      const approval = approvalOf(pr)
-      if (!pr.isMergeable) {
-        const conflict = `Resolve the conflict between ${pr.sourceBranch} and ${pr.destinationBranch} before merging.`
-        return {
-          // The conflict decides the verdict; an unknown approval still says why.
-          reason: approval._tag === "Unknown" ? `${conflict} ${approvalUnknownReasonText(approval.reason)}` : conflict,
-          tone: "critical",
-          verdict: "Resolve conflicts."
-        }
-      }
-      if (approval._tag === "Unknown") {
-        return {
-          reason: approvalUnknownReasonText(approval.reason),
-          tone: "caution",
-          verdict: `${approvalUnknownLabel}.`
-        }
-      }
-      if (approval._tag === "Pending") {
-        return {
-          reason: "The branch is mergeable, but its provider approval is still pending.",
-          tone: "caution",
-          verdict: "Review pending."
-        }
-      }
-      return {
-        reason:
-          approval._tag === "NotRequired"
-            ? "CodeCommit reports a clean merge, and no approval rules apply to this pull request."
-            : "CodeCommit reports a clean merge and the provider approval is satisfied.",
-        tone: "positive",
-        verdict: "Ready to merge."
-      }
-    }
-  }
-}
-
-const pullRequestStatusTone = (status: Domain.PullRequest["status"]): RlyStateTone =>
-  status === "MERGED" ? "positive" : status === "CLOSED" ? "neutral" : "progress"
 
 export function PRDetail() {
   const { accountId, prId } = useParams<{ accountId: string; prId: string }>()
@@ -1449,460 +504,126 @@ export function PRDetail() {
     return () => window.removeEventListener("keydown", handleKeyDown)
   }, [consoleUrl, handleOpen, handleSandbox, navigate, pr])
 
-  if (routeAmbiguous) {
-    return (
-      <section className={styles.loadingState}>
-        <StatePanel
-          announce="assertive"
-          description="Choose both repository and region to identify this pull request."
-          title="Pull request coordinates are ambiguous"
-          tone="critical"
-        />
-      </section>
-    )
-  }
-
-  if (pr === null && loadFailure !== null) {
-    return (
-      <section className={styles.loadingState}>
-        <StatePanel
-          action={
-            <>
-              {loadFailure.fixInSettings ? (
-                <RlyButton onClick={() => navigate("/settings/accounts")} size="compact" variant="primary">
-                  Open Settings → Accounts
-                </RlyButton>
-              ) : null}
-              <RlyButton onClick={retryLoad} size="compact">
-                Try again
-              </RlyButton>
-            </>
-          }
-          announce="assertive"
-          description={loadFailure.message}
-          title="Can't read this pull request"
-          tone="critical"
-        />
-      </section>
-    )
-  }
-
-  if (pr === null) {
-    return (
-      <section className={styles.loadingState}>
-        <StatePanel
-          announce="polite"
-          description="Reading the current provider facts and approval state from CodeCommit."
-          title="Loading pull request"
-          tone="progress"
-        />
-      </section>
-    )
-  }
-
-  const decision = pullRequestDecision(pr)
-  const scope = extractScope(pr.title)
-  const statusLabel = pr.status === "OPEN" ? "Open" : pr.status === "MERGED" ? "Merged" : "Closed"
-
   return (
-    <article className={styles.page}>
-      <nav aria-label="Pull request navigation" className={styles.backNavigation}>
-        <RlyButton leadingIcon="arrow-left" onClick={() => navigate("/")} size="compact" variant="quiet">
-          Back
-        </RlyButton>
-      </nav>
-
-      <header className={styles.hero}>
-        <Text as="h1" className={styles.title} variant="section-title">
-          {pr.title}
-        </Text>
-        <div className={styles.heroMeta}>
-          <ServiceMark service="codecommit" size="compact" />
-          <span>
-            Pull request {pr.id} by{" "}
-            <Link className={styles.textLink} to={`/?f=author:${encodeURIComponent(pr.author)}`}>
-              {pr.author}
-            </Link>
-            , opened <time dateTime={pr.creationDate.toISOString()}>{DateUtils.formatDate(pr.creationDate)}</time>.
-            {pr.fetchedAt !== undefined ? (
-              <> {DateUtils.formatRelativeTime(pr.fetchedAt, new Date(), "Fetched")}.</>
-            ) : null}
-          </span>
-        </div>
-      </header>
-
-      <section aria-label="Pull request decision and actions" className={styles.decisionWorkspace}>
-        {/* The review state is a sentence under the title, not the largest thing on the page. */}
-        <Notice className={styles.verdict} tone={decision.tone}>
-          <Text as="span" tone="inherit" variant="body-large">
-            <strong>{decision.verdict}</strong> {decision.reason}
-          </Text>
-        </Notice>
-        <aside className={styles.actionRail}>
-          <div className={styles.actionHeading}>
-            <Text tone="secondary" variant="label">
-              Actions
-            </Text>
-            <StateLabel label={statusLabel} size="compact" tone={pullRequestStatusTone(pr.status)} />
-          </div>
-          <div className={styles.actionGroup}>
-            <RlyButton
-              className={styles.actionButton}
-              loading={isRefreshing}
-              onClick={handleRefresh}
-              size="compact"
-              variant="secondary"
-            >
-              Refresh
-            </RlyButton>
-            <RlyButton
-              className={styles.actionButton}
-              onClick={handleSubscriptionToggle}
-              size="compact"
-              variant="secondary"
-            >
-              {isSubscribed ? "Unsubscribe" : "Subscribe"}
-            </RlyButton>
-            <RlyButton className={styles.actionButton} onClick={handleSandbox} size="compact" variant="secondary">
-              {stoppingSandbox !== undefined ? "Stopping…" : existingSandbox !== undefined ? "Open Sandbox" : "Sandbox"}
-            </RlyButton>
-            <RlyButton className={styles.actionButton} onClick={handleCopy} size="compact" variant="secondary">
-              {copied ? "Copied" : "Copy Link"}
-            </RlyButton>
-            <RlyButton
-              className={styles.actionButton}
-              leadingIcon="external-link"
-              onClick={handleOpen}
-              size="compact"
-              variant="primary"
-            >
-              Open in Console
-            </RlyButton>
-          </div>
-          <Text tone="secondary" variant="meta">
-            Enter or O opens CodeCommit. Period opens the sandbox. Esc returns to the list.
-          </Text>
-        </aside>
-      </section>
-
-      <Surface as="section" className={styles.revisionCard} padding="spacious" form="grouped" tone="secondary">
-        <header className={styles.revisionHeading}>
-          <div>
-            <Text tone="secondary" variant="label">
-              Current revision
-            </Text>
-            <Text as="h2" variant="card-title">
-              {pr.repositoryName}
-            </Text>
-            {/* In the text flow, not the corner, so the floating Relay dock can't cover it. */}
-            <ScoreBadge score={score} />
-          </div>
-        </header>
-
-        <div aria-label={`${pr.sourceBranch} into ${pr.destinationBranch}`} className={styles.branchPair}>
-          <div>
-            <Text tone="secondary" variant="meta">
-              Source
-            </Text>
-            <code>{pr.sourceBranch}</code>
-          </div>
-          <ArrowRightIcon aria-hidden="true" />
-          <div>
-            <Text tone="secondary" variant="meta">
-              Destination
-            </Text>
-            <code>{pr.destinationBranch}</code>
-          </div>
-        </div>
-
-        <dl className={styles.facts}>
-          <dt>Account</dt>
-          <dd>
-            <Link className={styles.codeLink} to={`/?f=account:${encodeURIComponent(pr.account.profile)}`}>
-              {pr.account.profile}
-            </Link>
-          </dd>
-
-          <dt>Repository</dt>
-          <dd>
-            <Link className={styles.codeLink} to={`/?f=repo:${encodeURIComponent(pr.repositoryName)}`}>
-              {pr.repositoryName}
-            </Link>
-          </dd>
-
-          <dt>Author</dt>
-          <dd>
-            <Link className={styles.textLink} to={`/?f=author:${encodeURIComponent(pr.author)}`}>
-              {pr.author}
-            </Link>
-          </dd>
-
-          {scope && (
-            <>
-              <dt>Scope</dt>
-              <dd>
-                <Link className={styles.textLink} to={`/?f=scope:${encodeURIComponent(scope)}`}>
-                  {scope}
-                </Link>
-              </dd>
-            </>
-          )}
-
-          <dt>Status</dt>
-          <dd className={styles.factStates}>
-            {pr.status === "MERGED" ? (
-              <Link className={styles.stateLink} to="/?f=status:merged">
-                <StateLabel label="Merged" size="compact" tone="positive" />
-              </Link>
-            ) : pr.status === "CLOSED" ? (
-              <Link className={styles.stateLink} to="/?f=status:closed">
-                <StateLabel label="Closed" size="compact" tone="neutral" />
-              </Link>
-            ) : (
-              <>
-                {approvalOf(pr)._tag === "Unknown" ? (
-                  <StateLabel label={approvalUnknownLabel} size="compact" tone="neutral" />
-                ) : approvalOf(pr)._tag === "NotRequired" ? (
-                  <StateLabel label={approvalNotRequiredLabel} size="compact" tone="neutral" />
-                ) : (
-                  <Link
-                    className={styles.stateLink}
-                    to={`/?f=status:${approvalOf(pr)._tag === "Approved" ? "approved" : "pending"}`}
-                  >
-                    <StateLabel
-                      label={approvalOf(pr)._tag === "Approved" ? "Approved" : "Pending approval"}
-                      size="compact"
-                      tone={approvalOf(pr)._tag === "Approved" ? "positive" : "caution"}
-                    />
-                  </Link>
-                )}
-                <Link className={styles.stateLink} to={`/?f=status:${pr.isMergeable ? "mergeable" : "conflicts"}`}>
-                  <StateLabel
-                    label={pr.isMergeable ? "Mergeable" : "Conflict"}
-                    size="compact"
-                    tone={pr.isMergeable ? "positive" : "critical"}
-                  />
-                </Link>
-              </>
-            )}
-          </dd>
-
-          <dt>Pull request ID</dt>
-          <dd>
-            <code>{pr.id}</code>
-          </dd>
-
-          <dt>Last activity</dt>
-          <dd>
-            <time dateTime={pr.lastModifiedDate.toISOString()}>{DateUtils.formatDate(pr.lastModifiedDate)}</time>
-          </dd>
-
-          <LifecycleInfo pr={pr} />
-        </dl>
-      </Surface>
-
-      <Suspense
-        fallback={
-          <StatePanel
-            announce="polite"
-            description="Preparing the exact-revision review workbench."
-            title="Loading diff tools"
-            tone="progress"
-          />
+    <PRDetailView
+      pullRequest={
+        pr !== null
+          ? AsyncResult.success(pr)
+          : loadFailure !== null
+            ? AsyncResult.fail(loadFailure)
+            : AsyncResult.initial()
+      }
+      routeAmbiguous={routeAmbiguous}
+      now={new Date()}
+      health={{ score, unknownReason: scoreUnknownReason }}
+      actions={{
+        copied,
+        isRefreshing,
+        isSubscribed,
+        sandboxState: stoppingSandbox !== undefined ? "stopping" : existingSandbox !== undefined ? "open" : "create",
+        onBack: () => {
+          void navigate("/")
+        },
+        onRefresh: handleRefresh,
+        onSubscriptionToggle: handleSubscriptionToggle,
+        onSandbox: handleSandbox,
+        onCopyLink: handleCopy,
+        onOpenConsole: handleOpen,
+        onRetryLoad: retryLoad,
+        onOpenAccountsSettings: () => {
+          void navigate("/settings/accounts")
         }
-      >
-        <PullRequestReviewWorkspace
-          accountId={reviewApiAccountId(pr)}
-          commentsRefreshGeneration={commentsRefreshGeneration}
-          commentNavigation={commentNavigation}
-          onFindingPosted={refreshCommentsAfterPublication}
-          onNavigateToComment={(target) => requestCommentNavigation("comment", target)}
-          pullRequest={pr}
-          refreshGeneration={reviewRefreshGeneration}
-        />
-      </Suspense>
-
-      <div className={styles.reviewWorkspace}>
-        <section aria-label="Pull request narrative and comments" className={styles.contentColumn}>
-          {pr.description && (
-            <Surface as="section" className={styles.contentSection} padding="spacious" form="grouped">
-              <header className={styles.sectionHeading}>
-                <Text as="h2" variant="card-title">
-                  Description
-                </Text>
-                <Text tone="secondary" variant="meta">
-                  What the author says this revision changes
-                </Text>
-              </header>
-              <div className={`${styles.description ?? ""} prose prose-sm dark:prose-invert max-w-none`}>
-                <Markdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>
-                  {pr.description}
-                </Markdown>
-              </div>
-            </Surface>
-          )}
-
-          <CollapsibleSection
-            {...(commentNavigation?.destination === "comment"
-              ? { openRequestKey: `${commentNavigation.target.commentId}:${String(commentNavigation.requestId)}` }
-              : {})}
-            keepMounted
-            title="Comments"
-            {...(commentCount !== undefined ? { count: commentCount } : {})}
-          >
-            {(commentsVisible) => (
-              <CommentsSection
-                commentsRefreshGeneration={commentsRefreshGeneration}
-                key={pr.id}
-                navigation={commentNavigation}
-                onCountChange={reconcileCommentCount}
-                onNavigateToDiff={(target) => requestCommentNavigation("diff", target)}
-                pr={pr}
-                visible={commentsVisible}
-              />
-            )}
-          </CollapsibleSection>
-        </section>
-
-        <aside className={styles.evidenceColumn}>
-          <section className={styles.approvalSection}>
-            <header className={styles.sectionHeading}>
-              <Text as="h2" variant="card-title">
-                Decision evidence
-              </Text>
-              <Text tone="secondary" variant="meta">
-                Provider approval rules for this pull request
-              </Text>
-            </header>
-            {[
-              { title: "Required Approvers", ruleName: REQUIRED_RULE_NAME, required: true },
-              { title: "Optional Approvers", ruleName: OPTIONAL_RULE_NAME, required: false }
-            ].map((card) => (
-              <ApproversCard
-                approvalRules={pr.approvalRules}
-                approvalUnknown={approvalOf(pr)._tag === "Unknown"}
-                approvedBy={currentApprovers(pr)}
-                approversUnknown={pr.approversUnknown === true}
-                currentUser={state.currentUser}
-                key={card.ruleName}
-                knownUserArns={knownUserArns}
-                onRefresh={refreshAfterApprovalMutation}
-                onSetApprovers={(arns) => {
-                  const existing = pr.approvalRules.find(
-                    (rule) => rule.ruleName === card.ruleName && rule.fromTemplate === undefined
-                  )
-                  if (existing !== undefined) {
-                    updateRule({
-                      payload: {
-                        account: pr.account,
-                        approvalRuleName: existing.ruleName,
-                        poolMembers: arns.length > 0 ? arns : ["*"],
-                        pullRequestId: pr.id,
-                        requiredApprovals: card.required ? (arns.length > 0 ? arns.length : 0) : 0
-                      }
-                    })
-                  } else if (arns.length > 0) {
-                    createRule({
-                      payload: {
-                        account: pr.account,
-                        approvalRuleName: card.ruleName,
-                        poolMembers: arns,
-                        pullRequestId: pr.id,
-                        requiredApprovals: card.required ? arns.length : 0
-                      }
-                    })
-                  }
-                }}
-                onRemoveRule={() =>
-                  deleteRule({
-                    payload: { account: pr.account, approvalRuleName: card.ruleName, pullRequestId: pr.id }
-                  }).then((exit): Promise<RuleRemoval> | RuleRemoval => {
-                    if (Exit.isSuccess(exit)) {
-                      return refreshAfterApprovalMutation().then((refreshed) =>
-                        refreshed ? { _tag: "Removed" } : { _tag: "RefreshFailed" }
-                      )
-                    }
-                    const error = Cause.squash(exit.cause)
-                    return {
-                      _tag: "DeleteFailed",
-                      reason: Predicate.isError(error) ? error.message : "the server didn't answer."
-                    }
-                  })
-                }
-                permissionPrompt={state.permissionPrompt !== undefined}
-                repoAccountId={currentAcct}
-                required={card.required}
-                ruleName={card.ruleName}
-                title={card.title}
-              />
-            ))}
-          </section>
-
-          <CollapsibleSection title="Health Score Breakdown">
-            {() => <ScoreBreakdown score={score} unknownReason={scoreUnknownReason} />}
-          </CollapsibleSection>
-        </aside>
-      </div>
-
-      <Dialog open={granted.visible} onOpenChange={granted.cancel}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Granted CLI Required</DialogTitle>
-            <DialogDescription>
-              "Open in Console" uses{" "}
-              <a
-                href="https://docs.commonfate.io/granted/introduction"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="underline"
-              >
-                Granted
-              </a>{" "}
-              to assume the AWS role for this account. Make sure the{" "}
-              <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs">assume</code> CLI is installed and
-              configured before continuing.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <label className="flex items-center gap-2 text-sm text-muted-foreground mr-auto">
-              <input
-                type="checkbox"
-                checked={granted.dontRemind}
-                onChange={(e) => granted.setDontRemind(e.target.checked)}
-                className="accent-primary"
-              />
-              Don't remind again
-            </label>
-            <Button variant="ghost" onClick={granted.cancel}>
-              Cancel
-            </Button>
-            <Button onClick={handleGrantedContinue}>Continue</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={docker.visible} onOpenChange={docker.cancel}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Docker Required</DialogTitle>
-            <DialogDescription>
-              Sandbox uses Docker to run a code-server container. Make sure Docker is started before continuing.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <label className="flex items-center gap-2 text-sm text-muted-foreground mr-auto">
-              <input
-                type="checkbox"
-                checked={docker.dontRemind}
-                onChange={(e) => docker.setDontRemind(e.target.checked)}
-                className="accent-primary"
-              />
-              Don't show again
-            </label>
-            <Button onClick={handleDockerContinue}>OK</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </article>
+      }}
+      approvals={{
+        currentUser: state.currentUser,
+        knownUserArns,
+        repoAccountId: currentAcct,
+        permissionPrompt: state.permissionPrompt !== undefined,
+        onRefresh: refreshAfterApprovalMutation,
+        onSetApprovers: (kind, arns) => {
+          if (pr === null) return
+          const required = kind === "required"
+          const ruleName = required ? REQUIRED_RULE_NAME : OPTIONAL_RULE_NAME
+          const existing = pr.approvalRules.find(
+            (rule) => rule.ruleName === ruleName && rule.fromTemplate === undefined
+          )
+          if (existing !== undefined) {
+            updateRule({
+              payload: {
+                account: pr.account,
+                approvalRuleName: existing.ruleName,
+                poolMembers: arns.length > 0 ? arns : ["*"],
+                pullRequestId: pr.id,
+                requiredApprovals: required ? (arns.length > 0 ? arns.length : 0) : 0
+              }
+            })
+          } else if (arns.length > 0) {
+            createRule({
+              payload: {
+                account: pr.account,
+                approvalRuleName: ruleName,
+                poolMembers: arns,
+                pullRequestId: pr.id,
+                requiredApprovals: required ? arns.length : 0
+              }
+            })
+          }
+        },
+        onRemoveRule: (kind) => {
+          if (pr === null) return Promise.resolve({ _tag: "DeleteFailed", reason: "Pull request is not loaded." })
+          const ruleName = kind === "required" ? REQUIRED_RULE_NAME : OPTIONAL_RULE_NAME
+          return deleteRule({
+            payload: { account: pr.account, approvalRuleName: ruleName, pullRequestId: pr.id }
+          }).then((exit): Promise<RuleRemoval> | RuleRemoval => {
+            if (Exit.isSuccess(exit)) {
+              return refreshAfterApprovalMutation().then((refreshed) =>
+                refreshed ? { _tag: "Removed" } : { _tag: "RefreshFailed" }
+              )
+            }
+            const error = Cause.squash(exit.cause)
+            return {
+              _tag: "DeleteFailed",
+              reason: Predicate.isError(error) ? error.message : "the server didn't answer."
+            }
+          })
+        }
+      }}
+      comments={{
+        count: commentCount,
+        navigation: commentNavigation,
+        refreshGeneration: commentsRefreshGeneration,
+        onCountChange: reconcileCommentCount,
+        onNavigateToDiff: (target) => requestCommentNavigation("diff", target)
+      }}
+      review={{
+        accountId: pr === null ? (accountId ?? "") : reviewApiAccountId(pr),
+        commentsRefreshGeneration,
+        commentNavigation,
+        onFindingPosted: refreshCommentsAfterPublication,
+        onNavigateToComment: (target) => requestCommentNavigation("comment", target),
+        refreshGeneration: reviewRefreshGeneration
+      }}
+      dialogs={{
+        granted: {
+          visible: granted.visible,
+          dontRemind: granted.dontRemind,
+          onOpenChange: granted.cancel,
+          onDontRemindChange: granted.setDontRemind,
+          onCancel: granted.cancel,
+          onContinue: handleGrantedContinue
+        },
+        docker: {
+          visible: docker.visible,
+          dontRemind: docker.dontRemind,
+          onOpenChange: docker.cancel,
+          onDontRemindChange: docker.setDontRemind,
+          onCancel: docker.cancel,
+          onContinue: handleDockerContinue
+        }
+      }}
+      renderReviewWorkspace={(input) => <PullRequestReviewWorkspace {...input} />}
+      renderComments={(input) => <CommentsSection {...input} />}
+      renderLifecycle={(pr) => <LifecycleInfo pr={pr} />}
+    />
   )
 }

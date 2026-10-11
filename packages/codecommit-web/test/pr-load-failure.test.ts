@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { pullRequestLoadFailure } from "../src/client/components/pr-detail.js"
+import { pullRequestLoadFailure } from "../src/client/components/pr-detail-presentation.js"
 import { AccountSwitchedOffApiError, AccountUnknownApiError, ApiError } from "../src/server/Api.js"
 
 // QA-168: the first read of an uncached pull request used to fail silently, leaving the loading panel up.

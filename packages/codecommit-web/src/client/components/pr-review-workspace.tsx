@@ -1,13 +1,8 @@
 import { useAtomSet, useAtomValue } from "@effect/atom-react"
 import type * as Domain from "@knpkv/codecommit-core/Domain.js"
 import { BoundedDiffCodeView, type RlyDiffCodeAnnotation, type RlyDiffCodeItem } from "@knpkv/rly/diff/bounded"
-import {
-  DiffFileTree,
-  type RlyDiffFile,
-  type RlyDiffFileContent,
-  type RlyDiffInventory
-} from "@knpkv/rly/diff/workbench"
-import { Button, Select, StateLabel, StatePanel, Surface, Text } from "@knpkv/rly/primitives"
+import { type RlyDiffFile, type RlyDiffFileContent, type RlyDiffInventory } from "@knpkv/rly/diff/workbench"
+import { Button, Select, StateLabel, StatePanel, Text } from "@knpkv/rly/primitives"
 import * as Schema from "effect/Schema"
 import * as Result from "effect/Result"
 import * as AsyncResult from "effect/reactivity/AsyncResult"
@@ -76,6 +71,7 @@ import {
   type ReviewCommentNavigationTarget,
   reviewCommentNavigationTarget
 } from "../review-comment-navigation.js"
+import { PRFilesDiffView } from "./pr-files-diff-view.js"
 import styles from "./pr-review-workspace.module.css"
 
 const reviewFocuses: ReadonlyArray<{
@@ -1738,113 +1734,53 @@ const ReadyReviewWorkspace = ({
         selectedFindingId={relayAboutId}
         turns={turns}
       />
-      <Surface as="section" className={styles.workspace} padding="none" form="grouped">
-        <header className={styles.workspaceHeader}>
-          <div>
-            <Text tone="secondary" variant="label">
-              Exact-revision review
-            </Text>
-            <Text as="h2" variant="card-title">
-              Diff
-            </Text>
-            <Text tone="secondary" variant="meta">
-              {diff.files.length} changed {diff.files.length === 1 ? "file" : "files"} at head{" "}
-              {diff.headCommit.slice(0, 12)}
-            </Text>
-          </div>
-          {placement === "drawer" ? (
-            <Button
-              aria-expanded={findingsOpen}
-              aria-haspopup="dialog"
-              onClick={() => setFindingsOpen(true)}
-              ref={findingsTrigger}
-              size="compact"
-              variant="secondary"
-            >
-              {findingsLabel}
-            </Button>
-          ) : null}
-        </header>
-
-        {diffFailure === null ? null : (
-          <div className={styles.reviewFailure}>
-            <StatePanel
-              announce="polite"
-              description={`${diffFailure} Showing the last successfully loaded exact revision.`}
-              title="Latest diff unavailable"
-              tone="caution"
+      <PRFilesDiffView
+        diff={diff}
+        diffFailure={diffFailure}
+        inventory={inventory}
+        pullRequestId={pullRequest.id}
+        selectedFile={selectedFile}
+        selectedFileMode={selectedFileMode}
+        layout={layout}
+        wrap={wrap}
+        findings={{
+          placement,
+          open: findingsOpen,
+          label: findingsLabel,
+          triggerRef: findingsTrigger,
+          onOpen: () => setFindingsOpen(true),
+          renderPane: () => relayPane
+        }}
+        workbenchRef={workbenchRef}
+        onSelectedFileChange={(fileId) => {
+          setSelectedFileIndex(Number(fileId))
+          setSelectedFindingId(null)
+        }}
+        onLayoutChange={setLayout}
+        onWrapChange={() => setWrap((current) => !current)}
+        renderSelectedFile={() =>
+          selectedFile === undefined ? null : (
+            <LoadedFileDiff
+              activeCommentId={commentNavigation?.destination === "diff" ? commentNavigation.target.commentId : null}
+              accountId={accountId}
+              baseCommit={diff.baseCommit}
+              comments={comments}
+              file={selectedFile}
+              findings={reviewIsStale ? [] : (review?.result.findings ?? [])}
+              headCommit={diff.headCommit}
+              key={`${diff.revisionId}:${diff.baseCommit}:${diff.headCommit}:${String(selectedFile.index)}:${layout}:${String(wrap)}`}
+              layout={layout}
+              onContentStateChange={updateContentState}
+              onNavigateToComment={onNavigateToComment}
+              pullRequestId={pullRequest.id}
+              region={pullRequest.account.region}
+              repositoryName={pullRequest.repositoryName}
+              revisionId={diff.revisionId}
+              wrap={wrap}
             />
-          </div>
-        )}
-
-        <div className={styles.workbench} data-findings={placement} ref={workbenchRef}>
-          <DiffFileTree
-            className={styles.fileTree}
-            data={inventory}
-            heading={`PR ${pullRequest.id}`}
-            onSelectedFileChange={(fileId) => {
-              setSelectedFileIndex(Number(fileId))
-              setSelectedFindingId(null)
-            }}
-            {...(selectedFile === undefined ? {} : { selectedFileId: String(selectedFile.index) })}
-          />
-
-          <section aria-label="Selected file diff" className={styles.diffPane}>
-            <header className={styles.diffToolbar}>
-              <span>
-                <code>{selectedFile?.path ?? "No changed file"}</code>
-                {selectedFileMode === null ? null : <small>{selectedFileMode}</small>}
-              </span>
-              <div>
-                <button aria-pressed={layout === "split"} onClick={() => setLayout("split")} type="button">
-                  Split
-                </button>
-                <button aria-pressed={layout === "stacked"} onClick={() => setLayout("stacked")} type="button">
-                  Stacked
-                </button>
-                <button aria-pressed={wrap} onClick={() => setWrap((current) => !current)} type="button">
-                  Wrap
-                </button>
-              </div>
-            </header>
-            <div className={styles.diffViewport}>
-              {selectedFile === undefined ? (
-                <StatePanel
-                  description="CodeCommit reports no changed files for this revision."
-                  title="Empty diff"
-                  tone="neutral"
-                />
-              ) : (
-                <LoadedFileDiff
-                  activeCommentId={
-                    commentNavigation?.destination === "diff" ? commentNavigation.target.commentId : null
-                  }
-                  accountId={accountId}
-                  baseCommit={diff.baseCommit}
-                  comments={comments}
-                  file={selectedFile}
-                  findings={reviewIsStale ? [] : (review?.result.findings ?? [])}
-                  headCommit={diff.headCommit}
-                  key={`${diff.revisionId}:${diff.baseCommit}:${diff.headCommit}:${String(selectedFile.index)}:${layout}:${String(wrap)}`}
-                  layout={layout}
-                  onContentStateChange={updateContentState}
-                  onNavigateToComment={onNavigateToComment}
-                  pullRequestId={pullRequest.id}
-                  region={pullRequest.account.region}
-                  repositoryName={pullRequest.repositoryName}
-                  revisionId={diff.revisionId}
-                  wrap={wrap}
-                />
-              )}
-            </div>
-          </section>
-
-          {placement === "drawer" ? null : relayPane}
-        </div>
-        <footer className={styles.workspaceFooter}>
-          Relay is advisory. Accept posts immediately; acknowledge and reject stay local to this review session.
-        </footer>
-      </Surface>
+          )
+        }
+      />
       <FindingsDrawer
         onClose={() => {
           // Dismissing the drawer ends "focus is in Relay", so a later resize doesn't reopen it. A
