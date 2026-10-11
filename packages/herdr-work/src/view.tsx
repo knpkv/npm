@@ -1062,7 +1062,19 @@ export const WorkBoard = ({
   const ordered = triage.rows.map((row) => row.goal)
   // Filters match what each row shows: the observed state where there is one.
   const filteredGoals = statusFilter === "all" ? ordered : ordered.filter((goal) => shownOf(goal) === statusFilter)
-  const filteredReadHasOmissions = statusFilter !== "all" && (snapshot.goalsOmitted ?? 0) > 0
+  const terminalFilter = statusFilter === "completed" || statusFilter === "deployed" || statusFilter === "abandoned"
+  const filteredReadCut =
+    statusFilter === "all"
+      ? ""
+      : [
+          (snapshot.goalsOmitted ?? 0) > 0 ? `${snapshot.goalsOmitted} more not in this read` : null,
+          terminalFilter && (snapshot.finishedOmitted ?? 0) > 0
+            ? `${snapshot.finishedOmitted} older finished goals not shown`
+            : null
+        ]
+          .filter((cut) => cut !== null)
+          .join(" · ")
+  const filteredReadHasOmissions = filteredReadCut !== ""
   const selectedFilteredGoalIndex = filteredGoals.findIndex(({ id }) => id === selectedId)
   const selected = filteredGoals.find(({ id }) => id === selectedId) ?? null
   const visibleGoalStart =
@@ -1444,7 +1456,7 @@ export const WorkBoard = ({
                   Showing {visibleGoals.length} of{" "}
                   {filteredGoals.length + (statusFilter === "all" ? (snapshot.goalsOmitted ?? 0) : 0)}{" "}
                   {filteredReadHasOmissions ? "retained goals" : "goals"}
-                  {filteredReadHasOmissions ? ` · ${snapshot.goalsOmitted} more not in this read` : null}
+                  {filteredReadHasOmissions ? ` · ${filteredReadCut}` : null}
                 </Text>
               )
             }
@@ -1452,9 +1464,11 @@ export const WorkBoard = ({
             count={
               statusFilter === "all"
                 ? filteredGoals.length + (snapshot.goalsOmitted ?? 0)
-                : filteredGoals.length === 0
-                  ? `0 of ${snapshot.goals.length + (snapshot.goalsOmitted ?? 0)}`
-                  : filteredGoals.length
+                : filteredReadHasOmissions
+                  ? `${filteredGoals.length} retained · ${filteredReadCut}`
+                  : filteredGoals.length === 0
+                    ? `0 of ${snapshot.goals.length}`
+                    : filteredGoals.length
             }
             title="Goals"
           >

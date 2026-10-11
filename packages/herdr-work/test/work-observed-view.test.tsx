@@ -677,6 +677,7 @@ describe("Work board with the observed overlay", () => {
 
   it("keeps the response cut visible when no retained goal matches the status filter", async () => {
     const host = await mount(snapshotOf([goal("planned", { state: "planned" })], { goalsOmitted: 12 }))
+    expect(host.querySelector(".work-board-list h2")?.textContent).toBe("Goals 13")
     const working = [...host.querySelectorAll<HTMLButtonElement>(".work-status-filter")].find(
       ({ textContent }) => textContent === "Working"
     )
@@ -685,6 +686,62 @@ describe("Work board with the observed overlay", () => {
       "Showing 0 of 0 retained goals · 12 more not in this read"
     )
     expect(host.querySelector(".work-filter-empty")?.textContent).toContain("No goals match this status in this read.")
+    expect(host.querySelector(".work-board-list h2")?.textContent).toBe("Goals 0 retained · 12 more not in this read")
+    expect(host.querySelector(".work-board-list h2")?.textContent).not.toContain("0 of 13")
+  })
+
+  it.each(["Completed", "Deployed", "Abandoned"])(
+    "keeps older finished omissions visible in an empty %s filter without assuming their status",
+    async (status) => {
+      const host = await mount(snapshotOf([goal("planned", { state: "planned" })], { finishedOmitted: 5 }))
+      const filter = [...host.querySelectorAll<HTMLButtonElement>(".work-status-filter")].find(
+        ({ textContent }) => textContent === status
+      )
+      await act(async () => filter?.click())
+      expect(host.querySelector(".work-board-list h2")?.textContent).toBe(
+        "Goals 0 retained · 5 older finished goals not shown"
+      )
+      expect(host.querySelector(".work-board-list [aria-live='polite']")?.textContent).toBe(
+        "Showing 0 of 0 retained goals · 5 older finished goals not shown"
+      )
+      expect(host.querySelector(".work-filter-empty")?.textContent).toContain(
+        "No goals match this status in this read."
+      )
+    }
+  )
+
+  it.each([
+    { finishedOmitted: 0, status: "Completed" },
+    { finishedOmitted: 5, status: "Working" }
+  ])("keeps the empty $status filter exact with $finishedOmitted older finished omissions", async (fixture) => {
+    const host = await mount(
+      snapshotOf([goal("planned", { state: "planned" })], { finishedOmitted: fixture.finishedOmitted })
+    )
+    const filter = [...host.querySelectorAll<HTMLButtonElement>(".work-status-filter")].find(
+      ({ textContent }) => textContent === fixture.status
+    )
+    await act(async () => filter?.click())
+    expect(host.querySelector(".work-filter-empty")?.textContent).toContain("No goals match this status.")
+    expect(host.querySelector(".work-board-list h2")?.textContent).toBe("Goals 0 of 1")
+    expect(host.querySelector(".work-board-list [aria-live='polite']")).toBeNull()
+  })
+
+  it("shares both omission sources between a populated terminal filter's heading and count action", async () => {
+    const host = await mount(
+      snapshotOf([goal("done", { state: "completed", updatedAt: NOW - HOUR })], {
+        finishedOmitted: 5,
+        goalsOmitted: 12
+      })
+    )
+    const completed = [...host.querySelectorAll<HTMLButtonElement>(".work-status-filter")].find(
+      ({ textContent }) => textContent === "Completed"
+    )
+    await act(async () => completed?.click())
+    const cut = "12 more not in this read · 5 older finished goals not shown"
+    expect(host.querySelector(".work-board-list h2")?.textContent).toBe(`Goals 1 retained · ${cut}`)
+    expect(host.querySelector(".work-board-list [aria-live='polite']")?.textContent).toBe(
+      `Showing 1 of 1 retained goals · ${cut}`
+    )
   })
 
   it("scrolls each focused status option into the nearest visible part of its row", async () => {
