@@ -96,7 +96,8 @@
     "@knpkv/rly": "workspace:^",
     "effect": "4.0.0",
     "web-push": "3.6.7",
-    "ws": "8.22.0"
+    "ws": "8.22.0",
+    "@knpkv/codecommit-web": "workspace:^"
   },
   "devDependencies": {
     "@effect/vitest": "4.0.0",

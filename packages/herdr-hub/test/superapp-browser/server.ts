@@ -1,5 +1,13 @@
 /** Loopback fixture serving the real built hub clients against schema-checked API responses. */
 import { NodeRuntime, NodeServices } from "@effect/platform-node"
+import {
+  CodeDetail,
+  CodeDiffContentQuery,
+  CodeDiffContentResult,
+  CodeDiffResult,
+  CodeQueue,
+  CodeQueueQuery
+} from "@knpkv/codecommit-web/host"
 import { FleetLimits, FleetUsage } from "@knpkv/herdr-connect"
 import { FleetConnectAgentPage } from "@knpkv/herdr-connect/model"
 import { type WorkGoal, WorkSnapshots } from "@knpkv/herdr-work/model"
@@ -9,6 +17,7 @@ import { createServer, type ServerResponse } from "node:http"
 import { DashboardSnapshot, PendingApprovalTarget } from "../../src/dashboard-model.js"
 import { dashboardPage } from "../../src/internal/dashboard-page.js"
 import { NeedsYouResult } from "../../src/modules.js"
+import { codeContentFixture, codeDetailFixture, codeDiffFixture, codeQueueFixture } from "./code-fixture.js"
 import { limitsFixture, usageFixture } from "./usage-fixture.js"
 
 class FixtureServerError extends Schema.TaggedError<FixtureServerError>()("FixtureServerError", {
@@ -354,6 +363,56 @@ const program = Effect.gen(function*() {
         } satisfies Parameters<typeof usageFixture>[0]
         response.end(Schema.encodeSync(Schema.fromJsonString(FleetUsage))(usageFixture(query, now, state)))
       } else response.end(Schema.encodeSync(Schema.fromJsonString(FleetLimits))(limitsFixture(now, state)))
+      return
+    }
+    if (url.pathname.startsWith("/v1/modules/code/")) {
+      const state = request.headers.cookie?.match(/(?:^|;\s*)code-fixture=([a-z]+)/u)?.[1] ?? "normal"
+      if (state === "failed") {
+        response.writeHead(503, { "content-type": "application/json" })
+        response.end(JSON.stringify({ error: "unavailable" }))
+        return
+      }
+      response.setHeader("content-type", "application/json")
+      if (url.pathname.endsWith("/queue")) {
+        const query = Schema.decodeUnknownResult(CodeQueueQuery)(url.searchParams, { onExcessProperty: "error" })
+        if (query._tag === "Failure") {
+          response.writeHead(400)
+          response.end()
+          return
+        }
+        response.end(Schema.encodeSync(Schema.fromJsonString(CodeQueue))(codeQueueFixture(query.success, now, state)))
+      } else if (url.pathname.endsWith("/detail")) {
+        const reading = codeDetailFixture(url.searchParams.get("ref") ?? "", now, state)
+        if (reading === null) {
+          response.writeHead(404)
+          response.end()
+          return
+        }
+        response.end(Schema.encodeSync(Schema.fromJsonString(CodeDetail))(reading))
+      } else if (url.pathname.endsWith("/diff")) {
+        const reading = codeDiffFixture(url.searchParams.get("ref") ?? "", now, state)
+        if (reading === null) {
+          response.writeHead(404)
+          response.end()
+          return
+        }
+        response.end(Schema.encodeSync(Schema.fromJsonString(CodeDiffResult))(reading))
+      } else if (url.pathname.endsWith("/diff-content")) {
+        const query = Schema.decodeUnknownResult(CodeDiffContentQuery)(url.searchParams, { onExcessProperty: "error" })
+        if (query._tag === "Failure") {
+          response.writeHead(400)
+          response.end()
+          return
+        }
+        response.end(
+          Schema.encodeSync(Schema.fromJsonString(CodeDiffContentResult))(
+            codeContentFixture(query.success.fileIndex, query.success.revisionId, state)
+          )
+        )
+      } else {
+        response.writeHead(404)
+        response.end()
+      }
       return
     }
     if (url.pathname === "/assets/relay-icon.svg" || url.pathname === "/favicon.ico") {

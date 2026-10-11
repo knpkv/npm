@@ -1,0 +1,32 @@
+id: no-code-host-read-bypass
+language: tsx
+severity: error
+message: "Code host reads must use the package-owned saved-grant factory, never raw provider authority."
+rule:
+  any:
+    - kind: import_statement
+      has:
+        field: source
+        regex: '^["''](@knpkv/codecommit-core["'']|@knpkv/codecommit-core/ReadClient|.*[/]PermissionedReadClient([.]js|[.]ts)?["''])'
+    - kind: export_statement
+      has:
+        field: source
+        regex: '^["''](@knpkv/codecommit-core["'']|@knpkv/codecommit-core/ReadClient|.*[/]PermissionedReadClient([.]js|[.]ts)?["''])'
+    - pattern: import($SOURCE)
+      has:
+        stopBy: end
+        kind: string
+        regex: '^["''](@knpkv/codecommit-core["'']|@knpkv/codecommit-core/ReadClient|.*[/]PermissionedReadClient([.]js|[.]ts)?["''])'
+files:
+  - "packages/herdr-hub/src/**/*.ts"
+  - "packages/herdr-hub/src/**/*.tsx"
+  - "packages/codecommit-web/src/server/host*.ts"
+ignores:
+  - "packages/codecommit-web/src/server/host-read.ts"
+note: |
+  The sole factory acquires one provider and fixes saved-grant, caller-attributed audit authority.
+  Hub adapters and host DTO modules consume its narrow host/server export. Core root imports are
+  refused too because that barrel exports ReadClient. Type-only provider imports are deliberately
+  refused: adapters need safe host contracts, not provider coordinate types. Owner UI services,
+  tests, generated files and vendor code are outside the source scope. Transitive wrappers and
+  deliberate authority changes still need human security review.

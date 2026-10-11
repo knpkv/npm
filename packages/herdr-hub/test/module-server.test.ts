@@ -19,6 +19,43 @@ const fleetReading = NeedsYouProviderResult.make({
 })
 
 describe("module server boundary", () => {
+  it.effect("passes only the authorized caller to read and write product handlers", () =>
+    Effect.gen(function*() {
+      const query = Schema.fromURLSearchParams(Schema.Struct({ login: Schema.String }))
+      const handlers = Layer.succeed(ModuleServer.ModuleHandlers, {
+        routes: [
+          ModuleServer.moduleReadRoute(
+            "/caller",
+            query,
+            Schema.String,
+            (_query, caller) => Effect.succeed(caller.login)
+          ),
+          ModuleServer.moduleWriteRoute(
+            "POST",
+            "/caller",
+            query,
+            Schema.Null,
+            Schema.String,
+            (_body, _query, caller) => Effect.succeed(caller.login)
+          )
+        ]
+      })
+      const context = yield* Layer.build(
+        ModuleServer.makeModuleLayer([fleetModule], [{ descriptor: fleetModule, handlers }])
+      )
+      for (const method of ["GET", "POST"]) {
+        const response = yield* ModuleServer.dispatchModuleRoute({
+          method,
+          url: new URL("https://hub.example/v1/modules/fleet/caller?login=spoofed-viewer"),
+          listener: "serve",
+          authorize: Effect.succeed({ login: "authorized-viewer" }),
+          sameOrigin: Effect.void,
+          readJson: () => Effect.succeed(null)
+        }).pipe(Effect.provide(context))
+        expect(response?.body).toBe("authorized-viewer")
+      }
+    }))
+
   it("retains independent authorization, origin and body failure channels", () => {
     const AuthorizationDenied = Schema.TaggedStruct("AuthorizationDenied", {})
     const OriginDenied = Schema.TaggedStruct("OriginDenied", {})
@@ -95,7 +132,7 @@ describe("module server boundary", () => {
         method: "GET",
         url: new URL("https://hub.example/v1/modules/today/needs-you"),
         listener: "serve",
-        authorize: Effect.void,
+        authorize: Effect.succeed({ login: "example-viewer" }),
         sameOrigin: Effect.void,
         readJson: () => Effect.die("GET has no body")
       }).pipe(Effect.provideContext(context))
@@ -150,7 +187,7 @@ describe("module server boundary", () => {
         method: "GET",
         url: new URL("https://hub.example/v1/modules/today/needs-you"),
         listener: "serve",
-        authorize: Effect.void,
+        authorize: Effect.succeed({ login: "example-viewer" }),
         sameOrigin: Effect.void,
         readJson: () => Effect.die("GET has no body")
       }).pipe(Effect.provideContext(context))
@@ -186,7 +223,7 @@ describe("module server boundary", () => {
           method: "GET",
           url: new URL(`https://hub.example/v1/modules/fleet/summary${search}`),
           listener: "serve",
-          authorize: Effect.void,
+          authorize: Effect.succeed({ login: "example-viewer" }),
           sameOrigin: Effect.void,
           readJson: () => Effect.die("Reads do not have a body")
         }).pipe(Effect.provideContext(context), Effect.result)
@@ -218,7 +255,7 @@ describe("module server boundary", () => {
         method: "GET",
         url: new URL("https://hub.example/v1/modules/fleet/summary?extra=yes"),
         listener: "serve",
-        authorize: Effect.void,
+        authorize: Effect.succeed({ login: "example-viewer" }),
         sameOrigin: Effect.void,
         readJson: () =>
           Effect.die("Reads do not have a body")
@@ -254,7 +291,7 @@ describe("module server boundary", () => {
         method: "GET",
         url: new URL("https://hub.example/v1/modules/fleet/summary?limit=bad"),
         listener: "serve",
-        authorize: Effect.void,
+        authorize: Effect.succeed({ login: "example-viewer" }),
         sameOrigin: Effect.void,
         readJson: () => Effect.die("Reads do not have a body")
       }).pipe(Effect.provideContext(yield* Layer.build(modules)), Effect.result)
@@ -286,7 +323,7 @@ describe("module server boundary", () => {
         method: "POST",
         url: new URL("https://hub.example/v1/modules/fleet/decide?mode=unknown"),
         listener: "serve",
-        authorize: Effect.void,
+        authorize: Effect.succeed({ login: "example-viewer" }),
         sameOrigin: Effect.void,
         readJson: () => Effect.succeed({ decision: "approve" })
       }).pipe(Effect.provideContext(yield* Layer.build(modules)), Effect.result)
@@ -355,7 +392,7 @@ describe("module server boundary", () => {
         method: "POST",
         url: new URL("https://hub.example/v1/modules/fleet/decide"),
         listener: "serve",
-        authorize: Ref.update(events, (items) => [...items, "authorized"]),
+        authorize: Ref.update(events, (items) => [...items, "authorized"]).pipe(Effect.as({ login: "example-viewer" })),
         sameOrigin: Effect.fail("origin_refused"),
         readJson: () => Ref.update(events, (items) => [...items, "decoded"]).pipe(Effect.as({ decision: "approve" }))
       }).pipe(Effect.provideContext(yield* Layer.build(modules)), Effect.result)
@@ -476,7 +513,7 @@ describe("module server boundary", () => {
         method: "POST",
         url: new URL("https://hub.example/v1/modules/fleet/decide"),
         listener: "serve",
-        authorize: Effect.void,
+        authorize: Effect.succeed({ login: "example-viewer" }),
         sameOrigin: Effect.void,
         readJson: () => Effect.succeed({ decision: "unknown" })
       }).pipe(Effect.provideContext(yield* Layer.build(modules)), Effect.result)
@@ -507,7 +544,7 @@ describe("module server boundary", () => {
           method: "GET",
           url: new URL("https://hub.example/v1/modules/fleet/summary"),
           listener: "serve",
-          authorize: Effect.void,
+          authorize: Effect.succeed({ login: "example-viewer" }),
           sameOrigin: Effect.die("Reads do not require origin"),
           readJson: () =>
             Effect.die("Reads do not have a body")

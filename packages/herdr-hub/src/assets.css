@@ -1,6 +1,7 @@
 @import "@knpkv/rly/styles.css";
 @import "@knpkv/herdr-connect/styles.css";
 @import "@knpkv/herdr-work/styles.css";
+@import "@knpkv/codecommit-web/host/style.css";
 @import "./styles.css";
 @import "./superapp.css";
 @import "./today.css";

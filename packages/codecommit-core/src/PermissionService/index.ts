@@ -50,6 +50,28 @@ type PermissionsConfig = typeof PermissionsConfig.Type
 const decodeConfig = Schema.decodeUnknownSync(PermissionsConfig)
 const decodeConfigText = Schema.decodeUnknownEffect(Schema.fromJsonString(PermissionsConfig))
 
+/**
+ * Reads the owner's persisted policy before each host-owned provider call, so revocations apply
+ * without restarting another application. Missing policy means a prompt would be required;
+ * unreadable or invalid policy fails closed. The path is server-private and this reader cannot grant.
+ */
+export const makeSavedPermissionCheck = Effect.fn("PermissionService.makeSavedPermissionCheck")(
+  function*(path: string) {
+    const fs = yield* FileSystem.FileSystem
+    return Effect.fn("PermissionService.checkSaved")(function*(operation: OperationName) {
+      const exists = yield* fs.exists(path).pipe(
+        Effect.mapError((cause) => new ConfigError({ message: "Couldn't read saved permissions", cause }))
+      )
+      if (!exists) return defaultPermissionState
+      const config = yield* fs.readFileString(path).pipe(
+        Effect.flatMap(decodeConfigText),
+        Effect.mapError((cause) => new ConfigError({ message: "Couldn't decode saved permissions", cause }))
+      )
+      return config.permissions[operation] ?? defaultPermissionState
+    })
+  }
+)
+
 // Uses Effect FileSystem — works in Bun, Node, tests.
 // Atomic write: write to .tmp, then rename. Prevents corruption on crash.
 

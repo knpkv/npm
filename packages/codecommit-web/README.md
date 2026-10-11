@@ -39,6 +39,40 @@ where "Allow every read" grants the whole read category in one saved step. Write
 posting comments, changing approval rules) ask in a dialog with "Allow once" as the default; "Always
 allow" there covers only that one operation. Settings → Permissions shows and resets every grant.
 
+The host-local Code read factory in `./host/server` uses saved `always_allow` grants only.
+It rereads the saved policy before every provider call. Missing, unreadable or corrupt policy
+returns `permission_required`; a would-ask read opens no prompt and changes no grants.
+Unreadable policy is logged with its authenticated caller and private diagnostic cause.
+Explicit denial stays denied. Granting and all writes remain in the paired owner UI.
+
+These host reads always append an authenticated-caller audit before contacting the provider,
+even when the owner UI's optional audit setting is off. A failed append refuses the call.
+The duration entry follows the read. The provider is constructed once; the caller wrapper is
+request-specific. Cache attachment is lazy, requires the existing owner's exact schema and
+private permissions, and retries a failed attachment after two seconds without migrating it.
+
+`./host` carries browser-safe read contracts. Queue summaries include the opaque reference,
+PR id, repository display name, title, derived author display, status, cached approval state
+and observation times. Detail adds bounded description and branch names; immutable diffs add
+in-repository paths, revisions and bounded text. Render user-authored content as text.
+Provider account identifiers, ARNs used as author metadata, profile names, regions, credentials,
+cache paths and original error causes remain server-private. Content is served only by the
+credential host's own authenticated hub; it must not be proxied through peer or fleet reads or
+the hub's Relay context. Queue visibility rereads persisted enabled accounts; an exact opaque
+target still resolves when its account is hidden. Unknown references return 404.
+
+`./views` exports the controlled `CodeHostView`; import `./host/style.css` beside the
+application's Rly stylesheet. The optional `onOpenReference` callback lets the host push
+deliberate target navigation. Without it, target links use ordinary browser navigation;
+modified clicks always retain that behavior. Selection, read state and refresh remain host-owned.
+The workspace `@knpkv/codecommit-web/views` type entry uses built declarations so hub consumers
+do not traverse the owner view source aliases. Build this package before typechecking the hub.
+Build and prepack force declaration emission even when `dist` was cleared with build-info retained.
+Removing those source aliases is a follow-up; published type, runtime and CSS paths are unchanged.
+
+The hub's machine-local owner link uses the owner's default loopback port 3000. An owner
+started on another port must be opened at its configured address on the credential host.
+
 ## Pairing boundary
 
 CodeCommit web owns an ephemeral, process-scoped owner session. Each bind rotates

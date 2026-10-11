@@ -479,8 +479,11 @@ When writing Effect code:
   removing a listed one means deleting its baseline line in the same change.
 - The sole raw Node filesystem exception is
   `packages/codecommit-core/src/CacheService/internal/PrivateDatabasePathNode.ts`:
-  it is an audited descriptor boundary that must retain `O_NOFOLLOW` directory
-  and database handles through `fchmod` and verify path identity before return.
+  it is an audited descriptor boundary. Create/repair retains `O_NOFOLLOW` directory
+  and database handles through `fchmod` and verifies path identity before return.
+  Existing-only attachment keeps both descriptors in the caller scope, verifies owner
+  and `0700`/`0600` modes with `fstat`, and compares pathname `lstat` device/inode
+  against the held descriptors. It must not create paths, chmod files, or run migrations.
   Do not broaden its ast-grep exclusion or move ordinary filesystem work into it.
 - `ChildProcess.make` options that set `env` must also state `extendEnv`; it
   defaults to falsy, so `env` alone replaces the child environment and drops

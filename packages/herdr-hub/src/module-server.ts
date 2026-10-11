@@ -10,6 +10,12 @@ import {
 import { collectNeedsYou } from "./module-needs-you-server.js"
 import { type NeedsYouProviderResult, NeedsYouResult } from "./module-needs-you.js"
 
+/** Authenticated login from the listener authorization result, never client-supplied selectors. */
+export const ModuleCaller = Schema.Struct({
+  login: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(254), Schema.isPattern(/^[^\s\p{Cc}]+$/u))
+})
+export type ModuleCaller = typeof ModuleCaller.Type
+
 export interface ModuleResponse {
   readonly status: 200 | 201 | 202
   readonly body: Schema.Json
@@ -35,7 +41,11 @@ export interface ModuleApiRoute {
   readonly path: `/${string}`
 }
 
-type InternalHandler = (query: URLSearchParams, body: Schema.Json) => Effect.Effect<ModuleResponse, ModuleRouteFailure>
+type InternalHandler = (
+  query: URLSearchParams,
+  body: Schema.Json,
+  caller: ModuleCaller
+) => Effect.Effect<ModuleResponse, ModuleRouteFailure>
 const routeHandlers = new WeakMap<ModuleApiRoute, InternalHandler>()
 
 /** Keep the executable handler private; spread copies cannot replace schema decoding. */
@@ -151,12 +161,12 @@ export const moduleReadRoute = <Q, A>(
   path: ModuleApiRoute["path"],
   querySchema: Schema.Codec<Q, URLSearchParams, never, never>,
   success: Schema.Codec<A, Schema.Json, never, never>,
-  handle: (query: Q) => Effect.Effect<A, ModuleRouteFailure>,
+  handle: (query: Q, caller: ModuleCaller) => Effect.Effect<A, ModuleRouteFailure>,
   status: ModuleResponse["status"] = 200
 ): ModuleApiRoute =>
-  registerRoute("GET", path, (query) =>
+  registerRoute("GET", path, (query, _body, caller) =>
     decodeModuleQuery(querySchema, query).pipe(
-      Effect.flatMap(handle),
+      Effect.flatMap((decoded) => handle(decoded, caller)),
       Effect.flatMap((body) => Schema.encodeEffect(success)(body)),
       Effect.mapError((error) =>
         error._tag === "ModuleRouteFailure" ? error : new ModuleRouteFailure({ status: 500, code: "invalid_response" })
@@ -171,15 +181,15 @@ export const moduleWriteRoute = <Q, A, B>(
   querySchema: Schema.Codec<Q, URLSearchParams, never, never>,
   schema: Schema.Codec<A, unknown, never, never>,
   success: Schema.Codec<B, Schema.Json, never, never>,
-  handle: (body: A, query: Q) => Effect.Effect<B, ModuleRouteFailure>,
+  handle: (body: A, query: Q, caller: ModuleCaller) => Effect.Effect<B, ModuleRouteFailure>,
   status: ModuleResponse["status"] = 200
 ): ModuleApiRoute =>
-  registerRoute(method, path, (query, body) =>
+  registerRoute(method, path, (query, body, caller) =>
     decodeModuleQuery(querySchema, query).pipe(
       Effect.flatMap((decodedQuery) =>
         Schema.decodeUnknownEffect(schema)(body).pipe(
           Effect.mapError(() => new ModuleRouteFailure({ status: 400, code: "invalid_body" })),
-          Effect.flatMap((decoded) => handle(decoded, decodedQuery))
+          Effect.flatMap((decoded) => handle(decoded, decodedQuery, caller))
         )
       ),
       Effect.flatMap((response) =>
@@ -200,7 +210,7 @@ export const dispatchModuleRoute = Effect.fn("ModuleRegistry.dispatch")(
     readonly method: string
     readonly url: URL
     readonly listener: ModuleListener | "work"
-    readonly authorize: Effect.Effect<unknown, E, R>
+    readonly authorize: Effect.Effect<ModuleCaller, E, R>
     readonly sameOrigin: Effect.Effect<unknown, OriginError, R>
     readonly readJson: () => Effect.Effect<Schema.Json, BodyError, R>
   }): Effect.fn.Return<ModuleResponse | null, E | OriginError | BodyError | ModuleRouteFailure, R | ModuleRegistry> {
@@ -213,13 +223,16 @@ export const dispatchModuleRoute = Effect.fn("ModuleRegistry.dispatch")(
         (candidate) => candidate.method === request.method && `${prefix}${candidate.path}` === request.url.pathname
       )
       if (route === undefined) return null
-      yield* request.authorize
+      const authorizedCaller = yield* request.authorize
+      const caller = yield* Schema.decodeUnknownEffect(ModuleCaller)(authorizedCaller).pipe(
+        Effect.mapError(() => new ModuleRouteFailure({ status: 500, code: "invalid_caller" }))
+      )
       const mutation = route.method !== "GET"
       if (mutation) yield* request.sameOrigin
       const body = mutation ? yield* request.readJson() : null
       const handle = routeHandlers.get(route)
       if (handle === undefined) return yield* new ModuleRouteFailure({ status: 500, code: "invalid_route" })
-      return yield* handle(request.url.searchParams, body)
+      return yield* handle(request.url.searchParams, body, caller)
     }
     return null
   }

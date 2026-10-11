@@ -1,0 +1,62 @@
+id: no-code-host-read-bypass
+snapshots:
+  const raw = await import("@knpkv/codecommit-core/ReadClient.js"):
+    labels:
+      - source: import("@knpkv/codecommit-core/ReadClient.js")
+        style: primary
+        start: 18
+        end: 64
+      - source: '"@knpkv/codecommit-core/ReadClient.js"'
+        style: secondary
+        start: 25
+        end: 63
+  export * from "@knpkv/codecommit-core/ReadClient.js":
+    labels:
+      - source: export * from "@knpkv/codecommit-core/ReadClient.js"
+        style: primary
+        start: 0
+        end: 52
+      - source: '"@knpkv/codecommit-core/ReadClient.js"'
+        style: secondary
+        start: 14
+        end: 52
+  import * as ReadClient from "@knpkv/codecommit-core/ReadClient.js":
+    labels:
+      - source: import * as ReadClient from "@knpkv/codecommit-core/ReadClient.js"
+        style: primary
+        start: 0
+        end: 66
+      - source: '"@knpkv/codecommit-core/ReadClient.js"'
+        style: secondary
+        start: 28
+        end: 66
+  import type { CodeCommitReadAccount } from "@knpkv/codecommit-core/ReadClient/models.js":
+    labels:
+      - source: import type { CodeCommitReadAccount } from "@knpkv/codecommit-core/ReadClient/models.js"
+        style: primary
+        start: 0
+        end: 88
+      - source: '"@knpkv/codecommit-core/ReadClient/models.js"'
+        style: secondary
+        start: 43
+        end: 88
+  import { InnerCodeCommitReadClient } from "../internal/PermissionedReadClient.js":
+    labels:
+      - source: import { InnerCodeCommitReadClient } from "../internal/PermissionedReadClient.js"
+        style: primary
+        start: 0
+        end: 81
+      - source: '"../internal/PermissionedReadClient.js"'
+        style: secondary
+        start: 42
+        end: 81
+  import { ReadClient } from "@knpkv/codecommit-core":
+    labels:
+      - source: import { ReadClient } from "@knpkv/codecommit-core"
+        style: primary
+        start: 0
+        end: 51
+      - source: '"@knpkv/codecommit-core"'
+        style: secondary
+        start: 27
+        end: 51

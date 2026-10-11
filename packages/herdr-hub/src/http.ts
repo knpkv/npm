@@ -68,6 +68,7 @@ import {
   PeerPendingUnavailableError,
   PendingApprovalCursor
 } from "@knpkv/herdr-fleet"
+import type { FleetHostName } from "@knpkv/herdr-fleet/model"
 import type { TailscaleAuthorizationError } from "@knpkv/herdr-tailscale"
 import { authorizeWhois, discoverFleetPeers, layer as tailscaleLayer, Tailscale } from "@knpkv/herdr-tailscale"
 import type {
@@ -111,6 +112,7 @@ import {
 } from "effect"
 import type { Redacted } from "effect"
 import * as HttpClient from "effect/http/HttpClient"
+import type * as Path from "effect/Path"
 import { ChildProcessSpawner } from "effect/process"
 import type * as SemaphoreModule from "effect/Semaphore"
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http"
@@ -123,6 +125,7 @@ import type { SanitizedJobRecord } from "./approval-request.js"
 import { sanitizeJobPayload, sanitizeJobRecord } from "./approval-request.js"
 import { resolveApprovalPage } from "./approval-url.js"
 import { authorize, authorizeLoopback, authorizeLoopbackPeer } from "./auth.js"
+import { makeCodeModule } from "./code-module.js"
 import {
   type ApprovalDirectory,
   type DashboardHistoryPage,
@@ -350,6 +353,8 @@ export type HubRelayOptions = {
 }
 
 export type HttpServerOptions = {
+  /** Explicit server-private credential host. Missing means Code is unavailable, never discovered. */
+  readonly codeHost?: FleetHostName
   /** Additional product layers join the shared registry at startup; handlers close their requirements. */
   readonly modules?: ReadonlyArray<ServerModule<unknown, HttpClient.HttpClient | Tailscale | Crypto.Crypto>>
   readonly lanWork?: LanWorkListenerOptions
@@ -1798,9 +1803,17 @@ export const startHttpServer = async (
   try {
     const moduleScope = await httpRuntime.runPromise(Scope.make())
     finalizers.unshift(() => httpRuntime.runPromise(Scope.close(moduleScope, Exit.void)))
-    const modules = [
+    const modules: ReadonlyArray<
+      ServerModule<unknown, HttpClient.HttpClient | Tailscale | Crypto.Crypto | FileSystem.FileSystem | Path.Path>
+    > = [
       { descriptor: todayModule, handlers: Layer.succeed(ModuleServer.ModuleHandlers, { routes: [] }) },
       { descriptor: usageModule, handlers: Layer.succeed(ModuleServer.ModuleHandlers, { routes: [] }) },
+      makeCodeModule({
+        host: config.host,
+        isHub,
+        stateDirectory: config.stateDirectory,
+        codeHost: options.codeHost ?? null
+      }),
       {
         descriptor: fleetModule,
         handlers: Layer.effect(
@@ -2974,7 +2987,7 @@ export const startHttpServer = async (
                 method: request.method ?? "GET",
                 url,
                 listener: mode,
-                authorize: authorized,
+                authorize: authorized.pipe(Effect.map((login) => ({ login }))),
                 sameOrigin: sameOrigin(request, expectedOrigin()),
                 readJson: () => readJson(request, Schema.Json)
               }).pipe(Effect.provideService(ModuleServer.ModuleRegistry, registry), Effect.result)

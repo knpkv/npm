@@ -4,18 +4,23 @@
  * Effect's portable FileSystem currently exposes path-based chmod and string
  * open flags only. This boundary uses O_NOFOLLOW and descriptor-based chmod so
  * a path replacement cannot redirect permission repair to a symlink target.
+ * Existing-only attachment verifies owner/mode without creation or chmod and
+ * retains both descriptors for the caller's scope and subsequent identity checks.
  *
  * @internal
  */
 import * as Effect from "effect/Effect"
 import { constants } from "node:fs"
 import { type FileHandle, lstat, mkdir, open } from "node:fs/promises"
+import { userInfo } from "node:os"
 import { dirname, resolve } from "node:path"
 import { CacheError } from "../CacheError.js"
 
 interface PrivatePathInfo {
   readonly dev: bigint
   readonly ino: bigint
+  readonly uid: bigint
+  readonly mode: bigint
   readonly isDirectory: () => boolean
   readonly isFile: () => boolean
   readonly isSymbolicLink: () => boolean
@@ -143,3 +148,49 @@ export const makeEnsurePrivateDatabasePath = (operations: PrivateDatabasePathOpe
   })
 
 export const ensurePrivateDatabasePath = makeEnsurePrivateDatabasePath(nodePrivateDatabasePathOperations)
+
+/**
+ * Attaches to an existing owner's database without creating paths or repairing permissions.
+ * Both O_NOFOLLOW descriptors stay open through mode, owner and path-identity verification.
+ * The caller may read cached content and append audit rows, but must not run cache migrations.
+ */
+export const makeVerifyExistingPrivateDatabasePath = (operations: PrivateDatabasePathOperations) =>
+  Effect.fn("CacheService.verifyExistingPrivateDatabasePath")(
+    function*(directory: string, database: string) {
+      if (resolve(dirname(database)) !== resolve(directory)) {
+        return yield* fail("attach-private-database", "Database must be a direct child of its private directory")
+      }
+      const owner = yield* Effect.try({
+        try: () => BigInt(userInfo().uid),
+        catch: (cause) => fail("inspect-owner", cause)
+      })
+      const directoryHandle = yield* Effect.acquireRelease(
+        attempt("open-existing-private-directory", () => operations.openDirectory(directory)),
+        (handle) => attempt("close-existing-private-directory", () => handle.close()).pipe(Effect.orDie)
+      )
+      const directoryInfo = yield* attempt("inspect-existing-private-directory", () => directoryHandle.stat())
+      if (!directoryInfo.isDirectory() || directoryInfo.uid !== owner || (directoryInfo.mode & 0o777n) !== 0o700n) {
+        return yield* fail("attach-private-database", "Existing cache directory is not private to its owner")
+      }
+      yield* verifyPathIdentity(operations, directory, directoryInfo, "directory")
+      const databaseHandle = yield* Effect.acquireRelease(
+        attempt("open-existing-private-database", () => operations.openDatabase(database)),
+        (handle) => attempt("close-existing-private-database", () => handle.close()).pipe(Effect.orDie)
+      )
+      const databaseInfo = yield* attempt("inspect-existing-private-database", () => databaseHandle.stat())
+      if (!databaseInfo.isFile() || databaseInfo.uid !== owner || (databaseInfo.mode & 0o777n) !== 0o600n) {
+        return yield* fail("attach-private-database", "Existing cache database is not private to its owner")
+      }
+      const verifyIdentity = Effect.fn("CacheService.verifyHeldDatabaseIdentity")(function*() {
+        yield* verifyPathIdentity(operations, directory, directoryInfo, "directory")
+        yield* verifyPathIdentity(operations, database, databaseInfo, "database")
+      })
+      yield* verifyIdentity()
+      return verifyIdentity
+    }
+  )
+
+export const verifyExistingPrivateDatabasePath = makeVerifyExistingPrivateDatabasePath({
+  ...nodePrivateDatabasePathOperations,
+  openDatabase: (path) => open(path, constants.O_RDWR | descriptorFlags).then(privatePathHandle)
+})

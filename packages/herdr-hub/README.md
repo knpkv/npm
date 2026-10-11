@@ -106,6 +106,30 @@ The browser adapter reuses authenticated `/v1/connect/usage` and `/v1/connect/li
 
 Totals include only reported token cells; unavailable hosts stay Unknown and are left out. Host observation times remain visible in the selected zone. Limit readings keep their host identity because reports contain no subscription identity that would justify merging them. Cost, balances, bookings, sessions, paths and prompt prefixes remain local; Usage details cannot show them or per-bot identity from this transport. The module grants no action authority.
 
+### Host-local Code
+
+`RELAY_CODE_HOST` explicitly names the credential host. It is server-private, validated at startup
+and passed by hostd as `HttpServerOptions.codeHost`. Missing configuration returns Unavailable;
+there is no discovery. Content is served only when that host is itself the configured hub.
+Another hub reports where Code lives, without opening its cache, provider or private reference
+store. The Code descriptor permits only the canonical serve listener. Peer, approval, LAN and
+Work listeners expose no Code routes; neither fleet aggregation nor hub Relay receives its content.
+
+The package-owned factory mounts only GET queue, detail and immutable diff reads. It uses fresh
+saved grants and mandatory caller audits; it cannot grant, publish or write provider data.
+Owner-session pairing and CSRF protection on the Code owner's write routes remain unchanged.
+Expected failures carry closed safe reasons; provider configuration and causes are private logs.
+Route callbacks now receive the decoded `ModuleCaller` as their final argument, sourced from the
+listener's authorization result. `dispatchModuleRoute.authorize` must return that schema's
+`{ login }` value. Query selectors and spoofed identity headers cannot supply the caller.
+
+`code-references.sqlite` stores server-private account, region, repository and PR coordinates
+behind random persisted UUID references. Its directory/file require 0700/0600 permissions.
+Only the opaque reference is a normalized authenticated client-visible identifier; persisted
+coordinates are never emitted as browser fields or log payloads. References survive restart and
+distinguish accounts. The map retains 10,000 entries and evicts the least recently seen on minting;
+an unknown, tampered or evicted reference returns 404. This bookkeeping grants no provider authority.
+
 `GET /v1/modules/today/needs-you` returns one decoded, deduplicated list per poll. Today starts a serial read when active and visible, repeats five seconds after each read finishes, and interrupts it when hidden or inactive. A six-second browser deadline keeps a stalled read from blocking subsequent polls. A failed refresh retains its previous reading with explicit old-reading copy. Only a complete current reading can say the fleet is clear, and its checked time stays visible. Expired requests remain linked after waiting requests, with a separate expired count; they never inflate the actionable heading.
 
 Products may supply a closed `ModuleHandlers.needsYou` effect returning `NeedsYouProviderResult`. Expected source failures belong in `issues`; the typed error channel is `never`. The hub collects these effects after all product layers build once, and owns the reserved Today `/needs-you` route. No registry service is resolved inside a request. Each provider has a four-second deadline; defects become an internal source issue and are logged privately, while external interruption remains interruption. At most four providers run concurrently.

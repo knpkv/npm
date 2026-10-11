@@ -65,7 +65,7 @@ export const focusWhenShown = (id: string, deadline: number = performance.now() 
   let frame: number
   const focus = (now: number): void => {
     const element = document.getElementById(id)
-    element?.focus()
+    if (element !== null && element.closest('[aria-hidden="true"], [inert], [hidden]') === null) element.focus()
     if (element !== null && document.activeElement === element) return
     if (now < deadline) frame = window.requestAnimationFrame(focus)
   }
@@ -80,13 +80,14 @@ export const isEditableTarget = (target: EventTarget | null): boolean => {
   return Predicate.hasProperty(target, "role") && target.role === "textbox"
 }
 
-/** Exact approvals win over their tab; Connect arrivals use search unless its stage owns focus. */
+/** Exact approvals win over their tab; modal portals own focus while their module slot is hidden. */
 export const focusModulePage = (module: string, page: string): (() => void) => {
   let cancelSearch: (() => void) | undefined
   const frame = window.requestAnimationFrame(() => {
     const slot = [...document.querySelectorAll<HTMLElement>("[data-module]")].find(
       (element) => element.dataset.module === module && element.hidden === false
     )
+    if (slot !== undefined && slot.closest('[aria-hidden="true"], [inert]') !== null) return
     const tab = [...(slot?.querySelectorAll<HTMLElement>('[role="tab"]') ?? [])].find(
       (element) => element.dataset.tabValue === page
     )
@@ -102,7 +103,8 @@ export const focusModulePage = (module: string, page: string): (() => void) => {
     }
     const approval = page === "approvals" ? slot?.querySelector<HTMLElement>('[data-approval-target="true"]') : null
     const target = approval ?? tab ?? pageLink ?? document.getElementById("main")
-    target?.focus({ preventScroll: true })
+    if (target !== null && target !== undefined && target.closest('[aria-hidden="true"], [inert], [hidden]') === null)
+      target.focus({ preventScroll: true })
   })
   return () => {
     window.cancelAnimationFrame(frame)

@@ -17,10 +17,6 @@ describe("CodeCommit web package contract", () => {
   })
 
   it("publishes the browser library and stylesheet separately from the application", () => {
-    expect(manifest.exports["./views"]).toEqual({
-      types: "./src/views.ts",
-      default: "./dist/views/index.js"
-    })
     expect(manifest.publishConfig.exports["./views"]).toEqual({
       types: "./dist/dts/views.d.ts",
       default: "./dist/views/index.js"
@@ -34,6 +30,42 @@ describe("CodeCommit web package contract", () => {
     for (const script of [manifest.scripts.build, manifest.scripts.prepack]) {
       expect(script).toContain("vite build && vite build -c vite.views.config.ts")
     }
+  })
+
+  /**
+   * This named workspace exception keeps owner-only source aliases out of hub typechecks.
+   * Remove it when the views graph uses consumer-safe imports; runtime and published paths stay fixed.
+   */
+  it("uses built workspace declarations for @knpkv/codecommit-web/views until owner aliases are removed", () => {
+    expect(manifest.exports["./views"]).toEqual({
+      types: "./dist/dts/views.d.ts",
+      default: "./dist/views/index.js"
+    })
+    // Build-info lives outside dist; a cleared output directory still needs every declaration emitted.
+    for (const script of [manifest.scripts.build, manifest.scripts.prepack]) {
+      expect(script).toContain("tsc -b --force")
+    }
+  })
+
+  it("publishes browser host contracts and CSS separately from the server authority factory", () => {
+    expect(manifest.exports["./host"]).toEqual({
+      types: "./src/host-contract.ts",
+      default: "./dist/host-contract.js"
+    })
+    expect(manifest.publishConfig.exports["./host"]).toEqual({
+      types: "./dist/dts/host-contract.d.ts",
+      default: "./dist/host-contract.js"
+    })
+    expect(manifest.exports["./host/server"]).toEqual({
+      types: "./src/server/host.ts",
+      default: "./dist/server/host.js"
+    })
+    expect(manifest.publishConfig.exports["./host/server"]).toEqual({
+      types: "./dist/dts/server/host.d.ts",
+      default: "./dist/server/host.js"
+    })
+    expect(manifest.exports["./host/style.css"]).toBe("./dist/host-code.css")
+    expect(manifest.publishConfig.exports["./host/style.css"]).toBe("./dist/host-code.css")
   })
 
   it("declares external browser runtimes as optional peers for server-only consumers", () => {
