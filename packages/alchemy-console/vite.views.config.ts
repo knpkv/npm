@@ -13,6 +13,7 @@ const viewsStyles: Plugin = {
 }
 
 export default defineConfig({
+  base: "./",
   plugins: [viewsStyles, react()],
   css: {
     postcss: {
@@ -28,6 +29,8 @@ export default defineConfig({
   build: {
     target: BROWSER_TARGET,
     outDir: "dist/views",
+    // Library assets sit beside style.css; CSS URL calculation must use that same directory.
+    assetsDir: ".",
     emptyOutDir: true,
     cssCodeSplit: false,
     lib: { entry: viewsEntry, formats: ["es"], fileName: () => "index.js", cssFileName: "style" },

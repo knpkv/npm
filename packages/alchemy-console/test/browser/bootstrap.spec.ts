@@ -4,7 +4,7 @@ import { Context, Deferred, Effect, FileSystem, Layer, ManagedRuntime, Option, P
 import { isBuiltin } from "node:module"
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
-import { build, type Plugin } from "vite"
+import { build, type Plugin, preview } from "vite"
 import { CatalogReadError, StackDetail, StackId, StackList } from "../../src/api.js"
 import { Catalog } from "../../src/server/Catalog.js"
 import { requestLoginUrl } from "../../src/server/ControlSocket.js"
@@ -321,6 +321,84 @@ test("built views export renders independently of the console runtime", async ()
       "output" in output && output.output.some((chunk) => chunk.type === "chunk" && chunk.exports.includes("view"))
     )
   ).toBe(true)
+})
+
+/** Public assets resolve beneath a consumer's mount, with no dependency on origin-root files. */
+test("built views consumer loads creature and both fonts beneath /console/", async ({ page }, testInfo) => {
+  const runtime = ManagedRuntime.make(NodeServices.layer)
+  try {
+    const fs = await runtime.runPromise(FileSystem.FileSystem)
+    const directory = await runtime.runPromise(fs.makeTempDirectory({ prefix: "alchemy-consumer-" }))
+    try {
+      const root = new URL("../consumer/", import.meta.url).pathname
+      await build({
+        root,
+        configFile: false,
+        base: "/console/",
+        logLevel: "silent",
+        build: { outDir: directory, emptyOutDir: true, assetsInlineLimit: 0 }
+      })
+      const server = await preview({
+        root,
+        configFile: false,
+        base: "/console/",
+        logLevel: "silent",
+        build: { outDir: directory },
+        preview: { host: "127.0.0.1", port: 0 }
+      })
+      const requests: Array<string> = []
+      const responses: Array<{ readonly path: string; readonly status: number }> = []
+      let fontLoads: ReadonlyArray<number> = []
+      try {
+        const url = Option.getOrThrow(Option.fromNullishOr(server.resolvedUrls?.local[0]))
+        page.on("request", (request) => requests.push(new URL(request.url()).pathname))
+        page.on("response", (response) =>
+          responses.push({
+            path: new URL(response.url()).pathname,
+            status: response.status()
+          }))
+        await page.goto(url)
+        const creature = page.locator("img.ac-empty-creature")
+        await expect(creature).toBeVisible()
+        await expect.poll(() =>
+          creature.evaluate(() => {
+            const image = document.querySelector<HTMLImageElement>("img.ac-empty-creature")
+            return image !== null && image.complete && image.naturalWidth > 0
+          })
+        ).toBe(true)
+        fontLoads = await page.evaluate(async () => {
+          const fonts = await Promise.all([
+            document.fonts.load("16px \"Geist Variable\""),
+            document.fonts.load("16px \"Geist Mono Variable\"")
+          ])
+          await document.fonts.ready
+          return fonts.map((faces) => faces.length)
+        })
+        expect(fontLoads).toEqual([1, 1])
+        await page.waitForLoadState("networkidle")
+        for (const asset of ["empty-creature", "geist-latin-wght-normal", "geist-mono-latin-wght-normal"]) {
+          const matching = responses.filter((response) => response.path.includes(asset))
+          expect(matching.length).toBeGreaterThan(0)
+          expect(matching.every((response) => response.status === 200 && response.path.startsWith("/console/")))
+            .toBe(true)
+        }
+        expect(requests.length).toBeGreaterThan(0)
+        expect(requests.every((request) => request.startsWith("/console/"))).toBe(true)
+      } finally {
+        await new Promise<void>((resolve, reject) => {
+          server.httpServer.close((error) => error === undefined ? resolve() : reject(error))
+        })
+        await testInfo.attach("nested-consumer-assets", {
+          body: JSON.stringify({ requests, responses, fontLoads }, null, 2),
+          contentType: "application/json"
+        })
+      }
+    } finally {
+      await runtime.runPromise(fs.remove(directory, { recursive: true }))
+    }
+  } finally {
+    await runtime.dispose()
+  }
 })
 
 /** Owner expiry is distinct from provider sign-in failure and cannot keep authenticated data on screen. */
