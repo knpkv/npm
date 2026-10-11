@@ -1,5 +1,15 @@
 # @knpkv/herdr-connect
 
+## 0.15.1
+
+### Patch Changes
+
+- Updated dependencies [[`2dc1b33`](https://github.com/knpkv/npm/commit/2dc1b33cf3c27ee2cc61e5476a6665e574a46792), [`c7fa96b`](https://github.com/knpkv/npm/commit/c7fa96be781457406e8de323bffdd9e137e66127), [`0fa3c3a`](https://github.com/knpkv/npm/commit/0fa3c3a81a4f1b30c43091f82a8ecdd68ddbfcd0)]:
+  - @knpkv/agent-usage@0.10.0
+  - @knpkv/bounded-io@0.3.0
+  - @knpkv/rly@0.22.1
+  - @knpkv/herdr-fleet@0.10.1
+
 ## 0.15.0
 
 ### Minor Changes

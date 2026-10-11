@@ -1,5 +1,12 @@
 # @knpkv/ai-codex
 
+## 0.5.4
+
+### Patch Changes
+
+- Updated dependencies [[`c7fa96b`](https://github.com/knpkv/npm/commit/c7fa96be781457406e8de323bffdd9e137e66127)]:
+  - @knpkv/bounded-io@0.3.0
+
 ## 0.5.3
 
 ### Patch Changes

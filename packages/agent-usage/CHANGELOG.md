@@ -1,5 +1,17 @@
 # @knpkv/agent-usage
 
+## 0.10.0
+
+### Minor Changes
+
+- [#819](https://github.com/knpkv/npm/pull/819) [`2dc1b33`](https://github.com/knpkv/npm/commit/2dc1b33cf3c27ee2cc61e5476a6665e574a46792) Thanks [@konopkov](https://github.com/konopkov)! - Running agent-usage with no subcommand signs you in: reuses the running server or starts one, opens the browser, and prints the link.
+
+### Patch Changes
+
+- Updated dependencies [[`2dc1b33`](https://github.com/knpkv/npm/commit/2dc1b33cf3c27ee2cc61e5476a6665e574a46792), [`0fa3c3a`](https://github.com/knpkv/npm/commit/0fa3c3a81a4f1b30c43091f82a8ecdd68ddbfcd0)]:
+  - @knpkv/browser-pairing@0.5.1
+  - @knpkv/rly@0.22.1
+
 ## 0.9.3
 
 ### Patch Changes

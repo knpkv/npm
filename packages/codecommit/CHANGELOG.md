@@ -1,5 +1,15 @@
 # @knpkv/codecommit
 
+## 0.17.6
+
+### Patch Changes
+
+- Updated dependencies [[`c7fa96b`](https://github.com/knpkv/npm/commit/c7fa96be781457406e8de323bffdd9e137e66127), [`2dc1b33`](https://github.com/knpkv/npm/commit/2dc1b33cf3c27ee2cc61e5476a6665e574a46792), [`6e6cc5a`](https://github.com/knpkv/npm/commit/6e6cc5a4802807054bed4a82cf16755053bad7fb), [`9b7fd55`](https://github.com/knpkv/npm/commit/9b7fd55a4bdbd0d986836798c885521a83c72bee)]:
+  - @knpkv/bounded-io@0.3.0
+  - @knpkv/browser-pairing@0.5.1
+  - @knpkv/codecommit-web@0.32.0
+  - @knpkv/ai-codex@0.5.4
+
 ## 0.17.5
 
 ### Patch Changes

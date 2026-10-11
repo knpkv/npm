@@ -1,5 +1,13 @@
 # @knpkv/alchemy-console
 
+## 0.2.1
+
+### Patch Changes
+
+- Updated dependencies [[`c7fa96b`](https://github.com/knpkv/npm/commit/c7fa96be781457406e8de323bffdd9e137e66127), [`2dc1b33`](https://github.com/knpkv/npm/commit/2dc1b33cf3c27ee2cc61e5476a6665e574a46792)]:
+  - @knpkv/bounded-io@0.3.0
+  - @knpkv/browser-pairing@0.5.1
+
 ## 0.2.0
 
 ### Minor Changes

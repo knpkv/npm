@@ -2,6 +2,23 @@
 
 Released as `@knpkv/herdr-approvals` up to 0.18.0; the headings below are that package's history.
 
+## 0.25.0
+
+### Minor Changes
+
+- [#822](https://github.com/knpkv/npm/pull/822) [`c7fa96b`](https://github.com/knpkv/npm/commit/c7fa96be781457406e8de323bffdd9e137e66127) Thanks [@konopkov](https://github.com/konopkov)! - `nix.check` and `nix.apply` no longer stop the command when its output passes 128 KiB. The cap used to fail the job and terminate the command's process group mid-run, which could leave an activation half applied. These commands now run to completion, their exit code alone decides the job, and each stream keeps its last 64 KiB after an `[N earlier bytes omitted]` line. Output that is parsed still fails past 128 KiB.
+
+- [#820](https://github.com/knpkv/npm/pull/820) [`9d43b5e`](https://github.com/knpkv/npm/commit/9d43b5e17d6773a0b93530abc45992b0c87597e7) Thanks [@konopkov](https://github.com/konopkov)! - Export the `relay` CLI as `@knpkv/herdr-hub/relay`, so a host that bundles its executables (as it bundles `@knpkv/herdr-hub/fleetctl`) can ship `relay` too.
+
+### Patch Changes
+
+- Updated dependencies [[`c7fa96b`](https://github.com/knpkv/npm/commit/c7fa96be781457406e8de323bffdd9e137e66127), [`0fa3c3a`](https://github.com/knpkv/npm/commit/0fa3c3a81a4f1b30c43091f82a8ecdd68ddbfcd0)]:
+  - @knpkv/bounded-io@0.3.0
+  - @knpkv/rly@0.22.1
+  - @knpkv/herdr-connect@0.15.1
+  - @knpkv/herdr-fleet@0.10.1
+  - @knpkv/herdr-tailscale@0.3.2
+
 ## 0.24.0
 
 ### Minor Changes

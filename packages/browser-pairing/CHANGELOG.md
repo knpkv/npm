@@ -1,5 +1,11 @@
 # @knpkv/browser-pairing
 
+## 0.5.1
+
+### Patch Changes
+
+- [#819](https://github.com/knpkv/npm/pull/819) [`2dc1b33`](https://github.com/knpkv/npm/commit/2dc1b33cf3c27ee2cc61e5476a6665e574a46792) Thanks [@konopkov](https://github.com/konopkov)! - The shared browser opener runs in the caller's process group, so the browser it starts is no longer killed when the opener exits.
+
 ## 0.5.0
 
 ### Minor Changes

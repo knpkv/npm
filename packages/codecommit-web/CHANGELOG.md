@@ -1,5 +1,21 @@
 # @knpkv/codecommit-web
 
+## 0.32.0
+
+### Minor Changes
+
+- [#825](https://github.com/knpkv/npm/pull/825) [`6e6cc5a`](https://github.com/knpkv/npm/commit/6e6cc5a4802807054bed4a82cf16755053bad7fb) Thanks [@konopkov](https://github.com/konopkov)! - Export controlled pull-request page sections and the diff frame for browser consumers.
+
+- [#818](https://github.com/knpkv/npm/pull/818) [`9b7fd55`](https://github.com/knpkv/npm/commit/9b7fd55a4bdbd0d986836798c885521a83c72bee) Thanks [@konopkov](https://github.com/konopkov)! - Export controlled pull-request queue views for browser consumers.
+
+### Patch Changes
+
+- Updated dependencies [[`2dc1b33`](https://github.com/knpkv/npm/commit/2dc1b33cf3c27ee2cc61e5476a6665e574a46792), [`0fa3c3a`](https://github.com/knpkv/npm/commit/0fa3c3a81a4f1b30c43091f82a8ecdd68ddbfcd0)]:
+  - @knpkv/browser-pairing@0.5.1
+  - @knpkv/rly@0.22.1
+  - @knpkv/ai-claude@0.4.4
+  - @knpkv/ai-codex@0.5.4
+
 ## 0.31.0
 
 ### Minor Changes
