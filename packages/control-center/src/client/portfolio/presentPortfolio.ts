@@ -334,19 +334,65 @@ const verdictPresentation = {
   deploying: { label: "Deploying", tone: "progress" },
   building: { label: "Building", tone: "progress" },
   shipped: { label: "Shipped", tone: "positive" },
-  held: { label: "Needs links", tone: "caution" }
+  held: { label: "Held", tone: "caution" }
 } satisfies Readonly<
   Record<ReadinessVerdict, { readonly label: string; readonly tone: RlyStateTone }>
 >
 
+/** The pipeline gate is a required fact, not an unconfirmed delivery link. */
+const missingManualGate = (finding: ReadinessFinding): boolean =>
+  finding.code === "relationship-missing" && finding.subject._tag === "fact" &&
+  finding.subject.factId === "pipeline.gate"
+
+/** Held is a decision shared by several causes; only delivery-link findings ask the owner for links. */
+const heldFindingLabel = (finding: ReadinessFinding | null): string => {
+  if (finding === null) return "Held"
+  if (missingManualGate(finding)) return "Needs a manual approval gate"
+  switch (finding.code) {
+    case "input-incomplete":
+      return "Waiting for complete source data"
+    case "relationship-missing":
+    case "relationship-unverified":
+    case "relationship-rejected":
+    case "relationship-superseded":
+      return "Needs links"
+    case "source-stale":
+    case "evidence-expired":
+      return "Needs fresh source data"
+    case "source-missing":
+      return "Missing source data"
+    case "source-unavailable":
+    case "plugin-degraded":
+      return "Source unavailable"
+    case "documentation-missing":
+    case "documentation-draft":
+    case "documentation-stale":
+    case "documentation-superseded":
+      return "Needs release documentation"
+    case "approval-missing":
+    case "approval-pending":
+    case "approval-expired":
+      return "Needs approval"
+    case "check-missing":
+      return "Needs required checks"
+    case "execution-missing":
+      return "Needs a pipeline run"
+    case "deployment-missing":
+      return "Needs deployment evidence"
+    default:
+      return "Held"
+  }
+}
+
 const findingReason = (finding: ReadinessFinding): string => {
+  if (missingManualGate(finding)) return "A required manual approval gate is missing."
   switch (finding.code) {
     case "gate-waived":
       return finding.waiver === undefined ?
         "Gate waiver audit unavailable." :
         describeReadinessGateWaiver(finding.waiver)
     case "input-incomplete":
-      return "Readiness inputs are incomplete."
+      return "Some required source data is missing or incomplete."
     case "relationship-missing":
       return "A required delivery link is missing."
     case "relationship-unverified":
@@ -419,7 +465,7 @@ const verdictReason = (verdict: ReadinessVerdict): string => {
     case "shipped":
       return "Production deployment is verified."
     case "held":
-      return "Waiting for required delivery links."
+      return "Waiting for required release evidence."
   }
 }
 
@@ -452,7 +498,7 @@ const releasePresentation = (
     ? "Readiness evaluation failed. Retry pending."
     : configurationHeld
     ? release.targetConfiguration?.reason === "no-target-environment" ?
-      "No target environment" :
+      "Choose a target environment in Settings." :
       release.targetConfiguration?.reason === "stale-topology"
       ? "Pipeline target configuration is stale"
       : "Target pipeline is unavailable"
@@ -464,9 +510,16 @@ const releasePresentation = (
     ? verdictReason(readiness.verdict)
     : findingReason(readiness.primaryFinding)
   const verdict: { readonly label: string; readonly tone: RlyStateTone } | null = forcedHeld
-    ? { label: "Held", tone: "caution" }
+    ? {
+      label: configurationHeld && release.targetConfiguration?.reason === "no-target-environment"
+        ? "No target environment"
+        : "Held",
+      tone: "caution"
+    }
     : readiness === null
     ? null
+    : readiness.verdict === "held"
+    ? { label: heldFindingLabel(readiness.primaryFinding), tone: "caution" }
     : verdictPresentation[readiness.verdict]
   return {
     collaborators,
