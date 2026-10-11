@@ -1,0 +1,29 @@
+id: no-concurrent-env-stub
+snapshots:
+  ? |
+    describe("default SDK providers", () => {
+      it.effect("reads shared config", () => Effect.sync(() => vi.stubEnv("AWS_CONFIG_FILE", file)))
+    })
+  : labels:
+      - source: vi.stubEnv("AWS_CONFIG_FILE", file)
+        style: primary
+        start: 101
+        end: 136
+  ? |
+    it("formats in Berlin", () => {
+      vi.stubEnv("TZ", "Europe/Berlin")
+    })
+  : labels:
+      - source: vi.stubEnv("TZ", "Europe/Berlin")
+        style: primary
+        start: 34
+        end: 67
+  ? |
+    it("formats in Berlin", { concurrent: true }, () => {
+      vi.stubEnv("TZ", "Europe/Berlin")
+    })
+  : labels:
+      - source: vi.stubEnv("TZ", "Europe/Berlin")
+        style: primary
+        start: 56
+        end: 89

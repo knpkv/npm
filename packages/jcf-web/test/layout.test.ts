@@ -80,7 +80,7 @@ describe("placeBlocks", () => {
     expect(placeBlocks([block(10, 0, 10, 0)], DAY)).toEqual([])
   })
 
-  it("places a block crossing the repeated autumn hour with positive height", () => {
+  it("places a block crossing the repeated autumn hour with positive height", { concurrent: false }, () => {
     vi.stubEnv("TZ", "Europe/Berlin")
     try {
       const repeated = {
@@ -101,7 +101,7 @@ describe("placeBlocks", () => {
     }
   })
 
-  it("keeps spring-forward blocks at their actual elapsed height", () => {
+  it("keeps spring-forward blocks at their actual elapsed height", { concurrent: false }, () => {
     vi.stubEnv("TZ", "Europe/Berlin")
     try {
       const skipped = {
@@ -118,7 +118,7 @@ describe("placeBlocks", () => {
     }
   })
 
-  it("uses ordinary UTC clock geometry when there is no local transition", () => {
+  it("uses ordinary UTC clock geometry when there is no local transition", { concurrent: false }, () => {
     vi.stubEnv("TZ", "UTC")
     try {
       const ordinary = {
