@@ -8,8 +8,15 @@ prints the link without opening a browser. CI, non-interactive stdout and
 `alchemy-console serve` always prints only and runs until SIGINT or SIGTERM.
 Closing a browser tab leaves the foreground server running.
 
-The current browser page performs login, then navigates to JSON at `/api/stacks`.
-Stack screens will follow the approved design references in a separate change.
+The browser shows stacks grouped by app, with desktop columns and compact phone
+rows. Read again starts a fresh discovery request and clears the previous rows.
+Loading, empty, incomplete discovery and owner sign-in failures are explicit.
+Missing metadata reads Unknown; zero resources remains zero. No polling, cached
+rows, plan, apply or destroy runs. Stage names and resource counts are plain text;
+the detail and resources screens are a later change.
+
+The standalone wrapper shows Alchemy console, the actual local listener address
+and owner session status. It adds no Relay host inventory or shell navigation.
 
 Configuration is read at startup:
 
@@ -66,6 +73,26 @@ go only to stdout and the browser opener, never logs or telemetry. Session token
 remain in the server and HttpOnly cookie. Every unsafe API method is refused,
 including apply and destroy. Reads reject foreign origins and cross-site browser
 requests. Listener and request Host are restricted to the bound loopback address.
+
+## Browser views
+
+Import `StackListView` from `@knpkv/alchemy-console/views` and its stylesheet from
+`@knpkv/alchemy-console/views/style.css`. Mount it inside a Rly style/theme boundary.
+Views consumers supply the optional React, React DOM and Rly peers; the standalone
+browser shell already bundles them.
+The application supplies `state`, a safe product label and host sign-in instruction,
+and `onReadAgain`. The views fetch nothing, read no
+configuration, and retain no data. `Ready.checkedAt` describes the actual completed
+request. Replace state with `Loading` before reading; failures and unauthorized
+states contain no previous rows. Only normalized authenticated client-visible
+stack metadata belongs here, never raw provider locators or credentials.
+
+The standalone client uses the typed API and sends same-origin cookies with
+no-store requests. The fragment is removed from history before its bootstrap
+POST. Tokens never enter storage, logs or telemetry. CSS and font assets are
+served from the same listener with a self-only CSP, without inline styles. The
+decorative empty-state SVG uses the approved Stacks illustration from this MIT
+repository, with presentation attributes rather than inline styles.
 
 ## Data readers
 

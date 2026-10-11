@@ -85,6 +85,8 @@ const builtAssetExports = new Set(["@knpkv/review/guide/styles.css", "@knpkv/rly
 
 /** Library bundles whose output filenames do not mirror their source entries. */
 const bundledEntrySources = new Map([
+  ["@knpkv/alchemy-console/views", "./src/views.ts"],
+  ["@knpkv/alchemy-console/views/style.css", "./src/views.css"],
   ["@knpkv/codecommit-web/views", "./src/views.ts"],
   ["@knpkv/codecommit-web/views/style.css", "./src/views.css"]
 ])
