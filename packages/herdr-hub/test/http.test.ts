@@ -41,7 +41,7 @@ import {
   WorkStore
 } from "@knpkv/herdr-work"
 import type { RelayBackend } from "@knpkv/relay"
-import { Data, Deferred, Effect, Fiber, Layer, Result, Schema, Stream } from "effect"
+import { Data, Deferred, Effect, Fiber, Layer, Ref, Result, Schema, Stream } from "effect"
 import { HttpClient } from "effect/http"
 import { build } from "esbuild"
 import { spawn } from "node:child_process"
@@ -84,6 +84,7 @@ import { defineModule } from "../src/module-contract.js"
 import { ModuleHandlers, moduleReadRoute, moduleWriteRoute, type ServerModule } from "../src/module-server.js"
 import { commandOutputMaxBytes } from "../src/operations.js"
 import { makeRelayHubMount, type RelayHubBackends } from "../src/relay/mount.js"
+import { ApprovalAppStore } from "../src/store.js"
 
 // Each test effect is an application boundary; @effect/vitest scopes its Node services.
 // @effect-diagnostics-next-line strictEffectProvide:off
@@ -473,6 +474,144 @@ describe("approval port reservation", () => {
 })
 
 describe("host HTTP authority", () => {
+  for (const discoveryFails of [true, false]) {
+    it.live(
+      discoveryFails
+        ? "delivers local blocked notifications when peer discovery fails"
+        : "delivers local and peer blocked notifications when discovery is healthy",
+      () => {
+        const root = mkdtempSync(join(tmpdir(), "herdr-http-local-push-"))
+        return Effect.gen(function*() {
+          yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { force: true, recursive: true })))
+          const tailscaleCommand = join(root, "tailscale-test")
+          writeFileSync(
+            tailscaleCommand,
+            `#!/bin/sh
+case "$1" in
+  ip) printf '%s\\n' '127.0.0.1' ;;
+  status) ${
+              discoveryFails
+                ? "exit 1"
+                : `printf '%s\\n' '{"Peer":{"alpha":{"HostName":"ALPHA","ID":"node-alpha","Online":true,"TailscaleIPs":["127.0.0.2"]}},"Self":{"HostName":"SER8","ID":"node-ser8","Online":true,"TailscaleIPs":["127.0.0.1"]}}'`
+            } ;;
+esac
+`,
+            { mode: 0o700 }
+          )
+          const peerServer = createServer((request, response) => {
+            response.writeHead(request.url === "/v1/connect/agents/local" ? 200 : 404, {
+              "content-type": "application/json"
+            })
+            response.end(JSON.stringify({
+              host: "ALPHA",
+              complete: true,
+              agents: [{
+                host: "ALPHA",
+                id: "agent-peer",
+                name: "peer worker",
+                kind: "worker",
+                state: "blocked",
+                work: "project",
+                lastActivityAt: 0
+              }]
+            }))
+          })
+          const peerPort = yield* Effect.acquireRelease(
+            Effect.promise(() => listenOn(peerServer, "127.0.0.2")),
+            () =>
+              Effect.promise(() =>
+                new Promise<void>((resolve, reject) => {
+                  peerServer.close((error) => error === undefined ? resolve() : reject(error))
+                })
+              )
+          )
+          const subscriptions = yield* Effect.acquireRelease(
+            ApprovalAppStore.open(join(root, "approval-app.sqlite")),
+            (opened) => Effect.sync(() => opened.close())
+          )
+          yield* subscriptions.putSubscription({
+            endpoint: "https://push.example.test/local",
+            expirationTime: null,
+            keys: { auth: "auth_key", p256dh: "public_key" }
+          }, "owner@example.com")
+          const jobs = yield* Effect.acquireRelease(
+            JobStore.open(join(root, "jobs.sqlite")),
+            (opened) => Effect.sync(() => opened.close())
+          )
+          const fleet = yield* makeFleetService({
+            approvalEnabled: true,
+            host: "SER8",
+            store: jobs,
+            operations: {
+              ...operations,
+              listAgents: () =>
+                Effect.succeed({
+                  available: true,
+                  error: null,
+                  agents: [{
+                    activityRevision: 1,
+                    agentId: "agent-local",
+                    kind: "worker",
+                    name: "local worker",
+                    paneId: "w1:p1",
+                    parentAgentId: null,
+                    relation: null,
+                    status: "blocked",
+                    work: "project"
+                  }]
+                })
+            }
+          })
+          const delivered = yield* Deferred.make<void>()
+          const sent = yield* Ref.make<ReadonlyArray<{ readonly host: string; readonly agentId: string }>>([])
+          yield* Effect.acquireRelease(
+            Effect.promise(() =>
+              startHttpServer(
+                {
+                  ...config(root),
+                  host: "SER8",
+                  crossHost: true,
+                  port: peerPort,
+                  approvalPort: 0,
+                  approvalTls: directTls,
+                  approvalHub: { host: "SER8", nodeId: "node-ser8", url: "https://ser8.example.test:0/" },
+                  tailscaleCommand
+                },
+                fleet,
+                assets,
+                {
+                  terminalConnector: unusedTerminal,
+                  pushSender: (_target, payload) =>
+                    "kind" in payload && payload.kind === "agent-blocked"
+                      ? Ref.updateAndGet(
+                        sent,
+                        (values) => [...values, { host: payload.host, agentId: payload.agentId }]
+                      ).pipe(
+                        Effect.flatMap((values) =>
+                          values.length === (discoveryFails ? 1 : 2)
+                            ? Deferred.succeed(delivered, undefined).pipe(Effect.asVoid)
+                            : Effect.void
+                        )
+                      )
+                      : Effect.void
+                }
+              )
+            ),
+            (running) => Effect.promise(running.close)
+          )
+          yield* Deferred.await(delivered).pipe(Effect.timeout("3 seconds"))
+          const payloads = yield* Ref.get(sent)
+          expect(payloads).toHaveLength(discoveryFails ? 1 : 2)
+          expect(payloads).toEqual(expect.arrayContaining(
+            discoveryFails
+              ? [{ host: "ser8", agentId: "agent-local" }]
+              : [{ host: "ser8", agentId: "agent-local" }, { host: "alpha", agentId: "agent-peer" }]
+          ))
+        }).pipe(Effect.scoped, provideNodeServices)
+      }
+    )
+  }
+
   it.effect("serves a sanitized request and keeps it after a bodyless approval", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-http-approval-request-test-"))
     const tailscaleCommand = join(root, "tailscale-test")

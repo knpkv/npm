@@ -42,9 +42,10 @@ export const runBlockedPushPass = Effect.fn("BlockedPushWorker.runPass")(
           .map((agent) => ({ host: read.host, agentId: agent.id }))
       )
     )
-    for (const episode of episodes) {
-      for (const target of subscriptions) {
-        yield* Effect.gen(function*() {
+    // Each subscription keeps episode order; a slow endpoint occupies only one of four delivery lanes.
+    yield* Effect.forEach(subscriptions, (target) =>
+      Effect.forEach(episodes, (episode) =>
+        Effect.gen(function*() {
           const owner = yield* Schema.decodeUnknownEffect(Schema.NonEmptyString)(target.owner).pipe(
             Effect.mapError((cause) => new BlockedPushRecipientError({ cause }))
           )
@@ -80,9 +81,7 @@ export const runBlockedPushPass = Effect.fn("BlockedPushWorker.runPass")(
             () => options.subscriptions.deleteSubscriptionPrivileged(target.endpoint)
           ),
           Effect.catch((error) => Effect.logError("BlockedPushWorker.delivery_failed", error))
-        )
-      }
-    }
+        ), { discard: true }), { concurrency: 4, discard: true })
     const remaining = yield* options.subscriptions.listSubscriptions()
     yield* options.store.prune(remaining.map(subscriptionRevision))
   }

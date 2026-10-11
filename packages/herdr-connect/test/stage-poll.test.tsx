@@ -2,7 +2,7 @@
 
 import { RegistryProvider } from "@effect/atom-react"
 import { Predicate, Schema } from "effect"
-import { act } from "react"
+import { act, useState } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest"
 
@@ -77,6 +77,61 @@ const settle = async (milliseconds = 0): Promise<void> => {
 const stageOpen = (): boolean => document.querySelector("[role='dialog']") !== null
 
 describe("Connect stage across polls", () => {
+  it("settles when an inline stage handler stores the target in parent state", async () => {
+    agentsBody = listed([reviewer])
+    const targets: Array<{ readonly host: string; readonly id: string } | null> = []
+    const handlers: Array<string> = []
+    const atoms = makeConnectAtoms()
+    const Parent = ({ label }: { readonly label: string }) => {
+      const [target, setTarget] = useState<{ readonly host: string; readonly id: string } | null>(null)
+      return (
+        <>
+          <output>{target?.id ?? "closed"}</output>
+          <ConnectSurface
+            atoms={atoms}
+            onStageChange={(next) => {
+              targets.push(next)
+              handlers.push(label)
+              // Bound a broken effect loop so the regression fails without hanging the test runner.
+              if (targets.length < 12) setTarget(next)
+            }}
+          />
+        </>
+      )
+    }
+    const host = document.createElement("div")
+    document.body.append(host)
+    const root = createRoot(host)
+    roots.push(root)
+    await act(async () =>
+      root.render(
+        <RegistryProvider>
+          <Parent label="first" />
+        </RegistryProvider>
+      )
+    )
+    await settle()
+    await act(async () => host.querySelector<HTMLButtonElement>(".connect-agent")?.click())
+    await settle()
+    expect(host.querySelector("output")?.textContent).toBe("agent-reviewer")
+    expect(targets.length).toBeLessThan(6)
+    const reports = targets.length
+    await act(async () =>
+      root.render(
+        <RegistryProvider>
+          <Parent label="latest" />
+        </RegistryProvider>
+      )
+    )
+    await settle()
+    expect(targets).toHaveLength(reports)
+    await act(async () => document.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Escape" })))
+    await settle()
+    expect(host.querySelector("output")?.textContent).toBe("closed")
+    expect(targets.at(-1)).toBeNull()
+    expect(handlers.at(-1)).toBe("latest")
+  })
+
   it("reports the open stage identity to its host and clears it on close", async () => {
     agentsBody = listed([reviewer])
     const targets: Array<{ readonly host: string; readonly id: string } | null> = []

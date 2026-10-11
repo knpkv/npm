@@ -1075,10 +1075,14 @@ export const ConnectSurface = ({
     stageCandidate === null || connectAgentIdentityAmbiguous(agents, stageCandidate) ? null : stageCandidate
   const stageHost = stageAgent?.host ?? null
   const stageId = stageAgent?.id ?? null
+  const stageChange = useRef(onStageChange)
+  useLayoutEffect(() => {
+    stageChange.current = onStageChange
+  }, [onStageChange])
   useEffect(() => {
-    onStageChange?.(stageHost === null || stageId === null ? null : { host: stageHost, id: stageId })
-    return () => onStageChange?.(null)
-  }, [onStageChange, stageHost, stageId])
+    stageChange.current?.(stageHost === null || stageId === null ? null : { host: stageHost, id: stageId })
+    return () => stageChange.current?.(null)
+  }, [stageHost, stageId])
   // An agent that leaves the directory closes its stage for good: it must not reopen, uninvited, when the
   // agent comes back on a later poll. Only a loaded list counts; a list still loading keeps the stage.
   useEffect(() => {
