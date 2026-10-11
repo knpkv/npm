@@ -10,9 +10,10 @@ import {
   reviewApiAccountId,
   sandboxAccountIdForPullRequest,
   sandboxMatchesPullRequest,
-  selectCodeCommitPullRequest,
-  signedOffByOthers
-} from "../src/client/components/pr-detail.js"
+  selectCodeCommitPullRequest
+} from "../src/client/components/pr-detail-helpers.js"
+
+import { signedOffByOthers } from "../src/client/components/pr-detail-presentation.js"
 
 const pullRequest = new Domain.PullRequest({
   account: new Domain.Account({
