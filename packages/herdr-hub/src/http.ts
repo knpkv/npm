@@ -82,6 +82,7 @@ import {
 import {
   Cause,
   Clock,
+  Context,
   Crypto,
   Duration,
   Effect,
@@ -163,6 +164,10 @@ import {
   PushSubscriptionRecord,
   PushSubscriptionRemoval
 } from "./model.js"
+import { fleetModule, todayModule } from "./module-contract.js"
+import type { NeedsYouCandidate, NeedsYouIssue, NeedsYouProviderResult } from "./module-needs-you.js"
+import * as ModuleServer from "./module-server.js"
+import type { ModuleRouteFailure, ServerModule } from "./module-server.js"
 import { generateVapidKeys, makePushSender } from "./push-sender.js"
 import { validatePushEndpoint } from "./push-subscription.js"
 import { type ApprovalNotificationBatch, makePushWorker } from "./push-worker.js"
@@ -280,6 +285,7 @@ type ApiError =
   | FleetStoreError
   | FleetTransitionConflictError
   | FleetValidationError
+  | ModuleRouteFailure
   | LanWorkConfigurationError
   | LanWorkCryptoError
   | LanWorkOriginRejectedError
@@ -329,6 +335,8 @@ export type HubRelayOptions = {
 }
 
 export type HttpServerOptions = {
+  /** Additional product layers join the shared registry at startup; handlers close their requirements. */
+  readonly modules?: ReadonlyArray<ServerModule<unknown, HttpClient.HttpClient | Tailscale | Crypto.Crypto>>
   readonly lanWork?: LanWorkListenerOptions
   /** Mounts Relay at `/v1/relay/*` on the canonical listener. */
   readonly relay?: HubRelayOptions
@@ -378,6 +386,8 @@ interface ApiErrorResponse {
 
 const apiError = (error: ApiError): ApiErrorResponse => {
   switch (error._tag) {
+    case "ModuleRouteFailure":
+      return { status: error.status, body: { error: error.code } }
     case "FleetAuthorizationError":
       return { status: 403, body: { error: error._tag, actor: error.actor } }
     case "FleetJobNotFoundError":
@@ -1069,6 +1079,104 @@ const pendingFailureReason = (
   }
 }
 
+interface FleetPendingJob extends PendingJob {
+  readonly kind: NeedsYouCandidate["kind"]
+}
+
+/** Keep only the pending-job fields already exposed by the dashboard and Relay. */
+const fleetPendingJob = (host: string, record: PendingApproval | SanitizedJobRecord): FleetPendingJob => ({
+  host,
+  jobId: record.id,
+  kind: record.payload.kind,
+  actor: record.actor,
+  createdAt: record.createdAt,
+  expiresAt: record.approvalExpiresAt ?? null
+})
+
+/**
+ * Relay and Today share one bounded read with per-source failure and pagination results.
+ * Peer discovery still runs after a failed local read so Today can retain healthy peer jobs.
+ */
+const readFleetPendingJobs = Effect.fn("HostHttp.readFleetPendingJobs")(function*(
+  config: HostConfiguration,
+  service: FleetService,
+  maxPages: number
+) {
+  const local = yield* Effect.result(
+    readPages(
+      (cursor: PendingApprovalCursor | null) =>
+        Effect.map(service.pendingApprovalPage(cursor), (page) => ({
+          items: page.records.map((record) => fleetPendingJob(config.host, sanitizeJobRecord(record))),
+          next: page.nextCursor
+        })),
+      maxPages
+    )
+  )
+  const peers = yield* Effect.result(fleetPeers(config))
+  const remote = Result.isSuccess(peers)
+    ? yield* Effect.forEach(
+      peers.success,
+      (peer) =>
+        Effect.result(
+          readPages(
+            (cursor: typeof PendingApprovalCursor.Type | null) =>
+              Effect.map(fetchPeerPending(peer, cursor), (page) => ({
+                items: page.approvals.map((approval) => fleetPendingJob(peer.host, sanitizePendingApproval(approval))),
+                next: page.nextCursor
+              })),
+            maxPages
+          )
+        ).pipe(Effect.map((result) => ({ peer, result }))),
+      { concurrency: 4 }
+    )
+    : []
+  return { local, peers, remote }
+})
+
+/** Read current peer availability on every poll; this path issues no approval proofs. */
+const readFleetNeedsYou = Effect.fn("HostHttp.readFleetNeedsYou")(function*(
+  config: HostConfiguration,
+  service: FleetService
+): Effect.fn.Return<NeedsYouProviderResult, never, HttpClient.HttpClient | Tailscale> {
+  const pending = yield* readFleetPendingJobs(config, service, relayPendingPagesPerHost)
+  const jobs: Array<FleetPendingJob> = []
+  const issues: Array<NeedsYouIssue> = []
+  const hosts: Array<{ readonly host: string; readonly reason: PendingApprovalFailure["reason"] }> = []
+  if (Result.isSuccess(pending.local)) {
+    for (const job of pending.local.success.items) jobs.push(job)
+    if (pending.local.success.more) issues.push({ state: "truncated" })
+  } else {
+    yield* Effect.logWarning("Today local approvals failed", pending.local.failure)
+    hosts.push({ host: config.host, reason: "request_failed" })
+  }
+  if (Result.isFailure(pending.peers)) {
+    yield* Effect.logWarning("Today peer discovery failed", pending.peers.failure)
+    issues.push({ state: "failed", reason: "request_failed" })
+  }
+  for (const remote of pending.remote) {
+    if (Result.isSuccess(remote.result)) {
+      for (const job of remote.result.success.items) jobs.push(job)
+      if (remote.result.success.more && !issues.some((issue) => issue.state === "truncated")) {
+        issues.push({ state: "truncated" })
+      }
+    } else {
+      hosts.push({ host: remote.peer.host, reason: pendingFailureReason(remote.result.failure) })
+    }
+  }
+  if (hosts.length > 0) issues.push({ state: "hosts", hosts })
+  return {
+    items: jobs.map((job): NeedsYouCandidate => ({
+      sourceKey: `${job.host.toLowerCase()}:${job.jobId}`,
+      destination: { _tag: "FleetApproval", module: "fleet", host: job.host, jobId: job.jobId },
+      kind: job.kind,
+      actor: job.actor,
+      createdAt: job.createdAt,
+      expiresAt: job.expiresAt
+    })),
+    issues
+  }
+})
+
 const aggregatePeerPending = Effect.fn("HostHttp.aggregatePeerPending")(
   function*(
     peers: ReadonlyArray<PeerTarget>,
@@ -1663,6 +1771,28 @@ export const startHttpServer = async (
   }
 
   try {
+    const moduleScope = await httpRuntime.runPromise(Scope.make())
+    finalizers.unshift(() => httpRuntime.runPromise(Scope.close(moduleScope, Exit.void)))
+    const modules = [
+      { descriptor: todayModule, handlers: Layer.succeed(ModuleServer.ModuleHandlers, { routes: [] }) },
+      {
+        descriptor: fleetModule,
+        handlers: Layer.effect(
+          ModuleServer.ModuleHandlers,
+          Effect.gen(function*() {
+            const context = yield* Effect.context<HttpClient.HttpClient | Tailscale>()
+            return { routes: [], needsYou: readFleetNeedsYou(config, service).pipe(Effect.provideContext(context)) }
+          })
+        )
+      },
+      ...(options.modules ?? [])
+    ]
+    const moduleContext = await httpRuntime.runPromise(
+      Layer.build(ModuleServer.makeModuleLayer(modules.map((module) => module.descriptor), modules)).pipe(
+        Effect.provideService(Scope.Scope, moduleScope)
+      )
+    )
+    const registry = Context.get(moduleContext, ModuleServer.ModuleRegistry)
     const tlsCredentials = isHub && approvalTls !== null
       ? await httpRuntime.runPromise(
         Effect.gen(function*() {
@@ -1772,56 +1902,17 @@ export const startHttpServer = async (
             ),
             pendingJobs: asRead("the pending approvals")(
               Effect.gen(function*() {
-                const local = yield* readPages(
-                  (cursor: PendingApprovalCursor | null) =>
-                    Effect.map(service.pendingApprovalPage(cursor), (page) => ({
-                      items: page.records.map(sanitizeJobRecord),
-                      next: page.nextCursor
-                    })),
-                  relayPendingPagesPerHost
-                )
-                const peers = yield* fleetPeers(config)
-                const remote = yield* Effect.forEach(
-                  peers,
-                  (peer) =>
-                    Effect.result(
-                      readPages(
-                        (cursor: typeof PendingApprovalCursor.Type | null) =>
-                          Effect.map(fetchPeerPending(peer, cursor), (page) => ({
-                            items: page.approvals.map(sanitizePendingApproval),
-                            next: page.nextCursor
-                          })),
-                        relayPendingPagesPerHost
-                      )
-                    ).pipe(Effect.map((result) => ({ peer, result }))),
-                  { concurrency: 4 }
-                )
-                const jobs: Array<PendingJob> = [
-                  ...local.items.map((record) => ({
-                    host: config.host,
-                    jobId: record.id,
-                    kind: record.payload.kind,
-                    actor: record.actor,
-                    createdAt: record.createdAt,
-                    expiresAt: record.approvalExpiresAt ?? null
-                  })),
-                  ...remote.flatMap(({ peer, result }) =>
-                    Result.isSuccess(result)
-                      ? result.success.items.map((approval) => ({
-                        host: peer.host,
-                        jobId: approval.id,
-                        kind: approval.payload.kind,
-                        actor: approval.actor,
-                        createdAt: approval.createdAt,
-                        expiresAt: approval.approvalExpiresAt
-                      }))
-                      : []
-                  )
-                ]
+                const pending = yield* readFleetPendingJobs(config, service, relayPendingPagesPerHost)
+                if (Result.isFailure(pending.local)) return yield* pending.local.failure
+                if (Result.isFailure(pending.peers)) return yield* pending.peers.failure
                 return {
-                  jobs,
-                  more: local.more || remote.some(({ result }) => Result.isSuccess(result) && result.success.more),
-                  unreachable: remote.flatMap(({ peer, result }) => (Result.isFailure(result) ? [peer.host] : []))
+                  jobs: [
+                    ...pending.local.success.items,
+                    ...pending.remote.flatMap(({ result }) => Result.isSuccess(result) ? result.success.items : [])
+                  ],
+                  more: pending.local.success.more ||
+                    pending.remote.some(({ result }) => Result.isSuccess(result) && result.success.more),
+                  unreachable: pending.remote.flatMap(({ peer, result }) => Result.isFailure(result) ? [peer.host] : [])
                 }
               })
             ),
@@ -2840,6 +2931,32 @@ export const startHttpServer = async (
             login: header(request, "tailscale-user-login"),
             remoteAddress: request.socket.remoteAddress
           })
+
+          if (url.pathname === "/v1/modules" || url.pathname.startsWith("/v1/modules/")) {
+            if (mode === "local") {
+              json(response, 404, { error: "not_found" })
+              return
+            }
+            const result = await runRequest(
+              ModuleServer.dispatchModuleRoute({
+                method: request.method ?? "GET",
+                url,
+                listener: mode,
+                authorize: authorized,
+                sameOrigin: sameOrigin(request, expectedOrigin()),
+                readJson: () => readJson(request, Schema.Json)
+              }).pipe(Effect.provideService(ModuleServer.ModuleRegistry, registry), Effect.result)
+            )
+            if (Result.isFailure(result)) {
+              const mapped = apiError(result.failure)
+              json(response, mapped.status, mapped.body)
+            } else if (result.success === null) {
+              json(response, 404, { error: "not_found" })
+            } else {
+              json(response, result.success.status, result.success.body)
+            }
+            return
+          }
 
           if (
             mode === "serve" &&

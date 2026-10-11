@@ -41,7 +41,7 @@ import {
   WorkStore
 } from "@knpkv/herdr-work"
 import type { RelayBackend } from "@knpkv/relay"
-import { Data, Deferred, Effect, Fiber, Result, Schema, Stream } from "effect"
+import { Data, Deferred, Effect, Fiber, Layer, Result, Schema, Stream } from "effect"
 import { HttpClient } from "effect/http"
 import { build } from "esbuild"
 import { spawn } from "node:child_process"
@@ -80,6 +80,8 @@ import {
   terminalBufferCanAccept,
   terminalBufferLimitBytes
 } from "../src/internal/websocket.js"
+import { defineModule } from "../src/module-contract.js"
+import { ModuleHandlers, moduleReadRoute, moduleWriteRoute, type ServerModule } from "../src/module-server.js"
 import { commandOutputMaxBytes } from "../src/operations.js"
 import { makeRelayHubMount, type RelayHubBackends } from "../src/relay/mount.js"
 
@@ -566,6 +568,10 @@ esac
           }
           const headers = {
             "tailscale-user-login": "owner@example.com"
+          }
+          for (const route of ["/v1/modules/today/needs-you", "/v1/modules/unknown/read", "/v1/modules"]) {
+            const response = yield* Effect.promise(() => fetch(`${approvalUrl}${route}`, { headers }))
+            expect(response.status).toBe(404)
           }
           const dashboardResponse = yield* Effect.promise(() => fetch(`${approvalUrl}/v1/dashboard`, { headers }))
           const dashboard = yield* Effect.promise(() => dashboardResponse.text())
@@ -2820,6 +2826,10 @@ esac
         return yield* Effect.die("Work listener missing")
       }
       const workUrl = server.workUrl
+      for (const route of ["/v1/modules/today/needs-you", "/v1/modules/unknown/read", "/v1/modules"]) {
+        const response = yield* Effect.promise(() => fetch(`${workUrl}${route}`))
+        expect(response.status).toBe(404)
+      }
       const workListenerUrl = new URL(workUrl)
       expect(workListenerUrl.hostname).toBe("127.0.0.2")
 
@@ -4972,7 +4982,7 @@ describe("Relay in the hub", () => {
   const hubRequest = (
     url: string,
     options: { readonly method?: string; readonly headers: Readonly<Record<string, string>>; readonly body?: string }
-  ): Promise<{ readonly status: number; readonly body: string }> =>
+  ): Promise<{ readonly status: number; readonly body: string; readonly cookies: ReadonlyArray<string> }> =>
     new Promise((resolve, reject) => {
       const request = httpsRequest(
         url,
@@ -4983,7 +4993,10 @@ describe("Relay in the hub", () => {
           response.on("data", (chunk: string) => {
             body += chunk
           })
-          response.once("end", () => resolve({ body, status: response.statusCode ?? 0 }))
+          response.once(
+            "end",
+            () => resolve({ body, status: response.statusCode ?? 0, cookies: response.headers["set-cookie"] ?? [] })
+          )
         }
       )
       request.once("error", reject)
@@ -5026,12 +5039,28 @@ describe("Relay in the hub", () => {
     root: string,
     relayDirectory: string,
     backends: RelayHubBackends,
-    seed: (store: JobStore) => Effect.Effect<void, unknown> = () => Effect.void
+    seed: (store: JobStore) => Effect.Effect<void, unknown> = () => Effect.void,
+    modules: ReadonlyArray<ServerModule> = [],
+    overrides: Partial<HostConfiguration> = {},
+    transformFleet: (fleet: FleetService) => FleetService = (fleet) => fleet
   ) =>
     Effect.gen(function*() {
       const identityMode = join(root, "identity-mode")
       const tailscaleCommand = join(root, "tailscale-test")
+      const statusFile = join(root, "tailscale-status")
       writeFileSync(identityMode, "allowed")
+      writeFileSync(
+        statusFile,
+        JSON.stringify({
+          Peer: {},
+          Self: {
+            HostName: "SER8",
+            ID: "node-ser8",
+            Online: true,
+            TailscaleIPs: ["127.0.0.1"]
+          }
+        })
+      )
       writeFileSync(
         tailscaleCommand,
         `#!/bin/sh
@@ -5043,7 +5072,7 @@ case "$1" in
     else
       printf '%s\\n' '{"Node":{"StableID":"node-phone"},"UserProfile":{"LoginName":"mallory@example.com"}}'
     fi ;;
-  status) printf '%s\\n' '{"Peer":{},"Self":{"HostName":"SER8","ID":"node-ser8","Online":true,"TailscaleIPs":["127.0.0.1"]}}' ;;
+  status) cat '${statusFile}' ;;
 esac
 `,
         { mode: 0o700 }
@@ -5053,7 +5082,7 @@ esac
         (opened) => Effect.sync(() => opened.close())
       )
       yield* Effect.orDie(seed(store))
-      const fleet = yield* makeFleetService({ approvalEnabled: true, host: "SER8", operations, store })
+      const fleet = transformFleet(yield* makeFleetService({ approvalEnabled: true, host: "SER8", operations, store }))
       const { approvalPort, server } = yield* Effect.acquireRelease(
         startWithApprovalPort(async (approvalPort) => {
           const hubConfig: HostConfiguration = {
@@ -5066,9 +5095,11 @@ esac
             host: "SER8",
             machines: [{ host: "SER8", nodeId: "node-ser8" }],
             port: 0,
-            tailscaleCommand
+            tailscaleCommand,
+            ...overrides
           }
           const server = await startHttpServer(hubConfig, fleet, assets, {
+            modules,
             relay: { directory: relayDirectory, backends },
             terminalConnector: unusedTerminal
           })
@@ -5083,6 +5114,7 @@ esac
         serveUrl: server.serveUrl,
         headers: { host: `127.0.0.1:${approvalPort}` },
         origin,
+        statusFile,
         deny: () => writeFileSync(identityMode, "denied"),
         allow: () => writeFileSync(identityMode, "allowed")
       }
@@ -5090,6 +5122,322 @@ esac
 
   const conversation = "product=herdr&kind=fleet&id=SER8"
   const hubRef = { product: "herdr", kind: "fleet", id: "SER8" }
+
+  it.effect("serves one bounded Today list without approval proofs or job payloads", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-today-list-"))
+    return Effect.gen(function*() {
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { force: true, recursive: true })))
+      const hub = yield* startHub(
+        root,
+        join(root, "relay"),
+        scriptedBackends("Nothing waits."),
+        (store) =>
+          Effect.forEach(
+            Array.from({ length: 12 }, (_, index) => pendingRecord("SER8", index)),
+            (record) => store.put(record),
+            { discard: true }
+          )
+      )
+      const response = yield* Effect.promise(() =>
+        hubRequest(`${hub.serveUrl}/v1/modules/today/needs-you`, {
+          headers: hub.headers
+        })
+      )
+      expect(response.status, response.body).toBe(200)
+      expect(response.cookies).toEqual([])
+      const body = Schema.decodeUnknownSync(Schema.TaggedStruct("Complete", {
+        items: Schema.Array(
+          Schema.Struct({ key: Schema.String, destination: Schema.Struct({ host: Schema.String }) })
+        )
+      }))(JSON.parse(response.body))
+      expect(body.items).toHaveLength(12)
+      expect(body.items[0]).toMatchObject({ key: "fleet:ser8:ser8-job-00", destination: { host: "SER8" } })
+      for (const field of ["payload", "hash", "nonce", "approvalUrl", "repository", "href"]) {
+        expect(response.body).not.toContain(`"${field}"`)
+      }
+      const dashboard = yield* Effect.promise(() =>
+        hubRequest(`${hub.serveUrl}/v1/dashboard`, { headers: hub.headers })
+      )
+      const snapshot = Schema.decodeUnknownSync(DashboardSnapshot)(JSON.parse(dashboard.body))
+      expect(snapshot.pendingApprovals.local.some((job) => job.id === "ser8-job-00")).toBe(false)
+      const cookie = dashboard.cookies[0]?.split(";", 1).join("")
+      if (cookie === undefined) return yield* Effect.die("Dashboard must issue its proof cookie")
+      const existingSession = yield* Effect.promise(() =>
+        hubRequest(`${hub.serveUrl}/v1/modules/today/needs-you`, {
+          headers: { ...hub.headers, cookie }
+        })
+      )
+      expect(existingSession.cookies).toEqual([])
+      const undisclosed = yield* Effect.promise(() =>
+        hubRequest(`${hub.serveUrl}/v1/jobs/ser8-job-00/approve`, {
+          method: "POST",
+          headers: { ...hub.headers, cookie, origin: hub.origin }
+        })
+      )
+      expect(undisclosed.status).toBe(409)
+    }).pipe(Effect.scoped, provideNodeServices)
+  })
+
+  it.effect("uses dashboard authorization before Today providers and rejects extra query selectors", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-today-auth-"))
+    let reads = 0
+    const code = defineModule({
+      id: "code",
+      label: "Code",
+      defaultPage: "overview",
+      pages: [{ id: "overview", label: "Code" }],
+      listeners: ["serve"],
+      requires: ["read"]
+    })
+    return Effect.gen(function*() {
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { force: true, recursive: true })))
+      const hub = yield* startHub(root, join(root, "relay"), scriptedBackends("Nothing waits."), () => Effect.void, [
+        {
+          descriptor: code,
+          handlers: Layer.succeed(ModuleHandlers, {
+            routes: [],
+            needsYou: Effect.sync(() => {
+              reads += 1
+              return { items: [], issues: [] }
+            })
+          })
+        }
+      ])
+      const get = (path: string) => Effect.promise(() => hubRequest(`${hub.serveUrl}${path}`, { headers: hub.headers }))
+      hub.deny()
+      const dashboard = yield* get("/v1/dashboard")
+      const denied = yield* get("/v1/modules/today/needs-you")
+      expect(denied.status).toBe(dashboard.status)
+      expect(denied.status).toBe(403)
+      expect(reads).toBe(0)
+      hub.allow()
+      const malformed = yield* get("/v1/modules/today/needs-you?extra=yes")
+      expect(malformed.status).toBe(400)
+      expect(JSON.parse(malformed.body)).toEqual({ error: "invalid_query" })
+      expect(reads).toBe(0)
+      expect((yield* get("/v1/modules/today/needs-you")).status).toBe(200)
+      expect(reads).toBe(1)
+      for (const path of ["/v1/modules", "/v1/modules/today/missing", "/v1/modules/unknown/needs-you"]) {
+        expect((yield* get(path)).status).toBe(404)
+      }
+      for (const url of [hub.server.url, hub.server.tailnetUrl]) {
+        if (url === null) return yield* Effect.die("Expected a listener URL")
+        const wrongListener = yield* Effect.promise(() => fetch(`${url}/v1/modules/today/needs-you`))
+        expect(wrongListener.status).toBe(404)
+        yield* Effect.promise(() => wrongListener.text())
+      }
+      expect(reads).toBe(1)
+    }).pipe(Effect.scoped, provideNodeServices)
+  })
+
+  it.effect("rereads peer availability and deduplicates case variants while preserving display case", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-today-peer-"))
+    const peer = createServer((_request, response) => {
+      response.writeHead(200, { "content-type": "application/json" })
+      response.end(JSON.stringify({
+        host: "ALPHA",
+        nextCursor: null,
+        approvals: [{
+          id: "alpha-job-00",
+          actor: "operator",
+          createdAt: 1,
+          approvalExpiresAt: null,
+          status: "pending_approval",
+          payload: {
+            kind: "agent.delegate",
+            mode: "work",
+            prompt: "peer private output text",
+            repository: "/srv/fixture"
+          }
+        }]
+      }))
+    })
+    return Effect.gen(function*() {
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { force: true, recursive: true })))
+      yield* Effect.acquireRelease(
+        Effect.promise(() => listenOn(peer, "127.0.0.2").then(() => peer)),
+        (server) =>
+          Effect.promise(() =>
+            new Promise<void>((resolve, reject) =>
+              server.close((error) => error === undefined ? resolve() : reject(error))
+            )
+          )
+      )
+      const port = Schema.decodeUnknownSync(Schema.Struct({ port: Schema.Number }))(peer.address()).port
+      const hub = yield* startHub(
+        root,
+        join(root, "relay"),
+        scriptedBackends("Nothing waits."),
+        (store) => store.put(pendingRecord("SER8", 0)),
+        [],
+        {
+          port,
+          machines: [
+            { host: "SER8", nodeId: "node-ser8" },
+            { host: "ser8", nodeId: "node-ser8" },
+            { host: "ALPHA", nodeId: "node-alpha" },
+            { host: "alpha", nodeId: "node-alpha" }
+          ]
+        }
+      )
+      const setOnline = (online: boolean) =>
+        writeFileSync(
+          hub.statusFile,
+          JSON.stringify({
+            Self: { HostName: "SER8", ID: "node-ser8", Online: true, TailscaleIPs: ["127.0.0.1"] },
+            Peer: { alpha: { HostName: "ALPHA", ID: "node-alpha", Online: online, TailscaleIPs: ["127.0.0.2"] } }
+          })
+        )
+      const get = () =>
+        Effect.promise(() => hubRequest(`${hub.serveUrl}/v1/modules/today/needs-you`, { headers: hub.headers }))
+      setOnline(true)
+      const online = yield* get()
+      expect(online.status).toBe(200)
+      expect(JSON.parse(online.body)).toMatchObject({
+        _tag: "Complete",
+        items: [
+          { key: "fleet:alpha:alpha-job-00", destination: { host: "ALPHA" } },
+          { key: "fleet:ser8:ser8-job-00", destination: { host: "SER8" } }
+        ]
+      })
+      expect(online.body).not.toContain("peer private output text")
+      expect(online.body).not.toContain("/srv/fixture")
+      setOnline(false)
+      const offline = yield* get()
+      expect(JSON.parse(offline.body)).toMatchObject({
+        _tag: "Partial",
+        items: [
+          { key: "fleet:ser8:ser8-job-00" }
+        ],
+        sources: [{
+          provider: "fleet",
+          issue: {
+            state: "hosts",
+            hosts: [
+              { host: "ALPHA", reason: "offline" },
+              { host: "alpha", reason: "offline" }
+            ]
+          }
+        }]
+      })
+    }).pipe(Effect.scoped, provideNodeServices)
+  })
+
+  it.effect("names a failed local host separately from failed peer discovery", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-today-source-failure-"))
+    return Effect.gen(function*() {
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { force: true, recursive: true })))
+      const hub = yield* startHub(
+        root,
+        join(root, "relay"),
+        scriptedBackends("Nothing waits."),
+        () => Effect.void,
+        [],
+        {},
+        (fleet) => ({
+          ...fleet,
+          pendingApprovalPage: () =>
+            Effect.fail(
+              new FleetStoreBusyError({
+                operation: "pending",
+                detail: "fixture busy",
+                cause: "fixture"
+              })
+            )
+        })
+      )
+      const get = () =>
+        Effect.promise(() => hubRequest(`${hub.serveUrl}/v1/modules/today/needs-you`, { headers: hub.headers }))
+      const localFailure = yield* get()
+      expect(JSON.parse(localFailure.body)).toEqual({
+        _tag: "Partial",
+        items: [],
+        sources: [
+          { provider: "fleet", issue: { state: "hosts", hosts: [{ host: "SER8", reason: "request_failed" }] } }
+        ]
+      })
+      writeFileSync(hub.statusFile, "invalid status JSON")
+      const discoveryFailure = yield* get()
+      expect(JSON.parse(discoveryFailure.body)).toEqual({
+        _tag: "Partial",
+        items: [],
+        sources: [
+          { provider: "fleet", issue: { state: "failed", reason: "request_failed" } },
+          { provider: "fleet", issue: { state: "hosts", hosts: [{ host: "SER8", reason: "request_failed" }] } }
+        ]
+      })
+      expect(discoveryFailure.body).not.toContain("fixture busy")
+      expect(discoveryFailure.body).not.toContain("invalid status JSON")
+    }).pipe(Effect.scoped, provideNodeServices)
+  })
+
+  it.effect("uses the production module mount's origin, content-type and body budget before writes", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-module-write-"))
+    let writes = 0
+    const code = defineModule({
+      id: "code",
+      label: "Code",
+      defaultPage: "overview",
+      pages: [{ id: "overview", label: "Code" }],
+      listeners: ["serve"],
+      requires: ["read", "write"]
+    })
+    const query = Schema.fromURLSearchParams(Schema.Record(Schema.String, Schema.Never))
+    const modules = [{
+      descriptor: code,
+      handlers: Layer.succeed(ModuleHandlers, {
+        routes: [
+          moduleReadRoute("/status", query, Schema.Boolean, () => Effect.succeed(true)),
+          moduleWriteRoute(
+            "POST",
+            "/decide",
+            query,
+            Schema.Struct({ decision: Schema.Literal("approve") }),
+            Schema.Null,
+            () =>
+              Effect.sync(() => {
+                writes += 1
+                return null
+              })
+          )
+        ]
+      })
+    }]
+    return Effect.gen(function*() {
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { force: true, recursive: true })))
+      const hub = yield* startHub(
+        root,
+        join(root, "relay"),
+        scriptedBackends("Nothing waits."),
+        () => Effect.void,
+        modules
+      )
+      const post = (contentType: string, body: string, origin = hub.origin) =>
+        Effect.promise(() =>
+          hubRequest(`${hub.serveUrl}/v1/modules/code/decide`, {
+            method: "POST",
+            headers: { ...hub.headers, "content-type": contentType, origin },
+            body
+          })
+        )
+      const valid = JSON.stringify({ decision: "approve" })
+      expect((yield* post("application/json", valid, "https://other.example.test")).status).toBe(403)
+      expect((yield* post("text/plain", valid)).status).toBe(400)
+      expect((yield* post("application/json", "{")).status).toBe(400)
+      expect(
+        (yield* post("application/json", JSON.stringify({ decision: "approve", padding: "x".repeat(1_024 * 1_024) })))
+          .status
+      ).toBe(400)
+      expect(writes).toBe(0)
+      expect((yield* post("application/json", valid)).status).toBe(200)
+      expect(writes).toBe(1)
+      const read = yield* Effect.promise(() =>
+        hubRequest(`${hub.serveUrl}/v1/modules/code/status`, { headers: hub.headers })
+      )
+      expect(read.status).toBe(200)
+      expect(JSON.parse(read.body)).toBe(true)
+    }).pipe(Effect.scoped, provideNodeServices)
+  })
 
   it.effect("refuses before Relay starts, and serves only the hub's conversation on the canonical listener", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-relay-routes-"))

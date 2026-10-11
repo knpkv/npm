@@ -50,6 +50,9 @@ import { answerOutcome, decidableExpiry, workRequestDecisionsFor } from "./work-
 import { DashboardWorkPollOwner } from "./work-poll-owner.js"
 import { SuperappShell } from "./superapp-view.js"
 import { makeFleetModuleViews } from "./fleet-module-view.js"
+import { makeTodayModuleViews, TodayReadFailed } from "./today-module-view.js"
+import { TodayFleetAgents, TodayFleetHistory } from "./today-fleet-activity.js"
+import { NeedsYouResult } from "./modules.js"
 import { RefreshStatus } from "./refresh-status.js"
 import { dashboardPolls } from "./internal/dashboard-polls.js"
 import { useDashboardPending } from "./internal/use-dashboard-pending.js"
@@ -115,6 +118,18 @@ const fetchJson = Effect.fn("ApprovalClient.fetchJson")(function* <A>(
 const browserRuntime = Atom.runtime(BrowserHttpClient.layerFetch)
 
 const loadDashboard = fetchJson(DashboardSnapshot, "/v1/dashboard")
+const loadToday = fetchJson(NeedsYouResult, "/v1/modules/today/needs-you").pipe(
+  Effect.timeout("6 seconds"),
+  Effect.mapError((failure) => {
+    const reasons = {
+      BrowserNetworkError: "network",
+      BrowserStatusError: "status",
+      BrowserJsonError: "invalid_json",
+      TimeoutError: "timeout"
+    } satisfies Record<typeof failure._tag, TodayReadFailed["reason"]>
+    return new TodayReadFailed({ reason: reasons[failure._tag] })
+  })
+)
 
 const loadDashboardPending = Effect.fn("Dashboard.loadPending")((
   continuation: DashboardSnapshotType["pendingApprovals"]["nextCursors"][number]
@@ -398,7 +413,13 @@ const makeDashboardAtoms = (initial: DashboardSnapshotType) => {
 
 type DashboardAtoms = ReturnType<typeof makeDashboardAtoms>
 
-const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
+const DashboardApp = ({
+  atoms,
+  readToday
+}: {
+  readonly atoms: DashboardAtoms
+  readonly readToday: Effect.Effect<typeof NeedsYouResult.Type, TodayReadFailed>
+}) => {
   const result = useAtomValue(atoms.dashboard)
   const { refreshFailed, snapshot } = dashboardRefreshView(result, atoms.bootstrap)
   const workResult = useAtomValue(atoms.work)
@@ -676,13 +697,19 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
       </section>
     )
   })
+  const today = makeTodayModuleViews({
+    read: readToday,
+    now: workNow,
+    agents: <TodayFleetAgents snapshot={current} />,
+    history: <TodayFleetHistory snapshot={current} />
+  })
   return (
     <>
       <DashboardWorkPollOwner atom={atoms.work} poll={atoms.workPoll} />
       {canonical ? (
         <SuperappShell
-          modules={[fleet]}
-          landing={{ module: "fleet", page: "approvals" }}
+          modules={[today, fleet]}
+          landing={{ module: "today", page: "overview" }}
           host={current.host}
           hostCount={hostCount}
           relay={relay}
@@ -733,9 +760,16 @@ const atoms = makeDashboardAtoms(initial)
  * Relay's one fleet conversation, on the canonical hub (the only listener that serves `/v1/relay`): one
  * stream for the page, closed when the page goes away for good.
  */
+const applicationRuntime = ManagedRuntime.make(Layer.merge(BrowserHttpClient.layerFetch, BrowserCrypto.layer))
+const readToday = Effect.callback<typeof NeedsYouResult.Type, TodayReadFailed>((resume, signal) => {
+  applicationRuntime.runCallback(loadToday, {
+    signal,
+    onExit: (exit) => resume(Exit.isSuccess(exit) ? Effect.succeed(exit.value) : Effect.failCause(exit.cause))
+  })
+})
 const relayConversations = makeRelayConversations(
   makeRelayClient({ base: "/v1/relay", origin: window.location.href }),
-  ManagedRuntime.make(Layer.merge(BrowserHttpClient.layerFetch, BrowserCrypto.layer))
+  applicationRuntime
 )
 const relay: HubRelayConversation = {
   conversations: relayConversations,
@@ -744,7 +778,7 @@ const relay: HubRelayConversation = {
 watchRelayPage(window, relay)
 const application = (
   <RegistryProvider>
-    <DashboardApp atoms={atoms} />
+    <DashboardApp atoms={atoms} readToday={readToday} />
   </RegistryProvider>
 )
 if (initial.approvalApp.canonical) createRoot(root).render(application)
