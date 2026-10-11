@@ -6,7 +6,10 @@
  * - A budget is a running total of `byteLength`. `limit` is inclusive: a stream of
  *   exactly `limit` bytes succeeds; the chunk that takes the total past it fails
  *   the stream with {@link ByteLimitExceeded}, and nothing after it is pulled.
- * - Failing is the only overflow behaviour; nothing is truncated.
+ * - The `limit*`/`collectBounded*` functions fail on overflow and never truncate.
+ *   `collectTail*` is the one deliberate exception: it keeps the last `limit`
+ *   bytes and reports how many it dropped, for output whose end matters (a
+ *   build log) and that nothing parses.
  * - Upstream failures pass through unchanged, so a caller maps
  *   `ByteLimitExceeded` to its own error and leaves the rest alone.
  * - `limit` must be a non-negative safe integer. An invalid one (`NaN`,
@@ -100,3 +103,77 @@ export const collectBoundedText = <E, R>(
   limit: number
 ): Effect.Effect<string, E | ByteLimitExceeded, R> =>
   collectBounded(stream, limit).pipe(Effect.map((body) => new TextDecoder().decode(body, { stream: true })))
+
+/** What {@link collectTail} kept: the stream's last bytes, and how many came before them. */
+export interface Tail {
+  readonly bytes: Uint8Array
+  readonly omittedBytes: number
+}
+
+/**
+ * Collect a stream's last `limit` bytes, holding no more than that plus one
+ * chunk at a time. Never fails for size: the stream runs to its end, which is
+ * the point when a caller must not interrupt the producer (a child process
+ * still writing). `limit` must be a non-negative safe integer; anything else
+ * dies with {@link InvalidByteLimit} before the stream is pulled.
+ */
+export const collectTail = <E, R>(
+  stream: Stream.Stream<Uint8Array, E, R>,
+  limit: number
+): Effect.Effect<Tail, E, R> =>
+  isValidLimit(limit)
+    ? Effect.suspend(() => {
+      const chunks: Array<Uint8Array> = []
+      let size = 0
+      let omittedBytes = 0
+      return stream.pipe(
+        Stream.runForEach((chunk) =>
+          Effect.sync(() => {
+            chunks.push(chunk)
+            size += chunk.byteLength
+            while (size > limit) {
+              const first = chunks[0]
+              if (first === undefined) break
+              const excess = size - limit
+              const dropped = Math.min(excess, first.byteLength)
+              if (dropped === first.byteLength) chunks.shift()
+              else chunks[0] = first.subarray(dropped)
+              size -= dropped
+              omittedBytes += dropped
+            }
+          })
+        ),
+        Effect.map((): Tail => ({ bytes: concat(chunks, size), omittedBytes }))
+      )
+    })
+    : Effect.die(new InvalidByteLimit({ limit }))
+
+/** {@link collectTail} decoded as text; `omittedBytes` counts every byte not decoded. */
+export interface TextTail {
+  readonly text: string
+  readonly omittedBytes: number
+}
+
+const isContinuationByte = (byte: number): boolean => (byte & 0xc0) === 0x80
+
+/**
+ * {@link collectTail}, decoded as {@link collectBoundedText} decodes. When bytes
+ * were dropped, the kept tail first skips UTF-8 continuation bytes, so it starts
+ * on a character boundary instead of with a replacement character.
+ */
+export const collectTailText = <E, R>(
+  stream: Stream.Stream<Uint8Array, E, R>,
+  limit: number
+): Effect.Effect<TextTail, E, R> =>
+  collectTail(stream, limit).pipe(
+    Effect.map(({ bytes, omittedBytes }): TextTail => {
+      let start = 0
+      if (omittedBytes > 0) {
+        while (start < bytes.byteLength && isContinuationByte(bytes[start] ?? 0)) start += 1
+      }
+      return {
+        text: new TextDecoder().decode(bytes.subarray(start), { stream: true }),
+        omittedBytes: omittedBytes + start
+      }
+    })
+  )

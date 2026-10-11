@@ -14,10 +14,10 @@ import {
 import { Effect, Result, Schema } from "effect"
 import * as HttpClientRequest from "effect/http/HttpClientRequest"
 import * as HttpClientResponse from "effect/http/HttpClientResponse"
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { commandOutputMaxBytes, makeHostOperations } from "../src/operations.js"
+import { commandOutputMaxBytes, commandOutputTailBytes, makeHostOperations } from "../src/operations.js"
 
 // Each test effect is an application boundary; @effect/vitest scopes its Node services.
 // @effect-diagnostics-next-line strictEffectProvide:off
@@ -241,7 +241,45 @@ printf '%s\\n' "{\\"jobId\\":\\"$job_id\\",\\"protocol\\":\\"herdr.coordinator.c
     )
   })
 
-  it.effect("preserves bounded output and rejects the first byte over the cap", () => {
+  it.effect("runs an apply with more output than the cap to completion and keeps its failure's end", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-apply-output-test-"))
+    const completed = join(root, "completed")
+    // Writes three caps of output, then marks completion: a reader that stopped at
+    // the cap would stop the command before the marker exists.
+    const noisy = (exit: number) => [
+      "sh",
+      "-c",
+      `dd if=/dev/zero bs=${commandOutputMaxBytes * 3} count=1 2>/dev/null | tr '\\000' x; ` +
+      `dd if=/dev/zero bs=${commandOutputMaxBytes * 3} count=1 2>/dev/null | tr '\\000' y >&2; ` +
+      `printf 'activated' > "$0"; printf 'last stderr line' >&2; exit ${exit}`,
+      completed
+    ]
+    return Effect.gen(function*() {
+      const succeeding = yield* makeHostOperations({ ...config(root, ["true"]), applyCommand: noisy(0) })
+      const output = yield* succeeding.run({ kind: "nix.apply", ref: "a".repeat(40) }, noWorkerStarted, "job-7")
+      expect(readFileSync(completed, "utf8")).toBe("activated")
+      expect(output).toMatch(/^\[\d+ earlier bytes omitted\]\n/)
+      expect(Buffer.byteLength(output)).toBeLessThan(commandOutputMaxBytes)
+
+      rmSync(completed)
+      const failing = yield* makeHostOperations({ ...config(root, ["true"]), applyCommand: noisy(3) })
+      const result = yield* Effect.result(
+        failing.run({ kind: "nix.apply", ref: "a".repeat(40) }, noWorkerStarted, "job-8")
+      )
+      expect(readFileSync(completed, "utf8")).toBe("activated")
+      expect(Result.isFailure(result)).toBe(true)
+      if (Result.isFailure(result)) {
+        expect(result.failure.detail).toContain("code 3")
+        expect(result.failure.detail).toContain("earlier bytes omitted")
+        expect(result.failure.detail.endsWith("last stderr line")).toBe(true)
+      }
+    }).pipe(
+      Effect.ensuring(Effect.sync(() => rmSync(root, { force: true, recursive: true }))),
+      provideNodeServices
+    )
+  })
+
+  it.effect("keeps a build log whole under the tail size and its end past it", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-command-output-test-"))
     return Effect.gen(function*() {
       const bounded = yield* makeHostOperations(
@@ -265,31 +303,30 @@ printf '%s\\n' "{\\"jobId\\":\\"$job_id\\",\\"protocol\\":\\"herdr.coordinator.c
         expect(failedResult.failure.detail).toContain("fatal")
       }
 
+      // A build log past the cap keeps its end: the omission line, then the
+      // last commandOutputTailBytes, and the job still succeeds.
       const overflowing = yield* makeHostOperations(
         config(root, [
           "sh",
           "-c",
-          `dd if=/dev/zero bs=${commandOutputMaxBytes + 1} count=1 2>/dev/null`
+          `dd if=/dev/zero bs=${commandOutputMaxBytes + 1} count=1 2>/dev/null | tr '\\000' x; printf 'done'`
         ])
       )
-      const result = yield* Effect.result(overflowing.run({ kind: "nix.check" }, noWorkerStarted, "job-nix-check"))
-      expect(Result.isFailure(result)).toBe(true)
-      if (Result.isFailure(result)) {
-        expect(result.failure).toMatchObject({
-          operation: "nix.check"
-        })
-        expect(result.failure.detail).toContain("exceeded")
-      }
+      const tail = yield* overflowing.run({ kind: "nix.check" }, noWorkerStarted, "job-nix-check")
+      const omitted = commandOutputMaxBytes + 1 + 4 - commandOutputTailBytes
+      expect(tail.startsWith(`[${omitted} earlier bytes omitted]\n`)).toBe(true)
+      expect(tail.endsWith("xxxxdone")).toBe(true)
+      expect(Buffer.byteLength(tail)).toBeLessThan(commandOutputMaxBytes)
 
       const exact = yield* makeHostOperations(
         config(root, [
           "sh",
           "-c",
-          `dd if=/dev/zero bs=${commandOutputMaxBytes} count=1 2>/dev/null | tr '\\000' x`
+          `dd if=/dev/zero bs=${commandOutputTailBytes} count=1 2>/dev/null | tr '\\000' x`
         ])
       )
-      expect(Buffer.byteLength(yield* exact.run({ kind: "nix.check" }, noWorkerStarted, "job-nix-check"))).toBe(
-        commandOutputMaxBytes
+      expect(yield* exact.run({ kind: "nix.check" }, noWorkerStarted, "job-nix-check")).toBe(
+        "x".repeat(commandOutputTailBytes)
       )
 
       const herdrCommand = join(root, "herdr-test")
