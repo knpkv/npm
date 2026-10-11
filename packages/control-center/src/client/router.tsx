@@ -1,3 +1,4 @@
+import type { BootstrapPairing } from "./bootstrapHandoff.js"
 import { createBrowserRouter } from "react-router"
 import { AppShell } from "./AppShell.js"
 
@@ -11,9 +12,9 @@ const notFoundRoute = async () => {
   return { Component: module.NotFoundPage }
 }
 
-const pairRoute = async () => {
+const pairRoute = (bootstrapPairing: BootstrapPairing | null) => async () => {
   const module = await import("./PairPage.js")
-  return { Component: module.PairPage }
+  return { Component: () => <module.PairPage bootstrapPairing={bootstrapPairing} /> }
 }
 
 const agentRoute = async () => {
@@ -92,40 +93,41 @@ const openPullRequestRoute = async () => {
 }
 
 /** Browser routes remain application-owned while rly receives only a link bridge. */
-export const router = createBrowserRouter([
-  {
-    element: <AppShell />,
-    hydrateFallbackElement: (
-      <p aria-live="polite" role="status">
-        Loading Control Center…
-      </p>
-    ),
-    children: [
-      { index: true, lazy: overviewRoute },
-      { path: "releases", lazy: overviewRoute },
-      { path: "services", lazy: servicesRoute },
-      { path: "services/oauth/atlassian/callback", lazy: atlassianOAuthCallbackRoute },
-      { path: "agent", lazy: agentRoute },
-      { path: "pair", lazy: pairRoute },
-      { path: "open-pr", lazy: openPullRequestRoute },
-      { path: "shares/:workspaceId/:shareId", lazy: authorizedShareRoute },
-      {
-        path: "w/:workspaceId",
-        lazy: workspaceRoute,
-        children: [
-          { path: "overview", lazy: workspaceOverviewRoute },
-          { path: "work", lazy: activeWorkRoute },
-          { path: "items/:entityId", lazy: workspaceEntityRoute },
-          { path: "items", lazy: itemsRoute },
-          { path: "timeline", lazy: timelineRoute },
-          { path: "settings", lazy: workspaceSettingsRoute },
-          { path: "releases/:releaseId/preview", lazy: releasePreviewRoute },
-          { path: "releases/:releaseId/agent", lazy: agentRoute },
-          { path: "releases/:releaseId", lazy: releaseFullRoute },
-          { path: "*", lazy: workspaceNotFoundRoute }
-        ]
-      },
-      { path: "*", lazy: notFoundRoute }
-    ]
-  }
-])
+export const makeRouter = (bootstrapPairing: BootstrapPairing | null) =>
+  createBrowserRouter([
+    {
+      element: <AppShell />,
+      hydrateFallbackElement: (
+        <p aria-live="polite" role="status">
+          Loading Control Center…
+        </p>
+      ),
+      children: [
+        { index: true, lazy: overviewRoute },
+        { path: "releases", lazy: overviewRoute },
+        { path: "services", lazy: servicesRoute },
+        { path: "services/oauth/atlassian/callback", lazy: atlassianOAuthCallbackRoute },
+        { path: "agent", lazy: agentRoute },
+        { path: "pair", lazy: pairRoute(bootstrapPairing) },
+        { path: "open-pr", lazy: openPullRequestRoute },
+        { path: "shares/:workspaceId/:shareId", lazy: authorizedShareRoute },
+        {
+          path: "w/:workspaceId",
+          lazy: workspaceRoute,
+          children: [
+            { path: "overview", lazy: workspaceOverviewRoute },
+            { path: "work", lazy: activeWorkRoute },
+            { path: "items/:entityId", lazy: workspaceEntityRoute },
+            { path: "items", lazy: itemsRoute },
+            { path: "timeline", lazy: timelineRoute },
+            { path: "settings", lazy: workspaceSettingsRoute },
+            { path: "releases/:releaseId/preview", lazy: releasePreviewRoute },
+            { path: "releases/:releaseId/agent", lazy: agentRoute },
+            { path: "releases/:releaseId", lazy: releaseFullRoute },
+            { path: "*", lazy: workspaceNotFoundRoute }
+          ]
+        },
+        { path: "*", lazy: notFoundRoute }
+      ]
+    }
+  ])

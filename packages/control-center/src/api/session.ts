@@ -61,7 +61,7 @@ export const SessionSummary = Schema.Struct({
 /** Decoded browser-session metadata. */
 export type SessionSummary = typeof SessionSummary.Type
 
-/** Pairing request whose credential is never represented in a URL. */
+/** Credential-bearing pairing POST body; terminal fragment handoffs are cleared before this request. */
 export const PairSessionRequest = Schema.Struct({ pairingCode: PairingCode })
 
 /** Decoded session-pairing request. */

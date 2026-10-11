@@ -1,5 +1,6 @@
 /**
- * Server-only Control Center composition.
+ * Server-only Control Center composition. Opt-in terminalLoginControl carries private bearer
+ * authority for non-destructive loopback sign-in; browser Auth and destructive recovery stay separate.
  *
  * Importing this entry from browser or API code is forbidden mechanically.
  *

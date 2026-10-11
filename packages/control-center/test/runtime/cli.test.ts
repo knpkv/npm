@@ -185,7 +185,9 @@ describe("Control Center CLI", () => {
   })
 
   it("accepts exactly the serve, recovery, and offline backup argument shapes", () => {
-    assert.deepStrictEqual(classifyControlCenterCliArguments([]), { _tag: "serve" })
+    assert.deepStrictEqual(classifyControlCenterCliArguments([]), { _tag: "open", noOpen: false })
+    assert.deepStrictEqual(classifyControlCenterCliArguments(["--no-open"]), { _tag: "open", noOpen: true })
+    assert.deepStrictEqual(classifyControlCenterCliArguments(["serve"]), { _tag: "serve" })
     assert.deepStrictEqual(classifyControlCenterCliArguments(["recover-owner"]), { _tag: "recover-owner" })
     assert.deepStrictEqual(classifyControlCenterCliArguments(["backup", "archive"]), {
       _tag: "backup",
@@ -206,6 +208,8 @@ describe("Control Center CLI", () => {
     for (
       const invalid of [
         ["unknown"],
+        ["serve", "unexpected"],
+        ["--no-open", "unexpected"],
         ["backup"],
         ["backup", ""],
         ["verify-backup"],

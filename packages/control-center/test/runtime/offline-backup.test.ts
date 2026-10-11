@@ -608,7 +608,7 @@ describe("offline backup commands", () => {
       assert.strictEqual(unsupported.stdout, "")
       assert.strictEqual(
         unsupported.stderr,
-        "Usage: control-center [recover-owner | backup <archive> | verify-backup <archive> | restore <archive>]\n"
+        "Usage: control-center [--no-open | serve | recover-owner | backup <archive> | verify-backup <archive> | restore <archive>]\n"
       )
 
       const missingArchive = yield* runBuiltCli(
@@ -664,7 +664,7 @@ describe("offline backup commands", () => {
         "built CLI is missing; run pnpm --filter @knpkv/control-center build before this test"
       )
       const port = yield* acquireEphemeralPort
-      const handle = yield* ChildProcess.make("node", [cliEntry], {
+      const handle = yield* ChildProcess.make("node", [cliEntry, "serve"], {
         env: {
           ...inactiveTelemetryEnvironment,
           CONTROL_CENTER_DATA_ROOT: configuredRoot,
@@ -793,7 +793,7 @@ describe("offline backup commands", () => {
         yield* Deferred.await(collectorReady).pipe(Effect.timeout("5 seconds"))
 
         const serverPort = yield* acquireEphemeralPort
-        const server = yield* ChildProcess.make("node", [cliEntry], {
+        const server = yield* ChildProcess.make("node", [cliEntry, "serve"], {
           env: {
             ...inactiveTelemetryEnvironment,
             CONTROL_CENTER_DATA_ROOT: configuredRoot,
@@ -929,10 +929,10 @@ describe("offline backup commands", () => {
         assert.strictEqual(unsupported.stdout, "")
         assert.strictEqual(
           unsupported.stderr,
-          "Usage: control-center [recover-owner | backup <archive> | verify-backup <archive> | restore <archive>]\n"
+          "Usage: control-center [--no-open | serve | recover-owner | backup <archive> | verify-backup <archive> | restore <archive>]\n"
         )
 
-        const server = yield* runBuiltCli(cliEntry, [], configuredRoot, undefined, invalidActiveTelemetry)
+        const server = yield* runBuiltCli(cliEntry, ["serve"], configuredRoot, undefined, invalidActiveTelemetry)
         assert.strictEqual(server.exitCode, ChildProcessSpawner.ExitCode(1))
         assert.strictEqual(server.stdout, "")
         assert.include(server.stderr, "Control Center command failed")
@@ -956,7 +956,7 @@ describe("offline backup commands", () => {
           "built CLI is missing; run pnpm --filter @knpkv/control-center build before this test"
         )
 
-        const result = yield* runBuiltCli(cliEntry, [], configuredRoot, undefined, {
+        const result = yield* runBuiltCli(cliEntry, ["serve"], configuredRoot, undefined, {
           OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: "not-a-url",
           OTEL_LOGS_EXPORTER: "otlp",
           OTEL_SDK_DISABLED: "false",
@@ -986,7 +986,7 @@ describe("offline backup commands", () => {
       yield* removeProviderOwnershipTables(path.join(prepared.dataRoot, "control-center.db"))
       const port = yield* acquireEphemeralPort
 
-      const result = yield* runBuiltCli(cliEntry, [], configuredRoot, port)
+      const result = yield* runBuiltCli(cliEntry, ["serve"], configuredRoot, port)
 
       assert.strictEqual(result.exitCode, ChildProcessSpawner.ExitCode(1))
       assert.strictEqual(result.stdout, "")
@@ -997,7 +997,7 @@ describe("offline backup commands", () => {
           "then explicitly recreate local development data or choose a new CONTROL_CENTER_DATA_ROOT. " +
           "Automatic migrations are disabled until schema stability.\n"
       )
-      const verification = yield* runBuiltCli(cliEntry, [], configuredRoot, port)
+      const verification = yield* runBuiltCli(cliEntry, ["serve"], configuredRoot, port)
       assert.strictEqual(verification.exitCode, ChildProcessSpawner.ExitCode(1))
       assert.strictEqual(verification.stderr, result.stderr)
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped), { timeout: 30_000 })

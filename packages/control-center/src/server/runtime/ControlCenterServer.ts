@@ -143,6 +143,11 @@ import { releaseTargetsStartupLayer } from "./ReleaseTargetsStartup.js"
 import { requestUrlBoundaryLayer } from "./RequestUrlBoundary.js"
 import { retentionStartupLayer } from "./RetentionStartup.js"
 import { ServerLifecycle } from "./ServerLifecycle.js"
+import {
+  supportsTerminalLogin,
+  terminalLoginControlLayer,
+  type TerminalLoginControlOptions
+} from "./TerminalLoginControl.js"
 
 type ControlCenterCoreApplicationServices =
   | AuthorizedShares
@@ -185,6 +190,11 @@ export interface ControlCenterPrReviewWorkerOptions {
 /** Runtime construction settings after security and persistence decoding. */
 export interface ControlCenterServerOptions<ApplicationError = never, ApplicationRequirements = never> {
   readonly bindConfig: BindConfig
+  /**
+   * Opt-in terminal mint authority for loopback HTTP only. Contains a server-private control bearer;
+   * never include it in browser metadata, logs or telemetry. Existing sessions and codes stay valid.
+   */
+  readonly terminalLoginControl?: TerminalLoginControlOptions
   readonly persistenceConfig: PersistenceConfig
   /** Scoped first-party provider runtimes used by live connection checks. */
   readonly pluginConnections?: PluginConnectionMapV1 | null
@@ -625,6 +635,9 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
     databaseDrain
   )
   const routes = Layer.mergeAll(
+    options.terminalLoginControl !== undefined && supportsTerminalLogin(options.bindConfig)
+      ? terminalLoginControlLayer(options.bindConfig, options.terminalLoginControl).pipe(Layer.provide(database))
+      : Layer.empty,
     controlCenterApiLayerWithLifecycle.pipe(Layer.provide(bootstrap)),
     staticApplicationLayer,
     requestUrlBoundaryLayer,

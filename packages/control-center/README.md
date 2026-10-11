@@ -107,10 +107,10 @@ Build once, then start the authenticated application server:
 
 ```sh
 pnpm --filter @knpkv/control-center build
-pnpm --filter @knpkv/control-center start
+pnpm --filter @knpkv/control-center start serve
 ```
 
-The first run prints a single-use pairing code and listens at `http://127.0.0.1:4173`. Durable data, content, and owner-only secrets live under `.control-center` by default; set `CONTROL_CENTER_DATA_ROOT` to choose another owner-controlled directory.
+`control-center serve` starts the foreground server without opening a browser. Its first run prints a ten-minute, single-use pairing code and listens at `http://127.0.0.1:4173`. Durable data, content, and owner-only secrets live under `.control-center` by default; set `CONTROL_CENTER_DATA_ROOT` to choose another owner-controlled directory.
 
 Control Center's durable auth is an explicit boundary from CodeCommit web's
 process-scoped owner session. Its `Auth` service keeps secret values redacted
@@ -175,7 +175,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:27686 \
 OTEL_EXPORTER_OTLP_PROTOCOL=http/json \
 OTEL_LOGS_EXPORTER=otlp \
 OTEL_TRACES_EXPORTER=otlp \
-pnpm --filter @knpkv/control-center start
+pnpm --filter @knpkv/control-center start serve
 ```
 
 To use [Lensflare](https://lensflare.dev/), create or select a dataset in its local UI and substitute that dataset's slug below. Lensflare listens on port `43110` by default and uses dataset-specific ingest routes:
@@ -186,7 +186,7 @@ OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://127.0.0.1:43110/ingest/otlp/v1/traces/
 OTEL_EXPORTER_OTLP_PROTOCOL=http/json \
 OTEL_LOGS_EXPORTER=otlp \
 OTEL_TRACES_EXPORTER=otlp \
-pnpm --filter @knpkv/control-center start
+pnpm --filter @knpkv/control-center start serve
 ```
 
 Lensflare's optional MCP endpoint for querying the captured telemetry is `http://127.0.0.1:43110/mcp`; it is separate from the ingest endpoints above.
@@ -212,10 +212,10 @@ Local providers are disabled by default. Enabling one grants that CLI read acces
 ```sh
 CONTROL_CENTER_AGENT_PROVIDERS=codex,claude \
 CONTROL_CENTER_AGENT_CWD=/srv/workspaces/payments \
-pnpm --filter @knpkv/control-center start
+pnpm --filter @knpkv/control-center start serve
 
 # Keep local agents disabled while leaving the release UI available.
-pnpm --filter @knpkv/control-center start
+pnpm --filter @knpkv/control-center start serve
 ```
 
 `CONTROL_CENTER_AGENT_CWD` is required whenever a provider is enabled; Control Center does not silently grant access to its launch directory.
@@ -228,7 +228,7 @@ An OpenAI-compatible chat-completions endpoint can be registered independently:
 CONTROL_CENTER_AGENT_OPENAI_API_URL=https://provider.example/v1 \
 CONTROL_CENTER_AGENT_OPENAI_MODEL=review-model \
 CONTROL_CENTER_AGENT_OPENAI_API_KEY=server-only-token \
-pnpm --filter @knpkv/control-center start
+pnpm --filter @knpkv/control-center start serve
 ```
 
 The API key is optional for trusted local endpoints. Provider credentials, API URLs, executable paths,
@@ -255,7 +255,7 @@ CONTROL_CENTER_AGENT_CWD=/srv/workspaces/payments \
 CONTROL_CENTER_PR_REVIEW_SBX_ENABLED=true \
 CONTROL_CENTER_PR_REVIEW_SBX_EXECUTABLE=sbx \
 CONTROL_CENTER_PR_REVIEW_CODEX_EXECUTABLE=codex \
-pnpm --filter @knpkv/control-center start
+pnpm --filter @knpkv/control-center start serve
 ```
 
 Native Claude review:
@@ -266,7 +266,7 @@ CONTROL_CENTER_AGENT_CWD=/srv/workspaces/payments \
 CONTROL_CENTER_PR_REVIEW_SBX_ENABLED=true \
 CONTROL_CENTER_PR_REVIEW_SBX_EXECUTABLE=sbx \
 CONTROL_CENTER_PR_REVIEW_CLAUDE_EXECUTABLE=claude \
-pnpm --filter @knpkv/control-center start
+pnpm --filter @knpkv/control-center start serve
 ```
 
 To offer both review presets, configure `CONTROL_CENTER_AGENT_PROVIDERS=codex,claude` and authenticate
@@ -282,7 +282,7 @@ CONTROL_CENTER_AGENT_OPENAI_MODEL=review-model \
 CONTROL_CENTER_PR_REVIEW_SBX_ENABLED=true \
 CONTROL_CENTER_PR_REVIEW_SBX_EXECUTABLE=sbx \
 CONTROL_CENTER_PR_REVIEW_SBX_TEMPLATE=review-template \
-pnpm --filter @knpkv/control-center start
+pnpm --filter @knpkv/control-center start serve
 ```
 
 When `CONTROL_CENTER_PR_REVIEW_SBX_ENABLED` is false or absent, the worker is disabled and no provider
@@ -463,7 +463,7 @@ CONTROL_CENTER_PUBLIC_ORIGIN=https://control.home.arpa \
 CONTROL_CENTER_ALLOWED_HOSTS=control.home.arpa \
 CONTROL_CENTER_ALLOWED_ORIGINS=https://control.home.arpa \
 CONTROL_CENTER_TRUSTED_PROXY_ADDRESSES=127.0.0.1 \
-pnpm --filter @knpkv/control-center start
+pnpm --filter @knpkv/control-center start serve
 ```
 
 Open `https://control.home.arpa` from the second machine and enter the one-time code printed by the server. Replace the example hostname with one that resolves to the server on both machines. If the local proxy connects over IPv6, trust its exact `::1` address instead of `127.0.0.1`. Never add client addresses or a subnet: forwarded headers are accepted only from the exact immediate proxy. Malformed, chained, or spoofed client-address headers fall back to the immediate peer for rate limiting.
@@ -802,6 +802,20 @@ Manual plugin sync has two independent request budgets: **2 per minute per authe
 Healthy connection creation starts its first sync on the server, with a separate **60/minute per-workspace onboarding bucket**. Creation succeeds even when that bucket is exhausted: the card shows **First sync queued** until admission. Onboarding never spends manual tokens. Drain interrupts queued admission; admitted syncs remain supervised by the server lifecycle. On restart, the server reconstructs first-sync queues for enabled synchronization-capable connections with no durable sync attempt; completed connections are not queued again. Services observes the existing resumable SSE stream rather than polling, and completion emits a portfolio invalidation after the attempt is durable. Startup synchronization retains its own existing lifecycle.
 
 HTTP 429 responses retain the typed `rate-limited` code and add the exhausted `budget` (`per-connection`, `global`, or `onboarding`), `retryAfterSeconds`, and `retryAt`, with a matching `Retry-After` header. Services names the manual budget and when to retry. Delayed onboarding does not return 429. Live clients refresh for future invalidation reasons; persisted event decoding stays strict.
+
+## Terminal sign-in
+
+Run `control-center` with no arguments to sign in. It reuses a running loopback HTTP server, or starts one in the foreground, prints a fresh sign-in URL to stdout and opens it according to the shared browser-launch policy. `control-center --no-open`, `BROWSER=none`, CI and non-interactive stdout print the URL without opening. A reused run exits successfully and leaves the server untouched. A newly started server stays alive until SIGINT/SIGTERM, then follows its scoped drain/shutdown; closing the browser tab does not stop it.
+
+Services and print-only server launches must use `control-center serve`, or `pnpm --filter @knpkv/control-center start serve`. The package's `start` script forwards arguments unchanged, so `start recover-owner` and backup commands retain their existing behavior. Existing services that run the bare binary must migrate to `serve` to avoid a reuse-and-exit restart loop.
+
+The canonical data root contains an owner-only `web/control.json` leaf. Its persisted `{origin, token}` holds the direct loopback HTTP origin and a server-private control bearer, with directory mode `0700` and file mode `0600`. Startup publishes it only after listening; scoped cleanup removes only the current listener's token. Configured data-root symlink claims retain their existing audited canonical resolution. The file, bearer and resolved filesystem pathname never enter browser projections, logs or telemetry.
+
+The bearer-authenticated `POST /control/login` uses the running server's durable database and fixed startup owner/workspace identity. It issues a 60-second, single-use owner pairing code through the ordinary digest-only pairing repository. It revokes no session and no outstanding code. A bad bearer, mismatched Origin/Host or draining server mints nothing. This authority is separate from owner-cookie browser administration and from the confirmation-gated, audited, destructive `recover-owner` command.
+
+The sign-in URL contains the one-time code in `#bootstrap_token=`. The client reads and replaces the fragment before creating its router or rendering, then submits it once in the existing `/api/v1/session/pair` body. The code never enters browser storage, HTTP request URLs, referrers, logs or telemetry. The browser initially receives a fragment-bearing navigation; replacement clears that current history entry. Manual `/pair` remains available for normal ten-minute codes and failed/expired terminal handoffs.
+
+Terminal minting is limited to loopback HTTP. TLS, trusted-proxy and insecure-LAN configurations print `sign in through <configured origin>` without probing, minting, opening or starting another server. Their existing pairing/transport restrictions stay in force. A control refusal never triggers a second server; restart an older running server without a control registration, or use an existing paired browser.
 
 ## Network exposure
 
