@@ -90,13 +90,13 @@ export const PairPage = ({
           Pair this browser
         </Text>
         <Text tone="secondary" variant="body-large">
-          Manual pairing codes expire after ten minutes. Terminal sign-in links expire after one minute.
+          Use the one-time code printed by the local Control Center server. It expires after ten minutes.
         </Text>
       </header>
       <Surface as="section" className={styles.pairCard} padding="spacious" form="grouped" tone="secondary">
         <form className={styles.pairForm} onSubmit={submit}>
           <Field
-            description="Manual codes stay in this request. Terminal sign-in links use a fragment cleared before pairing."
+            description="The code stays in this request and is never placed in a URL."
             label="Pairing code"
             required
             {...(error === undefined ? {} : { error })}
