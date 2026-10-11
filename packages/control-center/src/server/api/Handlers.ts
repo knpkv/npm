@@ -765,22 +765,21 @@ export const pluginHandlersLayer = HttpApiBuilder.group(
               ApplicationResourceNotFound: mapApplicationNotFound,
               ApplicationServiceUnavailable: mapApplicationUnavailable
             }))
-            yield* consumeManualSynchronizationTokens({
+            const admit = consumeManualSynchronizationTokens({
               workspaceId: session.workspaceId,
               pluginConnectionId: resolved.pluginConnectionId,
               peer: requestRateLimitKey(bindConfig, request)
             }).pipe(
               Effect.provideService(RateLimiter.RateLimiter, rateLimiter),
-              Effect.provideService(RequestLimitPolicy, limitPolicy),
-              Effect.catchTags({
-                RequestRateLimitExceeded: mapRequestRateLimitFailure,
-                RequestRateLimitUnavailable: mapRequestRateLimitUnavailable
-              })
+              Effect.provideService(RequestLimitPolicy, limitPolicy)
             )
-            return yield* synchronizeConnection({
+            return yield* onboarding.synchronize({
               pluginConnectionId: params.pluginConnectionId,
               workspaceId: session.workspaceId
-            }).pipe(Effect.catchTags({
+            }, admit).pipe(Effect.catchTags({
+              RequestRateLimitExceeded: mapRequestRateLimitFailure,
+              RequestRateLimitUnavailable: mapRequestRateLimitUnavailable,
+              ServerDraining: () => Effect.flatMap(serviceUnavailableApiError(), Effect.fail),
               ApplicationInvalidRequest: mapApplicationInvalidRequest,
               ApplicationRateLimited: mapApplicationRateLimited,
               ApplicationResourceNotFound: mapApplicationNotFound,
