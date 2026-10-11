@@ -63,15 +63,20 @@ for (
         expect(bounds.y + bounds.height).toBeLessThanOrEqual(padding.bottom)
         expect((await header.boundingBox())?.height).toBeLessThanOrEqual(initialHeaderHeight)
         if (contrast !== "none") {
-          await expect(mark.locator("[data-relay-chef-drawing=mark]")).toHaveCSS("display", "none")
-          const outline = await mark.locator("[data-relay-chef-drawing=contrast] > path").first().evaluate((node) => ({
+          const drawing = mark.locator(
+            `[data-relay-chef-drawing=contrast][data-relay-chef-size="${info.project.name === "phone" ? "24" : "32"}"]`
+          )
+          await expect(mark.locator("[data-relay-chef-drawing=mark]:visible")).toHaveCount(0)
+          await expect(drawing).toBeVisible()
+          const outline = await drawing.locator(":scope > g > path").first().evaluate((node) => ({
             color: getComputedStyle(node).color,
             stroke: getComputedStyle(node).stroke,
             fill: getComputedStyle(node).fill
           }))
           expect(outline.stroke).toBe(outline.color)
           expect(outline.fill).toBe("none")
-          const pupils = await mark.locator("[data-relay-chef-drawing=contrast] circle[fill]").all()
+          const pupils = await drawing.locator("circle[fill=\"currentColor\"]").all()
+          expect(pupils.length).toBeGreaterThan(0)
           for (const pupil of pupils) {
             expect(await pupil.evaluate((node) => getComputedStyle(node).fill)).toBe(outline.color)
           }
@@ -134,4 +139,25 @@ test("serves the simplified favicon separately and keeps full-bleed PNG corners 
     return readings
   })
   expect(corners).toEqual([[255, 255, 255, 255], [255, 255, 255, 255]])
+})
+
+test("switches pixel-sized drawings at the same breakpoint as the mark size", async ({ page }) => {
+  await page.goto("/")
+  const header = page.locator(".superapp-header .relay-chef-mark")
+  const sidebar = page.locator(".superapp-sidebar .relay-chef-mark")
+  for (const width of [639, 641]) {
+    await page.setViewportSize({ width, height: 900 })
+    const size = width === 639 ? 24 : 32
+    const visible = header.locator("[data-relay-chef-drawing=\"mark\"]:visible")
+    await expect(visible).toHaveCount(1)
+    await expect(visible).toHaveAttribute("data-relay-chef-size", String(size))
+    expect((await header.boundingBox())?.width).toBe(size)
+    // The hidden phone sidebar still owns the 32px drawing; it never switches to phone art.
+    const sidebarDrawing = await sidebar.locator("[data-relay-chef-drawing=\"mark\"][data-relay-chef-size=\"32\"]")
+      .evaluate((node) => getComputedStyle(node).display)
+    expect(sidebarDrawing).toBe("inline")
+    for (const drawing of await sidebar.locator("[data-relay-chef-size=\"24\"]").all()) {
+      await expect(drawing).toHaveCSS("display", "none")
+    }
+  }
 })
