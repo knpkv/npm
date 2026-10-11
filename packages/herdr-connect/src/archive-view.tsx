@@ -17,8 +17,19 @@ import {
 } from "./archive-model.js"
 import type { ConnectAtoms } from "./client.js"
 import { Creature } from "./creature.js"
-import { ConnectDirectorySwitch, connectDirectoryHref, navigateConnectDirectory } from "./directory-view.js"
-import { connectArchivePageMaxRecords, type ConnectArchiveCursor, type ConnectArchivePage } from "./model.js"
+import {
+  ConnectDirectorySwitch,
+  connectArchivedParentHref,
+  connectDirectoryHref,
+  navigateConnectDirectory,
+  syncConnectDirectoryHistory
+} from "./directory-view.js"
+import {
+  connectArchivePageMaxRecords,
+  connectArchiveWindowDays,
+  type ConnectArchiveCursor,
+  type ConnectArchivePage
+} from "./model.js"
 
 type ArchiveState =
   | { readonly _tag: "loading"; readonly page: ConnectArchivePage | null }
@@ -102,8 +113,17 @@ export const ConnectArchiveSurface = ({
   const archivedParentHref =
     archivedParent === undefined
       ? null
-      : `${connectDirectoryHref("archived")}&closed=${encodeURIComponent(archivedAgentKey(archivedParent))}`
-  const closeStage = (): void => setSelection(null)
+      : connectArchivedParentHref(
+          new URL(connectDirectoryHref("archived"), window.location.href),
+          archivedAgentKey(archivedParent)
+        )
+  const closeStage = (): void => {
+    setSelection(null)
+    const url = new URL(window.location.href)
+    if (!url.searchParams.has("closed")) return
+    url.searchParams.delete("closed")
+    syncConnectDirectoryHistory(`${url.pathname}${url.search}${url.hash}`)
+  }
   const now = Date.now()
   const failed =
     state._tag === "failed" ? (
@@ -162,7 +182,9 @@ export const ConnectArchiveSurface = ({
                 failed
               )
             ) : agents.length === 0 ? (
-              <div className="connect-archive-empty">No closed agents in the last 90 days</div>
+              <div className="connect-archive-empty">
+                No closed agents in the last {String(connectArchiveWindowDays)} days
+              </div>
             ) : (
               <>
                 <label className="connect-search connect-archive-search">

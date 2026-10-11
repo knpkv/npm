@@ -1,7 +1,8 @@
 import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it, vi } from "@effect/vitest"
-import { Effect, FileSystem, Path, Result, Schema } from "effect"
+import { Clock, Effect, FileSystem, Path, Result, Schema } from "effect"
 import { HttpClient, HttpClientResponse } from "effect/http"
+import { TestClock } from "effect/testing"
 import { DatabaseSync } from "node:sqlite"
 import { AgentArchiveStore, ConnectArchiveObservation } from "../src/archive-store.js"
 import { fleetConnectAgents } from "../src/directory.js"
@@ -372,6 +373,39 @@ describe("closed agent archive", () => {
         )
         expect(new Set(ids).size).toBe(67)
         expect(ids.slice(1)).toEqual(agents.map(({ id }) => id))
+      }).pipe(Effect.scoped))
+
+    it.effect("returns only closures in the inclusive 90-day window on initial and cursor pages", () =>
+      Effect.gen(function*() {
+        const store = yield* openStore()
+        const day = 86_400_000
+        const now = 100 * day
+        yield* Effect.acquireRelease(Clock.currentTimeMillis, (original) => TestClock.setTime(original))
+        yield* TestClock.setTime(now)
+        for (
+          const { days, id } of [
+            { id: "agent-old", days: 91 },
+            { id: "agent-boundary", days: 90 },
+            { id: "agent-recent", days: 89 }
+          ]
+        ) {
+          const closedAt = now - days * day
+          yield* observe(store, closedAt - 300_002, [agent(id)])
+          yield* observe(store, closedAt - 300_001, [])
+          yield* observe(store, closedAt, [])
+        }
+        const first = yield* store.page()
+        expect(first.agents.map(({ agentId }) => agentId)).toEqual(["agent-recent", "agent-boundary"])
+        expect(first.nextCursor).toBeNull()
+        const second = yield* store.page({ host: "host-a", agentId: "agent-recent", closedAt: now - 89 * day })
+        expect(second.agents.map(({ agentId }) => agentId)).toEqual(["agent-boundary"])
+        expect(second.nextCursor).toBeNull()
+        const expired = yield* store.page({ host: "host-a", agentId: "agent-boundary", closedAt: now - 90 * day })
+        expect(expired.agents).toEqual([])
+        expect(expired.nextCursor).toBeNull()
+        const olderCursor = yield* store.page({ host: "host-a", agentId: "agent-before", closedAt: now - 91 * day })
+        expect(olderCursor.agents).toEqual([])
+        expect(olderCursor.nextCursor).toBeNull()
       }).pipe(Effect.scoped))
 
     it.effect("retains records across reopening without age pruning", () =>

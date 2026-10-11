@@ -29,11 +29,23 @@ export const connectDirectoryHref = (
   return `${url.pathname}${url.search}${url.hash}`
 }
 
+/** Link a loaded archive closure while preserving the directory's owning module and fragment. */
+export const connectArchivedParentHref = (directory: URL, closure: string): string => {
+  const url = new URL(directory.href)
+  url.searchParams.set("closed", closure)
+  return `${url.pathname}${url.search}${url.hash}`
+}
+
 /** Unmodified links participate in shared Back/Forward history; modifier clicks remain native links. */
 export const navigateConnectDirectory = (event: MouseEvent<HTMLAnchorElement>): void => {
   if (event.button !== 0 || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
   event.preventDefault()
-  window.history.pushState(null, "", event.currentTarget.href)
+  syncConnectDirectoryHistory(event.currentTarget.href)
+}
+
+/** Notify both the directory subscription and its owning hub after a URL-addressable action. */
+export const syncConnectDirectoryHistory = (href: string): void => {
+  window.history.pushState(null, "", href)
   window.dispatchEvent(new PopStateEvent("popstate"))
 }
 

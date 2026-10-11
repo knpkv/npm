@@ -51,7 +51,17 @@ window.fetch = async (input) => {
     return new Response(agentsBody, { headers: { "content-type": "application/json" } })
   if (path === "/v1/connect/archive")
     return Response.json({
-      agents: [{ ...reviewer, agentId: reviewer.id, firstSeenAt: 1, closedAt: 2 }],
+      agents: [
+        { ...reviewer, agentId: reviewer.id, firstSeenAt: 1, closedAt: 2 },
+        {
+          ...reviewer,
+          agentId: "agent-child-review",
+          name: "Child review",
+          firstSeenAt: 1,
+          closedAt: 2,
+          relationship: { parentAgentId: reviewer.id, relation: "review" }
+        }
+      ],
       nextCursor: null
     })
   if (path.startsWith("/v1/work")) return new Response(emptyWork, { headers: { "content-type": "application/json" } })
@@ -83,6 +93,51 @@ const settle = async (milliseconds = 0): Promise<void> => {
 const stageOpen = (): boolean => document.querySelector("[role='dialog']") !== null
 
 describe("Connect stage across polls", () => {
+  it("clears the URL selection and notifies its history owner when a linked archived stage closes", async () => {
+    agentsBody = listed([])
+    window.history.replaceState(null, "", "/?module=connect&embedded&view=archived#details")
+    const host = document.createElement("div")
+    document.body.append(host)
+    const root = createRoot(host)
+    roots.push(root)
+    await act(async () =>
+      root.render(
+        <RegistryProvider>
+          <ConnectSurface atoms={makeConnectAtoms()} />
+        </RegistryProvider>
+      )
+    )
+    await settle()
+    const child = [...host.querySelectorAll<HTMLButtonElement>(".connect-archive-agent")].find(
+      (row) => row.querySelector("strong")?.textContent === "Child review"
+    )
+    expect(child).toBeDefined()
+    await act(async () => child?.click())
+    await settle()
+    const parent = document.querySelector<HTMLAnchorElement>(".connect-archive-stage a")
+    expect(parent).not.toBeNull()
+    await act(async () => parent?.click())
+    await settle()
+    expect(new URL(window.location.href).searchParams.get("closed")).toBe('["SER8","agent-reviewer",2]')
+    const changed = vi.fn()
+    window.addEventListener("popstate", changed)
+    try {
+      const close = document.querySelector<HTMLButtonElement>(".connect-archive-stage button[aria-label='Close']")
+      expect(close).not.toBeNull()
+      await act(async () => close?.click())
+      await settle()
+      expect(stageOpen()).toBe(false)
+      const target = new URL(window.location.href)
+      expect(target.searchParams.has("closed")).toBe(false)
+      expect(target.searchParams.get("view")).toBe("archived")
+      expect(target.searchParams.get("module")).toBe("connect")
+      expect(target.searchParams.has("embedded")).toBe(true)
+      expect(target.hash).toBe("#details")
+      expect(changed).toHaveBeenCalledOnce()
+    } finally {
+      window.removeEventListener("popstate", changed)
+    }
+  })
   it("keeps archived closures out of the application's live-stage heartbeat observer", async () => {
     agentsBody = listed([reviewer])
     window.history.replaceState(null, "", "/?view=archived")

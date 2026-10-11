@@ -1,5 +1,5 @@
 import { openPrivateSqlite, type PrivateDatabaseError, type PrivateSqlite } from "@knpkv/herdr-fleet/sqlite"
-import { Effect, Schema, Semaphore } from "effect"
+import { Clock, Effect, Schema, Semaphore } from "effect"
 import type { DatabaseSync, SQLOutputValue } from "node:sqlite"
 import { ConnectArchiveStoreError } from "./errors.js"
 import { initializePosts } from "./internal/post-database.js"
@@ -9,6 +9,7 @@ import {
   ConnectArchiveCursor,
   ConnectArchivePage,
   connectArchivePageMaxRecords,
+  connectArchiveWindowDays,
   LocalConnectAgents
 } from "./model.js"
 
@@ -228,7 +229,7 @@ export class AgentArchiveStore {
     }))
   })
 
-  /** Newest closure first, then host and stable identity; the cursor names the last returned row. */
+  /** Page the current archive window, newest closure first; the cursor names the last returned row. */
   readonly page = Effect.fn("AgentArchiveStore.page")(function*(
     this: AgentArchiveStore,
     input: ConnectArchiveCursor | null = null
@@ -236,6 +237,7 @@ export class AgentArchiveStore {
     const cursor = yield* Schema.decodeUnknownEffect(Schema.NullOr(ConnectArchiveCursor))(input).pipe(
       Effect.mapError(failWith("page.cursor"))
     )
+    const cutoff = (yield* Clock.currentTimeMillis) - connectArchiveWindowDays * 86_400_000
     return yield* this.#transactions.withPermits(1)(Effect.try({
       try: () => {
         const columns =
@@ -243,13 +245,16 @@ export class AgentArchiveStore {
         const rows = cursor === null
           ? this.#database.prepare(
             `SELECT ${columns} FROM connect_agent_archive
+             WHERE closed_at >= ?
              ORDER BY closed_at DESC, host, agent_id LIMIT ?`
-          ).all(connectArchivePageMaxRecords + 1)
+          ).all(cutoff, connectArchivePageMaxRecords + 1)
           : this.#database.prepare(
             `SELECT ${columns} FROM connect_agent_archive
-             WHERE closed_at < ? OR (closed_at = ? AND (host > ? OR (host = ? AND agent_id > ?)))
+             WHERE closed_at >= ? AND
+               (closed_at < ? OR (closed_at = ? AND (host > ? OR (host = ? AND agent_id > ?))))
              ORDER BY closed_at DESC, host, agent_id LIMIT ?`
           ).all(
+            cutoff,
             cursor.closedAt,
             cursor.closedAt,
             cursor.host,

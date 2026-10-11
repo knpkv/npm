@@ -1,6 +1,7 @@
 /** Archived records are read through the real HTTP boundary and rendered without active-agent actions. */
 import { expect, type Locator, type Page, test } from "@playwright/test"
 import { Schema } from "effect"
+import { strict as assert } from "node:assert"
 import {
   ArchivedConnectAgent,
   ConnectAgent,
@@ -125,8 +126,8 @@ const prepare = async (page: Page, width = 390, theme = "light") => {
     })
   })
 }
-const mount = async (page: Page, theme = "light", archived = true) => {
-  await page.goto(archived ? "/?embedded&view=archived" : "/?embedded")
+const mount = async (page: Page, theme = "light", archived = true, fragment = "") => {
+  await page.goto(`${archived ? "/?embedded&view=archived" : "/?embedded"}${fragment}`)
   await page.locator("body").evaluate((body, value) => body.setAttribute("data-rly-theme", value), theme)
   await page.locator("#fleet-connect-root").evaluate((root) => root.classList.add("fleet-shell-main"))
   await page.addStyleTag({
@@ -258,43 +259,64 @@ test("separate closures and a live identity remain distinct; last words render a
   await expect(page.getByRole("button", { name: "Open terminal", exact: true })).toHaveCount(0)
 })
 
-test("only loaded parents link to a read-only stage; malformed archive data shows Retry", async ({ page }) => {
-  await prepare(page)
-  await archiveRoute(
-    page,
-    pageOf([
-      Schema.decodeUnknownSync(ArchivedConnectAgent)({
-        ...reviewed,
-        relationship: { parentAgentId: "agent-missing-parent", relation: "review" }
-      }),
-      Schema.decodeUnknownSync(ArchivedConnectAgent)({
-        ...reviewed,
-        agentId: "agent-child-review",
-        name: "child-review",
-        relationship: { parentAgentId: reviewed.agentId, relation: "review" }
-      })
-    ])
-  )
-  await mount(page)
-  await rowNamed(page, "rev-auth").click()
-  await expect(page.getByRole("dialog").getByRole("link")).toHaveCount(0)
-  await expect(page.getByRole("dialog")).toContainText("agent-missing-parent")
-  await page.keyboard.press("Escape")
-  await rowNamed(page, "child-review").click()
-  await page.getByRole("dialog").getByRole("link", { name: "rev-auth", exact: true }).click()
-  await expect(page.getByRole("dialog")).toContainText("rev-auth")
-  await expect(page.getByRole("dialog").getByRole("link")).toHaveCount(0)
-  await expect(page.getByRole("button", { name: "Open terminal", exact: true })).toHaveCount(0)
-  await page.keyboard.press("Escape")
-  await page.route(
-    "**/v1/connect/archive*",
-    (route) => route.fulfill({ json: { agents: [{ name: "broken" }], nextCursor: null } })
-  )
-  await page.reload()
-  await expect(page.getByText("Couldn't load archived agents", { exact: true })).toBeVisible()
-  await expect(page.getByRole("button", { name: "Retry", exact: true })).toBeVisible()
-  await expect(page.getByText("No closed agents in the last 90 days", { exact: true })).toHaveCount(0)
-})
+for (const fragment of ["", "#details"]) {
+  test(`only loaded parents link to a read-only stage; malformed archive data shows Retry (${fragment === "" ? "no fragment" : fragment})`, async ({ page }) => {
+    await prepare(page)
+    await archiveRoute(
+      page,
+      pageOf([
+        Schema.decodeUnknownSync(ArchivedConnectAgent)({
+          ...reviewed,
+          relationship: { parentAgentId: "agent-missing-parent", relation: "review" }
+        }),
+        Schema.decodeUnknownSync(ArchivedConnectAgent)({
+          ...reviewed,
+          agentId: "agent-child-review",
+          name: "child-review",
+          relationship: { parentAgentId: reviewed.agentId, relation: "review" }
+        })
+      ])
+    )
+    await mount(page, "light", true, fragment)
+    await rowNamed(page, "rev-auth").click()
+    await expect(page.getByRole("dialog").getByRole("link")).toHaveCount(0)
+    await expect(page.getByRole("dialog")).toContainText("agent-missing-parent")
+    await page.keyboard.press("Escape")
+    await rowNamed(page, "child-review").click()
+    const parent = page.getByRole("dialog").getByRole("link", { name: "rev-auth", exact: true })
+    const href = await parent.getAttribute("href")
+    assert(href !== null, "Loaded parent has no link target")
+    const target = new URL(href, page.url())
+    expect(target.searchParams.get("closed")).toBe(JSON.stringify([reviewed.host, reviewed.agentId, reviewed.closedAt]))
+    expect(target.hash).toBe(fragment)
+    await parent.click()
+    await expect(page.getByRole("dialog")).toHaveAccessibleName("rev-auth")
+    await expect(page.getByRole("dialog").getByRole("link")).toHaveCount(0)
+    await expect(page.getByRole("button", { name: "Open terminal", exact: true })).toHaveCount(0)
+    await page.keyboard.press("Escape")
+    await expect(page.getByRole("dialog")).toHaveCount(0)
+    expect(new URL(page.url()).searchParams.has("closed")).toBe(false)
+    expect(new URL(page.url()).hash).toBe(fragment)
+    await page.reload()
+    await expect(rows(page)).toHaveCount(2)
+    await expect(page.getByRole("dialog")).toHaveCount(0)
+    // Closing is a directory history entry: Back can revisit the parent; Forward closes it again.
+    await page.goBack()
+    await expect(page.getByRole("dialog")).toHaveAccessibleName("rev-auth")
+    await page.reload()
+    await expect(page.getByRole("dialog")).toHaveAccessibleName("rev-auth")
+    await page.goForward()
+    await expect(page.getByRole("dialog")).toHaveCount(0)
+    await page.route(
+      "**/v1/connect/archive*",
+      (route) => route.fulfill({ json: { agents: [{ name: "broken" }], nextCursor: null } })
+    )
+    await page.reload()
+    await expect(page.getByText("Couldn't load archived agents", { exact: true })).toBeVisible()
+    await expect(page.getByRole("button", { name: "Retry", exact: true })).toBeVisible()
+    await expect(page.getByText("No closed agents in the last 90 days", { exact: true })).toHaveCount(0)
+  })
+}
 
 const frames = ["A1", "A2", "A3", "A3-v2", "A4", "A5", "A6"]
 for (const width of [390, 1280]) {

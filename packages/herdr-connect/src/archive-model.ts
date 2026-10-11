@@ -1,4 +1,4 @@
-import type { ArchivedConnectAgent, ConnectArchivePage } from "./model.js"
+import { type ArchivedConnectAgent, type ConnectArchivePage, connectArchiveWindowDays } from "./model.js"
 
 /** A reopening shares the live ID; each retained closure has its own identity. */
 export const archivedAgentKey = (agent: ArchivedConnectAgent): string =>
@@ -16,7 +16,7 @@ export const appendArchivePage = (loaded: ConnectArchivePage | null, next: Conne
 export const archiveCountCopy = (page: ConnectArchivePage): string =>
   `${String(page.agents.length)}${page.nextCursor === null ? "" : "+"} closed ${
     page.agents.length === 1 && page.nextCursor === null ? "agent" : "agents"
-  } in the last 90 days`
+  } in the last ${String(connectArchiveWindowDays)} days`
 
 /** Search only the loaded record fields promised by the directory, excluding words and close state. */
 export const archiveMatchesQuery = (agent: ArchivedConnectAgent, query: string): boolean => {

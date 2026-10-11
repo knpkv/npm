@@ -107,6 +107,8 @@ export const ConnectArchiveCursor = Schema.Struct({
 })
 export type ConnectArchiveCursor = typeof ConnectArchiveCursor.Type
 
+/** Closed-directory pages include closures at or after this many days before the server clock. */
+export const connectArchiveWindowDays = 90
 export const connectArchivePageMaxRecords = 64
 export const ConnectArchivePage = Schema.Struct({
   agents: Schema.Array(ArchivedConnectAgent).check(Schema.isMaxLength(connectArchivePageMaxRecords)),
