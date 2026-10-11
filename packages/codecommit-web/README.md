@@ -3,6 +3,19 @@
 The browser view of the CodeCommit review queue: pull requests that need a decision, their diffs and
 approvers, Relay reviews, and sandboxes.
 
+## Browser views
+
+Import presentation components and their props from `@knpkv/codecommit-web/views`, and load
+`@knpkv/codecommit-web/views/style.css` once. The browser entry excludes the application's atoms,
+owner-session bootstrap, and server entry. React, React DOM, React Router, and Rly are optional
+peers; browser consumers supply them and the router/provider contexts their views use.
+
+`SettingsSandboxView` requires `renderConfigUnavailable`. Preview callers can render
+`ConfigUnavailableView` with an explicit `path`, `connectionDetail`, and `onRetry`; the application
+container supplies its existing authenticated failure panel. A non-null `connectionDetail` means
+the owner session is unavailable. Only supply a config path obtained through the authenticated API;
+never put provider credentials or server-private locators in preview fixtures.
+
 ## Start it
 
 You need [Bun](https://bun.sh) 1.3 or later and an AWS CLI profile that can read CodeCommit.

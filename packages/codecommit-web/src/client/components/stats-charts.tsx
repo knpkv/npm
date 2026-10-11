@@ -10,17 +10,14 @@ export function formatMs(ms: number | null): string {
   return DateUtils.formatDuration(ms)
 }
 
-export function KPICard({
-  icon: Icon,
-  label,
-  onClick,
-  value
-}: {
+export interface KPICardProps {
   label: string
   value: string | number
   icon: React.ComponentType<{ className?: string }>
   onClick?: () => void
-}) {
+}
+
+export function KPICard({ icon: Icon, label, onClick, value }: KPICardProps) {
   return (
     <Card
       className={onClick !== undefined ? "cursor-pointer transition-colors hover:bg-accent/50" : undefined}
@@ -87,19 +84,15 @@ function RankingRow({
   )
 }
 
-export function RankingChart({
-  data,
-  labelKey,
-  onItemClick,
-  title,
-  valueKey
-}: {
+export interface RankingChartProps {
   data: ReadonlyArray<Record<string, Schema.Json>>
   labelKey: string
   valueKey: string
   title: string
   onItemClick?: (label: string) => void
-}) {
+}
+
+export function RankingChart({ data, labelKey, onItemClick, title, valueKey }: RankingChartProps) {
   const max = data.reduce((m, d) => Math.max(m, Number(d[valueKey]) || 0), 0)
   return (
     <Card>
@@ -133,13 +126,12 @@ export function RankingChart({
   )
 }
 
-export function SizeDistributionChart({
-  dist,
-  onBarClick
-}: {
+export interface SizeDistributionChartProps {
   dist: WeeklyStats["prSizeDistribution"]
   onBarClick?: (size: string) => void
-}) {
+}
+
+export function SizeDistributionChart({ dist, onBarClick }: SizeDistributionChartProps) {
   const chartData = [
     { key: "small", label: "S", sub: "<5 files", count: dist.small },
     { key: "medium", label: "M", sub: "5–15", count: dist.medium },
@@ -186,13 +178,12 @@ export function SizeDistributionChart({
   )
 }
 
-export function MostActivePRs({
-  onPRClick,
-  prs
-}: {
+export interface MostActivePRsProps {
   prs: WeeklyStats["mostActivePRs"]
   onPRClick: (awsAccountId: string, id: string, repositoryName: string, accountRegion: string) => void
-}) {
+}
+
+export function MostActivePRs({ onPRClick, prs }: MostActivePRsProps) {
   if (prs.length === 0) return null
   return (
     <Card>
@@ -222,13 +213,12 @@ export function MostActivePRs({
   )
 }
 
-export function StalePRs({
-  onPRClick,
-  prs
-}: {
+export interface StalePRsProps {
   prs: WeeklyStats["stalePRs"]
   onPRClick: (awsAccountId: string, id: string, repositoryName: string, accountRegion: string) => void
-}) {
+}
+
+export function StalePRs({ onPRClick, prs }: StalePRsProps) {
   if (prs.length === 0) return null
   return (
     <Card>
@@ -257,7 +247,11 @@ export function StalePRs({
   )
 }
 
-export function HealthCard({ data }: { data: WeeklyStats }) {
+export interface HealthCardProps {
+  data: WeeklyStats
+}
+
+export function HealthCard({ data }: HealthCardProps) {
   return (
     <Card>
       <CardHeader className="pb-2">

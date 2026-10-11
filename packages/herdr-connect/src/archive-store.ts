@@ -2,6 +2,7 @@ import { openPrivateSqlite, type PrivateDatabaseError, type PrivateSqlite } from
 import { Effect, Schema, Semaphore } from "effect"
 import type { DatabaseSync, SQLOutputValue } from "node:sqlite"
 import { ConnectArchiveStoreError } from "./errors.js"
+import { initializePosts } from "./internal/post-database.js"
 import {
   ArchivedConnectAgent,
   ConnectAgent,
@@ -35,7 +36,9 @@ const ArchiveRow = Schema.Struct({
   first_seen_at: Schema.Number,
   closed_at: Schema.Number,
   parent_agent_id: Schema.NullOr(Schema.String),
-  relation: Schema.NullOr(Schema.String)
+  relation: Schema.NullOr(Schema.String),
+  last_words_text: Schema.NullOr(Schema.String),
+  last_words_at: Schema.NullOr(Schema.Number)
 })
 const HostRow = Schema.Struct({ observed_at: Schema.Number })
 const failWith = (operation: string) => (cause: unknown) => new ConnectArchiveStoreError({ operation, cause })
@@ -54,10 +57,14 @@ const decodeArchiveRow = (row: Readonly<Record<string, SQLOutputValue>>): Archiv
     firstSeenAt: decoded.first_seen_at,
     closedAt: decoded.closed_at
   }
+  const withWords = decoded.last_words_text === null ? agent : {
+    ...agent,
+    lastWords: { text: decoded.last_words_text, createdAt: decoded.last_words_at }
+  }
   return Schema.decodeUnknownSync(ArchivedConnectAgent)(
     decoded.parent_agent_id === null && decoded.relation === null
-      ? agent
-      : { ...agent, relationship: { parentAgentId: decoded.parent_agent_id, relation: decoded.relation } }
+      ? withWords
+      : { ...withWords, relationship: { parentAgentId: decoded.parent_agent_id, relation: decoded.relation } }
   )
 }
 
@@ -119,10 +126,14 @@ const recordObservation = (
   if (!observation.complete) return
   database.prepare(
     `INSERT INTO connect_agent_archive
-       (host, agent_id, name, kind, work, state, first_seen_at, closed_at, parent_agent_id, relation)
-     SELECT host, agent_id, name, kind, work, state, first_seen_at, ?, parent_agent_id, relation
-     FROM connect_archive_observations
-     WHERE host = ? AND missing_reads >= 2 AND missing_since <= ?
+       (host, agent_id, name, kind, work, state, first_seen_at, closed_at, parent_agent_id, relation, last_words_text, last_words_at)
+     SELECT o.host, o.agent_id, o.name, o.kind, o.work, o.state, o.first_seen_at, ?, o.parent_agent_id, o.relation,
+       p.text, p.created_at
+     FROM connect_archive_observations o
+     LEFT JOIN connect_posts p ON p.sequence = (
+       SELECT MAX(sequence) FROM connect_posts WHERE host = o.host AND agent_id = o.agent_id
+     )
+     WHERE o.host = ? AND o.missing_reads >= 2 AND o.missing_since <= ?
      ON CONFLICT(host, agent_id) DO NOTHING`
   ).run(observation.observedAt, host, observation.observedAt - connectArchiveClosureDelayMillis)
 }
@@ -146,7 +157,8 @@ export class AgentArchiveStore {
 
   static readonly open = Effect.fn("AgentArchiveStore.open")(function*(path: string) {
     const opened = yield* openPrivateSqlite(path, {
-      initialize: (database) =>
+      initialize: (database) => {
+        initializePosts(database)
         database.exec(`
         CREATE TABLE IF NOT EXISTS connect_archive_hosts (
           host TEXT COLLATE NOCASE PRIMARY KEY, observed_at INTEGER NOT NULL
@@ -169,6 +181,16 @@ export class AgentArchiveStore {
           ON connect_agent_archive (closed_at DESC, host, agent_id);
         UPDATE connect_archive_observations SET missing_since = NULL, missing_reads = 0;
       `)
+        const columns = Schema.decodeUnknownSync(Schema.Array(Schema.Struct({ name: Schema.String })))(
+          database.prepare("PRAGMA table_info(connect_agent_archive)").all()
+        )
+        if (!columns.some(({ name }) => name === "last_words_text")) {
+          database.exec("ALTER TABLE connect_agent_archive ADD COLUMN last_words_text TEXT")
+        }
+        if (!columns.some(({ name }) => name === "last_words_at")) {
+          database.exec("ALTER TABLE connect_agent_archive ADD COLUMN last_words_at INTEGER")
+        }
+      }
     }).pipe(Effect.mapError(fromPrivateDatabaseError))
     const transactions = yield* Semaphore.make(1)
     return new AgentArchiveStore(path, transactions, opened)
@@ -216,7 +238,8 @@ export class AgentArchiveStore {
     )
     return yield* this.#transactions.withPermits(1)(Effect.try({
       try: () => {
-        const columns = "host, agent_id, name, kind, work, state, first_seen_at, closed_at, parent_agent_id, relation"
+        const columns =
+          "host, agent_id, name, kind, work, state, first_seen_at, closed_at, parent_agent_id, relation, last_words_text, last_words_at"
         const rows = cursor === null
           ? this.#database.prepare(
             `SELECT ${columns} FROM connect_agent_archive

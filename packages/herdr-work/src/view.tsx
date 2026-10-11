@@ -1062,6 +1062,19 @@ export const WorkBoard = ({
   const ordered = triage.rows.map((row) => row.goal)
   // Filters match what each row shows: the observed state where there is one.
   const filteredGoals = statusFilter === "all" ? ordered : ordered.filter((goal) => shownOf(goal) === statusFilter)
+  const terminalFilter = statusFilter === "completed" || statusFilter === "deployed" || statusFilter === "abandoned"
+  const filteredReadCut =
+    statusFilter === "all"
+      ? ""
+      : [
+          (snapshot.goalsOmitted ?? 0) > 0 ? `${snapshot.goalsOmitted} more not in this read` : null,
+          terminalFilter && (snapshot.finishedOmitted ?? 0) > 0
+            ? `${snapshot.finishedOmitted} older finished goals not shown`
+            : null
+        ]
+          .filter((cut) => cut !== null)
+          .join(" · ")
+  const filteredReadHasOmissions = filteredReadCut !== ""
   const selectedFilteredGoalIndex = filteredGoals.findIndex(({ id }) => id === selectedId)
   const selected = filteredGoals.find(({ id }) => id === selectedId) ?? null
   const visibleGoalStart =
@@ -1110,7 +1123,7 @@ export const WorkBoard = ({
       goal.owner.name === "Unassigned"
         ? `Unassigned · ${goal.repository.repository}`
         : terminal
-          ? `${agentName} · ${shown === "abandoned" ? "" : goal.delivery === "merged" || pr?.state === "merged" ? "Merged · " : "Done · "}${displayPresentation[shown].label} ${ageOf(pr?.closedAt ?? goal.updatedAt, snapshot.asOf)}`
+          ? `${agentName} · ${shown === "abandoned" ? "" : goal.delivery === "merged" || pr?.state === "merged" ? "Merged · " : "Done · "}${displayPresentation[shown].label} ${ageOf(workGoalFinishedAt(goal, observed), snapshot.asOf)}`
           : `${agentName}${host === undefined ? "" : ` on ${host}`} · ${stage}${blockersFor(goal).length === 0 || open.length > 0 ? "" : ` · ${blockersFor(goal)[0]?.summary ?? "Blocked"}`}`
     const hasCaption = open.length > 0 || observed?.stale === true || observed?.unknown != null
     const content = (
@@ -1438,10 +1451,12 @@ export const WorkBoard = ({
           )}
           <Region
             actions={
-              filteredGoals.length === 0 ? undefined : (
+              filteredGoals.length === 0 && !filteredReadHasOmissions ? undefined : (
                 <Text aria-live="polite" tone="secondary" variant="meta">
                   Showing {visibleGoals.length} of{" "}
-                  {filteredGoals.length + (statusFilter === "all" ? (snapshot.goalsOmitted ?? 0) : 0)} goals
+                  {filteredGoals.length + (statusFilter === "all" ? (snapshot.goalsOmitted ?? 0) : 0)}{" "}
+                  {filteredReadHasOmissions ? "retained goals" : "goals"}
+                  {filteredReadHasOmissions ? ` · ${filteredReadCut}` : null}
                 </Text>
               )
             }
@@ -1449,15 +1464,21 @@ export const WorkBoard = ({
             count={
               statusFilter === "all"
                 ? filteredGoals.length + (snapshot.goalsOmitted ?? 0)
-                : filteredGoals.length === 0
-                  ? `0 of ${snapshot.goals.length + (snapshot.goalsOmitted ?? 0)}`
-                  : filteredGoals.length
+                : filteredReadHasOmissions
+                  ? `${filteredGoals.length} retained · ${filteredReadCut}`
+                  : filteredGoals.length === 0
+                    ? `0 of ${snapshot.goals.length}`
+                    : filteredGoals.length
             }
             title="Goals"
           >
             {filteredGoals.length === 0 ? (
               <div className="work-filter-empty">
-                <Text tone="secondary">No goals match this status.</Text>
+                <Text tone="secondary">
+                  {filteredReadHasOmissions
+                    ? "No goals match this status in this read."
+                    : "No goals match this status."}
+                </Text>
                 {navigation === undefined ? (
                   <Button onClick={() => setStatusFilter("all")} variant="secondary">
                     Show all

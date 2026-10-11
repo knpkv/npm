@@ -6,31 +6,10 @@
  * @module
  */
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react"
-import { Button, StatePanel } from "@knpkv/rly/primitives"
 import * as AsyncResult from "effect/reactivity/AsyncResult"
 import { configPathQueryAtom, configQueryAtom } from "../atoms/app.js"
 import { connectionDetail, streamConnectionAtom } from "../connection.js"
-
-/** A failed read with its cause in words and a button that reads it again. */
-export function LoadFailed({
-  description,
-  onRetry,
-  title
-}: {
-  readonly description: string
-  readonly onRetry: () => void
-  readonly title: string
-}) {
-  return (
-    <StatePanel
-      action={<Button onClick={onRetry}>Try again</Button>}
-      announce="polite"
-      description={description}
-      title={title}
-      tone="critical"
-    />
-  )
-}
+import { ConfigUnavailableView } from "./config-unavailable-view.js"
 
 /**
  * The settings tabs' state when the server's config could not be read; names the file when the server
@@ -41,22 +20,11 @@ export function ConfigUnavailable() {
   const retry = useAtomRefresh(configQueryAtom)
   const path = useAtomValue(configPathQueryAtom)
   const connection = useAtomValue(streamConnectionAtom)
-  const file = AsyncResult.isSuccess(path) ? path.value.path : "its config file"
-  if (connection._tag === "Unauthenticated") {
-    return (
-      <StatePanel
-        announce="polite"
-        description={connectionDetail(connection) ?? ""}
-        title="This browser isn't signed in"
-        tone="caution"
-      />
-    )
-  }
   return (
-    <LoadFailed
-      description={`The CodeCommit server did not return its settings. If it is running, check ${file}, then try again.`}
+    <ConfigUnavailableView
+      connectionDetail={connection._tag === "Unauthenticated" ? (connectionDetail(connection) ?? "") : null}
       onRetry={retry}
-      title="Settings unavailable"
+      path={AsyncResult.isSuccess(path) ? path.value.path : null}
     />
   )
 }

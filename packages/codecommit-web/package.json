@@ -1,6 +1,6 @@
 {
   "name": "@knpkv/codecommit-web",
-  "version": "0.30.2",
+  "version": "0.30.3",
   "description": "Web server and frontend for CodeCommit PR browser",
   "type": "module",
   "main": "dist/index.js",
@@ -8,7 +8,18 @@
   "publishConfig": {
     "access": "public",
     "main": "dist/index.js",
-    "types": "dist/dts/index.d.ts"
+    "types": "dist/dts/index.d.ts",
+    "exports": {
+      ".": {
+        "types": "./dist/dts/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "./views": {
+        "types": "./dist/dts/views.d.ts",
+        "default": "./dist/views/index.js"
+      },
+      "./views/style.css": "./dist/views/style.css"
+    }
   },
   "files": [
     "dist"
@@ -18,10 +29,10 @@
     "predev": "pnpm --filter @knpkv/browser-pairing build && pnpm --filter \"@knpkv/relay-product...\" --filter \"@knpkv/relay...\" build && pnpm --filter \"@knpkv/review...\" build && pnpm build",
     "prestart": "pnpm --filter @knpkv/browser-pairing build && pnpm --filter \"@knpkv/relay-product...\" --filter \"@knpkv/relay...\" build && pnpm --filter \"@knpkv/review...\" build && pnpm build",
     "dev": "tsc -b ../codecommit-core && node ../../scripts/require-built.mjs @knpkv/codecommit-core && (tsc -b ../codecommit-core --watch --preserveWatchOutput & CODECOMMIT_WEB_PUBLIC_ORIGIN=http://localhost:5173 bun run --watch src/main.ts & vite --clearScreen false)",
-    "prepack": "pnpm --filter @knpkv/browser-pairing build && tsc -b && vite build",
+    "prepack": "pnpm --filter @knpkv/browser-pairing build && tsc -b && vite build && vite build -c vite.views.config.ts",
     "prebuild": "pnpm --filter @knpkv/browser-pairing build",
     "precheck": "pnpm --filter @knpkv/browser-pairing build",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && vite build && vite build -c vite.views.config.ts",
     "check": "tsc -b tsconfig.json && tsc -p tsconfig.roles.json --noEmit && tsc -p test/tsconfig.json --noEmit",
     "pretest": "pnpm --filter @knpkv/browser-pairing build",
     "test": "vitest",
@@ -76,5 +87,36 @@
     "typescript": "npm:@typescript/typescript6@^6.0.2",
     "vite": "^8.3.2",
     "vitest": "catalog:"
+  },
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./dist/index.js"
+    },
+    "./views": {
+      "types": "./src/views.ts",
+      "default": "./dist/views/index.js"
+    },
+    "./views/style.css": "./dist/views/style.css"
+  },
+  "peerDependencies": {
+    "@knpkv/rly": "workspace:^",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "react-router": "8.4.0"
+  },
+  "peerDependenciesMeta": {
+    "@knpkv/rly": {
+      "optional": true
+    },
+    "react": {
+      "optional": true
+    },
+    "react-dom": {
+      "optional": true
+    },
+    "react-router": {
+      "optional": true
+    }
   }
 }

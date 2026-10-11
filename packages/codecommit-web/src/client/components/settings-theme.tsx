@@ -5,6 +5,8 @@ import { Separator } from "./ui/separator.js"
 
 type ThemeOption = "dark" | "light" | "system"
 
+export type SettingsThemeProps = Record<string, never>
+
 export function SettingsTheme() {
   const { setTheme, theme } = useTheme()
 

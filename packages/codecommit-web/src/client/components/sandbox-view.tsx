@@ -1,66 +1,18 @@
 import { useAtomSet, useAtomValue } from "@effect/atom-react"
-import { SandboxId } from "@knpkv/codecommit-core/Domain.js"
-import { Button, StateLabel, StatePanel, type RlyStateTone } from "@knpkv/rly/primitives"
+import type { SandboxId } from "@knpkv/codecommit-core/Domain.js"
 import { AsyncResult } from "effect/reactivity"
 import { CopyIcon, EyeIcon, EyeOffIcon } from "lucide-react"
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { useState } from "react"
 import { useNavigate, useParams, useSearchParams } from "react-router"
 import {
-  type AppState,
   appStateAtom,
   deleteSandboxAtom,
   restartSandboxAtom,
   sandboxCredentialsAtom,
   stopSandboxAtom
 } from "../atoms/app.js"
-import { codeCommitPullRequestHref } from "../codecommit-route.js"
-import { sandboxBrowserUrl } from "../sandbox-origin.js"
+import { SandboxViewContent } from "./sandbox-view-content.js"
 import styles from "./sandbox.module.css"
-
-const provisioningStatuses = new Set(["creating", "cloning", "starting"])
-
-const statusTone = (status: string): RlyStateTone => {
-  switch (status) {
-    case "running":
-      return "positive"
-    case "creating":
-    case "cloning":
-    case "starting":
-    case "stopping":
-      return "progress"
-    case "error":
-      return "critical"
-    default:
-      return "neutral"
-  }
-}
-
-const statusLabel = (status: string): string =>
-  status.length === 0 ? "Unknown" : `${status.slice(0, 1).toUpperCase()}${status.slice(1)}`
-
-const LogPanel = ({ logs }: { readonly logs: string }) => {
-  const ref = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    if (ref.current !== null) ref.current.scrollTop = ref.current.scrollHeight
-  }, [logs])
-
-  const lines = logs.trimEnd().split("\n")
-  return (
-    <div aria-label="Sandbox logs" className={styles.logs} ref={ref} role="log">
-      {lines.map((line, index) => {
-        const match = line.match(/^\[([^\]]+)\]\s*(.*)$/)
-        const timestamp = match?.[1]
-        const message = match?.[2] ?? line
-        return (
-          <div className={styles.logLine} key={`${timestamp ?? "line"}-${String(index)}`}>
-            {timestamp === undefined ? null : <span className={styles.logTimestamp}>{timestamp}</span>}
-            <span className={styles.logMessage}>{message}</span>
-          </div>
-        )
-      })}
-    </div>
-  )
-}
 
 const SandboxCredentialsBar = ({ sandboxId }: { readonly sandboxId: SandboxId }) => {
   const credentials = useAtomValue(sandboxCredentialsAtom(sandboxId))
@@ -107,22 +59,6 @@ const SandboxCredentialsBar = ({ sandboxId }: { readonly sandboxId: SandboxId })
   )
 }
 
-interface SandboxActionRequest {
-  readonly params: { readonly sandboxId: SandboxId }
-}
-
-export interface SandboxViewContentProps {
-  readonly state: AppState
-  readonly sandboxId: string | undefined
-  readonly initialView: "editor" | "logs"
-  readonly onViewChange: (view: "editor" | "logs") => void
-  readonly stopSandbox: (request: SandboxActionRequest) => void
-  readonly restartSandbox: (request: SandboxActionRequest) => void
-  readonly deleteSandbox: (request: SandboxActionRequest) => void
-  readonly navigate: (href: string) => void
-  readonly renderCredentials: (sandboxId: SandboxId) => ReactNode
-}
-
 /** Full-width authenticated sandbox route wired to atoms and router state. */
 export function SandboxView() {
   const { sandboxId } = useParams<{ sandboxId: string }>()
@@ -146,183 +82,5 @@ export function SandboxView() {
       state={state}
       stopSandbox={stopSandbox}
     />
-  )
-}
-
-/** Sandbox workspace presentation with explicit lifecycle, routing, and credential dependencies. */
-export function SandboxViewContent({
-  deleteSandbox,
-  initialView,
-  navigate,
-  onViewChange,
-  renderCredentials,
-  restartSandbox,
-  sandboxId,
-  state,
-  stopSandbox
-}: SandboxViewContentProps) {
-  const [showLogs, setShowLogs] = useState(initialView === "logs")
-
-  const sandbox = useMemo(
-    () => state.sandboxes?.find((candidate) => candidate.id === sandboxId) ?? null,
-    [sandboxId, state.sandboxes]
-  )
-
-  const selectView = useCallback(
-    (view: "editor" | "logs") => {
-      const nextShowsLogs = view === "logs"
-      setShowLogs(nextShowsLogs)
-      onViewChange(view)
-    },
-    [onViewChange]
-  )
-
-  const handleStop = useCallback(() => {
-    if (sandboxId === undefined) return
-    stopSandbox({ params: { sandboxId: SandboxId.make(sandboxId) } })
-  }, [sandboxId, stopSandbox])
-
-  if (sandbox === null) {
-    return (
-      <div className={styles.loadingPage}>
-        <StatePanel
-          announce="polite"
-          className={styles.loadingPanel}
-          description="CodeCommit is loading the isolated review workspace and its current lifecycle state."
-          title="Loading sandbox"
-          tone="progress"
-        />
-      </div>
-    )
-  }
-
-  const isRunning = sandbox.status === "running"
-  const isProvisioning = provisioningStatuses.has(sandbox.status)
-  const displaysLogs = showLogs || !isRunning
-  const canRestart = (sandbox.status === "stopped" || sandbox.status === "error") && sandbox.containerId !== null
-  const canDelete = sandbox.status === "stopped" || sandbox.status === "error"
-  const canStop = isRunning || isProvisioning
-  const backUrl =
-    sandbox.region === null
-      ? `/accounts/${sandbox.awsAccountId}/prs/${sandbox.pullRequestId}`
-      : codeCommitPullRequestHref(sandbox.awsAccountId, sandbox.pullRequestId, sandbox.repositoryName, sandbox.region)
-
-  return (
-    <div className={styles.workspace}>
-      <header className={styles.workspaceHeader}>
-        <div className={styles.workspaceIdentity}>
-          <Button
-            className={styles.backButton}
-            leadingIcon="arrow-left"
-            onClick={() => navigate(backUrl)}
-            size="compact"
-            variant="quiet"
-          >
-            Back to PR
-          </Button>
-          <div className={styles.workspaceHeading}>
-            <p className={styles.workspaceTitle}>
-              <span className={styles.sandboxId}>{sandbox.repositoryName}</span> / {sandbox.sourceBranch}
-            </p>
-            <p className={styles.workspaceMeta}>
-              Pull request {sandbox.pullRequestId}, sandbox {sandbox.id}
-            </p>
-          </div>
-          <StateLabel label={statusLabel(sandbox.status)} size="compact" tone={statusTone(sandbox.status)} />
-        </div>
-
-        <div aria-label="Sandbox workspace actions" className={styles.workspaceActions} role="group">
-          {sandbox.logs === null ? null : (
-            <div aria-label="Workspace view" className={styles.viewActions} role="group">
-              {isRunning ? (
-                <Button
-                  aria-pressed={!displaysLogs}
-                  onClick={() => selectView("editor")}
-                  size="compact"
-                  variant={!displaysLogs ? "primary" : "quiet"}
-                >
-                  Editor
-                </Button>
-              ) : null}
-              <Button
-                aria-pressed={displaysLogs}
-                onClick={() => selectView("logs")}
-                size="compact"
-                variant={displaysLogs ? "primary" : "quiet"}
-              >
-                Logs
-              </Button>
-            </div>
-          )}
-          {canRestart ? (
-            <Button
-              onClick={() => restartSandbox({ params: { sandboxId: SandboxId.make(sandbox.id) } })}
-              size="compact"
-              variant="secondary"
-            >
-              Restart
-            </Button>
-          ) : null}
-          {canDelete ? (
-            <Button
-              onClick={() => {
-                deleteSandbox({ params: { sandboxId: SandboxId.make(sandbox.id) } })
-                navigate("/sandboxes")
-              }}
-              size="compact"
-              variant="quiet"
-            >
-              Delete
-            </Button>
-          ) : null}
-          {canStop ? (
-            <Button onClick={handleStop} size="compact" variant="secondary">
-              Stop
-            </Button>
-          ) : null}
-        </div>
-      </header>
-
-      {isRunning && !displaysLogs ? renderCredentials(SandboxId.make(sandbox.id)) : null}
-
-      {displaysLogs ? (
-        <div className={styles.workspaceContent}>
-          {sandbox.statusDetail === null && sandbox.error === null ? null : (
-            <div className={styles.workspaceNotice}>
-              {sandbox.statusDetail === null ? null : <p className={styles.statusDetail}>{sandbox.statusDetail}</p>}
-              {sandbox.error === null ? null : (
-                <StatePanel
-                  announce="assertive"
-                  description={sandbox.error}
-                  title="Sandbox stopped before readiness"
-                  tone="critical"
-                />
-              )}
-            </div>
-          )}
-          {sandbox.logs === null ? (
-            <div className={styles.noLogs}>
-              <StatePanel
-                description={
-                  isProvisioning
-                    ? "Logs will appear as the reviewed revision is cloned and prepared."
-                    : "This sandbox did not retain lifecycle logs."
-                }
-                title={isProvisioning ? "Preparing the revision" : "No logs available"}
-                tone={isProvisioning ? "progress" : "neutral"}
-              />
-            </div>
-          ) : (
-            <LogPanel logs={sandbox.logs} />
-          )}
-        </div>
-      ) : (
-        <iframe
-          className={styles.editorFrame}
-          src={sandbox.port === null ? undefined : sandboxBrowserUrl(window.location.hostname, sandbox.port)}
-          title={`${sandbox.repositoryName} code sandbox`}
-        />
-      )}
-    </div>
   )
 }

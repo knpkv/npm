@@ -4,10 +4,15 @@ Formerly `@knpkv/herdr-approvals`: renamed, with the same `hostd` and `fleetctl`
 
 Host runtime, fleet CLI, approval PWA, push worker, and shared Rly shell for the Herdr packages.
 
-It publishes two binaries:
+It publishes three binaries:
 
 - `hostd`: local fleet authority plus optional Tailscale listeners, approvals, Connect, and push
 - `fleetctl`: status, history, job submission/following, Work checkpoint recording/snapshots, and fleet-wide apply submission with per-host outcomes
+- `relay`: short agent updates through `post`; no arguments print usage
+
+`relay post --kind status "Tests passing"` resolves the current Herdr pane's stable agent ID and posts to the configured canonical authenticated hub. Kinds are `status`, `progress`, `skill-feedback`, `note`, and `blocker`. Status text allows 240 characters, other kinds 1024. `--event-id ID` allows retries across invocations, and `--goal-step ID` links an update to a goal step. An omitted event ID is generated once; transport retries reuse it. `FLEET_CONFIG_PATH` selects the fleet configuration, and `HERDR_PANE_ID` must identify the current pane. The CLI offers no agent ID override.
+
+Voice is host-bounded in v1: the hub authenticates the Tailscale node and checks the claimed agent against that host's fresh, complete inventory. A same-host process can claim a sibling's ID. The follow-up is a per-session token handed to each pane by Herdr and presented by the CLI. `POST /v1/connect/posts` and paged `GET /v1/connect/posts?host=HOST&agentId=AGENT&cursor=SEQUENCE` exist only on the canonical listener. Reports are plain text, never transcripts or HTML; consumers render them as text. Owner-only SQLite retains 90 days and 128 reports per host and agent. Retries are keyed by host, stable agent ID, and event ID. The latest retained report becomes the agent's `voice`; confirmed closure keeps its text and time as archive `lastWords`, including across existing-database migration. Failures are tagged `InvalidReport`, `UnboundAgent`, `Denied`, `Conflict`, and `Unavailable`.
 
 `hostd` reads `FLEET_CONFIG_PATH`, defaulting to `~/.config/fleet/config.json`. The file is decoded by `@knpkv/herdr-fleet`; invalid or missing fields fail startup. With `crossHost: false`, the loopback listener, the Work-only listener bound to `workBindAddress` (loopback by default), and immediately queued safe jobs are available, with no Tailscale dependency. Cross-host listeners authenticate the actual socket peer with Tailscale WhoIs. Forwarded identity headers are never trusted.
 

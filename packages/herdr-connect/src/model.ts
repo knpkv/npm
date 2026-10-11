@@ -1,5 +1,6 @@
 import { AgentStableId, AgentWorkerIdentity, AgentWorkerRelationship } from "@knpkv/herdr-fleet/model"
 import { Schema } from "effect"
+import { ConnectLastWords } from "./posts.js"
 import { terminalColumnBounds, terminalRowBounds } from "./terminal-dimensions.js"
 
 const BoundedString = Schema.String.check(
@@ -34,6 +35,7 @@ export const ConnectAgent = Schema.Struct({
   state: BoundedString,
   work: AgentWorkLabel,
   lastActivityAt: ActivityTimestamp,
+  voice: Schema.optionalKey(ConnectLastWords),
   relationship: Schema.optionalKey(ConnectAgentRelationship)
 })
 export type ConnectAgent = typeof ConnectAgent.Type
@@ -90,6 +92,7 @@ export const ArchivedConnectAgent = Schema.Struct({
   state: ConnectAgent.fields.state,
   firstSeenAt: ActivityTimestamp,
   closedAt: ActivityTimestamp,
+  lastWords: Schema.optionalKey(ConnectLastWords),
   relationship: Schema.optionalKey(ConnectAgentRelationship)
 }).check(Schema.makeFilter(
   (agent) => agent.closedAt >= agent.firstSeenAt,

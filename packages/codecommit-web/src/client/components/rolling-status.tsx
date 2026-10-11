@@ -1,7 +1,7 @@
 import { CheckIcon } from "lucide-react"
 import { type CSSProperties, useEffect, useRef, useState } from "react"
 
-interface RollingStatusProps {
+export interface RollingStatusProps {
   readonly statusDetail: string | undefined
   readonly isLoading: boolean
 }

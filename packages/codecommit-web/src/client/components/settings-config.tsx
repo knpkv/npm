@@ -5,7 +5,7 @@ import { CheckCircleIcon, CopyIcon, RotateCcwIcon } from "lucide-react"
 import { useCallback, useState } from "react"
 import { configPathQueryAtom, configResetAtom, configValidateQueryAtom, databaseInfoQueryAtom } from "../atoms/app.js"
 import { cn } from "../lib/utils.js"
-import { LoadFailed } from "./load-failed.js"
+import { LoadFailed } from "./config-unavailable-view.js"
 import { Button } from "./ui/button.js"
 import { Separator } from "./ui/separator.js"
 
