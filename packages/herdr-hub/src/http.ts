@@ -546,8 +546,9 @@ export const listenerAuthority = (address: string, port: number): string =>
     `http://${address.includes(":") && !address.startsWith("[") ? `[${address}]` : address}:${port}/`
   ).host.toLowerCase()
 
-/** The favicon and the manifest's scalable icon; the PNGs come from the same drawing (`relay-icon.ts`). */
+/** The manifest and legacy scalable tile; the simplified favicon has its own URL. */
 const relayIcon = relayIconSvg("tile", 512)
+const relayFavicon = relayIconSvg("favicon", 16)
 
 /** The installed app is Relay. `id`, `start_url` and `scope` are unchanged, so installs carry over. */
 const relayManifest = JSON.stringify({
@@ -1435,7 +1436,7 @@ const connectPage = (fontPreload: string): string =>
 <meta name="color-scheme" content="dark">
 <meta name="theme-color" content="#0b0d10">
 <title>Connect in Relay</title>
-<link rel="icon" href="/assets/relay-icon.svg" type="image/svg+xml">
+<link rel="icon" href="/assets/relay-favicon.svg" type="image/svg+xml">
 ${fontPreload}<link rel="stylesheet" href="/assets/index.css">
 </head>
 <body data-rly-root data-rly-theme="dark" class="connect-body">
@@ -2758,13 +2759,14 @@ export const startHttpServer = async (
             mode !== "lan" &&
             request.method === "GET" &&
             // The old path stays: an install made before the rename keeps asking for it.
-            (url.pathname === "/assets/relay-icon.svg" || url.pathname === "/assets/approval-icon.svg")
+            (url.pathname === "/assets/relay-icon.svg" || url.pathname === "/assets/approval-icon.svg" ||
+              url.pathname === "/assets/relay-favicon.svg")
           ) {
             response.writeHead(200, {
               "cache-control": "no-cache, must-revalidate",
               "content-type": "image/svg+xml; charset=utf-8"
             })
-            response.end(relayIcon)
+            response.end(url.pathname === "/assets/relay-favicon.svg" ? relayFavicon : relayIcon)
             return
           }
           const iconMatch = /^\/assets\/([^/]+\.png)$/.exec(url.pathname)

@@ -1,27 +1,27 @@
 {
   "relay-apple-touch-180.png": {
-    "pngSha256": "94adf37b55e6dea0700543144c684c11df22e0e2e52b0673112b14c239620f8e",
+    "pngSha256": "b53b21c0eb0f0fb2d24435ea18c28b83f5dd5c01ecb1d2734a4d5edad2e3746d",
     "size": 180,
-    "sourceSha256": "122c2366ce7fc3e20c940355497dd5b8c51e5c5968c128d91e41b979351fb420"
+    "sourceSha256": "cae2f360d166dd131c88f5167f4afd5db82f3117386e90b15d4900e70192263b"
   },
   "relay-192.png": {
-    "pngSha256": "63cb2461f7bc4a83d27358971eeabf872ed84a06051b8cc8659a86efddf22d40",
+    "pngSha256": "fc42c043b3d80678c6cb32dfae9042b8894637ba8227614e1457aadea8b589c5",
     "size": 192,
-    "sourceSha256": "3b92c9ec3e7a7060b2c112db4d2484370d099064430680a59371c94aafe15a4a"
+    "sourceSha256": "299b8c12616a1d064797885bedff6ade814a424101b4947ba19b6a9b3ffbacf5"
   },
   "relay-512.png": {
-    "pngSha256": "264c7b48a96c1c9c2546647d5c20c8e83a6134ce0392402e735913cb5673bb89",
+    "pngSha256": "9c529d2a37a15f92b778dfd550024550ded5ff275bd321b1c615e1d53ad69ce6",
     "size": 512,
-    "sourceSha256": "9e0bda68548c078213f0f76f4a7db397daddf1dc1e8e2a21a070e8f2bee52415"
+    "sourceSha256": "fbeb2fa194e0356d69105d8551694ffee7df98730b680959f22e70b2d97dec3e"
   },
   "relay-maskable-512.png": {
-    "pngSha256": "691a09fcc80318d0ea5303a3bfdc1341da6d76281f2bdf29b21c1fcff07c3911",
+    "pngSha256": "ddd2b5901f06b5345964aba61d1fc436dca3a193909c61cb1dc4a2a0439b5780",
     "size": 512,
-    "sourceSha256": "50487d77c3f0a088c280cde2846c6ce2e4b1b9677054397b3b4ff7714584eaeb"
+    "sourceSha256": "72ccc09a6be61f26c4f58e33115d30912f0191df2ec00b13c5ac8bd688eac62c"
   },
   "relay-badge-96.png": {
-    "pngSha256": "251376d99ee4507a99b3f3e9c47775d899e85aabd8b4c5e27f3ac6c24aafa17b",
+    "pngSha256": "ca3a27cae935c40f094af466bc2864901b2529e24ca1c8d0fd5060a3eed372d7",
     "size": 96,
-    "sourceSha256": "79f677c062ec69debed58becf8ac18799e7b83a760a6306fd94ec9234d8a5e5f"
+    "sourceSha256": "df329f12b2ebff2c44771b13e3efc1b8d0a49026e5261d99697a3025f1cf30ab"
   }
 }

@@ -39,9 +39,44 @@
     grid-row: 1;
   }
 
-  /* The launcher shows the pose; the panel and the existing live region carry its status words. */
+  /* The static Chef brands the launcher; the panel and live region carry Relay's status words. */
   .superapp-header .fleet-shell-relay-status {
     display: none;
+  }
+
+  .superapp-header [data-rly-relay-launcher] {
+    border: 0;
+    padding-block: 0;
+    block-size: 2rem;
+  }
+
+  .relay-chef-mark {
+    display: block;
+    inline-size: 2rem;
+    block-size: auto;
+    aspect-ratio: 1;
+    flex: none;
+  }
+
+  [data-relay-chef-drawing="contrast"] {
+    display: none;
+  }
+
+  @media (forced-colors: active) {
+    [data-relay-chef-drawing="mark"] {
+      display: none;
+    }
+    [data-relay-chef-drawing="contrast"] {
+      display: inline;
+    }
+  }
+
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) [data-relay-chef-drawing="mark"] {
+    display: none;
+  }
+
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) [data-relay-chef-drawing="contrast"] {
+    display: inline;
   }
 
   .superapp-breadcrumb {
@@ -410,14 +445,11 @@
       font-size: 1.125rem;
       font-weight: 700;
       min-block-size: 2.75rem;
+      block-size: 2.75rem;
     }
 
-    .superapp-header [data-rly-relay-launcher] > svg {
-      box-sizing: content-box;
-      padding: var(--rly-space-4);
-      background: var(--rly-color-agent);
-      color: var(--rly-color-canvas);
-      border-radius: var(--rly-radius-field);
+    .superapp-header .relay-chef-mark {
+      inline-size: 1.5rem;
     }
 
     .superapp-host {
@@ -465,11 +497,6 @@
     .superapp-shell:has(.connect-workspace[data-mode="terminal"]) .superapp-breadcrumb,
     .superapp-breadcrumb[data-route-found="false"] {
       display: none;
-    }
-
-    .superapp-header [data-rly-relay-avatar="launcher"] .hub-relay-avatar svg {
-      inline-size: 1.75rem;
-      block-size: 1.75rem;
     }
 
     .superapp-shell:has(.superapp-breadcrumb[data-route-found="true"]):not(

@@ -43,7 +43,7 @@ export const dashboardPage = (snapshot: DashboardSnapshot, fontPreload: string):
 <meta name="apple-mobile-web-app-title" content="Relay">
 <title>${dashboardDocumentTitle(snapshot)}</title>
 <link rel="manifest" href="/manifest.webmanifest">
-<link rel="icon" href="/assets/relay-icon.svg" type="image/svg+xml">
+<link rel="icon" href="/assets/relay-favicon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="/assets/relay-apple-touch-180.png">
 ${fontPreload}<link rel="stylesheet" href="/assets/index.css">
 </head>
