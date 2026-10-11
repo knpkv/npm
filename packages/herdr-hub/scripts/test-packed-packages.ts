@@ -440,7 +440,7 @@ const program = Effect.scoped(
       [
         "--input-type=module",
         "--eval",
-        "console.log(import.meta.resolve('@knpkv/herdr-hub/hostd')); console.log(import.meta.resolve('@knpkv/herdr-hub/hostd-runtime')); console.log(import.meta.resolve('@knpkv/herdr-hub/fleetctl'))"
+        "console.log(import.meta.resolve('@knpkv/herdr-hub/hostd')); console.log(import.meta.resolve('@knpkv/herdr-hub/hostd-runtime')); console.log(import.meta.resolve('@knpkv/herdr-hub/fleetctl')); console.log(import.meta.resolve('@knpkv/herdr-hub/relay'))"
       ],
       consumer
     )
@@ -448,14 +448,17 @@ const program = Effect.scoped(
     const hostdResolution = resolved[0]
     const hostdRuntimeResolution = resolved[1]
     const fleetctlResolution = resolved[2]
+    const relayResolution = resolved[3]
     if (
-      resolved.length !== 3 ||
+      resolved.length !== 4 ||
       hostdResolution === undefined ||
       hostdRuntimeResolution === undefined ||
       fleetctlResolution === undefined ||
+      relayResolution === undefined ||
       hostdResolution.endsWith("/dist/bin.js") === false ||
       hostdRuntimeResolution.endsWith("/dist/hostd.js") === false ||
-      fleetctlResolution.endsWith("/dist/fleetctl.js") === false
+      fleetctlResolution.endsWith("/dist/fleetctl.js") === false ||
+      relayResolution.endsWith("/dist/relay.js") === false
     ) {
       return yield* new HerdrPackContractError({ reason: `Approval runtime subpaths do not resolve: ${resolution}` })
     }
