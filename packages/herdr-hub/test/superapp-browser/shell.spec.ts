@@ -298,7 +298,7 @@ test(
 
 test("keeps a document anchor on first load", async ({ page }) => {
   await page.goto("/#main")
-  await expect(page.getByRole("tab", { name: "Approvals", exact: true })).toHaveAttribute("aria-selected", "true")
+  await expect(page.locator("[data-module=\"today\"]")).toBeVisible()
   expect(new URL(page.url()).hash).toBe("#main")
   await expect(page.getByText("This page doesn't exist in Relay.", { exact: true })).toHaveCount(0)
 })
@@ -512,8 +512,8 @@ test("shows a route notice for an unregistered page", async ({ page }) => {
   await expect(page.getByText("This page doesn't exist in Relay.", { exact: true })).toBeVisible()
   await expect(page.getByRole("tab", { name: "Approvals", exact: true })).toHaveCount(0)
   expect(new URL(page.url()).hash).toBe("#fleet/missing")
-  await page.getByRole("link", { name: "Back to Fleet", exact: true }).click()
-  await expect(page.getByRole("tab", { name: "Approvals", exact: true })).toBeVisible()
+  await page.getByRole("link", { name: "Back to Today", exact: true }).click()
+  await expect(page.locator("[data-module=\"today\"]")).toBeVisible()
 })
 
 test("keeps focus when selecting a Work window and restores that window on Back", async ({ page }) => {
@@ -705,7 +705,9 @@ test("keeps the shared panel inside the viewport during entry and exit motion", 
     await expect(page.getByRole("dialog", { name: "Your modules", exact: true })).toBeVisible()
     if (close === "escape") await page.keyboard.press("Escape")
     else {
-      const choice = page.getByRole("navigation", { name: "Module picker", exact: true }).getByRole("link")
+      const choice = page.getByRole("navigation", { name: "Module picker", exact: true }).locator(
+        "a[aria-current=\"page\"]"
+      )
       // Choosing the current module closes through the shell owner, without a Radix close request.
       await choice.click()
     }

@@ -9,6 +9,7 @@ import {
 
 export * from "./module-contract.js"
 export * from "./module-navigation.js"
+export * from "./module-needs-you.js"
 
 /** The shell owns history; products build exact links with moduleHref before navigating. */
 export interface ModulePageMount {

@@ -3,7 +3,7 @@ import { Result, Schema } from "effect"
 const Segment = Schema.String.check(Schema.isPattern(/^[a-z][a-z0-9-]*$/))
 const Label = Schema.String.check(Schema.isMinLength(1))
 
-export const ModuleListener = Schema.Literals(["serve", "approval", "tailnet", "lan", "work"])
+export const ModuleListener = Schema.Literals(["serve", "approval", "tailnet", "lan"])
 export type ModuleListener = typeof ModuleListener.Type
 
 /** Shared metadata. `requires` describes UI capabilities; the server mount enforces access. */
@@ -95,3 +95,12 @@ export const fleetModule = defineModule({
 })
 
 export type FleetModuleDestination = ModuleDestination<typeof fleetModule>
+
+export const todayModule = defineModule({
+  id: "today",
+  label: "Today",
+  defaultPage: "overview",
+  pages: [{ id: "overview", label: "Today" }],
+  listeners: ["serve"],
+  requires: ["read"]
+})

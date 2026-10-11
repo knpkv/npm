@@ -1,9 +1,14 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Result } from "effect"
-import { fleetModule, validateModuleRegistry } from "../src/module-contract.js"
+import { Result, Schema } from "effect"
+import { fleetModule, ModuleDescriptor, validateModuleRegistry } from "../src/module-contract.js"
 import { makeModuleViews } from "../src/modules.js"
 
 describe("module registration", () => {
+  it("refuses a product descriptor on the peer-only work listener", () => {
+    expect(Schema.decodeUnknownResult(ModuleDescriptor)({ ...fleetModule, listeners: ["work"] })._tag).toBe("Failure")
+    expect(Schema.decodeUnknownResult(ModuleDescriptor)({ ...fleetModule, listeners: ["serve"] })._tag).toBe("Success")
+  })
+
   it("refuses two modules claiming the same route namespace", () => {
     const result = validateModuleRegistry([fleetModule, { ...fleetModule, label: "Other Fleet" }])
     expect(Result.isFailure(result)).toBe(true)

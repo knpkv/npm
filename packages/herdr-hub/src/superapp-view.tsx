@@ -371,12 +371,14 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
             </span>
             {location.error === null ? (
               <>
-                {currentModule === undefined ? null : (
+                {currentModule === undefined || currentModule.pages.length === 1 ? null : (
                   <a href={moduleHref(currentModule, currentModule.defaultPage)} title={currentModule.label}>
                     <span>{currentModule.label}</span>
                   </a>
                 )}
-                <span aria-hidden="true">/</span>
+                {currentModule === undefined || currentModule.pages.length === 1 ? null : (
+                  <span aria-hidden="true">/</span>
+                )}
                 <span aria-current="page" title={currentPage?.label}>
                   <bdi dir="ltr">{currentPage?.label}</bdi>
                 </span>

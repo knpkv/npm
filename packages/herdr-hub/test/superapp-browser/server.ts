@@ -8,6 +8,7 @@ import { Clock, Config, Effect, FileSystem, Schema } from "effect"
 import { createServer, type ServerResponse } from "node:http"
 import { DashboardSnapshot, PendingApprovalTarget } from "../../src/dashboard-model.js"
 import { dashboardPage } from "../../src/internal/dashboard-page.js"
+import { NeedsYouResult } from "../../src/modules.js"
 
 class FixtureServerError extends Schema.TaggedError<FixtureServerError>()("FixtureServerError", {
   cause: Schema.Defect()
@@ -71,7 +72,7 @@ const program = Effect.gen(function*() {
       workEnabled: true
     },
     work,
-    records: [],
+    records: [{ ...record, id: "job-finished", actor: "Requester", status: "succeeded" }],
     historyNextCursor: null,
     directory: null,
     pendingApprovals: { local: [record], remote: [], failures: [], nextCursors: [] },
@@ -82,7 +83,21 @@ const program = Effect.gen(function*() {
       dirty: false,
       repository: "npm",
       revision: "abc123",
-      herdr: { agents: [], available: true, error: null }
+      herdr: {
+        agents: [{
+          agentId: "agent-1",
+          activityRevision: 1,
+          parentAgentId: null,
+          relation: null,
+          name: "Agent",
+          kind: "test",
+          paneId: "w9:p1",
+          status: "working",
+          work: "Checking module navigation"
+        }],
+        available: true,
+        error: null
+      }
     }
   })
   // The target is absent from page one and must be resolved through the exact-target endpoint.
@@ -90,6 +105,53 @@ const program = Effect.gen(function*() {
     _tag: "local",
     record: { ...record, id: "job-off-page", actor: "Off-page requester" }
   })
+  const alphaTarget = Schema.decodeUnknownSync(PendingApprovalTarget)({
+    _tag: "remote",
+    remote: {
+      host: "ALPHA",
+      approvalUrl: `http://127.0.0.1:${String(port)}/`,
+      approval: {
+        id: "alpha-off-page",
+        actor: "Peer requester",
+        createdAt: now,
+        status: "pending_approval",
+        approvalExpiresAt: now + 900_000,
+        payload: { kind: "nix.apply", ref: "main" }
+      }
+    }
+  })
+  const todayItem = (host: string, jobId: string, expiresAt: number) => ({
+    key: `fleet:${host.toLowerCase()}:${jobId}`,
+    provider: "fleet",
+    destination: { _tag: "FleetApproval", module: "fleet", host, jobId },
+    kind: "nix.apply",
+    actor: host === "ALPHA" ? "Peer requester" : "Requester",
+    createdAt: now,
+    expiresAt
+  })
+  const todayItems = [
+    todayItem("hub", "job-off-page", now + 180_000),
+    todayItem("hub", "job-1", now + 600_000),
+    todayItem("ALPHA", "alpha-off-page", now + 900_000)
+  ]
+  const todayReadings = new Map<string, NeedsYouResult>([
+    ["normal", Schema.decodeUnknownSync(NeedsYouResult)({ _tag: "Complete", items: todayItems })],
+    ["empty", Schema.decodeUnknownSync(NeedsYouResult)({ _tag: "Complete", items: [] })],
+    [
+      "partial",
+      Schema.decodeUnknownSync(NeedsYouResult)({
+        _tag: "Partial",
+        items: todayItems,
+        sources: [
+          { provider: "fleet", issue: { state: "hosts", hosts: [{ host: "cedar", reason: "offline" }] } }
+        ]
+      })
+    ],
+    [
+      "expired",
+      Schema.decodeUnknownSync(NeedsYouResult)({ _tag: "Complete", items: [todayItem("hub", "job-1", now - 1_000)] })
+    ]
+  ])
   const responses = new Map([
     ["/v1/dashboard", Schema.encodeSync(Schema.fromJsonString(DashboardSnapshot))(snapshot)],
     ["/v1/work", Schema.encodeSync(Schema.fromJsonString(WorkSnapshots))(work)],
@@ -240,8 +302,33 @@ const program = Effect.gen(function*() {
       response.end(String(relaySubscriptions))
       return
     }
+    if (url.pathname === "/v1/modules/today/needs-you") {
+      const source = request.headers.referer !== undefined && URL.canParse(request.headers.referer)
+        ? new URL(request.headers.referer)
+        : null
+      const state = source?.searchParams.get("todayFixture") ?? "normal"
+      if (state === "failed") {
+        response.writeHead(503, { "content-type": "application/json" })
+        response.end(JSON.stringify({ error: "unavailable" }))
+      } else {
+        const reading = todayReadings.get(state)
+        if (reading === undefined) {
+          response.writeHead(404)
+          response.end()
+        } else {
+          response.writeHead(200, { "content-type": "application/json" })
+          response.end(Schema.encodeSync(Schema.fromJsonString(NeedsYouResult))(reading))
+        }
+      }
+      return
+    }
     if (url.pathname === "/v1/pending-approval") {
-      if (url.searchParams.get("host") === "hub" && url.searchParams.get("jobId") === "job-off-page") {
+      if (
+        url.searchParams.get("host")?.toLowerCase() === "alpha" && url.searchParams.get("jobId") === "alpha-off-page"
+      ) {
+        response.writeHead(200, { "content-type": "application/json" })
+        response.end(Schema.encodeSync(Schema.fromJsonString(PendingApprovalTarget))(alphaTarget))
+      } else if (url.searchParams.get("host") === "hub" && url.searchParams.get("jobId") === "job-off-page") {
         response.writeHead(200, { "content-type": "application/json" })
         response.end(Schema.encodeSync(Schema.fromJsonString(PendingApprovalTarget))(offPageTarget))
       } else {

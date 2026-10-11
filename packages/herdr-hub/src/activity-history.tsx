@@ -1,5 +1,5 @@
 import { Button, StateLabel, Surface, Text } from "@knpkv/rly/primitives"
-import { requiresApproval, type DelegateMode, type JobStatus } from "@knpkv/herdr-fleet/model"
+import { requiresApproval, type DelegateMode, type JobPayload, type JobStatus } from "@knpkv/herdr-fleet/model"
 import { Predicate } from "effect"
 import { useMemo, useState, type KeyboardEvent, type ReactElement } from "react"
 import { approvalRequestFor, type ApprovalRequest, type SanitizedJobRecord } from "./approval-request.js"
@@ -109,30 +109,24 @@ export const statusTone = (status: JobStatus): "neutral" | "positive" | "critica
   }
 }
 
-export const jobTitle = (record: Pick<SanitizedJobRecord, "payload">): string => {
-  switch (record.payload.kind) {
-    case "browser.mcp.recover":
-      return "Recover browser MCP"
-    case "nix.check":
-      return "Check Nix configuration"
-    case "nix.apply":
-      return "Apply Nix configuration"
-    case "agent.delegate":
-      return delegateTitle(record.payload.mode)
-    case "agent.message":
-      return "Message an agent"
-    case "work.reconcile":
-      return "Reconcile existing Work owner"
-    case "work.admit":
-      return "Prospectively admit existing Work owner"
-    case "work.recover":
-      return "Link existing unlinked Work goal"
-    case "work.reassign":
-      return "Reassign Work goal owner"
-    case "work.abandon":
-      return "Abandon Work goal"
-  }
-}
+const jobKindTitles = {
+  "browser.mcp.recover": "Recover browser MCP",
+  "nix.check": "Check Nix configuration",
+  "nix.apply": "Apply Nix configuration",
+  "agent.delegate": "Delegate agent work",
+  "agent.message": "Message an agent",
+  "work.reconcile": "Reconcile existing Work owner",
+  "work.admit": "Prospectively admit existing Work owner",
+  "work.recover": "Link existing unlinked Work goal",
+  "work.reassign": "Reassign Work goal owner",
+  "work.abandon": "Abandon Work goal"
+} satisfies Record<JobPayload["kind"], string>
+
+/** Fleet's generic operation word, for summaries that deliberately omit the request payload. */
+export const jobKindTitle = (kind: JobPayload["kind"]): string => jobKindTitles[kind]
+
+export const jobTitle = (record: Pick<SanitizedJobRecord, "payload">): string =>
+  record.payload.kind === "agent.delegate" ? delegateTitle(record.payload.mode) : jobKindTitle(record.payload.kind)
 
 const safeSummary = (record: SanitizedJobRecord): string => {
   switch (record.payload.kind) {
