@@ -210,6 +210,25 @@ describe("Work board with the observed overlay", () => {
     )
   })
 
+  it("dates a recorded terminal row from its checkpoint even when its PR closed earlier", async () => {
+    const host = await mount(
+      snapshotOf([goal("finished", { state: "completed", updatedAt: NOW - HOUR })], {
+        observed: [merged("finished", NOW - 10 * HOUR)]
+      })
+    )
+    expect(host.querySelector(".work-board-row .work-row-meta")?.textContent).toContain("Completed 1h ago")
+    expect(host.querySelector(".work-board-row .work-row-meta")?.textContent).not.toContain("10h ago")
+  })
+
+  it("dates an observation-only terminal row from the PR close instead of the working checkpoint", async () => {
+    const host = await mount(
+      snapshotOf([goal("observed", { updatedAt: NOW - HOUR })], {
+        observed: [merged("observed", NOW - 10 * HOUR)]
+      })
+    )
+    expect(host.querySelector(".work-board-row .work-row-meta")?.textContent).toContain("Completed 10h ago")
+  })
+
   it("shows a distinct owner alongside the recorded worker without duplicating a matching identity", async () => {
     for (const ownerName of ["Coordinator", "Worker"]) {
       const host = await mount(
@@ -631,6 +650,41 @@ describe("Work board with the observed overlay", () => {
     const titles = [...host.querySelectorAll(".work-board-row")].map(({ textContent }) => textContent)
     expect(titles).toHaveLength(1)
     expect(titles[0]).toContain("Goal g1")
+  })
+
+  it("keeps the response cut visible in a populated status filter without assuming the omitted statuses", async () => {
+    const host = await mount(snapshotOf([goal("working")], { goalsOmitted: 12 }))
+    const working = [...host.querySelectorAll<HTMLButtonElement>(".work-status-filter")].find(
+      ({ textContent }) => textContent === "Working"
+    )
+    await act(async () => working?.click())
+    expect(host.querySelector(".work-board-list")?.textContent).toContain(
+      "Showing 1 of 1 retained goals · 12 more not in this read"
+    )
+    expect(host.querySelector(".work-board-list")?.textContent).not.toContain("Showing 1 of 13")
+  })
+
+  it("keeps filtered counts exact when the read omits no goals", async () => {
+    const host = await mount(snapshotOf([goal("working"), goal("planned", { state: "planned" })], { goalsOmitted: 0 }))
+    const working = [...host.querySelectorAll<HTMLButtonElement>(".work-status-filter")].find(
+      ({ textContent }) => textContent === "Working"
+    )
+    await act(async () => working?.click())
+    expect(host.querySelector(".work-board-list")?.textContent).toContain("Showing 1 of 1 goals")
+    expect(host.querySelector(".work-board-list")?.textContent).not.toContain("retained")
+    expect(host.querySelector(".work-board-list")?.textContent).not.toContain("more not in this read")
+  })
+
+  it("keeps the response cut visible when no retained goal matches the status filter", async () => {
+    const host = await mount(snapshotOf([goal("planned", { state: "planned" })], { goalsOmitted: 12 }))
+    const working = [...host.querySelectorAll<HTMLButtonElement>(".work-status-filter")].find(
+      ({ textContent }) => textContent === "Working"
+    )
+    await act(async () => working?.click())
+    expect(host.querySelector(".work-board-list")?.textContent).toContain(
+      "Showing 0 of 0 retained goals · 12 more not in this read"
+    )
+    expect(host.querySelector(".work-filter-empty")?.textContent).toContain("No goals match this status in this read.")
   })
 
   it("scrolls each focused status option into the nearest visible part of its row", async () => {
