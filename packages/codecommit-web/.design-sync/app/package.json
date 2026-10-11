@@ -1,0 +1,7 @@
+{
+  "name": "@knpkv/codecommit-web-design-system",
+  "private": true,
+  "type": "module",
+  "module": "./index.js",
+  "types": "./index.d.ts"
+}
