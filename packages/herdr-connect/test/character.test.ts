@@ -56,6 +56,35 @@ describe("agentCharacter", () => {
     }
   })
 
+  // The row ring must also enclose the curves between seeded vertices and both ordinary breath extrema.
+  it("encloses the curved outlines through a breath across the seed grid", () => {
+    for (const { body, bounds, ringScale } of grid) {
+      const [, top, width, height] = bounds
+      const coordinates = [...body.matchAll(/[\d.]+/g)].map(([number]) => Number(number))
+      let x0 = coordinates[0] ?? 0
+      let y0 = coordinates[1] ?? 0
+      for (let span = 2; span < coordinates.length; span += 6) {
+        const [ax = 0, ay = 0, bx = 0, by = 0, x1 = 0, y1 = 0] = coordinates.slice(span, span + 6)
+        for (let sample = 0; sample <= 20; sample++) {
+          const t = sample / 20
+          const u = 1 - t
+          const x = u ** 3 * x0 + 3 * u ** 2 * t * ax + 3 * u * t ** 2 * bx + t ** 3 * x1
+          const y = u ** 3 * y0 + 3 * u ** 2 * t * ay + 3 * u * t ** 2 * by + t ** 3 * y1
+          const moments = [[1, 1], [1.012, 0.988], [0.988, 1.012]] satisfies ReadonlyArray<readonly [number, number]>
+          for (const [sx, sy] of moments) {
+            const radius = Math.hypot(
+              (x - 50) * sx / (width / 2),
+              (FOOT + (y - FOOT) * sy - top - height / 2) / (height / 2)
+            )
+            expect(radius).toBeLessThan(ringScale)
+          }
+        }
+        x0 = x1
+        y0 = y1
+      }
+    }
+  })
+
   it("gives every face two separate, upright eyes with room to look round inside them", () => {
     for (const { bounds, eye, eyeGap, eyeY } of grid) {
       const [width, height] = eye

@@ -23,6 +23,8 @@ export interface AgentCharacter {
    * the points can bulge past it by under half a unit.
    */
   readonly bounds: readonly [number, number, number, number]
+  /** Enclosing ellipse scale over the half-width/height, with room for curves and an ordinary breath. */
+  readonly ringScale: number
   /** Light, mid and deep hues (OKLCH degrees), close enough to read as one creature. */
   readonly hues: readonly [number, number, number]
   /** Eye half-width and half-height. Never wider than tall, so a squint never reads as a frown. */
@@ -142,6 +144,11 @@ export const agentCharacter = (host: string, id: string): AgentCharacter => {
     FOOT - (maxY - y) * scale
   ])
   const top = FOOT - height
+  // Bounding-box axes alone miss diagonal lobes. Fit the ellipse to every seeded outline point instead.
+  // Three percent covers the interpolated curves, rounding and the 1.2% foot-pivoted breath.
+  const ringScale =
+    Math.max(...points.map(([x, y]) => Math.hypot((x - 50) / (width / 2), (y - top - height / 2) / (height / 2)))) *
+    1.03
   const eyeWidth = 5.2 + field(seed, 16, 5) * 0.2
   const aspect = EYE_ASPECTS[field(seed, 19, EYE_ASPECTS.length)] ?? 1
   return {
@@ -160,6 +167,7 @@ export const agentCharacter = (host: string, id: string): AgentCharacter => {
     eyeY: top + height * 0.4 + (field(seed, 21, 3) - 1) * 0.8,
     hues: [hue, (hue + spread) % 360, (hue + 360 - Math.round(spread / 2)) % 360],
     pace: 9 + field(seed, 23, 6),
-    phase: -field(seed, 27, 20)
+    phase: -field(seed, 27, 20),
+    ringScale
   }
 }

@@ -1,7 +1,7 @@
 /** Reference fixtures use the design's recorded identities and times, mounted without a hub masthead. */
 import { agentConnectTarget, AgentWorkerIdentity } from "@knpkv/herdr-fleet/model"
 import { WorkGoal, WorkSnapshots } from "@knpkv/herdr-work/model"
-import { expect, type Page, test } from "@playwright/test"
+import { expect, type Locator, type Page, test } from "@playwright/test"
 import { Schema } from "effect"
 import { ConnectAgent } from "../../src/model.js"
 
@@ -34,6 +34,8 @@ const base = [
   agent("skills", "ready", "atlas", "skills-daily", 11, 47),
   agent("pkgsrc", "done", "birch", "pkgsrc", 12, 10)
 ]
+const tallSeeds = ["134", "313", "509"].map((id) => agent(id, "working", "fixture-host", "package-work", 14, 2))
+
 const worker = (name: string) =>
   Schema.decodeUnknownSync(AgentWorkerIdentity)({
     host: name === "rev-usage" ? "birch" : "atlas",
@@ -165,6 +167,337 @@ const mount = async (page: Page, theme: string) => {
   })
   await page.evaluate(() => document.fonts.ready)
 }
+
+/** Mount the recorded directory for measured fidelity checks without taking a screenshot. */
+const openDirectory = async (page: Page, width: number, theme: string, agents = base) => {
+  await prepare(page, width, theme)
+  await page.route(
+    "**/v1/connect/agents",
+    (route) => route.fulfill({ json: { agents, failures: [], nextCursor: null } })
+  )
+  await mount(page, theme)
+  await expect(page.locator(".connect-agent")).toHaveCount(agents.length)
+}
+
+/** Read screen pixels, including SVG transforms, rather than the path's viewBox coordinates. */
+const drawnBox = (node: Locator) =>
+  node.evaluate((element) => {
+    const { height, width, x, y } = element.getBoundingClientRect()
+    return { height, width, x, y }
+  })
+
+/** Every ring stroke fits the root, including non-scaling halos in small pins and crew pills. */
+const expectRingFitsTrack = async (creature: Locator) => {
+  const track = await drawnBox(creature)
+  const strokes = await creature.evaluate(
+    (svg) =>
+      [...svg.querySelectorAll<SVGEllipseElement>(".connect-creature-halo, .connect-creature-orbit")].map(
+        (ring) => {
+          const style = getComputedStyle(ring)
+          const box = ring.getBoundingClientRect()
+          const matrix = ring.getScreenCTM()
+          const half = Number.parseFloat(style.strokeWidth) / 2
+          const margin = style.vectorEffect === "non-scaling-stroke"
+            ? half
+            : half * Math.hypot(matrix?.a ?? 0, matrix?.b ?? 0)
+          return {
+            left: box.x - margin,
+            right: box.right + margin,
+            top: box.y - margin,
+            bottom: box.bottom + margin
+          }
+        }
+      )
+  )
+  for (const stroke of strokes) {
+    expect(stroke.left).toBeGreaterThanOrEqual(track.x - 0.05)
+    expect(stroke.right).toBeLessThanOrEqual(track.x + track.width + 0.05)
+    expect(stroke.top).toBeGreaterThanOrEqual(track.y - 0.05)
+    expect(stroke.bottom).toBeLessThanOrEqual(track.y + track.height + 0.05)
+  }
+}
+
+/** Sample the actual curved outline under the stylesheet's ordinary breath, in the ring's coordinates. */
+const measureEnclosure = (creature: Locator, moment: string) =>
+  creature.evaluate((svg, phase) => {
+    // Hold the ordinary breath at either extreme; arrival motion intentionally leaves the ring.
+    for (const animation of svg.getAnimations({ subtree: true })) {
+      animation.pause()
+      const timing = animation.effect?.getTiming()
+      const duration = Number(timing?.duration ?? 0)
+      const delay = Number(timing?.delay ?? 0)
+      const pairs = Math.ceil(-delay / duration / 2) * 2 * duration
+      const name = "animationName" in animation ? String(animation.animationName) : ""
+      const fraction = name === "connect-creature-breathe" && phase === "inhale" ? 0.999 : 0.001
+      animation.currentTime = pairs + delay + duration * fraction
+    }
+    const body = svg.querySelector<SVGPathElement>(".connect-creature-body")
+    const halo = svg.querySelector<SVGEllipseElement>(".connect-creature-halo")
+    const bodyMatrix = body?.getScreenCTM()
+    const haloMatrix = halo?.getScreenCTM()
+    if (body === null || halo === null) return null
+    if (
+      bodyMatrix === null || bodyMatrix === undefined || haloMatrix === null || haloMatrix === undefined
+    ) return null
+    const inverse = haloMatrix.inverse()
+    const cx = halo.cx.baseVal.value
+    const cy = halo.cy.baseVal.value
+    // Clear the halo and the visible arc, accounting for their different stroke scaling.
+    const strokes = [halo, ...svg.querySelectorAll<SVGEllipseElement>(".connect-creature-orbit")]
+      .filter((ring) => ring === halo || Number(getComputedStyle(ring).opacity) > 0)
+      .map((ring) => {
+        const style = getComputedStyle(ring)
+        const half = Number.parseFloat(style.strokeWidth) / 2
+        return style.vectorEffect === "non-scaling-stroke"
+          ? [half / Math.hypot(haloMatrix.a, haloMatrix.b), half / Math.hypot(haloMatrix.c, haloMatrix.d)]
+          : [half, half]
+      })
+    const rx = halo.rx.baseVal.value - Math.max(...strokes.map(([x = 0]) => x))
+    const ry = halo.ry.baseVal.value - Math.max(...strokes.map(([, y = 0]) => y))
+    const length = body.getTotalLength()
+    let maximum = 0
+    for (let sample = 0; sample < 360; sample++) {
+      const point = body.getPointAtLength(length * sample / 360)
+      const local = new DOMPoint(point.x, point.y).matrixTransform(bodyMatrix).matrixTransform(inverse)
+      maximum = Math.max(maximum, Math.hypot((local.x - cx) / rx, (local.y - cy) / ry))
+    }
+    return maximum
+  }, moment)
+
+test.describe("creature fill fidelity", () => {
+  for (const width of [390, 1280]) {
+    for (const theme of ["light", "dark"]) {
+      test(`tall seeds keep row slots ${String(width)} ${theme}`, async ({ page }) => {
+        await openDirectory(page, width, theme, [...tallSeeds, ...base])
+        const control = page.locator(".connect-agent[data-agent-key=\"atlas:agent-ds-rly\"]")
+        const controlBox = await drawnBox(control)
+        for (const fixture of tallSeeds) {
+          const row = page.locator(`.connect-agent[data-agent-key="${fixture.host}:${fixture.id}"]`)
+          expect.soft((await drawnBox(row)).height).toBeCloseTo(controlBox.height, 1)
+          const track = await drawnBox(row.locator("svg.connect-creature"))
+          expect(track.width).toBe(36)
+          expect(track.height).toBe(36)
+          const body = await drawnBox(row.locator(".connect-creature-body"))
+          expect(body.width).toBeGreaterThanOrEqual(track.width * 0.58)
+          expect(Math.max(body.width, body.height)).toBeGreaterThanOrEqual(track.width * 0.7)
+          await expectRingFitsTrack(row.locator("svg.connect-creature"))
+        }
+      })
+
+      test(`tall seed pins stay 44px ${String(width)} ${theme}`, async ({ page }) => {
+        await openDirectory(page, width, theme, [...tallSeeds, ...base])
+        for (const fixture of tallSeeds) {
+          await page.locator(`.connect-agent[data-agent-key="${fixture.host}:${fixture.id}"]`).click()
+          await page.getByRole("button", { name: "Pin", exact: true }).click()
+          await page.keyboard.press("Escape")
+        }
+        const pins = page.locator(".connect-pins[data-placement=\"float\"] .connect-pin-open")
+        await expect(pins).toHaveCount(3)
+        for (const pin of await pins.all()) {
+          expect.soft((await drawnBox(pin)).height).toBe(44)
+          const svg = pin.locator("svg.connect-creature")
+          const creature = await drawnBox(svg)
+          expect(creature.width).toBe(32)
+          expect.soft(creature.height).toBe(32)
+          const body = await drawnBox(svg.locator(".connect-creature-body"))
+          expect(body.width).toBeGreaterThanOrEqual(creature.width * 0.58)
+          expect(Math.max(body.width, body.height)).toBeGreaterThanOrEqual(creature.width * 0.7)
+          await expectRingFitsTrack(svg)
+        }
+        const stack = await drawnBox(page.locator(".connect-pins[data-placement=\"float\"]"))
+        const reserved = await page.locator(".connect-agents[data-pinned]").evaluate(
+          (node) => Number.parseFloat(getComputedStyle(node).paddingBlockEnd)
+        )
+        const bottom = await page.locator(".connect-pins[data-placement=\"float\"]").evaluate(
+          (node) => Number.parseFloat(getComputedStyle(node).insetBlockEnd)
+        )
+        expect(stack.height + bottom).toBeLessThanOrEqual(reserved)
+        // Embedded desktop scrolls the directory; phones scroll the document.
+        await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight))
+        await page.locator(".connect-agents").evaluate((directory) => {
+          directory.scrollTop = directory.scrollHeight
+        })
+        const lastRow = await drawnBox(page.locator(".connect-agent").last())
+        const scrolledStack = await drawnBox(page.locator(".connect-pins[data-placement=\"float\"]"))
+        expect(lastRow.y + lastRow.height).toBeLessThanOrEqual(scrolledStack.y)
+      })
+
+      test(`tall seed crew keeps its square track ${String(width)} ${theme}`, async ({ page }) => {
+        const crew = [
+          agent("parent", "working", "fixture-host", "package-work", 14, 2),
+          agent("134", "working", "fixture-host", "package-work", 14, 2, "parent")
+        ]
+        await openDirectory(page, width, theme, crew)
+        await page.locator(".connect-agent[data-agent-key=\"fixture-host:agent-parent\"]").click()
+        const member = page.locator(".connect-stage-crew-member", { hasText: "134" })
+        await expect(member).toBeVisible()
+        const creature = member.locator("svg.connect-creature")
+        const track = await drawnBox(creature)
+        expect(track.width).toBe(28)
+        expect(track.height).toBe(28)
+        await expectRingFitsTrack(creature)
+        for (const moment of ["rest", "inhale", "exhale"]) {
+          await page.emulateMedia({ reducedMotion: moment === "rest" ? "reduce" : "no-preference" })
+          const geometry = await measureEnclosure(creature, moment)
+          expect(geometry).not.toBeNull()
+          expect(geometry).toBeLessThanOrEqual(1)
+        }
+      })
+
+      for (const surface of ["row", "stage"]) {
+        test(`working halo stays under its arc ${surface} ${String(width)} ${theme}`, async ({ page }) => {
+          await openDirectory(page, width, theme)
+          const row = page.locator(".connect-agent[data-agent-key=\"atlas:agent-ds-rly\"]")
+          if (surface === "stage") {
+            await row.click()
+            await expect(page.locator(".connect-stage-hero")).toBeVisible()
+          }
+          const creature = surface === "row"
+            ? row.locator("svg.connect-creature")
+            : page.locator(".connect-stage-hero svg.connect-creature")
+          const halo = creature.locator(".connect-creature-halo")
+          const orbit = creature.locator(".connect-creature-orbit")
+          expect(await halo.evaluate((node) => Number(getComputedStyle(node).opacity))).toBeGreaterThan(0)
+          expect(await orbit.evaluate((node) => Number(getComputedStyle(node).opacity))).toBeGreaterThan(0)
+          const neutral = await page.evaluate(() => {
+            const probe = document.createElement("span")
+            probe.style.color = "var(--rly-color-text-3)"
+            document.body.append(probe)
+            const colour = getComputedStyle(probe).color
+            probe.remove()
+            return colour
+          })
+          expect(await halo.evaluate((node) => getComputedStyle(node).stroke)).toBe(neutral)
+          expect(await halo.evaluate((node) => Number.parseFloat(getComputedStyle(node).strokeWidth))).toBe(
+            surface === "row" ? 2 : 1
+          )
+          await page.emulateMedia({ forcedColors: "active" })
+          expect(await halo.evaluate((node) => Number(getComputedStyle(node).opacity))).toBeGreaterThan(0)
+          expect(await halo.evaluate((node) => getComputedStyle(node).stroke)).not.toBe("none")
+        })
+      }
+
+      for (const surface of ["row", "stage"]) {
+        test(`halo encloses the seeded outline ${surface} ${String(width)} ${theme}`, async ({ page }) => {
+          const fixtures = surface === "row" ? [...base, ...tallSeeds] : base
+          await openDirectory(page, width, theme, fixtures)
+          for (const fixture of fixtures) {
+            const row = page.locator(`.connect-agent[data-agent-key="${fixture.host}:${fixture.id}"]`)
+            if (surface === "stage") {
+              await row.click()
+              await expect(page.locator(".connect-stage-hero")).toBeVisible()
+            }
+            const creature = surface === "row"
+              ? row.locator("svg.connect-creature")
+              : page.locator(".connect-stage-hero svg.connect-creature")
+            for (const moment of ["rest", "inhale", "exhale"]) {
+              await page.emulateMedia({ reducedMotion: moment === "rest" ? "reduce" : "no-preference" })
+              const geometry = await measureEnclosure(creature, moment)
+              expect(geometry, `${fixture.host}:${fixture.id} ${moment}`).not.toBeNull()
+              expect(geometry, `${fixture.host}:${fixture.id} ${moment}`).toBeLessThanOrEqual(1)
+            }
+            await page.emulateMedia({ reducedMotion: "reduce" })
+            if (surface === "stage") await page.keyboard.press("Escape")
+          }
+        })
+      }
+
+      test(`row bodies fill their tracks ${String(width)} ${theme}`, async ({ page }) => {
+        await openDirectory(page, width, theme)
+        const creatures = page.locator(".connect-agent > svg.connect-creature")
+        await expect(creatures).toHaveCount(base.length)
+        for (const creature of await creatures.all()) {
+          const track = await drawnBox(creature)
+          const body = await drawnBox(creature.locator(".connect-creature-body"))
+          expect(track.width).toBe(36)
+          // Square framing and stroke clearance at the 28px crew minimum leave tall seeds at least 0.58 wide.
+          expect(body.width).toBeGreaterThanOrEqual(track.width * 0.58)
+          expect(Math.max(body.width, body.height)).toBeGreaterThanOrEqual(track.width * 0.7)
+          expect(body.x).toBeGreaterThanOrEqual(track.x - 1)
+          expect(body.x + body.width).toBeLessThanOrEqual(track.x + track.width + 1)
+          const ring = await drawnBox(creature.locator(".connect-creature-halo"))
+          expect(Math.max(ring.width, ring.height)).toBeGreaterThanOrEqual(32)
+          expect(ring.width).toBeLessThanOrEqual(36)
+          await expectRingFitsTrack(creature)
+        }
+      })
+
+      test(`pinned body fills its chip ${String(width)} ${theme}`, async ({ page }) => {
+        await openDirectory(page, width, theme)
+        await page.locator(".connect-agent[data-agent-key=\"atlas:agent-ds-rly\"]").click()
+        await page.getByRole("button", { name: "Pin", exact: true }).click()
+        await page.keyboard.press("Escape")
+        const creature = page.locator(
+          ".connect-pins[data-placement=\"float\"] .connect-pin-open svg.connect-creature:visible"
+        )
+        await expect(creature).toHaveCount(1)
+        const track = await drawnBox(creature)
+        const body = await drawnBox(creature.locator(".connect-creature-body"))
+        expect(track.width).toBe(32)
+        expect(body.width).toBeGreaterThanOrEqual(track.width * 0.58)
+        expect(Math.max(body.width, body.height)).toBeGreaterThanOrEqual(track.width * 0.7)
+        expect(body.x).toBeGreaterThanOrEqual(track.x - 1)
+        expect(body.x + body.width).toBeLessThanOrEqual(track.x + track.width + 1)
+      })
+
+      for (const key of ["atlas:agent-ds-rly", "atlas:agent-sec-cc"]) {
+        test(`stage body and state ring keep their proportions ${key} ${String(width)} ${theme}`, async ({ page }) => {
+          await openDirectory(page, width, theme)
+          await page.locator(`.connect-agent[data-agent-key="${key}"]`).click()
+          const hero = page.locator(".connect-stage-hero")
+          await expect(hero).toBeVisible()
+          const heroBox = await drawnBox(hero)
+          expect(heroBox.height).toBe(width === 390 ? 272 : 176)
+          const creature = hero.locator("svg.connect-creature")
+          const body = await drawnBox(creature.locator(".connect-creature-body"))
+          const state = creature.locator(key.endsWith("ds-rly") ? ".connect-creature-orbit" : ".connect-creature-halo")
+          const ring = await drawnBox(state)
+          expect(await state.evaluate((node) => Number(getComputedStyle(node).opacity))).toBeGreaterThan(0)
+          expect(ring.width).toBeGreaterThan(body.width)
+          if (width === 390) {
+            expect(body.width).toBeGreaterThanOrEqual(150)
+            expect(ring.width).toBeGreaterThanOrEqual(180)
+            expect(ring.x - 2).toBeGreaterThanOrEqual(heroBox.x)
+            expect(ring.y - 2).toBeGreaterThanOrEqual(heroBox.y)
+            expect(ring.x + ring.width + 2).toBeLessThanOrEqual(heroBox.x + heroBox.width)
+            expect(ring.y + ring.height + 2).toBeLessThanOrEqual(heroBox.y + heroBox.height)
+          } else {
+            // The desktop stage already matches: enlarging every stage would regress it.
+            expect((await drawnBox(creature)).width).toBe(128)
+            expect(body.width).toBeGreaterThanOrEqual(70)
+            expect(body.width).toBeLessThanOrEqual(105)
+            expect(ring.width).toBeGreaterThanOrEqual(115)
+            expect(ring.width).toBeLessThanOrEqual(120)
+          }
+        })
+      }
+
+      test(`ok footer labels are plain secondary text with a usage arrow ${String(width)} ${theme}`, async ({ page }) => {
+        await openDirectory(page, width, theme)
+        const line = page.getByRole("list", { name: "Usage limits" })
+        await expect(line.locator("li")).toHaveCount(2)
+        for (const text of ["Claude 48% weekly", "Codex 31% weekly"]) {
+          const label = line.getByText(text, { exact: true })
+          await expect(label).toBeVisible()
+          const colours = await label.evaluate((node) => {
+            const probe = document.createElement("span")
+            probe.style.color = "var(--rly-color-text-2)"
+            node.append(probe)
+            const expected = getComputedStyle(probe).color
+            probe.remove()
+            return { actual: getComputedStyle(node).color, expected }
+          })
+          expect(colours.actual).toBe(colours.expected)
+        }
+        await expect(line.locator("svg")).toHaveCount(0)
+        const link = page.locator(".connect-limits-link")
+        await expect(link).toHaveAttribute("href", "/?tab=usage")
+        await expect(link.locator("svg")).toHaveCount(1)
+        await expect(link.locator("svg")).toHaveAttribute("aria-hidden", "true")
+      })
+    }
+  }
+})
 
 /** Export frame heights include the 98px masthead; capture the actual bounded directory below it. */
 const states = {
@@ -340,7 +673,7 @@ for (const width of [390, 1280]) {
             await page.addStyleTag({ content: ".connect-stage-sheet { border: 1px solid var(--rly-color-border-1); }" })
             const sheet = await page.locator(".connect-stage-sheet").boundingBox()
             expect(sheet?.width).toBe(Math.min(width + 2, 480))
-            expect((await page.locator(".connect-stage-hero").boundingBox())?.height).toBe(176)
+            expect((await page.locator(".connect-stage-hero").boundingBox())?.height).toBe(width === 390 ? 272 : 176)
           }
           if (state === "2t") {
             await expect(page.locator(".connect-agent[data-agent-key=\"atlas:agent-fmt-sub\"]")).toBeVisible()

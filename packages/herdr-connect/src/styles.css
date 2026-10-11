@@ -116,8 +116,11 @@
 
   /* The cards and history live in the Usage tab; the line links there. */
   .connect-limits-link {
+    align-items: center;
     color: var(--rly-color-text-2);
+    display: inline-flex;
     font-size: var(--rly-type-meta-size);
+    gap: var(--rly-space-8);
     inline-size: fit-content;
     position: relative;
   }
@@ -1003,7 +1006,7 @@
     }
 
     .connect-agent-tree {
-      --connect-creature-track: 28px;
+      --connect-creature-track: 36px;
       --connect-state-track: 6.25rem;
       --connect-time-track: 2.75rem;
     }
@@ -1305,6 +1308,10 @@
     stroke-width: 7;
   }
 
+  .connect-creature[data-size="row"] .connect-creature-orbit {
+    stroke-width: var(--connect-creature-row-stroke);
+  }
+
   .connect-creature[data-size="cast"] .connect-creature-orbit {
     stroke-width: 4.2;
   }
@@ -1321,7 +1328,7 @@
   .connect-creature-squash,
   .connect-creature-breath {
     transform-box: view-box;
-    transform-origin: 50px 88px;
+    transform-origin: var(--connect-creature-origin-x) var(--connect-creature-origin-y);
   }
 
   .connect-creature-orbit,
@@ -1350,6 +1357,17 @@
 
   .connect-creature[data-bucket="needs-you"] .connect-creature-pupil {
     scale: 1.22;
+  }
+
+  /* The working light travels over a quiet full ring, which remains visible between passes. */
+  .connect-creature[data-bucket="working"] .connect-creature-halo {
+    opacity: 0.35;
+    stroke: var(--rly-color-text-3);
+    stroke-width: 1px;
+  }
+
+  .connect-creature[data-size="row"] .connect-creature-halo {
+    stroke-width: 2px;
   }
 
   .connect-creature[data-bucket="working"] .connect-creature-orbit {
@@ -1595,7 +1613,7 @@
 
   @keyframes connect-creature-turn {
     to {
-      rotate: 360deg;
+      stroke-dashoffset: -100;
     }
   }
 
@@ -1640,6 +1658,11 @@
     }
 
     .connect-creature-halo {
+      stroke: Highlight;
+    }
+
+    .connect-creature[data-bucket="working"] .connect-creature-halo {
+      opacity: 1;
       stroke: Highlight;
     }
   }
@@ -1687,6 +1710,13 @@
   }
 
   :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .connect-creature-halo {
+    stroke: Highlight;
+  }
+
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"])
+    .connect-creature[data-bucket="working"]
+    .connect-creature-halo {
+    opacity: 1;
     stroke: Highlight;
   }
 
@@ -3085,6 +3115,14 @@
   }
   .connect-stage-hero .connect-creature {
     inline-size: 128px;
+  }
+  @media (max-width: 640px) {
+    .connect-stage-hero {
+      block-size: 272px;
+    }
+    .connect-stage-hero .connect-creature {
+      inline-size: 256px;
+    }
   }
   .connect-stage-hero[data-tone="progress"] {
     background: var(--rly-color-deploying-tint);

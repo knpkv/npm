@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 
+import { RLY_STATE_LABEL_VARIANTS } from "@knpkv/rly/primitives"
 import { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, describe, expect, it } from "vitest"
@@ -60,6 +61,39 @@ describe("ConnectLimits", () => {
     expect((await render(<ConnectLimits problem={null} view={{ ...view, off: true }} />)).textContent).toBe("")
     expect((await render(<ConnectLimits problem="Couldn't load limits." view={null} />)).textContent).toBe(
       "Couldn't load limits."
+    )
+  })
+
+  it("keeps ok limits quiet while warning and at-limit readings retain their icons", async () => {
+    const host = await render(
+      <ConnectLimits
+        problem={null}
+        view={{
+          ...view,
+          line: [
+            { agent: "claude", tone: "ok", text: "Claude 48% weekly" },
+            { agent: "codex", tone: "near", text: "Codex 86% weekly" }
+          ]
+        }}
+      />
+    )
+    const labels = host.querySelectorAll(".connect-limits-line li")
+    expect(labels[0]?.textContent).toBe("Claude 48% weekly")
+    expect(labels[0]?.querySelector("svg")).toBeNull()
+    expect(labels[0]?.querySelector("span")?.className).toContain(RLY_STATE_LABEL_VARIANTS.tone.neutral.className)
+    expect(labels[1]?.querySelectorAll("svg")).toHaveLength(1)
+    expect(labels[1]?.querySelector("span")?.className).toContain(RLY_STATE_LABEL_VARIANTS.tone.caution.className)
+    expect(host.querySelector(".connect-limits-link svg")?.getAttribute("aria-hidden")).toBe("true")
+    const limited = await render(
+      <ConnectLimits
+        problem={null}
+        view={{ ...view, line: [{ agent: "codex", tone: "at-limit", text: "Codex 100% weekly" }] }}
+      />
+    )
+    expect(limited.querySelector(".connect-limits-line li")?.textContent).toBe("Codex 100% weekly")
+    expect(limited.querySelectorAll(".connect-limits-line svg")).toHaveLength(1)
+    expect(limited.querySelector(".connect-limits-line li span")?.className).toContain(
+      RLY_STATE_LABEL_VARIANTS.tone.critical.className
     )
   })
 })

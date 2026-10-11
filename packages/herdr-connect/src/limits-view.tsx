@@ -6,12 +6,13 @@
  * @module
  */
 import type { LimitTone } from "@knpkv/agent-usage/limits"
+import { Icon } from "@knpkv/rly/foundations"
 import { type RlyStateTone, StateLabel, Text } from "@knpkv/rly/primitives"
 import type { ReactElement } from "react"
 import type { ConnectLimitsView } from "./limits-model.js"
 
 const stateTone = {
-  ok: "positive",
+  ok: "neutral",
   near: "caution",
   "at-limit": "critical",
   unknown: "neutral"
@@ -52,6 +53,7 @@ export const ConnectLimits = ({
       )}
       <a className="connect-limits-link" href={USAGE_TAB_HREF}>
         {view.hosts.length > 1 ? "Limits and usage on each host" : "Limits and usage"}
+        <Icon decorative name="arrow-right" size="small" />
       </a>
     </div>
   )

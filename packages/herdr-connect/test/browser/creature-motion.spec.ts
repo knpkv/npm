@@ -96,6 +96,24 @@ test.describe("Connect creatures", () => {
     ])
   })
 
+  // A rotating ellipse crosses a tall body's sides; the working light must travel along a fixed ring.
+  test("moves the working light without rotating its fitted ring", async ({ page }) => {
+    await open(page, "no-preference")
+    const orbit = page.locator(".connect-agent .connect-creature-orbit").first()
+    const read = () =>
+      orbit.evaluate((node) => {
+        const { height, width } = node.getBoundingClientRect()
+        return { height, width, offset: Number.parseFloat(getComputedStyle(node).strokeDashoffset) }
+      })
+    await freeze(page, ["connect-creature-turn"], 0.001)
+    const start = await read()
+    await freeze(page, ["connect-creature-turn"], 0.251)
+    const quarter = await read()
+    expect(quarter.width).toBeCloseTo(start.width, 2)
+    expect(quarter.height).toBeCloseTo(start.height, 2)
+    expect(Math.abs(quarter.offset - start.offset)).toBeCloseTo(25, 2)
+  })
+
   // Only the body squashes: through a breath and an arrival's hop the pupils stay round and keep their size.
   test("never squashes the eyes with the body", async ({ page }) => {
     await open(page, "no-preference")
@@ -151,8 +169,16 @@ test.describe("Connect creatures", () => {
           const canvas = new OffscreenCanvas(bitmap.width, bitmap.height)
           const context = canvas.getContext("2d")
           context?.drawImage(bitmap, 0, 0)
-          const scale = bitmap.width / 100
-          const pixel = context?.getImageData(Math.round(x * scale), Math.round(y * scale), 1, 1).data
+          const matrix = node.querySelector<SVGPathElement>(".connect-creature-body")?.ownerSVGElement?.getScreenCTM()
+          if (matrix === null || matrix === undefined) return []
+          const frame = node.getBoundingClientRect()
+          const point = new DOMPoint(x, y).matrixTransform(matrix)
+          const pixel = context?.getImageData(
+            Math.round((point.x - frame.x) * bitmap.width / frame.width),
+            Math.round((point.y - frame.y) * bitmap.height / frame.height),
+            1,
+            1
+          ).data
           return [...(pixel ?? [])].slice(0, 3)
         },
         [shot, point] satisfies readonly [string, readonly [number, number]]
