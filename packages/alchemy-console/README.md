@@ -32,6 +32,12 @@ The client-safe contracts are exported from `@knpkv/alchemy-console/api` and may
 used with Effect's `HttpApiClient`. Both endpoints require the process's owner
 cookie, and all responses are private and uncacheable:
 
+The cookie name includes the bound listener port, so sessions on different ports
+can coexist in one browser. Both API boundaries select that listener's cookie.
+Cookies still share the loopback host and travel across ports; the name separates
+sessions and does not provide port confidentiality. The API middleware resolves
+the name at runtime rather than declaring a fixed OpenAPI cookie scheme.
+
 | Route                 | Result                                                 |
 | --------------------- | ------------------------------------------------------ |
 | `GET /api/stacks`     | Stack summaries and explicit local/S3 discovery issues |

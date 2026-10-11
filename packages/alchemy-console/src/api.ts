@@ -1,6 +1,6 @@
 /** Client-safe contracts. IDs and metadata cross only the authenticated owner API, never public telemetry. */
 import { Schema } from "effect"
-import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiMiddleware, HttpApiSecurity } from "effect/http-api"
+import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiMiddleware } from "effect/http-api"
 import { StackState } from "./schema.js"
 
 /** Random, process-scoped identity; contains no encoded provider locator. Not persisted by the server. */
@@ -55,9 +55,9 @@ export class Unauthorized extends Schema.TaggedError<Unauthorized>()("Unauthoriz
 
 export class Forbidden extends Schema.TaggedError<Forbidden>()("Forbidden", {}, { httpApiStatus: 403 }) {}
 
+/** The server resolves its listener-specific cookie name at request time. */
 export class OwnerAuth extends HttpApiMiddleware.Service<OwnerAuth>()("@knpkv/alchemy-console/OwnerAuth", {
-  error: [Unauthorized, Forbidden],
-  security: { ownerCookie: HttpApiSecurity.apiKey({ in: "cookie", key: "alchemy_console_owner" }) }
+  error: [Unauthorized, Forbidden]
 }) {}
 
 const stacks = HttpApiGroup.make("stacks")

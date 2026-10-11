@@ -1,16 +1,17 @@
 import * as OwnerSession from "@knpkv/browser-pairing/owner-session"
-import { Effect, Layer, Redacted } from "effect"
+import { Effect, Layer } from "effect"
+import { HttpServerRequest } from "effect/http"
 import { Forbidden, OwnerAuth, Unauthorized } from "../api.js"
 
 /** Fresh process session. Codes are minted only after the authenticated HTTP listener has built. */
-export const makeOwnerSession = (origin: string) =>
+export const makeOwnerSession = (port: number) =>
   OwnerSession.make({
     product: "alchemy-console",
-    cookieName: "alchemy_console_owner",
+    cookieName: `alchemy_console_owner_${port}`,
     writes: "none",
     freshUrlHint: "run `alchemy-console login` for a fresh URL",
-    authorityOrigin: origin,
-    browserOrigin: origin
+    authorityOrigin: OwnerSession.loopbackOrigin("127.0.0.1", port),
+    browserOrigin: OwnerSession.loopbackOrigin("127.0.0.1", port)
   })
 
 /** Credential-bearing URL. Stdout and browser launch are its only announcement boundaries. */
@@ -23,14 +24,15 @@ export const ownerAuthLayer = Layer.effect(
   OwnerAuth,
   Effect.gen(function*() {
     const session = yield* OwnerSession.OwnerSession
-    return OwnerAuth.of({
-      ownerCookie: Effect.fn("AlchemyConsole.authorizeOwner")(function*(httpEffect, { credential }) {
-        yield* session.authorizeHttp(Redacted.value(credential)).pipe(Effect.catchTags({
+    return OwnerAuth.of(
+      Effect.fn("AlchemyConsole.authorizeOwner")(function*(httpEffect) {
+        const request = yield* HttpServerRequest.HttpServerRequest
+        yield* session.authorizeHttp(request.cookies[session.cookieName] ?? "").pipe(Effect.catchTags({
           OwnerSessionUnauthorizedError: () => Effect.fail(new Unauthorized({})),
           OwnerSessionForbiddenError: () => Effect.fail(new Forbidden({}))
         }))
         return yield* httpEffect
       })
-    })
+    )
   })
 )

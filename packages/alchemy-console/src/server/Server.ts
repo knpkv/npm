@@ -14,7 +14,7 @@ export const makeServer = (options: ControlOptions, ready: Deferred.Deferred<str
       const server = yield* HttpServer.HttpServer
       if (server.address._tag === "UnixPathAddress") return yield* Effect.die("Alchemy console requires a TCP listener")
       const port = server.address.port
-      const session = yield* makeOwnerSession(OwnerSession.loopbackOrigin("127.0.0.1", port))
+      const session = yield* makeOwnerSession(port)
       const listening = yield* Deferred.make<void>()
       const control = Layer.effectDiscard(controlSocket({ ...options, port }, session, Deferred.await(listening)))
       return HttpRouter.serve(application, { disableLogger: true, disableListenLog: true }).pipe(

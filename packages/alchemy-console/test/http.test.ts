@@ -13,7 +13,7 @@ import { FixtureSource, fixtureSourceLayer, state } from "./catalogFixture.js"
 const routes = Layer.unwrap(Effect.gen(function*() {
   const server = yield* HttpServer.HttpServer
   if (server.address._tag === "UnixPathAddress") return yield* Effect.die("fixture listener must use TCP")
-  const session = yield* makeOwnerSession(OwnerSession.loopbackOrigin("127.0.0.1", server.address.port))
+  const session = yield* makeOwnerSession(server.address.port)
   return HttpRouter.serve(application, { disableLogger: true, disableListenLog: true }).pipe(
     Layer.provideMerge(Layer.succeed(OwnerSession.OwnerSession, session)),
     Layer.provideMerge(Catalog.layer.pipe(Layer.provideMerge(fixtureSourceLayer))),
@@ -26,12 +26,23 @@ const fixtures = routes.pipe(
   Layer.provideMerge(HttpServer.layerTestClient),
   Layer.provide(NodeHttpClient.layerNodeHttp),
   Layer.provideMerge(NodeHttpServer.layerServer(createServer, { host: "127.0.0.1", port: 0 })),
-  Layer.provide(NodeServices.layer)
+  Layer.provideMerge(NodeServices.layer)
 )
 
 const cookie = (session: OwnerSession.OwnerSessionService): string => session.sessionCookie.split(";")[0] ?? ""
 
 layer(fixtures)("HTTP owner boundary", (it) => {
+  it.effect("rejects another listener's cookie instead of accepting a sibling session", () =>
+    Effect.gen(function*() {
+      const client = yield* HttpClient.HttpClient
+      const session = yield* OwnerSession.OwnerSession
+      const port = Number(new URL(session.authorityOrigin).port)
+      const other = yield* makeOwnerSession(port === 3114 ? 3115 : 3114)
+      expect(other.cookieName).not.toBe(session.cookieName)
+      expect((yield* client.get("/api/stacks", { headers: { cookie: cookie(other) } })).status).toBe(401)
+      expect((yield* client.get("/api/stacks", { headers: { cookie: cookie(session) } })).status).toBe(200)
+    }))
+
   it.effect("requires the owner cookie before any scan, and refuses cross-site reads and writes", () =>
     Effect.gen(function*() {
       const client = yield* HttpClient.HttpClient

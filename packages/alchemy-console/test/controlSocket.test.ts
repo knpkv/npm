@@ -38,7 +38,7 @@ layer(NodeServices.layer)("control socket trust", (it) => {
   it.effect("refuses startup over an existing entry and checks Unix path limits without deleting anything", () =>
     Effect.gen(function*() {
       const { fs, options, socketPath } = yield* setup
-      const session = yield* makeOwnerSession("http://127.0.0.1:3114")
+      const session = yield* makeOwnerSession(3114)
       yield* fs.writeFileString(socketPath, "fixture-sentinel")
       expect(yield* Effect.flip(controlSocket(options, session, Effect.void))).toMatchObject({ reason: "occupied" })
       expect(yield* fs.readFileString(socketPath)).toBe("fixture-sentinel")
