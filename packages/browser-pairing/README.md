@@ -1,9 +1,9 @@
 # @knpkv/browser-pairing
 
 Typed, redacted browser-pairing credentials and transport primitives. Product
-packages keep their own persistence, persisted authorization, and route policy.
+packages keep their persisted authorization and application route policy.
 
-`@knpkv/browser-pairing/owner-session` is the one shared policy: the Owner
+`@knpkv/browser-pairing/owner-session` shares the Owner
 Session of a single-operator loopback web app. It issues the session, CSRF
 (`writes: "csrf"`) and bootstrap credentials, authorizes requests by session
 cookie, Origin, Fetch Metadata and CSRF token, and serves `POST /auth/bootstrap`.
@@ -44,3 +44,44 @@ or persist credentials, and exposes sanitized `BrowserOpenError` and
 
 Typed cookie serialization accepts only a redacted `SessionToken`; JavaScript
 callers still reach the runtime credential and attribute validation boundary.
+
+`@knpkv/browser-pairing/control` shares owner-only control files and the bearer
+login route. Call `makeWebControl({ directory, file, messages })` with resolved
+paths and optional product-specific error sentences. Its `writeControlFile`,
+`registerControlFile`, `removeControlFile`, `requestLoginUrl` and `readOrigin` operations use
+Effect FileSystem, Path and HttpClient services. Register only once the
+listener is ready; scope cleanup removes the file only if its token still
+matches, leaving a newer server's registration intact.
+
+`ControlFile` persists `{ origin, token }` and is credential-bearing. The
+origin is the direct loopback listener; the bearer token and file stay
+server-private and owner-only, never in HTTP projections, logs or telemetry.
+Directories must be 0700 and files 0600. Linked and permissive paths are
+refused, writes use exclusive temporary files and atomic rename, and a shared
+exclusive lock serializes publication and removal with stale-lock recovery.
+Callers choose a private control directory; unrelated configuration directories
+can keep their existing permissions. The helper does not migrate legacy files.
+
+`readOrigin` reuses these private-path checks and decodes only the origin field.
+It returns a canonical HTTP loopback origin, rejecting credentials, paths,
+queries, fragments and noncanonical spellings. This validated origin may appear
+in an authenticated client response. The credential-bearing persisted record,
+token and private file paths must never appear there or in logs. It does not
+decode the token, contact the server, request a login link, create files or
+repair permissions. Missing, malformed or unsafe registrations return
+`WebNotRunning` without their underlying cause. An origin reading does not
+prove that the listener is reachable or that its login token is valid.
+
+`requestLoginUrl` sends one bearer-authenticated POST to `/control/login`.
+`WebNotRunning` covers missing, invalid or unreachable registrations;
+`WebLoginRefused` covers refused or malformed replies and must not trigger
+another server. Replies must contain a valid one-time bootstrap URL at the
+recorded loopback origin or the supported development proxy origin. That URL
+is a credential, printed only on CLI stdout and passed to the browser opener.
+
+`loginControlRouter(token, publicOrigin)` uses the existing OwnerSession mint
+and bootstrap flow. It returns a non-cacheable credential URL only for the
+server-private bearer token, without cookie authentication. Apply
+`controlAwareCors(options)` when enabling ordinary application CORS; it
+excludes `/control/login` from CORS and preflight while retaining it for other
+routes. The application supplies the same public origin as startup.

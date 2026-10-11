@@ -1,6 +1,6 @@
 {
   "name": "@knpkv/jira-clockify",
-  "version": "1.9.1",
+  "version": "1.10.1",
   "description": "TUI for Jira-Clockify time tracking, attachable to neovim",
   "license": "MIT",
   "author": "knpkv",
@@ -63,6 +63,7 @@
     "@knpkv/ai-claude": "workspace:^",
     "@knpkv/ai-codex": "workspace:^",
     "@knpkv/atlassian-common": "workspace:^",
+    "@knpkv/browser-pairing": "workspace:^",
     "@knpkv/clockify-api-client": "workspace:^",
     "@knpkv/jira-api-client": "workspace:^",
     "@knpkv/jira-cli": "workspace:^",

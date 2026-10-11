@@ -2010,8 +2010,12 @@ esac
           const text = (path: string) =>
             get(path).pipe(Effect.flatMap((response) => Effect.promise(() => response.text())))
           const svg = yield* text("/assets/relay-icon.svg")
+          const favicon = yield* text("/assets/relay-favicon.svg")
           const legacy = yield* text("/assets/approval-icon.svg")
           expect(svg).toContain("<title>Relay</title>")
+          expect(svg).toContain("viewBox=\"0 0 512 512\"")
+          expect(favicon).toContain("width=\"16\" height=\"16\"")
+          expect(favicon).not.toBe(svg)
           expect(legacy).toBe(svg)
           expect((yield* get("/assets/relay-unknown.png")).status).toBe(404)
         }).pipe(Effect.scoped),

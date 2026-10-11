@@ -1,5 +1,6 @@
 import { Effect, FileSystem, Path } from "effect"
 import { entries, exists, readText, stat, withinRoot } from "./internal/files.js"
+import { decodeOutputs } from "./outputs.js"
 import { type StackState, StateReadError } from "./schema.js"
 import { decodeResource } from "./state.js"
 
@@ -42,9 +43,21 @@ export const readLocalState = Effect.fn("AlchemyConsole.readLocalState")(functio
         backend: "local",
         alchemyVersion,
         lastDeploy: null,
-        resources: resources.sort((a, b) => a.fqn.localeCompare(b.fqn))
+        resources: resources.sort((a, b) => a.fqn.localeCompare(b.fqn)),
+        outputs: yield* readLocalOutputs(stageDir)
       })
     }
   }
   return { available: true, stacks }
 })
+
+/** Missing, inaccessible or unsupported output state is unavailable, never a successful empty read. */
+const readLocalOutputs = Effect.fn("AlchemyConsole.readLocalOutputs")(
+  function*(stageDir: string) {
+    const path = yield* Path.Path
+    const file = yield* withinRoot(stageDir, path.join(stageDir, "__stack_output__.json"))
+    if ((yield* stat(file)).type !== "File") return yield* new StateReadError({ reason: "invalid-state" })
+    return yield* decodeOutputs(yield* readText(file))
+  },
+  Effect.catchTag("StateReadError", () => Effect.succeed(null))
+)

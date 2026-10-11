@@ -80,7 +80,7 @@ const trustedProxyForwardedClient = (selector: string | ReadonlyArray<string> | 
   return "192.168.1.25"
 }
 
-const acquireEphemeralPort = Effect.tryPromise({
+export const acquireEphemeralPort = Effect.tryPromise({
   try: () =>
     new Promise<number>((resolve, reject) => {
       const probe = createServer()

@@ -2,6 +2,40 @@
 
 Released as `@knpkv/herdr-approvals` up to 0.18.0; the headings below are that package's history.
 
+## 0.29.0
+
+### Minor Changes
+
+- [#846](https://github.com/knpkv/npm/pull/846) [`f47bcd8`](https://github.com/knpkv/npm/commit/f47bcd8cb0ff789a068cd6ad1eefb912f28a1f89) Thanks [@konopkov](https://github.com/konopkov)! - Use the approved static Chef logo in the module shell, with square 32px desktop and 24px phone marks. The existing expanded styling indicates whether Ask Relay is open; status announcements and the conversation's Creature poses retain their behavior. Legacy Fleet and dashboard marks remain unchanged. `HubRelay.launcherMark` defaults to `creature`; `chef` explicitly selects the static logo independently of launcher labels.
+
+  Update the app, maskable and notification icons, and serve a separate simplified favicon. Installed app identity and legacy icon URLs remain stable. Committed icon hashes and drawing parity guards verify the approved geometry.
+
+## 0.28.0
+
+### Minor Changes
+
+- [#843](https://github.com/knpkv/npm/pull/843) [`929ef05`](https://github.com/knpkv/npm/commit/929ef055945cffcdb9d78fc2708ee1871c1126e3) Thanks [@konopkov](https://github.com/konopkov)! - Derive the machine-local Code owner link from the current private control file instead of a fixed port.
+  Code queue/status responses gain optional validated `ownerUi` metadata; the host server entry exports
+  its origin-only reader. Missing or invalid metadata has no fallback and exposes no control credential.
+
+  Point unreadable-cache guidance to the owner service and hub log, and document owner-only cache
+  migration and the native SQLite deployment probe. Strengthen the selection-close browser guard to
+  exercise a visible, enabled, hit-testable Close button without forced pointer input.
+
+### Patch Changes
+
+- Updated dependencies [[`929ef05`](https://github.com/knpkv/npm/commit/929ef055945cffcdb9d78fc2708ee1871c1126e3), [`929ef05`](https://github.com/knpkv/npm/commit/929ef055945cffcdb9d78fc2708ee1871c1126e3)]:
+  - @knpkv/codecommit-web@0.35.0
+  - @knpkv/browser-pairing@0.7.0
+
+## 0.27.1
+
+### Patch Changes
+
+- Updated dependencies [[`d9b889e`](https://github.com/knpkv/npm/commit/d9b889e13690c701f94448d831efbc0ae875624f)]:
+  - @knpkv/browser-pairing@0.6.0
+  - @knpkv/codecommit-web@0.34.1
+
 ## 0.27.0
 
 ### Minor Changes

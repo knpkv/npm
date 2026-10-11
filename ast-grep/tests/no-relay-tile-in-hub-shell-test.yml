@@ -1,0 +1,7 @@
+id: no-relay-tile-in-hub-shell
+valid:
+  - <RelayChefMark />
+  - <RelayMark size={32} />
+invalid:
+  - <RelayMark.Tile size={32} />
+  - <RelayMark.Tile />

@@ -22,6 +22,8 @@ export interface StackListViewProps {
   readonly state: StackListState
   readonly copy: StackListCopy
   readonly onReadAgain: () => void
+  /** Omit when the mounting host has no detail view. Known counts and stages share this real UI destination. */
+  readonly stackHref?: (stack: StackSummary) => string
 }
 
 const issueCopy = (issue: DiscoveryIssue) => {
@@ -72,10 +74,12 @@ const IssueNotice = ({ issue }: { readonly issue: DiscoveryIssue }): ReactElemen
 /** Group only returned rows; null metadata stays Unknown and zero remains a known count. */
 const StackGroup = ({
   app,
+  stackHref,
   stacks
 }: {
   readonly app: string
   readonly stacks: ReadonlyArray<StackSummary>
+  readonly stackHref: StackListViewProps["stackHref"]
 }): ReactElement => {
   const headingId = useId()
   return (
@@ -103,10 +107,17 @@ const StackGroup = ({
             {stacks.map((stack) => (
               <tr key={stack.id}>
                 <th scope="row">
-                  <span className="ac-stage">
-                    <span className="ac-sr-only">{app} </span>
-                    {stack.stage}
-                  </span>
+                  {stackHref === undefined ? (
+                    <span className="ac-stage">
+                      <span className="ac-sr-only">{app} </span>
+                      {stack.stage}
+                    </span>
+                  ) : (
+                    <a className="ac-stage ac-list-link" data-rly-hit-area href={stackHref(stack)}>
+                      <span className="ac-sr-only">{app} </span>
+                      {stack.stage}
+                    </a>
+                  )}
                 </th>
                 <td>
                   <span className="ac-sr-only">Backend: </span>
@@ -120,9 +131,22 @@ const StackGroup = ({
                   <span className="ac-mobile-label">Last deploy </span>
                   {stack.lastDeploy ?? "Unknown"}
                 </td>
-                <td>
+                <td className={stackHref === undefined ? undefined : "ac-list-count"}>
                   <span className="ac-mobile-label">Resources </span>
-                  {stack.resourceCount ?? "Unknown"}
+                  {stack.resourceCount === null ? (
+                    "Unknown"
+                  ) : stackHref === undefined ? (
+                    stack.resourceCount
+                  ) : (
+                    <a
+                      className="ac-list-link"
+                      data-rly-hit-area
+                      href={stackHref(stack)}
+                      aria-label={`${app} ${stack.stage}: ${stack.resourceCount} resources`}
+                    >
+                      {stack.resourceCount}
+                    </a>
+                  )}
                 </td>
               </tr>
             ))}
@@ -145,7 +169,7 @@ const Reading = (): ReactElement => (
 )
 
 /** Controlled module content for the local console or a host shell; no browser storage or data fetching. */
-export const StackListView = ({ copy, onReadAgain, state }: StackListViewProps): ReactElement => {
+export const StackListView = ({ copy, onReadAgain, stackHref, state }: StackListViewProps): ReactElement => {
   const stateTitleId = useId()
   const empty = state._tag === "Ready" && state.list.stacks.length === 0 && state.list.issues.length === 0
   const issues =
@@ -251,7 +275,12 @@ export const StackListView = ({ copy, onReadAgain, state }: StackListViewProps):
             <Reading />
           ) : state._tag === "Ready" ? (
             apps.map((app) => (
-              <StackGroup app={app} key={app} stacks={state.list.stacks.filter((stack) => stack.app === app)} />
+              <StackGroup
+                app={app}
+                key={app}
+                stacks={state.list.stacks.filter((stack) => stack.app === app)}
+                stackHref={stackHref}
+              />
             ))
           ) : null}
           {state._tag === "Ready" && state.list.stacks.length === 0 ? (

@@ -1,5 +1,31 @@
 # @knpkv/alchemy-console
 
+## 0.4.0
+
+### Minor Changes
+
+- [#848](https://github.com/knpkv/npm/pull/848) [`b8dce18`](https://github.com/knpkv/npm/commit/b8dce18f90b48e04c563ef7c09b82c2a55b71b99) Thanks [@konopkov](https://github.com/konopkov)! - Add authenticated read-only stack and resource detail views, resource-own provider identity and console links, bounded dependencies, and hidden output-key discovery.
+
+## 0.3.2
+
+### Patch Changes
+
+- Updated dependencies [[`929ef05`](https://github.com/knpkv/npm/commit/929ef055945cffcdb9d78fc2708ee1871c1126e3)]:
+  - @knpkv/browser-pairing@0.7.0
+
+## 0.3.1
+
+### Patch Changes
+
+- Updated dependencies [[`d9b889e`](https://github.com/knpkv/npm/commit/d9b889e13690c701f94448d831efbc0ae875624f)]:
+  - @knpkv/browser-pairing@0.6.0
+
+## 0.3.0
+
+### Minor Changes
+
+- [#838](https://github.com/knpkv/npm/pull/838) [`686a11d`](https://github.com/knpkv/npm/commit/686a11d478903647941d4a791e70fe6222857003) Thanks [@konopkov](https://github.com/konopkov)! - Add authenticated stack discovery screens and reusable browser views, with explicit incomplete discovery and owner sign-in states.
+
 ## 0.2.1
 
 ### Patch Changes

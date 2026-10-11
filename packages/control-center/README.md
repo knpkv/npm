@@ -46,6 +46,61 @@ On 2026-10-11, readiness evaluation initially grew the client API chunk to 288,1
 
 The server measurement was refreshed on 2026-10-03 after rolldown 1.2.12 began merging the persistence graph into the shared chunk (2,697,894 raw bytes). The server build now emits the `src/server/persistence/**` and `src/server/governance/**` modules, without their shared dependencies, as their own `persistence-*` (1,198,092 raw / 173,988 gzip bytes) and `governance-*` (161,833 / 25,823) chunks with strict cross-chunk execution order, leaving the shared chunk at 1,410,015 raw and 257,854 gzip bytes; the 292,000-byte gzip ceiling still requires a new measurement and cause here for further growth. This shared chunk remains bounded technical debt: it is primarily Control Center's own application, persistence, plugin, API, and schema-snapshot graph. `BindConfig` is only Vite's generated chunk name, not the size owner. Future work should split that internal graph at deliberate runtime boundaries.
 
+## Visual integration tests
+
+`test:visual` runs Chromium against an in-process server and the real Jira, Confluence,
+CodeCommit, CodePipeline and Clockify plugins. Provider transports use deterministic fixture data
+and record credential fingerprints. Every captured state passes functional, keyboard and accessibility
+assertions. Four projects cover 1280×800 and 390×844 in light and dark themes. Build separately:
+
+```sh
+pnpm --filter "@knpkv/control-center^..." build
+pnpm --filter @knpkv/control-center build
+pnpm --filter @knpkv/control-center test:visual
+```
+
+P0 covers onboarding, rejected and revoked credentials, all six readiness verdicts, connection
+isolation, and provider outage, rate-limit and incomplete-content states. Readiness comes from
+real provider normalization and the supervised evaluator: Jira fix-version membership, merged
+CodeCommit heads, exact pipeline revisions and action states, and Confluence runbook labels/tasks.
+Target stage ranges are configured through the governed settings API. A request-only regression
+checks the six server verdicts without launching Chromium; browser captures also check their
+stage states, freshness, unassigned responsibility and keyboard filters against the server response.
+
+Shots are files in `packages/control-center/test-results/visual/shots`, named
+`<scenario>--<state>--<project>.png`. Set `CC_VISUAL_OUT` to choose another directory. No baselines
+are committed. Mobile captures use viewport-height sections with the bottom navigation visible;
+fonts, clock, randomness and focus are settled before capture. Provider credentials are fixtures only.
+
+To compare locally against the main merge base, fetch main, then use an absolute base directory:
+
+```sh
+git fetch origin
+export CC_VISUAL_BASE="$PWD/packages/control-center/test-results/visual/base"
+pnpm --filter @knpkv/control-center exec tsx scripts/visual-base.ts
+pnpm --filter @knpkv/control-center test:visual:compare
+```
+
+The helper creates a temporary detached worktree at `git merge-base HEAD origin/main`, installs
+with `--frozen-lockfile --offline` locally using the existing pnpm store, builds, and runs that revision's
+capture suite. Set `CC_VISUAL_BASE_OFFLINE=false` to allow downloads. CI sets this explicitly because
+the PR's cached dependencies may not cover the base lockfile. The lockfile remains frozen.
+It removes the worktree on success or failure and retains the base shots. If the base
+has no visual harness, it prints `no base harness — compare skipped`; PR assertions still run.
+The runner defaults to a 5 GiB available-memory floor. `CC_VISUAL_MIN_MEMORY_GIB=4` lowers it to
+4 GiB when a shared-machine slot permits it. Run one Chromium worker at a time.
+
+`test:visual:compare` captures PR shots, then uses Playwright's PNG comparator with a
+`maxDiffPixelRatio` of 0.001. It never updates the base. New states are reported without failing;
+changed or removed states fail. Expected, actual and diff images and the state summary are written
+under `test-results/visual`. Extra capture arguments such as `--grep` and `--project` are forwarded;
+pass the same selection arguments to `visual-base.ts` and `test:visual:compare` when comparing a subset.
+
+The pull-request-only visual workflow captures both revisions. The `visual-change-approved` PR
+label permits changed or removed shots after review; adding or removing the label reruns the job.
+Functional, keyboard, accessibility, base-build and comparison-infrastructure failures always fail.
+The job summary lists states, and failed captures or comparisons upload `test-results` artifacts.
+
 ## Run the application
 
 Build once, then start the authenticated application server:

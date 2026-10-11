@@ -93,7 +93,7 @@ layer(Layer.merge(s3ReaderLayer(profile).pipe(Layer.provide(Layer.merge(http, cr
         expect(request?.owner).toBe("fixture-account")
         expect(selected).toEqual([profile, profile])
         expect(requests.every((request) => request.method === "GET")).toBe(true)
-        expect(Object.keys(reader).sort()).toEqual(["buckets", "resource", "versions"])
+        expect(Object.keys(reader).sort()).toEqual(["buckets", "outputs", "resource", "versions"])
       }))
 
     it.effect("reads the exact version and drops plaintext redaction payloads before returning", () =>
@@ -147,6 +147,30 @@ layer(Layer.merge(s3ReaderLayer(profile).pipe(Layer.provide(Layer.merge(http, cr
         }
         expect(spans.some((span) => span.name.startsWith("http."))).toBe(false)
       }).pipe(Effect.withTracerEnabled(true)))
+
+    it.effect("pins output reads to the selected version and returns only hidden keys", () =>
+      Effect.gen(function*() {
+        const reader = yield* S3Reader
+        responses.push({
+          version: "fixture-output",
+          body: JSON.stringify({
+            Endpoint: "fixture-secret",
+            Secret: { __redacted__: "fixture-secret", sibling: "fixture-secret" }
+          })
+        })
+        const outputs = yield* reader.outputs(bucket, "fixture-app/prod/__stack_output__.json", "fixture-output")
+        expect(outputs).toEqual([
+          { key: "Endpoint", value: { _tag: "Hidden" }, description: null },
+          { key: "Secret", value: { _tag: "Hidden" }, description: null }
+        ])
+        expect(requests.at(-1)?.url.searchParams.get("versionId")).toBe("fixture-output")
+        expect(requests.at(-1)?.owner).toBe(profile.account)
+        expect(JSON.stringify(outputs)).not.toContain("fixture-secret")
+        responses.push({ version: "fixture-wrong", body: "{}" })
+        expect(yield* Effect.flip(reader.outputs(bucket, "fixture-output-key", "fixture-output"))).toMatchObject({
+          reason: "invalid-response"
+        })
+      }))
 
     it.effect("rejects mismatched versions and oversized streams", () =>
       Effect.gen(function*() {

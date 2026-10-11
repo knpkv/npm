@@ -12,7 +12,7 @@ import {
 import * as CodeHost from "@knpkv/codecommit-web/host/server"
 import { FleetValidationError } from "@knpkv/herdr-fleet"
 import { FleetHostName } from "@knpkv/herdr-fleet/model"
-import { Config, Effect, Exit, Layer, Option, Schema, Scope } from "effect"
+import { Config, Effect, Exit, FileSystem, Layer, Option, Schema, Scope } from "effect"
 import * as Path from "effect/Path"
 import { makeCodeReferences } from "./code-reference-store.js"
 import { codeModule } from "./module-contract.js"
@@ -52,11 +52,20 @@ export const makeCodeModule = (configuration: {
         host: codeHost
       })
       const matches = codeHost !== null && isHub && codeHost.toLowerCase() === host.toLowerCase()
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      // This projection is independent of cache/provider availability. Never read it on another host.
+      const ownerUi = matches ?
+        CodeHost.readCodeOwnerUi.pipe(
+          Effect.provideService(FileSystem.FileSystem, fs),
+          Effect.provideService(Path.Path, path),
+          Effect.option
+        ) :
+        Effect.succeed(Option.none<string>())
       const scope = yield* Effect.acquireRelease(Scope.make(), (child) => Scope.close(child, Exit.void))
       const reads = matches ?
         yield* Effect.result(
           Effect.gen(function*() {
-            const path = yield* Path.Path
             return yield* CodeHost.makeCodeHostReads(
               makeCodeReferences(path.join(stateDirectory, "code-references.sqlite"))
             )
@@ -83,9 +92,13 @@ export const makeCodeModule = (configuration: {
       return {
         routes: [
           moduleReadRoute("/queue", CodeQueueQuery, CodeQueue, (query) =>
-            mounted._tag === "Unavailable"
-              ? Effect.succeed(mounted) :
-              recover(mounted.reader.queue(query))),
+            Effect.gen(function*() {
+              const origin = yield* ownerUi
+              const reading = mounted._tag === "Unavailable"
+                ? mounted :
+                yield* recover(mounted.reader.queue(query))
+              return Option.isSome(origin) ? { ...reading, ownerUi: origin.value } : reading
+            })),
           moduleReadRoute("/detail", CodeTargetQuery, CodeDetail, ({ ref }) =>
             mounted._tag === "Unavailable"
               ? Effect.succeed(mounted) :

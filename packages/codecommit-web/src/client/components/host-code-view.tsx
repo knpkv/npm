@@ -54,7 +54,8 @@ const approvalWords = {
 const unavailableWords = {
   not_configured: "Code has not been configured on this hub.",
   other_host: "Code is available only on its credential host's own hub.",
-  cache_unavailable: "The Code owner cache could not be read. Start the Code owner UI on this host, then read again.",
+  cache_unavailable:
+    "The Code owner cache could not be read. Check the Code owner service and hub log on this host, then read again.",
   config_unavailable: "Code's enabled accounts could not be read. Repair the configuration in the Code owner UI.",
   permission_required:
     "This read needs a saved always-allow grant. Open the Code owner UI on this host to review it, then read again.",
@@ -90,7 +91,7 @@ const Unavailable = ({
     ) : null}
     <p>{unavailableWords[value.reason]}</p>
     {ownerUIHref === null ? (
-      <p>Use the Code owner UI on the credential host. Its loopback address cannot be opened from this device.</p>
+      <p>Use the Code owner UI on the credential host.</p>
     ) : (
       <a className="code-host-action" href={ownerUIHref} target="_blank" rel="noopener noreferrer">
         Open Code owner UI on this machine

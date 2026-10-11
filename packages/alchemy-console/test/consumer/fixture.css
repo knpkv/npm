@@ -1,0 +1,11 @@
+.consumer-main {
+  margin-inline: auto;
+  max-inline-size: 66em;
+  padding: var(--rly-space-24) var(--rly-space-16);
+}
+
+@media (width >= 48em) {
+  .consumer-main {
+    padding: var(--rly-space-40);
+  }
+}

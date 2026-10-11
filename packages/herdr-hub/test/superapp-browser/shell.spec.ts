@@ -178,8 +178,9 @@ test("shows all five Relay poses while finished replies stay idle and listening 
     }
     await panel.getByRole("button", { name: "Close Relay", exact: true }).click()
     await expect(panel).toHaveCount(0)
-    const launcherPose = page.locator("[data-rly-relay-avatar=\"launcher\"] [data-relay-phase]")
-    await expect(launcherPose).toHaveAttribute("data-relay-phase", phase === "listening" ? "idle" : phase)
+    const launcher = page.locator("[data-rly-relay-avatar=\"launcher\"]")
+    await expect(launcher.locator(".relay-chef-mark")).toHaveCount(1)
+    await expect(launcher.locator("[data-relay-phase]")).toHaveCount(0)
   }
 })
 
@@ -243,7 +244,7 @@ test(
 )
 
 test(
-  "sizes the shared character and keeps its motion and forced-colour behavior across launcher, panel and turns",
+  "sizes the conversation character and keeps its motion and forced-colour behavior across panel and turns",
   async ({
     page
   }, info) => {
@@ -256,10 +257,9 @@ test(
     await expect(panel).toHaveAccessibleName("Ask Relay")
     const slots = [
       {
-        node: launcher.locator("[data-rly-relay-avatar=\"launcher\"] svg"),
-        size: info.project.name === "phone" ? 28 : 20
-      },
-      { node: panel.locator("[data-rly-relay-avatar=\"panel\"] svg"), size: 32 }
+        node: panel.locator("[data-rly-relay-avatar=\"panel\"] svg"),
+        size: 32
+      }
     ]
     for (const { node, size } of slots) {
       const bounds = await node.boundingBox()
@@ -276,7 +276,7 @@ test(
     }
     expect((await launcher.boundingBox())?.height).toBeGreaterThanOrEqual(info.project.name === "phone" ? 44 : 32)
     await page.emulateMedia({ reducedMotion: "reduce", forcedColors: "active" })
-    for (const node of [slots[0]?.node, slots[1]?.node, ...(await turns.all())]) {
+    for (const node of [...slots.map(({ node }) => node), ...(await turns.all())]) {
       if (node === undefined) throw new Error("Character slot missing")
       expect(await node.evaluate((svg) => svg.getAnimations({ subtree: true }).length)).toBe(0)
       const contrast = await node.evaluate((svg) => {
