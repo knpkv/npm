@@ -38,6 +38,7 @@
     "@knpkv/agent-skills": "workspace:^",
     "@knpkv/ai-codex": "workspace:^",
     "@knpkv/bounded-io": "workspace:^",
+    "@knpkv/browser-pairing": "workspace:^",
     "@knpkv/codecommit-core": "workspace:^",
     "@knpkv/codecommit-web": "workspace:^",
     "@opentui/core": "0.5.14",

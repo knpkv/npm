@@ -519,6 +519,9 @@ importers:
       '@knpkv/bounded-io':
         specifier: workspace:^
         version: link:../bounded-io
+      '@knpkv/browser-pairing':
+        specifier: workspace:^
+        version: link:../browser-pairing
       '@knpkv/codecommit-core':
         specifier: workspace:^
         version: link:../codecommit-core
