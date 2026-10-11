@@ -95,6 +95,9 @@ export const inspectBuildGraph = (graph: ControlCenterBuildGraph): ReadonlyArray
     if (!ids.includes("src/client/main.tsx")) violations.push("client graph is missing src/client/main.tsx")
     if (!entryIds.includes("index.html")) violations.push("client graph is missing index.html")
     if (ids.some((id) => id.includes("src/server/"))) violations.push("client graph contains server source")
+    if (ids.some((id) => /^src\/domain\/readiness\/(?:evaluate|material|model|policy|rollup)\.ts$/u.test(id))) {
+      violations.push("client graph contains readiness evaluation source")
+    }
     if (ids.some((id) => id.startsWith("node:") || id.includes("/node:"))) {
       violations.push("client graph contains a Node built-in")
     }

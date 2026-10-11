@@ -166,6 +166,7 @@ const defaultClient = (overrides: Partial<ConfluencePageClientContract> = {}): C
   }),
   getSystemInfo: Effect.succeed({ cloudId: "site-acme", commitHash: "commit", siteTitle: "Acme" }),
   getPage: () => Effect.succeed(currentPage),
+  getPageLabels: () => Effect.succeed({ results: [] }),
   getPageDraft: () =>
     Effect.fail(
       new ConfluencePageClientFailure({
@@ -947,6 +948,20 @@ describe("Confluence page adapter", () => {
       })
     }))
 
+  it.effect("preserves exact release labels as structured metadata, never a title assertion", () =>
+    Effect.gen(function*() {
+      const adapter = yield* makeAdapter(defaultClient({
+        getPageLabels: () => Effect.succeed({ results: [{ name: "2.18.0", prefix: "global" }] })
+      }))
+      const pages = yield* adapter.connection.sync(syncRequest).pipe(Stream.runCollect)
+      const event = pages.flatMap(({ events }) => events).find((event) =>
+        event._tag === "UpsertEntity" && event.entityType === "confluence-page"
+      )
+      if (event?._tag !== "UpsertEntity") return assert.fail("Expected a normalized Confluence page")
+      const attributes = yield* Schema.decodeUnknownEffect(ConfluencePageAttributesV1)(event.attributes)
+      assert.deepEqual(attributes.linkedReleaseVersions, ["2.18.0"])
+    }))
+
   it.effect("synchronizes lazy space pages, people, attachment metadata, and safe runbook evidence", () =>
     Effect.gen(function*() {
       const spaces: Array<string> = []
@@ -1094,7 +1109,7 @@ describe("Confluence page adapter", () => {
       assert.deepStrictEqual(attributes.watcherInventory, { complete: false, pagesFetched: 0 })
     }))
 
-  it.effect("keeps pages lazy when conversion produces only whitespace", () =>
+  it.effect("retains a resolved whitespace-only page as loaded content", () =>
     Effect.gen(function*() {
       const adapter = yield* makeAdapter(defaultClient(), "  \n")
 
@@ -1104,8 +1119,8 @@ describe("Confluence page adapter", () => {
       if (entity?._tag !== "UpsertEntity") return
       const attributes = Schema.decodeUnknownSync(ConfluencePageAttributesV1)(entity.attributes)
 
-      assert.strictEqual(attributes.content, null)
-      assert.strictEqual(attributes.contentState, "lazy")
+      assert.deepStrictEqual(attributes.content, { representation: "safe-markdown", markdown: "" })
+      assert.strictEqual(attributes.contentState, "loaded")
     }))
 
   it.effect("marks watcher metadata incomplete when the classic endpoint reports OAuth scope mismatch as 401", () =>

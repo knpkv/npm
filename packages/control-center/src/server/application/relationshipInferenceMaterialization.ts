@@ -1,7 +1,6 @@
 import type * as Crypto from "effect/Crypto"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
-import { Base64, Hex } from "effect/encoding"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 
@@ -24,11 +23,19 @@ import { PluginStreamKey } from "../persistence/repositories/pluginRuntimeModels
 import { firstPartySyncStreamKey } from "../plugins/firstPartySynchronization.js"
 import {
   deriveRelationshipInference,
+  isRelationshipInferenceOwned,
   type RelationshipInferenceCandidate,
   type RelationshipInferenceEndpoint,
   type RelationshipInferenceEntity,
   type RelationshipInferenceRelease
 } from "./relationshipInference.js"
+
+import {
+  decodeConfluencePublicationReference,
+  releasePublicationReceiptCandidatesFromRecords
+} from "./releasePublicationMetadata.js"
+
+import { stableUuid } from "./internal/stableUuid.js"
 
 const MAXIMUM_INFERENCE_ENTITIES = 500
 const MAXIMUM_INFERENCE_RELEASES = 50
@@ -268,7 +275,7 @@ const unchanged = (
 
 const protectedByDecision = (previous: DeliveryRelationship | null): boolean =>
   previous?.lifecycle._tag === "governed" ||
-  previous?.lifecycle._tag === "verified" ||
+  (previous?.lifecycle._tag === "verified" && !isRelationshipInferenceOwned(previous)) ||
   previous?.lifecycle._tag === "rejected"
 
 const materializeCandidate = Effect.fn("RelationshipInferenceMaterialization.materializeCandidate")(function*<
@@ -333,6 +340,8 @@ const materializeCandidate = Effect.fn("RelationshipInferenceMaterialization.mat
   }
   const confidence: DeliveryRelationship["confidence"] = candidate.confidence === null
     ? { _tag: "unknown", rationale: "No matching provider evidence is currently synchronized." }
+    : candidate.lifecycle === "verified"
+    ? { _tag: "confirmed" }
     : { _tag: "inferred", ...candidate.confidence }
   const relationship: DeliveryRelationship = {
     workspaceId: scope.workspaceId,
@@ -352,7 +361,7 @@ const materializeCandidate = Effect.fn("RelationshipInferenceMaterialization.mat
         effectiveAt: scope.committedAt,
         reason: "No synchronized provider evidence currently resolves this required delivery link."
       }
-      : { _tag: "inferred", effectiveAt: scope.committedAt },
+      : { _tag: candidate.lifecycle, effectiveAt: scope.committedAt },
     confidence,
     provenance: {
       _tag: "rule",
@@ -413,7 +422,11 @@ const supersedeObsoleteRelationship = Effect.fn("RelationshipInferenceMaterializ
     reason?: string
   ) {
     const previous = yield* readRelationship(persistence, scope.workspaceId, relationshipId)
-    if (previous?.lifecycle._tag !== "inferred" && previous?.lifecycle._tag !== "missing") return 0
+    if (
+      previous === null ||
+      (previous.lifecycle._tag !== "inferred" && previous.lifecycle._tag !== "missing" &&
+        !(previous.lifecycle._tag === "verified" && isRelationshipInferenceOwned(previous)))
+    ) return 0
     const relationship: DeliveryRelationship = {
       ...previous,
       revision: LedgerRevision.make(previous.revision + 1),
@@ -605,7 +618,27 @@ export const materializeRelationshipInference = Effect.fn("RelationshipInference
     )
   }
   const relationships = slices.flatMap((slice) => (slice._tag === "releaseSlice" ? slice.value.relationships : []))
+  const publicationRecords = releaseIds.length === 0 ?
+    [] :
+    yield* persistence.governedActions.readLatestTerminalReleasePublications({
+      workspaceId: scope.workspaceId,
+      providerId: "confluence",
+      releaseIds
+    })
+  const publishedRunbooks = releasePublicationReceiptCandidatesFromRecords(publicationRecords).flatMap((receipt) => {
+    const page = decodeConfluencePublicationReference(receipt.providerOperationId)
+    if (page === null) return []
+    const record = records.find(({ sourceRevision }) =>
+      sourceRevision.providerId === "confluence" &&
+      sourceRevision.pluginConnectionId === receipt.pluginConnectionId &&
+      sourceRevision.vendorImmutableId === page.pageId
+    )
+    return record === undefined
+      ? []
+      : [{ releaseId: receipt.releaseId, pageEntityId: record.entityId, publicationActionId: receipt.actionId }]
+  })
   const inferenceInput = {
+    publishedRunbooks,
     entities,
     minimumConfidenceScore: settings.inference.minimumConfidencePercent / 100,
     releases: inferenceReleases.map(({ inferenceRelease }) => inferenceRelease),
@@ -614,7 +647,7 @@ export const materializeRelationshipInference = Effect.fn("RelationshipInference
   const initialInference = deriveRelationshipInference(inferenceInput)
   const rejectedCandidateIdentityKeys = new Set<string>()
   for (const candidate of initialInference.candidates) {
-    if (candidate.lifecycle !== "inferred") continue
+    if (candidate.lifecycle === "missing") continue
     const relationshipId = yield* relationshipIdFor(identity, scope.workspaceId, candidate.identityKey)
     const previous = yield* readRelationship(persistence, scope.workspaceId, relationshipId)
     if (previous?.lifecycle._tag === "rejected") rejectedCandidateIdentityKeys.add(candidate.identityKey)
@@ -676,24 +709,11 @@ export const stableRelationshipInferenceIdentity = Effect.fn(
   cryptoService: Crypto.Crypto,
   identity: string
 ) {
-  const bytes = yield* Effect.fromResult(
-    Base64.decode(Base64.encode(identity))
-  ).pipe(
-    Effect.mapError(() =>
-      new PersistenceOperationError({
-        operation: "relationship-inference.identity-encoding"
-      })
-    )
+  return yield* stableUuid(
+    cryptoService,
+    identity,
+    (operation) => new PersistenceOperationError({ operation: `relationship-inference.identity-${operation}` })
   )
-  const digest = yield* cryptoService.digest("SHA-256", bytes).pipe(
-    Effect.mapError(() =>
-      new PersistenceOperationError({
-        operation: "relationship-inference.identity-digest"
-      })
-    )
-  )
-  const hex = Hex.encode(digest)
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-7${hex.slice(13, 16)}-8${hex.slice(17, 20)}-${hex.slice(20, 32)}`
 })
 
 /**

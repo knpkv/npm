@@ -1,10 +1,14 @@
 /** Canonical bounded provider prompt for one durable release-agent job. @module */
 import * as DateTime from "effect/DateTime"
 
+import type { ReadinessFailureDetails } from "../../domain/domainEvent.js"
+import { describeReadinessGateWaiver, releaseGateWaivers } from "../../domain/readiness/model.js"
 import type { Release } from "../../domain/release.js"
+import type { CurrentReleaseReadinessAssessmentRecord } from "../persistence/repositories/readinessRepository.js"
 
 const MAXIMUM_RENDERED_COLLABORATORS = 5
 const MAXIMUM_RENDERED_TARGET_ENVIRONMENTS = 5
+const MAXIMUM_RENDERED_GATE_WAIVERS = 1
 
 const actorIdentity = (assignment: Release["roleAssignments"][number]): string =>
   assignment.actor._tag === "human" ? assignment.actor.personId : assignment.actor.agentId
@@ -16,7 +20,9 @@ const actorIdentity = (assignment: Release["roleAssignments"][number]): string =
  */
 export const renderDurableReleaseAgentPrompt = (
   release: Release,
-  question: string
+  question: string,
+  readiness: CurrentReleaseReadinessAssessmentRecord | null = null,
+  readinessFailure: ReadinessFailureDetails | null = null
 ): string => {
   const activeCollaborators = release.roleAssignments.filter(({ lifecycle }) => lifecycle._tag === "active")
   const context = {
@@ -26,6 +32,19 @@ export const renderDurableReleaseAgentPrompt = (
     version: release.version,
     status: release.lifecycle,
     freshness: release.freshness._tag,
+    readiness: readiness === null ? null : {
+      authority: readiness.authority,
+      verdict: readiness.authority === "authoritative" && readinessFailure === null
+        ? readiness.assessment.verdict
+        : "held",
+      failure: readinessFailure,
+      gateWaiverCount: releaseGateWaivers(readiness.assessment).length,
+      gateWaiversComplete: releaseGateWaivers(readiness.assessment).length <= MAXIMUM_RENDERED_GATE_WAIVERS,
+      gateWaivers: releaseGateWaivers(readiness.assessment).slice(0, MAXIMUM_RENDERED_GATE_WAIVERS).map((waiver) => ({
+        label: describeReadinessGateWaiver(waiver),
+        ...waiver
+      }))
+    },
     targetEnvironmentCount: release.targetEnvironmentIds.length,
     targetEnvironmentIds: release.targetEnvironmentIds.slice(0, MAXIMUM_RENDERED_TARGET_ENVIRONMENTS),
     sourceRevisionCount: release.sourceRevisions.length,

@@ -733,6 +733,14 @@ const providerTokenFromCheckpoint = (
 const checkpointFromToken = (token: string | null): string =>
   token === null ? COMPLETE_CHECKPOINT : `${NEXT_CHECKPOINT_PREFIX}${token}`
 
+/** A bounded invocation is complete only after its provider cursor is exhausted. @internal */
+export const codePipelineInventoryIsComplete = Effect.fn("CodePipelinePlugin.inventoryIsComplete")(function*(
+  checkpoint: PluginSyncRequestV1["checkpoint"]
+) {
+  if (checkpoint === null) return false
+  return (yield* providerTokenFromCheckpoint(checkpoint)) === null
+})
+
 interface SyncState {
   readonly includePipeline: boolean
   readonly remaining: number

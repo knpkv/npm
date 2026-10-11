@@ -2,7 +2,7 @@ import { assert, describe, it } from "@effect/vitest"
 import * as Schema from "effect/Schema"
 
 import { DeliveryEntityProjection, DeliveryRelationship } from "../../src/domain/deliveryGraph.js"
-import { GraphNodeId, ReleaseId, WorkspaceId } from "../../src/domain/identifiers.js"
+import { GovernedActionId, GraphNodeId, ReleaseId, WorkspaceId } from "../../src/domain/identifiers.js"
 import {
   deriveRelationshipInference,
   type RelationshipInferenceEntity
@@ -36,7 +36,7 @@ const common = {
 }
 
 describe("relationship inference", () => {
-  it("builds one release journey while keeping missing and inferred links distinct", () => {
+  it("verifies exact delivery identifiers while keeping missing and fuzzy links distinct", () => {
     const issue = entity(
       1,
       {
@@ -117,11 +117,11 @@ describe("relationship inference", () => {
     assert.sameMembers(
       result.candidates.map(({ kind, lifecycle }) => `${kind}:${lifecycle}`),
       [
-        "implements:inferred",
+        "implements:verified",
         "implements:missing",
-        "delivered-by:inferred",
-        "documented-by:inferred",
-        "documented-by:inferred",
+        "delivered-by:verified",
+        "documented-by:verified",
+        "documented-by:verified",
         "tracks-time-for:inferred"
       ]
     )
@@ -321,11 +321,11 @@ describe("relationship inference", () => {
     const input = { entities: [issue, pullRequest, pipeline], releases: [], relationships: [] }
     const accepted = deriveRelationshipInference(input)
     const implementation = accepted.candidates.find(
-      ({ kind, lifecycle }) => kind === "implements" && lifecycle === "inferred"
+      ({ kind, lifecycle }) => kind === "implements" && lifecycle === "verified"
     )
-    if (implementation === undefined) throw new Error("expected inferred implementation fixture")
+    if (implementation === undefined) return assert.fail("expected exact verified implementation fixture")
     assert.isTrue(
-      accepted.candidates.some(({ kind, lifecycle }) => kind === "delivered-by" && lifecycle === "inferred")
+      accepted.candidates.some(({ kind, lifecycle }) => kind === "delivered-by" && lifecycle === "verified")
     )
 
     const rejected = deriveRelationshipInference({
@@ -335,7 +335,7 @@ describe("relationship inference", () => {
 
     assert.isTrue(rejected.candidates.some(({ kind, lifecycle }) => kind === "implements" && lifecycle === "missing"))
     assert.isFalse(
-      rejected.candidates.some(({ kind, lifecycle }) => kind === "delivered-by" && lifecycle === "inferred")
+      rejected.candidates.some(({ kind, lifecycle }) => kind === "delivered-by" && lifecycle === "verified")
     )
   })
 
@@ -388,10 +388,58 @@ describe("relationship inference", () => {
 
     const documentation = result.candidates.filter(({ kind }) => kind === "documented-by")
     assert.lengthOf(documentation, 1)
+    assert.strictEqual(documentation[0]?.lifecycle, "inferred", "a title match still requires governed confirmation")
     assert.strictEqual(documentation[0]?.target._tag, "resolved")
     if (documentation[0]?.target._tag === "resolved") {
       assert.strictEqual(documentation[0].target.nodeId, exact.nodeId)
     }
+  })
+
+  it("verifies the exact runbook from a governed publication receipt without a title match", () => {
+    const runbook = entity(26, {
+      ...common,
+      entityType: "page",
+      displayKey: "FIX/42",
+      title: "Deployment checklist",
+      details: { _tag: "page", spaceKey: "FIX", revision: "1", status: "current" }
+    })
+    const actionId = GovernedActionId.make("01890f6f-6d6a-7cc0-98d2-000000000214")
+    const result = deriveRelationshipInference({
+      entities: [runbook],
+      releases: [{ nodeId: nodeId("29"), releaseId, version: "2.18.0" }],
+      relationships: [],
+      publishedRunbooks: [{ releaseId, pageEntityId: runbook.projection.entityId, publicationActionId: actionId }]
+    })
+    const documentation = result.candidates.find(({ kind }) => kind === "documented-by")
+    assert.strictEqual(documentation?.lifecycle, "verified")
+    assert.include(documentation?.confidence?.rationale ?? "", actionId)
+    assert.strictEqual(documentation?.evidenceEntityId, runbook.projection.entityId)
+    assert.include(documentation?.observationKey ?? "", actionId)
+  })
+
+  it("verifies exact structured release metadata and records its rationale", () => {
+    const runbook = entity(25, {
+      ...common,
+      entityType: "page",
+      displayKey: "FIX/25",
+      title: "Deployment checklist",
+      details: {
+        _tag: "page",
+        spaceKey: "FIX",
+        revision: "1",
+        status: "current",
+        linkedReleaseVersions: ["2.18.0"]
+      }
+    })
+    const result = deriveRelationshipInference({
+      entities: [runbook],
+      releases: [{ nodeId: nodeId("29"), releaseId, version: "2.18.0" }],
+      relationships: []
+    })
+    const documentation = result.candidates.find(({ kind }) => kind === "documented-by")
+    assert.strictEqual(documentation?.lifecycle, "verified")
+    assert.include(documentation?.confidence?.rationale ?? "", "2.18.0")
+    assert.strictEqual(documentation?.evidenceEntityId, runbook.projection.entityId)
   })
 
   it("does not infer release documentation from an ambiguous version-only match", () => {
@@ -413,6 +461,24 @@ describe("relationship inference", () => {
     })
 
     assert.isFalse(result.candidates.some(({ kind }) => kind === "documented-by"))
+  })
+
+  it("requires an exact case-sensitive release identity in structured runbook metadata", () => {
+    const runbook = (version: string) =>
+      entity(31, {
+        ...common,
+        entityType: "page",
+        displayKey: "FIX/31",
+        title: "Runbook",
+        details: { _tag: "page", spaceKey: "FIX", revision: "1", status: "current", linkedReleaseVersions: [version] }
+      })
+    const releases = [{ nodeId: nodeId("29"), releaseId, version: "RC-1" }]
+    const mismatch = deriveRelationshipInference({ entities: [runbook("rc-1")], releases, relationships: [] })
+    const exact = deriveRelationshipInference({ entities: [runbook("RC-1")], releases, relationships: [] })
+    assert.isFalse(
+      mismatch.candidates.some(({ kind, lifecycle }) => kind === "documented-by" && lifecycle === "verified")
+    )
+    assert.isTrue(exact.candidates.some(({ kind, lifecycle }) => kind === "documented-by" && lifecycle === "verified"))
   })
 
   it("marks oversized candidate sets truncated so materialization can fail closed", () => {

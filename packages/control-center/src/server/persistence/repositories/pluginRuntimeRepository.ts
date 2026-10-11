@@ -441,14 +441,19 @@ const makePluginRuntimeRepository = Effect.gen(function*() {
     pluginConnectionId: PluginConnectionId,
     streamKey: PluginStreamKey
   ) {
-    const rows = yield* sql<SqlRow>`SELECT workspace_id AS workspaceId,
-      plugin_connection_id AS pluginConnectionId, provider_id AS providerId,
-      stream_key AS streamKey, revision, checkpoint_json AS checkpointJson,
-      checkpoint_digest AS checkpointDigest, last_page_id AS lastPageId,
-      synchronized_at AS synchronizedAt
-      FROM plugin_sync_streams
-      WHERE workspace_id = ${workspaceId} AND plugin_connection_id = ${pluginConnectionId}
-        AND stream_key = ${streamKey}`
+    const rows = yield* sql<SqlRow>`SELECT stream.workspace_id AS workspaceId,
+      stream.plugin_connection_id AS pluginConnectionId, stream.provider_id AS providerId,
+      stream.stream_key AS streamKey, stream.revision, stream.checkpoint_json AS checkpointJson,
+      stream.checkpoint_digest AS checkpointDigest, stream.last_page_id AS lastPageId,
+      stream.synchronized_at AS synchronizedAt, page.has_more AS pageHasMore
+      FROM plugin_sync_streams AS stream
+      LEFT JOIN plugin_sync_pages AS page
+        ON page.workspace_id = stream.workspace_id AND page.plugin_connection_id = stream.plugin_connection_id
+        AND page.stream_key = stream.stream_key AND page.page_id = stream.last_page_id
+        AND page.expected_revision + 1 = stream.revision AND page.checkpoint_digest = stream.checkpoint_digest
+        AND page.committed_at = stream.synchronized_at
+      WHERE stream.workspace_id = ${workspaceId} AND stream.plugin_connection_id = ${pluginConnectionId}
+        AND stream.stream_key = ${streamKey}`
     if (rows.length === 0) {
       return yield* new RecordNotFoundError({
         workspaceId,
@@ -457,12 +462,17 @@ const makePluginRuntimeRepository = Effect.gen(function*() {
       })
     }
     const row = rows[0]
-    const decoded = Schema.decodeUnknownResult(PluginStreamRecord)(row)
+    const pageHasMore = Schema.decodeUnknownResult(Schema.NullOr(Schema.Literals([0, 1])))(row?.pageHasMore)
+    const decoded = Schema.decodeUnknownResult(PluginStreamRecord)({
+      ...row,
+      headPageTerminal: row?.pageHasMore === 0
+    })
     const checkpointText = row?.checkpointJson
     const checkpointDigest = row?.checkpointDigest
     const actualDigest = Predicate.isString(checkpointText) ? yield* digestText(checkpointText) : null
     if (
-      Result.isFailure(decoded) ||
+      Result.isFailure(decoded) || Result.isFailure(pageHasMore) ||
+      (row?.lastPageId !== null && row?.pageHasMore === null) ||
       ((checkpointText === null || checkpointText === undefined)
         ? checkpointDigest !== null
         : !Predicate.isString(checkpointDigest) || actualDigest !== checkpointDigest)

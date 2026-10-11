@@ -53,6 +53,7 @@ import {
   RawConfluenceAttachmentPage,
   type RawConfluenceAttachmentPage as RawConfluenceAttachmentPageType,
   RawConfluenceCurrentUser,
+  RawConfluenceLabelPage,
   RawConfluencePage,
   RawConfluenceSpacePage,
   type RawConfluenceSpacePage as RawConfluenceSpacePageType,
@@ -372,6 +373,14 @@ const syncCursorFromCheckpoint = (
   return Effect.fail(new PluginConfigurationFailure({ diagnosticCode: "confluence-sync-checkpoint-invalid" }))
 }
 
+/** Bounded or restart checkpoints retain unfinished inventory without reporting an outage. @internal */
+export const confluenceInventoryIsComplete = Effect.fn("ConfluencePage.inventoryIsComplete")(function*(
+  checkpoint: PluginSyncRequestV1["checkpoint"]
+) {
+  if (checkpoint === null || checkpoint === RESTART_INITIAL_CHECKPOINT) return false
+  return (yield* syncCursorFromCheckpoint(checkpoint)).cursor === null
+})
+
 const durableMultiBoundedCheckpoint = (
   cursor: string,
   inventoryDigest: string,
@@ -594,6 +603,8 @@ interface NormalizedVersion {
 }
 
 interface SyncAttributesInput {
+  readonly linkedReleaseVersions: ReadonlyArray<string>
+  readonly releaseMetadataComplete: boolean
   readonly schemaVersion: 1
   readonly status: "current"
   readonly spaceId: string
@@ -792,6 +803,45 @@ const readAttachmentInventory = Effect.fn("ConfluencePage.readAttachmentInventor
 
 const isRunbookCandidate = (title: string): boolean => /\b(?:runbook|playbook|rollback|operations?)\b/iu.test(title)
 
+/** Only complete bounded label inventories can assert an exact release identity. */
+const readReleaseLabels = Effect.fn("ConfluencePage.readReleaseLabels")(function*(
+  client: ConfluencePageClientContract,
+  pageId: string
+): Effect.fn.Return<{ readonly values: ReadonlyArray<string>; readonly complete: boolean }, PluginFailure> {
+  const labels = new Set<string>()
+  const seen = new Set<string>()
+  let cursor: string | null = null
+  for (let pageIndex = 0; pageIndex < 2; pageIndex += 1) {
+    const response: Result.Result<unknown, PluginFailure> = yield* providerCall(client.getPageLabels(pageId, cursor))
+      .pipe(Effect.result)
+    if (Result.isFailure(response)) {
+      if (response.failure._tag === "PluginAuthorizationFailure") return { values: [], complete: false }
+      return yield* response.failure
+    }
+    const page: typeof RawConfluenceLabelPage.Type = yield* decodeProvider(
+      "confluence-page-labels",
+      "confluence-label-page-invalid",
+      RawConfluenceLabelPage,
+      response.success
+    )
+    for (const label of page.results ?? []) {
+      if (label.name.length <= 100) labels.add(label.name)
+    }
+    if (labels.size > 100) return { values: [], complete: false }
+    const next: string | null = yield* decodeConfluenceNextCursor(
+      "confluence-page-labels",
+      "confluence-label-cursor",
+      page._links?.next,
+      MAXIMUM_CHECKPOINT_LENGTH
+    )
+    if (next === null) return { values: [...labels].sort(), complete: true }
+    if (seen.has(next)) return yield* malformed("confluence-page-labels", "confluence-label-cursor-loop")
+    seen.add(next)
+    cursor = next
+  }
+  return { values: [], complete: false }
+})
+
 const normalizeSyncEvents = Effect.fn("ConfluencePage.normalizeSyncEvents")(function*(
   input: MakeConfluencePageAdapterInput,
   pages: ReadonlyArray<typeof RawConfluencePage.Type>
@@ -804,11 +854,12 @@ const normalizeSyncEvents = Effect.fn("ConfluencePage.normalizeSyncEvents")(func
   const contexts = yield* Effect.forEach(
     pages,
     Effect.fn("ConfluencePage.readSyncContext")(function*(page) {
-      const { history, inventory, watchers } = yield* Effect.all({
+      const { history, inventory, releaseLabels, watchers } = yield* Effect.all({
         history: readVersions(input.client, page.id),
         inventory: readAttachmentInventory(input.client, page.id),
-        watchers: readWatcherInventory(input.client, page.id)
-      }, { concurrency: 3 })
+        watchers: readWatcherInventory(input.client, page.id),
+        releaseLabels: readReleaseLabels(input.client, page.id)
+      }, { concurrency: 4 })
       const hasCurrentVersion = history.versions.some(({ number }) => number === page.version.number)
       const versions = hasCurrentVersion
         ? history.versions
@@ -821,6 +872,7 @@ const normalizeSyncEvents = Effect.fn("ConfluencePage.normalizeSyncEvents")(func
           )
         },
         inventory,
+        releaseLabels,
         page,
         versions,
         watchers
@@ -855,14 +907,16 @@ const normalizeSyncEvents = Effect.fn("ConfluencePage.normalizeSyncEvents")(func
   const eventGroups = yield* Effect.forEach(
     contexts,
     Effect.fn("ConfluencePage.normalizeSyncPage")(function*(context) {
-      const { history, inventory, page, versions, watchers } = context
+      const { history, inventory, page, releaseLabels, versions, watchers } = context
       const contributors = contributorsFromUsers(rolesByPage.get(page.id) ?? new Map(), users)
       const adf = page.body?.atlas_doc_format?.value
       const converted = adf === undefined
         ? null
         : yield* toSafeConfluenceMarkdown(input.converter, adf)
-      const markdown = converted === null || converted.trim().length === 0 ? null : converted
+      const markdown = converted
       const attributesInput = fitSyncAttributes({
+        linkedReleaseVersions: releaseLabels.values,
+        releaseMetadataComplete: releaseLabels.complete,
         schemaVersion: 1,
         status: page.status,
         spaceId: page.spaceId,

@@ -4,6 +4,49 @@ import { presentPortfolio } from "../../src/client/portfolio/presentPortfolio.js
 import { makePortfolioSnapshot } from "./portfolioFixtures.js"
 
 describe("portfolio presenter", () => {
+  it("holds a previously ready assessment while its evidence is being recomputed", () => {
+    const snapshot = makePortfolioSnapshot("six-state")
+    const ready = snapshot.releases.find(({ readiness }) => readiness?.verdict === "ready")
+    if (ready?.readiness === null || ready === undefined) return expect.fail("Expected the ready fixture")
+    const presented = presentPortfolio({
+      ...snapshot,
+      releases: [{
+        ...ready,
+        collaborators: [],
+        collaboratorCount: 0,
+        readiness: { ...ready.readiness, authority: "pending" }
+      }]
+    }).releases[0]
+    expect(presented?.readinessVerdict).toBe("held")
+    expect(presented?.release.verdict).toBe("Held")
+    expect(presented?.stages.every(({ state }) => state === "Not evaluated")).toBe(true)
+  })
+
+  it("shows a recorded evaluation failure and keeps the previous ready result held", () => {
+    const snapshot = makePortfolioSnapshot("six-state")
+    const ready = snapshot.releases.find(({ readiness }) => readiness?.verdict === "ready")
+    if (ready?.readiness === null || ready === undefined) return expect.fail("Expected the ready fixture")
+    const presented = presentPortfolio({
+      ...snapshot,
+      releases: [{
+        ...ready,
+        collaborators: [],
+        collaboratorCount: 0,
+        readiness: { ...ready.readiness, authority: "pending" },
+        readinessFailure: {
+          operation: "publish",
+          diagnosticCode: "readiness-publication-failed",
+          invalidationRevision: 1,
+          failedAt: snapshot.generatedAt,
+          retryAt: snapshot.generatedAt
+        }
+      }]
+    }).releases[0]
+    expect(presented?.readinessReason).toBe("Readiness evaluation failed. Retry pending.")
+    expect(presented?.readinessVerdict).toBe("held")
+    expect(presented?.release.verdict).toBe("Held")
+  })
+
   it("holds a targetless release and links directly to pipeline target configuration", () => {
     const snapshot = makePortfolioSnapshot()
     const presented = presentPortfolio({

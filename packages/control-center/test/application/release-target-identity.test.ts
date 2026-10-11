@@ -219,6 +219,25 @@ describe("release target identity", () => {
           yield* reconcileReleaseTargets(persistence, workspaceId, configured, committedAt)
           const release = (yield* persistence.releases.list(workspaceId, 10))[0]
           if (release === undefined) return assert.fail("Expected Jira to materialize the fixture release")
+          const slice = yield* persistence.deliveryGraph.read(workspaceId, {
+            _tag: "releaseSlice",
+            releaseId: release.release.id,
+            environmentId: null,
+            limit: 100
+          })
+          if (slice._tag !== "releaseSlice") return assert.fail("Expected a persisted release slice")
+          assert.strictEqual(
+            slice.value.relationships.find(({ kind }) => kind === "contains")?.lifecycle._tag,
+            "verified"
+          )
+          assert.strictEqual(
+            slice.value.relationships.find(({ kind }) => kind === "implements")?.lifecycle._tag,
+            "verified"
+          )
+          assert.strictEqual(
+            slice.value.relationships.find(({ kind }) => kind === "delivered-by")?.lifecycle._tag,
+            "verified"
+          )
           assert.lengthOf(release.release.targetEnvironmentIds, 1)
           const environmentId = yield* Schema.decodeUnknownEffect(EnvironmentId)(
             release.release.targetEnvironmentIds[0]

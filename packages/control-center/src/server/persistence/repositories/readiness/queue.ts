@@ -10,10 +10,13 @@ import { Database } from "../../Database.js"
 import { PersistenceOperationError } from "../../errors.js"
 import { readChanges } from "../internal.js"
 import {
+  type AcknowledgeReadinessInvalidationRequest,
   type ClaimReadinessInvalidationRequest,
+  type DeferReadinessInvalidationRequest,
   type EnqueueAffectedReadinessRequest,
   type EnqueueDueReadinessEvaluationsRequest,
   type EnqueueReadinessInvalidationRequest,
+  type ListPendingReadinessRequest,
   ReadinessInputError,
   type ReadinessInvalidationRecord,
   ReadinessInvalidationRevision,
@@ -200,6 +203,87 @@ export const makeReadinessQueue = Effect.gen(function*() {
     })
   })
 
+  const listPending = Effect.fn("ReadinessQueue.listPending")(
+    function*(request: typeof ListPendingReadinessRequest.Type) {
+      const timestamp = encodeTimestamp(request.dueAt)
+      const environments = yield* SqlSchema.findAll({
+        Request: Schema.Void,
+        Result: ReadinessEnvironmentQueueRow,
+        execute: () =>
+          sql`SELECT workspace_id AS workspaceId, release_id AS releaseId,
+        environment_id AS environmentId, invalidation_revision AS invalidationRevision,
+        reason, source_evidence_id AS sourceEvidenceId,
+        source_plugin_connection_id AS sourcePluginConnectionId,
+        queued_at AS queuedAt, available_at AS availableAt, attempts,
+        claim_owner AS claimOwner, claim_token AS claimToken, claim_expires_at AS claimExpiresAt
+        FROM readiness_environment_queue WHERE workspace_id = ${request.workspaceId}
+        AND (${request.releaseId ?? null} IS NULL OR release_id = ${request.releaseId ?? null})
+        AND available_at <= ${timestamp} AND (claim_owner IS NULL OR claim_expires_at <= ${timestamp})
+        ORDER BY available_at, release_id, environment_id LIMIT ${request.limit}`
+      })(undefined)
+      const remaining = request.limit - environments.length
+      const releases = remaining === 0 ? [] : yield* SqlSchema.findAll({
+        Request: Schema.Void,
+        Result: ReadinessReleaseQueueRow,
+        execute: () =>
+          sql`SELECT workspace_id AS workspaceId, release_id AS releaseId,
+        invalidation_revision AS invalidationRevision, reason, source_environment_id AS sourceEnvironmentId,
+        queued_at AS queuedAt, available_at AS availableAt, attempts,
+        claim_owner AS claimOwner, claim_token AS claimToken, claim_expires_at AS claimExpiresAt
+        FROM readiness_release_queue WHERE workspace_id = ${request.workspaceId}
+        AND (${request.releaseId ?? null} IS NULL OR release_id = ${request.releaseId ?? null})
+        AND available_at <= ${timestamp} AND (claim_owner IS NULL OR claim_expires_at <= ${timestamp})
+        ORDER BY available_at, release_id LIMIT ${remaining}`
+      })(undefined)
+      return [
+        ...yield* Effect.forEach(environments, (row) => environmentRecord(row, null)),
+        ...yield* Effect.forEach(releases, (row) => releaseRecord(row, null))
+      ]
+    }
+  )
+
+  const acknowledge = Effect.fn("ReadinessQueue.acknowledge")(
+    function*(request: typeof AcknowledgeReadinessInvalidationRequest.Type) {
+      const now = encodeTimestamp(yield* DateTime.now)
+      if (request._tag === "environment") {
+        yield* sql`DELETE FROM readiness_environment_queue WHERE workspace_id = ${request.workspaceId}
+        AND release_id = ${request.releaseId} AND environment_id = ${request.environmentId}
+        AND invalidation_revision = ${request.invalidationRevision}
+        AND claim_owner = ${request.leaseOwner} AND claim_token = ${request.leaseToken}
+        AND claim_expires_at > ${now}`
+      } else {
+        yield* sql`DELETE FROM readiness_release_queue WHERE workspace_id = ${request.workspaceId}
+        AND release_id = ${request.releaseId} AND invalidation_revision = ${request.invalidationRevision}
+        AND claim_owner = ${request.leaseOwner} AND claim_token = ${request.leaseToken}
+        AND claim_expires_at > ${now}`
+      }
+      return (yield* readChanges(sql)) === 1
+    }
+  )
+
+  const defer = Effect.fn("ReadinessQueue.defer")(function*(request: typeof DeferReadinessInvalidationRequest.Type) {
+    const now = encodeTimestamp(yield* DateTime.now)
+    const { target } = request
+    const availableAt = encodeTimestamp(request.availableAt)
+    if (DateTime.Order(request.availableAt, yield* DateTime.now) <= 0) {
+      return yield* new ReadinessInputError({ operation: "defer-invalidation", reason: "invalid-request" })
+    }
+    if (target._tag === "environment") {
+      yield* sql`UPDATE readiness_environment_queue SET available_at = ${availableAt},
+        claim_owner = NULL, claim_token = NULL, claim_expires_at = NULL
+        WHERE workspace_id = ${target.workspaceId} AND release_id = ${target.releaseId}
+        AND environment_id = ${target.environmentId} AND invalidation_revision = ${target.invalidationRevision}
+        AND claim_owner = ${target.leaseOwner} AND claim_token = ${target.leaseToken} AND claim_expires_at > ${now}`
+    } else {
+      yield* sql`UPDATE readiness_release_queue SET available_at = ${availableAt},
+        claim_owner = NULL, claim_token = NULL, claim_expires_at = NULL
+        WHERE workspace_id = ${target.workspaceId} AND release_id = ${target.releaseId}
+        AND invalidation_revision = ${target.invalidationRevision}
+        AND claim_owner = ${target.leaseOwner} AND claim_token = ${target.leaseToken} AND claim_expires_at > ${now}`
+    }
+    return (yield* readChanges(sql)) === 1
+  })
+
   const enqueueDue = Effect.fn("ReadinessQueue.enqueueDue")(function*(request: EnqueueDueReadinessEvaluationsRequest) {
     const dueAt = encodeTimestamp(request.dueAt)
     const schedules = yield* SqlSchema.findAll({
@@ -296,5 +380,5 @@ export const makeReadinessQueue = Effect.gen(function*() {
     return { environments: affected.length, releases: releaseIds.length }
   })
 
-  return { claim, enqueue, enqueueAffected, enqueueDue }
+  return { acknowledge, claim, defer, enqueue, enqueueAffected, enqueueDue, listPending }
 })
