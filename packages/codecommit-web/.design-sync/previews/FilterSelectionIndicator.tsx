@@ -4,7 +4,7 @@ import { waitingQueue } from "../fixtures/pull-requests.js"
 
 const noop = () => {}
 const repositoryCount = waitingQueue.rows.filter(({ pullRequest }) => pullRequest.repositoryName === "infra-core").length
-const authorCount = waitingQueue.rows.filter(({ pullRequest }) => pullRequest.author === "ana").length
+const authorCount = waitingQueue.rows.filter(({ pullRequest }) => pullRequest.author === "contributor").length
 
 // FilterCombobox's option composition, with CommandItem's Tailwind row classes.
 const option = (group: string, label: string, count: number, selected: boolean) => (
@@ -30,6 +30,6 @@ export const Selected = () => option("Repository", "infra-core", repositoryCount
 /** The same repository is available but unapplied. */
 export const NotSelected = () => option("Repository", "infra-core", repositoryCount, false)
 /** The fixture's author filter is applied. */
-export const AuthorSelected = () => option("Author", "ana", authorCount, true)
+export const AuthorSelected = () => option("Author", "contributor", authorCount, true)
 /** The author filter is available but unapplied. */
-export const AuthorNotSelected = () => option("Author", "ana", authorCount, false)
+export const AuthorNotSelected = () => option("Author", "contributor", authorCount, false)

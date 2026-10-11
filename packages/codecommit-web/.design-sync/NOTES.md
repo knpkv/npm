@@ -14,8 +14,9 @@ frame. `test/browser-entries.test.ts` keeps the views free of Node built-ins and
 runtime. `entries/styles.mjs` pulls `dist/views/style.css`, which carries the layer order, rly,
 Tailwind's utilities, the theme and the views' CSS modules.
 
-The pages people see most (the queue, the pull request page, the review workspace) are atom-bound
-containers and not in `./views` yet; their view extractions come first, then they join this bundle.
+The queue page (`PRListView` and its search, filter and activity pieces) and the pull request page
+(`PRDetailView`, its header, revision, health, approvals, comments, lifecycle and description sections,
+and the `PRFilesDiffView` diff frame) are in `./views`. Their atom-bound containers stay in the app.
 
 ## Setup on a fresh clone or worktree
 
@@ -35,6 +36,10 @@ containers and not in `./views` yet; their view extractions come first, then the
   dates relative to module load, so a card reads the same wherever it renders.
 - The long settings forms were cut off mid-section -> the 900x700 card viewport -> `cfg.overrides`
   gives `SettingsRelayView` and `SettingsSandboxView` a column card at 900x1200.
+- The queue card showed the header but no rows, and the diff frame's findings column was clipped ->
+  both are page-wide -> column cards: `PRListView` at 1100x1600, `PRFilesDiffView` at 1200x700.
+- `PRRevisionView`'s "Time to first review" read 19856.4d -> a fixture creation date at the epoch ->
+  unknown health is shown through the `health` prop alone, with the normal fixture dates.
 
 ## Previews
 
@@ -45,6 +50,12 @@ containers and not in `./views` yet; their view extractions come first, then the
   Tailwind classes only.
 - `FilterSelectionIndicator` is shown inside a filter option row (label and count), as the sidebar
   uses it; alone it is a bare checkbox.
+- States in which a component renders nothing are not cards: a deleted comment thread, lifecycle
+  metrics while comments load or with no review evidence, an empty recent-activity list. Each preview's
+  top comment says so.
+- `PRFilesDiffView` never renders the drawer's contents, so its drawer state is `FindingsDrawerClosed`;
+  the open drawer is the `FindingsDrawer` card. `PRRequirementDialogsView` is a modal (single card,
+  Docker dialog); the Granted dialog stays in its `.jsx`.
 - Not authored: the live sandbox editor (needs a server), interaction states (hover, open calendar,
   editing and saving), and states the tests have no fixtures for (a size distribution with data,
   `RollingStatus` phase sequences, notification permission variants).
@@ -53,7 +64,8 @@ containers and not in `./views` yet; their view extractions come first, then the
 
 - `[TOKENS_MISSING]` for `--radix-select-*`: Radix sets them inline on an open select at runtime.
 - Validate's `[GRID_OVERFLOW]` suggestions are applied as `cfg.overrides`: `FindingsDrawer` is a modal
-  dialog (single card), `SettingsRelayView` and `PRRow` are wider than a grid cell (column).
+  dialog (single card), as is `PRRequirementDialogsView`; `SettingsRelayView`, `PRRow`,
+  `PRDetailHeaderView` and `PRDetailView` are wider than a grid cell (column).
 
 ## Re-sync risks
 

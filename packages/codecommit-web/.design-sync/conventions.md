@@ -23,7 +23,13 @@ Wrap the screen in `CodeCommitWeb.ThemeProvider` with `CodeCommitWeb.PortalProvi
 
 ### The pieces
 
-- Queue: `PRRow` (one pull request: state, review ownership, health, repository, author, activity),
+- Queue page: `PRListView` (the whole queue: decision counts, search, filters, rows),
+  `SearchBarView`, `FilterSidebarView`, `RecentActivityView`.
+- Pull request page: `PRDetailView` (the whole page), or its sections `PRDetailHeaderView`,
+  `PRRevisionView`, `PRHealthBreakdownView`, `PRApprovalsView` (with `ApproversCard`),
+  `PRCommentsView`, `PRLifecycleView`, `PRDescriptionView`, `PRRequirementDialogsView`, and the diff
+  frame `PRFilesDiffView`.
+- Queue pieces: `PRRow` (one pull request: state, review ownership, health, repository, author, activity),
   `WorkbenchRailView` (the rail beside an open pull request), `FilterSelectionIndicator`,
   `DateRangePicker`, `RollingStatus` (the refresh progress line).
 - Review: `FindingsDrawer` (the findings panel beside or over the diff).
@@ -32,8 +38,8 @@ Wrap the screen in `CodeCommitWeb.ThemeProvider` with `CodeCommitWeb.PortalProvi
 - Settings: `SettingsRelayView`, `SettingsSandboxView`, `SettingsNotifications`, `SettingsTheme`,
   `SettingsAbout`, and `ConfigUnavailableView` for a settings read that failed.
 
-The full pull request page, the queue page and the review workspace are not here yet; compose from these
-pieces and rly rather than rebuilding them.
+The review workspace around the diff is not here yet; compose it from `PRFilesDiffView`,
+`FindingsDrawer` and rly rather than rebuilding them.
 
 ### The product's rules
 
