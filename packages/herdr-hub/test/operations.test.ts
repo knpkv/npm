@@ -251,7 +251,7 @@ printf '%s\\n' "{\\"jobId\\":\\"$job_id\\",\\"protocol\\":\\"herdr.coordinator.c
       "-c",
       `dd if=/dev/zero bs=${commandOutputMaxBytes * 3} count=1 2>/dev/null | tr '\\000' x; ` +
       `dd if=/dev/zero bs=${commandOutputMaxBytes * 3} count=1 2>/dev/null | tr '\\000' y >&2; ` +
-      `printf 'activated' > "$0"; printf 'last stderr line' >&2; exit ${exit}`,
+      `printf 'activated' > "$0"; printf 'last stderr line' >&2; printf 'last stdout line'; exit ${exit}`,
       completed
     ]
     return Effect.gen(function*() {
@@ -271,7 +271,10 @@ printf '%s\\n' "{\\"jobId\\":\\"$job_id\\",\\"protocol\\":\\"herdr.coordinator.c
       if (Result.isFailure(result)) {
         expect(result.failure.detail).toContain("code 3")
         expect(result.failure.detail).toContain("earlier bytes omitted")
-        expect(result.failure.detail.endsWith("last stderr line")).toBe(true)
+        // brew bundle and friends explain a failure on stdout, so its tail follows stderr's.
+        expect(result.failure.detail).toContain("last stderr line\nstdout:\n")
+        expect(result.failure.detail.endsWith("last stdout line")).toBe(true)
+        expect(Buffer.byteLength(result.failure.detail)).toBeLessThanOrEqual(commandOutputMaxBytes)
       }
     }).pipe(
       Effect.ensuring(Effect.sync(() => rmSync(root, { force: true, recursive: true }))),
@@ -300,7 +303,7 @@ printf '%s\\n' "{\\"jobId\\":\\"$job_id\\",\\"protocol\\":\\"herdr.coordinator.c
       expect(Result.isFailure(failedResult)).toBe(true)
       if (Result.isFailure(failedResult)) {
         expect(failedResult.failure.detail).toContain("code 7")
-        expect(failedResult.failure.detail).toContain("fatal")
+        expect(failedResult.failure.detail).toBe("command exited with code 7: fatal\nstdout:\nplausible")
       }
 
       // A build log past the cap keeps its end: the omission line, then the
@@ -367,15 +370,18 @@ printf '%s\n' '{"result":{"agents":[{"agent":"codex","agent_status":"working","c
 
       writeFileSync(
         herdrCommand,
-        "#!/bin/sh\nprintf 'fatal agent list' >&2\nexit 7\n",
+        "#!/bin/sh\nprintf '{\"partial\"' \nprintf 'fatal agent list' >&2\nexit 7\n",
         { mode: 0o700 }
       )
-      expect(yield* nearLimit.listAgents()).toMatchObject({
+      const failedListing = yield* nearLimit.listAgents()
+      expect(failedListing).toMatchObject({
         available: false,
         error: expect.stringContaining(
           "herdr.agent_list: command exited with code 7: fatal agent list"
         )
       })
+      // Parsed output never rides along in a failure: only build logs carry stdout.
+      expect(failedListing.error).not.toContain("partial")
 
       writeFileSync(
         herdrCommand,
