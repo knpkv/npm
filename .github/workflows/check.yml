@@ -268,6 +268,7 @@ jobs:
       matrix:
         package:
           - agent-usage
+          - alchemy-console
           - codecommit-web
           - control-center
           - herdr-connect

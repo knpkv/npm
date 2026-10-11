@@ -1,9 +1,76 @@
 # @knpkv/alchemy-console
 
-Read-only data layer for a local Alchemy stack console. The package adds
-project discovery, lockfile version lookup, local state metadata, and SSO/S3
-readers. There is no executable or HTTP listener yet. Authenticated API and
-design-backed Rly screens follow in separate PRs.
+Run `alchemy-console` to serve the read-only API on `127.0.0.1:3114` and open a
+one-time login link. `alchemy-console login` behaves the same way: it asks an
+existing server for a fresh link, or starts one in the foreground. `--no-open`
+prints the link without opening a browser. CI, non-interactive stdout and
+`BROWSER=none` also skip opening. `--port` selects a port from 1024 through 65535.
+`alchemy-console serve` always prints only and runs until SIGINT or SIGTERM.
+Closing a browser tab leaves the foreground server running.
+
+The current browser page performs login, then navigates to JSON at `/api/stacks`.
+Stack screens will follow the approved design references in a separate change.
+
+Configuration is read at startup:
+
+| Variable               | Default                                        | Boundary                              |
+| ---------------------- | ---------------------------------------------- | ------------------------------------- |
+| `ALCHEMY_CONSOLE_ROOT` | `Work/dev` under the user's home               | Server-private project discovery path |
+| `AWS_CONFIG_FILE`      | `.aws/config` under the user's home            | Server-private SSO configuration path |
+| `ALCHEMY_CONSOLE_HOME` | `.cache/alchemy-console` under the user's home | Server-private control directory      |
+
+Login reuse is per port. A reused server keeps its startup configuration. The
+control directory must be owned by the current user with mode `0700`; each
+`serve-<port>.sock` is `0600`. Symlinks, foreign owners and pre-existing stale
+sockets fail explicitly. For an abandoned socket, confirm its server has stopped
+before removing that entry and restarting. The control channel currently requires
+POSIX ownership and Unix sockets.
+
+## Authenticated API
+
+The client-safe contracts are exported from `@knpkv/alchemy-console/api` and may be
+used with Effect's `HttpApiClient`. Both endpoints require the process's owner
+cookie, and all responses are private and uncacheable:
+
+The cookie name includes the bound listener port, so sessions on different ports
+can coexist in one browser. Both API boundaries select that listener's cookie.
+Cookies still share the loopback host and travel across ports; the name separates
+sessions and does not provide port confidentiality. The API middleware resolves
+the name at runtime rather than declaring a fixed OpenAPI cookie scheme.
+
+| Route                 | Result                                                 |
+| --------------------- | ------------------------------------------------------ |
+| `GET /api/stacks`     | Stack summaries and explicit local/S3 discovery issues |
+| `GET /api/stacks/:id` | Current normalized resource state for a listed stack   |
+
+Listing runs discovery on demand, without polling or schedules. IDs are random,
+process-scoped identifiers with no encoded locator. They remain stable across
+scans while a stack remains present, then expire when it disappears or the server
+restarts. They are normalized, authenticated client-visible identifiers; the
+server never persists them. Do not emit them or stack metadata through public
+routes or telemetry. Browsers must not persist private provider coordinates.
+
+Discovery reports sanitized reason codes for failed projects, SSO profiles and
+buckets while continuing other sources. A discovered entrypoint with no state
+cannot supply an app or stage and contributes no stack row. Remote resource
+counts and Alchemy versions remain unknown until the corresponding state or
+lockfile establishes them. Discovery is capped at 1000 projects/stacks, 100 SSO
+profiles, 1000 candidate buckets per profile and two minutes per list request.
+
+The one public authentication route, `POST /auth/bootstrap`, exchanges a code
+from the URL fragment for an HttpOnly, SameSite=Strict owner cookie. Codes are
+single-use and expire after 60 seconds; a fresh mint replaces an unspent code.
+The page removes the fragment before exchanging it. Codes are minted and
+announced only after the authenticated HTTP listener is ready. Credential URLs
+go only to stdout and the browser opener, never logs or telemetry. Session tokens
+remain in the server and HttpOnly cookie. Every unsafe API method is refused,
+including apply and destroy. Reads reject foreign origins and cross-site browser
+requests. Listener and request Host are restricted to the bound loopback address.
+
+## Data readers
+
+The root export provides project discovery, lockfile version lookup, local
+state metadata and SSO/S3 readers for server-side consumers.
 
 `discoverProjects(directory)` scans an explicit root for `alchemy.run.ts` without
 importing or executing it. It skips `.git`, `node_modules`, `.alchemy`, `.direnv`,
