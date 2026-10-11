@@ -1,7 +1,8 @@
 /// <reference lib="webworker" />
 
 import { Effect, Result, Schema } from "effect"
-import { ApprovalPushPayload } from "./model.js"
+import { blockedPushDeepLink, showBlockedNotification } from "./blocked-push-pwa.js"
+import { PushPayload } from "./model.js"
 import { approvalDeepLink, handleNotificationClick, showApprovalNotification } from "./pwa.js"
 
 class ServiceWorkerScopeError extends Schema.TaggedError<ServiceWorkerScopeError>()(
@@ -42,22 +43,27 @@ worker.onpush = (event) => {
       try: () => event.data?.json(),
       catch: (cause) => new WorkerPayloadError({ cause })
     })
-    const payload = yield* Schema.decodeUnknownEffect(ApprovalPushPayload)(
+    const payload = yield* Schema.decodeUnknownEffect(PushPayload)(
       unknown
     ).pipe(Effect.mapError((cause) => new WorkerPayloadError({ cause })))
     yield* Effect.tryPromise({
-      try: () =>
-        showApprovalNotification(
-          {
-            scope: worker.registration.scope,
-            showNotification: (title, options) => worker.registration.showNotification(title, options)
-          },
-          (count) =>
-            "setAppBadge" in worker.navigator
-              ? worker.navigator.setAppBadge(count)
-              : Promise.resolve(),
-          payload
-        ),
+      try: () => {
+        const registration = {
+          scope: worker.registration.scope,
+          showNotification: (title: string, options: NotificationOptions) =>
+            worker.registration.showNotification(title, options)
+        }
+        return "kind" in payload
+          ? showBlockedNotification(registration, payload)
+          : showApprovalNotification(
+            registration,
+            (count) =>
+              "setAppBadge" in worker.navigator
+                ? worker.navigator.setAppBadge(count)
+                : Promise.resolve(),
+            payload
+          )
+      },
       catch: (cause) => new WorkerNotificationError({ cause })
     })
   })
@@ -68,11 +74,13 @@ worker.onnotificationclick = (event) => {
   event.notification.close()
   const effect = Effect.gen(function*() {
     const unknown: unknown = event.notification.data
-    const payload = yield* Schema.decodeUnknownEffect(ApprovalPushPayload)(unknown).pipe(
+    const payload = yield* Schema.decodeUnknownEffect(PushPayload)(unknown).pipe(
       Effect.mapError((cause) => new WorkerPayloadError({ cause }))
     )
     const canonicalUrl = new URL("/", worker.registration.scope).href
-    const deepLinkUrl = approvalDeepLink(canonicalUrl, payload)
+    const deepLinkUrl = "kind" in payload
+      ? blockedPushDeepLink(canonicalUrl, payload)
+      : approvalDeepLink(canonicalUrl, payload)
     yield* Effect.tryPromise({
       try: () =>
         handleNotificationClick(

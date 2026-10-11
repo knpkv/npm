@@ -1,4 +1,5 @@
 import { Schema } from "effect"
+import { BlockedPushPayload } from "./blocked-push-model.js"
 
 const BoundedIdentifier = Schema.String.check(
   Schema.isNonEmpty(),
@@ -63,6 +64,8 @@ export const ApprovalPushPayload = Schema.Struct({
   pendingCount: Schema.NullOr(Schema.Number)
 })
 export type ApprovalPushPayload = typeof ApprovalPushPayload.Type
+export const PushPayload = Schema.Union([ApprovalPushPayload, BlockedPushPayload])
+export type PushPayload = typeof PushPayload.Type
 
 export const PushPublicConfiguration = Schema.Struct({
   canonicalUrl: Schema.String,

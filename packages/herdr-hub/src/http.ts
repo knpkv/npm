@@ -123,6 +123,10 @@ import type { SanitizedJobRecord } from "./approval-request.js"
 import { sanitizeJobPayload, sanitizeJobRecord } from "./approval-request.js"
 import { resolveApprovalPage } from "./approval-url.js"
 import { authorize, authorizeLoopback, authorizeLoopbackPeer } from "./auth.js"
+import { BlockedPushSettings, StageHeartbeat } from "./blocked-push-model.js"
+import { loadBlockedPushObservations } from "./blocked-push-source.js"
+import { BlockedPushStore } from "./blocked-push-store.js"
+import { makeBlockedPushWorker } from "./blocked-push-worker.js"
 import {
   type ApprovalDirectory,
   type DashboardHistoryPage,
@@ -1883,6 +1887,8 @@ export const startHttpServer = async (
     finalizers.unshift(() => Promise.resolve().then(() => archiveStore.close()))
     const postStore = await httpRuntime.runPromise(AgentPostStore.open(statePath))
     finalizers.unshift(() => Promise.resolve().then(() => postStore.close()))
+    const blockedPushStore = await httpRuntime.runPromise(BlockedPushStore.open(statePath))
+    finalizers.unshift(() => Promise.resolve().then(() => blockedPushStore.close()))
     const workStore = await httpRuntime.runPromise(WorkStore.open(statePath))
     finalizers.unshift(() => Promise.resolve().then(() => workStore.close()))
     const work = await httpRuntime.runPromise(makeWorkService(workStore))
@@ -3410,6 +3416,52 @@ export const startHttpServer = async (
             return
           }
 
+          if (mode === "serve" && url.pathname === "/v1/push/blocked-settings") {
+            if (request.method === "GET") {
+              await respond(
+                response,
+                Effect.gen(function*() {
+                  const who = yield* authorized
+                  return yield* blockedPushStore.settings(who).pipe(
+                    Effect.mapError(() => new Unavailable({ operation: "push.settings" }))
+                  )
+                }),
+                200,
+                { "cache-control": "no-store" }
+              )
+              return
+            }
+            if (request.method === "PUT") {
+              await respond(
+                response,
+                Effect.gen(function*() {
+                  const who = yield* authorized
+                  yield* sameOrigin(request, expectedOrigin())
+                  const settings = yield* readJson(request, BlockedPushSettings)
+                  return yield* blockedPushStore.putSettings(who, settings).pipe(
+                    Effect.mapError(() => new Unavailable({ operation: "push.settings" }))
+                  )
+                })
+              )
+              return
+            }
+          }
+          if (mode === "serve" && request.method === "POST" && url.pathname === "/v1/push/stage-heartbeat") {
+            await respond(
+              response,
+              Effect.gen(function*() {
+                const who = yield* authorized
+                yield* sameOrigin(request, expectedOrigin())
+                const heartbeat = yield* readJson(request, StageHeartbeat)
+                yield* blockedPushStore.heartbeat(who, heartbeat).pipe(
+                  Effect.mapError(() => new Unavailable({ operation: "push.heartbeat" }))
+                )
+                return { accepted: true }
+              })
+            )
+            return
+          }
+
           if (
             mode === "serve" &&
             request.method === "POST" &&
@@ -4075,6 +4127,35 @@ export const startHttpServer = async (
           workerScope
         )
       )
+      await httpRuntime.runPromise(Effect.forkIn(
+        makeBlockedPushWorker({
+          allowedPushOrigins: config.pushAllowedOrigins,
+          allowedUsers: config.allowedUsers,
+          store: blockedPushStore,
+          subscriptions: approvalStore,
+          send: pushSender,
+          loadObservations: () =>
+            Effect.gen(function*() {
+              const observedAt = now()
+              const peers = yield* fleetPeers(config)
+              return yield* loadBlockedPushObservations(
+                localConnectAgents(config, service, activityStore, relationshipStore, observedAt).pipe(
+                  Effect.provideService(Crypto.Crypto, cryptoService)
+                ),
+                config.host,
+                peers.map((peer) => ({
+                  host: peer.host,
+                  online: peer.online,
+                  agentsUrl: peer.connectAgentsUrl,
+                  terminalUrl: peer.terminalUrl
+                })),
+                postStore,
+                observedAt
+              )
+            })
+        }),
+        workerScope
+      ))
     }
     lanWorkPairing = options.lanWork === undefined
       ? null

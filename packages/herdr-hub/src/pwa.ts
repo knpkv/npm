@@ -1,5 +1,5 @@
 import { Effect, Result, Schema } from "effect"
-import { ApprovalNotificationCandidate, type ApprovalPushPayload } from "./model.js"
+import { ApprovalNotificationCandidate, type ApprovalPushPayload, type PushPayload } from "./model.js"
 
 export class ApprovalDeepLinkError extends Schema.TaggedError<ApprovalDeepLinkError>()(
   "ApprovalDeepLinkError",
@@ -13,7 +13,7 @@ export type ApprovalWorkerRegistration = {
     options: {
       readonly badge: string
       readonly body: string
-      readonly data: ApprovalPushPayload
+      readonly data: PushPayload
       readonly icon: string
       readonly tag: string
     }
