@@ -2,6 +2,7 @@ import * as BrowserCrypto from "@effect/platform-browser/BrowserCrypto"
 import * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
 import * as FetchHttpClient from "effect/http/FetchHttpClient"
+import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
 
 import { makeControlCenterApiClient } from "../../api/client.js"
@@ -11,10 +12,13 @@ import type {
   WorkspaceSettingsReadModel
 } from "../../api/workspaceSettings.js"
 import { WorkspaceSettingsMutationId } from "../../domain/identifiers.js"
+import type { ReleaseTargetCatalog } from "../../domain/releaseTargets.js"
 import { makeAuthenticatedMutationClient } from "../authenticatedMutationClient.js"
 
 /** Browser boundary for authenticated settings reads and owner-authorized mutations. */
 export interface WorkspaceSettingsTransport {
+  /** Test transports may omit the catalogue; the editor then reports it unavailable. */
+  readonly loadTargetCatalog?: (signal: AbortSignal) => Promise<ReleaseTargetCatalog>
   readonly load: (signal: AbortSignal) => Promise<WorkspaceSettingsReadModel>
   readonly makeMutationId: () => Promise<WorkspaceSettingsMutationId>
   readonly update: (
@@ -40,8 +44,16 @@ export const browserWorkspacePresentationTransport: WorkspacePresentationTranspo
     )
 }
 
+/** Request-scoped catalogue entry program; each run owns its HTTP layer lifetime. */
+const targetCatalogueRead = Effect.scoped(Effect.gen(function*() {
+  const context = yield* Layer.build(FetchHttpClient.layer)
+  const client = yield* makeControlCenterApiClient().pipe(Effect.provideContext(context))
+  return yield* client.workspaceSettings.releaseTargetCatalog()
+}))
+
 /** Generated API transport with a retry-stable UUIDv7 mutation identity. */
 export const browserWorkspaceSettingsTransport: WorkspaceSettingsTransport = {
+  loadTargetCatalog: (signal) => Effect.runPromise(targetCatalogueRead, { signal }),
   load: (signal) =>
     Effect.runPromise(
       Effect.gen(function*() {

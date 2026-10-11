@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 
 import type { WorkspaceSettingsReadModel } from "../../api/workspaceSettings.js"
 import type { WorkspaceSettingsMutationId } from "../../domain/identifiers.js"
+import { ReleaseTargetConfigurationError } from "../../domain/releaseTargets.js"
 import {
   changedWorkspaceSettingsSections,
   isGovernedWorkspaceSettingsSection,
@@ -22,6 +23,7 @@ export type WorkspaceSettingsState =
     readonly pendingMutationId: WorkspaceSettingsMutationId | null
     readonly server: WorkspaceSettingsReadModel
     readonly status: "dirty" | "failed" | "saved" | "saving"
+    readonly targetError?: ReleaseTargetConfigurationError | null
   }
   | {
     readonly _tag: "conflict"
@@ -64,6 +66,12 @@ export const reapplyWorkspaceSettingsCandidate = (
   candidate: WorkspaceSettingsV1,
   latest: WorkspaceSettingsV1
 ): WorkspaceSettingsV1 | null => {
+  const releaseTargets = localChangeOrLatest(
+    base.pipeline.releaseTargets,
+    candidate.pipeline.releaseTargets,
+    latest.pipeline.releaseTargets,
+    (left, right) => JSON.stringify(left ?? []) === JSON.stringify(right ?? [])
+  )
   const recovered = {
     schemaVersion: 1,
     agent: {
@@ -131,6 +139,8 @@ export const reapplyWorkspaceSettingsCandidate = (
       )
     },
     pipeline: {
+      ...latest.pipeline,
+      ...(!(releaseTargets === undefined) && { releaseTargets }),
       maximumAttempts: localChangeOrLatest(
         base.pipeline.maximumAttempts,
         candidate.pipeline.maximumAttempts,
@@ -254,6 +264,7 @@ export const useWorkspaceSettings = (
     setState({
       ...current,
       draft,
+      targetError: null,
       pendingMutationId: null,
       status: changedWorkspaceSettingsSections(current.server.settings, draft).length === 0
         ? "saved"
@@ -311,7 +322,8 @@ export const useWorkspaceSettings = (
                 draft: candidate,
                 pendingMutationId: mutationId,
                 server: base,
-                status: "failed"
+                status: "failed",
+                targetError: Schema.is(ReleaseTargetConfigurationError)(failure) ? failure : null
               })
               return
             }

@@ -1,6 +1,7 @@
 import * as Schema from "effect/Schema"
 
 import { AgentProviderIdentifier } from "./agentProviderIdentifier.js"
+import { PipelineReleaseTargets } from "./releaseTargets.js"
 
 const boundedInteger = (minimum: number, maximum: number) => Schema.Int.check(Schema.isBetween({ minimum, maximum }))
 
@@ -121,7 +122,8 @@ export const WorkspaceSettingsV1 = Schema.Struct({
   }),
   pipeline: Schema.Struct({
     retryMode: Schema.Literals(["manual-only", "confirm-before-retry"]),
-    maximumAttempts: boundedInteger(1, 10)
+    maximumAttempts: boundedInteger(1, 10),
+    releaseTargets: Schema.optionalKey(PipelineReleaseTargets)
   }),
   agent: Schema.Struct({
     allowedProviders: Schema.Array(AgentProviderIdentifier).check(
@@ -183,7 +185,8 @@ export const DEFAULT_WORKSPACE_SETTINGS = WorkspaceSettingsV1.make({
   },
   pipeline: {
     retryMode: "manual-only",
-    maximumAttempts: 1
+    maximumAttempts: 1,
+    releaseTargets: []
   },
   agent: {
     allowedProviders: [],

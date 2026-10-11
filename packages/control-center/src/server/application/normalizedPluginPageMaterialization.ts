@@ -1,7 +1,6 @@
 import * as Crypto from "effect/Crypto"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
-import { Base64, Hex } from "effect/encoding"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 
@@ -46,6 +45,7 @@ import { type PluginCacheRecord, type PluginStreamKey } from "../persistence/rep
 import type { WorkspaceSettingsRecord } from "../persistence/repositories/workspaceSettingsRepository.js"
 import { ConfluencePageAttributesV1 } from "../plugins/confluence/ConfluencePageSchemas.js"
 import type { PluginConflictFailure } from "../plugins/failures.js"
+import { stableUuid as deriveStableUuid } from "./internal/stableUuid.js"
 import {
   affectedPipelineExecutionEvents,
   codePipelineCacheSelectors,
@@ -58,6 +58,7 @@ import {
   verifyPluginSynchronizationAuthority
 } from "./pluginSynchronizationAuthority.js"
 import { materializeRelationshipInference } from "./relationshipInferenceMaterialization.js"
+import { reconcileReleaseTargets } from "./releaseTargetConfiguration.js"
 
 type EntityUpsert = Extract<NormalizedPluginEventV1, { readonly _tag: "UpsertEntity" }>
 type PageDetails = Extract<DeliveryEntityDetails, { readonly _tag: "page" }>
@@ -533,20 +534,16 @@ const entityPresentation = Effect.fn("NormalizedPluginPageMaterialization.entity
   }
 })
 
-const stableUuid = Effect.fn("NormalizedPluginPageMaterialization.stableUuid")(function*(
+const stableUuid = (
   cryptoService: Crypto.Crypto,
   identity: string,
   eventId: string
-) {
-  const bytes = yield* Effect.fromResult(Base64.decode(Base64.encode(identity))).pipe(
-    Effect.mapError(() => malformed("normalized-identity-encoding-failed", eventId))
+) =>
+  deriveStableUuid(
+    cryptoService,
+    identity,
+    (operation) => malformed(`normalized-identity-${operation}-failed`, eventId)
   )
-  const digest = yield* cryptoService.digest("SHA-256", bytes).pipe(
-    Effect.mapError(() => malformed("normalized-identity-digest-failed", eventId))
-  )
-  const hex = Hex.encode(digest)
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-7${hex.slice(13, 16)}-8${hex.slice(17, 20)}-${hex.slice(20, 32)}`
-})
 
 const sourceIdentity = (
   scope: NormalizedPluginPageMaterializationScope,
@@ -2080,6 +2077,14 @@ export const materializeNormalizedPluginPage = Effect.fn(
       evidenceItemCount += inference.evidenceItemCount
       nodeCount += inference.nodeCount
       relationshipCount += inference.relationshipCount
+    }
+    if (
+      (settings.pipeline.releaseTargets?.length ?? 0) > 0 &&
+      (acceptedEvents.length > 0 || entityProjectionCount > 0)
+    ) {
+      yield* reconcileReleaseTargets(persistence, scope.workspaceId, settings, scope.committedAt).pipe(
+        Effect.provideService(Crypto.Crypto, cryptoService)
+      )
     }
     return {
       pageCommitted: committed.pageCommitted,

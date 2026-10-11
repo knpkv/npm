@@ -84,6 +84,9 @@ export const ReleaseAction = ({ release }: { readonly release: PortfolioReleaseP
       case "blocked":
         return { label: "Review blocker", to: releaseActiveWorkPath(context.workspaceId, release.id) }
       case "held":
+        if (release.targetSettingsPath !== undefined) {
+          return { label: "Configure targets", to: release.targetSettingsPath }
+        }
         return { label: "Repair missing links", to: `${releaseFullPath(context.workspaceId, release.id)}#release-work` }
       case "ready":
         return {
@@ -314,6 +317,11 @@ const FullRelease = ({ selection }: { readonly selection: ReleaseRouteSelection 
           verdict={release.release.verdict}
         />
         <ReleaseAction release={release} />
+        {release.targetSettingsPath === undefined ? null : (
+          <Link className={styles.back} to={`${releaseFullPath(context.workspaceId, release.id)}#release-work`}>
+            Repair missing links
+          </Link>
+        )}
       </header>
 
       <StageRail heading="Build, verify, production" stages={release.stages} />

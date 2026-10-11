@@ -1,0 +1,62 @@
+id: no-array-index-jsx-key
+snapshots:
+  ? |
+    mapping.environments.map((range, rangeIndex) => (
+      <div className={styles.fields} key={rangeIndex}>Environment {rangeIndex + 1}</div>
+    ))
+  : labels:
+      - source: key={rangeIndex}
+        style: primary
+        start: 83
+        end: 99
+      - source: |-
+          mapping.environments.map((range, rangeIndex) => (
+            <div className={styles.fields} key={rangeIndex}>Environment {rangeIndex + 1}</div>
+          ))
+        style: secondary
+        start: 0
+        end: 137
+      - source: |-
+          ((range, rangeIndex) => (
+            <div className={styles.fields} key={rangeIndex}>Environment {rangeIndex + 1}</div>
+          ))
+        style: secondary
+        start: 24
+        end: 137
+      - source: |-
+          (range, rangeIndex) => (
+            <div className={styles.fields} key={rangeIndex}>Environment {rangeIndex + 1}</div>
+          )
+        style: secondary
+        start: 25
+        end: 136
+  ? |
+    ranges.map((range, index) => {
+      return <input key={index} value={range.name} />
+    })
+  : labels:
+      - source: key={index}
+        style: primary
+        start: 47
+        end: 58
+      - source: |-
+          ranges.map((range, index) => {
+            return <input key={index} value={range.name} />
+          })
+        style: secondary
+        start: 0
+        end: 83
+      - source: |-
+          ((range, index) => {
+            return <input key={index} value={range.name} />
+          })
+        style: secondary
+        start: 10
+        end: 83
+      - source: |-
+          (range, index) => {
+            return <input key={index} value={range.name} />
+          }
+        style: secondary
+        start: 11
+        end: 82

@@ -113,6 +113,7 @@ import type {
   PrReviewSuggestionRevisionSequence
 } from "../../domain/prReviewRevision.js"
 import type { RelationshipRepairProposal } from "../../domain/relationshipRepair.js"
+import type { ReleaseTargetCatalog, ReleaseTargetConfigurationError } from "../../domain/releaseTargets.js"
 import type { Revision, VendorImmutableId } from "../../domain/sourceRevision.js"
 import type { TimelineActorKind, TimelineCursor, TimelineEventDetail, TimelinePage } from "../../domain/timeline.js"
 import { UtcTimestamp } from "../../domain/utcTimestamp.js"
@@ -152,6 +153,9 @@ export class ApplicationInvalidRequest extends Schema.TaggedError<ApplicationInv
 export class WorkspaceSettingsAdministration extends Context.Service<
   WorkspaceSettingsAdministration,
   {
+    readonly releaseTargetCatalog: (
+      workspaceId: WorkspaceId
+    ) => Effect.Effect<ReleaseTargetCatalog, ApplicationServiceUnavailable>
     readonly read: (
       workspaceId: WorkspaceId
     ) => Effect.Effect<WorkspaceSettingsReadModel, ApplicationServiceUnavailable>
@@ -161,7 +165,7 @@ export class WorkspaceSettingsAdministration extends Context.Service<
       readonly session: SessionSummary
     }) => Effect.Effect<
       WorkspaceSettingsReadModel,
-      ApplicationConflict | ApplicationInvalidRequest | ApplicationServiceUnavailable
+      ApplicationConflict | ApplicationInvalidRequest | ApplicationServiceUnavailable | ReleaseTargetConfigurationError
     >
   }
 >()("@knpkv/control-center/server/api/WorkspaceSettingsAdministration") {}

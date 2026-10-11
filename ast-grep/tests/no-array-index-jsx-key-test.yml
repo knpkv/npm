@@ -1,0 +1,21 @@
+id: no-array-index-jsx-key
+valid:
+  - |
+    mapping.environments.map((range, rangeIndex) => (
+      <div className={styles.fields} key={range.key}>Environment {rangeIndex + 1}</div>
+    ))
+  - |
+    mapping.environments.map((range) => <div key={draftKey(range)} />)
+  - |
+    ranges.map((range, index) => <div>{others.map((other) => <span key={other.id} />)}</div>)
+  - |
+    ranges.map((range, index) => <div>{stableKeys.map((index) => <span key={index} />)}</div>)
+invalid:
+  - |
+    mapping.environments.map((range, rangeIndex) => (
+      <div className={styles.fields} key={rangeIndex}>Environment {rangeIndex + 1}</div>
+    ))
+  - |
+    ranges.map((range, index) => {
+      return <input key={index} value={range.name} />
+    })

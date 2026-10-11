@@ -4,11 +4,20 @@ import { Effect, Layer, Result, Schema } from "effect"
 import * as Crypto from "effect/Crypto"
 import * as DateTime from "effect/DateTime"
 import { Hex } from "effect/encoding"
+import * as TestClock from "effect/testing/TestClock"
 
 import * as Predicate from "effect/Predicate"
 import { SessionSummary } from "../../src/api/session.js"
 import { WorkspaceSettingsRevision } from "../../src/api/workspaceSettings.js"
-import { PersonId, SessionId, WorkspaceId, WorkspaceSettingsMutationId } from "../../src/domain/identifiers.js"
+import {
+  PersonId,
+  PluginConnectionId,
+  SessionId,
+  WorkspaceId,
+  WorkspaceSettingsMutationId
+} from "../../src/domain/identifiers.js"
+import { PluginSyncPageV1 } from "../../src/domain/plugins/events.js"
+import { PipelineReleaseTarget } from "../../src/domain/releaseTargets.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
 import {
   DEFAULT_WORKSPACE_SETTINGS,
@@ -24,8 +33,11 @@ import {
 import { Database, databaseLayer } from "../../src/server/persistence/Database.js"
 import { PersistenceOperationError } from "../../src/server/persistence/errors.js"
 import { Persistence, persistenceLayerFromDatabase } from "../../src/server/persistence/Persistence.js"
-import { RecordRevision } from "../../src/server/persistence/repositories/models.js"
+import { PluginConnectionDisplayName, RecordRevision } from "../../src/server/persistence/repositories/models.js"
+import { PluginStreamKey } from "../../src/server/persistence/repositories/pluginRuntimeModels.js"
 import type { SqlRow } from "../../src/server/persistence/repositories/sqlRow.js"
+import { codePipelinePluginDescriptor } from "../../src/server/plugins/codepipeline/CodePipelinePluginDefinition.js"
+import { firstPartySyncStreamKey } from "../../src/server/plugins/firstPartySynchronization.js"
 import { makePersistenceTestConfig } from "./fixtures.js"
 
 const workspaceId = Schema.decodeSync(WorkspaceId)(
@@ -146,6 +158,253 @@ const seedAuthority = Effect.gen(function*() {
 })
 
 describe("WorkspaceSettingsRepository", () => {
+  it.effect("round-trips governed release targets without changing the SQL schema", () =>
+    withPersistence(Effect.gen(function*() {
+      yield* seedAuthority
+      const persistence = yield* Persistence
+      const original = yield* persistence.workspaceSettings.get(workspaceId)
+      const target = PipelineReleaseTarget.make({
+        pluginConnectionId: PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-000000000178"),
+        pipelineName: "fixture-pipeline",
+        topologyDigest: `sha256:${"a".repeat(64)}`,
+        environments: [{
+          key: "production",
+          name: "Production",
+          firstStage: "Build",
+          lastStage: "Deploy",
+          requiresManualGate: false
+        }]
+      })
+      const request = {
+        workspaceId,
+        mutationId: firstMutation,
+        expectedRevision: original.revision,
+        settings: { ...original.settings, pipeline: { ...original.settings.pipeline, releaseTargets: [target] } },
+        acknowledgedGovernedSections: ["pipeline"] satisfies ReadonlyArray<"pipeline">,
+        actorPersonId: ownerOne,
+        sessionId: sessionOne
+      }
+      const governanceAuthority = yield* authorizeWorkspaceSettingsGovernanceRequest(
+        ownerSession,
+        request,
+        firstUpdateAt
+      )
+      const { workspaceId: requestWorkspaceId, ...input } = request
+      yield* persistence.workspaceSettings.update(requestWorkspaceId, {
+        ...input,
+        governanceAuthority,
+        updatedAt: firstUpdateAt
+      })
+      const stored = yield* persistence.workspaceSettings.get(workspaceId)
+      assert.deepStrictEqual(stored.settings.pipeline.releaseTargets, [target])
+      assert.deepStrictEqual((yield* persistence.workspaceSettings.audits(workspaceId))[0]?.changedSections, [
+        "pipeline"
+      ])
+    })))
+
+  it.effect("returns field-addressed unknown-pipeline failure and rolls back the head and audit", () =>
+    withPersistence(Effect.gen(function*() {
+      yield* TestClock.setTime(DateTime.toEpochMillis(firstUpdateAt))
+      yield* seedAuthority
+      const persistence = yield* Persistence
+      const administration = yield* makeWorkspaceSettingsAdministration
+      const original = yield* persistence.workspaceSettings.get(workspaceId)
+      const result = yield* administration.update({
+        workspaceId,
+        session: ownerSession,
+        request: {
+          mutationId: firstMutation,
+          expectedRevision: WorkspaceSettingsRevision.make(original.revision),
+          settings: {
+            ...original.settings,
+            pipeline: {
+              ...original.settings.pipeline,
+              releaseTargets: [{
+                pluginConnectionId: PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-000000000178"),
+                pipelineName: "fixture-pipeline",
+                topologyDigest: `sha256:${"a".repeat(64)}`,
+                environments: [{
+                  key: "production",
+                  name: "Production",
+                  firstStage: "Build",
+                  lastStage: "Deploy",
+                  requiresManualGate: true
+                }]
+              }]
+            }
+          },
+          acknowledgedGovernedSections: ["pipeline"]
+        }
+      }).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(result))
+      if (Result.isFailure(result)) {
+        assert.strictEqual(result.failure._tag, "ReleaseTargetConfigurationError")
+        if (result.failure._tag === "ReleaseTargetConfigurationError") {
+          assert.strictEqual(result.failure.reason, "unknown-pipeline")
+        }
+      }
+      assert.strictEqual((yield* persistence.workspaceSettings.get(workspaceId)).revision, original.revision)
+      assert.lengthOf(yield* persistence.workspaceSettings.audits(workspaceId), 0)
+      assert.deepStrictEqual(yield* administration.releaseTargetCatalog(workspaceId), { complete: true, pipelines: [] })
+    })))
+
+  it.effect("saves edits to B beside stale A, rejects editing A, and permits removing A", () =>
+    withPersistence(Effect.gen(function*() {
+      yield* TestClock.setTime(DateTime.toEpochMillis(firstUpdateAt))
+      yield* seedAuthority
+      const persistence = yield* Persistence
+      const administration = yield* makeWorkspaceSettingsAdministration
+      const pluginConnectionId = PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-000000000178")
+      yield* persistence.pluginConnections.create(workspaceId, {
+        pluginConnectionId,
+        providerId: "codepipeline",
+        displayName: PluginConnectionDisplayName.make("Fixture delivery"),
+        isEnabled: true,
+        createdAt: firstUpdateAt
+      })
+      yield* persistence.pluginRuntime.acceptPluginDescriptor(
+        workspaceId,
+        pluginConnectionId,
+        "codepipeline",
+        codePipelinePluginDescriptor,
+        0,
+        firstUpdateAt
+      )
+      yield* persistence.pluginRuntime.commitNormalizedPage(
+        workspaceId,
+        pluginConnectionId,
+        "codepipeline",
+        PluginStreamKey.make(firstPartySyncStreamKey("codepipeline")),
+        0,
+        Schema.decodeUnknownSync(PluginSyncPageV1)({
+          hasMore: false,
+          checkpointAfterPage: "fixture-complete",
+          events: ["pipeline-a", "pipeline-b"].map((pipelineName) => ({
+            _tag: "UpsertEntity",
+            eventId: `definition-${pipelineName}`,
+            revision: "1",
+            observedAt: DateTime.formatIso(firstUpdateAt),
+            entityType: "aws.codepipeline.pipeline",
+            vendorImmutableId: pipelineName,
+            sourceUrl: null,
+            title: pipelineName,
+            attributes: {
+              pipelineName,
+              sampledAt: DateTime.formatIso(firstUpdateAt),
+              stages: ["Build", "Verify", "Deploy"].map((name) => ({ name, actions: [] }))
+            }
+          }))
+        }),
+        firstUpdateAt,
+        { _tag: "healthy", checkedAt: firstUpdateAt }
+      )
+      const catalogue = yield* administration.releaseTargetCatalog(workspaceId)
+      const mappings = catalogue.pipelines.map((pipeline) =>
+        PipelineReleaseTarget.make({
+          pluginConnectionId,
+          pipelineName: pipeline.pipelineName,
+          topologyDigest: pipeline.pipelineName === "pipeline-a" ? `sha256:${"f".repeat(64)}` : pipeline.topologyDigest,
+          environments: [{
+            key: "production",
+            name: "Production",
+            firstStage: "Build",
+            lastStage: "Deploy",
+            requiresManualGate: true
+          }]
+        })
+      )
+      assert.lengthOf(mappings, 2)
+      const original = yield* persistence.workspaceSettings.get(workspaceId)
+      const seedRequest = {
+        workspaceId,
+        mutationId: firstMutation,
+        expectedRevision: RecordRevision.make(original.revision),
+        settings: { ...original.settings, pipeline: { ...original.settings.pipeline, releaseTargets: mappings } },
+        acknowledgedGovernedSections: GovernedWorkspaceSettingsSections.make(["pipeline"]),
+        actorPersonId: ownerOne,
+        sessionId: sessionOne
+      }
+      const governanceAuthority = yield* authorizeWorkspaceSettingsGovernanceRequest(
+        ownerSession,
+        seedRequest,
+        firstUpdateAt
+      )
+      const { workspaceId: seedWorkspace, ...seedInput } = seedRequest
+      yield* persistence.workspaceSettings.update(seedWorkspace, {
+        ...seedInput,
+        governanceAuthority,
+        updatedAt: firstUpdateAt
+      })
+      const before = yield* administration.read(workspaceId)
+      const editedB = mappings.map((mapping) =>
+        mapping.pipelineName === "pipeline-b"
+          ? { ...mapping, environments: mapping.environments.map((range) => ({ ...range, requiresManualGate: false })) }
+          : mapping
+      )
+      const savedB = yield* administration.update({
+        workspaceId,
+        session: ownerSession,
+        request: {
+          mutationId: secondMutation,
+          expectedRevision: before.revision,
+          settings: { ...before.settings, pipeline: { ...before.settings.pipeline, releaseTargets: editedB } },
+          acknowledgedGovernedSections: ["pipeline"]
+        }
+      })
+      assert.strictEqual(savedB.revision, before.revision + 1)
+      const editedA = yield* administration.update({
+        workspaceId,
+        session: ownerSession,
+        request: {
+          mutationId: recoveredMutation,
+          expectedRevision: savedB.revision,
+          settings: {
+            ...savedB.settings,
+            pipeline: {
+              ...savedB.settings.pipeline,
+              releaseTargets: editedB.map((mapping) =>
+                mapping.pipelineName === "pipeline-a"
+                  ? {
+                    ...mapping,
+                    environments: mapping.environments.map((range) => ({ ...range, requiresManualGate: false }))
+                  } :
+                  mapping
+              )
+            }
+          },
+          acknowledgedGovernedSections: ["pipeline"]
+        }
+      }).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(editedA))
+      if (Result.isFailure(editedA)) {
+        assert.strictEqual(editedA.failure._tag, "ReleaseTargetConfigurationError")
+        if (editedA.failure._tag === "ReleaseTargetConfigurationError") {
+          assert.strictEqual(editedA.failure.reason, "stale-topology")
+        }
+      }
+      assert.strictEqual((yield* administration.read(workspaceId)).revision, savedB.revision)
+      const removedA = yield* administration.update({
+        workspaceId,
+        session: ownerSession,
+        request: {
+          mutationId: recoveredMutation,
+          expectedRevision: savedB.revision,
+          settings: {
+            ...savedB.settings,
+            pipeline: {
+              ...savedB.settings.pipeline,
+              releaseTargets: editedB.filter((mapping) => mapping.pipelineName !== "pipeline-a")
+            }
+          },
+          acknowledgedGovernedSections: ["pipeline"]
+        }
+      })
+      assert.strictEqual(removedA.revision, savedB.revision + 1)
+      assert.deepStrictEqual(removedA.settings.pipeline.releaseTargets?.map((mapping) => mapping.pipelineName), [
+        "pipeline-b"
+      ])
+    })))
+
   it.effect("updates a fresh workspace without a settings read preflight", () =>
     withPersistence(
       Effect.gen(function*() {

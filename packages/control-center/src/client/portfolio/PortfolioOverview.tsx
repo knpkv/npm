@@ -299,6 +299,13 @@ const FailedPortfolio = ({
 const ReleaseDossier = ({ onPreview, release, transitionNames }: ReleaseDossierProps): ReactElement => (
   <div className={styles.releaseEntry} data-portfolio-release-id={release.id}>
     <ReleaseRow
+      agentEntry={
+        release.targetSettingsPath === undefined ? undefined : (
+          <Link className={styles.configureTargets} to={release.targetSettingsPath}>
+            Configure targets
+          </Link>
+        )
+      }
       onPreview={onPreview}
       previewLabel={`Preview ${release.relay.codename}`}
       release={release.release}

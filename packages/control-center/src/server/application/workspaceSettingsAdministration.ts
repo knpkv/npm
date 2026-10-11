@@ -2,12 +2,14 @@ import * as Crypto from "effect/Crypto"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Schema from "effect/Schema"
 
 import {
   workspaceSettingsEtag,
   type WorkspaceSettingsReadModel,
   WorkspaceSettingsRevision
 } from "../../api/workspaceSettings.js"
+import { PipelineReleaseTargets, validateReleaseTargets } from "../../domain/releaseTargets.js"
 import {
   ApplicationConflict,
   ApplicationInvalidRequest,
@@ -15,13 +17,14 @@ import {
   WorkspaceSettingsAdministration
 } from "../api/ApplicationServices.js"
 import { authorizeWorkspaceSettingsGovernanceRequest } from "../governance/GovernedHumanMutationPolicyEvaluator.js"
-import type { PersistenceOperationFailure } from "../persistence/Persistence.js"
 import { Persistence } from "../persistence/Persistence.js"
 import { RecordRevision } from "../persistence/repositories/models.js"
 import type { WorkspaceSettingsRecord } from "../persistence/repositories/workspaceSettingsRepository.js"
 import { reconcileRelationshipInferencePolicy } from "./relationshipInferenceMaterialization.js"
+import { readReleaseTargetCatalog, reconcileReleaseTargets } from "./releaseTargetConfiguration.js"
 
 const unavailable = (): ApplicationServiceUnavailable => new ApplicationServiceUnavailable({ retryAt: null })
+const sameReleaseTargets = Schema.toEquivalence(PipelineReleaseTargets)
 
 const present = (record: WorkspaceSettingsRecord): WorkspaceSettingsReadModel => {
   const revision = WorkspaceSettingsRevision.make(record.revision)
@@ -36,26 +39,17 @@ const present = (record: WorkspaceSettingsRecord): WorkspaceSettingsReadModel =>
   }
 }
 
-const mapWriteFailure = (
-  error: PersistenceOperationFailure
-): ApplicationConflict | ApplicationInvalidRequest | ApplicationServiceUnavailable => {
-  switch (error._tag) {
-    case "RevisionConflictError":
-    case "WorkspaceSettingsMutationConflictError":
-      return new ApplicationConflict()
-    case "WorkspaceSettingsGovernanceError":
-    case "WorkspaceSettingsNoChangesError":
-      return new ApplicationInvalidRequest()
-    default:
-      return unavailable()
-  }
-}
-
 /** Construct the durable settings administration boundary. */
 export const makeWorkspaceSettingsAdministration = Effect.gen(function*() {
   const cryptoService = yield* Crypto.Crypto
   const persistence = yield* Persistence
   return WorkspaceSettingsAdministration.of({
+    releaseTargetCatalog: Effect.fn("WorkspaceSettingsAdministration.releaseTargetCatalog")(function*(workspaceId) {
+      return yield* persistence.workspaceSettings.readAtomically(
+        workspaceId,
+        (record) => readReleaseTargetCatalog(persistence, workspaceId, record.settings)
+      ).pipe(Effect.provideService(Crypto.Crypto, cryptoService), Effect.mapError(() => unavailable()))
+    }),
     read: Effect.fn("WorkspaceSettingsAdministration.read")(function*(workspaceId) {
       const record = yield* persistence.workspaceSettings.get(workspaceId).pipe(
         Effect.mapError(() => unavailable())
@@ -110,18 +104,80 @@ export const makeWorkspaceSettingsAdministration = Effect.gen(function*() {
           updatedAt
         },
         (before, current) =>
-          before.settings.inference.enabled !== current.settings.inference.enabled ||
-            before.settings.inference.minimumConfidencePercent !==
-              current.settings.inference.minimumConfidencePercent
-            ? reconcileRelationshipInferencePolicy(
-              persistence,
-              cryptoService,
-              input.workspaceId,
-              updatedAt,
-              current.settings
-            )
-            : Effect.void
-      ).pipe(Effect.mapError(mapWriteFailure))
+          Effect.gen(function*() {
+            if (
+              !sameReleaseTargets(
+                before.settings.pipeline.releaseTargets ?? [],
+                current.settings.pipeline.releaseTargets ?? []
+              )
+            ) {
+              const catalogue = yield* readReleaseTargetCatalog(persistence, input.workspaceId, current.settings)
+              yield* validateReleaseTargets(
+                current.settings.pipeline.releaseTargets ?? [],
+                catalogue,
+                before.settings.pipeline.releaseTargets ?? []
+              )
+              yield* reconcileReleaseTargets(persistence, input.workspaceId, current.settings, updatedAt)
+            }
+            if (
+              before.settings.inference.enabled !== current.settings.inference.enabled ||
+              before.settings.inference.minimumConfidencePercent !==
+                current.settings.inference.minimumConfidencePercent
+            ) {
+              yield* reconcileRelationshipInferencePolicy(
+                persistence,
+                cryptoService,
+                input.workspaceId,
+                updatedAt,
+                current.settings
+              )
+            }
+          })
+      ).pipe(
+        Effect.provideService(Crypto.Crypto, cryptoService),
+        Effect.mapError((error) => {
+          switch (error._tag) {
+            case "ReleaseTargetConfigurationError":
+              return error
+            case "RevisionConflictError":
+            case "WorkspaceSettingsMutationConflictError":
+              return new ApplicationConflict()
+            case "WorkspaceSettingsGovernanceError":
+            case "WorkspaceSettingsNoChangesError":
+              return new ApplicationInvalidRequest()
+            case "AgentJobInputError":
+            case "AuthorizedShareInputError":
+            case "BlobContainmentError":
+            case "BlobIntegrityError":
+            case "BlobNotFoundError":
+            case "BlobStoreInputError":
+            case "BlobStoreIoError":
+            case "BlobTooLargeError":
+            case "BlobUnexpectedEofError":
+            case "ContentMetadataMismatchError":
+            case "DeliveryGraphInputError":
+            case "GovernedActionInputError":
+            case "PersistedRecordError":
+            case "PluginConnectionLimitError":
+            case "ProviderAccountInputError":
+            case "PersistenceOperationError":
+            case "QuarantineWriteError":
+            case "ReadinessInputError":
+            case "RelationshipRepairProposalInputError":
+            case "RecordAlreadyExistsError":
+            case "RecordNotFoundError":
+            case "ReproducibleContentUnavailableError":
+            case "SecretReferenceScopeConflictError":
+            case "SourceIdentityMismatchError":
+            case "TimelineExportAuditInputError":
+              return unavailable()
+            default: {
+              const exhaustive: never = error
+              return exhaustive
+            }
+          }
+        })
+      )
       return present(record)
     })
   })

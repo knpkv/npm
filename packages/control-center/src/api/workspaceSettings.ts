@@ -2,6 +2,7 @@ import { HttpApiEndpoint, HttpApiGroup } from "effect/http-api"
 import * as Schema from "effect/Schema"
 
 import { PersonId, WorkspaceId, WorkspaceSettingsMutationId } from "../domain/identifiers.js"
+import { ReleaseTargetCatalog, ReleaseTargetConfigurationError } from "../domain/releaseTargets.js"
 import { UtcTimestamp } from "../domain/utcTimestamp.js"
 import { GovernedWorkspaceSettingsSections, WorkspaceSettingsV1 } from "../domain/workspaceSettings.js"
 import {
@@ -92,13 +93,24 @@ const readPresentation = HttpApiEndpoint.get("readPresentation", "/presentation"
 const update = HttpApiEndpoint.put("update", "/", {
   payload: UpdateWorkspaceSettingsRequest,
   success: WorkspaceSettingsReadModel,
-  error: [...authenticatedErrors, InvalidRequestApiError, ConflictApiError]
+  error: [
+    ...authenticatedErrors,
+    InvalidRequestApiError,
+    ConflictApiError,
+    ReleaseTargetConfigurationError.annotate({ httpApiStatus: 422 })
+  ]
 })
   .middleware(SessionCookieAuth)
   .middleware(SessionMutationAuth)
 
 /** Authenticated workspace settings read and concurrency-safe mutation contract. */
+const releaseTargetCatalog = HttpApiEndpoint.get("releaseTargetCatalog", "/release-target-catalog", {
+  success: ReleaseTargetCatalog,
+  error: authenticatedErrors
+}).middleware(SessionCookieAuth)
+
 export class WorkspaceSettingsApiGroup extends HttpApiGroup.make("workspaceSettings")
   .add(read, readPresentation, update)
+  .add(releaseTargetCatalog)
   .prefix("/api/v1/settings")
 {}

@@ -1225,6 +1225,33 @@ const makePluginRuntimeRepository = Effect.gen(function*() {
     return yield* decodeCacheRows(workspaceId, pluginConnectionId, rows)
   })
 
+  const getCodePipelineDefinitions = Effect.fn("PluginRuntimeRepository.getCodePipelineDefinitions")(function*(
+    workspaceId: WorkspaceId,
+    pluginConnectionId: PluginConnectionId,
+    streamKey: PluginStreamKey
+  ) {
+    const rows = yield* sql<SqlRow>`SELECT cache.workspace_id AS workspaceId,
+      cache.plugin_connection_id AS pluginConnectionId, cache.stream_key AS streamKey,
+      cache.record_key AS recordKey, cache.state, cache.payload_json AS payloadJson,
+      cache.payload_digest AS payloadDigest, cache.source_revision AS sourceRevision,
+      cache.last_page_id AS lastPageId, cache.cached_at AS cachedAt, cache.tombstoned_at AS tombstonedAt,
+      (SELECT evidence.payload_json FROM plugin_sync_evidence AS evidence
+        WHERE evidence.workspace_id = cache.workspace_id
+          AND evidence.plugin_connection_id = cache.plugin_connection_id
+          AND evidence.stream_key = cache.stream_key AND evidence.page_id = cache.last_page_id
+          AND evidence.record_key = cache.record_key ORDER BY evidence.ordinal DESC LIMIT 1) AS latestEventJson
+      FROM plugin_cache_entries AS cache WHERE cache.workspace_id = ${workspaceId}
+        AND cache.plugin_connection_id = ${pluginConnectionId} AND cache.stream_key = ${streamKey}
+        AND cache.state = 'present'
+        AND CASE WHEN json_valid(cache.payload_json)
+          THEN json_extract(cache.payload_json, '$.entityType') END = 'aws.codepipeline.pipeline'
+      ORDER BY cache.record_key LIMIT 101`
+    return {
+      records: yield* decodeCacheRows(workspaceId, pluginConnectionId, rows.slice(0, 100)),
+      truncated: rows.length > 100
+    }
+  })
+
   const getCodePipelineCacheBeforeTombstones = Effect.fn(
     "PluginRuntimeRepository.getCodePipelineCacheBeforeTombstones"
   )(function*(
@@ -1458,6 +1485,7 @@ const makePluginRuntimeRepository = Effect.gen(function*() {
     completeSyncAttempt,
     getCache,
     getCodePipelineCacheBeforeTombstones,
+    getCodePipelineDefinitions,
     getCodePipelineCache,
     getLastSuccessfulHealth,
     getRuntime,

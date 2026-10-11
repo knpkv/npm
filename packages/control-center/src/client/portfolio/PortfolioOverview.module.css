@@ -208,6 +208,25 @@
   text-decoration: none;
 }
 
+.configureTargets {
+  align-items: center;
+  background: var(--rly-color-surface-1);
+  border: 1px solid var(--rly-color-border-2);
+  border-radius: var(--rly-radius-control);
+  color: var(--rly-color-text-1);
+  display: inline-flex;
+  font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
+    var(--rly-type-label-font);
+  min-block-size: var(--rly-control-height-default);
+  padding-inline: var(--rly-space-24);
+  text-decoration: none;
+}
+
+.configureTargets:focus-visible {
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: var(--rly-focus-ring-offset);
+}
+
 .loading {
   display: grid;
   gap: 1.5rem;

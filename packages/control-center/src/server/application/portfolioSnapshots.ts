@@ -26,6 +26,7 @@ import {
   type ReleasePublicationReceiptCandidate,
   releasePublicationReceiptCandidatesFromRecords
 } from "./releasePublicationMetadata.js"
+import { inspectReleaseTargets, readReleaseTargetCatalog } from "./releaseTargetConfiguration.js"
 
 const MAXIMUM_PORTFOLIO_RELEASES = 200
 const MAXIMUM_COMPACT_COLLABORATORS = 50
@@ -218,6 +219,11 @@ export const makePortfolioSnapshots = Effect.gen(function*() {
         const plugins = yield* listPluginConnectionSummaries(persistence, workspaceId)
         const { headCursor: eventCursor } = yield* persistence.events.streamState(workspaceId)
         const generatedAt = DateTime.makeUnsafe(yield* Effect.clockWith((clock) => clock.currentTimeMillis))
+        const settings = yield* persistence.workspaceSettings.get(workspaceId)
+        const targetCatalogue = yield* readReleaseTargetCatalog(persistence, workspaceId, settings.settings).pipe(
+          Effect.provideService(Crypto.Crypto, cryptoService),
+          Effect.mapError(() => unavailable())
+        )
         const sourceConnectionIds = new Set(releases.flatMap(({ release }) => releaseSourceConnectionIds(release)))
         const sourceHealths = yield* Effect.forEach(
           plugins.filter((plugin) => sourceConnectionIds.has(plugin.pluginConnectionId)),
@@ -280,6 +286,26 @@ export const makePortfolioSnapshots = Effect.gen(function*() {
                 Effect.mapError(() => unavailable())
               )
             const pageAwareness = pageAwarenessByReleaseId.get(release.id) ?? unknownPageAwareness()
+            const targetSlice = release.sourceRevisions.some(({ providerId }) => providerId === "jira")
+              ? yield* persistence.deliveryGraph.read(workspaceId, {
+                _tag: "releaseSlice",
+                releaseId: release.id,
+                environmentId: null,
+                limit: 500
+              }) :
+              null
+            const targetConfiguration = targetSlice?._tag === "releaseSlice"
+              ? yield* inspectReleaseTargets(
+                persistence,
+                release,
+                targetSlice.value,
+                settings.settings.pipeline.releaseTargets ?? [],
+                targetCatalogue
+              ).pipe(
+                Effect.provideService(Crypto.Crypto, cryptoService),
+                Effect.mapError(() => unavailable())
+              ) :
+              null
             return {
               releaseId: release.id,
               serviceName: release.serviceName,
@@ -288,6 +314,7 @@ export const makePortfolioSnapshots = Effect.gen(function*() {
               relay: release.relay,
               freshness,
               targetEnvironmentIds: release.targetEnvironmentIds,
+              ...(!(targetConfiguration === null) && { targetConfiguration }),
               collaborators: collaboratorProjection.collaborators,
               collaboratorCount: collaboratorProjection.collaboratorCount,
               readiness: readinessByReleaseId.get(release.id) ?? null,

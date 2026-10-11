@@ -611,6 +611,18 @@ const makeReleaseRepository = Effect.gen(function*() {
       }
       return snapshots
     }),
+    listForReconciliation: Effect.fn("ReleaseRepository.listForReconciliation")(function*(
+      workspaceId: WorkspaceId,
+      afterReleaseId: ReleaseId | null
+    ) {
+      const rows = yield* sql`SELECT release_id AS releaseId FROM releases
+        WHERE workspace_id = ${workspaceId} AND (${afterReleaseId} IS NULL OR release_id > ${afterReleaseId})
+        ORDER BY release_id LIMIT 201`
+      const identities = yield* Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ releaseId: ReleaseId })))(rows)
+      const selected = identities.slice(0, 200)
+      const records = yield* Effect.forEach(selected, ({ releaseId }) => get(workspaceId, releaseId))
+      return { records, nextReleaseId: identities.length > 200 ? selected.at(-1)?.releaseId ?? null : null }
+    }),
     append: Effect.fn("ReleaseRepository.append")(function*(
       workspaceId: WorkspaceId,
       release: Release,
