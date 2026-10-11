@@ -134,6 +134,7 @@ import {
 } from "../../src/server/application/releasePublicationSubmissions.js"
 import { Auth } from "../../src/server/auth/Auth.js"
 import { CredentialRejectedError } from "../../src/server/auth/errors.js"
+import { ControlCenterBootstrap } from "../../src/server/runtime/Bootstrap.js"
 import { ServerLifecycle } from "../../src/server/runtime/ServerLifecycle.js"
 import { decodeBindConfig } from "../../src/server/security/BindConfig.js"
 import { makeNodePortfolioSnapshot } from "../fixtures/portfolio.js"
@@ -539,7 +540,8 @@ const pluginHandlersLayer = productionPluginHandlersLayer.pipe(Layer.provide([
   RequestLimitPolicy.defaultLayer,
   requestRateLimiterLayer,
   Layer.effect(ApiBindConfiguration, decodeBindConfig({})),
-  ServerLifecycle.layer
+  ServerLifecycle.layer,
+  Layer.succeed(ControlCenterBootstrap, { _tag: "disabled" })
 ]))
 
 describe("Control Center API handlers", () => {

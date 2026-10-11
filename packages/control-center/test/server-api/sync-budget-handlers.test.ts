@@ -16,6 +16,7 @@ import { ApiBindConfiguration } from "../../src/server/api/ApiConfiguration.js"
 import { ApplicationResourceNotFound, PluginAdministration } from "../../src/server/api/ApplicationServices.js"
 import { pluginHandlersLayer } from "../../src/server/api/Handlers.js"
 import { RequestLimitPolicy, requestRateLimiterLayer } from "../../src/server/api/RequestLimits.js"
+import { ControlCenterBootstrap } from "../../src/server/runtime/Bootstrap.js"
 import { ServerLifecycle } from "../../src/server/runtime/ServerLifecycle.js"
 import { decodeBindConfig } from "../../src/server/security/BindConfig.js"
 
@@ -77,6 +78,7 @@ const handler = pluginHandlersLayer.pipe(Layer.provide([
   RequestLimitPolicy.defaultLayer,
   requestRateLimiterLayer,
   ServerLifecycle.layer,
+  Layer.succeed(ControlCenterBootstrap, { _tag: "disabled" }),
   sessionLayer,
   mutationLayer
 ]))
@@ -134,6 +136,7 @@ describe("authenticated synchronization budgets", () => {
         RequestLimitPolicy.defaultLayer,
         requestRateLimiterLayer,
         ServerLifecycle.layer,
+        Layer.succeed(ControlCenterBootstrap, { _tag: "disabled" }),
         sessionLayer,
         mutationLayer
       ]))
@@ -186,6 +189,7 @@ describe("authenticated synchronization budgets", () => {
         RequestLimitPolicy.defaultLayer,
         requestRateLimiterLayer,
         ServerLifecycle.layer,
+        Layer.succeed(ControlCenterBootstrap, { _tag: "disabled" }),
         sessionLayer,
         mutationLayer
       ]))
@@ -251,6 +255,7 @@ describe("authenticated synchronization budgets", () => {
         RequestLimitPolicy.defaultLayer,
         requestRateLimiterLayer,
         Layer.succeed(ServerLifecycle, lifecycle),
+        Layer.succeed(ControlCenterBootstrap, { _tag: "disabled" }),
         sessionLayer,
         mutationLayer
       ]))
@@ -305,6 +310,7 @@ describe("authenticated synchronization budgets", () => {
         RequestLimitPolicy.defaultLayer,
         requestRateLimiterLayer,
         ServerLifecycle.layer,
+        Layer.succeed(ControlCenterBootstrap, { _tag: "disabled" }),
         sessionLayer,
         mutationLayer
       ]))

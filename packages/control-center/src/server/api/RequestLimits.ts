@@ -157,8 +157,8 @@ export const consumeRequestToken = Effect.fn("RequestLimits.consumeToken")(funct
 export const consumeManualSynchronizationTokens = Effect.fn("RequestLimits.consumeManualSynchronization")(function*(
   input: { readonly workspaceId: WorkspaceId; readonly pluginConnectionId: PluginConnectionId; readonly peer: string }
 ) {
-  yield* consumeRequestToken("sync-connection", `${input.workspaceId}:${input.pluginConnectionId}`)
   yield* consumeRequestToken("sync-global", input.peer)
+  yield* consumeRequestToken("sync-connection", `${input.workspaceId}:${input.pluginConnectionId}`)
 })
 
 /** Reject a declared oversized body and bound chunked/body decoding downstream. */

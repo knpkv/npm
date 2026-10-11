@@ -1,6 +1,8 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Result } from "effect"
 
+import * as TestClock from "effect/testing/TestClock"
+
 import { PluginConnectionId, WorkspaceId } from "../../src/domain/identifiers.js"
 import {
   consumeManualSynchronizationTokens,
@@ -61,6 +63,19 @@ describe("resolved synchronization budgets", () => {
         pluginConnectionId: connectionId(62),
         peer: "peer:192.0.2.1"
       })
+    }).pipe(Effect.provide([RequestLimitPolicy.defaultLayer, requestRateLimiterLayer])))
+
+  it.effect("global rejection preserves both connection tokens when global admission refills", () =>
+    Effect.gen(function*() {
+      for (let index = 1; index <= 60; index++) yield* manual(index)
+      const rejected = yield* manual(61).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(rejected))
+      if (Result.isFailure(rejected)) {
+        assert.deepInclude(rejected.failure, { _tag: "RequestRateLimitExceeded", budget: "global" })
+      }
+      yield* TestClock.adjust("2 seconds")
+      yield* manual(61)
+      yield* manual(61)
     }).pipe(Effect.provide([RequestLimitPolicy.defaultLayer, requestRateLimiterLayer])))
 
   it.effect("keeps onboarding independent of both manual budgets", () =>

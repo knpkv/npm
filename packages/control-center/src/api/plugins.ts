@@ -593,7 +593,7 @@ export const PluginSynchronizationFailure = Schema.Struct({
 /** Decoded sync failure. */
 export type PluginSynchronizationFailure = typeof PluginSynchronizationFailure.Type
 
-/** Secret-free synchronization state; queued first sync is owned by the current server scope. */
+/** Secret-free synchronization state; queued first sync is scope-owned and re-derived from never-synced connections on restart. */
 export const PluginSynchronizationState = Schema.Struct({
   pluginConnectionId: PluginConnectionId,
   providerId: ProviderId,

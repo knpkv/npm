@@ -2,6 +2,7 @@ import { HttpApiBuilder } from "effect/http-api"
 import * as Layer from "effect/Layer"
 
 import { ControlCenterApi } from "../../api/controlCenterApi.js"
+import { ControlCenterBootstrap } from "../runtime/Bootstrap.js"
 import { ServerLifecycle } from "../runtime/ServerLifecycle.js"
 import { mutationCsrfLayer, sessionCookieAuthLayer } from "./ApiMiddleware.js"
 import {
@@ -46,7 +47,8 @@ const controlCenterApiHandlersLayerWithLifecycle = Layer.mergeAll(
 
 /** Standalone handler composition with an isolated accepting lifecycle. */
 export const controlCenterApiHandlersLayer = controlCenterApiHandlersLayerWithLifecycle.pipe(
-  Layer.provide(ServerLifecycle.layer)
+  Layer.provide(ServerLifecycle.layer),
+  Layer.provide(Layer.succeed(ControlCenterBootstrap, { _tag: "disabled" }))
 )
 
 /** API routes requiring the process lifecycle supplied by the runnable server. */
