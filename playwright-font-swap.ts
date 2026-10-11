@@ -231,6 +231,8 @@ new PerformanceObserver((list) => {
 `
 
 /** Resolves once every `<link rel="stylesheet">` has loaded or failed (a failed sheet fails later checks). */
+// A null `sheet` means still loading: Chromium (the only browser this CDP-based helper runs in) gives
+// a failed link an empty sheet, so an error that fired earlier cannot leave the wait hanging.
 // Evaluated rather than polled with waitForFunction, which evals its string and trips a page's CSP.
 const STYLESHEETS_APPLIED = `Promise.all([...document.querySelectorAll('link[rel~="stylesheet"]')].map((link) =>
   link.sheet !== null ? undefined : new Promise((done) => {
