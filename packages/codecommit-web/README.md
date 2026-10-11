@@ -99,6 +99,9 @@ path, query or fragment. The control file and its bearer token stay server-priva
 neither enters the queue response or logs. Missing, linked, permissive or malformed files omit
 the field; there is no default-port fallback. The browser shows the link only when viewing the
 hub on this machine. Other devices receive the existing credential-host instructions.
+The product reader delegates private-path verification and origin-only projection to
+`makeWebControl.readOrigin`, then applies the stricter Code owner-origin schema. It never
+uses the credential-bearing login reader to produce this metadata.
 
 ## Pairing boundary
 

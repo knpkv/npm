@@ -1,6 +1,6 @@
 /** Product path and messages for the shared owner-only control protocol. */
 import { type ControlFile, makeWebControl } from "@knpkv/browser-pairing/control"
-import { Config, Data, Effect, FileSystem, Option, Path, Schema } from "effect"
+import { Config, Data, Effect, Path, Schema } from "effect"
 import { CodeOwnerUi } from "../../host-contract.js"
 
 export { ControlFile } from "@knpkv/browser-pairing/control"
@@ -25,35 +25,6 @@ export const controlFilePath = Effect.gen(function*() {
   const home = yield* Config.String("HOME").pipe(Config.orElse(() => Config.String("USERPROFILE")))
   return path.join(home, ".codecommit", "web.json")
 })
-/** readLink also detects dangling links, which exists/stat would otherwise follow or miss. */
-const refuseLink = Effect.fn("CodeCommitWeb.refuseControlLink")(function*(file: string) {
-  const fs = yield* FileSystem.FileSystem
-  if (Option.isSome(yield* fs.readLink(file).pipe(Effect.option))) return yield* new ControlFileError()
-})
-const requirePrivatePath = Effect.fn("CodeCommitWeb.requirePrivateControlPath")(function*(
-  file: string,
-  kind: "File" | "Directory",
-  mode: number
-) {
-  yield* refuseLink(file)
-  const fs = yield* FileSystem.FileSystem
-  const info = yield* fs.stat(file)
-  if (info.type !== kind || (info.mode & 0o777) !== mode) return yield* new ControlFileError()
-})
-
-/** Read only the public origin projection; ignore credential keys and never mint a login link. */
-export const readCodeOwnerUi = Effect.gen(function*() {
-  const fs = yield* FileSystem.FileSystem
-  const path = yield* Path.Path
-  const file = yield* controlFilePath
-  yield* requirePrivatePath(path.dirname(file), "Directory", 0o700)
-  yield* requirePrivatePath(file, "File", 0o600)
-  const projection = yield* fs.readFileString(file).pipe(
-    Effect.flatMap(Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Struct({ origin: CodeOwnerUi }))))
-  )
-  return projection.origin
-}).pipe(Effect.mapError(() => new WebNotRunning()))
-
 const control = Effect.gen(function*() {
   const path = yield* Path.Path
   const file = yield* controlFilePath
@@ -67,6 +38,12 @@ const control = Effect.gen(function*() {
     }
   })
 })
+/** Read only the validated owner origin; never request a sign-in link or decode its token. */
+export const readCodeOwnerUi = Effect.flatMap(control, (control) => control.readOrigin).pipe(
+  Effect.flatMap(Schema.decodeUnknownEffect(CodeOwnerUi)),
+  Effect.mapError(() => new WebNotRunning())
+)
+
 export const writeControlFile = (value: ControlFile) =>
   Effect.flatMap(control, (control) => control.writeControlFile(value)).pipe(
     Effect.mapError(() => new ControlFileError())

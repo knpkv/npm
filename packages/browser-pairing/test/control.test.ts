@@ -110,6 +110,124 @@ const fixture = Layer.unwrap(Effect.gen(function*() {
 })).pipe(Layer.provideMerge(NodeServices.layer))
 const control = { origin: "http://127.0.0.1:3001", token: "a1".repeat(32) }
 
+describe("Shared owner origin projection", () => {
+  it.layer(Layer.fresh(fixture))((it) =>
+    it.effect("reads the current origin only, without decoding credentials or requesting login", () =>
+      Effect.gen(function*() {
+        const fs = yield* FileSystem.FileSystem
+        const home = yield* Home
+        // This client double fails every HTTP request and counts any attempted call.
+        yield* Ref.set(home.mode, "stopped")
+        yield* home.control.writeControlFile(control)
+        for (
+          const origin of [
+            "http://127.0.0.1:4780",
+            "http://127.0.0.1:4781",
+            "http://localhost:4780",
+            "http://[::1]:4780"
+          ]
+        ) {
+          yield* fs.writeFileString(
+            `${home.path}/private/web.json`,
+            JSON.stringify({ origin, token: { invalid: true } })
+          )
+          expect(yield* home.control.readOrigin).toBe(origin)
+        }
+        yield* fs.writeFileString(`${home.path}/private/web.json`, JSON.stringify({ origin: control.origin }))
+        expect(yield* home.control.readOrigin).toBe(control.origin)
+        expect(yield* Ref.get(home.requests)).toBe(0)
+      }))
+  )
+
+  it.layer(Layer.fresh(fixture))((it) =>
+    it.effect("rejects noncanonical and unsafe origins with credential-free failures and logs", () =>
+      Effect.gen(function*() {
+        const fs = yield* FileSystem.FileSystem
+        const home = yield* Home
+        // This client double fails every HTTP request and counts any attempted call.
+        yield* Ref.set(home.mode, "stopped")
+        yield* home.control.writeControlFile(control)
+        for (
+          const origin of [
+            "https://127.0.0.1:4780",
+            "http://user:pass@127.0.0.1:4780",
+            "http://127.0.0.1:4780/x",
+            "http://127.0.0.1:4780?q",
+            "http://127.0.0.1:4780#f",
+            "http://127.0.0.1:4780/",
+            "http://example.com:4780",
+            "http://127.0.0.1:65536",
+            "http://LOCALHOST:4780"
+          ]
+        ) {
+          yield* fs.writeFileString(`${home.path}/private/web.json`, JSON.stringify({ origin, token: control.token }))
+          const error = yield* Effect.flip(home.control.readOrigin)
+          expect(error._tag).toBe("WebNotRunning")
+          expect(JSON.stringify(error)).not.toContain(control.token)
+          expect(JSON.stringify(error)).not.toContain(origin)
+        }
+        for (
+          const body of [
+            `{"token":"${control.token}",`,
+            JSON.stringify({ token: control.token }),
+            JSON.stringify({ origin: 4780, token: control.token })
+          ]
+        ) {
+          yield* fs.writeFileString(`${home.path}/private/web.json`, body)
+          const error = yield* Effect.flip(home.control.readOrigin)
+          expect(error._tag).toBe("WebNotRunning")
+          expect(JSON.stringify(error)).not.toContain(control.token)
+        }
+        expect(home.logs.join(" ")).not.toContain(control.token)
+        expect(yield* Ref.get(home.requests)).toBe(0)
+      }))
+  )
+
+  it.layer(Layer.fresh(fixture))((it) =>
+    it.effect("refuses missing and permissive paths without creating or repairing them", () =>
+      Effect.gen(function*() {
+        const fs = yield* FileSystem.FileSystem
+        const home = yield* Home
+        // This client double fails every HTTP request and counts any attempted call.
+        yield* Ref.set(home.mode, "stopped")
+        expect((yield* Effect.flip(home.control.readOrigin))._tag).toBe("WebNotRunning")
+        expect(yield* fs.exists(`${home.path}/private`)).toBe(false)
+        yield* home.control.writeControlFile(control)
+        const file = `${home.path}/private/web.json`
+        yield* fs.chmod(file, 0o644)
+        expect((yield* Effect.flip(home.control.readOrigin))._tag).toBe("WebNotRunning")
+        expect((yield* fs.stat(file)).mode & 0o777).toBe(0o644)
+        yield* fs.chmod(file, 0o600)
+        yield* fs.chmod(`${home.path}/private`, 0o755)
+        expect((yield* Effect.flip(home.control.readOrigin))._tag).toBe("WebNotRunning")
+        expect((yield* fs.stat(`${home.path}/private`)).mode & 0o777).toBe(0o755)
+        expect(yield* Ref.get(home.requests)).toBe(0)
+      }))
+  )
+
+  it.layer(Layer.fresh(fixture))((it) =>
+    it.effect("refuses linked files and directories without reading or modifying their targets", () =>
+      Effect.gen(function*() {
+        const fs = yield* FileSystem.FileSystem
+        const home = yield* Home
+        // This client double fails every HTTP request and counts any attempted call.
+        yield* Ref.set(home.mode, "stopped")
+        const target = yield* fs.makeTempDirectoryScoped({ prefix: "origin-target-" })
+        const targetFile = `${target}/web.json`
+        yield* fs.writeFileString(targetFile, "untouched", { mode: 0o600 })
+        yield* fs.symlink(target, `${home.path}/private`)
+        expect((yield* Effect.flip(home.control.readOrigin))._tag).toBe("WebNotRunning")
+        yield* fs.remove(`${home.path}/private`)
+        yield* fs.makeDirectory(`${home.path}/private`, { mode: 0o700 })
+        yield* fs.symlink(targetFile, `${home.path}/private/web.json`)
+        expect((yield* Effect.flip(home.control.readOrigin))._tag).toBe("WebNotRunning")
+        expect(yield* fs.readFileString(targetFile)).toBe("untouched")
+        expect(yield* fs.readLink(`${home.path}/private/web.json`)).toBe(targetFile)
+        expect(yield* Ref.get(home.requests)).toBe(0)
+      }))
+  )
+})
+
 describe("Shared owner control file", () => {
   it.layer(Layer.fresh(fixture))((it) =>
     it.effect("publishes atomically with owner-only permissions and removes only its own token", () =>
