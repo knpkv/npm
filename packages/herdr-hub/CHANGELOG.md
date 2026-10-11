@@ -2,6 +2,12 @@
 
 Released as `@knpkv/herdr-approvals` up to 0.18.0; the headings below are that package's history.
 
+## 0.30.0
+
+### Minor Changes
+
+- [#854](https://github.com/knpkv/npm/pull/854) [`3901a04`](https://github.com/knpkv/npm/commit/3901a04c94cc07c5a32416abeb96cf09a780cfd8) Thanks [@konopkov](https://github.com/konopkov)! - Replace the shell Chef mark, favicon and install icons with the approved M2 Flat-plus drawing. Keep the single Ask Relay launcher, its existing sizes and open styling, and the conversation creatures. Use pixel-specific phone/desktop drawings and instance-local clip paths, including forced colours.
+
 ## 0.29.1
 
 ### Patch Changes
