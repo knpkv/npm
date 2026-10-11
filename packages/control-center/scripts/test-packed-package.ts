@@ -7,6 +7,7 @@ import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import * as Schema from "effect/Schema"
+import { build } from "vite"
 
 class PackedPackageError extends Data.TaggedError("PackedPackageError")<{
   readonly reason: string
@@ -126,7 +127,29 @@ if (!rejectedMissingRevisionId) {
 `
     )
     yield* runChecked(spawner, "node", ["verify.mjs"], consumer)
-    yield* Console.log("control-center packed consumer verified shipped CodePipeline state decoding")
+    yield* fs.writeFileString(
+      path.join(consumer, "views-consumer.js"),
+      "import \"@knpkv/control-center/views/style.css\"\nexport * from \"@knpkv/control-center/views\"\n"
+    )
+    yield* Effect.tryPromise({
+      try: () =>
+        build({
+          configFile: false,
+          root: consumer,
+          build: {
+            write: false,
+            cssCodeSplit: false,
+            lib: { entry: path.join(consumer, "views-consumer.js"), formats: ["es"], fileName: "views-consumer" },
+            rollupOptions: {
+              external: (id: string) =>
+                !id.startsWith("@knpkv/control-center/") &&
+                /^(?:react(?:\/|$)|react-dom(?:\/|$)|react-router(?:\/|$)|effect(?:\/|$)|@effect\/|@knpkv\/)/.test(id)
+            }
+          }
+        }),
+      catch: (cause) => new PackedPackageError({ reason: `Packed views consumer bundle failed: ${String(cause)}` })
+    })
+    yield* Console.log("control-center packed consumer verified shipped CodePipeline state decoding and browser views")
   }).pipe(Effect.provide(NodeServices.layer))
 )
 

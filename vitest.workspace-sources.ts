@@ -88,7 +88,9 @@ const bundledEntrySources = new Map([
   ["@knpkv/alchemy-console/views", "./src/views.ts"],
   ["@knpkv/alchemy-console/views/style.css", "./src/views.css"],
   ["@knpkv/codecommit-web/views", "./src/views.ts"],
-  ["@knpkv/codecommit-web/views/style.css", "./src/views.css"]
+  ["@knpkv/codecommit-web/views/style.css", "./src/views.css"],
+  ["@knpkv/control-center/views", "./src/views.ts"],
+  ["@knpkv/control-center/views/style.css", "./src/views.css"]
 ])
 
 /** Built extension and the source extensions it may come from. */

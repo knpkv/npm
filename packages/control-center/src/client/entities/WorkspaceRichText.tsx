@@ -56,14 +56,13 @@ const Heading = ({ children, level }: { readonly children: ReactNode; readonly l
   return <h6>{children}</h6>
 }
 
-/** Render bounded normalized rich text as a safe semantic document fragment. */
-export const WorkspaceRichText = ({
-  className,
-  value
-}: {
+export interface WorkspaceRichTextProps {
   readonly className?: string | undefined
   readonly value: string
-}): ReactElement => (
+}
+
+/** Render bounded normalized rich text as a safe semantic document fragment. */
+export const WorkspaceRichText = ({ className, value }: WorkspaceRichTextProps): ReactElement => (
   <div className={className} data-workspace-rich-text>
     <Markdown
       allowedElements={[

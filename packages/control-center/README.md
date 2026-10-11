@@ -519,10 +519,41 @@ pnpm --filter @knpkv/control-center benchmark
 - `@knpkv/control-center/api` — shared typed API contracts
 - `@knpkv/control-center/domain` — Schema-backed vendor-neutral domain contracts, including canonical IDs, people and agent roles, source freshness, and deterministic release identity
 - `@knpkv/control-center/server` — server composition
+- `@knpkv/control-center/views` — controlled browser views and props
 
 The browser application is intentionally private. It consumes `@knpkv/rly`, while the root, API, domain, and server boundaries are mechanically prevented from importing the design system. Server composition is available only from the explicit `/server` entry.
 
 Release Relay projections are domain data, not presentation state. Each release persists its `relay/v1` codename and three-symbol projection; readers validate that projection against the canonical release ID so a future relay algorithm can be introduced without silently changing existing release identity.
+
+## Views
+
+`@knpkv/control-center/views` exports controlled browser components and their named props types.
+Supply data and callbacks; these views do not load sessions, connect transports or read application storage.
+`ConnectionSynchronizationView` also takes an explicit `now`; its host owns clock updates.
+`PortfolioOverviewView` accepts a `sessionStatus` slot and optional host-supplied row transition names.
+
+```tsx
+import "@knpkv/rly/styles.css"
+import "@knpkv/control-center/views/style.css"
+import { PortalProvider, ThemeProvider } from "@knpkv/rly/foundations"
+import { BrowserSessionStatusView } from "@knpkv/control-center/views"
+import { MemoryRouter } from "react-router"
+
+export const PairedBrowserStatus = () => (
+  <ThemeProvider theme="system">
+    <MemoryRouter>
+      <PortalProvider>
+        <BrowserSessionStatusView presentation={{ _tag: "authenticated", permission: "workspace-owner" }} />
+      </PortalProvider>
+    </MemoryRouter>
+  </ThemeProvider>
+)
+```
+
+Load both stylesheets in the host. The views stylesheet contains the selected components' scoped styles;
+Rly styles are supplied separately. Use a React Router host for links and filters (MemoryRouter is sufficient);
+ThemeProvider supplies the controlled theme, and PortalProvider supplies a target for sheets and dialogs.
+The application shell, controllers and default transports remain private.
 
 ## Plugin contract
 
