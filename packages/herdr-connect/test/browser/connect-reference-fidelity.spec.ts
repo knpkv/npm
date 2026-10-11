@@ -34,6 +34,8 @@ const base = [
   agent("skills", "ready", "atlas", "skills-daily", 11, 47),
   agent("pkgsrc", "done", "birch", "pkgsrc", 12, 10)
 ]
+const tallSeeds = ["134", "313", "509"].map((id) => agent(id, "working", "fixture-host", "package-work", 14, 2))
+
 const worker = (name: string) =>
   Schema.decodeUnknownSync(AgentWorkerIdentity)({
     host: name === "rev-usage" ? "birch" : "atlas",
@@ -167,14 +169,14 @@ const mount = async (page: Page, theme: string) => {
 }
 
 /** Mount the recorded directory for measured fidelity checks without taking a screenshot. */
-const openDirectory = async (page: Page, width: number, theme: string) => {
+const openDirectory = async (page: Page, width: number, theme: string, agents = base) => {
   await prepare(page, width, theme)
   await page.route(
     "**/v1/connect/agents",
-    (route) => route.fulfill({ json: { agents: base, failures: [], nextCursor: null } })
+    (route) => route.fulfill({ json: { agents, failures: [], nextCursor: null } })
   )
   await mount(page, theme)
-  await expect(page.locator(".connect-agent")).toHaveCount(base.length)
+  await expect(page.locator(".connect-agent")).toHaveCount(agents.length)
 }
 
 /** Read screen pixels, including SVG transforms, rather than the path's viewBox coordinates. */
@@ -184,9 +186,164 @@ const drawnBox = (node: Locator) =>
     return { height, width, x, y }
   })
 
+/** Every ring stroke fits the root, including non-scaling halos in small pins and crew pills. */
+const expectRingFitsTrack = async (creature: Locator) => {
+  const track = await drawnBox(creature)
+  const strokes = await creature.evaluate(
+    (svg) =>
+      [...svg.querySelectorAll<SVGEllipseElement>(".connect-creature-halo, .connect-creature-orbit")].map(
+        (ring) => {
+          const style = getComputedStyle(ring)
+          const box = ring.getBoundingClientRect()
+          const matrix = ring.getScreenCTM()
+          const half = Number.parseFloat(style.strokeWidth) / 2
+          const margin = style.vectorEffect === "non-scaling-stroke"
+            ? half
+            : half * Math.hypot(matrix?.a ?? 0, matrix?.b ?? 0)
+          return {
+            left: box.x - margin,
+            right: box.right + margin,
+            top: box.y - margin,
+            bottom: box.bottom + margin
+          }
+        }
+      )
+  )
+  for (const stroke of strokes) {
+    expect(stroke.left).toBeGreaterThanOrEqual(track.x - 0.05)
+    expect(stroke.right).toBeLessThanOrEqual(track.x + track.width + 0.05)
+    expect(stroke.top).toBeGreaterThanOrEqual(track.y - 0.05)
+    expect(stroke.bottom).toBeLessThanOrEqual(track.y + track.height + 0.05)
+  }
+}
+
+/** Sample the actual curved outline under the stylesheet's ordinary breath, in the ring's coordinates. */
+const measureEnclosure = (creature: Locator, moment: string) =>
+  creature.evaluate((svg, phase) => {
+    // Hold the ordinary breath at either extreme; arrival motion intentionally leaves the ring.
+    for (const animation of svg.getAnimations({ subtree: true })) {
+      animation.pause()
+      const timing = animation.effect?.getTiming()
+      const duration = Number(timing?.duration ?? 0)
+      const delay = Number(timing?.delay ?? 0)
+      const pairs = Math.ceil(-delay / duration / 2) * 2 * duration
+      const name = "animationName" in animation ? String(animation.animationName) : ""
+      const fraction = name === "connect-creature-breathe" && phase === "inhale" ? 0.999 : 0.001
+      animation.currentTime = pairs + delay + duration * fraction
+    }
+    const body = svg.querySelector<SVGPathElement>(".connect-creature-body")
+    const halo = svg.querySelector<SVGEllipseElement>(".connect-creature-halo")
+    const bodyMatrix = body?.getScreenCTM()
+    const haloMatrix = halo?.getScreenCTM()
+    if (body === null || halo === null) return null
+    if (
+      bodyMatrix === null || bodyMatrix === undefined || haloMatrix === null || haloMatrix === undefined
+    ) return null
+    const inverse = haloMatrix.inverse()
+    const cx = halo.cx.baseVal.value
+    const cy = halo.cy.baseVal.value
+    // Clear the halo and the visible arc, accounting for their different stroke scaling.
+    const strokes = [halo, ...svg.querySelectorAll<SVGEllipseElement>(".connect-creature-orbit")]
+      .filter((ring) => ring === halo || Number(getComputedStyle(ring).opacity) > 0)
+      .map((ring) => {
+        const style = getComputedStyle(ring)
+        const half = Number.parseFloat(style.strokeWidth) / 2
+        return style.vectorEffect === "non-scaling-stroke"
+          ? [half / Math.hypot(haloMatrix.a, haloMatrix.b), half / Math.hypot(haloMatrix.c, haloMatrix.d)]
+          : [half, half]
+      })
+    const rx = halo.rx.baseVal.value - Math.max(...strokes.map(([x = 0]) => x))
+    const ry = halo.ry.baseVal.value - Math.max(...strokes.map(([, y = 0]) => y))
+    const length = body.getTotalLength()
+    let maximum = 0
+    for (let sample = 0; sample < 360; sample++) {
+      const point = body.getPointAtLength(length * sample / 360)
+      const local = new DOMPoint(point.x, point.y).matrixTransform(bodyMatrix).matrixTransform(inverse)
+      maximum = Math.max(maximum, Math.hypot((local.x - cx) / rx, (local.y - cy) / ry))
+    }
+    return maximum
+  }, moment)
+
 test.describe("creature fill fidelity", () => {
   for (const width of [390, 1280]) {
     for (const theme of ["light", "dark"]) {
+      test(`tall seeds keep row slots ${String(width)} ${theme}`, async ({ page }) => {
+        await openDirectory(page, width, theme, [...tallSeeds, ...base])
+        const control = page.locator(".connect-agent[data-agent-key=\"atlas:agent-ds-rly\"]")
+        const controlBox = await drawnBox(control)
+        for (const fixture of tallSeeds) {
+          const row = page.locator(`.connect-agent[data-agent-key="${fixture.host}:${fixture.id}"]`)
+          expect.soft((await drawnBox(row)).height).toBeCloseTo(controlBox.height, 1)
+          const track = await drawnBox(row.locator("svg.connect-creature"))
+          expect(track.width).toBe(36)
+          expect(track.height).toBe(36)
+          const body = await drawnBox(row.locator(".connect-creature-body"))
+          expect(body.width).toBeGreaterThanOrEqual(track.width * 0.58)
+          expect(Math.max(body.width, body.height)).toBeGreaterThanOrEqual(track.width * 0.7)
+          await expectRingFitsTrack(row.locator("svg.connect-creature"))
+        }
+      })
+
+      test(`tall seed pins stay 44px ${String(width)} ${theme}`, async ({ page }) => {
+        await openDirectory(page, width, theme, [...tallSeeds, ...base])
+        for (const fixture of tallSeeds) {
+          await page.locator(`.connect-agent[data-agent-key="${fixture.host}:${fixture.id}"]`).click()
+          await page.getByRole("button", { name: "Pin", exact: true }).click()
+          await page.keyboard.press("Escape")
+        }
+        const pins = page.locator(".connect-pins[data-placement=\"float\"] .connect-pin-open")
+        await expect(pins).toHaveCount(3)
+        for (const pin of await pins.all()) {
+          expect.soft((await drawnBox(pin)).height).toBe(44)
+          const svg = pin.locator("svg.connect-creature")
+          const creature = await drawnBox(svg)
+          expect(creature.width).toBe(32)
+          expect.soft(creature.height).toBe(32)
+          const body = await drawnBox(svg.locator(".connect-creature-body"))
+          expect(body.width).toBeGreaterThanOrEqual(creature.width * 0.58)
+          expect(Math.max(body.width, body.height)).toBeGreaterThanOrEqual(creature.width * 0.7)
+          await expectRingFitsTrack(svg)
+        }
+        const stack = await drawnBox(page.locator(".connect-pins[data-placement=\"float\"]"))
+        const reserved = await page.locator(".connect-agents[data-pinned]").evaluate(
+          (node) => Number.parseFloat(getComputedStyle(node).paddingBlockEnd)
+        )
+        const bottom = await page.locator(".connect-pins[data-placement=\"float\"]").evaluate(
+          (node) => Number.parseFloat(getComputedStyle(node).insetBlockEnd)
+        )
+        expect(stack.height + bottom).toBeLessThanOrEqual(reserved)
+        // Embedded desktop scrolls the directory; phones scroll the document.
+        await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight))
+        await page.locator(".connect-agents").evaluate((directory) => {
+          directory.scrollTop = directory.scrollHeight
+        })
+        const lastRow = await drawnBox(page.locator(".connect-agent").last())
+        const scrolledStack = await drawnBox(page.locator(".connect-pins[data-placement=\"float\"]"))
+        expect(lastRow.y + lastRow.height).toBeLessThanOrEqual(scrolledStack.y)
+      })
+
+      test(`tall seed crew keeps its square track ${String(width)} ${theme}`, async ({ page }) => {
+        const crew = [
+          agent("parent", "working", "fixture-host", "package-work", 14, 2),
+          agent("134", "working", "fixture-host", "package-work", 14, 2, "parent")
+        ]
+        await openDirectory(page, width, theme, crew)
+        await page.locator(".connect-agent[data-agent-key=\"fixture-host:agent-parent\"]").click()
+        const member = page.locator(".connect-stage-crew-member", { hasText: "134" })
+        await expect(member).toBeVisible()
+        const creature = member.locator("svg.connect-creature")
+        const track = await drawnBox(creature)
+        expect(track.width).toBe(28)
+        expect(track.height).toBe(28)
+        await expectRingFitsTrack(creature)
+        for (const moment of ["rest", "inhale", "exhale"]) {
+          await page.emulateMedia({ reducedMotion: moment === "rest" ? "reduce" : "no-preference" })
+          const geometry = await measureEnclosure(creature, moment)
+          expect(geometry).not.toBeNull()
+          expect(geometry).toBeLessThanOrEqual(1)
+        }
+      })
+
       for (const surface of ["row", "stage"]) {
         test(`working halo stays under its arc ${surface} ${String(width)} ${theme}`, async ({ page }) => {
           await openDirectory(page, width, theme)
@@ -222,8 +379,9 @@ test.describe("creature fill fidelity", () => {
 
       for (const surface of ["row", "stage"]) {
         test(`halo encloses the seeded outline ${surface} ${String(width)} ${theme}`, async ({ page }) => {
-          await openDirectory(page, width, theme)
-          for (const fixture of base) {
+          const fixtures = surface === "row" ? [...base, ...tallSeeds] : base
+          await openDirectory(page, width, theme, fixtures)
+          for (const fixture of fixtures) {
             const row = page.locator(`.connect-agent[data-agent-key="${fixture.host}:${fixture.id}"]`)
             if (surface === "stage") {
               await row.click()
@@ -234,50 +392,7 @@ test.describe("creature fill fidelity", () => {
               : page.locator(".connect-stage-hero svg.connect-creature")
             for (const moment of ["rest", "inhale", "exhale"]) {
               await page.emulateMedia({ reducedMotion: moment === "rest" ? "reduce" : "no-preference" })
-              const geometry = await creature.evaluate((svg, phase) => {
-                // Hold the ordinary breath at either extreme; arrival motion intentionally leaves the ring.
-                for (const animation of svg.getAnimations({ subtree: true })) {
-                  animation.pause()
-                  const timing = animation.effect?.getTiming()
-                  const duration = Number(timing?.duration ?? 0)
-                  const delay = Number(timing?.delay ?? 0)
-                  const pairs = Math.ceil(-delay / duration / 2) * 2 * duration
-                  const name = "animationName" in animation ? String(animation.animationName) : ""
-                  const fraction = name === "connect-creature-breathe" && phase === "inhale" ? 0.999 : 0.001
-                  animation.currentTime = pairs + delay + duration * fraction
-                }
-                const body = svg.querySelector<SVGPathElement>(".connect-creature-body")
-                const halo = svg.querySelector<SVGEllipseElement>(".connect-creature-halo")
-                const bodyMatrix = body?.getScreenCTM()
-                const haloMatrix = halo?.getScreenCTM()
-                if (body === null || halo === null) return null
-                if (
-                  bodyMatrix === null || bodyMatrix === undefined || haloMatrix === null || haloMatrix === undefined
-                ) return null
-                const inverse = haloMatrix.inverse()
-                const cx = halo.cx.baseVal.value
-                const cy = halo.cy.baseVal.value
-                // Clear the halo and the visible arc, accounting for their different stroke scaling.
-                const strokes = [halo, ...svg.querySelectorAll<SVGEllipseElement>(".connect-creature-orbit")]
-                  .filter((ring) => ring === halo || Number(getComputedStyle(ring).opacity) > 0)
-                  .map((ring) => {
-                    const style = getComputedStyle(ring)
-                    const half = Number.parseFloat(style.strokeWidth) / 2
-                    return style.vectorEffect === "non-scaling-stroke"
-                      ? [half / Math.hypot(haloMatrix.a, haloMatrix.b), half / Math.hypot(haloMatrix.c, haloMatrix.d)]
-                      : [half, half]
-                  })
-                const rx = halo.rx.baseVal.value - Math.max(...strokes.map(([x = 0]) => x))
-                const ry = halo.ry.baseVal.value - Math.max(...strokes.map(([, y = 0]) => y))
-                const length = body.getTotalLength()
-                let maximum = 0
-                for (let sample = 0; sample < 360; sample++) {
-                  const point = body.getPointAtLength(length * sample / 360)
-                  const local = new DOMPoint(point.x, point.y).matrixTransform(bodyMatrix).matrixTransform(inverse)
-                  maximum = Math.max(maximum, Math.hypot((local.x - cx) / rx, (local.y - cy) / ry))
-                }
-                return maximum
-              }, moment)
+              const geometry = await measureEnclosure(creature, moment)
               expect(geometry, `${fixture.host}:${fixture.id} ${moment}`).not.toBeNull()
               expect(geometry, `${fixture.host}:${fixture.id} ${moment}`).toBeLessThanOrEqual(1)
             }
@@ -295,39 +410,15 @@ test.describe("creature fill fidelity", () => {
           const track = await drawnBox(creature)
           const body = await drawnBox(creature.locator(".connect-creature-body"))
           expect(track.width).toBe(36)
-          // 2px stroke clearance, the diagonal lobes and breath room set the minimum fill to 0.72.
-          expect(body.width).toBeGreaterThanOrEqual(track.width * 0.72)
+          // Square framing and stroke clearance at the 28px crew minimum leave tall seeds at least 0.58 wide.
+          expect(body.width).toBeGreaterThanOrEqual(track.width * 0.58)
+          expect(Math.max(body.width, body.height)).toBeGreaterThanOrEqual(track.width * 0.7)
           expect(body.x).toBeGreaterThanOrEqual(track.x - 1)
           expect(body.x + body.width).toBeLessThanOrEqual(track.x + track.width + 1)
           const ring = await drawnBox(creature.locator(".connect-creature-halo"))
-          expect(ring.width).toBeGreaterThanOrEqual(32)
+          expect(Math.max(ring.width, ring.height)).toBeGreaterThanOrEqual(32)
           expect(ring.width).toBeLessThanOrEqual(36)
-          const strokes = await creature.evaluate(
-            (svg) =>
-              [...svg.querySelectorAll<SVGEllipseElement>(".connect-creature-halo, .connect-creature-orbit")].map(
-                (ring) => {
-                  const style = getComputedStyle(ring)
-                  const box = ring.getBoundingClientRect()
-                  const matrix = ring.getScreenCTM()
-                  const half = Number.parseFloat(style.strokeWidth) / 2
-                  const margin = style.vectorEffect === "non-scaling-stroke"
-                    ? half
-                    : half * Math.hypot(matrix?.a ?? 0, matrix?.b ?? 0)
-                  return {
-                    left: box.x - margin,
-                    right: box.right + margin,
-                    top: box.y - margin,
-                    bottom: box.bottom + margin
-                  }
-                }
-              )
-          )
-          for (const stroke of strokes) {
-            expect(stroke.left).toBeGreaterThanOrEqual(track.x - 0.05)
-            expect(stroke.right).toBeLessThanOrEqual(track.x + track.width + 0.05)
-            expect(stroke.top).toBeGreaterThanOrEqual(track.y - 0.05)
-            expect(stroke.bottom).toBeLessThanOrEqual(track.y + track.height + 0.05)
-          }
+          await expectRingFitsTrack(creature)
         }
       })
 
@@ -343,7 +434,8 @@ test.describe("creature fill fidelity", () => {
         const track = await drawnBox(creature)
         const body = await drawnBox(creature.locator(".connect-creature-body"))
         expect(track.width).toBe(32)
-        expect(body.width).toBeGreaterThanOrEqual(track.width * 0.72)
+        expect(body.width).toBeGreaterThanOrEqual(track.width * 0.58)
+        expect(Math.max(body.width, body.height)).toBeGreaterThanOrEqual(track.width * 0.7)
         expect(body.x).toBeGreaterThanOrEqual(track.x - 1)
         expect(body.x + body.width).toBeLessThanOrEqual(track.x + track.width + 1)
       })

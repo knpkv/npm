@@ -53,10 +53,10 @@ export const Creature = ({ arrived = false, host, id, size, stale = false, state
   const [eyeWidth, eyeHeight] = character.eye
   const [left, top, width, height] = character.bounds
   const row = size === "row"
-  // Rows also render in 32px pinned chips. Reserve the 2px stroke on both sides of its centreline there.
-  const rowTrack = 32
+  // Rows also render in 32px pins and 28px crew pills. Reserve both stroke edges at the smallest track.
+  const rowTrack = 28
   const rowStroke = 2
-  const shortAxis = Math.min(1, height / width)
+  const shortAxis = Math.min(width, height) / Math.max(width, height)
   const strokeShare = rowStroke / ((rowTrack - rowStroke) * shortAxis)
   const enclosingScale = character.ringScale / (1 - strokeShare)
   const ring = {
@@ -64,11 +64,11 @@ export const Creature = ({ arrived = false, host, id, size, stale = false, state
     rx: row ? (width / 2) * enclosingScale : 46,
     ry: row ? (height / 2) * enclosingScale : 46
   }
-  const frameWidth = (2 * ring.rx) / (1 - rowStroke / rowTrack)
-  const stroke = (frameWidth * rowStroke) / rowTrack
-  const frameHeight = 2 * ring.ry + stroke
-  const frameLeft = 50 - ring.rx - stroke / 2
-  const frameTop = ring.cy - ring.ry - stroke / 2
+  // Pad the shorter axis symmetrically: a seeded aspect ratio must never enlarge the root's fixed slot.
+  const frameEdge = (2 * Math.max(ring.rx, ring.ry)) / (1 - rowStroke / rowTrack)
+  const stroke = (frameEdge * rowStroke) / rowTrack
+  const frameLeft = 50 - frameEdge / 2
+  const frameTop = ring.cy - frameEdge / 2
   const eyes = [50 - character.eyeGap, 50 + character.eyeGap]
   const eyeY = character.eyeY
   const iris = Math.min(eyeWidth, eyeHeight) * IRIS_SHARE
@@ -101,7 +101,7 @@ export const Creature = ({ arrived = false, host, id, size, stale = false, state
   const ref = `connect-creature-${useId().replace(/[^a-zA-Z0-9]/g, "")}`
   const fixed = (value: number): string => value.toFixed(2)
   // Frame the enclosing ring including its stroke; stage and cast keep their established circular orbit.
-  const viewBox = row ? [frameLeft, frameTop, frameWidth, frameHeight].map(fixed).join(" ") : "0 0 100 100"
+  const viewBox = row ? [frameLeft, frameTop, frameEdge, frameEdge].map(fixed).join(" ") : "0 0 100 100"
   // An opening bounded on one side by a lid's sagging edge, reaching far past the eye on the other side; the
   // stylesheet moves the edge.
   const lid = (x: number, edge: number, above: boolean): string => {
@@ -131,7 +131,7 @@ export const Creature = ({ arrived = false, host, id, size, stale = false, state
       data-stale={stale ? "" : undefined}
       data-tone={presentation.tone}
       focusable="false"
-      height={row ? (pixels[size] * frameHeight) / frameWidth : pixels[size]}
+      height={pixels[size]}
       style={rig}
       viewBox={viewBox}
       width={pixels[size]}

@@ -45,6 +45,25 @@ describe("Creature", () => {
     expect(markup("a-new-state")).toContain('data-bucket="needs-you"')
   })
 
+  // The same row root is used in 36px rows, 32px pins and 28px crew pills; identity cannot change its slot.
+  it("keeps row roots and viewBoxes square for tall and wide outlines", () => {
+    const fixtures: ReadonlyArray<readonly [string, string]> = [
+      ["fixture-host", "agent-134"],
+      ["atlas", "agent-ds-rly"],
+      ["birch", "agent-pkgsrc"]
+    ]
+    for (const [host, id] of fixtures) {
+      const markup = renderToStaticMarkup(<Creature host={host} id={id} size="row" state="working" />)
+      const root = markup.slice(0, markup.indexOf(">"))
+      expect(root).toContain('height="36"')
+      expect(root).toContain('width="36"')
+      const box = /viewBox="([^"]+)"/.exec(root)?.[1]?.split(" ").map(Number)
+      expect(box).toHaveLength(4)
+      expect(box?.[2]).toBe(box?.[3])
+      expect((box?.[0] ?? 0) + (box?.[2] ?? 0) / 2).toBeCloseTo(50, 1)
+    }
+  })
+
   // Decorative: the row's words already say the state, so assistive technology hears it once.
   it("is hidden from assistive technology and keeps its look across states", () => {
     const working = renderToStaticMarkup(<Creature host="nix" id="a1" size="row" state="working" />)
