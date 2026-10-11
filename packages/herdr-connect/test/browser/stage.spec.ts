@@ -81,7 +81,8 @@ test.describe("Connect stage", () => {
       await page.locator(".connect-agent", { hasText: "fixture-pane" }).click()
       await expect(page.getByRole("dialog", { name: "fixture-pane" })).toBeVisible()
       const field = page.locator(".connect-stage-hero")
-      expect((await field.boundingBox())?.height).toBe(176)
+      // The suite's 390px viewport gets the design's phone hero; wider screens keep 176px.
+      expect((await field.boundingBox())?.height).toBe(272)
       expect(await field.evaluate((node) => getComputedStyle(node).backgroundImage)).toBe("none")
       const animations = await field.locator(".connect-creature").evaluate((node) =>
         node.getAnimations({ subtree: true }).filter((animation) => animation.playState === "running").length
