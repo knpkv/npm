@@ -1,5 +1,12 @@
 # @knpkv/control-center
 
+## 0.16.4
+
+### Patch Changes
+
+- Updated dependencies [[`929ef05`](https://github.com/knpkv/npm/commit/929ef055945cffcdb9d78fc2708ee1871c1126e3)]:
+  - @knpkv/browser-pairing@0.7.0
+
 ## 0.16.3
 
 ### Patch Changes

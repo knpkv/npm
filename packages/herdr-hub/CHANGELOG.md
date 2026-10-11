@@ -2,6 +2,24 @@
 
 Released as `@knpkv/herdr-approvals` up to 0.18.0; the headings below are that package's history.
 
+## 0.28.0
+
+### Minor Changes
+
+- [#843](https://github.com/knpkv/npm/pull/843) [`929ef05`](https://github.com/knpkv/npm/commit/929ef055945cffcdb9d78fc2708ee1871c1126e3) Thanks [@konopkov](https://github.com/konopkov)! - Derive the machine-local Code owner link from the current private control file instead of a fixed port.
+  Code queue/status responses gain optional validated `ownerUi` metadata; the host server entry exports
+  its origin-only reader. Missing or invalid metadata has no fallback and exposes no control credential.
+
+  Point unreadable-cache guidance to the owner service and hub log, and document owner-only cache
+  migration and the native SQLite deployment probe. Strengthen the selection-close browser guard to
+  exercise a visible, enabled, hit-testable Close button without forced pointer input.
+
+### Patch Changes
+
+- Updated dependencies [[`929ef05`](https://github.com/knpkv/npm/commit/929ef055945cffcdb9d78fc2708ee1871c1126e3), [`929ef05`](https://github.com/knpkv/npm/commit/929ef055945cffcdb9d78fc2708ee1871c1126e3)]:
+  - @knpkv/codecommit-web@0.35.0
+  - @knpkv/browser-pairing@0.7.0
+
 ## 0.27.1
 
 ### Patch Changes
