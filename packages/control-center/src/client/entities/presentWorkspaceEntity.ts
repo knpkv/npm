@@ -332,11 +332,26 @@ const freshnessTimestamp = (inspection: WorkspaceEntityInspection): DateTime.Dat
   return freshness.sourceObservedAt ?? freshness.synchronizedAt ?? freshness.pluginHealth.checkedAt
 }
 
+/** Missing endpoint labels use bounded human source facts, never persisted placeholder keys. */
+export const missingDeliveryEndpointLabel = (
+  kind: DeliveryNode["endpointKind"],
+  source: WorkspaceEntityInspection["entity"]["projection"] | undefined
+): string => {
+  if (source === undefined) return `Missing ${titleCase(kind)}`
+  const reference = source.details._tag === "pull-request"
+    ? `PR #${source.displayKey.replace(/^PR[-#]/iu, "")} · ${source.details.repository}`
+    : source.displayKey
+  if (kind === "pipeline-execution") return `${reference} has no pipeline run`
+  if (kind === "pull-request") return `${reference} has no pull request`
+  return `${reference} has no ${titleCase(kind).toLocaleLowerCase("en-US")}`
+}
+
 const endpointFor = (
   node: DeliveryNode | undefined,
   entityById: ReadonlyMap<EntityId, WorkspaceEntityInspection["entity"]["projection"]>,
   service: RlyService,
-  workspaceId: WorkspaceId
+  workspaceId: WorkspaceId,
+  sourceProjection: WorkspaceEntityInspection["entity"]["projection"] | undefined
 ): RlyRelationship["source"] => {
   if (node === undefined) {
     return { state: "missing", label: "Unknown graph endpoint", reason: "The endpoint is outside this graph response." }
@@ -344,7 +359,7 @@ const endpointFor = (
   if (node.resolution._tag === "missing") {
     return {
       state: "missing",
-      label: node.resolution.missingKey,
+      label: missingDeliveryEndpointLabel(node.endpointKind, sourceProjection),
       reason: `${titleCase(node.endpointKind)} is not connected.`
     }
   }
@@ -414,6 +429,12 @@ const relationshipsFor = (
   const entityById = new Map<EntityId, WorkspaceEntityInspection["entity"]["projection"]>(
     projections.map((projection) => [projection.entityId, projection])
   )
+  const projectionFor = (nodeId: GraphNodeId) => {
+    const node = nodeById.get(nodeId)
+    return node?.resolution._tag === "resolved" && node.resolution.target._tag === "entity"
+      ? entityById.get(node.resolution.target.entityId)
+      : undefined
+  }
   const ownerById = new Map(inspection.entity.owners.map((owner) => [owner.personId, owner]))
   return inspection.graph.relationships.map((relationship) => {
     const actorOwner = relationship.recordedBy._tag === "human"
@@ -426,8 +447,20 @@ const relationshipsFor = (
       id: relationship.relationshipId,
       kind: titleCase(relationship.kind),
       lifecycle: relationship.lifecycle._tag,
-      source: endpointFor(nodeById.get(relationship.sourceNodeId), entityById, service, workspaceId),
-      target: endpointFor(nodeById.get(relationship.targetNodeId), entityById, service, workspaceId)
+      source: endpointFor(
+        nodeById.get(relationship.sourceNodeId),
+        entityById,
+        service,
+        workspaceId,
+        projectionFor(relationship.targetNodeId)
+      ),
+      target: endpointFor(
+        nodeById.get(relationship.targetNodeId),
+        entityById,
+        service,
+        workspaceId,
+        projectionFor(relationship.sourceNodeId)
+      )
     }
   })
 }

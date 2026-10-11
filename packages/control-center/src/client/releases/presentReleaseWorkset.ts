@@ -24,6 +24,7 @@ import type {
   WorkspaceId
 } from "../../domain/identifiers.js"
 import { releasePipelineApprovalReadiness } from "../../domain/releasePipelineApproval.js"
+import { missingDeliveryEndpointLabel } from "../entities/presentWorkspaceEntity.js"
 import { presentPipelineExecutionStages } from "../entities/presentWorkspacePipelineExecution.js"
 import { workspaceEntityPath } from "../workspaceEntityPaths.js"
 
@@ -328,7 +329,8 @@ const traceConnection = (
   inspection: ReleaseDeliveryGraphInspection,
   workspaceId: WorkspaceId,
   nodeId: GraphNodeId,
-  projections: ReadonlyMap<GraphNodeId, DeliveryEntityProjection>
+  projections: ReadonlyMap<GraphNodeId, DeliveryEntityProjection>,
+  sourceProjection: DeliveryEntityProjection | undefined
 ): SelectedReleaseWorksetTraceConnection => {
   const projection = projections.get(nodeId)
   if (projection !== undefined) {
@@ -348,7 +350,7 @@ const traceConnection = (
     return {
       href: null,
       kind: node.endpointKind,
-      label: node.resolution.missingKey,
+      label: missingDeliveryEndpointLabel(node.endpointKind, sourceProjection),
       service: null,
       title: `Missing ${titleCase(node.endpointKind)}`
     }
@@ -415,7 +417,13 @@ export const selectReleaseWorksetTrace = (
         id: relationship.relationshipId,
         kind: relationship.kind,
         lifecycle: titleCase(relationship.lifecycle._tag),
-        other: traceConnection(inspection, workspaceId, otherNodeId, projections),
+        other: traceConnection(
+          inspection,
+          workspaceId,
+          otherNodeId,
+          projections,
+          projections.get(direction === "outgoing" ? relationship.sourceNodeId : relationship.targetNodeId)
+        ),
         tone: relationshipLifecycleTone(relationship.lifecycle._tag)
       }]
     }

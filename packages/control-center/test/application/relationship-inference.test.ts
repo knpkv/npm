@@ -133,7 +133,9 @@ describe("relationship inference", () => {
     )
     const gap = result.candidates.find(({ lifecycle }) => lifecycle === "missing")
     assert.strictEqual(gap?.source._tag, "missing")
-    if (gap?.source._tag === "missing") assert.strictEqual(gap.source.missingKey, "PAY-43:pull-request")
+    if (gap?.source._tag === "missing") {
+      assert.strictEqual(gap.source.missingKey, "01890f6f-6d6a-7cc0-98d2-000000000102:pull-request")
+    }
     assert.isTrue(result.obsoleteGapIdentityKeys.some((key) => key.includes(issue.nodeId)))
   })
 

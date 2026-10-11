@@ -94,15 +94,15 @@ const resolved = (kind: RelationshipEndpointKind, nodeId: GraphNodeId): Relation
   nodeId
 })
 
+/** Placeholder keys inherit the source node’s connection/repository scope, independent of display text. */
 const missing = (
   kind: DeliveryEntityKind,
-  missingKey: string,
   identityKey: string
 ): RelationshipInferenceEndpoint => ({
   _tag: "missing",
   identityKey,
   kind,
-  missingKey
+  missingKey: `${identityKey}:${kind}`
 })
 
 const currentRelationship = (relationship: DeliveryRelationship): boolean =>
@@ -472,7 +472,7 @@ export const deriveRelationshipInference = (input: {
             identityKey,
             kind: "implements",
             releaseId,
-            source: missing("pull-request", `${details.key}:pull-request`, issue.nodeId),
+            source: missing("pull-request", issue.nodeId),
             target: resolved("issue", issue.nodeId)
           })
         )
@@ -539,7 +539,6 @@ export const deriveRelationshipInference = (input: {
             source: resolved("pull-request", pullRequest.nodeId),
             target: missing(
               "pipeline-execution",
-              `${pullRequest.projection.displayKey}:pipeline-execution`,
               pullRequest.nodeId
             )
           })

@@ -10,7 +10,9 @@ import {
   AgentId,
   EntityId,
   EnvironmentId,
+  GraphNodeId,
   PluginConnectionId,
+  RelationshipId,
   RoleAssignmentId,
   WorkspaceId
 } from "../../src/domain/identifiers.js"
@@ -28,7 +30,8 @@ import {
 } from "../../src/server/application/normalizedPluginPageMaterialization.js"
 import { pipelineStatus } from "../../src/server/application/pipelineExecutionProjection.js"
 import {
-  reconcileRelationshipInferencePolicy
+  reconcileRelationshipInferencePolicy,
+  stableRelationshipInferenceIdentity
 } from "../../src/server/application/relationshipInferenceMaterialization.js"
 import { Database, databaseLayer } from "../../src/server/persistence/Database.js"
 import {
@@ -36,6 +39,7 @@ import {
   persistenceLayerFromDatabase,
   type PersistenceService
 } from "../../src/server/persistence/Persistence.js"
+import { DeliveryGraphWriteBatch } from "../../src/server/persistence/repositories/deliveryGraphRepository.js"
 import { PluginConnectionDisplayName, WorkspaceName } from "../../src/server/persistence/repositories/models.js"
 import { PluginStreamKey } from "../../src/server/persistence/repositories/pluginRuntimeModels.js"
 import type { SqlRow } from "../../src/server/persistence/repositories/sqlRow.js"
@@ -767,7 +771,7 @@ const setup = Effect.gen(function*() {
 
 const setupConnection = Effect.fn("NormalizedPluginPageMaterializationTest.setupConnection")(function*(
   pluginConnectionId: PluginConnectionId,
-  providerId: "clockify" | "codecommit" | "codepipeline" | "confluence",
+  providerId: "clockify" | "codecommit" | "codepipeline" | "confluence" | "jira",
   pluginDescriptor: Schema.Json = descriptorFor(providerId)
 ) {
   const persistence = yield* Persistence
@@ -891,7 +895,302 @@ const inferredCodeCommitFreshnessAt = (
     return evidence.freshness._tag
   }))
 
+/** Distinct account/repository sources may legitimately share a provider PR number. */
+const scopedMissingNodePages = (second: boolean, issueRevision = 1) => {
+  const key = second ? "CAT-1" : "FIX-1"
+  const issueId = second ? "20010" : "10010"
+  const versionId = second ? "20020" : "10020"
+  const version = second ? "2.0.0" : "1.0.0"
+  const account = second ? "222222222222" : "111111111111"
+  const jira = Schema.decodeSync(PluginSyncPageV1)({
+    checkpointAfterPage: `jira-${key}-${issueRevision}`,
+    hasMore: false,
+    events: [{
+      _tag: "UpsertEntity",
+      eventId: `issue-${issueId}-v${issueRevision}`,
+      observedAt: "2026-07-19T09:01:00.000Z",
+      revision: `issue-v${issueRevision}`,
+      entityType: "jira.issue",
+      vendorImmutableId: issueId,
+      sourceUrl: `https://fixture.atlassian.net/browse/${key}`,
+      title: `${key} fixture change`,
+      attributes: { key, status: { name: "Done" } }
+    }, {
+      _tag: "UpsertEntity",
+      eventId: `release-${versionId}`,
+      observedAt: "2026-07-19T09:01:00.000Z",
+      revision: "release-v1",
+      entityType: "release",
+      vendorImmutableId: versionId,
+      sourceUrl: "https://fixture.atlassian.net",
+      title: `Fixture release ${version}`,
+      attributes: { serviceName: second ? "Fixture catalogue" : "Fixture checkout", version, lifecycle: "candidate" }
+    }, {
+      _tag: "ProposeRelationship",
+      eventId: `contains-${issueId}`,
+      observedAt: "2026-07-19T09:01:00.000Z",
+      revision: "contains-v1",
+      relationshipId: `contains-${issueId}`,
+      relationshipType: "contains",
+      from: { entityType: "release", vendorImmutableId: versionId },
+      to: { entityType: "jira.issue", vendorImmutableId: issueId },
+      confidence: 1,
+      evidenceIds: []
+    }]
+  })
+  const codecommit = Schema.decodeSync(PluginSyncPageV1)({
+    checkpointAfterPage: `codecommit-${key}`,
+    hasMore: false,
+    events: [{
+      _tag: "UpsertEntity",
+      eventId: `pr-${account}-1`,
+      observedAt: "2026-07-19T09:01:00.000Z",
+      revision: "pr-v1",
+      entityType: "pull-request",
+      vendorImmutableId: "1",
+      sourceUrl: `https://console.aws.amazon.com/codesuite/codecommit/repositories/fixture-${account}/pull-requests/1`,
+      title: `${key} fixture change`,
+      attributes: {
+        repository: `fixture-${account}`,
+        sourceBranch: `fixture/${key}`,
+        targetBranch: "main",
+        headRevision: "a".repeat(40),
+        reviewState: "requested"
+      }
+    }]
+  })
+  return { jira, codecommit }
+}
+
 describe("normalized plugin page materialization", () => {
+  it.effect("keeps missing delivery nodes isolated for two accounts with PR 1 and reuses them on repeat sync", () =>
+    withMaterializer(Effect.gen(function*() {
+      const persistence = yield* Persistence
+      yield* setup
+      yield* setupConnection(OTHER_PLUGIN_ID, "jira")
+      yield* setupConnection(CODECOMMIT_PLUGIN_ID, "codecommit")
+      const otherCodeCommit = PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-000000000203")
+      yield* setupConnection(otherCodeCommit, "codecommit")
+      const synchronize = (
+        connection: PluginConnectionId,
+        provider: "jira" | "codecommit",
+        revision: number,
+        page: typeof PluginSyncPageV1.Type
+      ) =>
+        materializeNormalizedPluginPage({
+          workspaceId: WORKSPACE_ID,
+          pluginConnectionId: connection,
+          providerId: provider,
+          streamKey: firstPartyStream(provider),
+          expectedRevision: revision,
+          committedAt: T2,
+          successfulHealth: { _tag: "healthy", checkedAt: T2 }
+        }, page)
+      for (
+        const [connection, second] of [[CODECOMMIT_PLUGIN_ID, false], [otherCodeCommit, true]] satisfies ReadonlyArray<
+          readonly [PluginConnectionId, boolean]
+        >
+      ) {
+        yield* synchronize(connection, "codecommit", 0, scopedMissingNodePages(second).codecommit)
+      }
+      for (
+        const [connection, second] of [[PLUGIN_ID, false], [OTHER_PLUGIN_ID, true]] satisfies ReadonlyArray<
+          readonly [PluginConnectionId, boolean]
+        >
+      ) {
+        yield* synchronize(connection, "jira", 0, scopedMissingNodePages(second).jira)
+      }
+      const releases = yield* persistence.releases.list(WORKSPACE_ID, 10)
+      assert.lengthOf(releases, 2)
+      const readGaps = Effect.gen(function*() {
+        const gaps: Array<DeliveryRelationship> = []
+        const keys: Array<string> = []
+        for (const { release } of releases) {
+          const slice = yield* persistence.deliveryGraph.read(WORKSPACE_ID, {
+            _tag: "releaseSlice",
+            releaseId: release.id,
+            environmentId: null,
+            limit: 100
+          })
+          if (slice._tag !== "releaseSlice") return yield* Effect.die("expected release slice")
+          const gap = slice.value.relationships.find(({ kind, lifecycle }) =>
+            kind === "delivered-by" && lifecycle._tag === "missing"
+          )
+          if (gap === undefined) return yield* Effect.die("expected missing pipeline relationship")
+          gaps.push(gap)
+          const node = slice.value.nodes.find(({ nodeId }) => nodeId === gap.targetNodeId)
+          if (node?.resolution._tag !== "missing") return yield* Effect.die("expected missing pipeline node")
+          keys.push(node.resolution.missingKey)
+        }
+        assert.strictEqual(new Set(keys).size, 2)
+        return gaps
+      })
+      const before = yield* readGaps
+      for (
+        const [connection, second] of [[PLUGIN_ID, false], [OTHER_PLUGIN_ID, true]] satisfies ReadonlyArray<
+          readonly [PluginConnectionId, boolean]
+        >
+      ) {
+        const receipt = yield* synchronize(connection, "jira", 1, scopedMissingNodePages(second, 2).jira)
+        assert.strictEqual(receipt.nodeCount, 0)
+      }
+      assert.deepStrictEqual(yield* readGaps, before)
+    })))
+
+  it.effect("keeps legacy PR 1 placeholders unchanged beside a second account and reuses nodes on changed sync", () =>
+    withMaterializer(Effect.gen(function*() {
+      const persistence = yield* Persistence
+      const cryptoService = yield* Crypto.Crypto
+      yield* setup
+      const disabled = persistenceWithWorkspaceSettings(persistence, {
+        ...DEFAULT_WORKSPACE_SETTINGS,
+        inference: { ...DEFAULT_WORKSPACE_SETTINGS.inference, enabled: false }
+      })
+      const scope: NormalizedPluginPageMaterializationScope = {
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: PLUGIN_ID,
+        providerId: "jira",
+        streamKey: firstPartyStream("jira"),
+        expectedRevision: 0,
+        committedAt: T2,
+        successfulHealth: { _tag: "healthy", checkedAt: T2 }
+      }
+      const page = scopedMissingNodePages(false).jira
+      yield* materializeNormalizedPluginPage(scope, page).pipe(Effect.provideService(Persistence, disabled))
+      const release = (yield* persistence.releases.list(WORKSPACE_ID, 10))[0]?.release
+      if (release === undefined) return yield* Effect.die("expected release")
+      const slice = yield* persistence.deliveryGraph.read(WORKSPACE_ID, {
+        _tag: "releaseSlice",
+        releaseId: release.id,
+        environmentId: null,
+        limit: 100
+      })
+      if (slice._tag !== "releaseSlice") return yield* Effect.die("expected release slice")
+      const issue = slice.value.nodes.find(({ endpointKind }) => endpointKind === "issue")
+      if (issue === undefined) return yield* Effect.die("expected issue node")
+      yield* setupConnection(CODECOMMIT_PLUGIN_ID, "codecommit")
+      yield* materializeNormalizedPluginPage({
+        ...scope,
+        pluginConnectionId: CODECOMMIT_PLUGIN_ID,
+        providerId: "codecommit",
+        streamKey: firstPartyStream("codecommit")
+      }, scopedMissingNodePages(false).codecommit)
+        .pipe(Effect.provideService(Persistence, disabled))
+      const pullRequestNodeId = GraphNodeId.make(
+        yield* stableRelationshipInferenceIdentity(
+          cryptoService,
+          `${WORKSPACE_ID}\u0000${CODECOMMIT_PLUGIN_ID}\u0000codecommit\u0000entity-node\u00001`
+        )
+      )
+      const oldNodeId = GraphNodeId.make(
+        yield* stableRelationshipInferenceIdentity(
+          cryptoService,
+          `${WORKSPACE_ID}\u0000relationship-inference\u0000missing-node\u0000pipeline-execution\u0000${pullRequestNodeId}`
+        )
+      )
+      const relationshipId = RelationshipId.make(
+        yield* stableRelationshipInferenceIdentity(
+          cryptoService,
+          `${WORKSPACE_ID}\u0000relationship-inference\u0000relationship\u0000gap:delivered-by:${release.id}:${pullRequestNodeId}`
+        )
+      )
+      const legacy: DeliveryRelationship = {
+        workspaceId: WORKSPACE_ID,
+        relationshipId,
+        relationshipSchemaVersion: 1,
+        revision: LedgerRevision.make(1),
+        supersedesRevision: null,
+        kind: "delivered-by",
+        sourceNodeId: pullRequestNodeId,
+        sourceNodeKind: "pull-request",
+        targetNodeId: oldNodeId,
+        targetNodeKind: "pipeline-execution",
+        scope: { _tag: "release", releaseId: release.id },
+        lifecycle: { _tag: "missing", effectiveAt: T2, reason: "No synchronized pipeline." },
+        confidence: { _tag: "unknown", rationale: "No synchronized pipeline." },
+        provenance: { _tag: "rule", ruleId: "delivery-gap-v1", ruleVersion: 1, rationale: "Required link is missing." },
+        recordedBy: { _tag: "system", component: "relationship-inference" },
+        evidenceClaimIds: [],
+        recordedAt: T2
+      }
+      yield* persistence.deliveryGraph.write(
+        WORKSPACE_ID,
+        Schema.encodeSync(DeliveryGraphWriteBatch)({
+          entityProjections: [],
+          evidenceItems: [],
+          evidenceClaims: [],
+          relationships: [legacy],
+          nodes: [{
+            workspaceId: WORKSPACE_ID,
+            nodeId: oldNodeId,
+            endpointKind: "pipeline-execution",
+            resolution: {
+              _tag: "missing",
+              expectedKind: "entity",
+              expectedEntityKind: "pipeline-execution",
+              missingKey: "1:pipeline-execution"
+            },
+            createdAt: T2
+          }]
+        })
+      )
+      yield* materializeNormalizedPluginPage({ ...scope, expectedRevision: 1 }, page)
+      const unchanged = yield* persistence.deliveryGraph.read(WORKSPACE_ID, {
+        _tag: "relationship",
+        relationshipId,
+        revision: null
+      })
+      if (unchanged._tag !== "relationship") return yield* Effect.die("expected unchanged legacy relationship")
+      assert.deepStrictEqual(unchanged.value, legacy)
+      yield* setupConnection(OTHER_PLUGIN_ID, "jira")
+      const otherCodeCommit = PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-000000000203")
+      yield* setupConnection(otherCodeCommit, "codecommit")
+      yield* materializeNormalizedPluginPage({
+        ...scope,
+        pluginConnectionId: otherCodeCommit,
+        providerId: "codecommit",
+        streamKey: firstPartyStream("codecommit")
+      }, scopedMissingNodePages(true).codecommit)
+      yield* materializeNormalizedPluginPage(
+        { ...scope, pluginConnectionId: OTHER_PLUGIN_ID },
+        scopedMissingNodePages(true).jira
+      )
+      assert.lengthOf(yield* persistence.releases.list(WORKSPACE_ID, 10), 2)
+      const current = yield* persistence.deliveryGraph.read(WORKSPACE_ID, {
+        _tag: "relationship",
+        relationshipId,
+        revision: null
+      })
+      if (current._tag !== "relationship") return yield* Effect.die("expected current relationship")
+      assert.strictEqual(current.value.revision, 1)
+      assert.strictEqual(current.value.supersedesRevision, null)
+      assert.deepStrictEqual(current.value, legacy)
+      const historical = yield* persistence.deliveryGraph.read(WORKSPACE_ID, {
+        _tag: "relationship",
+        relationshipId,
+        revision: LedgerRevision.make(1)
+      })
+      if (historical._tag !== "relationship") return yield* Effect.die("expected historical relationship")
+      assert.deepStrictEqual(historical.value, legacy)
+      const oldNode = yield* persistence.deliveryGraph.read(WORKSPACE_ID, { _tag: "node", nodeId: oldNodeId })
+      if (oldNode._tag !== "node") return yield* Effect.die("expected legacy node")
+      assert.strictEqual(oldNode.value.resolution._tag, "missing")
+      if (oldNode.value.resolution._tag === "missing") {
+        assert.strictEqual(oldNode.value.resolution.missingKey, "1:pipeline-execution")
+      }
+      const repeated = yield* materializeNormalizedPluginPage(
+        { ...scope, expectedRevision: 1 },
+        scopedMissingNodePages(false, 2).jira
+      )
+      assert.strictEqual(repeated.nodeCount, 0)
+      const after = yield* persistence.deliveryGraph.read(WORKSPACE_ID, {
+        _tag: "relationship",
+        relationshipId,
+        revision: null
+      })
+      assert.deepStrictEqual(after, current)
+    })))
+
   it("maps terminal and active CodePipeline statuses", () => {
     const cases: ReadonlyArray<readonly [string, ReturnType<typeof pipelineStatus>]> = [
       ["Cancelled", "stopped"],

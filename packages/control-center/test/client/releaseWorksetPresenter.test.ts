@@ -2,11 +2,47 @@ import * as Schema from "effect/Schema"
 import { describe, expect, it } from "vitest"
 
 import type { ReleaseDeliveryGraphInspection } from "../../src/api/deliveryGraph.js"
-import { presentReleaseWorkset, selectReleaseWorksetObject } from "../../src/client/releases/presentReleaseWorkset.js"
+import {
+  presentReleaseWorkset,
+  selectReleaseWorksetObject,
+  selectReleaseWorksetTrace
+} from "../../src/client/releases/presentReleaseWorkset.js"
 import { EntityId, GraphNodeId, RelationshipId } from "../../src/domain/identifiers.js"
 import { releaseWorksetFixture, WORKSET_WORKSPACE_ID } from "../fixtures/releaseWorkset.js"
 
 describe("release workset presenter", () => {
+  it.each(["1:pipeline-execution", "01890f6f-6d6a-7cc0-98d2-000000000201:pipeline-execution"])(
+    "shows human pipeline gap labels independently of persisted key %s",
+    (missingKey) => {
+      const pipeline = releaseWorksetFixture.nodes.find(({ endpointKind }) => endpointKind === "pipeline-execution")
+      const pullRequest = releaseWorksetFixture.entityProjections.find(({ projection }) =>
+        projection.entityType === "pull-request"
+      )
+      expect(pipeline).toBeDefined()
+      expect(pullRequest).toBeDefined()
+      if (pipeline === undefined || pullRequest === undefined) return
+      const inspection: ReleaseDeliveryGraphInspection = {
+        ...releaseWorksetFixture,
+        nodes: releaseWorksetFixture.nodes.map((node) =>
+          node.nodeId === pipeline.nodeId ?
+            {
+              ...node,
+              resolution: {
+                _tag: "missing",
+                expectedKind: "entity",
+                expectedEntityKind: "pipeline-execution",
+                missingKey
+              }
+            } :
+            node
+        )
+      }
+      const trace = selectReleaseWorksetTrace(inspection, WORKSET_WORKSPACE_ID, pullRequest.projection.entityId)
+      expect(trace?.relationships.find(({ kind }) => kind === "delivered-by")?.other.label)
+        .toBe("PR #184 · payments-api has no pipeline run")
+    }
+  )
+
   it("keeps all six Jira items in one dimension and groups five under exactly two PRs", () => {
     const workset = presentReleaseWorkset(releaseWorksetFixture, WORKSET_WORKSPACE_ID)
 
