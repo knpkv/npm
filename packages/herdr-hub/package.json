@@ -14,11 +14,13 @@
     "*.css",
     "**/*.css",
     "./dist/bin.js",
-    "./dist/fleetctl.js"
+    "./dist/fleetctl.js",
+    "./dist/relay.js"
   ],
   "bin": {
     "hostd": "./dist/bin.js",
-    "fleetctl": "./dist/fleetctl.js"
+    "fleetctl": "./dist/fleetctl.js",
+    "relay": "./dist/relay.js"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

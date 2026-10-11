@@ -23,6 +23,7 @@ import {
   type FleetConnectAgents as FleetConnectAgentsType,
   LocalConnectAgents
 } from "./model.js"
+import type { AgentPostStore } from "./post-store.js"
 import type { AgentRelationshipStore, RelationshipObservation } from "./relationship-store.js"
 
 export interface AgentSource {
@@ -266,7 +267,7 @@ export const fetchPeerConnectAgents = Effect.fn("HerdrConnect.fetchPeerAgents")(
 export const fleetConnectAgents = Effect.fn("HerdrConnect.fleetAgents")(function*(
   local: Effect.Effect<LocalConnectAgents, ConnectPeerError>,
   peers: ReadonlyArray<ConnectPeerTarget>,
-  archive?: { readonly store: AgentArchiveStore; readonly observedAt: number }
+  archive?: { readonly store: AgentArchiveStore; readonly observedAt: number; readonly posts?: AgentPostStore }
 ) {
   const localResult = yield* Effect.result(local)
   const agents = Result.isSuccess(localResult) ? [...localResult.success.agents] : []
@@ -317,5 +318,17 @@ export const fleetConnectAgents = Effect.fn("HerdrConnect.fleetAgents")(function
       )
     }
   }
-  return fleet
+  if (archive?.posts === undefined) return fleet
+  const posts = yield* archive.posts.latestMany(
+    fleet.agents.map(({ host, id }) => ({ host, agentId: id })),
+    archive.observedAt
+  )
+  const byAgent = new Map(posts.map((post) => [`${post.host.toLowerCase()}\u0000${post.agentId}`, post]))
+  return {
+    ...fleet,
+    agents: fleet.agents.map((agent) => {
+      const latest = byAgent.get(`${agent.host.toLowerCase()}\u0000${agent.id}`)
+      return latest === undefined ? agent : { ...agent, voice: { text: latest.text, createdAt: latest.createdAt } }
+    })
+  }
 })

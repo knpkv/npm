@@ -1,5 +1,6 @@
 import { NodeHttpClient, NodeServices } from "@effect/platform-node"
 import type {
+  Conflict,
   ConnectPeerError,
   TerminalAgentNotFoundError,
   TerminalBusyError,
@@ -10,14 +11,21 @@ import type {
 import {
   AgentActivityStore,
   AgentArchiveStore,
+  AgentPostStore,
   AgentRelationshipStore,
   ConnectAgentCursor,
   ConnectArchiveCursor,
+  ConnectPost,
+  ConnectPostCursor,
+  ConnectPostRequest,
+  Denied,
+  fetchPeerConnectAgents,
   fleetConnectAgents,
   fleetLimits,
   fleetUsage,
   hubLimits,
   hubUsage,
+  InvalidReport,
   localConnectAgents,
   makeHerdrTerminalConnector,
   pageFleetConnectAgents,
@@ -26,6 +34,8 @@ import {
   terminalFrameMaxEncodedBytes,
   TerminalSelection,
   TerminalServerSignal,
+  Unavailable,
+  UnboundAgent,
   UsageQuery
 } from "@knpkv/herdr-connect"
 import type {
@@ -272,6 +282,11 @@ export type UiAssets = {
 }
 
 type ApiError =
+  | InvalidReport
+  | UnboundAgent
+  | Denied
+  | Conflict
+  | Unavailable
   | ApprovalAppStoreError
   | ConnectPeerError
   | DashboardResponseBudgetError
@@ -388,6 +403,16 @@ const apiError = (error: ApiError): ApiErrorResponse => {
   switch (error._tag) {
     case "ModuleRouteFailure":
       return { status: error.status, body: { error: error.code } }
+    case "InvalidReport":
+      return { status: 400, body: { error: error._tag, detail: error.detail } }
+    case "UnboundAgent":
+      return { status: 403, body: { error: error._tag, agentId: error.agentId } }
+    case "Denied":
+      return { status: 403, body: { error: error._tag } }
+    case "Conflict":
+      return { status: 409, body: { error: error._tag, eventId: error.eventId } }
+    case "Unavailable":
+      return { status: 503, body: { error: error._tag, operation: error.operation } }
     case "FleetAuthorizationError":
       return { status: 403, body: { error: error._tag, actor: error.actor } }
     case "FleetJobNotFoundError":
@@ -498,7 +523,7 @@ const actor = (
     allowLocal
   )
 
-const sameOrigin = (request: IncomingMessage, expected: string) => {
+const sameOrigin = (request: IncomingMessage, expected: string): Effect.Effect<void, FleetAuthorizationError> => {
   const received = header(request, "origin")
   return received === expected
     ? Effect.void
@@ -1855,6 +1880,8 @@ export const startHttpServer = async (
     finalizers.unshift(() => Promise.resolve().then(() => relationshipStore.close()))
     const archiveStore = await httpRuntime.runPromise(AgentArchiveStore.open(statePath))
     finalizers.unshift(() => Promise.resolve().then(() => archiveStore.close()))
+    const postStore = await httpRuntime.runPromise(AgentPostStore.open(statePath))
+    finalizers.unshift(() => Promise.resolve().then(() => postStore.close()))
     const workStore = await httpRuntime.runPromise(WorkStore.open(statePath))
     finalizers.unshift(() => Promise.resolve().then(() => workStore.close()))
     const work = await httpRuntime.runPromise(makeWorkService(workStore))
@@ -1896,7 +1923,7 @@ export const startHttpServer = async (
                     online: peer.online,
                     terminalUrl: peer.terminalUrl
                   })),
-                  { store: archiveStore, observedAt }
+                  { store: archiveStore, observedAt, posts: postStore }
                 )
               })
             ),
@@ -2648,6 +2675,10 @@ export const startHttpServer = async (
           }
           if (!acceptingRequests) {
             json(response, 503, { error: "starting" })
+            return
+          }
+          if (url.pathname === "/v1/connect/posts" && mode !== "serve") {
+            json(response, 403, { error: "Denied" })
             return
           }
           if (request.method === "GET" && url.pathname === "/assets/index.css") {
@@ -3578,13 +3609,87 @@ export const startHttpServer = async (
                       online: peer.online,
                       terminalUrl: peer.terminalUrl
                     })),
-                    { store: archiveStore, observedAt }
+                    { store: archiveStore, observedAt, posts: postStore }
                   )
                   return yield* pageFleetConnectAgents(directory, cursor)
                 })
               )
             )
             return
+          }
+
+          if (url.pathname === "/v1/connect/posts") {
+            if (mode !== "serve") {
+              json(response, 403, { error: "Denied" })
+              return
+            }
+            if (request.method === "POST") {
+              await respond(
+                response,
+                Effect.gen(function*() {
+                  if (header(request, "origin") !== undefined) {
+                    yield* sameOrigin(request, expectedOrigin()).pipe(Effect.mapError(() => new Denied()))
+                  }
+                  const address = request.socket.remoteAddress
+                  if (address === undefined) return yield* new Denied()
+                  const tailscale = yield* Tailscale
+                  const identity = yield* tailscale.whois(address).pipe(
+                    Effect.mapError(() => new Unavailable({ operation: "posts.whois" }))
+                  )
+                  yield* authorizeWhois(identity, config.allowedUsers, null).pipe(Effect.mapError(() => new Denied()))
+                  const machine = config.machines.find(({ nodeId }) => nodeId === identity.Node.StableID)
+                  if (machine === undefined) return yield* new Denied()
+                  const body = yield* readJson(request, ConnectPostRequest).pipe(
+                    Effect.mapError(() => new InvalidReport({ detail: "invalid post body" }))
+                  )
+                  const observedAt = now()
+                  const inventory = yield* (machine.host.toLowerCase() === config.host.toLowerCase()
+                    ? localConnectAgents(config, service, activityStore, relationshipStore, observedAt).pipe(
+                      Effect.provideService(Crypto.Crypto, cryptoService)
+                    )
+                    : Effect.gen(function*() {
+                      const peers = yield* fleetPeers(config)
+                      const peer = peers.find(({ host }) => host.toLowerCase() === machine.host.toLowerCase())
+                      if (peer === undefined) return yield* new Unavailable({ operation: "posts.peer" })
+                      return yield* fetchPeerConnectAgents({
+                        host: peer.host,
+                        agentsUrl: peer.connectAgentsUrl,
+                        online: peer.online,
+                        terminalUrl: peer.terminalUrl
+                      })
+                    })).pipe(Effect.mapError(() => new Unavailable({ operation: "posts.inventory" })))
+                  if (inventory.complete !== true) return yield* new Unavailable({ operation: "posts.inventory" })
+                  if (!inventory.agents.some((agent) => agent.id === body.agentId)) {
+                    return yield* new UnboundAgent({ agentId: body.agentId })
+                  }
+                  return yield* postStore.post(machine.host, body.agentId, body, observedAt)
+                })
+              )
+              return
+            }
+            if (request.method === "GET") {
+              await respond(
+                response,
+                Effect.gen(function*() {
+                  yield* authorized
+                  const target = yield* Schema.decodeUnknownEffect(Schema.Struct({
+                    host: ConnectPost.fields.host,
+                    agentId: ConnectPost.fields.agentId
+                  }))({ host: url.searchParams.get("host"), agentId: url.searchParams.get("agentId") }).pipe(
+                    Effect.mapError(() => new InvalidReport({ detail: "host and agentId required" }))
+                  )
+                  const rawCursor = url.searchParams.get("cursor")
+                  const cursor = rawCursor === null ?
+                    null :
+                    yield* Schema.decodeUnknownEffect(Schema.NumberFromString)(rawCursor).pipe(
+                      Effect.flatMap((sequence) => Schema.decodeUnknownEffect(ConnectPostCursor)({ sequence })),
+                      Effect.mapError(() => new InvalidReport({ detail: "invalid post cursor" }))
+                    )
+                  return yield* postStore.page(target.host, target.agentId, cursor, now())
+                })
+              )
+              return
+            }
           }
 
           if (mode === "serve" && request.method === "GET" && url.pathname === "/v1/connect/archive") {
