@@ -1,5 +1,14 @@
 # @knpkv/browser-pairing
 
+## 0.7.0
+
+### Minor Changes
+
+- [#843](https://github.com/knpkv/npm/pull/843) [`929ef05`](https://github.com/knpkv/npm/commit/929ef055945cffcdb9d78fc2708ee1871c1126e3) Thanks [@konopkov](https://github.com/konopkov)! - Add `readOrigin` to `makeWebControl` for read-only projection of a canonical HTTP loopback
+  origin from the owner-private control file. Reuse private-path checks without decoding
+  the bearer token, requesting login or changing files. Unsafe or missing registrations
+  fail as `WebNotRunning` without retaining private causes.
+
 ## 0.6.0
 
 ### Minor Changes
