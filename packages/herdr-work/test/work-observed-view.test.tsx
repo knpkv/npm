@@ -505,41 +505,45 @@ describe("Work board with the observed overlay", () => {
     expect((await mount(snapshotOf([], {}))).textContent).toContain("No goals yet.")
   })
 
-  it("keeps visible activity clocks terse while older dates remain in their accessible descriptions", async () => {
-    vi.stubEnv("TZ", "UTC")
-    try {
-      const readAt = Date.parse("2026-10-10T14:02:00Z")
-      const snapshots = snapshotOf(
-        [
-          goal("dated", {
-            createdAt: readAt - 4 * 24 * HOUR,
-            updatedAt: readAt,
-            activity: [
-              { id: "older", kind: "note", summary: "Older note", occurredAt: readAt - 2 * 24 * HOUR },
-              { id: "yesterday", kind: "note", summary: "Yesterday note", occurredAt: readAt - 24 * HOUR },
-              { id: "today", kind: "note", summary: "Today note", occurredAt: readAt }
-            ]
-          })
-        ],
-        { observed: [] }
-      )
-      const host = await mount({ ...snapshots, now: { ...snapshots.now, asOf: readAt, observedAt: readAt } }, "dated")
-      for (const [id, date] of [
-        ["older", "8 Oct 2026, 14:02"],
-        ["yesterday", "9 Oct 2026, 14:02"]
-      ]) {
-        const row = host.querySelector(`[data-rly-timeline-event-id="${id}"]`)
-        expect(row?.querySelector("time")?.textContent).toBe("14:02")
-        expect(row?.querySelector(".work-accessible-detail")?.textContent).toContain(date)
-        expect(row?.getAttribute("aria-describedby")).toBe(row?.querySelector(".work-accessible-detail")?.id)
+  it(
+    "keeps visible activity clocks terse while older dates remain in their accessible descriptions",
+    { concurrent: false },
+    async () => {
+      vi.stubEnv("TZ", "UTC")
+      try {
+        const readAt = Date.parse("2026-10-10T14:02:00Z")
+        const snapshots = snapshotOf(
+          [
+            goal("dated", {
+              createdAt: readAt - 4 * 24 * HOUR,
+              updatedAt: readAt,
+              activity: [
+                { id: "older", kind: "note", summary: "Older note", occurredAt: readAt - 2 * 24 * HOUR },
+                { id: "yesterday", kind: "note", summary: "Yesterday note", occurredAt: readAt - 24 * HOUR },
+                { id: "today", kind: "note", summary: "Today note", occurredAt: readAt }
+              ]
+            })
+          ],
+          { observed: [] }
+        )
+        const host = await mount({ ...snapshots, now: { ...snapshots.now, asOf: readAt, observedAt: readAt } }, "dated")
+        for (const [id, date] of [
+          ["older", "8 Oct 2026, 14:02"],
+          ["yesterday", "9 Oct 2026, 14:02"]
+        ]) {
+          const row = host.querySelector(`[data-rly-timeline-event-id="${id}"]`)
+          expect(row?.querySelector("time")?.textContent).toBe("14:02")
+          expect(row?.querySelector(".work-accessible-detail")?.textContent).toContain(date)
+          expect(row?.getAttribute("aria-describedby")).toBe(row?.querySelector(".work-accessible-detail")?.id)
+        }
+        const today = host.querySelector('[data-rly-timeline-event-id="today"]')
+        expect(today?.querySelector("time")?.textContent).toBe("14:02")
+        expect(today?.querySelector(".work-accessible-detail")?.textContent).toBe("Note")
+      } finally {
+        vi.unstubAllEnvs()
       }
-      const today = host.querySelector('[data-rly-timeline-event-id="today"]')
-      expect(today?.querySelector("time")?.textContent).toBe("14:02")
-      expect(today?.querySelector(".work-accessible-detail")?.textContent).toBe("Note")
-    } finally {
-      vi.unstubAllEnvs()
     }
-  })
+  )
 
   it("says how many older goals a large board left out, so a goal leaving the view is never silent", async () => {
     expect((await mount(snapshotOf([goal("g1")], { goalsOmitted: 12, observed: [] }))).textContent).toContain(

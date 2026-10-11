@@ -98,7 +98,7 @@ const bunAvailable = await Effect.runPromise(
   )
 )
 
-describe("ChildEnv.profileScopedEnv", () => {
+describe("ChildEnv.profileScopedEnv", { concurrent: false }, () => {
   // Registered as a hook rather than trailing each test: a thrown assertion or
   // spawn error would skip success-path cleanup and leak the stubbed ambient
   // credentials into later cases, which assert on those variables being absent.
@@ -332,7 +332,7 @@ describe("ChildEnv.profileScopedEnv", () => {
   })
 })
 
-describe("ChildEnv.gitChildEnv", () => {
+describe("ChildEnv.gitChildEnv", { concurrent: false }, () => {
   it.effect("drops inherited config selectors while preserving explicit overrides", () =>
     Effect.gen(function*() {
       const host = yield* ChildEnv.HostEnvironment

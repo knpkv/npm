@@ -1,0 +1,36 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-concurrent-env-stub
+language: tsx
+severity: error
+message: "Stub process environment only inside a describe or test declared with { concurrent: false }"
+
+rule:
+  pattern: vi.stubEnv($$$ARGS)
+  not:
+    inside:
+      stopBy: end
+      kind: call_expression
+      has:
+        field: arguments
+        has:
+          kind: object
+          has:
+            kind: pair
+            all:
+              - has:
+                  field: key
+                  regex: ^concurrent$
+              - has:
+                  field: value
+                  kind: "false"
+
+files:
+  - "packages/*/test/**/*.ts"
+  - "packages/*/test/**/*.tsx"
+
+ignores:
+  - "**/generated/**"
+  - "**/vendor/**"
+
+note: vitest.shared.ts sets sequence.concurrent, so a sibling test's stub can replace process.env while an awaited read is in flight.

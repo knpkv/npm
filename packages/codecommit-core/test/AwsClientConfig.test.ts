@@ -80,7 +80,7 @@ describe("AWS profile credential resolution", () => {
     assert.strictEqual(fallbackCalls, 0)
   })
 
-  describe("default SDK providers", () => {
+  describe("default SDK providers", { concurrent: false }, () => {
     afterEach(() => {
       vi.unstubAllEnvs()
     })
