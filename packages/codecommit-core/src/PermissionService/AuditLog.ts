@@ -5,7 +5,7 @@
  * or timed out.
  *
  * Design constraints:
- *   - MUST never block API calls (catchAll on write failures at call site)
+ *   - Owner UI treats audit writes as best effort; saved-grant host reads fail closed on write failure
  *   - MUST handle high volume (~17 ops per refresh × every 5min)
  *   - MUST auto-prune (150k entries/month without pruning)
  *   - MUST support filtered queries (for the audit log UI page)
@@ -206,7 +206,9 @@ export class AuditLogRepo extends Context.Service<
   AuditLogRepo,
   AuditLogRepoContract
 >()("AuditLogRepo") {
-  static readonly Default = Layer.effect(AuditLogRepo, makeAuditLogRepo).pipe(
+  /** Bind to an already-verified database without owning migrations or its path lifecycle. */
+  static readonly layer = Layer.effect(AuditLogRepo, makeAuditLogRepo)
+  static readonly Default = AuditLogRepo.layer.pipe(
     Layer.provide(DatabaseLive)
   )
 }

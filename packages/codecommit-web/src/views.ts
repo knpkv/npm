@@ -11,6 +11,12 @@ export {
   type FindingsPlacement
 } from "./client/components/findings-drawer.js"
 export {
+  type CodeHostPage,
+  CodeHostView,
+  type CodeHostViewProps,
+  type CodeReadState
+} from "./client/components/host-code-view.js"
+export {
   ApproversCard,
   type ApproversCardProps,
   type PRApprovalActions,

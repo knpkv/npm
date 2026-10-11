@@ -350,7 +350,9 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
       )}
       key={module.id}
     >
-      <ShellIcon name={module.id === "fleet" ? "fleet" : "modules"} />
+      {modules.find((view) => view.descriptor.id === module.id)?.navigationIcon ?? (
+        <ShellIcon name={module.id === "fleet" ? "fleet" : "modules"} />
+      )}
       <span>{module.label}</span>
     </a>
   )
@@ -499,7 +501,9 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
                       location.error === null && module.id === location.destination.module ? "page" : undefined
                     }
                   >
-                    <ShellIcon name={module.id === "fleet" ? "fleet" : "modules"} />
+                    {modules.find((view) => view.descriptor.id === module.id)?.navigationIcon ?? (
+                      <ShellIcon name={module.id === "fleet" ? "fleet" : "modules"} />
+                    )}
                     <span>
                       <strong>{module.label}</strong>
                       <small>{module.pages.map((page) => page.label).join(", ")}</small>

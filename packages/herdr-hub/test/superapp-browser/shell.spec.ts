@@ -502,6 +502,17 @@ test("mounts one Relay launcher and conversation across every page", async ({ pa
     await expect(panel).toHaveCount(1)
     await expect(composer).toHaveValue("Keep this draft")
   }
+  for (
+    const destination of ["today", "code/pull-requests", "code/reviews", "code/diffs", "usage/limits", "usage/tokens"]
+  ) {
+    await page.evaluate((destination) => {
+      window.location.hash = `#${destination}`
+    }, destination)
+    await expect.poll(() => new URL(page.url()).hash).toBe(`#${destination}`)
+    await expect(launcher).toHaveCount(1)
+    await expect(panel).toHaveCount(1)
+    await expect(composer).toHaveValue("Keep this draft")
+  }
   expect(await page.request.get("/__fixture/relay-subscriptions").then((response) => response.text())).toBe(
     String(before + 1)
   )

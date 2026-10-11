@@ -24,6 +24,8 @@ export interface ModulePageMount {
 /** Browser implementations import a product's browser entry and supply every declared page. */
 export interface ModuleViews<D extends ModuleDescriptor> {
   readonly descriptor: D
+  /** Optional decorative navigation glyph. The shell supplies the visible and accessible module name. */
+  readonly navigationIcon?: ReactNode
   readonly pages: {
     readonly [P in D["pages"][number]["id"]]: (search: URLSearchParams, mount: ModulePageMount) => ReactNode
   }

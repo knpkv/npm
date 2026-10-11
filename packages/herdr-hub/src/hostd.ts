@@ -1,6 +1,7 @@
 import type { AgentWorkerIdentity, FleetStoreError, HostConfiguration, HostOperations } from "@knpkv/herdr-fleet"
 import { FleetOperationError, JobStore, loadConfiguration, makeFleetService } from "@knpkv/herdr-fleet"
 import { Console, Effect, Path, Redacted, Scope } from "effect"
+import { readCodeHost } from "./code-module.js"
 import type { HostdOperationsCompositionError } from "./errors.js"
 import { startHttpServer } from "./http.js"
 import { fleetConfigPath } from "./internal/config-path.js"
@@ -72,6 +73,7 @@ export const makeHostdProgram = Effect.fn("Hostd.makeProgram")(function*(
   const paths = yield* Path.Path
   const configPath = yield* fleetConfigPath
   const config = yield* loadConfiguration(configPath)
+  const codeHost = yield* readCodeHost
   const store = yield* Effect.acquireRelease(
     JobStore.open(paths.join(config.stateDirectory, "jobs.sqlite")),
     (opened) => Effect.sync(() => opened.close())
@@ -86,7 +88,8 @@ export const makeHostdProgram = Effect.fn("Hostd.makeProgram")(function*(
   const directory = paths.dirname(yield* paths.fromFileUrl(new URL(import.meta.url)))
   const assets = yield* loadUiAssets(directory)
   const relay = { directory: paths.join(config.stateDirectory, "relay") }
-  const serverOptions = config.lanWork === undefined ? { relay } : { lanWork: config.lanWork, relay }
+  const relayOptions = config.lanWork === undefined ? { relay } : { relay, lanWork: config.lanWork }
+  const serverOptions = codeHost === null ? relayOptions : { ...relayOptions, codeHost }
   const server = yield* Effect.acquireRelease(
     Effect.tryPromise({
       try: () => startHttpServer(config, service, assets, serverOptions),

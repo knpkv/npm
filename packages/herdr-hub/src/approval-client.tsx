@@ -53,6 +53,8 @@ import { SuperappShell } from "./superapp-view.js"
 import { makeFleetModuleViews } from "./fleet-module-view.js"
 import { makeTodayModuleViews, TodayReadFailed } from "./today-module-view.js"
 import { makeUsageModuleViews, type UsageModuleReads } from "./usage-module-view.js"
+import { makeCodeModuleViews } from "./code-module-view.js"
+import { loadCodeQueue, loadCodeDetail, loadCodeDiff, loadCodeContent, type CodeModuleReads } from "./code-client.js"
 import { TodayFleetAgents, TodayFleetHistory } from "./today-fleet-activity.js"
 import { NeedsYouResult } from "./modules.js"
 import { RefreshStatus } from "./refresh-status.js"
@@ -417,12 +419,14 @@ type DashboardAtoms = ReturnType<typeof makeDashboardAtoms>
 
 const DashboardApp = ({
   atoms,
+  codeReads,
   readToday,
   usageReads
 }: {
   readonly atoms: DashboardAtoms
   readonly readToday: Effect.Effect<typeof NeedsYouResult.Type, TodayReadFailed>
   readonly usageReads: UsageModuleReads
+  readonly codeReads: CodeModuleReads
 }) => {
   const result = useAtomValue(atoms.dashboard)
   const { refreshFailed, snapshot } = dashboardRefreshView(result, atoms.bootstrap)
@@ -725,13 +729,14 @@ const DashboardApp = ({
     now: Date.now(),
     onHubMachine: onLoopback()
   })
+  const code = makeCodeModuleViews({ reads: codeReads, onHubMachine: onLoopback() })
   return (
     <>
       <DashboardWorkPollOwner atom={atoms.work} poll={atoms.workPoll} />
       {canonical ? (
         <SuperappShell
-          modules={[today, fleet, usage]}
-          mobileModules={["today", "fleet"]}
+          modules={[today, fleet, code, usage]}
+          mobileModules={["today", "fleet", "code"]}
           landing={{ module: "today", page: "overview" }}
           host={current.host}
           hostCount={hostCount}
@@ -805,6 +810,20 @@ const usageReads: UsageModuleReads = {
     })
   })
 }
+/** The existing page runtime owns all Code fetches; module interruption aborts their request signals. */
+const runCodeRead = <A, E>(effect: Effect.Effect<A, E, HttpClient.HttpClient>): Effect.Effect<A, E> =>
+  Effect.callback((resume, signal) => {
+    applicationRuntime.runCallback(effect, {
+      signal,
+      onExit: (exit) => resume(Exit.isSuccess(exit) ? Effect.succeed(exit.value) : Effect.failCause(exit.cause))
+    })
+  })
+const codeReads: CodeModuleReads = {
+  queue: (query) => runCodeRead(loadCodeQueue(query)),
+  detail: (ref) => runCodeRead(loadCodeDetail(ref)),
+  diff: (ref) => runCodeRead(loadCodeDiff(ref)),
+  content: (query) => runCodeRead(loadCodeContent(query))
+}
 const relayConversations = makeRelayConversations(
   makeRelayClient({ base: "/v1/relay", origin: window.location.href }),
   applicationRuntime
@@ -816,7 +835,7 @@ const relay: HubRelayConversation = {
 watchRelayPage(window, relay)
 const application = (
   <RegistryProvider>
-    <DashboardApp atoms={atoms} readToday={readToday} usageReads={usageReads} />
+    <DashboardApp atoms={atoms} readToday={readToday} usageReads={usageReads} codeReads={codeReads} />
   </RegistryProvider>
 )
 if (initial.approvalApp.canonical) createRoot(root).render(application)

@@ -1,0 +1,12 @@
+id: no-code-host-read-bypass
+valid:
+  - 'import { makeCodeHostReads } from "@knpkv/codecommit-web/host/server"'
+  - 'import { CodeQueue } from "@knpkv/codecommit-web/host"'
+  - 'import { CodeHostReadError } from "./host-model.js"'
+invalid:
+  - 'import * as ReadClient from "@knpkv/codecommit-core/ReadClient.js"'
+  - 'import { ReadClient } from "@knpkv/codecommit-core"'
+  - 'import type { CodeCommitReadAccount } from "@knpkv/codecommit-core/ReadClient/models.js"'
+  - 'import { InnerCodeCommitReadClient } from "../internal/PermissionedReadClient.js"'
+  - 'export * from "@knpkv/codecommit-core/ReadClient.js"'
+  - 'const raw = await import("@knpkv/codecommit-core/ReadClient.js")'

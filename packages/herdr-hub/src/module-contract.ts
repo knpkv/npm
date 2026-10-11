@@ -114,3 +114,16 @@ export const usageModule = defineModule({
   listeners: ["serve"],
   requires: ["read"]
 })
+
+/** Code reads are credential-host local; peer and Relay transports never carry its content. */
+export const codeModule = defineModule({
+  id: "code",
+  label: "Code",
+  defaultPage: "pull-requests",
+  pages: [{ id: "pull-requests", label: "Pull requests" }, { id: "reviews", label: "Reviews" }, {
+    id: "diffs",
+    label: "Diffs"
+  }],
+  listeners: ["serve"],
+  requires: ["read"]
+})

@@ -1190,6 +1190,9 @@ importers:
       '@knpkv/capability':
         specifier: workspace:^
         version: link:../capability
+      '@knpkv/codecommit-web':
+        specifier: workspace:^
+        version: link:../codecommit-web
       '@knpkv/herdr-connect':
         specifier: workspace:^
         version: link:../herdr-connect

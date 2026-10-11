@@ -35,7 +35,7 @@ const readToday = Effect.fnUntraced(function*(providers: ReadonlyArray<ServerMod
     method: "GET",
     url: new URL("https://hub.example/v1/modules/today/needs-you"),
     listener: "serve",
-    authorize: Effect.void,
+    authorize: Effect.succeed({ login: "example-viewer" }),
     sameOrigin: Effect.void,
     readJson: () => Effect.die("GET has no body")
   }).pipe(Effect.provideContext(context))

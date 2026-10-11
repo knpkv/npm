@@ -5590,11 +5590,75 @@ esac
     }).pipe(Effect.scoped, provideNodeServices)
   })
 
+  /** The production mount uses whois authority, never a browser-supplied login header or query. */
+  it.effect("keeps Code local, read-only and caller identity sourced from authenticated whois", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-code-auth-"))
+    const callers: Array<string> = []
+    const descriptor = defineModule({
+      id: "caller-fixture",
+      label: "Fixture",
+      defaultPage: "overview",
+      pages: [{ id: "overview", label: "Fixture" }],
+      listeners: ["serve"],
+      requires: ["read"]
+    })
+    return Effect.gen(function*() {
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { force: true, recursive: true })))
+      const hub = yield* startHub(root, join(root, "relay"), scriptedBackends("Nothing waits."), () => Effect.void, [{
+        descriptor,
+        handlers: Layer.succeed(ModuleHandlers, {
+          routes: [
+            moduleReadRoute(
+              "/caller",
+              Schema.fromURLSearchParams(Schema.Struct({ login: Schema.optionalKey(Schema.String) })),
+              Schema.String,
+              (_query, caller) =>
+                Effect.sync(() => {
+                  callers.push(caller.login)
+                  return caller.login
+                })
+            )
+          ]
+        })
+      }])
+      const get = (path: string) =>
+        Effect.promise(() =>
+          hubRequest(`${hub.serveUrl}${path}`, {
+            headers: { ...hub.headers, "tailscale-user-login": "spoof@example.test" }
+          })
+        )
+      hub.deny()
+      expect((yield* get("/v1/modules/code/queue")).status).toBe((yield* get("/v1/dashboard")).status)
+      expect((yield* get("/v1/modules/caller-fixture/caller?login=spoof@example.test")).status).toBe(403)
+      expect(callers).toEqual([])
+      hub.allow()
+      const identity = yield* get("/v1/modules/caller-fixture/caller?login=spoof@example.test")
+      expect(identity.status).toBe(200)
+      expect(JSON.parse(identity.body)).toBe("owner@example.com")
+      expect(callers).toEqual(["owner@example.com"])
+      const missing = yield* get("/v1/modules/code/queue")
+      expect(missing.status).toBe(200)
+      expect(JSON.parse(missing.body)).toEqual({ _tag: "Unavailable", reason: "not_configured", host: null })
+      expect((yield* get("/v1/modules/code/queue?profile=private")).status).toBe(400)
+      expect((yield* get("/v1/modules/code/missing")).status).toBe(404)
+      const write = yield* Effect.promise(() =>
+        hubRequest(`${hub.serveUrl}/v1/modules/code/queue`, { method: "POST", headers: hub.headers })
+      )
+      expect(write.status).toBe(404)
+      for (const url of [hub.server.url, hub.server.tailnetUrl]) {
+        if (url === null) return yield* Effect.die("Expected a listener URL")
+        const remote = yield* Effect.promise(() => fetch(`${url}/v1/modules/code/queue`))
+        expect(remote.status).toBe(404)
+        yield* Effect.promise(() => remote.text())
+      }
+    }).pipe(Effect.scoped, provideNodeServices)
+  })
+
   it.effect("uses dashboard authorization before Today providers and rejects extra query selectors", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-today-auth-"))
     let reads = 0
     const code = defineModule({
-      id: "code",
+      id: "fixture",
       label: "Code",
       defaultPage: "overview",
       pages: [{ id: "overview", label: "Code" }],
@@ -5787,7 +5851,7 @@ esac
     const root = mkdtempSync(join(tmpdir(), "herdr-module-write-"))
     let writes = 0
     const code = defineModule({
-      id: "code",
+      id: "fixture",
       label: "Code",
       defaultPage: "overview",
       pages: [{ id: "overview", label: "Code" }],
@@ -5826,7 +5890,7 @@ esac
       )
       const post = (contentType: string, body: string, origin = hub.origin) =>
         Effect.promise(() =>
-          hubRequest(`${hub.serveUrl}/v1/modules/code/decide`, {
+          hubRequest(`${hub.serveUrl}/v1/modules/fixture/decide`, {
             method: "POST",
             headers: { ...hub.headers, "content-type": contentType, origin },
             body
@@ -5844,7 +5908,7 @@ esac
       expect((yield* post("application/json", valid)).status).toBe(200)
       expect(writes).toBe(1)
       const read = yield* Effect.promise(() =>
-        hubRequest(`${hub.serveUrl}/v1/modules/code/status`, { headers: hub.headers })
+        hubRequest(`${hub.serveUrl}/v1/modules/fixture/status`, { headers: hub.headers })
       )
       expect(read.status).toBe(200)
       expect(JSON.parse(read.body)).toBe(true)
