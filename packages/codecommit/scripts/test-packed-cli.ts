@@ -235,7 +235,7 @@ const program = Effect.scoped(
     const help = yield* codecommit(["--help"])
     yield* expect(
       help.code === 0 && help.stdout.includes("codecommit <subcommand> [flags]") &&
-        help.stdout.includes("Serve the browser UI on this machine and open it"),
+        help.stdout.includes("Sign in to the browser UI, starting it when needed"),
       "--help",
       help
     )

@@ -10,16 +10,16 @@
  */
 import { NodeHttpClient, NodeRuntime, NodeServices } from "@effect/platform-node"
 import { makeInstallCommand } from "@knpkv/agent-skills"
-import { browserLaunch, BrowserOpener, openBrowser, skippedLine } from "@knpkv/browser-pairing/launch"
+import { BrowserOpener } from "@knpkv/browser-pairing/launch"
 import { AwsClient, AwsClientConfig, CacheService, ChildEnv, ConfigService } from "@knpkv/codecommit-core"
 import {
   codeCommitMockAwsClientConfig,
   decodeCodeCommitMockEndpointEffect,
   withCodeCommitMock
 } from "@knpkv/codecommit-core/MockTransport.js"
-import { requireLoopbackHostname, serveCodeCommit } from "@knpkv/codecommit-web"
-import { Config, Console, Data, Effect, Layer, Option } from "effect"
-import { Command, Flag as Options } from "effect/cli"
+import { serveCodeCommit } from "@knpkv/codecommit-web"
+import { Console, Data, Effect, Layer } from "effect"
+import { Command } from "effect/cli"
 import * as HttpClient from "effect/http/HttpClient"
 import * as ChildProcess from "effect/process/ChildProcess"
 import * as Runtime from "effect/Runtime"
@@ -32,6 +32,7 @@ import { prExportCommand } from "./PrExport.js"
 import { prListCommand } from "./PrList.js"
 import { prOpenCommand } from "./PrOpen.js"
 import { prUpdateCommand } from "./PrUpdate.js"
+import { makeWebCommand } from "./Web.js"
 
 /**
  * The terminal UI runs on OpenTUI, which needs Bun; everything else runs on Node or Bun. Without Bun
@@ -83,38 +84,9 @@ const tui = Command.make("tui", {}, () => launchTui).pipe(
   Command.withDescription("Open the terminal UI (needs Bun and an interactive terminal)")
 )
 
-// Web Command
-const web = Command.make("web", {
-  port: Options.Int("port").pipe(Options.withDescription("Port to listen on"), Options.withDefault(3000)),
-  hostname: Options.String("hostname").pipe(
-    Options.withDescription("Loopback address to listen on, such as 127.0.0.1 or ::1"),
-    Options.withDefault("127.0.0.1")
-  ),
-  noOpen: Options.Boolean("no-open").pipe(
-    Options.withDescription(
-      "Print the sign-in link without opening a browser (also when BROWSER=none, CI is set, or stdout is not a terminal)"
-    )
-  )
-}, ({ hostname, noOpen, port }) =>
-  Effect.gen(function*() {
-    yield* requireLoopbackHostname(hostname)
-    const opener = yield* BrowserOpener
-    const launch = browserLaunch({
-      noOpen,
-      browser: Option.getOrUndefined(yield* Config.option(Config.String("BROWSER"))),
-      ci: Option.getOrUndefined(yield* Config.option(Config.String("CI"))),
-      interactive: process.stdout.isTTY === true
-    })
-    // The same start as the web package's own entry; this command adds opening the browser.
-    return yield* serveCodeCommit({
-      hostname,
-      onReady: (url) =>
-        launch._tag === "Skip"
-          ? Console.log(skippedLine(launch.reason))
-          : openBrowser(url).pipe(Effect.provideService(BrowserOpener, opener)),
-      port
-    })
-  })).pipe(Command.withDescription("Serve the browser UI on this machine and open it"))
+// Reuse a running server; the listener remains scoped to this invocation only when it starts one.
+// No port retry: a taken port is reported, never answered with a second server on the next port.
+const web = makeWebCommand((hostname, port, announce) => serveCodeCommit({ hostname, port, announce, portRetries: 0 }))
 
 // PR Command (parent)
 const pr = Command.make("pr", {}, () => Console.log("Usage: codecommit pr <command>")).pipe(
