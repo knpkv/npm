@@ -1,5 +1,12 @@
 # @knpkv/agent-usage
 
+## 0.9.1
+
+### Patch Changes
+
+- Updated dependencies [[`70f28c7`](https://github.com/knpkv/npm/commit/70f28c782bc8621513b9255e245533a7baa5d710)]:
+  - @knpkv/rly@0.21.0
+
 ## 0.9.0
 
 ### Minor Changes

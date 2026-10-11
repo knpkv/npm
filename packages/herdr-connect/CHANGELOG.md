@@ -1,5 +1,20 @@
 # @knpkv/herdr-connect
 
+## 0.13.0
+
+### Minor Changes
+
+- [#789](https://github.com/knpkv/npm/pull/789) [`bdabf68`](https://github.com/knpkv/npm/commit/bdabf6855cf008d5b08ca00de775895cbed0fcaa) Thanks [@konopkov](https://github.com/konopkov)! - Approvals show the requesting bot's Connect portrait when its exact identity is known, retain requests after failed reads, and revalidate stale decisions before sending them. The Connect surface exports AgentCreature for shared requester portraits.
+
+  The request list and history follow the responsive Approvals layout. Full request disclosures can show JSON built from the same normalized fields as the default field view.
+
+### Patch Changes
+
+- Updated dependencies [[`57880bb`](https://github.com/knpkv/npm/commit/57880bbfb042d60bfed8a4465260e8b47c7e25c4), [`70f28c7`](https://github.com/knpkv/npm/commit/70f28c782bc8621513b9255e245533a7baa5d710)]:
+  - @knpkv/herdr-work@0.12.0
+  - @knpkv/rly@0.21.0
+  - @knpkv/agent-usage@0.9.1
+
 ## 0.12.0
 
 ### Minor Changes
