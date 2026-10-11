@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import type { CodeQueue, CodeQueueQuery, CodeReference } from "@knpkv/codecommit-web/host"
+import { PortalProvider } from "@knpkv/rly/foundations"
 import { Effect } from "effect"
 import { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
@@ -30,7 +31,8 @@ describe("Code module reads", { concurrent: false }, () => {
     reads: CodeModuleReads,
     search: string,
     active = true,
-    page: "pull-requests" | "reviews" | "diffs" = "pull-requests"
+    page: "pull-requests" | "reviews" | "diffs" = "pull-requests",
+    closeSelection: ModulePageMount["closeSelection"] = () => undefined
   ) => {
     if (root === null) {
       const host = document.createElement("div")
@@ -39,9 +41,32 @@ describe("Code module reads", { concurrent: false }, () => {
     }
     const navigate = vi.fn<ModulePageMount["navigate"]>()
     const module = makeCodeModuleViews({ reads, onHubMachine: false })
-    await act(async () => root?.render(module.pages[page](new URLSearchParams(search), { active, navigate })))
+    await act(async () =>
+      root?.render(
+        <PortalProvider>
+          {module.pages[page](new URLSearchParams(search), { active, navigate, closeSelection })}
+        </PortalProvider>
+      )
+    )
     return navigate
   }
+
+  it("closes an exact target through the shell while keeping the current queue selectors", async () => {
+    const closeSelection = vi.fn<ModulePageMount["closeSelection"]>()
+    const navigate = await render(
+      defaults,
+      `filter=all&search=ready&offset=50&ref=${ref}`,
+      true,
+      "pull-requests",
+      closeSelection
+    )
+    await act(async () => vi.waitFor(() => expect(document.querySelector('[role="dialog"]')).not.toBeNull()))
+    const close = document.querySelector<HTMLButtonElement>('button[aria-label="Close pull request"]')
+    if (close === null) return expect.unreachable()
+    await act(async () => close.click())
+    expect(closeSelection).toHaveBeenCalledExactlyOnceWith("?filter=all&search=ready&offset=50#code/pull-requests")
+    expect(navigate).not.toHaveBeenCalled()
+  })
 
   it("repairs only active Code selectors without taking focus or rewriting Fleet approval targets", async () => {
     const read = vi.fn((_query: CodeQueueQuery) => queue)
