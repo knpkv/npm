@@ -1,5 +1,12 @@
 # @knpkv/agent-usage
 
+## 0.10.1
+
+### Patch Changes
+
+- Updated dependencies [[`d9b889e`](https://github.com/knpkv/npm/commit/d9b889e13690c701f94448d831efbc0ae875624f)]:
+  - @knpkv/browser-pairing@0.6.0
+
 ## 0.10.0
 
 ### Minor Changes
