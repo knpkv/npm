@@ -41,7 +41,7 @@ const boundary = Layer.unwrap(Effect.gen(function*() {
         "x-content-type-options": "nosniff",
         "x-frame-options": "DENY",
         "content-security-policy":
-          "default-src 'none'; script-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'"
+          "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'"
       }))
     )), { global: true })
 }))
