@@ -10,7 +10,44 @@ import { makeRelayPostCommand, resolveReportingAgent, submitRelayPost } from "..
 const makeRelayCommand = <A, E, R>(report: (body: ConnectPostBody) => Effect.Effect<A, E, R>) =>
   Command.make("relay").pipe(Command.withSubcommands([makeRelayPostCommand(report)]))
 
+const invalidTextCases = [
+  {
+    kind: "status",
+    text: "x".repeat(241),
+    detail: "text is 241 characters; status posts are limited to 240 (other kinds 1024)"
+  },
+  { kind: "note", text: "x".repeat(1025), detail: "text is 1025 characters; note posts are limited to 1024" },
+  { kind: "status", text: "", detail: "text is empty" },
+  { kind: "note", text: " \t\n ", detail: "text is empty" }
+] satisfies ReadonlyArray<{ readonly kind: ConnectPostBody["kind"]; readonly text: string; readonly detail: string }>
+
 it.layer(NodeServices.layer)("relay post", (it) => {
+  for (const fixture of invalidTextCases) {
+    it.effect(`reports the precise text failure: ${fixture.kind}, ${JSON.stringify(fixture.text.length)}`, () =>
+      Effect.gen(function*() {
+        const command = makeRelayCommand(() => Effect.die("invalid report reached transport"))
+        const result = yield* Effect.result(
+          Command.runWith(command, { version: "0" })(["post", "--kind", fixture.kind, fixture.text])
+        )
+        if (Result.isSuccess(result)) return yield* Effect.die("invalid text accepted")
+        expect(result.failure).toMatchObject({ _tag: "InvalidReport", detail: fixture.detail })
+      }))
+  }
+
+  it.effect("accepts a status with a URL at the 240-character limit without changing the text", () =>
+    Effect.gen(function*() {
+      const text = "https://example.test/status ".padEnd(240, "x")
+      const received: Array<ConnectPostBody> = []
+      const command = makeRelayCommand((body) =>
+        Effect.sync(() => {
+          received.push(body)
+        })
+      )
+      yield* Command.runWith(command, { version: "0" })(["post", "--kind", "status", text])
+      expect(received).toHaveLength(1)
+      expect(received[0]?.text).toBe(text)
+    }))
+
   it.effect("retries unavailable responses with one event ID and targets only the configured canonical hub", () =>
     Effect.gen(function*() {
       const fs = yield* FileSystem.FileSystem
