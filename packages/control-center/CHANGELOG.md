@@ -1,5 +1,12 @@
 # @knpkv/control-center
 
+## 0.16.2
+
+### Patch Changes
+
+- Updated dependencies [[`a530ddf`](https://github.com/knpkv/npm/commit/a530ddffe40953328aa6e216d42e66a836ffd681)]:
+  - @knpkv/codecommit-core@0.26.0
+
 ## 0.16.1
 
 ### Patch Changes

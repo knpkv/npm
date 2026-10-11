@@ -1,5 +1,21 @@
 # @knpkv/herdr-connect
 
+## 0.16.0
+
+### Minor Changes
+
+- [#821](https://github.com/knpkv/npm/pull/821) [`9ffdbef`](https://github.com/knpkv/npm/commit/9ffdbef7fe8493d241580043cb5cad4521174423) Thanks [@konopkov](https://github.com/konopkov)! - Notify subscribed users when agents need attention, with durable episode deduplication, one reminder, visible-stage acknowledgement, per-agent mute and quiet hours in a validated IANA time zone. Add application-owned stage observation and a pure shared state-bucket helper to Connect.
+
+- [#832](https://github.com/knpkv/npm/pull/832) [`9561de3`](https://github.com/knpkv/npm/commit/9561de3bcdc8cf21598087700dc742993d143cda) Thanks [@konopkov](https://github.com/konopkov)! - Report the text field, actual length and kind-specific limit when Relay posts are too long. CLI and HTTP validation share the same errors and reject empty or whitespace-only text while accepting URLs within the limit.
+
+  Export shared Connect post text limits and reject blank text only in the published posting schemas. Historical whitespace-only reports and last words stay readable. Hub validation uses the published schemas as its authority.
+
+### Patch Changes
+
+- [#830](https://github.com/knpkv/npm/pull/830) [`96bd47e`](https://github.com/knpkv/npm/commit/96bd47eb282ec5b9321e980f693574406072d41d) Thanks [@konopkov](https://github.com/konopkov)! - Keep local blocked notifications available when peer discovery fails, deliver to up to four subscriptions concurrently while preserving each subscription's episode order, and avoid repeated stage reports when an inline callback changes identity.
+
+- [#826](https://github.com/knpkv/npm/pull/826) [`1f5333d`](https://github.com/knpkv/npm/commit/1f5333d6b0aafb0baa5375c7659d7b26f1a3f180) Thanks [@konopkov](https://github.com/konopkov)! - Fill row and phone stage creature tracks, fit state rings around row bodies, retain a faint full ring beneath working arcs, and show healthy usage limits as secondary text with an arrow to Usage.
+
 ## 0.15.1
 
 ### Patch Changes
