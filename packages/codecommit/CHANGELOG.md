@@ -1,5 +1,13 @@
 # @knpkv/codecommit
 
+## 0.18.1
+
+### Patch Changes
+
+- Updated dependencies [[`d9b889e`](https://github.com/knpkv/npm/commit/d9b889e13690c701f94448d831efbc0ae875624f)]:
+  - @knpkv/browser-pairing@0.6.0
+  - @knpkv/codecommit-web@0.34.1
+
 ## 0.18.0
 
 ### Minor Changes
