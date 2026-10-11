@@ -1,5 +1,18 @@
 # @knpkv/control-center
 
+## 0.17.0
+
+### Minor Changes
+
+- [#850](https://github.com/knpkv/npm/pull/850) [`5db8146`](https://github.com/knpkv/npm/commit/5db8146fa812d17d2c2c630cde641be5d654bdac) Thanks [@konopkov](https://github.com/konopkov)! - Add non-destructive terminal sign-in that reuses or starts the local server, with a 60-second fragment handoff and an explicit foreground serve command. Allow the shared owner control route to use an application-owned pairing issuer.
+
+- [#849](https://github.com/knpkv/npm/pull/849) [`7f91b6f`](https://github.com/knpkv/npm/commit/7f91b6f948f0da53941f9ab4d9d735a8ffc2530f) Thanks [@konopkov](https://github.com/konopkov)! - Export controlled browser views with their props and stylesheet.
+
+### Patch Changes
+
+- Updated dependencies [[`5db8146`](https://github.com/knpkv/npm/commit/5db8146fa812d17d2c2c630cde641be5d654bdac)]:
+  - @knpkv/browser-pairing@0.8.0
+
 ## 0.16.4
 
 ### Patch Changes
