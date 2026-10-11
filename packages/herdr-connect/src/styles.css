@@ -1308,6 +1308,10 @@
     stroke-width: 7;
   }
 
+  .connect-creature[data-size="row"] .connect-creature-orbit {
+    stroke-width: var(--connect-creature-row-stroke);
+  }
+
   .connect-creature[data-size="cast"] .connect-creature-orbit {
     stroke-width: 4.2;
   }
@@ -1360,6 +1364,10 @@
     opacity: 0.35;
     stroke: var(--rly-color-text-3);
     stroke-width: 1px;
+  }
+
+  .connect-creature[data-size="row"] .connect-creature-halo {
+    stroke-width: 2px;
   }
 
   .connect-creature[data-bucket="working"] .connect-creature-orbit {

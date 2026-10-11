@@ -211,10 +211,79 @@ test.describe("creature fill fidelity", () => {
             return colour
           })
           expect(await halo.evaluate((node) => getComputedStyle(node).stroke)).toBe(neutral)
-          expect(await halo.evaluate((node) => Number.parseFloat(getComputedStyle(node).strokeWidth))).toBeLessThan(2)
+          expect(await halo.evaluate((node) => Number.parseFloat(getComputedStyle(node).strokeWidth))).toBe(
+            surface === "row" ? 2 : 1
+          )
           await page.emulateMedia({ forcedColors: "active" })
           expect(await halo.evaluate((node) => Number(getComputedStyle(node).opacity))).toBeGreaterThan(0)
           expect(await halo.evaluate((node) => getComputedStyle(node).stroke)).not.toBe("none")
+        })
+      }
+
+      for (const surface of ["row", "stage"]) {
+        test(`halo encloses the seeded outline ${surface} ${String(width)} ${theme}`, async ({ page }) => {
+          await openDirectory(page, width, theme)
+          for (const fixture of base) {
+            const row = page.locator(`.connect-agent[data-agent-key="${fixture.host}:${fixture.id}"]`)
+            if (surface === "stage") {
+              await row.click()
+              await expect(page.locator(".connect-stage-hero")).toBeVisible()
+            }
+            const creature = surface === "row"
+              ? row.locator("svg.connect-creature")
+              : page.locator(".connect-stage-hero svg.connect-creature")
+            for (const moment of ["rest", "inhale", "exhale"]) {
+              await page.emulateMedia({ reducedMotion: moment === "rest" ? "reduce" : "no-preference" })
+              const geometry = await creature.evaluate((svg, phase) => {
+                // Hold the ordinary breath at either extreme; arrival motion intentionally leaves the ring.
+                for (const animation of svg.getAnimations({ subtree: true })) {
+                  animation.pause()
+                  const timing = animation.effect?.getTiming()
+                  const duration = Number(timing?.duration ?? 0)
+                  const delay = Number(timing?.delay ?? 0)
+                  const pairs = Math.ceil(-delay / duration / 2) * 2 * duration
+                  const name = "animationName" in animation ? String(animation.animationName) : ""
+                  const fraction = name === "connect-creature-breathe" && phase === "inhale" ? 0.999 : 0.001
+                  animation.currentTime = pairs + delay + duration * fraction
+                }
+                const body = svg.querySelector<SVGPathElement>(".connect-creature-body")
+                const halo = svg.querySelector<SVGEllipseElement>(".connect-creature-halo")
+                const bodyMatrix = body?.getScreenCTM()
+                const haloMatrix = halo?.getScreenCTM()
+                if (body === null || halo === null) return null
+                if (
+                  bodyMatrix === null || bodyMatrix === undefined || haloMatrix === null || haloMatrix === undefined
+                ) return null
+                const inverse = haloMatrix.inverse()
+                const cx = halo.cx.baseVal.value
+                const cy = halo.cy.baseVal.value
+                // Clear the halo and the visible arc, accounting for their different stroke scaling.
+                const strokes = [halo, ...svg.querySelectorAll<SVGEllipseElement>(".connect-creature-orbit")]
+                  .filter((ring) => ring === halo || Number(getComputedStyle(ring).opacity) > 0)
+                  .map((ring) => {
+                    const style = getComputedStyle(ring)
+                    const half = Number.parseFloat(style.strokeWidth) / 2
+                    return style.vectorEffect === "non-scaling-stroke"
+                      ? [half / Math.hypot(haloMatrix.a, haloMatrix.b), half / Math.hypot(haloMatrix.c, haloMatrix.d)]
+                      : [half, half]
+                  })
+                const rx = halo.rx.baseVal.value - Math.max(...strokes.map(([x = 0]) => x))
+                const ry = halo.ry.baseVal.value - Math.max(...strokes.map(([, y = 0]) => y))
+                const length = body.getTotalLength()
+                let maximum = 0
+                for (let sample = 0; sample < 360; sample++) {
+                  const point = body.getPointAtLength(length * sample / 360)
+                  const local = new DOMPoint(point.x, point.y).matrixTransform(bodyMatrix).matrixTransform(inverse)
+                  maximum = Math.max(maximum, Math.hypot((local.x - cx) / rx, (local.y - cy) / ry))
+                }
+                return maximum
+              }, moment)
+              expect(geometry, `${fixture.host}:${fixture.id} ${moment}`).not.toBeNull()
+              expect(geometry, `${fixture.host}:${fixture.id} ${moment}`).toBeLessThanOrEqual(1)
+            }
+            await page.emulateMedia({ reducedMotion: "reduce" })
+            if (surface === "stage") await page.keyboard.press("Escape")
+          }
         })
       }
 
@@ -226,12 +295,39 @@ test.describe("creature fill fidelity", () => {
           const track = await drawnBox(creature)
           const body = await drawnBox(creature.locator(".connect-creature-body"))
           expect(track.width).toBe(36)
-          expect(body.width).toBeGreaterThanOrEqual(30)
+          // 2px stroke clearance, the diagonal lobes and breath room set the minimum fill to 0.72.
+          expect(body.width).toBeGreaterThanOrEqual(track.width * 0.72)
           expect(body.x).toBeGreaterThanOrEqual(track.x - 1)
           expect(body.x + body.width).toBeLessThanOrEqual(track.x + track.width + 1)
           const ring = await drawnBox(creature.locator(".connect-creature-halo"))
-          expect(ring.width).toBeGreaterThanOrEqual(34)
+          expect(ring.width).toBeGreaterThanOrEqual(32)
           expect(ring.width).toBeLessThanOrEqual(36)
+          const strokes = await creature.evaluate(
+            (svg) =>
+              [...svg.querySelectorAll<SVGEllipseElement>(".connect-creature-halo, .connect-creature-orbit")].map(
+                (ring) => {
+                  const style = getComputedStyle(ring)
+                  const box = ring.getBoundingClientRect()
+                  const matrix = ring.getScreenCTM()
+                  const half = Number.parseFloat(style.strokeWidth) / 2
+                  const margin = style.vectorEffect === "non-scaling-stroke"
+                    ? half
+                    : half * Math.hypot(matrix?.a ?? 0, matrix?.b ?? 0)
+                  return {
+                    left: box.x - margin,
+                    right: box.right + margin,
+                    top: box.y - margin,
+                    bottom: box.bottom + margin
+                  }
+                }
+              )
+          )
+          for (const stroke of strokes) {
+            expect(stroke.left).toBeGreaterThanOrEqual(track.x - 0.05)
+            expect(stroke.right).toBeLessThanOrEqual(track.x + track.width + 0.05)
+            expect(stroke.top).toBeGreaterThanOrEqual(track.y - 0.05)
+            expect(stroke.bottom).toBeLessThanOrEqual(track.y + track.height + 0.05)
+          }
         }
       })
 
@@ -247,7 +343,7 @@ test.describe("creature fill fidelity", () => {
         const track = await drawnBox(creature)
         const body = await drawnBox(creature.locator(".connect-creature-body"))
         expect(track.width).toBe(32)
-        expect(body.width).toBeGreaterThanOrEqual(track.width * 30 / 36)
+        expect(body.width).toBeGreaterThanOrEqual(track.width * 0.72)
         expect(body.x).toBeGreaterThanOrEqual(track.x - 1)
         expect(body.x + body.width).toBeLessThanOrEqual(track.x + track.width + 1)
       })

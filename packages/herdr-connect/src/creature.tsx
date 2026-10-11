@@ -40,7 +40,8 @@ type Rig = Record<
   | "--connect-creature-origin-x"
   | "--connect-creature-origin-y"
   | "--connect-creature-pace"
-  | "--connect-creature-phase",
+  | "--connect-creature-phase"
+  | "--connect-creature-row-stroke",
   string
 >
 
@@ -52,6 +53,22 @@ export const Creature = ({ arrived = false, host, id, size, stale = false, state
   const [eyeWidth, eyeHeight] = character.eye
   const [left, top, width, height] = character.bounds
   const row = size === "row"
+  // Rows also render in 32px pinned chips. Reserve the 2px stroke on both sides of its centreline there.
+  const rowTrack = 32
+  const rowStroke = 2
+  const shortAxis = Math.min(1, height / width)
+  const strokeShare = rowStroke / ((rowTrack - rowStroke) * shortAxis)
+  const enclosingScale = character.ringScale / (1 - strokeShare)
+  const ring = {
+    cy: row ? top + height / 2 : 55,
+    rx: row ? (width / 2) * enclosingScale : 46,
+    ry: row ? (height / 2) * enclosingScale : 46
+  }
+  const frameWidth = (2 * ring.rx) / (1 - rowStroke / rowTrack)
+  const stroke = (frameWidth * rowStroke) / rowTrack
+  const frameHeight = 2 * ring.ry + stroke
+  const frameLeft = 50 - ring.rx - stroke / 2
+  const frameTop = ring.cy - ring.ry - stroke / 2
   const eyes = [50 - character.eyeGap, 50 + character.eyeGap]
   const eyeY = character.eyeY
   const iris = Math.min(eyeWidth, eyeHeight) * IRIS_SHARE
@@ -73,24 +90,18 @@ export const Creature = ({ arrived = false, host, id, size, stale = false, state
     "--connect-creature-lid": (shut - upperRest).toFixed(2),
     "--connect-creature-lid-low": (shut - lowerRest).toFixed(2),
     // CSS origins are offsets from the viewBox's corner, so tight row framing must keep the foot's pivot.
-    "--connect-creature-origin-x": `${(row ? 50 - (left - width * 0.08) : 50).toFixed(2)}px`,
-    "--connect-creature-origin-y": `${(row ? FOOT - (top - height * 0.08) : FOOT).toFixed(2)}px`,
+    "--connect-creature-origin-x": `${(row ? 50 - frameLeft : 50).toFixed(2)}px`,
+    "--connect-creature-origin-y": `${(row ? FOOT - frameTop : FOOT).toFixed(2)}px`,
     "--connect-creature-pace": String(character.pace),
-    "--connect-creature-phase": String(character.phase)
+    "--connect-creature-phase": String(character.phase),
+    "--connect-creature-row-stroke": String(stroke)
   }
   // Unique per drawn creature: ids built from host and ID could collide once cleaned (hosts "a.b" and "a_b"),
   // painting one creature with another's colours.
   const ref = `connect-creature-${useId().replace(/[^a-zA-Z0-9]/g, "")}`
   const fixed = (value: number): string => value.toFixed(2)
-  // Rows frame the seeded outline with a little breathing room; larger drawings keep the stage's orbit margin.
-  const viewBox = row
-    ? [left - width * 0.08, top - height * 0.08, width * 1.16, height * 1.16].map(fixed).join(" ")
-    : "0 0 100 100"
-  const ring = {
-    cy: row ? top + height / 2 : 55,
-    rx: row ? width * 0.55 : 46,
-    ry: row ? height * 0.55 : 46
-  }
+  // Frame the enclosing ring including its stroke; stage and cast keep their established circular orbit.
+  const viewBox = row ? [frameLeft, frameTop, frameWidth, frameHeight].map(fixed).join(" ") : "0 0 100 100"
   // An opening bounded on one side by a lid's sagging edge, reaching far past the eye on the other side; the
   // stylesheet moves the edge.
   const lid = (x: number, edge: number, above: boolean): string => {
@@ -120,7 +131,7 @@ export const Creature = ({ arrived = false, host, id, size, stale = false, state
       data-stale={stale ? "" : undefined}
       data-tone={presentation.tone}
       focusable="false"
-      height={row ? (pixels[size] * height) / width : pixels[size]}
+      height={row ? (pixels[size] * frameHeight) / frameWidth : pixels[size]}
       style={rig}
       viewBox={viewBox}
       width={pixels[size]}
