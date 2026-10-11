@@ -30,6 +30,11 @@ import {
 import type { PullRequestReviewThread } from "./pullRequestReviewThreadReplay.js"
 import { controlCenterReviewThread } from "./reviewPlatformAdapter.js"
 
+import type {
+  PullRequestReviewPublicationState,
+  ReviewSuggestionPublicationTarget
+} from "./ReviewSuggestionPublicationSurface.js"
+
 const pullRequestReviewBrowser = import("./pullRequestReviewThreadReplay.js")
 const generatedClientTransport = pullRequestReviewBrowser.then(
   ({ generatedClientPullRequestReviewTransport }) => generatedClientPullRequestReviewTransport
@@ -64,12 +69,10 @@ export interface PullRequestReviewScope {
   readonly headRevision: string
   readonly sessionKey: string
 }
-
-/** Browser selection resolved to an exact revision before publication preview. */
-export type ReviewSuggestionPublicationTarget = Pick<
-  ReviewSuggestionPublicationSelection,
-  "jobId" | "revisionId" | "suggestionId"
->
+export type {
+  PullRequestReviewPublicationState,
+  ReviewSuggestionPublicationTarget
+} from "./ReviewSuggestionPublicationSurface.js"
 
 /** Exact immutable revision selected for one targeted agent operation. */
 export type ReviewSuggestionTarget = {
@@ -94,37 +97,6 @@ export type PullRequestReviewControllerState =
     readonly review: PullRequestReviewState
     readonly thread?: PullRequestReviewThread
   } & PullRequestReviewScope)
-
-export type PullRequestReviewPublicationState =
-  | { readonly _tag: "idle" }
-  | {
-    readonly _tag: "previewing"
-    readonly selection: ReviewSuggestionPublicationTarget
-  }
-  | {
-    readonly _tag: "preview"
-    readonly preview: ReviewSuggestionPublicationPreview
-  }
-  | {
-    readonly _tag: "publishing"
-    readonly preview: ReviewSuggestionPublicationPreview
-  }
-  | {
-    readonly _tag: "published"
-    readonly headSuperseded: boolean
-    readonly preview: ReviewSuggestionPublicationPreview
-    readonly publication: PublishedReviewComment
-  }
-  | {
-    readonly _tag: "receipt-conflict"
-    readonly preview: ReviewSuggestionPublicationPreview
-    readonly publication: PublishedReviewComment
-  }
-  | {
-    readonly _tag: "failed"
-    readonly preview: ReviewSuggestionPublicationPreview | null
-    readonly selection: ReviewSuggestionPublicationTarget
-  }
 
 /** Browser boundary for immutable pull-request review reads and mutations. */
 export interface PullRequestReviewTransport {

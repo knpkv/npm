@@ -48,7 +48,9 @@ const validManifest = {
     ".": { import: "./dist/server/index.js", types: "./dist/server/index.d.ts" },
     "./api": { import: "./dist/server/api/index.js", types: "./dist/server/api/index.d.ts" },
     "./domain": { import: "./dist/server/domain/index.js", types: "./dist/server/domain/index.d.ts" },
-    "./server": { import: "./dist/server/server/index.js", types: "./dist/server/server/index.d.ts" }
+    "./server": { import: "./dist/server/server/index.js", types: "./dist/server/server/index.d.ts" },
+    "./views": { import: "./dist/views/index.js", types: "./dist/views-types/views.d.ts" },
+    "./views/style.css": "./dist/views/style.css"
   },
   main: "./dist/server/index.js",
   name: "@knpkv/control-center",
@@ -68,6 +70,24 @@ const effectAlignmentCases: ReadonlyArray<readonly [keyof typeof validManifest.d
 describe("package contract", () => {
   it("accepts the reviewed T01 manifest surface", () => {
     expect(inspectPackageContract(validManifest)).toEqual([])
+  })
+
+  it("rejects views exports that point at application output or omit their stylesheet", () => {
+    expect(
+      inspectPackageContract({
+        ...validManifest,
+        exports: {
+          ...validManifest.exports,
+          "./views": { types: "./dist/server/index.d.ts", import: "./dist/client/index.js" }
+        }
+      })
+    ).toEqual(["invalid ./views export target"])
+    expect(
+      inspectPackageContract({
+        ...validManifest,
+        exports: { ...validManifest.exports, "./views/style.css": "./dist/client/style.css" }
+      })
+    ).toEqual(["invalid ./views/style.css export target"])
   })
 
   it("rejects a Node.js engine older than the supported baseline", () => {
@@ -107,7 +127,7 @@ describe("package contract", () => {
     ).toEqual(
       expect.arrayContaining([
         "runtime dependencies must remain the reviewed set",
-        "package exports must contain only ., ./api, ./domain, ./server"
+        "package exports must contain only ., ./api, ./domain, ./server, ./views, ./views/style.css"
       ])
     )
   })

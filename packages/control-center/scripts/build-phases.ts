@@ -17,7 +17,7 @@ export const controlCenterBuildPhases: ReadonlyArray<BuildPhase> = [
     label: "validate source boundaries"
   },
   {
-    args: ["dist", "node_modules/.cache/tsconfig.server.tsbuildinfo"],
+    args: ["dist", "node_modules/.cache/tsconfig.server.tsbuildinfo", "node_modules/.cache/tsconfig.views.tsbuildinfo"],
     command: "rimraf",
     label: "clean output"
   },
@@ -35,6 +35,16 @@ export const controlCenterBuildPhases: ReadonlyArray<BuildPhase> = [
     args: ["-b", "tsconfig.server.json"],
     command: "tsc",
     label: "emit server declarations"
+  },
+  {
+    args: ["build", "--config", "vite.views.config.ts"],
+    command: "vite",
+    label: "bundle views"
+  },
+  {
+    args: ["-b", "tsconfig.views.json"],
+    command: "tsc",
+    label: "emit views declarations"
   },
   {
     args: ["scripts/validate-dist.ts"],

@@ -99,16 +99,19 @@ build-graph boundary and ast-grep rule still reject static, computed, or glob im
 
 ## Public package entries
 
-| Entry                          | Purpose                                                       |
-| ------------------------------ | ------------------------------------------------------------- |
-| `@knpkv/control-center`        | Browser-safe API and domain aggregate                         |
-| `@knpkv/control-center/api`    | Versioned typed HTTP API, client constructor, and URL builder |
-| `@knpkv/control-center/domain` | Schema-backed vendor-neutral domain contracts                 |
-| `@knpkv/control-center/server` | Server composition and first-party provider definitions       |
-| `control-center`               | Application, recovery, backup, verification, and restore CLI  |
+| Entry                                   | Purpose                                                         |
+| --------------------------------------- | --------------------------------------------------------------- |
+| `@knpkv/control-center`                 | Browser-safe API and domain aggregate                           |
+| `@knpkv/control-center/api`             | Versioned typed HTTP API, client constructor, and URL builder   |
+| `@knpkv/control-center/domain`          | Schema-backed vendor-neutral domain contracts                   |
+| `@knpkv/control-center/server`          | Server composition and first-party provider definitions         |
+| `@knpkv/control-center/views`           | Controlled browser views and their props, with no data fetching |
+| `@knpkv/control-center/views/style.css` | Stylesheet for the views, loaded after `@knpkv/rly/styles.css`  |
+| `control-center`                        | Application, recovery, backup, verification, and restore CLI    |
 
-The browser application itself is private. Server composition is available only through the explicit
-`/server` entry.
+The browser application itself is private; `/views` exposes only its presentational pieces, which
+take data through props and expect the host to provide the rly theme, a router, and a portal root.
+Server composition is available only through the explicit `/server` entry.
 
 ## Stability
 

@@ -30,7 +30,7 @@
     "lint:security-doc-examples": "node scripts/check-security-doc-examples.mjs",
     "lint:live-aws": "node scripts/check-control-center-live-aws.mjs && bash infra/control-center-live-aws/bootstrap.test.sh && bash infra/control-center-live-aws/probe.test.sh && bash infra/control-center-live-aws/pr-review-eval.test.sh && bash packages/control-center/scripts/live-aws-default-profile.test.sh",
     "lint:eslint": "pnpm lint:eslint:control-center && pnpm lint:eslint:workspace",
-    "lint:eslint:control-center": "node scripts/run-eslint.mjs control-center --no-error-on-unmatched-pattern \"packages/control-center/{src,test,e2e}/**/*.{ts,tsx,mjs}\" \"packages/control-center/scripts/**/*.{ts,tsx}\" \"packages/control-center/{vite,vitest,vitest.live,vitest.live-aws,playwright,playwright.atlassian-oauth}.config.ts\"",
+    "lint:eslint:control-center": "node scripts/run-eslint.mjs control-center --no-error-on-unmatched-pattern \"packages/control-center/{src,test,e2e}/**/*.{ts,tsx,mjs}\" \"packages/control-center/scripts/**/*.{ts,tsx}\" \"packages/control-center/{vite,vite.views,vitest,vitest.live,vitest.live-aws,playwright,playwright.atlassian-oauth}.config.ts\"",
     "lint:eslint:workspace": "node scripts/run-eslint.mjs workspace --no-error-on-unmatched-pattern --ignore-pattern \"packages/control-center/**\" \"**/{src,test,e2e,examples,dtslint}/**/*.{ts,tsx,mjs}\" \"**/scripts/**/*.{ts,tsx}\" \"scripts/check-{control-center-live-aws,effect-reference-alignment,security-doc-examples}.mjs\" \"scripts/pack-herdr.mjs\" \"scripts/{build-typescript,run-eslint}{,.test}.mjs\"",
     "lint:eslint:fix": "pnpm lint:eslint:control-center --fix && pnpm lint:eslint:workspace --fix",
     "lint:oxlint": "oxlint --config oxlint.config.ts .",

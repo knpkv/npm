@@ -13,16 +13,18 @@ export const reviewSuggestionRevisionAuthorLabel = (revision: PrReviewSuggestion
 export const reviewSuggestionRevisionValidationLabel = (revision: PrReviewSuggestionRevision): string =>
   revision.validation._tag === "validated" ? "Validated" : "Needs revalidation"
 
+export interface ReviewSuggestionRevisionHistoryProps {
+  readonly loadEarlier: () => void
+  readonly loadingEarlier: boolean
+  readonly page: PrReviewSuggestionRevisionPage
+}
+
 /** Inspect complete immutable suggestion history without leaving the diff. */
 export const ReviewSuggestionRevisionHistory = ({
   loadEarlier,
   loadingEarlier,
   page
-}: {
-  readonly loadEarlier: () => void
-  readonly loadingEarlier: boolean
-  readonly page: PrReviewSuggestionRevisionPage
-}): ReactElement => {
+}: ReviewSuggestionRevisionHistoryProps): ReactElement => {
   const revisions = [page.current, ...page.revisions.filter(({ revisionId }) => revisionId !== page.current.revisionId)]
   return (
     <div className={styles.revisionHistory}>

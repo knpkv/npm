@@ -15,25 +15,13 @@ import type {
   RelationshipRepairReviewDecision
 } from "../../domain/relationshipRepair.js"
 import { loadReleaseEnvironmentSlices } from "./loadReleaseEnvironmentSlices.js"
+import type { RelationshipRepairPanelState } from "./RelationshipRepairPanelView.js"
 import { browserRelationshipRepairTransport, type RelationshipRepairTransport } from "./relationshipRepairTransport.js"
 
 const isUnauthorizedFailure = Predicate.isTagged("UnauthorizedApiError")
 const ignoreSessionExpired = (): void => undefined
 
-export type RelationshipRepairPanelState =
-  | { readonly _tag: "idle" }
-  | { readonly _tag: "loading" }
-  | { readonly _tag: "failed" }
-  | {
-    readonly _tag: "ready"
-    readonly actionFailure: RelationshipRepairProposalId | null
-    readonly applications: ReadonlyMap<RelationshipRepairProposalId, RelationshipRepairApplication>
-    readonly busyProposalId: RelationshipRepairProposalId | null
-    readonly environmentScopeKey: string
-    readonly page: RelationshipRepairProposalList
-    readonly releaseId: ReleaseId
-    readonly sessionKey: string
-  }
+export type { RelationshipRepairPanelState } from "./RelationshipRepairPanelView.js"
 
 export interface RelationshipRepairProposalController {
   readonly apply: (proposalId: RelationshipRepairProposalId) => Promise<boolean>

@@ -11,6 +11,15 @@ import type {
 import styles from "./WorkspaceSettingsPage.module.css"
 import { releaseTargetErrorMessage } from "./releaseTargetErrorMessage.js"
 
+export interface ReleaseTargetsEditorProps {
+  readonly mappings: ReadonlyArray<PipelineReleaseTarget>
+  readonly catalogue: ReleaseTargetCatalog | null
+  readonly error: ReleaseTargetConfigurationError | null
+  readonly disabled: boolean
+  readonly onChange: (value: ReadonlyArray<PipelineReleaseTarget>) => void
+  readonly onRefresh: () => void
+}
+
 /** Edit inclusive stage ranges using the same controls and governed save flow as workspace settings. */
 export const ReleaseTargetsEditor = ({
   catalogue,
@@ -19,14 +28,7 @@ export const ReleaseTargetsEditor = ({
   mappings,
   onChange,
   onRefresh
-}: {
-  readonly mappings: ReadonlyArray<PipelineReleaseTarget>
-  readonly catalogue: ReleaseTargetCatalog | null
-  readonly error: ReleaseTargetConfigurationError | null
-  readonly disabled: boolean
-  readonly onChange: (value: ReadonlyArray<PipelineReleaseTarget>) => void
-  readonly onRefresh: () => void
-}): ReactElement => {
+}: ReleaseTargetsEditorProps): ReactElement => {
   const prefix = useId()
   const rangeKeys = useRef(new WeakMap<ReleaseEnvironmentRange, string>())
   const nextKey = useRef(0)

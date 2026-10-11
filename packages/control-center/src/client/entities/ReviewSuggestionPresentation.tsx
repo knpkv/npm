@@ -65,17 +65,7 @@ const replacementSides = (unifiedDiff: string) => {
 const suggestionStateLabel = (state: PrReviewSuggestion["state"]): string =>
   `${state.slice(0, 1).toUpperCase()}${state.slice(1)}`
 
-/** Present one publishable, evidence-backed suggestion without owning its lifecycle. */
-export const ReviewSuggestionCard = ({
-  canPublish,
-  extraActions,
-  isPreviewing,
-  jobId,
-  metadata,
-  onPreviewPublication,
-  publicationBlockedReason,
-  suggestion
-}: {
+export interface ReviewSuggestionCardProps {
   readonly canPublish: boolean
   readonly extraActions?: ReactNode
   readonly isPreviewing: boolean
@@ -87,7 +77,19 @@ export const ReviewSuggestionCard = ({
   }) => void
   readonly publicationBlockedReason?: string
   readonly suggestion: PrReviewSuggestion
-}): ReactElement => {
+}
+
+/** Present one publishable, evidence-backed suggestion without owning its lifecycle. */
+export const ReviewSuggestionCard = ({
+  canPublish,
+  extraActions,
+  isPreviewing,
+  jobId,
+  metadata,
+  onPreviewPublication,
+  publicationBlockedReason,
+  suggestion
+}: ReviewSuggestionCardProps): ReactElement => {
   const replacement = suggestion.replacement === undefined ? null : replacementSides(suggestion.replacement.unifiedDiff)
 
   return (
@@ -229,8 +231,12 @@ export const ReviewSuggestionCard = ({
   )
 }
 
+export interface ReviewNotesProps {
+  readonly notes: ReadonlyArray<PrReviewNote>
+}
+
 /** Keep non-publishable observations visibly separate from actionable suggestions. */
-export const ReviewNotes = ({ notes }: { readonly notes: ReadonlyArray<PrReviewNote> }): ReactElement | null =>
+export const ReviewNotes = ({ notes }: ReviewNotesProps): ReactElement | null =>
   notes.length === 0 ? null : (
     <section aria-labelledby="review-notes-title" className={styles.reviewNotes}>
       <header>

@@ -49,6 +49,21 @@ const advancedJson = (suggestion: PrReviewSuggestionEdit): string =>
     ...(!(suggestion.replacement === undefined) && { replacement: suggestion.replacement })
   })
 
+export interface ReviewSuggestionRevisionDialogProps {
+  readonly canEdit: boolean
+  readonly conflict: boolean
+  readonly loadEarlier: () => void
+  readonly loadingEarlier: boolean
+  readonly mode: "edit" | "history"
+  readonly onOpenChange: (open: boolean) => void
+  readonly onResolveConflict: () => void
+  readonly onSave: (edit: PrReviewSuggestionEdit) => void
+  readonly open: boolean
+  readonly page: PrReviewSuggestionRevisionPage
+  readonly preservedDraft: PrReviewSuggestionEdit | null
+  readonly saving: boolean
+}
+
 /** Edit or inspect one immutable suggestion revision without leaving the diff. */
 export const ReviewSuggestionRevisionDialog = ({
   canEdit,
@@ -63,20 +78,7 @@ export const ReviewSuggestionRevisionDialog = ({
   page,
   preservedDraft,
   saving
-}: {
-  readonly canEdit: boolean
-  readonly conflict: boolean
-  readonly loadEarlier: () => void
-  readonly loadingEarlier: boolean
-  readonly mode: "edit" | "history"
-  readonly onOpenChange: (open: boolean) => void
-  readonly onResolveConflict: () => void
-  readonly onSave: (edit: PrReviewSuggestionEdit) => void
-  readonly open: boolean
-  readonly page: PrReviewSuggestionRevisionPage
-  readonly preservedDraft: PrReviewSuggestionEdit | null
-  readonly saving: boolean
-}): ReactElement => {
+}: ReviewSuggestionRevisionDialogProps): ReactElement => {
   const current = page.current
   const [draft, setDraft] = useState(() => editableSuggestion(current.suggestion))
   const [advanced, setAdvanced] = useState(() => advancedJson(current.suggestion))

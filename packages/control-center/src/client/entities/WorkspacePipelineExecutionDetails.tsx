@@ -30,12 +30,14 @@ const Section = ({
 const Timestamp = ({ value }: { readonly value: WorkspacePipelineExecutionPresentation["startedAt"] }): ReactElement =>
   value === null ? <>Not synchronized</> : <time dateTime={value.dateTime}>{value.label}</time>
 
+export interface WorkspacePipelineExecutionDetailsProps {
+  readonly pipeline: WorkspacePipelineExecutionPresentation
+}
+
 /** Render one immutable CodePipeline execution as an operator-readable flight recorder. */
 export const WorkspacePipelineExecutionDetails = ({
   pipeline
-}: {
-  readonly pipeline: WorkspacePipelineExecutionPresentation
-}): ReactElement => (
+}: WorkspacePipelineExecutionDetailsProps): ReactElement => (
   <article className={styles.document} data-workspace-pipeline-execution-detail>
     <section aria-label="Execution identity" className={styles.hero}>
       <div className={styles.heroHeading}>

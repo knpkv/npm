@@ -21,6 +21,7 @@
     "src/server/persistence/schema.json",
     "test",
     "vite.config.ts",
+    "vite.views.config.ts",
     "vitest.config.ts",
     "../../playwright-font-swap.ts",
     "../../browser-target.ts",

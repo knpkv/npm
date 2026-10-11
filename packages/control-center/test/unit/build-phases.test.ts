@@ -11,6 +11,8 @@ describe("Control Center build phases", () => {
       "bundle client",
       "bundle server",
       "emit server declarations",
+      "bundle views",
+      "emit views declarations",
       "validate distribution integrity"
     ])
   })
@@ -27,6 +29,15 @@ describe("Control Center build phases", () => {
     expect(clean?.args).toContain("node_modules/.cache/tsconfig.server.tsbuildinfo")
     expect(declarations).toMatchObject({ args: ["-b", "tsconfig.server.json"], command: "tsc" })
     expect(declarations?.args).not.toContain("--force")
+    expect(clean?.args).toContain("node_modules/.cache/tsconfig.views.tsbuildinfo")
+    expect(controlCenterBuildPhases.find(({ label }) => label === "bundle views")).toMatchObject({
+      args: ["build", "--config", "vite.views.config.ts"],
+      command: "vite"
+    })
+    expect(controlCenterBuildPhases.find(({ label }) => label === "emit views declarations")).toMatchObject({
+      args: ["-b", "tsconfig.views.json"],
+      command: "tsc"
+    })
   })
 
   it("keeps browser builds on manifest-based repair instead of rebuilding every dependency", () => {

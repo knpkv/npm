@@ -7,11 +7,9 @@ import type { SubmitClockifyActionRequest, SubmitClockifyActionResponse } from "
 import type { EntityId } from "../../domain/identifiers.js"
 import { makeAuthenticatedMutationClient } from "../authenticatedMutationClient.js"
 
-export type ClockifyActionSubmissionState =
-  | { readonly _tag: "idle" }
-  | { readonly _tag: "submitting" }
-  | { readonly _tag: "succeeded"; readonly result: SubmitClockifyActionResponse }
-  | { readonly _tag: "failed" }
+import type { ClockifyActionSubmissionState } from "./WorkspaceClockifyTimeEntryDetails.js"
+
+export type { ClockifyActionSubmissionState } from "./WorkspaceClockifyTimeEntryDetails.js"
 
 export interface ClockifyActionSubmissionTransport {
   readonly submit: (
