@@ -159,6 +159,10 @@ by hand instead:
 
 ## Development Conventions
 
+Design conformance: read `packages/design-conformance/README.md` before adding a
+product's refs, adapter or waivers. It defines independent live coverage, hashes,
+region checks and enforcement deadlines, including required PNG metadata.
+
 This project adheres to a strict set of development standards to ensure code quality and consistency.
 
 ### Coding Style

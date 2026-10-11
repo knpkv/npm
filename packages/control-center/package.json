@@ -111,6 +111,7 @@
   },
   "devDependencies": {
     "@effect/vitest": "4.0.0",
+    "@knpkv/design-conformance": "workspace:*",
     "@libsql/client": "^0.18.0",
     "@playwright/test": "1.63.0",
     "@types/node": "^26.6.4",

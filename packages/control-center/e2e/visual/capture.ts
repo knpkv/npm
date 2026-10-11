@@ -1,5 +1,12 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
-import { expect, type JSHandle, type Locator, type Page, test } from "@playwright/test"
+import {
+  maskUuidText,
+  screenshotSettings,
+  settleCaptureFonts,
+  settleCapturePage,
+  UUID_PATTERN
+} from "@knpkv/design-conformance/capture"
+import { expect, type Locator, type Page, test } from "@playwright/test"
 import * as Config from "effect/Config"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
@@ -16,8 +23,6 @@ class VisualCaptureFailure extends Schema.TaggedError<VisualCaptureFailure>()(
   "VisualCaptureFailure",
   { reason: Schema.String }
 ) {}
-
-const UUID_PATTERN = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/giu
 
 interface CaptureFrame {
   readonly top: number
@@ -53,42 +58,6 @@ const expectCapturedEvidence = async (evidence: Locator, frame: CaptureFrame): P
   expect(bounds.y + bounds.height).toBeLessThanOrEqual(frame.bottom)
 }
 
-/** Wrap only UUID substrings for Playwright's mask, retaining Relay identity and all surrounding text. */
-const maskUuidText = (page: Page): Promise<JSHandle<() => void>> =>
-  page.evaluateHandle<() => void>(`(() => {
-    const pattern = new RegExp(${JSON.stringify(UUID_PATTERN.source)}, 'giu');
-    const restores = [];
-    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-    const nodes = [];
-    while (walker.nextNode()) {
-      const node = walker.currentNode;
-      if (!node.parentElement?.closest('[data-visual-uuid], script, style, noscript')) nodes.push(node);
-    }
-    for (const node of nodes) {
-      const value = node.textContent ?? '';
-      const matches = Array.from(value.matchAll(pattern));
-      if (matches.length === 0) continue;
-      const fragment = document.createDocumentFragment();
-      let offset = 0;
-      for (const match of matches) {
-        fragment.append(value.slice(offset, match.index));
-        const span = document.createElement('span');
-        span.setAttribute('data-visual-uuid', '');
-        span.textContent = match[0];
-        fragment.append(span);
-        offset = match.index + match[0].length;
-      }
-      fragment.append(value.slice(offset));
-      const inserted = Array.from(fragment.childNodes);
-      node.replaceWith(fragment);
-      restores.push(() => {
-        inserted[0].replaceWith(node);
-        for (const replacement of inserted.slice(1)) replacement.remove();
-      });
-    }
-    return () => restores.reverse().forEach(restore => restore());
-  })()`)
-
 /** Files are named by scenario, state and project so two revisions can be compared independently. */
 const writeShot = async (page: Page, state: string, fullPage: boolean): Promise<void> => {
   const info = test.info()
@@ -98,10 +67,8 @@ const writeShot = async (page: Page, state: string, fullPage: boolean): Promise<
   }
   const png = await page.screenshot({
     fullPage,
-    animations: "disabled",
-    caret: "hide",
-    mask: [page.locator("[data-visual-uuid]")],
-    maskColor: "#808080"
+    ...screenshotSettings,
+    mask: [page.locator("[data-visual-uuid]")]
   })
   await Effect.runPromise(
     Effect.gen(function*() {
@@ -124,7 +91,7 @@ export const captureState = async (
 ): Promise<void> => {
   const viewport = page.viewportSize()
   expect(viewport).not.toBeNull()
-  await page.evaluate("document.fonts.forEach(font => { font.display = 'block' }); document.fonts.ready")
+  await settleCaptureFonts(page)
   await auditProductionRoutePresentation(page, audit)
   await page.emulateMedia({ forcedColors: "none", reducedMotion: "reduce" })
   await page.setViewportSize({ width: 390, height: 844 })
@@ -132,9 +99,7 @@ export const captureState = async (
     .toBe(true)
   expect(await seriousAxeViolations(page)).toEqual([])
   if (viewport !== null) await page.setViewportSize(viewport)
-  await page.evaluate("document.fonts.ready")
-  await page.evaluate("document.activeElement instanceof HTMLElement && document.activeElement.blur()")
-  await page.evaluate("window.scrollTo(0, 0)")
+  await settleCapturePage(page)
   const before = await page.locator("body").innerText()
   const restoreUuidText = await maskUuidText(page)
   try {
