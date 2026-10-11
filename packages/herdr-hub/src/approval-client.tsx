@@ -3,7 +3,7 @@ import { RegistryProvider, useAtom, useAtomRefresh, useAtomSet, useAtomValue } f
 import { BrowserCrypto, BrowserHttpClient } from "@effect/platform-browser"
 import { makeRelayClient, makeRelayConversations } from "@knpkv/relay-product/client"
 import { ConnectSurface, makeConnectAtoms } from "@knpkv/herdr-connect/surface"
-import { makeUsageAtoms, UsageSurface } from "@knpkv/herdr-connect/usage"
+import { loadLimits, loadUsage, makeUsageAtoms, onLoopback, UsageSurface } from "@knpkv/herdr-connect/usage"
 import { Cause, Effect, Exit, Layer, ManagedRuntime, Option, Result, Schema } from "effect"
 import * as AsyncResult from "effect/reactivity/AsyncResult"
 import * as Atom from "effect/reactivity/Atom"
@@ -51,6 +51,7 @@ import { DashboardWorkPollOwner } from "./work-poll-owner.js"
 import { SuperappShell } from "./superapp-view.js"
 import { makeFleetModuleViews } from "./fleet-module-view.js"
 import { makeTodayModuleViews, TodayReadFailed } from "./today-module-view.js"
+import { makeUsageModuleViews, type UsageModuleReads } from "./usage-module-view.js"
 import { TodayFleetAgents, TodayFleetHistory } from "./today-fleet-activity.js"
 import { NeedsYouResult } from "./modules.js"
 import { RefreshStatus } from "./refresh-status.js"
@@ -415,10 +416,12 @@ type DashboardAtoms = ReturnType<typeof makeDashboardAtoms>
 
 const DashboardApp = ({
   atoms,
-  readToday
+  readToday,
+  usageReads
 }: {
   readonly atoms: DashboardAtoms
   readonly readToday: Effect.Effect<typeof NeedsYouResult.Type, TodayReadFailed>
+  readonly usageReads: UsageModuleReads
 }) => {
   const result = useAtomValue(atoms.dashboard)
   const { refreshFailed, snapshot } = dashboardRefreshView(result, atoms.bootstrap)
@@ -701,14 +704,23 @@ const DashboardApp = ({
     read: readToday,
     now: workNow,
     agents: <TodayFleetAgents snapshot={current} />,
-    history: <TodayFleetHistory snapshot={current} />
+    history: <TodayFleetHistory snapshot={current} />,
+    usageDetails: true
+  })
+  const usage = makeUsageModuleViews({
+    reads: usageReads,
+    viewerTimeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    // Received report timestamps use the browser clock, unlike Work's hub-anchored countdown.
+    now: Date.now(),
+    onHubMachine: onLoopback()
   })
   return (
     <>
       <DashboardWorkPollOwner atom={atoms.work} poll={atoms.workPoll} />
       {canonical ? (
         <SuperappShell
-          modules={[today, fleet]}
+          modules={[today, fleet, usage]}
+          mobileModules={["today", "fleet"]}
           landing={{ module: "today", page: "overview" }}
           host={current.host}
           hostCount={hostCount}
@@ -767,6 +779,21 @@ const readToday = Effect.callback<typeof NeedsYouResult.Type, TodayReadFailed>((
     onExit: (exit) => resume(Exit.isSuccess(exit) ? Effect.succeed(exit.value) : Effect.failCause(exit.cause))
   })
 })
+const usageReads: UsageModuleReads = {
+  usage: (query) =>
+    Effect.callback((resume, signal) => {
+      applicationRuntime.runCallback(loadUsage(query), {
+        signal,
+        onExit: (exit) => resume(Exit.isSuccess(exit) ? Effect.succeed(exit.value) : Effect.failCause(exit.cause))
+      })
+    }),
+  limits: Effect.callback((resume, signal) => {
+    applicationRuntime.runCallback(loadLimits, {
+      signal,
+      onExit: (exit) => resume(Exit.isSuccess(exit) ? Effect.succeed(exit.value) : Effect.failCause(exit.cause))
+    })
+  })
+}
 const relayConversations = makeRelayConversations(
   makeRelayClient({ base: "/v1/relay", origin: window.location.href }),
   applicationRuntime
@@ -778,7 +805,7 @@ const relay: HubRelayConversation = {
 watchRelayPage(window, relay)
 const application = (
   <RegistryProvider>
-    <DashboardApp atoms={atoms} readToday={readToday} />
+    <DashboardApp atoms={atoms} readToday={readToday} usageReads={usageReads} />
   </RegistryProvider>
 )
 if (initial.approvalApp.canonical) createRoot(root).render(application)

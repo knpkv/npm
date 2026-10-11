@@ -4,4 +4,15 @@
  *
  * @module
  */
-export { makeUsageAtoms, type UsageAtoms, UsageSurface } from "./usage-client.js"
+export {
+  FleetReadLoadError,
+  limitsState,
+  loadLimits,
+  loadUsage,
+  type Received,
+  usageState
+} from "./fleet-reads-client.js"
+export type { FleetLimits } from "./limits.js"
+export { makeUsageAtoms, onLoopback, type UsageAtoms, UsageSurface } from "./usage-client.js"
+export { AGENT_USAGE_PAGE, UsageTab, type UsageTabProps } from "./usage-view.js"
+export { type FleetUsage, UsagePreset, type UsageQuery, UsageTimeZone } from "./usage.js"

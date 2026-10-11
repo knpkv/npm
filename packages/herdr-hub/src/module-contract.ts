@@ -104,3 +104,13 @@ export const todayModule = defineModule({
   listeners: ["serve"],
   requires: ["read"]
 })
+
+/** Usage details reads the existing Fleet reports; it grants no action capability. */
+export const usageModule = defineModule({
+  id: "usage",
+  label: "Usage details",
+  defaultPage: "limits",
+  pages: [{ id: "limits", label: "Limits" }, { id: "tokens", label: "Tokens" }],
+  listeners: ["serve"],
+  requires: ["read"]
+})

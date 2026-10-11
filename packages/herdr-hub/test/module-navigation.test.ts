@@ -1,6 +1,6 @@
 import { describe, expect, expectTypeOf, it } from "@effect/vitest"
 import { Result } from "effect"
-import { defineModule, fleetModule, type FleetModuleDestination } from "../src/module-contract.js"
+import { defineModule, fleetModule, type FleetModuleDestination, usageModule } from "../src/module-contract.js"
 import { canonicalModuleUrl, moduleHref, moduleLinkTarget, readModuleRoute } from "../src/module-navigation.js"
 
 const canonicalFleetUrl = (source: URL) =>
@@ -9,6 +9,30 @@ const fleetLinkTarget = (href: string, current: URL, click: Parameters<typeof mo
   moduleLinkTarget(href, current, click, [fleetModule])
 
 describe("Relay module navigation", () => {
+  it("opens Usage details without changing the legacy Fleet Usage destination", () => {
+    const descriptors = [fleetModule, usageModule]
+    expect(readModuleRoute(new URL("https://hub.example/#usage"), descriptors)).toEqual(
+      Result.succeed({ module: "usage", page: "limits" })
+    )
+    expect(canonicalModuleUrl(new URL("https://hub.example/?tab=usage"), descriptors, {
+      module: "usage",
+      page: "limits"
+    })).toMatchObject({ _tag: "Success", success: new URL("https://hub.example/#fleet/usage") })
+    expect(moduleHref(
+      usageModule,
+      "tokens",
+      new URLSearchParams({
+        range: "30d",
+        timeZone: "Europe/Amsterdam",
+        host: "ALPHA"
+      })
+    )).toBe("?range=30d&timeZone=Europe%2FAmsterdam&host=ALPHA#usage/tokens")
+    expect(Result.isFailure(readModuleRoute(new URL("https://hub.example/#usage/approvals"), descriptors))).toBe(true)
+    const unknown = new URL("https://hub.example/#usage/overview")
+    expect(Result.isFailure(canonicalModuleUrl(unknown, descriptors, { module: "usage", page: "limits" }))).toBe(true)
+    expect(unknown.hash).toBe("#usage/overview")
+  })
+
   it("rewrites an old Work link without losing its selected goal", () => {
     const url = canonicalFleetUrl(new URL("https://hub.example/?tab=work&goal=goal-1&window=week"))
     expect(Result.isSuccess(url)).toBe(true)

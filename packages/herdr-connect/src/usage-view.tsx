@@ -29,6 +29,11 @@ const compact = new Intl.NumberFormat("en", { notation: "compact", maximumFracti
 export const AGENT_USAGE_PAGE = "http://127.0.0.1:3112/"
 
 export interface UsageTabProps {
+  /**
+   * Defaults to the unchanged Fleet tab. Details uses its host's h1 to label this region,
+   * omits the internal toolbar and renders the selected page with h2 section headings.
+   */
+  readonly presentation?: "fleet" | { readonly page: "limits" | "tokens"; readonly labelledBy: string }
   /** The page is open on the hub's own machine, where agent-usage's loopback page can be reached. */
   readonly onHubMachine: boolean
   readonly range: UsagePreset
@@ -37,7 +42,14 @@ export interface UsageTabProps {
   readonly usage: UsageState
 }
 
-export const UsageTab = ({ limits, onHubMachine, onRangeChange, range, usage }: UsageTabProps): ReactElement => {
+export const UsageTab = ({
+  limits,
+  onHubMachine,
+  onRangeChange,
+  presentation = "fleet",
+  range,
+  usage
+}: UsageTabProps): ReactElement => {
   const headingId = useId()
   const tokensId = useId()
   const historyId = useId()
@@ -56,28 +68,31 @@ export const UsageTab = ({ limits, onHubMachine, onRangeChange, range, usage }: 
   const labelOf = (id: string) => view?.labels.get(id) ?? "Other models"
   const severalHosts = (limits.view?.hosts.length ?? 0) > 1
   const bucket = view?.range?.bucket === "hour" ? "hour" : "day"
+  const fleet = presentation === "fleet"
   return (
-    <section aria-labelledby={headingId} className="usage-tab">
-      <header className="usage-tab-header">
-        <Text as="h1" id={headingId} variant="card-title">
-          Usage
-        </Text>
-        <ToggleGroup
-          aria-label="Range"
-          items={USAGE_RANGES.map((value) => ({ value, label: value }))}
-          onValueChange={(value) => {
-            const next = USAGE_RANGES.find((candidate) => candidate === value)
-            if (next !== undefined) onRangeChange(next)
-          }}
-          size="compact"
-          value={range}
-        />
-        {onHubMachine ? (
-          <a className="usage-tab-full" href={AGENT_USAGE_PAGE} rel="noreferrer" target="_blank">
-            Open agent-usage on this machine
-          </a>
-        ) : null}
-      </header>
+    <section aria-labelledby={fleet ? headingId : presentation.labelledBy} className="usage-tab">
+      {fleet ? (
+        <header className="usage-tab-header">
+          <Text as="h1" id={headingId} variant="card-title">
+            Usage
+          </Text>
+          <ToggleGroup
+            aria-label="Range"
+            items={USAGE_RANGES.map((value) => ({ value, label: value }))}
+            onValueChange={(value) => {
+              const next = USAGE_RANGES.find((candidate) => candidate === value)
+              if (next !== undefined) onRangeChange(next)
+            }}
+            size="compact"
+            value={range}
+          />
+          {onHubMachine ? (
+            <a className="usage-tab-full" href={AGENT_USAGE_PAGE} rel="noreferrer" target="_blank">
+              Open agent-usage on this machine
+            </a>
+          ) : null}
+        </header>
+      ) : null}
 
       {/* Which hosts are missing or partial, before anything is read as the whole fleet. */}
       {view === null || view.notes.length === 0 ? null : (
@@ -92,39 +107,41 @@ export const UsageTab = ({ limits, onHubMachine, onRangeChange, range, usage }: 
         </ul>
       )}
 
-      <section aria-label="Limits now" className="usage-tab-now">
-        {limits.problem === null ? null : (
-          <Text as="p" tone="secondary" variant="meta">
-            {limits.problem}
-          </Text>
-        )}
-        {limits.view === null ? (
-          limits.problem === null ? (
-            <Skeleton decorative={false} height="9rem" label="Loading limits" variant="block" />
-          ) : null
-        ) : (
-          limits.view.hosts.map((host) => (
-            <LimitsSummary
-              balances={[]}
-              key={host.host}
-              latest={host.latest}
-              now={host.now}
-              title={severalHosts ? `Limits on ${host.host}` : "Limits now"}
-            />
-          ))
-        )}
-        {limits.view === null || limits.view.notes.length === 0 ? null : (
-          <ul className="usage-tab-notes">
-            {limits.view.notes.map((note) => (
-              <li key={note}>
-                <Text as="span" tone="secondary" variant="meta">
-                  {note}
-                </Text>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+      {fleet || presentation.page === "limits" ? (
+        <section aria-label="Limits now" className="usage-tab-now">
+          {limits.problem === null ? null : (
+            <Text as="p" tone="secondary" variant="meta">
+              {limits.problem}
+            </Text>
+          )}
+          {limits.view === null ? (
+            limits.problem === null ? (
+              <Skeleton decorative={false} height="9rem" label="Loading limits" variant="block" />
+            ) : null
+          ) : (
+            limits.view.hosts.map((host) => (
+              <LimitsSummary
+                balances={[]}
+                key={host.host}
+                latest={host.latest}
+                now={host.now}
+                title={severalHosts ? `Limits on ${host.host}` : "Limits now"}
+              />
+            ))
+          )}
+          {limits.view === null || limits.view.notes.length === 0 ? null : (
+            <ul className="usage-tab-notes">
+              {limits.view.notes.map((note) => (
+                <li key={note}>
+                  <Text as="span" tone="secondary" variant="meta">
+                    {note}
+                  </Text>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      ) : null}
 
       <section aria-busy={usage.loading} aria-labelledby={tokensId} className="usage-tab-panel">
         <div className="usage-tab-panel-head">
@@ -181,7 +198,7 @@ export const UsageTab = ({ limits, onHubMachine, onRangeChange, range, usage }: 
       </section>
 
       {/* Each host's history needs a read; until one arrives the token panel says why there is none. */}
-      {view === null || view.hosts.length === 0 ? null : (
+      {(!fleet && presentation.page === "tokens") || view === null || view.hosts.length === 0 ? null : (
         <section aria-labelledby={historyId} className="usage-tab-panel">
           <Text as="h2" id={historyId} variant="card-title">
             Limits over time

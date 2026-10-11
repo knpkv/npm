@@ -70,6 +70,11 @@
     text-align: start;
   }
 
+  .superapp-breadcrumb > a + [aria-hidden] + [aria-current="page"] {
+    flex-shrink: 0;
+    max-inline-size: 50%;
+  }
+
   .superapp-breadcrumb > :last-child {
     color: var(--rly-color-text-1);
     font-weight: 600;
@@ -257,6 +262,7 @@
 
   .superapp-sidebar a[aria-current="page"],
   .superapp-bottom a[aria-current="page"],
+  .superapp-bottom > button[aria-current="page"],
   .superapp-dialog nav a[aria-current="page"] {
     background: var(--rly-color-surface-2);
     color: var(--rly-color-text-1);

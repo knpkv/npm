@@ -9,6 +9,7 @@ import { createServer, type ServerResponse } from "node:http"
 import { DashboardSnapshot, PendingApprovalTarget } from "../../src/dashboard-model.js"
 import { dashboardPage } from "../../src/internal/dashboard-page.js"
 import { NeedsYouResult } from "../../src/modules.js"
+import { limitsFixture, usageFixture } from "./usage-fixture.js"
 
 class FixtureServerError extends Schema.TaggedError<FixtureServerError>()("FixtureServerError", {
   cause: Schema.Defect()
@@ -335,6 +336,24 @@ const program = Effect.gen(function*() {
         response.writeHead(404)
         response.end()
       }
+      return
+    }
+    if (url.pathname === "/v1/connect/usage" || url.pathname === "/v1/connect/limits") {
+      const state = request.headers.cookie?.match(/(?:^|;\s*)usage-fixture=([a-z]+)/u)?.[1] ?? "normal"
+      if (state === "failed") {
+        response.writeHead(503, { "content-type": "application/json" })
+        response.end(JSON.stringify({ error: "unavailable" }))
+        return
+      }
+      response.writeHead(200, { "content-type": "application/json" })
+      if (url.pathname === "/v1/connect/usage") {
+        const range = url.searchParams.get("range")
+        const query = {
+          range: range === "24h" || range === "30d" ? range : "7d",
+          timeZone: url.searchParams.get("timeZone") ?? "UTC"
+        } satisfies Parameters<typeof usageFixture>[0]
+        response.end(Schema.encodeSync(Schema.fromJsonString(FleetUsage))(usageFixture(query, now, state)))
+      } else response.end(Schema.encodeSync(Schema.fromJsonString(FleetLimits))(limitsFixture(now, state)))
       return
     }
     if (url.pathname === "/assets/relay-icon.svg" || url.pathname === "/favicon.ico") {

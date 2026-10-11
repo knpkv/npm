@@ -2,11 +2,13 @@
 
 import { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
-import { afterEach, describe, expect, it } from "vitest"
+import { renderToStaticMarkup } from "react-dom/server"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { UsageTabView } from "../src/usage-model.js"
 import { UsageTab, type UsageTabProps } from "../src/usage-view.js"
 
 const roots: Array<Root> = []
+beforeEach(() => vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true))
 
 afterEach(async () => {
   await act(async () => {
@@ -14,6 +16,7 @@ afterEach(async () => {
   })
   roots.length = 0
   document.body.replaceChildren()
+  vi.unstubAllGlobals()
 })
 
 const render = async (props: Partial<UsageTabProps> = {}): Promise<HTMLElement> => {
@@ -52,6 +55,38 @@ const view: UsageTabView = {
 }
 
 describe("UsageTab", () => {
+  it("keeps the default Fleet markup", () => {
+    const props: UsageTabProps = {
+      limits: { problem: null, view: null },
+      onHubMachine: false,
+      onRangeChange: () => undefined,
+      range: "7d",
+      usage: { loading: false, problem: null, view: null }
+    }
+    expect(renderToStaticMarkup(<UsageTab {...props} />)).toMatchSnapshot()
+  })
+
+  it("uses the host heading for details, keeps Fleet explicit default, and separates Tokens from Limits", async () => {
+    const defaultMarkup = (await render()).innerHTML
+    const fleetMarkup = (await render({ presentation: "fleet" })).innerHTML
+    const normalizeIds = (markup: string) => markup.replace(/_r_[a-z0-9]+_/gu, "ID")
+    expect(normalizeIds(fleetMarkup)).toBe(normalizeIds(defaultMarkup))
+    const tokens = await render({ presentation: { page: "tokens", labelledBy: "host-heading" } })
+    expect(tokens.querySelector(".usage-tab")?.getAttribute("aria-labelledby")).toBe("host-heading")
+    expect(tokens.querySelector("h1")).toBeNull()
+    expect(tokens.querySelector("[aria-label='Range']")).toBeNull()
+    expect(tokens.querySelector("[aria-label='Limits now']")).toBeNull()
+    expect([...tokens.querySelectorAll("h2")].map((heading) => heading.textContent)).toEqual(["Tokens"])
+    const limits = await render({ presentation: { page: "limits", labelledBy: "host-heading" } })
+    expect(limits.querySelector("h1")).toBeNull()
+    expect(limits.querySelector("[aria-label='Limits now']")).not.toBeNull()
+    expect(limits.querySelector("[aria-labelledby='host-heading']")).not.toBeNull()
+    expect([...limits.querySelectorAll("h2")].map((heading) => heading.textContent)).toEqual([
+      "Tokens",
+      "Limits over time"
+    ])
+    expect([...document.querySelectorAll(".usage-tab")][0]?.querySelector("[aria-label='Limits now']")).not.toBeNull()
+  })
   it("names the token chart by model, never by booking, and lists its models", async () => {
     const host = await render()
     const chart = host.querySelector(".usage-chart svg")

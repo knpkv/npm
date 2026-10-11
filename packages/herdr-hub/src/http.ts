@@ -164,7 +164,7 @@ import {
   PushSubscriptionRecord,
   PushSubscriptionRemoval
 } from "./model.js"
-import { fleetModule, todayModule } from "./module-contract.js"
+import { fleetModule, todayModule, usageModule } from "./module-contract.js"
 import type { NeedsYouCandidate, NeedsYouIssue, NeedsYouProviderResult } from "./module-needs-you.js"
 import * as ModuleServer from "./module-server.js"
 import type { ModuleRouteFailure, ServerModule } from "./module-server.js"
@@ -1775,6 +1775,7 @@ export const startHttpServer = async (
     finalizers.unshift(() => httpRuntime.runPromise(Scope.close(moduleScope, Exit.void)))
     const modules = [
       { descriptor: todayModule, handlers: Layer.succeed(ModuleServer.ModuleHandlers, { routes: [] }) },
+      { descriptor: usageModule, handlers: Layer.succeed(ModuleServer.ModuleHandlers, { routes: [] }) },
       {
         descriptor: fleetModule,
         handlers: Layer.effect(

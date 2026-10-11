@@ -1,0 +1,223 @@
+// @vitest-environment happy-dom
+import { type FleetUsage, type FleetLimits, type UsageQuery } from "@knpkv/herdr-connect/usage"
+import { Effect } from "effect"
+import { act } from "react"
+import { createRoot, type Root } from "react-dom/client"
+import { afterEach, beforeEach, expect, it, vi } from "vitest"
+import { makeUsageModuleViews, type UsageModuleReads } from "../src/usage-module-view.js"
+import { fleetModule, type ModuleViews } from "../src/modules.js"
+import { SuperappShell } from "../src/superapp-view.js"
+
+let root: Root | null = null
+beforeEach(() => vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true))
+afterEach(async () => {
+  await act(async () => root?.unmount())
+  root = null
+  document.body.replaceChildren()
+  window.history.replaceState(null, "", "/")
+  vi.restoreAllMocks()
+  vi.unstubAllGlobals()
+})
+const usage: FleetUsage = { hosts: [], failures: [], peersListed: true }
+const limits: FleetLimits = { hosts: [], failures: [], peersListed: true }
+const fleet: ModuleViews<typeof fleetModule> = {
+  descriptor: fleetModule,
+  pages: { approvals: () => <h1>Approvals</h1>, connect: () => null, work: () => null, usage: () => null }
+}
+const render = async (reads: UsageModuleReads) => {
+  const host = document.createElement("div")
+  document.body.append(host)
+  root = createRoot(host)
+  const module = makeUsageModuleViews({ reads, viewerTimeZone: "Europe/Amsterdam", now: 1_000, onHubMachine: false })
+  await act(async () =>
+    root?.render(
+      <SuperappShell
+        modules={[fleet, module]}
+        landing={{ module: "fleet", page: "approvals" }}
+        host="hub"
+        hostCount={1}
+        notifications={null}
+      />
+    )
+  )
+}
+const click = async (href: string) => {
+  const anchor = document.createElement("a")
+  anchor.href = href
+  document.body.append(anchor)
+  await act(async () => anchor.dispatchEvent(new MouseEvent("click", { bubbles: true, button: 0 })))
+  anchor.remove()
+}
+
+it("repairs selectors only on active Usage and keeps Fleet approval deep links after visiting Usage", async () => {
+  const calls: Array<UsageQuery> = []
+  const reads: UsageModuleReads = {
+    usage: (query) =>
+      Effect.sync(() => {
+        calls.push(query)
+        return { fleet: usage, receivedAt: 1_000 }
+      }),
+    limits: Effect.succeed({ fleet: limits, receivedAt: 1_000 })
+  }
+  window.history.replaceState(null, "", "/?approvalHost=ALPHA&approvalJob=job-1#fleet/approvals")
+  const replace = vi.spyOn(window.history, "replaceState")
+  await render(reads)
+  expect(window.location.search).toBe("?approvalHost=ALPHA&approvalJob=job-1")
+  expect(calls).toEqual([])
+  await click("?range=30d&timeZone=Europe%2FAmsterdam&approvalHost=ALPHA#usage/tokens")
+  expect(window.location.search).toBe("?range=30d&timeZone=Europe%2FAmsterdam")
+  expect(calls).toEqual([{ range: "30d", timeZone: "Europe/Amsterdam" }])
+  expect(document.querySelector(".usage-details-intro")?.textContent).toContain("Some URL selectors were reset")
+  const range = [...document.querySelectorAll<HTMLButtonElement>('[aria-label="Range"] button')].find(
+    (button) => button.textContent === "7 days"
+  )
+  await act(async () => range?.click())
+  expect(document.querySelector(".usage-details-intro")?.textContent).not.toContain("Some URL selectors were reset")
+  const count = replace.mock.calls.length
+  await act(async () =>
+    root?.render(
+      <SuperappShell
+        modules={[
+          fleet,
+          makeUsageModuleViews({ reads, viewerTimeZone: "Europe/Amsterdam", now: 2_000, onHubMachine: false })
+        ]}
+        landing={{ module: "fleet", page: "approvals" }}
+        host="hub"
+        hostCount={1}
+        notifications={null}
+      />
+    )
+  )
+  expect(replace.mock.calls.length).toBe(count)
+  await click("?approvalHost=ALPHA&approvalJob=job-2#fleet/approvals")
+  expect(window.location.search).toBe("?approvalHost=ALPHA&approvalJob=job-2")
+  expect(calls).toHaveLength(2)
+})
+
+it("reads limits only on its page, filters locally, repairs unknown hosts and keeps unknowns out of totals", async () => {
+  let limitsReads = 0
+  const queries: Array<UsageQuery> = []
+  const report: FleetUsage = {
+    hosts: [
+      {
+        host: "ALPHA",
+        readAt: 1_000,
+        reading: {
+          _tag: "Read",
+          skipped: 0,
+          usage: {
+            v: 1,
+            machine: "ALPHA",
+            observedAt: 0,
+            range: { preset: "7d", timeZone: "UTC", from: 0, to: 86_400_000, bucket: "day" },
+            periods: [{ key: "1970-01-01", start: 0 }],
+            tokens: [{ period: 0, agent: "claude", model: "model-a", tokens: 1200 }],
+            limits: []
+          }
+        }
+      }
+    ],
+    failures: [{ host: "cedar", reason: "offline" }],
+    peersListed: true
+  }
+  const first = report.hosts[0]
+  if (first === undefined || first.reading._tag !== "Read") return expect.unreachable()
+  const withPeer: FleetUsage = {
+    ...report,
+    hosts: [
+      ...report.hosts,
+      {
+        ...first,
+        host: "BETA",
+        reading: {
+          ...first.reading,
+          usage: {
+            ...first.reading.usage,
+            machine: "BETA",
+            tokens: [{ period: 0, agent: "claude", model: "model-a", tokens: 3600 }]
+          }
+        }
+      }
+    ]
+  }
+  const reads: UsageModuleReads = {
+    usage: (query) =>
+      Effect.sync(() => {
+        queries.push(query)
+        return { fleet: withPeer, receivedAt: 1_000 }
+      }),
+    limits: Effect.sync(() => {
+      limitsReads += 1
+      return { fleet: limits, receivedAt: 1_000 }
+    })
+  }
+  window.history.replaceState(null, "", "/?range=7d&timeZone=UTC#usage/tokens")
+  await render(reads)
+  expect(limitsReads).toBe(0)
+  const rows = [...document.querySelectorAll('[aria-label="By host"] li')]
+  expect(rows.map((row) => row.textContent)).toEqual([
+    "ALPHARead 00:00 in UTC1.2K",
+    "BETARead 00:00 in UTC3.6K",
+    "cedarOfflineUnknown"
+  ])
+  expect(document.querySelector(".usage-details-intro")?.textContent).toContain("4.8K reported tokens")
+  expect(document.querySelector('[aria-label="By agent and model"]')?.textContent).toContain("1.2K")
+  expect(document.querySelector('[aria-label="By agent and model"]')?.textContent).not.toContain("4.8K")
+  expect(document.querySelector('[aria-label="By provider"]')?.textContent).toContain("1.2K")
+  await click("?range=7d&timeZone=UTC&host=BETA#usage/tokens")
+  expect(document.querySelector('[aria-label="By agent and model"]')?.textContent).toContain("3.6K")
+  expect(document.querySelector('[aria-label="By provider"]')?.textContent).toContain("3.6K")
+  await click("?range=7d&timeZone=UTC&host=cedar#usage/tokens")
+  expect(document.querySelector('[aria-label="By host"]')?.textContent).not.toContain("ALPHA")
+  expect(window.location.search).toContain("host=cedar")
+  expect(queries).toHaveLength(1)
+  await click("?range=7d&timeZone=UTC&host=unknown#usage/tokens")
+  expect(window.location.search).toBe("?range=7d&timeZone=UTC")
+  expect(queries).toHaveLength(1)
+  await click("?range=7d&timeZone=UTC#usage/limits")
+  expect(limitsReads).toBe(1)
+  expect(queries).toHaveLength(1)
+  await click("?range=7d&timeZone=UTC#usage/tokens")
+  expect(limitsReads).toBe(1)
+})
+
+it("owns range changes in the URL, sends the selected zone and interrupts reads on inactive or hidden pages", async () => {
+  const calls: Array<UsageQuery> = []
+  let interruptions = 0
+  const reads: UsageModuleReads = {
+    usage: (query) =>
+      Effect.callback((resume) => {
+        calls.push(query)
+        if (query.range === "7d") resume(Effect.succeed({ fleet: usage, receivedAt: 1_000 }))
+        return Effect.sync(() => {
+          interruptions += 1
+        })
+      }),
+    limits: Effect.succeed({ fleet: limits, receivedAt: 1_000 })
+  }
+  window.history.replaceState(null, "", "/?range=7d&timeZone=UTC#usage/tokens")
+  await render(reads)
+  const push = vi.spyOn(window.history, "pushState")
+  const rangeButton = [...document.querySelectorAll<HTMLButtonElement>('[aria-label="Range"] button')].find(
+    (button) => button.textContent === "30 days"
+  )
+  await act(async () => rangeButton?.click())
+  expect(window.location.search).toBe("?range=30d&timeZone=UTC")
+  expect(push).not.toHaveBeenCalled()
+  expect(calls).toEqual([
+    { range: "7d", timeZone: "UTC" },
+    { range: "30d", timeZone: "UTC" }
+  ])
+  await click("?#fleet/approvals")
+  await vi.waitFor(() => expect(interruptions).toBe(1))
+  const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden")
+  await act(async () => document.dispatchEvent(new Event("visibilitychange")))
+  await click("?range=30d&timeZone=UTC#usage/tokens")
+  expect(calls).toHaveLength(2)
+  visibility.mockReturnValue("visible")
+  await act(async () => document.dispatchEvent(new Event("visibilitychange")))
+  expect(calls).toHaveLength(3)
+  visibility.mockReturnValue("hidden")
+  await act(async () => document.dispatchEvent(new Event("visibilitychange")))
+  await vi.waitFor(() => expect(interruptions).toBe(2))
+})
