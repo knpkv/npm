@@ -85,3 +85,11 @@ server-private bearer token, without cookie authentication. Apply
 `controlAwareCors(options)` when enabling ordinary application CORS; it
 excludes `/control/login` from CORS and preflight while retaining it for other
 routes. The application supplies the same public origin as startup.
+
+`loginControlRouterWithMint(token, publicOrigin, mint)` puts an application's own
+one-time issuer behind the same route. The `mint` effect runs only after the
+bearer and exact `Origin` checks and returns a redacted `PairingCode`; typed
+failures become a sanitized, non-cacheable 503. The caller owns identity, TTL,
+persistence, lifecycle admission and revocation. `loginControlRouter` keeps the
+OwnerSession issuer. Control Center uses durable 60-second codes that revoke
+nothing.

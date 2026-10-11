@@ -234,6 +234,26 @@ export const makeWebControl = ({
 
 /** Bearer-only, non-cacheable owner route. The reply contains a one-time credential URL. */
 export const loginControlRouter = (token: Redacted.Redacted<string>, publicOrigin: string) =>
+  loginControlRouterWithMint(
+    token,
+    publicOrigin,
+    Effect.gen(function*() {
+      const session = yield* OwnerSession.OwnerSession
+      return yield* session.mintBootstrapCode.pipe(Effect.orDie)
+    })
+  )
+
+/**
+ * Use an application's own one-time issuer behind the same owner-only bearer route. The callback
+ * runs only after bearer and Origin checks. Its redacted PairingCode becomes a credential-bearing
+ * fragment URL; failures return a sanitized, non-cacheable 503 without logging the credential.
+ * The caller retains its issuer's expiry, persistence, identity and revocation policy.
+ */
+export const loginControlRouterWithMint = <E, R>(
+  token: Redacted.Redacted<string>,
+  publicOrigin: string,
+  mint: Effect.Effect<Redacted.Redacted<PairingCode>, E, R>
+) =>
   HttpRouter.use((router) =>
     router.add(
       "POST",
@@ -247,12 +267,18 @@ export const loginControlRouter = (token: Redacted.Redacted<string>, publicOrigi
         ) {
           return HttpServerResponse.empty({ status: 401, headers: { "cache-control": "no-store" } })
         }
-        const session = yield* OwnerSession.OwnerSession
-        const code = yield* session.mintBootstrapCode.pipe(Effect.orDie)
-        return yield* HttpServerResponse.json(
-          { url: OwnerSession.bootstrapUrl(publicOrigin, code) },
-          { headers: { "cache-control": "no-store" } }
-        )
+        if (request.headers.origin !== undefined && request.headers.origin !== publicOrigin) {
+          return HttpServerResponse.empty({ status: 403, headers: { "cache-control": "no-store" } })
+        }
+        return yield* Effect.matchEffect(mint, {
+          onFailure: () =>
+            Effect.succeed(HttpServerResponse.empty({ status: 503, headers: { "cache-control": "no-store" } })),
+          onSuccess: (code) =>
+            HttpServerResponse.json(
+              { url: OwnerSession.bootstrapUrl(publicOrigin, code) },
+              { headers: { "cache-control": "no-store" } }
+            )
+        })
       })
     )
   )
