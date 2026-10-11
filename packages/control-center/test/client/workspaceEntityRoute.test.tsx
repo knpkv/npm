@@ -997,6 +997,36 @@ const LocationProbe = (): ReactElement => {
 }
 
 describe("canonical workspace entity", () => {
+  it.each(["1:pipeline-execution", "01890f6f-6d6a-7cc0-98d2-000000000201:pipeline-execution"])(
+    "shows human pipeline gap labels independently of persisted key %s",
+    (missingKey) => {
+      const next: Inspection = {
+        ...inspection,
+        graph: {
+          ...inspection.graph,
+          nodes: inspection.graph.nodes.map((node) =>
+            node.endpointKind === "pipeline-execution"
+              ? {
+                  ...node,
+                  resolution: {
+                    _tag: "missing",
+                    expectedKind: "entity",
+                    expectedEntityKind: "pipeline-execution",
+                    missingKey
+                  }
+                }
+              : node
+          )
+        }
+      }
+      const presentation = presentWorkspaceEntity(WORKSET_WORKSPACE_ID, next)
+      expect(presentation.relationships.find(({ kind }) => kind === "Delivered By")?.target).toMatchObject({
+        state: "missing",
+        label: "PR #184 · payments-api has no pipeline run"
+      })
+    }
+  )
+
   it("presents human-first next work, ownership, graph, provenance, and activity", () => {
     const presentation = presentWorkspaceEntity(WORKSET_WORKSPACE_ID, inspection)
 
