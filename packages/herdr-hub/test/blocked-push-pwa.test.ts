@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import type { BlockedPushPayload } from "../src/blocked-push-model.js"
 import { blockedPushDeepLink, showBlockedNotification } from "../src/blocked-push-pwa.js"
+import type { ApprovalWorkerRegistration } from "../src/pwa.js"
 
 const payload: BlockedPushPayload = {
   kind: "agent-blocked",
@@ -20,6 +21,23 @@ describe("blocked push presentation", () => {
     expect(blockedPushDeepLink("https://hub.example.test/", { ...payload, approvalJobId: "job-one" })).toBe(
       "https://hub.example.test/?tab=approvals&approvalHost=HOST-A&approvalJob=job-one"
     )
+  })
+  it("re-alerts when reminders and later episodes replace the same agent tag", async () => {
+    const shown: Array<{ readonly tag: string; readonly renotify: boolean | undefined }> = []
+    const registration: ApprovalWorkerRegistration = {
+      scope: "https://hub.example.test/",
+      showNotification: async (_title, options) => {
+        shown.push({ tag: options.tag, renotify: options.renotify })
+      }
+    }
+    await showBlockedNotification(registration, payload)
+    await showBlockedNotification(registration, payload)
+    await showBlockedNotification(registration, { ...payload, state: "needs-you" })
+    expect(shown).toEqual([
+      { tag: "agent-blocked:host-a:agent-one", renotify: true },
+      { tag: "agent-blocked:host-a:agent-one", renotify: true },
+      { tag: "agent-blocked:host-a:agent-one", renotify: true }
+    ])
   })
   it("uses a per-agent replacement tag and only name, state and the reported first line", async () => {
     const shown: Array<{ readonly title: string; readonly body: string; readonly tag: string }> = []

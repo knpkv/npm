@@ -1,6 +1,7 @@
 import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
 import { AgentPostStore, ConnectAgent } from "@knpkv/herdr-connect"
+import { openPrivateSqlite } from "@knpkv/herdr-fleet/sqlite"
 import { Clock, Effect, FileSystem, Path, Ref, Schema } from "effect"
 import { HttpClient } from "effect/http"
 import { TestClock } from "effect/testing"
@@ -22,6 +23,28 @@ const agent = (state: string) =>
     lastActivityAt: 0
   })
 
+// Retention is a persisted-data contract: inspect the private database to prove sensitive rows are removed.
+const retainedRows = Effect.fn("BlockedPushTest.retainedRows")(function*(path: string) {
+  const opened = yield* Effect.acquireRelease(
+    openPrivateSqlite(path, { initialize: () => {} }),
+    (value) => Effect.sync(() => value.database.close())
+  )
+  return yield* Effect.sync(() =>
+    Schema.decodeUnknownSync(Schema.Struct({
+      closed: Schema.Number,
+      episodes: Schema.Number,
+      sends: Schema.Number,
+      acknowledged: Schema.Number
+    }))(
+      opened.database.prepare(`SELECT
+    (SELECT COUNT(*) FROM blocked_push_episodes WHERE closed_at IS NOT NULL) AS closed,
+    (SELECT COUNT(*) FROM blocked_push_episodes) AS episodes,
+    (SELECT COUNT(*) FROM blocked_push_sends) AS sends,
+    (SELECT COUNT(*) FROM blocked_push_acknowledged) AS acknowledged`).get()
+    )
+  )
+})
+
 const setup = Effect.fn("BlockedPushTest.setup")(function*() {
   const fs = yield* FileSystem.FileSystem
   const paths = yield* Path.Path
@@ -39,12 +62,16 @@ const setup = Effect.fn("BlockedPushTest.setup")(function*() {
     keys: { auth: "auth_key", p256dh: "public_key" }
   }, "owner@example.test")
   const sent = yield* Ref.make<ReadonlyArray<BlockedPushPayload>>([])
-  const run = (observations: ReadonlyArray<BlockedObservation>, activeStore = store) =>
+  const run = (
+    observations: ReadonlyArray<BlockedObservation>,
+    activeStore = store,
+    allowedPushOrigins: ReadonlyArray<string> = ["https://push.example.test"]
+  ) =>
     runBlockedPushPass({
       store: activeStore,
       subscriptions,
       allowedUsers: ["owner@example.test"],
-      allowedPushOrigins: ["https://push.example.test"],
+      allowedPushOrigins,
       loadObservations: () => Effect.succeed(observations),
       send: (_target, payload) => Ref.update(sent, (values) => [...values, payload])
     })
@@ -85,6 +112,81 @@ const setup = Effect.fn("BlockedPushTest.setup")(function*() {
 
 describe("blocked agent notifications", () => {
   it.layer(NodeServices.layer)((it) => {
+    it.effect("waiting starts and preserves the same needs-you episode", () =>
+      Effect.gen(function*() {
+        const test = yield* setup()
+        yield* test.pass("waiting")
+        expect(yield* Ref.get(test.sent)).toMatchObject([{ state: "needs-you", firstLine: "worker needs you" }])
+        yield* test.pass("waiting")
+        yield* test.pass("blocked")
+        yield* test.pass("waiting")
+        expect(yield* Ref.get(test.sent)).toHaveLength(1)
+        yield* TestClock.adjust("15 minutes")
+        yield* test.pass("waiting")
+        expect(yield* Ref.get(test.sent)).toHaveLength(2)
+        yield* test.pass("idle")
+        yield* test.pass("error")
+        expect(yield* Ref.get(test.sent)).toHaveLength(3)
+      }))
+    it.effect("prunes closed episode payloads and dependents after seven days while preserving open episodes", () =>
+      Effect.gen(function*() {
+        const test = yield* setup()
+        yield* TestClock.setTime(0)
+        yield* test.pass("blocked")
+        yield* test.store.heartbeat("owner@example.test", {
+          clientId: "browser-one",
+          target: { host: "HOST-A", agentId: "agent-one" }
+        })
+        yield* test.store.heartbeat("owner@example.test", { clientId: "browser-one", target: null })
+        yield* test.pass("idle")
+        const active = { ...agent("blocked"), id: "agent-two" }
+        yield* test.run([{ host: "HOST-A", complete: true, observedAt: 0, agents: [agent("idle"), active] }])
+        yield* TestClock.adjust(7 * 24 * 60 * 60 * 1000 - 1)
+        yield* test.run([{ host: "HOST-A", complete: true, observedAt: 0, agents: [agent("idle"), active] }])
+        expect(yield* retainedRows(test.path)).toEqual({ closed: 1, episodes: 2, sends: 3, acknowledged: 1 })
+        yield* TestClock.adjust(1)
+        yield* test.run([{ host: "HOST-A", complete: true, observedAt: 0, agents: [agent("idle"), active] }])
+        expect(yield* retainedRows(test.path)).toEqual({ closed: 0, episodes: 1, sends: 2, acknowledged: 0 })
+      }))
+    it.effect("pruning keeps episode starts monotonic across restart even for equal observation timestamps", () =>
+      Effect.gen(function*() {
+        const test = yield* setup()
+        yield* TestClock.setTime(0)
+        for (let index = 0; index < 3; index += 1) {
+          yield* test.run([{ host: "HOST-A", complete: true, observedAt: 0, agents: [agent("blocked")] }])
+          yield* test.run([{ host: "HOST-A", complete: true, observedAt: 0, agents: [agent("idle")] }])
+        }
+        yield* TestClock.adjust("7 days")
+        yield* test.run([{ host: "HOST-A", complete: false, observedAt: 0, agents: [] }])
+        expect(yield* retainedRows(test.path)).toEqual({ closed: 0, episodes: 0, sends: 0, acknowledged: 0 })
+        const reopened = yield* Effect.acquireRelease(
+          BlockedPushStore.open(test.path),
+          (value) => Effect.sync(() => value.close())
+        )
+        yield* test.run([{ host: "HOST-A", complete: true, observedAt: 0, agents: [agent("blocked")] }], reopened)
+        const pending = yield* reopened.pending([{ host: "HOST-A", agentId: "agent-one" }])
+        expect(pending.map((episode) => episode.startedAt)).toEqual([3])
+      }))
+    it.effect("removed subscription revisions leave no retained send rows", () =>
+      Effect.gen(function*() {
+        const test = yield* setup()
+        yield* test.pass("blocked")
+        expect((yield* retainedRows(test.path)).sends).toBe(1)
+        yield* test.subscriptions.deleteOwnedSubscription("https://push.example.test/one", "owner@example.test")
+        yield* test.pass("blocked")
+        expect((yield* retainedRows(test.path)).sends).toBe(0)
+        expect((yield* retainedRows(test.path)).episodes).toBe(1)
+      }))
+    it.effect("a subscription rejected by the current endpoint policy is removed without sending", () =>
+      Effect.gen(function*() {
+        const test = yield* setup()
+        yield* test.pass("blocked")
+        expect(yield* test.subscriptions.listSubscriptions()).toHaveLength(1)
+        yield* test.run([{ host: "HOST-A", complete: true, observedAt: 0, agents: [agent("blocked")] }], test.store, [])
+        expect(yield* test.subscriptions.listSubscriptions()).toEqual([])
+        expect((yield* retainedRows(test.path)).sends).toBe(0)
+        expect(yield* Ref.get(test.sent)).toHaveLength(1)
+      }))
     it.effect("only the latest Voice blocker creates an episode; status text stays out of the payload", () =>
       Effect.gen(function*() {
         const test = yield* setup()

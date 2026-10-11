@@ -2,6 +2,7 @@ import { openPrivateSqlite, type PrivateSqlite } from "@knpkv/herdr-fleet/sqlite
 import { Clock, Effect, Schema, Semaphore } from "effect"
 import type { DatabaseSync } from "node:sqlite"
 import {
+  blockedAgentBucket,
   BlockedObservation,
   blockedPromptFirstLine,
   BlockedPushPayload,
@@ -11,6 +12,8 @@ import {
   StageHeartbeat,
   stageViewingTtlMillis
 } from "./blocked-push-model.js"
+
+const closedEpisodeRetentionMillis = 7 * 24 * 60 * 60 * 1_000
 
 const Episode = Schema.Struct({
   host: Schema.String,
@@ -52,6 +55,12 @@ export class BlockedPushStore {
         payload TEXT NOT NULL, closed_at INTEGER, missing_since INTEGER, missing_reads INTEGER NOT NULL DEFAULT 0,
         PRIMARY KEY (host, agent_id, started_at)
       );
+      CREATE TABLE IF NOT EXISTS blocked_push_agents (
+        host TEXT COLLATE NOCASE NOT NULL, agent_id TEXT NOT NULL, last_started_at INTEGER NOT NULL,
+        PRIMARY KEY (host, agent_id)
+      );
+      INSERT OR IGNORE INTO blocked_push_agents
+        SELECT host, agent_id, MAX(started_at) FROM blocked_push_episodes GROUP BY host, agent_id;
       CREATE UNIQUE INDEX IF NOT EXISTS blocked_push_open ON blocked_push_episodes (host, agent_id) WHERE closed_at IS NULL;
       CREATE TABLE IF NOT EXISTS blocked_push_sends (
         host TEXT COLLATE NOCASE NOT NULL, agent_id TEXT NOT NULL, started_at INTEGER NOT NULL,
@@ -92,6 +101,32 @@ export class BlockedPushStore {
       }).pipe(Effect.tap(() => this.#secureFiles.pipe(Effect.mapError(failure(`${operation}.permissions`)))))
     )
 
+  /** Closed sensitive data expires after seven days; only identity watermarks survive. Removed subscription revisions lose all sends. */
+  readonly prune = Effect.fn("BlockedPushStore.prune")(
+    function*(this: BlockedPushStore, liveSubscriptions: ReadonlyArray<string>) {
+      const now = yield* Clock.currentTimeMillis
+      return yield* this.#transaction("prune", (db) => {
+        db.prepare("DELETE FROM blocked_push_episodes WHERE closed_at <= ?").run(now - closedEpisodeRetentionMillis)
+        for (const table of ["blocked_push_sends", "blocked_push_acknowledged"]) {
+          db.prepare(`DELETE FROM ${table} WHERE NOT EXISTS (
+            SELECT 1 FROM blocked_push_episodes AS episode WHERE episode.host = ${table}.host
+            AND episode.agent_id = ${table}.agent_id AND episode.started_at = ${table}.started_at
+          )`).run()
+        }
+        const live = new Set(liveSubscriptions)
+        const revisions = Schema.decodeUnknownSync(Schema.Array(Schema.Struct({ subscription: Schema.String })))(
+          db.prepare("SELECT DISTINCT subscription FROM blocked_push_sends").all()
+        )
+        for (const { subscription } of revisions) {
+          if (!live.has(subscription)) {
+            db.prepare("DELETE FROM blocked_push_sends WHERE subscription = ?").run(subscription)
+          }
+        }
+        db.prepare("DELETE FROM blocked_push_viewing WHERE expires_at <= ?").run(now)
+      })
+    }
+  )
+
   /** Partial reads never start or end episodes and break any absence sequence. */
   readonly observe = Effect.fn("BlockedPushStore.observe")(
     function*(this: BlockedPushStore, input: BlockedObservation) {
@@ -123,8 +158,9 @@ export class BlockedPushStore {
           db.prepare(
             "UPDATE blocked_push_episodes SET missing_since = NULL, missing_reads = 0 WHERE host = ? AND agent_id = ? AND closed_at IS NULL"
           ).run(host, agent.id)
-          if (agent.state === "unknown" && agent.blocker !== true) continue
-          if (agent.state !== "blocked" && agent.state !== "needs-you" && agent.blocker !== true) {
+          const bucket = blockedAgentBucket(agent.state)
+          if (bucket === "unknown" && agent.blocker !== true) continue
+          if (bucket === "inactive" && agent.blocker !== true) {
             db.prepare(
               "UPDATE blocked_push_episodes SET closed_at = ? WHERE host = ? AND agent_id = ? AND closed_at IS NULL"
             ).run(observation.observedAt, host, agent.id)
@@ -135,9 +171,9 @@ export class BlockedPushStore {
             host,
             agentId: agent.id,
             agentName: agent.name,
-            state: agent.state === "blocked" ? "blocked" : "needs-you",
+            state: bucket === "blocked" ? "blocked" : "needs-you",
             firstLine: blockedPromptFirstLine(
-              agent.firstLine ?? (agent.state === "blocked" ? `${agent.name} is blocked` : `${agent.name} needs you`)
+              agent.firstLine ?? (bucket === "blocked" ? `${agent.name} is blocked` : `${agent.name} needs you`)
             ),
             approvalJobId: agent.approvalJobId ?? null
           })
@@ -146,12 +182,16 @@ export class BlockedPushStore {
           ).get(host, agent.id)
           if (current === undefined) {
             const latest = Schema.decodeUnknownSync(Schema.Struct({ latest: Schema.NullOr(Schema.Number) }))(
-              db.prepare("SELECT MAX(started_at) AS latest FROM blocked_push_episodes WHERE host = ? AND agent_id = ?")
+              db.prepare(
+                "SELECT MAX(last_started_at) AS latest FROM blocked_push_agents WHERE host = ? AND agent_id = ?"
+              )
                 .get(host, agent.id)
             ).latest
             const startedAt = latest === null ? observation.observedAt : Math.max(observation.observedAt, latest + 1)
             db.prepare("INSERT INTO blocked_push_episodes (host, agent_id, started_at, payload) VALUES (?, ?, ?, ?)")
               .run(host, agent.id, startedAt, JSON.stringify(payload))
+            db.prepare(`INSERT INTO blocked_push_agents VALUES (?, ?, ?) ON CONFLICT(host, agent_id)
+              DO UPDATE SET last_started_at = excluded.last_started_at`).run(host, agent.id, startedAt)
           } else {
             db.prepare(
               "UPDATE blocked_push_episodes SET payload = ? WHERE host = ? AND agent_id = ? AND closed_at IS NULL"

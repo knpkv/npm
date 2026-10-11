@@ -16,6 +16,7 @@ export type ApprovalWorkerRegistration = {
       readonly data: PushPayload
       readonly icon: string
       readonly tag: string
+      readonly renotify?: boolean
     }
   ) => Promise<void>
 }

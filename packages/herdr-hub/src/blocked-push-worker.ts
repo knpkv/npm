@@ -1,5 +1,10 @@
 import { Effect, Result, Schedule, Schema } from "effect"
-import { type BlockedObservation, type BlockedPushPayload, BlockedPushRecipientError } from "./blocked-push-model.js"
+import {
+  blockedAgentBucket,
+  type BlockedObservation,
+  type BlockedPushPayload,
+  BlockedPushRecipientError
+} from "./blocked-push-model.js"
 import type { BlockedPushStore } from "./blocked-push-store.js"
 import { PushDeliveryError } from "./errors.js"
 import type { PushSubscriptionRecord } from "./model.js"
@@ -18,18 +23,25 @@ type Options<LoadError, SendError, LoadServices, SendServices> = {
   ) => Effect.Effect<void, SendError, SendServices>
 }
 
+const subscriptionRevision = (target: PushSubscriptionRecord & { readonly owner?: string }): string =>
+  JSON.stringify([target.owner, target.endpoint, target.keys])
+
 export const runBlockedPushPass = Effect.fn("BlockedPushWorker.runPass")(
   function*<LE, SE, LR, SR>(options: Options<LE, SE, LR, SR>) {
+    const subscriptions = yield* options.subscriptions.listSubscriptions()
+    yield* options.store.prune(subscriptions.map(subscriptionRevision))
     const observations = yield* options.loadObservations()
     for (const observation of observations) yield* options.store.observe(observation)
     const episodes = yield* options.store.pending(
       observations.filter((read) => read.complete).flatMap((read) =>
         read.agents
-          .filter((agent) => agent.state === "blocked" || agent.state === "needs-you" || agent.blocker === true)
+          .filter((agent) => {
+            const bucket = blockedAgentBucket(agent.state)
+            return bucket === "blocked" || bucket === "needs-you" || agent.blocker === true
+          })
           .map((agent) => ({ host: read.host, agentId: agent.id }))
       )
     )
-    const subscriptions = yield* options.subscriptions.listSubscriptions()
     for (const episode of episodes) {
       for (const target of subscriptions) {
         yield* Effect.gen(function*() {
@@ -41,7 +53,7 @@ export const runBlockedPushPass = Effect.fn("BlockedPushWorker.runPass")(
             return
           }
           yield* validatePushEndpoint(target.endpoint, options.allowedPushOrigins)
-          const subscription = JSON.stringify([owner, target.endpoint, target.keys])
+          const subscription = subscriptionRevision(target)
           const reserved = yield* options.store.reserve(
             episode,
             subscription,
@@ -64,13 +76,15 @@ export const runBlockedPushPass = Effect.fn("BlockedPushWorker.runPass")(
           yield* Effect.logError("BlockedPushWorker.delivery_failed", error)
         }).pipe(
           Effect.catchTag(
-            "BlockedPushRecipientError",
+            ["BlockedPushRecipientError", "PushEndpointNotAllowedError"],
             () => options.subscriptions.deleteSubscriptionPrivileged(target.endpoint)
           ),
           Effect.catch((error) => Effect.logError("BlockedPushWorker.delivery_failed", error))
         )
       }
     }
+    const remaining = yield* options.subscriptions.listSubscriptions()
+    yield* options.store.prune(remaining.map(subscriptionRevision))
   }
 )
 

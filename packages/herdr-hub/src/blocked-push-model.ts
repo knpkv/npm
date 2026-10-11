@@ -1,5 +1,13 @@
-import { ConnectAgent } from "@knpkv/herdr-connect/model"
+import { agentStateBucket, ConnectAgent } from "@knpkv/herdr-connect/model"
 import { Schema } from "effect"
+
+/** The notification bucket for known Herdr states; unavailable or new states preserve episode evidence. */
+export const blockedAgentBucket = (state: string): "blocked" | "needs-you" | "inactive" | "unknown" => {
+  const bucket = agentStateBucket(state)
+  return bucket === null ? "unknown" : bucket === "needs-you"
+    ? state.toLocaleLowerCase("en-US") === "blocked" ? "blocked" : "needs-you"
+    : "inactive"
+}
 
 const Label = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(256))
 const Timestamp = Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 8_640_000_000_000_000 }))

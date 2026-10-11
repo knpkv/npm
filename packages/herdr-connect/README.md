@@ -14,7 +14,7 @@ herdr owns the scrollback and scrolls in whole lines, so touch scrolling draws t
 
 Browser consumers can import `@knpkv/herdr-connect/client` for the mounting entry, `@knpkv/herdr-connect/surface` for the embeddable state and view, and `@knpkv/herdr-connect/styles.css` for package-owned styles. Exact `host` plus stable `agent` query parameters select that room. The relationship store keys metadata by exact host and stable agent ID. Trusted live inventory may replace a stored parent only for the same host, stable agent ID, and pane with a strictly newer observation; durable, stale, equal, or pane-changing observations cannot reparent an agent. The view renders reported roots and parent relations; missing, cross-host, cyclic, or ambiguous ownership stays explicit and is never guessed.
 
-Browser contracts are available through `@knpkv/herdr-connect/model`; browser subpaths do not pull SQLite or Node process code into the bundle.
+Browser contracts are available through `@knpkv/herdr-connect/model`; browser subpaths do not pull SQLite or Node process code into the bundle. Its pure `agentStateBucket` helper shares the UI state classification with background consumers and returns `null` for unknown/new states.
 
 `ConnectSurface.onStageChange` is an optional application callback receiving the open stage's authenticated client-visible `{ host, id }`, or `null` on close and unmount. It observes the stage only; the application owns any reporting and persistence. The callback defaults to absent. The canonical hub uses it for invisible stage-viewing notification reporting.
 

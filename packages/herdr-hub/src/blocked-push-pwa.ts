@@ -21,6 +21,7 @@ export const showBlockedNotification = (
   return registration.showNotification(`${payload.agentName} needs you`, {
     badge: "/assets/relay-badge-96.png",
     icon: "/assets/relay-192.png",
+    renotify: true,
     body: payload.firstLine === state ? state : `${state}. ${payload.firstLine}`,
     tag: `agent-blocked:${payload.host.toLowerCase()}:${payload.agentId}`,
     data: payload
