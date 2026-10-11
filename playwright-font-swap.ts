@@ -15,7 +15,8 @@
  * same reason (a CSP that allows only `data:` fonts is widened to the held origin, in the test only);
  * a page whose fonts are inlined in its own document (review's offline guide) loads the
  * `text` from `externaliseInlineFonts(html)` and passes its `fonts` as `inlineFonts`. Once `ready` is
- * visible, the text under it must have rendered in a fallback face (`FALLBACK_FAMILIES`): a runner
+ * visible and every linked stylesheet has applied (a static `ready` element is laid out before the
+ * fallback faces are declared), the text under it must have rendered in a fallback face (`FALLBACK_FAMILIES`): a runner
  * without those fonts would otherwise measure system-ui and pass for the wrong reason. The fonts are
  * held past the block period and released; the text must still render in the fallback afterwards
  * (`FontLateFaceSwappedError` otherwise, meaning a face lost `optional`), and every requested Geist
@@ -229,6 +230,15 @@ new PerformanceObserver((list) => {
 }).observe({ buffered: true, type: "layout-shift" });
 `
 
+/** Resolves once every `<link rel="stylesheet">` has loaded or failed (a failed sheet fails later checks). */
+// Evaluated rather than polled with waitForFunction, which evals its string and trips a page's CSP.
+const STYLESHEETS_APPLIED = `Promise.all([...document.querySelectorAll('link[rel~="stylesheet"]')].map((link) =>
+  link.sheet !== null ? undefined : new Promise((done) => {
+    link.addEventListener("load", done, { once: true });
+    link.addEventListener("error", done, { once: true });
+  })
+)).then(() => undefined)`
+
 /** Ten "0"s in the mono fallback at 14px: exactly 84px unless glyph advances are hinted. */
 // Canvas measures with a substitute font until the local() face has loaded, and whether the page has
 // loaded it yet depends on what it drew first; so the face is loaded explicitly, and null means it
@@ -288,6 +298,9 @@ export const measureFontSwapShift = async (page: Page, options: FontSwapOptions)
     if (options.load !== undefined) await options.load()
     else await page.goto(options.url ?? "/", { waitUntil: "commit" })
     await page.locator(options.ready).first().waitFor()
+    // A static `ready` element is laid out before the head's stylesheets arrive (the CSS route above
+    // rewrites them first), and until they apply the fallback @font-face does not exist yet.
+    await page.evaluate(STYLESHEETS_APPLIED)
     const probe = options.probe ?? options.ready
     // Liberation Mono's "0" is exactly 0.6em, so ten of them at 14px are 84px unless advances are hinted.
     const zeros = Schema.decodeUnknownSync(Schema.NullOr(Schema.Number))(await page.evaluate(MEASURE_ZEROS))

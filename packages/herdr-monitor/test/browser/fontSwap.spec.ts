@@ -12,3 +12,22 @@ for (const viewport of [{ height: 900, width: 1440 }, { height: 844, width: 390 
     expect(swap.sum, swap.report).toBeLessThanOrEqual(0.05)
   })
 }
+
+// The h1 is static HTML, laid out before board.css applies; a slow stylesheet must not reach the
+// measurement before the fallback @font-face exists (a CI flake: 'Geist Mono Fallback' did not load).
+test("a slow stylesheet still measures the fallback faces", async ({ page }) => {
+  await page.setViewportSize({ height: 900, width: 1440 })
+  const swap = await measureFontSwapShift(page, {
+    probe: "h1",
+    ready: "h1",
+    // Registered after the helper's routes, so this handler runs first and holds board.css.
+    load: async () => {
+      await page.route("**/board.css", async (route) => {
+        await page.waitForTimeout(1_000)
+        await route.fallback()
+      })
+      await page.goto("/", { waitUntil: "commit" })
+    }
+  })
+  expect(swap.sum, swap.report).toBeLessThanOrEqual(0.05)
+})
