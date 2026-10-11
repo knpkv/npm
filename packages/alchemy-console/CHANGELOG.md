@@ -1,5 +1,11 @@
 # @knpkv/alchemy-console
 
+## 0.3.0
+
+### Minor Changes
+
+- [#838](https://github.com/knpkv/npm/pull/838) [`686a11d`](https://github.com/knpkv/npm/commit/686a11d478903647941d4a791e70fe6222857003) Thanks [@konopkov](https://github.com/konopkov)! - Add authenticated stack discovery screens and reusable browser views, with explicit incomplete discovery and owner sign-in states.
+
 ## 0.2.1
 
 ### Patch Changes
