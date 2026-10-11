@@ -3,6 +3,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as ChildEnv from "@knpkv/codecommit-core/ChildEnv.js"
 import { chromium } from "@playwright/test"
 import * as Cause from "effect/Cause"
+import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as FileSystem from "effect/FileSystem"
@@ -23,7 +24,9 @@ class VisualRunnerFailure extends Schema.TaggedError<VisualRunnerFailure>()(
   }
 }
 
-const cliArguments = argv.slice(2)
+const compareOnly = argv.includes("--compare-only")
+const compare = compareOnly || argv.includes("--compare")
+const cliArguments = argv.slice(2).filter((argument) => argument !== "--compare" && argument !== "--compare-only")
 const browserExecutable = chromium.executablePath()
 const program = Effect.gen(function*() {
   const fileSystem = yield* FileSystem.FileSystem
@@ -31,6 +34,13 @@ const program = Effect.gen(function*() {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
   const host = yield* ChildEnv.HostEnvironment
   const shots = path.resolve(host.variables.CC_VISUAL_OUT ?? "test-results/visual/shots")
+  const base = host.variables.CC_VISUAL_BASE
+  if (compare && (base === undefined || base.length === 0)) {
+    return yield* new VisualRunnerFailure({ reason: "CC_VISUAL_BASE is required for comparison" })
+  }
+  if (base !== undefined && path.resolve(base) === shots) {
+    return yield* new VisualRunnerFailure({ reason: "PR and base shots must use different directories" })
+  }
   if (cliArguments.some((argument) => argument.startsWith("--update-snapshots") || argument === "-u")) {
     return yield* new VisualRunnerFailure({
       reason: "visual shots are captured files; comparison never updates the base"
@@ -53,13 +63,15 @@ const program = Effect.gen(function*() {
   if (!Number.isInteger(minimumGiB) || minimumGiB < 4) {
     return yield* new VisualRunnerFailure({ reason: "CC_VISUAL_MIN_MEMORY_GIB must be an integer of at least 4" })
   }
-  if (!Number.isFinite(kilobytes) || kilobytes < minimumGiB * 1024 * 1024) {
+  if (!compareOnly && (!Number.isFinite(kilobytes) || kilobytes < minimumGiB * 1024 * 1024)) {
     return yield* new VisualRunnerFailure({ reason: `visual runner needs at least ${minimumGiB} GiB MemAvailable` })
   }
-  yield* fileSystem.makeDirectory(shots, { recursive: true })
-  for (const name of yield* fileSystem.readDirectory(shots)) {
-    if (/^p0-\d+--[a-z0-9-]+--(?:desktop|mobile)-(?:light|dark)\.png$/u.test(name)) {
-      yield* fileSystem.remove(path.join(shots, name))
+  if (!compareOnly) {
+    yield* fileSystem.makeDirectory(shots, { recursive: true })
+    for (const name of yield* fileSystem.readDirectory(shots)) {
+      if (/^p0-\d+--[a-z0-9-]+--(?:desktop|mobile)-(?:light|dark)\.png$/u.test(name)) {
+        yield* fileSystem.remove(path.join(shots, name))
+      }
     }
   }
   const run = (configuration: string, arguments_: ReadonlyArray<string>) =>
@@ -77,6 +89,7 @@ const program = Effect.gen(function*() {
           PATH: `${path.join(root, "bin")}:${host.variables.PATH ?? ""}`,
           BROWSER: "none",
           CC_VISUAL_OUT: shots,
+          CC_VISUAL_BASE: base === undefined ? undefined : path.resolve(base),
           AWS_CONFIG_FILE: path.join(root, "home", "config"),
           AWS_SHARED_CREDENTIALS_FILE: path.join(root, "home", "credentials"),
           PLAYWRIGHT_BROWSERS_PATH: path.dirname(path.dirname(path.dirname(browserExecutable)))
@@ -86,7 +99,19 @@ const program = Effect.gen(function*() {
         stderr: "inherit"
       })
     )
-  return yield* run("playwright.visual.config.ts", cliArguments)
+  if (!compareOnly) {
+    const captureExit = yield* run("playwright.visual.config.ts", cliArguments)
+    if (captureExit !== 0 || !compare) return captureExit
+  }
+  for (const name of ["comparison.json", "comparison.md"]) {
+    const filename = path.resolve("test-results/visual", name)
+    if (yield* fileSystem.exists(filename)) yield* fileSystem.remove(filename)
+  }
+  if (base !== undefined && (yield* fileSystem.exists(path.join(path.resolve(base), ".no-base-harness")))) {
+    yield* Console.log("no base harness — compare skipped")
+    return 0
+  }
+  return yield* run("e2e/visual/compare.config.ts", [])
 }).pipe(Effect.scoped)
 
 program.pipe(
