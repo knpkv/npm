@@ -32,6 +32,7 @@ const render = async (reads: UsageModuleReads) => {
   await act(async () =>
     root?.render(
       <SuperappShell
+        session={{ access: "tailscale", connection: "connected" }}
         modules={[fleet, module]}
         landing={{ module: "fleet", page: "approvals" }}
         host="hub"
@@ -77,6 +78,7 @@ it("repairs selectors only on active Usage and keeps Fleet approval deep links a
   await act(async () =>
     root?.render(
       <SuperappShell
+        session={{ access: "tailscale", connection: "connected" }}
         modules={[
           fleet,
           makeUsageModuleViews({ reads, viewerTimeZone: "Europe/Amsterdam", now: 2_000, onHubMachine: false })
@@ -160,7 +162,7 @@ it("reads limits only on its page, filters locally, repairs unknown hosts and ke
     "BETARead 00:00 in UTC3.6K",
     "cedarOfflineUnknown"
   ])
-  expect(document.querySelector(".usage-details-intro")?.textContent).toContain("4.8K reported tokens")
+  expect(document.querySelector('[aria-label="By host"]')?.textContent).toContain("4.8K reported tokens")
   expect(document.querySelector('[aria-label="By agent and model"]')?.textContent).toContain("1.2K")
   expect(document.querySelector('[aria-label="By agent and model"]')?.textContent).not.toContain("4.8K")
   expect(document.querySelector('[aria-label="By provider"]')?.textContent).toContain("1.2K")
@@ -220,4 +222,62 @@ it("owns range changes in the URL, sends the selected zone and interrupts reads 
   visibility.mockReturnValue("hidden")
   await act(async () => document.dispatchEvent(new Event("visibilitychange")))
   await vi.waitFor(() => expect(interruptions).toBe(2))
+})
+
+it("shows By tool for one reported host, with no limits fan-out or zero for an unavailable host", async () => {
+  let limitCalls = 0
+  const queries: Array<UsageQuery> = []
+  const reading: FleetUsage["hosts"][number]["reading"] = {
+    _tag: "Read",
+    skipped: 0,
+    usage: {
+      v: 1,
+      machine: "ALPHA",
+      observedAt: 0,
+      range: { preset: "7d", timeZone: "UTC", from: 0, to: 86_400_000, bucket: "day" },
+      periods: [{ key: "1970-01-01", start: 0 }],
+      tokens: [
+        { period: 0, agent: "claude", model: "Opus", tokens: 1200 },
+        { period: 0, agent: "codex", model: "GPT-5", tokens: 400 }
+      ],
+      limits: []
+    }
+  }
+  const report: FleetUsage = {
+    hosts: [
+      { host: "ALPHA", readAt: 1000, reading },
+      { host: "BETA", readAt: 1000, reading: { ...reading, usage: { ...reading.usage, machine: "BETA", tokens: [] } } }
+    ],
+    failures: [{ host: "cedar", reason: "offline" }],
+    peersListed: true
+  }
+  const reads: UsageModuleReads = {
+    usage: (query) =>
+      Effect.sync(() => {
+        queries.push(query)
+        return { fleet: report, receivedAt: 1000 }
+      }),
+    limits: Effect.sync(() => {
+      limitCalls += 1
+      return { fleet: limits, receivedAt: 1000 }
+    })
+  }
+  window.history.replaceState(null, "", "?range=7d&timeZone=UTC#usage/by-tool")
+  await render(reads)
+  expect(document.querySelector<HTMLSelectElement>('[name="usage-host"]')?.value).toBe("ALPHA")
+  expect(document.querySelector(".usage-by-tool-total")?.textContent).toBe("1.6K tokens")
+  expect([...document.querySelectorAll(".usage-by-tool tbody tr")].map((row) => row.textContent)).toEqual([
+    "Claude Code, Opus1.2K75%",
+    "Codex, GPT-540025%"
+  ])
+  expect(document.querySelector(".usage-by-tool time")?.textContent).toBe("00:00")
+  expect(document.querySelector(".usage-details-controls")?.textContent).toContain("Periods in UTC")
+  await click("?range=7d&timeZone=UTC&host=cedar#usage/by-tool")
+  expect(document.querySelector(".usage-by-tool-total")?.textContent).toBe("Unknown")
+  expect(document.querySelector(".usage-by-tool")?.textContent).toContain("cedar: Offline")
+  expect(document.querySelectorAll(".usage-by-tool tbody tr")).toHaveLength(0)
+  await click("?range=7d&timeZone=UTC&host=BETA#usage/by-tool")
+  expect(document.querySelector(".usage-by-tool-total")?.textContent).toBe("0 tokens")
+  expect(queries).toEqual([{ range: "7d", timeZone: "UTC" }])
+  expect(limitCalls).toBe(0)
 })

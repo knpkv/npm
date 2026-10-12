@@ -1,10 +1,10 @@
 import { Context, Effect, Layer, Result, Schema } from "effect"
 import {
+  connectModule,
   type ModuleDescriptor,
   type ModuleListener,
   ModuleRegistrationError,
   moduleRegistryFingerprint,
-  todayModule,
   validateModuleRegistry
 } from "./module-contract.js"
 import { collectNeedsYou } from "./module-needs-you-server.js"
@@ -28,6 +28,8 @@ export class ModuleRouteFailure extends Schema.TaggedError<ModuleRouteFailure>()
 }) {}
 
 const ModuleRouteTypeId = Symbol("ModuleApiRoute")
+/** The agent home owns the fleet-wide approvals summary; providers are composed once by the hub. */
+export const needsYouRouteOwner = connectModule.id
 const ApiPath = Schema.String.check(Schema.isPattern(/^(\/[a-z0-9][a-z0-9-]*)+$/))
 
 /**
@@ -113,7 +115,7 @@ export const makeModuleLayer = <E, R>(
             if (!routeHandlers.has(route) || Result.isFailure(Schema.decodeUnknownResult(ApiPath)(route.path))) {
               return yield* new ModuleRegistrationError({ module: module.descriptor.id, reason: "invalid_route" })
             }
-            if (module.descriptor.id === todayModule.id && route.method === "GET" && route.path === "/needs-you") {
+            if (module.descriptor.id === needsYouRouteOwner && route.method === "GET" && route.path === "/needs-you") {
               return yield* new ModuleRegistrationError({ module: module.descriptor.id, reason: "duplicate_route" })
             }
             const identity = `${route.method} ${route.path}`
@@ -134,7 +136,7 @@ export const makeModuleLayer = <E, R>(
       return {
         modules: mounted.map((module) => ({
           descriptor: module.descriptor,
-          routes: module.descriptor.id === todayModule.id
+          routes: module.descriptor.id === needsYouRouteOwner
             ? [
               ...module.routes,
               moduleReadRoute(

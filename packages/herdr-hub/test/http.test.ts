@@ -710,7 +710,7 @@ esac
           const headers = {
             "tailscale-user-login": "owner@example.com"
           }
-          for (const route of ["/v1/modules/today/needs-you", "/v1/modules/unknown/read", "/v1/modules"]) {
+          for (const route of ["/v1/modules/connect/needs-you", "/v1/modules/unknown/read", "/v1/modules"]) {
             const response = yield* Effect.promise(() => fetch(`${approvalUrl}${route}`, { headers }))
             expect(response.status).toBe(404)
           }
@@ -3279,7 +3279,7 @@ esac
         return yield* Effect.die("Work listener missing")
       }
       const workUrl = server.workUrl
-      for (const route of ["/v1/modules/today/needs-you", "/v1/modules/unknown/read", "/v1/modules"]) {
+      for (const route of ["/v1/modules/connect/needs-you", "/v1/modules/unknown/read", "/v1/modules"]) {
         const response = yield* Effect.promise(() => fetch(`${workUrl}${route}`))
         expect(response.status).toBe(404)
       }
@@ -5665,10 +5665,14 @@ esac
           )
       )
       const response = yield* Effect.promise(() =>
-        hubRequest(`${hub.serveUrl}/v1/modules/today/needs-you`, {
+        hubRequest(`${hub.serveUrl}/v1/modules/connect/needs-you`, {
           headers: hub.headers
         })
       )
+      const retired = yield* Effect.promise(() =>
+        hubRequest(`${hub.serveUrl}/v1/modules/today/needs-you`, { headers: hub.headers })
+      )
+      expect(retired.status).toBe(404)
       expect(response.status, response.body).toBe(200)
       expect(response.cookies).toEqual([])
       const body = Schema.decodeUnknownSync(Schema.TaggedStruct("Complete", {
@@ -5689,7 +5693,7 @@ esac
       const cookie = dashboard.cookies[0]?.split(";", 1).join("")
       if (cookie === undefined) return yield* Effect.die("Dashboard must issue its proof cookie")
       const existingSession = yield* Effect.promise(() =>
-        hubRequest(`${hub.serveUrl}/v1/modules/today/needs-you`, {
+        hubRequest(`${hub.serveUrl}/v1/modules/connect/needs-you`, {
           headers: { ...hub.headers, cookie }
         })
       )
@@ -5796,23 +5800,23 @@ esac
       const get = (path: string) => Effect.promise(() => hubRequest(`${hub.serveUrl}${path}`, { headers: hub.headers }))
       hub.deny()
       const dashboard = yield* get("/v1/dashboard")
-      const denied = yield* get("/v1/modules/today/needs-you")
+      const denied = yield* get("/v1/modules/connect/needs-you")
       expect(denied.status).toBe(dashboard.status)
       expect(denied.status).toBe(403)
       expect(reads).toBe(0)
       hub.allow()
-      const malformed = yield* get("/v1/modules/today/needs-you?extra=yes")
+      const malformed = yield* get("/v1/modules/connect/needs-you?extra=yes")
       expect(malformed.status).toBe(400)
       expect(JSON.parse(malformed.body)).toEqual({ error: "invalid_query" })
       expect(reads).toBe(0)
-      expect((yield* get("/v1/modules/today/needs-you")).status).toBe(200)
+      expect((yield* get("/v1/modules/connect/needs-you")).status).toBe(200)
       expect(reads).toBe(1)
       for (const path of ["/v1/modules", "/v1/modules/today/missing", "/v1/modules/unknown/needs-you"]) {
         expect((yield* get(path)).status).toBe(404)
       }
       for (const url of [hub.server.url, hub.server.tailnetUrl]) {
         if (url === null) return yield* Effect.die("Expected a listener URL")
-        const wrongListener = yield* Effect.promise(() => fetch(`${url}/v1/modules/today/needs-you`))
+        const wrongListener = yield* Effect.promise(() => fetch(`${url}/v1/modules/connect/needs-you`))
         expect(wrongListener.status).toBe(404)
         yield* Effect.promise(() => wrongListener.text())
       }
@@ -5879,7 +5883,7 @@ esac
           })
         )
       const get = () =>
-        Effect.promise(() => hubRequest(`${hub.serveUrl}/v1/modules/today/needs-you`, { headers: hub.headers }))
+        Effect.promise(() => hubRequest(`${hub.serveUrl}/v1/modules/connect/needs-you`, { headers: hub.headers }))
       setOnline(true)
       const online = yield* get()
       expect(online.status).toBe(200)
@@ -5937,7 +5941,7 @@ esac
         })
       )
       const get = () =>
-        Effect.promise(() => hubRequest(`${hub.serveUrl}/v1/modules/today/needs-you`, { headers: hub.headers }))
+        Effect.promise(() => hubRequest(`${hub.serveUrl}/v1/modules/connect/needs-you`, { headers: hub.headers }))
       const localFailure = yield* get()
       expect(JSON.parse(localFailure.body)).toEqual({
         _tag: "Partial",

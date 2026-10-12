@@ -176,6 +176,42 @@ describe("ConnectSurface directory loading", () => {
     }
   )
 
+  it.each(["hidden", "inert", "aria-hidden"])(
+    "clears filters without focusing a search under %s",
+    async (attribute) => {
+      respond = () => new Promise<Response>(() => {})
+      const host = document.createElement("div")
+      document.body.append(host)
+      const root = createRoot(host)
+      roots.push(root)
+      const atoms = makeConnectAtoms()
+      await act(async () => {
+        root.render(
+          <RegistryProvider
+            initialValues={[
+              [atoms.agents, AsyncResult.success(agentPage)],
+              [atoms.query, "zzz"],
+              [atoms.hostFilter, agent.host],
+              [atoms.activityFilter, "needs-you"]
+            ]}
+          >
+            <ConnectSurface atoms={atoms} embedded />
+          </RegistryProvider>
+        )
+        for (let index = 0; index < 12; index += 1) await Promise.resolve()
+      })
+      const search = host.querySelector<HTMLInputElement>("input[type='search']")
+      const clear = host.querySelector<HTMLButtonElement>(".connect-scope-clear")
+      if (search === null || clear === null) return expect.unreachable()
+      const focus = vi.spyOn(search, "focus")
+      host.setAttribute(attribute, attribute === "aria-hidden" ? "true" : "")
+      // An owner callback may finish after its module becomes inactive. It must not steal focus.
+      await act(async () => clear.click())
+      expect(search.value).toBe("")
+      expect(focus).not.toHaveBeenCalled()
+    }
+  )
+
   it("shows classified timeout recovery copy, a Retry button and Not updated yet", async () => {
     respond = () => new Promise<Response>(() => {})
     const host = document.createElement("div")
@@ -296,6 +332,42 @@ describe("ConnectSurface directory loading", () => {
     })
     expect(host.querySelector(".connect-agents")?.getAttribute("data-loading")).toBe("true")
   })
+})
+
+/** Active changes presentation only, keeping the terminal subtree and its atom/session identity. */
+it("keeps the same connected terminal owner while its embedded module is inactive", async () => {
+  const host = document.createElement("div")
+  document.body.append(host)
+  const root = createRoot(host)
+  roots.push(root)
+  const atoms = makeConnectAtoms()
+  const paint = async (active: boolean) =>
+    act(async () => {
+      root.render(
+        <RegistryProvider
+          initialValues={[
+            [atoms.agents, AsyncResult.success(agentPage)],
+            [atoms.connection, { _tag: "connected", agent }],
+            [atoms.preference, AsyncResult.success(null)],
+            [atoms.selectedKey, "SER8:agent-reviewer"],
+            [atoms.work, AsyncResult.success(workSnapshots)]
+          ]}
+        >
+          <ConnectSurface atoms={atoms} embedded active={active} />
+        </RegistryProvider>
+      )
+      for (let i = 0; i < 12; i += 1) await Promise.resolve()
+    })
+  await paint(true)
+  const terminal = host.querySelector(".connect-terminal-screen")
+  expect(terminal).not.toBeNull()
+  expect(host.querySelector(".connect-workspace")?.getAttribute("data-mode")).toBe("terminal")
+  await paint(false)
+  expect(host.querySelector(".connect-terminal-screen")).toBe(terminal)
+  expect(host.querySelector(".connect-workspace")?.getAttribute("data-mode")).toBe("terminal")
+  await paint(true)
+  expect(host.querySelector(".connect-terminal-screen")).toBe(terminal)
+  expect(host.querySelector(".connect-workspace")?.getAttribute("data-mode")).toBe("terminal")
 })
 
 describe("ConnectSurface terminal viewport lifecycle", () => {

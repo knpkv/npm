@@ -65,6 +65,15 @@ export const focusWhenShown = (id: string, deadline: number = performance.now() 
   let frame: number
   const focus = (now: number): void => {
     const element = document.getElementById(id)
+    const filters = element?.closest<HTMLElement>("[data-connect-home-filters]")
+    if (filters?.hidden === true) {
+      const reveal = filters.parentElement?.querySelector<HTMLButtonElement>("[data-connect-search-reveal]")
+      if (
+        reveal?.getAttribute("aria-expanded") === "false" &&
+        reveal.closest('[aria-hidden="true"], [inert], [hidden]') === null
+      )
+        reveal.click()
+    }
     if (element !== null && element.closest('[aria-hidden="true"], [inert], [hidden]') === null) element.focus()
     if (element !== null && document.activeElement === element) return
     if (now < deadline) frame = window.requestAnimationFrame(focus)

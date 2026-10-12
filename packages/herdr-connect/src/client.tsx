@@ -78,8 +78,10 @@ import { resolveConnectWorkGoal, workSnapshotForAssociation, type ConnectWorkGoa
 import { WorkPollMount } from "./work-poll.js"
 import { limitsState, loadLimits } from "./fleet-reads-client.js"
 import { ConnectLimits } from "./limits-view.js"
+import { ConnectHomeDirectory, connectHomePurpose } from "./home-directory.js"
 import { makeTerminalWorkerGuard } from "./terminal-worker-guard.js"
 import {
+  connectWorkspaceFocusFailureMessage,
   enterTerminalWorkspaceWithLock,
   returnToDirectoryWorkspace,
   type ConnectWorkspaceElements,
@@ -142,6 +144,7 @@ type ConnectionState =
       readonly _tag: "failed"
       readonly agent: ConnectAgent
       readonly detail: string
+      readonly entryFocusFailure?: ConnectWorkspaceFocusFailureReason
     }
 
 type ConnectionRequest = {
@@ -425,6 +428,13 @@ export const makeConnectAtoms = () => {
 }
 
 export type ConnectAtoms = ReturnType<typeof makeConnectAtoms>
+
+/** Fleet's visible limits panel owns its read and poll; Home has no limits subscription. */
+const ConnectLimitsOwner = ({ atoms }: { readonly atoms: ConnectAtoms }) => {
+  useAtomMount(atoms.limitsPoll)
+  const limits = limitsState(useAtomValue(atoms.limits), Date.now())
+  return <ConnectLimits problem={limits.problem} view={limits.view} />
+}
 
 const socketUrl = (agent: ConnectAgent, dimensions: TerminalDimensions): string => {
   const { cols, rows } = clampTerminalDimensions(dimensions)
@@ -711,18 +721,31 @@ const terminalWorker = (
     }).pipe(Effect.catch((error) => Effect.sync(() => update({ _tag: "failed", agent, detail: error.detail }))))
   )
 
+/**
+ * Fleet is the default directory presentation. Home accepts a host-owned summary above its filters;
+ * both presentations share the same directory reads, selection, stage, pins and terminal lifetime.
+ * The presentation affects only directory content, never terminal input or motion ownership.
+ */
 export const ConnectSurface = ({
+  active = true,
   atoms,
   embedded = false,
   onStageChange,
+  presentation = { _tag: "fleet" },
   roomFooter
 }: {
+  /** Hides portal presentation and stage presence while retaining selection, polls and terminal ownership. */
+  readonly active?: boolean
   readonly atoms: ConnectAtoms
   readonly embedded?: boolean
+  readonly presentation?:
+    { readonly _tag: "fleet" } | { readonly _tag: "home"; readonly summary?: ReactNode; readonly empty?: ReactNode }
   readonly roomFooter?: ReactNode
   /** Optional host observer for the open stage identity; close and unmount report null. */
   readonly onStageChange?: (target: Pick<ConnectAgent, "host" | "id"> | null) => void
 }) => {
+  const fleetPresentation = presentation._tag === "fleet"
+  const DirectoryView = fleetPresentation ? AgentDirectory : ConnectHomeDirectory
   const [activityFilter, setActivityFilter] = useAtom(atoms.activityFilter)
   const directory = useAtomValue(atoms.agents)
   const refreshDirectory = useAtomRefresh(atoms.agents)
@@ -820,9 +843,6 @@ export const ConnectSurface = ({
   const [terminalTextLines, setTerminalTextLines] = useState<ReadonlyArray<string> | null>(null)
   const [workspaceFocusFailure, setWorkspaceFocusFailure] = useState<ConnectWorkspaceFocusFailureReason | null>(null)
   useAtomMount(atoms.agentsPoll)
-  useAtomMount(atoms.limitsPoll)
-  // A host API at the UI boundary, compared only with this page's own receipt time.
-  const limits = limitsState(useAtomValue(atoms.limits), Date.now())
 
   const copyTerminalText = useCallback((text: string): void => {
     navigator.clipboard.writeText(text).then(
@@ -908,7 +928,10 @@ export const ConnectSurface = ({
               setConnection({
                 _tag: "failed",
                 agent: state.agent,
-                detail: "terminal focus transition failed: detached_element"
+                entryFocusFailure: "detached_element",
+                detail: fleetPresentation
+                  ? "terminal focus transition failed: detached_element"
+                  : connectWorkspaceFocusFailureMessage("detached_element")
               })
               return
             }
@@ -925,7 +948,10 @@ export const ConnectSurface = ({
               setConnection({
                 _tag: "failed",
                 agent: state.agent,
-                detail: `terminal focus transition failed: ${transition.reason}`
+                entryFocusFailure: transition.reason,
+                detail: fleetPresentation
+                  ? `terminal focus transition failed: ${transition.reason}`
+                  : connectWorkspaceFocusFailureMessage(transition.reason)
               })
               return
             }
@@ -1068,12 +1094,37 @@ export const ConnectSurface = ({
       ? directory.previousSuccess.value.timestamp
       : null
   const offlineHosts = (current?.failures ?? []).map((failure) => failure.host)
+  const answeringHosts = (current?.hosts ?? []).filter(
+    (host) => !offlineHosts.some((offline) => offline.toLowerCase() === host.toLowerCase())
+  )
   const silentHosts = silentHostsSentence(
     current?.failures ?? [],
     retainedAgents.map(({ host }) => host)
   )
   // The directory's own read time: it changes only when a poll lands, so nothing ticks between reads.
   const updatedAt = AsyncResult.isSuccess(directory) ? directory.timestamp : staleSince
+  const refreshingTimestamp =
+    !fleetPresentation && directory._tag === "Success" && directory.waiting ? directory.timestamp : null
+  const [refreshNoticeDeadline, setRefreshNoticeDeadline] = useState<number | null>(null)
+  useEffect(() => {
+    if (refreshingTimestamp === null) {
+      setRefreshNoticeDeadline(null)
+      return
+    }
+    // One UI deadline, not another read loop. A held request must cross the threshold without unrelated renders.
+    const timeout = window.setTimeout(
+      () => setRefreshNoticeDeadline(refreshingTimestamp),
+      Math.max(0, 10_000 - (Date.now() - refreshingTimestamp))
+    )
+    return () => window.clearTimeout(timeout)
+  }, [refreshingTimestamp])
+  const refreshAge = refreshingTimestamp === null ? 0 : Math.max(0, Date.now() - refreshingTimestamp)
+  const refreshingOldReading =
+    refreshingTimestamp !== null && (refreshAge >= 10_000 || refreshNoticeDeadline === refreshingTimestamp)
+  const refreshAgeText =
+    refreshAge < 60_000
+      ? `${String(Math.floor(refreshAge / 1_000))} sec`
+      : `${String(Math.floor(refreshAge / 60_000))} min`
   const selected =
     agents.find((agent) => connectAgentKey(agent) === selectedKey) ??
     (connectionRequest !== null && connectAgentKey(connectionRequest.agent) === selectedKey
@@ -1099,9 +1150,9 @@ export const ConnectSurface = ({
     stageChange.current = onStageChange
   }, [onStageChange])
   useEffect(() => {
-    stageChange.current?.(stageHost === null || stageId === null ? null : { host: stageHost, id: stageId })
+    stageChange.current?.(!active || stageHost === null || stageId === null ? null : { host: stageHost, id: stageId })
     return () => stageChange.current?.(null)
-  }, [stageHost, stageId])
+  }, [active, stageHost, stageId])
   // An agent that leaves the directory closes its stage for good: it must not reopen, uninvited, when the
   // agent comes back on a later poll. Only a loaded list counts; a list still loading keeps the stage.
   useEffect(() => {
@@ -1284,7 +1335,9 @@ export const ConnectSurface = ({
         nextConnection = {
           _tag: "failed",
           agent: connection.agent,
-          detail: `terminal focus transition failed: ${transition.reason}`
+          detail: fleetPresentation
+            ? `terminal focus transition failed: ${transition.reason}`
+            : connectWorkspaceFocusFailureMessage(transition.reason)
         }
         nextFocusFailure = transition.reason
       }
@@ -1333,13 +1386,76 @@ export const ConnectSurface = ({
 
   const directoryScreen = (
     <>
-      <header className={embedded ? "connect-embedded-intro" : "connect-header"}>
+      <header
+        className={fleetPresentation ? (embedded ? "connect-embedded-intro" : "connect-header") : "connect-home-intro"}
+      >
         <Text as="h1" variant="card-title">
           Connect
-          {current === null ? null : <ConnectSummary agents={agents} unavailable={false} />}
+          {!fleetPresentation || current === null ? null : <ConnectSummary agents={agents} unavailable={false} />}
         </Text>
-        {current === null ? <ConnectSummary agents={null} unavailable={directory._tag === "Failure"} /> : null}
+        {fleetPresentation ? (
+          current === null ? (
+            <ConnectSummary agents={null} unavailable={directory._tag === "Failure"} />
+          ) : null
+        ) : (
+          <Text as="p" tone="secondary">
+            {connectHomePurpose}
+          </Text>
+        )}
       </header>
+      {fleetPresentation ||
+      staleSince === null ||
+      (presentation._tag === "home" && presentation.empty !== undefined) ? null : (
+        <div className="connect-home-read-notice" role="status">
+          <div>
+            <StateLabel icon="clock" label="Couldn’t refresh" tone="caution" size="compact" />
+            <span>
+              Previous reading{" "}
+              <time dateTime={new Date(staleSince).toISOString()}>
+                {new Date(staleSince).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}
+              </time>
+              . Retrying every 5 seconds.
+            </span>
+          </div>
+        </div>
+      )}
+      {!refreshingOldReading ? null : (
+        <div className="connect-home-read-notice" role="status">
+          <div>
+            <StateLabel icon="loader" label="Refreshing" tone="progress" size="compact" />
+            <span>Updated {refreshAgeText} ago. The last reading stays on screen until the refresh lands.</span>
+          </div>
+        </div>
+      )}
+      {fleetPresentation || current === null || offlineHosts.length === 0 || staleSince !== null ? null : (
+        <div className="connect-home-read-notice" role="status">
+          <div>
+            <StateLabel
+              icon="clock"
+              label={`${new Intl.ListFormat("en", { style: "long", type: "conjunction" }).format(offlineHosts)} didn’t answer`}
+              tone="caution"
+              size="compact"
+            />
+            <span>
+              {offlineHosts.length === 1 ? "Its agents show as Unknown." : "Their agents show as Unknown."}{" "}
+              {answeringHosts.length === 0
+                ? null
+                : `${new Intl.ListFormat("en", { style: "long", type: "conjunction" }).format(answeringHosts)} ${answeringHosts.length === 1 ? "is" : "are"} live.`}
+            </span>
+          </div>
+          <Button
+            className="connect-home-retry connect-home-tap"
+            onClick={refreshDirectory}
+            size="compact"
+            variant="secondary"
+          >
+            Retry
+          </Button>
+        </div>
+      )}
+      {presentation._tag === "home" && presentation.summary !== undefined ? (
+        <div className="connect-home-summary">{presentation.summary}</div>
+      ) : null}
       <section
         aria-label="Herdr agents"
         className="connect-agents"
@@ -1347,7 +1463,18 @@ export const ConnectSurface = ({
         onKeyDown={moveAgentFocus}
         style={pinRows}
       >
-        {updatedAt === null ? null : (
+        {fleetPresentation || connection._tag !== "failed" || connection.entryFocusFailure === undefined ? null : (
+          <div className="connect-home-failure" role="alert">
+            <StateLabel
+              icon="alert"
+              label={`Couldn’t open ${connection.agent.name}’s terminal`}
+              tone="caution"
+              size="compact"
+            />
+            <span>{connectWorkspaceFocusFailureMessage(connection.entryFocusFailure)}</span>
+          </div>
+        )}
+        {updatedAt === null || !fleetPresentation ? null : (
           <small className="connect-updated" data-stale={staleSince === null ? undefined : "true"}>
             {staleSince === null ? "Updated " : "Stale, last updated "}
             <time dateTime={new Date(updatedAt).toISOString()}>
@@ -1355,14 +1482,14 @@ export const ConnectSurface = ({
             </time>
           </small>
         )}
-        {staleSince === null || directory._tag !== "Failure" ? null : (
+        {staleSince === null || directory._tag !== "Failure" || !fleetPresentation ? null : (
           <small className="connect-status-message" data-tone="caution">
             The list is stale. Couldn't refresh the directory: {causeSummary(directory.cause)}. Showing the list from{" "}
             {new Date(staleSince).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}; retrying every 5
             seconds.
           </small>
         )}
-        {silentHosts === null ? null : (
+        {silentHosts === null || !fleetPresentation ? null : (
           <p className="connect-failures" role="status">
             {silentHosts}
           </p>
@@ -1401,14 +1528,16 @@ export const ConnectSurface = ({
           )
         ) : (
           <>
-            <AgentCast
-              agents={agents}
-              arrivals={arrivals}
-              onOpen={(agent) => setStageKey(connectAgentKey(agent))}
-              silentHosts={offlineHosts}
-              stale={staleSince !== null}
-            />
-            <AgentDirectory
+            {fleetPresentation ? (
+              <AgentCast
+                agents={agents}
+                arrivals={arrivals}
+                onOpen={(agent) => setStageKey(connectAgentKey(agent))}
+                silentHosts={offlineHosts}
+                stale={staleSince !== null}
+              />
+            ) : null}
+            <DirectoryView
               search={
                 <label className="connect-search">
                   <span>Find agent</span>
@@ -1447,11 +1576,14 @@ export const ConnectSurface = ({
               }
               onClearQuery={() => {
                 setQuery("")
-                directorySearchRef.current?.focus()
+                const search = directorySearchRef.current
+                if (search !== null && search.closest('[hidden], [inert], [aria-hidden="true"]') === null)
+                  search.focus()
               }}
               activityFilter={activityFilter}
               agents={agents}
               configuredHosts={current.hosts ?? []}
+              empty={presentation._tag === "home" ? presentation.empty : undefined}
               hostFilter={hostFilter}
               onActivityFilter={setActivityFilter}
               onHostFilter={setHostFilter}
@@ -1463,7 +1595,8 @@ export const ConnectSurface = ({
               stale={staleSince !== null}
             />
             <AgentStage
-              agent={stageAgent}
+              agent={active ? stageAgent : null}
+              presentation={presentation._tag}
               agents={agents}
               workSnapshots={currentWork}
               crew={stageCrew}
@@ -1505,8 +1638,8 @@ export const ConnectSurface = ({
         )}
         {connection._tag === "connecting" ? (
           <small className="connect-status-message">Connecting to {connection.agent.name}…</small>
-        ) : connection._tag === "failed" ? (
-          <small className="connect-status-message" data-tone="critical">
+        ) : connection._tag === "failed" && (fleetPresentation || connection.entryFocusFailure === undefined) ? (
+          <small className="connect-status-message" data-tone="critical" role="alert">
             {connection.agent.name}: {connection.detail}
           </small>
         ) : connection._tag === "closed" ? (
@@ -1521,7 +1654,9 @@ export const ConnectSurface = ({
         )}
         {workspaceFocusFailure === null || workspaceFocusFailure === "focus_rejected" ? null : (
           <small className="connect-status-message" data-tone="critical">
-            Terminal focus transition failed: {workspaceFocusFailure}
+            {fleetPresentation
+              ? `Terminal focus transition failed: ${workspaceFocusFailure}`
+              : connectWorkspaceFocusFailureMessage(workspaceFocusFailure)}
           </small>
         )}
         {current === null && directory._tag !== "Failure" ? (
@@ -1531,9 +1666,9 @@ export const ConnectSurface = ({
             ))}
           </div>
         ) : null}
-        {current === null ? null : (
+        {!fleetPresentation || current === null ? null : (
           <div className="connect-directory-secondary" data-pinned={floatRows > 0 ? "" : undefined}>
-            <ConnectLimits problem={limits.problem} view={limits.view} />
+            <ConnectLimitsOwner atoms={atoms} />
             {embedded ? null : (
               <nav className="fleet-app-nav" aria-label="Fleet applications">
                 <a href="/">Approvals</a>
@@ -1604,7 +1739,9 @@ export const ConnectSurface = ({
       </div>
       {workspaceFocusFailure === "focus_rejected" ? (
         <small className="connect-status-message" data-tone="critical" role="alert">
-          Terminal focus transition failed: {workspaceFocusFailure}
+          {fleetPresentation
+            ? `Terminal focus transition failed: ${workspaceFocusFailure}`
+            : connectWorkspaceFocusFailureMessage(workspaceFocusFailure)}
         </small>
       ) : null}
       <TerminalKeyRail
@@ -1644,6 +1781,7 @@ export const ConnectSurface = ({
   return (
     <div
       className={embedded ? "connect-shell connect-shell-embedded" : "connect-shell"}
+      data-connect-presentation={fleetPresentation ? undefined : "home"}
       ref={attachShell}
       tabIndex={-1}
     >

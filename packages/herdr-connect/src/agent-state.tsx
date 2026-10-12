@@ -24,12 +24,15 @@ export {
 /** An agent's state as its icon and word, in the state's tone. */
 export const AgentStateLabel = ({
   className,
-  state
+  state,
+  statePolicy = "fleet"
 }: {
   readonly className?: string
   readonly state: string
+  /** Fleet by default; Home uses neutral Done and names unknown evidence without the needs-you bucket. */
+  readonly statePolicy?: "fleet" | "home"
 }): ReactElement => {
-  const presentation = agentStatePresentation(state)
+  const presentation = agentStatePresentation(state, statePolicy)
   const classes = [presentation.spins ? "agent-state-spinning" : undefined, className].filter(
     (name) => name !== undefined
   )

@@ -1,0 +1,10 @@
+id: no-local-agent-bucket
+valid:
+  - 'const group = connectAgentGroup(agent.state, { presentation: "home", offline })'
+  - "const presentation = agentStatePresentation(agent.state)"
+invalid:
+  - 'const group = agentStateBucket(agent.state) ?? "unknown"'
+  - 'const needsYou = agentStatePresentation(agent.state).bucket === "needs-you"'
+
+  - 'const bucket = agentStateBucket(state); const group = bucket === null ? "unknown" : bucket'
+  - "const classify = (state) => agentStateBucket(state); const bucket = classify(state)"

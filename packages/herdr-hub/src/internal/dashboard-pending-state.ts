@@ -87,10 +87,31 @@ export const mergeDashboardHistoryPage = (
       records: [...state.records, ...page.records]
     }
 
-export const dashboardPendingBadgeCount = (state: FleetPendingApprovals): number | null =>
-  state.nextCursors.length === 0 && state.failures.length === 0
-    ? state.local.length + state.remote.length
-    : null
+/** Both icon and navigation badges count the same unexpired bounded reading. */
+const pendingApprovalCount = (state: FleetPendingApprovals, now: number) => ({
+  count:
+    state.local.filter((record) =>
+      record.approvalExpiresAt === undefined || record.approvalExpiresAt === null || record.approvalExpiresAt > now
+    ).length +
+    state.remote.filter(({ approval }) => approval.approvalExpiresAt === null || approval.approvalExpiresAt > now)
+      .length,
+  complete: state.nextCursors.length === 0 && state.failures.length === 0
+})
+
+export const dashboardPendingBadgeCount = (state: FleetPendingApprovals, now: number): number | null => {
+  const reading = pendingApprovalCount(state, now)
+  return reading.complete ? reading.count : null
+}
+
+/** Partial zero is unknown, not empty; design omits the visible badge but names that uncertainty. */
+export const dashboardPendingNavigationBadge = (state: FleetPendingApprovals, now: number, stale: boolean) => {
+  const { complete, count } = pendingApprovalCount(state, now)
+  if (count === 0) return complete && !stale ? undefined : { text: "", label: "approvals unknown" }
+  return {
+    text: `${String(count)}${complete ? "" : "+"}`,
+    label: `${stale ? "Previous reading, " : ""}${complete ? "" : "at least "}${String(count)} approvals waiting`
+  }
+}
 
 export const pendingApprovalTargetAfterRevalidation = (
   current: PendingApprovalTarget | null,

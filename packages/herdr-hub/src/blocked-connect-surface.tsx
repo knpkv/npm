@@ -4,7 +4,7 @@ import { ConnectSurface, type ConnectAtoms } from "@knpkv/herdr-connect/surface"
 import type { ConnectAgent } from "@knpkv/herdr-connect/model"
 import { Effect, Fiber, Schedule, Schema } from "effect"
 import * as Atom from "effect/reactivity/Atom"
-import { useEffect, useState } from "react"
+import { useEffect, useState, type ComponentProps } from "react"
 import { reportStageHeartbeat } from "./blocked-push-client.js"
 import { PushAgentKey } from "./blocked-push-model.js"
 
@@ -15,11 +15,15 @@ const makeNotificationAtoms = () => ({
 
 /** Canonical-hub stage presence without additional stage controls. */
 export const BlockedConnectSurface = ({
+  active = true,
   atoms,
-  embedded = false
+  embedded = false,
+  presentation
 }: {
+  readonly active?: boolean
   readonly atoms: ConnectAtoms
   readonly embedded?: boolean
+  readonly presentation?: ComponentProps<typeof ConnectSurface>["presentation"]
 }) => {
   const [notifications] = useState(makeNotificationAtoms)
   const [target, setTarget] = useState<Pick<ConnectAgent, "host" | "id"> | null>(null)
@@ -48,5 +52,13 @@ export const BlockedConnectSurface = ({
       clear()
     }
   }, [agentId, host, report])
-  return <ConnectSurface atoms={atoms} embedded={embedded} onStageChange={setTarget} />
+  return (
+    <ConnectSurface
+      active={active}
+      atoms={atoms}
+      embedded={embedded}
+      {...(presentation === undefined ? {} : { presentation })}
+      onStageChange={setTarget}
+    />
+  )
 }

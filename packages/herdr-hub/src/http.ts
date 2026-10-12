@@ -184,7 +184,7 @@ import {
   PushSubscriptionRecord,
   PushSubscriptionRemoval
 } from "./model.js"
-import { fleetModule, todayModule, usageModule } from "./module-contract.js"
+import { connectModule, fleetHubModule, usageModule } from "./module-contract.js"
 import type { NeedsYouCandidate, NeedsYouIssue, NeedsYouProviderResult } from "./module-needs-you.js"
 import * as ModuleServer from "./module-server.js"
 import type { ModuleRouteFailure, ServerModule } from "./module-server.js"
@@ -1817,7 +1817,7 @@ export const startHttpServer = async (
     const modules: ReadonlyArray<
       ServerModule<unknown, HttpClient.HttpClient | Tailscale | Crypto.Crypto | FileSystem.FileSystem | Path.Path>
     > = [
-      { descriptor: todayModule, handlers: Layer.succeed(ModuleServer.ModuleHandlers, { routes: [] }) },
+      { descriptor: connectModule, handlers: Layer.succeed(ModuleServer.ModuleHandlers, { routes: [] }) },
       { descriptor: usageModule, handlers: Layer.succeed(ModuleServer.ModuleHandlers, { routes: [] }) },
       makeCodeModule({
         host: config.host,
@@ -1826,7 +1826,7 @@ export const startHttpServer = async (
         codeHost: options.codeHost ?? null
       }),
       {
-        descriptor: fleetModule,
+        descriptor: fleetHubModule,
         handlers: Layer.effect(
           ModuleServer.ModuleHandlers,
           Effect.gen(function*() {

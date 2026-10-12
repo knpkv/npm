@@ -15,14 +15,11 @@ interface TodayModuleContent {
   readonly usageDetails?: boolean
 }
 
-/** One serial poll only while Today is active and visible; interruption aborts an in-flight read. */
-const TodayPage = ({
-  active,
-  content
-}: {
-  readonly active: boolean
-  readonly content: TodayModuleContent
-}): ReactElement => {
+/** One serial needs-you poll only while its owner is active and visible; interruption aborts the read. */
+export const useNeedsYouReading = (
+  read: Effect.Effect<NeedsYouResult, TodayReadFailed>,
+  active: boolean
+): TodayReadState => {
   const [state, setState] = useState<TodayReadState>({ reading: null, failed: false })
   const [visible, setVisible] = useState(() => document.visibilityState === "visible")
   useEffect(() => {
@@ -34,7 +31,7 @@ const TodayPage = ({
     if (!active || !visible) return
     let current = true
     const poll = Effect.gen(function* () {
-      const result = yield* Effect.exit(content.read)
+      const result = yield* Effect.exit(read)
       if (!current) return
       const checkedAt = yield* Clock.currentTimeMillis
       yield* Effect.sync(() =>
@@ -50,7 +47,18 @@ const TodayPage = ({
       current = false
       Effect.runFork(Fiber.interrupt(fiber))
     }
-  }, [active, visible, content.read])
+  }, [active, visible, read])
+  return state
+}
+
+const TodayPage = ({
+  active,
+  content
+}: {
+  readonly active: boolean
+  readonly content: TodayModuleContent
+}): ReactElement => {
+  const state = useNeedsYouReading(content.read, active)
   return (
     <TodayView
       state={state}

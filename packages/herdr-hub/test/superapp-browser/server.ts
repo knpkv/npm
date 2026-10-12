@@ -15,11 +15,18 @@ import { BackendStatus, RelayEvent, SessionInfo } from "@knpkv/relay/wire"
 import { Clock, Config, Effect, FileSystem, Schema } from "effect"
 import { createServer, type ServerResponse } from "node:http"
 import { DashboardSnapshot, PendingApprovalTarget } from "../../src/dashboard-model.js"
+import { fontPreloadLink } from "../../src/font-preload.js"
 import { dashboardPage } from "../../src/internal/dashboard-page.js"
 import { NeedsYouResult } from "../../src/modules.js"
 import { relayIconSvg } from "../../src/relay-icon.js"
 import { codeContentFixture, codeDetailFixture, codeDiffFixture, codeQueueFixture } from "./code-fixture.js"
+import { connectFixture } from "./connect-fixture.js"
 import { limitsFixture, usageFixture } from "./usage-fixture.js"
+
+class FixtureStateError extends Schema.TaggedError<FixtureStateError>()("FixtureStateError", {
+  state: Schema.String,
+  cause: Schema.Defect()
+}) {}
 
 class FixtureServerError extends Schema.TaggedError<FixtureServerError>()("FixtureServerError", {
   cause: Schema.Defect()
@@ -29,11 +36,25 @@ const program = Effect.gen(function*() {
   const fs = yield* FileSystem.FileSystem
   const now = yield* Clock.currentTimeMillis
   const port = yield* Config.Int("SUPERAPP_FIXTURE_PORT")
+  // Decode every synthetic state before listening; a bad fixture names its state and cannot kill a mid-run server.
+  const connectReadings = new Map<string, FleetConnectAgentPage>()
+  for (const state of ["normal", "ready", "empty", "partial", "unknown"]) {
+    connectReadings.set(
+      state,
+      yield* Effect.try({
+        try: () => connectFixture(now, state),
+        catch: (cause) => new FixtureStateError({ state, cause })
+      })
+    )
+  }
   const dist = new URL("../../dist/", import.meta.url).pathname
   const assets = new Map<string, Uint8Array>()
   for (const name of yield* fs.readDirectory(dist)) {
     if (/\.(js|css|woff2|png)$/.test(name)) assets.set(`/assets/${name}`, yield* fs.readFile(`${dist}${name}`))
   }
+  const fontPreload = fontPreloadLink(
+    new Map([...assets].map(([pathname, bytes]) => [pathname.slice("/assets/".length), bytes]))
+  )
   const goal: WorkGoal = {
     id: "goal-1",
     title: "Check the module navigation",
@@ -286,7 +307,7 @@ const program = Effect.gen(function*() {
     }
     if (url.pathname === "/" || url.pathname === "/fleet") {
       response.writeHead(200, { "content-type": "text/html" })
-      response.end(dashboardPage(url.searchParams.has("noncanonical") ? noncanonical : snapshot, ""))
+      response.end(dashboardPage(url.searchParams.has("noncanonical") ? noncanonical : snapshot, fontPreload))
       return
     }
     if (url.pathname === "/connect/") {
@@ -313,7 +334,7 @@ const program = Effect.gen(function*() {
       response.end(String(relaySubscriptions))
       return
     }
-    if (url.pathname === "/v1/modules/today/needs-you") {
+    if (url.pathname === "/v1/modules/connect/needs-you") {
       const source = request.headers.referer !== undefined && URL.canParse(request.headers.referer)
         ? new URL(request.headers.referer)
         : null
@@ -332,6 +353,18 @@ const program = Effect.gen(function*() {
         }
       }
       return
+    }
+    if (url.pathname === "/v1/connect/agents") {
+      const state = request.headers.cookie?.match(/(?:^|;\s*)connect-fixture=([a-z]+)/u)?.[1]
+      if (state !== undefined) {
+        response.writeHead(200, { "content-type": "application/json" })
+        response.end(
+          Schema.encodeSync(Schema.fromJsonString(FleetConnectAgentPage))(
+            connectReadings.get(state) ?? connectFixture(now, "normal")
+          )
+        )
+        return
+      }
     }
     if (url.pathname === "/v1/pending-approval") {
       if (
@@ -437,6 +470,11 @@ const program = Effect.gen(function*() {
     ) {
       response.writeHead(200, { "content-type": "application/json" })
       response.end(Schema.encodeSync(Schema.fromJsonString(DashboardSnapshot))(noncanonical))
+      return
+    }
+    if (url.pathname === "/v1/push/stage-heartbeat" && request.method === "POST") {
+      response.writeHead(204)
+      response.end()
       return
     }
     const json = responses.get(url.pathname)

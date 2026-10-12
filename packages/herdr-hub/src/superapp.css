@@ -130,6 +130,33 @@
     gap: var(--rly-space-8);
   }
 
+  .superapp-module-badge {
+    margin-inline-start: auto;
+    min-inline-size: 1.375rem;
+    padding-inline: 0.3rem;
+    border-radius: 0.375rem;
+    background: var(--rly-color-held-tint);
+    color: var(--rly-color-held-ink);
+    font-size: 0.75rem;
+    font-weight: 430;
+    text-align: center;
+  }
+
+  .superapp-bottom .superapp-module-badge {
+    position: absolute;
+    inset-block-start: 0.25rem;
+    inset-inline-start: calc(50% + 0.375rem);
+    margin: 0;
+    min-inline-size: 1rem;
+    padding-inline: 0.2rem;
+    font-size: 0.625rem;
+  }
+
+  .connect-home-strip > a > .superapp-icon {
+    inline-size: 0.875rem;
+    block-size: 0.875rem;
+  }
+
   .superapp-notifications {
     grid-column: 3;
     grid-row: 1;
@@ -167,8 +194,9 @@
     grid-row: 1 / -1;
     display: flex;
     flex-direction: column;
-    gap: var(--rly-space-8);
-    padding: var(--rly-space-16);
+    gap: 1.6rem;
+    padding-block: 1.25rem 0.85rem;
+    padding-inline: 0.9rem;
     border-inline-end: 1px solid var(--rly-color-border-1);
     position: sticky;
     inset-block-start: 0;
@@ -182,13 +210,18 @@
     display: flex;
     align-items: center;
     gap: var(--rly-space-12);
-    padding-block: var(--rly-space-8) var(--rly-space-32);
-    padding-inline: var(--rly-space-8);
+    min-block-size: 3rem;
+    color: var(--rly-color-text-1);
+    text-decoration: none;
+    padding-block: 0.35rem;
+    padding-inline: 0.45rem;
   }
 
   .superapp-sidebar-brand strong {
-    font-size: 1.25rem;
-    letter-spacing: -0.04em;
+    font-size: 1.3rem;
+    line-height: 1.2;
+    font-weight: 620;
+    letter-spacing: -0.03em;
   }
 
   .superapp-sidebar-brand p,
@@ -206,7 +239,7 @@
     font-size: 0.875rem;
   }
 
-  .superapp-sidebar a,
+  .superapp-sidebar a:not(.superapp-sidebar-brand),
   .superapp-bottom a,
   .superapp-dialog nav a {
     display: flex;
@@ -304,11 +337,22 @@
   }
 
   .superapp-sidebar a[aria-current="page"],
-  .superapp-bottom a[aria-current="page"],
-  .superapp-bottom > button[aria-current="page"],
+  .superapp-sidebar .superapp-settings[aria-expanded="true"],
   .superapp-dialog nav a[aria-current="page"] {
     background: var(--rly-color-surface-2);
     color: var(--rly-color-text-1);
+  }
+
+  .superapp-sidebar:has(.superapp-settings[aria-expanded="true"]) a[aria-current="page"] {
+    background: transparent;
+    color: var(--rly-color-text-2);
+    font-weight: 430;
+  }
+
+  .superapp-bottom a[aria-current="page"],
+  .superapp-bottom > button[aria-current="page"] {
+    color: var(--rly-color-text-1);
+    font-weight: 620;
   }
 
   .superapp-shell a:focus-visible,
@@ -519,13 +563,6 @@
       display: none;
     }
 
-    .superapp-shell:has(.superapp-breadcrumb[data-route-found="true"]):not(
-        :has(.connect-workspace[data-mode="terminal"])
-      )
-      .superapp-main {
-      padding-block-start: var(--rly-space-12);
-    }
-
     .superapp-sidebar {
       display: none;
     }
@@ -539,31 +576,35 @@
     }
 
     .superapp-bottom {
-      display: flex;
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
       align-items: center;
-      justify-content: space-around;
-      gap: var(--rly-space-8);
+      gap: 0;
+      block-size: 4.75rem;
       position: fixed;
       inset-block-end: 0;
       inset-inline: 0;
-      padding-block: var(--rly-space-8) max(var(--rly-space-8), env(safe-area-inset-bottom, 0px));
-      padding-inline: max(var(--rly-space-16), env(safe-area-inset-left, 0px))
-        max(var(--rly-space-16), env(safe-area-inset-right, 0px));
-      background: var(--rly-color-canvas);
+      padding-block: var(--rly-space-4) max(0.875rem, env(safe-area-inset-bottom, 0px));
+      padding-inline: max(var(--rly-space-4), env(safe-area-inset-left, 0px))
+        max(var(--rly-space-4), env(safe-area-inset-right, 0px));
+      background: var(--rly-color-surface-1);
       border-block-start: 1px solid var(--rly-color-border-1);
       z-index: 10;
     }
 
-    .superapp-bottom a,
+    .superapp-bottom > a,
     .superapp-bottom > button {
+      position: relative;
       flex: 1;
       flex-direction: column;
       justify-content: center;
-      gap: var(--rly-space-4);
+      gap: 0.125rem;
       font-size: 0.6875rem;
-      font-weight: 600;
+      font-weight: 430;
       line-height: 1.5;
-      min-block-size: 3.25rem;
+      min-inline-size: 0;
+      padding-inline: var(--rly-space-4);
+      min-block-size: 3.5rem;
     }
 
     .superapp-dialog {
@@ -589,12 +630,589 @@
       inset-block-start: calc(var(--rly-space-20) + var(--rly-space-12));
       inset-inline-start: var(--rly-space-20);
     }
+  }
+}
 
-    .superapp-main .connect-terminal-screen {
-      block-size: calc(
-        var(--connect-visual-viewport-height, 100dvh) - var(--fleet-shell-terminal-offset) -
-          var(--app-bottom-inset, 0px)
-      );
+@layer fleet {
+  /* The existing Connect terminal owns the entire viewport, including focus and hit testing. */
+  .superapp-shell:has([data-module="connect"]:not([hidden]) .connect-workspace[data-mode="terminal"])
+    > :is(.superapp-header, .superapp-sidebar, .superapp-bottom) {
+    display: none;
+  }
+
+  .superapp-header {
+    block-size: 4rem;
+    min-block-size: 4rem;
+    position: relative;
+    padding-block: var(--rly-space-8);
+    background: var(--rly-color-surface-1);
+  }
+
+  .superapp-header > .superapp-brand,
+  .superapp-phone-title,
+  .superapp-breadcrumb {
+    display: none;
+  }
+
+  .superapp-module-nav {
+    display: grid;
+    gap: 0.3rem;
+  }
+
+  .superapp-module-nav > a {
+    font-size: 0.9375rem;
+    line-height: 1.5;
+    padding-inline: 0.8rem;
+  }
+
+  .superapp-module-nav > a[aria-current="page"] {
+    font-weight: 620;
+  }
+
+  .superapp-module-nav .superapp-icon {
+    inline-size: 1.1875rem;
+    block-size: 1.1875rem;
+  }
+
+  .superapp-host {
+    font-size: 0.75rem;
+    font-weight: 430;
+  }
+
+  .superapp-module-nav > a[data-secondary] {
+    min-block-size: 2.5rem;
+    font-size: 0.875rem;
+  }
+
+  .superapp-nav-divider {
+    block-size: 1px;
+    background: var(--rly-color-border-1);
+    margin-block: 0.7rem;
+    margin-inline: 0.8rem;
+    flex: none;
+  }
+
+  .superapp-settings {
+    min-block-size: 2.5rem;
+    font-size: 0.875rem;
+    line-height: 1.5;
+    margin-block-start: auto;
+    justify-content: start;
+  }
+
+  .superapp-session {
+    margin-block-start: 0;
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    min-block-size: 3.5rem;
+    line-height: 1.4;
+  }
+
+  .superapp-session small {
+    display: block;
+    margin-block: 0;
+    font-size: 0.65rem;
+  }
+
+  .superapp-session-avatar {
+    display: grid;
+    place-items: center;
+    inline-size: 2rem;
+    block-size: 2rem;
+    flex: none;
+    border-radius: 50%;
+    background: var(--rly-color-surface-3);
+  }
+
+  .superapp-session-avatar .superapp-icon {
+    inline-size: 1.0625rem;
+    block-size: 1.0625rem;
+  }
+
+  .superapp-session-announcement {
+    position: absolute;
+    inline-size: 1px;
+    block-size: 1px;
+    overflow: clip;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .superapp-session-online {
+    inline-size: 0.375rem;
+    block-size: 0.375rem;
+    flex: none;
+    margin-inline-start: auto;
+    border-radius: 50%;
+    background: var(--rly-color-success-ink);
+  }
+
+  .superapp-dialog:has(.superapp-more) {
+    inset-block: 0;
+    inset-inline: 0;
+    margin: auto;
+    block-size: fit-content;
+    inline-size: min(26.25rem, calc(100vw - var(--rly-space-48)));
+    max-block-size: calc(100dvh - var(--rly-space-48));
+    padding-block: var(--rly-space-20) var(--rly-space-24);
+    padding-inline: var(--rly-space-20);
+    gap: var(--rly-space-16);
+    border-radius: var(--rly-radius-overlay);
+  }
+
+  [data-rly-dialog-overlay]:has(~ .superapp-dialog .superapp-more) {
+    opacity: 1;
+    background: color-mix(in oklab, var(--rly-color-text-1) 32%, transparent);
+  }
+
+  .superapp-dialog:has(.superapp-more) > header h2 {
+    padding-inline: 0 2.75rem;
+    font: 620 1.25rem / 1.5 var(--rly-font-ui);
+    letter-spacing: -0.02em;
+  }
+
+  .superapp-dialog:has(.superapp-more) .superapp-dialog-title-icon {
+    display: none;
+  }
+
+  .superapp-dialog:has(.superapp-more) .superapp-dialog-close {
+    inset-block-start: var(--rly-space-20);
+    inset-inline-end: var(--rly-space-12);
+    inline-size: 2.75rem;
+    block-size: 2.75rem;
+    min-inline-size: 2.75rem;
+    min-block-size: 2.75rem;
+    border: 0;
+    background: transparent;
+  }
+
+  .superapp-dialog:has(.superapp-more) .superapp-dialog-close svg {
+    inline-size: 1rem;
+    block-size: 1rem;
+    stroke-width: 1.75;
+  }
+
+  .superapp-dialog:has(.superapp-more) .superapp-more section {
+    gap: 0;
+  }
+
+  .superapp-dialog:has(.superapp-more) .superapp-more h3 {
+    margin-block: 0 var(--rly-space-16);
+    font: 520 0.8125rem / 1.5 var(--rly-font-ui);
+    color: var(--rly-color-text-2);
+  }
+
+  .superapp-dialog:has(.superapp-more) .superapp-more section > button {
+    min-block-size: 3rem;
+    padding: 0;
+    border-block-end: 0;
+    font: 430 0.9375rem / 1.5 var(--rly-font-ui);
+  }
+
+  .superapp-dialog:has(.superapp-more) .superapp-more section > button + button {
+    border-block-start: 1px solid var(--rly-color-border-1);
+  }
+
+  .superapp-more,
+  .superapp-more section {
+    display: grid;
+    gap: var(--rly-space-12);
+  }
+
+  .superapp-more nav:empty {
+    display: none;
+  }
+
+  .superapp-more section > button {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--rly-space-16);
+    min-block-size: 2.75rem;
+    border: 0;
+    border-block-end: 1px solid var(--rly-color-border-1);
+    background: transparent;
+    color: var(--rly-color-text-1);
+    font: inherit;
+    text-align: start;
+    cursor: pointer;
+  }
+
+  .superapp-more button small {
+    color: var(--rly-color-text-2);
+    font-size: 0.8125rem;
+  }
+
+  .superapp-more button:focus-visible {
+    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+    outline-offset: var(--rly-focus-ring-offset);
+  }
+
+  .superapp-more button:active {
+    background: var(--rly-color-surface-2);
+  }
+
+  .superapp-module-heading,
+  [data-module="connect"] .connect-home-intro {
+    display: grid;
+    gap: 0;
+    padding: var(--rly-space-24) var(--rly-space-40) var(--rly-space-20);
+    border-block-end: 1px solid var(--rly-color-border-1);
+  }
+
+  .superapp-module-heading h1 {
+    margin: 0;
+    font-size: 1.75rem;
+    font-weight: 620;
+    letter-spacing: -0.035em;
+    line-height: 1.2;
+  }
+
+  .superapp-module-heading p {
+    margin: 0;
+    color: var(--rly-color-text-2);
+    font-size: 0.9375rem;
+    line-height: 1.5;
+  }
+
+  [data-module="fleet"] .superapp-module-heading {
+    padding-block-end: 0.9rem;
+    border-block-end: 0;
+  }
+
+  [data-module="connect"] .connect-home-intro p {
+    line-height: 1.5;
+  }
+
+  [data-module="connect"] .connect-home-summary {
+    padding-block: var(--connect-summary-inset, var(--rly-space-24)) 0;
+    padding-inline: var(--rly-space-40);
+  }
+
+  [data-module="connect"] .connect-home-read-notice + .connect-home-summary {
+    --connect-summary-inset: var(--rly-space-20);
+  }
+
+  [data-module="connect"] .connect-agents {
+    padding-block: var(--connect-agents-inset, var(--rly-space-20)) var(--rly-space-32);
+    padding-inline: var(--rly-space-40);
+  }
+
+  [data-module="connect"] .connect-agents:has(> .connect-home-empty) {
+    --connect-agents-inset: var(--rly-space-24);
+  }
+
+  .connect-home-strip {
+    display: grid;
+    grid-template-columns: auto auto minmax(0, 1fr);
+    align-items: center;
+    gap: var(--rly-space-8) var(--rly-space-24);
+    padding: 0.8rem var(--rly-space-16);
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-group);
+    background: var(--rly-color-surface-1);
+    font-weight: 430;
+    line-height: 1.5;
+  }
+
+  .connect-home-strip > div,
+  .connect-home-strip > a {
+    display: flex;
+    align-items: baseline;
+    gap: var(--rly-space-8);
+  }
+
+  .connect-home-strip > a {
+    flex-wrap: wrap;
+    color: var(--rly-color-text-1);
+    min-block-size: 2.75rem;
+    align-items: center;
+    text-decoration: none;
+    gap: 0.1rem var(--rly-space-8);
+  }
+
+  .connect-home-approval-count {
+    display: flex;
+    align-items: baseline;
+    gap: 0.4rem;
+  }
+
+  .connect-home-approval-count > span {
+    font-size: 0.875rem;
+  }
+
+  .connect-home-strip > a > .connect-home-approvals-word {
+    font-size: 0.875rem;
+    text-decoration: underline;
+    text-underline-offset: 0.2em;
+  }
+
+  .connect-home-strip > div > span {
+    font-size: 0.875rem;
+  }
+
+  .connect-home-strip > [data-previous-reading] {
+    flex-wrap: wrap;
+    row-gap: 2px;
+  }
+
+  .connect-home-strip > [data-previous-reading] > .connect-home-count-context {
+    flex-basis: 100%;
+    inline-size: 100%;
+    color: var(--rly-color-text-2);
+    font-size: 0.75rem;
+    font-weight: 520;
+  }
+
+  .connect-home-count-announcement {
+    position: absolute;
+    inline-size: 1px;
+    block-size: 1px;
+    overflow: clip;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .connect-home-strip strong {
+    font-size: 1.5rem;
+    font-weight: 650;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .connect-home-strip p,
+  .connect-home-strip small {
+    margin: 0;
+    color: var(--rly-color-text-2);
+    font-size: 0.8125rem;
+  }
+
+  .connect-home-strip small {
+    flex-basis: 100%;
+    font-size: 0.75rem;
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .superapp-more button:hover {
+      background: var(--rly-color-surface-2);
     }
+  }
+
+  @media (max-width: 40rem) {
+    .superapp-header {
+      grid-template-columns: auto minmax(0, 1fr) auto auto;
+      grid-template-rows: minmax(0, 1fr);
+      gap: var(--rly-space-8);
+      padding-block: 0;
+    }
+
+    .superapp-header > .superapp-brand {
+      display: flex;
+      grid-column: 1;
+      min-block-size: 2.75rem;
+      min-inline-size: 2.75rem;
+    }
+
+    .superapp-header > .fleet-shell-relay {
+      grid-column: 4;
+    }
+
+    .superapp-header [data-rly-relay-launcher] {
+      font-size: 0.875rem;
+      font-weight: 520;
+    }
+
+    .superapp-header .superapp-breadcrumb {
+      display: none;
+    }
+
+    .superapp-phone-title {
+      display: block;
+      grid-column: 2;
+      grid-row: 1;
+      font-size: 1.0625rem;
+      font-weight: 650;
+      min-inline-size: 0;
+      overflow: clip;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .superapp-phone-title > span {
+      font-weight: 430;
+      color: var(--rly-color-text-2);
+    }
+
+    .superapp-main {
+      padding-inline: 0;
+    }
+
+    .superapp-breadcrumb > [aria-hidden],
+    .superapp-breadcrumb-root {
+      display: none;
+    }
+
+    .superapp-breadcrumb > a,
+    .superapp-breadcrumb > [aria-current="page"] {
+      font-size: inherit;
+      direction: ltr;
+      font-weight: 650;
+      text-decoration: none;
+    }
+
+    .superapp-host {
+      display: none;
+    }
+
+    .superapp-notifications {
+      grid-column: 3;
+    }
+
+    .superapp-module-heading,
+    [data-module="connect"] .connect-home-intro {
+      position: absolute;
+      inline-size: 1px;
+      block-size: 1px;
+      overflow: clip;
+      clip-path: inset(50%);
+      padding: 0;
+      border: 0;
+    }
+
+    [data-module="connect"] .connect-home-summary {
+      padding-block-start: var(--connect-summary-inset, var(--rly-space-16));
+      padding-inline: var(--rly-space-16);
+    }
+
+    [data-module="connect"] .connect-agents {
+      padding-inline: var(--rly-space-16);
+    }
+
+    [data-module="connect"] .connect-agents:has(> .connect-home-empty) {
+      --connect-agents-inset: var(--rly-space-16);
+    }
+
+    .connect-home-strip {
+      grid-template-columns: auto auto;
+    }
+
+    .connect-home-strip > p {
+      grid-column: 1 / -1;
+    }
+
+    .superapp-bottom .superapp-icon {
+      inline-size: 1.5rem;
+      block-size: 1.5rem;
+    }
+
+    .superapp-dialog:has(.superapp-more) {
+      inset-block: auto var(--app-bottom-inset, 4.75rem);
+      inset-inline: 0;
+      margin: 0;
+      block-size: auto;
+      inline-size: 100%;
+      max-inline-size: none;
+      max-block-size: calc(100dvh - 4rem - var(--app-bottom-inset, 4.75rem));
+      min-block-size: auto;
+      padding-block: var(--rly-space-8) var(--rly-space-20);
+      padding-inline: max(var(--rly-space-16), env(safe-area-inset-left, 0px))
+        max(var(--rly-space-16), env(safe-area-inset-right, 0px));
+      gap: var(--rly-space-16);
+      border: 1px solid var(--rly-color-border-1);
+      border-block-end: 0;
+      border-radius: 0;
+      border-start-start-radius: var(--rly-radius-overlay);
+      border-start-end-radius: var(--rly-radius-overlay);
+    }
+
+    .superapp-dialog:has(.superapp-more)::before {
+      content: "";
+      justify-self: center;
+      inline-size: 2.25rem;
+      block-size: 0.25rem;
+      border-radius: 0.125rem;
+      background: var(--rly-color-border-2);
+    }
+
+    .superapp-dialog:has(.superapp-more) .superapp-dialog-close {
+      inset-block-start: 1.75rem;
+      inset-inline-end: var(--rly-space-8);
+      inline-size: 2.75rem;
+      block-size: 2.75rem;
+      min-inline-size: 2.75rem;
+      min-block-size: 2.75rem;
+      background: transparent;
+    }
+
+    [data-rly-dialog-overlay]:has(~ .superapp-dialog .superapp-more) {
+      inset-block-end: var(--app-bottom-inset, 4.75rem);
+      opacity: 1;
+      background: color-mix(in oklab, var(--rly-color-text-1) 32%, transparent);
+    }
+
+    .superapp-bottom > button[aria-expanded="true"] {
+      color: var(--rly-color-text-1);
+      font-weight: 620;
+    }
+
+    .superapp-bottom:has(> button[aria-expanded="true"]) > a[aria-current="page"] {
+      color: var(--rly-color-text-2);
+      font-weight: 430;
+    }
+  }
+}
+
+@layer fleet {
+  .connect-home-empty {
+    display: grid;
+    justify-items: start;
+    gap: 0.8rem;
+    padding: 1.5rem;
+    max-inline-size: 40em;
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-group);
+    background: var(--rly-color-surface-1);
+    font-weight: 430;
+    line-height: 1.5;
+  }
+
+  .connect-home-empty > .relay-chef-mark {
+    inline-size: 2.75rem;
+    block-size: 2.75rem;
+  }
+
+  .connect-home-empty h2 {
+    margin: 0;
+    font-size: 1.4rem;
+    font-weight: 620;
+    letter-spacing: -0.02em;
+    line-height: 1.25;
+    text-wrap: balance;
+  }
+
+  .connect-home-empty p {
+    margin: 0;
+    color: var(--rly-color-text-2);
+  }
+
+  .connect-home-empty ol {
+    display: grid;
+    gap: 0.3rem;
+    margin: 0;
+    padding-inline-start: 1.2em;
+    font-size: 0.9375rem;
+    line-height: 1.5;
+  }
+
+  .connect-home-empty small {
+    font-size: 0.8125rem;
+    line-height: 1.5;
+    color: var(--rly-color-text-2);
+  }
+
+  .connect-home-empty-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
   }
 }

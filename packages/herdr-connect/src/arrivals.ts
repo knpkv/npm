@@ -1,3 +1,4 @@
+import { connectAgentGroup } from "./agent-state-core.js"
 /**
  * Which agents just started needing you, from one directory poll to the next.
  *
@@ -14,7 +15,7 @@
  *
  * @module
  */
-import { type AgentBucket, agentStatePresentation } from "./agent-state.js"
+import { type AgentBucket } from "./agent-state.js"
 import type { ConnectAgent } from "./model.js"
 import { connectAgentKey } from "./view.js"
 
@@ -32,7 +33,7 @@ export const agentBucketsOf = (agents: ReadonlyArray<ConnectAgent>): AgentBucket
   new Map(
     agents.map((agent) => [
       connectAgentKey(agent),
-      { bucket: agentStatePresentation(agent.state).bucket, host: agent.host }
+      { bucket: connectAgentGroup(agent.state, { presentation: "fleet" }), host: agent.host }
     ])
   )
 

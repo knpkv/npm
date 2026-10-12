@@ -148,10 +148,17 @@ test("switches pixel-sized drawings at the same breakpoint as the mark size", as
   for (const width of [639, 641]) {
     await page.setViewportSize({ width, height: 900 })
     const size = width === 639 ? 24 : 32
-    const visible = header.locator("[data-relay-chef-drawing=\"mark\"]:visible")
-    await expect(visible).toHaveCount(1)
-    await expect(visible).toHaveAttribute("data-relay-chef-size", String(size))
-    expect((await header.boundingBox())?.width).toBe(size)
+    // Installed chrome has a Home brand mark plus the single Ask Relay launcher.
+    const visibleMarks = header.filter({ visible: true })
+    expect(await visibleMarks.count()).toBeGreaterThan(0)
+    for (const mark of await visibleMarks.all()) {
+      await expect(mark.locator("[data-relay-chef-drawing=\"mark\"]:visible")).toHaveCount(1)
+      await expect(mark.locator("[data-relay-chef-drawing=\"mark\"]:visible")).toHaveAttribute(
+        "data-relay-chef-size",
+        String(size)
+      )
+      expect((await mark.boundingBox())?.width).toBe(size)
+    }
     // The hidden phone sidebar still owns the 32px drawing; it never switches to phone art.
     const sidebarDrawing = await sidebar.locator("[data-relay-chef-drawing=\"mark\"][data-relay-chef-size=\"32\"]")
       .evaluate((node) => getComputedStyle(node).display)
