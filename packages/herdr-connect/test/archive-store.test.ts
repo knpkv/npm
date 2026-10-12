@@ -66,6 +66,49 @@ const seedClosure = Effect.fn("ArchiveTest.seedClosure")(function*(store: AgentA
 
 describe("closed agent archive", () => {
   it.layer(NodeServices.layer)((it) => {
+    it.effect("remembers an absent parent's latest name on its own host, before and after closure", () =>
+      Effect.gen(function*() {
+        const store = yield* openStore()
+        const parent = ConnectAgent.make({
+          id: "agent-parent",
+          host: "HOST-A",
+          name: "former coordinator",
+          kind: "codex",
+          work: "project",
+          state: "working",
+          lastActivityAt: 0
+        })
+        yield* observe(store, 0, [parent, agent()])
+        const read = (observedAt: number) =>
+          fleetConnectAgents(
+            Effect.succeed(LocalConnectAgents.make({ host: "HOST-A", agents: [agent()], complete: true })),
+            [],
+            { store, observedAt }
+          )
+        expect((yield* read(1)).agents[0]?.relationship).toEqual({
+          parentAgentId: "agent-parent",
+          relation: "pair",
+          parentName: "former coordinator"
+        })
+        expect((yield* read(300_001)).agents[0]?.relationship).toEqual({
+          parentAgentId: "agent-parent",
+          relation: "pair",
+          parentName: "former coordinator"
+        })
+        expect((yield* store.page()).agents.map(({ name }) => name)).toEqual(["former coordinator"])
+        const foreign = yield* fleetConnectAgents(
+          Effect.succeed(
+            LocalConnectAgents.make({ host: "HOST-B", agents: [agent("agent-foreign", "HOST-B")], complete: true })
+          ),
+          [],
+          { store, observedAt: 300_002 }
+        )
+        expect(foreign.agents[0]?.relationship).toEqual({ parentAgentId: "agent-parent", relation: "pair" })
+      }).pipe(
+        Effect.provideService(HttpClient.HttpClient, HttpClient.make(() => Effect.die("No peers in this read"))),
+        Effect.scoped
+      ))
+
     it.effect("keeps the state directory and database files owner-only after writing", () =>
       Effect.gen(function*() {
         const store = yield* openStore()

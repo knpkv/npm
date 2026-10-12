@@ -1,0 +1,44 @@
+id: no-connect-middot-content
+snapshots:
+  '.meta::before { content: " · "; }':
+    labels:
+      - source: 'content: " · ";'
+        style: primary
+        start: 16
+        end: 32
+      - source: content
+        style: secondary
+        start: 16
+        end: 23
+      - source: '" · "'
+        style: secondary
+        start: 25
+        end: 31
+  '.meta::before { content: "\00b7 "; }':
+    labels:
+      - source: 'content: "\00b7 ";'
+        style: primary
+        start: 16
+        end: 34
+      - source: content
+        style: secondary
+        start: 16
+        end: 23
+      - source: '"\00b7 "'
+        style: secondary
+        start: 25
+        end: 33
+  '.scope::before { content: "· "; }':
+    labels:
+      - source: 'content: "· ";'
+        style: primary
+        start: 17
+        end: 32
+      - source: content
+        style: secondary
+        start: 17
+        end: 24
+      - source: '"· "'
+        style: secondary
+        start: 26
+        end: 31

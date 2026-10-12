@@ -1,9 +1,9 @@
 import { useAtom, useAtomMount, useAtomRefresh, useAtomValue } from "@effect/atom-react"
 import { BrowserHttpClient } from "@effect/platform-browser"
-import { StateLabel, Surface, Text } from "@knpkv/rly/primitives"
+import { Button, StateLabel, Surface, Text } from "@knpkv/rly/primitives"
 import { Icon } from "@knpkv/rly/foundations"
 import { decodeBoundedResponseJson } from "@knpkv/herdr-fleet/response"
-import { Cause, Effect, Fiber, Predicate, Result, Schedule, Schema } from "effect"
+import { Cause, Effect, Fiber, Predicate, Result, Schedule, Schema, type Types } from "effect"
 import * as AsyncResult from "effect/reactivity/AsyncResult"
 import * as Atom from "effect/reactivity/Atom"
 import * as HttpClient from "effect/http/HttpClient"
@@ -292,6 +292,7 @@ const loadAgents = Effect.gen(function* () {
   const client = yield* HttpClient.HttpClient
   const agents: Array<ConnectAgent> = []
   const failures: Array<(typeof FleetConnectAgents.Type)["failures"][number]> = []
+  let hosts: (typeof FleetConnectAgents.Type)["hosts"]
   let cursor: ConnectAgentCursor | null = null
   do {
     const path: string =
@@ -318,9 +319,15 @@ const loadAgents = Effect.gen(function* () {
     )
     for (const agent of page.agents) agents.push(agent)
     for (const failure of page.failures) failures.push(failure)
+    if (page.hosts !== undefined) hosts = page.hosts
     cursor = page.nextCursor
   } while (cursor !== null)
-  const directory = yield* Schema.decodeUnknownEffect(FleetConnectAgents)({ agents, failures }).pipe(
+  const fields: Types.Mutable<typeof FleetConnectAgents.Type> = {
+    agents,
+    failures
+  }
+  if (hosts !== undefined) fields.hosts = hosts
+  const directory = yield* Schema.decodeUnknownEffect(FleetConnectAgents)(fields).pipe(
     Effect.mapError(
       (cause) =>
         new ConnectProtocolError({
@@ -1321,9 +1328,6 @@ export const ConnectSurface = ({
         aria-label="Herdr agents"
         className="connect-agents"
         data-loading={current === null ? "true" : undefined}
-        // Room for the floating pins, set here rather than with :has(), which Firefox 120 (in BROWSER_TARGET) lacks.
-        data-pinned={floatRows > 0 ? "" : undefined}
-        style={pinRows}
         onKeyDown={moveAgentFocus}
       >
         {updatedAt === null ? null : (
@@ -1347,25 +1351,31 @@ export const ConnectSurface = ({
           </p>
         )}
         {current === null ? (
-          <Text
-            className={directory._tag === "Failure" ? "connect-empty connect-directory-error" : "connect-loading-copy"}
-            tone="secondary"
-          >
-            {directory._tag === "Failure"
-              ? `The fleet directory didn't answer: ${causeSummary(directory.cause)}. Retrying every 5 seconds.`
-              : "Loading fleet agents…"}
-            {directory._tag === "Failure" ? (
-              <button className="connect-filters-clear" onClick={refreshDirectory} type="button">
-                Retry directory
-              </button>
-            ) : null}
-          </Text>
-        ) : agents.length === 0 ? (
-          silentHosts === null ? (
-            <Text className="connect-empty" tone="secondary">
-              No agents running on any host.
+          directory._tag === "Failure" ? (
+            <div className="connect-empty connect-directory-error">
+              <Icon decorative name="alert" size="default" />
+              <div className="connect-directory-error-copy">
+                <Text as="h2" variant="card-title">
+                  The fleet directory didn't answer
+                </Text>
+                <Text as="p" tone="secondary">
+                  The request timed out, so no agents are listed. Retry, or wait: Relay tries again every 5 seconds.
+                </Text>
+                <Button
+                  className="connect-compact-secondary"
+                  onClick={refreshDirectory}
+                  size="dense"
+                  variant="secondary"
+                >
+                  Retry
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <Text className="connect-loading-copy" tone="secondary">
+              Loading fleet agents…
             </Text>
-          ) : null
+          )
         ) : (
           <>
             <AgentCast
@@ -1415,12 +1425,13 @@ export const ConnectSurface = ({
               onClearQuery={() => setQuery("")}
               activityFilter={activityFilter}
               agents={agents}
+              configuredHosts={current.hosts ?? []}
               hostFilter={hostFilter}
               onActivityFilter={setActivityFilter}
               onHostFilter={setHostFilter}
               onSelect={(agent) => setStageKey(connectAgentKey(agent))}
               query={query}
-              selectedKey={selectedKey}
+              selectedKey={stageKey}
               arrivals={arrivals}
               silentHosts={offlineHosts}
               stale={staleSince !== null}
@@ -1459,16 +1470,6 @@ export const ConnectSurface = ({
               }}
               stale={staleSince !== null || (stageAgent !== null && offlineHosts.includes(stageAgent.host))}
             />
-            <PinnedAgents
-              agentFor={(key) => agentByKey.get(key)}
-              hiddenKey={stageKey}
-              now={Date.now()}
-              onOpen={(agent) => setStageKey(connectAgentKey(agent))}
-              onUnpin={removePin}
-              pins={pins}
-              placement="float"
-              stale={staleSince !== null}
-            />
             {pinError === null ? null : (
               <small className="connect-status-message" data-tone="caution" role="status">
                 {pinError}
@@ -1504,9 +1505,19 @@ export const ConnectSurface = ({
             ))}
           </div>
         ) : null}
-        {current === null && directory._tag !== "Failure" ? null : (
-          <div className="connect-directory-secondary">
+        {current === null ? null : (
+          <div className="connect-directory-secondary" data-pinned={floatRows > 0 ? "" : undefined} style={pinRows}>
             <ConnectLimits problem={limits.problem} view={limits.view} />
+            <PinnedAgents
+              agentFor={(key) => agentByKey.get(key)}
+              hiddenKey={stageKey}
+              now={Date.now()}
+              onOpen={(agent) => setStageKey(connectAgentKey(agent))}
+              onUnpin={removePin}
+              pins={pins}
+              placement="float"
+              stale={staleSince !== null}
+            />
             {embedded ? null : (
               <nav className="fleet-app-nav" aria-label="Fleet applications">
                 <a href="/">Approvals</a>

@@ -388,35 +388,35 @@ const PinChip = ({
   readonly onOpen: () => void
   readonly onUnpin: (event: MouseEvent<HTMLButtonElement>) => void
   readonly pinKey: string
-  /** The open and unpin buttons' places in the set's single tab stop. */
+  /** The unpin and open buttons' places in the set's single tab stop. */
   readonly roving: readonly [RovingStop, RovingStop]
   readonly stale: boolean
 }): ReactElement => (
   // Two sibling buttons, never one inside the other: open is the chip, unpin its own small control.
   <span className="connect-pin">
     <button
+      aria-label={`Unpin ${agent.name}`}
+      className="connect-pin-unpin"
+      data-pin-key={pinKey}
+      onClick={onUnpin}
+      type="button"
+      {...roving[0]}
+    >
+      <Icon decorative name="pin" size="small" />
+    </button>
+    <button
       aria-label={`Pinned: ${agent.name}, ${agentStatePresentation(agent.state).word}`}
       className="connect-pin-open"
       data-pin-key={pinKey}
       onClick={onOpen}
       type="button"
-      {...roving[0]}
+      {...roving[1]}
     >
       <Creature host={agent.host} id={String(agent.id)} size="row" stale={stale} state={agent.state} />
       <span className="connect-pin-name">{agent.name}</span>
       <span className="connect-pin-state">
         <AgentStateLabel state={agent.state} />
       </span>
-    </button>
-    <button
-      aria-label={`Unpin ${agent.name}`}
-      className="connect-pin-unpin"
-      data-pin-key={pinKey}
-      onClick={onUnpin}
-      type="button"
-      {...roving[1]}
-    >
-      <span aria-hidden="true">×</span>
     </button>
   </span>
 )
@@ -455,7 +455,7 @@ export const PinnedAgents = ({
 }): ReactElement | null => {
   const { overflow, shown } = arrangePins(pins, agentFor, room, (key) => key === hiddenKey)
   const [expanded, setExpanded] = useState(false)
-  const [active, setActive] = useState(0)
+  const [active, setActive] = useState(1)
   const group = useRef<HTMLDivElement>(null)
   const listId = `connect-pins-${useId().replace(/[^a-zA-Z0-9]/g, "")}`
   const open = expanded && overflow.length > 0
@@ -471,7 +471,7 @@ export const PinnedAgents = ({
     setActive(all.indexOf(target))
     target.focus()
   }
-  // Unpinning with the × keeps focus in the set, as Delete does: on the control now in its place, or search.
+  // Unpinning keeps focus in the set, as Delete does: on the control now in its place, or search.
   const unpinFrom =
     (key: string) =>
     (event: MouseEvent<HTMLButtonElement>): void => {
@@ -507,7 +507,7 @@ export const PinnedAgents = ({
     event.preventDefault()
     focusAt((index + step + all.length) % all.length)
   }
-  // Chip i's open and unpin buttons are stops 2i and 2i + 1, and "+N" comes last. The list behind "+N" is
+  // Chip i's unpin and open buttons are stops 2i and 2i + 1, and "+N" comes last. The list behind "+N" is
   // reached with the arrows once open, and takes focus when it opens.
   const stops = shown.length * 2 + (overflow.length > 0 ? 1 : 0)
   const stop = (index: number): RovingStop => ({

@@ -1,11 +1,11 @@
 // @vitest-environment happy-dom
 
-import { Schema } from "effect"
+import { Schema, type Types } from "effect"
 import { act } from "react"
 import { createRoot } from "react-dom/client"
 import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it, vi } from "vitest"
-import { ConnectAgent } from "../src/model.js"
+import { ConnectAgent, type ConnectAgentRelationship } from "../src/model.js"
 import { AgentDirectory } from "../src/view.js"
 
 Object.defineProperty(window, "IS_REACT_ACT_ENVIRONMENT", { configurable: true, value: true })
@@ -42,6 +42,16 @@ const directory = (props: Partial<Parameters<typeof AgentDirectory>[0]> = {}) =>
 )
 
 describe("Connect families", () => {
+  it("names the no-match scope, exposes its active-filter count, and offers Clear beside the scope", () => {
+    const host = document.createElement("div")
+    host.innerHTML = renderToStaticMarkup(directory({ query: "zzz", hostFilter: "ALPHA" }))
+    expect(host.querySelector(".connect-filters-toggle .connect-filter-count")?.textContent).toBe("1")
+    expect(host.querySelector(".connect-filter-summary button")?.textContent).toBe("Clear")
+    expect(host.querySelector(".connect-empty")?.textContent).toBe(
+      "No agents match “zzz” on ALPHA, in all states.Clear filters"
+    )
+  })
+
   it("prioritizes a family needing attention and keeps its primary before its pair partner", () => {
     const markup = renderToStaticMarkup(directory())
     expect(markup).toContain('class="connect-family"')
@@ -63,20 +73,78 @@ describe("Connect families", () => {
     const two = agent("agent-two", "working", "agent-missing", "review")
     const markup = renderToStaticMarkup(directory({ agents: [one, two] }))
     expect(markup.match(/class="connect-family"/g)).toHaveLength(1)
-    expect(markup).toContain("Primary not listed")
-    expect(markup).toContain("Pair partner of")
-    expect(markup).toContain("Reviewer of")
+    expect(markup).toContain("Parent agent not found")
+    expect(markup).toContain("Pair partner")
+    expect(markup).toContain("Reviewer")
     expect(markup).not.toContain('data-agent-key="SER8:agent-missing"')
   })
 
-  it("names a missing primary and holds stale creatures still", () => {
+  it("does not replace an unknown parent's name with its id and holds stale creatures still", () => {
     const markup = renderToStaticMarkup(
       directory({ agents: [agent("agent-orphan", "ready", "agent-absent")], stale: true })
     )
-    expect(markup).toContain("Primary not listed")
-    expect(markup).toContain("agent-absent")
+    expect(markup).toContain("Parent agent not found")
+    expect(markup).not.toContain("agent-absent")
+    expect(markup).not.toContain("Unknown parent")
     expect(markup).toContain("Old reading")
     expect(markup).toContain('data-stale=""')
+  })
+
+  it("keeps a lone unknown-parent issue inline, with its icon and a remembered name when known", () => {
+    for (const parentName of [undefined, "former coordinator"]) {
+      const relationship: Types.Mutable<ConnectAgentRelationship> = {
+        parentAgentId: "agent-missing",
+        relation: "delegated"
+      }
+      if (parentName !== undefined) relationship.parentName = parentName
+      const orphan = Schema.decodeUnknownSync(ConnectAgent)({
+        ...agent("agent-orphan", "working", "agent-missing"),
+        relationship
+      })
+      const host = document.createElement("div")
+      host.innerHTML = renderToStaticMarkup(directory({ agents: [orphan] }))
+      expect(host.querySelectorAll(".connect-family-missing")).toHaveLength(0)
+      const issue = host.querySelector(".connect-agent-issue")
+      expect(host.querySelectorAll(".connect-agent-issue svg")).toHaveLength(1)
+      expect(issue?.textContent).toBe(
+        parentName === undefined ? "Parent agent not found" : "Unknown parent former coordinator"
+      )
+      expect(host.textContent).not.toContain("agent-missing")
+    }
+  })
+
+  it("keeps the sibling group notice when a filter shows only one orphan", () => {
+    const one = agent("agent-one", "ready", "agent-missing", "pair")
+    const two = agent("agent-two", "working", "agent-missing", "review")
+    const host = document.createElement("div")
+    host.innerHTML = renderToStaticMarkup(directory({ agents: [one, two], query: one.name }))
+    expect(host.querySelectorAll(".connect-agent")).toHaveLength(1)
+    expect(host.querySelectorAll(".connect-family-missing")).toHaveLength(1)
+    expect(host.querySelectorAll(".connect-agent-issue")).toHaveLength(0)
+  })
+
+  it("names a remembered parent once per orphan family without duplicate row warnings", () => {
+    const child = (id: string, relation: string) =>
+      Schema.decodeUnknownSync(ConnectAgent)({
+        ...agent(id, "working", "agent-missing", relation),
+        relationship: { parentAgentId: "agent-missing", relation, parentName: "former coordinator" }
+      })
+    const markup = renderToStaticMarkup(
+      directory({ agents: [child("agent-one", "pair"), child("agent-two", "review")] })
+    )
+    const host = document.createElement("div")
+    host.innerHTML = markup
+    expect(host.querySelectorAll(".connect-family-missing")).toHaveLength(1)
+    expect(host.querySelector(".connect-family-missing")?.textContent).toContain(
+      "former coordinator on ALPHA isn't in the directory; its children are shown here."
+    )
+    expect(host.querySelectorAll(".connect-agent-issue")).toHaveLength(0)
+    expect(host.querySelectorAll(".connect-token")).toHaveLength(2)
+    expect(host.querySelectorAll(".connect-agent small")[0]?.textContent).toContain(
+      "Pair partner of former coordinator"
+    )
+    expect(host.querySelectorAll(".connect-agent small")[1]?.textContent).toContain("Reviewer of former coordinator")
+    expect(host.textContent).not.toContain("agent-missing")
   })
 
   it("expands children, keeps expansion through polling, and always reveals a matching or needy child", async () => {
@@ -158,7 +226,7 @@ describe("Connect families", () => {
       expect(toggle?.textContent).toContain("Filters 2")
       await act(async () => toggle?.click())
       expect(toggle?.getAttribute("aria-expanded")).toBe("true")
-      await act(async () => host.querySelector<HTMLButtonElement>(".connect-filters-clear")?.click())
+      await act(async () => host.querySelector<HTMLButtonElement>(".connect-filter-summary button")?.click())
       expect(clearHost).toHaveBeenCalledWith(null)
       expect(clearActivity).toHaveBeenCalledWith("all")
     } finally {

@@ -4,6 +4,7 @@ import { WorkGoal, WorkSnapshots } from "@knpkv/herdr-work/model"
 import { expect, type Locator, type Page, test } from "@playwright/test"
 import { Schema } from "effect"
 import { ConnectAgent } from "../../src/model.js"
+import { failureSentences } from "../../src/unavailable-detail.js"
 
 test.use({ locale: "en-GB", timezoneId: "UTC" })
 
@@ -26,6 +27,7 @@ const agent = (
     }
   )
 }
+
 const base = [
   agent("sec-cc", "waiting", "atlas", "sec-cc", 13, 58),
   agent("pair-codex", "idle", "atlas", "paired-session", 13, 55, "sec-cc", "pair"),
@@ -305,9 +307,7 @@ test.describe("creature fill fidelity", () => {
           await expectRingFitsTrack(svg)
         }
         const stack = await drawnBox(page.locator(".connect-pins[data-placement=\"float\"]"))
-        const reserved = await page.locator(".connect-agents[data-pinned]").evaluate(
-          (node) => Number.parseFloat(getComputedStyle(node).paddingBlockEnd)
-        )
+        const reserved = (await drawnBox(page.locator(".connect-directory-secondary[data-pinned]"))).height
         const bottom = await page.locator(".connect-pins[data-placement=\"float\"]").evaluate(
           (node) => Number.parseFloat(getComputedStyle(node).insetBlockEnd)
         )
@@ -500,6 +500,200 @@ test.describe("creature fill fidelity", () => {
 })
 
 /** Export frame heights include the 98px masthead; capture the actual bounded directory below it. */
+/** Generated separators must obey the same copy rule as text nodes. */
+const expectNoMiddots = async (page: Page) => {
+  const root = page.locator("#fleet-connect-root")
+  const text = (await root.innerText()).includes("\u00b7")
+  const generated = await root.evaluate((element) =>
+    [...element.querySelectorAll<HTMLElement>("*")]
+      .filter((node) => node.getClientRects().length > 0 && getComputedStyle(node).visibility === "visible")
+      .flatMap((node) =>
+        ["::before", "::after"].map((pseudo) => ({
+          element: node.className,
+          pseudo,
+          content: getComputedStyle(node, pseudo).content
+        }))
+      )
+      .filter(({ content }) => content.includes("\u00b7"))
+  )
+  expect.soft({ text, generated }).toEqual({ text: false, generated: [] })
+}
+
+/** Every point in the 44px target must hit this control, never an adjacent control. */
+const expectTouchTarget = async (target: Locator) => {
+  const measured = await target.evaluate((node) => {
+    const ancestors: Array<{ node: Element; x: number; y: number }> = []
+    for (let parent = node.parentElement; parent !== null; parent = parent.parentElement) {
+      ancestors.push({ node: parent, x: parent.scrollLeft, y: parent.scrollTop })
+    }
+    const previous = { x: window.scrollX, y: window.scrollY }
+    node.scrollIntoView({ block: "center", inline: "center", behavior: "instant" })
+    const box = node.getBoundingClientRect()
+    const points = [-21.5, 0, 21.5].flatMap((x) =>
+      [-21.5, 0, 21.5].map((y) => {
+        const hit = document.elementFromPoint(box.x + box.width / 2 + x, box.y + box.height / 2 + y)
+        return { x, y, owned: hit !== null && node.contains(hit) }
+      })
+    )
+    for (const saved of ancestors) saved.node.scrollTo(saved.x, saved.y)
+    window.scrollTo(previous.x, previous.y)
+    return points
+  })
+  expect.soft(measured.filter(({ owned }) => !owned)).toEqual([])
+}
+
+/** Resolve theme-dependent token colours in the card's own inheritance scope. */
+const expectCardBorder = async (card: Locator, token: string, padding = "16px") => {
+  const measured = await card.evaluate((node, name) => {
+    const probe = document.createElement("span")
+    probe.style.color = `var(${name})`
+    node.append(probe)
+    const expected = getComputedStyle(probe).color
+    probe.remove()
+    const style = getComputedStyle(node)
+    return {
+      expected,
+      colors: [style.borderTopColor, style.borderRightColor, style.borderBottomColor, style.borderLeftColor],
+      widths: [style.borderTopWidth, style.borderRightWidth, style.borderBottomWidth, style.borderLeftWidth],
+      padding: [style.paddingTop, style.paddingRight, style.paddingBottom, style.paddingLeft],
+      radius: style.borderTopLeftRadius
+    }
+  }, token)
+  expect.soft(measured.colors).toEqual(Array(4).fill(measured.expected))
+  expect.soft(measured.widths).toEqual(["1px", "1px", "1px", "1px"])
+  expect.soft(measured.padding).toEqual([padding, padding, padding, padding])
+  expect.soft(measured.radius).toBe("16px")
+}
+
+/** Reference text colours are sampled from the ref, independently of the live Text variant. */
+const expectRegularText = async (text: Locator, token: string, size?: string) => {
+  const measured = await text.evaluateAll((nodes, name) =>
+    nodes.map((node) => {
+      const probe = document.createElement("span")
+      probe.style.color = `var(${name})`
+      node.append(probe)
+      const expected = getComputedStyle(probe).color
+      probe.remove()
+      const style = getComputedStyle(node)
+      return {
+        text: node.textContent?.trim(),
+        color: style.color,
+        expected,
+        weight: style.fontWeight,
+        size: style.fontSize
+      }
+    }), token)
+  expect.soft(measured.length).toBeGreaterThan(0)
+  for (const reading of measured) {
+    expect.soft(reading.color, reading.text).toBe(reading.expected)
+    expect.soft(reading.weight, reading.text).toBe("400")
+    if (size !== undefined) expect.soft(reading.size, reading.text).toBe(size)
+  }
+}
+
+/** Check the painted divider, accepting any CSS implementation with the reference's inset. */
+const expectInsetFamilyDividers = async (rows: Locator) => {
+  expect.soft(await rows.count()).toBeGreaterThan(0)
+  for (const row of await rows.all()) {
+    const saved = await row.evaluate((node) => {
+      const ancestors: Array<{ x: number; y: number }> = []
+      for (let parent = node.parentElement; parent !== null; parent = parent.parentElement) {
+        ancestors.push({ x: parent.scrollLeft, y: parent.scrollTop })
+      }
+      const probe = document.createElement("span")
+      probe.style.color = "var(--rly-color-border-1)"
+      node.append(probe)
+      const border = getComputedStyle(probe).color
+      probe.style.color = "var(--rly-color-surface-1)"
+      const surface = getComputedStyle(probe).color
+      probe.remove()
+      return { ancestors, x: window.scrollX, y: window.scrollY, border, surface }
+    })
+    const screenshot = await row.screenshot({ animations: "disabled" })
+    const painted = await row.evaluate(async (node, { png, saved }) => {
+      const image = new Image()
+      image.src = `data:image/png;base64,${png}`
+      await image.decode()
+      const canvas = document.createElement("canvas")
+      canvas.width = image.width
+      canvas.height = image.height
+      const context = canvas.getContext("2d")
+      let reading = null
+      if (context !== null) {
+        context.drawImage(image, 0, 0)
+        // A fractional row edge can occupy either of the last raster rows.
+        const pixel = (x: number, y: number) => Array.from(context.getImageData(x, y, 1, 1).data)
+        const edgeRows = [1, 2, 3].map((offset) => ({
+          startGap: pixel(6, image.height - offset),
+          dividerStart: pixel(13, image.height - offset),
+          dividerEnd: pixel(image.width - 3, image.height - offset)
+        }))
+        context.fillStyle = saved.surface
+        context.fillRect(0, 0, 1, 1)
+        const surface = Array.from(context.getImageData(0, 0, 1, 1).data)
+        context.fillStyle = saved.border
+        context.fillRect(0, 0, 1, 1)
+        const border = Array.from(context.getImageData(0, 0, 1, 1).data)
+        reading = { edgeRows, surface, border }
+      }
+      let parent = node.parentElement
+      for (const position of saved.ancestors) {
+        parent?.scrollTo(position.x, position.y)
+        parent = parent?.parentElement ?? null
+      }
+      window.scrollTo(saved.x, saved.y)
+      return reading
+    }, { png: screenshot.toString("base64"), saved })
+    expect.soft(painted).not.toBeNull()
+    if (painted !== null) {
+      expect.soft(painted.edgeRows).toContainEqual({
+        startGap: painted.surface,
+        dividerStart: painted.border,
+        dividerEnd: painted.border
+      })
+    }
+  }
+}
+
+/** A notice icon starts its own column beside, rather than above, the first text line. */
+const expectNoticeIcon = async (card: Locator, text: Locator, gap = 12) => {
+  const icon = await card.locator(":scope > svg").boundingBox()
+  const heading = await text.boundingBox()
+  expect.soft(icon).not.toBeNull()
+  expect.soft(heading).not.toBeNull()
+  if (icon !== null && heading !== null) {
+    expect.soft(icon.x + icon.width).toBeLessThanOrEqual(heading.x)
+    expect.soft(Math.abs(icon.y - heading.y)).toBeLessThanOrEqual(2)
+    expect.soft(heading.x - (icon.x + icon.width)).toBe(gap)
+  }
+}
+
+/** Retry uses the shared secondary fill, border and compact density, rather than a primary action. */
+const expectCompactSecondary = async (button: Locator) => {
+  const measured = await button.evaluate((node) => {
+    const probe = document.createElement("span")
+    node.append(probe)
+    const color = (token: string) => {
+      probe.style.color = `var(${token})`
+      return getComputedStyle(probe).color
+    }
+    const style = getComputedStyle(node)
+    const result = {
+      fill: style.backgroundColor,
+      expectedFill: color("--rly-color-surface-1"),
+      border: style.borderTopColor,
+      expectedBorder: color("--rly-color-border-2"),
+      minHeight: style.minHeight,
+      compactHeight: style.getPropertyValue("--rly-control-height-dense").trim()
+    }
+    probe.remove()
+    return result
+  })
+  expect.soft(measured.fill).toBe(measured.expectedFill)
+  expect.soft(measured.border).toBe(measured.expectedBorder)
+  expect.soft(measured.minHeight).toBe(measured.compactHeight)
+}
+
 const states = {
   "2a": 1064,
   "2b": 647,
@@ -585,20 +779,73 @@ for (const width of [390, 1280]) {
           }
           return route.fulfill({
             json: {
-              agents,
+              agents: agents.map((entry) =>
+                (state === "2s" || state === "2h") && entry.relationship?.parentAgentId === "agent-coord-old"
+                  ? { ...entry, relationship: { ...entry.relationship, parentName: "coord-old" } }
+                  : entry
+              ),
               failures: failed && state === "2e" ? [{ host: "cedar", reason: "offline" }] : [],
+              hosts: ["atlas", "birch"],
               nextCursor: null
             }
           })
         })
-        if (state === "2o") await page.route("**/v1/connect/limits", (route) => route.fulfill({ status: 503 }))
+        if (state === "2o") {
+          await page.route("**/v1/connect/limits", (route) =>
+            route.fulfill({
+              json: {
+                hosts: [{
+                  host: "atlas",
+                  readAt: at(14, 2),
+                  reading: { _tag: "Unavailable", reason: "failed", detail: failureSentences.notRunning }
+                }],
+                failures: [],
+                peersListed: true
+              }
+            }))
+        }
         await mount(page, theme)
-        if (state === "2b") await expect(page.getByText("Loading fleet agents…")).toBeVisible()
-        else if (state === "2c") {
-          await expect(page.getByRole("button", { name: "Retry directory" })).toBeVisible()
-          await expect(page.locator(".connect-directory-error")).toContainText("HTTP 503")
-        } else if (state === "2f") await expect(page.getByText("No agents running on any host.")).toBeVisible()
-        else {
+        if (state === "2b") {
+          await expect(page.getByText("Loading fleet agents…")).toBeVisible()
+          await expect.soft(page.locator(".connect-directory-secondary")).toHaveCount(0)
+        } else if (state === "2c") {
+          await expect.soft(page.getByRole("heading", { name: "The fleet directory didn't answer" })).toBeVisible()
+          await expect.soft(page.getByText("Not updated yet", { exact: true })).toBeVisible()
+          await expect.soft(page.locator(".connect-directory-error svg")).toBeVisible()
+          await expect.soft(page.getByRole("button", { name: "Retry", exact: true })).toBeVisible()
+          await expect(page.locator(".connect-directory-error p")).toHaveText(
+            "The request timed out, so no agents are listed. Retry, or wait: Relay tries again every 5 seconds."
+          )
+          await expectCardBorder(page.locator(".connect-directory-error"), "--rly-color-blocked-ink", "24px")
+          await expectNoticeIcon(
+            page.locator(".connect-directory-error"),
+            page.locator(".connect-directory-error h2"),
+            16
+          )
+          await expectCompactSecondary(page.getByRole("button", { name: "Retry", exact: true }))
+          await expect.soft(page.locator(".connect-directory-secondary")).toHaveCount(0)
+          await expectRegularText(page.locator(".connect-directory-error p"), "--rly-color-text-2", "16px")
+        } else if (state === "2f") {
+          await expect(page.getByText("No agents running on any host.")).toBeVisible()
+          await expect.soft(page.getByRole("searchbox")).toBeVisible()
+          await expect.soft(page.getByRole("button", { name: "Filters", exact: true })).toBeVisible()
+          await expect.soft(page.getByText("Start an agent on atlas or birch and it appears here.", { exact: true }))
+            .toBeVisible()
+          await expectCardBorder(page.locator(".connect-empty"), "--rly-color-border-1")
+          await expectRegularText(page.locator(".connect-empty p").first(), "--rly-color-text-1", "14px")
+          await expectRegularText(page.locator(".connect-empty p").last(), "--rly-color-text-2", "12px")
+          const hint = await page.locator(".connect-empty p").evaluateAll((rows) =>
+            rows.map((row) => {
+              const box = row.getBoundingClientRect()
+              return { x: box.x, y: box.y, height: box.height }
+            })
+          )
+          expect.soft(hint).toHaveLength(2)
+          if (hint[0] !== undefined && hint[1] !== undefined) {
+            expect.soft(hint[1].x).toBe(hint[0].x)
+            expect.soft(hint[1].y).toBeGreaterThanOrEqual(hint[0].y + hint[0].height + 8)
+          }
+        } else {
           await expect(page.locator(".connect-family").first()).toBeVisible()
           if (state === "2h") {
             await expect(page.locator(".connect-agent")).toHaveCount(7)
@@ -641,12 +888,49 @@ for (const width of [390, 1280]) {
           if (state === "2q-v2" || state === "2g") {
             await page.getByRole("button", { name: "birch", exact: true }).click()
             await page.getByRole("button", { name: /^Filters/ }).click()
-            if (state === "2g") await page.getByRole("searchbox").fill("zzz")
+            if (state === "2g") {
+              await page.getByRole("searchbox").fill("zzz")
+              await page.getByRole("searchbox").blur()
+            }
+          }
+          if (state === "2g") {
+            await expect.soft(page.locator(".connect-filters-toggle .connect-filter-count")).toHaveText("1")
+            const fill = await page.locator(".connect-filters-toggle").evaluate((button) => {
+              const probe = document.createElement("span")
+              probe.style.color = "var(--rly-color-surface-3)"
+              button.append(probe)
+              const expected = getComputedStyle(probe).color
+              probe.remove()
+              return { actual: getComputedStyle(button).backgroundColor, expected }
+            })
+            expect.soft(fill.actual).toBe(fill.expected)
+            await expect(page.getByRole("searchbox")).not.toBeFocused()
+            await expect.soft(
+              page.locator(".connect-filter-summary").getByRole("button", { name: "Clear", exact: true })
+            ).toBeVisible()
+            await expect.soft(page.locator(".connect-empty")).toContainText(
+              "No agents match “zzz” on birch, in all states."
+            )
+            await expectCompactSecondary(page.getByRole("button", { name: "Clear filters", exact: true }))
+            await expectRegularText(page.locator(".connect-no-matches"), "--rly-color-text-1", "14px")
           }
           if (state === "2j") {
             await page.locator(".connect-agent[data-agent-key=\"atlas:agent-ds-rly\"]").click()
             await page.getByRole("button", { name: "Pin", exact: true }).click()
             await page.keyboard.press("Escape")
+            await page.mouse.move(0, 0)
+            await expect.soft(page.locator(".connect-pins[data-placement='float'] .connect-pin-name")).toBeVisible()
+            await expect.soft(page.locator(".connect-pins[data-placement='float'] .connect-pin-state")).toBeVisible()
+            await expect.soft(page.locator(".connect-pins[data-placement='float'] .lucide-pin")).toBeVisible()
+            const selected = page.locator(".connect-agent[data-agent-key=\"atlas:agent-ds-rly\"]")
+            await selected.evaluate((row) => row.blur())
+            const outline = await selected.evaluate((row) => getComputedStyle(row).outlineStyle)
+            expect.soft(outline).toBe("none")
+            const stack = await drawnBox(page.locator(".connect-pins[data-placement='float']"))
+            const footer = await drawnBox(page.locator(".connect-directory-secondary"))
+            const last = await drawnBox(page.locator(".connect-agent").last())
+            expect.soft(stack.y).toBeGreaterThanOrEqual(footer.y)
+            expect.soft(last.y + last.height).toBeLessThanOrEqual(stack.y)
           }
           if (state.startsWith("2i")) {
             const key = state === "2i-v2"
@@ -677,7 +961,126 @@ for (const width of [390, 1280]) {
           }
           if (state === "2t") {
             await expect(page.locator(".connect-agent[data-agent-key=\"atlas:agent-fmt-sub\"]")).toBeVisible()
-            await expect(page.getByRole("button", { name: "Nested deeper: open lint-sub →" })).toBeVisible()
+            const nested = page.getByRole("button", { name: /^Nested deeper: open lint-sub/ })
+            await expect(nested).toBeVisible()
+            const presentation = await nested.evaluate((node) => {
+              const label = node.querySelector(":scope > span")
+              const glyph = node.querySelector(":scope > svg")
+              return {
+                weight: getComputedStyle(node).fontWeight,
+                buttonDecoration: getComputedStyle(node).textDecorationLine,
+                label: label?.textContent?.trim() ?? null,
+                labelDecoration: label === null ? null : getComputedStyle(label).textDecorationLine,
+                icon: glyph?.classList.contains("lucide-arrow-right") ?? false,
+                decorative: glyph?.getAttribute("aria-hidden") ?? null,
+                iconAfterLabel: label !== null && glyph !== null && label.nextElementSibling === glyph,
+                last: glyph !== null && node.lastElementChild === glyph
+              }
+            })
+            expect.soft(presentation).toEqual({
+              weight: "600",
+              buttonDecoration: "none",
+              label: "Nested deeper: open lint-sub",
+              labelDecoration: "underline",
+              icon: true,
+              decorative: "true",
+              iconAfterLabel: true,
+              last: true
+            })
+          }
+          if (["2a", "2j", "2o", "2s"].includes(state)) {
+            const childFills = await page.locator(".connect-agent[data-depth='1']").evaluateAll((rows) =>
+              rows.map((row) => {
+                const family = row.closest(".connect-family")
+                const rowFill = getComputedStyle(row).backgroundColor
+                return { rowFill, familyFill: family === null ? null : getComputedStyle(family).backgroundColor }
+              })
+            )
+            expect.soft(childFills.length).toBeGreaterThan(0)
+            expect.soft(
+              childFills.every(({ familyFill, rowFill }) => rowFill === "rgba(0, 0, 0, 0)" || rowFill === familyFill)
+            ).toBe(true)
+            const metaOwners = await page.locator(".connect-agent-copy small").evaluateAll((rows) =>
+              rows.map((row) => {
+                const owner = row.closest("button")
+                const box = owner?.getBoundingClientRect()
+                return box !== undefined && box.width >= 44 && box.height >= 44
+              })
+            )
+            expect.soft(metaOwners.length).toBeGreaterThan(0)
+            expect.soft(metaOwners.every(Boolean)).toBe(true)
+          }
+          if (state === "2o") {
+            await expect.soft(page.locator(".connect-limits-problem")).toContainText(failureSentences.notRunning)
+            await expect.soft(page.locator(".connect-limits-problem svg")).toBeVisible()
+            await expectRegularText(page.locator(".connect-limits-problem p"), "--rly-color-text-1", "16px")
+            await expectCardBorder(page.locator(".connect-limits-problem"), "--rly-color-held-ink", "12px")
+            await expectNoticeIcon(
+              page.locator(".connect-limits-problem"),
+              page.locator(".connect-limits-problem p"),
+              8
+            )
+          }
+          if (state === "2s") {
+            await expect.soft(page.locator(".connect-family-missing")).toHaveCount(1)
+            await expect.soft(page.locator(".connect-family-missing")).toContainText(
+              "coord-old on birch isn't in the directory"
+            )
+            await expect.soft(page.locator(".connect-family-missing p")).toHaveCSS("line-height", "16px")
+            await expectRegularText(page.locator(".connect-family-missing p"), "--rly-color-text-2", "12px")
+            const noticeLines = await page.locator(".connect-family-missing").evaluate((node) => {
+              const label = node.querySelector(":scope > span")
+              const sentence = node.querySelector("p")
+              const labelText = Array.from(label?.childNodes ?? []).find((child) =>
+                child.nodeType === Node.TEXT_NODE && child.textContent?.trim()
+              )
+              if (label === null || sentence === null || labelText === undefined) return null
+              const labelRange = document.createRange()
+              labelRange.selectNodeContents(labelText)
+              const sentenceRange = document.createRange()
+              sentenceRange.selectNodeContents(sentence)
+              const labelBox = labelRange.getBoundingClientRect()
+              const sentenceBox = sentenceRange.getBoundingClientRect()
+              return {
+                label: { x: labelBox.x, right: labelBox.right, bottom: labelBox.bottom },
+                sentence: { x: sentenceBox.x, y: sentenceBox.y, bottom: sentenceBox.bottom },
+                labelBottom: label.getBoundingClientRect().bottom,
+                labelStart: label.getBoundingClientRect().x,
+                // React text fragments each get a rect, including fragments on the same visual line.
+                sentenceLineTops: Array.from(sentenceRange.getClientRects(), (rect) => rect.top)
+              }
+            })
+            expect.soft(noticeLines).not.toBeNull()
+            if (noticeLines !== null) {
+              if (width === 1280) {
+                expect.soft(noticeLines.sentenceLineTops.length).toBeGreaterThan(0)
+                expect.soft(
+                  Math.max(...noticeLines.sentenceLineTops) - Math.min(...noticeLines.sentenceLineTops),
+                  "desktop orphan sentence fragments stay on one visual line"
+                ).toBeLessThanOrEqual(1)
+                expect.soft(noticeLines.sentence.x, "desktop orphan sentence follows the label")
+                  .toBeGreaterThan(noticeLines.label.right)
+                expect.soft(
+                  Math.abs(noticeLines.label.bottom - noticeLines.sentence.bottom),
+                  "desktop orphan label and sentence share a text baseline"
+                ).toBeLessThanOrEqual(1)
+              } else {
+                expect.soft(noticeLines.sentence.y, "phone orphan sentence stacks below the label")
+                  .toBeGreaterThanOrEqual(noticeLines.labelBottom)
+                expect.soft(noticeLines.sentence.x).toBe(noticeLines.labelStart)
+              }
+            }
+            const fill = await page.locator(".connect-family-missing").evaluate((node) => {
+              const probe = document.createElement("span")
+              probe.style.color = "var(--rly-color-surface-2)"
+              node.append(probe)
+              const expected = getComputedStyle(probe).color
+              probe.remove()
+              return { actual: getComputedStyle(node).backgroundColor, expected }
+            })
+            expect.soft(fill.actual).toBe(fill.expected)
+            await expect.soft(page.locator(".connect-agent[data-lineage-issue='unknown_parent'] .connect-agent-issue"))
+              .toHaveCount(0)
           }
           if (state === "2u") {
             const more = page.getByRole("button", { name: "Show 3 more", exact: true })
@@ -690,20 +1093,44 @@ for (const width of [390, 1280]) {
           }
           if (state === "2r") await page.emulateMedia({ forcedColors: "active", reducedMotion: "reduce" })
         }
+        if (["2a", "2c", "2f", "2g", "2j", "2o", "2s", "2t"].includes(state)) await expectNoMiddots(page)
+        if (["2a", "2f", "2g", "2j", "2o", "2s", "2t"].includes(state)) {
+          const type = await page.locator(".connect-limits-link").evaluate((node) => ({
+            size: getComputedStyle(node).fontSize,
+            weight: getComputedStyle(node).fontWeight
+          }))
+          expect.soft(type).toEqual({ size: "14px", weight: "600" })
+        }
         await expect(page.locator(".connect-cast-member small")).toHaveCount(0)
         await page.evaluate(() => document.fonts.ready)
+        await page.mouse.move(0, 0)
+        if (["2a", "2j", "2o", "2s", "2t"].includes(state)) {
+          await expectRegularText(
+            page.locator(".connect-agent-copy small, .connect-agent-copy small *"),
+            "--rly-color-text-2",
+            "12px"
+          )
+          await expectRegularText(page.locator(".connect-agent-work"), "--rly-color-text-1", "14px")
+          await expectInsetFamilyDividers(page.locator(".connect-family .connect-agent:not(:last-child)"))
+        }
+        if (["2a", "2c", "2f", "2g", "2j", "2o", "2s", "2t"].includes(state)) {
+          await expectRegularText(
+            page.locator(state === "2c" ? ".connect-embedded-intro > .connect-attention-count" : ".connect-updated"),
+            "--rly-color-text-2",
+            "12px"
+          )
+        }
+        if (["2a", "2f", "2g", "2j", "2o", "2s", "2t"].includes(state)) {
+          await expectRegularText(page.locator(".connect-filter-summary > span").first(), "--rly-color-text-2", "12px")
+          await expectRegularText(page.locator(".connect-filter-summary > span").nth(1), "--rly-color-text-2", "12px")
+        }
         await page
           .locator(state.startsWith("2i") ? ".connect-stage-sheet" : "#fleet-connect-root")
           .screenshot({ path: testInfo.outputPath(`fidelity/connect-${state}-${String(width)}-${theme}.png`) })
         expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width + 2)
         if (state === "2a") {
           const title = page.getByRole("heading", { name: /Connect/ })
-          await expect(title).toHaveText("Connect 2 need you")
-          expect(
-            await page.locator(".connect-attention-count").evaluate((node) =>
-              getComputedStyle(node, "::before").content
-            )
-          ).toBe("\" ·\"")
+          await expect(title).toHaveText("Connect, 2 need you")
           const columns = await page
             .locator(".connect-agent-list")
             .evaluate((list) => getComputedStyle(list).gridTemplateColumns.split(" ").length)
@@ -722,6 +1149,59 @@ for (const width of [390, 1280]) {
           if (width === 1280) await expect(page.locator(".connect-search-shortcut")).toBeVisible()
           else await expect(page.locator(".connect-search-shortcut")).toBeHidden()
         }
+      })
+    }
+  }
+}
+
+/** Hit targets run independently so a copy or card failure cannot hide a geometry regression. */
+for (const width of [390, 1280]) {
+  for (const theme of ["light", "dark"]) {
+    for (
+      const [state, frameHeight] of Object.entries(states).filter(([state]) =>
+        ["2a", "2c", "2f", "2g", "2j", "2o", "2s", "2t"].includes(state)
+      )
+    ) {
+      test(`reference ${state} hit targets ${String(width)} ${theme}`, async ({ page }) => {
+        await prepare(page, width, theme)
+        if (width === 1280) await page.setViewportSize({ width: width + 2, height: frameHeight - 100 })
+        await page.route("**/v1/connect/agents", (route) =>
+          state === "2c"
+            ? route.fulfill({ status: 503 })
+            : route.fulfill({
+              json: {
+                agents: state === "2f" ? [] : [...base, ...extras(state)],
+                failures: [],
+                hosts: ["atlas", "birch"],
+                nextCursor: null
+              }
+            }))
+        await mount(page, theme)
+        if (state !== "2c") await expect(page.locator(".connect-limits-link")).toBeVisible()
+        if (state === "2c") {
+          const retry = page.getByRole("button", { name: "Retry", exact: true })
+          await expect(retry).toBeVisible()
+          await expectTouchTarget(retry)
+        } else if (state === "2g") {
+          await page.getByRole("button", { name: "Filters", exact: true }).click()
+          await page.getByRole("button", { name: "birch", exact: true }).click()
+          await page.getByRole("button", { name: /^Filters/ }).click()
+          await page.getByRole("searchbox").fill("zzz")
+          await page.getByRole("searchbox").blur()
+          await expectTouchTarget(page.getByRole("button", { name: /^Filters/ }))
+          await expectTouchTarget(page.getByRole("button", { name: "Clear", exact: true }))
+          await expectTouchTarget(page.getByRole("button", { name: "Clear filters", exact: true }))
+        } else if (state === "2j") {
+          await page.locator(".connect-agent[data-agent-key='atlas:agent-ds-rly']").click()
+          await page.getByRole("button", { name: "Pin", exact: true }).click()
+          await page.keyboard.press("Escape")
+          await page.mouse.move(0, 0)
+          await expectTouchTarget(page.getByRole("button", { name: "Unpin ds-rly", exact: true }))
+          await expectTouchTarget(page.getByRole("button", { name: "Pinned: ds-rly, Working", exact: true }))
+        } else if (state === "2t") {
+          await expectTouchTarget(page.getByRole("button", { name: /^Nested deeper: open lint-sub/ }))
+        }
+        if (state !== "2c") await expectTouchTarget(page.locator(".connect-limits-link"))
       })
     }
   }

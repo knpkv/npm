@@ -39,7 +39,7 @@ describe("Connect summary", () => {
   })
 
   it("says the directory is unavailable rather than claiming zero agents", () => {
-    expect(summary({ agents: null, unavailable: true })).toContain("The fleet directory didn&#x27;t answer")
+    expect(summary({ agents: null, unavailable: true })).toContain("Not updated yet")
     expect(summary({ agents: null, unavailable: false })).toContain("Loading the fleet")
   })
 })
@@ -68,7 +68,7 @@ describe("AgentDirectory rows", () => {
     expect(markup).not.toMatch(/(Working|Ready|Needs attention|Last active) in /)
   })
 
-  it("name a listed parent and shorten an unlisted one instead of printing its full hash", () => {
+  it("names a listed parent and never substitutes an unlisted parent's id for its name", () => {
     const parent = agent("agent-1f49bd901df108248299", "working")
     const child = Schema.decodeUnknownSync(ConnectAgent)({
       host: "SER8",
@@ -97,7 +97,8 @@ describe("AgentDirectory rows", () => {
       'Reviewer of <span class="connect-token">Agent agent-1f49bd901df108248299</span>'
     )
     const orphan = render([child])
-    expect(orphan).toContain('<span class="connect-token">agent-1f49bd90…</span>')
+    expect(orphan).toContain("Parent agent not found")
+    expect(orphan).not.toContain("agent-1f49bd90…")
     expect(orphan).not.toContain("agent-1f49bd901df108248299")
   })
 

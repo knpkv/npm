@@ -41,6 +41,7 @@ const ArchiveRow = Schema.Struct({
   last_words_at: Schema.NullOr(Schema.Number)
 })
 const HostRow = Schema.Struct({ observed_at: Schema.Number })
+const NameRow = Schema.Struct({ name: ConnectAgent.fields.name })
 const failWith = (operation: string) => (cause: unknown) => new ConnectArchiveStoreError({ operation, cause })
 const fromPrivateDatabaseError = (error: PrivateDatabaseError) =>
   new ConnectArchiveStoreError({ operation: error.operation, cause: error.cause })
@@ -225,6 +226,26 @@ export class AgentArchiveStore {
         Effect.tap(() => Effect.sync(() => this.#taintedHosts.delete(host))),
         Effect.tapError(() => Effect.sync(() => this.#taintedHosts.set(host, observation.observedAt)))
       )
+    }))
+  })
+
+  /** Latest remembered names, scoped to the requested host and identity, including closed agents. */
+  readonly namesFor = Effect.fn("AgentArchiveStore.namesFor")(function*(
+    this: AgentArchiveStore,
+    identities: ReadonlyArray<Pick<ConnectAgent, "host" | "id">>
+  ) {
+    return yield* this.#transactions.withPermits(1)(Effect.try({
+      try: () => {
+        const lookup = this.#database.prepare(
+          `SELECT name FROM connect_archive_observations WHERE host = ? AND agent_id = ?
+           UNION ALL SELECT name FROM connect_agent_archive WHERE host = ? AND agent_id = ? LIMIT 1`
+        )
+        return identities.flatMap(({ host, id }) => {
+          const row = lookup.get(host, id, host, id)
+          return row === undefined ? [] : [{ host, id, name: Schema.decodeUnknownSync(NameRow)(row).name }]
+        })
+      },
+      catch: failWith("namesFor")
     }))
   })
 

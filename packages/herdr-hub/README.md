@@ -38,6 +38,10 @@ Fleet-wide submission preserves partial results. One unreachable host does not e
 
 Approval mutations require the exact active listener origin, including HTML form submissions. Originless fleet submission remains a separate authenticated CLI path. Only hostd sets submission provenance, never the request body, which rejects unknown fields. A `POST /v1/jobs` on the local listener that passed loopback authorization and carries no proxy header (`Forwarded`, `X-Forwarded-*`, `X-Real-IP`, `Via`) is a verified local submission: its `nix.*` and `agent.*` jobs queue without approval. Every other listener or proxied request is remote, and Work authority jobs always wait for approval. Existing browser push subscriptions are reconciled with the server on page load, so server-side expiry or revocation cannot leave a false enabled state.
 
+## Connect directory
+
+The authenticated `GET /v1/connect/agents` response includes optional `hosts` on its first page, read from `config.machines`. This lists configured machine names even when agents or usage readings do not list a host. Later pages omit that metadata. Older clients can ignore it, and newer clients omit the empty-directory host hint when an older hub does not supply it.
+
 ## Approval request disclosure
 
 The authenticated approval browser receives a sanitized projection of each request from the persisted `JobRecord`. Pending, approved, rejected, and expired records retain the same typed request fields in browser-visible history. Safe fields include the request kind and title, operation mode and channel, normalized repository or revision coordinates, agent session, actor and worker identities, and lifecycle timestamps. Repository and revision values are redacted for credentials and unsafe URI query parameters before they cross the HTTP boundary; internal prompts and messages are represented by `[redacted internal prompt]`.

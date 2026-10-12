@@ -117,9 +117,9 @@
   /* The cards and history live in the Usage tab; the line links there. */
   .connect-limits-link {
     align-items: center;
-    color: var(--rly-color-text-2);
+    color: var(--rly-color-text-1);
     display: inline-flex;
-    font-size: var(--rly-type-meta-size);
+    font: var(--rly-type-label-weight) 0.875rem / 1.25rem var(--rly-type-label-font);
     gap: var(--rly-space-8);
     inline-size: fit-content;
     position: relative;
@@ -473,17 +473,13 @@
     outline-offset: -1px;
   }
 
-  .connect-attention-count[data-attention]::before {
-    content: " ·";
-    white-space: pre;
-  }
   .connect-row-separator::before {
-    content: " · ";
+    content: ", ";
     white-space: pre;
   }
 
   .connect-agent time {
-    color: var(--rly-color-text-3);
+    color: var(--rly-color-text-2);
     text-align: end;
     font-family: "Geist Mono", ui-monospace, monospace;
     font-size: var(--rly-type-meta-size);
@@ -538,7 +534,7 @@
 
   /* The directory's read time changes only per poll; tabular digits keep its width still. */
   .connect-updated {
-    color: var(--rly-color-text-3);
+    color: var(--rly-color-text-2);
     display: block;
     font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
       var(--rly-type-meta-font);
@@ -1789,8 +1785,20 @@
   }
 
   .connect-family .connect-agent {
+    border-block-end-color: transparent;
     inline-size: 100%;
     min-block-size: 44px;
+  }
+
+  /* The divider starts at the family's content inset; the transparent border keeps row geometry. */
+  .connect-family .connect-agent:not(:last-child)::before {
+    background: var(--rly-color-border-1);
+    block-size: 1px;
+    content: "";
+    inset-block-end: -1px;
+    inset-inline: 13px 1px;
+    pointer-events: none;
+    position: absolute;
   }
 
   .connect-family .connect-agent:last-child {
@@ -1972,7 +1980,7 @@
 
   .connect-filter-summary {
     align-items: center;
-    color: var(--rly-color-text-3);
+    color: var(--rly-color-text-2);
     display: flex;
     flex-wrap: wrap;
     font-size: var(--rly-type-meta-size);
@@ -2012,6 +2020,25 @@
     display: grid;
     gap: var(--rly-space-12);
     padding-block-start: var(--rly-space-24);
+    position: relative;
+  }
+
+  /* Pins live over the footer, whose height grows for a stack without changing directory rows. */
+  .connect-directory-secondary[data-pinned] {
+    min-block-size: calc(var(--rly-space-16) + var(--connect-pin-rows, 1) * (44px + var(--rly-space-8)));
+  }
+
+  @media (min-width: 701px) {
+    .connect-directory-secondary .connect-limits {
+      align-items: center;
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--rly-space-16);
+    }
+
+    .connect-directory-secondary .connect-limits-problem {
+      flex-basis: 100%;
+    }
   }
 
   .connect-cast-family {
@@ -2200,6 +2227,10 @@
     border-radius: var(--rly-space-8);
   }
 
+  .connect-search input::-webkit-search-cancel-button {
+    appearance: none;
+  }
+
   .connect-filter-row {
     background: var(--rly-color-surface-1);
     border-radius: var(--rly-space-16);
@@ -2214,17 +2245,26 @@
     font-weight: var(--rly-type-label-weight);
   }
 
-  .connect-filters-toggle[aria-expanded="true"] {
+  .connect-filters-toggle[aria-expanded="true"],
+  .connect-filters-toggle[data-active="true"] {
     background: var(--rly-color-surface-3);
+  }
+
+  .connect-filters-toggle .connect-filter-count {
+    background: var(--rly-color-action-background);
+    border-radius: 999px;
+    color: var(--rly-color-action-foreground);
+    display: inline-grid;
+    font-size: var(--rly-type-meta-size);
+    min-block-size: 18px;
+    min-inline-size: 18px;
+    padding-inline: var(--rly-space-4);
+    place-items: center;
   }
 
   .connect-filter-summary {
     gap: var(--rly-space-4);
     margin-block: var(--rly-space-12) var(--rly-space-20);
-  }
-
-  .connect-filter-summary > span + span::before {
-    content: "· ";
   }
 
   .connect-family-count {
@@ -2234,12 +2274,8 @@
     margin-block: 0 var(--rly-space-8);
   }
 
-  .connect-attention-count[data-attention]::before {
-    content: " ·";
-    white-space: pre;
-  }
   .connect-row-separator::before {
-    content: " · ";
+    content: ", ";
     white-space: pre;
   }
 
@@ -2253,10 +2289,6 @@
 
   .connect-agent > .connect-creature {
     align-self: start;
-  }
-
-  .connect-family .connect-agent[data-depth]:not([data-depth="0"]) {
-    background: var(--rly-color-surface-3);
   }
 
   .connect-family .connect-agent:first-child {
@@ -2282,9 +2314,86 @@
   .connect-empty {
     margin: 0;
   }
+
+  .connect-directory-error {
+    align-items: start;
+    border-color: var(--rly-color-blocked-ink);
+    grid-template-columns: 20px minmax(0, 1fr);
+    gap: var(--rly-space-16);
+    padding: var(--rly-space-24);
+  }
+
+  .connect-directory-error > svg {
+    color: var(--rly-color-blocked-ink);
+  }
+
+  .connect-directory-error-copy {
+    display: grid;
+    gap: var(--rly-space-12);
+    min-inline-size: 0;
+  }
+
+  .connect-directory-error-copy h2 {
+    margin: 0;
+  }
+
+  .connect-compact-secondary,
+  .connect-scope-clear {
+    position: relative;
+  }
+
+  .connect-compact-secondary::after,
+  .connect-scope-clear::after {
+    content: "";
+    inset: min(0px, (100% - 2.75rem) / 2);
+    position: absolute;
+  }
+
+  .connect-no-matches {
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+  }
+
+  .connect-limits-problem {
+    align-items: start;
+    background: var(--rly-color-surface-1);
+    border: 1px solid var(--rly-color-held-ink);
+    border-radius: var(--rly-space-16);
+    display: grid;
+    gap: var(--rly-space-8);
+    grid-template-columns: 16px minmax(0, 1fr);
+    padding: var(--rly-space-12);
+  }
+
+  .connect-limits-problem > svg {
+    color: var(--rly-color-held-ink);
+  }
+
+  .connect-limits-problem p {
+    margin: 0;
+  }
   .connect-empty p {
     margin: 0;
   }
+  .connect-empty > p:first-child {
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+  }
+
+  /* Supporting copy uses the reference's regular weight, without changing shared Rly type tokens. */
+  .connect-empty p,
+  .connect-limits-problem p,
+  .connect-family-missing p,
+  .connect-loading-copy,
+  .connect-embedded-intro > .connect-attention-count,
+  .connect-header > .connect-attention-count,
+  .connect-updated,
+  .connect-filter-summary,
+  .connect-family .connect-agent-copy small,
+  .connect-family .connect-agent-work {
+    font-weight: 400;
+  }
+
   .connect-empty button {
     justify-self: start;
   }
@@ -2364,13 +2473,16 @@
   }
 
   .connect-family-missing {
-    background: var(--rly-color-surface-3);
+    background: var(--rly-color-surface-2);
     border-start-start-radius: inherit;
     border-start-end-radius: inherit;
     border-block-end: 1px solid var(--rly-color-border-1);
-    display: grid;
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
     font-size: var(--rly-type-meta-size);
-    gap: var(--rly-space-4);
+    line-height: var(--rly-type-meta-line-height);
+    gap: var(--rly-space-4) var(--rly-space-8);
     padding: var(--rly-space-12);
   }
   .connect-family-missing > span {
@@ -2382,6 +2494,7 @@
   .connect-family-missing p {
     color: var(--rly-color-text-2);
     margin: 0;
+    min-inline-size: 0;
   }
 
   .connect-directory-toolbar {
@@ -2865,7 +2978,8 @@
     gap: var(--rly-space-8);
     min-block-size: 44px;
     min-inline-size: 0;
-    padding: var(--rly-space-4) var(--rly-space-4) var(--rly-space-4) var(--rly-space-4);
+    padding-block: var(--rly-space-4);
+    padding-inline: var(--rly-space-4) var(--rly-space-12);
   }
 
   .connect-pin-open .connect-creature {
@@ -2875,7 +2989,7 @@
   }
 
   .connect-pin-name {
-    font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
+    font: var(--rly-type-label-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
       var(--rly-type-label-font);
     max-inline-size: 10em;
     overflow: clip;
@@ -2883,24 +2997,24 @@
     white-space: nowrap;
   }
 
-  /* A full 44px to press, reaching into the margin after it and never over the open button before it. */
+  /* Sibling controls own disjoint hit areas; the leading pin is the unpin affordance. */
   .connect-pin-unpin {
-    block-size: 36px;
+    block-size: 44px;
     border-radius: 999px;
     color: var(--rly-color-text-2);
     display: grid;
     flex: none;
     font-size: 1.1rem;
-    inline-size: 36px;
+    inline-size: 44px;
     line-height: 1;
-    margin-inline-end: var(--rly-space-8);
     place-items: center;
     position: relative;
   }
 
+  /* The circular glyph control retains an entire 44px square hit area, separate from Open. */
   .connect-pin-unpin::after {
     content: "";
-    inset: -4px -8px -4px 0;
+    inset: 0;
     position: absolute;
   }
 
@@ -2964,14 +3078,14 @@
     color: var(--rly-color-text-2);
   }
 
-  /* Over the directory: a stack in the end corner, clear of the safe area; the list opens above it. */
+  /* A stack over the footer's end corner, clear of the safe area; the list opens above it. */
   .connect-pins[data-placement="float"] {
     align-items: end;
     flex-direction: column;
-    inset-block-end: calc(var(--rly-space-16) + env(safe-area-inset-bottom, 0px));
+    inset-block-end: calc(-1 * var(--rly-space-8) + env(safe-area-inset-bottom, 0px));
     /* Both sides' insets: inline-end is the left edge in right-to-left text. */
-    inset-inline-end: calc(var(--rly-space-16) + max(env(safe-area-inset-left, 0px), env(safe-area-inset-right, 0px)));
-    position: fixed;
+    inset-inline-end: max(env(safe-area-inset-left, 0px), env(safe-area-inset-right, 0px));
+    position: absolute;
     z-index: 2;
   }
 
@@ -2985,20 +3099,6 @@
   .connect-pins[data-placement="float"] .connect-pins-overflow {
     inset-block-end: calc(100% + var(--rly-space-8));
     inset-inline-end: 0;
-  }
-
-  /* On a phone the corner stays small: characters only; their names are in their labels and the list. */
-  @media (max-width: 47.99rem) {
-    .connect-pins[data-placement="float"] .connect-pin :is(.connect-pin-name, .connect-pin-state) {
-      display: none;
-    }
-  }
-
-  /* Room at the end of the directory, so the last row can scroll clear of the stack: one row per chip. */
-  .connect-agents[data-pinned] {
-    padding-block-end: calc(
-      var(--rly-space-24) + var(--connect-pin-rows, 1) * (44px + var(--rly-space-8)) + env(safe-area-inset-bottom, 0px)
-    );
   }
 
   /* In the terminal's bar: characters only, side by side; the list opens below, over the output only while open. */
@@ -3254,16 +3354,23 @@
 
 @layer connect {
   .connect-deep-parent {
+    align-items: center;
     background: transparent;
     border: 0;
     color: var(--rly-color-text-1);
     cursor: pointer;
+    display: inline-flex;
     font: inherit;
     font-size: var(--rly-type-meta-size);
+    font-weight: var(--rly-type-label-weight);
+    gap: var(--rly-space-8);
     justify-self: start;
     margin-inline-start: 97px;
     min-block-size: 44px;
     padding-inline: var(--rly-space-12);
+    text-decoration: none;
+  }
+  .connect-deep-parent-label {
     text-decoration: underline;
   }
   .connect-deep-parent:focus-visible {
