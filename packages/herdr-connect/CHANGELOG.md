@@ -1,5 +1,11 @@
 # @knpkv/herdr-connect
 
+## 0.17.0
+
+### Minor Changes
+
+- [#859](https://github.com/knpkv/npm/pull/859) [`820b6b7`](https://github.com/knpkv/npm/commit/820b6b7c6dfbb7a6e4b25978233ec80d981ec7a5) Thanks [@konopkov](https://github.com/konopkov)! - Add agent-authored creature self-state to the authenticated directory, backed by the shared post database with partial updates, archive cleanup and rate limits. Add host-authorized relay me and the stdio relay_me MCP tool with shared current-pane resolution and transport.
+
 ## 0.16.0
 
 ### Minor Changes
