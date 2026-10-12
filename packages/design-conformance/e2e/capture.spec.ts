@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
+import { PNG } from "pngjs"
 
 import { capturePage } from "../src/browser.js"
 import { installCaptureClock, VISUAL_TIME } from "../src/capture.js"
@@ -55,4 +56,127 @@ test("an oversized full-page frame fails before the screenshot protocol call", a
   const result = await Effect.runPromise(capturePage(page).pipe(Effect.exit))
   expect(result._tag).toBe("Failure")
   expect(screenshots).toBe(0)
+})
+
+/** Solid fixture colors locate the rendered rectangles independently of the sampled DOM geometry. */
+const paintedBox = (image: PNG, color: { readonly red: number; readonly green: number; readonly blue: number }) => {
+  let x = image.width
+  let y = image.height
+  let right = -1
+  let bottom = -1
+  for (let row = 0; row < image.height; row += 1) {
+    for (let column = 0; column < image.width; column += 1) {
+      const pixel = (row * image.width + column) * 4
+      if (
+        image.data[pixel] === color.red && image.data[pixel + 1] === color.green &&
+        image.data[pixel + 2] === color.blue && image.data[pixel + 3] === 255
+      ) {
+        x = Math.min(x, column)
+        y = Math.min(y, row)
+        right = Math.max(right, column)
+        bottom = Math.max(bottom, row)
+      }
+    }
+  }
+  expect(right).toBeGreaterThanOrEqual(x)
+  expect(bottom).toBeGreaterThanOrEqual(y)
+  return { x, y, width: right - x + 1, height: bottom - y + 1 }
+}
+
+test("running transitions and infinite animations have matching sampled metadata and pixels", async ({ page }) => {
+  test.setTimeout(15_000)
+  await installCaptureClock(page)
+  await page.clock.pauseAt(new Date(VISUAL_TIME))
+  await page.emulateMedia({ reducedMotion: "no-preference" })
+  await page.setViewportSize({ width: 390, height: 260 })
+  await page.setContent(`
+    <style>
+      body { margin: 0; background: white; font-size: 16px; }
+      [data-region] { position: absolute; inset-inline-start: 1em; inline-size: 2.5em; block-size: 2.5em; }
+      #transition { inset-block-start: 1em; background: rgb(255, 0, 0); }
+      #infinite { inset-block-start: 6em; background: rgb(0, 0, 255); }
+      @media (prefers-reduced-motion: no-preference) {
+        #transition { transition: inline-size 60s linear, background-color 60s linear; }
+        #infinite { animation: slide 60s infinite linear; }
+      }
+      @keyframes slide { from { transform: translateX(5em); } to { transform: translateX(10em); } }
+    </style>
+    <div id="transition" data-region="transition"></div>
+    <div id="infinite" data-region="infinite"></div>
+  `)
+  const initial = await page.evaluate(() => {
+    const element = document.querySelector<HTMLElement>("#transition")
+    if (element !== null) {
+      element.getBoundingClientRect()
+      element.style.inlineSize = "7.5em"
+      element.style.backgroundColor = "rgb(0, 255, 0)"
+    }
+    const animations = document.getAnimations()
+    for (const animation of animations) animation.currentTime = 30_000
+    return animations.map((animation) => ({
+      running: animation.playState === "running",
+      endTime: animation.effect?.getComputedTiming().endTime
+    }))
+  })
+  expect(initial).toHaveLength(3)
+  expect(initial.every((animation) => animation.running)).toBe(true)
+  expect(initial.filter((animation) => animation.endTime === Number.POSITIVE_INFINITY)).toHaveLength(1)
+
+  const result = await Effect.runPromise(capturePage(page))
+  const frame = PNG.sync.read(Buffer.from(result.frame))
+  const colors = [
+    { name: "transition", red: 0, green: 255, blue: 0, css: "rgb(0, 255, 0)" },
+    { name: "infinite", red: 0, green: 0, blue: 255, css: "rgb(0, 0, 255)" }
+  ]
+  expect(result.snapshot.regions.map((region) => region.name)).toEqual(colors.map((color) => color.name))
+  expect(result.regions.size).toBe(2)
+  for (const color of colors) {
+    const region = result.snapshot.regions.find((region) => region.name === color.name)
+    const box = paintedBox(frame, color)
+    expect(region?.box).toEqual(box)
+    expect(region?.styles["background-color"]).toBe(color.css)
+    const bytes = result.regions.get(color.name)
+    expect(bytes).toBeDefined()
+    if (bytes !== undefined) {
+      const image = PNG.sync.read(Buffer.from(bytes))
+      expect({ width: image.width, height: image.height }).toEqual({ width: box.width, height: box.height })
+      expect(paintedBox(image, color)).toEqual({ x: 0, y: 0, width: box.width, height: box.height })
+    }
+  }
+  expect(result.snapshot.regions[0]?.box.width).toBe(120)
+  expect(result.snapshot.regions[1]?.box.x).toBe(16)
+})
+
+test("a script animation started after sampling invalidates capture and restores the motion guard", async ({ page }) => {
+  test.setTimeout(15_000)
+  await page.setContent(
+    "<div data-region=\"content\" style=\"inline-size:40px;block-size:40px;transition:inline-size 60s linear\"></div>"
+  )
+  const original = await page.evaluateHandle(() => Element.prototype.animate)
+  try {
+    const screenshot = page.screenshot.bind(page)
+    page.screenshot = async (options) => {
+      const pending = screenshot(options)
+      await page.evaluate(() => {
+        document.querySelector("[data-region]")?.animate(
+          [{ transform: "translateX(0px)" }, { transform: "translateX(100px)" }],
+          { duration: 60_000, fill: "forwards" }
+        )
+      })
+      return pending
+    }
+    const result = await Effect.runPromise(capturePage(page).pipe(Effect.result))
+    expect(result).toMatchObject({
+      _tag: "Failure",
+      failure: {
+        _tag: "BrowserFailure",
+        cause: { _tag: "BrowserFailure", operation: "late capture animation" }
+      }
+    })
+    expect(await original.evaluate((animate) => Element.prototype.animate === animate)).toBe(true)
+    expect(await page.locator("[data-region]").evaluate((element) => getComputedStyle(element).transitionDuration))
+      .toBe("60s")
+  } finally {
+    await original.dispose()
+  }
 })

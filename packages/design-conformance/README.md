@@ -114,7 +114,14 @@ Both sides use fresh Chromium contexts with a fixed clock, reduced motion,
 UTC/en-US, settled fonts, blurred focus and scroll origin. Control Center's #844
 suite imports these settings and retains its own framing and functional assertions.
 
-The conformance runner waits for native render frames after UUID masking. The
+Before sampling regions, the conformance runner finishes finite animations,
+resets infinite animations and disables transitions. UUID masking and native paint
+readiness precede both metadata and screenshots. Screenshots keep that frozen frame
+with `animations: "allow"`; they do not perform a second animation reset.
+Script-created `element.animate()` calls during capture are cancelled and produce
+a typed `BrowserFailure`, even if they start after metadata sampling. The temporary
+animation guard and transition style are removed on success or failure.
+The
 installed clock fakes ordinary `requestAnimationFrame`; Playwright's RAF polling
 uses its preserved native callback. Full-page dimensions must be nonzero and at
 most 16,384 physical pixels per axis before the screenshot protocol call. This is
