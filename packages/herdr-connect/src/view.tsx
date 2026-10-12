@@ -520,7 +520,7 @@ export const AgentDirectory = ({
       <p className="connect-filter-summary">
         <span>{hostFilter ?? "All hosts"},</span>
         <span>{activityFilter === "all" ? "All states" : activityFilterLabel(activityFilter)}</span>
-        {scoped ? (
+        {filterCount > 0 ? (
           <>
             {" "}
             <span className="connect-visually-hidden">
@@ -598,13 +598,28 @@ export const AgentDirectory = ({
         ) : families.length === 0 ? (
           <div className="connect-empty">
             <Text as="p" className="connect-no-matches">
-              {query.trim().length === 0 ? "No agents match these filters" : `No agents match “${query.trim()}”`} on{" "}
-              {hostFilter ?? "all hosts"}, in{" "}
-              {activityFilter === "all" ? "all states" : activityFilterLabel(activityFilter).toLocaleLowerCase("en")}.
+              {filterCount === 0 && query.trim().length > 0 ? (
+                `No agents match “${query.trim()}”.`
+              ) : (
+                <>
+                  {query.trim().length === 0 ? "No agents match these filters" : `No agents match “${query.trim()}”`} on{" "}
+                  {hostFilter ?? "all hosts"}, in{" "}
+                  {activityFilter === "all"
+                    ? "all states"
+                    : activityFilterLabel(activityFilter).toLocaleLowerCase("en")}
+                  .
+                </>
+              )}
             </Text>
-            <Button className="connect-compact-secondary" onClick={clear} size="dense" variant="secondary">
-              Clear filters
-            </Button>
+            {filterCount === 0 && query.trim().length > 0 ? (
+              <Button onClick={onClearQuery} size="default" variant="secondary">
+                Clear search
+              </Button>
+            ) : (
+              <Button className="connect-compact-secondary" onClick={clear} size="dense" variant="secondary">
+                Clear filters
+              </Button>
+            )}
           </div>
         ) : (
           <p className="connect-family-count">

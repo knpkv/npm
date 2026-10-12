@@ -42,6 +42,14 @@ const directory = (props: Partial<Parameters<typeof AgentDirectory>[0]> = {}) =>
 )
 
 describe("Connect families", () => {
+  it("keeps an unfiltered no-match sentence concise and offers Clear search", () => {
+    const host = document.createElement("div")
+    host.innerHTML = renderToStaticMarkup(directory({ query: "zzz" }))
+    expect(host.querySelector(".connect-no-matches")?.textContent).toBe("No agents match “zzz”.")
+    expect(host.querySelector(".connect-empty button")?.textContent).toBe("Clear search")
+    expect(host.querySelector(".connect-filter-summary button")).toBeNull()
+  })
+
   it("names the no-match scope, exposes its active-filter count, and offers Clear beside the scope", () => {
     const host = document.createElement("div")
     host.innerHTML = renderToStaticMarkup(directory({ query: "zzz", hostFilter: "ALPHA" }))
@@ -63,7 +71,7 @@ describe("Connect families", () => {
   it("retains ancestors as context without counting them as search matches", () => {
     const markup = renderToStaticMarkup(directory({ query: partner.name }))
     expect(markup).toContain('data-context="true"')
-    expect(markup).toContain("1 matching agent")
+    expect(markup).toContain("1 agent in 1 family")
     expect(markup).toContain(primary.name)
     expect(markup).not.toContain("agent-independent")
   })

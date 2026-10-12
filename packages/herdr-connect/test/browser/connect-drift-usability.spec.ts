@@ -86,7 +86,9 @@ for (const width of [390, 1280]) {
 
       test("recover from a failed directory", async ({ page }) => {
         await open(page, true)
-        await expect(page.locator(".connect-directory-error")).toContainText("Relay tries again every 5 seconds.")
+        // This fixture is an HTTP rejection, not the held-request timeout exercised by reference 2c.
+        await expect(page.locator(".connect-directory-error h2")).toHaveText("Couldn't load the fleet directory")
+        await expect(page.locator(".connect-directory-error p")).toHaveText("The hub answered HTTP 503.")
         await page.unroute("**/v1/connect/agents")
         await page.route(
           "**/v1/connect/agents",

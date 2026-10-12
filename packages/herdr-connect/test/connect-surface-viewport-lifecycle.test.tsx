@@ -20,6 +20,10 @@ window.IS_REACT_ACT_ENVIRONMENT = true
 
 const roots: Array<Root> = []
 const originalFetch = window.fetch
+// Fetch's Context reference captures one function; dispatch each request to this test's responder.
+let respond = originalFetch
+window.fetch = (input, init) => respond(input, init)
+class TimeoutFixture extends Schema.TaggedError<TimeoutFixture>()("ConnectTimeoutError", {}) {}
 const originalInnerHeight = Object.getOwnPropertyDescriptor(window, "innerHeight")
 const agent = Schema.decodeUnknownSync(ConnectAgent)({
   host: "SER8",
@@ -49,7 +53,7 @@ beforeEach(() => {
   document.documentElement.style.cssText = "color: red;"
   document.body.style.cssText = "overflow: visible; touch-action: pan-x;"
   Object.defineProperty(window, "innerHeight", { configurable: true, value: 500 })
-  window.fetch = async (input) => {
+  respond = async (input) => {
     const url = new URL(
       Predicate.isString(input) ? input : "href" in input ? input.href : input.url,
       "http://localhost"
@@ -83,10 +87,61 @@ afterAll(() => {
 })
 
 describe("ConnectSurface directory loading", () => {
+  it.each([401, 403, 500, 502])(
+    "classifies a first-load HTTP %s response without claiming a timeout",
+    async (status) => {
+      respond = async () => new Response("timeout", { status })
+      const host = document.createElement("div")
+      document.body.append(host)
+      const root = createRoot(host)
+      roots.push(root)
+      await act(async () => {
+        root.render(
+          <RegistryProvider>
+            <ConnectSurface atoms={makeConnectAtoms()} embedded />
+          </RegistryProvider>
+        )
+        for (let index = 0; index < 40; index += 1) await Promise.resolve()
+      })
+      expect(host.querySelector(".connect-directory-error h2")?.textContent).toBe("Couldn't load the fleet directory")
+      expect(host.querySelector(".connect-directory-error p")?.textContent).toBe(
+        `The hub answered HTTP ${String(status)}.`
+      )
+      expect(host.textContent).not.toContain("timed out")
+    }
+  )
+
+  it.each(["network", "protocol"])(
+    "keeps a first-load %s failure free of a timeout claim and raw diagnostics",
+    async (kind) => {
+      respond = async () => {
+        if (kind === "network") throw new TypeError("sensitive diagnostic")
+        return new Response(JSON.stringify({ agents: "sensitive diagnostic" }), {
+          headers: { "content-type": "application/json" }
+        })
+      }
+      const host = document.createElement("div")
+      document.body.append(host)
+      const root = createRoot(host)
+      roots.push(root)
+      await act(async () => {
+        root.render(
+          <RegistryProvider>
+            <ConnectSurface atoms={makeConnectAtoms()} embedded />
+          </RegistryProvider>
+        )
+        for (let index = 0; index < 40; index += 1) await Promise.resolve()
+      })
+      expect(host.querySelector(".connect-directory-error")).not.toBeNull()
+      expect(host.textContent).not.toContain("timed out")
+      expect(host.textContent).not.toContain("sensitive diagnostic")
+    }
+  )
+
   it.each([".connect-empty button", ".connect-scope-clear"])(
     "returns focus to search after clearing filters through %s",
     async (selector) => {
-      window.fetch = () => new Promise<Response>(() => {})
+      respond = () => new Promise<Response>(() => {})
       const host = document.createElement("div")
       document.body.append(host)
       const root = createRoot(host)
@@ -121,8 +176,8 @@ describe("ConnectSurface directory loading", () => {
     }
   )
 
-  it("shows the directory recovery copy, a Retry button and Not updated yet without a raw status", async () => {
-    window.fetch = () => new Promise<Response>(() => {})
+  it("shows classified timeout recovery copy, a Retry button and Not updated yet", async () => {
+    respond = () => new Promise<Response>(() => {})
     const host = document.createElement("div")
     document.body.append(host)
     const root = createRoot(host)
@@ -130,7 +185,7 @@ describe("ConnectSurface directory loading", () => {
     const atoms = makeConnectAtoms()
     await act(async () => {
       root.render(
-        <RegistryProvider initialValues={[[atoms.agents, AsyncResult.failure(Cause.fail("HTTP 503"))]]}>
+        <RegistryProvider initialValues={[[atoms.agents, AsyncResult.failure(Cause.fail(new TimeoutFixture()))]]}>
           <ConnectSurface atoms={atoms} embedded />
         </RegistryProvider>
       )
@@ -148,7 +203,7 @@ describe("ConnectSurface directory loading", () => {
   })
 
   it("keeps search and filters on an empty fleet and names configured hosts", async () => {
-    window.fetch = () => new Promise<Response>(() => {})
+    respond = () => new Promise<Response>(() => {})
     const host = document.createElement("div")
     document.body.append(host)
     const root = createRoot(host)
@@ -170,7 +225,7 @@ describe("ConnectSurface directory loading", () => {
   })
 
   it("omits the host hint on an empty fleet from an older hub", async () => {
-    window.fetch = () => new Promise<Response>(() => {})
+    respond = () => new Promise<Response>(() => {})
     const host = document.createElement("div")
     document.body.append(host)
     const root = createRoot(host)
@@ -190,7 +245,7 @@ describe("ConnectSurface directory loading", () => {
 
   it("marks the directory as loading until the first list arrives, so the hub can hold its space", async () => {
     // The directory request hangs: the first list has not arrived yet.
-    window.fetch = () => new Promise<Response>(() => {})
+    respond = () => new Promise<Response>(() => {})
     const host = document.createElement("div")
     document.body.append(host)
     const root = createRoot(host)
@@ -225,7 +280,7 @@ describe("ConnectSurface directory loading", () => {
   })
 
   it("keeps the directory marked as loading when the first request fails, so its retry does not shift the chat", async () => {
-    window.fetch = () => new Promise<Response>(() => {})
+    respond = () => new Promise<Response>(() => {})
     const host = document.createElement("div")
     document.body.append(host)
     const root = createRoot(host)

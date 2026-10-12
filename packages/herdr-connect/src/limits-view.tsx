@@ -32,12 +32,12 @@ export const ConnectLimits = ({
   readonly problem: string | null
   readonly view: ConnectLimitsView | null
 }): ReactElement | null => {
-  if ((view === null || view.off) && problem === null) return null
+  if (view?.off === true || (view === null && problem === null)) return null
   const hostProblems = view?.problems ?? []
   const warnings =
     problem === null
       ? hostProblems.map(({ host, reading }) =>
-          hostProblems.length === 1 ? reading.detail : `${host}: ${reading.detail}`
+          hostProblems.length === 1 && view?.hosts.length === 0 ? reading.detail : `${host}: ${reading.detail}`
         )
       : [problem]
   return (
@@ -57,10 +57,12 @@ export const ConnectLimits = ({
           <Text as="p">{text}</Text>
         </div>
       ))}
-      <a className="connect-limits-link" href={USAGE_TAB_HREF}>
-        {(view?.hosts.length ?? 0) > 1 ? "Limits and usage on each host" : "Limits and usage"}
-        <Icon decorative name="arrow-right" size="small" />
-      </a>
+      {problem === null ? (
+        <a className="connect-limits-link" href={USAGE_TAB_HREF}>
+          {(view?.hosts.length ?? 0) > 1 ? "Limits and usage on each host" : "Limits and usage"}
+          <Icon decorative name="arrow-right" size="small" />
+        </a>
+      ) : null}
     </div>
   )
 }

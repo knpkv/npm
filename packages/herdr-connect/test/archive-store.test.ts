@@ -1,6 +1,6 @@
 import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it, vi } from "@effect/vitest"
-import { Effect, FileSystem, Path, Result, Schema } from "effect"
+import { Effect, FileSystem, Logger, Path, Result, Schema } from "effect"
 import { HttpClient, HttpClientResponse } from "effect/http"
 import { DatabaseSync } from "node:sqlite"
 import { AgentArchiveStore, ConnectArchiveObservation } from "../src/archive-store.js"
@@ -228,6 +228,34 @@ describe("closed agent archive", () => {
           Effect.provideService(HttpClient.HttpClient, client([]))
         )
         expect((yield* store.page()).agents.map(({ agentId }) => agentId)).toEqual(["agent-peer"])
+      }).pipe(Effect.scoped))
+
+    it.effect("archive name lookup failures leave live directory rows available without remembered parent names", () =>
+      Effect.gen(function*() {
+        const store = yield* openStore()
+        yield* Effect.acquireRelease(
+          Effect.sync(() =>
+            vi.spyOn(store, "namesFor").mockReturnValue(
+              Effect.fail(new ConnectArchiveStoreError({ operation: "namesFor", cause: "unreadable database" }))
+            )
+          ),
+          (spy) => Effect.sync(() => spy.mockRestore())
+        )
+        const logged: Array<{ readonly level: string; readonly message: string }> = []
+        const logger = Logger.make<unknown, void>((entry) => {
+          logged.push({ level: entry.logLevel, message: String(entry.message) })
+        })
+        const local = { host: "HOST-A", agents: [agent()], complete: true }
+        const directory = yield* fleetConnectAgents(Effect.succeed(local), [], { store, observedAt: 0 }).pipe(
+          Effect.provideService(HttpClient.HttpClient, HttpClient.make(() => Effect.die("unexpected peer request"))),
+          Effect.withLogger(logger)
+        )
+        expect(directory).toEqual({ agents: local.agents, failures: [] })
+        expect(directory.agents[0]?.relationship).not.toHaveProperty("parentName")
+        expect(logged).toContainEqual({
+          level: "Warn",
+          message: expect.stringContaining("Connect archive name lookup failed")
+        })
       }).pipe(Effect.scoped))
 
     it.effect("archive write failures leave live directory rows available", () =>

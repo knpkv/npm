@@ -72,7 +72,7 @@ describe("PinnedAgents", () => {
   it("names each pinned agent and its state, with its own unpin, never nested", () => {
     const reviewer = agent("agent-reviewer")
     const markup = render(pinned([reviewer]), [reviewer], "float")
-    expect(markup).toContain('aria-label="Pinned: agent-reviewer, Waiting"')
+    expect(markup).toContain('aria-label="Pinned: agent-reviewer, Needs you"')
     expect(markup).toContain('aria-label="Unpin agent-reviewer"')
     expect(markup).not.toMatch(/<button[^>]*>(?:(?!<\/button>).)*<button/s)
     expect(markup.match(/class="connect-creature"/g)).toHaveLength(1)
@@ -97,7 +97,7 @@ describe("PinnedAgents", () => {
     const here = agent("agent-here")
     const away = agent("agent-away")
     const markup = render(pinned([away, here]), [here], "float")
-    expect(markup).toContain('aria-label="Pinned: agent-here, Waiting"')
+    expect(markup).toContain('aria-label="Pinned: agent-here, Needs you"')
     expect(markup).toContain('aria-label="1 more pinned"')
     expect(render(pinned([here]), [here], "float", connectAgentKey(here))).toBe("")
   })

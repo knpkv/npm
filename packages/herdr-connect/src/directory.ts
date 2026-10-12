@@ -326,7 +326,10 @@ export const fleetConnectAgents = Effect.fn("HerdrConnect.fleetAgents")(function
         : [{ host, id: relationship.parentAgentId }]
     )
     const remembered = yield* archive.store.namesFor(missingParents).pipe(
-      Effect.mapError((cause) => new ConnectPeerError({ cause, host: "fleet", reason: "unavailable" }))
+      Effect.catchTag(
+        "ConnectArchiveStoreError",
+        (cause) => Effect.logWarning("Connect archive name lookup failed", { cause }).pipe(Effect.as([]))
+      )
     )
     const names = new Map(remembered.map(({ host, id, name }) => [`${host.toLowerCase()}\u0000${id}`, name]))
     fleet = {

@@ -9,7 +9,7 @@
  */
 import { Icon, PortalProvider } from "@knpkv/rly/foundations"
 import { workNavigationHref } from "@knpkv/herdr-work/navigation"
-import { Button, Sheet } from "@knpkv/rly/primitives"
+import { Button, Sheet, StateLabel } from "@knpkv/rly/primitives"
 import { type KeyboardEvent, type MouseEvent, type ReactElement, useId, useRef, useState } from "react"
 
 import { AgentStateLabel, agentStatePresentation } from "./agent-state.js"
@@ -381,6 +381,7 @@ const PinChip = ({
   onOpen,
   onUnpin,
   pinKey,
+  placement,
   roving,
   stale
 }: {
@@ -388,45 +389,57 @@ const PinChip = ({
   readonly onOpen: () => void
   readonly onUnpin: (event: MouseEvent<HTMLButtonElement>) => void
   readonly pinKey: string
+  readonly placement: "bar" | "float"
   /** The unpin and open buttons' places in the set's single tab stop. */
   readonly roving: readonly [RovingStop, RovingStop]
   readonly stale: boolean
-}): ReactElement => (
-  // Two sibling buttons, never one inside the other: open is the chip, unpin its own small control.
-  <span className="connect-pin">
-    <button
-      aria-label={`Unpin ${agent.name}`}
-      className="connect-pin-unpin"
-      data-pin-key={pinKey}
-      onClick={onUnpin}
-      type="button"
-      {...roving[0]}
-    >
-      <Icon decorative name="pin" size="small" />
-    </button>
-    <button
-      aria-label={`Pinned: ${agent.name}, ${agentStatePresentation(agent.state).word}`}
-      className="connect-pin-open"
-      data-pin-key={pinKey}
-      onClick={onOpen}
-      type="button"
-      {...roving[1]}
-    >
-      <Creature host={agent.host} id={String(agent.id)} size="row" stale={stale} state={agent.state} />
-      <span className="connect-pin-name">{agent.name}</span>
-      <span className="connect-pin-state">
-        <AgentStateLabel state={agent.state} />
-      </span>
-    </button>
-  </span>
-)
+}): ReactElement => {
+  const presentation = agentStatePresentation(agent.state)
+  const needsYou = placement === "float" && presentation.word === "Waiting"
+  const word = needsYou ? "Needs you" : presentation.word
+  return (
+    // Two sibling buttons, never one inside the other: open is the chip, unpin its own small control.
+    <span className="connect-pin">
+      <button
+        aria-label={`Unpin ${agent.name}`}
+        className="connect-pin-unpin"
+        data-pin-key={pinKey}
+        onClick={onUnpin}
+        type="button"
+        {...roving[0]}
+      >
+        <Icon decorative name="pin" size="small" />
+      </button>
+      <button
+        aria-label={`Pinned: ${agent.name}, ${word}`}
+        className="connect-pin-open"
+        data-pin-key={pinKey}
+        onClick={onOpen}
+        type="button"
+        {...roving[1]}
+      >
+        <Creature host={agent.host} id={String(agent.id)} size="row" stale={stale} state={agent.state} />
+        <span className="connect-pin-name">{agent.name}</span>
+        <span className="connect-pin-state">
+          <StateLabel
+            className={presentation.spins ? "agent-state-spinning" : undefined}
+            icon={presentation.icon}
+            label={word}
+            size="compact"
+            tone={presentation.tone}
+          />
+        </span>
+      </button>
+    </span>
+  )
+}
 
 /**
  * The agents this device keeps pinned, small and always to hand, in the order they were pinned. The first
  * few that are here show as chips; the rest, and any pinned agent this poll didn't list, wait behind a "+N"
  * button, the away ones dimmed with when they were last seen, so a pin never seems lost. Over the directory
- * they stack in the end corner, clear of the safe area; in the terminal they sit inside its bar, never over
- * the output or the key rail.
+ * they stick to the scrolling viewport's end corner and settle in reserved footer space, clear of the safe
+ * area; in the terminal they sit inside its bar, never over the output or the key rail.
  *
  * One tab stop for the whole set; arrows move through it, and Delete or Backspace unpins the focused pin.
  */
@@ -540,6 +553,7 @@ export const PinnedAgents = ({
             onOpen={() => onOpen(agent)}
             onUnpin={unpinFrom(pin.key)}
             pinKey={pin.key}
+            placement={placement}
             roving={[stop(index * 2), stop(index * 2 + 1)]}
             stale={stale}
           />

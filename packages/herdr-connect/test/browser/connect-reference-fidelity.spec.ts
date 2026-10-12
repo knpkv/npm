@@ -5,6 +5,7 @@ import { expect, type Locator, type Page, test } from "@playwright/test"
 import { Schema } from "effect"
 import { ConnectAgent } from "../../src/model.js"
 import { failureSentences } from "../../src/unavailable-detail.js"
+import { pinReferenceFleet, pinRegressionFleet, scrollPinDirectory, seedPins } from "./connect-pin-fixture.js"
 
 test.use({ locale: "en-GB", timezoneId: "UTC" })
 
@@ -286,7 +287,7 @@ test.describe("creature fill fidelity", () => {
         }
       })
 
-      test(`tall seed pins stay 44px ${String(width)} ${theme}`, async ({ page }) => {
+      test(`tall seed pin pills stay 48px ${String(width)} ${theme}`, async ({ page }) => {
         await openDirectory(page, width, theme, [...tallSeeds, ...base])
         for (const fixture of tallSeeds) {
           await page.locator(`.connect-agent[data-agent-key="${fixture.host}:${fixture.id}"]`).click()
@@ -296,11 +297,11 @@ test.describe("creature fill fidelity", () => {
         const pins = page.locator(".connect-pins[data-placement=\"float\"] .connect-pin-open")
         await expect(pins).toHaveCount(3)
         for (const pin of await pins.all()) {
-          expect.soft((await drawnBox(pin)).height).toBe(44)
+          expect.soft((await drawnBox(pin.locator(".."))).height).toBe(48)
           const svg = pin.locator("svg.connect-creature")
           const creature = await drawnBox(svg)
-          expect(creature.width).toBe(32)
-          expect.soft(creature.height).toBe(32)
+          expect(creature.width).toBe(28)
+          expect.soft(creature.height).toBe(28)
           const body = await drawnBox(svg.locator(".connect-creature-body"))
           expect(body.width).toBeGreaterThanOrEqual(creature.width * 0.58)
           expect(Math.max(body.width, body.height)).toBeGreaterThanOrEqual(creature.width * 0.7)
@@ -433,7 +434,9 @@ test.describe("creature fill fidelity", () => {
         await expect(creature).toHaveCount(1)
         const track = await drawnBox(creature)
         const body = await drawnBox(creature.locator(".connect-creature-body"))
-        expect(track.width).toBe(32)
+        // rev5.2's PIN export renders a 28px creature in a 48px pill; the fill ratios still apply.
+        expect(track.width).toBe(28)
+        expect((await drawnBox(creature.locator("../.."))).height).toBe(48)
         expect(body.width).toBeGreaterThanOrEqual(track.width * 0.58)
         expect(Math.max(body.width, body.height)).toBeGreaterThanOrEqual(track.width * 0.7)
         expect(body.x).toBeGreaterThanOrEqual(track.x - 1)
@@ -773,8 +776,8 @@ for (const width of [390, 1280]) {
         }
         if (state === "2h") agents = [...agents, ...agents.filter((entry) => entry.name === "pkgsrc")]
         await page.route("**/v1/connect/agents", (route) => {
-          if (state === "2b") return
-          if (state === "2c" || (failed && (state === "2d" || state === "2i-v4-stale"))) {
+          if (state === "2b" || state === "2c") return
+          if (failed && (state === "2d" || state === "2i-v4-stale")) {
             return route.fulfill({ status: 503, body: "timeout" })
           }
           return route.fulfill({
@@ -809,6 +812,7 @@ for (const width of [390, 1280]) {
           await expect(page.getByText("Loading fleet agents…")).toBeVisible()
           await expect.soft(page.locator(".connect-directory-secondary")).toHaveCount(0)
         } else if (state === "2c") {
+          await page.clock.runFor(10_050)
           await expect.soft(page.getByRole("heading", { name: "The fleet directory didn't answer" })).toBeVisible()
           await expect.soft(page.getByText("Not updated yet", { exact: true })).toBeVisible()
           await expect.soft(page.locator(".connect-directory-error svg")).toBeVisible()
@@ -926,6 +930,8 @@ for (const width of [390, 1280]) {
             await selected.evaluate((row) => row.blur())
             const outline = await selected.evaluate((row) => getComputedStyle(row).outlineStyle)
             expect.soft(outline).toBe("none")
+            // Base 2j depicts the footer at the end; mid-scroll sticking is guarded by 2j-v2.
+            await scrollPinDirectory(page, 1)
             const stack = await drawnBox(page.locator(".connect-pins[data-placement='float']"))
             const footer = await drawnBox(page.locator(".connect-directory-secondary"))
             const last = await drawnBox(page.locator(".connect-agent").last())
@@ -1167,7 +1173,7 @@ for (const width of [390, 1280]) {
         if (width === 1280) await page.setViewportSize({ width: width + 2, height: frameHeight - 100 })
         await page.route("**/v1/connect/agents", (route) =>
           state === "2c"
-            ? route.fulfill({ status: 503 })
+            ? undefined
             : route.fulfill({
               json: {
                 agents: state === "2f" ? [] : [...base, ...extras(state)],
@@ -1179,6 +1185,7 @@ for (const width of [390, 1280]) {
         await mount(page, theme)
         if (state !== "2c") await expect(page.locator(".connect-limits-link")).toBeVisible()
         if (state === "2c") {
+          await page.clock.runFor(10_050)
           const retry = page.getByRole("button", { name: "Retry", exact: true })
           await expect(retry).toBeVisible()
           await expectTouchTarget(retry)
@@ -1205,4 +1212,227 @@ for (const width of [390, 1280]) {
       })
     }
   }
+}
+
+/** New reference states keep failure causes honest and footer actions outside the pin reserve. */
+for (const width of [390, 1280]) {
+  for (const theme of ["light", "dark"]) {
+    for (const state of ["2c-v2", "2g-v2", "2o-v2"]) {
+      test(`reference rev5.2 ${state} ${String(width)} ${theme}`, async ({ page }, testInfo) => {
+        await prepare(page, width, theme)
+        await page.route("**/v1/connect/agents", (route) =>
+          state === "2c-v2"
+            ? route.fulfill({ status: 502, body: "upstream failed, not a timeout" })
+            : route.fulfill({ json: { agents: base, failures: [], nextCursor: null } }))
+        if (state === "2o-v2") {
+          await page.route("**/v1/connect/limits", (route) => route.fulfill({ status: 503 }))
+        }
+        await mount(page, theme)
+        if (state === "2c-v2") {
+          await expect.soft(page.locator(".connect-directory-error h2")).toHaveText("Couldn't load the fleet directory")
+          await expect.soft(page.locator(".connect-directory-error p")).toHaveText("The hub answered HTTP 502.")
+          const retry = page.getByRole("button", { name: "Retry", exact: true })
+          expect.soft((await drawnBox(retry)).height).toBe(48)
+          await expectTouchTarget(retry)
+          await expectCardBorder(page.locator(".connect-directory-error"), "--rly-color-blocked-ink", "24px")
+          await expectNoticeIcon(
+            page.locator(".connect-directory-error"),
+            page.locator(".connect-directory-error h2"),
+            16
+          )
+          await expect(page.locator(".connect-directory-secondary")).toHaveCount(0)
+        } else if (state === "2g-v2") {
+          const search = page.getByRole("searchbox")
+          await search.fill("zzz")
+          await search.blur()
+          await expect(page.locator(".connect-no-matches")).toHaveText("No agents match “zzz”.")
+          await expect(page.locator(".connect-filter-summary")).toHaveText("All hosts,All states")
+          const clear = page.getByRole("button", { name: "Clear search", exact: true })
+          expect.soft((await drawnBox(clear)).height).toBe(48)
+          await expectTouchTarget(clear)
+          await page.locator("#fleet-connect-root").screenshot({
+            path: testInfo.outputPath(`fidelity/connect-${state}-${String(width)}-${theme}.png`)
+          })
+          await clear.click()
+          await expect(search).toHaveValue("")
+          await expect(search).toBeFocused()
+          await expect(page.locator(".connect-agent")).toHaveCount(6)
+          return
+        } else {
+          await expect(page.locator(".connect-limits-problem p")).toHaveText(
+            "Couldn't load limits. Trying again every minute."
+          )
+          await expectCardBorder(page.locator(".connect-limits-problem"), "--rly-color-held-ink", "12px")
+          await expectNoticeIcon(page.locator(".connect-limits-problem"), page.locator(".connect-limits-problem p"), 8)
+          await expect(page.locator(".connect-limits-link")).toHaveCount(0)
+        }
+        await page.locator("#fleet-connect-root").screenshot({
+          path: testInfo.outputPath(`fidelity/connect-${state}-${String(width)}-${theme}.png`)
+        })
+      })
+    }
+
+    test(`reference rev5.2 2c typed deadline ${String(width)} ${theme}`, async ({ page }) => {
+      await prepare(page, width, theme)
+      await page.route("**/v1/connect/agents", () => {})
+      await mount(page, theme)
+      await expect(page.getByText("Loading fleet agents…")).toBeVisible()
+      await page.clock.runFor(10_050)
+      await expect(page.locator(".connect-directory-error h2")).toHaveText("The fleet directory didn't answer")
+      await expect(page.locator(".connect-directory-error p")).toHaveText(
+        "The request timed out, so no agents are listed. Retry, or wait: Relay tries again every 5 seconds."
+      )
+    })
+  }
+}
+
+for (const width of [320, 390, 1280]) {
+  for (const theme of ["light", "dark"]) {
+    test(
+      `reference rev5.2 sticky pin stack and footer reserve ${String(width)} ${theme}`,
+      async ({ page }, testInfo) => {
+        await prepare(page, width, theme)
+        await page.setViewportSize({ width: width + 2, height: width === 1280 ? 800 : 780 })
+        await seedPins(page)
+        await page.route(
+          "**/v1/connect/agents",
+          (route) => route.fulfill({ json: { agents: pinReferenceFleet, failures: [], nextCursor: null } })
+        )
+        await mount(page, theme)
+        await expect(page.locator(".connect-agent")).toHaveCount(31)
+        const stack = page.locator(".connect-pins[data-placement='float']")
+        await expect(stack.locator(".connect-pin")).toHaveCount(2)
+        const owner = await scrollPinDirectory(page, 0.5)
+        const mid = await drawnBox(stack)
+        expect.soft(owner.scrollTop).toBeGreaterThan(500)
+        expect.soft(mid.y, owner.owner).toBeGreaterThanOrEqual(0)
+        expect.soft(mid.y + mid.height, owner.owner).toBeLessThanOrEqual(owner.bottom)
+        expect.soft(owner.bottom - mid.y - mid.height, "stack stays near the scroll viewport bottom")
+          .toBeLessThanOrEqual(60)
+        for (const pin of await stack.locator(".connect-pin").all()) {
+          const pill = await drawnBox(pin)
+          expect.soft(pill.height).toBe(48)
+          if (width < 600) {
+            expect.soft(pill.width).toBeLessThanOrEqual(144)
+          }
+          expect.soft(
+            await pin.locator(".connect-creature").evaluate((node) => {
+              const box = node.getBoundingClientRect()
+              const open = node.closest(".connect-pin-open")
+              return open?.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2)) ?? false
+            }),
+            "the creature opens its stage, rather than the adjacent Unpin target"
+          ).toBe(true)
+        }
+        if (width !== 320) {
+          await page.screenshot({
+            clip: { x: 1, y: 0, width, height: width === 1280 ? 800 : 780 },
+            path: testInfo.outputPath(`fidelity/connect-2j-v2-${String(width)}-${theme}.png`)
+          })
+        }
+        await scrollPinDirectory(page, 1)
+        const footer = page.locator(".connect-directory-secondary")
+        const foot = await drawnBox(footer)
+        const limits = await drawnBox(page.locator(".connect-limits"))
+        const end = await drawnBox(stack)
+        const last = await drawnBox(page.locator(".connect-agent").last())
+        expect.soft(end.y).toBeGreaterThanOrEqual(foot.y)
+        expect.soft(end.x + end.width).toBeLessThanOrEqual(foot.x + foot.width)
+        expect.soft(limits.x + limits.width).toBeLessThanOrEqual(foot.x + foot.width - (width < 600 ? 156 : 260))
+        expect.soft(last.y + last.height).toBeLessThanOrEqual(end.y)
+        await expectTouchTarget(page.locator(".connect-limits-link"))
+        for (const control of await stack.locator(".connect-pin > button").all()) await expectTouchTarget(control)
+        if (width !== 320) {
+          await page.screenshot({
+            clip: { x: 1, y: 0, width, height: width === 1280 ? 800 : 780 },
+            path: testInfo.outputPath(`fidelity/connect-2j-v2-end-${String(width)}-${theme}.png`)
+          })
+        }
+      }
+    )
+
+    test(`reference rev5.2 pinned standalone footer controls ${String(width)} ${theme}`, async ({ page }) => {
+      await prepare(page, width, theme)
+      await seedPins(page, pinRegressionFleet, ["ds-rly", "sec-cc", "rev-usage", "skills"])
+      await page.route(
+        "**/v1/connect/agents",
+        (route) => route.fulfill({ json: { agents: pinRegressionFleet, failures: [], nextCursor: null } })
+      )
+      await page.route("**/v1/connect/limits", (route) =>
+        route.fulfill({
+          json: {
+            hosts: [{
+              host: "atlas",
+              readAt: at(14, 2),
+              reading: { _tag: "Unavailable", reason: "failed", detail: failureSentences.notRunning }
+            }],
+            failures: [],
+            peersListed: true
+          }
+        }))
+      await page.goto("/")
+      await page.locator("body").evaluate((body, theme) => body.setAttribute("data-rly-theme", theme), theme)
+      await page.evaluate(() => document.fonts.ready)
+      await expect(page.locator(".connect-agent")).toHaveCount(34)
+      await scrollPinDirectory(page, 1)
+      await expect(
+        page.locator(".connect-pins[data-placement='float']").getByRole("button", {
+          name: "1 more pinned",
+          exact: true
+        })
+      ).toHaveText("+1")
+      for (const link of await page.locator(".connect-directory-secondary a").all()) await expectTouchTarget(link)
+      const warning = await drawnBox(page.locator(".connect-limits-problem"))
+      const stack = await drawnBox(page.locator(".connect-pins[data-placement='float']"))
+      expect.soft(warning.x + warning.width).toBeLessThanOrEqual(stack.x)
+    })
+  }
+}
+
+for (const theme of ["light", "dark"]) {
+  test(`reference rev5.2 320 long pin names preserve the full state ${theme}`, async ({ page }) => {
+    const fleet = base.map((entry) =>
+      entry.name === "sec-cc" ? { ...entry, name: "a-very-long-pinned-agent-name" } : entry
+    )
+    await prepare(page, 320, theme)
+    await seedPins(page, fleet, ["a-very-long-pinned-agent-name"])
+    await page.route(
+      "**/v1/connect/agents",
+      (route) => route.fulfill({ json: { agents: fleet, failures: [], nextCursor: null } })
+    )
+    await mount(page, theme)
+    await scrollPinDirectory(page, 1)
+    const pill = page.locator(".connect-pins[data-placement='float'] .connect-pin")
+    await expect(pill).toBeVisible()
+    const measured = await pill.evaluate((node) => {
+      const name = node.querySelector<HTMLElement>(".connect-pin-name")
+      const state = node.querySelector<HTMLElement>(".connect-pin-state")
+      const open = node.querySelector<HTMLElement>(".connect-pin-open")
+      if (name === null || state === null || open === null) return null
+      const box = node.getBoundingClientRect()
+      const stateBox = state.getBoundingClientRect()
+      return {
+        width: box.width,
+        nameClipped: name.scrollWidth > name.clientWidth,
+        nameEllipsis: getComputedStyle(name).textOverflow,
+        stateFits: state.scrollWidth <= state.clientWidth,
+        stateEllipsis: getComputedStyle(state).textOverflow,
+        stateText: state.textContent,
+        stateEndGap: box.right - stateBox.right,
+        padding: Number.parseFloat(getComputedStyle(open).paddingInlineEnd)
+      }
+    })
+    expect(measured).not.toBeNull()
+    expect.soft(measured?.width).toBeLessThanOrEqual(144)
+    expect.soft(measured?.nameClipped).toBe(true)
+    expect.soft(measured?.nameEllipsis).toBe("ellipsis")
+    expect.soft(measured?.stateText?.trim()).toBe("Needs you")
+    expect.soft(measured?.stateFits).toBe(true)
+    expect.soft(measured?.stateEllipsis).not.toBe("ellipsis")
+    expect.soft(measured?.stateEndGap).toBeGreaterThanOrEqual(12)
+    expect.soft(measured?.padding).toBeGreaterThanOrEqual(12)
+    await expect(pill.locator(".connect-pin-open")).toHaveAccessibleName(
+      "Pinned: a-very-long-pinned-agent-name, Needs you"
+    )
+  })
 }
