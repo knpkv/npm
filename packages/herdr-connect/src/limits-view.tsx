@@ -32,29 +32,37 @@ export const ConnectLimits = ({
   readonly problem: string | null
   readonly view: ConnectLimitsView | null
 }): ReactElement | null => {
-  if (view === null) {
-    return problem === null ? null : (
-      <Text as="p" className="connect-limits-problem" tone="secondary" variant="meta">
-        {problem}
-      </Text>
-    )
-  }
-  if (view.off) return null
+  if (view?.off === true || (view === null && problem === null)) return null
+  const hostProblems = view?.problems ?? []
+  const warnings =
+    problem === null
+      ? hostProblems.map(({ host, reading }) =>
+          hostProblems.length === 1 && view?.hosts.length === 0 ? reading.detail : `${host}: ${reading.detail}`
+        )
+      : [problem]
   return (
     <div className="connect-limits">
-      {view.line.length === 0 ? null : (
+      {(view?.line.length ?? 0) === 0 ? null : (
         <ul aria-label="Usage limits" className="connect-limits-line">
-          {view.line.map((item) => (
+          {view?.line.map((item) => (
             <li key={item.agent}>
               <StateLabel label={item.text} size="compact" tone={stateTone[item.tone]} />
             </li>
           ))}
         </ul>
       )}
-      <a className="connect-limits-link" href={USAGE_TAB_HREF}>
-        {view.hosts.length > 1 ? "Limits and usage on each host" : "Limits and usage"}
-        <Icon decorative name="arrow-right" size="small" />
-      </a>
+      {warnings.map((text, index) => (
+        <div className="connect-limits-problem" key={index}>
+          <Icon decorative name="clock" size="small" />
+          <Text as="p">{text}</Text>
+        </div>
+      ))}
+      {problem === null ? (
+        <a className="connect-limits-link" href={USAGE_TAB_HREF}>
+          {(view?.hosts.length ?? 0) > 1 ? "Limits and usage on each host" : "Limits and usage"}
+          <Icon decorative name="arrow-right" size="small" />
+        </a>
+      ) : null}
     </div>
   )
 }

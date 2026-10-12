@@ -20,6 +20,10 @@ window.IS_REACT_ACT_ENVIRONMENT = true
 
 const roots: Array<Root> = []
 const originalFetch = window.fetch
+// Fetch's Context reference captures one function; dispatch each request to this test's responder.
+let respond = originalFetch
+window.fetch = (input, init) => respond(input, init)
+class TimeoutFixture extends Schema.TaggedError<TimeoutFixture>()("ConnectTimeoutError", {}) {}
 const originalInnerHeight = Object.getOwnPropertyDescriptor(window, "innerHeight")
 const agent = Schema.decodeUnknownSync(ConnectAgent)({
   host: "SER8",
@@ -49,7 +53,7 @@ beforeEach(() => {
   document.documentElement.style.cssText = "color: red;"
   document.body.style.cssText = "overflow: visible; touch-action: pan-x;"
   Object.defineProperty(window, "innerHeight", { configurable: true, value: 500 })
-  window.fetch = async (input) => {
+  respond = async (input) => {
     const url = new URL(
       Predicate.isString(input) ? input : "href" in input ? input.href : input.url,
       "http://localhost"
@@ -83,9 +87,165 @@ afterAll(() => {
 })
 
 describe("ConnectSurface directory loading", () => {
+  it.each([401, 403, 500, 502])(
+    "classifies a first-load HTTP %s response without claiming a timeout",
+    async (status) => {
+      respond = async () => new Response("timeout", { status })
+      const host = document.createElement("div")
+      document.body.append(host)
+      const root = createRoot(host)
+      roots.push(root)
+      await act(async () => {
+        root.render(
+          <RegistryProvider>
+            <ConnectSurface atoms={makeConnectAtoms()} embedded />
+          </RegistryProvider>
+        )
+        for (let index = 0; index < 40; index += 1) await Promise.resolve()
+      })
+      expect(host.querySelector(".connect-directory-error h2")?.textContent).toBe("Couldn't load the fleet directory")
+      expect(host.querySelector(".connect-directory-error p")?.textContent).toBe(
+        `The hub answered HTTP ${String(status)}.`
+      )
+      expect(host.textContent).not.toContain("timed out")
+    }
+  )
+
+  it.each(["network", "protocol"])(
+    "keeps a first-load %s failure free of a timeout claim and raw diagnostics",
+    async (kind) => {
+      respond = async () => {
+        if (kind === "network") throw new TypeError("sensitive diagnostic")
+        return new Response(JSON.stringify({ agents: "sensitive diagnostic" }), {
+          headers: { "content-type": "application/json" }
+        })
+      }
+      const host = document.createElement("div")
+      document.body.append(host)
+      const root = createRoot(host)
+      roots.push(root)
+      await act(async () => {
+        root.render(
+          <RegistryProvider>
+            <ConnectSurface atoms={makeConnectAtoms()} embedded />
+          </RegistryProvider>
+        )
+        for (let index = 0; index < 40; index += 1) await Promise.resolve()
+      })
+      expect(host.querySelector(".connect-directory-error")).not.toBeNull()
+      expect(host.textContent).not.toContain("timed out")
+      expect(host.textContent).not.toContain("sensitive diagnostic")
+    }
+  )
+
+  it.each([".connect-empty button", ".connect-scope-clear"])(
+    "returns focus to search after clearing filters through %s",
+    async (selector) => {
+      respond = () => new Promise<Response>(() => {})
+      const host = document.createElement("div")
+      document.body.append(host)
+      const root = createRoot(host)
+      roots.push(root)
+      const atoms = makeConnectAtoms()
+      await act(async () => {
+        root.render(
+          <RegistryProvider
+            initialValues={[
+              [atoms.agents, AsyncResult.success(agentPage)],
+              [atoms.query, "zzz"],
+              [atoms.hostFilter, agent.host],
+              [atoms.activityFilter, "needs-you"]
+            ]}
+          >
+            <ConnectSurface atoms={atoms} embedded />
+          </RegistryProvider>
+        )
+        for (let index = 0; index < 12; index += 1) await Promise.resolve()
+      })
+      const search = host.querySelector<HTMLInputElement>("input[type='search']")
+      const clear = host.querySelector<HTMLButtonElement>(selector)
+      expect(search).not.toBeNull()
+      expect(clear).not.toBeNull()
+      clear?.focus()
+      expect(document.activeElement).toBe(clear)
+      await act(async () => clear?.click())
+      expect(search?.value).toBe("")
+      expect(host.querySelector(".connect-scope-clear")).toBeNull()
+      expect(host.querySelectorAll(".connect-agent")).toHaveLength(1)
+      expect(document.activeElement).toBe(search)
+    }
+  )
+
+  it("shows classified timeout recovery copy, a Retry button and Not updated yet", async () => {
+    respond = () => new Promise<Response>(() => {})
+    const host = document.createElement("div")
+    document.body.append(host)
+    const root = createRoot(host)
+    roots.push(root)
+    const atoms = makeConnectAtoms()
+    await act(async () => {
+      root.render(
+        <RegistryProvider initialValues={[[atoms.agents, AsyncResult.failure(Cause.fail(new TimeoutFixture()))]]}>
+          <ConnectSurface atoms={atoms} embedded />
+        </RegistryProvider>
+      )
+      for (let index = 0; index < 12; index += 1) await Promise.resolve()
+    })
+    expect(host.querySelector(".connect-directory-error h2")?.textContent).toBe("The fleet directory didn't answer")
+    expect(host.querySelector(".connect-directory-error p")?.textContent).toBe(
+      "The request timed out, so no agents are listed. Retry, or wait: Relay tries again every 5 seconds."
+    )
+    expect(host.querySelector(".connect-directory-error")?.textContent).not.toContain("HTTP 503")
+    expect(host.querySelector(".connect-directory-error button")?.textContent).toBe("Retry")
+    expect(host.querySelector(".connect-directory-error svg")).not.toBeNull()
+    expect(host.textContent).toContain("Not updated yet")
+    expect(host.querySelector(".connect-directory-secondary")).toBeNull()
+  })
+
+  it("keeps search and filters on an empty fleet and names configured hosts", async () => {
+    respond = () => new Promise<Response>(() => {})
+    const host = document.createElement("div")
+    document.body.append(host)
+    const root = createRoot(host)
+    roots.push(root)
+    const atoms = makeConnectAtoms()
+    const page = { agents: [], failures: [], hosts: ["ALPHA", "BETA"] }
+    await act(async () => {
+      root.render(
+        <RegistryProvider initialValues={[[atoms.agents, AsyncResult.success(page)]]}>
+          <ConnectSurface atoms={atoms} embedded />
+        </RegistryProvider>
+      )
+      for (let index = 0; index < 12; index += 1) await Promise.resolve()
+    })
+    expect(host.textContent).toContain("No agents running on any host.")
+    expect(host.querySelector("input[type='search']")).not.toBeNull()
+    expect(host.querySelector(".connect-filters-toggle")?.textContent).toBe("Filters")
+    expect(host.textContent).toContain("Start an agent on ALPHA or BETA and it appears here.")
+  })
+
+  it("omits the host hint on an empty fleet from an older hub", async () => {
+    respond = () => new Promise<Response>(() => {})
+    const host = document.createElement("div")
+    document.body.append(host)
+    const root = createRoot(host)
+    roots.push(root)
+    const atoms = makeConnectAtoms()
+    await act(async () => {
+      root.render(
+        <RegistryProvider initialValues={[[atoms.agents, AsyncResult.success({ agents: [], failures: [] })]]}>
+          <ConnectSurface atoms={atoms} embedded />
+        </RegistryProvider>
+      )
+      for (let index = 0; index < 12; index += 1) await Promise.resolve()
+    })
+    expect(host.querySelector("input[type='search']")).not.toBeNull()
+    expect(host.textContent).not.toContain("Start an agent on")
+  })
+
   it("marks the directory as loading until the first list arrives, so the hub can hold its space", async () => {
     // The directory request hangs: the first list has not arrived yet.
-    window.fetch = () => new Promise<Response>(() => {})
+    respond = () => new Promise<Response>(() => {})
     const host = document.createElement("div")
     document.body.append(host)
     const root = createRoot(host)
@@ -100,6 +260,7 @@ describe("ConnectSurface directory loading", () => {
       for (let index = 0; index < 12; index += 1) await Promise.resolve()
     })
     expect(host.querySelector(".connect-agents")?.getAttribute("data-loading")).toBe("true")
+    expect(host.querySelector(".connect-directory-secondary")).toBeNull()
 
     const loadedHost = document.createElement("div")
     document.body.append(loadedHost)
@@ -115,10 +276,11 @@ describe("ConnectSurface directory loading", () => {
       for (let index = 0; index < 12; index += 1) await Promise.resolve()
     })
     expect(loadedHost.querySelector(".connect-agents")?.hasAttribute("data-loading")).toBe(false)
+    expect(loadedHost.querySelector(".connect-directory-secondary")).not.toBeNull()
   })
 
   it("keeps the directory marked as loading when the first request fails, so its retry does not shift the chat", async () => {
-    window.fetch = () => new Promise<Response>(() => {})
+    respond = () => new Promise<Response>(() => {})
     const host = document.createElement("div")
     document.body.append(host)
     const root = createRoot(host)

@@ -1,0 +1,10 @@
+id: no-connect-middot-content
+valid:
+  - '.meta::before { content: ", "; }'
+  - '.meta::after { content: ""; }'
+  - "/* · is forbidden in copy */ .meta { color: inherit; }"
+  - '.meta::before { content: "\1b7 "; }'
+invalid:
+  - '.meta::before { content: " · "; }'
+  - '.scope::before { content: "· "; }'
+  - '.meta::before { content: "\00b7 "; }'

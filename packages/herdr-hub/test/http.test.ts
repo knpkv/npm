@@ -2272,7 +2272,10 @@ esac
       expect(page.body).toContain("Tests passing")
       const directory = yield* Effect.promise(() => secureRequestBody(`${canonical}/v1/connect/agents`, headers))
       expect(directory.body).toContain("\"voice\":{\"text\":\"Tests passing\",\"createdAt\":100}")
-      const agents = Schema.decodeUnknownSync(Schema.fromJsonString(FleetConnectAgentPage))(directory.body).agents
+      const directoryPage = Schema.decodeUnknownSync(Schema.fromJsonString(FleetConnectAgentPage))(directory.body)
+      // Configured hosts reach the browser even when no usage report names that host.
+      expect(directoryPage.hosts).toEqual(["SER8", "ALPHA"])
+      const agents = directoryPage.agents
       expect(agents.find(({ id }) => id === "agent-one")?.lastActivityAt).toBe(100)
       expect(agents.find(({ id }) => id === "agent-one")?.self).toEqual({
         mood: "excited",

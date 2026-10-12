@@ -25,6 +25,7 @@ import {
   type WindowSummary
 } from "@knpkv/agent-usage/limits"
 import type { FleetLimits, HostLimits } from "./limits.js"
+import { peerUnavailableDetail } from "./unavailable-detail.js"
 
 export interface HostLimitsView {
   readonly host: string
@@ -51,6 +52,11 @@ export interface ConnectLimitsView {
   readonly notes: ReadonlyArray<string>
   /** No host is set up to read limits and none failed: Connect shows nothing about them. */
   readonly off: boolean
+  /** Typed host failures, with only the transport's known, path-free sentences retained. */
+  readonly problems?: ReadonlyArray<{
+    readonly host: string
+    readonly reading: Extract<HostLimits["reading"], { readonly _tag: "Unavailable" }>
+  }>
 }
 
 const toneRank = { "at-limit": 3, near: 2, unknown: 1, ok: 0 } satisfies Record<LimitTone, number>
@@ -107,9 +113,17 @@ const failureWords = {
 export const connectLimitsView = (fleet: FleetLimits, sinceLoad: number): ConnectLimitsView => {
   const hosts: Array<HostLimitsView> = []
   const notes: Array<string> = []
+  const problems: Array<NonNullable<ConnectLimitsView["problems"]>[number]> = []
   for (const host of fleet.hosts) {
-    if (host.reading._tag === "Unavailable") notes.push(unavailableNote(host.host, host.reading))
-    else {
+    if (host.reading._tag === "Unavailable") {
+      notes.push(unavailableNote(host.host, host.reading))
+      if (host.reading.reason !== "not_configured") {
+        problems.push({
+          host: host.host,
+          reading: { ...host.reading, detail: peerUnavailableDetail(host.reading.reason, host.reading.detail) }
+        })
+      }
+    } else {
       const skipped = host.reading.skipped
       if (skipped > 0) {
         notes.push(
@@ -144,5 +158,5 @@ export const connectLimitsView = (fleet: FleetLimits, sinceLoad: number): Connec
   })
   const off = hosts.length === 0 && fleet.failures.length === 0 && fleet.peersListed &&
     fleet.hosts.every((host) => host.reading._tag === "Unavailable" && host.reading.reason === "not_configured")
-  return { line, hosts, notes, off }
+  return { line, hosts, notes, off, problems }
 }

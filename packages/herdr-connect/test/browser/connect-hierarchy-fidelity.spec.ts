@@ -145,7 +145,7 @@ for (const width of [390, 1280]) {
         } else if (state === "empty") {
           await expect(page.getByText("No agents running on any host.")).toBeVisible()
         } else if (state === "unavailable") {
-          await expect(page.getByRole("button", { name: "Retry directory" })).toBeVisible()
+          await expect(page.getByRole("button", { name: "Retry", exact: true })).toBeVisible()
         } else if (state === "loading") {
           await expect(page.getByText("Loading fleet agents…")).toBeVisible()
         } else {

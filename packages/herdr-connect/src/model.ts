@@ -27,7 +27,11 @@ export const ConnectAgentRelation = Schema.Literals([
 ])
 export type ConnectAgentRelation = typeof ConnectAgentRelation.Type
 
-export const ConnectAgentRelationship = AgentWorkerRelationship
+export const ConnectAgentRelationship = Schema.Struct({
+  ...AgentWorkerRelationship.fields,
+  /** Display-only remembered name. It does not assert that the parent is still listed. */
+  parentName: Schema.optionalKey(AgentWorkerIdentity.fields.name)
+})
 export type ConnectAgentRelationship = typeof ConnectAgentRelationship.Type
 
 export const ConnectAgent = Schema.Struct({
@@ -66,7 +70,9 @@ export type ConnectPeerFailure = typeof ConnectPeerFailure.Type
 
 export const FleetConnectAgents = Schema.Struct({
   agents: Schema.Array(ConnectAgent).check(Schema.isMaxLength(1_024)),
-  failures: Schema.Array(ConnectPeerFailure).check(Schema.isMaxLength(256))
+  failures: Schema.Array(ConnectPeerFailure).check(Schema.isMaxLength(256)),
+  /** Configured machine names, independent of which machines report usage or live agents. */
+  hosts: Schema.optionalKey(Schema.Array(ConnectAgent.fields.host).check(Schema.isMaxLength(256)))
 })
 export type FleetConnectAgents = typeof FleetConnectAgents.Type
 
@@ -82,6 +88,7 @@ export const FleetConnectAgentPage = Schema.Struct({
     Schema.isMaxLength(connectAgentPageMaxRecords)
   ),
   failures: FleetConnectAgents.fields.failures,
+  hosts: FleetConnectAgents.fields.hosts,
   nextCursor: Schema.NullOr(ConnectAgentCursor)
 })
 export type FleetConnectAgentPage = typeof FleetConnectAgentPage.Type

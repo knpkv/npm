@@ -6,7 +6,7 @@ import type {
   HostConfiguration
 } from "@knpkv/herdr-fleet"
 import { decodeBoundedResponseJson } from "@knpkv/herdr-fleet"
-import { Effect, Result, Schema } from "effect"
+import { Effect, Result, Schema, type Types } from "effect"
 import * as HttpClient from "effect/http/HttpClient"
 import type { AgentActivityStore } from "./activity-store.js"
 import type { AgentArchiveStore } from "./archive-store.js"
@@ -62,11 +62,13 @@ export const pageFleetConnectAgents = Effect.fn("HerdrConnect.pageFleetAgents")(
   const nextCursor = start + agents.length < sorted.length && last !== undefined
     ? { host: last.host, id: last.id }
     : null
-  return yield* Schema.decodeUnknownEffect(FleetConnectAgentPage)({
+  const page: Types.Mutable<typeof FleetConnectAgentPage.Type> = {
     agents,
     failures: cursor === null ? directory.failures : [],
     nextCursor
-  }).pipe(
+  }
+  if (cursor === null && directory.hosts !== undefined) page.hosts = directory.hosts
+  return yield* Schema.decodeUnknownEffect(FleetConnectAgentPage)(page).pipe(
     Effect.mapError(
       (cause) => new ConnectPeerError({ cause, host: "fleet", reason: "invalid_response" })
     )
@@ -283,7 +285,7 @@ export const fleetConnectAgents = Effect.fn("HerdrConnect.fleetAgents")(function
       for (const agent of result.success.agents) agents.push(agent)
     } else failures.push({ host: peer.host, reason: result.failure.reason })
   }
-  const fleet = yield* Schema.decodeUnknownEffect(FleetConnectAgents)({ agents, failures }).pipe(
+  let fleet = yield* Schema.decodeUnknownEffect(FleetConnectAgents)({ agents, failures }).pipe(
     Effect.mapError(
       (cause) =>
         new ConnectPeerError({
@@ -316,6 +318,27 @@ export const fleetConnectAgents = Effect.fn("HerdrConnect.fleetAgents")(function
           (cause) => Effect.logWarning("Connect archive observation failed", { host: observation.host, cause })
         )
       )
+    }
+    const liveKeys = new Set(fleet.agents.map(({ host, id }) => `${host.toLowerCase()}\u0000${id}`))
+    const missingParents = fleet.agents.flatMap(({ host, relationship }) =>
+      relationship === undefined || liveKeys.has(`${host.toLowerCase()}\u0000${relationship.parentAgentId}`)
+        ? []
+        : [{ host, id: relationship.parentAgentId }]
+    )
+    const remembered = yield* archive.store.namesFor(missingParents).pipe(
+      Effect.catchTag(
+        "ConnectArchiveStoreError",
+        (cause) => Effect.logWarning("Connect archive name lookup failed", { cause }).pipe(Effect.as([]))
+      )
+    )
+    const names = new Map(remembered.map(({ host, id, name }) => [`${host.toLowerCase()}\u0000${id}`, name]))
+    fleet = {
+      ...fleet,
+      agents: fleet.agents.map((agent) => {
+        if (agent.relationship === undefined) return agent
+        const parentName = names.get(`${agent.host.toLowerCase()}\u0000${agent.relationship.parentAgentId}`)
+        return parentName === undefined ? agent : { ...agent, relationship: { ...agent.relationship, parentName } }
+      })
     }
   }
   if (archive?.posts === undefined) return fleet
