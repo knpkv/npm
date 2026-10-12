@@ -42,7 +42,7 @@ import {
   WorkStore
 } from "@knpkv/herdr-work"
 import type { RelayBackend } from "@knpkv/relay"
-import { Clock, Data, Deferred, Effect, Fiber, Layer, Ref, Result, Schema, Stream } from "effect"
+import { Clock, Data, Deferred, Effect, Fiber, Layer, Logger, Queue, Ref, Result, Schema, Stream } from "effect"
 import { HttpClient } from "effect/http"
 import { TestClock } from "effect/testing"
 import { build } from "esbuild"
@@ -166,6 +166,59 @@ const assets = {
   stylesheet: "",
   worker: ""
 }
+
+/** Exercise controller admission through an authorized listener, with each resource scoped immediately. */
+const controllerServer = Effect.fn("ControllerTest.server")(function*(connector: TerminalConnector) {
+  const root = mkdtempSync(join(tmpdir(), "herdr-controller-test-"))
+  yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { force: true, recursive: true })))
+  const tailscaleCommand = join(root, "tailscale-test")
+  writeFileSync(
+    tailscaleCommand,
+    `#!/bin/sh
+case "$1" in
+  ip) printf '%s\\n' '127.0.0.1' ;;
+  whois) printf '%s\\n' '{"Node":{"StableID":"node-ser8"},"UserProfile":{"LoginName":"owner@example.com"}}' ;;
+  status) printf '%s\\n' '{"Peer":{},"Self":{"HostName":"ALPHA","ID":"node-alpha","Online":true,"TailscaleIPs":["127.0.0.1"]}}' ;;
+esac
+`,
+    { mode: 0o700 }
+  )
+  const hostConfig = { ...config(root), approvalPort: 0, crossHost: true, tailscaleCommand }
+  const store = yield* Effect.acquireRelease(
+    JobStore.open(join(root, "jobs.sqlite")),
+    (opened) => Effect.sync(() => opened.close())
+  )
+  const fleet = yield* makeFleetService({ approvalEnabled: false, host: hostConfig.host, operations, store })
+  const server = yield* Effect.acquireRelease(
+    Effect.promise(() => startHttpServer(hostConfig, fleet, assets, { terminalConnector: connector })),
+    (running) => Effect.promise(running.close)
+  )
+  if (server.tailnetUrl === null) return yield* Effect.die("tailnet listener missing")
+  const url = new URL("/v1/connect/terminal", server.tailnetUrl)
+  url.protocol = "ws:"
+  url.searchParams.set("agent", "agent-controller")
+  url.searchParams.set("host", hostConfig.host)
+  url.searchParams.set("cols", "100")
+  url.searchParams.set("rows", "30")
+  return { url, close: server.close }
+})
+
+/** Register close and ready observations before a socket can receive its first server frame. */
+const controllerClient = Effect.fn("ControllerTest.client")(function*(url: URL, autoPong = true) {
+  return yield* Effect.acquireRelease(
+    Effect.sync(() => {
+      const socket = new WebSocketClient(url, { autoPong })
+      const closed = new Promise<number>((resolve) => socket.once("close", (code) => resolve(code)))
+      const ready = new Promise<string | number>((resolve, reject) => {
+        socket.once("error", reject)
+        socket.once("message", () => resolve("ready"))
+        socket.once("close", (code) => resolve(code))
+      })
+      return { socket, ready, closed }
+    }),
+    (client) => Effect.sync(() => client.socket.terminate())
+  )
+})
 
 const approvalProofCookieCount = (response: Response): number =>
   response.headers.get("set-cookie")?.match(/fleet_approval_proof_/gu)?.length ?? 0
@@ -5021,6 +5074,174 @@ esac
     ).pipe(provideNodeServices)
   })
 
+  it.effect("keeps a ponging terminal exclusive and releases a silent controller after the heartbeat", () =>
+    Effect.gen(function*() {
+      const server = yield* controllerServer({
+        open: () => Effect.succeed({ events: Stream.never, send: () => Effect.void })
+      })
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] })
+      yield* Effect.addFinalizer(() => Effect.sync(() => vi.useRealTimers()))
+      const alive = yield* controllerClient(server.url)
+      expect(yield* Effect.promise(() => alive.ready)).toBe("ready")
+      const ping = new Promise<void>((resolve) => alive.socket.once("ping", () => resolve()))
+      yield* Effect.promise(() => vi.advanceTimersByTimeAsync(25_000))
+      yield* Effect.promise(() => ping)
+      // Echoing a message synchronizes after the automatic pong reached the server.
+      const echo = new Promise<void>((resolve) => alive.socket.once("pong", () => resolve()))
+      alive.socket.ping()
+      yield* Effect.promise(() => echo)
+      yield* Effect.promise(() => vi.advanceTimersByTimeAsync(25_000))
+      const duplicate = yield* controllerClient(server.url)
+      expect(yield* Effect.promise(() => duplicate.ready)).toBe(4_423)
+      alive.socket.terminate()
+      yield* Effect.promise(() => alive.closed)
+      const silent = yield* controllerClient(server.url, false)
+      expect(yield* Effect.promise(() => silent.ready)).toBe("ready")
+      const silentPing = new Promise<void>((resolve) => silent.socket.once("ping", () => resolve()))
+      yield* Effect.promise(() => vi.advanceTimersByTimeAsync(25_000))
+      yield* Effect.promise(() => silentPing)
+      expect(silent.socket.readyState).toBe(WebSocketClient.OPEN)
+      yield* Effect.promise(() => vi.advanceTimersByTimeAsync(25_000))
+      expect(yield* Effect.promise(() => silent.closed)).toBe(1_006)
+      const replacement = yield* controllerClient(server.url)
+      expect(yield* Effect.promise(() => replacement.ready)).toBe("ready")
+    }).pipe(Effect.scoped, provideNodeServices))
+
+  it.effect("does not exhaust the four-controller cap after five disconnected held releases", () =>
+    Effect.gen(function*() {
+      const allowRelease = yield* Deferred.make<void>()
+      const releaseStarted = yield* Queue.unbounded<string>()
+      const connector: TerminalConnector = {
+        open: (selection) =>
+          Effect.acquireRelease(
+            Effect.succeed({ events: Stream.never, send: () => Effect.void }),
+            () => Queue.offer(releaseStarted, selection.agentId).pipe(Effect.andThen(Deferred.await(allowRelease)))
+          )
+      }
+      const server = yield* controllerServer(connector)
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] })
+      yield* Effect.addFinalizer(() =>
+        Deferred.succeed(allowRelease, undefined).pipe(
+          Effect.andThen(Effect.sync(() => vi.useRealTimers()))
+        )
+      )
+      for (let index = 0; index < 5; index += 1) {
+        const url = new URL(server.url)
+        const agentId = `agent-controller-${index}`
+        url.searchParams.set("agent", agentId)
+        const client = yield* controllerClient(url)
+        expect(yield* Effect.promise(() => client.ready)).toBe("ready")
+        client.socket.terminate()
+        yield* Effect.promise(() => client.closed)
+        expect(yield* Queue.take(releaseStarted)).toBe(agentId)
+        yield* Effect.promise(() => vi.advanceTimersByTimeAsync(10_000))
+      }
+      const replacement = yield* controllerClient(server.url)
+      expect(yield* Effect.promise(() => replacement.ready)).toBe("ready")
+    }).pipe(Effect.scoped, provideNodeServices))
+
+  it.effect("a late release cannot clear the replacement controller's reservation", () =>
+    Effect.gen(function*() {
+      const releaseStarted = yield* Deferred.make<void>()
+      const releaseFinished = yield* Deferred.make<void>()
+      const allowRelease = yield* Deferred.make<void>()
+      let opens = 0
+      const connector: TerminalConnector = {
+        open: () => {
+          opens += 1
+          return opens === 1
+            ? Effect.acquireRelease(
+              Effect.succeed({ events: Stream.never, send: () => Effect.void }),
+              () =>
+                Deferred.succeed(releaseStarted, undefined).pipe(
+                  Effect.andThen(Deferred.await(allowRelease)),
+                  Effect.ensuring(Deferred.succeed(releaseFinished, undefined))
+                )
+            )
+            : Effect.succeed({ events: Stream.never, send: () => Effect.void })
+        }
+      }
+      const server = yield* controllerServer(connector)
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] })
+      yield* Effect.addFinalizer(() =>
+        Deferred.succeed(allowRelease, undefined).pipe(
+          Effect.andThen(Effect.sync(() => vi.useRealTimers()))
+        )
+      )
+      const first = yield* controllerClient(server.url)
+      expect(yield* Effect.promise(() => first.ready)).toBe("ready")
+      first.socket.terminate()
+      yield* Effect.promise(() => first.closed)
+      yield* Deferred.await(releaseStarted)
+      yield* Effect.promise(() => vi.advanceTimersByTimeAsync(10_000))
+      const replacement = yield* controllerClient(server.url)
+      expect(yield* Effect.promise(() => replacement.ready)).toBe("ready")
+      yield* Deferred.succeed(allowRelease, undefined)
+      yield* Deferred.await(releaseFinished)
+      const duplicate = yield* controllerClient(server.url)
+      expect(yield* Effect.promise(() => duplicate.ready)).toBe(4_423)
+      expect(opens).toBe(2)
+    }).pipe(Effect.scoped, provideNodeServices))
+
+  it.effect("releases a failed terminal setup even when its peer never answers the close handshake", () =>
+    Effect.gen(function*() {
+      let opens = 0
+      const connector: TerminalConnector = {
+        open: () => {
+          opens += 1
+          if (opens === 1) {
+            throw new FleetOperationError({
+              cause: undefined,
+              detail: "controller fixture failed",
+              operation: "controller.fixture"
+            })
+          }
+          return Effect.succeed({ events: Stream.never, send: () => Effect.void })
+        }
+      }
+      const server = yield* controllerServer(connector)
+      const broken = yield* controllerClient(server.url)
+      yield* Effect.promise(() =>
+        new Promise<void>((resolve) =>
+          broken.socket.once("open", () => {
+            broken.socket.pause()
+            resolve()
+          })
+        )
+      )
+      const replacement = yield* controllerClient(server.url)
+      expect(yield* Effect.promise(() => replacement.ready)).toBe("ready")
+    }).pipe(Effect.scoped, provideNodeServices))
+
+  it.effect("hub shutdown interrupts a cooperative controller finalizer without leaking its slot", () =>
+    Effect.gen(function*() {
+      const releaseStarted = yield* Deferred.make<void>()
+      const interrupted = yield* Deferred.make<void>()
+      const connector: TerminalConnector = {
+        open: () =>
+          Effect.acquireRelease(
+            Effect.succeed({ events: Stream.never, send: () => Effect.void }),
+            () =>
+              Effect.interruptible(
+                Deferred.succeed(releaseStarted, undefined).pipe(
+                  Effect.andThen(Effect.never),
+                  Effect.onInterrupt(() => Deferred.succeed(interrupted, undefined))
+                )
+              )
+          )
+      }
+      const server = yield* controllerServer(connector)
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] })
+      yield* Effect.addFinalizer(() => Effect.sync(() => vi.useRealTimers()))
+      const client = yield* controllerClient(server.url)
+      expect(yield* Effect.promise(() => client.ready)).toBe("ready")
+      const closing = server.close()
+      yield* Deferred.await(releaseStarted)
+      yield* Effect.promise(() => vi.advanceTimersByTimeAsync(10_000))
+      yield* Effect.promise(() => closing)
+      expect(yield* Deferred.isDone(interrupted)).toBe(true)
+    }).pipe(Effect.scoped, provideNodeServices))
+
   it.effect("releases a disconnected terminal open and closes a clean exit", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-http-terminal-test-"))
     const tailscaleCommand = join(root, "tailscale-test")
@@ -5051,6 +5272,7 @@ esac
       const allowControllerRelease = yield* Deferred.make<void>()
       const controllerReleaseFinished = yield* Deferred.make<void>()
       const shutdownReleaseStarted = yield* Deferred.make<void>()
+      const shutdownReleaseFinished = yield* Deferred.make<void>()
       const allowShutdownRelease = yield* Deferred.make<void>()
       let opens = 0
       let sends = 0
@@ -5114,7 +5336,8 @@ esac
               Effect.succeed(session),
               () =>
                 Deferred.succeed(shutdownReleaseStarted, undefined).pipe(
-                  Effect.andThen(Deferred.await(allowShutdownRelease))
+                  Effect.andThen(Deferred.await(allowShutdownRelease)),
+                  Effect.ensuring(Deferred.succeed(shutdownReleaseFinished, undefined))
                 )
             )
             : Effect.succeed(session)
@@ -5225,6 +5448,17 @@ esac
               JSON.stringify({ type: "terminal.scroll_state", offsetFromBottom: 42, scrollsForwarded: 0 })
             )
 
+            vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] })
+            const warnings = vi.spyOn(Logger.defaultLogger, "log")
+            yield* Effect.addFinalizer(() =>
+              Deferred.succeed(allowControllerRelease, undefined).pipe(
+                Effect.andThen(Deferred.succeed(allowShutdownRelease, undefined)),
+                Effect.andThen(Effect.sync(() => {
+                  vi.useRealTimers()
+                  warnings.mockRestore()
+                }))
+              )
+            )
             const held = yield* Effect.promise(
               () =>
                 new Promise<WebSocketClient>((resolve, reject) => {
@@ -5235,6 +5469,7 @@ esac
             )
             held.close()
             yield* Deferred.await(controllerReleaseStarted)
+            yield* Effect.promise(() => vi.advanceTimersByTimeAsync(9_999))
             const blockedDuplicate = yield* Effect.promise(
               () =>
                 new Promise<number>((resolve, reject) => {
@@ -5245,18 +5480,28 @@ esac
             )
             expect(blockedDuplicate).toBe(4_423)
             expect(opens).toBe(5)
-            yield* Deferred.succeed(allowControllerRelease, undefined)
-            yield* Deferred.await(controllerReleaseFinished)
-            yield* Effect.yieldNow
-
-            yield* Effect.promise(
+            yield* Effect.promise(() => vi.advanceTimersByTimeAsync(1))
+            const replacement = yield* Effect.promise(
               () =>
-                new Promise<void>((resolve, reject) => {
+                new Promise<string | number>((resolve, reject) => {
                   const socket = new WebSocketClient(url)
                   socket.once("error", reject)
-                  socket.once("open", () => resolve())
+                  socket.once("message", () => resolve("ready"))
+                  socket.once("close", (code) => resolve(code))
                 })
             )
+            expect(replacement).toBe("ready")
+            const timeoutWarnings = warnings.mock.calls.map(([entry]) => entry.message).filter((message) =>
+              JSON.stringify(message).includes("TerminalReleaseTimeout")
+            )
+            expect(timeoutWarnings).toEqual([[{
+              _tag: "TerminalReleaseTimeout",
+              host: hostConfig.host,
+              agentId: "agent-1",
+              elapsed: 10_000
+            }]])
+            vi.useRealTimers()
+            warnings.mockRestore()
             const closeFinished = yield* Deferred.make<void>()
             const runPromise = Effect.runPromiseWith(yield* Effect.context<never>())
             const closing = server.close().then(() =>
@@ -5267,6 +5512,10 @@ esac
             yield* Deferred.await(shutdownReleaseStarted)
             expect(yield* Deferred.isDone(closeFinished)).toBe(false)
             yield* Deferred.succeed(allowShutdownRelease, undefined)
+            yield* Deferred.await(shutdownReleaseFinished)
+            expect(yield* Deferred.isDone(closeFinished)).toBe(false)
+            yield* Deferred.succeed(allowControllerRelease, undefined)
+            yield* Deferred.await(controllerReleaseFinished)
             yield* Effect.promise(() => closing)
             expect(yield* Deferred.isDone(closeFinished)).toBe(true)
             expect(opens).toBe(6)

@@ -46,6 +46,8 @@ Approval mutations require the exact active listener origin, including HTML form
 
 ## Connect directory
 
+Terminal control permits one controller per host and stable agent ID, and four controllers in total. A socket is pinged every 25 seconds and terminated if the previous ping is unanswered at the next check. Disconnect, error, failed setup and server teardown share idempotent cleanup. The controller lock and connection slot are held for cleanup for at most ten seconds. A late finalizer receives an interruption request and remains owned by the hub; shutdown waits for an uninterruptible finalizer to finish. The `TerminalReleaseTimeout` warning contains only its tag, host, stable agent ID and elapsed milliseconds. A live controller still refuses a second device with the existing message.
+
 The authenticated `GET /v1/connect/agents` response includes optional `hosts` on its first page, read from `config.machines`. This lists the first 256 configured machine names in configuration order, even when agents or usage readings do not list a host. Additional configured machines remain configured but are omitted from this hint so the page stays within its schema bound. Later pages omit that metadata. Older clients can ignore it, and newer clients omit the empty-directory host hint when an older hub does not supply it.
 
 ## Approval request disclosure

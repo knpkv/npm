@@ -150,6 +150,7 @@ import { dashboardPage } from "./internal/dashboard-page.js"
 import { type ListenerMode, listenerServesWork } from "./internal/listener.js"
 import { decodeRelayPostRequest } from "./internal/relay-post-validation.js"
 import { decodeRelaySelfBody } from "./internal/relay-self-validation.js"
+import { releaseTerminalScope } from "./internal/terminal-controller.js"
 import { relayScrollState, remoteTerminalUrl, terminalSelectionInput } from "./internal/terminal-selection.js"
 import {
   isRelayedScrollState,
@@ -2408,18 +2409,24 @@ export const startHttpServer = async (
         closeSocket(socket, 4423, "agent already controlled")
         return
       }
+      const scope = Scope.makeUnsafe()
       terminalControllers.add(key)
-      const scope = await Effect.runPromise(Scope.make())
       let finalized = false
+      let released = false
       let finalizePromise: Promise<void> | undefined
       let idleTimer: NodeJS.Timeout | undefined
+      const releaseReservation = (): void => {
+        if (released) return
+        released = true
+        terminalControllers.delete(key)
+      }
       const finalize = async (): Promise<void> => {
-        if (finalizePromise !== undefined) return finalizePromise
+        if (finalized) return finalizePromise
         finalized = true
         if (idleTimer !== undefined) clearTimeout(idleTimer)
         finalizePromise = Effect.runPromise(
-          Scope.close(scope, Exit.void)
-        ).finally(() => terminalControllers.delete(key))
+          releaseTerminalScope(scope, workerScope, selection)
+        ).finally(releaseReservation)
         return finalizePromise
       }
       const finalizeFromSocket = (): void => {
@@ -2429,127 +2436,132 @@ export const startHttpServer = async (
           )
         )
       }
-      socket.once("close", finalizeFromSocket)
-      socket.once("error", finalizeFromSocket)
-      const openFiber = await Effect.runPromise(
-        Effect.forkIn(
-          Effect.result(Scope.provide(scope)(terminalConnector.open(selection))),
-          scope
+      try {
+        socket.once("close", finalizeFromSocket)
+        socket.once("error", finalizeFromSocket)
+        const openFiber = await Effect.runPromise(
+          Effect.forkIn(
+            Effect.result(Scope.provide(scope)(terminalConnector.open(selection))),
+            scope
+          )
         )
-      )
-      const openExit = await Effect.runPromise(Fiber.await(openFiber))
-      if (Exit.isFailure(openExit)) {
-        await finalize()
-        if (Cause.hasInterruptsOnly(openExit.cause)) return
-        await Effect.runPromise(Effect.failCause(openExit.cause))
-        return
-      }
-      const opened = openExit.value
-      if (Result.isFailure(opened)) {
-        await finalize()
-        closeSocket(
-          socket,
-          terminalCloseCode(opened.failure),
-          opened.failure._tag
-        )
-        return
-      }
-      if (finalized || socket.readyState !== WebSocketClient.OPEN) {
-        await finalize()
-        return
-      }
-      const session = opened.success
-      const inputQueue = await Effect.runPromise(
-        Queue.dropping<typeof TerminalClientCommand.Type>(64)
-      )
-      const inputLoop = Stream.fromQueue(inputQueue).pipe(
-        Stream.runForEach(session.send),
-        Effect.catch((error) => Effect.sync(() => closeSocket(socket, terminalCloseCode(error), error._tag)))
-      )
-      await Effect.runPromise(Effect.forkIn(inputLoop, scope))
-      const resetIdle = (): void => {
-        if (idleTimer !== undefined) clearTimeout(idleTimer)
-        idleTimer = setTimeout(
-          () => closeSocket(socket, 4408, "terminal idle timeout"),
-          30 * 60 * 1_000
-        )
-        idleTimer.unref()
-      }
-      resetIdle()
-      const readySignal = JSON.stringify(
-        Schema.decodeUnknownSync(TerminalServerSignal)({
-          type: "terminal.ready"
-        })
-      )
-      setImmediate(() => {
-        if (socket.readyState === WebSocketClient.OPEN) {
-          socket.send(readySignal)
-        }
-      })
-      socket.on("message", (data, isBinary) => {
-        if (isBinary) {
-          closeSocket(socket, 4400, "binary client frames are forbidden")
+        const openExit = await Effect.runPromise(Fiber.await(openFiber))
+        if (Exit.isFailure(openExit)) {
+          if (Cause.hasInterruptsOnly(openExit.cause)) return
+          await Effect.runPromise(Effect.failCause(openExit.cause))
           return
         }
-        resetIdle()
-        try {
-          const command = Schema.decodeUnknownSync(TerminalClientCommand)(
-            JSON.parse(data.toString())
+        const opened = openExit.value
+        if (Result.isFailure(opened)) {
+          closeSocket(
+            socket,
+            terminalCloseCode(opened.failure),
+            opened.failure._tag
           )
-          if (!Queue.offerUnsafe(inputQueue, command)) {
-            closeSocket(socket, 4429, "terminal input queue limit reached")
-          }
-        } catch {
-          closeSocket(socket, 4400, "invalid terminal command")
+          return
         }
-      })
-      const scrollSignals = makeLatestSignalSender({
-        bufferedAmount: () => socket.bufferedAmount,
-        isOpen: () => socket.readyState === WebSocketClient.OPEN,
-        send: (payload) => socket.send(payload)
-      }, 100)
-      socket.once("close", scrollSignals.dispose)
-      const eventLoop = Stream.runForEach(session.events, (event) =>
-        Effect.sync(() => {
-          if (socket.readyState !== WebSocketClient.OPEN) return
-          if (event.type === "terminal.frame") {
-            const payload = Buffer.from(event.bytes, "base64")
-            if (!terminalBufferCanAccept(socket.bufferedAmount, payload.byteLength)) {
-              closeSocket(socket, 4429, "terminal output backpressure limit hit")
-              return
-            }
-            socket.send(payload, { binary: true })
-          } else if (event.type === "terminal.scroll_state") {
-            // The pane's scroll position as the connector read it. Under backpressure the newest one
-            // waits for the buffer to drain; the connector reports only changes, so none may be lost.
-            relayScrollState(
-              selection,
-              JSON.stringify(Schema.decodeUnknownSync(TerminalServerSignal)(event)),
-              scrollSignals.offer
-            )
-          } else {
-            const payload = JSON.stringify(
-              Schema.decodeUnknownSync(TerminalServerSignal)({
-                type: "terminal.closed",
-                reason: "terminal ended"
-              })
-            )
-            if (!terminalBufferCanAccept(socket.bufferedAmount, Buffer.byteLength(payload))) {
-              closeSocket(socket, 4429, "terminal output backpressure limit hit")
-              return
-            }
-            socket.send(payload)
-            closeSocket(socket, 1000, "terminal closed")
-          }
-        })).pipe(
-          Effect.tap(() => Effect.sync(() => closeSocket(socket, 1000, "terminal ended"))),
+        if (finalized || socket.readyState !== WebSocketClient.OPEN) {
+          return
+        }
+        const session = opened.success
+        const inputQueue = await Effect.runPromise(
+          Queue.dropping<typeof TerminalClientCommand.Type>(64)
+        )
+        const inputLoop = Stream.fromQueue(inputQueue).pipe(
+          Stream.runForEach(session.send),
           Effect.catch((error) => Effect.sync(() => closeSocket(socket, terminalCloseCode(error), error._tag)))
         )
-      const eventFiber = await Effect.runPromise(
-        Effect.forkIn(eventLoop, scope)
-      )
-      await Effect.runPromise(Fiber.await(eventFiber))
-      await finalize()
+        await Effect.runPromise(Effect.forkIn(inputLoop, scope))
+        const resetIdle = (): void => {
+          if (idleTimer !== undefined) clearTimeout(idleTimer)
+          idleTimer = setTimeout(
+            () => closeSocket(socket, 4408, "terminal idle timeout"),
+            30 * 60 * 1_000
+          )
+          idleTimer.unref()
+        }
+        resetIdle()
+        const readySignal = JSON.stringify(
+          Schema.decodeUnknownSync(TerminalServerSignal)({
+            type: "terminal.ready"
+          })
+        )
+        setImmediate(() => {
+          if (socket.readyState === WebSocketClient.OPEN) {
+            socket.send(readySignal)
+          }
+        })
+        socket.on("message", (data, isBinary) => {
+          if (finalized || socket.readyState !== WebSocketClient.OPEN) return
+          if (isBinary) {
+            closeSocket(socket, 4400, "binary client frames are forbidden")
+            return
+          }
+          resetIdle()
+          try {
+            const command = Schema.decodeUnknownSync(TerminalClientCommand)(
+              JSON.parse(data.toString())
+            )
+            if (!Queue.offerUnsafe(inputQueue, command)) {
+              closeSocket(socket, 4429, "terminal input queue limit reached")
+            }
+          } catch {
+            closeSocket(socket, 4400, "invalid terminal command")
+          }
+        })
+        const scrollSignals = makeLatestSignalSender({
+          bufferedAmount: () => socket.bufferedAmount,
+          isOpen: () => socket.readyState === WebSocketClient.OPEN,
+          send: (payload) => socket.send(payload)
+        }, 100)
+        socket.once("close", scrollSignals.dispose)
+        const eventLoop = Stream.runForEach(session.events, (event) =>
+          Effect.sync(() => {
+            if (socket.readyState !== WebSocketClient.OPEN) return
+            if (event.type === "terminal.frame") {
+              const payload = Buffer.from(event.bytes, "base64")
+              if (!terminalBufferCanAccept(socket.bufferedAmount, payload.byteLength)) {
+                closeSocket(socket, 4429, "terminal output backpressure limit hit")
+                return
+              }
+              socket.send(payload, { binary: true })
+            } else if (event.type === "terminal.scroll_state") {
+              // The pane's scroll position as the connector read it. Under backpressure the newest one
+              // waits for the buffer to drain; the connector reports only changes, so none may be lost.
+              relayScrollState(
+                selection,
+                JSON.stringify(Schema.decodeUnknownSync(TerminalServerSignal)(event)),
+                scrollSignals.offer
+              )
+            } else {
+              const payload = JSON.stringify(
+                Schema.decodeUnknownSync(TerminalServerSignal)({
+                  type: "terminal.closed",
+                  reason: "terminal ended"
+                })
+              )
+              if (!terminalBufferCanAccept(socket.bufferedAmount, Buffer.byteLength(payload))) {
+                closeSocket(socket, 4429, "terminal output backpressure limit hit")
+                return
+              }
+              socket.send(payload)
+              closeSocket(socket, 1000, "terminal closed")
+            }
+          })).pipe(
+            Effect.tap(() => Effect.sync(() => closeSocket(socket, 1000, "terminal ended"))),
+            Effect.catch((error) => Effect.sync(() => closeSocket(socket, terminalCloseCode(error), error._tag)))
+          )
+        const eventFiber = await Effect.runPromise(
+          Effect.forkIn(eventLoop, scope)
+        )
+        await Effect.runPromise(Fiber.await(eventFiber))
+      } catch (error) {
+        closeSocket(socket, 4503, "terminal unavailable")
+        throw error
+      } finally {
+        closeSocket(socket, 1000, "terminal ended")
+        await finalize()
+      }
     }
 
     const proxyTerminal = async (
