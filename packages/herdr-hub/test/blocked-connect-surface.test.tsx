@@ -774,6 +774,51 @@ describe("stage notification controls", () => {
     expect(fixture.writes.at(-1)?.quietHours?.startMinute).toBe(1320)
   })
 
+  it("Enter after a queued Clear preserves the visible pair as the final quiet-hours intent", async () => {
+    const quietHours = { startMinute: 1380, endMinute: 420, timeZone: "Europe/Berlin" }
+    const fixture = await openStage({
+      mutedAgents: [],
+      quietHours: { ...quietHours, startMinute: 1320 }
+    })
+    const from = document.querySelector<HTMLInputElement>("input[aria-label='Quiet hours from']")
+    const until = document.querySelector<HTMLInputElement>("input[aria-label='Quiet hours until']")
+    await act(async () => {
+      if (from !== null) {
+        from.value = "23:00"
+        from.dispatchEvent(new Event("input", { bubbles: true }))
+      }
+    })
+    await settle()
+    const release = fixture.holdNextSave()
+    try {
+      await act(async () => from?.dispatchEvent(new FocusEvent("focusout", { bubbles: true })))
+      await settle()
+      await act(async () => document.querySelector<HTMLButtonElement>(".connect-stage-notification-clear")?.click())
+      await settle()
+      expect(from?.value).toBe("23:00")
+      expect(until?.value).toBe("07:00")
+      for (let press = 0; press < 2; press += 1) {
+        await act(async () => from?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })))
+        await settle()
+      }
+      expect(fixture.mutations).toEqual([{ _tag: "SetQuietHours", quietHours }])
+    } finally {
+      await act(async () => release())
+      await settle()
+    }
+    expect(fixture.mutations).toEqual([
+      { _tag: "SetQuietHours", quietHours },
+      { _tag: "SetQuietHours", quietHours: null },
+      { _tag: "SetQuietHours", quietHours }
+    ])
+    expect(fixture.writes.at(-1)?.quietHours).toEqual(quietHours)
+    expect(from?.value).toBe("23:00")
+    expect(until?.value).toBe("07:00")
+    await act(async () => from?.dispatchEvent(new FocusEvent("focusout", { bubbles: true })))
+    await settle()
+    expect(fixture.mutations).toHaveLength(3)
+  })
+
   it("keeps the saved display and marks it busy while controls accept further intents", async () => {
     const fixture = await openStage()
     const release = fixture.holdNextSave()

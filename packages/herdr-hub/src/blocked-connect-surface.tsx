@@ -67,8 +67,9 @@ const QuietHours = ({
   }, [previousStart, previousEnd])
 
   const timeZone = settings.quietHours?.timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone
-  const commit = async (): Promise<void> => {
-    if (revision.current === settledRevision.current) return
+  // Enter reaffirms the visible pair over a queued Clear; blur and dismissal keep Clear's settlement.
+  const commit = async (explicit = false): Promise<void> => {
+    if (!explicit && revision.current === settledRevision.current) return
     const startMinute = timeMinute(start)
     const endMinute = timeMinute(end)
     if (startMinute === null || endMinute === null) return
@@ -82,6 +83,7 @@ const QuietHours = ({
       if (pending.current === null) settledRevision.current = revision.current
       return
     }
+    if (explicit) revision.current += 1
     const intent: QuietHoursIntent = { quietHours: { startMinute, endMinute, timeZone } }
     pending.current = intent
     const edited = revision.current
@@ -133,7 +135,7 @@ const QuietHours = ({
           onKeyDown={(event) => {
             if (event.key === "Enter" && !event.nativeEvent.isComposing) {
               event.preventDefault()
-              void commit()
+              void commit(true)
             }
           }}
         >
