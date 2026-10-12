@@ -19,6 +19,9 @@ import { createServer } from "node:net"
 import { join } from "node:path"
 import { env } from "node:process"
 
+/** Preserve the runner environment when a browser launch overrides LANG or other individual variables. */
+export const playwrightLaunchEnvironment = () => ({ ...env })
+
 /** The OS answered a port-0 listen without a TCP port. */
 export class PlaywrightPortError extends Data.TaggedError("PlaywrightPortError")<{ readonly address: string }> {}
 

@@ -273,7 +273,11 @@ describe("Connect stage across polls", () => {
     await act(async () =>
       root.render(
         <RegistryProvider>
-          <ConnectSurface atoms={makeConnectAtoms()} onStageChange={(target) => targets.push(target)} />
+          <ConnectSurface
+            atoms={makeConnectAtoms()}
+            onStageChange={(target) => targets.push(target)}
+            stageFooter={<p>Agent notification settings</p>}
+          />
         </RegistryProvider>
       )
     )
@@ -281,6 +285,7 @@ describe("Connect stage across polls", () => {
     await act(async () => host.querySelector<HTMLButtonElement>(".connect-agent")?.click())
     await settle()
     expect(targets.at(-1)).toEqual({ host: "SER8", id: "agent-reviewer" })
+    expect(document.querySelector("[role='dialog']")?.textContent).toContain("Agent notification settings")
     await act(async () => document.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Escape" })))
     await settle()
     expect(targets.at(-1)).toBeNull()

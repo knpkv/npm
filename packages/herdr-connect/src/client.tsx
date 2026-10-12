@@ -721,6 +721,8 @@ type ConnectSurfaceProps = {
   readonly roomFooter?: ReactNode
   /** Optional host observer for the live stage; archive stages never report a live identity. */
   readonly onStageChange?: (target: Pick<ConnectAgent, "host" | "id"> | null) => void
+  /** Optional application controls inside the open live stage; absent by default. */
+  readonly stageFooter?: ReactNode
 }
 
 /** URL-owned Active/Archived directory selection, shared with the containing hub's browser history. */
@@ -740,7 +742,13 @@ export const ConnectSurface = (props: ConnectSurfaceProps) => {
   )
 }
 
-const ActiveConnectSurface = ({ atoms, embedded = false, onStageChange, roomFooter }: ConnectSurfaceProps) => {
+const ActiveConnectSurface = ({
+  atoms,
+  embedded = false,
+  onStageChange,
+  roomFooter,
+  stageFooter
+}: ConnectSurfaceProps) => {
   const [activityFilter, setActivityFilter] = useAtom(atoms.activityFilter)
   const directory = useAtomValue(atoms.agents)
   const refreshDirectory = useAtomRefresh(atoms.agents)
@@ -1487,6 +1495,7 @@ const ActiveConnectSurface = ({ atoms, embedded = false, onStageChange, roomFoot
               stale={staleSince !== null}
             />
             <AgentStage
+              footer={stageFooter}
               agent={stageAgent}
               agents={agents}
               workSnapshots={currentWork}

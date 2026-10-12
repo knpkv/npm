@@ -2131,7 +2131,12 @@ esac
         JSON.stringify({ mutedAgents: [], quietHours: null })
       )
       expect(
-        (yield* Effect.promise(() => secureRequestBody(settingsUrl, pushHeaders, { method: "PUT", body: preferences })))
+        (yield* Effect.promise(() =>
+          secureRequestBody(settingsUrl, pushHeaders, {
+            method: "PATCH",
+            body: { _tag: "SetAgentMute", agent: preferences.mutedAgents[0], muted: true }
+          })
+        ))
           .status
       ).toBe(200)
       expect((yield* Effect.promise(() => secureRequestBody(settingsUrl, headers))).body.trim()).toBe(
@@ -2140,24 +2145,27 @@ esac
       expect(
         (yield* Effect.promise(() =>
           secureRequestBody(settingsUrl, { ...pushHeaders, origin: "https://foreign.example.test" }, {
-            method: "PUT",
-            body: preferences
+            method: "PATCH",
+            body: { _tag: "SetAgentMute", agent: preferences.mutedAgents[0], muted: true }
           })
         )).status
       ).toBe(403)
       expect(
         (yield* Effect.promise(() =>
           secureRequestBody(settingsUrl, pushHeaders, {
-            method: "PUT",
-            body: { ...preferences, quietHours: { startMinute: -1, endMinute: 300, timeZone: "America/New_York" } }
+            method: "PATCH",
+            body: {
+              _tag: "SetQuietHours",
+              quietHours: { startMinute: -1, endMinute: 300, timeZone: "America/New_York" }
+            }
           })
         )).status
       ).toBe(400)
       expect(
         (yield* Effect.promise(() =>
           secureRequestBody(settingsUrl, pushHeaders, {
-            method: "PUT",
-            body: { ...preferences, quietHours: { startMinute: 60, endMinute: 120, timeZone: "Invalid/Zone" } }
+            method: "PATCH",
+            body: { _tag: "SetQuietHours", quietHours: { startMinute: 60, endMinute: 120, timeZone: "Invalid/Zone" } }
           })
         )).status
       ).toBe(400)
@@ -2167,9 +2175,23 @@ esac
       }
       expect(
         (yield* Effect.promise(() =>
-          secureRequestBody(settingsUrl, pushHeaders, { method: "PUT", body: zonedPreferences })
+          secureRequestBody(settingsUrl, pushHeaders, {
+            method: "PATCH",
+            body: { _tag: "SetQuietHours", quietHours: zonedPreferences.quietHours }
+          })
         )).status
       ).toBe(200)
+      expect((yield* Effect.promise(() => secureRequestBody(settingsUrl, headers))).body.trim()).toBe(
+        JSON.stringify(zonedPreferences)
+      )
+      expect(
+        (yield* Effect.promise(() =>
+          secureRequestBody(settingsUrl, pushHeaders, {
+            method: "PUT",
+            body: preferences
+          })
+        )).status
+      ).not.toBe(200)
       expect((yield* Effect.promise(() => secureRequestBody(settingsUrl, headers))).body.trim()).toBe(
         JSON.stringify(zonedPreferences)
       )
