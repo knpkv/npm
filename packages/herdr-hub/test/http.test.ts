@@ -42,8 +42,9 @@ import {
   WorkStore
 } from "@knpkv/herdr-work"
 import type { RelayBackend } from "@knpkv/relay"
-import { Data, Deferred, Effect, Fiber, Layer, Ref, Result, Schema, Stream } from "effect"
+import { Clock, Data, Deferred, Effect, Fiber, Layer, Ref, Result, Schema, Stream } from "effect"
 import { HttpClient } from "effect/http"
+import { TestClock } from "effect/testing"
 import { build } from "esbuild"
 import { spawn } from "node:child_process"
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
@@ -2390,7 +2391,6 @@ esac
       machines: [{ host: "SER8", nodeId: "node-ser8" }],
       tailscaleCommand
     }
-    let observedAt = 0
     let present = true
     let partial = false
     const archiveOperations: HostOperations = {
@@ -2429,6 +2429,9 @@ esac
     }
     return Effect.scoped(Effect.gen(function*() {
       yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { force: true, recursive: true })))
+      // The HTTP runtime owns a live Clock; keep this simulated ten-minute absence inside its archive window.
+      const firstSeenAt = (yield* TestClock.withLive(Clock.currentTimeMillis)) - 600_003
+      let observedAt = firstSeenAt
       const store = yield* Effect.acquireRelease(
         JobStore.open(join(root, "jobs.sqlite")),
         (opened) => Effect.sync(() => opened.close())
@@ -2463,9 +2466,9 @@ esac
       expect((yield* page()).agents).toEqual([])
       expect((yield* get("/v1/connect/agents")).status).toBe(200)
       present = false
-      observedAt = 1
+      observedAt = firstSeenAt + 1
       yield* get("/v1/connect/agents")
-      observedAt = 300_001
+      observedAt = firstSeenAt + 300_001
       partial = true
       const partialDirectory = yield* get("/v1/connect/agents")
       expect(partialDirectory.status).toBe(200)
@@ -2476,10 +2479,10 @@ esac
       ).toEqual(["agent-staying"])
       expect((yield* page()).agents).toEqual([])
       partial = false
-      observedAt = 300_002
+      observedAt = firstSeenAt + 300_002
       yield* get("/v1/connect/agents")
       expect((yield* page()).agents).toEqual([])
-      observedAt = 600_002
+      observedAt = firstSeenAt + 600_002
       yield* get("/v1/connect/agents")
       expect((yield* page()).agents).toEqual([{
         host: "ser8",
@@ -2488,11 +2491,11 @@ esac
         kind: "codex",
         work: "project",
         state: "working",
-        firstSeenAt: 0,
-        closedAt: 600_002
+        firstSeenAt,
+        closedAt: firstSeenAt + 600_002
       }])
       const continuation = encodeURIComponent(
-        JSON.stringify({ host: "SER8", agentId: "agent-archive", closedAt: 600_002 })
+        JSON.stringify({ host: "SER8", agentId: "agent-archive", closedAt: firstSeenAt + 600_002 })
       )
       const afterLast = yield* get(`/v1/connect/archive?cursor=${continuation}`)
       expect(afterLast.status).toBe(200)
@@ -2517,7 +2520,7 @@ esac
       expect((yield* get("/v1/connect/archive")).status).toBe(403)
       writeFileSync(identityMode, "allowed")
       present = true
-      observedAt = 600_003
+      observedAt = firstSeenAt + 600_003
       yield* get("/v1/connect/agents")
       expect((yield* page()).agents).toEqual([])
     })).pipe(provideNodeServices)

@@ -124,7 +124,7 @@ const keyframes = (): Map<string, string> => {
 }
 
 describe("creature keyframes", () => {
-  it("scales only stale brow paths, never a live brow or the face group", () => {
+  it("scales only stale brow paths, with an identity reset for closed brows", () => {
     const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8")
     const browRules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
       .filter(([, selector]) => selector?.includes(".connect-creature-brow"))
@@ -132,8 +132,12 @@ describe("creature keyframes", () => {
     for (const [, selector, declarations] of browRules) {
       expect(declarations).not.toMatch(/\b(?:transform|skew)\s*:/)
       if (/\bscale\s*:/.test(declarations ?? "")) {
-        expect(selector?.trim()).toBe(".connect-creature[data-stale] .connect-creature-brow")
-        expect(declarations).toContain("scale: 1 0.45;")
+        if (selector?.trim() === ".connect-creature[data-closed] .connect-creature-brow") {
+          expect(/\bscale\s*:\s*([^;]+);/.exec(declarations ?? "")?.[1]).toBe("1")
+        } else {
+          expect(selector?.trim()).toBe(".connect-creature[data-stale] .connect-creature-brow")
+          expect(declarations).toContain("scale: 1 0.45;")
+        }
       }
     }
   })
