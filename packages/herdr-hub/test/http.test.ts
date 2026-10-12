@@ -2028,6 +2028,64 @@ esac
     ).pipe(provideNodeServices)
   })
 
+  it.effect("serves the first 256 configured hosts in config order when 257 machines exist", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const root = mkdtempSync(join(tmpdir(), "herdr-http-configured-hosts-"))
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { force: true, recursive: true })))
+      const tailscaleCommand = join(root, "tailscale-test")
+      const status = {
+        Peer: Object.fromEntries(Array.from({ length: 256 }, (_, index) => [
+          `node-${index + 1}`,
+          { HostName: `fixture-${index + 1}`, ID: `node-${index + 1}`, Online: false, TailscaleIPs: ["127.0.0.2"] }
+        ])),
+        Self: { HostName: "SER8", ID: "node-ser8", Online: true, TailscaleIPs: ["127.0.0.1"] }
+      }
+      writeFileSync(
+        tailscaleCommand,
+        `#!/bin/sh
+case "$1" in
+  ip) printf '%s\\n' '127.0.0.1' ;;
+  whois) printf '%s\\n' '{"Node":{"StableID":"node-ser8"},"UserProfile":{"LoginName":"owner@example.com"}}' ;;
+  status) printf '%s\\n' '${JSON.stringify(status)}' ;;
+esac
+`,
+        { mode: 0o700 }
+      )
+      const hostConfig: HostConfiguration = {
+        ...config(root),
+        host: "SER8",
+        crossHost: true,
+        approvalHub: { host: "SER8", nodeId: "node-ser8", url: "https://ser8.example.test:0/" },
+        approvalPort: 0,
+        approvalTls: directTls,
+        machines: [
+          { host: "SER8", nodeId: "node-ser8" },
+          ...Array.from({ length: 256 }, (_, index) => ({ host: `fixture-${index + 1}`, nodeId: `node-${index + 1}` }))
+        ],
+        tailscaleCommand
+      }
+      const store = yield* Effect.acquireRelease(
+        JobStore.open(join(root, "jobs.sqlite")),
+        (opened) => Effect.sync(() => opened.close())
+      )
+      const fleet = yield* makeFleetService({ approvalEnabled: true, host: hostConfig.host, operations, store })
+      const server = yield* Effect.acquireRelease(
+        Effect.promise(() => startHttpServer(hostConfig, fleet, assets, { terminalConnector: unusedTerminal })),
+        (running) => Effect.promise(running.close)
+      )
+      if (server.serveUrl === null) return yield* Effect.die("canonical listener fixture missing")
+      const response = yield* Effect.promise(() =>
+        secureRequestBody(`${server.serveUrl}/v1/connect/agents`, {
+          host: "ser8.example.test:0"
+        })
+      )
+      expect(response.status).toBe(200)
+      const page = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(FleetConnectAgentPage))(response.body)
+      expect(page.agents).toEqual([])
+      expect(page.hosts).toEqual(["SER8", ...Array.from({ length: 255 }, (_, index) => `fixture-${index + 1}`)])
+      expect(page.hosts).not.toContain("fixture-256")
+    })).pipe(provideNodeServices))
+
   it.effect("accepts host-bound voice and self-state only on the canonical listener, including sibling claims on the same host", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-http-posts-"))
     const tailscaleCommand = join(root, "tailscale-test")

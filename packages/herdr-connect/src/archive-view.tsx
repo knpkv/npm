@@ -18,6 +18,7 @@ import {
 } from "./archive-model.js"
 import type { ConnectAtoms } from "./client.js"
 import { Creature } from "./creature.js"
+import type { ConnectTimeoutError } from "./internal/read-deadline.js"
 import {
   ConnectDirectorySwitch,
   connectArchivedParentHref,
@@ -35,7 +36,11 @@ import {
 type ArchiveState =
   | { readonly _tag: "loading"; readonly page: ConnectArchivePage | null }
   | { readonly _tag: "ready"; readonly page: ConnectArchivePage }
-  | { readonly _tag: "failed"; readonly page: ConnectArchivePage | null; readonly error: ConnectArchiveLoadError }
+  | {
+      readonly _tag: "failed"
+      readonly page: ConnectArchivePage | null
+      readonly error: ConnectArchiveLoadError | ConnectTimeoutError
+    }
 
 /** Archive selection has no live-stage callback; parent links are drawn only for already loaded identities. */
 export const ConnectArchiveSurface = ({

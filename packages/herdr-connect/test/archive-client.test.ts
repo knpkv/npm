@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Effect, Schema } from "effect"
+import { Deferred, Effect, Fiber, Schema } from "effect"
 import { HttpClient, HttpClientError, HttpClientRequest, HttpClientResponse } from "effect/http"
+import { TestClock } from "effect/testing"
 import { loadConnectArchive } from "../src/archive-client.js"
 import { appendArchivePage, archiveCountCopy, archivedAgentKey, archiveMatchesQuery } from "../src/archive-model.js"
 import { ArchivedConnectAgent } from "../src/model.js"
@@ -48,6 +49,43 @@ describe("archive paging and search", () => {
 })
 
 describe("archive HTTP boundary", () => {
+  it.effect("a held archive request fails at ten seconds without restarting its deadline", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const started = yield* Deferred.make<void>()
+      const client = testClient(() => Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never)))
+      const fiber = yield* loadConnectArchive(null).pipe(
+        Effect.provideService(HttpClient.HttpClient, client),
+        Effect.flip,
+        Effect.forkScoped
+      )
+      yield* Deferred.await(started)
+      yield* TestClock.adjust("5 seconds")
+      expect(fiber.pollUnsafe()).toBeUndefined()
+      yield* TestClock.adjust("4999 millis")
+      expect(fiber.pollUnsafe()).toBeUndefined()
+      yield* TestClock.adjust("1 millis")
+      expect(fiber.pollUnsafe()).toMatchObject({ _tag: "Success", value: { _tag: "ConnectTimeoutError" } })
+    })))
+  it.effect("an archive response just below the deadline still succeeds", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const started = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const client = testClient((request) =>
+        Deferred.succeed(started, undefined).pipe(
+          Effect.andThen(Deferred.await(release)),
+          Effect.as(HttpClientResponse.fromWeb(request, Response.json(first)))
+        )
+      )
+      const fiber = yield* loadConnectArchive(null).pipe(
+        Effect.provideService(HttpClient.HttpClient, client),
+        Effect.forkScoped
+      )
+      yield* Deferred.await(started)
+      yield* TestClock.adjust("9999 millis")
+      expect(fiber.pollUnsafe()).toBeUndefined()
+      yield* Deferred.succeed(release, undefined)
+      expect(yield* Fiber.join(fiber)).toEqual(first)
+    })))
   it.effect("retains a typed transport failure for retry", () =>
     Effect.gen(function*() {
       const client = testClient((request) =>
@@ -61,9 +99,11 @@ describe("archive HTTP boundary", () => {
         Effect.provideService(HttpClient.HttpClient, client),
         Effect.flip
       )
-      expect(error._tag).toBe("ConnectArchiveLoadError")
-      expect(error.reason).toBe("network")
-      expect(error.cause).toHaveProperty("reason._tag", "TransportError")
+      expect(error).toMatchObject({
+        _tag: "ConnectArchiveLoadError",
+        reason: "network",
+        cause: { reason: { _tag: "TransportError" } }
+      })
     }))
   it.effect("requests exactly one page with the opaque encoded cursor", () =>
     Effect.gen(function*() {
@@ -88,9 +128,7 @@ describe("archive HTTP boundary", () => {
         Effect.provideService(HttpClient.HttpClient, client),
         Effect.flip
       )
-      expect(error._tag).toBe("ConnectArchiveLoadError")
-      expect(error.reason).toBe("status")
-      expect(error.cause).toBe(503)
+      expect(error).toMatchObject({ _tag: "ConnectArchiveLoadError", reason: "status", cause: 503 })
     }))
   for (
     const body of [{ agents: [{ name: "broken" }], nextCursor: null }, {
@@ -105,7 +143,7 @@ describe("archive HTTP boundary", () => {
           Effect.provideService(HttpClient.HttpClient, client),
           Effect.flip
         )
-        expect(error.reason).toBe("decode")
+        expect(error).toMatchObject({ _tag: "ConnectArchiveLoadError", reason: "decode" })
       }))
   }
 })
