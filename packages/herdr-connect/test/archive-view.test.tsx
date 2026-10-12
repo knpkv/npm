@@ -177,3 +177,39 @@ describe("archived application navigation", () => {
     }
   }
 })
+
+describe("archive shortcuts for embedders retaining hidden mounts", () => {
+  for (const attribute of ["hidden", "inert", "aria-hidden"]) {
+    for (const modifier of ["control", "meta"]) {
+      it(`leaves ${modifier}+K uncancelled behind ${attribute}, while the visible archive owns its shortcut`, async () => {
+        const host = await mount(true)
+        const search = host.querySelector<HTMLInputElement>("#connect-agent-search")
+        expect(search).not.toBeNull()
+        const outside = document.createElement("button")
+        outside.textContent = "Other module"
+        document.body.append(outside)
+        const press = () => {
+          const event = new KeyboardEvent("keydown", {
+            key: "k",
+            ctrlKey: modifier === "control",
+            metaKey: modifier === "meta",
+            bubbles: true,
+            cancelable: true
+          })
+          outside.dispatchEvent(event)
+          return event
+        }
+        outside.focus()
+        expect(press().defaultPrevented).toBe(true)
+        expect(document.activeElement).toBe(search)
+        outside.focus()
+        host.setAttribute(attribute, attribute === "aria-hidden" ? "true" : "")
+        expect(press().defaultPrevented).toBe(false)
+        expect(document.activeElement).toBe(outside)
+        host.removeAttribute(attribute)
+        expect(press().defaultPrevented).toBe(true)
+        expect(document.activeElement).toBe(search)
+      })
+    }
+  }
+})

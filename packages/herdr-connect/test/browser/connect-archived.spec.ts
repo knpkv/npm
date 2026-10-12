@@ -143,11 +143,42 @@ const archiveRoute = (page: Page, data: ConnectArchivePage) =>
 
 /** A closed creature has fully shut apertures and no visible state ring or animation, even with motion allowed. */
 const expectClosed = async (creature: Locator) => {
+  await expect(creature).toHaveAttribute("data-closed", "")
   const appearance = await creature.evaluate((svg) => {
     const style = getComputedStyle(svg)
     const upper = Number.parseFloat(style.getPropertyValue("--connect-creature-lid"))
     const lower = Number.parseFloat(style.getPropertyValue("--connect-creature-lid-low"))
+    const isStyleRule = (rule: CSSRule): rule is CSSStyleRule => rule.type === CSSRule.STYLE_RULE
+    const isMediaRule = (rule: CSSRule): rule is CSSMediaRule => rule.type === CSSRule.MEDIA_RULE
+    const isSupportsRule = (rule: CSSRule): rule is CSSSupportsRule => rule.type === CSSRule.SUPPORTS_RULE
+    const isGroupingRule = (rule: CSSRule): rule is CSSGroupingRule => "cssRules" in rule
+    const liveRules = (rules: CSSRuleList): ReadonlyArray<CSSStyleRule> =>
+      [...rules].flatMap((rule) => {
+        if (isMediaRule(rule) && !matchMedia(rule.conditionText).matches) return []
+        if (isSupportsRule(rule) && !CSS.supports(rule.conditionText)) return []
+        if (isStyleRule(rule)) {
+          const animation = rule.style.getPropertyValue("animation") || rule.style.getPropertyValue("animation-name")
+          return rule.selectorText.includes("connect-creature") && animation.includes("connect-creature-")
+            ? [rule]
+            : []
+        }
+        return isGroupingRule(rule) ? liveRules(rule.cssRules) : []
+      })
+    const activeLiveRules = [...document.styleSheets].flatMap((sheet) => {
+      if (sheet.disabled || (sheet.media.length > 0 && !matchMedia(sheet.media.mediaText).matches)) return []
+      return liveRules(sheet.cssRules)
+    })
+    const parts = [svg, ...svg.querySelectorAll("*")]
     return {
+      motionAllowed: matchMedia("(prefers-reduced-motion: no-preference)").matches,
+      liveRuleCount: activeLiveRules.length,
+      // The later fleet-layer reset can hide live selectors matching closed parts. Guard their scope too.
+      matchingLiveRules: activeLiveRules.filter((rule) => parts.some((part) => part.matches(rule.selectorText))).map(
+        (rule) => ({
+          selector: rule.selectorText,
+          animation: rule.style.getPropertyValue("animation") || rule.style.getPropertyValue("animation-name")
+        })
+      ),
       animationCount: svg.getAnimations({ subtree: true }).length,
       animationNames: [
         ...svg.querySelectorAll(".connect-creature-breath, .connect-creature-bob, .connect-creature-lid")
@@ -167,6 +198,8 @@ const expectClosed = async (creature: Locator) => {
       lashes: [...svg.querySelectorAll(".connect-creature-lash")].map((lash) => Number(getComputedStyle(lash).opacity))
     }
   })
+  if (appearance.motionAllowed) expect(appearance.liveRuleCount).toBeGreaterThan(0)
+  expect(appearance.matchingLiveRules, "Live animation selectors must exclude closed SVG parts").toEqual([])
   expect(appearance.animationCount).toBe(0)
   for (const part of appearance.motionParts) expect(part.count, part.selector).toBeGreaterThan(0)
   // Each eye has two aperture lids; visible lid groups may add more without changing the stillness contract.
@@ -179,6 +212,41 @@ const expectClosed = async (creature: Locator) => {
 }
 
 for (const theme of ["light", "dark"]) {
+  for (const modifier of ["Control", "Meta"]) {
+    test(`defensively leaves ${modifier}+K to embedders retaining Archived in a hidden mount, ${theme}`, async ({ page }) => {
+      await prepare(page, 390, theme)
+      await archiveRoute(page, pageOf(records))
+      await mount(page, theme)
+      await expect(rows(page)).toHaveCount(records.length)
+      // The canonical hub unmounts inactive Connect. This fixture models a different embedder retaining it.
+      await page.locator("#fleet-connect-root").evaluate((root) => {
+        root.setAttribute("hidden", "")
+        const module = document.createElement("section")
+        const button = document.createElement("button")
+        button.textContent = "Other module"
+        const search = document.createElement("input")
+        search.setAttribute("aria-label", "Embedding shell search")
+        module.append(button, search)
+        document.body.append(module)
+        // A shell's window listener receives the event after the archive's document listener.
+        window.addEventListener("keydown", (event) => {
+          if (!event.defaultPrevented && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+            event.preventDefault()
+            search.focus()
+          }
+        })
+      })
+      await expect(page.locator(".connect-archive-shell")).toBeHidden()
+      await page.getByRole("button", { name: "Other module", exact: true }).focus()
+      await page.keyboard.press(`${modifier}+k`)
+      await expect(page.getByRole("textbox", { name: "Embedding shell search", exact: true })).toBeFocused()
+      await page.locator("#fleet-connect-root").evaluate((root) => root.removeAttribute("hidden"))
+      await page.getByRole("button", { name: "Other module", exact: true }).focus()
+      await page.keyboard.press(`${modifier}+k`)
+      await expect(page.locator("#connect-agent-search")).toBeFocused()
+    })
+  }
+
   test(`closed working, waiting and finished creatures stay shut and still with motion allowed, ${theme}`, async ({ page }) => {
     await prepare(page, 390, theme)
     const fixtures = ["working", "waiting", "done"].map((state) =>

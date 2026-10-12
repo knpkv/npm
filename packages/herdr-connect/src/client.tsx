@@ -725,6 +725,8 @@ type ConnectSurfaceProps = {
 
 /** URL-owned Active/Archived directory selection, shared with the containing hub's browser history. */
 export const ConnectSurface = (props: ConnectSurfaceProps) => {
+  // Inventory reads also drive archive observation while the live directory is not shown.
+  useAtomMount(props.atoms.agentsPoll)
   const locationSearch = useConnectDirectoryLocation()
   return new URLSearchParams(locationSearch).get("view") === "archived" ? (
     <ConnectArchiveSurface
@@ -835,7 +837,6 @@ const ActiveConnectSurface = ({ atoms, embedded = false, onStageChange, roomFoot
   const [terminalPositionUnconfirmed, setTerminalPositionUnconfirmed] = useState(false)
   const [terminalTextLines, setTerminalTextLines] = useState<ReadonlyArray<string> | null>(null)
   const [workspaceFocusFailure, setWorkspaceFocusFailure] = useState<ConnectWorkspaceFocusFailureReason | null>(null)
-  useAtomMount(atoms.agentsPoll)
   useAtomMount(atoms.limitsPoll)
   // A host API at the UI boundary, compared only with this page's own receipt time.
   const limits = limitsState(useAtomValue(atoms.limits), Date.now())

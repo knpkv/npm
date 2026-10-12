@@ -19,6 +19,7 @@ window.IS_REACT_ACT_ENVIRONMENT = true
 
 const roots: Array<Root> = []
 let agentsBody = ""
+const inventoryReads: Array<string> = []
 const originalFetch = window.fetch
 const emptyWindow = (window: "day" | "month" | "now" | "week") => ({
   asOf: 1_000,
@@ -47,8 +48,10 @@ const reviewer = {
 window.fetch = async (input) => {
   const url = Predicate.isString(input) ? input : "href" in input ? input.href : input.url
   const path = new URL(url, "http://localhost").pathname
-  if (path === "/v1/connect/agents")
+  if (path === "/v1/connect/agents") {
+    inventoryReads.push(agentsBody)
     return new Response(agentsBody, { headers: { "content-type": "application/json" } })
+  }
   if (path === "/v1/connect/archive")
     return Response.json({
       agents: [
@@ -77,6 +80,7 @@ afterEach(async () => {
     for (const root of roots) root.unmount()
   })
   roots.length = 0
+  inventoryReads.length = 0
   document.body.replaceChildren()
   window.localStorage.clear()
   window.history.replaceState(null, "", "/")
@@ -93,6 +97,48 @@ const settle = async (milliseconds = 0): Promise<void> => {
 const stageOpen = (): boolean => document.querySelector("[role='dialog']") !== null
 
 describe("Connect stage across polls", () => {
+  it("keeps inventory reads running through closure confirmation while Archived is shown", async () => {
+    vi.useFakeTimers()
+    agentsBody = listed([reviewer])
+    const host = document.createElement("div")
+    document.body.append(host)
+    const root = createRoot(host)
+    roots.push(root)
+    await act(async () =>
+      root.render(
+        <RegistryProvider>
+          <ConnectSurface atoms={makeConnectAtoms()} />
+        </RegistryProvider>
+      )
+    )
+    await settle()
+    expect(host.querySelector(".connect-agent")).not.toBeNull()
+    await act(async () =>
+      host.querySelector<HTMLAnchorElement>(".connect-directory-switch a[href*='view=archived']")?.click()
+    )
+    await settle()
+    expect(host.querySelector(".connect-archive-directory")).not.toBeNull()
+    agentsBody = listed([])
+    const initialReads = inventoryReads.length
+    await settle(5_000)
+    expect(inventoryReads.length).toBeGreaterThan(initialReads)
+    expect(inventoryReads.at(-1)).toBe(listed([]))
+    const missingReads = inventoryReads.length
+    await settle(300_000)
+    expect(inventoryReads.length).toBeGreaterThan(missingReads)
+    expect(inventoryReads.at(-1)).toBe(listed([]))
+    agentsBody = listed([reviewer])
+    const returningReads = inventoryReads.length
+    await settle(5_000)
+    expect(inventoryReads.length).toBeGreaterThan(returningReads)
+    expect(inventoryReads.at(-1)).toBe(listed([reviewer]))
+    await act(async () =>
+      host.querySelector<HTMLAnchorElement>(".connect-directory-switch a:not([aria-current])")?.click()
+    )
+    await settle()
+    expect(host.querySelector(".connect-agent")?.textContent).toContain("Review worker")
+  })
+
   it("clears the URL selection and notifies its history owner when a linked archived stage closes", async () => {
     agentsBody = listed([])
     window.history.replaceState(null, "", "/?module=connect&embedded&view=archived#details")

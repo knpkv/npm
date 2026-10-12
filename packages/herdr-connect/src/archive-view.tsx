@@ -62,9 +62,12 @@ export const ConnectArchiveSurface = ({
   const activeAgents = Option.isSome(activeSnapshot) ? activeSnapshot.value.agents : []
   useEffect(() => {
     const focusSearch = (event: KeyboardEvent): void => {
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k" && search.current !== null) {
+      const field = search.current
+      // Embedders may retain an inactive surface; its shortcut must leave the shell's event uncancelled.
+      if (field === null || field.closest('[hidden], [inert], [aria-hidden="true"]') !== null) return
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
         event.preventDefault()
-        search.current.focus()
+        field.focus()
       }
     }
     document.addEventListener("keydown", focusSearch)
