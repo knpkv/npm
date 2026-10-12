@@ -2,6 +2,26 @@
 
 Released as `@knpkv/herdr-approvals` up to 0.18.0; the headings below are that package's history.
 
+## 0.33.1
+
+### Patch Changes
+
+- Updated dependencies [[`463a39f`](https://github.com/knpkv/npm/commit/463a39fac06cd41205b4733ccce9a1649c852093)]:
+  - @knpkv/herdr-connect@0.20.0
+
+## 0.33.0
+
+### Minor Changes
+
+- [#852](https://github.com/knpkv/npm/pull/852) [`fd8fb68`](https://github.com/knpkv/npm/commit/fd8fb68c95cbb05ef206bf8e92683cc5f4023a71) Thanks [@konopkov](https://github.com/konopkov)! - Add stage notification controls for per-agent mutes and quiet hours in the user's time zone. Keep the last saved settings after failed changes and link devices with notifications off to Approvals. Let applications supply stage controls through the optional `ConnectSurface.stageFooter` prop. Render the muted notification status as one sentence matching the design.
+
+  Replace full-snapshot `PUT /v1/push/blocked-settings` with atomic `PATCH` intents for one agent's mute or quiet hours, so a stale device cannot overwrite another device's preferences. Queue mute toggles and quiet-hour reversions against their latest intended values. Enter after a queued Clear saves the visible time pair as the final intent without duplicate saves. Save valid drafts on backdrop and Close dismissal while keeping Escape as cancel. Preserve keyboard focus while editing times, and show devices with stale subscription keys as off until Approvals reconciles them.
+
+### Patch Changes
+
+- Updated dependencies [[`fd8fb68`](https://github.com/knpkv/npm/commit/fd8fb68c95cbb05ef206bf8e92683cc5f4023a71)]:
+  - @knpkv/herdr-connect@0.19.0
+
 ## 0.32.0
 
 ### Minor Changes

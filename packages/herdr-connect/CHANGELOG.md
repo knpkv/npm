@@ -1,5 +1,25 @@
 # @knpkv/herdr-connect
 
+## 0.20.1
+
+### Patch Changes
+
+- [#864](https://github.com/knpkv/npm/pull/864) [`1823277`](https://github.com/knpkv/npm/commit/18232777eb388e16f75b2fed6b2445c1a4c10a71) Thanks [@konopkov](https://github.com/konopkov)! - Restore the Connect directory after a stable agent moves panes. A strictly newer trusted inventory observation can update its pane while preserving the same parent and relation, in the existing batch transaction. Keep stale, equal-time and durable observations from moving ownership, and log local inventory failures with only a step, validated agent ID and reason.
+
+## 0.20.0
+
+### Minor Changes
+
+- [#853](https://github.com/knpkv/npm/pull/853) [`463a39f`](https://github.com/knpkv/npm/commit/463a39fac06cd41205b4733ccce9a1649c852093) Thanks [@konopkov](https://github.com/konopkov)! - Add the URL-addressable Archived directory with bounded paging, loaded-record search, read-only closure details and static closed creatures.
+
+## 0.19.0
+
+### Minor Changes
+
+- [#852](https://github.com/knpkv/npm/pull/852) [`fd8fb68`](https://github.com/knpkv/npm/commit/fd8fb68c95cbb05ef206bf8e92683cc5f4023a71) Thanks [@konopkov](https://github.com/konopkov)! - Add stage notification controls for per-agent mutes and quiet hours in the user's time zone. Keep the last saved settings after failed changes and link devices with notifications off to Approvals. Let applications supply stage controls through the optional `ConnectSurface.stageFooter` prop. Render the muted notification status as one sentence matching the design.
+
+  Replace full-snapshot `PUT /v1/push/blocked-settings` with atomic `PATCH` intents for one agent's mute or quiet hours, so a stale device cannot overwrite another device's preferences. Queue mute toggles and quiet-hour reversions against their latest intended values. Enter after a queued Clear saves the visible time pair as the final intent without duplicate saves. Save valid drafts on backdrop and Close dismissal while keeping Escape as cancel. Preserve keyboard focus while editing times, and show devices with stale subscription keys as off until Approvals reconciles them.
+
 ## 0.18.0
 
 ### Minor Changes

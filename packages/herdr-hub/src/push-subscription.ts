@@ -27,6 +27,19 @@ export const validatePushEndpoint = (
     )
   )
 
+/** Decode the configured public key for native subscription comparison and acquisition. */
+export const applicationServerKey = (encoded: string): ArrayBuffer => {
+  const padding = "=".repeat((4 - (encoded.length % 4)) % 4)
+  const base64 = encoded.replaceAll("-", "+").replaceAll("_", "/") + padding
+  const bytes = atob(base64)
+  const buffer = new ArrayBuffer(bytes.length)
+  const view = new Uint8Array(buffer)
+  for (let index = 0; index < bytes.length; index += 1) {
+    view[index] = bytes.charCodeAt(index)
+  }
+  return buffer
+}
+
 export interface OwnedPushSubscription {
   readonly unsubscribe: () => Promise<boolean>
 }
@@ -37,7 +50,8 @@ export interface CurrentPushSubscription extends OwnedPushSubscription {
   }
 }
 
-const applicationServerKeysEqual = (
+/** Compare native subscription key bytes with the configured VAPID public key. */
+export const applicationServerKeysEqual = (
   current: ArrayBuffer | null,
   expected: ArrayBuffer
 ): boolean => {

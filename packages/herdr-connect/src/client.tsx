@@ -77,6 +77,9 @@ import { ConnectAgentIdentity } from "./work-goal-link-view.js"
 import { resolveConnectWorkGoal, workSnapshotForAssociation, type ConnectWorkGoalResolution } from "./work-goal-link.js"
 import { WorkPollMount } from "./work-poll.js"
 import { limitsState, loadLimits } from "./fleet-reads-client.js"
+import { ConnectArchiveSurface } from "./archive-view.js"
+import { loadConnectArchive } from "./archive-client.js"
+import { ConnectDirectorySwitch, useConnectDirectoryLocation } from "./directory-view.js"
 import { ConnectLimits } from "./limits-view.js"
 import { ConnectHomeDirectory, connectHomePurpose } from "./home-directory.js"
 import { makeTerminalWorkerGuard } from "./terminal-worker-guard.js"
@@ -402,6 +405,7 @@ export const makeConnectAtoms = () => {
   const limits = browserRuntime.atom(loadLimits)
   return {
     activityFilter: Atom.make<AgentActivityFilter>("all"),
+    archivePage: browserRuntime.fn(loadConnectArchive),
     agents,
     // A pending read owns its deadline; polling must not interrupt and restart it every five seconds.
     agentsPoll: browserRuntime.atom(
@@ -721,19 +725,7 @@ const terminalWorker = (
     }).pipe(Effect.catch((error) => Effect.sync(() => update({ _tag: "failed", agent, detail: error.detail }))))
   )
 
-/**
- * Fleet is the default directory presentation. Home accepts a host-owned summary above its filters;
- * both presentations share the same directory reads, selection, stage, pins and terminal lifetime.
- * The presentation affects only directory content, never terminal input or motion ownership.
- */
-export const ConnectSurface = ({
-  active = true,
-  atoms,
-  embedded = false,
-  onStageChange,
-  presentation = { _tag: "fleet" },
-  roomFooter
-}: {
+type ConnectSurfaceProps = {
   /** Hides portal presentation and stage presence while retaining selection, polls and terminal ownership. */
   readonly active?: boolean
   readonly atoms: ConnectAtoms
@@ -741,9 +733,42 @@ export const ConnectSurface = ({
   readonly presentation?:
     { readonly _tag: "fleet" } | { readonly _tag: "home"; readonly summary?: ReactNode; readonly empty?: ReactNode }
   readonly roomFooter?: ReactNode
-  /** Optional host observer for the open stage identity; close and unmount report null. */
+  /** Optional host observer for the live stage; archive stages never report a live identity. */
   readonly onStageChange?: (target: Pick<ConnectAgent, "host" | "id"> | null) => void
-}) => {
+  /** Optional application controls inside the open live stage; absent by default. */
+  readonly stageFooter?: ReactNode
+}
+
+/**
+ * Fleet is the default directory presentation, with URL-owned Active/Archived selection.
+ * Home accepts host-owned summary and empty content. Both retain the same reads, selection,
+ * stage, pins and terminal lifetime; inactive portal presentation hides without dropping owners.
+ */
+export const ConnectSurface = (props: ConnectSurfaceProps) => {
+  // Inventory reads also drive archive observation while the live directory is not shown.
+  useAtomMount(props.atoms.agentsPoll)
+  const locationSearch = useConnectDirectoryLocation()
+  return props.presentation?._tag !== "home" && new URLSearchParams(locationSearch).get("view") === "archived" ? (
+    <ConnectArchiveSurface
+      atoms={props.atoms}
+      embedded={props.embedded ?? false}
+      locationSearch={locationSearch}
+      roomFooter={props.roomFooter}
+    />
+  ) : (
+    <ActiveConnectSurface {...props} />
+  )
+}
+
+const ActiveConnectSurface = ({
+  active = true,
+  atoms,
+  embedded = false,
+  onStageChange,
+  presentation = { _tag: "fleet" },
+  roomFooter,
+  stageFooter
+}: ConnectSurfaceProps) => {
   const fleetPresentation = presentation._tag === "fleet"
   const DirectoryView = fleetPresentation ? AgentDirectory : ConnectHomeDirectory
   const [activityFilter, setActivityFilter] = useAtom(atoms.activityFilter)
@@ -842,7 +867,6 @@ export const ConnectSurface = ({
   const [terminalPositionUnconfirmed, setTerminalPositionUnconfirmed] = useState(false)
   const [terminalTextLines, setTerminalTextLines] = useState<ReadonlyArray<string> | null>(null)
   const [workspaceFocusFailure, setWorkspaceFocusFailure] = useState<ConnectWorkspaceFocusFailureReason | null>(null)
-  useAtomMount(atoms.agentsPoll)
 
   const copyTerminalText = useCallback((text: string): void => {
     navigator.clipboard.writeText(text).then(
@@ -1386,23 +1410,43 @@ export const ConnectSurface = ({
 
   const directoryScreen = (
     <>
-      <header
-        className={fleetPresentation ? (embedded ? "connect-embedded-intro" : "connect-header") : "connect-home-intro"}
-      >
-        <Text as="h1" variant="card-title">
-          Connect
-          {!fleetPresentation || current === null ? null : <ConnectSummary agents={agents} unavailable={false} />}
-        </Text>
-        {fleetPresentation ? (
-          current === null ? (
-            <ConnectSummary agents={null} unavailable={directory._tag === "Failure"} />
-          ) : null
-        ) : (
+      {fleetPresentation ? (
+        <div className="connect-directory-heading">
+          <header
+            className={
+              embedded ? "connect-embedded-intro connect-directory-title" : "connect-header connect-directory-title"
+            }
+          >
+            <Text as="h1" variant="card-title">
+              Connect
+              {current === null ? null : <ConnectSummary agents={agents} unavailable={false} />}
+            </Text>
+            {current === null ? <ConnectSummary agents={null} unavailable={directory._tag === "Failure"} /> : null}
+            {updatedAt === null ? null : (
+              <small className="connect-updated" data-stale={staleSince === null ? undefined : "true"}>
+                {staleSince === null ? "Updated " : "Stale, last updated "}
+                <time dateTime={new Date(updatedAt).toISOString()}>
+                  {new Date(updatedAt).toLocaleTimeString([], {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                    second: "2-digit"
+                  })}
+                </time>
+              </small>
+            )}
+          </header>
+          <ConnectDirectorySwitch />
+        </div>
+      ) : (
+        <header className="connect-home-intro">
+          <Text as="h1" variant="card-title">
+            Connect
+          </Text>
           <Text as="p" tone="secondary">
             {connectHomePurpose}
           </Text>
-        )}
-      </header>
+        </header>
+      )}
       {fleetPresentation ||
       staleSince === null ||
       (presentation._tag === "home" && presentation.empty !== undefined) ? null : (
@@ -1473,14 +1517,6 @@ export const ConnectSurface = ({
             />
             <span>{connectWorkspaceFocusFailureMessage(connection.entryFocusFailure)}</span>
           </div>
-        )}
-        {updatedAt === null || !fleetPresentation ? null : (
-          <small className="connect-updated" data-stale={staleSince === null ? undefined : "true"}>
-            {staleSince === null ? "Updated " : "Stale, last updated "}
-            <time dateTime={new Date(updatedAt).toISOString()}>
-              {new Date(updatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
-            </time>
-          </small>
         )}
         {staleSince === null || directory._tag !== "Failure" || !fleetPresentation ? null : (
           <small className="connect-status-message" data-tone="caution">
@@ -1595,6 +1631,7 @@ export const ConnectSurface = ({
               stale={staleSince !== null}
             />
             <AgentStage
+              footer={stageFooter}
               agent={active ? stageAgent : null}
               presentation={presentation._tag}
               agents={agents}

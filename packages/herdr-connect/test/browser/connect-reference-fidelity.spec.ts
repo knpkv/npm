@@ -1135,6 +1135,9 @@ for (const width of [390, 1280]) {
           .screenshot({ path: testInfo.outputPath(`fidelity/connect-${state}-${String(width)}-${theme}.png`) })
         expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width + 2)
         if (state === "2a") {
+          await expect(page.locator("header .connect-directory-switch")).toHaveCount(0)
+          await expect(page.getByRole("link", { name: "Active", exact: true })).toHaveAttribute("aria-current", "page")
+          await expect(page.getByRole("link", { name: "Archived", exact: true })).toBeVisible()
           const title = page.getByRole("heading", { name: /Connect/ })
           await expect(title).toHaveText("Connect, 2 need you")
           const columns = await page

@@ -27,6 +27,12 @@ export interface CreatureProps {
   readonly statePolicy?: "fleet" | "home"
   /** The agent's host stopped answering: the last known state shows, without life. */
   readonly stale?: boolean
+  /**
+   * Defaults to false. In every size, closure keeps the seeded outline with a neutral tint, shut lids and
+   * lowered brows, and removes rings and all creature motion for the lifetime of this prop. It is static
+   * with either reduced-motion preference; clearing it resumes the current state's normal presentation.
+   */
+  readonly closed?: boolean
   /** It started needing you on this poll: it turns to you once. */
   readonly arrived?: boolean
   readonly size: CreatureSize
@@ -50,6 +56,7 @@ type Rig = Record<
 /** The agent's character, decorative and hidden from assistive technology. */
 export const Creature = ({
   arrived = false,
+  closed = false,
   host,
   id,
   size,
@@ -75,10 +82,12 @@ export const Creature = ({
     ry: row ? (height / 2) * enclosingScale : 46
   }
   // Pad the shorter axis symmetrically: a seeded aspect ratio must never enlarge the root's fixed slot.
-  const frameEdge = (2 * Math.max(ring.rx, ring.ry)) / (1 - rowStroke / rowTrack)
+  const frameEdge = closed
+    ? Math.max(width, height + 8) + 6
+    : (2 * Math.max(ring.rx, ring.ry)) / (1 - rowStroke / rowTrack)
   const stroke = (frameEdge * rowStroke) / rowTrack
   const frameLeft = 50 - frameEdge / 2
-  const frameTop = ring.cy - frameEdge / 2
+  const frameTop = (closed ? top + (height + 8) / 2 : ring.cy) - frameEdge / 2
   const eyes = [50 - character.eyeGap, 50 + character.eyeGap]
   const eyeY = character.eyeY
   const iris = Math.min(eyeWidth, eyeHeight) * IRIS_SHARE
@@ -137,6 +146,7 @@ export const Creature = ({
       className="connect-creature"
       data-arrived={arrived ? "" : undefined}
       data-bucket={presentation.bucket}
+      data-closed={closed ? "" : undefined}
       data-size={size}
       data-stale={stale ? "" : undefined}
       data-tone={presentation.tone}
@@ -148,9 +158,9 @@ export const Creature = ({
     >
       <defs>
         <radialGradient cx="38%" cy="30%" id={`${ref}-body`} r="80%">
-          <stop offset="0" stopColor={`oklch(0.86 0.12 ${String(light)})`} />
-          <stop offset="0.55" stopColor={`oklch(0.66 0.17 ${String(light)})`} />
-          <stop offset="1" stopColor={`oklch(0.46 0.17 ${String(mid)})`} />
+          <stop offset="0" stopColor={`oklch(0.86 ${closed ? "0.012" : "0.12"} ${String(light)})`} />
+          <stop offset="0.55" stopColor={`oklch(0.66 ${closed ? "0.016" : "0.17"} ${String(light)})`} />
+          <stop offset="1" stopColor={`oklch(0.46 ${closed ? "0.016" : "0.17"} ${String(mid)})`} />
         </radialGradient>
         {/* A gradient shadow: a blur filter on every row of a long list costs more. */}
         <radialGradient id={`${ref}-shadow`}>

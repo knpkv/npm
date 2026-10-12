@@ -42,8 +42,9 @@ import {
   WorkStore
 } from "@knpkv/herdr-work"
 import type { RelayBackend } from "@knpkv/relay"
-import { Data, Deferred, Effect, Fiber, Layer, Ref, Result, Schema, Stream } from "effect"
+import { Clock, Data, Deferred, Effect, Fiber, Layer, Ref, Result, Schema, Stream } from "effect"
 import { HttpClient } from "effect/http"
+import { TestClock } from "effect/testing"
 import { build } from "esbuild"
 import { spawn } from "node:child_process"
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
@@ -2027,6 +2028,64 @@ esac
     ).pipe(provideNodeServices)
   })
 
+  it.effect("serves the first 256 configured hosts in config order when 257 machines exist", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const root = mkdtempSync(join(tmpdir(), "herdr-http-configured-hosts-"))
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { force: true, recursive: true })))
+      const tailscaleCommand = join(root, "tailscale-test")
+      const status = {
+        Peer: Object.fromEntries(Array.from({ length: 256 }, (_, index) => [
+          `node-${index + 1}`,
+          { HostName: `fixture-${index + 1}`, ID: `node-${index + 1}`, Online: false, TailscaleIPs: ["127.0.0.2"] }
+        ])),
+        Self: { HostName: "SER8", ID: "node-ser8", Online: true, TailscaleIPs: ["127.0.0.1"] }
+      }
+      writeFileSync(
+        tailscaleCommand,
+        `#!/bin/sh
+case "$1" in
+  ip) printf '%s\\n' '127.0.0.1' ;;
+  whois) printf '%s\\n' '{"Node":{"StableID":"node-ser8"},"UserProfile":{"LoginName":"owner@example.com"}}' ;;
+  status) printf '%s\\n' '${JSON.stringify(status)}' ;;
+esac
+`,
+        { mode: 0o700 }
+      )
+      const hostConfig: HostConfiguration = {
+        ...config(root),
+        host: "SER8",
+        crossHost: true,
+        approvalHub: { host: "SER8", nodeId: "node-ser8", url: "https://ser8.example.test:0/" },
+        approvalPort: 0,
+        approvalTls: directTls,
+        machines: [
+          { host: "SER8", nodeId: "node-ser8" },
+          ...Array.from({ length: 256 }, (_, index) => ({ host: `fixture-${index + 1}`, nodeId: `node-${index + 1}` }))
+        ],
+        tailscaleCommand
+      }
+      const store = yield* Effect.acquireRelease(
+        JobStore.open(join(root, "jobs.sqlite")),
+        (opened) => Effect.sync(() => opened.close())
+      )
+      const fleet = yield* makeFleetService({ approvalEnabled: true, host: hostConfig.host, operations, store })
+      const server = yield* Effect.acquireRelease(
+        Effect.promise(() => startHttpServer(hostConfig, fleet, assets, { terminalConnector: unusedTerminal })),
+        (running) => Effect.promise(running.close)
+      )
+      if (server.serveUrl === null) return yield* Effect.die("canonical listener fixture missing")
+      const response = yield* Effect.promise(() =>
+        secureRequestBody(`${server.serveUrl}/v1/connect/agents`, {
+          host: "ser8.example.test:0"
+        })
+      )
+      expect(response.status).toBe(200)
+      const page = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(FleetConnectAgentPage))(response.body)
+      expect(page.agents).toEqual([])
+      expect(page.hosts).toEqual(["SER8", ...Array.from({ length: 255 }, (_, index) => `fixture-${index + 1}`)])
+      expect(page.hosts).not.toContain("fixture-256")
+    })).pipe(provideNodeServices))
+
   it.effect("accepts host-bound voice and self-state only on the canonical listener, including sibling claims on the same host", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-http-posts-"))
     const tailscaleCommand = join(root, "tailscale-test")
@@ -2130,7 +2189,12 @@ esac
         JSON.stringify({ mutedAgents: [], quietHours: null })
       )
       expect(
-        (yield* Effect.promise(() => secureRequestBody(settingsUrl, pushHeaders, { method: "PUT", body: preferences })))
+        (yield* Effect.promise(() =>
+          secureRequestBody(settingsUrl, pushHeaders, {
+            method: "PATCH",
+            body: { _tag: "SetAgentMute", agent: preferences.mutedAgents[0], muted: true }
+          })
+        ))
           .status
       ).toBe(200)
       expect((yield* Effect.promise(() => secureRequestBody(settingsUrl, headers))).body.trim()).toBe(
@@ -2139,24 +2203,27 @@ esac
       expect(
         (yield* Effect.promise(() =>
           secureRequestBody(settingsUrl, { ...pushHeaders, origin: "https://foreign.example.test" }, {
-            method: "PUT",
-            body: preferences
+            method: "PATCH",
+            body: { _tag: "SetAgentMute", agent: preferences.mutedAgents[0], muted: true }
           })
         )).status
       ).toBe(403)
       expect(
         (yield* Effect.promise(() =>
           secureRequestBody(settingsUrl, pushHeaders, {
-            method: "PUT",
-            body: { ...preferences, quietHours: { startMinute: -1, endMinute: 300, timeZone: "America/New_York" } }
+            method: "PATCH",
+            body: {
+              _tag: "SetQuietHours",
+              quietHours: { startMinute: -1, endMinute: 300, timeZone: "America/New_York" }
+            }
           })
         )).status
       ).toBe(400)
       expect(
         (yield* Effect.promise(() =>
           secureRequestBody(settingsUrl, pushHeaders, {
-            method: "PUT",
-            body: { ...preferences, quietHours: { startMinute: 60, endMinute: 120, timeZone: "Invalid/Zone" } }
+            method: "PATCH",
+            body: { _tag: "SetQuietHours", quietHours: { startMinute: 60, endMinute: 120, timeZone: "Invalid/Zone" } }
           })
         )).status
       ).toBe(400)
@@ -2166,9 +2233,23 @@ esac
       }
       expect(
         (yield* Effect.promise(() =>
-          secureRequestBody(settingsUrl, pushHeaders, { method: "PUT", body: zonedPreferences })
+          secureRequestBody(settingsUrl, pushHeaders, {
+            method: "PATCH",
+            body: { _tag: "SetQuietHours", quietHours: zonedPreferences.quietHours }
+          })
         )).status
       ).toBe(200)
+      expect((yield* Effect.promise(() => secureRequestBody(settingsUrl, headers))).body.trim()).toBe(
+        JSON.stringify(zonedPreferences)
+      )
+      expect(
+        (yield* Effect.promise(() =>
+          secureRequestBody(settingsUrl, pushHeaders, {
+            method: "PUT",
+            body: preferences
+          })
+        )).status
+      ).not.toBe(200)
       expect((yield* Effect.promise(() => secureRequestBody(settingsUrl, headers))).body.trim()).toBe(
         JSON.stringify(zonedPreferences)
       )
@@ -2368,7 +2449,6 @@ esac
       machines: [{ host: "SER8", nodeId: "node-ser8" }],
       tailscaleCommand
     }
-    let observedAt = 0
     let present = true
     let partial = false
     const archiveOperations: HostOperations = {
@@ -2407,6 +2487,9 @@ esac
     }
     return Effect.scoped(Effect.gen(function*() {
       yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { force: true, recursive: true })))
+      // The HTTP runtime owns a live Clock; keep this simulated ten-minute absence inside its archive window.
+      const firstSeenAt = (yield* TestClock.withLive(Clock.currentTimeMillis)) - 600_003
+      let observedAt = firstSeenAt
       const store = yield* Effect.acquireRelease(
         JobStore.open(join(root, "jobs.sqlite")),
         (opened) => Effect.sync(() => opened.close())
@@ -2441,9 +2524,9 @@ esac
       expect((yield* page()).agents).toEqual([])
       expect((yield* get("/v1/connect/agents")).status).toBe(200)
       present = false
-      observedAt = 1
+      observedAt = firstSeenAt + 1
       yield* get("/v1/connect/agents")
-      observedAt = 300_001
+      observedAt = firstSeenAt + 300_001
       partial = true
       const partialDirectory = yield* get("/v1/connect/agents")
       expect(partialDirectory.status).toBe(200)
@@ -2454,10 +2537,10 @@ esac
       ).toEqual(["agent-staying"])
       expect((yield* page()).agents).toEqual([])
       partial = false
-      observedAt = 300_002
+      observedAt = firstSeenAt + 300_002
       yield* get("/v1/connect/agents")
       expect((yield* page()).agents).toEqual([])
-      observedAt = 600_002
+      observedAt = firstSeenAt + 600_002
       yield* get("/v1/connect/agents")
       expect((yield* page()).agents).toEqual([{
         host: "ser8",
@@ -2466,11 +2549,11 @@ esac
         kind: "codex",
         work: "project",
         state: "working",
-        firstSeenAt: 0,
-        closedAt: 600_002
+        firstSeenAt,
+        closedAt: firstSeenAt + 600_002
       }])
       const continuation = encodeURIComponent(
-        JSON.stringify({ host: "SER8", agentId: "agent-archive", closedAt: 600_002 })
+        JSON.stringify({ host: "SER8", agentId: "agent-archive", closedAt: firstSeenAt + 600_002 })
       )
       const afterLast = yield* get(`/v1/connect/archive?cursor=${continuation}`)
       expect(afterLast.status).toBe(200)
@@ -2495,7 +2578,7 @@ esac
       expect((yield* get("/v1/connect/archive")).status).toBe(403)
       writeFileSync(identityMode, "allowed")
       present = true
-      observedAt = 600_003
+      observedAt = firstSeenAt + 600_003
       yield* get("/v1/connect/agents")
       expect((yield* page()).agents).toEqual([])
     })).pipe(provideNodeServices)

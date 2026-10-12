@@ -2,7 +2,7 @@ import { NodeHttpClient, NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
 import type { HostConfiguration, HostOperations } from "@knpkv/herdr-fleet"
 import { fleetResponseBodyMaxBytes, JobStore, makeFleetService } from "@knpkv/herdr-fleet"
-import { Effect, Fiber, Option, Result, Schedule, Schema, Stream } from "effect"
+import { Effect, Fiber, Logger, Option, Result, Schedule, Schema, Stream } from "effect"
 import * as HttpClient from "effect/http/HttpClient"
 import * as HttpClientResponse from "effect/http/HttpClientResponse"
 import { TestClock } from "effect/testing"
@@ -541,6 +541,66 @@ describe("Connect public seams", () => {
     )
   })
 
+  it.effect("refuses older, equal-time and durable same-id pane moves without mutation", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-relationship-pane-move-guards-"))
+    const original = Schema.decodeUnknownSync(PersistedConnectAgentMetadata)({
+      agentId: "agent-moving-root",
+      host: "SER8",
+      observedAt: 2_000,
+      paneId: "w1:p1"
+    })
+    return Effect.scoped(Effect.gen(function*() {
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { force: true, recursive: true })))
+      const store = yield* Effect.acquireRelease(
+        AgentRelationshipStore.open(join(root, "relationships.sqlite")),
+        (opened) => Effect.sync(() => opened.close())
+      )
+      yield* store.persist(original, "trusted_live_inventory")
+      for (const observedAt of [1_999, 2_000]) {
+        expect(
+          yield* Effect.result(store.persist({ ...original, observedAt, paneId: "w2:p2" }, "trusted_live_inventory"))
+        )
+          .toMatchObject({ failure: { reason: "ambiguous_ownership" } })
+      }
+      expect(yield* Effect.result(store.persist({ ...original, observedAt: 3_000, paneId: "w2:p2" }, "durable_worker")))
+        .toMatchObject({ failure: { reason: "ambiguous_ownership" } })
+      expect(yield* store.list()).toEqual([original])
+    })).pipe(provideNodeServices)
+  })
+
+  it.effect("rolls a newer trusted pane move back with the rest of a rejected relationship batch", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-relationship-pane-move-rollback-"))
+    const original = Schema.decodeUnknownSync(PersistedConnectAgentMetadata)({
+      agentId: "agent-moving-root",
+      host: "SER8",
+      observedAt: 1_000,
+      paneId: "w1:p1"
+    })
+    return Effect.scoped(Effect.gen(function*() {
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { force: true, recursive: true })))
+      const store = yield* Effect.acquireRelease(
+        AgentRelationshipStore.open(join(root, "relationships.sqlite")),
+        (opened) => Effect.sync(() => opened.close())
+      )
+      yield* store.persist(original, "trusted_live_inventory")
+      const result = yield* Effect.result(store.persistAll([
+        { metadata: { ...original, observedAt: 2_000, paneId: "w2:p2" }, source: "trusted_live_inventory" },
+        {
+          metadata: {
+            agentId: "agent-cycle",
+            host: "SER8",
+            observedAt: 2_000,
+            paneId: "w2:p3",
+            relationship: { parentAgentId: "agent-cycle", relation: "review" }
+          },
+          source: "trusted_live_inventory"
+        }
+      ]))
+      expect(result).toMatchObject({ failure: { reason: "cyclic" } })
+      expect(yield* store.list()).toEqual([original])
+    })).pipe(provideNodeServices)
+  })
+
   it.effect("refuses a newer reparent that substitutes the pane", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-relationship-pane-substitution-test-"))
     const path = join(root, "relationships.sqlite")
@@ -815,6 +875,110 @@ describe("Connect public seams", () => {
         })
     ).pipe(provideNodeServices)
   })
+
+  it.effect("loads a root moved to a new pane by newer trusted inventory without changing another id's retained row", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-directory-pane-move-"))
+    const original = Schema.decodeUnknownSync(PersistedConnectAgentMetadata)({
+      agentId: "agent-moving-root",
+      host: "SER8",
+      observedAt: 1_000,
+      paneId: "w1:p1"
+    })
+    const retained = { ...original, agentId: "agent-retained-root" }
+    const source: AgentSource = {
+      agents: () =>
+        Effect.succeed({
+          available: true,
+          error: null,
+          agents: [{
+            activityRevision: 1,
+            agentId: original.agentId,
+            kind: "worker",
+            name: "Moving root",
+            paneId: "w2:p2",
+            parentAgentId: null,
+            relation: null,
+            status: "working",
+            work: "project"
+          }]
+        }),
+      workers: () => Effect.succeed([])
+    }
+    return Effect.scoped(Effect.gen(function*() {
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { force: true, recursive: true })))
+      const activity = yield* Effect.acquireRelease(
+        AgentActivityStore.open(join(root, "activity.sqlite")),
+        (store) => Effect.sync(() => store.close())
+      )
+      const relationships = yield* Effect.acquireRelease(
+        AgentRelationshipStore.open(join(root, "relationships.sqlite")),
+        (store) => Effect.sync(() => store.close())
+      )
+      yield* relationships.persist(original, "trusted_live_inventory")
+      // Version three permits distinct historical stable identities to retain one pane.
+      expect(yield* relationships.persist(retained, "trusted_live_inventory")).toEqual(retained)
+      const directory = yield* localConnectAgents(hostConfiguration(root), source, activity, relationships, 2_000)
+      expect(directory.agents).toHaveLength(1)
+      expect(directory.agents[0]).toMatchObject({ id: original.agentId, name: "Moving root" })
+      expect(directory.agents[0]?.relationship).toBeUndefined()
+      expect(yield* relationships.list()).toEqual([
+        { ...original, paneId: "w2:p2", observedAt: 2_000 },
+        retained
+      ])
+    })).pipe(provideNodeServices)
+  })
+
+  for (const malformedWork of [false, true]) {
+    it.effect(`logs one safe step, stable id and reason for ${malformedWork ? "decoding" : "relationship"} failure`, () => {
+      const root = mkdtempSync(join(tmpdir(), "herdr-directory-safe-diagnostic-"))
+      const messages: Array<unknown> = []
+      const logger = Logger.make<unknown, void>((entry) => {
+        messages.push(entry.message)
+      })
+      const source: AgentSource = {
+        agents: () =>
+          Effect.succeed({
+            available: true,
+            error: null,
+            agents: [{
+              activityRevision: 1,
+              agentId: "agent-diagnostic",
+              kind: "worker",
+              name: "PROMPT_SENTINEL",
+              paneId: "w1:p1",
+              parentAgentId: malformedWork ? null : "agent-diagnostic",
+              relation: malformedWork ? null : "review",
+              status: "working",
+              work: malformedWork ? "" : "project"
+            }]
+          }),
+        workers: () => Effect.succeed([])
+      }
+      return Effect.scoped(Effect.gen(function*() {
+        yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { force: true, recursive: true })))
+        const activity = yield* Effect.acquireRelease(
+          AgentActivityStore.open(join(root, "activity.sqlite")),
+          (store) => Effect.sync(() => store.close())
+        )
+        const relationships = yield* Effect.acquireRelease(
+          AgentRelationshipStore.open(join(root, "relationships.sqlite")),
+          (store) => Effect.sync(() => store.close())
+        )
+        const result = yield* Effect.result(
+          localConnectAgents(hostConfiguration(root), source, activity, relationships, 2_000)
+        )
+          .pipe(Effect.withLogger(logger))
+        const diagnostic = {
+          step: malformedWork ? "decode_inventory" : "persist_relationships",
+          agentId: "agent-diagnostic",
+          reason: malformedWork ? "SchemaError" : "cyclic"
+        }
+        expect(messages).toEqual([["Connect.local_inventory_failed", diagnostic]])
+        expect(result).toMatchObject({ failure: { reason: "invalid_response", cause: diagnostic } })
+        expect(JSON.stringify(messages)).not.toContain("PROMPT_SENTINEL")
+      })).pipe(provideNodeServices)
+    })
+  }
 
   it.effect("projects a configured dotted hostname into live agents", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-directory-hostname-test-"))

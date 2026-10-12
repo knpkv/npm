@@ -328,9 +328,10 @@ describe("blocked agent notifications", () => {
       Effect.gen(function*() {
         const test = yield* setup()
         yield* test.store.observe({ host: "HOST-A", complete: true, observedAt: 0, agents: [agent("blocked")] })
-        yield* test.store.putSettings("other@example.test", {
-          mutedAgents: [{ host: "HOST-A", agentId: "agent-one" }],
-          quietHours: null
+        yield* test.store.mutateSettings("other@example.test", {
+          _tag: "SetAgentMute",
+          agent: { host: "HOST-A", agentId: "agent-one" },
+          muted: true
         })
         yield* test.store.heartbeat("other@example.test", {
           clientId: "browser-two",
@@ -428,18 +429,96 @@ describe("blocked agent notifications", () => {
         yield* test.pass("blocked")
         expect(yield* Ref.get(test.sent)).toHaveLength(1)
       }))
+    it.effect("merges settings intents atomically across independent devices", () =>
+      Effect.gen(function*() {
+        const test = yield* setup()
+        const second = yield* Effect.acquireRelease(
+          BlockedPushStore.open(test.store.path),
+          (store) => Effect.sync(() => store.close())
+        )
+        expect(yield* test.store.settings("owner@example.test")).toEqual({ mutedAgents: [], quietHours: null })
+        expect(yield* second.settings("owner@example.test")).toEqual({ mutedAgents: [], quietHours: null })
+        yield* test.store.mutateSettings("owner@example.test", {
+          _tag: "SetAgentMute",
+          agent: { host: "HOST-A", agentId: "agent-one" },
+          muted: true
+        })
+        yield* test.store.mutateSettings("owner@example.test", {
+          _tag: "SetQuietHours",
+          quietHours: { startMinute: 1320, endMinute: 420, timeZone: "Europe/Berlin" }
+        })
+        expect(
+          yield* second.mutateSettings("owner@example.test", {
+            _tag: "SetAgentMute",
+            agent: { host: "HOST-A", agentId: "agent-two" },
+            muted: true
+          })
+        ).toEqual({
+          mutedAgents: [{ host: "HOST-A", agentId: "agent-one" }, { host: "HOST-A", agentId: "agent-two" }],
+          quietHours: { startMinute: 1320, endMinute: 420, timeZone: "Europe/Berlin" }
+        })
+        expect(
+          yield* second.mutateSettings("owner@example.test", {
+            _tag: "SetAgentMute",
+            agent: { host: "host-a", agentId: "agent-two" },
+            muted: false
+          })
+        ).toEqual({
+          mutedAgents: [{ host: "HOST-A", agentId: "agent-one" }],
+          quietHours: { startMinute: 1320, endMinute: 420, timeZone: "Europe/Berlin" }
+        })
+        expect(yield* second.settings("other@example.test")).toEqual({ mutedAgents: [], quietHours: null })
+      }))
+    it.effect("bounded mute intents remain idempotent and roll back an overflowing edit", () =>
+      Effect.gen(function*() {
+        const test = yield* setup()
+        for (let index = 0; index < 256; index += 1) {
+          yield* test.store.mutateSettings("owner@example.test", {
+            _tag: "SetAgentMute",
+            agent: { host: "HOST-A", agentId: `agent-${index}` },
+            muted: true
+          })
+        }
+        yield* test.store.mutateSettings("owner@example.test", {
+          _tag: "SetAgentMute",
+          agent: { host: "host-a", agentId: "agent-0" },
+          muted: true
+        })
+        const previous = yield* test.store.settings("owner@example.test")
+        expect(previous.mutedAgents).toHaveLength(256)
+        const rejected = yield* Effect.flip(test.store.mutateSettings("owner@example.test", {
+          _tag: "SetAgentMute",
+          agent: { host: "HOST-A", agentId: "agent-overflow" },
+          muted: true
+        }))
+        expect(rejected._tag).toBe("BlockedPushStoreError")
+        expect(yield* test.store.settings("owner@example.test")).toEqual(previous)
+        expect(
+          yield* test.store.mutateSettings("owner@example.test", {
+            _tag: "SetAgentMute",
+            agent: { host: "host-a", agentId: "agent-0" },
+            muted: false
+          })
+        ).toEqual({ mutedAgents: previous.mutedAgents.slice(1), quietHours: null })
+      }))
     it.effect("agent mute and overnight quiet hours suppress without consuming a delivery", () =>
       Effect.gen(function*() {
         const test = yield* setup()
         expect(yield* test.store.settings("owner@example.test")).toEqual({ mutedAgents: [], quietHours: null })
-        yield* test.store.putSettings("owner@example.test", {
-          mutedAgents: [{ host: "HOST-A", agentId: "agent-one" }],
-          quietHours: null
+        yield* test.store.mutateSettings("owner@example.test", {
+          _tag: "SetAgentMute",
+          agent: { host: "HOST-A", agentId: "agent-one" },
+          muted: true
         })
         yield* test.pass("blocked")
         expect(yield* Ref.get(test.sent)).toHaveLength(0)
-        yield* test.store.putSettings("owner@example.test", {
-          mutedAgents: [],
+        yield* test.store.mutateSettings("owner@example.test", {
+          _tag: "SetAgentMute",
+          agent: { host: "HOST-A", agentId: "agent-one" },
+          muted: false
+        })
+        yield* test.store.mutateSettings("owner@example.test", {
+          _tag: "SetQuietHours",
           quietHours: { startMinute: 22 * 60, endMinute: 7 * 60, timeZone: "Etc/UTC" }
         })
         yield* test.pass("blocked")
@@ -460,8 +539,8 @@ describe("blocked agent notifications", () => {
         ) {
           const test = yield* setup()
           yield* TestClock.setTime(Date.parse(start))
-          yield* test.store.putSettings("owner@example.test", {
-            mutedAgents: [],
+          yield* test.store.mutateSettings("owner@example.test", {
+            _tag: "SetQuietHours",
             quietHours: { startMinute: 22 * 60, endMinute: 7 * 60, timeZone: "America/New_York" }
           })
           yield* test.pass("blocked")
@@ -487,7 +566,10 @@ describe("blocked agent notifications", () => {
         for (const timeZone of ["America/New_York", "Asia/Kathmandu", "Etc/GMT+5"]) {
           const test = yield* setup()
           const settings = { mutedAgents: [], quietHours: { startMinute: 60, endMinute: 120, timeZone } }
-          yield* test.store.putSettings("owner@example.test", settings)
+          yield* test.store.mutateSettings("owner@example.test", {
+            _tag: "SetQuietHours",
+            quietHours: settings.quietHours
+          })
           expect(yield* test.store.settings("owner@example.test")).toEqual(settings)
         }
       }))
