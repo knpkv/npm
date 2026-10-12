@@ -218,6 +218,7 @@ export class AgentRelationshipStore {
               (agent_id, host, pane_id, parent_agent_id, relation, observed_at, source)
              VALUES (?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(host, agent_id) DO UPDATE SET
+               pane_id = excluded.pane_id,
                parent_agent_id = excluded.parent_agent_id,
                relation = excluded.relation,
                observed_at = excluded.observed_at,
@@ -229,7 +230,8 @@ export class AgentRelationshipStore {
                  THEN connect_agent_relationships.source
                  ELSE excluded.source
                END
-             WHERE connect_agent_relationships.pane_id = excluded.pane_id
+             WHERE (
+               connect_agent_relationships.pane_id = excluded.pane_id
                AND (
                  (
                    connect_agent_relationships.parent_agent_id IS excluded.parent_agent_id
@@ -241,6 +243,12 @@ export class AgentRelationshipStore {
                    AND excluded.observed_at > connect_agent_relationships.observed_at
                  )
                )
+             ) OR (
+               ? = 'trusted_live_inventory'
+               AND excluded.observed_at > connect_agent_relationships.observed_at
+               AND connect_agent_relationships.parent_agent_id IS excluded.parent_agent_id
+               AND connect_agent_relationships.relation IS excluded.relation
+             )
              RETURNING agent_id, host, pane_id, parent_agent_id, relation, observed_at, source`
               ).get(
                 metadata.agentId,
@@ -249,6 +257,7 @@ export class AgentRelationshipStore {
                 metadata.relationship?.parentAgentId ?? null,
                 metadata.relationship?.relation ?? null,
                 metadata.observedAt,
+                source,
                 source,
                 source
               )
