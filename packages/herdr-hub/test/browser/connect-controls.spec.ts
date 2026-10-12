@@ -84,6 +84,7 @@ const mount = async (page: Page, state = "2v", width = 390, theme: "light" | "da
     quietHours: state === "2v-v3" ? quiet : null
   }
   const writes: Array<BlockedPushSettings> = []
+  const mutations: Array<BlockedPushMutation> = []
   let reject = false
   let held: Promise<void> | null = null
   await page.setViewportSize({ width: width + 2, height: width === 390 ? 1441 : 1241 })
@@ -107,6 +108,7 @@ const mount = async (page: Page, state = "2v", width = 390, theme: "light" | "da
   await page.route("**/v1/push/blocked-settings", async (route) => {
     if (route.request().method() !== "PATCH") return route.fulfill({ json: settings })
     const mutation = Schema.decodeUnknownSync(Schema.fromJsonString(BlockedPushMutation))(route.request().postData())
+    mutations.push(mutation)
     writes.push(applyBlockedPushMutation(settings, mutation))
     const gate = held
     held = null
@@ -133,6 +135,7 @@ const mount = async (page: Page, state = "2v", width = 390, theme: "light" | "da
   return {
     panel,
     writes,
+    mutations,
     mute: panel.getByRole("button", { name: "Mute this agent", exact: true }),
     from: panel.getByLabel("Quiet hours from", { exact: true }),
     until: panel.getByLabel("Quiet hours until", { exact: true }),
@@ -203,6 +206,65 @@ const measureTrack = async (track: Locator) => {
   }
 }
 
+/** Phone sheets cover the backdrop; use their visible Close affordance with a real tap. */
+const dismissStage = async (page: Page, width: number, dismissal: "Close" | "backdrop"): Promise<void> => {
+  if (dismissal === "backdrop") {
+    await page.locator("[data-rly-sheet-overlay]").click({ position: { x: 1, y: 1 } })
+    return
+  }
+  const close = page.getByRole("dialog", { name: "worker", exact: true })
+    .getByRole("button", { name: "Close", exact: true })
+  if (width === 390) await close.tap()
+  else await close.click()
+}
+
+/** Read painted native-editor text from Chromium's UA shadow tree; input.value always stays 24-hour. */
+const renderedTime = async (field: Locator, page: Page): Promise<string> => {
+  const id = await field.getAttribute("id")
+  expect(id).not.toBeNull()
+  const session = await page.context().newCDPSession(page)
+  try {
+    const snapshot = Schema.decodeUnknownSync(Schema.Struct({
+      domNodes: Schema.Array(Schema.Struct({
+        attributes: Schema.optional(Schema.Array(Schema.Struct({ name: Schema.String, value: Schema.String }))),
+        childNodeIndexes: Schema.optional(Schema.Array(Schema.Number))
+      })),
+      layoutTreeNodes: Schema.Array(
+        Schema.Struct({ domNodeIndex: Schema.Number, layoutText: Schema.optional(Schema.String) })
+      )
+    }))(
+      await session.send("DOMSnapshot.getSnapshot", {
+        computedStyleWhitelist: [],
+        includeUserAgentShadowTree: true
+      })
+    )
+    const input = snapshot.domNodes.findIndex((node) =>
+      node.attributes?.some((attribute) => attribute.name === "id" && attribute.value === id)
+    )
+    expect(input).toBeGreaterThanOrEqual(0)
+    const descendants = new Set<number>([input])
+    const pending = [input]
+    while (pending.length > 0) {
+      const index = pending.pop()
+      if (index === undefined) break
+      for (const child of snapshot.domNodes[index]?.childNodeIndexes ?? []) {
+        if (descendants.has(child)) continue
+        descendants.add(child)
+        pending.push(child)
+      }
+    }
+    const text = snapshot.layoutTreeNodes
+      .filter((node) => descendants.has(node.domNodeIndex))
+      .map((node) => node.layoutText ?? "")
+      .join("")
+      .replace(/\s/g, "")
+    expect(text).not.toBe("")
+    return text
+  } finally {
+    await session.detach()
+  }
+}
+
 for (const width of [390, 1280]) {
   for (const theme of themes) {
     for (const state of states) {
@@ -215,6 +277,7 @@ for (const width of [390, 1280]) {
           await expect(fixture.summary).toHaveText("Muted You won't get pushes from worker.")
         } else if (state === "2v-v3") {
           await expect(fixture.from).toHaveValue("22:00")
+          expect(await renderedTime(fixture.from, page)).toBe("22:00")
           await expect(fixture.until).toHaveValue("07:00")
           await expect(fixture.summary).toHaveText("Quiet 22:00–07:00 Europe/Berlin")
         } else if (state === "2v-v4") {
@@ -238,6 +301,8 @@ for (const width of [390, 1280]) {
       test("locale time fields fit values and the picker at either width", async ({ page }) => {
         const fixture = await mount(page, "2v-v3", width)
         expect(await page.evaluate(() => navigator.language)).toBe("en-US")
+        expect(await renderedTime(fixture.from, page)).toBe("10:00PM")
+        expect(await renderedTime(fixture.until, page)).toMatch(/^0?7:00AM$/)
         for (const field of [fixture.from, fixture.until]) {
           // UA pseudo computed styles can report the input width; measure the picker's actual intrinsic footprint.
           const dimensions = Schema.decodeUnknownSync(Schema.Struct({
@@ -461,6 +526,67 @@ for (const width of [390, 1280]) {
       expect(fixture.writes).toHaveLength(0)
       await expect(fixture.from).toHaveValue("22:00")
       await expect(fixture.until).toHaveValue("07:00")
+    })
+    const dismissals: ReadonlyArray<"Close" | "backdrop"> = width === 390 ? ["Close"] : ["backdrop", "Close"]
+    for (const dismissal of dismissals) {
+      test(`${dismissal} dismissal commits the focused complete draft once`, async ({ page }) => {
+        const fixture = await mount(page, "2v", width)
+        await fixture.from.fill("22:00")
+        await fixture.until.fill("07:00")
+        await expect(fixture.until).toBeFocused()
+        expect(fixture.mutations).toHaveLength(0)
+        await dismissStage(page, width, dismissal)
+        await expect(page.getByRole("dialog", { name: "worker", exact: true })).not.toBeVisible()
+        await expect.poll(() => fixture.mutations).toEqual([{ _tag: "SetQuietHours", quietHours: quiet }])
+      })
+      test(`normal tab-out then ${dismissal} dismissal sends one quiet-hours intent`, async ({ page }) => {
+        const fixture = await mount(page, "2v", width)
+        await fixture.from.fill("22:00")
+        await fixture.until.fill("07:00")
+        const release = fixture.holdNextSave()
+        try {
+          // Pass the native time input's segment stops and leave the editor through real Tab presses.
+          for (let stop = 0; stop < 5; stop += 1) {
+            await page.keyboard.press("Tab")
+            if (!(await fixture.until.evaluate((input) => input === document.activeElement))) break
+          }
+          await expect(fixture.until).not.toBeFocused()
+          await expect.poll(() => fixture.mutations).toEqual([{ _tag: "SetQuietHours", quietHours: quiet }])
+          await dismissStage(page, width, dismissal)
+          await expect(page.getByRole("dialog", { name: "worker", exact: true })).not.toBeVisible()
+        } finally {
+          release()
+        }
+        await page.locator(".connect-agent[data-agent-key='atlas:agent-root']").click()
+        const reopened = page.getByRole("region", { name: "Agent notifications" })
+        await expect(reopened.locator(".connect-stage-notification-summary")).toHaveText(
+          "Quiet 22:00–07:00 Europe/Berlin"
+        )
+        await expect(reopened).toHaveAttribute("aria-busy", "false")
+        expect(fixture.writes).toHaveLength(1)
+        expect(fixture.mutations).toEqual([{ _tag: "SetQuietHours", quietHours: quiet }])
+      })
+    }
+    test("Close activation without blur commits the focused complete draft once", async ({ page }) => {
+      const fixture = await mount(page, "2v", width)
+      await fixture.from.fill("22:00")
+      await fixture.until.fill("07:00")
+      await expect(fixture.until).toBeFocused()
+      expect(fixture.mutations).toHaveLength(0)
+      // Programmatic/assistive activation need not move focus first, unlike a mouse click.
+      await page.getByRole("dialog", { name: "worker", exact: true })
+        .getByRole("button", { name: "Close", exact: true }).dispatchEvent("click")
+      await expect(page.getByRole("dialog", { name: "worker", exact: true })).not.toBeVisible()
+      await expect.poll(() => fixture.mutations).toEqual([{ _tag: "SetQuietHours", quietHours: quiet }])
+    })
+    test("Escape cancels a focused complete quiet-hours draft", async ({ page }) => {
+      const fixture = await mount(page, "2v", width)
+      await fixture.from.fill("22:00")
+      await fixture.until.fill("07:00")
+      await expect(fixture.until).toBeFocused()
+      await page.keyboard.press("Escape")
+      await expect(page.getByRole("dialog", { name: "worker", exact: true })).not.toBeVisible()
+      expect(fixture.mutations).toHaveLength(0)
     })
     test("targets do not overlap, keep keyboard focus visible, and work in forced colours", async ({ page }) => {
       const fixture = await mount(page, "2v-v3", width)

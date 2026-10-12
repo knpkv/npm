@@ -124,6 +124,7 @@ const openStage = async (
   options: { readonly agentId?: string; readonly backend?: SettingsBackend } = {}
 ) => {
   const writes: Array<BlockedPushSettings> = []
+  const mutations: Array<BlockedPushMutation> = []
   const backend = options.backend ?? { settings: initialSettings }
   let rejectSave = false
   let rejectOnce = false
@@ -139,6 +140,7 @@ const openStage = async (
         const mutation = Schema.decodeUnknownSync(Schema.fromJsonString(BlockedPushMutation))(
           await new Response(init?.body).text()
         )
+        mutations.push(mutation)
         writes.push(applyBlockedPushMutation(backend.settings, mutation))
         const held = heldSave
         heldSave = null
@@ -196,6 +198,7 @@ const openStage = async (
   await settle()
   return {
     writes,
+    mutations,
     holdNextSave: () => {
       const gate = Promise.withResolvers<void>()
       heldSave = gate.promise
@@ -242,6 +245,45 @@ describe("stage notification controls", () => {
     expect(fixture.writes.at(-1)?.mutedAgents).toEqual([{ host: "HOST-B", agentId: "agent-other" }])
     expect(muteButton()?.getAttribute("aria-pressed")).toBe("false")
   })
+  it.each([1, 2])("applies %i rapid mute toggles against the latest queued desired state", async (clicks) => {
+    const fixture = await openStage()
+    const release = fixture.holdNextSave()
+    try {
+      await act(async () => muteButton()?.click())
+      await settle()
+      expect(fixture.mutations).toEqual([
+        {
+          _tag: "SetAgentMute",
+          agent: { host: "HOST-A", agentId: "agent-one" },
+          muted: true
+        }
+      ])
+      if (clicks === 2) {
+        await act(async () => muteButton()?.click())
+        await settle()
+      }
+      expect(fixture.mutations).toHaveLength(1)
+    } finally {
+      await act(async () => release())
+      await settle()
+    }
+    expect(fixture.mutations).toEqual(
+      clicks === 1
+        ? [
+            {
+              _tag: "SetAgentMute",
+              agent: { host: "HOST-A", agentId: "agent-one" },
+              muted: true
+            }
+          ]
+        : [
+            { _tag: "SetAgentMute", agent: { host: "HOST-A", agentId: "agent-one" }, muted: true },
+            { _tag: "SetAgentMute", agent: { host: "HOST-A", agentId: "agent-one" }, muted: false }
+          ]
+    )
+    expect(muteButton()?.getAttribute("aria-pressed")).toBe(clicks === 1 ? "true" : "false")
+  })
+
   it("preserves independent devices' agent mutes and quiet hours when their snapshots are stale", async () => {
     const backend: SettingsBackend = { settings: { mutedAgents: [], quietHours: null } }
     await openStage(undefined, "enabled", true, { backend, agentId: "agent-one" })
@@ -327,6 +369,110 @@ describe("stage notification controls", () => {
       "Pushes on, no quiet hours"
     )
   })
+  it.each([
+    { dismissal: "backdrop", end: "07:00", saves: 1 },
+    { dismissal: "blur then backdrop", end: "07:00", saves: 1 },
+    { dismissal: "Close", end: "07:00", saves: 1 },
+    { dismissal: "blur then Close", end: "07:00", saves: 1 },
+    { dismissal: "Close", end: "", saves: 0 },
+    { dismissal: "Escape", end: "07:00", saves: 0 },
+    { dismissal: "backdrop", end: "", saves: 0 }
+  ])("dismisses via $dismissal with Until=$end and saves $saves complete drafts", async ({ dismissal, end, saves }) => {
+    const fixture = await openStage()
+    const from = document.querySelector<HTMLInputElement>("input[aria-label='Quiet hours from']")
+    const until = document.querySelector<HTMLInputElement>("input[aria-label='Quiet hours until']")
+    expect(from).not.toBeNull()
+    expect(until).not.toBeNull()
+    await act(async () => {
+      if (from !== null) {
+        from.focus()
+        from.value = "22:00"
+        from.dispatchEvent(new Event("input", { bubbles: true }))
+      }
+      if (until !== null) {
+        until.focus()
+        until.value = end
+        until.dispatchEvent(new Event("input", { bubbles: true }))
+      }
+    })
+    await settle()
+    expect(document.activeElement).toBe(until)
+    expect(fixture.mutations).toHaveLength(0)
+    const release = fixture.holdNextSave()
+    try {
+      if (dismissal === "blur then backdrop" || dismissal === "blur then Close") {
+        await act(async () => until?.dispatchEvent(new FocusEvent("focusout", { bubbles: true })))
+        await settle()
+        expect(fixture.mutations).toHaveLength(1)
+      }
+      await act(async () => {
+        if (dismissal === "Escape") {
+          document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))
+        } else if (dismissal === "Close" || dismissal === "blur then Close") {
+          document.querySelector<HTMLButtonElement>("[role='dialog'] button[aria-label='Close']")?.click()
+        } else {
+          document
+            .querySelector("[data-rly-sheet-overlay]")
+            ?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerType: "mouse", button: 0 }))
+        }
+      })
+      await settle()
+      expect(document.querySelector("[role='dialog']")).toBeNull()
+    } finally {
+      await act(async () => release())
+      await settle()
+    }
+    expect(fixture.mutations).toEqual(
+      saves === 0
+        ? []
+        : [
+            {
+              _tag: "SetQuietHours",
+              quietHours: {
+                startMinute: 1320,
+                endMinute: 420,
+                timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone
+              }
+            }
+          ]
+    )
+  })
+
+  it.each(["backdrop", "Close"])(
+    "does not restore saved time fields when dismissing via %s during a pending Clear",
+    async (dismissal) => {
+      const fixture = await openStage({
+        mutedAgents: [],
+        quietHours: {
+          startMinute: 1320,
+          endMinute: 420,
+          timeZone: "Europe/Berlin"
+        }
+      })
+      const release = fixture.holdNextSave()
+      try {
+        await act(async () => document.querySelector<HTMLButtonElement>(".connect-stage-notification-clear")?.click())
+        await settle()
+        expect(fixture.mutations).toEqual([{ _tag: "SetQuietHours", quietHours: null }])
+        await act(async () => {
+          if (dismissal === "Close") {
+            document.querySelector<HTMLButtonElement>("[role='dialog'] button[aria-label='Close']")?.click()
+          } else {
+            document
+              .querySelector("[data-rly-sheet-overlay]")
+              ?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerType: "mouse", button: 0 }))
+          }
+        })
+        await settle()
+      } finally {
+        await act(async () => release())
+        await settle()
+      }
+      expect(fixture.mutations).toEqual([{ _tag: "SetQuietHours", quietHours: null }])
+      expect(fixture.writes.at(-1)?.quietHours).toBeNull()
+    }
+  )
+
   it("omits controls when push is off and links to Approvals", async () => {
     await openStage(undefined, "disabled")
     const panel = document.querySelector("[aria-label='Agent notifications']")
@@ -583,6 +729,47 @@ describe("stage notification controls", () => {
     )
     await act(async () => from?.dispatchEvent(new FocusEvent("focusout", { bubbles: true })))
     await settle()
+    expect(fixture.writes).toHaveLength(2)
+    expect(fixture.writes.at(-1)?.quietHours?.startMinute).toBe(1320)
+  })
+
+  it("queues a reversion blurred before an earlier quiet-hours save completes", async () => {
+    const fixture = await openStage({
+      mutedAgents: [],
+      quietHours: {
+        startMinute: 1320,
+        endMinute: 420,
+        timeZone: "Europe/Berlin"
+      }
+    })
+    const from = document.querySelector<HTMLInputElement>("input[aria-label='Quiet hours from']")
+    const change = async (value: string) => {
+      await act(async () => {
+        if (from !== null) {
+          from.value = value
+          from.dispatchEvent(new Event("input", { bubbles: true }))
+        }
+      })
+      await settle()
+    }
+    await change("23:00")
+    const release = fixture.holdNextSave()
+    try {
+      await act(async () => from?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })))
+      await settle()
+      expect(fixture.writes).toHaveLength(1)
+      await change("22:00")
+      await act(async () => from?.dispatchEvent(new FocusEvent("focusout", { bubbles: true })))
+      await settle()
+      expect(fixture.writes).toHaveLength(1)
+    } finally {
+      await act(async () => release())
+      await settle()
+    }
+    expect(from?.value).toBe("22:00")
+    expect(document.querySelector(".connect-stage-notification-summary")?.textContent).toBe(
+      "Quiet 22:00–07:00 Europe/Berlin"
+    )
     expect(fixture.writes).toHaveLength(2)
     expect(fixture.writes.at(-1)?.quietHours?.startMinute).toBe(1320)
   })
