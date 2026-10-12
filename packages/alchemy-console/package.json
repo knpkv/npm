@@ -1,6 +1,6 @@
 {
   "name": "@knpkv/alchemy-console",
-  "version": "0.2.1",
+  "version": "0.4.1",
   "description": "Read-only discovery and state readers for local Alchemy stacks",
   "license": "MIT",
   "repository": {
@@ -9,7 +9,9 @@
     "directory": "packages/alchemy-console"
   },
   "type": "module",
-  "sideEffects": false,
+  "sideEffects": [
+    "**/*.css"
+  ],
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
@@ -23,7 +25,12 @@
     "./api": {
       "types": "./dist/api.d.ts",
       "import": "./dist/api.js"
-    }
+    },
+    "./views": {
+      "types": "./dist/views.d.ts",
+      "import": "./dist/views/index.js"
+    },
+    "./views/style.css": "./dist/views/style.css"
   },
   "files": [
     "dist",
@@ -33,20 +40,40 @@
     "access": "public"
   },
   "scripts": {
-    "build": "tsc -b tsconfig.build.json --force && vite build",
-    "check": "tsc -b tsconfig.json && tsc -p test/tsconfig.json --noEmit",
+    "build": "tsc -b tsconfig.build.json --force && vite build && vite build -c vite.views.config.ts",
+    "check": "tsc -b tsconfig.json && tsc -p test/tsconfig.json --noEmit && tsc -p test/consumer/tsconfig.json --noEmit",
     "lint": "eslint src test",
     "test": "vitest run",
     "test:browser": "pnpm --filter '@knpkv/alchemy-console^...' build && pnpm build && playwright test"
   },
   "peerDependencies": {
-    "effect": "4.0.0"
+    "@knpkv/rly": "workspace:^",
+    "effect": "4.0.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
+  },
+  "peerDependenciesMeta": {
+    "@knpkv/rly": {
+      "optional": true
+    },
+    "react": {
+      "optional": true
+    },
+    "react-dom": {
+      "optional": true
+    }
   },
   "devDependencies": {
+    "@knpkv/rly": "workspace:^",
     "@effect/vitest": "4.0.0",
     "@playwright/test": "1.63.0",
     "@types/node": "^26.6.4",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.1",
     "effect": "4.0.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
     "typescript": "npm:@typescript/typescript6@^6.0.2",
     "vitest": "catalog:",
     "vite": "^8.3.2"

@@ -1,6 +1,6 @@
 import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it, vi } from "@effect/vitest"
-import { Clock, Effect, FileSystem, Path, Result, Schema } from "effect"
+import { Clock, Effect, FileSystem, Logger, Path, Result, Schema } from "effect"
 import { HttpClient, HttpClientResponse } from "effect/http"
 import { TestClock } from "effect/testing"
 import { DatabaseSync } from "node:sqlite"
@@ -67,6 +67,49 @@ const seedClosure = Effect.fn("ArchiveTest.seedClosure")(function*(store: AgentA
 
 describe("closed agent archive", () => {
   it.layer(NodeServices.layer)((it) => {
+    it.effect("remembers an absent parent's latest name on its own host, before and after closure", () =>
+      Effect.gen(function*() {
+        const store = yield* openStore()
+        const parent = ConnectAgent.make({
+          id: "agent-parent",
+          host: "HOST-A",
+          name: "former coordinator",
+          kind: "codex",
+          work: "project",
+          state: "working",
+          lastActivityAt: 0
+        })
+        yield* observe(store, 0, [parent, agent()])
+        const read = (observedAt: number) =>
+          fleetConnectAgents(
+            Effect.succeed(LocalConnectAgents.make({ host: "HOST-A", agents: [agent()], complete: true })),
+            [],
+            { store, observedAt }
+          )
+        expect((yield* read(1)).agents[0]?.relationship).toEqual({
+          parentAgentId: "agent-parent",
+          relation: "pair",
+          parentName: "former coordinator"
+        })
+        expect((yield* read(300_001)).agents[0]?.relationship).toEqual({
+          parentAgentId: "agent-parent",
+          relation: "pair",
+          parentName: "former coordinator"
+        })
+        expect((yield* store.page()).agents.map(({ name }) => name)).toEqual(["former coordinator"])
+        const foreign = yield* fleetConnectAgents(
+          Effect.succeed(
+            LocalConnectAgents.make({ host: "HOST-B", agents: [agent("agent-foreign", "HOST-B")], complete: true })
+          ),
+          [],
+          { store, observedAt: 300_002 }
+        )
+        expect(foreign.agents[0]?.relationship).toEqual({ parentAgentId: "agent-parent", relation: "pair" })
+      }).pipe(
+        Effect.provideService(HttpClient.HttpClient, HttpClient.make(() => Effect.die("No peers in this read"))),
+        Effect.scoped
+      ))
+
     it.effect("keeps the state directory and database files owner-only after writing", () =>
       Effect.gen(function*() {
         const store = yield* openStore()
@@ -186,6 +229,34 @@ describe("closed agent archive", () => {
           Effect.provideService(HttpClient.HttpClient, client([]))
         )
         expect((yield* store.page()).agents.map(({ agentId }) => agentId)).toEqual(["agent-peer"])
+      }).pipe(Effect.scoped))
+
+    it.effect("archive name lookup failures leave live directory rows available without remembered parent names", () =>
+      Effect.gen(function*() {
+        const store = yield* openStore()
+        yield* Effect.acquireRelease(
+          Effect.sync(() =>
+            vi.spyOn(store, "namesFor").mockReturnValue(
+              Effect.fail(new ConnectArchiveStoreError({ operation: "namesFor", cause: "unreadable database" }))
+            )
+          ),
+          (spy) => Effect.sync(() => spy.mockRestore())
+        )
+        const logged: Array<{ readonly level: string; readonly message: string }> = []
+        const logger = Logger.make<unknown, void>((entry) => {
+          logged.push({ level: entry.logLevel, message: String(entry.message) })
+        })
+        const local = { host: "HOST-A", agents: [agent()], complete: true }
+        const directory = yield* fleetConnectAgents(Effect.succeed(local), [], { store, observedAt: 0 }).pipe(
+          Effect.provideService(HttpClient.HttpClient, HttpClient.make(() => Effect.die("unexpected peer request"))),
+          Effect.withLogger(logger)
+        )
+        expect(directory).toEqual({ agents: local.agents, failures: [] })
+        expect(directory.agents[0]?.relationship).not.toHaveProperty("parentName")
+        expect(logged).toContainEqual({
+          level: "Warn",
+          message: expect.stringContaining("Connect archive name lookup failed")
+        })
       }).pipe(Effect.scoped))
 
     it.effect("archive write failures leave live directory rows available", () =>

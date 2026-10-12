@@ -2,10 +2,15 @@ import { StateLabel, Text } from "@knpkv/rly/primitives"
 import { useRef, useState, type FormEvent, type ReactElement, type ReactNode } from "react"
 import { Link } from "react-router"
 
-import type { SubmitClockifyActionRequest } from "../../api/deliveryGraph.js"
+import type { SubmitClockifyActionRequest, SubmitClockifyActionResponse } from "../../api/deliveryGraph.js"
 import type { WorkspaceClockifyTimeEntryPresentation } from "./presentWorkspaceClockifyTimeEntry.js"
-import type { ClockifyActionSubmissionState } from "./useClockifyActionSubmission.js"
 import styles from "./WorkspaceClockifyTimeEntryDetails.module.css"
+
+export type ClockifyActionSubmissionState =
+  | { readonly _tag: "idle" }
+  | { readonly _tag: "submitting" }
+  | { readonly _tag: "succeeded"; readonly result: SubmitClockifyActionResponse }
+  | { readonly _tag: "failed" }
 
 const Section = ({
   children,
@@ -29,6 +34,14 @@ const Section = ({
   </section>
 )
 
+export interface WorkspaceClockifyTimeEntryDetailsProps {
+  readonly canApprove?: boolean
+  readonly canCorrect?: boolean
+  readonly onSubmit?: (request: SubmitClockifyActionRequest) => void
+  readonly submission?: ClockifyActionSubmissionState
+  readonly timeEntry: WorkspaceClockifyTimeEntryPresentation
+}
+
 /** Render one immutable Clockify entry and its Control Center-owned approval. */
 export const WorkspaceClockifyTimeEntryDetails = ({
   canApprove = false,
@@ -36,13 +49,7 @@ export const WorkspaceClockifyTimeEntryDetails = ({
   onSubmit,
   submission = { _tag: "idle" },
   timeEntry
-}: {
-  readonly canApprove?: boolean
-  readonly canCorrect?: boolean
-  readonly onSubmit?: (request: SubmitClockifyActionRequest) => void
-  readonly submission?: ClockifyActionSubmissionState
-  readonly timeEntry: WorkspaceClockifyTimeEntryPresentation
-}): ReactElement => {
+}: WorkspaceClockifyTimeEntryDetailsProps): ReactElement => {
   const [jiraIssueKey, setJiraIssueKey] = useState("")
   const [rationale, setRationale] = useState("")
   const approvalDecision = useRef<"approved" | "rejected">("approved")

@@ -2011,8 +2011,12 @@ esac
           const text = (path: string) =>
             get(path).pipe(Effect.flatMap((response) => Effect.promise(() => response.text())))
           const svg = yield* text("/assets/relay-icon.svg")
+          const favicon = yield* text("/assets/relay-favicon.svg")
           const legacy = yield* text("/assets/approval-icon.svg")
           expect(svg).toContain("<title>Relay</title>")
+          expect(svg).toContain("viewBox=\"0 0 512 512\"")
+          expect(favicon).toContain("width=\"16\" height=\"16\"")
+          expect(favicon).not.toBe(svg)
           expect(legacy).toBe(svg)
           expect((yield* get("/assets/relay-unknown.png")).status).toBe(404)
         }).pipe(Effect.scoped),
@@ -2024,7 +2028,7 @@ esac
     ).pipe(provideNodeServices)
   })
 
-  it.effect("accepts host-bound voice only on the canonical listener, including sibling claims on the same host", () => {
+  it.effect("accepts host-bound voice and self-state only on the canonical listener, including sibling claims on the same host", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-http-posts-"))
     const tailscaleCommand = join(root, "tailscale-test")
     const identityMode = join(root, "identity-mode")
@@ -2189,6 +2193,51 @@ esac
         Effect.promise(() =>
           secureRequestBody(`${canonical}/v1/connect/posts`, headers, { method: "POST", body: input })
         )
+      type SelfRequestHeaders = {
+        readonly host: string
+        readonly "content-type": string
+        "x-herdr-agent-id"?: string
+      }
+      const me = (agentId: string | null, input: Readonly<Record<string, string>>) => {
+        const requestHeaders: SelfRequestHeaders = { ...headers }
+        if (agentId !== null) requestHeaders["x-herdr-agent-id"] = agentId
+        return Effect.promise(() =>
+          secureRequestBody(`${canonical}/v1/connect/me`, requestHeaders, { method: "POST", body: input })
+        )
+      }
+      expect((yield* me(null, { mood: "happy" })).status).toBe(403)
+      expect(
+        (yield* Effect.promise(() =>
+          secureRequestBody(`${canonical}/v1/connect/me`, {
+            ...headers,
+            "x-herdr-agent-id": "agent-one",
+            origin: "https://foreign.example.test"
+          }, { method: "POST", body: { mood: "happy" } })
+        )).status
+      ).toBe(403)
+      expect((yield* me("agent-foreign", { mood: "happy" })).body).toContain("UnboundAgent")
+      const invalidSelf: ReadonlyArray<Readonly<Record<string, string>>> = [
+        { mood: "angry" },
+        { say: "x".repeat(141) },
+        { mood: "happy", accessory: "crown" },
+        { mood: "happy", agentId: "agent-sibling" },
+        { mood: "happy", host: "ALPHA" },
+        { mood: "happy", replyTo: "ask-one" },
+        { say: "line\nbreak" }
+      ]
+      for (const invalid of invalidSelf) {
+        const rejected = yield* me("agent-one", invalid)
+        expect(rejected.status, JSON.stringify({ invalid, response: rejected })).toBe(400)
+      }
+      expect(
+        (yield* me("agent-one", { say: "  Keeping an eye on tests  ", mood: "focused", accessory: "glasses" })).status
+      ).toBe(200)
+      expect((yield* me("agent-sibling", { mood: "happy" })).status).toBe(200)
+      expect((yield* me("agent-one", { mood: "happy" })).status).toBe(200)
+      expect((yield* me("agent-one", { mood: "excited" })).status).toBe(200)
+      const limited = yield* me("agent-one", { mood: "happy" })
+      expect(limited.status).toBe(429)
+      expect(limited.body).toContain("\"error\":\"TooManySelfUpdates\"")
       const first = yield* post(body)
       expect(first.status).toBe(200)
       expect((yield* post(body)).body).toBe(first.body)
@@ -2224,8 +2273,19 @@ esac
       expect(page.body).toContain("Tests passing")
       const directory = yield* Effect.promise(() => secureRequestBody(`${canonical}/v1/connect/agents`, headers))
       expect(directory.body).toContain("\"voice\":{\"text\":\"Tests passing\",\"createdAt\":100}")
-      const agents = Schema.decodeUnknownSync(Schema.fromJsonString(FleetConnectAgentPage))(directory.body).agents
+      const directoryPage = Schema.decodeUnknownSync(Schema.fromJsonString(FleetConnectAgentPage))(directory.body)
+      // Configured hosts reach the browser even when no usage report names that host.
+      expect(directoryPage.hosts).toEqual(["SER8", "ALPHA"])
+      const agents = directoryPage.agents
       expect(agents.find(({ id }) => id === "agent-one")?.lastActivityAt).toBe(100)
+      expect(agents.find(({ id }) => id === "agent-one")?.self).toEqual({
+        mood: "excited",
+        say: "Keeping an eye on tests",
+        accessory: "glasses",
+        at: 100,
+        replyTo: null
+      })
+      expect(agents.find(({ id }) => id === "agent-remote")?.self).toBeNull()
       const withExtraField = yield* post({ ...body, eventId: "extra-field", extra: "ignored" })
       expect(withExtraField.status).toBe(400)
       expect(
@@ -2241,14 +2301,32 @@ esac
       expect(withUrl.status).toBe(200)
       expect(Schema.decodeUnknownSync(Schema.fromJsonString(ConnectPost))(withUrl.body).text).toBe(urlText)
       partial = true
+      expect((yield* me("agent-sibling", { mood: "happy" })).body).toContain("Unavailable")
       expect((yield* post({ ...body, eventId: "event-two" })).body).toContain("Unavailable")
       partial = false
       writeFileSync(identityMode, "node-alpha")
+      expect((yield* me("agent-sibling", { mood: "happy" })).body).toContain("UnboundAgent")
+      expect((yield* me("agent-remote", { say: "Remote update" })).status).toBe(200)
+      const remoteDirectory = yield* Effect.promise(() => secureRequestBody(`${canonical}/v1/connect/agents`, headers))
+      expect(
+        Schema.decodeUnknownSync(Schema.fromJsonString(FleetConnectAgentPage))(remoteDirectory.body).agents
+          .find(({ id }) => id === "agent-remote")?.self?.say
+      ).toBe("Remote update")
       expect((yield* post(body)).body).toContain("UnboundAgent")
       expect((yield* post({ ...body, agentId: "agent-remote" })).status).toBe(200)
       writeFileSync(identityMode, "node-foreign")
+      expect((yield* me("agent-one", { mood: "happy" })).body).toContain("Denied")
       expect((yield* post(body)).body).toContain("Denied")
       for (const listener of [server.url, server.tailnetUrl, server.lanWorkUrl]) {
+        expect(
+          (yield* Effect.promise(() =>
+            fetch(`${listener}/v1/connect/me`, {
+              method: "POST",
+              headers: { "x-herdr-agent-id": "agent-one" },
+              body: JSON.stringify({ mood: "happy" })
+            })
+          )).status
+        ).toBe(403)
         expect(
           (yield* Effect.promise(() =>
             fetch(`${listener}/v1/connect/posts`, { method: "POST", body: JSON.stringify(body) })

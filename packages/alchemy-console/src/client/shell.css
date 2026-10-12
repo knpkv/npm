@@ -1,0 +1,70 @@
+html,
+body {
+  margin: 0;
+}
+
+.ac-console {
+  background:
+    radial-gradient(ellipse at 100% 0%, color-mix(in oklch, var(--rly-color-agent) 5%, transparent), transparent 45%),
+    var(--rly-color-canvas);
+  min-block-size: 100svh;
+}
+
+.ac-shell-header {
+  align-items: center;
+  border-block-end: 1px solid var(--rly-color-border-1);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--rly-space-12) var(--rly-space-24);
+  justify-content: space-between;
+  padding: var(--rly-space-24) clamp(1em, 4vw, 2.5em);
+}
+
+.ac-shell-meta {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--rly-space-8) var(--rly-space-24);
+}
+
+.ac-main {
+  margin-inline: auto;
+  max-inline-size: 65.875em;
+  padding: var(--rly-space-40) clamp(1em, 4vw, 2.5em);
+}
+
+.ac-skip {
+  background: var(--rly-color-surface-1);
+  color: var(--rly-color-text-1);
+  inset-block-start: var(--rly-space-8);
+  inset-inline-start: var(--rly-space-16);
+  padding: var(--rly-space-12);
+  position: absolute;
+  z-index: 1;
+}
+
+.ac-skip:not(:focus-visible) {
+  block-size: 1px;
+  clip-path: inset(50%);
+  inline-size: 1px;
+  min-inline-size: 0;
+  overflow: clip;
+}
+
+.ac-breadcrumbs {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--rly-space-8);
+  font-size: var(--rly-type-code-size);
+  margin-block-end: var(--rly-space-24);
+}
+
+.ac-breadcrumbs > :where(a, span) {
+  min-inline-size: 0;
+  overflow-wrap: break-word;
+}
+
+.ac-detail-read {
+  margin-inline-start: auto;
+}

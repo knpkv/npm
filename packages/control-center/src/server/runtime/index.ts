@@ -1,4 +1,4 @@
-/** Runnable Node server composition and startup bootstrap. @packageDocumentation */
+/** Runnable server composition; opt-in terminalLoginControl is owner-private, loopback-only and non-destructive. @packageDocumentation */
 export {
   ControlCenterBootstrap,
   type ControlCenterBootstrapError,

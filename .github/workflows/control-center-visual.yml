@@ -1,0 +1,120 @@
+name: Control Center visual
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+    paths:
+      - .github/workflows/control-center-visual.yml
+      - .github/actions/**
+      - packages/control-center/**
+      - packages/control-center-sql/**
+      - packages/rly/**
+      - packages/jira-api-client/**
+      - packages/confluence-api-client/**
+      - packages/confluence-to-markdown/**
+      - packages/clockify-api-client/**
+      - packages/codecommit-core/**
+      - packages/atlassian-common/**
+      - packages/browser-pairing/**
+      - packages/bounded-io/**
+      - browser-target.ts
+      - playwright-font-swap.ts
+      - vite-font-preload.ts
+      - package.json
+      - pnpm-lock.yaml
+      - pnpm-workspace.yaml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  visual:
+    name: Browser (control-center visual)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CC_VISUAL_MIN_MEMORY_GIB: 4
+      CC_VISUAL_BASE_OFFLINE: "false"
+      CC_VISUAL_OUT: ${{ github.workspace }}/packages/control-center/test-results/visual/shots
+      CC_VISUAL_BASE: ${{ github.workspace }}/packages/control-center/test-results/visual/base
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify checkout credentials were not persisted
+        shell: bash
+        run: |
+          if git config --local --get-regexp '^http\..*\.extraheader$'; then
+            echo "actions/checkout persisted an HTTP authorization header"
+            exit 1
+          fi
+      - name: Install dependencies
+        uses: ./.github/actions/setup
+        with:
+          node-version: 26.7.0
+      - name: Install bounded Chromium runtime
+        run: pnpm --filter @knpkv/control-center exec playwright install --with-deps chromium
+      - name: Build workspace dependencies
+        run: pnpm --filter "@knpkv/control-center^..." build
+      - name: Build Control Center
+        run: pnpm --filter @knpkv/control-center build
+      - name: Capture the main merge-base revision
+        id: base
+        run: pnpm --filter @knpkv/control-center exec tsx scripts/visual-base.ts
+      - name: Capture PR with functional, keyboard and accessibility assertions
+        id: capture
+        run: pnpm --filter @knpkv/control-center test:visual
+      - name: Compare shots
+        id: compare
+        continue-on-error: true
+        run: pnpm --filter @knpkv/control-center exec tsx e2e/visual/main.ts --compare-only
+      - name: Publish changed, new and removed states
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          if [ -f packages/control-center/test-results/visual/comparison.md ]; then
+            cat packages/control-center/test-results/visual/comparison.md >> "$GITHUB_STEP_SUMMARY"
+          elif [ -f "$CC_VISUAL_BASE/.no-base-harness" ]; then
+            echo 'no base harness — compare skipped' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'Capture or comparison did not complete.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Upload comparison and capture artifacts
+        if: ${{ always() && (steps.compare.outcome == 'failure' || steps.capture.outcome == 'failure') }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: control-center-visual-results
+          path: packages/control-center/test-results/
+          if-no-files-found: warn
+          retention-days: 14
+      # The approval label never waives functional or accessibility failures.
+      - name: Require functional checks and approved visual changes
+        if: ${{ always() }}
+        shell: bash
+        env:
+          BASE_OUTCOME: ${{ steps.base.outcome }}
+          CAPTURE_OUTCOME: ${{ steps.capture.outcome }}
+          COMPARE_OUTCOME: ${{ steps.compare.outcome }}
+          VISUAL_APPROVED: ${{ contains(github.event.pull_request.labels.*.name, 'visual-change-approved') }}
+        run: |
+          set -euo pipefail
+          if [ "$BASE_OUTCOME" != success ] || [ "$CAPTURE_OUTCOME" != success ]; then
+            echo 'Base and PR functional, keyboard and accessibility assertions must pass.'
+            exit 1
+          fi
+          if [ "$COMPARE_OUTCOME" = success ]; then
+            exit 0
+          fi
+          if [ "$COMPARE_OUTCOME" = failure ] && [ "$VISUAL_APPROVED" = true ] &&
+            jq -e '.infrastructureFailure == false and (.states | any(.state == "changed" or .state == "removed"))' \
+              packages/control-center/test-results/visual/comparison.json; then
+            echo 'Visual differences approved by visual-change-approved.'
+            exit 0
+          fi
+          echo 'Visual comparison failed; approval only waives changed or removed screenshots.'
+          exit 1

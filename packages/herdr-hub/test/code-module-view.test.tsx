@@ -1,11 +1,12 @@
 // @vitest-environment happy-dom
 import type { CodeQueue, CodeQueueQuery, CodeReference } from "@knpkv/codecommit-web/host"
+import { PortalProvider } from "@knpkv/rly/foundations"
 import { Effect } from "effect"
 import { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { makeCodeModuleViews } from "../src/code-module-view.js"
-import type { CodeModuleReads } from "../src/code-client.js"
+import { CodeReadFailed, type CodeModuleReads } from "../src/code-client.js"
 import type { ModulePageMount } from "../src/modules.js"
 
 describe("Code module reads", { concurrent: false }, () => {
@@ -30,7 +31,9 @@ describe("Code module reads", { concurrent: false }, () => {
     reads: CodeModuleReads,
     search: string,
     active = true,
-    page: "pull-requests" | "reviews" | "diffs" = "pull-requests"
+    page: "pull-requests" | "reviews" | "diffs" = "pull-requests",
+    closeSelection: ModulePageMount["closeSelection"] = () => undefined,
+    onHubMachine = false
   ) => {
     if (root === null) {
       const host = document.createElement("div")
@@ -38,10 +41,81 @@ describe("Code module reads", { concurrent: false }, () => {
       root = createRoot(host)
     }
     const navigate = vi.fn<ModulePageMount["navigate"]>()
-    const module = makeCodeModuleViews({ reads, onHubMachine: false })
-    await act(async () => root?.render(module.pages[page](new URLSearchParams(search), { active, navigate })))
+    const module = makeCodeModuleViews({ reads, onHubMachine })
+    await act(async () =>
+      root?.render(
+        <PortalProvider>
+          {module.pages[page](new URLSearchParams(search), { active, navigate, closeSelection })}
+        </PortalProvider>
+      )
+    )
     return navigate
   }
+
+  it("uses the queue's current owner origin locally, with no remote, missing or failed-reading fallback", async () => {
+    const unavailable = {
+      _tag: "Unavailable",
+      reason: "cache_unavailable",
+      host: null
+    } satisfies CodeQueue
+    const read = vi.fn(() => ({ ...unavailable, ownerUi: "http://127.0.0.1:4780" }))
+    const reads = { ...defaults, queue: () => Effect.sync(read) }
+    const link = () => document.querySelector<HTMLAnchorElement>('a[href^="http://127.0.0.1:"]')
+    const search = "filter=open&search=&offset=0"
+    await render(reads, search, true, "pull-requests", () => undefined, true)
+    await act(async () => vi.waitFor(() => expect(read).toHaveBeenCalledOnce()))
+    expect(link()?.href).toBe("http://127.0.0.1:4780/")
+    await render(reads, search)
+    expect(link()).toBeNull()
+    const next = vi.fn(() => ({ ...unavailable, ownerUi: "http://127.0.0.1:4781" }))
+    const changed = { ...defaults, queue: () => Effect.sync(next) }
+    await render(changed, search, true, "pull-requests", () => undefined, true)
+    await act(async () => vi.waitFor(() => expect(next).toHaveBeenCalledOnce()))
+    expect(link()?.href).toBe("http://127.0.0.1:4781/")
+    const failed = vi.fn(() => new CodeReadFailed({ reason: "network" }))
+    await render(
+      { ...defaults, queue: () => Effect.sync(failed).pipe(Effect.flatMap(Effect.fail)) },
+      search,
+      true,
+      "pull-requests",
+      () => undefined,
+      true
+    )
+    await act(async () => vi.waitFor(() => expect(failed).toHaveBeenCalledOnce()))
+    expect(document.body.textContent).toContain("hub could not be reached")
+    expect(link()).toBeNull()
+    const absent = vi.fn(() => unavailable)
+    await render(
+      { ...defaults, queue: () => Effect.sync(absent) },
+      search,
+      true,
+      "pull-requests",
+      () => undefined,
+      true
+    )
+    await act(async () => vi.waitFor(() => expect(absent).toHaveBeenCalledOnce()))
+    expect(document.body.textContent).not.toContain("hub could not be reached")
+    expect(link()).toBeNull()
+    await render(reads, search, false, "pull-requests", () => undefined, true)
+    expect(read).toHaveBeenCalledOnce()
+  })
+
+  it("closes an exact target through the shell while keeping the current queue selectors", async () => {
+    const closeSelection = vi.fn<ModulePageMount["closeSelection"]>()
+    const navigate = await render(
+      defaults,
+      `filter=all&search=ready&offset=50&ref=${ref}`,
+      true,
+      "pull-requests",
+      closeSelection
+    )
+    await act(async () => vi.waitFor(() => expect(document.querySelector('[role="dialog"]')).not.toBeNull()))
+    const close = document.querySelector<HTMLButtonElement>('button[aria-label="Close pull request"]')
+    if (close === null) return expect.unreachable()
+    await act(async () => close.click())
+    expect(closeSelection).toHaveBeenCalledExactlyOnceWith("?filter=all&search=ready&offset=50#code/pull-requests")
+    expect(navigate).not.toHaveBeenCalled()
+  })
 
   it("repairs only active Code selectors without taking focus or rewriting Fleet approval targets", async () => {
     const read = vi.fn((_query: CodeQueueQuery) => queue)
@@ -92,16 +166,20 @@ describe("Code module reads", { concurrent: false }, () => {
   })
 
   it("shows permission-required instructions without a remote loopback link or publication controls", async () => {
-    await render(
-      { ...defaults, queue: () => Effect.succeed({ _tag: "Unavailable", reason: "permission_required", host: null }) },
-      "filter=open&search=&offset=0"
+    const read = vi.fn(
+      () =>
+        ({
+          _tag: "Unavailable",
+          reason: "permission_required",
+          host: null
+        }) satisfies CodeQueue
     )
-    await vi.waitFor(async () => {
-      await act(async () => {})
-      expect(document.body.textContent).toContain("saved always-allow grant")
-    })
+    await render({ ...defaults, queue: () => Effect.sync(read) }, "filter=open&search=&offset=0")
+    await act(async () => vi.waitFor(() => expect(read).toHaveBeenCalledOnce()))
+    expect(document.body.textContent).toContain("saved always-allow grant")
     expect(document.querySelector('a[href^="http://127.0.0.1"]')).toBeNull()
-    expect(document.body.textContent).toContain("cannot be opened from this device")
+    expect(document.body.textContent).toContain("Use the Code owner UI on the credential host")
+    expect(document.body.textContent).not.toContain("cannot be opened from this device")
     expect([...document.querySelectorAll("button")].map((button) => button.textContent)).toEqual(["Read again"])
   })
 

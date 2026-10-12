@@ -1,5 +1,40 @@
 # @knpkv/codecommit
 
+## 0.18.3
+
+### Patch Changes
+
+- Updated dependencies [[`5db8146`](https://github.com/knpkv/npm/commit/5db8146fa812d17d2c2c630cde641be5d654bdac)]:
+  - @knpkv/browser-pairing@0.8.0
+  - @knpkv/codecommit-web@0.35.1
+
+## 0.18.2
+
+### Patch Changes
+
+- Updated dependencies [[`929ef05`](https://github.com/knpkv/npm/commit/929ef055945cffcdb9d78fc2708ee1871c1126e3), [`929ef05`](https://github.com/knpkv/npm/commit/929ef055945cffcdb9d78fc2708ee1871c1126e3)]:
+  - @knpkv/codecommit-web@0.35.0
+  - @knpkv/browser-pairing@0.7.0
+
+## 0.18.1
+
+### Patch Changes
+
+- Updated dependencies [[`d9b889e`](https://github.com/knpkv/npm/commit/d9b889e13690c701f94448d831efbc0ae875624f)]:
+  - @knpkv/browser-pairing@0.6.0
+  - @knpkv/codecommit-web@0.34.1
+
+## 0.18.0
+
+### Minor Changes
+
+- [#837](https://github.com/knpkv/npm/pull/837) [`a8e6ea2`](https://github.com/knpkv/npm/commit/a8e6ea23653950ac8d1c9b6e6bca337506f4972f) Thanks [@konopkov](https://github.com/konopkov)! - A running server hands out fresh sign-in links to its owner. `codecommit web` reuses it: it opens a fresh sign-in link instead of starting a second server, and `codecommit web login` prints one. When the port is taken and nothing answers through the control file, `codecommit web` says so and exits instead of moving to the next port. If the server cannot write its control file it warns at startup and keeps running.
+
+### Patch Changes
+
+- Updated dependencies [[`a8e6ea2`](https://github.com/knpkv/npm/commit/a8e6ea23653950ac8d1c9b6e6bca337506f4972f)]:
+  - @knpkv/codecommit-web@0.34.0
+
 ## 0.17.7
 
 ### Patch Changes

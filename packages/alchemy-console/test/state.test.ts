@@ -19,7 +19,9 @@ layer(NodeServices.layer)("state metadata boundary", (it) => {
         providerId: null,
         account: null,
         region: null,
-        consoleUrl: null
+        consoleUrl: null,
+        updatedAt: null,
+        downstream: []
       })
       expect(JSON.stringify(resource)).not.toContain("fixture-secret")
       expect(JSON.stringify(resource)).not.toContain("fixture-assets")

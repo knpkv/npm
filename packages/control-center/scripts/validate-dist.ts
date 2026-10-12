@@ -85,7 +85,10 @@ const program = Effect.gen(function*() {
       "dist/server/server/auth/index.d.ts",
       "dist/server/server/cli.js",
       "dist/server/server/persistence/index.d.ts",
-      "dist/server/build-graph.json"
+      "dist/server/build-graph.json",
+      "dist/views/index.js",
+      "dist/views/style.css",
+      "dist/views-types/views.d.ts"
     ]
   ) {
     if (!(yield* fs.exists(path.join(packageRoot, artifact)))) failures.push(`missing ${artifact}`)
@@ -93,6 +96,7 @@ const program = Effect.gen(function*() {
 
   const clientArtifacts = yield* filesWithin(fs, path, clientRoot)
   const serverArtifacts = yield* filesWithin(fs, path, serverRoot)
+  const viewDeclarations = yield* filesWithin(fs, path, path.join(packageRoot, "dist/views-types"))
   const serverFiles = serverArtifacts.map((file) => path.relative(serverRoot, file).replaceAll("\\", "/"))
   if (serverFiles.some((file) => file.startsWith("client/"))) failures.push("server build emitted browser source")
 
@@ -217,7 +221,14 @@ void [
   const forbiddenFactoryConsumerSource = `import { authLayerFromDatabase, persistenceLayerFromDatabase } from ${
     JSON.stringify(path.join(serverRoot, "server/index.js"))
   }\nvoid authLayerFromDatabase\nvoid persistenceLayerFromDatabase\n`
+  const viewsConsumerPath = path.join(packageRoot, "views-consumer.mts")
+  const viewsConsumerSource = `import { BrowserSessionStatusView } from "@knpkv/control-center/views"
+import type { BrowserSessionStatusViewProps, PortfolioOverviewViewProps, SettingsFormProps, ConnectionSynchronizationViewProps } from "@knpkv/control-center/views"
+export const status = (props: BrowserSessionStatusViewProps) => BrowserSessionStatusView(props)
+export type ViewInputs = PortfolioOverviewViewProps | SettingsFormProps | ConnectionSynchronizationViewProps
+`
   const virtualSources = new Map([
+    [viewsConsumerPath, viewsConsumerSource],
     [forbiddenFactoryConsumerPath, forbiddenFactoryConsumerSource],
     [offlineBackupConsumerPath, offlineBackupConsumerSource],
     [packedConsumerPath, packedConsumerSource],
@@ -241,6 +252,13 @@ void [
     failures.push(
       `packed PluginDefinitionV1 consumer typecheck failed: ${formatTypeScriptDiagnostic(diagnostic)}`
     )
+  }
+
+  const viewsDiagnostics = ts.getPreEmitDiagnostics(
+    ts.createProgram({ rootNames: [viewsConsumerPath], options: compilerOptions, host: compilerHost })
+  )
+  for (const diagnostic of viewsDiagnostics) {
+    failures.push(`views consumer typecheck failed: ${formatTypeScriptDiagnostic(diagnostic)}`)
   }
 
   const publicApplicationServicesDiagnostics = ts.getPreEmitDiagnostics(
@@ -287,7 +305,7 @@ void [
   }
   const declarationDiagnostics = ts.getPreEmitDiagnostics(
     ts.createProgram({
-      rootNames: serverArtifacts.filter((file) => file.endsWith(".d.ts")),
+      rootNames: [...serverArtifacts, ...viewDeclarations].filter((file) => file.endsWith(".d.ts")),
       options: declarationCompilerOptions
     })
   )

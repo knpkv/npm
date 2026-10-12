@@ -86,6 +86,32 @@ layer(NodeServices.layer)("local readers", (it) => {
       expect(yield* Effect.flip(readLocalState(root, "2.0.0-beta.77"))).toMatchObject({ reason: "outside-root" })
     }).pipe(Effect.scoped))
 
+  it.effect("distinguishes missing, proven-empty, hidden, malformed and inaccessible output state", () =>
+    Effect.gen(function*() {
+      const { fs, path, root } = yield* setup
+      const dir = path.join(root, ".alchemy", "state", "docs", "preview")
+      yield* fs.makeDirectory(dir, { recursive: true })
+      const file = path.join(dir, "__stack_output__.json")
+      const read = readLocalState(root, "2.0.0-beta.74")
+      expect((yield* read).stacks[0]?.outputs).toBeNull()
+      yield* fs.writeFileString(file, "{}")
+      expect((yield* read).stacks[0]?.outputs).toEqual([])
+      yield* fs.writeFileString(file, JSON.stringify({ Endpoint: "fixture-secret" }))
+      expect((yield* read).stacks[0]?.outputs).toEqual([{
+        key: "Endpoint",
+        value: { _tag: "Hidden" },
+        description: null
+      }])
+      yield* fs.writeFileString(file, "{")
+      expect((yield* read).stacks[0]?.outputs).toBeNull()
+      yield* fs.remove(file)
+      const outside = yield* fs.makeTempDirectoryScoped()
+      const foreign = path.join(outside, "output.json")
+      yield* fs.writeFileString(foreign, "{}")
+      yield* fs.symlink(foreign, file)
+      expect((yield* read).stacks[0]?.outputs).toBeNull()
+    }).pipe(Effect.scoped))
+
   it.effect("resolves the project's pnpm importer, not another workspace's version", () =>
     Effect.gen(function*() {
       const { fs, path, root } = yield* setup

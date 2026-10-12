@@ -1,5 +1,36 @@
 # @knpkv/jira-clockify
 
+## 1.10.2
+
+### Patch Changes
+
+- Updated dependencies [[`5db8146`](https://github.com/knpkv/npm/commit/5db8146fa812d17d2c2c630cde641be5d654bdac)]:
+  - @knpkv/browser-pairing@0.8.0
+
+## 1.10.1
+
+### Patch Changes
+
+- Updated dependencies [[`929ef05`](https://github.com/knpkv/npm/commit/929ef055945cffcdb9d78fc2708ee1871c1126e3)]:
+  - @knpkv/browser-pairing@0.7.0
+
+## 1.10.0
+
+### Minor Changes
+
+- [#841](https://github.com/knpkv/npm/pull/841) [`d9b889e`](https://github.com/knpkv/npm/commit/d9b889e13690c701f94448d831efbc0ae875624f) Thanks [@konopkov](https://github.com/konopkov)! - Share the owner-only web control file and bearer login route through the browser-pairing control export. Keep existing sign-in commands and product messages.
+
+  The week-view control file moves to `~/.jcf/web/control.json` in its own private leaf directory, so existing configuration directories keep their permissions. Legacy control files stay untouched and are no longer read.
+
+  The week view now rejects linked or permissive control paths and malformed or foreign bootstrap URLs, matching the stricter shared checks.
+
+  Breaking for direct importers: the inferred service requirements and error types of `jira-clockify`'s `WebControl.writeControlFile` / `removeControlFile` and `jcf-web`'s `makeCommand` change, and `jcf-web` no longer exports `loginControlRouter` (use the one from `@knpkv/browser-pairing/control`).
+
+### Patch Changes
+
+- Updated dependencies [[`d9b889e`](https://github.com/knpkv/npm/commit/d9b889e13690c701f94448d831efbc0ae875624f)]:
+  - @knpkv/browser-pairing@0.6.0
+
 ## 1.9.1
 
 ### Patch Changes

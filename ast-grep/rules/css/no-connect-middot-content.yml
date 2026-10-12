@@ -1,0 +1,21 @@
+id: no-connect-middot-content
+language: css
+severity: error
+message: "Connect copy must not join facts with a middot; use a comma or separate elements"
+
+rule:
+  kind: declaration
+  all:
+    - has:
+        kind: property_name
+        regex: "(?i)^content$"
+    - has:
+        kind: string_value
+        regex: "·|\\\\0*[bB]7([^0-9a-fA-F]|$)"
+
+files:
+  - "packages/herdr-connect/src/**/*.css"
+
+note: |
+  Generated separators obey the rendered copy rule too. The browser checks visible text and
+  pseudo-element content; this rule catches literal middots and their CSS hexadecimal escape.

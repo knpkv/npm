@@ -2,6 +2,82 @@
 
 Released as `@knpkv/herdr-approvals` up to 0.18.0; the headings below are that package's history.
 
+## 0.31.0
+
+### Minor Changes
+
+- [#859](https://github.com/knpkv/npm/pull/859) [`820b6b7`](https://github.com/knpkv/npm/commit/820b6b7c6dfbb7a6e4b25978233ec80d981ec7a5) Thanks [@konopkov](https://github.com/konopkov)! - Add agent-authored creature self-state to the authenticated directory, backed by the shared post database with partial updates, archive cleanup and rate limits. Add host-authorized relay me and the stdio relay_me MCP tool with shared current-pane resolution and transport.
+
+### Patch Changes
+
+- Updated dependencies [[`820b6b7`](https://github.com/knpkv/npm/commit/820b6b7c6dfbb7a6e4b25978233ec80d981ec7a5)]:
+  - @knpkv/herdr-connect@0.17.0
+
+## 0.30.0
+
+### Minor Changes
+
+- [#854](https://github.com/knpkv/npm/pull/854) [`3901a04`](https://github.com/knpkv/npm/commit/3901a04c94cc07c5a32416abeb96cf09a780cfd8) Thanks [@konopkov](https://github.com/konopkov)! - Replace the shell Chef mark, favicon and install icons with the approved M2 Flat-plus drawing. Keep the single Ask Relay launcher, its existing sizes and open styling, and the conversation creatures. Use pixel-specific phone/desktop drawings and instance-local clip paths, including forced colours.
+
+## 0.29.1
+
+### Patch Changes
+
+- Updated dependencies [[`5db8146`](https://github.com/knpkv/npm/commit/5db8146fa812d17d2c2c630cde641be5d654bdac)]:
+  - @knpkv/browser-pairing@0.8.0
+  - @knpkv/codecommit-web@0.35.1
+
+## 0.29.0
+
+### Minor Changes
+
+- [#846](https://github.com/knpkv/npm/pull/846) [`f47bcd8`](https://github.com/knpkv/npm/commit/f47bcd8cb0ff789a068cd6ad1eefb912f28a1f89) Thanks [@konopkov](https://github.com/konopkov)! - Use the approved static Chef logo in the module shell, with square 32px desktop and 24px phone marks. The existing expanded styling indicates whether Ask Relay is open; status announcements and the conversation's Creature poses retain their behavior. Legacy Fleet and dashboard marks remain unchanged. `HubRelay.launcherMark` defaults to `creature`; `chef` explicitly selects the static logo independently of launcher labels.
+
+  Update the app, maskable and notification icons, and serve a separate simplified favicon. Installed app identity and legacy icon URLs remain stable. Committed icon hashes and drawing parity guards verify the approved geometry.
+
+## 0.28.0
+
+### Minor Changes
+
+- [#843](https://github.com/knpkv/npm/pull/843) [`929ef05`](https://github.com/knpkv/npm/commit/929ef055945cffcdb9d78fc2708ee1871c1126e3) Thanks [@konopkov](https://github.com/konopkov)! - Derive the machine-local Code owner link from the current private control file instead of a fixed port.
+  Code queue/status responses gain optional validated `ownerUi` metadata; the host server entry exports
+  its origin-only reader. Missing or invalid metadata has no fallback and exposes no control credential.
+
+  Point unreadable-cache guidance to the owner service and hub log, and document owner-only cache
+  migration and the native SQLite deployment probe. Strengthen the selection-close browser guard to
+  exercise a visible, enabled, hit-testable Close button without forced pointer input.
+
+### Patch Changes
+
+- Updated dependencies [[`929ef05`](https://github.com/knpkv/npm/commit/929ef055945cffcdb9d78fc2708ee1871c1126e3), [`929ef05`](https://github.com/knpkv/npm/commit/929ef055945cffcdb9d78fc2708ee1871c1126e3)]:
+  - @knpkv/codecommit-web@0.35.0
+  - @knpkv/browser-pairing@0.7.0
+
+## 0.27.1
+
+### Patch Changes
+
+- Updated dependencies [[`d9b889e`](https://github.com/knpkv/npm/commit/d9b889e13690c701f94448d831efbc0ae875624f)]:
+  - @knpkv/browser-pairing@0.6.0
+  - @knpkv/codecommit-web@0.34.1
+
+## 0.27.0
+
+### Minor Changes
+
+- [#833](https://github.com/knpkv/npm/pull/833) [`56d9856`](https://github.com/knpkv/npm/commit/56d98569cf3c758a4e69f1331dc9048335192a26) Thanks [@konopkov](https://github.com/konopkov)! - Fix notification taps by navigating a controlled same-origin window, then focusing the returned client. Failed navigation opens the deep link with the click's remaining window-interaction grant. Preserve a bounded optional Voice blocker event ID in the push payload and stage URL. Connect opens the agent stage now; scrolling to the post waits for the posts view. Approval deep links keep their existing targets.
+
+- [#839](https://github.com/knpkv/npm/pull/839) [`012b752`](https://github.com/knpkv/npm/commit/012b752f033598df7d129f72bac3f3fcea36691c) Thanks [@konopkov](https://github.com/konopkov)! - Running `relay` without a subcommand opens the configured Relay UI when the tailnet hub answers. When it is unreachable, the command reports the local dashboard URL or that hostd is not running, without opening a browser or starting hostd.
+
+- [#834](https://github.com/knpkv/npm/pull/834) [`884a08c`](https://github.com/knpkv/npm/commit/884a08ca0583b2c9f4e5e7e189f0cb893d6aa083) Thanks [@konopkov](https://github.com/konopkov)! - Add `ModulePageMount.closeSelection(parentHref)` for targets opened through shell navigation. Code Close and Escape return through Back when the current shell opened the target from that exact parent; direct, reloaded or remounted targets close with replace instead. Other module-mount hosts must supply the new method.
+
+  Preserve foreign history-state keys and selection origin through query repairs. Closing dialogs retain focus ownership after cleanup, and Forward reopens the target without adding duplicate queue entries.
+
+### Patch Changes
+
+- Updated dependencies [[`a8e6ea2`](https://github.com/knpkv/npm/commit/a8e6ea23653950ac8d1c9b6e6bca337506f4972f)]:
+  - @knpkv/codecommit-web@0.34.0
+
 ## 0.26.0
 
 ### Minor Changes

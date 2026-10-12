@@ -1,4 +1,6 @@
 import { NodeFileSystem, NodeHttpServer, NodeServices } from "@effect/platform-node"
+import { issueCredential } from "@knpkv/browser-pairing"
+import { controlAwareCors, loginControlRouter } from "@knpkv/browser-pairing/control"
 import * as OwnerSession from "@knpkv/browser-pairing/owner-session"
 import {
   AwsClient,
@@ -18,7 +20,7 @@ import {
   PermissionGateLiveLayer,
   PermissionGateLiveTag
 } from "@knpkv/codecommit-core/PermissionService/PermissionGateLive.js"
-import { Config, Deferred, Effect, Layer, Option, Ref, Stream } from "effect"
+import { Config, Console, Deferred, Effect, Layer, Option, Redacted, Ref, Stream } from "effect"
 import { Etag, FetchHttpClient, HttpPlatform, HttpRouter } from "effect/http"
 import { HttpApiBuilder } from "effect/http-api"
 import * as Path from "effect/Path"
@@ -46,6 +48,7 @@ import { InnerCodeCommitReadClient, makePermissionedReadClient } from "./interna
 import { updatePortOnConflict } from "./internal/PortRetry.js"
 import { resolveCodeCommitPublicOriginForBind } from "./internal/PublicOrigin.js"
 import { staticClient } from "./internal/StaticClient.js"
+import { registerControlFile } from "./internal/WebControl.js"
 import { commentPosterLayer, relayMountLayer } from "./relay/RelayMount.js"
 import { makeRelayFindingPublisher, RelayFindingPublisher } from "./review/RelayFindingPublisher.js"
 
@@ -250,7 +253,7 @@ const AllowedOrigins = Config.String("ALLOWED_ORIGINS").pipe(
 // CORS layer via Effect Config — consistent with Port config
 const CorsLive = Layer.unwrap(
   Effect.map(AllowedOrigins, (allowedOrigins) =>
-    HttpRouter.cors({
+    controlAwareCors({
       allowedOrigins,
       allowedMethods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
       allowedHeaders: ["Content-Type", "Authorization", "X-CSRF-Token"]
@@ -274,6 +277,8 @@ export interface CodeCommitServerOptions {
   /** Completed with the bootstrap URL once the server is listening. */
   readonly ready?: Deferred.Deferred<string>
   readonly security: OwnerSession.OwnerSessionService
+  /** Server-private bearer token; enables the owner-only login route, outside CORS and cookie auth. */
+  readonly controlToken?: Redacted.Redacted<string>
 }
 
 export const makeServer = (options: CodeCommitServerOptions) => {
@@ -283,11 +288,17 @@ export const makeServer = (options: CodeCommitServerOptions) => {
       // The printed URL carries the bootstrap code, so its origin must be the server or its dev proxy.
       Effect.andThen(OwnerSession.resolvePublicOrigin(options.publicOrigin, options.security.authorityOrigin)),
       Effect.map((publicOrigin) => {
-        const server = HttpRouter.serve(AllRoutes, {
-          // Coordinate tokens include provider-valid repository names up to 100
-          // characters; keep one bounded segment for the review route.
-          routerConfig: { maxParamLength: coordinateRouterMaxParamLength }
-        }).pipe(
+        const server = HttpRouter.serve(
+          Layer.mergeAll(
+            AllRoutes,
+            options.controlToken === undefined ? Layer.empty : loginControlRouter(options.controlToken, publicOrigin)
+          ),
+          {
+            // Coordinate tokens include provider-valid repository names up to 100
+            // characters; keep one bounded segment for the review route.
+            routerConfig: { maxParamLength: coordinateRouterMaxParamLength }
+          }
+        ).pipe(
           // Node's default socket timeout is off, so server-sent events stay open as long as the page.
           Layer.provide(NodeHttpServer.layer(createServer, { host: hostname, port: options.port })),
           Layer.provide(Etag.layer),
@@ -315,60 +326,81 @@ export const Port = Config.Int("PORT").pipe(Config.withDefault(3000))
 const PublicOrigin = Config.option(Config.String("CODECOMMIT_WEB_PUBLIC_ORIGIN"))
 
 /** How `serveCodeCommit` binds. Every field is optional; the defaults are the web package's own entry. */
-export interface CodeCommitServeOptions {
+export interface CodeCommitServeOptions<E = never> {
   /** Loopback hostname to listen on. Default `127.0.0.1`. */
   readonly hostname?: string
   /** First port to try; a taken port moves to the next, up to ten times. Default `PORT`, else 3000. */
   readonly port?: number
   /** Runs once the server is listening and the bootstrap URL is printed, e.g. to open a browser. */
   readonly onReady?: (url: string) => Effect.Effect<void>
+  /** How many taken ports to skip before failing. Default 10; `codecommit web` uses 0 so it never starts a second server. */
+  readonly portRetries?: number
+  /** Replace the default stdout block with this credential-URL announcement, after listening. */
+  readonly announce?: (url: string) => Effect.Effect<void, E>
 }
 
 /**
  * Serve CodeCommit web until the server stops: mint fresh owner secrets for each bind attempt, move
  * to the next port when one is taken, print the bootstrap URL (on `CODECOMMIT_WEB_PUBLIC_ORIGIN` when
- * set and the requested port was free), then run `onReady`. `codecommit web` and this package's
+ * set and the requested port was free), then run `onReady`. An `announce` callback replaces
+ * the default stdout block. The owner-only control file is published after listening and removed
+ * when this foreground scope ends, unless a newer server replaced its token. `codecommit web` and this package's
  * entry both start the server this way.
  */
-export const serveCodeCommit = Effect.fn("CodeCommitServer.serve")(function*(options: CodeCommitServeOptions = {}) {
-  const stdio = yield* Stdio.Stdio
-  const hostname = options.hostname ?? "127.0.0.1"
-  // The Vite dev proxy forwards to PORT, whatever port this server was asked to start on.
-  const proxyPort = yield* Port.pipe(Effect.orDie)
-  const portRef = yield* Ref.make(options.port ?? proxyPort)
-  const retriesRef = yield* Ref.make(10)
-  const listening = yield* Ref.make(false)
-  const publicOriginOverride = yield* PublicOrigin.pipe(Effect.orDie)
+export const serveCodeCommit = Effect.fn("CodeCommitServer.serve")(
+  function*<E = never>(options: CodeCommitServeOptions<E> = {}) {
+    const stdio = yield* Stdio.Stdio
+    const hostname = options.hostname ?? "127.0.0.1"
+    // The Vite dev proxy forwards to PORT, whatever port this server was asked to start on.
+    const proxyPort = yield* Port.pipe(Effect.orDie)
+    const portRef = yield* Ref.make(options.port ?? proxyPort)
+    const retriesRef = yield* Ref.make(options.portRetries ?? 10)
+    const listening = yield* Ref.make(false)
+    const publicOriginOverride = yield* PublicOrigin.pipe(Effect.orDie)
 
-  return yield* Effect.forever(
-    Effect.gen(function*() {
-      const p = yield* Ref.get(portRef)
-      const directOrigin = OwnerSession.loopbackOrigin(hostname, p)
-      // Rotate every authority-bearing secret on each bind attempt so a URL
-      // emitted for an occupied port cannot authenticate to a later retry.
-      const security = yield* makeOwnerSession(directOrigin)
-      const publicOrigin = yield* resolveCodeCommitPublicOriginForBind(
-        Option.getOrUndefined(publicOriginOverride),
-        proxyPort,
-        p,
-        directOrigin
-      )
-      return yield* OwnerSession.serveWithBootstrapUrl(
-        (ready) => makeServer({ hostname, port: p, publicOrigin, ready, security }),
-        (url) =>
-          Effect.gen(function*() {
-            yield* Ref.set(listening, true)
-            yield* Effect.logInfo(`Authenticated server ready at ${directOrigin}`)
-            // The one line a new user needs, set apart from the logs above it.
-            yield* Stream.make(
-              `\nCodeCommit is ready. Open this sign-in link (it works once, within 60 seconds):\n\n  ${url}\n\n`
-            ).pipe(Stream.run(stdio.stdout()))
-            if (options.onReady !== undefined) yield* options.onReady(url)
-          })
-      )
-    }).pipe(updatePortOnConflict(portRef, retriesRef, listening))
-  )
-})
+    return yield* Effect.forever(
+      Effect.gen(function*() {
+        const p = yield* Ref.get(portRef)
+        const directOrigin = OwnerSession.loopbackOrigin(hostname, p)
+        // Rotate every authority-bearing secret on each bind attempt so a URL
+        // emitted for an occupied port cannot authenticate to a later retry.
+        const security = yield* makeOwnerSession(directOrigin)
+        const controlToken = yield* issueCredential()
+        const publicOrigin = yield* resolveCodeCommitPublicOriginForBind(
+          Option.getOrUndefined(publicOriginOverride),
+          proxyPort,
+          p,
+          directOrigin
+        )
+        return yield* OwnerSession.serveWithBootstrapUrl(
+          (ready) => makeServer({ hostname, port: p, publicOrigin, ready, security, controlToken }),
+          (url) =>
+            Effect.gen(function*() {
+              yield* Ref.set(listening, true)
+              // Optional: without the control file the server still runs; only `codecommit web login` and
+              // reuse by a second `codecommit web` cannot reach it.
+              yield* registerControlFile({ origin: directOrigin, token: Redacted.value(controlToken) }).pipe(
+                Effect.catchTag("ControlFileError", (error) =>
+                  Console.error(
+                    `codecommit web: ${error.message} This server keeps running, but codecommit web login and another codecommit web cannot reach it.`
+                  ))
+              )
+              yield* Effect.logInfo(`Authenticated server ready at ${directOrigin}`)
+              // The one line a new user needs, set apart from the logs above it.
+              if (options.announce !== undefined) {
+                yield* options.announce(url)
+              } else {
+                yield* Stream.make(
+                  `\nCodeCommit is ready. Open this sign-in link (it works once, within 60 seconds):\n\n  ${url}\n\n`
+                ).pipe(Stream.run(stdio.stdout()))
+              }
+              if (options.onReady !== undefined) yield* options.onReady(url)
+            })
+        )
+      }).pipe(updatePortOnConflict(portRef, retriesRef, listening))
+    )
+  }
+)
 
 /** The web package's entry: `serveCodeCommit` with its defaults. */
 export const CodeCommitServerLive = serveCodeCommit()

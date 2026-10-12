@@ -1,124 +1,23 @@
-import { Button, StateLabel, Text } from "@knpkv/rly/primitives"
 import { type ReactElement, useEffect, useState } from "react"
-
-import type { RateLimitedApiError } from "../../api/errors.js"
-import type { PluginSynchronizationState } from "../../api/plugins.js"
-import styles from "./ServicesPage.module.css"
 import {
-  isAccountSyncFailure,
-  type SyncLine,
-  syncFailureSentence,
-  syncLine,
-  syncRequestBudgetSentence
-} from "./syncPresentation.js"
+  ConnectionSynchronizationView,
+  type ConnectionSynchronizationViewProps
+} from "./ConnectionSynchronizationView.js"
 
-/** Browser lifecycle for one connection's durable manual synchronization state. */
-export type ConnectionSynchronizationViewState =
-  | { readonly _tag: "loading" }
-  | { readonly _tag: "syncing"; readonly previous: PluginSynchronizationState | null }
-  | { readonly _tag: "failed"; readonly requestBudget?: RateLimitedApiError }
-  | { readonly _tag: "ready"; readonly synchronization: PluginSynchronizationState }
+export type { ConnectionSynchronizationViewState } from "./ConnectionSynchronizationView.js"
 
-/** The current time, refreshed every half minute so relative times ("2 min ago") stay true. */
-const useNow = (): Date => {
-  const [now, setNow] = useState(() => new Date())
+type ConnectionSynchronizationProps = Omit<ConnectionSynchronizationViewProps, "now">
+
+/** Keep the application's half-minute clock outside the controlled synchronization view. */
+export const ConnectionSynchronization = (props: ConnectionSynchronizationProps): ReactElement | null => {
+  const active = props.state?._tag === "ready" || (props.state?._tag === "syncing" && props.state.previous !== null)
+  const [clock, setClock] = useState(() => ({ active, now: active ? new Date() : new Date(0) }))
+  // Resample when details appear while retaining the view's existing controls and focus.
+  if (clock.active !== active) setClock({ active, now: active ? new Date() : new Date(0) })
   useEffect(() => {
-    const timer = setInterval(() => setNow(new Date()), 30_000)
+    if (!active) return
+    const timer = setInterval(() => setClock({ active: true, now: new Date() }), 30_000)
     return () => clearInterval(timer)
-  }, [])
-  return now
-}
-
-const StateDetails = ({
-  hideAccountFailure,
-  isSyncing,
-  synchronization
-}: {
-  readonly hideAccountFailure: boolean
-  readonly isSyncing: boolean
-  readonly synchronization: PluginSynchronizationState
-}): ReactElement => {
-  // While an attempt is in flight, surface the in-progress state instead of the stale prior result.
-  const now = useNow()
-  const line: SyncLine = isSyncing ? { label: "Syncing…", tone: "progress" } : syncLine(synchronization, now)
-  const failureClass = synchronization.failure?.failureClass
-  const sentence =
-    isSyncing || (hideAccountFailure && failureClass !== undefined && isAccountSyncFailure(failureClass))
-      ? null
-      : syncFailureSentence(synchronization)
-  return (
-    <div className={styles.syncState}>
-      <StateLabel label={line.label} size="compact" tone={line.tone} />
-      {sentence === null ? null : (
-        <Text as="p" tone="secondary" variant="meta">
-          {sentence}
-        </Text>
-      )}
-    </div>
-  )
-}
-
-/** Compact read/action presentation for the shared manual-sync API. */
-export const ConnectionSynchronization = ({
-  canSynchronize,
-  hideAccountFailure = false,
-  onRefresh,
-  onSynchronize,
-  state
-}: {
-  readonly canSynchronize: boolean
-  /** On a resource inside an account: credential failures are stated once on the account instead. */
-  readonly hideAccountFailure?: boolean
-  readonly onRefresh: () => void
-  readonly onSynchronize: () => void
-  readonly state: ConnectionSynchronizationViewState | undefined
-}): ReactElement | null => {
-  if (state === undefined) return null
-  const isSyncing = state._tag === "syncing"
-  const synchronization =
-    state._tag === "ready" ? state.synchronization : state._tag === "syncing" ? state.previous : null
-  const isQueued = synchronization?.result === "queued"
-  const isServerSyncing = synchronization?.result === "running"
-  return (
-    <div className={styles.synchronization}>
-      {synchronization === null ? (
-        isSyncing ? (
-          <StateLabel label="Syncing…" size="compact" tone="progress" />
-        ) : null
-      ) : (
-        <StateDetails
-          hideAccountFailure={hideAccountFailure}
-          isSyncing={isSyncing && !isQueued}
-          synchronization={synchronization}
-        />
-      )}
-      {state._tag === "loading" ? (
-        <Text tone="secondary" variant="meta">
-          Loading sync state…
-        </Text>
-      ) : null}
-      {state._tag === "failed" ? (
-        <Text as="p" className={styles.setupError} role="alert" variant="body">
-          {state.requestBudget === undefined
-            ? "Sync state is unavailable."
-            : syncRequestBudgetSentence(state.requestBudget)}
-        </Text>
-      ) : null}
-      <div className={styles.syncActions}>
-        <Button
-          disabled={!canSynchronize || state._tag === "loading" || isSyncing || isQueued || isServerSyncing}
-          loading={(isSyncing || isServerSyncing) && !isQueued}
-          onClick={onSynchronize}
-          variant="secondary"
-        >
-          Sync now
-        </Button>
-        {state._tag === "failed" ? (
-          <Button onClick={onRefresh} variant="quiet">
-            Refresh state
-          </Button>
-        ) : null}
-      </div>
-    </div>
-  )
+  }, [active])
+  return <ConnectionSynchronizationView {...props} now={clock.now} />
 }

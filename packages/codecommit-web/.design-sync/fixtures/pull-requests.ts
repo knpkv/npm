@@ -1,12 +1,17 @@
-// Fixtures from packages/codecommit-web/test/workbench-rail.test.ts and packages/codecommit-web/test/pr-row-presentation.test.ts.
-import { AwsProfileName, AwsRegion, type PullRequest, PullRequestId, RepositoryName } from "@knpkv/codecommit-core/Domain.js"
+// Fixtures from packages/codecommit-web/test/{workbench-rail,pr-row-presentation,pr-detail-view,pr-comments-view,pr-lifecycle-view,pr-approvals-view}.test.ts, test/pr-view-fixtures.ts and e2e/approval-unknown.spec.ts.
+import { AwsProfileName, AwsRegion, PullRequestId, RepositoryName } from "@knpkv/codecommit-core/Domain.js"
 import type { PRRowProps, WorkbenchRailViewProps } from "@knpkv/codecommit-web/views"
+import type { PRApprovalsViewProps, PRCommentsViewProps, PRDetailViewProps, PRRequirementDialogsViewProps } from "@knpkv/codecommit-web/views"
+import type { CommentThreadJsonEncoded, PRCommentLocationJson, PullRequest } from "@knpkv/codecommit-core/Domain.js"
+import { calculateHealthScore, healthUnknownReason } from "@knpkv/codecommit-core/HealthScore.js"
+import { Cause, Option } from "effect"
+import * as AsyncResult from "effect/reactivity/AsyncResult"
 
 type Queue = WorkbenchRailViewProps["queue"]
 type Row = Queue["rows"][number]
 
 // Anchor age labels to module load so captures and live cards show the same age.
-const now = Date.now()
+export const now = Date.now()
 const hour = 3_600_000
 const day = 86_400_000
 
@@ -19,7 +24,7 @@ export const pullRequest = (id: string, overrides: Partial<PullRequest> = {}): P
   approvalRules: [{ poolMembers: ["owner"], poolMemberArns: [], requiredApprovals: 1, ruleName: "Approvals", satisfied: false }],
   approvedBy: [],
   approvedByArns: [],
-  author: "ana",
+  author: "contributor",
   commentedBy: [],
   creationDate: new Date(now - day),
   destinationBranch: "main",
@@ -74,4 +79,85 @@ export const approvalUnknownQueue: Queue = {
     }))
   ],
   summary: { _tag: "Waiting", count: 1, oldest: reviewOne }
+}
+
+export const noop = () => {}
+
+// The page tests' decoded facts, with the same ages relative to this module's clock.
+export const pagePullRequest = (overrides: Partial<PullRequest> = {}): PullRequest => pullRequest("7", {
+  account: {
+    profile: AwsProfileName.make("primary"), region: AwsRegion.make("eu-west-1"),
+    awsAccountId: "111122223333", repoAccountId: "111122223333"
+  },
+  approvalRules: [], author: "contributor", isApproved: true,
+  title: "feat(queue): simplify retries", description: "**Reason for the change**",
+  creationDate: new Date(now - 2 * day - 3.5 * hour),
+  lastModifiedDate: new Date(now - 3 * hour), fetchedAt: new Date(now - 0.5 * hour),
+  link: "https://example.invalid/pr/7", consoleUrl: "https://example.invalid/pr/7",
+  ...overrides
+})
+
+export const managedRules: PullRequest["approvalRules"] = [{
+  ruleName: "Required approvers", requiredApprovals: 1, poolMembers: ["reviewer"],
+  poolMemberArns: ["CodeCommitApprovers:111122223333:reviewer"], satisfied: false
+}]
+export const repositoryRule: PullRequest["approvalRules"][number] = {
+  ruleName: "Repository rule", fromTemplate: "base-template", requiredApprovals: 1,
+  poolMembers: ["template-reviewer"], poolMemberArns: [], satisfied: true
+}
+
+export const detailActions: PRDetailViewProps["actions"] = {
+  copied: false, isRefreshing: false, isSubscribed: false, sandboxState: "create",
+  onBack: noop, onRefresh: noop, onSubscriptionToggle: noop, onSandbox: noop,
+  onCopyLink: noop, onOpenConsole: noop, onRetryLoad: noop, onOpenAccountsSettings: noop
+}
+export const approvalActions: PRApprovalsViewProps["actions"] = {
+  currentUser: "reviewer", knownUserArns: new Map(), repoAccountId: "111122223333",
+  permissionPrompt: false, onSetApprovers: noop,
+  onRemoveRule: () => Promise.resolve({ _tag: "Removed" }), onRefresh: () => Promise.resolve(true)
+}
+export const dialogState: PRRequirementDialogsViewProps["granted"] = {
+  visible: false, dontRemind: false, onOpenChange: noop, onDontRemindChange: noop,
+  onCancel: noop, onContinue: noop
+}
+export const requirementDialogs: PRRequirementDialogsViewProps = { granted: dialogState, docker: dialogState }
+
+const reviewComment: CommentThreadJsonEncoded["root"] = {
+  id: "c1", content: "**Review feedback**", author: "reviewer",
+  creationDate: new Date(now - 2 * day - 1.5 * hour).toISOString(), deleted: false, lineNumber: 12
+}
+export const commentLocation: typeof PRCommentLocationJson.Type = {
+  filePath: "src/retry.ts", beforeCommitId: "base", afterCommitId: "head", relativeFileVersion: "AFTER",
+  comments: [{
+    root: reviewComment, replies: []
+  }]
+}
+export const feedbackLocation: typeof PRCommentLocationJson.Type = {
+  ...commentLocation,
+  comments: [{
+    root: { ...reviewComment, id: "review", content: "Deleted feedback", deleted: true },
+    replies: [{
+      root: {
+        id: "reply", author: "contributor", content: "Addressed", deleted: false,
+        creationDate: new Date(now - 2 * day - 0.5 * hour).toISOString()
+      }, replies: []
+    }]
+  }]
+}
+export const readyComments: PRCommentsViewProps["comments"] = AsyncResult.success([commentLocation])
+export const feedbackComments: PRCommentsViewProps["comments"] = AsyncResult.success([feedbackLocation])
+export const emptyComments: PRCommentsViewProps["comments"] = AsyncResult.success([])
+export const loadingComments: PRCommentsViewProps["comments"] = AsyncResult.initial()
+export const failedComments: PRCommentsViewProps["comments"] = AsyncResult.failure(Cause.die("Unavailable"))
+export const commentProps: PRCommentsViewProps = {
+  comments: readyComments, navigation: null, visible: true, now: new Date(now),
+  onCountChange: noop, onNavigateToDiff: noop
+}
+
+// Derive category data from the tested PR facts, rather than inventing a score breakdown.
+export const healthFor = (pr: PullRequest): PRDetailViewProps["health"] => ({
+  score: Option.getOrUndefined(calculateHealthScore(pr, new Date(now))), unknownReason: healthUnknownReason(pr)
+})
+export const unknownHealth: PRDetailViewProps["health"] = {
+  score: undefined, unknownReason: Option.some("creation date missing")
 }

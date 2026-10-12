@@ -37,8 +37,12 @@ const RichText = ({ empty, value }: { readonly empty: string; readonly value: st
     <WorkspaceRichText className={styles.richText} value={value} />
   )
 
+export interface WorkspaceIssueDetailsProps {
+  readonly issue: WorkspaceIssuePresentation
+}
+
 /** Render a complete, read-only synchronized issue as a quiet working document. */
-export const WorkspaceIssueDetails = ({ issue }: { readonly issue: WorkspaceIssuePresentation }): ReactElement => (
+export const WorkspaceIssueDetails = ({ issue }: WorkspaceIssueDetailsProps): ReactElement => (
   <article className={styles.document} data-workspace-issue-detail>
     {issue.truncationMessage === null ? null : (
       <Text className={styles.boundaryNotice} tone="secondary">

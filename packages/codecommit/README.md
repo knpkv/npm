@@ -281,19 +281,38 @@ narrower than the hierarchy.
 
 ```bash
 codecommit web [--port 3000] [--hostname 127.0.0.1] [--no-open]
+codecommit web login
 ```
 
-The sign-in link is always printed. A browser opens it only for a person at a
+`codecommit web` asks the running server for a fresh sign-in link before starting one.
+Reuse opens the link and exits successfully, leaving that server untouched. A newly
+started server stays in the foreground until SIGINT/SIGTERM; closing the browser
+never stops it. `codecommit web login` prints a fresh link without opening or starting.
+If the running server refuses login, the command reports it on stderr and exits
+nonzero without starting another server.
+
+The sign-in link is always printed on stdout. A browser opens it only for a person at a
 terminal: `--no-open`, `BROWSER=none`, a set `CI`, or stdout that is not a
 terminal (scripts, test harnesses) print the link and say why no browser opened.
 The shared browser opener reports launch failures without sign-in URLs or
 subprocess error details.
 
-`--port` is the starting port: when it is taken, web mode tries the next one,
+`--port` and `--hostname` apply only when starting. `--port` is the starting port:
+when it is taken, web mode tries the next one,
 up to ten times, and prints the URL it actually bound. During
 development, `CODECOMMIT_WEB_PUBLIC_ORIGIN=http://localhost:5173` advertises the
 Vite dev proxy instead; it applies only while the server holds the requested port,
 and an origin other than that proxy or the server's own fails startup.
+
+Once listening, the server writes `~/.codecommit/web.json` with its direct bound
+loopback origin and a server-private control token. That credential-bearing file
+is owner-only `0600` inside the `0700` cache directory; symbolic links and permissive
+paths are refused. The CLI presents the token to `POST /control/login`, which has
+bearer-only authentication, no cookie authentication and no CORS. It returns a
+one-time sign-in URL on the same public origin as startup. The token and file
+never cross browser/API projections or logs; the URL goes only to stdout and the
+browser opener. Web-command logs and opener warnings go to stderr; TUI logging
+is unchanged. Shutdown removes the file only if it still holds this server's token.
 
 Web mode accepts only loopback hostnames. On startup it opens an owner URL whose
 fragment contains a short-lived, single-use bootstrap token. The token is

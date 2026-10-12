@@ -8,8 +8,19 @@ prints the link without opening a browser. CI, non-interactive stdout and
 `alchemy-console serve` always prints only and runs until SIGINT or SIGTERM.
 Closing a browser tab leaves the foreground server running.
 
-The current browser page performs login, then navigates to JSON at `/api/stacks`.
-Stack screens will follow the approved design references in a separate change.
+The browser shows stacks grouped by app, with desktop columns and compact phone
+rows. Read again starts a fresh discovery request and clears the previous rows.
+Loading, empty, incomplete discovery and owner sign-in failures are explicit.
+Missing metadata reads Unknown; zero resources remains zero. No polling, cached
+rows, plan, apply or destroy runs. Stage names and known resource counts open the
+stack UI. Resources lists actual returned resource metadata; State groups the
+same resources by their returned construct parent and exact type. Resource rows
+open identity and dependency details. Outputs distinguishes Hidden values, proven
+empty state and unavailable formats. No raw JSON click target, Plan tab or Preview
+changes action is present.
+
+The standalone wrapper shows Alchemy console, the actual local listener address
+and owner session status. It adds no Relay host inventory or shell navigation.
 
 Configuration is read at startup:
 
@@ -48,7 +59,7 @@ process-scoped identifiers with no encoded locator. They remain stable across
 scans while a stack remains present, then expire when it disappears or the server
 restarts. They are normalized, authenticated client-visible identifiers; the
 server never persists them. Do not emit them or stack metadata through public
-routes or telemetry. Browsers must not persist private provider coordinates.
+routes or telemetry. Browsers must not persist provider coordinates or authenticated stack/resource metadata.
 
 Discovery reports sanitized reason codes for failed projects, SSO profiles and
 buckets while continuing other sources. A discovered entrypoint with no state
@@ -66,6 +77,37 @@ go only to stdout and the browser opener, never logs or telemetry. Session token
 remain in the server and HttpOnly cookie. Every unsafe API method is refused,
 including apply and destroy. Reads reject foreign origins and cross-site browser
 requests. Listener and request Host are restricted to the bound loopback address.
+
+## Browser views
+
+Import `StackListView`, `StackDetailView` and `ResourceDetailView` from `@knpkv/alchemy-console/views` and its stylesheet from
+`@knpkv/alchemy-console/views/style.css`. Mount them inside a Rly style/theme boundary.
+Views consumers supply the optional React, React DOM and Rly peers; the standalone
+browser shell already bundles them.
+The application supplies normalized presentation data, a product label, host
+sign-in instruction, read actions and real UI destinations. `StackListView` accepts
+optional `stackHref`; without a destination, stages and counts remain text.
+`StackDetailView` has controlled Resources/Outputs/State tabs and `resourceHref`.
+`ResourceDetailView` accepts `stackHref` and `resourceHref`. Views fetch nothing,
+read no configuration and persist no data. The standalone detail wrapper adds
+breadcrumbs and Read again outside the referenced module content. Phone list
+links use separated stage/count lines to keep their 44px targets disjoint. `Ready.checkedAt` describes the actual completed
+request. Replace state with `Loading` before reading; failures and unauthorized
+states contain no previous rows. Only normalized authenticated client-visible
+stack metadata belongs here, never raw provider locators or credentials.
+
+The standalone client uses the typed API and sends same-origin cookies with
+no-store requests. The fragment is removed from history before its bootstrap
+POST. Tokens never enter storage, logs or telemetry. CSS and font assets are
+served from the same listener with a self-only CSP and no application-authored inline
+style markup. Pinned Rly/Radix tabs assign `outline: none` on their tab list and
+`animation-duration: 0s` on an initially mounted panel through trusted CSSOM
+properties. Those framework effects require no CSP relaxation; serialized inline
+style markup remains blocked. The
+decorative empty-state SVG uses the approved Stacks illustration from this MIT
+repository, with presentation attributes rather than inline styles. The State empty panel uses
+the original decorative 56px Stacks2c procedural creature from the same MIT repo;
+both SVGs remain external same-origin assets.
 
 ## Data readers
 
@@ -86,7 +128,7 @@ unresolved Alchemy version return `null`. Invalid lockfiles fail explicitly.
 `.alchemy/state/<app>/<stage>/<encoded-fqn>.json` for beta.74 and beta.77. Other
 versions, including unknown versions, fail with `unsupported-version`. Resource
 metadata includes FQN, logical ID, type, status, and namespace parent. Action rows
-are validated and excluded. Stack output and temporary files are ignored. Missing
+are validated and excluded. Temporary files are ignored. Missing
 state returns `available: false`; an existing empty stage returns an empty resource
 list with `available: true`. JSON names must match the stored FQN encoding.
 
@@ -121,10 +163,11 @@ An API can report these failures per profile while continuing other profiles.
 keys. `listS3Versions(bucket, prefix)` returns persisted object version coordinates
 and deletion markers. Both S3 continuation markers are retained; repeated markers
 fail. `readS3State(stack, alchemyVersion?)` reads each latest non-deleted resource
-using its listed version ID. Stack outputs and temporary files are excluded.
+using its listed version ID. Temporary files are excluded; supported-version stack outputs use their selected
+current version and the key-only decoder below.
 `readS3Resource(stack, key, versionId)` reads one historical version after checking
 that the key belongs to that stack. JSON names must match the resource FQN.
-Latest deletion markers never resurrect an older resource. Null versions from
+Latest deletion markers never resurrect an older resource or output dictionary. Null versions from
 unversioned or suspended buckets are supported. Multiple resource reads are not
 an atomic snapshot of a deployment.
 
@@ -141,10 +184,41 @@ Read-only IAM access needs `s3:ListAllMyBuckets`, `s3:ListBucketVersions`, and
 and [object reading](https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html)
 references. No live AWS or Alchemy stack is used by the tests.
 
-The flat resource list retains namespace parents, including parents without their
-own resource row. A consumer can group these into a tree. Provider IDs, account,
-region, console links, and last deploy are currently `null`. Local file timestamps
-do not prove a successful deployment. Readers do not invent missing metadata.
+The flat resource list retains construct parents, including parents without their
+own resource row. Resource-own identity is selected only from documented beta.74
+and beta.77 `attr` fields. The AWS allowlist is Lambda Function, S3 Bucket,
+DynamoDB Table, SQS Queue, IAM Role/Policy, CloudFront Distribution, Logs LogGroup,
+ACM Certificate and CloudWatch Alarm/Dashboard. Commercial `aws` ARNs must match
+the exact resource type and own name. Console links use the AWS-owned
+[toolkit resource resolver](https://github.com/aws/aws-toolkit-vscode/blob/e1b0f9bc573bac1830f0b9aa7ced25a6c69bb477/packages/core/src/awsService/cloudformation/consoleLinksUtils.ts).
+Other partitions and unknown/custom types have no link. S3 resource region/account
+must come from that resource, never the backend bucket or SSO selector.
+
+`Cloudflare.Worker` uses its own validated account, worker ID and worker name in
+the documented service route. Local/dev identities, dispatch namespaces and
+parent-owned versions have no regular service link. R2 Bucket and DNS Record may
+expose validated own identity but have no console link when an official route or
+required own routing identity is unproven. DNS `modifiedOn` alone supplies Last
+updated, preserving valid complete UTC precision. No other generic updated time
+or successful deployment time is inferred. Missing metadata remains null.
+Absent provider mode can represent legacy cloud state; explicit local or invalid
+modes never authorize a provider link.
+
+`downstream` records dependents, not dependencies. The view builds a bounded
+reverse index for the complete returned stack. Missing edges, missing rows,
+duplicates or an incomplete graph make dependency knowledge unavailable rather
+than inventing an empty dependency list. Local file timestamps never prove a
+successful deployment.
+
+The supported stack output file is a JSON root dictionary. Only validated keys
+cross normalization; each value is `Hidden`, with a null description. Plaintext,
+including a URL, never proves safety. Exact successfully read `{}` proves no
+outputs. Missing, unreadable, malformed, scalar/array or root encoding-marker
+state is unavailable, including reserved envelopes with sibling fields. Unknown
+remote version cannot establish an output format. Output values are never
+traversed or transported. The pure exported view additionally accepts `SafeText`
+with `proof: "explicit-non-sensitive"` only from a trusted host projection with
+independent proof. The persisted readers and standalone API never produce it.
 
 ## Private data and redaction
 
@@ -156,23 +230,31 @@ appear on unauthenticated routes or public telemetry.
 
 Persisted Alchemy state can contain plaintext secret payloads inside
 `__redacted__` marker objects. This package never invokes Alchemy's reviver or
-decrypts anything. It discards props, attrs, old state, action inputs, and outputs.
+decrypts anything. It discards raw props, attrs, old state, action inputs and output values. Only the
+explicit resource-own attr allowlist and output keys are normalized.
 Marker objects in metadata become `<redacted>`, including sibling fields. Parsing
 errors include only a tagged reason, never raw contents or parser diagnostics.
-Reads are capped at 8 MiB per file and directory listings at 50,000 entries.
+Reads are capped at 8 MiB per file and directory listings at 50,000 entries. Resource identities are bounded to 1024
+characters, dependency graphs to 100,000 edges, and output dictionaries to 1000
+keys of at most 256 characters.
 
 SSO profiles retain server-private names, config paths, account/role selectors,
 session names, start URLs, and routing regions. S3 bucket names, state prefixes,
 object keys, version IDs, and pagination markers are also server-private. Their
 persisted representation is AWS config or S3 object coordinates; console code
 holds them in server memory only. They must not cross HTTP, browser storage,
-logs, telemetry, or public errors. Only normalized `StackState` and
-`ResourceSummary` fields may cross the authenticated owner API. Credential-bearing
+logs, telemetry, or public errors. Only normalized `StackState`, `ResourceSummary` and `OutputSummary` fields may
+cross the authenticated owner API. Resource FQNs, construct parents, provider IDs,
+own account/region, allowlisted console URLs, documented updated timestamps,
+downstream identities and output keys are authenticated client-visible metadata.
+Stack IDs and resource FQNs also appear in validated UI query routes and browser
+history. They are not backend locators. Never emit them on public routes, in logs
+or telemetry, or persist them in browser storage. Credential-bearing
 `SsoCredentials` results remain solely inside the signing boundary. S3 reads have
 the same 8 MiB payload cap and a 50,000-entry / 100-page listing cap.
 
-Cloudflare profiles will also remain server-side. The UI will never apply or
-destroy. Plan diffs remain on demand, with no scheduled execution.
+Cloudflare profile configuration remains server-side. This phase has no plan,
+apply or destroy execution.
 
 ## Format references
 

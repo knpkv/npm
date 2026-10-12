@@ -8,18 +8,20 @@ const scopeKinds = ["line", "file", "changes"] satisfies ReadonlyArray<"line" | 
 const canNavigateEntry = (entry: CompleteDiffInventoryEntry | undefined): entry is CompleteDiffInventoryEntry =>
   entry !== undefined && !entry.binary && !entry.generated && !entry.oversized
 
+export interface ReviewSuggestionOverviewProps {
+  readonly entries: ReadonlyArray<CompleteDiffInventoryEntry>
+  readonly onNavigate: (fileId: string, lineNumber: number, side: "additions" | "deletions") => void
+  readonly onSelectAnchor: (anchor: Extract<PrReviewSuggestion["anchor"], { readonly _tag: "file" }>) => void
+  readonly suggestions: ReadonlyArray<PrReviewSuggestion>
+}
+
 /** Group scoped advice while keeping renderable inventory-backed locations navigable. */
 export const ReviewSuggestionOverview = ({
   entries,
   onNavigate,
   onSelectAnchor,
   suggestions
-}: {
-  readonly entries: ReadonlyArray<CompleteDiffInventoryEntry>
-  readonly onNavigate: (fileId: string, lineNumber: number, side: "additions" | "deletions") => void
-  readonly onSelectAnchor: (anchor: Extract<PrReviewSuggestion["anchor"], { readonly _tag: "file" }>) => void
-  readonly suggestions: ReadonlyArray<PrReviewSuggestion>
-}): ReactElement | null => {
+}: ReviewSuggestionOverviewProps): ReactElement | null => {
   const overviewSuggestions = suggestions.filter(
     ({ anchor, relatedLocations }) => anchor._tag !== "line" || relatedLocations.length > 0
   )

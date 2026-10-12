@@ -57,7 +57,7 @@ const startServer = async (
       ([name]) => !name.startsWith("CONTROL_CENTER_TEST_ATLASSIAN_") || name === "CONTROL_CENTER_TEST_ATLASSIAN_OAUTH"
     )
   )
-  const server = spawn(process.execPath, [join(process.cwd(), "dist/server/server/cli.js")], {
+  const server = spawn(process.execPath, [join(process.cwd(), "dist/server/server/cli.js"), "serve"], {
     cwd: process.cwd(),
     env: {
       ...inheritedEnvironment,

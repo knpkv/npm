@@ -1,6 +1,6 @@
 import type { RlyStateTone } from "@knpkv/rly/primitives"
 import type { PluginConnectionSummary, PluginConnectionTestResult } from "../../api/plugins.js"
-import type { ConnectionSynchronizationViewState } from "./ConnectionSynchronization.js"
+import type { ConnectionSynchronizationViewState } from "./ConnectionSynchronizationView.js"
 
 export type ConnectionTestState =
   | { readonly _tag: "testing" }

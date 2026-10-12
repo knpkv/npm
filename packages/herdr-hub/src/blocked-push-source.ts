@@ -42,7 +42,9 @@ export const loadBlockedPushObservations = Effect.fn("BlockedPushSource.load")(f
     ...read,
     agents: read.agents.map((agent) => {
       const post = blockers.get(`${read.host.toLowerCase()}\u0000${agent.id}`)
-      return post === undefined ? agent : { ...agent, blocker: true, firstLine: blockedPromptFirstLine(post.text) }
+      return post === undefined
+        ? agent
+        : { ...agent, blocker: true, firstLine: blockedPromptFirstLine(post.text), eventId: post.eventId }
     })
   }))
 })

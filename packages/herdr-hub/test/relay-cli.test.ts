@@ -1,14 +1,16 @@
 import { NodeServices } from "@effect/platform-node"
 import { expect, it } from "@effect/vitest"
+import { BrowserOpener } from "@knpkv/browser-pairing/launch"
 import { type ConnectPostBody, ConnectPostRequest, UnboundAgent } from "@knpkv/herdr-connect"
 import type { HostConfiguration } from "@knpkv/herdr-fleet"
-import { Effect, FileSystem, Path, Result, Schema } from "effect"
+import { Effect, FileSystem, Layer, Path, Result, Schema } from "effect"
 import { Command } from "effect/cli"
 import { HttpClient, HttpClientResponse } from "effect/http"
 import { makeRelayPostCommand, resolveReportingAgent, submitRelayPost } from "../src/internal/relay-cli.js"
+import { RelayProbe, relayRootCommand } from "../src/internal/relay-open.js"
 
 const makeRelayCommand = <A, E, R>(report: (body: ConnectPostBody) => Effect.Effect<A, E, R>) =>
-  Command.make("relay").pipe(Command.withSubcommands([makeRelayPostCommand(report)]))
+  relayRootCommand.pipe(Command.withSubcommands([makeRelayPostCommand(report)]))
 
 const invalidTextCases = [
   {
@@ -21,7 +23,19 @@ const invalidTextCases = [
   { kind: "note", text: " \t\n ", detail: "text is empty" }
 ] satisfies ReadonlyArray<{ readonly kind: ConnectPostBody["kind"]; readonly text: string; readonly detail: string }>
 
-it.layer(NodeServices.layer)("relay post", (it) => {
+const postLayer = Layer.mergeAll(
+  NodeServices.layer,
+  Layer.succeed(BrowserOpener, BrowserOpener.of({ open: () => Effect.die("Post/help must not open a browser") })),
+  Layer.succeed(
+    RelayProbe,
+    RelayProbe.of({
+      tailnetOnline: () => Effect.die("Post/help must not discover Relay"),
+      answers: () => Effect.die("Post/help must not probe Relay")
+    })
+  )
+)
+
+it.layer(postLayer)("relay post", (it) => {
   for (const fixture of invalidTextCases) {
     it.effect(`reports the precise text failure: ${fixture.kind}, ${JSON.stringify(fixture.text.length)}`, () =>
       Effect.gen(function*() {
@@ -151,15 +165,14 @@ it.layer(NodeServices.layer)("relay post", (it) => {
       }
     }))
 
-  it.effect("root and help avoid transport; domain failures stay tagged", () =>
+  it.effect("help avoids transport; post domain failures stay tagged", () =>
     Effect.gen(function*() {
       const command = makeRelayCommand(() => Effect.fail(new UnboundAgent({ agentId: "agent-one" })))
-      for (const args of [[], ["--help"], ["post", "--help"]]) {
+      for (const args of [["--help"], ["post", "--help"]]) {
         const help = yield* Effect.result(
           Command.runWith(command, { version: "0" })(args)
         )
-        if (args.length === 0) expect(Result.isFailure(help) && help.failure._tag).toBe("ShowHelp")
-        else expect(Result.isSuccess(help)).toBe(true)
+        expect(Result.isSuccess(help)).toBe(true)
       }
       const failed = yield* Effect.result(
         Command.runWith(command, { version: "0" })(["post", "--kind", "note", "text"])

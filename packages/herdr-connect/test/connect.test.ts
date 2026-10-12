@@ -1164,6 +1164,31 @@ describe("Connect public seams", () => {
     }).pipe(provideNodeHttpClient)
   })
 
+  it.effect("carries configured hosts only on the first directory page and accepts older directories", () =>
+    Effect.gen(function*() {
+      const directory = Schema.decodeUnknownSync(FleetConnectAgents)({
+        agents: [],
+        failures: [],
+        hosts: ["ALPHA", "BETA"]
+      })
+      expect(yield* pageFleetConnectAgents(directory, null)).toEqual({
+        agents: [],
+        failures: [],
+        hosts: ["ALPHA", "BETA"],
+        nextCursor: null
+      })
+      expect(yield* pageFleetConnectAgents(directory, { host: "ALPHA", id: "agent-one" })).toEqual({
+        agents: [],
+        failures: [],
+        nextCursor: null
+      })
+      expect(yield* pageFleetConnectAgents({ agents: [], failures: [] }, null)).toEqual({
+        agents: [],
+        failures: [],
+        nextCursor: null
+      })
+    }))
+
   it.effect("pages a 700-agent three-host forest within the response budget", () => {
     const hosts = ["a".repeat(253), `b${"a".repeat(252)}`, `c${"a".repeat(252)}`]
     const text = "界".repeat(256)

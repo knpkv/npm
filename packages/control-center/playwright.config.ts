@@ -17,6 +17,8 @@ export default defineConfig({
     }
   ],
   testDir: "e2e",
+  // Visual specs need the isolated runtime and launcher in e2e/visual; run them via `pnpm test:visual`.
+  testIgnore: "visual/**",
   timeout: 20_000,
   use: {
     baseURL: "http://127.0.0.1:4173",

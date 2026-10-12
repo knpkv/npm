@@ -147,7 +147,22 @@ export const readS3State = Effect.fn("AlchemyConsole.readS3State")(function*(
     backend: "s3",
     alchemyVersion,
     lastDeploy: null,
-    resources: resources.sort((a, b) => a.fqn.localeCompare(b.fqn))
+    resources: resources.sort((a, b) => a.fqn.localeCompare(b.fqn)),
+    outputs: alchemyVersion === null ? null : yield* readS3Outputs(stack, versions)
   }
   return state
 })
+
+/** Use the already selected current version; a latest delete marker can never fall back to an older output. */
+const readS3Outputs = Effect.fn("AlchemyConsole.readS3Outputs")(
+  function*(stack: S3StackLocator, versions: ReadonlyArray<S3Version>) {
+    const output = versions.find((version) => version.key === `${stagePrefix(stack)}__stack_output__.json`)
+    if (output === undefined) return null
+    const reader = yield* S3Reader
+    return yield* reader.outputs(stack.bucket, output.key, output.versionId)
+  },
+  Effect.catchTags({
+    S3ReadError: () => Effect.succeed(null),
+    StateReadError: () => Effect.succeed(null)
+  })
+)

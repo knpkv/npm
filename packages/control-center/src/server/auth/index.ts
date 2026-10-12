@@ -1,3 +1,4 @@
+/** Browser Auth and destructive terminal recovery. Non-destructive terminal minting stays private to the owner-bearer runtime route. */
 export { Auth, authLayer } from "./Auth.js"
 export {
   AuthCryptoError,
