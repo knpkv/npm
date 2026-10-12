@@ -4,11 +4,88 @@ import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as HttpServerResponse from "effect/http/HttpServerResponse"
 
-import { browserCall } from "../src/browser.js"
+import { browserCall, capturePage } from "../src/browser.js"
+import { captureContext, installCaptureClock } from "../src/capture.js"
 import { LiveProduct } from "../src/live.js"
+import { restrictContextNetwork, restrictPageNetwork } from "../src/network.js"
 import { runConformance } from "../src/runner.js"
 import { serveFiles } from "../src/server.js"
-import { localServer, readyHtml, testLive, testReferences } from "./fixtures.js"
+import { bodyTransferServer, localServer, readyHtml, testLive, testReferences } from "./fixtures.js"
+
+for (const mode of ["truncated", "cancelled", "complete"]) {
+  test(`${mode} 200 response bodies settle before the reference context closes`, async ({ browser }) => {
+    // Only the regression deadline bounds OLD code's deadlock; production settlement has no timeout.
+    test.setTimeout(10_000)
+    await Effect.runPromise(
+      Effect.gen(function*() {
+        const body = "complete fixture body"
+        const html = readyHtml.replace("data-design-ready=true", "data-design-ready=false").replace(
+          "</body>",
+          "<button id=cancel onclick=controller.abort()>Cancel</button><script>const controller=new AbortController();fetch('/probe.txt',{signal:controller.signal}).then(response=>response.text()).then(text=>{document.documentElement.dataset.transfer=text;document.documentElement.dataset.designReady='true'},()=>{document.documentElement.dataset.transfer='failed';document.documentElement.dataset.designReady='true'})</script></body>"
+        )
+        const server = yield* bodyTransferServer(html, body)
+        const context = yield* Effect.acquireRelease(
+          browserCall(
+            "body transfer context",
+            () => browser.newContext({ ...captureContext, serviceWorkers: "block" })
+          ),
+          (context) => browserCall("close body transfer context", () => context.close()).pipe(Effect.orDie)
+        )
+        const blocked: Array<string> = []
+        const network = yield* restrictContextNetwork(
+          context,
+          server.origin,
+          blocked,
+          new Set(["page.html", "probe.txt"])
+        )
+        const page = yield* browserCall("body transfer page", () => context.newPage())
+        const interception = yield* restrictPageNetwork(context, page, network.permits)
+        yield* browserCall("body transfer clock", () => installCaptureClock(page))
+        yield* browserCall("observe probe headers before ending transfer", async () => {
+          const headers = page.waitForResponse((response) => response.url() === `${server.origin}/probe.txt`)
+          await page.goto(`${server.origin}/page.html`)
+          const response = await headers
+          expect(response.status()).toBe(200)
+          expect(response.headers()["content-length"]).toBe(String(body.length))
+        })
+        if (mode === "complete") yield* server.finish
+        else {
+          const failure = yield* browserCall("observe terminal body failure", async () => ({
+            request: page.waitForEvent("requestfailed", (request) => request.url() === `${server.origin}/probe.txt`)
+          }))
+          if (mode === "truncated") yield* server.truncate
+          else yield* browserCall("cancel response after headers", () => page.locator("#cancel").click())
+          yield* browserCall("assert terminal body failure", async () => {
+            const request = await failure.request
+            expect(request.failure()?.errorText).toBe(
+              mode === "truncated" ? "net::ERR_CONTENT_LENGTH_MISMATCH" : "net::ERR_ABORTED"
+            )
+          })
+        }
+        yield* browserCall("body failure can still signal readiness", async () => {
+          await page.locator("html[data-design-ready=true]").waitFor()
+          expect(await page.locator("html").getAttribute("data-transfer")).toBe(mode === "complete" ? body : "failed")
+        })
+        // Match withPage ordering: capture and both network settlements happen before scope closes the context.
+        expect((yield* capturePage(page)).frame.byteLength).toBeGreaterThan(0)
+        yield* interception.settle()
+        if (mode === "complete") yield* network.settle()
+        else {
+          const failure = yield* network.settle().pipe(Effect.flip)
+          expect(failure).toMatchObject({
+            _tag: "ReferenceFailure",
+            file: "probe.txt",
+            detail: `Reference request failed: ${
+              mode === "truncated" ? "net::ERR_CONTENT_LENGTH_MISMATCH" : "net::ERR_ABORTED"
+            }`
+          })
+        }
+        expect(page.isClosed()).toBe(false)
+        expect(blocked).toEqual([])
+      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer))
+    )
+  })
+}
 
 for (
   const { file, kind, markup } of [

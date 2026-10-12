@@ -9,7 +9,7 @@ import type * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Layer from "effect/Layer"
 import * as Path from "effect/Path"
 import * as Schema from "effect/Schema"
-import { createServer } from "node:http"
+import { createServer, type ServerResponse } from "node:http"
 
 import { browserCall } from "../src/browser.js"
 import { LiveProduct } from "../src/live.js"
@@ -38,6 +38,37 @@ export const localServer = Effect.fn("BoundaryTest.server")(
     )
     const server = yield* HttpServer.HttpServer.pipe(Effect.provide(context))
     return HttpServer.formatAddress(server.address)
+  }
+)
+
+/** Hold a real 200 body open until the browser observes headers, then finish or cut its socket. */
+export const bodyTransferServer = Effect.fn("BoundaryTest.bodyTransferServer")(
+  function*(html: string, body: string) {
+    const server = yield* Effect.acquireRelease(
+      Effect.sync(() => createServer()),
+      (server) => Effect.sync(() => server.closeAllConnections())
+    )
+    const response = new Promise<ServerResponse>((resolve) => {
+      server.on("request", (request, reply) => {
+        if (request.url === "/probe.txt") {
+          reply.writeHead(200, { "Content-Length": Buffer.byteLength(body), "Content-Type": "text/plain" })
+          reply.flushHeaders()
+          reply.write(body.slice(0, 6))
+          resolve(reply)
+        } else {
+          reply.writeHead(200, { "Content-Type": "text/html" })
+          reply.end(html)
+        }
+      })
+    })
+    const listener = yield* NodeHttpServer.make(() => server, { port: 0, host: "127.0.0.1" })
+    return {
+      origin: HttpServer.formatAddress(listener.address),
+      finish: browserCall("complete probe body", async () => {
+        ;(await response).end(body.slice(6))
+      }),
+      truncate: Effect.sync(() => server.closeAllConnections())
+    }
   }
 )
 

@@ -30,6 +30,9 @@ timestamp copy is normalized. Other timestamps must be deterministic fixture val
 HTML refs fetch the fixture relative to their file and set
 `document.documentElement.dataset.designReady = "true"` after rendering it.
 The reference server serves only hashed files. External network requests fail.
+Reference body settlement races successful completion against that request's failure event;
+interrupted or cancelled transfers fail with `ReferenceFailure` even after successful headers
+and page readiness. Context closure and global timeouts are not completion signals.
 The file inventory includes the fixture, HTML, scripts, CSS, fonts and images.
 Only `manifest.json` and `waivers.json` are outside the hash inventory. Symlinks fail.
 

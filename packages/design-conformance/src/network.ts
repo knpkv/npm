@@ -1,4 +1,4 @@
-import type { BrowserContext, Page } from "@playwright/test"
+import type { BrowserContext, Page, Request } from "@playwright/test"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 
@@ -27,6 +27,7 @@ export const restrictContextNetwork = Effect.fn("DesignConformance.restrictConte
   function*(context: BrowserContext, origin: string, blocked: Array<string>, referenceFiles?: ReadonlySet<string>) {
     const pending = new Set<Promise<void>>()
     const failures: Array<ReferenceFailure> = []
+    const failedRequests = new Map<Request, (failure: ReferenceFailure) => void>()
     const permits = (address: string): boolean => {
       if (!permittedCaptureUrl(address, origin)) {
         blocked.push(address)
@@ -52,26 +53,43 @@ export const restrictContextNetwork = Effect.fn("DesignConformance.restrictConte
         const url = new URL(request.url())
         if (referenceFiles === undefined || !["http:", "https:"].includes(url.protocol) || url.origin !== origin) return
         const file = url.pathname.slice(1)
-        const action = (async () => {
+        const failed = new Promise<ReferenceFailure>((resolve) => failedRequests.set(request, resolve))
+        const completed = (async () => {
           const response = await request.response()
           if (response === null) {
-            failures.push(new ReferenceFailure({ file, detail: "Reference request received no HTTP response" }))
+            return new ReferenceFailure({ file, detail: "Reference request received no HTTP response" })
           } else if (!response.ok()) {
-            failures.push(new ReferenceFailure({ file, detail: `Reference response HTTP ${response.status()}` }))
+            return new ReferenceFailure({ file, detail: `Reference response HTTP ${response.status()}` })
           } else {
             const error = await response.finished()
             if (error !== null) {
-              failures.push(new ReferenceFailure({ file, detail: `Reference response failed: ${error.message}` }))
+              return new ReferenceFailure({ file, detail: `Reference response failed: ${error.message}` })
             }
           }
-        })().catch((cause) => {
+        })()
+        // Playwright 1.63 does not settle response.finished() on requestfailed after headers.
+        const action = Promise.race([completed, failed]).then((failure) => {
+          if (failure !== undefined) failures.push(failure)
+        }).catch((cause) => {
           failures.push(new ReferenceFailure({ file, detail: `Reference request failed: ${String(cause)}` }))
-        })
+        }).finally(() => failedRequests.delete(request))
         pending.add(action)
         void action.then(() => pending.delete(action))
       })
       context.on("requestfailed", (request) => {
         if (!permittedCaptureUrl(request.url(), origin)) blocked.push(request.url())
+        const fail = failedRequests.get(request)
+        if (fail !== undefined) {
+          const reason = request.failure()
+          fail(
+            new ReferenceFailure({
+              file: new URL(request.url()).pathname.slice(1),
+              detail: reason === null
+                ? "Reference request failed without a browser reason"
+                : `Reference request failed: ${reason.errorText}`
+            })
+          )
+        }
       })
       await context.route("**/*", async (route) => {
         if (permits(route.request().url())) await route.continue()
