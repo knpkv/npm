@@ -50,7 +50,8 @@ for (const theme of ["light", "dark"]) {
       for (const color of geometry.readingTimeColors) expect.soft(color).toBe(geometry.metaColor)
       expect.soft(geometry.shellBottom).toBeGreaterThanOrEqual(geometry.lastCardBottom ?? Infinity)
       if (info.project.name === "desktop") {
-        expect.soft(geometry.introTop).toBe(geometry.headerBottom)
+        // Export52 wraps the title and directory switch in a 24px desktop mast inset.
+        expect.soft(geometry.introTop).toBe((geometry.headerBottom ?? 0) + 24)
         const navigation = await page.locator(".superapp-sidebar").evaluate((sidebar) => {
           const brand = sidebar.querySelector(".superapp-sidebar-brand")
           const settings = sidebar.querySelector(".superapp-settings")

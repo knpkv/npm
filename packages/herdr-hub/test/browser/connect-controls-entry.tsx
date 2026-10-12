@@ -19,6 +19,14 @@ if (root !== null) {
     <RegistryProvider>
       <BlockedConnectSurface
         embedded
+        directoryLocation={{
+          url: new URL(window.location.href),
+          navigate: (href, mode) => {
+            if (mode === "replace") window.history.replaceState(null, "", href)
+            else window.history.pushState(null, "", href)
+            window.dispatchEvent(new PopStateEvent("popstate"))
+          }
+        }}
         atoms={makeConnectAtoms()}
         notificationState={state === "2v-v4" ? "disabled" : "enabled"}
       />

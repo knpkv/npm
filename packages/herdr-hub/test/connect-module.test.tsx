@@ -30,6 +30,7 @@ const renderEmpty = (hosts: ReadonlyArray<string> | undefined, stale: boolean): 
   const views = makeConnectModuleViews({
     atoms,
     now: 2_000,
+    notificationState: "enabled",
     readApprovals: Effect.succeed({ _tag: "Complete", items: [] })
   })
   try {

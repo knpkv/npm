@@ -683,7 +683,12 @@ const DashboardApp = ({
       </section>
     )
   })
-  const connect = makeConnectModuleViews({ atoms: atoms.connect, readApprovals: readToday, now: workNow })
+  const connect = makeConnectModuleViews({
+    atoms: atoms.connect,
+    readApprovals: readToday,
+    now: workNow,
+    notificationState
+  })
   const usage = makeUsageModuleViews({
     reads: usageReads,
     viewerTimeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,

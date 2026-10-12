@@ -1,0 +1,24 @@
+id: no-nested-at-rule
+valid:
+  - "@media (min-width: 40rem) { .a { padding: 0; } }"
+  - "@layer app { @media (min-width: 40rem) { .a { padding: 0; } } }"
+  - |
+    @layer rly.components {
+      .root { color: red; }
+      @media (forced-colors: active) {
+        .blocked { text-decoration: underline; }
+      }
+    }
+  - "@layer rly.components { @supports (display: grid) { .a { display: grid; } } }"
+  - "@layer rly.components { @container (max-width: 28rem) { .a { padding: 0; } } }"
+  - '.a { content: "@media"; }'
+invalid:
+  - ".a { color: red; @media (min-width: 40rem) { padding: 0; } }"
+  - ".a { @supports (display: grid) { display: grid; } }"
+  - |
+    @layer rly.components {
+      .a {
+        @media (min-width: 40rem) { padding: 0; }
+      }
+    }
+  - "@layer app; .a { @media (min-width: 40rem) { padding: 0; } }"

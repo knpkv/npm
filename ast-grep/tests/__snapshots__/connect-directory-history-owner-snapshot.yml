@@ -1,0 +1,26 @@
+id: connect-directory-history-owner
+snapshots:
+  const search = window.location.search:
+    labels:
+      - source: window.location.search
+        style: primary
+        start: 15
+        end: 37
+  const url = new URL(window.location.href):
+    labels:
+      - source: new URL(window.location.href)
+        style: primary
+        start: 12
+        end: 41
+  window.history.pushState(null, "", href):
+    labels:
+      - source: window.history.pushState(null, "", href)
+        style: primary
+        start: 0
+        end: 40
+  window.history.replaceState(null, "", href):
+    labels:
+      - source: window.history.replaceState(null, "", href)
+        style: primary
+        start: 0
+        end: 43

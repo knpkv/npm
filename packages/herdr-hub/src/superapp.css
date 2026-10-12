@@ -854,9 +854,9 @@
   }
 
   .superapp-module-heading,
-  [data-module="connect"] .connect-home-intro {
+  [data-module="connect"] .connect-home-heading {
     display: grid;
-    gap: 0;
+    gap: 0.9rem;
     padding: var(--rly-space-24) var(--rly-space-40) var(--rly-space-20);
     border-block-end: 1px solid var(--rly-color-border-1);
   }
@@ -877,8 +877,12 @@
   }
 
   [data-module="fleet"] .superapp-module-heading {
-    padding-block-end: 0.9rem;
     border-block-end: 0;
+  }
+  @media (min-width: 40.001rem) {
+    [data-module="fleet"] .superapp-module-heading {
+      padding-block-end: 0.9rem;
+    }
   }
 
   [data-module="connect"] .connect-home-intro p {
@@ -1079,6 +1083,11 @@
       border: 0;
     }
 
+    [data-module="connect"] .connect-home-heading {
+      padding-block: var(--rly-space-12);
+      padding-inline: max(var(--rly-space-16), env(safe-area-inset-left, 0px))
+        max(var(--rly-space-16), env(safe-area-inset-right, 0px));
+    }
     [data-module="connect"] .connect-home-summary {
       padding-block-start: var(--connect-summary-inset, var(--rly-space-16));
       padding-inline: var(--rly-space-16);

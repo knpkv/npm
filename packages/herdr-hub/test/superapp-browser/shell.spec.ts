@@ -971,3 +971,28 @@ test("phone titles follow installed page metadata", async ({ page }, info) => {
     await expect(page.locator(".superapp-phone-title")).toHaveText(title)
   }
 })
+
+/** Desktop-only Fleet gutter cannot enlarge the one-pixel phone announcement heading. */
+test("Fleet heading keeps its phone hiding geometry and remains outside the tab order", async ({ page }, info) => {
+  await page.goto("/#fleet/approvals")
+  const heading = page.locator("[data-module=\"fleet\"] .superapp-module-heading")
+  await expect(heading).toHaveCount(1)
+  const metrics = await heading.evaluate((element) => {
+    const box = element.getBoundingClientRect()
+    return {
+      width: box.width,
+      height: box.height,
+      tabIndex: element.getAttribute("tabindex"),
+      focusable: element.querySelectorAll("a,button,input,select,textarea,[tabindex=\"0\"]").length
+    }
+  })
+  expect(metrics.tabIndex).toBe("-1")
+  expect(metrics.focusable).toBe(0)
+  if (info.project.name === "phone") {
+    expect(metrics.width).toBe(1)
+    expect(metrics.height).toBe(1)
+  } else {
+    expect(metrics.width).toBeGreaterThan(1)
+    expect(metrics.height).toBeGreaterThan(1)
+  }
+})

@@ -3568,8 +3568,7 @@
 
   .connect-home-intro {
     display: grid;
-    gap: var(--rly-space-4);
-    padding-block-end: var(--rly-space-20);
+    gap: 0;
   }
 
   .connect-home-intro h1 {
@@ -4186,6 +4185,260 @@
     .connect-directory-switch a:active,
     .connect-archive-agent:active {
       scale: 0.99;
+    }
+  }
+}
+
+@layer fleet {
+  .connect-home-heading {
+    display: grid;
+    gap: 0.9rem;
+  }
+  .connect-home-switch {
+    font: 430 1rem / 1.5 var(--rly-font-ui);
+    display: inline-flex;
+    justify-self: start;
+    gap: 2px;
+    padding: 2px;
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-control);
+    background: var(--rly-color-surface-2);
+  }
+  .connect-home-switch a {
+    display: grid;
+    place-items: center;
+    min-block-size: 2.25rem;
+    padding-inline: 1rem;
+    border-radius: calc(var(--rly-radius-control) - 2px);
+    color: var(--rly-color-text-2);
+    font-size: 0.875rem;
+    text-decoration: none;
+  }
+  .connect-home-switch a[aria-current="page"] {
+    background: var(--rly-color-surface-1);
+    color: var(--rly-color-text-1);
+    font-weight: 560;
+    box-shadow: 0 0 0 1px var(--rly-color-border-1);
+  }
+  .connect-home-switch a:focus-visible,
+  .connect-home-archive-row:focus-visible {
+    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+    outline-offset: var(--rly-focus-ring-offset);
+  }
+  .connect-home-archive {
+    font: 430 1rem / 1.5 var(--rly-font-ui);
+    display: grid;
+    gap: 0.75rem;
+    padding-block: var(--rly-space-24) var(--rly-space-32);
+    padding-inline: max(var(--rly-space-40), env(safe-area-inset-left, 0px))
+      max(var(--rly-space-40), env(safe-area-inset-right, 0px));
+  }
+  .connect-home-archive-count {
+    line-height: 1.5;
+    margin: 0;
+    color: var(--rly-color-text-2);
+    font-size: 0.875rem;
+  }
+  .connect-home-archive-list {
+    display: grid;
+    overflow: clip;
+    min-inline-size: 0;
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-group);
+    background: var(--rly-color-surface-1);
+  }
+  .connect-home-archive-row {
+    display: flex;
+    align-items: center;
+    gap: 0.875rem;
+    min-block-size: 4rem;
+    inline-size: 100%;
+    padding: 0.75rem 1rem;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: start;
+    cursor: pointer;
+  }
+  .connect-home-archive-row + .connect-home-archive-row {
+    border-block-start: 1px solid var(--rly-color-border-1);
+  }
+  .connect-home-archive-row > .connect-creature {
+    inline-size: 2.75rem;
+    flex: none;
+  }
+  .connect-home-archive-copy {
+    display: grid;
+    gap: 2px;
+    min-inline-size: 0;
+    flex: 1;
+  }
+  .connect-home-archive-copy small {
+    line-height: 1.5;
+    font-size: 0.8125rem;
+    color: var(--rly-color-text-2);
+  }
+  .connect-home-archive-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 0.75rem;
+  }
+  .connect-home-archive-top strong {
+    font-weight: 600;
+  }
+  .connect-home-archive-words {
+    line-height: 1.5;
+    overflow: clip;
+    min-inline-size: 0;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.875rem;
+  }
+  .connect-home-archive-empty {
+    padding: 2rem 1rem;
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-group);
+    background: var(--rly-color-surface-1);
+    color: var(--rly-color-text-2);
+    text-align: center;
+  }
+  .connect-home-archive-error,
+  .connect-home-archive-page-error {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem 1rem;
+    align-items: center;
+    color: var(--rly-color-text-1);
+  }
+  .connect-home-archive-error {
+    justify-content: space-between;
+    padding: 0.75rem 1rem;
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-group);
+    background: var(--rly-color-surface-1);
+  }
+  .connect-home-archive-error > div {
+    display: grid;
+    gap: 0.2rem;
+    min-inline-size: 0;
+  }
+  .connect-home-archive-error p,
+  .connect-home-archive-page-error p {
+    margin: 0;
+    font-size: 0.875rem;
+  }
+  .connect-home-archive-page-error p {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    min-block-size: 2.5rem;
+    color: var(--rly-color-text-2);
+  }
+  .connect-home-archive-control {
+    font: 430 1rem / 1.5 var(--rly-font-ui);
+    min-block-size: 2.75rem;
+  }
+  .connect-home-archive-paging {
+    min-block-size: 2.5rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.875rem;
+    color: var(--rly-color-text-2);
+  }
+  .connect-home-archive-spinner {
+    inline-size: 0.875rem;
+    block-size: 0.875rem;
+    border: 2px solid var(--rly-color-border-1);
+    border-block-start-color: currentColor;
+    border-radius: 50%;
+  }
+  .connect-home-archive-skeleton-creature,
+  .connect-home-archive-skeleton .connect-home-archive-copy > span {
+    display: block;
+    background: var(--rly-color-surface-3);
+    border-radius: var(--rly-radius-tag);
+  }
+  .connect-home-archive-skeleton {
+    cursor: default;
+  }
+  .connect-home-archive-skeleton-creature {
+    flex: none;
+    inline-size: 2.5rem;
+    block-size: 2.5rem;
+    border-radius: 0.75rem;
+  }
+  .connect-home-archive-skeleton .connect-home-archive-copy {
+    gap: 6px;
+  }
+  .connect-home-archive-skeleton .connect-home-archive-copy > span:nth-child(1) {
+    inline-size: min(8rem, 100%);
+    block-size: 0.9rem;
+  }
+  .connect-home-archive-skeleton .connect-home-archive-copy > span:nth-child(2) {
+    inline-size: min(11rem, 100%);
+    block-size: 0.75rem;
+  }
+  .connect-home-archive-skeleton .connect-home-archive-copy > span:nth-child(3) {
+    inline-size: min(26rem, 90%);
+    block-size: 0.8rem;
+  }
+  .connect-home-archive-loading {
+    position: absolute;
+    inline-size: 1px;
+    block-size: 1px;
+    overflow: clip;
+    clip-path: inset(50%);
+  }
+  @media (max-width: 40rem) {
+    .connect-home-archive-row > .connect-creature {
+      inline-size: 2.25rem;
+    }
+    .connect-home-switch a {
+      min-block-size: 2.75rem;
+    }
+    .connect-home-archive {
+      padding-block-start: var(--rly-space-16);
+      padding-inline: max(var(--rly-space-16), env(safe-area-inset-left, 0px))
+        max(var(--rly-space-16), env(safe-area-inset-right, 0px));
+    }
+    .connect-home-archive-top {
+      flex-direction: column;
+      gap: 2px;
+    }
+    .connect-home-archive-error > .connect-home-archive-control {
+      min-block-size: var(--rly-control-height-default);
+    }
+    .connect-home-archive-page-error p {
+      min-block-size: 2.75rem;
+    }
+    .connect-home-archive-paging {
+      min-block-size: 2.75rem;
+    }
+    .connect-home-archive-paging > button {
+      inline-size: 100%;
+    }
+    .connect-home-archive-skeleton-creature {
+      inline-size: 2.25rem;
+      block-size: 2.25rem;
+    }
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .connect-home-switch a:hover,
+    .connect-home-archive-row:hover {
+      background: var(--rly-color-surface-2);
+    }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .connect-home-archive-spinner {
+      animation: connect-home-archive-spin 1s linear infinite;
+    }
+    @keyframes connect-home-archive-spin {
+      to {
+        rotate: 1turn;
+      }
     }
   }
 }

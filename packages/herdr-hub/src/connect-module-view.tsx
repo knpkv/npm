@@ -6,7 +6,8 @@ import { connectAgentGroup, type ConnectAgent } from "@knpkv/herdr-connect/model
 import type { Effect } from "effect"
 import { Option } from "effect"
 import * as AsyncResult from "effect/reactivity/AsyncResult"
-import type { ReactElement } from "react"
+import { useMemo, type ReactElement } from "react"
+import type { NotificationState } from "./approval-app-view.js"
 import { BlockedConnectSurface } from "./blocked-connect-surface.js"
 import {
   connectModule,
@@ -23,6 +24,7 @@ interface ConnectModuleContent {
   readonly atoms: ConnectAtoms
   readonly readApprovals: Effect.Effect<NeedsYouResult, TodayReadFailed>
   readonly now: number
+  readonly notificationState: NotificationState
 }
 
 /** Both counts name their source. Incomplete or failed reads never claim that unknown work is clear. */
@@ -35,6 +37,14 @@ const ConnectModulePage = ({
   readonly mount: ModulePageMount
   readonly search: URLSearchParams
 }): ReactElement => {
+  const savedSearch = search.toString()
+  const directoryLocation = useMemo(
+    () => ({
+      url: new URL(moduleHref(connectModule, "overview", new URLSearchParams(savedSearch)), window.location.href),
+      navigate: mount.navigate
+    }),
+    [savedSearch, mount.navigate]
+  )
   const directory = useAtomValue(content.atoms.agents)
   const reading = Option.getOrNull(AsyncResult.value(directory))
   const approvals = useNeedsYouReading(content.readApprovals, mount.active)
@@ -177,6 +187,8 @@ const ConnectModulePage = ({
       key={JSON.stringify([search.get("host"), search.get("agent"), search.get("open")])}
       active={mount.active}
       atoms={content.atoms}
+      directoryLocation={directoryLocation}
+      notificationState={content.notificationState}
       embedded
       presentation={{
         _tag: "home",

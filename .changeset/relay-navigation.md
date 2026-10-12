@@ -36,3 +36,7 @@ Add an optional Home empty-state slot and shell-owned openHostAccess mount callb
 Add an optional AgentStage presentation for Home navigation chrome. Phone Back and desktop Close use the existing selection close and focus-return path; Fleet's header and both stage bodies stay unchanged.
 
 Add optional module-page `showInPhoneTitle` metadata for designed phone mast labels.
+
+Connect Home retains Active/Archived navigation, including read-only closed stages and retained older-page recovery. The optional paired directoryLocation owns URL and navigation together; absent keeps standalone history unchanged. Embedded hub owners require that pair, build links from their saved Connect location and preserve shell/foreign history through the shell navigator. Inactive archive portals and expired-selection repair are suppressed while closure selection and loaded pages remain retained. Paging and retry transitions keep keyboard focus in the archive and move it to the new result or recovery control.
+
+The canonical Connect module forwards the dashboard notification state to its stage footer, avoiding a competing device-state read.

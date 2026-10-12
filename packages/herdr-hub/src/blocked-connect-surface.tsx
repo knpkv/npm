@@ -177,20 +177,26 @@ const QuietHours = ({
   )
 }
 
-/** Canonical-hub stage presence and owner-scoped notification settings. */
+type DirectoryLocation = NonNullable<ComponentProps<typeof ConnectSurface>["directoryLocation"]>
+type BlockedConnectSurfaceProps = {
+  readonly active?: boolean
+  readonly atoms: ConnectAtoms
+  readonly presentation?: ComponentProps<typeof ConnectSurface>["presentation"]
+  readonly notificationState?: NotificationState
+} & (
+  | { readonly embedded: true; readonly directoryLocation: DirectoryLocation }
+  | { readonly embedded?: false; readonly directoryLocation?: DirectoryLocation }
+)
+
+/** Canonical-hub stage presence and owner-scoped notification settings. Embedded history is always host-owned. */
 export const BlockedConnectSurface = ({
   active = true,
   atoms,
+  directoryLocation,
   embedded = false,
   notificationState,
-  presentation
-}: {
-  readonly active?: boolean
-  readonly atoms: ConnectAtoms
-  readonly embedded?: boolean
-  readonly presentation?: ComponentProps<typeof ConnectSurface>["presentation"]
-  readonly notificationState?: NotificationState
-}) => {
+  presentation = { _tag: "fleet" }
+}: BlockedConnectSurfaceProps) => {
   const [notifications] = useState(() => makeNotificationAtoms(notificationState))
   const [target, setTarget] = useState<Pick<ConnectAgent, "host" | "id"> | null>(null)
   const deviceResult = useAtomValue(notifications.device)
@@ -324,8 +330,9 @@ export const BlockedConnectSurface = ({
     <ConnectSurface
       active={active}
       atoms={atoms}
+      directoryLocation={directoryLocation}
       embedded={embedded}
-      {...(presentation === undefined ? {} : { presentation })}
+      presentation={presentation}
       onStageChange={setTarget}
       stageFooter={footer}
     />

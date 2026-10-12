@@ -79,7 +79,7 @@ import { WorkPollMount } from "./work-poll.js"
 import { limitsState, loadLimits } from "./fleet-reads-client.js"
 import { ConnectArchiveSurface } from "./archive-view.js"
 import { loadConnectArchive } from "./archive-client.js"
-import { ConnectDirectorySwitch, useConnectDirectoryLocation } from "./directory-view.js"
+import { ConnectDirectorySwitch, useConnectDirectoryLocation, type ConnectDirectoryLocation } from "./directory-view.js"
 import { ConnectLimits } from "./limits-view.js"
 import { ConnectHomeDirectory, connectHomePurpose } from "./home-directory.js"
 import { makeTerminalWorkerGuard } from "./terminal-worker-guard.js"
@@ -729,6 +729,8 @@ type ConnectSurfaceProps = {
   /** Hides portal presentation and stage presence while retaining selection, polls and terminal ownership. */
   readonly active?: boolean
   readonly atoms: ConnectAtoms
+  /** Absent uses standalone browser history. Present owns URL and navigation together; url is never mutated. */
+  readonly directoryLocation?: ConnectDirectoryLocation | undefined
   readonly embedded?: boolean
   readonly presentation?:
     { readonly _tag: "fleet" } | { readonly _tag: "home"; readonly summary?: ReactNode; readonly empty?: ReactNode }
@@ -747,28 +749,32 @@ type ConnectSurfaceProps = {
 export const ConnectSurface = (props: ConnectSurfaceProps) => {
   // Inventory reads also drive archive observation while the live directory is not shown.
   useAtomMount(props.atoms.agentsPoll)
-  const locationSearch = useConnectDirectoryLocation()
-  return props.presentation?._tag !== "home" && new URLSearchParams(locationSearch).get("view") === "archived" ? (
+  const directoryLocation = useConnectDirectoryLocation(props.directoryLocation)
+  return directoryLocation.url.searchParams.get("view") === "archived" ? (
     <ConnectArchiveSurface
       atoms={props.atoms}
       embedded={props.embedded ?? false}
-      locationSearch={locationSearch}
+      directoryLocation={directoryLocation}
+      active={props.active ?? true}
+      presentation={props.presentation?._tag ?? "fleet"}
       roomFooter={props.roomFooter}
     />
   ) : (
-    <ActiveConnectSurface {...props} />
+    <ActiveConnectSurface {...props} directoryLocation={directoryLocation} />
   )
 }
 
 const ActiveConnectSurface = ({
   active = true,
   atoms,
+  directoryLocation,
   embedded = false,
   onStageChange,
   presentation = { _tag: "fleet" },
   roomFooter,
   stageFooter
 }: ConnectSurfaceProps) => {
+  const locationSearch = directoryLocation?.url.search ?? ""
   const fleetPresentation = presentation._tag === "fleet"
   const DirectoryView = fleetPresentation ? AgentDirectory : ConnectHomeDirectory
   const [activityFilter, setActivityFilter] = useAtom(atoms.activityFilter)
@@ -1313,7 +1319,7 @@ const ActiveConnectSurface = ({
       ? { _tag: "available", key: remembered.value }
       : { _tag: "unavailable" }
     const fiber = Effect.runFork(
-      resolveConnectPreferenceDecision(window.location.search, current.agents, stored).pipe(
+      resolveConnectPreferenceDecision(locationSearch, current.agents, stored).pipe(
         Effect.tap((decision) =>
           Effect.sync(() => {
             if (decision._tag === "retry") {
@@ -1337,7 +1343,7 @@ const ActiveConnectSurface = ({
     return () => {
       Effect.runFork(Fiber.interrupt(fiber))
     }
-  }, [current, remembered, setPreferenceError, setSelectedKey])
+  }, [current, remembered, locationSearch, setPreferenceError, setSelectedKey])
   const moveAgentFocus = (event: KeyboardEvent<HTMLElement>): void => {
     const buttons = [...event.currentTarget.querySelectorAll<HTMLButtonElement>(".connect-agent:not(:disabled)")]
     const currentIndex = buttons.findIndex((button) => button === event.target)
@@ -1435,17 +1441,20 @@ const ActiveConnectSurface = ({
               </small>
             )}
           </header>
-          <ConnectDirectorySwitch />
+          <ConnectDirectorySwitch location={directoryLocation} />
         </div>
       ) : (
-        <header className="connect-home-intro">
-          <Text as="h1" variant="card-title">
-            Connect
-          </Text>
-          <Text as="p" tone="secondary">
-            {connectHomePurpose}
-          </Text>
-        </header>
+        <div className="connect-home-heading">
+          <header className="connect-home-intro">
+            <Text as="h1" variant="card-title">
+              Connect
+            </Text>
+            <Text as="p" tone="secondary">
+              {connectHomePurpose}
+            </Text>
+          </header>
+          <ConnectDirectorySwitch home location={directoryLocation} />
+        </div>
       )}
       {fleetPresentation ||
       staleSince === null ||

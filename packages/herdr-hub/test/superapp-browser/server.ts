@@ -14,6 +14,7 @@ import { type WorkGoal, WorkSnapshots } from "@knpkv/herdr-work/model"
 import { BackendStatus, RelayEvent, SessionInfo } from "@knpkv/relay/wire"
 import { Clock, Config, Effect, FileSystem, Schema } from "effect"
 import { createServer, type ServerResponse } from "node:http"
+import { BlockedPushSettings } from "../../src/blocked-push-model.js"
 import { DashboardSnapshot, PendingApprovalTarget } from "../../src/dashboard-model.js"
 import { fontPreloadLink } from "../../src/font-preload.js"
 import { dashboardPage } from "../../src/internal/dashboard-page.js"
@@ -185,6 +186,10 @@ const program = Effect.gen(function*() {
     ]
   ])
   const responses = new Map([
+    [
+      "/v1/push/blocked-settings",
+      Schema.encodeSync(Schema.fromJsonString(BlockedPushSettings))({ mutedAgents: [], quietHours: null })
+    ],
     ["/v1/dashboard", Schema.encodeSync(Schema.fromJsonString(DashboardSnapshot))(snapshot)],
     ["/v1/work", Schema.encodeSync(Schema.fromJsonString(WorkSnapshots))(work)],
     [

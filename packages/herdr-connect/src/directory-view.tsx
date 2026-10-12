@@ -1,24 +1,35 @@
-import { useSyncExternalStore, type MouseEvent } from "react"
+import { useMemo, useSyncExternalStore, type MouseEvent } from "react"
+
+/** A host owns the complete directory URL and every history mutation together. Builders clone url. */
+export interface ConnectDirectoryLocation {
+  readonly url: URL
+  readonly navigate: (href: string, mode: "push" | "replace") => void
+}
 
 const subscribe = (changed: () => void) => {
   window.addEventListener("popstate", changed)
   return () => window.removeEventListener("popstate", changed)
 }
+const noSubscription = () => () => {}
 
-/** Subscribe to the browser URL, shared with the canonical hub's history owner. */
-export const useConnectDirectoryLocation = (): string =>
-  useSyncExternalStore(
-    subscribe,
-    () => window.location.search,
-    () => ""
+/** Controlled directories never subscribe to another module's browser location. */
+export const useConnectDirectoryLocation = (location?: ConnectDirectoryLocation): ConnectDirectoryLocation => {
+  const href = useSyncExternalStore(
+    location === undefined ? subscribe : noSubscription,
+    () => location?.url.href ?? window.location.href,
+    () => location?.url.href ?? "http://localhost/"
   )
+  const navigate = location?.navigate ?? syncConnectDirectoryHistory
+  return useMemo(() => ({ url: new URL(href), navigate }), [href, navigate])
+}
 
 /** Preserve the owning module and embedded frame while changing the directory view. */
 export const connectDirectoryHref = (
   view: "active" | "archived",
-  target?: { readonly host: string; readonly id: string }
+  target?: { readonly host: string; readonly id: string },
+  directory?: URL
 ): string => {
-  const url = new URL(window.location.href)
+  const url = new URL(directory?.href ?? window.location.href)
   for (const key of ["view", "host", "agent", "open", "closed"]) url.searchParams.delete(key)
   if (view === "archived") url.searchParams.set("view", "archived")
   if (target !== undefined) {
@@ -36,14 +47,18 @@ export const connectArchivedParentHref = (directory: URL, closure: string): stri
   return `${url.pathname}${url.search}${url.hash}`
 }
 
-/** Unmodified links participate in shared Back/Forward history; modifier clicks remain native links. */
-export const navigateConnectDirectory = (event: MouseEvent<HTMLAnchorElement>): void => {
+/** Unmodified links use their location owner; modifier clicks remain native links. */
+export const navigateConnectDirectory = (
+  event: MouseEvent<HTMLAnchorElement>,
+  location?: ConnectDirectoryLocation
+): void => {
   if (event.button !== 0 || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
   event.preventDefault()
-  syncConnectDirectoryHistory(event.currentTarget.href)
+  const navigate = location?.navigate ?? syncConnectDirectoryHistory
+  navigate(event.currentTarget.href, "push")
 }
 
-/** Notify both the directory subscription and its owning hub after a URL-addressable action. */
+/** Standalone history retains its existing null state and popstate notification. Controlled hosts never call this. */
 export const syncConnectDirectoryHistory = (href: string, mode: "push" | "replace" = "push"): void => {
   if (mode === "replace") window.history.replaceState(null, "", href)
   else window.history.pushState(null, "", href)
@@ -51,19 +66,27 @@ export const syncConnectDirectoryHistory = (href: string, mode: "push" | "replac
 }
 
 /** The directory's URL-addressable views, with Active as the default. */
-export const ConnectDirectorySwitch = ({ archived = false }: { readonly archived?: boolean }) => (
-  <nav aria-label="Agent directory view" className="connect-directory-switch">
+export const ConnectDirectorySwitch = ({
+  archived = false,
+  home = false,
+  location
+}: {
+  readonly archived?: boolean
+  readonly home?: boolean
+  readonly location?: ConnectDirectoryLocation | undefined
+}) => (
+  <nav aria-label="Agent directory view" className={home ? "connect-home-switch" : "connect-directory-switch"}>
     <a
       aria-current={archived ? undefined : "page"}
-      href={connectDirectoryHref("active")}
-      onClick={navigateConnectDirectory}
+      href={connectDirectoryHref("active", undefined, location?.url)}
+      onClick={(event) => navigateConnectDirectory(event, location)}
     >
       Active
     </a>
     <a
       aria-current={archived ? "page" : undefined}
-      href={connectDirectoryHref("archived")}
-      onClick={navigateConnectDirectory}
+      href={connectDirectoryHref("archived", undefined, location?.url)}
+      onClick={(event) => navigateConnectDirectory(event, location)}
     >
       Archived
     </a>
