@@ -98,6 +98,20 @@ export const ConnectArchiveSurface = ({
   const agents = page?.agents ?? []
   const filtered = agents.filter((agent) => archiveMatchesQuery(agent, query))
   const selected = agents.find((agent) => archivedAgentKey(agent) === selection) ?? null
+  useEffect(() => {
+    if (state._tag !== "ready" || selection === null || selected !== null) return
+    // Restore only this URL-selected closure. The server bounds each page to 64 and the retained 90-day window.
+    if (state.page.nextCursor !== null) {
+      setState({ _tag: "loading", page: state.page })
+      setAttempt((previous) => ({ cursor: state.page.nextCursor, revision: previous.revision + 1 }))
+      return
+    }
+    // A removed/expired closure has no stage. Replace its stale URL rather than adding a dead history entry.
+    setSelection(null)
+    const url = new URL(window.location.href)
+    url.searchParams.delete("closed")
+    syncConnectDirectoryHistory(`${url.pathname}${url.search}${url.hash}`, "replace")
+  }, [state, selection, selected])
   const parentId = selected?.relationship?.parentAgentId
   const activeParents =
     parentId === undefined
@@ -345,6 +359,14 @@ export const ConnectArchiveSurface = ({
           )}
         </Sheet.Root>
       </PortalProvider>
+      {embedded ? null : (
+        <nav aria-label="Fleet applications" className="fleet-app-nav">
+          <a href="/">Approvals</a>
+          <a aria-current="page" href="/connect/">
+            Connect
+          </a>
+        </nav>
+      )}
       {roomFooter}
     </div>
   )

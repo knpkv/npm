@@ -29,7 +29,7 @@ const closed = (
     kind,
     work: name === "rev-auth" ? "auth-review" : "package-work",
     state,
-    firstSeenAt: Date.UTC(2026, 9, name === "rev-auth" ? 9 : 7, 14, 2),
+    firstSeenAt: Math.min(Date.UTC(2026, 9, name === "rev-auth" ? 9 : 7, 14, 2), now - (hours + 1) * 3_600_000),
     closedAt: now - hours * 3_600_000
   }
   const spoken = text === undefined
@@ -149,6 +149,13 @@ const expectClosed = async (creature: Locator) => {
     const lower = Number.parseFloat(style.getPropertyValue("--connect-creature-lid-low"))
     return {
       animationCount: svg.getAnimations({ subtree: true }).length,
+      animationNames: [
+        ...svg.querySelectorAll(".connect-creature-breath, .connect-creature-bob, .connect-creature-lid")
+      ].map((node) => getComputedStyle(node).animationName),
+      motionParts: [".connect-creature-breath", ".connect-creature-bob", ".connect-creature-lid"].map((selector) => ({
+        selector,
+        count: svg.querySelectorAll(selector).length
+      })),
       rings: [...svg.querySelectorAll(".connect-creature-halo, .connect-creature-orbit")].map((ring) => {
         const current = getComputedStyle(ring)
         return current.display === "none" || current.visibility === "hidden" ? 0 : Number(current.opacity)
@@ -161,11 +168,81 @@ const expectClosed = async (creature: Locator) => {
     }
   })
   expect(appearance.animationCount).toBe(0)
+  for (const part of appearance.motionParts) expect(part.count, part.selector).toBeGreaterThan(0)
+  // Each eye has two aperture lids; visible lid groups may add more without changing the stillness contract.
+  expect(appearance.animationNames.length).toBeGreaterThanOrEqual(6)
+  for (const name of appearance.animationNames) expect(name).toBe("none")
   for (const opacity of appearance.rings) expect(opacity).toBe(0)
   expect(appearance.lids).toHaveLength(4)
   for (const lid of appearance.lids) expect(lid.actual).toBeCloseTo(lid.expected, 1)
   for (const opacity of appearance.lashes) expect(opacity).toBe(1)
 }
+
+for (const theme of ["light", "dark"]) {
+  test(`closed working, waiting and finished creatures stay shut and still with motion allowed, ${theme}`, async ({ page }) => {
+    await prepare(page, 390, theme)
+    const fixtures = ["working", "waiting", "done"].map((state) =>
+      closed(`closed-${state}`, "fixture-host", 1, undefined, "worker", state)
+    )
+    await archiveRoute(page, pageOf(fixtures))
+    // Mount with motion allowed, rather than sampling a media change after a reduced-motion fixture capture.
+    await page.emulateMedia({ reducedMotion: "no-preference" })
+    expect(await page.evaluate(() => window.matchMedia("(prefers-reduced-motion: no-preference)").matches)).toBe(true)
+    await mount(page, theme)
+    await expect(rows(page)).toHaveCount(3)
+    for (const state of ["working", "waiting", "done"]) {
+      const row = rowNamed(page, `closed-${state}`)
+      await expectClosed(row.locator(".connect-creature"))
+      await row.click()
+      await expectClosed(page.locator(".connect-archive-stage .connect-creature"))
+      await page.keyboard.press("Escape")
+    }
+    // Nearby live working motion must survive the closed-only exclusion.
+    await page.route(
+      "**/v1/connect/agents*",
+      (route) => route.fulfill({ json: { agents: [{ ...live, state: "working" }], failures: [], nextCursor: null } })
+    )
+    await page.getByRole("link", { name: "Active", exact: true }).click()
+    const active = page.locator(".connect-agent .connect-creature").first()
+    await expect(active).toBeVisible()
+    expect(await active.evaluate((svg) => svg.getAnimations({ subtree: true }).length)).toBeGreaterThan(0)
+  })
+}
+
+test("a parent beyond the first page reopens on refresh; expired selections clear without adding history", async ({ page }) => {
+  await prepare(page)
+  const parent = closed("older-primary", "fixture-host", 100)
+  const child = Schema.decodeUnknownSync(ArchivedConnectAgent)({
+    ...closed("newer-child", "fixture-host", 1),
+    relationship: { parentAgentId: parent.agentId, relation: "review" }
+  })
+  const requests: Array<string | null> = []
+  await page.route("**/v1/connect/archive*", (route) => {
+    const cursor = new URL(route.request().url()).searchParams.get("cursor")
+    requests.push(cursor)
+    return route.fulfill({ json: cursor === null ? pageOf([child], true) : pageOf([parent]) })
+  })
+  await mount(page, "light", true, "#details")
+  await page.getByRole("button", { name: "Show older", exact: true }).click()
+  await expect(rows(page)).toHaveCount(2)
+  await rowNamed(page, "newer-child").click()
+  await page.getByRole("dialog").getByRole("link", { name: "older-primary", exact: true }).click()
+  await expect(page.getByRole("dialog")).toHaveAccessibleName("older-primary")
+  requests.length = 0
+  await page.reload()
+  await expect(page.getByRole("dialog")).toHaveAccessibleName("older-primary")
+  expect(requests).toHaveLength(2)
+  expect(requests[0]).toBeNull()
+  expect(requests[1]).not.toBeNull()
+  await page.keyboard.press("Escape")
+  const url = new URL(page.url())
+  url.searchParams.set("closed", JSON.stringify([parent.host, parent.agentId, 1]))
+  await page.goto(url.href)
+  await expect(rows(page)).toHaveCount(2)
+  await expect.poll(() => new URL(page.url()).searchParams.has("closed")).toBe(false)
+  expect(new URL(page.url()).hash).toBe("#details")
+  await expect(page.getByRole("dialog")).toHaveCount(0)
+})
 
 test("archive view survives Back and refresh while Active remains the default", async ({ page }) => {
   await prepare(page)

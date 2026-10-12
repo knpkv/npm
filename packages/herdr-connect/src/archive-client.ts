@@ -1,4 +1,4 @@
-/** One authorized canonical-listener archive page. Paging is explicit, never a background full-archive scan. */
+/** One authorized archive page, requested explicitly or while restoring a URL-selected retained closure. */
 import { decodeBoundedResponseJson } from "@knpkv/herdr-fleet/response"
 import { Effect, Schema } from "effect"
 import { HttpClient } from "effect/http"

@@ -44,8 +44,9 @@ export const navigateConnectDirectory = (event: MouseEvent<HTMLAnchorElement>): 
 }
 
 /** Notify both the directory subscription and its owning hub after a URL-addressable action. */
-export const syncConnectDirectoryHistory = (href: string): void => {
-  window.history.pushState(null, "", href)
+export const syncConnectDirectoryHistory = (href: string, mode: "push" | "replace" = "push"): void => {
+  if (mode === "replace") window.history.replaceState(null, "", href)
+  else window.history.pushState(null, "", href)
   window.dispatchEvent(new PopStateEvent("popstate"))
 }
 
