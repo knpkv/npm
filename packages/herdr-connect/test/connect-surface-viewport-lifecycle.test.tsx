@@ -1,10 +1,11 @@
 // @vitest-environment happy-dom
 
-import { RegistryProvider } from "@effect/atom-react"
+import { RegistryContext, RegistryProvider } from "@effect/atom-react"
 import { AgentStableId } from "@knpkv/herdr-fleet/model"
 import { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { Cause, Predicate, Schema } from "effect"
+import * as AtomRegistry from "effect/reactivity/AtomRegistry"
 import * as AsyncResult from "effect/reactivity/AsyncResult"
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { ConnectSurface, makeConnectAtoms } from "../src/client.js"
@@ -336,6 +337,12 @@ describe("ConnectSurface directory loading", () => {
 
 /** Active changes presentation only, keeping the terminal subtree and its atom/session identity. */
 it("keeps the same connected terminal owner while its embedded module is inactive", async () => {
+  const matchMedia = window.matchMedia.bind(window)
+  vi.spyOn(window, "matchMedia").mockImplementation((query) => {
+    const media = matchMedia(query)
+    if (query === "(pointer: fine)") Object.defineProperty(media, "matches", { value: false })
+    return media
+  })
   const host = document.createElement("div")
   document.body.append(host)
   const root = createRoot(host)
@@ -362,12 +369,41 @@ it("keeps the same connected terminal owner while its embedded module is inactiv
   const terminal = host.querySelector(".connect-terminal-screen")
   expect(terminal).not.toBeNull()
   expect(host.querySelector(".connect-workspace")?.getAttribute("data-mode")).toBe("terminal")
+  expect(document.documentElement.classList.contains("connect-terminal-document-lock")).toBe(true)
+  const outside = document.createElement("button")
+  document.body.append(outside)
+  outside.focus()
   await paint(false)
+  expect(document.documentElement.classList.contains("connect-terminal-document-lock")).toBe(false)
+  expect(document.body.classList.contains("connect-terminal-document-lock")).toBe(false)
+  expect(document.documentElement.style.cssText).toBe("color: red;")
+  expect(document.body.style.cssText).toBe("overflow: visible; touch-action: pan-x;")
+  expect(document.activeElement).toBe(outside)
   expect(host.querySelector(".connect-terminal-screen")).toBe(terminal)
   expect(host.querySelector(".connect-workspace")?.getAttribute("data-mode")).toBe("terminal")
   await paint(true)
+  expect(document.documentElement.classList.contains("connect-terminal-document-lock")).toBe(true)
+  expect(terminal?.contains(document.activeElement)).toBe(true)
   expect(host.querySelector(".connect-terminal-screen")).toBe(terminal)
   expect(host.querySelector(".connect-workspace")?.getAttribute("data-mode")).toBe("terminal")
+  outside.focus()
+  await paint(true)
+  expect(document.activeElement).toBe(outside)
+  await paint(false)
+  const input = document.createElement("input")
+  document.body.append(input)
+  input.focus()
+  await paint(true)
+  expect(document.activeElement).toBe(input)
+  await paint(false)
+  const dialog = document.createElement("div")
+  dialog.setAttribute("role", "dialog")
+  const close = document.createElement("button")
+  dialog.append(close)
+  document.body.append(dialog)
+  close.focus()
+  await paint(true)
+  expect(document.activeElement).toBe(close)
 })
 
 describe("ConnectSurface terminal viewport lifecycle", () => {
@@ -486,4 +522,68 @@ describe("ConnectSurface terminal viewport lifecycle", () => {
     expect(document.documentElement.style.cssText).toBe("color: red;")
     expect(document.body.style.cssText).toBe("overflow: visible; touch-action: pan-x;")
   })
+})
+
+/** Archived replaces the active owner; its closed worker cannot leave a connected atom in the shell. */
+it("clears terminal ownership on Active unmount while keeping the selected agent", async () => {
+  const host = document.createElement("div")
+  document.body.append(host)
+  const root = createRoot(host)
+  roots.push(root)
+  const atoms = makeConnectAtoms()
+  const registry = AtomRegistry.make({
+    initialValues: [
+      [atoms.agents, AsyncResult.success(agentPage)],
+      [atoms.connection, { _tag: "connected", agent }],
+      [atoms.selectedKey, "SER8:agent-reviewer"],
+      [atoms.preference, AsyncResult.success("SER8:agent-reviewer")],
+      [atoms.work, AsyncResult.success(workSnapshots)]
+    ]
+  })
+  const releases = [
+    registry.mount(atoms.connection),
+    registry.mount(atoms.connectionRequest),
+    registry.mount(atoms.selectedKey)
+  ]
+  try {
+    await act(async () =>
+      root.render(
+        <RegistryContext.Provider value={registry}>
+          <ConnectSurface
+            atoms={atoms}
+            embedded
+            directoryLocation={{
+              url: new URL("http://localhost/?view=active#connect/overview"),
+              navigate: () => {},
+              closeSelection: () => {}
+            }}
+          />
+        </RegistryContext.Provider>
+      )
+    )
+    expect(registry.get(atoms.connection)._tag).toBe("connected")
+    await act(async () =>
+      root.render(
+        <RegistryContext.Provider value={registry}>
+          <ConnectSurface
+            atoms={atoms}
+            embedded
+            directoryLocation={{
+              url: new URL("http://localhost/?view=archived#connect/overview"),
+              navigate: () => {},
+              closeSelection: () => {}
+            }}
+          />
+        </RegistryContext.Provider>
+      )
+    )
+    expect(registry.get(atoms.connection)._tag).toBe("idle")
+    expect(registry.get(atoms.connectionRequest)).toBeNull()
+    expect(registry.get(atoms.selectedKey)).toBe("SER8:agent-reviewer")
+  } finally {
+    await act(async () => root.unmount())
+    roots.splice(roots.indexOf(root), 1)
+    for (const release of releases) release()
+    registry.dispose()
+  }
 })

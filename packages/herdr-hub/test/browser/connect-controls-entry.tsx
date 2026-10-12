@@ -25,6 +25,10 @@ if (root !== null) {
             if (mode === "replace") window.history.replaceState(null, "", href)
             else window.history.pushState(null, "", href)
             window.dispatchEvent(new PopStateEvent("popstate"))
+          },
+          closeSelection: (href) => {
+            window.history.replaceState(null, "", href)
+            window.dispatchEvent(new PopStateEvent("popstate"))
           }
         }}
         atoms={makeConnectAtoms()}

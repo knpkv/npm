@@ -111,7 +111,11 @@ it("retains the selected archive across inactive and unrelated parent renders wi
             embedded
             active={active}
             presentation={{ _tag: "home" }}
-            directoryLocation={{ url: new URL(url.href), navigate: (href, mode) => navigate(href, mode) }}
+            directoryLocation={{
+              url: new URL(url.href),
+              navigate: (href, mode) => navigate(href, mode),
+              closeSelection: (href) => navigate(href, "replace")
+            }}
           />
         </RegistryProvider>
       )

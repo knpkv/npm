@@ -48,6 +48,91 @@ afterEach(async () => {
 })
 
 describe("Sheet", () => {
+  it("returns to the latest opener across controlled open cycles", async () => {
+    const view = (open: boolean) => (
+      <>
+        <button type="button">First opener</button>
+        <button type="button">Second opener</button>
+        <Sheet.Root open={open} onOpenChange={() => {}}>
+          <Sheet.Content title="Agent">
+            <Sheet.Body>Details</Sheet.Body>
+          </Sheet.Content>
+        </Sheet.Root>
+      </>
+    )
+    const { host, portal, root } = await mount(view(false))
+    const openers = host.querySelectorAll<HTMLButtonElement>("button")
+    for (const opener of openers) {
+      opener.focus()
+      await act(async () => root.render(<PortalProvider container={portal}>{view(true)}</PortalProvider>))
+      expect(portal.querySelector('[role="dialog"]')).not.toBeNull()
+      await act(async () => root.render(<PortalProvider container={portal}>{view(false)}</PortalProvider>))
+      await act(async () => new Promise<void>((resolve) => setTimeout(resolve, 0)))
+      expect(document.activeElement).toBe(opener)
+    }
+  })
+  it.each(["target", "undefined", "detached", "hidden", "aria-hidden", "no-rect", "focus-failure"])(
+    "restores the owned target or captured opener after cleanup: %s",
+    async (state) => {
+      const target = document.createElement("button")
+      target.textContent = "Agent row"
+      Object.defineProperty(target, "getClientRects", {
+        value: () => (state === "no-rect" ? [] : [new DOMRect(0, 0, 100, 40)])
+      })
+      if (state === "focus-failure") Object.defineProperty(target, "focus", { value: () => {} })
+      if (state !== "detached") document.body.append(target)
+      if (state === "hidden") target.hidden = true
+      if (state === "aria-hidden") {
+        const parent = document.createElement("div")
+        parent.setAttribute("aria-hidden", "true")
+        document.body.append(parent)
+        parent.append(target)
+      }
+      let calls = 0
+      const { host, portal } = await mount(
+        <Sheet.Root
+          restoreFocus={() => {
+            calls += 1
+            return state === "undefined" ? undefined : target
+          }}
+        >
+          <Sheet.Trigger>Inspect</Sheet.Trigger>
+          <Sheet.Content title="Agent">
+            <Sheet.Body>Details</Sheet.Body>
+          </Sheet.Content>
+        </Sheet.Root>
+      )
+      const opener = host.querySelector<HTMLButtonElement>("button")
+      await act(async () => opener?.click())
+      expect(calls).toBe(0)
+      const dialog = portal.querySelector('[role="dialog"]')
+      if (dialog === null) return expect.unreachable()
+      await pressEscape(dialog)
+      await act(async () => new Promise<void>((resolve) => setTimeout(resolve, 0)))
+      expect(calls).toBe(1)
+      expect(document.activeElement).toBe(state === "target" ? target : opener)
+    }
+  )
+  it("does not restore an obsolete close after the sheet reopens", async () => {
+    let calls = 0
+    const restoreFocus = () => {
+      calls += 1
+      return undefined
+    }
+    const view = (open: boolean) => (
+      <Sheet.Root open={open} onOpenChange={() => {}} restoreFocus={restoreFocus}>
+        <Sheet.Content title="Agent">
+          <Sheet.Body>Details</Sheet.Body>
+        </Sheet.Content>
+      </Sheet.Root>
+    )
+    const { portal, root } = await mount(view(true))
+    act(() => root.render(<PortalProvider container={portal}>{view(false)}</PortalProvider>))
+    act(() => root.render(<PortalProvider container={portal}>{view(true)}</PortalProvider>))
+    await act(async () => new Promise<void>((resolve) => setTimeout(resolve, 0)))
+    expect(calls).toBe(0)
+    expect(portal.querySelector('[role="dialog"]')).not.toBeNull()
+  })
   it("supports controlled state, sets focus, restores focus, and cleans modal isolation", async () => {
     const changes: Array<boolean> = []
     const initialFocusRef = createRef<HTMLButtonElement>()

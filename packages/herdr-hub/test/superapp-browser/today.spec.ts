@@ -1,5 +1,40 @@
 import { expect, test } from "@playwright/test"
 
+/** Empty agents cannot hide uncertainty from the independent approvals source. */
+for (const state of ["partial", "failed", "empty"]) {
+  test(`empty Home retains the ${state} approval reading`, async ({ baseURL, context, page }) => {
+    if (baseURL === undefined) throw new Error("Missing fixture origin")
+    await context.addCookies([{ name: "connect-fixture", value: "empty", url: baseURL }])
+    if (state === "partial") {
+      await page.route("**/v1/modules/connect/needs-you", (route) =>
+        route.fulfill({
+          json: {
+            _tag: "Partial",
+            items: [],
+            sources: [{ provider: "fleet", issue: { state: "failed", reason: "offline" } }]
+          }
+        }))
+    }
+    await page.goto(`/?todayFixture=${state}#connect/overview`)
+    await expect(page.locator(".connect-home-empty")).toBeVisible()
+    if (state === "empty") await expect(page.locator(".connect-home-strip")).toHaveCount(0)
+    else {
+      const strip = page.locator(".connect-home-strip-compact")
+      await expect(strip.getByRole("link", { name: "Approvals unknown, open Fleet Approvals", exact: true }))
+        .toBeVisible()
+      await expect(strip.locator("strong")).toHaveCount(0)
+      const stripBounds = await strip.boundingBox()
+      const emptyBounds = await page.locator(".connect-home-empty").boundingBox()
+      expect(stripBounds).not.toBeNull()
+      expect(emptyBounds).not.toBeNull()
+      if (stripBounds === null || emptyBounds === null) return
+      expect(emptyBounds.y - stripBounds.y - stripBounds.height).toBeCloseTo(36, 1)
+      await strip.getByRole("link").click()
+      await expect(page.getByRole("tab", { name: "Approvals", exact: true })).toBeFocused()
+    }
+  })
+}
+
 for (const theme of ["light", "dark"]) {
   test(
     `Connect home groups the existing reading and Ready states in ${theme}`,

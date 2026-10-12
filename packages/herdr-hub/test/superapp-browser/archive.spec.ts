@@ -1,6 +1,55 @@
 import { expect, test } from "@playwright/test"
 import { archiveFixture } from "./archive-fixture.js"
 
+/** Dismissal consumes a shell-owned selection, and a reloaded selection replaces its current entry. */
+for (const reloaded of [false, true]) {
+  test(`archived-stage Close does not create a reopening Back entry, reloaded=${String(reloaded)}`, async ({ page }) => {
+    await page.route("**/v1/connect/archive*", (route) => route.fulfill({ json: archiveFixture() }))
+    await page.goto("/#connect/overview")
+    await page.getByRole("navigation", { name: "Agent directory view" }).getByRole("link", {
+      name: "Archived",
+      exact: true
+    }).click()
+    const before = await page.evaluate(() => history.length)
+    await page.locator(".connect-home-archive-row").first().click()
+    const stage = page.getByRole("dialog", { name: "fix-pins", exact: true })
+    await expect(stage).toBeVisible()
+    expect(await page.evaluate(() => history.length)).toBe(before + 1)
+    if (reloaded) {
+      await page.reload()
+      await expect(stage).toBeVisible()
+    }
+    await stage.getByRole("button", { name: "Close", exact: true }).click()
+    await expect(stage).toHaveCount(0)
+    expect(new URL(page.url()).searchParams.has("closed")).toBe(false)
+    expect(await page.evaluate(() => history.length)).toBe(before + 1)
+    await page.goBack()
+    await expect(page.getByRole("dialog")).toHaveCount(0)
+    expect(new URL(page.url()).searchParams.has("closed")).toBe(false)
+    expect(new URL(page.url()).searchParams.get("view")).toBe(reloaded ? "archived" : null)
+  })
+}
+
+/** A direct archived selection replaces its URL, so Back reaches the page before the deep link. */
+test("direct archived-stage Close replaces before Back leaves Connect", async ({ page }) => {
+  await page.route("**/v1/connect/archive*", (route) => route.fulfill({ json: archiveFixture() }))
+  await page.goto("/?view=archived#connect/overview")
+  await page.locator(".connect-home-archive-row").first().click()
+  const selectedHref = page.url()
+  await page.goto("/#fleet/work")
+  await page.goto(selectedHref)
+  const stage = page.getByRole("dialog", { name: "fix-pins", exact: true })
+  await expect(stage).toBeVisible()
+  const before = await page.evaluate(() => history.length)
+  await stage.getByRole("button", { name: "Close", exact: true }).click()
+  await expect(stage).toHaveCount(0)
+  expect(await page.evaluate(() => history.length)).toBe(before)
+  expect(new URL(page.url()).searchParams.has("closed")).toBe(false)
+  await page.goBack()
+  await expect(page.locator("[data-module=\"fleet\"]")).toBeVisible()
+  await expect(page.getByRole("dialog")).toHaveCount(0)
+})
+
 /** The real shell retains closure/history while a hidden Connect owner stays mounted. */
 test(
   "Home Archived preserves shell history, paging and the selected closure through Fleet and Back",

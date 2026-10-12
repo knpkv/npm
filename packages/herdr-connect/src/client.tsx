@@ -79,7 +79,12 @@ import { WorkPollMount } from "./work-poll.js"
 import { limitsState, loadLimits } from "./fleet-reads-client.js"
 import { ConnectArchiveSurface } from "./archive-view.js"
 import { loadConnectArchive } from "./archive-client.js"
-import { ConnectDirectorySwitch, useConnectDirectoryLocation, type ConnectDirectoryLocation } from "./directory-view.js"
+import {
+  connectDirectoryHref,
+  ConnectDirectorySwitch,
+  useConnectDirectoryLocation,
+  type ConnectDirectoryLocation
+} from "./directory-view.js"
 import { ConnectLimits } from "./limits-view.js"
 import { ConnectHomeDirectory, connectHomePurpose } from "./home-directory.js"
 import { makeTerminalWorkerGuard } from "./terminal-worker-guard.js"
@@ -773,8 +778,12 @@ const ActiveConnectSurface = ({
   presentation = { _tag: "fleet" },
   roomFooter,
   stageFooter
-}: ConnectSurfaceProps) => {
-  const locationSearch = directoryLocation?.url.search ?? ""
+}: ConnectSurfaceProps & { readonly directoryLocation: ConnectDirectoryLocation }) => {
+  const locationSearch = directoryLocation.url.search
+  const activeRef = useRef(active)
+  useLayoutEffect(() => {
+    activeRef.current = active
+  }, [active])
   const fleetPresentation = presentation._tag === "fleet"
   const DirectoryView = fleetPresentation ? AgentDirectory : ConnectHomeDirectory
   const [activityFilter, setActivityFilter] = useAtom(atoms.activityFilter)
@@ -789,6 +798,7 @@ const ActiveConnectSurface = ({
   const [selectedKey, setSelectedKey] = useAtom(atoms.selectedKey)
   const work = useAtomValue(atoms.work)
   const preferenceApplied = useRef(false)
+  const preferenceSearch = useRef(locationSearch)
   const requestId = useRef(connectionRequest?.id ?? 0)
   const directorySearchRef = useRef<HTMLInputElement>(null)
   const directoryViewportRef = useRef<HTMLDivElement>(null)
@@ -947,7 +957,10 @@ const ActiveConnectSurface = ({
         connectionRequest.agent,
         (state) => {
           if (!workerGuard.accepts(requestId.current)) return
-          if (state._tag === "connected") {
+          if (state._tag === "connected" && !activeRef.current) {
+            // A retained worker can connect off-screen; only its visible owner may move focus or lock the document.
+            terminalActiveRequestRef.current = terminalRequestId
+          } else if (state._tag === "connected") {
             const elements = workspaceElements()
             const focusTarget = window.matchMedia("(pointer: fine)").matches
               ? terminalFocusTargetRef.current
@@ -988,7 +1001,7 @@ const ActiveConnectSurface = ({
             setWorkspaceFocusFailure(null)
             terminalActiveRequestRef.current = terminalRequestId
           } else if (state._tag === "closed" || state._tag === "failed") {
-            if (terminalActiveRequestRef.current === terminalRequestId) {
+            if (activeRef.current && terminalActiveRequestRef.current === terminalRequestId) {
               const transition = restoreDirectoryFocus(state.agent)
               if (transition._tag === "failed") {
                 setWorkspaceFocusFailure(transition.reason)
@@ -1080,6 +1093,18 @@ const ActiveConnectSurface = ({
     }
   }, [connectionRequest, copyTerminalText, releaseTerminalEntryLock, setConnection])
 
+  // Worker cleanup above relinquishes callbacks before this owner clears its shared terminal state.
+  // Inactivity does not run this cleanup: hidden modules keep their socket and selected agent.
+  useEffect(
+    () => () => {
+      setConnectionRequest(null)
+      setConnection((current) =>
+        current._tag === "connected" || current._tag === "connecting" ? { _tag: "idle" } : current
+      )
+    },
+    [setConnection, setConnectionRequest]
+  )
+
   const terminalVisible = connection._tag === "connected" || workspaceFocusFailure === "focus_rejected"
   const terminalViewportActive = terminalViewportBindingActive({
     connectionRequested: connectionRequest !== null,
@@ -1090,6 +1115,10 @@ const ActiveConnectSurface = ({
   // Size the hidden terminal before its first visible frame so Fleet navigation never overlaps it.
   useLayoutEffect(() => {
     const room = terminalViewportRef.current
+    if (!active) {
+      releaseTerminalEntryLock()
+      return
+    }
     if (!terminalViewportActive || room === null) return
     const attachedShell = shellElement ?? shellRef.current
     const topBoundary = embedded ? attachedShell : undefined
@@ -1099,7 +1128,30 @@ const ActiveConnectSurface = ({
     } finally {
       if (terminalVisible) releaseTerminalEntryLock()
     }
-  }, [embedded, releaseTerminalEntryLock, shellElement, terminalViewportActive, terminalVisible])
+  }, [active, embedded, releaseTerminalEntryLock, shellElement, terminalViewportActive, terminalVisible])
+
+  const previouslyActive = useRef(active)
+  // Only activation may restore terminal focus. Other panels and editors retain their own focus authority.
+  useEffect(() => {
+    const returning = active && !previouslyActive.current
+    previouslyActive.current = active
+    if (!returning || connection._tag !== "connected") return
+    const focused = document.activeElement
+    if (
+      focused !== null &&
+      focused.closest('[role="dialog"], [role="alertdialog"], input, textarea, select, [contenteditable="true"]') !==
+        null
+    )
+      return
+    const elements = workspaceElements()
+    const target = window.matchMedia("(pointer: fine)").matches
+      ? terminalFocusTargetRef.current
+      : terminalBackRef.current
+    if (elements === null || target === null) return
+    const entry = enterTerminalWorkspaceWithLock(elements, target, () => bindTerminalDocumentLock(window))
+    entry.releaseLock()
+    setWorkspaceFocusFailure(entry.transition._tag === "failed" ? entry.transition.reason : null)
+  }, [active, connection._tag])
 
   const current = AsyncResult.isSuccess(directory)
     ? directory.value
@@ -1169,6 +1221,30 @@ const ActiveConnectSurface = ({
         : resolveConnectWorkGoal(selected, currentWork)
   // The agent whose stage is open: a row or the cast opens it, Open terminal leaves it for the terminal.
   const [stageKey, setStageKey] = useState<string | null>(null)
+  const stageUrlSelection = useRef<{ readonly key: string; readonly host: string; readonly id: string } | null>(null)
+  const stageReturnKey = useRef<string | null>(null)
+  const restoreStageFocus = useCallback(() => {
+    const key = stageReturnKey.current
+    stageReturnKey.current = null
+    if (key === null) return undefined
+    const row = activeRef.current
+      ? shellRef.current?.querySelector<HTMLButtonElement>(`.connect-agent[data-agent-key="${CSS.escape(key)}"]`)
+      : undefined
+    if (
+      row !== undefined &&
+      row !== null &&
+      row.isConnected &&
+      row.closest('[hidden], [inert], [aria-hidden="true"]') === null &&
+      row.getClientRects().length > 0
+    )
+      return row
+    return shellRef.current?.closest<HTMLElement>("main") ?? undefined
+  }, [])
+  const openLocalStage = (agent: ConnectAgent): void => {
+    stageReturnKey.current = null
+    stageUrlSelection.current = null
+    setStageKey(connectAgentKey(agent))
+  }
   const stageCandidate =
     stageKey === null ? null : (agents.find((agent) => connectAgentKey(agent) === stageKey) ?? null)
   const stageAgent =
@@ -1186,7 +1262,11 @@ const ActiveConnectSurface = ({
   // An agent that leaves the directory closes its stage for good: it must not reopen, uninvited, when the
   // agent comes back on a later poll. Only a loaded list counts; a list still loading keeps the stage.
   useEffect(() => {
-    if (stageKey !== null && stageAgent === null && current !== null) setStageKey(null)
+    if (stageKey !== null && stageAgent === null && current !== null) {
+      stageReturnKey.current = stageUrlSelection.current?.key ?? null
+      stageUrlSelection.current = null
+      setStageKey(null)
+    }
   }, [current, stageAgent, stageKey])
   // Who started needing you since the last poll; the first list a surface sees is history, not news.
   const previousBuckets = useRef<AgentBuckets | null>(null)
@@ -1314,6 +1394,20 @@ const ActiveConnectSurface = ({
     )
   }
   useEffect(() => {
+    if (preferenceSearch.current !== locationSearch) {
+      preferenceSearch.current = locationSearch
+      preferenceApplied.current = false
+      const owned = stageUrlSelection.current
+      const params = new URLSearchParams(locationSearch)
+      if (
+        owned !== null &&
+        (params.get("open") !== "stage" || params.get("host") !== owned.host || params.get("agent") !== owned.id)
+      ) {
+        stageReturnKey.current = owned.key
+        stageUrlSelection.current = null
+        setStageKey(null)
+      }
+    }
     if (preferenceApplied.current || current === null) return
     const stored: RememberedConnectPreference = AsyncResult.isSuccess(remembered)
       ? { _tag: "available", key: remembered.value }
@@ -1332,7 +1426,10 @@ const ActiveConnectSurface = ({
               setSelectedKey(decision.key)
               setPreferenceError(decision.error)
             } else if (decision._tag === "stage") {
-              setStageKey(connectAgentKey(decision.target))
+              const key = connectAgentKey(decision.target)
+              stageReturnKey.current = null
+              stageUrlSelection.current = { key, host: decision.target.host, id: decision.target.id }
+              setStageKey(key)
             } else {
               selectAgent(decision.target)
             }
@@ -1577,7 +1674,7 @@ const ActiveConnectSurface = ({
               <AgentCast
                 agents={agents}
                 arrivals={arrivals}
-                onOpen={(agent) => setStageKey(connectAgentKey(agent))}
+                onOpen={openLocalStage}
                 silentHosts={offlineHosts}
                 stale={staleSince !== null}
               />
@@ -1632,7 +1729,7 @@ const ActiveConnectSurface = ({
               hostFilter={hostFilter}
               onActivityFilter={setActivityFilter}
               onHostFilter={setHostFilter}
-              onSelect={(agent) => setStageKey(connectAgentKey(agent))}
+              onSelect={openLocalStage}
               query={query}
               selectedKey={stageKey}
               arrivals={arrivals}
@@ -1643,16 +1740,33 @@ const ActiveConnectSurface = ({
               footer={stageFooter}
               agent={active ? stageAgent : null}
               presentation={presentation._tag}
+              restoreFocus={restoreStageFocus}
               agents={agents}
               workSnapshots={currentWork}
               crew={stageCrew}
               onClose={() => {
                 const closing = stageKey
+                stageUrlSelection.current = null
                 setStageKey(null)
+                const url = directoryLocation?.url
+                const fromUrl =
+                  url?.searchParams.get("open") === "stage" &&
+                  stageAgent !== null &&
+                  url.searchParams.get("host") === stageAgent.host &&
+                  url.searchParams.get("agent") === stageAgent.id
+                stageReturnKey.current = fromUrl ? closing : null
+                if (fromUrl) {
+                  directoryLocation.navigate(connectDirectoryHref("active", undefined, url), "replace")
+                  return
+                }
                 // The control that opened the stage may be gone (the pin hides while its stage is open, the
                 // terminal's bar chip unmounts on the way here); focus then goes to the agent's row, not the page.
                 window.setTimeout(() => {
-                  if (closing === null || (document.activeElement !== null && document.activeElement !== document.body))
+                  if (
+                    !activeRef.current ||
+                    closing === null ||
+                    (document.activeElement !== null && document.activeElement !== document.body)
+                  )
                     return
                   const target =
                     document.querySelector<HTMLButtonElement>(
@@ -1661,7 +1775,7 @@ const ActiveConnectSurface = ({
                   target?.focus()
                 }, 0)
               }}
-              onOpen={(agent) => setStageKey(connectAgentKey(agent))}
+              onOpen={openLocalStage}
               onPinChange={(pinned) => (stageAgent === null ? undefined : changePin(stageAgent, pinned))}
               pinned={stageKey !== null && pins.some((each) => each.key === stageKey)}
               workGoal={
@@ -1670,6 +1784,7 @@ const ActiveConnectSurface = ({
                   : resolveConnectWorkGoal(stageAgent, currentWork)
               }
               onOpenTerminal={(agent) => {
+                stageUrlSelection.current = null
                 setStageKey(null)
                 selectAgent(agent)
               }}
@@ -1730,7 +1845,7 @@ const ActiveConnectSurface = ({
             agentFor={(key) => agentByKey.get(key)}
             hiddenKey={stageKey}
             now={Date.now()}
-            onOpen={(agent) => setStageKey(connectAgentKey(agent))}
+            onOpen={openLocalStage}
             onUnpin={removePin}
             pins={pins}
             placement="float"
@@ -1774,7 +1889,7 @@ const ActiveConnectSurface = ({
           now={Date.now()}
           onOpen={(agent) => {
             disconnect()
-            setStageKey(connectAgentKey(agent))
+            openLocalStage(agent)
           }}
           onUnpin={removePin}
           pins={pins}

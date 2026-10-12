@@ -108,12 +108,12 @@ describe("dashboard pending continuation state", () => {
 
   it("labels bounded navigation counts as exact, partial or previous and omits expired approvals", () => {
     const page = { ...emptyPage([]), local: [record("job-live"), { ...record("job-expired"), approvalExpiresAt: 2 }] }
-    expect(dashboardPendingNavigationBadge(page, 3, false)).toEqual({ text: "1", label: "1 approvals waiting" })
+    expect(dashboardPendingNavigationBadge(page, 3, false)).toEqual({ text: "1", label: "1 approval waiting" })
     expect(dashboardPendingBadgeCount(page, 3)).toBe(1)
     expect(dashboardPendingNavigationBadge({ ...page, nextCursors: [cursor("ALPHA", "more")] }, 3, false))
-      .toEqual({ text: "1+", label: "at least 1 approvals waiting" })
+      .toEqual({ text: "1+", label: "at least 1 approval waiting" })
     expect(dashboardPendingNavigationBadge({ ...page, failures: [{ host: "PI", reason: "unavailable" }] }, 3, true))
-      .toEqual({ text: "1+", label: "Previous reading, at least 1 approvals waiting" })
+      .toEqual({ text: "1+", label: "Previous reading, at least 1 approval waiting" })
     expect(dashboardPendingNavigationBadge(emptyPage([]), 3, false)).toBeUndefined()
     expect(
       dashboardPendingNavigationBadge({ ...emptyPage([]), failures: [{ host: "PI", reason: "unavailable" }] }, 3, false)

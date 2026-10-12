@@ -90,13 +90,20 @@ export const isEditableTarget = (target: EventTarget | null): boolean => {
 }
 
 /** Exact approvals win over their tab; modal portals own focus while their module slot is hidden. */
-export const focusModulePage = (module: string, page: string): (() => void) => {
+export const focusModulePage = (module: string, page: string, preserveOwnerFocus = false): (() => void) => {
   let cancelSearch: (() => void) | undefined
+  const previousFocus = document.activeElement
   const frame = window.requestAnimationFrame(() => {
     const slot = [...document.querySelectorAll<HTMLElement>("[data-module]")].find(
       (element) => element.dataset.module === module && element.hidden === false
     )
     if (slot !== undefined && slot.closest('[aria-hidden="true"], [inert]') !== null) return
+    if (
+      preserveOwnerFocus === true &&
+      document.activeElement !== previousFocus &&
+      slot?.contains(document.activeElement) === true
+    )
+      return
     const tab = [...(slot?.querySelectorAll<HTMLElement>('[role="tab"]') ?? [])].find(
       (element) => element.dataset.tabValue === page
     )

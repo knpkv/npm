@@ -17,7 +17,10 @@ export * from "./usage-selection.js"
  * page. Pass null for in-page selector updates to retain control focus, or search for Connect.
  */
 export interface ModulePageMount {
-  /** Gate portals/focus traps on active; hidden sections do not hide portals. Keep underlying owners alive. */
+  /**
+   * Gate portals/focus traps on active; hidden sections do not hide portals. Keep underlying owners alive.
+   * Move owned arrival focus in the activation effect; the shell keeps focus claimed inside the destination.
+   */
   readonly active: boolean
   readonly navigate: (href: string, history: "push" | "replace", focus?: "page" | "search" | null) => void
   /**

@@ -197,4 +197,4 @@ Provider keys are local and opaque. The collector adds the registered module nam
 
 Module page metadata `showInPhoneTitle` defaults to false. It appends the page label to the phone mast when its design calls for one; primary links and page ownership are unchanged.
 
-Canonical Connect owns its saved Active/Archived location through the shell navigator. Embedded `BlockedConnectSurface` requires a paired `directoryLocation` URL and navigation callback; standalone use retains the default browser history. The module forwards the dashboard notification state to the stage footer without another device-state read.
+Canonical Connect owns its saved Active/Archived location through the shell navigator. Embedded `BlockedConnectSurface` requires one `directoryLocation` containing its URL, navigation and selection-close callbacks; standalone use retains the default browser history. The module forwards the dashboard notification state to the stage footer without another device-state read.

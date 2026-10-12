@@ -904,7 +904,11 @@
   }
 
   [data-module="connect"] .connect-agents:has(> .connect-home-empty) {
-    --connect-agents-inset: var(--rly-space-24);
+    --connect-agents-inset: var(--connect-empty-inset, var(--rly-space-24));
+  }
+
+  [data-module="connect"] .connect-shell:has(.connect-home-strip-compact) {
+    --connect-empty-inset: var(--rly-space-20);
   }
 
   .connect-home-strip {
@@ -918,6 +922,11 @@
     background: var(--rly-color-surface-1);
     font-weight: 430;
     line-height: 1.5;
+  }
+
+  .connect-home-strip-compact {
+    display: flex;
+    margin-block-end: var(--rly-space-16);
   }
 
   .connect-home-strip > div,
@@ -1098,7 +1107,7 @@
     }
 
     [data-module="connect"] .connect-agents:has(> .connect-home-empty) {
-      --connect-agents-inset: var(--rly-space-16);
+      --connect-agents-inset: var(--connect-empty-inset, var(--rly-space-16));
     }
 
     .connect-home-strip {

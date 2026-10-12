@@ -155,7 +155,7 @@ export const ConnectArchiveSurface = ({
     const url = new URL(locationHref)
     if (!url.searchParams.has("closed")) return
     url.searchParams.delete("closed")
-    navigate(`${url.pathname}${url.search}${url.hash}`, "push")
+    directoryLocation.closeSelection(`${url.pathname}${url.search}${url.hash}`)
   }
   const openStage = (key: string): void => {
     if (!home) {

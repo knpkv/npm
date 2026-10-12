@@ -447,3 +447,134 @@ it("renders the Home empty slot instead of empty activity groups", () => {
   expect(host.querySelector("[data-home-empty]")?.textContent).toBe("No agents on any host yet")
   expect(host.querySelector(".connect-home-group")).toBeNull()
 })
+
+/** URL-selected stages close through the paired owner; row stages remain local and add no history. */
+it.each([true, false])("closes a Home stage through replace only for URL entry=%s", async (fromUrl) => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true)
+  const atoms = makeConnectAtoms()
+  const registry = AtomRegistry.make({
+    initialValues: [
+      [atoms.agents, AsyncResult.success({ agents: [agent], failures: [] }, { timestamp: 0 })],
+      [atoms.preference, AsyncResult.success(null)],
+      [atoms.work, AsyncResult.initial()]
+    ]
+  })
+  const host = document.createElement("div")
+  document.body.append(host)
+  const root = createRoot(host)
+  const navigate = vi.fn()
+  let url = new URL(
+    fromUrl
+      ? "http://localhost/?keep=yes&host=ALPHA&agent=agent-reviewer&open=stage#connect/overview"
+      : "http://localhost/?keep=yes#connect/overview"
+  )
+  const paint = async () =>
+    act(async () => {
+      root.render(
+        <RegistryContext.Provider value={registry}>
+          <ConnectSurface
+            atoms={atoms}
+            embedded
+            presentation={{ _tag: "home" }}
+            directoryLocation={{ url, navigate, closeSelection: (href) => navigate(href, "replace") }}
+          />
+        </RegistryContext.Provider>
+      )
+      for (let i = 0; i < 20; i += 1) await Promise.resolve()
+    })
+  try {
+    await paint()
+    const terminal = host.querySelector(".connect-terminal-screen")
+    await act(async () => registry.set(atoms.query, "Review"))
+    if (!fromUrl) await act(async () => host.querySelector<HTMLButtonElement>(".connect-agent")?.click())
+    const dialog = document.querySelector('[role="dialog"]')
+    expect(dialog).not.toBeNull()
+    if (fromUrl) {
+      url = new URL("http://localhost/?keep=yes#connect/overview")
+      await paint()
+      expect(document.querySelector('[role="dialog"]')).toBeNull()
+      expect(navigate).not.toHaveBeenCalled()
+      expect(host.querySelector(".connect-terminal-screen")).toBe(terminal)
+      expect(registry.get(atoms.query)).toBe("Review")
+      url = new URL("http://localhost/?keep=yes&host=ALPHA&agent=agent-reviewer&open=stage#connect/overview")
+      await paint()
+    } else {
+      url = new URL("http://localhost/?keep=yes&unrelated=changed#connect/overview")
+      await paint()
+      expect(document.querySelector('[role="dialog"]')).not.toBeNull()
+    }
+    const close = document.querySelector<HTMLButtonElement>(".connect-home-stage-close")
+    expect(close).not.toBeNull()
+    await act(async () => close?.click())
+    expect(document.querySelector('[role="dialog"]')).toBeNull()
+    if (fromUrl) expect(navigate).toHaveBeenCalledExactlyOnceWith("/?keep=yes#connect/overview", "replace")
+    else expect(navigate).not.toHaveBeenCalled()
+    expect(url.searchParams.has("host")).toBe(fromUrl)
+    if (fromUrl) {
+      url = new URL("http://localhost/?keep=yes#connect/overview")
+      await paint()
+      expect(host.querySelector(".connect-terminal-screen")).toBe(terminal)
+      expect(registry.get(atoms.query)).toBe("Review")
+      url = new URL("http://localhost/?keep=yes&host=ALPHA&agent=agent-reviewer&open=stage#connect/overview")
+      await paint()
+      expect(document.querySelector('[role="dialog"]')).not.toBeNull()
+      expect(host.querySelector(".connect-terminal-screen")).toBe(terminal)
+    }
+  } finally {
+    await act(async () => root.unmount())
+    registry.dispose()
+    host.remove()
+    vi.unstubAllGlobals()
+  }
+})
+
+/** A retained surface switches URL-owned agents without resetting its filters or terminal owner. */
+it("switches a URL-owned stage when its selected agent changes", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true)
+  const other = { ...agent, id: Schema.decodeUnknownSync(AgentStableId)("agent-other"), name: "Other worker" }
+  const atoms = makeConnectAtoms()
+  const registry = AtomRegistry.make({
+    initialValues: [
+      [atoms.agents, AsyncResult.success({ agents: [agent, other], failures: [] }, { timestamp: 0 })],
+      [atoms.preference, AsyncResult.success(null)],
+      [atoms.work, AsyncResult.initial()]
+    ]
+  })
+  const host = document.createElement("div")
+  document.body.append(host)
+  const root = createRoot(host)
+  const navigate = vi.fn()
+  const paint = async (id: string) =>
+    act(async () => {
+      root.render(
+        <RegistryContext.Provider value={registry}>
+          <ConnectSurface
+            atoms={atoms}
+            embedded
+            presentation={{ _tag: "home" }}
+            directoryLocation={{
+              url: new URL(`http://localhost/?host=ALPHA&agent=${id}&open=stage#connect/overview`),
+              navigate,
+              closeSelection: (href) => navigate(href, "replace")
+            }}
+          />
+        </RegistryContext.Provider>
+      )
+      for (let i = 0; i < 20; i += 1) await Promise.resolve()
+    })
+  try {
+    await paint("agent-reviewer")
+    const terminal = host.querySelector(".connect-terminal-screen")
+    await act(async () => registry.set(atoms.query, "worker"))
+    await paint("agent-other")
+    expect(document.querySelector(".connect-home-stage-header h2")?.textContent).toContain("Other worker")
+    expect(host.querySelector(".connect-terminal-screen")).toBe(terminal)
+    expect(registry.get(atoms.query)).toBe("worker")
+    expect(navigate).not.toHaveBeenCalled()
+  } finally {
+    await act(async () => root.unmount())
+    registry.dispose()
+    host.remove()
+    vi.unstubAllGlobals()
+  }
+})

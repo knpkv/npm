@@ -232,7 +232,7 @@ test("flat navigation and the module heading remain readable beside an active Re
     await expect(page.locator(".superapp-module-heading h1")).toHaveText("Fleet")
     await expect(page.locator(".superapp-breadcrumb")).toBeHidden()
     await expect(page.locator(".superapp-sidebar a[aria-current=\"page\"]")).toHaveAccessibleName(
-      "Fleet, 1 approvals waiting"
+      "Fleet, 1 approval waiting"
     )
     for (const open of [false, true]) {
       if (open) await page.getByRole("button", { name: "Ask Relay", exact: true }).click()
@@ -390,7 +390,7 @@ for (const jobId of ["job-1", "job-off-page"]) {
 }
 
 test("restores useful focus when Back closes a Connect handoff stage", async ({ page }) => {
-  await page.goto("/?agent=agent-1&host=hub#fleet/connect")
+  await page.goto("/#fleet/connect")
   await page.getByRole("button", { name: "Filters", exact: true }).click()
   await expect(page.locator("#connect-agent-search")).toBeVisible()
   // A same-origin incoming handoff is outside the product's own selection links.
@@ -405,8 +405,84 @@ test("restores useful focus when Back closes a Connect handoff stage", async ({ 
   await expect(page.getByRole("dialog", { name: "Agent", exact: true })).toBeVisible()
   await page.goBack()
   await expect(page.getByRole("dialog", { name: "Agent", exact: true })).toHaveCount(0)
-  // Overview arrival focuses the page; selector changes recreate the closed Home filters.
+  // The retained owner returns to the URL-selected row through Sheet's cleanup, without a remount.
+  await expect(page.locator(".connect-agent[data-agent-key=\"hub:agent-1\"]")).toBeFocused()
+  await expect(page.locator("#connect-agent-search")).toBeVisible()
+})
+
+/** A vanished URL-selected row falls back to the page, never a detached modal opener. */
+test("a URL-owned stage returns to the page when its agent disappears", async ({ page }) => {
+  await page.clock.install()
+  await page.goto("/?host=hub&agent=agent-1&open=stage#connect/overview")
+  await expect(page.getByRole("dialog", { name: "Agent", exact: true })).toBeVisible()
+  await page.route(
+    "**/v1/connect/agents*",
+    (route) => route.fulfill({ json: { agents: [], failures: [], hosts: ["hub"], nextCursor: null } })
+  )
+  await page.clock.runFor(5_100)
+  await expect(page.getByRole("dialog", { name: "Agent", exact: true })).toHaveCount(0)
   await expect(page.locator("#main")).toBeFocused()
+  const history = await page.evaluate(() => window.history.length)
+  await page.goBack()
+  await expect(page.getByRole("dialog")).toHaveCount(0)
+  expect(await page.evaluate(() => window.history.length)).toBe(history)
+})
+
+/** Modal cleanup from a hidden, vanished agent cannot redirect the next local stage's return focus. */
+test("a vanished inactive URL stage does not change the next row opener", async ({ page }, info) => {
+  await page.clock.install()
+  let removed = false
+  await page.route("**/v1/connect/agents*", (route) =>
+    route.fulfill({
+      json: {
+        agents: [
+          ...(removed
+            ? []
+            : [{
+              id: "agent-1",
+              host: "hub",
+              name: "Agent",
+              kind: "test",
+              state: "working",
+              work: "npm",
+              lastActivityAt: 0
+            }]),
+          {
+            id: "agent-2",
+            host: "hub",
+            name: "Other agent",
+            kind: "test",
+            state: "working",
+            work: "npm",
+            lastActivityAt: 0
+          }
+        ],
+        failures: [],
+        nextCursor: null
+      }
+    }))
+  await page.goto("/?host=hub&agent=agent-1&open=stage#connect/overview")
+  await expect(page.getByRole("dialog", { name: "Agent", exact: true })).toBeVisible()
+  await page.evaluate(() => {
+    window.location.hash = "#fleet/work"
+  })
+  await expect(page.locator("[data-module=\"fleet\"]")).toBeVisible()
+  removed = true
+  await page.clock.runFor(5_100)
+  await page.evaluate(() => {
+    window.location.hash = "#connect/overview"
+  })
+  const row = page.locator(".connect-agent[data-agent-key=\"hub:agent-2\"]")
+  await expect(row).toBeVisible()
+  await page.clock.runFor(50)
+  await row.click()
+  const stage = page.getByRole("dialog", { name: "Other agent", exact: true })
+  await expect(stage).toBeVisible()
+  await stage.getByRole("button", { name: info.project.name === "phone" ? "Back to Connect" : "Close", exact: true })
+    .click()
+  await expect(stage).toHaveCount(0)
+  await page.clock.runFor(50)
+  await expect(row).toBeFocused()
 })
 
 test("opens the exact Work goal, hands off to embedded Connect, and goes Back", async ({ page }) => {
@@ -420,7 +496,9 @@ test("opens the exact Work goal, hands off to embedded Connect, and goes Back", 
   expect(new URL(page.url()).searchParams.get("agent")).toBe("agent-1")
   expect(new URL(page.url()).searchParams.get("host")).toBe("hub")
   await page.goBack()
-  await expect(page.getByRole("tab", { name: "Work", exact: true })).toBeFocused()
+  await expect(page.getByRole("heading", { name: "Goal details", exact: true })).toBeFocused()
+  await expect(page.getByRole("tab", { name: "Work", exact: true })).toHaveAttribute("aria-selected", "true")
+  expect(new URL(page.url()).searchParams.get("goal")).toBe("goal-1")
   await expect(page.getByRole("heading", { name: "Check the module navigation", exact: true })).toBeVisible()
   await expect(page.getByRole("dialog")).toHaveCount(0)
   await expect(page.locator(".superapp-shell")).not.toHaveAttribute("aria-hidden", "true")
@@ -506,12 +584,15 @@ test("keeps focus when selecting a Work window and restores that window on Back"
   await expect(previousWeek).toBeFocused()
   await expect(previousWeek).toHaveAttribute("aria-current", "page")
   expect(await page.evaluate(() => window.history.length)).toBe(historyLength)
+  const workSearch = new URL(page.url()).search
   await page.getByRole("link", { name: /Open .* in Connect/ }).click()
   await expect(page.getByRole("dialog", { name: "Agent", exact: true })).toBeVisible()
   expect(await page.evaluate(() => window.history.length)).toBe(historyLength + 1)
   await page.goBack()
   await expect(previousWeek).toHaveAttribute("aria-current", "page")
-  await expect(page.getByRole("tab", { name: "Work", exact: true })).toBeFocused()
+  await expect(page.getByRole("heading", { name: "Goal details", exact: true })).toBeFocused()
+  await expect(page.getByRole("tab", { name: "Work", exact: true })).toHaveAttribute("aria-selected", "true")
+  expect(new URL(page.url()).search).toBe(workSearch)
 })
 
 test("keeps Relay summon and Connect search shortcuts", async ({ page }) => {
@@ -982,11 +1063,11 @@ test("Fleet heading keeps its phone hiding geometry and remains outside the tab 
     return {
       width: box.width,
       height: box.height,
-      tabIndex: element.getAttribute("tabindex"),
+      tabIndex: element.tabIndex,
       focusable: element.querySelectorAll("a,button,input,select,textarea,[tabindex=\"0\"]").length
     }
   })
-  expect(metrics.tabIndex).toBe("-1")
+  expect(metrics.tabIndex).toBe(-1)
   expect(metrics.focusable).toBe(0)
   if (info.project.name === "phone") {
     expect(metrics.width).toBe(1)
@@ -995,4 +1076,137 @@ test("Fleet heading keeps its phone hiding geometry and remains outside the tab 
     expect(metrics.width).toBeGreaterThan(1)
     expect(metrics.height).toBeGreaterThan(1)
   }
+})
+
+/** Presentation locks follow visibility; the terminal worker remains owned until the active surface leaves. */
+for (const readyWhileHidden of [false, true]) {
+  test(`a retained terminal releases hidden locks and restores guarded focus, ready while hidden=${String(readyWhileHidden)}`, async ({ page }) => {
+    const sockets: Array<WebSocketRoute> = []
+    let closed = 0
+    await page.routeWebSocket("**/v1/connect/session?*", (socket) => {
+      sockets.push(socket)
+      socket.onClose(() => {
+        closed += 1
+      })
+    })
+    await page.goto("/#fleet/work")
+    await page.locator(".superapp-sidebar, .superapp-bottom").filter({ visible: true })
+      .getByRole("link", { name: "Connect", exact: true }).click()
+    await page.locator(".connect-home-agent").first().click()
+    await page.getByRole("dialog").getByRole("button", { name: "Open terminal", exact: true }).click()
+    await expect.poll(() => sockets.length).toBe(1)
+    await expect(page.locator(".ghostty-terminal canvas")).toHaveCount(1)
+    const socket = sockets[0]
+    if (socket === undefined) throw new Error("Missing fixture socket")
+    if (!readyWhileHidden) {
+      socket.send(JSON.stringify({ type: "terminal.ready" }))
+      await expect(page.locator(".connect-terminal-screen")).toBeVisible()
+    }
+    await page.goBack()
+    await expect(page.locator("[data-module=\"fleet\"]")).toBeVisible()
+    if (readyWhileHidden) socket.send(JSON.stringify({ type: "terminal.ready" }))
+    await expect.poll(() =>
+      page.evaluate(() => document.documentElement.classList.contains("connect-terminal-document-lock"))
+    )
+      .toBe(false)
+    await page.evaluate(() => {
+      const module = document.querySelector("[data-module=\"fleet\"]")
+      const probe = document.createElement("div")
+      probe.style.blockSize = "2000px"
+      module?.append(probe)
+    })
+    await page.mouse.wheel(0, 300)
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0)
+    expect(closed).toBe(0)
+    await page.goForward()
+    const terminal = page.locator(".connect-terminal-screen")
+    await expect(terminal).toBeVisible()
+    await expect.poll(() => terminal.evaluate((element) => element.contains(document.activeElement))).toBe(true)
+    expect(await page.evaluate(() => document.documentElement.classList.contains("connect-terminal-document-lock")))
+      .toBe(true)
+    expect(sockets).toHaveLength(1)
+    expect(closed).toBe(0)
+    await terminal.getByRole("button", { name: "Agents", exact: true }).click()
+    await page.locator(".superapp-sidebar, .superapp-bottom").filter({ visible: true })
+      .getByRole("link", { name: "Usage", exact: true }).click()
+    await expect(page.locator("[data-module=\"usage\"] [data-module-page=\"limits\"]")).toBeFocused()
+  })
+}
+
+/** Archive replaces Active, releasing its terminal ownership rather than leaving a connected shell predicate. */
+test("Back from a terminal to Archived restores chrome and Relay keys", async ({ page }) => {
+  const sockets: Array<WebSocketRoute> = []
+  await page.routeWebSocket("**/v1/connect/session?*", (socket) => sockets.push(socket))
+  await page.goto("/?view=archived#connect/overview")
+  await page.getByRole("navigation", { name: "Agent directory view" }).getByRole("link", {
+    name: "Active",
+    exact: true
+  }).click()
+  await page.locator(".connect-home-agent").first().click()
+  await page.getByRole("dialog").getByRole("button", { name: "Open terminal", exact: true }).click()
+  await expect.poll(() => sockets.length).toBe(1)
+  await expect(page.locator(".ghostty-terminal canvas")).toHaveCount(1)
+  const socket = sockets[0]
+  if (socket === undefined) throw new Error("Missing fixture socket")
+  socket.send(JSON.stringify({ type: "terminal.ready" }))
+  await expect(page.locator(".connect-terminal-screen")).toBeVisible()
+  await page.goBack()
+  await expect(page.locator(".connect-home-archive")).toBeVisible()
+  await expect(page.locator(".superapp-header")).toBeVisible()
+  await expect(page.locator(".superapp-header")).not.toHaveAttribute("inert", "")
+  await page.keyboard.press("Control+j")
+  await expect(page.locator("[data-rly-relay-panel]")).toBeVisible()
+})
+
+/** Selector removal is a replace within one owner; the same incoming selection can then reopen the stage. */
+test("closing a URL-selected Home stage preserves its owner and makes reload stay closed", async ({ page }, info) => {
+  const entry = "/?host=hub&agent=agent-1&open=stage#connect/overview"
+  await page.goto(entry)
+  await expect(page.getByRole("dialog", { name: "Agent", exact: true })).toBeVisible()
+  await page.evaluate(() => document.querySelector(".connect-shell")?.setAttribute("data-owner-probe", "kept"))
+  const historyLength = await page.evaluate(() => window.history.length)
+  await page.getByRole("dialog").getByRole("button", {
+    name: info.project.name === "phone" ? "Back to Connect" : "Close",
+    exact: true
+  }).click()
+  await expect(page.getByRole("dialog")).toHaveCount(0)
+  for (const key of ["host", "agent", "open"]) expect(new URL(page.url()).searchParams.has(key)).toBe(false)
+  await expect(page.locator(".connect-shell")).toHaveAttribute("data-owner-probe", "kept")
+  expect(await page.evaluate(() => window.history.length)).toBe(historyLength)
+  await expect(page.locator(".connect-agent[data-agent-key=\"hub:agent-1\"]")).toBeFocused()
+  await page.reload()
+  await expect(page.locator(".connect-home-agent")).not.toHaveCount(0)
+  await expect(page.getByRole("dialog")).toHaveCount(0)
+  await page.evaluate((href) => {
+    const link = document.createElement("a")
+    link.href = href
+    document.body.append(link)
+    link.click()
+    link.remove()
+  }, entry)
+  await expect(page.getByRole("dialog", { name: "Agent", exact: true })).toBeVisible()
+  await page.getByRole("dialog").getByRole("button", {
+    name: info.project.name === "phone" ? "Back to Connect" : "Close",
+    exact: true
+  }).click()
+  expect(new URL(page.url()).searchParams.has("open")).toBe(false)
+  await page.goBack()
+  await expect(page.getByRole("dialog")).toHaveCount(0)
+})
+
+/** Standalone uses the same replace-close mode without creating a shell entry or reopening on Back. */
+test("standalone URL-selected stage close replaces its selectors before Back", async ({ page }) => {
+  await page.goto("/#fleet/work")
+  await page.goto("/connect/?host=hub&agent=agent-1&open=stage")
+  const dialog = page.getByRole("dialog", { name: "Agent", exact: true })
+  await expect(dialog).toBeVisible()
+  const length = await page.evaluate(() => window.history.length)
+  await dialog.getByRole("button", { name: "Close", exact: true }).click()
+  await expect(dialog).toHaveCount(0)
+  expect(await page.evaluate(() => window.history.length)).toBe(length)
+  for (const key of ["host", "agent", "open"]) expect(new URL(page.url()).searchParams.has(key)).toBe(false)
+  await expect(page.locator(".connect-agent[data-agent-key=\"hub:agent-1\"]")).toBeFocused()
+  await page.goBack()
+  expect(new URL(page.url()).hash).toBe("#fleet/work")
+  await expect(page.getByRole("dialog")).toHaveCount(0)
 })

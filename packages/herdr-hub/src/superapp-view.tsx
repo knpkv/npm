@@ -35,7 +35,7 @@ interface ShellLocation {
   readonly url: URL
   readonly destination: ModuleDestination
   readonly error: string | null
-  readonly focus: "deferred" | "page" | "search" | null
+  readonly focus: "deferred" | "history" | "page" | "search" | null
 }
 
 const ShellHistoryEntry = Schema.Struct({ openedFrom: Schema.String, document: Schema.String })
@@ -220,7 +220,7 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
   const navigate = (
     href: string,
     history: "push" | "replace",
-    focus: Exclude<ShellLocation["focus"], "deferred"> = "page"
+    focus: Exclude<ShellLocation["focus"], "deferred" | "history"> = "page"
   ): void => {
     const current = new URL(window.location.href)
     const target = hubModuleLinkTarget(
@@ -289,7 +289,12 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
     navigate(parentHref, "replace", null)
   }
   const cancelLocationFocus = useRef<(() => void) | null>(null)
+  const previousFocusDestination = useRef(location.destination)
+  // Schedule before child activation effects claim focus, so the arrival RAF can preserve that claim.
   useLayoutEffect(() => {
+    const previous = previousFocusDestination.current
+    previousFocusDestination.current = location.destination
+    const arrival = previous.module !== location.destination.module || previous.page !== location.destination.page
     // Query repairs retain the pending arrival focus, but never start another focus request.
     if (location.focus === null) return
     cancelLocationFocus.current?.()
@@ -297,12 +302,16 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
     if (location.focus === "search") {
       cancelLocationFocus.current = focusWhenShown("connect-agent-search")
     }
-    if (location.focus === "page")
-      cancelLocationFocus.current = focusModulePage(location.destination.module, location.destination.page)
+    if (location.focus === "page" || location.focus === "history")
+      cancelLocationFocus.current = focusModulePage(
+        location.destination.module,
+        location.destination.page,
+        arrival || location.focus === "history"
+      )
   }, [location])
   useLayoutEffect(() => () => cancelLocationFocus.current?.(), [])
   useEffect(() => {
-    const read = (): void => {
+    const read = (event: Event): void => {
       const url = new URL(window.location.href)
       const closing = pendingSelectionClose.current?.parent === historyHref(url, descriptors)
       pendingSelectionClose.current = null
@@ -314,7 +323,8 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
           next.error === previous.error
         )
           return next.url.href === previous.url.href && next.url.href === url.href ? previous : { ...next, focus: null }
-        return closing ? { ...next, focus: null } : next
+        if (closing) return { ...next, focus: null }
+        return event.type === "popstate" && next.focus === "page" ? { ...next, focus: "history" } : next
       })
     }
     window.addEventListener("popstate", read)

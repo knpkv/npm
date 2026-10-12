@@ -41,9 +41,10 @@ const ConnectModulePage = ({
   const directoryLocation = useMemo(
     () => ({
       url: new URL(moduleHref(connectModule, "overview", new URLSearchParams(savedSearch)), window.location.href),
-      navigate: mount.navigate
+      navigate: (href: string, mode: "push" | "replace") => mount.navigate(href, mode, null),
+      closeSelection: mount.closeSelection
     }),
-    [savedSearch, mount.navigate]
+    [savedSearch, mount.navigate, mount.closeSelection]
   )
   const directory = useAtomValue(content.atoms.agents)
   const reading = Option.getOrNull(AsyncResult.value(directory))
@@ -65,6 +66,7 @@ const ConnectModulePage = ({
     approvals.reading?.result.items.filter((item) => item.expiresAt === null || item.expiresAt > content.now).length ??
     null
   const partial = approvals.reading?.result._tag === "Partial"
+  const approvalsUnknown = waiting === null || (waiting === 0 && (partial || approvals.failed))
   const unreadApprovalHosts =
     approvals.reading?.result._tag === "Partial"
       ? [
@@ -122,27 +124,32 @@ const ConnectModulePage = ({
     </section>
   )
   const summary =
-    empty && waiting === 0 ? undefined : (
-      <section aria-label="Needs you and approvals" className="connect-home-strip">
-        <div data-previous-reading={AsyncResult.isFailure(directory) && reading !== null ? "" : undefined}>
-          {AsyncResult.isFailure(directory) && reading !== null ? (
-            <span aria-hidden="true" className="connect-home-count-context">
-              Previous reading
-            </span>
-          ) : reading !== null && reading.failures.length > 0 ? (
-            <span>At least</span>
-          ) : null}
-          <strong>{needing === null ? "Unknown" : String(needing)}</strong>
-          <span>need you</span>
-          {AsyncResult.isFailure(directory) && reading !== null ? (
-            <span className="connect-home-count-announcement">, from the previous reading.</span>
-          ) : null}
-        </div>
+    empty && waiting === 0 && !partial && !approvals.failed ? undefined : (
+      <section
+        aria-label="Needs you and approvals"
+        className={empty ? "connect-home-strip connect-home-strip-compact" : "connect-home-strip"}
+      >
+        {empty ? null : (
+          <div data-previous-reading={AsyncResult.isFailure(directory) && reading !== null ? "" : undefined}>
+            {AsyncResult.isFailure(directory) && reading !== null ? (
+              <span aria-hidden="true" className="connect-home-count-context">
+                Previous reading
+              </span>
+            ) : reading !== null && reading.failures.length > 0 ? (
+              <span>At least</span>
+            ) : null}
+            <strong>{needing === null ? "Unknown" : String(needing)}</strong>
+            <span>need you</span>
+            {AsyncResult.isFailure(directory) && reading !== null ? (
+              <span className="connect-home-count-announcement">, from the previous reading.</span>
+            ) : null}
+          </div>
+        )}
         <a
           href={moduleHref(fleetHubModule, "approvals")}
-          aria-label={waiting === null ? "Approvals unknown, open Fleet Approvals" : undefined}
+          aria-label={approvalsUnknown ? "Approvals unknown, open Fleet Approvals" : undefined}
         >
-          {waiting === null ? null : (
+          {approvalsUnknown ? null : (
             <span className="connect-home-approval-count">
               {approvals.failed && approvals.reading !== null ? (
                 <span>Previous reading</span>
@@ -153,10 +160,10 @@ const ConnectModulePage = ({
             </span>
           )}
           <span className="connect-home-approvals-word">
-            {waiting === null ? "Approvals unknown" : "approvals waiting"}
+            {approvalsUnknown ? "Approvals unknown" : waiting === 1 ? "approval waiting" : "approvals waiting"}
           </span>
           <ShellIcon name="next" />
-          {waiting !== null && (approvals.failed || partial) ? (
+          {!approvalsUnknown && (approvals.failed || partial) ? (
             <small>
               {approvals.failed
                 ? approvals.reading === null
@@ -166,25 +173,26 @@ const ConnectModulePage = ({
             </small>
           ) : null}
         </a>
-        <p>
-          {latest === undefined ? (
-            "No activity reading yet"
-          ) : (
-            <>
-              Last activity{" "}
-              <time dateTime={new Date(latest.lastActivityAt).toISOString()}>
-                {new Date(latest.lastActivityAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}
-              </time>
-              , {latest.name}
-              {latest.work.length === 0 ? null : `: ${latest.work}`}
-            </>
-          )}
-        </p>
+        {empty ? null : (
+          <p>
+            {latest === undefined ? (
+              "No activity reading yet"
+            ) : (
+              <>
+                Last activity{" "}
+                <time dateTime={new Date(latest.lastActivityAt).toISOString()}>
+                  {new Date(latest.lastActivityAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}
+                </time>
+                , {latest.name}
+                {latest.work.length === 0 ? null : `: ${latest.work}`}
+              </>
+            )}
+          </p>
+        )}
       </section>
     )
   return (
     <BlockedConnectSurface
-      key={JSON.stringify([search.get("host"), search.get("agent"), search.get("open")])}
       active={mount.active}
       atoms={content.atoms}
       directoryLocation={directoryLocation}

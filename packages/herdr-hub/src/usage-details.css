@@ -23,6 +23,54 @@
     margin: 0;
   }
 
+  .usage-by-tool-updating {
+    gap: var(--rly-space-8);
+    line-height: 1.5;
+    margin-block-start: -0.25rem;
+    font-size: 0.8125rem;
+    font-weight: 430;
+  }
+
+  .usage-by-tool-notice {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.6rem var(--rly-space-16);
+    padding: var(--rly-space-12) var(--rly-space-16);
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-group);
+    background: var(--rly-color-surface-1);
+    font-weight: 430;
+  }
+
+  .usage-by-tool-notice > div {
+    display: grid;
+    gap: 0.2rem;
+    min-inline-size: 0;
+  }
+
+  .usage-by-tool-notice > div > span:last-child {
+    font-size: 0.875rem;
+    line-height: 1.5;
+  }
+
+  .usage-details .usage-by-tool-notice time {
+    color: inherit;
+  }
+
+  .usage-by-tool-notice button {
+    min-block-size: 2.25rem;
+    font-size: 1rem;
+    font-weight: 430;
+    line-height: 1.5;
+  }
+
+  .usage-by-tool-updating svg {
+    inline-size: 0.75rem;
+    block-size: 0.75rem;
+  }
+
   .usage-details-intro,
   .usage-details-section,
   .usage-details-footer {
@@ -445,6 +493,15 @@
 
     .usage-details[data-usage-page="by-tool"] {
       gap: var(--rly-space-16);
+    }
+
+    .usage-by-tool-notice,
+    .usage-by-tool-updating {
+      margin-block-end: var(--rly-space-4);
+    }
+
+    .usage-by-tool-notice button {
+      min-block-size: 2.75rem;
     }
 
     .usage-details:is([data-usage-page="by-tool"], [data-usage-page="limits"]) .usage-details-mast {

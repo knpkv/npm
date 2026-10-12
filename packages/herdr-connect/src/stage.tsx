@@ -260,6 +260,7 @@ export const AgentStage = ({
   onPinChange,
   pinned,
   presentation = "fleet",
+  restoreFocus,
   stale,
   workGoal,
   workSnapshots = null
@@ -275,6 +276,8 @@ export const AgentStage = ({
   readonly pinned: boolean
   /** Header layout only; Fleet is the default and the stage body keeps its existing owner. */
   readonly presentation?: "fleet" | "home"
+  /** Optional URL-selection return target, decided by Sheet after modal cleanup. */
+  readonly restoreFocus?: (() => HTMLElement | undefined) | undefined
   readonly onPinChange: (pinned: boolean) => void
   /** Its direct children, used when a complete directory is not supplied. */
   readonly crew: ReadonlyArray<ConnectAgent>
@@ -286,7 +289,11 @@ export const AgentStage = ({
   return (
     // Its own portal target: Connect runs standalone and inside the hub, and neither provides one.
     <PortalProvider>
-      <Sheet.Root onOpenChange={(open) => (open ? undefined : onClose())} open={agent !== null}>
+      <Sheet.Root
+        onOpenChange={(open) => (open ? undefined : onClose())}
+        open={agent !== null}
+        restoreFocus={restoreFocus}
+      >
         {agent === null ? null : (
           <Sheet.Content
             className="connect-stage-sheet"

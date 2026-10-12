@@ -329,3 +329,72 @@ test("Limits matches the shared Usage chrome geometry", async ({ page }, info) =
     expect(chrome.top).toBe(chrome.headerBottom)
   }
 })
+
+/** Range transitions and failed refreshes preserve numbers while naming which reading they came from. */
+test("By tool frames a retained range while updating, failing and retrying", async ({ page }, info) => {
+  let release = () => {}
+  const pending = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  let fail = true
+  await page.route("**/v1/connect/usage?*", async (route) => {
+    if (new URL(route.request().url()).searchParams.get("range") !== "30d") return route.continue()
+    await pending
+    if (fail) return route.fulfill({ status: 503, body: "private fixture transport detail" })
+    return route.continue()
+  })
+  try {
+    await page.goto("/?range=7d&timeZone=UTC#usage/by-tool")
+    const reading = page.locator(".usage-by-tool-reading")
+    await expect(reading).toContainText("last 7 days")
+    const total = await page.locator(".usage-by-tool-total").textContent()
+    await page.getByRole("radio", { name: "30 days", exact: true }).click()
+    await expect(page.getByRole("status").filter({ hasText: "Updating to 30 days" })).toHaveText(
+      "Updating to 30 days… showing the last 7 days"
+    )
+    await expect(page.locator(".usage-by-tool-total")).toHaveText(total ?? "")
+    const updating = page.locator(".usage-by-tool-updating")
+    expect(await updating.evaluate((element) => getComputedStyle(element).lineHeight)).toBe("19.5px")
+    expect(await updating.evaluate((element) => getComputedStyle(element).gap)).toBe("8px")
+    expect(await updating.locator("svg").evaluate((element) => element.getBoundingClientRect().width)).toBe(12)
+    const updatingBounds = await updating.boundingBox()
+    const retainedBounds = await page.locator(".usage-by-tool-total").boundingBox()
+    expect(updatingBounds).not.toBeNull()
+    expect(retainedBounds).not.toBeNull()
+    if (updatingBounds === null || retainedBounds === null) return
+    expect(retainedBounds.y - updatingBounds.y - updatingBounds.height).toBeCloseTo(20, 1)
+    release()
+    const notice = page.locator(".usage-by-tool-notice")
+    await expect(notice).toContainText("Couldn’t refresh")
+    expect(
+      await notice.locator(":scope > div > span:last-child").evaluate((element) => getComputedStyle(element).lineHeight)
+    ).toBe("21px")
+    await expect(notice).toContainText(/Previous reading \d\d:\d\d\. Retrying every 5 minutes\./)
+    await expect(reading).toContainText("last 7 days")
+    await expect(page.locator(".usage-details")).not.toContainText("private fixture transport detail")
+    const readingColors = await notice.locator("time").evaluate((element) => ({
+      time: getComputedStyle(element).color,
+      text: element.parentElement === null ? null : getComputedStyle(element.parentElement).color
+    }))
+    expect(readingColors.time).toBe(readingColors.text)
+    const retry = notice.getByRole("button", { name: "Retry", exact: true })
+    const retryStyle = await retry.evaluate((element) => {
+      const style = getComputedStyle(element)
+      return { size: style.fontSize, weight: style.fontWeight, height: element.getBoundingClientRect().height }
+    })
+    expect(retryStyle).toEqual({ size: "16px", weight: "430", height: info.project.name === "phone" ? 44 : 36 })
+    const noticeBounds = await notice.boundingBox()
+    const previousBounds = await page.locator(".usage-by-tool-total").boundingBox()
+    expect(noticeBounds).not.toBeNull()
+    expect(previousBounds).not.toBeNull()
+    if (noticeBounds === null || previousBounds === null) return
+    expect(previousBounds.y - noticeBounds.y - noticeBounds.height).toBeCloseTo(20, 1)
+    fail = false
+    await retry.click()
+    await expect(reading).toContainText("last 30 days")
+    await expect(notice).toHaveCount(0)
+    await expect(page.locator(".usage-by-tool-updating")).toHaveCount(0)
+  } finally {
+    release()
+  }
+})

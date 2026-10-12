@@ -4,6 +4,8 @@ import { useMemo, useSyncExternalStore, type MouseEvent } from "react"
 export interface ConnectDirectoryLocation {
   readonly url: URL
   readonly navigate: (href: string, mode: "push" | "replace") => void
+  /** Consume a pushed selection or replace a direct selection with its parent using the host's history. */
+  readonly closeSelection: (parentHref: string) => void
 }
 
 const subscribe = (changed: () => void) => {
@@ -20,7 +22,8 @@ export const useConnectDirectoryLocation = (location?: ConnectDirectoryLocation)
     () => location?.url.href ?? "http://localhost/"
   )
   const navigate = location?.navigate ?? syncConnectDirectoryHistory
-  return useMemo(() => ({ url: new URL(href), navigate }), [href, navigate])
+  const closeSelection = location?.closeSelection ?? closeStandaloneDirectorySelection
+  return useMemo(() => ({ url: new URL(href), navigate, closeSelection }), [href, navigate, closeSelection])
 }
 
 /** Preserve the owning module and embedded frame while changing the directory view. */
@@ -64,6 +67,9 @@ export const syncConnectDirectoryHistory = (href: string, mode: "push" | "replac
   else window.history.pushState(null, "", href)
   window.dispatchEvent(new PopStateEvent("popstate"))
 }
+
+/** Keep the shipped standalone archive dismissal; embedded hosts supply their own selection close. */
+const closeStandaloneDirectorySelection = (href: string): void => syncConnectDirectoryHistory(href, "push")
 
 /** The directory's URL-addressable views, with Active as the default. */
 export const ConnectDirectorySwitch = ({

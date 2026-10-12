@@ -22,6 +22,7 @@ it("derives archive and live parent links without mutating the supplied location
 /** The controlled callback is the only history writer, with no synthetic browser event. */
 it("routes plain clicks to the owner and leaves modified clicks native", async () => {
   const navigate = vi.fn()
+  const closeSelection = vi.fn()
   const push = vi.spyOn(window.history, "pushState")
   const pop = vi.fn()
   window.addEventListener("popstate", pop)
@@ -31,7 +32,9 @@ it("routes plain clicks to the owner and leaves modified clicks native", async (
   try {
     await act(async () =>
       root.render(
-        <ConnectDirectorySwitch location={{ url: new URL("http://localhost/#connect/overview"), navigate }} />
+        <ConnectDirectorySwitch
+          location={{ url: new URL("http://localhost/#connect/overview"), navigate, closeSelection }}
+        />
       )
     )
     const anchor = host.querySelector<HTMLAnchorElement>('a[href*="view=archived"]')
@@ -42,6 +45,7 @@ it("routes plain clicks to the owner and leaves modified clicks native", async (
     expect(navigate).toHaveBeenCalledExactlyOnceWith(anchor?.href, "push")
     expect(push).not.toHaveBeenCalled()
     expect(pop).not.toHaveBeenCalled()
+    expect(closeSelection).not.toHaveBeenCalled()
     await act(async () =>
       anchor?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0, ctrlKey: true }))
     )

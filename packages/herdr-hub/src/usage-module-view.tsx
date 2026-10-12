@@ -10,7 +10,7 @@ import {
   usageState,
   type UsageQuery
 } from "@knpkv/herdr-connect/usage"
-import { Button, ToggleGroup } from "@knpkv/rly/primitives"
+import { Button, StateLabel, ToggleGroup } from "@knpkv/rly/primitives"
 import { Effect, Fiber, Option, Result, Schedule } from "effect"
 import * as AsyncResult from "effect/reactivity/AsyncResult"
 import { useEffect, useId, useMemo, useState, type ReactElement } from "react"
@@ -35,6 +35,8 @@ interface UsageModuleContent {
   readonly now: number
   readonly onHubMachine: boolean
 }
+
+const usagePollInterval = "5 minutes"
 
 /** Serial cached reads stop when the module is inactive or hidden, including an in-flight request. */
 const useUsageRead = <A,>(
@@ -120,7 +122,7 @@ const UsagePage = ({
   const timeZone = selection?.timeZone ?? content.viewerTimeZone
   const read = useMemo(() => content.reads.usage({ range, timeZone }), [content.reads.usage, range, timeZone])
   const enabled = mount.active && visible && selection !== null
-  const usage = useUsageRead(read, enabled, "5 minutes", refresh)
+  const usage = useUsageRead(read, enabled, usagePollInterval, refresh)
   const limits = useUsageRead(content.reads.limits, enabled && page === "limits", "1 minute", refresh)
   const usageReading = Option.getOrNull(AsyncResult.value(usage))
   const limitsReading = Option.getOrNull(AsyncResult.value(limits))
@@ -273,10 +275,47 @@ const UsagePage = ({
             Open agent-usage on this machine
           </a>
         ) : null}
-        {AsyncResult.isFailure(usage) || AsyncResult.isFailure(limits) ? (
+        {(AsyncResult.isFailure(usage) && (page !== "by-tool" || toolReading?._tag !== "Read")) ||
+        AsyncResult.isFailure(limits) ? (
           <Button onClick={() => setRefresh((previous) => previous + 1)}>Retry</Button>
         ) : null}
       </div>
+      {page === "by-tool" &&
+      toolReading?._tag === "Read" &&
+      usage.waiting &&
+      toolReading.usage.range.preset !== range ? (
+        <StateLabel
+          className="usage-by-tool-updating"
+          role="status"
+          tone="neutral"
+          icon="loader"
+          size="compact"
+          label={`Updating to ${rangeLabels[range]}… showing the last ${rangeLabels[toolReading.usage.range.preset]}`}
+        />
+      ) : null}
+      {page === "by-tool" && toolReading?._tag === "Read" && AsyncResult.isFailure(usage) ? (
+        <div className="usage-by-tool-notice" role="status">
+          <div>
+            <StateLabel label="Couldn’t refresh" tone="caution" icon="alert" size="compact" />
+            {toolReading?._tag !== "Read" ? null : (
+              <span>
+                Previous reading{" "}
+                <time dateTime={new Date(toolReading.usage.observedAt).toISOString()}>
+                  {new Date(toolReading.usage.observedAt).toLocaleTimeString("en-GB", {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                    timeZone
+                  })}
+                </time>
+                . Retrying every {usagePollInterval}.
+              </span>
+            )}
+          </div>
+          <Button variant="secondary" size="dense" onClick={() => setRefresh((previous) => previous + 1)}>
+            Retry
+          </Button>
+        </div>
+      ) : null}
       {page === "by-tool" ? (
         <section className="usage-details-section usage-by-tool" aria-label="By tool">
           <h2 className="usage-by-tool-heading">By tool</h2>

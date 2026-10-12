@@ -109,7 +109,9 @@ export const dashboardPendingNavigationBadge = (state: FleetPendingApprovals, no
   if (count === 0) return complete && !stale ? undefined : { text: "", label: "approvals unknown" }
   return {
     text: `${String(count)}${complete ? "" : "+"}`,
-    label: `${stale ? "Previous reading, " : ""}${complete ? "" : "at least "}${String(count)} approvals waiting`
+    label: `${stale ? "Previous reading, " : ""}${complete ? "" : "at least "}${String(count)} ${
+      count === 1 ? "approval" : "approvals"
+    } waiting`
   }
 }
 

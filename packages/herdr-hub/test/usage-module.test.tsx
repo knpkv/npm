@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { type FleetUsage, type FleetLimits, type UsageQuery } from "@knpkv/herdr-connect/usage"
+import { FleetReadLoadError, type FleetUsage, type FleetLimits, type UsageQuery } from "@knpkv/herdr-connect/usage"
 import { Effect } from "effect"
 import { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
@@ -280,4 +280,67 @@ it("shows By tool for one reported host, with no limits fan-out or zero for an u
   expect(document.querySelector(".usage-by-tool-total")?.textContent).toBe("0 tokens")
   expect(queries).toEqual([{ range: "7d", timeZone: "UTC" }])
   expect(limitCalls).toBe(0)
+})
+
+/** A retained report names its range and failure state while the next request is controlled by the test. */
+it.each(["pending", "failed"])("frames retained By-tool rows while the new range is %s", async (state) => {
+  const report: FleetUsage = {
+    hosts: [
+      {
+        host: "ALPHA",
+        readAt: 1000,
+        reading: {
+          _tag: "Read",
+          skipped: 0,
+          usage: {
+            v: 1,
+            machine: "ALPHA",
+            observedAt: 0,
+            range: { preset: "7d", timeZone: "UTC", from: 0, to: 86400000, bucket: "day" },
+            periods: [{ key: "1970-01-01", start: 0 }],
+            tokens: [{ period: 0, agent: "claude", model: "Opus", tokens: 1200 }],
+            limits: []
+          }
+        }
+      }
+    ],
+    failures: [],
+    peersListed: true
+  }
+  const reads: UsageModuleReads = {
+    usage: (query) =>
+      query.range === "7d"
+        ? Effect.succeed({ fleet: report, receivedAt: 1000 })
+        : state === "failed"
+          ? Effect.fail(
+              new FleetReadLoadError({
+                path: "/v1/connect/usage",
+                reason: "network",
+                cause: "private transport detail"
+              })
+            )
+          : Effect.never,
+    limits: Effect.succeed({ fleet: limits, receivedAt: 1000 })
+  }
+  window.history.replaceState(null, "", "?range=7d&timeZone=UTC#usage/by-tool")
+  await render(reads)
+  expect(document.querySelector(".usage-by-tool-total")?.textContent).toBe("1.2K tokens")
+  const button = [...document.querySelectorAll<HTMLButtonElement>('[aria-label="Range"] button')].find(
+    (button) => button.textContent === "30 days"
+  )
+  await act(async () => button?.click())
+  expect(window.location.search).toBe("?range=30d&timeZone=UTC")
+  expect(document.querySelector(".usage-by-tool-reading")?.textContent).toContain("last 7 days")
+  expect(document.querySelector(".usage-by-tool-total")?.textContent).toBe("1.2K tokens")
+  if (state === "pending")
+    expect(document.querySelector(".usage-details")?.textContent).toContain(
+      "Updating to 30 days… showing the last 7 days"
+    )
+  else {
+    expect(document.querySelector(".usage-details")?.textContent).toContain("Couldn’t refresh")
+    expect(document.querySelector(".usage-details")?.textContent).toContain(
+      "Previous reading 00:00. Retrying every 5 minutes."
+    )
+    expect(document.querySelector(".usage-details")?.textContent).not.toContain("private transport detail")
+  }
 })

@@ -40,3 +40,11 @@ Add optional module-page `showInPhoneTitle` metadata for designed phone mast lab
 Connect Home retains Active/Archived navigation, including read-only closed stages and retained older-page recovery. The optional paired directoryLocation owns URL and navigation together; absent keeps standalone history unchanged. Embedded hub owners require that pair, build links from their saved Connect location and preserve shell/foreign history through the shell navigator. Inactive archive portals and expired-selection repair are suppressed while closure selection and loaded pages remain retained. Paging and retry transitions keep keyboard focus in the archive and move it to the new result or recovery control.
 
 The canonical Connect module forwards the dashboard notification state to its stage footer, avoiding a competing device-state read.
+
+Inactive Connect releases its document and viewport locks while retaining the terminal socket. Reactivation restores guarded terminal focus once. Leaving Active for Archived releases terminal ownership so shell chrome and summon keys recover. URL-selected stage close removes selectors through replace navigation without remounting the directory; a repeated incoming selection reopens it.
+
+Returning to a module keeps its owner's arrival focus, such as Work goal details. History traversal also preserves focus claimed inside the destination; explicit page-focus requests stay unchanged. URL-owned stages follow history selector changes and return focus to their agent row; local stages and filters remain owned by the retained directory.
+
+Empty Home keeps a compact Approvals unknown link when the independent approval reading is incomplete or failed. By tool retains its reported range during range updates and names failed retained readings with their timestamp and five-minute retry cadence.
+
+Controlled Connect locations also supply selection dismissal. Archived-stage Close consumes the shell-owned pushed entry, or replaces a direct/reloaded selection, so Back does not reopen it. Standalone history stays unchanged. Approval-count copy uses the singular noun for one waiting approval.
