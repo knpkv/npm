@@ -2,6 +2,14 @@
 
 Released as `@knpkv/herdr-approvals` up to 0.18.0; the headings below are that package's history.
 
+## 0.33.2
+
+### Patch Changes
+
+- [#866](https://github.com/knpkv/npm/pull/866) [`9904bb8`](https://github.com/knpkv/npm/commit/9904bb8648a2bbc8275a2dbb65354648c44a429d) Thanks [@konopkov](https://github.com/konopkov)! - Stop archive reads after ten seconds with a typed timeout and Retry, without restarting the deadline on directory polls. Limit the directory's configured-host hint to the first 256 machines in configuration order so host metadata stays within the page schema's bound.
+- Updated dependencies [[`9904bb8`](https://github.com/knpkv/npm/commit/9904bb8648a2bbc8275a2dbb65354648c44a429d)]:
+  - @knpkv/herdr-connect@0.20.2
+
 ## 0.33.1
 
 ### Patch Changes
