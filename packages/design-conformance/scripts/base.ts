@@ -12,6 +12,8 @@ import * as Stream from "effect/Stream"
 
 import { readJson } from "../src/references.js"
 import { BaseComparison, Manifest, Name, RunnerFailure } from "../src/schema.js"
+import { discoverReferenceManifests, gitChildEnvironment } from "./discovery.js"
+import { checkBaseMemory } from "./memory.js"
 import { captureBaseProduct, isReferenceOnlyChange } from "./product.js"
 
 /** Capture merge-base application code using the PR's gate, refs and adapter. */
@@ -25,7 +27,12 @@ const program = Effect.gen(function*() {
   const product = yield* Schema.decodeUnknownEffect(Name)(args[0])
   const output = path.resolve(args[1] ?? path.join(repository, "test-results/design-conformance/base", product))
   const run = Effect.fn("DesignBase.command")(function*(args: ReadonlyArray<string>, cwd = repository) {
-    const handle = yield* spawner.spawn(ChildProcess.make(args[0] ?? "git", args.slice(1), { cwd, stderr: "inherit" }))
+    const handle = yield* spawner.spawn(ChildProcess.make(args[0] ?? "git", args.slice(1), {
+      cwd,
+      env: gitChildEnvironment,
+      extendEnv: true,
+      stderr: "inherit"
+    }))
     const text = yield* Stream.mkString(Stream.decodeText(handle.stdout))
     const exit = yield* handle.exitCode
     if (exit !== 0) return yield* new RunnerFailure({ detail: `${args.join(" ")} exited ${exit}` })
@@ -37,10 +44,14 @@ const program = Effect.gen(function*() {
   const manifestFile = `design-refs/${product}/manifest.json`
   const manifest = yield* readJson(path.join(repository, manifestFile), Manifest)
   const changedFiles = yield* run(["git", "diff", "--name-only", "--no-renames", "-z", revision, "HEAD"])
+  const manifests = yield* discoverReferenceManifests(repository, baseRef)
   yield* fs.writeFileString(
     path.join(output, "comparison.json"),
     yield* Schema.encodeEffect(Schema.fromJsonString(BaseComparison))({
-      referenceOnly: isReferenceOnlyChange(changedFiles.split("\0").filter((file) => file.length > 0))
+      referenceOnly: isReferenceOnlyChange(
+        changedFiles.split("\0").filter((file) => file.length > 0),
+        [...manifests.current, ...manifests.base]
+      )
     })
   )
   const packageFile = `packages/${manifest.live.package.slice("@knpkv/".length)}/package.json`
@@ -56,12 +67,7 @@ const program = Effect.gen(function*() {
     run(["git", "worktree", "add", "--detach", checkout, revision]),
     () => run(["git", "worktree", "remove", "--force", checkout]).pipe(Effect.orDie)
   )
-  // Local shared-machine policy: leave at least 3 GiB available before heavy base preparation.
-  const memory = yield* fs.readFileString("/proc/meminfo")
-  const available = Number(/MemAvailable:\s+(\d+)/u.exec(memory)?.[1])
-  if (!Number.isFinite(available) || available < 3 * 1024 * 1024) {
-    return yield* new RunnerFailure({ detail: "Base capture needs at least 3 GiB MemAvailable" })
-  }
+  yield* checkBaseMemory()
   yield* run(["pnpm", "install", "--frozen-lockfile"], checkout)
   yield* run(["pnpm", "--filter", `${manifest.live.package}...`, "build"], checkout)
   yield* captureBaseProduct(repository, checkout, product, output)

@@ -78,6 +78,8 @@ export const Manifest = Schema.Struct({
   files: Schema.Record(RelativeFile, Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/u))),
   states: Schema.Array(State).check(Schema.isMinLength(1))
 }).check(Schema.makeFilter((manifest) => {
+  const packageRoot = `packages/${manifest.live.package.slice("@knpkv/".length)}/`
+  if (!manifest.live.adapter.startsWith(packageRoot)) return "Live adapter must belong to its product package"
   if (new Set(manifest.states.map((state) => `${state.screen}/${state.state}`)).size !== manifest.states.length) {
     return "Duplicate manifest state"
   }

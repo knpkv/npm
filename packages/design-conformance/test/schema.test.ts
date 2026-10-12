@@ -25,6 +25,20 @@ it.effect("manifest and live routes preserve query and fragment while rejecting 
     }
   }))
 
+it.effect("live adapters belong to the named product package rather than reference inputs", () =>
+  Effect.gen(function*() {
+    expect((yield* Schema.decodeUnknownEffect(Manifest)(manifest)).live).toEqual(manifest.live)
+    for (
+      const adapter of ["design-refs/_fixture/adapter.ts", "packages/toy/scripts/adapter.ts", "scripts/adapter.ts"]
+    ) {
+      expect(
+        (yield* Schema.decodeUnknownEffect(Manifest)({ ...manifest, live: { ...manifest.live, adapter } }).pipe(
+          Effect.exit
+        ))._tag
+      ).toBe("Failure")
+    }
+  }))
+
 it.effect("decodes manifest, fixture and review waiver boundaries", () =>
   Effect.gen(function*() {
     expect(yield* Schema.decodeUnknownEffect(Manifest)(manifest)).toEqual(decodedManifest)

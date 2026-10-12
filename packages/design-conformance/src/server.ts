@@ -34,6 +34,8 @@ export const serveFiles = Effect.fn("DesignConformance.serveFiles")(
                 ? "font/woff2"
                 : file.endsWith(".png")
                 ? "image/png"
+                : file.endsWith(".svg")
+                ? "image/svg+xml"
                 : "application/octet-stream"
             })
           )

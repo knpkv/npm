@@ -14,7 +14,72 @@ import { LiveProduct } from "../src/live.js"
 import { loadReferences, readJson } from "../src/references.js"
 import { runConformance } from "../src/runner.js"
 import { Identity, RunnerFailure } from "../src/schema.js"
+import { serveFiles } from "../src/server.js"
 import { verdict } from "../src/verdict.js"
+import { testLive, testReferences } from "./fixtures.js"
+
+test("a scoped state preserves missing-route coverage from the authoritative live route table", async () => {
+  await Effect.runPromise(
+    Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const repository = yield* path.fromFileUrl(new URL("../../../", import.meta.url))
+      const refs = yield* loadReferences(path.join(repository, "design-refs/_fixture"))
+      const live = yield* start(refs.fixture, repository)
+      const selected = {
+        ...live,
+        inventory: { ...live.inventory, states: live.inventory.states.filter((state) => state.state === "passing") }
+      }
+      for (const routes of [[], live.inventory.routes]) {
+        const result = yield* runConformance(refs, {
+          state: "toy/passing",
+          output: yield* fs.makeTempDirectoryScoped()
+        }).pipe(Effect.provideService(LiveProduct, { ...selected, inventory: { ...selected.inventory, routes } }))
+        if (result === undefined) return yield* new RunnerFailure({ detail: "Scoped route check returned no verdict" })
+        const missing = result.findings.filter((finding) =>
+          finding.rule === "coverage" && finding.detail === "State route missing from live route table"
+        )
+        expect(missing.length).toBe(routes.length === 0 ? 1 : 0)
+        if (routes.length === 0) expect(missing.every((finding) => finding.disposition === "required")).toBe(true)
+        else expect(result.passed).toBe(true)
+      }
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer))
+  )
+})
+
+test("hashed external SVG assets render with their intrinsic dimensions in reference and live captures", async () => {
+  await Effect.runPromise(
+    Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      const refs = yield* testReferences(
+        "<html data-design-ready=true><body><main data-region=content><img src='/probe.svg' alt='Fixture square'></main></body></html>",
+        {
+          "probe.svg":
+            "<svg xmlns='http://www.w3.org/2000/svg' width='64' height='64'><rect width='64' height='64' fill='red'/></svg>"
+        }
+      )
+      const origin = yield* serveFiles(refs.root, { "/page.html": "page.html", "/probe.svg": "probe.svg" })
+      const live = testLive(origin)
+      const result = yield* runConformance(refs, { output: yield* fs.makeTempDirectoryScoped() }).pipe(
+        Effect.provideService(LiveProduct, {
+          ...live,
+          ready: (page, identity) =>
+            live.ready(page, identity).pipe(Effect.andThen(browserCall("assert rendered SVG", async () => {
+              const dimensions = await page.evaluate(async () => {
+                const image = document.querySelector("img")
+                if (image === null) return { width: 0, height: 0 }
+                await image.decode()
+                return { width: image.naturalWidth, height: image.naturalHeight }
+              })
+              expect(dimensions).toEqual({ width: 64, height: 64 })
+            })))
+        })
+      )
+      if (result === undefined) return yield* new RunnerFailure({ detail: "SVG check returned no verdict" })
+      expect(result.passed).toBe(true)
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer))
+  )
+})
 
 test("hash-route navigation preserves query and fragment and waits for adapter settlement", async () => {
   await Effect.runPromise(

@@ -4,6 +4,7 @@ import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
+import { platform } from "node:os"
 
 import { start } from "../scripts/fixture.js"
 import { captureBaseProduct, isReferenceOnlyChange } from "../scripts/product.js"
@@ -12,6 +13,61 @@ import { LiveProduct } from "../src/live.js"
 import { loadReferences } from "../src/references.js"
 import { runConformance } from "../src/runner.js"
 import { type Manifest, RunnerFailure } from "../src/schema.js"
+import { serveFiles } from "../src/server.js"
+import { readyHtml, testLive, testReferences } from "./fixtures.js"
+
+test("aliased output cannot overwrite base captures; sibling and distinct symlink targets remain valid", async () => {
+  test.skip(
+    platform() === "win32",
+    "Creating directory symlinks requires additional Windows privileges; CI runs this regression on Linux"
+  )
+  await Effect.runPromise(
+    Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const root = yield* fs.makeTempDirectoryScoped()
+      const base = path.join(root, "base")
+      yield* fs.makeDirectory(base)
+      yield* fs.writeFileString(path.join(base, "captures.json"), "[]")
+      const alias = path.join(root, "alias")
+      yield* fs.symlink(base, alias)
+      const refs = yield* testReferences(readyHtml)
+      let seeds = 0
+      const origin = yield* serveFiles(refs.root, { "/page.html": "page.html" })
+      const live = {
+        ...testLive(origin),
+        seed: () =>
+          Effect.sync(() => {
+            seeds += 1
+          })
+      }
+      const invalid = yield* runConformance(refs, { output: alias, base, captureOnly: true }).pipe(
+        Effect.provideService(LiveProduct, live),
+        Effect.flip
+      )
+      expect(invalid).toMatchObject({
+        _tag: "RunnerFailure",
+        detail: "Base and current capture directories must differ"
+      })
+      expect(seeds).toBe(0)
+      expect(yield* fs.readFileString(path.join(base, "captures.json"))).toBe("[]")
+      expect(yield* fs.readDirectory(base)).toEqual(["captures.json"])
+      const sibling = path.join(root, "sibling")
+      yield* runConformance(refs, { output: sibling, base, captureOnly: true }).pipe(
+        Effect.provideService(LiveProduct, live)
+      )
+      const target = path.join(root, "target")
+      yield* fs.makeDirectory(target)
+      const distinct = path.join(root, "distinct")
+      yield* fs.symlink(target, distinct)
+      yield* runConformance(refs, { output: distinct, base, captureOnly: true }).pipe(
+        Effect.provideService(LiveProduct, live)
+      )
+      expect(seeds).toBe(2)
+      expect(yield* fs.exists(path.join(target, "captures.json"))).toBe(true)
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer))
+  )
+})
 
 test("onboarding uses base live UI; one live change is required; refs-only changes stay untouched", async () => {
   await Effect.runPromise(
@@ -88,7 +144,7 @@ test("onboarding uses base live UI; one live change is required; refs-only chang
       yield* fs.writeFileString(
         path.join(base, "comparison.json"),
         JSON.stringify({
-          referenceOnly: isReferenceOnlyChange(["design-refs/_fixture/fixture.json"])
+          referenceOnly: isReferenceOnlyChange(["design-refs/_fixture/fixture.json"], [refs.manifest])
         })
       )
       const refOnly = yield* runConformance(

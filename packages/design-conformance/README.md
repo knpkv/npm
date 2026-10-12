@@ -76,6 +76,10 @@ an origin, independent route/state inventory, `seed(page, fixture, identity)` an
 `ready(page, identity)` effects. Acquire servers and other resources in the supplied
 scope. `seed` runs before navigation. `ready` runs afterward.
 
+The adapter and live inventory inputs belong under the named product's
+`packages/<package>/` directory. Manifest decoding enforces adapter ownership.
+Review inventory dependencies, including dynamic imports and file reads, for the same boundary.
+
 Routes are origin-relative paths with optional query strings and fragments, such
 as `/?range=7d&timeZone=UTC#usage/limits`. Navigation preserves the fragment and
 waits for the adapter's `ready` effect before capture. The adapter must settle
@@ -85,6 +89,12 @@ URLs fail the route schema.
 `start(fixture, repository)` must load the live app and its inventory from that
 repository's built package. Base capture supplies the merge-base checkout here;
 a static import of PR application code would invalidate the comparison.
+
+Only declared reference files, manifests and waivers qualify for the refs-only
+exemption. Adapter paths and unlisted live inventory/code paths do not qualify.
+Changing a manifest's live package or adapter also removes the exemption.
+State-scoped runs filter the original live route table; they never create a
+missing route entry from a selected state.
 
 The inventory must come from the application, independently of reference states.
 Each live route needs at least one state. Inventory states supply screen, state,
@@ -102,6 +112,20 @@ installed clock fakes ordinary `requestAnimationFrame`; Playwright's RAF polling
 uses its preserved native callback. Full-page dimensions must be nonzero and at
 most 16,384 physical pixels per axis before the screenshot protocol call. This is
 a conservative capture bound, not a layout tolerance.
+
+Capture contexts block service workers and fail attempted registrations. HTTP
+requests and WebSockets are restricted to the capture origin. Chromium CDP Fetch
+interception checks each redirect hop before dispatch, preserving same-origin
+redirects and their final URL. Its session stays active until the context closes. Browser-local `about:`, `data:` and
+`blob:` URLs are allowed. Base and output directories must resolve to different
+canonical filesystem paths, including through symlinks.
+
+CI discovers the union of merge-base and current products. A deleted reference
+product retains its job and fails when its manifest cannot be loaded. Product
+decommissioning has no automatic exemption. The local 3 GiB memory policy applies
+only when `/proc/meminfo` exists; read errors and invalid memory information still
+fail. Directory-symlink browser regressions run on Linux/macOS and skip Windows,
+where creating symlinks requires additional privileges.
 
 ## Waivers and reference review
 
@@ -126,6 +150,11 @@ Its deliberate failures are asserted by Playwright, so its CI matrix entry runs
 those assertions instead of accepting its intentionally failing conformance verdict.
 
 ## Running
+
+Base-checkout commands and discovery fixtures clear inherited repository-local
+`GIT_*` variables with explicit `extendEnv: true`. A hook's repository and index
+must not override the command's checkout. The sentinel regression runs discovery
+under hook-like routing and verifies that its HEAD and staged index stay unchanged.
 
 Under the machine's build/browser baton:
 

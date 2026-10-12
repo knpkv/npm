@@ -11,6 +11,7 @@ import { browserCall, type Capture, capturePage } from "./browser.js"
 import { captureContext, installCaptureClock } from "./capture.js"
 import { comparePixels, compareSnapshots, coverageFailures, shotKey, stateKey, stateShots } from "./compare.js"
 import { LiveProduct } from "./live.js"
+import { restrictContextNetwork, restrictPageNetwork } from "./network.js"
 import type { loadReferences } from "./references.js"
 import { readJson } from "./references.js"
 import { writeReport } from "./report.js"
@@ -48,27 +49,21 @@ const withPage = Effect.fn("DesignConformance.withPage")(
       browserCall("create context", () =>
         browser.newContext({
           ...captureContext,
+          serviceWorkers: "block",
           viewport: { width: identity.viewport, height: identity.viewport === 390 ? 844 : 800 },
           colorScheme: identity.theme
         })),
       (context) => browserCall("close context", () => context.close()).pipe(Effect.orDie)
     )
     const blocked: Array<string> = []
-    yield* browserCall("restrict capture network", () =>
-      context.route("**/*", async (route) => {
-        const url = new URL(route.request().url())
-        if (url.origin === origin) {
-          await route.continue()
-        } else {
-          blocked.push(url.origin)
-          await route.abort("blockedbyclient")
-        }
-      }))
+    yield* restrictContextNetwork(context, origin, blocked)
     const page = yield* browserCall("new page", () => context.newPage())
+    const network = yield* restrictPageNetwork(context, page, origin, blocked)
     yield* browserCall("fixed clock", () => installCaptureClock(page))
-    const result = yield* use(page)
+    const result = yield* use(page).pipe(Effect.exit)
+    yield* network.settle()
     if (blocked.length > 0) return yield* new BrowserFailure({ operation: "external capture network", cause: blocked })
-    return result
+    return yield* result
   },
   Effect.scoped
 )
@@ -96,14 +91,14 @@ export const runConformance = Effect.fn("DesignConformance.run")(function*(refs:
   ) {
     return yield* new RunnerFailure({ detail: `Unknown requested state: ${options.state}` })
   }
-  if (options.base !== undefined && path.resolve(options.base) === path.resolve(options.output)) {
+  yield* fs.makeDirectory(options.output, { recursive: true })
+  if (options.base !== undefined && (yield* fs.realPath(options.base)) === (yield* fs.realPath(options.output))) {
     return yield* new RunnerFailure({ detail: "Base and current capture directories must differ" })
   }
   const browser = yield* Effect.acquireRelease(
     browserCall("launch Chromium", () => chromium.launch()),
     (browser) => browserCall("close Chromium", () => browser.close()).pipe(Effect.orDie)
   )
-  yield* fs.makeDirectory(options.output, { recursive: true })
   const refOrigin = options.captureOnly === true
     ? undefined
     : yield* serveFiles(
@@ -224,7 +219,9 @@ export const runConformance = Effect.fn("DesignConformance.run")(function*(refs:
   const scopedInventory = options.state === undefined
     ? inventory
     : {
-      routes: inventory.states.filter((state) => stateKey(state) === options.state).map((state) => state.route),
+      routes: inventory.routes.filter((route) =>
+        inventory.states.some((state) => stateKey(state) === options.state && state.route === route)
+      ),
       states: inventory.states.filter((state) => stateKey(state) === options.state)
     }
   for (

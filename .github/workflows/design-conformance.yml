@@ -27,6 +27,8 @@ jobs:
           node-version: 26.7.0
       - name: Discover reference products
         id: matrix
+        env:
+          DESIGN_BASE_REF: ${{ github.event.pull_request.base.sha || github.sha }}
         run: pnpm --filter @knpkv/design-conformance exec tsx scripts/matrix.ts
       - name: Flag waiver changes for review
         env:

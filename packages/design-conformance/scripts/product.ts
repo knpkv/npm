@@ -7,7 +7,7 @@ import type { StartProduct } from "../src/live.js"
 import { LiveProduct } from "../src/live.js"
 import { loadReferences } from "../src/references.js"
 import { runConformance } from "../src/runner.js"
-import { InvalidContract } from "../src/schema.js"
+import { InvalidContract, type Manifest } from "../src/schema.js"
 
 const Adapter = Schema.Struct({ start: Schema.declare((value): value is StartProduct => Predicate.isFunction(value)) })
 
@@ -38,6 +38,20 @@ export const captureBaseProduct = Effect.fn("DesignConformance.captureBaseProduc
   yield* runConformance(refs, { output, captureOnly: true }).pipe(Effect.provideService(LiveProduct, live))
 })
 
-/** A refs-only PR can alter capture inputs without changing the application's live UI. */
-export const isReferenceOnlyChange = (files: ReadonlyArray<string>): boolean =>
-  files.length > 0 && files.every((file) => file.startsWith("design-refs/"))
+/** Only declared reference inputs qualify. Live adapters and unlisted inventory/code files never do. */
+export const isReferenceOnlyChange = (files: ReadonlyArray<string>, manifests: ReadonlyArray<Manifest>): boolean => {
+  for (const manifest of manifests) {
+    if (
+      manifests.some((other) =>
+        other.product === manifest.product &&
+        (other.live.adapter !== manifest.live.adapter || other.live.package !== manifest.live.package)
+      )
+    ) return false
+  }
+  const adapters = new Set(manifests.map((manifest) => manifest.live.adapter))
+  const inputs = new Set(manifests.flatMap((manifest) => {
+    const root = `design-refs/${manifest.product}/`
+    return ["manifest.json", "waivers.json", ...Object.keys(manifest.files)].map((file) => `${root}${file}`)
+  }))
+  return files.length > 0 && files.every((file) => inputs.has(file) && !adapters.has(file))
+}

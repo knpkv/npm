@@ -162,6 +162,10 @@ by hand instead:
 Design conformance: read `packages/design-conformance/README.md` before adding a
 product's refs, adapter or waivers. It defines independent live coverage, hashes,
 region checks and enforcement deadlines, including required PNG metadata.
+Keep each product's live adapter and inventory inputs under its own `packages/<package>/`
+directory. Review adapter imports and file reads for this ownership boundary: the manifest
+validates the adapter path, but cannot discover arbitrary inventory dependencies. Reference
+files under `design-refs/**` must describe designs, independently of live route/state inventory.
 
 This project adheres to a strict set of development standards to ensure code quality and consistency.
 

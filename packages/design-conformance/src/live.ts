@@ -10,6 +10,7 @@ import type { BrowserFailure, Fixture, Identity, Inventory, RunnerFailure } from
 
 export class LiveProduct extends Context.Service<LiveProduct, {
   readonly origin: string
+  /** Derive from live inputs owned by the product package, independently of design-refs. */
   readonly inventory: Inventory
   /** Seed before navigation, using the same decoded fixture the design reads. */
   readonly seed: (
