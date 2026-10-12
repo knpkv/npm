@@ -13,8 +13,9 @@ import type { AgentArchiveStore } from "./archive-store.js"
 import { ConnectPeerError } from "./errors.js"
 import { buildConnectForest } from "./forest.js"
 import { connectAgentId } from "./id.js"
+import { ConnectInventoryFailure, inventoryRelationshipFailure } from "./internal/inventory-failure.js"
 import {
-  type ConnectAgent,
+  ConnectAgent,
   type ConnectAgentCursor,
   connectAgentPageMaxRecords,
   type ConnectPeerFailure,
@@ -75,126 +76,168 @@ export const pageFleetConnectAgents = Effect.fn("HerdrConnect.pageFleetAgents")(
   )
 })
 
-export const localConnectAgents = Effect.fn("HerdrConnect.localAgents")(function*(
-  config: HostConfiguration,
-  source: AgentSource,
-  store: AgentActivityStore,
-  relationshipStore: AgentRelationshipStore,
-  observedAt: number
-) {
-  const durableWorkers = yield* source.workers().pipe(
-    Effect.mapError((cause) => new ConnectPeerError({ cause, host: config.host, reason: "unavailable" }))
-  )
-  const inventory = yield* source.agents().pipe(
-    Effect.mapError((cause) => new ConnectPeerError({ cause, host: config.host, reason: "unavailable" }))
-  )
-  if (!inventory.available) {
-    return yield* new ConnectPeerError({
-      cause: inventory.error,
-      host: config.host,
-      reason: "unavailable"
-    })
-  }
-  const identified = yield* Effect.forEach(inventory.agents, (agent) =>
-    Effect.gen(function*() {
-      const id = agent.agentId === null
-        ? yield* connectAgentId(config.host, agent.paneId).pipe(
-          Effect.mapError((cause) => new ConnectPeerError({ cause, host: config.host, reason: "unavailable" }))
-        )
-        : agent.agentId
-      return { agent, id }
-    }))
-  const durableObservations: ReadonlyArray<RelationshipObservation> = durableWorkers.map((worker) => ({
-    metadata: worker.relationship === undefined
-      ? {
-        agentId: worker.agentId,
-        host: worker.host,
-        observedAt: worker.terminalObservedAt ?? 0,
-        paneId: worker.paneId
-      }
-      : {
-        agentId: worker.agentId,
-        host: worker.host,
-        observedAt: worker.terminalObservedAt ?? 0,
-        paneId: worker.paneId,
-        relationship: worker.relationship
-      },
-    source: "durable_worker"
-  }))
-  const liveObservations: ReadonlyArray<RelationshipObservation> = identified.map(({ agent, id }) => ({
-    metadata: agent.parentAgentId === null || agent.relation === null
-      ? {
-        agentId: id,
+export const localConnectAgents = Effect.fn("HerdrConnect.localAgents")(
+  function*(
+    config: HostConfiguration,
+    source: AgentSource,
+    store: AgentActivityStore,
+    relationshipStore: AgentRelationshipStore,
+    observedAt: number
+  ) {
+    const durableWorkers = yield* source.workers().pipe(
+      Effect.mapError((cause) => new ConnectPeerError({ cause, host: config.host, reason: "unavailable" }))
+    )
+    const inventory = yield* source.agents().pipe(
+      Effect.mapError((cause) => new ConnectPeerError({ cause, host: config.host, reason: "unavailable" }))
+    )
+    if (!inventory.available) {
+      return yield* new ConnectPeerError({
+        cause: inventory.error,
         host: config.host,
-        observedAt,
-        paneId: agent.paneId
-      }
-      : {
-        agentId: id,
-        host: config.host,
-        observedAt,
-        paneId: agent.paneId,
-        relationship: {
-          parentAgentId: agent.parentAgentId,
-          relation: agent.relation
+        reason: "unavailable"
+      })
+    }
+    const identified = yield* Effect.forEach(inventory.agents, (agent) =>
+      Effect.gen(function*() {
+        const id = agent.agentId === null
+          ? yield* connectAgentId(config.host, agent.paneId).pipe(
+            Effect.mapError((cause) => new ConnectPeerError({ cause, host: config.host, reason: "unavailable" }))
+          )
+          : agent.agentId
+        return { agent, id }
+      }))
+    const durableObservations: ReadonlyArray<RelationshipObservation> = durableWorkers.map((worker) => ({
+      metadata: worker.relationship === undefined
+        ? {
+          agentId: worker.agentId,
+          host: worker.host,
+          observedAt: worker.terminalObservedAt ?? 0,
+          paneId: worker.paneId
         }
-      },
-    source: "trusted_live_inventory"
-  }))
-  const persisted = yield* relationshipStore.persistAll([
-    ...durableObservations,
-    ...liveObservations
-  ]).pipe(
-    Effect.mapError((cause) => new ConnectPeerError({ cause, host: config.host, reason: "invalid_response" }))
-  )
-  const persistedByAgent = new Map(
-    persisted.map((metadata) => [
-      `${metadata.host.toLowerCase()}\u0000${metadata.agentId}`,
-      metadata
-    ])
-  )
-  const counts = new Map<string, number>()
-  const agents = yield* Effect.forEach(identified, ({ agent, id }) =>
-    Effect.gen(function*() {
-      const next = (counts.get(agent.kind) ?? 0) + 1
-      counts.set(agent.kind, next)
-      const relationship = persistedByAgent.get(`${config.host.toLowerCase()}\u0000${id}`)
-      if (relationship === undefined) {
-        return yield* new ConnectPeerError({ cause: id, host: config.host, reason: "invalid_response" })
-      }
-      const lastActivityAt = yield* store
-        .observe(config.host, id, agent.activityRevision, observedAt)
-        .pipe(
-          Effect.mapError((cause) => new ConnectPeerError({ cause, host: config.host, reason: "unavailable" }))
-        )
-      const connectAgent = {
-        host: config.host,
-        id,
-        kind: agent.kind,
-        lastActivityAt,
-        name: agent.name.includes(agent.paneId) ? `${agent.kind} agent ${next}` : agent.name,
-        state: agent.status,
-        work: agent.work
-      }
-      return relationship.relationship === undefined
-        ? connectAgent satisfies ConnectAgent
         : {
-          ...connectAgent,
-          relationship: relationship.relationship
-        } satisfies ConnectAgent
+          agentId: worker.agentId,
+          host: worker.host,
+          observedAt: worker.terminalObservedAt ?? 0,
+          paneId: worker.paneId,
+          relationship: worker.relationship
+        },
+      source: "durable_worker"
     }))
-  const local = yield* Schema.decodeUnknownEffect(LocalConnectAgents)({
-    agents,
-    host: config.host,
-    complete: inventory.error === null
-  }).pipe(
-    Effect.mapError((cause) => new ConnectPeerError({ cause, host: config.host, reason: "invalid_response" }))
-  )
-  yield* buildConnectForest(local.agents).pipe(
-    Effect.mapError((cause) => new ConnectPeerError({ cause, host: config.host, reason: "invalid_response" }))
-  )
-  return local
-})
+    const liveObservations: ReadonlyArray<RelationshipObservation> = identified.map(({ agent, id }) => ({
+      metadata: agent.parentAgentId === null || agent.relation === null
+        ? {
+          agentId: id,
+          host: config.host,
+          observedAt,
+          paneId: agent.paneId
+        }
+        : {
+          agentId: id,
+          host: config.host,
+          observedAt,
+          paneId: agent.paneId,
+          relationship: {
+            parentAgentId: agent.parentAgentId,
+            relation: agent.relation
+          }
+        },
+      source: "trusted_live_inventory"
+    }))
+    const persisted = yield* relationshipStore.persistAll([
+      ...durableObservations,
+      ...liveObservations
+    ]).pipe(
+      Effect.mapError((cause) =>
+        new ConnectPeerError({
+          cause: inventoryRelationshipFailure("persist_relationships", cause),
+          host: config.host,
+          reason: "invalid_response"
+        })
+      )
+    )
+    const persistedByAgent = new Map(
+      persisted.map((metadata) => [
+        `${metadata.host.toLowerCase()}\u0000${metadata.agentId}`,
+        metadata
+      ])
+    )
+    const counts = new Map<string, number>()
+    const agents = yield* Effect.forEach(identified, ({ agent, id }) =>
+      Effect.gen(function*() {
+        const next = (counts.get(agent.kind) ?? 0) + 1
+        counts.set(agent.kind, next)
+        const relationship = persistedByAgent.get(`${config.host.toLowerCase()}\u0000${id}`)
+        if (relationship === undefined) {
+          return yield* new ConnectPeerError({
+            cause: new ConnectInventoryFailure({
+              step: "lookup_relationship",
+              agentId: id,
+              reason: "MissingPersistedRelationship"
+            }),
+            host: config.host,
+            reason: "invalid_response"
+          })
+        }
+        const lastActivityAt = yield* store
+          .observe(config.host, id, agent.activityRevision, observedAt)
+          .pipe(
+            Effect.mapError((cause) => new ConnectPeerError({ cause, host: config.host, reason: "unavailable" }))
+          )
+        const connectAgent = {
+          host: config.host,
+          id,
+          kind: agent.kind,
+          lastActivityAt,
+          name: agent.name.includes(agent.paneId) ? `${agent.kind} agent ${next}` : agent.name,
+          state: agent.status,
+          work: agent.work
+        }
+        const projected = relationship.relationship === undefined
+          ? connectAgent satisfies ConnectAgent
+          : {
+            ...connectAgent,
+            relationship: relationship.relationship
+          } satisfies ConnectAgent
+        return yield* Schema.decodeUnknownEffect(ConnectAgent)(projected).pipe(
+          Effect.mapError((cause) =>
+            new ConnectPeerError({
+              cause: new ConnectInventoryFailure({ step: "decode_inventory", agentId: id, reason: cause._tag }),
+              host: config.host,
+              reason: "invalid_response"
+            })
+          )
+        )
+      }))
+    const local = yield* Schema.decodeUnknownEffect(LocalConnectAgents)({
+      agents,
+      host: config.host,
+      complete: inventory.error === null
+    }).pipe(
+      Effect.mapError((cause) =>
+        new ConnectPeerError({
+          cause: new ConnectInventoryFailure({ step: "decode_inventory", agentId: null, reason: cause._tag }),
+          host: config.host,
+          reason: "invalid_response"
+        })
+      )
+    )
+    yield* buildConnectForest(local.agents).pipe(
+      Effect.mapError((cause) =>
+        new ConnectPeerError({
+          cause: inventoryRelationshipFailure("validate_forest", cause),
+          host: config.host,
+          reason: "invalid_response"
+        })
+      )
+    )
+    return local
+  },
+  Effect.tapError((error) => {
+    if (error.reason !== "invalid_response" || !Schema.is(ConnectInventoryFailure)(error.cause)) return Effect.void
+    const { agentId, reason, step } = error.cause
+    return Effect.logWarning("Connect.local_inventory_failed", { step, agentId, reason })
+  })
+)
 
 // The host endpoint is unpaged: it validates the entire inventory and rejects lists over 256.
 // Preserve older peers' rows, but require their explicit full-list assertion for closure evidence.
