@@ -1,7 +1,10 @@
 import { AgentStableId, AgentWorkerIdentity, AgentWorkerRelationship } from "@knpkv/herdr-fleet/model"
 import { Schema } from "effect"
 import { ConnectLastWords } from "./posts.js"
+import { ConnectSelfState } from "./self-model.js"
 import { terminalColumnBounds, terminalRowBounds } from "./terminal-dimensions.js"
+
+export * from "./self-model.js"
 
 const BoundedString = Schema.String.check(
   Schema.isMinLength(1),
@@ -24,7 +27,11 @@ export const ConnectAgentRelation = Schema.Literals([
 ])
 export type ConnectAgentRelation = typeof ConnectAgentRelation.Type
 
-export const ConnectAgentRelationship = AgentWorkerRelationship
+export const ConnectAgentRelationship = Schema.Struct({
+  ...AgentWorkerRelationship.fields,
+  /** Display-only remembered name. It does not assert that the parent is still listed. */
+  parentName: Schema.optionalKey(AgentWorkerIdentity.fields.name)
+})
 export type ConnectAgentRelationship = typeof ConnectAgentRelationship.Type
 
 export const ConnectAgent = Schema.Struct({
@@ -36,6 +43,7 @@ export const ConnectAgent = Schema.Struct({
   work: AgentWorkLabel,
   lastActivityAt: ActivityTimestamp,
   voice: Schema.optionalKey(ConnectLastWords),
+  self: Schema.optionalKey(Schema.NullOr(ConnectSelfState)),
   relationship: Schema.optionalKey(ConnectAgentRelationship)
 })
 export type ConnectAgent = typeof ConnectAgent.Type
@@ -62,7 +70,9 @@ export type ConnectPeerFailure = typeof ConnectPeerFailure.Type
 
 export const FleetConnectAgents = Schema.Struct({
   agents: Schema.Array(ConnectAgent).check(Schema.isMaxLength(1_024)),
-  failures: Schema.Array(ConnectPeerFailure).check(Schema.isMaxLength(256))
+  failures: Schema.Array(ConnectPeerFailure).check(Schema.isMaxLength(256)),
+  /** Configured machine names, independent of which machines report usage or live agents. */
+  hosts: Schema.optionalKey(Schema.Array(ConnectAgent.fields.host).check(Schema.isMaxLength(256)))
 })
 export type FleetConnectAgents = typeof FleetConnectAgents.Type
 
@@ -78,6 +88,7 @@ export const FleetConnectAgentPage = Schema.Struct({
     Schema.isMaxLength(connectAgentPageMaxRecords)
   ),
   failures: FleetConnectAgents.fields.failures,
+  hosts: FleetConnectAgents.fields.hosts,
   nextCursor: Schema.NullOr(ConnectAgentCursor)
 })
 export type FleetConnectAgentPage = typeof FleetConnectAgentPage.Type

@@ -1,25 +1,68 @@
 import { Button, Dialog, Text } from "@knpkv/rly/primitives"
 import { type ReactElement, useEffect, useRef, useState } from "react"
 
-import type { ReviewSuggestionPublicationPreview } from "../../api/agent.js"
-import type { PullRequestReviewPublicationState } from "./usePullRequestReview.js"
+import type {
+  PublishedReviewComment,
+  ReviewSuggestionPublicationPreview,
+  ReviewSuggestionPublicationSelection
+} from "../../api/agent.js"
+
 import styles from "./WorkspacePullRequestDetails.module.css"
+
+/** Browser selection resolved to an exact revision before publication preview. */
+export type ReviewSuggestionPublicationTarget = Pick<
+  ReviewSuggestionPublicationSelection,
+  "jobId" | "revisionId" | "suggestionId"
+>
+
+export type PullRequestReviewPublicationState =
+  | { readonly _tag: "idle" }
+  | {
+      readonly _tag: "previewing"
+      readonly selection: ReviewSuggestionPublicationTarget
+    }
+  | {
+      readonly _tag: "preview"
+      readonly preview: ReviewSuggestionPublicationPreview
+    }
+  | {
+      readonly _tag: "publishing"
+      readonly preview: ReviewSuggestionPublicationPreview
+    }
+  | {
+      readonly _tag: "published"
+      readonly headSuperseded: boolean
+      readonly preview: ReviewSuggestionPublicationPreview
+      readonly publication: PublishedReviewComment
+    }
+  | {
+      readonly _tag: "receipt-conflict"
+      readonly preview: ReviewSuggestionPublicationPreview
+      readonly publication: PublishedReviewComment
+    }
+  | {
+      readonly _tag: "failed"
+      readonly preview: ReviewSuggestionPublicationPreview | null
+      readonly selection: ReviewSuggestionPublicationTarget
+    }
 
 const anchorLabel = (anchor: ReviewSuggestionPublicationPreview["anchor"]): string =>
   anchor._tag === "changes"
     ? "Whole pull request"
     : `${anchor.path}:${String(anchor.line)} · ${anchor.relativeFileVersion}`
 
+export interface ReviewSuggestionPublicationSurfaceProps {
+  readonly onCancel: () => void
+  readonly onPublish: (finalContent: string) => void
+  readonly publication: PullRequestReviewPublicationState
+}
+
 /** Render the on-demand operator confirmation and durable publication receipt. */
 export const ReviewSuggestionPublicationSurface = ({
   onCancel,
   onPublish,
   publication
-}: {
-  readonly onCancel: () => void
-  readonly onPublish: (finalContent: string) => void
-  readonly publication: PullRequestReviewPublicationState
-}): ReactElement | null => {
+}: ReviewSuggestionPublicationSurfaceProps): ReactElement | null => {
   const [content, setContent] = useState("")
   const editorRef = useRef<HTMLTextAreaElement>(null)
   const preview =

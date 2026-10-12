@@ -350,13 +350,14 @@ Slow clients have bounded queues and reconnect through the durable cursor. No ev
 ### 6.1 Session flow
 
 1. On first start, the server creates a cryptographically random, single-use pairing code valid for ten minutes and prints it only to the terminal.
-2. `POST /auth/pair` is rate-limited. It consumes the hashed code and issues a random opaque 256-bit session token.
+2. `POST /api/v1/session/pair` is rate-limited. It consumes the hashed code and issues a random opaque 256-bit session token.
 3. Only the token hash is stored. The browser receives an `HttpOnly`, `SameSite=Strict`, path `/` cookie.
 4. The paired workspace owner can issue another single-use, short-lived code with an explicit actor and permission role for a second browser/device. Owners can list and revoke sessions and outstanding codes; revocation closes their SSE streams.
 5. A local-terminal recovery command, gated by data-directory ownership and an interactive confirmation, can issue a new owner recovery code without starting an unauthenticated HTTP administration endpoint. Recovery is audited and can revoke existing owner sessions.
-6. A session binds actor, workspace, permissions, created/idle/absolute expiry, revocation, and CSRF-secret hash. It rotates after pairing or permission elevation.
-7. Mutations require the authenticated cookie, exact allowed `Origin`, and an in-memory `X-CSRF-Token` bound to the session.
-8. SSE uses the same session and scope. Session tokens and CSRF values never enter `localStorage`, URLs, logs, exports, or agent prompts.
+6. Non-destructive terminal sign-in is a separate local authority: bare `control-center` reuses or starts loopback HTTP; `serve` always remains foreground and print-only. An owner-only canonical `web/control.json` persists `{origin, token}` at `0700`/`0600`. Its bearer-only `/control/login` mints a durable 60-second, single-use owner code in-process for the fixed startup identity, revoking nothing. Invalid bearer/Origin/Host and drain mint nothing. The credential-bearing URL is stdout/opener-only. The client clears its fragment before router/render and POSTs once through the existing pairing endpoint. TLS/proxy/insecure LAN print configured-origin guidance and mint nothing.
+7. A session binds actor, workspace, permissions, created/idle/absolute expiry, revocation, and CSRF-secret hash. It rotates after pairing or permission elevation.
+8. Mutations require the authenticated cookie, exact allowed `Origin`, and an in-memory `X-CSRF-Token` bound to the session.
+9. SSE uses the same session and scope. Session tokens and CSRF values never enter `localStorage`, URLs, logs, exports, or agent prompts.
 
 Two-browser tests pair distinct sessions, isolate their authorized events/threads, revoke one without affecting the other, and exercise terminal recovery after all sessions are lost.
 

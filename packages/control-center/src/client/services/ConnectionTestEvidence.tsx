@@ -8,12 +8,12 @@ import styles from "./ServicesPage.module.css"
 
 const checkedAt = (result: PluginConnectionTestResult): string => DateTime.formatIso(result.checkedAt)
 
-/** Provider identity and timing evidence from the most recent explicit live test. */
-export const ConnectionTestEvidence = ({
-  state
-}: {
+export interface ConnectionTestEvidenceProps {
   readonly state: ConnectionTestState | undefined
-}): ReactElement | null => {
+}
+
+/** Provider identity and timing evidence from the most recent explicit live test. */
+export const ConnectionTestEvidence = ({ state }: ConnectionTestEvidenceProps): ReactElement | null => {
   if (state === undefined || state._tag === "testing") return null
   if (state._tag === "request-failed") {
     return (

@@ -1,9 +1,9 @@
 import { useAtom, useAtomMount, useAtomRefresh, useAtomValue } from "@effect/atom-react"
 import { BrowserHttpClient } from "@effect/platform-browser"
-import { StateLabel, Surface, Text } from "@knpkv/rly/primitives"
+import { Button, StateLabel, Surface, Text } from "@knpkv/rly/primitives"
 import { Icon } from "@knpkv/rly/foundations"
 import { decodeBoundedResponseJson } from "@knpkv/herdr-fleet/response"
-import { Cause, Effect, Fiber, Predicate, Result, Schedule, Schema } from "effect"
+import { Cause, Effect, Fiber, Predicate, Result, Schedule, Schema, type Types } from "effect"
 import * as AsyncResult from "effect/reactivity/AsyncResult"
 import * as Atom from "effect/reactivity/Atom"
 import * as HttpClient from "effect/http/HttpClient"
@@ -90,6 +90,8 @@ import {
 class ConnectNetworkError extends Schema.TaggedError<ConnectNetworkError>()("ConnectNetworkError", {
   detail: Schema.String
 }) {}
+
+class ConnectTimeoutError extends Schema.TaggedError<ConnectTimeoutError>()("ConnectTimeoutError", {}) {}
 
 class ConnectStatusError extends Schema.TaggedError<ConnectStatusError>()("ConnectStatusError", {
   status: Schema.Number
@@ -281,6 +283,7 @@ const storeTerminalKeysHidden = (hidden: boolean) =>
 /** One line for a failure a person reads: the error's own message, never a stack trace. */
 const causeSummary = (cause: Cause.Cause<unknown>): string => {
   const error = Cause.squash(cause)
+  if (Schema.is(ConnectTimeoutError)(error)) return "the directory request timed out"
   if (Schema.is(ConnectStatusError)(error)) return `HTTP ${String(error.status)}`
   if (Schema.is(ConnectNetworkError)(error) || Schema.is(ConnectProtocolError)(error)) return error.detail
   return Predicate.hasProperty(error, "message") && Predicate.isString(error.message) && error.message.length > 0
@@ -292,6 +295,7 @@ const loadAgents = Effect.gen(function* () {
   const client = yield* HttpClient.HttpClient
   const agents: Array<ConnectAgent> = []
   const failures: Array<(typeof FleetConnectAgents.Type)["failures"][number]> = []
+  let hosts: (typeof FleetConnectAgents.Type)["hosts"]
   let cursor: ConnectAgentCursor | null = null
   do {
     const path: string =
@@ -318,9 +322,15 @@ const loadAgents = Effect.gen(function* () {
     )
     for (const agent of page.agents) agents.push(agent)
     for (const failure of page.failures) failures.push(failure)
+    if (page.hosts !== undefined) hosts = page.hosts
     cursor = page.nextCursor
   } while (cursor !== null)
-  const directory = yield* Schema.decodeUnknownEffect(FleetConnectAgents)({ agents, failures }).pipe(
+  const fields: Types.Mutable<typeof FleetConnectAgents.Type> = {
+    agents,
+    failures
+  }
+  if (hosts !== undefined) fields.hosts = hosts
+  const directory = yield* Schema.decodeUnknownEffect(FleetConnectAgents)(fields).pipe(
     Effect.mapError(
       (cause) =>
         new ConnectProtocolError({
@@ -331,7 +341,10 @@ const loadAgents = Effect.gen(function* () {
   )
   // Lineage issues are labelled per row. They must not hide independently valid agent identities.
   return directory
-})
+}).pipe(
+  Effect.timeout("10 seconds"),
+  Effect.catchTag("TimeoutError", () => Effect.fail(new ConnectTimeoutError()))
+)
 
 const loadWork = Effect.gen(function* () {
   const client = yield* HttpClient.HttpClient
@@ -387,7 +400,13 @@ export const makeConnectAtoms = () => {
   return {
     activityFilter: Atom.make<AgentActivityFilter>("all"),
     agents,
-    agentsPoll: browserRuntime.atom(Atom.refresh(agents).pipe(Effect.repeat(Schedule.spaced("5 seconds")))),
+    // A pending read owns its deadline; polling must not interrupt and restart it every five seconds.
+    agentsPoll: browserRuntime.atom(
+      Effect.gen(function* () {
+        const current = yield* Atom.get(agents)
+        if (!current.waiting) yield* Atom.refresh(agents)
+      }).pipe(Effect.repeat(Schedule.spaced("5 seconds")))
+    ),
     connection: Atom.make<ConnectionState>({ _tag: "idle" }),
     connectionRequest: Atom.make<ConnectionRequest | null>(null),
     hostFilter: Atom.make<string | null>(null),
@@ -1311,6 +1330,10 @@ export const ConnectSurface = ({
     setTerminalKeyError(null)
   }
 
+  const firstLoadFailure = directory._tag === "Failure" ? Cause.squash(directory.cause) : null
+  const firstLoadTimedOut = Schema.is(ConnectTimeoutError)(firstLoadFailure)
+  const firstLoadStatus = Schema.is(ConnectStatusError)(firstLoadFailure) ? firstLoadFailure.status : null
+
   const directoryScreen = (
     <>
       <header className={embedded ? "connect-embedded-intro" : "connect-header"}>
@@ -1324,10 +1347,8 @@ export const ConnectSurface = ({
         aria-label="Herdr agents"
         className="connect-agents"
         data-loading={current === null ? "true" : undefined}
-        // Room for the floating pins, set here rather than with :has(), which Firefox 120 (in BROWSER_TARGET) lacks.
-        data-pinned={floatRows > 0 ? "" : undefined}
-        style={pinRows}
         onKeyDown={moveAgentFocus}
+        style={pinRows}
       >
         {updatedAt === null ? null : (
           <small className="connect-updated" data-stale={staleSince === null ? undefined : "true"}>
@@ -1350,25 +1371,37 @@ export const ConnectSurface = ({
           </p>
         )}
         {current === null ? (
-          <Text
-            className={directory._tag === "Failure" ? "connect-empty connect-directory-error" : "connect-loading-copy"}
-            tone="secondary"
-          >
-            {directory._tag === "Failure"
-              ? `The fleet directory didn't answer: ${causeSummary(directory.cause)}. Retrying every 5 seconds.`
-              : "Loading fleet agents…"}
-            {directory._tag === "Failure" ? (
-              <button className="connect-filters-clear" onClick={refreshDirectory} type="button">
-                Retry directory
-              </button>
-            ) : null}
-          </Text>
-        ) : agents.length === 0 ? (
-          silentHosts === null ? (
-            <Text className="connect-empty" tone="secondary">
-              No agents running on any host.
+          directory._tag === "Failure" ? (
+            <div className="connect-empty connect-directory-error">
+              <Icon decorative name="alert" size="default" />
+              <div className="connect-directory-error-copy">
+                <Text as="h2" variant="card-title">
+                  {firstLoadTimedOut ? "The fleet directory didn't answer" : "Couldn't load the fleet directory"}
+                </Text>
+                {firstLoadTimedOut ? (
+                  <Text as="p" tone="secondary">
+                    The request timed out, so no agents are listed. Retry, or wait: Relay tries again every 5 seconds.
+                  </Text>
+                ) : firstLoadStatus === null ? null : (
+                  <Text as="p" tone="secondary">
+                    The hub answered HTTP {String(firstLoadStatus)}.
+                  </Text>
+                )}
+                <Button
+                  className={firstLoadTimedOut ? "connect-compact-secondary" : undefined}
+                  onClick={refreshDirectory}
+                  size={firstLoadTimedOut ? "dense" : "default"}
+                  variant="secondary"
+                >
+                  Retry
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <Text className="connect-loading-copy" tone="secondary">
+              Loading fleet agents…
             </Text>
-          ) : null
+          )
         ) : (
           <>
             <AgentCast
@@ -1415,15 +1448,19 @@ export const ConnectSurface = ({
                   ) : null}
                 </label>
               }
-              onClearQuery={() => setQuery("")}
+              onClearQuery={() => {
+                setQuery("")
+                directorySearchRef.current?.focus()
+              }}
               activityFilter={activityFilter}
               agents={agents}
+              configuredHosts={current.hosts ?? []}
               hostFilter={hostFilter}
               onActivityFilter={setActivityFilter}
               onHostFilter={setHostFilter}
               onSelect={(agent) => setStageKey(connectAgentKey(agent))}
               query={query}
-              selectedKey={selectedKey}
+              selectedKey={stageKey}
               arrivals={arrivals}
               silentHosts={offlineHosts}
               stale={staleSince !== null}
@@ -1463,16 +1500,6 @@ export const ConnectSurface = ({
               }}
               stale={staleSince !== null || (stageAgent !== null && offlineHosts.includes(stageAgent.host))}
             />
-            <PinnedAgents
-              agentFor={(key) => agentByKey.get(key)}
-              hiddenKey={stageKey}
-              now={Date.now()}
-              onOpen={(agent) => setStageKey(connectAgentKey(agent))}
-              onUnpin={removePin}
-              pins={pins}
-              placement="float"
-              stale={staleSince !== null}
-            />
             {pinError === null ? null : (
               <small className="connect-status-message" data-tone="caution" role="status">
                 {pinError}
@@ -1508,8 +1535,8 @@ export const ConnectSurface = ({
             ))}
           </div>
         ) : null}
-        {current === null && directory._tag !== "Failure" ? null : (
-          <div className="connect-directory-secondary">
+        {current === null ? null : (
+          <div className="connect-directory-secondary" data-pinned={floatRows > 0 ? "" : undefined}>
             <ConnectLimits problem={limits.problem} view={limits.view} />
             {embedded ? null : (
               <nav className="fleet-app-nav" aria-label="Fleet applications">
@@ -1520,6 +1547,18 @@ export const ConnectSurface = ({
               </nav>
             )}
           </div>
+        )}
+        {current === null ? null : (
+          <PinnedAgents
+            agentFor={(key) => agentByKey.get(key)}
+            hiddenKey={stageKey}
+            now={Date.now()}
+            onOpen={(agent) => setStageKey(connectAgentKey(agent))}
+            onUnpin={removePin}
+            pins={pins}
+            placement="float"
+            stale={staleSince !== null}
+          />
         )}
       </section>
     </>

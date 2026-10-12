@@ -3,7 +3,11 @@ import { StrictMode } from "react"
 import { createRoot } from "react-dom/client"
 import { RouterProvider } from "react-router"
 import { AppProviders } from "./AppProviders.js"
-import { router } from "./router.js"
+import { makeRouter } from "./router.js"
+import { makeBootstrapPairing, readBootstrapHandoff } from "./bootstrapHandoff.js"
+
+const code = readBootstrapHandoff(window.location, window.history)
+const router = makeRouter(code === null ? null : makeBootstrapPairing(code))
 
 const rootElement = document.querySelector<HTMLElement>("#root")
 

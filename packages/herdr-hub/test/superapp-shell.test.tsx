@@ -32,6 +32,7 @@ afterEach(async () => {
   roots.length = 0
   document.body.replaceChildren()
   window.history.replaceState(null, "", "/")
+  vi.restoreAllMocks()
   vi.unstubAllGlobals()
 })
 
@@ -95,6 +96,179 @@ const render = async (modules: Parameters<typeof SuperappShell>[0]["modules"] = 
     )
   )
 }
+
+const selectionParent = "?range=7d#fleet/usage"
+const selectionViews: ModuleViews<typeof fleetModule> = {
+  ...fleet,
+  pages: {
+    ...fleet.pages,
+    work: (_search, mount) => <button onClick={() => mount.navigate(selectionParent, "push", null)}>Open queue</button>,
+    usage: (search, mount) => (
+      <>
+        <p>{search.has("ref") ? "Selected item" : "Selection queue"}</p>
+        <button onClick={() => mount.navigate("?range=7d&ref=item-1#fleet/usage", "push", null)}>Open item</button>
+        <button onClick={() => mount.navigate("?range=7d&ref=item-1&file=0#fleet/usage", "replace", null)}>
+          Select file
+        </button>
+        <button onClick={() => mount.closeSelection(selectionParent)}>Close item</button>
+      </>
+    )
+  }
+}
+const clickSelectionControl = async (label: string) => {
+  const button = [...document.querySelectorAll("button")].find((element) => element.textContent === label)
+  if (button === undefined) return expect.unreachable()
+  await act(async () => button.click())
+}
+
+it("closing a pushed selection returns to its parent without a duplicate Back stop", async () => {
+  window.history.replaceState(null, "", "/#fleet/work")
+  await render([selectionViews])
+  await clickSelectionControl("Open queue")
+  await clickSelectionControl("Open item")
+  await clickSelectionControl("Close item")
+  await vi.waitFor(() => expect(window.location.search).toBe("?range=7d"))
+  await act(async () => {
+    window.history.back()
+    await new Promise((resolve) => window.setTimeout(resolve, 50))
+  })
+  expect(window.location.hash).toBe("#fleet/work")
+})
+
+it("preserves foreign history state and the selection parent through URL repairs and file changes", async () => {
+  window.history.replaceState({ external: { reading: "saved" } }, "", "/?range=7d&tab=usage")
+  await render([selectionViews])
+  expect(window.history.state).toEqual({ external: { reading: "saved" } })
+  await clickSelectionControl("Open item")
+  await clickSelectionControl("Select file")
+  expect(window.history.state).toMatchObject({ external: { reading: "saved" } })
+  await clickSelectionControl("Close item")
+  await vi.waitFor(() => expect(window.location.search).toBe("?range=7d"))
+  await act(async () => {
+    window.history.forward()
+    await new Promise((resolve) => window.setTimeout(resolve, 50))
+  })
+  expect(window.location.search).toBe("?range=7d&ref=item-1&file=0")
+  expect(document.querySelector('[data-module="fleet"] p')?.textContent).toBe("Selected item")
+})
+
+it("closes a direct selection in place without traversing to its unrelated preceding page", async () => {
+  window.history.replaceState(null, "", "/#fleet/work")
+  window.history.pushState(null, "", "/?range=7d&ref=item-1#fleet/usage")
+  await render([selectionViews])
+  await clickSelectionControl("Close item")
+  expect(window.location.search).toBe("?range=7d")
+  expect(window.location.hash).toBe("#fleet/usage")
+  await act(async () => {
+    window.history.back()
+    await new Promise((resolve) => window.setTimeout(resolve, 50))
+  })
+  expect(window.location.hash).toBe("#fleet/work")
+})
+
+it("a new shell lifetime refuses to traverse a selection opened by the previous shell", async () => {
+  window.history.replaceState(null, "", "/?range=7d#fleet/usage")
+  await render([selectionViews])
+  await clickSelectionControl("Open item")
+  await act(async () => roots.pop()?.unmount())
+  document.body.replaceChildren()
+  await render([selectionViews])
+  await clickSelectionControl("Close item")
+  expect(window.location.search).toBe("?range=7d")
+  // A replace leaves the original queue entry behind it; a Back would have moved onto it.
+  await act(async () => {
+    window.history.back()
+    await new Promise((resolve) => window.setTimeout(resolve, 50))
+  })
+  expect(window.location.search).toBe("?range=7d")
+  expect(window.location.hash).toBe("#fleet/usage")
+})
+
+it("a double close requests only one traversal", async () => {
+  window.history.replaceState(null, "", "/#fleet/work")
+  await render([selectionViews])
+  await clickSelectionControl("Open queue")
+  await clickSelectionControl("Open item")
+  const button = [...document.querySelectorAll("button")].find((element) => element.textContent === "Close item")
+  if (button === undefined) return expect.unreachable()
+  await act(async () => {
+    button.click()
+    button.click()
+    await new Promise((resolve) => window.setTimeout(resolve, 50))
+  })
+  expect(window.location.search).toBe("?range=7d")
+  expect(window.location.hash).toBe("#fleet/usage")
+})
+
+it("uses Back when the parent URL has the same selectors in a different order", async () => {
+  window.history.replaceState(null, "", "/?host=hub&range=7d#fleet/usage")
+  const back = vi.spyOn(window.history, "back")
+  await render([
+    {
+      ...selectionViews,
+      pages: {
+        ...selectionViews.pages,
+        usage: (_search, mount) => (
+          <>
+            <button onClick={() => mount.navigate("?host=hub&range=7d&ref=item-1#fleet/usage", "push", null)}>
+              Open item
+            </button>
+            <button onClick={() => mount.closeSelection("?range=7d&host=hub#fleet/usage")}>Close item</button>
+          </>
+        )
+      }
+    }
+  ])
+  await clickSelectionControl("Open item")
+  await clickSelectionControl("Close item")
+  expect(back).toHaveBeenCalledOnce()
+  await vi.waitFor(() => expect(window.location.search).toBe("?host=hub&range=7d"))
+})
+
+it("a cancelled traversal lets a later Close replace the selected URL", async () => {
+  window.history.replaceState(null, "", "/?range=7d#fleet/usage")
+  await render([selectionViews])
+  await clickSelectionControl("Open item")
+  const back = vi.spyOn(window.history, "back").mockImplementation(() => undefined)
+  const now = vi.spyOn(window.performance, "now").mockReturnValue(0)
+  await clickSelectionControl("Close item")
+  expect(window.location.search).toBe("?range=7d&ref=item-1")
+  now.mockReturnValue(100)
+  await clickSelectionControl("Close item")
+  expect(window.location.search).toBe("?range=7d&ref=item-1")
+  now.mockReturnValue(501)
+  await clickSelectionControl("Close item")
+  expect(window.location.search).toBe("?range=7d")
+  expect(back).toHaveBeenCalledOnce()
+})
+
+it("keeps a supported bare-module alias of the current page without moving focus", async () => {
+  window.history.replaceState(null, "", "/#fleet/approvals")
+  await render()
+  const host = document.querySelector<HTMLButtonElement>(".superapp-host")
+  await act(async () => host?.focus())
+  await act(async () => {
+    window.location.hash = "#fleet"
+    window.dispatchEvent(new HashChangeEvent("hashchange"))
+    await new Promise((resolve) => window.setTimeout(resolve, 50))
+  })
+  expect(window.location.hash).toBe("#fleet")
+  expect(document.activeElement).toBe(host)
+})
+
+it("repairs a redundant legacy tab on the current page without moving focus", async () => {
+  window.history.replaceState(null, "", "/#fleet/approvals")
+  await render()
+  const host = document.querySelector<HTMLButtonElement>(".superapp-host")
+  await act(async () => host?.focus())
+  await act(async () => {
+    window.history.replaceState(window.history.state, "", "/?tab=approvals#fleet/approvals")
+    window.dispatchEvent(new PopStateEvent("popstate"))
+  })
+  expect(window.location.search).toBe("")
+  expect(window.location.hash).toBe("#fleet/approvals")
+  expect(document.activeElement).toBe(host)
+})
 
 it("keeps a first-load document anchor while rendering the landing module", async () => {
   window.history.replaceState(null, "", "/#main")

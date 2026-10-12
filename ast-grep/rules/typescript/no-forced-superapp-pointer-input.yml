@@ -1,0 +1,32 @@
+id: no-forced-superapp-pointer-input
+language: tsx
+severity: error
+message: "Exercise visible, hit-testable shell controls without forced Playwright pointer input"
+rule:
+  kind: pair
+  has:
+    field: key
+    regex: "^force$"
+  all:
+    - has:
+        field: value
+        regex: "^true$"
+  inside:
+    kind: object
+    inside:
+      kind: arguments
+      inside:
+        kind: call_expression
+        has:
+          field: function
+          regex: "\\.(click|dblclick|tap)$"
+files:
+  - "packages/herdr-hub/test/superapp-browser/**/*.spec.ts"
+note: |
+  Shell history and focus guards must exercise controls a user can reach.
+  A forced pointer event skips Playwright's visibility and hit-target checks,
+  so an invisible or covered close button can make an impossible path pass.
+  This rule covers literal force: true options passed directly to click,
+  dblclick and tap in the shell browser suite. It does not inspect options
+  variables, other input methods or dispatchEvent. Unrelated product suites
+  may deliberately inspect disabled controls or browser engine behavior.

@@ -4,11 +4,12 @@ import type { StackState } from "../src/schema.js"
 import { type DiscoveredStack, StackSource } from "../src/server/Catalog.js"
 
 export const state: StackState = {
-  app: "fixture-app",
+  app: "billing",
   stage: "prod",
   backend: "local",
   alchemyVersion: "2.0.0-beta.77",
   lastDeploy: null,
+  outputs: null,
   resources: [{
     fqn: "Storage/Assets",
     logicalId: "Assets",
@@ -18,7 +19,9 @@ export const state: StackState = {
     providerId: null,
     account: null,
     region: null,
-    consoleUrl: null
+    consoleUrl: null,
+    updatedAt: null,
+    downstream: null
   }]
 }
 

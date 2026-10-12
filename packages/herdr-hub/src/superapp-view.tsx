@@ -1,7 +1,6 @@
 import { PortalProvider } from "@knpkv/rly/foundations"
-import { RelayMark } from "@knpkv/rly/patterns"
 import { Dialog, IconButton, StatePanel } from "@knpkv/rly/primitives"
-import { Predicate, Result } from "effect"
+import { Predicate, Result, Schema } from "effect"
 import {
   useCallback,
   useEffect,
@@ -15,6 +14,7 @@ import {
 import { HubRelay, type HubRelayConversation } from "./hub-relay.js"
 import { hubModuleLinkTarget } from "./internal/hub-module-links.js"
 import { ShellIcon } from "./internal/shell-icon.js"
+import { RelayChefMark } from "./internal/relay-chef-mark.js"
 import { ShortcutsDialog, focusWhenShown, focusModulePage, isEditableTarget } from "./internal/shell-keys.js"
 import {
   canonicalModuleUrl,
@@ -35,6 +35,23 @@ interface ShellLocation {
   readonly destination: ModuleDestination
   readonly error: string | null
   readonly focus: "deferred" | "page" | "search" | null
+}
+
+const ShellHistoryEntry = Schema.Struct({ openedFrom: Schema.String, document: Schema.String })
+
+/** Preserve other history owners' object keys while validating our own record separately. */
+const historyState = () => {
+  const state: unknown = window.history.state
+  return Predicate.isObject(state) ? state : {}
+}
+
+/** Query-key ordering is irrelevant to a parent identity; repeated values retain their order. */
+const historyHref = (source: URL, descriptors: ReadonlyArray<ModuleDescriptor>): string => {
+  const url = new URL(source)
+  const route = readModuleRoute(url, descriptors)
+  if (Result.isSuccess(route)) url.hash = `${route.success.module}/${route.success.page}`
+  url.searchParams.sort()
+  return url.href
 }
 
 /** Ordinary document anchors keep their URL and use the landing page behind them. */
@@ -72,6 +89,7 @@ const shellLocation = (
 
 /** Keep a module's component position and last page while another module shows. */
 const ModuleSlot = ({
+  closeSelection,
   location,
   navigate,
   view
@@ -79,6 +97,7 @@ const ModuleSlot = ({
   readonly view: ModuleViews<ModuleDescriptor>
   readonly location: ShellLocation
   readonly navigate: ModulePageMount["navigate"]
+  readonly closeSelection: ModulePageMount["closeSelection"]
 }): ReactElement => {
   const active = location.error === null && location.destination.module === view.descriptor.id
   const [saved, setSaved] = useState({ page: view.descriptor.defaultPage, search: "" })
@@ -89,7 +108,7 @@ const ModuleSlot = ({
     throw new ModuleRegistrationError({ module: view.descriptor.id, reason: "browser_mismatch" })
   return (
     <section data-module={view.descriptor.id} hidden={!active}>
-      {renderPage(new URLSearchParams(selected.search), { active, navigate })}
+      {renderPage(new URLSearchParams(selected.search), { active, navigate, closeSelection })}
     </section>
   )
 }
@@ -128,6 +147,12 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
     return descriptors
   }, [fingerprint, landing.module, landing.page])
   const [location, setLocation] = useState(() => shellLocation(new URL(window.location.href), descriptors, landing))
+  const [documentNonce] = useState(() => window.crypto.randomUUID())
+  const pendingSelectionClose = useRef<{
+    readonly parent: string
+    readonly closing: string
+    readonly startedAt: number
+  } | null>(null)
   const [visited, setVisited] = useState<Readonly<Record<string, { readonly page: string; readonly search: string }>>>(
     {}
   )
@@ -183,7 +208,7 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
   const bottomBar = useRef<HTMLElement>(null)
   useLayoutEffect(() => {
     if (location.error === null && location.url.href !== window.location.href)
-      window.history.replaceState(null, "", location.url)
+      window.history.replaceState(historyState(), "", location.url)
   }, [location])
   useLayoutEffect(() => {
     onLocationChange?.(location.url.search)
@@ -209,13 +234,55 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
       setLocation((previous) => ({ ...previous, error: href }))
       return
     }
-    if (history === "push") window.history.pushState(null, "", next.url)
-    else window.history.replaceState(null, "", next.url)
+    pendingSelectionClose.current = null
+    if (history === "push")
+      window.history.pushState(
+        {
+          ...historyState(),
+          relayShell: { openedFrom: historyHref(location.url, descriptors), document: documentNonce }
+        },
+        "",
+        next.url
+      )
+    else window.history.replaceState(historyState(), "", next.url)
     if (panel.open) {
       pendingPanelNavigation.current = { ...next, focus }
       closePanel()
     }
     setLocation({ ...next, focus: panel.open ? "deferred" : focus })
+  }
+  const closeSelection = (parentHref: string): void => {
+    const current = new URL(window.location.href)
+    const pending = pendingSelectionClose.current
+    if (pending !== null && pending.closing === current.href) {
+      if (window.performance.now() - pending.startedAt < 500) return
+      // A cancelled traversal must not leave later Close attempts disabled.
+      navigate(parentHref, "replace", null)
+      return
+    }
+    const parent = hubModuleLinkTarget(
+      parentHref,
+      current,
+      { button: 0, altKey: false, ctrlKey: false, metaKey: false, shiftKey: false },
+      descriptors
+    )
+    const entry = Schema.decodeUnknownResult(ShellHistoryEntry)(historyState().relayShell)
+    const parentLocation =
+      parent !== null && Result.isSuccess(parent) ? shellLocation(parent.success, descriptors, landing) : null
+    const parentKey = parentLocation === null ? null : historyHref(parentLocation.url, descriptors)
+    if (parentKey === historyHref(shellLocation(current, descriptors, landing).url, descriptors)) return
+    if (
+      parentKey !== null &&
+      Result.isSuccess(entry) &&
+      entry.success.document === documentNonce &&
+      entry.success.openedFrom === parentKey
+    ) {
+      // Separate input tasks may arrive before popstate. Bound the guard so a stalled Back can still close.
+      pendingSelectionClose.current = { parent: parentKey, closing: current.href, startedAt: window.performance.now() }
+      window.history.back()
+      return
+    }
+    navigate(parentHref, "replace", null)
   }
   const cancelLocationFocus = useRef<(() => void) | null>(null)
   useLayoutEffect(() => {
@@ -231,10 +298,21 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
   }, [location])
   useLayoutEffect(() => () => cancelLocationFocus.current?.(), [])
   useEffect(() => {
-    const read = (): void =>
-      setLocation((previous) =>
-        shellLocation(new URL(window.location.href), descriptors, landing, previous.destination)
-      )
+    const read = (): void => {
+      const url = new URL(window.location.href)
+      const closing = pendingSelectionClose.current?.parent === historyHref(url, descriptors)
+      pendingSelectionClose.current = null
+      setLocation((previous) => {
+        const next = shellLocation(url, descriptors, landing, previous.destination)
+        // Hash traversals also emit hashchange. Do not repeat focus after popstate handled them.
+        if (
+          historyHref(next.url, descriptors) === historyHref(previous.url, descriptors) &&
+          next.error === previous.error
+        )
+          return next.url.href === previous.url.href && next.url.href === url.href ? previous : { ...next, focus: null }
+        return closing ? { ...next, focus: null } : next
+      })
+    }
     window.addEventListener("popstate", read)
     window.addEventListener("hashchange", read)
     return () => {
@@ -368,13 +446,14 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
         <header className="superapp-header" ref={header}>
           {relay === undefined ? (
             <span className="superapp-brand">
-              <RelayMark.Tile size={32} />
+              <RelayChefMark />
               Relay
             </span>
           ) : (
             <HubRelay
               relay={relay}
               launcherLabels={{ desktop: "Ask Relay", phone: "Relay" }}
+              launcherMark="chef"
               terminalOwnsKeys={
                 location.error === null &&
                 location.destination.module === "fleet" &&
@@ -425,7 +504,7 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
         </header>
         <nav aria-label="Modules" className="superapp-sidebar">
           <div className="superapp-sidebar-brand">
-            <RelayMark.Tile size={32} />
+            <RelayChefMark />
             <div>
               <strong>Relay</strong>
               <p>Ask anything about your work</p>
@@ -455,7 +534,13 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
             />
           )}
           {modules.map((view) => (
-            <ModuleSlot key={view.descriptor.id} view={view} location={location} navigate={navigate} />
+            <ModuleSlot
+              key={view.descriptor.id}
+              view={view}
+              location={location}
+              navigate={navigate}
+              closeSelection={closeSelection}
+            />
           ))}
         </main>
         <nav aria-label="Mobile modules" className="superapp-bottom" ref={bottomBar}>

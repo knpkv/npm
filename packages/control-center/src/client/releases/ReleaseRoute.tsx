@@ -1,14 +1,14 @@
+import { ReleaseEvidence } from "./ReleaseEvidence.js"
 import {
   AgentContextButton,
   FreshnessStamp,
   PeopleStrip,
   ReleasePreview,
   ReleaseRelay,
-  ServiceMark,
   StageRail,
   Verdict
 } from "@knpkv/rly/patterns"
-import { Button, StateLabel, StatePanel, Surface, Text } from "@knpkv/rly/primitives"
+import { Button, StatePanel, Text } from "@knpkv/rly/primitives"
 import { type ReactElement, useEffect, useRef, useState } from "react"
 import { Link, useLocation, useNavigate, useOutletContext, useParams, useViewTransitionState } from "react-router"
 
@@ -32,6 +32,8 @@ import styles from "./ReleaseRoute.module.css"
 import { useCompactReleasePreview, usePrefersReducedReleaseMotion } from "./useCompactReleasePreview.js"
 import { RelationshipRepairPanel } from "./RelationshipRepairPanel.js"
 import { ReleaseWorkset } from "./ReleaseWorkset.js"
+
+export { ReleaseEvidence } from "./ReleaseEvidence.js"
 
 interface ReleaseRouteSelection {
   readonly release: PortfolioReleasePresentation
@@ -116,28 +118,6 @@ export const ReleaseAction = ({ release }: { readonly release: PortfolioReleaseP
     </Link>
   )
 }
-
-export const ReleaseEvidence = ({ release }: { readonly release: PortfolioReleasePresentation }): ReactElement => (
-  <Surface as="section" className={styles.evidence} padding="compact" tone="secondary">
-    <div className={styles.evidenceHeading}>
-      {release.source.service === null ? null : <ServiceMark service={release.source.service} />}
-      <div>
-        <Text as="h2" variant="card-title">
-          {release.source.displayName}
-        </Text>
-        <Text tone="secondary" variant="meta">
-          Source evidence
-        </Text>
-      </div>
-    </div>
-    <StateLabel label={release.source.healthLabel} size="compact" tone={release.source.healthTone} />
-    {release.source.warning === null ? (
-      <Text tone="secondary">Detailed evidence is not evaluated in the tracer snapshot.</Text>
-    ) : (
-      <Text tone="secondary">{release.source.warning}</Text>
-    )}
-  </Surface>
-)
 
 const releaseContextLabel = (release: PortfolioReleasePresentation): string =>
   `${release.serviceName} · ${release.version} · ${release.relay.codename} · ${release.id}`

@@ -1,0 +1,9 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "skipLibCheck": false,
+    "incremental": false
+  },
+  "include": ["views.ts"],
+  "exclude": []
+}

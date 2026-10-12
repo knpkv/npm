@@ -1,0 +1,14 @@
+id: no-relay-tile-in-hub-shell
+snapshots:
+  <RelayMark.Tile />:
+    labels:
+      - source: <RelayMark.Tile />
+        style: primary
+        start: 0
+        end: 18
+  <RelayMark.Tile size={32} />:
+    labels:
+      - source: <RelayMark.Tile size={32} />
+        style: primary
+        start: 0
+        end: 28

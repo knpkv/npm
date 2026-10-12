@@ -2,11 +2,12 @@ import { Button, Field, Surface, Text } from "@knpkv/rly/primitives"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import * as FetchHttpClient from "effect/http/FetchHttpClient"
-import { type FormEvent, type ReactElement, useState } from "react"
+import { type FormEvent, type ReactElement, useEffect, useState } from "react"
 import { useNavigate, useSearchParams } from "react-router"
 
 import { makeControlCenterApiClient } from "../api/client.js"
-import { PairingCode } from "../api/session.js"
+import { PairingCode, type PairSessionResponse } from "../api/session.js"
+import type { BootstrapPairing } from "./bootstrapHandoff.js"
 import type { ProviderId } from "../domain/sourceRevision.js"
 import { useBrowserSession } from "./BrowserSession.js"
 import { pairingFailureMessage } from "./PairingFailure.js"
@@ -21,18 +22,49 @@ const pairBrowser = Effect.fn("PairPage.pairBrowser")((rawPairingCode: string) =
   }).pipe(Effect.provide(FetchHttpClient.layer))
 )
 
+/**
+ * Promise edge for the terminal fragment handoff. It lives in this lazy route chunk so the
+ * generated API client stays out of the initial bundle; the code is decoded before any request.
+ */
+export const exchangeBootstrapCode = (code: string): Promise<PairSessionResponse> =>
+  Effect.runPromise(pairBrowser(code))
+
 /** Preserve explicit service onboarding while ordinary pairing resolves workspace settings. */
 export const pairedBrowserDestination = (selectedProvider: ProviderId | null): string =>
   selectedProvider === null ? "/" : serviceSetupPath(selectedProvider)
 
 /** Pair the current tab without ever exposing the opaque session cookie to JavaScript. */
-export const PairPage = (): ReactElement => {
+export const PairPage = ({
+  bootstrapPairing
+}: { readonly bootstrapPairing?: BootstrapPairing | null } = {}): ReactElement => {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const { establishSession } = useBrowserSession()
   const [pairingCode, setPairingCode] = useState("")
   const [error, setError] = useState<string | undefined>()
   const [isPairing, setIsPairing] = useState(false)
+
+  useEffect(() => {
+    const pending = bootstrapPairing?.pair()
+    if (pending === undefined || pending === null) return
+    let current = true
+    setIsPairing(true)
+    pending.then(
+      (result) => {
+        if (!current) return
+        establishSession(result.csrfToken, result.session)
+        navigate(pairedBrowserDestination(selectedServiceProvider(searchParams, "service")), { replace: true })
+      },
+      (failure) => {
+        if (!current) return
+        setError(pairingFailureMessage(failure))
+        setIsPairing(false)
+      }
+    )
+    return () => {
+      current = false
+    }
+  }, [bootstrapPairing, establishSession, navigate, searchParams])
 
   const submit = (event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault()

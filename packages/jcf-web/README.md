@@ -42,8 +42,16 @@ authenticates. The code expires a minute after it is minted.
 
 For another browser, or a tab that says it is not signed in, run `jcf web login` (or `jcf-web login`)
 on the same machine: it asks the running server for a fresh link. While it runs, jcf-web keeps its
-address and a control token in `~/.jcf/web.json` (owner-only, `0600`) for that request, and removes the
-file when it stops.
+address and a control token in `~/.jcf/web/control.json` (owner-only, `0600`) for that request, and removes the
+file when it stops, only if the token still belongs to this server. The shared
+`@knpkv/browser-pairing/control` protocol requires a `0700` directory and `0600` file,
+refuses symbolic links and permissive paths, and validates replies as bootstrap URLs on the
+recorded loopback origin or the supported development proxy origin. The private `~/.jcf/web/` leaf
+is created with `0700` permissions; the existing configuration directory is not chmodded. Older
+`~/.jcf/web.json` registrations are ignored and left untouched. Restart an older web server to
+publish the new registration. The control token and
+credential-bearing file stay server-private. The returned credential URL goes only to CLI stdout
+and the browser opener, never logs or telemetry.
 
 A system that is not connected shows "Not connected" and the command that connects it
 (`jcf auth jira token`, `jcf auth clockify setup`), never a zero.

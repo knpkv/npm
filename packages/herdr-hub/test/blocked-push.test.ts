@@ -308,7 +308,11 @@ describe("blocked agent notifications", () => {
           text: "Please choose\nprivate second line"
         }, 0)
         yield* test.run(yield* source(0))
-        expect(yield* Ref.get(test.sent)).toMatchObject([{ firstLine: "Please choose" }])
+        expect(yield* Ref.get(test.sent)).toMatchObject([{
+          firstLine: "Please choose",
+          agentId: "agent-one",
+          eventId: "blocker-one"
+        }])
         yield* test.posts.post("HOST-A", "agent-one", {
           kind: "status",
           eventId: "status-one",

@@ -10,6 +10,9 @@ const PortTaken = Schema.Union([
 ])
 const portTaken = Schema.is(PortTaken)
 
+/** True for a failure or defect that means the requested port is already bound. */
+export const isPortTaken = portTaken
+
 /**
  * Retry a bind that failed because its port is taken, until `listening` is set. Once the server is
  * listening its URL is out and the caller's `onReady` is running, so a later failure is not a port

@@ -826,6 +826,24 @@ describe("Control Center source boundaries", () => {
     expect(inspectModuleImports("src/client/module.ts", "import(); require()")).toEqual([])
   })
 
+  it("classifies the views entry as browser code that cannot reach the server", () => {
+    expect(inspectSourceBoundaries("src/views.ts", "export * from \"./client/settings/SettingsForm.js\"")).toEqual([])
+    expect(inspectSourceBoundaries("src/views.ts", "export * from \"./server/main.js\"")).toEqual([
+      {
+        importPath: "./server/main.js",
+        reason: "the views entry must remain browser-safe",
+        sourcePath: "src/views.ts"
+      }
+    ])
+    expect(inspectSourceBoundaries("src/server/main.ts", "import \"../views.js\"")).toEqual([
+      {
+        importPath: "../views.js",
+        reason: "server code can import only server, API, or domain code",
+        sourcePath: "src/server/main.ts"
+      }
+    ])
+  })
+
   it("rejects unclassified bridge modules at the source root", () => {
     expect(inspectSourceBoundaries("src/bridge.ts", "export * from \"./server/index.js\"")).toContainEqual({
       importPath: "<unclassified source>",

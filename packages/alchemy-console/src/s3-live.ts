@@ -14,6 +14,7 @@ import {
 import { collectBoundedText } from "@knpkv/bounded-io"
 import { Effect, Layer, Predicate } from "effect"
 import * as HttpClient from "effect/http/HttpClient"
+import { decodeOutputs } from "./outputs.js"
 import type { SsoProfile } from "./profiles.js"
 import { type S3Bucket, S3Reader, S3ReadError, type S3Version, type VersionCursor } from "./s3-reader.js"
 import { SsoCredentials } from "./sso-credentials.js"
@@ -58,6 +59,33 @@ export const makeS3Reader = Effect.fn("AlchemyConsole.makeS3Reader")(function*(p
         orElse: () => Effect.fail(new S3ReadError({ reason: "provider" }))
       }),
       Effect.mapError(providerError)
+    )
+  })
+  const readObject = Effect.fn("AlchemyConsole.getS3Object")(function*(
+    bucket: S3Bucket,
+    key: string,
+    versionId: string
+  ) {
+    const result = yield* call(
+      getObject({
+        Bucket: bucket.name,
+        ExpectedBucketOwner: profile.account,
+        Key: key,
+        VersionId: versionId
+      }),
+      bucket.region
+    )
+    if ((result.VersionId ?? "null") !== versionId || result.DeleteMarker === true || result.Body === undefined) {
+      return yield* new S3ReadError({ reason: "invalid-response" })
+    }
+    return yield* collectBoundedText(result.Body, 8 * 1024 * 1024).pipe(
+      Effect.mapError((error) =>
+        new S3ReadError({ reason: Predicate.isTagged(error, "ByteLimitExceeded") ? "limit" : "provider" })
+      ),
+      Effect.timeoutOrElse({
+        duration: "30 seconds",
+        orElse: () => Effect.fail(new S3ReadError({ reason: "provider" }))
+      })
     )
   })
   return S3Reader.of({
@@ -125,30 +153,12 @@ export const makeS3Reader = Effect.fn("AlchemyConsole.makeS3Reader")(function*(p
     }),
     resource: Effect.fn("AlchemyConsole.getS3Resource")(
       function*(bucket: S3Bucket, key: string, versionId: string) {
-        const result = yield* call(
-          getObject({
-            Bucket: bucket.name,
-            ExpectedBucketOwner: profile.account,
-            Key: key,
-            VersionId: versionId
-          }),
-          bucket.region
-        )
-        if (
-          (result.VersionId ?? "null") !== versionId || result.DeleteMarker === true || result.Body === undefined
-        ) {
-          return yield* new S3ReadError({ reason: "invalid-response" })
-        }
-        const text = yield* collectBoundedText(result.Body, 8 * 1024 * 1024).pipe(
-          Effect.mapError((error) =>
-            new S3ReadError({ reason: Predicate.isTagged(error, "ByteLimitExceeded") ? "limit" : "provider" })
-          ),
-          Effect.timeoutOrElse({
-            duration: "30 seconds",
-            orElse: () => Effect.fail(new S3ReadError({ reason: "provider" }))
-          })
-        )
-        return yield* decodeResource(text)
+        return yield* decodeResource(yield* readObject(bucket, key, versionId))
+      }
+    ),
+    outputs: Effect.fn("AlchemyConsole.getS3Outputs")(
+      function*(bucket: S3Bucket, key: string, versionId: string) {
+        return yield* decodeOutputs(yield* readObject(bucket, key, versionId))
       }
     )
   })

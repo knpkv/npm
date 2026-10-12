@@ -57,7 +57,7 @@ describe("codecommit CLI", () => {
     expect(result.stderr).toBe("")
     // QA-J65: every subcommand says what it does.
     expect(result.stdout).toContain("Open the terminal UI")
-    expect(result.stdout).toContain("Serve the browser UI on this machine and open it")
+    expect(result.stdout).toContain("Sign in to the browser UI, starting it when needed")
   })
 
   // QA-J62: without a terminal the TUI says so in one line instead of drawing into a pipe.

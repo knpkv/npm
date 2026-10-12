@@ -17,6 +17,7 @@ import { createServer, type ServerResponse } from "node:http"
 import { DashboardSnapshot, PendingApprovalTarget } from "../../src/dashboard-model.js"
 import { dashboardPage } from "../../src/internal/dashboard-page.js"
 import { NeedsYouResult } from "../../src/modules.js"
+import { relayIconSvg } from "../../src/relay-icon.js"
 import { codeContentFixture, codeDetailFixture, codeDiffFixture, codeQueueFixture } from "./code-fixture.js"
 import { limitsFixture, usageFixture } from "./usage-fixture.js"
 
@@ -415,9 +416,17 @@ const program = Effect.gen(function*() {
       }
       return
     }
-    if (url.pathname === "/assets/relay-icon.svg" || url.pathname === "/favicon.ico") {
-      response.writeHead(204)
-      response.end()
+    if (
+      url.pathname === "/assets/relay-icon.svg" || url.pathname === "/assets/relay-favicon.svg" ||
+      url.pathname === "/favicon.ico"
+    ) {
+      response.writeHead(200, { "content-type": "image/svg+xml" })
+      response.end(
+        relayIconSvg(
+          url.pathname === "/assets/relay-icon.svg" ? "tile" : "favicon",
+          url.pathname === "/assets/relay-icon.svg" ? 512 : 16
+        )
+      )
       return
     }
     if (

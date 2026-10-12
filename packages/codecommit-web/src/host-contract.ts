@@ -4,7 +4,7 @@
  * References are random persisted identifiers, not encoded provider locators.
  * @module
  */
-import { Effect, Schema } from "effect"
+import { Effect, Result, Schema } from "effect"
 
 export const CodeReference = Schema.String.check(
   Schema.isPattern(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
@@ -12,6 +12,16 @@ export const CodeReference = Schema.String.check(
 export type CodeReference = typeof CodeReference.Type
 const Text = Schema.String.check(Schema.isMaxLength(4096))
 const ShortText = Schema.String.check(Schema.isMaxLength(256))
+
+/** Authenticated client-visible loopback origin only; no credential, path, query or fragment. */
+export const CodeOwnerUi = Schema.String.check(Schema.makeFilter((origin) => {
+  const decoded = Schema.decodeUnknownResult(Schema.URLFromString)(origin)
+  if (Result.isFailure(decoded)) return false
+  const url = decoded.success
+  return url.protocol === "http:" &&
+    Schema.is(Schema.Literals(["127.0.0.1", "localhost", "[::1]"]))(url.hostname) &&
+    url.origin === origin
+}))
 
 export const CodePullRequest = Schema.Struct({
   ref: CodeReference,
@@ -44,11 +54,12 @@ export const CodeUnavailable = Schema.TaggedStruct("Unavailable", {
 export type CodeUnavailable = typeof CodeUnavailable.Type
 
 export const CodeQueue = Schema.Union([
-  CodeUnavailable,
+  Schema.Struct({ ...CodeUnavailable.fields, ownerUi: Schema.optionalKey(CodeOwnerUi) }),
   Schema.TaggedStruct("Ready", {
     items: Schema.Array(CodePullRequest).check(Schema.isMaxLength(50)),
     more: Schema.Boolean,
-    observedAt: Schema.Number
+    observedAt: Schema.Number,
+    ownerUi: Schema.optionalKey(CodeOwnerUi)
   })
 ])
 export type CodeQueue = typeof CodeQueue.Type

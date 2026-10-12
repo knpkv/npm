@@ -458,3 +458,13 @@ Session reports optionally retain `sessionEvidence` with each session's ticket a
 individual active intervals. This lets web description requests correlate saved time
 without another scan. `SessionAttributor.describe` accepts a nullable ticket key for
 unkeyed time. Legacy reports without this evidence cannot support precise correlation.
+
+`jcf web login` uses the shared `@knpkv/browser-pairing/control` protocol to read
+the running week view's owner-only registration. The control file moves to
+`~/.jcf/web/control.json`, with a private `0700` leaf directory beside the existing configuration
+files. The parent directory permissions stay unchanged, and legacy `~/.jcf/web.json` files are
+ignored and left untouched. The credential-bearing file and bearer token stay server-private;
+its directory must be 0700 and the file 0600, with symbolic links and permissive
+paths refused. Replies must be valid one-time bootstrap URLs on the registered
+loopback origin or supported development proxy origin. Sign-in URLs are
+credentials printed only on CLI stdout, never logs or telemetry.

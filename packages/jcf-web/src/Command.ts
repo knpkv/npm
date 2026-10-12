@@ -5,9 +5,10 @@
  *
  * @module
  */
+import { makeWebControl } from "@knpkv/browser-pairing/control"
 import { browserLaunch, BrowserLaunchOutputError, openOrServe } from "@knpkv/browser-pairing/launch"
 import { WebControl } from "@knpkv/jira-clockify"
-import { Config, Console, Data, Effect, Option, Runtime } from "effect"
+import { Config, Console, Data, Effect, Option, Path, Runtime } from "effect"
 import { Command, Flag } from "effect/cli"
 import * as Stdio from "effect/Stdio"
 import * as Stream from "effect/Stream"
@@ -44,8 +45,11 @@ export const announceWeekView = Effect.fn("JcfWeb.announceWeekView")(function*<E
   announce: (url: string) => Effect.Effect<void, E, R>
 ) {
   yield* announce(url)
-  yield* WebControl.writeControlFile({ origin, token }).pipe(Effect.catch((error) => Console.error(error.message)))
-  yield* Effect.addFinalizer(() => WebControl.removeControlFile(token))
+  const path = yield* Path.Path
+  const file = yield* WebControl.controlFilePath
+  yield* makeWebControl({ directory: path.dirname(file), file }).registerControlFile({ origin, token }).pipe(
+    Effect.catchTag("ControlFileError", () => Console.error(new WebControl.ControlFileError({ path: file }).message))
+  )
 })
 
 /** The service start's announcement: the labelled URL on stdout and nowhere else. */

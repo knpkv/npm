@@ -1,9 +1,48 @@
+import type { CodeQueue } from "@knpkv/codecommit-web/host"
 import { expect, test } from "@playwright/test"
 import { ok } from "node:assert/strict"
 import { CODE_OTHER_REF, CODE_REF } from "./code-fixture.js"
 
 const route = (page: string, ref?: string) =>
   `/?filter=open&search=&offset=0${ref === undefined ? "" : `&ref=${ref}`}#code/${page}`
+
+test("owner links follow the queue's bound origin without a port fallback or another endpoint", async ({ page }) => {
+  let ownerUi: string | undefined = "http://127.0.0.1:4780"
+  let failed = false
+  const requests: Array<string> = []
+  page.on("request", (request) => {
+    const path = new URL(request.url()).pathname
+    if (path.startsWith("/v1/modules/code/")) requests.push(path)
+  })
+  await page.route(/\/v1\/modules\/code\/queue\?/, async (request) => {
+    const unavailable: CodeQueue = {
+      _tag: "Unavailable",
+      reason: "cache_unavailable",
+      host: null
+    }
+    const status = ownerUi === undefined ? unavailable : { ...unavailable, ownerUi }
+    await request.fulfill({ status: failed ? 503 : 200, json: status })
+  })
+  await page.goto(route("pull-requests"))
+  const link = page.getByRole("link", { name: "Open Code owner UI on this machine" })
+  const refresh = page.getByRole("button", { name: "Read again", exact: true })
+  await expect(link).toHaveAttribute("href", "http://127.0.0.1:4780")
+  await expect(page.locator(".code-host-notice")).toContainText("Code owner service and hub log")
+  ownerUi = "http://127.0.0.1:4781"
+  await refresh.click()
+  await expect(link).toHaveAttribute("href", "http://127.0.0.1:4781")
+  failed = true
+  await refresh.click()
+  await expect(page.locator(".code-host-problem")).toContainText("Showing the previous reading")
+  await expect(link).toHaveCount(0)
+  failed = false
+  ownerUi = undefined
+  await refresh.click()
+  await expect(page.locator(".code-host-problem")).toHaveCount(0)
+  await expect(link).toHaveCount(0)
+  await expect(page.locator(".code-host-notice")).not.toContainText("cannot be opened from this device")
+  expect(requests).toEqual(Array(4).fill("/v1/modules/code/queue"))
+})
 
 test("Code is a registered mobile module with a cache-only queue and readable controls", async ({ page }) => {
   const requests: Array<string> = []

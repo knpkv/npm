@@ -5,8 +5,8 @@
  *
  * - **One fleet conversation.** The hub holds `{ product: "herdr", kind: "fleet", id: <hub host> }`; the page
  *   opens its stream once and every part of it reads that one.
- * - **The mark is the launcher.** It shows what Relay is doing (working, needs you, a reply you haven't
- *   seen), and its words sit beside it. They are announced only while the panel is closed: once it is open,
+ * - **The mark is the launcher.** The shell selects a static Chef; legacy callers keep the phase-driven
+ *   Creature. Expanded button styling shows the open state. Existing words carry Relay's status. They are announced only while the panel is closed: once it is open,
  *   its transcript announces the runs.
  * - **Ctrl/⌘+J opens Relay, except in Connect,** where the terminal owns the key. Escape closes Relay
  *   either way.
@@ -27,6 +27,7 @@ import {
 import { RelayLauncher, useRelayPresentation, useRelayShortcut, useRelaySummon } from "@knpkv/rly/patterns"
 import { Button, Text } from "@knpkv/rly/primitives"
 import { type ReactElement, useCallback, useRef, useState } from "react"
+import { RelayChefMark } from "./internal/relay-chef-mark.js"
 
 type RelayPhase = "idle" | "listening" | "thinking" | "answering" | "needs-you"
 
@@ -113,6 +114,7 @@ const useSpokenStatus = (
 /** Relay's launcher, status and panel for the masthead. */
 export const HubRelay = ({
   launcherLabels,
+  launcherMark = "creature",
   relay,
   terminalOwnsKeys
 }: {
@@ -121,6 +123,8 @@ export const HubRelay = ({
   readonly terminalOwnsKeys: boolean
   /** Optional shell names: desktop button and phone brand. Both announce the desktop action name. */
   readonly launcherLabels?: { readonly desktop: string; readonly phone: string }
+  /** Creature by default. Chef is static; open styling and the existing status words retain their meanings. */
+  readonly launcherMark?: "creature" | "chef"
 }): ReactElement => {
   const [open, setOpen] = useState(false)
   const [composerFocused, setComposerFocused] = useState(false)
@@ -148,7 +152,7 @@ export const HubRelay = ({
     <div className="fleet-shell-relay">
       <RelayLauncher
         activity={status.activity}
-        avatar={avatar}
+        avatar={launcherMark === "chef" ? <RelayChefMark /> : avatar}
         {...(launcherLabels === undefined
           ? {}
           : {

@@ -24,12 +24,35 @@ You need [Bun](https://bun.sh) 1.3 or later and an AWS CLI profile that can read
    Profiles are read from `~/.aws/config` and `~/.aws/credentials`, or from `AWS_CONFIG_FILE` and
    `AWS_SHARED_CREDENTIALS_FILE` when those are set. The app never edits these files.
 2. Run `codecommit web`. It prints one sign-in link and opens it; the link works once, within 60 seconds.
-   Lost it? Run the command again for a new one.
+   Lost it? Run the command again: it reuses the running server, opens a fresh link and exits.
+   `codecommit web login` prints one without opening. `--no-open` suppresses opening on the root.
+   If no server answers, the command starts one in the foreground until SIGINT/SIGTERM;
+   closing the tab never stops it. A refused login fails instead of starting another server.
 3. The first screen says what's missing, if anything: "No AWS profiles yet" links to Settings → Accounts,
    which shows where it looked, the commands that create a profile, and "Detect again".
 
 Settings live in `~/.codecommit/config.json`. Until the first setting is saved there is no file and the
 defaults apply.
+
+### Supervised owner process
+
+A deployment can keep the credential host's owner process running with
+`bun packages/codecommit-web/dist/main.js`, built from the same revision as hostd and its
+workspace dependencies. This entry stays running; `codecommit web` instead reuses a running
+owner and exits after requesting a sign-in link. The process needs Bun and its child commands
+on `PATH`. `PORT` chooses the first loopback port; the standalone entry retains its port retries.
+Do not set the development proxy's `CODECOMMIT_WEB_PUBLIC_ORIGIN` or `ALLOWED_ORIGINS` for this service.
+
+For a systemd user service, use `Restart=on-failure` and `StandardOutput=null`: the startup
+sign-in URL contains a single-use credential and must not reach the journal. Operational stderr
+may go to the journal. The owner-only control file records the actually bound origin, so
+`codecommit web` can obtain a fresh link even after a port retry.
+
+Only the owner process creates, repairs and migrates its cache and runs its configured refresh
+policy. Its permission gates stay in force. The hub verifies an existing private cache with the
+exact supported schema; it never creates, repairs, migrates or chmods that cache. An unreadable
+cache remains Unavailable. Check the owner service and the hub's private diagnostic log;
+the hub's existing poll or Read again retries attachment without restarting the hub.
 
 ## AWS calls ask first
 
@@ -70,8 +93,15 @@ do not traverse the owner view source aliases. Build this package before typeche
 Build and prepack force declaration emission even when `dist` was cleared with build-info retained.
 Removing those source aliases is a follow-up; published type, runtime and CSS paths are unchanged.
 
-The hub's machine-local owner link uses the owner's default loopback port 3000. An owner
-started on another port must be opened at its configured address on the credential host.
+The hub queue may add `ownerUi`, the validated direct HTTP loopback origin read afresh from the
+owner control file. It is a normalized authenticated client-visible origin, with no credential,
+path, query or fragment. The control file and its bearer token stay server-private and owner-only;
+neither enters the queue response or logs. Missing, linked, permissive or malformed files omit
+the field; there is no default-port fallback. The browser shows the link only when viewing the
+hub on this machine. Other devices receive the existing credential-host instructions.
+The product reader delegates private-path verification and origin-only projection to
+`makeWebControl.readOrigin`, then applies the stricter Code owner-origin schema. It never
+uses the credential-bearing login reader to produce this metadata.
 
 ## Pairing boundary
 
@@ -103,6 +133,24 @@ logged, never served on unauthenticated routes, and the browser keeps it only in
 its in-memory snapshot. Reasons carry no provider message; the account's
 notification explains the failure.
 
+## Owner control route
+
+The shared `@knpkv/browser-pairing/control` protocol owns file locking and the bearer login route.
+After its authenticated listener is ready, each server publishes `~/.codecommit/web.json`:
+`{origin, token}` stores the direct loopback origin actually bound, including a port retry, and a
+server-private bearer credential rotated on every bind attempt. The directory is `0700`, the file
+`0600`, and linked or permissive paths are refused. Publication is atomic under an exclusive lock;
+shutdown removes only the file holding this server's token, leaving a newer server's file intact.
+
+`POST /control/login` requires that bearer token, independently of cookies and CORS. No or wrong
+bearer returns 401 without minting. Success returns an uncached `{url}` whose one-time bootstrap
+code uses the same public origin, exchange, single-use policy and expiry as startup. A dev proxy
+therefore receives the same kind of link as startup. Control tokens and the file are owner-only and
+server-private, never browser/API projections or log fields. The returned URL is credential-bearing;
+the CLI prints it on stdout and passes it to the opener, never to logs. CLI web logs go to stderr.
+Standalone `serveCodeCommit` retains its ready block by default; an `announce` callback replaces
+that stdout block. `onReady` still runs after announcement.
+
 ## Relay routes
 
 `/api/relay` serves the Relay assistant dock, behind the same owner cookie and CSRF policy as every
@@ -129,8 +177,8 @@ unauthenticated routes. Profiles, credentials and provider ARNs never cross into
   `GET /backends`: `Unverified`, `Ready` or `Unavailable` with a one-line fix.
 
 Sessions hold conversation content. They live in `~/.codecommit/relay/sessions.sqlite`, with an
-owner-only directory (`0700`) and database (`0600`). One server process owns them. A second
-`codecommit web` on the same home keeps serving the queue, and answers 503 `RelayUnavailableError`
+owner-only directory (`0700`) and database (`0600`). One server process owns them. `codecommit web` reuses the server already holding that home. Starting another standalone
+server on the same home still serves the queue, but answers 503 `RelayUnavailableError`
 with the fix on `/api/relay`. Turns run on the user's own Claude Code or Codex CLI login, with every
 CLI tool withheld.
 

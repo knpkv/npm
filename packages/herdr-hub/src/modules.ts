@@ -19,6 +19,12 @@ export * from "./usage-selection.js"
 export interface ModulePageMount {
   readonly active: boolean
   readonly navigate: (href: string, history: "push" | "replace", focus?: "page" | "search" | null) => void
+  /**
+   * Close a target opened with navigate(..., "push"). Return through Back only when this
+   * shell lifetime opened it directly from parentHref; direct/reloaded/remounted targets replace instead.
+   * Selector filters still use navigate(..., "replace"). The closing modal owns focus.
+   */
+  readonly closeSelection: (parentHref: string) => void
 }
 
 /** Browser implementations import a product's browser entry and supply every declared page. */

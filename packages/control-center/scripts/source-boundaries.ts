@@ -272,11 +272,15 @@ const reasonForImport = (sourcePath: string, importPath: string): string | undef
   if (
     isApi &&
     target !== undefined &&
-    (isWithin(target, "src/client") || isWithin(target, "src/server") || target === "src/index")
+    (isWithin(target, "src/client") || isWithin(target, "src/server") || target === "src/index" ||
+      target === "src/views")
   ) {
     return "API code can import only API or domain code"
   }
-  if (isServer && target !== undefined && (isWithin(target, "src/client") || target === "src/index")) {
+  if (
+    isServer && target !== undefined &&
+    (isWithin(target, "src/client") || target === "src/index" || target === "src/views")
+  ) {
     return "server code can import only server, API, or domain code"
   }
   if (isDomain && target !== undefined && !isWithin(target, "src/domain")) {
@@ -288,6 +292,9 @@ const reasonForImport = (sourcePath: string, importPath: string): string | undef
     (isWithin(target, "src/client") || isWithin(target, "src/server"))
   ) {
     return "the package root must remain browser-safe"
+  }
+  if (normalizedSource === "src/views" && target !== undefined && isWithin(target, "src/server")) {
+    return "the views entry must remain browser-safe"
   }
   if ((isApi || isDomain || isServer || normalizedSource === "src/index") && isRlyImport(importPath)) {
     return "API, domain, and server code cannot import the presentation system"
@@ -406,7 +413,7 @@ export const inspectStylesheetBoundaries = (
 export const inspectSourceBoundaries = (sourcePath: string, source: string): ReadonlyArray<SourceBoundaryViolation> =>
   (() => {
     const normalizedSource = sourcePath.replaceAll("\\", "/").replace(SCRIPT_EXTENSION, "")
-    const classified = normalizedSource === "src/index" ||
+    const classified = normalizedSource === "src/index" || normalizedSource === "src/views" ||
       ["src/api", "src/client", "src/domain", "src/server"].some((directory) => isWithin(normalizedSource, directory))
     const structuralViolations: ReadonlyArray<SourceBoundaryViolation> = classified
       ? []

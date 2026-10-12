@@ -114,6 +114,38 @@ const mount = async (conversations: RelayConversations) => {
 }
 
 describe("Relay in the hub's masthead", () => {
+  it.each([undefined, "creature", "chef"] satisfies ReadonlyArray<"creature" | "chef" | undefined>)(
+    "selects the launcher mark explicitly, independently of its label: %s",
+    async (launcherMark) => {
+      const { conversations } = fakeConversations({ ...initialRelayConversation, connection: "live", runIds: ["r1"] })
+      const host = document.createElement("div")
+      document.body.append(host)
+      const created = createRoot(host)
+      root = created
+      await act(async () =>
+        created.render(
+          <PortalProvider>
+            <HubRelay
+              {...(launcherMark === undefined ? {} : { launcherMark })}
+              launcherLabels={{ desktop: "Ask Relay", phone: "Relay" }}
+              relay={{ conversation: fleet, conversations }}
+              terminalOwnsKeys={false}
+            />
+          </PortalProvider>
+        )
+      )
+      const launcher = host.querySelector<HTMLButtonElement>("[data-rly-relay-launcher]")
+      expect(launcher?.getAttribute("aria-label")).toBe("Ask Relay")
+      expect(launcher?.querySelectorAll(".relay-chef-mark").length).toBe(launcherMark === "chef" ? 1 : 0)
+      expect(launcher?.querySelectorAll("[data-relay-phase]").length).toBe(launcherMark === "chef" ? 0 : 1)
+      await act(async () => launcher?.click())
+      const panel = document.querySelector("[data-rly-relay-panel]")
+      expect(panel?.querySelector(".relay-chef-mark")).toBeNull()
+      expect(
+        panel?.querySelector("[data-rly-relay-avatar=panel] [data-relay-phase]")?.getAttribute("data-relay-phase")
+      ).toBe("thinking")
+    }
+  )
   it.each([
     { labels: undefined, title: "Relay" },
     { labels: { desktop: "Ask Ops", phone: "Ops" }, title: "Ask Ops" }
@@ -246,6 +278,26 @@ describe("Relay in the hub's masthead", () => {
       expect(page.live()).toBe(words ?? "")
     }
   )
+
+  it.each(phases)("keeps the shell Chef static and the status authoritative for $label", async ({ state, words }) => {
+    const { conversations, publish } = fakeConversations(liveState)
+    const host = document.createElement("div")
+    document.body.append(host)
+    const created = createRoot(host)
+    root = created
+    await act(async () =>
+      created.render(
+        <PortalProvider>
+          <HubRelay launcherMark="chef" relay={{ conversation: fleet, conversations }} terminalOwnsKeys={false} />
+        </PortalProvider>
+      )
+    )
+    await act(async () => publish(state))
+    const launcher = host.querySelector("[data-rly-relay-launcher]")
+    expect(launcher?.querySelectorAll(".relay-chef-mark")).toHaveLength(1)
+    expect(launcher?.querySelector("[data-relay-phase]")).toBeNull()
+    expect(host.querySelector(".fleet-shell-relay-live")?.textContent).toBe(words ?? "")
+  })
 
   it("uses the listening pose only while the composer is focused and clears it on close", async () => {
     const { conversations } = fakeConversations({ ...initialRelayConversation, connection: "live" })

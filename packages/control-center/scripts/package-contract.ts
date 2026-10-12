@@ -24,7 +24,8 @@ const expectedExports = {
   ".": { import: "./dist/server/index.js", types: "./dist/server/index.d.ts" },
   "./api": { import: "./dist/server/api/index.js", types: "./dist/server/api/index.d.ts" },
   "./domain": { import: "./dist/server/domain/index.js", types: "./dist/server/domain/index.d.ts" },
-  "./server": { import: "./dist/server/server/index.js", types: "./dist/server/server/index.d.ts" }
+  "./server": { import: "./dist/server/server/index.js", types: "./dist/server/server/index.d.ts" },
+  "./views": { import: "./dist/views/index.js", types: "./dist/views-types/views.d.ts" }
 } satisfies Readonly<Record<string, { readonly import: string; readonly types: string }>>
 
 const sameKeys = (record: Readonly<Record<string, Schema.Json>>, expected: ReadonlyArray<string>): boolean => {
@@ -148,9 +149,9 @@ export const inspectPackageContract = <UnparsedInput>(value: UnparsedInput): Rea
     violations.push("effect must align with the pinned Effect release")
   }
 
-  const expectedKeys = Object.keys(expectedExports).sort()
+  const expectedKeys = [...Object.keys(expectedExports), "./views/style.css"].sort()
   if (!sameKeys(manifest.exports, expectedKeys)) {
-    violations.push("package exports must contain only ., ./api, ./domain, ./server")
+    violations.push("package exports must contain only ., ./api, ./domain, ./server, ./views, ./views/style.css")
   }
   for (const [entry, expected] of Object.entries(expectedExports)) {
     const actual = Schema.decodeUnknownResult(ExportTargetSchema)(manifest.exports[entry])
@@ -161,6 +162,9 @@ export const inspectPackageContract = <UnparsedInput>(value: UnparsedInput): Rea
     ) {
       violations.push(`invalid ${entry} export target`)
     }
+  }
+  if (manifest.exports["./views/style.css"] !== "./dist/views/style.css") {
+    violations.push("invalid ./views/style.css export target")
   }
   return violations
 }

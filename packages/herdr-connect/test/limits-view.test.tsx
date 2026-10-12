@@ -4,8 +4,9 @@ import { RLY_STATE_LABEL_VARIANTS } from "@knpkv/rly/primitives"
 import { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, describe, expect, it } from "vitest"
-import type { ConnectLimitsView } from "../src/limits-model.js"
+import { type ConnectLimitsView, connectLimitsView } from "../src/limits-model.js"
 import { ConnectLimits } from "../src/limits-view.js"
+import { failureSentences } from "../src/unavailable-detail.js"
 
 const roots: Array<Root> = []
 
@@ -41,6 +42,59 @@ const view: ConnectLimitsView = {
 }
 
 describe("ConnectLimits", () => {
+  it("keeps a known missing-service cause in a warning card and keeps its usage link", async () => {
+    const unavailable = connectLimitsView(
+      {
+        hosts: [
+          {
+            host: "ALPHA",
+            readAt: 0,
+            reading: { _tag: "Unavailable", reason: "failed", detail: failureSentences.notRunning }
+          }
+        ],
+        failures: [],
+        peersListed: true
+      },
+      0
+    )
+    const host = await render(<ConnectLimits problem={null} view={unavailable} />)
+    expect(host.querySelector(".connect-limits-problem")?.textContent).toBe(failureSentences.notRunning)
+    expect(host.querySelector(".connect-limits-problem svg")).not.toBeNull()
+    expect(host.querySelector("a")?.getAttribute("href")).toBe("/?tab=usage")
+  })
+
+  it("shows only the generic failure card after an HTTP failure without claiming the service is missing", async () => {
+    const host = await render(<ConnectLimits problem="Couldn't load limits." view={null} />)
+    expect(host.querySelector("a")).toBeNull()
+    expect(host.querySelector(".connect-limits-problem")?.textContent).toBe("Couldn't load limits.")
+    expect(host.textContent).not.toContain(failureSentences.notRunning)
+  })
+
+  it("names the unavailable host when another host has a successful limits reading", async () => {
+    const mixed = connectLimitsView(
+      {
+        hosts: [
+          {
+            host: "ALPHA",
+            readAt: 0,
+            reading: { _tag: "Read", limits: { v: 1, machine: "ALPHA", observedAt: 0, latest: [] }, skipped: 0 }
+          },
+          {
+            host: "BETA",
+            readAt: 0,
+            reading: { _tag: "Unavailable", reason: "failed", detail: failureSentences.notRunning }
+          }
+        ],
+        failures: [],
+        peersListed: true
+      },
+      0
+    )
+    const host = await render(<ConnectLimits problem={null} view={mixed} />)
+    expect(host.querySelector(".connect-limits-problem")?.textContent).toBe(`BETA: ${failureSentences.notRunning}`)
+    expect(host.querySelector("a")?.getAttribute("href")).toBe("/?tab=usage")
+  })
+
   it("shows one line of state labels and links to the Usage tab for each host's cards", async () => {
     const host = await render(<ConnectLimits problem={null} view={view} />)
     expect([...host.querySelectorAll(".connect-limits-line li")].map((item) => item.textContent)).toEqual([
@@ -59,9 +113,30 @@ describe("ConnectLimits", () => {
 
   it("shows nothing while limits are off, and says why when the first load failed", async () => {
     expect((await render(<ConnectLimits problem={null} view={{ ...view, off: true }} />)).textContent).toBe("")
-    expect((await render(<ConnectLimits problem="Couldn't load limits." view={null} />)).textContent).toBe(
-      "Couldn't load limits."
+    expect(
+      (await render(<ConnectLimits problem="Couldn't load limits." view={null} />)).querySelector(
+        ".connect-limits-problem"
+      )?.textContent
+    ).toBe("Couldn't load limits.")
+  })
+
+  it("keeps limits hidden when an off reading is followed by a failed poll", async () => {
+    const host = document.createElement("div")
+    document.body.append(host)
+    const root = createRoot(host)
+    roots.push(root)
+    const off = connectLimitsView(
+      {
+        hosts: [{ host: "ALPHA", readAt: 0, reading: { _tag: "Unavailable", reason: "not_configured", detail: "" } }],
+        failures: [],
+        peersListed: true
+      },
+      0
     )
+    await act(async () => root.render(<ConnectLimits problem={null} view={off} />))
+    expect(host.innerHTML).toBe("")
+    await act(async () => root.render(<ConnectLimits problem="Couldn't load limits." view={off} />))
+    expect(host.innerHTML).toBe("")
   })
 
   it("keeps ok limits quiet while warning and at-limit readings retain their icons", async () => {
