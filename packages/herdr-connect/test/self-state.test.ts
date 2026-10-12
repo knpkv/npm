@@ -86,6 +86,31 @@ describe("creature self-state", () => {
         expect((yield* store.selfUpdate("host-a", "agent-two", { say: "independent" }, 0)).say).toBe("independent")
       }).pipe(Effect.scoped))
 
+    it.effect("counts each refill interval only once when request timestamps arrive out of order", () =>
+      Effect.gen(function*() {
+        const store = yield* openStore()
+        const accepted: Array<boolean> = []
+        for (const now of [0, 10_000, 0, 10_000, 10_000]) {
+          const result = yield* Effect.result(store.selfUpdate("HOST-A", "agent-one", { mood: "focused" }, now))
+          accepted.push(Result.isSuccess(result))
+          if (Result.isFailure(result)) {
+            expect(result.failure).toMatchObject({ _tag: "TooManySelfUpdates", retryAfterMillis: 10_000 })
+          }
+        }
+        // The initial three tokens plus one elapsed refill permit four writes, never five.
+        expect(accepted).toEqual([true, true, true, true, false])
+        const reopened = yield* Effect.acquireRelease(
+          AgentPostStore.open(store.path),
+          (opened) => Effect.sync(() => opened.close())
+        )
+        const repeated = yield* Effect.result(reopened.selfUpdate("host-a", "agent-one", { mood: "happy" }, 10_000))
+        expect(Result.isFailure(repeated) && repeated.failure).toMatchObject({
+          _tag: "TooManySelfUpdates",
+          retryAfterMillis: 10_000
+        })
+        expect((yield* reopened.selfUpdate("host-a", "agent-one", { mood: "happy" }, 20_000)).mood).toBe("happy")
+      }).pipe(Effect.scoped))
+
     it.effect("clears self-state and its bucket only after a confirmed archive", () =>
       Effect.gen(function*() {
         const store = yield* openStore()

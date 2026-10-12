@@ -39,9 +39,10 @@ export const makeSelfStateMethods = (
                 "SELECT state_json, tokens, refilled_at FROM connect_self_state WHERE host = ? AND agent_id = ?"
               ).get(host.toLowerCase(), agentId)
               const previous = raw === undefined ? null : Schema.decodeUnknownSync(Row)(raw)
+              const refilledAt = Math.max(previous?.refilled_at ?? now, now)
               const tokens = previous === null
                 ? 3
-                : Math.min(3, previous.tokens + Math.max(0, now - previous.refilled_at) / 10_000)
+                : Math.min(3, previous.tokens + (refilledAt - previous.refilled_at) / 10_000)
               if (tokens < 1) throw new TooManySelfUpdates({ retryAfterMillis: Math.ceil((1 - tokens) * 10_000) })
               const priorState = previous === null ? null : Schema.decodeUnknownSync(StateJson)(previous.state_json)
               const self = Schema.decodeUnknownSync(ConnectSelfState)({
@@ -54,7 +55,7 @@ export const makeSelfStateMethods = (
               database.prepare(`INSERT INTO connect_self_state (host, agent_id, state_json, tokens, refilled_at)
             VALUES (?, ?, ?, ?, ?) ON CONFLICT(host, agent_id) DO UPDATE SET
               state_json = excluded.state_json, tokens = excluded.tokens, refilled_at = excluded.refilled_at`)
-                .run(host.toLowerCase(), agentId, JSON.stringify(self), tokens - 1, now)
+                .run(host.toLowerCase(), agentId, JSON.stringify(self), tokens - 1, refilledAt)
               database.exec("COMMIT")
               return self
             } catch (cause) {
