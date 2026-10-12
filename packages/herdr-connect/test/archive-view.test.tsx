@@ -26,10 +26,12 @@ const selectedKey = JSON.stringify([closure.host, closure.agentId, closure.close
 const newer = { ...closure, agentId: "agent-newer", name: "Newer closure", closedAt: 30 }
 const cursor = { host: newer.host, agentId: newer.agentId, closedAt: newer.closedAt }
 const requests: Array<string | null> = []
+let directoryRequests = 0
 let archive: (cursor: string | null) => Promise<Response>
 
 beforeEach(() => {
   requests.length = 0
+  directoryRequests = 0
   archive = async () => Response.json({ agents: [closure], nextCursor: null })
   window.fetch = async (input) => {
     const url = new URL(
@@ -40,7 +42,10 @@ beforeEach(() => {
       requests.push(url.searchParams.get("cursor"))
       return archive(url.searchParams.get("cursor"))
     }
-    if (url.pathname === "/v1/connect/agents") return Response.json({ agents: [], failures: [], nextCursor: null })
+    if (url.pathname === "/v1/connect/agents") {
+      directoryRequests += 1
+      return Response.json({ agents: [], failures: [], nextCursor: null })
+    }
     return Response.json({ hosts: [], failures: [], peersListed: true })
   }
 })
@@ -83,6 +88,43 @@ const mount = async (embedded = false, key: string | null = null) => {
 }
 
 describe("archived directory selection", () => {
+  it("a held archive reaches the failed state at ten seconds despite directory polls, and Retry recovers", async () => {
+    vi.useFakeTimers()
+    try {
+      archive = () => new Promise<Response>(() => {})
+      const host = await mount()
+      expect(requests).toEqual([null])
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5000)
+      })
+      expect(directoryRequests).toBeGreaterThan(1)
+      expect(host.textContent).toContain("Loading archived agents")
+      expect(requests).toEqual([null])
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(4999)
+      })
+      expect(host.querySelector("[role='alert']")).toBeNull()
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1)
+      })
+      const alert = host.querySelector("[role='alert']")
+      expect(alert?.textContent).toContain("Couldn't load archived agents")
+      expect(alert?.textContent).toContain("The hub didn't return the archive. Active agents aren't affected.")
+      expect(requests).toEqual([null])
+      archive = async () => Response.json({ agents: [closure], nextCursor: null })
+      const retry = alert?.querySelector<HTMLButtonElement>("button")
+      expect(retry?.textContent).toBe("Retry")
+      await act(async () => {
+        retry?.click()
+      })
+      await settle()
+      expect(host.querySelector("[role='alert']")).toBeNull()
+      expect(host.querySelector(".connect-archive-agent strong")?.textContent).toBe("Closed parent")
+      expect(requests).toEqual([null, null])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
   it("reopens a first-page closure without reading any older page", async () => {
     archive = async () => Response.json({ agents: [closure], nextCursor: { ...cursor, closedAt: closure.closedAt } })
     await mount(false, selectedKey)

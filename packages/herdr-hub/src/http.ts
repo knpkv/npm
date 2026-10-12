@@ -3686,7 +3686,7 @@ export const startHttpServer = async (
                     { store: archiveStore, observedAt, posts: postStore }
                   )
                   return yield* pageFleetConnectAgents(
-                    { ...directory, hosts: config.machines.map(({ host }) => host) },
+                    { ...directory, hosts: config.machines.slice(0, 256).map(({ host }) => host) },
                     cursor
                   )
                 })

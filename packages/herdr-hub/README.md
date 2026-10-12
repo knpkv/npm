@@ -46,7 +46,7 @@ Approval mutations require the exact active listener origin, including HTML form
 
 ## Connect directory
 
-The authenticated `GET /v1/connect/agents` response includes optional `hosts` on its first page, read from `config.machines`. This lists configured machine names even when agents or usage readings do not list a host. Later pages omit that metadata. Older clients can ignore it, and newer clients omit the empty-directory host hint when an older hub does not supply it.
+The authenticated `GET /v1/connect/agents` response includes optional `hosts` on its first page, read from `config.machines`. This lists the first 256 configured machine names in configuration order, even when agents or usage readings do not list a host. Additional configured machines remain configured but are omitted from this hint so the page stays within its schema bound. Later pages omit that metadata. Older clients can ignore it, and newer clients omit the empty-directory host hint when an older hub does not supply it.
 
 ## Approval request disclosure
 
