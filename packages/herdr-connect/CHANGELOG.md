@@ -1,5 +1,11 @@
 # @knpkv/herdr-connect
 
+## 0.20.1
+
+### Patch Changes
+
+- [#864](https://github.com/knpkv/npm/pull/864) [`1823277`](https://github.com/knpkv/npm/commit/18232777eb388e16f75b2fed6b2445c1a4c10a71) Thanks [@konopkov](https://github.com/konopkov)! - Restore the Connect directory after a stable agent moves panes. A strictly newer trusted inventory observation can update its pane while preserving the same parent and relation, in the existing batch transaction. Keep stale, equal-time and durable observations from moving ownership, and log local inventory failures with only a step, validated agent ID and reason.
+
 ## 0.20.0
 
 ### Minor Changes
