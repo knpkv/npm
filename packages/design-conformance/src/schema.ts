@@ -6,7 +6,7 @@ export const Name = Schema.String.check(Schema.isPattern(/^[a-z0-9_]+(?:-[a-z0-9
 export const RelativeFile = Schema.String.check(
   Schema.isPattern(/^(?:[a-zA-Z0-9_-]+\/)*[a-zA-Z0-9_-]+(?:\.[a-zA-Z0-9_-]+)+$/u)
 )
-const Route = Schema.String.check(Schema.isPattern(/^\/(?!\/)[^\s#]*$/u))
+const Route = Schema.String.check(Schema.isPattern(/^\/(?!\/)[^\s\\]*$/u))
 const Instant = Schema.String.check(Schema.makeFilter((value) => {
   const day = value.slice(0, 10)
   const parsed = DateTime.make(`${day}T00:00:00.000Z`)

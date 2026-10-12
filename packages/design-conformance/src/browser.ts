@@ -14,6 +14,23 @@ export interface Capture {
   readonly regions: ReadonlyMap<string, Uint8Array>
 }
 
+// Conservative per-axis physical-pixel bound for Chromium screenshot textures.
+const FrameDimension = Schema.Finite.check(Schema.isGreaterThan(0), Schema.isLessThanOrEqualTo(16_384))
+export const FrameSize = Schema.Struct({ width: FrameDimension, height: FrameDimension })
+
+/** Native RAF polling survives the installed clock. Two frame callbacks bracket a render opportunity. */
+export const waitForCapturePaint = async (page: Page): Promise<void> => {
+  const ready = await page.waitForFunction(
+    (state) => {
+      state.polls += 1
+      return state.polls >= 3
+    },
+    { polls: 0 },
+    { polling: "raf" }
+  )
+  await ready.dispose()
+}
+
 /** Visible named regions, resolved tokens, document-space boxes, DOM order and nearest region parent. */
 export const capturePage = (page: Page) =>
   browserCall("capture regions", async (): Promise<Capture> => {
@@ -61,6 +78,31 @@ export const capturePage = (page: Page) =>
     const snapshot = Schema.decodeUnknownSync(Snapshot)(raw)
     const restore = await maskUuidText(page)
     try {
+      await waitForCapturePaint(page)
+      Schema.decodeUnknownSync(FrameSize)(
+        await page.evaluate(() => ({
+          width: Math.ceil(
+            Math.max(
+              document.body.scrollWidth,
+              document.documentElement.scrollWidth,
+              document.body.offsetWidth,
+              document.documentElement.offsetWidth,
+              document.body.clientWidth,
+              document.documentElement.clientWidth
+            ) * window.devicePixelRatio
+          ),
+          height: Math.ceil(
+            Math.max(
+              document.body.scrollHeight,
+              document.documentElement.scrollHeight,
+              document.body.offsetHeight,
+              document.documentElement.offsetHeight,
+              document.body.clientHeight,
+              document.documentElement.clientHeight
+            ) * window.devicePixelRatio
+          )
+        }))
+      )
       const masks = page.locator("[data-visual-uuid]")
       const frame = await page.screenshot({ ...screenshotSettings, mask: [masks], fullPage: true })
       const regions = new Map<string, Uint8Array>()

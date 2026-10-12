@@ -5,15 +5,69 @@ import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
+import * as Schema from "effect/Schema"
 
 import { start } from "../scripts/fixture.js"
 import { browserCall } from "../src/browser.js"
 import { comparePixels } from "../src/compare.js"
 import { LiveProduct } from "../src/live.js"
-import { loadReferences } from "../src/references.js"
+import { loadReferences, readJson } from "../src/references.js"
 import { runConformance } from "../src/runner.js"
-import { RunnerFailure } from "../src/schema.js"
+import { Identity, RunnerFailure } from "../src/schema.js"
 import { verdict } from "../src/verdict.js"
+
+test("hash-route navigation preserves query and fragment and waits for adapter settlement", async () => {
+  await Effect.runPromise(
+    Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const repository = yield* path.fromFileUrl(new URL("../../../", import.meta.url))
+      const refs = yield* loadReferences(path.join(repository, "design-refs/_fixture"))
+      const live = yield* start(refs.fixture, repository)
+      const route = "/screen.html?range=7d&timeZone=UTC#usage/limits"
+      const hashRouted = LiveProduct.of({
+        ...live,
+        inventory: {
+          routes: [route],
+          states: [{ screen: "toy", state: "passing", route, viewports: [390], themes: ["light"] }]
+        },
+        seed: (page, fixture, identity) =>
+          Effect.gen(function*() {
+            yield* live.seed(page, fixture, identity)
+            yield* browserCall("assert hash settlement before screenshot", async () => {
+              const screenshot = page.screenshot.bind(page)
+              page.screenshot = async (options) => {
+                expect(await page.locator("h1").textContent()).toBe("Hash route settled")
+                return screenshot(options)
+              }
+            })
+          }),
+        ready: (page, identity) =>
+          Effect.gen(function*() {
+            yield* live.ready(page, identity)
+            yield* browserCall("settle toy hash route", async () => {
+              const expected = new URL(route, live.origin)
+              expected.searchParams.set("state", identity.state)
+              expected.searchParams.set("theme", identity.theme)
+              expect(page.url()).toBe(expected.href)
+              await page.locator("h1").evaluate((heading) =>
+                new Promise<void>((resolve) => {
+                  requestAnimationFrame(() => {
+                    heading.textContent = "Hash route settled"
+                    resolve()
+                  })
+                })
+              )
+            })
+          })
+      })
+      const output = yield* fs.makeTempDirectoryScoped()
+      yield* runConformance(refs, { output, captureOnly: true }).pipe(Effect.provideService(LiveProduct, hashRouted))
+      expect(yield* readJson(path.join(output, "captures.json"), Schema.Array(Identity)))
+        .toEqual([{ screen: "toy", state: "passing", viewport: 390, theme: "light" }])
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer))
+  )
+})
 
 test("toy refs prove required, waived, stale, coverage, legacy and touched decisions", async () => {
   await Effect.runPromise(

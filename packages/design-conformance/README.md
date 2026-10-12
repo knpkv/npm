@@ -76,6 +76,12 @@ an origin, independent route/state inventory, `seed(page, fixture, identity)` an
 `ready(page, identity)` effects. Acquire servers and other resources in the supplied
 scope. `seed` runs before navigation. `ready` runs afterward.
 
+Routes are origin-relative paths with optional query strings and fragments, such
+as `/?range=7d&timeZone=UTC#usage/limits`. Navigation preserves the fragment and
+waits for the adapter's `ready` effect before capture. The adapter must settle
+its hash router and asynchronous UI. Absolute, protocol-relative and backslash
+URLs fail the route schema.
+
 `start(fixture, repository)` must load the live app and its inventory from that
 repository's built package. Base capture supplies the merge-base checkout here;
 a static import of PR application code would invalidate the comparison.
@@ -90,6 +96,12 @@ inside the application. The toy adapter is [`scripts/fixture.ts`](scripts/fixtur
 Both sides use fresh Chromium contexts with a fixed clock, reduced motion,
 UTC/en-US, settled fonts, blurred focus and scroll origin. Control Center's #844
 suite imports these settings and retains its own framing and functional assertions.
+
+The conformance runner waits for native render frames after UUID masking. The
+installed clock fakes ordinary `requestAnimationFrame`; Playwright's RAF polling
+uses its preserved native callback. Full-page dimensions must be nonzero and at
+most 16,384 physical pixels per axis before the screenshot protocol call. This is
+a conservative capture bound, not a layout tolerance.
 
 ## Waivers and reference review
 
