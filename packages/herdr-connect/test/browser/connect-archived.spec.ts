@@ -91,7 +91,7 @@ const fullPage = [
   historical("docs-index", "atlas", 39, "Index rebuilt; search now covers the patterns folder."),
   historical("rev-tokens", "atlas", 40, undefined, "reviewer"),
   historical("fmt-pass", "birch", 41),
-  historical("release-notes", "atlas", 41, "Drafted notes for rly 0.17 and left them in Work.")
+  historical("release-notes", "atlas", 41, "Drafted notes for rly 0.17 and left them in the release PR.")
 ]
 const live = Schema.decodeUnknownSync(ConnectAgent)({
   host: "atlas",
@@ -385,11 +385,45 @@ test("search covers loaded archive pages and keeps unloaded scope explicit", asy
   }
   await search.fill("zzz")
   await expect(page.getByText("No loaded closed agents match \"zzz\" in Archived.", { exact: true })).toBeVisible()
-  await expect(page.getByText("Search covers loaded archived agents only.", { exact: true })).toBeVisible()
+  await expect(page.getByText("Search covers loaded archived agents only", { exact: true })).toBeVisible()
   await page.getByRole("button", { name: "Clear search", exact: true }).click()
   await expect(search).toHaveValue("")
   await expect(rows(page)).toHaveCount(7)
 })
+
+for (const more of [false, true]) {
+  test(`archive no-match paging keeps the query, cursor present=${String(more)}`, async ({ page }) => {
+    await prepare(page)
+    const older = closed("older-worker", "fixture-host", 100)
+    const requests: Array<string | null> = []
+    await page.route("**/v1/connect/archive*", (route) => {
+      const cursor = new URL(route.request().url()).searchParams.get("cursor")
+      requests.push(cursor)
+      return route.fulfill({ json: cursor === null ? pageOf(records, more) : pageOf([older]) })
+    })
+    await mount(page)
+    const search = page.getByRole("searchbox")
+    await search.fill("older")
+    await expect(rows(page)).toHaveCount(0)
+    const showOlder = page.getByRole("button", { name: "Show older", exact: true })
+    if (more) {
+      // Loading older pages remains available during search; the query also filters the appended page.
+      await expect(showOlder).toBeVisible()
+      await expect(page.getByText(`Loads the next ${String(connectArchivePageMaxRecords)}.`, { exact: true }))
+        .toBeVisible()
+      await showOlder.click()
+      await expect(rowNamed(page, "older-worker")).toBeVisible()
+      await expect(rows(page)).toHaveCount(1)
+      await expect(search).toHaveValue("older")
+      expect(requests).toHaveLength(2)
+      expect(requests[1]).not.toBeNull()
+    } else {
+      expect(requests).toEqual([null])
+    }
+    await expect(showOlder).toHaveCount(0)
+    await expect(page.locator(".connect-archive-paging")).toHaveCount(0)
+  })
+}
 
 test("separate closures and a live identity remain distinct; last words render as text", async ({ page }) => {
   await prepare(page)
@@ -478,6 +512,46 @@ for (const fragment of ["", "#details"]) {
 const frames = ["A1", "A2", "A3", "A3-v2", "A4", "A5", "A6"]
 for (const width of [390, 1280]) {
   for (const theme of ["light", "dark"]) {
+    test(`archive search helper spacing ${String(width)} ${theme}`, async ({ page }) => {
+      await prepare(page, width, theme)
+      await archiveRoute(page, pageOf(firstPage, true))
+      await mount(page, theme)
+      await expect(rows(page)).toHaveCount(connectArchivePageMaxRecords)
+      const field = await page.getByRole("searchbox").boundingBox()
+      const helper = await page.locator(".connect-archive-scope").boundingBox()
+      const count = await page.locator(".connect-family-count").boundingBox()
+      const list = await page.locator(".connect-archive-list").boundingBox()
+      assert(field !== null && helper !== null && count !== null && list !== null, "Archive search layout unavailable")
+      // The archive refs put the scope 6px below the field, then retain the directory's 16px rhythm.
+      expect.soft(helper.y - field.y - field.height, "Field-to-scope gap").toBeCloseTo(6, 2)
+      expect.soft(count.y - helper.y - helper.height, "Scope-to-count gap").toBeCloseTo(16, 2)
+      expect.soft(list.y - count.y - count.height, "Count-to-list gap").toBeCloseTo(16, 2)
+    })
+
+    test(`archive no-match copy and Clear search hit area ${String(width)} ${theme}`, async ({ page }) => {
+      await prepare(page, width, theme)
+      await archiveRoute(page, pageOf(firstPage, true))
+      await mount(page, theme)
+      await page.getByRole("searchbox").fill("zzz")
+      await expect(page.locator(".connect-archive-no-match")).toBeVisible()
+      const appearance = await page.getByRole("button", { name: "Clear search", exact: true }).evaluate((button) => {
+        const bounds = button.getBoundingClientRect()
+        const x = bounds.x + bounds.width / 2
+        const panel = button.closest(".connect-archive-no-match")
+        return {
+          height: bounds.height,
+          textSize: panel === null ? null : getComputedStyle(panel).fontSize,
+          // Six pixels on each side turn the 32px visual control into a distinct 44px target.
+          hits: [bounds.y - 5, bounds.y + bounds.height / 2, bounds.y + bounds.height + 5].map((y) =>
+            document.elementFromPoint(x, y)?.closest("button") === button
+          )
+        }
+      })
+      expect.soft(appearance.textSize).toBe("14px")
+      expect.soft(appearance.height).toBeCloseTo(32, 2)
+      expect.soft(appearance.hits).toEqual([true, true, true])
+    })
+
     for (const frame of frames) {
       test(`archived reference ${frame} ${String(width)} ${theme}`, async ({ page }, info) => {
         await prepare(page, width, theme)
@@ -504,6 +578,7 @@ for (const width of [390, 1280]) {
         if (frame === "A2") {
           await expect(page.getByText("No closed agents in the last 90 days", { exact: true })).toBeVisible()
           await expect(page.locator(".connect-archive-empty")).toHaveCSS("border-radius", "14px")
+          await expect(page.locator(".connect-archive-empty")).toHaveCSS("font-size", "14px")
         } else if (frame === "A3") {
           await expect(page.getByText("Loading archived agents...", { exact: true })).toBeVisible()
           await expect(page.locator(".connect-archive-skeleton")).toHaveCount(4)
@@ -529,7 +604,7 @@ for (const width of [390, 1280]) {
           await expect(page.getByText("No loaded closed agents match \"zzz\" in Archived.", { exact: true }))
             .toBeVisible()
           await expect(page.getByRole("button", { name: "Clear search", exact: true })).toBeVisible()
-          await expect(page.getByText("Search covers loaded archived agents only.", { exact: true })).toBeVisible()
+          await expect(page.getByText("Search covers loaded archived agents only", { exact: true })).toBeVisible()
           await expect(page.locator(".connect-archive-empty")).toHaveCSS("border-radius", "10px")
           const clear = page.getByRole("button", { name: "Clear search", exact: true })
           await expect(clear).toHaveCSS("border-radius", "6px")
@@ -540,6 +615,9 @@ for (const width of [390, 1280]) {
           if (clearBox !== null && emptyBox !== null) expect(clearBox.width).toBeLessThan(emptyBox.width / 2)
         } else if (frame === "A5") {
           await expect(rows(page)).toHaveCount(64)
+          await expect(rowNamed(page, "release-notes").locator(".connect-archive-last-words")).toHaveText(
+            "Drafted notes for rly 0.17 and left them in the release PR."
+          )
           await expect(page.getByText("64+ closed agents in the last 90 days", { exact: true })).toBeVisible()
           const helper = page.getByText(`Loads the next ${String(connectArchivePageMaxRecords)}.`, { exact: true })
           // Scroll both owners: desktop retains the directory scroller; phone scrolls the document.
@@ -585,7 +663,7 @@ for (const width of [390, 1280]) {
         } else {
           await expect(rows(page)).toHaveCount(connectArchivePageMaxRecords)
           await expect(page.getByText("64+ closed agents in the last 90 days", { exact: true })).toBeVisible()
-          await expect(page.getByText("Search covers loaded archived agents only.", { exact: true })).toBeVisible()
+          await expect(page.getByText("Search covers loaded archived agents only", { exact: true })).toBeVisible()
           await expect(rowNamed(page, "rev-auth").locator(".connect-archive-metadata")).toHaveText(
             "atlas, Reviewer, closed 3h ago"
           )

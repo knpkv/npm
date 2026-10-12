@@ -210,25 +210,27 @@ export const ConnectArchiveSurface = ({
               </div>
             ) : (
               <>
-                <label className="connect-search connect-archive-search">
-                  <span>Find archived agent</span>
-                  <Icon decorative name="search" size="small" />
-                  <input
-                    autoComplete="off"
-                    id="connect-agent-search"
-                    onChange={(event) => setQuery(event.currentTarget.value)}
-                    placeholder="Name, host, kind..."
-                    ref={search}
-                    type="search"
-                    value={query}
-                  />
-                  <kbd aria-hidden="true" className="connect-search-shortcut">
-                    Ctrl K
-                  </kbd>
-                </label>
-                {page.nextCursor === null ? null : (
-                  <small className="connect-archive-scope">Search covers loaded archived agents only.</small>
-                )}
+                <div className="connect-archive-search-group">
+                  <label className="connect-search connect-archive-search">
+                    <span>Find archived agent</span>
+                    <Icon decorative name="search" size="small" />
+                    <input
+                      autoComplete="off"
+                      id="connect-agent-search"
+                      onChange={(event) => setQuery(event.currentTarget.value)}
+                      placeholder="Name, host, kind..."
+                      ref={search}
+                      type="search"
+                      value={query}
+                    />
+                    <kbd aria-hidden="true" className="connect-search-shortcut">
+                      Ctrl K
+                    </kbd>
+                  </label>
+                  {page.nextCursor === null ? null : (
+                    <small className="connect-archive-scope">Search covers loaded archived agents only</small>
+                  )}
+                </div>
                 {filtered.length === 0 ? (
                   <div className="connect-archive-empty connect-archive-no-match">
                     <p>
@@ -236,12 +238,12 @@ export const ConnectArchiveSurface = ({
                       in Archived.
                     </p>
                     <Button
-                      className="connect-archive-control"
+                      className="connect-archive-control connect-scope-clear"
                       onClick={() => {
                         setQuery("")
                         search.current?.focus()
                       }}
-                      size="compact"
+                      size="dense"
                       variant="secondary"
                     >
                       Clear search

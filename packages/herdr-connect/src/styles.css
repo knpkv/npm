@@ -3603,6 +3603,15 @@
     min-block-size: 0;
     padding-block: var(--rly-space-16) var(--rly-space-24);
   }
+  .connect-archive-search-group {
+    display: grid;
+    gap: var(--rly-space-6);
+    min-inline-size: 0;
+  }
+  .connect-archive-search {
+    padding-block-end: 0;
+    position: static;
+  }
   .connect-archive-subtitle,
   .connect-archive-loading,
   .connect-archive-scope {
@@ -3675,8 +3684,10 @@
   .connect-archive-empty {
     align-items: start;
     display: grid;
+    font-size: 14px;
     gap: var(--rly-space-12);
     justify-items: start;
+    line-height: 20px;
   }
   .connect-archive-no-match {
     border-radius: var(--rly-radius-field);
