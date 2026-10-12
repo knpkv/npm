@@ -157,3 +157,23 @@ test("design conformance publishes the fixture explanation before its deliberate
     }).pipe(Effect.scoped)
   )
 })
+
+test("manual design conformance uses main while PR runs retain their base SHA in every comparison", async () => {
+  const workflow = parseDocument(
+    await runtime.runPromise(
+      FileSystem.FileSystem.pipe(
+        Effect.flatMap((fs) =>
+          fs.readFileString(fileURLToPath(new URL("../.github/workflows/design-conformance.yml", import.meta.url)))
+        )
+      )
+    )
+  ).toJS()
+  const discover = workflow.jobs.products.steps.find((step) => step.id === "matrix")
+  const waivers = workflow.jobs.products.steps.find((step) => step.name === "Flag waiver changes for review")
+  for (const base of [discover.env.DESIGN_BASE_REF, waivers.env.BASE_REF, workflow.jobs.product.env.DESIGN_BASE_REF]) {
+    assert.equal(base, "${{ github.event.pull_request.base.sha || 'origin/main' }}")
+  }
+  for (const job of [workflow.jobs.products, workflow.jobs.product]) {
+    assert.equal(job.steps.find((step) => step.uses?.startsWith("actions/checkout@")).with["fetch-depth"], 0)
+  }
+})

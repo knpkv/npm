@@ -12,6 +12,37 @@ import { runConformance } from "../src/runner.js"
 import { serveFiles } from "../src/server.js"
 import { bodyTransferServer, localServer, readyHtml, testLive, testReferences } from "./fixtures.js"
 
+for (const extension of ["mjs", "js"]) {
+  test(`hashed .${extension} module scripts execute imports and signal reference readiness`, async () => {
+    test.setTimeout(10_000)
+    await Effect.runPromise(
+      Effect.gen(function*() {
+        const fs = yield* FileSystem.FileSystem
+        const entry = `boot.${extension}`
+        const refs = yield* testReferences(
+          `<html><body><main data-region=content>Waiting</main><script type=module src='/${entry}?cache=fixture'></script></body></html>`,
+          {
+            [entry]:
+              "import{heading}from './helper.js';document.querySelector('main').textContent=heading;document.documentElement.dataset.designReady='true'",
+            "helper.js": "export const heading='Fixture workspace'"
+          }
+        )
+        const origin = yield* serveFiles(refs.root, {
+          "/page.html": "page.html",
+          [`/${entry}`]: entry,
+          "/helper.js": "helper.js"
+        })
+        const result = yield* runConformance(refs, { output: yield* fs.makeTempDirectoryScoped() }).pipe(
+          Effect.provideService(LiveProduct, testLive(origin))
+        )
+        expect(result?.passed).toBe(true)
+        expect(result?.findings).toEqual([])
+        expect(result?.shots).toHaveLength(1)
+      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer))
+    )
+  })
+}
+
 for (const mode of ["truncated", "cancelled", "complete"]) {
   test(`${mode} 200 response bodies settle before the reference context closes`, async ({ browser }) => {
     // Only the regression deadline bounds OLD code's deadlock; production settlement has no timeout.

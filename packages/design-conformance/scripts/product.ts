@@ -7,7 +7,28 @@ import type { StartProduct } from "../src/live.js"
 import { LiveProduct } from "../src/live.js"
 import { loadReferences } from "../src/references.js"
 import { runConformance } from "../src/runner.js"
-import { InvalidContract, type Manifest } from "../src/schema.js"
+import { InvalidContract, type Manifest, RunnerFailure } from "../src/schema.js"
+
+/** Existing products retain their package until a migration can preserve the previous live inventory. */
+export const baseCaptureMode = Effect.fn("DesignConformance.baseCaptureMode")(
+  function*(current: Manifest, base: ReadonlyArray<Manifest>, packageExists: boolean) {
+    const previous = base.find((manifest) => manifest.product === current.product)
+    if (previous !== undefined && previous.live.package !== current.live.package) {
+      return yield* new RunnerFailure({
+        detail:
+          `Existing product ${current.product} changed live.package from ${previous.live.package} to ${current.live.package}; package migrations must preserve the previous live inventory`
+      })
+    }
+    if (packageExists) return "capture"
+    if (previous !== undefined) {
+      return yield* new RunnerFailure({
+        detail:
+          `Existing product ${current.product} has no merge-base package ${current.live.package}; cannot discard its previous live inventory`
+      })
+    }
+    return "new"
+  }
+)
 
 const Adapter = Schema.Struct({ start: Schema.declare((value): value is StartProduct => Predicate.isFunction(value)) })
 

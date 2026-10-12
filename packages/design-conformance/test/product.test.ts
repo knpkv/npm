@@ -1,8 +1,54 @@
 import { expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 
-import { isReferenceOnlyChange } from "../scripts/product.js"
-import { manifest } from "./models.js"
+import { baseCaptureMode, isReferenceOnlyChange } from "../scripts/product.js"
+import { coverageFailures, shotKey } from "../src/compare.js"
+import { identity, manifest, state } from "./models.js"
+
+it.effect("existing product package moves cannot discard previously captured deleted states", () =>
+  Effect.gen(function*() {
+    const moved = { ...manifest, live: { package: "@knpkv/moved", adapter: "packages/moved/scripts/adapter.ts" } }
+    const deleted = { ...identity, state: "removed" }
+    const base = { ...manifest, states: [...manifest.states, { ...state, state: deleted.state }] }
+    const inventory = { routes: [state.route], states: [state] }
+    const captured = new Set([shotKey(identity)])
+    expect(coverageFailures(moved, inventory, captured, [])).toEqual([])
+    expect(coverageFailures(moved, inventory, captured, [identity, deleted])).toMatchObject([{
+      ...deleted,
+      rule: "coverage",
+      detail: "Previously captured live state was removed"
+    }])
+    for (const packageExists of [true, false]) {
+      expect(yield* baseCaptureMode(moved, [base], packageExists).pipe(Effect.result)).toMatchObject({
+        _tag: "Failure",
+        failure: {
+          _tag: "RunnerFailure",
+          detail:
+            "Existing product toy changed live.package from @knpkv/design-conformance to @knpkv/moved; package migrations must preserve the previous live inventory"
+        }
+      })
+    }
+  }))
+
+it.effect("an existing product with its unchanged package missing on base cannot become new", () =>
+  Effect.gen(function*() {
+    expect(yield* baseCaptureMode(manifest, [manifest], false).pipe(Effect.result)).toMatchObject({
+      _tag: "Failure",
+      failure: {
+        _tag: "RunnerFailure",
+        detail:
+          "Existing product toy has no merge-base package @knpkv/design-conformance; cannot discard its previous live inventory"
+      }
+    })
+  }))
+
+it.effect("new products may lack a base package while available legacy apps still get captured", () =>
+  Effect.gen(function*() {
+    expect(yield* baseCaptureMode(manifest, [], false)).toBe("new")
+    expect(yield* baseCaptureMode(manifest, [{ ...manifest, product: "other" }], false)).toBe("new")
+    expect(yield* baseCaptureMode(manifest, [], true)).toBe("capture")
+    expect(yield* baseCaptureMode(manifest, [manifest], true)).toBe("capture")
+  }))
 
 it.effect("only a nonempty refs-only diff exempts states from touched enforcement", () =>
   Effect.sync(() => {

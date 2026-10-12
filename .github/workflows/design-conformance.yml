@@ -28,11 +28,11 @@ jobs:
       - name: Discover reference products
         id: matrix
         env:
-          DESIGN_BASE_REF: ${{ github.event.pull_request.base.sha || github.sha }}
+          DESIGN_BASE_REF: ${{ github.event.pull_request.base.sha || 'origin/main' }}
         run: pnpm --filter @knpkv/design-conformance exec tsx scripts/matrix.ts
       - name: Flag waiver changes for review
         env:
-          BASE_REF: ${{ github.event.pull_request.base.sha || github.sha }}
+          BASE_REF: ${{ github.event.pull_request.base.sha || 'origin/main' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -60,7 +60,7 @@ jobs:
     env:
       PRODUCT: ${{ matrix.product }}
       PRODUCT_PACKAGE: ${{ matrix.package }}
-      DESIGN_BASE_REF: ${{ github.event.pull_request.base.sha || github.sha }}
+      DESIGN_BASE_REF: ${{ github.event.pull_request.base.sha || 'origin/main' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:

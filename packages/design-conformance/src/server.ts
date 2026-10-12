@@ -24,7 +24,7 @@ export const serveFiles = Effect.fn("DesignConformance.serveFiles")(
             HttpServerResponse.uint8Array(body, {
               contentType: file.endsWith(".html")
                 ? "text/html"
-                : file.endsWith(".js")
+                : file.endsWith(".js") || file.endsWith(".mjs")
                 ? "text/javascript"
                 : file.endsWith(".css")
                 ? "text/css"

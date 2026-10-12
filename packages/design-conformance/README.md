@@ -52,7 +52,11 @@ merge-base capture by more than the #844 0.1% threshold, including size changes.
 The PR's refs, fixture and adapter drive both captures. During onboarding, the base
 app is captured even when its checkout has no refs or gate package. A state is new
 only when absent from the base live inventory. A missing base live package means
-all current states are new. Ref-only PRs leave states untouched, while coverage,
+all current states are new only for a product with no base manifest. For an existing
+product, a missing base package fails. Every existing product's `live.package` change
+also fails, even if the destination package exists on the base. Package migrations
+need a path that preserves the previous package's live inventory.
+Ref-only PRs leave states untouched, while coverage,
 integrity and waiver checks still apply. A missing base capture file for an indexed
 shot is an infrastructure failure. Removed live states fail coverage.
 

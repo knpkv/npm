@@ -14,7 +14,7 @@ import { readJson } from "../src/references.js"
 import { BaseComparison, Manifest, Name, RunnerFailure } from "../src/schema.js"
 import { discoverReferenceManifests, gitChildEnvironment } from "./discovery.js"
 import { checkBaseMemory } from "./memory.js"
-import { captureBaseProduct, isReferenceOnlyChange } from "./product.js"
+import { baseCaptureMode, captureBaseProduct, isReferenceOnlyChange } from "./product.js"
 
 /** Capture merge-base application code using the PR's gate, refs and adapter. */
 const program = Effect.gen(function*() {
@@ -56,7 +56,7 @@ const program = Effect.gen(function*() {
   )
   const packageFile = `packages/${manifest.live.package.slice("@knpkv/".length)}/package.json`
   const exists = yield* run(["git", "ls-tree", "--name-only", revision, "--", packageFile])
-  if (exists.length === 0) {
+  if ((yield* baseCaptureMode(manifest, manifests.base, exists.length > 0)) === "new") {
     yield* fs.writeFileString(path.join(output, "captures.json"), "[]")
     yield* Console.log(`${product}: no merge-base live package; live states are new`)
     return
