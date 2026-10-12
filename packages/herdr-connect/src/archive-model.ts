@@ -18,6 +18,9 @@ export const archiveCountCopy = (page: ConnectArchivePage): string =>
     page.agents.length === 1 && page.nextCursor === null ? "agent" : "agents"
   } in the last ${String(connectArchiveWindowDays)} days`
 
+/** Sentence copy names a kind with an initial capital; the stored kind and details field stay unchanged. */
+export const archiveKindLabel = (kind: string): string => `${kind.charAt(0).toLocaleUpperCase("en-US")}${kind.slice(1)}`
+
 /** Search only the loaded record fields promised by the directory, excluding words and close state. */
 export const archiveMatchesQuery = (agent: ArchivedConnectAgent, query: string): boolean => {
   const normalized = query.trim().toLocaleLowerCase("en-US")

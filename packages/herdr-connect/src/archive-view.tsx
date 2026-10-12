@@ -11,6 +11,7 @@ import {
   appendArchivePage,
   archiveClosedAge,
   archiveCountCopy,
+  archiveKindLabel,
   archiveMatchesQuery,
   archivedAgentKey,
   archiveTimestamp
@@ -149,7 +150,12 @@ export const ConnectArchiveSurface = ({
         <div>
           {page === null ? <h2>Couldn't load archived agents</h2> : <p>Couldn't load older archived agents.</p>}
           {page === null ? <p>The hub didn't return the archive. Active agents aren't affected.</p> : null}
-          <Button onClick={() => request(page?.nextCursor ?? null)} size="compact" variant="secondary">
+          <Button
+            className="connect-archive-control"
+            onClick={() => request(page?.nextCursor ?? null)}
+            size="compact"
+            variant="secondary"
+          >
             Retry
           </Button>
         </div>
@@ -224,12 +230,13 @@ export const ConnectArchiveSurface = ({
                   <small className="connect-archive-scope">Search covers loaded archived agents only.</small>
                 )}
                 {filtered.length === 0 ? (
-                  <div className="connect-archive-empty">
+                  <div className="connect-archive-empty connect-archive-no-match">
                     <p>
                       {page.nextCursor === null ? "No closed agents" : "No loaded closed agents"} match "{query.trim()}"
                       in Archived.
                     </p>
                     <Button
+                      className="connect-archive-control"
                       onClick={() => {
                         setQuery("")
                         search.current?.focus()
@@ -261,8 +268,8 @@ export const ConnectArchiveSurface = ({
                           <span className="connect-archive-row-copy">
                             <strong>{agent.name}</strong>
                             <small className="connect-archive-metadata">
-                              <span>{agent.kind}</span> <span>{agent.host}</span>{" "}
-                              <span>closed {archiveClosedAge(agent.closedAt, now)}</span>
+                              {agent.host}, {archiveKindLabel(agent.kind)}, closed{" "}
+                              {archiveClosedAge(agent.closedAt, now)}
                             </small>
                             {agent.lastWords === undefined ? null : (
                               <span className="connect-archive-last-words">{agent.lastWords.text}</span>
@@ -277,7 +284,7 @@ export const ConnectArchiveSurface = ({
                 {page.nextCursor === null || state._tag === "failed" ? null : (
                   <div className="connect-archive-paging">
                     <Button
-                      className="connect-archive-more"
+                      className="connect-archive-more connect-archive-control"
                       disabled={state._tag === "loading"}
                       onClick={() => request(page.nextCursor)}
                       size="compact"
@@ -304,7 +311,7 @@ export const ConnectArchiveSurface = ({
             <Sheet.Content
               className="connect-stage-sheet connect-archive-stage"
               closeLabel="Close"
-              description={`${selected.kind} on ${selected.host}, archived, read-only`}
+              description={`${archiveKindLabel(selected.kind)} on ${selected.host}, archived, read-only`}
               title={selected.name}
             >
               <Sheet.Body className="connect-stage connect-archive-stage-body">

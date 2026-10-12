@@ -3563,7 +3563,7 @@
     margin-block-end: 0;
   }
   .connect-directory-switch a {
-    border-radius: var(--rly-radius-field);
+    border-radius: var(--rly-radius-tag);
     color: var(--rly-color-text-2);
     display: inline-flex;
     font-size: var(--rly-type-meta-size);
@@ -3613,7 +3613,7 @@
   .connect-archive-list {
     background: var(--rly-color-surface-1);
     border: 1px solid var(--rly-color-border-1);
-    border-radius: var(--rly-radius-group);
+    border-radius: var(--rly-radius-field);
   }
   .connect-archive-agent {
     align-items: center;
@@ -3631,13 +3631,13 @@
     text-align: start;
   }
   .connect-archive-agent:first-child {
-    border-start-start-radius: var(--rly-radius-group);
-    border-start-end-radius: var(--rly-radius-group);
+    border-start-start-radius: var(--rly-radius-field);
+    border-start-end-radius: var(--rly-radius-field);
   }
   .connect-archive-agent:last-child {
     border-block-end: 0;
-    border-end-start-radius: var(--rly-radius-group);
-    border-end-end-radius: var(--rly-radius-group);
+    border-end-start-radius: var(--rly-radius-field);
+    border-end-end-radius: var(--rly-radius-field);
   }
   .connect-archive-agent .connect-creature {
     inline-size: 32px;
@@ -3656,11 +3656,6 @@
     font-size: var(--rly-type-meta-size);
     line-height: var(--rly-type-meta-line-height);
   }
-  .connect-archive-metadata {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--rly-space-8);
-  }
   .connect-archive-last-words {
     color: var(--rly-color-text-2);
     font-size: 14px;
@@ -3674,7 +3669,7 @@
   .connect-archive-error {
     background: var(--rly-color-surface-1);
     border: 1px solid var(--rly-color-border-1);
-    border-radius: var(--rly-radius-group);
+    border-radius: var(--rly-radius-control);
     padding: var(--rly-space-16);
   }
   .connect-archive-empty {
@@ -3682,6 +3677,12 @@
     display: grid;
     gap: var(--rly-space-12);
     justify-items: start;
+  }
+  .connect-archive-no-match {
+    border-radius: var(--rly-radius-field);
+  }
+  .connect-archive-control {
+    border-radius: var(--rly-radius-tag);
   }
   .connect-archive-error {
     align-items: start;
@@ -3736,10 +3737,10 @@
     gap: var(--rly-space-12);
   }
   .connect-archive-skeleton {
-    background: var(--rly-color-surface-2);
+    background: var(--rly-color-surface-3);
     block-size: 72px;
     border: 1px solid var(--rly-color-border-1);
-    border-radius: var(--rly-radius-group);
+    border-radius: var(--rly-radius-control);
   }
   .connect-archive-stage .connect-archive-hero {
     background: var(--rly-color-surface-2);

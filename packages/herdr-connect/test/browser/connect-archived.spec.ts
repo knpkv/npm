@@ -65,6 +65,14 @@ const records = [
   closed("coord-old", "birch", 48, "Handed lint-sweep to lint-fix and rev-lint.", "coordinator"),
   closed("cedar-probe", "cedar", 49, "cedar stopped answering; closing the probe.")
 ]
+/** A1/A6 show a full loaded page whose cursor promises more pages, with the reference rows first. */
+const firstPage = [
+  ...records,
+  ...Array.from(
+    { length: connectArchivePageMaxRecords - records.length },
+    (_, index) => closed(`older-worker-${String(index + 1)}`, "fixture-host", index + 50)
+  )
+]
 const historical = (name: string, host: string, days: number, text?: string, kind = "worker") => {
   const fixture = closed(name, host, 1, text, kind)
   const fields = { ...fixture, firstSeenAt: now - 50 * 86_400_000, closedAt: now - days * 86_400_000 }
@@ -320,6 +328,10 @@ test("archive view survives Back and refresh while Active remains the default", 
   await page.getByRole("link", { name: "Archived", exact: true }).click()
   await expect(page).toHaveURL(/view=archived/)
   await expect(rows(page)).toHaveCount(7)
+  // A complete no-cursor page remains exact; A1's paginated capture must not replace this case.
+  await expect(page.getByText("7 closed agents in the last 90 days", { exact: true })).toBeVisible()
+  await expect(page.locator(".connect-archive-scope")).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Show older", exact: true })).toHaveCount(0)
   await page.reload()
   await expect(rows(page)).toHaveCount(7)
   await page.getByRole("link", { name: "Active", exact: true }).click()
@@ -475,25 +487,52 @@ for (const width of [390, 1280]) {
         } else {
           await archiveRoute(
             page,
-            frame === "A2" ? pageOf([]) : frame === "A5" ? pageOf(fullPage, true) : pageOf(records)
+            frame === "A2"
+              ? pageOf([])
+              : frame === "A5"
+              ? pageOf(fullPage, true)
+              : frame === "A1" || frame === "A6"
+              ? pageOf(firstPage, true)
+              : pageOf(records)
           )
         }
         await mount(page, theme)
         await expect(page.getByRole("link", { name: "Archived", exact: true })).toHaveAttribute("aria-current", "page")
+        // Check the tag corner before A4 opens its modal and makes the directory switch inert.
+        await expect(page.getByRole("link", { name: "Archived", exact: true })).toHaveCSS("border-radius", "6px")
         if (frame === "A1") await expect(page.locator("header .connect-directory-switch")).toHaveCount(0)
         if (frame === "A2") {
           await expect(page.getByText("No closed agents in the last 90 days", { exact: true })).toBeVisible()
+          await expect(page.locator(".connect-archive-empty")).toHaveCSS("border-radius", "14px")
         } else if (frame === "A3") {
           await expect(page.getByText("Loading archived agents...", { exact: true })).toBeVisible()
           await expect(page.locator(".connect-archive-skeleton")).toHaveCount(4)
+          const skeleton = page.locator(".connect-archive-skeleton").first()
+          // Ref A3 uses surface-3, #e8e9ed / #282a31. Resolve through Canvas so OKLCH is compared as paint.
+          const fill = await skeleton.evaluate((node) => {
+            const canvas = document.createElement("canvas")
+            const context = canvas.getContext("2d")
+            if (context === null) return null
+            context.fillStyle = getComputedStyle(node).backgroundColor
+            context.fillRect(0, 0, 1, 1)
+            return [...context.getImageData(0, 0, 1, 1).data]
+          })
+          expect(fill).toEqual(theme === "light" ? [232, 233, 237, 255] : [40, 42, 49, 255])
+          await expect(skeleton).toHaveCSS("border-radius", "14px")
         } else if (frame === "A3-v2") {
           await expect(page.getByText("Couldn't load archived agents", { exact: true })).toBeVisible()
           await expect(page.getByRole("button", { name: "Retry", exact: true })).toBeVisible()
+          await expect(page.locator(".connect-archive-error")).toHaveCSS("border-radius", "14px")
+          await expect(page.getByRole("button", { name: "Retry", exact: true })).toHaveCSS("border-radius", "6px")
         } else if (frame === "A6") {
           await page.getByRole("searchbox").fill("zzz")
-          await expect(page.getByText("No closed agents match \"zzz\" in Archived.", { exact: true })).toBeVisible()
+          await expect(page.getByText("No loaded closed agents match \"zzz\" in Archived.", { exact: true }))
+            .toBeVisible()
           await expect(page.getByRole("button", { name: "Clear search", exact: true })).toBeVisible()
+          await expect(page.getByText("Search covers loaded archived agents only.", { exact: true })).toBeVisible()
+          await expect(page.locator(".connect-archive-empty")).toHaveCSS("border-radius", "10px")
           const clear = page.getByRole("button", { name: "Clear search", exact: true })
+          await expect(clear).toHaveCSS("border-radius", "6px")
           const clearBox = await clear.boundingBox()
           const emptyBox = await page.locator(".connect-archive-empty").boundingBox()
           expect(clearBox).not.toBeNull()
@@ -503,12 +542,20 @@ for (const width of [390, 1280]) {
           await expect(rows(page)).toHaveCount(64)
           await expect(page.getByText("64+ closed agents in the last 90 days", { exact: true })).toBeVisible()
           const helper = page.getByText(`Loads the next ${String(connectArchivePageMaxRecords)}.`, { exact: true })
+          // Scroll both owners: desktop retains the directory scroller; phone scrolls the document.
+          await page.locator(".connect-archive-directory").evaluate((node) => {
+            node.scrollTop = node.scrollHeight
+          })
+          await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight))
           await helper.scrollIntoViewIfNeeded()
+          await expect(page.getByRole("button", { name: "Show older", exact: true })).toHaveCSS("border-radius", "6px")
           await expect(helper).toBeVisible()
           await expect(page.getByRole("button", { name: "Show older", exact: true })).toBeVisible()
         } else if (frame === "A4") {
           await rowNamed(page, "rev-auth").click()
           const sheet = page.getByRole("dialog")
+          await expect(sheet).toHaveAccessibleDescription("Reviewer on atlas, archived, read-only")
+          await expect(sheet.locator("dt").filter({ hasText: /^Kind$/ }).locator("+ dd")).toHaveText("reviewer")
           await expect(sheet).toContainText("First seen 9 Oct 2026 14:02 → Closed 11 Oct 2026 09:40")
           await expect(sheet).toContainText("State at close")
           await expect(sheet).toContainText("Done")
@@ -536,16 +583,18 @@ for (const width of [390, 1280]) {
           await expectClosed(sheet.locator("svg.connect-creature"))
           await page.emulateMedia({ forcedColors: "none", reducedMotion: "reduce" })
         } else {
-          await expect(rows(page)).toHaveCount(7)
-          await expect(page.getByText("7 closed agents in the last 90 days", { exact: true })).toBeVisible()
-          await expect(rowNamed(page, "rev-auth").locator(".connect-archive-metadata > span")).toHaveText([
-            "reviewer",
-            "atlas",
-            "closed 3h ago"
-          ])
+          await expect(rows(page)).toHaveCount(connectArchivePageMaxRecords)
+          await expect(page.getByText("64+ closed agents in the last 90 days", { exact: true })).toBeVisible()
+          await expect(page.getByText("Search covers loaded archived agents only.", { exact: true })).toBeVisible()
+          await expect(rowNamed(page, "rev-auth").locator(".connect-archive-metadata")).toHaveText(
+            "atlas, Reviewer, closed 3h ago"
+          )
+          await expect(page.locator(".connect-archive-list")).toHaveCSS("border-radius", "10px")
           await expect(rowNamed(page, "lint-sub")).not.toContainText("Last words")
           await page.emulateMedia({ reducedMotion: "no-preference" })
-          for (const creature of await rows(page).locator("svg.connect-creature").all()) await expectClosed(creature)
+          for (const creature of (await rows(page).locator("svg.connect-creature").all()).slice(0, records.length)) {
+            await expectClosed(creature)
+          }
           const lastWords = rowNamed(page, "rev-auth").locator(".connect-archive-last-words")
           const truncation = await lastWords.evaluate((node) => ({
             whiteSpace: getComputedStyle(node).whiteSpace,
@@ -556,11 +605,21 @@ for (const width of [390, 1280]) {
           await page.emulateMedia({ reducedMotion: "reduce" })
         }
         await page.evaluate(() => document.fonts.ready)
+        const path = info.outputPath(`fidelity/connect-${frame}-${String(width)}-${theme}.png`)
         if (frame === "A5") {
-          await page.screenshot({ path: info.outputPath(`fidelity/connect-${frame}-${String(width)}-${theme}.png`) })
-        } else {await page.locator(frame === "A4" ? ".connect-archive-stage" : "#fleet-connect-root").screenshot({
-            path: info.outputPath(`fidelity/connect-${frame}-${String(width)}-${theme}.png`)
-          })}
+          const tail = await rowNamed(page, "deps-audit").boundingBox()
+          const helper = await page.locator(".connect-archive-paging small").boundingBox()
+          assert(tail !== null && helper !== null, "Archive tail capture bounds unavailable")
+          // The ref frames only the real list end, with 20px above and 32px below its tail content.
+          const top = Math.max(0, tail.y - 20)
+          await page.screenshot({ path, clip: { x: 1, y: top, width, height: helper.y + helper.height + 32 - top } })
+        } else if (frame === "A1" || (frame === "A4" && width === 1280)) {
+          // A1 is the visible first page, not a full-height image of all 64 loaded rows.
+          // Desktop A4 includes the dimmed directory; phone A4 frames the sheet alone.
+          await page.screenshot({ path })
+        } else {
+          await page.locator(frame === "A4" ? ".connect-archive-stage" : "#fleet-connect-root").screenshot({ path })
+        }
         expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width + 2)
         if (frame === "A3-v2") {
           await archiveRoute(page, pageOf(records))
