@@ -1,53 +1,19 @@
-import { collectBoundedText } from "@knpkv/bounded-io"
 import type { ConnectPostBody } from "@knpkv/herdr-connect"
 import { Conflict, ConnectPost, Denied, InvalidReport, Unavailable, UnboundAgent } from "@knpkv/herdr-connect"
+import { type ConnectSelfBody } from "@knpkv/herdr-connect/model"
 import { decodeBoundedResponseJson, loadConfiguration } from "@knpkv/herdr-fleet"
-import { AgentStableId, AgentWorkerIdentity, type HostConfiguration } from "@knpkv/herdr-fleet/model"
+import { type HostConfiguration } from "@knpkv/herdr-fleet/model"
 import { Config, Console, Crypto, Effect, Option, Schema } from "effect"
 import { Argument, Command, Flag } from "effect/cli"
 import { HttpClient, HttpClientRequest } from "effect/http"
-import { ChildProcess, ChildProcessSpawner } from "effect/process"
+import type { Mutable } from "effect/Types"
 import { fleetConfigPath } from "./config-path.js"
 import { decodeRelayPostBody } from "./relay-post-validation.js"
+import { resolveReportingAgent } from "./relay-report-identity.js"
+import { decodeRelaySelfBody, type RelaySelfOptions } from "./relay-self-validation.js"
+import { reportRelaySelf } from "./relay-self.js"
 
-const ReportingPane = Schema.fromJsonString(Schema.Struct({
-  result: Schema.Struct({
-    agent: Schema.Struct({
-      agent: Schema.String,
-      pane_id: AgentWorkerIdentity.fields.paneId,
-      tokens: Schema.Struct({ agent_id: AgentStableId, lineage_version: Schema.Literal("hostd.agent-lineage.v1") })
-    })
-  })
-}))
-
-/** Resolve only the current pane's stable identity. There is no caller-supplied agent override. */
-export const resolveReportingAgent = Effect.fn("Relay.resolveReportingAgent")(
-  function*(command: string, paneId: string) {
-    yield* Schema.decodeUnknownEffect(AgentWorkerIdentity.fields.paneId)(paneId).pipe(
-      Effect.mapError(() => new UnboundAgent({ agentId: "current-pane" }))
-    )
-    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-    return yield* Effect.scoped(Effect.gen(function*() {
-      const handle = yield* spawner.spawn(ChildProcess.make(command, ["agent", "get", paneId])).pipe(
-        Effect.mapError(() => new Unavailable({ operation: "post.identity" }))
-      )
-      const [output, , exitCode] = yield* Effect.all([
-        collectBoundedText(handle.stdout, 64 * 1024),
-        collectBoundedText(handle.stderr, 64 * 1024),
-        handle.exitCode
-      ], { concurrency: "unbounded" }).pipe(Effect.mapError(() => new Unavailable({ operation: "post.identity" })))
-      if (exitCode !== ChildProcessSpawner.ExitCode(0)) return yield* new UnboundAgent({ agentId: "current-pane" })
-      const parsed = yield* Schema.decodeUnknownEffect(ReportingPane)(output).pipe(
-        Effect.mapError(() => new UnboundAgent({ agentId: "current-pane" }))
-      )
-      if (parsed.result.agent.pane_id !== paneId) return yield* new UnboundAgent({ agentId: "current-pane" })
-      return parsed.result.agent.tokens.agent_id
-    })).pipe(Effect.timeoutOrElse({
-      duration: "3 seconds",
-      orElse: () => Effect.fail(new Unavailable({ operation: "post.identity.timeout" }))
-    }))
-  }
-)
+export { resolveReportingAgent } from "./relay-report-identity.js"
 
 const ReportFailure = Schema.Union([
   Schema.Struct({ error: Schema.Literal("InvalidReport"), detail: Schema.String }),
@@ -153,5 +119,31 @@ export const relayPostCommand = makeRelayPostCommand(
     )
     const post = yield* submitRelayPost(config, paneId, body)
     yield* Console.log(JSON.stringify(post))
+  })
+)
+
+/** Parse and normalize self-state before touching configuration, identity or the network. */
+export const makeRelaySelfCommand = <A, E, R>(report: (body: ConnectSelfBody) => Effect.Effect<A, E, R>) =>
+  Command.make(
+    "me",
+    {
+      mood: Flag.String("mood").pipe(Flag.optional),
+      say: Flag.String("say").pipe(Flag.optional),
+      accessory: Flag.String("accessory").pipe(Flag.optional)
+    },
+    Effect.fn("Relay.me")(function*({ accessory, mood, say }) {
+      const input: Mutable<RelaySelfOptions> = {}
+      if (Option.isSome(mood)) input.mood = mood.value
+      if (Option.isSome(say)) input.say = say.value
+      if (Option.isSome(accessory)) input.accessory = accessory.value
+      const body = yield* decodeRelaySelfBody(input)
+      yield* report(body)
+    })
+  ).pipe(Command.withDescription("Update this agent's creature: mood, words (1-140 characters) and accessory"))
+
+export const relaySelfCommand = makeRelaySelfCommand(
+  Effect.fn("Relay.printSelf")(function*(body: ConnectSelfBody) {
+    const self = yield* reportRelaySelf(body)
+    yield* Console.log(JSON.stringify(self))
   })
 )

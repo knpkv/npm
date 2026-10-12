@@ -6,13 +6,15 @@ import type {
   TerminalBusyError,
   TerminalConnector,
   TerminalProtocolError,
-  TerminalTransportError
+  TerminalTransportError,
+  TooManySelfUpdates
 } from "@knpkv/herdr-connect"
 import {
   AgentActivityStore,
   AgentArchiveStore,
   AgentPostStore,
   AgentRelationshipStore,
+  ConnectAgent,
   ConnectAgentCursor,
   ConnectArchiveCursor,
   ConnectPost,
@@ -147,6 +149,7 @@ import { readHostUsage, usageCache } from "./host-usage.js"
 import { dashboardPage } from "./internal/dashboard-page.js"
 import { type ListenerMode, listenerServesWork } from "./internal/listener.js"
 import { decodeRelayPostRequest } from "./internal/relay-post-validation.js"
+import { decodeRelaySelfBody } from "./internal/relay-self-validation.js"
 import { relayScrollState, remoteTerminalUrl, terminalSelectionInput } from "./internal/terminal-selection.js"
 import {
   isRelayedScrollState,
@@ -289,6 +292,7 @@ export type UiAssets = {
 }
 
 type ApiError =
+  | TooManySelfUpdates
   | InvalidReport
   | UnboundAgent
   | Denied
@@ -412,6 +416,8 @@ const apiError = (error: ApiError): ApiErrorResponse => {
   switch (error._tag) {
     case "ModuleRouteFailure":
       return { status: error.status, body: { error: error.code } }
+    case "TooManySelfUpdates":
+      return { status: 429, body: { error: error._tag, retryAfterMillis: error.retryAfterMillis } }
     case "InvalidReport":
       return { status: 400, body: { error: error._tag, detail: error.detail } }
     case "UnboundAgent":
@@ -2698,7 +2704,7 @@ export const startHttpServer = async (
             json(response, 503, { error: "starting" })
             return
           }
-          if (url.pathname === "/v1/connect/posts" && mode !== "serve") {
+          if ((url.pathname === "/v1/connect/posts" || url.pathname === "/v1/connect/me") && mode !== "serve") {
             json(response, 403, { error: "Denied" })
             return
           }
@@ -3686,6 +3692,71 @@ export const startHttpServer = async (
             return
           }
 
+          const resolveReporter = Effect.fn("Connect.resolveReporter")(function*() {
+            if (header(request, "origin") !== undefined) {
+              yield* sameOrigin(request, expectedOrigin()).pipe(Effect.mapError(() => new Denied()))
+            }
+            const address = request.socket.remoteAddress
+            if (address === undefined) return yield* new Denied()
+            const tailscale = yield* Tailscale
+            const identity = yield* tailscale.whois(address).pipe(
+              Effect.mapError(() => new Unavailable({ operation: "posts.whois" }))
+            )
+            yield* authorizeWhois(identity, config.allowedUsers, null).pipe(Effect.mapError(() => new Denied()))
+            const machine = config.machines.find(({ nodeId }) => nodeId === identity.Node.StableID)
+            if (machine === undefined) return yield* new Denied()
+            return Effect.fn("Connect.bindReporter")(function*(agentId: string) {
+              const observedAt = now()
+              const inventory = yield* (machine.host.toLowerCase() === config.host.toLowerCase()
+                ? localConnectAgents(config, service, activityStore, relationshipStore, observedAt).pipe(
+                  Effect.provideService(Crypto.Crypto, cryptoService)
+                )
+                : Effect.gen(function*() {
+                  const peers = yield* fleetPeers(config)
+                  const peer = peers.find(({ host }) => host.toLowerCase() === machine.host.toLowerCase())
+                  if (peer === undefined) return yield* new Unavailable({ operation: "posts.peer" })
+                  return yield* fetchPeerConnectAgents({
+                    host: peer.host,
+                    agentsUrl: peer.connectAgentsUrl,
+                    online: peer.online,
+                    terminalUrl: peer.terminalUrl
+                  })
+                })).pipe(Effect.mapError(() => new Unavailable({ operation: "posts.inventory" })))
+              if (inventory.complete !== true) return yield* new Unavailable({ operation: "posts.inventory" })
+              if (!inventory.agents.some((agent) => agent.id === agentId)) {
+                return yield* new UnboundAgent({ agentId })
+              }
+              return { host: machine.host, agentId, observedAt }
+            })
+          })
+
+          if (url.pathname === "/v1/connect/me") {
+            if (mode !== "serve") {
+              json(response, 403, { error: "Denied" })
+              return
+            }
+            if (request.method === "POST") {
+              await respond(
+                response,
+                Effect.gen(function*() {
+                  const bindReporter = yield* resolveReporter()
+                  const agentId = yield* Schema.decodeUnknownEffect(ConnectAgent.fields.id)(
+                    header(request, "x-herdr-agent-id")
+                  ).pipe(
+                    Effect.mapError(() => new UnboundAgent({ agentId: "current-pane" }))
+                  )
+                  const target = yield* bindReporter(agentId)
+                  const input = yield* readJson(request, Schema.Unknown).pipe(
+                    Effect.mapError((error) => new InvalidReport({ detail: error.detail }))
+                  )
+                  const body = yield* decodeRelaySelfBody(input)
+                  return yield* postStore.selfUpdate(target.host, target.agentId, body, target.observedAt)
+                })
+              )
+              return
+            }
+          }
+
           if (url.pathname === "/v1/connect/posts") {
             if (mode !== "serve") {
               json(response, 403, { error: "Denied" })
@@ -3695,43 +3766,13 @@ export const startHttpServer = async (
               await respond(
                 response,
                 Effect.gen(function*() {
-                  if (header(request, "origin") !== undefined) {
-                    yield* sameOrigin(request, expectedOrigin()).pipe(Effect.mapError(() => new Denied()))
-                  }
-                  const address = request.socket.remoteAddress
-                  if (address === undefined) return yield* new Denied()
-                  const tailscale = yield* Tailscale
-                  const identity = yield* tailscale.whois(address).pipe(
-                    Effect.mapError(() => new Unavailable({ operation: "posts.whois" }))
-                  )
-                  yield* authorizeWhois(identity, config.allowedUsers, null).pipe(Effect.mapError(() => new Denied()))
-                  const machine = config.machines.find(({ nodeId }) => nodeId === identity.Node.StableID)
-                  if (machine === undefined) return yield* new Denied()
+                  const bindReporter = yield* resolveReporter()
                   const input = yield* readJson(request, Schema.Unknown).pipe(
                     Effect.mapError((error) => new InvalidReport({ detail: error.detail }))
                   )
                   const body = yield* decodeRelayPostRequest(input)
-                  const observedAt = now()
-                  const inventory = yield* (machine.host.toLowerCase() === config.host.toLowerCase()
-                    ? localConnectAgents(config, service, activityStore, relationshipStore, observedAt).pipe(
-                      Effect.provideService(Crypto.Crypto, cryptoService)
-                    )
-                    : Effect.gen(function*() {
-                      const peers = yield* fleetPeers(config)
-                      const peer = peers.find(({ host }) => host.toLowerCase() === machine.host.toLowerCase())
-                      if (peer === undefined) return yield* new Unavailable({ operation: "posts.peer" })
-                      return yield* fetchPeerConnectAgents({
-                        host: peer.host,
-                        agentsUrl: peer.connectAgentsUrl,
-                        online: peer.online,
-                        terminalUrl: peer.terminalUrl
-                      })
-                    })).pipe(Effect.mapError(() => new Unavailable({ operation: "posts.inventory" })))
-                  if (inventory.complete !== true) return yield* new Unavailable({ operation: "posts.inventory" })
-                  if (!inventory.agents.some((agent) => agent.id === body.agentId)) {
-                    return yield* new UnboundAgent({ agentId: body.agentId })
-                  }
-                  return yield* postStore.post(machine.host, body.agentId, body, observedAt)
+                  const target = yield* bindReporter(body.agentId)
+                  return yield* postStore.post(target.host, target.agentId, body, target.observedAt)
                 })
               )
               return

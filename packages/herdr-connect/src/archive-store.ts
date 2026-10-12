@@ -136,6 +136,9 @@ const recordObservation = (
      WHERE o.host = ? AND o.missing_reads >= 2 AND o.missing_since <= ?
      ON CONFLICT(host, agent_id) DO NOTHING`
   ).run(observation.observedAt, host, observation.observedAt - connectArchiveClosureDelayMillis)
+  database.prepare(`DELETE FROM connect_self_state WHERE host = ? AND agent_id IN (
+    SELECT agent_id FROM connect_agent_archive WHERE host = ?
+  )`).run(host, host)
 }
 
 /**

@@ -1,7 +1,10 @@
 import { AgentStableId, AgentWorkerIdentity, AgentWorkerRelationship } from "@knpkv/herdr-fleet/model"
 import { Schema } from "effect"
 import { ConnectLastWords } from "./posts.js"
+import { ConnectSelfState } from "./self-model.js"
 import { terminalColumnBounds, terminalRowBounds } from "./terminal-dimensions.js"
+
+export * from "./self-model.js"
 
 const BoundedString = Schema.String.check(
   Schema.isMinLength(1),
@@ -36,6 +39,7 @@ export const ConnectAgent = Schema.Struct({
   work: AgentWorkLabel,
   lastActivityAt: ActivityTimestamp,
   voice: Schema.optionalKey(ConnectLastWords),
+  self: Schema.optionalKey(Schema.NullOr(ConnectSelfState)),
   relationship: Schema.optionalKey(ConnectAgentRelationship)
 })
 export type ConnectAgent = typeof ConnectAgent.Type

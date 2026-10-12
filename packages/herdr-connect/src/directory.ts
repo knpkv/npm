@@ -323,12 +323,17 @@ export const fleetConnectAgents = Effect.fn("HerdrConnect.fleetAgents")(function
     fleet.agents.map(({ host, id }) => ({ host, agentId: id })),
     archive.observedAt
   )
+  const selfStates = yield* archive.posts.selfLatestMany(fleet.agents.map(({ host, id }) => ({ host, agentId: id })))
+  const bySelf = new Map(selfStates.map((entry) => [`${entry.host.toLowerCase()}\u0000${entry.agentId}`, entry.self]))
   const byAgent = new Map(posts.map((post) => [`${post.host.toLowerCase()}\u0000${post.agentId}`, post]))
   return {
     ...fleet,
     agents: fleet.agents.map((agent) => {
       const latest = byAgent.get(`${agent.host.toLowerCase()}\u0000${agent.id}`)
-      return latest === undefined ? agent : { ...agent, voice: { text: latest.text, createdAt: latest.createdAt } }
+      const self = bySelf.get(`${agent.host.toLowerCase()}\u0000${agent.id}`) ?? null
+      return latest === undefined
+        ? { ...agent, self }
+        : { ...agent, self, voice: { text: latest.text, createdAt: latest.createdAt } }
     })
   }
 })
