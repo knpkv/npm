@@ -10,7 +10,7 @@
 import { Icon, PortalProvider } from "@knpkv/rly/foundations"
 import { workNavigationHref } from "@knpkv/herdr-work/navigation"
 import { Button, Sheet, StateLabel } from "@knpkv/rly/primitives"
-import { type KeyboardEvent, type MouseEvent, type ReactElement, useId, useRef, useState } from "react"
+import { type KeyboardEvent, type MouseEvent, type ReactElement, type ReactNode, useId, useRef, useState } from "react"
 
 import { AgentStateLabel, agentStatePresentation } from "./agent-state.js"
 import { Creature } from "./creature.js"
@@ -225,6 +225,7 @@ export const AgentStage = ({
   agent,
   agents,
   crew,
+  footer,
   onClose,
   onOpen,
   onOpenTerminal,
@@ -235,6 +236,8 @@ export const AgentStage = ({
   workSnapshots = null
 }: {
   readonly agent: ConnectAgent | null
+  /** Optional application controls, rendered in the stage body after lineage. */
+  readonly footer?: ReactNode
   readonly agents?: ReadonlyArray<ConnectAgent>
   readonly workSnapshots?: WorkSnapshots | null
   /** The open agent's goal on the Work board, linked from its stage when there is exactly one. */
@@ -334,6 +337,7 @@ export const AgentStage = ({
                 onOpen={onOpen}
                 stale={stale}
               />
+              {footer}
             </Sheet.Body>
             <Sheet.Footer className="connect-stage-actions">
               <Button leadingIcon="pin" onClick={() => onPinChange(!pinned)} size="default" variant="secondary">

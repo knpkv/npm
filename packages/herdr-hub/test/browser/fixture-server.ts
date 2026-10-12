@@ -1,4 +1,4 @@
-/** Serve the real approvals stylesheet stack and a deterministic browser fixture. */
+/** Serve the real hub stylesheet stack and deterministic browser fixtures. */
 import { NodeHttpServer, NodeRuntime } from "@effect/platform-node"
 import { Config, Effect, Layer } from "effect"
 import { HttpRouter, HttpServerResponse } from "effect/http"
@@ -10,7 +10,10 @@ import { BROWSER_TARGET } from "../../../../browser-target.ts"
 const bundle = await build({
   absWorkingDir: fileURLToPath(new URL("../..", import.meta.url)),
   bundle: true,
-  entryPoints: { approvals: "test/browser/fixture-entry.tsx" },
+  entryPoints: {
+    approvals: "test/browser/fixture-entry.tsx",
+    "connect-controls": "test/browser/connect-controls-entry.tsx"
+  },
   format: "iife",
   loader: { ".woff2": "file" },
   outdir: "fixture-out",
@@ -29,6 +32,18 @@ const page = `<!doctype html>
 
 const routes = Layer.mergeAll(
   HttpRouter.add("GET", "/", HttpServerResponse.html(page)),
+  HttpRouter.add(
+    "GET",
+    "/connect-controls/",
+    HttpServerResponse.html(`<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Stage notification fixture</title>
+<link rel="stylesheet" href="/assets/connect-controls.css">
+</head><body data-rly-root data-rly-theme="dark" class="connect-body"><div id="fleet-connect-root"></div>
+<script src="/assets/connect-controls.js" defer></script></body></html>`)
+  ),
   ...bundle.outputFiles.map((output) =>
     HttpRouter.add(
       "GET",

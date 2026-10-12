@@ -17,6 +17,7 @@ import { decodeWorkNavigationSelection, workNavigationHref } from "@knpkv/herdr-
 import { WorkBoard } from "@knpkv/herdr-work/react"
 import { PushPublicConfiguration, PushSubscriptionRecord, PushSubscriptionStatus } from "./model.js"
 import {
+  applicationServerKey,
   reconcileCurrentPushSubscription,
   reconcilePushSubscriptionState,
   registerNewPushSubscription,
@@ -272,18 +273,6 @@ const loadNotificationState = Effect.gen(function* () {
 
 type NotificationLoadError =
   typeof loadNotificationState extends Effect.Effect<unknown, infer Error, unknown> ? Error : never
-
-const applicationServerKey = (encoded: string): ArrayBuffer => {
-  const padding = "=".repeat((4 - (encoded.length % 4)) % 4)
-  const base64 = encoded.replaceAll("-", "+").replaceAll("_", "/") + padding
-  const bytes = atob(base64)
-  const buffer = new ArrayBuffer(bytes.length)
-  const view = new Uint8Array(buffer)
-  for (let index = 0; index < bytes.length; index += 1) {
-    view[index] = bytes.charCodeAt(index)
-  }
-  return buffer
-}
 
 const enableNotifications = Effect.fn("Notifications.enable")(function* () {
   const config = yield* loadPushConfiguration
@@ -687,6 +676,7 @@ const DashboardApp = ({
         ])}
         atoms={atoms.connect}
         embedded
+        notificationState={notificationState}
       />
     ) : (
       <ConnectSurface

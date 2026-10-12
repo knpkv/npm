@@ -715,13 +715,16 @@ export const ConnectSurface = ({
   atoms,
   embedded = false,
   onStageChange,
-  roomFooter
+  roomFooter,
+  stageFooter
 }: {
   readonly atoms: ConnectAtoms
   readonly embedded?: boolean
   readonly roomFooter?: ReactNode
   /** Optional host observer for the open stage identity; close and unmount report null. */
   readonly onStageChange?: (target: Pick<ConnectAgent, "host" | "id"> | null) => void
+  /** Optional application controls inside the open stage; absent by default. */
+  readonly stageFooter?: ReactNode
 }) => {
   const [activityFilter, setActivityFilter] = useAtom(atoms.activityFilter)
   const directory = useAtomValue(atoms.agents)
@@ -1463,6 +1466,7 @@ export const ConnectSurface = ({
               stale={staleSince !== null}
             />
             <AgentStage
+              footer={stageFooter}
               agent={stageAgent}
               agents={agents}
               workSnapshots={currentWork}
