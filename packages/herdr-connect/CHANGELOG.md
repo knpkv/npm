@@ -1,5 +1,11 @@
 # @knpkv/herdr-connect
 
+## 0.20.0
+
+### Minor Changes
+
+- [#853](https://github.com/knpkv/npm/pull/853) [`463a39f`](https://github.com/knpkv/npm/commit/463a39fac06cd41205b4733ccce9a1649c852093) Thanks [@konopkov](https://github.com/konopkov)! - Add the URL-addressable Archived directory with bounded paging, loaded-record search, read-only closure details and static closed creatures.
+
 ## 0.19.0
 
 ### Minor Changes
