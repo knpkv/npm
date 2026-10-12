@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { ModuleKind, ScriptTarget, transpileModule } from "typescript"
+import { mountLegacyFleetColumn } from "./legacy-fleet-fixture.js"
 
 const packageRoot = resolve(fileURLToPath(new URL("../..", import.meta.url)))
 const workspaceRoot = resolve(packageRoot, "../..")
@@ -198,6 +199,7 @@ const setEmbeddedTerminal = async (page: Page): Promise<void> => {
         </main>
       </body>
     </html>`)
+  await page.locator(".fleet-shell-main").evaluate(mountLegacyFleetColumn)
   await page.locator("[data-work-tab]").evaluate((element) => {
     element.addEventListener("click", () => {
       element.setAttribute("aria-selected", "true")

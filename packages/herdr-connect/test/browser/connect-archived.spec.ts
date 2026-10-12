@@ -137,7 +137,6 @@ const prepare = async (page: Page, width = 390, theme = "light") => {
 const mount = async (page: Page, theme = "light", archived = true, fragment = "") => {
   await page.goto(`${archived ? "/?embedded&view=archived" : "/?embedded"}${fragment}`)
   await page.locator("body").evaluate((body, value) => body.setAttribute("data-rly-theme", value), theme)
-  await page.locator("#fleet-connect-root").evaluate((root) => root.classList.add("fleet-shell-main"))
   await page.addStyleTag({
     content:
       "#fleet-connect-root { border: 1px solid var(--rly-color-border-1); padding-block: 0; } body.connect-body { overflow: visible; }"
