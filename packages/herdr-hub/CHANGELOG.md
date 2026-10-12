@@ -2,6 +2,12 @@
 
 Released as `@knpkv/herdr-approvals` up to 0.18.0; the headings below are that package's history.
 
+## 0.33.3
+
+### Patch Changes
+
+- [#868](https://github.com/knpkv/npm/pull/868) [`8d5281d`](https://github.com/knpkv/npm/commit/8d5281daaa9bd9ef28d32004a88fca4c9f1d117b) Thanks [@konopkov](https://github.com/konopkov)! - Release terminal controller locks and connection slots after failed setup or a disconnected session, with a ten-second cleanup wait. Keep late finalizers owned by the hub, warn with only the host, agent ID and elapsed time, and preserve live-controller exclusivity and the four-controller limit.
+
 ## 0.33.2
 
 ### Patch Changes
