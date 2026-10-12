@@ -1422,7 +1422,10 @@ export const ConnectSurface = ({
                   ) : null}
                 </label>
               }
-              onClearQuery={() => setQuery("")}
+              onClearQuery={() => {
+                setQuery("")
+                directorySearchRef.current?.focus()
+              }}
               activityFilter={activityFilter}
               agents={agents}
               configuredHosts={current.hosts ?? []}

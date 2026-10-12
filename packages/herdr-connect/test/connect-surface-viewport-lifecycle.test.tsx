@@ -83,6 +83,44 @@ afterAll(() => {
 })
 
 describe("ConnectSurface directory loading", () => {
+  it.each([".connect-empty button", ".connect-scope-clear"])(
+    "returns focus to search after clearing filters through %s",
+    async (selector) => {
+      window.fetch = () => new Promise<Response>(() => {})
+      const host = document.createElement("div")
+      document.body.append(host)
+      const root = createRoot(host)
+      roots.push(root)
+      const atoms = makeConnectAtoms()
+      await act(async () => {
+        root.render(
+          <RegistryProvider
+            initialValues={[
+              [atoms.agents, AsyncResult.success(agentPage)],
+              [atoms.query, "zzz"],
+              [atoms.hostFilter, agent.host],
+              [atoms.activityFilter, "needs-you"]
+            ]}
+          >
+            <ConnectSurface atoms={atoms} embedded />
+          </RegistryProvider>
+        )
+        for (let index = 0; index < 12; index += 1) await Promise.resolve()
+      })
+      const search = host.querySelector<HTMLInputElement>("input[type='search']")
+      const clear = host.querySelector<HTMLButtonElement>(selector)
+      expect(search).not.toBeNull()
+      expect(clear).not.toBeNull()
+      clear?.focus()
+      expect(document.activeElement).toBe(clear)
+      await act(async () => clear?.click())
+      expect(search?.value).toBe("")
+      expect(host.querySelector(".connect-scope-clear")).toBeNull()
+      expect(host.querySelectorAll(".connect-agent")).toHaveLength(1)
+      expect(document.activeElement).toBe(search)
+    }
+  )
+
   it("shows the directory recovery copy, a Retry button and Not updated yet without a raw status", async () => {
     window.fetch = () => new Promise<Response>(() => {})
     const host = document.createElement("div")

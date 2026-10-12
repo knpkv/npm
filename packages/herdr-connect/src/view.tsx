@@ -666,6 +666,7 @@ export const AgentDirectory = ({
                     const activity = agentStatePresentation(agent.state).bucket
                     const context = !family.matches.has(key)
                     const ambiguousIdentity = connectAgentIdentityAmbiguous(agents, agent)
+                    const lastActive = timeLabel(agent.lastActivityAt, timeZone)
                     return (
                       <Fragment key={key}>
                         <button
@@ -710,9 +711,8 @@ export const AgentDirectory = ({
                                 </>
                               ) : null}
                               <span aria-hidden="true" className="connect-row-separator" />
-                              <time dateTime={new Date(agent.lastActivityAt).toISOString()}>
-                                <span className="connect-visually-hidden"> last active at </span>
-                                {timeLabel(agent.lastActivityAt, timeZone)}
+                              <time aria-hidden="true" dateTime={new Date(agent.lastActivityAt).toISOString()}>
+                                {lastActive}
                               </time>
                               {context ? ", context" : ""}
                               {stale || silentHosts.includes(agent.host) ? ", Old reading" : ""}
@@ -729,7 +729,8 @@ export const AgentDirectory = ({
                               </span>
                             )}
                           </span>
-                          <span className="connect-visually-hidden">, open stage</span>
+                          {/* Keep the time and comma in one spoken phrase; layout boundaries insert spaces. */}
+                          <span className="connect-visually-hidden">{`last active at ${lastActive}, open stage`}</span>
                         </button>
                         {depth <= 2 || issue !== null ? null : (
                           <button

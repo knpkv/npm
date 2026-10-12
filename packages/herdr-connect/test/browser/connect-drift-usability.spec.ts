@@ -76,6 +76,9 @@ for (const width of [390, 1280]) {
       test("find who needs me", async ({ page }) => {
         await open(page)
         await expect(page.getByRole("heading", { name: /Connect/ })).toContainText("1 needs you")
+        for (const row of await page.locator(".connect-agent").all()) {
+          await expect(row).toHaveAccessibleName(/last active at \d{2}:\d{2}, open stage$/)
+        }
         await openReviewer(page)
         await expect(page.getByRole("dialog", { name: "Reviewer", exact: true })).toBeVisible()
         await expect(page.locator(".connect-stage-speech")).toContainText("Blocked")
@@ -106,6 +109,7 @@ for (const width of [390, 1280]) {
         await expect(page.locator(".connect-empty")).toContainText("No agents match “zzz” on beta, in all states.")
         await activate(page, page.getByRole("button", { name: "Clear filters", exact: true }))
         await expect(search).toHaveValue("")
+        await expect(search).toBeFocused()
         await expect(page.locator(".connect-filter-summary")).toHaveText("All hosts,All states")
         await expect(page.locator(".connect-agent")).toHaveCount(2)
       })
