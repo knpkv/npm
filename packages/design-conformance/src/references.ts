@@ -21,7 +21,16 @@ export const loadReferences = Effect.fn("DesignConformance.loadReferences")(func
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   const cryptoService = yield* Crypto.Crypto
-  const root = yield* fs.realPath(directory)
+  const requested = path.resolve(directory)
+  // Effect stat follows links; readLink inspects the root entry before canonicalization.
+  yield* fs.readLink(requested).pipe(Effect.matchEffect({
+    onFailure: (error) =>
+      Schema.is(Schema.Struct({ code: Schema.Literal("EINVAL") }))(error.cause)
+        ? Effect.void
+        : Effect.fail(error),
+    onSuccess: () => Effect.fail(new ReferenceFailure({ file: requested, detail: "Symlinks are not reference roots" }))
+  }))
+  const root = yield* fs.realPath(requested)
   if ((yield* fs.realPath(path.join(root, "manifest.json"))) !== path.join(root, "manifest.json")) {
     return yield* new ReferenceFailure({ file: "manifest.json", detail: "Symlinks are not reference files" })
   }

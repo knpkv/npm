@@ -120,6 +120,15 @@ redirects and their final URL. Its session stays active until the context closes
 `blob:` URLs are allowed. Base and output directories must resolve to different
 canonical filesystem paths, including through symlinks.
 
+Reference HTTP requests also require an exact path in the SHA256 inventory;
+query strings and fragments do not change file identity. Every reference response
+must be 2xx with a completed body. Unlisted requests, HTTP errors and failed
+transfers produce `ReferenceFailure`, even if the page signals readiness.
+Reference WebSockets have no hashed-file representation and are rejected.
+Live captures retain their same-origin application behavior.
+The product root itself must be an ordinary directory, checked before resolving
+its canonical path; a symlink in an ancestor does not make the product root a link.
+
 CI discovers the union of merge-base and current products. A deleted reference
 product retains its job and fails when its manifest cannot be loaded. Product
 decommissioning has no automatic exemption. The local 3 GiB memory policy applies

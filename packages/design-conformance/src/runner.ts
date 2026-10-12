@@ -43,7 +43,8 @@ const withPage = Effect.fn("DesignConformance.withPage")(
     browser: Browser,
     identity: Identity,
     origin: string,
-    use: (page: Page) => Effect.Effect<Capture, BrowserFailure | RunnerFailure>
+    use: (page: Page) => Effect.Effect<Capture, BrowserFailure | RunnerFailure>,
+    referenceFiles?: ReadonlySet<string>
   ) {
     const context = yield* Effect.acquireRelease(
       browserCall("create context", () =>
@@ -56,12 +57,13 @@ const withPage = Effect.fn("DesignConformance.withPage")(
       (context) => browserCall("close context", () => context.close()).pipe(Effect.orDie)
     )
     const blocked: Array<string> = []
-    yield* restrictContextNetwork(context, origin, blocked)
+    const contextNetwork = yield* restrictContextNetwork(context, origin, blocked, referenceFiles)
     const page = yield* browserCall("new page", () => context.newPage())
-    const network = yield* restrictPageNetwork(context, page, origin, blocked)
+    const network = yield* restrictPageNetwork(context, page, contextNetwork.permits)
     yield* browserCall("fixed clock", () => installCaptureClock(page))
     const result = yield* use(page).pipe(Effect.exit)
     yield* network.settle()
+    yield* contextNetwork.settle()
     if (blocked.length > 0) return yield* new BrowserFailure({ operation: "external capture network", cause: blocked })
     return yield* result
   },
@@ -161,7 +163,7 @@ export const runConformance = Effect.fn("DesignConformance.run")(function*(refs:
                 yield* browserCall("reference fixture readiness", () =>
                   page.locator("html[data-design-ready=\"true\"]").waitFor())
                 return yield* capturePage(page)
-              }))
+              }), new Set(Object.keys(refs.manifest.files)))
           } else {
             const ref = reference.refs.find((shot) =>
               shot.viewport === identity.viewport && shot.theme === identity.theme

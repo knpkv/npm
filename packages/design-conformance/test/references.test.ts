@@ -7,6 +7,28 @@ import * as Path from "effect/Path"
 import { loadReferences } from "../src/references.js"
 
 layer(NodeServices.layer)("reference filesystem", (it) => {
+  it.effect("a product root symlink fails while its ordinary tree and a linked ancestor remain valid", () =>
+    Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const source = yield* path.fromFileUrl(new URL("../../../design-refs/_fixture/", import.meta.url))
+      const parent = yield* fs.makeTempDirectoryScoped()
+      const product = path.join(parent, "product")
+      yield* fs.copy(source, product)
+      expect((yield* loadReferences(product)).manifest.product).toBe("_fixture")
+      const alias = path.join(parent, "alias")
+      yield* fs.symlink(product, alias)
+      for (const directory of [alias, alias + path.sep]) {
+        expect(yield* loadReferences(directory).pipe(Effect.flip)).toMatchObject({
+          _tag: "ReferenceFailure",
+          detail: "Symlinks are not reference roots"
+        })
+      }
+      const ancestor = path.join(parent, "ancestor")
+      yield* fs.symlink(parent, ancestor)
+      expect((yield* loadReferences(path.join(ancestor, "product"))).manifest.product).toBe("_fixture")
+    }))
+
   it.effect("hashed fixture and all HTML assets load; changed and unlisted assets fail", () =>
     Effect.gen(function*() {
       const fs = yield* FileSystem.FileSystem

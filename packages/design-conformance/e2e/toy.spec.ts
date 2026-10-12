@@ -52,7 +52,7 @@ test("hashed external SVG assets render with their intrinsic dimensions in refer
     Effect.gen(function*() {
       const fs = yield* FileSystem.FileSystem
       const refs = yield* testReferences(
-        "<html data-design-ready=true><body><main data-region=content><img src='/probe.svg' alt='Fixture square'></main></body></html>",
+        "<html data-design-ready=true><body><main data-region=content><img src='/probe.svg?cache=fixture#shape' alt='Fixture square'></main></body></html>",
         {
           "probe.svg":
             "<svg xmlns='http://www.w3.org/2000/svg' width='64' height='64'><rect width='64' height='64' fill='red'/></svg>"

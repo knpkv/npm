@@ -91,10 +91,10 @@ jobs:
         run: |
           set -euo pipefail
           report="test-results/design-conformance/current/$PRODUCT/summary.md"
-          if [ -f "$report" ]; then
-            cat "$report" >> "$GITHUB_STEP_SUMMARY"
-          elif [ "$PRODUCT" = _fixture ]; then
+          if [ "$PRODUCT" = _fixture ]; then
             echo 'Toy product tests assert passing, required, waived, stale, coverage and legacy verdicts.' >> "$GITHUB_STEP_SUMMARY"
+          elif [ -f "$report" ]; then
+            cat "$report" >> "$GITHUB_STEP_SUMMARY"
           else
             echo 'Capture did not complete. See the failing step.' >> "$GITHUB_STEP_SUMMARY"
           fi

@@ -10,6 +10,92 @@ import { runConformance } from "../src/runner.js"
 import { serveFiles } from "../src/server.js"
 import { localServer, readyHtml, testLive, testReferences } from "./fixtures.js"
 
+for (
+  const { file, kind, markup } of [
+    { kind: "HTML", file: "missing.html", markup: "<iframe src='/missing.html?cache=fixture'></iframe>" },
+    { kind: "CSS", file: "missing.css", markup: "<link rel=stylesheet href='/missing.css?cache=fixture'>" },
+    {
+      kind: "font",
+      file: "missing.woff2",
+      markup:
+        "<style>@font-face{font-family:Fixture;src:url('/missing.woff2?cache=fixture')}main{font-family:Fixture}</style>"
+    },
+    { kind: "image", file: "missing.svg", markup: "<img src='/missing.svg?cache=fixture'>" },
+    { kind: "script", file: "missing.js", markup: "<script src='/missing.js?cache=fixture'></script>" }
+  ]
+) {
+  test(`unlisted ${kind} requests fail ready refs while live same-origin HTTP errors remain allowed`, async () => {
+    await Effect.runPromise(
+      Effect.gen(function*() {
+        const fs = yield* FileSystem.FileSystem
+        const attack = yield* testReferences(readyHtml.replace("</body>", `${markup}</body>`))
+        const clean = yield* testReferences(readyHtml)
+        const origin = yield* serveFiles(attack.root, { "/page.html": "page.html" })
+        yield* runConformance(attack, { output: yield* fs.makeTempDirectoryScoped(), captureOnly: true }).pipe(
+          Effect.provideService(LiveProduct, testLive(origin))
+        )
+        const cleanOrigin = yield* serveFiles(clean.root, { "/page.html": "page.html" })
+        const invalid = yield* runConformance(attack, { output: yield* fs.makeTempDirectoryScoped() }).pipe(
+          Effect.provideService(LiveProduct, testLive(cleanOrigin)),
+          Effect.flip
+        )
+        expect(invalid).toMatchObject({
+          _tag: "ReferenceFailure",
+          file,
+          detail: "Request path is not in the reference hash inventory"
+        })
+      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer))
+    )
+  })
+}
+
+test("a hashed ref asset with an HTTP error fails even when its error handler signals readiness", async () => {
+  await Effect.runPromise(
+    Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      const refs = yield* testReferences(
+        "<html><body><main data-region=content>Fixture workspace</main><img src='/probe.svg?cache=fixture' onerror=\"document.documentElement.dataset.designReady='true'\"></body></html>",
+        { "probe.svg": "<svg xmlns='http://www.w3.org/2000/svg' width='64' height='64'></svg>" }
+      )
+      // Simulate a file disappearing after hash validation; its listed server route now returns HTTP 500.
+      yield* fs.remove(`${refs.root}/probe.svg`)
+      const clean = yield* testReferences(readyHtml)
+      const origin = yield* serveFiles(clean.root, { "/page.html": "page.html" })
+      const invalid = yield* runConformance(refs, { output: yield* fs.makeTempDirectoryScoped() }).pipe(
+        Effect.provideService(LiveProduct, testLive(origin)),
+        Effect.flip
+      )
+      expect(invalid).toMatchObject({
+        _tag: "ReferenceFailure",
+        file: "probe.svg",
+        detail: "Reference response HTTP 500"
+      })
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer))
+  )
+})
+
+test("reference WebSockets fail even at the reference origin", async () => {
+  await Effect.runPromise(
+    Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      const refs = yield* testReferences(
+        "<html><body><main data-region=content>Fixture workspace</main><script>const socket=new WebSocket(location.origin.replace('http:','ws:')+'/socket');socket.onclose=()=>{document.documentElement.dataset.designReady='true'}</script></body></html>"
+      )
+      const clean = yield* testReferences(readyHtml)
+      const origin = yield* serveFiles(clean.root, { "/page.html": "page.html" })
+      const invalid = yield* runConformance(refs, { output: yield* fs.makeTempDirectoryScoped() }).pipe(
+        Effect.provideService(LiveProduct, testLive(origin)),
+        Effect.flip
+      )
+      expect(invalid).toMatchObject({
+        _tag: "ReferenceFailure",
+        file: "socket",
+        detail: "WebSockets are not hashed reference assets"
+      })
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer))
+  )
+})
+
 test("redirect hops reject forbidden origins before dispatch and preserve same-origin redirects and assets", async () => {
   await Effect.runPromise(
     Effect.gen(function*() {

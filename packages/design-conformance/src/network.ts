@@ -3,7 +3,7 @@ import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 
 import { browserCall } from "./browser.js"
-import { BrowserFailure } from "./schema.js"
+import { BrowserFailure, ReferenceFailure } from "./schema.js"
 
 declare global {
   interface Window {
@@ -18,28 +18,79 @@ export const permittedCaptureUrl = (address: string, origin: string): boolean =>
     ["http:", "https:"].includes(url.protocol) && url.origin === origin
 }
 
+/** Query/fragment variants identify the same hashed file; encoded or extended paths do not. */
+export const permittedReferenceUrl = (address: string, files: ReadonlySet<string>): boolean =>
+  files.has(new URL(address).pathname.slice(1))
+
 /** Install before creating pages. Service-worker attempts fail the capture even when the app catches rejection. */
 export const restrictContextNetwork = Effect.fn("DesignConformance.restrictContextNetwork")(
-  function*(context: BrowserContext, origin: string, blocked: Array<string>) {
+  function*(context: BrowserContext, origin: string, blocked: Array<string>, referenceFiles?: ReadonlySet<string>) {
+    const pending = new Set<Promise<void>>()
+    const failures: Array<ReferenceFailure> = []
+    const permits = (address: string): boolean => {
+      if (!permittedCaptureUrl(address, origin)) {
+        blocked.push(address)
+        return false
+      }
+      const url = new URL(address)
+      if (
+        referenceFiles !== undefined && ["http:", "https:"].includes(url.protocol) &&
+        !permittedReferenceUrl(address, referenceFiles)
+      ) {
+        failures.push(
+          new ReferenceFailure({
+            file: url.pathname.slice(1),
+            detail: "Request path is not in the reference hash inventory"
+          })
+        )
+        return false
+      }
+      return true
+    }
     yield* browserCall("restrict capture network", async () => {
+      context.on("request", (request) => {
+        const url = new URL(request.url())
+        if (referenceFiles === undefined || !["http:", "https:"].includes(url.protocol) || url.origin !== origin) return
+        const file = url.pathname.slice(1)
+        const action = (async () => {
+          const response = await request.response()
+          if (response === null) {
+            failures.push(new ReferenceFailure({ file, detail: "Reference request received no HTTP response" }))
+          } else if (!response.ok()) {
+            failures.push(new ReferenceFailure({ file, detail: `Reference response HTTP ${response.status()}` }))
+          } else {
+            const error = await response.finished()
+            if (error !== null) {
+              failures.push(new ReferenceFailure({ file, detail: `Reference response failed: ${error.message}` }))
+            }
+          }
+        })().catch((cause) => {
+          failures.push(new ReferenceFailure({ file, detail: `Reference request failed: ${String(cause)}` }))
+        })
+        pending.add(action)
+        void action.then(() => pending.delete(action))
+      })
       context.on("requestfailed", (request) => {
         if (!permittedCaptureUrl(request.url(), origin)) blocked.push(request.url())
       })
       await context.route("**/*", async (route) => {
-        const address = route.request().url()
-        if (permittedCaptureUrl(address, origin)) await route.continue()
-        else {
-          blocked.push(address)
-          await route.abort("blockedbyclient")
-        }
+        if (permits(route.request().url())) await route.continue()
+        else await route.abort("blockedbyclient")
       })
       await context.routeWebSocket("**/*", async (socket) => {
         const url = new URL(socket.url())
         url.protocol = url.protocol === "wss:" ? "https:" : "http:"
-        if (url.origin === origin) socket.connectToServer()
+        if (url.origin === origin && referenceFiles === undefined) socket.connectToServer()
         else {
-          blocked.push(socket.url())
-          await socket.close({ code: 1008, reason: "External capture network" })
+          if (url.origin === origin) {
+            failures.push(
+              new ReferenceFailure({
+                file: url.pathname.slice(1),
+                detail: "WebSockets are not hashed reference assets"
+              })
+            )
+          } else blocked.push(socket.url())
+          await socket.close({ code: 1008, reason: "Capture network boundary" })
         }
       })
       await context.exposeBinding("__designCaptureBlocked", (_source, address: string) => {
@@ -53,6 +104,16 @@ export const restrictContextNetwork = Effect.fn("DesignConformance.restrictConte
         }
       })
     })
+    return {
+      permits,
+      settle: Effect.fn("DesignConformance.settleReferenceNetwork")(function*() {
+        yield* browserCall("settle reference responses", async () => {
+          while (pending.size > 0) await Promise.all(pending)
+        })
+        const failure = failures[0]
+        if (failure !== undefined) return yield* failure
+      })
+    }
   }
 )
 
@@ -61,7 +122,7 @@ type PausedRequest = Schema.Schema.Type<typeof PausedRequest>
 
 /** The context owns this session until close. Fetch interception validates every native redirect hop. */
 export const restrictPageNetwork = Effect.fn("DesignConformance.restrictPageNetwork")(
-  function*(context: BrowserContext, page: Page, origin: string, blocked: Array<string>) {
+  function*(context: BrowserContext, page: Page, permits: (address: string) => boolean) {
     const session = yield* browserCall("capture network session", () => context.newCDPSession(page))
     const pending = new Set<Promise<void>>()
     const failures: Array<BrowserFailure> = []
@@ -69,11 +130,8 @@ export const restrictPageNetwork = Effect.fn("DesignConformance.restrictPageNetw
       session.on("Fetch.requestPaused", (event: PausedRequest) => {
         const action = (async () => {
           const { request, requestId } = Schema.decodeUnknownSync(PausedRequest)(event)
-          if (permittedCaptureUrl(request.url, origin)) await session.send("Fetch.continueRequest", { requestId })
-          else {
-            blocked.push(request.url)
-            await session.send("Fetch.failRequest", { requestId, errorReason: "BlockedByClient" })
-          }
+          if (permits(request.url)) await session.send("Fetch.continueRequest", { requestId })
+          else await session.send("Fetch.failRequest", { requestId, errorReason: "BlockedByClient" })
         })().catch((cause) => {
           failures.push(new BrowserFailure({ operation: "intercept capture redirect targets", cause }))
         })
