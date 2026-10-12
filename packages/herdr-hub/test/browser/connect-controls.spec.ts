@@ -274,7 +274,7 @@ for (const width of [390, 1280]) {
         await expect(page.getByRole("button", { name: "Unpin", exact: true })).toBeVisible()
         if (state === "2v-v2") {
           await expect(fixture.mute).toHaveAttribute("aria-pressed", "true")
-          await expect(fixture.summary).toHaveText("Muted You won't get pushes from worker.")
+          await expect(fixture.summary).toHaveText("Muted, you won’t get pushes from worker")
         } else if (state === "2v-v3") {
           await expect(fixture.from).toHaveValue("22:00")
           expect(await renderedTime(fixture.from, page)).toBe("22:00")
@@ -380,22 +380,19 @@ for (const width of [390, 1280]) {
         expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width + 2)
       })
     })
-    test("muted summary has a weighted state and a visible gap before its sentence", async ({ page }) => {
+    // rev6 2v-v2 replaces the earlier bold state/gap split with one plain, comma-joined sentence.
+    test("rev6 muted summary is one plain sentence with uniform typography", async ({ page }) => {
       const fixture = await mount(page, "2v-v2", width)
-      const layout = await fixture.summary.evaluate((summary) => {
-        const [state, sentence] = summary.children
-        if (state === undefined || sentence === undefined) return null
-        const stateBox = state.getBoundingClientRect()
-        const sentenceBox = sentence.getBoundingClientRect()
+      await expect(fixture.summary).toHaveText("Muted, you won’t get pushes from worker")
+      const typography = await fixture.summary.evaluate((summary) => {
+        const styles = [summary, ...summary.querySelectorAll("*")].map((element) => getComputedStyle(element))
         return {
-          stateWeight: Number(getComputedStyle(state).fontWeight),
-          sentenceWeight: Number(getComputedStyle(sentence).fontWeight),
-          separated: sentenceBox.x >= stateBox.right + 8 || sentenceBox.y >= stateBox.bottom + 8
+          weights: [...new Set(styles.map((style) => style.fontWeight))],
+          colours: [...new Set(styles.map((style) => style.color))]
         }
       })
-      expect(layout).not.toBeNull()
-      expect(layout?.stateWeight).toBeGreaterThan(layout?.sentenceWeight ?? 0)
-      expect(layout?.separated).toBe(true)
+      expect(typography.weights).toHaveLength(1)
+      expect(typography.colours).toHaveLength(1)
     })
     test("mute affects only the selected agent; quiet hours use the browser zone and Clear", async ({ page }) => {
       const fixture = await mount(page, "2v", width)
@@ -613,7 +610,7 @@ for (const width of [390, 1280]) {
       expect(on.knob).toBeGreaterThan(off.knob)
       expect(off.border).not.toBe(off.background)
       expect(on.background).not.toBe(off.background)
-      await expect(fixture.summary).toHaveText("Muted You won't get pushes from worker.")
+      await expect(fixture.summary).toHaveText("Muted, you won’t get pushes from worker")
       await measureControl(fixture.mute, page)
       await page.keyboard.press("Space")
       await expect(fixture.mute).toHaveAttribute("aria-pressed", "false")

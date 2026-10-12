@@ -120,18 +120,6 @@
     padding-inline: var(--rly-space-12);
   }
 
-  .connect-stage-notification-summary {
-    align-items: baseline;
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--rly-space-8);
-  }
-
-  .connect-stage-notification-summary > span:first-child {
-    color: var(--rly-color-text-1);
-    font-weight: var(--rly-type-label-weight);
-  }
-
   .connect-stage-notification-zone {
     overflow-wrap: break-word;
     padding-block-end: var(--rly-space-12);

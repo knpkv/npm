@@ -3,6 +3,6 @@
 "@knpkv/herdr-hub": minor
 ---
 
-Add stage notification controls for per-agent mutes and quiet hours in the user's time zone. Keep the last saved settings after failed changes and link devices with notifications off to Approvals. Let applications supply stage controls through the optional `ConnectSurface.stageFooter` prop.
+Add stage notification controls for per-agent mutes and quiet hours in the user's time zone. Keep the last saved settings after failed changes and link devices with notifications off to Approvals. Let applications supply stage controls through the optional `ConnectSurface.stageFooter` prop. Render the muted notification status as one sentence matching the design.
 
 Replace full-snapshot `PUT /v1/push/blocked-settings` with atomic `PATCH` intents for one agent's mute or quiet hours, so a stale device cannot overwrite another device's preferences. Queue mute toggles and quiet-hour reversions against their latest intended values. Enter after a queued Clear saves the visible time pair as the final intent without duplicate saves. Save valid drafts on backdrop and Close dismissal while keeping Escape as cancel. Preserve keyboard focus while editing times, and show devices with stale subscription keys as off until Approvals reconciles them.

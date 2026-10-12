@@ -233,13 +233,8 @@ describe("stage notification controls", () => {
       }
     ])
     expect(muteButton()?.getAttribute("aria-pressed")).toBe("true")
-    expect(document.querySelector("[aria-label='Agent notifications']")?.textContent).toContain(
-      "Muted You won't get pushes from worker."
-    )
     const summary = document.querySelector(".connect-stage-notification-summary")
-    expect(summary?.children).toHaveLength(2)
-    expect(summary?.children[0]?.textContent).toBe("Muted")
-    expect(summary?.children[1]?.textContent).toBe("You won't get pushes from worker.")
+    expect(summary?.textContent).toBe("Muted, you won’t get pushes from worker")
     await act(async () => muteButton()?.click())
     await settle()
     expect(fixture.writes.at(-1)?.mutedAgents).toEqual([{ host: "HOST-B", agentId: "agent-other" }])

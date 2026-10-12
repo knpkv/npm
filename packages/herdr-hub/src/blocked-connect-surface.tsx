@@ -296,15 +296,11 @@ export const BlockedConnectSurface = ({
           </button>
           <QuietHours settings={settings} save={save} busy={busy} />
           <p className="connect-stage-notification-summary">
-            {muted ? (
-              <>
-                <span>Muted</span> <span>You won't get pushes from {name ?? "this agent"}.</span>
-              </>
-            ) : settings.quietHours === null ? (
-              "Pushes on, no quiet hours"
-            ) : (
-              `Quiet ${timeLabel(settings.quietHours.startMinute)}–${timeLabel(settings.quietHours.endMinute)} ${settings.quietHours.timeZone}`
-            )}
+            {muted
+              ? `Muted, you won’t get pushes from ${name ?? "this agent"}`
+              : settings.quietHours === null
+                ? "Pushes on, no quiet hours"
+                : `Quiet ${timeLabel(settings.quietHours.startMinute)}–${timeLabel(settings.quietHours.endMinute)} ${settings.quietHours.timeZone}`}
           </p>
         </>
       )}
