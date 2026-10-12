@@ -3,7 +3,8 @@ import { Schema } from "effect"
 import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it } from "vitest"
 
-import { Creature } from "../src/creature.js"
+import { Creature, type CreatureAccessory } from "../src/creature.js"
+import { agentCharacter } from "../src/character.js"
 import { ConnectAgent } from "../src/model.js"
 import { AgentDirectory } from "../src/view.js"
 
@@ -64,6 +65,43 @@ describe("Creature", () => {
     }
   })
 
+  // Head overlays paint outside the fitted ring; switching moods must not shrink the list body.
+  it("keeps the same row body framing when a head overlay appears", () => {
+    const frame = (state: string) =>
+      /viewBox="([^"]+)"/.exec(
+        renderToStaticMarkup(<Creature host="fixture-host" id="drawing-1" size="row" state={state} />)
+      )?.[1]
+    expect(frame("blocked")).toBe(frame("ready"))
+    expect(frame("working")).toBe(frame("ready"))
+  })
+
+  // The ring fits the body; headwear and marks must not shrink its row, pin or crew presentation.
+  it("meets the body floors in every row slot, including accessories", () => {
+    for (const id of ["drawing-0", "drawing-1", "drawing-2"]) {
+      const {
+        bounds: [, , width, height]
+      } = agentCharacter("fixture-host", id)
+      for (const accessory of [
+        "none",
+        "headphones",
+        "hard-hat",
+        "scarf",
+        "glasses"
+      ] satisfies ReadonlyArray<CreatureAccessory>) {
+        const markup = renderToStaticMarkup(
+          <Creature host="fixture-host" id={id} size="row" state="working" accessory={accessory} />
+        )
+        const frame = /viewBox="([^"]+)"/.exec(markup)?.[1]?.split(" ").map(Number)
+        expect(frame).toHaveLength(4)
+        const edge = frame?.[2] ?? Infinity
+        for (const track of [28, 32, 36]) {
+          expect((width / edge) * track).toBeGreaterThanOrEqual(track * 0.58)
+          expect((Math.max(width, height) / edge) * track).toBeGreaterThanOrEqual(track * 0.7)
+        }
+      }
+    }
+  })
+
   // Decorative: the row's words already say the state, so assistive technology hears it once.
   it("is hidden from assistive technology and keeps its look across states", () => {
     const working = renderToStaticMarkup(<Creature host="nix" id="a1" size="row" state="working" />)
@@ -75,7 +113,7 @@ describe("Creature", () => {
   })
 
   // Ids built from host and ID collide once cleaned ("a.b" and "a_b"), and one creature then wears another's colours.
-  it("gives every creature on a page its own gradients", () => {
+  it("gives every creature on a page its own clip references", () => {
     const markup = renderToStaticMarkup(
       <>
         <Creature host="a.b" id="x" size="row" state="working" />
@@ -101,19 +139,19 @@ describe("Creature", () => {
     expect(body.split("<g").length).toBe(body.split("</g>").length)
   })
 
-  it("draws two closed tapered brows in the face's bob group, with the body's middle hue", () => {
+  it("draws two open quadratic brow strokes in the face, using the palette ink", () => {
     const markup = renderToStaticMarkup(<Creature host="nix" id="a1" size="stage" state="working" />)
     const brows = [...markup.matchAll(/<path class="connect-creature-brow"[^>]*>/g)].map(([path]) => path)
     expect(brows).toHaveLength(2)
     expect(brows[0]).toContain('data-side="l"')
     expect(brows[1]).toContain('data-side="r"')
-    for (const path of brows) expect(path).toMatch(/d="M[\d. ]+Q[\d. ]+Q[\d. ]+Z"/)
+    for (const path of brows) expect(path).toMatch(/d="M[\d. ]+Q[\d. ]+"/)
     const bob = markup.indexOf('class="connect-creature-bob"')
     expect(bob).toBeGreaterThan(-1)
     const face = markup.slice(bob)
     expect(face.match(/class="connect-creature-brow"/g)).toHaveLength(2)
     expect(face).not.toContain('class="connect-creature-breath"')
-    expect(markup).toContain("--connect-creature-brow-hue:")
+    expect(markup).toContain("--connect-creature-ink:")
   })
 
   // A gaze not clipped to its eye paints iris over skin when it looks aside; lids painted over the eye show as
@@ -122,6 +160,63 @@ describe("Creature", () => {
     const markup = renderToStaticMarkup(<Creature host="nix" id="a1" size="stage" state="ready" />)
     for (const clip of ["eye", "upper", "lower", "socket"]) {
       expect(markup.match(new RegExp(`clip-path="url\\(#[^)]+-${clip}-\\d\\)"`, "g")), clip).toHaveLength(2)
+    }
+  })
+
+  it("gates mouths to a talking stage and retains blush for every ordinary agent", () => {
+    const stage = renderToStaticMarkup(<Creature host="fixture-host" id="one" size="stage" state="working" talking />)
+    expect(stage).toContain('class="connect-creature-mouth"')
+    for (const size of ["row", "cast"] satisfies ReadonlyArray<"row" | "cast">) {
+      const markup = renderToStaticMarkup(<Creature host="fixture-host" id="one" size={size} state="working" talking />)
+      expect(markup).not.toContain('class="connect-creature-mouth"')
+      expect(markup.match(/class="connect-creature-blush"/g)).toHaveLength(2)
+      expect(markup).not.toContain('data-talking=""')
+    }
+  })
+
+  it("keeps closed identity but closes the lids, desaturates the paint and disables talk", () => {
+    const closed = renderToStaticMarkup(
+      <Creature closed host="fixture-host" id="one" size="stage" state="blocked" talking />
+    )
+    const live = renderToStaticMarkup(<Creature host="fixture-host" id="one" size="stage" state="working" />)
+    const body = (markup: string) => /class="connect-creature-body" d="([^"]+)"/.exec(markup)?.[1]
+    expect(body(closed)).toBe(body(live))
+    expect(closed).toContain('data-closed=""')
+    expect(closed).toContain("--connect-creature-open:1;")
+    expect(closed).toContain("calc(c * 0.1)")
+    expect(closed).not.toContain('data-talking=""')
+    expect(closed).not.toContain('class="connect-creature-mouth"')
+    expect(closed).not.toContain('class="connect-creature-question"')
+  })
+
+  it("defaults accessories to none and draws only the closed agent accessory set", () => {
+    const plain = renderToStaticMarkup(<Creature host="fixture-host" id="one" size="row" state="ready" />)
+    expect(plain).not.toContain('class="connect-creature-accessory"')
+    for (const accessory of [
+      "none",
+      "headphones",
+      "hard-hat",
+      "scarf",
+      "glasses"
+    ] satisfies ReadonlyArray<CreatureAccessory>) {
+      const markup = renderToStaticMarkup(
+        <Creature accessory={accessory} host="fixture-host" id="one" size="row" state="ready" />
+      )
+      expect(markup.includes('class="connect-creature-accessory"')).toBe(accessory !== "none")
+    }
+  })
+
+  it("uses the agent name for hash colour and lets a served family override it on every slot", () => {
+    for (const size of ["row", "cast", "stage"] satisfies ReadonlyArray<"row" | "cast" | "stage">) {
+      const markup = renderToStaticMarkup(
+        <Creature host="atlas" id="agent-ds-rly" name="ds-rly" size={size} state="working" />
+      )
+      expect(markup).toContain('fill="#7173d7"')
+      expect(
+        renderToStaticMarkup(
+          <Creature host="atlas" hueFamily="rose" id="agent-ds-rly" name="ds-rly" size={size} state="working" />
+        )
+      ).toContain('fill="#cd4f66"')
     }
   })
 

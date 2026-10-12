@@ -650,6 +650,7 @@ export const AgentDirectory = ({
                             arrived={arrivals.has(key)}
                             host={agent.host}
                             id={String(agent.id)}
+                            name={agent.name}
                             size="row"
                             stale={stale || silentHosts.includes(agent.host)}
                             state={agent.state}

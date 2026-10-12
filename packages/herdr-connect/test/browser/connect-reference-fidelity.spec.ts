@@ -4,6 +4,7 @@ import { WorkGoal, WorkSnapshots } from "@knpkv/herdr-work/model"
 import { expect, type Locator, type Page, test } from "@playwright/test"
 import { Schema } from "effect"
 import { ConnectAgent } from "../../src/model.js"
+import { captureFidelity } from "./creature-capture.js"
 
 test.use({ locale: "en-GB", timezoneId: "UTC" })
 
@@ -692,9 +693,11 @@ for (const width of [390, 1280]) {
         }
         await expect(page.locator(".connect-cast-member small")).toHaveCount(0)
         await page.evaluate(() => document.fonts.ready)
-        await page
-          .locator(state.startsWith("2i") ? ".connect-stage-sheet" : "#fleet-connect-root")
-          .screenshot({ path: testInfo.outputPath(`fidelity/connect-${state}-${String(width)}-${theme}.png`) })
+        await captureFidelity(
+          page,
+          testInfo.outputPath(`fidelity/connect-${state}-${String(width)}-${theme}.png`),
+          page.locator(state.startsWith("2i") ? ".connect-stage-sheet" : "#fleet-connect-root")
+        )
         expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width + 2)
         if (state === "2a") {
           const title = page.getByRole("heading", { name: /Connect/ })

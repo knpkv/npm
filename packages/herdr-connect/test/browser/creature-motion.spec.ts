@@ -2,9 +2,13 @@ import { expect, type Page, test } from "@playwright/test"
 import { agentStatePresentation } from "../../src/agent-state.js"
 
 /** The actual SVG paths for the contact-sheet seeds, under the app's creature stylesheet. */
-const openBrowGrid = async (page: Page): Promise<void> => {
+const openBrowGrid = async (page: Page, state = "working", size = "stage"): Promise<void> => {
   await page.emulateMedia({ reducedMotion: "no-preference" })
-  await page.goto("/?brows")
+  await page.goto(
+    `/?brows&size=${size}&state=${state === "stale" ? "working" : state === "finished" ? "done" : state}&${
+      state === "stale" ? "stale" : ""
+    }`
+  )
   await expect(page.locator("[data-brow-grid] svg.connect-creature")).toHaveCount(64)
 }
 
@@ -77,8 +81,7 @@ const measure = (page: Page) =>
 test.describe("Connect creatures", () => {
   test("live while working when the reader allows motion", async ({ page }) => {
     await open(page, "no-preference")
-    // Breathing, blinking, reading and the light round the body: the working agent's life. Each eye blinks with
-    // three lid parts (the aperture's two edges and the lash) and reads with its own gaze.
+    // Only the eyes and working light move on an ordinary agent; body deformation belongs to talk.
     expect(await running(page)).toEqual([
       "connect-creature-blink",
       "connect-creature-blink",
@@ -86,8 +89,6 @@ test.describe("Connect creatures", () => {
       "connect-creature-blink",
       "connect-creature-blink-low",
       "connect-creature-blink-low",
-      "connect-creature-bob",
-      "connect-creature-breathe",
       "connect-creature-lash",
       "connect-creature-lash",
       "connect-creature-read",
@@ -114,8 +115,8 @@ test.describe("Connect creatures", () => {
     expect(Math.abs(quarter.offset - start.offset)).toBeCloseTo(25, 2)
   })
 
-  // Only the body squashes: through a breath and an arrival's hop the pupils stay round and keep their size.
-  test("never squashes the eyes with the body", async ({ page }) => {
+  // Ordinary arrivals retain body scale, round pupils and the face's proportions.
+  test("keeps an ordinary arrival and its eyes at their true scale", async ({ page }) => {
     await open(page, "no-preference")
     await freeze(page, [], 0)
     const rest = await measure(page)
@@ -135,7 +136,7 @@ test.describe("Connect creatures", () => {
     for (const [names, share] of moments) {
       await freeze(page, names, share)
       const moment = await measure(page)
-      expect(moment.body, names.join()).not.toBe(rest.body)
+      expect(moment.body, names.join()).toBe(rest.body)
       expect(moment.width).toBeCloseTo(moment.height, 2)
       expect(moment.width).toBeCloseTo(rest.width, 2)
       expect(moment.browWidth).toBeCloseTo(rest.browWidth, 2)
@@ -155,9 +156,8 @@ test.describe("Connect creatures", () => {
     )
     // A point on the eye's white beside the iris, clear of where the lash falls, read before the eyes go.
     const point = await svg.evaluate((node): readonly [number, number] => {
-      const eye = node.querySelector(".connect-creature-white")
-      const read = (name: string): number => Number(eye?.getAttribute(name) ?? 0)
-      return [read("cx") - read("rx") * 0.8, read("cy") - read("ry") * 0.1]
+      const eye = node.querySelector<SVGPathElement>(".connect-creature-white")?.getBBox()
+      return [eye === undefined ? 0 : eye.x + eye.width * 0.1, eye === undefined ? 0 : eye.y + eye.height * 0.45]
     })
     expect(point[0]).toBeGreaterThan(0)
     /** The RGB drawn at that point. */
@@ -186,7 +186,7 @@ test.describe("Connect creatures", () => {
     }
     const distance = (one: ReadonlyArray<number>, other: ReadonlyArray<number>) =>
       Math.max(...one.map((value, index) => Math.abs(value - (other[index] ?? 0))))
-    await freeze(page, ["connect-creature-blink", "connect-creature-lash"], 0.958)
+    await freeze(page, ["connect-creature-blink", "connect-creature-lash"], 0.345)
     const shut = await sample()
     await freeze(page, [], 0)
     const awake = await sample()
@@ -204,7 +204,7 @@ test.describe("Connect creatures", () => {
     expect(await running(page)).toEqual([])
   })
 
-  // The hub's in-app setting zeroes rly's motion tokens; every pace is a multiple of one, so it stops too.
+  // The in-app preference selects the same static frames as the system preference.
   test("still under the in-app reduced-motion setting", async ({ page }) => {
     await open(page, "no-preference")
     await page.evaluate(() => document.body.setAttribute("data-rly-reduced-motion", "reduce"))
@@ -228,7 +228,7 @@ test.describe("Connect creatures", () => {
     for (const state of ["ready", "working", "needs-you", "finished", "stale"]) {
       test(`${size} brows clear sockets, silhouette and centre line across 64 seeds while ${state}`, async ({ page }) => {
         test.setTimeout(30_000)
-        await openBrowGrid(page)
+        await openBrowGrid(page, state, size)
         const failures = await page.locator("[data-brow-grid]").evaluate((grid, [drawnSize, shown]) => {
           const failures: Array<string> = []
           for (const [index, svg] of [...grid.querySelectorAll<SVGSVGElement>("svg")].entries()) {
@@ -249,7 +249,7 @@ test.describe("Connect creatures", () => {
             const body = svg.querySelector<SVGPathElement>(".connect-creature-body")
             const bob = svg.querySelector<SVGGElement>(".connect-creature-bob")
             const brows = [...svg.querySelectorAll<SVGPathElement>(".connect-creature-brow")]
-            const sockets = [...svg.querySelectorAll<SVGEllipseElement>(".connect-creature-socket")]
+            const sockets = [...svg.querySelectorAll<SVGPathElement>(".connect-creature-socket")]
             const bodyInverse = body?.getCTM()?.inverse()
             const bobInverse = bob?.getCTM()?.inverse()
             if (
@@ -286,10 +286,9 @@ test.describe("Connect creatures", () => {
                   if (side === 0 ? face.x >= 50 : face.x <= 50) {
                     failures.push(`Seed ${index}, side ${side}: crossed centre`)
                   }
-                  const x = (eye.x - socket.cx.baseVal.value) / socket.rx.baseVal.value
-                  if (Math.abs(x) <= 1) {
-                    const top = socket.cy.baseVal.value - socket.ry.baseVal.value * Math.sqrt(1 - x * x)
-                    clearance = Math.min(clearance, top - eye.y)
+                  const box = socket.getBBox()
+                  if (eye.x >= box.x && eye.x <= box.x + box.width) {
+                    clearance = Math.min(clearance, box.y - eye.y)
                   }
                 }
               }
@@ -305,43 +304,34 @@ test.describe("Connect creatures", () => {
     }
   }
 
-  test("ready brows share the wander clock and stay static under reduced motion", async ({ page }) => {
+  test("focused gaze uses the reference clock and becomes still under reduced motion", async ({ page }) => {
     await open(page, "no-preference")
     const svg = page.locator(".connect-agent svg.connect-creature").first()
-    await svg.evaluate((node) => node.setAttribute("data-bucket", "ready"))
-    const clocks = await svg.evaluate((node) => {
-      const style = (selector: string) => getComputedStyle(node.querySelector(selector) ?? node)
-      const brow = style(".connect-creature-brow")
-      const gaze = style(".connect-creature-gaze")
-      return {
-        brow: [brow.animationDuration, brow.animationDelay],
-        gaze: [gaze.animationDuration, gaze.animationDelay]
-      }
-    })
-    expect(clocks.brow).toEqual(clocks.gaze)
-    expect(clocks.brow[0]).not.toBe("0s")
+    await expect(svg.locator(".connect-creature-gaze").first()).toHaveCSS("animation-duration", "2.4s")
+    expect(
+      await svg.locator(".connect-creature-gaze").first().evaluate((node) =>
+        Number.parseFloat(getComputedStyle(node).animationDelay)
+      )
+    ).toBeLessThan(0)
     await page.emulateMedia({ reducedMotion: "reduce" })
     expect(await running(page)).toEqual([])
   })
 
-  test("stale brows flatten without inheriting working tilt, and forced colours make them opaque", async ({ page }) => {
-    await open(page, "reduce")
-    const svg = page.locator(".connect-agent svg.connect-creature").first()
-    await svg.evaluate((node) => node.setAttribute("data-stale", ""))
+  test("stale brows lower without distortion, and forced colours retain their stroke", async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" })
+    await page.goto("/?drawing=single&stale")
+    const svg = page.locator("[data-drawing-case] .connect-creature")
     const brow = svg.locator(".connect-creature-brow").first()
-    await expect(brow).toHaveCSS("opacity", "0.45")
-    await expect(brow).toHaveCSS("rotate", "0deg")
-    await expect(brow).toHaveCSS("scale", "1 0.45")
-    await expect(brow).toHaveCSS("translate", "0px 0.4px")
+    await expect(brow).toHaveCSS("scale", "none")
+    expect(await brow.evaluate((node) => getComputedStyle(node).translate)).not.toBe("none")
     await page.emulateMedia({ forcedColors: "active" })
     await expect(brow).toHaveCSS("opacity", "1")
-    expect(await brow.evaluate((node) => getComputedStyle(node).fill)).toBe(
+    expect(await brow.evaluate((node) => getComputedStyle(node).stroke)).toBe(
       await svg.locator(".connect-creature-pupil").first().evaluate((node) => getComputedStyle(node).fill)
     )
     await page.emulateMedia({ forcedColors: "none" })
     await page.evaluate(() => document.body.setAttribute("data-rly-forced-colors", "active"))
-    await expect(brow).toHaveCSS("opacity", "1")
-    expect(await brow.evaluate((node) => getComputedStyle(node).fill)).toBe(
+    expect(await brow.evaluate((node) => getComputedStyle(node).stroke)).toBe(
       await svg.locator(".connect-creature-pupil").first().evaluate((node) => getComputedStyle(node).fill)
     )
   })
@@ -354,7 +344,7 @@ test.describe("Connect creatures", () => {
           test(`brow fidelity ${size} ${state} ${theme} ${width}`, async ({ page }, testInfo) => {
             await page.setViewportSize({ height: 844, width })
             await page.emulateMedia({ colorScheme: theme })
-            await openBrowGrid(page)
+            await openBrowGrid(page, state, size)
             const presentation = agentStatePresentation(
               state === "stale" ? "working" : state === "finished" ? "done" : state === "needs-you" ? "waiting" : state
             )
