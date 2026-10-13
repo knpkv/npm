@@ -1,5 +1,5 @@
 import { openPrivateSqlite, type PrivateDatabaseError, type PrivateSqlite } from "@knpkv/herdr-fleet/sqlite"
-import { Clock, Effect, Schema, Semaphore } from "effect"
+import { Clock, Effect, Option, Schema, Semaphore } from "effect"
 import type { DatabaseSync, SQLOutputValue } from "node:sqlite"
 import { ConnectArchiveStoreError } from "./errors.js"
 import { advanceHueObservation, initializeHues } from "./internal/hue-database.js"
@@ -229,10 +229,15 @@ export class AgentArchiveStore {
     return new AgentArchiveStore(path, transactions, opened)
   })
 
-  /** Supply one validated host read. Failed or partial reads must set complete to false. */
+  /**
+   * Supply one validated host read. Failed or partial reads must set complete to false.
+   * By default busy writes retry for about five seconds. `retryBusy: false` makes one native 100 ms
+   * attempt and refuses a queued archive permit, for optional enrichment on live directory reads.
+   */
   readonly observe = Effect.fn("AgentArchiveStore.observe")(function*(
     this: AgentArchiveStore,
-    input: ConnectArchiveObservation
+    input: ConnectArchiveObservation,
+    options: { readonly retryBusy?: boolean } = {}
   ) {
     const observation = yield* Schema.decodeUnknownEffect(ConnectArchiveObservation)(input).pipe(
       Effect.mapError(failWith("observe.decode"))
@@ -244,8 +249,10 @@ export class AgentArchiveStore {
         Math.max(this.#taintedHosts.get(host) ?? observation.observedAt, observation.observedAt)
       )
     )
-    return yield* this.#transactions.withPermits(1)(
-      connectSqliteWrite("observe.transaction", () => {
+    const retryBusy = options.retryBusy !== false
+    const write = connectSqliteWrite(
+      "observe.transaction",
+      () => {
         // Cancellation can taint this host while an older attempt waits; check again on every retry.
         const failedAt = this.#taintedHosts.get(host)
         if (failedAt !== undefined && observation.observedAt < failedAt) return false
@@ -258,21 +265,33 @@ export class AgentArchiveStore {
           this.#database.exec("ROLLBACK")
           throw cause
         }
-      }, failWith("observe.transaction")).pipe(
-        Effect.tap((recorded) =>
-          recorded ? this.#secureFiles.pipe(Effect.mapError(fromPrivateDatabaseError)) : Effect.void
-        ),
-        Effect.tap((recorded) =>
-          Effect.sync(() => {
-            if (!recorded) return
-            const failedAt = this.#taintedHosts.get(host)
-            if (failedAt === undefined || failedAt <= observation.observedAt) this.#taintedHosts.delete(host)
-          })
-        ),
-        Effect.tapError(() => markTainted),
-        Effect.asVoid
-      )
-    ).pipe(Effect.onInterrupt(() => markTainted))
+      },
+      failWith("observe.transaction"),
+      retryBusy
+    ).pipe(
+      Effect.tap((recorded) =>
+        recorded ? this.#secureFiles.pipe(Effect.mapError(fromPrivateDatabaseError)) : Effect.void
+      ),
+      Effect.tap((recorded) =>
+        Effect.sync(() => {
+          if (!recorded) return
+          const failedAt = this.#taintedHosts.get(host)
+          if (failedAt === undefined || failedAt <= observation.observedAt) this.#taintedHosts.delete(host)
+        })
+      ),
+      Effect.asVoid
+    )
+    const guarded = retryBusy
+      ? this.#transactions.withPermits(1)(write)
+      : this.#transactions.withPermitsIfAvailable(1)(write).pipe(Effect.flatMap(Option.match({
+        onNone: () =>
+          new ConnectArchiveStoreError({
+            operation: "observe.transaction",
+            cause: "archive transaction already in progress"
+          }),
+        onSome: () => Effect.void
+      })))
+    return yield* guarded.pipe(Effect.tapError(() => markTainted), Effect.onInterrupt(() => markTainted))
   })
 
   /** Latest remembered names, scoped to the requested host and identity, including closed agents. */

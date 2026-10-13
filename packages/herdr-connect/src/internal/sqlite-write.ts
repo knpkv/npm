@@ -27,16 +27,24 @@ const retrySchedule = Schedule.exponential("25 millis").pipe(
 export const connectSqliteWrite = Effect.fn("ConnectStore.sqliteWrite")(function*<A, E>(
   operation: string,
   run: () => A,
-  onOtherFailure: (cause: unknown) => E
+  onOtherFailure: (cause: unknown) => E,
+  retryBusy = true
 ) {
-  return yield* Effect.try({
+  const attempt = Effect.try({
     try: run,
     catch: (cause) =>
       isSqliteBusy(cause)
-        ? new ConnectStoreBusyError({ operation, timeoutMillis: connectWriteTimeoutMillis, cause })
+        ? new ConnectStoreBusyError({
+          operation,
+          timeoutMillis: retryBusy ? connectWriteTimeoutMillis : connectBusyTimeoutMillis,
+          cause
+        })
         : onOtherFailure(cause)
-  }).pipe(Effect.retry({
-    while: (error): boolean => Schema.is(ConnectStoreBusyError)(error),
-    schedule: retrySchedule
-  }))
+  })
+  return yield* retryBusy ?
+    attempt.pipe(Effect.retry({
+      while: (error): boolean => Schema.is(ConnectStoreBusyError)(error),
+      schedule: retrySchedule
+    })) :
+    attempt
 })

@@ -1,6 +1,6 @@
 import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it, vi } from "@effect/vitest"
-import { Clock, Deferred, Effect, Fiber, FileSystem, Logger, Path, Result, Schema } from "effect"
+import { Clock, Deferred, Effect, Fiber, FileSystem, Logger, Option, Path, Result, Schema } from "effect"
 import { HttpClient, HttpClientResponse } from "effect/http"
 import { TestClock } from "effect/testing"
 import { DatabaseSync } from "node:sqlite"
@@ -624,6 +624,87 @@ describe("closed agent archive", () => {
 
 /** Real time is the contract here: short native waits must leave the loop free for the competing writer. */
 it.layer(NodeServices.layer, { excludeTestServices: true })((it) => {
+  /** Optional archive contention must not consume the live directory's ten-second deadline per host. */
+  it.effect.each([false, true])(
+    "serves three live hosts promptly while their optional archive writer is locked; primary pending %s",
+    (primaryPending) =>
+      Effect.gen(function*() {
+        const store = yield* openStore()
+        const database = yield* Effect.acquireRelease(
+          Effect.sync(() => new DatabaseSync(store.path)),
+          (opened) => Effect.sync(() => opened.close())
+        )
+        yield* Effect.acquireRelease(
+          Effect.sync(() => database.exec("BEGIN IMMEDIATE")),
+          () => Effect.sync(() => database.exec("ROLLBACK"))
+        )
+        const readings = ["HOST-A", "HOST-B", "HOST-C"].map((host) =>
+          LocalConnectAgents.make({
+            host,
+            complete: true,
+            agents: [ConnectAgent.make({
+              id: `agent-${host.toLowerCase()}`,
+              host,
+              name: "Worker",
+              kind: "test",
+              state: "working",
+              work: "Healthy live agent",
+              lastActivityAt: 0
+            })]
+          })
+        )
+        const local = readings[0]
+        if (local === undefined) {
+          return yield* Effect.die(
+            new ConnectArchiveStoreError({ operation: "fixture.local", cause: "local fixture is missing" })
+          )
+        }
+        const peers = readings.slice(1).map(({ host }) => ({
+          host,
+          online: true,
+          agentsUrl: `https://${host.toLowerCase()}.example.test/agents`,
+          terminalUrl: null
+        }))
+        const client = HttpClient.make((request) => {
+          const reading = readings.find(({ host }) =>
+            new URL(request.url).hostname === `${host.toLowerCase()}.example.test`
+          )
+          if (reading === undefined) {
+            return Effect.die(
+              new ConnectArchiveStoreError({ operation: "fixture.peer", cause: "unknown fixture host" })
+            )
+          }
+          return Effect.succeed(HttpClientResponse.fromWeb(request, new Response(JSON.stringify(reading))))
+        })
+        const warnings: Array<{ readonly level: string; readonly message: string }> = []
+        const logger = Logger.make<unknown, void>((entry) => {
+          warnings.push({ level: entry.logLevel, message: String(entry.message) })
+        })
+        if (primaryPending) {
+          yield* Effect.forkScoped(observe(store, 2, [agent()]), { startImmediately: true })
+        }
+        const started = yield* Clock.currentTimeMillis
+        const directory = yield* fleetConnectAgents(Effect.succeed(local), peers, { store, observedAt: 1 }).pipe(
+          Effect.provideService(HttpClient.HttpClient, client),
+          Effect.withLogger(logger),
+          Effect.timeoutOption("2 seconds")
+        )
+        expect(Option.isSome(directory)).toBe(true)
+        if (Option.isSome(directory)) {
+          expect(directory.value).toEqual({ agents: readings.flatMap(({ agents }) => agents), failures: [] })
+        }
+        expect((yield* Clock.currentTimeMillis) - started).toBeLessThan(1_500)
+        expect(
+          warnings.filter(({ level, message }) =>
+            level === "Warn" && message.includes("Connect archive observation failed")
+          )
+        ).toHaveLength(3)
+        expect(warnings.filter(({ message }) => message.includes("Connect archive name lookup failed"))).toHaveLength(
+          primaryPending ? 1 : 0
+        )
+      }).pipe(Effect.scoped),
+    { timeout: 5_000 }
+  )
   it.effect(
     "retries a writer released after 300 ms while the event loop timer still runs",
     () =>

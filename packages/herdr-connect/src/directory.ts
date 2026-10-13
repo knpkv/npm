@@ -14,6 +14,7 @@ import { ConnectArchiveStoreError, ConnectPeerError, ConnectStoreBusyError } fro
 import { buildConnectForest } from "./forest.js"
 import { connectAgentId } from "./id.js"
 import { ConnectInventoryFailure, inventoryRelationshipFailure } from "./internal/inventory-failure.js"
+import { connectBusyTimeoutMillis } from "./internal/sqlite-write.js"
 import {
   ConnectAgent,
   type ConnectAgentCursor,
@@ -360,7 +361,7 @@ export const fleetConnectAgents = Effect.fn("HerdrConnect.fleetAgents")(function
       )
     ]
     for (const observation of observations) {
-      yield* archive.store.observe({ ...observation, observedAt: archive.observedAt }).pipe(
+      yield* archive.store.observe({ ...observation, observedAt: archive.observedAt }, { retryBusy: false }).pipe(
         Effect.catchIf(
           Schema.is(Schema.Union([ConnectArchiveStoreError, ConnectStoreBusyError])),
           (cause) => Effect.logWarning("Connect archive observation failed", { host: observation.host, cause })
@@ -374,6 +375,15 @@ export const fleetConnectAgents = Effect.fn("HerdrConnect.fleetAgents")(function
         : [{ host, id: relationship.parentAgentId }]
     )
     const remembered = yield* archive.store.namesFor(missingParents).pipe(
+      // A primary writer can hold the local permit during retries; this lookup is optional too.
+      Effect.timeoutOrElse({
+        duration: connectBusyTimeoutMillis,
+        orElse: () =>
+          new ConnectArchiveStoreError({
+            operation: "names.deadline",
+            cause: "archive name lookup exceeded its optional read budget"
+          })
+      }),
       Effect.catchTag(
         "ConnectArchiveStoreError",
         (cause) => Effect.logWarning("Connect archive name lookup failed", { cause }).pipe(Effect.as([]))
