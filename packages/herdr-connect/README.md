@@ -4,7 +4,7 @@ Fleet agent directory and authenticated Herdr terminal control.
 
 The directory combines the local inventory with peer `/v1/connect/agents/local` responses. Peer requests time out after 1.5 seconds and run with bounded concurrency. An offline, unavailable, timed-out, or malformed peer becomes a typed partial failure; healthy agents remain usable. The directory names each host that didn't answer, with its cause, above the list and in the Host filter, so missing agents are explained rather than silently absent.
 
-`ConnectAgent.hue` and `ArchivedConnectAgent.hue` optionally carry one of eight agent palettes: rose, ember, amber, lime, moss, teal, sky and iris. Plum belongs to the Relay mark. Older peers and archives may omit the field. The current drawing remains unchanged; the creature drawing update consumes this served family instead of its hash-only fallback.
+`ConnectAgent.hue` and `ArchivedConnectAgent.hue` optionally carry one of eight agent palettes: rose, ember, amber, lime, moss, teal, sky and iris. Plum belongs to the Relay mark. Older peers and archives may omit the field. Every live row, cast, crew member, pin and stage uses the served family when present, as do Home cards and closed archive snapshots. Older rows without it keep the name hash fallback.
 
 Hue assignment is optional enrichment. If its store operation fails, the validated directory still serves its agents without hue fields, so clients use the hash fallback. One `ConnectHueAssignmentFailed` warning records the host and typed cause tag, without database details.
 
@@ -62,7 +62,7 @@ The newest retained report supplies the directory's optional `voice` text and ti
 
 ### Creature identity and motion
 
-`Creature` seeds its circle, squircle, pear, star or bean body from `host:id`. Body identity stays fixed across state changes and sizes. Hue uses `hash(host,name)` over eight design families. `name` defaults to `id` for standalone drawings; Connect supplies the agent name. `hueFamily` overrides the hash for a future served assignment. Hash-only allocation can collide on one host until the hub persists allocations. Plum is reserved for the chef mark and is never selected by the agent hash.
+`Creature` seeds its circle, squircle, pear, star or bean body from `lowercase(host):id`. Drawing and persisted hue reservations share the seed and shape selector. Body identity ignores host casing and stays fixed across state changes and sizes. Hue uses `hash(lowercase(host),name)` over eight design families. `name` defaults to `id` for standalone drawings; Connect supplies the agent name. `hueFamily` overrides the hash with the hub-assigned family. Connect passes each agent's served hue across every live and archive surface; missing fields keep the hash fallback, which can still collide on older peers. Plum is reserved for the chef mark and is never selected by the agent hash.
 
 `accessory` defaults to `none`. Agents may wear neutral `headphones`, `hard-hat`, `scarf` or `glasses`; every accessory keeps the eyes clear. Chef headwear belongs only to the app mark and is outside the agent accessory set. `talking` defaults to false. A mouth and squash/stretch require both `talking` and `size="stage"`; rows, cast, pins and crew keep blush and their true body. Slot sizes and stage hero sizes stay owned by Connect's layout.
 

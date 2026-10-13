@@ -260,6 +260,11 @@ for (const theme of ["light", "dark"]) {
       closed(`closed-${state}`, "fixture-host", 1, undefined, "worker", state)
     )
     await archiveRoute(page, pageOf(fixtures))
+    // Archived retains the live inventory cache: seed Working before mount, not after switching views.
+    await page.route(
+      "**/v1/connect/agents*",
+      (route) => route.fulfill({ json: { agents: [{ ...live, state: "working" }], failures: [], nextCursor: null } })
+    )
     // Mount with motion allowed, rather than sampling a media change after a reduced-motion fixture capture.
     await page.emulateMedia({ reducedMotion: "no-preference" })
     expect(await page.evaluate(() => window.matchMedia("(prefers-reduced-motion: no-preference)").matches)).toBe(true)
@@ -272,15 +277,14 @@ for (const theme of ["light", "dark"]) {
       await expectClosed(page.locator(".connect-archive-stage .connect-creature"))
       await page.keyboard.press("Escape")
     }
-    // Nearby live working motion must survive the closed-only exclusion.
-    await page.route(
-      "**/v1/connect/agents*",
-      (route) => route.fulfill({ json: { agents: [{ ...live, state: "working" }], failures: [], nextCursor: null } })
-    )
+    // CONNECT-MAP rev6 keeps Waiting still; Working's connect-creature-turn orbit retains its 1800ms clock.
     await page.getByRole("link", { name: "Active", exact: true }).click()
-    const active = page.locator(".connect-agent .connect-creature").first()
+    const active = page.locator(".connect-agent .connect-creature[data-bucket='working']")
     await expect(active).toBeVisible()
-    expect(await active.evaluate((svg) => svg.getAnimations({ subtree: true }).length)).toBeGreaterThan(0)
+    const orbit = active.locator(".connect-creature-orbit")
+    await expect(orbit).toHaveCSS("animation-name", "connect-creature-turn")
+    await expect(orbit).toHaveCSS("animation-duration", "1.8s")
+    expect(await orbit.evaluate((node) => node.getAnimations().length)).toBeGreaterThan(0)
   })
 }
 

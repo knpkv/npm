@@ -2978,6 +2978,7 @@
   /* The stack is a sibling, so its sticky containing block includes the whole directory. */
   .connect-agents {
     --connect-pin-inset: var(--rly-space-24);
+    --connect-pin-inline-inset: var(--rly-space-32);
     --connect-pin-height: calc(
       var(--connect-pin-rows, 0) * 48px + max(0, var(--connect-pin-rows, 0) - 1) * var(--rly-space-8)
     );
@@ -2988,13 +2989,21 @@
     padding-inline-end: 260px;
   }
 
-  @media (max-width: 640px) {
+  @media (width < 600px) {
     .connect-agents {
-      --connect-pin-inset: calc(var(--app-bottom-inset, 0px) + var(--rly-space-12) + env(safe-area-inset-bottom, 0px));
+      --connect-pin-inset: calc(46px + env(safe-area-inset-bottom, 0px));
+      --connect-pin-inline-inset: var(--rly-space-16);
     }
 
     .connect-directory-secondary[data-pinned] {
       padding-inline-end: 156px;
+    }
+  }
+
+  @media (max-width: 40rem) {
+    /* The embedded shell owns the navigation clearance, including its measured bottom bar. */
+    .connect-shell-embedded .connect-agents {
+      --connect-pin-inset: calc(var(--app-bottom-inset, 0px) + var(--rly-space-12) + env(safe-area-inset-bottom, 0px));
     }
   }
 
@@ -3291,6 +3300,20 @@
     grid-template-columns: 20px minmax(0, 1fr);
     gap: var(--rly-space-16);
     padding: var(--rly-space-24);
+  }
+
+  /* rev6's unreachable card is distinct from HTTP responses and typed deadlines. */
+  .connect-directory-error[data-unreachable] {
+    border-radius: var(--rly-radius-control);
+  }
+
+  .connect-directory-error[data-unreachable] h2 {
+    font-size: var(--rly-type-card-title-size);
+  }
+
+  .connect-directory-error[data-unreachable] > svg {
+    block-size: 20px;
+    inline-size: 20px;
   }
 
   .connect-directory-error > svg {
@@ -3788,6 +3811,36 @@
     justify-content: start;
   }
 
+  .connect-pin-caption {
+    align-items: center;
+    display: flex;
+    gap: var(--rly-space-8);
+    min-inline-size: 0;
+    text-align: start;
+  }
+
+  .connect-pin-state {
+    color: var(--rly-color-text-2);
+    flex: none;
+    font-size: var(--rly-type-meta-size);
+    font-weight: 500;
+    line-height: 1.2;
+    white-space: nowrap;
+  }
+
+  .connect-pin-state[data-tone="progress"] {
+    color: var(--rly-color-deploying-ink);
+  }
+  .connect-pin-state[data-tone="caution"] {
+    color: var(--rly-color-held-ink);
+  }
+  .connect-pin-state[data-tone="critical"] {
+    color: var(--rly-color-blocked-ink);
+  }
+  .connect-pin-state[data-tone="positive"] {
+    color: var(--rly-color-success-ink);
+  }
+
   .connect-pin-text {
     display: grid;
     min-inline-size: 0;
@@ -3805,26 +3858,33 @@
   /* Sticky uses the actual scroll owner, including a page-scrolling hub on phones. At the end the
      negative margin overlays only the footer's reserved corner; the list still ends above it. */
   .connect-pins[data-placement="float"] {
-    align-items: end;
-    flex-direction: column;
+    display: grid;
+    gap: var(--rly-space-8);
+    justify-items: end;
+    max-inline-size: 100%;
     inset-block-end: var(--connect-pin-inset);
     inline-size: fit-content;
     margin-block-start: calc(-1 * (var(--connect-pin-height) + var(--connect-pin-inset)));
     margin-block-end: var(--connect-pin-inset);
     margin-inline-start: auto;
     /* Both sides' insets: inline-end is the left edge in right-to-left text. */
-    inset-inline-end: max(env(safe-area-inset-left, 0px), env(safe-area-inset-right, 0px));
+    inset-inline-end: calc(
+      var(--connect-pin-inline-inset) + max(env(safe-area-inset-left, 0px), env(safe-area-inset-right, 0px))
+    );
     position: sticky;
     z-index: 2;
   }
 
   .connect-pins[data-placement="float"] .connect-pin {
-    block-size: 48px;
+    gap: var(--rly-space-6);
+    min-block-size: 48px;
   }
 
   .connect-pins[data-placement="float"] .connect-pin > .connect-pin-open {
     block-size: 46px;
     gap: var(--rly-space-6);
+    flex: 1;
+    padding-inline-start: 0;
   }
 
   .connect-pins[data-placement="float"] .connect-pin > .connect-pin-open .connect-creature {
@@ -3832,8 +3892,9 @@
   }
 
   .connect-pins[data-placement="float"] .connect-pin > .connect-pin-unpin {
-    margin-inline-start: calc(-1 * var(--rly-space-8));
-    margin-inline-end: calc(-1 * var(--rly-space-12));
+    /* The 16px glyph starts 8px into the capsule; its 44px control stays beside Open. */
+    margin-inline-start: -6px;
+    margin-inline-end: -14px;
     z-index: 1;
   }
 
@@ -3841,49 +3902,26 @@
     block-size: 48px;
   }
 
-  @media (max-width: 640px) {
+  .connect-pins[data-placement="float"] .connect-pin-name {
+    max-inline-size: none;
+    min-inline-size: 0;
+  }
+
+  /* pinFrame applies to every pin count, switching only at the 600px viewport boundary. */
+  @media (width < 600px) {
     .connect-pins[data-placement="float"] .connect-pin {
-      inline-size: 144px;
+      inline-size: fit-content;
       max-inline-size: 144px;
     }
 
-    .connect-pins[data-placement="float"] .connect-pin > .connect-pin-unpin {
-      /* Keep the square target; its glyph occupies only the leading 20px of the compact pill. */
-      margin-inline-end: calc(-1 * var(--rly-space-16));
+    .connect-pins[data-placement="float"] .connect-pin-caption {
+      align-items: start;
+      flex-direction: column;
+      gap: var(--rly-space-2);
     }
 
-    .connect-pins[data-placement="float"] .connect-pin > .connect-pin-open {
-      align-content: center;
-      display: grid;
-      flex: 1;
-      gap: 0 var(--rly-space-4);
-      grid-template-columns: 28px minmax(0, 1fr);
-      grid-template-rows: repeat(2, 16px);
-      text-align: start;
-    }
-
-    .connect-pins[data-placement="float"] .connect-pin > .connect-pin-open .connect-creature {
-      grid-row: 1 / 3;
-      inline-size: 28px;
-    }
-
-    .connect-pins[data-placement="float"] .connect-pin-name,
-    .connect-pins[data-placement="float"] .connect-pin-state {
-      min-inline-size: 0;
-    }
-
-    .connect-pins[data-placement="float"] .connect-pin-state {
-      grid-column: 2;
-      white-space: nowrap;
-    }
-
-    .connect-pins[data-placement="float"] .connect-pin-state > span {
-      gap: var(--rly-space-4);
-    }
-
-    .connect-pins[data-placement="float"] .connect-pin-state svg {
-      block-size: 12px;
-      inline-size: 12px;
+    .connect-pins[data-placement="float"] .connect-pin-name {
+      align-self: stretch;
     }
   }
 
@@ -3910,7 +3948,7 @@
     min-inline-size: 0;
   }
 
-  .connect-pins[data-placement="bar"] .connect-pin :is(.connect-pin-name, .connect-pin-state) {
+  .connect-pins[data-placement="bar"] .connect-pin-caption {
     display: none;
   }
 
@@ -4837,12 +4875,12 @@
     opacity: 1;
   }
   .connect-creature[data-closed] .connect-creature-brow {
-    fill: oklch(0.36 0.012 var(--connect-creature-brow-hue));
+    fill: none;
     rotate: 0deg;
     scale: 1;
-    opacity: 1;
-    stroke: oklch(0.36 0.012 var(--connect-creature-brow-hue));
-    translate: 0 0.8px;
+    opacity: 0.45;
+    stroke: var(--connect-creature-ink);
+    translate: 0 calc(var(--connect-creature-unit) * 0.45px);
   }
   .connect-creature[data-closed] .connect-creature-core {
     opacity: 0;
@@ -4852,14 +4890,16 @@
   }
   @media (forced-colors: active) {
     .connect-creature[data-closed] .connect-creature-brow {
-      fill: CanvasText;
+      fill: none;
+      opacity: 1;
       stroke: CanvasText;
     }
   }
   :where([data-forced-colors="active"], [data-rly-forced-colors="active"])
     .connect-creature[data-closed]
     .connect-creature-brow {
-    fill: CanvasText;
+    fill: none;
+    opacity: 1;
     stroke: CanvasText;
   }
   @media (hover: hover) and (pointer: fine) {

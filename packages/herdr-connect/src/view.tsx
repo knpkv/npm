@@ -700,6 +700,7 @@ export const AgentDirectory = ({
                           <Creature
                             arrived={arrivals.has(key)}
                             host={agent.host}
+                            hueFamily={agent.hue}
                             id={String(agent.id)}
                             name={agent.name}
                             size="row"

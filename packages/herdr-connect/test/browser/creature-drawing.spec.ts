@@ -393,6 +393,18 @@ for (const theme of ["light", "dark"] satisfies ReadonlyArray<"light" | "dark">)
         await expect(creature.locator(".connect-creature-halo")).toHaveCSS("opacity", "0")
         await expect(creature.locator(".connect-creature-orbit")).toHaveCSS("opacity", "0")
         await expect(creature.locator(".connect-creature-mouth")).toHaveCount(0)
+        const brows = await creature.locator(".connect-creature-brow").evaluateAll((nodes) =>
+          nodes.map((node) => {
+            const style = getComputedStyle(node)
+            return { fill: style.fill, stroke: style.stroke, opacity: Number(style.opacity) }
+          })
+        )
+        expect(brows).toHaveLength(2)
+        for (const brow of brows) {
+          expect(brow.fill).toBe("none")
+          expect(brow.stroke).not.toBe("none")
+          expect(brow.opacity).toBe(forcedColors === "active" ? 1 : 0.45)
+        }
         expectScale(await bodyScale(creature), 1)
         if (forcedColors === "active") {
           expect(await creature.locator(".connect-creature-body").evaluate((node) => getComputedStyle(node).stroke)).not

@@ -1,9 +1,9 @@
 import { Schema } from "effect"
 import type { DatabaseSync } from "node:sqlite"
+import { characterBodyKind, characterSeed } from "../character.js"
 import { type ConnectAgent, ConnectAgentHue } from "../model.js"
 
 const BodyKind = Schema.Literals(["circle", "squircle", "pear", "star", "bean"])
-const bodyKinds = BodyKind.literals
 const HueRow = Schema.Struct({
   agent_id: Schema.String,
   hue: ConnectAgentHue,
@@ -20,18 +20,6 @@ const hueSeed = (host: string, name: string): number => {
   let hash = 2166136261
   for (const char of `${host}:${name}`) hash = Math.imul(hash ^ char.charCodeAt(0), 16777619)
   return hash >>> 0
-}
-
-/** The drawing's independent mixed host:id seed and five-shape field, never derived from its hue. */
-const bodyKindFor = (host: string, id: string): typeof BodyKind.Type => {
-  let hash = 2166136261
-  for (const char of `${host}:${id}`) hash = Math.imul(hash ^ (char.codePointAt(0) ?? 0), 16777619)
-  hash ^= hash >>> 16
-  hash = Math.imul(hash, 0x85ebca6b)
-  hash ^= hash >>> 13
-  hash = Math.imul(hash, 0xc2b2ae35)
-  const seed = (hash ^ (hash >>> 16)) >>> 0
-  return Schema.decodeUnknownSync(BodyKind)(bodyKinds[(seed >>> 3) % bodyKinds.length])
 }
 
 /** The assigning host owns reservations and its observation watermark, even when archives live elsewhere. */
@@ -146,7 +134,7 @@ export const assignHues = (
       )
     ) continue
     const current = [...byId.values()]
-    const bodyKind = bodyKindFor(normalized, agent.id)
+    const bodyKind = characterBodyKind(characterSeed(normalized, agent.id))
     const hue = chooseHue(normalized, agent, current, bodyKind)
     const exclusive = current.some((row) =>
         row.agent_id !== agent.id && row.closed_at === null && row.hue === hue && row.exclusive === 1

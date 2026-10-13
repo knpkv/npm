@@ -5,6 +5,7 @@ import { Effect, FileSystem, Path, Result, Schema } from "effect"
 import { DatabaseSync } from "node:sqlite"
 import { AgentActivityStore } from "../src/activity-store.js"
 import { AgentArchiveStore } from "../src/archive-store.js"
+import { agentCharacter } from "../src/character.js"
 import { type AgentSource, localConnectAgents } from "../src/directory.js"
 import { type ArchivedConnectAgent, ConnectAgent } from "../src/model.js"
 import { AgentRelationshipStore } from "../src/relationship-store.js"
@@ -209,6 +210,26 @@ describe("persisted agent hues", () => {
           expect(next.agents[0]).toHaveProperty("hue", "ember")
         }).pipe(Effect.scoped))
     }
+
+    it.effect("reserves the client's drawn body for 28 agents on a mixed-case host with overflow", () =>
+      Effect.gen(function*() {
+        const stores = yield* openStores(yield* pathFor)
+        const host = "FIXTURE-HOST"
+        const agents = Array.from({ length: 28 }, (_, index) => identity(`worker-${String(index)}`))
+        yield* read(stores, agents, 0, host)
+        const database = yield* Effect.acquireRelease(
+          Effect.sync(() => new DatabaseSync(stores.activity.path)),
+          (opened) => Effect.sync(() => opened.close())
+        )
+        const rows = Schema.decodeUnknownSync(Schema.Array(Schema.Struct({
+          agent_id: Schema.String,
+          body_kind: Schema.String
+        })))(database.prepare("SELECT agent_id, body_kind FROM connect_agent_hues WHERE host = ?").all(host))
+        expect(rows).toHaveLength(28)
+        for (const row of rows) {
+          expect(agentCharacter(host, row.agent_id).bodyKind, row.agent_id).toBe(row.body_kind)
+        }
+      }).pipe(Effect.scoped))
 
     it.effect("normalizes host casing before overflow shape and hue seeds", () =>
       Effect.gen(function*() {

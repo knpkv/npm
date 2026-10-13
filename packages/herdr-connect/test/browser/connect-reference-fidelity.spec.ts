@@ -502,6 +502,91 @@ test.describe("creature fill fidelity", () => {
   }
 })
 
+/** CONNECT-MAP rev6 plus the pinFrame design clarification: phone whole-pill cap, desktop one line. */
+test.describe("rev6 pin fidelity", () => {
+  for (const width of [390, 1280]) {
+    for (const theme of ["light", "dark"]) {
+      test(`rev6 pin state stays plain with responsive long names ${String(width)} ${theme}`, async ({ page }) => {
+        const longName = "coordinator-for-package-builder-review-and-release-notes"
+        const pinned = agent(longName, "waiting", "atlas", "package-work", 14, 2)
+        await openDirectory(page, width, theme, [pinned])
+        await page.locator(".connect-agent").click()
+        await page.getByRole("button", { name: "Pin", exact: true }).click()
+        await page.keyboard.press("Escape")
+        const pin = page.locator(".connect-pins[data-placement=\"float\"] .connect-pin-open")
+        await expect(pin).toHaveAccessibleName(new RegExp(`^Pinned: ${longName},`))
+        const name = pin.locator(".connect-pin-name")
+        const state = pin.locator(".connect-pin-state")
+        await expect(name).toBeVisible()
+        await expect(state).toBeVisible()
+        await expect(state).toHaveText("Needs you")
+        const metrics = await pin.evaluate((node) => {
+          const name = node.querySelector<HTMLElement>(".connect-pin-name")
+          const state = node.querySelector<HTMLElement>(".connect-pin-state")
+          if (name === null || state === null) return null
+          const label = state.querySelector("span") ?? state
+          const nameStyle = getComputedStyle(name)
+          const stateStyle = getComputedStyle(state)
+          const labelStyle = getComputedStyle(label)
+          const nameBox = name.getBoundingClientRect()
+          const stateBox = state.getBoundingClientRect()
+          const pinBox = node.getBoundingClientRect()
+          return {
+            pillCap: getComputedStyle(node.parentElement ?? node).maxInlineSize,
+            nameCap: nameStyle.maxInlineSize,
+            pillWidth: node.parentElement?.getBoundingClientRect().width ?? 0,
+            ellipsis: nameStyle.textOverflow,
+            nameOverflow: name.scrollWidth > name.clientWidth,
+            stateFont: stateStyle.fontSize,
+            stateWeight: stateStyle.fontWeight,
+            stateLine: stateStyle.lineHeight,
+            stateShrink: stateStyle.flexShrink,
+            stateOverflow: state.scrollWidth > state.clientWidth,
+            background: labelStyle.backgroundColor,
+            border: labelStyle.borderTopWidth,
+            padding: labelStyle.paddingInlineStart,
+            gap: stateBox.left - nameBox.right,
+            stackedGap: stateBox.top - nameBox.bottom,
+            stackedAligned: Math.abs(stateBox.left - nameBox.left) < 1,
+            sameLine: Math.abs(stateBox.top - nameBox.top) < 4,
+            endSpace: pinBox.right - stateBox.right,
+            fitsViewport: pinBox.left >= 0 && pinBox.right <= window.innerWidth
+          }
+        })
+        expect(metrics).not.toBeNull()
+        if (metrics === null) return
+        expect.soft(metrics.pillCap).toBe(width < 600 ? "144px" : "none")
+        expect.soft(metrics.nameCap).toBe("none")
+        expect.soft(metrics.ellipsis).toBe("ellipsis")
+        expect.soft(metrics.nameOverflow).toBe(width < 600)
+        if (width < 600) expect.soft(metrics.pillWidth).toBeLessThanOrEqual(144)
+        expect.soft(metrics.stateFont).toBe("12px")
+        expect.soft(metrics.stateWeight).toBe("500")
+        expect.soft(Number.parseFloat(metrics.stateLine)).toBeCloseTo(14.4, 1)
+        expect.soft(metrics.stateShrink).toBe("0")
+        expect.soft(metrics.stateOverflow).toBe(false)
+        expect.soft(metrics.background).toBe("rgba(0, 0, 0, 0)")
+        expect.soft(metrics.border).toBe("0px")
+        expect.soft(metrics.padding).toBe("0px")
+        if (width >= 600) expect.soft(metrics.gap).toBe(8)
+        else {
+          expect.soft(metrics.stackedGap).toBeCloseTo(2, 1)
+          expect.soft(metrics.stackedAligned).toBe(true)
+        }
+        await expect(state.locator("svg")).toHaveCount(0)
+        const creatureBox = await drawnBox(pin.locator(".connect-creature"))
+        expect.soft(creatureBox.width).toBe(28)
+        expect.soft(creatureBox.height).toBe(28)
+        expect.soft(metrics.sameLine).toBe(width >= 600)
+        expect.soft(metrics.endSpace).toBeGreaterThanOrEqual(12)
+        expect.soft(metrics.fitsViewport).toBe(true)
+        await pin.click()
+        await expect(page.getByRole("dialog", { name: longName, exact: true })).toBeVisible()
+      })
+    }
+  }
+})
+
 /** Export frame heights include the 98px masthead; capture the actual bounded directory below it. */
 /** Generated separators must obey the same copy rule as text nodes. */
 const expectNoMiddots = async (page: Page) => {
@@ -701,6 +786,7 @@ const states = {
   "2a": 1064,
   "2b": 647,
   "2c": 358,
+  "2c-v3": 440,
   "2d": 1130,
   "2e": 1236,
   "2f": 462,
@@ -729,7 +815,9 @@ for (const width of [390, 1280]) {
     for (const [state, frameHeight] of Object.entries(states)) {
       test(`reference ${state} ${String(width)} ${theme}`, async ({ page }, testInfo) => {
         await prepare(page, width, theme)
-        if (state.startsWith("2i")) {
+        if (state === "2c-v3") {
+          await page.setViewportSize({ width: width + 2, height: (width === 390 ? 489 : frameHeight) - 106 })
+        } else if (state.startsWith("2i")) {
           await page.setViewportSize({ width: width + 2, height: width === 1280 ? 1064 : 1164 })
         } else if (width === 1280) {
           await page.setViewportSize({ width: width + 2, height: frameHeight - 100 })
@@ -777,6 +865,8 @@ for (const width of [390, 1280]) {
         if (state === "2h") agents = [...agents, ...agents.filter((entry) => entry.name === "pkgsrc")]
         await page.route("**/v1/connect/agents", (route) => {
           if (state === "2b" || state === "2c") return
+          // rev6 2c-v3 depicts inability to reach the hub, not an HTTP response or typed deadline.
+          if (state === "2c-v3") return route.abort("failed")
           if (failed && (state === "2d" || state === "2i-v4-stale")) {
             return route.fulfill({ status: 503, body: "timeout" })
           }
@@ -829,6 +919,30 @@ for (const width of [390, 1280]) {
           await expectCompactSecondary(page.getByRole("button", { name: "Retry", exact: true }))
           await expect.soft(page.locator(".connect-directory-secondary")).toHaveCount(0)
           await expectRegularText(page.locator(".connect-directory-error p"), "--rly-color-text-2", "16px")
+        } else if (state === "2c-v3") {
+          // CONNECT-MAP rev6, connect--2c-v3: actionable copy, 24px inset and a 48px Retry control.
+          const card = page.locator(".connect-directory-error")
+          await expect(card.getByRole("heading", { name: "Couldn’t load the fleet directory", exact: true }))
+            .toBeVisible()
+          await expect(card.getByText("Relay couldn’t reach the hub. It tries again every 5 seconds.", { exact: true }))
+            .toBeVisible()
+          const retry = card.getByRole("button", { name: "Retry", exact: true })
+          await expect(retry).toBeVisible()
+          expect.soft((await drawnBox(retry)).height).toBe(48)
+          const layout = await card.evaluate((node) => {
+            const style = getComputedStyle(node)
+            const title = node.querySelector("h2")
+            const icon = node.querySelector("svg")
+            return {
+              padding: style.paddingInlineStart,
+              gap: style.columnGap,
+              radius: style.borderTopLeftRadius,
+              titleSize: title === null ? null : getComputedStyle(title).fontSize,
+              iconSize: icon === null ? null : icon.getBoundingClientRect().width
+            }
+          })
+          expect.soft(layout).toEqual({ padding: "24px", gap: "16px", radius: "14px", titleSize: "20px", iconSize: 20 })
+          await expect(card).not.toContainText("HTTP 503")
         } else if (state === "2f") {
           await expect(page.getByText("No agents running on any host.")).toBeVisible()
           await expect.soft(page.getByRole("searchbox")).toBeVisible()
@@ -931,6 +1045,7 @@ for (const width of [390, 1280]) {
             const outline = await selected.evaluate((row) => getComputedStyle(row).outlineStyle)
             expect.soft(outline).toBe("none")
             // Base 2j depicts the footer at the end; mid-scroll sticking is guarded by 2j-v2.
+            // Design marks its 202px phone pill stale: all pin counts use rev6's compact v2 pinFrame.
             await scrollPinDirectory(page, 1)
             const stack = await drawnBox(page.locator(".connect-pins[data-placement='float']"))
             const footer = await drawnBox(page.locator(".connect-directory-secondary"))
@@ -1213,7 +1328,7 @@ for (const width of [390, 1280]) {
         } else if (state === "2t") {
           await expectTouchTarget(page.getByRole("button", { name: /^Nested deeper: open lint-sub/ }))
         }
-        if (state !== "2c") await expectTouchTarget(page.locator(".connect-limits-link"))
+        if (state !== "2c" && state !== "2c-v3") await expectTouchTarget(page.locator(".connect-limits-link"))
       })
     }
   }
@@ -1255,9 +1370,11 @@ for (const width of [390, 1280]) {
           const clear = page.getByRole("button", { name: "Clear search", exact: true })
           expect.soft((await drawnBox(clear)).height).toBe(48)
           await expectTouchTarget(clear)
-          await page.locator("#fleet-connect-root").screenshot({
-            path: testInfo.outputPath(`fidelity/connect-${state}-${String(width)}-${theme}.png`)
-          })
+          await captureFidelity(
+            page,
+            testInfo.outputPath(`fidelity/connect-${state}-${String(width)}-${theme}.png`),
+            page.locator("#fleet-connect-root")
+          )
           await clear.click()
           await expect(search).toHaveValue("")
           await expect(search).toBeFocused()
@@ -1271,9 +1388,11 @@ for (const width of [390, 1280]) {
           await expectNoticeIcon(page.locator(".connect-limits-problem"), page.locator(".connect-limits-problem p"), 8)
           await expect(page.locator(".connect-limits-link")).toHaveCount(0)
         }
-        await page.locator("#fleet-connect-root").screenshot({
-          path: testInfo.outputPath(`fidelity/connect-${state}-${String(width)}-${theme}.png`)
-        })
+        await captureFidelity(
+          page,
+          testInfo.outputPath(`fidelity/connect-${state}-${String(width)}-${theme}.png`),
+          page.locator("#fleet-connect-root")
+        )
       })
     }
 
@@ -1307,6 +1426,17 @@ for (const width of [320, 390, 1280]) {
         await expect(page.locator(".connect-agent")).toHaveCount(31)
         const stack = page.locator(".connect-pins[data-placement='float']")
         await expect(stack.locator(".connect-pin")).toHaveCount(2)
+        // rev6 pinFrame uses the viewport alone: a grid stack with 8px gaps at every count.
+        const stackStyle = await stack.evaluate((node) => {
+          const style = getComputedStyle(node)
+          return { display: style.display, gap: style.rowGap, justify: style.justifyItems, bottom: style.insetBlockEnd }
+        })
+        expect.soft(stackStyle).toEqual({
+          display: "grid",
+          gap: "8px",
+          justify: "end",
+          bottom: width < 600 ? "46px" : "24px"
+        })
         const owner = await scrollPinDirectory(page, 0.5)
         const mid = await drawnBox(stack)
         expect.soft(owner.scrollTop).toBeGreaterThan(500)
@@ -1319,6 +1449,9 @@ for (const width of [320, 390, 1280]) {
           expect.soft(pill.height).toBe(48)
           if (width < 600) {
             expect.soft(pill.width).toBeLessThanOrEqual(144)
+            // rev6 2j-v2 390 light/dark painted border bounds: ds-rly 124px, sec-cc 138px.
+            const recorded = (await pin.innerText()).includes("ds-rly") ? 124 : 138
+            expect.soft(Math.abs(pill.width - recorded), "matches the recorded fixture capsule").toBeLessThanOrEqual(2)
           }
           expect.soft(
             await pin.locator(".connect-creature").evaluate((node) => {
@@ -1330,14 +1463,20 @@ for (const width of [320, 390, 1280]) {
           ).toBe(true)
         }
         if (width !== 320) {
-          await page.screenshot({
-            clip: { x: 1, y: 0, width, height: width === 1280 ? 800 : 780 },
-            path: testInfo.outputPath(`fidelity/connect-2j-v2-${String(width)}-${theme}.png`)
-          })
+          await captureFidelity(
+            page,
+            testInfo.outputPath(`fidelity/connect-2j-v2-${String(width)}-${theme}.png`),
+            undefined,
+            { x: 1, y: 0, width, height: width === 1280 ? 800 : 780 }
+          )
         }
         await scrollPinDirectory(page, 1)
         const footer = page.locator(".connect-directory-secondary")
         const foot = await drawnBox(footer)
+        if (width < 600) {
+          // The phone footer reserves the whole 144px pill plus the 12px clearance.
+          expect.soft(await footer.evaluate((node) => getComputedStyle(node).paddingInlineEnd)).toBe("156px")
+        }
         const limits = await drawnBox(page.locator(".connect-limits"))
         const end = await drawnBox(stack)
         const last = await drawnBox(page.locator(".connect-agent").last())
@@ -1348,10 +1487,12 @@ for (const width of [320, 390, 1280]) {
         await expectTouchTarget(page.locator(".connect-limits-link"))
         for (const control of await stack.locator(".connect-pin > button").all()) await expectTouchTarget(control)
         if (width !== 320) {
-          await page.screenshot({
-            clip: { x: 1, y: 0, width, height: width === 1280 ? 800 : 780 },
-            path: testInfo.outputPath(`fidelity/connect-2j-v2-end-${String(width)}-${theme}.png`)
-          })
+          await captureFidelity(
+            page,
+            testInfo.outputPath(`fidelity/connect-2j-v2-end-${String(width)}-${theme}.png`),
+            undefined,
+            { x: 1, y: 0, width, height: width === 1280 ? 800 : 780 }
+          )
         }
       }
     )

@@ -34,7 +34,7 @@ export interface CreatureProps {
   /** Agent name for palette hashing. Defaults to id for standalone drawings. */
   readonly name?: string
   /** Optional served family; overrides hash(host,name). Only the eight agent families are accepted. */
-  readonly hueFamily?: CreatureHueFamily
+  readonly hueFamily?: CreatureHueFamily | undefined
   readonly state: string
   /** Home keeps unknown evidence neutral; Fleet retains its existing needs-you fallback. */
   readonly statePolicy?: "fleet" | "home"

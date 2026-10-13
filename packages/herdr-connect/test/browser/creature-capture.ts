@@ -1,5 +1,5 @@
 import { NodeFileSystem } from "@effect/platform-node"
-import { expect, type Locator, type Page } from "@playwright/test"
+import { expect, type Locator, type Page, type PageScreenshotOptions } from "@playwright/test"
 import { Effect, FileSystem } from "effect"
 
 /** Include overflowing head overlays as well as the fixed slot, for outside-creature screenshot masks. */
@@ -27,9 +27,18 @@ export const paintBox = (creature: Locator) =>
   })
 
 /** Every fidelity PNG gets paint bounds in its own pixels, clipped to the shot and including overflow marks. */
-export const captureFidelity = async (page: Page, path: string, target?: Locator) => {
+export const captureFidelity = async (
+  page: Page,
+  path: string,
+  target?: Locator,
+  clip?: PageScreenshotOptions["clip"]
+) => {
+  // Viewport clips share paintBox coordinates; full-page frames translate from document scroll.
+  expect(target === undefined || clip === undefined, "a capture has one frame owner").toBe(true)
   if (target !== undefined) await target.scrollIntoViewIfNeeded()
-  const frame = target === undefined
+  const frame = clip !== undefined
+    ? clip
+    : target === undefined
     ? await page.evaluate(() => ({
       x: -window.scrollX,
       y: -window.scrollY,
@@ -45,7 +54,9 @@ export const captureFidelity = async (page: Page, path: string, target?: Locator
     expect(box).not.toBeNull()
     if (box !== null) painted.push(box)
   }
-  const png = target === undefined
+  const png = clip !== undefined
+    ? await page.screenshot({ path, clip })
+    : target === undefined
     ? await page.screenshot({ path, fullPage: true })
     : await target.screenshot({ path })
   const pixels = { width: png.readUInt32BE(16), height: png.readUInt32BE(20) }

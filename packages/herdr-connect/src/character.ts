@@ -50,15 +50,21 @@ const fixed = (value: number): string => value.toFixed(3)
 const pair = ([x, y]: Point): string => `${fixed(x)} ${fixed(y)}`
 const field = (seed: number, shift: number, size: number): number => (seed >>> shift) % size
 
-/** Unsigned FNV-1a with the murmur3 finaliser keeps neighbouring identities apart. */
+/** Case-insensitive host identity; unsigned FNV-1a with the murmur3 finaliser separates neighbouring IDs. */
 export const characterSeed = (host: string, id: string): number => {
   let hash = 2166136261
-  for (const char of `${host}:${id}`) hash = Math.imul(hash ^ (char.codePointAt(0) ?? 0), 16777619)
+  for (const char of `${host.toLowerCase()}:${id}`) hash = Math.imul(hash ^ (char.codePointAt(0) ?? 0), 16777619)
   hash ^= hash >>> 16
   hash = Math.imul(hash, 0x85ebca6b)
   hash ^= hash >>> 13
   hash = Math.imul(hash, 0xc2b2ae35)
   return (hash ^ (hash >>> 16)) >>> 0
+}
+
+/** Drawing and hue reservations choose the same silhouette without constructing its outline. */
+export const characterBodyKind = (seed: number): BodyKind => {
+  const kinds: ReadonlyArray<BodyKind> = ["circle", "squircle", "pear", "star", "bean"]
+  return kinds[field(seed, 3, kinds.length)] ?? "circle"
 }
 
 /** Catmull-Rom spans and sampled curves share one geometry for painting and fitting the enclosing ring. */
@@ -204,8 +210,7 @@ export const agentCharacter = (host: string, id: string): AgentCharacter => {
   const seed = characterSeed(host, id)
   const hue = (field(seed, 0, 12) * 30 + field(seed, 4, 14)) % 360
   const spread = 18 + field(seed, 9, 30)
-  const kinds: ReadonlyArray<BodyKind> = ["circle", "squircle", "pear", "star", "bean"]
-  const bodyKind = kinds[field(seed, 3, kinds.length)] ?? "circle"
+  const bodyKind = characterBodyKind(seed)
   const drawing = creatureBodySeed(bodyKind)
   const unit = Math.min(3, 78 / drawing.width, 72 / drawing.height)
   const height = drawing.height * unit
@@ -293,12 +298,12 @@ const colours = {
 /** Matches the design's un-mixed FNV-1a over host:name; body seeds retain their separate mixed hash. */
 const familySeed = (host: string, name: string): number => {
   let hash = 2166136261
-  for (const char of `${host}:${name}`) hash = Math.imul(hash ^ char.charCodeAt(0), 16777619)
+  for (const char of `${host.toLowerCase()}:${name}`) hash = Math.imul(hash ^ char.charCodeAt(0), 16777619)
   return hash >>> 0
 }
 
 /** Pure hash-only family assignment; a served family overrides it. The chef's plum family is outside the agent set.
- * Same-host collisions remain possible until the hub persists family allocations. Chroma scales only closed/stale paint.
+ * The fallback may collide when older peers omit their served family. Chroma scales only closed/stale paint.
  */
 export const creaturePalette = (
   host: string,

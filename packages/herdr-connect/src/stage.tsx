@@ -10,7 +10,7 @@ import { connectAgentGroup } from "./agent-state-core.js"
  */
 import { Icon, PortalProvider } from "@knpkv/rly/foundations"
 import { workNavigationHref } from "@knpkv/herdr-work/navigation"
-import { Button, Sheet, StateLabel } from "@knpkv/rly/primitives"
+import { Button, Sheet } from "@knpkv/rly/primitives"
 import { type KeyboardEvent, type MouseEvent, type ReactElement, type ReactNode, useId, useRef, useState } from "react"
 
 import { AgentStateLabel, agentStatePresentation } from "./agent-state.js"
@@ -97,6 +97,7 @@ export const AgentCast = ({
                 <Creature
                   arrived={arrivals.has(connectAgentKey(agent))}
                   host={agent.host}
+                  hueFamily={agent.hue}
                   id={String(agent.id)}
                   name={agent.name}
                   size="cast"
@@ -184,6 +185,7 @@ const AgentLineage = ({
     >
       <Creature
         host={member.host}
+        hueFamily={member.hue}
         id={String(member.id)}
         name={member.name}
         size="row"
@@ -315,6 +317,7 @@ export const AgentStage = ({
               <div className="connect-stage-hero" data-tone={agentStatePresentation(agent.state).tone}>
                 <Creature
                   host={agent.host}
+                  hueFamily={agent.hue}
                   id={String(agent.id)}
                   name={agent.name}
                   size="stage"
@@ -479,21 +482,18 @@ const PinChip = ({
       >
         <Creature
           host={agent.host}
+          hueFamily={agent.hue}
           id={String(agent.id)}
           name={agent.name}
           size="row"
           stale={stale}
           state={agent.state}
         />
-        <span className="connect-pin-name">{agent.name}</span>
-        <span className="connect-pin-state">
-          <StateLabel
-            className={presentation.spins ? "agent-state-spinning" : undefined}
-            icon={presentation.icon}
-            label={word}
-            size="compact"
-            tone={presentation.tone}
-          />
+        <span className="connect-pin-caption">
+          <span className="connect-pin-name">{agent.name}</span>
+          <span className="connect-pin-state" data-tone={presentation.tone}>
+            {word}
+          </span>
         </span>
       </button>
     </span>
@@ -667,6 +667,7 @@ export const PinnedAgents = ({
                     >
                       <Creature
                         host={agent.host}
+                        hueFamily={agent.hue}
                         id={String(agent.id)}
                         name={agent.name}
                         size="row"

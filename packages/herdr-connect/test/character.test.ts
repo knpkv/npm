@@ -12,6 +12,15 @@ describe("agentCharacter", () => {
     expect(agentCharacter("fixture-host", "drawing-0")).not.toEqual(agentCharacter("fixture-host", "drawing-1"))
   })
 
+  it("draws the same body, face, phase and fallback palette for ATLAS and atlas", () => {
+    for (const id of ["agent-134", "agent-10", "agent-ds-rly"]) {
+      expect({ character: agentCharacter("ATLAS", id), palette: creaturePalette("ATLAS", id) }).toEqual({
+        character: agentCharacter("atlas", id),
+        palette: creaturePalette("atlas", id)
+      })
+    }
+  })
+
   it("uses all five canonical outlines and seeds a strictly negative phase", () => {
     const kinds = new Set<string>()
     for (const { body, bodyKind, phase } of fleet) {
