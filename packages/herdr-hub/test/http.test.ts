@@ -2575,7 +2575,11 @@ esac
         return Schema.decodeUnknownSync(Schema.fromJsonString(ConnectArchivePage))(response.body)
       })
       expect((yield* page()).agents).toEqual([])
-      expect((yield* get("/v1/connect/agents")).status).toBe(200)
+      const initialDirectory = yield* get("/v1/connect/agents")
+      expect(initialDirectory.status).toBe(200)
+      const initialAgents =
+        Schema.decodeUnknownSync(Schema.fromJsonString(FleetConnectAgentPage))(initialDirectory.body).agents
+      expect(initialAgents.find(({ id }) => id === "agent-archive")).toHaveProperty("hue", "teal")
       present = false
       observedAt = firstSeenAt + 1
       yield* get("/v1/connect/agents")
@@ -2599,6 +2603,7 @@ esac
         host: "ser8",
         agentId: "agent-archive",
         name: "worker",
+        hue: "teal",
         kind: "codex",
         work: "project",
         state: "working",
@@ -2634,6 +2639,29 @@ esac
       observedAt = firstSeenAt + 600_003
       yield* get("/v1/connect/agents")
       expect((yield* page()).agents).toEqual([])
+      // Palette writes are optional enrichment; a failed transaction must not hide the host's agents.
+      const hueDatabase = yield* Effect.acquireRelease(
+        Effect.sync(() => new DatabaseSync(join(root, "approval-app.sqlite"))),
+        (opened) => Effect.sync(() => opened.close())
+      )
+      hueDatabase.exec(`CREATE TRIGGER hue_failure BEFORE INSERT ON connect_agent_hues
+        BEGIN SELECT RAISE(ABORT, 'HUE_PRIVATE_SENTINEL'); END`)
+      const hueWarnings = vi.spyOn(Logger.defaultLogger, "log")
+      yield* Effect.addFinalizer(() => Effect.sync(() => hueWarnings.mockRestore()))
+      const hueFailureDirectory = yield* get("/v1/connect/agents")
+      expect(hueFailureDirectory.status).toBe(200)
+      const hueFreePage = Schema.decodeUnknownSync(Schema.fromJsonString(FleetConnectAgentPage))(
+        hueFailureDirectory.body
+      )
+      expect(hueFreePage.agents.map(({ id }) => id)).toEqual(["agent-archive", "agent-staying"])
+      for (const agent of hueFreePage.agents) expect(agent).not.toHaveProperty("hue")
+      expect(hueFreePage.failures).toEqual([])
+      expect(hueWarnings.mock.calls.map(([entry]) => entry.logLevel)).toEqual(["Warn"])
+      expect(hueWarnings.mock.calls.map(([entry]) => entry.message)).toEqual([
+        ["ConnectHueAssignmentFailed", { host: "SER8", cause: "TerminalTransportError" }]
+      ])
+      hueWarnings.mockRestore()
+      hueDatabase.exec("DROP TRIGGER hue_failure")
     })).pipe(provideNodeServices)
   })
 

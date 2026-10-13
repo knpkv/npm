@@ -2,6 +2,8 @@ import { openPrivateSqlite, type PrivateDatabaseError, type PrivateSqlite } from
 import { Effect, Schema } from "effect"
 import type { DatabaseSync } from "node:sqlite"
 import { TerminalTransportError } from "./errors.js"
+import { assignHues, initializeHues } from "./internal/hue-database.js"
+import { ConnectAgent, LocalConnectAgents } from "./model.js"
 
 const ActivityRow = Schema.Struct({ last_activity_at: Schema.Number })
 const TableColumn = Schema.Struct({ name: Schema.String })
@@ -18,16 +20,19 @@ const storeError = (operation: string) => (cause: unknown) =>
 
 export class AgentActivityStore {
   readonly #database: DatabaseSync
+  readonly #secureFiles: PrivateSqlite["secureFiles"]
   readonly path: string
 
   private constructor(path: string, opened: PrivateSqlite) {
     this.path = path
     this.#database = opened.database
+    this.#secureFiles = opened.secureFiles
   }
 
   static readonly open = Effect.fn("AgentActivityStore.open")(function*(path: string) {
     const opened = yield* openPrivateSqlite(path, {
       initialize: (database) => {
+        initializeHues(database)
         database.exec(`
         CREATE TABLE IF NOT EXISTS agent_activity (
           host TEXT COLLATE NOCASE NOT NULL,
@@ -88,6 +93,44 @@ export class AgentActivityStore {
       Effect.mapError(storeError("activity.decode")),
       Effect.map(({ last_activity_at }) => last_activity_at)
     )
+  })
+
+  /** Assign once per live lifetime; the database transaction protects all eight host reservations. */
+  readonly assignHues = Effect.fn("AgentActivityStore.assignHues")(function*(
+    this: AgentActivityStore,
+    host: string,
+    agents: ReadonlyArray<ConnectAgent>,
+    observedAt: number
+  ) {
+    const input = yield* Schema.decodeUnknownEffect(Schema.Struct({
+      directory: LocalConnectAgents,
+      observedAt: ConnectAgent.fields.lastActivityAt
+    }))({ directory: { host, agents }, observedAt }).pipe(
+      Effect.mapError(storeError("activity.hues.decode"))
+    )
+    if (input.directory.agents.some((agent) => agent.host.toLowerCase() !== input.directory.host.toLowerCase())) {
+      return yield* new TerminalTransportError({
+        cause: input.directory.host,
+        detail: "Hue allocation requires agents from the requested host",
+        operation: "activity.hues.decode"
+      })
+    }
+    const assigned = yield* Effect.try({
+      try: () => {
+        this.#database.exec("BEGIN IMMEDIATE")
+        try {
+          const result = assignHues(this.#database, input.directory.host, input.directory.agents, input.observedAt)
+          this.#database.exec("COMMIT")
+          return result
+        } catch (cause) {
+          this.#database.exec("ROLLBACK")
+          throw cause
+        }
+      },
+      catch: storeError("activity.hues.assign")
+    })
+    yield* this.#secureFiles.pipe(Effect.mapError(fromPrivateDatabaseError))
+    return assigned
   })
 
   close(): void {

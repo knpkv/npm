@@ -1099,6 +1099,7 @@ describe("Connect public seams", () => {
             kind: "codex",
             lastActivityAt: 2_000,
             name: "Current coordinator",
+            hue: "sky",
             state: "working",
             work: "npm"
           },
@@ -1108,6 +1109,7 @@ describe("Connect public seams", () => {
             kind: "codex",
             lastActivityAt: 2_000,
             name: "Child",
+            hue: "iris",
             relationship: { parentAgentId: "agent-coordinator-current", relation: "delegated" },
             state: "working",
             work: "npm"
@@ -1159,6 +1161,7 @@ describe("Connect public seams", () => {
           kind: "codex",
           lastActivityAt: 3_000,
           name: "Current coordinator",
+          hue: "sky",
           state: "working",
           work: "npm"
         }])

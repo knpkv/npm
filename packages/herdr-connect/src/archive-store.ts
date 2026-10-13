@@ -2,10 +2,12 @@ import { openPrivateSqlite, type PrivateDatabaseError, type PrivateSqlite } from
 import { Clock, Effect, Schema, Semaphore } from "effect"
 import type { DatabaseSync, SQLOutputValue } from "node:sqlite"
 import { ConnectArchiveStoreError } from "./errors.js"
+import { initializeHues } from "./internal/hue-database.js"
 import { initializePosts } from "./internal/post-database.js"
 import {
   ArchivedConnectAgent,
   ConnectAgent,
+  ConnectAgentHue,
   ConnectArchiveCursor,
   ConnectArchivePage,
   connectArchivePageMaxRecords,
@@ -38,6 +40,7 @@ const ArchiveRow = Schema.Struct({
   closed_at: Schema.Number,
   parent_agent_id: Schema.NullOr(Schema.String),
   relation: Schema.NullOr(Schema.String),
+  hue: Schema.NullOr(ConnectAgentHue),
   last_words_text: Schema.NullOr(Schema.String),
   last_words_at: Schema.NullOr(Schema.Number)
 })
@@ -59,8 +62,9 @@ const decodeArchiveRow = (row: Readonly<Record<string, SQLOutputValue>>): Archiv
     firstSeenAt: decoded.first_seen_at,
     closedAt: decoded.closed_at
   }
-  const withWords = decoded.last_words_text === null ? agent : {
-    ...agent,
+  const withHue = decoded.hue === null ? agent : { ...agent, hue: decoded.hue }
+  const withWords = decoded.last_words_text === null ? withHue : {
+    ...withHue,
     lastWords: { text: decoded.last_words_text, createdAt: decoded.last_words_at }
   }
   return Schema.decodeUnknownSync(ArchivedConnectAgent)(
@@ -73,11 +77,12 @@ const decodeArchiveRow = (row: Readonly<Record<string, SQLOutputValue>>): Archiv
 const recordSighting = (database: DatabaseSync, agent: ConnectAgent, observedAt: number): void => {
   database.prepare(
     `INSERT INTO connect_archive_observations
-       (host, agent_id, name, kind, work, state, first_seen_at, parent_agent_id, relation)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+       (host, agent_id, name, kind, work, state, first_seen_at, parent_agent_id, relation, hue)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(host, agent_id) DO UPDATE SET
        name = excluded.name, kind = excluded.kind, work = excluded.work, state = excluded.state,
        parent_agent_id = excluded.parent_agent_id, relation = excluded.relation,
+       hue = COALESCE(excluded.hue, connect_archive_observations.hue),
        missing_since = NULL, missing_reads = 0`
   ).run(
     agent.host.toLowerCase(),
@@ -88,7 +93,8 @@ const recordSighting = (database: DatabaseSync, agent: ConnectAgent, observedAt:
     agent.state,
     observedAt,
     agent.relationship?.parentAgentId ?? null,
-    agent.relationship?.relation ?? null
+    agent.relationship?.relation ?? null,
+    agent.hue ?? null
   )
   database.prepare("DELETE FROM connect_agent_archive WHERE host = ? AND agent_id = ?")
     .run(agent.host.toLowerCase(), agent.id)
@@ -128,9 +134,9 @@ const recordObservation = (
   if (!observation.complete) return
   database.prepare(
     `INSERT INTO connect_agent_archive
-       (host, agent_id, name, kind, work, state, first_seen_at, closed_at, parent_agent_id, relation, last_words_text, last_words_at)
+       (host, agent_id, name, kind, work, state, first_seen_at, closed_at, parent_agent_id, relation, last_words_text, last_words_at, hue)
      SELECT o.host, o.agent_id, o.name, o.kind, o.work, o.state, o.first_seen_at, ?, o.parent_agent_id, o.relation,
-       p.text, p.created_at
+       p.text, p.created_at, o.hue
      FROM connect_archive_observations o
      LEFT JOIN connect_posts p ON p.sequence = (
        SELECT MAX(sequence) FROM connect_posts WHERE host = o.host AND agent_id = o.agent_id
@@ -138,6 +144,15 @@ const recordObservation = (
      WHERE o.host = ? AND o.missing_reads >= 2 AND o.missing_since <= ?
      ON CONFLICT(host, agent_id) DO NOTHING`
   ).run(observation.observedAt, host, observation.observedAt - connectArchiveClosureDelayMillis)
+  database.prepare(`UPDATE connect_agent_hues SET closed_at = (
+    SELECT a.closed_at FROM connect_agent_archive a
+    WHERE a.host = connect_agent_hues.host AND a.agent_id = connect_agent_hues.agent_id
+  ) WHERE host = ? AND agent_id IN (
+    SELECT agent_id FROM connect_agent_archive WHERE host = ?
+  ) AND observed_at <= (
+    SELECT a.closed_at FROM connect_agent_archive a
+    WHERE a.host = connect_agent_hues.host AND a.agent_id = connect_agent_hues.agent_id
+  )`).run(host, host)
   database.prepare(`DELETE FROM connect_self_state WHERE host = ? AND agent_id IN (
     SELECT agent_id FROM connect_agent_archive WHERE host = ?
   )`).run(host, host)
@@ -164,6 +179,7 @@ export class AgentArchiveStore {
     const opened = yield* openPrivateSqlite(path, {
       initialize: (database) => {
         initializePosts(database)
+        initializeHues(database)
         database.exec(`
         CREATE TABLE IF NOT EXISTS connect_archive_hosts (
           host TEXT COLLATE NOCASE PRIMARY KEY, observed_at INTEGER NOT NULL
@@ -186,6 +202,12 @@ export class AgentArchiveStore {
           ON connect_agent_archive (closed_at DESC, host, agent_id);
         UPDATE connect_archive_observations SET missing_since = NULL, missing_reads = 0;
       `)
+        for (const table of ["connect_archive_observations", "connect_agent_archive"]) {
+          const columns = Schema.decodeUnknownSync(Schema.Array(Schema.Struct({ name: Schema.String })))(
+            database.prepare(`PRAGMA table_info(${table})`).all()
+          )
+          if (!columns.some(({ name }) => name === "hue")) database.exec(`ALTER TABLE ${table} ADD COLUMN hue TEXT`)
+        }
         const columns = Schema.decodeUnknownSync(Schema.Array(Schema.Struct({ name: Schema.String })))(
           database.prepare("PRAGMA table_info(connect_agent_archive)").all()
         )
@@ -265,7 +287,7 @@ export class AgentArchiveStore {
     return yield* this.#transactions.withPermits(1)(Effect.try({
       try: () => {
         const columns =
-          "host, agent_id, name, kind, work, state, first_seen_at, closed_at, parent_agent_id, relation, last_words_text, last_words_at"
+          "host, agent_id, name, kind, work, state, first_seen_at, closed_at, parent_agent_id, relation, last_words_text, last_words_at, hue"
         const rows = cursor === null
           ? this.#database.prepare(
             `SELECT ${columns} FROM connect_agent_archive

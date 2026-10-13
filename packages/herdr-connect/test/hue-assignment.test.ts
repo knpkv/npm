@@ -1,0 +1,302 @@
+import { NodeServices } from "@effect/platform-node"
+import { describe, expect, it } from "@effect/vitest"
+import type { HostConfiguration } from "@knpkv/herdr-fleet"
+import { Effect, FileSystem, Path, Result, Schema } from "effect"
+import { DatabaseSync } from "node:sqlite"
+import { AgentActivityStore } from "../src/activity-store.js"
+import { AgentArchiveStore } from "../src/archive-store.js"
+import { type AgentSource, localConnectAgents } from "../src/directory.js"
+import { type ArchivedConnectAgent, ConnectAgent } from "../src/model.js"
+import { AgentRelationshipStore } from "../src/relationship-store.js"
+
+const configuration = (stateDirectory: string, host = "atlas"): HostConfiguration => ({
+  allowedUsers: ["owner@example.test"],
+  applyCommand: null,
+  browserMcpRecoverCommand: null,
+  applyMachines: [host],
+  approvalHub: { host, nodeId: "node-test", url: "https://hub.example.test/" },
+  approvalNodes: ["node-test"],
+  approvalPort: 4779,
+  approvalTls: null,
+  checkCommand: ["true"],
+  coordinatorCommand: ["true"],
+  crossHost: false,
+  herdrCommand: "herdr",
+  host,
+  localPort: 4777,
+  machines: [{ host, nodeId: "node-test" }],
+  port: 4778,
+  pushAllowedOrigins: ["https://hub.example.test"],
+  pushSubject: "mailto:owner@example.test",
+  repository: stateDirectory,
+  stateDirectory,
+  tailscaleCommand: "tailscale"
+})
+const pathFor = Effect.gen(function*() {
+  const fs = yield* FileSystem.FileSystem
+  const paths = yield* Path.Path
+  return paths.join(yield* fs.makeTempDirectoryScoped({ prefix: "connect-hues-" }), "state.sqlite")
+})
+const openStores = Effect.fn("HueTest.open")(function*(path: string) {
+  const activity = yield* Effect.acquireRelease(
+    AgentActivityStore.open(path),
+    (store) => Effect.sync(() => store.close())
+  )
+  const relationships = yield* Effect.acquireRelease(
+    AgentRelationshipStore.open(path),
+    (store) => Effect.sync(() => store.close())
+  )
+  const archive = yield* Effect.acquireRelease(
+    AgentArchiveStore.open(path),
+    (store) => Effect.sync(() => store.close())
+  )
+  return { activity, relationships, archive }
+})
+type Stores = Effect.Success<ReturnType<typeof openStores>>
+interface Identity {
+  readonly id: string
+  readonly name: string
+}
+const identity = (name: string): Identity => ({ id: `agent-${name}`, name })
+const read = (stores: Stores, entries: ReadonlyArray<Identity>, observedAt = 0, host = "atlas") => {
+  const source: AgentSource = {
+    workers: () => Effect.succeed([]),
+    agents: () =>
+      Effect.succeed({
+        available: true,
+        error: null,
+        agents: entries.map(({ id, name }) => ({
+          activityRevision: 1,
+          agentId: id,
+          kind: "codex",
+          name,
+          paneId: `w1:p${
+            String([...id].reduce((hash, char) => Math.imul(hash ^ char.charCodeAt(0), 16777619), 2166136261) >>> 0)
+          }`,
+          parentAgentId: null,
+          relation: null,
+          status: "working",
+          work: "project"
+        }))
+      })
+  }
+  return localConnectAgents(
+    configuration(stores.activity.path, host),
+    source,
+    stores.activity,
+    stores.relationships,
+    observedAt
+  )
+}
+const hueOf = (row: ConnectAgent | ArchivedConnectAgent | undefined): string =>
+  Schema.decodeUnknownSync(Schema.Struct({ hue: Schema.String }))(row).hue
+const close = (stores: Stores, agents: ReadonlyArray<ConnectAgent>, start = 0) =>
+  Effect.gen(function*() {
+    yield* stores.archive.observe({ host: "atlas", agents, observedAt: start, complete: true })
+    yield* stores.archive.observe({ host: "atlas", agents: [], observedAt: start + 1, complete: true })
+    yield* stores.archive.observe({ host: "atlas", agents: [], observedAt: start + 300_001, complete: true })
+  })
+
+describe("persisted agent hues", () => {
+  it.layer(NodeServices.layer)((it) => {
+    it.effect("assigns colliding names different families in stable identity order", () =>
+      Effect.gen(function*() {
+        const stores = yield* openStores(yield* pathFor)
+        const result = yield* read(stores, [identity("skills"), identity("sec-cc")])
+        expect(result.agents).toEqual(expect.arrayContaining([
+          expect.objectContaining({ name: "sec-cc", hue: "rose" }),
+          expect.objectContaining({ name: "skills", hue: "ember" })
+        ]))
+      }).pipe(Effect.scoped))
+
+    it.effect("matches the design fixture assignments without reserving the chef palette", () =>
+      Effect.gen(function*() {
+        const stores = yield* openStores(yield* pathFor)
+        const atlas = yield* read(stores, ["skills", "sec-cc", "pair-codex", "ds-rly"].map(identity))
+        const birch = yield* read(stores, ["pkgsrc", "rev-usage"].map(identity), 0, "birch")
+        expect([...atlas.agents, ...birch.agents]).toEqual(expect.arrayContaining([
+          expect.objectContaining({ name: "ds-rly", hue: "iris" }),
+          expect.objectContaining({ name: "sec-cc", hue: "rose" }),
+          expect.objectContaining({ name: "pair-codex", hue: "moss" }),
+          expect.objectContaining({ name: "skills", hue: "ember" }),
+          expect.objectContaining({ name: "pkgsrc", hue: "ember" }),
+          expect.objectContaining({ name: "rev-usage", hue: "moss" })
+        ]))
+      }).pipe(Effect.scoped))
+
+    it.effect("keeps its allocation after restart, renaming and host case changes", () =>
+      Effect.gen(function*() {
+        const path = yield* pathFor
+        const before = yield* Effect.scoped(Effect.gen(function*() {
+          const stores = yield* openStores(path)
+          return yield* read(stores, [identity("skills"), identity("sec-cc")])
+        }))
+        const stores = yield* openStores(path)
+        const after = yield* read(
+          stores,
+          [{ id: "agent-skills", name: "renamed-worker" }, identity("sec-cc")],
+          1,
+          "ATLAS"
+        )
+        expect(after.agents.map(hueOf)).toEqual(before.agents.map(hueOf))
+      }).pipe(Effect.scoped))
+
+    it.effect("reuses the oldest archived-only family while keeping archived snapshots", () =>
+      Effect.gen(function*() {
+        const stores = yield* openStores(yield* pathFor)
+        const initial = (yield* read(
+          stores,
+          Array.from({ length: 8 }, (_, index) => identity(`worker-${String(index)}`))
+        )).agents
+        yield* stores.archive.observe({ host: "atlas", agents: initial, observedAt: 0, complete: true })
+        for (let index = 0; index < 8; index++) {
+          const agents = initial.slice(index + 1)
+          const start = index * 300_002 + 1
+          yield* stores.archive.observe({ host: "atlas", agents, observedAt: start, complete: true })
+          yield* stores.archive.observe({ host: "atlas", agents, observedAt: start + 300_001, complete: true })
+        }
+        const archived = yield* stores.archive.page()
+        expect(archived.agents).toHaveLength(8)
+        const oldest = archived.agents.at(-1)
+        expect(oldest).toHaveProperty("hue", hueOf(initial[0]))
+        const next = yield* read(stores, [identity("new-worker")], 3_000_000)
+        expect(next.agents[0]).toHaveProperty("hue", hueOf(oldest))
+        expect((yield* stores.archive.page()).agents).toEqual(archived.agents)
+      }).pipe(Effect.scoped))
+
+    it.effect("keeps the returning identity's family when it is free", () =>
+      Effect.gen(function*() {
+        const stores = yield* openStores(yield* pathFor)
+        const first = yield* read(stores, [identity("sec-cc")])
+        yield* close(stores, first.agents)
+        expect((yield* stores.archive.page()).agents[0]).toHaveProperty("hue", "rose")
+        const returned = yield* read(stores, [identity("sec-cc")], 300_002)
+        expect(returned.agents[0]).toHaveProperty("hue", "rose")
+        yield* stores.archive.observe({ host: "atlas", agents: returned.agents, observedAt: 300_002, complete: true })
+        expect((yield* stores.archive.page()).agents).toEqual([])
+      }).pipe(Effect.scoped))
+
+    it.effect("reallocates a returning identity when another live agent took its family", () =>
+      Effect.gen(function*() {
+        const stores = yield* openStores(yield* pathFor)
+        const first = yield* read(stores, [identity("sec-cc")])
+        yield* close(stores, first.agents)
+        const taken = yield* read(stores, [identity("skills")], 300_002)
+        expect(taken.agents[0]).toHaveProperty("hue", "rose")
+        expect((yield* stores.archive.page()).agents[0]).toHaveProperty("hue", "rose")
+        const returned = yield* read(stores, [identity("sec-cc"), identity("skills")], 300_003)
+        expect(returned.agents).toEqual(expect.arrayContaining([
+          expect.objectContaining({ name: "sec-cc", hue: "ember" }),
+          expect.objectContaining({ name: "skills", hue: "rose" })
+        ]))
+      }).pipe(Effect.scoped))
+
+    it.effect("uses a different shape for a repeated family above eight live agents", () =>
+      Effect.gen(function*() {
+        const stores = yield* openStores(yield* pathFor)
+        const first = Array.from(
+          { length: 8 },
+          (_, index) => ({ id: `agent-${String(index)}`, name: `worker-${String(index)}` })
+        )
+        yield* read(stores, first)
+        const ninth = { id: "agent-8", name: "worker-8" }
+        const all = (yield* read(stores, [...first, ninth], 1)).agents
+        const bodyById = new Map([
+          ["agent-0", "star"],
+          ["agent-1", "bean"],
+          ["agent-2", "squircle"],
+          ["agent-3", "star"],
+          ["agent-4", "pear"],
+          ["agent-5", "squircle"],
+          ["agent-6", "star"],
+          ["agent-7", "circle"],
+          ["agent-8", "pear"]
+        ])
+        expect(new Set(all.map(hueOf)).size).toBe(8)
+        const added = all.find(({ id }) => id === ninth.id)
+        expect(added).toHaveProperty("hue", "rose")
+        const repeated = all.filter((row) => row.id !== ninth.id && hueOf(row) === hueOf(added))
+        expect(repeated.length).toBeGreaterThan(0)
+        for (const row of repeated) expect(bodyById.get(row.id)).not.toBe(bodyById.get(ninth.id))
+      }).pipe(Effect.scoped))
+
+    it.effect("falls back only when every family already holds the new shape, reachable at nine", () =>
+      Effect.gen(function*() {
+        const stores = yield* openStores(yield* pathFor)
+        // Golden circle seeds from the drawing's independent host:id shape hash.
+        const ids = [7, 18, 29, 33, 44, 45, 56, 66, 67]
+        const entries = ids.map((id) => ({ id: `agent-${String(id)}`, name: `agent-${String(id)}` }))
+        const first = yield* read(stores, entries.slice(0, 8))
+        expect(new Set(first.agents.map(hueOf)).size).toBe(8)
+        const all = yield* read(stores, entries, 1)
+        expect(all.agents.find(({ id }) => id === "agent-67")).toHaveProperty("hue", "teal")
+      }).pipe(Effect.scoped))
+
+    it.effect("does not restart a closed lifetime from an older positive directory sighting", () =>
+      Effect.gen(function*() {
+        const stores = yield* openStores(yield* pathFor)
+        const first = yield* read(stores, [identity("sec-cc")])
+        yield* close(stores, first.agents)
+        yield* read(stores, [identity("skills")], 300_002)
+        const stale = yield* read(stores, [identity("sec-cc")], 1)
+        expect(stale.agents[0]).toHaveProperty("hue", "rose")
+      }).pipe(Effect.scoped))
+
+    it.effect("does not release a newer positive sighting through an older closure observation", () =>
+      Effect.gen(function*() {
+        const stores = yield* openStores(yield* pathFor)
+        const first = yield* read(stores, [identity("sec-cc")])
+        yield* stores.archive.observe({ host: "atlas", agents: first.agents, observedAt: 0, complete: true })
+        yield* stores.archive.observe({ host: "atlas", agents: [], observedAt: 1, complete: true })
+        yield* read(stores, [identity("sec-cc")], 300_002)
+        yield* stores.archive.observe({ host: "atlas", agents: [], observedAt: 300_001, complete: true })
+        const other = yield* read(stores, [identity("skills")], 300_003)
+        expect(other.agents[0]).toHaveProperty("hue", "ember")
+      }).pipe(Effect.scoped))
+
+    it.effect("rolls back the whole first-sighting batch when a later allocation write fails", () =>
+      Effect.gen(function*() {
+        const stores = yield* openStores(yield* pathFor)
+        const database = yield* Effect.acquireRelease(
+          Effect.sync(() => new DatabaseSync(stores.activity.path)),
+          (opened) => Effect.sync(() => opened.close())
+        )
+        database.exec(`CREATE TRIGGER hue_failure BEFORE INSERT ON connect_agent_hues
+          WHEN NEW.agent_id = 'agent-skills' BEGIN SELECT RAISE(ABORT, 'write refused'); END`)
+        const result = yield* read(stores, [identity("sec-cc"), identity("skills")])
+        expect(result.agents).toHaveLength(2)
+        for (const agent of result.agents) expect(agent).not.toHaveProperty("hue")
+        database.exec("DROP TRIGGER hue_failure")
+        const next = yield* read(stores, [identity("skills")], 1)
+        expect(next.agents[0]).toHaveProperty("hue", "rose")
+      }).pipe(Effect.scoped))
+
+    it.effect("serializes simultaneous first sightings across two connections to the same store", () =>
+      Effect.gen(function*() {
+        const path = yield* pathFor
+        const first = yield* openStores(path)
+        const second = yield* openStores(path)
+        const results = yield* Effect.all([
+          read(first, [identity("sec-cc")]),
+          read(second, [identity("skills")])
+        ], { concurrency: "unbounded" })
+        expect(new Set(results.flatMap(({ agents }) => agents.map(hueOf))).size).toBe(2)
+      }).pipe(Effect.scoped))
+  })
+
+  it("accepts older hue-free rows but rejects the chef family and unknown served families", () => {
+    const row = {
+      id: "agent-one",
+      host: "atlas",
+      name: "worker",
+      kind: "codex",
+      work: "project",
+      state: "working",
+      lastActivityAt: 0
+    }
+    expect(Schema.decodeUnknownSync(ConnectAgent)(row)).toEqual(row)
+    for (const hue of ["plum", "unknown"]) {
+      expect(Result.isFailure(Schema.decodeUnknownResult(ConnectAgent)({ ...row, hue }))).toBe(true)
+    }
+  })
+})
