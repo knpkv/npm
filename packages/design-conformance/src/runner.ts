@@ -174,7 +174,8 @@ export const runConformance = Effect.fn("DesignConformance.run")(function*(refs:
                 ...identity,
                 region: name,
                 rule: "pixels",
-                detail: `Off-frame region: reference=${ref._tag}, live=${livePixels._tag}; no region image`
+                detail:
+                  `Off-frame region or zero-size region: reference=${ref._tag}, live=${livePixels._tag}; no region image`
               })
               if (ref._tag === "Image") artifacts[`ref-${name}`] = yield* write(`${key}-${name}-ref.png`, ref.bytes)
               if (livePixels._tag === "Image") {

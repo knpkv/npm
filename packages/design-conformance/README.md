@@ -138,8 +138,10 @@ deliver its events before installing those listeners. Every subsequent motion
 event is late; there are no fill-mode-dependent allowances. Motion started by
 a freeze-event handler must also pass the guard before metadata sampling.
 Region images are crops of the same full-frame PNG; capture never scrolls to a
-region. A CSS-visible region entirely outside the frame retains its metadata and
-has typed `OffFrame` pixel evidence with no region image. Its pixel finding follows
+region. A CSS-visible region entirely outside the frame or with zero width or
+height retains its actual box and all metadata. It has typed `OffFrame` pixel
+evidence with no region image. Region sizes must be finite and non-negative;
+membership, copy, geometry, order and nesting still compare normally. Its pixel finding follows
 the same required, legacy report-only and waiver decisions as other drift.
 Partially clipped regions keep their frame intersection. The temporary animation guard and transition style are removed on success or failure.
 The
