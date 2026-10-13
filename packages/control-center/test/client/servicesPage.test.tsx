@@ -4154,7 +4154,14 @@ describe("ServicesPage first sync", () => {
           codeCommit: { _tag: "available", names: [], truncated: false },
           codePipeline: { _tag: "available", names: [], truncated: false }
         }),
-      overview: () => Promise.resolve({ ...awsOverview, connections: createdConnections }),
+      overview: () =>
+        Promise.resolve({
+          ...awsOverview,
+          connections: createdConnections.map((row) => ({
+            ...row,
+            runtimeRevision: row.pluginConnectionId === ids[0] && finished ? 2 : 1
+          }))
+        }),
       makeConnectionId: vi.fn().mockResolvedValueOnce(ids[0]).mockResolvedValueOnce(ids[1]),
       setEnabled: vi.fn(),
       synchronization: (pluginConnectionId) =>
@@ -4494,4 +4501,123 @@ describe("ServicesPage first sync", () => {
     expect(card?.textContent).toContain("Not synced yet")
     expect(card?.textContent).not.toContain("Healthy")
   })
+})
+
+// Live overview rows are new objects even when every connection token is unchanged.
+describe("ServicesPage invalidation request bounds", () => {
+  it("keeps detail reads cached across unrelated invalidations and refreshes only the changed connection", async () => {
+    const rows = [
+      { ...connection, supportsSynchronization: true, runtimeRevision: 1 },
+      { ...confluenceConnection, supportsSynchronization: true, runtimeRevision: 1 }
+    ]
+    let currentRows = rows
+    let invalidate: (() => void) | undefined
+    const synchronization = vi.fn<NonNullable<ConnectionTestTransport["synchronization"]>>((id) =>
+      Promise.resolve(
+        Schema.decodeUnknownSync(PluginSynchronizationState)({
+          pluginConnectionId: id,
+          providerId: "jira",
+          streamKey: "issues",
+          lastAttemptAt: null,
+          lastSuccessAt: null,
+          result: "never",
+          pagesCommitted: 0
+        })
+      )
+    )
+    const administration = vi.fn<NonNullable<ConnectionTestTransport["administration"]>>(() =>
+      Promise.reject({ _tag: "FixtureAdministrationUnavailable" })
+    )
+    await renderServices({
+      create: vi.fn(),
+      makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
+      overview: () => Promise.resolve({ ...overview, connections: currentRows.map((row) => ({ ...row })) }),
+      observeInvalidations: ({ onInvalidation, signal }) =>
+        new Promise((resolve) => {
+          invalidate = onInvalidation
+          signal.addEventListener("abort", () => resolve(), { once: true })
+        }),
+      setEnabled: vi.fn(),
+      test: vi.fn(),
+      synchronization,
+      administration
+    })
+    expect(synchronization).toHaveBeenCalledTimes(2)
+    expect(administration).toHaveBeenCalledTimes(2)
+    for (let index = 0; index < 5; index++) await act(async () => invalidate?.())
+    expect(synchronization).toHaveBeenCalledTimes(2)
+    expect(administration).toHaveBeenCalledTimes(2)
+    currentRows = rows.map((row) =>
+      row.pluginConnectionId === connection.pluginConnectionId ? { ...row, runtimeRevision: 2 } : row
+    )
+    await act(async () => invalidate?.())
+    expect(synchronization).toHaveBeenCalledTimes(3)
+    expect(administration).toHaveBeenCalledTimes(3)
+    expect(synchronization.mock.calls.at(-1)?.[0]).toBe(connection.pluginConnectionId)
+    expect(administration.mock.calls.at(-1)?.[0]).toBe(connection.pluginConnectionId)
+  })
+
+  it("coalesces invalidations during an overview request into exactly one follow-up", async () => {
+    const pending: Array<(value: PluginOverviewResponse) => void> = []
+    let invalidate: (() => void) | undefined
+    const load = vi
+      .fn<ConnectionTestTransport["overview"]>()
+      .mockResolvedValueOnce(overview)
+      .mockImplementation(() => new Promise((resolve) => pending.push(resolve)))
+    await renderServices({
+      create: vi.fn(),
+      makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
+      overview: load,
+      observeInvalidations: ({ onInvalidation, signal }) =>
+        new Promise((resolve) => {
+          invalidate = onInvalidation
+          signal.addEventListener("abort", () => resolve(), { once: true })
+        }),
+      setEnabled: vi.fn(),
+      test: vi.fn()
+    })
+    await act(async () => invalidate?.())
+    for (let index = 0; index < 5; index++) await act(async () => invalidate?.())
+    expect(load).toHaveBeenCalledTimes(2)
+    await act(async () => pending[0]?.(overview))
+    expect(load).toHaveBeenCalledTimes(3)
+    await act(async () => pending[1]?.(overview))
+    expect(load).toHaveBeenCalledTimes(3)
+  })
+})
+
+it("invalidates a 401 overview session and discards its pending refresh", async () => {
+  const unauthorized = Schema.decodeUnknownSync(UnauthorizedApiError)({
+    _tag: "UnauthorizedApiError",
+    correlationId: "fixture-overview-expired",
+    code: "unauthorized",
+    message: "The browser session expired."
+  })
+  let rejectRead: (cause: UnauthorizedApiError) => void = () => undefined
+  const blocked = new Promise<PluginOverviewResponse>((_resolve, reject) => {
+    rejectRead = reject
+  })
+  let invalidate: (() => void) | undefined
+  const load = vi.fn<ConnectionTestTransport["overview"]>().mockResolvedValueOnce(overview).mockReturnValue(blocked)
+  await renderServices({
+    create: vi.fn(),
+    makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
+    overview: load,
+    observeInvalidations: ({ onInvalidation, signal }) =>
+      new Promise((resolve) => {
+        invalidate = onInvalidation
+        signal.addEventListener("abort", () => resolve(), { once: true })
+      }),
+    setEnabled: vi.fn(),
+    test: vi.fn()
+  })
+  await act(async () => invalidate?.())
+  await act(async () => invalidate?.())
+  await act(async () => {
+    rejectRead(unauthorized)
+    await blocked.catch(() => undefined)
+  })
+  expect(sessionControls?.state._tag).toBe("anonymous")
+  expect(load).toHaveBeenCalledTimes(2)
+  expect(sessionStorage.getItem("cc_csrf")).toBeNull()
 })
