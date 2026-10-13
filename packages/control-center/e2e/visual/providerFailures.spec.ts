@@ -118,8 +118,8 @@ test("P0-10 overview preserves unavailable source facts", async ({ page, visualR
   })
   const reads = visualRuntime.apiRequests().filter(({ method }) => method === "GET" || method === "HEAD")
   // The fixed clock prevents limiter refill; each scenario must fit one 120-read window with headroom.
-  expect(reads.length, "P0-10b Overview frozen-clock read budget: at most 66 requests, including setup")
-    .toBeLessThanOrEqual(66)
+  expect(reads.length, "P0-10b Overview frozen-clock read budget: at most 68 requests, including setup")
+    .toBeLessThanOrEqual(68)
 })
 
 test("P0-10 omitted Confluence body is a truthful unsynchronized-task gap", async ({ page, visualRuntime }) => {

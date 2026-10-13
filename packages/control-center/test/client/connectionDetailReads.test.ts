@@ -28,3 +28,13 @@ it("keys connection details by their own revision instead of array identity or o
   tracker.reset()
   expect(tracker.reconcile([changed]).changed).toEqual([changed])
 })
+
+it("retries an unchanged failed token once without invalidating another connection", () => {
+  const a = connection("01890f6f-6d6a-7cc0-98d2-000000000101")
+  const b = connection("01890f6f-6d6a-7cc0-98d2-000000000102")
+  const tracker = makeConnectionDetailTracker()
+  tracker.reconcile([a, b])
+  tracker.failed(a.pluginConnectionId)
+  expect(tracker.reconcile([{ ...a }, { ...b }]).changed).toEqual([a])
+  expect(tracker.reconcile([{ ...b }, { ...a }]).changed).toEqual([])
+})

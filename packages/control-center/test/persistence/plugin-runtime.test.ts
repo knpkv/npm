@@ -145,6 +145,35 @@ const upsertPage = {
 }
 
 describe("plugin runtime persistence", () => {
+  it.effect("advances the connection token once when a sync completes and preserves it on replay", () =>
+    withRuntime(Effect.gen(function*() {
+      const runtime = yield* PluginRuntimeRepository
+      yield* setup
+      const attempt = yield* runtime.beginSyncAttempt(WORKSPACE_ID, PLUGIN_ID, "jira", STREAM, T0)
+      const before = yield* runtime.getRuntime(WORKSPACE_ID, PLUGIN_ID)
+      const completion = yield* runtime.completeSyncAttempt(
+        WORKSPACE_ID,
+        PLUGIN_ID,
+        STREAM,
+        attempt.attemptSequence,
+        "synchronized",
+        T1
+      )
+      const after = yield* runtime.getRuntime(WORKSPACE_ID, PLUGIN_ID)
+      assert.strictEqual(after.revision, before.revision + 1)
+      assert.deepStrictEqual(after.health, before.health)
+      const replay = yield* runtime.completeSyncAttempt(
+        WORKSPACE_ID,
+        PLUGIN_ID,
+        STREAM,
+        attempt.attemptSequence,
+        "synchronized",
+        T1
+      )
+      assert.deepStrictEqual(replay, completion)
+      assert.strictEqual((yield* runtime.getRuntime(WORKSPACE_ID, PLUGIN_ID)).revision, after.revision)
+    })))
+
   it.effect("distinguishes a terminal head page from retained provider progress without changing health", () =>
     withRuntime(Effect.gen(function*() {
       const runtime = yield* PluginRuntimeRepository

@@ -18,6 +18,7 @@ export const withSnapshotRefresh = Effect.fn("PortfolioSnapshotRefresh.run")(fun
   apply: (snapshot: A) => Effect.Effect<void>,
   consume: (controls: {
     readonly request: (cursor: EventCursor) => Effect.Effect<void, never, R>
+    readonly drain: Effect.Effect<void>
     readonly reset: Effect.Effect<void>
   }) => Effect.Effect<B, E2, R2>
 ): Effect.fn.Return<B, E | E2, R | R2> {
@@ -64,6 +65,8 @@ export const withSnapshotRefresh = Effect.fn("PortfolioSnapshotRefresh.run")(fun
   return yield* Effect.raceFirst(
     consume({
       request,
+      // Normal EOF drains accepted work; failing or interrupting the owner still cancels it immediately.
+      drain: Effect.suspend(() => active === null ? Effect.void : Fiber.join(active)),
       reset: Effect.gen(function*() {
         generation++
         pending = null

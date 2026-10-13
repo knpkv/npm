@@ -4503,13 +4503,39 @@ describe("ServicesPage first sync", () => {
   })
 })
 
+/** Successful local administration data for cache and failure-retry scenarios. */
+const detailAdministration = (summary: PluginConnectionSummary): PluginConnectionAdministration =>
+  Schema.decodeUnknownSync(PluginConnectionAdministration)({
+    connection: Schema.encodeSync(PluginConnectionSummary)(summary),
+    configuration: {
+      pluginConnectionId: summary.pluginConnectionId,
+      revision: 1,
+      values: [],
+      updatedAt: "2026-07-14T12:00:00.000Z"
+    },
+    metadata: {
+      pluginConnectionId: summary.pluginConnectionId,
+      pluginId: `dev.knpkv.${summary.providerId}.read`,
+      contractVersion: { major: 1, minor: 0, patch: 0 },
+      adapterVersion: { major: 1, minor: 0, patch: 0 },
+      configurationFields: [],
+      capabilities: []
+    },
+    credentialFields: [],
+    permissions: [],
+    schedule: { mode: "manual", nextRunAt: null },
+    synchronization: null,
+    diagnostics: []
+  })
+
+class FixtureDetailReadFailure extends Schema.TaggedError<FixtureDetailReadFailure>()("FixtureDetailReadFailure", {}) {}
+
 // Live overview rows are new objects even when every connection token is unchanged.
 describe("ServicesPage invalidation request bounds", () => {
   it("keeps detail reads cached across unrelated invalidations and refreshes only the changed connection", async () => {
-    const rows = [
-      { ...connection, supportsSynchronization: true, runtimeRevision: 1 },
-      { ...confluenceConnection, supportsSynchronization: true, runtimeRevision: 1 }
-    ]
+    const firstRow = { ...connection, supportsSynchronization: true, runtimeRevision: 1 }
+    const secondRow = { ...confluenceConnection, supportsSynchronization: true, runtimeRevision: 1 }
+    const rows = [firstRow, secondRow]
     let currentRows = rows
     let invalidate: (() => void) | undefined
     const synchronization = vi.fn<NonNullable<ConnectionTestTransport["synchronization"]>>((id) =>
@@ -4525,8 +4551,8 @@ describe("ServicesPage invalidation request bounds", () => {
         })
       )
     )
-    const administration = vi.fn<NonNullable<ConnectionTestTransport["administration"]>>(() =>
-      Promise.reject({ _tag: "FixtureAdministrationUnavailable" })
+    const administration = vi.fn<NonNullable<ConnectionTestTransport["administration"]>>((id) =>
+      Promise.resolve(detailAdministration(id === connection.pluginConnectionId ? firstRow : secondRow))
     )
     await renderServices({
       create: vi.fn(),
@@ -4555,6 +4581,105 @@ describe("ServicesPage invalidation request bounds", () => {
     expect(administration).toHaveBeenCalledTimes(3)
     expect(synchronization.mock.calls.at(-1)?.[0]).toBe(connection.pluginConnectionId)
     expect(administration.mock.calls.at(-1)?.[0]).toBe(connection.pluginConnectionId)
+  })
+
+  for (const failedRead of ["synchronization", "administration"]) {
+    it(`retries a failed ${failedRead} read once when the next overview has the same token`, async () => {
+      const row = { ...connection, supportsSynchronization: true, runtimeRevision: 1 }
+      let invalidate: (() => void) | undefined
+      const synchronized = Schema.decodeUnknownSync(PluginSynchronizationState)({
+        pluginConnectionId: row.pluginConnectionId,
+        providerId: "jira",
+        streamKey: "issues",
+        lastAttemptAt: null,
+        lastSuccessAt: null,
+        result: "never",
+        pagesCommitted: 0
+      })
+      const synchronization = vi
+        .fn<NonNullable<ConnectionTestTransport["synchronization"]>>()
+        .mockResolvedValue(synchronized)
+      const administration = vi
+        .fn<NonNullable<ConnectionTestTransport["administration"]>>()
+        .mockResolvedValue(detailAdministration(row))
+      if (failedRead === "synchronization") synchronization.mockRejectedValueOnce(new FixtureDetailReadFailure())
+      else administration.mockRejectedValueOnce(new FixtureDetailReadFailure())
+      const host = await renderServices({
+        create: vi.fn(),
+        makeConnectionId: () => Promise.resolve(row.pluginConnectionId),
+        overview: () => Promise.resolve({ ...overview, connections: [{ ...row }] }),
+        observeInvalidations: ({ onInvalidation, signal }) =>
+          new Promise((resolve) => {
+            invalidate = onInvalidation
+            signal.addEventListener("abort", () => resolve(), { once: true })
+          }),
+        setEnabled: vi.fn(),
+        test: vi.fn(),
+        synchronization,
+        administration
+      })
+      expect(synchronization).toHaveBeenCalledTimes(1)
+      expect(administration).toHaveBeenCalledTimes(1)
+      const failedCopy =
+        failedRead === "synchronization" ? "Sync state is unavailable." : "Administration details are unavailable."
+      expect(host.textContent).toContain(failedCopy)
+      await act(async () => invalidate?.())
+      expect(synchronization).toHaveBeenCalledTimes(2)
+      expect(administration).toHaveBeenCalledTimes(2)
+      expect(host.textContent).not.toContain(failedCopy)
+      await act(async () => invalidate?.())
+      expect(synchronization).toHaveBeenCalledTimes(2)
+      expect(administration).toHaveBeenCalledTimes(2)
+    })
+  }
+
+  it("a second client reads sync completion once when the runtime token advances", async () => {
+    let completed = false
+    let invalidate: (() => void) | undefined
+    const row = { ...connection, supportsSynchronization: true, runtimeRevision: 5 }
+    const synchronization = vi.fn<NonNullable<ConnectionTestTransport["synchronization"]>>(() =>
+      Promise.resolve(
+        Schema.decodeUnknownSync(PluginSynchronizationState)({
+          pluginConnectionId: row.pluginConnectionId,
+          providerId: "jira",
+          streamKey: "issues",
+          lastAttemptAt: "2026-07-14T12:00:00.000Z",
+          lastSuccessAt: completed ? "2026-07-14T12:01:00.000Z" : null,
+          result: completed ? "synchronized" : "running",
+          pagesCommitted: 0
+        })
+      )
+    )
+    const synchronize = vi.fn<NonNullable<ConnectionTestTransport["synchronize"]>>()
+    const host = await renderServices({
+      create: vi.fn(),
+      makeConnectionId: () => Promise.resolve(row.pluginConnectionId),
+      overview: () =>
+        Promise.resolve({
+          ...overview,
+          connections: [{ ...row, runtimeRevision: completed ? 6 : 5 }]
+        }),
+      observeInvalidations: ({ onInvalidation, signal }) =>
+        new Promise((resolve) => {
+          invalidate = onInvalidation
+          signal.addEventListener("abort", () => resolve(), { once: true })
+        }),
+      setEnabled: vi.fn(),
+      test: vi.fn(),
+      synchronization,
+      synchronize
+    })
+    expect(synchronization).toHaveBeenCalledTimes(1)
+    expect(host.textContent).toContain("Syncing")
+    await act(async () => {
+      completed = true
+      invalidate?.()
+    })
+    expect(synchronization).toHaveBeenCalledTimes(2)
+    expect(host.textContent).toContain("Synced")
+    await act(async () => invalidate?.())
+    expect(synchronization).toHaveBeenCalledTimes(2)
+    expect(synchronize).not.toHaveBeenCalled()
   })
 
   it("coalesces invalidations during an overview request into exactly one follow-up", async () => {

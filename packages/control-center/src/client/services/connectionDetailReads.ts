@@ -30,6 +30,9 @@ export const makeConnectionDetailTracker = () => {
       })
       return { changed, removed }
     },
+    failed: (id: PluginConnectionId): void => {
+      tokens.delete(id)
+    },
     reset: (): void => tokens.clear()
   }
 }

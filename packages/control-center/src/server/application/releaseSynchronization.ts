@@ -659,5 +659,14 @@ export const synchronizeFakeReleaseFromMap = Effect.fn(
     outcome._tag,
     completedAt
   )
+  yield* appendPortfolioInvalidation({
+    workspaceId: input.workspaceId,
+    pluginConnectionId: input.pluginConnectionId,
+    releaseId: null,
+    occurredAt: completedAt,
+    reason: "release-projection"
+  })
+  const wakeups = yield* DomainEventWakeups
+  yield* wakeups.notify(input.workspaceId)
   return outcome
 })

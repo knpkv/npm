@@ -199,7 +199,7 @@ const runController = Effect.fn("PortfolioLiveController.run")(function*({
     return yield* withSnapshotRefresh(
       refreshSnapshot,
       (snapshot) => publish({ _tag: "stream-snapshot", snapshot }).pipe(Effect.andThen(markUsable)),
-      ({ request, reset }) => {
+      ({ drain, request, reset }) => {
         const consumeEvent = (event: ControlCenterLiveEvent): Effect.Effect<void, unknown> => {
           switch (event.event) {
             case "portfolio.snapshot": {
@@ -253,6 +253,7 @@ const runController = Effect.fn("PortfolioLiveController.run")(function*({
         }
 
         return Stream.runForEach(stream, (event) => consumeEvent(event).pipe(Effect.andThen(markUsable))).pipe(
+          Effect.andThen(drain),
           Effect.andThen(Effect.fail(new PortfolioStreamClosedError()))
         )
       }

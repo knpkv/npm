@@ -621,6 +621,7 @@ export const ServicesPage = ({
         (failure) => {
           if (request.signal.aborted) return
           administrationRequests.current.delete(pluginConnectionId)
+          detailTracker.current.failed(pluginConnectionId)
           if (Predicate.isTagged("UnauthorizedApiError")(failure)) invalidateSession(sessionKey)
           setAdministrationStates((current) => new Map(current).set(pluginConnectionId, { _tag: "failed" }))
         }
@@ -667,6 +668,7 @@ export const ServicesPage = ({
         (failure) => {
           if (request.signal.aborted) return
           synchronizationRequests.current.delete(pluginConnectionId)
+          detailTracker.current.failed(pluginConnectionId)
           if (Predicate.isTagged("UnauthorizedApiError")(failure)) invalidateSession(sessionKey)
           setSynchronizationStates((current) => new Map(current).set(pluginConnectionId, { _tag: "failed" }))
         }
