@@ -94,6 +94,8 @@ const freezeCaptureMotion = (page: Page): Promise<JSHandle<MotionGuard>> =>
 export const cropRegions = (bytes: Uint8Array, snapshot: Snapshot, scale = 1): ReadonlyMap<string, RegionPixels> => {
   const source = PNG.sync.read(Buffer.from(bytes))
   return new Map<string, RegionPixels>(snapshot.regions.map((region) => {
+    // Check layout area before rounding: fractional coordinates must not fabricate a pixel.
+    if (region.box.width === 0 || region.box.height === 0) return [region.name, RegionPixels.OffFrame()]
     const x = Math.max(0, Math.floor(region.box.x * scale))
     const y = Math.max(0, Math.floor(region.box.y * scale))
     const width = Math.min(source.width, Math.ceil((region.box.x + region.box.width) * scale)) - x

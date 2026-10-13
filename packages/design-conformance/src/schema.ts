@@ -129,8 +129,8 @@ export const Waivers = Schema.Array(Waiver)
 export const Box = Schema.Struct({
   x: Schema.Finite,
   y: Schema.Finite,
-  width: Schema.Finite.check(Schema.isGreaterThan(0)),
-  height: Schema.Finite.check(Schema.isGreaterThan(0))
+  width: Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0)),
+  height: Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0))
 })
 export const Region = Schema.Struct({
   name: Name,

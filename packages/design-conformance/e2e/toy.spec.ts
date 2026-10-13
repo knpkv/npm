@@ -319,6 +319,83 @@ test("fully off-frame live regions retain metadata findings and obey legacy grac
   )
 })
 
+/** A visible empty live region must reach normal findings and grace instead of aborting the report. */
+test("zero-height live regions retain membership findings and obey legacy grace in written reports", async ({ page }) => {
+  await Effect.runPromise(
+    Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const html = `<html data-design-ready=true><body>
+        <style>body { margin: 0; } main { inline-size: 2.5em; block-size: 2.5em; } [data-region=cards] { inline-size: 2.5em; block-size: 0; }</style>
+        <main data-region=content>Box</main>
+      </body></html>`
+      const loaded = yield* testReferences(html)
+      const refs = {
+        ...loaded,
+        manifest: {
+          ...loaded.manifest,
+          enforcement: {
+            ...loaded.manifest.enforcement,
+            legacy: { mode: "report-only", until: DateTime.add(yield* DateTime.now, { days: 7 }) }
+          }
+        }
+      } satisfies Effect.Success<ReturnType<typeof loadReferences>>
+      const liveHtml = html.replace("</main>", "</main><div data-region=cards></div>")
+      const origin = yield* localServer(() => HttpServerResponse.html(liveHtml))
+      const live = testLive(origin)
+      yield* browserCall("zero-height fixture viewport", () => page.setViewportSize({ width: 390, height: 844 }))
+      yield* browserCall("zero-height fixture clock", () => installCaptureClock(page))
+      yield* browserCall("zero-height fixture navigation", () => page.goto(`${origin}/page.html`))
+      expect(
+        yield* browserCall(
+          "zero-height fixture visibility",
+          () =>
+            page.locator("[data-region=cards]").evaluate((element) =>
+              element.checkVisibility({ opacityProperty: true, visibilityProperty: true })
+            )
+        )
+      ).toBe(true)
+      const captured = yield* capturePage(page)
+      expect(captured.snapshot.regions.find((region) => region.name === "cards")?.box).toEqual({
+        x: 0,
+        y: 40,
+        width: 40,
+        height: 0
+      })
+      expect(captured.regions.get("cards")).toMatchObject({ _tag: "OffFrame" })
+      const output = yield* fs.makeTempDirectoryScoped()
+      const required = yield* runConformance(refs, { output }).pipe(Effect.provideService(LiveProduct, live))
+      expect(required?.passed).toBe(false)
+      expect(
+        required?.findings.some((finding) =>
+          finding.rule === "geometry" && finding.region === "*" &&
+          finding.detail === "Region order or membership differs" && finding.disposition === "required"
+        )
+      ).toBe(true)
+      expect(
+        required?.findings.some((finding) =>
+          finding.rule === "geometry" && finding.region === "cards" && finding.disposition === "required"
+        )
+      ).toBe(true)
+      expect(yield* readJson(path.join(output, "result.json"), Result)).toEqual(required)
+      expect(yield* fs.exists(path.join(output, "index.html"))).toBe(true)
+      expect(yield* fs.exists(path.join(output, "toy--passing--390--light-cards-live.png"))).toBe(false)
+      const base = yield* fs.makeTempDirectoryScoped()
+      yield* runConformance(refs, { output: base, captureOnly: true }).pipe(Effect.provideService(LiveProduct, live))
+      const graceOutput = yield* fs.makeTempDirectoryScoped()
+      const grace = yield* runConformance(refs, { output: graceOutput, base }).pipe(
+        Effect.provideService(LiveProduct, live)
+      )
+      expect(grace?.passed).toBe(true)
+      expect(grace?.findings.length).toBeGreaterThan(0)
+      expect(grace?.findings.every((finding) => finding.disposition === "report-only")).toBe(true)
+      expect(grace?.shots.every((shot) => !shot.touched)).toBe(true)
+      expect(yield* readJson(path.join(graceOutput, "result.json"), Result)).toEqual(grace)
+      expect(yield* fs.exists(path.join(graceOutput, "index.html"))).toBe(true)
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer))
+  )
+})
+
 /** Compare real PNG evidence with identical metadata, so tolerance cannot hide arbitrary pixels. */
 test("PNG refs reject a disabled pixel threshold, accept drift within 2% and require unrelated pixels", async ({ page }) => {
   await Effect.runPromise(
