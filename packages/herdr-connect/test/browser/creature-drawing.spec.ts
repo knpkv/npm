@@ -48,7 +48,7 @@ for (const theme of ["light", "dark"] satisfies ReadonlyArray<"light" | "dark">)
     test.use({ colorScheme: theme })
 
     for (const size of ["row", "cast", "stage"]) {
-      test(`all seeded ${size} bodies are circle, squircle or pear, never ovals or lobes`, async ({ page }) => {
+      test(`rev6 seeded ${size} bodies cover circle, squircle, pear, star and bean`, async ({ page }) => {
         await page.goto(`/?drawing=grid&size=${size}`)
         const creatures = page.locator("[data-drawing-case] .connect-creature")
         await expect(creatures).toHaveCount(64)
@@ -84,13 +84,81 @@ for (const theme of ["light", "dark"] satisfies ReadonlyArray<"light" | "dark">)
             ) {
               return "pear"
             }
+            const path = body.getAttribute("d") ?? ""
+            // Five rounded tips retain a concave lower notch; a bean has a cleft above its full centre.
+            if ((path.match(/Q/g)?.length ?? 0) === 10 && inside(0.5, 0.15) && !inside(0.5, 0.95)) {
+              return "star"
+            }
+            // The exported bean paints at aspect 1.36124; its cleft ends at 6.83% of painted height.
+            if (
+              (path.match(/C/g)?.length ?? 0) === 32 && aspect > 1.35 && aspect < 1.37 && !inside(0.5, 0.04)
+              && inside(0.5, 0.3) && inside(0.5, 0.8)
+            ) {
+              return "bean"
+            }
             return `unrecognised silhouette, aspect ${String(aspect)}`
           })
         )
-        expect(silhouettes.filter((silhouette) => !["circle", "squircle", "pear"].includes(silhouette))).toEqual([])
-        expect(new Set(silhouettes)).toEqual(new Set(["circle", "squircle", "pear"]))
+        expect(silhouettes.filter((silhouette) => !["circle", "squircle", "pear", "star", "bean"].includes(silhouette)))
+          .toEqual([])
+        expect(new Set(silhouettes)).toEqual(new Set(["circle", "squircle", "pear", "star", "bean"]))
       })
     }
+
+    for (const size of ["row", "stage"]) {
+      test(`rev6 waiting ${size} has raised brows and wider eyes than working`, async ({ page }) => {
+        const working = await open(page, `id=drawing-0&size=${size}&state=working`)
+        const face = (creature: Locator) =>
+          creature.evaluate((svg) => {
+            const unit = Number.parseFloat(getComputedStyle(svg).getPropertyValue("--connect-creature-unit"))
+            const eye = svg.querySelector<SVGPathElement>(".connect-creature-white")?.getBBox()
+            const brow = svg.querySelector<SVGPathElement>(".connect-creature-brow")?.getBBox()
+            return {
+              eyeHeight: (eye?.height ?? 0) / unit,
+              browGap: ((eye?.y ?? 0) - (brow?.y ?? 0) - (brow?.height ?? 0)) / unit
+            }
+          })
+        const focused = await face(working)
+        const waiting = await face(await open(page, `id=drawing-0&size=${size}&state=waiting`))
+        expect(waiting.eyeHeight).toBeGreaterThanOrEqual(focused.eyeHeight * 1.1)
+        expect(waiting.browGap).toBeGreaterThan(focused.browGap)
+      })
+
+      test(`rev6 done ${size} keeps visible happy arcs at rest`, async ({ page }) => {
+        const creature = await open(page, `size=${size}&state=done`)
+        const arcs = creature.locator(".connect-creature-eye-mark[data-eyes=\"arc\"]")
+        await expect(arcs).toHaveCount(2)
+        for (const arc of await arcs.all()) await expect(arc).toBeVisible()
+        await expect(creature.locator(".connect-creature-mouth")).toHaveCount(0)
+      })
+
+      test(`rev6 stale ${size} has half lids rather than closed eyes`, async ({ page }) => {
+        const creature = await open(page, `size=${size}&state=working&stale`, "no-preference")
+        const lids = await creature.evaluate((svg) => {
+          const style = getComputedStyle(svg)
+          const span = Number.parseFloat(style.getPropertyValue("--connect-creature-eye-span"))
+          const socket = Number.parseFloat(style.getPropertyValue("--connect-creature-eye-socket"))
+          return [...svg.querySelectorAll("clipPath .connect-creature-lid:not([data-low])")].map((lid) =>
+            (Number.parseFloat(getComputedStyle(lid).translate.split(" ")[1] ?? "0") - socket) / span
+          )
+        })
+        expect(lids).toHaveLength(2)
+        for (const fraction of lids) expect(fraction).toBeCloseTo(0.5, 2)
+        expect(await creature.evaluate((svg) => svg.getAnimations({ subtree: true }).length)).toBe(0)
+        await expect(creature.locator(".connect-creature-mouth")).toHaveCount(0)
+      })
+    }
+
+    test("rev6 agent faces have no leftover blink, brow twitch or reading motion", async ({ page }) => {
+      for (const state of ["working", "waiting", "blocked", "done", "ready"]) {
+        const creature = await open(page, `state=${state}`, "no-preference")
+        const names = await creature.locator(
+          ".connect-creature-lid, .connect-creature-lash, .connect-creature-brow, .connect-creature-gaze"
+        ).evaluateAll((nodes) => nodes.map((node) => getComputedStyle(node).animationName))
+        expect(names.length).toBeGreaterThanOrEqual(9)
+        expect(names.every((name) => name === "none"), `${state}: ${names.join(", ")}`).toBe(true)
+      }
+    })
 
     test("cast faces retain two eyes and brows at 16 and 24 pixels", async ({ page }) => {
       await page.goto("/?drawing=grid&size=cast")
@@ -180,18 +248,21 @@ for (const theme of ["light", "dark"] satisfies ReadonlyArray<"light" | "dark">)
       await expect(row.locator(".connect-creature-blush")).toHaveCount(2)
     })
 
-    test("blocked defaults to the stuck face with its sweat and question", async ({ page }) => {
-      const creature = await open(page, "state=blocked")
-      await expect(creature.locator(".connect-creature-sweat")).toHaveCount(1)
-      await expect(creature.locator(".connect-creature-question")).toHaveCount(1)
-      await expect(creature.locator(".connect-creature-mouth")).toHaveCount(0)
-      expectScale(await bodyScale(creature), 1)
+    test("rev6 blocked and error agents default to the worried face without talk overlays", async ({ page }) => {
+      for (const state of ["blocked", "error"]) {
+        const creature = await open(page, `state=${state}`)
+        await expect(creature).toHaveAttribute("data-mood", "worried")
+        await expect(creature.locator(".connect-creature-sweat")).toHaveCount(0)
+        await expect(creature.locator(".connect-creature-question")).toHaveCount(0)
+        await expect(creature.locator(".connect-creature-mouth")).toHaveCount(0)
+        expectScale(await bodyScale(creature), 1)
+      }
     })
 
     // The list reference uses a larger drop than the stage, so it remains visible at its native 32px slot.
     test("stuck sweat stays visible at 32 pixels on every list body", async ({ page }) => {
       for (const id of ["drawing-0", "drawing-1", "drawing-2"]) {
-        const creature = await open(page, `id=${id}&state=blocked&size=row`)
+        const creature = await open(page, `id=${id}&mood=stuck&size=row`)
         await creature.evaluate((node) => {
           node.style.inlineSize = "32px"
           node.style.blockSize = "32px"
@@ -340,15 +411,15 @@ for (const theme of ["light", "dark"] satisfies ReadonlyArray<"light" | "dark">)
       await expect(creature.locator(".connect-creature-mouth")).toHaveCount(0)
     })
 
-    test("focused loops use the state timing and keep the fleet out of phase", async ({ page }) => {
+    test("talking happy loops use the state timing and keep the fleet out of phase", async ({ page }) => {
       await page.emulateMedia({ reducedMotion: "no-preference" })
-      await page.goto("/?drawing=grid&mood=focused")
+      await page.goto("/?drawing=grid&mood=happy&talking")
       const creatures = page.locator("[data-drawing-case] .connect-creature")
       await expect(creatures).toHaveCount(64)
       const timings = await creatures.evaluateAll((nodes) =>
         nodes.map((node) =>
           node.getAnimations({ subtree: true }).map((animation) => animation.effect?.getTiming()).filter((timing) =>
-            timing?.duration === 2400 && timing.iterations === Infinity
+            timing?.duration === 1600 && timing.iterations === Infinity
           ).map((timing) => timing?.delay)
         )
       )

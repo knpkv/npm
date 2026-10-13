@@ -3,9 +3,18 @@ import { type CSSProperties, type ReactElement, useId, useState } from "react"
 
 import { CreatureAdornment } from "./creature-accessory.js"
 import { agentStatePresentation } from "./agent-state.js"
-import { agentCharacter, creaturePalette, FOOT, IRIS_SHARE, softBoxPath, type CreatureHueFamily } from "./character.js"
+import {
+  agentCharacter,
+  creatureBodySeed,
+  creaturePalette,
+  FOOT,
+  IRIS_SHARE,
+  softBoxPath,
+  type CreatureHueFamily
+} from "./character.js"
 import {
   browStroke,
+  creatureAgentPose,
   creatureMood,
   creaturePose,
   mouthPath,
@@ -28,7 +37,7 @@ export interface CreatureProps {
   readonly hueFamily?: CreatureHueFamily
   readonly state: string
   readonly size: CreatureSize
-  /** Stale hosts close the eyes and stop motion; identity is retained. Default false. */
+  /** Stale hosts rest with half lids and stop motion; identity is retained. Default false. */
   readonly stale?: boolean
   /** Closed agents are desaturated and still, with shut lids and no halo. Default false. */
   readonly closed?: boolean
@@ -65,28 +74,35 @@ export const Creature = ({
 }: CreatureProps): ReactElement => {
   const character = agentCharacter(host, id)
   const presentation = agentStatePresentation(state)
+  const talkPose = talking && size === "stage"
   const [completion, setCompletion] = useState({
     state,
     override,
-    complete: override === undefined && creatureMood(state) === "done"
+    complete: override === undefined && creatureMood(state, talkPose) === "done"
   })
   // Render-time adjustment resets the one-shot with the state, without timers or an intermediate old pose.
   if (completion.state !== state || completion.override !== override) {
     setCompletion({ state, override, complete: false })
   }
   const settled = completion.state === state && completion.override === override && completion.complete
-  const selected = override ?? creatureMood(state)
+  const selected = override ?? creatureMood(state, talkPose)
   const mood =
     size === "stage" && reaction !== undefined ? reaction : selected === "done" && settled ? "happy" : selected
   const shut = closed || stale
   const expressive = talking && size === "stage" && !shut
-  const pose = creaturePose(mood, shut)
+  const pose =
+    !shut && !talkPose && override === undefined && reaction === undefined
+      ? creatureAgentPose(state)
+      : creaturePose(mood, closed, stale)
   const palette = creaturePalette(host, name, hueFamily, closed ? 0.1 : stale ? 0.35 : 1)
   const ew = character.eye[0] * pose.eyeScale
   const eh = character.eye[1] * pose.eyeScale
   const [left, top, width, height] = character.bounds
   const unit = character.unit
-  const referenceWidth = (character.bodyKind === "pear" ? 28 : character.bodyKind === "squircle" ? 23 : 24) * unit
+  const seed = creatureBodySeed(character.bodyKind)
+  const referenceWidth = seed.width * unit
+  const referenceHeight = seed.height * unit
+  const referenceTop = character.eyeY - referenceHeight * seed.eyeY
   const referenceLeft = 50 - referenceWidth / 2
   const row = size === "row"
   const rowTrack = 28
@@ -124,7 +140,7 @@ export const Creature = ({
     "--connect-creature-unit": String(unit),
     "--connect-creature-ink": palette.p26,
     "--connect-creature-ring": palette.ring,
-    "--connect-creature-open": String(shut ? 1 : (eh * 2 * pose.lid + socket) / (shutY - upperRest)),
+    "--connect-creature-open": String(closed ? 1 : (eh * 2 * pose.lid + socket) / (shutY - upperRest)),
     "--connect-creature-lower": String((pose.lower * 2 * eh) / (lowerRest - shutY)),
     "--connect-creature-lid": String(shutY - upperRest),
     "--connect-creature-eye-span": String(2 * eh),
@@ -165,6 +181,7 @@ export const Creature = ({
       data-closed={closed ? "" : undefined}
       data-tone={presentation.tone}
       data-mood={mood}
+      data-lidded={pose.lid > 0 ? "" : undefined}
       data-talking={expressive ? "" : undefined}
       data-loop={pose.loops ? "" : undefined}
       focusable="false"
@@ -222,7 +239,7 @@ export const Creature = ({
                 className="connect-creature-lit"
                 d={character.body}
                 fill={palette.p58}
-                transform={`translate(${-1.25 * unit} ${-1.5 * unit}) translate(${String(referenceLeft)} ${String(top)}) scale(.99) translate(${String(-referenceLeft)} ${String(-top)})`}
+                transform={`translate(${-1.25 * unit} ${-1.5 * unit}) translate(${String(referenceLeft)} ${String(referenceTop)}) scale(.99) translate(${String(-referenceLeft)} ${String(-referenceTop)})`}
               />
               <rect
                 className="connect-creature-highlight"
@@ -231,7 +248,7 @@ export const Creature = ({
                 width={5 * unit}
                 height={1.6 * unit}
                 rx={0.8 * unit}
-                transform={`translate(${String(referenceLeft + (character.bodyKind === "pear" ? 6.6 : character.bodyKind === "squircle" ? 2.4 : 3.6) * unit)} ${String(top + height * 0.47)}) rotate(${character.bodyKind === "squircle" ? "-82" : character.bodyKind === "pear" ? "-68" : "-64"})`}
+                transform={`translate(${String(referenceLeft + seed.highlightX * unit)} ${String(referenceTop + referenceHeight * 0.47)}) rotate(${String(seed.highlightRotation)})`}
                 fill={palette.p70}
               />
             </g>

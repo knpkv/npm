@@ -166,11 +166,11 @@ const poses = {
   }
 } satisfies Record<CreatureMood, CreaturePose>
 
-/** Shares the directory's unknown-state fallback, with blocked/error using the stuck drawing. */
-export const creatureMood = (state: string): CreatureMood => {
+/** Ordinary blocked/error agents look worried; talking stages retain the richer stuck reaction. */
+export const creatureMood = (state: string, talking = false): CreatureMood => {
   const presentation = agentStatePresentation(state)
   if (presentation.word === "Idle") return "sleepy"
-  if (presentation.tone === "critical") return "stuck"
+  if (presentation.tone === "critical") return talking ? "stuck" : "worried"
   const defaults = { working: "focused", finished: "done", ready: "happy", "needs-you": "waiting" } satisfies Record<
     AgentBucket,
     CreatureMood
@@ -178,9 +178,17 @@ export const creatureMood = (state: string): CreatureMood => {
   return defaults[presentation.bucket]
 }
 
-/** Closed/stale override only the face, leaving identity intact. */
-export const creaturePose = (mood: CreatureMood, shut = false): CreaturePose =>
-  shut ? { ...poses.sleepy, lid: 1, duration: 0, loops: false } : poses[mood]
+/** Closed lids meet fully; stale lids rest halfway. Both retain identity and stop motion. */
+export const creaturePose = (mood: CreatureMood, closed = false, stale = false): CreaturePose =>
+  closed || stale ? { ...poses.sleepy, lid: closed ? 1 : 0.5, duration: 0, loops: false } : poses[mood]
+
+/** Connect agent faces are distinct from explicit talking poses: waiting looks up, finished keeps happy arcs. */
+export const creatureAgentPose = (state: string): CreaturePose => {
+  const mood = creatureMood(state)
+  if (mood === "waiting") return { ...poses.waiting, brow: "up", eyeScale: 1.12 }
+  if (mood === "done") return { ...poses.happy, eyes: "arc" }
+  return poses[mood]
+}
 
 export interface BrowStroke {
   readonly points: readonly [readonly [number, number], readonly [number, number], readonly [number, number]]

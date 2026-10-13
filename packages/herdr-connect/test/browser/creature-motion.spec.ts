@@ -79,22 +79,18 @@ const measure = (page: Page) =>
     })
 
 test.describe("Connect creatures", () => {
-  test("live while working when the reader allows motion", async ({ page }) => {
+  // connect--2a and CONNECT-MAP rev6 keep the working arc while ordinary faces stay still.
+  // The existing connect-creature-turn keyframe retains its 1800ms stylesheet clock.
+  test("rev6 working motion stays on the orbit while the ordinary face and body stay still", async ({ page }) => {
     await open(page, "no-preference")
-    // Only the eyes and working light move on an ordinary agent; body deformation belongs to talk.
-    expect(await running(page)).toEqual([
-      "connect-creature-blink",
-      "connect-creature-blink",
-      "connect-creature-blink",
-      "connect-creature-blink",
-      "connect-creature-blink-low",
-      "connect-creature-blink-low",
-      "connect-creature-lash",
-      "connect-creature-lash",
-      "connect-creature-read",
-      "connect-creature-read",
-      "connect-creature-turn"
-    ])
+    expect(await running(page)).toEqual(["connect-creature-turn"])
+    const svg = page.locator(".connect-agent svg.connect-creature").first()
+    await expect(svg.locator(".connect-creature-orbit")).toHaveCSS("animation-duration", "1.8s")
+    const still = await svg.locator(
+      ".connect-creature-breath, .connect-creature-bob, .connect-creature-lid, .connect-creature-lash, .connect-creature-brow, .connect-creature-gaze"
+    ).evaluateAll((nodes) => nodes.map((node) => getComputedStyle(node).animationName))
+    expect(still.length).toBeGreaterThanOrEqual(11)
+    expect(still.every((name) => name === "none")).toBe(true)
   })
 
   // A rotating ellipse crosses a tall body's sides; the working light must travel along a fixed ring.
@@ -144,8 +140,8 @@ test.describe("Connect creatures", () => {
     }
   })
 
-  // A shut eye must be the body's own skin: lids painted on top show as discs in another shade.
-  test("closes its eyes onto unbroken skin", async ({ page }) => {
+  // CONNECT-MAP rev6 archived eyes are shut and still. They expose the same skin, without the removed generic blink.
+  test("rev6 archived lids close onto unbroken skin without a blink", async ({ page }) => {
     await open(page, "no-preference")
     const svg = page.locator(".connect-agent svg.connect-creature").first()
     await svg.evaluate((node) =>
@@ -186,10 +182,11 @@ test.describe("Connect creatures", () => {
     }
     const distance = (one: ReadonlyArray<number>, other: ReadonlyArray<number>) =>
       Math.max(...one.map((value, index) => Math.abs(value - (other[index] ?? 0))))
-    await freeze(page, ["connect-creature-blink", "connect-creature-lash"], 0.345)
-    const shut = await sample()
     await freeze(page, [], 0)
     const awake = await sample()
+    await svg.evaluate((node) => node.setAttribute("data-closed", ""))
+    expect(await svg.evaluate((node) => node.getAnimations({ subtree: true }).length)).toBe(0)
+    const shut = await sample()
     // The skin under the eye: the same creature with its eyes taken away.
     await svg.evaluate((node) => {
       for (const eye of node.querySelectorAll(".connect-creature-eye")) eye.remove()
@@ -304,17 +301,42 @@ test.describe("Connect creatures", () => {
     }
   }
 
-  test("focused gaze uses the reference clock and becomes still under reduced motion", async ({ page }) => {
-    await open(page, "no-preference")
-    const svg = page.locator(".connect-agent svg.connect-creature").first()
-    await expect(svg.locator(".connect-creature-gaze").first()).toHaveCSS("animation-duration", "2.4s")
-    expect(
-      await svg.locator(".connect-creature-gaze").first().evaluate((node) =>
-        Number.parseFloat(getComputedStyle(node).animationDelay)
-      )
-    ).toBeLessThan(0)
+  // creature--focused--stage: loop 2400ms, frames 1–4 at 0/200/900/1500ms; ordinary rev6 agents never run this scan.
+  test("rev6 talking focused gaze follows the sheet's four positions on its 2400ms clock", async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: "no-preference" })
+    await page.goto("/?drawing=single&size=stage&mood=focused&talking")
+    const svg = page.locator("[data-drawing-case] .connect-creature")
+    await expect(svg).toHaveCount(1)
+    const gaze = svg.locator(".connect-creature-gaze").first()
+    await expect(gaze).toHaveCSS("animation-name", "connect-creature-focused-scan")
+    await expect(gaze).toHaveCSS("animation-duration", "2.4s")
+    expect(await gaze.evaluate((node) => Number.parseFloat(getComputedStyle(node).animationDelay))).toBeLessThan(0)
+    for (
+      const [time, x, y] of [[0, 0, 0.3], [200, -0.2, 0.8], [900, -0.85, 0.6], [
+        1500,
+        0.85,
+        0.6
+      ]] satisfies ReadonlyArray<readonly [number, number, number]>
+    ) {
+      const look = await svg.evaluate((node, at) => {
+        for (const animation of node.getAnimations({ subtree: true })) {
+          animation.pause()
+          const timing = animation.effect?.getTiming()
+          animation.currentTime = Number(timing?.delay ?? 0) + 2400 + at
+        }
+        const unit = Number.parseFloat(getComputedStyle(node).getPropertyValue("--connect-creature-unit"))
+        const eye = node.querySelector(".connect-creature-gaze")
+        const xy = eye === null ? [] : getComputedStyle(eye).translate.split(" ").map(Number.parseFloat)
+        return [(xy[0] ?? 0) / (0.85 * unit), ((xy[1] ?? 0) - 0.4 * unit) / (0.85 * unit)]
+      }, time)
+      expect(look[0], `frame at ${String(time)}ms`).toBeCloseTo(x, 2)
+      expect(look[1], `frame at ${String(time)}ms`).toBeCloseTo(y, 2)
+    }
     await page.emulateMedia({ reducedMotion: "reduce" })
-    expect(await running(page)).toEqual([])
+    expect(await svg.evaluate((node) => node.getAnimations({ subtree: true }).length)).toBe(0)
+    await page.emulateMedia({ reducedMotion: "no-preference" })
+    await page.evaluate(() => document.body.setAttribute("data-rly-reduced-motion", "reduce"))
+    expect(await svg.evaluate((node) => node.getAnimations({ subtree: true }).length)).toBe(0)
   })
 
   test("stale brows lower without distortion, and forced colours retain their stroke", async ({ page }) => {

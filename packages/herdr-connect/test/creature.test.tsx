@@ -3,7 +3,7 @@ import { Schema } from "effect"
 import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it } from "vitest"
 
-import { Creature, type CreatureAccessory } from "../src/creature.js"
+import { Creature, type CreatureAccessory, type CreatureMood } from "../src/creature.js"
 import { agentCharacter } from "../src/character.js"
 import { ConnectAgent } from "../src/model.js"
 import { AgentDirectory } from "../src/view.js"
@@ -36,6 +36,30 @@ const directory = (agents: ReadonlyArray<ReturnType<typeof agent>>, stale: boole
   )
 
 describe("Creature", () => {
+  it("uses worried for ordinary blocked/error agents and keeps the talking stuck pose", () => {
+    for (const state of ["blocked", "error"]) {
+      expect(renderToStaticMarkup(<Creature host="fixture-host" id="one" size="stage" state={state} />)).toContain(
+        'data-mood="worried"'
+      )
+      expect(
+        renderToStaticMarkup(<Creature host="fixture-host" id="one" size="stage" state={state} talking />)
+      ).toContain('data-mood="stuck"')
+    }
+  })
+
+  it("keeps the done agent's happy arcs after mounting an already finished state", () => {
+    const markup = renderToStaticMarkup(<Creature host="fixture-host" id="one" size="row" state="done" />)
+    expect(markup.match(/class="connect-creature-eye-mark" data-eyes="arc"/g)).toHaveLength(2)
+  })
+
+  it("uses half lids for stale agents and full lids for archived agents", () => {
+    const stale = renderToStaticMarkup(<Creature host="fixture-host" id="one" size="row" state="working" stale />)
+    const closed = renderToStaticMarkup(<Creature host="fixture-host" id="one" size="row" state="working" closed />)
+    expect(stale).not.toContain("--connect-creature-open:1;")
+    expect(stale).toContain("calc(c * 0.35)")
+    expect(closed).toContain("--connect-creature-open:1;")
+  })
+
   // Behaviour follows the state language rows already use, so a creature never acts out a different state.
   it("takes its behaviour from the agent's state bucket and tone", () => {
     const markup = (state: string) => renderToStaticMarkup(<Creature host="nix" id="a1" size="row" state={state} />)
@@ -67,17 +91,17 @@ describe("Creature", () => {
 
   // Head overlays paint outside the fitted ring; switching moods must not shrink the list body.
   it("keeps the same row body framing when a head overlay appears", () => {
-    const frame = (state: string) =>
+    const frame = (mood: CreatureMood) =>
       /viewBox="([^"]+)"/.exec(
-        renderToStaticMarkup(<Creature host="fixture-host" id="drawing-1" size="row" state={state} />)
+        renderToStaticMarkup(<Creature host="fixture-host" id="drawing-1" size="row" state="working" mood={mood} />)
       )?.[1]
-    expect(frame("blocked")).toBe(frame("ready"))
-    expect(frame("working")).toBe(frame("ready"))
+    expect(frame("stuck")).toBe(frame("happy"))
+    expect(frame("focused")).toBe(frame("happy"))
   })
 
   // The ring fits the body; headwear and marks must not shrink its row, pin or crew presentation.
   it("meets the body floors in every row slot, including accessories", () => {
-    for (const id of ["drawing-0", "drawing-1", "drawing-2"]) {
+    for (const id of Array.from({ length: 64 }, (_, index) => `drawing-${String(index)}`)) {
       const {
         bounds: [, , width, height]
       } = agentCharacter("fixture-host", id)

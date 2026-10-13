@@ -1,12 +1,14 @@
 import { describe, expect, it } from "@effect/vitest"
-import { type CreatureMood, creatureMood, creaturePose } from "../src/creature-state.js"
+import { creatureAgentPose, type CreatureMood, creatureMood, creaturePose } from "../src/creature-state.js"
 
 describe("creature state poses", () => {
   it("shares the directory's state language including unknown and case-insensitive states", () => {
     expect(creatureMood("WORKING")).toBe("focused")
     expect(creatureMood("running")).toBe("focused")
-    expect(creatureMood("blocked")).toBe("stuck")
-    expect(creatureMood("error")).toBe("stuck")
+    expect(creatureMood("blocked")).toBe("worried")
+    expect(creatureMood("error")).toBe("worried")
+    expect(creatureMood("blocked", true)).toBe("stuck")
+    expect(creatureMood("error", true)).toBe("stuck")
     expect(creatureMood("waiting")).toBe("waiting")
     expect(creatureMood("needs-you")).toBe("waiting")
     expect(creatureMood("new-state")).toBe("waiting")
@@ -35,5 +37,18 @@ describe("creature state poses", () => {
     ) {
       expect(creaturePose(mood, true)).toMatchObject({ duration: 0, loops: false, lid: 1, brow: "sleepy" })
     }
+  })
+
+  it("uses Connect waiting eyes and finished arcs without changing explicit talk poses", () => {
+    expect(creatureAgentPose("waiting")).toMatchObject({ brow: "up", eyeScale: 1.12 })
+    expect(creatureAgentPose("done")).toMatchObject({ brow: "up", eyes: "arc" })
+    expect(creatureAgentPose("working")).toMatchObject({ brow: "focus", lid: 0.38 })
+    expect(creaturePose("waiting")).toMatchObject({ brow: "rest", eyeScale: 1 })
+    expect(creaturePose("happy")).toMatchObject({ eyes: "open", lower: 0.32 })
+  })
+
+  it("keeps stale half lids distinct from closed lids, with closed taking precedence", () => {
+    expect(creaturePose("focused", false, true)).toMatchObject({ lid: 0.5, duration: 0, loops: false })
+    expect(creaturePose("focused", true, true)).toMatchObject({ lid: 1, duration: 0, loops: false })
   })
 })

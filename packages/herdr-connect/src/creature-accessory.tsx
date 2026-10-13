@@ -1,6 +1,6 @@
 /** Neutral role accessories follow the reference body contour and leave eyes clear. No chef headwear belongs here. */
 import type { ReactElement } from "react"
-import type { BodyKind } from "./character.js"
+import { creatureBodySeed, type BodyKind } from "./character.js"
 import type { CreatureAccessory } from "./creature-state.js"
 
 interface AccessoryProps {
@@ -30,7 +30,7 @@ export const CreatureAdornment = ({
   unit
 }: AccessoryProps): ReactElement | null => {
   if (accessory === "none") return null
-  const width = bodyKind === "pear" ? 28 : bodyKind === "squircle" ? 23 : 24
+  const width = creatureBodySeed(bodyKind).width
   const height = (foot - top) / unit
   const y = eyeY / unit
   const head = top / unit

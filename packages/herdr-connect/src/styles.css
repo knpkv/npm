@@ -1205,6 +1205,9 @@
     opacity: 0;
     stroke-width: calc(var(--connect-creature-unit) * 0.85px);
   }
+  .connect-creature[data-lidded] .connect-creature-lash {
+    opacity: 1;
+  }
   .connect-creature-eye-mark {
     stroke-width: calc(var(--connect-creature-unit) * 0.85px);
   }
@@ -1330,11 +1333,9 @@
     stroke-linecap: round;
     stroke-linejoin: round;
   }
-  .connect-creature[data-stale] .connect-creature-lid,
   .connect-creature[data-closed] .connect-creature-lid {
     translate: 0 calc(var(--connect-creature-lid) * 1px);
   }
-  .connect-creature[data-stale] .connect-creature-lid[data-low],
   .connect-creature[data-closed] .connect-creature-lid[data-low] {
     translate: 0 calc(var(--connect-creature-lid-low) * 1px);
   }
@@ -1361,72 +1362,23 @@
 
   /* Motion is opt-in at both boundaries. Loops share a seeded phase; one-shots start fresh on their key. */
   @media (prefers-reduced-motion: no-preference) {
-    .connect-creature:not(
-        [data-stale],
-        [data-closed],
-        :where([data-rly-reduced-motion="reduce"] *, [data-reduced-motion="reduce"] *)
-      )
-      .connect-creature-gaze {
-      animation: connect-creature-look var(--connect-creature-duration) var(--rly-easing-in-out)
-        var(--connect-creature-iterations) both;
-    }
-    .connect-creature[data-loop]:not(
-        [data-stale],
-        [data-closed],
-        :where([data-rly-reduced-motion="reduce"] *, [data-reduced-motion="reduce"] *)
-      )
-      .connect-creature-gaze {
-      animation-delay: var(--connect-creature-phase);
-    }
-    .connect-creature[data-mood="focused"]:not(
-        [data-stale],
-        [data-closed],
-        :where([data-rly-reduced-motion="reduce"] *, [data-reduced-motion="reduce"] *)
-      )
-      .connect-creature-gaze {
-      animation-name: connect-creature-read;
-    }
-    .connect-creature[data-mood="waiting"]:not(
-        [data-stale],
-        [data-closed],
-        :where([data-rly-reduced-motion="reduce"] *, [data-reduced-motion="reduce"] *)
-      )
-      .connect-creature-gaze {
-      animation-name: connect-creature-wait;
-    }
-    .connect-creature:not(
-        [data-stale],
-        [data-closed],
-        :where([data-rly-reduced-motion="reduce"] *, [data-reduced-motion="reduce"] *)
-      )
-      .connect-creature-lid {
-      animation: connect-creature-blink 4800ms linear infinite;
-      animation-delay: var(--connect-creature-phase);
-    }
-    .connect-creature:not(
-        [data-stale],
-        [data-closed],
-        :where([data-rly-reduced-motion="reduce"] *, [data-reduced-motion="reduce"] *)
-      )
-      .connect-creature-lid[data-low] {
-      animation-name: connect-creature-blink-low;
-    }
-    .connect-creature:not(
-        [data-stale],
-        [data-closed],
-        :where([data-rly-reduced-motion="reduce"] *, [data-reduced-motion="reduce"] *)
-      )
-      .connect-creature-lash {
-      animation: connect-creature-lash 4800ms linear infinite;
-      animation-delay: var(--connect-creature-phase);
-    }
-    .connect-creature[data-mood="sleepy"]:not(
+    .connect-creature[data-talking][data-mood="sleepy"]:not(
         [data-stale],
         [data-closed],
         :where([data-rly-reduced-motion="reduce"] *, [data-reduced-motion="reduce"] *)
       )
       .connect-creature-lid:not([data-low]) {
-      animation-name: connect-creature-sleep;
+      animation: connect-creature-sleep 4800ms var(--rly-easing-in-out) infinite;
+      animation-delay: var(--connect-creature-phase);
+    }
+    .connect-creature[data-talking][data-mood="focused"]:not(
+        [data-stale],
+        [data-closed],
+        :where([data-rly-reduced-motion="reduce"] *, [data-reduced-motion="reduce"] *)
+      )
+      .connect-creature-gaze {
+      animation: connect-creature-focused-scan 2400ms var(--rly-easing-in-out) infinite;
+      animation-delay: var(--connect-creature-phase);
     }
     .connect-creature[data-bucket="working"]:not(
         [data-stale],
@@ -2277,18 +2229,13 @@
       scale: 1;
     }
   }
-  @keyframes connect-creature-look {
-    0%,
-    100% {
-      translate: var(--connect-creature-gaze-x) var(--connect-creature-gaze-y);
-    }
-  }
-  @keyframes connect-creature-read {
+  /* Focused stage sheet: rest, lean at 200ms, left at 900ms, right at 1500ms; no ordinary-agent scan. */
+  @keyframes connect-creature-focused-scan {
     0%,
     100% {
       translate: 0 calc(var(--connect-creature-unit) * 0.655px);
     }
-    8.333% {
+    8.333333% {
       translate: calc(var(--connect-creature-unit) * -0.17px) calc(var(--connect-creature-unit) * 1.08px);
     }
     37.5% {
@@ -2296,58 +2243,6 @@
     }
     62.5% {
       translate: calc(var(--connect-creature-unit) * 0.7225px) calc(var(--connect-creature-unit) * 0.91px);
-    }
-  }
-  @keyframes connect-creature-wait {
-    0%,
-    40%,
-    85%,
-    100% {
-      translate: 0 calc(var(--connect-creature-unit) * 0.4px);
-    }
-    50%,
-    56.25% {
-      translate: calc(var(--connect-creature-unit) * -0.765px) calc(var(--connect-creature-unit) * 0.4px);
-    }
-    70.833%,
-    77.083% {
-      translate: calc(var(--connect-creature-unit) * 0.765px) calc(var(--connect-creature-unit) * 0.4px);
-    }
-  }
-  @keyframes connect-creature-blink {
-    0%,
-    32%,
-    36%,
-    100% {
-      translate: 0 calc(var(--connect-creature-lid) * var(--connect-creature-open) * 1px);
-    }
-    33.333%,
-    35.833% {
-      translate: 0 calc(var(--connect-creature-lid) * 1px);
-    }
-  }
-  @keyframes connect-creature-blink-low {
-    0%,
-    32%,
-    36%,
-    100% {
-      translate: 0 calc(var(--connect-creature-lid-low) * var(--connect-creature-lower) * 1px);
-    }
-    33.333%,
-    35.833% {
-      translate: 0 calc(var(--connect-creature-lid-low) * 1px);
-    }
-  }
-  @keyframes connect-creature-lash {
-    0%,
-    32%,
-    36%,
-    100% {
-      opacity: 0;
-    }
-    33.333%,
-    35.833% {
-      opacity: 1;
     }
   }
   @keyframes connect-creature-sleep {

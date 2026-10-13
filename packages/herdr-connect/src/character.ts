@@ -19,8 +19,24 @@ export interface AgentCharacter {
   readonly phase: number
 }
 
-/** New silhouettes can extend this set when their design references arrive. */
-export type BodyKind = "circle" | "squircle" | "pear"
+/** Five reference silhouettes, shared by body, face and accessory placement. */
+export type BodyKind = "circle" | "squircle" | "pear" | "star" | "bean"
+interface BodySeed {
+  readonly width: number
+  readonly height: number
+  readonly eyeGap: number
+  readonly eyeY: number
+  readonly highlightX: number
+  readonly highlightRotation: number
+}
+const bodySeeds = {
+  circle: { width: 24, height: 24, eyeGap: 4.25, eyeY: 0.5, highlightX: 3.6, highlightRotation: -64 },
+  squircle: { width: 23, height: 23, eyeGap: 4.4, eyeY: 0.5, highlightX: 2.4, highlightRotation: -82 },
+  pear: { width: 28, height: 24, eyeGap: 4.25, eyeY: 0.5, highlightX: 6.6, highlightRotation: -68 },
+  star: { width: 27.4, height: 26, eyeGap: 4.25, eyeY: 0.56, highlightX: 3.5, highlightRotation: -40 },
+  bean: { width: 27, height: 22, eyeGap: 4.4, eyeY: 0.55, highlightX: 3, highlightRotation: -70 }
+} satisfies Readonly<Record<BodyKind, BodySeed>>
+export const creatureBodySeed = (kind: BodyKind): BodySeed => bodySeeds[kind]
 export const FOOT = 88
 export const IRIS_SHARE = 0.74
 
@@ -28,6 +44,7 @@ type Point = readonly [number, number]
 interface Outline {
   readonly path: string
   readonly points: ReadonlyArray<Point>
+  readonly originTop: number
 }
 const fixed = (value: number): string => value.toFixed(3)
 const pair = ([x, y]: Point): string => `${fixed(x)} ${fixed(y)}`
@@ -66,15 +83,15 @@ const smooth = (points: ReadonlyArray<Point>, sample = false): Outline => {
     }
     return `C${pair(a)} ${pair(b)} ${pair(next)}`
   })
-  return { path: `M${pair(at(0))}${spans.join("")}Z`, points: samples }
+  return { path: `M${pair(at(0))}${spans.join("")}Z`, points: samples, originTop: 0 }
 }
 
 /** Reference superellipse; eyes use exponent 2.4 and bodies use 4.2. */
 export const softBoxPath = (x: number, y: number, width: number, height: number, exponent: number): string =>
   softBox(x, y, width, height, exponent).path
 
-const softBox = (x: number, y: number, width: number, height: number, exponent: number, sample = false): Outline =>
-  smooth(
+const softBox = (x: number, y: number, width: number, height: number, exponent: number, sample = false): Outline => ({
+  ...smooth(
     Array.from({ length: 36 }, (_, index): Point => {
       const angle = index * Math.PI * 2 / 36
       const c = Math.cos(angle)
@@ -85,19 +102,18 @@ const softBox = (x: number, y: number, width: number, height: number, exponent: 
       ]
     }),
     sample
-  )
+  ),
+  originTop: y
+})
 
-/** Rounded trapezoid from the pear reference, including samples of each quadratic corner. */
-const pear = (width: number, height: number, unit: number): Outline => {
-  const top = FOOT - height
-  const vertices: ReadonlyArray<Point> = [
-    [50 - width * 0.28, top],
-    [50 + width * 0.28, top],
-    [50 + width / 2, FOOT],
-    [50 - width / 2, FOOT]
-  ]
-  const radii = [6, 6, 6.5, 6.5]
-  const at = (index: number): Point => vertices[(index + 4) % 4] ?? [50, FOOT]
+/** Rounded reference polygons sample the same quadratic corners their path paints. */
+const roundedPolygon = (
+  vertices: ReadonlyArray<Point>,
+  radii: ReadonlyArray<number>,
+  unit: number,
+  originTop: number
+): Outline => {
+  const at = (index: number): Point => vertices[(index + vertices.length) % vertices.length] ?? [50, FOOT]
   const toward = (a: Point, b: Point, distance: number): Point => {
     const length = Math.hypot(b[0] - a[0], b[1] - a[1])
     return [a[0] + (b[0] - a[0]) * distance / length, a[1] + (b[1] - a[1]) * distance / length]
@@ -117,7 +133,55 @@ const pear = (width: number, height: number, unit: number): Outline => {
     }
     return `${index === 0 ? "M" : "L"}${pair(a)}Q${pair(point)} ${pair(b)}`
   })
-  return { path: `${spans.join("")}Z`, points: samples }
+  return { path: `${spans.join("")}Z`, points: samples, originTop }
+}
+
+/** Wide-based pear from the four rounded reference corners. */
+const pear = (width: number, height: number, unit: number): Outline => {
+  const top = FOOT - height
+  return roundedPolygon(
+    [
+      [50 - width * 0.28, top],
+      [50 + width * 0.28, top],
+      [50 + width / 2, FOOT],
+      [50 - width / 2, FOOT]
+    ],
+    [6, 6, 6.5, 6.5],
+    unit,
+    top
+  )
+}
+
+/** Five rounded tips with 62%-radius valleys; align the actual bottom with the common foot. */
+const starBody = (width: number, height: number, unit: number): Outline => {
+  const radius = width / 2 / Math.sin(72 * Math.PI / 180)
+  const top = FOOT - height
+  const vertices = Array.from({ length: 10 }, (_, index): Point => {
+    const angle = (-90 + index * 36) * Math.PI / 180
+    const r = index % 2 === 0 ? radius : radius * 0.62
+    return [50 + r * Math.cos(angle), top + radius + r * Math.sin(angle)]
+  })
+  const radii = vertices.map((_, index) => index % 2 === 0 ? 3 : 1.6)
+  const outline = roundedPolygon(vertices, radii, unit, top)
+  const offset = FOOT - Math.max(...outline.points.map(([, y]) => y))
+  return roundedPolygon(vertices.map(([x, y]): Point => [x, y + offset]), radii, unit, top + offset)
+}
+
+/** The reference bean is a soft box with a shallow top cleft, never an oval. */
+const beanBody = (width: number, height: number): Outline => {
+  const top = FOOT - height
+  const outline = smooth(
+    Array.from({ length: 32 }, (_, index): Point => {
+      const angle = index * Math.PI * 2 / 32
+      const c = Math.cos(angle)
+      const s = Math.sin(angle)
+      const x = Math.sign(c) * Math.abs(c) ** (2 / 2.6)
+      const y = Math.sign(s) * Math.abs(s) ** (2 / 2.6) + 0.32 * Math.exp(-((angle - 1.5 * Math.PI) ** 2) / 0.22)
+      return [50 + x * width / 2, top + height / 2 * (1 + y)]
+    }),
+    true
+  )
+  return { ...outline, originTop: top }
 }
 
 /** Fit the ellipse to the outline itself. Its maximum normalized radius is convex in the vertical centre. */
@@ -140,11 +204,12 @@ export const agentCharacter = (host: string, id: string): AgentCharacter => {
   const seed = characterSeed(host, id)
   const hue = (field(seed, 0, 12) * 30 + field(seed, 4, 14)) % 360
   const spread = 18 + field(seed, 9, 30)
-  const kinds: ReadonlyArray<BodyKind> = ["circle", "squircle", "pear"]
+  const kinds: ReadonlyArray<BodyKind> = ["circle", "squircle", "pear", "star", "bean"]
   const bodyKind = kinds[field(seed, 3, kinds.length)] ?? "circle"
-  const unit = bodyKind === "pear" ? 78 / 28 : 3
-  const height = (bodyKind === "squircle" ? 23 : 24) * unit
-  const width = (bodyKind === "pear" ? 28 : bodyKind === "squircle" ? 23 : 24) * unit
+  const drawing = creatureBodySeed(bodyKind)
+  const unit = Math.min(3, 78 / drawing.width, 72 / drawing.height)
+  const height = drawing.height * unit
+  const width = drawing.width * unit
   const radius = width / 2
   const cy = FOOT - height / 2
   const outline: Outline = bodyKind === "circle"
@@ -158,20 +223,23 @@ export const agentCharacter = (host: string, id: string): AgentCharacter => {
           _,
           index
         ): Point => [50 + radius * Math.cos(index * Math.PI / 180), cy + radius * Math.sin(index * Math.PI / 180)]
-      )
+      ),
+      originTop: FOOT - height
     }
     : bodyKind === "squircle"
     ? softBox(50 - width / 2, FOOT - height, width, height, 4.2, true)
-    : pear(width, height, unit)
+    : bodyKind === "pear" ?
+    pear(width, height, unit)
+    : bodyKind === "star" ?
+    starBody(width, height, unit)
+    : beanBody(width, height)
   const xs = outline.points.map(([x]) => x)
   const ys = outline.points.map(([, y]) => y)
   const left = Math.min(...xs)
   const top = Math.min(...ys)
   const actualWidth = Math.max(...xs) - left
   const actualHeight = Math.max(...ys) - top
-  const ringCy = bodyKind === "pear"
-    ? ringCentre(outline.points, top, actualWidth, actualHeight)
-    : top + actualHeight / 2
+  const ringCy = ringCentre(outline.points, top, actualWidth, actualHeight)
   const ringScale = Math.max(
     ...outline.points.map(([x, y]) => Math.hypot((x - 50) / (actualWidth / 2), (y - ringCy) / (actualHeight / 2)))
   ) * 1.015
@@ -180,8 +248,8 @@ export const agentCharacter = (host: string, id: string): AgentCharacter => {
     bodyKind,
     bounds: [left, top, actualWidth, actualHeight],
     eye: [2.125 * unit, 2.5 * unit],
-    eyeGap: (bodyKind === "squircle" ? 4.4 : 4.25) * unit,
-    eyeY: FOOT - height + height * 0.5,
+    eyeGap: drawing.eyeGap * unit,
+    eyeY: outline.originTop + height * drawing.eyeY,
     hues: [hue, (hue + spread) % 360, (hue + 360 - Math.round(spread / 2)) % 360],
     phase: -(1 + field(seed, 4, 997)) / 1000,
     ringScale,

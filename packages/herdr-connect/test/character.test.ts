@@ -11,19 +11,29 @@ describe("agentCharacter", () => {
     expect(agentCharacter("fixture-host", "drawing-0")).not.toEqual(agentCharacter("fixture-host", "drawing-1"))
   })
 
-  it("uses only the three canonical outlines and seeds a strictly negative phase", () => {
+  it("uses all five canonical outlines and seeds a strictly negative phase", () => {
     const kinds = new Set<string>()
     for (const { body, bodyKind, phase } of fleet) {
       const arcs = body.match(/A/g)?.length ?? 0
       const cubics = body.match(/C/g)?.length ?? 0
       const corners = body.match(/Q/g)?.length ?? 0
-      const kind = arcs === 2 ? "circle" : cubics === 36 ? "squircle" : corners === 4 ? "pear" : "other"
+      const kind = arcs === 2
+        ? "circle"
+        : cubics === 36
+        ? "squircle"
+        : corners === 4
+        ? "pear"
+        : corners === 10
+        ? "star"
+        : cubics === 32
+        ? "bean"
+        : "other"
       kinds.add(kind)
       expect(kind).not.toBe("other")
       expect(kind).toBe(bodyKind)
       expect(phase).toBeLessThan(0)
     }
-    expect(kinds).toEqual(new Set(["circle", "squircle", "pear"]))
+    expect(kinds).toEqual(new Set(["circle", "squircle", "pear", "star", "bean"]))
     expect(new Set(fleet.map(({ phase }) => phase)).size).toBeGreaterThan(8)
   })
 
