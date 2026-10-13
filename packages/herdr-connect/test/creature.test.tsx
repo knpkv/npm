@@ -47,6 +47,37 @@ describe("Creature", () => {
     }
   })
 
+  it("keeps ordinary idle and ready faces free of sleepy and happy overlays", () => {
+    for (const state of ["idle", "ready"]) {
+      const markup = renderToStaticMarkup(<Creature host="atlas" id="agent-pair-codex" size="row" state={state} />)
+      expect(markup).not.toContain('class="connect-creature-z"')
+      expect(markup).not.toContain('data-lidded=""')
+      expect(markup).toContain("--connect-creature-lower:0;")
+      expect(markup).not.toContain('data-loop=""')
+    }
+    expect(
+      renderToStaticMarkup(<Creature host="atlas" id="agent-pair-codex" size="row" state="idle" mood="sleepy" />)
+    ).toContain('class="connect-creature-z"')
+    // Ordinary faces are still, but each working orbit keeps its negative per-agent phase.
+    const phases = ["agent-ds-rly", "agent-sec-cc"].map((id) =>
+      Number(
+        /--connect-creature-phase:([^m]+)/.exec(
+          renderToStaticMarkup(<Creature host="atlas" id={id} size="row" state="working" />)
+        )?.[1]
+      )
+    )
+    expect(phases.every((phase) => phase < 0)).toBe(true)
+    expect(new Set(phases).size).toBe(2)
+  })
+
+  // Rev6 rings are circles, including wide beans; the square frame already reserves the longer axis.
+  it("uses circular row rings without changing the fixed slot or clipping stroke", () => {
+    const markup = renderToStaticMarkup(<Creature host="atlas" id="agent-ds-rly" size="row" state="working" />)
+    const ring = /class="connect-creature-halo"[^>]+rx="([^"]+)" ry="([^"]+)"/.exec(markup)
+    expect(ring).not.toBeNull()
+    expect(ring?.[1]).toBe(ring?.[2])
+  })
+
   it("keeps the done agent's happy arcs after mounting an already finished state", () => {
     const markup = renderToStaticMarkup(<Creature host="fixture-host" id="one" size="row" state="done" />)
     expect(markup.match(/class="connect-creature-eye-mark" data-eyes="arc"/g)).toHaveLength(2)
@@ -56,7 +87,7 @@ describe("Creature", () => {
     const stale = renderToStaticMarkup(<Creature host="fixture-host" id="one" size="row" state="working" stale />)
     const closed = renderToStaticMarkup(<Creature host="fixture-host" id="one" size="row" state="working" closed />)
     expect(stale).not.toContain("--connect-creature-open:1;")
-    expect(stale).toContain("calc(c * 0.35)")
+    expect(stale).not.toContain("calc(c * 0.35)")
     expect(closed).toContain("--connect-creature-open:1;")
   })
 
@@ -111,6 +142,16 @@ describe("Creature", () => {
       )?.[1]
     expect(frame("stuck")).toBe(frame("happy"))
     expect(frame("focused")).toBe(frame("happy"))
+  })
+
+  // Rev6 closedCr rows have no ring and use the exported 0 2 32 32 body frame.
+  it("frames archived row bodies at the reference's 32 design units", () => {
+    for (const id of ["agent-pair-codex", "agent-rev-auth", "agent-ds-rly"]) {
+      const { unit } = agentCharacter("atlas", id)
+      const markup = renderToStaticMarkup(<Creature closed host="atlas" id={id} size="row" state="working" />)
+      const frame = /viewBox="([^"]+)"/.exec(markup)?.[1]?.split(" ").map(Number)
+      expect((frame?.[2] ?? 0) / unit).toBeCloseTo(32, 3)
+    }
   })
 
   // The ring fits the body; headwear and marks must not shrink its row, pin or crew presentation.

@@ -12,7 +12,9 @@ export const expectReferenceCreatureIdentity = async (
 ) => {
   const fixture = referenceCreatureIdentities.find((entry) => entry.host === host && entry.name === name)
   assert(fixture !== undefined, `No recorded identity for ${host}:${name}`)
+  await expect(creature, `${host}:${name} has one recorded creature`).toHaveCount(1)
   const path = creature.locator(".connect-creature-body")
+  await expect(path, `${host}:${name} has one painted body`).toHaveCount(1)
   const topology = await path.evaluate((node) => {
     const d = node.getAttribute("d") ?? ""
     return { arcs: d.match(/A/g)?.length ?? 0, cubics: d.match(/C/g)?.length ?? 0, corners: d.match(/Q/g)?.length ?? 0 }

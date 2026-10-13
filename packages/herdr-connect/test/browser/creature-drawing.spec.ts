@@ -120,7 +120,8 @@ for (const theme of ["light", "dark"] satisfies ReadonlyArray<"light" | "dark">)
           })
         const focused = await face(working)
         const waiting = await face(await open(page, `id=drawing-0&size=${size}&state=waiting`))
-        expect(waiting.eyeHeight).toBeGreaterThanOrEqual(focused.eyeHeight * 1.1)
+        // 02 Connect rev6 draw.P uses eyeS=1.08; sampled paths retain only rounding error.
+        expect(waiting.eyeHeight / focused.eyeHeight).toBeCloseTo(1.08, 3)
         expect(waiting.browGap).toBeGreaterThan(focused.browGap)
       })
 
@@ -246,6 +247,55 @@ for (const theme of ["light", "dark"] satisfies ReadonlyArray<"light" | "dark">)
       const row = await open(page, "mood=speaking&size=row&talking")
       await expect(row.locator(".connect-creature-mouth")).toHaveCount(0)
       await expect(row.locator(".connect-creature-blush")).toHaveCount(2)
+    })
+
+    // 02 Connect rev6 draw.P: idle/ready use open rest eyes; sleepy remains an explicit talk pose.
+    test("rev6 ordinary idle and ready keep open rest eyes without sleep marks", async ({ page }) => {
+      for (const state of ["idle", "ready"]) {
+        const creature = await open(page, `size=row&state=${state}`, "no-preference")
+        await expect(creature).not.toHaveAttribute("data-lidded")
+        await expect(creature).not.toHaveAttribute("data-loop")
+        await expect(creature.locator(".connect-creature-z")).toHaveCount(0)
+        expect(await creature.evaluate((node) => getComputedStyle(node).getPropertyValue("--connect-creature-lower")))
+          .toBe("0")
+      }
+    })
+
+    // 02 Connect rev6 draw uses grayscale(1), opacity .7, half lids and no state ring for stale readings.
+    test("rev6 stale creatures lose all hue and rings while keeping half lids", async ({ page }) => {
+      for (const size of ["row", "cast", "stage"]) {
+        // Emulated forced colours survive navigation; restore the ordinary paint before each slot.
+        await page.emulateMedia({ forcedColors: "none" })
+        const creature = await open(page, `size=${size}&state=waiting&stale`, "no-preference")
+        await expect(creature).toHaveCSS("filter", "grayscale(1)")
+        await expect(creature).toHaveCSS("opacity", "0.7")
+        await expect(creature.locator(".connect-creature-halo")).toHaveCSS("opacity", "0")
+        await expect(creature.locator(".connect-creature-orbit")).toHaveCSS("opacity", "0")
+        await page.emulateMedia({ forcedColors: "active" })
+        await expect(creature).toHaveCSS("filter", "none")
+      }
+    })
+
+    // 02 Connect rev6 draw.TONE and CS.draw ring: severity selects the stroke, never identity hue.
+    test("rev6 row cast and stage rings are circular and carry their state tone", async ({ page }) => {
+      for (const size of ["row", "cast", "stage"]) {
+        for (const state of ["waiting", "blocked", "working"]) {
+          const creature = await open(page, `size=${size}&id=agent-ds-rly&family=rose&state=${state}`)
+          const stroke = state === "working" ? ".connect-creature-orbit" : ".connect-creature-halo"
+          const colour = await creature.evaluate((node, state) => {
+            const token = state === "working" ? "deploying" : state === "waiting" ? "held" : "blocked"
+            const probe = document.createElement("span")
+            probe.style.color = `var(--rly-color-${token}-ink)`
+            node.parentElement?.append(probe)
+            const expected = getComputedStyle(probe).color
+            const halo = node.querySelector<SVGEllipseElement>(".connect-creature-halo")
+            probe.remove()
+            return { expected, rx: halo?.rx.baseVal.value, ry: halo?.ry.baseVal.value }
+          }, state)
+          await expect(creature.locator(stroke)).toHaveCSS("stroke", colour.expected)
+          expect(colour.rx).toBe(colour.ry)
+        }
+      }
     })
 
     test("rev6 blocked and error agents default to the worried face without talk overlays", async ({ page }) => {
@@ -375,6 +425,31 @@ for (const theme of ["light", "dark"] satisfies ReadonlyArray<"light" | "dark">)
           if (accessory === "scarf") {
             expect(faces.tail[0]?.y).toBeGreaterThan(Math.max(...faces.eyes.map(({ bottom }) => bottom)))
           }
+        }
+      }
+    })
+
+    // CS.draw's lid>=.95 frame: endpoints at eye centre, quadratic control 1.3 units below.
+    test("rev6 closed lashes retain the full curved shut-eye stroke", async ({ page }) => {
+      for (const size of ["row", "stage"]) {
+        const creature = await open(page, `size=${size}&state=working&closed`)
+        const lashes = await creature.evaluate((root) => {
+          const unit = Number.parseFloat(getComputedStyle(root).getPropertyValue("--connect-creature-unit"))
+          return [...root.querySelectorAll<SVGPathElement>(".connect-creature-lash")].map((node) => {
+            const box = node.getBBox()
+            const socket = node.closest("[clip-path]")
+            return {
+              width: box.width / unit,
+              height: box.height / unit,
+              clippedBySocket: socket?.getAttribute("clip-path")?.includes("socket") ?? false
+            }
+          })
+        })
+        expect(lashes).toHaveLength(2)
+        for (const lash of lashes) {
+          expect(lash.width).toBeCloseTo(4.25, 2)
+          expect(lash.height).toBeCloseTo(0.65, 2)
+          expect(lash.clippedBySocket).toBe(false)
         }
       }
     })

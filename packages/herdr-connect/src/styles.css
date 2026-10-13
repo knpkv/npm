@@ -1182,6 +1182,37 @@
     flex: none;
     overflow: visible;
   }
+  .connect-creature {
+    --connect-creature-state-ring: var(--connect-creature-ring);
+  }
+  .connect-creature[data-tone="progress"] {
+    --connect-creature-state-ring: var(--rly-color-deploying-ink);
+  }
+  .connect-creature[data-tone="caution"] {
+    --connect-creature-state-ring: var(--rly-color-held-ink);
+  }
+  .connect-creature[data-tone="critical"] {
+    --connect-creature-state-ring: var(--rly-color-blocked-ink);
+  }
+  .connect-creature[data-stale]:not([data-closed]) {
+    filter: grayscale(1);
+    opacity: 0.7;
+  }
+  .connect-creature[data-stale] .connect-creature-halo,
+  .connect-creature[data-stale] .connect-creature-orbit {
+    opacity: 0;
+  }
+  @media (forced-colors: active) {
+    .connect-creature[data-stale]:not([data-closed]) {
+      filter: none;
+      opacity: 1;
+    }
+  }
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"])
+    .connect-creature[data-stale]:not([data-closed]) {
+    filter: none;
+    opacity: 1;
+  }
   .connect-creature-socket {
     fill: none;
   }
@@ -1258,17 +1289,12 @@
   .connect-creature-halo {
     fill: none;
     opacity: 0;
-    stroke: var(--connect-creature-ring);
+    stroke: var(--connect-creature-state-ring);
     stroke-width: 2.5px;
     vector-effect: non-scaling-stroke;
   }
-  .connect-creature[data-bucket="needs-you"] .connect-creature-halo {
+  .connect-creature[data-bucket="needs-you"]:not([data-stale], [data-closed]) .connect-creature-halo {
     opacity: 0.9;
-  }
-  .connect-creature[data-bucket="working"] .connect-creature-halo {
-    opacity: 0.35;
-    stroke: var(--rly-color-text-3);
-    stroke-width: 1px;
   }
   .connect-creature[data-size="row"] .connect-creature-halo {
     stroke-width: 2px;
@@ -1276,7 +1302,7 @@
   .connect-creature-orbit {
     fill: none;
     opacity: 0;
-    stroke: var(--connect-creature-ring);
+    stroke: var(--connect-creature-state-ring);
     stroke-dasharray: 9 91;
     stroke-linecap: round;
     stroke-width: 4.2;
@@ -1287,7 +1313,7 @@
   .connect-creature[data-size="stage"] .connect-creature-orbit {
     stroke-width: 1.3;
   }
-  .connect-creature[data-bucket="working"] .connect-creature-orbit {
+  .connect-creature[data-bucket="working"]:not([data-stale], [data-closed]) .connect-creature-orbit {
     opacity: 1;
   }
   .connect-creature-squash,
@@ -1335,6 +1361,12 @@
   .connect-creature[data-closed] .connect-creature-lid[data-low] {
     translate: 0 calc(var(--connect-creature-lid-low) * 1px);
   }
+  .connect-creature-lash[data-shut] {
+    stroke-width: calc(var(--connect-creature-unit) * 0.85px);
+  }
+  .connect-creature[data-size="row"] .connect-creature-lash[data-shut] {
+    stroke-width: calc(var(--connect-creature-unit) * 1.1px);
+  }
   .connect-creature[data-stale] .connect-creature-lash,
   .connect-creature[data-closed] .connect-creature-lash {
     opacity: 1;
@@ -1346,9 +1378,6 @@
   .connect-creature[data-stale] .connect-creature-gaze,
   .connect-creature[data-closed] .connect-creature-gaze {
     translate: 0 0;
-  }
-  .connect-creature[data-stale] .connect-creature-halo {
-    opacity: 0.35;
   }
   .connect-creature[data-closed] .connect-creature-halo,
   .connect-creature[data-stale] .connect-creature-orbit,
@@ -2546,7 +2575,7 @@
       stroke: Highlight;
     }
 
-    .connect-creature[data-bucket="working"] .connect-creature-halo {
+    .connect-creature[data-bucket="working"]:not([data-stale], [data-closed]) .connect-creature-halo {
       opacity: 1;
       stroke: Highlight;
     }
@@ -2603,7 +2632,7 @@
   }
 
   :where([data-forced-colors="active"], [data-rly-forced-colors="active"])
-    .connect-creature[data-bucket="working"]
+    .connect-creature[data-bucket="working"]:not([data-stale], [data-closed])
     .connect-creature-halo {
     opacity: 1;
     stroke: Highlight;
@@ -4668,7 +4697,7 @@
     border-radius: var(--rly-radius-field);
   }
   .connect-archive-agent {
-    align-items: center;
+    align-items: start;
     background: transparent;
     border: 0;
     border-block-end: 1px solid var(--rly-color-border-1);
@@ -4676,10 +4705,10 @@
     cursor: pointer;
     display: grid;
     font: inherit;
-    gap: var(--rly-space-16);
-    grid-template-columns: 32px minmax(0, 1fr);
+    gap: var(--rly-space-12);
+    grid-template-columns: 40px minmax(0, 1fr);
     inline-size: 100%;
-    padding: var(--rly-space-12) var(--rly-space-16);
+    padding: var(--rly-space-12);
     text-align: start;
   }
   .connect-archive-agent:first-child {
@@ -4692,7 +4721,8 @@
     border-end-end-radius: var(--rly-radius-field);
   }
   .connect-archive-agent .connect-creature {
-    inline-size: 32px;
+    block-size: 40px;
+    inline-size: 40px;
   }
   .connect-archive-row-copy {
     display: grid;
@@ -4701,17 +4731,17 @@
   }
   .connect-archive-row-copy strong {
     font-size: 16px;
-    line-height: 20px;
+    line-height: 1.3;
   }
   .connect-archive-row-copy small {
     color: var(--rly-color-text-2);
     font-size: var(--rly-type-meta-size);
-    line-height: var(--rly-type-meta-line-height);
+    line-height: 1.4;
   }
   .connect-archive-last-words {
     color: var(--rly-color-text-2);
     font-size: 14px;
-    line-height: 20px;
+    line-height: 1.4;
     min-inline-size: 0;
     overflow: clip;
     text-overflow: ellipsis;

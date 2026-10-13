@@ -109,7 +109,7 @@ const extras = (state: string): ReadonlyArray<ConnectAgent> =>
     : state === "2u"
     ? [
       agent("rev-auth", "working", "atlas", "auth-review", 13, 59, "sec-cc", "review"),
-      ...["child-a", "child-b", "child-c"].map((name) =>
+      ...["worker-extra-a", "worker-extra-b", "worker-extra-c"].map((name) =>
         agent(name, "ready", "atlas", "package-work", 13, 40, "sec-cc")
       )
     ]
@@ -357,8 +357,14 @@ test.describe("creature fill fidelity", () => {
         }
       })
 
+      test(`rev6 skills fixture carries Ember rather than Amber ${String(width)} ${theme}`, async ({ page }) => {
+        await openDirectory(page, width, theme)
+        const body = page.locator(".connect-agent[data-agent-key=\"atlas:agent-skills\"] .connect-creature-body")
+        await expect(body).toHaveAttribute("fill", "#9a3d00")
+      })
+
       for (const surface of ["row", "stage"]) {
-        test(`working halo stays under its arc ${surface} ${String(width)} ${theme}`, async ({ page }) => {
+        test(`rev6 working arc has no neutral full halo ${surface} ${String(width)} ${theme}`, async ({ page }) => {
           await openDirectory(page, width, theme)
           const row = page.locator(".connect-agent[data-agent-key=\"atlas:agent-ds-rly\"]")
           if (surface === "stage") {
@@ -370,20 +376,9 @@ test.describe("creature fill fidelity", () => {
             : page.locator(".connect-stage-hero svg.connect-creature")
           const halo = creature.locator(".connect-creature-halo")
           const orbit = creature.locator(".connect-creature-orbit")
-          expect(await halo.evaluate((node) => Number(getComputedStyle(node).opacity))).toBeGreaterThan(0)
+          // Rev6 draw.ring has only the deploying-ink arc; the previous full neutral halo is retired.
+          await expect(halo).toHaveCSS("opacity", "0")
           expect(await orbit.evaluate((node) => Number(getComputedStyle(node).opacity))).toBeGreaterThan(0)
-          const neutral = await page.evaluate(() => {
-            const probe = document.createElement("span")
-            probe.style.color = "var(--rly-color-text-3)"
-            document.body.append(probe)
-            const colour = getComputedStyle(probe).color
-            probe.remove()
-            return colour
-          })
-          expect(await halo.evaluate((node) => getComputedStyle(node).stroke)).toBe(neutral)
-          expect(await halo.evaluate((node) => Number.parseFloat(getComputedStyle(node).strokeWidth))).toBe(
-            surface === "row" ? 2 : 1
-          )
           await page.emulateMedia({ forcedColors: "active" })
           expect(await halo.evaluate((node) => Number(getComputedStyle(node).opacity))).toBeGreaterThan(0)
           expect(await halo.evaluate((node) => getComputedStyle(node).stroke)).not.toBe("none")
@@ -866,7 +861,7 @@ for (const width of [390, 1280]) {
         if (state === "2h") {
           agents = base.map((entry) =>
             entry.name === "pair-codex"
-              ? { ...entry, host: "birch" }
+              ? { ...entry, relationship: { parentAgentId: "agent-rev-usage", relation: "pair" } }
               : entry.name === "rev-usage"
               ? { ...entry, relationship: { parentAgentId: entry.id, relation: "review" } }
               : entry.name === "ds-rly"
@@ -911,7 +906,8 @@ for (const width of [390, 1280]) {
         }
         await mount(page, theme)
         if (state === "2a") {
-          for (const fixture of referenceCreatureIdentities.filter(({ name }) => name !== "rev-auth")) {
+          // The shared identity table also covers long-list frames; 2a mounts only this six-agent fleet.
+          for (const fixture of base) {
             await expectReferenceCreatureIdentity(
               page.locator(`.connect-agent[data-agent-key="${fixture.host}:agent-${fixture.name}"] .connect-creature`),
               fixture.host,
@@ -987,6 +983,11 @@ for (const width of [390, 1280]) {
         } else {
           await expect(page.locator(".connect-family").first()).toBeVisible()
           if (state === "2h") {
+            await expectReferenceCreatureIdentity(
+              page.locator(".connect-agent[data-agent-key=\"atlas:agent-pair-codex\"] .connect-creature"),
+              "atlas",
+              "pair-codex"
+            )
             await expect(page.locator(".connect-agent")).toHaveCount(7)
             await expect(page.locator(".connect-agent[data-lineage-issue=\"cross_host\"]")).toBeEnabled()
             await expect(page.locator(".connect-agent[data-lineage-issue=\"cycle\"]")).toBeEnabled()
@@ -1026,11 +1027,17 @@ for (const width of [390, 1280]) {
           }
           if (state === "2q-v2" || state === "2g") {
             await page.getByRole("button", { name: "birch", exact: true }).click()
-            await page.getByRole("button", { name: /^Filters/ }).click()
+            if (state === "2q-v2") await page.getByRole("button", { name: /^Needs you/ }).click()
+            else await page.getByRole("button", { name: /^Filters/ }).click()
             if (state === "2g") {
               await page.getByRole("searchbox").fill("zzz")
               await page.getByRole("searchbox").blur()
             }
+          }
+          if (state === "2q-v2") {
+            await expect(page.locator(".connect-agent")).toHaveCount(1)
+            await expect(page.locator(".connect-agent-copy > strong")).toHaveText(["rev-usage"])
+            await expect(page.getByRole("button", { name: /^Needs you/ })).toHaveAttribute("aria-pressed", "true")
           }
           if (state === "2g") {
             await expect.soft(page.locator(".connect-filters-toggle .connect-filter-count")).toHaveText("1")
@@ -1225,6 +1232,17 @@ for (const width of [390, 1280]) {
               .toHaveCount(0)
           }
           if (state === "2u") {
+            const family = page.locator(".connect-agent[data-agent-key=\"atlas:agent-sec-cc\"]").locator("..")
+            await expect(family.locator(".connect-agent-copy > strong")).toHaveText([
+              "sec-cc",
+              "pair-codex",
+              "rev-auth"
+            ])
+            await expectReferenceCreatureIdentity(
+              family.locator(".connect-agent[data-agent-key=\"atlas:agent-rev-auth\"] .connect-creature"),
+              "atlas",
+              "rev-auth"
+            )
             const more = page.getByRole("button", { name: "Show 3 more", exact: true })
             await expect(more).toBeVisible()
             const buttonBox = await more.boundingBox()

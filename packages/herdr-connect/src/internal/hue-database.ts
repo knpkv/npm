@@ -15,10 +15,11 @@ const HueRow = Schema.Struct({
 type HueRow = typeof HueRow.Type
 const HostRow = Schema.Struct({ observed_at: Schema.Number })
 
-/** Same un-mixed FNV-1a host:name seed as the creature's old-hub palette fallback. */
-const hueSeed = (host: string, name: string): number => {
+/** Rev6 first sighting uses un-mixed FNV-1a over the normalized host and stable ID payload. */
+const hueSeed = (host: string, id: string): number => {
+  const canonicalId = id.startsWith("agent-") ? id.slice(6) : id
   let hash = 2166136261
-  for (const char of `${host}:${name}`) hash = Math.imul(hash ^ char.charCodeAt(0), 16777619)
+  for (const char of `${host}:${canonicalId}`) hash = Math.imul(hash ^ char.charCodeAt(0), 16777619)
   return hash >>> 0
 }
 
@@ -50,7 +51,7 @@ export const advanceHueObservation = (database: DatabaseSync, host: string, obse
     .run(host.toLowerCase(), observedAt)
 }
 
-/** Legacy repairs use the recorded family as their start/fallback when no display name is available. */
+/** Legacy repairs retain the recorded family as their start and fallback across seed upgrades. */
 const chooseHue = (
   agentId: string,
   fallbackFamily: ConnectAgentHue,
@@ -114,7 +115,7 @@ export const assignHues = (
   const byId = new Map(rows.map((row) => [row.agent_id, row]))
   const bodyKindsChanged = rows.some((row, index) => row.body_kind !== stored[index]?.body_kind)
   if (bodyKindsChanged) {
-    // Legacy rows have no allocation timestamp/name. Rely on rowid insertion order: UPSERT preserves it.
+    // Legacy rows have no allocation timestamp. Rely on rowid insertion order: UPSERT preserves it.
     // Exclusive holders stay fixed; stable sorting keeps the earliest overflow holder of each corrected pair.
     const ordered = rows.filter(({ closed_at }) => closed_at === null)
       .toSorted((left, right) => right.exclusive - left.exclusive)
@@ -172,7 +173,7 @@ export const assignHues = (
     const bodyKind = characterBodyKind(normalized, agent.id)
     const families = ConnectAgentHue.literals
     const hashFamily = Schema.decodeUnknownSync(ConnectAgentHue)(
-      families[hueSeed(normalized, agent.name) % families.length]
+      families[hueSeed(normalized, String(agent.id)) % families.length]
     )
     const hue = chooseHue(agent.id, hashFamily, current, bodyKind)
     const exclusive = current.some((row) =>

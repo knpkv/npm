@@ -182,12 +182,15 @@ export const creatureMood = (state: string, talking = false): CreatureMood => {
 export const creaturePose = (mood: CreatureMood, closed = false, stale = false): CreaturePose =>
   closed || stale ? { ...poses.sleepy, lid: closed ? 1 : 0.5, duration: 0, loops: false } : poses[mood]
 
-/** Connect agent faces are distinct from explicit talking poses: waiting looks up, finished keeps happy arcs. */
+/** Connect rev6 ordinary faces stay still; explicit talking moods keep their state-sheet poses. */
 export const creatureAgentPose = (state: string): CreaturePose => {
   const mood = creatureMood(state)
-  if (mood === "waiting") return { ...poses.waiting, brow: "up", eyeScale: 1.12 }
-  if (mood === "done") return { ...poses.happy, eyes: "arc" }
-  return poses[mood]
+  const rest = { ...poses.waiting, loops: false }
+  if (mood === "waiting") return { ...rest, brow: "up", eyeScale: 1.08 }
+  if (mood === "done") return { ...rest, brow: "up", eyes: "arc" }
+  if (mood === "focused") return { ...poses.focused, lid: 0.36, look: [0, 0.6], loops: false }
+  if (mood === "worried") return { ...poses.worried, eyeScale: 1.1, loops: false }
+  return rest
 }
 
 export interface BrowStroke {

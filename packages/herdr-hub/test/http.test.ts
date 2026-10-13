@@ -2806,7 +2806,8 @@ esac
       expect(initialDirectory.status).toBe(200)
       const initialAgents =
         Schema.decodeUnknownSync(Schema.fromJsonString(FleetConnectAgentPage))(initialDirectory.body).agents
-      expect(initialAgents.find(({ id }) => id === "agent-archive")).toHaveProperty("hue", "teal")
+      // Rev6 first sighting hashes the canonical stable ID: FNV-1a("ser8:archive") %8 is7, Iris.
+      expect(initialAgents.find(({ id }) => id === "agent-archive")).toHaveProperty("hue", "iris")
       present = false
       observedAt = firstSeenAt + 1
       yield* get("/v1/connect/agents")
@@ -2830,7 +2831,7 @@ esac
         host: "ser8",
         agentId: "agent-archive",
         name: "worker",
-        hue: "teal",
+        hue: "iris",
         kind: "codex",
         work: "project",
         state: "working",

@@ -40,11 +40,23 @@ describe("creature state poses", () => {
   })
 
   it("uses Connect waiting eyes and finished arcs without changing explicit talk poses", () => {
-    expect(creatureAgentPose("waiting")).toMatchObject({ brow: "up", eyeScale: 1.12 })
+    expect(creatureAgentPose("waiting")).toMatchObject({ brow: "up", eyeScale: 1.08 })
     expect(creatureAgentPose("done")).toMatchObject({ brow: "up", eyes: "arc" })
-    expect(creatureAgentPose("working")).toMatchObject({ brow: "focus", lid: 0.38 })
+    expect(creatureAgentPose("working")).toMatchObject({ brow: "focus", lid: 0.36 })
     expect(creaturePose("waiting")).toMatchObject({ brow: "rest", eyeScale: 1 })
     expect(creaturePose("happy")).toMatchObject({ eyes: "open", lower: 0.32 })
+  })
+
+  // Connect rev6 draw.P is the ordinary face map; explicit moods retain the richer state-sheet poses.
+  it("uses rev6 ordinary rest faces and exact state poses without talk motion", () => {
+    for (const state of ["idle", "ready"]) {
+      expect(creatureAgentPose(state)).toMatchObject({ brow: "rest", lid: 0, lower: 0, loops: false })
+    }
+    expect(creatureAgentPose("working")).toMatchObject({ brow: "focus", lid: 0.36, look: [0, 0.6], loops: false })
+    expect(creatureAgentPose("waiting")).toMatchObject({ brow: "up", eyeScale: 1.08, loops: false })
+    for (const state of ["blocked", "error"]) {
+      expect(creatureAgentPose(state)).toMatchObject({ brow: "worried", eyeScale: 1.1, loops: false })
+    }
   })
 
   it("keeps stale half lids distinct from closed lids, with closed taking precedence", () => {

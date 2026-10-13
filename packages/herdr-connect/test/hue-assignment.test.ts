@@ -268,6 +268,33 @@ describe("persisted agent hues", () => {
         ).toBe(true)
       }).pipe(Effect.scoped))
 
+    it.effect("seeds first sightings from rev6 canonical IDs, independent of display names", () =>
+      Effect.gen(function*() {
+        const stores = yield* openStores(yield* pathFor)
+        const result = yield* read(stores, [
+          { id: "agent-sec-cc", name: "renamed-coordinator" },
+          { id: "agent-skills", name: "renamed-worker" },
+          { id: "agent-pair-codex", name: "renamed-peer" },
+          { id: "agent-ds-rly", name: "renamed-designer" }
+        ])
+        // Un-mixed FNV-1a(host:canonical-id) %8; sec-cc holds rose, so skills probes to ember.
+        expect(result.agents.map(({ hue, id }) => ({ id, hue }))).toEqual(expect.arrayContaining([
+          { id: "agent-sec-cc", hue: "rose" },
+          { id: "agent-skills", hue: "ember" },
+          { id: "agent-pair-codex", hue: "moss" },
+          { id: "agent-ds-rly", hue: "iris" }
+        ]))
+        const renamed = yield* read(stores, [
+          { id: "agent-sec-cc", name: "renamed-again" },
+          { id: "agent-skills", name: "another-worker" },
+          identity("pair-codex"),
+          identity("ds-rly")
+        ], 1)
+        for (const current of renamed.agents) {
+          expect(current.hue).toBe(result.agents.find(({ id }) => id === current.id)?.hue)
+        }
+      }).pipe(Effect.scoped))
+
     it.effect("assigns colliding names different families in stable identity order", () =>
       Effect.gen(function*() {
         const stores = yield* openStores(yield* pathFor)
@@ -415,8 +442,8 @@ describe("persisted agent hues", () => {
         yield* read(stores, first, 1)
         yield* read(stores, first, 2, "ATLAS")
         const next = yield* read(stores, [...first, { id: "agent-10", name: "worker-10" }], 3, "ATLAS")
-        // Canonical payload 10 is star: skip rose's star holder and repeat ember's squircle.
-        expect(next.agents.find(({ id }) => id === "agent-10")).toHaveProperty("hue", "ember")
+        // Canonical payload2 holds rose with a squircle; payload10 is a star, so rose is shape-safe.
+        expect(next.agents.find(({ id }) => id === "agent-10")).toHaveProperty("hue", "rose")
       }).pipe(Effect.scoped))
 
     for (const owner of Schema.Literals(["local directory", "shared archive"]).literals) {
@@ -545,7 +572,8 @@ describe("persisted agent hues", () => {
         const first = yield* read(stores, entries.slice(0, 8))
         expect(new Set(first.agents.map(hueOf)).size).toBe(8)
         const all = yield* read(stores, entries, 1)
-        expect(all.agents.find(({ id }) => id === "agent-77")).toHaveProperty("hue", "moss")
+        // Every family holds a circle; FNV-1a("atlas:77") %8 is0, so the plain repeat is rose.
+        expect(all.agents.find(({ id }) => id === "agent-77")).toHaveProperty("hue", "rose")
       }).pipe(Effect.scoped))
 
     it.effect("does not restart a closed lifetime from an older positive directory sighting", () =>

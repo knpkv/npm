@@ -93,6 +93,7 @@ export const Creature = ({
   }
   const settled = completion.state === state && completion.override === override && completion.complete
   const selected = override ?? creatureMood(state, talkPose)
+  const ordinary = !talkPose && override === undefined && reaction === undefined
   const mood =
     size === "stage" && reaction !== undefined ? reaction : selected === "done" && settled ? "happy" : selected
   const shut = closed || stale
@@ -101,7 +102,7 @@ export const Creature = ({
     !shut && !talkPose && override === undefined && reaction === undefined
       ? creatureAgentPose(state)
       : creaturePose(mood, closed, stale)
-  const palette = creaturePalette(host, name, hueFamily, closed ? 0.1 : stale ? 0.35 : 1)
+  const palette = creaturePalette(host, name, hueFamily, closed ? 0.1 : 1)
   const ew = character.eye[0] * pose.eyeScale
   const eh = character.eye[1] * pose.eyeScale
   const [left, top, width, height] = character.bounds
@@ -122,12 +123,19 @@ export const Creature = ({
   // Reserve both 2px stroke edges at the 28px crew minimum; accessories and marks do not change body sizing.
   const frameEdge = (2 * Math.max(baseRx, baseRy)) / (1 - (2 * rowStroke) / rowTrack)
   const strokeHalf = frameEdge / rowTrack
-  const ring = { cy: row ? rowCy : 55, rx: row ? baseRx + strokeHalf : 46, ry: row ? baseRy + strokeHalf : 46 }
+  const radius = row ? Math.max(baseRx, baseRy) + strokeHalf : 46
+  const ring = { cy: row ? rowCy : 55, rx: radius, ry: radius }
   const frameLeft = 50 - frameEdge / 2
   const frameTop = rowCy - frameEdge / 2
   const fixed = (value: number): string => value.toFixed(3)
   const dropRadius = row ? 1.4 : 1.05
-  const viewBox = row ? [frameLeft, frameTop, frameEdge, frameEdge].map(fixed).join(" ") : "0 0 100 100"
+  // Closed archive rows have no track: map the reference's 0 2 32 32 frame onto this scaled body.
+  const viewBox =
+    row && closed
+      ? [50 - 16 * unit, FOOT - 28.75 * unit, 32 * unit, 32 * unit].map(fixed).join(" ")
+      : row
+        ? [frameLeft, frameTop, frameEdge, frameEdge].map(fixed).join(" ")
+        : "0 0 100 100"
   const eyeY = character.eyeY
   const eyes = [50 - character.eyeGap, 50 + character.eyeGap]
   const iris = character.eye[0] * IRIS_SHARE
@@ -316,14 +324,22 @@ export const Creature = ({
                       </g>
                     </g>
                   </g>
-                  <g clipPath={`url(#${ref}-socket-${String(index)})`}>
-                    <g className="connect-creature-lid">
-                      <path
-                        className="connect-creature-lash"
-                        d={`M${fixed(x - reach)} ${fixed(upperRest - sag)}Q${fixed(x)} ${fixed(upperRest + sag)} ${fixed(x + reach)} ${fixed(upperRest - sag)}`}
-                      />
+                  {closed ? (
+                    <path
+                      className="connect-creature-lash"
+                      data-shut=""
+                      d={`M${fixed(x - ew)} ${fixed(eyeY)}Q${fixed(x)} ${fixed(eyeY + 1.3 * unit)} ${fixed(x + ew)} ${fixed(eyeY)}`}
+                    />
+                  ) : (
+                    <g clipPath={`url(#${ref}-socket-${String(index)})`}>
+                      <g className="connect-creature-lid">
+                        <path
+                          className="connect-creature-lash"
+                          d={`M${fixed(x - reach)} ${fixed(upperRest - sag)}Q${fixed(x)} ${fixed(upperRest + sag)} ${fixed(x + reach)} ${fixed(upperRest - sag)}`}
+                        />
+                      </g>
                     </g>
-                  </g>
+                  )}
                 </g>
                 <path
                   className="connect-creature-eye-mark"
@@ -393,7 +409,7 @@ export const Creature = ({
           </g>
         </>
       ) : null}
-      {!shut && mood === "sleepy" ? (
+      {!shut && !ordinary && mood === "sleepy" ? (
         <path
           className="connect-creature-z"
           d={`M${fixed(50 + 9 * unit)} ${fixed(overlayTop + 1.5 * unit)}h${fixed(2 * unit)}l${fixed(-2 * unit)} ${fixed(2 * unit)}h${fixed(2 * unit)}`}
