@@ -1310,6 +1310,18 @@
   .connect-creature[data-size="row"] .connect-creature-orbit {
     stroke-width: var(--connect-creature-row-stroke);
   }
+  /* Home export 66 uses one scaled design unit for its row rings. */
+  .connect-creature[data-row-presentation="home"] .connect-creature-halo {
+    stroke-width: var(--connect-creature-unit);
+    vector-effect: none;
+  }
+  .connect-creature[data-row-presentation="home"][data-bucket="needs-you"]:not([data-stale], [data-closed])
+    .connect-creature-halo {
+    opacity: 1;
+  }
+  .connect-creature[data-row-presentation="home"] .connect-creature-orbit {
+    stroke-dasharray: 22 78;
+  }
   .connect-creature[data-size="stage"] .connect-creature-orbit {
     stroke-width: 1.3;
   }
@@ -5022,7 +5034,8 @@
     border-block-start: 1px solid var(--rly-color-border-1);
   }
   .connect-home-archive-row > .connect-creature {
-    inline-size: 2.75rem;
+    inline-size: 2.5rem;
+    block-size: auto;
     flex: none;
   }
   .connect-home-archive-copy {

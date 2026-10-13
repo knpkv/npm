@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test"
 import { strict as assert } from "node:assert"
-import { type BodyKind, creaturePalette } from "../../../herdr-connect/src/character.js"
+import { agentCharacter, type BodyKind, creaturePalette } from "../../../herdr-connect/src/character.js"
 import { captureFidelity } from "../../../herdr-connect/test/browser/creature-capture.js"
 import { archiveFixture } from "./archive-fixture.js"
 import { connectFixture } from "./connect-fixture.js"
@@ -23,6 +23,15 @@ const bodyKinds = new Map<string, BodyKind>([
   ["pair-css", "circle"],
   ["seed-data", "star"]
 ])
+// Export 66 RelayCreatureStates.SEEDS, not fitted Fleet track bounds.
+const designBounds = {
+  circle: [24, 24],
+  squircle: [23, 23],
+  pear: [28, 24],
+  star: [27.4, 26],
+  bean: [27, 22]
+} satisfies Record<BodyKind, readonly [number, number]>
+
 const topology = {
   circle: [2, 0, 0],
   squircle: [0, 36, 0],
@@ -70,6 +79,60 @@ for (const theme of ["light", "dark"]) {
         const expected = bodyKinds.get(record.name)
         assert(expected !== undefined, `No recorded Home body for ${record.name}`)
         expect(segments, `${record.name} uses its canonical stable ID payload`).toEqual(topology[expected])
+        if (frame !== "connect-stage") {
+          // Export 66 uses -6 -6 44 44 at 44/52px live and 36/40px closed slots.
+          // A fixed slot must not inherit Fleet's tighter enclosing-ring body frame.
+          const phone = (page.viewportSize()?.width ?? 0) < 600
+          const slot = frame === "connect-archived" ? phone ? 36 : 40 : phone ? 44 : 52
+          const geometry = await root.locator("[data-creature]").evaluate((node) => {
+            const outline = node.querySelector<SVGGraphicsElement>(".connect-creature-body")
+            const halo = node.querySelector<SVGEllipseElement>(".connect-creature-halo")
+            const orbit = node.querySelector<SVGEllipseElement>(".connect-creature-orbit")
+            const matrix = outline?.getScreenCTM()
+            const haloMatrix = halo?.getScreenCTM()
+            const orbitMatrix = orbit?.getScreenCTM()
+            if (
+              outline === null || halo === null || orbit === null || matrix == null || haloMatrix == null ||
+              orbitMatrix == null
+            ) return null
+            const stroke = (part: SVGGraphicsElement, scale: number): number => {
+              const style = getComputedStyle(part)
+              return Number.parseFloat(style.strokeWidth) * (style.vectorEffect === "non-scaling-stroke" ? 1 : scale)
+            }
+            const bounds = node.getBoundingClientRect()
+            const haloScale = Math.hypot(haloMatrix.a, haloMatrix.b)
+            return {
+              width: bounds.width,
+              height: bounds.height,
+              scale: Math.hypot(matrix.a, matrix.b),
+              haloRadius: halo.rx.baseVal.value * haloScale,
+              haloStroke: stroke(halo, haloScale),
+              haloOpacity: Number(getComputedStyle(halo).opacity),
+              needsYou: node.getAttribute("data-bucket") === "needs-you",
+              muted: node.hasAttribute("data-stale") || node.hasAttribute("data-closed"),
+              orbitDash: getComputedStyle(orbit).strokeDasharray.split(/[ ,]+/).map(Number.parseFloat),
+              orbitStroke: stroke(orbit, Math.hypot(orbitMatrix.a, orbitMatrix.b))
+            }
+          })
+          assert(geometry !== null, `${frame}: ${record.name} has a body, halo, orbit and screen matrices`)
+          expect(geometry.width, `${record.name} keeps the export's ${String(slot)}px slot`).toBeCloseTo(slot, 2)
+          expect(geometry.height).toBeCloseTo(slot, 2)
+          const designScale = slot / 44
+          expect(
+            geometry.scale * agentCharacter(record.host, record.id).unit,
+            `${record.name} painted body uses ${String(slot)}/44 design scale, not Fleet fit`
+          ).toBeCloseTo(designScale, 3)
+          if (frame !== "connect-archived") {
+            const [designWidth, designHeight] = designBounds[expected]
+            // RelayCreatureStates.draw: r=max(w,h)/2+2.25; RelayAgent ring width=1.
+            expect(geometry.haloRadius).toBeCloseTo((Math.max(designWidth, designHeight) / 2 + 2.25) * designScale, 2)
+            expect(geometry.haloStroke, `${record.name} thin Home solid state ring`).toBeCloseTo(designScale, 3)
+            expect(geometry.orbitStroke, `${record.name} thin Home working arc`).toBeCloseTo(designScale, 3)
+            expect(geometry.haloOpacity).toBe(geometry.needsYou && !geometry.muted ? 1 : 0)
+            expect(geometry.orbitDash).toEqual([22, 78])
+          }
+        }
+
         await expect(body).toHaveAttribute(
           "fill",
           creaturePalette(record.host, record.name, record.hue, frame === "connect-archived" ? 0.1 : 1).p46

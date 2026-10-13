@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it } from "vitest"
 
 import { Creature, type CreatureAccessory, type CreatureMood } from "../src/creature.js"
-import { agentCharacter } from "../src/character.js"
+import { agentCharacter, FOOT } from "../src/character.js"
 import { ConnectAgent } from "../src/model.js"
 import { AgentDirectory } from "../src/view.js"
 
@@ -142,6 +142,31 @@ describe("Creature", () => {
       )?.[1]
     expect(frame("stuck")).toBe(frame("happy"))
     expect(frame("focused")).toBe(frame("happy"))
+  })
+
+  // Export 66 RelayAgent draws all Home row states in -6 -6 44 44; Fleet has its own tighter track.
+  it("frames live and closed Home rows at 44 design units without changing Fleet rows", () => {
+    for (const closed of [false, true]) {
+      for (const id of ["agent-pair-codex", "agent-rev-auth", "agent-ds-rly"]) {
+        const { unit } = agentCharacter("atlas", id)
+        const frame = (statePolicy: "home" | "fleet") =>
+          /viewBox="([^"]+)"/
+            .exec(
+              renderToStaticMarkup(
+                <Creature closed={closed} host="atlas" id={id} size="row" state="working" statePolicy={statePolicy} />
+              )
+            )?.[1]
+            ?.split(" ")
+            .map(Number)
+        const home = frame("home")
+        expect(home).toHaveLength(4)
+        expect(home?.[0]).toBeCloseTo(50 - 22 * unit, 2)
+        expect(home?.[1]).toBeCloseTo(FOOT - 36.75 * unit, 2)
+        expect(home?.[2]).toBeCloseTo(44 * unit, 2)
+        expect(home?.[3]).toBeCloseTo(44 * unit, 2)
+        expect(home).not.toEqual(frame("fleet"))
+      }
+    }
   })
 
   // Rev6 closedCr rows have no ring and use the exported 0 2 32 32 body frame.
