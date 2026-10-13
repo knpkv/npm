@@ -1,5 +1,11 @@
 # @knpkv/herdr-connect
 
+## 0.22.0
+
+### Minor Changes
+
+- [#872](https://github.com/knpkv/npm/pull/872) [`8f2d743`](https://github.com/knpkv/npm/commit/8f2d743cc568d386801ef115628567eb3497005c) Thanks [@konopkov](https://github.com/konopkov)! - Persist per-agent hue families, resolve live-host collisions with shape-aware overflow, and serve retained family snapshots in the archive.
+
 ## 0.21.0
 
 ### Minor Changes
