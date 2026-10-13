@@ -3,6 +3,7 @@ import { Effect, Schema, SchemaIssue, Semaphore } from "effect"
 import type { DatabaseSync, SQLOutputValue } from "node:sqlite"
 import { initializePosts } from "./internal/post-database.js"
 import { makeSelfStateMethods } from "./internal/self-state-store.js"
+import { connectBusyTimeoutMillis, connectSqliteWrite } from "./internal/sqlite-write.js"
 import {
   Conflict,
   ConnectPost,
@@ -68,7 +69,10 @@ export class AgentPostStore {
     this.selfLatestMany = self.latestMany
   }
   static readonly open = Effect.fn("AgentPostStore.open")(function*(path: string) {
-    const opened = yield* openPrivateSqlite(path, { initialize: initializePosts }).pipe(
+    const opened = yield* openPrivateSqlite(path, {
+      busyTimeoutMillis: connectBusyTimeoutMillis,
+      initialize: initializePosts
+    }).pipe(
       Effect.mapError(unavailable("posts.open"))
     )
     return new AgentPostStore(path, yield* Semaphore.make(1), opened)
@@ -94,38 +98,37 @@ export class AgentPostStore {
       Effect.mapError(() => new InvalidReport({ detail: "invalid post identity or timestamp" }))
     )
     return yield* this.#transactions.withPermits(1)(
-      Effect.try({
-        try: () => {
-          this.#database.exec("BEGIN IMMEDIATE")
-          try {
-            prune(this.#database, now)
-            const previous = this.#database.prepare(
-              "SELECT * FROM connect_posts WHERE host = ? AND agent_id = ? AND event_id = ?"
-            ).get(host.toLowerCase(), agentId, body.eventId)
-            if (previous !== undefined) {
-              const post = decodeRow(previous)
-              if (post.kind !== body.kind || post.text !== body.text || post.goalStep !== body.goalStep) {
-                throw new Conflict({ eventId: body.eventId })
-              }
-              this.#database.exec("COMMIT")
-              return post
+      connectSqliteWrite("posts.post", () => {
+        this.#database.exec("BEGIN IMMEDIATE")
+        try {
+          prune(this.#database, now)
+          const previous = this.#database.prepare(
+            "SELECT * FROM connect_posts WHERE host = ? AND agent_id = ? AND event_id = ?"
+          ).get(host.toLowerCase(), agentId, body.eventId)
+          if (previous !== undefined) {
+            const post = decodeRow(previous)
+            if (post.kind !== body.kind || post.text !== body.text || post.goalStep !== body.goalStep) {
+              throw new Conflict({ eventId: body.eventId })
             }
-            const row = this.#database.prepare(`
+            this.#database.exec("COMMIT")
+            return post
+          }
+          const row = this.#database.prepare(`
             INSERT INTO connect_posts (host, agent_id, event_id, kind, text, goal_step, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING *
           `).get(host.toLowerCase(), agentId, body.eventId, body.kind, body.text, body.goalStep ?? null, now)
-            if (row === undefined) throw new Unavailable({ operation: "posts.insert" })
-            const post = decodeRow(row)
-            prune(this.#database, now)
-            this.#database.exec("COMMIT")
-            return post
-          } catch (cause) {
-            this.#database.exec("ROLLBACK")
-            throw cause
-          }
-        },
-        catch: (cause) => Schema.is(Conflict)(cause) ? cause : new Unavailable({ operation: "posts.post" })
-      }).pipe(Effect.tap(() => this.#secureFiles.pipe(Effect.mapError(unavailable("posts.permissions")))))
+          if (row === undefined) throw new Unavailable({ operation: "posts.insert" })
+          const post = decodeRow(row)
+          prune(this.#database, now)
+          this.#database.exec("COMMIT")
+          return post
+        } catch (cause) {
+          this.#database.exec("ROLLBACK")
+          throw cause
+        }
+      }, (cause) => Schema.is(Conflict)(cause) ? cause : new Unavailable({ operation: "posts.post" })).pipe(
+        Effect.tap(() => this.#secureFiles.pipe(Effect.mapError(unavailable("posts.permissions"))))
+      )
     )
   })
 

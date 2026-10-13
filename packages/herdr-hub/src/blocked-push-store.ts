@@ -14,6 +14,7 @@ import {
   StageHeartbeat,
   stageViewingTtlMillis
 } from "./blocked-push-model.js"
+import { hubConnectBusyTimeoutMillis } from "./internal/sqlite-busy.js"
 
 const closedEpisodeRetentionMillis = 7 * 24 * 60 * 60 * 1_000
 
@@ -54,6 +55,7 @@ export class BlockedPushStore {
 
   static readonly open = Effect.fn("BlockedPushStore.open")(function*(path: string) {
     const opened = yield* openPrivateSqlite(path, {
+      busyTimeoutMillis: hubConnectBusyTimeoutMillis,
       initialize: (db) =>
         db.exec(`
       CREATE TABLE IF NOT EXISTS blocked_push_hosts (

@@ -1,6 +1,6 @@
 import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it, vi } from "@effect/vitest"
-import { Clock, Effect, FileSystem, Logger, Path, Result, Schema } from "effect"
+import { Clock, Deferred, Effect, Fiber, FileSystem, Logger, Path, Result, Schema } from "effect"
 import { HttpClient, HttpClientResponse } from "effect/http"
 import { TestClock } from "effect/testing"
 import { DatabaseSync } from "node:sqlite"
@@ -54,7 +54,9 @@ const withDatabaseLock = Effect.fn("ArchiveTest.withDatabaseLock")(
       Effect.sync(() => database.exec("BEGIN IMMEDIATE")),
       () => Effect.sync(() => database.exec("ROLLBACK"))
     )
-    return yield* effect
+    const pending = yield* Effect.forkScoped(effect)
+    yield* TestClock.adjust(6_000)
+    return yield* Fiber.join(pending)
   },
   Effect.scoped
 )
@@ -331,6 +333,94 @@ describe("closed agent archive", () => {
         expect((yield* store.page()).agents.map(({ host }) => host)).toEqual(["host-b"])
       }).pipe(Effect.scoped))
 
+    it.effect("cancelling a contended positive sighting resets absence evidence and releases the transaction", () =>
+      Effect.gen(function*() {
+        const store = yield* openStore()
+        yield* observe(store, 0, [agent()])
+        yield* observe(store, 1, [])
+        const db = yield* Effect.acquireRelease(
+          Effect.sync(() => new DatabaseSync(store.path)),
+          (db) => Effect.sync(() => db.close())
+        )
+        let locked = false
+        const unlock = (): void => {
+          if (!locked) return
+          db.exec("ROLLBACK")
+          locked = false
+        }
+        yield* Effect.acquireRelease(
+          Effect.sync(() => {
+            db.exec("BEGIN IMMEDIATE")
+            locked = true
+          }),
+          () => Effect.sync(unlock)
+        )
+        const pending = yield* Effect.forkScoped(observe(store, 150_000, [agent()]))
+        yield* TestClock.adjust(1)
+        yield* Fiber.interrupt(pending)
+        yield* Effect.sync(unlock)
+        yield* observe(store, 300_001, [])
+        expect((yield* store.page()).agents).toEqual([])
+        yield* observe(store, 600_001, [])
+        expect((yield* store.page()).agents[0]?.closedAt).toBe(600_001)
+      }).pipe(Effect.scoped))
+
+    it.effect("a cancelled queued sighting cannot be erased by an older write retry", () =>
+      Effect.gen(function*() {
+        const store = yield* openStore()
+        yield* observe(store, 0, [agent()])
+        yield* observe(store, 1, [])
+        const db = yield* Effect.acquireRelease(Effect.sync(() => new DatabaseSync(store.path)), (db) =>
+          Effect.sync(() => db.close()))
+        let locked = false
+        const unlock = (): void => {
+          if (!locked) {
+            return
+          }
+          db.exec("ROLLBACK")
+          locked = false
+        }
+        yield* Effect.acquireRelease(
+          Effect.sync(() => {
+            db.exec("BEGIN IMMEDIATE")
+            locked = true
+          }),
+          () =>
+            Effect.sync(unlock)
+        )
+        const older = yield* Effect.forkScoped(observe(store, 300_001, []))
+        yield* TestClock.adjust(1)
+        const positive = yield* Effect.forkScoped(observe(store, 350_000, [agent()]))
+        yield* TestClock.adjust(1)
+        yield* Fiber.interrupt(positive)
+        yield* Effect.sync(unlock)
+        yield* TestClock.adjust(1_000)
+        yield* Fiber.join(older)
+        expect((yield* store.page()).agents).toEqual([])
+        yield* observe(store, 600_001, [])
+        expect((yield* store.page()).agents).toEqual([])
+        yield* observe(store, 900_001, [])
+        expect((yield* store.page()).agents[0]?.closedAt).toBe(900_001)
+      }).pipe(Effect.scoped))
+
+    /** A second process's writer lock must expire as a named retryable busy failure, not an opaque archive error. */
+    it.effect("reports a typed busy expiry when another connection owns the archive writer", () =>
+      Effect.gen(function*() {
+        const store = yield* openStore()
+        yield* observe(store, 0, [agent()])
+        const failed = yield* withDatabaseLock(store, Effect.result(observe(store, 1, [agent()])))
+        expect(failed).toMatchObject({
+          failure: { cause: { code: "ERR_SQLITE_ERROR", errcode: 5 } }
+        })
+        expect(failed).toMatchObject({
+          failure: {
+            _tag: "ConnectStoreBusyError",
+            operation: "observe.transaction",
+            timeoutMillis: 5_000
+          }
+        })
+      }).pipe(Effect.scoped))
+
     it.effect("reopening requires fresh absence evidence and retains already archived rows", () =>
       Effect.gen(function*() {
         const store = yield* openStore()
@@ -530,4 +620,61 @@ describe("closed agent archive", () => {
       false
     )
   })
+})
+
+/** Real time is the contract here: short native waits must leave the loop free for the competing writer. */
+it.layer(NodeServices.layer, { excludeTestServices: true })((it) => {
+  it.effect(
+    "retries a writer released after 300 ms while the event loop timer still runs",
+    () =>
+      Effect.gen(function*() {
+        const store = yield* openStore()
+        yield* observe(store, 0, [agent()])
+        const database = yield* Effect.acquireRelease(
+          Effect.sync(() => new DatabaseSync(store.path)),
+          (opened) => Effect.sync(() => opened.close())
+        )
+        let released = false
+        const unlock = (): void => {
+          if (released) return
+          database.exec("ROLLBACK")
+          released = true
+        }
+        yield* Effect.acquireRelease(
+          Effect.sync(() => database.exec("BEGIN IMMEDIATE")),
+          () => Effect.sync(unlock)
+        )
+        const started = yield* Clock.currentTimeMillis
+        const tickStarted = yield* Deferred.make<void>()
+        const releaseStarted = yield* Deferred.make<void>()
+        const tick = yield* Effect.forkScoped(
+          Deferred.succeed(tickStarted, undefined).pipe(
+            Effect.andThen(Effect.sleep("25 millis")),
+            Effect.andThen(Clock.currentTimeMillis)
+          )
+        )
+        const release = yield* Effect.forkScoped(
+          Deferred.succeed(releaseStarted, undefined).pipe(
+            Effect.andThen(Effect.sleep("300 millis")),
+            Effect.andThen(Effect.sync(unlock)),
+            Effect.andThen(Clock.currentTimeMillis)
+          )
+        )
+        yield* Deferred.await(tickStarted)
+        yield* Deferred.await(releaseStarted)
+        yield* observe(store, 1, [agent()])
+        const writtenAt = yield* Clock.currentTimeMillis
+        const tickAt = yield* Fiber.join(tick)
+        const releasedAt = yield* Fiber.join(release)
+        expect(tickAt - started).toBeLessThan(250)
+        expect(tickAt).toBeLessThan(releasedAt)
+        expect(releasedAt - started).toBeGreaterThanOrEqual(290)
+        expect(writtenAt).toBeGreaterThanOrEqual(releasedAt)
+        expect(writtenAt - started).toBeLessThan(1_500)
+        expect(yield* store.namesFor([{ host: "HOST-A", id: "agent-one" }])).toEqual([
+          { host: "HOST-A", id: "agent-one", name: "worker" }
+        ])
+      }).pipe(Effect.scoped),
+    { timeout: 10_000 }
+  )
 })

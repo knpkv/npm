@@ -2,6 +2,7 @@ import { NodeHttpClient, NodeServices } from "@effect/platform-node"
 import type {
   Conflict,
   ConnectPeerError,
+  ConnectStoreBusyError,
   TerminalAgentNotFoundError,
   TerminalBusyError,
   TerminalConnector,
@@ -301,6 +302,7 @@ type ApiError =
   | Unavailable
   | ApprovalAppStoreError
   | ConnectPeerError
+  | ConnectStoreBusyError
   | DashboardResponseBudgetError
   | FleetApprovalError
   | FleetAuthorizationError
@@ -427,6 +429,11 @@ const apiError = (error: ApiError): ApiErrorResponse => {
       return { status: 403, body: { error: error._tag } }
     case "Conflict":
       return { status: 409, body: { error: error._tag, eventId: error.eventId } }
+    case "ConnectStoreBusyError":
+      return {
+        status: 503,
+        body: { error: error._tag, operation: error.operation, timeoutMillis: error.timeoutMillis }
+      }
     case "Unavailable":
       return { status: 503, body: { error: error._tag, operation: error.operation } }
     case "FleetAuthorizationError":

@@ -10,7 +10,7 @@ import { Effect, Result, Schema, type Types } from "effect"
 import * as HttpClient from "effect/http/HttpClient"
 import type { AgentActivityStore } from "./activity-store.js"
 import type { AgentArchiveStore } from "./archive-store.js"
-import { ConnectPeerError } from "./errors.js"
+import { ConnectArchiveStoreError, ConnectPeerError, ConnectStoreBusyError } from "./errors.js"
 import { buildConnectForest } from "./forest.js"
 import { connectAgentId } from "./id.js"
 import { ConnectInventoryFailure, inventoryRelationshipFailure } from "./internal/inventory-failure.js"
@@ -361,8 +361,8 @@ export const fleetConnectAgents = Effect.fn("HerdrConnect.fleetAgents")(function
     ]
     for (const observation of observations) {
       yield* archive.store.observe({ ...observation, observedAt: archive.observedAt }).pipe(
-        Effect.catchTag(
-          "ConnectArchiveStoreError",
+        Effect.catchIf(
+          Schema.is(Schema.Union([ConnectArchiveStoreError, ConnectStoreBusyError])),
           (cause) => Effect.logWarning("Connect archive observation failed", { host: observation.host, cause })
         )
       )

@@ -3,6 +3,7 @@ import { Effect, Schema } from "effect"
 import type { DatabaseSync } from "node:sqlite"
 import { TerminalTransportError } from "./errors.js"
 import { assignHues, initializeHues } from "./internal/hue-database.js"
+import { connectBusyTimeoutMillis, connectSqliteWrite } from "./internal/sqlite-write.js"
 import { ConnectAgent, LocalConnectAgents } from "./model.js"
 
 const ActivityRow = Schema.Struct({ last_activity_at: Schema.Number })
@@ -31,6 +32,7 @@ export class AgentActivityStore {
 
   static readonly open = Effect.fn("AgentActivityStore.open")(function*(path: string) {
     const opened = yield* openPrivateSqlite(path, {
+      busyTimeoutMillis: connectBusyTimeoutMillis,
       initialize: (database) => {
         initializeHues(database)
         database.exec(`
@@ -64,11 +66,10 @@ export class AgentActivityStore {
     observedAt: number
   ) {
     const normalizedHost = host.toLowerCase()
-    const row = yield* Effect.try({
-      try: () =>
-        this.#database
-          .prepare(
-            `INSERT INTO agent_activity (host, agent_id, revision, last_activity_at, observed_at)
+    const row = yield* connectSqliteWrite("activity.observe", () =>
+      this.#database
+        .prepare(
+          `INSERT INTO agent_activity (host, agent_id, revision, last_activity_at, observed_at)
              VALUES (?, ?, ?, ?, ?)
              ON CONFLICT(host, agent_id) DO UPDATE SET
                revision = CASE
@@ -85,10 +86,10 @@ export class AgentActivityStore {
                END,
                observed_at = MAX(agent_activity.observed_at, excluded.observed_at)
              RETURNING last_activity_at`
-          )
-          .get(normalizedHost, agentId, revision, observedAt, observedAt),
-      catch: storeError("activity.observe")
-    })
+        )
+        .get(normalizedHost, agentId, revision, observedAt, observedAt), storeError("activity.observe")).pipe(
+        Effect.tap(() => this.#secureFiles.pipe(Effect.mapError(fromPrivateDatabaseError)))
+      )
     return yield* Schema.decodeUnknownEffect(ActivityRow)(row).pipe(
       Effect.mapError(storeError("activity.decode")),
       Effect.map(({ last_activity_at }) => last_activity_at)
@@ -116,26 +117,23 @@ export class AgentActivityStore {
         operation: "activity.hues.decode"
       })
     }
-    const assigned = yield* Effect.try({
-      try: () => {
-        this.#database.exec("BEGIN IMMEDIATE")
-        try {
-          const result = assignHues(
-            this.#database,
-            input.directory.host,
-            input.directory.agents,
-            input.observedAt,
-            input.directory.complete === true
-          )
-          this.#database.exec("COMMIT")
-          return result
-        } catch (cause) {
-          this.#database.exec("ROLLBACK")
-          throw cause
-        }
-      },
-      catch: storeError("activity.hues.assign")
-    })
+    const assigned = yield* connectSqliteWrite("activity.hues.assign", () => {
+      this.#database.exec("BEGIN IMMEDIATE")
+      try {
+        const result = assignHues(
+          this.#database,
+          input.directory.host,
+          input.directory.agents,
+          input.observedAt,
+          input.directory.complete === true
+        )
+        this.#database.exec("COMMIT")
+        return result
+      } catch (cause) {
+        this.#database.exec("ROLLBACK")
+        throw cause
+      }
+    }, storeError("activity.hues.assign"))
     yield* this.#secureFiles.pipe(Effect.mapError(fromPrivateDatabaseError))
     return assigned
   })

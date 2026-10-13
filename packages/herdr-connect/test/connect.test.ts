@@ -2,7 +2,7 @@ import { NodeHttpClient, NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
 import type { HostConfiguration, HostOperations } from "@knpkv/herdr-fleet"
 import { fleetResponseBodyMaxBytes, JobStore, makeFleetService } from "@knpkv/herdr-fleet"
-import { Effect, Fiber, Logger, Option, Result, Schedule, Schema, Stream } from "effect"
+import { Effect, Fiber, FileSystem, Logger, Option, Result, Schedule, Schema, Stream } from "effect"
 import * as HttpClient from "effect/http/HttpClient"
 import * as HttpClientResponse from "effect/http/HttpClientResponse"
 import { TestClock } from "effect/testing"
@@ -1028,6 +1028,83 @@ describe("Connect public seams", () => {
       provideNodeServices
     )
   })
+
+  it.effect("classifies exhausted relationship contention without leaking the SQLite cause or inventory work", () =>
+    Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "connect-inventory-busy-" })
+      const activity = yield* Effect.acquireRelease(
+        AgentActivityStore.open(join(root, "activity.sqlite")),
+        (store) => Effect.sync(() => store.close())
+      )
+      const relationships = yield* Effect.acquireRelease(
+        AgentRelationshipStore.open(join(root, "relationships.sqlite")),
+        (store) => Effect.sync(() => store.close())
+      )
+      const blocker = yield* Effect.acquireRelease(
+        Effect.sync(() => new DatabaseSync(relationships.path)),
+        (db) => Effect.sync(() => db.close())
+      )
+      yield* Effect.acquireRelease(
+        Effect.sync(() => blocker.exec("BEGIN IMMEDIATE")),
+        () => Effect.sync(() => blocker.exec("ROLLBACK"))
+      )
+      const source: AgentSource = {
+        agents: () =>
+          Effect.succeed({
+            agents: [{
+              activityRevision: 1,
+              agentId: "agent-busy",
+              kind: "test",
+              name: "Worker",
+              paneId: "w1:p1",
+              parentAgentId: null,
+              relation: null,
+              status: "working",
+              work: "raw inventory work text"
+            }],
+            available: true,
+            error: null
+          }),
+        workers: () => Effect.succeed([])
+      }
+      const pending = yield* Effect.forkScoped(
+        Effect.result(localConnectAgents(hostConfiguration(root), source, activity, relationships, 1))
+      )
+      yield* TestClock.adjust(6_000)
+      const failed = yield* Fiber.join(pending)
+      expect(failed).toMatchObject({
+        failure: {
+          _tag: "ConnectPeerError",
+          reason: "invalid_response",
+          cause: {
+            _tag: "ConnectInventoryFailure",
+            step: "persist_relationships",
+            agentId: null,
+            reason: "ConnectStoreBusyError"
+          }
+        }
+      })
+      if (Result.isFailure(failed)) {
+        expect(
+          Schema.decodeUnknownSync(
+            Schema.TaggedStruct("ConnectInventoryFailure", {
+              step: Schema.Literal("persist_relationships"),
+              agentId: Schema.Null,
+              reason: Schema.Literal("ConnectStoreBusyError")
+            }),
+            { onExcessProperty: "error" }
+          )(failed.failure.cause)
+        ).toEqual({
+          _tag: "ConnectInventoryFailure",
+          step: "persist_relationships",
+          agentId: null,
+          reason: "ConnectStoreBusyError"
+        })
+        expect(JSON.stringify(failed.failure.cause)).not.toContain("raw inventory work text")
+        expect(JSON.stringify(failed.failure.cause)).not.toContain("database is locked")
+      }
+    }).pipe(Effect.scoped, provideNodeServices))
 
   it.effect("recovers a stale stored parent from newer same-pane live inventory without exposing it", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-directory-replay-test-"))

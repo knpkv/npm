@@ -4,6 +4,7 @@ import type { DatabaseSync, SQLOutputValue } from "node:sqlite"
 import { ConnectArchiveStoreError } from "./errors.js"
 import { advanceHueObservation, initializeHues } from "./internal/hue-database.js"
 import { initializePosts } from "./internal/post-database.js"
+import { connectBusyTimeoutMillis, connectSqliteWrite } from "./internal/sqlite-write.js"
 import {
   ArchivedConnectAgent,
   ConnectAgent,
@@ -178,6 +179,7 @@ export class AgentArchiveStore {
 
   static readonly open = Effect.fn("AgentArchiveStore.open")(function*(path: string) {
     const opened = yield* openPrivateSqlite(path, {
+      busyTimeoutMillis: connectBusyTimeoutMillis,
       initialize: (database) => {
         initializePosts(database)
         initializeHues(database)
@@ -236,27 +238,41 @@ export class AgentArchiveStore {
       Effect.mapError(failWith("observe.decode"))
     )
     const host = observation.host.toLowerCase()
-    return yield* this.#transactions.withPermits(1)(Effect.suspend(() => {
-      const failedAt = this.#taintedHosts.get(host)
-      if (failedAt !== undefined && observation.observedAt < failedAt) return Effect.void
-      return Effect.try({
-        try: () => {
-          this.#database.exec("BEGIN IMMEDIATE")
-          try {
-            recordObservation(this.#database, observation, failedAt !== undefined)
-            this.#database.exec("COMMIT")
-          } catch (cause) {
-            this.#database.exec("ROLLBACK")
-            throw cause
-          }
-        },
-        catch: failWith("observe.transaction")
-      }).pipe(
-        Effect.andThen(this.#secureFiles.pipe(Effect.mapError(fromPrivateDatabaseError))),
-        Effect.tap(() => Effect.sync(() => this.#taintedHosts.delete(host))),
-        Effect.tapError(() => Effect.sync(() => this.#taintedHosts.set(host, observation.observedAt)))
+    const markTainted = Effect.sync(() =>
+      this.#taintedHosts.set(
+        host,
+        Math.max(this.#taintedHosts.get(host) ?? observation.observedAt, observation.observedAt)
       )
-    }))
+    )
+    return yield* this.#transactions.withPermits(1)(
+      connectSqliteWrite("observe.transaction", () => {
+        // Cancellation can taint this host while an older attempt waits; check again on every retry.
+        const failedAt = this.#taintedHosts.get(host)
+        if (failedAt !== undefined && observation.observedAt < failedAt) return false
+        this.#database.exec("BEGIN IMMEDIATE")
+        try {
+          recordObservation(this.#database, observation, failedAt !== undefined)
+          this.#database.exec("COMMIT")
+          return true
+        } catch (cause) {
+          this.#database.exec("ROLLBACK")
+          throw cause
+        }
+      }, failWith("observe.transaction")).pipe(
+        Effect.tap((recorded) =>
+          recorded ? this.#secureFiles.pipe(Effect.mapError(fromPrivateDatabaseError)) : Effect.void
+        ),
+        Effect.tap((recorded) =>
+          Effect.sync(() => {
+            if (!recorded) return
+            const failedAt = this.#taintedHosts.get(host)
+            if (failedAt === undefined || failedAt <= observation.observedAt) this.#taintedHosts.delete(host)
+          })
+        ),
+        Effect.tapError(() => markTainted),
+        Effect.asVoid
+      )
+    ).pipe(Effect.onInterrupt(() => markTainted))
   })
 
   /** Latest remembered names, scoped to the requested host and identity, including closed agents. */
