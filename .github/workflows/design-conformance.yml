@@ -1,0 +1,110 @@
+name: Design conformance
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  products:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          node-version: 26.7.0
+      - name: Discover reference products
+        id: matrix
+        env:
+          DESIGN_BASE_REF: ${{ github.event.pull_request.base.sha || 'origin/main' }}
+        run: pnpm --filter @knpkv/design-conformance exec tsx scripts/matrix.ts
+      - name: Flag waiver changes for review
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.sha || 'origin/main' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          base=$(git merge-base HEAD "$BASE_REF")
+          changes=$(git diff --name-only "$base" HEAD -- ':(glob)design-refs/**/waivers.json')
+          if [ -n "$changes" ]; then
+            echo '::notice::Design waivers changed. Waiver authority is decided by code-owner or coordinator review.'
+            {
+              echo '### Waiver changes require review'
+              echo 'Waiver changes do not fail this job. Matching and stale-waiver rules still apply.'
+              echo '```text'
+              printf '%s\n' "$changes"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  product:
+    name: Design conformance (${{ matrix.product }})
+    needs: products
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.products.outputs.matrix) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PRODUCT: ${{ matrix.product }}
+      PRODUCT_PACKAGE: ${{ matrix.package }}
+      DESIGN_BASE_REF: ${{ github.event.pull_request.base.sha || 'origin/main' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          node-version: 26.7.0
+      - name: Install Chromium
+        run: pnpm --filter @knpkv/design-conformance exec playwright install --with-deps chromium
+      - name: Build product and gate
+        shell: bash
+        run: pnpm --filter "$PRODUCT_PACKAGE..." --filter @knpkv/design-conformance build
+      - name: Prove fixture rejection and acceptance
+        if: ${{ matrix.product == '_fixture' }}
+        run: pnpm --filter @knpkv/design-conformance test:browser
+      - name: Capture merge-base product
+        if: ${{ matrix.product != '_fixture' }}
+        shell: bash
+        run: pnpm --filter @knpkv/design-conformance exec tsx scripts/base.ts "$PRODUCT" "$GITHUB_WORKSPACE/test-results/design-conformance/base/$PRODUCT"
+      - name: Check PR against refs and merge-base captures
+        if: ${{ matrix.product != '_fixture' }}
+        shell: bash
+        run: pnpm design:check --product "$PRODUCT" --base "$GITHUB_WORKSPACE/test-results/design-conformance/base/$PRODUCT" --output "$GITHUB_WORKSPACE/test-results/design-conformance/current/$PRODUCT"
+      - name: Publish required and legacy drift results
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          report="test-results/design-conformance/current/$PRODUCT/summary.md"
+          if [ "$PRODUCT" = _fixture ]; then
+            echo 'Toy product tests assert passing, required, waived, stale, coverage and legacy verdicts.' >> "$GITHUB_STEP_SUMMARY"
+          elif [ -f "$report" ]; then
+            cat "$report" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'Capture did not complete. See the failing step.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Upload reference, live and diff report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: design-conformance-${{ matrix.product }}
+          path: |
+            test-results/design-conformance/
+            packages/design-conformance/test-results/
+          if-no-files-found: warn
+          retention-days: 14

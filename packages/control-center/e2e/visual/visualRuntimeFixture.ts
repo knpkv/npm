@@ -1,5 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as AwsClientConfig from "@knpkv/codecommit-core/AwsClientConfig.js"
+import { installCaptureClock, VISUAL_TIME } from "@knpkv/design-conformance/capture"
 import { type Page, test as base } from "@playwright/test"
 import * as Clock from "effect/Clock"
 import * as Context from "effect/Context"
@@ -39,7 +40,7 @@ import { disposeFailedFixtureSetup, protectPartialFixtureAllocation } from "../r
 import { makeCodePipelineProvider } from "./fakeProviders/codepipeline.js"
 import { type FakeProviders, makeFakeProviders } from "./fakeProviders/transport.js"
 
-export const VISUAL_TIME = "2026-07-14T12:00:00.000Z"
+export { VISUAL_TIME }
 export const VISUAL_WORKSPACE_ID = WorkspaceId.make("01890f6f-6d6a-7cc0-98d2-000000000001")
 const OWNER_ID = PersonId.make("01890f6f-6d6a-7cc0-98d2-000000000002")
 const epochMillis = 1784030400000
@@ -287,8 +288,7 @@ export const test = base.extend<{ readonly visualRuntime: VisualRuntimeFixture }
     })
     const page = await context.newPage()
     try {
-      await page.clock.install({ time: new Date(VISUAL_TIME) })
-      await page.clock.setFixedTime(new Date(VISUAL_TIME))
+      await installCaptureClock(page)
       await page.addInitScript(`(() => {
         Object.defineProperty(crypto, 'getRandomValues', { value: function(array) {
           let seed = Number(sessionStorage.getItem('__fixture_random_seed') ?? '17');
