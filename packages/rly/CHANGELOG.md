@@ -1,5 +1,13 @@
 # @knpkv/rly
 
+## 0.23.0
+
+### Minor Changes
+
+- [#870](https://github.com/knpkv/npm/pull/870) [`1ffd400`](https://github.com/knpkv/npm/commit/1ffd4002d82cb981cb203b77c67844002179bcf9) Thanks [@konopkov](https://github.com/konopkov)! - Add optional Sheet.Root restoreFocus to choose a return target after modal cleanup while retaining captured-opener restoration by default.
+
+  Sheet returns focus to the latest opener across controlled open cycles.
+
 ## 0.22.1
 
 ### Patch Changes

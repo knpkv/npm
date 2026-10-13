@@ -8,6 +8,7 @@ import {
   FleetConnectAgentPage,
   FleetLimits,
   FleetUsage,
+  LocalConnectAgents,
   terminalCommandMaxPayloadBytes,
   type TerminalConnector,
   terminalFrameMaxEncodedBytes,
@@ -2469,6 +2470,205 @@ esac
     })).pipe(provideNodeServices)
   })
 
+  it.effect("releases a peer's own hue reservations while the canonical hub archives in a separate database", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-http-peer-hues-"))
+    const mainRoot = join(root, "hub")
+    const peerRoot = join(root, "peer")
+    mkdirSync(mainRoot, { mode: 0o700 })
+    mkdirSync(peerRoot, { mode: 0o700 })
+    const mainTailscale = join(mainRoot, "tailscale-test")
+    const peerTailscale = join(peerRoot, "tailscale-test")
+    for (
+      const { address, command, host, status } of [
+        {
+          command: mainTailscale,
+          address: "127.0.0.1",
+          host: "ALPHA",
+          status:
+            "{\"atlas\":{\"HostName\":\"atlas\",\"ID\":\"node-atlas\",\"Online\":true,\"TailscaleIPs\":[\"127.0.0.2\"]}}"
+        },
+        { command: peerTailscale, address: "127.0.0.2", host: "atlas", status: "{}" }
+      ]
+    ) {
+      writeFileSync(
+        command,
+        `#!/bin/sh
+case "$1" in
+  ip) printf '%s\n' '${address}' ;;
+  whois) printf '%s\n' '{"Node":{"StableID":"node-alpha"},"UserProfile":{"LoginName":"owner@example.com"}}' ;;
+  status) printf '%s\n' '{"Peer":${status},"Self":{"HostName":"${host}","ID":"node-${host.toLowerCase()}","Online":true,"TailscaleIPs":["${address}"]}}' ;;
+esac
+`,
+        { mode: 0o700 }
+      )
+    }
+    let names = ["sec-cc", ...Array.from({ length: 7 }, (_, index) => `worker-${String(index)}`)]
+    let partial = false
+    const peerOperations: HostOperations = {
+      ...operations,
+      listAgents: () =>
+        Effect.succeed({
+          available: true,
+          error: partial ? "partial inventory" : null,
+          agents: names.map((name, index) => ({
+            activityRevision: 1,
+            agentId: `agent-${name}`,
+            name,
+            paneId: `w1:p${String(index + 1)}`,
+            kind: "codex",
+            parentAgentId: null,
+            relation: null,
+            status: "working",
+            work: "project"
+          }))
+        })
+    }
+    return Effect.scoped(Effect.gen(function*() {
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { force: true, recursive: true })))
+      const firstSeenAt = (yield* TestClock.withLive(Clock.currentTimeMillis)) - 300_002
+      let observedAt = firstSeenAt
+      const peerStore = yield* Effect.acquireRelease(
+        JobStore.open(join(peerRoot, "jobs.sqlite")),
+        (opened) => Effect.sync(() => opened.close())
+      )
+      const mainStore = yield* Effect.acquireRelease(
+        JobStore.open(join(mainRoot, "jobs.sqlite")),
+        (opened) => Effect.sync(() => opened.close())
+      )
+      const peerFleet = yield* makeFleetService({
+        approvalEnabled: true,
+        host: "atlas",
+        operations: peerOperations,
+        store: peerStore
+      })
+      const mainFleet = yield* makeFleetService({ approvalEnabled: true, host: "ALPHA", operations, store: mainStore })
+      const shared = {
+        approvalNodes: ["node-alpha"],
+        approvalPort: 0,
+        crossHost: true,
+        port: 0,
+        machines: [{ host: "ALPHA", nodeId: "node-alpha" }, { host: "atlas", nodeId: "node-atlas" }]
+      }
+      const peerConfig: HostConfiguration = {
+        ...config(peerRoot),
+        ...shared,
+        host: "atlas",
+        tailscaleCommand: peerTailscale,
+        approvalHub: { host: "ALPHA", nodeId: "node-alpha", url: "https://alpha.example.test/" }
+      }
+      // Bind the hub to the peer's chosen ports on a different loopback address; retry only port collisions.
+      const { approvalPort, mainServer, peerServer } = yield* Effect.acquireRelease(
+        Effect.tryPromise({
+          try: async (): Promise<PairStart> => {
+            const peerServer = await startHttpServer(peerConfig, peerFleet, assets, {
+              terminalConnector: unusedTerminal,
+              now: () => observedAt
+            })
+            const ports = await Promise.resolve().then(() => ({
+              approvalPort: boundPort(peerServer.approvalUrl),
+              peerPort: boundPort(peerServer.tailnetUrl)
+            })).catch(async (cause: unknown) => {
+              await peerServer.close()
+              throw cause
+            })
+            try {
+              const mainServer = await startHttpServer(
+                {
+                  ...config(mainRoot),
+                  ...shared,
+                  host: "ALPHA",
+                  tailscaleCommand: mainTailscale,
+                  approvalPort: ports.approvalPort,
+                  port: ports.peerPort,
+                  approvalTls: directTls,
+                  approvalHub: {
+                    host: "ALPHA",
+                    nodeId: "node-alpha",
+                    url: `https://alpha.example.test:${String(ports.approvalPort)}/`
+                  }
+                },
+                mainFleet,
+                assets,
+                { terminalConnector: unusedTerminal, now: () => observedAt }
+              )
+              return { _tag: "Started", approvalPort: ports.approvalPort, mainServer, peerServer }
+            } catch (cause) {
+              await peerServer.close()
+              if (isAddressInUse(cause) && (cause.port === ports.peerPort || cause.port === ports.approvalPort)) {
+                return { _tag: "PortTaken", cause }
+              }
+              throw cause
+            }
+          },
+          catch: (cause) => new ApprovalStartFailed({ cause })
+        }).pipe(
+          Effect.flatMap((started) =>
+            started._tag === "PortTaken"
+              ? Effect.fail(new ApprovalPortTaken({ cause: started.cause }))
+              : Effect.succeed(started)
+          ),
+          Effect.retry({ times: 4, while: (error) => error._tag === "ApprovalPortTaken" })
+        ),
+        ({ mainServer, peerServer }) =>
+          Effect.promise(async () => {
+            await mainServer.close()
+            await peerServer.close()
+          })
+      )
+      if (mainServer.serveUrl === null || peerServer.tailnetUrl === null) {
+        return yield* Effect.die("peer hue listeners missing")
+      }
+      const canonicalUrl = mainServer.serveUrl
+      const peerUrl = peerServer.tailnetUrl
+      const headers = { host: `alpha.example.test:${String(approvalPort)}` }
+      const get = (path: string) => Effect.promise(() => secureRequestBody(`${canonicalUrl}${path}`, headers))
+      const initial = yield* get("/v1/connect/agents")
+      expect(initial.status).toBe(200)
+      const initialPage = Schema.decodeUnknownSync(Schema.fromJsonString(FleetConnectAgentPage))(initial.body)
+      expect(initialPage.failures).toEqual([])
+      expect(initialPage.agents).toHaveLength(8)
+      expect(initialPage.agents.find(({ id }) => id === "agent-sec-cc")).toHaveProperty("hue", "rose")
+      // Partial evidence does not release any of the eight peer reservations.
+      names = ["skills"]
+      partial = true
+      observedAt = firstSeenAt + 1
+      const partialRead = yield* Effect.promise(() => fetch(`${peerUrl}/v1/connect/agents/local`))
+      expect(partialRead.status).toBe(200)
+      const partialPage = Schema.decodeUnknownSync(Schema.fromJsonString(LocalConnectAgents))(
+        yield* Effect.promise(() => partialRead.text())
+      )
+      expect(partialPage.agents[0]).toHaveProperty("hue", "ember")
+      names = []
+      partial = false
+      observedAt = firstSeenAt + 2
+      yield* get("/v1/connect/agents")
+      observedAt = firstSeenAt + 300_002
+      yield* get("/v1/connect/agents")
+      const archived = yield* get("/v1/connect/archive")
+      expect(archived.status).toBe(200)
+      const archivePage = Schema.decodeUnknownSync(Schema.fromJsonString(ConnectArchivePage))(archived.body)
+      expect(archivePage.agents).toHaveLength(8)
+      expect(archivePage.agents.find(({ agentId }) => agentId === "agent-sec-cc")).toHaveProperty("hue", "rose")
+      names = ["skills"]
+      observedAt++
+      const replacement = yield* Effect.promise(() => fetch(`${peerUrl}/v1/connect/agents/local`))
+      expect(replacement.status).toBe(200)
+      const replacementPage = Schema.decodeUnknownSync(Schema.fromJsonString(LocalConnectAgents))(
+        yield* Effect.promise(() => replacement.text())
+      )
+      // This returning bean held overflow ember; use a new bean identity to probe oldest-family reuse instead.
+      names = ["skills", "replacement-4"]
+      observedAt++
+      const newest = yield* Effect.promise(() => fetch(`${peerUrl}/v1/connect/agents/local`))
+      expect(newest.status).toBe(200)
+      const newestPage = Schema.decodeUnknownSync(Schema.fromJsonString(LocalConnectAgents))(
+        yield* Effect.promise(() => newest.text())
+      )
+      expect(newestPage.agents.find(({ id }) => id === "agent-replacement-4")).toHaveProperty("hue", "rose")
+      expect(replacementPage.agents[0]).toHaveProperty("hue", "ember")
+    })).pipe(provideNodeServices)
+  })
+
   it.effect("archives confirmed closures through the authenticated listener and rejects other listeners and malformed cursors", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-http-archive-"))
     const tailscaleCommand = join(root, "tailscale-test")
@@ -2575,7 +2775,11 @@ esac
         return Schema.decodeUnknownSync(Schema.fromJsonString(ConnectArchivePage))(response.body)
       })
       expect((yield* page()).agents).toEqual([])
-      expect((yield* get("/v1/connect/agents")).status).toBe(200)
+      const initialDirectory = yield* get("/v1/connect/agents")
+      expect(initialDirectory.status).toBe(200)
+      const initialAgents =
+        Schema.decodeUnknownSync(Schema.fromJsonString(FleetConnectAgentPage))(initialDirectory.body).agents
+      expect(initialAgents.find(({ id }) => id === "agent-archive")).toHaveProperty("hue", "teal")
       present = false
       observedAt = firstSeenAt + 1
       yield* get("/v1/connect/agents")
@@ -2599,6 +2803,7 @@ esac
         host: "ser8",
         agentId: "agent-archive",
         name: "worker",
+        hue: "teal",
         kind: "codex",
         work: "project",
         state: "working",
@@ -2634,6 +2839,29 @@ esac
       observedAt = firstSeenAt + 600_003
       yield* get("/v1/connect/agents")
       expect((yield* page()).agents).toEqual([])
+      // Palette writes are optional enrichment; a failed transaction must not hide the host's agents.
+      const hueDatabase = yield* Effect.acquireRelease(
+        Effect.sync(() => new DatabaseSync(join(root, "approval-app.sqlite"))),
+        (opened) => Effect.sync(() => opened.close())
+      )
+      hueDatabase.exec(`CREATE TRIGGER hue_failure BEFORE INSERT ON connect_agent_hues
+        BEGIN SELECT RAISE(ABORT, 'HUE_PRIVATE_SENTINEL'); END`)
+      const hueWarnings = vi.spyOn(Logger.defaultLogger, "log")
+      yield* Effect.addFinalizer(() => Effect.sync(() => hueWarnings.mockRestore()))
+      const hueFailureDirectory = yield* get("/v1/connect/agents")
+      expect(hueFailureDirectory.status).toBe(200)
+      const hueFreePage = Schema.decodeUnknownSync(Schema.fromJsonString(FleetConnectAgentPage))(
+        hueFailureDirectory.body
+      )
+      expect(hueFreePage.agents.map(({ id }) => id)).toEqual(["agent-archive", "agent-staying"])
+      for (const agent of hueFreePage.agents) expect(agent).not.toHaveProperty("hue")
+      expect(hueFreePage.failures).toEqual([])
+      expect(hueWarnings.mock.calls.map(([entry]) => entry.logLevel)).toEqual(["Warn"])
+      expect(hueWarnings.mock.calls.map(([entry]) => entry.message)).toEqual([
+        ["ConnectHueAssignmentFailed", { host: "SER8", cause: "TerminalTransportError" }]
+      ])
+      hueWarnings.mockRestore()
+      hueDatabase.exec("DROP TRIGGER hue_failure")
     })).pipe(provideNodeServices)
   })
 

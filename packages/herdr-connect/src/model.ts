@@ -34,6 +34,10 @@ export const ConnectAgentRelationship = Schema.Struct({
 })
 export type ConnectAgentRelationship = typeof ConnectAgentRelationship.Type
 
+/** Agent-only palettes in design order; the Relay mark's plum is deliberately excluded. */
+export const ConnectAgentHue = Schema.Literals(["rose", "ember", "amber", "lime", "moss", "teal", "sky", "iris"])
+export type ConnectAgentHue = typeof ConnectAgentHue.Type
+
 export const ConnectAgent = Schema.Struct({
   id: AgentStableId,
   host: AgentWorkerIdentity.fields.host,
@@ -42,6 +46,7 @@ export const ConnectAgent = Schema.Struct({
   state: BoundedString,
   work: AgentWorkLabel,
   lastActivityAt: ActivityTimestamp,
+  hue: Schema.optionalKey(ConnectAgentHue),
   voice: Schema.optionalKey(ConnectLastWords),
   self: Schema.optionalKey(Schema.NullOr(ConnectSelfState)),
   relationship: Schema.optionalKey(ConnectAgentRelationship)
@@ -101,6 +106,7 @@ export const ArchivedConnectAgent = Schema.Struct({
   kind: ConnectAgent.fields.kind,
   work: ConnectAgent.fields.work,
   state: ConnectAgent.fields.state,
+  hue: ConnectAgent.fields.hue,
   firstSeenAt: ActivityTimestamp,
   closedAt: ActivityTimestamp,
   lastWords: Schema.optionalKey(ConnectLastWords),
