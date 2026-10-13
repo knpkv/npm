@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { type FleetUsage, type FleetLimits, type UsageQuery } from "@knpkv/herdr-connect/usage"
+import { FleetReadLoadError, type FleetUsage, type FleetLimits, type UsageQuery } from "@knpkv/herdr-connect/usage"
 import { Effect } from "effect"
 import { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
@@ -32,6 +32,7 @@ const render = async (reads: UsageModuleReads) => {
   await act(async () =>
     root?.render(
       <SuperappShell
+        session={{ access: "tailscale", connection: "connected" }}
         modules={[fleet, module]}
         landing={{ module: "fleet", page: "approvals" }}
         host="hub"
@@ -48,6 +49,23 @@ const click = async (href: string) => {
   await act(async () => anchor.dispatchEvent(new MouseEvent("click", { bubbles: true, button: 0 })))
   anchor.remove()
 }
+
+/** A retained Limits error must not expose a Retry on a page that never reads Limits. */
+it("keeps Limits Retry on Limits after switching to healthy By tool", async () => {
+  const reads: UsageModuleReads = {
+    usage: () => Effect.succeed({ fleet: usage, receivedAt: 1_000 }),
+    limits: Effect.fail(new FleetReadLoadError({ path: "/v1/connect/limits", reason: "network", cause: "offline" }))
+  }
+  window.history.replaceState(null, "", "/?range=7d&timeZone=UTC#usage/limits")
+  await render(reads)
+  const retries = () =>
+    [...document.querySelectorAll(".usage-details button")].filter((button) => button.textContent === "Retry")
+  expect(retries()).toHaveLength(1)
+  await click("?range=7d&timeZone=UTC#usage/by-tool")
+  expect(retries()).toHaveLength(0)
+  await click("?range=7d&timeZone=UTC#usage/limits")
+  expect(retries()).toHaveLength(1)
+})
 
 it("repairs selectors only on active Usage and keeps Fleet approval deep links after visiting Usage", async () => {
   const calls: Array<UsageQuery> = []
@@ -77,6 +95,7 @@ it("repairs selectors only on active Usage and keeps Fleet approval deep links a
   await act(async () =>
     root?.render(
       <SuperappShell
+        session={{ access: "tailscale", connection: "connected" }}
         modules={[
           fleet,
           makeUsageModuleViews({ reads, viewerTimeZone: "Europe/Amsterdam", now: 2_000, onHubMachine: false })
@@ -160,7 +179,7 @@ it("reads limits only on its page, filters locally, repairs unknown hosts and ke
     "BETARead 00:00 in UTC3.6K",
     "cedarOfflineUnknown"
   ])
-  expect(document.querySelector(".usage-details-intro")?.textContent).toContain("4.8K reported tokens")
+  expect(document.querySelector('[aria-label="By host"]')?.textContent).toContain("4.8K reported tokens")
   expect(document.querySelector('[aria-label="By agent and model"]')?.textContent).toContain("1.2K")
   expect(document.querySelector('[aria-label="By agent and model"]')?.textContent).not.toContain("4.8K")
   expect(document.querySelector('[aria-label="By provider"]')?.textContent).toContain("1.2K")
@@ -220,4 +239,125 @@ it("owns range changes in the URL, sends the selected zone and interrupts reads 
   visibility.mockReturnValue("hidden")
   await act(async () => document.dispatchEvent(new Event("visibilitychange")))
   await vi.waitFor(() => expect(interruptions).toBe(2))
+})
+
+it("shows By tool for one reported host, with no limits fan-out or zero for an unavailable host", async () => {
+  let limitCalls = 0
+  const queries: Array<UsageQuery> = []
+  const reading: FleetUsage["hosts"][number]["reading"] = {
+    _tag: "Read",
+    skipped: 0,
+    usage: {
+      v: 1,
+      machine: "ALPHA",
+      observedAt: 0,
+      range: { preset: "7d", timeZone: "UTC", from: 0, to: 86_400_000, bucket: "day" },
+      periods: [{ key: "1970-01-01", start: 0 }],
+      tokens: [
+        { period: 0, agent: "claude", model: "Opus", tokens: 1200 },
+        { period: 0, agent: "codex", model: "GPT-5", tokens: 400 }
+      ],
+      limits: []
+    }
+  }
+  const report: FleetUsage = {
+    hosts: [
+      { host: "ALPHA", readAt: 1000, reading },
+      { host: "BETA", readAt: 1000, reading: { ...reading, usage: { ...reading.usage, machine: "BETA", tokens: [] } } }
+    ],
+    failures: [{ host: "cedar", reason: "offline" }],
+    peersListed: true
+  }
+  const reads: UsageModuleReads = {
+    usage: (query) =>
+      Effect.sync(() => {
+        queries.push(query)
+        return { fleet: report, receivedAt: 1000 }
+      }),
+    limits: Effect.sync(() => {
+      limitCalls += 1
+      return { fleet: limits, receivedAt: 1000 }
+    })
+  }
+  window.history.replaceState(null, "", "?range=7d&timeZone=UTC#usage/by-tool")
+  await render(reads)
+  expect(document.querySelector<HTMLSelectElement>('[name="usage-host"]')?.value).toBe("ALPHA")
+  expect(document.querySelector(".usage-by-tool-total")?.textContent).toBe("1.6K tokens")
+  expect([...document.querySelectorAll(".usage-by-tool tbody tr")].map((row) => row.textContent)).toEqual([
+    "Claude Code, Opus1.2K75%",
+    "Codex, GPT-540025%"
+  ])
+  expect(document.querySelector(".usage-by-tool time")?.textContent).toBe("00:00")
+  expect(document.querySelector(".usage-details-controls")?.textContent).toContain("Periods in UTC")
+  await click("?range=7d&timeZone=UTC&host=cedar#usage/by-tool")
+  expect(document.querySelector(".usage-by-tool-total")?.textContent).toBe("Unknown")
+  expect(document.querySelector(".usage-by-tool")?.textContent).toContain("cedar: Offline")
+  expect(document.querySelectorAll(".usage-by-tool tbody tr")).toHaveLength(0)
+  await click("?range=7d&timeZone=UTC&host=BETA#usage/by-tool")
+  expect(document.querySelector(".usage-by-tool-total")?.textContent).toBe("0 tokens")
+  expect(queries).toEqual([{ range: "7d", timeZone: "UTC" }])
+  expect(limitCalls).toBe(0)
+})
+
+/** A retained report names its range and failure state while the next request is controlled by the test. */
+it.each(["pending", "failed"])("frames retained By-tool rows while the new range is %s", async (state) => {
+  const report: FleetUsage = {
+    hosts: [
+      {
+        host: "ALPHA",
+        readAt: 1000,
+        reading: {
+          _tag: "Read",
+          skipped: 0,
+          usage: {
+            v: 1,
+            machine: "ALPHA",
+            observedAt: 0,
+            range: { preset: "7d", timeZone: "UTC", from: 0, to: 86400000, bucket: "day" },
+            periods: [{ key: "1970-01-01", start: 0 }],
+            tokens: [{ period: 0, agent: "claude", model: "Opus", tokens: 1200 }],
+            limits: []
+          }
+        }
+      }
+    ],
+    failures: [],
+    peersListed: true
+  }
+  const reads: UsageModuleReads = {
+    usage: (query) =>
+      query.range === "7d"
+        ? Effect.succeed({ fleet: report, receivedAt: 1000 })
+        : state === "failed"
+          ? Effect.fail(
+              new FleetReadLoadError({
+                path: "/v1/connect/usage",
+                reason: "network",
+                cause: "private transport detail"
+              })
+            )
+          : Effect.never,
+    limits: Effect.succeed({ fleet: limits, receivedAt: 1000 })
+  }
+  window.history.replaceState(null, "", "?range=7d&timeZone=UTC#usage/by-tool")
+  await render(reads)
+  expect(document.querySelector(".usage-by-tool-total")?.textContent).toBe("1.2K tokens")
+  const button = [...document.querySelectorAll<HTMLButtonElement>('[aria-label="Range"] button')].find(
+    (button) => button.textContent === "30 days"
+  )
+  await act(async () => button?.click())
+  expect(window.location.search).toBe("?range=30d&timeZone=UTC")
+  expect(document.querySelector(".usage-by-tool-reading")?.textContent).toContain("last 7 days")
+  expect(document.querySelector(".usage-by-tool-total")?.textContent).toBe("1.2K tokens")
+  if (state === "pending")
+    expect(document.querySelector(".usage-details")?.textContent).toContain(
+      "Updating to 30 days… showing the last 7 days"
+    )
+  else {
+    expect(document.querySelector(".usage-details")?.textContent).toContain("Couldn’t refresh")
+    expect(document.querySelector(".usage-details")?.textContent).toContain(
+      "Previous reading 00:00. Retrying every 5 minutes."
+    )
+    expect(document.querySelector(".usage-details")?.textContent).not.toContain("private transport detail")
+  }
 })

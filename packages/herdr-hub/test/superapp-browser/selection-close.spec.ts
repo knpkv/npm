@@ -98,7 +98,7 @@ for (const motion of ["no-preference", "reduce"] satisfies ReadonlyArray<"no-pre
       await expect(dialog.getByRole("button", { name: "Close pull request" })).toBeFocused()
       await close()
       await page.goBack()
-      await expect.poll(() => new URL(page.url()).hash).toBe("#today/overview")
+      await expect.poll(() => new URL(page.url()).hash).toBe("#connect/overview")
       expect(await page.evaluate(() => document.documentElement.dataset.hiddenFocusAttempt)).toBeUndefined()
       expect(warnings).toEqual([])
     })
@@ -130,7 +130,7 @@ test("a direct target closes without leaving the app", async ({ page }) => {
   expect(new URL(page.url()).hash).toBe("#code/pull-requests")
   expect(new URL(page.url()).searchParams.has("ref")).toBe(false)
   await page.goBack()
-  await expect.poll(() => new URL(page.url()).hash).toBe("#today/overview")
+  await expect.poll(() => new URL(page.url()).hash).toBe("#connect/overview")
 })
 
 test("changing queue selectors while a target is open declines an unrelated history parent", async ({ page }) => {

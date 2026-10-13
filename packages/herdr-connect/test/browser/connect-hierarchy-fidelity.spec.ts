@@ -44,8 +44,6 @@ const fixture = async (page: Page, agents: ReadonlyArray<ConnectAgent> = hierarc
     (route) => route.fulfill({ json: { agents, failures: [], nextCursor: null } })
   )
   await page.goto("/?embedded")
-  // Match the hub's real main-column gutter, without modifying its stylesheet.
-  await page.locator("#fleet-connect-root").evaluate((root) => root.classList.add("fleet-shell-main"))
   await expect(page.locator(".connect-family")).toHaveCount(4)
 }
 
@@ -135,7 +133,6 @@ for (const width of [390, 1280]) {
           })
         })
         await page.goto("/?embedded")
-        await page.locator("#fleet-connect-root").evaluate((root) => root.classList.add("fleet-shell-main"))
         await page.locator("body").evaluate((body, theme) => body.setAttribute("data-rly-theme", theme), theme)
         if (state === "stale") {
           await expect(page.locator(".connect-family")).toHaveCount(4)
@@ -146,7 +143,7 @@ for (const width of [390, 1280]) {
         } else if (state === "empty") {
           await expect(page.getByText("No agents running on any host.")).toBeVisible()
         } else if (state === "unavailable") {
-          await expect(page.getByRole("button", { name: "Retry directory" })).toBeVisible()
+          await expect(page.getByRole("button", { name: "Retry", exact: true })).toBeVisible()
         } else if (state === "loading") {
           await expect(page.getByText("Loading fleet agents…")).toBeVisible()
         } else {

@@ -1,22 +1,28 @@
 import { expect, test } from "@playwright/test"
 import { LONG_USAGE_HOST } from "./usage-fixture.js"
 
-test("a single long breadcrumb uses its available phone line", async ({ page }) => {
+/** By tool cannot retry a Limits read it does not own. */
+test("a retained Limits error has Retry only on the Limits page", async ({ page }) => {
+  await page.route(/\/v1\/connect\/limits(\?|$)/, (route) => route.fulfill({ status: 503, body: "unavailable" }))
+  await page.goto("/?range=7d&timeZone=UTC#usage/limits")
+  const module = page.locator("[data-module=\"usage\"]")
+  await expect(module.getByRole("button", { name: "Retry", exact: true })).toBeVisible()
+  await module.getByRole("link", { name: "By tool", exact: true }).click()
+  await expect(page.locator(".usage-by-tool-total")).toContainText("tokens")
+  await expect(module.getByRole("button", { name: "Retry", exact: true })).toHaveCount(0)
+  await module.getByRole("link", { name: "Limits", exact: true }).click()
+  await expect(module.getByRole("button", { name: "Retry", exact: true })).toBeVisible()
+})
+
+test("phone Usage has one module title and four installed destinations", async ({ page }, info) => {
+  test.skip(info.project.name !== "phone", "Phone chrome")
   await page.setViewportSize({ width: 320, height: 900 })
-  await page.goto("/")
-  const current = page.getByRole("navigation", { name: "Breadcrumb" }).locator("[aria-current=\"page\"]")
-  await expect(current).toHaveText("Today")
-  await current.locator("bdi").evaluate((element) => {
-    element.textContent = "A longer single module label"
-  })
-  await page.evaluate(() => document.fonts.ready)
-  const size = await current.evaluate((element) => ({
-    box: element.getBoundingClientRect().width,
-    line: element.parentElement?.getBoundingClientRect().width ?? Infinity,
-    text: element.querySelector("bdi")?.getBoundingClientRect().width ?? Infinity
-  }))
-  expect(size.box).toBeGreaterThan(size.line / 2)
-  expect(size.box + 0.5).toBeGreaterThanOrEqual(size.text)
+  await page.goto("/?range=7d&timeZone=UTC#usage/tokens")
+  await expect(page.locator(".superapp-phone-title")).toHaveText("Usage")
+  await expect(page.locator(".superapp-breadcrumb")).toBeHidden()
+  await expect(page.locator(".superapp-bottom a")).toHaveText(["Connect", "Fleet1", "Code", "Usage"])
+  await expect(page.locator(".superapp-bottom a[aria-current=\"page\"]")).toHaveAccessibleName("Usage")
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320)
 })
 
 test("forced colours keep the selected range label readable", async ({ page }) => {
@@ -44,17 +50,12 @@ test("forced colours keep the selected range label readable", async ({ page }) =
   expect(colors.color).not.toBe(colors.background)
 })
 
-test("the tablet breadcrumb keeps the complete current page label", async ({ page }) => {
+test("the tablet Usage header names the module and current page without nested navigation", async ({ page }) => {
   await page.setViewportSize({ width: 768, height: 900 })
   await page.goto("/?range=7d&timeZone=UTC#usage/tokens")
-  const current = page.getByRole("navigation", { name: "Breadcrumb" }).locator("[aria-current=\"page\"]")
-  await expect(current).toHaveText("Tokens")
-  await page.evaluate(() => document.fonts.ready)
-  const size = await current.evaluate((element) => ({
-    box: element.getBoundingClientRect().width,
-    text: element.querySelector("bdi")?.getBoundingClientRect().width ?? Infinity
-  }))
-  expect(size.box + 0.5).toBeGreaterThanOrEqual(size.text)
+  await expect(page.locator(".usage-details-intro h1")).toHaveText("Usage")
+  await expect(page.locator(".usage-details-tabs [aria-current=\"page\"]")).toHaveText("Tokens")
+  await expect(page.locator(".superapp-breadcrumb")).toBeHidden()
 })
 
 test("the wide Usage chart aligns with the module column", async ({ page }) => {
@@ -143,23 +144,23 @@ test("hidden Usage preserves exact Fleet approval selectors and target focus", a
   await expect(page.locator("[data-module-page=\"tokens\"]")).toBeFocused()
 })
 
-test("Today opens Usage limits and deliberate Fleet links still reach the original tab", async ({ page }, info) => {
+test("Usage is primary on phone and retired Fleet Usage links migrate to By tool", async ({ page }, info) => {
   await page.goto("/")
-  await page.getByRole("link", { name: "Check limits", exact: true }).click()
+  const nav = page.locator(".superapp-sidebar, .superapp-bottom").filter({ visible: true })
+  await nav.getByRole("link", { name: "Usage", exact: true }).click()
   await expect(page.locator("[data-module-page=\"limits\"]")).toBeFocused()
   expect(new URL(page.url()).hash).toBe("#usage/limits")
   if (info.project.name === "phone") {
     const bottom = page.getByRole("navigation", { name: "Mobile modules", exact: true })
-    await expect(bottom.getByRole("link", { name: "Usage details", exact: true })).toHaveCount(0)
-    await expect(bottom.getByRole("button", { name: "All modules, current module Usage details", exact: true }))
-      .toHaveAttribute("aria-current", "page")
+    await expect(bottom.getByRole("link", { name: "Usage", exact: true })).toHaveAttribute("aria-current", "page")
+    await expect(bottom.getByRole("button", { name: "More", exact: true })).not.toHaveAttribute("aria-current", "page")
   }
-  await page.locator("[data-module=\"usage\"]").getByRole("link", { name: "Fleet usage", exact: true }).click()
-  await expect(page.getByRole("tab", { name: "Usage", exact: true })).toBeFocused()
-  expect(new URL(page.url()).hash).toBe("#fleet/usage")
-  await page.goto("/?tab=usage")
-  await expect(page.getByRole("tab", { name: "Usage", exact: true })).toBeVisible()
-  expect(new URL(page.url()).hash).toBe("#fleet/usage")
+  for (const route of ["/#fleet/usage", "/?tab=usage", "/#usage/by-agent"]) {
+    await page.goto(route)
+    await expect(page.locator("[data-module-page=\"by-tool\"]")).toBeFocused()
+    expect(new URL(page.url()).hash).toBe("#usage/by-tool")
+    await expect(page.getByRole("tab", { name: "Usage", exact: true })).toHaveCount(0)
+  }
 })
 
 for (const state of ["normal", "partial", "stale", "empty", "failed"]) {
@@ -183,7 +184,11 @@ for (const state of ["normal", "partial", "stale", "empty", "failed"]) {
         await expect(module.locator("[aria-label=\"By host\"] li").filter({ hasText: "cedar" })).toContainText(
           "Unknown"
         )
-        await expect(module.locator(".usage-details-intro")).toContainText("344M reported tokens")
+        await expect(
+          module.locator("[aria-label=\"By host\"]").locator("..").locator("..").filter({
+            hasText: "344M reported tokens"
+          })
+        ).toContainText("344M reported tokens")
         await expect(module.getByText("Unknown hosts are left out of the total.")).toBeVisible()
       }
       if (state === "stale") {
@@ -242,4 +247,167 @@ test("a maximum-length host fits the report and host selector", async ({ baseURL
   const selected = await host.boundingBox()
   expect(selected).not.toBeNull()
   expect((selected?.x ?? Infinity) + (selected?.width ?? Infinity)).toBeLessThanOrEqual(320)
+  // Older engines keep the native fixed sizing. The complete host also remains in the reading text.
+  await page.goto(`/?range=7d&timeZone=UTC&host=${encodeURIComponent(LONG_USAGE_HOST)}#usage/by-tool`)
+  await expect(page.locator(".usage-by-tool-reading")).toContainText(LONG_USAGE_HOST)
+  const byToolHost = page.getByRole("combobox", { name: "Host", exact: true })
+  await byToolHost.evaluate((element) => element.style.setProperty("field-sizing", "fixed"))
+  await expect(byToolHost).toHaveValue(LONG_USAGE_HOST)
+  expect(await byToolHost.evaluate((element) => getComputedStyle(element).maxInlineSize)).toBe("100%")
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+})
+
+/** Export 41 gives By tool one module masthead, a segmented range, and a single-host reading. */
+test("By tool matches its installed masthead and toolbar geometry", async ({ page }, info) => {
+  await page.goto("/?range=7d#usage/by-tool")
+  await expect(page.locator(".usage-by-tool table tbody tr")).not.toHaveCount(0)
+  await page.evaluate(() => document.fonts.ready)
+  const geometry = await page.locator(".usage-details[data-usage-page=\"by-tool\"]").evaluate((element) => {
+    const mast = element.querySelector(".usage-details-mast") ?? element.querySelector(".usage-details-intro")
+    const tabs = element.querySelector(".usage-details-tabs")
+    const select = element.querySelector("select")
+    const range = element.querySelector("[role=\"radiogroup\"]")
+    const table = element.querySelector("table")
+    const header = document.querySelector(".superapp-header")
+    if (mast === null || tabs === null || select === null || range === null || table === null || header === null) {
+      return null
+    }
+    const main = document.querySelector(".superapp-main")?.getBoundingClientRect()
+    return {
+      mast: { left: mast.getBoundingClientRect().left, right: mast.getBoundingClientRect().right },
+      main: { left: main?.left, right: main?.right },
+      tabsTop: tabs.getBoundingClientRect().top,
+      tabsHeight: tabs.getBoundingClientRect().height,
+      headerBottom: header.getBoundingClientRect().bottom,
+      selectHeight: select.getBoundingClientRect().height,
+      selectSizing: getComputedStyle(select).getPropertyValue("field-sizing"),
+      rangeHeight: range.getBoundingClientRect().height,
+      readingGap: (element.querySelector(".usage-by-tool-reading")?.getBoundingClientRect().top ?? Infinity) -
+        (element.querySelector(".usage-details-controls")?.getBoundingClientRect().bottom ?? -Infinity),
+      tabFont: getComputedStyle(tabs.querySelector("a") ?? tabs).fontSize,
+      rowFont: getComputedStyle(table.querySelector("th[scope=\"row\"]") ?? table).fontWeight
+    }
+  })
+  expect(geometry).not.toBeNull()
+  if (geometry === null) return
+  expect(geometry.mast).toEqual(geometry.main)
+  expect(geometry.tabsHeight).toBe(44)
+  expect(geometry.tabFont).toBe("15px")
+  expect(geometry.rowFont).toBe("430")
+  expect(geometry.selectHeight).toBe(info.project.name === "phone" ? 44 : 40)
+  expect(geometry.selectSizing).toBe("content")
+  expect(geometry.rangeHeight).toBe(info.project.name === "phone" ? 46 : 42)
+  expect(geometry.readingGap).toBe(info.project.name === "phone" ? 16 : 20)
+  if (info.project.name === "phone") {
+    expect(geometry.tabsTop).toBe(geometry.headerBottom)
+    await expect(page.locator(".superapp-phone-title")).toHaveText("Usage By tool")
+  }
+  await page.emulateMedia({ forcedColors: "active" })
+  const contrast = await page.getByRole("radio", { name: "7 days", exact: true }).evaluate((element) => {
+    const styles = getComputedStyle(element)
+    return { adjust: styles.forcedColorAdjust, background: styles.backgroundColor, color: styles.color }
+  })
+  expect(contrast.adjust).toBe("none")
+  expect(contrast.background).not.toBe(contrast.color)
+})
+
+/** Limits shares the designed module mast and tabs while its shipped body stays unchanged. */
+test("Limits matches the shared Usage chrome geometry", async ({ page }, info) => {
+  await page.goto("/#usage/limits")
+  const tabs = page.locator(".usage-details[data-usage-page=\"limits\"] .usage-details-tabs")
+  await expect(tabs).toBeVisible()
+  const chrome = await tabs.evaluate((element) => {
+    const link = element.querySelector("a")
+    if (link === null) return null
+    const bounds = element.getBoundingClientRect()
+    return {
+      left: bounds.left,
+      right: bounds.right,
+      top: bounds.top,
+      height: bounds.height,
+      headerBottom: document.querySelector(".superapp-header")?.getBoundingClientRect().bottom,
+      fontSize: getComputedStyle(element).fontSize,
+      padding: getComputedStyle(link).paddingInlineStart,
+      viewport: innerWidth
+    }
+  })
+  expect(chrome).not.toBeNull()
+  if (chrome === null) return
+  expect(chrome.height).toBe(44)
+  expect(chrome.fontSize).toBe("15px")
+  expect(chrome.padding).toBe(info.project.name === "phone" ? "12px" : "4px")
+  if (info.project.name === "phone") {
+    expect(chrome.left).toBe(0)
+    expect(chrome.right).toBe(chrome.viewport)
+    expect(chrome.top).toBe(chrome.headerBottom)
+  }
+})
+
+/** Range transitions and failed refreshes preserve numbers while naming which reading they came from. */
+test("By tool frames a retained range while updating, failing and retrying", async ({ page }, info) => {
+  let release = () => {}
+  const pending = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  let fail = true
+  await page.route("**/v1/connect/usage?*", async (route) => {
+    if (new URL(route.request().url()).searchParams.get("range") !== "30d") return route.continue()
+    await pending
+    if (fail) return route.fulfill({ status: 503, body: "private fixture transport detail" })
+    return route.continue()
+  })
+  try {
+    await page.goto("/?range=7d&timeZone=UTC#usage/by-tool")
+    const reading = page.locator(".usage-by-tool-reading")
+    await expect(reading).toContainText("last 7 days")
+    const total = await page.locator(".usage-by-tool-total").textContent()
+    await page.getByRole("radio", { name: "30 days", exact: true }).click()
+    await expect(page.getByRole("status").filter({ hasText: "Updating to 30 days" })).toHaveText(
+      "Updating to 30 days… showing the last 7 days"
+    )
+    await expect(page.locator(".usage-by-tool-total")).toHaveText(total ?? "")
+    const updating = page.locator(".usage-by-tool-updating")
+    expect(await updating.evaluate((element) => getComputedStyle(element).lineHeight)).toBe("19.5px")
+    expect(await updating.evaluate((element) => getComputedStyle(element).gap)).toBe("8px")
+    expect(await updating.locator("svg").evaluate((element) => element.getBoundingClientRect().width)).toBe(12)
+    const updatingBounds = await updating.boundingBox()
+    const retainedBounds = await page.locator(".usage-by-tool-total").boundingBox()
+    expect(updatingBounds).not.toBeNull()
+    expect(retainedBounds).not.toBeNull()
+    if (updatingBounds === null || retainedBounds === null) return
+    expect(retainedBounds.y - updatingBounds.y - updatingBounds.height).toBeCloseTo(20, 1)
+    release()
+    const notice = page.locator(".usage-by-tool-notice")
+    await expect(notice).toContainText("Couldn’t refresh")
+    expect(
+      await notice.locator(":scope > div > span:last-child").evaluate((element) => getComputedStyle(element).lineHeight)
+    ).toBe("21px")
+    await expect(notice).toContainText(/Previous reading \d\d:\d\d\. Retrying every 5 minutes\./)
+    await expect(reading).toContainText("last 7 days")
+    await expect(page.locator(".usage-details")).not.toContainText("private fixture transport detail")
+    const readingColors = await notice.locator("time").evaluate((element) => ({
+      time: getComputedStyle(element).color,
+      text: element.parentElement === null ? null : getComputedStyle(element.parentElement).color
+    }))
+    expect(readingColors.time).toBe(readingColors.text)
+    const retry = notice.getByRole("button", { name: "Retry", exact: true })
+    const retryStyle = await retry.evaluate((element) => {
+      const style = getComputedStyle(element)
+      return { size: style.fontSize, weight: style.fontWeight, height: element.getBoundingClientRect().height }
+    })
+    expect(retryStyle).toEqual({ size: "16px", weight: "430", height: info.project.name === "phone" ? 44 : 36 })
+    const noticeBounds = await notice.boundingBox()
+    const previousBounds = await page.locator(".usage-by-tool-total").boundingBox()
+    expect(noticeBounds).not.toBeNull()
+    expect(previousBounds).not.toBeNull()
+    if (noticeBounds === null || previousBounds === null) return
+    expect(previousBounds.y - noticeBounds.y - noticeBounds.height).toBeCloseTo(20, 1)
+    fail = false
+    await retry.click()
+    await expect(reading).toContainText("last 30 days")
+    await expect(notice).toHaveCount(0)
+    await expect(page.locator(".usage-by-tool-updating")).toHaveCount(0)
+  } finally {
+    release()
+  }
 })

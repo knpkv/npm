@@ -5,6 +5,7 @@ import type { FleetPendingApprovals, PendingApproval } from "../src/dashboard-mo
 import {
   dashboardHistoryState,
   dashboardPendingBadgeCount,
+  dashboardPendingNavigationBadge,
   dashboardPendingState,
   loadDashboardPendingPage,
   mergeDashboardHistoryPage,
@@ -95,14 +96,32 @@ describe("dashboard pending continuation state", () => {
       local: Array.from({ length: 8 }, (_, index) => record(`job-${String(index)}`))
     }
 
-    expect(dashboardPendingBadgeCount(partial)).toBeNull()
+    expect(dashboardPendingBadgeCount(partial, 3)).toBeNull()
     expect(
       dashboardPendingBadgeCount({
         ...emptyPage([]),
         failures: [{ host: "PI", reason: "unavailable" }]
-      })
+      }, 3)
     ).toBeNull()
-    expect(dashboardPendingBadgeCount(emptyPage([]))).toBe(0)
+    expect(dashboardPendingBadgeCount(emptyPage([]), 3)).toBe(0)
+  })
+
+  it("labels bounded navigation counts as exact, partial or previous and omits expired approvals", () => {
+    const page = { ...emptyPage([]), local: [record("job-live"), { ...record("job-expired"), approvalExpiresAt: 2 }] }
+    expect(dashboardPendingNavigationBadge(page, 3, false)).toEqual({ text: "1", label: "1 approval waiting" })
+    expect(dashboardPendingBadgeCount(page, 3)).toBe(1)
+    expect(dashboardPendingNavigationBadge({ ...page, nextCursors: [cursor("ALPHA", "more")] }, 3, false))
+      .toEqual({ text: "1+", label: "at least 1 approval waiting" })
+    expect(dashboardPendingNavigationBadge({ ...page, failures: [{ host: "PI", reason: "unavailable" }] }, 3, true))
+      .toEqual({ text: "1+", label: "Previous reading, at least 1 approval waiting" })
+    expect(dashboardPendingNavigationBadge(emptyPage([]), 3, false)).toBeUndefined()
+    expect(
+      dashboardPendingNavigationBadge({ ...emptyPage([]), failures: [{ host: "PI", reason: "unavailable" }] }, 3, false)
+    )
+      .toEqual({ text: "", label: "approvals unknown" })
+    expect(dashboardPendingNavigationBadge(emptyPage([cursor("ALPHA", "more")]), 3, false))
+      .toEqual({ text: "", label: "approvals unknown" })
+    expect(dashboardPendingNavigationBadge(emptyPage([]), 3, true)).toEqual({ text: "", label: "approvals unknown" })
   })
 
   it("ignores a stale page after a refreshed generation wins", () => {

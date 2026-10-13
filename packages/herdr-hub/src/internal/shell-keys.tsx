@@ -65,6 +65,15 @@ export const focusWhenShown = (id: string, deadline: number = performance.now() 
   let frame: number
   const focus = (now: number): void => {
     const element = document.getElementById(id)
+    const filters = element?.closest<HTMLElement>("[data-connect-home-filters]")
+    if (filters?.hidden === true) {
+      const reveal = filters.parentElement?.querySelector<HTMLButtonElement>("[data-connect-search-reveal]")
+      if (
+        reveal?.getAttribute("aria-expanded") === "false" &&
+        reveal.closest('[aria-hidden="true"], [inert], [hidden]') === null
+      )
+        reveal.click()
+    }
     if (element !== null && element.closest('[aria-hidden="true"], [inert], [hidden]') === null) element.focus()
     if (element !== null && document.activeElement === element) return
     if (now < deadline) frame = window.requestAnimationFrame(focus)
@@ -81,13 +90,20 @@ export const isEditableTarget = (target: EventTarget | null): boolean => {
 }
 
 /** Exact approvals win over their tab; modal portals own focus while their module slot is hidden. */
-export const focusModulePage = (module: string, page: string): (() => void) => {
+export const focusModulePage = (module: string, page: string, preserveOwnerFocus = false): (() => void) => {
   let cancelSearch: (() => void) | undefined
+  const previousFocus = document.activeElement
   const frame = window.requestAnimationFrame(() => {
     const slot = [...document.querySelectorAll<HTMLElement>("[data-module]")].find(
       (element) => element.dataset.module === module && element.hidden === false
     )
     if (slot !== undefined && slot.closest('[aria-hidden="true"], [inert]') !== null) return
+    if (
+      preserveOwnerFocus === true &&
+      document.activeElement !== previousFocus &&
+      slot?.contains(document.activeElement) === true
+    )
+      return
     const tab = [...(slot?.querySelectorAll<HTMLElement>('[role="tab"]') ?? [])].find(
       (element) => element.dataset.tabValue === page
     )

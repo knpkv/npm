@@ -1,5 +1,5 @@
 import { openPrivateSqlite, type PrivateDatabaseError, type PrivateSqlite } from "@knpkv/herdr-fleet/sqlite"
-import { Effect, Schema, Semaphore } from "effect"
+import { Clock, Effect, Schema, Semaphore } from "effect"
 import type { DatabaseSync, SQLOutputValue } from "node:sqlite"
 import { ConnectArchiveStoreError } from "./errors.js"
 import { initializePosts } from "./internal/post-database.js"
@@ -9,6 +9,7 @@ import {
   ConnectArchiveCursor,
   ConnectArchivePage,
   connectArchivePageMaxRecords,
+  connectArchiveWindowDays,
   LocalConnectAgents
 } from "./model.js"
 
@@ -41,6 +42,7 @@ const ArchiveRow = Schema.Struct({
   last_words_at: Schema.NullOr(Schema.Number)
 })
 const HostRow = Schema.Struct({ observed_at: Schema.Number })
+const NameRow = Schema.Struct({ name: ConnectAgent.fields.name })
 const failWith = (operation: string) => (cause: unknown) => new ConnectArchiveStoreError({ operation, cause })
 const fromPrivateDatabaseError = (error: PrivateDatabaseError) =>
   new ConnectArchiveStoreError({ operation: error.operation, cause: error.cause })
@@ -136,6 +138,9 @@ const recordObservation = (
      WHERE o.host = ? AND o.missing_reads >= 2 AND o.missing_since <= ?
      ON CONFLICT(host, agent_id) DO NOTHING`
   ).run(observation.observedAt, host, observation.observedAt - connectArchiveClosureDelayMillis)
+  database.prepare(`DELETE FROM connect_self_state WHERE host = ? AND agent_id IN (
+    SELECT agent_id FROM connect_agent_archive WHERE host = ?
+  )`).run(host, host)
 }
 
 /**
@@ -228,7 +233,27 @@ export class AgentArchiveStore {
     }))
   })
 
-  /** Newest closure first, then host and stable identity; the cursor names the last returned row. */
+  /** Latest remembered names, scoped to the requested host and identity, including closed agents. */
+  readonly namesFor = Effect.fn("AgentArchiveStore.namesFor")(function*(
+    this: AgentArchiveStore,
+    identities: ReadonlyArray<Pick<ConnectAgent, "host" | "id">>
+  ) {
+    return yield* this.#transactions.withPermits(1)(Effect.try({
+      try: () => {
+        const lookup = this.#database.prepare(
+          `SELECT name FROM connect_archive_observations WHERE host = ? AND agent_id = ?
+           UNION ALL SELECT name FROM connect_agent_archive WHERE host = ? AND agent_id = ? LIMIT 1`
+        )
+        return identities.flatMap(({ host, id }) => {
+          const row = lookup.get(host, id, host, id)
+          return row === undefined ? [] : [{ host, id, name: Schema.decodeUnknownSync(NameRow)(row).name }]
+        })
+      },
+      catch: failWith("namesFor")
+    }))
+  })
+
+  /** Page the current archive window, newest closure first; the cursor names the last returned row. */
   readonly page = Effect.fn("AgentArchiveStore.page")(function*(
     this: AgentArchiveStore,
     input: ConnectArchiveCursor | null = null
@@ -236,6 +261,7 @@ export class AgentArchiveStore {
     const cursor = yield* Schema.decodeUnknownEffect(Schema.NullOr(ConnectArchiveCursor))(input).pipe(
       Effect.mapError(failWith("page.cursor"))
     )
+    const cutoff = (yield* Clock.currentTimeMillis) - connectArchiveWindowDays * 86_400_000
     return yield* this.#transactions.withPermits(1)(Effect.try({
       try: () => {
         const columns =
@@ -243,13 +269,16 @@ export class AgentArchiveStore {
         const rows = cursor === null
           ? this.#database.prepare(
             `SELECT ${columns} FROM connect_agent_archive
+             WHERE closed_at >= ?
              ORDER BY closed_at DESC, host, agent_id LIMIT ?`
-          ).all(connectArchivePageMaxRecords + 1)
+          ).all(cutoff, connectArchivePageMaxRecords + 1)
           : this.#database.prepare(
             `SELECT ${columns} FROM connect_agent_archive
-             WHERE closed_at < ? OR (closed_at = ? AND (host > ? OR (host = ? AND agent_id > ?)))
+             WHERE closed_at >= ? AND
+               (closed_at < ? OR (closed_at = ? AND (host > ? OR (host = ? AND agent_id > ?))))
              ORDER BY closed_at DESC, host, agent_id LIMIT ?`
           ).all(
+            cutoff,
             cursor.closedAt,
             cursor.closedAt,
             cursor.host,

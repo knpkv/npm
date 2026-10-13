@@ -2,6 +2,7 @@ import { openPrivateSqlite, type PrivateSqlite } from "@knpkv/herdr-fleet/sqlite
 import { Effect, Schema, SchemaIssue, Semaphore } from "effect"
 import type { DatabaseSync, SQLOutputValue } from "node:sqlite"
 import { initializePosts } from "./internal/post-database.js"
+import { makeSelfStateMethods } from "./internal/self-state-store.js"
 import {
   Conflict,
   ConnectPost,
@@ -49,17 +50,22 @@ const prune = (database: DatabaseSync, now: number): void => {
   )`)
 }
 
-/** Bounded plain-text reports. Retries are keyed by authenticated host, stable agent ID and event ID. */
+/** Bounded reports and latest creature self-state. Post retries use authenticated host, stable agent ID and event ID. */
 export class AgentPostStore {
   readonly #database: DatabaseSync
   readonly #transactions: Semaphore.Semaphore
   readonly #secureFiles: PrivateSqlite["secureFiles"]
+  readonly selfUpdate: ReturnType<typeof makeSelfStateMethods>["update"]
+  readonly selfLatestMany: ReturnType<typeof makeSelfStateMethods>["latestMany"]
   readonly path: string
   private constructor(path: string, transactions: Semaphore.Semaphore, opened: PrivateSqlite) {
     this.path = path
     this.#database = opened.database
     this.#transactions = transactions
     this.#secureFiles = opened.secureFiles
+    const self = makeSelfStateMethods(opened.database, transactions, opened.secureFiles)
+    this.selfUpdate = self.update
+    this.selfLatestMany = self.latestMany
   }
   static readonly open = Effect.fn("AgentPostStore.open")(function*(path: string) {
     const opened = yield* openPrivateSqlite(path, { initialize: initializePosts }).pipe(

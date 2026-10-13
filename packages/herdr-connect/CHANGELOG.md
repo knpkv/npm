@@ -1,5 +1,49 @@
 # @knpkv/herdr-connect
 
+## 0.20.2
+
+### Patch Changes
+
+- [#866](https://github.com/knpkv/npm/pull/866) [`9904bb8`](https://github.com/knpkv/npm/commit/9904bb8648a2bbc8275a2dbb65354648c44a429d) Thanks [@konopkov](https://github.com/konopkov)! - Stop archive reads after ten seconds with a typed timeout and Retry, without restarting the deadline on directory polls. Limit the directory's configured-host hint to the first 256 machines in configuration order so host metadata stays within the page schema's bound.
+
+## 0.20.1
+
+### Patch Changes
+
+- [#864](https://github.com/knpkv/npm/pull/864) [`1823277`](https://github.com/knpkv/npm/commit/18232777eb388e16f75b2fed6b2445c1a4c10a71) Thanks [@konopkov](https://github.com/konopkov)! - Restore the Connect directory after a stable agent moves panes. A strictly newer trusted inventory observation can update its pane while preserving the same parent and relation, in the existing batch transaction. Keep stale, equal-time and durable observations from moving ownership, and log local inventory failures with only a step, validated agent ID and reason.
+
+## 0.20.0
+
+### Minor Changes
+
+- [#853](https://github.com/knpkv/npm/pull/853) [`463a39f`](https://github.com/knpkv/npm/commit/463a39fac06cd41205b4733ccce9a1649c852093) Thanks [@konopkov](https://github.com/konopkov)! - Add the URL-addressable Archived directory with bounded paging, loaded-record search, read-only closure details and static closed creatures.
+
+## 0.19.0
+
+### Minor Changes
+
+- [#852](https://github.com/knpkv/npm/pull/852) [`fd8fb68`](https://github.com/knpkv/npm/commit/fd8fb68c95cbb05ef206bf8e92683cc5f4023a71) Thanks [@konopkov](https://github.com/konopkov)! - Add stage notification controls for per-agent mutes and quiet hours in the user's time zone. Keep the last saved settings after failed changes and link devices with notifications off to Approvals. Let applications supply stage controls through the optional `ConnectSurface.stageFooter` prop. Render the muted notification status as one sentence matching the design.
+
+  Replace full-snapshot `PUT /v1/push/blocked-settings` with atomic `PATCH` intents for one agent's mute or quiet hours, so a stale device cannot overwrite another device's preferences. Queue mute toggles and quiet-hour reversions against their latest intended values. Enter after a queued Clear saves the visible time pair as the final intent without duplicate saves. Save valid drafts on backdrop and Close dismissal while keeping Escape as cancel. Preserve keyboard focus while editing times, and show devices with stale subscription keys as off until Approvals reconciles them.
+
+## 0.18.0
+
+### Minor Changes
+
+- [#858](https://github.com/knpkv/npm/pull/858) [`75cbd22`](https://github.com/knpkv/npm/commit/75cbd223d797c52021b0d13b0ef30b568379b289) Thanks [@konopkov](https://github.com/konopkov)! - Add optional configured `hosts` to fleet directory responses and `configuredHosts` to the directory view. Empty directories keep search and filters, and name configured hosts when supplied by the hub. Older responses remain supported without the hint.
+
+  Remember missing parents' display names through optional relationship `parentName` and archive name lookup, without treating those names as live identity. Keep a lone orphan's alert inline, while siblings share one missing-parent notice. Retain typed unavailable readings in `ConnectLimitsView.problems` for limits warnings.
+
+  Keep live directory rows available when archive name enrichment fails, with a warning in the server log. Keep disabled limits hidden after refresh failures, and identify an unavailable host when other host readings are present.
+
+  Match directory recovery, empty filters, orphan groups and pinned agents to the current design. Use commas in directory copy, 48px HTTP recovery and clear-search controls, compact timeout and scoped filter controls with 44px hit areas, and sticky pins with reserved footer space that leaves agent rows and footer actions clear. Cap phone pin pills at 144px and truncate only names, keeping state words visible with 12px end padding. Give directory reads a typed ten-second deadline and distinguish actual timeouts from HTTP, network and decoding failures; omit the Usage link for a generic limits request failure. Match secondary metadata, regular body text and inset family dividers. Keep the limits footer hidden until the first directory loads, while preserving it with retained stale rows.
+
+## 0.17.0
+
+### Minor Changes
+
+- [#859](https://github.com/knpkv/npm/pull/859) [`820b6b7`](https://github.com/knpkv/npm/commit/820b6b7c6dfbb7a6e4b25978233ec80d981ec7a5) Thanks [@konopkov](https://github.com/konopkov)! - Add agent-authored creature self-state to the authenticated directory, backed by the shared post database with partial updates, archive cleanup and rate limits. Add host-authorized relay me and the stdio relay_me MCP tool with shared current-pane resolution and transport.
+
 ## 0.16.0
 
 ### Minor Changes

@@ -6,13 +6,15 @@ import type {
   TerminalBusyError,
   TerminalConnector,
   TerminalProtocolError,
-  TerminalTransportError
+  TerminalTransportError,
+  TooManySelfUpdates
 } from "@knpkv/herdr-connect"
 import {
   AgentActivityStore,
   AgentArchiveStore,
   AgentPostStore,
   AgentRelationshipStore,
+  ConnectAgent,
   ConnectAgentCursor,
   ConnectArchiveCursor,
   ConnectPost,
@@ -124,7 +126,7 @@ import type { SanitizedJobRecord } from "./approval-request.js"
 import { sanitizeJobPayload, sanitizeJobRecord } from "./approval-request.js"
 import { resolveApprovalPage } from "./approval-url.js"
 import { authorize, authorizeLoopback, authorizeLoopbackPeer } from "./auth.js"
-import { BlockedPushSettings, StageHeartbeat } from "./blocked-push-model.js"
+import { BlockedPushMutation, StageHeartbeat } from "./blocked-push-model.js"
 import { loadBlockedPushObservations } from "./blocked-push-source.js"
 import { BlockedPushStore } from "./blocked-push-store.js"
 import { makeBlockedPushWorker } from "./blocked-push-worker.js"
@@ -147,6 +149,8 @@ import { readHostUsage, usageCache } from "./host-usage.js"
 import { dashboardPage } from "./internal/dashboard-page.js"
 import { type ListenerMode, listenerServesWork } from "./internal/listener.js"
 import { decodeRelayPostRequest } from "./internal/relay-post-validation.js"
+import { decodeRelaySelfBody } from "./internal/relay-self-validation.js"
+import { releaseTerminalScope } from "./internal/terminal-controller.js"
 import { relayScrollState, remoteTerminalUrl, terminalSelectionInput } from "./internal/terminal-selection.js"
 import {
   isRelayedScrollState,
@@ -181,7 +185,7 @@ import {
   PushSubscriptionRecord,
   PushSubscriptionRemoval
 } from "./model.js"
-import { fleetModule, todayModule, usageModule } from "./module-contract.js"
+import { connectModule, fleetHubModule, usageModule } from "./module-contract.js"
 import type { NeedsYouCandidate, NeedsYouIssue, NeedsYouProviderResult } from "./module-needs-you.js"
 import * as ModuleServer from "./module-server.js"
 import type { ModuleRouteFailure, ServerModule } from "./module-server.js"
@@ -289,6 +293,7 @@ export type UiAssets = {
 }
 
 type ApiError =
+  | TooManySelfUpdates
   | InvalidReport
   | UnboundAgent
   | Denied
@@ -412,6 +417,8 @@ const apiError = (error: ApiError): ApiErrorResponse => {
   switch (error._tag) {
     case "ModuleRouteFailure":
       return { status: error.status, body: { error: error.code } }
+    case "TooManySelfUpdates":
+      return { status: 429, body: { error: error._tag, retryAfterMillis: error.retryAfterMillis } }
     case "InvalidReport":
       return { status: 400, body: { error: error._tag, detail: error.detail } }
     case "UnboundAgent":
@@ -1811,7 +1818,7 @@ export const startHttpServer = async (
     const modules: ReadonlyArray<
       ServerModule<unknown, HttpClient.HttpClient | Tailscale | Crypto.Crypto | FileSystem.FileSystem | Path.Path>
     > = [
-      { descriptor: todayModule, handlers: Layer.succeed(ModuleServer.ModuleHandlers, { routes: [] }) },
+      { descriptor: connectModule, handlers: Layer.succeed(ModuleServer.ModuleHandlers, { routes: [] }) },
       { descriptor: usageModule, handlers: Layer.succeed(ModuleServer.ModuleHandlers, { routes: [] }) },
       makeCodeModule({
         host: config.host,
@@ -1820,7 +1827,7 @@ export const startHttpServer = async (
         codeHost: options.codeHost ?? null
       }),
       {
-        descriptor: fleetModule,
+        descriptor: fleetHubModule,
         handlers: Layer.effect(
           ModuleServer.ModuleHandlers,
           Effect.gen(function*() {
@@ -2402,18 +2409,24 @@ export const startHttpServer = async (
         closeSocket(socket, 4423, "agent already controlled")
         return
       }
+      const scope = Scope.makeUnsafe()
       terminalControllers.add(key)
-      const scope = await Effect.runPromise(Scope.make())
       let finalized = false
+      let released = false
       let finalizePromise: Promise<void> | undefined
       let idleTimer: NodeJS.Timeout | undefined
+      const releaseReservation = (): void => {
+        if (released) return
+        released = true
+        terminalControllers.delete(key)
+      }
       const finalize = async (): Promise<void> => {
-        if (finalizePromise !== undefined) return finalizePromise
+        if (finalized) return finalizePromise
         finalized = true
         if (idleTimer !== undefined) clearTimeout(idleTimer)
         finalizePromise = Effect.runPromise(
-          Scope.close(scope, Exit.void)
-        ).finally(() => terminalControllers.delete(key))
+          releaseTerminalScope(scope, workerScope, selection)
+        ).finally(releaseReservation)
         return finalizePromise
       }
       const finalizeFromSocket = (): void => {
@@ -2423,127 +2436,132 @@ export const startHttpServer = async (
           )
         )
       }
-      socket.once("close", finalizeFromSocket)
-      socket.once("error", finalizeFromSocket)
-      const openFiber = await Effect.runPromise(
-        Effect.forkIn(
-          Effect.result(Scope.provide(scope)(terminalConnector.open(selection))),
-          scope
+      try {
+        socket.once("close", finalizeFromSocket)
+        socket.once("error", finalizeFromSocket)
+        const openFiber = await Effect.runPromise(
+          Effect.forkIn(
+            Effect.result(Scope.provide(scope)(terminalConnector.open(selection))),
+            scope
+          )
         )
-      )
-      const openExit = await Effect.runPromise(Fiber.await(openFiber))
-      if (Exit.isFailure(openExit)) {
-        await finalize()
-        if (Cause.hasInterruptsOnly(openExit.cause)) return
-        await Effect.runPromise(Effect.failCause(openExit.cause))
-        return
-      }
-      const opened = openExit.value
-      if (Result.isFailure(opened)) {
-        await finalize()
-        closeSocket(
-          socket,
-          terminalCloseCode(opened.failure),
-          opened.failure._tag
-        )
-        return
-      }
-      if (finalized || socket.readyState !== WebSocketClient.OPEN) {
-        await finalize()
-        return
-      }
-      const session = opened.success
-      const inputQueue = await Effect.runPromise(
-        Queue.dropping<typeof TerminalClientCommand.Type>(64)
-      )
-      const inputLoop = Stream.fromQueue(inputQueue).pipe(
-        Stream.runForEach(session.send),
-        Effect.catch((error) => Effect.sync(() => closeSocket(socket, terminalCloseCode(error), error._tag)))
-      )
-      await Effect.runPromise(Effect.forkIn(inputLoop, scope))
-      const resetIdle = (): void => {
-        if (idleTimer !== undefined) clearTimeout(idleTimer)
-        idleTimer = setTimeout(
-          () => closeSocket(socket, 4408, "terminal idle timeout"),
-          30 * 60 * 1_000
-        )
-        idleTimer.unref()
-      }
-      resetIdle()
-      const readySignal = JSON.stringify(
-        Schema.decodeUnknownSync(TerminalServerSignal)({
-          type: "terminal.ready"
-        })
-      )
-      setImmediate(() => {
-        if (socket.readyState === WebSocketClient.OPEN) {
-          socket.send(readySignal)
-        }
-      })
-      socket.on("message", (data, isBinary) => {
-        if (isBinary) {
-          closeSocket(socket, 4400, "binary client frames are forbidden")
+        const openExit = await Effect.runPromise(Fiber.await(openFiber))
+        if (Exit.isFailure(openExit)) {
+          if (Cause.hasInterruptsOnly(openExit.cause)) return
+          await Effect.runPromise(Effect.failCause(openExit.cause))
           return
         }
-        resetIdle()
-        try {
-          const command = Schema.decodeUnknownSync(TerminalClientCommand)(
-            JSON.parse(data.toString())
+        const opened = openExit.value
+        if (Result.isFailure(opened)) {
+          closeSocket(
+            socket,
+            terminalCloseCode(opened.failure),
+            opened.failure._tag
           )
-          if (!Queue.offerUnsafe(inputQueue, command)) {
-            closeSocket(socket, 4429, "terminal input queue limit reached")
-          }
-        } catch {
-          closeSocket(socket, 4400, "invalid terminal command")
+          return
         }
-      })
-      const scrollSignals = makeLatestSignalSender({
-        bufferedAmount: () => socket.bufferedAmount,
-        isOpen: () => socket.readyState === WebSocketClient.OPEN,
-        send: (payload) => socket.send(payload)
-      }, 100)
-      socket.once("close", scrollSignals.dispose)
-      const eventLoop = Stream.runForEach(session.events, (event) =>
-        Effect.sync(() => {
-          if (socket.readyState !== WebSocketClient.OPEN) return
-          if (event.type === "terminal.frame") {
-            const payload = Buffer.from(event.bytes, "base64")
-            if (!terminalBufferCanAccept(socket.bufferedAmount, payload.byteLength)) {
-              closeSocket(socket, 4429, "terminal output backpressure limit hit")
-              return
-            }
-            socket.send(payload, { binary: true })
-          } else if (event.type === "terminal.scroll_state") {
-            // The pane's scroll position as the connector read it. Under backpressure the newest one
-            // waits for the buffer to drain; the connector reports only changes, so none may be lost.
-            relayScrollState(
-              selection,
-              JSON.stringify(Schema.decodeUnknownSync(TerminalServerSignal)(event)),
-              scrollSignals.offer
-            )
-          } else {
-            const payload = JSON.stringify(
-              Schema.decodeUnknownSync(TerminalServerSignal)({
-                type: "terminal.closed",
-                reason: "terminal ended"
-              })
-            )
-            if (!terminalBufferCanAccept(socket.bufferedAmount, Buffer.byteLength(payload))) {
-              closeSocket(socket, 4429, "terminal output backpressure limit hit")
-              return
-            }
-            socket.send(payload)
-            closeSocket(socket, 1000, "terminal closed")
-          }
-        })).pipe(
-          Effect.tap(() => Effect.sync(() => closeSocket(socket, 1000, "terminal ended"))),
+        if (finalized || socket.readyState !== WebSocketClient.OPEN) {
+          return
+        }
+        const session = opened.success
+        const inputQueue = await Effect.runPromise(
+          Queue.dropping<typeof TerminalClientCommand.Type>(64)
+        )
+        const inputLoop = Stream.fromQueue(inputQueue).pipe(
+          Stream.runForEach(session.send),
           Effect.catch((error) => Effect.sync(() => closeSocket(socket, terminalCloseCode(error), error._tag)))
         )
-      const eventFiber = await Effect.runPromise(
-        Effect.forkIn(eventLoop, scope)
-      )
-      await Effect.runPromise(Fiber.await(eventFiber))
-      await finalize()
+        await Effect.runPromise(Effect.forkIn(inputLoop, scope))
+        const resetIdle = (): void => {
+          if (idleTimer !== undefined) clearTimeout(idleTimer)
+          idleTimer = setTimeout(
+            () => closeSocket(socket, 4408, "terminal idle timeout"),
+            30 * 60 * 1_000
+          )
+          idleTimer.unref()
+        }
+        resetIdle()
+        const readySignal = JSON.stringify(
+          Schema.decodeUnknownSync(TerminalServerSignal)({
+            type: "terminal.ready"
+          })
+        )
+        setImmediate(() => {
+          if (socket.readyState === WebSocketClient.OPEN) {
+            socket.send(readySignal)
+          }
+        })
+        socket.on("message", (data, isBinary) => {
+          if (finalized || socket.readyState !== WebSocketClient.OPEN) return
+          if (isBinary) {
+            closeSocket(socket, 4400, "binary client frames are forbidden")
+            return
+          }
+          resetIdle()
+          try {
+            const command = Schema.decodeUnknownSync(TerminalClientCommand)(
+              JSON.parse(data.toString())
+            )
+            if (!Queue.offerUnsafe(inputQueue, command)) {
+              closeSocket(socket, 4429, "terminal input queue limit reached")
+            }
+          } catch {
+            closeSocket(socket, 4400, "invalid terminal command")
+          }
+        })
+        const scrollSignals = makeLatestSignalSender({
+          bufferedAmount: () => socket.bufferedAmount,
+          isOpen: () => socket.readyState === WebSocketClient.OPEN,
+          send: (payload) => socket.send(payload)
+        }, 100)
+        socket.once("close", scrollSignals.dispose)
+        const eventLoop = Stream.runForEach(session.events, (event) =>
+          Effect.sync(() => {
+            if (socket.readyState !== WebSocketClient.OPEN) return
+            if (event.type === "terminal.frame") {
+              const payload = Buffer.from(event.bytes, "base64")
+              if (!terminalBufferCanAccept(socket.bufferedAmount, payload.byteLength)) {
+                closeSocket(socket, 4429, "terminal output backpressure limit hit")
+                return
+              }
+              socket.send(payload, { binary: true })
+            } else if (event.type === "terminal.scroll_state") {
+              // The pane's scroll position as the connector read it. Under backpressure the newest one
+              // waits for the buffer to drain; the connector reports only changes, so none may be lost.
+              relayScrollState(
+                selection,
+                JSON.stringify(Schema.decodeUnknownSync(TerminalServerSignal)(event)),
+                scrollSignals.offer
+              )
+            } else {
+              const payload = JSON.stringify(
+                Schema.decodeUnknownSync(TerminalServerSignal)({
+                  type: "terminal.closed",
+                  reason: "terminal ended"
+                })
+              )
+              if (!terminalBufferCanAccept(socket.bufferedAmount, Buffer.byteLength(payload))) {
+                closeSocket(socket, 4429, "terminal output backpressure limit hit")
+                return
+              }
+              socket.send(payload)
+              closeSocket(socket, 1000, "terminal closed")
+            }
+          })).pipe(
+            Effect.tap(() => Effect.sync(() => closeSocket(socket, 1000, "terminal ended"))),
+            Effect.catch((error) => Effect.sync(() => closeSocket(socket, terminalCloseCode(error), error._tag)))
+          )
+        const eventFiber = await Effect.runPromise(
+          Effect.forkIn(eventLoop, scope)
+        )
+        await Effect.runPromise(Fiber.await(eventFiber))
+      } catch (error) {
+        closeSocket(socket, 4503, "terminal unavailable")
+        throw error
+      } finally {
+        closeSocket(socket, 1000, "terminal ended")
+        await finalize()
+      }
     }
 
     const proxyTerminal = async (
@@ -2698,7 +2716,7 @@ export const startHttpServer = async (
             json(response, 503, { error: "starting" })
             return
           }
-          if (url.pathname === "/v1/connect/posts" && mode !== "serve") {
+          if ((url.pathname === "/v1/connect/posts" || url.pathname === "/v1/connect/me") && mode !== "serve") {
             json(response, 403, { error: "Denied" })
             return
           }
@@ -3446,14 +3464,14 @@ export const startHttpServer = async (
               )
               return
             }
-            if (request.method === "PUT") {
+            if (request.method === "PATCH") {
               await respond(
                 response,
                 Effect.gen(function*() {
                   const who = yield* authorized
                   yield* sameOrigin(request, expectedOrigin())
-                  const settings = yield* readJson(request, BlockedPushSettings)
-                  return yield* blockedPushStore.putSettings(who, settings).pipe(
+                  const mutation = yield* readJson(request, BlockedPushMutation)
+                  return yield* blockedPushStore.mutateSettings(who, mutation).pipe(
                     Effect.mapError(() => new Unavailable({ operation: "push.settings" }))
                   )
                 })
@@ -3679,11 +3697,79 @@ export const startHttpServer = async (
                     })),
                     { store: archiveStore, observedAt, posts: postStore }
                   )
-                  return yield* pageFleetConnectAgents(directory, cursor)
+                  return yield* pageFleetConnectAgents(
+                    { ...directory, hosts: config.machines.slice(0, 256).map(({ host }) => host) },
+                    cursor
+                  )
                 })
               )
             )
             return
+          }
+
+          const resolveReporter = Effect.fn("Connect.resolveReporter")(function*() {
+            if (header(request, "origin") !== undefined) {
+              yield* sameOrigin(request, expectedOrigin()).pipe(Effect.mapError(() => new Denied()))
+            }
+            const address = request.socket.remoteAddress
+            if (address === undefined) return yield* new Denied()
+            const tailscale = yield* Tailscale
+            const identity = yield* tailscale.whois(address).pipe(
+              Effect.mapError(() => new Unavailable({ operation: "posts.whois" }))
+            )
+            yield* authorizeWhois(identity, config.allowedUsers, null).pipe(Effect.mapError(() => new Denied()))
+            const machine = config.machines.find(({ nodeId }) => nodeId === identity.Node.StableID)
+            if (machine === undefined) return yield* new Denied()
+            return Effect.fn("Connect.bindReporter")(function*(agentId: string) {
+              const observedAt = now()
+              const inventory = yield* (machine.host.toLowerCase() === config.host.toLowerCase()
+                ? localConnectAgents(config, service, activityStore, relationshipStore, observedAt).pipe(
+                  Effect.provideService(Crypto.Crypto, cryptoService)
+                )
+                : Effect.gen(function*() {
+                  const peers = yield* fleetPeers(config)
+                  const peer = peers.find(({ host }) => host.toLowerCase() === machine.host.toLowerCase())
+                  if (peer === undefined) return yield* new Unavailable({ operation: "posts.peer" })
+                  return yield* fetchPeerConnectAgents({
+                    host: peer.host,
+                    agentsUrl: peer.connectAgentsUrl,
+                    online: peer.online,
+                    terminalUrl: peer.terminalUrl
+                  })
+                })).pipe(Effect.mapError(() => new Unavailable({ operation: "posts.inventory" })))
+              if (inventory.complete !== true) return yield* new Unavailable({ operation: "posts.inventory" })
+              if (!inventory.agents.some((agent) => agent.id === agentId)) {
+                return yield* new UnboundAgent({ agentId })
+              }
+              return { host: machine.host, agentId, observedAt }
+            })
+          })
+
+          if (url.pathname === "/v1/connect/me") {
+            if (mode !== "serve") {
+              json(response, 403, { error: "Denied" })
+              return
+            }
+            if (request.method === "POST") {
+              await respond(
+                response,
+                Effect.gen(function*() {
+                  const bindReporter = yield* resolveReporter()
+                  const agentId = yield* Schema.decodeUnknownEffect(ConnectAgent.fields.id)(
+                    header(request, "x-herdr-agent-id")
+                  ).pipe(
+                    Effect.mapError(() => new UnboundAgent({ agentId: "current-pane" }))
+                  )
+                  const target = yield* bindReporter(agentId)
+                  const input = yield* readJson(request, Schema.Unknown).pipe(
+                    Effect.mapError((error) => new InvalidReport({ detail: error.detail }))
+                  )
+                  const body = yield* decodeRelaySelfBody(input)
+                  return yield* postStore.selfUpdate(target.host, target.agentId, body, target.observedAt)
+                })
+              )
+              return
+            }
           }
 
           if (url.pathname === "/v1/connect/posts") {
@@ -3695,43 +3781,13 @@ export const startHttpServer = async (
               await respond(
                 response,
                 Effect.gen(function*() {
-                  if (header(request, "origin") !== undefined) {
-                    yield* sameOrigin(request, expectedOrigin()).pipe(Effect.mapError(() => new Denied()))
-                  }
-                  const address = request.socket.remoteAddress
-                  if (address === undefined) return yield* new Denied()
-                  const tailscale = yield* Tailscale
-                  const identity = yield* tailscale.whois(address).pipe(
-                    Effect.mapError(() => new Unavailable({ operation: "posts.whois" }))
-                  )
-                  yield* authorizeWhois(identity, config.allowedUsers, null).pipe(Effect.mapError(() => new Denied()))
-                  const machine = config.machines.find(({ nodeId }) => nodeId === identity.Node.StableID)
-                  if (machine === undefined) return yield* new Denied()
+                  const bindReporter = yield* resolveReporter()
                   const input = yield* readJson(request, Schema.Unknown).pipe(
                     Effect.mapError((error) => new InvalidReport({ detail: error.detail }))
                   )
                   const body = yield* decodeRelayPostRequest(input)
-                  const observedAt = now()
-                  const inventory = yield* (machine.host.toLowerCase() === config.host.toLowerCase()
-                    ? localConnectAgents(config, service, activityStore, relationshipStore, observedAt).pipe(
-                      Effect.provideService(Crypto.Crypto, cryptoService)
-                    )
-                    : Effect.gen(function*() {
-                      const peers = yield* fleetPeers(config)
-                      const peer = peers.find(({ host }) => host.toLowerCase() === machine.host.toLowerCase())
-                      if (peer === undefined) return yield* new Unavailable({ operation: "posts.peer" })
-                      return yield* fetchPeerConnectAgents({
-                        host: peer.host,
-                        agentsUrl: peer.connectAgentsUrl,
-                        online: peer.online,
-                        terminalUrl: peer.terminalUrl
-                      })
-                    })).pipe(Effect.mapError(() => new Unavailable({ operation: "posts.inventory" })))
-                  if (inventory.complete !== true) return yield* new Unavailable({ operation: "posts.inventory" })
-                  if (!inventory.agents.some((agent) => agent.id === body.agentId)) {
-                    return yield* new UnboundAgent({ agentId: body.agentId })
-                  }
-                  return yield* postStore.post(machine.host, body.agentId, body, observedAt)
+                  const target = yield* bindReporter(body.agentId)
+                  return yield* postStore.post(target.host, target.agentId, body, target.observedAt)
                 })
               )
               return

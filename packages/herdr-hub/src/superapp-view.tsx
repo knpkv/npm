@@ -12,7 +12,8 @@ import {
   type ReactNode
 } from "react"
 import { HubRelay, type HubRelayConversation } from "./hub-relay.js"
-import { hubModuleLinkTarget } from "./internal/hub-module-links.js"
+import { hubModuleLinkTarget, hubModuleUrl } from "./internal/hub-module-links.js"
+import { dashboardRefreshTime } from "./internal/dashboard-refresh.js"
 import { ShellIcon } from "./internal/shell-icon.js"
 import { RelayChefMark } from "./internal/relay-chef-mark.js"
 import { ShortcutsDialog, focusWhenShown, focusModulePage, isEditableTarget } from "./internal/shell-keys.js"
@@ -34,7 +35,7 @@ interface ShellLocation {
   readonly url: URL
   readonly destination: ModuleDestination
   readonly error: string | null
-  readonly focus: "deferred" | "page" | "search" | null
+  readonly focus: "deferred" | "history" | "page" | "search" | null
 }
 
 const ShellHistoryEntry = Schema.Struct({ openedFrom: Schema.String, document: Schema.String })
@@ -56,11 +57,12 @@ const historyHref = (source: URL, descriptors: ReadonlyArray<ModuleDescriptor>):
 
 /** Ordinary document anchors keep their URL and use the landing page behind them. */
 const shellLocation = (
-  source: URL,
+  incoming: URL,
   descriptors: ReadonlyArray<ModuleDescriptor>,
   landing: ModuleDestination,
   anchorFallback: ModuleDestination = landing
 ): ShellLocation => {
+  const source = hubModuleUrl(incoming, descriptors)
   const legacyWorkAnchor = source.hash === "#work-selected-goal" && source.searchParams.get("tab") === "work"
   if (
     source.hash !== "" &&
@@ -92,12 +94,14 @@ const ModuleSlot = ({
   closeSelection,
   location,
   navigate,
+  openHostAccess,
   view
 }: {
   readonly view: ModuleViews<ModuleDescriptor>
   readonly location: ShellLocation
   readonly navigate: ModulePageMount["navigate"]
   readonly closeSelection: ModulePageMount["closeSelection"]
+  readonly openHostAccess: () => void
 }): ReactElement => {
   const active = location.error === null && location.destination.module === view.descriptor.id
   const [saved, setSaved] = useState({ page: view.descriptor.defaultPage, search: "" })
@@ -108,10 +112,15 @@ const ModuleSlot = ({
     throw new ModuleRegistrationError({ module: view.descriptor.id, reason: "browser_mismatch" })
   return (
     <section data-module={view.descriptor.id} hidden={!active}>
-      {renderPage(new URLSearchParams(selected.search), { active, navigate, closeSelection })}
+      {renderPage(new URLSearchParams(selected.search), { active, navigate, closeSelection, openHostAccess })}
     </section>
   )
 }
+
+/** Bootstrap/last-success readings stay visible while reconnecting; no reading is unavailable. */
+export type SuperappSession =
+  | { readonly access: "tailscale" | "loopback"; readonly connection: "connected" | "unavailable" }
+  | { readonly access: "tailscale" | "loopback"; readonly connection: "stale"; readonly observedAt: number }
 
 /** The canonical hub owns module history, shared chrome and one Relay conversation. */
 export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<ModuleDescriptor>>>({
@@ -122,14 +131,23 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
   modules,
   notifications,
   onLocationChange,
-  relay
+  primaryModules,
+  relay,
+  session,
+  terminalOwnsKeys = false
 }: {
   readonly modules: Views
   readonly landing: NoInfer<ModuleDestination<Views[number]["descriptor"]>>
   /** Installed modules shown directly on the phone bar; defaults to every installed module. */
   readonly mobileModules?: ReadonlyArray<NoInfer<Views[number]["descriptor"]["id"]>>
+  /** Installed destinations above the desktop divider; defaults to one flat group. */
+  readonly primaryModules?: ReadonlyArray<NoInfer<Views[number]["descriptor"]["id"]>>
   readonly host: string
   readonly hostCount: number
+  /** Access and connectivity come from the composition, never inferred from the host label. */
+  /** Defaults false. An active connected Connect terminal reserves summon keys and hides/inerts shell chrome until it exits. Home directory itself does neither. */
+  readonly terminalOwnsKeys?: boolean
+  readonly session: SuperappSession
   readonly notifications: ReactNode
   readonly relay?: HubRelayConversation
   /** Keep existing product selection owners synchronized before the route paints. */
@@ -153,20 +171,6 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
     readonly closing: string
     readonly startedAt: number
   } | null>(null)
-  const [visited, setVisited] = useState<Readonly<Record<string, { readonly page: string; readonly search: string }>>>(
-    {}
-  )
-  useLayoutEffect(() => {
-    if (location.error !== null) return
-    setVisited((previous) => {
-      const saved = previous[location.destination.module]
-      if (saved?.page === location.destination.page && saved.search === location.url.search) return previous
-      return {
-        ...previous,
-        [location.destination.module]: { page: location.destination.page, search: location.url.search }
-      }
-    })
-  }, [location])
   const [panel, setPanel] = useState<{ readonly page: "modules" | "notifications" | "hosts"; readonly open: boolean }>({
     page: "modules",
     open: false
@@ -216,7 +220,7 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
   const navigate = (
     href: string,
     history: "push" | "replace",
-    focus: Exclude<ShellLocation["focus"], "deferred"> = "page"
+    focus: Exclude<ShellLocation["focus"], "deferred" | "history"> = "page"
   ): void => {
     const current = new URL(window.location.href)
     const target = hubModuleLinkTarget(
@@ -285,7 +289,12 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
     navigate(parentHref, "replace", null)
   }
   const cancelLocationFocus = useRef<(() => void) | null>(null)
+  const previousFocusDestination = useRef(location.destination)
+  // Schedule before child activation effects claim focus, so the arrival RAF can preserve that claim.
   useLayoutEffect(() => {
+    const previous = previousFocusDestination.current
+    previousFocusDestination.current = location.destination
+    const arrival = previous.module !== location.destination.module || previous.page !== location.destination.page
     // Query repairs retain the pending arrival focus, but never start another focus request.
     if (location.focus === null) return
     cancelLocationFocus.current?.()
@@ -293,12 +302,16 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
     if (location.focus === "search") {
       cancelLocationFocus.current = focusWhenShown("connect-agent-search")
     }
-    if (location.focus === "page")
-      cancelLocationFocus.current = focusModulePage(location.destination.module, location.destination.page)
+    if (location.focus === "page" || location.focus === "history")
+      cancelLocationFocus.current = focusModulePage(
+        location.destination.module,
+        location.destination.page,
+        arrival || location.focus === "history"
+      )
   }, [location])
   useLayoutEffect(() => () => cancelLocationFocus.current?.(), [])
   useEffect(() => {
-    const read = (): void => {
+    const read = (event: Event): void => {
       const url = new URL(window.location.href)
       const closing = pendingSelectionClose.current?.parent === historyHref(url, descriptors)
       pendingSelectionClose.current = null
@@ -310,7 +323,8 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
           next.error === previous.error
         )
           return next.url.href === previous.url.href && next.url.href === url.href ? previous : { ...next, focus: null }
-        return closing ? { ...next, focus: null } : next
+        if (closing) return { ...next, focus: null }
+        return event.type === "popstate" && next.focus === "page" ? { ...next, focus: "history" } : next
       })
     }
     window.addEventListener("popstate", read)
@@ -341,7 +355,7 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
       const route = Result.isSuccess(target) ? readModuleRoute(target.success, descriptors) : null
       const samePage =
         (anchor.closest<HTMLElement>("[data-module]")?.dataset.module === location.destination.module ||
-          anchor.closest('[aria-label="Module picker"]') !== null) &&
+          anchor.closest('[aria-label="More modules"]') !== null) &&
         route !== null &&
         Result.isSuccess(route) &&
         location.error === null &&
@@ -370,13 +384,27 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
         setShortcutsOpen(true)
         return
       }
-      const fleet = descriptors.find((module) => module.id === "fleet")
-      if (fleet === undefined) return
+      const targetModule =
+        next.shortcut._tag === "focus_agent_search" || next.shortcut.tab === "connect"
+          ? (descriptors.find((module) => module.id === "connect") ??
+            descriptors.find((module) => module.id === "fleet"))
+          : next.shortcut.tab === "usage"
+            ? (descriptors.find((module) => module.id === "usage") ??
+              descriptors.find((module) => module.id === "fleet"))
+            : descriptors.find((module) => module.id === "fleet")
+      if (targetModule === undefined) return
       event.preventDefault()
-      const page = next.shortcut._tag === "focus_agent_search" ? "connect" : next.shortcut.tab
+      const page =
+        next.shortcut._tag === "focus_agent_search" || next.shortcut.tab === "connect"
+          ? targetModule.id === "connect"
+            ? targetModule.defaultPage
+            : "connect"
+          : next.shortcut.tab === "usage" && targetModule.id === "usage"
+            ? targetModule.defaultPage
+            : next.shortcut.tab
       navigate(
-        moduleHref(fleet, page),
-        location.destination.module === "fleet" ? "replace" : "push",
+        moduleHref(targetModule, page),
+        location.destination.module === targetModule.id ? "replace" : "push",
         next.shortcut._tag === "focus_agent_search" ? "search" : "page"
       )
     }
@@ -417,51 +445,66 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
   const landingModule = descriptors.find((module) => module.id === landing.module)
   if (landingModule === undefined)
     throw new ModuleRegistrationError({ module: landing.module, reason: "missing_default" })
-  const moduleLink = (module: ModuleDescriptor) => (
-    <a
-      aria-label={module.label}
-      aria-current={location.error === null && module.id === location.destination.module ? "page" : undefined}
-      href={moduleHref(
-        module,
-        visited[module.id]?.page ?? module.defaultPage,
-        new URLSearchParams(visited[module.id]?.search)
-      )}
-      key={module.id}
-    >
-      {modules.find((view) => view.descriptor.id === module.id)?.navigationIcon ?? (
-        <ShellIcon name={module.id === "fleet" ? "fleet" : "modules"} />
-      )}
-      <span>{module.label}</span>
-    </a>
+  const moduleLink = (module: ModuleDescriptor) => {
+    const view = modules.find((view) => view.descriptor.id === module.id)
+    const badge = view?.navigationBadge
+    return (
+      <a
+        aria-label={badge === undefined ? module.label : `${module.label}, ${badge.label}`}
+        aria-current={location.error === null && module.id === location.destination.module ? "page" : undefined}
+        data-secondary={primaryModules !== undefined && !primaryModules.includes(module.id) ? true : undefined}
+        href={moduleHref(module, module.defaultPage)}
+        key={module.id}
+      >
+        {view?.navigationIcon ?? <ShellIcon name={module.id === "fleet" ? "fleet" : "modules"} />}
+        <span>{module.label}</span>
+        {badge === undefined || badge.text === "" ? null : (
+          <span className="superapp-module-badge" aria-hidden="true">
+            {badge.text}
+          </span>
+        )}
+      </a>
+    )
+  }
+  const primaryDescriptors = descriptors.filter(
+    (module) => primaryModules === undefined || primaryModules.includes(module.id)
   )
-  const links = descriptors.map(moduleLink)
+  const secondaryDescriptors = descriptors.filter((module) => !primaryDescriptors.includes(module))
   const mobileDescriptors = descriptors.filter(
     (module) => mobileModules === undefined || mobileModules.includes(module.id)
   )
   const offBarModule =
     currentModule !== undefined && !mobileDescriptors.some((module) => module.id === currentModule.id)
+  const terminalActive = terminalOwnsKeys && location.error === null && location.destination.module === "connect"
   return (
     <PortalProvider>
       <div className="superapp-shell">
-        <header className="superapp-header" ref={header}>
-          {relay === undefined ? (
-            <span className="superapp-brand">
-              <RelayChefMark />
-              Relay
-            </span>
-          ) : (
+        <header className="superapp-header" ref={header} hidden={terminalActive} inert={terminalActive}>
+          <a
+            className="superapp-brand"
+            href={moduleHref(landingModule, landing.page)}
+            aria-label="Relay home"
+            title="Home"
+          >
+            <RelayChefMark />
+          </a>
+          <strong className="superapp-phone-title" aria-hidden="true">
+            {location.error === null ? currentModule?.label : "Page not found"}
+            {currentPage?.showInPhoneTitle === true ? <span> {currentPage.label}</span> : null}
+          </strong>
+          {relay === undefined ? null : (
             <HubRelay
               relay={relay}
-              launcherLabels={{ desktop: "Ask Relay", phone: "Relay" }}
+              launcherLabels={{ desktop: "Ask Relay", phone: "Ask Relay" }}
               launcherMark="chef"
               terminalOwnsKeys={
                 location.error === null &&
-                location.destination.module === "fleet" &&
-                location.destination.page === "connect"
+                ((location.destination.module === "connect" && terminalOwnsKeys) ||
+                  (location.destination.module === "fleet" && location.destination.page === "connect"))
               }
             />
           )}
-          <nav aria-label="Breadcrumb" className="superapp-breadcrumb" data-route-found={location.error === null}>
+          <nav aria-label="Current page" className="superapp-breadcrumb" data-route-found={location.error === null}>
             <span className="superapp-breadcrumb-root">Relay</span>
             <span aria-hidden="true" className="superapp-breadcrumb-root">
               /
@@ -502,21 +545,68 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
             <ShellIcon name="notifications" />
           </button>
         </header>
-        <nav aria-label="Modules" className="superapp-sidebar">
-          <div className="superapp-sidebar-brand">
+        <nav aria-label="Modules" className="superapp-sidebar" hidden={terminalActive} inert={terminalActive}>
+          <a
+            className="superapp-sidebar-brand"
+            href={moduleHref(landingModule, landing.page)}
+            aria-label="Relay home"
+            title="Home"
+          >
             <RelayChefMark />
             <div>
               <strong>Relay</strong>
-              <p>Ask anything about your work</p>
             </div>
+          </a>
+          <div className="superapp-module-nav">
+            {primaryDescriptors.map(moduleLink)}
+            {secondaryDescriptors.length === 0 ? null : <span className="superapp-nav-divider" role="separator" />}
+            {secondaryDescriptors.map(moduleLink)}
           </div>
-          {links}
-          <button type="button" className="superapp-control" onClick={() => openPanel("modules")}>
-            <ShellIcon name="modules" /> All modules
+          <button
+            type="button"
+            className="superapp-control superapp-settings"
+            aria-haspopup="dialog"
+            aria-expanded={panel.open && panel.page === "modules"}
+            onClick={() => openPanel("modules")}
+          >
+            <ShellIcon name="host" /> Settings
           </button>
-          <div className="superapp-session" title={`Session on ${host}`}>
-            <span>Session on {host}</span>
-            <small>Tailscale access</small>
+          <div className="superapp-session" data-state={session.connection}>
+            <span className="superapp-session-avatar" aria-hidden="true">
+              <ShellIcon name="host" />
+            </span>
+            <span aria-hidden="true">
+              Session on {host}
+              <small>
+                {session.connection === "connected" ? (
+                  session.access === "loopback" ? (
+                    "Local access"
+                  ) : (
+                    "Tailscale access"
+                  )
+                ) : session.connection === "stale" ? (
+                  <>
+                    Reconnecting, last seen{" "}
+                    <time dateTime={new Date(session.observedAt).toISOString()}>
+                      {dashboardRefreshTime(session.observedAt)}
+                    </time>
+                  </>
+                ) : (
+                  "Hub not reachable"
+                )}
+              </small>
+            </span>
+            <span className="superapp-session-announcement">
+              Session on {host}.{" "}
+              {session.connection === "connected"
+                ? `${session.access === "loopback" ? "Local access" : "Tailscale access"}, connected.`
+                : session.connection === "stale"
+                  ? `Reconnecting; last seen ${dashboardRefreshTime(session.observedAt)}.`
+                  : "Hub not reachable."}
+            </span>
+            {session.connection === "connected" ? (
+              <span className="superapp-session-online" data-state="connected" aria-hidden="true" />
+            ) : null}
           </div>
         </nav>
         <main className="superapp-main" id="main" tabIndex={-1}>
@@ -540,19 +630,27 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
               location={location}
               navigate={navigate}
               closeSelection={closeSelection}
+              openHostAccess={() => openPanel("hosts")}
             />
           ))}
         </main>
-        <nav aria-label="Mobile modules" className="superapp-bottom" ref={bottomBar}>
+        <nav
+          aria-label="Mobile modules"
+          className="superapp-bottom"
+          ref={bottomBar}
+          hidden={terminalActive}
+          inert={terminalActive}
+        >
           {mobileDescriptors.map(moduleLink)}
           <button
             type="button"
             className="superapp-control"
             aria-current={offBarModule ? "page" : undefined}
-            aria-label={offBarModule ? `All modules, current module ${currentModule.label}` : undefined}
+            aria-expanded={panel.open && panel.page === "modules"}
+            aria-label={offBarModule ? `More, current module ${currentModule.label}` : undefined}
             onClick={() => openPanel("modules")}
           >
-            <ShellIcon name="modules" /> All modules
+            <ShellIcon name="modules" /> <span>More</span>
           </button>
         </nav>
         <Dialog.Root
@@ -562,8 +660,7 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
           }}
         >
           <Dialog.Content
-            title={panel.page === "modules" ? "Your modules" : panel.page === "hosts" ? "Hosts" : "Notifications"}
-            {...(panel.page === "modules" ? { description: "One Relay session. Each tool keeps its own pages." } : {})}
+            title={panel.page === "modules" ? "More" : panel.page === "hosts" ? "Hosts" : "Notifications"}
             className="superapp-dialog"
             restoreFocus={restorePanelFocus}
           >
@@ -573,29 +670,40 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
               />
             </span>
             {panel.page === "modules" ? (
-              <nav aria-label="Module picker">
-                {descriptors.map((module) => (
-                  <a
-                    key={module.id}
-                    href={moduleHref(
-                      module,
-                      visited[module.id]?.page ?? module.defaultPage,
-                      new URLSearchParams(visited[module.id]?.search)
-                    )}
-                    aria-current={
-                      location.error === null && module.id === location.destination.module ? "page" : undefined
-                    }
-                  >
-                    {modules.find((view) => view.descriptor.id === module.id)?.navigationIcon ?? (
-                      <ShellIcon name={module.id === "fleet" ? "fleet" : "modules"} />
-                    )}
-                    <span>
-                      <strong>{module.label}</strong>
-                      <small>{module.pages.map((page) => page.label).join(", ")}</small>
-                    </span>
-                  </a>
-                ))}
-              </nav>
+              <div className="superapp-more">
+                <nav aria-label="More modules">
+                  {descriptors
+                    .filter((module) => !mobileDescriptors.includes(module))
+                    .map((module) => (
+                      <a
+                        key={module.id}
+                        href={moduleHref(module, module.defaultPage)}
+                        aria-current={
+                          location.error === null && module.id === location.destination.module ? "page" : undefined
+                        }
+                      >
+                        {modules.find((view) => view.descriptor.id === module.id)?.navigationIcon ?? (
+                          <ShellIcon name={module.id === "fleet" ? "fleet" : "modules"} />
+                        )}
+                        <span>
+                          <strong>{module.label}</strong>
+                          <small>{module.pages.map((page) => page.label).join(", ")}</small>
+                        </span>
+                      </a>
+                    ))}
+                </nav>
+                <section aria-labelledby="superapp-settings-heading">
+                  <h3 id="superapp-settings-heading">Settings</h3>
+                  <button type="button" onClick={() => openPanel("hosts")}>
+                    <span>Host access</span>
+                    <small>{hostLabel}</small>
+                  </button>
+                  <button type="button" onClick={() => openPanel("notifications")}>
+                    <span>Notifications</span>
+                    <small>Approvals and blocked agents</small>
+                  </button>
+                </section>
+              </div>
             ) : panel.page === "hosts" ? (
               <p>
                 {host}. {hostLabel}.

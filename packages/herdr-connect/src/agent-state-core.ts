@@ -1,7 +1,7 @@
 /**
  * The one state language for agents, shared by Connect's directory and the hub. Each herdr agent
  * state maps to a word, an icon, a tone, whether it moves, and the Status filter bucket it counts in.
- * Rows and filters read only this module, so a row never looks idle while its filter says it needs you.
+ * Rows and filters read this module with an explicit Fleet, Home or push policy for incomplete evidence.
  *
  * Only work in progress moves (and only with motion allowed); every settled state has a still,
  * distinct icon, so the state never rests on colour alone.
@@ -60,14 +60,45 @@ const knownAgentStatePresentation = (state: string): AgentStatePresentation | nu
 export const agentStateBucket = (state: string): AgentBucket | null =>
   knownAgentStatePresentation(state)?.bucket ?? null
 
-export const agentStatePresentation = (state: string): AgentStatePresentation =>
-  knownAgentStatePresentation(state) ?? {
-    bucket: "needs-you",
+export type ConnectAgentGroup = AgentBucket | "unknown"
+
+/**
+ * Fleet retains its unknown-state safety fallback. Home names incomplete evidence explicitly;
+ * an offline host's remembered state cannot claim that its agent currently needs a person.
+ */
+export function connectAgentGroup(
+  state: string,
+  context: { readonly presentation: "fleet"; readonly offline?: boolean }
+): AgentBucket
+export function connectAgentGroup(
+  state: string,
+  context: { readonly presentation: "fleet" | "home" | "push"; readonly offline?: boolean }
+): ConnectAgentGroup
+export function connectAgentGroup(
+  state: string,
+  context: { readonly presentation: "fleet" | "home" | "push"; readonly offline?: boolean }
+): ConnectAgentGroup {
+  if (context.presentation === "home" && context.offline === true) return "unknown"
+  return knownAgentStatePresentation(state)?.bucket ?? (context.presentation === "fleet" ? "needs-you" : "unknown")
+}
+
+type HomeStatePresentation = Omit<AgentStatePresentation, "bucket"> & { readonly bucket: ConnectAgentGroup }
+
+/** Home names unknown evidence and settled Done neutrally; Fleet keeps its existing safety and success tones. */
+export function agentStatePresentation(state: string, policy?: "fleet"): AgentStatePresentation
+export function agentStatePresentation(state: string, policy: "home"): HomeStatePresentation
+export function agentStatePresentation(state: string, policy: "fleet" | "home"): HomeStatePresentation
+export function agentStatePresentation(state: string, policy: "fleet" | "home" = "fleet"): HomeStatePresentation {
+  const known = knownAgentStatePresentation(state)
+  if (known !== null) return policy === "home" && known.word === "Done" ? { ...known, tone: "neutral" } : known
+  return {
+    bucket: connectAgentGroup(state, { presentation: policy }),
     icon: "alert",
     spins: false,
     tone: "caution",
     word: capitalised(state)
   }
+}
 
 /**
  * What an agent's stage says before its work, in the state's fixed words: "Working on" a working agent's

@@ -1,0 +1,15 @@
+id: no-local-agent-bucket
+language: tsx
+severity: error
+message: "Use connectAgentGroup with an explicit presentation policy; local fallbacks drift from counts and filters."
+rule:
+  any:
+    - pattern: agentStateBucket($$$)
+    - pattern: agentStatePresentation($STATE).bucket
+files:
+  - "packages/herdr-connect/src/**/*.{ts,tsx}"
+  - "packages/herdr-hub/src/**/*.{ts,tsx}"
+ignores:
+  - "packages/herdr-connect/src/agent-state-core.ts"
+  - "**/generated/**"
+  - "**/vendor/**"

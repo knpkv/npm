@@ -36,10 +36,16 @@ export interface CreatureProps {
   /** Optional served family; overrides hash(host,name). Only the eight agent families are accepted. */
   readonly hueFamily?: CreatureHueFamily
   readonly state: string
+  /** Home keeps unknown evidence neutral; Fleet retains its existing needs-you fallback. */
+  readonly statePolicy?: "fleet" | "home"
   readonly size: CreatureSize
   /** Stale hosts rest with half lids and stop motion; identity is retained. Default false. */
   readonly stale?: boolean
-  /** Closed agents are desaturated and still, with shut lids and no halo. Default false. */
+  /**
+   * Defaults to false. In every size, closure keeps the seeded outline with a neutral tint, shut lids and
+   * lowered brows, and removes rings and all creature motion for the lifetime of this prop. It is static
+   * with either reduced-motion preference; clearing it resumes the current state's normal presentation.
+   */
   readonly closed?: boolean
   /** Retained arrival marker; ordinary agents keep their true body on arrival. Default false. */
   readonly arrived?: boolean
@@ -70,10 +76,11 @@ export const Creature = ({
   size,
   stale = false,
   state,
+  statePolicy = "fleet",
   talking = false
 }: CreatureProps): ReactElement => {
   const character = agentCharacter(host, id)
-  const presentation = agentStatePresentation(state)
+  const presentation = agentStatePresentation(state, statePolicy)
   const talkPose = talking && size === "stage"
   const [completion, setCompletion] = useState({
     state,

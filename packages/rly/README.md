@@ -199,6 +199,13 @@ as long, so portal removal cannot cut the surface animation short.
 Dialog returns focus to its opener after exit and modal cleanup, rather than immediately
 on close. Consumer tests must wait for cleanup and the restored focus.
 
+`Sheet.Root.restoreFocus` takes a stable callback reading the current destination and
+returning its target after modal cleanup, once for the latest close. The default restores
+the captured opener. Targets must be connected, outside hidden/inert/aria-hidden ancestors, have a
+client rect and receive focus; otherwise opener restoration applies. Returning `undefined`
+also keeps the opener. Unlike `Dialog.Content.restoreFocus`, return the element rather than
+focusing it and returning a boolean. Reduced motion keeps the same cleanup ordering.
+
 `Dialog.Content.restoreFocus` defaults to restoring the opener. A route owner can
 return `true` after focusing its destination, or `false` to keep opener restoration.
 The callback runs after exit and modal cleanup, only for the latest modal transition.

@@ -1,3 +1,4 @@
+import { connectAgentGroup } from "./agent-state-core.js"
 /**
  * An agent's stage and the cast strip that opens it: the character large on a field in its state tone, its
  * work as what it is saying, quiet details, and the way into its terminal.
@@ -9,8 +10,8 @@
  */
 import { Icon, PortalProvider } from "@knpkv/rly/foundations"
 import { workNavigationHref } from "@knpkv/herdr-work/navigation"
-import { Button, Sheet } from "@knpkv/rly/primitives"
-import { type KeyboardEvent, type MouseEvent, type ReactElement, useId, useRef, useState } from "react"
+import { Button, Sheet, StateLabel } from "@knpkv/rly/primitives"
+import { type KeyboardEvent, type MouseEvent, type ReactElement, type ReactNode, useId, useRef, useState } from "react"
 
 import { AgentStateLabel, agentStatePresentation } from "./agent-state.js"
 import { Creature } from "./creature.js"
@@ -43,11 +44,13 @@ export const AgentCast = ({
   readonly silentHosts?: ReadonlyArray<string>
 }): ReactElement => {
   const families = connectAgentFamilies(agents).filter((family) =>
-    family.rows.some(({ agent }) => agentStatePresentation(agent.state).bucket === "needs-you")
+    family.rows.some(({ agent }) => connectAgentGroup(agent.state, { presentation: "fleet" }) === "needs-you")
   )
   const cast = families.flatMap((family) =>
     family.rows
-      .filter((row, index) => index === 0 || agentStatePresentation(row.agent.state).bucket === "needs-you")
+      .filter(
+        (row, index) => index === 0 || connectAgentGroup(row.agent.state, { presentation: "fleet" }) === "needs-you"
+      )
       .map(({ agent }) => agent)
   )
   // One tab stop for the whole strip, so the cast doesn't double every row's stop; arrows move along it.
@@ -75,7 +78,10 @@ export const AgentCast = ({
           role="group"
         >
           {family.rows
-            .filter((row, index) => index === 0 || agentStatePresentation(row.agent.state).bucket === "needs-you")
+            .filter(
+              (row, index) =>
+                index === 0 || connectAgentGroup(row.agent.state, { presentation: "fleet" }) === "needs-you"
+            )
             .map(({ agent }) => (
               <button
                 aria-haspopup="dialog"
@@ -166,7 +172,7 @@ const AgentLineage = ({
       : []
   const workers = children.filter((child) => child.relationship?.relation !== "pair")
   const visibleWorkers = workers.filter(
-    (child, index) => expanded || index < 3 || agentStatePresentation(child.state).bucket === "needs-you"
+    (child, index) => expanded || index < 3 || connectAgentGroup(child.state, { presentation: "fleet" }) === "needs-you"
   )
   const hiddenWorkers = workers.length - visibleWorkers.length
   const member = (member: ConnectAgent, role: string) => (
@@ -228,27 +234,58 @@ const AgentLineage = ({
   )
 }
 
+/** Home's navigation chrome shares the sheet owner's close and focus-return path. */
+const HomeStageHeader = ({
+  agent,
+  onClose
+}: {
+  readonly agent: ConnectAgent
+  readonly onClose: () => void
+}): ReactElement => (
+  <header className="connect-home-stage-header">
+    <button aria-label="Back to Connect" className="connect-home-stage-back" onClick={onClose} type="button">
+      <Icon decorative name="chevron-left" size="small" />
+    </button>
+    <h2>
+      <b>Connect</b>
+      <span>{agent.name}</span>
+    </h2>
+    <button aria-label="Close" className="connect-home-stage-close" onClick={onClose} type="button">
+      <Icon decorative name="close" size="small" />
+    </button>
+  </header>
+)
+
 /** The open agent's stage, or nothing; closing it hands focus back to whatever opened it. */
 export const AgentStage = ({
   agent,
   agents,
   crew,
+  footer,
   onClose,
   onOpen,
   onOpenTerminal,
   onPinChange,
   pinned,
+  presentation = "fleet",
+  restoreFocus,
   stale,
   workGoal,
   workSnapshots = null
 }: {
   readonly agent: ConnectAgent | null
+  /** Optional application controls, rendered in the stage body after lineage. */
+  readonly footer?: ReactNode
   readonly agents?: ReadonlyArray<ConnectAgent>
   readonly workSnapshots?: WorkSnapshots | null
   /** The open agent's goal on the Work board, linked from its stage when there is exactly one. */
   readonly workGoal: ConnectWorkGoalResolution
   /** Whether this agent is pinned on this device. */
   readonly pinned: boolean
+  /** Header layout only; Fleet is the default and the stage body keeps its existing owner. */
+  readonly presentation?: "fleet" | "home"
+  /** Optional URL-selection return target, decided by Sheet after modal cleanup. */
+  readonly restoreFocus?: (() => HTMLElement | undefined) | undefined
   readonly onPinChange: (pinned: boolean) => void
   /** Its direct children, used when a complete directory is not supplied. */
   readonly crew: ReadonlyArray<ConnectAgent>
@@ -260,14 +297,20 @@ export const AgentStage = ({
   return (
     // Its own portal target: Connect runs standalone and inside the hub, and neither provides one.
     <PortalProvider>
-      <Sheet.Root onOpenChange={(open) => (open ? undefined : onClose())} open={agent !== null}>
+      <Sheet.Root
+        onOpenChange={(open) => (open ? undefined : onClose())}
+        open={agent !== null}
+        restoreFocus={restoreFocus}
+      >
         {agent === null ? null : (
           <Sheet.Content
             className="connect-stage-sheet"
+            data-connect-stage-presentation={presentation}
             closeLabel="Close"
             description={`${agent.kind} on ${agent.host}`}
             title={agent.name}
           >
+            {presentation === "home" ? <HomeStageHeader agent={agent} onClose={onClose} /> : null}
             <Sheet.Body className="connect-stage" data-stale={stale ? "" : undefined}>
               <div className="connect-stage-hero" data-tone={agentStatePresentation(agent.state).tone}>
                 <Creature
@@ -349,6 +392,7 @@ export const AgentStage = ({
                 onOpen={onOpen}
                 stale={stale}
               />
+              {footer}
             </Sheet.Body>
             <Sheet.Footer className="connect-stage-actions">
               <Button leadingIcon="pin" onClick={() => onPinChange(!pinned)} size="default" variant="secondary">
@@ -396,6 +440,7 @@ const PinChip = ({
   onOpen,
   onUnpin,
   pinKey,
+  placement,
   roving,
   stale
 }: {
@@ -403,52 +448,64 @@ const PinChip = ({
   readonly onOpen: () => void
   readonly onUnpin: (event: MouseEvent<HTMLButtonElement>) => void
   readonly pinKey: string
-  /** The open and unpin buttons' places in the set's single tab stop. */
+  readonly placement: "bar" | "float"
+  /** The unpin and open buttons' places in the set's single tab stop. */
   readonly roving: readonly [RovingStop, RovingStop]
   readonly stale: boolean
-}): ReactElement => (
-  // Two sibling buttons, never one inside the other: open is the chip, unpin its own small control.
-  <span className="connect-pin">
-    <button
-      aria-label={`Pinned: ${agent.name}, ${agentStatePresentation(agent.state).word}`}
-      className="connect-pin-open"
-      data-pin-key={pinKey}
-      onClick={onOpen}
-      type="button"
-      {...roving[0]}
-    >
-      <Creature
-        host={agent.host}
-        id={String(agent.id)}
-        name={agent.name}
-        size="row"
-        stale={stale}
-        state={agent.state}
-      />
-      <span className="connect-pin-name">{agent.name}</span>
-      <span className="connect-pin-state">
-        <AgentStateLabel state={agent.state} />
-      </span>
-    </button>
-    <button
-      aria-label={`Unpin ${agent.name}`}
-      className="connect-pin-unpin"
-      data-pin-key={pinKey}
-      onClick={onUnpin}
-      type="button"
-      {...roving[1]}
-    >
-      <span aria-hidden="true">×</span>
-    </button>
-  </span>
-)
+}): ReactElement => {
+  const presentation = agentStatePresentation(agent.state)
+  const needsYou = placement === "float" && presentation.word === "Waiting"
+  const word = needsYou ? "Needs you" : presentation.word
+  return (
+    // Two sibling buttons, never one inside the other: open is the chip, unpin its own small control.
+    <span className="connect-pin">
+      <button
+        aria-label={`Unpin ${agent.name}`}
+        className="connect-pin-unpin"
+        data-pin-key={pinKey}
+        onClick={onUnpin}
+        type="button"
+        {...roving[0]}
+      >
+        <Icon decorative name="pin" size="small" />
+      </button>
+      <button
+        aria-label={`Pinned: ${agent.name}, ${word}`}
+        className="connect-pin-open"
+        data-pin-key={pinKey}
+        onClick={onOpen}
+        type="button"
+        {...roving[1]}
+      >
+        <Creature
+          host={agent.host}
+          id={String(agent.id)}
+          name={agent.name}
+          size="row"
+          stale={stale}
+          state={agent.state}
+        />
+        <span className="connect-pin-name">{agent.name}</span>
+        <span className="connect-pin-state">
+          <StateLabel
+            className={presentation.spins ? "agent-state-spinning" : undefined}
+            icon={presentation.icon}
+            label={word}
+            size="compact"
+            tone={presentation.tone}
+          />
+        </span>
+      </button>
+    </span>
+  )
+}
 
 /**
  * The agents this device keeps pinned, small and always to hand, in the order they were pinned. The first
  * few that are here show as chips; the rest, and any pinned agent this poll didn't list, wait behind a "+N"
  * button, the away ones dimmed with when they were last seen, so a pin never seems lost. Over the directory
- * they stack in the end corner, clear of the safe area; in the terminal they sit inside its bar, never over
- * the output or the key rail.
+ * they stick to the scrolling viewport's end corner and settle in reserved footer space, clear of the safe
+ * area; in the terminal they sit inside its bar, never over the output or the key rail.
  *
  * One tab stop for the whole set; arrows move through it, and Delete or Backspace unpins the focused pin.
  */
@@ -477,7 +534,7 @@ export const PinnedAgents = ({
 }): ReactElement | null => {
   const { overflow, shown } = arrangePins(pins, agentFor, room, (key) => key === hiddenKey)
   const [expanded, setExpanded] = useState(false)
-  const [active, setActive] = useState(0)
+  const [active, setActive] = useState(1)
   const group = useRef<HTMLDivElement>(null)
   const listId = `connect-pins-${useId().replace(/[^a-zA-Z0-9]/g, "")}`
   const open = expanded && overflow.length > 0
@@ -493,7 +550,7 @@ export const PinnedAgents = ({
     setActive(all.indexOf(target))
     target.focus()
   }
-  // Unpinning with the × keeps focus in the set, as Delete does: on the control now in its place, or search.
+  // Unpinning keeps focus in the set, as Delete does: on the control now in its place, or search.
   const unpinFrom =
     (key: string) =>
     (event: MouseEvent<HTMLButtonElement>): void => {
@@ -529,7 +586,7 @@ export const PinnedAgents = ({
     event.preventDefault()
     focusAt((index + step + all.length) % all.length)
   }
-  // Chip i's open and unpin buttons are stops 2i and 2i + 1, and "+N" comes last. The list behind "+N" is
+  // Chip i's unpin and open buttons are stops 2i and 2i + 1, and "+N" comes last. The list behind "+N" is
   // reached with the arrows once open, and takes focus when it opens.
   const stops = shown.length * 2 + (overflow.length > 0 ? 1 : 0)
   const stop = (index: number): RovingStop => ({
@@ -562,6 +619,7 @@ export const PinnedAgents = ({
             onOpen={() => onOpen(agent)}
             onUnpin={unpinFrom(pin.key)}
             pinKey={pin.key}
+            placement={placement}
             roving={[stop(index * 2), stop(index * 2 + 1)]}
             stale={stale}
           />

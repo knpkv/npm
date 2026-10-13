@@ -1,0 +1,16 @@
+id: connect-directory-history-owner
+language: tsx
+severity: error
+message: "Use the supplied directory location. Only the standalone directory helper may read or mutate browser history."
+rule:
+  any:
+    - pattern: window.history.pushState($$$)
+    - pattern: window.history.replaceState($$$)
+    - pattern: window.location.search
+    - pattern: new URL(window.location.href)
+files:
+  - "packages/herdr-connect/src/**/*.{ts,tsx}"
+ignores:
+  - "packages/herdr-connect/src/directory-view.tsx"
+  - "**/generated/**"
+  - "**/vendor/**"

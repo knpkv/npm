@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { ModuleKind, ScriptTarget, transpileModule } from "typescript"
+import { mountLegacyFleetColumn } from "./legacy-fleet-fixture.js"
 
 const packageRoot = resolve(fileURLToPath(new URL("../..", import.meta.url)))
 const workspaceRoot = resolve(packageRoot, "../..")
@@ -127,6 +128,7 @@ const setKeyboardTerminal = async (page: Page): Promise<void> => {
         </div>
       </body>
     </html>`)
+  await page.locator(".fleet-shell-main").evaluate(mountLegacyFleetColumn)
   await page.addScriptTag({
     content: `${terminalViewportSource}\nwindow.bindTerminalViewport = bindTerminalViewport`,
     type: "module"
@@ -143,37 +145,47 @@ const setKeyboardTerminal = async (page: Page): Promise<void> => {
   })
 }
 
-test("keyboard-height terminal never fits below the server terminal bounds", async ({ page }) => {
-  await setKeyboardTerminal(page)
-  await page.addScriptTag({
-    content: `${terminalDimensionsSource}\nwindow.clampTerminalDimensions = clampTerminalDimensions`,
-    type: "module"
-  })
-  // Inline module scripts run after addScriptTag resolves.
-  await page.waitForFunction(() => window.clampTerminalDimensions !== undefined)
-  await page.setViewportSize({ height: 300, width: 393 })
-  await expect
-    .poll(() => page.locator(".ghostty-terminal").evaluate((terminal) => terminal.clientHeight))
-    .toBeLessThan(80)
+test(
+  "legacy Fleet keyboard-height terminal never fits below the server terminal bounds",
+  async ({ page }, testInfo) => {
+    await setKeyboardTerminal(page)
+    await page.addScriptTag({
+      content: `${terminalDimensionsSource}\nwindow.clampTerminalDimensions = clampTerminalDimensions`,
+      type: "module"
+    })
+    // Inline module scripts run after addScriptTag resolves.
+    await page.waitForFunction(() => window.clampTerminalDimensions !== undefined)
+    await page.setViewportSize({ height: 300, width: 393 })
+    await expect
+      .poll(() => page.locator(".ghostty-terminal").evaluate((terminal) => terminal.clientHeight))
+      .toBeLessThan(80)
 
-  const fitted = await page.evaluate(() => {
-    const terminal = document.querySelector<HTMLElement>(".ghostty-terminal")
-    const clampDimensions = window.clampTerminalDimensions
-    if (terminal === null || clampDimensions === undefined) throw new Error("terminal dimensions fixture missing")
-    // Mirrors ghostty-web 0.4.0 FitAddon.proposeDimensions for 13px Geist Mono cells.
-    const raw = {
-      cols: Math.max(2, Math.floor((terminal.clientWidth - 15) / 8)),
-      rows: Math.max(1, Math.floor(terminal.clientHeight / 16))
-    }
-    return { clamped: clampDimensions(raw), raw }
-  })
+    await expect(page.locator(".fleet-shell-main")).toHaveCSS("padding-block-start", "24px")
+    const terminalHeight = await page.locator(".ghostty-terminal").evaluate((terminal) => terminal.clientHeight)
+    await testInfo.attach("legacy-terminal-geometry", {
+      body: JSON.stringify({ terminalHeight, legacyBlockPadding: "24px" }),
+      contentType: "application/json"
+    })
 
-  expect(fitted.raw.rows).toBeLessThan(5)
-  expect(fitted.clamped.rows).toBeGreaterThanOrEqual(5)
-  expect(fitted.clamped.rows).toBeLessThanOrEqual(200)
-  expect(fitted.clamped.cols).toBeGreaterThanOrEqual(20)
-  expect(fitted.clamped.cols).toBeLessThanOrEqual(400)
-})
+    const fitted = await page.evaluate(() => {
+      const terminal = document.querySelector<HTMLElement>(".ghostty-terminal")
+      const clampDimensions = window.clampTerminalDimensions
+      if (terminal === null || clampDimensions === undefined) throw new Error("terminal dimensions fixture missing")
+      // Mirrors ghostty-web 0.4.0 FitAddon.proposeDimensions for 13px Geist Mono cells.
+      const raw = {
+        cols: Math.max(2, Math.floor((terminal.clientWidth - 15) / 8)),
+        rows: Math.max(1, Math.floor(terminal.clientHeight / 16))
+      }
+      return { clamped: clampDimensions(raw), raw }
+    })
+
+    expect(fitted.raw.rows).toBeLessThan(5)
+    expect(fitted.clamped.rows).toBeGreaterThanOrEqual(5)
+    expect(fitted.clamped.rows).toBeLessThanOrEqual(200)
+    expect(fitted.clamped.cols).toBeGreaterThanOrEqual(20)
+    expect(fitted.clamped.cols).toBeLessThanOrEqual(400)
+  }
+)
 
 test("393x500 terminal blocks iPhone focus scrolling and restores the document", async ({ page }) => {
   await setKeyboardTerminal(page)

@@ -1,0 +1,9 @@
+id: connect-directory-history-owner
+valid:
+  - 'directoryLocation.navigate(href, "push")'
+  - "const url = new URL(directoryLocation.url.href)"
+invalid:
+  - 'window.history.pushState(null, "", href)'
+  - 'window.history.replaceState(null, "", href)'
+  - "const search = window.location.search"
+  - "const url = new URL(window.location.href)"

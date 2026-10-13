@@ -1,6 +1,6 @@
 import { describe, expect, expectTypeOf, it } from "@effect/vitest"
 import { Effect, Layer, Ref, Schema } from "effect"
-import { defineModule, fleetModule, todayModule as today } from "../src/module-contract.js"
+import { connectModule as connect, defineModule, fleetModule } from "../src/module-contract.js"
 import { NeedsYouProviderResult } from "../src/module-needs-you.js"
 import * as ModuleServer from "../src/module-server.js"
 import type { ModuleApiRoute, ModuleRouteFailure } from "../src/module-server.js"
@@ -92,10 +92,10 @@ describe("module server boundary", () => {
       expect(yield* Ref.get(builds)).toBe(1)
     }))
 
-  it.effect("reserves the hub-owned Today route before a product can shadow it", () =>
+  it.effect("reserves the hub-owned Connect route before a product can shadow it", () =>
     Effect.gen(function*() {
-      const layer = ModuleServer.makeModuleLayer([today], [{
-        descriptor: today,
+      const layer = ModuleServer.makeModuleLayer([connect], [{
+        descriptor: connect,
         handlers: Layer.succeed(ModuleServer.ModuleHandlers, {
           routes: [ModuleServer.moduleReadRoute("/needs-you", emptyQuery, Schema.Null, () => Effect.succeed(null))]
         })
@@ -105,13 +105,13 @@ describe("module server boundary", () => {
         _tag: "Failure",
         failure: {
           _tag: "ModuleRegistrationError",
-          module: "today",
+          module: "connect",
           reason: "duplicate_route"
         }
       })
     }))
 
-  it.effect("builds providers once and collects them through the hub-owned Today route", () =>
+  it.effect("builds providers once and collects them through the hub-owned Connect route", () =>
     Effect.gen(function*() {
       const builds = yield* Ref.make(0)
       const fleet = {
@@ -124,13 +124,13 @@ describe("module server boundary", () => {
           }))
         )
       }
-      const context = yield* Layer.build(ModuleServer.makeModuleLayer([today, fleetModule], [
-        { descriptor: today, handlers: Layer.succeed(ModuleServer.ModuleHandlers, { routes: [] }) },
+      const context = yield* Layer.build(ModuleServer.makeModuleLayer([connect, fleetModule], [
+        { descriptor: connect, handlers: Layer.succeed(ModuleServer.ModuleHandlers, { routes: [] }) },
         fleet
       ]))
       const read = ModuleServer.dispatchModuleRoute({
         method: "GET",
-        url: new URL("https://hub.example/v1/modules/today/needs-you"),
+        url: new URL("https://hub.example/v1/modules/connect/needs-you"),
         listener: "serve",
         authorize: Effect.succeed({ login: "example-viewer" }),
         sameOrigin: Effect.void,
@@ -166,8 +166,8 @@ describe("module server boundary", () => {
         listeners: ["serve"],
         requires: ["read"]
       })
-      const context = yield* Layer.build(ModuleServer.makeModuleLayer([today, fleetModule, code], [
-        { descriptor: today, handlers: Layer.succeed(ModuleServer.ModuleHandlers, { routes: [] }) },
+      const context = yield* Layer.build(ModuleServer.makeModuleLayer([connect, fleetModule, code], [
+        { descriptor: connect, handlers: Layer.succeed(ModuleServer.ModuleHandlers, { routes: [] }) },
         {
           descriptor: fleetModule,
           handlers: Layer.succeed(ModuleServer.ModuleHandlers, {
@@ -185,7 +185,7 @@ describe("module server boundary", () => {
       ]))
       const response = yield* ModuleServer.dispatchModuleRoute({
         method: "GET",
-        url: new URL("https://hub.example/v1/modules/today/needs-you"),
+        url: new URL("https://hub.example/v1/modules/connect/needs-you"),
         listener: "serve",
         authorize: Effect.succeed({ login: "example-viewer" }),
         sameOrigin: Effect.void,

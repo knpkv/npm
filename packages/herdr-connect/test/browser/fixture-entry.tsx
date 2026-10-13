@@ -9,8 +9,10 @@ import { useState } from "react"
 import { createRoot } from "react-dom/client"
 import { ConnectSurface, makeConnectAtoms } from "../../src/client.js"
 import { Creature, type CreatureHueFamily } from "../../src/creature.js"
+import { mountLegacyFleetColumn } from "./legacy-fleet-fixture.js"
 
-// `?embedded` mounts Connect the way the hub's Connect tab does: page title, summary, directory.
+// `?embedded` protects the exported legacy FleetShell + embedded Connect composition.
+// Canonical Home is covered by the hub module-shell fixture.
 // `?brows` renders the 64-seed grid here, outside Playwright's component transform.
 const root = document.querySelector<HTMLElement>("#fleet-connect-root")
 const parameters = new URLSearchParams(location.search)
@@ -107,6 +109,7 @@ const DrawingFixture = () => {
 }
 
 if (root !== null) {
+  if (parameters.has("embedded")) mountLegacyFleetColumn(root)
   createRoot(root).render(
     <RegistryProvider>
       {parameters.has("drawing") ? (

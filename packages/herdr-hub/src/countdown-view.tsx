@@ -837,7 +837,7 @@ export const ApprovalsCountdown = ({
                   ? "Couldn't refresh requests."
                   : pendingTargetCheck?.state === "failed"
                     ? "Couldn't check this request."
-                    : `Couldn't check ${unchecked.map(failureText).join(", ")}.`}{" "}
+                    : `Couldn’t check ${unchecked.map(failureText).join(", ")}.`}{" "}
                 Retained requests stay here; retry before deciding on an unchecked host.
               </p>
               <Button

@@ -60,6 +60,20 @@ describe("Creature", () => {
     expect(closed).toContain("--connect-creature-open:1;")
   })
 
+  it("keeps the live seeded outline in a closed record and defaults to the live presentation", () => {
+    for (const size of ["row", "cast", "stage"] satisfies ReadonlyArray<"row" | "cast" | "stage">) {
+      const live = renderToStaticMarkup(<Creature host="fixture-host" id="agent-134" size={size} state="working" />)
+      const closed = renderToStaticMarkup(
+        <Creature closed host="fixture-host" id="agent-134" size={size} state="working" />
+      )
+      const outline = (markup: string) => /class="connect-creature-body" d="([^"]+)"/.exec(markup)?.[1]
+      expect(outline(live)).toBeDefined()
+      expect(outline(closed)).toBe(outline(live))
+      expect(live).not.toContain("data-closed")
+      expect(closed).toContain('data-closed=""')
+      expect(closed).toContain("calc(c * 0.1)")
+    }
+  })
   // Behaviour follows the state language rows already use, so a creature never acts out a different state.
   it("takes its behaviour from the agent's state bucket and tone", () => {
     const markup = (state: string) => renderToStaticMarkup(<Creature host="nix" id="a1" size="row" state={state} />)

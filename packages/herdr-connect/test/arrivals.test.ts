@@ -32,6 +32,17 @@ describe("arrivalsBetween", () => {
     expect([...arrivalsBetween(now, now)]).toEqual([])
   })
 
+  it.each(["home", "fleet"] satisfies ReadonlyArray<"home" | "fleet">)(
+    "uses %s evidence policy for unknown-state arrivals",
+    (presentation) => {
+      const before = agentBucketsOf([agent("agent-one", "working")], presentation)
+      const unknown = agentBucketsOf([agent("agent-one", "new-wire-state")], presentation)
+      expect([...arrivalsBetween(before, unknown)]).toEqual(presentation === "home" ? [] : ["nix:agent-one"])
+      const waiting = agentBucketsOf([agent("agent-one", "waiting")], presentation)
+      expect([...arrivalsBetween(before, waiting)]).toEqual(["nix:agent-one"])
+    }
+  )
+
   it("names an agent that appeared already needing you, and never one that stopped", () => {
     const before = poll(agent("agent-one", "blocked"))
     const now = poll(agent("agent-one", "working"), agent("agent-two", "error"))

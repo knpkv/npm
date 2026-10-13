@@ -42,8 +42,9 @@ import {
   WorkStore
 } from "@knpkv/herdr-work"
 import type { RelayBackend } from "@knpkv/relay"
-import { Data, Deferred, Effect, Fiber, Layer, Ref, Result, Schema, Stream } from "effect"
+import { Clock, Data, Deferred, Effect, Fiber, Layer, Logger, Queue, Ref, Result, Schema, Stream } from "effect"
 import { HttpClient } from "effect/http"
+import { TestClock } from "effect/testing"
 import { build } from "esbuild"
 import { spawn } from "node:child_process"
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
@@ -165,6 +166,59 @@ const assets = {
   stylesheet: "",
   worker: ""
 }
+
+/** Exercise controller admission through an authorized listener, with each resource scoped immediately. */
+const controllerServer = Effect.fn("ControllerTest.server")(function*(connector: TerminalConnector) {
+  const root = mkdtempSync(join(tmpdir(), "herdr-controller-test-"))
+  yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { force: true, recursive: true })))
+  const tailscaleCommand = join(root, "tailscale-test")
+  writeFileSync(
+    tailscaleCommand,
+    `#!/bin/sh
+case "$1" in
+  ip) printf '%s\\n' '127.0.0.1' ;;
+  whois) printf '%s\\n' '{"Node":{"StableID":"node-ser8"},"UserProfile":{"LoginName":"owner@example.com"}}' ;;
+  status) printf '%s\\n' '{"Peer":{},"Self":{"HostName":"ALPHA","ID":"node-alpha","Online":true,"TailscaleIPs":["127.0.0.1"]}}' ;;
+esac
+`,
+    { mode: 0o700 }
+  )
+  const hostConfig = { ...config(root), approvalPort: 0, crossHost: true, tailscaleCommand }
+  const store = yield* Effect.acquireRelease(
+    JobStore.open(join(root, "jobs.sqlite")),
+    (opened) => Effect.sync(() => opened.close())
+  )
+  const fleet = yield* makeFleetService({ approvalEnabled: false, host: hostConfig.host, operations, store })
+  const server = yield* Effect.acquireRelease(
+    Effect.promise(() => startHttpServer(hostConfig, fleet, assets, { terminalConnector: connector })),
+    (running) => Effect.promise(running.close)
+  )
+  if (server.tailnetUrl === null) return yield* Effect.die("tailnet listener missing")
+  const url = new URL("/v1/connect/terminal", server.tailnetUrl)
+  url.protocol = "ws:"
+  url.searchParams.set("agent", "agent-controller")
+  url.searchParams.set("host", hostConfig.host)
+  url.searchParams.set("cols", "100")
+  url.searchParams.set("rows", "30")
+  return { url, close: server.close }
+})
+
+/** Register close and ready observations before a socket can receive its first server frame. */
+const controllerClient = Effect.fn("ControllerTest.client")(function*(url: URL, autoPong = true) {
+  return yield* Effect.acquireRelease(
+    Effect.sync(() => {
+      const socket = new WebSocketClient(url, { autoPong })
+      const closed = new Promise<number>((resolve) => socket.once("close", (code) => resolve(code)))
+      const ready = new Promise<string | number>((resolve, reject) => {
+        socket.once("error", reject)
+        socket.once("message", () => resolve("ready"))
+        socket.once("close", (code) => resolve(code))
+      })
+      return { socket, ready, closed }
+    }),
+    (client) => Effect.sync(() => client.socket.terminate())
+  )
+})
 
 const approvalProofCookieCount = (response: Response): number =>
   response.headers.get("set-cookie")?.match(/fleet_approval_proof_/gu)?.length ?? 0
@@ -710,7 +764,7 @@ esac
           const headers = {
             "tailscale-user-login": "owner@example.com"
           }
-          for (const route of ["/v1/modules/today/needs-you", "/v1/modules/unknown/read", "/v1/modules"]) {
+          for (const route of ["/v1/modules/connect/needs-you", "/v1/modules/unknown/read", "/v1/modules"]) {
             const response = yield* Effect.promise(() => fetch(`${approvalUrl}${route}`, { headers }))
             expect(response.status).toBe(404)
           }
@@ -2027,7 +2081,65 @@ esac
     ).pipe(provideNodeServices)
   })
 
-  it.effect("accepts host-bound voice only on the canonical listener, including sibling claims on the same host", () => {
+  it.effect("serves the first 256 configured hosts in config order when 257 machines exist", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const root = mkdtempSync(join(tmpdir(), "herdr-http-configured-hosts-"))
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { force: true, recursive: true })))
+      const tailscaleCommand = join(root, "tailscale-test")
+      const status = {
+        Peer: Object.fromEntries(Array.from({ length: 256 }, (_, index) => [
+          `node-${index + 1}`,
+          { HostName: `fixture-${index + 1}`, ID: `node-${index + 1}`, Online: false, TailscaleIPs: ["127.0.0.2"] }
+        ])),
+        Self: { HostName: "SER8", ID: "node-ser8", Online: true, TailscaleIPs: ["127.0.0.1"] }
+      }
+      writeFileSync(
+        tailscaleCommand,
+        `#!/bin/sh
+case "$1" in
+  ip) printf '%s\\n' '127.0.0.1' ;;
+  whois) printf '%s\\n' '{"Node":{"StableID":"node-ser8"},"UserProfile":{"LoginName":"owner@example.com"}}' ;;
+  status) printf '%s\\n' '${JSON.stringify(status)}' ;;
+esac
+`,
+        { mode: 0o700 }
+      )
+      const hostConfig: HostConfiguration = {
+        ...config(root),
+        host: "SER8",
+        crossHost: true,
+        approvalHub: { host: "SER8", nodeId: "node-ser8", url: "https://ser8.example.test:0/" },
+        approvalPort: 0,
+        approvalTls: directTls,
+        machines: [
+          { host: "SER8", nodeId: "node-ser8" },
+          ...Array.from({ length: 256 }, (_, index) => ({ host: `fixture-${index + 1}`, nodeId: `node-${index + 1}` }))
+        ],
+        tailscaleCommand
+      }
+      const store = yield* Effect.acquireRelease(
+        JobStore.open(join(root, "jobs.sqlite")),
+        (opened) => Effect.sync(() => opened.close())
+      )
+      const fleet = yield* makeFleetService({ approvalEnabled: true, host: hostConfig.host, operations, store })
+      const server = yield* Effect.acquireRelease(
+        Effect.promise(() => startHttpServer(hostConfig, fleet, assets, { terminalConnector: unusedTerminal })),
+        (running) => Effect.promise(running.close)
+      )
+      if (server.serveUrl === null) return yield* Effect.die("canonical listener fixture missing")
+      const response = yield* Effect.promise(() =>
+        secureRequestBody(`${server.serveUrl}/v1/connect/agents`, {
+          host: "ser8.example.test:0"
+        })
+      )
+      expect(response.status).toBe(200)
+      const page = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(FleetConnectAgentPage))(response.body)
+      expect(page.agents).toEqual([])
+      expect(page.hosts).toEqual(["SER8", ...Array.from({ length: 255 }, (_, index) => `fixture-${index + 1}`)])
+      expect(page.hosts).not.toContain("fixture-256")
+    })).pipe(provideNodeServices))
+
+  it.effect("accepts host-bound voice and self-state only on the canonical listener, including sibling claims on the same host", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-http-posts-"))
     const tailscaleCommand = join(root, "tailscale-test")
     const identityMode = join(root, "identity-mode")
@@ -2130,7 +2242,12 @@ esac
         JSON.stringify({ mutedAgents: [], quietHours: null })
       )
       expect(
-        (yield* Effect.promise(() => secureRequestBody(settingsUrl, pushHeaders, { method: "PUT", body: preferences })))
+        (yield* Effect.promise(() =>
+          secureRequestBody(settingsUrl, pushHeaders, {
+            method: "PATCH",
+            body: { _tag: "SetAgentMute", agent: preferences.mutedAgents[0], muted: true }
+          })
+        ))
           .status
       ).toBe(200)
       expect((yield* Effect.promise(() => secureRequestBody(settingsUrl, headers))).body.trim()).toBe(
@@ -2139,24 +2256,27 @@ esac
       expect(
         (yield* Effect.promise(() =>
           secureRequestBody(settingsUrl, { ...pushHeaders, origin: "https://foreign.example.test" }, {
-            method: "PUT",
-            body: preferences
+            method: "PATCH",
+            body: { _tag: "SetAgentMute", agent: preferences.mutedAgents[0], muted: true }
           })
         )).status
       ).toBe(403)
       expect(
         (yield* Effect.promise(() =>
           secureRequestBody(settingsUrl, pushHeaders, {
-            method: "PUT",
-            body: { ...preferences, quietHours: { startMinute: -1, endMinute: 300, timeZone: "America/New_York" } }
+            method: "PATCH",
+            body: {
+              _tag: "SetQuietHours",
+              quietHours: { startMinute: -1, endMinute: 300, timeZone: "America/New_York" }
+            }
           })
         )).status
       ).toBe(400)
       expect(
         (yield* Effect.promise(() =>
           secureRequestBody(settingsUrl, pushHeaders, {
-            method: "PUT",
-            body: { ...preferences, quietHours: { startMinute: 60, endMinute: 120, timeZone: "Invalid/Zone" } }
+            method: "PATCH",
+            body: { _tag: "SetQuietHours", quietHours: { startMinute: 60, endMinute: 120, timeZone: "Invalid/Zone" } }
           })
         )).status
       ).toBe(400)
@@ -2166,9 +2286,23 @@ esac
       }
       expect(
         (yield* Effect.promise(() =>
-          secureRequestBody(settingsUrl, pushHeaders, { method: "PUT", body: zonedPreferences })
+          secureRequestBody(settingsUrl, pushHeaders, {
+            method: "PATCH",
+            body: { _tag: "SetQuietHours", quietHours: zonedPreferences.quietHours }
+          })
         )).status
       ).toBe(200)
+      expect((yield* Effect.promise(() => secureRequestBody(settingsUrl, headers))).body.trim()).toBe(
+        JSON.stringify(zonedPreferences)
+      )
+      expect(
+        (yield* Effect.promise(() =>
+          secureRequestBody(settingsUrl, pushHeaders, {
+            method: "PUT",
+            body: preferences
+          })
+        )).status
+      ).not.toBe(200)
       expect((yield* Effect.promise(() => secureRequestBody(settingsUrl, headers))).body.trim()).toBe(
         JSON.stringify(zonedPreferences)
       )
@@ -2192,6 +2326,51 @@ esac
         Effect.promise(() =>
           secureRequestBody(`${canonical}/v1/connect/posts`, headers, { method: "POST", body: input })
         )
+      type SelfRequestHeaders = {
+        readonly host: string
+        readonly "content-type": string
+        "x-herdr-agent-id"?: string
+      }
+      const me = (agentId: string | null, input: Readonly<Record<string, string>>) => {
+        const requestHeaders: SelfRequestHeaders = { ...headers }
+        if (agentId !== null) requestHeaders["x-herdr-agent-id"] = agentId
+        return Effect.promise(() =>
+          secureRequestBody(`${canonical}/v1/connect/me`, requestHeaders, { method: "POST", body: input })
+        )
+      }
+      expect((yield* me(null, { mood: "happy" })).status).toBe(403)
+      expect(
+        (yield* Effect.promise(() =>
+          secureRequestBody(`${canonical}/v1/connect/me`, {
+            ...headers,
+            "x-herdr-agent-id": "agent-one",
+            origin: "https://foreign.example.test"
+          }, { method: "POST", body: { mood: "happy" } })
+        )).status
+      ).toBe(403)
+      expect((yield* me("agent-foreign", { mood: "happy" })).body).toContain("UnboundAgent")
+      const invalidSelf: ReadonlyArray<Readonly<Record<string, string>>> = [
+        { mood: "angry" },
+        { say: "x".repeat(141) },
+        { mood: "happy", accessory: "crown" },
+        { mood: "happy", agentId: "agent-sibling" },
+        { mood: "happy", host: "ALPHA" },
+        { mood: "happy", replyTo: "ask-one" },
+        { say: "line\nbreak" }
+      ]
+      for (const invalid of invalidSelf) {
+        const rejected = yield* me("agent-one", invalid)
+        expect(rejected.status, JSON.stringify({ invalid, response: rejected })).toBe(400)
+      }
+      expect(
+        (yield* me("agent-one", { say: "  Keeping an eye on tests  ", mood: "focused", accessory: "glasses" })).status
+      ).toBe(200)
+      expect((yield* me("agent-sibling", { mood: "happy" })).status).toBe(200)
+      expect((yield* me("agent-one", { mood: "happy" })).status).toBe(200)
+      expect((yield* me("agent-one", { mood: "excited" })).status).toBe(200)
+      const limited = yield* me("agent-one", { mood: "happy" })
+      expect(limited.status).toBe(429)
+      expect(limited.body).toContain("\"error\":\"TooManySelfUpdates\"")
       const first = yield* post(body)
       expect(first.status).toBe(200)
       expect((yield* post(body)).body).toBe(first.body)
@@ -2227,8 +2406,19 @@ esac
       expect(page.body).toContain("Tests passing")
       const directory = yield* Effect.promise(() => secureRequestBody(`${canonical}/v1/connect/agents`, headers))
       expect(directory.body).toContain("\"voice\":{\"text\":\"Tests passing\",\"createdAt\":100}")
-      const agents = Schema.decodeUnknownSync(Schema.fromJsonString(FleetConnectAgentPage))(directory.body).agents
+      const directoryPage = Schema.decodeUnknownSync(Schema.fromJsonString(FleetConnectAgentPage))(directory.body)
+      // Configured hosts reach the browser even when no usage report names that host.
+      expect(directoryPage.hosts).toEqual(["SER8", "ALPHA"])
+      const agents = directoryPage.agents
       expect(agents.find(({ id }) => id === "agent-one")?.lastActivityAt).toBe(100)
+      expect(agents.find(({ id }) => id === "agent-one")?.self).toEqual({
+        mood: "excited",
+        say: "Keeping an eye on tests",
+        accessory: "glasses",
+        at: 100,
+        replyTo: null
+      })
+      expect(agents.find(({ id }) => id === "agent-remote")?.self).toBeNull()
       const withExtraField = yield* post({ ...body, eventId: "extra-field", extra: "ignored" })
       expect(withExtraField.status).toBe(400)
       expect(
@@ -2244,14 +2434,32 @@ esac
       expect(withUrl.status).toBe(200)
       expect(Schema.decodeUnknownSync(Schema.fromJsonString(ConnectPost))(withUrl.body).text).toBe(urlText)
       partial = true
+      expect((yield* me("agent-sibling", { mood: "happy" })).body).toContain("Unavailable")
       expect((yield* post({ ...body, eventId: "event-two" })).body).toContain("Unavailable")
       partial = false
       writeFileSync(identityMode, "node-alpha")
+      expect((yield* me("agent-sibling", { mood: "happy" })).body).toContain("UnboundAgent")
+      expect((yield* me("agent-remote", { say: "Remote update" })).status).toBe(200)
+      const remoteDirectory = yield* Effect.promise(() => secureRequestBody(`${canonical}/v1/connect/agents`, headers))
+      expect(
+        Schema.decodeUnknownSync(Schema.fromJsonString(FleetConnectAgentPage))(remoteDirectory.body).agents
+          .find(({ id }) => id === "agent-remote")?.self?.say
+      ).toBe("Remote update")
       expect((yield* post(body)).body).toContain("UnboundAgent")
       expect((yield* post({ ...body, agentId: "agent-remote" })).status).toBe(200)
       writeFileSync(identityMode, "node-foreign")
+      expect((yield* me("agent-one", { mood: "happy" })).body).toContain("Denied")
       expect((yield* post(body)).body).toContain("Denied")
       for (const listener of [server.url, server.tailnetUrl, server.lanWorkUrl]) {
+        expect(
+          (yield* Effect.promise(() =>
+            fetch(`${listener}/v1/connect/me`, {
+              method: "POST",
+              headers: { "x-herdr-agent-id": "agent-one" },
+              body: JSON.stringify({ mood: "happy" })
+            })
+          )).status
+        ).toBe(403)
         expect(
           (yield* Effect.promise(() =>
             fetch(`${listener}/v1/connect/posts`, { method: "POST", body: JSON.stringify(body) })
@@ -2294,7 +2502,6 @@ esac
       machines: [{ host: "SER8", nodeId: "node-ser8" }],
       tailscaleCommand
     }
-    let observedAt = 0
     let present = true
     let partial = false
     const archiveOperations: HostOperations = {
@@ -2333,6 +2540,9 @@ esac
     }
     return Effect.scoped(Effect.gen(function*() {
       yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { force: true, recursive: true })))
+      // The HTTP runtime owns a live Clock; keep this simulated ten-minute absence inside its archive window.
+      const firstSeenAt = (yield* TestClock.withLive(Clock.currentTimeMillis)) - 600_003
+      let observedAt = firstSeenAt
       const store = yield* Effect.acquireRelease(
         JobStore.open(join(root, "jobs.sqlite")),
         (opened) => Effect.sync(() => opened.close())
@@ -2367,9 +2577,9 @@ esac
       expect((yield* page()).agents).toEqual([])
       expect((yield* get("/v1/connect/agents")).status).toBe(200)
       present = false
-      observedAt = 1
+      observedAt = firstSeenAt + 1
       yield* get("/v1/connect/agents")
-      observedAt = 300_001
+      observedAt = firstSeenAt + 300_001
       partial = true
       const partialDirectory = yield* get("/v1/connect/agents")
       expect(partialDirectory.status).toBe(200)
@@ -2380,10 +2590,10 @@ esac
       ).toEqual(["agent-staying"])
       expect((yield* page()).agents).toEqual([])
       partial = false
-      observedAt = 300_002
+      observedAt = firstSeenAt + 300_002
       yield* get("/v1/connect/agents")
       expect((yield* page()).agents).toEqual([])
-      observedAt = 600_002
+      observedAt = firstSeenAt + 600_002
       yield* get("/v1/connect/agents")
       expect((yield* page()).agents).toEqual([{
         host: "ser8",
@@ -2392,11 +2602,11 @@ esac
         kind: "codex",
         work: "project",
         state: "working",
-        firstSeenAt: 0,
-        closedAt: 600_002
+        firstSeenAt,
+        closedAt: firstSeenAt + 600_002
       }])
       const continuation = encodeURIComponent(
-        JSON.stringify({ host: "SER8", agentId: "agent-archive", closedAt: 600_002 })
+        JSON.stringify({ host: "SER8", agentId: "agent-archive", closedAt: firstSeenAt + 600_002 })
       )
       const afterLast = yield* get(`/v1/connect/archive?cursor=${continuation}`)
       expect(afterLast.status).toBe(200)
@@ -2421,7 +2631,7 @@ esac
       expect((yield* get("/v1/connect/archive")).status).toBe(403)
       writeFileSync(identityMode, "allowed")
       present = true
-      observedAt = 600_003
+      observedAt = firstSeenAt + 600_003
       yield* get("/v1/connect/agents")
       expect((yield* page()).agents).toEqual([])
     })).pipe(provideNodeServices)
@@ -3205,7 +3415,7 @@ esac
         return yield* Effect.die("Work listener missing")
       }
       const workUrl = server.workUrl
-      for (const route of ["/v1/modules/today/needs-you", "/v1/modules/unknown/read", "/v1/modules"]) {
+      for (const route of ["/v1/modules/connect/needs-you", "/v1/modules/unknown/read", "/v1/modules"]) {
         const response = yield* Effect.promise(() => fetch(`${workUrl}${route}`))
         expect(response.status).toBe(404)
       }
@@ -4864,6 +5074,174 @@ esac
     ).pipe(provideNodeServices)
   })
 
+  it.effect("keeps a ponging terminal exclusive and releases a silent controller after the heartbeat", () =>
+    Effect.gen(function*() {
+      const server = yield* controllerServer({
+        open: () => Effect.succeed({ events: Stream.never, send: () => Effect.void })
+      })
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] })
+      yield* Effect.addFinalizer(() => Effect.sync(() => vi.useRealTimers()))
+      const alive = yield* controllerClient(server.url)
+      expect(yield* Effect.promise(() => alive.ready)).toBe("ready")
+      const ping = new Promise<void>((resolve) => alive.socket.once("ping", () => resolve()))
+      yield* Effect.promise(() => vi.advanceTimersByTimeAsync(25_000))
+      yield* Effect.promise(() => ping)
+      // Echoing a message synchronizes after the automatic pong reached the server.
+      const echo = new Promise<void>((resolve) => alive.socket.once("pong", () => resolve()))
+      alive.socket.ping()
+      yield* Effect.promise(() => echo)
+      yield* Effect.promise(() => vi.advanceTimersByTimeAsync(25_000))
+      const duplicate = yield* controllerClient(server.url)
+      expect(yield* Effect.promise(() => duplicate.ready)).toBe(4_423)
+      alive.socket.terminate()
+      yield* Effect.promise(() => alive.closed)
+      const silent = yield* controllerClient(server.url, false)
+      expect(yield* Effect.promise(() => silent.ready)).toBe("ready")
+      const silentPing = new Promise<void>((resolve) => silent.socket.once("ping", () => resolve()))
+      yield* Effect.promise(() => vi.advanceTimersByTimeAsync(25_000))
+      yield* Effect.promise(() => silentPing)
+      expect(silent.socket.readyState).toBe(WebSocketClient.OPEN)
+      yield* Effect.promise(() => vi.advanceTimersByTimeAsync(25_000))
+      expect(yield* Effect.promise(() => silent.closed)).toBe(1_006)
+      const replacement = yield* controllerClient(server.url)
+      expect(yield* Effect.promise(() => replacement.ready)).toBe("ready")
+    }).pipe(Effect.scoped, provideNodeServices))
+
+  it.effect("does not exhaust the four-controller cap after five disconnected held releases", () =>
+    Effect.gen(function*() {
+      const allowRelease = yield* Deferred.make<void>()
+      const releaseStarted = yield* Queue.unbounded<string>()
+      const connector: TerminalConnector = {
+        open: (selection) =>
+          Effect.acquireRelease(
+            Effect.succeed({ events: Stream.never, send: () => Effect.void }),
+            () => Queue.offer(releaseStarted, selection.agentId).pipe(Effect.andThen(Deferred.await(allowRelease)))
+          )
+      }
+      const server = yield* controllerServer(connector)
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] })
+      yield* Effect.addFinalizer(() =>
+        Deferred.succeed(allowRelease, undefined).pipe(
+          Effect.andThen(Effect.sync(() => vi.useRealTimers()))
+        )
+      )
+      for (let index = 0; index < 5; index += 1) {
+        const url = new URL(server.url)
+        const agentId = `agent-controller-${index}`
+        url.searchParams.set("agent", agentId)
+        const client = yield* controllerClient(url)
+        expect(yield* Effect.promise(() => client.ready)).toBe("ready")
+        client.socket.terminate()
+        yield* Effect.promise(() => client.closed)
+        expect(yield* Queue.take(releaseStarted)).toBe(agentId)
+        yield* Effect.promise(() => vi.advanceTimersByTimeAsync(10_000))
+      }
+      const replacement = yield* controllerClient(server.url)
+      expect(yield* Effect.promise(() => replacement.ready)).toBe("ready")
+    }).pipe(Effect.scoped, provideNodeServices))
+
+  it.effect("a late release cannot clear the replacement controller's reservation", () =>
+    Effect.gen(function*() {
+      const releaseStarted = yield* Deferred.make<void>()
+      const releaseFinished = yield* Deferred.make<void>()
+      const allowRelease = yield* Deferred.make<void>()
+      let opens = 0
+      const connector: TerminalConnector = {
+        open: () => {
+          opens += 1
+          return opens === 1
+            ? Effect.acquireRelease(
+              Effect.succeed({ events: Stream.never, send: () => Effect.void }),
+              () =>
+                Deferred.succeed(releaseStarted, undefined).pipe(
+                  Effect.andThen(Deferred.await(allowRelease)),
+                  Effect.ensuring(Deferred.succeed(releaseFinished, undefined))
+                )
+            )
+            : Effect.succeed({ events: Stream.never, send: () => Effect.void })
+        }
+      }
+      const server = yield* controllerServer(connector)
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] })
+      yield* Effect.addFinalizer(() =>
+        Deferred.succeed(allowRelease, undefined).pipe(
+          Effect.andThen(Effect.sync(() => vi.useRealTimers()))
+        )
+      )
+      const first = yield* controllerClient(server.url)
+      expect(yield* Effect.promise(() => first.ready)).toBe("ready")
+      first.socket.terminate()
+      yield* Effect.promise(() => first.closed)
+      yield* Deferred.await(releaseStarted)
+      yield* Effect.promise(() => vi.advanceTimersByTimeAsync(10_000))
+      const replacement = yield* controllerClient(server.url)
+      expect(yield* Effect.promise(() => replacement.ready)).toBe("ready")
+      yield* Deferred.succeed(allowRelease, undefined)
+      yield* Deferred.await(releaseFinished)
+      const duplicate = yield* controllerClient(server.url)
+      expect(yield* Effect.promise(() => duplicate.ready)).toBe(4_423)
+      expect(opens).toBe(2)
+    }).pipe(Effect.scoped, provideNodeServices))
+
+  it.effect("releases a failed terminal setup even when its peer never answers the close handshake", () =>
+    Effect.gen(function*() {
+      let opens = 0
+      const connector: TerminalConnector = {
+        open: () => {
+          opens += 1
+          if (opens === 1) {
+            throw new FleetOperationError({
+              cause: undefined,
+              detail: "controller fixture failed",
+              operation: "controller.fixture"
+            })
+          }
+          return Effect.succeed({ events: Stream.never, send: () => Effect.void })
+        }
+      }
+      const server = yield* controllerServer(connector)
+      const broken = yield* controllerClient(server.url)
+      yield* Effect.promise(() =>
+        new Promise<void>((resolve) =>
+          broken.socket.once("open", () => {
+            broken.socket.pause()
+            resolve()
+          })
+        )
+      )
+      const replacement = yield* controllerClient(server.url)
+      expect(yield* Effect.promise(() => replacement.ready)).toBe("ready")
+    }).pipe(Effect.scoped, provideNodeServices))
+
+  it.effect("hub shutdown interrupts a cooperative controller finalizer without leaking its slot", () =>
+    Effect.gen(function*() {
+      const releaseStarted = yield* Deferred.make<void>()
+      const interrupted = yield* Deferred.make<void>()
+      const connector: TerminalConnector = {
+        open: () =>
+          Effect.acquireRelease(
+            Effect.succeed({ events: Stream.never, send: () => Effect.void }),
+            () =>
+              Effect.interruptible(
+                Deferred.succeed(releaseStarted, undefined).pipe(
+                  Effect.andThen(Effect.never),
+                  Effect.onInterrupt(() => Deferred.succeed(interrupted, undefined))
+                )
+              )
+          )
+      }
+      const server = yield* controllerServer(connector)
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] })
+      yield* Effect.addFinalizer(() => Effect.sync(() => vi.useRealTimers()))
+      const client = yield* controllerClient(server.url)
+      expect(yield* Effect.promise(() => client.ready)).toBe("ready")
+      const closing = server.close()
+      yield* Deferred.await(releaseStarted)
+      yield* Effect.promise(() => vi.advanceTimersByTimeAsync(10_000))
+      yield* Effect.promise(() => closing)
+      expect(yield* Deferred.isDone(interrupted)).toBe(true)
+    }).pipe(Effect.scoped, provideNodeServices))
+
   it.effect("releases a disconnected terminal open and closes a clean exit", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-http-terminal-test-"))
     const tailscaleCommand = join(root, "tailscale-test")
@@ -4894,6 +5272,7 @@ esac
       const allowControllerRelease = yield* Deferred.make<void>()
       const controllerReleaseFinished = yield* Deferred.make<void>()
       const shutdownReleaseStarted = yield* Deferred.make<void>()
+      const shutdownReleaseFinished = yield* Deferred.make<void>()
       const allowShutdownRelease = yield* Deferred.make<void>()
       let opens = 0
       let sends = 0
@@ -4957,7 +5336,8 @@ esac
               Effect.succeed(session),
               () =>
                 Deferred.succeed(shutdownReleaseStarted, undefined).pipe(
-                  Effect.andThen(Deferred.await(allowShutdownRelease))
+                  Effect.andThen(Deferred.await(allowShutdownRelease)),
+                  Effect.ensuring(Deferred.succeed(shutdownReleaseFinished, undefined))
                 )
             )
             : Effect.succeed(session)
@@ -5068,6 +5448,17 @@ esac
               JSON.stringify({ type: "terminal.scroll_state", offsetFromBottom: 42, scrollsForwarded: 0 })
             )
 
+            vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] })
+            const warnings = vi.spyOn(Logger.defaultLogger, "log")
+            yield* Effect.addFinalizer(() =>
+              Deferred.succeed(allowControllerRelease, undefined).pipe(
+                Effect.andThen(Deferred.succeed(allowShutdownRelease, undefined)),
+                Effect.andThen(Effect.sync(() => {
+                  vi.useRealTimers()
+                  warnings.mockRestore()
+                }))
+              )
+            )
             const held = yield* Effect.promise(
               () =>
                 new Promise<WebSocketClient>((resolve, reject) => {
@@ -5078,6 +5469,7 @@ esac
             )
             held.close()
             yield* Deferred.await(controllerReleaseStarted)
+            yield* Effect.promise(() => vi.advanceTimersByTimeAsync(9_999))
             const blockedDuplicate = yield* Effect.promise(
               () =>
                 new Promise<number>((resolve, reject) => {
@@ -5088,18 +5480,28 @@ esac
             )
             expect(blockedDuplicate).toBe(4_423)
             expect(opens).toBe(5)
-            yield* Deferred.succeed(allowControllerRelease, undefined)
-            yield* Deferred.await(controllerReleaseFinished)
-            yield* Effect.yieldNow
-
-            yield* Effect.promise(
+            yield* Effect.promise(() => vi.advanceTimersByTimeAsync(1))
+            const replacement = yield* Effect.promise(
               () =>
-                new Promise<void>((resolve, reject) => {
+                new Promise<string | number>((resolve, reject) => {
                   const socket = new WebSocketClient(url)
                   socket.once("error", reject)
-                  socket.once("open", () => resolve())
+                  socket.once("message", () => resolve("ready"))
+                  socket.once("close", (code) => resolve(code))
                 })
             )
+            expect(replacement).toBe("ready")
+            const timeoutWarnings = warnings.mock.calls.map(([entry]) => entry.message).filter((message) =>
+              JSON.stringify(message).includes("TerminalReleaseTimeout")
+            )
+            expect(timeoutWarnings).toEqual([[{
+              _tag: "TerminalReleaseTimeout",
+              host: hostConfig.host,
+              agentId: "agent-1",
+              elapsed: 10_000
+            }]])
+            vi.useRealTimers()
+            warnings.mockRestore()
             const closeFinished = yield* Deferred.make<void>()
             const runPromise = Effect.runPromiseWith(yield* Effect.context<never>())
             const closing = server.close().then(() =>
@@ -5110,6 +5512,10 @@ esac
             yield* Deferred.await(shutdownReleaseStarted)
             expect(yield* Deferred.isDone(closeFinished)).toBe(false)
             yield* Deferred.succeed(allowShutdownRelease, undefined)
+            yield* Deferred.await(shutdownReleaseFinished)
+            expect(yield* Deferred.isDone(closeFinished)).toBe(false)
+            yield* Deferred.succeed(allowControllerRelease, undefined)
+            yield* Deferred.await(controllerReleaseFinished)
             yield* Effect.promise(() => closing)
             expect(yield* Deferred.isDone(closeFinished)).toBe(true)
             expect(opens).toBe(6)
@@ -5591,10 +5997,14 @@ esac
           )
       )
       const response = yield* Effect.promise(() =>
-        hubRequest(`${hub.serveUrl}/v1/modules/today/needs-you`, {
+        hubRequest(`${hub.serveUrl}/v1/modules/connect/needs-you`, {
           headers: hub.headers
         })
       )
+      const retired = yield* Effect.promise(() =>
+        hubRequest(`${hub.serveUrl}/v1/modules/today/needs-you`, { headers: hub.headers })
+      )
+      expect(retired.status).toBe(404)
       expect(response.status, response.body).toBe(200)
       expect(response.cookies).toEqual([])
       const body = Schema.decodeUnknownSync(Schema.TaggedStruct("Complete", {
@@ -5615,7 +6025,7 @@ esac
       const cookie = dashboard.cookies[0]?.split(";", 1).join("")
       if (cookie === undefined) return yield* Effect.die("Dashboard must issue its proof cookie")
       const existingSession = yield* Effect.promise(() =>
-        hubRequest(`${hub.serveUrl}/v1/modules/today/needs-you`, {
+        hubRequest(`${hub.serveUrl}/v1/modules/connect/needs-you`, {
           headers: { ...hub.headers, cookie }
         })
       )
@@ -5722,23 +6132,23 @@ esac
       const get = (path: string) => Effect.promise(() => hubRequest(`${hub.serveUrl}${path}`, { headers: hub.headers }))
       hub.deny()
       const dashboard = yield* get("/v1/dashboard")
-      const denied = yield* get("/v1/modules/today/needs-you")
+      const denied = yield* get("/v1/modules/connect/needs-you")
       expect(denied.status).toBe(dashboard.status)
       expect(denied.status).toBe(403)
       expect(reads).toBe(0)
       hub.allow()
-      const malformed = yield* get("/v1/modules/today/needs-you?extra=yes")
+      const malformed = yield* get("/v1/modules/connect/needs-you?extra=yes")
       expect(malformed.status).toBe(400)
       expect(JSON.parse(malformed.body)).toEqual({ error: "invalid_query" })
       expect(reads).toBe(0)
-      expect((yield* get("/v1/modules/today/needs-you")).status).toBe(200)
+      expect((yield* get("/v1/modules/connect/needs-you")).status).toBe(200)
       expect(reads).toBe(1)
       for (const path of ["/v1/modules", "/v1/modules/today/missing", "/v1/modules/unknown/needs-you"]) {
         expect((yield* get(path)).status).toBe(404)
       }
       for (const url of [hub.server.url, hub.server.tailnetUrl]) {
         if (url === null) return yield* Effect.die("Expected a listener URL")
-        const wrongListener = yield* Effect.promise(() => fetch(`${url}/v1/modules/today/needs-you`))
+        const wrongListener = yield* Effect.promise(() => fetch(`${url}/v1/modules/connect/needs-you`))
         expect(wrongListener.status).toBe(404)
         yield* Effect.promise(() => wrongListener.text())
       }
@@ -5805,7 +6215,7 @@ esac
           })
         )
       const get = () =>
-        Effect.promise(() => hubRequest(`${hub.serveUrl}/v1/modules/today/needs-you`, { headers: hub.headers }))
+        Effect.promise(() => hubRequest(`${hub.serveUrl}/v1/modules/connect/needs-you`, { headers: hub.headers }))
       setOnline(true)
       const online = yield* get()
       expect(online.status).toBe(200)
@@ -5863,7 +6273,7 @@ esac
         })
       )
       const get = () =>
-        Effect.promise(() => hubRequest(`${hub.serveUrl}/v1/modules/today/needs-you`, { headers: hub.headers }))
+        Effect.promise(() => hubRequest(`${hub.serveUrl}/v1/modules/connect/needs-you`, { headers: hub.headers }))
       const localFailure = yield* get()
       expect(JSON.parse(localFailure.body)).toEqual({
         _tag: "Partial",

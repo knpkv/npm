@@ -1,5 +1,14 @@
 export type ConnectWorkspaceFocusFailureReason = "detached_element" | "focus_rejected"
 
+/** Tell the user how to recover without exposing the browser transition's internal code. */
+export const connectWorkspaceFocusFailureMessage = (reason: ConnectWorkspaceFocusFailureReason): string => {
+  const messages = {
+    detached_element: "The terminal view changed before focus could move. Try again.",
+    focus_rejected: "Couldn’t switch views while another panel has focus. Close it and try again."
+  } satisfies Record<ConnectWorkspaceFocusFailureReason, string>
+  return messages[reason]
+}
+
 export type ConnectWorkspaceFocusTransition = { readonly _tag: "moved" } | {
   readonly _tag: "failed"
   readonly reason: ConnectWorkspaceFocusFailureReason

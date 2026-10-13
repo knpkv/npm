@@ -11,7 +11,11 @@ export const ModuleDescriptor = Schema.Struct({
   id: Segment,
   label: Label,
   defaultPage: Segment,
-  pages: Schema.Array(Schema.Struct({ id: Segment, label: Label })).check(Schema.isMinLength(1)),
+  pages: Schema.Array(Schema.Struct({
+    id: Segment,
+    label: Label,
+    showInPhoneTitle: Schema.optionalKey(Schema.Boolean)
+  })).check(Schema.isMinLength(1)),
   listeners: Schema.Array(ModuleListener).check(Schema.isMinLength(1)),
   requires: Schema.Array(Schema.Literals(["read", "write"]))
 })
@@ -96,6 +100,26 @@ export const fleetModule = defineModule({
 
 export type FleetModuleDestination = ModuleDestination<typeof fleetModule>
 
+/** Canonical Fleet keeps decisions and work; standalone Fleet retains its legacy four-page descriptor. */
+export const fleetHubModule = defineModule({
+  ...fleetModule,
+  pages: [{ id: "approvals", label: "Approvals", showInPhoneTitle: true }, {
+    id: "work",
+    label: "Work",
+    showInPhoneTitle: true
+  }]
+})
+
+/** Connect is the agent home; Fleet's standalone /connect/ owner retains stage and terminal authority. */
+export const connectModule = defineModule({
+  id: "connect",
+  label: "Connect",
+  defaultPage: "overview",
+  pages: [{ id: "overview", label: "Connect" }],
+  listeners: ["serve"],
+  requires: ["read", "write"]
+})
+
 export const todayModule = defineModule({
   id: "today",
   label: "Today",
@@ -108,9 +132,13 @@ export const todayModule = defineModule({
 /** Usage details reads the existing Fleet reports; it grants no action capability. */
 export const usageModule = defineModule({
   id: "usage",
-  label: "Usage details",
+  label: "Usage",
   defaultPage: "limits",
-  pages: [{ id: "limits", label: "Limits" }, { id: "tokens", label: "Tokens" }],
+  pages: [{ id: "limits", label: "Limits", showInPhoneTitle: true }, { id: "tokens", label: "Tokens" }, {
+    id: "by-tool",
+    label: "By tool",
+    showInPhoneTitle: true
+  }],
   listeners: ["serve"],
   requires: ["read"]
 })

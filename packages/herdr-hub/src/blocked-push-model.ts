@@ -1,10 +1,10 @@
-import { agentStateBucket, ConnectAgent } from "@knpkv/herdr-connect/model"
+import { ConnectAgent, connectAgentGroup } from "@knpkv/herdr-connect/model"
 import { Schema } from "effect"
 
 /** The notification bucket for known Herdr states; unavailable or new states preserve episode evidence. */
 export const blockedAgentBucket = (state: string): "blocked" | "needs-you" | "inactive" | "unknown" => {
-  const bucket = agentStateBucket(state)
-  return bucket === null ? "unknown" : bucket === "needs-you"
+  const bucket = connectAgentGroup(state, { presentation: "push" })
+  return bucket === "unknown" ? "unknown" : bucket === "needs-you"
     ? state.toLocaleLowerCase("en-US") === "blocked" ? "blocked" : "needs-you"
     : "inactive"
 }
@@ -61,6 +61,31 @@ export const BlockedPushSettings = Schema.Struct({
   quietHours: Schema.NullOr(Schema.Struct({ startMinute: Minute, endMinute: Minute, timeZone: TimeZone }))
 })
 export type BlockedPushSettings = typeof BlockedPushSettings.Type
+/** Device edits carry only their intent, so another device's preferences remain intact. */
+export const BlockedPushMutation = Schema.TaggedUnion({
+  SetAgentMute: { agent: PushAgentKey, muted: Schema.Boolean },
+  SetQuietHours: { quietHours: BlockedPushSettings.fields.quietHours }
+})
+export type BlockedPushMutation = typeof BlockedPushMutation.Type
+
+export const applyBlockedPushMutation = (
+  settings: BlockedPushSettings,
+  mutation: BlockedPushMutation
+): BlockedPushSettings =>
+  BlockedPushMutation.match(mutation, {
+    SetAgentMute: ({ agent, muted }) => {
+      const matches = (entry: typeof PushAgentKey.Type) =>
+        entry.host.toLowerCase() === agent.host.toLowerCase() && entry.agentId === agent.agentId
+      return {
+        ...settings,
+        mutedAgents: muted
+          ? settings.mutedAgents.some(matches) ? settings.mutedAgents : [...settings.mutedAgents, agent]
+          : settings.mutedAgents.filter((entry) => !matches(entry))
+      }
+    },
+    SetQuietHours: ({ quietHours }) => ({ ...settings, quietHours })
+  })
+
 export const StageHeartbeat = Schema.Struct({
   clientId: Label,
   target: Schema.NullOr(PushAgentKey)

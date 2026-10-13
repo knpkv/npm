@@ -1,4 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
+import { readFileSync } from "node:fs"
 
 import { agentCharacter, characterSeed, creaturePalette, FOOT } from "../src/character.js"
 
@@ -100,5 +101,25 @@ describe("creaturePalette", () => {
   it("desaturates closed colours to ten percent without changing lightness or hue", () => {
     expect(creaturePalette("atlas", "ds-rly", "iris", 0.1).p58).toBe("oklch(from #7173d7 l calc(c * 0.1) h)")
     expect(creaturePalette("atlas", "ds-rly", "iris", 0.1).sclera).toBe("#ffffff")
+  })
+})
+
+describe("creature keyframes", () => {
+  it("scales only stale brow paths, with an identity reset for closed brows", () => {
+    const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8")
+    const browRules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+      .filter(([, selector]) => selector?.includes(".connect-creature-brow"))
+    expect(browRules.length).toBeGreaterThan(0)
+    for (const [, selector, declarations] of browRules) {
+      expect(declarations).not.toMatch(/\b(?:transform|skew)\s*:/)
+      if (/\bscale\s*:/.test(declarations ?? "")) {
+        if (selector?.trim() === ".connect-creature[data-closed] .connect-creature-brow") {
+          expect(/\bscale\s*:\s*([^;]+);/.exec(declarations ?? "")?.[1]).toBe("1")
+        } else {
+          expect(selector?.trim()).toBe(".connect-creature[data-stale] .connect-creature-brow")
+          expect(declarations).toContain("scale: 1 0.45;")
+        }
+      }
+    }
   })
 })

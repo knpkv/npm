@@ -1,7 +1,7 @@
 import { expect, it } from "@effect/vitest"
 import { Deferred, Effect, Fiber, Layer, Schema } from "effect"
 import { TestClock } from "effect/testing"
-import { defineModule, fleetModule, todayModule } from "../src/module-contract.js"
+import { connectModule, defineModule, fleetModule } from "../src/module-contract.js"
 import { NeedsYouProviderResult, NeedsYouResult } from "../src/module-needs-you.js"
 import { dispatchModuleRoute, makeModuleLayer, ModuleHandlers, type ServerModule } from "../src/module-server.js"
 
@@ -25,15 +25,15 @@ const reading = NeedsYouProviderResult.make({
   issues: []
 })
 
-const readToday = Effect.fnUntraced(function*(providers: ReadonlyArray<ServerModule>) {
+const readApprovals = Effect.fnUntraced(function*(providers: ReadonlyArray<ServerModule>) {
   const modules = [
-    { descriptor: todayModule, handlers: Layer.succeed(ModuleHandlers, { routes: [] }) },
+    { descriptor: connectModule, handlers: Layer.succeed(ModuleHandlers, { routes: [] }) },
     ...providers
   ]
   const context = yield* Layer.build(makeModuleLayer(modules.map((module) => module.descriptor), modules))
   return yield* dispatchModuleRoute({
     method: "GET",
-    url: new URL("https://hub.example/v1/modules/today/needs-you"),
+    url: new URL("https://hub.example/v1/modules/connect/needs-you"),
     listener: "serve",
     authorize: Effect.succeed({ login: "example-viewer" }),
     sameOrigin: Effect.void,
@@ -43,7 +43,7 @@ const readToday = Effect.fnUntraced(function*(providers: ReadonlyArray<ServerMod
 
 it.effect("rejects a provider emitting another module's destination", () =>
   Effect.gen(function*() {
-    const response = yield* readToday([{
+    const response = yield* readApprovals([{
       descriptor: codeModule,
       handlers: Layer.succeed(ModuleHandlers, {
         routes: [],
@@ -80,7 +80,7 @@ it.effect("caps a provider at 256 sorted rows and reports truncation", () =>
         expiresAt: 300 - index
       }))
     })
-    const response = yield* readToday([{
+    const response = yield* readApprovals([{
       descriptor: fleetModule,
       handlers: Layer.succeed(ModuleHandlers, {
         routes: [],
@@ -127,7 +127,7 @@ it.effect("deduplicates whole rows by local identity and sorts expiry, creation 
         }
       ]
     })
-    const response = yield* readToday([{
+    const response = yield* readApprovals([{
       descriptor: fleetModule,
       handlers: Layer.succeed(ModuleHandlers, {
         routes: [],
@@ -150,7 +150,7 @@ it.effect("deduplicates whole rows by local identity and sorts expiry, creation 
 it.effect("returns a Partial list after a provider exceeds the four-second deadline", () =>
   Effect.gen(function*() {
     const started = yield* Deferred.make<void>()
-    const request = yield* readToday([
+    const request = yield* readApprovals([
       {
         descriptor: fleetModule,
         handlers: Layer.succeed(ModuleHandlers, {
@@ -186,7 +186,7 @@ it.effect("refuses unknown operation kinds before rendering a provider reading",
     for (const kind of ["constructor", "toString", "new.operation"]) {
       const row = { ...first }
       Object.defineProperty(row, "kind", { value: kind })
-      const response = yield* readToday([{
+      const response = yield* readApprovals([{
         descriptor: fleetModule,
         handlers: Layer.succeed(ModuleHandlers, {
           routes: [],

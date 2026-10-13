@@ -117,9 +117,9 @@
   /* The cards and history live in the Usage tab; the line links there. */
   .connect-limits-link {
     align-items: center;
-    color: var(--rly-color-text-2);
+    color: var(--rly-color-text-1);
     display: inline-flex;
-    font-size: var(--rly-type-meta-size);
+    font: var(--rly-type-label-weight) 0.875rem / 1.25rem var(--rly-type-label-font);
     gap: var(--rly-space-8);
     inline-size: fit-content;
     position: relative;
@@ -473,17 +473,13 @@
     outline-offset: -1px;
   }
 
-  .connect-attention-count[data-attention]::before {
-    content: " ·";
-    white-space: pre;
-  }
   .connect-row-separator::before {
-    content: " · ";
+    content: ", ";
     white-space: pre;
   }
 
   .connect-agent time {
-    color: var(--rly-color-text-3);
+    color: var(--rly-color-text-2);
     text-align: end;
     font-family: "Geist Mono", ui-monospace, monospace;
     font-size: var(--rly-type-meta-size);
@@ -538,7 +534,7 @@
 
   /* The directory's read time changes only per poll; tabular digits keep its width still. */
   .connect-updated {
-    color: var(--rly-color-text-3);
+    color: var(--rly-color-text-2);
     display: block;
     font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
       var(--rly-type-meta-font);
@@ -2730,8 +2726,20 @@
   }
 
   .connect-family .connect-agent {
+    border-block-end-color: transparent;
     inline-size: 100%;
     min-block-size: 44px;
+  }
+
+  /* The divider starts at the family's content inset; the transparent border keeps row geometry. */
+  .connect-family .connect-agent:not(:last-child)::before {
+    background: var(--rly-color-border-1);
+    block-size: 1px;
+    content: "";
+    inset-block-end: -1px;
+    inset-inline: 13px 1px;
+    pointer-events: none;
+    position: absolute;
   }
 
   .connect-family .connect-agent:last-child {
@@ -2913,7 +2921,7 @@
 
   .connect-filter-summary {
     align-items: center;
-    color: var(--rly-color-text-3);
+    color: var(--rly-color-text-2);
     display: flex;
     flex-wrap: wrap;
     font-size: var(--rly-type-meta-size);
@@ -2951,8 +2959,56 @@
     border-block-start: 1px solid var(--rly-color-border-1);
     margin-block-start: var(--rly-space-24);
     display: grid;
-    gap: var(--rly-space-12);
+    /* The compact Usage link can extend 12px below its line; keep the standalone navigation clear. */
+    gap: var(--rly-space-16);
     padding-block-start: var(--rly-space-24);
+    position: relative;
+  }
+
+  .connect-directory-secondary .fleet-app-nav {
+    flex-wrap: wrap;
+  }
+
+  .connect-directory-secondary .fleet-app-nav a {
+    align-items: center;
+    display: inline-flex;
+    min-block-size: 44px;
+  }
+
+  /* The stack is a sibling, so its sticky containing block includes the whole directory. */
+  .connect-agents {
+    --connect-pin-inset: var(--rly-space-24);
+    --connect-pin-height: calc(
+      var(--connect-pin-rows, 0) * 48px + max(0, var(--connect-pin-rows, 0) - 1) * var(--rly-space-8)
+    );
+  }
+
+  .connect-directory-secondary[data-pinned] {
+    min-block-size: calc(var(--rly-space-16) + var(--connect-pin-height) + var(--connect-pin-inset));
+    padding-inline-end: 260px;
+  }
+
+  @media (max-width: 640px) {
+    .connect-agents {
+      --connect-pin-inset: calc(var(--app-bottom-inset, 0px) + var(--rly-space-12) + env(safe-area-inset-bottom, 0px));
+    }
+
+    .connect-directory-secondary[data-pinned] {
+      padding-inline-end: 156px;
+    }
+  }
+
+  @media (min-width: 701px) {
+    .connect-directory-secondary .connect-limits {
+      align-items: center;
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--rly-space-16);
+    }
+
+    .connect-directory-secondary .connect-limits-problem {
+      flex-basis: 100%;
+    }
   }
 
   .connect-cast-family {
@@ -3141,6 +3197,10 @@
     border-radius: var(--rly-space-8);
   }
 
+  .connect-search input::-webkit-search-cancel-button {
+    appearance: none;
+  }
+
   .connect-filter-row {
     background: var(--rly-color-surface-1);
     border-radius: var(--rly-space-16);
@@ -3155,17 +3215,26 @@
     font-weight: var(--rly-type-label-weight);
   }
 
-  .connect-filters-toggle[aria-expanded="true"] {
+  .connect-filters-toggle[aria-expanded="true"],
+  .connect-filters-toggle[data-active="true"] {
     background: var(--rly-color-surface-3);
+  }
+
+  .connect-filters-toggle .connect-filter-count {
+    background: var(--rly-color-action-background);
+    border-radius: 999px;
+    color: var(--rly-color-action-foreground);
+    display: inline-grid;
+    font-size: var(--rly-type-meta-size);
+    min-block-size: 18px;
+    min-inline-size: 18px;
+    padding-inline: var(--rly-space-4);
+    place-items: center;
   }
 
   .connect-filter-summary {
     gap: var(--rly-space-4);
     margin-block: var(--rly-space-12) var(--rly-space-20);
-  }
-
-  .connect-filter-summary > span + span::before {
-    content: "· ";
   }
 
   .connect-family-count {
@@ -3175,12 +3244,8 @@
     margin-block: 0 var(--rly-space-8);
   }
 
-  .connect-attention-count[data-attention]::before {
-    content: " ·";
-    white-space: pre;
-  }
   .connect-row-separator::before {
-    content: " · ";
+    content: ", ";
     white-space: pre;
   }
 
@@ -3194,10 +3259,6 @@
 
   .connect-agent > .connect-creature {
     align-self: start;
-  }
-
-  .connect-family .connect-agent[data-depth]:not([data-depth="0"]) {
-    background: var(--rly-color-surface-3);
   }
 
   .connect-family .connect-agent:first-child {
@@ -3223,9 +3284,86 @@
   .connect-empty {
     margin: 0;
   }
+
+  .connect-directory-error {
+    align-items: start;
+    border-color: var(--rly-color-blocked-ink);
+    grid-template-columns: 20px minmax(0, 1fr);
+    gap: var(--rly-space-16);
+    padding: var(--rly-space-24);
+  }
+
+  .connect-directory-error > svg {
+    color: var(--rly-color-blocked-ink);
+  }
+
+  .connect-directory-error-copy {
+    display: grid;
+    gap: var(--rly-space-12);
+    min-inline-size: 0;
+  }
+
+  .connect-directory-error-copy h2 {
+    margin: 0;
+  }
+
+  .connect-compact-secondary,
+  .connect-scope-clear {
+    position: relative;
+  }
+
+  .connect-compact-secondary::after,
+  .connect-scope-clear::after {
+    content: "";
+    inset: min(0px, (100% - 2.75rem) / 2);
+    position: absolute;
+  }
+
+  .connect-no-matches {
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+  }
+
+  .connect-limits-problem {
+    align-items: start;
+    background: var(--rly-color-surface-1);
+    border: 1px solid var(--rly-color-held-ink);
+    border-radius: var(--rly-space-16);
+    display: grid;
+    gap: var(--rly-space-8);
+    grid-template-columns: 16px minmax(0, 1fr);
+    padding: var(--rly-space-12);
+  }
+
+  .connect-limits-problem > svg {
+    color: var(--rly-color-held-ink);
+  }
+
+  .connect-limits-problem p {
+    margin: 0;
+  }
   .connect-empty p {
     margin: 0;
   }
+  .connect-empty > p:first-child {
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+  }
+
+  /* Supporting copy uses the reference's regular weight, without changing shared Rly type tokens. */
+  .connect-empty p,
+  .connect-limits-problem p,
+  .connect-family-missing p,
+  .connect-loading-copy,
+  .connect-embedded-intro > .connect-attention-count,
+  .connect-header > .connect-attention-count,
+  .connect-updated,
+  .connect-filter-summary,
+  .connect-family .connect-agent-copy small,
+  .connect-family .connect-agent-work {
+    font-weight: 400;
+  }
+
   .connect-empty button {
     justify-self: start;
   }
@@ -3305,13 +3443,16 @@
   }
 
   .connect-family-missing {
-    background: var(--rly-color-surface-3);
+    background: var(--rly-color-surface-2);
     border-start-start-radius: inherit;
     border-start-end-radius: inherit;
     border-block-end: 1px solid var(--rly-color-border-1);
-    display: grid;
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
     font-size: var(--rly-type-meta-size);
-    gap: var(--rly-space-4);
+    line-height: var(--rly-type-meta-line-height);
+    gap: var(--rly-space-4) var(--rly-space-8);
     padding: var(--rly-space-12);
   }
   .connect-family-missing > span {
@@ -3323,6 +3464,7 @@
   .connect-family-missing p {
     color: var(--rly-color-text-2);
     margin: 0;
+    min-inline-size: 0;
   }
 
   .connect-directory-toolbar {
@@ -3560,7 +3702,8 @@
     gap: var(--rly-space-8);
     min-block-size: 44px;
     min-inline-size: 0;
-    padding: var(--rly-space-4) var(--rly-space-4) var(--rly-space-4) var(--rly-space-4);
+    padding-block: var(--rly-space-4);
+    padding-inline: var(--rly-space-4) var(--rly-space-12);
   }
 
   .connect-pin-open .connect-creature {
@@ -3570,7 +3713,7 @@
   }
 
   .connect-pin-name {
-    font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
+    font: var(--rly-type-label-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
       var(--rly-type-label-font);
     max-inline-size: 10em;
     overflow: clip;
@@ -3578,24 +3721,24 @@
     white-space: nowrap;
   }
 
-  /* A full 44px to press, reaching into the margin after it and never over the open button before it. */
+  /* Sibling controls own disjoint hit areas; the leading pin is the unpin affordance. */
   .connect-pin-unpin {
-    block-size: 36px;
+    block-size: 44px;
     border-radius: 999px;
     color: var(--rly-color-text-2);
     display: grid;
     flex: none;
     font-size: 1.1rem;
-    inline-size: 36px;
+    inline-size: 44px;
     line-height: 1;
-    margin-inline-end: var(--rly-space-8);
     place-items: center;
     position: relative;
   }
 
+  /* The circular glyph control retains an entire 44px square hit area, separate from Open. */
   .connect-pin-unpin::after {
     content: "";
-    inset: -4px -8px -4px 0;
+    inset: 0;
     position: absolute;
   }
 
@@ -3659,41 +3802,101 @@
     color: var(--rly-color-text-2);
   }
 
-  /* Over the directory: a stack in the end corner, clear of the safe area; the list opens above it. */
+  /* Sticky uses the actual scroll owner, including a page-scrolling hub on phones. At the end the
+     negative margin overlays only the footer's reserved corner; the list still ends above it. */
   .connect-pins[data-placement="float"] {
     align-items: end;
     flex-direction: column;
-    inset-block-end: calc(var(--rly-space-16) + env(safe-area-inset-bottom, 0px));
+    inset-block-end: var(--connect-pin-inset);
+    inline-size: fit-content;
+    margin-block-start: calc(-1 * (var(--connect-pin-height) + var(--connect-pin-inset)));
+    margin-block-end: var(--connect-pin-inset);
+    margin-inline-start: auto;
     /* Both sides' insets: inline-end is the left edge in right-to-left text. */
-    inset-inline-end: calc(var(--rly-space-16) + max(env(safe-area-inset-left, 0px), env(safe-area-inset-right, 0px)));
-    position: fixed;
+    inset-inline-end: max(env(safe-area-inset-left, 0px), env(safe-area-inset-right, 0px));
+    position: sticky;
     z-index: 2;
+  }
+
+  .connect-pins[data-placement="float"] .connect-pin {
+    block-size: 48px;
+  }
+
+  .connect-pins[data-placement="float"] .connect-pin > .connect-pin-open {
+    block-size: 46px;
+    gap: var(--rly-space-6);
+  }
+
+  .connect-pins[data-placement="float"] .connect-pin > .connect-pin-open .connect-creature {
+    inline-size: 28px;
+  }
+
+  .connect-pins[data-placement="float"] .connect-pin > .connect-pin-unpin {
+    margin-inline-start: calc(-1 * var(--rly-space-8));
+    margin-inline-end: calc(-1 * var(--rly-space-12));
+    z-index: 1;
+  }
+
+  .connect-pins[data-placement="float"] .connect-pins-more {
+    block-size: 48px;
+  }
+
+  @media (max-width: 640px) {
+    .connect-pins[data-placement="float"] .connect-pin {
+      inline-size: 144px;
+      max-inline-size: 144px;
+    }
+
+    .connect-pins[data-placement="float"] .connect-pin > .connect-pin-unpin {
+      /* Keep the square target; its glyph occupies only the leading 20px of the compact pill. */
+      margin-inline-end: calc(-1 * var(--rly-space-16));
+    }
+
+    .connect-pins[data-placement="float"] .connect-pin > .connect-pin-open {
+      align-content: center;
+      display: grid;
+      flex: 1;
+      gap: 0 var(--rly-space-4);
+      grid-template-columns: 28px minmax(0, 1fr);
+      grid-template-rows: repeat(2, 16px);
+      text-align: start;
+    }
+
+    .connect-pins[data-placement="float"] .connect-pin > .connect-pin-open .connect-creature {
+      grid-row: 1 / 3;
+      inline-size: 28px;
+    }
+
+    .connect-pins[data-placement="float"] .connect-pin-name,
+    .connect-pins[data-placement="float"] .connect-pin-state {
+      min-inline-size: 0;
+    }
+
+    .connect-pins[data-placement="float"] .connect-pin-state {
+      grid-column: 2;
+      white-space: nowrap;
+    }
+
+    .connect-pins[data-placement="float"] .connect-pin-state > span {
+      gap: var(--rly-space-4);
+    }
+
+    .connect-pins[data-placement="float"] .connect-pin-state svg {
+      block-size: 12px;
+      inline-size: 12px;
+    }
   }
 
   .connect-pins[data-placement="float"] .connect-pin,
   .connect-pins[data-placement="float"] .connect-pins-more {
-    backdrop-filter: blur(16px) saturate(1.4);
-    background: color-mix(in oklch, var(--rly-color-surface-1) 82%, transparent);
+    background: var(--rly-color-surface-1);
+    border-color: var(--rly-color-border-2);
     box-shadow: 0 16px 40px -18px oklch(0% 0 none / 50%);
   }
 
   .connect-pins[data-placement="float"] .connect-pins-overflow {
     inset-block-end: calc(100% + var(--rly-space-8));
     inset-inline-end: 0;
-  }
-
-  /* On a phone the corner stays small: characters only; their names are in their labels and the list. */
-  @media (max-width: 47.99rem) {
-    .connect-pins[data-placement="float"] .connect-pin :is(.connect-pin-name, .connect-pin-state) {
-      display: none;
-    }
-  }
-
-  /* Room at the end of the directory, so the last row can scroll clear of the stack: one row per chip. */
-  .connect-agents[data-pinned] {
-    padding-block-end: calc(
-      var(--rly-space-24) + var(--connect-pin-rows, 1) * (44px + var(--rly-space-8)) + env(safe-area-inset-bottom, 0px)
-    );
   }
 
   /* In the terminal's bar: characters only, side by side; the list opens below, over the output only while open. */
@@ -3773,8 +3976,13 @@
   }
   /* The legacy hub auto-height override must not expand a bounded desktop directory past its scroll owner. */
   @media (min-width: 701px) {
-    .connect-shell.connect-shell-embedded .connect-workspace,
-    .connect-shell.connect-shell-embedded .connect-directory-screen {
+    /* The embedded shell begins below the measured tabs, not at the viewport's block start. */
+    .connect-shell.connect-shell-embedded:not([data-connect-presentation="home"]) {
+      block-size: max(0px, calc(100dvh - var(--fleet-shell-tab-bottom, 0px)));
+    }
+
+    .connect-shell.connect-shell-embedded:not([data-connect-presentation="home"]) .connect-workspace,
+    .connect-shell.connect-shell-embedded:not([data-connect-presentation="home"]) .connect-directory-screen {
       block-size: 100%;
       min-block-size: 0;
     }
@@ -3949,16 +4157,23 @@
 
 @layer connect {
   .connect-deep-parent {
+    align-items: center;
     background: transparent;
     border: 0;
     color: var(--rly-color-text-1);
     cursor: pointer;
+    display: inline-flex;
     font: inherit;
     font-size: var(--rly-type-meta-size);
+    font-weight: var(--rly-type-label-weight);
+    gap: var(--rly-space-8);
     justify-self: start;
     margin-inline-start: 97px;
     min-block-size: 44px;
     padding-inline: var(--rly-space-12);
+    text-decoration: none;
+  }
+  .connect-deep-parent-label {
     text-decoration: underline;
   }
   .connect-deep-parent:focus-visible {
@@ -4017,6 +4232,900 @@
     }
     .connect-family .connect-agent[data-depth]:not([data-depth="0"]) {
       background: var(--rly-color-surface-1);
+    }
+  }
+}
+
+@layer connect {
+  .connect-shell[data-connect-presentation="home"],
+  [data-connect-presentation="home"] .connect-workspace,
+  [data-connect-presentation="home"] .connect-directory-screen {
+    block-size: auto;
+    min-block-size: 0;
+    overflow: visible;
+  }
+
+  .connect-shell[data-connect-presentation="home"] {
+    padding-block-start: 0;
+  }
+
+  [data-connect-presentation="home"] .connect-directory-screen {
+    grid-template-rows: auto auto auto;
+  }
+
+  .connect-home-intro {
+    display: grid;
+    gap: 0;
+  }
+
+  .connect-home-intro h1 {
+    font-size: 1.75rem;
+    font-weight: 620;
+    letter-spacing: -0.035em;
+    line-height: 1.2;
+  }
+
+  .connect-home-intro p {
+    font-size: 0.9375rem;
+  }
+
+  [data-connect-presentation="home"] .connect-agents {
+    inline-size: 100%;
+    overflow: visible;
+    padding-inline: 0;
+  }
+
+  .connect-home-directory {
+    display: grid;
+    gap: var(--rly-space-20);
+  }
+
+  .connect-home-filter-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--rly-space-12);
+    align-items: end;
+  }
+
+  .connect-home-filter-row[hidden] {
+    display: none;
+  }
+
+  .connect-home-filter-row > label {
+    display: grid;
+    gap: var(--rly-space-4);
+  }
+
+  .connect-home-filter-row select {
+    min-block-size: 2.75rem;
+    max-inline-size: 100%;
+    font: inherit;
+    font-size: 1rem;
+  }
+
+  .connect-home-group {
+    display: grid;
+    gap: 0.6rem;
+  }
+
+  .connect-home-group-heading {
+    display: flex;
+    align-items: center;
+    gap: var(--rly-space-8);
+    min-block-size: 2.75rem;
+  }
+
+  .connect-home-group-heading h2 {
+    margin: 0;
+    font-size: 1.05rem;
+    font-weight: 620;
+  }
+
+  .connect-home-group-heading h2 > span {
+    color: var(--rly-color-text-2);
+    font-size: 0.8125rem;
+    font-weight: 400;
+    margin-inline-start: var(--rly-space-4);
+  }
+
+  .connect-home-group-heading button {
+    margin-inline-start: auto;
+    border: 0;
+    background: var(--rly-color-surface-2);
+  }
+
+  .connect-home-cards {
+    display: grid;
+    gap: 0.6rem;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .connect-home-agent {
+    --connect-creature-track: 3.25rem;
+    align-items: start;
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-group);
+    background: var(--rly-color-surface-1);
+    gap: 0.25rem 0.8rem;
+    min-block-size: 2.75rem;
+    padding: 0.8rem 0.9rem;
+    font-weight: 430;
+    line-height: 1.5;
+  }
+
+  .connect-home-agent > .connect-creature-state {
+    display: none;
+  }
+
+  .connect-home-agent-title {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.2rem 0.6rem;
+  }
+
+  .connect-home-agent .connect-agent-copy {
+    gap: 0.2rem;
+  }
+
+  .connect-home-agent .connect-agent-copy small,
+  .connect-home-group[data-home-group="ready"] .connect-agent-copy > span:last-child,
+  .connect-home-last-activity {
+    font-size: 0.75rem;
+    font-weight: 430;
+    line-height: 1.5;
+  }
+
+  .connect-home-agent .connect-agent-work {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    font-size: 0.875rem;
+    line-height: 1.5;
+  }
+
+  .connect-home-last-activity,
+  .connect-home-group[data-home-group="ready"] .connect-agent-copy > span:last-child {
+    color: var(--rly-color-text-2);
+  }
+
+  .connect-home-agent:active {
+    background: var(--rly-color-surface-2);
+  }
+
+  .connect-home-agent:disabled {
+    cursor: not-allowed;
+  }
+
+  @media (max-width: 40rem) {
+    .connect-home-cards {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .connect-home-agent {
+      --connect-creature-track: 2.75rem;
+    }
+  }
+}
+
+@layer connect {
+  [data-connect-presentation="home"] .connect-agents {
+    display: grid;
+    align-content: start;
+    gap: var(--rly-space-20);
+  }
+
+  .connect-home-failure {
+    display: grid;
+    gap: 0.2rem;
+    padding-block: 0.75rem;
+    padding-inline: 1rem;
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-group);
+    background: var(--rly-color-surface-1);
+    font-size: 0.875rem;
+    font-weight: 430;
+    line-height: 1.5;
+  }
+}
+
+@layer connect {
+  .connect-home-read-notice {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem 1rem;
+    align-items: center;
+    justify-content: space-between;
+    margin-inline: var(--rly-space-40);
+    margin-block-start: var(--rly-space-24);
+    padding-block: 0.75rem;
+    padding-inline: 1rem;
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-group);
+    background: var(--rly-color-surface-1);
+    font-size: 0.875rem;
+    font-weight: 430;
+    line-height: 1.5;
+  }
+
+  .connect-home-read-notice > div {
+    display: grid;
+    gap: 0.2rem;
+    min-inline-size: 0;
+  }
+
+  .connect-home-tap {
+    min-block-size: 2.75rem;
+    padding-block: 0;
+    border-radius: var(--rly-radius-control);
+    font: 430 1rem / 1.5 var(--rly-font-ui);
+  }
+
+  @media (max-width: 40rem) {
+    .connect-home-tap {
+      min-block-size: var(--rly-control-height-default);
+    }
+
+    .connect-home-read-notice {
+      margin-inline: var(--rly-space-16);
+      margin-block-start: var(--rly-space-16);
+    }
+  }
+}
+
+@layer connect {
+  .connect-stage-sheet[data-connect-stage-presentation="home"] {
+    block-size: auto;
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-overlay);
+    inline-size: 28.75rem;
+    inset-block: var(--rly-space-16);
+    inset-inline-end: var(--rly-space-16);
+    max-inline-size: calc(100vw - var(--rly-space-32));
+  }
+  /* Sheet's retained title still names the dialog; Home owns only its visible navigation header. */
+  .connect-stage-sheet[data-connect-stage-presentation="home"] > div:first-child {
+    display: none;
+  }
+  .connect-home-stage-header {
+    align-items: center;
+    border-block-end: 1px solid var(--rly-color-border-1);
+    display: flex;
+    flex: none;
+    gap: var(--rly-space-8);
+    block-size: var(--rly-space-64);
+    padding-inline: var(--rly-space-12) var(--rly-space-16);
+  }
+  .connect-home-stage-header h2 {
+    display: flex;
+    font-size: 1.0625rem;
+    font-weight: inherit;
+    gap: 0.45rem;
+    margin: 0;
+    min-inline-size: 0;
+  }
+  .connect-home-stage-header h2 b {
+    font-weight: 650;
+  }
+  .connect-home-stage-header h2 span {
+    color: var(--rly-color-text-2);
+  }
+  .connect-home-stage-header button {
+    align-items: center;
+    background: transparent;
+    border: 0;
+    color: inherit;
+    cursor: pointer;
+    justify-content: center;
+    min-block-size: 2.75rem;
+    min-inline-size: 2.75rem;
+  }
+  .connect-home-stage-back {
+    display: none;
+  }
+  .connect-home-stage-close {
+    display: flex;
+    margin-inline-start: auto;
+  }
+  .connect-home-stage-header button:focus-visible {
+    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+    outline-offset: var(--rly-focus-ring-offset);
+  }
+  @media (max-width: 40rem) {
+    .connect-stage-sheet[data-connect-stage-presentation="home"] {
+      border: 0;
+      border-radius: 0;
+      inline-size: 100%;
+      inset-block: 0;
+      inset-inline: 0;
+      max-inline-size: 100%;
+    }
+    .connect-home-stage-header {
+      padding-inline: max(var(--rly-space-12), env(safe-area-inset-left, 0px))
+        max(var(--rly-space-16), env(safe-area-inset-right, 0px));
+    }
+    .connect-home-stage-back {
+      display: flex;
+    }
+    .connect-home-stage-close {
+      display: none;
+    }
+  }
+}
+
+@layer fleet {
+  .connect-directory-switch {
+    display: flex;
+    gap: var(--rly-space-0);
+    margin-block: var(--rly-space-16);
+  }
+  .connect-directory-title {
+    align-items: start;
+    flex-direction: column;
+  }
+  .connect-directory-title .connect-updated {
+    margin-block-end: 0;
+  }
+  .connect-directory-switch a {
+    border-radius: var(--rly-radius-tag);
+    color: var(--rly-color-text-2);
+    display: inline-flex;
+    font-size: var(--rly-type-meta-size);
+    line-height: var(--rly-type-meta-line-height);
+    padding: var(--rly-space-8);
+    position: relative;
+    text-decoration: none;
+  }
+  .connect-directory-switch a[aria-current="page"] {
+    background: var(--rly-color-surface-2);
+    color: var(--rly-color-text-1);
+  }
+  .connect-directory-switch a::after {
+    content: "";
+    inset-block: -6px;
+    inset-inline: 0;
+    position: absolute;
+  }
+  .connect-directory-switch a:focus-visible,
+  .connect-archive-agent:focus-visible,
+  .connect-archive-details a:focus-visible,
+  .connect-archive-words p:focus-visible {
+    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+    outline-offset: var(--rly-focus-ring-offset);
+  }
+  .connect-archive-shell .connect-header {
+    align-items: start;
+    flex-direction: column;
+  }
+  .connect-archive-shell .connect-directory-switch {
+    margin-block-end: 0;
+  }
+  .connect-shell.connect-archive-shell .connect-archive-directory {
+    display: flex;
+    flex-direction: column;
+    gap: var(--rly-space-16);
+    min-block-size: 0;
+    padding-block: var(--rly-space-16) var(--rly-space-24);
+  }
+  .connect-archive-search-group {
+    display: grid;
+    gap: var(--rly-space-6);
+    min-inline-size: 0;
+  }
+  .connect-archive-search {
+    padding-block-end: 0;
+    position: static;
+  }
+  .connect-archive-subtitle,
+  .connect-archive-loading,
+  .connect-archive-scope {
+    color: var(--rly-color-text-2);
+    font-size: var(--rly-type-meta-size);
+    line-height: var(--rly-type-meta-line-height);
+  }
+  .connect-archive-list {
+    background: var(--rly-color-surface-1);
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-field);
+  }
+  .connect-archive-agent {
+    align-items: center;
+    background: transparent;
+    border: 0;
+    border-block-end: 1px solid var(--rly-color-border-1);
+    color: var(--rly-color-text-1);
+    cursor: pointer;
+    display: grid;
+    font: inherit;
+    gap: var(--rly-space-16);
+    grid-template-columns: 32px minmax(0, 1fr);
+    inline-size: 100%;
+    padding: var(--rly-space-12) var(--rly-space-16);
+    text-align: start;
+  }
+  .connect-archive-agent:first-child {
+    border-start-start-radius: var(--rly-radius-field);
+    border-start-end-radius: var(--rly-radius-field);
+  }
+  .connect-archive-agent:last-child {
+    border-block-end: 0;
+    border-end-start-radius: var(--rly-radius-field);
+    border-end-end-radius: var(--rly-radius-field);
+  }
+  .connect-archive-agent .connect-creature {
+    inline-size: 32px;
+  }
+  .connect-archive-row-copy {
+    display: grid;
+    gap: var(--rly-space-2);
+    min-inline-size: 0;
+  }
+  .connect-archive-row-copy strong {
+    font-size: 16px;
+    line-height: 20px;
+  }
+  .connect-archive-row-copy small {
+    color: var(--rly-color-text-2);
+    font-size: var(--rly-type-meta-size);
+    line-height: var(--rly-type-meta-line-height);
+  }
+  .connect-archive-last-words {
+    color: var(--rly-color-text-2);
+    font-size: 14px;
+    line-height: 20px;
+    min-inline-size: 0;
+    overflow: clip;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .connect-archive-empty,
+  .connect-archive-error {
+    background: var(--rly-color-surface-1);
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-control);
+    padding: var(--rly-space-16);
+  }
+  .connect-archive-empty {
+    align-items: start;
+    display: grid;
+    font-size: 14px;
+    gap: var(--rly-space-12);
+    justify-items: start;
+    line-height: 20px;
+  }
+  .connect-archive-no-match {
+    border-radius: var(--rly-radius-field);
+  }
+  .connect-archive-control {
+    border-radius: var(--rly-radius-tag);
+  }
+  .connect-archive-error {
+    align-items: start;
+    border-color: var(--rly-color-blocked-ink);
+    display: grid;
+    gap: var(--rly-space-16);
+    grid-template-columns: 20px minmax(0, 1fr);
+    padding: var(--rly-space-24);
+  }
+  .connect-archive-error > svg {
+    color: var(--rly-color-blocked-ink);
+    margin-block-start: var(--rly-space-4);
+  }
+  .connect-archive-error > div,
+  .connect-archive-page-error {
+    display: grid;
+    gap: var(--rly-space-12);
+    justify-items: start;
+  }
+  .connect-archive-error h2 {
+    font-size: 20px;
+    line-height: 26px;
+  }
+  .connect-archive-error p {
+    color: var(--rly-color-text-2);
+    font-size: 16px;
+    line-height: 24px;
+  }
+  .connect-archive-shell p,
+  .connect-archive-shell h2,
+  .connect-archive-stage p,
+  .connect-archive-stage h2,
+  .connect-archive-stage dl,
+  .connect-archive-stage dd {
+    margin: 0;
+  }
+  .connect-archive-more {
+    inline-size: 100%;
+  }
+  .connect-archive-paging {
+    display: grid;
+    gap: var(--rly-space-8);
+  }
+  .connect-archive-paging small {
+    color: var(--rly-color-text-2);
+    font-size: var(--rly-type-meta-size);
+    line-height: var(--rly-type-meta-line-height);
+    text-align: center;
+  }
+  .connect-archive-skeletons {
+    display: grid;
+    gap: var(--rly-space-12);
+  }
+  .connect-archive-skeleton {
+    background: var(--rly-color-surface-3);
+    block-size: 72px;
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-control);
+  }
+  .connect-archive-stage .connect-archive-hero {
+    background: var(--rly-color-surface-2);
+    block-size: 272px;
+  }
+  .connect-archive-stage .connect-archive-hero .connect-creature {
+    inline-size: 240px;
+  }
+  .connect-archive-stage-body {
+    gap: var(--rly-space-24);
+  }
+  .connect-archive-dates {
+    font-size: 14px;
+    font-weight: var(--rly-type-card-title-weight);
+    line-height: 20px;
+  }
+  .connect-archive-details {
+    display: grid;
+    gap: var(--rly-space-8) var(--rly-space-16);
+    grid-template-columns: auto minmax(0, 1fr);
+    font-size: var(--rly-type-meta-size);
+    line-height: var(--rly-type-meta-line-height);
+  }
+  .connect-archive-details dt,
+  .connect-archive-words small {
+    color: var(--rly-color-text-2);
+  }
+  .connect-archive-details dd {
+    min-inline-size: 0;
+    overflow: auto;
+  }
+  .connect-archive-details a {
+    align-items: center;
+    color: var(--rly-color-text-1);
+    display: inline-flex;
+    gap: var(--rly-space-8);
+    text-decoration: underline;
+    text-underline-offset: 0.2em;
+  }
+  .connect-archive-words {
+    display: grid;
+    gap: var(--rly-space-8);
+  }
+  .connect-archive-words h2 {
+    font-size: 14px;
+    line-height: 20px;
+  }
+  .connect-archive-words p {
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-field);
+    font-size: 14px;
+    line-height: 22px;
+    overflow: auto;
+    padding: var(--rly-space-16);
+    white-space: pre-wrap;
+  }
+  .connect-archive-words small {
+    font-size: var(--rly-type-meta-size);
+    line-height: var(--rly-type-meta-line-height);
+  }
+  /* Closure is its own static pose, including working/blocked close states and forced colours. */
+  .connect-creature[data-closed],
+  .connect-creature[data-closed] * {
+    animation: none;
+  }
+  .connect-creature[data-closed] .connect-creature-halo,
+  .connect-creature[data-closed] .connect-creature-orbit {
+    display: none;
+    opacity: 0;
+  }
+  .connect-creature[data-closed] .connect-creature-lid {
+    translate: 0 calc(var(--connect-creature-lid) * 1px);
+  }
+  .connect-creature[data-closed] .connect-creature-lid[data-low] {
+    translate: 0 calc(var(--connect-creature-lid-low) * 1px);
+  }
+  .connect-creature[data-closed] .connect-creature-lash {
+    opacity: 1;
+  }
+  .connect-creature[data-closed] .connect-creature-brow {
+    fill: oklch(0.36 0.012 var(--connect-creature-brow-hue));
+    rotate: 0deg;
+    scale: 1;
+    opacity: 1;
+    stroke: oklch(0.36 0.012 var(--connect-creature-brow-hue));
+    translate: 0 0.8px;
+  }
+  .connect-creature[data-closed] .connect-creature-core {
+    opacity: 0;
+  }
+  .connect-creature[data-closed] .connect-creature-shade {
+    filter: grayscale(1);
+  }
+  @media (forced-colors: active) {
+    .connect-creature[data-closed] .connect-creature-brow {
+      fill: CanvasText;
+      stroke: CanvasText;
+    }
+  }
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"])
+    .connect-creature[data-closed]
+    .connect-creature-brow {
+    fill: CanvasText;
+    stroke: CanvasText;
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .connect-directory-switch a:hover,
+    .connect-archive-agent:hover {
+      background: var(--rly-color-surface-2);
+    }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .connect-directory-switch a:active,
+    .connect-archive-agent:active {
+      scale: 0.99;
+    }
+  }
+}
+
+@layer fleet {
+  .connect-home-heading {
+    display: grid;
+    gap: 0.9rem;
+  }
+  .connect-home-switch {
+    font: 430 1rem / 1.5 var(--rly-font-ui);
+    display: inline-flex;
+    justify-self: start;
+    gap: 2px;
+    padding: 2px;
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-control);
+    background: var(--rly-color-surface-2);
+  }
+  .connect-home-switch a {
+    display: grid;
+    place-items: center;
+    min-block-size: 2.25rem;
+    padding-inline: 1rem;
+    border-radius: calc(var(--rly-radius-control) - 2px);
+    color: var(--rly-color-text-2);
+    font-size: 0.875rem;
+    text-decoration: none;
+  }
+  .connect-home-switch a[aria-current="page"] {
+    background: var(--rly-color-surface-1);
+    color: var(--rly-color-text-1);
+    font-weight: 560;
+    box-shadow: 0 0 0 1px var(--rly-color-border-1);
+  }
+  .connect-home-switch a:focus-visible,
+  .connect-home-archive-row:focus-visible {
+    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+    outline-offset: var(--rly-focus-ring-offset);
+  }
+  .connect-home-archive {
+    font: 430 1rem / 1.5 var(--rly-font-ui);
+    display: grid;
+    gap: 0.75rem;
+    padding-block: var(--rly-space-24) var(--rly-space-32);
+    padding-inline: max(var(--rly-space-40), env(safe-area-inset-left, 0px))
+      max(var(--rly-space-40), env(safe-area-inset-right, 0px));
+  }
+  .connect-home-archive-count {
+    line-height: 1.5;
+    margin: 0;
+    color: var(--rly-color-text-2);
+    font-size: 0.875rem;
+  }
+  .connect-home-archive-list {
+    display: grid;
+    overflow: clip;
+    min-inline-size: 0;
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-group);
+    background: var(--rly-color-surface-1);
+  }
+  .connect-home-archive-row {
+    display: flex;
+    align-items: center;
+    gap: 0.875rem;
+    min-block-size: 4rem;
+    inline-size: 100%;
+    padding: 0.75rem 1rem;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: start;
+    cursor: pointer;
+  }
+  .connect-home-archive-row + .connect-home-archive-row {
+    border-block-start: 1px solid var(--rly-color-border-1);
+  }
+  .connect-home-archive-row > .connect-creature {
+    inline-size: 2.75rem;
+    flex: none;
+  }
+  .connect-home-archive-copy {
+    display: grid;
+    gap: 2px;
+    min-inline-size: 0;
+    flex: 1;
+  }
+  .connect-home-archive-copy small {
+    line-height: 1.5;
+    font-size: 0.8125rem;
+    color: var(--rly-color-text-2);
+  }
+  .connect-home-archive-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 0.75rem;
+  }
+  .connect-home-archive-top strong {
+    font-weight: 600;
+  }
+  .connect-home-archive-words {
+    line-height: 1.5;
+    overflow: clip;
+    min-inline-size: 0;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.875rem;
+  }
+  .connect-home-archive-empty {
+    padding: 2rem 1rem;
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-group);
+    background: var(--rly-color-surface-1);
+    color: var(--rly-color-text-2);
+    text-align: center;
+  }
+  .connect-home-archive-error,
+  .connect-home-archive-page-error {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem 1rem;
+    align-items: center;
+    color: var(--rly-color-text-1);
+  }
+  .connect-home-archive-error {
+    justify-content: space-between;
+    padding: 0.75rem 1rem;
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-group);
+    background: var(--rly-color-surface-1);
+  }
+  .connect-home-archive-error > div {
+    display: grid;
+    gap: 0.2rem;
+    min-inline-size: 0;
+  }
+  .connect-home-archive-error p,
+  .connect-home-archive-page-error p {
+    margin: 0;
+    font-size: 0.875rem;
+  }
+  .connect-home-archive-page-error p {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    min-block-size: 2.5rem;
+    color: var(--rly-color-text-2);
+  }
+  .connect-home-archive-control {
+    font: 430 1rem / 1.5 var(--rly-font-ui);
+    min-block-size: 2.75rem;
+  }
+  .connect-home-archive-paging {
+    min-block-size: 2.5rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.875rem;
+    color: var(--rly-color-text-2);
+  }
+  .connect-home-archive-spinner {
+    inline-size: 0.875rem;
+    block-size: 0.875rem;
+    border: 2px solid var(--rly-color-border-1);
+    border-block-start-color: currentColor;
+    border-radius: 50%;
+  }
+  .connect-home-archive-skeleton-creature,
+  .connect-home-archive-skeleton .connect-home-archive-copy > span {
+    display: block;
+    background: var(--rly-color-surface-3);
+    border-radius: var(--rly-radius-tag);
+  }
+  .connect-home-archive-skeleton {
+    cursor: default;
+  }
+  .connect-home-archive-skeleton-creature {
+    flex: none;
+    inline-size: 2.5rem;
+    block-size: 2.5rem;
+    border-radius: 0.75rem;
+  }
+  .connect-home-archive-skeleton .connect-home-archive-copy {
+    gap: 6px;
+  }
+  .connect-home-archive-skeleton .connect-home-archive-copy > span:nth-child(1) {
+    inline-size: min(8rem, 100%);
+    block-size: 0.9rem;
+  }
+  .connect-home-archive-skeleton .connect-home-archive-copy > span:nth-child(2) {
+    inline-size: min(11rem, 100%);
+    block-size: 0.75rem;
+  }
+  .connect-home-archive-skeleton .connect-home-archive-copy > span:nth-child(3) {
+    inline-size: min(26rem, 90%);
+    block-size: 0.8rem;
+  }
+  .connect-home-archive-loading {
+    position: absolute;
+    inline-size: 1px;
+    block-size: 1px;
+    overflow: clip;
+    clip-path: inset(50%);
+  }
+  @media (max-width: 40rem) {
+    .connect-home-archive-row > .connect-creature {
+      inline-size: 2.25rem;
+    }
+    .connect-home-switch a {
+      min-block-size: 2.75rem;
+    }
+    .connect-home-archive {
+      padding-block-start: var(--rly-space-16);
+      padding-inline: max(var(--rly-space-16), env(safe-area-inset-left, 0px))
+        max(var(--rly-space-16), env(safe-area-inset-right, 0px));
+    }
+    .connect-home-archive-top {
+      flex-direction: column;
+      gap: 2px;
+    }
+    .connect-home-archive-error > .connect-home-archive-control {
+      min-block-size: var(--rly-control-height-default);
+    }
+    .connect-home-archive-page-error p {
+      min-block-size: 2.75rem;
+    }
+    .connect-home-archive-paging {
+      min-block-size: 2.75rem;
+    }
+    .connect-home-archive-paging > button {
+      inline-size: 100%;
+    }
+    .connect-home-archive-skeleton-creature {
+      inline-size: 2.25rem;
+      block-size: 2.25rem;
+    }
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .connect-home-switch a:hover,
+    .connect-home-archive-row:hover {
+      background: var(--rly-color-surface-2);
+    }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .connect-home-archive-spinner {
+      animation: connect-home-archive-spin 1s linear infinite;
+    }
+    @keyframes connect-home-archive-spin {
+      to {
+        rotate: 1turn;
+      }
     }
   }
 }

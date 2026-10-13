@@ -8,7 +8,7 @@ import { afterEach, beforeEach, expect, expectTypeOf, it, vi } from "vitest"
 import { fleetModule, type ModuleViews, moduleHref, type ModulePageMount } from "../src/modules.js"
 import { SuperappShell } from "../src/superapp-view.js"
 import { FleetShell, type FleetShellTab } from "../src/shell-view.js"
-import { defineModule, usageModule } from "../src/modules.js"
+import { connectModule, defineModule, todayModule, usageModule } from "../src/modules.js"
 import { makeFleetModuleViews } from "../src/fleet-module-view.js"
 import { DashboardView } from "../src/dashboard-view.js"
 import type { DashboardSnapshot } from "../src/dashboard-model.js"
@@ -78,7 +78,16 @@ const fleet: ModuleViews<typeof fleetModule> = {
   }
 }
 
-const render = async (modules: Parameters<typeof SuperappShell>[0]["modules"] = [fleet]) => {
+const render = async (
+  modules: Parameters<typeof SuperappShell>[0]["modules"] = [fleet],
+  mobileModules: ReadonlyArray<string> = ["fleet"],
+  session:
+    | { readonly access: "tailscale" | "loopback"; readonly connection: "connected" | "unavailable" }
+    | { readonly access: "tailscale" | "loopback"; readonly connection: "stale"; readonly observedAt: number } = {
+    access: "tailscale",
+    connection: "connected"
+  }
+) => {
   const host = document.createElement("div")
   document.body.append(host)
   const root = createRoot(host)
@@ -87,15 +96,228 @@ const render = async (modules: Parameters<typeof SuperappShell>[0]["modules"] = 
     root.render(
       <SuperappShell
         modules={modules}
-        mobileModules={["fleet"]}
+        mobileModules={mobileModules}
         landing={{ module: "fleet", page: "approvals" }}
         host="hub"
         hostCount={1}
+        session={session}
         notifications={<p>No recent activity</p>}
       />
     )
   )
 }
+
+it("names a module badge without replacing its visible destination name", async () => {
+  await render([{ ...fleet, navigationBadge: { text: "3+", label: "at least 3 approvals waiting" } }])
+  for (const selector of [".superapp-sidebar", ".superapp-bottom"]) {
+    const link = document.querySelector(`${selector} .superapp-module-badge`)?.closest("a")
+    expect(link?.getAttribute("aria-label")).toBe("Fleet, at least 3 approvals waiting")
+    expect(link?.querySelector(".superapp-module-badge")?.textContent).toBe("3+")
+    expect(link?.getAttribute("href")).toBe(moduleHref(fleetModule, "approvals"))
+  }
+})
+
+it("names an unknown module reading without showing a zero badge", async () => {
+  await render([{ ...fleet, navigationBadge: { text: "", label: "approvals unknown" } }])
+  expect(document.querySelector('.superapp-module-nav a[aria-label="Fleet, approvals unknown"]')).not.toBeNull()
+  expect(document.querySelector(".superapp-module-badge")).toBeNull()
+})
+
+it.each([
+  { access: "tailscale", connection: "connected", copy: "Tailscale access", dot: true },
+  { access: "loopback", connection: "connected", copy: "Local access", dot: true },
+  { access: "tailscale", connection: "stale", observedAt: 0, copy: "Reconnecting, last seen", dot: false },
+  { access: "tailscale", connection: "unavailable", copy: "Hub not reachable", dot: false }
+] satisfies ReadonlyArray<Parameters<typeof render>[2] & { readonly copy: string; readonly dot: boolean }>)(
+  "reports $access/$connection from the session instead of claiming a live tailnet connection",
+  async ({ copy, dot, ...session }) => {
+    await render([fleet], ["fleet"], session)
+    const footer = document.querySelector(".superapp-session")
+    expect(footer?.textContent).toContain(copy)
+    expect(footer?.textContent?.includes("connected")).toBe(dot)
+    expect(footer?.getAttribute("data-state")).toBe(session.connection)
+    expect(footer?.querySelector(".superapp-session-online") !== null).toBe(dot)
+    if (session.access === "loopback") expect(footer?.textContent).not.toContain("Tailscale")
+    if (session.connection === "stale")
+      expect(footer?.querySelector("time")?.dateTime).toBe(new Date(session.observedAt).toISOString())
+  }
+)
+
+it.each(["#today", "#today/overview", "#fleet/connect", "?tab=connect"])(
+  "repairs the retired %s entry before selecting a module, retaining foreign history state",
+  async (alias) => {
+    const source = new URL(alias, window.location.href)
+    source.searchParams.set("host", "ALPHA")
+    source.searchParams.set("agent", "agent-1")
+    source.searchParams.set("open", "stage")
+    window.history.replaceState({ foreign: "kept" }, "", source)
+    const connect: ModuleViews<typeof connectModule> = {
+      descriptor: connectModule,
+      pages: { overview: (search) => <h1>Connect home {search.get("agent")}</h1> }
+    }
+    const descriptor = defineModule({
+      ...fleetModule,
+      pages: [
+        { id: "approvals", label: "Approvals" },
+        { id: "work", label: "Work" }
+      ]
+    })
+    const retiredFleet: ModuleViews<typeof descriptor> = {
+      descriptor,
+      pages: { approvals: fleetPage("approvals"), work: fleetPage("work") }
+    }
+    await render([retiredFleet, connect])
+    expect(document.querySelector<HTMLElement>('[data-module="connect"]')?.hidden).toBe(false)
+    expect(document.querySelector('[data-module="connect"] h1')?.textContent).toBe("Connect home agent-1")
+    expect(window.location.hash).toBe("#connect/overview")
+    expect(new URLSearchParams(window.location.search).get("host")).toBe("ALPHA")
+    expect(window.history.state).toMatchObject({ foreign: "kept" })
+  }
+)
+
+it("keeps Today reachable when it and Connect are both installed", async () => {
+  window.history.replaceState(null, "", "#connect/overview")
+  const connect: ModuleViews<typeof connectModule> = {
+    descriptor: connectModule,
+    pages: { overview: () => <h1>Connect home</h1> }
+  }
+  const today: ModuleViews<typeof todayModule> = {
+    descriptor: todayModule,
+    pages: { overview: () => <h1>Today reading</h1> }
+  }
+  await render([fleet, today, connect])
+  const link = document.querySelector<HTMLAnchorElement>('.superapp-sidebar a[href="?#today/overview"]')
+  expect(link).not.toBeNull()
+  await act(async () => link?.click())
+  expect(window.location.hash).toBe("#today/overview")
+  expect(document.querySelector<HTMLElement>('[data-module="today"]')?.hidden).toBe(false)
+})
+
+it("opens each module's default page instead of resuming a selected object on a previous page", async () => {
+  window.history.replaceState(null, "", "?goal=goal-1&window=week#fleet/work")
+  const notesDescriptor = defineModule({
+    id: "notes",
+    label: "Notes",
+    defaultPage: "inbox",
+    pages: [{ id: "inbox", label: "Inbox" }],
+    listeners: ["serve"],
+    requires: ["read"]
+  })
+  const notes: ModuleViews<typeof notesDescriptor> = {
+    descriptor: notesDescriptor,
+    pages: { inbox: () => <h1>Inbox</h1> }
+  }
+  await render([fleet, notes])
+  const notesLink = document.querySelector<HTMLAnchorElement>('.superapp-sidebar a[aria-label="Notes"]')
+  expect(notesLink).not.toBeNull()
+  await act(async () => notesLink?.click())
+  const picker = document.querySelector<HTMLButtonElement>(".superapp-bottom > button")
+  expect(picker).not.toBeNull()
+  await act(async () => picker?.click())
+  for (const nav of [".superapp-sidebar", ".superapp-bottom"]) {
+    const link = document.querySelector<HTMLAnchorElement>(`${nav} a[href*="#fleet/"]`)
+    expect(link?.getAttribute("href")).toBe(moduleHref(fleetModule, fleetModule.defaultPage))
+  }
+  const fleetLink = document.querySelector<HTMLAnchorElement>('.superapp-sidebar a[href*="#fleet/"]')
+  expect(fleetLink).not.toBeNull()
+  await act(async () => fleetLink?.click())
+  expect(window.location.hash).toBe("#fleet/approvals")
+  expect(window.location.search).toBe("")
+  expect(document.querySelector<HTMLElement>('[data-module="fleet"]')?.hidden).toBe(false)
+})
+
+it("lists only off-bar installed modules in More and links to their default page", async () => {
+  window.history.replaceState(null, "", "?goal=selected#fleet/work")
+  await render([fleet], [])
+  await act(async () => document.querySelector<HTMLButtonElement>(".superapp-bottom > button")?.click())
+  const link = document.querySelector<HTMLAnchorElement>('[aria-label="More modules"] a[href*="#fleet/"]')
+  expect(link?.getAttribute("href")).toBe(moduleHref(fleetModule, fleetModule.defaultPage))
+  expect(document.querySelector(".superapp-more")?.textContent).toContain("Host access")
+  expect(document.querySelector(".superapp-more")?.textContent).toContain("Notifications")
+  expect(document.querySelector(".superapp-more")?.textContent).not.toContain("Appearance")
+  await act(async () => {
+    link?.click()
+    await new Promise((resolve) => window.setTimeout(resolve, 80))
+  })
+  expect(window.location.hash).toBe("#fleet/approvals")
+  expect(window.location.search).toBe("")
+  expect(document.querySelector('[role="dialog"]')).toBeNull()
+})
+
+it("keeps an inactive page but remounts distinct page components after a default-page return", async () => {
+  const descriptor = defineModule({
+    id: "counter",
+    label: "Counter",
+    defaultPage: "first",
+    pages: [
+      { id: "first", label: "First" },
+      { id: "second", label: "Second" }
+    ],
+    listeners: ["serve"],
+    requires: ["read"]
+  })
+  const First = ({ mount }: { readonly mount: ModulePageMount }) => (
+    <>
+      <h1>First page</h1>
+      <button onClick={() => mount.navigate(moduleHref(descriptor, "second"), "push")} type="button">
+        Open second
+      </button>
+    </>
+  )
+  const Second = () => {
+    const [count, setCount] = useState(0)
+    return (
+      <button onClick={() => setCount((value) => value + 1)} type="button">
+        Count {count}
+      </button>
+    )
+  }
+  const counter: ModuleViews<typeof descriptor> = {
+    descriptor,
+    pages: { first: (_search, mount) => <First mount={mount} />, second: () => <Second /> }
+  }
+  window.history.replaceState(null, "", "#counter/second")
+  await render([fleet, counter])
+  const button = document.querySelector<HTMLButtonElement>('[data-module="counter"] button')
+  expect(button).not.toBeNull()
+  await act(async () => button?.click())
+  expect(button?.textContent).toBe("Count 1")
+  await act(async () => document.querySelector<HTMLAnchorElement>('.superapp-sidebar a[aria-label="Fleet"]')?.click())
+  expect(document.querySelector('[data-module="counter"] button')).toBe(button)
+  expect(button?.textContent).toBe("Count 1")
+  await act(async () => document.querySelector<HTMLAnchorElement>('.superapp-sidebar a[aria-label="Counter"]')?.click())
+  expect(window.location.hash).toBe("#counter/first")
+  expect(document.querySelector('[data-module="counter"] h1')?.textContent).toBe("First page")
+  await act(async () => document.querySelector<HTMLButtonElement>('[data-module="counter"] button')?.click())
+  expect(window.location.hash).toBe("#counter/second")
+  expect(document.querySelector('[data-module="counter"] button')?.textContent).toBe("Count 0")
+  expect(document.querySelector('[data-module="counter"] button')).not.toBe(button)
+})
+
+it("keeps By tool aliases out of the generic router and repairs them at the shell boundary", async () => {
+  const descriptor = defineModule({
+    ...usageModule,
+    pages: usageModule.pages
+  })
+  const usage: ModuleViews<typeof descriptor> = {
+    descriptor,
+    pages: {
+      limits: () => <h1>Limits</h1>,
+      tokens: () => <h1>Tokens</h1>,
+      "by-tool": (search) => (
+        <h1>
+          By tool {search.get("range")} {search.get("host")}
+        </h1>
+      )
+    }
+  }
+  window.history.replaceState({ foreign: "kept" }, "", "?range=30d&host=ALPHA#usage/by-agent")
+  await render([fleet, usage])
+  expect(document.querySelector<HTMLElement>('[data-module="usage"]')?.hidden).toBe(false)
+  expect(document.querySelector('[data-module="usage"] h1')?.textContent).toBe("By tool 30d ALPHA")
+  expect(window.location.hash).toBe("#usage/by-tool")
+  expect(window.history.state).toMatchObject({ foreign: "kept" })
+})
 
 const selectionParent = "?range=7d#fleet/usage"
 const selectionViews: ModuleViews<typeof fleetModule> = {
@@ -312,15 +534,18 @@ it("keeps personal modules behind the mobile picker and announces its current mo
   window.history.replaceState(null, "", "/#usage/limits")
   await render([
     fleet,
-    { descriptor: usageModule, pages: { limits: () => <h1>Limits</h1>, tokens: () => <h1>Tokens</h1> } }
+    {
+      descriptor: usageModule,
+      pages: { limits: () => <h1>Limits</h1>, tokens: () => <h1>Tokens</h1>, "by-tool": () => <h1>By tool</h1> }
+    }
   ])
   const bottom = document.querySelector('nav[aria-label="Mobile modules"]')
   expect([...(bottom?.querySelectorAll("a") ?? [])].map((link) => link.textContent)).toEqual(["Fleet"])
   const picker = bottom?.querySelector("button")
   expect(picker?.getAttribute("aria-current")).toBe("page")
-  expect(picker?.getAttribute("aria-label")).toBe("All modules, current module Usage details")
+  expect(picker?.getAttribute("aria-label")).toBe("More, current module Usage")
   expect(picker?.getAttribute("aria-label")?.startsWith(picker.textContent?.trim() ?? "")).toBe(true)
-  expect(document.querySelector('nav[aria-label="Modules"] a[aria-label="Usage details"]')).not.toBeNull()
+  expect(document.querySelector('nav[aria-label="Modules"] a[aria-label="Usage"]')).not.toBeNull()
 })
 
 it("starts the host button name with its visible label and keeps the host named when that label is hidden", async () => {
@@ -337,7 +562,7 @@ it("starts the host button name with its visible label and keeps the host named 
 it("links the breadcrumb module to its landing page and names the current page as text", async () => {
   window.history.replaceState(null, "", "/#fleet/work")
   await render()
-  const breadcrumb = document.querySelector('nav[aria-label="Breadcrumb"]')
+  const breadcrumb = document.querySelector('nav[aria-label="Current page"]')
   const module = breadcrumb?.querySelector<HTMLAnchorElement>("a")
   expect(module?.textContent).toBe("Fleet")
   expect(module?.getAttribute("href")).toBe("?#fleet/approvals")
@@ -400,7 +625,7 @@ it("retains the approval answer across all Fleet pages and another installed mod
   await act(async () => document.querySelector<HTMLAnchorElement>('.superapp-sidebar a[href*="#fleet/"]')?.click())
   expect(document.querySelector('[data-module="fleet"] button:not([role="tab"])')).toBe(answer)
   expect(answer?.textContent).toBe("Approved")
-  expect(document.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe("Work")
+  expect(document.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe("Approvals")
 })
 
 it.each([
@@ -621,6 +846,7 @@ it("selects and focuses an exact approval after a handoff from another module", 
     })
     return (
       <SuperappShell
+        session={{ access: "tailscale", connection: "connected" }}
         modules={[
           fleet,
           {
@@ -654,16 +880,16 @@ it("selects and focuses an exact approval after a handoff from another module", 
 })
 
 it.each([
-  ["sidebar modules", ".superapp-sidebar > button", "Your modules"],
-  ["bottom modules", ".superapp-bottom > button", "Your modules"],
+  ["sidebar modules", ".superapp-sidebar > button", "More"],
+  ["bottom modules", ".superapp-bottom > button", "More"],
   ["hosts", ".superapp-host", "Hosts"],
   ["notifications", '.superapp-header button[aria-label="Notifications"]', "Notifications"]
 ])("clears cancelled navigation when the %s open path starts a new panel cycle", async (_name, selector, title) => {
   window.history.replaceState(null, "", "/#fleet/work")
-  await render()
+  await render([fleet], [])
   const pickerOpener = document.querySelector<HTMLButtonElement>(".superapp-sidebar > button")
   await act(async () => pickerOpener?.click())
-  const link = document.querySelector<HTMLAnchorElement>('[aria-label="Module picker"] a[href*="#fleet/"]')
+  const link = document.querySelector<HTMLAnchorElement>('[aria-label="More modules"] a[href*="#fleet/"]')
   expect(link).not.toBeNull()
   await act(async () => link?.click())
   const opener = document.querySelector<HTMLButtonElement>(selector)
@@ -696,10 +922,49 @@ it("closes the module picker and focuses the chosen module after modal cleanup",
   await act(async () => document.querySelector<HTMLButtonElement>(".superapp-sidebar > button")?.click())
   expect(document.querySelector('[role="dialog"]')).not.toBeNull()
   await act(async () => {
-    document.querySelector<HTMLAnchorElement>('[aria-label="Module picker"] a[href*="#other/"]')?.click()
+    document.querySelector<HTMLAnchorElement>('[aria-label="More modules"] a[href*="#other/"]')?.click()
     await new Promise((resolve) => window.setTimeout(resolve, 80))
   })
   expect(window.location.hash).toBe("#other/home")
   expect(document.querySelector('[role="dialog"]')).toBeNull()
   await vi.waitFor(() => expect(document.activeElement).toBe(document.getElementById("main")))
+})
+
+it("Settings reports dialog expansion without claiming the current page", async () => {
+  await render()
+  const settings = document.querySelector<HTMLButtonElement>(".superapp-settings")
+  if (settings === null) return expect.unreachable()
+  const current = () => [...document.querySelectorAll('.superapp-sidebar [aria-current="page"]')]
+  expect(current()).toHaveLength(1)
+  expect(current()[0]?.tagName).toBe("A")
+  expect(settings.hasAttribute("aria-current")).toBe(false)
+  expect(settings.getAttribute("aria-haspopup")).toBe("dialog")
+  expect(settings.getAttribute("aria-expanded")).toBe("false")
+  await act(async () => settings.click())
+  expect(settings.getAttribute("aria-expanded")).toBe("true")
+  expect(current()).toHaveLength(1)
+  const close = document.querySelector<HTMLButtonElement>(".superapp-dialog-close")
+  if (close === null) return expect.unreachable()
+  await act(async () => close.click())
+  expect(settings.getAttribute("aria-expanded")).toBe("false")
+  expect(current()).toHaveLength(1)
+  expect(current()[0]?.tagName).toBe("A")
+})
+
+/** Page suffixes are descriptor-owned; only the designed phone mast opts in. */
+it("uses page metadata for the phone title without changing other module titles", async () => {
+  const descriptor = defineModule({
+    ...fleetModule,
+    pages: [
+      { id: "approvals", label: "Approvals", showInPhoneTitle: true },
+      { id: "work", label: "Work" }
+    ]
+  })
+  await render([{ descriptor, pages: { approvals: fleetPage("approvals"), work: fleetPage("work") } }])
+  expect(document.querySelector(".superapp-phone-title")?.textContent).toBe("Fleet Approvals")
+  await act(async () => {
+    window.history.pushState(null, "", "#fleet/work")
+    window.dispatchEvent(new PopStateEvent("popstate"))
+  })
+  expect(document.querySelector(".superapp-phone-title")?.textContent).toBe("Fleet")
 })

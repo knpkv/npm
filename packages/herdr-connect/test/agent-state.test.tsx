@@ -21,6 +21,14 @@ describe("agent state language", () => {
     expect(agentStatePresentation(state)).toEqual({ bucket, icon, spins, tone, word })
   })
 
+  it("keeps Fleet's Done success tone while Home's read-only Done label is neutral", () => {
+    expect(agentStatePresentation("done").tone).toBe("positive")
+    expect(agentStatePresentation("done", "home")).toMatchObject({ word: "Done", icon: "check", tone: "neutral" })
+    expect(renderToStaticMarkup(<AgentStateLabel state="done" statePolicy="home" />)).not.toEqual(
+      renderToStaticMarkup(<AgentStateLabel state="done" />)
+    )
+  })
+
   it("reads states case-insensitively", () => {
     expect(agentStatePresentation("WORKING").bucket).toBe("working")
     expect(agentStatePresentation("Waiting").word).toBe("Waiting")

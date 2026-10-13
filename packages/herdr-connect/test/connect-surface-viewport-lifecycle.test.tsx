@@ -1,10 +1,11 @@
 // @vitest-environment happy-dom
 
-import { RegistryProvider } from "@effect/atom-react"
+import { RegistryContext, RegistryProvider } from "@effect/atom-react"
 import { AgentStableId } from "@knpkv/herdr-fleet/model"
 import { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { Cause, Predicate, Schema } from "effect"
+import * as AtomRegistry from "effect/reactivity/AtomRegistry"
 import * as AsyncResult from "effect/reactivity/AsyncResult"
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { ConnectSurface, makeConnectAtoms } from "../src/client.js"
@@ -20,6 +21,10 @@ window.IS_REACT_ACT_ENVIRONMENT = true
 
 const roots: Array<Root> = []
 const originalFetch = window.fetch
+// Fetch's Context reference captures one function; dispatch each request to this test's responder.
+let respond = originalFetch
+window.fetch = (input, init) => respond(input, init)
+class TimeoutFixture extends Schema.TaggedError<TimeoutFixture>()("ConnectTimeoutError", {}) {}
 const originalInnerHeight = Object.getOwnPropertyDescriptor(window, "innerHeight")
 const agent = Schema.decodeUnknownSync(ConnectAgent)({
   host: "SER8",
@@ -49,7 +54,7 @@ beforeEach(() => {
   document.documentElement.style.cssText = "color: red;"
   document.body.style.cssText = "overflow: visible; touch-action: pan-x;"
   Object.defineProperty(window, "innerHeight", { configurable: true, value: 500 })
-  window.fetch = async (input) => {
+  respond = async (input) => {
     const url = new URL(
       Predicate.isString(input) ? input : "href" in input ? input.href : input.url,
       "http://localhost"
@@ -83,9 +88,201 @@ afterAll(() => {
 })
 
 describe("ConnectSurface directory loading", () => {
+  it.each([401, 403, 500, 502])(
+    "classifies a first-load HTTP %s response without claiming a timeout",
+    async (status) => {
+      respond = async () => new Response("timeout", { status })
+      const host = document.createElement("div")
+      document.body.append(host)
+      const root = createRoot(host)
+      roots.push(root)
+      await act(async () => {
+        root.render(
+          <RegistryProvider>
+            <ConnectSurface atoms={makeConnectAtoms()} embedded />
+          </RegistryProvider>
+        )
+        for (let index = 0; index < 40; index += 1) await Promise.resolve()
+      })
+      expect(host.querySelector(".connect-directory-error h2")?.textContent).toBe("Couldn't load the fleet directory")
+      expect(host.querySelector(".connect-directory-error p")?.textContent).toBe(
+        `The hub answered HTTP ${String(status)}.`
+      )
+      expect(host.textContent).not.toContain("timed out")
+    }
+  )
+
+  it.each(["network", "protocol"])(
+    "keeps a first-load %s failure free of a timeout claim and raw diagnostics",
+    async (kind) => {
+      respond = async () => {
+        if (kind === "network") throw new TypeError("sensitive diagnostic")
+        return new Response(JSON.stringify({ agents: "sensitive diagnostic" }), {
+          headers: { "content-type": "application/json" }
+        })
+      }
+      const host = document.createElement("div")
+      document.body.append(host)
+      const root = createRoot(host)
+      roots.push(root)
+      await act(async () => {
+        root.render(
+          <RegistryProvider>
+            <ConnectSurface atoms={makeConnectAtoms()} embedded />
+          </RegistryProvider>
+        )
+        for (let index = 0; index < 40; index += 1) await Promise.resolve()
+      })
+      expect(host.querySelector(".connect-directory-error")).not.toBeNull()
+      expect(host.textContent).not.toContain("timed out")
+      expect(host.textContent).not.toContain("sensitive diagnostic")
+    }
+  )
+
+  it.each([".connect-empty button", ".connect-scope-clear"])(
+    "returns focus to search after clearing filters through %s",
+    async (selector) => {
+      respond = () => new Promise<Response>(() => {})
+      const host = document.createElement("div")
+      document.body.append(host)
+      const root = createRoot(host)
+      roots.push(root)
+      const atoms = makeConnectAtoms()
+      await act(async () => {
+        root.render(
+          <RegistryProvider
+            initialValues={[
+              [atoms.agents, AsyncResult.success(agentPage)],
+              [atoms.query, "zzz"],
+              [atoms.hostFilter, agent.host],
+              [atoms.activityFilter, "needs-you"]
+            ]}
+          >
+            <ConnectSurface atoms={atoms} embedded />
+          </RegistryProvider>
+        )
+        for (let index = 0; index < 12; index += 1) await Promise.resolve()
+      })
+      const search = host.querySelector<HTMLInputElement>("input[type='search']")
+      const clear = host.querySelector<HTMLButtonElement>(selector)
+      expect(search).not.toBeNull()
+      expect(clear).not.toBeNull()
+      clear?.focus()
+      expect(document.activeElement).toBe(clear)
+      await act(async () => clear?.click())
+      expect(search?.value).toBe("")
+      expect(host.querySelector(".connect-scope-clear")).toBeNull()
+      expect(host.querySelectorAll(".connect-agent")).toHaveLength(1)
+      expect(document.activeElement).toBe(search)
+    }
+  )
+
+  it.each(["hidden", "inert", "aria-hidden"])(
+    "clears filters without focusing a search under %s",
+    async (attribute) => {
+      respond = () => new Promise<Response>(() => {})
+      const host = document.createElement("div")
+      document.body.append(host)
+      const root = createRoot(host)
+      roots.push(root)
+      const atoms = makeConnectAtoms()
+      await act(async () => {
+        root.render(
+          <RegistryProvider
+            initialValues={[
+              [atoms.agents, AsyncResult.success(agentPage)],
+              [atoms.query, "zzz"],
+              [atoms.hostFilter, agent.host],
+              [atoms.activityFilter, "needs-you"]
+            ]}
+          >
+            <ConnectSurface atoms={atoms} embedded />
+          </RegistryProvider>
+        )
+        for (let index = 0; index < 12; index += 1) await Promise.resolve()
+      })
+      const search = host.querySelector<HTMLInputElement>("input[type='search']")
+      const clear = host.querySelector<HTMLButtonElement>(".connect-scope-clear")
+      if (search === null || clear === null) return expect.unreachable()
+      const focus = vi.spyOn(search, "focus")
+      host.setAttribute(attribute, attribute === "aria-hidden" ? "true" : "")
+      // An owner callback may finish after its module becomes inactive. It must not steal focus.
+      await act(async () => clear.click())
+      expect(search.value).toBe("")
+      expect(focus).not.toHaveBeenCalled()
+    }
+  )
+
+  it("shows classified timeout recovery copy, a Retry button and Not updated yet", async () => {
+    respond = () => new Promise<Response>(() => {})
+    const host = document.createElement("div")
+    document.body.append(host)
+    const root = createRoot(host)
+    roots.push(root)
+    const atoms = makeConnectAtoms()
+    await act(async () => {
+      root.render(
+        <RegistryProvider initialValues={[[atoms.agents, AsyncResult.failure(Cause.fail(new TimeoutFixture()))]]}>
+          <ConnectSurface atoms={atoms} embedded />
+        </RegistryProvider>
+      )
+      for (let index = 0; index < 12; index += 1) await Promise.resolve()
+    })
+    expect(host.querySelector(".connect-directory-error h2")?.textContent).toBe("The fleet directory didn't answer")
+    expect(host.querySelector(".connect-directory-error p")?.textContent).toBe(
+      "The request timed out, so no agents are listed. Retry, or wait: Relay tries again every 5 seconds."
+    )
+    expect(host.querySelector(".connect-directory-error")?.textContent).not.toContain("HTTP 503")
+    expect(host.querySelector(".connect-directory-error button")?.textContent).toBe("Retry")
+    expect(host.querySelector(".connect-directory-error svg")).not.toBeNull()
+    expect(host.textContent).toContain("Not updated yet")
+    expect(host.querySelector(".connect-directory-secondary")).toBeNull()
+  })
+
+  it("keeps search and filters on an empty fleet and names configured hosts", async () => {
+    respond = () => new Promise<Response>(() => {})
+    const host = document.createElement("div")
+    document.body.append(host)
+    const root = createRoot(host)
+    roots.push(root)
+    const atoms = makeConnectAtoms()
+    const page = { agents: [], failures: [], hosts: ["ALPHA", "BETA"] }
+    await act(async () => {
+      root.render(
+        <RegistryProvider initialValues={[[atoms.agents, AsyncResult.success(page)]]}>
+          <ConnectSurface atoms={atoms} embedded />
+        </RegistryProvider>
+      )
+      for (let index = 0; index < 12; index += 1) await Promise.resolve()
+    })
+    expect(host.textContent).toContain("No agents running on any host.")
+    expect(host.querySelector("input[type='search']")).not.toBeNull()
+    expect(host.querySelector(".connect-filters-toggle")?.textContent).toBe("Filters")
+    expect(host.textContent).toContain("Start an agent on ALPHA or BETA and it appears here.")
+  })
+
+  it("omits the host hint on an empty fleet from an older hub", async () => {
+    respond = () => new Promise<Response>(() => {})
+    const host = document.createElement("div")
+    document.body.append(host)
+    const root = createRoot(host)
+    roots.push(root)
+    const atoms = makeConnectAtoms()
+    await act(async () => {
+      root.render(
+        <RegistryProvider initialValues={[[atoms.agents, AsyncResult.success({ agents: [], failures: [] })]]}>
+          <ConnectSurface atoms={atoms} embedded />
+        </RegistryProvider>
+      )
+      for (let index = 0; index < 12; index += 1) await Promise.resolve()
+    })
+    expect(host.querySelector("input[type='search']")).not.toBeNull()
+    expect(host.textContent).not.toContain("Start an agent on")
+  })
+
   it("marks the directory as loading until the first list arrives, so the hub can hold its space", async () => {
     // The directory request hangs: the first list has not arrived yet.
-    window.fetch = () => new Promise<Response>(() => {})
+    respond = () => new Promise<Response>(() => {})
     const host = document.createElement("div")
     document.body.append(host)
     const root = createRoot(host)
@@ -100,6 +297,7 @@ describe("ConnectSurface directory loading", () => {
       for (let index = 0; index < 12; index += 1) await Promise.resolve()
     })
     expect(host.querySelector(".connect-agents")?.getAttribute("data-loading")).toBe("true")
+    expect(host.querySelector(".connect-directory-secondary")).toBeNull()
 
     const loadedHost = document.createElement("div")
     document.body.append(loadedHost)
@@ -115,10 +313,11 @@ describe("ConnectSurface directory loading", () => {
       for (let index = 0; index < 12; index += 1) await Promise.resolve()
     })
     expect(loadedHost.querySelector(".connect-agents")?.hasAttribute("data-loading")).toBe(false)
+    expect(loadedHost.querySelector(".connect-directory-secondary")).not.toBeNull()
   })
 
   it("keeps the directory marked as loading when the first request fails, so its retry does not shift the chat", async () => {
-    window.fetch = () => new Promise<Response>(() => {})
+    respond = () => new Promise<Response>(() => {})
     const host = document.createElement("div")
     document.body.append(host)
     const root = createRoot(host)
@@ -134,6 +333,77 @@ describe("ConnectSurface directory loading", () => {
     })
     expect(host.querySelector(".connect-agents")?.getAttribute("data-loading")).toBe("true")
   })
+})
+
+/** Active changes presentation only, keeping the terminal subtree and its atom/session identity. */
+it("keeps the same connected terminal owner while its embedded module is inactive", async () => {
+  const matchMedia = window.matchMedia.bind(window)
+  vi.spyOn(window, "matchMedia").mockImplementation((query) => {
+    const media = matchMedia(query)
+    if (query === "(pointer: fine)") Object.defineProperty(media, "matches", { value: false })
+    return media
+  })
+  const host = document.createElement("div")
+  document.body.append(host)
+  const root = createRoot(host)
+  roots.push(root)
+  const atoms = makeConnectAtoms()
+  const paint = async (active: boolean) =>
+    act(async () => {
+      root.render(
+        <RegistryProvider
+          initialValues={[
+            [atoms.agents, AsyncResult.success(agentPage)],
+            [atoms.connection, { _tag: "connected", agent }],
+            [atoms.preference, AsyncResult.success(null)],
+            [atoms.selectedKey, "SER8:agent-reviewer"],
+            [atoms.work, AsyncResult.success(workSnapshots)]
+          ]}
+        >
+          <ConnectSurface atoms={atoms} embedded active={active} />
+        </RegistryProvider>
+      )
+      for (let i = 0; i < 12; i += 1) await Promise.resolve()
+    })
+  await paint(true)
+  const terminal = host.querySelector(".connect-terminal-screen")
+  expect(terminal).not.toBeNull()
+  expect(host.querySelector(".connect-workspace")?.getAttribute("data-mode")).toBe("terminal")
+  expect(document.documentElement.classList.contains("connect-terminal-document-lock")).toBe(true)
+  const outside = document.createElement("button")
+  document.body.append(outside)
+  outside.focus()
+  await paint(false)
+  expect(document.documentElement.classList.contains("connect-terminal-document-lock")).toBe(false)
+  expect(document.body.classList.contains("connect-terminal-document-lock")).toBe(false)
+  expect(document.documentElement.style.cssText).toBe("color: red;")
+  expect(document.body.style.cssText).toBe("overflow: visible; touch-action: pan-x;")
+  expect(document.activeElement).toBe(outside)
+  expect(host.querySelector(".connect-terminal-screen")).toBe(terminal)
+  expect(host.querySelector(".connect-workspace")?.getAttribute("data-mode")).toBe("terminal")
+  await paint(true)
+  expect(document.documentElement.classList.contains("connect-terminal-document-lock")).toBe(true)
+  expect(terminal?.contains(document.activeElement)).toBe(true)
+  expect(host.querySelector(".connect-terminal-screen")).toBe(terminal)
+  expect(host.querySelector(".connect-workspace")?.getAttribute("data-mode")).toBe("terminal")
+  outside.focus()
+  await paint(true)
+  expect(document.activeElement).toBe(outside)
+  await paint(false)
+  const input = document.createElement("input")
+  document.body.append(input)
+  input.focus()
+  await paint(true)
+  expect(document.activeElement).toBe(input)
+  await paint(false)
+  const dialog = document.createElement("div")
+  dialog.setAttribute("role", "dialog")
+  const close = document.createElement("button")
+  dialog.append(close)
+  document.body.append(dialog)
+  close.focus()
+  await paint(true)
+  expect(document.activeElement).toBe(close)
 })
 
 describe("ConnectSurface terminal viewport lifecycle", () => {
@@ -252,4 +522,68 @@ describe("ConnectSurface terminal viewport lifecycle", () => {
     expect(document.documentElement.style.cssText).toBe("color: red;")
     expect(document.body.style.cssText).toBe("overflow: visible; touch-action: pan-x;")
   })
+})
+
+/** Archived replaces the active owner; its closed worker cannot leave a connected atom in the shell. */
+it("clears terminal ownership on Active unmount while keeping the selected agent", async () => {
+  const host = document.createElement("div")
+  document.body.append(host)
+  const root = createRoot(host)
+  roots.push(root)
+  const atoms = makeConnectAtoms()
+  const registry = AtomRegistry.make({
+    initialValues: [
+      [atoms.agents, AsyncResult.success(agentPage)],
+      [atoms.connection, { _tag: "connected", agent }],
+      [atoms.selectedKey, "SER8:agent-reviewer"],
+      [atoms.preference, AsyncResult.success("SER8:agent-reviewer")],
+      [atoms.work, AsyncResult.success(workSnapshots)]
+    ]
+  })
+  const releases = [
+    registry.mount(atoms.connection),
+    registry.mount(atoms.connectionRequest),
+    registry.mount(atoms.selectedKey)
+  ]
+  try {
+    await act(async () =>
+      root.render(
+        <RegistryContext.Provider value={registry}>
+          <ConnectSurface
+            atoms={atoms}
+            embedded
+            directoryLocation={{
+              url: new URL("http://localhost/?view=active#connect/overview"),
+              navigate: () => {},
+              closeSelection: () => {}
+            }}
+          />
+        </RegistryContext.Provider>
+      )
+    )
+    expect(registry.get(atoms.connection)._tag).toBe("connected")
+    await act(async () =>
+      root.render(
+        <RegistryContext.Provider value={registry}>
+          <ConnectSurface
+            atoms={atoms}
+            embedded
+            directoryLocation={{
+              url: new URL("http://localhost/?view=archived#connect/overview"),
+              navigate: () => {},
+              closeSelection: () => {}
+            }}
+          />
+        </RegistryContext.Provider>
+      )
+    )
+    expect(registry.get(atoms.connection)._tag).toBe("idle")
+    expect(registry.get(atoms.connectionRequest)).toBeNull()
+    expect(registry.get(atoms.selectedKey)).toBe("SER8:agent-reviewer")
+  } finally {
+    await act(async () => root.unmount())
+    roots.splice(roots.indexOf(root), 1)
+    for (const release of releases) release()
+    registry.dispose()
+  }
 })

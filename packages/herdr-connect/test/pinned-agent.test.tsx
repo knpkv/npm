@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 import { AgentStableId } from "@knpkv/herdr-fleet/model"
 import { Result, Schema } from "effect"
 import { renderToStaticMarkup } from "react-dom/server"
@@ -52,11 +54,25 @@ const render = (
 }
 
 describe("PinnedAgents", () => {
+  // The leading pin is its own unpin control; opening the agent stays the default keyboard stop.
+  it("puts a decorative pin before the named agent without changing the default open stop", () => {
+    const present = agent("agent-worker", "working")
+    const markup = render(pinned([present]), [present], "float")
+    const document = new DOMParser().parseFromString(markup, "text/html")
+    const controls = [...document.querySelectorAll(".connect-pin button")]
+    expect(controls.map((button) => button.getAttribute("aria-label"))).toEqual([
+      "Unpin agent-worker",
+      "Pinned: agent-worker, Working"
+    ])
+    expect(controls[0]?.querySelector("svg")?.getAttribute("aria-hidden")).toBe("true")
+    expect(controls.map((button) => button.getAttribute("tabindex"))).toEqual(["-1", "0"])
+  })
+
   // Each chip is two sibling buttons: open names the agent and its state, unpin names the agent.
   it("names each pinned agent and its state, with its own unpin, never nested", () => {
     const reviewer = agent("agent-reviewer")
     const markup = render(pinned([reviewer]), [reviewer], "float")
-    expect(markup).toContain('aria-label="Pinned: agent-reviewer, Waiting"')
+    expect(markup).toContain('aria-label="Pinned: agent-reviewer, Needs you"')
     expect(markup).toContain('aria-label="Unpin agent-reviewer"')
     expect(markup).not.toMatch(/<button[^>]*>(?:(?!<\/button>).)*<button/s)
     expect(markup.match(/class="connect-creature"/g)).toHaveLength(1)
@@ -81,7 +97,7 @@ describe("PinnedAgents", () => {
     const here = agent("agent-here")
     const away = agent("agent-away")
     const markup = render(pinned([away, here]), [here], "float")
-    expect(markup).toContain('aria-label="Pinned: agent-here, Waiting"')
+    expect(markup).toContain('aria-label="Pinned: agent-here, Needs you"')
     expect(markup).toContain('aria-label="1 more pinned"')
     expect(render(pinned([here]), [here], "float", connectAgentKey(here))).toBe("")
   })
