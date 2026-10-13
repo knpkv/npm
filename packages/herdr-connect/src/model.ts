@@ -149,9 +149,22 @@ export const TerminalSelection = Schema.Struct({
   rows: TerminalRows,
   // The client understands `terminal.scroll_state`. Absent for older clients, which would close
   // the terminal on an unknown signal, so hosts send scroll states only when it is set.
-  scrollState: Schema.optionalKey(Schema.Boolean)
+  scrollState: Schema.optionalKey(Schema.Boolean),
+  /** Explicit user intent to replace this agent's current controller; absent is an ordinary attach. */
+  takeover: Schema.optionalKey(Schema.Boolean)
 })
 export type TerminalSelection = typeof TerminalSelection.Type
+
+/** A fresh authenticated host reading, required before a hub forwards takeover intent. */
+export const TerminalCapabilities = Schema.Struct({ takeover: Schema.Literal(true) })
+export type TerminalCapabilities = typeof TerminalCapabilities.Type
+
+/** Close-event identity for a superseded controller, including through a relaying hub. */
+export const TerminalTakenOverClose = Schema.Struct({
+  code: Schema.Literal(4_424),
+  reason: Schema.Literal("taken_over")
+})
+export type TerminalTakenOverClose = typeof TerminalTakenOverClose.Type
 
 export const TerminalClientCommand = Schema.Union([
   Schema.Struct({
