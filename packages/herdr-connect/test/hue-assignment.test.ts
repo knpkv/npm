@@ -151,6 +151,21 @@ describe("persisted agent hues", () => {
           .toHaveProperty("hue", "rose")
       }).pipe(Effect.scoped))
 
+    it.effect("ranks a retired family by its latest closure across all historical holders", () =>
+      Effect.gen(function*() {
+        const stores = yield* openStores(yield* pathFor)
+        const entries = [
+          identity("sec-cc"),
+          ...Array.from({ length: 7 }, (_, index) => identity(`worker-${String(index)}`))
+        ]
+        yield* read(stores, entries)
+        yield* read(stores, [], 1)
+        expect((yield* read(stores, [identity("rose-reused")], 2)).agents[0]).toHaveProperty("hue", "rose")
+        yield* read(stores, [], 100)
+        // Rose's first holder closed at 1, but its latest holder closed at 100; ember has waited longer.
+        expect((yield* read(stores, [identity("next-family")], 101)).agents[0]).toHaveProperty("hue", "ember")
+      }).pipe(Effect.scoped))
+
     it.effect("leaves released families for returning identities while unused palettes remain", () =>
       Effect.gen(function*() {
         const stores = yield* openStores(yield* pathFor)

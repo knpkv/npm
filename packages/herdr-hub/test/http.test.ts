@@ -2474,8 +2474,8 @@ esac
     const root = mkdtempSync(join(tmpdir(), "herdr-http-peer-hues-"))
     const mainRoot = join(root, "hub")
     const peerRoot = join(root, "peer")
-    mkdirSync(mainRoot)
-    mkdirSync(peerRoot)
+    mkdirSync(mainRoot, { mode: 0o700 })
+    mkdirSync(peerRoot, { mode: 0o700 })
     const mainTailscale = join(mainRoot, "tailscale-test")
     const peerTailscale = join(peerRoot, "tailscale-test")
     for (

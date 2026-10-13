@@ -81,10 +81,17 @@ const chooseHue = (
     const family = families[(seed + offset) % families.length]
     if (family !== undefined && unused.includes(family)) return family
   }
-  // Once every family has history, reuse the longest-closed free family; ties follow design table order.
-  const retired = rows.flatMap(({ closed_at, hue }) =>
-    closed_at === null || !free.includes(hue) ? [] : [{ hue, closedAt: closed_at }]
-  ).toSorted((a, b) => a.closedAt - b.closedAt || families.indexOf(a.hue) - families.indexOf(b.hue))
+  // A free family's latest holder determines when it became available; ties follow design table order.
+  const retired = free.flatMap((hue) => {
+    const closedAt = rows.reduce<number | null>(
+      (latest, row) =>
+        row.hue === hue && row.closed_at !== null
+          ? Math.max(latest ?? row.closed_at, row.closed_at)
+          : latest,
+      null
+    )
+    return closedAt === null ? [] : [{ hue, closedAt }]
+  }).toSorted((a, b) => a.closedAt - b.closedAt || families.indexOf(a.hue) - families.indexOf(b.hue))
   const oldest = retired[0]
   if (oldest !== undefined) return oldest.hue
   // Above eight live agents, repeated colours stay distinguishable by the independent body shape.
