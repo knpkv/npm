@@ -1,10 +1,9 @@
-const { URLSearchParams, document, fetch, location } = globalThis
-const parameters = new URLSearchParams(location.search)
-document.documentElement.style.colorScheme = parameters.get("theme") === "dark" ? "dark" : "light"
+const { document, fetch } = globalThis
+document.documentElement.style.colorScheme = globalThis.__designFixtureIdentity.theme === "dark" ? "dark" : "light"
 const response = await fetch("/fixture.json")
 if (!response.ok) throw new Error(`Fixture returned ${response.status}`)
 const fixture = await response.json()
-const state = parameters.get("state")
+const state = globalThis.__designFixtureIdentity.state
 document.querySelector("h1").textContent = fixture.data.heading
 document.querySelector("p").textContent = state === "copy" || state === "waived"
   ? "Changed workspace"

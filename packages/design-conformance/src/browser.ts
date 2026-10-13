@@ -1,6 +1,7 @@
-import type { Page } from "@playwright/test"
+import type { JSHandle, Page } from "@playwright/test"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
+import { PNG } from "pngjs"
 
 import { maskUuidText, screenshotSettings, settleCaptureFonts, settleCapturePage } from "./capture.js"
 import { BrowserFailure, Snapshot } from "./schema.js"
@@ -31,40 +32,64 @@ export const waitForCapturePaint = async (page: Page): Promise<void> => {
   await ready.dispose()
 }
 
-/** Finish finite motion, reset infinite motion, and reject script-created motion until evidence is complete. */
-const freezeCaptureMotion = (page: Page) =>
-  page.evaluateHandle(() => {
-    const animate = Element.prototype.animate
-    const style = document.createElement("style")
-    style.textContent = "*, ::before, ::after { transition: none !important; }"
-    let lateAnimation = false
-    Element.prototype.animate = function(this: Element, ...args: Parameters<Element["animate"]>) {
-      lateAnimation = true
-      const animation = animate.apply(this, args)
-      animation.cancel()
-      return animation
+interface MotionGuard {
+  readonly interrupted: () => boolean
+  readonly restore: () => void
+}
+
+// Browser source stays literal: tsx can inject host-only helpers into nested function callbacks.
+const motionGuardScript = String.raw`(() => {
+  const animate = Element.prototype.animate;
+  const style = document.createElement("style");
+  style.textContent = "*, ::before, ::after { transition: none !important; }";
+  const accepted = new Set(document.getAnimations());
+  let lateAnimation = false;
+  Element.prototype.animate = function(...args) {
+    lateAnimation = true;
+    const animation = animate.apply(this, args);
+    animation.cancel();
+    return animation;
+  };
+  const restore = () => {
+    Element.prototype.animate = animate;
+    style.remove();
+  };
+  try {
+    for (const animation of accepted) {
+      if (Number.isFinite(animation.effect?.getComputedTiming().endTime)) animation.finish();
+      else animation.cancel();
     }
-    const restore = () => {
-      Element.prototype.animate = animate
-      style.remove()
-    }
-    try {
-      for (const animation of document.getAnimations()) {
-        if (Number.isFinite(animation.effect?.getComputedTiming().endTime)) animation.finish()
-        else animation.cancel()
-      }
-      document.head.append(style)
-      return {
-        interrupted: () =>
-          lateAnimation ||
-          document.getAnimations().some((animation) => animation.playState === "running" || animation.pending),
-        restore
-      }
-    } catch (cause) {
-      restore()
-      throw cause
-    }
-  })
+    document.head.append(style);
+    return {
+      interrupted: () => lateAnimation || document.getAnimations().some(animation =>
+        !accepted.has(animation) || animation.playState === "running" || animation.pending
+      ),
+      restore
+    };
+  } catch (cause) {
+    restore();
+    throw cause;
+  }
+})()`
+
+/** Finish finite motion, reset infinite motion, and reject new animation identities until evidence is complete. */
+const freezeCaptureMotion = (page: Page): Promise<JSHandle<MotionGuard>> =>
+  page.evaluateHandle<MotionGuard>(motionGuardScript)
+
+/** Crop every region from the same frame, without scrolling or re-rendering the document. */
+export const cropRegions = (bytes: Uint8Array, snapshot: Snapshot, scale = 1): ReadonlyMap<string, Uint8Array> => {
+  const source = PNG.sync.read(Buffer.from(bytes))
+  return new Map(snapshot.regions.map((region) => {
+    const x = Math.max(0, Math.floor(region.box.x * scale))
+    const y = Math.max(0, Math.floor(region.box.y * scale))
+    const width = Math.min(source.width, Math.ceil((region.box.x + region.box.width) * scale)) - x
+    const height = Math.min(source.height, Math.ceil((region.box.y + region.box.height) * scale)) - y
+    Schema.decodeUnknownSync(FrameSize)({ width, height })
+    const target = new PNG({ width, height })
+    PNG.bitblt(source, target, x, y, width, height, 0, 0)
+    return [region.name, PNG.sync.write(target)]
+  }))
+}
 
 // Motion is already frozen for metadata and every image. Screenshots must not mutate it again.
 const frozenScreenshotSettings = { ...screenshotSettings, animations: "allow" } satisfies Parameters<
@@ -147,13 +172,8 @@ export const capturePage = (page: Page) =>
         )
         const masks = page.locator("[data-visual-uuid]")
         const frame = await page.screenshot({ ...frozenScreenshotSettings, mask: [masks], fullPage: true })
-        const regions = new Map<string, Uint8Array>()
-        for (const region of snapshot.regions) {
-          const locator = page.locator(`[data-region="${region.name}"]`)
-          if (await locator.count() === 1) {
-            regions.set(region.name, await locator.screenshot({ ...frozenScreenshotSettings, mask: [masks] }))
-          }
-        }
+        const scale = await page.evaluate(() => window.devicePixelRatio)
+        const regions = cropRegions(frame, snapshot, scale)
         if (await motion.evaluate((guard) => guard.interrupted())) {
           throw new BrowserFailure({
             operation: "late capture animation",

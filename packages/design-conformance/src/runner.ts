@@ -5,9 +5,8 @@ import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 import * as Schema from "effect/Schema"
 import type { Mutable } from "effect/Types"
-import { PNG } from "pngjs"
 
-import { browserCall, type Capture, capturePage } from "./browser.js"
+import { browserCall, type Capture, capturePage, cropRegions } from "./browser.js"
 import { captureContext, installCaptureClock } from "./capture.js"
 import { comparePixels, compareSnapshots, coverageFailures, shotKey, stateKey, stateShots } from "./compare.js"
 import { LiveProduct } from "./live.js"
@@ -70,17 +69,6 @@ const withPage = Effect.fn("DesignConformance.withPage")(
   Effect.scoped
 )
 
-const crop = (bytes: Uint8Array, region: Snapshot["regions"][number]): Uint8Array => {
-  const source = PNG.sync.read(Buffer.from(bytes))
-  const x = Math.floor(region.box.x)
-  const y = Math.floor(region.box.y)
-  const width = Math.ceil(region.box.x + region.box.width) - x
-  const height = Math.ceil(region.box.y + region.box.height) - y
-  const target = new PNG({ width, height })
-  PNG.bitblt(source, target, x, y, width, height, 0, 0)
-  return PNG.sync.write(target)
-}
-
 /** Each state gets fresh equal contexts. Base captures determine touched status independently of refs. */
 export const runConformance = Effect.fn("DesignConformance.run")(function*(refs: References, options: RunnerOptions) {
   const fs = yield* FileSystem.FileSystem
@@ -129,8 +117,6 @@ export const runConformance = Effect.fn("DesignConformance.run")(function*(refs:
         Effect.gen(function*() {
           yield* live.seed(page, refs.fixture, identity)
           const url = new URL(state.route, live.origin)
-          url.searchParams.set("state", identity.state)
-          url.searchParams.set("theme", identity.theme)
           yield* browserCall("live navigation", () => page.goto(url.href).then(() => undefined))
           yield* live.ready(page, identity)
           return yield* capturePage(page)
@@ -172,7 +158,7 @@ export const runConformance = Effect.fn("DesignConformance.run")(function*(refs:
             const snapshot = yield* readJson(path.join(refs.root, ref.metadata), Snapshot)
             const frame = yield* fs.readFile(path.join(refs.root, ref.image))
             const regions = yield* Effect.try({
-              try: () => new Map(snapshot.regions.map((region) => [region.name, crop(frame, region)])),
+              try: () => cropRegions(frame, snapshot),
               catch: (cause) => new BrowserFailure({ operation: "crop PNG reference", cause })
             })
             expected = { snapshot, frame, regions }

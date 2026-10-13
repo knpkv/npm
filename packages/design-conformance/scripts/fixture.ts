@@ -6,6 +6,12 @@ import { LiveProduct, type StartProduct } from "../src/live.js"
 import { RunnerFailure } from "../src/schema.js"
 import { serveFiles } from "../src/server.js"
 
+declare global {
+  interface Window {
+    __designFixtureIdentity: { readonly state: string; readonly theme: string }
+  }
+}
+
 const Data = Schema.Struct({ heading: Schema.String, detail: Schema.String })
 const states = ["passing", "copy", "geometry", "token", "pixel", "waived", "stale", "legacy", "unreferenced"]
 
@@ -30,8 +36,13 @@ export const start: StartProduct = Effect.fn("DesignFixture.start")(function*(fi
         themes: ["light", "dark"]
       }))
     },
-    seed: (page, data) =>
-      browserCall("seed toy", () => page.route("**/fixture.json", (route) => route.fulfill({ json: data }))),
+    seed: (page, data, identity) =>
+      browserCall("seed toy", async () => {
+        await page.route("**/fixture.json", (route) => route.fulfill({ json: data }))
+        await page.addInitScript((identity) => {
+          window.__designFixtureIdentity = identity
+        }, identity)
+      }),
     ready: (page) => browserCall("toy readiness", () => page.locator("html[data-design-ready=\"true\"]").waitFor())
   })
 })

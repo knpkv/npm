@@ -180,3 +180,63 @@ test("a script animation started after sampling invalidates capture and restores
     await original.dispose()
   }
 })
+
+for (const duration of ["0s", "0.01s"]) {
+  test(`late finished CSS animation (${duration}) invalidates sampled evidence`, async ({ page }) => {
+    test.setTimeout(15_000)
+    await page.emulateMedia({ reducedMotion: "no-preference" })
+    await page.setContent(`
+      <style>
+        body { margin: 0; }
+        [data-region] { inline-size: 2.5em; block-size: 2.5em; background: rgb(255, 0, 0); }
+        @media (prefers-reduced-motion: no-preference) { .late { animation: grow ${duration} forwards; } }
+        @keyframes grow { to { inline-size: 7.5em; background: rgb(0, 255, 0); } }
+      </style>
+      <div data-region="content"></div>
+    `)
+    const screenshot = page.screenshot.bind(page)
+    page.screenshot = async (options) => {
+      await page.evaluate(async () => {
+        document.querySelector("[data-region]")?.classList.add("late")
+        await Promise.all(document.getAnimations().map((animation) => animation.finished))
+      })
+      return screenshot(options)
+    }
+    const result = await Effect.runPromise(capturePage(page).pipe(Effect.result))
+    expect(result._tag).toBe("Failure")
+    if (result._tag === "Failure") {
+      expect(result.failure).toMatchObject({
+        _tag: "BrowserFailure",
+        cause: { _tag: "BrowserFailure", operation: "late capture animation" }
+      })
+    }
+  })
+}
+
+test("below-fold region evidence uses frame crops without firing scroll mutations", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 260 })
+  await page.setContent(`
+    <style>
+      body { margin: 0; font-size: 16px; }
+      [data-region] { inline-size: 2.5em; block-size: 2.5em; background: rgb(255, 0, 0); }
+      #below { margin-block-start: 30em; }
+    </style>
+    <div data-region="above"></div><div id="below" data-region="below"></div>
+    <script>addEventListener('scroll',()=>{document.documentElement.dataset.scrolled='true';document.querySelector('#below').style.background='rgb(0, 255, 0)'})</script>
+  `)
+  const result = await Effect.runPromise(capturePage(page))
+  expect(await page.evaluate(() => window.scrollY)).toBe(0)
+  expect(await page.locator("html").getAttribute("data-scrolled")).toBeNull()
+  const frame = PNG.sync.read(Buffer.from(result.frame))
+  for (const region of result.snapshot.regions) {
+    const bytes = result.regions.get(region.name)
+    expect(bytes).toBeDefined()
+    if (bytes === undefined) continue
+    const image = PNG.sync.read(Buffer.from(bytes))
+    const expected = new PNG({ width: image.width, height: image.height })
+    PNG.bitblt(frame, expected, region.box.x, region.box.y, image.width, image.height, 0, 0)
+    expect(image.data).toEqual(expected.data)
+    expect(paintedBox(image, { red: 255, green: 0, blue: 0 }))
+      .toEqual({ x: 0, y: 0, width: 40, height: 40 })
+  }
+})

@@ -89,7 +89,7 @@ test("hash-route navigation preserves query and fragment and waits for adapter s
       const repository = yield* path.fromFileUrl(new URL("../../../", import.meta.url))
       const refs = yield* loadReferences(path.join(repository, "design-refs/_fixture"))
       const live = yield* start(refs.fixture, repository)
-      const route = "/screen.html?range=7d&timeZone=UTC#usage/limits"
+      const route = "/screen.html?state=fixture-nonce&theme=application-theme&range=7d&timeZone=UTC#usage/limits"
       const hashRouted = LiveProduct.of({
         ...live,
         inventory: {
@@ -112,8 +112,6 @@ test("hash-route navigation preserves query and fragment and waits for adapter s
             yield* live.ready(page, identity)
             yield* browserCall("settle toy hash route", async () => {
               const expected = new URL(route, live.origin)
-              expected.searchParams.set("state", identity.state)
-              expected.searchParams.set("theme", identity.theme)
               expect(page.url()).toBe(expected.href)
               await page.locator("h1").evaluate((heading) =>
                 new Promise<void>((resolve) => {
@@ -237,7 +235,14 @@ test("toy refs prove required, waived, stale, coverage, legacy and touched decis
             yield* browserCall("repair toy copy", () =>
               page.route(
                 "**/screen.js",
-                (route) => route.fulfill({ body: referenceScript, contentType: "text/javascript" })
+                (route) =>
+                  route.fulfill({
+                    body: referenceScript.replace(
+                      "new URLSearchParams(location.search)",
+                      "new URLSearchParams(globalThis.__designFixtureIdentity)"
+                    ),
+                    contentType: "text/javascript"
+                  })
               ))
           })
       })

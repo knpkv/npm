@@ -12,7 +12,7 @@ export class LiveProduct extends Context.Service<LiveProduct, {
   readonly origin: string
   /** Derive from live inputs owned by the product package, independently of design-refs. */
   readonly inventory: Inventory
-  /** Seed before navigation, using the same decoded fixture the design reads. */
+  /** Seed fixture and capture identity before navigation. Live route query keys belong to the application. */
   readonly seed: (
     page: Page,
     fixture: Fixture,

@@ -27,6 +27,7 @@ export const restrictContextNetwork = Effect.fn("DesignConformance.restrictConte
   function*(context: BrowserContext, origin: string, blocked: Array<string>, referenceFiles?: ReadonlySet<string>) {
     const pending = new Set<Promise<void>>()
     const failures: Array<ReferenceFailure> = []
+    let capturePage: Page | undefined
     const failedRequests = new Map<Request, (failure: ReferenceFailure) => void>()
     const permits = (address: string): boolean => {
       if (!permittedCaptureUrl(address, origin)) {
@@ -49,6 +50,10 @@ export const restrictContextNetwork = Effect.fn("DesignConformance.restrictConte
       return true
     }
     yield* browserCall("restrict capture network", async () => {
+      context.on("page", (page) => {
+        if (capturePage === undefined) capturePage = page
+        else blocked.push(`additional-page:${page.url()}`)
+      })
       context.on("request", (request) => {
         const url = new URL(request.url())
         if (referenceFiles === undefined || !["http:", "https:"].includes(url.protocol) || url.origin !== origin) return
@@ -92,7 +97,20 @@ export const restrictContextNetwork = Effect.fn("DesignConformance.restrictConte
         }
       })
       await context.route("**/*", async (route) => {
-        if (permits(route.request().url())) await route.continue()
+        const request = route.request()
+        let requestPage: Page
+        try {
+          requestPage = request.frame().page()
+        } catch (cause) {
+          // Initial popup requests can precede their Playwright frame. Unowned traffic fails closed.
+          blocked.push(`unowned-page:${request.url()}:${String(cause)}`)
+          await route.abort("blockedbyclient")
+          return
+        }
+        if (requestPage !== capturePage) {
+          blocked.push(`additional-page:${request.url()}`)
+          await route.abort("blockedbyclient")
+        } else if (permits(request.url())) await route.continue()
         else await route.abort("blockedbyclient")
       })
       await context.routeWebSocket("**/*", async (socket) => {

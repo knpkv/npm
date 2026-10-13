@@ -88,7 +88,8 @@ The adapter and live inventory inputs belong under the named product's
 Review inventory dependencies, including dynamic imports and file reads, for the same boundary.
 
 Routes are origin-relative paths with optional query strings and fragments, such
-as `/?range=7d&timeZone=UTC#usage/limits`. Navigation preserves the fragment and
+as `/?range=7d&timeZone=UTC#usage/limits`. Navigation preserves the complete route,
+including application-owned `state` and `theme` query keys. The adapter seeds capture identity separately. Navigation
 waits for the adapter's `ready` effect before capture. The adapter must settle
 its hash router and asynchronous UI. Absolute, protocol-relative and backslash
 URLs fail the route schema.
@@ -119,8 +120,10 @@ resets infinite animations and disables transitions. UUID masking and native pai
 readiness precede both metadata and screenshots. Screenshots keep that frozen frame
 with `animations: "allow"`; they do not perform a second animation reset.
 Script-created `element.animate()` calls during capture are cancelled and produce
-a typed `BrowserFailure`, even if they start after metadata sampling. The temporary
-animation guard and transition style are removed on success or failure.
+a typed `BrowserFailure`, even if they start after metadata sampling. New CSS
+animation identities also fail, including finished forwards-filled animations.
+Region images are crops of the same full-frame PNG; capture never scrolls to a
+region. The temporary animation guard and transition style are removed on success or failure.
 The
 installed clock fakes ordinary `requestAnimationFrame`; Playwright's RAF polling
 uses its preserved native callback. Full-page dimensions must be nonzero and at
@@ -129,7 +132,8 @@ a conservative capture bound, not a layout tolerance.
 
 Capture contexts block service workers and fail attempted registrations. HTTP
 requests and WebSockets are restricted to the capture origin. Chromium CDP Fetch
-interception checks each redirect hop before dispatch, preserving same-origin
+interception checks each redirect hop before dispatch. Additional pages and popup
+requests are rejected; each capture owns one page. This preserves same-origin
 redirects and their final URL. Its session stays active until the context closes. Browser-local `about:`, `data:` and
 `blob:` URLs are allowed. Base and output directories must resolve to different
 canonical filesystem paths, including through symlinks.

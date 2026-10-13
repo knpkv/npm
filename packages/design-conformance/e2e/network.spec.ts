@@ -322,3 +322,53 @@ for (const target of ["live", "reference"]) {
     )
   })
 }
+
+for (const target of ["live", "reference"]) {
+  test(`popup redirect requests are blocked before dispatch in the ${target} context`, async ({ browser }) => {
+    await Effect.runPromise(
+      Effect.gen(function*() {
+        let forbiddenRequests = 0
+        const forbidden = yield* localServer(() => {
+          forbiddenRequests += 1
+          return HttpServerResponse.html(readyHtml)
+        })
+        const origin = yield* localServer((address) => {
+          if (address === "/jump") {
+            return HttpServerResponse.empty({
+              status: 302,
+              headers: { location: `${forbidden}/page.html` }
+            })
+          }
+          return HttpServerResponse.html(readyHtml.replace("</body>", "<script>window.open('/jump')</script></body>"))
+        })
+        const context = yield* Effect.acquireRelease(
+          browserCall(
+            "popup boundary context",
+            () => browser.newContext({ ...captureContext, serviceWorkers: "block" })
+          ),
+          (context) => browserCall("close popup boundary context", () => context.close()).pipe(Effect.orDie)
+        )
+        const blocked: Array<string> = []
+        const network = yield* restrictContextNetwork(
+          context,
+          origin,
+          blocked,
+          target === "reference" ? new Set(["page.html", "jump"]) : undefined
+        )
+        const page = yield* browserCall("popup boundary page", () => context.newPage())
+        const interception = yield* restrictPageNetwork(context, page, network.permits)
+        yield* browserCall("observe popup attempt", async () => {
+          const popup = page.waitForEvent("popup")
+          await page.goto(`${origin}/page.html`)
+          await popup
+        })
+        yield* capturePage(page)
+        yield* interception.settle()
+        yield* network.settle().pipe(Effect.result)
+        expect(forbiddenRequests).toBe(0)
+        expect(blocked.some((address) => address.startsWith("additional-page:") || address.startsWith("unowned-page:")))
+          .toBe(true)
+      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer))
+    )
+  })
+}
