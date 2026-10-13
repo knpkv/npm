@@ -8,6 +8,8 @@ import {
   ConnectArchivePage,
   connectArchivePageMaxRecords
 } from "../../src/model.js"
+import { referenceCreatureIdentities } from "../reference-creature-identities.js"
+import { expectReferenceCreatureIdentity } from "./reference-creature-identity.js"
 
 test.use({ locale: "en-GB", timezoneId: "UTC" })
 
@@ -22,6 +24,7 @@ const closed = (
   kind = "worker",
   state = "working"
 ) => {
+  const hue = referenceCreatureIdentities.find((entry) => entry.host === host && entry.name === name)?.family
   const fields = {
     host,
     agentId: `agent-${name}`,
@@ -32,9 +35,10 @@ const closed = (
     firstSeenAt: Math.min(Date.UTC(2026, 9, name === "rev-auth" ? 9 : 7, 14, 2), now - (hours + 1) * 3_600_000),
     closedAt: now - hours * 3_600_000
   }
+  const colored = hue === undefined ? fields : { ...fields, hue }
   const spoken = text === undefined
-    ? fields
-    : { ...fields, lastWords: { text, createdAt: now - hours * 3_600_000 - 60_000 } }
+    ? colored
+    : { ...colored, lastWords: { text, createdAt: now - hours * 3_600_000 - 60_000 } }
   return Schema.decodeUnknownSync(ArchivedConnectAgent)(
     name === "rev-auth"
       ? { ...spoken, relationship: { parentAgentId: "agent-sec-cc", relation: "review" } }
@@ -633,8 +637,15 @@ for (const width of [390, 1280]) {
           await expect(helper).toBeVisible()
           await expect(page.getByRole("button", { name: "Show older", exact: true })).toBeVisible()
         } else if (frame === "A4") {
+          await expectReferenceCreatureIdentity(
+            rowNamed(page, "rev-auth").locator(".connect-creature"),
+            "atlas",
+            "rev-auth",
+            true
+          )
           await rowNamed(page, "rev-auth").click()
           const sheet = page.getByRole("dialog")
+          await expectReferenceCreatureIdentity(sheet.locator(".connect-creature"), "atlas", "rev-auth", true)
           await expect(sheet).toHaveAccessibleDescription("Reviewer on atlas, archived, read-only")
           await expect(sheet.locator("dt").filter({ hasText: /^Kind$/ }).locator("+ dd")).toHaveText("reviewer")
           await expect(sheet).toContainText("First seen 9 Oct 2026 14:02 → Closed 11 Oct 2026 09:40")

@@ -1,4 +1,4 @@
-/** Canonical outline and motion phase seeded by host:id. Painting uses the separate host:name family palette. */
+/** Outline uses the stable ID payload; motion keeps the mixed host:id seed. Palette uses host:name or a served family. */
 export interface AgentCharacter {
   readonly body: string
   readonly bodyKind: BodyKind
@@ -50,6 +50,13 @@ const fixed = (value: number): string => value.toFixed(3)
 const pair = ([x, y]: Point): string => `${fixed(x)} ${fixed(y)}`
 const field = (seed: number, shift: number, size: number): number => (seed >>> shift) % size
 
+/** Unsigned FNV-1a used by the reference identity and palette selectors. */
+const identitySeed = (host: string, identity: string): number => {
+  let hash = 2166136261
+  for (const char of `${host.toLowerCase()}:${identity}`) hash = Math.imul(hash ^ char.charCodeAt(0), 16777619)
+  return hash >>> 0
+}
+
 /** Case-insensitive host identity; unsigned FNV-1a with the murmur3 finaliser separates neighbouring IDs. */
 export const characterSeed = (host: string, id: string): number => {
   let hash = 2166136261
@@ -61,10 +68,12 @@ export const characterSeed = (host: string, id: string): number => {
   return (hash ^ (hash >>> 16)) >>> 0
 }
 
-/** Drawing and hue reservations choose the same silhouette without constructing its outline. */
-export const characterBodyKind = (seed: number): BodyKind => {
+/** Rev6 agentLook: stable ID payload, unsigned FNV-1a, then bits 8 upward. Display names never select bodies. */
+export const characterBodyKind = (host: string, id: string): BodyKind => {
+  const canonicalId = id.startsWith("agent-") ? id.slice(6) : id
+  const seed = identitySeed(host, canonicalId)
   const kinds: ReadonlyArray<BodyKind> = ["circle", "squircle", "pear", "star", "bean"]
-  return kinds[field(seed, 3, kinds.length)] ?? "circle"
+  return kinds[field(seed, 8, kinds.length)] ?? "circle"
 }
 
 /** Catmull-Rom spans and sampled curves share one geometry for painting and fitting the enclosing ring. */
@@ -205,12 +214,12 @@ const ringCentre = (points: ReadonlyArray<Point>, top: number, width: number, he
   return (low + high) / 2
 }
 
-/** Pure and stable across polls, pages and devices; retains the existing hue-family assignment. */
+/** Pure and stable across polls, pages and devices; the body ignores mutable display names. */
 export const agentCharacter = (host: string, id: string): AgentCharacter => {
   const seed = characterSeed(host, id)
   const hue = (field(seed, 0, 12) * 30 + field(seed, 4, 14)) % 360
   const spread = 18 + field(seed, 9, 30)
-  const bodyKind = characterBodyKind(seed)
+  const bodyKind = characterBodyKind(host, id)
   const drawing = creatureBodySeed(bodyKind)
   const unit = Math.min(3, 78 / drawing.width, 72 / drawing.height)
   const height = drawing.height * unit
@@ -295,13 +304,6 @@ const colours = {
   iris: { ink: "#1c1c41", base: "#7173d7", shade: "#4c52a9", highlight: "#9c9ef1", blush: "#b998ea", ring: "#7173d7" }
 } satisfies Record<CreatureHueFamily, HueSet>
 
-/** Matches the design's un-mixed FNV-1a over host:name; body seeds retain their separate mixed hash. */
-const familySeed = (host: string, name: string): number => {
-  let hash = 2166136261
-  for (const char of `${host.toLowerCase()}:${name}`) hash = Math.imul(hash ^ char.charCodeAt(0), 16777619)
-  return hash >>> 0
-}
-
 /** Pure hash-only family assignment; a served family overrides it. The chef's plum family is outside the agent set.
  * The fallback may collide when older peers omit their served family. Chroma scales only closed/stale paint.
  */
@@ -311,7 +313,7 @@ export const creaturePalette = (
   family?: CreatureHueFamily,
   chroma = 1
 ): CreaturePalette => {
-  const selected = family ?? families[familySeed(host, name) % families.length] ?? "rose"
+  const selected = family ?? families[identitySeed(host, name) % families.length] ?? "rose"
   const set = colours[selected]
   const muted = (colour: string): string =>
     chroma === 1 ? colour : `oklch(from ${colour} l calc(c * ${String(chroma)}) h)`

@@ -5,8 +5,10 @@ import { expect, type Locator, type Page, test } from "@playwright/test"
 import { Schema } from "effect"
 import { ConnectAgent } from "../../src/model.js"
 import { failureSentences } from "../../src/unavailable-detail.js"
+import { referenceCreatureIdentities } from "../reference-creature-identities.js"
 import { pinReferenceFleet, pinRegressionFleet, scrollPinDirectory, seedPins } from "./connect-pin-fixture.js"
 import { captureFidelity } from "./creature-capture.js"
+import { expectReferenceCreatureIdentity } from "./reference-creature-identity.js"
 
 test.use({ locale: "en-GB", timezoneId: "UTC" })
 
@@ -21,10 +23,20 @@ const agent = (
   parent?: string,
   relation = "delegated"
 ) => {
-  const fields = { id: `agent-${name}`, name, state, host, work, kind: "claude", lastActivityAt: at(hour, minute) }
+  const hue = referenceCreatureIdentities.find((entry) => entry.host === host && entry.name === name)?.family
+  const fields = {
+    id: `agent-${name}`,
+    name,
+    state,
+    host,
+    work,
+    kind: "claude",
+    lastActivityAt: at(hour, minute)
+  }
+  const colored = hue === undefined ? fields : { ...fields, hue }
   return Schema.decodeUnknownSync(ConnectAgent)(
-    parent === undefined ? fields : {
-      ...fields,
+    parent === undefined ? colored : {
+      ...colored,
       relationship: { parentAgentId: `agent-${parent}`, relation }
     }
   )
@@ -898,6 +910,15 @@ for (const width of [390, 1280]) {
             }))
         }
         await mount(page, theme)
+        if (state === "2a") {
+          for (const fixture of referenceCreatureIdentities.filter(({ name }) => name !== "rev-auth")) {
+            await expectReferenceCreatureIdentity(
+              page.locator(`.connect-agent[data-agent-key="${fixture.host}:agent-${fixture.name}"] .connect-creature`),
+              fixture.host,
+              fixture.name
+            )
+          }
+        }
         if (state === "2b") {
           await expect(page.getByText("Loading fleet agents…")).toBeVisible()
           await expect.soft(page.locator(".connect-directory-secondary")).toHaveCount(0)

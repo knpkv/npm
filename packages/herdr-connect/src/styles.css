@@ -3001,9 +3001,9 @@
   }
 
   @media (max-width: 40rem) {
-    /* The embedded shell owns the navigation clearance, including its measured bottom bar. */
+    /* Measured shell navigation plus a gap; without that measurement, retain the 46px reference inset. */
     .connect-shell-embedded .connect-agents {
-      --connect-pin-inset: calc(var(--app-bottom-inset, 0px) + var(--rly-space-12) + env(safe-area-inset-bottom, 0px));
+      --connect-pin-inset: calc(var(--app-bottom-inset, 34px) + var(--rly-space-12) + env(safe-area-inset-bottom, 0px));
     }
   }
 

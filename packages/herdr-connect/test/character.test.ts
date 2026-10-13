@@ -1,11 +1,30 @@
 import { describe, expect, it } from "@effect/vitest"
 import { readFileSync } from "node:fs"
 
-import { agentCharacter, characterSeed, creaturePalette, FOOT } from "../src/character.js"
+import { agentCharacter, characterBodyKind, characterSeed, creaturePalette, FOOT } from "../src/character.js"
+import { referenceBodyKind, referenceCreatureIdentities } from "./reference-creature-identities.js"
 
 const fleet = Array.from({ length: 64 }, (_, index) => agentCharacter("fixture-host", `drawing-${String(index)}`))
 
 describe("agentCharacter", () => {
+  it.each(referenceCreatureIdentities)(
+    "matches rev6 $host:$name shape and served family",
+    ({ bodyKind, family, host, name }) => {
+      expect(agentCharacter(host, `agent-${name}`).bodyKind).toBe(bodyKind)
+      expect(referenceBodyKind(host, name)).toBe(bodyKind)
+      expect(creaturePalette(host, name, family).family).toBe(family)
+    }
+  )
+
+  it("reproduces the design formula from stable ID payloads without changing the motion seed", () => {
+    for (const { bodyKind, host, name } of referenceCreatureIdentities) {
+      expect(characterBodyKind(host, `agent-${name}`)).toBe(referenceBodyKind(host, name))
+      expect(characterBodyKind(host.toUpperCase(), `agent-${name}`)).toBe(bodyKind)
+      expect(characterBodyKind(host, name)).toBe(bodyKind)
+    }
+    expect(characterSeed("fixture-host", "drawing-0")).toBe(1330749424)
+  })
+
   it("retains identity across polls and separates neighbouring host:id pairs", () => {
     expect(agentCharacter("fixture-host", "drawing-0")).toEqual(agentCharacter("fixture-host", "drawing-0"))
     expect(agentCharacter("fixture-host", "drawing-0")).not.toEqual(agentCharacter("other-host", "drawing-0"))

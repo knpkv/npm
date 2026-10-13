@@ -54,12 +54,13 @@ const [workflowText, browserPackages] = await runtime.runPromise(
 const jobs = parseDocument(workflowText).toJS().jobs
 const suiteJob = jobs["browser-suite"]
 const requiredJob = jobs.browser
+const suiteTimeout = "${{ matrix.package == 'herdr-connect' && 25 || 15 }}"
 
 test("the matrix runs exactly the packages that declare a browser suite", () => {
   assert(browserPackages.length > 0)
   assert.deepEqual([...suiteJob.strategy.matrix.package].sort(), browserPackages)
   assert.equal(suiteJob.strategy["fail-fast"], false)
-  assert.equal(suiteJob["timeout-minutes"], 15)
+  assert.equal(suiteJob["timeout-minutes"], suiteTimeout)
   assert.equal(suiteJob["continue-on-error"], undefined)
   assert(suiteJob.steps.some((step) => step.run === 'pnpm --filter "@knpkv/${{ matrix.package }}" run test:browser'))
   const buildStep = suiteJob.steps.findIndex((step) => step.run?.includes("${{ matrix.package }}^..."))

@@ -5,10 +5,11 @@ import { Effect, FileSystem, Path, Result, Schema } from "effect"
 import { DatabaseSync } from "node:sqlite"
 import { AgentActivityStore } from "../src/activity-store.js"
 import { AgentArchiveStore } from "../src/archive-store.js"
-import { agentCharacter } from "../src/character.js"
+import { agentCharacter, characterSeed } from "../src/character.js"
 import { type AgentSource, localConnectAgents } from "../src/directory.js"
 import { type ArchivedConnectAgent, ConnectAgent } from "../src/model.js"
 import { AgentRelationshipStore } from "../src/relationship-store.js"
+import { referenceBodyKind } from "./reference-creature-identities.js"
 
 const configuration = (stateDirectory: string, host = "atlas"): HostConfiguration => ({
   allowedUsers: ["owner@example.test"],
@@ -107,6 +108,166 @@ const close = (stores: Stores, agents: ReadonlyArray<ConnectAgent>, start = 0) =
 
 describe("persisted agent hues", () => {
   it.layer(NodeServices.layer)((it) => {
+    it.effect("repairs only later overflow holders during the shape upgrade and preserves reservation order", () =>
+      Effect.gen(function*() {
+        const stores = yield* openStores(yield* pathFor)
+        const host = "fixture-host"
+        const entries = Array.from({ length: 28 }, (_, index) => identity(`worker-${String(index)}`))
+        yield* read(stores, entries, 0, host)
+        const database = yield* Effect.acquireRelease(
+          Effect.sync(() => new DatabaseSync(stores.activity.path)),
+          (opened) => Effect.sync(() => opened.close())
+        )
+        const rowSchema = Schema.Array(Schema.Struct({
+          reservation_order: Schema.Number,
+          agent_id: Schema.String,
+          hue: Schema.String,
+          body_kind: Schema.String,
+          exclusive: Schema.Number
+        }))
+        const stored = () =>
+          Schema.decodeUnknownSync(rowSchema)(
+            database.prepare(
+              "SELECT rowid AS reservation_order, agent_id, hue, body_kind, exclusive FROM connect_agent_hues WHERE host = ? ORDER BY rowid"
+            ).all(host)
+          )
+        const beforeUpsert = stored()
+        yield* read(stores, entries, 1, host)
+        expect(stored().map(({ reservation_order }) => reservation_order))
+          .toEqual(beforeUpsert.map(({ reservation_order }) => reservation_order))
+        // Recorded assignments of this 28-agent inventory under the old mixed/shift-3 rule.
+        const oldHues = [
+          "rose",
+          "lime",
+          "rose",
+          "amber",
+          "lime",
+          "moss",
+          "iris",
+          "teal",
+          "sky",
+          "ember",
+          "ember",
+          "sky",
+          "moss",
+          "amber",
+          "teal",
+          "iris",
+          "rose",
+          "ember",
+          "rose",
+          "rose",
+          "lime",
+          "ember",
+          "amber",
+          "amber",
+          "moss",
+          "lime",
+          "ember",
+          "teal"
+        ]
+        const oldKinds = ["circle", "squircle", "pear", "star", "bean"]
+        const update = database.prepare(
+          "UPDATE connect_agent_hues SET hue = ?, body_kind = ? WHERE host = ? AND agent_id = ?"
+        )
+        database.exec("BEGIN")
+        for (const [index, entry] of entries.entries()) {
+          update.run(
+            oldHues[index] ?? "rose",
+            oldKinds[(characterSeed(host, entry.id) >>> 3) % 5] ?? "circle",
+            host,
+            entry.id
+          )
+        }
+        database.exec("COMMIT")
+        const legacy = stored()
+        expect(legacy.find(({ agent_id }) => agent_id === "agent-worker-16")).toMatchObject({
+          hue: "rose",
+          body_kind: "pear",
+          exclusive: 0
+        })
+        expect(legacy.find(({ agent_id }) => agent_id === "agent-worker-18")).toMatchObject({
+          hue: "rose",
+          body_kind: "squircle",
+          exclusive: 0
+        })
+        // No names are available on this partial read: the upgrade must repair the stored holders alone.
+        yield* read(stores, [], 2, host, false)
+        const upgraded = stored()
+        expect(upgraded.find(({ agent_id }) => agent_id === "agent-worker-16")).toMatchObject({
+          hue: "rose",
+          body_kind: "squircle"
+        })
+        const later = upgraded.find(({ agent_id }) => agent_id === "agent-worker-18")
+        expect(later).toHaveProperty("body_kind", "squircle")
+        expect(later).toHaveProperty("hue", "sky") // First family with no squircle holder.
+        expect(upgraded.filter(({ exclusive }) => exclusive === 1).map(({ agent_id, hue }) => ({ agent_id, hue })))
+          .toEqual(legacy.filter(({ exclusive }) => exclusive === 1).map(({ agent_id, hue }) => ({ agent_id, hue })))
+        yield* read(stores, [], 3, host, false)
+        expect(stored()).toEqual(upgraded)
+      }).pipe(Effect.scoped))
+
+    it.effect("keeps a legacy overflow repeat when every family has its corrected shape", () =>
+      Effect.gen(function*() {
+        const stores = yield* openStores(yield* pathFor)
+        const entries = [19, 44, 46, 48, 52, 58, 69, 75, 77].map((id) => identity(String(id)))
+        const before = yield* read(stores, entries)
+        const database = yield* Effect.acquireRelease(
+          Effect.sync(() => new DatabaseSync(stores.activity.path)),
+          (opened) => Effect.sync(() => opened.close())
+        )
+        const update = database.prepare("UPDATE connect_agent_hues SET body_kind = ? WHERE host = ? AND agent_id = ?")
+        const oldKinds = ["circle", "squircle", "pear", "star", "bean"]
+        database.exec("BEGIN")
+        for (const entry of entries) {
+          update.run(oldKinds[(characterSeed("atlas", entry.id) >>> 3) % 5] ?? "circle", "atlas", entry.id)
+        }
+        database.exec("COMMIT")
+        const upgraded = yield* read(stores, entries, 1)
+        expect(upgraded.agents.map(({ hue, id }) => ({ id, hue })))
+          .toEqual(before.agents.map(({ hue, id }) => ({ id, hue })))
+        for (const entry of entries) expect(agentCharacter("atlas", entry.id).bodyKind).toBe("circle")
+      }).pipe(Effect.scoped))
+
+    it.effect("upgrades old-rule reservations before checking an overflow colour's shape", () =>
+      Effect.gen(function*() {
+        const stores = yield* openStores(yield* pathFor)
+        const entries = [
+          identity("sec-cc"),
+          ...Array.from({ length: 7 }, (_, index) => identity(`worker-${String(index)}`))
+        ]
+        yield* read(stores, entries)
+        const database = yield* Effect.acquireRelease(
+          Effect.sync(() => new DatabaseSync(stores.activity.path)),
+          (opened) => Effect.sync(() => opened.close())
+        )
+        const oldKinds = ["circle", "squircle", "pear", "star", "bean"]
+        const update = database.prepare("UPDATE connect_agent_hues SET body_kind = ? WHERE host = ? AND agent_id = ?")
+        database.exec("BEGIN")
+        for (const entry of entries) {
+          update.run(oldKinds[(characterSeed("atlas", entry.id) >>> 3) % 5] ?? "circle", "atlas", entry.id)
+        }
+        database.exec("COMMIT")
+        // A partial read leaves all eight reservations live; this ninth body is a reference circle.
+        const newcomer = identity("upgrade-6")
+        expect(referenceBodyKind("atlas", newcomer.name)).toBe("circle")
+        const result = yield* read(stores, [newcomer], 1, "atlas", false)
+        const rows = Schema.decodeUnknownSync(Schema.Array(Schema.Struct({
+          agent_id: Schema.String,
+          hue: Schema.String,
+          body_kind: Schema.String
+        })))(database.prepare("SELECT agent_id, hue, body_kind FROM connect_agent_hues WHERE host = ?").all("atlas"))
+        for (const row of rows) {
+          expect(row.body_kind, row.agent_id).toBe(referenceBodyKind("atlas", row.agent_id.slice(6)))
+        }
+        const hue = hueOf(result.agents[0])
+        expect(hue).not.toBe("rose") // sec-cc holds rose with its corrected circle, not its old bean.
+        expect(
+          rows.filter((row) => row.agent_id !== newcomer.id && row.hue === hue)
+            .every((row) => row.body_kind !== "circle")
+        ).toBe(true)
+      }).pipe(Effect.scoped))
+
     it.effect("assigns colliding names different families in stable identity order", () =>
       Effect.gen(function*() {
         const stores = yield* openStores(yield* pathFor)
@@ -117,11 +278,12 @@ describe("persisted agent hues", () => {
         ]))
       }).pipe(Effect.scoped))
 
-    it.effect("matches the design fixture assignments without reserving the chef palette", () =>
+    it.effect("allocates fresh lifetimes without reserving the chef palette", () =>
       Effect.gen(function*() {
         const stores = yield* openStores(yield* pathFor)
         const atlas = yield* read(stores, ["skills", "sec-cc", "pair-codex", "ds-rly"].map(identity))
         const birch = yield* read(stores, ["pkgsrc", "rev-usage"].map(identity), 0, "birch")
+        // A fresh atlas inventory gives skills ember. Ref frames carry an older recorded amber allocation.
         expect([...atlas.agents, ...birch.agents]).toEqual(expect.arrayContaining([
           expect.objectContaining({ name: "ds-rly", hue: "iris" }),
           expect.objectContaining({ name: "sec-cc", hue: "rose" }),
@@ -206,8 +368,19 @@ describe("persisted agent hues", () => {
             expect(Result.isFailure(result)).toBe(true)
           } else yield* read(stores, [], absence === "equal-time" ? 0 : 1, "atlas", absence === "equal-time")
           const next = yield* read(stores, [identity("skills")], 2, "atlas", false)
-          // skills and sec-cc are both beans: a retained rose forces the next safe family, ember.
-          expect(next.agents[0]).toHaveProperty("hue", "ember")
+          expect(next.agents[0]).toHaveProperty("hue")
+          const database = yield* Effect.acquireRelease(
+            Effect.sync(() => new DatabaseSync(stores.activity.path)),
+            (opened) => Effect.sync(() => opened.close())
+          )
+          // All eight original holders remain live. Shapes may permit an overflow repeat without release.
+          const count = Schema.decodeUnknownSync(Schema.Struct({ held: Schema.Number }))(
+            database.prepare(
+              "SELECT COUNT(*) AS held FROM connect_agent_hues WHERE host = ? AND closed_at IS NULL AND agent_id != ?"
+            )
+              .get("atlas", "agent-skills")
+          )
+          expect(count.held).toBe(8)
         }).pipe(Effect.scoped))
     }
 
@@ -242,8 +415,8 @@ describe("persisted agent hues", () => {
         yield* read(stores, first, 1)
         yield* read(stores, first, 2, "ATLAS")
         const next = yield* read(stores, [...first, { id: "agent-10", name: "worker-10" }], 3, "ATLAS")
-        // atlas:agent-10 is squircle, so rose's star and pear holders allow this repeat.
-        expect(next.agents.find(({ id }) => id === "agent-10")).toHaveProperty("hue", "rose")
+        // Canonical payload 10 is star: skip rose's star holder and repeat ember's squircle.
+        expect(next.agents.find(({ id }) => id === "agent-10")).toHaveProperty("hue", "ember")
       }).pipe(Effect.scoped))
 
     for (const owner of Schema.Literals(["local directory", "shared archive"]).literals) {
@@ -344,14 +517,14 @@ describe("persisted agent hues", () => {
         const ninth = { id: "agent-8", name: "worker-8" }
         const all = (yield* read(stores, [...first, ninth], 1)).agents
         const bodyById = new Map([
-          ["agent-0", "star"],
+          ["agent-0", "squircle"],
           ["agent-1", "bean"],
           ["agent-2", "squircle"],
           ["agent-3", "star"],
-          ["agent-4", "pear"],
-          ["agent-5", "squircle"],
-          ["agent-6", "star"],
-          ["agent-7", "circle"],
+          ["agent-4", "squircle"],
+          ["agent-5", "bean"],
+          ["agent-6", "squircle"],
+          ["agent-7", "bean"],
           ["agent-8", "pear"]
         ])
         expect(new Set(all.map(hueOf)).size).toBe(8)
@@ -365,13 +538,14 @@ describe("persisted agent hues", () => {
     it.effect("falls back only when every family already holds the new shape, reachable at nine", () =>
       Effect.gen(function*() {
         const stores = yield* openStores(yield* pathFor)
-        // Golden circle seeds from the drawing's independent host:id shape hash.
-        const ids = [7, 18, 29, 33, 44, 45, 56, 66, 67]
+        // Golden circle seeds from rev6's stable-ID payload rule.
+        const ids = [19, 44, 46, 48, 52, 58, 69, 75, 77]
         const entries = ids.map((id) => ({ id: `agent-${String(id)}`, name: `agent-${String(id)}` }))
+        for (const entry of entries) expect(agentCharacter("atlas", entry.id).bodyKind).toBe("circle")
         const first = yield* read(stores, entries.slice(0, 8))
         expect(new Set(first.agents.map(hueOf)).size).toBe(8)
         const all = yield* read(stores, entries, 1)
-        expect(all.agents.find(({ id }) => id === "agent-67")).toHaveProperty("hue", "teal")
+        expect(all.agents.find(({ id }) => id === "agent-77")).toHaveProperty("hue", "moss")
       }).pipe(Effect.scoped))
 
     it.effect("does not restart a closed lifetime from an older positive directory sighting", () =>
