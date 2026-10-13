@@ -1,0 +1,23 @@
+id: no-nested-at-rule
+language: css
+severity: error
+message: "Keep at-rules outside selector blocks: the CSS build does not lower nesting for supported browsers"
+rule:
+  any:
+    - kind: media_statement
+    - kind: supports_statement
+    - kind: at_rule
+  inside:
+    kind: block
+    inside:
+      kind: rule_set
+      # tree-sitter-css splits dotted layer names into an incomplete @layer and a fake selector.
+      not:
+        follows:
+          kind: at_rule
+          regex: "^@layer\\b[^;{}]*$"
+files:
+  - "packages/*/src/**/*.css"
+ignores:
+  - "**/generated/**"
+  - "**/vendor/**"

@@ -162,7 +162,6 @@ const prepare = async (page: Page, width: number, theme: string) => {
 const mount = async (page: Page, theme: string) => {
   await page.goto("/?embedded")
   await page.locator("body").evaluate((body, value) => body.setAttribute("data-rly-theme", value), theme)
-  await page.locator("#fleet-connect-root").evaluate((root) => root.classList.add("fleet-shell-main"))
   // The design export includes the device frame's border; the capture has no invented hub shell.
   await page.addStyleTag({
     content:

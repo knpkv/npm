@@ -16,6 +16,7 @@ import { createRoot, type Root } from "react-dom/client"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { HubRelay, watchRelayPage } from "../src/hub-relay.js"
 import { FleetShell, keyboardHeight } from "../src/shell-view.js"
+import { connectModule } from "../src/modules.js"
 import { SuperappShell } from "../src/superapp-view.js"
 import { makeFleetModuleViews } from "../src/fleet-module-view.js"
 
@@ -339,6 +340,7 @@ describe("Relay in the hub's masthead", () => {
     await act(async () =>
       created.render(
         <SuperappShell
+          session={{ access: "tailscale", connection: "connected" }}
           modules={[views]}
           landing={{ module: "fleet", page: "approvals" }}
           host="hub"
@@ -584,3 +586,39 @@ describe("Relay in the hub's masthead", () => {
     expect(page.live()).toBe("")
   })
 })
+
+/** Home offers summon keys; only its actual connected terminal reserves them. */
+it.each([false, true])(
+  "Connect Home reserves Relay summon keys only when terminalOwnsKeys=%s",
+  async (terminalOwnsKeys) => {
+    const { conversations } = fakeConversations()
+    window.history.replaceState(null, "", "/#connect/overview")
+    const host = document.createElement("div")
+    document.body.append(host)
+    root = createRoot(host)
+    const created = root
+    await act(async () =>
+      created.render(
+        <SuperappShell
+          modules={[{ descriptor: connectModule, pages: { overview: () => <h1>Connect</h1> } }]}
+          landing={{ module: "connect", page: "overview" }}
+          host="hub"
+          hostCount={1}
+          session={{ access: "tailscale", connection: "connected" }}
+          notifications={null}
+          terminalOwnsKeys={terminalOwnsKeys}
+          relay={{ conversation: fleet, conversations }}
+        />
+      )
+    )
+    const launcher = document.querySelector<HTMLButtonElement>("[data-rly-relay-launcher]")
+    expect(launcher?.hasAttribute("aria-keyshortcuts")).toBe(!terminalOwnsKeys)
+    const key = launcher?.getAttribute("aria-keyshortcuts")?.includes("Meta") === true ? "Meta" : "Control"
+    await act(async () =>
+      document.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "j", ctrlKey: key === "Control", metaKey: key === "Meta", bubbles: true })
+      )
+    )
+    expect(document.querySelector("[data-rly-relay-panel]") !== null).toBe(!terminalOwnsKeys)
+  }
+)

@@ -1,10 +1,10 @@
-import { agentStateBucket, ConnectAgent } from "@knpkv/herdr-connect/model"
+import { ConnectAgent, connectAgentGroup } from "@knpkv/herdr-connect/model"
 import { Schema } from "effect"
 
 /** The notification bucket for known Herdr states; unavailable or new states preserve episode evidence. */
 export const blockedAgentBucket = (state: string): "blocked" | "needs-you" | "inactive" | "unknown" => {
-  const bucket = agentStateBucket(state)
-  return bucket === null ? "unknown" : bucket === "needs-you"
+  const bucket = connectAgentGroup(state, { presentation: "push" })
+  return bucket === "unknown" ? "unknown" : bucket === "needs-you"
     ? state.toLocaleLowerCase("en-US") === "blocked" ? "blocked" : "needs-you"
     : "inactive"
 }

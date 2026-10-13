@@ -10,13 +10,13 @@ import {
   usageState,
   type UsageQuery
 } from "@knpkv/herdr-connect/usage"
-import { Button, ToggleGroup } from "@knpkv/rly/primitives"
+import { Button, StateLabel, ToggleGroup } from "@knpkv/rly/primitives"
 import { Effect, Fiber, Option, Result, Schedule } from "effect"
 import * as AsyncResult from "effect/reactivity/AsyncResult"
 import { useEffect, useId, useMemo, useState, type ReactElement } from "react"
+import { ShellIcon } from "./internal/shell-icon.js"
 import {
   canonicalUsageSelection,
-  fleetModule,
   moduleHref,
   usageModule,
   type ModulePageMount,
@@ -35,6 +35,8 @@ interface UsageModuleContent {
   readonly now: number
   readonly onHubMachine: boolean
 }
+
+const usagePollInterval = "5 minutes"
 
 /** Serial cached reads stop when the module is inactive or hidden, including an in-flight request. */
 const useUsageRead = <A,>(
@@ -75,6 +77,11 @@ const rangeLabels = { "24h": "24 hours", "7d": "7 days", "30d": "30 days" } sati
   UsageSelection["range"],
   string
 >
+type ReportedTool = Extract<
+  FleetUsage["hosts"][number]["reading"],
+  { readonly _tag: "Read" }
+>["usage"]["tokens"][number]["agent"]
+const toolLabels = { claude: "Claude Code", codex: "Codex" } satisfies Record<ReportedTool, string>
 const compact = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 })
 const failureWords = {
   offline: "Offline",
@@ -92,7 +99,7 @@ const UsagePage = ({
 }: {
   readonly content: UsageModuleContent
   readonly mount: ModulePageMount
-  readonly page: "limits" | "tokens"
+  readonly page: "limits" | "tokens" | "by-tool"
   readonly search: URLSearchParams
 }): ReactElement => {
   const headingId = useId()
@@ -115,7 +122,7 @@ const UsagePage = ({
   const timeZone = selection?.timeZone ?? content.viewerTimeZone
   const read = useMemo(() => content.reads.usage({ range, timeZone }), [content.reads.usage, range, timeZone])
   const enabled = mount.active && visible && selection !== null
-  const usage = useUsageRead(read, enabled, "5 minutes", refresh)
+  const usage = useUsageRead(read, enabled, usagePollInterval, refresh)
   const limits = useUsageRead(content.reads.limits, enabled && page === "limits", "1 minute", refresh)
   const usageReading = Option.getOrNull(AsyncResult.value(usage))
   const limitsReading = Option.getOrNull(AsyncResult.value(limits))
@@ -130,7 +137,7 @@ const UsagePage = ({
   const hostsComplete =
     AsyncResult.isSuccess(usage) &&
     usage.value.fleet.peersListed &&
-    (page === "tokens" || (AsyncResult.isSuccess(limits) && limits.value.fleet.peersListed))
+    (page !== "limits" || (AsyncResult.isSuccess(limits) && limits.value.fleet.peersListed))
   const unknownHost =
     selection?.host !== null &&
     selection?.host !== undefined &&
@@ -147,7 +154,7 @@ const UsagePage = ({
   }, [decoded, unknownHost, query, page, mount.active, mount.navigate])
   if (Result.isFailure(decoded))
     return (
-      <section className="usage-details">
+      <section className="usage-details" data-usage-page={page}>
         <h1>Usage unavailable</h1>
         <p>The browser's time zone could not be read.</p>
       </section>
@@ -182,7 +189,7 @@ const UsagePage = ({
     if (host.reading._tag !== "Read" || host.host.toLowerCase() !== breakdownHost?.toLowerCase()) continue
     for (const cell of host.reading.usage.tokens) {
       providerTotals.set(cell.agent, (providerTotals.get(cell.agent) ?? 0) + cell.tokens)
-      const label = `${cell.agent} / ${cell.model}`
+      const label = `${toolLabels[cell.agent]}, ${cell.model}`
       modelTotals.set(label, (modelTotals.get(label) ?? 0) + cell.tokens)
     }
   }
@@ -192,53 +199,56 @@ const UsagePage = ({
       ? "No token reading is available yet."
       : `${compact.format(total)} reported tokens in the last ${shownRange?._tag === "Read" ? rangeLabels[shownRange.usage.range.preset] : rangeLabels[range]} from ${counted.length} ${counted.length === 1 ? "host" : "hosts"}.`
   const tabProps: UsageTabProps = {
-    presentation: { page, labelledBy: headingId },
+    presentation: { page: page === "limits" ? "limits" : "tokens", labelledBy: headingId },
     onHubMachine: false,
     range,
     onRangeChange: (range) => changeSelection({ ...decoded.success.selection, range }),
     usage: usageState(filteredUsage, content.now),
     limits: limitsState(filteredLimits, content.now)
   }
+  const toolReading = hostTotals.find((host) => host.host.toLowerCase() === breakdownHost?.toLowerCase())?.reading
+  const toolFailure = shown?.fleet.failures.find((entry) => entry.host.toLowerCase() === breakdownHost?.toLowerCase())
+  const toolTotal =
+    toolReading?._tag === "Read" ? [...providerTotals.values()].reduce((sum, tokens) => sum + tokens, 0) : null
   return (
-    <div className="usage-details">
-      <header className="usage-details-intro">
-        <h1 id={headingId}>{page === "limits" ? "Limits" : "Tokens"}</h1>
-        <p>{page === "limits" ? "Know when to wait, and when there is room for another task." : summary}</p>
-        {repaired ? <p>Some URL selectors were reset. Valid selections were kept.</p> : null}
-      </header>
-      <nav aria-label="Usage pages" className="usage-details-tabs">
-        {usageModule.pages.map((entry) => (
-          <a
-            key={entry.id}
-            href={moduleHref(usageModule, entry.id, decoded.success.search)}
-            aria-current={page === entry.id ? "page" : undefined}
-            data-module-page={entry.id}
-          >
-            {entry.label}
-          </a>
-        ))}
-      </nav>
+    <div className="usage-details" data-usage-page={page}>
+      <div className="usage-details-mast">
+        <header className="usage-details-intro">
+          <h1 id={headingId}>Usage</h1>
+          <p>Limits and tokens, per host, tool and model</p>
+          {repaired ? <p>Some URL selectors were reset. Valid selections were kept.</p> : null}
+        </header>
+        <nav aria-label="Usage pages" className="usage-details-tabs">
+          {usageModule.pages.map((entry) => (
+            <a
+              key={entry.id}
+              href={moduleHref(usageModule, entry.id, decoded.success.search)}
+              aria-current={page === entry.id ? "page" : undefined}
+              data-module-page={entry.id}
+            >
+              {entry.label}
+            </a>
+          ))}
+        </nav>
+      </div>
       <div className="usage-details-controls">
-        <ToggleGroup
-          aria-label="Range"
-          value={range}
-          items={Object.entries(rangeLabels).map(([value, label]) => ({ value, label }))}
-          onValueChange={(value) => {
-            const next = value === "24h" || value === "7d" || value === "30d" ? value : null
-            if (next !== null) changeSelection({ ...decoded.success.selection, range: next })
-          }}
-        />
         <label htmlFor={hostId}>
           Host
           <select
             id={hostId}
             name="usage-host"
-            value={selectedHost ?? ""}
+            value={page === "by-tool" ? (breakdownHost ?? "") : (selectedHost ?? "")}
             onChange={(event) =>
               changeSelection({ ...decoded.success.selection, host: event.currentTarget.value || null })
             }
           >
-            <option value="">All hosts</option>
+            {page === "by-tool" ? (
+              breakdownHost === null ? (
+                <option value="">No reported host</option>
+              ) : null
+            ) : (
+              <option value="">All hosts</option>
+            )}
             {knownHosts.map((host) => (
               <option key={host} value={host}>
                 {host}
@@ -248,22 +258,143 @@ const UsagePage = ({
               <option value={selectedHost}>{selectedHost}</option>
             ) : null}
           </select>
+          {page === "by-tool" ? <ShellIcon name="next" /> : null}
         </label>
-        <span>Periods in {timeZone}</span>
+        <ToggleGroup
+          aria-label="Range"
+          value={range}
+          items={Object.entries(rangeLabels).map(([value, label]) => ({ value, label }))}
+          onValueChange={(value) => {
+            const next = value === "24h" || value === "7d" || value === "30d" ? value : null
+            if (next !== null) changeSelection({ ...decoded.success.selection, range: next })
+          }}
+        />
+        <span className="usage-details-time-zone">Periods in {timeZone}</span>
         {content.onHubMachine ? (
           <a href={AGENT_USAGE_PAGE} target="_blank" rel="noreferrer">
             Open agent-usage on this machine
           </a>
         ) : null}
-        {AsyncResult.isFailure(usage) || AsyncResult.isFailure(limits) ? (
+        {(AsyncResult.isFailure(usage) && (page !== "by-tool" || toolReading?._tag !== "Read")) ||
+        (page === "limits" && AsyncResult.isFailure(limits)) ? (
           <Button onClick={() => setRefresh((previous) => previous + 1)}>Retry</Button>
         ) : null}
       </div>
-      <UsageTab {...tabProps} />
+      {page === "by-tool" &&
+      toolReading?._tag === "Read" &&
+      usage.waiting &&
+      toolReading.usage.range.preset !== range ? (
+        <StateLabel
+          className="usage-by-tool-updating"
+          role="status"
+          tone="neutral"
+          icon="loader"
+          size="compact"
+          label={`Updating to ${rangeLabels[range]}… showing the last ${rangeLabels[toolReading.usage.range.preset]}`}
+        />
+      ) : null}
+      {page === "by-tool" && toolReading?._tag === "Read" && AsyncResult.isFailure(usage) ? (
+        <div className="usage-by-tool-notice" role="status">
+          <div>
+            <StateLabel label="Couldn’t refresh" tone="caution" icon="alert" size="compact" />
+            {toolReading?._tag !== "Read" ? null : (
+              <span>
+                Previous reading{" "}
+                <time dateTime={new Date(toolReading.usage.observedAt).toISOString()}>
+                  {new Date(toolReading.usage.observedAt).toLocaleTimeString("en-GB", {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                    timeZone
+                  })}
+                </time>
+                . Retrying every {usagePollInterval}.
+              </span>
+            )}
+          </div>
+          <Button variant="secondary" size="dense" onClick={() => setRefresh((previous) => previous + 1)}>
+            Retry
+          </Button>
+        </div>
+      ) : null}
+      {page === "by-tool" ? (
+        <section className="usage-details-section usage-by-tool" aria-label="By tool">
+          <h2 className="usage-by-tool-heading">By tool</h2>
+          <div className="usage-by-tool-reading">
+            <strong className="usage-by-tool-total">
+              {toolTotal === null ? "Unknown" : `${compact.format(toolTotal)} tokens`}
+            </strong>
+            <p>
+              {toolReading?._tag === "Read" ? (
+                <>
+                  {breakdownHost}, last {rangeLabels[toolReading.usage.range.preset]}, read{" "}
+                  <time dateTime={new Date(toolReading.usage.observedAt).toISOString()}>
+                    {new Date(toolReading.usage.observedAt).toLocaleTimeString("en-GB", {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                      timeZone
+                    })}
+                  </time>
+                </>
+              ) : toolReading !== undefined ? (
+                toolReading.detail
+              ) : toolFailure !== undefined ? (
+                `${toolFailure.host}: ${failureWords[toolFailure.reason]}`
+              ) : (
+                "No tool reading is available yet."
+              )}
+            </p>
+          </div>
+          <table aria-label={breakdownHost === null ? "By tool and model" : `By tool and model on ${breakdownHost}`}>
+            <thead>
+              <tr>
+                <th scope="col">Tool and model</th>
+                <th scope="col">Tokens</th>
+                <th scope="col">Share</th>
+                <th scope="col">Share track</th>
+              </tr>
+            </thead>
+            <tbody>
+              {[...modelTotals]
+                .sort(([, left], [, right]) => right - left)
+                .map(([label, tokens]) => (
+                  <tr key={label}>
+                    <th scope="row">{label}</th>
+                    <td>{compact.format(tokens)}</td>
+                    <td>
+                      {toolTotal === null || toolTotal === 0
+                        ? "0%"
+                        : `${String(Math.round((tokens / toolTotal) * 100))}%`}
+                    </td>
+                    <td className="usage-by-tool-track">
+                      <progress
+                        aria-hidden="true"
+                        max={100}
+                        value={toolTotal === null || toolTotal === 0 ? 0 : (tokens / toolTotal) * 100}
+                      />
+                    </td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+          <p>
+            Per tool and model on one host at a time; splits are never summed across hosts. Moved here from Fleet /
+            Usage.
+          </p>
+          {shown === null ||
+          (shown.fleet.peersListed &&
+            shown.fleet.failures.length === 0 &&
+            counted.length === hostTotals.length) ? null : (
+            <p>Unknown hosts are left out of totals. No token reading is treated as zero.</p>
+          )}
+        </section>
+      ) : (
+        <UsageTab {...tabProps} />
+      )}
       {page === "tokens" ? (
         <>
           <section className="usage-details-section" aria-label="By host">
             <h2>By host</h2>
+            <p>{summary}</p>
             <ul>
               {hostTotals.map((host) => (
                 <li key={host.host}>
@@ -340,7 +471,6 @@ const UsagePage = ({
         </>
       ) : null}
       <footer className="usage-details-footer">
-        <a href={moduleHref(fleetModule, "usage")}>Fleet usage</a>
         <p>
           Only reported tokens and limit readings travel between hosts. Costs, balances, sessions and paths stay on
           their machines. Cost isn't reported.
@@ -353,8 +483,10 @@ const UsagePage = ({
 /** The shared page root keeps prior readings across tabs and shell navigation; Fleet owns transport. */
 export const makeUsageModuleViews = (content: UsageModuleContent): ModuleViews<typeof usageModule> => ({
   descriptor: usageModule,
+  navigationIcon: <ShellIcon name="usage" />,
   pages: {
     limits: (search, mount) => <UsagePage content={content} mount={mount} page="limits" search={search} />,
-    tokens: (search, mount) => <UsagePage content={content} mount={mount} page="tokens" search={search} />
+    tokens: (search, mount) => <UsagePage content={content} mount={mount} page="tokens" search={search} />,
+    "by-tool": (search, mount) => <UsagePage content={content} mount={mount} page="by-tool" search={search} />
   }
 })

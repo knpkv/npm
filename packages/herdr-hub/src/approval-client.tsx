@@ -2,8 +2,8 @@ import { dashboardRefreshView } from "./internal/dashboard-refresh.js"
 import { RegistryProvider, useAtom, useAtomRefresh, useAtomSet, useAtomValue } from "@effect/atom-react"
 import { BrowserCrypto, BrowserHttpClient } from "@effect/platform-browser"
 import { makeRelayClient, makeRelayConversations } from "@knpkv/relay-product/client"
-import { ConnectSurface, makeConnectAtoms } from "@knpkv/herdr-connect/surface"
-import { BlockedConnectSurface } from "./blocked-connect-surface.js"
+import { makeConnectAtoms } from "@knpkv/herdr-connect/surface"
+import { makeConnectModuleViews } from "./connect-module-view.js"
 import { loadLimits, loadUsage, makeUsageAtoms, onLoopback, UsageSurface } from "@knpkv/herdr-connect/usage"
 import { Cause, Effect, Exit, Layer, ManagedRuntime, Option, Result, Schema } from "effect"
 import * as AsyncResult from "effect/reactivity/AsyncResult"
@@ -37,6 +37,7 @@ import { type HubRelayConversation, watchRelayPage } from "./hub-relay.js"
 import {
   dashboardHistoryState,
   dashboardPendingBadgeCount,
+  dashboardPendingNavigationBadge,
   loadDashboardPendingPage,
   mergeDashboardHistoryPage,
   withPendingApprovalTarget
@@ -51,12 +52,11 @@ import { useHubNow } from "./hub-clock.js"
 import { answerOutcome, decidableExpiry, workRequestDecisionsFor } from "./work-decisions.js"
 import { DashboardWorkPollOwner } from "./work-poll-owner.js"
 import { SuperappShell } from "./superapp-view.js"
-import { makeFleetModuleViews } from "./fleet-module-view.js"
-import { makeTodayModuleViews, TodayReadFailed } from "./today-module-view.js"
+import { makeFleetHubModuleViews } from "./fleet-module-view.js"
+import { TodayReadFailed } from "./today-module-view.js"
 import { makeUsageModuleViews, type UsageModuleReads } from "./usage-module-view.js"
 import { makeCodeModuleViews } from "./code-module-view.js"
 import { loadCodeQueue, loadCodeDetail, loadCodeDiff, loadCodeContent, type CodeModuleReads } from "./code-client.js"
-import { TodayFleetAgents, TodayFleetHistory } from "./today-fleet-activity.js"
 import { NeedsYouResult } from "./modules.js"
 import { RefreshStatus } from "./refresh-status.js"
 import { dashboardPolls } from "./internal/dashboard-polls.js"
@@ -123,7 +123,7 @@ const fetchJson = Effect.fn("ApprovalClient.fetchJson")(function* <A>(
 const browserRuntime = Atom.runtime(BrowserHttpClient.layerFetch)
 
 const loadDashboard = fetchJson(DashboardSnapshot, "/v1/dashboard")
-const loadToday = fetchJson(NeedsYouResult, "/v1/modules/today/needs-you").pipe(
+const loadToday = fetchJson(NeedsYouResult, "/v1/modules/connect/needs-you").pipe(
   Effect.timeout("6 seconds"),
   Effect.mapError((failure) => {
     const reasons = {
@@ -573,7 +573,6 @@ const DashboardApp = ({
       ? "error"
       : "loading"
   const waiting = AsyncResult.isWaiting(result)
-  const pendingBadgeCount = dashboardPendingBadgeCount(pendingState)
   const canonical = snapshot.approvalApp.canonical === true
   const currentSnapshot = withPendingApprovalTarget(
     {
@@ -590,14 +589,6 @@ const DashboardApp = ({
     }
   }, [pull.refreshing, setPull, waiting])
   useEffect(() => {
-    if (!canonical || pendingBadgeCount === null || !pushSupported()) return
-    void runBadge(pendingBadgeCount).then((exit) => {
-      if (Exit.isFailure(exit)) {
-        Effect.runFork(Effect.logError(Cause.pretty(exit.cause)))
-      }
-    })
-  }, [canonical, pendingBadgeCount, runBadge])
-  useEffect(() => {
     setHistoryState((state) => dashboardHistoryState(state.generation + 1, [], snapshot.historyNextCursor))
   }, [snapshot])
   useEffect(() => {
@@ -612,10 +603,19 @@ const DashboardApp = ({
     latestObservedAt.current = currentSnapshot.observedAt
   }, [currentSnapshot.observedAt])
   // The Work board's request clocks read hub time, like the Approvals countdown.
-  const workNow = useHubNow(
-    currentSnapshot.observedAt,
-    currentSnapshot.pendingApprovals.local.map((record) => record.approvalExpiresAt ?? null)
-  )
+  const workNow = useHubNow(currentSnapshot.observedAt, [
+    ...currentSnapshot.pendingApprovals.local.map((record) => record.approvalExpiresAt ?? null),
+    ...currentSnapshot.pendingApprovals.remote.map(({ approval }) => approval.approvalExpiresAt)
+  ])
+  const pendingBadgeCount = dashboardPendingBadgeCount(pendingState, workNow)
+  useEffect(() => {
+    if (!canonical || pendingBadgeCount === null || !pushSupported()) return
+    void runBadge(pendingBadgeCount).then((exit) => {
+      if (Exit.isFailure(exit)) {
+        Effect.runFork(Effect.logError(Cause.pretty(exit.cause)))
+      }
+    })
+  }, [canonical, pendingBadgeCount, runBadge])
   const current = currentSnapshot
   const workSelection = decodeWorkNavigationSelection(routeSearch)
   const workContent =
@@ -664,31 +664,9 @@ const DashboardApp = ({
   )
   const hostCount = current.directory === null ? 1 : current.directory.links.length + 1
   const gesture = { onTouchStart, onTouchMove, onTouchEnd, onTouchCancel: resetPull }
-  const connectSelection = new URLSearchParams(routeSearch)
-  const fleet = makeFleetModuleViews({
+  const fleet = makeFleetHubModuleViews({
     approvals: dashboardView,
-    connect: canonical ? (
-      <BlockedConnectSurface
-        key={JSON.stringify([
-          connectSelection.get("host"),
-          connectSelection.get("agent"),
-          connectSelection.get("open")
-        ])}
-        atoms={atoms.connect}
-        embedded
-        notificationState={notificationState}
-      />
-    ) : (
-      <ConnectSurface
-        key={JSON.stringify([
-          connectSelection.get("host"),
-          connectSelection.get("agent"),
-          connectSelection.get("open")
-        ])}
-        atoms={atoms.connect}
-        embedded
-      />
-    ),
+    connect: null,
     hostCount,
     notice: refreshNotice,
     usage: <UsageSurface atoms={atoms.usage} />,
@@ -705,12 +683,11 @@ const DashboardApp = ({
       </section>
     )
   })
-  const today = makeTodayModuleViews({
-    read: readToday,
+  const connect = makeConnectModuleViews({
+    atoms: atoms.connect,
+    readApprovals: readToday,
     now: workNow,
-    agents: <TodayFleetAgents snapshot={current} />,
-    history: <TodayFleetHistory snapshot={current} />,
-    usageDetails: true
+    notificationState
   })
   const usage = makeUsageModuleViews({
     reads: usageReads,
@@ -720,16 +697,27 @@ const DashboardApp = ({
     onHubMachine: onLoopback()
   })
   const code = makeCodeModuleViews({ reads: codeReads, onHubMachine: onLoopback() })
+  const connectConnection = useAtomValue(atoms.connect.connection)
+  const fleetNavigationBadge = dashboardPendingNavigationBadge(pendingState, workNow, refreshFailed)
+  const fleetWithBadge =
+    fleetNavigationBadge === undefined ? fleet : { ...fleet, navigationBadge: fleetNavigationBadge }
   return (
     <>
       <DashboardWorkPollOwner atom={atoms.work} poll={atoms.workPoll} />
       {canonical ? (
         <SuperappShell
-          modules={[today, fleet, code, usage]}
-          mobileModules={["today", "fleet", "code"]}
-          landing={{ module: "today", page: "overview" }}
+          modules={[connect, fleetWithBadge, code, usage]}
+          mobileModules={["connect", "fleet", "code", "usage"]}
+          primaryModules={["connect", "fleet"]}
+          landing={{ module: "connect", page: "overview" }}
           host={current.host}
           hostCount={hostCount}
+          session={
+            refreshFailed
+              ? { access: onLoopback() ? "loopback" : "tailscale", connection: "stale", observedAt: current.observedAt }
+              : { access: onLoopback() ? "loopback" : "tailscale", connection: "connected" }
+          }
+          terminalOwnsKeys={connectConnection._tag === "connected"}
           relay={relay}
           onLocationChange={setRouteSearch}
           notifications={

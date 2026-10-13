@@ -1,3 +1,4 @@
+import { connectAgentGroup } from "./agent-state-core.js"
 /**
  * An agent's stage and the cast strip that opens it: the character large on a field in its state tone, its
  * work as what it is saying, quiet details, and the way into its terminal.
@@ -43,11 +44,13 @@ export const AgentCast = ({
   readonly silentHosts?: ReadonlyArray<string>
 }): ReactElement => {
   const families = connectAgentFamilies(agents).filter((family) =>
-    family.rows.some(({ agent }) => agentStatePresentation(agent.state).bucket === "needs-you")
+    family.rows.some(({ agent }) => connectAgentGroup(agent.state, { presentation: "fleet" }) === "needs-you")
   )
   const cast = families.flatMap((family) =>
     family.rows
-      .filter((row, index) => index === 0 || agentStatePresentation(row.agent.state).bucket === "needs-you")
+      .filter(
+        (row, index) => index === 0 || connectAgentGroup(row.agent.state, { presentation: "fleet" }) === "needs-you"
+      )
       .map(({ agent }) => agent)
   )
   // One tab stop for the whole strip, so the cast doesn't double every row's stop; arrows move along it.
@@ -75,7 +78,10 @@ export const AgentCast = ({
           role="group"
         >
           {family.rows
-            .filter((row, index) => index === 0 || agentStatePresentation(row.agent.state).bucket === "needs-you")
+            .filter(
+              (row, index) =>
+                index === 0 || connectAgentGroup(row.agent.state, { presentation: "fleet" }) === "needs-you"
+            )
             .map(({ agent }) => (
               <button
                 aria-haspopup="dialog"
@@ -165,7 +171,7 @@ const AgentLineage = ({
       : []
   const workers = children.filter((child) => child.relationship?.relation !== "pair")
   const visibleWorkers = workers.filter(
-    (child, index) => expanded || index < 3 || agentStatePresentation(child.state).bucket === "needs-you"
+    (child, index) => expanded || index < 3 || connectAgentGroup(child.state, { presentation: "fleet" }) === "needs-you"
   )
   const hiddenWorkers = workers.length - visibleWorkers.length
   const member = (member: ConnectAgent, role: string) => (
@@ -220,6 +226,28 @@ const AgentLineage = ({
   )
 }
 
+/** Home's navigation chrome shares the sheet owner's close and focus-return path. */
+const HomeStageHeader = ({
+  agent,
+  onClose
+}: {
+  readonly agent: ConnectAgent
+  readonly onClose: () => void
+}): ReactElement => (
+  <header className="connect-home-stage-header">
+    <button aria-label="Back to Connect" className="connect-home-stage-back" onClick={onClose} type="button">
+      <Icon decorative name="chevron-left" size="small" />
+    </button>
+    <h2>
+      <b>Connect</b>
+      <span>{agent.name}</span>
+    </h2>
+    <button aria-label="Close" className="connect-home-stage-close" onClick={onClose} type="button">
+      <Icon decorative name="close" size="small" />
+    </button>
+  </header>
+)
+
 /** The open agent's stage, or nothing; closing it hands focus back to whatever opened it. */
 export const AgentStage = ({
   agent,
@@ -231,6 +259,8 @@ export const AgentStage = ({
   onOpenTerminal,
   onPinChange,
   pinned,
+  presentation = "fleet",
+  restoreFocus,
   stale,
   workGoal,
   workSnapshots = null
@@ -244,6 +274,10 @@ export const AgentStage = ({
   readonly workGoal: ConnectWorkGoalResolution
   /** Whether this agent is pinned on this device. */
   readonly pinned: boolean
+  /** Header layout only; Fleet is the default and the stage body keeps its existing owner. */
+  readonly presentation?: "fleet" | "home"
+  /** Optional URL-selection return target, decided by Sheet after modal cleanup. */
+  readonly restoreFocus?: (() => HTMLElement | undefined) | undefined
   readonly onPinChange: (pinned: boolean) => void
   /** Its direct children, used when a complete directory is not supplied. */
   readonly crew: ReadonlyArray<ConnectAgent>
@@ -255,14 +289,20 @@ export const AgentStage = ({
   return (
     // Its own portal target: Connect runs standalone and inside the hub, and neither provides one.
     <PortalProvider>
-      <Sheet.Root onOpenChange={(open) => (open ? undefined : onClose())} open={agent !== null}>
+      <Sheet.Root
+        onOpenChange={(open) => (open ? undefined : onClose())}
+        open={agent !== null}
+        restoreFocus={restoreFocus}
+      >
         {agent === null ? null : (
           <Sheet.Content
             className="connect-stage-sheet"
+            data-connect-stage-presentation={presentation}
             closeLabel="Close"
             description={`${agent.kind} on ${agent.host}`}
             title={agent.name}
           >
+            {presentation === "home" ? <HomeStageHeader agent={agent} onClose={onClose} /> : null}
             <Sheet.Body className="connect-stage" data-stale={stale ? "" : undefined}>
               <div className="connect-stage-hero" data-tone={agentStatePresentation(agent.state).tone}>
                 <Creature host={agent.host} id={String(agent.id)} size="stage" stale={stale} state={agent.state} />

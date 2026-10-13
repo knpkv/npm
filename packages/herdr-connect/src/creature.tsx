@@ -23,6 +23,8 @@ export interface CreatureProps {
   readonly host: string
   readonly id: string
   readonly state: string
+  /** Home keeps unknown evidence neutral; Fleet retains its existing needs-you fallback. */
+  readonly statePolicy?: "fleet" | "home"
   /** The agent's host stopped answering: the last known state shows, without life. */
   readonly stale?: boolean
   /**
@@ -59,10 +61,11 @@ export const Creature = ({
   id,
   size,
   stale = false,
-  state
+  state,
+  statePolicy = "fleet"
 }: CreatureProps): ReactElement => {
   const character = agentCharacter(host, id)
-  const presentation = agentStatePresentation(state)
+  const presentation = agentStatePresentation(state, statePolicy)
   const [light, mid, deep] = character.hues
   const [eyeWidth, eyeHeight] = character.eye
   const [left, top, width, height] = character.bounds

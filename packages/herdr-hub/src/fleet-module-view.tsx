@@ -1,5 +1,5 @@
 import type { ReactElement, ReactNode, TouchEventHandler } from "react"
-import { fleetModule, moduleHref, type ModulePageMount, type ModuleViews } from "./modules.js"
+import { fleetModule, fleetHubModule, moduleHref, type ModulePageMount, type ModuleViews } from "./modules.js"
 import { FleetShell, type FleetShellTab } from "./shell-view.js"
 
 export interface FleetModuleContent {
@@ -19,20 +19,29 @@ export interface FleetModuleContent {
 
 /** Every Fleet page uses this same root, preserving the mounted Approvals decision. */
 const FleetModulePage = ({
+  canonical = false,
   content,
   mount,
   page,
   search
 }: {
   readonly content: FleetModuleContent
+  readonly canonical?: boolean
   readonly page: FleetShellTab
   readonly search: URLSearchParams
   readonly mount: ModulePageMount
 }): ReactElement => (
   <div className="dashboard-gesture" {...content.gesture}>
+    {canonical ? (
+      <header className="superapp-module-heading">
+        <h1>Fleet</h1>
+        <p>Hosts, approvals and what they apply</p>
+      </header>
+    ) : null}
     <FleetShell
       active={mount.active}
       embedded
+      {...(canonical ? { pages: ["approvals", "work"] } : {})}
       navigation={{ tab: page, onTabChange: (tab) => mount.navigate(moduleHref(fleetModule, tab, search), "replace") }}
       approvals={content.approvals}
       connect={content.connect}
@@ -54,3 +63,14 @@ export const makeFleetModuleViews = (content: FleetModuleContent): ModuleViews<t
     pages: { approvals: page("approvals"), connect: page("connect"), work: page("work"), usage: page("usage") }
   }
 }
+
+/** Canonical navigation retires Connect/Usage while preserving Fleet's shared Approvals owner. */
+export const makeFleetHubModuleViews = (content: FleetModuleContent): ModuleViews<typeof fleetHubModule> => ({
+  descriptor: fleetHubModule,
+  pages: {
+    approvals: (search, mount) => (
+      <FleetModulePage canonical content={content} page="approvals" search={search} mount={mount} />
+    ),
+    work: (search, mount) => <FleetModulePage canonical content={content} page="work" search={search} mount={mount} />
+  }
+})

@@ -33,7 +33,10 @@ for (const theme of ["light", "dark"]) {
       })
     const firstOwner = await scrollPinDirectory(page, 0.35)
     const first = await read()
-    expect.soft(firstOwner.scrollTop).toBeGreaterThan(500)
+    // The Home grid has three desktop columns; prove real travel without assuming the old single-column height.
+    expect.soft(firstOwner.scrollRange).toBeGreaterThan(0)
+    expect.soft(firstOwner.scrollTop).toBeGreaterThan(0)
+    expect.soft(firstOwner.scrollTop).toBeCloseTo(firstOwner.scrollRange * 0.35, 0)
     expect.soft(first.y, firstOwner.owner).toBeGreaterThanOrEqual(0)
     expect.soft(first.bottom + first.inset, firstOwner.owner).toBeCloseTo(firstOwner.bottom, 0)
     const mobileNavigation = await page.locator(".superapp-bottom").isVisible()
@@ -47,16 +50,9 @@ for (const theme of ["light", "dark"]) {
     expect.soft(second.bottom + second.inset).toBeCloseTo(secondOwner.bottom, 0)
     await scrollPinDirectory(page, 1)
     const end = await read()
-    const footer = await page.locator(".connect-directory-secondary").boundingBox()
-    expect(footer).not.toBeNull()
-    if (footer !== null) expect.soft(end.y).toBeGreaterThanOrEqual(footer.y)
-    const link = page.locator(".connect-limits-link")
-    await expect(link).toBeVisible()
-    expect(
-      await link.evaluate((node) => {
-        const box = node.getBoundingClientRect()
-        return node.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2))
-      })
-    ).toBe(true)
+    await expect(stack).toBeVisible()
+    await expect(page.locator(".connect-directory-secondary")).toHaveCount(0)
+    await expect(page.locator(".connect-limits-link")).toHaveCount(0)
+    expect.soft(end.bottom).toBeLessThanOrEqual(page.viewportSize()?.height ?? 0)
   })
 }

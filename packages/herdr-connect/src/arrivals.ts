@@ -1,3 +1,4 @@
+import { type ConnectAgentGroup, connectAgentGroup } from "./agent-state-core.js"
 /**
  * Which agents just started needing you, from one directory poll to the next.
  *
@@ -14,25 +15,27 @@
  *
  * @module
  */
-import { type AgentBucket, agentStatePresentation } from "./agent-state.js"
 import type { ConnectAgent } from "./model.js"
 import { connectAgentKey } from "./view.js"
 
 /** One agent's bucket on a poll, with the host that reported it. */
 export interface AgentBucketEntry {
   readonly host: string
-  readonly bucket: AgentBucket
+  readonly bucket: ConnectAgentGroup
 }
 
 /** Each agent's bucket on a poll, by `connectAgentKey`. */
 export type AgentBuckets = ReadonlyMap<string, AgentBucketEntry>
 
-/** The buckets of one poll. */
-export const agentBucketsOf = (agents: ReadonlyArray<ConnectAgent>): AgentBuckets =>
+/** The buckets of one poll under the surface's policy; standalone Fleet remains the default. */
+export const agentBucketsOf = (
+  agents: ReadonlyArray<ConnectAgent>,
+  presentation: "fleet" | "home" = "fleet"
+): AgentBuckets =>
   new Map(
     agents.map((agent) => [
       connectAgentKey(agent),
-      { bucket: agentStatePresentation(agent.state).bucket, host: agent.host }
+      { bucket: connectAgentGroup(agent.state, { presentation }), host: agent.host }
     ])
   )
 

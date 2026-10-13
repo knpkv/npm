@@ -1,0 +1,3 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`keeps the shipped Fleet stage header 1`] = `"<div class="_header_0134c6"><div class="_heading_0134c6"><h2 id="INSTANCE" class="_title_0134c6">Agent</h2><p id="INSTANCE" class="_description_0134c6">codex on hub</p></div><button type="button" aria-label="Close" class="_iconClose_0134c6" data-rly-hit-area=""><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-x" focusable="false" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg></button></div>"`;

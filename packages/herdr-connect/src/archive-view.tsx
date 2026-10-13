@@ -18,13 +18,15 @@ import {
 } from "./archive-model.js"
 import type { ConnectAtoms } from "./client.js"
 import { Creature } from "./creature.js"
+import { ConnectHomeArchive } from "./archive-home.js"
+import { connectHomePurpose } from "./home-directory.js"
 import type { ConnectTimeoutError } from "./internal/read-deadline.js"
 import {
   ConnectDirectorySwitch,
   connectArchivedParentHref,
   connectDirectoryHref,
   navigateConnectDirectory,
-  syncConnectDirectoryHistory
+  type ConnectDirectoryLocation
 } from "./directory-view.js"
 import {
   connectArchivePageMaxRecords,
@@ -44,16 +46,24 @@ type ArchiveState =
 
 /** Archive selection has no live-stage callback; parent links are drawn only for already loaded identities. */
 export const ConnectArchiveSurface = ({
+  active: visible = true,
   atoms,
+  directoryLocation,
   embedded,
-  locationSearch,
+  presentation = "fleet",
   roomFooter
 }: {
   readonly atoms: ConnectAtoms
   readonly embedded: boolean
-  readonly locationSearch: string
+  readonly active?: boolean
+  readonly presentation?: "fleet" | "home"
+  readonly directoryLocation: ConnectDirectoryLocation
   readonly roomFooter?: ReactNode
 }) => {
+  const locationHref = directoryLocation.url.href
+  const locationSearch = directoryLocation.url.search
+  const navigate = directoryLocation.navigate
+  const home = presentation === "home"
   const [state, setState] = useState<ArchiveState>({ _tag: "loading", page: null })
   const [attempt, setAttempt] = useState<{ readonly cursor: ConnectArchiveCursor | null; readonly revision: number }>({
     cursor: null,
@@ -108,7 +118,7 @@ export const ConnectArchiveSurface = ({
   const filtered = agents.filter((agent) => archiveMatchesQuery(agent, query))
   const selected = agents.find((agent) => archivedAgentKey(agent) === selection) ?? null
   useEffect(() => {
-    if (state._tag !== "ready" || selection === null || selected !== null) return
+    if (!visible || state._tag !== "ready" || selection === null || selected !== null) return
     // Restore only this URL-selected closure. The server bounds each page to 64 and the retained 90-day window.
     if (state.page.nextCursor !== null) {
       setState({ _tag: "loading", page: state.page })
@@ -117,10 +127,10 @@ export const ConnectArchiveSurface = ({
     }
     // A removed/expired closure has no stage. Replace its stale URL rather than adding a dead history entry.
     setSelection(null)
-    const url = new URL(window.location.href)
+    const url = new URL(locationHref)
     url.searchParams.delete("closed")
-    syncConnectDirectoryHistory(`${url.pathname}${url.search}${url.hash}`, "replace")
-  }, [state, selection, selected])
+    navigate(`${url.pathname}${url.search}${url.hash}`, "replace")
+  }, [state, selection, selected, visible, locationHref, navigate])
   const parentId = selected?.relationship?.parentAgentId
   const activeParents =
     parentId === undefined
@@ -137,15 +147,22 @@ export const ConnectArchiveSurface = ({
     archivedParent === undefined
       ? null
       : connectArchivedParentHref(
-          new URL(connectDirectoryHref("archived"), window.location.href),
+          new URL(connectDirectoryHref("archived", undefined, directoryLocation.url), locationHref),
           archivedAgentKey(archivedParent)
         )
   const closeStage = (): void => {
     setSelection(null)
-    const url = new URL(window.location.href)
+    const url = new URL(locationHref)
     if (!url.searchParams.has("closed")) return
     url.searchParams.delete("closed")
-    syncConnectDirectoryHistory(`${url.pathname}${url.search}${url.hash}`)
+    directoryLocation.closeSelection(`${url.pathname}${url.search}${url.hash}`)
+  }
+  const openStage = (key: string): void => {
+    if (!home) {
+      setSelection(key)
+      return
+    }
+    navigate(connectArchivedParentHref(directoryLocation.url, key), "push")
   }
   const now = Date.now()
   const failed =
@@ -168,143 +185,171 @@ export const ConnectArchiveSurface = ({
     ) : null
   return (
     <div
+      data-connect-presentation={home ? "home" : "fleet"}
       className={
         embedded ? "connect-shell connect-shell-embedded connect-archive-shell" : "connect-shell connect-archive-shell"
       }
     >
       <div className="connect-workspace" data-mode="directory">
         <div className="connect-directory-screen">
-          <div className="connect-directory-heading">
-            <header
-              className={
-                embedded ? "connect-embedded-intro connect-directory-title" : "connect-header connect-directory-title"
-              }
-            >
-              <Text as="h1" variant="card-title">
-                Connect
-              </Text>
-              <small className="connect-archive-subtitle">
-                {page === null
-                  ? state._tag === "loading"
-                    ? "Loading the archive..."
-                    : "Not loaded"
-                  : "Archived, newest closed first"}
-              </small>
-            </header>
-            <ConnectDirectorySwitch archived />
-          </div>
-          <section aria-label="Archived agents" className="connect-agents connect-archive-directory">
-            {page === null ? (
-              state._tag === "loading" ? (
-                <>
-                  <small className="connect-archive-loading" role="status">
-                    Loading archived agents...
-                  </small>
-                  <div aria-hidden="true" className="connect-archive-skeletons">
-                    {[0, 1, 2, 3].map((index) => (
-                      <div className="connect-archive-skeleton" key={index} />
-                    ))}
-                  </div>
-                </>
-              ) : (
-                failed
-              )
-            ) : agents.length === 0 ? (
-              <div className="connect-archive-empty">
-                No closed agents in the last {String(connectArchiveWindowDays)} days
+          {home ? (
+            <>
+              <div className="connect-home-heading">
+                <header className="connect-home-intro">
+                  <Text as="h1" variant="card-title">
+                    Connect
+                  </Text>
+                  <Text as="p" tone="secondary">
+                    {connectHomePurpose}
+                  </Text>
+                </header>
+                <ConnectDirectorySwitch archived home location={directoryLocation} />
               </div>
-            ) : (
-              <>
-                <div className="connect-archive-search-group">
-                  <label className="connect-search connect-archive-search">
-                    <span>Find archived agent</span>
-                    <Icon decorative name="search" size="small" />
-                    <input
-                      autoComplete="off"
-                      id="connect-agent-search"
-                      onChange={(event) => setQuery(event.currentTarget.value)}
-                      placeholder="Name, host, kind..."
-                      ref={search}
-                      type="search"
-                      value={query}
-                    />
-                    <kbd aria-hidden="true" className="connect-search-shortcut">
-                      Ctrl K
-                    </kbd>
-                  </label>
-                  {page.nextCursor === null ? null : (
-                    <small className="connect-archive-scope">Search covers loaded archived agents only</small>
-                  )}
-                </div>
-                {filtered.length === 0 ? (
-                  <div className="connect-archive-empty connect-archive-no-match">
-                    <p>
-                      {page.nextCursor === null ? "No closed agents" : "No loaded closed agents"} match "{query.trim()}"
-                      in Archived.
-                    </p>
-                    <Button
-                      className="connect-archive-control connect-scope-clear"
-                      onClick={() => {
-                        setQuery("")
-                        search.current?.focus()
-                      }}
-                      size="dense"
-                      variant="secondary"
-                    >
-                      Clear search
-                    </Button>
+              <ConnectHomeArchive
+                page={page}
+                loading={state._tag === "loading"}
+                failed={state._tag === "failed"}
+                request={request}
+                open={openStage}
+              />
+            </>
+          ) : (
+            <>
+              <div className="connect-directory-heading">
+                <header
+                  className={
+                    embedded
+                      ? "connect-embedded-intro connect-directory-title"
+                      : "connect-header connect-directory-title"
+                  }
+                >
+                  <Text as="h1" variant="card-title">
+                    Connect
+                  </Text>
+                  <small className="connect-archive-subtitle">
+                    {page === null
+                      ? state._tag === "loading"
+                        ? "Loading the archive..."
+                        : "Not loaded"
+                      : "Archived, newest closed first"}
+                  </small>
+                </header>
+                <ConnectDirectorySwitch archived location={directoryLocation} />
+              </div>
+              <section aria-label="Archived agents" className="connect-agents connect-archive-directory">
+                {page === null ? (
+                  state._tag === "loading" ? (
+                    <>
+                      <small className="connect-archive-loading" role="status">
+                        Loading archived agents...
+                      </small>
+                      <div aria-hidden="true" className="connect-archive-skeletons">
+                        {[0, 1, 2, 3].map((index) => (
+                          <div className="connect-archive-skeleton" key={index} />
+                        ))}
+                      </div>
+                    </>
+                  ) : (
+                    failed
+                  )
+                ) : agents.length === 0 ? (
+                  <div className="connect-archive-empty">
+                    No closed agents in the last {String(connectArchiveWindowDays)} days
                   </div>
                 ) : (
                   <>
-                    <p className="connect-family-count">{archiveCountCopy(page)}</p>
-                    <div className="connect-archive-list">
-                      {filtered.map((agent) => (
-                        <button
-                          className="connect-archive-agent"
-                          key={archivedAgentKey(agent)}
-                          onClick={() => setSelection(archivedAgentKey(agent))}
-                          type="button"
-                        >
-                          <Creature
-                            closed
-                            host={agent.host}
-                            id={String(agent.agentId)}
-                            size="row"
-                            state={agent.state}
-                          />
-                          <span className="connect-archive-row-copy">
-                            <strong>{agent.name}</strong>
-                            <small className="connect-archive-metadata">
-                              {agent.host}, {archiveKindLabel(agent.kind)}, closed{" "}
-                              {archiveClosedAge(agent.closedAt, now)}
-                            </small>
-                            {agent.lastWords === undefined ? null : (
-                              <span className="connect-archive-last-words">{agent.lastWords.text}</span>
-                            )}
-                          </span>
-                        </button>
-                      ))}
+                    <div className="connect-archive-search-group">
+                      <label className="connect-search connect-archive-search">
+                        <span>Find archived agent</span>
+                        <Icon decorative name="search" size="small" />
+                        <input
+                          autoComplete="off"
+                          id="connect-agent-search"
+                          onChange={(event) => setQuery(event.currentTarget.value)}
+                          placeholder="Name, host, kind..."
+                          ref={search}
+                          type="search"
+                          value={query}
+                        />
+                        <kbd aria-hidden="true" className="connect-search-shortcut">
+                          Ctrl K
+                        </kbd>
+                      </label>
+                      {page.nextCursor === null ? null : (
+                        <small className="connect-archive-scope">Search covers loaded archived agents only</small>
+                      )}
                     </div>
+                    {filtered.length === 0 ? (
+                      <div className="connect-archive-empty connect-archive-no-match">
+                        <p>
+                          {page.nextCursor === null ? "No closed agents" : "No loaded closed agents"} match "
+                          {query.trim()}" in Archived.
+                        </p>
+                        <Button
+                          className="connect-archive-control connect-scope-clear"
+                          onClick={() => {
+                            setQuery("")
+                            search.current?.focus()
+                          }}
+                          size="dense"
+                          variant="secondary"
+                        >
+                          Clear search
+                        </Button>
+                      </div>
+                    ) : (
+                      <>
+                        <p className="connect-family-count">{archiveCountCopy(page)}</p>
+                        <div className="connect-archive-list">
+                          {filtered.map((agent) => (
+                            <button
+                              className="connect-archive-agent"
+                              key={archivedAgentKey(agent)}
+                              onClick={() => openStage(archivedAgentKey(agent))}
+                              type="button"
+                            >
+                              <Creature
+                                closed
+                                host={agent.host}
+                                id={String(agent.agentId)}
+                                size="row"
+                                state={agent.state}
+                              />
+                              <span className="connect-archive-row-copy">
+                                <strong>{agent.name}</strong>
+                                <small className="connect-archive-metadata">
+                                  {agent.host}, {archiveKindLabel(agent.kind)}, closed{" "}
+                                  {archiveClosedAge(agent.closedAt, now)}
+                                </small>
+                                {agent.lastWords === undefined ? null : (
+                                  <span className="connect-archive-last-words">{agent.lastWords.text}</span>
+                                )}
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                    {failed}
+                    {page.nextCursor === null || state._tag === "failed" ? null : (
+                      <div className="connect-archive-paging">
+                        <Button
+                          className="connect-archive-more connect-archive-control"
+                          disabled={state._tag === "loading"}
+                          onClick={() => request(page.nextCursor)}
+                          size="compact"
+                          variant="secondary"
+                        >
+                          Show older
+                        </Button>
+                        <small>Loads the next {String(connectArchivePageMaxRecords)}.</small>
+                      </div>
+                    )}
                   </>
                 )}
-                {failed}
-                {page.nextCursor === null || state._tag === "failed" ? null : (
-                  <div className="connect-archive-paging">
-                    <Button
-                      className="connect-archive-more connect-archive-control"
-                      disabled={state._tag === "loading"}
-                      onClick={() => request(page.nextCursor)}
-                      size="compact"
-                      variant="secondary"
-                    >
-                      Show older
-                    </Button>
-                    <small>Loads the next {String(connectArchivePageMaxRecords)}.</small>
-                  </div>
-                )}
-              </>
-            )}
-          </section>
+              </section>
+            </>
+          )}
         </div>
       </div>
       <PortalProvider>
@@ -312,7 +357,7 @@ export const ConnectArchiveSurface = ({
           onOpenChange={(open) => {
             if (!open) closeStage()
           }}
-          open={selected !== null}
+          open={visible && selected !== null}
         >
           {selected === null ? null : (
             <Sheet.Content
@@ -350,11 +395,17 @@ export const ConnectArchiveSurface = ({
                       <dt>Parent</dt>
                       <dd>
                         {activeParent !== undefined ? (
-                          <a href={connectDirectoryHref("active", activeParent)} onClick={navigateConnectDirectory}>
+                          <a
+                            href={connectDirectoryHref("active", activeParent, directoryLocation.url)}
+                            onClick={(event) => navigateConnectDirectory(event, directoryLocation)}
+                          >
                             {activeParent.name} <Icon decorative name="arrow-right" size="small" />
                           </a>
                         ) : archivedParent !== undefined && archivedParentHref !== null ? (
-                          <a href={archivedParentHref} onClick={navigateConnectDirectory}>
+                          <a
+                            href={archivedParentHref}
+                            onClick={(event) => navigateConnectDirectory(event, directoryLocation)}
+                          >
                             {archivedParent.name} <Icon decorative name="arrow-right" size="small" />
                           </a>
                         ) : (

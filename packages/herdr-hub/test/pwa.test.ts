@@ -102,7 +102,7 @@ describe("approval PWA", () => {
         local: Array.from({ length: 8 }, (_, index) => approvalRecord(`job-${String(index)}`)),
         nextCursors: [{ cursor: { createdAt: 1, id: "job-cursor" }, host: "SER8" }],
         remote: []
-      })
+      }, 3)
     ).toBeNull()
     expect(
       dashboardPendingBadgeCount({
@@ -110,7 +110,7 @@ describe("approval PWA", () => {
         local: Array.from({ length: 9 }, (_, index) => approvalRecord(`job-${String(index)}`)),
         nextCursors: [],
         remote: []
-      })
+      }, 3)
     ).toBe(9)
   })
 

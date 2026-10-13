@@ -1,4 +1,5 @@
 import { agentBucketLabel, agentBuckets, type AgentBucket, agentStatePresentation } from "./agent-state.js"
+import { connectAgentGroup } from "./agent-state-core.js"
 import { HeroWord } from "@knpkv/rly/patterns"
 import { Icon } from "@knpkv/rly/foundations"
 import { Button, Text } from "@knpkv/rly/primitives"
@@ -70,13 +71,23 @@ export const connectAgentHosts = (agents: ReadonlyArray<ConnectAgent>): Readonly
 const activityFilterLabel = (activity: AgentActivityFilter): string =>
   activity === "all" ? "All" : agentBucketLabel(activity)
 
-const matchesQuery = (agent: ConnectAgent, query: string): boolean => {
+export const matchesConnectQuery = (agent: ConnectAgent, query: string): boolean => {
   const normalized = query.trim().toLocaleLowerCase("en-US")
   if (normalized.length === 0) return true
   return [agent.host, agent.name, agent.kind, agent.state, agent.work].some((value) =>
     value.toLocaleLowerCase("en-US").includes(normalized)
   )
 }
+
+/** The same filter predicate serves both directory presentations, with their explicit unknown-state policy. */
+export const matchesConnectAgent = (
+  agent: ConnectAgent,
+  filters: AgentFilters,
+  context: { readonly presentation: "fleet" | "home"; readonly offline?: boolean } = { presentation: "fleet" }
+): boolean =>
+  matchesConnectQuery(agent, filters.query) &&
+  (filters.host === null || agent.host.toLowerCase() === filters.host.toLowerCase()) &&
+  (filters.activity === "all" || connectAgentGroup(agent.state, context) === filters.activity)
 
 export const connectLineageRows = (agents: ReadonlyArray<ConnectAgent>): ReadonlyArray<ConnectLineageRow> => {
   const keyOf = (agent: Pick<ConnectAgent, "host" | "id">): string => `${agent.host.toLowerCase()}\u0000${agent.id}`
@@ -223,7 +234,7 @@ export const connectAgentFamilies = (agents: ReadonlyArray<ConnectAgent>): Reado
   }
   const needsYou = (family: ConnectAgentFamily): boolean =>
     family.missingParent !== undefined ||
-    family.rows.some(({ agent }) => agentStatePresentation(agent.state).bucket === "needs-you")
+    family.rows.some(({ agent }) => connectAgentGroup(agent.state, { presentation: "fleet" }) === "needs-you")
   return families.toSorted(
     (left, right) =>
       Number(right.missingParent !== undefined) - Number(left.missingParent !== undefined) ||
@@ -235,14 +246,7 @@ export const connectAgentFamilies = (agents: ReadonlyArray<ConnectAgent>): Reado
 /** A filtered child brings its ancestors as context; unrelated siblings do not become matches. */
 const filterFamily = (family: ConnectAgentFamily, filters: AgentFilters) => {
   const matches = new Set(
-    family.rows
-      .filter(
-        ({ agent }) =>
-          matchesQuery(agent, filters.query) &&
-          (filters.host === null || filters.host === agent.host) &&
-          (filters.activity === "all" || agentStatePresentation(agent.state).bucket === filters.activity)
-      )
-      .map(({ agent }) => connectAgentKey(agent))
+    family.rows.filter(({ agent }) => matchesConnectAgent(agent, filters)).map(({ agent }) => connectAgentKey(agent))
   )
   const included = new Set(matches)
   for (const row of family.rows) {
@@ -310,12 +314,7 @@ export const calendarConnectAgents = (
   const days = new Map<string, AgentCalendarDay>()
   const filtered = agents
     .filter((agent) => {
-      const activity = agentStatePresentation(agent.state).bucket
-      return (
-        matchesQuery(agent, filters.query) &&
-        (filters.host === null || agent.host === filters.host) &&
-        (filters.activity === "all" || activity === filters.activity)
-      )
+      return matchesConnectAgent(agent, filters)
     })
     .toSorted(
       (left, right) =>
@@ -382,7 +381,7 @@ export const agentBucketCounts = (
     ["all", inHost.length],
     ...agentBuckets.map((bucket): readonly [AgentActivityFilter, number] => [
       bucket,
-      inHost.filter((agent) => agentStatePresentation(agent.state).bucket === bucket).length
+      inHost.filter((agent) => connectAgentGroup(agent.state, { presentation: "fleet" }) === bucket).length
     ])
   ])
 }
@@ -432,7 +431,7 @@ export const ConnectSummary = ({
   readonly unavailable: boolean
 }) => {
   const needAttention =
-    agents?.filter((agent) => agentStatePresentation(agent.state).bucket === "needs-you").length ?? 0
+    agents?.filter((agent) => connectAgentGroup(agent.state, { presentation: "fleet" }) === "needs-you").length ?? 0
   return (
     <span
       aria-label="Connect summary"
@@ -639,7 +638,7 @@ export const AgentDirectory = ({
                     index <= 2 ||
                     row.depth > 2 ||
                     scoped ||
-                    agentStatePresentation(row.agent.state).bucket === "needs-you"
+                    connectAgentGroup(row.agent.state, { presentation: "fleet" }) === "needs-you"
                 )
                 .map(({ agent }) => connectAgentKey(agent))
             )
@@ -678,7 +677,7 @@ export const AgentDirectory = ({
                   .filter(({ agent }) => shown.has(connectAgentKey(agent)))
                   .map(({ agent, depth, issue }) => {
                     const key = connectAgentKey(agent)
-                    const activity = agentStatePresentation(agent.state).bucket
+                    const activity = connectAgentGroup(agent.state, { presentation: "fleet" })
                     const context = !family.matches.has(key)
                     const ambiguousIdentity = connectAgentIdentityAmbiguous(agents, agent)
                     const lastActive = timeLabel(agent.lastActivityAt, timeZone)

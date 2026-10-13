@@ -7,7 +7,7 @@ import { Text } from "@knpkv/rly/primitives"
 import { Effect, Exit, Fiber, Schedule, Schema } from "effect"
 import * as Atom from "effect/reactivity/Atom"
 import * as AsyncResult from "effect/reactivity/AsyncResult"
-import { useEffect, useEffectEvent, useId, useRef, useState } from "react"
+import { useEffect, useEffectEvent, useId, useRef, useState, type ComponentProps } from "react"
 import {
   loadBlockedDevicePushState,
   loadBlockedSettings,
@@ -177,16 +177,26 @@ const QuietHours = ({
   )
 }
 
-/** Canonical-hub stage presence and owner-scoped notification settings. */
-export const BlockedConnectSurface = ({
-  atoms,
-  embedded = false,
-  notificationState
-}: {
+type DirectoryLocation = NonNullable<ComponentProps<typeof ConnectSurface>["directoryLocation"]>
+type BlockedConnectSurfaceProps = {
+  readonly active?: boolean
   readonly atoms: ConnectAtoms
-  readonly embedded?: boolean
+  readonly presentation?: ComponentProps<typeof ConnectSurface>["presentation"]
   readonly notificationState?: NotificationState
-}) => {
+} & (
+  | { readonly embedded: true; readonly directoryLocation: DirectoryLocation }
+  | { readonly embedded?: false; readonly directoryLocation?: DirectoryLocation }
+)
+
+/** Canonical-hub stage presence and owner-scoped notification settings. Embedded history is always host-owned. */
+export const BlockedConnectSurface = ({
+  active = true,
+  atoms,
+  directoryLocation,
+  embedded = false,
+  notificationState,
+  presentation = { _tag: "fleet" }
+}: BlockedConnectSurfaceProps) => {
   const [notifications] = useState(() => makeNotificationAtoms(notificationState))
   const [target, setTarget] = useState<Pick<ConnectAgent, "host" | "id"> | null>(null)
   const deviceResult = useAtomValue(notifications.device)
@@ -316,5 +326,15 @@ export const BlockedConnectSurface = ({
       ) : null}
     </section>
   )
-  return <ConnectSurface atoms={atoms} embedded={embedded} onStageChange={setTarget} stageFooter={footer} />
+  return (
+    <ConnectSurface
+      active={active}
+      atoms={atoms}
+      directoryLocation={directoryLocation}
+      embedded={embedded}
+      presentation={presentation}
+      onStageChange={setTarget}
+      stageFooter={footer}
+    />
+  )
 }

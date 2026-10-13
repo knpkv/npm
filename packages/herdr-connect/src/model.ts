@@ -237,4 +237,4 @@ export const TerminalServerSignal = Schema.Union([
 ])
 export type TerminalServerSignal = typeof TerminalServerSignal.Type
 
-export { agentStateBucket } from "./agent-state-core.js"
+export { agentStateBucket, type ConnectAgentGroup, connectAgentGroup } from "./agent-state-core.js"

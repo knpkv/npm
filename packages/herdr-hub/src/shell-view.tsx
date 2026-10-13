@@ -228,6 +228,7 @@ export const FleetShell = ({
   hostCount,
   navigation,
   notice = null,
+  pages,
   relay,
   usage,
   work
@@ -238,6 +239,8 @@ export const FleetShell = ({
   readonly embedded?: boolean
   /** The parent owns URL/history and global shortcuts when supplied; otherwise legacy query tabs apply. */
   readonly navigation?: { readonly tab: FleetShellTab; readonly onTabChange: (tab: FleetShellTab) => void }
+  /** Optional installed page subset; omitted keeps the standalone four-tab surface. */
+  readonly pages?: ReadonlyArray<FleetShellTab>
   readonly approvals: ReactNode
   readonly connect: ReactNode
   readonly hostCount: number
@@ -438,7 +441,7 @@ export const FleetShell = ({
   return (
     // rly overlays (the shortcuts dialog) render into a portal target; without a provider they don't mount.
     <PortalProvider>
-      <div className="fleet-shell" ref={shellRef}>
+      <div className="fleet-shell" data-fleet-layout={pages === undefined ? "legacy" : "module"} ref={shellRef}>
         {embedded ? null : (
           <header className="fleet-shell-masthead" ref={mastheadRef}>
             <div className="fleet-shell-brand">
@@ -475,7 +478,7 @@ export const FleetShell = ({
           <Tabs
             aria-label="Relay applications"
             data-mobile-layout="single-row"
-            items={items}
+            items={pages === undefined ? items : items.filter((item) => pages.some((page) => page === item.value))}
             onValueChange={selectTab}
             ref={tabsRef}
             size="large"

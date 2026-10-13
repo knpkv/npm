@@ -52,6 +52,13 @@ export type RlySheetSide = keyof typeof RLY_SHEET_VARIANTS.side
 
 interface SheetRootBaseProps {
   readonly children: ReactNode
+  /**
+   * Defaults to the captured opener. Supply a stable callback that reads the current destination.
+   * Called once after cleanup, only for the latest close. A usable target is connected, outside
+   * hidden/inert/aria-hidden ancestors and has a client rect; undefined or an unusable target keeps the opener.
+   * Unlike Dialog.Content.restoreFocus, return a target rather than focusing it and returning a boolean.
+   */
+  readonly restoreFocus?: (() => HTMLElement | undefined) | undefined
 }
 
 type ControlledSheetRootProps = SheetRootBaseProps & {
@@ -152,7 +159,7 @@ const requireVisibleAction = (value: number | string, component: string): number
 }
 
 const SheetRoot = (componentProps: SheetRootProps): ReactElement => {
-  const { children, defaultOpen = false, onOpenChange, open } = componentProps
+  const { children, defaultOpen = false, onOpenChange, open, restoreFocus } = componentProps
   const [defaultState, setDefaultState] = useState(defaultOpen)
   const isParentModalReady = useParentModalReady()
   const restoreFocusRef = useRef<HTMLElement | null>(null)
@@ -167,8 +174,23 @@ const SheetRoot = (componentProps: SheetRootProps): ReactElement => {
     if (previousOpenRef.current === resolvedOpen) return
     previousOpenRef.current = resolvedOpen
     if (resolvedOpen) invalidateModalFocusRestore()
-    else restoreModalFocusAfterCleanup(restoreFocusRef.current)
-  }, [resolvedOpen])
+    else {
+      const opener = restoreFocusRef.current
+      restoreFocusRef.current = null
+      restoreModalFocusAfterCleanup(opener, () => {
+        const target = restoreFocus?.()
+        if (
+          target === undefined ||
+          !target.isConnected ||
+          target.closest('[hidden], [inert], [aria-hidden="true"]') !== null ||
+          target.getClientRects().length === 0
+        )
+          return false
+        target.focus()
+        return target.ownerDocument.activeElement === target
+      })
+    }
+  }, [resolvedOpen, restoreFocus])
 
   return (
     <ModalNestingBoundary>

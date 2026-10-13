@@ -17,6 +17,10 @@ export * from "./usage-selection.js"
  * page. Pass null for in-page selector updates to retain control focus, or search for Connect.
  */
 export interface ModulePageMount {
+  /**
+   * Gate portals/focus traps on active; hidden sections do not hide portals. Keep underlying owners alive.
+   * Move owned arrival focus in the activation effect; the shell keeps focus claimed inside the destination.
+   */
   readonly active: boolean
   readonly navigate: (href: string, history: "push" | "replace", focus?: "page" | "search" | null) => void
   /**
@@ -25,6 +29,8 @@ export interface ModulePageMount {
    * Selector filters still use navigate(..., "replace"). The closing modal owns focus.
    */
   readonly closeSelection: (parentHref: string) => void
+  /** Open the shell’s existing Host access sheet; custom mount hosts may omit it. */
+  readonly openHostAccess?: () => void
 }
 
 /** Browser implementations import a product's browser entry and supply every declared page. */
@@ -32,6 +38,8 @@ export interface ModuleViews<D extends ModuleDescriptor> {
   readonly descriptor: D
   /** Optional decorative navigation glyph. The shell supplies the visible and accessible module name. */
   readonly navigationIcon?: ReactNode
+  /** A bounded reading supplied by the module owner; label states any partial or stale semantics. */
+  readonly navigationBadge?: { readonly text: string; readonly label: string }
   readonly pages: {
     readonly [P in D["pages"][number]["id"]]: (search: URLSearchParams, mount: ModulePageMount) => ReactNode
   }

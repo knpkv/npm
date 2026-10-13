@@ -120,7 +120,7 @@
     display: none;
   }
 
-  .fleet-shell-main {
+  .fleet-shell[data-fleet-layout="legacy"] > .fleet-shell-main {
     margin-inline: auto;
     max-inline-size: 100rem;
     padding: var(--rly-space-24) var(--rly-space-32) var(--rly-space-96);
@@ -128,9 +128,50 @@
 
   /* A phone gets one 16px gutter, here; the panels inside add none of their own on top of it. */
   @media (max-width: 40rem) {
-    .fleet-shell-main {
+    .fleet-shell[data-fleet-layout="legacy"] > .fleet-shell-main {
       padding-inline: max(var(--rly-space-16), env(safe-area-inset-left, 0px))
         max(var(--rly-space-16), env(safe-area-inset-right, 0px));
+    }
+  }
+  .fleet-shell[data-fleet-layout="module"] > .fleet-shell-main {
+    padding-block: 0 var(--rly-space-96);
+    padding-inline: max(var(--rly-space-40), env(safe-area-inset-left, 0px))
+      max(var(--rly-space-40), env(safe-area-inset-right, 0px));
+  }
+
+  .fleet-shell[data-fleet-layout="module"] [role="tablist"] {
+    gap: var(--rly-space-8);
+  }
+
+  .fleet-shell[data-fleet-layout="module"] [role="tab"] {
+    flex: 0 0 auto;
+    min-block-size: 2.75rem;
+    padding-inline: var(--rly-space-4);
+    border-radius: 0;
+    font: 430 0.9375rem / 1.5 var(--rly-font-ui);
+  }
+
+  .fleet-shell[data-fleet-layout="module"] [role="tab"][data-state="active"] {
+    font-weight: 620;
+  }
+
+  .fleet-shell[data-fleet-layout="module"] [role="tab"]:focus-visible {
+    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+    outline-offset: calc(-1 * var(--rly-focus-ring-width));
+  }
+
+  @media (max-width: 40rem) {
+    .fleet-shell[data-fleet-layout="module"] > .fleet-shell-main {
+      padding-inline: max(var(--rly-space-8), env(safe-area-inset-left, 0px))
+        max(var(--rly-space-8), env(safe-area-inset-right, 0px));
+    }
+
+    .fleet-shell[data-fleet-layout="module"] [role="tablist"] {
+      gap: 0;
+    }
+
+    .fleet-shell[data-fleet-layout="module"] [role="tab"] {
+      padding-inline: var(--rly-space-12);
     }
   }
   .fleet-shortcuts dt span,
@@ -156,12 +197,12 @@
     inline-size: 100%;
     padding-block-start: var(--rly-space-24);
   }
-  .connect-shell-embedded {
+  .connect-shell-embedded:not([data-connect-presentation="home"]) {
     min-block-size: 0;
     padding-block-start: var(--rly-space-24);
   }
-  .connect-shell-embedded .connect-workspace,
-  .connect-shell-embedded .connect-directory-screen {
+  .connect-shell-embedded:not([data-connect-presentation="home"]) .connect-workspace,
+  .connect-shell-embedded:not([data-connect-presentation="home"]) .connect-directory-screen {
     block-size: auto;
     min-block-size: 38rem;
   }

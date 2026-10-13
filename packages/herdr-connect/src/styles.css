@@ -3290,12 +3290,12 @@
   /* The legacy hub auto-height override must not expand a bounded desktop directory past its scroll owner. */
   @media (min-width: 701px) {
     /* The embedded shell begins below the measured tabs, not at the viewport's block start. */
-    .connect-shell.connect-shell-embedded {
+    .connect-shell.connect-shell-embedded:not([data-connect-presentation="home"]) {
       block-size: max(0px, calc(100dvh - var(--fleet-shell-tab-bottom, 0px)));
     }
 
-    .connect-shell.connect-shell-embedded .connect-workspace,
-    .connect-shell.connect-shell-embedded .connect-directory-screen {
+    .connect-shell.connect-shell-embedded:not([data-connect-presentation="home"]) .connect-workspace,
+    .connect-shell.connect-shell-embedded:not([data-connect-presentation="home"]) .connect-directory-screen {
       block-size: 100%;
       min-block-size: 0;
     }
@@ -3545,6 +3545,324 @@
     }
     .connect-family .connect-agent[data-depth]:not([data-depth="0"]) {
       background: var(--rly-color-surface-1);
+    }
+  }
+}
+
+@layer connect {
+  .connect-shell[data-connect-presentation="home"],
+  [data-connect-presentation="home"] .connect-workspace,
+  [data-connect-presentation="home"] .connect-directory-screen {
+    block-size: auto;
+    min-block-size: 0;
+    overflow: visible;
+  }
+
+  .connect-shell[data-connect-presentation="home"] {
+    padding-block-start: 0;
+  }
+
+  [data-connect-presentation="home"] .connect-directory-screen {
+    grid-template-rows: auto auto auto;
+  }
+
+  .connect-home-intro {
+    display: grid;
+    gap: 0;
+  }
+
+  .connect-home-intro h1 {
+    font-size: 1.75rem;
+    font-weight: 620;
+    letter-spacing: -0.035em;
+    line-height: 1.2;
+  }
+
+  .connect-home-intro p {
+    font-size: 0.9375rem;
+  }
+
+  [data-connect-presentation="home"] .connect-agents {
+    inline-size: 100%;
+    overflow: visible;
+    padding-inline: 0;
+  }
+
+  .connect-home-directory {
+    display: grid;
+    gap: var(--rly-space-20);
+  }
+
+  .connect-home-filter-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--rly-space-12);
+    align-items: end;
+  }
+
+  .connect-home-filter-row[hidden] {
+    display: none;
+  }
+
+  .connect-home-filter-row > label {
+    display: grid;
+    gap: var(--rly-space-4);
+  }
+
+  .connect-home-filter-row select {
+    min-block-size: 2.75rem;
+    max-inline-size: 100%;
+    font: inherit;
+    font-size: 1rem;
+  }
+
+  .connect-home-group {
+    display: grid;
+    gap: 0.6rem;
+  }
+
+  .connect-home-group-heading {
+    display: flex;
+    align-items: center;
+    gap: var(--rly-space-8);
+    min-block-size: 2.75rem;
+  }
+
+  .connect-home-group-heading h2 {
+    margin: 0;
+    font-size: 1.05rem;
+    font-weight: 620;
+  }
+
+  .connect-home-group-heading h2 > span {
+    color: var(--rly-color-text-2);
+    font-size: 0.8125rem;
+    font-weight: 400;
+    margin-inline-start: var(--rly-space-4);
+  }
+
+  .connect-home-group-heading button {
+    margin-inline-start: auto;
+    border: 0;
+    background: var(--rly-color-surface-2);
+  }
+
+  .connect-home-cards {
+    display: grid;
+    gap: 0.6rem;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .connect-home-agent {
+    --connect-creature-track: 3.25rem;
+    align-items: start;
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-group);
+    background: var(--rly-color-surface-1);
+    gap: 0.25rem 0.8rem;
+    min-block-size: 2.75rem;
+    padding: 0.8rem 0.9rem;
+    font-weight: 430;
+    line-height: 1.5;
+  }
+
+  .connect-home-agent > .connect-creature-state {
+    display: none;
+  }
+
+  .connect-home-agent-title {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.2rem 0.6rem;
+  }
+
+  .connect-home-agent .connect-agent-copy {
+    gap: 0.2rem;
+  }
+
+  .connect-home-agent .connect-agent-copy small,
+  .connect-home-group[data-home-group="ready"] .connect-agent-copy > span:last-child,
+  .connect-home-last-activity {
+    font-size: 0.75rem;
+    font-weight: 430;
+    line-height: 1.5;
+  }
+
+  .connect-home-agent .connect-agent-work {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    font-size: 0.875rem;
+    line-height: 1.5;
+  }
+
+  .connect-home-last-activity,
+  .connect-home-group[data-home-group="ready"] .connect-agent-copy > span:last-child {
+    color: var(--rly-color-text-2);
+  }
+
+  .connect-home-agent:active {
+    background: var(--rly-color-surface-2);
+  }
+
+  .connect-home-agent:disabled {
+    cursor: not-allowed;
+  }
+
+  @media (max-width: 40rem) {
+    .connect-home-cards {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .connect-home-agent {
+      --connect-creature-track: 2.75rem;
+    }
+  }
+}
+
+@layer connect {
+  [data-connect-presentation="home"] .connect-agents {
+    display: grid;
+    align-content: start;
+    gap: var(--rly-space-20);
+  }
+
+  .connect-home-failure {
+    display: grid;
+    gap: 0.2rem;
+    padding-block: 0.75rem;
+    padding-inline: 1rem;
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-group);
+    background: var(--rly-color-surface-1);
+    font-size: 0.875rem;
+    font-weight: 430;
+    line-height: 1.5;
+  }
+}
+
+@layer connect {
+  .connect-home-read-notice {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem 1rem;
+    align-items: center;
+    justify-content: space-between;
+    margin-inline: var(--rly-space-40);
+    margin-block-start: var(--rly-space-24);
+    padding-block: 0.75rem;
+    padding-inline: 1rem;
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-group);
+    background: var(--rly-color-surface-1);
+    font-size: 0.875rem;
+    font-weight: 430;
+    line-height: 1.5;
+  }
+
+  .connect-home-read-notice > div {
+    display: grid;
+    gap: 0.2rem;
+    min-inline-size: 0;
+  }
+
+  .connect-home-tap {
+    min-block-size: 2.75rem;
+    padding-block: 0;
+    border-radius: var(--rly-radius-control);
+    font: 430 1rem / 1.5 var(--rly-font-ui);
+  }
+
+  @media (max-width: 40rem) {
+    .connect-home-tap {
+      min-block-size: var(--rly-control-height-default);
+    }
+
+    .connect-home-read-notice {
+      margin-inline: var(--rly-space-16);
+      margin-block-start: var(--rly-space-16);
+    }
+  }
+}
+
+@layer connect {
+  .connect-stage-sheet[data-connect-stage-presentation="home"] {
+    block-size: auto;
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-overlay);
+    inline-size: 28.75rem;
+    inset-block: var(--rly-space-16);
+    inset-inline-end: var(--rly-space-16);
+    max-inline-size: calc(100vw - var(--rly-space-32));
+  }
+  /* Sheet's retained title still names the dialog; Home owns only its visible navigation header. */
+  .connect-stage-sheet[data-connect-stage-presentation="home"] > div:first-child {
+    display: none;
+  }
+  .connect-home-stage-header {
+    align-items: center;
+    border-block-end: 1px solid var(--rly-color-border-1);
+    display: flex;
+    flex: none;
+    gap: var(--rly-space-8);
+    block-size: var(--rly-space-64);
+    padding-inline: var(--rly-space-12) var(--rly-space-16);
+  }
+  .connect-home-stage-header h2 {
+    display: flex;
+    font-size: 1.0625rem;
+    font-weight: inherit;
+    gap: 0.45rem;
+    margin: 0;
+    min-inline-size: 0;
+  }
+  .connect-home-stage-header h2 b {
+    font-weight: 650;
+  }
+  .connect-home-stage-header h2 span {
+    color: var(--rly-color-text-2);
+  }
+  .connect-home-stage-header button {
+    align-items: center;
+    background: transparent;
+    border: 0;
+    color: inherit;
+    cursor: pointer;
+    justify-content: center;
+    min-block-size: 2.75rem;
+    min-inline-size: 2.75rem;
+  }
+  .connect-home-stage-back {
+    display: none;
+  }
+  .connect-home-stage-close {
+    display: flex;
+    margin-inline-start: auto;
+  }
+  .connect-home-stage-header button:focus-visible {
+    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+    outline-offset: var(--rly-focus-ring-offset);
+  }
+  @media (max-width: 40rem) {
+    .connect-stage-sheet[data-connect-stage-presentation="home"] {
+      border: 0;
+      border-radius: 0;
+      inline-size: 100%;
+      inset-block: 0;
+      inset-inline: 0;
+      max-inline-size: 100%;
+    }
+    .connect-home-stage-header {
+      padding-inline: max(var(--rly-space-12), env(safe-area-inset-left, 0px))
+        max(var(--rly-space-16), env(safe-area-inset-right, 0px));
+    }
+    .connect-home-stage-back {
+      display: flex;
+    }
+    .connect-home-stage-close {
+      display: none;
     }
   }
 }
@@ -3867,6 +4185,260 @@
     .connect-directory-switch a:active,
     .connect-archive-agent:active {
       scale: 0.99;
+    }
+  }
+}
+
+@layer fleet {
+  .connect-home-heading {
+    display: grid;
+    gap: 0.9rem;
+  }
+  .connect-home-switch {
+    font: 430 1rem / 1.5 var(--rly-font-ui);
+    display: inline-flex;
+    justify-self: start;
+    gap: 2px;
+    padding: 2px;
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-control);
+    background: var(--rly-color-surface-2);
+  }
+  .connect-home-switch a {
+    display: grid;
+    place-items: center;
+    min-block-size: 2.25rem;
+    padding-inline: 1rem;
+    border-radius: calc(var(--rly-radius-control) - 2px);
+    color: var(--rly-color-text-2);
+    font-size: 0.875rem;
+    text-decoration: none;
+  }
+  .connect-home-switch a[aria-current="page"] {
+    background: var(--rly-color-surface-1);
+    color: var(--rly-color-text-1);
+    font-weight: 560;
+    box-shadow: 0 0 0 1px var(--rly-color-border-1);
+  }
+  .connect-home-switch a:focus-visible,
+  .connect-home-archive-row:focus-visible {
+    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+    outline-offset: var(--rly-focus-ring-offset);
+  }
+  .connect-home-archive {
+    font: 430 1rem / 1.5 var(--rly-font-ui);
+    display: grid;
+    gap: 0.75rem;
+    padding-block: var(--rly-space-24) var(--rly-space-32);
+    padding-inline: max(var(--rly-space-40), env(safe-area-inset-left, 0px))
+      max(var(--rly-space-40), env(safe-area-inset-right, 0px));
+  }
+  .connect-home-archive-count {
+    line-height: 1.5;
+    margin: 0;
+    color: var(--rly-color-text-2);
+    font-size: 0.875rem;
+  }
+  .connect-home-archive-list {
+    display: grid;
+    overflow: clip;
+    min-inline-size: 0;
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-group);
+    background: var(--rly-color-surface-1);
+  }
+  .connect-home-archive-row {
+    display: flex;
+    align-items: center;
+    gap: 0.875rem;
+    min-block-size: 4rem;
+    inline-size: 100%;
+    padding: 0.75rem 1rem;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: start;
+    cursor: pointer;
+  }
+  .connect-home-archive-row + .connect-home-archive-row {
+    border-block-start: 1px solid var(--rly-color-border-1);
+  }
+  .connect-home-archive-row > .connect-creature {
+    inline-size: 2.75rem;
+    flex: none;
+  }
+  .connect-home-archive-copy {
+    display: grid;
+    gap: 2px;
+    min-inline-size: 0;
+    flex: 1;
+  }
+  .connect-home-archive-copy small {
+    line-height: 1.5;
+    font-size: 0.8125rem;
+    color: var(--rly-color-text-2);
+  }
+  .connect-home-archive-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 0.75rem;
+  }
+  .connect-home-archive-top strong {
+    font-weight: 600;
+  }
+  .connect-home-archive-words {
+    line-height: 1.5;
+    overflow: clip;
+    min-inline-size: 0;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.875rem;
+  }
+  .connect-home-archive-empty {
+    padding: 2rem 1rem;
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-group);
+    background: var(--rly-color-surface-1);
+    color: var(--rly-color-text-2);
+    text-align: center;
+  }
+  .connect-home-archive-error,
+  .connect-home-archive-page-error {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem 1rem;
+    align-items: center;
+    color: var(--rly-color-text-1);
+  }
+  .connect-home-archive-error {
+    justify-content: space-between;
+    padding: 0.75rem 1rem;
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-group);
+    background: var(--rly-color-surface-1);
+  }
+  .connect-home-archive-error > div {
+    display: grid;
+    gap: 0.2rem;
+    min-inline-size: 0;
+  }
+  .connect-home-archive-error p,
+  .connect-home-archive-page-error p {
+    margin: 0;
+    font-size: 0.875rem;
+  }
+  .connect-home-archive-page-error p {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    min-block-size: 2.5rem;
+    color: var(--rly-color-text-2);
+  }
+  .connect-home-archive-control {
+    font: 430 1rem / 1.5 var(--rly-font-ui);
+    min-block-size: 2.75rem;
+  }
+  .connect-home-archive-paging {
+    min-block-size: 2.5rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.875rem;
+    color: var(--rly-color-text-2);
+  }
+  .connect-home-archive-spinner {
+    inline-size: 0.875rem;
+    block-size: 0.875rem;
+    border: 2px solid var(--rly-color-border-1);
+    border-block-start-color: currentColor;
+    border-radius: 50%;
+  }
+  .connect-home-archive-skeleton-creature,
+  .connect-home-archive-skeleton .connect-home-archive-copy > span {
+    display: block;
+    background: var(--rly-color-surface-3);
+    border-radius: var(--rly-radius-tag);
+  }
+  .connect-home-archive-skeleton {
+    cursor: default;
+  }
+  .connect-home-archive-skeleton-creature {
+    flex: none;
+    inline-size: 2.5rem;
+    block-size: 2.5rem;
+    border-radius: 0.75rem;
+  }
+  .connect-home-archive-skeleton .connect-home-archive-copy {
+    gap: 6px;
+  }
+  .connect-home-archive-skeleton .connect-home-archive-copy > span:nth-child(1) {
+    inline-size: min(8rem, 100%);
+    block-size: 0.9rem;
+  }
+  .connect-home-archive-skeleton .connect-home-archive-copy > span:nth-child(2) {
+    inline-size: min(11rem, 100%);
+    block-size: 0.75rem;
+  }
+  .connect-home-archive-skeleton .connect-home-archive-copy > span:nth-child(3) {
+    inline-size: min(26rem, 90%);
+    block-size: 0.8rem;
+  }
+  .connect-home-archive-loading {
+    position: absolute;
+    inline-size: 1px;
+    block-size: 1px;
+    overflow: clip;
+    clip-path: inset(50%);
+  }
+  @media (max-width: 40rem) {
+    .connect-home-archive-row > .connect-creature {
+      inline-size: 2.25rem;
+    }
+    .connect-home-switch a {
+      min-block-size: 2.75rem;
+    }
+    .connect-home-archive {
+      padding-block-start: var(--rly-space-16);
+      padding-inline: max(var(--rly-space-16), env(safe-area-inset-left, 0px))
+        max(var(--rly-space-16), env(safe-area-inset-right, 0px));
+    }
+    .connect-home-archive-top {
+      flex-direction: column;
+      gap: 2px;
+    }
+    .connect-home-archive-error > .connect-home-archive-control {
+      min-block-size: var(--rly-control-height-default);
+    }
+    .connect-home-archive-page-error p {
+      min-block-size: 2.75rem;
+    }
+    .connect-home-archive-paging {
+      min-block-size: 2.75rem;
+    }
+    .connect-home-archive-paging > button {
+      inline-size: 100%;
+    }
+    .connect-home-archive-skeleton-creature {
+      inline-size: 2.25rem;
+      block-size: 2.25rem;
+    }
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .connect-home-switch a:hover,
+    .connect-home-archive-row:hover {
+      background: var(--rly-color-surface-2);
+    }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .connect-home-archive-spinner {
+      animation: connect-home-archive-spin 1s linear infinite;
+    }
+    @keyframes connect-home-archive-spin {
+      to {
+        rotate: 1turn;
+      }
     }
   }
 }

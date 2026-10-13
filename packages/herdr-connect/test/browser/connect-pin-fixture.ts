@@ -97,10 +97,20 @@ export const scrollPinDirectory = (page: Page, fraction: number) =>
       if (/(auto|scroll)/u.test(style.overflowY) && node.scrollHeight > node.clientHeight) {
         node.scrollTop = (node.scrollHeight - node.clientHeight) * fraction
         const box = node.getBoundingClientRect()
-        return { bottom: Math.min(innerHeight, box.bottom), owner: node.className, scrollTop: node.scrollTop }
+        return {
+          bottom: Math.min(innerHeight, box.bottom),
+          owner: node.className,
+          scrollTop: node.scrollTop,
+          scrollRange: node.scrollHeight - node.clientHeight
+        }
       }
     }
     const node = document.scrollingElement ?? document.documentElement
     window.scrollTo(0, (node.scrollHeight - innerHeight) * fraction)
-    return { bottom: innerHeight, owner: "document", scrollTop: node.scrollTop }
+    return {
+      bottom: innerHeight,
+      owner: "document",
+      scrollTop: node.scrollTop,
+      scrollRange: node.scrollHeight - innerHeight
+    }
   }, fraction)
