@@ -2,6 +2,17 @@
 
 Released as `@knpkv/herdr-approvals` up to 0.18.0; the headings below are that package's history.
 
+## 0.35.0
+
+### Minor Changes
+
+- [#872](https://github.com/knpkv/npm/pull/872) [`8f2d743`](https://github.com/knpkv/npm/commit/8f2d743cc568d386801ef115628567eb3497005c) Thanks [@konopkov](https://github.com/konopkov)! - Persist per-agent hue families, resolve live-host collisions with shape-aware overflow, and serve retained family snapshots in the archive.
+
+### Patch Changes
+
+- Updated dependencies [[`8f2d743`](https://github.com/knpkv/npm/commit/8f2d743cc568d386801ef115628567eb3497005c)]:
+  - @knpkv/herdr-connect@0.22.0
+
 ## 0.34.0
 
 ### Minor Changes
