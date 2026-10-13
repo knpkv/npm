@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
+import * as Schema from "effect/Schema"
 import { PNG } from "pngjs"
 
 import { capturePage } from "../src/browser.js"
@@ -20,7 +21,7 @@ test("capture waits for native frames after masking, even with a paused clock", 
   let screenshots = 0
   page.waitForFunction = async <R, Arg>(...args: Parameters<typeof page.waitForFunction<R, Arg>>) => {
     barriers += 1
-    // The first barrier drains pre-freeze events; hold the masked evidence barrier.
+    // The first barrier drains freeze-generated events; hold the masked evidence barrier.
     if (barriers === 1) return waitForFunction<R, Arg>(...args)
     expect(await page.locator("[data-visual-uuid]").count()).toBe(1)
     await Effect.runPromise(Deferred.succeed(entered, undefined))
@@ -302,4 +303,132 @@ test("in-frame and partially clipped regions retain matching frame pixels", asyn
       .toEqual({ x: 0, y: 0, width: 40 + x, height: 40 })
     expect(await page.evaluate(() => scrollX + scrollY)).toBe(0)
   }
+})
+
+const finiteMotionHtml = (fill: string, delay: number) => `
+  <style>
+    body { margin: 0; font-size: 16px; }
+    main { inline-size: 7.5em; block-size: 2.5em; background: rgb(0, 255, 0); }
+    @media (prefers-reduced-motion: no-preference) { main { animation: grow 60s ${delay}s ${fill} linear; } }
+    @keyframes grow {
+      from { inline-size: 2.5em; background: rgb(255, 0, 0); }
+      to { inline-size: 7.5em; background: rgb(0, 255, 0); }
+    }
+  </style>
+  <main data-region=content></main>
+`
+
+for (
+  const { delay, fill } of [
+    { fill: "backwards", delay: 60 },
+    { fill: "both", delay: 60 },
+    { fill: "none", delay: 60 },
+    { fill: "forwards", delay: 60 },
+    { fill: "both", delay: 0 }
+  ]
+) {
+  /** Fill-derived progress during delay must not turn pre-existing motion into a late animation. */
+  test(`pre-existing ${delay === 0 ? "immediate" : "delayed"} ${fill} motion captures final geometry and pixels`, async ({ page }) => {
+    test.setTimeout(15_000)
+    await installCaptureClock(page)
+    await page.clock.pauseAt(new Date(VISUAL_TIME))
+    await page.emulateMedia({ reducedMotion: "no-preference" })
+    await page.setViewportSize({ width: 390, height: 260 })
+    await page.setContent(finiteMotionHtml(fill, delay))
+    const initial = await page.evaluate(() => {
+      const animations = document.getAnimations()
+      for (const animation of animations) animation.currentTime = 0
+      return animations.map((animation) => ({
+        currentTime: animation.currentTime,
+        delay: animation.effect?.getComputedTiming().delay,
+        progress: animation.effect?.getComputedTiming().progress
+      }))
+    })
+    expect(initial).toHaveLength(1)
+    expect(initial[0]?.delay).toBe(delay * 1000)
+    if (delay > 0 && (fill === "backwards" || fill === "both")) expect(initial[0]?.progress).toBe(0)
+    const captured = await Effect.runPromise(capturePage(page).pipe(Effect.result))
+    expect(captured._tag, captured._tag === "Failure" ? JSON.stringify(captured.failure) : undefined).toBe("Success")
+    if (captured._tag !== "Success") return
+    const result = captured.success
+    const expected = { x: 0, y: 0, width: 120, height: 40 }
+    expect(result.snapshot.regions[0]?.box).toEqual(expected)
+    expect(paintedBox(PNG.sync.read(Buffer.from(result.frame)), { red: 0, green: 255, blue: 0 })).toEqual(expected)
+  })
+}
+
+/** Record queued-event delivery in the same browser call that installs capture listeners. */
+test("freeze-generated animationstart and animationend are delivered before capture listeners start", async ({ page }) => {
+  test.setTimeout(15_000)
+  await installCaptureClock(page)
+  await page.clock.pauseAt(new Date(VISUAL_TIME))
+  await page.emulateMedia({ reducedMotion: "no-preference" })
+  await page.setContent(finiteMotionHtml("both", 60))
+  await page.evaluate(() => {
+    for (const type of ["animationstart", "animationend"]) {
+      document.addEventListener(type, (event) => {
+        const root = document.documentElement
+        root.dataset.motionEvents = [root.dataset.motionEvents, event.type].filter(Boolean).join(",")
+      }, true)
+    }
+  })
+  const evaluateHandle = page.evaluateHandle.bind(page)
+  let calls = 0
+  page.evaluateHandle = async <R, Arg>(...args: Parameters<typeof page.evaluateHandle<R, Arg>>) => {
+    calls += 1
+    if (calls !== 1) return evaluateHandle<R, Arg>(...args)
+    const [source, arg] = args
+    const script = Schema.decodeUnknownSync(Schema.String)(source)
+    // Wrap the guard without extra browser round trips between the barrier and listener installation.
+    return evaluateHandle<R, Arg>(
+      String.raw`(() => {
+      const guard = ${script};
+      const begin = guard.beginEvidence;
+      guard.beginEvidence = () => {
+        const root = document.documentElement;
+        root.dataset.motionEventsAtEvidence = root.dataset.motionEvents ?? "";
+        begin();
+      };
+      return guard;
+    })()`,
+      arg
+    )
+  }
+  expect((await Effect.runPromise(capturePage(page))).snapshot.regions[0]?.box.width).toBe(120)
+  expect(await page.locator("html").getAttribute("data-motion-events-at-evidence"))
+    .toBe("animationstart,animationend")
+  expect(await page.locator("html").getAttribute("data-motion-events")).toBe("animationstart,animationend")
+})
+
+/** The flush interval must not admit motion spawned by an accepted animation's completion handler. */
+test("motion spawned by a freeze event is rejected before sampling or taking a screenshot", async ({ page }) => {
+  test.setTimeout(15_000)
+  await installCaptureClock(page)
+  await page.clock.pauseAt(new Date(VISUAL_TIME))
+  await page.emulateMedia({ reducedMotion: "no-preference" })
+  await page.setContent(
+    finiteMotionHtml("both", 60) + `
+    <style>
+      @media (prefers-reduced-motion: no-preference) { .late { animation: later 60s linear; } }
+      @keyframes later { to { inline-size: 12em; } }
+    </style>
+  `
+  )
+  await page.locator("main").evaluate((element) => {
+    element.addEventListener("animationend", () => {
+      element.classList.add("late")
+      element.getBoundingClientRect()
+    }, { once: true })
+  })
+  let screenshots = 0
+  const screenshot = page.screenshot.bind(page)
+  page.screenshot = async (options) => {
+    screenshots += 1
+    return screenshot(options)
+  }
+  expect(await Effect.runPromise(capturePage(page).pipe(Effect.result))).toMatchObject({
+    _tag: "Failure",
+    failure: { _tag: "BrowserFailure", cause: { _tag: "BrowserFailure", operation: "late capture animation" } }
+  })
+  expect(screenshots).toBe(0)
 })

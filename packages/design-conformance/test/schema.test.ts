@@ -103,3 +103,62 @@ it.effect("coverage and integrity cannot be waived", () =>
       expect((yield* Schema.decodeUnknownEffect(Waivers)([{ ...waiver, rule }]).pipe(Effect.exit))._tag).toBe("Failure")
     }
   }))
+
+/** The manifest boundary rejects the one region name that overwrites whole-frame artifacts. */
+it.effect("region names cannot collide with reserved whole-frame artifact names", () =>
+  Effect.gen(function*() {
+    for (const region of ["content", "frame-content", "diff-frame", "ref", "live"]) {
+      expect(
+        (yield* Schema.decodeUnknownEffect(Manifest)({ ...manifest, states: [{ ...state, regions: [region] }] }))
+          .states[0]?.regions
+      ).toEqual([region])
+    }
+    for (const region of ["frame", "*", "../frame", "content/frame"]) {
+      const result = yield* Schema.decodeUnknownEffect(Manifest)({
+        ...manifest,
+        states: [{ ...state, regions: [region] }]
+      }).pipe(Effect.result)
+      expect(result._tag).toBe("Failure")
+      if (region === "frame" && result._tag === "Failure") {
+        expect(result.failure._tag).toBe("SchemaError")
+        expect(result.failure.message).toContain("Region name frame is reserved for whole-frame artifacts")
+      }
+    }
+  }))
+
+/** PNG tolerance stays useful without permitting the pixel comparison to be disabled. */
+it.effect("PNG tolerance rejects fully permissive thresholds and accepts the documented starting value", () =>
+  Effect.gen(function*() {
+    const png = {
+      ...state,
+      source: "png",
+      refs: [{ viewport: 390, theme: "light", image: "shots/mobile.png", metadata: "shots/mobile.json" }],
+      pixelMaxDiffRatio: 0.02
+    }
+    const files = {
+      "fixture.json": "a".repeat(64),
+      "shots/mobile.png": "b".repeat(64),
+      "shots/mobile.json": "c".repeat(64)
+    }
+    for (const pixelMaxDiffRatio of [0, 0.02, 0.05]) {
+      expect(
+        (yield* Schema.decodeUnknownEffect(Manifest)({ ...manifest, states: [{ ...png, pixelMaxDiffRatio }], files }))
+          .states[0]
+      ).toMatchObject({ pixelMaxDiffRatio })
+    }
+    for (const pixelMaxDiffRatio of [1, 0.050001, -0.001, Number.NaN, Number.POSITIVE_INFINITY]) {
+      const result = yield* Schema.decodeUnknownEffect(Manifest)({
+        ...manifest,
+        states: [{ ...png, pixelMaxDiffRatio }],
+        files
+      }).pipe(Effect.result)
+      expect(result._tag).toBe("Failure")
+      if (result._tag === "Failure") expect(result.failure._tag).toBe("SchemaError")
+    }
+    const reserved = yield* Schema.decodeUnknownEffect(Manifest)({
+      ...manifest,
+      states: [{ ...png, regions: ["frame"] }],
+      files
+    }).pipe(Effect.result)
+    expect(reserved._tag).toBe("Failure")
+  }))

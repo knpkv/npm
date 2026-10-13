@@ -17,7 +17,12 @@ export const Theme = Schema.Literals(["light", "dark"])
 export const Viewport = Schema.Literals([390, 1280])
 const Themes = Schema.Array(Theme).check(Schema.isMinLength(1), Schema.isUnique())
 const Viewports = Schema.Array(Viewport).check(Schema.isMinLength(1), Schema.isUnique())
-const Ratio = Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 1 }))
+// PNG exports allow modest renderer drift; larger deviations require explicit review waivers.
+const PngRatio = Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 0.05 }))
+// The whole-frame diff reserves its key and path; other names remain constrained by Name.
+const RegionName = Name.check(
+  Schema.makeFilter((name) => name !== "frame" || "Region name frame is reserved for whole-frame artifacts")
+)
 
 export const Identity = Schema.Struct({ screen: Name, state: Name, viewport: Viewport, theme: Theme })
 export interface Identity extends Schema.Schema.Type<typeof Identity> {}
@@ -46,7 +51,7 @@ export const BaseComparison = Schema.Struct({ referenceOnly: Schema.Boolean })
 const StateFields = {
   ...LiveState.fields,
   status: Schema.Literals(["designed", "implemented"]),
-  regions: Schema.Array(Name).check(Schema.isMinLength(1), Schema.isUnique())
+  regions: Schema.Array(RegionName).check(Schema.isMinLength(1), Schema.isUnique())
 }
 const PngRef = Schema.Struct({ viewport: Viewport, theme: Theme, image: RelativeFile, metadata: RelativeFile })
 export const State = Schema.Union([
@@ -55,7 +60,7 @@ export const State = Schema.Union([
     ...StateFields,
     source: Schema.Literal("png"),
     refs: Schema.Array(PngRef).check(Schema.isMinLength(1)),
-    pixelMaxDiffRatio: Ratio
+    pixelMaxDiffRatio: PngRatio
   })
 ])
 export type State = Schema.Schema.Type<typeof State>

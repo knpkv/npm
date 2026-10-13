@@ -1,20 +1,23 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { expect, test } from "@playwright/test"
 import * as Clock from "effect/Clock"
+import * as Crypto from "effect/Crypto"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 import * as Schema from "effect/Schema"
+import { PNG } from "pngjs"
 
 import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import { start } from "../scripts/fixture.js"
-import { browserCall } from "../src/browser.js"
+import { browserCall, capturePage } from "../src/browser.js"
+import { installCaptureClock } from "../src/capture.js"
 import { comparePixels } from "../src/compare.js"
 import { LiveProduct } from "../src/live.js"
 import { loadReferences, readJson } from "../src/references.js"
 import { runConformance } from "../src/runner.js"
-import { Identity, Result, RunnerFailure } from "../src/schema.js"
+import { Identity, Manifest, Result, RunnerFailure, Snapshot, type State } from "../src/schema.js"
 import { serveFiles } from "../src/server.js"
 import { verdict } from "../src/verdict.js"
 import { localServer, testLive, testReferences } from "./fixtures.js"
@@ -312,6 +315,113 @@ test("fully off-frame live regions retain metadata findings and obey legacy grac
       expect(grace?.shots.every((shot) => !shot.touched)).toBe(true)
       expect(yield* readJson(path.join(graceOutput, "result.json"), Result)).toEqual(grace)
       expect(yield* fs.exists(path.join(graceOutput, "index.html"))).toBe(true)
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer))
+  )
+})
+
+/** Compare real PNG evidence with identical metadata, so tolerance cannot hide arbitrary pixels. */
+test("PNG refs reject a disabled pixel threshold, accept drift within 2% and require unrelated pixels", async ({ page }) => {
+  await Effect.runPromise(
+    Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const cryptoService = yield* Crypto.Crypto
+      const html = `<html data-design-ready=true><body>
+        <style>body { margin: 0; } main { inline-size: 40px; block-size: 40px; background: rgb(255, 0, 0); }</style>
+        <main data-region=content></main>
+      </body></html>`
+      const initial = yield* testReferences(html)
+      const origin = yield* localServer(() => HttpServerResponse.html(html))
+      yield* browserCall("PNG fixture navigation", async () => {
+        await page.setViewportSize({ width: 390, height: 844 })
+        await installCaptureClock(page)
+        await page.goto(`${origin}/page.html`)
+      })
+      const reference = yield* capturePage(page)
+      const pngState: State = {
+        screen: "toy",
+        state: "passing",
+        route: "/page.html",
+        status: "implemented",
+        source: "png",
+        viewports: [390],
+        themes: ["light"],
+        regions: ["content"],
+        pixelMaxDiffRatio: 0.02,
+        refs: [{ viewport: 390, theme: "light", image: "shot.png", metadata: "shot.json" }]
+      }
+      const metadata = new TextEncoder().encode(
+        yield* Schema.encodeEffect(Schema.fromJsonString(Snapshot))(reference.snapshot)
+      )
+      const writeRefs = Effect.fn("PngTest.writeReferences")(function*(pixels: Uint8Array, ratio: number) {
+        const files = { ...initial.manifest.files }
+        for (
+          const [file, bytes] of [["shot.png", pixels], ["shot.json", metadata]] satisfies ReadonlyArray<
+            readonly [string, Uint8Array]
+          >
+        ) {
+          yield* fs.writeFile(path.join(initial.root, file), bytes)
+          const hash = yield* cryptoService.digest("SHA-256", bytes)
+          files[file] = Array.from(hash, (byte) => byte.toString(16).padStart(2, "0")).join("")
+        }
+        const encoded = yield* Schema.encodeEffect(Manifest)({ ...initial.manifest, files, states: [pngState] })
+        yield* fs.writeFileString(
+          path.join(initial.root, "manifest.json"),
+          JSON.stringify({
+            ...encoded,
+            states: encoded.states.map((state) => ({ ...state, pixelMaxDiffRatio: ratio }))
+          })
+        )
+        return yield* loadReferences(initial.root)
+      })
+      const unrelated = PNG.sync.read(Buffer.from(reference.frame))
+      for (let index = 0; index < unrelated.data.length; index += 4) {
+        unrelated.data[index] = 0
+        unrelated.data[index + 1] = 0
+        unrelated.data[index + 2] = 255
+        unrelated.data[index + 3] = 255
+      }
+      const arbitrary = PNG.sync.write(unrelated)
+      expect(yield* writeRefs(arbitrary, 1).pipe(Effect.flip)).toMatchObject({
+        _tag: "InvalidContract",
+        cause: { _tag: "SchemaError" }
+      })
+      const nearby = PNG.sync.read(Buffer.from(reference.frame))
+      for (let y = 10; y < 14; y += 1) {
+        for (let x = 10; x < 14; x += 1) {
+          const pixel = (y * nearby.width + x) * 4
+          nearby.data[pixel] = 0
+          nearby.data[pixel + 1] = 255
+        }
+      }
+      const nearbyBytes = PNG.sync.write(nearby)
+      const ratio = comparePixels(nearbyBytes, reference.frame).ratio
+      expect(ratio).toBeGreaterThan(0)
+      expect(ratio).toBeLessThanOrEqual(0.02)
+      const refs = yield* writeRefs(nearbyBytes, 0.02)
+      const accepted = yield* runConformance(refs, { output: yield* fs.makeTempDirectoryScoped() }).pipe(
+        Effect.provideService(LiveProduct, testLive(origin))
+      )
+      expect(accepted?.passed).toBe(true)
+      expect(accepted?.findings).toEqual([])
+      const rejected = yield* runConformance(yield* writeRefs(arbitrary, 0.02), {
+        output: yield* fs.makeTempDirectoryScoped()
+      }).pipe(
+        Effect.provideService(LiveProduct, testLive(origin))
+      )
+      expect(rejected?.passed).toBe(false)
+      for (const region of ["*", "content"]) {
+        expect(
+          rejected?.findings.some((finding) =>
+            finding.region === region && finding.rule === "pixels" && finding.disposition === "required"
+          )
+        ).toBe(true)
+      }
+      expect(rejected?.findings.every((finding) => finding.rule === "pixels")).toBe(true)
+      const artifacts = rejected?.shots[0]?.artifacts
+      expect(artifacts?.["diff-frame"]).toBeDefined()
+      expect(artifacts?.["diff-content"]).toBeDefined()
+      expect(artifacts?.["diff-frame"]).not.toBe(artifacts?.["diff-content"])
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer))
   )
 })

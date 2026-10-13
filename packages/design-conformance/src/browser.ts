@@ -52,33 +52,8 @@ const motionGuardScript = String.raw`(() => {
   style.textContent = "*, ::before, ::after { transition: none !important; }";
   const accepted = new Set(document.getAnimations());
   let lateAnimation = false;
-  // Only finish/cancel events produced by freezing accepted motion get one allowance.
-  // All allowances expire before metadata; subsequent events stay recorded even after removal.
-  const initialEvents = [];
-  for (const animation of accepted) {
-    if (animation instanceof CSSAnimation) {
-      const timing = animation.effect?.getComputedTiming();
-      const finite = Number.isFinite(timing?.endTime);
-      initialEvents.push({
-        target: animation.effect?.target,
-        name: animation.animationName,
-        pseudo: animation.effect?.pseudoElement ?? "",
-        start: finite && timing?.progress === null,
-        cancel: !finite
-      });
-    }
-  }
-  const recordMotion = event => {
-    const key = event.type === "animationstart" ? "start" : "cancel";
-    const initial = event.type === "transitionrun" ? undefined : initialEvents.find(entry =>
-      entry[key] && entry.target === event.target && entry.name === event.animationName &&
-      entry.pseudo === event.pseudoElement
-    );
-    if (initial !== undefined) initial[key] = false;
-    else lateAnimation = true;
-  };
+  const recordMotion = () => { lateAnimation = true; };
   const events = ["animationstart", "animationcancel", "transitionrun"];
-  for (const event of events) document.addEventListener(event, recordMotion, true);
   Element.prototype.animate = function(...args) {
     lateAnimation = true;
     const animation = animate.apply(this, args);
@@ -97,7 +72,9 @@ const motionGuardScript = String.raw`(() => {
     }
     document.head.append(style);
     return {
-      beginEvidence: () => { initialEvents.length = 0; },
+      beginEvidence: () => {
+        for (const event of events) document.addEventListener(event, recordMotion, true);
+      },
       interrupted: () => lateAnimation || document.getAnimations().some(animation =>
         !accepted.has(animation) || animation.playState === "running" || animation.pending
       ),
@@ -134,19 +111,30 @@ const frozenScreenshotSettings = { ...screenshotSettings, animations: "allow" } 
   Page["screenshot"]
 >[0]
 
+/** Reject motion spawned by freeze-event handlers before sampling, and recheck after pixels. */
+const assertCaptureMotion = async (motion: JSHandle<MotionGuard>): Promise<void> => {
+  if (await motion.evaluate((guard) => guard.interrupted())) {
+    throw new BrowserFailure({
+      operation: "late capture animation",
+      cause: "An animation started or resumed after capture motion was frozen"
+    })
+  }
+}
+
 /** Visible named regions, resolved tokens, document-space boxes, DOM order and nearest region parent. */
 export const capturePage = (page: Page) =>
   browserCall("capture regions", async (): Promise<Capture> => {
     await settleCaptureFonts(page)
     await settleCapturePage(page)
-    // Flush pre-freeze CSS start/run events before installing the capture listener.
-    await waitForCapturePaint(page)
     const motion = await freezeCaptureMotion(page)
     try {
+      // Deliver finish/cancel events before every subsequent CSS motion event becomes late.
+      await waitForCapturePaint(page)
+      await motion.evaluate((guard) => guard.beginEvidence())
+      await assertCaptureMotion(motion)
       const restore = await maskUuidText(page)
       try {
         await waitForCapturePaint(page)
-        await motion.evaluate((guard) => guard.beginEvidence())
         const raw = await page.evaluate(() => {
           const properties = [
             "color",
@@ -215,12 +203,7 @@ export const capturePage = (page: Page) =>
         const frame = await page.screenshot({ ...frozenScreenshotSettings, mask: [masks], fullPage: true })
         const scale = await page.evaluate(() => window.devicePixelRatio)
         const regions = cropRegions(frame, snapshot, scale)
-        if (await motion.evaluate((guard) => guard.interrupted())) {
-          throw new BrowserFailure({
-            operation: "late capture animation",
-            cause: "An animation started or resumed after capture motion was frozen"
-          })
-        }
+        await assertCaptureMotion(motion)
         return { snapshot, frame, regions }
       } finally {
         try {

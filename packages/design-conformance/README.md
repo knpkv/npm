@@ -19,7 +19,9 @@ Put refs in `design-refs/<product>/`:
 - `waivers.json`: reviewed exceptions for actual copy, geometry, token or pixel failures.
 
 Tag the same visible regions on both sides with `data-region="content"`, for example.
-Names must be unique per state. Declare every region in the manifest. The gate checks
+Names must be unique per state. `frame` is reserved for whole-frame artifact keys
+and paths; manifest decoding rejects it for both HTML and PNG states.
+Declare every region in the manifest. The gate checks
 DOM order, nearest region parent, horizontal page/region overflow, normalized visible
 text, and document-space boxes. Geometry tolerance is 2px at 390 and 4px at 1280.
 Resolved color, background, font, borders, radius, gaps and padding must match exactly.
@@ -69,7 +71,12 @@ Date-only values expire at UTC midnight. Impossible calendar dates fail decoding
 
 Canvas-only products can use `source: "png"`. Supply `refs` entries with `viewport`,
 `theme`, `image` and `metadata`, plus a product-specific `pixelMaxDiffRatio` between
-0 and 1. Each viewport/theme needs a hashed PNG and hashed metadata JSON.
+0 and 0.05 inclusive. Start with 0.02, a 2% mismatch budget. This is an explicit
+manifest value, not an implicit decoder default. The 5% cap permits modest canvas
+renderer differences while requiring at least 95% of compared pixels to agree
+under pixelmatch's anti-alias rule.
+Larger accepted differences need a reviewed pixel waiver rather than a threshold
+that can disable the check. Each viewport/theme needs a hashed PNG and hashed metadata JSON.
 Metadata uses `Snapshot`: `{ "overflow": false, "regions": [...] }`. Each region
 contains `name`, visible `copy`, `box` with `x/y/width/height`, nearest region `parent`
 or null, resolved `styles`, and horizontal `overflow`. Array order is DOM order.
@@ -126,7 +133,10 @@ a typed `BrowserFailure`, even if they start after metadata sampling. New CSS
 animation identities also fail, including finished forwards-filled animations.
 Capture-phase `animationstart`, `animationcancel` and `transitionrun` events retain
 late CSS motion evidence after no-fill animations disappear from `getAnimations()`.
-Only events caused by freezing pre-existing motion are accepted before sampling.
+The runner finishes/cancels pre-existing motion and waits for native paint to
+deliver its events before installing those listeners. Every subsequent motion
+event is late; there are no fill-mode-dependent allowances. Motion started by
+a freeze-event handler must also pass the guard before metadata sampling.
 Region images are crops of the same full-frame PNG; capture never scrolls to a
 region. A CSS-visible region entirely outside the frame retains its metadata and
 has typed `OffFrame` pixel evidence with no region image. Its pixel finding follows
