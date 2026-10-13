@@ -319,6 +319,8 @@ describe("manual plugin synchronization", () => {
       const { connections, persistence, streamKey } = yield* setupFixture(fixture)
       const wakeups = yield* DomainEventWakeups
       const observations: Array<{ readonly reason: string; readonly completed: boolean }> = []
+      let secondClientRevision: number | null = null
+      const secondClientReads: Array<boolean> = []
       const observedWakeups = DomainEventWakeups.of({
         subscribe: wakeups.subscribe,
         notify: (workspaceId) =>
@@ -332,9 +334,19 @@ describe("manual plugin synchronization", () => {
                 streamKey
               ).pipe(Effect.orDie)
               if (event !== undefined) {
+                const runtime = yield* persistence.pluginRuntime.getRuntime(
+                  workspaceId,
+                  fixture.pluginConnectionId
+                ).pipe(Effect.orDie)
+                const completed = attempts.at(-1)?.completedAt !== null &&
+                  attempts.at(-1)?.completedAt !== undefined
+                if (runtime.revision !== secondClientRevision) {
+                  secondClientRevision = runtime.revision
+                  secondClientReads.push(completed)
+                }
                 observations.push({
                   reason: event.payload.reason,
-                  completed: attempts.at(-1)?.completedAt !== null && attempts.at(-1)?.completedAt !== undefined
+                  completed
                 })
               }
             }
@@ -352,6 +364,8 @@ describe("manual plugin synchronization", () => {
       yield* synchronization.synchronize({ workspaceId: WORKSPACE_ID, pluginConnectionId: fixture.pluginConnectionId })
       const final = observations.at(-1)
       assert.deepEqual(final, { reason: "release-projection", completed: true })
+      // A non-initiating client must read the terminal state exactly once after the earlier health read.
+      assert.deepStrictEqual(secondClientReads, [false, true])
       assert.isTrue(
         observations.every((observation) => observation.reason !== "release-projection" || observation.completed)
       )

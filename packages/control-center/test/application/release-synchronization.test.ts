@@ -261,6 +261,48 @@ const runScenarioFromMap = Effect.fn("ReleaseSynchronizationTest.runScenarioFrom
 })
 
 describe("fake release synchronization", () => {
+  it.effect("notifies a distinct connection token only after startup sync completion is durable", () =>
+    withPersistence(Effect.gen(function*() {
+      yield* TestClock.setTime(epochMillis(SYNCHRONIZED_AT))
+      const persistence = yield* setup
+      const wakeups = yield* DomainEventWakeups
+      const observations: Array<{
+        readonly completed: boolean
+        readonly reason: string
+        readonly revision: number
+      }> = []
+      const observedWakeups = DomainEventWakeups.of({
+        subscribe: wakeups.subscribe,
+        notify: (workspaceId) =>
+          Effect.gen(function*() {
+            const page = yield* persistence.events.pageAfter(workspaceId, EventCursor.make(0), 128).pipe(Effect.orDie)
+            const attempts = yield* persistence.pluginRuntime.listSyncAttempts(workspaceId, PLUGIN_ID, STREAM)
+              .pipe(Effect.orDie)
+            const runtime = yield* persistence.pluginRuntime.getRuntime(workspaceId, PLUGIN_ID).pipe(Effect.orDie)
+            if (page._tag === "page") {
+              const event = page.events.at(-1)
+              if (event !== undefined) {
+                observations.push({
+                  reason: event.payload.reason,
+                  revision: runtime.revision,
+                  completed: attempts.at(-1)?.completedAt !== null && attempts.at(-1)?.completedAt !== undefined
+                })
+              }
+            }
+            yield* wakeups.notify(workspaceId)
+          })
+      })
+      yield* runScenarioFromMap(scenario(success({
+        checkpointAfterPage: "fixture-completion",
+        hasMore: false,
+        events: []
+      }))).pipe(Effect.provideService(DomainEventWakeups, observedWakeups))
+      assert.strictEqual(observations.at(-1)?.reason, "release-projection")
+      assert.isTrue(observations.at(-1)?.completed)
+      assert.lengthOf(observations, 2)
+      assert.strictEqual(observations[1]?.revision, (observations[0]?.revision ?? 0) + 1)
+    })))
+
   it.effect("projects a failed source immediately, preserves its streak start, and recovers on a healthy sync", () =>
     withPersistence(Effect.gen(function*() {
       const persistence = yield* setup

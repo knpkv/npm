@@ -84,9 +84,17 @@ export const PortfolioInvalidatedLiveEvent = Schema.Struct({
 /** Decoded portfolio invalidation stream event. */
 export type PortfolioInvalidatedLiveEvent = typeof PortfolioInvalidatedLiveEvent.Type
 
-/** Replay-gap instruction; it deliberately has no SSE ID so it cannot advance resume state. */
+/** SSE parsers inherit the preceding event's ID; nondurable frames discard it in both directions. */
+const IgnoredInheritedEventId = Schema.optional(Schema.String).pipe(
+  Schema.decodeTo(Schema.optionalKey(Schema.Undefined), {
+    decode: SchemaGetter.omit(),
+    encode: SchemaGetter.omit()
+  })
+)
+
+/** Replay-gap instruction; an inherited wire ID is ignored and server encoding still omits it. */
 export const StreamResetRequiredLiveEvent = Schema.Struct({
-  id: Schema.optionalKey(Schema.Undefined),
+  id: IgnoredInheritedEventId,
   event: Schema.Literal("stream.reset-required"),
   data: Schema.fromJsonString(StreamResetRequired)
 }).annotate({ identifier: "StreamResetRequiredLiveEvent" })
@@ -94,9 +102,9 @@ export const StreamResetRequiredLiveEvent = Schema.Struct({
 /** Decoded replay-gap stream event. */
 export type StreamResetRequiredLiveEvent = typeof StreamResetRequiredLiveEvent.Type
 
-/** Keepalive event; it deliberately has no SSE ID so it cannot advance resume state. */
+/** Keepalive event; an inherited wire ID is ignored and server encoding still omits it. */
 export const StreamHeartbeatLiveEvent = Schema.Struct({
-  id: Schema.optionalKey(Schema.Undefined),
+  id: IgnoredInheritedEventId,
   event: Schema.Literal("stream.heartbeat"),
   data: Schema.fromJsonString(StreamHeartbeat)
 }).annotate({ identifier: "StreamHeartbeatLiveEvent" })

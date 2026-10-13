@@ -9,6 +9,8 @@ import * as Result from "effect/Result"
 import * as Stream from "effect/Stream"
 import { useCallback, useEffect, useState } from "react"
 
+import { withSnapshotRefresh } from "./snapshotRefresh.js"
+
 import { makeControlCenterApiClient } from "../../api/client.js"
 import type { ControlCenterLiveEvent, StreamResetRequired } from "../../api/liveEvents.js"
 import type { PortfolioSnapshot } from "../../api/portfolio.js"
@@ -170,7 +172,7 @@ const runController = Effect.fn("PortfolioLiveController.run")(function*({
   ) {
     const snapshot = yield* transport.loadSnapshot
     if (snapshot.eventCursor < minimumCursor) return yield* new PortfolioStreamProtocolError()
-    yield* publish({ _tag: "stream-snapshot", snapshot })
+    return snapshot
   })
 
   const consumeStream = Effect.fn("PortfolioLiveController.consumeStream")(function*(
@@ -188,67 +190,74 @@ const runController = Effect.fn("PortfolioLiveController.run")(function*({
       if (cursor > streamCursor) streamCursor = cursor
     }
 
-    const consumeEvent = (event: ControlCenterLiveEvent): Effect.Effect<void, unknown> => {
-      switch (event.event) {
-        case "portfolio.snapshot": {
-          if (event.id !== event.data.eventCursor) return Effect.fail(new PortfolioStreamProtocolError())
-          const appliedCursor = appliedPortfolioCursor(currentState)
-          if (appliedCursor === null) return Effect.fail(new PortfolioStreamProtocolError())
-          if (resetHeadCursor !== null && event.id < resetHeadCursor) {
-            return Effect.fail(new PortfolioStreamProtocolError())
-          }
-          if (resetHeadCursor === null) {
-            advanceStreamCursor(event.id)
-          } else {
-            streamCursor = event.id
-          }
-          if (resetHeadCursor === null && event.id < appliedCursor) return Effect.void
-          resetHeadCursor = null
-          return publish({ _tag: "stream-snapshot", snapshot: event.data })
-        }
-        case "portfolio.invalidated": {
-          if (resetHeadCursor !== null || event.id !== event.data.eventCursor) {
-            return Effect.fail(new PortfolioStreamProtocolError())
-          }
-          advanceStreamCursor(event.id)
-          const appliedCursor = appliedPortfolioCursor(currentState)
-          if (appliedCursor === null || event.id <= appliedCursor) return Effect.void
-          return publish({ _tag: "invalidated", eventCursor: event.id }).pipe(
-            Effect.andThen(refreshSnapshot(event.id))
-          )
-        }
-        case "stream.reset-required": {
-          if (event.data.requestedCursor !== streamCursor || !hasValidResetCursorRelation(event.data)) {
-            return Effect.fail(new PortfolioStreamProtocolError())
-          }
-          resetHeadCursor = resetHeadCursor === null || event.data.headCursor > resetHeadCursor
-            ? event.data.headCursor
-            : resetHeadCursor
-          return publish({ _tag: "reset-required", headCursor: resetHeadCursor })
-        }
-        case "stream.heartbeat":
-          if (resetHeadCursor !== null) return Effect.fail(new PortfolioStreamProtocolError())
-          {
-            const appliedCursor = appliedPortfolioCursor(currentState)
-            if (appliedCursor === null) return Effect.fail(new PortfolioStreamProtocolError())
-            advanceStreamCursor(event.data.eventCursor)
-            if (event.data.eventCursor <= appliedCursor) return publish({ _tag: "caught-up" })
-            return publish({ _tag: "invalidated", eventCursor: event.data.eventCursor }).pipe(
-              Effect.andThen(refreshSnapshot(event.data.eventCursor))
-            )
-          }
-      }
-    }
+    const markUsable = Effect.suspend(() => {
+      if (isUsable || currentState._tag !== "loaded" || currentState.isSnapshotStale) return Effect.void
+      isUsable = true
+      return onUsable
+    })
 
-    yield* Stream.runForEach(stream, (event) =>
-      consumeEvent(event).pipe(
-        Effect.tap(() => {
-          if (isUsable) return Effect.void
-          isUsable = true
-          return onUsable
-        })
-      ))
-    return yield* new PortfolioStreamClosedError()
+    return yield* withSnapshotRefresh(
+      refreshSnapshot,
+      (snapshot) => publish({ _tag: "stream-snapshot", snapshot }).pipe(Effect.andThen(markUsable)),
+      ({ drain, request, reset }) => {
+        const consumeEvent = (event: ControlCenterLiveEvent): Effect.Effect<void, unknown> => {
+          switch (event.event) {
+            case "portfolio.snapshot": {
+              if (event.id !== event.data.eventCursor) return Effect.fail(new PortfolioStreamProtocolError())
+              const appliedCursor = appliedPortfolioCursor(currentState)
+              if (appliedCursor === null) return Effect.fail(new PortfolioStreamProtocolError())
+              if (resetHeadCursor !== null && event.id < resetHeadCursor) {
+                return Effect.fail(new PortfolioStreamProtocolError())
+              }
+              if (resetHeadCursor === null) {
+                advanceStreamCursor(event.id)
+              } else {
+                streamCursor = event.id
+              }
+              if (resetHeadCursor === null && event.id < appliedCursor) return Effect.void
+              resetHeadCursor = null
+              return publish({ _tag: "stream-snapshot", snapshot: event.data })
+            }
+            case "portfolio.invalidated": {
+              if (resetHeadCursor !== null || event.id !== event.data.eventCursor) {
+                return Effect.fail(new PortfolioStreamProtocolError())
+              }
+              advanceStreamCursor(event.id)
+              const appliedCursor = appliedPortfolioCursor(currentState)
+              if (appliedCursor === null || event.id <= appliedCursor) return Effect.void
+              return publish({ _tag: "invalidated", eventCursor: event.id }).pipe(
+                Effect.andThen(request(event.id))
+              )
+            }
+            case "stream.reset-required": {
+              if (event.data.requestedCursor !== streamCursor || !hasValidResetCursorRelation(event.data)) {
+                return Effect.fail(new PortfolioStreamProtocolError())
+              }
+              resetHeadCursor = resetHeadCursor === null || event.data.headCursor > resetHeadCursor
+                ? event.data.headCursor
+                : resetHeadCursor
+              return reset.pipe(Effect.andThen(publish({ _tag: "reset-required", headCursor: resetHeadCursor })))
+            }
+            case "stream.heartbeat":
+              if (resetHeadCursor !== null) return Effect.fail(new PortfolioStreamProtocolError())
+              {
+                const appliedCursor = appliedPortfolioCursor(currentState)
+                if (appliedCursor === null) return Effect.fail(new PortfolioStreamProtocolError())
+                advanceStreamCursor(event.data.eventCursor)
+                if (event.data.eventCursor <= appliedCursor) return publish({ _tag: "caught-up" })
+                return publish({ _tag: "invalidated", eventCursor: event.data.eventCursor }).pipe(
+                  Effect.andThen(request(event.data.eventCursor))
+                )
+              }
+          }
+        }
+
+        return Stream.runForEach(stream, (event) => consumeEvent(event).pipe(Effect.andThen(markUsable))).pipe(
+          Effect.andThen(drain),
+          Effect.andThen(Effect.fail(new PortfolioStreamClosedError()))
+        )
+      }
+    )
   })
 
   const reconnect = Effect.fn("PortfolioLiveController.reconnect")(function*() {
