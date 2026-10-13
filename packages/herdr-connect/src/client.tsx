@@ -59,7 +59,14 @@ import {
 import { acquireTerminalSetup, ConnectTerminalSetupError } from "./terminal-setup.js"
 import { terminalBackground, terminalForeground } from "./terminal-theme.js"
 import { bindTerminalDocumentLock, bindTerminalViewport, terminalViewportBindingActive } from "./terminal-viewport.js"
-import { type RememberedConnectPreference, resolveConnectPreferenceDecision } from "./target.js"
+import {
+  type ConnectTargetSelection,
+  type RememberedConnectPreference,
+  connectTargetSelection,
+  connectTargetSelectionMatches,
+  sameConnectTargetSelection,
+  resolveConnectPreferenceDecision
+} from "./target.js"
 import { nextConnectAgentIndex } from "./keyboard.js"
 import {
   applyTerminalModifierToInput,
@@ -798,7 +805,7 @@ const ActiveConnectSurface = ({
   const [selectedKey, setSelectedKey] = useAtom(atoms.selectedKey)
   const work = useAtomValue(atoms.work)
   const preferenceApplied = useRef(false)
-  const preferenceSearch = useRef(locationSearch)
+  const preferenceSelection = useRef(connectTargetSelection(locationSearch))
   const requestId = useRef(connectionRequest?.id ?? 0)
   const directorySearchRef = useRef<HTMLInputElement>(null)
   const directoryViewportRef = useRef<HTMLDivElement>(null)
@@ -1221,7 +1228,7 @@ const ActiveConnectSurface = ({
         : resolveConnectWorkGoal(selected, currentWork)
   // The agent whose stage is open: a row or the cast opens it, Open terminal leaves it for the terminal.
   const [stageKey, setStageKey] = useState<string | null>(null)
-  const stageUrlSelection = useRef<{ readonly key: string; readonly host: string; readonly id: string } | null>(null)
+  const stageUrlSelection = useRef<{ readonly key: string; readonly selection: ConnectTargetSelection } | null>(null)
   const stageReturnKey = useRef<string | null>(null)
   const restoreStageFocus = useCallback(() => {
     const key = stageReturnKey.current
@@ -1273,12 +1280,12 @@ const ActiveConnectSurface = ({
   const [arrivals, setArrivals] = useState<ReadonlySet<string>>(() => new Set())
   useEffect(() => {
     if (current === null) return
-    const buckets = agentBucketsOf(current.agents)
+    const buckets = agentBucketsOf(current.agents, presentation._tag)
     setArrivals(arrivalsBetween(previousBuckets.current, buckets))
     // A host that missed this poll keeps what it last reported, so its waiting agents don't arrive again.
     const silent = new Set(current.failures.map((failure) => failure.host))
     previousBuckets.current = nextAgentBuckets(previousBuckets.current, buckets, silent)
-  }, [current])
+  }, [current, presentation._tag])
   // The stored pins seed them; this session's choices win once made. Unreadable storage pins nothing.
   const storedPins = useAtomValue(atoms.pinned)
   const [pinsChoice, setPinsChoice] = useState<Pins | null>(null)
@@ -1394,15 +1401,12 @@ const ActiveConnectSurface = ({
     )
   }
   useEffect(() => {
-    if (preferenceSearch.current !== locationSearch) {
-      preferenceSearch.current = locationSearch
+    const selection = connectTargetSelection(locationSearch)
+    if (!sameConnectTargetSelection(preferenceSelection.current, selection)) {
+      preferenceSelection.current = selection
       preferenceApplied.current = false
       const owned = stageUrlSelection.current
-      const params = new URLSearchParams(locationSearch)
-      if (
-        owned !== null &&
-        (params.get("open") !== "stage" || params.get("host") !== owned.host || params.get("agent") !== owned.id)
-      ) {
+      if (owned !== null && !sameConnectTargetSelection(selection, owned.selection)) {
         stageReturnKey.current = owned.key
         stageUrlSelection.current = null
         setStageKey(null)
@@ -1428,7 +1432,7 @@ const ActiveConnectSurface = ({
             } else if (decision._tag === "stage") {
               const key = connectAgentKey(decision.target)
               stageReturnKey.current = null
-              stageUrlSelection.current = { key, host: decision.target.host, id: decision.target.id }
+              stageUrlSelection.current = { key, selection }
               setStageKey(key)
             } else {
               selectAgent(decision.target)
@@ -1750,10 +1754,8 @@ const ActiveConnectSurface = ({
                 setStageKey(null)
                 const url = directoryLocation?.url
                 const fromUrl =
-                  url?.searchParams.get("open") === "stage" &&
                   stageAgent !== null &&
-                  url.searchParams.get("host") === stageAgent.host &&
-                  url.searchParams.get("agent") === stageAgent.id
+                  connectTargetSelectionMatches(connectTargetSelection(locationSearch), stageAgent, "stage")
                 stageReturnKey.current = fromUrl ? closing : null
                 if (fromUrl) {
                   directoryLocation.navigate(connectDirectoryHref("active", undefined, url), "replace")

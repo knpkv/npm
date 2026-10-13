@@ -226,6 +226,55 @@ it("keeps Fleet's safety fallback and Home/push unknown policy explicit", () => 
   expect(home.querySelector('[data-home-group="needs-you"] h2')?.textContent).toBe("Needs you 0")
 })
 
+/** Creature arrival follows the displayed group, including Home's explicit unknown-evidence policy. */
+it.each(["home", "fleet"] satisfies ReadonlyArray<"home" | "fleet">)(
+  "threads %s policy into creature arrivals",
+  async (presentation) => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true)
+    const atoms = {
+      ...makeConnectAtoms(),
+      agents: Atom.make(AsyncResult.success({ agents: [{ ...agent, state: "working" }], failures: [] }))
+    }
+    const registry = AtomRegistry.make({
+      initialValues: [
+        [atoms.agents, AsyncResult.success({ agents: [{ ...agent, state: "working" }], failures: [] })],
+        [atoms.preference, AsyncResult.success(null)],
+        [atoms.work, AsyncResult.initial()]
+      ]
+    })
+    const host = document.createElement("div")
+    document.body.append(host)
+    const root = createRoot(host)
+    try {
+      await act(async () =>
+        root.render(
+          <RegistryContext.Provider value={registry}>
+            <ConnectSurface atoms={atoms} embedded presentation={{ _tag: presentation }} />
+          </RegistryContext.Provider>
+        )
+      )
+      expect(host.querySelector(".connect-creature")?.hasAttribute("data-arrived")).toBe(false)
+      await act(async () =>
+        registry.set(
+          atoms.agents,
+          AsyncResult.success({ agents: [{ ...agent, state: "new-wire-state" }], failures: [] })
+        )
+      )
+      expect(host.querySelector(".connect-creature")?.hasAttribute("data-arrived")).toBe(presentation === "fleet")
+      await act(async () =>
+        registry.set(atoms.agents, AsyncResult.success({ agents: [{ ...agent, state: "working" }], failures: [] }))
+      )
+      await act(async () => registry.set(atoms.agents, AsyncResult.success({ agents: [agent], failures: [] })))
+      expect(host.querySelector(".connect-creature")?.hasAttribute("data-arrived")).toBe(true)
+    } finally {
+      await act(async () => root.unmount())
+      registry.dispose()
+      host.remove()
+      vi.unstubAllGlobals()
+    }
+  }
+)
+
 /** Only the presentation that displays limits may own its read loop. */
 it.each(["home", "fleet"])(
   "mounts the limits read only where its %s presentation renders limits",
@@ -449,7 +498,8 @@ it("renders the Home empty slot instead of empty activity groups", () => {
 })
 
 /** URL-selected stages close through the paired owner; row stages remain local and add no history. */
-it.each([true, false])("closes a Home stage through replace only for URL entry=%s", async (fromUrl) => {
+it.each(["ALPHA", "alpha", "AlPhA", null])("closes a Home stage through replace for URL host=%s", async (urlHost) => {
+  const fromUrl = urlHost !== null
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true)
   const atoms = makeConnectAtoms()
   const registry = AtomRegistry.make({
@@ -465,7 +515,7 @@ it.each([true, false])("closes a Home stage through replace only for URL entry=%
   const navigate = vi.fn()
   let url = new URL(
     fromUrl
-      ? "http://localhost/?keep=yes&host=ALPHA&agent=agent-reviewer&open=stage#connect/overview"
+      ? `http://localhost/?keep=yes&host=${urlHost}&agent=agent-reviewer&open=stage#connect/overview`
       : "http://localhost/?keep=yes#connect/overview"
   )
   const paint = async () =>
@@ -496,7 +546,7 @@ it.each([true, false])("closes a Home stage through replace only for URL entry=%
       expect(navigate).not.toHaveBeenCalled()
       expect(host.querySelector(".connect-terminal-screen")).toBe(terminal)
       expect(registry.get(atoms.query)).toBe("Review")
-      url = new URL("http://localhost/?keep=yes&host=ALPHA&agent=agent-reviewer&open=stage#connect/overview")
+      url = new URL(`http://localhost/?keep=yes&host=${urlHost}&agent=agent-reviewer&open=stage#connect/overview`)
       await paint()
     } else {
       url = new URL("http://localhost/?keep=yes&unrelated=changed#connect/overview")
@@ -515,13 +565,74 @@ it.each([true, false])("closes a Home stage through replace only for URL entry=%
       await paint()
       expect(host.querySelector(".connect-terminal-screen")).toBe(terminal)
       expect(registry.get(atoms.query)).toBe("Review")
-      url = new URL("http://localhost/?keep=yes&host=ALPHA&agent=agent-reviewer&open=stage#connect/overview")
+      url = new URL(`http://localhost/?keep=yes&host=${urlHost}&agent=agent-reviewer&open=stage#connect/overview`)
       await paint()
       expect(document.querySelector('[role="dialog"]')).not.toBeNull()
       expect(host.querySelector(".connect-terminal-screen")).toBe(terminal)
     }
   } finally {
     await act(async () => root.unmount())
+    registry.dispose()
+    host.remove()
+    vi.unstubAllGlobals()
+  }
+})
+
+/** Observe request creation; happy-dom cannot keep a Ghostty socket alive, which the browser guard proves. */
+it("keeps a direct terminal request across unrelated query and host-case changes", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true)
+  const other = { ...agent, id: Schema.decodeUnknownSync(AgentStableId)("agent-other"), name: "Other worker" }
+  const atoms = makeConnectAtoms()
+  const registry = AtomRegistry.make({
+    initialValues: [
+      [atoms.agents, AsyncResult.success({ agents: [agent, other], failures: [] })],
+      [atoms.preference, AsyncResult.success(null)],
+      [atoms.work, AsyncResult.initial()]
+    ]
+  })
+  const requests: Array<NonNullable<Atom.Type<typeof atoms.connectionRequest>>> = []
+  const release = registry.subscribe(atoms.connectionRequest, (request) => {
+    if (request !== null) requests.push(request)
+  })
+  const host = document.createElement("div")
+  document.body.append(host)
+  const root = createRoot(host)
+  const navigate = vi.fn()
+  const paint = async (search: string) =>
+    act(async () => {
+      root.render(
+        <RegistryContext.Provider value={registry}>
+          <ConnectSurface
+            atoms={atoms}
+            embedded
+            active={false}
+            presentation={{ _tag: "home" }}
+            directoryLocation={{
+              url: new URL(`http://localhost/${search}#connect/overview`),
+              navigate,
+              closeSelection: (href) => navigate(href, "replace")
+            }}
+          />
+        </RegistryContext.Provider>
+      )
+      for (let i = 0; i < 20; i += 1) await Promise.resolve()
+    })
+  try {
+    await paint("?host=ALPHA&agent=agent-reviewer")
+    expect(requests).toHaveLength(1)
+    const first = requests[0]
+    await paint("?keep=yes&host=alpha&agent=agent-reviewer")
+    expect(requests).toHaveLength(1)
+    await paint("?keep=yes&host=alpha&agent=agent-other")
+    expect(requests).toHaveLength(2)
+    const next = requests[1]
+    expect(next?.agent.id).toBe("agent-other")
+    expect(next?.id).not.toBe(first?.id)
+    await paint("?keep=changed&host=ALPHA&agent=agent-other")
+    expect(requests).toHaveLength(2)
+  } finally {
+    await act(async () => root.unmount())
+    release()
     registry.dispose()
     host.remove()
     vi.unstubAllGlobals()

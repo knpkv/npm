@@ -50,6 +50,23 @@ const click = async (href: string) => {
   anchor.remove()
 }
 
+/** A retained Limits error must not expose a Retry on a page that never reads Limits. */
+it("keeps Limits Retry on Limits after switching to healthy By tool", async () => {
+  const reads: UsageModuleReads = {
+    usage: () => Effect.succeed({ fleet: usage, receivedAt: 1_000 }),
+    limits: Effect.fail(new FleetReadLoadError({ path: "/v1/connect/limits", reason: "network", cause: "offline" }))
+  }
+  window.history.replaceState(null, "", "/?range=7d&timeZone=UTC#usage/limits")
+  await render(reads)
+  const retries = () =>
+    [...document.querySelectorAll(".usage-details button")].filter((button) => button.textContent === "Retry")
+  expect(retries()).toHaveLength(1)
+  await click("?range=7d&timeZone=UTC#usage/by-tool")
+  expect(retries()).toHaveLength(0)
+  await click("?range=7d&timeZone=UTC#usage/limits")
+  expect(retries()).toHaveLength(1)
+})
+
 it("repairs selectors only on active Usage and keeps Fleet approval deep links after visiting Usage", async () => {
   const calls: Array<UsageQuery> = []
   const reads: UsageModuleReads = {

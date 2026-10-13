@@ -1158,40 +1158,86 @@ test("Back from a terminal to Archived restores chrome and Relay keys", async ({
   await expect(page.locator("[data-rly-relay-panel]")).toBeVisible()
 })
 
-/** Selector removal is a replace within one owner; the same incoming selection can then reopen the stage. */
-test("closing a URL-selected Home stage preserves its owner and makes reload stay closed", async ({ page }, info) => {
-  const entry = "/?host=hub&agent=agent-1&open=stage#connect/overview"
-  await page.goto(entry)
-  await expect(page.getByRole("dialog", { name: "Agent", exact: true })).toBeVisible()
-  await page.evaluate(() => document.querySelector(".connect-shell")?.setAttribute("data-owner-probe", "kept"))
-  const historyLength = await page.evaluate(() => window.history.length)
-  await page.getByRole("dialog").getByRole("button", {
-    name: info.project.name === "phone" ? "Back to Connect" : "Close",
-    exact: true
-  }).click()
-  await expect(page.getByRole("dialog")).toHaveCount(0)
-  for (const key of ["host", "agent", "open"]) expect(new URL(page.url()).searchParams.has(key)).toBe(false)
-  await expect(page.locator(".connect-shell")).toHaveAttribute("data-owner-probe", "kept")
-  expect(await page.evaluate(() => window.history.length)).toBe(historyLength)
-  await expect(page.locator(".connect-agent[data-agent-key=\"hub:agent-1\"]")).toBeFocused()
-  await page.reload()
-  await expect(page.locator(".connect-home-agent")).not.toHaveCount(0)
-  await expect(page.getByRole("dialog")).toHaveCount(0)
-  await page.evaluate((href) => {
-    const link = document.createElement("a")
-    link.href = href
-    document.body.append(link)
-    link.click()
-    link.remove()
-  }, entry)
-  await expect(page.getByRole("dialog", { name: "Agent", exact: true })).toBeVisible()
-  await page.getByRole("dialog").getByRole("button", {
-    name: info.project.name === "phone" ? "Back to Connect" : "Close",
-    exact: true
-  }).click()
-  expect(new URL(page.url()).searchParams.has("open")).toBe(false)
-  await page.goBack()
-  await expect(page.getByRole("dialog")).toHaveCount(0)
+/** Selector removal is a replace within one owner; host casing does not change its close contract. */
+for (const urlHost of ["hub", "HuB"]) {
+  test(
+    `closing a URL-selected Home stage preserves its owner and makes reload stay closed, host=${urlHost}`,
+    async ({ page }, info) => {
+      const entry = `/?host=${urlHost}&agent=agent-1&open=stage#connect/overview`
+      await page.goto(entry)
+      await expect(page.getByRole("dialog", { name: "Agent", exact: true })).toBeVisible()
+      await page.evaluate(() => document.querySelector(".connect-shell")?.setAttribute("data-owner-probe", "kept"))
+      const historyLength = await page.evaluate(() => window.history.length)
+      await page.getByRole("dialog").getByRole("button", {
+        name: info.project.name === "phone" ? "Back to Connect" : "Close",
+        exact: true
+      }).click()
+      await expect(page.getByRole("dialog")).toHaveCount(0)
+      for (const key of ["host", "agent", "open"]) expect(new URL(page.url()).searchParams.has(key)).toBe(false)
+      await expect(page.locator(".connect-shell")).toHaveAttribute("data-owner-probe", "kept")
+      expect(await page.evaluate(() => window.history.length)).toBe(historyLength)
+      await expect(page.locator(".connect-agent[data-agent-key=\"hub:agent-1\"]")).toBeFocused()
+      await page.reload()
+      await expect(page.locator(".connect-home-agent")).not.toHaveCount(0)
+      await expect(page.getByRole("dialog")).toHaveCount(0)
+      await page.evaluate((href) => {
+        const link = document.createElement("a")
+        link.href = href
+        document.body.append(link)
+        link.click()
+        link.remove()
+      }, entry)
+      await expect(page.getByRole("dialog", { name: "Agent", exact: true })).toBeVisible()
+      await page.getByRole("dialog").getByRole("button", {
+        name: info.project.name === "phone" ? "Back to Connect" : "Close",
+        exact: true
+      }).click()
+      expect(new URL(page.url()).searchParams.has("open")).toBe(false)
+      await page.goBack()
+      await expect(page.getByRole("dialog")).toHaveCount(0)
+    }
+  )
+}
+
+/** Query changes outside the normalized selection cannot dispose a working terminal or create a new socket. */
+test("a direct terminal keeps its socket across unrelated queries and host casing", async ({ page }) => {
+  const sockets: Array<WebSocketRoute> = []
+  let closed = 0
+  await page.routeWebSocket("**/v1/connect/session?*", (socket) => {
+    sockets.push(socket)
+    socket.onClose(() => {
+      closed += 1
+    })
+  })
+  await page.goto("/?host=hub&agent=agent-1#connect/overview")
+  await expect.poll(() => sockets.length).toBe(1)
+  await expect(page.locator(".ghostty-terminal canvas")).toHaveCount(1)
+  const socket = sockets[0]
+  if (socket === undefined) throw new Error("Missing fixture terminal socket")
+  socket.send(JSON.stringify({ type: "terminal.ready" }))
+  await expect(page.locator(".connect-terminal-screen")).toBeVisible()
+  const canvas = await page.locator(".ghostty-terminal canvas").elementHandle()
+  expect(canvas).not.toBeNull()
+  for (const host of ["hub", "HuB"]) {
+    await page.evaluate((host) => {
+      const href = new URL(window.location.href)
+      href.searchParams.set("keep", host)
+      href.searchParams.set("host", host)
+      const link = document.createElement("a")
+      link.href = href.href
+      document.body.append(link)
+      link.click()
+      link.remove()
+    }, host)
+    await expect.poll(() => new URL(page.url()).searchParams.get("keep")).toBe(host)
+    await page.evaluate(() =>
+      new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+    )
+    await expect(page.locator(".connect-terminal-screen")).toBeVisible()
+    expect(await canvas?.evaluate((element) => element.isConnected)).toBe(true)
+    expect(sockets).toHaveLength(1)
+    expect(closed).toBe(0)
+  }
 })
 
 /** Standalone uses the same replace-close mode without creating a shell entry or reopening on Back. */

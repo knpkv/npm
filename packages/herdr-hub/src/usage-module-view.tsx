@@ -276,7 +276,7 @@ const UsagePage = ({
           </a>
         ) : null}
         {(AsyncResult.isFailure(usage) && (page !== "by-tool" || toolReading?._tag !== "Read")) ||
-        AsyncResult.isFailure(limits) ? (
+        (page === "limits" && AsyncResult.isFailure(limits)) ? (
           <Button onClick={() => setRefresh((previous) => previous + 1)}>Retry</Button>
         ) : null}
       </div>

@@ -48,3 +48,5 @@ Returning to a module keeps its owner's arrival focus, such as Work goal details
 Empty Home keeps a compact Approvals unknown link when the independent approval reading is incomplete or failed. By tool retains its reported range during range updates and names failed retained readings with their timestamp and five-minute retry cadence.
 
 Controlled Connect locations also supply selection dismissal. Archived-stage Close consumes the shell-owned pushed entry, or replaces a direct/reloaded selection, so Back does not reopen it. Standalone history stays unchanged. Approval-count copy uses the singular noun for one waiting approval.
+
+Limit retry controls follow their owning Usage page. Home creature arrivals use Home's unknown-evidence policy, while Fleet keeps its safety fallback. Export normalized Connect URL-selection helpers shared by target resolution, retained terminal preference changes and stage ownership: unrelated query parameters or host-case changes keep the same terminal, and case-insensitive stage links clear their selectors on close.

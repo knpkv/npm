@@ -1,6 +1,19 @@
 import { expect, test } from "@playwright/test"
 import { LONG_USAGE_HOST } from "./usage-fixture.js"
 
+/** By tool cannot retry a Limits read it does not own. */
+test("a retained Limits error has Retry only on the Limits page", async ({ page }) => {
+  await page.route(/\/v1\/connect\/limits(\?|$)/, (route) => route.fulfill({ status: 503, body: "unavailable" }))
+  await page.goto("/?range=7d&timeZone=UTC#usage/limits")
+  const module = page.locator("[data-module=\"usage\"]")
+  await expect(module.getByRole("button", { name: "Retry", exact: true })).toBeVisible()
+  await module.getByRole("link", { name: "By tool", exact: true }).click()
+  await expect(page.locator(".usage-by-tool-total")).toContainText("tokens")
+  await expect(module.getByRole("button", { name: "Retry", exact: true })).toHaveCount(0)
+  await module.getByRole("link", { name: "Limits", exact: true }).click()
+  await expect(module.getByRole("button", { name: "Retry", exact: true })).toBeVisible()
+})
+
 test("phone Usage has one module title and four installed destinations", async ({ page }, info) => {
   test.skip(info.project.name !== "phone", "Phone chrome")
   await page.setViewportSize({ width: 320, height: 900 })
