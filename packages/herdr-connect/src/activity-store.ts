@@ -95,17 +95,18 @@ export class AgentActivityStore {
     )
   })
 
-  /** Assign once per live lifetime; the database transaction protects all eight host reservations. */
+  /** Complete local inventories release absent reservations; partial reads only enrich positive sightings. */
   readonly assignHues = Effect.fn("AgentActivityStore.assignHues")(function*(
     this: AgentActivityStore,
     host: string,
     agents: ReadonlyArray<ConnectAgent>,
-    observedAt: number
+    observedAt: number,
+    complete = false
   ) {
     const input = yield* Schema.decodeUnknownEffect(Schema.Struct({
       directory: LocalConnectAgents,
       observedAt: ConnectAgent.fields.lastActivityAt
-    }))({ directory: { host, agents }, observedAt }).pipe(
+    }))({ directory: { host, agents, complete }, observedAt }).pipe(
       Effect.mapError(storeError("activity.hues.decode"))
     )
     if (input.directory.agents.some((agent) => agent.host.toLowerCase() !== input.directory.host.toLowerCase())) {
@@ -119,7 +120,13 @@ export class AgentActivityStore {
       try: () => {
         this.#database.exec("BEGIN IMMEDIATE")
         try {
-          const result = assignHues(this.#database, input.directory.host, input.directory.agents, input.observedAt)
+          const result = assignHues(
+            this.#database,
+            input.directory.host,
+            input.directory.agents,
+            input.observedAt,
+            input.directory.complete === true
+          )
           this.#database.exec("COMMIT")
           return result
         } catch (cause) {

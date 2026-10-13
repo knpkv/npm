@@ -58,13 +58,20 @@ interface Identity {
   readonly name: string
 }
 const identity = (name: string): Identity => ({ id: `agent-${name}`, name })
-const read = (stores: Stores, entries: ReadonlyArray<Identity>, observedAt = 0, host = "atlas") => {
+const read = (
+  stores: Stores,
+  entries: ReadonlyArray<Identity>,
+  observedAt = 0,
+  host = "atlas",
+  complete = true,
+  available = true
+) => {
   const source: AgentSource = {
     workers: () => Effect.succeed([]),
     agents: () =>
       Effect.succeed({
-        available: true,
-        error: null,
+        available,
+        error: complete ? null : "partial inventory",
         agents: entries.map(({ id, name }) => ({
           activityRevision: 1,
           agentId: id,
@@ -124,6 +131,102 @@ describe("persisted agent hues", () => {
         ]))
       }).pipe(Effect.scoped))
 
+    it.effect("releases peer-owned families from its complete inventory without hub database writes", () =>
+      Effect.gen(function*() {
+        const peer = yield* openStores(yield* pathFor)
+        const hub = yield* openStores(yield* pathFor)
+        const entries = [
+          identity("sec-cc"),
+          ...Array.from({ length: 7 }, (_, index) => identity(`worker-${String(index)}`))
+        ]
+        const initial = yield* read(peer, entries)
+        yield* hub.archive.observe({ host: "atlas", agents: initial.agents, observedAt: 0, complete: true })
+        yield* read(peer, [], 1)
+        yield* hub.archive.observe({ host: "atlas", agents: [], observedAt: 1, complete: true })
+        yield* hub.archive.observe({ host: "atlas", agents: [], observedAt: 300_001, complete: true })
+        expect((yield* hub.archive.page()).agents).toHaveLength(8)
+        const replacement = yield* read(peer, [identity("skills")], 300_002)
+        expect(replacement.agents[0]).toHaveProperty("hue", "rose")
+        expect((yield* hub.archive.page()).agents.find(({ agentId }) => agentId === "agent-sec-cc"))
+          .toHaveProperty("hue", "rose")
+      }).pipe(Effect.scoped))
+
+    it.effect("leaves released families for returning identities while unused palettes remain", () =>
+      Effect.gen(function*() {
+        const stores = yield* openStores(yield* pathFor)
+        const first = yield* read(stores, [identity("sec-cc")])
+        yield* close(stores, first.agents)
+        const next = yield* read(stores, [identity("skills")], 300_002)
+        expect(next.agents[0]).toHaveProperty("hue", "ember")
+        expect((yield* stores.archive.page()).agents[0]).toHaveProperty("hue", "rose")
+        const returned = yield* read(stores, [identity("sec-cc"), identity("skills")], 300_003)
+        expect(returned.agents.find(({ id }) => id === "agent-sec-cc")).toHaveProperty("hue", "rose")
+      }).pipe(Effect.scoped))
+
+    it.effect("prefers unused families so a complete-inventory restart blip keeps its old free family", () =>
+      Effect.gen(function*() {
+        const stores = yield* openStores(yield* pathFor)
+        expect((yield* read(stores, [identity("sec-cc")])).agents[0]).toHaveProperty("hue", "rose")
+        yield* read(stores, [], 1)
+        expect((yield* read(stores, [identity("skills")], 2)).agents[0]).toHaveProperty("hue", "ember")
+        const returned = yield* read(stores, [identity("sec-cc"), identity("skills")], 3)
+        expect(returned.agents).toEqual(expect.arrayContaining([
+          expect.objectContaining({ id: "agent-sec-cc", hue: "rose" }),
+          expect.objectContaining({ id: "agent-skills", hue: "ember" })
+        ]))
+      }).pipe(Effect.scoped))
+
+    for (const absence of Schema.Literals(["partial", "offline", "equal-time"]).literals) {
+      it.effect(`retains peer reservations on ${absence} inventories`, () =>
+        Effect.gen(function*() {
+          const stores = yield* openStores(yield* pathFor)
+          const entries = [
+            identity("sec-cc"),
+            ...Array.from({ length: 7 }, (_, index) => identity(`worker-${String(index)}`))
+          ]
+          yield* read(stores, entries)
+          if (absence === "offline") {
+            const result = yield* read(stores, [], 1, "atlas", false, false).pipe(Effect.result)
+            expect(Result.isFailure(result)).toBe(true)
+          } else yield* read(stores, [], absence === "equal-time" ? 0 : 1, "atlas", absence === "equal-time")
+          const next = yield* read(stores, [identity("skills")], 2, "atlas", false)
+          // skills and sec-cc are both beans: a retained rose forces the next safe family, ember.
+          expect(next.agents[0]).toHaveProperty("hue", "ember")
+        }).pipe(Effect.scoped))
+    }
+
+    it.effect("normalizes host casing before overflow shape and hue seeds", () =>
+      Effect.gen(function*() {
+        const stores = yield* openStores(yield* pathFor)
+        const first = Array.from(
+          { length: 9 },
+          (_, index) => ({ id: `agent-${String(index)}`, name: `worker-${String(index)}` })
+        )
+        yield* read(stores, first.slice(0, 8))
+        yield* read(stores, first, 1)
+        yield* read(stores, first, 2, "ATLAS")
+        const next = yield* read(stores, [...first, { id: "agent-10", name: "worker-10" }], 3, "ATLAS")
+        // atlas:agent-10 is squircle, so rose's star and pear holders allow this repeat.
+        expect(next.agents.find(({ id }) => id === "agent-10")).toHaveProperty("hue", "rose")
+      }).pipe(Effect.scoped))
+
+    for (const owner of Schema.Literals(["local directory", "shared archive"]).literals) {
+      it.effect(`rejects stale first sightings after a newer empty ${owner} observation`, () =>
+        Effect.gen(function*() {
+          const stores = yield* openStores(yield* pathFor)
+          if (owner === "local directory") yield* read(stores, [], 100)
+          else yield* stores.archive.observe({ host: "atlas", agents: [], observedAt: 100, complete: true })
+          const stale = yield* read(stores, [identity("sec-cc")], 50)
+          expect(stale.agents[0]).not.toHaveProperty("hue")
+          const current = yield* read(
+            stores,
+            Array.from({ length: 8 }, (_, index) => identity(`worker-${String(index)}`)),
+            101
+          )
+          expect(new Set(current.agents.map(hueOf)).size).toBe(8)
+        }).pipe(Effect.scoped))
+    }
+
     it.effect("keeps its allocation after restart, renaming and host case changes", () =>
       Effect.gen(function*() {
         const path = yield* pathFor
@@ -179,7 +282,10 @@ describe("persisted agent hues", () => {
     it.effect("reallocates a returning identity when another live agent took its family", () =>
       Effect.gen(function*() {
         const stores = yield* openStores(yield* pathFor)
-        const first = yield* read(stores, [identity("sec-cc")])
+        const first = yield* read(stores, [
+          identity("sec-cc"),
+          ...Array.from({ length: 7 }, (_, index) => identity(`worker-${String(index)}`))
+        ])
         yield* close(stores, first.agents)
         const taken = yield* read(stores, [identity("skills")], 300_002)
         expect(taken.agents[0]).toHaveProperty("hue", "rose")

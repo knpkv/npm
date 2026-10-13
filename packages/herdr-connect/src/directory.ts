@@ -230,7 +230,7 @@ export const localConnectAgents = Effect.fn("HerdrConnect.localAgents")(
         })
       )
     )
-    return yield* store.assignHues(local.host, local.agents, observedAt).pipe(
+    return yield* store.assignHues(local.host, local.agents, observedAt, local.complete === true).pipe(
       Effect.map((agents) => ({ ...local, agents })),
       Effect.catch((cause) =>
         Effect.logWarning("ConnectHueAssignmentFailed", { host: local.host, cause: cause._tag }).pipe(Effect.as(local))

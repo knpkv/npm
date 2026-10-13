@@ -2,7 +2,7 @@ import { openPrivateSqlite, type PrivateDatabaseError, type PrivateSqlite } from
 import { Clock, Effect, Schema, Semaphore } from "effect"
 import type { DatabaseSync, SQLOutputValue } from "node:sqlite"
 import { ConnectArchiveStoreError } from "./errors.js"
-import { initializeHues } from "./internal/hue-database.js"
+import { advanceHueObservation, initializeHues } from "./internal/hue-database.js"
 import { initializePosts } from "./internal/post-database.js"
 import {
   ArchivedConnectAgent,
@@ -119,6 +119,7 @@ const recordObservation = (
     `INSERT INTO connect_archive_hosts (host, observed_at) VALUES (?, ?)
      ON CONFLICT(host) DO UPDATE SET observed_at = excluded.observed_at`
   ).run(host, observation.observedAt)
+  advanceHueObservation(database, host, observation.observedAt)
   if (!observation.complete) {
     database.prepare(
       "UPDATE connect_archive_observations SET missing_since = NULL, missing_reads = 0 WHERE host = ?"
@@ -147,7 +148,7 @@ const recordObservation = (
   database.prepare(`UPDATE connect_agent_hues SET closed_at = (
     SELECT a.closed_at FROM connect_agent_archive a
     WHERE a.host = connect_agent_hues.host AND a.agent_id = connect_agent_hues.agent_id
-  ) WHERE host = ? AND agent_id IN (
+  ) WHERE host = ? AND closed_at IS NULL AND agent_id IN (
     SELECT agent_id FROM connect_agent_archive WHERE host = ?
   ) AND observed_at <= (
     SELECT a.closed_at FROM connect_agent_archive a
@@ -184,6 +185,9 @@ export class AgentArchiveStore {
         CREATE TABLE IF NOT EXISTS connect_archive_hosts (
           host TEXT COLLATE NOCASE PRIMARY KEY, observed_at INTEGER NOT NULL
         );
+        INSERT INTO connect_hue_hosts (host, observed_at)
+          SELECT host, observed_at FROM connect_archive_hosts WHERE true
+          ON CONFLICT(host) DO UPDATE SET observed_at = MAX(connect_hue_hosts.observed_at, excluded.observed_at);
         CREATE TABLE IF NOT EXISTS connect_archive_observations (
           host TEXT COLLATE NOCASE NOT NULL, agent_id TEXT NOT NULL,
           name TEXT NOT NULL, kind TEXT NOT NULL, work TEXT NOT NULL, state TEXT NOT NULL,
