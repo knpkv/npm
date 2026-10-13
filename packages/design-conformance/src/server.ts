@@ -6,20 +6,22 @@ import * as HttpServer from "effect/http/HttpServer"
 import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Layer from "effect/Layer"
 import * as Path from "effect/Path"
+import type * as PlatformError from "effect/PlatformError"
 import { createServer } from "node:http"
 
-import { BrowserFailure, RunnerFailure } from "./schema.js"
+import { type VerifiedBodies, verifiedBody } from "./references.js"
+import { BrowserFailure, type ReferenceFailure, RunnerFailure } from "./schema.js"
 
-/** Serve an explicit file map. References can only load assets the manifest hashed. */
-export const serveFiles = Effect.fn("DesignConformance.serveFiles")(
-  function*(root: string, files: Readonly<Record<string, string>>) {
-    const fs = yield* FileSystem.FileSystem
-    const path = yield* Path.Path
+const serveBodies = Effect.fn("DesignConformance.serveBodies")(
+  function*(
+    files: Readonly<Record<string, string>>,
+    read: (file: string) => Effect.Effect<Uint8Array, PlatformError.PlatformError | ReferenceFailure>
+  ) {
     const routes = Object.entries(files).map(([route, file]) =>
       HttpRouter.add(
         "GET",
         `/${route.replace(/^\//u, "")}`,
-        fs.readFile(path.join(root, file)).pipe(
+        read(file).pipe(
           Effect.map((body) =>
             HttpServerResponse.uint8Array(body, {
               contentType: file.endsWith(".html")
@@ -57,3 +59,19 @@ export const serveFiles = Effect.fn("DesignConformance.serveFiles")(
     return HttpServer.formatAddress(server.address)
   }
 )
+
+/** Live product files may change with application state; their routes stay explicit. */
+export const serveFiles = Effect.fn("DesignConformance.serveFiles")(
+  function*(root: string, files: Readonly<Record<string, string>>) {
+    const fs = yield* FileSystem.FileSystem
+    const path = yield* Path.Path
+    return yield* serveBodies(files, (file) => fs.readFile(path.join(root, file)))
+  }
+)
+
+/** Serve only verified memory bodies; disk rewrites cannot change approved reference content. */
+export const serveVerifiedFiles = (bodies: VerifiedBodies) =>
+  serveBodies(
+    Object.fromEntries(Array.from(bodies.keys(), (file) => [`/${file}`, file])),
+    (file) => verifiedBody(bodies, file)
+  )

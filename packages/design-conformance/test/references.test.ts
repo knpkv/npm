@@ -4,7 +4,8 @@ import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 
-import { loadReferences } from "../src/references.js"
+import { loadReferences, readVerifiedJson, verifiedBody } from "../src/references.js"
+import { Fixture } from "../src/schema.js"
 
 layer(NodeServices.layer)("reference filesystem", (it) => {
   it.effect("a product root symlink fails while its ordinary tree and a linked ancestor remain valid", () =>
@@ -60,6 +61,30 @@ layer(NodeServices.layer)("reference filesystem", (it) => {
       expect(yield* loadReferences(root).pipe(Effect.flip)).toMatchObject({
         _tag: "ReferenceFailure",
         detail: "Symlinks are not reference files"
+      })
+    }))
+
+  it.effect("verified fixture and asset bytes survive later disk rewrites and missing bodies fail typed", () =>
+    Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const source = yield* path.fromFileUrl(new URL("../../../design-refs/_fixture/", import.meta.url))
+      const root = yield* fs.makeTempDirectoryScoped()
+      yield* fs.copy(source, root)
+      const refs = yield* loadReferences(root)
+      const file = "screens/screen.html"
+      const original = yield* fs.readFile(path.join(root, file))
+      yield* fs.writeFileString(path.join(root, file), "unverified HTML")
+      yield* fs.writeFileString(
+        path.join(root, refs.manifest.fixture),
+        JSON.stringify({ version: 1, data: { changed: true } })
+      )
+      expect(yield* verifiedBody(refs.bodies, file)).toEqual(original)
+      expect(yield* readVerifiedJson(refs.bodies, refs.manifest.fixture, Fixture)).toEqual(refs.fixture)
+      expect(yield* verifiedBody(refs.bodies, "unlisted.html").pipe(Effect.flip)).toMatchObject({
+        _tag: "ReferenceFailure",
+        file: "unlisted.html",
+        detail: "Verified reference body is unavailable"
       })
     }))
 })

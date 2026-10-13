@@ -29,7 +29,9 @@ timestamp copy is normalized. Other timestamps must be deterministic fixture val
 
 HTML refs fetch the fixture relative to their file and set
 `document.documentElement.dataset.designReady = "true"` after rendering it.
-The reference server serves only hashed files. External network requests fail.
+The reference server serves the exact verified bodies retained by `loadReferences`,
+including JSON metadata and PNG bytes. Rewriting or deleting reference files after
+validation does not change that capture. Unlisted paths remain 404. External network requests fail.
 Reference body settlement races successful completion against that request's failure event;
 interrupted or cancelled transfers fail with `ReferenceFailure` even after successful headers
 and page readiness. Context closure and global timeouts are not completion signals.
@@ -122,8 +124,14 @@ with `animations: "allow"`; they do not perform a second animation reset.
 Script-created `element.animate()` calls during capture are cancelled and produce
 a typed `BrowserFailure`, even if they start after metadata sampling. New CSS
 animation identities also fail, including finished forwards-filled animations.
+Capture-phase `animationstart`, `animationcancel` and `transitionrun` events retain
+late CSS motion evidence after no-fill animations disappear from `getAnimations()`.
+Only events caused by freezing pre-existing motion are accepted before sampling.
 Region images are crops of the same full-frame PNG; capture never scrolls to a
-region. The temporary animation guard and transition style are removed on success or failure.
+region. A CSS-visible region entirely outside the frame retains its metadata and
+has typed `OffFrame` pixel evidence with no region image. Its pixel finding follows
+the same required, legacy report-only and waiver decisions as other drift.
+Partially clipped regions keep their frame intersection. The temporary animation guard and transition style are removed on success or failure.
 The
 installed clock fakes ordinary `requestAnimationFrame`; Playwright's RAF polling
 uses its preserved native callback. Full-page dimensions must be nonzero and at

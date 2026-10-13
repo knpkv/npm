@@ -6,13 +6,13 @@ import * as Path from "effect/Path"
 import * as Schema from "effect/Schema"
 import type { Mutable } from "effect/Types"
 
-import { browserCall, type Capture, capturePage, cropRegions } from "./browser.js"
+import { browserCall, type Capture, capturePage, cropRegions, RegionPixels } from "./browser.js"
 import { captureContext, installCaptureClock } from "./capture.js"
 import { comparePixels, compareSnapshots, coverageFailures, shotKey, stateKey, stateShots } from "./compare.js"
 import { LiveProduct } from "./live.js"
 import { restrictContextNetwork, restrictPageNetwork } from "./network.js"
 import type { loadReferences } from "./references.js"
-import { readJson } from "./references.js"
+import { readJson, readVerifiedJson, verifiedBody } from "./references.js"
 import { writeReport } from "./report.js"
 import {
   BaseComparison,
@@ -25,7 +25,7 @@ import {
   type ShotResult,
   Snapshot
 } from "./schema.js"
-import { serveFiles } from "./server.js"
+import { serveVerifiedFiles } from "./server.js"
 import { verdict } from "./verdict.js"
 
 export interface RunnerOptions {
@@ -91,10 +91,7 @@ export const runConformance = Effect.fn("DesignConformance.run")(function*(refs:
   )
   const refOrigin = options.captureOnly === true
     ? undefined
-    : yield* serveFiles(
-      refs.root,
-      Object.fromEntries(Object.keys(refs.manifest.files).map((file) => [`/${file}`, file]))
-    )
+    : yield* serveVerifiedFiles(refs.bodies)
   const baseIndex = options.base === undefined
     ? []
     : yield* readJson(path.join(options.base, "captures.json"), CaptureIndex)
@@ -155,8 +152,8 @@ export const runConformance = Effect.fn("DesignConformance.run")(function*(refs:
               shot.viewport === identity.viewport && shot.theme === identity.theme
             )
             if (ref === undefined) continue
-            const snapshot = yield* readJson(path.join(refs.root, ref.metadata), Snapshot)
-            const frame = yield* fs.readFile(path.join(refs.root, ref.image))
+            const snapshot = yield* readVerifiedJson(refs.bodies, ref.metadata, Snapshot)
+            const frame = yield* verifiedBody(refs.bodies, ref.image)
             const regions = yield* Effect.try({
               try: () => cropRegions(frame, snapshot),
               catch: (cause) => new BrowserFailure({ operation: "crop PNG reference", cause })
@@ -169,18 +166,31 @@ export const runConformance = Effect.fn("DesignConformance.run")(function*(refs:
           artifacts.ref = yield* write(`${key}-ref.png`, expected.frame)
           const limit = reference.source === "html" ? 0.001 : reference.pixelMaxDiffRatio
           for (const name of ["*", ...reference.regions]) {
-            const ref = name === "*" ? expected.frame : expected.regions.get(name)
-            const liveBytes = name === "*" ? actual.frame : actual.regions.get(name)
-            if (ref === undefined || liveBytes === undefined) continue
+            const ref = name === "*" ? RegionPixels.Image({ bytes: expected.frame }) : expected.regions.get(name)
+            const livePixels = name === "*" ? RegionPixels.Image({ bytes: actual.frame }) : actual.regions.get(name)
+            if (ref === undefined || livePixels === undefined) continue
+            if (ref._tag === "OffFrame" || livePixels._tag === "OffFrame") {
+              failures.push({
+                ...identity,
+                region: name,
+                rule: "pixels",
+                detail: `Off-frame region: reference=${ref._tag}, live=${livePixels._tag}; no region image`
+              })
+              if (ref._tag === "Image") artifacts[`ref-${name}`] = yield* write(`${key}-${name}-ref.png`, ref.bytes)
+              if (livePixels._tag === "Image") {
+                artifacts[`live-${name}`] = yield* write(`${key}-${name}-live.png`, livePixels.bytes)
+              }
+              continue
+            }
             const pixels = yield* Effect.try({
-              try: () => comparePixels(ref, liveBytes),
+              try: () => comparePixels(ref.bytes, livePixels.bytes),
               catch: (cause) => new BrowserFailure({ operation: "compare reference pixels", cause })
             })
             const suffix = name === "*" ? "frame" : name
             artifacts[`diff-${suffix}`] = yield* write(`${key}-${suffix}-diff.png`, pixels.diff)
             if (name !== "*") {
-              artifacts[`ref-${name}`] = yield* write(`${key}-${name}-ref.png`, ref)
-              artifacts[`live-${name}`] = yield* write(`${key}-${name}-live.png`, liveBytes)
+              artifacts[`ref-${name}`] = yield* write(`${key}-${name}-ref.png`, ref.bytes)
+              artifacts[`live-${name}`] = yield* write(`${key}-${name}-live.png`, livePixels.bytes)
             }
             if (pixels.ratio > limit) {
               failures.push({

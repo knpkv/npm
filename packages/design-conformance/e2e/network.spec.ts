@@ -157,27 +157,61 @@ for (
   })
 }
 
-test("a hashed ref asset with an HTTP error fails even when its error handler signals readiness", async () => {
+test("a hashed ref asset with an HTTP error fails even when its error handler signals readiness", async ({ browser }) => {
   await Effect.runPromise(
     Effect.gen(function*() {
-      const fs = yield* FileSystem.FileSystem
-      const refs = yield* testReferences(
-        "<html><body><main data-region=content>Fixture workspace</main><img src='/probe.svg?cache=fixture' onerror=\"document.documentElement.dataset.designReady='true'\"></body></html>",
-        { "probe.svg": "<svg xmlns='http://www.w3.org/2000/svg' width='64' height='64'></svg>" }
+      const origin = yield* localServer((address) =>
+        address.startsWith("/probe.svg")
+          ? HttpServerResponse.empty({ status: 500 })
+          : HttpServerResponse.html(
+            "<html><body><main data-region=content>Fixture workspace</main><img src='/probe.svg?cache=fixture' onerror=\"document.documentElement.dataset.designReady='true'\"></body></html>"
+          )
       )
-      // Simulate a file disappearing after hash validation; its listed server route now returns HTTP 500.
-      yield* fs.remove(`${refs.root}/probe.svg`)
-      const clean = yield* testReferences(readyHtml)
-      const origin = yield* serveFiles(clean.root, { "/page.html": "page.html" })
-      const invalid = yield* runConformance(refs, { output: yield* fs.makeTempDirectoryScoped() }).pipe(
-        Effect.provideService(LiveProduct, testLive(origin)),
-        Effect.flip
+      const context = yield* Effect.acquireRelease(
+        browserCall(
+          "HTTP error reference context",
+          () => browser.newContext({ ...captureContext, serviceWorkers: "block" })
+        ),
+        (context) => browserCall("close HTTP error reference context", () => context.close()).pipe(Effect.orDie)
       )
-      expect(invalid).toMatchObject({
+      const network = yield* restrictContextNetwork(context, origin, [], new Set(["page.html", "probe.svg"]))
+      const page = yield* browserCall("HTTP error reference page", () => context.newPage())
+      const interception = yield* restrictPageNetwork(context, page, network.permits)
+      yield* browserCall("HTTP error reference readiness", async () => {
+        await page.goto(`${origin}/page.html`)
+        await page.locator("html[data-design-ready=true]").waitFor()
+      })
+      yield* capturePage(page)
+      yield* interception.settle()
+      expect(yield* network.settle().pipe(Effect.flip)).toMatchObject({
         _tag: "ReferenceFailure",
         file: "probe.svg",
         detail: "Reference response HTTP 500"
       })
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer))
+  )
+})
+
+/** Rewrite after the production hash boundary, before either renderer navigates. */
+test("reference navigation serves original verified HTML and unchanged hashed assets after disk rewrite", async () => {
+  await Effect.runPromise(
+    Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      const html = readyHtml.replace("</body>", "<link rel=stylesheet href='/probe.css'></body>")
+      const css = "main { color: rgb(255, 0, 0); }"
+      const refs = yield* testReferences(html, { "probe.css": css })
+      const origin = yield* localServer((address) =>
+        address.startsWith("/probe.css")
+          ? HttpServerResponse.text(css, { contentType: "text/css" })
+          : HttpServerResponse.html(html)
+      )
+      yield* fs.writeFileString(`${refs.root}/page.html`, html.replace("Fixture workspace", "Unverified rewrite"))
+      const result = yield* runConformance(refs, { output: yield* fs.makeTempDirectoryScoped() }).pipe(
+        Effect.provideService(LiveProduct, testLive(origin))
+      )
+      expect(result?.passed).toBe(true)
+      expect(result?.findings).toEqual([])
+      expect(result?.shots).toHaveLength(1)
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer))
   )
 })

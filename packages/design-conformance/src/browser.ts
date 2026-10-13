@@ -1,4 +1,5 @@
 import type { JSHandle, Page } from "@playwright/test"
+import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import { PNG } from "pngjs"
@@ -9,10 +10,16 @@ import { BrowserFailure, Snapshot } from "./schema.js"
 export const browserCall = <A>(operation: string, run: () => PromiseLike<A>) =>
   Effect.tryPromise({ try: run, catch: (cause) => new BrowserFailure({ operation, cause }) })
 
+export type RegionPixels = Data.TaggedEnum<{
+  Image: { readonly bytes: Uint8Array }
+  OffFrame: {}
+}>
+export const RegionPixels = Data.taggedEnum<RegionPixels>()
+
 export interface Capture {
   readonly snapshot: Snapshot
   readonly frame: Uint8Array
-  readonly regions: ReadonlyMap<string, Uint8Array>
+  readonly regions: ReadonlyMap<string, RegionPixels>
 }
 
 // Conservative per-axis physical-pixel bound for Chromium screenshot textures.
@@ -33,6 +40,7 @@ export const waitForCapturePaint = async (page: Page): Promise<void> => {
 }
 
 interface MotionGuard {
+  readonly beginEvidence: () => void
   readonly interrupted: () => boolean
   readonly restore: () => void
 }
@@ -44,6 +52,33 @@ const motionGuardScript = String.raw`(() => {
   style.textContent = "*, ::before, ::after { transition: none !important; }";
   const accepted = new Set(document.getAnimations());
   let lateAnimation = false;
+  // Only finish/cancel events produced by freezing accepted motion get one allowance.
+  // All allowances expire before metadata; subsequent events stay recorded even after removal.
+  const initialEvents = [];
+  for (const animation of accepted) {
+    if (animation instanceof CSSAnimation) {
+      const timing = animation.effect?.getComputedTiming();
+      const finite = Number.isFinite(timing?.endTime);
+      initialEvents.push({
+        target: animation.effect?.target,
+        name: animation.animationName,
+        pseudo: animation.effect?.pseudoElement ?? "",
+        start: finite && timing?.progress === null,
+        cancel: !finite
+      });
+    }
+  }
+  const recordMotion = event => {
+    const key = event.type === "animationstart" ? "start" : "cancel";
+    const initial = event.type === "transitionrun" ? undefined : initialEvents.find(entry =>
+      entry[key] && entry.target === event.target && entry.name === event.animationName &&
+      entry.pseudo === event.pseudoElement
+    );
+    if (initial !== undefined) initial[key] = false;
+    else lateAnimation = true;
+  };
+  const events = ["animationstart", "animationcancel", "transitionrun"];
+  for (const event of events) document.addEventListener(event, recordMotion, true);
   Element.prototype.animate = function(...args) {
     lateAnimation = true;
     const animation = animate.apply(this, args);
@@ -51,6 +86,7 @@ const motionGuardScript = String.raw`(() => {
     return animation;
   };
   const restore = () => {
+    for (const event of events) document.removeEventListener(event, recordMotion, true);
     Element.prototype.animate = animate;
     style.remove();
   };
@@ -61,6 +97,7 @@ const motionGuardScript = String.raw`(() => {
     }
     document.head.append(style);
     return {
+      beginEvidence: () => { initialEvents.length = 0; },
       interrupted: () => lateAnimation || document.getAnimations().some(animation =>
         !accepted.has(animation) || animation.playState === "running" || animation.pending
       ),
@@ -77,17 +114,18 @@ const freezeCaptureMotion = (page: Page): Promise<JSHandle<MotionGuard>> =>
   page.evaluateHandle<MotionGuard>(motionGuardScript)
 
 /** Crop every region from the same frame, without scrolling or re-rendering the document. */
-export const cropRegions = (bytes: Uint8Array, snapshot: Snapshot, scale = 1): ReadonlyMap<string, Uint8Array> => {
+export const cropRegions = (bytes: Uint8Array, snapshot: Snapshot, scale = 1): ReadonlyMap<string, RegionPixels> => {
   const source = PNG.sync.read(Buffer.from(bytes))
-  return new Map(snapshot.regions.map((region) => {
+  return new Map<string, RegionPixels>(snapshot.regions.map((region) => {
     const x = Math.max(0, Math.floor(region.box.x * scale))
     const y = Math.max(0, Math.floor(region.box.y * scale))
     const width = Math.min(source.width, Math.ceil((region.box.x + region.box.width) * scale)) - x
     const height = Math.min(source.height, Math.ceil((region.box.y + region.box.height) * scale)) - y
+    if (width <= 0 || height <= 0) return [region.name, RegionPixels.OffFrame()]
     Schema.decodeUnknownSync(FrameSize)({ width, height })
     const target = new PNG({ width, height })
     PNG.bitblt(source, target, x, y, width, height, 0, 0)
-    return [region.name, PNG.sync.write(target)]
+    return [region.name, RegionPixels.Image({ bytes: PNG.sync.write(target) })]
   }))
 }
 
@@ -101,11 +139,14 @@ export const capturePage = (page: Page) =>
   browserCall("capture regions", async (): Promise<Capture> => {
     await settleCaptureFonts(page)
     await settleCapturePage(page)
+    // Flush pre-freeze CSS start/run events before installing the capture listener.
+    await waitForCapturePaint(page)
     const motion = await freezeCaptureMotion(page)
     try {
       const restore = await maskUuidText(page)
       try {
         await waitForCapturePaint(page)
+        await motion.evaluate((guard) => guard.beginEvidence())
         const raw = await page.evaluate(() => {
           const properties = [
             "color",

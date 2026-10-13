@@ -7,7 +7,8 @@ import * as HttpClient from "effect/http/HttpClient"
 import * as Layer from "effect/Layer"
 import * as Path from "effect/Path"
 
-import { serveFiles } from "../src/server.js"
+import { loadReferences } from "../src/references.js"
+import { serveFiles, serveVerifiedFiles } from "../src/server.js"
 
 layer(Layer.merge(NodeServices.layer, NodeHttpClient.layerUndici))("reference asset responses", (it) => {
   it.effect("both JavaScript module extensions have executable MIME while binary files stay binary", () =>
@@ -30,5 +31,28 @@ layer(Layer.merge(NodeServices.layer, NodeHttpClient.layerUndici))("reference as
         expect(response.headers["content-type"]?.split(";")[0]).toBe(type)
         expect(yield* response.text).toBe("fixture bytes")
       }
+    }))
+
+  it.effect("verified reference bodies remain immutable across disk rewrites and unlisted paths remain 404", () =>
+    Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const client = yield* HttpClient.HttpClient
+      const source = yield* path.fromFileUrl(new URL("../../../design-refs/_fixture/", import.meta.url))
+      const root = yield* fs.makeTempDirectoryScoped()
+      yield* fs.copy(source, root)
+      const refs = yield* loadReferences(root)
+      const html = yield* fs.readFileString(path.join(root, "screens/screen.html"))
+      const css = yield* fs.readFileString(path.join(root, "screens/screen.css"))
+      yield* fs.writeFileString(path.join(root, "screens/screen.html"), "unverified HTML")
+      yield* fs.remove(path.join(root, "screens/screen.css"))
+      yield* fs.writeFileString(path.join(root, "unlisted.html"), "unlisted HTML")
+      const origin = yield* serveVerifiedFiles(refs.bodies)
+      for (const [file, text] of [["screens/screen.html", html], ["screens/screen.css", css]]) {
+        const response = yield* client.get(`${origin}/${file}?cache=fixture`)
+        expect(response.status).toBe(200)
+        expect(yield* response.text).toBe(text)
+      }
+      expect((yield* client.get(`${origin}/unlisted.html`)).status).toBe(404)
     }))
 })

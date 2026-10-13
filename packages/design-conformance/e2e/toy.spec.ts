@@ -7,16 +7,17 @@ import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 import * as Schema from "effect/Schema"
 
+import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import { start } from "../scripts/fixture.js"
 import { browserCall } from "../src/browser.js"
 import { comparePixels } from "../src/compare.js"
 import { LiveProduct } from "../src/live.js"
 import { loadReferences, readJson } from "../src/references.js"
 import { runConformance } from "../src/runner.js"
-import { Identity, RunnerFailure } from "../src/schema.js"
+import { Identity, Result, RunnerFailure } from "../src/schema.js"
 import { serveFiles } from "../src/server.js"
 import { verdict } from "../src/verdict.js"
-import { testLive, testReferences } from "./fixtures.js"
+import { localServer, testLive, testReferences } from "./fixtures.js"
 
 test("a scoped state preserves missing-route coverage from the authoritative live route table", async () => {
   await Effect.runPromise(
@@ -251,6 +252,66 @@ test("toy refs prove required, waived, stale, coverage, legacy and touched decis
       )
       expect(accepted?.passed).toBe(true)
       expect(accepted?.findings).toEqual([])
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer))
+  )
+})
+
+/** Off-frame regions are drift evidence, rather than a renderer exception that prevents reports. */
+test("fully off-frame live regions retain metadata findings and obey legacy grace in written reports", async () => {
+  await Effect.runPromise(
+    Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const html = `<html data-design-ready=true><body>
+        <style>body { margin: 0; font-size: 16px; } main { inline-size: 40px; block-size: 40px; background: rgb(255, 0, 0); transform: none; }</style>
+        <main data-region=content>Box</main>
+      </body></html>`
+      const loaded = yield* testReferences(html)
+      const refs = {
+        ...loaded,
+        manifest: {
+          ...loaded.manifest,
+          enforcement: {
+            ...loaded.manifest.enforcement,
+            legacy: { mode: "report-only", until: DateTime.add(yield* DateTime.now, { days: 7 }) }
+          }
+        }
+      } satisfies Effect.Success<ReturnType<typeof loadReferences>>
+      const liveHtml = html.replace("transform: none", "transform: translateX(-40px)").replace(
+        ">Box</main>",
+        ">Drift</main>"
+      )
+      const origin = yield* localServer(() => HttpServerResponse.html(liveHtml))
+      const live = testLive(origin)
+      const output = yield* fs.makeTempDirectoryScoped()
+      const required = yield* runConformance(refs, { output }).pipe(Effect.provideService(LiveProduct, live))
+      expect(required?.passed).toBe(false)
+      for (const rule of ["geometry", "copy", "pixels"]) {
+        expect(
+          required?.findings.some((finding) =>
+            finding.region === "content" && finding.rule === rule && finding.disposition === "required"
+          )
+        ).toBe(true)
+      }
+      expect(
+        required?.findings.some((finding) => finding.rule === "pixels" && finding.detail.includes("Off-frame region"))
+      ).toBe(true)
+      expect(yield* readJson(path.join(output, "result.json"), Result)).toEqual(required)
+      expect(yield* fs.exists(path.join(output, "index.html"))).toBe(true)
+      expect(yield* fs.exists(path.join(output, "toy--passing--390--light-content-live.png"))).toBe(false)
+      expect(yield* fs.exists(path.join(output, "toy--passing--390--light-content-ref.png"))).toBe(true)
+      const base = yield* fs.makeTempDirectoryScoped()
+      yield* runConformance(refs, { output: base, captureOnly: true }).pipe(Effect.provideService(LiveProduct, live))
+      const graceOutput = yield* fs.makeTempDirectoryScoped()
+      const grace = yield* runConformance(refs, { output: graceOutput, base }).pipe(
+        Effect.provideService(LiveProduct, live)
+      )
+      expect(grace?.passed).toBe(true)
+      expect(grace?.findings.length).toBeGreaterThan(0)
+      expect(grace?.findings.every((finding) => finding.disposition === "report-only")).toBe(true)
+      expect(grace?.shots.every((shot) => !shot.touched)).toBe(true)
+      expect(yield* readJson(path.join(graceOutput, "result.json"), Result)).toEqual(grace)
+      expect(yield* fs.exists(path.join(graceOutput, "index.html"))).toBe(true)
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer))
   )
 })
