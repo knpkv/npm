@@ -56,7 +56,8 @@ const chooseHue = (
   agentId: string,
   fallbackFamily: ConnectAgentHue,
   rows: ReadonlyArray<HueRow>,
-  bodyKind: typeof BodyKind.Type
+  bodyKind: typeof BodyKind.Type,
+  mode: "fresh" | "repair" = "fresh"
 ): ConnectAgentHue => {
   const families = ConnectAgentHue.literals
   const existing = rows.find(({ agent_id }) => agent_id === agentId)
@@ -83,10 +84,17 @@ const chooseHue = (
   }).toSorted((a, b) => a.closedAt - b.closedAt || families.indexOf(a.hue) - families.indexOf(b.hue))
   const oldest = retired[0]
   if (oldest !== undefined) return oldest.hue
-  // Above eight live agents, repeated colours stay distinguishable by the independent body shape.
-  return families.find((family) =>
-    !holders.some(({ body_kind: heldKind, hue }) => hue === family && heldKind === bodyKind)
-  ) ?? fallbackFamily
+  // Fresh overflow starts in table order; repair probes forward from its recorded family.
+  const start = mode === "repair" ? seed : 0
+  for (let offset = 0; offset < families.length; offset++) {
+    const family = families[(start + offset) % families.length]
+    if (
+      family !== undefined && !holders.some(({ body_kind: heldKind, hue }) => hue === family && heldKind === bodyKind)
+    ) {
+      return family
+    }
+  }
+  return fallbackFamily
 }
 
 /** Caller owns BEGIN IMMEDIATE; every choice sees the preceding insertion, including other connections. */
@@ -128,7 +136,8 @@ export const assignHues = (
           row.agent_id,
           row.hue,
           [...byId.values()].filter(({ agent_id }) => agent_id !== row.agent_id),
-          row.body_kind
+          row.body_kind,
+          "repair"
         )
         : row.hue
       const updated = hue === row.hue ? row : { ...row, hue }

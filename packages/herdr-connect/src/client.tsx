@@ -394,7 +394,14 @@ const loadWork = Effect.gen(function* () {
 
 const browserRuntime = Atom.runtime(BrowserHttpClient.layerFetch)
 
-export { Creature, type CreatureProps } from "./creature.js"
+export {
+  Creature,
+  type CreatureAccessory,
+  type CreatureHueFamily,
+  type CreatureMood,
+  type CreatureProps,
+  type CreatureReaction
+} from "./creature.js"
 export { ConnectLimits } from "./limits-view.js"
 export { AgentCast, AgentStage, PinnedAgents } from "./stage.js"
 export { UsageTab, type UsageTabProps } from "./usage-view.js"

@@ -11,3 +11,5 @@ Match the rev6 body selector: unsigned FNV-1a of the lowercase host and stable I
 Use canonical stable IDs for first-sighting hue allocation, with unsigned FNV-1a modulo eight and per-host forward probing. Existing recorded families remain unchanged. Match state-tone circular rings, open idle and ready faces, neutral stale readings and curved closed lashes, and use 40px archive row creatures.
 
 Match Home row framing and thin state rings, including 36px phone and 40px desktop archive slots. Fleet row tracks and app stage sizes stay unchanged.
+
+Replay every poke effect together, settle done celebrations immediately under reduced motion, and reuse bounded identity geometry across renders. Probe repaired overflow hues from their recorded family, export the appearance prop types from the surface entry, and keep long desktop pins inside the viewport.

@@ -538,10 +538,12 @@ test.describe("rev6 pin fidelity", () => {
           const nameBox = name.getBoundingClientRect()
           const stateBox = state.getBoundingClientRect()
           const pinBox = node.getBoundingClientRect()
+          const pillBox = (node.parentElement ?? node).getBoundingClientRect()
           return {
             pillCap: getComputedStyle(node.parentElement ?? node).maxInlineSize,
             nameCap: nameStyle.maxInlineSize,
             pillWidth: node.parentElement?.getBoundingClientRect().width ?? 0,
+            pillFitsViewport: pillBox.left >= 0 && pillBox.right <= window.innerWidth,
             ellipsis: nameStyle.textOverflow,
             nameOverflow: name.scrollWidth > name.clientWidth,
             stateFont: stateStyle.fontSize,
@@ -562,7 +564,9 @@ test.describe("rev6 pin fidelity", () => {
         })
         expect(metrics).not.toBeNull()
         if (metrics === null) return
-        expect.soft(metrics.pillCap).toBe(width < 600 ? "144px" : "none")
+        // Desktop has no fixed name cap; a whole-pill viewport bound is still required.
+        if (width < 600) expect.soft(metrics.pillCap).toBe("144px")
+        expect.soft(metrics.pillFitsViewport).toBe(true)
         expect.soft(metrics.nameCap).toBe("none")
         expect.soft(metrics.ellipsis).toBe("ellipsis")
         expect.soft(metrics.nameOverflow).toBe(width < 600)
@@ -589,6 +593,52 @@ test.describe("rev6 pin fidelity", () => {
         expect.soft(metrics.fitsViewport).toBe(true)
         await pin.click()
         await expect(page.getByRole("dialog", { name: longName, exact: true })).toBeVisible()
+      })
+    }
+  }
+})
+
+/** Valid schema-max names must leave Open, the creature and Unpin reachable on desktop. */
+test.describe("schema-max desktop pins", () => {
+  for (const width of [640, 1280]) {
+    for (const theme of ["light", "dark"]) {
+      test(`schema-max desktop pins fit ${String(width)} ${theme}`, async ({ page }) => {
+        const name = "release-review-worker-".repeat(16).slice(0, 256)
+        const pinned = Schema.decodeUnknownSync(ConnectAgent)({
+          ...agent("long-pin", "waiting", "atlas", "package-work", 14, 2),
+          name
+        })
+        await openDirectory(page, width, theme, [pinned])
+        // Fidelity captures add two frame-border pixels. This guard needs the exact named viewport.
+        await page.setViewportSize({ width, height: 844 })
+        expect(await page.evaluate(() => window.innerWidth)).toBe(width)
+        await page.locator(".connect-agent").click()
+        await page.getByRole("button", { name: "Pin", exact: true }).click()
+        await page.keyboard.press("Escape")
+        const pill = page.locator(".connect-pins[data-placement=float] .connect-pin")
+        const bounds = await pill.boundingBox()
+        expect(bounds).not.toBeNull()
+        expect(bounds?.x).toBeGreaterThanOrEqual(0)
+        expect((bounds?.x ?? -1) + (bounds?.width ?? 0)).toBeLessThanOrEqual(width)
+        expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
+        const text = pill.locator(".connect-pin-name")
+        await expect(text).toHaveCSS("text-overflow", "ellipsis")
+        expect(await text.evaluate((node) => node.scrollWidth > node.clientWidth)).toBe(true)
+        const creature = await pill.locator(".connect-creature").boundingBox()
+        expect(creature?.x).toBeGreaterThanOrEqual(0)
+        expect((creature?.x ?? -1) + (creature?.width ?? 0)).toBeLessThanOrEqual(width)
+        const unpin = pill.getByRole("button", { name: `Unpin ${name}`, exact: true })
+        expect(
+          await unpin.evaluate((node) => {
+            const box = node.getBoundingClientRect()
+            return node.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2))
+          })
+        ).toBe(true)
+        await pill.locator(".connect-pin-open").click()
+        await expect(page.getByRole("dialog", { name, exact: true })).toBeVisible()
+        await page.keyboard.press("Escape")
+        await unpin.click()
+        await expect(pill).toHaveCount(0)
       })
     }
   }

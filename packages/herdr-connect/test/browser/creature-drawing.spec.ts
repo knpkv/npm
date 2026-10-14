@@ -498,6 +498,34 @@ for (const theme of ["light", "dark"] satisfies ReadonlyArray<"light" | "dark">)
       await expect(creature.locator(".connect-creature-mouth")).toHaveCount(0)
     })
 
+    for (const preference of ["system", "in-app", "legacy"] satisfies ReadonlyArray<"system" | "in-app" | "legacy">) {
+      for (
+        const when of ["before finish", "during celebration"] satisfies ReadonlyArray<
+          "before finish" | "during celebration"
+        >
+      ) {
+        test(`done settles immediately with ${preference} reduced motion ${when}`, async ({ page }) => {
+          const creature = await open(page, "state=working&talking", "no-preference")
+          const reduce = async () => {
+            if (preference === "system") await page.emulateMedia({ reducedMotion: "reduce" })
+            else {await page.locator("[data-drawing-fixture]").evaluate(
+                (owner, name) => owner.setAttribute(name, "reduce"),
+                preference === "in-app" ? "data-rly-reduced-motion" : "data-reduced-motion"
+              )}
+          }
+          if (when === "before finish") await reduce()
+          await page.getByRole("button", { name: "Finish agent" }).click()
+          if (when === "during celebration") {
+            await expect(creature).toHaveAttribute("data-mood", "done")
+            await reduce()
+          }
+          await expect(creature).toHaveAttribute("data-mood", "happy", { timeout: 300 })
+          await expect(creature.locator(".connect-creature-celebration")).toHaveCount(0)
+          expect(await creature.evaluate((node) => node.getAnimations({ subtree: true }).length)).toBe(0)
+        })
+      }
+    }
+
     test("talking happy loops use the state timing and keep the fleet out of phase", async ({ page }) => {
       await page.emulateMedia({ reducedMotion: "no-preference" })
       await page.goto("/?drawing=grid&mood=happy&talking")
@@ -540,6 +568,32 @@ for (const theme of ["light", "dark"] satisfies ReadonlyArray<"light" | "dark">)
         await page.getByRole("button", { name: "Replay reaction" }).click()
         expect((await read()).some((timing) => timing.time >= 0 && timing.time < duration && timing.iterations === 1))
           .toBe(true)
+        if (reaction === "poke") {
+          // Filled sibling animations must restart too, not just the keyed body subtree.
+          const overlays = await creature.evaluate((node) =>
+            node.getAnimations({ subtree: true })
+              .flatMap((animation) => {
+                if (!("animationName" in animation)) return []
+                const name = animation.animationName
+                // Membership in the two named CSS effects proves the string without constructor identity.
+                if (name !== "connect-creature-tap-fade" && name !== "connect-creature-ticks-show") return []
+                return [{ name, time: Number(animation.currentTime) }]
+              })
+          )
+          expect(overlays.map(({ name }) => name).sort()).toEqual([
+            "connect-creature-tap-fade",
+            "connect-creature-ticks-show"
+          ])
+          for (const overlay of overlays) {
+            expect(overlay.time, `${overlay.name} restarts with reactionKey`).toBeLessThan(duration)
+          }
+          await pose(creature, 0)
+          await expect(creature.locator(".connect-creature-tap")).toHaveCSS("opacity", "1")
+          await expect(creature.locator(".connect-creature-ticks")).toHaveCSS("opacity", "0")
+          await pose(creature, 1)
+          await expect(creature.locator(".connect-creature-tap")).toHaveCSS("opacity", "0")
+          await expect(creature.locator(".connect-creature-ticks")).toHaveCSS("opacity", "1")
+        }
       })
     }
 
@@ -580,7 +634,30 @@ for (const theme of ["light", "dark"] satisfies ReadonlyArray<"light" | "dark">)
         ] satisfies ReadonlyArray<CreatureMood>
       ) {
         test(`reference creature ${mood} ${size}`, async ({ page }, testInfo) => {
-          const creature = await open(page, `id=drawing-1&state=ready&mood=${mood}&size=${size}&family=iris&talking`)
+          if (mood === "done") {
+            // State sheet 10m starts with closed happy arcs at 0ms. Freeze before mount; reduction skips to settled happy.
+            await page.route("**/assets/connect.css", async (route) => {
+              const response = await route.fetch()
+              await route.fulfill({
+                response,
+                body: `${await response
+                  .text()}\n[data-drawing-case] .connect-creature[data-mood="done"] * { animation-play-state: paused; }`
+              })
+            })
+          }
+          const creature = await open(
+            page,
+            `id=drawing-1&state=ready&mood=${mood}&size=${size}&family=iris&talking`,
+            mood === "done" ? "no-preference" : "reduce"
+          )
+          if (mood === "done") {
+            await pose(creature, 0)
+            const animations = await creature.evaluate((node) =>
+              node.getAnimations({ subtree: true }).map((animation) => animation.playState)
+            )
+            expect(animations.length).toBeGreaterThan(0)
+            expect(animations.every((state) => state === "paused")).toBe(true)
+          }
           // The shared fixture starts dark; use the requested theme and the directory row's own surface.
           await page.locator("html, body").evaluateAll((nodes, scheme) => {
             for (const node of nodes) node.setAttribute("data-rly-theme", scheme)
@@ -617,6 +694,8 @@ for (const theme of ["light", "dark"] satisfies ReadonlyArray<"light" | "dark">)
             listening: [0, 160, 320, 520],
             poke: [0, 60, 220, 400],
             stuck: [0, 300, 700, 1000],
+            // relay-creature-states.js, 10m: arcs at0, chest-out at200, settling at480, happy rest at900.
+            // Sample899 just before completion removes the one-shot; reduced settlement has separate guards.
             done: [0, 200, 480, 899]
           } satisfies Record<CreatureMood, ReadonlyArray<number>>
           await page.emulateMedia({ reducedMotion: "no-preference" })

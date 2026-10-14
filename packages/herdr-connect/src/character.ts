@@ -214,8 +214,19 @@ const ringCentre = (points: ReadonlyArray<Point>, top: number, width: number, he
   return (low + high) / 2
 }
 
+// At most two full 256-agent pages. Stable identities share geometry across polls and surfaces.
+const characterCache = new Map<string, AgentCharacter>()
+const CHARACTER_CACHE_LIMIT = 512
+
 /** Pure and stable across polls, pages and devices; the body ignores mutable display names. */
 export const agentCharacter = (host: string, id: string): AgentCharacter => {
+  const key = `${host.toLowerCase()}\u0000${id}`
+  const cached = characterCache.get(key)
+  if (cached !== undefined) {
+    characterCache.delete(key)
+    characterCache.set(key, cached)
+    return cached
+  }
   const seed = characterSeed(host, id)
   const hue = (field(seed, 0, 12) * 30 + field(seed, 4, 14)) % 360
   const spread = 18 + field(seed, 9, 30)
@@ -257,7 +268,7 @@ export const agentCharacter = (host: string, id: string): AgentCharacter => {
   const ringScale = Math.max(
     ...outline.points.map(([x, y]) => Math.hypot((x - 50) / (actualWidth / 2), (y - ringCy) / (actualHeight / 2)))
   ) * 1.015
-  return {
+  const character: AgentCharacter = {
     body: outline.path,
     bodyKind,
     bounds: [left, top, actualWidth, actualHeight],
@@ -270,6 +281,12 @@ export const agentCharacter = (host: string, id: string): AgentCharacter => {
     ringCy,
     unit
   }
+  if (characterCache.size >= CHARACTER_CACHE_LIMIT) {
+    const oldest = characterCache.keys().next().value
+    if (oldest !== undefined) characterCache.delete(oldest)
+  }
+  characterCache.set(key, character)
+  return character
 }
 
 export type CreatureHueFamily = "rose" | "ember" | "amber" | "lime" | "moss" | "teal" | "sky" | "iris"

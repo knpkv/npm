@@ -5,9 +5,9 @@ import { Effect, FileSystem, Path, Result, Schema } from "effect"
 import { DatabaseSync } from "node:sqlite"
 import { AgentActivityStore } from "../src/activity-store.js"
 import { AgentArchiveStore } from "../src/archive-store.js"
-import { agentCharacter, characterSeed } from "../src/character.js"
+import { agentCharacter, type BodyKind, characterSeed } from "../src/character.js"
 import { type AgentSource, localConnectAgents } from "../src/directory.js"
-import { type ArchivedConnectAgent, ConnectAgent } from "../src/model.js"
+import { type ArchivedConnectAgent, ConnectAgent, type ConnectAgentHue } from "../src/model.js"
 import { AgentRelationshipStore } from "../src/relationship-store.js"
 import { referenceBodyKind } from "./reference-creature-identities.js"
 
@@ -204,6 +204,57 @@ describe("persisted agent hues", () => {
         expect(upgraded.filter(({ exclusive }) => exclusive === 1).map(({ agent_id, hue }) => ({ agent_id, hue })))
           .toEqual(legacy.filter(({ exclusive }) => exclusive === 1).map(({ agent_id, hue }) => ({ agent_id, hue })))
         yield* read(stores, [], 3, host, false)
+        expect(stored()).toEqual(upgraded)
+      }).pipe(Effect.scoped))
+
+    it.effect("probes a repaired non-rose overflow forward from its recorded family", () =>
+      Effect.gen(function*() {
+        const stores = yield* openStores(yield* pathFor)
+        const database = yield* Effect.acquireRelease(
+          Effect.sync(() => new DatabaseSync(stores.activity.path)),
+          (opened) => Effect.sync(() => opened.close())
+        )
+        // All eight families are held. Rose and Amber are shape-safe; Ember has the conflicting circle.
+        const rows: ReadonlyArray<readonly [ConnectAgentHue, string, BodyKind, 0 | 1]> = [
+          ["rose", "agent-probe-rose-15", "star", 1],
+          ["ember", "agent-probe-ember-29", "circle", 1],
+          ["amber", "agent-probe-amber-11", "star", 1],
+          ["lime", "agent-probe-lime-8", "circle", 1],
+          ["moss", "agent-probe-moss-18", "circle", 1],
+          ["teal", "agent-probe-teal-10", "circle", 1],
+          ["sky", "agent-probe-sky-1", "circle", 1],
+          ["iris", "agent-probe-iris-0", "circle", 1],
+          ["ember", "agent-probe-overflow-9", "bean", 0]
+        ]
+        const write = database.prepare(`
+          INSERT INTO connect_agent_hues (host, agent_id, hue, body_kind, exclusive, closed_at, observed_at)
+          VALUES ('fixture-host', ?, ?, ?, ?, NULL, 0)
+        `)
+        database.exec("BEGIN")
+        for (const [hue, id, bodyKind, exclusive] of rows) write.run(id, hue, bodyKind, exclusive)
+        database.exec("COMMIT")
+        expect(referenceBodyKind("fixture-host", "probe-overflow-9")).toBe("circle")
+        const stored = () =>
+          Schema.decodeUnknownSync(Schema.Array(Schema.Struct({
+            agent_id: Schema.String,
+            hue: Schema.String,
+            body_kind: Schema.String,
+            exclusive: Schema.Number
+          })))(
+            database.prepare(
+              "SELECT agent_id, hue, body_kind, exclusive FROM connect_agent_hues WHERE host = ? ORDER BY rowid"
+            ).all("fixture-host")
+          )
+        yield* read(stores, [], 1, "fixture-host", false)
+        const upgraded = stored()
+        expect(upgraded.find(({ agent_id }) => agent_id === "agent-probe-overflow-9")).toMatchObject({
+          hue: "amber",
+          body_kind: "circle",
+          exclusive: 0
+        })
+        expect(upgraded.filter(({ exclusive }) => exclusive === 1).map(({ hue }) => hue))
+          .toEqual(["rose", "ember", "amber", "lime", "moss", "teal", "sky", "iris"])
+        yield* read(stores, [], 2, "fixture-host", false)
         expect(stored()).toEqual(upgraded)
       }).pipe(Effect.scoped))
 

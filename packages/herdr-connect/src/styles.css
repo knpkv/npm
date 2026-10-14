@@ -3917,6 +3917,14 @@
   }
 
   .connect-pins[data-placement="float"] .connect-pin {
+    /* Desktop has no fixed name cap; the whole pill must fit the owner and viewport insets. */
+    max-inline-size: min(
+      100%,
+      calc(
+        100vi - 2 * var(--connect-pin-inline-inset) - 2 *
+          max(env(safe-area-inset-left, 0px), env(safe-area-inset-right, 0px))
+      )
+    );
     gap: var(--rly-space-6);
     min-block-size: 48px;
   }

@@ -1,5 +1,14 @@
 /** Decorative agent identity; adjacent text carries state. Only a talking stage owns a mouth or body deformation. */
-import { type CSSProperties, type ReactElement, useId, useState } from "react"
+import {
+  type CSSProperties,
+  type ReactElement,
+  type RefObject,
+  useCallback,
+  useId,
+  useRef,
+  useState,
+  useSyncExternalStore
+} from "react"
 
 import { CreatureAdornment } from "./creature-accessory.js"
 import { agentStatePresentation } from "./agent-state.js"
@@ -61,6 +70,39 @@ export interface CreatureProps {
   readonly reactionKey?: number
 }
 
+/** Only an unsettled one-shot subscribes; both preference sources can stop an already-running celebration. */
+const useReducedCreatureMotion = (root: RefObject<SVGSVGElement | null>, active: boolean): boolean => {
+  const snapshot = useCallback(() => {
+    const node = root.current
+    if (!active || node === null) return false
+    return (
+      node.ownerDocument.defaultView?.matchMedia("(prefers-reduced-motion: reduce)").matches === true ||
+      node.closest('[data-rly-reduced-motion="reduce"], [data-reduced-motion="reduce"]') !== null
+    )
+  }, [active, root])
+  const subscribe = useCallback(
+    (changed: () => void) => {
+      const node = root.current
+      const view = node?.ownerDocument.defaultView
+      if (!active || node === null || view === null || view === undefined) return () => {}
+      const media = view.matchMedia("(prefers-reduced-motion: reduce)")
+      const observer = new MutationObserver(changed)
+      media.addEventListener("change", changed)
+      observer.observe(node.ownerDocument.documentElement, {
+        attributes: true,
+        subtree: true,
+        attributeFilter: ["data-rly-reduced-motion", "data-reduced-motion"]
+      })
+      return () => {
+        media.removeEventListener("change", changed)
+        observer.disconnect()
+      }
+    },
+    [active, root]
+  )
+  return useSyncExternalStore(subscribe, snapshot, () => false)
+}
+
 /** SVG coordinates use a square row frame, including both stroke edges at the smallest 28px crew track. */
 export const Creature = ({
   accessory = "none",
@@ -82,6 +124,7 @@ export const Creature = ({
   const character = agentCharacter(host, id)
   const presentation = agentStatePresentation(state, statePolicy)
   const talkPose = talking && size === "stage"
+  const root = useRef<SVGSVGElement>(null)
   const [completion, setCompletion] = useState({
     state,
     override,
@@ -93,9 +136,18 @@ export const Creature = ({
   }
   const settled = completion.state === state && completion.override === override && completion.complete
   const selected = override ?? creatureMood(state, talkPose)
+  const reduced = useReducedCreatureMotion(root, selected === "done" && !settled && reaction === undefined)
+  // Persist the skipped completion so restoring motion cannot replay this transition.
+  if (reduced && !settled && selected === "done" && reaction === undefined) {
+    setCompletion({ state, override, complete: true })
+  }
   const ordinary = !talkPose && override === undefined && reaction === undefined
   const mood =
-    size === "stage" && reaction !== undefined ? reaction : selected === "done" && settled ? "happy" : selected
+    size === "stage" && reaction !== undefined
+      ? reaction
+      : selected === "done" && (settled || reduced)
+        ? "happy"
+        : selected
   const shut = closed || stale
   const expressive = talking && size === "stage" && !shut
   const pose =
@@ -196,6 +248,7 @@ export const Creature = ({
       aria-hidden="true"
       className="connect-creature"
       data-creature=""
+      ref={root}
       data-arrived={arrived ? "" : undefined}
       data-bucket={presentation.bucket}
       data-size={size}
@@ -454,6 +507,7 @@ export const Creature = ({
       {!shut && mood === "poke" ? (
         <g
           className="connect-creature-tap"
+          key={`tap:${mood}:${String(reactionKey)}`}
           transform={`translate(${String(referenceLeft - 1.75 * unit)} ${String(top + height * 0.55)}) scale(${String(unit)})`}
         >
           <circle r="1.6" fill="none" stroke={palette.p70} strokeWidth=".55" />
@@ -468,7 +522,7 @@ export const Creature = ({
         </g>
       ) : null}
       {!shut && mood === "poke" ? (
-        <g className="connect-creature-ticks">
+        <g className="connect-creature-ticks" key={`ticks:${mood}:${String(reactionKey)}`}>
           <path
             d={`M${fixed(left + width + unit)} ${fixed(top + 3.5 * unit)}l${fixed(1.5 * unit)} ${fixed(-unit)}M${fixed(left + width + unit)} ${fixed(top + 6.75 * unit)}h${fixed(1.8 * unit)}M${fixed(left - unit)} ${fixed(top + 3.5 * unit)}l${fixed(-1.5 * unit)} ${fixed(-unit)}`}
           />
