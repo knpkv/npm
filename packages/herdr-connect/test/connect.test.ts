@@ -2,7 +2,7 @@ import { NodeHttpClient, NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
 import type { HostConfiguration, HostOperations } from "@knpkv/herdr-fleet"
 import { fleetResponseBodyMaxBytes, JobStore, makeFleetService } from "@knpkv/herdr-fleet"
-import { Effect, Fiber, FileSystem, Logger, Option, Result, Schedule, Schema, Stream } from "effect"
+import { Clock, Effect, Fiber, FileSystem, Logger, Option, Result, Schedule, Schema, Stream } from "effect"
 import * as HttpClient from "effect/http/HttpClient"
 import * as HttpClientResponse from "effect/http/HttpClientResponse"
 import { TestClock } from "effect/testing"
@@ -838,6 +838,45 @@ describe("Connect public seams", () => {
       expect(disposals).toBe(1)
     })
   })
+
+  it.live("serializes a locked activity and hue burst so native waits do not accumulate", () =>
+    Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      const directory = yield* fs.makeTempDirectoryScoped({ prefix: "connect-activity-burst-" })
+      const store = yield* Effect.acquireRelease(
+        AgentActivityStore.open(join(directory, "state.sqlite")),
+        (opened) => Effect.sync(() => opened.close())
+      )
+      const writer = yield* Effect.acquireRelease(
+        Effect.sync(() => new DatabaseSync(store.path)),
+        (opened) => Effect.sync(() => opened.close())
+      )
+      let locked = true
+      yield* Effect.acquireRelease(
+        Effect.sync(() => writer.exec("BEGIN IMMEDIATE")),
+        () =>
+          Effect.sync(() => {
+            if (locked) writer.exec("ROLLBACK")
+          })
+      )
+      const started = yield* Clock.currentTimeMillis
+      const timer = yield* Effect.forkScoped(Effect.sleep("20 millis").pipe(Effect.andThen(Clock.currentTimeMillis)))
+      const burst = yield* Effect.forkScoped(Effect.forEach(
+        Array.from({ length: 16 }, (_, index) => index),
+        (index) =>
+          Effect.result(
+            index % 2 === 0
+              ? store.observe("host-a", `agent-burst-${index}`, 1, 1).pipe(Effect.asVoid)
+              : store.assignHues("host-a", [agent(`agent-burst-${index}`, "host-a")], 1).pipe(Effect.asVoid)
+          ),
+        { concurrency: "unbounded" }
+      ))
+      expect((yield* Fiber.join(timer)) - started).toBeLessThan(400)
+      yield* Effect.sync(() => writer.exec("ROLLBACK"))
+      locked = false
+      const results = yield* Fiber.join(burst)
+      expect(results.every(Result.isSuccess)).toBe(true)
+    }).pipe(Effect.scoped, provideNodeServices))
 
   it.effect("ignores stale activity observations", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-activity-order-test-"))

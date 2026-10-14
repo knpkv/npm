@@ -63,6 +63,25 @@ describe("agent posts", () => {
   })
 
   it.layer(NodeServices.layer)((it) => {
+    it.effect("secures lazy WAL sidecars after a SELECT-only page read", () =>
+      Effect.gen(function*() {
+        const store = yield* openStore()
+        const fs = yield* FileSystem.FileSystem
+        const paths = yield* Path.Path
+        if (paths.sep !== "/") return
+        expect(yield* fs.exists(`${store.path}-wal`)).toBe(false)
+        expect(yield* fs.exists(`${store.path}-shm`)).toBe(false)
+        // SQLite's lazy sidecars inherit this accepted, non-writable database mode.
+        yield* fs.chmod(store.path, 0o644)
+        expect((yield* store.page("host-a", "agent-one", null, 1)).posts).toEqual([])
+        const modes = yield* Effect.forEach([`${store.path}-wal`, `${store.path}-shm`, store.path], (path) =>
+          Effect.gen(function*() {
+            expect(yield* fs.exists(path)).toBe(true)
+            return (yield* fs.stat(path)).mode & 0o777
+          }))
+        expect(modes).toEqual([0o600, 0o600, 0o600])
+      }).pipe(Effect.scoped))
+
     it.effect("evicts expired reports globally in bounded write batches without any page read", () =>
       Effect.gen(function*() {
         const store = yield* openStore()

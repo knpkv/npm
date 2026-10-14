@@ -1,5 +1,5 @@
 import { openPrivateSqlite, type PrivateDatabaseError, type PrivateSqlite } from "@knpkv/herdr-fleet/sqlite"
-import { Effect, Schema } from "effect"
+import { Effect, Schema, Semaphore } from "effect"
 import type { DatabaseSync } from "node:sqlite"
 import { ConnectStoreBusyError, TerminalTransportError } from "./errors.js"
 import { assignHues, initializeHues } from "./internal/hue-database.js"
@@ -23,12 +23,14 @@ const storeError = (operation: string) => (cause: unknown) =>
 
 export class AgentActivityStore {
   readonly #database: DatabaseSync
+  readonly #transactions: Semaphore.Semaphore
   readonly #secureFiles: PrivateSqlite["secureFiles"]
   readonly path: string
 
-  private constructor(path: string, opened: PrivateSqlite) {
+  private constructor(path: string, transactions: Semaphore.Semaphore, opened: PrivateSqlite) {
     this.path = path
     this.#database = opened.database
+    this.#transactions = transactions
     this.#secureFiles = opened.secureFiles
   }
 
@@ -57,7 +59,7 @@ export class AgentActivityStore {
         }
       }
     }).pipe(Effect.mapError(fromPrivateDatabaseError))
-    return new AgentActivityStore(path, opened)
+    return new AgentActivityStore(path, yield* Semaphore.make(1), opened)
   })
 
   readonly observe = Effect.fn("AgentActivityStore.observe")(function*(
@@ -68,10 +70,12 @@ export class AgentActivityStore {
     observedAt: number
   ) {
     const normalizedHost = host.toLowerCase()
-    const row = yield* connectSqliteWrite("activity.observe", () =>
-      this.#database
-        .prepare(
-          `INSERT INTO agent_activity (host, agent_id, revision, last_activity_at, observed_at)
+    const row = yield* connectSqliteWrite(
+      "activity.observe",
+      () =>
+        this.#database
+          .prepare(
+            `INSERT INTO agent_activity (host, agent_id, revision, last_activity_at, observed_at)
              VALUES (?, ?, ?, ?, ?)
              ON CONFLICT(host, agent_id) DO UPDATE SET
                revision = CASE
@@ -88,10 +92,13 @@ export class AgentActivityStore {
                END,
                observed_at = MAX(agent_activity.observed_at, excluded.observed_at)
              RETURNING last_activity_at`
-        )
-        .get(normalizedHost, agentId, revision, observedAt, observedAt), storeError("activity.observe")).pipe(
-        Effect.tap(() => this.#secureFiles.pipe(Effect.mapError(fromPrivateDatabaseError)))
-      )
+          )
+          .get(normalizedHost, agentId, revision, observedAt, observedAt),
+      storeError("activity.observe"),
+      true,
+      this.#transactions,
+      () => this.#secureFiles.pipe(Effect.mapError(fromPrivateDatabaseError))
+    )
     return yield* Schema.decodeUnknownEffect(ActivityRow)(row).pipe(
       Effect.mapError(storeError("activity.decode")),
       Effect.map(({ last_activity_at }) => last_activity_at)
@@ -120,24 +127,30 @@ export class AgentActivityStore {
           operation: "activity.hues.decode"
         })
       }
-      const assigned = yield* connectSqliteWrite("activity.hues.assign", () => {
-        this.#database.exec("BEGIN IMMEDIATE")
-        try {
-          const result = assignHues(
-            this.#database,
-            input.directory.host,
-            input.directory.agents,
-            input.observedAt,
-            input.directory.complete === true
-          )
-          this.#database.exec("COMMIT")
-          return result
-        } catch (cause) {
-          this.#database.exec("ROLLBACK")
-          throw cause
-        }
-      }, storeError("activity.hues.assign"))
-      yield* this.#secureFiles.pipe(Effect.mapError(fromPrivateDatabaseError))
+      const assigned = yield* connectSqliteWrite(
+        "activity.hues.assign",
+        () => {
+          this.#database.exec("BEGIN IMMEDIATE")
+          try {
+            const result = assignHues(
+              this.#database,
+              input.directory.host,
+              input.directory.agents,
+              input.observedAt,
+              input.directory.complete === true
+            )
+            this.#database.exec("COMMIT")
+            return result
+          } catch (cause) {
+            this.#database.exec("ROLLBACK")
+            throw cause
+          }
+        },
+        storeError("activity.hues.assign"),
+        true,
+        this.#transactions,
+        () => this.#secureFiles.pipe(Effect.mapError(fromPrivateDatabaseError))
+      )
       return assigned
     },
     Effect.timeoutOrElse({

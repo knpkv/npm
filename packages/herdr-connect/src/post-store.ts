@@ -186,7 +186,7 @@ export class AgentPostStore {
           })
         },
         catch: unavailable("posts.page")
-      })
+      }).pipe(Effect.tap(() => this.#secureFiles.pipe(Effect.mapError(unavailable("posts.permissions")))))
     )
   })
 
