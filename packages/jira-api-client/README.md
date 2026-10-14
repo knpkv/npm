@@ -115,3 +115,24 @@ its Jira consumers, adds a changeset, and opens or updates a pull request on
 
 Generated source is excluded from handwritten-source lint rules, but remains
 fully typechecked, built, and exercised through transport and decoding tests.
+
+## Regeneration compatibility
+
+The JSON patch removes contradictory closed-object constraints from the JQL,
+workflow-condition, context-variable and custom-field-default union wrappers. Their branches own
+the field constraints. It also corrects the bulk-move required property names
+and the security-member request's required key, and removes the wrapper value constraint that conflicts with string-array
+mandatory fields. Regeneration keeps named-property objects as structs and
+retains the public `MultipartFile`, `Resource` and `UserFilter` models even
+when no endpoint references them. Pure maps retain their value types.
+
+This update requires a major version. Binary attachment request models use
+`Blob | File`. Bulk moves require `targetToSourcesMapping` and each mapping's
+`issueIdsOrKeys`, matching the documented request fields. Mandatory non-ADF
+fields accept string arrays. JSON maps and formerly unconstrained object
+values have explicit JSON value types, and nullable enum members follow the
+upstream declarations. The application-property model follows the upstream `example` field instead
+of the previous `examples` alias.
+Context-variable variants use their documented discriminator values: `user`,
+`issue` and `json`. Security-member requests require `members`. All previously
+exported model names remain available.
