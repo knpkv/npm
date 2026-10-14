@@ -43,7 +43,22 @@ import {
   WorkStore
 } from "@knpkv/herdr-work"
 import type { RelayBackend } from "@knpkv/relay"
-import { Clock, Data, Deferred, Effect, Fiber, Layer, Logger, Queue, Ref, Result, Schema, Stream } from "effect"
+import {
+  Clock,
+  Data,
+  Deferred,
+  Effect,
+  Fiber,
+  FileSystem,
+  Layer,
+  Logger,
+  Predicate,
+  Queue,
+  Ref,
+  Result,
+  Schema,
+  Stream
+} from "effect"
 import { HttpClient } from "effect/http"
 import { TestClock } from "effect/testing"
 import { build } from "esbuild"
@@ -2140,6 +2155,94 @@ esac
       expect(page.hosts).not.toContain("fixture-256")
     })).pipe(provideNodeServices))
 
+  it.live(
+    "preserves the exhausted inventory store error in report responses",
+    () =>
+      Effect.scoped(Effect.gen(function*() {
+        const fs = yield* FileSystem.FileSystem
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "herdr-http-report-busy-" })
+        yield* fs.chmod(root, 0o700)
+        const tailscaleCommand = join(root, "tailscale-fixture")
+        yield* fs.writeFileString(
+          tailscaleCommand,
+          `#!/bin/sh
+case "$1" in
+  ip) printf '%s\\n' '127.0.0.1' ;;
+  whois) printf '%s\\n' '{"Node":{"StableID":"node-hub"},"UserProfile":{"LoginName":"owner@example.test"}}' ;;
+  status) printf '%s\\n' '{"Peer":{},"Self":{"HostName":"hub","ID":"node-hub","Online":true,"TailscaleIPs":["127.0.0.1"]}}' ;;
+esac
+`
+        )
+        yield* fs.chmod(tailscaleCommand, 0o700)
+        const hostConfig: HostConfiguration = {
+          ...config(root),
+          allowedUsers: ["owner@example.test"],
+          host: "hub",
+          crossHost: true,
+          approvalHub: { host: "hub", nodeId: "node-hub", url: "https://hub.example.test:0/" },
+          approvalPort: 0,
+          approvalTls: directTls,
+          machines: [{ host: "hub", nodeId: "node-hub" }],
+          tailscaleCommand
+        }
+        const postOperations: HostOperations = {
+          ...operations,
+          listAgents: () =>
+            Effect.succeed({
+              available: true,
+              error: null,
+              agents: [{
+                activityRevision: 1,
+                agentId: "agent-report",
+                kind: "worker",
+                name: "Worker",
+                paneId: "w1:p1",
+                parentAgentId: null,
+                relation: null,
+                status: "working",
+                work: "Reporting progress"
+              }]
+            })
+        }
+        const store = yield* Effect.acquireRelease(
+          JobStore.open(join(root, "jobs.sqlite")),
+          (opened) => Effect.sync(() => opened.close())
+        )
+        const fleet = yield* makeFleetService({ approvalEnabled: true, host: "hub", operations: postOperations, store })
+        const server = yield* Effect.acquireRelease(
+          Effect.promise(() => startHttpServer(hostConfig, fleet, assets, { terminalConnector: unusedTerminal })),
+          (running) => Effect.promise(running.close)
+        )
+        const canonical = yield* Schema.decodeUnknownEffect(Schema.String)(server.serveUrl)
+        const post = (eventId: string) =>
+          Effect.promise(() =>
+            secureRequestBody(`${canonical}/v1/connect/posts`, {
+              host: "hub.example.test:0",
+              "content-type": "application/json"
+            }, { method: "POST", body: { agentId: "agent-report", kind: "status", text: "Progress", eventId } })
+          )
+        expect((yield* post("before-lock")).status).toBe(200)
+        const blocker = yield* Effect.acquireRelease(
+          Effect.sync(() => new DatabaseSync(join(root, "approval-app.sqlite"))),
+          (database) => Effect.sync(() => database.close())
+        )
+        yield* Effect.sync(() => blocker.exec("BEGIN IMMEDIATE"))
+        const exhausted = yield* post("during-lock")
+        expect(exhausted.status, exhausted.body).toBe(503)
+        const errorBody = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(exhausted.body)
+        expect(errorBody).toEqual({
+          error: "ConnectStoreBusyError",
+          operation: "persist.transaction",
+          timeoutMillis: 5_000
+        })
+        expect(exhausted.body).not.toContain("cause")
+        expect(exhausted.body).not.toContain(root)
+        yield* Effect.sync(() => blocker.exec("ROLLBACK"))
+        expect((yield* post("during-lock")).status).toBe(200)
+      })).pipe(provideNodeServices),
+    15_000
+  )
+
   it.effect("accepts host-bound voice and self-state only on the canonical listener, including sibling claims on the same host", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-http-posts-"))
     const tailscaleCommand = join(root, "tailscale-test")
@@ -2207,13 +2310,17 @@ esac
           }]
         }))
       })
-      const peerPort = yield* Effect.acquireRelease(
+      let peerPort = yield* Effect.acquireRelease(
         Effect.promise(() => listenOn(peerServer, "127.0.0.2")),
         () =>
-          Effect.promise(() =>
-            new Promise<void>((resolve, reject) =>
-              peerServer.close((error) => error === undefined ? resolve() : reject(error))
-            )
+          Effect.suspend(() =>
+            peerServer.listening
+              ? Effect.promise(() =>
+                new Promise<void>((resolve, reject) =>
+                  peerServer.close((error) => error === undefined ? resolve() : reject(error))
+                )
+              )
+              : Effect.void
           )
       )
       const store = yield* Effect.acquireRelease(
@@ -2222,13 +2329,26 @@ esac
       )
       const fleet = yield* makeFleetService({ approvalEnabled: true, host: "SER8", operations: postOperations, store })
       const server = yield* Effect.acquireRelease(
-        Effect.promise(() =>
-          startHttpServer({ ...hostConfig, port: peerPort }, fleet, assets, {
-            terminalConnector: unusedTerminal,
-            now: () => 100,
-            lanWork: { address: "127.0.0.1", port: 0 }
-          })
-        ),
+        Effect.tryPromise({
+          try: async () => {
+            try {
+              return await startHttpServer({ ...hostConfig, port: peerPort }, fleet, assets, {
+                terminalConnector: unusedTerminal,
+                now: () => 100,
+                lanWork: { address: "127.0.0.1", port: 0 }
+              })
+            } catch (cause) {
+              if (!isAddressInUse(cause) || cause.port !== peerPort) throw cause
+              // Port 0 on the peer address does not reserve the same port on the hub address.
+              await new Promise<void>((resolve, reject) =>
+                peerServer.close((error) => error === undefined ? resolve() : reject(error))
+              )
+              peerPort = await listenOn(peerServer, "127.0.0.2")
+              throw new ApprovalPortTaken({ cause })
+            }
+          },
+          catch: (cause) => Predicate.isTagged(cause, "ApprovalPortTaken") ? cause : new ApprovalStartFailed({ cause })
+        }).pipe(Effect.retry({ times: 4, while: (error) => error._tag === "ApprovalPortTaken" })),
         (running) => Effect.promise(running.close)
       )
       if (server.serveUrl === null || server.tailnetUrl === null || server.lanWorkUrl === null) {

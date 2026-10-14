@@ -1029,7 +1029,7 @@ describe("Connect public seams", () => {
     )
   })
 
-  it.effect("classifies exhausted relationship contention without leaking the SQLite cause or inventory work", () =>
+  it.effect("retains exhausted relationship retry metadata while logging only safe diagnostics", () =>
     Effect.gen(function*() {
       const fs = yield* FileSystem.FileSystem
       const root = yield* fs.makeTempDirectoryScoped({ prefix: "connect-inventory-busy-" })
@@ -1068,8 +1068,14 @@ describe("Connect public seams", () => {
           }),
         workers: () => Effect.succeed([])
       }
+      const messages: Array<unknown> = []
+      const logger = Logger.make<unknown, void>((entry) => {
+        messages.push(entry.message)
+      })
       const pending = yield* Effect.forkScoped(
-        Effect.result(localConnectAgents(hostConfiguration(root), source, activity, relationships, 1))
+        Effect.result(localConnectAgents(hostConfiguration(root), source, activity, relationships, 1)).pipe(
+          Effect.withLogger(logger)
+        )
       )
       yield* TestClock.adjust(6_000)
       const failed = yield* Fiber.join(pending)
@@ -1078,32 +1084,20 @@ describe("Connect public seams", () => {
           _tag: "ConnectPeerError",
           reason: "invalid_response",
           cause: {
-            _tag: "ConnectInventoryFailure",
-            step: "persist_relationships",
-            agentId: null,
-            reason: "ConnectStoreBusyError"
+            _tag: "ConnectStoreBusyError",
+            operation: "persist.transaction",
+            timeoutMillis: 5_000
           }
         }
       })
-      if (Result.isFailure(failed)) {
-        expect(
-          Schema.decodeUnknownSync(
-            Schema.TaggedStruct("ConnectInventoryFailure", {
-              step: Schema.Literal("persist_relationships"),
-              agentId: Schema.Null,
-              reason: Schema.Literal("ConnectStoreBusyError")
-            }),
-            { onExcessProperty: "error" }
-          )(failed.failure.cause)
-        ).toEqual({
-          _tag: "ConnectInventoryFailure",
-          step: "persist_relationships",
-          agentId: null,
-          reason: "ConnectStoreBusyError"
-        })
-        expect(JSON.stringify(failed.failure.cause)).not.toContain("raw inventory work text")
-        expect(JSON.stringify(failed.failure.cause)).not.toContain("database is locked")
-      }
+      expect(messages).toEqual([["Connect.local_inventory_failed", {
+        step: "persist_relationships",
+        agentId: null,
+        reason: "ConnectStoreBusyError"
+      }]])
+      expect(JSON.stringify(messages)).not.toContain("raw inventory work text")
+      expect(JSON.stringify(messages)).not.toContain("database is locked")
+      expect(JSON.stringify(messages)).not.toContain(root)
     }).pipe(Effect.scoped, provideNodeServices))
 
   it.effect("recovers a stale stored parent from newer same-pane live inventory without exposing it", () => {

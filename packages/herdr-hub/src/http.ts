@@ -2,7 +2,6 @@ import { NodeHttpClient, NodeServices } from "@effect/platform-node"
 import type {
   Conflict,
   ConnectPeerError,
-  ConnectStoreBusyError,
   TerminalAgentNotFoundError,
   TerminalBusyError,
   TerminalConnector,
@@ -20,6 +19,7 @@ import {
   ConnectArchiveCursor,
   ConnectPost,
   ConnectPostCursor,
+  ConnectStoreBusyError,
   Denied,
   fetchPeerConnectAgents,
   fleetConnectAgents,
@@ -3743,7 +3743,13 @@ export const startHttpServer = async (
                     online: peer.online,
                     terminalUrl: peer.terminalUrl
                   })
-                })).pipe(Effect.mapError(() => new Unavailable({ operation: "posts.inventory" })))
+                })).pipe(
+                  Effect.mapError((error) =>
+                    error._tag === "ConnectPeerError" && Schema.is(ConnectStoreBusyError)(error.cause)
+                      ? error.cause
+                      : new Unavailable({ operation: "posts.inventory" })
+                  )
+                )
               if (inventory.complete !== true) return yield* new Unavailable({ operation: "posts.inventory" })
               if (!inventory.agents.some((agent) => agent.id === agentId)) {
                 return yield* new UnboundAgent({ agentId })

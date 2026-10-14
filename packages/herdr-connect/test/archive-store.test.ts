@@ -15,6 +15,7 @@ import {
   connectArchivePageMaxRecords,
   LocalConnectAgents
 } from "../src/model.js"
+import { AgentPostStore } from "../src/post-store.js"
 
 const agent = (id = "agent-one", host = "HOST-A"): ConnectAgent =>
   Schema.decodeUnknownSync(ConnectAgent)({
@@ -365,43 +366,46 @@ describe("closed agent archive", () => {
         expect((yield* store.page()).agents[0]?.closedAt).toBe(600_001)
       }).pipe(Effect.scoped))
 
-    it.effect("a cancelled queued sighting cannot be erased by an older write retry", () =>
-      Effect.gen(function*() {
-        const store = yield* openStore()
-        yield* observe(store, 0, [agent()])
-        yield* observe(store, 1, [])
-        const db = yield* Effect.acquireRelease(Effect.sync(() => new DatabaseSync(store.path)), (db) =>
-          Effect.sync(() => db.close()))
-        let locked = false
-        const unlock = (): void => {
-          if (!locked) {
-            return
+    it.effect.each([350_000, 300_001])(
+      "a cancelled queued sighting cannot be erased by a retry at or before its time; positive %s",
+      (positiveAt) =>
+        Effect.gen(function*() {
+          const store = yield* openStore()
+          yield* observe(store, 0, [agent()])
+          yield* observe(store, 1, [])
+          const db = yield* Effect.acquireRelease(Effect.sync(() => new DatabaseSync(store.path)), (db) =>
+            Effect.sync(() => db.close()))
+          let locked = false
+          const unlock = (): void => {
+            if (!locked) {
+              return
+            }
+            db.exec("ROLLBACK")
+            locked = false
           }
-          db.exec("ROLLBACK")
-          locked = false
-        }
-        yield* Effect.acquireRelease(
-          Effect.sync(() => {
-            db.exec("BEGIN IMMEDIATE")
-            locked = true
-          }),
-          () =>
-            Effect.sync(unlock)
-        )
-        const older = yield* Effect.forkScoped(observe(store, 300_001, []))
-        yield* TestClock.adjust(1)
-        const positive = yield* Effect.forkScoped(observe(store, 350_000, [agent()]))
-        yield* TestClock.adjust(1)
-        yield* Fiber.interrupt(positive)
-        yield* Effect.sync(unlock)
-        yield* TestClock.adjust(1_000)
-        yield* Fiber.join(older)
-        expect((yield* store.page()).agents).toEqual([])
-        yield* observe(store, 600_001, [])
-        expect((yield* store.page()).agents).toEqual([])
-        yield* observe(store, 900_001, [])
-        expect((yield* store.page()).agents[0]?.closedAt).toBe(900_001)
-      }).pipe(Effect.scoped))
+          yield* Effect.acquireRelease(
+            Effect.sync(() => {
+              db.exec("BEGIN IMMEDIATE")
+              locked = true
+            }),
+            () =>
+              Effect.sync(unlock)
+          )
+          const older = yield* Effect.forkScoped(observe(store, 300_001, []))
+          yield* TestClock.adjust(1)
+          const positive = yield* Effect.forkScoped(observe(store, positiveAt, [agent()]))
+          yield* TestClock.adjust(1)
+          yield* Fiber.interrupt(positive)
+          yield* Effect.sync(unlock)
+          yield* TestClock.adjust(1_000)
+          yield* Fiber.join(older)
+          expect((yield* store.page()).agents).toEqual([])
+          yield* observe(store, 600_001, [])
+          expect((yield* store.page()).agents).toEqual([])
+          yield* observe(store, 900_001, [])
+          expect((yield* store.page()).agents[0]?.closedAt).toBe(900_001)
+        }).pipe(Effect.scoped)
+    )
 
     /** A second process's writer lock must expire as a named retryable busy failure, not an opaque archive error. */
     it.effect("reports a typed busy expiry when another connection owns the archive writer", () =>
@@ -624,6 +628,155 @@ describe("closed agent archive", () => {
 
 /** Real time is the contract here: short native waits must leave the loop free for the competing writer. */
 it.layer(NodeServices.layer, { excludeTestServices: true })((it) => {
+  it.effect.each([false, true])(
+    "live directory survives post-store contention; primary pending %s",
+    (primaryPending) =>
+      Effect.gen(function*() {
+        const store = yield* openStore()
+        const posts = yield* Effect.acquireRelease(
+          AgentPostStore.open(store.path),
+          (value) => Effect.sync(() => value.close())
+        )
+        const now = yield* Clock.currentTimeMillis
+        const row = agent()
+        yield* posts.post(row.host, row.id, { eventId: "event-live", kind: "status", text: "Ready" }, now)
+        yield* posts.selfUpdate(row.host, row.id, { mood: "focused" }, now)
+        const db = yield* Effect.acquireRelease(
+          Effect.sync(() => new DatabaseSync(store.path)),
+          (value) => Effect.sync(() => value.close())
+        )
+        yield* Effect.acquireRelease(
+          Effect.sync(() => db.exec("BEGIN IMMEDIATE")),
+          () => Effect.sync(() => db.exec("ROLLBACK"))
+        )
+        if (primaryPending) {
+          yield* Effect.forkScoped(posts.selfUpdate(row.host, row.id, { mood: "waiting" }, now + 1), {
+            startImmediately: true
+          })
+        }
+        const warnings: Array<string> = []
+        const logger = Logger.make<unknown, void>((entry) => {
+          warnings.push(String(entry.message))
+        })
+        const started = yield* Clock.currentTimeMillis
+        const directory = yield* fleetConnectAgents(
+          Effect.succeed(LocalConnectAgents.make({ host: row.host, agents: [row], complete: true })),
+          [],
+          { store, posts, observedAt: now + 1 }
+        ).pipe(
+          Effect.provideService(
+            HttpClient.HttpClient,
+            HttpClient.make(() =>
+              Effect.die(new ConnectArchiveStoreError({ operation: "fixture.peer", cause: "unexpected peer" }))
+            )
+          ),
+          Effect.withLogger(logger),
+          Effect.timeoutOption("2 seconds")
+        )
+        expect(Option.isSome(directory)).toBe(true)
+        if (Option.isSome(directory)) {
+          expect(directory.value.failures).toEqual([])
+          if (primaryPending) expect(directory.value.agents).toEqual([row])
+          else {expect(directory.value.agents).toMatchObject([{
+              id: row.id,
+              voice: { text: "Ready", createdAt: now },
+              self: { mood: "focused", accessory: "none", at: now }
+            }])}
+        }
+        expect((yield* Clock.currentTimeMillis) - started).toBeLessThan(500)
+        expect(warnings.some((message) => message.includes("Connect voice enrichment failed"))).toBe(primaryPending)
+      }).pipe(Effect.scoped),
+    { timeout: 5_000 }
+  )
+  it.effect.each([true, false])(
+    "bounds optional archive work across sixteen hosts; locked %s",
+    (locked) =>
+      Effect.gen(function*() {
+        const store = yield* openStore()
+        const observedAt = yield* Clock.currentTimeMillis
+        const readings = Array.from({ length: 16 }, (_, index) =>
+          LocalConnectAgents.make({
+            host: `host-${String(index).padStart(2, "0")}`,
+            complete: true,
+            agents: [ConnectAgent.make({
+              host: `host-${String(index).padStart(2, "0")}`,
+              id: `agent-${String(index)}`,
+              name: "Worker",
+              kind: "test",
+              state: "working",
+              work: "Healthy agent",
+              lastActivityAt: observedAt
+            })]
+          }))
+        for (const reading of readings) {
+          yield* store.observe({ ...reading, complete: true, observedAt })
+          yield* store.observe({ ...reading, complete: true, agents: [], observedAt: observedAt + 1 })
+        }
+        const database = yield* Effect.acquireRelease(
+          Effect.sync(() => new DatabaseSync(store.path)),
+          (db) => Effect.sync(() => db.close())
+        )
+        let held = false
+        const unlock = () => {
+          if (held) {
+            database.exec("ROLLBACK")
+            held = false
+          }
+        }
+        if (locked) {
+          yield* Effect.acquireRelease(
+            Effect.sync(() => {
+              database.exec("BEGIN IMMEDIATE")
+              held = true
+            }),
+            () => Effect.sync(unlock)
+          )
+        }
+        const local = readings[0]
+        if (local === undefined) {
+          return yield* Effect.die(new ConnectArchiveStoreError({ operation: "fixture.local", cause: "missing local" }))
+        }
+        const client = HttpClient.make((request) => {
+          const reading = readings.find(({ host }) => new URL(request.url).hostname === `${host}.example.test`)
+          return reading === undefined
+            ? Effect.die(new ConnectArchiveStoreError({ operation: "fixture.peer", cause: "unknown host" }))
+            : Effect.succeed(HttpClientResponse.fromWeb(request, new Response(JSON.stringify(reading))))
+        })
+        const tickStarted = yield* Deferred.make<void>()
+        const started = yield* Clock.currentTimeMillis
+        const tick = yield* Effect.forkScoped(
+          Deferred.succeed(tickStarted, undefined).pipe(
+            Effect.andThen(Effect.sleep("25 millis")),
+            Effect.andThen(Clock.currentTimeMillis)
+          )
+        )
+        yield* Deferred.await(tickStarted)
+        const directory = yield* fleetConnectAgents(
+          Effect.succeed(local),
+          readings.slice(1).map(({ host }) => ({
+            host,
+            online: true,
+            agentsUrl: `https://${host}.example.test/agents`,
+            terminalUrl: null
+          })),
+          { store, observedAt: observedAt + 150_000 }
+        ).pipe(Effect.provideService(HttpClient.HttpClient, client))
+        const completed = yield* Clock.currentTimeMillis
+        expect(directory).toEqual({ agents: readings.flatMap(({ agents }) => agents), failures: [] })
+        expect(completed - started).toBeLessThan(500)
+        expect((yield* Fiber.join(tick)) - started).toBeLessThan(250)
+        yield* Effect.sync(unlock)
+        for (const reading of readings) {
+          yield* store.observe({ ...reading, complete: true, agents: [], observedAt: observedAt + 300_001 })
+        }
+        expect((yield* store.page()).agents).toEqual([])
+        for (const reading of readings) {
+          yield* store.observe({ ...reading, complete: true, agents: [], observedAt: observedAt + 600_001 })
+        }
+        expect((yield* store.page()).agents).toHaveLength(16)
+      }).pipe(Effect.scoped),
+    { timeout: 10_000 }
+  )
   /** Optional archive contention must not consume the live directory's ten-second deadline per host. */
   it.effect.each([false, true])(
     "serves three live hosts promptly while their optional archive writer is locked; primary pending %s",
@@ -698,7 +851,7 @@ it.layer(NodeServices.layer, { excludeTestServices: true })((it) => {
           warnings.filter(({ level, message }) =>
             level === "Warn" && message.includes("Connect archive observation failed")
           )
-        ).toHaveLength(3)
+        ).toHaveLength(1)
         expect(warnings.filter(({ message }) => message.includes("Connect archive name lookup failed"))).toHaveLength(
           primaryPending ? 1 : 0
         )

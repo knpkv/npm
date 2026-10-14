@@ -178,7 +178,7 @@ export class AgentPostStore {
     return posts[0] ?? null
   })
 
-  /** A directory poll prunes and secures once, then reads one indexed row for each requested identity. */
+  /** Directory polls only read retained rows; post/page operations own physical pruning. */
   readonly latestMany = Effect.fn("AgentPostStore.latestMany")(function*(
     this: AgentPostStore,
     targets: ReadonlyArray<Pick<ConnectPost, "host" | "agentId">>,
@@ -187,12 +187,11 @@ export class AgentPostStore {
     return yield* this.#transactions.withPermits(1)(
       Effect.try({
         try: () => {
-          prune(this.#database, now)
           const query = this.#database.prepare(
-            "SELECT * FROM connect_posts WHERE host = ? AND agent_id = ? ORDER BY sequence DESC LIMIT 1"
+            "SELECT * FROM connect_posts WHERE host = ? AND agent_id = ? AND created_at >= ? ORDER BY sequence DESC LIMIT 1"
           )
           return targets.flatMap(({ agentId, host }) => {
-            const row = query.get(host.toLowerCase(), agentId)
+            const row = query.get(host.toLowerCase(), agentId, now - connectPostRetentionMillis)
             return row === undefined ? [] : [decodeRow(row)]
           })
         },

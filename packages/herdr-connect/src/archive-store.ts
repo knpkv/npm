@@ -243,19 +243,14 @@ export class AgentArchiveStore {
       Effect.mapError(failWith("observe.decode"))
     )
     const host = observation.host.toLowerCase()
-    const markTainted = Effect.sync(() =>
-      this.#taintedHosts.set(
-        host,
-        Math.max(this.#taintedHosts.get(host) ?? observation.observedAt, observation.observedAt)
-      )
-    )
+    const markTainted = Effect.sync(() => this.taintHost(host, observation.observedAt))
     const retryBusy = options.retryBusy !== false
     const write = connectSqliteWrite(
       "observe.transaction",
       () => {
         // Cancellation can taint this host while an older attempt waits; check again on every retry.
         const failedAt = this.#taintedHosts.get(host)
-        if (failedAt !== undefined && observation.observedAt < failedAt) return false
+        if (failedAt !== undefined && observation.observedAt <= failedAt) return false
         this.#database.exec("BEGIN IMMEDIATE")
         try {
           recordObservation(this.#database, observation, failedAt !== undefined)
@@ -276,7 +271,7 @@ export class AgentArchiveStore {
         Effect.sync(() => {
           if (!recorded) return
           const failedAt = this.#taintedHosts.get(host)
-          if (failedAt === undefined || failedAt <= observation.observedAt) this.#taintedHosts.delete(host)
+          if (failedAt === undefined || failedAt < observation.observedAt) this.#taintedHosts.delete(host)
         })
       ),
       Effect.asVoid
@@ -293,6 +288,33 @@ export class AgentArchiveStore {
       })))
     return yield* guarded.pipe(Effect.tapError(() => markTainted), Effect.onInterrupt(() => markTainted))
   })
+
+  /** One optional pass stops at its first failure; skipped hosts lose any prior absence evidence. */
+  readonly observeAvailable = Effect.fn("AgentArchiveStore.observeAvailable")(function*(
+    this: AgentArchiveStore,
+    input: ReadonlyArray<ConnectArchiveObservation>
+  ) {
+    const observations = yield* Schema.decodeUnknownEffect(Schema.Array(ConnectArchiveObservation))(input).pipe(
+      Effect.mapError(failWith("observe.batch.decode"))
+    )
+    let completed = 0
+    const taintPending = Effect.sync(() => {
+      for (const observation of observations.slice(completed)) this.taintHost(observation.host, observation.observedAt)
+    })
+    return yield* Effect.forEach(observations, (observation) =>
+      this.observe(observation, { retryBusy: false }).pipe(
+        Effect.tap(() =>
+          Effect.sync(() => {
+            completed++
+          })
+        )
+      ), { discard: true }).pipe(Effect.tapError(() => taintPending), Effect.onInterrupt(() => taintPending))
+  })
+
+  private taintHost(host: string, observedAt: number): void {
+    const normalizedHost = host.toLowerCase()
+    this.#taintedHosts.set(normalizedHost, Math.max(this.#taintedHosts.get(normalizedHost) ?? observedAt, observedAt))
+  }
 
   /** Latest remembered names, scoped to the requested host and identity, including closed agents. */
   readonly namesFor = Effect.fn("AgentArchiveStore.namesFor")(function*(

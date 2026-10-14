@@ -26,6 +26,7 @@ import {
   LocalConnectAgents
 } from "./model.js"
 import type { AgentPostStore } from "./post-store.js"
+import { Unavailable } from "./posts.js"
 import type { AgentRelationshipStore, RelationshipObservation } from "./relationship-store.js"
 
 export interface AgentSource {
@@ -150,7 +151,9 @@ export const localConnectAgents = Effect.fn("HerdrConnect.localAgents")(
     ]).pipe(
       Effect.mapError((cause) =>
         new ConnectPeerError({
-          cause: inventoryRelationshipFailure("persist_relationships", cause),
+          cause: cause._tag === "ConnectStoreBusyError"
+            ? cause
+            : inventoryRelationshipFailure("persist_relationships", cause),
           host: config.host,
           reason: "invalid_response"
         })
@@ -239,8 +242,12 @@ export const localConnectAgents = Effect.fn("HerdrConnect.localAgents")(
     )
   },
   Effect.tapError((error) => {
-    if (error.reason !== "invalid_response" || !Schema.is(ConnectInventoryFailure)(error.cause)) return Effect.void
-    const { agentId, reason, step } = error.cause
+    if (error.reason !== "invalid_response") return Effect.void
+    const diagnostic = Schema.is(ConnectStoreBusyError)(error.cause)
+      ? inventoryRelationshipFailure("persist_relationships", error.cause)
+      : error.cause
+    if (!Schema.is(ConnectInventoryFailure)(diagnostic)) return Effect.void
+    const { agentId, reason, step } = diagnostic
     return Effect.logWarning("Connect.local_inventory_failed", { step, agentId, reason })
   })
 )
@@ -360,14 +367,15 @@ export const fleetConnectAgents = Effect.fn("HerdrConnect.fleetAgents")(function
           : { host: peer.host, agents: [], complete: false }
       )
     ]
-    for (const observation of observations) {
-      yield* archive.store.observe({ ...observation, observedAt: archive.observedAt }, { retryBusy: false }).pipe(
-        Effect.catchIf(
-          Schema.is(Schema.Union([ConnectArchiveStoreError, ConnectStoreBusyError])),
-          (cause) => Effect.logWarning("Connect archive observation failed", { host: observation.host, cause })
-        )
+    yield* archive.store.observeAvailable(observations.map((observation) => ({
+      ...observation,
+      observedAt: archive.observedAt
+    }))).pipe(
+      Effect.catchIf(
+        Schema.is(Schema.Union([ConnectArchiveStoreError, ConnectStoreBusyError])),
+        (cause) => Effect.logWarning("Connect archive observation failed", { cause })
       )
-    }
+    )
     const liveKeys = new Set(fleet.agents.map(({ host, id }) => `${host.toLowerCase()}\u0000${id}`))
     const missingParents = fleet.agents.flatMap(({ host, relationship }) =>
       relationship === undefined || liveKeys.has(`${host.toLowerCase()}\u0000${relationship.parentAgentId}`)
@@ -400,21 +408,33 @@ export const fleetConnectAgents = Effect.fn("HerdrConnect.fleetAgents")(function
     }
   }
   if (archive?.posts === undefined) return fleet
-  const posts = yield* archive.posts.latestMany(
-    fleet.agents.map(({ host, id }) => ({ host, agentId: id })),
-    archive.observedAt
+  const postStore = archive.posts
+  return yield* Effect.gen(function*() {
+    const posts = yield* postStore.latestMany(
+      fleet.agents.map(({ host, id }) => ({ host, agentId: id })),
+      archive.observedAt
+    )
+    const selfStates = yield* postStore.selfLatestMany(fleet.agents.map(({ host, id }) => ({ host, agentId: id })))
+    const bySelf = new Map(selfStates.map((entry) => [`${entry.host.toLowerCase()}\u0000${entry.agentId}`, entry.self]))
+    const byAgent = new Map(posts.map((post) => [`${post.host.toLowerCase()}\u0000${post.agentId}`, post]))
+    return {
+      ...fleet,
+      agents: fleet.agents.map((agent) => {
+        const latest = byAgent.get(`${agent.host.toLowerCase()}\u0000${agent.id}`)
+        const self = bySelf.get(`${agent.host.toLowerCase()}\u0000${agent.id}`) ?? null
+        return latest === undefined
+          ? { ...agent, self }
+          : { ...agent, self, voice: { text: latest.text, createdAt: latest.createdAt } }
+      })
+    }
+  }).pipe(
+    Effect.timeoutOrElse({
+      duration: connectBusyTimeoutMillis,
+      orElse: () => new Unavailable({ operation: "directory.enrichment.deadline" })
+    }),
+    Effect.catchTag(
+      "Unavailable",
+      (cause) => Effect.logWarning("Connect voice enrichment failed", { cause }).pipe(Effect.as(fleet))
+    )
   )
-  const selfStates = yield* archive.posts.selfLatestMany(fleet.agents.map(({ host, id }) => ({ host, agentId: id })))
-  const bySelf = new Map(selfStates.map((entry) => [`${entry.host.toLowerCase()}\u0000${entry.agentId}`, entry.self]))
-  const byAgent = new Map(posts.map((post) => [`${post.host.toLowerCase()}\u0000${post.agentId}`, post]))
-  return {
-    ...fleet,
-    agents: fleet.agents.map((agent) => {
-      const latest = byAgent.get(`${agent.host.toLowerCase()}\u0000${agent.id}`)
-      const self = bySelf.get(`${agent.host.toLowerCase()}\u0000${agent.id}`) ?? null
-      return latest === undefined
-        ? { ...agent, self }
-        : { ...agent, self, voice: { text: latest.text, createdAt: latest.createdAt } }
-    })
-  }
 })
