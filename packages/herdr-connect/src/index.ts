@@ -11,6 +11,7 @@ export {
 export * from "./directory.js"
 export * from "./errors.js"
 export * from "./forest.js"
+export { type ConnectHueEnrichment, makeConnectHueEnrichment } from "./hue-enrichment.js"
 export * from "./id.js"
 export { connectReportResponseTimeoutMillis } from "./internal/peer-deadline.js"
 export * from "./keyboard.js"

@@ -8,6 +8,7 @@ import { AgentActivityStore } from "../src/activity-store.js"
 import { AgentArchiveStore } from "../src/archive-store.js"
 import { agentCharacter, type BodyKind, characterSeed } from "../src/character.js"
 import { type AgentSource, localConnectAgents } from "../src/directory.js"
+import { type ConnectHueEnrichment, makeConnectHueEnrichment } from "../src/hue-enrichment.js"
 import { connectPeerDirectoryTimeoutMillis } from "../src/internal/peer-deadline.js"
 import { type ArchivedConnectAgent, ConnectAgent, type ConnectAgentHue } from "../src/model.js"
 import { AgentRelationshipStore } from "../src/relationship-store.js"
@@ -68,7 +69,8 @@ const read = (
   observedAt = 0,
   host = "atlas",
   complete = true,
-  available = true
+  available = true,
+  hueEnrichment?: ConnectHueEnrichment
 ) => {
   const source: AgentSource = {
     workers: () => Effect.succeed([]),
@@ -96,7 +98,8 @@ const read = (
     source,
     stores.activity,
     stores.relationships,
-    observedAt
+    observedAt,
+    hueEnrichment
   )
 }
 const hueOf = (row: ConnectAgent | ArchivedConnectAgent | undefined): string =>
@@ -110,6 +113,47 @@ const close = (stores: Stores, agents: ReadonlyArray<ConnectAgent>, start = 0) =
 
 describe("persisted agent hues", () => {
   it.layer(NodeServices.layer)((it) => {
+    it.effect("returns the uncoloured directory before the peer deadline while hue chmod is held", () =>
+      Effect.gen(function*() {
+        const path = yield* pathFor
+        const fs = yield* FileSystem.FileSystem
+        const securing = yield* Deferred.make<void>()
+        const release = yield* Deferred.make<void>()
+        let afterChmod = (_file: string): Effect.Effect<void> => Effect.void
+        const delegated = FileSystem.FileSystem.of({
+          ...fs,
+          chmod: (file, mode) => fs.chmod(file, mode).pipe(Effect.andThen(Effect.suspend(() => afterChmod(file))))
+        })
+        const stores = yield* openStores(path)
+        const hues = yield* makeConnectHueEnrichment(path).pipe(Effect.provideService(FileSystem.FileSystem, delegated))
+        const reader = yield* Effect.acquireRelease(
+          Effect.sync(() => new DatabaseSync(path)),
+          (database) => Effect.sync(() => database.close())
+        )
+        yield* read(stores, [identity("worker")])
+        afterChmod = (file) =>
+          Effect.gen(function*() {
+            if (file !== path) return
+            const rows = reader.prepare("SELECT observed_at FROM connect_hue_hosts").all()
+            if (rows[0]?.observed_at !== 1) return
+            yield* Deferred.succeed(securing, undefined)
+            yield* Deferred.await(release)
+          })
+        yield* Effect.addFinalizer(() => Deferred.succeed(release, undefined))
+        const pending = yield* Effect.forkScoped(read(stores, [identity("worker")], 1, "atlas", true, true, hues))
+        yield* Deferred.await(securing)
+        yield* TestClock.adjust(connectPeerDirectoryTimeoutMillis / 2)
+        expect(pending.pollUnsafe()).toBeDefined()
+        const result = yield* Fiber.join(pending)
+        expect(result.agents).toHaveLength(1)
+        expect(result.agents[0]?.hue).toBeUndefined()
+        const repeated = yield* read(stores, [identity("worker")], 2, "atlas", true, true, hues)
+        expect(repeated.agents[0]?.lastActivityAt).toBe(0)
+        expect(repeated.agents[0]?.hue).toBeUndefined()
+        expect(reader.prepare("SELECT observed_at FROM connect_hue_hosts").all()).toEqual([{ observed_at: 1 }])
+        yield* Deferred.succeed(release, undefined)
+      }).pipe(Effect.scoped))
+
     it.effect("repairs only later overflow holders during the shape upgrade and preserves reservation order", () =>
       Effect.gen(function*() {
         const stores = yield* openStores(yield* pathFor)

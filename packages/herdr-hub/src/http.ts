@@ -29,6 +29,7 @@ import {
   hubUsage,
   InvalidReport,
   localConnectAgents,
+  makeConnectHueEnrichment,
   makeHerdrTerminalConnector,
   pageFleetConnectAgents,
   TerminalCapabilities,
@@ -1919,6 +1920,11 @@ export const startHttpServer = async (
       AgentActivityStore.open(statePath)
     )
     finalizers.unshift(() => Promise.resolve().then(() => activityStore.close()))
+    const hueScope = await httpRuntime.runPromise(Scope.make())
+    finalizers.unshift(() => httpRuntime.runPromise(Scope.close(hueScope, Exit.void)))
+    const hueEnrichment = await httpRuntime.runPromise(
+      makeConnectHueEnrichment(statePath).pipe(Effect.provideService(Scope.Scope, hueScope))
+    )
     const relationshipStore = await httpRuntime.runPromise(
       AgentRelationshipStore.open(statePath)
     )
@@ -1961,7 +1967,7 @@ export const startHttpServer = async (
                 const observedAt = now()
                 const peers = yield* fleetPeers(config)
                 return yield* fleetConnectAgents(
-                  localConnectAgents(config, service, activityStore, relationshipStore, observedAt).pipe(
+                  localConnectAgents(config, service, activityStore, relationshipStore, observedAt, hueEnrichment).pipe(
                     Effect.provideService(Crypto.Crypto, cryptoService)
                   ),
                   peers.map((peer) => ({
@@ -3671,7 +3677,8 @@ export const startHttpServer = async (
                   service,
                   activityStore,
                   relationshipStore,
-                  now()
+                  now(),
+                  hueEnrichment
                 ).pipe(
                   Effect.provideService(Crypto.Crypto, cryptoService)
                 )
@@ -3756,7 +3763,8 @@ export const startHttpServer = async (
                       service,
                       activityStore,
                       relationshipStore,
-                      observedAt
+                      observedAt,
+                      hueEnrichment
                     ).pipe(
                       Effect.provideService(Crypto.Crypto, cryptoService)
                     ),
@@ -3794,7 +3802,7 @@ export const startHttpServer = async (
             return Effect.fn("Connect.bindReporter")(function*(agentId: string) {
               const observedAt = now()
               const inventory = yield* (machine.host.toLowerCase() === config.host.toLowerCase()
-                ? localConnectAgents(config, service, activityStore, relationshipStore, observedAt).pipe(
+                ? localConnectAgents(config, service, activityStore, relationshipStore, observedAt, hueEnrichment).pipe(
                   Effect.provideService(Crypto.Crypto, cryptoService)
                 )
                 : Effect.gen(function*() {
@@ -4287,7 +4295,7 @@ export const startHttpServer = async (
             Effect.gen(function*() {
               const observedAt = now()
               const local = yield* Effect.result(
-                localConnectAgents(config, service, activityStore, relationshipStore, observedAt).pipe(
+                localConnectAgents(config, service, activityStore, relationshipStore, observedAt, hueEnrichment).pipe(
                   Effect.provideService(Crypto.Crypto, cryptoService)
                 )
               )
