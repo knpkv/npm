@@ -6,12 +6,13 @@ import type {
   HostConfiguration
 } from "@knpkv/herdr-fleet"
 import { decodeBoundedResponseJson } from "@knpkv/herdr-fleet"
-import { Effect, Result, Schema, type Types } from "effect"
+import { Effect, Option, Result, Schema, type Types } from "effect"
 import * as HttpClient from "effect/http/HttpClient"
 import type { AgentActivityStore } from "./activity-store.js"
 import type { AgentArchiveStore } from "./archive-store.js"
 import { ConnectArchiveStoreError, ConnectPeerError, ConnectStoreBusyError } from "./errors.js"
 import { buildConnectForest } from "./forest.js"
+import type { ConnectHueEnrichment } from "./hue-enrichment.js"
 import { connectAgentId } from "./id.js"
 import { ConnectInventoryFailure, inventoryRelationshipFailure } from "./internal/inventory-failure.js"
 import { connectPeerDirectoryTimeoutMillis, connectPeerReporterTimeoutMillis } from "./internal/peer-deadline.js"
@@ -85,7 +86,8 @@ export const localConnectAgents = Effect.fn("HerdrConnect.localAgents")(
     source: AgentSource,
     store: AgentActivityStore,
     relationshipStore: AgentRelationshipStore,
-    observedAt: number
+    observedAt: number,
+    hueEnrichment?: ConnectHueEnrichment
   ) {
     const durableWorkers = yield* source.workers().pipe(
       Effect.mapError((cause) => new ConnectPeerError({ cause, host: config.host, reason: "unavailable" }))
@@ -235,6 +237,10 @@ export const localConnectAgents = Effect.fn("HerdrConnect.localAgents")(
         })
       )
     )
+    if (hueEnrichment !== undefined) {
+      const assigned = yield* hueEnrichment.assign(local.host, local.agents, observedAt, local.complete === true)
+      return Option.isSome(assigned) ? { ...local, agents: assigned.value } : local
+    }
     return yield* store.assignHues(local.host, local.agents, observedAt, local.complete === true).pipe(
       Effect.map((agents) => ({ ...local, agents })),
       Effect.catch((cause) =>

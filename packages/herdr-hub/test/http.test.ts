@@ -3031,6 +3031,17 @@ esac
       const peerUrl = peerServer.tailnetUrl
       const headers = { host: `alpha.example.test:${String(approvalPort)}` }
       const get = (path: string) => Effect.promise(() => secureRequestBody(`${canonicalUrl}${path}`, headers))
+      // An optional read may return before the owned allocation finishes. Poll
+      // through the real peer route to assert its eventual reservation, not every response's decoration.
+      const expectPeerHue = (id: string, hue: string) =>
+        Effect.promise(() =>
+          expect.poll(async () => {
+            const response = await fetch(`${peerUrl}/v1/connect/agents/local`)
+            expect(response.status).toBe(200)
+            const page = Schema.decodeUnknownSync(Schema.fromJsonString(LocalConnectAgents))(await response.text())
+            return page.agents.find((agent) => agent.id === id)?.hue
+          }, { timeout: 2_000 }).toBe(hue)
+        )
       const initial = yield* get("/v1/connect/agents")
       expect(initial.status).toBe(200)
       const initialPage = Schema.decodeUnknownSync(Schema.fromJsonString(FleetConnectAgentPage))(initial.body)
@@ -3046,7 +3057,8 @@ esac
       const partialPage = Schema.decodeUnknownSync(Schema.fromJsonString(LocalConnectAgents))(
         yield* Effect.promise(() => partialRead.text())
       )
-      expect(partialPage.agents[0]).toHaveProperty("hue", "ember")
+      expect(partialPage.complete).toBe(false)
+      yield* expectPeerHue("agent-skills", "ember")
       names = []
       partial = false
       observedAt = firstSeenAt + 2
@@ -3060,21 +3072,12 @@ esac
       expect(archivePage.agents.find(({ agentId }) => agentId === "agent-sec-cc")).toHaveProperty("hue", "rose")
       names = ["skills"]
       observedAt++
-      const replacement = yield* Effect.promise(() => fetch(`${peerUrl}/v1/connect/agents/local`))
-      expect(replacement.status).toBe(200)
-      const replacementPage = Schema.decodeUnknownSync(Schema.fromJsonString(LocalConnectAgents))(
-        yield* Effect.promise(() => replacement.text())
-      )
+      yield* expectPeerHue("agent-skills", "ember")
       // This returning bean held overflow ember; use a new bean identity to probe oldest-family reuse instead.
       names = ["skills", "replacement-4"]
       observedAt++
-      const newest = yield* Effect.promise(() => fetch(`${peerUrl}/v1/connect/agents/local`))
-      expect(newest.status).toBe(200)
-      const newestPage = Schema.decodeUnknownSync(Schema.fromJsonString(LocalConnectAgents))(
-        yield* Effect.promise(() => newest.text())
-      )
-      expect(newestPage.agents.find(({ id }) => id === "agent-replacement-4")).toHaveProperty("hue", "rose")
-      expect(replacementPage.agents[0]).toHaveProperty("hue", "ember")
+      yield* expectPeerHue("agent-replacement-4", "rose")
+      yield* expectPeerHue("agent-skills", "ember")
     })).pipe(provideNodeServices)
   })
 
