@@ -7161,6 +7161,82 @@ esac
       }
     })
 
+  /** Seed once, then retry only the peer and hub listeners on their shared port. */
+  const startPeerAvailabilityHub = Effect.fn("HttpTest.startPeerAvailabilityHub")(function*(
+    root: string,
+    peer: ReturnType<typeof createServer>,
+    beforeHubStart: (port: number) => Effect.Effect<void, ApprovalStartFailed, Scope.Scope> = () => Effect.void
+  ) {
+    yield* Effect.acquireUseRelease(
+      JobStore.open(join(root, "jobs.sqlite")),
+      (store) => store.put(pendingRecord("SER8", 0)),
+      (store) => Effect.sync(() => store.close())
+    ).pipe(Effect.mapError((cause) => new ApprovalStartFailed({ cause })))
+    return yield* startWithPeerPort(peer, "127.0.0.2", (port) =>
+      beforeHubStart(port).pipe(
+        Effect.andThen(startHub(
+          root,
+          join(root, "relay"),
+          scriptedBackends("Nothing waits."),
+          () => Effect.void,
+          [],
+          {
+            port,
+            machines: [
+              { host: "SER8", nodeId: "node-ser8" },
+              { host: "ser8", nodeId: "node-ser8" },
+              { host: "ALPHA", nodeId: "node-alpha" },
+              { host: "alpha", nodeId: "node-alpha" }
+            ]
+          }
+        )),
+        Effect.mapError((cause) =>
+          cause._tag === "ApprovalPortTaken" || cause._tag === "ApprovalStartFailed"
+            ? cause
+            : new ApprovalStartFailed({ cause })
+        )
+      ))
+  })
+
+  describe("shared peer port startup", () => {
+    it.effect("recovers the seeded peer-availability hub after a shared-port collision", () =>
+      Effect.gen(function*() {
+        const root = mkdtempSync(join(tmpdir(), "herdr-seeded-peer-retry-"))
+        yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { force: true, recursive: true })))
+        const peer = yield* Effect.acquireRelease(
+          Effect.sync(() => createServer((_request, response) => response.end("{}"))),
+          (server) => Effect.promise(() => closePeer(server))
+        )
+        const occupied = yield* Effect.acquireRelease(
+          Effect.sync(() => createServer()),
+          (server) => Effect.promise(() => closePeer(server))
+        )
+        const ports: Array<number> = []
+        const hub = yield* startPeerAvailabilityHub(root, peer, (port) =>
+          Effect.gen(function*() {
+            ports.push(port)
+            if (ports.length !== 1) return
+            yield* Effect.tryPromise({
+              try: () =>
+                new Promise<void>((resolve, reject) => {
+                  occupied.once("error", reject)
+                  occupied.listen(port, "127.0.0.1", resolve)
+                }),
+              catch: (cause) => new ApprovalStartFailed({ cause })
+            })
+          }))
+        expect(ports.length).toBeGreaterThanOrEqual(2)
+        expect(ports.length).toBeLessThanOrEqual(5)
+        expect(boundPort(hub.server.tailnetUrl)).not.toBe(ports[0])
+        const dashboard = yield* Effect.promise(() =>
+          hubRequest(`${hub.serveUrl}/v1/dashboard`, { headers: hub.headers })
+        )
+        expect(dashboard.status).toBe(200)
+        const snapshot = Schema.decodeUnknownSync(Schema.fromJsonString(DashboardSnapshot))(dashboard.body)
+        expect(snapshot.pendingApprovals.local.map((job) => job.id)).toEqual(["ser8-job-00"])
+      }).pipe(Effect.scoped, provideNodeServices))
+  })
+
   const conversation = "product=herdr&kind=fleet&id=SER8"
   const hubRef = { product: "herdr", kind: "fleet", id: "SER8" }
 
@@ -7440,27 +7516,7 @@ esac
         Effect.sync(() => peer),
         (server) => Effect.promise(() => closePeer(server))
       )
-      const hub = yield* startWithPeerPort(peer, "127.0.0.2", (port) =>
-        startHub(
-          root,
-          join(root, "relay"),
-          scriptedBackends("Nothing waits."),
-          (store) => store.put(pendingRecord("SER8", 0)),
-          [],
-          {
-            port,
-            machines: [
-              { host: "SER8", nodeId: "node-ser8" },
-              { host: "ser8", nodeId: "node-ser8" },
-              { host: "ALPHA", nodeId: "node-alpha" },
-              { host: "alpha", nodeId: "node-alpha" }
-            ]
-          }
-        ).pipe(Effect.mapError((cause) =>
-          cause._tag === "ApprovalPortTaken" || cause._tag === "ApprovalStartFailed"
-            ? cause
-            : new ApprovalStartFailed({ cause })
-        )))
+      const hub = yield* startPeerAvailabilityHub(root, peer)
       const setOnline = (online: boolean) =>
         writeFileSync(
           hub.statusFile,
