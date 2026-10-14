@@ -6,7 +6,7 @@ import type {
   HostConfiguration
 } from "@knpkv/herdr-fleet"
 import { decodeBoundedResponseJson } from "@knpkv/herdr-fleet"
-import { Effect, Option, Result, Schema, type Types } from "effect"
+import { Clock, Effect, Option, Result, Schema, type Types } from "effect"
 import * as HttpClient from "effect/http/HttpClient"
 import type { AgentActivityStore } from "./activity-store.js"
 import type { AgentArchiveStore } from "./archive-store.js"
@@ -16,7 +16,11 @@ import type { ConnectHueEnrichment } from "./hue-enrichment.js"
 import { connectAgentId } from "./id.js"
 import { ConnectInventoryFailure, inventoryRelationshipFailure } from "./internal/inventory-failure.js"
 import { connectPeerDirectoryTimeoutMillis, connectPeerReporterTimeoutMillis } from "./internal/peer-deadline.js"
-import { connectBusyTimeoutMillis, connectWriteTimeoutMillis } from "./internal/sqlite-write.js"
+import {
+  connectBusyTimeoutMillis,
+  ConnectInventoryWriteDeadline,
+  connectWriteTimeoutMillis
+} from "./internal/sqlite-write.js"
 import {
   ConnectAgent,
   type ConnectAgentCursor,
@@ -148,10 +152,12 @@ export const localConnectAgents = Effect.fn("HerdrConnect.localAgents")(
         },
       source: "trusted_live_inventory"
     }))
+    const writeDeadline = (yield* Clock.currentTimeMillis) + connectWriteTimeoutMillis
     const persisted = yield* relationshipStore.persistAll([
       ...durableObservations,
       ...liveObservations
     ]).pipe(
+      Effect.provideService(ConnectInventoryWriteDeadline, writeDeadline),
       Effect.mapError((cause) =>
         new ConnectPeerError({
           cause: cause._tag === "ConnectStoreBusyError"
@@ -188,6 +194,7 @@ export const localConnectAgents = Effect.fn("HerdrConnect.localAgents")(
         const lastActivityAt = yield* store
           .observe(config.host, id, agent.activityRevision, observedAt)
           .pipe(
+            Effect.provideService(ConnectInventoryWriteDeadline, writeDeadline),
             Effect.mapError((cause) => new ConnectPeerError({ cause, host: config.host, reason: "unavailable" }))
           )
         const connectAgent = {

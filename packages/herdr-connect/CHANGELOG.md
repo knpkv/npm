@@ -1,5 +1,13 @@
 # @knpkv/herdr-connect
 
+## 0.24.1
+
+### Patch Changes
+
+- [#888](https://github.com/knpkv/npm/pull/888) [`b82fa1e`](https://github.com/knpkv/npm/commit/b82fa1ea10d6ba73d79e15a8621d1ea076d21741) Thanks [@konopkov](https://github.com/konopkov)! - Share one five-second acquisition and SQL retry budget across relationship and activity writes in a local inventory. Reporter peers receive the exhausted operation's safe busy metadata before their transport deadline instead of losing it to repeated per-write budgets. Keep post-commit finalization outside the lock timeout and under the store permit.
+
+- [#887](https://github.com/knpkv/npm/pull/887) [`4552a1f`](https://github.com/knpkv/npm/commit/4552a1f2192c3d7fb2e91a84d11c5c84e449d8bd) Thanks [@konopkov](https://github.com/konopkov)! - Let post pages read retained reports during local post and self-state write backoff. Keep page SQL read-only and secure lazy database sidecars to 0600 before returning, without waiting for the writer transaction permit.
+
 ## 0.24.0
 
 ### Minor Changes

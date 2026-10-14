@@ -29,6 +29,55 @@ const openStore = Effect.fn("PostTest.open")(function*() {
 })
 
 describe("agent posts", () => {
+  it.layer(NodeServices.layer, { excludeTestServices: true })((it) => {
+    it.effect.each(["post", "self-state"])(
+      "reads retained pages while a local %s writer backs off behind an external SQLite lock",
+      (kind) =>
+        Effect.gen(function*() {
+          const store = yield* openStore()
+          const retained = yield* store.post("host-a", "agent-one", body, 0)
+          const fs = yield* FileSystem.FileSystem
+          const paths = yield* Path.Path
+          const writer = yield* Effect.acquireRelease(
+            Effect.sync(() => new DatabaseSync(store.path)),
+            (database) => Effect.sync(() => database.close())
+          )
+          let locked = true
+          yield* Effect.acquireRelease(
+            Effect.sync(() => writer.exec("BEGIN IMMEDIATE")),
+            () =>
+              Effect.sync(() => {
+                if (locked) writer.exec("ROLLBACK")
+              })
+          )
+          if (paths.sep === "/") {
+            yield* fs.chmod(`${store.path}-wal`, 0o644)
+            yield* fs.chmod(`${store.path}-shm`, 0o644)
+          }
+          const write = kind === "post"
+            ? store.post("host-a", "agent-one", { ...body, eventId: "pending-event" }, 1).pipe(Effect.asVoid)
+            : store.selfUpdate("host-a", "agent-one", { mood: "focused" }, 1).pipe(Effect.asVoid)
+          const pending = yield* Effect.forkScoped(write)
+          yield* Effect.yieldNow
+          const page = yield* Effect.result(
+            store.page("host-a", "agent-one", null, 1).pipe(
+              Effect.timeout("1 second")
+            )
+          )
+          expect(Result.isSuccess(page)).toBe(true)
+          if (Result.isSuccess(page)) expect(page.success.posts).toEqual([retained])
+          expect(pending.pollUnsafe()).toBeUndefined()
+          if (paths.sep === "/") {
+            expect((yield* fs.stat(`${store.path}-wal`)).mode & 0o777).toBe(0o600)
+            expect((yield* fs.stat(`${store.path}-shm`)).mode & 0o777).toBe(0o600)
+          }
+          yield* Effect.sync(() => writer.exec("ROLLBACK"))
+          locked = false
+          yield* Fiber.join(pending)
+        }).pipe(Effect.scoped)
+    )
+  })
+
   it("rejects blank writes while preserving historical whitespace and valid text unchanged", () => {
     for (const text of ["", " ", " \t\n "]) {
       const request = { ...body, text, agentId: "agent-one" }
