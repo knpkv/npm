@@ -7,6 +7,7 @@ import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it } from "vitest"
 import { ConnectHomeArchive } from "../src/archive-home.js"
 import { ConnectHomeDirectory } from "../src/home-directory.js"
+import { Creature, type CreatureReaction, type CreatureSize } from "../src/creature.js"
 import type { ConnectAgentHue } from "../src/model.js"
 import { ConnectAgent, ConnectArchivePage } from "../src/model.js"
 import { pin, type Pins } from "../src/pins.js"
@@ -167,6 +168,105 @@ describe("creature identity across Connect surfaces", () => {
       }
     })
   }
+
+  // React keys do not serialize: retained DOM proves that list reactions cannot restart their descendants.
+  it.each(["row", "cast", "stage"] satisfies ReadonlyArray<CreatureSize>)(
+    "%s keeps reaction replay scoped to stage node lifetime",
+    async (size) => {
+      const host = document.createElement("div")
+      document.body.append(host)
+      const root = createRoot(host)
+      const render = (reaction: CreatureReaction, reactionKey: number) =>
+        root.render(
+          <Creature
+            host="atlas"
+            id="agent-one"
+            size={size}
+            state="working"
+            reaction={reaction}
+            reactionKey={reactionKey}
+          />
+        )
+      try {
+        await act(async () => render("poke", 1))
+        const lean = host.querySelector(".connect-creature-lean")
+        const body = host.querySelector(".connect-creature-body")
+        const face = host.querySelector(".connect-creature-face")
+        const creature = host.querySelector<SVGElement>(".connect-creature")
+        expect(lean).not.toBeNull()
+        expect(body).not.toBeNull()
+        expect(face).not.toBeNull()
+        const phase = creature?.style.getPropertyValue("--connect-creature-phase")
+        expect(phase).toMatch(/^-.*ms$/)
+        for (const [reaction, key] of [
+          ["poke", 2],
+          ["listening", 3]
+        ] satisfies ReadonlyArray<readonly [CreatureReaction, number]>) {
+          await act(async () => render(reaction, key))
+          const retained = [
+            host.querySelector(".connect-creature-lean") === lean,
+            host.querySelector(".connect-creature-body") === body,
+            host.querySelector(".connect-creature-face") === face
+          ]
+          expect(retained, `${size}/${reaction}/${String(key)} retained lean/body/face`).toEqual(
+            size === "stage" ? [false, false, false] : [true, true, true]
+          )
+          expect(host.querySelector(".connect-creature")?.getAttribute("data-mood")).toBe(
+            size === "stage" ? reaction : "focused"
+          )
+          expect(host.querySelector(".connect-creature")).toBe(creature)
+          if (size !== "stage" || reaction === "poke") {
+            expect(creature?.style.getPropertyValue("--connect-creature-phase")).toBe(phase)
+          }
+        }
+      } finally {
+        await act(async () => root.unmount())
+        host.remove()
+      }
+    }
+  )
+
+  // The sheet retains its root while selecting another agent; completion belongs to that identity.
+  it.each([
+    { label: "new stable id", host: "atlas", id: "agent-other" },
+    { label: "same id on another host", host: "birch", id: "agent-134" }
+  ])(
+    "opens an already-done $label without replaying the previous stage's celebration",
+    async ({ host: nextHost, id }) => {
+      const first = { ...liveAgent(), state: "working" }
+      const finished = Schema.decodeUnknownSync(ConnectAgent)({ ...first, host: nextHost, id, state: "done" })
+      const host = document.createElement("div")
+      document.body.append(host)
+      const root = createRoot(host)
+      const render = (agent: ConnectAgent) =>
+        root.render(
+          <AgentStage
+            agent={agent}
+            crew={[]}
+            onClose={() => {}}
+            onOpen={() => {}}
+            onOpenTerminal={() => {}}
+            onPinChange={() => {}}
+            pinned={false}
+            stale={false}
+            workGoal={{ _tag: "missing" }}
+          />
+        )
+      try {
+        await act(async () => render(first))
+        expect(host.querySelector(".connect-stage-hero .connect-creature")?.getAttribute("data-mood")).toBe("focused")
+        await act(async () => render(finished))
+        expect(host.querySelector(".connect-stage-hero .connect-creature")?.getAttribute("data-mood")).toBe("happy")
+        // A real completion transition of the same identity still owns its one-shot.
+        await act(async () => render(first))
+        await act(async () => render({ ...first, state: "done" }))
+        expect(host.querySelector(".connect-stage-hero .connect-creature")?.getAttribute("data-mood")).toBe("done")
+      } finally {
+        await act(async () => root.unmount())
+        host.remove()
+      }
+    }
+  )
 
   it.each(palettes)("Overflow pin: $label", async ({ hue, ink }) => {
     const agent = liveAgent(hue)

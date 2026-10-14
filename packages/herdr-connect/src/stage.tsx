@@ -738,8 +738,16 @@ export const PinnedAgents = ({
                 <li className="connect-pins-entry" data-away={agent === undefined ? "" : undefined} key={pin.key}>
                   {agent === undefined ? (
                     <span className="connect-pin-open">
-                      {/* Drawn as away: still, eyes closed, colour drained. */}
-                      <Creature host={pin.host} id={pin.id} name={pin.name} size="row" stale state="done" />
+                      {/* Drawn as away: still, half-lidded, colour drained. */}
+                      <Creature
+                        host={pin.host}
+                        hueFamily={pin.hue}
+                        id={pin.id}
+                        name={pin.name}
+                        size="row"
+                        stale
+                        state="done"
+                      />
                       <span className="connect-pin-text">
                         <span className="connect-pin-name">{pin.name}</span>
                         <small className="connect-pin-since">{sinceLabel(pin.seenAt, now)}</small>

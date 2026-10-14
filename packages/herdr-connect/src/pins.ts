@@ -3,7 +3,7 @@
  *
  * **Mental model**
  *
- * - **A pin outlives its agent's absence.** A pin names an agent by `connectAgentKey` and keeps its name and
+ * - **A pin outlives its agent's absence.** A pin names an agent by `connectAgentKey` and keeps its name, served family and
  *   when Connect last saw it, so an agent that leaves the directory and comes back is still pinned, and while
  *   it's gone the pin still shows, as "not seen since". Nothing is pruned for being absent; only unpinning
  *   removes a pin.
@@ -14,6 +14,8 @@
  * @module
  */
 import { Data, Result, Schema } from "effect"
+
+import { ConnectAgentHue } from "./model.js"
 
 /** How many agents one device can keep pinned. */
 export const MAX_PINS = 8
@@ -29,6 +31,8 @@ export const Pin = Schema.Struct({
   id: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(256)),
   /** Its name when last seen, to label the pin while the agent is away. */
   name: Schema.String.check(Schema.isMaxLength(256)),
+  /** Last served family, retained while away. Older pins omit it and use the identity fallback. */
+  hue: Schema.optionalKey(ConnectAgentHue),
   /**
    * When Connect last saw it in the directory, epoch milliseconds to the minute, within the range a Date can
    * show; `null` until a poll has seen it (a pin carried over from the single-pin version starts there).
@@ -61,6 +65,7 @@ export interface PinnableAgent {
   readonly id: string
   readonly key: string
   readonly name: string
+  readonly hue?: ConnectAgentHue | undefined
 }
 
 /** Rounded to the minute: "not seen since" never needs more, and a stable value spares a write each poll. */
@@ -70,18 +75,16 @@ const minute = (at: number): number => Math.floor(at / 60_000) * 60_000
 export const pin = (pins: Pins, agent: PinnableAgent, now: number): Result.Result<Pins, PinLimitReached> => {
   if (pins.some((existing) => existing.key === agent.key)) return Result.succeed(pins)
   if (pins.length >= MAX_PINS) return Result.fail(new PinLimitReached({ limit: MAX_PINS }))
-  return Result.succeed([
-    ...pins,
-    { host: agent.host, id: agent.id, key: agent.key, name: agent.name, seenAt: minute(now) }
-  ])
+  const entry = { host: agent.host, id: agent.id, key: agent.key, name: agent.name, seenAt: minute(now) }
+  return Result.succeed([...pins, agent.hue === undefined ? entry : { ...entry, hue: agent.hue }])
 }
 
 /** Removes the pin for `key`; the rest keep their order. */
 export const unpin = (pins: Pins, key: string): Pins => pins.filter((existing) => existing.key !== key)
 
 /**
- * Records which pinned agents this poll saw: their names and the minute. Returns the same list when nothing
- * changed, so the caller can skip a write.
+ * Records which pinned agents this poll saw: their names, served families and the minute.
+ * Returns the same list when nothing changed, so the caller can skip a write.
  */
 export const observePins = (pins: Pins, present: ReadonlyArray<PinnableAgent>, now: number): Pins => {
   const byKey = new Map(present.map((agent) => [agent.key, agent]))
@@ -90,9 +93,11 @@ export const observePins = (pins: Pins, present: ReadonlyArray<PinnableAgent>, n
     const agent = byKey.get(existing.key)
     if (agent === undefined) return existing
     const seenAt = minute(now)
-    if (existing.seenAt === seenAt && existing.name === agent.name) return existing
+    const hue = agent.hue ?? existing.hue
+    if (existing.seenAt === seenAt && existing.name === agent.name && existing.hue === hue) return existing
     changed = true
-    return { ...existing, name: agent.name, seenAt }
+    const observed = { ...existing, name: agent.name, seenAt }
+    return hue === undefined ? observed : { ...observed, hue }
   })
   return changed ? next : pins
 }

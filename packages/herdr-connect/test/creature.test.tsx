@@ -36,6 +36,23 @@ const directory = (agents: ReadonlyArray<ReturnType<typeof agent>>, stale: boole
   )
 
 describe("Creature", () => {
+  it("ignores stage-only reactions on rows and cast, including their ordinary pose and overlays", () => {
+    for (const size of ["row", "cast"] satisfies ReadonlyArray<"row" | "cast">) {
+      for (const state of ["idle", "working", "done"]) {
+        const ordinary = renderToStaticMarkup(<Creature host="atlas" id="agent-one" size={size} state={state} />)
+        for (const reaction of ["poke", "listening"] satisfies ReadonlyArray<"poke" | "listening">) {
+          const reacted = renderToStaticMarkup(
+            <Creature host="atlas" id="agent-one" size={size} state={state} reaction={reaction} reactionKey={2} />
+          )
+          expect(reacted, `${size}/${state}/${reaction}`).toBe(ordinary)
+        }
+      }
+    }
+    expect(
+      renderToStaticMarkup(<Creature host="atlas" id="agent-one" size="stage" state="idle" reaction="poke" />)
+    ).toContain('data-mood="poke"')
+  })
+
   it("uses worried for ordinary blocked/error agents and keeps the talking stuck pose", () => {
     for (const state of ["blocked", "error"]) {
       expect(renderToStaticMarkup(<Creature host="fixture-host" id="one" size="stage" state={state} />)).toContain(
