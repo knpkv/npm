@@ -97,8 +97,9 @@ export class AgentPostStore {
     yield* Schema.decodeUnknownEffect(ConnectPost)({ ...body, host, agentId, createdAt: now, sequence: 1 }).pipe(
       Effect.mapError(() => new InvalidReport({ detail: "invalid post identity or timestamp" }))
     )
-    return yield* this.#transactions.withPermits(1)(
-      connectSqliteWrite("posts.post", () => {
+    return yield* connectSqliteWrite(
+      "posts.post",
+      () => {
         this.#database.exec("BEGIN IMMEDIATE")
         try {
           prune(this.#database, now)
@@ -126,9 +127,11 @@ export class AgentPostStore {
           this.#database.exec("ROLLBACK")
           throw cause
         }
-      }, (cause) => Schema.is(Conflict)(cause) ? cause : new Unavailable({ operation: "posts.post" })).pipe(
-        Effect.tap(() => this.#secureFiles.pipe(Effect.mapError(unavailable("posts.permissions"))))
-      )
+      },
+      (cause) => Schema.is(Conflict)(cause) ? cause : new Unavailable({ operation: "posts.post" }),
+      true,
+      this.#transactions,
+      () => this.#secureFiles.pipe(Effect.mapError(unavailable("posts.permissions")))
     )
   })
 

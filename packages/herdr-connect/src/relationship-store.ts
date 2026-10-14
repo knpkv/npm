@@ -208,8 +208,9 @@ export class AgentRelationshipStore {
     observations: ReadonlyArray<RelationshipObservation>
   ) {
     const database = this.#database
-    return yield* this.#transactions.withPermits(1)(
-      connectSqliteWrite("persist.transaction", () => {
+    return yield* connectSqliteWrite(
+      "persist.transaction",
+      () => {
         database.exec("BEGIN IMMEDIATE")
         try {
           const acceptedObservations: Array<RelationshipObservation> = []
@@ -307,10 +308,13 @@ export class AgentRelationshipStore {
           database.exec("ROLLBACK")
           throw cause
         }
-      }, (cause) =>
+      },
+      (cause) =>
         isRelationshipPersistenceFailure(cause)
           ? cause
-          : storeError("persist.transaction")(cause))
+          : storeError("persist.transaction")(cause),
+      true,
+      this.#transactions
     )
   })
 

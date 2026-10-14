@@ -2243,6 +2243,180 @@ esac
     15_000
   )
 
+  it.live(
+    "preserves busy metadata for remote reporters and keeps unrelated peer failures generic",
+    () =>
+      Effect.scoped(Effect.gen(function*() {
+        const fs = yield* FileSystem.FileSystem
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "herdr-remote-report-busy-" })
+        yield* fs.chmod(root, 0o700)
+        const mainRoot = join(root, "hub")
+        const peerRoot = join(root, "peer")
+        yield* fs.makeDirectory(mainRoot)
+        yield* fs.makeDirectory(peerRoot)
+        let unavailable = false
+        const peerOperations: HostOperations = {
+          ...operations,
+          listAgents: () =>
+            Effect.succeed({
+              available: !unavailable,
+              error: unavailable ? "private inventory failure" : null,
+              agents: [{
+                activityRevision: 1,
+                agentId: "agent-remote",
+                kind: "worker",
+                name: "Worker",
+                paneId: "w1:p1",
+                parentAgentId: null,
+                relation: null,
+                status: "working",
+                work: "private work sentinel"
+              }]
+            })
+        }
+        const mainStore = yield* Effect.acquireRelease(
+          JobStore.open(join(mainRoot, "jobs.sqlite")),
+          (value) => Effect.sync(() => value.close())
+        )
+        const peerStore = yield* Effect.acquireRelease(
+          JobStore.open(join(peerRoot, "jobs.sqlite")),
+          (value) => Effect.sync(() => value.close())
+        )
+        const mainFleet = yield* makeFleetService({ host: "hub", approvalEnabled: true, operations, store: mainStore })
+        const peerFleet = yield* makeFleetService({
+          host: "peer",
+          approvalEnabled: true,
+          operations: peerOperations,
+          store: peerStore
+        })
+        const mainCommand = join(root, "tailscale-hub")
+        const peerCommand = join(root, "tailscale-peer")
+        for (
+          const { address, command, host, other, otherAddress } of [
+            { command: mainCommand, host: "hub", address: "127.0.0.1", other: "peer", otherAddress: "127.0.0.2" },
+            { command: peerCommand, host: "peer", address: "127.0.0.2", other: "hub", otherAddress: "127.0.0.1" }
+          ]
+        ) {
+          yield* fs.writeFileString(
+            command,
+            `#!/bin/sh
+case "$1" in
+  ip) printf '%s\\n' '${address}' ;;
+  whois) printf '%s\\n' '{"Node":{"StableID":"node-${other}"},"UserProfile":{"LoginName":"owner@example.test"}}' ;;
+  status) printf '%s\\n' '{"Peer":{"other":{"HostName":"${other}","ID":"node-${other}","Online":true,"TailscaleIPs":["${otherAddress}"]}},"Self":{"HostName":"${host}","ID":"node-${host}","Online":true,"TailscaleIPs":["${address}"]}}' ;;
+esac
+`
+          )
+          yield* fs.chmod(command, 0o700)
+        }
+        const shared = {
+          allowedUsers: ["owner@example.test"],
+          approvalNodes: ["node-hub"],
+          crossHost: true,
+          approvalPort: 0,
+          port: 0,
+          machines: [{ host: "hub", nodeId: "node-hub" }, { host: "peer", nodeId: "node-peer" }]
+        }
+        const peerConfig: HostConfiguration = {
+          ...config(peerRoot),
+          ...shared,
+          host: "peer",
+          tailscaleCommand: peerCommand,
+          approvalHub: { host: "hub", nodeId: "node-hub", url: "https://hub.example.test:0/" }
+        }
+        const { mainServer } = yield* Effect.acquireRelease(
+          Effect.tryPromise({
+            try: async (): Promise<PairStart> => {
+              const peerServer = await startHttpServer(peerConfig, peerFleet, assets, {
+                terminalConnector: unusedTerminal
+              })
+              const ports = await Promise.resolve().then(() => ({
+                approvalPort: boundPort(peerServer.approvalUrl),
+                peerPort: boundPort(peerServer.tailnetUrl)
+              }))
+                .catch(async (cause: unknown) => {
+                  await peerServer.close()
+                  throw cause
+                })
+              try {
+                const mainServer = await startHttpServer(
+                  {
+                    ...config(mainRoot),
+                    ...shared,
+                    host: "hub",
+                    tailscaleCommand: mainCommand,
+                    port: ports.peerPort,
+                    approvalPort: ports.approvalPort,
+                    approvalTls: directTls,
+                    approvalHub: {
+                      host: "hub",
+                      nodeId: "node-hub",
+                      url: `https://hub.example.test:${ports.approvalPort}/`
+                    }
+                  },
+                  mainFleet,
+                  assets,
+                  { terminalConnector: unusedTerminal }
+                )
+                return { _tag: "Started", approvalPort: ports.approvalPort, mainServer, peerServer }
+              } catch (cause) {
+                await peerServer.close()
+                if (
+                  isAddressInUse(cause) && (cause.port === ports.peerPort || cause.port === ports.approvalPort)
+                ) return { _tag: "PortTaken", cause }
+                throw cause
+              }
+            },
+            catch: (cause) => new ApprovalStartFailed({ cause })
+          }).pipe(
+            Effect.flatMap((pair) =>
+              pair._tag === "PortTaken"
+                ? Effect.fail(new ApprovalPortTaken({ cause: pair.cause }))
+                : Effect.succeed(pair)
+            ),
+            Effect.retry({ times: 4, while: (error) => error._tag === "ApprovalPortTaken" })
+          ),
+          (pair) => Effect.promise(() => Promise.all([pair.mainServer.close(), pair.peerServer.close()]))
+        )
+        const canonical = yield* Schema.decodeUnknownEffect(Schema.String)(mainServer.serveUrl)
+        const authority = new URL(canonical).port
+        const post = (eventId: string) =>
+          Effect.promise(() =>
+            secureRequestBody(`${canonical}/v1/connect/posts`, {
+              host: `hub.example.test:${authority}`,
+              "content-type": "application/json"
+            }, { method: "POST", body: { agentId: "agent-remote", kind: "status", text: "Progress", eventId } })
+          )
+        const warmup = yield* post("warmup")
+        expect(warmup.status, warmup.body).toBe(200)
+        const blocker = yield* Effect.acquireRelease(
+          Effect.sync(() => new DatabaseSync(join(peerRoot, "approval-app.sqlite"))),
+          (value) => Effect.sync(() => value.close())
+        )
+        yield* Effect.sync(() => blocker.exec("BEGIN IMMEDIATE"))
+        const busy = yield* post("busy")
+        expect(busy.status, busy.body).toBe(503)
+        expect(yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(busy.body)).toEqual({
+          error: "ConnectStoreBusyError",
+          operation: "persist.transaction",
+          timeoutMillis: 5_000
+        })
+        expect(busy.body).not.toContain("cause")
+        expect(busy.body).not.toContain(root)
+        expect(busy.body).not.toContain("private work sentinel")
+        yield* Effect.sync(() => blocker.exec("ROLLBACK"))
+        expect((yield* post("busy")).status).toBe(200)
+        unavailable = true
+        const other = yield* post("other")
+        expect(other.status).toBe(503)
+        expect(yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(other.body)).toEqual({
+          error: "Unavailable",
+          operation: "posts.inventory"
+        })
+      })).pipe(provideNodeServices),
+    20_000
+  )
+
   it.effect("accepts host-bound voice and self-state only on the canonical listener, including sibling claims on the same host", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-http-posts-"))
     const tailscaleCommand = join(root, "tailscale-test")

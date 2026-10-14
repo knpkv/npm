@@ -1029,6 +1029,58 @@ describe("Connect public seams", () => {
     )
   })
 
+  it.effect.each([false, true])(
+    "bounds concurrent relationship writers from entry; unlock %s",
+    (unlock) =>
+      Effect.gen(function*() {
+        const fs = yield* FileSystem.FileSystem
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "connect-queued-relationships-" })
+        const store = yield* Effect.acquireRelease(
+          AgentRelationshipStore.open(join(root, "state.sqlite")),
+          (value) => Effect.sync(() => value.close())
+        )
+        const db = yield* Effect.acquireRelease(
+          Effect.sync(() => new DatabaseSync(store.path)),
+          (value) => Effect.sync(() => value.close())
+        )
+        let held = true
+        yield* Effect.acquireRelease(Effect.sync(() => db.exec("BEGIN IMMEDIATE")), () =>
+          Effect.sync(() => {
+            if (held) db.exec("ROLLBACK")
+          }))
+        const write = (index: number) =>
+          store.persist({
+            host: "host-a",
+            agentId: `agent-queued-${index}`,
+            paneId: `w1:p${index}`,
+            observedAt: 1
+          }, "trusted_live_inventory")
+        const first = yield* Effect.forkScoped(Effect.result(write(1)))
+        const second = yield* Effect.forkScoped(Effect.result(write(2)))
+        yield* TestClock.adjust(1)
+        if (unlock) {
+          yield* Effect.sync(() => db.exec("ROLLBACK"))
+          held = false
+        }
+        yield* TestClock.adjust(6_000)
+        if (!unlock) {
+          expect(first.pollUnsafe()).toBeDefined()
+          expect(second.pollUnsafe()).toBeDefined()
+        }
+        const firstResult = yield* Fiber.join(first)
+        const secondResult = yield* Fiber.join(second)
+        expect(Result.isSuccess(firstResult)).toBe(unlock)
+        expect(Result.isSuccess(secondResult)).toBe(unlock)
+        if (!unlock) {
+          const expected = {
+            failure: { _tag: "ConnectStoreBusyError", operation: "persist.transaction", timeoutMillis: 5_000 }
+          }
+          expect(firstResult).toMatchObject(expected)
+          expect(secondResult).toMatchObject(expected)
+        } else expect(yield* store.list()).toHaveLength(2)
+      }).pipe(Effect.scoped, provideNodeServices)
+  )
+
   it.effect("retains exhausted relationship retry metadata while logging only safe diagnostics", () =>
     Effect.gen(function*() {
       const fs = yield* FileSystem.FileSystem

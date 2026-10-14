@@ -15,6 +15,7 @@ import {
   connectArchiveWindowDays,
   LocalConnectAgents
 } from "./model.js"
+import { connectPostRetentionMillis } from "./post-store.js"
 
 export const connectArchiveClosureDelayMillis = 5 * 60 * 1_000
 
@@ -141,11 +142,17 @@ const recordObservation = (
        p.text, p.created_at, o.hue
      FROM connect_archive_observations o
      LEFT JOIN connect_posts p ON p.sequence = (
-       SELECT MAX(sequence) FROM connect_posts WHERE host = o.host AND agent_id = o.agent_id
+       SELECT MAX(sequence) FROM connect_posts
+       WHERE host = o.host AND agent_id = o.agent_id AND created_at >= ?
      )
      WHERE o.host = ? AND o.missing_reads >= 2 AND o.missing_since <= ?
      ON CONFLICT(host, agent_id) DO NOTHING`
-  ).run(observation.observedAt, host, observation.observedAt - connectArchiveClosureDelayMillis)
+  ).run(
+    observation.observedAt,
+    observation.observedAt - connectPostRetentionMillis,
+    host,
+    observation.observedAt - connectArchiveClosureDelayMillis
+  )
   database.prepare(`UPDATE connect_agent_hues SET closed_at = (
     SELECT a.closed_at FROM connect_agent_archive a
     WHERE a.host = connect_agent_hues.host AND a.agent_id = connect_agent_hues.agent_id
@@ -262,22 +269,18 @@ export class AgentArchiveStore {
         }
       },
       failWith("observe.transaction"),
-      retryBusy
-    ).pipe(
-      Effect.tap((recorded) =>
-        recorded ? this.#secureFiles.pipe(Effect.mapError(fromPrivateDatabaseError)) : Effect.void
-      ),
-      Effect.tap((recorded) =>
-        Effect.sync(() => {
+      retryBusy,
+      retryBusy ? this.#transactions : undefined,
+      (recorded) =>
+        Effect.gen({ self: this }, function*() {
           if (!recorded) return
+          yield* this.#secureFiles.pipe(Effect.mapError(fromPrivateDatabaseError))
           const failedAt = this.#taintedHosts.get(host)
           if (failedAt === undefined || failedAt < observation.observedAt) this.#taintedHosts.delete(host)
         })
-      ),
-      Effect.asVoid
-    )
+    ).pipe(Effect.asVoid)
     const guarded = retryBusy
-      ? this.#transactions.withPermits(1)(write)
+      ? write
       : this.#transactions.withPermitsIfAvailable(1)(write).pipe(Effect.flatMap(Option.match({
         onNone: () =>
           new ConnectArchiveStoreError({

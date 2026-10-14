@@ -465,6 +465,12 @@ const apiError = (error: ApiError): ApiErrorResponse => {
     case "PushEndpointNotAllowedError":
       return { status: 400, body: { error: error._tag, origin: error.origin } }
     case "ConnectPeerError":
+      if (Schema.is(ConnectStoreBusyError)(error.cause)) {
+        return {
+          status: 503,
+          body: { error: error.cause._tag, operation: error.cause.operation, timeoutMillis: error.cause.timeoutMillis }
+        }
+      }
       return {
         status: 503,
         body: { error: error._tag, host: error.host, reason: error.reason }
@@ -3742,7 +3748,7 @@ export const startHttpServer = async (
                     agentsUrl: peer.connectAgentsUrl,
                     online: peer.online,
                     terminalUrl: peer.terminalUrl
-                  })
+                  }, { timeout: "reporter" })
                 })).pipe(
                   Effect.mapError((error) =>
                     error._tag === "ConnectPeerError" && Schema.is(ConnectStoreBusyError)(error.cause)

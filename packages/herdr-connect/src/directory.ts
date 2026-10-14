@@ -14,7 +14,7 @@ import { ConnectArchiveStoreError, ConnectPeerError, ConnectStoreBusyError } fro
 import { buildConnectForest } from "./forest.js"
 import { connectAgentId } from "./id.js"
 import { ConnectInventoryFailure, inventoryRelationshipFailure } from "./internal/inventory-failure.js"
-import { connectBusyTimeoutMillis } from "./internal/sqlite-write.js"
+import { connectBusyTimeoutMillis, connectWriteTimeoutMillis } from "./internal/sqlite-write.js"
 import {
   ConnectAgent,
   type ConnectAgentCursor,
@@ -260,8 +260,20 @@ const PeerConnectAgents = Schema.Struct({
   truncated: Schema.optionalKey(Schema.Boolean)
 })
 
+const PeerInventoryBusy = Schema.Struct({
+  error: Schema.Literal("ConnectStoreBusyError"),
+  operation: Schema.Literals(["persist.transaction", "activity.observe"]),
+  timeoutMillis: Schema.Literal(connectWriteTimeoutMillis)
+})
+const peerDirectoryTimeoutMillis = 1_500
+const peerReporterTimeoutMarginMillis = 1_000
+
+/** Reporter reads wait for the write budget plus a transport margin; directory reads keep their shorter deadline. */
 export const fetchPeerConnectAgents = Effect.fn("HerdrConnect.fetchPeerAgents")(
-  function*(peer: ConnectPeerTarget): Effect.fn.Return<LocalConnectAgents, ConnectPeerError, HttpClient.HttpClient> {
+  function*(
+    peer: ConnectPeerTarget,
+    _options: { readonly timeout?: "directory" | "reporter" } = {}
+  ): Effect.fn.Return<LocalConnectAgents, ConnectPeerError, HttpClient.HttpClient> {
     if (!peer.online) {
       return yield* new ConnectPeerError({ cause: peer.host, host: peer.host, reason: "offline" })
     }
@@ -273,6 +285,20 @@ export const fetchPeerConnectAgents = Effect.fn("HerdrConnect.fetchPeerAgents")(
       Effect.mapError((cause) => new ConnectPeerError({ cause, host: peer.host, reason: "request_failed" }))
     )
     if (response.status < 200 || response.status >= 300) {
+      if (response.status === 503) {
+        const busy = yield* Effect.result(decodeBoundedResponseJson(response, PeerInventoryBusy, 1_024))
+        if (Result.isSuccess(busy)) {
+          return yield* new ConnectPeerError({
+            cause: new ConnectStoreBusyError({
+              operation: busy.success.operation,
+              timeoutMillis: busy.success.timeoutMillis,
+              cause: response.status
+            }),
+            host: peer.host,
+            reason: "unavailable"
+          })
+        }
+      }
       return yield* new ConnectPeerError({
         cause: response.status,
         host: peer.host,
@@ -310,16 +336,20 @@ export const fetchPeerConnectAgents = Effect.fn("HerdrConnect.fetchPeerAgents")(
         (summary.nextCursor === undefined || summary.nextCursor === null) && summary.truncated !== true
     }
   },
-  (effect, peer) =>
-    effect.pipe(
+  (effect, peer, options?: { readonly timeout?: "directory" | "reporter" }) => {
+    const timeoutMillis = options?.timeout === "reporter"
+      ? connectWriteTimeoutMillis + peerReporterTimeoutMarginMillis
+      : peerDirectoryTimeoutMillis
+    return effect.pipe(
       Effect.timeoutOrElse({
-        duration: "1500 millis",
+        duration: timeoutMillis,
         orElse: () =>
           Effect.fail(
-            new ConnectPeerError({ cause: 1_500, host: peer.host, reason: "timeout" })
+            new ConnectPeerError({ cause: timeoutMillis, host: peer.host, reason: "timeout" })
           )
       })
     )
+  }
 )
 
 export const fleetConnectAgents = Effect.fn("HerdrConnect.fleetAgents")(function*(

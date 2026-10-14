@@ -1,15 +1,20 @@
 import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
-import { Effect, FileSystem, Path, Result, Schema } from "effect"
+import { Effect, Fiber, FileSystem, Path, Result, Schema } from "effect"
+import { HttpClient } from "effect/http"
+import { TestClock } from "effect/testing"
 import { DatabaseSync } from "node:sqlite"
 import { AgentArchiveStore } from "../src/archive-store.js"
-import { AgentPostStore } from "../src/post-store.js"
+import { fleetConnectAgents } from "../src/directory.js"
+import { type ConnectAgent, LocalConnectAgents } from "../src/model.js"
+import { AgentPostStore, connectPostRetentionMillis } from "../src/post-store.js"
 import {
   ConnectLastWords,
   ConnectPost,
   ConnectPostBody,
   ConnectPostRequest,
-  connectPostTextLimit
+  connectPostTextLimit,
+  Unavailable
 } from "../src/posts.js"
 
 const body: ConnectPostBody = { kind: "status", text: "Tests passing", eventId: "event-one" }
@@ -58,6 +63,53 @@ describe("agent posts", () => {
   })
 
   it.layer(NodeServices.layer)((it) => {
+    it.effect.each([false, true])(
+      "bounds queued post and self-state writers from entry; unlock %s",
+      (unlock) =>
+        Effect.gen(function*() {
+          const store = yield* openStore()
+          const db = yield* Effect.acquireRelease(
+            Effect.sync(() => new DatabaseSync(store.path)),
+            (value) => Effect.sync(() => value.close())
+          )
+          let held = true
+          yield* Effect.acquireRelease(Effect.sync(() => db.exec("BEGIN IMMEDIATE")), () =>
+            Effect.sync(() => {
+              if (held) db.exec("ROLLBACK")
+            }))
+          const first = yield* Effect.forkScoped(Effect.result(store.post("host-a", "agent-one", body, 1)))
+          const second = yield* Effect.forkScoped(
+            Effect.result(store.selfUpdate("host-a", "agent-one", { mood: "focused" }, 1))
+          )
+          yield* TestClock.adjust(1)
+          if (unlock) {
+            yield* Effect.sync(() => db.exec("ROLLBACK"))
+            held = false
+          }
+          // Let retries resume after unlock without expiring real filesystem completion.
+          yield* TestClock.adjust(unlock ? 1_000 : 6_000)
+          if (!unlock) {
+            expect(first.pollUnsafe()).toBeDefined()
+            expect(second.pollUnsafe()).toBeDefined()
+          }
+          const firstResult = yield* Fiber.join(first)
+          const secondResult = yield* Fiber.join(second)
+          expect(Result.isSuccess(firstResult)).toBe(unlock)
+          expect(Result.isSuccess(secondResult)).toBe(unlock)
+          if (!unlock) {
+            expect(firstResult).toMatchObject({
+              failure: { _tag: "ConnectStoreBusyError", operation: "posts.post", timeoutMillis: 5_000 }
+            })
+            expect(secondResult).toMatchObject({
+              failure: { _tag: "ConnectStoreBusyError", operation: "self.update", timeoutMillis: 5_000 }
+            })
+          } else {
+            expect((yield* store.page("host-a", "agent-one", null, 1)).posts).toHaveLength(1)
+            expect(yield* store.selfLatestMany([{ host: "host-a", agentId: "agent-one" }])).toHaveLength(1)
+          }
+        }).pipe(Effect.scoped)
+    )
+
     it.effect("keeps stored whitespace reports readable in pages, latest reads and archive last words", () =>
       Effect.gen(function*() {
         const store = yield* openStore()
@@ -180,6 +232,46 @@ describe("agent posts", () => {
           closedAt: 1
         }])
       }).pipe(Effect.scoped))
+
+    it.effect.each([0, 300_001, 300_002, 300_003])(
+      "directory closure filters words at the inclusive retention cutoff; created %s",
+      (createdAt) =>
+        Effect.gen(function*() {
+          const store = yield* openStore()
+          const archive = yield* Effect.acquireRelease(AgentArchiveStore.open(store.path), (value) =>
+            Effect.sync(() => value.close()))
+          const row: ConnectAgent = {
+            id: "agent-one",
+            host: "HOST-A",
+            name: "Worker",
+            kind: "worker",
+            state: "working",
+            work: "project",
+            lastActivityAt: 0
+          }
+          yield* store.post(row.host, row.id, body, createdAt)
+          const poll = (agents: ReadonlyArray<ConnectAgent>, observedAt: number) =>
+            fleetConnectAgents(
+              Effect.succeed(LocalConnectAgents.make({ host: row.host, agents, complete: true })),
+              [],
+              { store: archive, posts: store, observedAt }
+            ).pipe(Effect.provideService(
+              HttpClient.HttpClient,
+              HttpClient.make(() =>
+                Effect.die(new Unavailable({ operation: "fixture.peer" }))
+              )
+            ))
+          const live = yield* poll([row], connectPostRetentionMillis + 1)
+          expect(live.agents[0]?.voice === undefined).toBe(createdAt === 0)
+          yield* poll([], connectPostRetentionMillis + 2)
+          yield* poll([], connectPostRetentionMillis + 300_002)
+          const closed = (yield* archive.page()).agents[0]
+          expect(closed).toBeDefined()
+          if (createdAt < 300_002) {
+            expect(closed?.lastWords).toBeUndefined()
+          } else expect(closed?.lastWords).toEqual({ text: body.text, createdAt })
+        }).pipe(Effect.scoped)
+    )
 
     it.effect("closure snapshots the latest words and retains them after post eviction and reopening", () =>
       Effect.gen(function*() {

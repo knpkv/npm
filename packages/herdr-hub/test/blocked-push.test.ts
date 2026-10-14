@@ -2,9 +2,10 @@ import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
 import { AgentPostStore, ConnectAgent } from "@knpkv/herdr-connect"
 import { openPrivateSqlite } from "@knpkv/herdr-fleet/sqlite"
-import { Clock, Deferred, Effect, Fiber, FileSystem, Path, Ref, Schema } from "effect"
+import { Clock, Deferred, Effect, Fiber, FileSystem, Path, Ref, Result, Schema } from "effect"
 import { HttpClient } from "effect/http"
 import { TestClock } from "effect/testing"
+import { DatabaseSync } from "node:sqlite"
 import { type BlockedObservation, type BlockedPushPayload, BlockedPushSettings } from "../src/blocked-push-model.js"
 import { loadBlockedPushObservations } from "../src/blocked-push-source.js"
 import { BlockedPushStore } from "../src/blocked-push-store.js"
@@ -681,4 +682,54 @@ describe("blocked agent notifications", () => {
         expect(yield* Ref.get(test.sent)).toHaveLength(2)
       }))
   })
+})
+
+// This pass contract is about real event-loop latency, including native SQLite waits.
+it.layer(NodeServices.layer, { excludeTestServices: true })((it) => {
+  it.effect.each([false, true])(
+    "bounds a notification pass when a writer arrives during send; locked %s",
+    (locked) =>
+      Effect.gen(function*() {
+        const test = yield* setup()
+        yield* test.subscriptions.putSubscription({
+          endpoint: "https://push.example.test/two",
+          expirationTime: null,
+          keys: { auth: "auth_key", p256dh: "public_key" }
+        }, "owner@example.test")
+        const agents = Array.from({ length: 16 }, (_, index) => ({ ...agent("blocked"), id: `agent-${index}` }))
+        const observedAt = yield* Clock.currentTimeMillis
+        yield* test.store.observe({ host: "HOST-A", complete: true, observedAt: observedAt - 60_000, agents })
+        const db = yield* Effect.acquireRelease(
+          Effect.sync(() => new DatabaseSync(test.path)),
+          (value) => Effect.sync(() => value.close())
+        )
+        let held = false
+        const sent = yield* Ref.make(0)
+        const started = yield* Clock.currentTimeMillis
+        const timer = yield* Effect.forkScoped(Effect.sleep("25 millis").pipe(Effect.andThen(Clock.currentTimeMillis)))
+        const result = yield* Effect.result(runBlockedPushPass({
+          store: test.store,
+          subscriptions: test.subscriptions,
+          allowedUsers: ["owner@example.test"],
+          allowedPushOrigins: ["https://push.example.test"],
+          loadObservations: () => Effect.succeed([{ host: "HOST-A", complete: true, observedAt, agents }]),
+          send: () =>
+            Ref.update(sent, (count) => count + 1).pipe(Effect.andThen(Effect.sync(() => {
+              if (locked && !held) {
+                db.exec("BEGIN IMMEDIATE")
+                held = true
+              }
+            })))
+        }))
+        const completed = yield* Clock.currentTimeMillis
+        expect(completed - started).toBeLessThan(750)
+        expect((yield* Fiber.join(timer)) - started).toBeLessThan(750)
+        if (locked) expect(result).toMatchObject({ failure: { _tag: "BlockedPushStoreError" } })
+        else {
+          expect(Result.isSuccess(result)).toBe(true)
+          expect(yield* Ref.get(sent)).toBe(32)
+        }
+      }).pipe(Effect.scoped),
+    { timeout: 10_000 }
+  )
 })

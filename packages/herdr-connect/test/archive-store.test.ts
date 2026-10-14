@@ -1,6 +1,6 @@
 import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it, vi } from "@effect/vitest"
-import { Clock, Deferred, Effect, Fiber, FileSystem, Logger, Option, Path, Result, Schema } from "effect"
+import { Clock, Deferred, Effect, Fiber, FileSystem, Logger, Option, Path, Ref, Result, Schema } from "effect"
 import { HttpClient, HttpClientResponse } from "effect/http"
 import { TestClock } from "effect/testing"
 import { DatabaseSync } from "node:sqlite"
@@ -70,6 +70,47 @@ const seedClosure = Effect.fn("ArchiveTest.seedClosure")(function*(store: AgentA
 
 describe("closed agent archive", () => {
   it.layer(NodeServices.layer)((it) => {
+    it.effect("keeps optional observations outside the primary permit until file security finishes", () =>
+      Effect.gen(function*() {
+        const fs = yield* FileSystem.FileSystem
+        const armed = yield* Ref.make(false)
+        const securing = yield* Deferred.make<void>()
+        const release = yield* Deferred.make<void>()
+        const delegated = FileSystem.FileSystem.of({
+          ...fs,
+          chmod: (path, mode) =>
+            Effect.gen(function*() {
+              yield* fs.chmod(path, mode)
+              if (path.endsWith("archive.sqlite") && (yield* Ref.getAndSet(armed, false))) {
+                yield* Deferred.succeed(securing, undefined)
+                yield* Deferred.await(release)
+              }
+            })
+        })
+        const store = yield* openStore().pipe(Effect.provideService(FileSystem.FileSystem, delegated))
+        yield* Ref.set(armed, true)
+        const primary = yield* Effect.forkScoped(observe(store, 0, [agent()]))
+        yield* Deferred.await(securing)
+        const reader = yield* Effect.acquireRelease(
+          Effect.sync(() => new DatabaseSync(store.path)),
+          (database) => Effect.sync(() => database.close())
+        )
+        expect(reader.prepare("SELECT agent_id FROM connect_archive_observations").all()).toHaveLength(1)
+        const absent = (observedAt: number) =>
+          store.observeAvailable([{ host: "HOST-A", agents: [], complete: true, observedAt }])
+        expect(yield* Effect.result(absent(1))).toMatchObject({
+          _tag: "Failure",
+          failure: { _tag: "ConnectArchiveStoreError", operation: "observe.transaction" }
+        })
+        yield* Deferred.succeed(release, undefined)
+        yield* Fiber.join(primary)
+        yield* absent(1)
+        yield* absent(300_001)
+        expect((yield* store.page()).agents).toEqual([])
+        yield* absent(600_001)
+        expect((yield* store.page()).agents).toHaveLength(1)
+      }).pipe(Effect.scoped))
+
     it.effect("remembers an absent parent's latest name on its own host, before and after closure", () =>
       Effect.gen(function*() {
         const store = yield* openStore()

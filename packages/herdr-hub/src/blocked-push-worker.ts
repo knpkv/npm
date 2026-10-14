@@ -3,7 +3,8 @@ import {
   blockedAgentBucket,
   type BlockedObservation,
   type BlockedPushPayload,
-  BlockedPushRecipientError
+  BlockedPushRecipientError,
+  BlockedPushStoreError
 } from "./blocked-push-model.js"
 import type { BlockedPushStore } from "./blocked-push-store.js"
 import { PushDeliveryError } from "./errors.js"
@@ -80,7 +81,11 @@ export const runBlockedPushPass = Effect.fn("BlockedPushWorker.runPass")(
             ["BlockedPushRecipientError", "PushEndpointNotAllowedError"],
             () => options.subscriptions.deleteSubscriptionPrivileged(target.endpoint)
           ),
-          Effect.catch((error) => Effect.logError("BlockedPushWorker.delivery_failed", error))
+          Effect.catch((error) =>
+            Schema.is(BlockedPushStoreError)(error)
+              ? Effect.fail(error)
+              : Effect.logError("BlockedPushWorker.delivery_failed", error)
+          )
         ), { discard: true }), { concurrency: 4, discard: true })
     const remaining = yield* options.subscriptions.listSubscriptions()
     yield* options.store.prune(remaining.map(subscriptionRevision))

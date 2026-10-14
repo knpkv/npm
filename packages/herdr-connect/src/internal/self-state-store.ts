@@ -31,8 +31,9 @@ export const makeSelfStateMethods = (
       )({ host, agentId, at: now }).pipe(
         Effect.mapError(() => new InvalidReport({ detail: "invalid self-state identity or timestamp" }))
       )
-      return yield* transactions.withPermits(1)(
-        connectSqliteWrite("self.update", () => {
+      return yield* connectSqliteWrite(
+        "self.update",
+        () => {
           database.exec("BEGIN IMMEDIATE")
           try {
             const raw = database.prepare(
@@ -62,12 +63,11 @@ export const makeSelfStateMethods = (
             database.exec("ROLLBACK")
             throw cause
           }
-        }, (cause) => Schema.is(TooManySelfUpdates)(cause) ? cause : new Unavailable({ operation: "self.update" }))
-          .pipe(
-            Effect.tap(() =>
-              secureFiles.pipe(Effect.mapError(() => new Unavailable({ operation: "self.permissions" })))
-            )
-          )
+        },
+        (cause) => Schema.is(TooManySelfUpdates)(cause) ? cause : new Unavailable({ operation: "self.update" }),
+        true,
+        transactions,
+        () => secureFiles.pipe(Effect.mapError(() => new Unavailable({ operation: "self.permissions" })))
       )
     }
   ),
