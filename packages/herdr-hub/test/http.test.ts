@@ -44,6 +44,7 @@ import {
   WorkStore
 } from "@knpkv/herdr-work"
 import type { RelayBackend } from "@knpkv/relay"
+import type { Scope } from "effect"
 import {
   Clock,
   Data,
@@ -255,7 +256,8 @@ const directTls = {
 
 /** A real hub-to-peer hop proves unsupported takeover never reaches an old host's upgrade handler. */
 const terminalRelayFixture = Effect.fn("ControllerTest.relay")(function*(
-  capability: "missing" | "false" | "invalid" | "redirect" | "transport" | "supported"
+  capability: "missing" | "false" | "invalid" | "redirect" | "transport" | "supported",
+  beforeHubStart: (port: number) => Effect.Effect<void, ApprovalStartFailed, Scope.Scope> = () => Effect.void
 ) {
   const root = mkdtempSync(join(tmpdir(), "herdr-terminal-relay-"))
   yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { force: true, recursive: true })))
@@ -294,7 +296,7 @@ const terminalRelayFixture = Effect.fn("ControllerTest.relay")(function*(
         )
       })
     ),
-    (server) => Effect.promise(() => new Promise<void>((resolve) => server.close(() => resolve())))
+    (server) => Effect.promise(() => closePeer(server))
   )
   peer.on("upgrade", (request, socket, head) => {
     upgrades.push(request.url ?? "")
@@ -304,13 +306,6 @@ const terminalRelayFixture = Effect.fn("ControllerTest.relay")(function*(
       accepted.send(JSON.stringify({ type: "terminal.ready" }))
     })
   })
-  yield* Effect.promise(() =>
-    new Promise<void>((resolve, reject) => {
-      peer.once("error", reject)
-      peer.listen(0, "127.0.0.2", () => resolve())
-    })
-  )
-  const address = yield* Schema.decodeUnknownEffect(Schema.Struct({ port: Schema.Number }))(peer.address())
   const tailscaleCommand = join(root, "tailscale-test")
   writeFileSync(
     tailscaleCommand,
@@ -329,23 +324,28 @@ esac
   )
   const fleet = yield* makeFleetService({ approvalEnabled: false, host: "SER8", operations, store })
   const running = yield* Effect.acquireRelease(
-    startWithApprovalPort(async (approvalPort) =>
-      startHttpServer(
-        {
-          ...config(root),
-          host: "SER8",
-          crossHost: true,
-          approvalHub: { host: "SER8", nodeId: "node-ser8", url: `https://127.0.0.1:${String(approvalPort)}/` },
-          approvalPort,
-          approvalTls: directTls,
-          port: address.port,
-          machines: [{ host: "SER8", nodeId: "node-ser8" }, { host: "SER9", nodeId: "node-ser9" }],
-          tailscaleCommand
-        },
-        fleet,
-        assets,
-        { terminalConnector: unusedTerminal }
-      )
+    startWithPeerPort(
+      peer,
+      "127.0.0.2",
+      (peerPort) =>
+        beforeHubStart(peerPort).pipe(Effect.andThen(startWithApprovalPort(async (approvalPort) =>
+          startHttpServer(
+            {
+              ...config(root),
+              host: "SER8",
+              crossHost: true,
+              approvalHub: { host: "SER8", nodeId: "node-ser8", url: `https://127.0.0.1:${String(approvalPort)}/` },
+              approvalPort,
+              approvalTls: directTls,
+              port: peerPort,
+              machines: [{ host: "SER8", nodeId: "node-ser8" }, { host: "SER9", nodeId: "node-ser9" }],
+              tailscaleCommand
+            },
+            fleet,
+            assets,
+            { terminalConnector: unusedTerminal }
+          )
+        )))
     ),
     (server) => Effect.promise(server.close)
   )
@@ -457,6 +457,42 @@ const listenOn = (server: ReturnType<typeof createServer>, host: string): Promis
       else resolve(address.success.port)
     })
   })
+
+/** Failed startup may already have closed this owned peer. */
+const closePeer = (peer: ReturnType<typeof createServer>): Promise<void> =>
+  peer.listening
+    ? new Promise((resolve, reject) => peer.close((error) => error === undefined ? resolve() : reject(error)))
+    : Promise.resolve()
+
+/** A peer's chosen port was occupied on the hub's different loopback address. */
+class SharedPeerPortTaken extends Data.TaggedError("SharedPeerPortTaken")<{ readonly cause: unknown }> {}
+
+/** Bind the owned peer to port 0; close failed pairs before retrying only that shared-port collision. */
+const startWithPeerPort = Effect.fn("HttpTest.startWithPeerPort")(function*<A, R>(
+  peer: ReturnType<typeof createServer>,
+  host: string,
+  start: (port: number) => Effect.Effect<A, ApprovalPortTaken | ApprovalStartFailed, R>
+) {
+  const attempt = Effect.gen(function*() {
+    const port = yield* Effect.tryPromise({
+      try: () => listenOn(peer, host),
+      catch: (cause) => new ApprovalStartFailed({ cause })
+    })
+    const result = yield* Effect.result(start(port))
+    if (Result.isSuccess(result)) return result.success
+    // startHttpServer closes every listener it acquired before rejecting; the peer is ours to close.
+    yield* Effect.tryPromise({
+      try: () =>
+        new Promise<void>((resolve, reject) => peer.close((error) => error === undefined ? resolve() : reject(error))),
+      catch: (cause) => new ApprovalStartFailed({ cause })
+    })
+    const error = result.failure
+    return yield* isAddressInUse(error.cause) && error.cause.port === port
+      ? new SharedPeerPortTaken({ cause: error.cause })
+      : error
+  })
+  return yield* attempt.pipe(Effect.retry({ times: 4, while: (error) => error._tag === "SharedPeerPortTaken" }))
+})
 
 /** A hub and peer pair started on the peer's ports, or the hub found one of those ports taken on its address. */
 type PairStart =
@@ -656,6 +692,55 @@ describe("approval port reservation", () => {
     }))
 })
 
+describe("shared peer port startup", () => {
+  it.effect("closes every failed peer and preserves the fifth shared-port error", () =>
+    Effect.gen(function*() {
+      const peer = yield* Effect.acquireRelease(
+        Effect.sync(() => createServer()),
+        (server) => Effect.promise(() => closePeer(server))
+      )
+      let attempts = 0
+      let closed = 0
+      let lastPort = 0
+      peer.on("close", () => {
+        closed += 1
+      })
+      const failure = yield* Effect.flip(startWithPeerPort(peer, "127.0.0.2", (port) => {
+        attempts += 1
+        lastPort = port
+        expect(peer.listening).toBe(true)
+        return Effect.fail(new ApprovalStartFailed({ cause: { code: "EADDRINUSE", port } }))
+      }))
+      expect(failure).toMatchObject({ _tag: "SharedPeerPortTaken", cause: { code: "EADDRINUSE", port: lastPort } })
+      expect(attempts).toBe(5)
+      expect(closed).toBe(5)
+      expect(peer.listening).toBe(false)
+    }).pipe(Effect.scoped))
+
+  it.effect.each(["another port", "another failure"])("closes without retrying %s", (kind) =>
+    Effect.gen(function*() {
+      const peer = yield* Effect.acquireRelease(
+        Effect.sync(() => createServer()),
+        (server) => Effect.promise(() => closePeer(server))
+      )
+      let attempts = 0
+      let original: ApprovalStartFailed | undefined
+      const failure = yield* Effect.flip(startWithPeerPort(peer, "127.0.0.2", (port) => {
+        attempts += 1
+        original = new ApprovalStartFailed({
+          cause: {
+            code: kind === "another port" ? "EADDRINUSE" : "EACCES",
+            port: kind === "another port" ? port + 1 : port
+          }
+        })
+        return Effect.fail(original)
+      }))
+      expect(failure).toBe(original)
+      expect(attempts).toBe(1)
+      expect(peer.listening).toBe(false)
+    }).pipe(Effect.scoped))
+})
+
 describe("host HTTP authority", () => {
   for (const discoveryFails of [true, false]) {
     it.live(
@@ -699,14 +784,9 @@ esac
               }]
             }))
           })
-          const peerPort = yield* Effect.acquireRelease(
-            Effect.promise(() => listenOn(peerServer, "127.0.0.2")),
-            () =>
-              Effect.promise(() =>
-                new Promise<void>((resolve, reject) => {
-                  peerServer.close((error) => error === undefined ? resolve() : reject(error))
-                })
-              )
+          yield* Effect.acquireRelease(
+            Effect.sync(() => peerServer),
+            (server) => Effect.promise(() => closePeer(server))
           )
           const subscriptions = yield* Effect.acquireRelease(
             ApprovalAppStore.open(join(root, "approval-app.sqlite")),
@@ -748,38 +828,41 @@ esac
           const delivered = yield* Deferred.make<void>()
           const sent = yield* Ref.make<ReadonlyArray<{ readonly host: string; readonly agentId: string }>>([])
           yield* Effect.acquireRelease(
-            Effect.promise(() =>
-              startHttpServer(
-                {
-                  ...config(root),
-                  host: "SER8",
-                  crossHost: true,
-                  port: peerPort,
-                  approvalPort: 0,
-                  approvalTls: directTls,
-                  approvalHub: { host: "SER8", nodeId: "node-ser8", url: "https://ser8.example.test:0/" },
-                  tailscaleCommand
-                },
-                fleet,
-                assets,
-                {
-                  terminalConnector: unusedTerminal,
-                  pushSender: (_target, payload) =>
-                    "kind" in payload && payload.kind === "agent-blocked"
-                      ? Ref.updateAndGet(
-                        sent,
-                        (values) => [...values, { host: payload.host, agentId: payload.agentId }]
-                      ).pipe(
-                        Effect.flatMap((values) =>
-                          values.length === (discoveryFails ? 1 : 2)
-                            ? Deferred.succeed(delivered, undefined).pipe(Effect.asVoid)
-                            : Effect.void
-                        )
-                      )
-                      : Effect.void
-                }
-              )
-            ),
+            startWithPeerPort(peerServer, "127.0.0.2", (peerPort) =>
+              Effect.tryPromise({
+                try: () =>
+                  startHttpServer(
+                    {
+                      ...config(root),
+                      host: "SER8",
+                      crossHost: true,
+                      port: peerPort,
+                      approvalPort: 0,
+                      approvalTls: directTls,
+                      approvalHub: { host: "SER8", nodeId: "node-ser8", url: "https://ser8.example.test:0/" },
+                      tailscaleCommand
+                    },
+                    fleet,
+                    assets,
+                    {
+                      terminalConnector: unusedTerminal,
+                      pushSender: (_target, payload) =>
+                        "kind" in payload && payload.kind === "agent-blocked"
+                          ? Ref.updateAndGet(
+                            sent,
+                            (values) => [...values, { host: payload.host, agentId: payload.agentId }]
+                          ).pipe(
+                            Effect.flatMap((values) =>
+                              values.length === (discoveryFails ? 1 : 2)
+                                ? Deferred.succeed(delivered, undefined).pipe(Effect.asVoid)
+                                : Effect.void
+                            )
+                          )
+                          : Effect.void
+                    }
+                  ),
+                catch: (cause) => new ApprovalStartFailed({ cause })
+              })),
             (running) => Effect.promise(running.close)
           )
           yield* Deferred.await(delivered).pipe(Effect.timeout("3 seconds"))
@@ -4710,16 +4793,11 @@ esac
                 nextCursor: hasCursor ? null : { createdAt: 1, id: "legacy-peer-job" }
               }))
             })
-            const pendingPort = yield* Effect.promise(() => listenOn(peerServer, "127.0.0.2"))
-            yield* Effect.addFinalizer(() =>
-              Effect.promise(
-                () =>
-                  new Promise<void>((resolve, reject) => {
-                    peerServer.close((error) => (error === undefined ? resolve() : reject(error)))
-                  })
-              )
+            yield* Effect.acquireRelease(
+              Effect.sync(() => peerServer),
+              (server) => Effect.promise(() => closePeer(server))
             )
-            const hostConfigFor = (approvalPort: number): HostConfiguration => ({
+            const hostConfigFor = (approvalPort: number, pendingPort: number): HostConfiguration => ({
               ...config(root),
               approvalHub: {
                 host: "ALPHA",
@@ -4741,12 +4819,13 @@ esac
               store
             })
             const { approvalPort, server } = yield* Effect.acquireRelease(
-              startWithApprovalPort(async (approvalPort) => ({
-                approvalPort,
-                server: await startHttpServer(hostConfigFor(approvalPort), fleet, assets, {
-                  terminalConnector: unusedTerminal
-                })
-              })),
+              startWithPeerPort(peerServer, "127.0.0.2", (pendingPort) =>
+                startWithApprovalPort(async (approvalPort) => ({
+                  approvalPort,
+                  server: await startHttpServer(hostConfigFor(approvalPort, pendingPort), fleet, assets, {
+                    terminalConnector: unusedTerminal
+                  })
+                }))),
               (running) => Effect.promise(running.server.close)
             )
             if (server.serveUrl === null) {
@@ -6196,6 +6275,41 @@ esac
       expect(opens).toBe(2)
     }).pipe(Effect.scoped, provideNodeServices))
 
+  it.effect("retries the complete terminal relay pair when its shared port is occupied on the hub address", () =>
+    Effect.gen(function*() {
+      const attempted: Array<number> = []
+      let blockedPort: number | undefined
+      const peer = yield* terminalRelayFixture("invalid", (port) =>
+        Effect.gen(function*() {
+          attempted.push(port)
+          if (blockedPort !== undefined) return
+          const blocker = yield* Effect.acquireRelease(
+            Effect.sync(() => createServer()),
+            (server) => Effect.promise(() => new Promise<void>((resolve) => server.close(() => resolve())))
+          )
+          yield* Effect.tryPromise({
+            try: () =>
+              new Promise<void>((resolve, reject) => {
+                blocker.once("error", reject)
+                blocker.listen(port, "127.0.0.1", resolve)
+              }),
+            catch: (cause) => new ApprovalStartFailed({ cause })
+          })
+          blockedPort = port
+        }))
+      const client = yield* controllerClient(peer.url, true, {
+        rejectUnauthorized: false,
+        headers: { origin: peer.origin }
+      })
+      expect(yield* Effect.promise(() => client.ready)).toBe(4_423)
+      expect(blockedPort).toBeDefined()
+      expect(attempted.length).toBeGreaterThanOrEqual(2)
+      expect(attempted.length).toBeLessThanOrEqual(5)
+      expect(attempted.at(-1)).not.toBe(blockedPort)
+      expect(peer.probes).toEqual(["/v1/connect/terminal/capabilities"])
+      expect(peer.upgrades).toEqual([])
+    }).pipe(Effect.scoped, provideNodeServices))
+
   it.effect.each(
     ["missing", "false", "invalid", "redirect"] satisfies ReadonlyArray<
       "missing" | "false" | "invalid" | "redirect"
@@ -7050,6 +7164,82 @@ esac
       }
     })
 
+  /** Seed once, then retry only the peer and hub listeners on their shared port. */
+  const startPeerAvailabilityHub = Effect.fn("HttpTest.startPeerAvailabilityHub")(function*(
+    root: string,
+    peer: ReturnType<typeof createServer>,
+    beforeHubStart: (port: number) => Effect.Effect<void, ApprovalStartFailed, Scope.Scope> = () => Effect.void
+  ) {
+    yield* Effect.acquireUseRelease(
+      JobStore.open(join(root, "jobs.sqlite")),
+      (store) => store.put(pendingRecord("SER8", 0)),
+      (store) => Effect.sync(() => store.close())
+    ).pipe(Effect.mapError((cause) => new ApprovalStartFailed({ cause })))
+    return yield* startWithPeerPort(peer, "127.0.0.2", (port) =>
+      beforeHubStart(port).pipe(
+        Effect.andThen(startHub(
+          root,
+          join(root, "relay"),
+          scriptedBackends("Nothing waits."),
+          () => Effect.void,
+          [],
+          {
+            port,
+            machines: [
+              { host: "SER8", nodeId: "node-ser8" },
+              { host: "ser8", nodeId: "node-ser8" },
+              { host: "ALPHA", nodeId: "node-alpha" },
+              { host: "alpha", nodeId: "node-alpha" }
+            ]
+          }
+        )),
+        Effect.mapError((cause) =>
+          cause._tag === "ApprovalPortTaken" || cause._tag === "ApprovalStartFailed"
+            ? cause
+            : new ApprovalStartFailed({ cause })
+        )
+      ))
+  })
+
+  describe("shared peer port startup", () => {
+    it.effect("recovers the seeded peer-availability hub after a shared-port collision", () =>
+      Effect.gen(function*() {
+        const root = mkdtempSync(join(tmpdir(), "herdr-seeded-peer-retry-"))
+        yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { force: true, recursive: true })))
+        const peer = yield* Effect.acquireRelease(
+          Effect.sync(() => createServer((_request, response) => response.end("{}"))),
+          (server) => Effect.promise(() => closePeer(server))
+        )
+        const occupied = yield* Effect.acquireRelease(
+          Effect.sync(() => createServer()),
+          (server) => Effect.promise(() => closePeer(server))
+        )
+        const ports: Array<number> = []
+        const hub = yield* startPeerAvailabilityHub(root, peer, (port) =>
+          Effect.gen(function*() {
+            ports.push(port)
+            if (ports.length !== 1) return
+            yield* Effect.tryPromise({
+              try: () =>
+                new Promise<void>((resolve, reject) => {
+                  occupied.once("error", reject)
+                  occupied.listen(port, "127.0.0.1", resolve)
+                }),
+              catch: (cause) => new ApprovalStartFailed({ cause })
+            })
+          }))
+        expect(ports.length).toBeGreaterThanOrEqual(2)
+        expect(ports.length).toBeLessThanOrEqual(5)
+        expect(boundPort(hub.server.tailnetUrl)).not.toBe(ports[0])
+        const dashboard = yield* Effect.promise(() =>
+          hubRequest(`${hub.serveUrl}/v1/dashboard`, { headers: hub.headers })
+        )
+        expect(dashboard.status).toBe(200)
+        const snapshot = Schema.decodeUnknownSync(Schema.fromJsonString(DashboardSnapshot))(dashboard.body)
+        expect(snapshot.pendingApprovals.local.map((job) => job.id)).toEqual(["ser8-job-00"])
+      }).pipe(Effect.scoped, provideNodeServices))
+  })
+
   const conversation = "product=herdr&kind=fleet&id=SER8"
   const hubRef = { product: "herdr", kind: "fleet", id: "SER8" }
 
@@ -7326,31 +7516,10 @@ esac
     return Effect.gen(function*() {
       yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { force: true, recursive: true })))
       yield* Effect.acquireRelease(
-        Effect.promise(() => listenOn(peer, "127.0.0.2").then(() => peer)),
-        (server) =>
-          Effect.promise(() =>
-            new Promise<void>((resolve, reject) =>
-              server.close((error) => error === undefined ? resolve() : reject(error))
-            )
-          )
+        Effect.sync(() => peer),
+        (server) => Effect.promise(() => closePeer(server))
       )
-      const port = Schema.decodeUnknownSync(Schema.Struct({ port: Schema.Number }))(peer.address()).port
-      const hub = yield* startHub(
-        root,
-        join(root, "relay"),
-        scriptedBackends("Nothing waits."),
-        (store) => store.put(pendingRecord("SER8", 0)),
-        [],
-        {
-          port,
-          machines: [
-            { host: "SER8", nodeId: "node-ser8" },
-            { host: "ser8", nodeId: "node-ser8" },
-            { host: "ALPHA", nodeId: "node-alpha" },
-            { host: "alpha", nodeId: "node-alpha" }
-          ]
-        }
-      )
+      const hub = yield* startPeerAvailabilityHub(root, peer)
       const setOnline = (online: boolean) =>
         writeFileSync(
           hub.statusFile,
