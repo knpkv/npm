@@ -3867,6 +3867,93 @@
   }
 }
 
+@layer connect {
+  /* Ownership recovery fills the terminal area below the compact identity; the directory stays behind the sheet. */
+  .connect-stage-sheet[data-terminal-control] .connect-stage {
+    align-content: stretch;
+    gap: 1.1rem;
+    grid-template-rows: auto minmax(min-content, 1fr);
+    padding: var(--rly-space-20) var(--rly-space-16);
+  }
+
+  .connect-terminal-stage-identity {
+    align-items: center;
+    display: grid;
+    gap: var(--rly-space-16);
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .connect-terminal-stage-identity > .connect-creature {
+    block-size: 6rem;
+    inline-size: 6rem;
+  }
+  .connect-terminal-stage-identity > div {
+    display: grid;
+    gap: 0.3rem;
+    min-inline-size: 0;
+  }
+  .connect-terminal-stage-identity h2 {
+    font-size: 1.5rem;
+    font-weight: var(--rly-type-card-title-weight);
+    justify-self: start;
+    letter-spacing: -0.03em;
+    line-height: 1.5;
+    margin: 0;
+    overflow-wrap: break-word;
+  }
+  .connect-terminal-stage-state {
+    font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height) var(--rly-font-ui);
+  }
+  .connect-terminal-stage-identity small {
+    color: var(--rly-color-text-2);
+    font-size: var(--rly-type-label-size);
+    font-weight: var(--rly-type-body-weight);
+    line-height: 1.5;
+    overflow-wrap: break-word;
+  }
+
+  .connect-terminal-control {
+    align-content: center;
+    background: var(--rly-color-surface-2);
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-group);
+    display: grid;
+    gap: var(--rly-space-8);
+    justify-items: center;
+    min-inline-size: 0;
+    padding: var(--rly-space-32) var(--rly-space-24);
+    text-align: center;
+  }
+  .connect-terminal-control h3 {
+    font-size: 1.0625rem;
+    font-weight: var(--rly-type-card-title-weight);
+    letter-spacing: -0.01em;
+    line-height: 1.5;
+    margin: 0;
+  }
+  .connect-terminal-control p {
+    color: var(--rly-color-text-2);
+    font-size: 0.9375rem;
+    font-weight: var(--rly-type-body-weight);
+    line-height: 1.5;
+    margin: 0;
+    margin-block-end: var(--rly-space-12);
+    max-inline-size: 20em;
+    text-wrap: pretty;
+  }
+  .connect-terminal-control > button {
+    border-radius: var(--rly-radius-control);
+    font: var(--rly-type-body-weight) var(--rly-type-body-size) / var(--rly-type-body-line-height) var(--rly-font-ui);
+    min-block-size: 2.75rem;
+    min-inline-size: 2.75rem;
+    padding-inline: var(--rly-space-16);
+  }
+  @media (max-width: 40rem) {
+    .connect-terminal-control > button {
+      min-inline-size: 12rem;
+    }
+  }
+}
+
 @layer fleet {
   .connect-directory-switch {
     display: flex;

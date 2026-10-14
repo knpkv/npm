@@ -30,11 +30,13 @@ import {
   localConnectAgents,
   makeHerdrTerminalConnector,
   pageFleetConnectAgents,
+  TerminalCapabilities,
   TerminalClientCommand,
   terminalCommandMaxPayloadBytes,
   terminalFrameMaxEncodedBytes,
   TerminalSelection,
   TerminalServerSignal,
+  TerminalTakenOverClose,
   Unavailable,
   UnboundAgent,
   UsageQuery
@@ -150,6 +152,7 @@ import { dashboardPage } from "./internal/dashboard-page.js"
 import { type ListenerMode, listenerServesWork } from "./internal/listener.js"
 import { decodeRelayPostRequest } from "./internal/relay-post-validation.js"
 import { decodeRelaySelfBody } from "./internal/relay-self-validation.js"
+import { requireRemoteTerminalTakeover } from "./internal/terminal-capabilities.js"
 import { releaseTerminalScope } from "./internal/terminal-controller.js"
 import { relayScrollState, remoteTerminalUrl, terminalSelectionInput } from "./internal/terminal-selection.js"
 import {
@@ -1737,7 +1740,10 @@ export const startHttpServer = async (
   >()
   const activeHttpSockets = new Set<Duplex>()
   const activeRequestControllers = new Set<AbortController>()
-  const terminalControllers = new Set<string>()
+  const terminalControllers = new Map<string, {
+    readonly releaseIfClosing: () => Promise<void> | undefined
+    readonly supersede: () => Promise<void>
+  }>()
   const terminalTasks = new Set<Promise<void>>()
   const webSockets = new Set<WebSocketClient>()
   const finalizers: Array<() => Promise<void>> = [
@@ -2400,33 +2406,37 @@ export const startHttpServer = async (
       socket: WebSocketClient,
       selection: typeof TerminalSelection.Type
     ): Promise<void> => {
-      if (terminalControllers.size >= 4) {
-        closeSocket(socket, 4429, "terminal connection limit reached")
-        return
-      }
       const key = `${selection.host.toLowerCase()}:${selection.agentId}`
-      if (terminalControllers.has(key)) {
+      const previous = terminalControllers.get(key)
+      const closingRelease = previous?.releaseIfClosing()
+      if (previous !== undefined && closingRelease === undefined && selection.takeover !== true) {
         closeSocket(socket, 4423, "agent already controlled")
         return
       }
+      if (previous === undefined && terminalControllers.size >= 4) {
+        closeSocket(socket, 4429, "terminal connection limit reached")
+        return
+      }
       const scope = Scope.makeUnsafe()
-      terminalControllers.add(key)
       let finalized = false
       let released = false
       let finalizePromise: Promise<void> | undefined
       let idleTimer: NodeJS.Timeout | undefined
+      let previousRelease = Promise.resolve()
       const releaseReservation = (): void => {
         if (released) return
         released = true
-        terminalControllers.delete(key)
+        if (terminalControllers.get(key) === controller) terminalControllers.delete(key)
       }
       const finalize = async (): Promise<void> => {
         if (finalized) return finalizePromise
         finalized = true
         if (idleTimer !== undefined) clearTimeout(idleTimer)
-        finalizePromise = Effect.runPromise(
+        const cleanup = Effect.runPromise(
           releaseTerminalScope(scope, workerScope, selection)
-        ).finally(releaseReservation)
+        )
+        finalizePromise = (previous === undefined ? cleanup : cleanup.finally(() => previousRelease))
+          .finally(releaseReservation)
         return finalizePromise
       }
       const finalizeFromSocket = (): void => {
@@ -2436,9 +2446,29 @@ export const startHttpServer = async (
           )
         )
       }
+      const controller = {
+        // The socket may close before its callback runs; reconnect must join that cleanup.
+        releaseIfClosing: (): Promise<void> | undefined => {
+          if (!finalized && socket.readyState === WebSocketClient.OPEN) return undefined
+          return finalize()
+        },
+        supersede: (): Promise<void> => {
+          const reason = TerminalTakenOverClose.make({ code: 4_424, reason: "taken_over" })
+          closeSocket(socket, reason.code, reason.reason)
+          return finalize()
+        }
+      }
+      terminalControllers.set(key, controller)
       try {
         socket.once("close", finalizeFromSocket)
         socket.once("error", finalizeFromSocket)
+        if (previous !== undefined) {
+          previousRelease = closingRelease ?? previous.supersede()
+          await previousRelease
+          if (finalized || terminalControllers.get(key) !== controller || socket.readyState !== WebSocketClient.OPEN) {
+            return
+          }
+        }
         const openFiber = await Effect.runPromise(
           Effect.forkIn(
             Effect.result(Scope.provide(scope)(terminalConnector.open(selection))),
@@ -2576,13 +2606,25 @@ export const startHttpServer = async (
         closeSocket(socket, 4404, "host unavailable")
         return
       }
+      if (selection.takeover === true) {
+        const capability = await httpRuntime.runPromise(Effect.result(requireRemoteTerminalTakeover(peer.terminalUrl)))
+        if (Result.isFailure(capability)) {
+          closeSocket(
+            socket,
+            capability.failure.reason === "unsupported" ? 4_423 : 4_503,
+            capability.failure.reason === "unsupported" ? "agent already controlled" : "remote host unavailable"
+          )
+          return
+        }
+        if (closed || socket.readyState !== WebSocketClient.OPEN) return
+      }
       const remoteUrl = remoteTerminalUrl(peer.terminalUrl, selection)
       const remote = new WebSocketClient(remoteUrl, {
         headers: { host: remoteUrl.host },
         maxPayload: terminalFrameMaxPayload,
         perMessageDeflate: false
       })
-      const closed = new Promise<void>((resolve) => remote.once("close", () => resolve()))
+      const remoteClosed = new Promise<void>((resolve) => remote.once("close", () => resolve()))
       webSockets.add(remote)
       const connectTimeout = setTimeout(() => {
         remote.terminate()
@@ -2674,7 +2716,7 @@ export const startHttpServer = async (
           remote.close(1000, "browser disconnected")
         }
       })
-      await closed
+      await remoteClosed
     }
 
     const listen = async (
@@ -3582,6 +3624,22 @@ export const startHttpServer = async (
             await respond(
               response,
               effect
+            )
+            return
+          }
+
+          if (
+            mode === "tailnet" &&
+            request.method === "GET" &&
+            url.pathname === "/v1/connect/terminal/capabilities"
+          ) {
+            await respond(
+              response,
+              Effect.gen(function*() {
+                yield* authorizeOriginlessMutation(request)
+                yield* tailnetActor(request, config, [config.approvalHub.nodeId])
+                return TerminalCapabilities.make({ takeover: true })
+              })
             )
             return
           }

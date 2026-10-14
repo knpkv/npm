@@ -2,6 +2,7 @@ import { NodeServices } from "@effect/platform-node"
 import { afterAll, describe, expect, it, vi } from "@effect/vitest"
 import { makeDeterministicLanguageModel } from "@knpkv/ai-runtime"
 import {
+  ConnectAgent,
   connectAgentPageMaxRecords,
   ConnectArchivePage,
   ConnectPost,
@@ -54,7 +55,8 @@ import { request as httpsRequest } from "node:https"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { DatabaseSync } from "node:sqlite"
-import WebSocketClient from "ws"
+import WebSocketClient, { WebSocketServer } from "ws"
+import { terminalConnectionAfterClose } from "../../herdr-connect/src/internal/terminal-connection.js"
 import { SanitizedJobRecord } from "../src/approval-request.js"
 import { resolveApprovalPage } from "../src/approval-url.js"
 import { authorize } from "../src/auth.js"
@@ -205,17 +207,24 @@ esac
 })
 
 /** Register close and ready observations before a socket can receive its first server frame. */
-const controllerClient = Effect.fn("ControllerTest.client")(function*(url: URL, autoPong = true) {
+const controllerClient = Effect.fn("ControllerTest.client")(function*(
+  url: URL,
+  autoPong = true,
+  options: WebSocketClient.ClientOptions = {}
+) {
   return yield* Effect.acquireRelease(
     Effect.sync(() => {
-      const socket = new WebSocketClient(url, { autoPong })
+      const socket = new WebSocketClient(url, { ...options, autoPong })
       const closed = new Promise<number>((resolve) => socket.once("close", (code) => resolve(code)))
+      const closeEvent = new Promise<{ code: number; reason: string }>((resolve) =>
+        socket.once("close", (code, reason) => resolve({ code, reason: reason.toString() }))
+      )
       const ready = new Promise<string | number>((resolve, reject) => {
         socket.once("error", reject)
         socket.once("message", () => resolve("ready"))
         socket.once("close", (code) => resolve(code))
       })
-      return { socket, ready, closed }
+      return { socket, ready, closed, closeEvent }
     }),
     (client) => Effect.sync(() => client.socket.terminate())
   )
@@ -228,6 +237,109 @@ const directTls = {
   certificatePath: join(import.meta.dirname, "fixtures/ser8.example.test.crt"),
   privateKeyPath: join(import.meta.dirname, "fixtures/ser8.example.test.key")
 }
+
+/** A real hub-to-peer hop proves unsupported takeover never reaches an old host's upgrade handler. */
+const terminalRelayFixture = Effect.fn("ControllerTest.relay")(function*(
+  capability: "missing" | "false" | "invalid" | "redirect" | "transport" | "supported"
+) {
+  const root = mkdtempSync(join(tmpdir(), "herdr-terminal-relay-"))
+  yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { force: true, recursive: true })))
+  const probes: Array<string> = []
+  const upgrades: Array<string> = []
+  const sockets = new Set<WebSocketClient>()
+  const webSockets = yield* Effect.acquireRelease(
+    Effect.sync(() => new WebSocketServer({ noServer: true })),
+    (server) =>
+      Effect.sync(() => {
+        for (const socket of sockets) socket.terminate()
+        server.close()
+      })
+  )
+  const peer = yield* Effect.acquireRelease(
+    Effect.sync(() =>
+      createServer((request, response) => {
+        if (request.url !== "/v1/connect/terminal/capabilities") {
+          response.writeHead(404)
+          response.end()
+          return
+        }
+        probes.push(request.url ?? "")
+        if (capability === "transport") {
+          request.socket.destroy()
+          return
+        }
+        if (capability === "redirect") {
+          response.writeHead(302, { location: "/would-advertise-takeover" })
+          response.end()
+          return
+        }
+        response.writeHead(capability === "missing" ? 404 : 200, { "content-type": "application/json" })
+        response.end(
+          capability === "supported" ? "{\"takeover\":true}" : capability === "false" ? "{\"takeover\":false}" : "{}"
+        )
+      })
+    ),
+    (server) => Effect.promise(() => new Promise<void>((resolve) => server.close(() => resolve())))
+  )
+  peer.on("upgrade", (request, socket, head) => {
+    upgrades.push(request.url ?? "")
+    webSockets.handleUpgrade(request, socket, head, (accepted) => {
+      sockets.add(accepted)
+      accepted.once("close", () => sockets.delete(accepted))
+      accepted.send(JSON.stringify({ type: "terminal.ready" }))
+    })
+  })
+  yield* Effect.promise(() =>
+    new Promise<void>((resolve, reject) => {
+      peer.once("error", reject)
+      peer.listen(0, "127.0.0.2", () => resolve())
+    })
+  )
+  const address = yield* Schema.decodeUnknownEffect(Schema.Struct({ port: Schema.Number }))(peer.address())
+  const tailscaleCommand = join(root, "tailscale-test")
+  writeFileSync(
+    tailscaleCommand,
+    `#!/bin/sh
+case "$1" in
+  ip) printf '%s\\n' '127.0.0.1' ;;
+  whois) printf '%s\\n' '{"Node":{"StableID":"node-ser8"},"UserProfile":{"LoginName":"owner@example.com"}}' ;;
+  status) printf '%s\\n' '{"Peer":{"ser9":{"HostName":"SER9","ID":"node-ser9","Online":true,"TailscaleIPs":["127.0.0.2"]}},"Self":{"HostName":"SER8","ID":"node-ser8","Online":true,"TailscaleIPs":["127.0.0.1"]}}' ;;
+esac
+`,
+    { mode: 0o700 }
+  )
+  const store = yield* Effect.acquireRelease(
+    JobStore.open(join(root, "jobs.sqlite")),
+    (opened) => Effect.sync(() => opened.close())
+  )
+  const fleet = yield* makeFleetService({ approvalEnabled: false, host: "SER8", operations, store })
+  const running = yield* Effect.acquireRelease(
+    startWithApprovalPort(async (approvalPort) =>
+      startHttpServer(
+        {
+          ...config(root),
+          host: "SER8",
+          crossHost: true,
+          approvalHub: { host: "SER8", nodeId: "node-ser8", url: `https://127.0.0.1:${String(approvalPort)}/` },
+          approvalPort,
+          approvalTls: directTls,
+          port: address.port,
+          machines: [{ host: "SER8", nodeId: "node-ser8" }, { host: "SER9", nodeId: "node-ser9" }],
+          tailscaleCommand
+        },
+        fleet,
+        assets,
+        { terminalConnector: unusedTerminal }
+      )
+    ),
+    (server) => Effect.promise(server.close)
+  )
+  if (running.serveUrl === null) return yield* Effect.die("hub listener missing")
+  const url = new URL("/v1/connect/session?host=SER9&agent=agent-relayed&cols=100&rows=30&takeover=1", running.serveUrl)
+  const origin = url.origin
+  url.protocol = "wss:"
+  return { url, origin, probes, upgrades, sockets }
+})
 
 const secureRequestBody = (
   url: string,
@@ -3770,6 +3882,26 @@ esac
     expect(decode(terminalSelectionInput(remote))).toEqual(current)
   })
 
+  /** Takeover survives the hub hop only as a validated explicit opt-in, never as a default. */
+  it("passes explicit takeover intent to the remote host and rejects malformed intent", () => {
+    const decode = Schema.decodeUnknownSync(TerminalSelection)
+    const browser = new URL("wss://hub.example.test/v1/connect/session?host=SER9&agent=agent-1&cols=100&rows=30")
+    const ordinary = decode(terminalSelectionInput(browser))
+    expect(remoteTerminalUrl("ws://ser9.example.test/v1/connect/terminal", ordinary).searchParams.has("takeover"))
+      .toBe(false)
+    browser.searchParams.set("takeover", "1")
+    const explicit = decode(terminalSelectionInput(browser))
+    expect(explicit).toEqual({ host: "SER9", agentId: "agent-1", cols: 100, rows: 30, takeover: true })
+    const remote = remoteTerminalUrl("ws://ser9.example.test/v1/connect/terminal", explicit)
+    expect(remote.searchParams.get("takeover")).toBe("1")
+    expect(decode(terminalSelectionInput(remote))).toEqual(explicit)
+    for (const invalid of ["", "0", "false", "true", "yes"]) {
+      browser.searchParams.set("takeover", invalid)
+      expect(Result.isFailure(Schema.decodeUnknownResult(TerminalSelection)(terminalSelectionInput(browser))))
+        .toBe(true)
+    }
+  })
+
   it("relays scroll states only to a client that opted in, whatever produced them", () => {
     const relayed: Array<string> = []
     const base = { host: "SER9", agentId: "agent-1", cols: 100, rows: 30 }
@@ -5335,6 +5467,472 @@ esac
       expect(yield* Effect.promise(() => replacement.ready)).toBe("ready")
     }).pipe(Effect.scoped, provideNodeServices))
 
+  /** Client close can finish before scope cleanup; ordinary reconnect waits without taking over a live socket. */
+  it.effect("ordinary reconnect waits for a closing controller's bounded release", () =>
+    Effect.gen(function*() {
+      const releaseStarted = yield* Deferred.make<void>()
+      const allowRelease = yield* Deferred.make<void>()
+      let opens = 0
+      const server = yield* controllerServer({
+        open: () => {
+          opens += 1
+          return opens === 1 ?
+            Effect.acquireRelease(
+              Effect.succeed({ events: Stream.never, send: () => Effect.void }),
+              () => Deferred.succeed(releaseStarted, undefined).pipe(Effect.andThen(Deferred.await(allowRelease)))
+            ) :
+            Effect.succeed({ events: Stream.never, send: () => Effect.void })
+        }
+      })
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] })
+      yield* Effect.addFinalizer(() =>
+        Deferred.succeed(allowRelease, undefined).pipe(
+          Effect.andThen(Effect.sync(() => vi.useRealTimers()))
+        )
+      )
+      const first = yield* controllerClient(server.url)
+      expect(yield* Effect.promise(() => first.ready)).toBe("ready")
+      first.socket.close()
+      yield* Effect.promise(() => first.closed)
+      yield* Deferred.await(releaseStarted)
+      const incoming = yield* controllerClient(server.url)
+      yield* Effect.promise(() => new Promise<void>((resolve) => incoming.socket.once("open", resolve)))
+      let settled = false
+      void incoming.ready.then(() => {
+        settled = true
+      })
+      yield* Effect.promise(() => vi.advanceTimersByTimeAsync(9_999))
+      expect(settled).toBe(false)
+      expect(incoming.socket.readyState).toBe(WebSocketClient.OPEN)
+      expect(opens).toBe(1)
+      yield* Effect.promise(() => vi.advanceTimersByTimeAsync(1))
+      expect(yield* Effect.promise(() => incoming.ready)).toBe("ready")
+      expect(opens).toBe(2)
+      const duplicate = yield* controllerClient(server.url)
+      expect(yield* Effect.promise(() => duplicate.ready)).toBe(4_423)
+    }).pipe(Effect.scoped, provideNodeServices))
+
+  it.effect("an aborted ordinary reconnect waiter releases its reservation without opening a session", () =>
+    Effect.gen(function*() {
+      const releaseStarted = yield* Deferred.make<void>()
+      const allowRelease = yield* Deferred.make<void>()
+      let opens = 0
+      const server = yield* controllerServer({
+        open: () => {
+          opens += 1
+          return opens === 1 ?
+            Effect.acquireRelease(
+              Effect.succeed({ events: Stream.never, send: () => Effect.void }),
+              () => Deferred.succeed(releaseStarted, undefined).pipe(Effect.andThen(Deferred.await(allowRelease)))
+            ) :
+            Effect.succeed({ events: Stream.never, send: () => Effect.void })
+        }
+      })
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] })
+      yield* Effect.addFinalizer(() =>
+        Deferred.succeed(allowRelease, undefined).pipe(
+          Effect.andThen(Effect.sync(() => vi.useRealTimers()))
+        )
+      )
+      const first = yield* controllerClient(server.url)
+      expect(yield* Effect.promise(() => first.ready)).toBe("ready")
+      first.socket.close()
+      yield* Effect.promise(() => first.closed)
+      yield* Deferred.await(releaseStarted)
+      const incoming = yield* controllerClient(server.url)
+      yield* Effect.promise(() => new Promise<void>((resolve) => incoming.socket.once("open", resolve)))
+      yield* Effect.promise(() => vi.advanceTimersByTimeAsync(9_999))
+      expect(incoming.socket.readyState).toBe(WebSocketClient.OPEN)
+      expect(opens).toBe(1)
+      incoming.socket.terminate()
+      yield* Effect.promise(() => incoming.closed)
+      yield* Effect.promise(() => vi.advanceTimersByTimeAsync(1))
+      expect(opens).toBe(1)
+      const replacement = yield* controllerClient(server.url)
+      expect(yield* Effect.promise(() => replacement.ready)).toBe("ready")
+      expect(opens).toBe(2)
+      const duplicate = yield* controllerClient(server.url)
+      expect(yield* Effect.promise(() => duplicate.ready)).toBe(4_423)
+    }).pipe(Effect.scoped, provideNodeServices))
+
+  it.effect("a takeover supersedes an ordinary reconnect waiter without bypassing cleanup", () =>
+    Effect.gen(function*() {
+      const releaseStarted = yield* Deferred.make<void>()
+      const allowRelease = yield* Deferred.make<void>()
+      let opens = 0
+      const server = yield* controllerServer({
+        open: () => {
+          opens += 1
+          return opens === 1 ?
+            Effect.acquireRelease(
+              Effect.succeed({ events: Stream.never, send: () => Effect.void }),
+              () => Deferred.succeed(releaseStarted, undefined).pipe(Effect.andThen(Deferred.await(allowRelease)))
+            ) :
+            Effect.succeed({ events: Stream.never, send: () => Effect.void })
+        }
+      })
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] })
+      yield* Effect.addFinalizer(() =>
+        Deferred.succeed(allowRelease, undefined).pipe(
+          Effect.andThen(Effect.sync(() => vi.useRealTimers()))
+        )
+      )
+      const first = yield* controllerClient(server.url)
+      expect(yield* Effect.promise(() => first.ready)).toBe("ready")
+      first.socket.close()
+      yield* Effect.promise(() => first.closed)
+      yield* Deferred.await(releaseStarted)
+      const incoming = yield* controllerClient(server.url)
+      yield* Effect.promise(() => new Promise<void>((resolve) => incoming.socket.once("open", resolve)))
+      const url = new URL(server.url)
+      url.searchParams.set("takeover", "1")
+      const newest = yield* controllerClient(url)
+      yield* Effect.promise(() => new Promise<void>((resolve) => newest.socket.once("open", resolve)))
+      expect(yield* Effect.promise(() => incoming.ready)).toBe(4_424)
+      let settled = false
+      void newest.ready.then(() => {
+        settled = true
+      })
+      yield* Effect.promise(() => vi.advanceTimersByTimeAsync(9_999))
+      expect(settled).toBe(false)
+      expect(opens).toBe(1)
+      yield* Effect.promise(() => vi.advanceTimersByTimeAsync(1))
+      expect(yield* Effect.promise(() => newest.ready)).toBe("ready")
+      expect(opens).toBe(2)
+      yield* Deferred.succeed(allowRelease, undefined)
+      const duplicate = yield* controllerClient(server.url)
+      expect(yield* Effect.promise(() => duplicate.ready)).toBe(4_423)
+    }).pipe(Effect.scoped, provideNodeServices))
+
+  /** Explicit takeover closes and releases the prior controller before the replacement can send input. */
+  it.effect("takes over an agent only on explicit intent and reports the typed close to the old device", () =>
+    Effect.gen(function*() {
+      const lifecycle: Array<string> = []
+      let opens = 0
+      const server = yield* controllerServer({
+        open: () => {
+          opens += 1
+          const number = opens
+          return Effect.acquireRelease(
+            Effect.sync(() => {
+              lifecycle.push(`open ${String(number)}`)
+              return { events: Stream.never, send: () => Effect.void }
+            }),
+            () => Effect.sync(() => lifecycle.push(`release ${String(number)}`))
+          )
+        }
+      })
+      const first = yield* controllerClient(server.url)
+      expect(yield* Effect.promise(() => first.ready)).toBe("ready")
+      const ordinary = yield* controllerClient(server.url)
+      expect(yield* Effect.promise(() => ordinary.ready)).toBe(4_423)
+      const agent = Schema.decodeUnknownSync(ConnectAgent)({
+        host: server.url.searchParams.get("host"),
+        id: server.url.searchParams.get("agent"),
+        name: "Worker",
+        kind: "test",
+        state: "working",
+        work: "Checking changes",
+        lastActivityAt: 0
+      })
+      expect(terminalConnectionAfterClose(agent, yield* Effect.promise(() => ordinary.closeEvent)))
+        .toEqual({ _tag: "controlled", agent })
+      expect(opens).toBe(1)
+      const previousClose = new Promise<{ code: number; reason: string }>((resolve) =>
+        first.socket.once("close", (code, reason) => resolve({ code, reason: reason.toString() }))
+      )
+      const takeover = new URL(server.url)
+      takeover.searchParams.set("takeover", "1")
+      const replacement = yield* controllerClient(takeover)
+      expect(yield* Effect.promise(() => replacement.ready)).toBe("ready")
+      expect(yield* Effect.promise(() => previousClose)).toEqual({ code: 4_424, reason: "taken_over" })
+      expect(terminalConnectionAfterClose(agent, yield* Effect.promise(() => first.closeEvent)))
+        .toEqual({ _tag: "taken-over", agent })
+      expect(lifecycle.slice(0, 3)).toEqual(["open 1", "release 1", "open 2"])
+      const reconnect = yield* controllerClient(server.url)
+      expect(yield* Effect.promise(() => reconnect.ready)).toBe(4_423)
+      expect(opens).toBe(2)
+    }).pipe(Effect.scoped, provideNodeServices))
+
+  /** A host advertises takeover through the same authenticated hub-node boundary as terminal upgrades. */
+  it.effect("advertises terminal takeover only to an authenticated originless hub request", () =>
+    Effect.gen(function*() {
+      const server = yield* controllerServer({
+        open: () => Effect.succeed({ events: Stream.never, send: () => Effect.void })
+      })
+      const capabilities = new URL(server.url)
+      capabilities.protocol = "http:"
+      capabilities.pathname = "/v1/connect/terminal/capabilities"
+      capabilities.search = ""
+      const accepted = yield* Effect.promise(() => fetch(capabilities))
+      expect(accepted.status).toBe(200)
+      expect(yield* Effect.promise(() => accepted.json())).toEqual({ takeover: true })
+      const browser = yield* Effect.promise(() => fetch(capabilities, { headers: { origin: capabilities.origin } }))
+      expect(browser.status).toBe(403)
+    }).pipe(Effect.scoped, provideNodeServices))
+
+  /** Waiting for release is still an admitted connection, not a refusal or an early ready signal. */
+  it.effect("keeps takeover pending until bounded cleanup reaches ten seconds", () =>
+    Effect.gen(function*() {
+      const releaseStarted = yield* Deferred.make<void>()
+      const allowRelease = yield* Deferred.make<void>()
+      let opens = 0
+      const server = yield* controllerServer({
+        open: () => {
+          opens += 1
+          return opens === 1 ?
+            Effect.acquireRelease(
+              Effect.succeed({ events: Stream.never, send: () => Effect.void }),
+              () => Deferred.succeed(releaseStarted, undefined).pipe(Effect.andThen(Deferred.await(allowRelease)))
+            ) :
+            Effect.succeed({ events: Stream.never, send: () => Effect.void })
+        }
+      })
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] })
+      yield* Effect.addFinalizer(() =>
+        Deferred.succeed(allowRelease, undefined).pipe(
+          Effect.andThen(Effect.sync(() => vi.useRealTimers()))
+        )
+      )
+      const first = yield* controllerClient(server.url)
+      expect(yield* Effect.promise(() => first.ready)).toBe("ready")
+      const url = new URL(server.url)
+      url.searchParams.set("takeover", "1")
+      const incoming = yield* controllerClient(url)
+      const runPromise = Effect.runPromiseWith(yield* Effect.context<never>())
+      expect(
+        yield* Effect.promise(() =>
+          Promise.race([
+            runPromise(Deferred.await(releaseStarted)).then(() => "cleanup"),
+            incoming.ready
+          ])
+        )
+      ).toBe("cleanup")
+      expect(yield* Effect.promise(() => first.closed)).toBe(4_424)
+      let settled = false
+      void incoming.ready.then(() => {
+        settled = true
+      })
+      yield* Effect.promise(() => vi.advanceTimersByTimeAsync(9_999))
+      expect(settled).toBe(false)
+      expect(incoming.socket.readyState).toBe(WebSocketClient.OPEN)
+      expect(opens).toBe(1)
+      yield* Effect.promise(() => vi.advanceTimersByTimeAsync(1))
+      expect(yield* Effect.promise(() => incoming.ready)).toBe("ready")
+      expect(opens).toBe(2)
+    }).pipe(Effect.scoped, provideNodeServices))
+
+  /** Three viewers share one release barrier; superseding a waiter cannot bypass the first cleanup. */
+  it.effect("admits only the newest concurrent takeover and retains ownership after late cleanup", () =>
+    Effect.gen(function*() {
+      const releaseStarted = yield* Deferred.make<void>()
+      const allowRelease = yield* Deferred.make<void>()
+      const releaseFinished = yield* Deferred.make<void>()
+      let opens = 0
+      const server = yield* controllerServer({
+        open: () => {
+          opens += 1
+          return opens === 1 ?
+            Effect.acquireRelease(
+              Effect.succeed({ events: Stream.never, send: () => Effect.void }),
+              () =>
+                Deferred.succeed(releaseStarted, undefined).pipe(
+                  Effect.andThen(Deferred.await(allowRelease)),
+                  Effect.ensuring(Deferred.succeed(releaseFinished, undefined))
+                )
+            ) :
+            Effect.succeed({ events: Stream.never, send: () => Effect.void })
+        }
+      })
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] })
+      yield* Effect.addFinalizer(() =>
+        Deferred.succeed(allowRelease, undefined).pipe(
+          Effect.andThen(Effect.sync(() => vi.useRealTimers()))
+        )
+      )
+      const first = yield* controllerClient(server.url)
+      expect(yield* Effect.promise(() => first.ready)).toBe("ready")
+      const url = new URL(server.url)
+      url.searchParams.set("takeover", "1")
+      const middle = yield* controllerClient(url)
+      const runPromise = Effect.runPromiseWith(yield* Effect.context<never>())
+      expect(
+        yield* Effect.promise(() =>
+          Promise.race([
+            runPromise(Deferred.await(releaseStarted)).then(() => "cleanup"),
+            middle.ready
+          ])
+        )
+      ).toBe("cleanup")
+      const newest = yield* controllerClient(url)
+      expect(yield* Effect.promise(() => middle.ready)).toBe(4_424)
+      let settled = false
+      void newest.ready.then(() => {
+        settled = true
+      })
+      yield* Effect.promise(() => vi.advanceTimersByTimeAsync(9_999))
+      expect(settled).toBe(false)
+      expect(opens).toBe(1)
+      yield* Effect.promise(() => vi.advanceTimersByTimeAsync(1))
+      expect(yield* Effect.promise(() => newest.ready)).toBe("ready")
+      expect(opens).toBe(2)
+      yield* Deferred.succeed(allowRelease, undefined)
+      yield* Deferred.await(releaseFinished)
+      const duplicate = yield* controllerClient(server.url)
+      expect(yield* Effect.promise(() => duplicate.ready)).toBe(4_423)
+      expect(opens).toBe(2)
+    }).pipe(Effect.scoped, provideNodeServices))
+
+  it.effect("replaces one controller at cap four without admitting a fifth agent", () =>
+    Effect.gen(function*() {
+      let opens = 0
+      const server = yield* controllerServer({
+        open: () =>
+          Effect.sync(() => {
+            opens += 1
+            return { events: Stream.never, send: () => Effect.void }
+          })
+      })
+      for (let index = 0; index < 4; index += 1) {
+        const url = new URL(server.url)
+        url.searchParams.set("agent", `agent-cap-${String(index)}`)
+        const client = yield* controllerClient(url)
+        expect(yield* Effect.promise(() => client.ready)).toBe("ready")
+      }
+      const url = new URL(server.url)
+      url.searchParams.set("agent", "agent-cap-0")
+      const ordinary = yield* controllerClient(url)
+      expect(yield* Effect.promise(() => ordinary.ready)).toBe(4_423)
+      const agent = Schema.decodeUnknownSync(ConnectAgent)({
+        host: url.searchParams.get("host"),
+        id: "agent-cap-0",
+        name: "Worker",
+        kind: "test",
+        state: "working",
+        work: "Checking changes",
+        lastActivityAt: 0
+      })
+      expect(terminalConnectionAfterClose(agent, yield* Effect.promise(() => ordinary.closeEvent)))
+        .toEqual({ _tag: "controlled", agent })
+      url.searchParams.set("takeover", "1")
+      const replacement = yield* controllerClient(url)
+      expect(yield* Effect.promise(() => replacement.ready)).toBe("ready")
+      const fifth = new URL(server.url)
+      const refused = yield* controllerClient(fifth)
+      expect(yield* Effect.promise(() => refused.ready)).toBe(4_429)
+      expect(opens).toBe(5)
+    }).pipe(Effect.scoped, provideNodeServices))
+
+  it.effect("an aborted takeover waiter releases its reservation without opening a session", () =>
+    Effect.gen(function*() {
+      const releaseStarted = yield* Deferred.make<void>()
+      const allowRelease = yield* Deferred.make<void>()
+      let opens = 0
+      const server = yield* controllerServer({
+        open: () => {
+          opens += 1
+          return opens === 1 ?
+            Effect.acquireRelease(
+              Effect.succeed({ events: Stream.never, send: () => Effect.void }),
+              () => Deferred.succeed(releaseStarted, undefined).pipe(Effect.andThen(Deferred.await(allowRelease)))
+            ) :
+            Effect.succeed({ events: Stream.never, send: () => Effect.void })
+        }
+      })
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] })
+      yield* Effect.addFinalizer(() =>
+        Deferred.succeed(allowRelease, undefined).pipe(
+          Effect.andThen(Effect.sync(() => vi.useRealTimers()))
+        )
+      )
+      const first = yield* controllerClient(server.url)
+      expect(yield* Effect.promise(() => first.ready)).toBe("ready")
+      const url = new URL(server.url)
+      url.searchParams.set("takeover", "1")
+      const incoming = yield* controllerClient(url)
+      const runPromise = Effect.runPromiseWith(yield* Effect.context<never>())
+      expect(
+        yield* Effect.promise(() =>
+          Promise.race([
+            runPromise(Deferred.await(releaseStarted)).then(() => "cleanup"),
+            incoming.ready
+          ])
+        )
+      ).toBe("cleanup")
+      incoming.socket.terminate()
+      yield* Effect.promise(() => incoming.closed)
+      yield* Effect.promise(() => vi.advanceTimersByTimeAsync(10_000))
+      expect(opens).toBe(1)
+      const replacement = yield* controllerClient(server.url)
+      expect(yield* Effect.promise(() => replacement.ready)).toBe("ready")
+      expect(opens).toBe(2)
+    }).pipe(Effect.scoped, provideNodeServices))
+
+  it.effect.each(
+    ["missing", "false", "invalid", "redirect"] satisfies ReadonlyArray<
+      "missing" | "false" | "invalid" | "redirect"
+    >
+  )("refuses takeover before a remote upgrade when capability is %s", (capability) =>
+    Effect.gen(function*() {
+      const peer = yield* terminalRelayFixture(capability)
+      const client = yield* controllerClient(peer.url, true, {
+        rejectUnauthorized: false,
+        headers: { origin: peer.origin }
+      })
+      expect(yield* Effect.promise(() => client.ready)).toBe(4_423)
+      expect(peer.upgrades).toEqual([])
+      expect(peer.probes).toEqual(["/v1/connect/terminal/capabilities"])
+    }).pipe(Effect.scoped, provideNodeServices))
+
+  it.effect("keeps capability transport failure unavailable without an ordinary remote attach", () =>
+    Effect.gen(function*() {
+      const peer = yield* terminalRelayFixture("transport")
+      const client = yield* controllerClient(peer.url, true, {
+        rejectUnauthorized: false,
+        headers: { origin: peer.origin }
+      })
+      expect(yield* Effect.promise(() => client.ready)).toBe(4_503)
+      expect(peer.upgrades).toEqual([])
+    }).pipe(Effect.scoped, provideNodeServices))
+
+  it.effect("probes takeover freshly and relays intent and the typed close through a capable host", () =>
+    Effect.gen(function*() {
+      const peer = yield* terminalRelayFixture("supported")
+      const client = yield* controllerClient(peer.url, true, {
+        rejectUnauthorized: false,
+        headers: { origin: peer.origin }
+      })
+      let reason = ""
+      client.socket.once("close", (_code, text) => {
+        reason = text.toString()
+      })
+      const ready = yield* Effect.promise(() => client.ready)
+      expect(ready, JSON.stringify({ probes: peer.probes, upgrades: peer.upgrades, reason }))
+        .toBe("ready")
+      expect(peer.probes).toEqual(["/v1/connect/terminal/capabilities"])
+      expect(peer.upgrades).toHaveLength(1)
+      expect(new URL(peer.upgrades[0] ?? "", "http://peer").searchParams.get("takeover")).toBe("1")
+      const closed = new Promise<{ code: number; reason: string }>((resolve) =>
+        client.socket.once("close", (code, reason) => resolve({ code, reason: reason.toString() }))
+      )
+      for (const socket of peer.sockets) socket.close(4_424, "taken_over")
+      expect(yield* Effect.promise(() => closed)).toEqual({ code: 4_424, reason: "taken_over" })
+      const ordinary = new URL(peer.url)
+      ordinary.searchParams.delete("takeover")
+      const reconnect = yield* controllerClient(ordinary, true, {
+        rejectUnauthorized: false,
+        headers: { origin: peer.origin }
+      })
+      expect(yield* Effect.promise(() => reconnect.ready)).toBe("ready")
+      expect(peer.probes).toHaveLength(1)
+      const fresh = yield* controllerClient(peer.url, true, {
+        rejectUnauthorized: false,
+        headers: { origin: peer.origin }
+      })
+      expect(yield* Effect.promise(() => fresh.ready)).toBe("ready")
+      expect(peer.probes).toHaveLength(2)
+    }).pipe(Effect.scoped, provideNodeServices))
+
   it.effect("does not exhaust the four-controller cap after five disconnected held releases", () =>
     Effect.gen(function*() {
       const allowRelease = yield* Deferred.make<void>()
@@ -5698,27 +6296,18 @@ esac
             held.close()
             yield* Deferred.await(controllerReleaseStarted)
             yield* Effect.promise(() => vi.advanceTimersByTimeAsync(9_999))
-            const blockedDuplicate = yield* Effect.promise(
-              () =>
-                new Promise<number>((resolve, reject) => {
-                  const socket = new WebSocketClient(url)
-                  socket.once("error", reject)
-                  socket.once("close", (code) => resolve(code))
-                })
-            )
-            expect(blockedDuplicate).toBe(4_423)
+            // The reservation still holds, but a reconnect waits instead of reporting a live controller.
+            const waiting = yield* controllerClient(new URL(url))
+            yield* Effect.promise(() => new Promise<void>((resolve) => waiting.socket.once("open", resolve)))
+            let waitingSettled = false
+            void waiting.ready.then(() => {
+              waitingSettled = true
+            })
+            expect(waiting.socket.readyState).toBe(WebSocketClient.OPEN)
+            expect(waitingSettled).toBe(false)
             expect(opens).toBe(5)
             yield* Effect.promise(() => vi.advanceTimersByTimeAsync(1))
-            const replacement = yield* Effect.promise(
-              () =>
-                new Promise<string | number>((resolve, reject) => {
-                  const socket = new WebSocketClient(url)
-                  socket.once("error", reject)
-                  socket.once("message", () => resolve("ready"))
-                  socket.once("close", (code) => resolve(code))
-                })
-            )
-            expect(replacement).toBe("ready")
+            expect(yield* Effect.promise(() => waiting.ready)).toBe("ready")
             const timeoutWarnings = warnings.mock.calls.map(([entry]) => entry.message).filter((message) =>
               JSON.stringify(message).includes("TerminalReleaseTimeout")
             )
