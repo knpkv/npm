@@ -8,7 +8,16 @@ import type { Mutable } from "effect/Types"
 
 import { browserCall, type Capture, capturePage, cropRegions, RegionPixels } from "./browser.js"
 import { captureContext, installCaptureClock } from "./capture.js"
-import { comparePixels, compareSnapshots, coverageFailures, shotKey, stateKey, stateShots } from "./compare.js"
+import {
+  compareLiveRegions,
+  comparePixels,
+  compareSnapshots,
+  coverageFailures,
+  LIVE_CHANGE_MAX_DIFF_RATIO,
+  shotKey,
+  stateKey,
+  stateShots
+} from "./compare.js"
 import { LiveProduct } from "./live.js"
 import { restrictContextNetwork, restrictPageNetwork } from "./network.js"
 import type { loadReferences } from "./references.js"
@@ -17,7 +26,7 @@ import { writeReport } from "./report.js"
 import {
   BaseComparison,
   BrowserFailure,
-  CaptureNavigationFailure,
+  type CaptureNavigationFailure,
   type Failure,
   Identity,
   Inventory,
@@ -70,7 +79,7 @@ const withPage = Effect.fn("DesignConformance.withPage")(
   Effect.scoped
 )
 
-/** Each state gets fresh equal contexts. Base captures determine touched status independently of refs. */
+/** Each shot gets fresh equal contexts. Base region evidence determines touched status independently of refs. */
 export const runConformance = Effect.fn("DesignConformance.run")(function*(refs: References, options: RunnerOptions) {
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
@@ -121,20 +130,31 @@ export const runConformance = Effect.fn("DesignConformance.run")(function*(refs:
         }))
       captured.push(identity)
       const artifacts: Mutable<ShotArtifacts> = { live: yield* write(`${key}-live.png`, actual.frame) }
-      // Base pixels are decoded only when this identity existed in its authoritative capture index.
-      let changed = true
+      artifacts.metadata = `${key}-live.json`
+      yield* fs.writeFileString(
+        path.join(options.output, artifacts.metadata),
+        yield* Schema.encodeEffect(Schema.fromJsonString(Snapshot))(actual.snapshot)
+      )
+      const reference = refs.manifest.states.find((ref) =>
+        stateKey(ref) === stateKey(state) && ref.status === "implemented" &&
+        ref.viewports.includes(identity.viewport) && ref.themes.includes(identity.theme)
+      )
+      // Indexed base evidence must include metadata; missing evidence fails instead of making drift new.
+      let base: Capture | undefined
       if (options.base !== undefined && baseIndex.some((base) => shotKey(base) === key)) {
-        const base = yield* fs.readFile(path.join(options.base, `${key}-live.png`))
-        changed = yield* Effect.try({
-          try: () => comparePixels(base, actual.frame).ratio > 0.001,
-          catch: (cause) => new BrowserFailure({ operation: "compare base pixels", cause })
+        const frame = yield* fs.readFile(path.join(options.base, `${key}-live.png`))
+        const snapshot = yield* readJson(path.join(options.base, `${key}-live.json`), Snapshot)
+        const regions = yield* Effect.try({
+          try: () => cropRegions(frame, snapshot),
+          catch: (cause) => new BrowserFailure({ operation: "crop base regions", cause })
         })
+        base = { frame, snapshot, regions }
       }
+      const changes = referenceOnly ? { touchedRegions: [], outsidePixelsChanged: false } : yield* Effect.try({
+        try: () => compareLiveRegions(identity, base, actual, reference?.regions ?? []),
+        catch: (cause) => new BrowserFailure({ operation: "compare base regions", cause })
+      })
       if (options.captureOnly !== true && refOrigin !== undefined) {
-        const reference = refs.manifest.states.find((ref) =>
-          stateKey(ref) === stateKey(state) && ref.status === "implemented" &&
-          ref.viewports.includes(identity.viewport) && ref.themes.includes(identity.theme)
-        )
         if (reference !== undefined) {
           let expected: Capture
           if (reference.source === "html") {
@@ -165,7 +185,7 @@ export const runConformance = Effect.fn("DesignConformance.run")(function*(refs:
             failures.push(failure)
           }
           artifacts.ref = yield* write(`${key}-ref.png`, expected.frame)
-          const limit = reference.source === "html" ? 0.001 : reference.pixelMaxDiffRatio
+          const limit = reference.source === "html" ? LIVE_CHANGE_MAX_DIFF_RATIO : reference.pixelMaxDiffRatio
           for (const name of ["*", ...reference.regions]) {
             const ref = name === "*" ? RegionPixels.Image({ bytes: expected.frame }) : expected.regions.get(name)
             const livePixels = name === "*" ? RegionPixels.Image({ bytes: actual.frame }) : actual.regions.get(name)
@@ -205,7 +225,7 @@ export const runConformance = Effect.fn("DesignConformance.run")(function*(refs:
           }
         }
       }
-      shots.push({ ...identity, touched: !referenceOnly && changed, artifacts })
+      shots.push({ ...identity, touched: changes.touchedRegions.length > 0, ...changes, artifacts })
     }
   }
   yield* fs.writeFileString(

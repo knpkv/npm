@@ -156,6 +156,8 @@ export interface ShotArtifacts extends Schema.Schema.Type<typeof ShotArtifacts> 
 export const ShotResult = Schema.Struct({
   ...Identity.fields,
   touched: Schema.Boolean,
+  touchedRegions: Schema.Array(Schema.Union([Name, Schema.Literal("*")])),
+  outsidePixelsChanged: Schema.Boolean,
   artifacts: ShotArtifacts
 })
 export interface ShotResult extends Schema.Schema.Type<typeof ShotResult> {}

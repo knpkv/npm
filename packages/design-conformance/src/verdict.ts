@@ -1,6 +1,6 @@
 import * as DateTime from "effect/DateTime"
 
-import { stateKey } from "./compare.js"
+import { shotKey } from "./compare.js"
 import type { Failure, Finding, Identity, Manifest, Result, ShotResult, Waiver } from "./schema.js"
 
 export const waiverMatches = (waiver: Waiver, failure: Failure): boolean =>
@@ -17,14 +17,22 @@ export const verdict = (
   shots: ReadonlyArray<ShotResult>,
   now: DateTime.Utc
 ): Result => {
-  const touched = new Set(shots.filter((shot) => shot.touched).map(stateKey))
+  const touched = new Map(shots.map((shot) => [shotKey(shot), new Set(shot.touchedRegions)]))
+  const outside = new Set(shots.filter((shot) => shot.outsidePixelsChanged).map(shotKey))
+  const changedPixelFailures = new Set(
+    failures.filter((failure) =>
+      failure.rule === "pixels" && failure.region !== "*" && touched.get(shotKey(failure))?.has(failure.region)
+    ).map(shotKey)
+  )
   const grace = manifest.enforcement.legacy !== "required" &&
     DateTime.isLessThan(now, manifest.enforcement.legacy.until)
   const findings: Array<Finding> = failures.map((failure) => {
     const waiver = waivers.findIndex((candidate) => waiverMatches(candidate, failure))
     if (waiver !== -1) return { ...failure, disposition: "waived", waiver }
-    const required = ["coverage", "integrity", "stale-waiver"].includes(failure.rule) ||
-      touched.has(stateKey(failure)) || !grace
+    const changed = failure.region === "*" && failure.rule === "pixels"
+      ? outside.has(shotKey(failure)) || changedPixelFailures.has(shotKey(failure))
+      : touched.get(shotKey(failure))?.has(failure.region) === true
+    const required = ["coverage", "integrity", "stale-waiver"].includes(failure.rule) || changed || !grace
     return { ...failure, disposition: required ? "required" : "report-only" }
   })
   for (const waiver of waivers) {
@@ -48,6 +56,6 @@ export const verdict = (
     product: manifest.product,
     passed: !findings.some((finding) => finding.disposition === "required"),
     findings,
-    shots: shots.map((shot) => ({ ...shot, touched: touched.has(stateKey(shot)) }))
+    shots: shots.map((shot) => ({ ...shot, touched: shot.touchedRegions.length > 0 }))
   }
 }
