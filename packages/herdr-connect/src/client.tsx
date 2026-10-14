@@ -1326,7 +1326,8 @@ const ActiveConnectSurface = ({
     host: agent.host,
     id: String(agent.id),
     key: connectAgentKey(agent),
-    name: agent.name
+    name: agent.name,
+    hue: agent.hue
   })
   const changePin = (agent: ConnectAgent, pinned: boolean): void => {
     setPinError(null)
@@ -1359,7 +1360,8 @@ const ActiveConnectSurface = ({
         host: agent.host,
         id: String(agent.id),
         key: connectAgentKey(agent),
-        name: agent.name
+        name: agent.name,
+        hue: agent.hue
       })),
       Date.now()
     )

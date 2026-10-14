@@ -214,9 +214,10 @@ const ringCentre = (points: ReadonlyArray<Point>, top: number, width: number, he
   return (low + high) / 2
 }
 
-// At most two full 256-agent pages. Stable identities share geometry across polls and surfaces.
+// Stable identities share geometry across polls and surfaces.
 const characterCache = new Map<string, AgentCharacter>()
-const CHARACTER_CACHE_LIMIT = 512
+// One full supported directory must survive the next stable-order poll without eviction.
+const CHARACTER_CACHE_LIMIT = 1_024
 
 /** Pure and stable across polls, pages and devices; the body ignores mutable display names. */
 export const agentCharacter = (host: string, id: string): AgentCharacter => {

@@ -66,7 +66,7 @@ export interface CreatureProps {
   readonly mood?: CreatureMood
   /** Stage-only, one-shot reaction. Listening lasts 720ms, poke 620ms; both settle to the true body. */
   readonly reaction?: CreatureReaction
-  /** Increment to replay the same reaction. Identity and looping phases remain unchanged. Default 0. */
+  /** Stage-only. Increment to replay the same reaction. Identity and looping phases remain unchanged. Default 0. */
   readonly reactionKey?: number
 }
 
@@ -113,41 +113,45 @@ export const Creature = ({
   id,
   name = id,
   mood: override,
-  reaction,
-  reactionKey = 0,
+  reaction: requestedReaction,
+  reactionKey: requestedReactionKey = 0,
   size,
   stale = false,
   state,
   statePolicy = "fleet",
   talking = false
 }: CreatureProps): ReactElement => {
+  const reaction = size === "stage" ? requestedReaction : undefined
+  const reactionKey = size === "stage" ? requestedReactionKey : 0
   const character = agentCharacter(host, id)
   const presentation = agentStatePresentation(state, statePolicy)
   const talkPose = talking && size === "stage"
   const root = useRef<SVGSVGElement>(null)
+  const identity = `${host.toLowerCase()}\u0000${id}`
+  const alreadyDone = override === undefined && creatureMood(state, talkPose) === "done"
   const [completion, setCompletion] = useState({
+    identity,
     state,
     override,
-    complete: override === undefined && creatureMood(state, talkPose) === "done"
+    complete: alreadyDone
   })
-  // Render-time adjustment resets the one-shot with the state, without timers or an intermediate old pose.
-  if (completion.state !== state || completion.override !== override) {
-    setCompletion({ state, override, complete: false })
+  // A new identity starts at its current pose; only a transition of the same agent celebrates.
+  if (completion.identity !== identity || completion.state !== state || completion.override !== override) {
+    setCompletion({ identity, state, override, complete: completion.identity !== identity && alreadyDone })
   }
-  const settled = completion.state === state && completion.override === override && completion.complete
+  const settled =
+    completion.identity === identity &&
+    completion.state === state &&
+    completion.override === override &&
+    completion.complete
   const selected = override ?? creatureMood(state, talkPose)
   const reduced = useReducedCreatureMotion(root, selected === "done" && !settled && reaction === undefined)
   // Persist the skipped completion so restoring motion cannot replay this transition.
   if (reduced && !settled && selected === "done" && reaction === undefined) {
-    setCompletion({ state, override, complete: true })
+    setCompletion({ identity, state, override, complete: true })
   }
   const ordinary = !talkPose && override === undefined && reaction === undefined
-  const mood =
-    size === "stage" && reaction !== undefined
-      ? reaction
-      : selected === "done" && (settled || reduced)
-        ? "happy"
-        : selected
+  const mood = reaction !== undefined ? reaction : selected === "done" && (settled || reduced) ? "happy" : selected
   const shut = closed || stale
   const expressive = talking && size === "stage" && !shut
   const pose =
@@ -303,7 +307,7 @@ export const Creature = ({
         key={`${mood}:${String(reactionKey)}`}
         onAnimationEnd={(event) => {
           if (event.animationName === "connect-creature-done-face" && selected === "done" && reaction === undefined) {
-            setCompletion({ state, override, complete: true })
+            setCompletion({ identity, state, override, complete: true })
           }
         }}
       >
