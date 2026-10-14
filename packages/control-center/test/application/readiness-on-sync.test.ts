@@ -1,6 +1,8 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
 import { Context, Effect, Layer, Ref, Schema } from "effect"
+import * as Clock from "effect/Clock"
+import * as Console from "effect/Console"
 import * as Crypto from "effect/Crypto"
 import * as DateTime from "effect/DateTime"
 import * as HttpClient from "effect/http/HttpClient"
@@ -212,6 +214,19 @@ const withFirstPartyProviders = Effect.fn("ReadinessOnSyncTest.withFirstPartyPro
     readonly truncateJiraAfterSync?: boolean
   } = {}
 ) {
+  const timingStartedAt = scenario.releaseCount === undefined
+    ? null
+    : yield* TestClock.withLive(Clock.currentTimeMillis)
+  // Real elapsed time is diagnostic only; provider and readiness clocks stay fixed.
+  const markInventoryPhase = Effect.fn("ReadinessOnSyncTest.markInventoryPhase")(function*(phase: string) {
+    if (timingStartedAt === null) return
+    const elapsedMillis = (yield* TestClock.withLive(Clock.currentTimeMillis)) - timingStartedAt
+    yield* Console.log(`[readiness inventory ${scenario.releaseCount}] ${phase}: ${elapsedMillis}ms since start`).pipe(
+      Effect.provideService(Console.Console, Console.Console.defaultValue())
+    )
+  })
+  yield* markInventoryPhase("started")
+  yield* Effect.addFinalizer(() => markInventoryPhase("scope closed"))
   yield* TestClock.setTime(DateTime.toEpochMillis(synchronizedAt))
   const config = yield* makePersistenceTestConfig("control-center-readiness-on-sync-")
   const requestedPaths: Array<string> = []
@@ -233,6 +248,7 @@ const withFirstPartyProviders = Effect.fn("ReadinessOnSyncTest.withFirstPartyPro
     const persistence = yield* Persistence
     const connections = yield* PluginConnectionMap
     const secrets = yield* SecretStore
+    yield* markInventoryPhase("persistence and runtime built")
     yield* persistence.workspaces.create(workspaceId, {
       displayName: WorkspaceName.make("Fixture service"),
       createdAt: synchronizedAt
@@ -359,9 +375,11 @@ const withFirstPartyProviders = Effect.fn("ReadinessOnSyncTest.withFirstPartyPro
         synchronizedAt
       )
     }
+    yield* markInventoryPhase("connections configured")
     const synchronization = yield* makeManualPluginSynchronization(connections)
     const pipelineSync = yield* synchronization.synchronize({ workspaceId, pluginConnectionId: pipelineId })
     assert.equal(pipelineSync.result, "synchronized", "real CodePipeline fixture synchronization must succeed")
+    yield* markInventoryPhase("pipeline synchronized")
     const settings = yield* persistence.workspaceSettings.get(workspaceId)
     const catalogue = yield* readReleaseTargetCatalog(persistence, workspaceId, settings.settings)
     const pipeline = catalogue.pipelines.find(({ pluginConnectionId }) => pluginConnectionId === pipelineId)
@@ -415,6 +433,7 @@ const withFirstPartyProviders = Effect.fn("ReadinessOnSyncTest.withFirstPartyPro
       governanceAuthority,
       updatedAt: synchronizedAt
     })
+    yield* markInventoryPhase("targets configured")
     for (const pluginConnectionId of [jiraId, codeCommitId, confluenceId]) {
       const result = yield* synchronization.synchronize({ workspaceId, pluginConnectionId })
       assert.equal(
@@ -424,6 +443,7 @@ const withFirstPartyProviders = Effect.fn("ReadinessOnSyncTest.withFirstPartyPro
           result.failure?.safeMessage ?? "no provider failure"
         }; requested ${requestedPaths.join(", ")}`
       )
+      yield* markInventoryPhase(`${result.providerId} synchronized`)
     }
     assert.includeMembers(requestedPaths, [
       "/rest/api/3/myself",
@@ -454,6 +474,7 @@ const withFirstPartyProviders = Effect.fn("ReadinessOnSyncTest.withFirstPartyPro
         Stream.filterEffect(() => readQueueOccupancy(workspaceId).pipe(Effect.map(({ pending }) => pending === 0)))
       )
       yield* Stream.runHead(awaitReady)
+      yield* markInventoryPhase("initial queue drained")
       const eventsBefore = yield* persistence.events.readLatestReadinessOutcomes(workspaceId, releaseIds)
       assert.lengthOf(eventsBefore, scenario.releaseCount)
       assert.isEmpty(
@@ -491,11 +512,14 @@ const withFirstPartyProviders = Effect.fn("ReadinessOnSyncTest.withFirstPartyPro
           }
         }
       }
+      yield* markInventoryPhase("all initial outcomes checked")
       // Jira materialization is the gt50 regression trigger. The neighboring
       // single-release case retains unchanged-sync coverage for all four providers.
       const repeated = yield* synchronization.synchronize({ workspaceId, pluginConnectionId: jiraId })
       assert.equal(repeated.result, "synchronized")
+      yield* markInventoryPhase("unchanged Jira synchronized")
       yield* Stream.runHead(awaitReady)
+      yield* markInventoryPhase("repeat queue drained")
       assert.deepEqual(
         yield* persistence.readiness.readCurrentReleases({ workspaceId, releaseIds }),
         before,
@@ -506,6 +530,7 @@ const withFirstPartyProviders = Effect.fn("ReadinessOnSyncTest.withFirstPartyPro
         eventsBefore,
         "unchanged provider evidence must not publish extra readiness outcomes"
       )
+      yield* markInventoryPhase("unchanged assessments and events checked")
       return
     }
     const portfolio = yield* makePortfolioSnapshots
@@ -1032,7 +1057,7 @@ describe("readiness after real first-party synchronization", () => {
         "ready",
         { repeatUnchanged: true }
       ).pipe(Effect.scoped))
-    // Keep the real 51-release inventory and the existing 20-second CI budget.
+    // Local 9.25s exceeded 20s in CI at f470a2d, run 38562629431; this one boundary case gets 60s.
     it.effect(
       "all 51 releases keep healthy links and ready assessments through unchanged sync",
       () =>
@@ -1044,7 +1069,7 @@ describe("readiness after real first-party synchronization", () => {
           exactRunbookMetadata: true,
           releaseCount: 51
         }, "ready").pipe(Effect.scoped),
-      20_000
+      60_000
     )
     for (const scenario of scenarios) {
       it.effect(`${scenario.verdict}: ${scenario.reason}`, () =>
