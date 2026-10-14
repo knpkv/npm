@@ -1,11 +1,13 @@
 import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
 import type { HostConfiguration } from "@knpkv/herdr-fleet"
-import { Effect, FileSystem, Path, Result, Schema } from "effect"
+import { Effect, Fiber, FileSystem, Path, Result, Schema } from "effect"
+import { TestClock } from "effect/testing"
 import { DatabaseSync } from "node:sqlite"
 import { AgentActivityStore } from "../src/activity-store.js"
 import { AgentArchiveStore } from "../src/archive-store.js"
 import { type AgentSource, localConnectAgents } from "../src/directory.js"
+import { connectPeerDirectoryTimeoutMillis } from "../src/internal/peer-deadline.js"
 import { type ArchivedConnectAgent, ConnectAgent } from "../src/model.js"
 import { AgentRelationshipStore } from "../src/relationship-store.js"
 
@@ -106,6 +108,36 @@ const close = (stores: Stores, agents: ReadonlyArray<ConnectAgent>, start = 0) =
 
 describe("persisted agent hues", () => {
   it.layer(NodeServices.layer)((it) => {
+    it.effect("bounds optional hue contention below the peer directory deadline and recovers after unlock", () =>
+      Effect.gen(function*() {
+        const stores = yield* openStores(yield* pathFor)
+        const initial = yield* read(stores, [identity("worker")])
+        const writer = yield* Effect.acquireRelease(
+          Effect.sync(() => new DatabaseSync(stores.activity.path)),
+          (database) => Effect.sync(() => database.close())
+        )
+        let locked = true
+        yield* Effect.acquireRelease(Effect.sync(() => writer.exec("BEGIN IMMEDIATE")), () =>
+          Effect.sync(() => {
+            if (locked) writer.exec("ROLLBACK")
+          }))
+        const pending = yield* Effect.forkScoped(
+          Effect.result(stores.activity.assignHues("atlas", initial.agents, 1, true))
+        )
+        yield* TestClock.adjust(connectPeerDirectoryTimeoutMillis - 1)
+        expect(pending.pollUnsafe()).toBeDefined()
+        expect(yield* Fiber.join(pending)).toMatchObject({
+          failure: {
+            _tag: "ConnectStoreBusyError",
+            operation: "activity.hues.assign",
+            timeoutMillis: connectPeerDirectoryTimeoutMillis / 2
+          }
+        })
+        yield* Effect.sync(() => writer.exec("ROLLBACK"))
+        locked = false
+        expect((yield* read(stores, [identity("worker")], 2)).agents).toEqual(initial.agents)
+      }).pipe(Effect.scoped))
+
     it.effect("assigns colliding names different families in stable identity order", () =>
       Effect.gen(function*() {
         const stores = yield* openStores(yield* pathFor)

@@ -2252,8 +2252,11 @@ esac
         yield* fs.chmod(root, 0o700)
         const mainRoot = join(root, "hub")
         const peerRoot = join(root, "peer")
-        yield* fs.makeDirectory(mainRoot)
-        yield* fs.makeDirectory(peerRoot)
+        yield* fs.makeDirectory(mainRoot, { mode: 0o700 })
+        yield* fs.makeDirectory(peerRoot, { mode: 0o700 })
+        for (const directory of [mainRoot, peerRoot]) {
+          expect((yield* fs.stat(directory)).mode & 0o777).toBe(0o700)
+        }
         let unavailable = false
         const peerOperations: HostOperations = {
           ...operations,

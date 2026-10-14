@@ -1,13 +1,15 @@
 import { openPrivateSqlite, type PrivateDatabaseError, type PrivateSqlite } from "@knpkv/herdr-fleet/sqlite"
 import { Effect, Schema } from "effect"
 import type { DatabaseSync } from "node:sqlite"
-import { TerminalTransportError } from "./errors.js"
+import { ConnectStoreBusyError, TerminalTransportError } from "./errors.js"
 import { assignHues, initializeHues } from "./internal/hue-database.js"
+import { connectPeerDirectoryTimeoutMillis } from "./internal/peer-deadline.js"
 import { connectBusyTimeoutMillis, connectSqliteWrite } from "./internal/sqlite-write.js"
 import { ConnectAgent, LocalConnectAgents } from "./model.js"
 
 const ActivityRow = Schema.Struct({ last_activity_at: Schema.Number })
 const TableColumn = Schema.Struct({ name: Schema.String })
+const optionalHueTimeoutMillis = connectPeerDirectoryTimeoutMillis / 2
 
 const fromPrivateDatabaseError = (error: PrivateDatabaseError) =>
   new TerminalTransportError({
@@ -97,46 +99,57 @@ export class AgentActivityStore {
   })
 
   /** Complete local inventories release absent reservations; partial reads only enrich positive sightings. */
-  readonly assignHues = Effect.fn("AgentActivityStore.assignHues")(function*(
-    this: AgentActivityStore,
-    host: string,
-    agents: ReadonlyArray<ConnectAgent>,
-    observedAt: number,
-    complete = false
-  ) {
-    const input = yield* Schema.decodeUnknownEffect(Schema.Struct({
-      directory: LocalConnectAgents,
-      observedAt: ConnectAgent.fields.lastActivityAt
-    }))({ directory: { host, agents, complete }, observedAt }).pipe(
-      Effect.mapError(storeError("activity.hues.decode"))
-    )
-    if (input.directory.agents.some((agent) => agent.host.toLowerCase() !== input.directory.host.toLowerCase())) {
-      return yield* new TerminalTransportError({
-        cause: input.directory.host,
-        detail: "Hue allocation requires agents from the requested host",
-        operation: "activity.hues.decode"
-      })
-    }
-    const assigned = yield* connectSqliteWrite("activity.hues.assign", () => {
-      this.#database.exec("BEGIN IMMEDIATE")
-      try {
-        const result = assignHues(
-          this.#database,
-          input.directory.host,
-          input.directory.agents,
-          input.observedAt,
-          input.directory.complete === true
-        )
-        this.#database.exec("COMMIT")
-        return result
-      } catch (cause) {
-        this.#database.exec("ROLLBACK")
-        throw cause
+  readonly assignHues = Effect.fn("AgentActivityStore.assignHues")(
+    function*(
+      this: AgentActivityStore,
+      host: string,
+      agents: ReadonlyArray<ConnectAgent>,
+      observedAt: number,
+      complete = false
+    ) {
+      const input = yield* Schema.decodeUnknownEffect(Schema.Struct({
+        directory: LocalConnectAgents,
+        observedAt: ConnectAgent.fields.lastActivityAt
+      }))({ directory: { host, agents, complete }, observedAt }).pipe(
+        Effect.mapError(storeError("activity.hues.decode"))
+      )
+      if (input.directory.agents.some((agent) => agent.host.toLowerCase() !== input.directory.host.toLowerCase())) {
+        return yield* new TerminalTransportError({
+          cause: input.directory.host,
+          detail: "Hue allocation requires agents from the requested host",
+          operation: "activity.hues.decode"
+        })
       }
-    }, storeError("activity.hues.assign"))
-    yield* this.#secureFiles.pipe(Effect.mapError(fromPrivateDatabaseError))
-    return assigned
-  })
+      const assigned = yield* connectSqliteWrite("activity.hues.assign", () => {
+        this.#database.exec("BEGIN IMMEDIATE")
+        try {
+          const result = assignHues(
+            this.#database,
+            input.directory.host,
+            input.directory.agents,
+            input.observedAt,
+            input.directory.complete === true
+          )
+          this.#database.exec("COMMIT")
+          return result
+        } catch (cause) {
+          this.#database.exec("ROLLBACK")
+          throw cause
+        }
+      }, storeError("activity.hues.assign"))
+      yield* this.#secureFiles.pipe(Effect.mapError(fromPrivateDatabaseError))
+      return assigned
+    },
+    Effect.timeoutOrElse({
+      duration: optionalHueTimeoutMillis,
+      orElse: () =>
+        new ConnectStoreBusyError({
+          operation: "activity.hues.assign",
+          timeoutMillis: optionalHueTimeoutMillis,
+          cause: "Optional hue allocation exceeded its peer-directory budget"
+        })
+    })
+  )
 
   close(): void {
     this.#database.close()

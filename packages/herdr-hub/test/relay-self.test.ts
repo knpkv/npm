@@ -81,7 +81,7 @@ it.layer(layer)("relay me", (it) => {
       yield* Command.runWith(command, { version: "0" })(["me", "--help"])
     }))
 
-  it.effect("uses the current pane header, an identity-free body and canonical hub; identity failures stop before HTTP", () =>
+  it.effect("preserves exhausted store failures and current-pane authorization without retrying", () =>
     Effect.gen(function*() {
       const fs = yield* FileSystem.FileSystem
       const paths = yield* Path.Path
@@ -129,6 +129,7 @@ it.layer(layer)("relay me", (it) => {
       }
       let requests = 0
       let limited = false
+      let busy = false
       const client = HttpClient.make((request) =>
         Effect.sync(() => {
           requests++
@@ -138,7 +139,16 @@ it.layer(layer)("relay me", (it) => {
           expect(new TextDecoder().decode(request.body.body)).toBe(JSON.stringify({ say: "Ready" }))
           return HttpClientResponse.fromWeb(
             request,
-            limited
+            busy
+              ? Response.json({
+                error: "ConnectStoreBusyError",
+                operation: "self.update",
+                timeoutMillis: 5_000,
+                cause: "private SQLite detail"
+              }, {
+                status: 503
+              })
+              : limited
               ? Response.json({ error: "TooManySelfUpdates", retryAfterMillis: 10_000 }, { status: 429 })
               : Response.json({ say: "Ready", accessory: "none", at: 1, replyTo: null })
           )
@@ -154,9 +164,14 @@ it.layer(layer)("relay me", (it) => {
         retryAfterMillis: 10_000
       })
       expect(requests).toBe(2)
+      busy = true
+      expect(yield* Effect.result(submit())).toMatchObject({
+        failure: { _tag: "ConnectStoreBusyError", operation: "self.update", timeoutMillis: 5_000, cause: 503 }
+      })
+      expect(requests).toBe(3)
       yield* writeIdentity("w1:p2")
       const identityFailure = yield* Effect.result(submit())
       expect(Result.isFailure(identityFailure) && identityFailure.failure._tag).toBe("UnboundAgent")
-      expect(requests).toBe(2)
+      expect(requests).toBe(3)
     }).pipe(Effect.scoped))
 })

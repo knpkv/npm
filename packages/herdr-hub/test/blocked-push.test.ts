@@ -113,6 +113,89 @@ const setup = Effect.fn("BlockedPushTest.setup")(function*() {
 
 describe("blocked agent notifications", () => {
   it.layer(NodeServices.layer)((it) => {
+    it.effect.each(["accepted", "rejected"])(
+      "drains reserved sibling outcomes after a store failure: %s",
+      (outcome) =>
+        Effect.gen(function*() {
+          const test = yield* setup()
+          yield* test.subscriptions.putSubscription({
+            endpoint: "https://push.example.test/two",
+            expirationTime: null,
+            keys: { auth: "auth_key", p256dh: "public_key" }
+          }, "owner@example.test")
+          const writer = yield* Effect.acquireRelease(
+            Effect.sync(() => new DatabaseSync(test.path)),
+            (database) => Effect.sync(() => database.close())
+          )
+          let held = false
+          yield* Effect.addFinalizer(() =>
+            Effect.sync(() => {
+              if (held) writer.exec("ROLLBACK")
+            })
+          )
+          const firstStarted = yield* Deferred.make<void>()
+          const releaseFirst = yield* Deferred.make<void>()
+          const secondLane = yield* Deferred.make<Fiber.Fiber<unknown, unknown>>()
+          const agents = [agent("blocked"), { ...agent("blocked"), id: "agent-two" }]
+          yield* test.store.observe({ host: "HOST-A", complete: true, observedAt: 0, agents })
+          yield* TestClock.adjust(60_000)
+          const loadObservations = () =>
+            Effect.succeed([{ host: "HOST-A", complete: true, observedAt: 60_000, agents }])
+          const running = yield* Effect.forkScoped(Effect.result(runBlockedPushPass({
+            store: test.store,
+            subscriptions: test.subscriptions,
+            allowedUsers: ["owner@example.test"],
+            allowedPushOrigins: ["https://push.example.test"],
+            loadObservations,
+            send: (target) =>
+              Effect.gen(function*() {
+                if (target.endpoint.endsWith("/one")) {
+                  yield* Deferred.succeed(firstStarted, undefined)
+                  yield* Deferred.await(releaseFirst)
+                  if (outcome === "rejected") {
+                    return yield* new PushDeliveryError({
+                      operation: "webpush.send",
+                      statusCode: 503,
+                      cause: "rejected"
+                    })
+                  }
+                } else {
+                  yield* Deferred.await(firstStarted)
+                  yield* Deferred.succeed(secondLane, yield* Effect.fiber)
+                  writer.exec("BEGIN IMMEDIATE")
+                  held = true
+                }
+              })
+          })))
+          yield* Fiber.await(yield* Deferred.await(secondLane))
+          yield* Effect.sync(() => writer.exec("ROLLBACK"))
+          held = false
+          yield* Deferred.succeed(releaseFirst, undefined)
+          expect(yield* Fiber.join(running)).toMatchObject({ failure: { _tag: "BlockedPushStoreError" } })
+          const subscription = JSON.stringify([
+            "owner@example.test",
+            "https://push.example.test/one",
+            { auth: "auth_key", p256dh: "public_key" }
+          ])
+          expect(writer.prepare("SELECT status FROM blocked_push_sends WHERE subscription = ?").all(subscription))
+            .toEqual([{ status: outcome === "accepted" ? "sent" : "retry" }])
+          expect(writer.prepare("SELECT * FROM blocked_push_sends WHERE agent_id = 'agent-two'").all()).toEqual([])
+          let retries = 0
+          yield* runBlockedPushPass({
+            store: test.store,
+            subscriptions: test.subscriptions,
+            allowedUsers: ["owner@example.test"],
+            allowedPushOrigins: ["https://push.example.test"],
+            loadObservations,
+            send: (target, payload) =>
+              Effect.sync(() => {
+                if (target.endpoint.endsWith("/one") && payload.agentId === "agent-one") retries++
+              })
+          })
+          expect(retries).toBe(outcome === "rejected" ? 1 : 0)
+        }).pipe(Effect.scoped)
+    )
+
     it.effect("limits in-flight delivery to four subscriptions across multiple episodes", () =>
       Effect.gen(function*() {
         const test = yield* setup()
@@ -686,6 +769,47 @@ describe("blocked agent notifications", () => {
 
 // This pass contract is about real event-loop latency, including native SQLite waits.
 it.layer(NodeServices.layer, { excludeTestServices: true })((it) => {
+  it.effect.each(["revoked", "gone", "disallowed"])(
+    "ends the pass when subscription cleanup is locked: %s",
+    (reason) =>
+      Effect.gen(function*() {
+        const test = yield* setup()
+        const fs = yield* FileSystem.FileSystem
+        const paths = yield* Path.Path
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "push-subscription-lock-" })
+        const subscriptions = yield* Effect.acquireRelease(
+          ApprovalAppStore.open(paths.join(root, "subscriptions.sqlite")),
+          (store) => Effect.sync(() => store.close())
+        )
+        yield* subscriptions.putSubscription({
+          endpoint: "https://push.example.test/one",
+          expirationTime: null,
+          keys: { auth: "auth_key", p256dh: "public_key" }
+        }, "owner@example.test")
+        const writer = yield* Effect.acquireRelease(
+          Effect.sync(() => new DatabaseSync(subscriptions.path)),
+          (database) => Effect.sync(() => database.close())
+        )
+        yield* Effect.acquireRelease(Effect.sync(() => writer.exec("BEGIN IMMEDIATE")), () =>
+          Effect.sync(() => writer.exec("ROLLBACK")))
+        const observedAt = yield* Clock.currentTimeMillis
+        const agents = Array.from({ length: 6 }, (_, index) => ({ ...agent("blocked"), id: `agent-${index}` }))
+        yield* test.store.observe({ host: "HOST-A", complete: true, observedAt: observedAt - 60_000, agents })
+        expect(
+          yield* Effect.result(runBlockedPushPass({
+            store: test.store,
+            subscriptions,
+            allowedUsers: reason === "revoked" ? [] : ["owner@example.test"],
+            allowedPushOrigins: reason === "disallowed" ? [] : ["https://push.example.test"],
+            loadObservations: () =>
+              Effect.succeed([{ host: "HOST-A", complete: true, observedAt, agents }]),
+            send: () =>
+              Effect.fail(new PushDeliveryError({ operation: "webpush.send", statusCode: 410, cause: "gone" }))
+          }))
+        ).toMatchObject({ failure: { _tag: "ApprovalAppStoreError", operation: "subscription.delete" } })
+      }).pipe(Effect.scoped)
+  )
+
   it.effect.each([false, true])(
     "bounds a notification pass when a writer arrives during send; locked %s",
     (locked) =>
