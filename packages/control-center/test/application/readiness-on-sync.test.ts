@@ -5,6 +5,7 @@ import * as Crypto from "effect/Crypto"
 import * as DateTime from "effect/DateTime"
 import * as HttpClient from "effect/http/HttpClient"
 import * as PlatformError from "effect/PlatformError"
+import * as SqlSchema from "effect/sql/SqlSchema"
 import * as Stream from "effect/Stream"
 import * as TestClock from "effect/testing/TestClock"
 
@@ -434,47 +435,66 @@ const withFirstPartyProviders = Effect.fn("ReadinessOnSyncTest.withFirstPartyPro
       assert.lengthOf(releases, scenario.releaseCount)
       for (const { release } of releases) {
         assert.lengthOf(release.targetEnvironmentIds, 1, `${release.version} must retain its configured target`)
-        const slice = yield* persistence.deliveryGraph.read(workspaceId, {
-          _tag: "releaseSlice",
-          releaseId: release.id,
-          environmentId: null,
-          limit: 100
-        })
-        if (slice._tag !== "releaseSlice") return assert.fail("expected release delivery slice")
-        for (const kind of ["implements", "delivered-by", "documented-by"]) {
-          assert.isTrue(
-            slice.value.relationships.some((edge) => edge.kind === kind && edge.lifecycle._tag === "verified"),
-            `${release.version} must retain a verified ${kind} link with ${scenario.releaseCount} releases`
-          )
-        }
       }
       const releaseIds = releases.map(({ release }) => release.id)
-      const awaitReady = readinessChanges.pipe(Stream.filterEffect(() =>
-        Effect.gen(function*() {
-          const outcomes = yield* persistence.events.readLatestReadinessOutcomes(workspaceId, releaseIds)
-          const failures = outcomes.filter(({ payload }) => payload.reason === "readiness-failed")
-          assert.isEmpty(failures, "healthy release inventory must not cause readiness-publication-failed")
-          const pending = yield* persistence.readiness.listPending({
-            workspaceId,
-            dueAt: yield* DateTime.now,
-            limit: 1
-          })
-          return pending.length === 0
-        })
-      ))
+      const { sql } = yield* Database
+      // Admission's listPending excludes leased work. This test barrier includes
+      // claimed rows too, so the last in-flight assessment cannot look drained.
+      const readQueueOccupancy = SqlSchema.findOne({
+        Request: WorkspaceId,
+        Result: Schema.Struct({ pending: Schema.Literals([0, 1]) }),
+        execute: (id) =>
+          sql`SELECT (
+          EXISTS(SELECT 1 FROM readiness_environment_queue WHERE workspace_id = ${id}) OR
+          EXISTS(SELECT 1 FROM readiness_release_queue WHERE workspace_id = ${id})
+        ) AS pending`
+      })
+      // Decode the complete inventory once after drain, not on every wake hint.
+      const awaitReady = readinessChanges.pipe(
+        Stream.filterEffect(() => readQueueOccupancy(workspaceId).pipe(Effect.map(({ pending }) => pending === 0)))
+      )
       yield* Stream.runHead(awaitReady)
+      const eventsBefore = yield* persistence.events.readLatestReadinessOutcomes(workspaceId, releaseIds)
+      assert.lengthOf(eventsBefore, scenario.releaseCount)
+      assert.isEmpty(
+        eventsBefore.filter(({ payload }) => payload.reason === "readiness-failed"),
+        "healthy release inventory must not cause readiness-publication-failed"
+      )
       const before = yield* persistence.readiness.readCurrentReleases({ workspaceId, releaseIds })
+      const releasesById = new Map(releases.map(({ release }) => [release.id, release]))
       assert.lengthOf(before, scenario.releaseCount)
       for (const head of before) {
         assert.equal(head.authority, "authoritative")
         assert.equal(head.assessment.verdict, "ready")
         assert.isTrue(head.assessment.sourceFreshness.some((source) => source.pluginConnectionId === confluenceId))
+        const release = releasesById.get(head.assessment.candidate.scope.releaseId)
+        if (release === undefined) return assert.fail("expected assessed inventory release")
+        assert.lengthOf(head.assessment.environments, 1)
+        for (const environment of head.assessment.environments) {
+          assert.equal(environment.environmentId, release.targetEnvironmentIds[0])
+          assert.equal(environment.verdict, "ready")
+          // The assessment retains these exact link observations; inspecting them
+          // avoids hydrating the same delivery closure again for every release.
+          for (
+            const { factId, kind } of [
+              { kind: "implements", factId: "code.implements" },
+              { kind: "delivered-by", factId: "pipeline.relationship" },
+              { kind: "documented-by", factId: "runbook.relationship" }
+            ]
+          ) {
+            const fact = environment.facts.find(({ definition }) => definition.factId === factId)
+            if (fact === undefined) return assert.fail(`${release.version} must retain its ${kind} observation`)
+            assert.equal(fact.result, "verified")
+            assert.equal(fact.observation?.state._tag, "relationship")
+            assert.equal(fact.observation?.state.status, "verified")
+            assert.isNotEmpty(fact.evidenceIds)
+          }
+        }
       }
-      const eventsBefore = yield* persistence.events.readLatestReadinessOutcomes(workspaceId, releaseIds)
-      for (const pluginConnectionId of [pipelineId, jiraId, codeCommitId, confluenceId]) {
-        const result = yield* synchronization.synchronize({ workspaceId, pluginConnectionId })
-        assert.equal(result.result, "synchronized")
-      }
+      // Jira materialization is the gt50 regression trigger. The neighboring
+      // single-release case retains unchanged-sync coverage for all four providers.
+      const repeated = yield* synchronization.synchronize({ workspaceId, pluginConnectionId: jiraId })
+      assert.equal(repeated.result, "synchronized")
       yield* Stream.runHead(awaitReady)
       assert.deepEqual(
         yield* persistence.readiness.readCurrentReleases({ workspaceId, releaseIds }),
@@ -1012,7 +1032,7 @@ describe("readiness after real first-party synchronization", () => {
         "ready",
         { repeatUnchanged: true }
       ).pipe(Effect.scoped))
-    // Measured at 12.23s for all 51 assessments plus an unchanged sync; the package default is 10s.
+    // Keep the real 51-release inventory and the existing 20-second CI budget.
     it.effect(
       "all 51 releases keep healthy links and ready assessments through unchanged sync",
       () =>
