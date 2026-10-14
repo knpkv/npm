@@ -1,5 +1,11 @@
 # @knpkv/herdr-connect
 
+## 0.27.0
+
+### Minor Changes
+
+- [#902](https://github.com/knpkv/npm/pull/902) [`6e3abc8`](https://github.com/knpkv/npm/commit/6e3abc863ecf98f1b367643421964743ab971459) Thanks [@konopkov](https://github.com/konopkov)! - Keep completion state scoped to each agent, ignore stage reactions on rows and cast, and retain the last served hue in persisted pins while an agent is away. Keep all 1,024 supported directory identities cached across polls.
+
 ## 0.26.0
 
 ### Minor Changes
