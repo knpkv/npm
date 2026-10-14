@@ -5,6 +5,7 @@
  * The committed OpenAPI document is the unmodified upstream document. RFC 6902
  * patches and deterministic compatibility normalizations are applied in memory.
  */
+import * as JsonSchemaGenerator from "@effect/openapi-generator/JsonSchemaGenerator"
 import * as OpenApiGenerator from "@effect/openapi-generator/OpenApiGenerator"
 import * as OpenApiPatch from "@effect/openapi-generator/OpenApiPatch"
 import { NodeHttpClient, NodeRuntime, NodeServices } from "@effect/platform-node"
@@ -22,6 +23,7 @@ import * as Path from "effect/Path"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import { format as formatSource } from "prettier"
+import * as ts from "typescript"
 
 const SPEC_URL = "https://dac-static.atlassian.com/cloud/jira/platform/swagger-v3.v3.json"
 const METHODS = new Set(["get", "put", "post", "delete", "options", "head", "patch", "trace"])
@@ -103,7 +105,9 @@ const formattedJson = (value: Schema.Json) =>
  */
 const normalizeSchema = (schema: JsonSchema.JsonSchema): JsonSchema.JsonSchema => {
   const { default: _default, examples: _examples, ...normalized } = schema
-  return normalized.additionalProperties === true && Predicate.isObject(normalized.properties)
+  return (normalized.additionalProperties === true || normalized.additionalProperties === undefined) &&
+      Predicate.isObject(normalized.properties) && normalized.anyOf === undefined && normalized.oneOf === undefined &&
+      normalized.allOf === undefined
     ? { ...normalized, additionalProperties: false }
     : normalized
 }
@@ -178,6 +182,48 @@ const ownPrototypeKeys = (source: string): string => {
     )
 }
 
+/**
+ * Keep published models whose endpoint references are no longer traversed. Generate their dependency closure from the same patched definitions,
+ * appending only declarations that the endpoint generator did not already emit.
+ */
+const retainPublishedModels = (source: string, document: OpenAPISpec): string => {
+  const retained = ["MultipartFile", "Resource", "UserFilter"]
+  const definitions = document.components.schemas
+  for (const name of retained) {
+    if (definitions[name] === undefined) {
+      throw new RegenerateError({ message: `Published Jira component disappeared: ${name}` })
+    }
+  }
+  const models = JsonSchemaGenerator.make()
+  models.addSchema("__PublishedModels", {
+    type: "object",
+    properties: Object.fromEntries(retained.map((name) => [name, { $ref: `#/components/schemas/${name}` }]))
+  })
+  const generated = models.generate("openapi-3.0", definitions, false, { onEnter: normalizeSchema })
+  const file = ts.createSourceFile("models.ts", generated, ts.ScriptTarget.Latest, true)
+  const existing = new Set(Array.from(source.matchAll(/^export (?:type|const) (\w+)\b/gm), (match) => match[1]))
+  const missing: Array<string> = []
+  for (const statement of file.statements) {
+    let identifier: string
+    if (ts.isTypeAliasDeclaration(statement)) {
+      identifier = statement.name.text
+    } else if (ts.isVariableStatement(statement)) {
+      const declaration = statement.declarationList.declarations[0]
+      if (
+        statement.declarationList.declarations.length !== 1 || declaration === undefined ||
+        !ts.isIdentifier(declaration.name)
+      ) {
+        throw new RegenerateError({ message: "Effect model generator emitted an unsupported variable" })
+      }
+      identifier = declaration.name.text
+    } else {
+      throw new RegenerateError({ message: "Effect model generator emitted an unsupported declaration" })
+    }
+    if (identifier !== "__PublishedModels" && !existing.has(identifier)) missing.push(statement.getText(file))
+  }
+  return `${source}\n// Published components retained independently of endpoint reachability.\n${missing.join("\n")}\n`
+}
+
 const generate = Effect.fn("Jira.regenerate.generate")(function*(scriptPaths: ScriptPaths, upstream: Schema.Json) {
   const fs = yield* FileSystem.FileSystem
   const patch = yield* OpenApiPatch.parsePatchInput(scriptPaths.patchFile).pipe(
@@ -206,7 +252,10 @@ const generate = Effect.fn("Jira.regenerate.generate")(function*(scriptPaths: Sc
     (warning) => Console.warn(`[${warning.code}] ${warning.method ?? ""} ${warning.path ?? ""}: ${warning.message}`),
     { discard: true }
   )
-  yield* fs.writeFileString(scriptPaths.outputFile, ownPrototypeKeys(stripTrailingWhitespace(generated))).pipe(
+  yield* fs.writeFileString(
+    scriptPaths.outputFile,
+    ownPrototypeKeys(stripTrailingWhitespace(retainPublishedModels(generated, document)))
+  ).pipe(
     Effect.mapError((cause) => new RegenerateError({ message: "Could not write generated Jira client", cause }))
   )
 })
