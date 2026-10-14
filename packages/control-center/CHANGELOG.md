@@ -1,5 +1,11 @@
 # @knpkv/control-center
 
+## 0.18.1
+
+### Patch Changes
+
+- [#879](https://github.com/knpkv/npm/pull/879) [`dc8e9fa`](https://github.com/knpkv/npm/commit/dc8e9faabf684a0bcc946fed6ed1295381530e7a) Thanks [@konopkov](https://github.com/konopkov)! - Workspaces with more than 50 releases keep their verified delivery links and readiness assessments when unchanged provider data synchronizes.
+
 ## 0.18.0
 
 ### Minor Changes
