@@ -2,6 +2,14 @@
 
 Released as `@knpkv/herdr-approvals` up to 0.18.0; the headings below are that package's history.
 
+## 0.37.2
+
+### Patch Changes
+
+- [#895](https://github.com/knpkv/npm/pull/895) [`fdbca63`](https://github.com/knpkv/npm/commit/fdbca63a2a259e25f61ad044feec713f8e1c0550) Thanks [@konopkov](https://github.com/konopkov)! - Add scoped, single-flight optional hue enrichment and bind it to the hub's server lifetime. Return an uncoloured directory when hue permission finalization exceeds its wait budget, while keeping mandatory activity observations independent. Shutdown interrupts the owned worker, joins for at most two seconds and closes its connection, logging a typed warning if uninterruptible cleanup remains pending.
+- Updated dependencies [[`fdbca63`](https://github.com/knpkv/npm/commit/fdbca63a2a259e25f61ad044feec713f8e1c0550)]:
+  - @knpkv/herdr-connect@0.26.0
+
 ## 0.37.1
 
 ### Patch Changes
