@@ -1,8 +1,10 @@
 import type * as Crypto from "effect/Crypto"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
+import * as Option from "effect/Option"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
+import * as Stream from "effect/Stream"
 
 import {
   type DeliveryNode,
@@ -12,13 +14,20 @@ import {
   LedgerRevision
 } from "../../domain/deliveryGraph.js"
 import type { Freshness, PluginHealth } from "../../domain/freshness.js"
-import { EvidenceClaimId, EvidenceId, GraphNodeId, RelationshipId, type WorkspaceId } from "../../domain/identifiers.js"
+import {
+  EvidenceClaimId,
+  EvidenceId,
+  GraphNodeId,
+  RelationshipId,
+  type ReleaseId,
+  type WorkspaceId
+} from "../../domain/identifiers.js"
 import type { UtcTimestamp } from "../../domain/utcTimestamp.js"
 import type { WorkspaceSettingsV1 } from "../../domain/workspaceSettings.js"
 import { PersistenceOperationError } from "../persistence/errors.js"
 import type { PersistenceOperationFailure, PersistenceService } from "../persistence/Persistence.js"
 import { DeliveryGraphWriteBatch } from "../persistence/repositories/deliveryGraphRepository.js"
-import type { EntityRecord } from "../persistence/repositories/models.js"
+import type { EntityRecord, ReleaseSnapshotRecord } from "../persistence/repositories/models.js"
 import { PluginStreamKey } from "../persistence/repositories/pluginRuntimeModels.js"
 import { firstPartySyncStreamKey } from "../plugins/firstPartySynchronization.js"
 import {
@@ -38,7 +47,6 @@ import {
 import { stableUuid } from "./internal/stableUuid.js"
 
 const MAXIMUM_INFERENCE_ENTITIES = 500
-const MAXIMUM_INFERENCE_RELEASES = 50
 const MAXIMUM_INFERENCE_RELATIONSHIPS = 2_000
 const COMPONENT = "relationship-inference"
 
@@ -558,10 +566,22 @@ export const materializeRelationshipInference = Effect.fn("RelationshipInference
       nodeId: GraphNodeId.make(yield* identity(entityNodeIdentity(scope.workspaceId, entity)))
     })
   }
-  const releases = yield* persistence.releases.list(scope.workspaceId, MAXIMUM_INFERENCE_RELEASES + 1)
-  if (releases.length > MAXIMUM_INFERENCE_RELEASES) {
-    return yield* retireInferenceAtEntityBound(persistence, scope)
-  }
+  // Version ambiguity is workspace-wide, so derive once after exhausting the bounded keyset pages.
+  const releasePages = yield* Stream.paginate<
+    ReleaseId | null,
+    ReadonlyArray<ReleaseSnapshotRecord>,
+    PersistenceOperationFailure
+  >(
+    null,
+    (afterReleaseId) =>
+      persistence.releases.listForReconciliation(scope.workspaceId, afterReleaseId).pipe(
+        Effect.map((page) => [
+          page.records.length === 0 ? [] : [page.records],
+          Option.fromNullishOr(page.nextReleaseId)
+        ])
+      )
+  ).pipe(Stream.runCollect)
+  const releases = releasePages.flat()
   const inferenceReleases: Array<{
     readonly inferenceRelease: RelationshipInferenceRelease
     readonly node: DeliveryNode | null
@@ -618,25 +638,30 @@ export const materializeRelationshipInference = Effect.fn("RelationshipInference
     )
   }
   const relationships = slices.flatMap((slice) => (slice._tag === "releaseSlice" ? slice.value.relationships : []))
-  const publicationRecords = releaseIds.length === 0 ?
-    [] :
-    yield* persistence.governedActions.readLatestTerminalReleasePublications({
-      workspaceId: scope.workspaceId,
-      providerId: "confluence",
-      releaseIds
-    })
-  const publishedRunbooks = releasePublicationReceiptCandidatesFromRecords(publicationRecords).flatMap((receipt) => {
-    const page = decodeConfluencePublicationReference(receipt.providerOperationId)
-    if (page === null) return []
-    const record = records.find(({ sourceRevision }) =>
-      sourceRevision.providerId === "confluence" &&
-      sourceRevision.pluginConnectionId === receipt.pluginConnectionId &&
-      sourceRevision.vendorImmutableId === page.pageId
-    )
-    return record === undefined
-      ? []
-      : [{ releaseId: receipt.releaseId, pageEntityId: record.entityId, publicationActionId: receipt.actionId }]
-  })
+  // Reuse the 200-record pages to keep publication lookups within their existing request bound.
+  const publicationPages = yield* Effect.forEach(
+    releasePages,
+    (page) =>
+      persistence.governedActions.readLatestTerminalReleasePublications({
+        workspaceId: scope.workspaceId,
+        providerId: "confluence",
+        releaseIds: page.map(({ release }) => release.id)
+      })
+  )
+  const publishedRunbooks = releasePublicationReceiptCandidatesFromRecords(publicationPages.flat()).flatMap(
+    (receipt) => {
+      const page = decodeConfluencePublicationReference(receipt.providerOperationId)
+      if (page === null) return []
+      const record = records.find(({ sourceRevision }) =>
+        sourceRevision.providerId === "confluence" &&
+        sourceRevision.pluginConnectionId === receipt.pluginConnectionId &&
+        sourceRevision.vendorImmutableId === page.pageId
+      )
+      return record === undefined
+        ? []
+        : [{ releaseId: receipt.releaseId, pageEntityId: record.entityId, publicationActionId: receipt.actionId }]
+    }
+  )
   const inferenceInput = {
     publishedRunbooks,
     entities,

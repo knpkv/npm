@@ -429,6 +429,65 @@ const withFirstPartyProviders = Effect.fn("ReadinessOnSyncTest.withFirstPartyPro
       "/rest/api/3/search/jql",
       "/wiki/api/v2/spaces/space-1/pages"
     ])
+    if (scenario.releaseCount !== undefined) {
+      const releases = yield* persistence.releases.list(workspaceId, 200)
+      assert.lengthOf(releases, scenario.releaseCount)
+      for (const { release } of releases) {
+        assert.lengthOf(release.targetEnvironmentIds, 1, `${release.version} must retain its configured target`)
+        const slice = yield* persistence.deliveryGraph.read(workspaceId, {
+          _tag: "releaseSlice",
+          releaseId: release.id,
+          environmentId: null,
+          limit: 100
+        })
+        if (slice._tag !== "releaseSlice") return assert.fail("expected release delivery slice")
+        for (const kind of ["implements", "delivered-by", "documented-by"]) {
+          assert.isTrue(
+            slice.value.relationships.some((edge) => edge.kind === kind && edge.lifecycle._tag === "verified"),
+            `${release.version} must retain a verified ${kind} link with ${scenario.releaseCount} releases`
+          )
+        }
+      }
+      const releaseIds = releases.map(({ release }) => release.id)
+      const awaitReady = readinessChanges.pipe(Stream.filterEffect(() =>
+        Effect.gen(function*() {
+          const outcomes = yield* persistence.events.readLatestReadinessOutcomes(workspaceId, releaseIds)
+          const failures = outcomes.filter(({ payload }) => payload.reason === "readiness-failed")
+          assert.isEmpty(failures, "healthy release inventory must not cause readiness-publication-failed")
+          const pending = yield* persistence.readiness.listPending({
+            workspaceId,
+            dueAt: yield* DateTime.now,
+            limit: 1
+          })
+          return pending.length === 0
+        })
+      ))
+      yield* Stream.runHead(awaitReady)
+      const before = yield* persistence.readiness.readCurrentReleases({ workspaceId, releaseIds })
+      assert.lengthOf(before, scenario.releaseCount)
+      for (const head of before) {
+        assert.equal(head.authority, "authoritative")
+        assert.equal(head.assessment.verdict, "ready")
+        assert.isTrue(head.assessment.sourceFreshness.some((source) => source.pluginConnectionId === confluenceId))
+      }
+      const eventsBefore = yield* persistence.events.readLatestReadinessOutcomes(workspaceId, releaseIds)
+      for (const pluginConnectionId of [pipelineId, jiraId, codeCommitId, confluenceId]) {
+        const result = yield* synchronization.synchronize({ workspaceId, pluginConnectionId })
+        assert.equal(result.result, "synchronized")
+      }
+      yield* Stream.runHead(awaitReady)
+      assert.deepEqual(
+        yield* persistence.readiness.readCurrentReleases({ workspaceId, releaseIds }),
+        before,
+        "unchanged provider evidence must preserve every assessment revision"
+      )
+      assert.deepEqual(
+        yield* persistence.events.readLatestReadinessOutcomes(workspaceId, releaseIds),
+        eventsBefore,
+        "unchanged provider evidence must not publish extra readiness outcomes"
+      )
+      return
+    }
     const portfolio = yield* makePortfolioSnapshots
     const releaseId = (yield* persistence.releases.list(workspaceId, 10)).find(({ release }) =>
       release.version === readinessReleaseVersion
@@ -953,6 +1012,20 @@ describe("readiness after real first-party synchronization", () => {
         "ready",
         { repeatUnchanged: true }
       ).pipe(Effect.scoped))
+    // Measured at 12.23s for all 51 assessments plus an unchanged sync; the package default is 10s.
+    it.effect(
+      "all 51 releases keep healthy links and ready assessments through unchanged sync",
+      () =>
+        withFirstPartyProviders({
+          build: "Succeeded",
+          verify: "Succeeded",
+          gate: "InProgress",
+          deployment: "not-started",
+          exactRunbookMetadata: true,
+          releaseCount: 51
+        }, "ready").pipe(Effect.scoped),
+      20_000
+    )
     for (const scenario of scenarios) {
       it.effect(`${scenario.verdict}: ${scenario.reason}`, () =>
         withFirstPartyProviders(scenario.provider, scenario.verdict).pipe(Effect.scoped))
