@@ -1,7 +1,7 @@
 import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
 import type { HostConfiguration } from "@knpkv/herdr-fleet"
-import { Effect, Fiber, FileSystem, Path, Result, Schema } from "effect"
+import { Deferred, Effect, Fiber, FileSystem, Path, Ref, Result, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import { DatabaseSync } from "node:sqlite"
 import { AgentActivityStore } from "../src/activity-store.js"
@@ -108,6 +108,44 @@ const close = (stores: Stores, agents: ReadonlyArray<ConnectAgent>, start = 0) =
 
 describe("persisted agent hues", () => {
   it.layer(NodeServices.layer)((it) => {
+    it.effect("does not call committed hues busy while permission finalization outlives their lock budget", () =>
+      Effect.gen(function*() {
+        const path = yield* pathFor
+        const fs = yield* FileSystem.FileSystem
+        const armed = yield* Ref.make(false)
+        const securing = yield* Deferred.make<void>()
+        const release = yield* Deferred.make<void>()
+        const delegated = FileSystem.FileSystem.of({
+          ...fs,
+          chmod: (file, mode) =>
+            Effect.gen(function*() {
+              yield* fs.chmod(file, mode)
+              if (file === path && (yield* Ref.getAndSet(armed, false))) {
+                yield* Deferred.succeed(securing, undefined)
+                yield* Deferred.await(release)
+              }
+            })
+        })
+        const stores = yield* openStores(path).pipe(Effect.provideService(FileSystem.FileSystem, delegated))
+        const initial = yield* read(stores, [identity("worker")])
+        const reader = yield* Effect.acquireRelease(
+          Effect.sync(() => new DatabaseSync(path)),
+          (database) => Effect.sync(() => database.close())
+        )
+        yield* Ref.set(armed, true)
+        const pending = yield* Effect.forkScoped(Effect.result(
+          stores.activity.assignHues("atlas", initial.agents, 1, true)
+        ))
+        yield* Deferred.await(securing)
+        expect(reader.prepare("SELECT observed_at FROM connect_hue_hosts").all()).toEqual([{ observed_at: 1 }])
+        yield* TestClock.adjust(connectPeerDirectoryTimeoutMillis)
+        expect(pending.pollUnsafe()).toBeUndefined()
+        yield* Deferred.succeed(release, undefined)
+        const result = yield* Fiber.join(pending)
+        expect(Result.isSuccess(result)).toBe(true)
+        if (Result.isSuccess(result)) expect(result.success).toEqual(initial.agents)
+      }).pipe(Effect.scoped))
+
     it.effect("bounds optional hue contention below the peer directory deadline and recovers after unlock", () =>
       Effect.gen(function*() {
         const stores = yield* openStores(yield* pathFor)

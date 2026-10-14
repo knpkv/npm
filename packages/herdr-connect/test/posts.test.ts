@@ -1,6 +1,6 @@
 import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
-import { Effect, Fiber, FileSystem, Path, Result, Schema } from "effect"
+import { Deferred, Effect, Fiber, FileSystem, Path, Ref, Result, Schema } from "effect"
 import { HttpClient } from "effect/http"
 import { TestClock } from "effect/testing"
 import { DatabaseSync } from "node:sqlite"
@@ -63,6 +63,52 @@ describe("agent posts", () => {
   })
 
   it.layer(NodeServices.layer)((it) => {
+    it.effect("keeps committed posts successful when chmod outlives the lock budget", () =>
+      Effect.gen(function*() {
+        const fs = yield* FileSystem.FileSystem
+        const armed = yield* Ref.make(false)
+        const securing = yield* Deferred.make<void>()
+        const release = yield* Deferred.make<void>()
+        const delegated = FileSystem.FileSystem.of({
+          ...fs,
+          chmod: (path, mode) =>
+            Effect.gen(function*() {
+              yield* fs.chmod(path, mode)
+              if (path.endsWith("posts.sqlite") && (yield* Ref.getAndSet(armed, false))) {
+                yield* Deferred.succeed(securing, undefined)
+                yield* Deferred.await(release)
+              }
+            })
+        })
+        const store = yield* openStore().pipe(Effect.provideService(FileSystem.FileSystem, delegated))
+        const reader = yield* Effect.acquireRelease(
+          Effect.sync(() => new DatabaseSync(store.path)),
+          (database) => Effect.sync(() => database.close())
+        )
+        yield* Ref.set(armed, true)
+        const pending = yield* Effect.forkScoped(Effect.result(store.post("host-a", "agent-one", body, 1)))
+        yield* Deferred.await(securing)
+        expect(reader.prepare("SELECT event_id FROM connect_posts").all()).toHaveLength(1)
+        yield* TestClock.adjust(6_000)
+        expect(pending.pollUnsafe()).toBeUndefined()
+        // Finalization keeps the permit; another writer's independent queue budget still expires.
+        const queued = yield* Effect.forkScoped(Effect.result(
+          store.post("host-a", "agent-one", { ...body, eventId: "queued-event" }, 2)
+        ))
+        yield* TestClock.adjust(6_000)
+        expect(yield* Fiber.join(queued)).toMatchObject({
+          failure: { _tag: "ConnectStoreBusyError", operation: "posts.post", timeoutMillis: 5_000 }
+        })
+        expect(reader.prepare("SELECT event_id FROM connect_posts").all()).toHaveLength(1)
+        yield* Deferred.succeed(release, undefined)
+        const result = yield* Fiber.join(pending)
+        expect(Result.isSuccess(result)).toBe(true)
+        if (Result.isSuccess(result)) {
+          expect(yield* store.post("host-a", "agent-one", body, 3)).toEqual(result.success)
+        }
+        expect(reader.prepare("SELECT event_id FROM connect_posts").all()).toHaveLength(1)
+      }).pipe(Effect.scoped))
+
     it.effect("secures lazy WAL sidecars after a SELECT-only page read", () =>
       Effect.gen(function*() {
         const store = yield* openStore()
@@ -199,6 +245,7 @@ describe("agent posts", () => {
             expect(secondResult).toMatchObject({
               failure: { _tag: "ConnectStoreBusyError", operation: "self.update", timeoutMillis: 5_000 }
             })
+            expect(db.prepare("SELECT event_id FROM connect_posts").all()).toHaveLength(0)
           } else {
             expect((yield* store.page("host-a", "agent-one", null, 1)).posts).toHaveLength(1)
             expect(yield* store.selfLatestMany([{ host: "host-a", agentId: "agent-one" }])).toHaveLength(1)

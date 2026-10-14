@@ -12,3 +12,5 @@ Stop notification admission on subscription-store failures too, while draining a
 Request-facing hub stores use zero native lock waits and return typed failures immediately; Connect batch writers retain asynchronous retries. Export the shared report response deadline, derived from reporter inventory plus the primary write plus a transport margin, and use it in both report clients so exhausted busy responses arrive before cancellation.
 
 Serialize activity observations and optional hue allocations through one store-wide permit, including file-permission finalization. Preserve the existing queue-inclusive write and optional hue deadlines. Secure lazy WAL and SHM sidecars after post-page SELECTs without reintroducing read-path pruning.
+
+End the busy deadline after lock acquisition and SQL retries, before post-commit permission finalization. Keep the transaction permit through finalization without returning ConnectStoreBusyError for an already-committed write. Apply the same boundary to the optional hue lock budget.

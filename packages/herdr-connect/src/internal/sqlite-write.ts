@@ -23,14 +23,15 @@ const retrySchedule = Schedule.exponential("25 millis").pipe(
   Schedule.while(({ elapsed }) => elapsed < connectWriteTimeoutMillis)
 )
 
-/** Replay an atomic write; keep its permit through completion. The deadline includes acquisition and completion. */
+/** Bound acquisition and SQL retries; retain the permit through post-commit finalization outside that timeout. */
 export const connectSqliteWrite = Effect.fn("ConnectStore.sqliteWrite")(function*<A, E, E2 = never, R = never>(
   operation: string,
   run: () => A,
   onOtherFailure: (cause: unknown) => E,
   retryBusy = true,
   transactions?: Semaphore.Semaphore,
-  onSuccess?: (value: A) => Effect.Effect<unknown, E2, R>
+  onSuccess?: (value: A) => Effect.Effect<unknown, E2, R>,
+  lockTimeoutMillis = connectWriteTimeoutMillis
 ) {
   let lastBusy: ConnectStoreBusyError | undefined
   const attempt = Effect.try({
@@ -39,7 +40,7 @@ export const connectSqliteWrite = Effect.fn("ConnectStore.sqliteWrite")(function
       if (isSqliteBusy(cause)) {
         lastBusy = new ConnectStoreBusyError({
           operation,
-          timeoutMillis: retryBusy ? connectWriteTimeoutMillis : connectBusyTimeoutMillis,
+          timeoutMillis: retryBusy ? lockTimeoutMillis : connectBusyTimeoutMillis,
           cause
         })
         return lastBusy
@@ -53,17 +54,23 @@ export const connectSqliteWrite = Effect.fn("ConnectStore.sqliteWrite")(function
       schedule: retrySchedule
     })) :
     attempt
-  const completed = onSuccess === undefined ? retried : retried.pipe(Effect.tap(onSuccess))
-  const guarded = transactions === undefined ? completed : transactions.withPermits(1)(completed)
-  return yield* retryBusy ?
-    guarded.pipe(Effect.timeoutOrElse({
-      duration: connectWriteTimeoutMillis,
+  const acquire = transactions === undefined ? Effect.void : Effect.acquireRelease(
+    transactions.take(1),
+    () => transactions.release(1),
+    { interruptible: true }
+  )
+  const write = acquire.pipe(Effect.andThen(retried))
+  const value = yield* retryBusy ?
+    write.pipe(Effect.timeoutOrElse({
+      duration: lockTimeoutMillis,
       orElse: () =>
         lastBusy ?? new ConnectStoreBusyError({
           operation,
-          timeoutMillis: connectWriteTimeoutMillis,
-          cause: "SQLite write exceeded its transaction completion deadline"
+          timeoutMillis: lockTimeoutMillis,
+          cause: "SQLite lock acquisition and retry deadline exceeded"
         })
     })) :
-    guarded
-})
+    write
+  if (onSuccess !== undefined) yield* onSuccess(value)
+  return value
+}, Effect.scoped)

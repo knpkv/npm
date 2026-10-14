@@ -1,7 +1,7 @@
 import { openPrivateSqlite, type PrivateDatabaseError, type PrivateSqlite } from "@knpkv/herdr-fleet/sqlite"
 import { Effect, Schema, Semaphore } from "effect"
 import type { DatabaseSync } from "node:sqlite"
-import { ConnectStoreBusyError, TerminalTransportError } from "./errors.js"
+import { TerminalTransportError } from "./errors.js"
 import { assignHues, initializeHues } from "./internal/hue-database.js"
 import { connectPeerDirectoryTimeoutMillis } from "./internal/peer-deadline.js"
 import { connectBusyTimeoutMillis, connectSqliteWrite } from "./internal/sqlite-write.js"
@@ -149,19 +149,11 @@ export class AgentActivityStore {
         storeError("activity.hues.assign"),
         true,
         this.#transactions,
-        () => this.#secureFiles.pipe(Effect.mapError(fromPrivateDatabaseError))
+        () => this.#secureFiles.pipe(Effect.mapError(fromPrivateDatabaseError)),
+        optionalHueTimeoutMillis
       )
       return assigned
-    },
-    Effect.timeoutOrElse({
-      duration: optionalHueTimeoutMillis,
-      orElse: () =>
-        new ConnectStoreBusyError({
-          operation: "activity.hues.assign",
-          timeoutMillis: optionalHueTimeoutMillis,
-          cause: "Optional hue allocation exceeded its peer-directory budget"
-        })
-    })
+    }
   )
 
   close(): void {
