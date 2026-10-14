@@ -1,5 +1,21 @@
 # @knpkv/herdr-connect
 
+## 0.24.0
+
+### Minor Changes
+
+- [#877](https://github.com/knpkv/npm/pull/877) [`6de50ff`](https://github.com/knpkv/npm/commit/6de50ff3b833224069a5e2b4460d762e94c98002) Thanks [@konopkov](https://github.com/konopkov)! - Recover Connect writes from short-lived SQLite writer contention. Use 100 ms native lock waits, followed by asynchronous exponential retries with jitter and an approximately five-second budget, replaying the whole atomic statement or IMMEDIATE transaction. Export ConnectStoreBusyError for exhaustion and classify the hub's additive 503 response contract as minor. Keep archive enrichment isolated, preserve safe inventory diagnostics, and return an exhausted report's operation and budget as HTTP 503 without its private cause. Preserve WAL, FULL synchronous mode and owner-only database and sidecar files; leave Work, Code and Fleet job settings unchanged. Optional archive passes on live directory reads stop at the first failure, limiting writer contention to one native wait for the whole fleet and invalidating absence evidence for skipped hosts. Parent-name and voice/self-state enrichment each have a 100 ms deadline. Directory and post-page reads filter retained rows without pruning. Post writes evict one global batch of at most 256 expired reports under the asynchronous write budget, including reports from agents that never write again, and trim only the writer to 128 entries. Physical expiry eviction waits for post writes; dormant fleets retain hidden expired rows until posting resumes. Equal-time observations cannot clear archive taint; recovery must be strictly newer. Optional failures remain isolated and logged, preserving the browser's directory deadline.
+
+  Include transaction-permit queueing in the write deadline and retry SQLITE_LOCKED alongside SQLITE_BUSY. Preserve safe busy metadata for remote reporters, using the reporter timeout option on peer inventory reads while leaving ordinary directory deadlines unchanged. Stop a blocked-notification pass after its first store failure. New archive closure snapshots ignore expired reports, preserving the inclusive retention cutoff and existing recorded last words.
+
+  Stop notification admission on subscription-store failures too, while draining already-reserved provider sends and recording their definite outcomes. Bound optional hue allocation to half the peer-directory deadline. Preserve typed busy responses in Relay post and self-state clients, without repeating an exhausted post or exposing the server-private cause.
+
+  Request-facing hub stores use zero native lock waits and return typed failures immediately; Connect batch writers retain asynchronous retries. Export the shared report response deadline, derived from reporter inventory plus the primary write plus a transport margin, and use it in both report clients so exhausted busy responses arrive before cancellation.
+
+  Serialize activity observations and optional hue allocations through one store-wide permit, including file-permission finalization. Preserve the existing queue-inclusive write and optional hue deadlines. Secure lazy WAL and SHM sidecars after post-page SELECTs without reintroducing read-path pruning.
+
+  End the busy deadline after lock acquisition and SQL retries, before post-commit permission finalization. Keep the transaction permit through finalization without returning ConnectStoreBusyError for an already-committed write. Apply the same boundary to the optional hue lock budget.
+
 ## 0.23.0
 
 ### Minor Changes
