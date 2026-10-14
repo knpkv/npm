@@ -8,7 +8,7 @@ import {
   AgentRelationshipStore,
   ConnectAgent
 } from "@knpkv/herdr-connect"
-import { Effect, FileSystem, Path, Schema } from "effect"
+import { Clock, Effect, Fiber, FileSystem, Path, Result, Schema } from "effect"
 import { DatabaseSync } from "node:sqlite"
 import { BlockedPushStore } from "../src/blocked-push-store.js"
 import { ApprovalAppStore } from "../src/store.js"
@@ -22,17 +22,19 @@ const agent = Schema.decodeUnknownSync(ConnectAgent)({
   work: "Checking",
   lastActivityAt: 0
 })
-const assertConnectionPragmas = Effect.fn("ConnectSqliteTest.guard")(function*(path: string, table: string) {
-  const db = yield* Effect.acquireRelease(
-    Effect.sync(() => new DatabaseSync(path)),
-    (db) => Effect.sync(() => db.close())
-  )
-  db.exec(`CREATE TRIGGER connection_guard BEFORE INSERT ON ${table} BEGIN
-    SELECT CASE WHEN (SELECT timeout FROM pragma_busy_timeout) != 100 THEN RAISE(ABORT, 'busy_timeout must be 100') END;
+const assertConnectionPragmas = Effect.fn("ConnectSqliteTest.guard")(
+  function*(path: string, table: string, timeout = 100) {
+    const db = yield* Effect.acquireRelease(
+      Effect.sync(() => new DatabaseSync(path)),
+      (db) => Effect.sync(() => db.close())
+    )
+    db.exec(`CREATE TRIGGER connection_guard BEFORE INSERT ON ${table} BEGIN
+    SELECT CASE WHEN (SELECT timeout FROM pragma_busy_timeout) != ${timeout} THEN RAISE(ABORT, 'unexpected busy_timeout') END;
     SELECT CASE WHEN (SELECT journal_mode FROM pragma_journal_mode) != 'wal' THEN RAISE(ABORT, 'journal_mode must be WAL') END;
     SELECT CASE WHEN (SELECT synchronous FROM pragma_synchronous) != 2 THEN RAISE(ABORT, 'synchronous must remain FULL') END;
   END;`)
-})
+  }
+)
 
 describe("Connect database connection policy", () => {
   it.layer(NodeServices.layer)((it) => {
@@ -93,7 +95,7 @@ describe("Connect database connection policy", () => {
                 Effect.sync(() =>
                   store.close()
                 ))
-              yield* assertConnectionPragmas(path, "push_subscriptions")
+              yield* assertConnectionPragmas(path, "push_subscriptions", 0)
               yield* store.putSubscription({
                 endpoint: "https://push.example.test/device",
                 expirationTime: null,
@@ -106,7 +108,7 @@ describe("Connect database connection policy", () => {
                 Effect.sync(() =>
                   store.close()
                 ))
-              yield* assertConnectionPragmas(path, "blocked_push_hosts")
+              yield* assertConnectionPragmas(path, "blocked_push_hosts", 0)
               yield* store.observe({ host: agent.host, agents: [agent], observedAt: 1, complete: true })
               break
             }
@@ -120,4 +122,58 @@ describe("Connect database connection policy", () => {
         }).pipe(Effect.scoped)
     )
   })
+})
+
+it.layer(NodeServices.layer, { excludeTestServices: true })((it) => {
+  it.effect("fails locked request writes without aggregating native waits on the event loop", () =>
+    Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      const paths = yield* Path.Path
+      const directory = yield* fs.makeTempDirectoryScoped({ prefix: "request-store-contention-" })
+      const path = paths.join(directory, "state.sqlite")
+      const subscriptions = yield* Effect.acquireRelease(
+        ApprovalAppStore.open(path),
+        (store) => Effect.sync(() => store.close())
+      )
+      const blocked = yield* Effect.acquireRelease(
+        BlockedPushStore.open(path),
+        (store) => Effect.sync(() => store.close())
+      )
+      const writer = yield* Effect.acquireRelease(
+        Effect.sync(() => new DatabaseSync(path)),
+        (database) => Effect.sync(() => database.close())
+      )
+      yield* Effect.acquireRelease(
+        Effect.sync(() => writer.exec("BEGIN IMMEDIATE")),
+        () => Effect.sync(() => writer.exec("ROLLBACK"))
+      )
+      const started = yield* Clock.currentTimeMillis
+      const timer = yield* Effect.forkScoped(Effect.sleep("20 millis").pipe(Effect.andThen(Clock.currentTimeMillis)))
+      const results = yield* Effect.forEach(
+        Array.from({ length: 16 }, (_, index) => index),
+        (index) =>
+          Effect.result(Effect.gen(function*() {
+            if (index % 3 === 0) {
+              yield* subscriptions.putSubscription({
+                endpoint: `https://push.example.test/${index}`,
+                expirationTime: null,
+                keys: { auth: "auth_key", p256dh: "public_key" }
+              }, "owner@example.test")
+            } else if (index % 3 === 1) {
+              yield* blocked.mutateSettings("owner@example.test", { _tag: "SetQuietHours", quietHours: null })
+            } else {
+              yield* blocked.heartbeat("owner@example.test", { clientId: `browser-${index}`, target: null })
+            }
+          })),
+        { concurrency: "unbounded" }
+      )
+      expect(results.every(Result.isFailure)).toBe(true)
+      for (const [index, result] of results.entries()) {
+        expect(result).toMatchObject({
+          failure: { _tag: index % 3 === 0 ? "ApprovalAppStoreError" : "BlockedPushStoreError" }
+        })
+      }
+      expect((yield* Clock.currentTimeMillis) - started).toBeLessThan(250)
+      expect((yield* Fiber.join(timer)) - started).toBeLessThan(250)
+    }).pipe(Effect.scoped))
 })

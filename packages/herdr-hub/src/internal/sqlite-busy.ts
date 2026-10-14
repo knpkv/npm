@@ -1,2 +1,2 @@
-/** Keep shared Connect database contention from monopolizing the hub event loop. */
-export const hubConnectBusyTimeoutMillis = 100
+/** Request-facing synchronous stores fail immediately; Connect batch writers own their separate retry budget. */
+export const hubConnectBusyTimeoutMillis = 0

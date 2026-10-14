@@ -14,7 +14,7 @@ import { ConnectArchiveStoreError, ConnectPeerError, ConnectStoreBusyError } fro
 import { buildConnectForest } from "./forest.js"
 import { connectAgentId } from "./id.js"
 import { ConnectInventoryFailure, inventoryRelationshipFailure } from "./internal/inventory-failure.js"
-import { connectPeerDirectoryTimeoutMillis } from "./internal/peer-deadline.js"
+import { connectPeerDirectoryTimeoutMillis, connectPeerReporterTimeoutMillis } from "./internal/peer-deadline.js"
 import { connectBusyTimeoutMillis, connectWriteTimeoutMillis } from "./internal/sqlite-write.js"
 import {
   ConnectAgent,
@@ -266,7 +266,6 @@ const PeerInventoryBusy = Schema.Struct({
   operation: Schema.Literals(["persist.transaction", "activity.observe"]),
   timeoutMillis: Schema.Literal(connectWriteTimeoutMillis)
 })
-const peerReporterTimeoutMarginMillis = 1_000
 
 /** Reporter reads wait for the write budget plus a transport margin; directory reads keep their shorter deadline. */
 export const fetchPeerConnectAgents = Effect.fn("HerdrConnect.fetchPeerAgents")(
@@ -338,7 +337,7 @@ export const fetchPeerConnectAgents = Effect.fn("HerdrConnect.fetchPeerAgents")(
   },
   (effect, peer, options?: { readonly timeout?: "directory" | "reporter" }) => {
     const timeoutMillis = options?.timeout === "reporter"
-      ? connectWriteTimeoutMillis + peerReporterTimeoutMarginMillis
+      ? connectPeerReporterTimeoutMillis
       : connectPeerDirectoryTimeoutMillis
     return effect.pipe(
       Effect.timeoutOrElse({

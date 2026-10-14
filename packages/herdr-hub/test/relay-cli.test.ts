@@ -3,9 +3,10 @@ import { expect, it } from "@effect/vitest"
 import { BrowserOpener } from "@knpkv/browser-pairing/launch"
 import { type ConnectPostBody, ConnectPostRequest, UnboundAgent } from "@knpkv/herdr-connect"
 import type { HostConfiguration } from "@knpkv/herdr-fleet"
-import { Effect, FileSystem, Layer, Path, Result, Schema } from "effect"
+import { Deferred, Effect, Fiber, FileSystem, Layer, Path, Result, Schema } from "effect"
 import { Command } from "effect/cli"
 import { HttpClient, HttpClientResponse } from "effect/http"
+import { TestClock } from "effect/testing"
 import { makeRelayPostCommand, resolveReportingAgent, submitRelayPost } from "../src/internal/relay-cli.js"
 import { RelayProbe, relayRootCommand } from "../src/internal/relay-open.js"
 
@@ -98,6 +99,8 @@ it.layer(postLayer)("relay post", (it) => {
       }
       const received: Array<typeof ConnectPostRequest.Type> = []
       let busy = false
+      let delayed = false
+      const slowStarted = yield* Deferred.make<void>()
       const client = HttpClient.make((request) =>
         Effect.gen(function*() {
           expect(request.url).toBe("https://hub.example.test/v1/connect/posts")
@@ -106,6 +109,10 @@ it.layer(postLayer)("relay post", (it) => {
             new TextDecoder().decode(request.body.body)
           )
           received.push(body)
+          if (delayed) {
+            yield* Deferred.succeed(slowStarted, undefined)
+            yield* Effect.sleep("11 seconds")
+          }
           return HttpClientResponse.fromWeb(
             request,
             busy
@@ -139,6 +146,19 @@ it.layer(postLayer)("relay post", (it) => {
         failure: { _tag: "ConnectStoreBusyError", operation: "posts.post", timeoutMillis: 5_000, cause: 503 }
       })
       expect(received).toHaveLength(3)
+      delayed = true
+      const pending = yield* Effect.forkScoped(Effect.result(
+        submitRelayPost(config, "w1:p1", { ...body, eventId: "slow-busy" }).pipe(
+          Effect.provideService(HttpClient.HttpClient, client)
+        )
+      ))
+      yield* Deferred.await(slowStarted)
+      yield* TestClock.adjust("11 seconds")
+      expect(received).toHaveLength(4)
+      expect(yield* Fiber.join(pending)).toMatchObject({
+        failure: { _tag: "ConnectStoreBusyError", operation: "posts.post", timeoutMillis: 5_000, cause: 503 }
+      })
+      expect(received).toHaveLength(4)
     }).pipe(Effect.scoped))
 
   it.effect("parses bounded reports with a caller-controlled retry identity", () =>

@@ -1,6 +1,7 @@
 /** Current-pane self updates. The canonical hub applies the same host-scoped authorization as relay post. */
 import type { ConnectSelfBody } from "@knpkv/herdr-connect"
 import {
+  connectReportResponseTimeoutMillis,
   ConnectSelfState,
   ConnectStoreBusyError,
   Denied,
@@ -76,7 +77,7 @@ export const submitRelaySelf = Effect.fn("Relay.submitSelf")(
         Effect.mapError(() => new Unavailable({ operation: "self.response" }))
       )
     }).pipe(Effect.timeoutOrElse({
-      duration: "10 seconds",
+      duration: connectReportResponseTimeoutMillis,
       orElse: () => Effect.fail(new Unavailable({ operation: "self.timeout" }))
     }))
   }

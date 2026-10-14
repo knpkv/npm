@@ -2,6 +2,7 @@ import type { ConnectPostBody } from "@knpkv/herdr-connect"
 import {
   Conflict,
   ConnectPost,
+  connectReportResponseTimeoutMillis,
   ConnectStoreBusyError,
   Denied,
   InvalidReport,
@@ -87,7 +88,7 @@ export const submitRelayPost = Effect.fn("Relay.submitPost")(function*(
     return post
   }).pipe(
     Effect.timeoutOrElse({
-      duration: "10 seconds",
+      duration: connectReportResponseTimeoutMillis,
       orElse: () => Effect.fail(new Unavailable({ operation: "post.timeout" }))
     }),
     Effect.retry({ times: 2, while: Schema.is(Unavailable) })
