@@ -81,7 +81,11 @@ pnpm --filter @knpkv/clockify-api-client test
 5. Remove unreliable `examples` and `default` schema annotations. Clockify's
    document currently contains metadata whose values contradict its schemas.
 6. Generate `src/generated/ClockifyApi.ts` with
-   `@effect/openapi-generator`'s `httpclient` format.
+   `@effect/openapi-generator`'s `httpclient` format. Named-property records keep
+   their published struct shape; explicit map schemas retain their value types.
+   Render the published `FeaturePlan`, `Feature`, `WorkspaceSettingsDtoV1`,
+   `CreateExpenseV1Request` and `UpdateExpenseV1Request` components independently
+   of endpoint reachability, retaining their missing dependency declarations.
 7. Normalize generated multipart request construction to Effect's record-aware
    `bodyFormDataRecord` helper. The exported `uploadImage` method accepts a
    `Blob`, so the runtime builds a real `FormData` body and boundary.
@@ -131,3 +135,14 @@ tested; only style/AST rules intended for maintained source are skipped.
 ## License
 
 MIT
+
+## Generated contract migration
+
+This regeneration requires a major version. Multipart request codecs now use
+`Blob | File` for binary fields instead of strings. The legacy expense model
+exports remain available with their string-valued file field, but multipart
+operations use the separate multipart models. Open JSON custom-field values
+use `Schema.Json`, which includes null and excludes non-JSON objects. Add an
+explicit JSON conversion for application values before passing them to these
+request models. The upstream update also adds rate, approval, time-off and
+webhook fields and enum members.

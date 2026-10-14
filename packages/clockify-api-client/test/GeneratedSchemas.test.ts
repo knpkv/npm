@@ -1,7 +1,13 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
-import { FeaturePlan, WorkspaceDtoV1, WorkspaceSettingsDtoV1 } from "../src/generated/ClockifyApi.js"
+import {
+  CreateExpenseV1Request,
+  FeaturePlan,
+  UpdateExpenseV1Request,
+  WorkspaceDtoV1,
+  WorkspaceSettingsDtoV1
+} from "../src/generated/ClockifyApi.js"
 
 describe("generated workspace settings schema", () => {
   // Preserve both upstream spellings in responses without rewriting either value.
@@ -73,4 +79,30 @@ describe("generated workspace schema", () => {
         expect(failure._tag).toBe("SchemaError")
       })
   )
+})
+
+// These published models remain importable even when no endpoint references them.
+describe("retained component models", () => {
+  it("keeps legacy expense schemas separate from multipart request bodies", () => {
+    const expense = {
+      amount: 12,
+      categoryId: "category",
+      date: "2026-10-14T09:00:00Z",
+      file: "receipt",
+      projectId: "project",
+      userId: "user"
+    }
+    expect(Schema.decodeUnknownSync(CreateExpenseV1Request)(expense)).toEqual(expense)
+    const update = { ...expense, changeFields: ["FILE"] }
+    expect(Schema.decodeUnknownSync(UpdateExpenseV1Request)(update)).toEqual(update)
+  })
+
+  it("accepts an ordinary interface without requiring a JSON index signature", () => {
+    interface Plan {
+      readonly paidPlan: boolean
+    }
+    const plan: Plan = { paidPlan: true }
+    const generated: typeof FeaturePlan.Encoded = plan
+    expect(Schema.decodeUnknownSync(FeaturePlan)(generated)).toEqual(plan)
+  })
 })
