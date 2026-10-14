@@ -17,6 +17,7 @@ import { writeReport } from "./report.js"
 import {
   BaseComparison,
   BrowserFailure,
+  CaptureNavigationFailure,
   type Failure,
   Identity,
   Inventory,
@@ -42,7 +43,7 @@ const withPage = Effect.fn("DesignConformance.withPage")(
     browser: Browser,
     identity: Identity,
     origin: string,
-    use: (page: Page) => Effect.Effect<Capture, BrowserFailure | RunnerFailure>,
+    use: (page: Page) => Effect.Effect<Capture, BrowserFailure | CaptureNavigationFailure | RunnerFailure>,
     referenceFiles?: ReadonlySet<string>
   ) {
     const context = yield* Effect.acquireRelease(
@@ -116,7 +117,7 @@ export const runConformance = Effect.fn("DesignConformance.run")(function*(refs:
           const url = new URL(state.route, live.origin)
           yield* browserCall("live navigation", () => page.goto(url.href).then(() => undefined))
           yield* live.ready(page, identity)
-          return yield* capturePage(page)
+          return yield* capturePage(page, key)
         }))
       captured.push(identity)
       const artifacts: Mutable<ShotArtifacts> = { live: yield* write(`${key}-live.png`, actual.frame) }
@@ -145,7 +146,7 @@ export const runConformance = Effect.fn("DesignConformance.run")(function*(refs:
                 yield* browserCall("reference navigation", () => page.goto(url.href).then(() => undefined))
                 yield* browserCall("reference fixture readiness", () =>
                   page.locator("html[data-design-ready=\"true\"]").waitFor())
-                return yield* capturePage(page)
+                return yield* capturePage(page, key)
               }), new Set(Object.keys(refs.manifest.files)))
           } else {
             const ref = reference.refs.find((shot) =>

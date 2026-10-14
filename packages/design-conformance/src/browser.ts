@@ -5,6 +5,7 @@ import * as Schema from "effect/Schema"
 import { PNG } from "pngjs"
 
 import { maskUuidText, screenshotSettings, settleCaptureFonts, settleCapturePage } from "./capture.js"
+import { guardCaptureNavigation, subscribeCaptureNavigation } from "./navigation.js"
 import { BrowserFailure, Snapshot } from "./schema.js"
 
 export const browserCall = <A>(operation: string, run: () => PromiseLike<A>) =>
@@ -124,7 +125,7 @@ const assertCaptureMotion = async (motion: JSHandle<MotionGuard>): Promise<void>
 }
 
 /** Visible named regions, resolved tokens, document-space boxes, DOM order and nearest region parent. */
-export const capturePage = (page: Page) =>
+export const capturePage = (page: Page, shot = page.url()) =>
   browserCall("capture regions", async (): Promise<Capture> => {
     await settleCaptureFonts(page)
     await settleCapturePage(page)
@@ -223,4 +224,4 @@ export const capturePage = (page: Page) =>
         await motion.dispose()
       }
     }
-  })
+  }).pipe((capture) => guardCaptureNavigation(shot, subscribeCaptureNavigation(page), capture))
