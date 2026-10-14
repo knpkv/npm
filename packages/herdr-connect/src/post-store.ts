@@ -154,6 +154,7 @@ export class AgentPostStore {
     )
   })
 
+  /** WAL SELECTs must not queue behind writer backoff; secure lazy sidecars before returning. */
   readonly page = Effect.fn("AgentPostStore.page")(function*(
     this: AgentPostStore,
     host: string,
@@ -164,30 +165,28 @@ export class AgentPostStore {
     const cursor = yield* Schema.decodeUnknownEffect(Schema.NullOr(ConnectPostCursor))(input).pipe(
       Effect.mapError(() => new InvalidReport({ detail: "invalid post cursor" }))
     )
-    return yield* this.#transactions.withPermits(1)(
-      Effect.try({
-        try: () => {
-          const rows = this.#database.prepare(`SELECT * FROM connect_posts
+    return yield* Effect.try({
+      try: () => {
+        const rows = this.#database.prepare(`SELECT * FROM connect_posts
           WHERE host = ? AND agent_id = ? AND sequence < ? AND created_at >= ? ORDER BY sequence DESC LIMIT ?`)
-            .all(
-              host.toLowerCase(),
-              agentId,
-              cursor?.sequence ?? Number.MAX_SAFE_INTEGER,
-              now - connectPostRetentionMillis,
-              connectPostPageMaxRecords + 1
-            )
-          const posts = rows.slice(0, connectPostPageMaxRecords).map(decodeRow)
-          const last = posts.at(-1)
-          return Schema.decodeUnknownSync(ConnectPostPage)({
-            posts,
-            nextCursor: rows.length > connectPostPageMaxRecords && last !== undefined
-              ? { sequence: last.sequence }
-              : null
-          })
-        },
-        catch: unavailable("posts.page")
-      }).pipe(Effect.tap(() => this.#secureFiles.pipe(Effect.mapError(unavailable("posts.permissions")))))
-    )
+          .all(
+            host.toLowerCase(),
+            agentId,
+            cursor?.sequence ?? Number.MAX_SAFE_INTEGER,
+            now - connectPostRetentionMillis,
+            connectPostPageMaxRecords + 1
+          )
+        const posts = rows.slice(0, connectPostPageMaxRecords).map(decodeRow)
+        const last = posts.at(-1)
+        return Schema.decodeUnknownSync(ConnectPostPage)({
+          posts,
+          nextCursor: rows.length > connectPostPageMaxRecords && last !== undefined
+            ? { sequence: last.sequence }
+            : null
+        })
+      },
+      catch: unavailable("posts.page")
+    }).pipe(Effect.tap(() => this.#secureFiles.pipe(Effect.mapError(unavailable("posts.permissions")))))
   })
 
   readonly latest = Effect.fn("AgentPostStore.latest")(function*(
