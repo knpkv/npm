@@ -1,5 +1,14 @@
 # @knpkv/jira-clockify
 
+## 1.10.3
+
+### Patch Changes
+
+- Updated dependencies [[`40877b7`](https://github.com/knpkv/npm/commit/40877b7ab5a8395e4c0a69099699a58154728f54), [`381ea6b`](https://github.com/knpkv/npm/commit/381ea6bba0c487987c3a2599c9e692ae3cd89009)]:
+  - @knpkv/clockify-api-client@4.0.0
+  - @knpkv/jira-api-client@3.0.0
+  - @knpkv/jira-cli@1.6.5
+
 ## 1.10.2
 
 ### Patch Changes
