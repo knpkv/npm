@@ -389,7 +389,14 @@ const loadWork = Effect.gen(function* () {
 
 const browserRuntime = Atom.runtime(BrowserHttpClient.layerFetch)
 
-export { Creature, type CreatureProps } from "./creature.js"
+export {
+  Creature,
+  type CreatureAccessory,
+  type CreatureHueFamily,
+  type CreatureMood,
+  type CreatureProps,
+  type CreatureReaction
+} from "./creature.js"
 export { ConnectLimits } from "./limits-view.js"
 export { AgentCast, AgentStage, PinnedAgents } from "./stage.js"
 export { UsageTab, type UsageTabProps } from "./usage-view.js"
@@ -1520,6 +1527,7 @@ const ActiveConnectSurface = ({
 
   const firstLoadFailure = directory._tag === "Failure" ? Cause.squash(directory.cause) : null
   const firstLoadTimedOut = Schema.is(ConnectTimeoutError)(firstLoadFailure)
+  const firstLoadUnreachable = Schema.is(ConnectNetworkError)(firstLoadFailure)
   const firstLoadStatus = Schema.is(ConnectStatusError)(firstLoadFailure) ? firstLoadFailure.status : null
 
   const directoryScreen = (
@@ -1649,15 +1657,23 @@ const ActiveConnectSurface = ({
         )}
         {current === null ? (
           directory._tag === "Failure" ? (
-            <div className="connect-empty connect-directory-error">
+            <div className="connect-empty connect-directory-error" data-unreachable={firstLoadUnreachable || undefined}>
               <Icon decorative name="alert" size="default" />
               <div className="connect-directory-error-copy">
                 <Text as="h2" variant="card-title">
-                  {firstLoadTimedOut ? "The fleet directory didn't answer" : "Couldn't load the fleet directory"}
+                  {firstLoadTimedOut
+                    ? "The fleet directory didn't answer"
+                    : firstLoadUnreachable
+                      ? "Couldn’t load the fleet directory"
+                      : "Couldn't load the fleet directory"}
                 </Text>
                 {firstLoadTimedOut ? (
                   <Text as="p" tone="secondary">
                     The request timed out, so no agents are listed. Retry, or wait: Relay tries again every 5 seconds.
+                  </Text>
+                ) : firstLoadUnreachable ? (
+                  <Text as="p" tone="secondary">
+                    Relay couldn’t reach the hub. It tries again every 5 seconds.
                   </Text>
                 ) : firstLoadStatus === null ? null : (
                   <Text as="p" tone="secondary">

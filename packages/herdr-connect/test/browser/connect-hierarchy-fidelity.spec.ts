@@ -2,6 +2,7 @@
 import { expect, type Page, test } from "@playwright/test"
 import { Schema } from "effect"
 import { ConnectAgent } from "../../src/model.js"
+import { captureFidelity } from "./creature-capture.js"
 
 const agent = (id: string, name: string, state: string, parent?: string, relation = "delegated", host = "alpha") => {
   const fields = {
@@ -62,7 +63,7 @@ for (const width of [390, 1280]) {
       await expect(page.locator(".connect-family").filter({ has: partner })).toContainText("Pair partner")
       await expect(page.locator(".connect-family-more")).toHaveText("Show 2 more")
       expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
-      await page.screenshot({ path: testInfo.outputPath(`fidelity/${prefix}-closed.png`), fullPage: true })
+      await captureFidelity(page, testInfo.outputPath(`fidelity/${prefix}-closed.png`))
       await page.getByRole("button", { name: "Filters", exact: true }).click()
       for (const selector of [".connect-group-filter button", ".connect-status-filter button"]) {
         const rows = await page.locator(selector).evaluateAll((buttons) =>
@@ -71,19 +72,19 @@ for (const width of [390, 1280]) {
         expect(rows).toBe(1)
       }
       expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
-      await page.screenshot({ path: testInfo.outputPath(`fidelity/${prefix}-filters.png`), fullPage: true })
+      await captureFidelity(page, testInfo.outputPath(`fidelity/${prefix}-filters.png`))
       await page.getByRole("searchbox").fill("Pair partner")
       await expect(page.locator(".connect-agent")).toHaveCount(2)
       await expect(page.locator(".connect-agent[data-context='true']")).toHaveCount(1)
-      await page.screenshot({ path: testInfo.outputPath(`fidelity/${prefix}-filtered.png`), fullPage: true })
+      await captureFidelity(page, testInfo.outputPath(`fidelity/${prefix}-filtered.png`))
       await partner.click()
       const stage = page.getByRole("dialog", { name: "Pair partner" })
       await expect(stage.getByRole("heading", { name: "Paired with" })).toBeVisible()
       await expect(stage.getByText("Waiting", { exact: true })).toBeVisible()
-      await page.screenshot({ path: testInfo.outputPath(`fidelity/${prefix}-stage.png`), fullPage: true })
+      await captureFidelity(page, testInfo.outputPath(`fidelity/${prefix}-stage.png`))
       await stage.locator(".connect-stage-lineage button", { hasText: "Primary" }).click()
       await expect(page.getByRole("dialog", { name: "Primary" })).toBeVisible()
-      await page.screenshot({ path: testInfo.outputPath(`fidelity/${prefix}-primary-stage.png`), fullPage: true })
+      await captureFidelity(page, testInfo.outputPath(`fidelity/${prefix}-primary-stage.png`))
       await page.keyboard.press("Escape")
       await expect(page.getByRole("dialog")).toBeHidden()
     })
@@ -102,7 +103,7 @@ test(
     const halo = await partner.locator(".connect-creature-halo").evaluate((halo) => getComputedStyle(halo).stroke)
     expect(halo).not.toBe("none")
     await expect(partner).toHaveAccessibleName(/Waiting/)
-    await page.screenshot({ path: testInfo.outputPath("fidelity/connect-390-forced-colours.png"), fullPage: true })
+    await captureFidelity(page, testInfo.outputPath("fidelity/connect-390-forced-colours.png"))
   }
 )
 
@@ -149,10 +150,7 @@ for (const width of [390, 1280]) {
           await expect(page.locator(".connect-agent")).toHaveAccessibleName(/New_phase.*Unknown state/)
         }
         expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
-        await page.screenshot({
-          path: testInfo.outputPath(`fidelity/connect-${String(width)}-${theme}-${state}.png`),
-          fullPage: true
-        })
+        await captureFidelity(page, testInfo.outputPath(`fidelity/connect-${String(width)}-${theme}-${state}.png`))
       })
     }
   }

@@ -1452,7 +1452,8 @@ describe("Connect public seams", () => {
             kind: "codex",
             lastActivityAt: 2_000,
             name: "Current coordinator",
-            hue: "sky",
+            // FNV-1a("ser8:coordinator-current") = 1360462579, % 8 = 3; Lime is free.
+            hue: "lime",
             state: "working",
             work: "npm"
           },
@@ -1514,7 +1515,7 @@ describe("Connect public seams", () => {
           kind: "codex",
           lastActivityAt: 3_000,
           name: "Current coordinator",
-          hue: "sky",
+          hue: "lime",
           state: "working",
           work: "npm"
         }])

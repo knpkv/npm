@@ -39,7 +39,7 @@ const program = Effect.gen(function*() {
   const port = yield* Config.Int("SUPERAPP_FIXTURE_PORT")
   // Decode every synthetic state before listening; a bad fixture names its state and cannot kill a mid-run server.
   const connectReadings = new Map<string, FleetConnectAgentPage>()
-  for (const state of ["normal", "ready", "empty", "partial", "unknown"]) {
+  for (const state of ["normal", "ready", "empty", "partial", "unknown", "design", "designready", "designpartial"]) {
     connectReadings.set(
       state,
       yield* Effect.try({

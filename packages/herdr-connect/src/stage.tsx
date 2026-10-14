@@ -10,7 +10,7 @@ import { connectAgentGroup } from "./agent-state-core.js"
  */
 import { Icon, PortalProvider } from "@knpkv/rly/foundations"
 import { workNavigationHref } from "@knpkv/herdr-work/navigation"
-import { Button, Sheet, StateLabel } from "@knpkv/rly/primitives"
+import { Button, Sheet } from "@knpkv/rly/primitives"
 import {
   type KeyboardEvent,
   type MouseEvent,
@@ -106,7 +106,9 @@ export const AgentCast = ({
                 <Creature
                   arrived={arrivals.has(connectAgentKey(agent))}
                   host={agent.host}
+                  hueFamily={agent.hue}
                   id={String(agent.id)}
+                  name={agent.name}
                   size="cast"
                   stale={stale || silentHosts.includes(agent.host)}
                   state={agent.state}
@@ -190,7 +192,15 @@ const AgentLineage = ({
       onClick={() => onOpen(member)}
       type="button"
     >
-      <Creature host={member.host} id={String(member.id)} size="row" stale={stale} state={member.state} />
+      <Creature
+        host={member.host}
+        hueFamily={member.hue}
+        id={String(member.id)}
+        name={member.name}
+        size="row"
+        stale={stale}
+        state={member.state}
+      />
       <span>
         {member.name}
         <small>{role}</small>
@@ -333,7 +343,15 @@ export const AgentStage = ({
               {terminalControl === undefined ? (
                 <>
                   <div className="connect-stage-hero" data-tone={agentStatePresentation(agent.state).tone}>
-                    <Creature host={agent.host} id={String(agent.id)} size="stage" stale={stale} state={agent.state} />
+                    <Creature
+                      host={agent.host}
+                      hueFamily={agent.hue}
+                      id={String(agent.id)}
+                      name={agent.name}
+                      size="stage"
+                      stale={stale}
+                      state={agent.state}
+                    />
                   </div>
                   <p className="connect-stage-speech" data-tone={agentStatePresentation(agent.state).tone}>
                     {stale ? "Last known: " : null}
@@ -412,7 +430,15 @@ export const AgentStage = ({
               ) : (
                 <>
                   <div className="connect-terminal-stage-identity">
-                    <Creature host={agent.host} id={String(agent.id)} size="cast" stale={stale} state={agent.state} />
+                    <Creature
+                      host={agent.host}
+                      hueFamily={agent.hue}
+                      id={String(agent.id)}
+                      name={agent.name}
+                      size="cast"
+                      stale={stale}
+                      state={agent.state}
+                    />
                     <div>
                       <h2>{agent.name}</h2>
                       <AgentStateLabel
@@ -546,16 +572,20 @@ const PinChip = ({
         type="button"
         {...roving[1]}
       >
-        <Creature host={agent.host} id={String(agent.id)} size="row" stale={stale} state={agent.state} />
-        <span className="connect-pin-name">{agent.name}</span>
-        <span className="connect-pin-state">
-          <StateLabel
-            className={presentation.spins ? "agent-state-spinning" : undefined}
-            icon={presentation.icon}
-            label={word}
-            size="compact"
-            tone={presentation.tone}
-          />
+        <Creature
+          host={agent.host}
+          hueFamily={agent.hue}
+          id={String(agent.id)}
+          name={agent.name}
+          size="row"
+          stale={stale}
+          state={agent.state}
+        />
+        <span className="connect-pin-caption">
+          <span className="connect-pin-name">{agent.name}</span>
+          <span className="connect-pin-state" data-tone={presentation.tone}>
+            {word}
+          </span>
         </span>
       </button>
     </span>
@@ -709,7 +739,7 @@ export const PinnedAgents = ({
                   {agent === undefined ? (
                     <span className="connect-pin-open">
                       {/* Drawn as away: still, eyes closed, colour drained. */}
-                      <Creature host={pin.host} id={pin.id} size="row" stale state="done" />
+                      <Creature host={pin.host} id={pin.id} name={pin.name} size="row" stale state="done" />
                       <span className="connect-pin-text">
                         <span className="connect-pin-name">{pin.name}</span>
                         <small className="connect-pin-since">{sinceLabel(pin.seenAt, now)}</small>
@@ -727,7 +757,15 @@ export const PinnedAgents = ({
                       tabIndex={-1}
                       type="button"
                     >
-                      <Creature host={agent.host} id={String(agent.id)} size="row" stale={stale} state={agent.state} />
+                      <Creature
+                        host={agent.host}
+                        hueFamily={agent.hue}
+                        id={String(agent.id)}
+                        name={agent.name}
+                        size="row"
+                        stale={stale}
+                        state={agent.state}
+                      />
                       <span className="connect-pin-name">{agent.name}</span>
                       <AgentStateLabel state={agent.state} />
                     </button>

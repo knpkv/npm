@@ -1,6 +1,13 @@
 export * from "./activity-store.js"
 export * from "./archive-store.js"
-export { Creature, type CreatureProps } from "./creature.js"
+export {
+  Creature,
+  type CreatureAccessory,
+  type CreatureHueFamily,
+  type CreatureMood,
+  type CreatureProps,
+  type CreatureReaction
+} from "./creature.js"
 export * from "./directory.js"
 export * from "./errors.js"
 export * from "./forest.js"

@@ -12,6 +12,11 @@ const escapeHtml = (text: string): string =>
     "&#39;"
   )
 
+const dispositionLabel = (disposition: Result["findings"][number]["disposition"]): string =>
+  disposition === "report-only" ? "report-only (inherited/legacy)" : disposition
+const tableText = (text: string): string =>
+  escapeHtml(text).replaceAll("\\", "\\\\").replaceAll("|", "\\|").replaceAll("\n", " ").replaceAll("\r", " ")
+
 /** Report images stay local; all labels and failure details are escaped before entering HTML. */
 export const renderReport = (result: Result): string => {
   const sections = result.shots.map((shot) => {
@@ -35,10 +40,10 @@ export const renderReport = (result: Result): string => {
         ]
     }).join("")
     return `<section><h2>${escapeHtml(shotKey(shot))}</h2><p>${
-      shot.touched ? "Touched state" : "Unchanged state"
+      shot.touched ? `Touched regions: ${escapeHtml(shot.touchedRegions.join(", "))}` : "Inherited/legacy shot"
     }</p><ul>${
       findings.map((finding) =>
-        `<li>${escapeHtml(finding.region)} · ${finding.rule} · ${finding.disposition}: ${
+        `<li>${escapeHtml(finding.region)} · ${finding.rule} · ${dispositionLabel(finding.disposition)}: ${
           escapeHtml(finding.detail)
         }</li>`
       ).join("")
@@ -50,9 +55,9 @@ export const renderReport = (result: Result): string => {
 *{box-sizing:border-box}body{margin:0;padding:1rem;font:1rem/1.5 system-ui;background:oklch(98% 0 none);color:oklch(20% 0 none);text-wrap:pretty;overflow-wrap:break-word}h1,h2,p,figure{margin:0}main{display:grid;gap:2rem}section{display:grid;gap:1rem;border:1px solid oklch(75% 0 none);padding:1rem}.shots{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,20rem),1fr));gap:1rem}figure{min-inline-size:0}img{display:block;max-inline-size:100%;block-size:auto}figcaption{font-weight:600}
 </style></head><body><main><h1>${escapeHtml(result.product)}: ${result.passed ? "PASS" : "FAIL"}</h1><ul>${
     result.findings.map((finding) =>
-      `<li>${escapeHtml(shotKey(finding))} / ${
-        escapeHtml(finding.region)
-      } / ${finding.rule} / ${finding.disposition}: ${escapeHtml(finding.detail)}</li>`
+      `<li>${escapeHtml(shotKey(finding))} / ${escapeHtml(finding.region)} / ${finding.rule} / ${
+        dispositionLabel(finding.disposition)
+      }: ${escapeHtml(finding.detail)}</li>`
     ).join("")
   }</ul>${sections}</main></body></html>`
 }
@@ -61,13 +66,15 @@ export const reportSummary = (result: Result): string =>
   [
     `### Design conformance: ${result.product} ${result.passed ? "PASS" : "FAIL"}`,
     "",
-    "| State | Region | Rule | Disposition |",
-    "| --- | --- | --- | --- |",
+    "| State | Region | Rule | Disposition | Drift |",
+    "| --- | --- | --- | --- | --- |",
     ...result.findings.map((finding) =>
-      `| ${shotKey(finding)} | ${finding.region} | ${finding.rule} | ${finding.disposition} |`
+      `| ${shotKey(finding)} | ${finding.region} | ${finding.rule} | ${dispositionLabel(finding.disposition)} | ${
+        tableText(finding.detail)
+      } |`
     ),
     "",
-    "Reference, live and diff images are in the report artifact."
+    "Report-only findings are inherited/legacy drift. Reference, live and diff images are in the report artifact."
   ].join("\n")
 
 export const writeReport = Effect.fn("DesignConformance.writeReport")(function*(directory: string, result: Result) {

@@ -1,6 +1,7 @@
 import pixelmatch from "pixelmatch"
 import { PNG } from "pngjs"
 
+import type { Capture } from "./browser.js"
 import { normalizeCopy } from "./capture.js"
 import type { Failure, Identity, Inventory, Manifest, Snapshot, State } from "./schema.js"
 
@@ -13,6 +14,10 @@ export const stateShots = (state: Inventory["states"][number]): ReadonlyArray<Id
     state.themes.map((theme) => ({ screen: state.screen, state: state.state, viewport, theme }))
   )
 
+export const LIVE_CHANGE_MAX_DIFF_RATIO = 0.001
+const pixelOptions = { threshold: 0.2, includeAA: false }
+const geometryTolerance = (identity: Identity): number => identity.viewport === 390 ? 2 : 4
+
 /** A dimension change always differs. Include anti-alias detection like the #844 comparison. */
 export const comparePixels = (reference: Uint8Array, live: Uint8Array) => {
   const ref = PNG.sync.read(Buffer.from(reference))
@@ -24,8 +29,95 @@ export const comparePixels = (reference: Uint8Array, live: Uint8Array) => {
     diff.data.fill(255)
     return { ratio: 1, diff: PNG.sync.write(diff) }
   }
-  const count = pixelmatch(ref.data, actual.data, diff.data, width, height, { threshold: 0.2, includeAA: false })
+  const count = pixelmatch(ref.data, actual.data, diff.data, width, height, pixelOptions)
   return { ratio: count / (width * height), diff: PNG.sync.write(diff) }
+}
+
+/** Count original comparator differences outside both captures' named boxes, without changing AA neighbours. */
+const compareOutsideRegions = (base: Capture, live: Capture): boolean => {
+  const before = PNG.sync.read(Buffer.from(base.frame))
+  const after = PNG.sync.read(Buffer.from(live.frame))
+  const width = Math.max(before.width, after.width)
+  const height = Math.max(before.height, after.height)
+  const previous = before.width === width && before.height === height ? before : new PNG({ width, height })
+  const current = after.width === width && after.height === height ? after : new PNG({ width, height })
+  if (previous !== before) PNG.bitblt(before, previous, 0, 0, before.width, before.height, 0, 0)
+  if (current !== after) PNG.bitblt(after, current, 0, 0, after.width, after.height, 0, 0)
+  const diff = new PNG({ width, height })
+  pixelmatch(previous.data, current.data, diff.data, width, height, { ...pixelOptions, diffMask: true })
+  const named = new Uint8Array(width * height)
+  for (const region of [...base.snapshot.regions, ...live.snapshot.regions]) {
+    if (region.box.width === 0 || region.box.height === 0) continue
+    const left = Math.max(0, Math.floor(region.box.x))
+    const right = Math.min(width, Math.ceil(region.box.x + region.box.width))
+    const top = Math.max(0, Math.floor(region.box.y))
+    const bottom = Math.min(height, Math.ceil(region.box.y + region.box.height))
+    if (left >= right || top >= bottom) continue
+    for (let y = top; y < bottom; y++) named.fill(1, y * width + left, y * width + right)
+  }
+  let differences = 0
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const index = y * width + x
+      if (named[index] === 1) continue
+      // Extent changes outside every named box retain the comparator's strict dimension rule.
+      if ((x < before.width && y < before.height) !== (x < after.width && y < after.height)) return true
+      if (diff.data[index * 4 + 3] !== 0) differences++
+    }
+  }
+  return differences / (width * height) > LIVE_CHANGE_MAX_DIFF_RATIO
+}
+
+export interface LiveChanges {
+  readonly touchedRegions: ReadonlyArray<string>
+  readonly outsidePixelsChanged: boolean
+}
+
+/** Compare merge-base and PR evidence for this shot; reference drift never selects touched regions. */
+export const compareLiveRegions = (
+  identity: Identity,
+  base: Capture | undefined,
+  live: Capture,
+  declared: ReadonlyArray<string>
+): LiveChanges => {
+  const names = Array.from(
+    new Set([
+      "*",
+      ...declared,
+      ...base?.snapshot.regions.map((region) => region.name) ?? [],
+      ...live.snapshot.regions.map((region) => region.name)
+    ])
+  )
+  if (base === undefined) return { touchedRegions: names, outsidePixelsChanged: true }
+  const outsidePixelsChanged = compareOutsideRegions(base, live)
+  const touchedRegions = names.filter((name) => {
+    const before = base.snapshot.regions.filter((region) => region.name === name)
+    const after = live.snapshot.regions.filter((region) => region.name === name)
+    const metadataChanged = name === "*"
+      ? base.snapshot.overflow !== live.snapshot.overflow ||
+        base.snapshot.regions.map((region) => region.name).join("|") !==
+          live.snapshot.regions.map((region) => region.name).join("|")
+      : before.length !== after.length || before.some((region, index) => {
+        const current = after[index]
+        return current === undefined || normalizeCopy(region.copy) !== normalizeCopy(current.copy) ||
+          region.parent !== current.parent || region.overflow !== current.overflow ||
+          (["x", "y", "width", "height"] satisfies ReadonlyArray<keyof typeof region.box>).some((coordinate) =>
+            Math.abs(region.box[coordinate] - current.box[coordinate]) > geometryTolerance(identity)
+          ) ||
+          Array.from(new Set([...Object.keys(region.styles), ...Object.keys(current.styles)])).some((token) =>
+            region.styles[token] !== current.styles[token]
+          )
+      })
+    if (name === "*") {
+      return metadataChanged || outsidePixelsChanged
+    }
+    const previous = base.regions.get(name)
+    const current = live.regions.get(name)
+    if (metadataChanged || previous?._tag !== current?._tag) return true
+    return previous?._tag === "Image" && current?._tag === "Image" &&
+      comparePixels(previous.bytes, current.bytes).ratio > LIVE_CHANGE_MAX_DIFF_RATIO
+  })
+  return { touchedRegions, outsidePixelsChanged }
 }
 
 export const compareSnapshots = (
@@ -38,7 +130,7 @@ export const compareSnapshots = (
   const fail = (region: string, rule: Failure["rule"], detail: string) => {
     failures.push({ ...identity, region, rule, detail })
   }
-  const tolerance = identity.viewport === 390 ? 2 : 4
+  const tolerance = geometryTolerance(identity)
   const refNames = ref.regions.map((region) => region.name)
   const liveNames = live.regions.map((region) => region.name)
   if (ref.overflow || live.overflow) fail("*", "geometry", "Horizontal page overflow")
