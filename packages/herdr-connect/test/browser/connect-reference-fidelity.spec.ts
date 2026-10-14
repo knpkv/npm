@@ -5,7 +5,10 @@ import { expect, type Locator, type Page, test } from "@playwright/test"
 import { Schema } from "effect"
 import { ConnectAgent } from "../../src/model.js"
 import { failureSentences } from "../../src/unavailable-detail.js"
+import { referenceCreatureIdentities } from "../reference-creature-identities.js"
 import { pinReferenceFleet, pinRegressionFleet, scrollPinDirectory, seedPins } from "./connect-pin-fixture.js"
+import { captureFidelity } from "./creature-capture.js"
+import { expectReferenceCreatureIdentity } from "./reference-creature-identity.js"
 
 test.use({ locale: "en-GB", timezoneId: "UTC" })
 
@@ -20,10 +23,20 @@ const agent = (
   parent?: string,
   relation = "delegated"
 ) => {
-  const fields = { id: `agent-${name}`, name, state, host, work, kind: "claude", lastActivityAt: at(hour, minute) }
+  const hue = referenceCreatureIdentities.find((entry) => entry.host === host && entry.name === name)?.family
+  const fields = {
+    id: `agent-${name}`,
+    name,
+    state,
+    host,
+    work,
+    kind: "claude",
+    lastActivityAt: at(hour, minute)
+  }
+  const colored = hue === undefined ? fields : { ...fields, hue }
   return Schema.decodeUnknownSync(ConnectAgent)(
-    parent === undefined ? fields : {
-      ...fields,
+    parent === undefined ? colored : {
+      ...colored,
       relationship: { parentAgentId: `agent-${parent}`, relation }
     }
   )
@@ -96,7 +109,7 @@ const extras = (state: string): ReadonlyArray<ConnectAgent> =>
     : state === "2u"
     ? [
       agent("rev-auth", "working", "atlas", "auth-review", 13, 59, "sec-cc", "review"),
-      ...["child-a", "child-b", "child-c"].map((name) =>
+      ...["worker-extra-a", "worker-extra-b", "worker-extra-c"].map((name) =>
         agent(name, "ready", "atlas", "package-work", 13, 40, "sec-cc")
       )
     ]
@@ -344,8 +357,14 @@ test.describe("creature fill fidelity", () => {
         }
       })
 
+      test(`rev6 skills fixture carries Ember rather than Amber ${String(width)} ${theme}`, async ({ page }) => {
+        await openDirectory(page, width, theme)
+        const body = page.locator(".connect-agent[data-agent-key=\"atlas:agent-skills\"] .connect-creature-body")
+        await expect(body).toHaveAttribute("fill", "#9a3d00")
+      })
+
       for (const surface of ["row", "stage"]) {
-        test(`working halo stays under its arc ${surface} ${String(width)} ${theme}`, async ({ page }) => {
+        test(`rev6 working arc has no neutral full halo ${surface} ${String(width)} ${theme}`, async ({ page }) => {
           await openDirectory(page, width, theme)
           const row = page.locator(".connect-agent[data-agent-key=\"atlas:agent-ds-rly\"]")
           if (surface === "stage") {
@@ -357,20 +376,9 @@ test.describe("creature fill fidelity", () => {
             : page.locator(".connect-stage-hero svg.connect-creature")
           const halo = creature.locator(".connect-creature-halo")
           const orbit = creature.locator(".connect-creature-orbit")
-          expect(await halo.evaluate((node) => Number(getComputedStyle(node).opacity))).toBeGreaterThan(0)
+          // Rev6 draw.ring has only the deploying-ink arc; the previous full neutral halo is retired.
+          await expect(halo).toHaveCSS("opacity", "0")
           expect(await orbit.evaluate((node) => Number(getComputedStyle(node).opacity))).toBeGreaterThan(0)
-          const neutral = await page.evaluate(() => {
-            const probe = document.createElement("span")
-            probe.style.color = "var(--rly-color-text-3)"
-            document.body.append(probe)
-            const colour = getComputedStyle(probe).color
-            probe.remove()
-            return colour
-          })
-          expect(await halo.evaluate((node) => getComputedStyle(node).stroke)).toBe(neutral)
-          expect(await halo.evaluate((node) => Number.parseFloat(getComputedStyle(node).strokeWidth))).toBe(
-            surface === "row" ? 2 : 1
-          )
           await page.emulateMedia({ forcedColors: "active" })
           expect(await halo.evaluate((node) => Number(getComputedStyle(node).opacity))).toBeGreaterThan(0)
           expect(await halo.evaluate((node) => getComputedStyle(node).stroke)).not.toBe("none")
@@ -496,6 +504,141 @@ test.describe("creature fill fidelity", () => {
         await expect(link).toHaveAttribute("href", "/?tab=usage")
         await expect(link.locator("svg")).toHaveCount(1)
         await expect(link.locator("svg")).toHaveAttribute("aria-hidden", "true")
+      })
+    }
+  }
+})
+
+/** CONNECT-MAP rev6 plus the pinFrame design clarification: phone whole-pill cap, desktop one line. */
+test.describe("rev6 pin fidelity", () => {
+  for (const width of [390, 1280]) {
+    for (const theme of ["light", "dark"]) {
+      test(`rev6 pin state stays plain with responsive long names ${String(width)} ${theme}`, async ({ page }) => {
+        const longName = "coordinator-for-package-builder-review-and-release-notes"
+        const pinned = agent(longName, "waiting", "atlas", "package-work", 14, 2)
+        await openDirectory(page, width, theme, [pinned])
+        await page.locator(".connect-agent").click()
+        await page.getByRole("button", { name: "Pin", exact: true }).click()
+        await page.keyboard.press("Escape")
+        const pin = page.locator(".connect-pins[data-placement=\"float\"] .connect-pin-open")
+        await expect(pin).toHaveAccessibleName(new RegExp(`^Pinned: ${longName},`))
+        const name = pin.locator(".connect-pin-name")
+        const state = pin.locator(".connect-pin-state")
+        await expect(name).toBeVisible()
+        await expect(state).toBeVisible()
+        await expect(state).toHaveText("Needs you")
+        const metrics = await pin.evaluate((node) => {
+          const name = node.querySelector<HTMLElement>(".connect-pin-name")
+          const state = node.querySelector<HTMLElement>(".connect-pin-state")
+          if (name === null || state === null) return null
+          const label = state.querySelector("span") ?? state
+          const nameStyle = getComputedStyle(name)
+          const stateStyle = getComputedStyle(state)
+          const labelStyle = getComputedStyle(label)
+          const nameBox = name.getBoundingClientRect()
+          const stateBox = state.getBoundingClientRect()
+          const pinBox = node.getBoundingClientRect()
+          const pillBox = (node.parentElement ?? node).getBoundingClientRect()
+          return {
+            pillCap: getComputedStyle(node.parentElement ?? node).maxInlineSize,
+            nameCap: nameStyle.maxInlineSize,
+            pillWidth: node.parentElement?.getBoundingClientRect().width ?? 0,
+            pillFitsViewport: pillBox.left >= 0 && pillBox.right <= window.innerWidth,
+            ellipsis: nameStyle.textOverflow,
+            nameOverflow: name.scrollWidth > name.clientWidth,
+            stateFont: stateStyle.fontSize,
+            stateWeight: stateStyle.fontWeight,
+            stateLine: stateStyle.lineHeight,
+            stateShrink: stateStyle.flexShrink,
+            stateOverflow: state.scrollWidth > state.clientWidth,
+            background: labelStyle.backgroundColor,
+            border: labelStyle.borderTopWidth,
+            padding: labelStyle.paddingInlineStart,
+            gap: stateBox.left - nameBox.right,
+            stackedGap: stateBox.top - nameBox.bottom,
+            stackedAligned: Math.abs(stateBox.left - nameBox.left) < 1,
+            sameLine: Math.abs(stateBox.top - nameBox.top) < 4,
+            endSpace: pinBox.right - stateBox.right,
+            fitsViewport: pinBox.left >= 0 && pinBox.right <= window.innerWidth
+          }
+        })
+        expect(metrics).not.toBeNull()
+        if (metrics === null) return
+        // Desktop has no fixed name cap; a whole-pill viewport bound is still required.
+        if (width < 600) expect.soft(metrics.pillCap).toBe("144px")
+        expect.soft(metrics.pillFitsViewport).toBe(true)
+        expect.soft(metrics.nameCap).toBe("none")
+        expect.soft(metrics.ellipsis).toBe("ellipsis")
+        expect.soft(metrics.nameOverflow).toBe(width < 600)
+        if (width < 600) expect.soft(metrics.pillWidth).toBeLessThanOrEqual(144)
+        expect.soft(metrics.stateFont).toBe("12px")
+        expect.soft(metrics.stateWeight).toBe("500")
+        expect.soft(Number.parseFloat(metrics.stateLine)).toBeCloseTo(14.4, 1)
+        expect.soft(metrics.stateShrink).toBe("0")
+        expect.soft(metrics.stateOverflow).toBe(false)
+        expect.soft(metrics.background).toBe("rgba(0, 0, 0, 0)")
+        expect.soft(metrics.border).toBe("0px")
+        expect.soft(metrics.padding).toBe("0px")
+        if (width >= 600) expect.soft(metrics.gap).toBe(8)
+        else {
+          expect.soft(metrics.stackedGap).toBeCloseTo(2, 1)
+          expect.soft(metrics.stackedAligned).toBe(true)
+        }
+        await expect(state.locator("svg")).toHaveCount(0)
+        const creatureBox = await drawnBox(pin.locator(".connect-creature"))
+        expect.soft(creatureBox.width).toBe(28)
+        expect.soft(creatureBox.height).toBe(28)
+        expect.soft(metrics.sameLine).toBe(width >= 600)
+        expect.soft(metrics.endSpace).toBeGreaterThanOrEqual(12)
+        expect.soft(metrics.fitsViewport).toBe(true)
+        await pin.click()
+        await expect(page.getByRole("dialog", { name: longName, exact: true })).toBeVisible()
+      })
+    }
+  }
+})
+
+/** Valid schema-max names must leave Open, the creature and Unpin reachable on desktop. */
+test.describe("schema-max desktop pins", () => {
+  for (const width of [640, 1280]) {
+    for (const theme of ["light", "dark"]) {
+      test(`schema-max desktop pins fit ${String(width)} ${theme}`, async ({ page }) => {
+        const name = "release-review-worker-".repeat(16).slice(0, 256)
+        const pinned = Schema.decodeUnknownSync(ConnectAgent)({
+          ...agent("long-pin", "waiting", "atlas", "package-work", 14, 2),
+          name
+        })
+        await openDirectory(page, width, theme, [pinned])
+        // Fidelity captures add two frame-border pixels. This guard needs the exact named viewport.
+        await page.setViewportSize({ width, height: 844 })
+        expect(await page.evaluate(() => window.innerWidth)).toBe(width)
+        await page.locator(".connect-agent").click()
+        await page.getByRole("button", { name: "Pin", exact: true }).click()
+        await page.keyboard.press("Escape")
+        const pill = page.locator(".connect-pins[data-placement=float] .connect-pin")
+        const bounds = await pill.boundingBox()
+        expect(bounds).not.toBeNull()
+        expect(bounds?.x).toBeGreaterThanOrEqual(0)
+        expect((bounds?.x ?? -1) + (bounds?.width ?? 0)).toBeLessThanOrEqual(width)
+        expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
+        const text = pill.locator(".connect-pin-name")
+        await expect(text).toHaveCSS("text-overflow", "ellipsis")
+        expect(await text.evaluate((node) => node.scrollWidth > node.clientWidth)).toBe(true)
+        const creature = await pill.locator(".connect-creature").boundingBox()
+        expect(creature?.x).toBeGreaterThanOrEqual(0)
+        expect((creature?.x ?? -1) + (creature?.width ?? 0)).toBeLessThanOrEqual(width)
+        const unpin = pill.getByRole("button", { name: `Unpin ${name}`, exact: true })
+        expect(
+          await unpin.evaluate((node) => {
+            const box = node.getBoundingClientRect()
+            return node.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2))
+          })
+        ).toBe(true)
+        await pill.locator(".connect-pin-open").click()
+        await expect(page.getByRole("dialog", { name, exact: true })).toBeVisible()
+        await page.keyboard.press("Escape")
+        await unpin.click()
+        await expect(pill).toHaveCount(0)
       })
     }
   }
@@ -700,6 +843,7 @@ const states = {
   "2a": 1064,
   "2b": 647,
   "2c": 358,
+  "2c-v3": 440,
   "2d": 1130,
   "2e": 1236,
   "2f": 462,
@@ -728,7 +872,9 @@ for (const width of [390, 1280]) {
     for (const [state, frameHeight] of Object.entries(states)) {
       test(`reference ${state} ${String(width)} ${theme}`, async ({ page }, testInfo) => {
         await prepare(page, width, theme)
-        if (state.startsWith("2i")) {
+        if (state === "2c-v3") {
+          await page.setViewportSize({ width: width + 2, height: (width === 390 ? 489 : frameHeight) - 106 })
+        } else if (state.startsWith("2i")) {
           await page.setViewportSize({ width: width + 2, height: width === 1280 ? 1064 : 1164 })
         } else if (width === 1280) {
           await page.setViewportSize({ width: width + 2, height: frameHeight - 100 })
@@ -765,7 +911,7 @@ for (const width of [390, 1280]) {
         if (state === "2h") {
           agents = base.map((entry) =>
             entry.name === "pair-codex"
-              ? { ...entry, host: "birch" }
+              ? { ...entry, relationship: { parentAgentId: "agent-rev-usage", relation: "pair" } }
               : entry.name === "rev-usage"
               ? { ...entry, relationship: { parentAgentId: entry.id, relation: "review" } }
               : entry.name === "ds-rly"
@@ -776,6 +922,8 @@ for (const width of [390, 1280]) {
         if (state === "2h") agents = [...agents, ...agents.filter((entry) => entry.name === "pkgsrc")]
         await page.route("**/v1/connect/agents", (route) => {
           if (state === "2b" || state === "2c") return
+          // rev6 2c-v3 depicts inability to reach the hub, not an HTTP response or typed deadline.
+          if (state === "2c-v3") return route.abort("failed")
           if (failed && (state === "2d" || state === "2i-v4-stale")) {
             return route.fulfill({ status: 503, body: "timeout" })
           }
@@ -807,6 +955,16 @@ for (const width of [390, 1280]) {
             }))
         }
         await mount(page, theme)
+        if (state === "2a") {
+          // The shared identity table also covers long-list frames; 2a mounts only this six-agent fleet.
+          for (const fixture of base) {
+            await expectReferenceCreatureIdentity(
+              page.locator(`.connect-agent[data-agent-key="${fixture.host}:agent-${fixture.name}"] .connect-creature`),
+              fixture.host,
+              fixture.name
+            )
+          }
+        }
         if (state === "2b") {
           await expect(page.getByText("Loading fleet agents…")).toBeVisible()
           await expect.soft(page.locator(".connect-directory-secondary")).toHaveCount(0)
@@ -828,6 +986,30 @@ for (const width of [390, 1280]) {
           await expectCompactSecondary(page.getByRole("button", { name: "Retry", exact: true }))
           await expect.soft(page.locator(".connect-directory-secondary")).toHaveCount(0)
           await expectRegularText(page.locator(".connect-directory-error p"), "--rly-color-text-2", "16px")
+        } else if (state === "2c-v3") {
+          // CONNECT-MAP rev6, connect--2c-v3: actionable copy, 24px inset and a 48px Retry control.
+          const card = page.locator(".connect-directory-error")
+          await expect(card.getByRole("heading", { name: "Couldn’t load the fleet directory", exact: true }))
+            .toBeVisible()
+          await expect(card.getByText("Relay couldn’t reach the hub. It tries again every 5 seconds.", { exact: true }))
+            .toBeVisible()
+          const retry = card.getByRole("button", { name: "Retry", exact: true })
+          await expect(retry).toBeVisible()
+          expect.soft((await drawnBox(retry)).height).toBe(48)
+          const layout = await card.evaluate((node) => {
+            const style = getComputedStyle(node)
+            const title = node.querySelector("h2")
+            const icon = node.querySelector("svg")
+            return {
+              padding: style.paddingInlineStart,
+              gap: style.columnGap,
+              radius: style.borderTopLeftRadius,
+              titleSize: title === null ? null : getComputedStyle(title).fontSize,
+              iconSize: icon === null ? null : icon.getBoundingClientRect().width
+            }
+          })
+          expect.soft(layout).toEqual({ padding: "24px", gap: "16px", radius: "14px", titleSize: "20px", iconSize: 20 })
+          await expect(card).not.toContainText("HTTP 503")
         } else if (state === "2f") {
           await expect(page.getByText("No agents running on any host.")).toBeVisible()
           await expect.soft(page.getByRole("searchbox")).toBeVisible()
@@ -851,6 +1033,11 @@ for (const width of [390, 1280]) {
         } else {
           await expect(page.locator(".connect-family").first()).toBeVisible()
           if (state === "2h") {
+            await expectReferenceCreatureIdentity(
+              page.locator(".connect-agent[data-agent-key=\"atlas:agent-pair-codex\"] .connect-creature"),
+              "atlas",
+              "pair-codex"
+            )
             await expect(page.locator(".connect-agent")).toHaveCount(7)
             await expect(page.locator(".connect-agent[data-lineage-issue=\"cross_host\"]")).toBeEnabled()
             await expect(page.locator(".connect-agent[data-lineage-issue=\"cycle\"]")).toBeEnabled()
@@ -890,11 +1077,17 @@ for (const width of [390, 1280]) {
           }
           if (state === "2q-v2" || state === "2g") {
             await page.getByRole("button", { name: "birch", exact: true }).click()
-            await page.getByRole("button", { name: /^Filters/ }).click()
+            if (state === "2q-v2") await page.getByRole("button", { name: /^Needs you/ }).click()
+            else await page.getByRole("button", { name: /^Filters/ }).click()
             if (state === "2g") {
               await page.getByRole("searchbox").fill("zzz")
               await page.getByRole("searchbox").blur()
             }
+          }
+          if (state === "2q-v2") {
+            await expect(page.locator(".connect-agent")).toHaveCount(1)
+            await expect(page.locator(".connect-agent-copy > strong")).toHaveText(["rev-usage"])
+            await expect(page.getByRole("button", { name: /^Needs you/ })).toHaveAttribute("aria-pressed", "true")
           }
           if (state === "2g") {
             await expect.soft(page.locator(".connect-filters-toggle .connect-filter-count")).toHaveText("1")
@@ -930,6 +1123,7 @@ for (const width of [390, 1280]) {
             const outline = await selected.evaluate((row) => getComputedStyle(row).outlineStyle)
             expect.soft(outline).toBe("none")
             // Base 2j depicts the footer at the end; mid-scroll sticking is guarded by 2j-v2.
+            // Design marks its 202px phone pill stale: all pin counts use rev6's compact v2 pinFrame.
             await scrollPinDirectory(page, 1)
             const stack = await drawnBox(page.locator(".connect-pins[data-placement='float']"))
             const footer = await drawnBox(page.locator(".connect-directory-secondary"))
@@ -1088,6 +1282,17 @@ for (const width of [390, 1280]) {
               .toHaveCount(0)
           }
           if (state === "2u") {
+            const family = page.locator(".connect-agent[data-agent-key=\"atlas:agent-sec-cc\"]").locator("..")
+            await expect(family.locator(".connect-agent-copy > strong")).toHaveText([
+              "sec-cc",
+              "pair-codex",
+              "rev-auth"
+            ])
+            await expectReferenceCreatureIdentity(
+              family.locator(".connect-agent[data-agent-key=\"atlas:agent-rev-auth\"] .connect-creature"),
+              "atlas",
+              "rev-auth"
+            )
             const more = page.getByRole("button", { name: "Show 3 more", exact: true })
             await expect(more).toBeVisible()
             const buttonBox = await more.boundingBox()
@@ -1129,9 +1334,11 @@ for (const width of [390, 1280]) {
           await expectRegularText(page.locator(".connect-filter-summary > span").first(), "--rly-color-text-2", "12px")
           await expectRegularText(page.locator(".connect-filter-summary > span").nth(1), "--rly-color-text-2", "12px")
         }
-        await page
-          .locator(state.startsWith("2i") ? ".connect-stage-sheet" : "#fleet-connect-root")
-          .screenshot({ path: testInfo.outputPath(`fidelity/connect-${state}-${String(width)}-${theme}.png`) })
+        await captureFidelity(
+          page,
+          testInfo.outputPath(`fidelity/connect-${state}-${String(width)}-${theme}.png`),
+          page.locator(state.startsWith("2i") ? ".connect-stage-sheet" : "#fleet-connect-root")
+        )
         expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width + 2)
         if (state === "2a") {
           await expect(page.locator("header .connect-directory-switch")).toHaveCount(0)
@@ -1210,7 +1417,7 @@ for (const width of [390, 1280]) {
         } else if (state === "2t") {
           await expectTouchTarget(page.getByRole("button", { name: /^Nested deeper: open lint-sub/ }))
         }
-        if (state !== "2c") await expectTouchTarget(page.locator(".connect-limits-link"))
+        if (state !== "2c" && state !== "2c-v3") await expectTouchTarget(page.locator(".connect-limits-link"))
       })
     }
   }
@@ -1252,9 +1459,11 @@ for (const width of [390, 1280]) {
           const clear = page.getByRole("button", { name: "Clear search", exact: true })
           expect.soft((await drawnBox(clear)).height).toBe(48)
           await expectTouchTarget(clear)
-          await page.locator("#fleet-connect-root").screenshot({
-            path: testInfo.outputPath(`fidelity/connect-${state}-${String(width)}-${theme}.png`)
-          })
+          await captureFidelity(
+            page,
+            testInfo.outputPath(`fidelity/connect-${state}-${String(width)}-${theme}.png`),
+            page.locator("#fleet-connect-root")
+          )
           await clear.click()
           await expect(search).toHaveValue("")
           await expect(search).toBeFocused()
@@ -1268,9 +1477,11 @@ for (const width of [390, 1280]) {
           await expectNoticeIcon(page.locator(".connect-limits-problem"), page.locator(".connect-limits-problem p"), 8)
           await expect(page.locator(".connect-limits-link")).toHaveCount(0)
         }
-        await page.locator("#fleet-connect-root").screenshot({
-          path: testInfo.outputPath(`fidelity/connect-${state}-${String(width)}-${theme}.png`)
-        })
+        await captureFidelity(
+          page,
+          testInfo.outputPath(`fidelity/connect-${state}-${String(width)}-${theme}.png`),
+          page.locator("#fleet-connect-root")
+        )
       })
     }
 
@@ -1304,6 +1515,17 @@ for (const width of [320, 390, 1280]) {
         await expect(page.locator(".connect-agent")).toHaveCount(31)
         const stack = page.locator(".connect-pins[data-placement='float']")
         await expect(stack.locator(".connect-pin")).toHaveCount(2)
+        // rev6 pinFrame uses the viewport alone: a grid stack with 8px gaps at every count.
+        const stackStyle = await stack.evaluate((node) => {
+          const style = getComputedStyle(node)
+          return { display: style.display, gap: style.rowGap, justify: style.justifyItems, bottom: style.insetBlockEnd }
+        })
+        expect.soft(stackStyle).toEqual({
+          display: "grid",
+          gap: "8px",
+          justify: "end",
+          bottom: width < 600 ? "46px" : "24px"
+        })
         const owner = await scrollPinDirectory(page, 0.5)
         const mid = await drawnBox(stack)
         expect.soft(owner.scrollTop).toBeGreaterThan(500)
@@ -1316,6 +1538,9 @@ for (const width of [320, 390, 1280]) {
           expect.soft(pill.height).toBe(48)
           if (width < 600) {
             expect.soft(pill.width).toBeLessThanOrEqual(144)
+            // rev6 2j-v2 390 light/dark painted border bounds: ds-rly 124px, sec-cc 138px.
+            const recorded = (await pin.innerText()).includes("ds-rly") ? 124 : 138
+            expect.soft(Math.abs(pill.width - recorded), "matches the recorded fixture capsule").toBeLessThanOrEqual(2)
           }
           expect.soft(
             await pin.locator(".connect-creature").evaluate((node) => {
@@ -1327,14 +1552,20 @@ for (const width of [320, 390, 1280]) {
           ).toBe(true)
         }
         if (width !== 320) {
-          await page.screenshot({
-            clip: { x: 1, y: 0, width, height: width === 1280 ? 800 : 780 },
-            path: testInfo.outputPath(`fidelity/connect-2j-v2-${String(width)}-${theme}.png`)
-          })
+          await captureFidelity(
+            page,
+            testInfo.outputPath(`fidelity/connect-2j-v2-${String(width)}-${theme}.png`),
+            undefined,
+            { x: 1, y: 0, width, height: width === 1280 ? 800 : 780 }
+          )
         }
         await scrollPinDirectory(page, 1)
         const footer = page.locator(".connect-directory-secondary")
         const foot = await drawnBox(footer)
+        if (width < 600) {
+          // The phone footer reserves the whole 144px pill plus the 12px clearance.
+          expect.soft(await footer.evaluate((node) => getComputedStyle(node).paddingInlineEnd)).toBe("156px")
+        }
         const limits = await drawnBox(page.locator(".connect-limits"))
         const end = await drawnBox(stack)
         const last = await drawnBox(page.locator(".connect-agent").last())
@@ -1345,10 +1576,12 @@ for (const width of [320, 390, 1280]) {
         await expectTouchTarget(page.locator(".connect-limits-link"))
         for (const control of await stack.locator(".connect-pin > button").all()) await expectTouchTarget(control)
         if (width !== 320) {
-          await page.screenshot({
-            clip: { x: 1, y: 0, width, height: width === 1280 ? 800 : 780 },
-            path: testInfo.outputPath(`fidelity/connect-2j-v2-end-${String(width)}-${theme}.png`)
-          })
+          await captureFidelity(
+            page,
+            testInfo.outputPath(`fidelity/connect-2j-v2-end-${String(width)}-${theme}.png`),
+            undefined,
+            { x: 1, y: 0, width, height: width === 1280 ? 800 : 780 }
+          )
         }
       }
     )

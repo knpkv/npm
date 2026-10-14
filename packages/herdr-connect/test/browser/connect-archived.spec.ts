@@ -8,6 +8,8 @@ import {
   ConnectArchivePage,
   connectArchivePageMaxRecords
 } from "../../src/model.js"
+import { referenceCreatureIdentities } from "../reference-creature-identities.js"
+import { expectReferenceCreatureIdentity } from "./reference-creature-identity.js"
 
 test.use({ locale: "en-GB", timezoneId: "UTC" })
 
@@ -22,6 +24,7 @@ const closed = (
   kind = "worker",
   state = "working"
 ) => {
+  const hue = referenceCreatureIdentities.find((entry) => entry.host === host && entry.name === name)?.family
   const fields = {
     host,
     agentId: `agent-${name}`,
@@ -32,9 +35,10 @@ const closed = (
     firstSeenAt: Math.min(Date.UTC(2026, 9, name === "rev-auth" ? 9 : 7, 14, 2), now - (hours + 1) * 3_600_000),
     closedAt: now - hours * 3_600_000
   }
+  const colored = hue === undefined ? fields : { ...fields, hue }
   const spoken = text === undefined
-    ? fields
-    : { ...fields, lastWords: { text, createdAt: now - hours * 3_600_000 - 60_000 } }
+    ? colored
+    : { ...colored, lastWords: { text, createdAt: now - hours * 3_600_000 - 60_000 } }
   return Schema.decodeUnknownSync(ArchivedConnectAgent)(
     name === "rev-auth"
       ? { ...spoken, relationship: { parentAgentId: "agent-sec-cc", relation: "review" } }
@@ -260,6 +264,11 @@ for (const theme of ["light", "dark"]) {
       closed(`closed-${state}`, "fixture-host", 1, undefined, "worker", state)
     )
     await archiveRoute(page, pageOf(fixtures))
+    // Archived retains the live inventory cache: seed Working before mount, not after switching views.
+    await page.route(
+      "**/v1/connect/agents*",
+      (route) => route.fulfill({ json: { agents: [{ ...live, state: "working" }], failures: [], nextCursor: null } })
+    )
     // Mount with motion allowed, rather than sampling a media change after a reduced-motion fixture capture.
     await page.emulateMedia({ reducedMotion: "no-preference" })
     expect(await page.evaluate(() => window.matchMedia("(prefers-reduced-motion: no-preference)").matches)).toBe(true)
@@ -272,15 +281,14 @@ for (const theme of ["light", "dark"]) {
       await expectClosed(page.locator(".connect-archive-stage .connect-creature"))
       await page.keyboard.press("Escape")
     }
-    // Nearby live working motion must survive the closed-only exclusion.
-    await page.route(
-      "**/v1/connect/agents*",
-      (route) => route.fulfill({ json: { agents: [{ ...live, state: "working" }], failures: [], nextCursor: null } })
-    )
+    // CONNECT-MAP rev6 keeps Waiting still; Working's connect-creature-turn orbit retains its 1800ms clock.
     await page.getByRole("link", { name: "Active", exact: true }).click()
-    const active = page.locator(".connect-agent .connect-creature").first()
+    const active = page.locator(".connect-agent .connect-creature[data-bucket='working']")
     await expect(active).toBeVisible()
-    expect(await active.evaluate((svg) => svg.getAnimations({ subtree: true }).length)).toBeGreaterThan(0)
+    const orbit = active.locator(".connect-creature-orbit")
+    await expect(orbit).toHaveCSS("animation-name", "connect-creature-turn")
+    await expect(orbit).toHaveCSS("animation-duration", "1.8s")
+    expect(await orbit.evaluate((node) => node.getAnimations().length)).toBeGreaterThan(0)
   })
 }
 
@@ -511,6 +519,47 @@ for (const fragment of ["", "#details"]) {
 const frames = ["A1", "A2", "A3", "A3-v2", "A4", "A5", "A6"]
 for (const width of [390, 1280]) {
   for (const theme of ["light", "dark"]) {
+    test(`rev6 archived row geometry ${String(width)} ${theme}`, async ({ page }) => {
+      await prepare(page, width, theme)
+      await archiveRoute(page, pageOf(records))
+      await mount(page, theme)
+      await expect(rows(page)).toHaveCount(records.length)
+      // Rev6 arow: 40px creature, 12px padding/gap, 16px/1.3 title and 14px/1.4 last words.
+      // A1/A5 raster dividers are 65px apart without words and 86/87px with words.
+      const geometry = await rows(page).evaluateAll((nodes) =>
+        nodes.map((node) => {
+          const creature = node.querySelector<SVGSVGElement>(".connect-creature")
+          const style = getComputedStyle(node)
+          const metadata = node.querySelector(".connect-archive-row-copy small")
+          const body = creature?.querySelector<SVGPathElement>(".connect-creature-body")
+          const matrix = body?.getScreenCTM()
+          const unit = creature === null || creature === undefined ?
+            0
+            : Number.parseFloat(getComputedStyle(creature).getPropertyValue("--connect-creature-unit"))
+          return {
+            designUnit: matrix === null || matrix === undefined ? null : Math.hypot(matrix.a, matrix.b) * unit,
+            height: node.getBoundingClientRect().height,
+            track: creature?.getBoundingClientRect().width,
+            trackHeight: creature?.getBoundingClientRect().height,
+            metadataLeading: metadata === null ? null : getComputedStyle(metadata).lineHeight,
+            gap: style.columnGap,
+            padding: style.paddingInlineStart,
+            words: node.querySelector(".connect-archive-last-words") !== null,
+            border: Number.parseFloat(style.borderBottomWidth)
+          }
+        })
+      )
+      for (const row of geometry) {
+        expect(row.track).toBe(40)
+        expect(row.trackHeight).toBe(40)
+        expect(row.designUnit).toBeCloseTo(40 / 32, 3)
+        expect(row.metadataLeading).toBe("16.8px")
+        expect(row.gap).toBe("12px")
+        expect(row.padding).toBe("12px")
+        expect(row.height - row.border).toBeCloseTo(row.words ? 85.2 : 64, 0)
+      }
+    })
+
     test(`archive search helper spacing ${String(width)} ${theme}`, async ({ page }) => {
       await prepare(page, width, theme)
       await archiveRoute(page, pageOf(firstPage, true))
@@ -629,8 +678,15 @@ for (const width of [390, 1280]) {
           await expect(helper).toBeVisible()
           await expect(page.getByRole("button", { name: "Show older", exact: true })).toBeVisible()
         } else if (frame === "A4") {
+          await expectReferenceCreatureIdentity(
+            rowNamed(page, "rev-auth").locator(".connect-creature"),
+            "atlas",
+            "rev-auth",
+            true
+          )
           await rowNamed(page, "rev-auth").click()
           const sheet = page.getByRole("dialog")
+          await expectReferenceCreatureIdentity(sheet.locator(".connect-creature"), "atlas", "rev-auth", true)
           await expect(sheet).toHaveAccessibleDescription("Reviewer on atlas, archived, read-only")
           await expect(sheet.locator("dt").filter({ hasText: /^Kind$/ }).locator("+ dd")).toHaveText("reviewer")
           await expect(sheet).toContainText("First seen 9 Oct 2026 14:02 → Closed 11 Oct 2026 09:40")

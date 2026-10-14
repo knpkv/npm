@@ -3036,7 +3036,23 @@ esac
       const initialPage = Schema.decodeUnknownSync(Schema.fromJsonString(FleetConnectAgentPage))(initial.body)
       expect(initialPage.failures).toEqual([])
       expect(initialPage.agents).toHaveLength(8)
+      expect(new Set(initialPage.agents.map(({ hue }) => hue)).size).toBe(8)
       expect(initialPage.agents.find(({ id }) => id === "agent-sec-cc")).toHaveProperty("hue", "rose")
+      const peerHues = yield* Effect.acquireRelease(
+        Effect.sync(() => new DatabaseSync(join(peerRoot, "approval-app.sqlite"), { readOnly: true })),
+        (database) => Effect.sync(() => database.close())
+      )
+      const liveReservations = () =>
+        Schema.decodeUnknownSync(Schema.Array(Schema.Struct({
+          agent_id: Schema.String,
+          hue: Schema.String,
+          body_kind: Schema.String,
+          exclusive: Schema.Literals([0, 1])
+        })))(
+          peerHues.prepare(
+            "SELECT agent_id, hue, body_kind, exclusive FROM connect_agent_hues WHERE host = ? AND closed_at IS NULL"
+          ).all("atlas")
+        )
       // Partial evidence does not release any of the eight peer reservations.
       names = ["skills"]
       partial = true
@@ -3046,7 +3062,16 @@ esac
       const partialPage = Schema.decodeUnknownSync(Schema.fromJsonString(LocalConnectAgents))(
         yield* Effect.promise(() => partialRead.text())
       )
-      expect(partialPage.agents[0]).toHaveProperty("hue", "ember")
+      // Rev6 payload seeds make sec-cc a circle and skills a squircle. With all eight families held,
+      // rose is the first shape-safe overflow family; sharing it does not prove the peer released a holder.
+      expect(partialPage.agents[0]).toHaveProperty("hue", "rose")
+      const retained = liveReservations()
+      expect(retained).toHaveLength(9)
+      expect(retained.filter(({ exclusive }) => exclusive === 1)).toHaveLength(8)
+      expect(retained.find(({ agent_id }) => agent_id === "agent-sec-cc"))
+        .toMatchObject({ hue: "rose", body_kind: "circle", exclusive: 1 })
+      expect(retained.find(({ agent_id }) => agent_id === "agent-skills"))
+        .toMatchObject({ hue: "rose", body_kind: "squircle", exclusive: 0 })
       names = []
       partial = false
       observedAt = firstSeenAt + 2
@@ -3058,6 +3083,7 @@ esac
       const archivePage = Schema.decodeUnknownSync(Schema.fromJsonString(ConnectArchivePage))(archived.body)
       expect(archivePage.agents).toHaveLength(8)
       expect(archivePage.agents.find(({ agentId }) => agentId === "agent-sec-cc")).toHaveProperty("hue", "rose")
+      expect(liveReservations()).toEqual([])
       names = ["skills"]
       observedAt++
       const replacement = yield* Effect.promise(() => fetch(`${peerUrl}/v1/connect/agents/local`))
@@ -3065,7 +3091,7 @@ esac
       const replacementPage = Schema.decodeUnknownSync(Schema.fromJsonString(LocalConnectAgents))(
         yield* Effect.promise(() => replacement.text())
       )
-      // This returning bean held overflow ember; use a new bean identity to probe oldest-family reuse instead.
+      // The returning squircle keeps its recorded rose. The new identity probes retired-family reuse.
       names = ["skills", "replacement-4"]
       observedAt++
       const newest = yield* Effect.promise(() => fetch(`${peerUrl}/v1/connect/agents/local`))
@@ -3073,8 +3099,9 @@ esac
       const newestPage = Schema.decodeUnknownSync(Schema.fromJsonString(LocalConnectAgents))(
         yield* Effect.promise(() => newest.text())
       )
-      expect(newestPage.agents.find(({ id }) => id === "agent-replacement-4")).toHaveProperty("hue", "rose")
-      expect(replacementPage.agents[0]).toHaveProperty("hue", "ember")
+      // All original families closed together: rose is live again, so ember wins the palette-order tie.
+      expect(newestPage.agents.find(({ id }) => id === "agent-replacement-4")).toHaveProperty("hue", "ember")
+      expect(replacementPage.agents[0]).toHaveProperty("hue", "rose")
     })).pipe(provideNodeServices)
   })
 
@@ -3188,7 +3215,8 @@ esac
       expect(initialDirectory.status).toBe(200)
       const initialAgents =
         Schema.decodeUnknownSync(Schema.fromJsonString(FleetConnectAgentPage))(initialDirectory.body).agents
-      expect(initialAgents.find(({ id }) => id === "agent-archive")).toHaveProperty("hue", "teal")
+      // Rev6 first sighting hashes the canonical stable ID: FNV-1a("ser8:archive") %8 is7, Iris.
+      expect(initialAgents.find(({ id }) => id === "agent-archive")).toHaveProperty("hue", "iris")
       present = false
       observedAt = firstSeenAt + 1
       yield* get("/v1/connect/agents")
@@ -3212,7 +3240,7 @@ esac
         host: "ser8",
         agentId: "agent-archive",
         name: "worker",
-        hue: "teal",
+        hue: "iris",
         kind: "codex",
         work: "project",
         state: "working",

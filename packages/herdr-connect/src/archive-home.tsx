@@ -126,7 +126,9 @@ export const ConnectHomeArchive = ({
                 <Creature
                   closed
                   host={agent.host}
+                  hueFamily={agent.hue}
                   id={String(agent.agentId)}
+                  name={agent.name}
                   size="row"
                   state={agent.state}
                   statePolicy="home"

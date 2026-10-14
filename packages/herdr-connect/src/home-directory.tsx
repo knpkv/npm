@@ -190,7 +190,9 @@ export const ConnectHomeDirectory = ({
                     <Creature
                       arrived={arrivals.has(key)}
                       host={agent.host}
+                      hueFamily={agent.hue}
                       id={String(agent.id)}
+                      name={agent.name}
                       size="row"
                       stale={old}
                       state={agent.state}
