@@ -1,9 +1,15 @@
 /** Short native waits yield to the hub between complete, idempotent SQLite write attempts. */
-import { Duration, Effect, Schedule, Schema, type Semaphore } from "effect"
+import { Clock, Context, Duration, Effect, Schedule, Schema, type Semaphore } from "effect"
 import { ConnectStoreBusyError } from "../errors.js"
 
 export const connectBusyTimeoutMillis = 100
 export const connectWriteTimeoutMillis = 5_000
+
+/** Local inventories share a deadline; independent writes retain their ordinary per-operation budget. */
+export const ConnectInventoryWriteDeadline = Context.Reference<number | undefined>(
+  "@knpkv/herdr-connect/InventoryWriteDeadline",
+  { defaultValue: () => undefined }
+)
 const isSqliteBusy = Schema.is(
   Schema.Struct({
     code: Schema.Literal("ERR_SQLITE_ERROR"),
@@ -33,6 +39,17 @@ export const connectSqliteWrite = Effect.fn("ConnectStore.sqliteWrite")(function
   onSuccess?: (value: A) => Effect.Effect<unknown, E2, R>,
   lockTimeoutMillis = connectWriteTimeoutMillis
 ) {
+  const deadline = yield* ConnectInventoryWriteDeadline
+  const remainingMillis = deadline === undefined
+    ? lockTimeoutMillis
+    : Math.min(lockTimeoutMillis, deadline - (yield* Clock.currentTimeMillis))
+  if (retryBusy && remainingMillis <= 0) {
+    return yield* new ConnectStoreBusyError({
+      operation,
+      timeoutMillis: lockTimeoutMillis,
+      cause: "Inventory write acquisition and retry deadline exceeded"
+    })
+  }
   let lastBusy: ConnectStoreBusyError | undefined
   const attempt = Effect.try({
     try: run,
@@ -62,7 +79,7 @@ export const connectSqliteWrite = Effect.fn("ConnectStore.sqliteWrite")(function
   const write = acquire.pipe(Effect.andThen(retried))
   const value = yield* retryBusy ?
     write.pipe(Effect.timeoutOrElse({
-      duration: lockTimeoutMillis,
+      duration: remainingMillis,
       orElse: () =>
         lastBusy ?? new ConnectStoreBusyError({
           operation,

@@ -2,7 +2,21 @@ import { NodeHttpClient, NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
 import type { HostConfiguration, HostOperations } from "@knpkv/herdr-fleet"
 import { fleetResponseBodyMaxBytes, JobStore, makeFleetService } from "@knpkv/herdr-fleet"
-import { Clock, Effect, Fiber, FileSystem, Logger, Option, Result, Schedule, Schema, Stream } from "effect"
+import {
+  Clock,
+  Crypto,
+  Deferred,
+  Effect,
+  Fiber,
+  FileSystem,
+  Logger,
+  Option,
+  Random,
+  Result,
+  Schedule,
+  Schema,
+  Stream
+} from "effect"
 import * as HttpClient from "effect/http/HttpClient"
 import * as HttpClientResponse from "effect/http/HttpClientResponse"
 import { TestClock } from "effect/testing"
@@ -18,6 +32,7 @@ import {
   localConnectAgents,
   pageFleetConnectAgents
 } from "../src/directory.js"
+import { ConnectStoreBusyError } from "../src/errors.js"
 import { buildConnectForest } from "../src/forest.js"
 import { connectAgentId } from "../src/id.js"
 import { releaseTerminalControl, terminalKillOptions } from "../src/internal/terminal-release.js"
@@ -1119,6 +1134,182 @@ describe("Connect public seams", () => {
         } else expect(yield* store.list()).toHaveLength(2)
       }).pipe(Effect.scoped, provideNodeServices)
   )
+
+  it.effect.each([false, true])(
+    "shares one reporter inventory write budget across relationship and activity contention; unlock %s",
+    (unlock) =>
+      Effect.gen(function*() {
+        const fs = yield* FileSystem.FileSystem
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "connect-inventory-budget-" })
+        yield* fs.chmod(root, 0o700)
+        const activity = yield* Effect.acquireRelease(
+          AgentActivityStore.open(join(root, "activity.sqlite")),
+          (store) => Effect.sync(() => store.close())
+        )
+        const relationships = yield* Effect.acquireRelease(
+          AgentRelationshipStore.open(join(root, "relationships.sqlite")),
+          (store) => Effect.sync(() => store.close())
+        )
+        const relationshipLock = yield* Effect.acquireRelease(
+          Effect.sync(() => new DatabaseSync(relationships.path)),
+          (db) => Effect.sync(() => db.close())
+        )
+        const activityLock = yield* Effect.acquireRelease(
+          Effect.sync(() => new DatabaseSync(activity.path)),
+          (db) => Effect.sync(() => db.close())
+        )
+        let relationshipHeld = true
+        let activityHeld = true
+        yield* Effect.acquireRelease(Effect.sync(() => relationshipLock.exec("BEGIN IMMEDIATE")), () =>
+          Effect.sync(() => {
+            if (relationshipHeld) {
+              relationshipLock.exec("ROLLBACK")
+            }
+          }))
+        yield* Effect.acquireRelease(
+          Effect.sync(() =>
+            activityLock.exec("BEGIN IMMEDIATE")
+          ),
+          () =>
+            Effect.sync(() => {
+              if (activityHeld) activityLock.exec("ROLLBACK")
+            })
+        )
+        const source: AgentSource = {
+          workers: () => Effect.succeed([]),
+          agents: () =>
+            Effect.succeed({
+              available: true,
+              error: null,
+              agents: [{
+                activityRevision: 1,
+                agentId: "agent-budget",
+                kind: "worker",
+                name: "Worker",
+                paneId: "w1:p1",
+                parentAgentId: null,
+                relation: null,
+                status: "working",
+                work: "project"
+              }]
+            })
+        }
+        const cryptoService = yield* Crypto.Crypto
+        // This client runs the real local inventory and the peer's bounded safe response decoder.
+        const client = HttpClient.make((request) =>
+          Effect.gen(function*() {
+            const local = yield* Effect.result(
+              localConnectAgents(hostConfiguration(root), source, activity, relationships, 1).pipe(
+                Effect.provideService(Crypto.Crypto, cryptoService)
+              )
+            )
+            if (Result.isSuccess(local)) {
+              return HttpClientResponse.fromWeb(request, new Response(JSON.stringify(local.success)))
+            }
+            const cause = local.failure.cause
+            const response = Schema.is(ConnectStoreBusyError)(cause)
+              ? { error: cause._tag, operation: cause.operation, timeoutMillis: cause.timeoutMillis }
+              : { error: "Unavailable" }
+            return HttpClientResponse.fromWeb(request, new Response(JSON.stringify(response), { status: 503 }))
+          })
+        )
+        const pending = yield* Effect.forkScoped(
+          Effect.result(fetchPeerConnectAgents({
+            host: "SER8",
+            agentsUrl: "https://host.example.test/v1/connect/agents/local",
+            online: true,
+            terminalUrl: null
+          }, { timeout: "reporter" })).pipe(
+            Effect.provideService(HttpClient.HttpClient, client),
+            Random.withSeed("inventory-write-budget")
+          )
+        )
+        yield* TestClock.adjust(3_000)
+        yield* Effect.sync(() => relationshipLock.exec("ROLLBACK"))
+        relationshipHeld = false
+        if (unlock) {
+          yield* Effect.sync(() => activityLock.exec("ROLLBACK"))
+          activityHeld = false
+        }
+        yield* TestClock.adjust(1_500)
+        expect(yield* relationships.list()).toHaveLength(1)
+        if (!unlock) yield* TestClock.adjust(1_500)
+        const result = yield* Fiber.join(pending)
+        if (unlock) expect(result).toMatchObject({ success: { complete: true, agents: [{ id: "agent-budget" }] } })
+        else {expect(result).toMatchObject({
+            failure: {
+              reason: "unavailable",
+              cause: { _tag: "ConnectStoreBusyError", operation: "activity.observe", timeoutMillis: 5_000 }
+            }
+          })}
+      }).pipe(Effect.scoped, provideNodeServices)
+  )
+
+  it.effect("keeps committed inventory observations successful when finalization outlives the shared SQL budget", () =>
+    Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "connect-inventory-finalization-" })
+      yield* fs.chmod(root, 0o700)
+      const activityPath = join(root, "activity.sqlite")
+      const securing = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      let gate = false
+      const delegated = FileSystem.FileSystem.of({
+        ...fs,
+        chmod: (path, mode) =>
+          Effect.gen(function*() {
+            yield* fs.chmod(path, mode)
+            if (path === activityPath && gate) {
+              gate = false
+              yield* Deferred.succeed(securing, undefined)
+              yield* Deferred.await(release)
+            }
+          })
+      })
+      const activity = yield* Effect.acquireRelease(
+        AgentActivityStore.open(activityPath).pipe(Effect.provideService(FileSystem.FileSystem, delegated)),
+        (store) => Effect.sync(() => store.close())
+      )
+      const relationships = yield* Effect.acquireRelease(
+        AgentRelationshipStore.open(join(root, "relationships.sqlite")),
+        (store) => Effect.sync(() => store.close())
+      )
+      const database = yield* Effect.acquireRelease(
+        Effect.sync(() => new DatabaseSync(activityPath)),
+        (opened) => Effect.sync(() => opened.close())
+      )
+      const source: AgentSource = {
+        workers: () => Effect.succeed([]),
+        agents: () =>
+          Effect.succeed({
+            available: true,
+            error: null,
+            agents: [{
+              activityRevision: 1,
+              agentId: "agent-finalized",
+              kind: "worker",
+              name: "Worker",
+              paneId: "w1:p1",
+              parentAgentId: null,
+              relation: null,
+              status: "working",
+              work: "project"
+            }]
+          })
+      }
+      gate = true
+      const pending = yield* Effect.forkScoped(Effect.result(
+        localConnectAgents(hostConfiguration(root), source, activity, relationships, 1)
+      ))
+      yield* Deferred.await(securing)
+      expect(database.prepare("SELECT agent_id FROM agent_activity").all()).toEqual([{ agent_id: "agent-finalized" }])
+      yield* TestClock.adjust(6_000)
+      expect(pending.pollUnsafe()).toBeUndefined()
+      yield* Deferred.succeed(release, undefined)
+      expect(yield* Fiber.join(pending)).toMatchObject({
+        success: { complete: true, agents: [{ id: "agent-finalized" }] }
+      })
+    }).pipe(Effect.scoped, provideNodeServices))
 
   it.effect("retains exhausted relationship retry metadata while logging only safe diagnostics", () =>
     Effect.gen(function*() {
