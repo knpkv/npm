@@ -2,6 +2,51 @@
 
 Released as `@knpkv/herdr-approvals` up to 0.18.0; the headings below are that package's history.
 
+## 0.37.0
+
+### Minor Changes
+
+- [#877](https://github.com/knpkv/npm/pull/877) [`6de50ff`](https://github.com/knpkv/npm/commit/6de50ff3b833224069a5e2b4460d762e94c98002) Thanks [@konopkov](https://github.com/konopkov)! - Recover Connect writes from short-lived SQLite writer contention. Use 100 ms native lock waits, followed by asynchronous exponential retries with jitter and an approximately five-second budget, replaying the whole atomic statement or IMMEDIATE transaction. Export ConnectStoreBusyError for exhaustion and classify the hub's additive 503 response contract as minor. Keep archive enrichment isolated, preserve safe inventory diagnostics, and return an exhausted report's operation and budget as HTTP 503 without its private cause. Preserve WAL, FULL synchronous mode and owner-only database and sidecar files; leave Work, Code and Fleet job settings unchanged. Optional archive passes on live directory reads stop at the first failure, limiting writer contention to one native wait for the whole fleet and invalidating absence evidence for skipped hosts. Parent-name and voice/self-state enrichment each have a 100 ms deadline. Directory and post-page reads filter retained rows without pruning. Post writes evict one global batch of at most 256 expired reports under the asynchronous write budget, including reports from agents that never write again, and trim only the writer to 128 entries. Physical expiry eviction waits for post writes; dormant fleets retain hidden expired rows until posting resumes. Equal-time observations cannot clear archive taint; recovery must be strictly newer. Optional failures remain isolated and logged, preserving the browser's directory deadline.
+
+  Include transaction-permit queueing in the write deadline and retry SQLITE_LOCKED alongside SQLITE_BUSY. Preserve safe busy metadata for remote reporters, using the reporter timeout option on peer inventory reads while leaving ordinary directory deadlines unchanged. Stop a blocked-notification pass after its first store failure. New archive closure snapshots ignore expired reports, preserving the inclusive retention cutoff and existing recorded last words.
+
+  Stop notification admission on subscription-store failures too, while draining already-reserved provider sends and recording their definite outcomes. Bound optional hue allocation to half the peer-directory deadline. Preserve typed busy responses in Relay post and self-state clients, without repeating an exhausted post or exposing the server-private cause.
+
+  Request-facing hub stores use zero native lock waits and return typed failures immediately; Connect batch writers retain asynchronous retries. Export the shared report response deadline, derived from reporter inventory plus the primary write plus a transport margin, and use it in both report clients so exhausted busy responses arrive before cancellation.
+
+  Serialize activity observations and optional hue allocations through one store-wide permit, including file-permission finalization. Preserve the existing queue-inclusive write and optional hue deadlines. Secure lazy WAL and SHM sidecars after post-page SELECTs without reintroducing read-path pruning.
+
+  End the busy deadline after lock acquisition and SQL retries, before post-commit permission finalization. Keep the transaction permit through finalization without returning ConnectStoreBusyError for an already-committed write. Apply the same boundary to the optional hue lock budget.
+
+### Patch Changes
+
+- Updated dependencies [[`6de50ff`](https://github.com/knpkv/npm/commit/6de50ff3b833224069a5e2b4460d762e94c98002)]:
+  - @knpkv/herdr-connect@0.24.0
+
+## 0.36.0
+
+### Minor Changes
+
+- [#875](https://github.com/knpkv/npm/pull/875) [`5a8885c`](https://github.com/knpkv/npm/commit/5a8885c94067f1fcde10746ccc0bb2397333eaa6) Thanks [@konopkov](https://github.com/konopkov)! - Add explicit terminal takeover across devices. A controlled terminal offers Take over, including when all four controller slots are occupied; the previous device shows Taken over on another device with Reconnect. Keep Connecting during bounded cleanup and cancel pending admission when the stage closes. Preserve recovery-dialog focus through directory refreshes. Require fresh authenticated remote-host capability before forwarding takeover, preserving the controlled state on older hosts. Export optional takeover selection and the capability and takeover-close schemas.
+
+  Ordinary reconnects wait for a closing controller's bounded release instead of being refused as already controlled. Live controllers remain exclusive; cancellation and newer takeovers retain the same cleanup barrier.
+
+### Patch Changes
+
+- Updated dependencies [[`5a8885c`](https://github.com/knpkv/npm/commit/5a8885c94067f1fcde10746ccc0bb2397333eaa6)]:
+  - @knpkv/herdr-connect@0.23.0
+
+## 0.35.0
+
+### Minor Changes
+
+- [#872](https://github.com/knpkv/npm/pull/872) [`8f2d743`](https://github.com/knpkv/npm/commit/8f2d743cc568d386801ef115628567eb3497005c) Thanks [@konopkov](https://github.com/konopkov)! - Persist per-agent hue families, resolve live-host collisions with shape-aware overflow, and serve retained family snapshots in the archive.
+
+### Patch Changes
+
+- Updated dependencies [[`8f2d743`](https://github.com/knpkv/npm/commit/8f2d743cc568d386801ef115628567eb3497005c)]:
+  - @knpkv/herdr-connect@0.22.0
+
 ## 0.34.0
 
 ### Minor Changes

@@ -1,7 +1,9 @@
 import { assert, describe, it } from "@effect/vitest"
+import * as Data from "effect/Data"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
+import * as Queue from "effect/Queue"
 import * as Random from "effect/Random"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
@@ -840,3 +842,283 @@ describe("live portfolio controller", () => {
       yield* Fiber.interrupt(fiber)
     }))
 })
+
+// HTTP refresh backpressure must not stop the decoder from collapsing a live invalidation burst.
+it.effect("consumes an invalidation burst during a blocked snapshot read with one follow-up", () =>
+  Effect.gen(function*() {
+    const firstStarted = yield* Deferred.make<void>()
+    const lastDecoded = yield* Deferred.make<void>()
+    const firstRead = yield* Deferred.make<ReturnType<typeof makePortfolioSnapshot>>()
+    const finished = yield* Deferred.make<void>()
+    let loads = 0
+    const transport: PortfolioLiveTransport = {
+      loadSnapshot: Effect.suspend(() => {
+        loads++
+        if (loads === 1) return Effect.succeed(makePortfolioSnapshot("current", 10))
+        if (loads === 2) {
+          return Deferred.succeed(firstStarted, undefined).pipe(Effect.andThen(Deferred.await(firstRead)))
+        }
+        return Effect.succeed(makePortfolioSnapshot("current", 14))
+      }),
+      openStream: () =>
+        Effect.succeed(
+          lastingStream([
+            invalidatedEvent(11),
+            invalidatedEvent(12),
+            invalidatedEvent(13),
+            invalidatedEvent(14)
+          ]).pipe(Stream.tap((event) =>
+            event.event === "portfolio.invalidated" && event.id === 14
+              ? Deferred.succeed(lastDecoded, undefined)
+              : Effect.void
+          ))
+        )
+    }
+    const fiber = yield* runPortfolioLiveController({
+      connectivity: onlineConnectivity,
+      onSessionExpired: () => undefined,
+      onState: (state) => {
+        if (state._tag === "loaded" && state.snapshot.eventCursor === 14) Deferred.doneUnsafe(finished, Effect.void)
+      },
+      sessionKey: "fixture-session",
+      transport
+    }).pipe(Effect.forkChild({ startImmediately: true }))
+    yield* Deferred.await(firstStarted)
+    assert.isTrue(yield* Deferred.isDone(lastDecoded), "invalidation decoding continues while the read is blocked")
+    yield* Deferred.succeed(firstRead, makePortfolioSnapshot("current", 11))
+    yield* Deferred.await(finished)
+    assert.strictEqual(loads, 3, "initial snapshot, active refresh, one coalesced follow-up")
+    yield* Fiber.interrupt(fiber)
+  }))
+
+class FixtureSnapshotUnavailable extends Data.TaggedError("FixtureSnapshotUnavailable") {}
+
+// Decoding an invalidation is not proof that its HTTP refresh succeeded.
+it.effect("keeps reconnect backoff growing when decoded invalidations cannot refresh", () =>
+  Effect.gen(function*() {
+    const attempts = yield* Queue.unbounded<number>()
+    let loads = 0
+    let lastAttempt = 0
+    const fiber = yield* runPortfolioLiveController({
+      connectivity: onlineConnectivity,
+      onSessionExpired: () => undefined,
+      onState: (state) => {
+        if (state._tag === "loaded" && state.connection._tag === "reconnecting") {
+          lastAttempt = state.connection.attempt
+          Queue.offerUnsafe(attempts, state.connection.attempt)
+        }
+      },
+      sessionKey: "fixture-session",
+      transport: {
+        loadSnapshot: Effect.suspend(() =>
+          ++loads === 1
+            ? Effect.succeed(makePortfolioSnapshot("current", 10))
+            : Effect.fail(new FixtureSnapshotUnavailable())
+        ),
+        openStream: () => Effect.succeed(lastingStream([invalidatedEvent(11)]))
+      }
+    }).pipe(Effect.forkChild({ startImmediately: true }))
+    assert.strictEqual(yield* Queue.take(attempts), 1)
+    yield* TestClock.adjust(500)
+    assert.strictEqual(lastAttempt, 2)
+    yield* Fiber.interrupt(fiber)
+  }))
+
+// Worker failure must preserve the API error tag all the way to session ownership.
+it.effect("ends in session-expired after an unauthorized snapshot refresh without reconnecting", () =>
+  Effect.gen(function*() {
+    const failed = yield* Deferred.make<void>()
+    const expired: Array<string> = []
+    const states: Array<PortfolioSnapshotLoadState> = []
+    let loads = 0
+    let openings = 0
+    const fiber = yield* runPortfolioLiveController({
+      connectivity: onlineConnectivity,
+      onSessionExpired: (key) => expired.push(key),
+      onState: (state) => {
+        states.push(state)
+        if (state._tag === "failed") Deferred.doneUnsafe(failed, Effect.void)
+      },
+      sessionKey: "fixture-session",
+      transport: {
+        loadSnapshot: Effect.suspend(() =>
+          ++loads === 1
+            ? Effect.succeed(makePortfolioSnapshot("current", 10))
+            : Effect.fail({ _tag: "UnauthorizedApiError" })
+        ),
+        openStream: () =>
+          Effect.sync(() => {
+            openings++
+            return lastingStream([invalidatedEvent(11)])
+          })
+      }
+    }).pipe(Effect.forkChild({ startImmediately: true }))
+    yield* Deferred.await(failed)
+    assert.deepStrictEqual(expired, ["fixture-session"])
+    assert.deepStrictEqual(states.at(-1), { _tag: "failed", failure: "session-expired", sessionKey: "fixture-session" })
+    assert.strictEqual(loads, 2)
+    assert.strictEqual(openings, 1)
+    yield* Fiber.interrupt(fiber)
+  }))
+
+it.effect("one blocked refresh covers an invalidation and heartbeat at the same cursor", () =>
+  Effect.gen(function*() {
+    const decoded = yield* Deferred.make<void>()
+    const firstRead = yield* Deferred.make<ReturnType<typeof makePortfolioSnapshot>>()
+    const applied = yield* Deferred.make<void>()
+    let loads = 0
+    const fiber = yield* runPortfolioLiveController({
+      connectivity: onlineConnectivity,
+      onSessionExpired: () => undefined,
+      onState: (state) => {
+        if (state._tag === "loaded" && state.snapshot.eventCursor === 11 && !state.isSnapshotStale) {
+          Deferred.doneUnsafe(applied, Effect.void)
+        }
+      },
+      sessionKey: "fixture-session",
+      transport: {
+        loadSnapshot: Effect.suspend(() => {
+          loads++
+          if (loads === 1) return Effect.succeed(makePortfolioSnapshot("current", 10))
+          if (loads === 2) return Deferred.await(firstRead)
+          return Effect.succeed(makePortfolioSnapshot("current", 11))
+        }),
+        openStream: () =>
+          Effect.succeed(
+            Stream.fromIterable([invalidatedEvent(11), heartbeatEvent(11)]).pipe(
+              Stream.concat(Stream.fromEffect(Deferred.succeed(decoded, undefined)).pipe(Stream.drain)),
+              Stream.concat(Stream.never)
+            )
+          )
+      }
+    }).pipe(Effect.forkChild({ startImmediately: true }))
+    yield* Deferred.await(decoded)
+    assert.strictEqual(loads, 2)
+    yield* Deferred.succeed(firstRead, makePortfolioSnapshot("current", 11))
+    yield* Deferred.await(applied)
+    yield* Effect.yieldNow
+    assert.strictEqual(loads, 2)
+    yield* Fiber.interrupt(fiber)
+  }))
+
+it.effect("a newer uncovered invalidation and heartbeat require exactly one follow-up read", () =>
+  Effect.gen(function*() {
+    const decoded = yield* Deferred.make<void>()
+    const firstRead = yield* Deferred.make<ReturnType<typeof makePortfolioSnapshot>>()
+    const applied = yield* Deferred.make<void>()
+    let loads = 0
+    const fiber = yield* runPortfolioLiveController({
+      connectivity: onlineConnectivity,
+      onSessionExpired: () => undefined,
+      onState: (state) => {
+        if (state._tag === "loaded" && state.snapshot.eventCursor === 12 && !state.isSnapshotStale) {
+          Deferred.doneUnsafe(applied, Effect.void)
+        }
+      },
+      sessionKey: "fixture-session",
+      transport: {
+        loadSnapshot: Effect.suspend(() => {
+          loads++
+          if (loads === 1) return Effect.succeed(makePortfolioSnapshot("current", 10))
+          if (loads === 2) return Deferred.await(firstRead)
+          return Effect.succeed(makePortfolioSnapshot("current", 12))
+        }),
+        openStream: () =>
+          Effect.succeed(
+            Stream.fromIterable([
+              invalidatedEvent(11),
+              invalidatedEvent(12),
+              heartbeatEvent(12)
+            ]).pipe(
+              Stream.concat(Stream.fromEffect(Deferred.succeed(decoded, undefined)).pipe(Stream.drain)),
+              Stream.concat(Stream.never)
+            )
+          )
+      }
+    }).pipe(Effect.forkChild({ startImmediately: true }))
+    yield* Deferred.await(decoded)
+    assert.strictEqual(loads, 2)
+    yield* Deferred.succeed(firstRead, makePortfolioSnapshot("current", 11))
+    yield* Deferred.await(applied)
+    yield* Effect.yieldNow
+    assert.strictEqual(loads, 3)
+    yield* Fiber.interrupt(fiber)
+  }))
+
+it.effect("applies the accepted removal snapshot before reconnecting after a finite stream closes", () =>
+  Effect.gen(function*() {
+    const closed = yield* Deferred.make<void>()
+    const started = yield* Deferred.make<void>()
+    const firstRead = yield* Deferred.make<ReturnType<typeof makePortfolioSnapshot>>()
+    const applied = yield* Deferred.make<void>()
+    let interrupted = false
+    let loads = 0
+    const fiber = yield* runPortfolioLiveController({
+      connectivity: onlineConnectivity,
+      onSessionExpired: () => undefined,
+      onState: (state) => {
+        if (state._tag === "loaded" && state.snapshot.eventCursor === 11 && state.snapshot.releases.length === 0) {
+          Deferred.doneUnsafe(applied, Effect.void)
+        }
+      },
+      sessionKey: "fixture-session",
+      transport: {
+        loadSnapshot: Effect.suspend(() => {
+          loads++
+          if (loads === 1) return Effect.succeed(makePortfolioSnapshot("current", 10))
+          return Deferred.succeed(started, undefined).pipe(
+            Effect.andThen(Deferred.await(firstRead)),
+            Effect.onInterrupt(() =>
+              Effect.sync(() => {
+                interrupted = true
+              })
+            )
+          )
+        }),
+        openStream: () =>
+          Effect.succeed(
+            Stream.succeed(invalidatedEvent(11)).pipe(
+              Stream.ensuring(Deferred.succeed(closed, undefined))
+            )
+          )
+      }
+    }).pipe(Effect.forkChild({ startImmediately: true }))
+    yield* Deferred.await(started)
+    yield* Deferred.await(closed)
+    yield* Effect.yieldNow
+    assert.isFalse(interrupted)
+    yield* Deferred.succeed(firstRead, { ...makePortfolioSnapshot("current", 11), releases: [] })
+    yield* Deferred.await(applied)
+    assert.strictEqual(loads, 2)
+    yield* Fiber.interrupt(fiber)
+  }))
+
+it.effect("owner cancellation interrupts a snapshot still draining after stream EOF", () =>
+  Effect.gen(function*() {
+    const closed = yield* Deferred.make<void>()
+    const stopped = yield* Deferred.make<void>()
+    let loads = 0
+    const fiber = yield* runPortfolioLiveController({
+      connectivity: onlineConnectivity,
+      onSessionExpired: () => undefined,
+      onState: () => undefined,
+      sessionKey: "fixture-session",
+      transport: {
+        loadSnapshot: Effect.suspend(() =>
+          ++loads === 1
+            ? Effect.succeed(makePortfolioSnapshot("current", 10))
+            : Effect.never.pipe(Effect.onInterrupt(() => Deferred.succeed(stopped, undefined)))
+        ),
+        openStream: () =>
+          Effect.succeed(
+            Stream.succeed(invalidatedEvent(11)).pipe(
+              Stream.ensuring(Deferred.succeed(closed, undefined))
+            )
+          )
+      }
+    }).pipe(Effect.forkChild({ startImmediately: true }))
+    yield* Deferred.await(closed)
+    yield* Fiber.interrupt(fiber)
+    yield* Deferred.await(stopped)
+    assert.strictEqual(loads, 2)
+  }))

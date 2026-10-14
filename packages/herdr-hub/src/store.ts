@@ -2,6 +2,7 @@ import { openPrivateSqlite, type PrivateDatabaseError, type PrivateSqlite } from
 import { Effect, Schema } from "effect"
 import type { DatabaseSync, SQLOutputValue } from "node:sqlite"
 import { ApprovalAppStoreError } from "./errors.js"
+import { hubConnectBusyTimeoutMillis } from "./internal/sqlite-busy.js"
 import {
   PushSubscriptionRecord,
   type PushSubscriptionRecord as PushSubscriptionRecordType,
@@ -131,6 +132,7 @@ export class ApprovalAppStore {
 
   static readonly open = Effect.fn("ApprovalAppStore.open")(function*(path: string) {
     const opened = yield* openPrivateSqlite(path, {
+      busyTimeoutMillis: hubConnectBusyTimeoutMillis,
       initialize: (database) => {
         database.exec(`
         CREATE TABLE IF NOT EXISTS vapid_keys (

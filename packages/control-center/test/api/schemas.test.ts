@@ -17,6 +17,7 @@ import {
   OpaqueMediaId,
   PairingCode,
   PatchPluginConfigurationRequest,
+  PluginConnectionSummary,
   PluginListResponse,
   PluginOverviewResponse,
   PluginSynchronizationState,
@@ -262,6 +263,17 @@ describe("public API schemas", () => {
         "x-timeline-export-limit": "1001"
       })
     ))
+  })
+
+  it("accepts legacy connection summaries and the optional runtime revision token", () => {
+    assert.isUndefined(Schema.decodeUnknownSync(PluginConnectionSummary)(encodedPlugin).runtimeRevision)
+    assert.strictEqual(
+      Schema.decodeUnknownSync(PluginConnectionSummary)({ ...encodedPlugin, runtimeRevision: 4 }).runtimeRevision,
+      4
+    )
+    assert.isTrue(
+      Result.isFailure(Schema.decodeUnknownResult(PluginConnectionSummary)({ ...encodedPlugin, runtimeRevision: -1 }))
+    )
   })
 
   it("bounds session, plugin list, and plugin overview responses", () => {
@@ -975,15 +987,14 @@ describe("public API schemas", () => {
     for (const event of encodedEvents.slice(2)) {
       assert.isTrue(Result.isSuccess(Schema.decodeUnknownResult(ControlCenterLiveEvent)({ ...event, id: undefined })))
     }
-    assert.isTrue(
-      Result.isFailure(
-        Schema.decodeUnknownResult(ControlCenterLiveEvent)({
-          event: "stream.reset-required",
-          id: "7",
-          data: JSON.stringify({ reason: "retention", requestedCursor: 1, headCursor: 7, prunedThroughCursor: 3 })
-        })
-      )
-    )
+    // The parser inherits the preceding durable ID; the reset must not expose it as cursor progress.
+    const resetWithInheritedId = Schema.decodeUnknownResult(ControlCenterLiveEvent)({
+      event: "stream.reset-required",
+      id: "7",
+      data: JSON.stringify({ reason: "retention", requestedCursor: 1, headCursor: 7, prunedThroughCursor: 3 })
+    })
+    assert.isTrue(Result.isSuccess(resetWithInheritedId))
+    if (Result.isSuccess(resetWithInheritedId)) assert.notProperty(resetWithInheritedId.success, "id")
     assert.isTrue(
       Result.isFailure(
         Schema.decodeUnknownResult(ControlCenterLiveEvent)({

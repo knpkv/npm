@@ -344,6 +344,7 @@ const connectionSummary = Effect.fn("PluginAdministration.connectionSummary")(fu
     health: connection.isEnabled
       ? Option.isSome(runtime) ? runtime.value.health : null
       : { _tag: "disabled", checkedAt: connection.updatedAt },
+    ...(Option.isSome(runtime) && { runtimeRevision: runtime.value.revision }),
     updatedAt: connection.updatedAt
   } satisfies PluginConnectionSummary
 })

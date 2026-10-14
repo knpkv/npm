@@ -6,22 +6,34 @@
  */
 import type { TerminalSelection } from "@knpkv/herdr-connect"
 
+type TerminalSelectionFields = {
+  host: string | null
+  agentId: string | null
+  cols: number
+  rows: number
+  scrollState?: true
+  takeover?: true | string
+}
+
 /** The raw selection fields from a terminal URL, for `TerminalSelection` to decode. */
 export const terminalSelectionInput = (url: URL) => {
-  const fields = {
+  const fields: TerminalSelectionFields = {
     host: url.searchParams.get("host"),
     agentId: url.searchParams.get("agent"),
     cols: Number(url.searchParams.get("cols")),
     rows: Number(url.searchParams.get("rows"))
   }
   // Only a client that asked gets scroll states; leaving the key out keeps older clients as they were.
-  if (url.searchParams.get("scrollState") !== "1") return fields
-  return { ...fields, scrollState: true }
+  if (url.searchParams.get("scrollState") === "1") fields.scrollState = true
+  const takeover = url.searchParams.get("takeover")
+  // Preserve malformed input so the selection Schema rejects it instead of silently attaching normally.
+  if (takeover !== null) fields.takeover = takeover === "1" ? true : takeover
+  return fields
 }
 
 /**
- * The remote host's terminal URL for a selection. The client's scroll-state opt-in goes along, so a
- * remote host never sends a signal this client cannot read.
+ * Forward scroll opt-in and explicit takeover intent. The caller verifies fresh takeover capability
+ * before opening this URL, so an older host cannot silently treat takeover as an ordinary attach.
  */
 export const remoteTerminalUrl = (terminalUrl: string, selection: TerminalSelection): URL => {
   const url = new URL(terminalUrl)
@@ -30,6 +42,7 @@ export const remoteTerminalUrl = (terminalUrl: string, selection: TerminalSelect
   url.searchParams.set("cols", String(selection.cols))
   url.searchParams.set("rows", String(selection.rows))
   if (selection.scrollState === true) url.searchParams.set("scrollState", "1")
+  if (selection.takeover === true) url.searchParams.set("takeover", "1")
   return url
 }
 

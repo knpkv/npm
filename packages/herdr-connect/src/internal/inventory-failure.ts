@@ -1,6 +1,6 @@
 /** Local inventory diagnostics carry only an operation, validated stable identity and failure category. */
 import { Result, Schema } from "effect"
-import type { ConnectRelationshipError, ConnectRelationshipStoreError } from "../errors.js"
+import type { ConnectRelationshipError, ConnectRelationshipStoreError, ConnectStoreBusyError } from "../errors.js"
 import { ConnectAgent } from "../model.js"
 
 export class ConnectInventoryFailure extends Schema.TaggedError<ConnectInventoryFailure>()("ConnectInventoryFailure", {
@@ -14,6 +14,7 @@ export class ConnectInventoryFailure extends Schema.TaggedError<ConnectInventory
     "cross_host",
     "ambiguous_ownership",
     "ConnectRelationshipStoreError",
+    "ConnectStoreBusyError",
     "SchemaError",
     "MissingPersistedRelationship"
   ])
@@ -22,9 +23,9 @@ export class ConnectInventoryFailure extends Schema.TaggedError<ConnectInventory
 /** Relationship errors name the failing identity first; validate it before retaining it in a diagnostic. */
 export const inventoryRelationshipFailure = (
   step: "persist_relationships" | "validate_forest",
-  cause: ConnectRelationshipError | ConnectRelationshipStoreError
+  cause: ConnectRelationshipError | ConnectRelationshipStoreError | ConnectStoreBusyError
 ): ConnectInventoryFailure => {
-  if (cause._tag === "ConnectRelationshipStoreError") {
+  if (cause._tag === "ConnectRelationshipStoreError" || cause._tag === "ConnectStoreBusyError") {
     return new ConnectInventoryFailure({ step, agentId: null, reason: cause._tag })
   }
   const identity = Schema.decodeUnknownResult(ConnectAgent.fields.id)(cause.detail.split(" ")[1])

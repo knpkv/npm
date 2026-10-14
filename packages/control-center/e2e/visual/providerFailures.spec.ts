@@ -1,4 +1,4 @@
-import { expect } from "@playwright/test"
+import { expect, type Page } from "@playwright/test"
 import * as DateTime from "effect/DateTime"
 
 import { checkConnection, createConnection, expectFirstSync, portfolio, synchronize } from "./api.js"
@@ -7,9 +7,10 @@ import { confluenceInput, pipelineInput } from "./connectionInputs.js"
 import { jiraCredential } from "./fakeProviders/transport.js"
 import { addJiraConnection, JIRA_TOKEN_A } from "./jiraUi.js"
 import { resourceTestAction } from "./serviceUi.js"
-import { test, VISUAL_WORKSPACE_ID } from "./visualRuntimeFixture.js"
+import { test, VISUAL_WORKSPACE_ID, type VisualRuntimeFixture } from "./visualRuntimeFixture.js"
 
-test("P0-10 provider outage, Retry-After and malformed response preserve unavailable source facts", async ({ page, visualRuntime }) => {
+/** Both failure surfaces start with the same retained healthy facts and real provider failures. */
+const setupUnavailableSources = async (page: Page, visualRuntime: VisualRuntimeFixture): Promise<void> => {
   await visualRuntime.pairThroughUi(page)
   await addJiraConnection(page, visualRuntime.origin, JIRA_TOKEN_A, "Fixture Jira")
   const jira = (await portfolio(page, visualRuntime.origin)).plugins.find((connection) =>
@@ -44,6 +45,10 @@ test("P0-10 provider outage, Retry-After and malformed response preserve unavail
   expect(snapshot.releases).toHaveLength(1)
   expect(snapshot.releases[0]?.freshness._tag).toBe("source-unavailable")
   expect(snapshot.releases[0]?.readiness?.verdict).not.toBe("ready")
+}
+
+test("P0-10 provider outage, Retry-After and malformed response preserve unavailable source facts", async ({ page, visualRuntime }) => {
+  await setupUnavailableSources(page, visualRuntime)
   await page.goto(`${visualRuntime.origin}/services`)
   for (const name of ["fixture-pipeline", "Space · 40001"]) {
     await (await resourceTestAction(page, name)).click()
@@ -88,6 +93,14 @@ test("P0-10 provider outage, Retry-After and malformed response preserve unavail
       }
     })
   }
+  const reads = visualRuntime.apiRequests().filter(({ method }) => method === "GET" || method === "HEAD")
+  // The fixed clock prevents limiter refill; each scenario must fit one 120-read window with headroom.
+  expect(reads.length, "P0-10a Services frozen-clock read budget: at most 100 requests, including setup")
+    .toBeLessThanOrEqual(100)
+})
+
+test("P0-10 overview preserves unavailable source facts", async ({ page, visualRuntime }) => {
+  await setupUnavailableSources(page, visualRuntime)
   await page.goto(visualRuntime.origin)
   await expect(page.getByText("Showing preserved source facts", { exact: true })).toBeVisible()
   await expect(page.getByText(/^Source unavailable since .*rate-limited, retry .*last read /u)).toBeVisible()
@@ -103,6 +116,10 @@ test("P0-10 provider outage, Retry-After and malformed response preserve unavail
       await expect(page.getByText("Showing preserved source facts", { exact: true })).toBeVisible()
     }
   })
+  const reads = visualRuntime.apiRequests().filter(({ method }) => method === "GET" || method === "HEAD")
+  // The fixed clock prevents limiter refill; each scenario must fit one 120-read window with headroom.
+  expect(reads.length, "P0-10b Overview frozen-clock read budget: at most 68 requests, including setup")
+    .toBeLessThanOrEqual(68)
 })
 
 test("P0-10 omitted Confluence body is a truthful unsynchronized-task gap", async ({ page, visualRuntime }) => {

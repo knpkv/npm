@@ -3,6 +3,7 @@ import { Effect, Schema, Semaphore } from "effect"
 import type { DatabaseSync, SQLOutputValue } from "node:sqlite"
 import { ConnectRelationshipError, ConnectRelationshipStoreError } from "./errors.js"
 import { connectRelationshipViolation } from "./forest.js"
+import { connectBusyTimeoutMillis, connectSqliteWrite } from "./internal/sqlite-write.js"
 import { ConnectAgent, ConnectAgentRelationship } from "./model.js"
 
 export const PersistedConnectAgentMetadata = Schema.Struct({
@@ -103,6 +104,7 @@ export class AgentRelationshipStore {
   static readonly open = Effect.fn("AgentRelationshipStore.open")(
     function*(path: string) {
       const opened = yield* openPrivateSqlite(path, {
+        busyTimeoutMillis: connectBusyTimeoutMillis,
         initialize: (database) => {
           database.exec(`
         CREATE TABLE IF NOT EXISTS connect_store_metadata (
@@ -206,15 +208,15 @@ export class AgentRelationshipStore {
     observations: ReadonlyArray<RelationshipObservation>
   ) {
     const database = this.#database
-    return yield* this.#transactions.withPermits(1)(
-      Effect.try({
-        try: () => {
-          database.exec("BEGIN IMMEDIATE")
-          try {
-            const acceptedObservations: Array<RelationshipObservation> = []
-            for (const { metadata, source } of observations) {
-              const changed = database.prepare(
-                `INSERT INTO connect_agent_relationships
+    return yield* connectSqliteWrite(
+      "persist.transaction",
+      () => {
+        database.exec("BEGIN IMMEDIATE")
+        try {
+          const acceptedObservations: Array<RelationshipObservation> = []
+          for (const { metadata, source } of observations) {
+            const changed = database.prepare(
+              `INSERT INTO connect_agent_relationships
               (agent_id, host, pane_id, parent_agent_id, relation, observed_at, source)
              VALUES (?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(host, agent_id) DO UPDATE SET
@@ -250,68 +252,69 @@ export class AgentRelationshipStore {
                AND connect_agent_relationships.relation IS excluded.relation
              )
              RETURNING agent_id, host, pane_id, parent_agent_id, relation, observed_at, source`
-              ).get(
-                metadata.agentId,
-                metadata.host,
-                metadata.paneId,
-                metadata.relationship?.parentAgentId ?? null,
-                metadata.relationship?.relation ?? null,
-                metadata.observedAt,
-                source,
-                source,
-                source
-              )
-              const currentObservation = decodeRowSync(
-                changed ?? database.prepare(
-                  `SELECT agent_id, host, pane_id, parent_agent_id, relation, observed_at, source
+            ).get(
+              metadata.agentId,
+              metadata.host,
+              metadata.paneId,
+              metadata.relationship?.parentAgentId ?? null,
+              metadata.relationship?.relation ?? null,
+              metadata.observedAt,
+              source,
+              source,
+              source
+            )
+            const currentObservation = decodeRowSync(
+              changed ?? database.prepare(
+                `SELECT agent_id, host, pane_id, parent_agent_id, relation, observed_at, source
              FROM connect_agent_relationships
              WHERE host = ? AND agent_id = ?`
-                ).get(metadata.host, metadata.agentId)
-              )
-              const current = currentObservation.metadata
-              const staleDurableLoser = source === "durable_worker" &&
-                currentObservation.source === "trusted_live_inventory" &&
-                current.paneId === metadata.paneId &&
-                current.observedAt > metadata.observedAt &&
-                !sameMetadata(current, metadata)
-              if (!staleDurableLoser) acceptedObservations.push({ metadata, source })
-            }
-            const persisted = listUnlockedSync(database)
-            const finalObservations = new Map<string, PersistedConnectAgentMetadata>()
-            for (const { metadata } of acceptedObservations) {
-              finalObservations.set(`${metadata.host.toLowerCase()}\u0000${metadata.agentId}`, metadata)
-            }
-            for (const metadata of finalObservations.values()) {
-              const current = persisted.find(
-                (candidate) =>
-                  candidate.agentId === metadata.agentId &&
-                  candidate.host.toLowerCase() === metadata.host.toLowerCase()
-              )
-              if (current === undefined || !sameMetadata(current, metadata)) {
-                throw new ConnectRelationshipError({
-                  detail: `agent ${metadata.agentId} already has different relationship ownership`,
-                  reason: "ambiguous_ownership"
-                })
-              }
-            }
-            const violation = connectRelationshipViolation(
-              persisted.map(({ agentId: id, host, relationship }) =>
-                relationship === undefined ? { host, id } : { host, id, relationship }
-              )
+              ).get(metadata.host, metadata.agentId)
             )
-            if (violation !== undefined) throw violation
-            database.exec("COMMIT")
-            return persisted
-          } catch (cause) {
-            database.exec("ROLLBACK")
-            throw cause
+            const current = currentObservation.metadata
+            const staleDurableLoser = source === "durable_worker" &&
+              currentObservation.source === "trusted_live_inventory" &&
+              current.paneId === metadata.paneId &&
+              current.observedAt > metadata.observedAt &&
+              !sameMetadata(current, metadata)
+            if (!staleDurableLoser) acceptedObservations.push({ metadata, source })
           }
-        },
-        catch: (cause) =>
-          isRelationshipPersistenceFailure(cause)
-            ? cause
-            : storeError("persist.transaction")(cause)
-      })
+          const persisted = listUnlockedSync(database)
+          const finalObservations = new Map<string, PersistedConnectAgentMetadata>()
+          for (const { metadata } of acceptedObservations) {
+            finalObservations.set(`${metadata.host.toLowerCase()}\u0000${metadata.agentId}`, metadata)
+          }
+          for (const metadata of finalObservations.values()) {
+            const current = persisted.find(
+              (candidate) =>
+                candidate.agentId === metadata.agentId &&
+                candidate.host.toLowerCase() === metadata.host.toLowerCase()
+            )
+            if (current === undefined || !sameMetadata(current, metadata)) {
+              throw new ConnectRelationshipError({
+                detail: `agent ${metadata.agentId} already has different relationship ownership`,
+                reason: "ambiguous_ownership"
+              })
+            }
+          }
+          const violation = connectRelationshipViolation(
+            persisted.map(({ agentId: id, host, relationship }) =>
+              relationship === undefined ? { host, id } : { host, id, relationship }
+            )
+          )
+          if (violation !== undefined) throw violation
+          database.exec("COMMIT")
+          return persisted
+        } catch (cause) {
+          database.exec("ROLLBACK")
+          throw cause
+        }
+      },
+      (cause) =>
+        isRelationshipPersistenceFailure(cause)
+          ? cause
+          : storeError("persist.transaction")(cause),
+      true,
+      this.#transactions
     )
   })
 

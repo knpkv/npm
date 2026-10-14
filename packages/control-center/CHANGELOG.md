@@ -1,5 +1,19 @@
 # @knpkv/control-center
 
+## 0.18.1
+
+### Patch Changes
+
+- [#879](https://github.com/knpkv/npm/pull/879) [`dc8e9fa`](https://github.com/knpkv/npm/commit/dc8e9faabf684a0bcc946fed6ed1295381530e7a) Thanks [@konopkov](https://github.com/konopkov)! - Workspaces with more than 50 releases keep their verified delivery links and readiness assessments when unchanged provider data synchronizes.
+
+## 0.18.0
+
+### Minor Changes
+
+- [#874](https://github.com/knpkv/npm/pull/874) [`efb12b9`](https://github.com/knpkv/npm/commit/efb12b9729b1b9637b7df6b36fba008cf530e2f0) Thanks [@konopkov](https://github.com/konopkov)! - Overview's live updates no longer disconnect after a keepalive, so changes appear immediately instead of after a growing reconnect delay. Connection summaries now expose an optional runtime revision so live refreshes reload only the connection details that changed.
+
+  An update already being read finishes before a normally closed live stream reconnects. Services retries unavailable connection details on the next refresh and shows completed syncs in other open clients.
+
 ## 0.17.1
 
 ### Patch Changes

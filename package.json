@@ -48,7 +48,8 @@
     "prepare": "effect-tsgo patch --typescript && husky",
     "test:unit:cached": "vitest --configLoader native --fsModuleCache --fsModuleCachePath node_modules/.cache/vitest/modules",
     "test:changed": "vitest run --configLoader native --fsModuleCache --fsModuleCachePath node_modules/.cache/vitest/modules --changed",
-    "test:related": "vitest related --run --configLoader native --fsModuleCache --fsModuleCachePath node_modules/.cache/vitest/modules"
+    "test:related": "vitest related --run --configLoader native --fsModuleCache --fsModuleCachePath node_modules/.cache/vitest/modules",
+    "design:check": "pnpm --filter @knpkv/design-conformance design:check"
   },
   "devDependencies": {
     "@ast-grep/cli": "^0.45.3",

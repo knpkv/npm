@@ -3,9 +3,10 @@ import { expect, it } from "@effect/vitest"
 import { BrowserOpener } from "@knpkv/browser-pairing/launch"
 import { type ConnectPostBody, ConnectPostRequest, UnboundAgent } from "@knpkv/herdr-connect"
 import type { HostConfiguration } from "@knpkv/herdr-fleet"
-import { Effect, FileSystem, Layer, Path, Result, Schema } from "effect"
+import { Deferred, Effect, Fiber, FileSystem, Layer, Path, Result, Schema } from "effect"
 import { Command } from "effect/cli"
 import { HttpClient, HttpClientResponse } from "effect/http"
+import { TestClock } from "effect/testing"
 import { makeRelayPostCommand, resolveReportingAgent, submitRelayPost } from "../src/internal/relay-cli.js"
 import { RelayProbe, relayRootCommand } from "../src/internal/relay-open.js"
 
@@ -62,7 +63,7 @@ it.layer(postLayer)("relay post", (it) => {
       expect(received[0]?.text).toBe(text)
     }))
 
-  it.effect("retries unavailable responses with one event ID and targets only the configured canonical hub", () =>
+  it.effect("retries unavailable responses but preserves exhausted store failures without retrying", () =>
     Effect.gen(function*() {
       const fs = yield* FileSystem.FileSystem
       const paths = yield* Path.Path
@@ -97,6 +98,9 @@ it.layer(postLayer)("relay post", (it) => {
         tailscaleCommand: "tailscale"
       }
       const received: Array<typeof ConnectPostRequest.Type> = []
+      let busy = false
+      let delayed = false
+      const slowStarted = yield* Deferred.make<void>()
       const client = HttpClient.make((request) =>
         Effect.gen(function*() {
           expect(request.url).toBe("https://hub.example.test/v1/connect/posts")
@@ -105,9 +109,22 @@ it.layer(postLayer)("relay post", (it) => {
             new TextDecoder().decode(request.body.body)
           )
           received.push(body)
+          if (delayed) {
+            yield* Deferred.succeed(slowStarted, undefined)
+            yield* Effect.sleep("11 seconds")
+          }
           return HttpClientResponse.fromWeb(
             request,
-            received.length === 1
+            busy
+              ? Response.json({
+                error: "ConnectStoreBusyError",
+                operation: "posts.post",
+                timeoutMillis: 5_000,
+                cause: "private SQLite detail"
+              }, {
+                status: 503
+              })
+              : received.length === 1
               ? Response.json({ error: "Unavailable", operation: "posts.inventory" }, { status: 503 })
               : Response.json({ ...body, host: "host-a", createdAt: 1, sequence: 1 })
           )
@@ -119,6 +136,29 @@ it.layer(postLayer)("relay post", (it) => {
           .eventId
       ).toBe("retry-one")
       expect(received).toEqual([{ ...body, agentId: "agent-one" }, { ...body, agentId: "agent-one" }])
+      busy = true
+      const failed = yield* Effect.result(
+        submitRelayPost(config, "w1:p1", { ...body, eventId: "busy-one" }).pipe(
+          Effect.provideService(HttpClient.HttpClient, client)
+        )
+      )
+      expect(failed).toMatchObject({
+        failure: { _tag: "ConnectStoreBusyError", operation: "posts.post", timeoutMillis: 5_000, cause: 503 }
+      })
+      expect(received).toHaveLength(3)
+      delayed = true
+      const pending = yield* Effect.forkScoped(Effect.result(
+        submitRelayPost(config, "w1:p1", { ...body, eventId: "slow-busy" }).pipe(
+          Effect.provideService(HttpClient.HttpClient, client)
+        )
+      ))
+      yield* Deferred.await(slowStarted)
+      yield* TestClock.adjust("11 seconds")
+      expect(received).toHaveLength(4)
+      expect(yield* Fiber.join(pending)).toMatchObject({
+        failure: { _tag: "ConnectStoreBusyError", operation: "posts.post", timeoutMillis: 5_000, cause: 503 }
+      })
+      expect(received).toHaveLength(4)
     }).pipe(Effect.scoped))
 
   it.effect("parses bounded reports with a caller-controlled retry identity", () =>

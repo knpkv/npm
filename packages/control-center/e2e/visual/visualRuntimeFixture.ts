@@ -1,5 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as AwsClientConfig from "@knpkv/codecommit-core/AwsClientConfig.js"
+import { installCaptureClock, VISUAL_TIME } from "@knpkv/design-conformance/capture"
 import { type Page, test as base } from "@playwright/test"
 import * as Clock from "effect/Clock"
 import * as Context from "effect/Context"
@@ -38,8 +39,9 @@ import { acquireEphemeralPort } from "../realRuntimeFixture.js"
 import { disposeFailedFixtureSetup, protectPartialFixtureAllocation } from "../realRuntimeLifecycle.js"
 import { makeCodePipelineProvider } from "./fakeProviders/codepipeline.js"
 import { type FakeProviders, makeFakeProviders } from "./fakeProviders/transport.js"
+import { makeVisualRequestAudit, type VisualApiRequest } from "./requestAudit.js"
 
-export const VISUAL_TIME = "2026-07-14T12:00:00.000Z"
+export { VISUAL_TIME }
 export const VISUAL_WORKSPACE_ID = WorkspaceId.make("01890f6f-6d6a-7cc0-98d2-000000000001")
 const OWNER_ID = PersonId.make("01890f6f-6d6a-7cc0-98d2-000000000002")
 const epochMillis = 1784030400000
@@ -88,6 +90,7 @@ export interface VisualRuntimeFixture {
   readonly pairThroughUi: (page: Page) => Promise<void>
   readonly issuePairingCode: () => Promise<string>
   readonly applicationLogEntries: () => ReadonlyArray<string>
+  readonly apiRequests: () => ReadonlyArray<VisualApiRequest>
   readonly advanceClockBy: (milliseconds: number) => string
   readonly dispose: () => Promise<void>
 }
@@ -105,6 +108,7 @@ export const startVisualRuntimeFixture = async (): Promise<VisualRuntimeFixture>
     currentTimeNanosUnsafe: () => BigInt(clockEpochMillis) * 1_000_000n,
     currentTimeNanos: Effect.sync(() => BigInt(clockEpochMillis) * 1_000_000n)
   })
+  const apiAudit = makeVisualRequestAudit()
   const providers = makeFakeProviders()
   const pipeline = makeCodePipelineProvider(providers)
   const applicationLogEntries: Array<string> = []
@@ -163,7 +167,7 @@ export const startVisualRuntimeFixture = async (): Promise<VisualRuntimeFixture>
         randomUUIDv7: Effect.sync(() => `01890f6f-6d6a-7cc0-98d2-${String(nextId++).padStart(12, "0")}`)
       }))
     ).pipe(Layer.provide(NodeServices.layer))
-    const platform = Layer.mergeAll(NodeServices.layer, clockLayer, cryptoLayer)
+    const platform = Layer.mergeAll(NodeServices.layer, clockLayer, cryptoLayer, apiAudit.layer)
     const database = databaseLayer(allocated.persistenceConfig)
     const foundation = Layer.mergeAll(
       persistenceLayerFromDatabase(allocated.persistenceConfig).pipe(Layer.provide(database)),
@@ -230,6 +234,7 @@ export const startVisualRuntimeFixture = async (): Promise<VisualRuntimeFixture>
       pipeline,
       dispose,
       issuePairingCode,
+      apiRequests: apiAudit.requests,
       applicationLogEntries: () => [...applicationLogEntries],
       advanceClockBy: (milliseconds) => {
         clockEpochMillis += Schema.decodeUnknownSync(Schema.Int.check(Schema.isGreaterThan(0)))(milliseconds)
@@ -266,6 +271,10 @@ export const test = base.extend<{ readonly visualRuntime: VisualRuntimeFixture }
           body: runtime.applicationLogEntries().join("\n"),
           contentType: "application/x-ndjson"
         })
+        await testInfo.attach("api-requests", {
+          body: JSON.stringify(runtime.apiRequests(), null, 2),
+          contentType: "application/json"
+        })
         await testInfo.attach("provider-requests", {
           body: JSON.stringify(runtime.providers.requests(), null, 2),
           contentType: "application/json"
@@ -287,8 +296,7 @@ export const test = base.extend<{ readonly visualRuntime: VisualRuntimeFixture }
     })
     const page = await context.newPage()
     try {
-      await page.clock.install({ time: new Date(VISUAL_TIME) })
-      await page.clock.setFixedTime(new Date(VISUAL_TIME))
+      await installCaptureClock(page)
       await page.addInitScript(`(() => {
         Object.defineProperty(crypto, 'getRandomValues', { value: function(array) {
           let seed = Number(sessionStorage.getItem('__fixture_random_seed') ?? '17');
