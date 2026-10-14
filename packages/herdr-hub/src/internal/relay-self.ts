@@ -1,7 +1,9 @@
 /** Current-pane self updates. The canonical hub applies the same host-scoped authorization as relay post. */
 import type { ConnectSelfBody } from "@knpkv/herdr-connect"
 import {
+  connectReportResponseTimeoutMillis,
   ConnectSelfState,
+  ConnectStoreBusyError,
   Denied,
   InvalidReport,
   TooManySelfUpdates,
@@ -13,10 +15,19 @@ import type { HostConfiguration } from "@knpkv/herdr-fleet/model"
 import { Config, Effect, Schema } from "effect"
 import { HttpClient, HttpClientRequest } from "effect/http"
 import { fleetConfigPath } from "./config-path.js"
+import { RelayStoreBusyFailureBody } from "./relay-report-failure.js"
 import { resolveReportingAgent } from "./relay-report-identity.js"
 
-export const RelaySelfFailure = Schema.Union([InvalidReport, UnboundAgent, Denied, Unavailable, TooManySelfUpdates])
+export const RelaySelfFailure = Schema.Union([
+  InvalidReport,
+  UnboundAgent,
+  Denied,
+  Unavailable,
+  TooManySelfUpdates,
+  ConnectStoreBusyError
+])
 const FailureBody = Schema.Union([
+  RelayStoreBusyFailureBody,
   Schema.Struct({ error: Schema.Literal("InvalidReport"), detail: Schema.String }),
   Schema.Struct({ error: Schema.Literal("UnboundAgent"), agentId: Schema.String }),
   Schema.Struct({ error: Schema.Literal("Denied") }),
@@ -44,6 +55,12 @@ export const submitRelaySelf = Effect.fn("Relay.submitSelf")(
           Effect.mapError(() => new Unavailable({ operation: "self.response" }))
         )
         switch (failure.error) {
+          case "ConnectStoreBusyError":
+            return yield* new ConnectStoreBusyError({
+              operation: failure.operation,
+              timeoutMillis: failure.timeoutMillis,
+              cause: response.status
+            })
           case "InvalidReport":
             return yield* new InvalidReport({ detail: failure.detail })
           case "UnboundAgent":
@@ -60,7 +77,7 @@ export const submitRelaySelf = Effect.fn("Relay.submitSelf")(
         Effect.mapError(() => new Unavailable({ operation: "self.response" }))
       )
     }).pipe(Effect.timeoutOrElse({
-      duration: "10 seconds",
+      duration: connectReportResponseTimeoutMillis,
       orElse: () => Effect.fail(new Unavailable({ operation: "self.timeout" }))
     }))
   }

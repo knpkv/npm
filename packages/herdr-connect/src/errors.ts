@@ -68,3 +68,9 @@ export class ConnectArchiveStoreError extends Schema.TaggedError<ConnectArchiveS
   "ConnectArchiveStoreError",
   { cause: Schema.Defect(), operation: Schema.String }
 ) {}
+
+/** Connect's writer lock remained busy after its bounded asynchronous retry budget. */
+export class ConnectStoreBusyError extends Schema.TaggedError<ConnectStoreBusyError>()(
+  "ConnectStoreBusyError",
+  { operation: Schema.String, timeoutMillis: Schema.Number, cause: Schema.Defect() }
+) {}

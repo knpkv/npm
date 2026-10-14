@@ -19,6 +19,7 @@ import {
   ConnectArchiveCursor,
   ConnectPost,
   ConnectPostCursor,
+  ConnectStoreBusyError,
   Denied,
   fetchPeerConnectAgents,
   fleetConnectAgents,
@@ -304,6 +305,7 @@ type ApiError =
   | Unavailable
   | ApprovalAppStoreError
   | ConnectPeerError
+  | ConnectStoreBusyError
   | DashboardResponseBudgetError
   | FleetApprovalError
   | FleetAuthorizationError
@@ -430,6 +432,11 @@ const apiError = (error: ApiError): ApiErrorResponse => {
       return { status: 403, body: { error: error._tag } }
     case "Conflict":
       return { status: 409, body: { error: error._tag, eventId: error.eventId } }
+    case "ConnectStoreBusyError":
+      return {
+        status: 503,
+        body: { error: error._tag, operation: error.operation, timeoutMillis: error.timeoutMillis }
+      }
     case "Unavailable":
       return { status: 503, body: { error: error._tag, operation: error.operation } }
     case "FleetAuthorizationError":
@@ -461,6 +468,12 @@ const apiError = (error: ApiError): ApiErrorResponse => {
     case "PushEndpointNotAllowedError":
       return { status: 400, body: { error: error._tag, origin: error.origin } }
     case "ConnectPeerError":
+      if (Schema.is(ConnectStoreBusyError)(error.cause)) {
+        return {
+          status: 503,
+          body: { error: error.cause._tag, operation: error.cause.operation, timeoutMillis: error.cause.timeoutMillis }
+        }
+      }
       return {
         status: 503,
         body: { error: error._tag, host: error.host, reason: error.reason }
@@ -3793,8 +3806,14 @@ export const startHttpServer = async (
                     agentsUrl: peer.connectAgentsUrl,
                     online: peer.online,
                     terminalUrl: peer.terminalUrl
-                  })
-                })).pipe(Effect.mapError(() => new Unavailable({ operation: "posts.inventory" })))
+                  }, { timeout: "reporter" })
+                })).pipe(
+                  Effect.mapError((error) =>
+                    error._tag === "ConnectPeerError" && Schema.is(ConnectStoreBusyError)(error.cause)
+                      ? error.cause
+                      : new Unavailable({ operation: "posts.inventory" })
+                  )
+                )
               if (inventory.complete !== true) return yield* new Unavailable({ operation: "posts.inventory" })
               if (!inventory.agents.some((agent) => agent.id === agentId)) {
                 return yield* new UnboundAgent({ agentId })
