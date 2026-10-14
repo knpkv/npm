@@ -176,4 +176,12 @@ export class ReferenceFailure
 export class BrowserFailure
   extends Schema.TaggedError<BrowserFailure>()("BrowserFailure", { operation: Schema.String, cause: Schema.Defect() })
 {}
+export class CaptureNavigationFailure extends Schema.TaggedError<CaptureNavigationFailure>()(
+  "CaptureNavigationFailure",
+  { shot: Schema.NonEmptyString, event: Schema.Literals(["framenavigated", "load"]), url: Schema.String }
+) {
+  override get message() {
+    return `Shot ${this.shot} ${this.event} during capture: ${this.url}`
+  }
+}
 export class RunnerFailure extends Schema.TaggedError<RunnerFailure>()("RunnerFailure", { detail: Schema.String }) {}

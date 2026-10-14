@@ -224,3 +224,11 @@ dependencies, captures the merge-base app with the PR's adapter, then checks PR 
 It uses read-only repository permissions and uploads reports on success and failure.
 The phase-0 toy test takes two live passes plus one reference pass over 36 shots.
 Product runtime grows with states × viewports × themes; use one Chromium worker.
+
+Capture watches main-frame `framenavigated` and `load` events from before font
+settlement until evidence completes. Navigation or reload fails immediately with
+`CaptureNavigationFailure`, naming the shot and destination, even if the screenshot
+protocol call is pending. Iframe navigation remains allowed; listeners are removed
+on success, failure and interruption. There is no timeout retry or framing fallback.
+Reference pages must update in place on breakpoint changes: Chromium full-page
+capture can transiently change the emulated viewport and trigger those listeners.
