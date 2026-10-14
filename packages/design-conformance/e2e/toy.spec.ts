@@ -203,7 +203,12 @@ test("toy refs prove required, waived, stale, coverage, legacy and touched decis
         refs.manifest,
         rawFailures,
         refs.waivers,
-        result.shots.map((shot) => ({ ...shot, touched: true })),
+        result.shots.map((shot) => ({
+          ...shot,
+          touched: true,
+          touchedRegions: ["*", "content"],
+          outsidePixelsChanged: true
+        })),
         DateTime.makeUnsafe("2026-10-17T00:00:00.000Z")
       )
       expect(touched.findings.some((finding) => finding.state === "copy" && finding.disposition === "required")).toBe(

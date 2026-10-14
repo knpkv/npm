@@ -2,10 +2,10 @@
 
 Private workspace package. No changeset or npm publication.
 
-Every live state needs a reference. A touched state fails on unwaived copy,
+Every live state needs a reference. A touched region fails on unwaived copy,
 geometry, computed-style or pixel differences. Coverage and stale waivers always
 fail. Unchanged legacy drift may be report-only until the product's deadline.
-Changing any viewport or theme makes the entire state touched.
+Changing one region, viewport or theme does not promote inherited drift in another.
 
 ## Reference contract
 
@@ -51,8 +51,17 @@ for the complete HTML example. Its enforcement block is:
 ```
 
 Use `"legacy": "required"` after migration. At the deadline, existing drift becomes
-required automatically. Touched means new state or live pixels differing from the
-merge-base capture by more than the #844 0.1% threshold, including size changes.
+required automatically. Touched means a new shot/region, or that region's live pixels
+differing from its merge-base crop by more than the #844 0.1% threshold, including size
+changes. Copy, nesting, overflow and computed styles are compared directly; geometry
+uses the existing 2px/4px tolerance. Whole-frame `*` pixel findings are required only
+when a changed named region also fails pixels, or pixels outside named regions changed.
+The outside comparison counts the original comparator's significant pixels outside
+both captures' region boxes; it does not change anti-alias detection or thresholds.
+Frame growth contained by a matching named region does not promote inherited drift.
+Global geometry still tracks overflow and membership changes. `result.json` records
+`touchedRegions` and `outsidePixelsChanged` for each exact screen/state/viewport/theme.
+All inherited findings remain listed with their reference drift in HTML and CI summaries.
 The PR's refs, fixture and adapter drive both captures. During onboarding, the base
 app is captured even when its checkout has no refs or gate package. A state is new
 only when absent from the base live inventory. A missing base live package means
@@ -62,7 +71,9 @@ also fails, even if the destination package exists on the base. Package migratio
 need a path that preserves the previous package's live inventory.
 Ref-only PRs leave states untouched, while coverage,
 integrity and waiver checks still apply. A missing base capture file for an indexed
-shot is an infrastructure failure. Removed live states fail coverage.
+shot is an infrastructure failure. Each capture writes `<shot>-live.json` beside its
+PNG so base crops use the base's own region boxes. Missing base metadata also fails;
+old saved base evidence must be recaptured. Removed live states fail coverage.
 
 The deadline decodes to a UTC instant; ISO offsets and date-only values are accepted.
 Date-only values expire at UTC midnight. Impossible calendar dates fail decoding.

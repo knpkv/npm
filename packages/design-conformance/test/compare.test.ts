@@ -2,7 +2,8 @@ import { expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import { PNG } from "pngjs"
 
-import { comparePixels, compareSnapshots, coverageFailures, shotKey } from "../src/compare.js"
+import { type Capture, RegionPixels } from "../src/browser.js"
+import { compareLiveRegions, comparePixels, compareSnapshots, coverageFailures, shotKey } from "../src/compare.js"
 import { identity, manifest, snapshot, state } from "./models.js"
 
 it.effect("copy, geometry, token equality and overflow each detect their original defect shape", () =>
@@ -81,4 +82,120 @@ it.effect("perceptual comparison detects pixel and dimension changes while equal
     image.data[2] = 0
     expect(comparePixels(reference, PNG.sync.write(image)).ratio).toBeGreaterThan(0.001)
     expect(comparePixels(reference, PNG.sync.write(new PNG({ width: 11, height: 10 }))).ratio).toBe(1)
+  }))
+
+it.effect("region touched comparison keeps the 0.1% boundary and requires real changes above it", () =>
+  Effect.sync(() => {
+    const image = new PNG({ width: 100, height: 10 })
+    image.data.fill(255)
+    const reference = PNG.sync.write(image)
+    const evidence = (bytes: Uint8Array): Capture => ({
+      frame: bytes,
+      snapshot: {
+        ...snapshot,
+        regions: snapshot.regions.map((region) => ({
+          ...region,
+          box: { x: 0, y: 0, width: 100, height: 10 }
+        }))
+      },
+      regions: new Map([["content", RegionPixels.Image({ bytes })]])
+    })
+    const base = evidence(reference)
+    for (let channel = 0; channel < 3; channel++) image.data[channel] = 0
+    const boundary = evidence(PNG.sync.write(image))
+    expect(comparePixels(base.frame, boundary.frame).ratio).toBe(0.001)
+    expect(compareLiveRegions(identity, base, boundary, ["content"]).touchedRegions).toEqual([])
+    for (let channel = 4; channel < 7; channel++) image.data[channel] = 0
+    const changed = evidence(PNG.sync.write(image))
+    expect(comparePixels(base.frame, changed.frame).ratio).toBe(0.002)
+    expect(compareLiveRegions(identity, base, changed, ["content"]).touchedRegions).toEqual(["content"])
+  }))
+
+it.effect("base metadata uses existing rule tolerances and inherited overflow stays untouched", () =>
+  Effect.sync(() => {
+    const image = new PNG({ width: 10, height: 10 })
+    image.data.fill(255)
+    const frame = PNG.sync.write(image)
+    const base: Capture = {
+      frame,
+      snapshot,
+      regions: new Map([["content", RegionPixels.Image({ bytes: frame })]])
+    }
+    const region = snapshot.regions[0]
+    if (region === undefined) return expect.unreachable()
+    const drift = (change: Partial<typeof region>): Capture => ({
+      ...base,
+      snapshot: { ...snapshot, regions: [{ ...region, ...change }] }
+    })
+    expect(compareLiveRegions(identity, base, drift({ box: { ...region.box, x: 18 } }), ["content"]).touchedRegions)
+      .toEqual([])
+    expect(compareLiveRegions(identity, base, drift({ box: { ...region.box, x: 19 } }), ["content"]).touchedRegions)
+      .toEqual([
+        "content"
+      ])
+    for (
+      const change of [
+        { copy: "Different visible copy" },
+        { parent: "nav" },
+        { overflow: true },
+        { styles: { color: "rgb(255, 0, 0)" } }
+      ]
+    ) expect(compareLiveRegions(identity, base, drift(change), ["content"]).touchedRegions).toEqual(["content"])
+    const inherited = {
+      ...drift({ overflow: true }),
+      snapshot: { ...drift({ overflow: true }).snapshot, overflow: true }
+    }
+    expect(compareLiveRegions(identity, inherited, inherited, ["content"]).touchedRegions).toEqual([])
+    expect(compareLiveRegions(identity, undefined, base, ["nav", "content"]).touchedRegions).toEqual([
+      "*",
+      "nav",
+      "content"
+    ])
+  }))
+
+it.effect("off-frame base regions stay inherited until membership or image availability changes", () =>
+  Effect.sync(() => {
+    const image = new PNG({ width: 10, height: 10 })
+    image.data.fill(255)
+    const frame = PNG.sync.write(image)
+    const base: Capture = { frame, snapshot, regions: new Map([["content", RegionPixels.OffFrame()]]) }
+    expect(compareLiveRegions(identity, base, base, ["content"]).touchedRegions).toEqual([])
+    expect(
+      compareLiveRegions(identity, base, {
+        ...base,
+        regions: new Map([["content", RegionPixels.Image({ bytes: frame })]])
+      }, ["content"]).touchedRegions
+    ).toEqual(["content"])
+    expect(
+      compareLiveRegions(identity, base, {
+        ...base,
+        snapshot: { ...snapshot, regions: [] },
+        regions: new Map()
+      }, ["content"]).touchedRegions
+    ).toEqual(["*", "content"])
+  }))
+
+it.effect("frame enforcement catches outside-region pixels at the unchanged threshold and uncovered size changes", () =>
+  Effect.sync(() => {
+    const image = new PNG({ width: 100, height: 10 })
+    image.data.fill(255)
+    const crop = new PNG({ width: 50, height: 10 })
+    crop.data.fill(255)
+    const region = snapshot.regions[0]
+    if (region === undefined) return expect.unreachable()
+    const base: Capture = {
+      frame: PNG.sync.write(image),
+      snapshot: { ...snapshot, regions: [{ ...region, box: { x: 0, y: 0, width: 50, height: 10 } }] },
+      regions: new Map([["content", RegionPixels.Image({ bytes: PNG.sync.write(crop) })]])
+    }
+    for (let channel = 75 * 4; channel < 75 * 4 + 3; channel++) image.data[channel] = 0
+    expect(compareLiveRegions(identity, base, { ...base, frame: PNG.sync.write(image) }, ["content"]))
+      .toEqual({ touchedRegions: [], outsidePixelsChanged: false })
+    for (let channel = 76 * 4; channel < 76 * 4 + 3; channel++) image.data[channel] = 0
+    expect(compareLiveRegions(identity, base, { ...base, frame: PNG.sync.write(image) }, ["content"]))
+      .toEqual({ touchedRegions: ["*"], outsidePixelsChanged: true })
+    const wider = new PNG({ width: 101, height: 10 })
+    wider.data.fill(255)
+    expect(compareLiveRegions(identity, base, { ...base, frame: PNG.sync.write(wider) }, ["content"]))
+      .toEqual({ touchedRegions: ["*"], outsidePixelsChanged: true })
   }))
