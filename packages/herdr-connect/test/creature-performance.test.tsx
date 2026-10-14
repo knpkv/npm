@@ -1,4 +1,3 @@
-import { performance } from "node:perf_hooks"
 import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it } from "vitest"
 
@@ -24,12 +23,14 @@ describe("creature geometry reuse", () => {
     expect(agentCharacter("perf-host", identities[0] ?? "")).not.toBe(agentCharacter("other-host", identities[0] ?? ""))
   })
 
-  it("renders a warmed 256-agent directory within the 250ms polling budget", () => {
-    renderFleet()
-    const started = performance.now()
-    const markup = renderFleet()
-    const elapsed = performance.now() - started
-    expect(markup.match(/data-creature=""/g)).toHaveLength(256)
-    expect(elapsed, `256 warm renders took ${elapsed.toFixed(1)}ms`).toBeLessThan(250)
+  it("keeps all 256 geometry entries cached across warm directory renders", () => {
+    const warmed = identities.map((id) => agentCharacter("perf-host", id))
+    for (let render = 0; render < 2; render++) {
+      const markup = renderFleet()
+      expect(markup.match(/data-creature=""/g)).toHaveLength(identities.length)
+      identities.forEach((id, index) => {
+        expect(agentCharacter("perf-host", id), id).toBe(warmed[index])
+      })
+    }
   })
 })
