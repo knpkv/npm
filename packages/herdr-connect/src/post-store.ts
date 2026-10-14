@@ -41,14 +41,33 @@ const decodeRow = (input: Readonly<Record<string, SQLOutputValue>>): ConnectPost
   return Schema.decodeUnknownSync(ConnectPost)(row.goal_step === null ? post : { ...post, goalStep: row.goal_step })
 }
 const unavailable = (operation: string) => () => new Unavailable({ operation })
-const prune = (database: DatabaseSync, now: number): void => {
-  database.prepare("DELETE FROM connect_posts WHERE created_at < ?").run(now - connectPostRetentionMillis)
-  database.exec(`DELETE FROM connect_posts WHERE sequence IN (
-    SELECT sequence FROM (
-      SELECT sequence, ROW_NUMBER() OVER (PARTITION BY host, agent_id ORDER BY sequence DESC) AS rank
-      FROM connect_posts
-    ) WHERE rank > ${connectPostsPerAgent}
-  )`)
+const expiredPostBatchSize = 256
+
+/** Each post write evicts one global batch, including its expired retry identity before reuse. */
+const evictExpiredPosts = (
+  database: DatabaseSync,
+  host: string,
+  agentId: string,
+  eventId: string,
+  now: number
+): void => {
+  const cutoff = now - connectPostRetentionMillis
+  database.prepare(`WITH retry AS (
+    SELECT sequence FROM connect_posts
+    WHERE host = ? AND agent_id = ? AND event_id = ? AND created_at < ?
+  ), expired AS (
+    SELECT sequence FROM connect_posts
+    WHERE created_at < ? AND sequence NOT IN (SELECT sequence FROM retry)
+    ORDER BY created_at, sequence LIMIT ? - (SELECT COUNT(*) FROM retry)
+  ) DELETE FROM connect_posts WHERE sequence IN (
+    SELECT sequence FROM retry UNION ALL SELECT sequence FROM expired
+  )`).run(host.toLowerCase(), agentId, eventId, cutoff, cutoff, expiredPostBatchSize)
+}
+
+const trimAgentPosts = (database: DatabaseSync, host: string, agentId: string): void => {
+  database.prepare(`DELETE FROM connect_posts WHERE host = ? AND agent_id = ? AND sequence NOT IN (
+    SELECT sequence FROM connect_posts WHERE host = ? AND agent_id = ? ORDER BY sequence DESC LIMIT ?
+  )`).run(host.toLowerCase(), agentId, host.toLowerCase(), agentId, connectPostsPerAgent)
 }
 
 /** Bounded reports and latest creature self-state. Post retries use authenticated host, stable agent ID and event ID. */
@@ -102,7 +121,7 @@ export class AgentPostStore {
       () => {
         this.#database.exec("BEGIN IMMEDIATE")
         try {
-          prune(this.#database, now)
+          evictExpiredPosts(this.#database, host, agentId, body.eventId, now)
           const previous = this.#database.prepare(
             "SELECT * FROM connect_posts WHERE host = ? AND agent_id = ? AND event_id = ?"
           ).get(host.toLowerCase(), agentId, body.eventId)
@@ -120,7 +139,7 @@ export class AgentPostStore {
           `).get(host.toLowerCase(), agentId, body.eventId, body.kind, body.text, body.goalStep ?? null, now)
           if (row === undefined) throw new Unavailable({ operation: "posts.insert" })
           const post = decodeRow(row)
-          prune(this.#database, now)
+          trimAgentPosts(this.#database, host, agentId)
           this.#database.exec("COMMIT")
           return post
         } catch (cause) {
@@ -148,13 +167,13 @@ export class AgentPostStore {
     return yield* this.#transactions.withPermits(1)(
       Effect.try({
         try: () => {
-          prune(this.#database, now)
           const rows = this.#database.prepare(`SELECT * FROM connect_posts
-          WHERE host = ? AND agent_id = ? AND sequence < ? ORDER BY sequence DESC LIMIT ?`)
+          WHERE host = ? AND agent_id = ? AND sequence < ? AND created_at >= ? ORDER BY sequence DESC LIMIT ?`)
             .all(
               host.toLowerCase(),
               agentId,
               cursor?.sequence ?? Number.MAX_SAFE_INTEGER,
+              now - connectPostRetentionMillis,
               connectPostPageMaxRecords + 1
             )
           const posts = rows.slice(0, connectPostPageMaxRecords).map(decodeRow)
@@ -167,7 +186,7 @@ export class AgentPostStore {
           })
         },
         catch: unavailable("posts.page")
-      }).pipe(Effect.tap(() => this.#secureFiles.pipe(Effect.mapError(unavailable("posts.permissions")))))
+      })
     )
   })
 
@@ -181,7 +200,7 @@ export class AgentPostStore {
     return posts[0] ?? null
   })
 
-  /** Directory polls only read retained rows; post/page operations own physical pruning. */
+  /** Reads only select retained rows; post writes own bounded global expiry eviction. */
   readonly latestMany = Effect.fn("AgentPostStore.latestMany")(function*(
     this: AgentPostStore,
     targets: ReadonlyArray<Pick<ConnectPost, "host" | "agentId">>,

@@ -63,6 +63,83 @@ describe("agent posts", () => {
   })
 
   it.layer(NodeServices.layer)((it) => {
+    it.effect("evicts expired reports globally in bounded write batches without any page read", () =>
+      Effect.gen(function*() {
+        const store = yield* openStore()
+        const database = yield* Effect.acquireRelease(
+          Effect.sync(() => new DatabaseSync(store.path)),
+          (opened) => Effect.sync(() => opened.close())
+        )
+        yield* Effect.sync(() =>
+          database.exec(`
+          WITH RECURSIVE expired(n) AS (VALUES(0) UNION ALL SELECT n + 1 FROM expired WHERE n < 512)
+          INSERT INTO connect_posts (host, agent_id, event_id, kind, text, created_at)
+          SELECT 'host-a', 'agent-inactive-' || n, 'old-' || n, 'status', 'expired text', 0 FROM expired;
+          INSERT INTO connect_posts (host, agent_id, event_id, kind, text, created_at)
+          VALUES ('host-a', 'agent-cutoff', 'boundary', 'status', 'retained text', 1);
+        `)
+        )
+        // Agent B drives hub-wide maintenance; none of the expired agents ever writes or reads again.
+        yield* store.post("host-b", "agent-b", body, connectPostRetentionMillis + 1)
+        expect(database.prepare("SELECT sequence FROM connect_posts WHERE created_at = 0").all()).toHaveLength(257)
+        expect(database.prepare("SELECT sequence FROM connect_posts WHERE event_id = 'old-0'").all()).toHaveLength(0)
+        expect(database.prepare("SELECT sequence FROM connect_posts WHERE event_id = 'boundary'").all()).toHaveLength(1)
+        yield* store.post("host-b", "agent-b", { ...body, eventId: "next" }, connectPostRetentionMillis + 1)
+        expect(database.prepare("SELECT sequence FROM connect_posts WHERE created_at = 0").all()).toHaveLength(1)
+        yield* store.post("host-b", "agent-b", { ...body, eventId: "last" }, connectPostRetentionMillis + 1)
+        expect(database.prepare("SELECT sequence FROM connect_posts WHERE created_at = 0").all()).toHaveLength(0)
+      }).pipe(Effect.scoped))
+
+    it.effect("serves retained pages during a writer lock without pruning expired reports", () =>
+      Effect.gen(function*() {
+        const store = yield* openStore()
+        yield* store.post("host-a", "agent-one", body, 0)
+        const retained = yield* store.post("host-a", "agent-one", { ...body, eventId: "retained" }, 1)
+        const database = yield* Effect.acquireRelease(
+          Effect.sync(() => new DatabaseSync(store.path)),
+          (opened) => Effect.sync(() => opened.close())
+        )
+        yield* Effect.acquireRelease(
+          Effect.sync(() => database.exec("BEGIN IMMEDIATE")),
+          () => Effect.sync(() => database.exec("ROLLBACK"))
+        )
+        const pages = yield* Effect.forEach(
+          Array.from({ length: 8 }),
+          () => Effect.result(store.page("host-a", "agent-one", null, connectPostRetentionMillis + 1)),
+          { concurrency: "unbounded" }
+        )
+        expect(pages.filter(Result.isSuccess)).toHaveLength(8)
+        for (const page of pages) {
+          if (Result.isSuccess(page)) expect(page.success.posts).toEqual([retained])
+        }
+        expect(database.prepare("SELECT sequence FROM connect_posts").all()).toHaveLength(2)
+      }).pipe(Effect.scoped))
+
+    it.effect("reuses an expired event outside the oldest eviction batch without exceeding the batch", () =>
+      Effect.gen(function*() {
+        const store = yield* openStore()
+        const database = yield* Effect.acquireRelease(
+          Effect.sync(() => new DatabaseSync(store.path)),
+          (opened) => Effect.sync(() => opened.close())
+        )
+        yield* Effect.sync(() =>
+          database.exec(`
+          WITH RECURSIVE expired(n) AS (VALUES(0) UNION ALL SELECT n + 1 FROM expired WHERE n < 512)
+          INSERT INTO connect_posts (host, agent_id, event_id, kind, text, created_at)
+          SELECT 'host-a', 'agent-inactive-' || n, 'old-' || n, 'status', 'expired text', 0 FROM expired;
+        `)
+        )
+        const retried = yield* store.post(
+          "host-a",
+          "agent-inactive-512",
+          { ...body, eventId: "old-512" },
+          connectPostRetentionMillis + 1
+        )
+        expect(retried.text).toBe(body.text)
+        expect(retried.createdAt).toBe(connectPostRetentionMillis + 1)
+        expect(database.prepare("SELECT sequence FROM connect_posts WHERE created_at = 0").all()).toHaveLength(257)
+      }).pipe(Effect.scoped))
+
     it.effect.each([false, true])(
       "bounds queued post and self-state writers from entry; unlock %s",
       (unlock) =>
@@ -298,7 +375,7 @@ describe("agent posts", () => {
         yield* store.post("HOST-A", "agent-one", { ...body, eventId: "event-two", text: "Finished" }, 2)
         yield* archive.observe({ host: "HOST-A", complete: true, agents: [], observedAt: 3 })
         yield* archive.observe({ host: "HOST-A", complete: true, agents: [], observedAt: 300_003 })
-        yield* store.page("HOST-A", "agent-one", null, 8_000_000_000)
+        yield* store.post("HOST-B", "agent-other", body, 8_000_000_000)
         const reopened = yield* Effect.acquireRelease(
           AgentArchiveStore.open(store.path),
           (opened) => Effect.sync(() => opened.close())
