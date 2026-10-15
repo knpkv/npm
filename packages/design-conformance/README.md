@@ -63,9 +63,14 @@ for the complete HTML example. Its enforcement block is:
 ```
 
 Use `"legacy": "required"` after migration. At the deadline, existing drift becomes
-required automatically. Touched means a new shot/region, or that region's live pixels
+required automatically. Touched means a new shot, or that region's live pixels
 differing from its merge-base crop by more than the #844 0.1% threshold, including size
-changes. Copy, nesting and overflow are compared directly. Computed styles use the same
+changes. When a PR adds a region tag absent from the base, the gate crops the raw base
+screenshot at the PR region's rectangle and compares those pixels with the PR crop.
+Equal pixels stay inherited and listed; changed or unavailable pixels require the region.
+The gate never adds region metadata to the base snapshot. New tags alone do not count
+as global membership changes; removal and reordering of previously tagged regions do.
+Where both captures have region metadata, copy, nesting and overflow are compared directly. Computed styles use the same
 unpainted-border normalization as reference comparisons; geometry uses the existing 2px/4px tolerance. Whole-frame `*` pixel findings are required only
 when a changed named region also fails pixels, or pixels outside named regions changed.
 The outside comparison counts the original comparator's significant pixels outside
@@ -85,7 +90,8 @@ Ref-only PRs leave states untouched, while coverage,
 integrity and waiver checks still apply. A missing base capture file for an indexed
 shot is an infrastructure failure. Each capture writes `<shot>-live.json` beside its
 PNG so base crops use the base's own region boxes. Missing base metadata also fails;
-old saved base evidence must be recaptured. Removed live states fail coverage.
+old saved base evidence must be recaptured. A saved snapshot with an empty `regions`
+array is valid pre-inventory evidence, not a missing metadata file. Removed live states fail coverage.
 
 The deadline decodes to a UTC instant; ISO offsets and date-only values are accepted.
 Date-only values expire at UTC midnight. Impossible calendar dates fail decoding.
