@@ -103,6 +103,7 @@ const paths = {
   shield: "m12 2 8 3v6c0 6-8 11-8 11S4 17 4 11V5l8-3M8 11l3 3 5-6",
   doc: "M6 2h8l4 4v16H6zM14 2v5h4M9 12h6M9 16h6",
   stacks: "m12 2 10 5-10 5L2 7zM2 12l10 5 10-5M2 17l10 5 10-5",
+  host: "M6 6h12v12H6zM10 10h4v4h-4zM9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4",
 };
 class RelayGlyph extends HTMLElement {
   static get observedAttributes() { return ["name", "size"]; }

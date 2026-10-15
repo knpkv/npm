@@ -108,7 +108,12 @@ export const UsageTab = ({
       )}
 
       {fleet || presentation.page === "limits" ? (
-        <section aria-label="Limits now" className="usage-tab-now" data-region={fleet ? undefined : "cards"}>
+        <section
+          aria-label="Limits now"
+          className="usage-tab-now"
+          // A fresh failure shows only its notice; the design has no cards region there.
+          data-region={fleet || (limits.view === null && limits.problem !== null) ? undefined : "cards"}
+        >
           {limits.problem === null ? null : (
             <Text as="p" tone="secondary" variant="meta" data-region={fleet ? undefined : "notice"}>
               {limits.problem}

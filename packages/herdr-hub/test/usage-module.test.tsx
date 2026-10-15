@@ -298,6 +298,21 @@ it("keeps Limits Retry on Limits after switching to healthy By tool", async () =
   expect(retries()).toHaveLength(1)
 })
 
+/** A fresh Limits failure has no cards to show, so it must not claim the cards region the design omits. */
+it("tags no cards region for a fresh Limits failure while loading keeps it", async () => {
+  window.history.replaceState(null, "", "/?range=7d&timeZone=UTC#usage/limits")
+  await render({
+    usage: () => Effect.succeed({ fleet: usage, receivedAt: 1_000 }),
+    limits: Effect.fail(new FleetReadLoadError({ path: "/v1/connect/limits", reason: "network", cause: "offline" }))
+  })
+  expect(document.querySelector('[data-region="notice"]')).not.toBeNull()
+  expect(document.querySelector('[data-region="cards"]')).toBeNull()
+  await act(async () => root?.unmount())
+  document.body.replaceChildren()
+  await render({ usage: () => Effect.never, limits: Effect.never })
+  expect(document.querySelector('[data-region="cards"]')).not.toBeNull()
+})
+
 it("repairs selectors only on active Usage and keeps Fleet approval deep links after visiting Usage", async () => {
   const calls: Array<UsageQuery> = []
   const reads: UsageModuleReads = {

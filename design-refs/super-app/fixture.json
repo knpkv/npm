@@ -46,13 +46,20 @@
             "icon": "usage",
             "group": "personal",
             "bar": true
+          },
+          {
+            "id": "hostResources",
+            "name": "Host resources",
+            "icon": "host",
+            "group": "personal",
+            "bar": false
           }
         ],
         "hubHost": "atlas",
         "session": {
           "title": "Session on atlas",
-          "access": "Tailscale access",
-          "aria": "Session on atlas, Tailscale access, connected"
+          "access": "Local access",
+          "aria": "Session on atlas, Local access, connected"
         },
         "settings": {
           "label": "Settings",
