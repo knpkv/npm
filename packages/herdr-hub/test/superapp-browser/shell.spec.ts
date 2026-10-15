@@ -1291,7 +1291,12 @@ test("sidebar rows, Settings and the wordmark follow the design geometry", async
       label: label(row)
     }))
     const resources = element.querySelector("a[aria-label=\"Host resources\"] svg path")?.getAttribute("d")
-    return { rows, resources, wordmark: box(element.querySelector(".superapp-sidebar-brand strong")) }
+    return {
+      rows,
+      resources,
+      wordmark: box(element.querySelector(".superapp-sidebar-brand strong")),
+      weight: getComputedStyle(element.querySelector(".superapp-module-nav") ?? element).fontWeight
+    }
   })
   expect(geometry.rows.map((row) => row.name)).toEqual([
     "Connect",
@@ -1311,4 +1316,12 @@ test("sidebar rows, Settings and the wordmark follow the design geometry", async
   expect(geometry.wordmark?.x).toBeCloseTo(65.6, 1)
   expect(geometry.wordmark?.y).toBeCloseTo(31.52, 1)
   expect(geometry.wordmark?.height).toBeCloseTo(24.96, 1)
+  expect(geometry.weight).toBe("430")
+})
+
+/** The phone bar shares the design's 430 navigation text weight outside the empty Usage layout too. */
+test("the phone module bar uses the design's navigation text weight", async ({ page }, info) => {
+  test.skip(info.project.name !== "phone", "Phone bar")
+  await page.goto("/#fleet/approvals")
+  await expect(page.locator(".superapp-bottom")).toHaveCSS("font-weight", "430")
 })
