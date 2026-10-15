@@ -1,8 +1,9 @@
+import { NodeFileSystem, NodePath } from "@effect/platform-node"
 import { expect, test } from "@playwright/test"
 import { Config, Effect, Option } from "effect"
-import { access } from "node:fs/promises"
 import { join } from "node:path"
 import { resourceFixtureNow, resourcesStates } from "./resources-fixture.js"
+import { checkResourcesReferences } from "./resources-references.js"
 
 // Free slot: 24px header, 0.8rem padding on both sides, and two 1px borders.
 const freeSlotHeight = 51.6
@@ -11,13 +12,9 @@ const referenceDirectory = Option.getOrUndefined(
   await Effect.runPromise(Config.option(Config.String("HOST_RESOURCES_DESIGN_DIRECTORY")))
 )
 if (referenceDirectory !== undefined) {
-  for (const state of resourcesStates) {
-    for (const width of [390, 1280]) {
-      for (const theme of ["light", "dark"]) {
-        await access(join(referenceDirectory, `host-resources--${state}--${width}-${theme}.png`))
-      }
-    }
-  }
+  await Effect.runPromise(
+    checkResourcesReferences(referenceDirectory).pipe(Effect.provide([NodeFileSystem.layer, NodePath.layer]))
+  )
 }
 test.use({ timezoneId: Intl.DateTimeFormat().resolvedOptions().timeZone })
 for (const state of resourcesStates) {
