@@ -3,11 +3,66 @@ import { describe, expect, it } from "@effect/vitest"
 import { renderToStaticMarkup } from "react-dom/server"
 import { HostResourcesView } from "../src/resources-module-view.js"
 import { memoryPaths } from "../src/resources-view-model.js"
+import { previewRows } from "../src/internal/host-resources/parsers.js"
 import { resourceFixtureNow, resourcesFixture, resourcesStates } from "./superapp-browser/resources-fixture.js"
 
 import exported from "./fixtures/host-resources.json" with { type: "json" }
 
 const regions = ["memory", "trend", "cpu", "disk", "gate", "jobs", "previews", "top"]
+it.each([
+  "data:text/plain,/fixture-secret",
+  "https:/fixture-secret",
+  "mailto:owner@example.test/fixture-secret",
+  "https://fixture-secret@preview.invalid/node",
+  "/private/fixture-secret",
+  "秘密-fixture-secret",
+  "node"
+])("keeps spoofed argv zero %s out of preview text and Open accessible names", (argv0) => {
+  const fixture = resourcesFixture("live-healthy")
+  const snapshot = fixture.snapshot
+  if (snapshot === null) throw new TypeError("resource fixture missing")
+  for (const readable of [true, false]) {
+    const preview = previewRows(
+      [{ port: 4791, pid: 42, tailnet: true }],
+      [
+        {
+          pid: 42,
+          parent: 1,
+          startedAt: 0,
+          rssBytes: 0,
+          pane: null,
+          cwd: "/private/fixture-secret",
+          argv: [argv0, "fixture-secret"]
+        }
+      ],
+      new Map(),
+      readable ? new Map([[42, "/usr/bin/node"]]) : new Map()
+    )[0]
+    if (preview === undefined) throw new TypeError("preview missing")
+    const root = document.createElement("div")
+    root.innerHTML = renderToStaticMarkup(
+      <HostResourcesView
+        {...fixture}
+        now={resourceFixtureNow}
+        snapshot={{
+          ...snapshot,
+          previews: {
+            _tag: "Reading",
+            value: [{ ...preview, open: { _tag: "Ready", url: "http://maple.example.test:4791/" } }]
+          }
+        }}
+      />
+    )
+    const label = readable ? "node :4791" : "Port 4791"
+    const region = root.querySelector('[data-region="previews"]')
+    expect({
+      text: region?.querySelector(".hr-prow > span")?.textContent,
+      accessibleName: region?.querySelector("a")?.getAttribute("aria-label")
+    }).toEqual({ text: label, accessibleName: `Open ${label}, port 4791, opens in a new tab` })
+    expect(region?.textContent).not.toContain("fixture-secret")
+    expect(region?.querySelector("a")?.getAttribute("aria-label")).not.toContain("fixture-secret")
+  }
+})
 describe("host resource reference states", () => {
   it.each(resourcesStates)("renders %s with distinct reference regions and read-only controls", (state) => {
     const fixture = resourcesFixture(state)

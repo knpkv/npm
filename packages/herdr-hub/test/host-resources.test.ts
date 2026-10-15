@@ -148,10 +148,13 @@ describe("host resource sources", () => {
         ...proc(5, 1, null, 0),
         argv: ["chromium"]
       }]
-      const previews = previewRows(listeners, processes, new Map([["4791", "Docs preview"]]))
+      const executables = new Map([[2, "/usr/bin/node"], [4, "/usr/bin/codex"], [5, "/usr/bin/chromium"]])
+      const previews = previewRows(listeners, processes, new Map([["4791", "Docs preview"]]), executables)
       expect(previews.map((p) => p.port)).toEqual([4791, 4899, 8765])
       expect(previews[0]?.label).toBe("Docs preview")
-      expect(previewRows([{ port: 4791, pid: 2, tailnet: false }], processes, new Map())[0]?.label).toBe("maple")
+      expect(previewRows([{ port: 4791, pid: 2, tailnet: false }], processes, new Map(), executables)[0]?.label).toBe(
+        "node :4791"
+      )
       expect((yield* parseListeners("malformed", "").pipe(Effect.flip))._tag).toBe("PreviewSourceError")
     }))
   it("keeps at most 360 samples and evicts gaps older than one hour without inventing points", () => {
@@ -327,6 +330,47 @@ it("rejects malformed or oversized pane identities instead of poisoning the snap
   expect(paneFromEnvironment(`HERDR_PANE_ID=w${"2".repeat(60)}:p3\0`)).toHaveLength(64)
 })
 
+it("keeps preview labels independent of argv values, script paths, cwd and worktree names", () => {
+  const listener = [{ port: 4791, pid: 42, tailnet: false }]
+  for (
+    const argv of [
+      ["/usr/bin/node", "server.ts", "--token", "fixture-secret"],
+      ["node", "/srv/private-script/server.ts"],
+      ["node", "server.ts", "--directory", "/srv/private-directory"],
+      ["node", "server.ts", "https://fixture-token@preview.invalid/secret"],
+      ["node", "server.ts", "TOKEN=fixture-secret"],
+      ["node", "server.ts", "/srv/worktrees/private-project/private-branch"]
+    ]
+  ) {
+    const processes = [{ ...proc(42, 1, null, 0), argv, cwd: "/srv/worktrees/private-project/private-branch" }]
+    expect(previewRows(listener, processes, new Map(), new Map([[42, "/usr/bin/node"]]))[0]?.label).toBe("node :4791")
+    expect(previewRows(listener, processes, new Map([["4791", "Docs preview"]]), new Map())[0]?.label).toBe(
+      "Docs preview"
+    )
+  }
+  expect(previewRows(listener, [], new Map(), new Map())[0]?.label).toBe("Port 4791")
+})
+
+it("uses the port-only preview label when the executable is unreadable, regardless of argv zero", () => {
+  for (
+    const executable of [
+      "https://user:fixture-secret@node",
+      "TOKEN=fixture-secret",
+      "node\nfixture-secret",
+      "x".repeat(65),
+      "node"
+    ]
+  ) {
+    const rows = previewRows(
+      [{ port: 4791, pid: 42, tailnet: false }],
+      [{ ...proc(42, 1, null, 0), argv: [executable, "server.ts"] }],
+      new Map(),
+      new Map()
+    )
+    expect(rows[0]?.label).toBe("Port 4791")
+  }
+})
+
 it("excludes preview services by executable identity, never a repository path or later argument", () => {
   const listener = [{ port: 4791, pid: 42, tailnet: true }]
   for (
@@ -337,10 +381,20 @@ it("excludes preview services by executable identity, never a repository path or
       ["node", "server.ts", "/opt/hostd/index.mjs"]
     ]
   ) {
-    expect(previewRows(listener, [{ ...proc(42, 1, null, 0), argv }], new Map())).toHaveLength(1)
+    expect(previewRows(listener, [{ ...proc(42, 1, null, 0), argv }], new Map(), new Map([[42, "/usr/bin/node"]])))
+      .toHaveLength(1)
   }
-  for (const argv of [["/usr/bin/codex"], ["syncthing"], ["chromium"], ["hostd"], ["node", "/opt/hostd/index.mjs"]]) {
-    expect(previewRows(listener, [{ ...proc(42, 1, null, 0), argv }], new Map())).toHaveLength(0)
+  for (
+    const [argv, executable] of [
+      [["/usr/bin/codex"], "/usr/bin/codex"],
+      [["syncthing"], "/usr/bin/syncthing"],
+      [["chromium"], "/usr/bin/chromium"],
+      [["hostd"], "/usr/bin/hostd"],
+      [["node", "/opt/hostd/index.mjs"], "/usr/bin/node"]
+    ] satisfies ReadonlyArray<readonly [ReadonlyArray<string>, string]>
+  ) {
+    expect(previewRows(listener, [{ ...proc(42, 1, null, 0), argv }], new Map(), new Map([[42, executable]])))
+      .toHaveLength(0)
   }
 })
 

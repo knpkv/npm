@@ -261,36 +261,31 @@ export const parseListeners = Effect.fn("HostResources.parseListeners")(function
   }
   return [...listeners.values()].sort((a, b) => a.port - b.port)
 })
+const executableBasename = (value: string | undefined): string | null => {
+  const name = value?.split("/").at(-1) ?? ""
+  return /^[A-Za-z0-9_.+-]{1,64}$/.test(name) && value?.includes("://") !== true ? name : null
+}
+
+/** Executable paths come from realPath of /proc/<pid>/exe, independently of argv. */
 export const previewRows = (
   listeners: ReadonlyArray<Listener>,
   processes: ReadonlyArray<ProcInfo>,
-  labels: ReadonlyMap<string, string>
+  labels: ReadonlyMap<string, string>,
+  executablePaths: ReadonlyMap<number, string>
 ): ReadonlyArray<ResourcePreview> =>
   listeners.flatMap((listener) => {
     const proc = processes.find((p) => p.pid === listener.pid)
-    const command = proc?.argv.join(" ") ?? ""
-    const executable = proc?.argv[0]?.split("/").at(-1) ?? ""
+    const executable = listener.pid === null ? "" : executablePaths.get(listener.pid)?.split("/").at(-1) ?? ""
     const nodeScript = proc?.argv[1] ?? ""
     if (
       ["hostd", "codex", "syncthing", "chromium", "chromium-browser"].includes(executable) ||
       (executable === "node" && /(?:^|\/)hostd\/index\.mjs$/.test(nodeScript))
     ) return []
-    const cwd = proc?.cwd ?? ""
-    const worktree = /worktrees\/[^/\s]+\/([^/\s]+)/.exec(`${cwd} ${command}`)?.[1]
-    const directory = /--directory (\S+)/.exec(command)?.[1]
-    const base = (path: string) => path.split("/").filter(Boolean).at(-1) ?? ""
-    const guess = [
-      worktree ?? base(cwd),
-      ...(directory !== undefined && directory !== ""
-        ? [`static ${base(directory)}`]
-        : command.includes("server.ts")
-        ? [base(command.split(" ").at(-1) ?? "")]
-        : [])
-    ].filter(Boolean).join(", ")
+    const guess = executable === "" ? `Port ${listener.port}` : `${executable} :${listener.port}`
     return [{
       ...listener,
       open: { _tag: "Unavailable", reason: "not_probed" },
-      label: (labels.get(String(listener.port)) || guess || `Port ${listener.port}`).slice(0, 1024)
+      label: (labels.get(String(listener.port)) || guess).slice(0, 1024)
     }]
   })
 
@@ -328,10 +323,7 @@ export const displayCommand = (argv: ReadonlyArray<string>): string => {
   const basename = (value: string) => value.split("/").at(-1) ?? ""
   const shell = argv.map(basename).find((word) => shellExecutables.has(word))
   if (shell !== undefined) return `${shell} -c …`
-  const name = basename(argv[0] ?? "process")
-  const executable = /^[A-Za-z0-9_.+-]{1,64}$/.test(name) && name.trim() === name && argv[0]?.includes("://") !== true
-    ? name
-    : "process"
+  const executable = executableBasename(argv[0]) ?? "process"
   if (argv.length < 2) return executable
   const opaque = `${executable} …`
   const policy = safeCommandArguments.get(executable)

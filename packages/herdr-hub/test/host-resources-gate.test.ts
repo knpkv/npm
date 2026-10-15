@@ -24,12 +24,20 @@ interface GateFixture {
   readonly oneSlot?: boolean
   readonly slotHolders?: Readonly<Record<string, ReadonlyArray<number>>>
   readonly descriptorError?: "NotFound" | "PermissionDenied"
+  readonly descriptorTarget?: string
+  readonly descriptorStatError?: "NotFound" | "PermissionDenied"
   readonly denyOwnership?: boolean
   readonly unlocked?: boolean
   readonly fdinfoOwner?: number
   readonly omitGlobalLocks?: boolean
   readonly unreadableGlobal?: boolean
   readonly latePids?: ReadonlyArray<number>
+  readonly fdDirectoryErrors?: Readonly<Record<string, "NotFound" | "PermissionDenied">>
+  readonly lockDirectoryError?: "NotFound" | "PermissionDenied"
+  readonly missingLockFiles?: boolean
+  readonly agentNames?: ReadonlyArray<unknown>
+  readonly previewListener?: boolean
+  readonly executableError?: "NotFound" | "PermissionDenied"
 }
 const parent: FixtureProcess = {
   pid: 42,
@@ -41,13 +49,28 @@ const child: FixtureProcess = { pid: 43, parent: 42, age: 5, argv: ["/usr/bin/ti
 
 const gateFixture = Effect.fn("ResourcesTest.gateFixture")(function*(fixture: GateFixture) {
   const original = yield* FileSystem.FileSystem
+  const originalSpawner = yield* ChildProcessSpawner.ChildProcessSpawner
   const root = yield* original.makeTempDirectoryScoped({ prefix: "resources-fixture-" })
   const executable = `${root}/fixture-command`
   yield* original.writeFileString(
+    `${root}/agents.json`,
+    JSON.stringify({
+      result: {
+        agents: (fixture.agentNames ?? ["ledger-cx"]).map((name, index) => ({ pane_id: `w1:p${index + 1}`, name }))
+      }
+    })
+  )
+  yield* original.writeFileString(
     executable,
-    `#!/bin/sh\ncase "$1" in\nagent) printf '%s' '{"result":{"agents":[{"pane_id":"w1:p1","name":"ledger-cx"}]}}';;\nip) printf '%s' '100.64.0.1';;\nstatus) printf '%s' '{"Peer":{},"Self":{"HostName":"maple","ID":"node-maple","Online":true,"TailscaleIPs":["100.64.0.1"]}}';;\nesac\n`,
+    `#!/bin/sh\ncase "$1" in\nagent) cat "$(dirname "$0")/agents.json";;\nlisteners) cat "$(dirname "$0")/listeners";;\nip) printf '%s' '100.64.0.1';;\nstatus) printf '%s' '{"Peer":{},"Self":{"HostName":"maple","ID":"node-maple","Online":true,"TailscaleIPs":["100.64.0.1"]}}';;\nesac\n`,
     { mode: 0o700 }
   )
+  if (fixture.previewListener === true) {
+    yield* original.writeFileString(
+      `${root}/listeners`,
+      "LISTEN 0 128 100.64.0.1:4791 0.0.0.0:* users:((\"node\",pid=42,fd=9))\n"
+    )
+  }
   const now = yield* Clock.currentTimeMillis
   const ticks = Number((yield* runCommand(["getconf", "CLK_TCK"])).trim())
   const boot = Math.floor(now / 1000) - 3600
@@ -71,18 +94,44 @@ const gateFixture = Effect.fn("ResourcesTest.gateFixture")(function*(fixture: Ga
     return {
       ...base,
       dev: descriptor !== null && Number(descriptor[1]) === fixture.collisionPid ? 0x47 : device,
-      ino: Option.some(inode(slot))
+      ino: Option.some(descriptor?.[2] === "0" && fixture.descriptorTarget !== undefined ? 123 : inode(slot))
     }
   }
   let inventoryReads = 0
   const fs = FileSystem.makeNoop({
-    stat: (path) => Effect.succeed(identityFor(path)),
+    stat: (path) => {
+      const failure = /^\/proc\/\d+\/fd\/0$/.test(path) ?
+        fixture.descriptorStatError :
+        fixture.missingLockFiles === true && path.startsWith("/fixture/gate/")
+        ? "NotFound"
+        : undefined
+      return failure === undefined ? Effect.succeed(identityFor(path)) : Effect.fail(
+        new PlatformError.PlatformError(
+          new PlatformError.SystemError({
+            _tag: failure,
+            module: "FileSystem",
+            method: "stat"
+          })
+        )
+      )
+    },
     open: (path, options) =>
       original.open(descriptorFile, options).pipe(
         Effect.map((opened) => ({ ...opened, stat: Effect.succeed(identityFor(path)) }))
       ),
     exists: () => Effect.succeed(false),
     readDirectory: (path) => {
+      if (path === "/fixture/gate") {
+        return fixture.lockDirectoryError === undefined ? Effect.succeed([]) : Effect.fail(
+          new PlatformError.PlatformError(
+            new PlatformError.SystemError({
+              _tag: fixture.lockDirectoryError,
+              module: "FileSystem",
+              method: "readDirectory"
+            })
+          )
+        )
+      }
       if (path === "/proc") {
         inventoryReads++
         return Effect.succeed([
@@ -91,15 +140,38 @@ const gateFixture = Effect.fn("ResourcesTest.gateFixture")(function*(fixture: Ga
         ])
       }
       const pid = Number(/^\/proc\/(\d+)\/fd$/.exec(path)?.[1])
+      const fdError = fixture.fdDirectoryErrors?.[String(pid)]
+      if (fdError !== undefined) {
+        return Effect.fail(
+          new PlatformError.PlatformError(
+            new PlatformError.SystemError({
+              _tag: fdError,
+              module: "FileSystem",
+              method: "readDirectory"
+            })
+          )
+        )
+      }
       return Effect.succeed(
         [
-          ...(fixture.descriptorError === undefined ? [] : ["0"]),
+          ...(fixture.descriptorError === undefined && fixture.descriptorStatError === undefined ? [] : ["0"]),
           ...slots.filter((slot) => owns(pid, slot)).map((slot) => slot === 1 ? "9" : "8")
         ]
       )
     },
     realPath: (path) => {
       if (!path.startsWith("/proc/")) return Effect.succeed(path)
+      if (path.endsWith("/exe")) {
+        return fixture.executableError === undefined ? Effect.succeed("/fixture/bin/node") : Effect.fail(
+          new PlatformError.PlatformError(
+            new PlatformError.SystemError({
+              _tag: fixture.executableError,
+              module: "FileSystem",
+              method: "realPath"
+            })
+          )
+        )
+      }
       const descriptor = /^\/proc\/(\d+)\/fd\/(\d+)$/.exec(path)
       if (descriptor !== null && (descriptor[2] === "0" || fixture.denyOwnership === true)) {
         return Effect.fail(
@@ -171,12 +243,22 @@ const gateFixture = Effect.fn("ResourcesTest.gateFixture")(function*(fixture: Ga
       return Stream.succeed(new TextEncoder().encode(text))
     }
   })
+  const spawner = ChildProcessSpawner.make((command) =>
+    originalSpawner.spawn(
+      fixture.previewListener === true && command._tag === "StandardCommand" && command.command === "ss"
+        ? ChildProcess.make(executable, ["listeners"])
+        : command
+    )
+  )
   const sampler = yield* makeHostResources({
     host: "maple",
     herdrCommand: executable,
     tailscaleCommand: executable,
     heavyGate: { lockDirectory: "/fixture/gate" }
-  }).pipe(Effect.provideService(FileSystem.FileSystem, fs))
+  }).pipe(
+    Effect.provideService(FileSystem.FileSystem, fs),
+    Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner)
+  )
   return yield* sampler.read
 })
 const runFixture = (fixture: GateFixture) =>
@@ -186,6 +268,29 @@ const runFixture = (fixture: GateFixture) =>
   )
 const held = (snapshot: HostResources) =>
   snapshot.gate._tag === "Reading" ? snapshot.gate.value.slots.filter((s) => s.holder !== null) : []
+
+it.live("gets a preview label from the real process executable instead of spoofed argv zero", () =>
+  Effect.gen(function*() {
+    const snapshot = yield* runFixture({
+      processes: [{ ...parent, argv: ["data:text/plain,/fixture-secret", "fixture-secret"] }],
+      previewListener: true
+    })
+    expect(snapshot.previews._tag).toBe("Reading")
+    expect(snapshot.previews._tag === "Reading" ? snapshot.previews.value[0]?.label : null).toBe("node :4791")
+  }))
+
+for (
+  const executableError of ["NotFound", "PermissionDenied"] satisfies ReadonlyArray<
+    NonNullable<GateFixture["executableError"]>
+  >
+) {
+  it.live(`keeps a preview with its port-only label when the executable is ${executableError}`, () =>
+    Effect.gen(function*() {
+      const snapshot = yield* runFixture({ processes: [parent], previewListener: true, executableError })
+      expect(snapshot.previews._tag).toBe("Reading")
+      expect(snapshot.previews._tag === "Reading" ? snapshot.previews.value[0]?.label : null).toBe("Port 4791")
+    }))
+}
 
 it.live("resolves an exited flock acquirer to every retaining process and its topmost job root", () =>
   Effect.gen(function*() {
@@ -501,3 +606,149 @@ it.live("does not prove free when a new process appears after the metadata inven
       "Held"
     ])
   }))
+
+it.live("keeps unheld slots free when a process exits before its descriptor scan", () =>
+  Effect.gen(function*() {
+    const snapshot = yield* runFixture({
+      processes: [parent],
+      holders: [],
+      unlocked: true,
+      fdDirectoryErrors: { "42": "NotFound" }
+    })
+    expect(snapshot.gate._tag === "Reading" ? snapshot.gate.value.slots.map((slot) => slot.status) : []).toEqual([
+      "Free",
+      "Free"
+    ])
+  }))
+
+for (const exited of [false, true]) {
+  it.live(`keeps unheld slots free when a new non-holder ${exited ? "exits" : "appears"} after inventory`, () =>
+    Effect.gen(function*() {
+      const fixture: GateFixture = {
+        processes: [parent],
+        latePids: [52],
+        holders: [],
+        unlocked: true
+      }
+      const snapshot = yield* runFixture(exited ? { ...fixture, fdDirectoryErrors: { "52": "NotFound" } } : fixture)
+      expect(snapshot.gate._tag === "Reading" ? snapshot.gate.value.slots.map((slot) => slot.status) : []).toEqual([
+        "Free",
+        "Free"
+      ])
+    }))
+}
+
+it.live("marks only the retained slot unknown when a new holder lacks inventoried metadata", () =>
+  Effect.gen(function*() {
+    const snapshot = yield* runFixture({
+      processes: [parent],
+      latePids: [52],
+      omitGlobalLocks: true,
+      slotHolders: { "1": [52], "2": [] }
+    })
+    expect(snapshot.gate._tag === "Reading" ? snapshot.gate.value.slots.map((slot) => slot.status) : []).toEqual([
+      "Unknown",
+      "Free"
+    ])
+    expect(snapshot.heavyJobs._tag === "Reading" ? snapshot.heavyJobs.value : null).toEqual([])
+  }))
+
+it.live("keeps slots unknown when a process descriptor directory is denied", () =>
+  Effect.gen(function*() {
+    const snapshot = yield* runFixture({
+      processes: [parent],
+      holders: [],
+      unlocked: true,
+      fdDirectoryErrors: { "42": "PermissionDenied" }
+    })
+    expect(snapshot.gate._tag === "Reading" ? snapshot.gate.value.slots.map((slot) => slot.status) : []).toEqual([
+      "Unknown",
+      "Unknown"
+    ])
+  }))
+
+for (const descriptorTarget of ["pipe:[123]", "socket:[456]", "anon_inode:[eventpoll]", "anon_inode:inotify"]) {
+  it.live(`keeps unheld slots free with a normal ${descriptorTarget} descriptor`, () =>
+    Effect.gen(function*() {
+      const snapshot = yield* runFixture({
+        processes: [parent],
+        holders: [],
+        unlocked: true,
+        descriptorError: "NotFound",
+        descriptorTarget
+      })
+      expect(snapshot.gate._tag === "Reading" ? snapshot.gate.value.slots.map((slot) => slot.status) : []).toEqual([
+        "Free",
+        "Free"
+      ])
+    }))
+}
+
+it.live("keeps unheld slots unknown when a potentially relevant descriptor cannot be resolved", () =>
+  Effect.gen(function*() {
+    const snapshot = yield* runFixture({
+      processes: [parent],
+      holders: [],
+      unlocked: true,
+      descriptorError: "NotFound"
+    })
+    expect(snapshot.gate._tag === "Reading" ? snapshot.gate.value.slots.map((slot) => slot.status) : []).toEqual([
+      "Unknown",
+      "Free"
+    ])
+  }))
+
+for (
+  const descriptorStatError of ["NotFound", "PermissionDenied"] satisfies ReadonlyArray<
+    NonNullable<GateFixture["descriptorStatError"]>
+  >
+) {
+  it.live(`handles descriptor stat ${descriptorStatError} without making a false ownership claim`, () =>
+    Effect.gen(function*() {
+      const snapshot = yield* runFixture({ processes: [parent], holders: [], unlocked: true, descriptorStatError })
+      expect(snapshot.gate._tag === "Reading" ? snapshot.gate.value.slots.map((slot) => slot.status) : []).toEqual(
+        descriptorStatError === "NotFound" ? ["Free", "Free"] : ["Unknown", "Unknown"]
+      )
+    }))
+}
+
+for (
+  const lockDirectoryError of ["NotFound", "PermissionDenied"] satisfies ReadonlyArray<
+    NonNullable<GateFixture["lockDirectoryError"]>
+  >
+) {
+  it.live(`makes gate and jobs unavailable when the configured lock directory is ${lockDirectoryError}`, () =>
+    Effect.gen(function*() {
+      const snapshot = yield* runFixture({ processes: [], missingLockFiles: true, lockDirectoryError })
+      expect(snapshot.gate).toEqual({ _tag: "Unavailable", reason: "failed" })
+      expect(snapshot.heavyJobs).toEqual({ _tag: "Unavailable", reason: "failed" })
+    }))
+}
+
+it.live("keeps absent lock files free inside an existing readable directory", () =>
+  Effect.gen(function*() {
+    const snapshot = yield* runFixture({ processes: [], missingLockFiles: true })
+    expect(snapshot.gate._tag === "Reading" ? snapshot.gate.value.slots.map((slot) => slot.status) : []).toEqual([
+      "Free",
+      "Free"
+    ])
+    expect(snapshot.heavyJobs).toEqual({ _tag: "Reading", value: [] })
+  }))
+
+for (const name of ["x".repeat(1025), 42, { label: "invalid" }, "", "   ", "bad\nname"]) {
+  it.live(`drops invalid agent name ${JSON.stringify(name).slice(0, 40)} without hiding readings or valid names`, () =>
+    Effect.gen(function*() {
+      const snapshot = yield* runFixture({
+        processes: [parent, { ...child, environment: "HERDR_PANE_ID=w1:p2\0" }],
+        agentNames: [name, "ledger-cx"]
+      })
+      expect(Schema.decodeUnknownSync(HostResources)(snapshot)).toEqual(snapshot)
+      expect(held(snapshot)[0]?.holder).toMatchObject({ pane: "w1:p1", lane: null })
+      expect(snapshot.topMemory._tag).toBe("Reading")
+      if (snapshot.topMemory._tag === "Reading") {
+        expect(snapshot.topMemory.value.namesAvailable).toBe(true)
+        expect(snapshot.topMemory.value.groups.find((group) => group.pane === "w1:p1")?.lane).toBeNull()
+        expect(snapshot.topMemory.value.groups.find((group) => group.pane === "w1:p2")?.lane).toBe("ledger-cx")
+      }
+    }))
+}
