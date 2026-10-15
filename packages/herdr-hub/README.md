@@ -246,8 +246,9 @@ the three possible local-date directories around their creation date. Explicit
 session paths must resolve inside the matching provider's session root.
 `CLAUDE_CONFIG_DIR` and `CODEX_HOME` override the default roots below `HOME`.
 Absolute overrides work without `HOME`; missing defaults and relative overrides
-remain unavailable for that provider. Claude project directories replace only
-`/`, `:` and `.`, preserving underscores and other characters.
+remain unavailable for that provider. Claude project directories replace every
+non-alphanumeric character with `-`, including underscores. Hashed names for
+encoded project paths longer than 200 characters are unsupported and remain unknown.
 There is no newest-session fallback, and out-of-root symlinks are rejected.
 Each read seeks to at most the last 128KiB; a cut leading record is discarded,
 and malformed or incomplete trailing records produce unknown activity.

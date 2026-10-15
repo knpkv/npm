@@ -43,7 +43,7 @@ describe("reported session task source", () => {
       Effect.gen(function*() {
         const { fs, paths, roots } = yield* setup()
         const cases: ReadonlyArray<readonly [string, string]> = [
-          ["/fixture/my_repo", "-fixture-my_repo"],
+          ["/fixture/my_repo", "-fixture-my-repo"],
           ["/fixture/repo", "-fixture-repo"],
           ["/fixture/has.dot", "-fixture-has-dot"],
           ["/fixture/a:b", "-fixture-a-b"]

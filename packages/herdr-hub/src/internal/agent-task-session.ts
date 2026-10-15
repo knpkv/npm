@@ -53,7 +53,7 @@ export const makeSessionTaskReader = Effect.fn("TaskEvidence.makeSessionReader")
     } else {
       if (!safeId(session.value)) return unknownActivity
       candidate = session.agent === "claude"
-        ? paths.join(root, input.cwd.replace(/[/:.]/gu, "-"), `${session.value}.jsonl`)
+        ? paths.join(root, input.cwd.replace(/[^a-zA-Z0-9]/g, "-"), `${session.value}.jsonl`)
         : yield* codexPath(session.value, root)
     }
     if (candidate === undefined) return unknownActivity
