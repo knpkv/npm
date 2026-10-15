@@ -1294,6 +1294,9 @@ importers:
       '@knpkv/ai-runtime':
         specifier: workspace:^
         version: link:../ai-runtime
+      '@knpkv/design-conformance':
+        specifier: workspace:*
+        version: link:../design-conformance
       '@playwright/test':
         specifier: 1.63.0
         version: 1.63.0

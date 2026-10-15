@@ -10,7 +10,8 @@ import {
   type RelayConversations,
   type RelayConversationState
 } from "@knpkv/relay-product/client"
-import { Exit } from "effect"
+import { Effect, Exit } from "effect"
+import { makeUsageModuleViews } from "../src/usage-module-view.js"
 import { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -115,6 +116,72 @@ const mount = async (conversations: RelayConversations) => {
 }
 
 describe("Relay in the hub's masthead", () => {
+  /** Empty-state header grouping must not restart the fleet conversation when the route changes. */
+  it("retains the launcher and conversation across empty Limits and Tokens", async () => {
+    const { conversations } = fakeConversations({ ...initialRelayConversation, connection: "live" })
+    const subscribe = vi.spyOn(conversations, "subscribe")
+    const host = document.createElement("div")
+    document.body.append(host)
+    root = createRoot(host)
+    window.history.replaceState(null, "", "/?range=7d&timeZone=UTC#usage/limits")
+    const empty = { hosts: [], failures: [], peersListed: true }
+    const usage = makeUsageModuleViews({
+      reads: {
+        usage: () => Effect.succeed({ fleet: empty, receivedAt: 1_000 }),
+        limits: Effect.succeed({ fleet: empty, receivedAt: 1_000 })
+      },
+      viewerTimeZone: "UTC",
+      now: 1_000,
+      onHubMachine: false
+    })
+    await act(async () =>
+      root?.render(
+        <SuperappShell
+          session={{ access: "loopback", connection: "connected" }}
+          modules={[usage]}
+          landing={{ module: "usage", page: "limits" }}
+          host="hub"
+          hostCount={1}
+          notifications={null}
+          relay={{ conversation: fleet, conversations }}
+        />
+      )
+    )
+    const launcher = document.querySelector("[data-rly-relay-launcher]")
+    const subscriptions = subscribe.mock.calls.length
+    const action = document.querySelector<HTMLAnchorElement>('[data-region="action"]')
+    expect(action).not.toBeNull()
+    await act(async () => action?.dispatchEvent(new MouseEvent("click", { bubbles: true, button: 0 })))
+    expect(document.querySelector("[data-rly-relay-launcher]")).toBe(launcher)
+    expect(subscribe.mock.calls).toHaveLength(subscriptions)
+    expect(document.querySelector(".usage-empty-header-region")).toBeNull()
+  })
+  /** Moving the announcement out of the visual mast preserves live updates and panel announcement ownership. */
+  it("keeps status announcements in the supplied shell outlet", async () => {
+    const { conversations, emit } = fakeConversations({ ...initialRelayConversation, connection: "live" })
+    const host = document.createElement("div")
+    const outlet = document.createElement("div")
+    document.body.append(host, outlet)
+    root = createRoot(host)
+    await act(async () =>
+      root?.render(
+        <PortalProvider>
+          <HubRelay
+            announcementOutlet={outlet}
+            relay={{ conversation: fleet, conversations }}
+            terminalOwnsKeys={false}
+          />
+        </PortalProvider>
+      )
+    )
+    expect(host.querySelector(".fleet-shell-relay-live")).toBeNull()
+    expect(outlet.querySelector('[aria-live="polite"][role="status"]')).not.toBeNull()
+    await act(async () => emit(working))
+    expect(outlet.textContent).toContain("Working")
+    await act(async () => host.querySelector<HTMLButtonElement>("[data-rly-relay-launcher]")?.click())
+    expect(outlet.textContent).toBe("")
+    expect(document.querySelector("[data-rly-relay-panel]")).not.toBeNull()
+  })
   it.each([undefined, "creature", "chef"] satisfies ReadonlyArray<"creature" | "chef" | undefined>)(
     "selects the launcher mark explicitly, independently of its label: %s",
     async (launcherMark) => {

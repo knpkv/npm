@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Usage, Limits</title>
+<link rel="stylesheet" href="rly.css">
+<link rel="stylesheet" href="chrome.css">
+<script src="relay-chef-modern.js"></script>
+<script src="relay-creature-states.js"></script>
+<script src="relay-screen-art.js"></script>
+<style>
+@font-face { font-display: block; font-family: "Geist Variable"; font-style: normal; font-weight: 100 900; src: url("fonts/geist-variable.woff2") format("woff2-variations"), url("fonts/geist-variable.woff2") format("woff2"); }
+@font-face { font-display: block; font-family: "Geist"; font-style: normal; font-weight: 100 900; src: url("fonts/geist-variable.woff2") format("woff2-variations"), url("fonts/geist-variable.woff2") format("woff2"); }
+@font-face { font-display: block; font-family: "Geist Mono Variable"; font-style: normal; font-weight: 100 900; src: url("fonts/geist-mono-variable.woff2") format("woff2-variations"), url("fonts/geist-mono-variable.woff2") format("woff2"); }
+@font-face { font-display: block; font-family: "Geist Mono"; font-style: normal; font-weight: 100 900; src: url("fonts/geist-mono-variable.woff2") format("woff2-variations"), url("fonts/geist-mono-variable.woff2") format("woff2"); }
+html, body { margin: 0; }
+body { background: var(--rly-color-canvas); }
+body { font: 430 1rem/1.5 var(--rly-font-ui); color: var(--rly-color-text-1); background: var(--rly-color-canvas); }
+a { color: inherit; text-decoration: none; }
+a:hover { color: var(--rly-color-text-1); }
+button { font: inherit; }
+.sr { position: absolute; inline-size: 1px; block-size: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+
+.crumb { display: none; box-sizing: border-box; block-size: 32px; padding: 8px 16px 0; align-items: center; min-inline-size: 0; white-space: nowrap; font: 430 .75rem/1.3 var(--rly-font-ui); color: var(--rly-color-text-2); }
+.crumb .parents { flex: 0 1 auto; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; direction: rtl; }
+.crumb .parents > span { direction: ltr; unicode-bidi: isolate; }
+.crumb a { text-decoration: underline; text-underline-offset: .2em; }
+.crumb .cur { flex: none; max-inline-size: 100%; overflow: hidden; text-overflow: ellipsis; font-weight: 520; color: var(--rly-color-text-1); }
+
+main { padding: 2rem 40px 1rem; max-inline-size: 1520px; }
+.page { display: grid; gap: 2rem; min-inline-size: 0; }
+.page-head { display: grid; gap: .5rem; min-inline-size: 0; }
+.page-head h1 { margin: 0; font-size: 3rem; font-weight: 620; letter-spacing: -0.045em; line-height: 1.08; text-wrap: balance; }
+.page-head p { margin: 0; color: var(--rly-color-text-2); font-size: .9375rem; max-inline-size: 44em; }
+.notices { display: grid; gap: 2rem; }
+.summary { display: grid; gap: .4rem; max-inline-size: 46em; }
+.summary h2 { margin: 0; font-size: 1.9rem; font-weight: 620; letter-spacing: -0.03em; line-height: 1.2; text-wrap: balance; }
+.summary p { margin: 0; color: var(--rly-color-text-2); }
+.cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; min-inline-size: 0; }
+.card { display: grid; gap: .85rem; align-content: start; padding: 1.1rem 1.15rem; border: 1px solid var(--rly-color-border-1); border-radius: var(--rly-radius-group); background: var(--rly-color-surface-1); min-inline-size: 0; }
+.card-head { display: flex; flex-wrap: wrap; gap: .25rem 1rem; align-items: baseline; justify-content: space-between; }
+.card-head h2 { margin: 0; font-size: 1.25rem; font-weight: 620; letter-spacing: -0.02em; }
+.card-head small { font-size: .75rem; color: var(--rly-color-text-2); }
+.figure { display: flex; flex-wrap: wrap; gap: .25rem .75rem; align-items: baseline; }
+.figure b { font-size: 2.6rem; font-weight: 620; letter-spacing: -0.04em; line-height: 1; font-variant-numeric: tabular-nums; }
+.figure span { font-size: .875rem; color: var(--rly-color-text-2); }
+.card dl { margin: 0; display: grid; }
+.card dl > div { display: flex; justify-content: space-between; gap: 1rem; padding-block: .5rem; border-block-start: 1px solid var(--rly-color-border-1); font-size: .875rem; }
+.card dt { color: var(--rly-color-text-2); }
+.card dd { margin: 0; font-weight: 520; text-align: end; }
+.card .note { margin: 0; font-size: .8125rem; color: var(--rly-color-text-2); }
+.unknown { color: var(--rly-color-text-2) !important; }
+.chart { margin: 0; display: grid; gap: .9rem; padding: 1.1rem 1.15rem; border: 1px solid var(--rly-color-border-1); border-radius: var(--rly-radius-group); background: var(--rly-color-surface-1); min-inline-size: 0; }
+.chart-head { display: flex; flex-wrap: wrap; gap: .25rem 1rem; align-items: baseline; justify-content: space-between; }
+.chart-head h2 { margin: 0; font-size: 1.1rem; font-weight: 620; }
+.chart-head a { display: inline-flex; gap: .35rem; align-items: center; min-block-size: 44px; font-size: .8125rem; text-decoration: underline; text-underline-offset: .2em; }
+.bars { display: grid; gap: .5rem; align-items: end; block-size: 200px; }
+.bar { display: grid; gap: .3rem; justify-items: center; align-content: end; block-size: 100%; min-inline-size: 0; }
+.bar .v { font-size: .75rem; font-weight: 520; font-variant-numeric: tabular-nums; color: var(--rly-color-text-1); }
+.bar .b { display: block; inline-size: 100%; max-inline-size: 44px; background: var(--rly-color-text-3); border-radius: 4px 4px 0 0; }
+.bar .d { font-size: .75rem; color: var(--rly-color-text-2); text-align: center; overflow-wrap: anywhere; }
+.chart figcaption { display: flex; flex-wrap: wrap; gap: .4rem 1.25rem; font-size: .8125rem; color: var(--rly-color-text-2); }
+.chart figcaption span { color: var(--rly-color-text-1); }
+.foot { margin: 0; padding-block-start: .8rem; border-block-start: 1px solid var(--rly-color-border-1); font-size: .8125rem; color: var(--rly-color-text-2); max-inline-size: 52em; }
+.loading { display: grid; gap: .75rem; }
+.empty { display: grid; justify-items: start; gap: 1rem; padding-block: 1.5rem; max-inline-size: 34em; }
+.empty h2 { margin: 0; font-size: 1.6rem; font-weight: 620; letter-spacing: -0.025em; line-height: 1.25; text-wrap: balance; }
+.empty p, .error p { margin: 0; color: var(--rly-color-text-2); }
+.linkbtn { justify-self: start; display: inline-flex; align-items: center; gap: .4rem; min-block-size: 44px; padding-inline: 1rem; border: 1px solid var(--rly-color-border-1); border-radius: var(--rly-radius-control); background: var(--rly-color-surface-1); font-size: .875rem; font-weight: 520; color: var(--rly-color-text-1); }
+.error { display: grid; justify-items: start; gap: 1rem; padding: 1.5rem; border: 1px solid var(--rly-color-border-1); border-radius: var(--rly-radius-group); background: var(--rly-color-surface-1); max-inline-size: 40em; }
+.error h2 { margin: 0; font-size: 1.4rem; font-weight: 620; letter-spacing: -0.02em; line-height: 1.25; }
+.fail { padding: 2rem; display: grid; gap: .75rem; max-inline-size: 40em; }
+.fail h1 { margin: 0; font-size: 2rem; font-weight: 620; letter-spacing: -0.03em; }
+.fail p { margin: 0; color: var(--rly-color-text-2); }
+.fail code { font: 430 .875rem/1.4 var(--rly-font-mono); color: var(--rly-color-text-1); }
+
+@media (max-width: 599px) {
+  body { padding-block-end: env(safe-area-inset-bottom); }
+  .crumb { display: flex; }
+  main { padding: .9rem 16px 6rem; }
+  .page { gap: 1.5rem; }
+  .page-head h1 { font-size: 2.2rem; }
+  .summary h2 { font-size: 1.5rem; }
+  .cards { grid-template-columns: minmax(0, 1fr); }
+}
+</style>
+</head>
+<body data-rly-root data-theme="light">
+<div id="app"></div>
+<script>
+(() => {
+  const params = new URLSearchParams(location.search);
+  const theme = params.get("theme") === "dark" ? "dark" : "light";
+  const app = document.getElementById("app");
+  document.body.dataset.theme = theme;
+  document.documentElement.dataset.theme = theme;
+  document.documentElement.style.colorScheme = theme;
+
+  const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const ICON = {
+    clock: '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" focusable="false" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><path d="M12 6v6l4 2"></path></svg>',
+    alert: '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" focusable="false" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><line x1="12" x2="12" y1="8" y2="12"></line><line x1="12" x2="12.01" y1="16" y2="16"></line></svg>',
+  };
+  const TONE_ICON = { caution: ICON.clock, critical: ICON.alert };
+  const stateLabel = (label, tone, compact) =>
+    `<span class="rly_StateLabel-module__root rly_StateLabel-module__${esc(tone)} rly_StateLabel-module__${compact ? "compact" : "defaultSize"}">${TONE_ICON[tone] || ""}<span>${esc(label)}</span></span>`;
+  const notice = (n) =>
+    `<div class="rly_Notice-module__root rly_Notice-module__${esc(n.tone)}"><div class="rly_Notice-module__lead"><span aria-hidden="true" class="rly_Notice-module__icon">${TONE_ICON[n.tone] || ""}</span><div class="rly_Notice-module__message"><span><b>${esc(n.title)}</b> ${esc(n.text)}</span></div></div></div>`;
+  const track = (pct, stale, label, valueText) => {
+    const tone = pct >= 100 ? "full" : pct >= 80 ? "near" : "ok";
+    return `<div><span class="sr">${esc(label)}: ${esc(valueText)}</span><span aria-hidden="true" class="rly_LimitTrack-module__root rly_LimitTrack-module__defaultSize"${stale ? ' data-stale="true"' : ""} data-tone="${tone}"><span class="rly_LimitTrack-module__fill" data-part="fill" style="inline-size: ${Math.max(0, Math.min(100, pct))}%;"></span><span class="rly_LimitTrack-module__near" data-part="near" style="inset-inline-start: min(80%, 100% - 1px);"></span></span></div>`;
+  };
+  const skeleton = (variant, style) => `<div aria-hidden="true" class="rly_Skeleton-module__root rly_Skeleton-module__${variant}" role="presentation" style="${style}"></div>`;
+  const button = (label, region) => `<button class="rly_Button-module__root rly_Button-module__secondary rly_Button-module__dense" type="button"${region ? ` data-region="${region}"` : ""}><span class="rly_Button-module__content"><span class="rly_Button-module__label">${esc(label)}</span></span></button>`;
+
+  const loadFonts = async () => {
+    const specs = ['430 16px "Geist"', '620 16px "Geist"', '430 16px "Geist Variable"', '620 16px "Geist Variable"', '430 16px "Geist Mono"', '430 16px "Geist Mono Variable"'];
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const res = await Promise.allSettled(specs.map((f) => document.fonts.load(f)));
+      res.forEach((r, i) => { if (r.status === "rejected") console.warn("font load failed", specs[i], r.reason); });
+      const faces = [...document.fonts].filter((f) => f.family.replace(/"/g, "") === "Geist");
+      const faceRes = await Promise.allSettled(faces.map((f) => f.load()));
+      faceRes.forEach((r) => { if (r.status === "rejected") console.warn("Geist face failed", r.reason); });
+      try { await document.fonts.ready; } catch (e) { console.warn("fonts.ready failed", e); }
+      if (document.fonts.check("16px Geist")) return true;
+      await new Promise((r) => setTimeout(r, 150));
+    }
+    return document.fonts.check("16px Geist");
+  };
+
+  const finish = async (status) => {
+    try { await Promise.all([customElements.whenDefined("relay-glyph"), customElements.whenDefined("relay-agent"), customElements.whenDefined("relay-chef")]); } catch (e) { console.warn("custom elements not defined", e); }
+    const ok = await loadFonts();
+    if (status === "1" && !ok) { document.getElementById("app").innerHTML = `<main class="fail" role="alert"><h1>Fonts didn’t load</h1><p>Geist isn’t available from screens/fonts, so the screen can’t be captured.</p></main>`; return; }
+    requestAnimationFrame(() => requestAnimationFrame(() => { if (status === "1") document.documentElement.dataset.designReady = "true"; }));
+  };
+
+  const findState = (fx, id) => {
+    if (fx.states[id]) return [id, fx.states[id]];
+    const alias = { error: "unavailable" };
+    if (alias[id]) return [alias[id], fx.states[alias[id]]];
+    const hit = Object.entries(fx.states).find(([, s]) => s.id06 === id);
+    return hit || [null, null];
+  };
+
+  const render = (fx) => {
+    const req = params.get("state") || fx.meta.defaultState;
+    const [stateId, S] = findState(fx, req);
+    document.documentElement.dataset.state = stateId || "unknown";
+    if (!S) {
+      app.innerHTML = `<main class="fail" role="alert" data-region="notice"><h1>Unknown state</h1><p>No state <code>${esc(req)}</code> in fixture.json.</p><p>Known states: ${Object.entries(fx.states).map(([k, s]) => `<code>${esc(k)}</code> (${esc(s.id06)})`).join(", ")}.</p></main>`;
+      return;
+    }
+    const sh = { ...fx.shell, ...(S.shell || {}) }, L = fx.labels, P = fx.page;
+    const tool = (id) => fx.tools.find((t) => t.id === id);
+    const cur = (m) => (m.id === sh.currentModule ? "page" : "false");
+    const navItem = (m) => `<a href="#" class="nav-item"${m.group === "personal" ? " data-secondary" : ""} data-bar="${m.bar}" aria-label="${esc(m.name)}" aria-current="${cur(m)}"><span class="g19"><relay-glyph name="${esc(m.icon)}" size="${m.group === "personal" ? 17 : 19}"></relay-glyph></span><span class="g24"><relay-glyph name="${esc(m.icon)}" size="24"></relay-glyph></span><span class="side-name">${esc(m.name)}</span><span class="bar-name">${esc(m.name)}</span>${m.showsApprovals && sh.approvals > 0 ? `<span class="count" aria-label="${sh.approvals} approvals">${sh.approvals}</span>` : ""}</a>`;
+    const mods = (g) => sh.modules.filter((m) => m.group === g).map(navItem).join("");
+    const curMod = sh.modules.find((m) => m.id === sh.currentModule);
+
+    const nav = `<aside class="side" aria-label="${esc(sh.product)} navigation"><div class="side-in">
+      <a href="${esc(sh.brandHref)}" class="brand" aria-label="${esc(sh.brandLabel)}"><relay-chef size="32"></relay-chef><span>${esc(sh.product)}</span></a>
+      <nav class="nav" aria-label="Modules" data-region="nav">
+        ${mods("main")}
+        <div class="nav-sep" role="separator"></div>
+        ${mods("personal")}
+        <button type="button" class="nav-more" aria-label="${esc(sh.modulesButton)}" aria-expanded="false" data-current="false"><relay-glyph name="grid" size="24"></relay-glyph><span>${esc(sh.modulesButton)}</span></button>
+      </nav>
+      ${sh.settings ? `<a href="${esc(sh.settings.href)}" class="nav-item side-settings" data-secondary aria-label="${esc(sh.settings.aria)}" aria-current="false"><span class="g19"><relay-glyph name="shield" size="17"></relay-glyph></span><span class="side-name">${esc(sh.settings.label)}</span></a>` : ""}
+      <button type="button" class="session" aria-label="${esc(sh.session.aria)}"><span class="avatar" aria-hidden="true"><relay-glyph name="shield" size="17"></relay-glyph></span><span>${esc(sh.session.title)}<small>${esc(sh.session.access)}</small></span><span class="online" aria-hidden="true"></span></button>
+    </div></aside>`;
+
+    const hasTabs = P.tabs.length > 1, curTab = (P.tabs.find((t) => t.current) || {}).name;
+    const header = `<div data-region="header">
+      <header class="mast">
+        <a href="${esc(sh.brandHref)}" class="mast-brand" aria-label="${esc(sh.brandLabel)}"><relay-chef size="28"></relay-chef></a>
+        <p class="mast-title"><b>${esc(curMod.name)}</b>${curTab ? `<span>${esc(curTab)}</span>` : ""}</p>
+        <div class="tools">
+          <button type="button" class="hosts" aria-label="${esc(sh.hostsLabel)}"><relay-glyph name="shield" size="19"></relay-glyph><span>${esc(sh.hostsLabel)}</span></button>
+          <button type="button" class="bell" aria-label="${esc(sh.notificationsLabel)}" aria-expanded="false"><relay-glyph name="bell" size="19"></relay-glyph></button>
+          <button type="button" class="ask" aria-expanded="false"><span class="chef-desk"><relay-chef size="32"></relay-chef></span><span class="chef-phone"><relay-chef size="24"></relay-chef></span><span>${esc(sh.askRelay)}</span><kbd>${esc(sh.askShortcut)}</kbd></button>
+        </div>
+      </header>
+      <div class="modhead"${hasTabs ? " data-tabs" : ""}>
+        <div class="titles"><h1>${esc(curMod.name)}</h1><p>${esc(S.lead || P.purpose)}</p></div>
+        ${hasTabs ? `<nav class="tabs" aria-label="${esc(curMod.name)}" data-region="tabs">${P.tabs.map((t) => `<a href="#" class="tab" aria-current="${t.current ? "page" : "false"}">${esc(t.name)}</a>`).join("")}</nav>` : ""}
+      </div>
+    </div>`;
+
+    const pct = (n) => (n == null ? L.unknown : n + "%");
+    const card = (lm) => {
+      const t = tool(lm.tool), primary = t.primaryLimit === "fiveHour" ? lm.fiveHour : lm.weekly;
+      const read = lm.signIn ? `${lm.host}, ${L.signInRequired}` : `${lm.host}, ${L.read} ${lm.readAt}`;
+      const what = lm.signIn ? L.weeklyUnknown : t.primaryLimit === "fiveHour" ? L.fiveHourUsed : L.weeklyUsed;
+      const details = t.primaryLimit === "fiveHour"
+        ? [[L.fiveHourReset, lm.fiveHour.reset], [L.weeklyLimit, lm.weekly.used == null ? null : `${lm.weekly.used}% ${L.used}`], [L.weeklyReset, lm.weekly.reset]]
+        : [[L.fiveHourLimit, lm.fiveHour.used == null ? null : `${lm.fiveHour.used}% ${L.used}`], [L.fiveHourReset, lm.fiveHour.reset], [L.weeklyReset, lm.weekly.reset]];
+      const trackLabel = `${t.name} ${t.primaryLimit === "fiveHour" ? L.fiveHourTrack : L.weeklyTrack}`;
+      const valueText = `${primary.used}% ${L.used}${lm.stale ? ` ${L.asOf} ${lm.readAt}` : ""}`;
+      return `<section class="card" aria-label="${esc(t.name)} limits" data-tool="${esc(t.id)}">
+        <div class="card-head"><h2>${esc(t.name)}</h2><small>${esc(read)}</small></div>
+        <div class="figure"><b class="${primary.used == null ? "unknown" : ""}">${esc(pct(primary.used))}</b><span>${esc(what)}</span></div>
+        ${lm.state ? `<span>${stateLabel(lm.state.label, lm.state.tone, true)}</span>` : ""}
+        ${primary.used != null ? track(primary.used, !!lm.stale, trackLabel, valueText) : ""}
+        <dl>${details.map(([k, v]) => `<div><dt>${esc(k)}</dt><dd class="${v == null ? "unknown" : ""}">${esc(v ?? L.unknown)}</dd></div>`).join("")}</dl>
+        ${lm.note ? `<p class="note">${esc(lm.note)}</p>` : ""}
+      </section>`;
+    };
+
+    const chart = () => {
+      const T = fx.tokens, claudeOnly = S.chart === "claudeOnly", u = T.unit;
+      const vals = T.days.map((d) => (claudeOnly ? d.claude : d.total)), max = Math.max(...vals);
+      const title = claudeOnly ? T.titleClaudeOnly : T.title;
+      const fmt = (n) => n.toLocaleString("en-GB") + u;
+      const legend = claudeOnly
+        ? [[`Claude ${fmt(T.totals.claude)}`, 430], [`Codex ${T.legend.excluded}`, 430, true], [`${fmt(T.totals.claude)} ${T.legend.counted}`, 620]]
+        : [[`Claude ${fmt(T.totals.claude)}`, 430], [`Codex ${fmt(T.totals.codex)}`, 430], [`${fmt(T.totals.total)} ${T.legend.total}`, 620]];
+      const aria = `${T.host} tokens ${T.window}${claudeOnly ? ", Claude only" : ""}: ${T.days.map((d, i) => `${d.day} ${fmt(vals[i])}`).join(", ")}`;
+      return `<figure class="chart" aria-label="${esc(aria)}" data-region="detail">
+        <div class="chart-head"><h2>${esc(title)}</h2><a href="#">${esc(T.link)}<relay-glyph name="arrow" size="14"></relay-glyph></a></div>
+        <div class="bars" aria-hidden="true" style="grid-template-columns: repeat(${T.days.length}, minmax(0, 1fr))">${T.days.map((d, i) => `<div class="bar"><span class="v">${esc(fmt(vals[i]))}</span><span class="b" style="block-size: ${Math.max(4, Math.round((vals[i] / max) * 140))}px"></span><span class="d">${esc(d.day)}</span></div>`).join("")}</div>
+        <figcaption>${legend.map(([t, w, uk]) => `<span style="font-weight: ${w}"${uk ? ' class="unknown"' : ""}>${esc(t)}</span>`).join("")}</figcaption>
+      </figure>`;
+    };
+
+    let body = "";
+    if (S.kind === "loading") {
+      body = `<div class="loading" aria-label="${esc(S.loadingLabel)}" aria-busy="true" data-region="cards">${skeleton("text", "inline-size: 9rem;")}${Array.from({ length: S.skeletonRows }, () => skeleton("block", "block-size: 76px;")).join("")}</div>`;
+    } else if (S.kind === "empty") {
+      body = `<section class="empty" data-region="notice"><relay-agent agent="pkgsrc" host="birch" state="ready" size="88"></relay-agent><h2>${esc(S.empty.title)}</h2><p>${esc(S.empty.text)}</p><a href="#" class="linkbtn" data-region="action">${esc(S.empty.link)}</a></section>`;
+    } else if (S.kind === "error") {
+      body = `<section class="error" role="alert" data-region="notice">${stateLabel(S.error.label, "critical", false)}<h2>${esc(S.error.title)}</h2><p>${esc(S.error.text)}</p>${button(S.error.action, "action")}</section>`;
+    } else {
+      body = (S.notices.length ? `<div class="notices" data-region="notice">${S.notices.map(notice).join("")}</div>` : "")
+        + `<section class="summary" aria-label="Room to work" data-region="summary"><h2>${esc(S.summary.verdict)}</h2><p>${esc(S.summary.note)}</p></section>`
+        + `<div class="cards" data-region="cards">${S.limits.map(card).join("")}</div>`
+        + chart()
+        + `<p class="foot" data-region="footer">${esc(P.footnote)}</p>`;
+    }
+
+    app.innerHTML = `<div class="shell">${nav}<div class="work">${header}<main><div class="page">${body}</div></main></div></div>`;
+
+    // Phone: the bottom bar lives directly under <body> (position: fixed; bottom: 0), so the document scrolls and a full-page capture ends with the bar.
+    const navEl = app.querySelector(".nav"), navHome = navEl.parentNode, navNext = navEl.nextSibling, mq = matchMedia("(max-width: 599px)");
+    const place = () => { if (mq.matches) document.body.appendChild(navEl); else navHome.insertBefore(navEl, navNext); };
+    place(); mq.addEventListener("change", place);
+  };
+
+  fetch("../fixture.json", { cache: "no-store" })
+    .then((r) => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+    .then((fx) => { render(fx.data.usageLimits); finish("1"); })
+    .catch((e) => {
+      app.innerHTML = `<main class="fail" role="alert"><h1>Couldn’t load fixture.json</h1><p>${esc(e.message)}. Serve the project folder over HTTP and open this page from it.</p></main>`;
+      finish("error");
+    });
+})();
+</script>
+</body>
+</html>

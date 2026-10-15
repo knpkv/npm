@@ -50,6 +50,57 @@ const click = async (href: string) => {
   anchor.remove()
 }
 
+/** Successful empty readings use the designed notice and action, without fabricated zero-value cards. */
+it("renders empty Limits with grouped header and a real tokens route, then restores ordinary chrome", async () => {
+  window.history.replaceState(null, "", "/?range=7d&timeZone=UTC#usage/limits")
+  await render({
+    usage: () => Effect.succeed({ fleet: usage, receivedAt: 1_000 }),
+    limits: Effect.succeed({ fleet: limits, receivedAt: 1_000 })
+  })
+  expect(document.querySelector('.superapp-shell[data-usage-empty="true"]')).not.toBeNull()
+  expect(document.querySelector(".usage-limits-empty")).not.toBeNull()
+  expect(document.querySelector(".usage-empty")).toBeNull()
+  const sidebar = document.querySelector(".superapp-sidebar")
+  expect(sidebar?.getAttribute("data-region")).toBeNull()
+  expect(sidebar?.querySelector('[data-region="nav"]')?.textContent).toBe("FleetUsage")
+  expect([...document.querySelectorAll("[data-region]")].map((region) => region.getAttribute("data-region"))).toEqual([
+    "nav",
+    "header",
+    "tabs",
+    "notice",
+    "action",
+    "nav"
+  ])
+  const header = document.querySelector('[data-region="header"]')
+  expect(header?.querySelector('[data-region="tabs"]')).not.toBeNull()
+  expect(header?.textContent).toContain("Usage details on hub. Account readings stay on this machine.")
+  const notice = document.querySelector('[data-region="notice"]')
+  expect(notice?.textContent).toContain("No usage readings yet")
+  expect(notice?.textContent).toContain("hub hasn’t recorded any limits or token use. Unknown is not zero.")
+  const action = document.querySelector<HTMLAnchorElement>('[data-region="action"]')
+  expect(action?.textContent).toBe("See fleet token readings")
+  expect(action?.getAttribute("href")).toBe("?range=7d&timeZone=UTC#usage/tokens")
+  expect(document.querySelector('[data-region="cards"]')).toBeNull()
+  expect(document.querySelector('[data-region="detail"]')).toBeNull()
+  expect(document.querySelector('[data-region="footer"]')).toBeNull()
+  await click("/?range=7d&timeZone=UTC#usage/tokens")
+  expect(document.querySelector('.superapp-shell[data-usage-empty="true"]')).toBeNull()
+  expect(document.querySelector(".usage-empty-header-region")).toBeNull()
+  expect(document.querySelector('.superapp-header[data-region="header"]')).not.toBeNull()
+})
+
+/** Empty arrays with incomplete peer discovery are unknown evidence, not a successful empty state. */
+it("keeps ordinary Limits when peer discovery is incomplete", async () => {
+  window.history.replaceState(null, "", "/?range=7d&timeZone=UTC#usage/limits")
+  await render({
+    usage: () => Effect.succeed({ fleet: { ...usage, peersListed: false }, receivedAt: 1_000 }),
+    limits: Effect.succeed({ fleet: limits, receivedAt: 1_000 })
+  })
+  expect(document.querySelector('.superapp-shell[data-usage-empty="true"]')).toBeNull()
+  expect(document.querySelector(".usage-empty-notice")).toBeNull()
+  expect(document.querySelector('[data-region="cards"]')).not.toBeNull()
+})
+
 /** A retained Limits error must not expose a Retry on a page that never reads Limits. */
 it("keeps Limits Retry on Limits after switching to healthy By tool", async () => {
   const reads: UsageModuleReads = {

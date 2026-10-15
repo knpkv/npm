@@ -13,7 +13,10 @@ import {
 import { Button, StateLabel, ToggleGroup } from "@knpkv/rly/primitives"
 import { Effect, Fiber, Option, Result, Schedule } from "effect"
 import * as AsyncResult from "effect/reactivity/AsyncResult"
-import { useEffect, useId, useMemo, useState, type ReactElement } from "react"
+import { useContext, useEffect, useId, useMemo, useState, type ReactElement } from "react"
+import { createPortal } from "react-dom"
+import { UsageEmptyArt } from "./internal/usage-empty-art.js"
+import { UsageEmptyChromeContext } from "./internal/usage-empty-chrome.js"
 import { ShellIcon } from "./internal/shell-icon.js"
 import {
   canonicalUsageSelection,
@@ -126,6 +129,22 @@ const UsagePage = ({
   const limits = useUsageRead(content.reads.limits, enabled && page === "limits", "1 minute", refresh)
   const usageReading = Option.getOrNull(AsyncResult.value(usage))
   const limitsReading = Option.getOrNull(AsyncResult.value(limits))
+  const emptyChrome = useContext(UsageEmptyChromeContext)
+  const empty =
+    page === "limits" &&
+    AsyncResult.isSuccess(usage) &&
+    AsyncResult.isSuccess(limits) &&
+    usage.value.fleet.peersListed &&
+    limits.value.fleet.peersListed &&
+    usage.value.fleet.hosts.length === 0 &&
+    limits.value.fleet.hosts.length === 0 &&
+    usage.value.fleet.failures.length === 0 &&
+    limits.value.fleet.failures.length === 0
+  const setEmpty = emptyChrome?.setEmpty
+  useEffect(() => {
+    setEmpty?.(mount.active && empty)
+    return () => setEmpty?.(false)
+  }, [empty, mount.active, setEmpty])
   const knownHosts = [
     ...new Set([
       ...(usageReading?.fleet.hosts.map((entry) => entry.host) ?? []),
@@ -210,6 +229,45 @@ const UsagePage = ({
   const toolFailure = shown?.fleet.failures.find((entry) => entry.host.toLowerCase() === breakdownHost?.toLowerCase())
   const toolTotal =
     toolReading?._tag === "Read" ? [...providerTotals.values()].reduce((sum, tokens) => sum + tokens, 0) : null
+  if (empty && emptyChrome !== null) {
+    const mast = (
+      <div className="usage-empty-mast">
+        <div className="usage-empty-titles">
+          <h1 id={headingId}>Usage</h1>
+          <p>Usage details on {emptyChrome.host}. Account readings stay on this machine.</p>
+        </div>
+        <nav aria-label="Usage pages" className="usage-empty-tabs" data-region="tabs">
+          {usageModule.pages.map((entry) => (
+            <a
+              key={entry.id}
+              href={moduleHref(usageModule, entry.id, decoded.success.search)}
+              aria-current={page === entry.id ? "page" : undefined}
+              data-module-page={entry.id}
+            >
+              {entry.label}
+            </a>
+          ))}
+        </nav>
+      </div>
+    )
+    return (
+      <div className="usage-limits-empty" data-usage-page="limits" data-usage-empty="true" aria-label="Usage Limits">
+        {emptyChrome.headerOutlet === null ? mast : createPortal(mast, emptyChrome.headerOutlet)}
+        <section className="usage-empty-notice" data-region="notice">
+          <UsageEmptyArt />
+          <h2>No usage readings yet</h2>
+          <p>{emptyChrome.host} hasn’t recorded any limits or token use. Unknown is not zero.</p>
+          <a
+            href={moduleHref(usageModule, "tokens", decoded.success.search)}
+            className="usage-empty-action"
+            data-region="action"
+          >
+            See fleet token readings
+          </a>
+        </section>
+      </div>
+    )
+  }
   return (
     <div className="usage-details" data-usage-page={page}>
       <div className="usage-details-mast">
@@ -218,7 +276,7 @@ const UsagePage = ({
           <p>Limits and tokens, per host, tool and model</p>
           {repaired ? <p>Some URL selectors were reset. Valid selections were kept.</p> : null}
         </header>
-        <nav aria-label="Usage pages" className="usage-details-tabs">
+        <nav aria-label="Usage pages" className="usage-details-tabs" data-region="tabs">
           {usageModule.pages.map((entry) => (
             <a
               key={entry.id}
@@ -277,7 +335,12 @@ const UsagePage = ({
         ) : null}
         {(AsyncResult.isFailure(usage) && (page !== "by-tool" || toolReading?._tag !== "Read")) ||
         (page === "limits" && AsyncResult.isFailure(limits)) ? (
-          <Button onClick={() => setRefresh((previous) => previous + 1)}>Retry</Button>
+          <Button
+            data-region={page === "limits" ? "action" : undefined}
+            onClick={() => setRefresh((previous) => previous + 1)}
+          >
+            Retry
+          </Button>
         ) : null}
       </div>
       {page === "by-tool" &&
@@ -470,7 +533,7 @@ const UsagePage = ({
           </section>
         </>
       ) : null}
-      <footer className="usage-details-footer">
+      <footer className="usage-details-footer" data-region={page === "limits" ? "footer" : undefined}>
         <p>
           Only reported tokens and limit readings travel between hosts. Costs, balances, sessions and paths stay on
           their machines. Cost isn't reported.

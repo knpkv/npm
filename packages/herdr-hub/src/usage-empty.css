@@ -1,0 +1,307 @@
+@layer fleet {
+  /* A stable header parent keeps the launcher and conversation mounted when empty readings arrive. */
+  .superapp-header-region:not([hidden]) {
+    display: contents;
+  }
+
+  .superapp-shell[data-usage-empty="true"] {
+    font: 430 1rem / 1.5 var(--rly-font-ui);
+    color: var(--rly-color-text-1);
+  }
+
+  .superapp-shell[data-usage-empty="true"] .superapp-sidebar,
+  .superapp-shell[data-usage-empty="true"] .superapp-bottom {
+    font-weight: 430;
+  }
+
+  .superapp-shell[data-usage-empty="true"] .superapp-header [data-rly-relay-launcher] {
+    min-block-size: 44px;
+    block-size: 44px;
+    padding-inline: 0.5rem;
+    font: 520 0.875rem / 1.2 var(--rly-font-ui);
+    letter-spacing: normal;
+  }
+
+  .superapp-shell[data-usage-empty="true"] .superapp-header kbd {
+    min-inline-size: 0;
+    padding-block: 0.2rem;
+    padding-inline: 0.35rem;
+    font: 430 0.75rem / 1 var(--rly-font-mono);
+    border-color: var(--rly-color-border-1);
+    border-radius: 4px;
+    background: var(--rly-color-surface-2);
+  }
+
+  .superapp-shell[data-usage-empty="true"] .superapp-session small {
+    font-size: 0.65rem;
+    line-height: inherit;
+    margin-block: 0;
+  }
+
+  .superapp-shell[data-usage-empty="true"] .superapp-settings .superapp-icon,
+  .superapp-shell[data-usage-empty="true"] .superapp-session-avatar .superapp-icon {
+    inline-size: 17px;
+    block-size: 17px;
+  }
+
+  .usage-empty-header-region {
+    grid-column: 2;
+    grid-row: 1;
+    min-inline-size: 0;
+  }
+
+  .usage-empty-announcements,
+  .usage-empty-header-outlet {
+    display: contents;
+  }
+
+  .superapp-shell[data-usage-empty="true"] .superapp-header {
+    display: flex;
+    position: relative;
+    min-block-size: 4rem;
+    block-size: 4rem;
+    padding-block: 0;
+    padding-inline: 40px;
+    gap: 0.5rem;
+    background: var(--rly-color-surface-1);
+  }
+
+  .superapp-shell[data-usage-empty="true"] .superapp-header > .fleet-shell-relay {
+    order: 3;
+    margin-inline-start: 0;
+  }
+
+  .superapp-shell[data-usage-empty="true"] .superapp-host {
+    margin-inline-start: auto;
+    min-inline-size: 44px;
+    min-block-size: 44px;
+    padding-inline: 0.5rem;
+    font: 430 0.75rem / 1.2 var(--rly-font-ui);
+    gap: 0.4rem;
+    padding-block: 0;
+  }
+
+  .superapp-shell[data-usage-empty="true"] .superapp-notifications {
+    min-inline-size: 44px;
+    min-block-size: 44px;
+    padding: 0;
+    color: var(--rly-color-text-1);
+  }
+
+  .superapp-shell[data-usage-empty="true"] .superapp-header .superapp-icon {
+    inline-size: 19px;
+    block-size: 19px;
+  }
+
+  .superapp-shell[data-usage-empty="true"] .fleet-shell-relay-status {
+    display: none;
+  }
+
+  .superapp-shell[data-usage-empty="true"] .superapp-main {
+    padding-block: 0;
+  }
+
+  .superapp-shell[data-usage-empty="true"] .superapp-main {
+    padding-inline: 0;
+  }
+
+  .usage-limits-empty {
+    min-inline-size: 0;
+    color: var(--rly-color-text-1);
+    padding-block: 2rem 1rem;
+    padding-inline: 40px;
+  }
+
+  .usage-empty-mast {
+    display: grid;
+    gap: 0.9rem;
+    padding-block: 1.5rem 0;
+    padding-inline: 40px;
+    border-block-end: 1px solid var(--rly-color-border-1);
+  }
+
+  .usage-empty-titles h1,
+  .usage-empty-titles p,
+  .usage-empty-notice h2,
+  .usage-empty-notice p {
+    margin: 0;
+  }
+
+  .usage-empty-titles h1 {
+    font-size: 1.75rem;
+    font-weight: 620;
+    letter-spacing: -0.035em;
+    line-height: 1.2;
+  }
+
+  .usage-empty-titles p {
+    color: var(--rly-color-text-2);
+    font-size: 0.9375rem;
+  }
+
+  .usage-empty-tabs {
+    display: flex;
+    gap: 0.5rem;
+    overflow: auto;
+    scrollbar-width: none;
+    margin-block-end: -1px;
+  }
+
+  .usage-empty-tabs a {
+    display: flex;
+    flex: none;
+    align-items: center;
+    min-block-size: 44px;
+    padding-inline: 0.25rem;
+    white-space: nowrap;
+    text-decoration: none;
+    font-size: 0.9375rem;
+    color: var(--rly-color-text-2);
+    border-block-end: 2px solid transparent;
+  }
+
+  .usage-empty-tabs a[aria-current="page"] {
+    font-weight: 620;
+    color: var(--rly-color-text-1);
+    border-block-end-color: var(--rly-color-text-1);
+  }
+
+  .usage-empty-notice {
+    display: grid;
+    justify-items: start;
+    gap: 1rem;
+    padding-block: 1.5rem;
+    max-inline-size: 34em;
+  }
+
+  .usage-empty-art {
+    display: block;
+    flex: none;
+    inline-size: 88px;
+    block-size: 88px;
+    line-height: 0;
+  }
+
+  .usage-empty-notice h2 {
+    font-size: 1.6rem;
+    font-weight: 620;
+    letter-spacing: -0.025em;
+    line-height: 1.25;
+    text-wrap: balance;
+  }
+
+  .usage-empty-notice p {
+    color: var(--rly-color-text-2);
+  }
+
+  .usage-empty-action {
+    justify-self: start;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    min-block-size: 44px;
+    padding-inline: 1rem;
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-control);
+    background: var(--rly-color-surface-1);
+    font-size: 0.875rem;
+    font-weight: 520;
+    color: var(--rly-color-text-1);
+    text-decoration: none;
+  }
+
+  @media (max-width: 599px) {
+    .superapp-shell[data-usage-empty="true"] .superapp-header [data-rly-relay-launcher] {
+      min-block-size: 44px;
+      block-size: 44px;
+      padding-inline: 0.5rem;
+      font: 520 0.875rem / 1.2 var(--rly-font-ui);
+      letter-spacing: normal;
+    }
+
+    .superapp-shell[data-usage-empty="true"] .superapp-header kbd {
+      min-inline-size: 0;
+      padding-block: 0.2rem;
+      padding-inline: 0.35rem;
+      font: 430 0.75rem / 1 var(--rly-font-mono);
+      border-color: var(--rly-color-border-1);
+      border-radius: 4px;
+      background: var(--rly-color-surface-2);
+    }
+
+    .superapp-shell[data-usage-empty="true"] .superapp-session small {
+      font-size: 0.65rem;
+      line-height: inherit;
+      margin-block: 0;
+    }
+
+    .superapp-shell[data-usage-empty="true"] .superapp-settings .superapp-icon,
+    .superapp-shell[data-usage-empty="true"] .superapp-session-avatar .superapp-icon {
+      inline-size: 17px;
+      block-size: 17px;
+    }
+
+    .usage-empty-header-region {
+      grid-column: 1;
+    }
+
+    .superapp-shell[data-usage-empty="true"] .superapp-header {
+      gap: 0.5rem;
+      padding-inline: 16px;
+    }
+
+    .superapp-shell[data-usage-empty="true"] .superapp-header > .superapp-brand {
+      display: grid;
+      place-items: center;
+      margin-inline-start: -8px;
+    }
+
+    .usage-empty-chef {
+      inline-size: 28px;
+      block-size: 28px;
+      display: block;
+    }
+
+    .superapp-shell[data-usage-empty="true"] .superapp-phone-title {
+      display: flex;
+      gap: 0.45rem;
+    }
+
+    .superapp-shell[data-usage-empty="true"] .superapp-phone-title span {
+      margin-inline-start: 0;
+    }
+
+    .superapp-shell[data-usage-empty="true"] .superapp-host {
+      display: none;
+    }
+
+    .superapp-shell[data-usage-empty="true"] .superapp-notifications {
+      margin-inline-start: auto;
+      margin-inline-end: -8px;
+    }
+
+    .usage-limits-empty {
+      padding-block: 0.9rem 6rem;
+      padding-inline: 16px;
+    }
+
+    .usage-empty-mast {
+      padding-block: 0;
+      padding-inline: 8px;
+      gap: 0;
+      background: var(--rly-color-surface-1);
+    }
+
+    .usage-empty-titles {
+      display: none;
+    }
+
+    .usage-empty-tabs {
+      gap: 0;
+    }
+
+    .usage-empty-tabs a {
+      padding-inline: 0.75rem;
+    }
+  }
+}
