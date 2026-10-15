@@ -12,23 +12,24 @@ The browser shows stacks grouped by app, with desktop columns and compact phone
 rows. Read again starts a fresh discovery request and clears the previous rows.
 Loading, empty, incomplete discovery and owner sign-in failures are explicit.
 Missing metadata reads Unknown; zero resources remains zero. No polling, cached
-rows, plan, apply or destroy runs. Stage names and known resource counts open the
+rows, local plan, apply or destroy runs. Stage names and known resource counts open the
 stack UI. Resources lists actual returned resource metadata; State groups the
 same resources by their returned construct parent and exact type. Resource rows
 open identity and dependency details. Outputs distinguishes Hidden values, proven
-empty state and unavailable formats. No raw JSON click target, Plan tab or Preview
-changes action is present.
+empty state and unavailable formats. Plan shows the latest plan infrastructure CI already published. No raw JSON or
+Preview changes action is present.
 
 The standalone wrapper shows Alchemy console, the actual local listener address
 and owner session status. It adds no Relay host inventory or shell navigation.
 
 Configuration is read at startup:
 
-| Variable               | Default                                        | Boundary                              |
-| ---------------------- | ---------------------------------------------- | ------------------------------------- |
-| `ALCHEMY_CONSOLE_ROOT` | `Work/dev` under the user's home               | Server-private project discovery path |
-| `AWS_CONFIG_FILE`      | `.aws/config` under the user's home            | Server-private SSO configuration path |
-| `ALCHEMY_CONSOLE_HOME` | `.cache/alchemy-console` under the user's home | Server-private control directory      |
+| Variable                   | Default                                        | Boundary                               |
+| -------------------------- | ---------------------------------------------- | -------------------------------------- |
+| `ALCHEMY_CONSOLE_ROOT`     | `Work/dev` under the user's home               | Server-private project discovery path  |
+| `AWS_CONFIG_FILE`          | `.aws/config` under the user's home            | Server-private SSO configuration path  |
+| `ALCHEMY_CONSOLE_HOME`     | `.cache/alchemy-console` under the user's home | Server-private control directory       |
+| `ALCHEMY_CONSOLE_CI_TOKEN` | Unconfigured                                   | Server-private read-only Actions token |
 
 Login reuse is per port. A reused server keeps its startup configuration. The
 control directory must be owned by the current user with mode `0700`; each
@@ -40,7 +41,7 @@ POSIX ownership and Unix sockets.
 ## Authenticated API
 
 The client-safe contracts are exported from `@knpkv/alchemy-console/api` and may be
-used with Effect's `HttpApiClient`. Both endpoints require the process's owner
+used with Effect's `HttpApiClient`. All endpoints require the process's owner
 cookie, and all responses are private and uncacheable:
 
 The cookie name includes the bound listener port, so sessions on different ports
@@ -49,10 +50,11 @@ Cookies still share the loopback host and travel across ports; the name separate
 sessions and does not provide port confidentiality. The API middleware resolves
 the name at runtime rather than declaring a fixed OpenAPI cookie scheme.
 
-| Route                 | Result                                                 |
-| --------------------- | ------------------------------------------------------ |
-| `GET /api/stacks`     | Stack summaries and explicit local/S3 discovery issues |
-| `GET /api/stacks/:id` | Current normalized resource state for a listed stack   |
+| Route                      | Result                                                   |
+| -------------------------- | -------------------------------------------------------- |
+| `GET /api/stacks`          | Stack summaries and explicit local/S3 discovery issues   |
+| `GET /api/stacks/:id`      | Current normalized resource state for a listed stack     |
+| `GET /api/stacks/:id/plan` | Latest verified CI plan or an explicit unavailable state |
 
 Listing runs discovery on demand, without polling or schedules. IDs are random,
 process-scoped identifiers with no encoded locator. They remain stable across
@@ -78,16 +80,66 @@ remain in the server and HttpOnly cookie. Every unsafe API method is refused,
 including apply and destroy. Reads reject foreign origins and cross-site browser
 requests. Listener and request Host are restricted to the bound loopback address.
 
+## CI plans
+
+The console never imports or executes stack code. It reads the `plan.json`
+publication from infrastructure CI in `knpkv/infra`. Only `site/prod` and
+`aws-org/org` map to that repository's `site` and `aws-org` stacks. Other app/stage
+pairs show Not connected.
+
+Set `ALCHEMY_CONSOLE_CI_TOKEN` on the server to a dedicated fine-grained token with
+Actions read access to that repository. The token is held in redacted server
+configuration; no host `gh` token is discovered. The current main comparison uses
+the newest main push workflow run's SHA, the latest main commit seen by CI.
+It does not query Git references or require Contents access. If no main push run
+is visible, only the age rule applies. This comparison does not prove the current
+Git branch tip.
+
+The reader selects the newest non-expired matching artifact. It verifies its
+publication workflow on main, successful publisher and producer runs, PR/head/base
+identity, publisher job identity, ZIP SHA-256, exact receipt fields, pinned
+resource identities and the native semantic digest. Both archive and expanded
+JSON must be below 1 MB. API metadata has a separate 2 MiB per-response cap to
+accommodate full 100-row pages before schema projection. Metadata pagination stops
+at ten pages and the whole read has a 30-second timeout. ZIP inspection and decompression stay in memory. No
+payload is logged or extracted to disk.
+
+A publication becomes stale after 24 hours or when its base differs from the
+latest main commit seen by CI. A newer failed stack run can retain the verified
+last publication with a stale notice. The latest attempt must have run the selected
+stack’s `Native read-only plan` step. A successful job that skipped that step, or
+a newer attempt for another stack, does not replace the selected stack’s attempt. Expired, unverified, unconnected and
+unavailable states have no rows. Infra CI not publishing is distinct from a
+stack's first publication. Only a CI transport failure offers Retry, which reads
+again and never executes a plan. Owner-session failures return to the console's
+sign-in/error state instead of pretending CI refused access.
+
+The normalized authenticated client-visible projection contains PR number, short
+head/base SHAs, publication time, safe GitHub run link, short semantic digest,
+resource identity/type/action and bounded property names. These fields may cross
+owner HTTP, but must not enter public or unauthenticated routes, browser storage
+or telemetry. The token, signed artifact URLs, artifact/job IDs, full receipt
+hashes, raw ZIP and semantic hash inputs remain server-private. Property values,
+provider credentials and backend locators never enter this projection.
+
+CI publication authenticates the source of the data, not the behavior of PR code.
+The console does not certify CI's no-write or secret-access policy. No real CI
+artifact is used by this feature's tests; all reader and browser states use
+synthetic fixtures.
+
 ## Browser views
 
-Import `StackListView`, `StackDetailView` and `ResourceDetailView` from `@knpkv/alchemy-console/views` and its stylesheet from
+Import `StackListView`, `StackDetailView`, `PlanView` and `ResourceDetailView` from `@knpkv/alchemy-console/views` and its stylesheet from
 `@knpkv/alchemy-console/views/style.css`. Mount them inside a Rly style/theme boundary.
 Views consumers supply the optional React, React DOM and Rly peers; the standalone
 browser shell already bundles them.
 The application supplies normalized presentation data, a product label, host
 sign-in instruction, read actions and real UI destinations. `StackListView` accepts
 optional `stackHref`; without a destination, stages and counts remain text.
-`StackDetailView` has controlled Resources/Outputs/State tabs and `resourceHref`.
+`StackDetailView` has controlled Resources/Outputs/State/Plan tabs and `resourceHref`. Supply
+`planState` and `onReadPlanAgain` for CI reading; without `planState`, Plan shows
+Not connected. `PlanView` accepts the same controlled state and a read-only
+`onReadAgain` callback.
 `ResourceDetailView` accepts `stackHref` and `resourceHref`. Views fetch nothing,
 read no configuration and persist no data. The standalone detail wrapper adds
 breadcrumbs and Read again outside the referenced module content. Phone list

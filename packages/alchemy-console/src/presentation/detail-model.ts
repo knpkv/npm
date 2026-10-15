@@ -23,7 +23,7 @@ export interface StackPresentation extends Omit<StackState, "resources" | "outpu
   readonly outputs: ReadonlyArray<OutputPresentation> | null
 }
 
-export type StackTab = "resources" | "outputs" | "state"
+export type StackTab = "resources" | "outputs" | "state" | "plan"
 
 /** Refresh and navigation replace the whole state, so a failed read cannot retain the previous stack. */
 export type StackDetailState =

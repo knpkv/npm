@@ -8,6 +8,7 @@ import { CatalogReadError, StackDetail, StackList } from "../src/api.js"
 import { Catalog } from "../src/server/Catalog.js"
 import { application } from "../src/server/HttpApplication.js"
 import { makeOwnerSession } from "../src/server/OwnerSession.js"
+import { PlanReader } from "../src/server/PlanReader.js"
 import { FixtureSource, fixtureSourceLayer, state } from "./catalogFixture.js"
 
 const routes = Layer.unwrap(Effect.gen(function*() {
@@ -17,6 +18,32 @@ const routes = Layer.unwrap(Effect.gen(function*() {
   return HttpRouter.serve(application, { disableLogger: true, disableListenLog: true }).pipe(
     Layer.provideMerge(Layer.succeed(OwnerSession.OwnerSession, session)),
     Layer.provideMerge(Catalog.layer.pipe(Layer.provideMerge(fixtureSourceLayer))),
+    Layer.provide(Layer.succeed(
+      PlanReader,
+      PlanReader.of({
+        read: () =>
+          Effect.succeed({
+            _tag: "Ready",
+            plan: {
+              source: {
+                pr: 42,
+                head: "3f9c2e1",
+                base: "8a41d07",
+                publishedAt: "2026-10-14T14:05:00Z",
+                ageDays: 0,
+                runHref: "https://github.com/knpkv/infra/actions/runs/101"
+              },
+              digest: "9be1…c04a",
+              rows: [{ fqn: "Site", resourceType: "Cloudflare.Worker", action: "update", changedKeys: ["routes"] }],
+              stale: null
+            },
+            token: "fixture-private-token",
+            artifactId: 301,
+            artifactUrl: "https://fixture.invalid/private.zip",
+            fullHash: "a".repeat(64)
+          })
+      })
+    )),
     Layer.provide(HttpPlatform.layer),
     Layer.provide(Etag.layer)
   )
@@ -88,6 +115,27 @@ layer(fixtures)("HTTP owner boundary", (it) => {
       const detail = yield* Schema.decodeUnknownEffect(StackDetail)(yield* detailResponse.json)
       expect(detail.state).toEqual(state)
       expect(JSON.stringify([list, detail])).not.toMatch(/fixture-secret|fixture-private-locator|__redacted__/)
+    }))
+
+  it.effect("requires owner auth for the GET-only plan route and emits only the safe projection", () =>
+    Effect.gen(function*() {
+      const client = yield* HttpClient.HttpClient
+      const session = yield* OwnerSession.OwnerSession
+      const list = yield* Schema.decodeUnknownEffect(StackList)(
+        yield* (yield* client.get("/api/stacks", { headers: { cookie: cookie(session) } })).json
+      )
+      const id = list.stacks[0]?.id
+      if (id === undefined) return yield* Effect.die("fixture stack missing")
+      const url = `/api/stacks/${id}/plan`
+      expect((yield* client.get(url)).status).toBe(401)
+      expect((yield* client.post(url, { headers: { cookie: cookie(session) } })).status).toBe(403)
+      const response = yield* client.get(url, { headers: { cookie: cookie(session) } })
+      expect(response.status).toBe(200)
+      expect(response.headers["cache-control"]).toBe("private, no-store")
+      const body = JSON.stringify(yield* response.json)
+      expect(body).toContain("\"changedKeys\":[\"routes\"]")
+      expect(body).toContain("\"digest\":\"9be1…c04a\"")
+      expect(body).not.toMatch(/fixture-private|artifactId|artifactUrl|fullHash|token|private.zip|aaaaaaaaaaaaaaaa/)
     }))
 
   it.effect("marks data, errors, auth refusals and bootstrap assets uncacheable", () =>

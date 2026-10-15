@@ -20,6 +20,7 @@ import { HttpClient } from "effect/http"
 import { Catalog } from "../src/server/Catalog.js"
 import { requestLoginUrl } from "../src/server/ControlSocket.js"
 import { runConsole } from "../src/server/Launch.js"
+import { disconnectedLayer } from "../src/server/PlanReader.js"
 import { fixtureSourceLayer } from "./catalogFixture.js"
 
 class LaunchFixture extends Context.Service<LaunchFixture, {
@@ -56,7 +57,7 @@ const launchLayer = Layer.effectContext(Effect.gen(function*() {
 const fixtures = Catalog.layer.pipe(
   Layer.provideMerge(fixtureSourceLayer),
   // Merge the capture last so live Node stdout cannot replace it in the retained platform context.
-  Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeHttpClient.layerNodeHttp, launchLayer))
+  Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeHttpClient.layerNodeHttp, launchLayer, disconnectedLayer))
 )
 
 const optionsFor = Effect.gen(function*() {
