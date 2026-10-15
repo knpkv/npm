@@ -1,6 +1,8 @@
 /** Decorative agent identity; adjacent text carries state. Talking stages own mouths; typed idle evidence opts into seeded motion. */
 import type { AgentTaskKind } from "@knpkv/herdr-fleet/model"
 import { useCreatureNeighbourPhase } from "./creature-neighbours.js"
+import { useTaskPlayback } from "./creature-playback.js"
+import { creatureTaskMotion, taskTickInk, type TaskEntry, type TaskPose } from "./creature-task.js"
 import { useCreatureVisibility } from "./creature-visibility.js"
 import {
   type CSSProperties,
@@ -15,6 +17,7 @@ import {
 
 import { CreatureAdornment } from "./creature-accessory.js"
 import { agentStatePresentation } from "./agent-state.js"
+import { connectAgentGroup } from "./agent-state-core.js"
 import {
   agentCharacter,
   creatureBodySeed,
@@ -42,6 +45,9 @@ export type { CreatureAccessory, CreatureMood, CreatureReaction } from "./creatu
 export type CreatureSize = "row" | "cast" | "stage"
 const pixels = { cast: 60, row: 36, stage: 240 } satisfies Record<CreatureSize, number>
 
+type TaskStyle = CSSProperties & { readonly [property: `--connect-task-${string}`]: string }
+const taskStyle = (properties: TaskStyle): CSSProperties => properties
+
 export interface CreatureProps {
   readonly host: string
   readonly id: string
@@ -51,9 +57,15 @@ export interface CreatureProps {
   readonly hueFamily?: CreatureHueFamily | undefined
   readonly state: string
   /**
-   * Defaults to absent, preserving legacy state motion. Explicit idle enables the seeded idle loops and
-   * habit at every size, sampled from host/id and the rendered family. Same-kind updates retain phase;
-   * another kind removes the idle layers. Closed, stale, reduced-motion and forced-colour views stay still.
+   * Defaults to absent, preserving legacy state motion in Fleet and Home at every size. Supplied kinds
+   * use the page13–16 task vocabulary, sampled on each published update; Fleet already debounces these
+   * for 500ms. Stage uses full motion, row/cast use the quiet row variant. Same-kind updates retain nodes,
+   * clocks and seeded phase; named one-shots finish before the newest queued kind starts. Trusted raw
+   * needs-input/done evidence wins over a stale kind; explicit failing has highest priority. The controller
+   * stays mounted through lifecycle changes, and matching kind catch-up never replays an entry. Done/failing
+   * mounts are settled and repeated updates never replay them. Removing this prop exits task motion.
+   * Closed/stale, mood overrides, talking and reactions take ownership instead. System/in-app reduction
+   * and forced colours settle immediately; restoring motion never replays a skipped one-shot.
    */
   readonly taskKind?: AgentTaskKind | undefined
   /** Home keeps unknown evidence neutral and uses its wider row frame with thin state rings; Fleet retains its needs-you fallback and fitted row track. */
@@ -157,29 +169,56 @@ export const Creature = ({
     completion.override === override &&
     completion.complete
   const selected = override ?? creatureMood(state, talkPose)
-  const reduced = useReducedCreatureMotion(root, selected === "done" && !settled && reaction === undefined)
+  const ordinary = !talkPose && override === undefined && reaction === undefined
+  const shut = closed || stale
+  const taskOwned = ordinary && !shut && taskKind !== undefined
+  const reduced = useReducedCreatureMotion(
+    root,
+    !taskOwned && selected === "done" && !settled && reaction === undefined
+  )
   // Persist the skipped completion so restoring motion cannot replay this transition.
   if (reduced && !settled && selected === "done" && reaction === undefined) {
     setCompletion({ identity, state, override, complete: true })
   }
-  const ordinary = !talkPose && override === undefined && reaction === undefined
   const mood = reaction !== undefined ? reaction : selected === "done" && (settled || reduced) ? "happy" : selected
-  const shut = closed || stale
   const expressive = talking && size === "stage" && !shut
   // Lifecycle urgency takes precedence while the server debounces a new task kind.
-  const resting = presentation.bucket !== "needs-you" && presentation.bucket !== "finished"
-  const idle = taskKind === "idle" && ordinary && !shut && resting
-  useCreatureVisibility(root, idle)
+  const palette = creaturePalette(host, name, hueFamily, closed ? 0.1 : 1)
+  const signature = creatureSignature(host, id, palette.family)
+  const phase = useCreatureNeighbourPhase(host, id, signature.phase)
+  // Raw lifecycle evidence is trusted before the debounced kind catches up. Unknown raw states
+  // have no authority: Fleet's needs-you fallback is presentation, not evidence of an input request.
+  const lifecycle = connectAgentGroup(state, { presentation: "push" })
+  const requestedTask = taskOwned
+    ? taskKind === "failing"
+      ? "failing"
+      : lifecycle === "finished"
+        ? "done"
+        : lifecycle === "needs-you"
+          ? "blocked"
+          : taskKind
+    : undefined
+  const { finish: finishTask, playback, still: stillTask } = useTaskPlayback(root, identity, requestedTask)
+  const typed = requestedTask !== undefined
+  // The typed controller owns this completion too. Exiting to legacy motion must not celebrate it again.
+  if (typed && playback.current.kind === "done" && !playback.current.entered && selected === "done" && !settled) {
+    setCompletion({ identity, state, override, complete: true })
+  }
+  const idle = typed && playback.current.kind === "idle"
+  const idlePresent = idle || (typed && playback.outgoing?.kind === "idle")
+  const task =
+    typed && playback.current.kind !== "idle" ? creatureTaskMotion(playback.current.kind, size === "stage") : undefined
+  useCreatureVisibility(root, typed)
   const basePose =
     !shut && !talkPose && override === undefined && reaction === undefined
       ? creatureAgentPose(state)
       : creaturePose(mood, closed, stale)
-  const pose: CreaturePose = idle
-    ? { ...basePose, brow: "rest", lid: 0.12, lower: 0, eyeScale: 1, look: [0, 0], eyes: "open" }
-    : basePose
-  const palette = creaturePalette(host, name, hueFamily, closed ? 0.1 : 1)
-  const signature = creatureSignature(host, id, palette.family)
-  const phase = useCreatureNeighbourPhase(host, id, signature.phase)
+  const pose: CreaturePose =
+    task !== undefined
+      ? task.base
+      : idle
+        ? { ...basePose, brow: "rest", lid: 0.12, lower: 0, eyeScale: 1, look: [0, 0], eyes: "open" }
+        : basePose
   const ew = character.eye[0] * pose.eyeScale
   const eh = character.eye[1] * pose.eyeScale
   const [left, top, width, height] = character.bounds
@@ -189,6 +228,11 @@ export const Creature = ({
   const referenceHeight = seed.height * unit
   const referenceTop = character.eyeY - referenceHeight * seed.eyeY
   const referenceLeft = 50 - referenceWidth / 2
+  // Typing ticks hang off the seed's top (the reference's y0) and use its detail levels: lvl >= 2 only at stage.
+  const tickTop = FOOT - referenceHeight
+  const tickLength = (size === "stage" ? 1.8 : 2.4) * unit
+  // The done glint hangs off the reference's oy, which is measured from the seed top rather than the drawn bounds.
+  const glintTop = tickTop - (4 + (accessory === "hard-hat" ? 2.5 : accessory === "headphones" ? 1.5 : 0)) * unit
   const row = size === "row"
   const homeRow = row && statePolicy === "home"
   // Keep body framing independent of mood. Overlays may paint outside this slot; screenshot masks include SVG paint bounds.
@@ -214,7 +258,6 @@ export const Creature = ({
   const upperRest = eyeY - eh - socket
   const lowerRest = eyeY + eh + socket
   const reach = ew + (idle ? 0 : socket) + unit
-  const lashReach = idle ? ew + 0.5 * unit : reach
   type Rig = Record<
     `--connect-creature-${"duration" | "phase" | "unit" | "ink" | "open" | "lower" | "lid" | "lid-low" | "origin-x" | "origin-y" | "row-stroke" | "gaze-x" | "gaze-y" | "iterations" | "lever" | "ring" | "eye-span" | "eye-socket"}`,
     string
@@ -261,15 +304,45 @@ export const Creature = ({
   }
   const star = (x: number, y: number, radius: number): string =>
     `M${fixed(x)} ${fixed(y - radius)}Q${fixed(x + radius * 0.24)} ${fixed(y - radius * 0.24)} ${fixed(x + radius)} ${fixed(y)}Q${fixed(x + radius * 0.24)} ${fixed(y + radius * 0.24)} ${fixed(x)} ${fixed(y + radius)}Q${fixed(x - radius * 0.24)} ${fixed(y + radius * 0.24)} ${fixed(x - radius)} ${fixed(y)}Q${fixed(x - radius * 0.24)} ${fixed(y - radius * 0.24)} ${fixed(x)} ${fixed(y - radius)}Z`
-  const browPath = (x: number, side: number, squint = false): string => {
-    const brow = browStroke(squint ? "focus" : pose.brow)
+  const browPath = (x: number, side: number, squint = false, featurePose = pose): string => {
+    const brow = browStroke(squint ? "focus" : featurePose.brow)
     const y =
-      eyeY - 4.6 * unit + brow.dy * unit - (pose.eyeScale - 1) * 2.5 * unit - (accessory === "glasses" ? 0.7 * unit : 0)
+      eyeY -
+      4.6 * unit +
+      brow.dy * unit -
+      (featurePose.eyeScale - 1) * 2.5 * unit -
+      (accessory === "glasses" ? 0.7 * unit : 0)
     const points = brow.points.map(([dx, dy]) => `${fixed(x + dx * unit * side)} ${fixed(y + dy * unit)}`)
     return `M${points[0] ?? ""}Q${points[1] ?? ""} ${points[2] ?? ""}`
   }
-  const face = (frame: "base" | "squint" | "blink"): ReactElement => {
+  const face = (
+    frame: "base" | "squint" | "blink",
+    featurePose: TaskPose = pose,
+    frameId = "base",
+    idleLayer = idle
+  ): ReactElement => {
+    const litLid = idleLayer || typed
+    const ew = character.eye[0] * featurePose.eyeScale
+    const eh = character.eye[1] * featurePose.eyeScale
+    const upperRest = eyeY - eh - socket
+    const lowerRest = eyeY + eh + socket
+    const shutY = eyeY + eh * 0.25
+    const reach = ew + unit
+    const lashReach = litLid ? ew + 0.5 * unit : ew + socket + unit
+    const eyePath = (x: number): string => softBoxPath(x - ew, eyeY - eh, ew * 2, eh * 2, 2.4)
+    const faceRef = litLid ? `${ref}-task-${frameId}-${frame}` : ref
+    const style: (CSSProperties & Partial<Rig>) | undefined = litLid
+      ? ({
+          "--connect-creature-open": String((eh * 2 * featurePose.lid + socket) / (shutY - upperRest)),
+          "--connect-creature-lid": String(shutY - upperRest),
+          "--connect-creature-lower": String((featurePose.lower * 2 * eh) / (lowerRest - shutY)),
+          "--connect-creature-lid-low": String(shutY - lowerRest),
+          "--connect-creature-gaze-x": `${String(featurePose.look[0] * ew * 0.4)}px`,
+          "--connect-creature-gaze-y": `${String(0.08 * eh * 2 + featurePose.look[1] * eh * 0.34)}px`
+        } satisfies CSSProperties & Partial<Rig>)
+      : undefined
     const squint = frame === "squint"
+    const flat = squint || featurePose.flat === true
     const blink = frame === "blink"
     return (
       <g
@@ -280,7 +353,17 @@ export const Creature = ({
               ? "connect-creature-face connect-creature-idle-blink"
               : "connect-creature-face"
         }
+        style={style}
       >
+        {litLid ? (
+          <defs>
+            {eyes.map((x, index) => (
+              <clipPath key={x} id={`${faceRef}-eye-${String(index)}`}>
+                <path d={eyePath(x)} />
+              </clipPath>
+            ))}
+          </defs>
+        ) : null}
         <g className="connect-creature-bob" clipPath={`url(#${ref}-skin)`}>
           {eyes.map((x, index) => (
             <g className="connect-creature-eye" key={x}>
@@ -293,13 +376,13 @@ export const Creature = ({
                 fill={palette.blush}
                 fillOpacity="0.5"
               />
-              <g className="connect-creature-open-eye" data-eyes={pose.eyes}>
+              <g className="connect-creature-open-eye" data-eyes={featurePose.eyes}>
                 {blink ? null : (
-                  <g clipPath={idle ? undefined : `url(#${ref}-${squint ? "squint" : "upper"}-${String(index)})`}>
-                    <g clipPath={idle ? undefined : `url(#${ref}-lower-${String(index)})`}>
+                  <g clipPath={litLid ? undefined : `url(#${ref}-${squint ? "squint" : "upper"}-${String(index)})`}>
+                    <g clipPath={litLid ? undefined : `url(#${ref}-lower-${String(index)})`}>
                       <path className="connect-creature-socket" d={eyePath(x)} />
                       <path className="connect-creature-white" d={eyePath(x)} fill={palette.sclera} />
-                      <g clipPath={`url(#${ref}-eye-${String(index)})`}>
+                      <g clipPath={`url(#${faceRef}-eye-${String(index)})`}>
                         <g className="connect-creature-gaze">
                           <circle className="connect-creature-iris" cx={x} cy={eyeY} r={iris} fill={palette.p46} />
                           <circle
@@ -344,28 +427,51 @@ export const Creature = ({
                     d={`M${fixed(x - ew)} ${fixed(eyeY)}Q${fixed(x)} ${fixed(eyeY + 1.3 * unit)} ${fixed(x + ew)} ${fixed(eyeY)}`}
                   />
                 ) : (
-                  <g clipPath={`url(#${ref}-${idle ? "eye" : "socket"}-${String(index)})`}>
-                    <g className={squint ? "connect-creature-squint-lid" : "connect-creature-lid"}>
-                      {idle ? (
+                  <g clipPath={`url(#${faceRef}-${litLid ? "eye" : "socket"}-${String(index)})`}>
+                    {typed && featurePose.lower > 0 ? (
+                      <>
                         <path
-                          className="connect-creature-idle-lid-fill"
-                          d={lid(x, upperRest, true, squint)}
+                          className="connect-creature-task-lower"
                           fill={palette.p58}
+                          d={`M${fixed(x - reach)} ${fixed(eyeY + eh + unit)}V${fixed(eyeY + eh * (1 - 2 * featurePose.lower) + 0.9 * unit)}Q${fixed(x)} ${fixed(eyeY + eh * (1 - 2 * featurePose.lower) - 0.9 * unit)} ${fixed(x + reach)} ${fixed(eyeY + eh * (1 - 2 * featurePose.lower) + 0.9 * unit)}V${fixed(eyeY + eh + unit)}Z`}
                         />
-                      ) : null}
-                      <path
-                        className="connect-creature-lash"
-                        d={`M${fixed(x - lashReach)} ${fixed(upperRest + (idle ? 0.05 * unit : -sag))}Q${fixed(x)} ${fixed(upperRest + (idle ? (squint ? 0.05 : 0.55) * unit : sag))} ${fixed(x + lashReach)} ${fixed(upperRest + (idle ? 0.05 * unit : -sag))}`}
-                      />
-                    </g>
+                        {size === "stage" ? (
+                          <path
+                            fill="none"
+                            stroke={palette.p46}
+                            strokeWidth={0.4 * unit}
+                            d={`M${fixed(x - ew - 0.5 * unit)} ${fixed(eyeY + eh * (1 - 2 * featurePose.lower) + 0.75 * unit)}Q${fixed(x)} ${fixed(eyeY + eh * (1 - 2 * featurePose.lower) - 0.85 * unit)} ${fixed(x + ew + 0.5 * unit)} ${fixed(eyeY + eh * (1 - 2 * featurePose.lower) + 0.75 * unit)}`}
+                          />
+                        ) : null}
+                      </>
+                    ) : null}
+                    {!typed || featurePose.lid > 0 ? (
+                      <g className={squint ? "connect-creature-squint-lid" : "connect-creature-lid"}>
+                        {litLid ? (
+                          <path
+                            className="connect-creature-idle-lid-fill"
+                            d={
+                              typed
+                                ? `M${fixed(x - reach)} ${fixed(upperRest - eh * 4)}V${fixed(upperRest)}Q${fixed(x)} ${fixed(upperRest + (flat ? 0 : 0.5 * unit))} ${fixed(x + reach)} ${fixed(upperRest)}V${fixed(upperRest - eh * 4)}Z`
+                                : lid(x, upperRest, true, squint)
+                            }
+                            fill={palette.p58}
+                          />
+                        ) : null}
+                        <path
+                          className="connect-creature-lash"
+                          d={`M${fixed(x - lashReach)} ${fixed(upperRest + (litLid ? 0.05 * unit : -sag))}Q${fixed(x)} ${fixed(upperRest + (litLid ? (flat ? 0.05 : 0.55) * unit : sag))} ${fixed(x + lashReach)} ${fixed(upperRest + (litLid ? 0.05 * unit : -sag))}`}
+                        />
+                      </g>
+                    ) : null}
                   </g>
                 )}
               </g>
               <path
                 className="connect-creature-eye-mark"
-                data-eyes={pose.eyes}
+                data-eyes={featurePose.eyes}
                 d={
-                  pose.eyes === "squeeze"
+                  featurePose.eyes === "squeeze"
                     ? `M${fixed(x + (index === 0 ? -1 : 1) * (ew - 0.4 * unit))} ${fixed(eyeY - 1.5 * unit)}L${fixed(x + (index === 0 ? 1 : -1) * (ew - 0.4 * unit))} ${fixed(eyeY)}L${fixed(x + (index === 0 ? -1 : 1) * (ew - 0.4 * unit))} ${fixed(eyeY + 1.5 * unit)}`
                     : `M${fixed(x - ew + 0.2 * unit)} ${fixed(eyeY + 0.9 * unit)}Q${fixed(x)} ${fixed(eyeY - 2.1 * unit)} ${fixed(x + ew - 0.2 * unit)} ${fixed(eyeY + 0.9 * unit)}`
                 }
@@ -376,17 +482,17 @@ export const Creature = ({
             <path
               className="connect-creature-brow"
               data-side={index === 0 ? "l" : "r"}
-              d={browPath(x, index === 0 ? -1 : 1, squint)}
+              d={browPath(x, index === 0 ? -1 : 1, squint, featurePose)}
               key={x}
             />
           ))}
           {expressive ? (
             <g
               className="connect-creature-mouth"
-              data-filled={pose.mouth === "small" || pose.mouth === "open" ? "" : undefined}
+              data-filled={featurePose.mouth === "small" || featurePose.mouth === "open" ? "" : undefined}
               transform={`translate(50 ${String(eyeY + 4.8 * unit)}) scale(${String(unit)})`}
             >
-              <path d={mouthPath(pose.mouth)} />
+              <path d={mouthPath(featurePose.mouth)} />
             </g>
           ) : null}
         </g>
@@ -409,16 +515,33 @@ export const Creature = ({
       ry={unit}
     />
   )
-  const drawing = (
+  const drawing = (featurePose: TaskPose = pose, frameId = "base", idleLayer = idle) => (
     <g
       className="connect-creature-lean"
-      key={idle ? `idle:${identity}` : `${mood}:${String(reactionKey)}`}
+      key={typed ? `frame:${frameId}` : `${mood}:${String(reactionKey)}`}
       onAnimationEnd={(event) => {
         if (event.animationName === "connect-creature-done-face" && selected === "done" && reaction === undefined) {
           setCompletion({ identity, state, override, complete: true })
         }
       }}
     >
+      {featurePose.halo !== undefined ? (
+        <circle
+          className="connect-creature-task-celebration"
+          cx="50"
+          cy={
+            (referenceTop - (accessory === "hard-hat" ? 4.8 : accessory === "headphones" ? 3.2 : 0) * unit + FOOT) / 2
+          }
+          r={
+            (FOOT - referenceTop + (accessory === "hard-hat" ? 4.8 : accessory === "headphones" ? 3.2 : 0) * unit) / 2 +
+            (0.5 + featurePose.halo[0]) * unit
+          }
+          fill="none"
+          stroke={palette.p70}
+          strokeOpacity={featurePose.halo[1]}
+          strokeWidth={0.6 * unit}
+        />
+      ) : null}
       <g className="connect-creature-squash">
         <g className="connect-creature-breath">
           <path className="connect-creature-body" d={character.body} fill={palette.p46} />
@@ -442,25 +565,59 @@ export const Creature = ({
           </g>
         </g>
       </g>
-      {idle ? (
+      {idleLayer ? (
         <g className="connect-creature-idle-base-face">
-          <g className="connect-creature-idle-open-face">{face("base")}</g>
-          {face("blink")}
+          <g className="connect-creature-idle-open-face">{face("base", featurePose, frameId, idleLayer)}</g>
+          {face("blink", featurePose, frameId, idleLayer)}
         </g>
       ) : (
-        face("base")
+        face("base", featurePose, frameId, idleLayer)
       )}
-      {idle && signature.habit === "squint" ? face("squint") : null}
-      {idle ? (
+      {idleLayer && signature.habit === "squint" ? face("squint", featurePose, frameId, idleLayer) : null}
+      {typed ? (
         <g className="connect-creature-idle-forced-face" fill="none" stroke="CanvasText" strokeLinecap="round">
           {eyes.map((x, index) => (
             <g key={x}>
               <ellipse cx={x} cy={eyeY} rx={2.1 * unit} ry={2.5 * unit} fill="Canvas" strokeWidth={0.8 * unit} />
               <circle cx={x} cy={eyeY + 0.3 * unit} r={1.2 * unit} fill="CanvasText" stroke="none" />
-              <path d={browPath(x, index === 0 ? -1 : 1)} strokeWidth={1.1 * unit} />
+              <path
+                d={`M${fixed(x + (index === 0 ? -1 : 1) * 1.9 * unit)} ${fixed(eyeY - 4.25 * unit)}Q${fixed(x + (index === 0 ? -1 : 1) * 0.2 * unit)} ${fixed(eyeY - 5.6 * unit)} ${fixed(x - (index === 0 ? -1 : 1) * 1.7 * unit)} ${fixed(eyeY - 4.15 * unit)}`}
+                strokeWidth={1.1 * unit}
+              />
             </g>
           ))}
         </g>
+      ) : null}
+      {featurePose.ticks !== undefined && featurePose.ticks > 0 ? (
+        <path
+          className="connect-creature-task-ticks"
+          fill="none"
+          stroke={taskTickInk[palette.family]}
+          strokeWidth={(size === "stage" ? 0.55 : 1) * unit}
+          strokeLinecap="round"
+          d={[
+            [referenceLeft + referenceWidth + 0.75 * unit, tickTop + 3.5 * unit, -35],
+            [referenceLeft + referenceWidth + 1.65 * unit, tickTop + 6.75 * unit, -5],
+            ...(featurePose.ticks > 1
+              ? [
+                  [referenceLeft - 0.75 * unit, tickTop + 3.5 * unit, -145],
+                  [referenceLeft - 1.65 * unit, tickTop + 6.75 * unit, -175]
+                ]
+              : [])
+          ]
+            .map(
+              ([x = 0, y = 0, angle = 0]) =>
+                `M${fixed(x)} ${fixed(y)}l${fixed(Math.cos((angle * Math.PI) / 180) * tickLength)} ${fixed(Math.sin((angle * Math.PI) / 180) * tickLength)}`
+            )
+            .join("")}
+        />
+      ) : null}
+      {featurePose.glint !== undefined ? (
+        <path
+          className="connect-creature-task-celebration"
+          d={star(50 + 10 * unit, glintTop + 0.75 * unit, featurePose.glint * unit)}
+          fill={palette.p70}
+        />
       ) : null}
       <CreatureAdornment
         accessory={accessory}
@@ -476,13 +633,93 @@ export const Creature = ({
       />
     </g>
   )
+  const taskLayer = (entry: TaskEntry): ReactElement => {
+    const prefix = String(entry.epoch)
+    if (entry.kind === "idle") {
+      const idlePose: TaskPose = {
+        ...basePose,
+        brow: "rest",
+        lid: 0.12,
+        lower: 0,
+        eyeScale: 1,
+        look: [0, 0],
+        eyes: "open"
+      }
+      return (
+        <g style={{ ...rig, ...idleRig }} className="connect-creature-idle-habit">
+          <g className="connect-creature-idle-fidget">
+            <g className="connect-creature-idle-breath">
+              {shadow()}
+              {shadow("blink")}
+              {signature.habit === "squint" ? shadow("squint") : null}
+              {drawing(idlePose, prefix, true)}
+            </g>
+          </g>
+        </g>
+      )
+    }
+    const motion = creatureTaskMotion(entry.kind, size === "stage")
+    const entering = entry.entered && !stillTask
+    const terminal = motion.oneShot !== undefined
+    const clock =
+      terminal && !entering ? (entry.kind === "done" && size === "stage" ? "rest" : undefined) : motion.clock
+    const period = terminal && !entering && entry.kind === "done" ? 4200 : motion.period
+    const frames = motion.frames.filter((frame) => entering || frame.once === undefined)
+    return (
+      <g
+        data-task-body=""
+        data-task-entered={entering ? "" : undefined}
+        data-task-terminal={terminal ? "" : undefined}
+        className={
+          clock === undefined
+            ? "connect-creature-task-body"
+            : `connect-creature-task-body connect-creature-task-${clock}`
+        }
+        style={taskStyle({
+          "--connect-task-period": `${String(period * signature.tempo)}ms`,
+          "--connect-task-phase": `${String(terminal ? (entering ? 0 : -Math.round(13000 * phase)) : -Math.round(13000 * phase))}ms`,
+          "--connect-task-amplitude": String(signature.amplitude),
+          "--connect-task-travel": size === "stage" ? "1" : "0.5",
+          "--connect-task-rest": motion.restTransform ?? "none"
+        })}
+      >
+        <g className="connect-creature-task-base">
+          {shadow()}
+          {drawing(motion.base, `${prefix}-base`, false)}
+        </g>
+        <g className="connect-creature-task-still">
+          {shadow()}
+          {drawing(motion.settled, `${prefix}-still`, false)}
+        </g>
+        {frames.map((frame, index) => (
+          <g
+            className="connect-creature-task-frame"
+            key={`${String(frame.period)}:${String(frame.step)}`}
+            style={taskStyle({
+              "--connect-task-frame-name":
+                frame.once === undefined ? `connect-creature-task-w${String(frame.steps)}` : "connect-creature-task-on",
+              "--connect-task-frame-duration": `${String((frame.once ?? frame.period) * signature.tempo)}ms`,
+              "--connect-task-frame-iterations": frame.once === undefined ? "infinite" : "1",
+              "--connect-task-frame-delay": `${String(frame.once === undefined ? (entering && frame.after !== undefined ? frame.after + (frame.step * frame.period) / frame.steps : (frame.step * frame.period) / frame.steps - frame.period) * signature.tempo - (terminal && entering ? 0 : Math.round(13000 * phase)) : frame.step * signature.tempo)}ms`
+            })}
+          >
+            {shadow()}
+            {drawing(frame.pose, `${prefix}-${String(index)}`, false)}
+          </g>
+        ))}
+      </g>
+    )
+  }
   return (
     <svg
       aria-hidden="true"
       className="connect-creature"
       data-creature=""
-      data-idle-motion={idle ? "" : undefined}
-      data-idle-habit={idle ? signature.habit : undefined}
+      data-task-phase={typed ? String(phase) : undefined}
+      data-task-kind={typed ? playback.current.kind : undefined}
+      data-task-transition={typed ? (playback.transition ?? "settled") : undefined}
+      data-idle-motion={idlePresent ? "" : undefined}
+      data-idle-habit={idlePresent ? signature.habit : undefined}
       data-idle-phase={idle ? String(phase) : undefined}
       ref={root}
       data-arrived={arrived ? "" : undefined}
@@ -492,14 +729,14 @@ export const Creature = ({
       data-stale={stale ? "" : undefined}
       data-closed={closed ? "" : undefined}
       data-tone={presentation.tone}
-      data-mood={idle ? "idle" : mood}
+      data-mood={typed ? (idle ? "idle" : "task") : mood}
       data-lidded={pose.lid > 0 ? "" : undefined}
       data-talking={expressive ? "" : undefined}
       data-loop={pose.loops ? "" : undefined}
       focusable="false"
       height={pixels[size]}
       width={pixels[size]}
-      style={idle ? { ...rig, ...idleRig } : rig}
+      style={idlePresent ? { ...rig, ...idleRig } : rig}
       viewBox={viewBox}
     >
       <defs>
@@ -528,22 +765,61 @@ export const Creature = ({
           </g>
         ))}
       </defs>
-      {idle ? null : shadow()}
+      {typed ? null : shadow()}
       <ellipse className="connect-creature-halo" cx="50" cy={ring.cy} rx={ring.rx} ry={ring.ry} />
       <ellipse className="connect-creature-orbit" cx="50" cy={ring.cy} pathLength="100" rx={ring.rx} ry={ring.ry} />
-      {idle ? (
-        <g className="connect-creature-idle-habit">
-          <g className="connect-creature-idle-fidget">
-            <g className="connect-creature-idle-breath">
-              {shadow()}
-              {shadow("blink")}
-              {signature.habit === "squint" ? shadow("squint") : null}
-              {drawing}
-            </g>
-          </g>
+      {typed ? (
+        <g
+          className="connect-creature-task-stack"
+          data-transition={playback.transition ?? undefined}
+          style={taskStyle({
+            "--connect-task-transition": `${String(360 * signature.tempo)}ms`,
+            "--connect-task-amplitude": String(signature.amplitude),
+            "--connect-task-travel": size === "stage" ? "1" : "0.5"
+          })}
+          onAnimationEnd={(event) => {
+            if (event.animationName === "connect-creature-task-hop") finishTask()
+          }}
+        >
+          {[playback.outgoing, playback.current].flatMap((entry) => {
+            if (entry === null) return []
+            const incoming = entry.epoch === playback.current.epoch
+            const transition = playback.transition
+            return [
+              <g
+                key={entry.epoch}
+                data-task-epoch={entry.epoch}
+                className={`connect-creature-task-entry${transition === null ? "" : incoming ? " connect-creature-task-incoming" : " connect-creature-task-outgoing"}`}
+                data-transition={transition ?? undefined}
+                style={taskStyle({
+                  "--connect-task-transition": `${String((transition === "hop" ? 360 : transition === "blend" ? 300 : 80) * signature.tempo)}ms`,
+                  "--connect-task-cover": `${String((transition === "hop" ? 270 : transition === "blend" ? 300 : 80) * signature.tempo)}ms`
+                })}
+                onAnimationEnd={(event) => {
+                  if (!incoming) return
+                  if (
+                    (transition === "failing" && event.animationName === "connect-creature-task-wince") ||
+                    (transition === "done" &&
+                      (event.animationName === "connect-creature-task-done" ||
+                        event.animationName === "connect-creature-task-done-row")) ||
+                    (transition === "blend" && event.animationName === "connect-creature-task-in") ||
+                    (transition === "hop" && event.animationName === "connect-creature-task-hop")
+                  )
+                    finishTask()
+                }}
+              >
+                <g
+                  className="connect-creature-task-transition-body"
+                  data-transition={incoming ? (transition ?? undefined) : undefined}
+                >
+                  <g className="connect-creature-task-content">{taskLayer(entry)}</g>
+                </g>
+              </g>
+            ]
+          })}
         </g>
       ) : (
-        drawing
+        drawing()
       )}
       {!shut && mood === "stuck" ? (
         <>
@@ -589,7 +865,7 @@ export const Creature = ({
           ))}
         </g>
       ) : null}
-      {!shut && mood === "done" ? (
+      {!typed && !shut && mood === "done" ? (
         <g className="connect-creature-celebration">
           <ellipse
             cx="50"
