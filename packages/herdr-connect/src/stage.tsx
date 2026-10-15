@@ -24,6 +24,7 @@ import {
 
 import { AgentStateLabel, agentStatePresentation } from "./agent-state.js"
 import { Creature } from "./creature.js"
+import { CreatureNeighbours } from "./creature-neighbours.js"
 import type { ConnectAgent } from "./model.js"
 import { arrangePins, type Pins } from "./pins.js"
 import {
@@ -78,49 +79,52 @@ export const AgentCast = ({
   }
   if (families.length === 0) return <></>
   return (
-    <nav aria-label="Agents at a glance" className="connect-cast" onKeyDown={move}>
-      {families.map((family) => (
-        <div
-          aria-label={`${family.rows[0]?.agent.name ?? "Agent"} family`}
-          className="connect-cast-family"
-          key={family.key}
-          role="group"
-        >
-          {family.rows
-            .filter(
-              (row, index) =>
-                index === 0 || connectAgentGroup(row.agent.state, { presentation: "fleet" }) === "needs-you"
-            )
-            .map(({ agent }) => (
-              <button
-                aria-haspopup="dialog"
-                className="connect-cast-member"
-                onFocus={() => setActive(connectAgentKey(agent))}
-                tabIndex={connectAgentKey(agent) === activeKey ? 0 : -1}
-                data-agent-key={connectAgentKey(agent)}
-                key={connectAgentKey(agent)}
-                onClick={() => onOpen(agent)}
-                type="button"
-                disabled={connectAgentIdentityAmbiguous(agents, agent)}
-              >
-                <Creature
-                  arrived={arrivals.has(connectAgentKey(agent))}
-                  host={agent.host}
-                  hueFamily={agent.hue}
-                  id={String(agent.id)}
-                  name={agent.name}
-                  size="cast"
-                  stale={stale || silentHosts.includes(agent.host)}
-                  state={agent.state}
-                />
-                <AgentStateGlyph state={agent.state} />
-                <span className="connect-visually-hidden">{agentStatePresentation(agent.state).word}, </span>
-                <span className="connect-cast-name">{agent.name}</span>
-              </button>
-            ))}
-        </div>
-      ))}
-    </nav>
+    <CreatureNeighbours agents={cast}>
+      <nav aria-label="Agents at a glance" className="connect-cast" onKeyDown={move}>
+        {families.map((family) => (
+          <div
+            aria-label={`${family.rows[0]?.agent.name ?? "Agent"} family`}
+            className="connect-cast-family"
+            key={family.key}
+            role="group"
+          >
+            {family.rows
+              .filter(
+                (row, index) =>
+                  index === 0 || connectAgentGroup(row.agent.state, { presentation: "fleet" }) === "needs-you"
+              )
+              .map(({ agent }) => (
+                <button
+                  aria-haspopup="dialog"
+                  className="connect-cast-member"
+                  onFocus={() => setActive(connectAgentKey(agent))}
+                  tabIndex={connectAgentKey(agent) === activeKey ? 0 : -1}
+                  data-agent-key={connectAgentKey(agent)}
+                  key={connectAgentKey(agent)}
+                  onClick={() => onOpen(agent)}
+                  type="button"
+                  disabled={connectAgentIdentityAmbiguous(agents, agent)}
+                >
+                  <Creature
+                    arrived={arrivals.has(connectAgentKey(agent))}
+                    host={agent.host}
+                    hueFamily={agent.hue}
+                    taskKind={agent.taskKind}
+                    id={String(agent.id)}
+                    name={agent.name}
+                    size="cast"
+                    stale={stale || silentHosts.includes(agent.host)}
+                    state={agent.state}
+                  />
+                  <AgentStateGlyph state={agent.state} />
+                  <span className="connect-visually-hidden">{agentStatePresentation(agent.state).word}, </span>
+                  <span className="connect-cast-name">{agent.name}</span>
+                </button>
+              ))}
+          </div>
+        ))}
+      </nav>
+    </CreatureNeighbours>
   )
 }
 
@@ -195,6 +199,7 @@ const AgentLineage = ({
       <Creature
         host={member.host}
         hueFamily={member.hue}
+        taskKind={member.taskKind}
         id={String(member.id)}
         name={member.name}
         size="row"
@@ -209,39 +214,43 @@ const AgentLineage = ({
     </button>
   )
   return (
-    <section aria-label="Lineage" className="connect-stage-lineage">
-      <h2>{agent.relationship?.relation === "pair" ? "Paired with" : "Crew"}</h2>
-      {row?.issue === "unknown_parent" ? <p>Primary not listed: {agent.relationship?.parentAgentId}</p> : null}
-      {row?.issue === "cross_host" ? <p>Cross-host parent. Relationship unavailable.</p> : null}
-      {row?.issue === "cycle" ? <p>Cyclic relationship. Lineage unavailable.</p> : null}
-      {row?.issue === "ambiguous" ? <p>Ambiguous ownership. Lineage unavailable.</p> : null}
-      {ancestors.map((ancestor, index) => member(ancestor, index === 0 ? "Primary" : "Ancestor"))}
-      {ancestors.length === 0 && children.length === 0 && row?.issue === null ? (
-        <p>No crew. This agent has no children.</p>
-      ) : null}
-      {children.filter((child) => child.relationship?.relation === "pair").length === 0 ? null : (
-        <nav aria-label="Pair partners" className="connect-stage-crew">
-          {children
-            .filter((child) => child.relationship?.relation === "pair")
-            .map((child) => member(child, "Pair partner"))}
-        </nav>
-      )}
-      {workers.length === 0 ? null : (
-        <nav aria-label="Workers and reviewers" className="connect-stage-crew">
-          {visibleWorkers.map((child) =>
-            member(
-              child,
-              child.relationship === undefined ? "Worker" : connectRelationLabel(child.relationship.relation)
-            )
-          )}
-          {hiddenWorkers === 0 ? null : (
-            <button className="connect-family-more" onClick={() => setExpanded(true)} type="button">
-              Show {String(hiddenWorkers)} more
-            </button>
-          )}
-        </nav>
-      )}
-    </section>
+    <CreatureNeighbours
+      agents={[...ancestors, ...children.filter((child) => child.relationship?.relation === "pair"), ...visibleWorkers]}
+    >
+      <section aria-label="Lineage" className="connect-stage-lineage">
+        <h2>{agent.relationship?.relation === "pair" ? "Paired with" : "Crew"}</h2>
+        {row?.issue === "unknown_parent" ? <p>Primary not listed: {agent.relationship?.parentAgentId}</p> : null}
+        {row?.issue === "cross_host" ? <p>Cross-host parent. Relationship unavailable.</p> : null}
+        {row?.issue === "cycle" ? <p>Cyclic relationship. Lineage unavailable.</p> : null}
+        {row?.issue === "ambiguous" ? <p>Ambiguous ownership. Lineage unavailable.</p> : null}
+        {ancestors.map((ancestor, index) => member(ancestor, index === 0 ? "Primary" : "Ancestor"))}
+        {ancestors.length === 0 && children.length === 0 && row?.issue === null ? (
+          <p>No crew. This agent has no children.</p>
+        ) : null}
+        {children.filter((child) => child.relationship?.relation === "pair").length === 0 ? null : (
+          <nav aria-label="Pair partners" className="connect-stage-crew">
+            {children
+              .filter((child) => child.relationship?.relation === "pair")
+              .map((child) => member(child, "Pair partner"))}
+          </nav>
+        )}
+        {workers.length === 0 ? null : (
+          <nav aria-label="Workers and reviewers" className="connect-stage-crew">
+            {visibleWorkers.map((child) =>
+              member(
+                child,
+                child.relationship === undefined ? "Worker" : connectRelationLabel(child.relationship.relation)
+              )
+            )}
+            {hiddenWorkers === 0 ? null : (
+              <button className="connect-family-more" onClick={() => setExpanded(true)} type="button">
+                Show {String(hiddenWorkers)} more
+              </button>
+            )}
+          </nav>
+        )}
+      </section>
+    </CreatureNeighbours>
   )
 }
 
@@ -346,6 +355,7 @@ export const AgentStage = ({
                     <Creature
                       host={agent.host}
                       hueFamily={agent.hue}
+                      taskKind={agent.taskKind}
                       id={String(agent.id)}
                       name={agent.name}
                       size="stage"
@@ -433,6 +443,7 @@ export const AgentStage = ({
                     <Creature
                       host={agent.host}
                       hueFamily={agent.hue}
+                      taskKind={agent.taskKind}
                       id={String(agent.id)}
                       name={agent.name}
                       size="cast"
@@ -575,6 +586,7 @@ const PinChip = ({
         <Creature
           host={agent.host}
           hueFamily={agent.hue}
+          taskKind={agent.taskKind}
           id={String(agent.id)}
           name={agent.name}
           size="row"
@@ -691,109 +703,114 @@ export const PinnedAgents = ({
       requestAnimationFrame(() => group.current?.querySelector<HTMLElement>(".connect-pins-overflow button")?.focus())
   }
   return (
-    <div
-      aria-label="Pinned agents"
-      className="connect-pins"
-      data-placement={placement}
-      // Light dismiss: focus leaving the set, by a press elsewhere or Tab, closes the list.
-      onBlur={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget)) setExpanded(false)
-      }}
-      onKeyDown={keyDown}
-      ref={group}
-      role="group"
+    <CreatureNeighbours
+      agents={[...shown, ...(open ? overflow : [])].flatMap(({ agent }) => (agent === undefined ? [] : [agent]))}
     >
-      {shown.map(({ agent, pin }, index) =>
-        agent === undefined ? null : (
-          <PinChip
-            agent={agent}
-            key={pin.key}
-            onOpen={() => onOpen(agent)}
-            onUnpin={unpinFrom(pin.key)}
-            pinKey={pin.key}
-            placement={placement}
-            roving={[stop(index * 2), stop(index * 2 + 1)]}
-            stale={stale}
-          />
-        )
-      )}
-      {overflow.length === 0 ? null : (
-        <div className="connect-pins-more-wrap">
-          <button
-            aria-controls={listId}
-            aria-expanded={open}
-            aria-label={
-              shown.length === 0 ? `${String(overflow.length)} pinned` : `${String(overflow.length)} more pinned`
-            }
-            className="connect-pins-more"
-            onClick={toggle}
-            type="button"
-            {...stop(stops - 1)}
-          >
-            {shown.length === 0 ? `Pins ${String(overflow.length)}` : `+${String(overflow.length)}`}
-          </button>
-          {open ? (
-            <ul className="connect-pins-overflow" id={listId}>
-              {overflow.map(({ agent, pin }) => (
-                <li className="connect-pins-entry" data-away={agent === undefined ? "" : undefined} key={pin.key}>
-                  {agent === undefined ? (
-                    <span className="connect-pin-open">
-                      {/* Drawn as away: still, half-lidded, colour drained. */}
-                      <Creature
-                        host={pin.host}
-                        hueFamily={pin.hue}
-                        id={pin.id}
-                        name={pin.name}
-                        size="row"
-                        stale
-                        state="done"
-                      />
-                      <span className="connect-pin-text">
-                        <span className="connect-pin-name">{pin.name}</span>
-                        <small className="connect-pin-since">{sinceLabel(pin.seenAt, now)}</small>
+      <div
+        aria-label="Pinned agents"
+        className="connect-pins"
+        data-placement={placement}
+        // Light dismiss: focus leaving the set, by a press elsewhere or Tab, closes the list.
+        onBlur={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget)) setExpanded(false)
+        }}
+        onKeyDown={keyDown}
+        ref={group}
+        role="group"
+      >
+        {shown.map(({ agent, pin }, index) =>
+          agent === undefined ? null : (
+            <PinChip
+              agent={agent}
+              key={pin.key}
+              onOpen={() => onOpen(agent)}
+              onUnpin={unpinFrom(pin.key)}
+              pinKey={pin.key}
+              placement={placement}
+              roving={[stop(index * 2), stop(index * 2 + 1)]}
+              stale={stale}
+            />
+          )
+        )}
+        {overflow.length === 0 ? null : (
+          <div className="connect-pins-more-wrap">
+            <button
+              aria-controls={listId}
+              aria-expanded={open}
+              aria-label={
+                shown.length === 0 ? `${String(overflow.length)} pinned` : `${String(overflow.length)} more pinned`
+              }
+              className="connect-pins-more"
+              onClick={toggle}
+              type="button"
+              {...stop(stops - 1)}
+            >
+              {shown.length === 0 ? `Pins ${String(overflow.length)}` : `+${String(overflow.length)}`}
+            </button>
+            {open ? (
+              <ul className="connect-pins-overflow" id={listId}>
+                {overflow.map(({ agent, pin }) => (
+                  <li className="connect-pins-entry" data-away={agent === undefined ? "" : undefined} key={pin.key}>
+                    {agent === undefined ? (
+                      <span className="connect-pin-open">
+                        {/* Drawn as away: still, half-lidded, colour drained. */}
+                        <Creature
+                          host={pin.host}
+                          hueFamily={pin.hue}
+                          id={pin.id}
+                          name={pin.name}
+                          size="row"
+                          stale
+                          state="done"
+                        />
+                        <span className="connect-pin-text">
+                          <span className="connect-pin-name">{pin.name}</span>
+                          <small className="connect-pin-since">{sinceLabel(pin.seenAt, now)}</small>
+                        </span>
                       </span>
-                    </span>
-                  ) : (
+                    ) : (
+                      <button
+                        aria-label={`Pinned: ${agent.name}, ${agentStatePresentation(agent.state).word}`}
+                        className="connect-pin-open"
+                        data-pin-key={pin.key}
+                        onClick={() => {
+                          setExpanded(false)
+                          onOpen(agent)
+                        }}
+                        tabIndex={-1}
+                        type="button"
+                      >
+                        <Creature
+                          host={agent.host}
+                          hueFamily={agent.hue}
+                          taskKind={agent.taskKind}
+                          id={String(agent.id)}
+                          name={agent.name}
+                          size="row"
+                          stale={stale}
+                          state={agent.state}
+                        />
+                        <span className="connect-pin-name">{agent.name}</span>
+                        <AgentStateLabel state={agent.state} />
+                      </button>
+                    )}
                     <button
-                      aria-label={`Pinned: ${agent.name}, ${agentStatePresentation(agent.state).word}`}
-                      className="connect-pin-open"
+                      aria-label={`Unpin ${pin.name}`}
+                      className="connect-pin-unpin"
                       data-pin-key={pin.key}
-                      onClick={() => {
-                        setExpanded(false)
-                        onOpen(agent)
-                      }}
+                      onClick={unpinFrom(pin.key)}
                       tabIndex={-1}
                       type="button"
                     >
-                      <Creature
-                        host={agent.host}
-                        hueFamily={agent.hue}
-                        id={String(agent.id)}
-                        name={agent.name}
-                        size="row"
-                        stale={stale}
-                        state={agent.state}
-                      />
-                      <span className="connect-pin-name">{agent.name}</span>
-                      <AgentStateLabel state={agent.state} />
+                      <span aria-hidden="true">×</span>
                     </button>
-                  )}
-                  <button
-                    aria-label={`Unpin ${pin.name}`}
-                    className="connect-pin-unpin"
-                    data-pin-key={pin.key}
-                    onClick={unpinFrom(pin.key)}
-                    tabIndex={-1}
-                    type="button"
-                  >
-                    <span aria-hidden="true">×</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          ) : null}
-        </div>
-      )}
-    </div>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+        )}
+      </div>
+    </CreatureNeighbours>
   )
 }

@@ -6,6 +6,7 @@ import { Button, Text } from "@knpkv/rly/primitives"
 import { Schema } from "effect"
 import { Fragment, useId, useState, type ReactNode, type Ref } from "react"
 import { Creature } from "./creature.js"
+import { CreatureNeighbours } from "./creature-neighbours.js"
 import type { ConnectAgent, ConnectPeerFailure } from "./model.js"
 import {
   serializeTerminalKey,
@@ -495,6 +496,32 @@ export const AgentDirectory = ({
     onActivityFilter("all")
     onClearQuery?.()
   }
+  const visibleFamilyRows = (family: (typeof families)[number]) => {
+    const shown = new Set(
+      family.rows
+        .filter(
+          (row, index) =>
+            expanded.has(family.key) ||
+            index <= 2 ||
+            row.depth > 2 ||
+            scoped ||
+            connectAgentGroup(row.agent.state, { presentation: "fleet" }) === "needs-you"
+        )
+        .map(({ agent }) => connectAgentKey(agent))
+    )
+    // A visible descendant keeps the ancestry that makes its place in this family readable.
+    for (const row of family.rows) {
+      if (!shown.has(connectAgentKey(row.agent))) continue
+      let current = row.agent
+      while (current.relationship !== undefined && row.issue === null) {
+        const parent = family.rows.find(({ agent }) => agent.id === current.relationship?.parentAgentId)?.agent
+        if (parent === undefined) break
+        shown.add(connectAgentKey(parent))
+        current = parent
+      }
+    }
+    return family.rows.filter(({ agent }) => shown.has(connectAgentKey(agent)))
+  }
   return (
     <>
       <div className="connect-directory-toolbar">
@@ -625,57 +652,35 @@ export const AgentDirectory = ({
             {plural(matchingCount, "agent", "agents")} in {plural(families.length, "family", "families")}
           </p>
         )}
-        <div className="connect-agent-list">
-          {families.map((family) => {
-            const missingParent = missingParentGroups.has(family.key) ? family.missingParent : undefined
-            const missingParentName = family.rows.find(({ agent }) => agent.relationship?.parentName !== undefined)
-              ?.agent.relationship?.parentName
-            const shown = new Set(
-              family.rows
-                .filter(
-                  (row, index) =>
-                    expanded.has(family.key) ||
-                    index <= 2 ||
-                    row.depth > 2 ||
-                    scoped ||
-                    connectAgentGroup(row.agent.state, { presentation: "fleet" }) === "needs-you"
-                )
-                .map(({ agent }) => connectAgentKey(agent))
-            )
-            // A visible descendant keeps the ancestry that makes its place in this family readable.
-            for (const row of family.rows) {
-              if (!shown.has(connectAgentKey(row.agent))) continue
-              let current = row.agent
-              while (current.relationship !== undefined && row.issue === null) {
-                const parent = family.rows.find(({ agent }) => agent.id === current.relationship?.parentAgentId)?.agent
-                if (parent === undefined) break
-                shown.add(connectAgentKey(parent))
-                current = parent
-              }
-            }
-            const hiddenCount = family.rows.filter(({ agent }) => !shown.has(connectAgentKey(agent))).length
-            return (
-              <section
-                aria-label={`${family.rows[0]?.agent.name ?? "Agent"} family`}
-                className="connect-family"
-                key={family.key}
-              >
-                {missingParent === undefined ? null : (
-                  <div className="connect-family-missing">
-                    <span>
-                      <Icon decorative name="alert" size="small" />
-                      {missingParentName === undefined ? "Parent agent not found" : "Primary not listed"}
-                    </span>
-                    {missingParentName === undefined ? null : (
-                      <p>
-                        {missingParentName} on {missingParent.host} isn't in the directory; its children are shown here.
-                      </p>
-                    )}
-                  </div>
-                )}
-                {family.rows
-                  .filter(({ agent }) => shown.has(connectAgentKey(agent)))
-                  .map(({ agent, depth, issue }) => {
+        <CreatureNeighbours agents={families.flatMap((family) => visibleFamilyRows(family).map(({ agent }) => agent))}>
+          <div className="connect-agent-list">
+            {families.map((family) => {
+              const missingParent = missingParentGroups.has(family.key) ? family.missingParent : undefined
+              const missingParentName = family.rows.find(({ agent }) => agent.relationship?.parentName !== undefined)
+                ?.agent.relationship?.parentName
+              const visibleRows = visibleFamilyRows(family)
+              const hiddenCount = family.rows.length - visibleRows.length
+              return (
+                <section
+                  aria-label={`${family.rows[0]?.agent.name ?? "Agent"} family`}
+                  className="connect-family"
+                  key={family.key}
+                >
+                  {missingParent === undefined ? null : (
+                    <div className="connect-family-missing">
+                      <span>
+                        <Icon decorative name="alert" size="small" />
+                        {missingParentName === undefined ? "Parent agent not found" : "Primary not listed"}
+                      </span>
+                      {missingParentName === undefined ? null : (
+                        <p>
+                          {missingParentName} on {missingParent.host} isn't in the directory; its children are shown
+                          here.
+                        </p>
+                      )}
+                    </div>
+                  )}
+                  {visibleRows.map(({ agent, depth, issue }) => {
                     const key = connectAgentKey(agent)
                     const activity = connectAgentGroup(agent.state, { presentation: "fleet" })
                     const context = !family.matches.has(key)
@@ -701,6 +706,7 @@ export const AgentDirectory = ({
                             arrived={arrivals.has(key)}
                             host={agent.host}
                             hueFamily={agent.hue}
+                            taskKind={agent.taskKind}
                             id={String(agent.id)}
                             name={agent.name}
                             size="row"
@@ -769,19 +775,20 @@ export const AgentDirectory = ({
                       </Fragment>
                     )
                   })}
-                {hiddenCount === 0 ? null : (
-                  <button
-                    className="connect-family-more"
-                    onClick={() => setExpanded(new Set([...expanded, family.key]))}
-                    type="button"
-                  >
-                    Show {String(hiddenCount)} more
-                  </button>
-                )}
-              </section>
-            )
-          })}
-        </div>
+                  {hiddenCount === 0 ? null : (
+                    <button
+                      className="connect-family-more"
+                      onClick={() => setExpanded(new Set([...expanded, family.key]))}
+                      type="button"
+                    >
+                      Show {String(hiddenCount)} more
+                    </button>
+                  )}
+                </section>
+              )
+            })}
+          </div>
+        </CreatureNeighbours>
       </div>
     </>
   )

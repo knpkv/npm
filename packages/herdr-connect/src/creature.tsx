@@ -1,4 +1,7 @@
-/** Decorative agent identity; adjacent text carries state. Only a talking stage owns a mouth or body deformation. */
+/** Decorative agent identity; adjacent text carries state. Talking stages own mouths; typed idle evidence opts into seeded motion. */
+import type { AgentTaskKind } from "@knpkv/herdr-fleet/model"
+import { useCreatureNeighbourPhase } from "./creature-neighbours.js"
+import { useCreatureVisibility } from "./creature-visibility.js"
 import {
   type CSSProperties,
   type ReactElement,
@@ -16,6 +19,7 @@ import {
   agentCharacter,
   creatureBodySeed,
   creaturePalette,
+  creatureSignature,
   FOOT,
   IRIS_SHARE,
   softBoxPath,
@@ -27,6 +31,7 @@ import {
   creatureMood,
   creaturePose,
   mouthPath,
+  type CreaturePose,
   type CreatureAccessory,
   type CreatureMood,
   type CreatureReaction
@@ -45,6 +50,12 @@ export interface CreatureProps {
   /** Optional served family; overrides hash(host,name). Only the eight agent families are accepted. */
   readonly hueFamily?: CreatureHueFamily | undefined
   readonly state: string
+  /**
+   * Defaults to absent, preserving legacy state motion. Explicit idle enables the seeded idle loops and
+   * habit at every size, sampled from host/id and the rendered family. Same-kind updates retain phase;
+   * another kind removes the idle layers. Closed, stale, reduced-motion and forced-colour views stay still.
+   */
+  readonly taskKind?: AgentTaskKind | undefined
   /** Home keeps unknown evidence neutral and uses its wider row frame with thin state rings; Fleet retains its needs-you fallback and fitted row track. */
   readonly statePolicy?: "fleet" | "home"
   readonly size: CreatureSize
@@ -60,7 +71,7 @@ export interface CreatureProps {
   readonly arrived?: boolean
   /** Default none. Optional neutral headphones, hard-hat, scarf or glasses. Agents never wear chef headwear. */
   readonly accessory?: CreatureAccessory
-  /** Default false. Only stage presentation may show a mouth or squash; reduced motion holds the static pose. */
+  /** Default false. Enables the expressive mouth and pose only at stage size; reduced motion holds the static pose. */
   readonly talking?: boolean
   /** Optional pose override. Otherwise state owns the mood; entering done plays once before happy. An already-done mount is happy. */
   readonly mood?: CreatureMood
@@ -119,6 +130,7 @@ export const Creature = ({
   stale = false,
   state,
   statePolicy = "fleet",
+  taskKind,
   talking = false
 }: CreatureProps): ReactElement => {
   const reaction = size === "stage" ? requestedReaction : undefined
@@ -154,11 +166,20 @@ export const Creature = ({
   const mood = reaction !== undefined ? reaction : selected === "done" && (settled || reduced) ? "happy" : selected
   const shut = closed || stale
   const expressive = talking && size === "stage" && !shut
-  const pose =
+  // Lifecycle urgency takes precedence while the server debounces a new task kind.
+  const resting = presentation.bucket !== "needs-you" && presentation.bucket !== "finished"
+  const idle = taskKind === "idle" && ordinary && !shut && resting
+  useCreatureVisibility(root, idle)
+  const basePose =
     !shut && !talkPose && override === undefined && reaction === undefined
       ? creatureAgentPose(state)
       : creaturePose(mood, closed, stale)
+  const pose: CreaturePose = idle
+    ? { ...basePose, brow: "rest", lid: 0.12, lower: 0, eyeScale: 1, look: [0, 0], eyes: "open" }
+    : basePose
   const palette = creaturePalette(host, name, hueFamily, closed ? 0.1 : 1)
+  const signature = creatureSignature(host, id, palette.family)
+  const phase = useCreatureNeighbourPhase(host, id, signature.phase)
   const ew = character.eye[0] * pose.eyeScale
   const eh = character.eye[1] * pose.eyeScale
   const [left, top, width, height] = character.bounds
@@ -207,11 +228,20 @@ export const Creature = ({
   const socket = 0.2 * unit
   const upperRest = eyeY - eh - socket
   const lowerRest = eyeY + eh + socket
-  const reach = ew + socket + unit
+  const reach = ew + (idle ? 0 : socket) + unit
+  const lashReach = idle ? ew + 0.5 * unit : reach
   type Rig = Record<
     `--connect-creature-${"duration" | "phase" | "unit" | "ink" | "open" | "lower" | "lid" | "lid-low" | "origin-x" | "origin-y" | "row-stroke" | "gaze-x" | "gaze-y" | "iterations" | "lever" | "ring" | "eye-span" | "eye-socket"}`,
     string
   >
+  const idleRig = {
+    "--connect-creature-idle-tempo": String(signature.tempo),
+    "--connect-creature-idle-amplitude": String(signature.amplitude),
+    "--connect-creature-idle-phase": `${String(-Math.round(13000 * phase))}ms`,
+    "--connect-creature-habit-phase": `${String(-Math.round(8000 * phase))}ms`,
+    "--connect-creature-idle-travel": size === "stage" ? "1" : "0.5",
+    "--connect-creature-squint-open": String((eh * 2 * 0.6 + socket) / (shutY - upperRest))
+  }
   const rig: CSSProperties & Rig = {
     "--connect-creature-duration": `${String(pose.duration)}ms`,
     "--connect-creature-phase": `${String(pose.duration * character.phase)}ms`,
@@ -234,122 +264,53 @@ export const Creature = ({
   }
   const ref = `connect-creature-${useId().replace(/[^a-zA-Z0-9]/g, "")}`
   const eyePath = (x: number): string => softBoxPath(x - ew, eyeY - eh, ew * 2, eh * 2, 2.4)
-  const lid = (x: number, edge: number, above: boolean): string => {
+  const lid = (x: number, edge: number, above: boolean, flat = false): string => {
     const far = above ? edge - eh * 4 : edge + eh * 4
-    return `M${fixed(x - reach)} ${fixed(far)}V${fixed(edge - sag)}Q${fixed(x)} ${fixed(edge + sag)} ${fixed(x + reach)} ${fixed(edge - sag)}V${fixed(far)}Z`
+    if (idle) {
+      const curve = flat ? 0 : 0.5 * unit
+      return `M${fixed(x - reach)} ${fixed(far)}V${fixed(edge)}Q${fixed(x)} ${fixed(edge + curve)} ${fixed(x + reach)} ${fixed(edge)}V${fixed(far)}Z`
+    }
+    const curve = flat ? 0 : sag
+    return `M${fixed(x - reach)} ${fixed(far)}V${fixed(edge - curve)}Q${fixed(x)} ${fixed(edge + curve)} ${fixed(x + reach)} ${fixed(edge - curve)}V${fixed(far)}Z`
   }
   const star = (x: number, y: number, radius: number): string =>
     `M${fixed(x)} ${fixed(y - radius)}Q${fixed(x + radius * 0.24)} ${fixed(y - radius * 0.24)} ${fixed(x + radius)} ${fixed(y)}Q${fixed(x + radius * 0.24)} ${fixed(y + radius * 0.24)} ${fixed(x)} ${fixed(y + radius)}Q${fixed(x - radius * 0.24)} ${fixed(y + radius * 0.24)} ${fixed(x - radius)} ${fixed(y)}Q${fixed(x - radius * 0.24)} ${fixed(y - radius * 0.24)} ${fixed(x)} ${fixed(y - radius)}Z`
-  const brow = browStroke(pose.brow)
-  const browPath = (x: number, side: number): string => {
+  const browPath = (x: number, side: number, squint = false): string => {
+    const brow = browStroke(squint ? "focus" : pose.brow)
     const y =
       eyeY - 4.6 * unit + brow.dy * unit - (pose.eyeScale - 1) * 2.5 * unit - (accessory === "glasses" ? 0.7 * unit : 0)
     const points = brow.points.map(([dx, dy]) => `${fixed(x + dx * unit * side)} ${fixed(y + dy * unit)}`)
     return `M${points[0] ?? ""}Q${points[1] ?? ""} ${points[2] ?? ""}`
   }
-  return (
-    <svg
-      aria-hidden="true"
-      className="connect-creature"
-      data-creature=""
-      ref={root}
-      data-arrived={arrived ? "" : undefined}
-      data-bucket={presentation.bucket}
-      data-size={size}
-      data-row-presentation={homeRow ? "home" : undefined}
-      data-stale={stale ? "" : undefined}
-      data-closed={closed ? "" : undefined}
-      data-tone={presentation.tone}
-      data-mood={mood}
-      data-lidded={pose.lid > 0 ? "" : undefined}
-      data-talking={expressive ? "" : undefined}
-      data-loop={pose.loops ? "" : undefined}
-      focusable="false"
-      height={pixels[size]}
-      width={pixels[size]}
-      style={rig}
-      viewBox={viewBox}
-    >
-      <defs>
-        <clipPath id={`${ref}-skin`}>
-          <path d={character.body} />
-        </clipPath>
-        {eyes.map((x, index) => (
-          <g key={x}>
-            <clipPath id={`${ref}-eye-${String(index)}`}>
-              <path d={eyePath(x)} />
-            </clipPath>
-            <clipPath id={`${ref}-socket-${String(index)}`}>
-              <path d={eyePath(x)} />
-            </clipPath>
-            <clipPath id={`${ref}-upper-${String(index)}`}>
-              <path className="connect-creature-lid" d={lid(x, upperRest, false)} />
-            </clipPath>
-            <clipPath id={`${ref}-lower-${String(index)}`}>
-              <path className="connect-creature-lid" data-low="" d={lid(x, lowerRest, true)} />
-            </clipPath>
-          </g>
-        ))}
-      </defs>
-      <ellipse
-        className="connect-creature-shadow"
-        cx="50"
-        cy={FOOT}
-        fill={palette.p26}
-        fillOpacity="0.16"
-        rx={referenceWidth * 0.36}
-        ry={unit}
-      />
-      <ellipse className="connect-creature-halo" cx="50" cy={ring.cy} rx={ring.rx} ry={ring.ry} />
-      <ellipse className="connect-creature-orbit" cx="50" cy={ring.cy} pathLength="100" rx={ring.rx} ry={ring.ry} />
+  const face = (frame: "base" | "squint" | "blink"): ReactElement => {
+    const squint = frame === "squint"
+    const blink = frame === "blink"
+    return (
       <g
-        className="connect-creature-lean"
-        key={`${mood}:${String(reactionKey)}`}
-        onAnimationEnd={(event) => {
-          if (event.animationName === "connect-creature-done-face" && selected === "done" && reaction === undefined) {
-            setCompletion({ identity, state, override, complete: true })
-          }
-        }}
+        className={
+          squint
+            ? "connect-creature-face connect-creature-idle-squint"
+            : blink
+              ? "connect-creature-face connect-creature-idle-blink"
+              : "connect-creature-face"
+        }
       >
-        <g className="connect-creature-squash">
-          <g className="connect-creature-breath">
-            <path className="connect-creature-body" d={character.body} fill={palette.p46} />
-            <g clipPath={`url(#${ref}-skin)`}>
-              <path
-                className="connect-creature-lit"
-                d={character.body}
-                fill={palette.p58}
-                transform={`translate(${-1.25 * unit} ${-1.5 * unit}) translate(${String(referenceLeft)} ${String(referenceTop)}) scale(.99) translate(${String(-referenceLeft)} ${String(-referenceTop)})`}
+        <g className="connect-creature-bob" clipPath={`url(#${ref}-skin)`}>
+          {eyes.map((x, index) => (
+            <g className="connect-creature-eye" key={x}>
+              <ellipse
+                className="connect-creature-blush"
+                cx={x + (index === 0 ? -3.75 : 3.75) * unit}
+                cy={eyeY + 3.4 * unit}
+                rx={1.8 * unit}
+                ry={unit}
+                fill={palette.blush}
+                fillOpacity="0.5"
               />
-              <rect
-                className="connect-creature-highlight"
-                x={-2.5 * unit}
-                y={-0.8 * unit}
-                width={5 * unit}
-                height={1.6 * unit}
-                rx={0.8 * unit}
-                transform={`translate(${String(referenceLeft + seed.highlightX * unit)} ${String(referenceTop + referenceHeight * 0.47)}) rotate(${String(seed.highlightRotation)})`}
-                fill={palette.p70}
-              />
-            </g>
-          </g>
-        </g>
-        <g className="connect-creature-face">
-          <g className="connect-creature-bob" clipPath={`url(#${ref}-skin)`}>
-            {eyes.map((x, index) => (
-              <g className="connect-creature-eye" key={x}>
-                <ellipse
-                  className="connect-creature-blush"
-                  cx={x + (index === 0 ? -3.75 : 3.75) * unit}
-                  cy={eyeY + 3.4 * unit}
-                  rx={1.8 * unit}
-                  ry={unit}
-                  fill={palette.blush}
-                  fillOpacity="0.5"
-                />
-                <g className="connect-creature-open-eye" data-eyes={pose.eyes}>
-                  <g clipPath={`url(#${ref}-upper-${String(index)})`}>
-                    <g clipPath={`url(#${ref}-lower-${String(index)})`}>
+              <g className="connect-creature-open-eye" data-eyes={pose.eyes}>
+                {blink ? null : (
+                  <g clipPath={idle ? undefined : `url(#${ref}-${squint ? "squint" : "upper"}-${String(index)})`}>
+                    <g clipPath={idle ? undefined : `url(#${ref}-lower-${String(index)})`}>
                       <path className="connect-creature-socket" d={eyePath(x)} />
                       <path className="connect-creature-white" d={eyePath(x)} fill={palette.sclera} />
                       <g clipPath={`url(#${ref}-eye-${String(index)})`}>
@@ -389,66 +350,215 @@ export const Creature = ({
                       </g>
                     </g>
                   </g>
-                  {closed ? (
-                    <path
-                      className="connect-creature-lash"
-                      data-shut=""
-                      d={`M${fixed(x - ew)} ${fixed(eyeY)}Q${fixed(x)} ${fixed(eyeY + 1.3 * unit)} ${fixed(x + ew)} ${fixed(eyeY)}`}
-                    />
-                  ) : (
-                    <g clipPath={`url(#${ref}-socket-${String(index)})`}>
-                      <g className="connect-creature-lid">
+                )}
+                {closed || blink ? (
+                  <path
+                    className="connect-creature-lash"
+                    data-shut=""
+                    d={`M${fixed(x - ew)} ${fixed(eyeY)}Q${fixed(x)} ${fixed(eyeY + 1.3 * unit)} ${fixed(x + ew)} ${fixed(eyeY)}`}
+                  />
+                ) : (
+                  <g clipPath={`url(#${ref}-${idle ? "eye" : "socket"}-${String(index)})`}>
+                    <g className={squint ? "connect-creature-squint-lid" : "connect-creature-lid"}>
+                      {idle ? (
                         <path
-                          className="connect-creature-lash"
-                          d={`M${fixed(x - reach)} ${fixed(upperRest - sag)}Q${fixed(x)} ${fixed(upperRest + sag)} ${fixed(x + reach)} ${fixed(upperRest - sag)}`}
+                          className="connect-creature-idle-lid-fill"
+                          d={lid(x, upperRest, true, squint)}
+                          fill={palette.p58}
                         />
-                      </g>
+                      ) : null}
+                      <path
+                        className="connect-creature-lash"
+                        d={`M${fixed(x - lashReach)} ${fixed(upperRest + (idle ? 0.05 * unit : -sag))}Q${fixed(x)} ${fixed(upperRest + (idle ? (squint ? 0.05 : 0.55) * unit : sag))} ${fixed(x + lashReach)} ${fixed(upperRest + (idle ? 0.05 * unit : -sag))}`}
+                      />
                     </g>
-                  )}
-                </g>
-                <path
-                  className="connect-creature-eye-mark"
-                  data-eyes={pose.eyes}
-                  d={
-                    pose.eyes === "squeeze"
-                      ? `M${fixed(x + (index === 0 ? -1 : 1) * (ew - 0.4 * unit))} ${fixed(eyeY - 1.5 * unit)}L${fixed(x + (index === 0 ? 1 : -1) * (ew - 0.4 * unit))} ${fixed(eyeY)}L${fixed(x + (index === 0 ? -1 : 1) * (ew - 0.4 * unit))} ${fixed(eyeY + 1.5 * unit)}`
-                      : `M${fixed(x - ew + 0.2 * unit)} ${fixed(eyeY + 0.9 * unit)}Q${fixed(x)} ${fixed(eyeY - 2.1 * unit)} ${fixed(x + ew - 0.2 * unit)} ${fixed(eyeY + 0.9 * unit)}`
-                  }
-                />
+                  </g>
+                )}
               </g>
-            ))}
-            {eyes.map((x, index) => (
               <path
-                className="connect-creature-brow"
-                data-side={index === 0 ? "l" : "r"}
-                d={browPath(x, index === 0 ? -1 : 1)}
-                key={x}
+                className="connect-creature-eye-mark"
+                data-eyes={pose.eyes}
+                d={
+                  pose.eyes === "squeeze"
+                    ? `M${fixed(x + (index === 0 ? -1 : 1) * (ew - 0.4 * unit))} ${fixed(eyeY - 1.5 * unit)}L${fixed(x + (index === 0 ? 1 : -1) * (ew - 0.4 * unit))} ${fixed(eyeY)}L${fixed(x + (index === 0 ? -1 : 1) * (ew - 0.4 * unit))} ${fixed(eyeY + 1.5 * unit)}`
+                    : `M${fixed(x - ew + 0.2 * unit)} ${fixed(eyeY + 0.9 * unit)}Q${fixed(x)} ${fixed(eyeY - 2.1 * unit)} ${fixed(x + ew - 0.2 * unit)} ${fixed(eyeY + 0.9 * unit)}`
+                }
               />
-            ))}
-            {expressive ? (
-              <g
-                className="connect-creature-mouth"
-                data-filled={pose.mouth === "small" || pose.mouth === "open" ? "" : undefined}
-                transform={`translate(50 ${String(eyeY + 4.8 * unit)}) scale(${String(unit)})`}
-              >
-                <path d={mouthPath(pose.mouth)} />
-              </g>
-            ) : null}
+            </g>
+          ))}
+          {eyes.map((x, index) => (
+            <path
+              className="connect-creature-brow"
+              data-side={index === 0 ? "l" : "r"}
+              d={browPath(x, index === 0 ? -1 : 1, squint)}
+              key={x}
+            />
+          ))}
+          {expressive ? (
+            <g
+              className="connect-creature-mouth"
+              data-filled={pose.mouth === "small" || pose.mouth === "open" ? "" : undefined}
+              transform={`translate(50 ${String(eyeY + 4.8 * unit)}) scale(${String(unit)})`}
+            >
+              <path d={mouthPath(pose.mouth)} />
+            </g>
+          ) : null}
+        </g>
+      </g>
+    )
+  }
+  // Full pose-frame overlays in pages15/17 carry their own translucent ground shadow.
+  const shadow = (overlay?: "blink" | "squint"): ReactElement => (
+    <ellipse
+      className={
+        overlay === undefined
+          ? "connect-creature-shadow"
+          : `connect-creature-shadow connect-creature-idle-${overlay}-shadow`
+      }
+      cx="50"
+      cy={FOOT}
+      fill={palette.p26}
+      fillOpacity="0.16"
+      rx={referenceWidth * 0.36}
+      ry={unit}
+    />
+  )
+  const drawing = (
+    <g
+      className="connect-creature-lean"
+      key={idle ? `idle:${identity}` : `${mood}:${String(reactionKey)}`}
+      onAnimationEnd={(event) => {
+        if (event.animationName === "connect-creature-done-face" && selected === "done" && reaction === undefined) {
+          setCompletion({ identity, state, override, complete: true })
+        }
+      }}
+    >
+      <g className="connect-creature-squash">
+        <g className="connect-creature-breath">
+          <path className="connect-creature-body" d={character.body} fill={palette.p46} />
+          <g clipPath={`url(#${ref}-skin)`}>
+            <path
+              className="connect-creature-lit"
+              d={character.body}
+              fill={palette.p58}
+              transform={`translate(${-1.25 * unit} ${-1.5 * unit}) translate(${String(referenceLeft)} ${String(referenceTop)}) scale(.99) translate(${String(-referenceLeft)} ${String(-referenceTop)})`}
+            />
+            <rect
+              className="connect-creature-highlight"
+              x={-2.5 * unit}
+              y={-0.8 * unit}
+              width={5 * unit}
+              height={1.6 * unit}
+              rx={0.8 * unit}
+              transform={`translate(${String(referenceLeft + seed.highlightX * unit)} ${String(referenceTop + referenceHeight * 0.47)}) rotate(${String(seed.highlightRotation)})`}
+              fill={palette.p70}
+            />
           </g>
         </g>
-        <CreatureAdornment
-          accessory={accessory}
-          bodyKind={character.bodyKind}
-          unit={unit}
-          top={top}
-          foot={FOOT}
-          eyeY={eyeY}
-          eyeWidth={ew}
-          eyeHeight={eh}
-          eyeGap={character.eyeGap}
-          skin={`${ref}-skin`}
-        />
       </g>
+      {idle ? (
+        <g className="connect-creature-idle-base-face">
+          <g className="connect-creature-idle-open-face">{face("base")}</g>
+          {face("blink")}
+        </g>
+      ) : (
+        face("base")
+      )}
+      {idle && signature.habit === "squint" ? face("squint") : null}
+      {idle ? (
+        <g className="connect-creature-idle-forced-face" fill="none" stroke="CanvasText" strokeLinecap="round">
+          {eyes.map((x, index) => (
+            <g key={x}>
+              <ellipse cx={x} cy={eyeY} rx={2.1 * unit} ry={2.5 * unit} fill="Canvas" strokeWidth={0.8 * unit} />
+              <circle cx={x} cy={eyeY + 0.3 * unit} r={1.2 * unit} fill="CanvasText" stroke="none" />
+              <path d={browPath(x, index === 0 ? -1 : 1)} strokeWidth={1.1 * unit} />
+            </g>
+          ))}
+        </g>
+      ) : null}
+      <CreatureAdornment
+        accessory={accessory}
+        bodyKind={character.bodyKind}
+        unit={unit}
+        top={top}
+        foot={FOOT}
+        eyeY={eyeY}
+        eyeWidth={ew}
+        eyeHeight={eh}
+        eyeGap={character.eyeGap}
+        skin={`${ref}-skin`}
+      />
+    </g>
+  )
+  return (
+    <svg
+      aria-hidden="true"
+      className="connect-creature"
+      data-creature=""
+      data-idle-motion={idle ? "" : undefined}
+      data-idle-habit={idle ? signature.habit : undefined}
+      data-idle-phase={idle ? String(phase) : undefined}
+      ref={root}
+      data-arrived={arrived ? "" : undefined}
+      data-bucket={presentation.bucket}
+      data-size={size}
+      data-row-presentation={homeRow ? "home" : undefined}
+      data-stale={stale ? "" : undefined}
+      data-closed={closed ? "" : undefined}
+      data-tone={presentation.tone}
+      data-mood={idle ? "idle" : mood}
+      data-lidded={pose.lid > 0 ? "" : undefined}
+      data-talking={expressive ? "" : undefined}
+      data-loop={pose.loops ? "" : undefined}
+      focusable="false"
+      height={pixels[size]}
+      width={pixels[size]}
+      style={idle ? { ...rig, ...idleRig } : rig}
+      viewBox={viewBox}
+    >
+      <defs>
+        <clipPath id={`${ref}-skin`}>
+          <path d={character.body} />
+        </clipPath>
+        {eyes.map((x, index) => (
+          <g key={x}>
+            <clipPath id={`${ref}-eye-${String(index)}`}>
+              <path d={eyePath(x)} />
+            </clipPath>
+            <clipPath id={`${ref}-socket-${String(index)}`}>
+              <path d={eyePath(x)} />
+            </clipPath>
+            <clipPath id={`${ref}-upper-${String(index)}`}>
+              <path className="connect-creature-lid" d={lid(x, upperRest, false)} />
+            </clipPath>
+            {idle && signature.habit === "squint" ? (
+              <clipPath id={`${ref}-squint-${String(index)}`}>
+                <path className="connect-creature-squint-lid" d={lid(x, upperRest, false, true)} />
+              </clipPath>
+            ) : null}
+            <clipPath id={`${ref}-lower-${String(index)}`}>
+              <path className="connect-creature-lid" data-low="" d={lid(x, lowerRest, true)} />
+            </clipPath>
+          </g>
+        ))}
+      </defs>
+      {idle ? null : shadow()}
+      <ellipse className="connect-creature-halo" cx="50" cy={ring.cy} rx={ring.rx} ry={ring.ry} />
+      <ellipse className="connect-creature-orbit" cx="50" cy={ring.cy} pathLength="100" rx={ring.rx} ry={ring.ry} />
+      {idle ? (
+        <g className="connect-creature-idle-habit">
+          <g className="connect-creature-idle-fidget">
+            <g className="connect-creature-idle-breath">
+              {shadow()}
+              {shadow("blink")}
+              {signature.habit === "squint" ? shadow("squint") : null}
+              {drawing}
+            </g>
+          </g>
+        </g>
+      ) : (
+        drawing
+      )}
       {!shut && mood === "stuck" ? (
         <>
           <g

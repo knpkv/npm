@@ -5307,3 +5307,285 @@
     }
   }
 }
+
+@layer connect {
+  /* Pages15/17: a separate transform per task layer and habit; app slots and identity never change. */
+  .connect-creature-idle-habit,
+  .connect-creature-idle-fidget,
+  .connect-creature-idle-breath {
+    transform-box: view-box;
+    transform-origin: 50% 95%;
+  }
+  .connect-creature-idle-blink,
+  .connect-creature-idle-squint,
+  .connect-creature-idle-blink-shadow,
+  .connect-creature-idle-squint-shadow {
+    opacity: 0;
+  }
+  /* Page15 draw(): the curved lid is lit skin; its fine edge is not a full lash. */
+  .connect-creature[data-idle-motion] .connect-creature-lash:not([data-shut]) {
+    stroke-width: calc(var(--connect-creature-unit) * 0.9px);
+  }
+  .connect-creature[data-idle-motion][data-size="stage"] .connect-creature-lash:not([data-shut]) {
+    stroke-width: calc(var(--connect-creature-unit) * 0.45px);
+  }
+  .connect-creature[data-idle-motion] .connect-creature-brow {
+    opacity: 0.9;
+  }
+  .connect-creature-idle-forced-face {
+    display: none;
+  }
+  .connect-creature-squint-lid {
+    translate: 0 calc(var(--connect-creature-lid) * var(--connect-creature-squint-open) * 1px);
+  }
+  .connect-creature[data-idle-motion] :is(.connect-creature-orbit, .connect-creature-halo) {
+    display: none;
+  }
+
+  @media (prefers-reduced-motion: no-preference) and (forced-colors: none) {
+    .connect-creature[data-idle-motion]:not(
+        :where([data-rly-reduced-motion="reduce"] *, [data-reduced-motion="reduce"] *),
+        :where([data-rly-forced-colors="active"] *, [data-forced-colors="active"] *)
+      ) {
+      .connect-creature-idle-fidget {
+        animation: connect-creature-idle-tilt calc(13000ms * var(--connect-creature-idle-tempo)) linear infinite;
+        animation-delay: var(--connect-creature-idle-phase);
+      }
+      &[data-size="stage"] .connect-creature-idle-fidget {
+        animation-name: connect-creature-idle-fidget;
+      }
+      &[data-size="stage"] .connect-creature-idle-breath {
+        animation: connect-creature-idle-breath calc(4200ms * var(--connect-creature-idle-tempo)) ease-in-out infinite;
+        animation-delay: var(--connect-creature-idle-phase);
+      }
+      .connect-creature-idle-blink,
+      .connect-creature-idle-blink-shadow,
+      .connect-creature-idle-open-face {
+        animation: connect-creature-idle-blink calc(15000ms * var(--connect-creature-idle-tempo)) linear infinite;
+        animation-delay: var(--connect-creature-idle-phase);
+      }
+      .connect-creature-idle-open-face {
+        animation-name: connect-creature-idle-open;
+      }
+      .connect-creature-idle-habit {
+        animation-duration: calc(8000ms * var(--connect-creature-idle-tempo));
+        animation-delay: var(--connect-creature-habit-phase);
+        animation-timing-function: ease-in-out;
+        animation-iteration-count: infinite;
+      }
+      &[data-idle-habit="tilt"] .connect-creature-idle-habit {
+        animation-name: connect-creature-habit-tilt;
+      }
+      &[data-idle-habit="flick"] .connect-creature-idle-habit {
+        animation-name: connect-creature-habit-flick;
+      }
+      &[data-idle-habit="hop"] .connect-creature-idle-habit {
+        animation-name: connect-creature-habit-hop;
+      }
+      &[data-idle-habit="squint"] .connect-creature-idle-squint,
+      &[data-idle-habit="squint"] .connect-creature-idle-squint-shadow,
+      &[data-idle-habit="squint"] .connect-creature-idle-base-face {
+        animation: connect-creature-habit-squint calc(8000ms * var(--connect-creature-idle-tempo)) steps(1, end)
+          infinite;
+        animation-delay: var(--connect-creature-habit-phase);
+      }
+      &[data-idle-habit="squint"] .connect-creature-idle-base-face {
+        animation-name: connect-creature-habit-squint-base;
+      }
+      /* Visibility owns the whole decorative subtree, including future accessory animations. */
+      &:not([data-motion-visible]) * {
+        animation-play-state: paused !important;
+      }
+    }
+  }
+
+  /* Page15 cm-blink15: four 150ms holds on the unscaled fifteen-second clock. */
+  @keyframes connect-creature-idle-blink {
+    0%,
+    1%,
+    27.01%,
+    28%,
+    47.01%,
+    48%,
+    80.01%,
+    81% {
+      opacity: 1;
+    }
+    1.01%,
+    27%,
+    28.01%,
+    47%,
+    48.01%,
+    80%,
+    81.01%,
+    100% {
+      opacity: 0;
+    }
+  }
+  @keyframes connect-creature-idle-open {
+    0%,
+    1%,
+    27.01%,
+    28%,
+    47.01%,
+    48%,
+    80.01%,
+    81% {
+      opacity: 0;
+    }
+    1.01%,
+    27%,
+    28.01%,
+    47%,
+    48.01%,
+    80%,
+    81.01%,
+    100% {
+      opacity: 1;
+    }
+  }
+  @keyframes connect-creature-idle-breath {
+    0%,
+    100% {
+      scale: 1;
+    }
+    50% {
+      scale: calc(1 + 0.01 * var(--connect-creature-idle-amplitude))
+        calc(1 + 0.02 * var(--connect-creature-idle-amplitude));
+    }
+  }
+  @keyframes connect-creature-idle-fidget {
+    0%,
+    28%,
+    39%,
+    74%,
+    78.5%,
+    100% {
+      rotate: 0deg;
+    }
+    31%,
+    36% {
+      rotate: calc(5deg * var(--connect-creature-idle-amplitude));
+    }
+    75.5% {
+      rotate: calc(-3deg * var(--connect-creature-idle-amplitude));
+    }
+    77% {
+      rotate: calc(2.5deg * var(--connect-creature-idle-amplitude));
+    }
+  }
+  @keyframes connect-creature-idle-tilt {
+    0%,
+    28%,
+    39%,
+    100% {
+      rotate: 0deg;
+    }
+    31%,
+    36% {
+      rotate: calc(6deg * var(--connect-creature-idle-amplitude));
+    }
+  }
+  /* Page17 cm-h-* is independent of the task loop, always 8000ms before tempo. */
+  @keyframes connect-creature-habit-tilt {
+    0%,
+    46%,
+    57%,
+    100% {
+      rotate: 0deg;
+    }
+    49%,
+    54% {
+      rotate: calc(5deg * var(--connect-creature-idle-amplitude));
+    }
+  }
+  @keyframes connect-creature-habit-flick {
+    0%,
+    48%,
+    52.5%,
+    100% {
+      rotate: 0deg;
+    }
+    49.5% {
+      rotate: calc(-4deg * var(--connect-creature-idle-amplitude));
+    }
+    51% {
+      rotate: calc(3deg * var(--connect-creature-idle-amplitude));
+    }
+  }
+  @keyframes connect-creature-habit-hop {
+    0%,
+    48%,
+    53.5%,
+    100% {
+      translate: 0;
+      scale: 1;
+    }
+    50% {
+      translate: 0
+        calc(
+          -5px * var(--connect-creature-pixel, 1) * var(--connect-creature-idle-travel) *
+            var(--connect-creature-idle-amplitude)
+        );
+      scale: 0.98 1.03;
+    }
+    52% {
+      translate: 0;
+      scale: 1.02 0.98;
+    }
+  }
+  @keyframes connect-creature-habit-squint {
+    0%,
+    47.99%,
+    55.01%,
+    100% {
+      opacity: 0;
+    }
+    48%,
+    55% {
+      opacity: 1;
+    }
+  }
+  @keyframes connect-creature-habit-squint-base {
+    0%,
+    47.99%,
+    55.01%,
+    100% {
+      opacity: 1;
+    }
+    48%,
+    55% {
+      opacity: 0;
+    }
+  }
+}
+
+@layer connect {
+  /* Page18 drawFc(): outlined body/eyes, solid pupils, no hue/iris/glint/lid layers. */
+  @media (forced-colors: active) {
+    .connect-creature[data-idle-motion] .connect-creature-body {
+      stroke-width: calc(var(--connect-creature-unit) * 1.2px);
+    }
+    .connect-creature[data-idle-motion] :is(.connect-creature-idle-base-face, .connect-creature-idle-squint) {
+      display: none;
+    }
+    .connect-creature[data-idle-motion] .connect-creature-idle-forced-face {
+      display: inline;
+    }
+  }
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"])
+    .connect-creature[data-idle-motion]
+    .connect-creature-body {
+    stroke-width: calc(var(--connect-creature-unit) * 1.2px);
+  }
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"])
+    .connect-creature[data-idle-motion]
+    :is(.connect-creature-idle-base-face, .connect-creature-idle-squint) {
+    display: none;
+  }
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"])
+    .connect-creature[data-idle-motion]
+    .connect-creature-idle-forced-face {
+    display: inline;
+  }
+}

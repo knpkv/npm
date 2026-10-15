@@ -197,7 +197,7 @@ export const localConnectAgents = Effect.fn("HerdrConnect.localAgents")(
             Effect.provideService(ConnectInventoryWriteDeadline, writeDeadline),
             Effect.mapError((cause) => new ConnectPeerError({ cause, host: config.host, reason: "unavailable" }))
           )
-        const connectAgent = {
+        const connectAgent: Types.Mutable<ConnectAgent> = {
           host: config.host,
           id,
           kind: agent.kind,
@@ -206,6 +206,7 @@ export const localConnectAgents = Effect.fn("HerdrConnect.localAgents")(
           state: agent.status,
           work: agent.work
         }
+        if (agent.taskKind !== undefined) connectAgent.taskKind = agent.taskKind
         const projected = relationship.relationship === undefined
           ? connectAgent satisfies ConnectAgent
           : {
