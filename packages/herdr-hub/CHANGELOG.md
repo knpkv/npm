@@ -2,6 +2,12 @@
 
 Released as `@knpkv/herdr-approvals` up to 0.18.0; the headings below are that package's history.
 
+## 0.40.0
+
+### Minor Changes
+
+- [#923](https://github.com/knpkv/npm/pull/923) [`a1152b5`](https://github.com/knpkv/npm/commit/a1152b51e8819c16bf9513a45fa0804f481d21ad) Thanks [@konopkov](https://github.com/konopkov)! - Produce agent task kinds from bounded, host-private Claude/Codex session evidence and existing branch PR facts. Keep unsupported sources unknown and send only the normalized kind over the fleet wire.
+
 ## 0.39.0
 
 ### Minor Changes
