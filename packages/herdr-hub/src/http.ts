@@ -149,6 +149,7 @@ import { DashboardResponseBudgetError } from "./errors.js"
 import type { ApprovalAppStoreError, PushEndpointNotAllowedError } from "./errors.js"
 import { fontPreloadLink } from "./font-preload.js"
 import { readHostLimits, staleWhileRevalidate } from "./host-limits.js"
+import { makeHostResources } from "./host-resources.js"
 import { readHostUsage, usageCache } from "./host-usage.js"
 import { attachTaskWorkReader } from "./internal/agent-task-work-source.js"
 import { dashboardPage } from "./internal/dashboard-page.js"
@@ -191,7 +192,7 @@ import {
   PushSubscriptionRecord,
   PushSubscriptionRemoval
 } from "./model.js"
-import { connectModule, fleetHubModule, usageModule } from "./module-contract.js"
+import { connectModule, fleetHubModule, resourcesModule, usageModule } from "./module-contract.js"
 import type { NeedsYouCandidate, NeedsYouIssue, NeedsYouProviderResult } from "./module-needs-you.js"
 import * as ModuleServer from "./module-server.js"
 import type { ModuleRouteFailure, ServerModule } from "./module-server.js"
@@ -1797,6 +1798,9 @@ export const startHttpServer = async (
       )
     ).pipe(Effect.provideService(Scope.Scope, limitsScope))
   )
+  const localResources = await httpRuntime.runPromise(
+    makeHostResources(config).pipe(Effect.provideService(Scope.Scope, limitsScope))
+  )
   const shutdown = async (): Promise<void> => {
     if (closed) return
     closed = true
@@ -1841,6 +1845,7 @@ export const startHttpServer = async (
     > = [
       { descriptor: connectModule, handlers: Layer.succeed(ModuleServer.ModuleHandlers, { routes: [] }) },
       { descriptor: usageModule, handlers: Layer.succeed(ModuleServer.ModuleHandlers, { routes: [] }) },
+      { descriptor: resourcesModule, handlers: Layer.succeed(ModuleServer.ModuleHandlers, { routes: [] }) },
       makeCodeModule({
         host: config.host,
         isHub,
@@ -3719,6 +3724,13 @@ export const startHttpServer = async (
                 Effect.flatMap(decodeUsageQuery(url), localUsage)
               )
             )
+            return
+          }
+
+          if (request.method === "GET" && url.pathname === "/v1/host/resources") {
+            await respond(response, Effect.andThen(authorized, localResources.read), 200, {
+              "cache-control": "no-store"
+            })
             return
           }
 

@@ -6,6 +6,7 @@ export { AgentActivity, DashboardView, type DashboardViewProps } from "./dashboa
 export { HubRelay } from "./hub-relay.js"
 export { LanWorkPage, LanWorkPairPage } from "./lan-work-view.js"
 export { RefreshStatus } from "./refresh-status.js"
+export { HostResourcesView, type HostResourcesViewProps } from "./resources-module-view.js"
 export { FleetShell, FleetWorkPanel } from "./shell-view.js"
 export { SuperappShell } from "./superapp-view.js"
 export { type TodayReadState, TodayView, type TodayViewProps } from "./today-view.js"
