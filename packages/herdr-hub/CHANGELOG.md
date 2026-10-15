@@ -2,6 +2,12 @@
 
 Released as `@knpkv/herdr-approvals` up to 0.18.0; the headings below are that package's history.
 
+## 0.41.1
+
+### Patch Changes
+
+- [#946](https://github.com/knpkv/npm/pull/946) [`b27b391`](https://github.com/knpkv/npm/commit/b27b391fedf7eb1b4100557f54b204148d1fa895) Thanks [@konopkov](https://github.com/konopkov)! - Empty Usage Limits tabs stay Usage navigation: focus lands on the current tab and clicking it replaces history instead of pushing. Relay's status region stays mounted when Usage enters or leaves its empty layout, so an unchanged status is not announced again.
+
 ## 0.41.0
 
 ### Minor Changes
