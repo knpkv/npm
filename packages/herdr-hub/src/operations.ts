@@ -14,11 +14,21 @@ import {
   type LocalJobPayload,
   type WorkerStarted
 } from "@knpkv/herdr-fleet"
-import { Effect, Path, Schema, Stream } from "effect"
-import { ChildProcess, ChildProcessSpawner } from "effect/process"
+import { Config, Effect, Option, Path, Schema, Stream } from "effect"
+import { ChildProcessSpawner } from "effect/process"
+import { makeSessionTaskReader } from "./internal/agent-task-session.js"
+import { makeTaskWorkSource, registerTaskWorkSource } from "./internal/agent-task-work-source.js"
+import {
+  branchTaskFacts,
+  decodeTaskBranchTarget,
+  type TaskBranchTarget,
+  type TaskWorkFacts
+} from "./internal/agent-task-work.js"
+import { makeHostCommand } from "./internal/host-command.js"
 
 const HerdrAgentFields = {
   agent_status: Schema.String,
+  agent_session: Schema.optionalKey(Schema.Unknown),
   cwd: Schema.String,
   foreground_cwd: Schema.optionalKey(Schema.String),
   name: Schema.optionalKey(Schema.NullOr(Schema.String)),
@@ -175,6 +185,14 @@ export const makeHostOperations = Effect.fn("HostOperations.make")(function*(
 ) {
   const paths = yield* Path.Path
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+  const workSource = yield* makeTaskWorkSource()
+  const home = yield* Config.option(Config.String("HOME"))
+  const claudeConfig = yield* Config.option(Config.String("CLAUDE_CONFIG_DIR"))
+  const codexHome = yield* Config.option(Config.String("CODEX_HOME"))
+  const sessionReader = Option.isNone(home) ? null : yield* makeSessionTaskReader({
+    claudeProjects: paths.join(Option.getOrElse(claudeConfig, () => paths.join(home.value, ".claude")), "projects"),
+    codexSessions: paths.join(Option.getOrElse(codexHome, () => paths.join(home.value, ".codex")), "sessions")
+  })
 
   const outputLimitError = (operation: string, observedBytes: number) =>
     new FleetOperationError({
@@ -218,7 +236,7 @@ export const makeHostOperations = Effect.fn("HostOperations.make")(function*(
         operation
       })
     }
-    const child = ChildProcess.make(command, commandLine.slice(1), {
+    const child = makeHostCommand(command, commandLine.slice(1), {
       cwd: config.repository
     })
     return yield* Effect.scoped(
@@ -270,32 +288,60 @@ export const makeHostOperations = Effect.fn("HostOperations.make")(function*(
         })
       ),
       Effect.flatMap((parsed) =>
-        Effect.forEach(
-          parsed.result.agents.filter(isHerdrAgent),
-          (agent) => {
-            return Effect.gen(function*() {
-              const basename = paths.basename(agent.foreground_cwd ?? agent.cwd)
-              const work = yield* Schema.decodeUnknownEffect(AgentWorkLabel)(
-                basename === "" ? "root" : basename
-              ).pipe(Effect.mapError(operationError("herdr.agent_list.work")))
-              const lineage = yield* decodeLineage(agent.tokens)
-              return yield* Schema.decodeUnknownEffect(AgentSummary)({
-                agentId: lineage.agentId,
-                activityRevision: agent.state_change_seq,
-                kind: agent.agent,
-                name: agent.name ?? `${agent.agent}@${agent.pane_id}`,
-                paneId: agent.pane_id,
-                parentAgentId: lineage.parentAgentId,
-                relation: lineage.relation,
-                status: agent.agent_status,
-                taskKind: classifyAgentTask({ status: agent.agent_status }),
-                work
+        Effect.gen(function*() {
+          const entries = parsed.result.agents.filter(isHerdrAgent)
+          const observations = yield* workSource.observations
+          const targets = new Map<string, TaskBranchTarget | undefined>()
+          if (observations.some((observation) => observation.pullRequest !== null)) {
+            const directories = [...new Set(entries.map((agent) => agent.foreground_cwd ?? agent.cwd))]
+            yield* Effect.forEach(directories, (directory) =>
+              Effect.all({
+                origin: runCommand("task.git.origin", ["git", "-C", directory, "remote", "get-url", "origin"]),
+                branch: runCommand("task.git.branch", ["git", "-C", directory, "symbolic-ref", "--short", "HEAD"])
               }).pipe(
-                Effect.mapError(operationError("herdr.agent_list.agent"))
-              )
-            })
+                Effect.map(({ branch, origin }) => {
+                  targets.set(directory, decodeTaskBranchTarget(origin.trim(), branch.trim()))
+                }),
+                Effect.catchTag("FleetOperationError", () => Effect.void)
+              ), { concurrency: 4 })
           }
-        )
+          return yield* Effect.forEach(
+            entries,
+            (agent) => {
+              return Effect.gen(function*() {
+                const basename = paths.basename(agent.foreground_cwd ?? agent.cwd)
+                const work = yield* Schema.decodeUnknownEffect(AgentWorkLabel)(
+                  basename === "" ? "root" : basename
+                ).pipe(Effect.mapError(operationError("herdr.agent_list.work")))
+                const lineage = yield* decodeLineage(agent.tokens)
+                const activity = sessionReader === null || agent.agent_status !== "working"
+                  ? undefined
+                  : yield* sessionReader({ provider: agent.agent, cwd: agent.cwd, session: agent.agent_session })
+                const target = targets.get(agent.foreground_cwd ?? agent.cwd)
+                const workFacts = target === undefined
+                  ? { ci: "unknown", review: "unknown" } satisfies TaskWorkFacts
+                  : branchTaskFacts(observations, target)
+                const taskFacts = activity === undefined
+                  ? { status: agent.agent_status, ...workFacts }
+                  : { status: agent.agent_status, activity, ...workFacts }
+                return yield* Schema.decodeUnknownEffect(AgentSummary)({
+                  agentId: lineage.agentId,
+                  activityRevision: agent.state_change_seq,
+                  kind: agent.agent,
+                  name: agent.name ?? `${agent.agent}@${agent.pane_id}`,
+                  paneId: agent.pane_id,
+                  parentAgentId: lineage.parentAgentId,
+                  relation: lineage.relation,
+                  status: agent.agent_status,
+                  taskKind: classifyAgentTask(taskFacts),
+                  work
+                }).pipe(
+                  Effect.mapError(operationError("herdr.agent_list.agent"))
+                )
+              })
+            }
+          )
+        })
       ),
       Effect.map(
         (agents): AgentInventory => ({ agents, available: true, error: null })
@@ -327,7 +373,7 @@ export const makeHostOperations = Effect.fn("HostOperations.make")(function*(
           operation
         })
       }
-      const child = ChildProcess.make(command, commandLine.slice(1), {
+      const child = makeHostCommand(command, commandLine.slice(1), {
         cwd: config.repository
       })
       const validatedWorkerStarted: WorkerStarted = (identity) => {
@@ -493,6 +539,7 @@ export const makeHostOperations = Effect.fn("HostOperations.make")(function*(
       jobId
     )
 
+  yield* registerTaskWorkSource(listAgents, workSource.register)
   return {
     inspect,
     listAgents,

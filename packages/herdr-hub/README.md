@@ -211,10 +211,51 @@ The Connect live directory serves an optional `hue` palette assigned by each hos
 
 ### Agent task signals
 
-The local Herdr inventory adapter supplies `taskKind` from decoded lifecycle
-state. Fleet debounces kind changes for 500ms across agent/status reads.
-Working agents without supported activity evidence report `unknown`; the
-adapter does not infer tasks or CI failures from terminal text, work labels, or
-non-zero command exits. Provider-session tool activity and branch-linked
-Work/CI and review producers remain a separate follow-up. Only the normalized
-kind enters the fleet agent wire contract.
+The local Herdr inventory adapter supplies `taskKind` from decoded lifecycle,
+session activity, and existing Work PR evidence. Fleet debounces changes for
+500ms across agent/status reads. Unsupported or unavailable evidence remains
+`unknown`; terminal text and work labels are never scraped or interpreted.
+
+Session identity comes from Herdr's `agent_session`. Claude IDs resolve in the
+reported starting project's transcript directory; Codex UUIDv7 IDs resolve in
+the three possible local-date directories around their creation date. Explicit
+session paths must resolve inside the matching provider's session root.
+`CLAUDE_CONFIG_DIR` and `CODEX_HOME` override the default roots below `HOME`.
+There is no newest-session fallback, and out-of-root symlinks are rejected.
+Each read seeks to at most the last 128KiB; a cut leading record is discarded,
+and malformed or incomplete trailing records produce unknown activity.
+
+Direct Claude Read/Grep/Glob, Edit/Write and Bash calls and native Codex
+read/apply-patch/command calls classify from decoded records. Only simple direct
+read/search or test/build commands are recognized. Shell control flow and
+JavaScript orchestration wrappers remain unknown. Tool results are correlated
+by call ID; Claude error flags and structured native Codex exit codes can mark
+a test/build failure. An ordinary non-zero exit never yields `failing`, and
+free-form result text is not parsed for a claimed exit status.
+
+The HTTP scope privately registers its existing Work reader. Current Git
+origin and branch match a unique open PR observation; stale, failed, ambiguous,
+unsupported-origin, detached-head and unmatched reads stay unknown. Work exposes
+only the oldest source failure, so any failure on the matching goal suppresses
+CI/review evidence, including an agent-only failure with an otherwise healthy PR.
+The adapter
+queries each distinct working directory once per inventory, with at most four
+directories in flight. Git children clear inherited repository-local environment
+variables so a hook cannot redirect their reads or fixture writes to its repository.
+The registration follows operations composition and
+is detached before Work closes; late cleanup cannot detach a newer reader.
+No public callback or HTTP option is added. This reads the local Work view,
+including its omission/retention limits, without new provider or peer fan-out.
+Hosts whose Work view lacks the PR therefore have unknown CI/review evidence.
+
+Provider logs, origin locators and their paths are server-private and may be
+credential-bearing. They are read on the owning host only. Tool content,
+arguments, outputs, session paths and PR details are never added to fleet
+responses; only the normalized kind is added. Work-read warnings log the typed
+cause tag, not its contents.
+
+Codex orchestration-wrapper support is tracked in
+[#919](https://github.com/knpkv/npm/issues/919). In one bounded 1MiB rollout sample
+of 500 records, all 60 calls stayed unknown: 50 JavaScript wrappers and 10 sleep
+calls, with no separate typed nested read/write/command events. This is a local
+sample, not a fleet-wide estimate; lifecycle and Work signals remain independent.

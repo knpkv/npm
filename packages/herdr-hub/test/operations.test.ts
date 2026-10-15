@@ -11,12 +11,18 @@ import {
   makeFleetService,
   type WorkerStarted
 } from "@knpkv/herdr-fleet"
-import { Effect, FileSystem, Path, Result, Schema } from "effect"
+import { WorkPullRequestObservation, WorkStoreError } from "@knpkv/herdr-work"
+import { ConfigProvider, Effect, FileSystem, Path, Result, Schema } from "effect"
 import * as HttpClientRequest from "effect/http/HttpClientRequest"
 import * as HttpClientResponse from "effect/http/HttpClientResponse"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { makeHostdOperations } from "../src/hostd.js"
+import { attachTaskWorkReader } from "../src/internal/agent-task-work-source.js"
+import { type TaskWorkObservation } from "../src/internal/agent-task-work.js"
+import { makeHostCommand } from "../src/internal/host-command.js"
 import { commandOutputMaxBytes, commandOutputTailBytes, makeHostOperations } from "../src/operations.js"
 
 // Each test effect is an application boundary; @effect/vitest scopes its Node services.
@@ -747,6 +753,227 @@ describe("host task signal producer", () => {
         expect(inventory.agents.map(({ taskKind }) => taskKind)).toEqual(cases.map(({ expected }) => expected))
         expect(JSON.stringify(inventory)).not.toContain("private tool content")
         expect(inventory.agents).toHaveLength(6)
+      }).pipe(Effect.scoped))
+  })
+})
+
+describe("live host session producer", () => {
+  it.layer(NodeServices.layer)((it) => {
+    it.effect("serves reported Claude and Codex activity without leaking session identity, arguments or content", () =>
+      Effect.gen(function*() {
+        const fs = yield* FileSystem.FileSystem
+        const paths = yield* Path.Path
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "host-session-task-" })
+        const project = paths.join(root, ".claude", "projects", "-fixture-repo")
+        const codexDirectory = paths.join(root, ".codex", "sessions", "2026", "10", "15")
+        yield* fs.makeDirectory(project, { recursive: true })
+        yield* fs.makeDirectory(codexDirectory, { recursive: true })
+        yield* fs.writeFileString(
+          paths.join(project, "target.jsonl"),
+          JSON.stringify({
+            type: "assistant",
+            message: {
+              content: [{
+                type: "tool_use",
+                id: "read",
+                name: "Read",
+                input: { file_path: "/private/secret", content: "PRIVATE_TOOL_CONTENT_SENTINEL" }
+              }]
+            }
+          }) + "\n"
+        )
+        const codexFile = paths.join(codexDirectory, "native.jsonl")
+        yield* fs.writeFileString(
+          codexFile,
+          JSON.stringify({
+            type: "response_item",
+            payload: {
+              type: "function_call",
+              call_id: "test",
+              name: "exec_command",
+              arguments: JSON.stringify({ cmd: "pnpm test /private/secret", content: "PRIVATE_TOOL_CONTENT_SENTINEL" })
+            }
+          }) + "\n"
+        )
+        const agents = [
+          {
+            agent: "claude",
+            agent_status: "working",
+            cwd: "/fixture/repo",
+            pane_id: "w1:p1",
+            state_change_seq: 1,
+            agent_session: { agent: "claude", kind: "id", value: "target" }
+          },
+          {
+            agent: "codex",
+            agent_status: "working",
+            cwd: "/fixture/repo",
+            pane_id: "w1:p2",
+            state_change_seq: 1,
+            agent_session: { agent: "codex", kind: "path", value: codexFile }
+          },
+          {
+            agent: "codex",
+            agent_status: "working",
+            cwd: "/fixture/repo",
+            pane_id: "w1:p3",
+            state_change_seq: 1,
+            agent_session: { kind: "id", value: "malformed" }
+          }
+        ]
+        const herdrCommand = paths.join(root, "herdr-test")
+        yield* fs.writeFileString(
+          herdrCommand,
+          `#!/bin/sh\nprintf '%s\\n' '${JSON.stringify({ result: { agents } })}'\n`
+        )
+        yield* fs.chmod(herdrCommand, 0o700)
+        const operations = yield* makeHostOperations({ ...config(root, ["true"]), herdrCommand }).pipe(
+          Effect.provideService(ConfigProvider.ConfigProvider, ConfigProvider.fromUnknown({ HOME: root }))
+        )
+        const inventory = yield* operations.listAgents()
+        expect(inventory.available).toBe(true)
+        expect(inventory.agents.map(({ taskKind }) => taskKind)).toEqual(["reading", "testing", "unknown"])
+        const wire = JSON.stringify(inventory)
+        for (
+          const privateValue of [
+            "PRIVATE_TOOL_CONTENT_SENTINEL",
+            "/private/secret",
+            root,
+            "agent_session",
+            "arguments",
+            "exec_command"
+          ]
+        ) expect(wire).not.toContain(privateValue)
+      }).pipe(Effect.scoped))
+  })
+})
+
+describe("host branch Work task producer", () => {
+  it.layer(NodeServices.layer)((it) => {
+    it.effect("isolates fixture and production Git from a hook repository while retaining the exact branch PR reader", () =>
+      Effect.gen(function*() {
+        const fs = yield* FileSystem.FileSystem
+        const paths = yield* Path.Path
+        const realSpawner = yield* ChildProcessSpawner.ChildProcessSpawner
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "host-work-task-" })
+        const decoy = paths.join(root, "decoy")
+        expect(yield* realSpawner.exitCode(makeHostCommand("git", ["init", "-q", "--initial-branch=decoy", decoy])))
+          .toBe(0)
+        expect(
+          yield* realSpawner.exitCode(
+            makeHostCommand("git", ["-C", decoy, "config", "remote.origin.url", "https://example.test/decoy.git"])
+          )
+        ).toBe(0)
+        yield* fs.writeFileString(paths.join(decoy, "tracked"), "decoy index sentinel")
+        expect(yield* realSpawner.exitCode(makeHostCommand("git", ["-C", decoy, "add", "tracked"]))).toBe(0)
+        const configPath = paths.join(decoy, ".git", "config")
+        const indexPath = paths.join(decoy, ".git", "index")
+        const originalConfig = yield* fs.readFile(configPath)
+        const originalIndex = yield* fs.readFile(indexPath)
+        // Model inherited hook variables below each command's explicit env, without mutating the test process.
+        const spawner = ChildProcessSpawner.make((command) =>
+          realSpawner.spawn(
+            command._tag === "StandardCommand"
+              ? ChildProcess.make(command.command, command.args, {
+                ...command.options,
+                env: {
+                  GIT_DIR: paths.join(decoy, ".git"),
+                  GIT_INDEX_FILE: indexPath,
+                  GIT_WORK_TREE: decoy,
+                  ...command.options.env
+                },
+                extendEnv: true
+              })
+              : command
+          )
+        )
+        const repo = paths.join(root, "repo")
+        yield* fs.makeDirectory(repo)
+        expect(yield* spawner.exitCode(makeHostCommand("git", ["init", "-q", "--initial-branch=feat/fixture", repo])))
+          .toBe(0)
+        expect(
+          yield* spawner.exitCode(
+            makeHostCommand("git", [
+              "-C",
+              repo,
+              "config",
+              "--local",
+              "remote.origin.url",
+              "https://github.com/Fixture/Project.git"
+            ])
+          )
+        ).toBe(0)
+        const herdrCommand = paths.join(root, "herdr-test")
+        const agents = [{ agent: "codex", agent_status: "working", cwd: repo, pane_id: "w1:p1", state_change_seq: 1 }]
+        yield* fs.writeFileString(
+          herdrCommand,
+          `#!/bin/sh\nprintf '%s\\n' '${JSON.stringify({ result: { agents } })}'\n`
+        )
+        yield* fs.chmod(herdrCommand, 0o700)
+        const operations = yield* makeHostdOperations(
+          { ...config(root, ["true"]), herdrCommand, repository: repo },
+          ({ defaultOperations }) =>
+            Effect.succeed({
+              ...defaultOperations,
+              listAgents: () => defaultOperations.listAgents()
+            })
+        ).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner))
+        const rows = (checks: "failing" | "pending"): ReadonlyArray<TaskWorkObservation> => [{
+          stale: false,
+          unknown: null,
+          pullRequest: {
+            observedAt: 1,
+            confirmedAt: 1,
+            fact: Schema.decodeUnknownSync(WorkPullRequestObservation)({
+              _tag: "pull_request",
+              repository: "fixture/project",
+              pullRequest: 12,
+              state: "open",
+              branch: "feat/fixture",
+              head: "a".repeat(40),
+              review: "requested",
+              checks,
+              closedAt: null
+            })
+          }
+        }]
+        const { close: closeOld } = yield* attachTaskWorkReader(operations.listAgents, Effect.succeed(rows("failing")))
+        yield* Effect.addFinalizer(() => closeOld)
+        const firstInventory = yield* operations.listAgents()
+        expect(yield* fs.readFile(configPath)).toEqual(originalConfig)
+        expect(yield* fs.readFile(indexPath)).toEqual(originalIndex)
+        expect(yield* spawner.lines(makeHostCommand("git", ["-C", repo, "symbolic-ref", "--short", "HEAD"])))
+          .toEqual(["feat/fixture"])
+        expect(firstInventory.agents[0]?.taskKind).toBe("failing")
+        const { close: closeCurrent } = yield* attachTaskWorkReader(
+          operations.listAgents,
+          Effect.succeed(rows("pending"))
+        )
+        yield* Effect.addFinalizer(() => closeCurrent)
+        yield* closeOld
+        expect((yield* operations.listAgents()).agents[0]?.taskKind).toBe("waiting")
+        yield* closeCurrent
+        expect((yield* operations.listAgents()).agents[0]?.taskKind).toBe("unknown")
+        const reused = Effect.succeed(rows("failing"))
+        const { close: closeFirstUse } = yield* attachTaskWorkReader(operations.listAgents, reused)
+        yield* Effect.addFinalizer(() => closeFirstUse)
+        const { close: closeSecondUse } = yield* attachTaskWorkReader(operations.listAgents, reused)
+        yield* Effect.addFinalizer(() => closeSecondUse)
+        yield* closeFirstUse
+        expect((yield* operations.listAgents()).agents[0]?.taskKind).toBe("failing")
+        yield* closeSecondUse
+        const { close: closeFailed } = yield* attachTaskWorkReader(
+          operations.listAgents,
+          Effect.fail(new WorkStoreError({ operation: "fixture", cause: "PRIVATE_WORK_FAILURE" }))
+        )
+        yield* Effect.addFinalizer(() => closeFailed)
+        const inventory = yield* operations.listAgents()
+        expect(inventory.available).toBe(true)
+        expect(inventory.agents[0]?.taskKind).toBe("unknown")
+        expect(JSON.stringify(inventory)).not.toContain("PRIVATE_WORK_FAILURE")
+        yield* closeFailed
+        expect(yield* fs.readFile(configPath)).toEqual(originalConfig)
+        expect(yield* fs.readFile(indexPath)).toEqual(originalIndex)
       }).pipe(Effect.scoped))
   })
 })

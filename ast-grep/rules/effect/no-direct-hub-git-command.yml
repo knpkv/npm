@@ -1,0 +1,20 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+id: no-direct-hub-git-command
+language: tsx
+severity: error
+message: "Use makeHostCommand so inherited hook variables cannot redirect Git"
+rule:
+  any:
+    - pattern: ChildProcess.make("git", $$$ARGS)
+    - pattern: ChildProcess.make(command, commandLine.slice(1), $$$OPTIONS)
+files:
+  - "packages/herdr-hub/src/**/*.ts"
+  - "packages/herdr-hub/test/**/*.ts"
+note: |
+  Direct Git fixtures and HostOperations' dynamic executable boundary must use
+  internal/host-command.ts. That helper clears Git's repository-local variables
+  with an explicit env and extendEnv. Its behavioral tests retain a real decoy
+  repository's config and index under simulated hook inheritance.
+  The dynamic matcher follows HostOperations' command/commandLine convention;
+  aliases and differently shaped dynamic executables still require review.
+  Generated/vendor code is outside the scoped paths.
