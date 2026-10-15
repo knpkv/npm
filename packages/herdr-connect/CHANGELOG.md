@@ -1,5 +1,11 @@
 # @knpkv/herdr-connect
 
+## 0.28.0
+
+### Minor Changes
+
+- [#933](https://github.com/knpkv/npm/pull/933) [`ca9f6a2`](https://github.com/knpkv/npm/commit/ca9f6a23a0cfd6ab1fdd21804156791864fbef07) Thanks [@konopkov](https://github.com/konopkov)! - Add optional task-kind evidence and seeded idle motion across agent rows, cast and stage. Idle creatures share the hue allocator's stable identity seed, vary tempo, amplitude and phase, and add one family-dependent habit. Preserve existing motion when evidence is absent, pause offscreen work, and keep reduced-motion, forced-colour, stale and closed views still.
+
 ## 0.27.2
 
 ### Patch Changes
