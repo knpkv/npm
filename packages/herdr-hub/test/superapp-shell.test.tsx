@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { act, useState, type ReactNode } from "react"
+import { act, useLayoutEffect, useRef, useState, type ReactNode } from "react"
 import { WorkBoard } from "@knpkv/herdr-work/react"
 import { decodeWorkNavigationSelection, workNavigationHref } from "@knpkv/herdr-work/navigation"
 import type { WorkSnapshot, WorkSnapshots } from "@knpkv/herdr-work/model"
@@ -968,3 +968,64 @@ it("uses page metadata for the phone title without changing other module titles"
   })
   expect(document.querySelector(".superapp-phone-title")?.textContent).toBe("Fleet")
 })
+
+/** Back can activate a child before the shell layout effect schedules its arrival callback. */
+it.each(["same page", "reactivated module"])(
+  "preserves the target claimed before the parent effect on Back to %s",
+  async (departure) => {
+    const other = defineModule({
+      id: "other",
+      label: "Other",
+      defaultPage: "home",
+      pages: [{ id: "home", label: "Home" }],
+      listeners: ["serve"],
+      requires: ["read"]
+    })
+    const Target = ({ mount, search }: { readonly mount: ModulePageMount; readonly search: URLSearchParams }) => {
+      const target = useRef<HTMLButtonElement>(null)
+      const selected = search.get("target") === "recorded"
+      useLayoutEffect(() => {
+        if (mount.active && selected) target.current?.focus()
+      }, [mount.active, selected])
+      return (
+        <section>
+          <button onClick={() => mount.navigate("?target=recorded#fleet/work", "push", null)}>
+            Open recorded target
+          </button>
+          <button ref={target}>Recorded target</button>
+          <button
+            onClick={() =>
+              mount.navigate(departure === "same page" ? "?target=discussion#fleet/work" : "#other/home", "push", null)
+            }
+          >
+            Leave target
+          </button>
+        </section>
+      )
+    }
+    const installed = {
+      ...fleet,
+      pages: {
+        ...fleet.pages,
+        work: (search: URLSearchParams, mount: ModulePageMount) => (
+          <FleetPage page="work" mount={mount} search={search} work={<Target mount={mount} search={search} />} />
+        )
+      }
+    }
+    window.history.replaceState(null, "", "/#fleet/work")
+    await render([installed, { descriptor: other, pages: { home: () => <h1>Other page</h1> } }])
+    const button = (text: string) =>
+      [...document.querySelectorAll<HTMLButtonElement>("button")].find((node) => node.textContent === text)
+    await act(async () => button("Open recorded target")?.click())
+    await vi.waitFor(() => expect(document.activeElement).toBe(button("Recorded target")))
+    await act(async () => {
+      button("Leave target")?.focus()
+      button("Leave target")?.click()
+    })
+    await act(async () => {
+      window.history.back()
+      await new Promise((resolve) => window.requestAnimationFrame(resolve))
+    })
+    await vi.waitFor(() => expect(document.activeElement).toBe(button("Recorded target")))
+  }
+)

@@ -1,0 +1,38 @@
+[
+  {
+    "screen": "toy",
+    "state": "waived",
+    "region": "content",
+    "rule": "copy",
+    "reason": "design-impossible",
+    "detail": "Intentional waived fixture failure",
+    "decisionLink": "https://example.test/decisions/waived"
+  },
+  {
+    "screen": "toy",
+    "state": "waived",
+    "region": "content",
+    "rule": "pixels",
+    "reason": "design-impossible",
+    "detail": "Intentional waived fixture failure",
+    "decisionLink": "https://example.test/decisions/waived"
+  },
+  {
+    "screen": "toy",
+    "state": "waived",
+    "region": "*",
+    "rule": "pixels",
+    "reason": "design-impossible",
+    "detail": "Intentional waived fixture failure",
+    "decisionLink": "https://example.test/decisions/waived"
+  },
+  {
+    "screen": "toy",
+    "state": "stale",
+    "region": "content",
+    "rule": "tokens",
+    "reason": "design-impossible",
+    "detail": "Intentional stale waiver",
+    "decisionLink": "https://example.test/decisions/stale"
+  }
+]

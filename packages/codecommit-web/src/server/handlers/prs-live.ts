@@ -48,6 +48,11 @@ import {
 } from "../review/PullRequestReview.js"
 import { RelayFindingPublisher } from "../review/RelayFindingPublisher.js"
 import {
+  makeReviewRunRecorder,
+  recordCompletedReview,
+  recordCompletedReviewStream
+} from "../review/ReviewRunRecorder.js"
+import {
   discoverReviewSkills,
   type ReviewSkillDefinition,
   selectedReviewSkillPrompt
@@ -338,6 +343,8 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
     const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner
     const relayFindingPublisher = yield* RelayFindingPublisher
     const configService = yield* ConfigService.ConfigService
+    const saveReview = yield* makeReviewRunRecorder()
+    const recordReview = recordCompletedReview(saveReview)
 
     return handlers
       .handle("list", () =>
@@ -422,7 +429,7 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
           const skills = yield* discoverReviewSkills()
           const { profile, skillPrompt } = yield* resolveRelayReviewExecution(configService, payload.profile, skills)
           const pullRequest = yield* cachedPullRequest(pullRequestRepo, params.awsAccountId, params.prId, query)
-          return yield* withRelayReviewPermit(
+          const response = yield* withRelayReviewPermit(
             relaySemaphore,
             runPullRequestRelayReview(
               readClient,
@@ -433,6 +440,7 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
               skillPrompt
             )
           )
+          return yield* recordReview(pullRequest, response)
         }).pipe(Effect.mapError((error) => new ApiError({ message: error.message }))))
       .handleRaw("relayReviewStream", ({ params, query }) =>
         Effect.gen(function*() {
@@ -451,6 +459,7 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
               skillPrompt
             )
           ).pipe(
+            (stream) => recordCompletedReviewStream(stream, (response) => recordReview(pullRequest, response)),
             Stream.catch((error) => Stream.make({ type: "error", message: error.message }))
           )
           return relayStreamResponse(stream.pipe(
@@ -483,6 +492,7 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
               skillPrompt
             )
           ).pipe(
+            (stream) => recordCompletedReviewStream(stream, (response) => recordReview(pullRequest, response)),
             Stream.catch((error) => Stream.make({ type: "error", message: error.message }))
           )
           return relayStreamResponse(stream.pipe(

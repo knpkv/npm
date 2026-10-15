@@ -159,6 +159,14 @@ by hand instead:
 
 ## Development Conventions
 
+Design conformance: read `packages/design-conformance/README.md` before adding a
+product's refs, adapter or waivers. It defines independent live coverage, hashes,
+region checks and enforcement deadlines, including required PNG metadata.
+Keep each product's live adapter and inventory inputs under its own `packages/<package>/`
+directory. Review adapter imports and file reads for this ownership boundary: the manifest
+validates the adapter path, but cannot discover arbitrary inventory dependencies. Reference
+files under `design-refs/**` must describe designs, independently of live route/state inventory.
+
 This project adheres to a strict set of development standards to ensure code quality and consistency.
 
 ### Coding Style
@@ -288,6 +296,15 @@ needs no freshness wording.
 Public motion-ownership props must document their default, affected surfaces and presentations, sampling or update lifetime, exit behavior, and reduced-motion interaction. Cover both intrinsic and externally owned entry with browser-backed component examples.
 
 Security-sensitive canonical-payload documentation and code examples must name the persisted representation and every identity input. Raw provider secrets must not be described as durable payload fields, and idempotency examples must include every identity component used by production.
+When receipt fields, canonical hashing or provenance checks change in
+`packages/alchemy-console/src/server/plan/receipt.ts` or
+`packages/alchemy-console/src/server/PlanReader.ts`, update the canonical receipt
+table in `packages/alchemy-console/README.md` in the same change. Name the persisted
+`plan.json` ZIP member in its Actions artifact, recursive sorted-key JSON / UTF-8 /
+SHA-256 representation, every identity input and its server-private or authenticated-client
+boundary. Distinguish semantic-hash inputs, transport provenance and fields checked
+only for shape; relevance requires judgment. Generic "exact receipt fields" wording
+does not meet this requirement. Generated/vendor files are excluded.
 
 Security documentation in `.specs/**` and package READMEs must distinguish server-private provider locators from normalized or client-visible representations. Name a bucket, key, ARN, token, or similar coordinate only with its private boundary, and list the safe fields that may cross normalization or HTTP boundaries.
 For `packages/browser-pairing/src/**`, structs containing `PairingCode`, `SessionToken`, or `CsrfToken` must be documented as credential-bearing; do not describe those payloads as secret-free. Credential-free summaries may retain a secret-free description.

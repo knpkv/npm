@@ -194,6 +194,8 @@ export const PluginConnectionSummary = Schema.Struct({
     })
   ),
   health: Schema.NullOr(PluginHealth),
+  /** Changes whenever this connection's health or synchronization state is recorded. */
+  runtimeRevision: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
   updatedAt: UtcTimestamp
 }).annotate({ identifier: "PluginConnectionSummary" })
 

@@ -16,6 +16,7 @@ import { hubModuleLinkTarget, hubModuleUrl } from "./internal/hub-module-links.j
 import { dashboardRefreshTime } from "./internal/dashboard-refresh.js"
 import { ShellIcon } from "./internal/shell-icon.js"
 import { RelayChefMark } from "./internal/relay-chef-mark.js"
+import { RelayChefMastMark } from "./internal/relay-chef-mast-mark.js"
 import { ShortcutsDialog, focusWhenShown, focusModulePage, isEditableTarget } from "./internal/shell-keys.js"
 import {
   canonicalModuleUrl,
@@ -166,6 +167,7 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
   }, [fingerprint, landing.module, landing.page])
   const [location, setLocation] = useState(() => shellLocation(new URL(window.location.href), descriptors, landing))
   const [documentNonce] = useState(() => window.crypto.randomUUID())
+  const focusBeforeNavigation = useRef<Element | null>(document.activeElement)
   const pendingSelectionClose = useRef<{
     readonly parent: string
     readonly closing: string
@@ -239,6 +241,7 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
       return
     }
     pendingSelectionClose.current = null
+    focusBeforeNavigation.current = document.activeElement
     if (history === "push")
       window.history.pushState(
         {
@@ -290,7 +293,7 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
   }
   const cancelLocationFocus = useRef<(() => void) | null>(null)
   const previousFocusDestination = useRef(location.destination)
-  // Schedule before child activation effects claim focus, so the arrival RAF can preserve that claim.
+  // Compare with the navigation origin, before child activation effects can claim their target.
   useLayoutEffect(() => {
     const previous = previousFocusDestination.current
     previousFocusDestination.current = location.destination
@@ -306,13 +309,15 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
       cancelLocationFocus.current = focusModulePage(
         location.destination.module,
         location.destination.page,
-        arrival || location.focus === "history"
+        arrival || location.focus === "history",
+        focusBeforeNavigation.current
       )
   }, [location])
   useLayoutEffect(() => () => cancelLocationFocus.current?.(), [])
   useEffect(() => {
     const read = (event: Event): void => {
       const url = new URL(window.location.href)
+      const origin = document.activeElement
       const closing = pendingSelectionClose.current?.parent === historyHref(url, descriptors)
       pendingSelectionClose.current = null
       setLocation((previous) => {
@@ -324,6 +329,7 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
         )
           return next.url.href === previous.url.href && next.url.href === url.href ? previous : { ...next, focus: null }
         if (closing) return { ...next, focus: null }
+        focusBeforeNavigation.current = origin
         return event.type === "popstate" && next.focus === "page" ? { ...next, focus: "history" } : next
       })
     }
@@ -486,7 +492,7 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
             aria-label="Relay home"
             title="Home"
           >
-            <RelayChefMark />
+            <RelayChefMastMark />
           </a>
           <strong className="superapp-phone-title" aria-hidden="true">
             {location.error === null ? currentModule?.label : "Page not found"}

@@ -6,6 +6,7 @@ import {
   CodeDiffResult,
   CodeQueue,
   CodeQueueQuery,
+  CodeReviewResult,
   CodeTargetQuery,
   type CodeUnavailable
 } from "@knpkv/codecommit-web/host"
@@ -103,6 +104,14 @@ export const makeCodeModule = (configuration: {
             mounted._tag === "Unavailable"
               ? Effect.succeed(mounted) :
               recover(mounted.reader.detail(ref))),
+          moduleReadRoute("/review", CodeTargetQuery, CodeReviewResult, ({ ref }, caller) => {
+            if (mounted._tag === "Unavailable") return Effect.succeed(mounted)
+            return recover(
+              mounted.reader.review(ref, caller).pipe(
+                Effect.map((reading): CodeReviewResult => ({ _tag: "Ready", reading }))
+              )
+            )
+          }),
           moduleReadRoute("/diff", CodeTargetQuery, CodeDiffResult, ({ ref }, caller) => {
             if (mounted._tag === "Unavailable") return Effect.succeed(mounted)
             return recover(

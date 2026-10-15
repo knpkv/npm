@@ -46,7 +46,11 @@ Approval mutations require the exact active listener origin, including HTML form
 
 ## Connect directory
 
-Terminal control permits one controller per host and stable agent ID, and four controllers in total. A socket is pinged every 25 seconds and terminated if the previous ping is unanswered at the next check. Disconnect, error, failed setup and server teardown share idempotent cleanup. The controller lock and connection slot are held for cleanup for at most ten seconds. A late finalizer receives an interruption request and remains owned by the hub; shutdown waits for an uninterruptible finalizer to finish. The `TerminalReleaseTimeout` warning contains only its tag, host, stable agent ID and elapsed milliseconds. A live controller still refuses a second device with the existing message.
+Terminal control permits one controller per host and stable agent ID, and four controllers in total. A socket is pinged every 25 seconds and terminated if the previous ping is unanswered at the next check. Disconnect, error, failed setup and server teardown share idempotent cleanup. The controller lock and connection slot are held for cleanup for at most ten seconds. A late finalizer receives an interruption request and remains owned by the hub; shutdown waits for an uninterruptible finalizer to finish. The `TerminalReleaseTimeout` warning contains only its tag, host, stable agent ID and elapsed milliseconds. An ordinary second attachment to a live controller is refused with code `4423` and `agent already controlled`. An ordinary reconnect to a closing controller waits for that same bounded cleanup, showing Connecting. Closing the waiting socket cancels its attachment; an explicit takeover during the wait supersedes it without bypassing cleanup.
+
+Explicit `takeover=1` on `/v1/connect/session` or the owning host's `/v1/connect/terminal` replaces that agent's controller. Malformed takeover values are rejected. The old socket closes with the shared `TerminalTakenOverClose` identity (`4424`, `taken_over`), stops accepting input, and releases its scope before the replacement opens. Replacement reuses the agent's existing cap slot. Concurrent requests admit only the newest surviving takeover after the shared cleanup barrier; an aborted waiter cannot open a session, and old cleanup cannot remove the new reservation. Clients show Connecting throughout the cleanup wait.
+
+Before a remote takeover, the hub probes the owning host's tailnet `GET /v1/connect/terminal/capabilities`. This originless authenticated route authorizes only the configured approval hub node and returns `{ "takeover": true }`, decoded with `TerminalCapabilities`. Every takeover needs a fresh probe; ordinary attachments do not probe. The read is bounded to 1 KiB and five seconds and does not follow redirects. Absent, false, malformed, redirected or 404 capability responses return the controlled state before any remote WebSocket upgrade. Transport or server failures use the unavailable-host path. The hub never retries takeover as an ordinary attachment, so older hosts cannot silently ignore the intent. Typed takeover close code and reason pass unchanged through the relay.
 
 The authenticated `GET /v1/connect/agents` response includes optional `hosts` on its first page, read from `config.machines`. This lists the first 256 configured machine names in configuration order, even when agents or usage readings do not list a host. Additional configured machines remain configured but are omitted from this hint so the page stays within its schema bound. Later pages omit that metadata. Older clients can ignore it, and newer clients omit the empty-directory host hint when an older hub does not supply it.
 
@@ -69,6 +73,8 @@ Each subscription receives one notification per episode and one reminder 15 minu
 The canonical Connect stage shows notification settings when pushes are enabled on this device. Its Mute toggle saves only the selected agent; quiet hours save when both From and Until are valid and focus leaves the time editor, on Enter, or when the stage backdrop is tapped or Close is activated. Escape cancels an uncommitted draft. Clear removes quiet hours. Enter while Clear is queued reaffirms the visible time pair after that Clear; blur and dismissal do not restore it. The initial time zone is the browser's IANA zone; saved settings keep their zone. Pending saves mark the editor busy and keep controls usable. Edits are queued in order. Rapid mute clicks toggle the latest intended state, and quiet-hour reversions compare against the latest queued value. Rejected saves show an error while retaining the last saved mute and times. When pushes are off, the controls are replaced by a link to turn them on in Approvals. An unavailable device or settings check shows an error. The standalone stage checks its existing browser subscription, configured public key and server registration without enrolling the device. An older or missing subscription key shows the device-off state so Approvals can reconcile it.
 
 Per-agent mutes and quiet hours are also available through authenticated settings routes. `GET /v1/push/blocked-settings` reads the saved settings. `PATCH` replaces full-snapshot `PUT` with a single intent: `{ _tag: "SetAgentMute", agent: { host, agentId }, muted }` or `{ _tag: "SetQuietHours", quietHours }`, where `quietHours` is a validated time pair and zone, or `null` to clear it. The store merges each intent atomically into the current settings and returns the complete result, so stale devices cannot overwrite unrelated preferences. They apply to the authenticated user's subscriptions across devices; defaults are no mutes and no quiet hours. Quiet hours require a validated IANA `timeZone` in the quiet-hour settings. The hub calculates the current minute in that zone, including daylight-saving changes. Quiet hours include the start and exclude the end, and may span midnight; equal times suppress all day. A visible open stage reports an owner-scoped heartbeat every 15 seconds to `/v1/push/stage-heartbeat`. A heartbeat for an open episode acknowledges it for that user across subscriptions, suppressing both its initial notification and reminder after the user leaves or the hub restarts. A later episode requires a new acknowledgement. Closing or hiding the stage clears presence; a lost heartbeat expires after 45 seconds. Presence and settings are accepted only on the authenticated canonical listener, with exact-origin mutation checks. Another user's presence or preferences cannot suppress your notifications.
+
+Connect activity, archive, relationship and post stores share the approval application's private SQLite file with notification settings and Work. Connect batch connections use a 100 ms native busy timeout; request-facing approval-app and blocked-push connections use a zero native timeout and return their typed store failures immediately under contention; Connect writes retry asynchronously for about five seconds so a contended writer cannot block terminal heartbeats for the whole retry budget. An exhausted report write answers 503 `ConnectStoreBusyError` with its operation and retry budget, without the private SQLite cause. Optional archive passes in live directory reads stop after the first failed attempt and invalidate absence evidence for skipped hosts, bounding writer contention to one native wait across the fleet. Parent-name and voice/self-state enrichment each have a 100 ms deadline; latest-post reads perform no pruning writes. These failures remain isolated warnings and do not consume the directory deadline with primary-write retries. The five-second write deadline includes local transaction-permit queueing, and SQLITE_LOCKED uses the same retry policy as SQLITE_BUSY. Report clients use `connectReportResponseTimeoutMillis`: the reporter-inventory budget plus the primary-write budget plus a one-second response margin, currently twelve seconds per attempt. Remote reporter inventory reads allow the write budget plus a one-second transport margin, while ordinary directory peer reads retain their 1.5-second deadline. Only the narrow safe inventory-busy response is forwarded; unrelated peer failures remain generic. Relay post and self-state clients decode exhausted busy responses as `ConnectStoreBusyError`, preserving operation and timeout fields without retrying the exhausted post or copying the server-private cause. Optional hue allocation and permission finalization share a wait of half the peer-directory deadline. A server-scoped, single-flight enrichment owner uses a separate SQLite connection, so a pending hue finalizer neither delays the uncoloured directory fallback nor queues later mandatory activity observations. Shutdown interrupts the worker, joins for at most two seconds, then closes its connection; an uninterruptible overrun logs `HueFinalizerShutdownTimeout` and accepts no new work. A blocked-notification pass stops admitting new store work after its first episode-store or subscription-store failure, drains already-reserved provider sends and records their definite outcomes, then ends the pass rather than repeating native lock waits for every delivery; provider failures remain isolated. Work, Code references and Fleet jobs retain their own connection settings. WAL, FULL synchronous mode, owner-only database and sidecar permissions, and initialization-before-WAL migration order are preserved.
 
 Episodes, settings, presence, owner-scoped acknowledgements and delivery reservations persist in the hub's owner-only SQLite database. The episode key includes host, stable agent ID and episode start. Reservations include the private subscription revision and initial/reminder slot; raw subscription coordinates never enter the notification payload. Reservation precedes Web Push, so a restart or ambiguous transport failure cannot duplicate an accepted notification. A definite non-2xx rejection releases its slot for the next pass, up to three attempts, then records failure. A 404/410 or endpoint-policy rejection removes the subscription and its blocked send rows. Removed or replaced subscription revisions lose their send rows on the next worker pass. Closed episodes and their payload, acknowledgements and send rows expire after seven days; open episodes retain their deduplication state. Only host, agent ID and the latest episode start survive closed-episode pruning to keep starts monotonic. Suppression consumes no slot.
 
@@ -175,6 +181,13 @@ server-private and never enter HTTP responses or logs. Missing or invalid metada
 field, with no fixed-port fallback. Only a browser viewing this machine's hub uses the link;
 remote viewers retain the credential-host instructions. No extra route, poll or login request is added.
 
+`GET /v1/modules/code/review?ref=…` reads the current immutable diff, completed owner review and
+cached comments through the same authenticated credential-host boundary. It adds no command or
+provider-comment operation. Reviewed revisions remain independent of the current head; unknown
+checks and unavailable cached comments remain explicit. Selected PRs on Pull requests and Reviews
+install the read-only Review/Conversation workspace. The existing Diffs page keeps its explicit,
+cached diff owner and Back/Forward behavior.
+
 Code reads bring a native SQLite dependency into hostd. A JavaScript bundle alone is insufficient:
 the installed `@libsql/client` native packages must match the host platform and runtime. Before
 restarting hostd, the deployment gate must load the installed driver and execute an in-memory
@@ -189,6 +202,40 @@ coordinates are never emitted as browser fields or log payloads. References surv
 distinguish accounts. The map retains 10,000 entries and evicts the least recently seen on minting;
 an unknown, tampered or evicted reference returns 404. This bookkeeping grants no provider authority.
 
+Code review selection stays inside the shell's exact Code page. With a valid opaque `ref`, `view`
+selects Review or Conversation, and `thread` stores a JSON object containing only the
+normalized authenticated client-visible `source` and `id`. Neither message/finding prose nor
+provider PR coordinates belong in that URL. Invalid view/thread selectors are repaired independently,
+preserving valid queue/reference fields. Deliberate finding activation delegates one shell-owned
+push with focus null; modified links retain the complete module href. Workspace installation must
+switch to Review, expand secondary if needed and then focus the shared card target. These selectors
+grant no review execution or write authority.
+
+The review controller reads once for an active, visible PR or explicit Read again and interrupts
+when inactive. Ref changes drop the other PR's output immediately. Retained failures and in-flight
+previous values say Previous reading; unauthorized/not-found failures drop protected output.
+One focusable review owner stays mounted through loading and retry. A deliberate thread selector
+waits for a fresh same-ref reading, opens secondary before focusing and is consumed once. Repeated
+activation can focus the same target without requiring a new URL or read. Parent refreshes never
+re-arm focus, and another modal keeps its focus.
+
+One mounted polite atomic host region reuses the existing loading, failure, Code-unavailable and
+absolute Read-time words. Only an accepted same-ref completion replaces its child; parent renders
+and stale/aborted reads do not. Inactive or hidden owners turn it off. The visible loading/failure
+words remain without a duplicate status role. No extra poll, relative-age timer or review action.
+
+Selected PRs occupy the full Code page, with one PR header and recorded checks. The queue returns with its search/filter/page context and focused row. Review stacks files from the immutable diff inventory, reading them serially within one cumulative display budget for rendered text and explicit raw fallbacks. Refused responses consume no display allowance; an explicit file selector narrows that reading. Valid file
+selectors work on the PR pages too; missing indices are replaced without losing the PR/queue.
+Conversation performs no hidden file read. Exact parsed objects feed both Rly rendering and global
+Current-only finding placement and exact current human-discussion anchors; unplaced or outdated rows remain separate, and parse/identity failures are explicit. All, Findings and Comments filters change the thread index without hiding diff/card targets.
+The views stylesheet is loaded alongside the host stylesheet; its shared base layers must remain
+below Rly/host styling. Cross-module browser geometry is part of the final stylesheet gate.
+
+Guide is not installed in the hub until its backing reader exists. A direct `view=guide` link
+is replaced with Review on the same Code page, preserving the PR and valid queue/diff context
+and clearing its thread target. The repair creates no history entry or Guide read. Standalone
+Guide ownership is unchanged.
+
 `GET /v1/modules/connect/needs-you` returns one decoded, deduplicated list per poll. Connect starts a serial approval read when active and visible, repeats five seconds after each read finishes, and interrupts it when hidden or inactive. A six-second browser deadline keeps a stalled read from blocking subsequent polls. A failed refresh retains its previous reading with explicit old-reading copy. Partial readings say At least, failed refreshes say Previous reading, and missing readings say Unknown. Only unexpired requests count as approvals waiting.
 
 Products may supply a closed `ModuleHandlers.needsYou` effect returning `NeedsYouProviderResult`. Expected source failures belong in `issues`; the typed error channel is `never`. The hub collects these effects after all product layers build once, and owns the reserved Connect `/needs-you` route through `needsYouRouteOwner`. No registry service is resolved inside a request. Each provider has a four-second deadline; defects become an internal source issue and are logged privately, while external interruption remains interruption. At most four providers run concurrently.
@@ -200,3 +247,17 @@ Provider keys are local and opaque. The collector adds the registered module nam
 Module page metadata `showInPhoneTitle` defaults to false. It appends the page label to the phone mast when its design calls for one; primary links and page ownership are unchanged.
 
 Canonical Connect owns its saved Active/Archived location through the shell navigator. Embedded `BlockedConnectSurface` requires one `directoryLocation` containing its URL, navigation and selection-close callbacks; standalone use retains the default browser history. The module forwards the dashboard notification state to the stage footer without another device-state read.
+
+The Connect live directory serves an optional `hue` palette assigned by each host's persisted activity store, also snapshotted on confirmed archive closure and served by `/v1/connect/archive`. Old peers and old archived rows may omit it. Allocations are transactional per host and stable agent ID: live holders reserve colours, unused families precede released ones, and released families are reused longest-closed first once no unused family remains. Each host releases absence from its own newer complete validated inventory; partial, failed, offline and equal-time absent inventories retain reservations. The canonical hub archives peers in its own database without writing into their stores. A shared host watermark rejects stale first allocations, and both seeds use lowercase host identity. Overflow above eight live colours avoids repeating the same seeded shape where possible. If every palette already has that shape, the hash fallback can repeat both. A returning archived identity retains its family only while it is unclaimed by a live agent; otherwise its new lifetime is reallocated. Reappearance still deletes the old archive row. UI consumption belongs to the creature drawing update.
+
+### Agent task signals
+
+The local Herdr inventory adapter supplies `taskKind` from decoded lifecycle
+state. Fleet debounces kind changes for 500ms across agent/status reads.
+Working agents without supported activity evidence report `unknown`; the
+adapter does not infer tasks or CI failures from terminal text, work labels, or
+non-zero command exits. Provider-session tool activity and branch-linked
+Work/CI and review producers remain a separate follow-up. Only the normalized
+kind enters the fleet agent wire contract.
+
+On the full Code review page, retained-read failure, previous-reading time and any host-owned retry precede PR metadata. A retry for content alone sits in Diff. Read and focus ownership stay mounted across these placements; saved-history/comments failures keep their single workspace-owned retry.

@@ -1,6 +1,6 @@
 {
   "name": "@knpkv/codecommit-web",
-  "version": "0.35.1",
+  "version": "0.35.2",
   "description": "Web server and frontend for CodeCommit PR browser",
   "type": "module",
   "main": "dist/index.js",
@@ -59,6 +59,7 @@
     "@knpkv/capability": "workspace:^",
     "@knpkv/codecommit-core": "workspace:^",
     "@knpkv/relay": "workspace:^",
+    "@knpkv/review": "workspace:^",
     "diff": "9.0.0",
     "effect": "4.0.0"
   },
@@ -69,7 +70,6 @@
     "@fontsource-variable/geist-mono": "^5.3.0",
     "@formkit/auto-animate": "^0.10.0",
     "@knpkv/relay-product": "workspace:^",
-    "@knpkv/review": "workspace:^",
     "@knpkv/rly": "workspace:^",
     "@playwright/test": "1.63.0",
     "@tailwindcss/typography": "^0.5.20",

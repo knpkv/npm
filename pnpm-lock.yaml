@@ -684,6 +684,9 @@ importers:
       '@knpkv/relay':
         specifier: workspace:^
         version: link:../relay
+      '@knpkv/review':
+        specifier: workspace:^
+        version: link:../review
       diff:
         specifier: 9.0.0
         version: 9.0.0
@@ -709,9 +712,6 @@ importers:
       '@knpkv/relay-product':
         specifier: workspace:^
         version: link:../relay-product
-      '@knpkv/review':
-        specifier: workspace:^
-        version: link:../review
       '@knpkv/rly':
         specifier: workspace:^
         version: link:../rly
@@ -963,6 +963,9 @@ importers:
       '@effect/vitest':
         specifier: 4.0.0
         version: 4.0.0(effect@4.0.0)(vitest@5.0.3)
+      '@knpkv/design-conformance':
+        specifier: workspace:*
+        version: link:../design-conformance
       '@libsql/client':
         specifier: ^0.18.0
         version: 0.18.0
@@ -1024,6 +1027,43 @@ importers:
       rimraf:
         specifier: ^6.1.3
         version: 6.1.3
+      tsx:
+        specifier: ^4.23.15
+        version: 4.23.15
+      typescript:
+        specifier: npm:@typescript/typescript6@^6.0.2
+        version: '@typescript/typescript6@6.0.2'
+      vitest:
+        specifier: ^5.0.3
+        version: 5.0.3(@edge-runtime/vm@5.0.0)(@opentelemetry/api@1.9.1)(@types/node@26.6.4)(@vitest/browser-playwright@5.0.3)(@vitest/coverage-v8@5.0.3)(@vitest/ui@5.0.3)(happy-dom@20.14.5)(vite@8.3.2(@types/node@26.6.4)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.44.0)(tsx@4.23.15)(yaml@2.9.1))
+
+  packages/design-conformance:
+    dependencies:
+      '@effect/platform-node':
+        specifier: 4.0.0
+        version: 4.0.0(effect@4.0.0)(redis@6.2.1(@opentelemetry/api@1.9.1))
+      '@playwright/test':
+        specifier: 1.63.0
+        version: 1.63.0
+      effect:
+        specifier: 4.0.0
+        version: 4.0.0
+      pixelmatch:
+        specifier: ^7.2.0
+        version: 7.2.0
+      pngjs:
+        specifier: ^7.0.0
+        version: 7.0.0
+    devDependencies:
+      '@effect/vitest':
+        specifier: 4.0.0
+        version: 4.0.0(effect@4.0.0)(vitest@5.0.3)
+      '@types/node':
+        specifier: ^26.6.4
+        version: 26.6.4
+      '@types/pngjs':
+        specifier: ^6.0.5
+        version: 6.0.5
       tsx:
         specifier: ^4.23.15
         version: 4.23.15
@@ -1688,9 +1728,6 @@ importers:
 
   packages/review:
     dependencies:
-      '@knpkv/rly':
-        specifier: workspace:^
-        version: link:../rly
       effect:
         specifier: 4.0.0
         version: 4.0.0
@@ -1701,6 +1738,9 @@ importers:
       '@effect/vitest':
         specifier: 4.0.0
         version: 4.0.0(effect@4.0.0)(vitest@5.0.3)
+      '@knpkv/rly':
+        specifier: workspace:^
+        version: link:../rly
       '@playwright/test':
         specifier: 1.63.0
         version: 1.63.0
@@ -5079,6 +5119,9 @@ packages:
   '@types/node@26.6.4':
     resolution: {integrity: sha512-ldVPDCzj7fsaGZrLB0NuHuTvJcsNasysBAqMolr/cgxrLd1xbqxIr3XJiPnHHJUCxj5sNF1vnRj9aWnrVh5Jcg==}
 
+  '@types/pngjs@6.0.5':
+    resolution: {integrity: sha512-0k5eKfrA83JOZPppLtS2C7OUtyNAl2wKNxfyYl9Q5g9lPkgBl/9hNyAu6HuEH2J4XmIv2znEpkDd0SaZVxW6iQ==}
+
   '@types/react-dom@19.3.0':
     resolution: {integrity: sha512-ZI7bU42mZXXKHn/qNLEw2IrbiINU7X5+vfgdixBHkCNpYWXjKgfQ/P+uyGb5CjOLB9UcnTeg3rylQtV2hym44Q==}
     peerDependencies:
@@ -7682,6 +7725,10 @@ packages:
   picomatch@4.0.7:
     resolution: {integrity: sha512-qcJu88Q2IWqJsDD529JKMdwGm/dvInW4HvQnRwiH9JtihJvzGOscDtHE3x1pBKeUOTysQ8kVmLnJ2kJu7yhcGA==}
     engines: {node: '>=12'}
+
+  pixelmatch@7.2.0:
+    resolution: {integrity: sha512-xhcb4yHu9sM/G7foGzoLtXYcC0zHEaOXXjRKhGup0fw78Nf2Tkiapv4EQyMzrbcmQPsllAI7DbFY2UT7PlI9Pg==}
+    hasBin: true
 
   pkg-entry-points@1.1.2:
     resolution: {integrity: sha512-bmmM+SdLXNNetFr4o53QiiZRZicls2apmzj8HRpo4bU+3nJHiPO/omv8TXHIOzTcirua3YBAwTlKE+7zkICh4g==}
@@ -12356,6 +12403,10 @@ snapshots:
     dependencies:
       undici-types: 8.9.0
 
+  '@types/pngjs@6.0.5':
+    dependencies:
+      '@types/node': 26.6.4
+
   '@types/react-dom@19.3.0(@types/react@19.3.0)':
     dependencies:
       '@types/react': 19.3.0
@@ -15434,6 +15485,10 @@ snapshots:
   picomatch@2.3.2: {}
 
   picomatch@4.0.7: {}
+
+  pixelmatch@7.2.0:
+    dependencies:
+      pngjs: 7.0.0
 
   pkg-entry-points@1.1.2: {}
 

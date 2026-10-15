@@ -1,0 +1,441 @@
+.workspace {
+  display: grid;
+  grid-template-columns: minmax(18.75rem, 23.75rem) minmax(0, 1fr);
+  align-items: start;
+  gap: 1.5rem;
+  min-inline-size: 0;
+}
+
+.column,
+.record {
+  display: grid;
+  gap: 1rem;
+  min-inline-size: 0;
+}
+
+.diffFile {
+  display: grid;
+  min-inline-size: 0;
+  border: 1px solid var(--rly-color-border-1);
+  border-radius: var(--rly-radius-group);
+  overflow: clip;
+}
+
+.fileHeading {
+  margin: 0;
+  padding-block: 0.6rem;
+  padding-inline: 0.9rem;
+  font: 700 0.8125rem / 1.4 var(--rly-font-mono);
+  overflow-wrap: break-word;
+  background: var(--rly-color-surface-2);
+  border-block-end: 1px solid var(--rly-color-border-1);
+}
+
+.diffFile > [data-rly-patch-diff] {
+  border: 0;
+  border-radius: 0;
+}
+
+/* Number headings align with their columns; the change heading starts at the source column. */
+.diffFile [data-rly-patch-diff] th {
+  text-align: start;
+  color: var(--rly-color-text-2);
+}
+
+.diffFile [data-rly-patch-diff] th:nth-child(-n + 2) {
+  text-align: end;
+}
+
+/* Code review keeps its own body type without changing shared diff defaults. */
+.diffFile [data-rly-patch-diff] tbody {
+  font-size: 0.8125rem;
+  line-height: 1.6;
+}
+
+/* Stacked and split views expose their mode; number columns keep the same compact type. */
+.diffFile [data-rly-diff-mode="stacked"] tbody > tr > td:nth-child(-n + 2):not([colspan]),
+.diffFile [data-rly-diff-mode="split"] tbody > tr > td:nth-child(odd):not([colspan]) {
+  inline-size: 3.25rem;
+  min-inline-size: 3.25rem;
+  font-size: 0.75rem;
+  line-height: 1.75;
+}
+
+/* Auto table layout may shrink declared cell widths; minimums retain the numbered columns. */
+.diffFile [data-rly-diff-mode="stacked"] tbody > tr > td:nth-child(3):not([colspan]) {
+  inline-size: 1.2rem;
+  min-inline-size: 1.2rem;
+}
+
+.diffFile [data-rly-patch-diff] td:has(> code) {
+  padding-inline: 0 0.75rem;
+}
+
+.diffFile [data-rly-patch-diff] td > code {
+  padding-inline: 0;
+}
+
+/* Only hunk cells contain text directly; annotation cells contain the owned record or discussion. */
+.diffFile [data-rly-patch-diff] tbody > tr > td[colspan="4"]:not(:has(> .record, > article)) {
+  padding-block: 0.3rem;
+  padding-inline: 0.9rem;
+  font: 430 0.75rem / 1.5 var(--rly-font-mono);
+  border-block-end: 0;
+}
+
+.diffFile [data-rly-patch-diff] td:has(> .record, > article) {
+  border-block: 0;
+}
+
+/* Inline cards inherit the diff's type rhythm; separate cards keep the page rhythm. */
+.diffFile [data-rly-patch-diff] td > .record {
+  --review-finding-line-height: 1.6;
+  --review-finding-status-line-height: 1.3rem;
+  font: 430 0.8125rem / 1.6 var(--rly-font-ui);
+}
+
+.diffFile [data-rly-patch-diff] td > .record,
+.diffFile [data-rly-patch-diff] td > article {
+  margin-inline: 0.25rem;
+  margin-block-end: 0.25rem;
+}
+
+/* Inline discussions have their own rhythm; the Conversation feed keeps message defaults. */
+.diffFile [data-rly-patch-diff] td > .thread {
+  --review-message-list-gap: 0.5rem;
+  --review-message-gap: 0.15rem;
+  --review-message-author-weight: 620;
+  --review-message-time-size: 0.8125rem;
+  --review-message-body-size: 0.9375rem;
+  --review-message-body-line-height: 1.6;
+  gap: 0.6rem;
+  padding-block: 0.9rem 1rem;
+  padding-inline: 1rem;
+  font-family: var(--rly-font-ui);
+}
+
+.diffFile [data-rly-patch-diff] td > .thread > .meta {
+  gap: 0.35rem 0.6rem;
+}
+
+.diffFile [data-rly-patch-diff] td > .thread > .meta h3 {
+  display: inline-flex;
+  padding-inline: 0.4rem;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  font-weight: inherit;
+  border: 1px solid var(--rly-color-border-1);
+  border-radius: var(--rly-radius-tag);
+}
+
+.diffFile [data-rly-patch-diff] td > .thread > .meta code {
+  font-size: 0.833333em;
+}
+
+/* Only separate outdated discussions use the historical card rhythm; inline and feed owners stay distinct. */
+.column > .thread[data-review-thread-outdated] {
+  --review-message-list-gap: 0.5rem;
+  --review-message-gap: 0.15rem;
+  --review-message-author-weight: 620;
+  --review-message-time-size: 0.8125rem;
+  --review-message-meta-line-height: 1.5;
+  --review-message-body-size: 0.9375rem;
+  --review-message-body-line-height: 1.5;
+  gap: 0.6rem;
+  padding-block: 0.9rem 1rem;
+  padding-inline: 1rem;
+  font: 430 1rem / 1.5 var(--rly-font-ui);
+}
+
+.column > .thread[data-review-thread-outdated] > .meta {
+  gap: 0.35rem 0.6rem;
+  font-size: inherit;
+}
+
+.column > .thread[data-review-thread-outdated] > .meta h3,
+.column > .thread[data-review-thread-outdated] [data-review-thread-status="outdated"] {
+  display: inline-flex;
+  padding-inline: 0.4rem;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  font-weight: inherit;
+  border: 1px solid var(--rly-color-border-1);
+  border-radius: var(--rly-radius-tag);
+}
+
+.column > .thread[data-review-thread-outdated] [data-review-thread-status="outdated"] {
+  background: var(--rly-color-surface-2);
+}
+
+.column > .thread[data-review-thread-outdated] > .meta code {
+  font-size: 0.833333em;
+  line-height: 1.5;
+}
+
+.unplaced {
+  display: grid;
+  gap: 0.75rem;
+  min-inline-size: 0;
+  padding-inline: 0.75rem;
+  padding-block-end: 0.75rem;
+}
+
+.conversation {
+  grid-column: 1 / -1;
+  display: grid;
+  min-inline-size: 0;
+  border: 1px solid var(--rly-color-border-1);
+  border-radius: var(--rly-radius-group);
+  background: var(--rly-color-surface-1);
+}
+
+.heading {
+  margin: 0;
+  padding-block: 0.75rem;
+  padding-inline: 1rem;
+  font-size: 1rem;
+  font-weight: 620;
+}
+
+.feedHeading,
+.groupHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding-inline-end: 1rem;
+}
+
+.feedHeading {
+  border-block-end: 1px solid var(--rly-color-border-1);
+}
+
+.feedHeading small,
+.groupHeading small {
+  color: var(--rly-color-text-2);
+}
+
+.findingReference {
+  display: flex;
+  gap: 0.6rem;
+  align-items: start;
+  min-inline-size: 0;
+  padding-block: 0.5rem;
+  color: var(--rly-color-text-1);
+  overflow-wrap: break-word;
+}
+
+.verdict {
+  margin: 0;
+  font-size: 0.9375rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+.thread {
+  display: grid;
+  gap: 0.7rem;
+  min-inline-size: 0;
+  padding-block: 1rem;
+  padding-inline: 1.1rem;
+  border: 1px solid var(--rly-color-border-1);
+  border-radius: var(--rly-radius-group);
+  background: var(--rly-color-surface-1);
+  color: var(--rly-color-text-1);
+}
+
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 0.6rem;
+  min-inline-size: 0;
+  overflow-wrap: break-word;
+  color: var(--rly-color-text-2);
+  font-size: 0.8125rem;
+}
+
+.meta h3 {
+  margin: 0;
+  font-size: inherit;
+  font-weight: 520;
+}
+
+.thread:focus-visible,
+.findingReference:focus-visible {
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: var(--rly-focus-ring-offset);
+}
+
+@media (max-width: 599px) {
+  .unplaced {
+    padding-inline: 0.4rem;
+  }
+
+  .workspace {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1rem;
+  }
+}
+
+/* Discussion feed entries share a timeline boundary, not the bordered outside/inline card treatment. */
+.conversation > .thread {
+  --review-message-list-gap: 0.75rem;
+  --review-message-gap: 0.15rem;
+  --review-message-meta-size: 0.875rem;
+  --review-message-meta-line-height: 1.5;
+  --review-message-time-numeric: normal;
+  --review-message-author-weight: 600;
+  padding-block: 0.9rem;
+  padding-inline: 1rem;
+  line-height: 1.5;
+  border: 0;
+  border-block-end: 1px solid var(--rly-color-border-1);
+  border-radius: 0;
+}
+.conversation > .thread:last-child {
+  border-block-end: 0;
+}
+.conversation > .thread > .meta h3 {
+  font-weight: 430;
+}
+.conversation > .thread > .meta > :is(code, span) {
+  font-size: 0.833333em;
+}
+.feedHeading > small {
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+.conversation .findingReference {
+  align-items: center;
+  gap: 0.5rem;
+  min-block-size: 2.75rem;
+  padding-block: 0;
+  font-size: 0.9375rem;
+  font-weight: 600;
+}
+.conversation .findingReference > span:last-child {
+  min-inline-size: 0;
+  overflow: clip;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+  text-decoration-color: var(--rly-color-border-2);
+}
+.conversation > [data-review-run-fallback] {
+  gap: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.conversation > [data-review-run-fallback] > [role="status"] {
+  margin-block: 0.75rem 0;
+  margin-inline: 1.1rem;
+}
+.conversation > button {
+  justify-self: start;
+  margin-block-start: 0.6rem;
+  margin-inline: 1.1rem;
+}
+
+/* Raw source remains complete when parsing refuses; only this review owner controls its wrapping. */
+.column > [data-code-review-diff] [data-code-review-raw] {
+  display: grid;
+  min-inline-size: 0;
+  border: 1px solid var(--rly-color-border-1);
+  border-radius: var(--rly-radius-group);
+  overflow: clip;
+}
+.column > [data-code-review-diff] [data-code-review-raw] > h3 {
+  margin: 0;
+  padding-block: 0.6rem;
+  padding-inline: 0.9rem;
+  font: 700 0.8125rem / 1.4 var(--rly-font-mono);
+  overflow-wrap: break-word;
+  background: var(--rly-color-surface-2);
+  border-block-end: 1px solid var(--rly-color-border-1);
+}
+.column > [data-code-review-diff] [data-code-review-raw] > :global(.code-review-status),
+.column > [data-code-review-diff] [data-code-review-raw] > :global(.code-host-notice) {
+  margin-block: 0.75rem;
+  margin-inline: 1rem;
+}
+.column > [data-code-review-diff] :global(.code-host-file-columns) {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+  min-inline-size: 0;
+}
+.column > [data-code-review-diff] :global(.code-host-file-columns) > section {
+  display: grid;
+  gap: 0;
+  min-inline-size: 0;
+  padding-block-start: 0.5rem;
+}
+.column > [data-code-review-diff] :global(.code-host-file-columns) > section:first-child {
+  padding-block-start: 0;
+}
+.column > [data-code-review-diff] :global(.code-host-file-columns) h3 {
+  margin: 0;
+  margin-inline: 1rem;
+  font-size: 0.8125rem;
+  font-weight: 560;
+  line-height: 1.5;
+  color: var(--rly-color-text-2);
+}
+.column > [data-code-review-diff] :global(.code-host-file-columns) pre {
+  min-inline-size: 0;
+  margin: 0;
+  padding-block: 0.6rem;
+  padding-inline: 0.75rem;
+  font: 430 0.75rem / 1.6 var(--rly-font-mono);
+  background: var(--rly-color-canvas);
+  border: 1px solid var(--rly-color-border-1);
+  border-radius: var(--rly-radius-field);
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+/* Full-width raw blocks meet their clipped panel edge; paint the shared keyboard ring inside them. */
+.column > [data-code-review-diff] [data-code-review-raw] pre:focus-visible {
+  outline-offset: calc(-1 * var(--rly-focus-ring-width));
+}
+
+/* Conversation owns the single outer panel; embedded fallback sections own only heading and notice. */
+.conversation > [data-review-threads-fallback] {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.conversation > [data-review-threads-fallback] > [role="status"] {
+  margin-block: 0.75rem 0;
+  margin-inline: 1.1rem;
+}
+
+/* Loading is a plain padded line inside the file panel, not a second page-level loading panel. */
+.column > [data-code-review-diff] > :global(.code-review-pending) {
+  padding: 0;
+}
+.column > [data-code-review-diff] > :global(.code-review-pending) > p {
+  padding-block: 1.5rem;
+  padding-inline: 1rem;
+}
+
+@media (min-width: 600px) {
+  .conversation > .thread {
+    padding-block: 1rem;
+    padding-inline: 1.1rem;
+  }
+}
+
+/* File availability copy is one body with line breaks; page-level guidance keeps its separate rhythm. */
+.column > [data-code-review-diff] :global(.code-review-status-body) {
+  gap: 0;
+}
+.column > [data-code-review-diff] :global(.code-review-status-body) > p + p {
+  color: inherit;
+}

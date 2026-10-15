@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Result, Schema } from "effect"
 
-import { arrangePins, MAX_PINS, observePins, pin, Pins, unpin } from "../src/pins.js"
+import { arrangePins, MAX_PINS, observePins, pin, type PinnableAgent, Pins, StoredPins, unpin } from "../src/pins.js"
 
 const agent = (name: string) => ({ host: "nix", id: name, key: `nix:${name}`, name })
 const minute = 60_000
@@ -41,6 +41,20 @@ describe("pins", () => {
     ])
     const renamed = observePins(away, [{ ...agent("b"), name: "b-renamed" }], 12 * minute)
     expect(renamed.find((each) => each.key === "nix:b")).toMatchObject({ name: "b-renamed", seenAt: 12 * minute })
+  })
+
+  it("persists the last served hue through absence and refreshes it even within the same minute", () => {
+    const first = { ...agent("a"), hue: "sky" } satisfies PinnableAgent
+    const pinned = Result.getOrThrow(pin([], first, minute))
+    expect(pinned[0]).toMatchObject({ hue: "sky" })
+    const restored = Schema.decodeUnknownSync(StoredPins)(JSON.parse(JSON.stringify({ v: 1, pins: pinned }))).pins
+    const away = observePins(restored, [], 3 * minute)
+    expect(away[0]).toMatchObject({ hue: "sky" })
+    const changed = observePins(away, [{ ...first, hue: "ember" }], minute)
+    expect(changed[0]).toMatchObject({ hue: "ember", seenAt: minute })
+    expect(observePins(changed, [agent("a")], minute)[0]).toMatchObject({ hue: "ember" })
+    // Old persisted pins have no hue and still decode and observe normally.
+    expect(Schema.decodeUnknownSync(StoredPins)({ v: 1, pins: pinAll(["legacy"]) }).pins).toHaveLength(1)
   })
 
   // A poll that changes nothing must hand back the same list, so the client doesn't write storage every poll.

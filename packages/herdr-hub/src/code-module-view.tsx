@@ -1,102 +1,23 @@
-import { CodeHostView, type CodeHostPage, type CodeReadState } from "@knpkv/codecommit-web/views"
+import { CodeHostView, type CodeHostPage } from "@knpkv/codecommit-web/views"
 import type { CodeDiffContentResult, CodeDiffResult, CodeReference } from "@knpkv/codecommit-web/host"
-import { Cause, Effect, Exit, Fiber, Result, Schedule } from "effect"
+import { Effect } from "effect"
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
-import { type CodeModuleReads, type CodeReadFailed } from "./code-client.js"
-import { canonicalCodeSelection, type CodeSelection } from "./code-selection.js"
+import { type CodeModuleReads } from "./code-client.js"
+import {
+  canonicalCodeSelection,
+  codeSelectionForReference,
+  codeSelectionSearch as selectionSearch,
+  type CodeSelection
+} from "./code-selection.js"
 import { focusModulePage } from "./internal/shell-keys.js"
+import { useCodeRead } from "./internal/use-code-read.js"
+import { useCodeReviewWorkspace } from "./code-review-workspace.js"
 import { ShellIcon } from "./internal/shell-icon.js"
 import { codeModule, moduleHref, type ModulePageMount, type ModuleViews } from "./modules.js"
 
 interface CodeModuleContent {
   readonly reads: CodeModuleReads
   readonly onHubMachine: boolean
-}
-const empty = <A,>(): CodeReadState<A> => ({ value: null, loading: false, failure: null })
-
-/**
- * Query identity prevents stale targets. Up to 16 successful explicit reads survive Back/Forward;
- * Read again clears them. Cached queue polls remain serial. Inactive reads are interrupted.
- */
-const useCodeRead = <A,>(
-  key: string,
-  read: Effect.Effect<A, CodeReadFailed>,
-  enabled: boolean,
-  poll: boolean,
-  refresh: number
-) => {
-  const [state, setState] = useState<{ readonly key: string; readonly reading: CodeReadState<A> }>({
-    key,
-    reading: empty()
-  })
-  const cache = useRef(new Map<string, A>())
-  const generation = useRef(refresh)
-  useEffect(() => {
-    if (generation.current !== refresh) {
-      cache.current.clear()
-      generation.current = refresh
-    }
-    if (!enabled) return
-    if (!poll && cache.current.has(key)) {
-      const value = cache.current.get(key)
-      if (value !== undefined) {
-        setState({ key, reading: { value, loading: false, failure: null } })
-        return
-      }
-    }
-    let current = true
-    const pass = Effect.gen(function* () {
-      yield* Effect.sync(() =>
-        setState((previous) => ({
-          key,
-          reading: {
-            ...(previous.key === key ? previous.reading : empty<A>()),
-            loading: true
-          }
-        }))
-      )
-      const answer = yield* Effect.exit(poll ? Effect.sleep("200 millis").pipe(Effect.andThen(read)) : read)
-      if (!current) return
-      if (!poll && Exit.isSuccess(answer)) {
-        cache.current.delete(key)
-        cache.current.set(key, answer.value)
-        if (cache.current.size > 16) {
-          const oldest = cache.current.keys().next().value
-          if (oldest !== undefined) cache.current.delete(oldest)
-        }
-      }
-      const failure = Exit.isFailure(answer) ? Cause.findError(answer.cause) : null
-      yield* Effect.sync(() =>
-        setState((previous) => ({
-          key,
-          reading: Exit.isSuccess(answer)
-            ? { value: answer.value, loading: false, failure: null }
-            : {
-                value: previous.key === key ? previous.reading.value : null,
-                loading: false,
-                failure: failure !== null && Result.isSuccess(failure) ? failure.success.reason : "status"
-              }
-        }))
-      )
-    })
-    const fiber = Effect.runFork(poll ? pass.pipe(Effect.repeat(Schedule.spaced("60 seconds"))) : pass)
-    return () => {
-      current = false
-      Effect.runFork(Fiber.interrupt(fiber))
-    }
-  }, [key, read, enabled, poll, refresh])
-  return state.key === key ? state.reading : empty<A>()
-}
-
-const selectionSearch = (selection: CodeSelection): URLSearchParams => {
-  const search = new URLSearchParams({
-    filter: selection.filter,
-    search: selection.search,
-    offset: String(selection.offset)
-  })
-  if (selection.ref !== null) search.set("ref", selection.ref)
-  if (selection.file !== null) search.set("file", String(selection.file))
-  return search
 }
 
 const CodePage = ({
@@ -144,6 +65,14 @@ const CodePage = ({
   )
   // Detail is a cache-only poll, including deep-linked diffs whose PR is absent from the queue page.
   const detail = useCodeRead(ref ?? "none", detailRead, enabled && ref !== null, true, refresh)
+  const reviewWorkspace = useCodeReviewWorkspace({
+    reads: content.reads,
+    selection,
+    page,
+    mount,
+    enabled: enabled && page !== "diffs",
+    ownerUIHref: content.onHubMachine && queue.failure === null ? (queue.value?.ownerUi ?? null) : null
+  })
   const diffRead = useMemo(() => (ref === null ? Effect.never : content.reads.diff(ref)), [content.reads.diff, ref])
   const diff = useCodeRead<CodeDiffResult>(
     ref ?? "none",
@@ -199,19 +128,24 @@ const CodePage = ({
     return false
   }, [])
   const hrefFor = (target: CodeReference) =>
-    moduleHref(codeModule, page, selectionSearch({ ...selection, ref: target, file: null }))
+    moduleHref(codeModule, page, selectionSearch(codeSelectionForReference(selection, target)))
   const hrefForFile = (index: number) => moduleHref(codeModule, page, selectionSearch({ ...selection, file: index }))
-  const tabHref = (target: CodeHostPage) =>
-    moduleHref(
+  const tabHref = (target: CodeHostPage) => {
+    const queueReturn = target === page && ref !== null && page !== "diffs"
+    return moduleHref(
       codeModule,
       target,
       selectionSearch({
         ...selection,
+        ref: queueReturn ? null : selection.ref,
+        view: queueReturn ? "review" : selection.view,
+        thread: queueReturn ? null : selection.thread,
         filter: target === "reviews" ? "reviews" : page === "reviews" ? "open" : selection.filter,
         offset: 0,
         file: null
       })
     )
+  }
   return (
     <>
       {repaired ? (
@@ -228,7 +162,7 @@ const CodePage = ({
         content={fileReading}
         query={selection}
         selected={ref}
-        selectedFile={file}
+        selectedFile={selection.file}
         tabs={{
           "pull-requests": { label: "Pull requests", href: tabHref("pull-requests") },
           reviews: { label: "Reviews", href: tabHref("reviews") },
@@ -238,7 +172,7 @@ const CodePage = ({
         hrefForFile={hrefForFile}
         onOpenReference={(target) => {
           if (selection.ref === target && selection.file === null) return
-          change({ ...selection, ref: target, file: null }, "push")
+          change(codeSelectionForReference(selection, target), "push")
         }}
         nextHref={
           queue.value?._tag === "Ready" && queue.value.more && selection.offset <= 9950
@@ -256,10 +190,23 @@ const CodePage = ({
         onFilter={(filter) => change({ ...selection, filter, offset: 0 }, "replace")}
         onClose={() => {
           setRepaired(false)
-          mount.closeSelection(moduleHref(codeModule, page, selectionSearch({ ...selection, ref: null, file: null })))
+          mount.closeSelection(
+            moduleHref(
+              codeModule,
+              page,
+              selectionSearch({ ...selection, ref: null, file: null, view: "review", thread: null })
+            )
+          )
         }}
-        onRefresh={() => setRefresh((value) => value + 1)}
+        onRefresh={() => {
+          setRefresh((value) => value + 1)
+          reviewWorkspace.readAgain()
+        }}
         restoreFocus={restoreFocus}
+        reviewWorkspace={reviewWorkspace.node}
+        reviewBeforeDetail={reviewWorkspace.beforeDetail}
+        reviewStatus={reviewWorkspace.status}
+        reviewChecks={reviewWorkspace.checks}
       />
     </>
   )

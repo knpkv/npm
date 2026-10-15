@@ -1,12 +1,13 @@
-import { Effect, Result, Schedule, Schema } from "effect"
+import { Effect, Option, Ref, Result, Schedule, Schema } from "effect"
 import {
   blockedAgentBucket,
   type BlockedObservation,
   type BlockedPushPayload,
-  BlockedPushRecipientError
+  BlockedPushRecipientError,
+  BlockedPushStoreError
 } from "./blocked-push-model.js"
 import type { BlockedPushStore } from "./blocked-push-store.js"
-import { PushDeliveryError } from "./errors.js"
+import { ApprovalAppStoreError, PushDeliveryError } from "./errors.js"
 import type { PushSubscriptionRecord } from "./model.js"
 import { validatePushEndpoint } from "./push-subscription.js"
 import type { ApprovalAppStore } from "./store.js"
@@ -42,10 +43,13 @@ export const runBlockedPushPass = Effect.fn("BlockedPushWorker.runPass")(
           .map((agent) => ({ host: read.host, agentId: agent.id }))
       )
     )
+    const storeFailure = yield* Ref.make<Option.Option<BlockedPushStoreError | ApprovalAppStoreError>>(Option.none())
     // Each subscription keeps episode order; a slow endpoint occupies only one of four delivery lanes.
+    // Stop new store work on failure, but let reserved provider sends drain and record their outcomes.
     yield* Effect.forEach(subscriptions, (target) =>
       Effect.forEach(episodes, (episode) =>
         Effect.gen(function*() {
+          if (Option.isSome(yield* Ref.get(storeFailure))) return
           const owner = yield* Schema.decodeUnknownEffect(Schema.NonEmptyString)(target.owner).pipe(
             Effect.mapError((cause) => new BlockedPushRecipientError({ cause }))
           )
@@ -54,6 +58,7 @@ export const runBlockedPushPass = Effect.fn("BlockedPushWorker.runPass")(
             return
           }
           yield* validatePushEndpoint(target.endpoint, options.allowedPushOrigins)
+          if (Option.isSome(yield* Ref.get(storeFailure))) return
           const subscription = subscriptionRevision(target)
           const reserved = yield* options.store.reserve(
             episode,
@@ -80,8 +85,14 @@ export const runBlockedPushPass = Effect.fn("BlockedPushWorker.runPass")(
             ["BlockedPushRecipientError", "PushEndpointNotAllowedError"],
             () => options.subscriptions.deleteSubscriptionPrivileged(target.endpoint)
           ),
-          Effect.catch((error) => Effect.logError("BlockedPushWorker.delivery_failed", error))
+          Effect.catch((error) =>
+            Schema.is(Schema.Union([BlockedPushStoreError, ApprovalAppStoreError]))(error)
+              ? Ref.update(storeFailure, (first) => Option.isSome(first) ? first : Option.some(error))
+              : Effect.logError("BlockedPushWorker.delivery_failed", error)
+          )
         ), { discard: true }), { concurrency: 4, discard: true })
+    const failed = yield* Ref.get(storeFailure)
+    if (Option.isSome(failed)) return yield* failed.value
     const remaining = yield* options.subscriptions.listSubscriptions()
     yield* options.store.prune(remaining.map(subscriptionRevision))
   }

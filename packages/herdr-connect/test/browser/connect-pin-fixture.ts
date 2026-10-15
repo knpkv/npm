@@ -2,6 +2,7 @@
 import type { Page } from "@playwright/test"
 import { Schema } from "effect"
 import { ConnectAgent } from "../../src/model.js"
+import { referenceCreatureIdentities } from "../reference-creature-identities.js"
 
 const rows: ReadonlyArray<readonly [name: string, state: string, work: string, host: string, parent?: string]> = [
   ["release-coord", "working", "release-train", "atlas"],
@@ -39,10 +40,20 @@ const recorded = (
   at: number,
   parent?: string
 ): ConnectAgent => {
-  const fields = { id: `agent-${name}`, name, state, work, host, kind: "claude", lastActivityAt: at }
+  const hue = referenceCreatureIdentities.find((entry) => entry.host === host && entry.name === name)?.family
+  const fields = {
+    id: `agent-${name}`,
+    name,
+    state,
+    work,
+    host,
+    kind: "claude",
+    lastActivityAt: at
+  }
+  const colored = hue === undefined ? fields : { ...fields, hue }
   return Schema.decodeUnknownSync(ConnectAgent)(
-    parent === undefined ? fields : {
-      ...fields,
+    parent === undefined ? colored : {
+      ...colored,
       relationship: { parentAgentId: `agent-${parent}`, relation: "delegated" }
     }
   )

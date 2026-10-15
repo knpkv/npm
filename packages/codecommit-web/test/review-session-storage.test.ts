@@ -123,6 +123,26 @@ describe("Relay review session storage", () => {
     }
   })
 
+  it("keeps the owner history warning when a completed review is restored from browser storage", async () => {
+    const key = relayReviewSessionStorageKey(resource)
+    const completed = { ...review, historyWarning: { reason: "io" } } satisfies PullRequestRelayReviewResponse
+    await writeSession(localStorage, key, {
+      identity: "exact-head-1",
+      resource,
+      review: completed,
+      skillIds: [],
+      turns: [],
+      dispositions: {}
+    })
+
+    const restored = readRelayReviewSession(localStorage, key, resource)
+    expect(Result.isSuccess(restored)).toBe(true)
+    if (Result.isSuccess(restored)) {
+      expect(restored.success?.review.historyWarning).toEqual({ reason: "io" })
+      expect(restored.success?.review.result).toEqual(review.result)
+    }
+  })
+
   it("rejects malformed stored state", () => {
     const key = relayReviewSessionStorageKey(resource)
     sessionStorage.setItem(key, JSON.stringify({ identity: "exact-head-1", turns: "not-an-array" }))

@@ -1,7 +1,10 @@
 /** Client-safe contracts. IDs and metadata cross only the authenticated owner API, never public telemetry. */
 import { Schema } from "effect"
 import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiMiddleware } from "effect/http-api"
+import { PlanState } from "./plan.js"
 import { StackState } from "./schema.js"
+
+export { PlanRow, PlanSource, PlanState, PublishedPlan } from "./plan.js"
 
 /** Random, process-scoped identity; contains no encoded provider locator. Not persisted by the server. */
 export const StackId = Schema.String.check(Schema.isUUID())
@@ -65,6 +68,11 @@ const stacks = HttpApiGroup.make("stacks")
   .add(HttpApiEndpoint.get("get", "/stacks/:id", {
     params: Schema.Struct({ id: StackId }),
     success: StackDetail,
+    error: [StackNotFound, CatalogReadError]
+  }))
+  .add(HttpApiEndpoint.get("plan", "/stacks/:id/plan", {
+    params: Schema.Struct({ id: StackId }),
+    success: PlanState,
     error: [StackNotFound, CatalogReadError]
   }))
   .prefix("/api")

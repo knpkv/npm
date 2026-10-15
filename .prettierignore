@@ -12,3 +12,8 @@ docs/debt.md
 packages/*/.design-sync/overrides/
 packages/*/.design-sync/previews/
 packages/*/.design-sync/fixtures/*.json
+
+# Frozen Design exports: source-manifest hashes validate their original bytes.
+design-refs/code-review/fixture.json
+design-refs/code-review/screens/
+design-refs/code-review/revisions/

@@ -34,6 +34,10 @@ export const ConnectAgentRelationship = Schema.Struct({
 })
 export type ConnectAgentRelationship = typeof ConnectAgentRelationship.Type
 
+/** Agent-only palettes in design order; the Relay mark's plum is deliberately excluded. */
+export const ConnectAgentHue = Schema.Literals(["rose", "ember", "amber", "lime", "moss", "teal", "sky", "iris"])
+export type ConnectAgentHue = typeof ConnectAgentHue.Type
+
 export const ConnectAgent = Schema.Struct({
   id: AgentStableId,
   host: AgentWorkerIdentity.fields.host,
@@ -42,6 +46,7 @@ export const ConnectAgent = Schema.Struct({
   state: BoundedString,
   work: AgentWorkLabel,
   lastActivityAt: ActivityTimestamp,
+  hue: Schema.optionalKey(ConnectAgentHue),
   voice: Schema.optionalKey(ConnectLastWords),
   self: Schema.optionalKey(Schema.NullOr(ConnectSelfState)),
   relationship: Schema.optionalKey(ConnectAgentRelationship)
@@ -101,6 +106,7 @@ export const ArchivedConnectAgent = Schema.Struct({
   kind: ConnectAgent.fields.kind,
   work: ConnectAgent.fields.work,
   state: ConnectAgent.fields.state,
+  hue: ConnectAgent.fields.hue,
   firstSeenAt: ActivityTimestamp,
   closedAt: ActivityTimestamp,
   lastWords: Schema.optionalKey(ConnectLastWords),
@@ -149,9 +155,22 @@ export const TerminalSelection = Schema.Struct({
   rows: TerminalRows,
   // The client understands `terminal.scroll_state`. Absent for older clients, which would close
   // the terminal on an unknown signal, so hosts send scroll states only when it is set.
-  scrollState: Schema.optionalKey(Schema.Boolean)
+  scrollState: Schema.optionalKey(Schema.Boolean),
+  /** Explicit user intent to replace this agent's current controller; absent is an ordinary attach. */
+  takeover: Schema.optionalKey(Schema.Boolean)
 })
 export type TerminalSelection = typeof TerminalSelection.Type
+
+/** A fresh authenticated host reading, required before a hub forwards takeover intent. */
+export const TerminalCapabilities = Schema.Struct({ takeover: Schema.Literal(true) })
+export type TerminalCapabilities = typeof TerminalCapabilities.Type
+
+/** Close-event identity for a superseded controller, including through a relaying hub. */
+export const TerminalTakenOverClose = Schema.Struct({
+  code: Schema.Literal(4_424),
+  reason: Schema.Literal("taken_over")
+})
+export type TerminalTakenOverClose = typeof TerminalTakenOverClose.Type
 
 export const TerminalClientCommand = Schema.Union([
   Schema.Struct({

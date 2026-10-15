@@ -6,6 +6,7 @@ import type { PRCommentLocation } from "../../Domain.js"
 import { CacheError } from "../CacheError.js"
 import { DatabaseLive } from "../Database.js"
 import { EventsHub, RepoChange } from "../EventsHub.js"
+import { commentCoordinatePredicate } from "./commentCoordinates.js"
 import { decodeCommentLocations } from "./commentLocations.js"
 
 const CommentRow = Schema.Struct({
@@ -52,17 +53,14 @@ const makeCommentRepo = Effect.gen(function*() {
       sql`SELECT locations_json FROM pr_comments
             WHERE aws_account_id = ${req.awsAccountId}
               AND pull_request_id = ${req.pullRequestId}
-              AND (
-                (repository_name = ${req.repositoryName} AND account_region = ${req.accountRegion})
-                OR (
-                  repository_name = ${legacyCoordinate}
-                  AND account_region = ${legacyCoordinate}
-                  AND (
-                    SELECT count(*) FROM pull_requests
-                    WHERE aws_account_id = ${req.awsAccountId} AND id = ${req.pullRequestId}
-                  ) = 1
-                )
-              )
+              AND ${
+        commentCoordinatePredicate(sql, {
+          accountId: req.awsAccountId,
+          id: req.pullRequestId,
+          repository: req.repositoryName,
+          region: req.accountRegion
+        })
+      }
             ORDER BY CASE
               WHEN repository_name = ${req.repositoryName} AND account_region = ${req.accountRegion} THEN 0
               ELSE 1

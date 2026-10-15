@@ -1,3 +1,9 @@
+body {
+  background: var(--rly-color-canvas);
+  font: 430 1rem/1.5 var(--rly-font-ui);
+  margin: 0;
+}
+
 .consumer-main {
   margin-inline: auto;
   max-inline-size: 66em;

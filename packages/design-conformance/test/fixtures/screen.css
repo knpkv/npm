@@ -1,0 +1,34 @@
+* {
+  box-sizing: border-box;
+}
+:root {
+  color-scheme: light dark;
+  --toy-background: light-dark(oklch(98% 0 none), oklch(20% 0 none));
+  --toy-text: light-dark(oklch(20% 0 none), oklch(98% 0 none));
+}
+body {
+  margin: 0;
+  padding: 1rem;
+  background: var(--toy-background);
+  color: var(--toy-text);
+  font: 1rem/1.5 system-ui;
+  text-wrap: pretty;
+  overflow-wrap: break-word;
+}
+main {
+  display: grid;
+  gap: 1rem;
+  padding: 1rem;
+  border: 1px solid currentColor;
+  border-radius: 0.5rem;
+}
+h1,
+p {
+  margin: 0;
+}
+h1 {
+  font-size: 1.5rem;
+}
+svg {
+  display: block;
+}

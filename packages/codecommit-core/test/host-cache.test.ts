@@ -1,12 +1,16 @@
 import { NodeServices } from "@effect/platform-node"
 import * as LibsqlClient from "@effect/sql-libsql/LibsqlClient"
 import { describe, expect, it } from "@effect/vitest"
-import { Clock, Effect, Layer, Result, Stream } from "effect"
+import { Clock, ConfigProvider, Context, Effect, Layer, Option, Result, Stream } from "effect"
 import * as FileSystem from "effect/FileSystem"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import * as Reactivity from "effect/reactivity/Reactivity"
+import * as SqlClient from "effect/sql/SqlClient"
+import { DatabaseLive } from "../src/CacheService/Database.js"
 import { attachHostCache } from "../src/CacheService/HostReads.js"
 import { ensurePrivateDatabasePath } from "../src/CacheService/internal/PrivateDatabasePathNode.js"
+import { CommentRepo } from "../src/CacheService/repos/CommentRepo.js"
+import { CommentId, type CommentThreadJsonEncoded, PRComment, type PRCommentLocation } from "../src/Domain.js"
 import type { NewAuditLogEntry } from "../src/PermissionService/AuditLog.js"
 
 const fixture = <A, E, R>(run: (database: string, sql: LibsqlClient.LibsqlClient) => Effect.Effect<A, E, R>) =>
@@ -106,6 +110,240 @@ describe("host cache attachment", () => {
         const duration = (yield* Clock.currentTimeMillis) - started
         expect(duration).toBeGreaterThanOrEqual(350)
         expect(duration).toBeLessThan(1500)
+      })
+    ))
+})
+
+const coordinates = { accountId: "owner-account", region: "fixture-zone", repository: "review-repo", id: "42" }
+const commentLocations = [{
+  comments: [{
+    root: {
+      id: "comment-one",
+      content: "Review this branch",
+      author: "Reviewer",
+      creationDate: "2026-10-13T12:00:00.000Z",
+      deleted: false
+    },
+    replies: []
+  }]
+}]
+const commentFixture = <A, E, R>(run: Parameters<typeof fixture<A, E, R>>[0]) =>
+  fixture((database, sql) =>
+    Effect.gen(function*() {
+      yield* sql`CREATE TABLE pull_requests (aws_account_id TEXT, id TEXT, repository_name TEXT, account_region TEXT)`
+      yield* sql`CREATE TABLE pr_comments (aws_account_id TEXT, pull_request_id TEXT, repository_name TEXT, account_region TEXT, locations_json TEXT, fetched_at TEXT)`
+      return yield* run(database, sql)
+    })
+  )
+
+const replyChain = (levels: number): CommentThreadJsonEncoded => {
+  const root = {
+    id: "reply",
+    content: "Reviewer reply",
+    author: "Reviewer",
+    creationDate: "2026-10-13T12:00:00Z",
+    deleted: false
+  }
+  let thread: CommentThreadJsonEncoded = { root, replies: [] }
+  for (let level = 0; level < levels; level++) thread = { root: { ...root, id: `reply-${level}` }, replies: [thread] }
+  return thread
+}
+
+describe("host cached comments", () => {
+  it.effect("accepts ordinary reply chains and distinguishes valid larger owner snapshots from corruption", () =>
+    commentFixture((database, sql) =>
+      Effect.gen(function*() {
+        const cache = yield* attachHostCache(database)
+        const ordinary = [{ comments: [replyChain(15)] }]
+        yield* sql`INSERT INTO pr_comments VALUES ('owner-account', '42', 'review-repo', 'fixture-zone', ${
+          JSON.stringify(ordinary)
+        }, '2026-10-13 12:00:00')`
+        expect((yield* cache.comments(coordinates))?.locations).toEqual(ordinary)
+        for (
+          const locations of [Array.from({ length: 501 }, () => ({ comments: [] })), [{ comments: [replyChain(65)] }]]
+        ) {
+          yield* sql`UPDATE pr_comments SET locations_json = ${JSON.stringify(locations)}`
+          const result = yield* Effect.result(cache.comments(coordinates))
+          expect(Result.isFailure(result)).toBe(true)
+          if (Result.isFailure(result)) {
+            expect(result.failure).toMatchObject({ _tag: "HostCommentsReadError", reason: "over_limit" })
+          }
+        }
+        yield* sql`UPDATE pr_comments SET locations_json = 'not-json'`
+        const corrupt = yield* Effect.result(cache.comments(coordinates))
+        expect(Result.isFailure(corrupt)).toBe(true)
+        if (Result.isFailure(corrupt)) {
+          expect(corrupt.failure).toMatchObject({ _tag: "HostCommentsReadError", reason: "corrupt" })
+        }
+      })
+    ))
+
+  it.effect("uses the owner's coordinate predicate through both real readers", () =>
+    Effect.gen(function*() {
+      const services = yield* Layer.build(NodeServices.layer)
+      return yield* Effect.gen(function*() {
+        const fs = yield* FileSystem.FileSystem
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "code-comments-owner-" })
+        const context = yield* Layer.build(
+          Layer.merge(CommentRepo.Default, DatabaseLive).pipe(
+            Layer.provide(ConfigProvider.layer(ConfigProvider.fromUnknown({ HOME: root })))
+          )
+        )
+        const sql = Context.get(context, SqlClient.SqlClient)
+        const repo = Context.get(context, CommentRepo)
+        const cache = yield* attachHostCache(`${root}/.codecommit/cache.db`)
+        yield* repo.upsert(coordinates.accountId, coordinates.id, JSON.stringify(commentLocations))
+        const check = (present: boolean) =>
+          Effect.gen(function*() {
+            const owner = yield* repo.find(coordinates.accountId, coordinates.id, {
+              repositoryName: coordinates.repository,
+              accountRegion: coordinates.region
+            })
+            expect(Option.isSome(owner)).toBe(present)
+            expect((yield* cache.comments(coordinates)) !== null).toBe(present)
+          })
+        yield* check(false)
+        yield* sql`INSERT INTO pull_requests (
+          id, aws_account_id, account_profile, account_region, title, author, repository_name,
+          creation_date, last_modified_date, status, source_branch, destination_branch, link
+        ) VALUES ('42', 'owner-account', 'Owner', 'fixture-zone', 'Review', 'Author', 'another-repo',
+          '2026-10-13T12:00:00Z', '2026-10-13T12:00:00Z', 'OPEN', 'feature', 'main', 'https://example.invalid/pr/42')`
+        yield* check(false)
+        yield* sql`UPDATE pull_requests SET repository_name = 'review-repo'`
+        yield* check(true)
+        yield* sql`INSERT INTO pull_requests (
+          id, aws_account_id, account_profile, account_region, title, author, repository_name,
+          creation_date, last_modified_date, status, source_branch, destination_branch, link
+        ) VALUES ('42', 'owner-account', 'Owner', 'another-zone', 'Review', 'Author', 'review-repo',
+          '2026-10-13T12:00:00Z', '2026-10-13T12:00:00Z', 'OPEN', 'feature', 'main', 'https://example.invalid/pr/42')`
+        yield* check(false)
+        yield* repo.upsert(coordinates.accountId, coordinates.id, "[]", {
+          repositoryName: coordinates.repository,
+          accountRegion: coordinates.region
+        })
+        yield* check(true)
+        const owner = yield* repo.find(coordinates.accountId, coordinates.id, {
+          repositoryName: coordinates.repository,
+          accountRegion: coordinates.region
+        })
+        expect(Option.getOrNull(owner)).toEqual([])
+        expect((yield* cache.comments(coordinates))?.locations).toEqual([])
+        const written: ReadonlyArray<PRCommentLocation> = [{
+          filePath: "src/review.ts",
+          beforeCommitId: "base-one",
+          afterCommitId: "head-one",
+          relativeFileVersion: "AFTER",
+          comments: [{
+            root: new PRComment({
+              id: CommentId.make("comment-one"),
+              inReplyTo: CommentId.make("parent-comment"),
+              filePath: "src/review.ts",
+              lineNumber: 9,
+              content: "Review this branch",
+              author: "Reviewer",
+              creationDate: new Date("2026-10-13T12:00:00Z"),
+              deleted: false
+            }),
+            replies: []
+          }]
+        }]
+        yield* repo.upsert(coordinates.accountId, coordinates.id, JSON.stringify(written), {
+          repositoryName: coordinates.repository,
+          accountRegion: coordinates.region
+        })
+        const roundTrip = yield* cache.comments(coordinates)
+        expect(roundTrip?.locations[0]?.comments[0]?.root).toMatchObject({
+          id: "comment-one",
+          inReplyTo: "parent-comment",
+          filePath: "src/review.ts",
+          lineNumber: 9,
+          creationDate: "2026-10-13T12:00:00.000Z"
+        })
+      }).pipe(Effect.provideContext(services))
+    }))
+
+  it.effect("distinguishes a missing snapshot from a cached empty conversation", () =>
+    commentFixture((database, sql) =>
+      Effect.gen(function*() {
+        const cache = yield* attachHostCache(database)
+        expect(yield* cache.comments(coordinates)).toBeNull()
+        yield* sql`INSERT INTO pr_comments VALUES ('owner-account', '42', 'review-repo', 'fixture-zone', '[]', '2026-10-13 12:00:00')`
+        expect(yield* cache.comments(coordinates)).toEqual({ observedAt: 1791892800000, locations: [] })
+        expect(yield* sql`SELECT * FROM audit_log`).toHaveLength(0)
+        expect(Object.keys(cache).sort()).toEqual(["comments", "exact", "log", "queue"])
+      })
+    ))
+
+  it.effect("reads only the exact account, region, repository and PR", () =>
+    commentFixture((database, sql) =>
+      Effect.gen(function*() {
+        yield* sql`INSERT INTO pr_comments VALUES ('owner-account', '42', 'review-repo', 'fixture-zone', ${
+          JSON.stringify(commentLocations)
+        }, '2026-10-13 12:00:00')`
+        const cache = yield* attachHostCache(database)
+        expect((yield* cache.comments(coordinates))?.locations).toEqual(commentLocations)
+        for (
+          const other of [
+            { ...coordinates, accountId: "another-account" },
+            { ...coordinates, region: "another-zone" },
+            { ...coordinates, repository: "another-repo" },
+            { ...coordinates, id: "43" }
+          ]
+        ) expect(yield* cache.comments(other)).toBeNull()
+        expect(yield* sql`SELECT * FROM pr_comments`).toHaveLength(1)
+      })
+    ))
+
+  it.effect("adopts legacy comments only for the unique exact cached PR, preferring an exact snapshot", () =>
+    commentFixture((database, sql) =>
+      Effect.gen(function*() {
+        yield* sql`INSERT INTO pr_comments VALUES ('owner-account', '42', '', '', ${
+          JSON.stringify(commentLocations)
+        }, '2026-10-13 12:00:00')`
+        const cache = yield* attachHostCache(database)
+        expect(yield* cache.comments(coordinates)).toBeNull()
+        yield* sql`INSERT INTO pull_requests VALUES ('owner-account', '42', 'another-repo', 'fixture-zone')`
+        expect(yield* cache.comments(coordinates)).toBeNull()
+        yield* sql`UPDATE pull_requests SET repository_name = 'review-repo'`
+        expect((yield* cache.comments(coordinates))?.locations).toEqual(commentLocations)
+        yield* sql`INSERT INTO pull_requests VALUES ('owner-account', '42', 'another-repo', 'fixture-zone')`
+        expect(yield* cache.comments(coordinates)).toBeNull()
+        yield* sql`INSERT INTO pr_comments VALUES ('owner-account', '42', 'review-repo', 'fixture-zone', '[]', '2026-10-13 12:01:00')`
+        expect((yield* cache.comments(coordinates))?.locations).toEqual([])
+      })
+    ))
+
+  it.effect("refuses corrupt, excess-property and invalid-timestamp snapshots instead of reporting no comments", () =>
+    commentFixture((database, sql) =>
+      Effect.gen(function*() {
+        const cache = yield* attachHostCache(database)
+        for (const json of ["broken", "{}", JSON.stringify([{ ...commentLocations[0], token: "never-emitted" }])]) {
+          yield* sql`DELETE FROM pr_comments`
+          yield* sql`INSERT INTO pr_comments VALUES ('owner-account', '42', 'review-repo', 'fixture-zone', ${json}, '2026-10-13 12:00:00')`
+          const result = yield* Effect.result(cache.comments(coordinates))
+          expect(Result.isFailure(result)).toBe(true)
+          if (Result.isFailure(result)) {
+            expect(result.failure).toMatchObject({ _tag: "HostCommentsReadError", reason: "corrupt" })
+          }
+        }
+        yield* sql`UPDATE pr_comments SET locations_json = '[]', fetched_at = 'not-a-time'`
+        expect(Result.isFailure(yield* Effect.result(cache.comments(coordinates)))).toBe(true)
+      })
+    ))
+
+  it.effect("bounds stored bytes and recursive nesting before decoding comment threads", () =>
+    commentFixture((database, sql) =>
+      Effect.gen(function*() {
+        const cache = yield* attachHostCache(database)
+        for (const json of [JSON.stringify("x".repeat(1_048_576)), "[".repeat(1000) + "0" + "]".repeat(1000)]) {
+          yield* sql`DELETE FROM pr_comments`
+          yield* sql`INSERT INTO pr_comments VALUES ('owner-account', '42', 'review-repo', 'fixture-zone', ${json}, '2026-10-13 12:00:00')`
+          const result = yield* Effect.result(cache.comments(coordinates))
+          expect(Result.isFailure(result)).toBe(true)
+          if (Result.isFailure(result)) {
+            expect(result.failure).toMatchObject({ _tag: "HostCommentsReadError", reason: "over_limit" })
+          }
+        }
       })
     ))
 })

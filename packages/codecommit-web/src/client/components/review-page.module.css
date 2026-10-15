@@ -1,0 +1,205 @@
+.page {
+  --review-page-gutter: 2.5rem;
+  display: grid;
+  grid-template-columns:
+    [full-start] var(--review-page-gutter) [content-start] minmax(0, 1fr)
+    [content-end] var(--review-page-gutter) [full-end];
+  grid-template-rows: [title] auto [tabs] auto [body] auto;
+  align-content: start;
+  min-inline-size: 0;
+  color: var(--rly-color-text-1);
+  font-weight: 430;
+  padding-block: 1.5rem var(--rly-space-32);
+}
+
+.page::before {
+  content: "";
+  grid-column: full;
+  grid-row: tabs;
+  align-self: end;
+  border-block-end: 1px solid var(--rly-color-border-1);
+}
+
+.heading {
+  grid-column: content;
+  grid-row: title;
+  display: grid;
+  gap: 0;
+  padding: 0;
+}
+
+.heading h1 {
+  margin: 0;
+  font-size: 1.75rem;
+  font-weight: 620;
+  letter-spacing: -0.035em;
+  line-height: 1.2;
+}
+
+.heading p {
+  margin: 0;
+  font-size: 0.9375rem;
+  line-height: 1.5;
+  color: var(--rly-color-text-2);
+}
+
+.pages {
+  grid-column: content;
+  grid-row: tabs;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-block-start: 0.9rem;
+}
+
+.pages a {
+  display: grid;
+  align-items: center;
+  padding-inline: 0.25rem;
+  min-block-size: 2.75rem;
+  border-block-end: 2px solid transparent;
+  color: var(--rly-color-text-2);
+  font-size: 0.9375rem;
+  text-decoration: none;
+}
+
+.pages [aria-current="page"] {
+  border-block-end-color: var(--rly-color-text-1);
+  color: var(--rly-color-text-1);
+  font-weight: 620;
+}
+
+.body {
+  grid-column: full;
+  grid-row: body;
+  display: grid;
+  gap: 1.5rem;
+  min-inline-size: 0;
+  padding-block-start: 1.5rem;
+  padding-inline: var(--review-page-gutter);
+}
+
+.body > [data-code-review-owner] {
+  display: grid;
+  gap: 1.5rem;
+  min-inline-size: 0;
+}
+
+.pullRequest {
+  display: grid;
+  gap: 0.6rem;
+  min-inline-size: 0;
+  padding-block: 1rem;
+  padding-inline: 1.25rem;
+  border: 1px solid var(--rly-color-border-1);
+  border-radius: var(--rly-radius-group);
+  background: var(--rly-color-surface-1);
+}
+
+.pullRequest h2 {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 620;
+  line-height: 1.25;
+  letter-spacing: -0.025em;
+  overflow-wrap: break-word;
+  text-wrap: balance;
+}
+
+.reference,
+.metadata {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 1.25rem;
+  min-inline-size: 0;
+  color: var(--rly-color-text-2);
+  font-size: 0.875rem;
+  line-height: 1.5;
+  overflow-wrap: break-word;
+}
+
+.reference {
+  gap: 0.25rem 0.75rem;
+}
+
+.reference > *,
+.metadata > * {
+  min-inline-size: 0;
+}
+
+.reference b {
+  font: 520 0.875rem / 1.4 var(--rly-font-mono);
+}
+
+.metadata code {
+  color: var(--rly-color-text-1);
+  font: 430 0.8125rem / 1.4 var(--rly-font-mono);
+}
+
+.checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 2rem;
+  align-items: center;
+  padding-block-start: 0.6rem;
+  border-block-start: 1px solid var(--rly-color-border-1);
+}
+
+.checks p {
+  margin: 0;
+}
+
+.page:focus-visible,
+.pages a:focus-visible {
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: var(--rly-focus-ring-offset);
+}
+
+@media (max-width: 599px) {
+  .page {
+    --review-page-gutter: 1rem;
+    grid-template-columns:
+      [full-start] 0.5rem [tabs-start] 0.5rem [content-start] minmax(0, 1fr)
+      [content-end] 0.5rem [tabs-end] 0.5rem [full-end];
+    padding-block-start: 0;
+    padding-block-end: var(--rly-space-20);
+  }
+
+  .heading {
+    position: absolute;
+    inline-size: 1px;
+    block-size: 1px;
+    min-inline-size: 0;
+    overflow: clip;
+    clip-path: inset(50%);
+  }
+
+  .pages {
+    grid-column: tabs;
+    gap: 0;
+    margin-block-start: 0;
+  }
+
+  .pages a {
+    padding-inline: var(--rly-space-12);
+  }
+
+  .body {
+    gap: 1rem;
+    padding-block-start: 1rem;
+  }
+
+  .body > [data-code-review-owner] {
+    gap: 1rem;
+  }
+
+  .pullRequest {
+    padding-block: 0.9rem;
+    padding-inline: 1rem;
+  }
+
+  .pullRequest h2 {
+    font-size: 1.25rem;
+  }
+}

@@ -5,6 +5,7 @@
  * The committed OpenAPI document is the unmodified upstream document. RFC 6902
  * patches are applied in memory before Effect's OpenAPI generator runs.
  */
+import * as JsonSchemaGenerator from "@effect/openapi-generator/JsonSchemaGenerator"
 import * as OpenApiGenerator from "@effect/openapi-generator/OpenApiGenerator"
 import * as OpenApiPatch from "@effect/openapi-generator/OpenApiPatch"
 import { NodeHttpClient, NodeRuntime, NodeServices } from "@effect/platform-node"
@@ -22,6 +23,7 @@ import * as Path from "effect/Path"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import { format as formatSource } from "prettier"
+import * as ts from "typescript"
 
 const SPEC_URL = "https://docs.clockify.me/openapi.json"
 
@@ -103,7 +105,11 @@ const formattedJson = (value: Schema.Json) =>
 
 const stripUnreliableMetadata = (schema: JsonSchema.JsonSchema): JsonSchema.JsonSchema => {
   const { default: _default, examples: _examples, ...normalized } = schema
-  return normalized
+  // Preserve the published struct types instead of adding JSON index signatures
+  // to every named-property record. Explicit map schemas keep their value types.
+  return normalized.properties !== undefined && normalized.additionalProperties === undefined
+    ? { ...normalized, additionalProperties: false }
+    : normalized
 }
 
 const stripTrailingWhitespace = (source: string): string => source.replace(/[ \t]+$/gm, "")
@@ -130,6 +136,55 @@ const removeUnusedErrorDecoder = (source: string): string => {
  */
 const normalizeMultipartBodies = (source: string): string =>
   source.replaceAll("HttpClientRequest.bodyFormData(", "HttpClientRequest.bodyFormDataRecord(")
+
+/**
+ * Keep published models whose endpoint references were removed by the workspace
+ * patch. Generate their dependency closure from the same patched definitions,
+ * appending only declarations that the endpoint generator did not already emit.
+ */
+const retainPublishedModels = (source: string, document: OpenAPISpec): string => {
+  const retained = [
+    "FeaturePlan",
+    "Feature",
+    "WorkspaceSettingsDtoV1",
+    "CreateExpenseV1Request",
+    "UpdateExpenseV1Request"
+  ]
+  const definitions = document.components.schemas
+  for (const name of retained) {
+    if (definitions[name] === undefined) {
+      throw new RegenerateError({ message: `Published Clockify component disappeared: ${name}` })
+    }
+  }
+  const models = JsonSchemaGenerator.make()
+  models.addSchema("__PublishedModels", {
+    type: "object",
+    properties: Object.fromEntries(retained.map((name) => [name, { $ref: `#/components/schemas/${name}` }]))
+  })
+  const generated = models.generate("openapi-3.0", definitions, false, { onEnter: stripUnreliableMetadata })
+  const file = ts.createSourceFile("models.ts", generated, ts.ScriptTarget.Latest, true)
+  const existing = new Set(Array.from(source.matchAll(/^export (?:type|const) (\w+)\b/gm), (match) => match[1]))
+  const missing: Array<string> = []
+  for (const statement of file.statements) {
+    let identifier: string
+    if (ts.isTypeAliasDeclaration(statement)) {
+      identifier = statement.name.text
+    } else if (ts.isVariableStatement(statement)) {
+      const declaration = statement.declarationList.declarations[0]
+      if (
+        statement.declarationList.declarations.length !== 1 || declaration === undefined ||
+        !ts.isIdentifier(declaration.name)
+      ) {
+        throw new RegenerateError({ message: "Effect model generator emitted an unsupported variable" })
+      }
+      identifier = declaration.name.text
+    } else {
+      throw new RegenerateError({ message: "Effect model generator emitted an unsupported declaration" })
+    }
+    if (identifier !== "__PublishedModels" && !existing.has(identifier)) missing.push(statement.getText(file))
+  }
+  return `${source}\n// Published components retained independently of endpoint reachability.\n${missing.join("\n")}\n`
+}
 
 const generate = Effect.fn("Clockify.regenerate.generate")(function*(
   scriptPaths: ScriptPaths,
@@ -163,7 +218,9 @@ const generate = Effect.fn("Clockify.regenerate.generate")(function*(
   )
   yield* fs.writeFileString(
     scriptPaths.outputFile,
-    stripTrailingWhitespace(normalizeMultipartBodies(removeUnusedErrorDecoder(generated)))
+    stripTrailingWhitespace(
+      retainPublishedModels(normalizeMultipartBodies(removeUnusedErrorDecoder(generated)), document)
+    )
   ).pipe(
     Effect.mapError((cause) => new RegenerateError({ message: "Could not write generated Clockify client", cause }))
   )

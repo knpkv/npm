@@ -10,8 +10,17 @@ import { connectAgentGroup } from "./agent-state-core.js"
  */
 import { Icon, PortalProvider } from "@knpkv/rly/foundations"
 import { workNavigationHref } from "@knpkv/herdr-work/navigation"
-import { Button, Sheet, StateLabel } from "@knpkv/rly/primitives"
-import { type KeyboardEvent, type MouseEvent, type ReactElement, type ReactNode, useId, useRef, useState } from "react"
+import { Button, Sheet } from "@knpkv/rly/primitives"
+import {
+  type KeyboardEvent,
+  type MouseEvent,
+  type ReactElement,
+  type ReactNode,
+  useEffect,
+  useId,
+  useRef,
+  useState
+} from "react"
 
 import { AgentStateLabel, agentStatePresentation } from "./agent-state.js"
 import { Creature } from "./creature.js"
@@ -97,7 +106,9 @@ export const AgentCast = ({
                 <Creature
                   arrived={arrivals.has(connectAgentKey(agent))}
                   host={agent.host}
+                  hueFamily={agent.hue}
                   id={String(agent.id)}
+                  name={agent.name}
                   size="cast"
                   stale={stale || silentHosts.includes(agent.host)}
                   state={agent.state}
@@ -181,7 +192,15 @@ const AgentLineage = ({
       onClick={() => onOpen(member)}
       type="button"
     >
-      <Creature host={member.host} id={String(member.id)} size="row" stale={stale} state={member.state} />
+      <Creature
+        host={member.host}
+        hueFamily={member.hue}
+        id={String(member.id)}
+        name={member.name}
+        size="row"
+        stale={stale}
+        state={member.state}
+      />
       <span>
         {member.name}
         <small>{role}</small>
@@ -262,6 +281,7 @@ export const AgentStage = ({
   presentation = "fleet",
   restoreFocus,
   stale,
+  terminalControl,
   workGoal,
   workSnapshots = null
 }: {
@@ -285,7 +305,21 @@ export const AgentStage = ({
   readonly onOpen: (agent: ConnectAgent) => void
   readonly onOpenTerminal: (agent: ConnectAgent) => void
   readonly stale: boolean
+  /** Absent preserves the ordinary stage. A control state replaces its body with explicit terminal recovery. */
+  readonly terminalControl?:
+    | {
+        readonly state: "controlled" | "taken-over" | "connecting"
+        readonly onAction: () => void
+      }
+    | undefined
 }): ReactElement => {
+  const terminalAction = useRef<HTMLButtonElement>(null)
+  const terminalIdentity = agent === null ? null : connectAgentKey(agent)
+  const recoveryState = terminalControl?.state
+  useEffect(() => {
+    if (terminalIdentity === null || recoveryState === undefined || recoveryState === "connecting") return
+    terminalAction.current?.focus()
+  }, [terminalIdentity, recoveryState])
   return (
     // Its own portal target: Connect runs standalone and inside the hub, and neither provides one.
     <PortalProvider>
@@ -301,92 +335,168 @@ export const AgentStage = ({
             closeLabel="Close"
             description={`${agent.kind} on ${agent.host}`}
             title={agent.name}
+            data-terminal-control={terminalControl?.state}
+            initialFocusRef={terminalAction}
           >
             {presentation === "home" ? <HomeStageHeader agent={agent} onClose={onClose} /> : null}
             <Sheet.Body className="connect-stage" data-stale={stale ? "" : undefined}>
-              <div className="connect-stage-hero" data-tone={agentStatePresentation(agent.state).tone}>
-                <Creature host={agent.host} id={String(agent.id)} size="stage" stale={stale} state={agent.state} />
-              </div>
-              <p className="connect-stage-speech" data-tone={agentStatePresentation(agent.state).tone}>
-                {stale ? "Last known: " : null}
-                <AgentStateLabel state={agent.state} />
-                {stale ? null : (
-                  <span className="connect-stage-work">
-                    {agentStatePresentation(agent.state).icon === "clock" ? " for you on " : " on "}
-                    {agent.work}
-                  </span>
-                )}
-              </p>
-              <div className="connect-stage-goal-state">
-                {workGoal._tag === "available" ? (
-                  <a className="connect-stage-goal" href={workGoal.href}>
-                    Goal: {workGoal.title} <Icon decorative name="arrow-right" size="small" />
-                  </a>
-                ) : workGoal._tag === "missing" ? (
-                  <p>No Work goal linked</p>
-                ) : workGoal._tag === "ambiguous" ? (
-                  <>
-                    <a className="connect-stage-goal" href={workNavigationHref({ goalId: null, window: "now" })}>
-                      Choose one in Work <Icon decorative name="arrow-right" size="small" />
-                    </a>
-                    <p>Several Work goals match this agent</p>
-                  </>
-                ) : (
-                  <p>Work goals unavailable right now</p>
-                )}
-              </div>
-              <dl className="connect-stage-details">
-                <dt>Host</dt>
-                <dd>{agent.host}</dd>
-                <dt>Kind</dt>
-                <dd>{agent.kind}</dd>
-                <dt>Parent</dt>
-                <dd>{agent.relationship?.parentAgentId ?? "None, primary"}</dd>
-                <dt>Last active</dt>
-                <dd>{new Date(agent.lastActivityAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</dd>
-              </dl>
-              <section aria-label="Pull requests" className="connect-stage-prs">
-                <h2>
-                  Pull requests
-                  {workSnapshots === null ? (
-                    ""
-                  ) : (
-                    <span>
-                      <span aria-hidden="true" className="connect-row-separator" />
-                      owned {String(connectOwnedPullRequests(agent, workSnapshots).length)}
-                    </span>
-                  )}
-                </h2>
-                {workSnapshots === null ? (
-                  <p>Work snapshot unavailable.</p>
-                ) : (
-                  <>
-                    <p>Owned in this Work snapshot.</p>
-                    {connectOwnedPullRequests(agent, workSnapshots).map((url) => (
-                      <a href={url} key={url} rel="noreferrer" target="_blank">
-                        {url.replace("https://github.com/", "")}
+              {terminalControl === undefined ? (
+                <>
+                  <div className="connect-stage-hero" data-tone={agentStatePresentation(agent.state).tone}>
+                    <Creature
+                      host={agent.host}
+                      hueFamily={agent.hue}
+                      id={String(agent.id)}
+                      name={agent.name}
+                      size="stage"
+                      stale={stale}
+                      state={agent.state}
+                    />
+                  </div>
+                  <p className="connect-stage-speech" data-tone={agentStatePresentation(agent.state).tone}>
+                    {stale ? "Last known: " : null}
+                    <AgentStateLabel state={agent.state} />
+                    {stale ? null : (
+                      <span className="connect-stage-work">
+                        {agentStatePresentation(agent.state).icon === "clock" ? " for you on " : " on "}
+                        {agent.work}
+                      </span>
+                    )}
+                  </p>
+                  <div className="connect-stage-goal-state">
+                    {workGoal._tag === "available" ? (
+                      <a className="connect-stage-goal" href={workGoal.href}>
+                        Goal: {workGoal.title} <Icon decorative name="arrow-right" size="small" />
                       </a>
-                    ))}
-                  </>
-                )}
-              </section>
-              <AgentLineage
-                key={connectAgentKey(agent)}
-                agent={agent}
-                agents={agents ?? [agent, ...crew]}
-                onOpen={onOpen}
-                stale={stale}
-              />
-              {footer}
+                    ) : workGoal._tag === "missing" ? (
+                      <p>No Work goal linked</p>
+                    ) : workGoal._tag === "ambiguous" ? (
+                      <>
+                        <a className="connect-stage-goal" href={workNavigationHref({ goalId: null, window: "now" })}>
+                          Choose one in Work <Icon decorative name="arrow-right" size="small" />
+                        </a>
+                        <p>Several Work goals match this agent</p>
+                      </>
+                    ) : (
+                      <p>Work goals unavailable right now</p>
+                    )}
+                  </div>
+                  <dl className="connect-stage-details">
+                    <dt>Host</dt>
+                    <dd>{agent.host}</dd>
+                    <dt>Kind</dt>
+                    <dd>{agent.kind}</dd>
+                    <dt>Parent</dt>
+                    <dd>{agent.relationship?.parentAgentId ?? "None, primary"}</dd>
+                    <dt>Last active</dt>
+                    <dd>
+                      {new Date(agent.lastActivityAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                    </dd>
+                  </dl>
+                  <section aria-label="Pull requests" className="connect-stage-prs">
+                    <h2>
+                      Pull requests
+                      {workSnapshots === null ? (
+                        ""
+                      ) : (
+                        <span>
+                          <span aria-hidden="true" className="connect-row-separator" />
+                          owned {String(connectOwnedPullRequests(agent, workSnapshots).length)}
+                        </span>
+                      )}
+                    </h2>
+                    {workSnapshots === null ? (
+                      <p>Work snapshot unavailable.</p>
+                    ) : (
+                      <>
+                        <p>Owned in this Work snapshot.</p>
+                        {connectOwnedPullRequests(agent, workSnapshots).map((url) => (
+                          <a href={url} key={url} rel="noreferrer" target="_blank">
+                            {url.replace("https://github.com/", "")}
+                          </a>
+                        ))}
+                      </>
+                    )}
+                  </section>
+                  <AgentLineage
+                    key={connectAgentKey(agent)}
+                    agent={agent}
+                    agents={agents ?? [agent, ...crew]}
+                    onOpen={onOpen}
+                    stale={stale}
+                  />
+                  {footer}
+                </>
+              ) : (
+                <>
+                  <div className="connect-terminal-stage-identity">
+                    <Creature
+                      host={agent.host}
+                      hueFamily={agent.hue}
+                      id={String(agent.id)}
+                      name={agent.name}
+                      size="cast"
+                      stale={stale}
+                      state={agent.state}
+                    />
+                    <div>
+                      <h2>{agent.name}</h2>
+                      <AgentStateLabel
+                        className="connect-terminal-stage-state"
+                        state={agent.state}
+                        statePolicy={presentation}
+                      />
+                      <small>
+                        {agent.relationship === undefined
+                          ? "Primary"
+                          : connectRelationLabel(agent.relationship.relation)}
+                        , {agent.host}
+                        <br />
+                        {agent.work}
+                      </small>
+                    </div>
+                  </div>
+                  <section className="connect-terminal-control">
+                    {terminalControl.state === "connecting" ? (
+                      <small>Connecting to {agent.name}…</small>
+                    ) : (
+                      <>
+                        <h3>
+                          {terminalControl.state === "controlled"
+                            ? "Open on another device"
+                            : "Taken over on another device"}
+                        </h3>
+                        <p>
+                          {terminalControl.state === "controlled"
+                            ? "This terminal is in use on another device. Taking over disconnects it there."
+                            : "This terminal is now open somewhere else."}
+                        </p>
+                        <Button
+                          ref={terminalAction}
+                          onClick={(event) => {
+                            event.currentTarget.closest<HTMLElement>("[role='dialog']")?.focus()
+                            terminalControl.onAction()
+                          }}
+                          variant="primary"
+                        >
+                          {terminalControl.state === "controlled" ? "Take over" : "Reconnect"}
+                        </Button>
+                      </>
+                    )}
+                  </section>
+                </>
+              )}
             </Sheet.Body>
-            <Sheet.Footer className="connect-stage-actions">
-              <Button leadingIcon="pin" onClick={() => onPinChange(!pinned)} size="default" variant="secondary">
-                {pinned ? "Unpin" : "Pin"}
-              </Button>
-              <Button onClick={() => onOpenTerminal(agent)} size="default" variant="primary">
-                Open terminal
-              </Button>
-            </Sheet.Footer>
+            {terminalControl === undefined ? (
+              <Sheet.Footer className="connect-stage-actions">
+                <Button leadingIcon="pin" onClick={() => onPinChange(!pinned)} size="default" variant="secondary">
+                  {pinned ? "Unpin" : "Pin"}
+                </Button>
+                <Button onClick={() => onOpenTerminal(agent)} size="default" variant="primary">
+                  Open terminal
+                </Button>
+              </Sheet.Footer>
+            ) : null}
           </Sheet.Content>
         )}
       </Sheet.Root>
@@ -462,16 +572,20 @@ const PinChip = ({
         type="button"
         {...roving[1]}
       >
-        <Creature host={agent.host} id={String(agent.id)} size="row" stale={stale} state={agent.state} />
-        <span className="connect-pin-name">{agent.name}</span>
-        <span className="connect-pin-state">
-          <StateLabel
-            className={presentation.spins ? "agent-state-spinning" : undefined}
-            icon={presentation.icon}
-            label={word}
-            size="compact"
-            tone={presentation.tone}
-          />
+        <Creature
+          host={agent.host}
+          hueFamily={agent.hue}
+          id={String(agent.id)}
+          name={agent.name}
+          size="row"
+          stale={stale}
+          state={agent.state}
+        />
+        <span className="connect-pin-caption">
+          <span className="connect-pin-name">{agent.name}</span>
+          <span className="connect-pin-state" data-tone={presentation.tone}>
+            {word}
+          </span>
         </span>
       </button>
     </span>
@@ -624,8 +738,16 @@ export const PinnedAgents = ({
                 <li className="connect-pins-entry" data-away={agent === undefined ? "" : undefined} key={pin.key}>
                   {agent === undefined ? (
                     <span className="connect-pin-open">
-                      {/* Drawn as away: still, eyes closed, colour drained. */}
-                      <Creature host={pin.host} id={pin.id} size="row" stale state="done" />
+                      {/* Drawn as away: still, half-lidded, colour drained. */}
+                      <Creature
+                        host={pin.host}
+                        hueFamily={pin.hue}
+                        id={pin.id}
+                        name={pin.name}
+                        size="row"
+                        stale
+                        state="done"
+                      />
                       <span className="connect-pin-text">
                         <span className="connect-pin-name">{pin.name}</span>
                         <small className="connect-pin-since">{sinceLabel(pin.seenAt, now)}</small>
@@ -643,7 +765,15 @@ export const PinnedAgents = ({
                       tabIndex={-1}
                       type="button"
                     >
-                      <Creature host={agent.host} id={String(agent.id)} size="row" stale={stale} state={agent.state} />
+                      <Creature
+                        host={agent.host}
+                        hueFamily={agent.hue}
+                        id={String(agent.id)}
+                        name={agent.name}
+                        size="row"
+                        stale={stale}
+                        state={agent.state}
+                      />
                       <span className="connect-pin-name">{agent.name}</span>
                       <AgentStateLabel state={agent.state} />
                     </button>

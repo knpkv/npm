@@ -311,7 +311,9 @@ export const ConnectArchiveSurface = ({
                               <Creature
                                 closed
                                 host={agent.host}
+                                hueFamily={agent.hue}
                                 id={String(agent.agentId)}
+                                name={agent.name}
                                 size="row"
                                 state={agent.state}
                               />
@@ -371,7 +373,9 @@ export const ConnectArchiveSurface = ({
                   <Creature
                     closed
                     host={selected.host}
+                    hueFamily={selected.hue}
                     id={String(selected.agentId)}
+                    name={selected.name}
                     size="stage"
                     state={selected.state}
                   />

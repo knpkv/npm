@@ -1,10 +1,55 @@
 // @vitest-environment happy-dom
 import { expect, it } from "@effect/vitest"
+import type { CodeReviewResult } from "@knpkv/codecommit-web/host"
 import { Effect, Result } from "effect"
 import { HttpClient, HttpClientResponse } from "effect/http"
-import { loadCodeContent, loadCodeDetail, loadCodeDiff, loadCodeQueue } from "../src/code-client.js"
+import { loadCodeContent, loadCodeDetail, loadCodeDiff, loadCodeQueue, loadCodeReview } from "../src/code-client.js"
 
 const ref = "00000000-0000-4000-8000-000000000001"
+it.effect("refuses a valid review DTO for a different opaque PR without emitting its content", () =>
+  Effect.gen(function*() {
+    const other = "00000000-0000-4000-8000-000000000002"
+    for (const subjectId of [ref, other]) {
+      const value: CodeReviewResult = {
+        _tag: "Ready",
+        reading: {
+          diff: {
+            pullRequestId: "7",
+            revisionId: "revision",
+            baseCommit: "base",
+            headCommit: "head",
+            readAt: 1_000,
+            cacheUpdatedAt: 900,
+            files: []
+          },
+          workspace: {
+            identity: {
+              namespace: "codecommit",
+              subjectId,
+              revisionId: "revision",
+              baseRevision: "base",
+              headRevision: "head"
+            },
+            observedAt: 1_000,
+            run: { _tag: "NotRecorded" },
+            checks: { _tag: "Unknown" },
+            conversations: { _tag: "Ready", observedAt: 900, threads: [] }
+          }
+        }
+      }
+      const client = HttpClient.make((request) =>
+        Effect.succeed(HttpClientResponse.fromWeb(request, Response.json(value)))
+      )
+      const result = yield* Effect.result(loadCodeReview(ref)).pipe(
+        Effect.provideService(HttpClient.HttpClient, client)
+      )
+      if (subjectId === ref) expect(result).toEqual(Result.succeed(value))
+      else {
+        expect(Result.isFailure(result)).toBe(true)
+        if (Result.isFailure(result)) expect(result.failure.reason).toBe("invalid_response")
+      }
+    }
+  }))
 it.effect("reads only same-host GET routes with opaque selectors and preserves typed unavailable responses", () =>
   Effect.gen(function*() {
     const urls: Array<string> = []
@@ -26,12 +71,14 @@ it.effect("reads only same-host GET routes with opaque selectors and preserves t
       })
       yield* loadCodeDetail(ref)
       yield* loadCodeDiff(ref)
+      yield* loadCodeReview(ref)
       yield* loadCodeContent({ ref, revisionId: "revision", baseCommit: "base", headCommit: "head", fileIndex: 2 })
     }).pipe(Effect.provideService(HttpClient.HttpClient, client))
     expect(urls).toEqual([
       "/v1/modules/code/queue?filter=reviews&search=a+%26+b&offset=50",
       `/v1/modules/code/detail?ref=${ref}`,
       `/v1/modules/code/diff?ref=${ref}`,
+      `/v1/modules/code/review?ref=${ref}`,
       `/v1/modules/code/diff-content?ref=${ref}&revisionId=revision&baseCommit=base&headCommit=head&fileIndex=2`
     ])
   }))

@@ -12,6 +12,7 @@ import { AuditLogRepo } from "@knpkv/codecommit-core/PermissionService/AuditLog.
 import { makeSavedPermissionCheck } from "@knpkv/codecommit-core/PermissionService/index.js"
 import { CachedPRToPullRequest } from "@knpkv/codecommit-core/PRService/internal.js"
 import * as ReadClient from "@knpkv/codecommit-core/ReadClient.js"
+import type { ReviewRunReading } from "@knpkv/review"
 import { Clock, Config, Context, Duration, Effect, Exit, Layer, Result, Schema, ScopedCache, Semaphore } from "effect"
 import type { Scope } from "effect"
 import type * as Crypto from "effect/Crypto"
@@ -24,16 +25,24 @@ import {
   type CodeDiffContentQuery,
   CodeQueue,
   type CodeQueueQuery,
-  type CodeReference
+  type CodeReference,
+  CodeReviewReading
 } from "../host-contract.js"
 import { CodeHostReadError, type CodeReferenceStore } from "./host-model.js"
 import { codePullRequest } from "./host-presentation.js"
 import { makePermissionedReadClient } from "./internal/PermissionedReadClient.js"
 import { loadPullRequestDiff, loadPullRequestDiffContent } from "./review/PullRequestReview.js"
+import { reviewConversationsOf } from "./review/review-comments-projection.js"
+import { reviewRunIdentity, reviewRunSubject } from "./review/review-run-projection.js"
+import { makeReviewRunReader, type ReviewRunReader, ReviewRunStoreError } from "./review/ReviewRunReader.js"
 
 export interface CodeHostReads {
   readonly queue: (query: CodeQueueQuery) => Effect.Effect<CodeQueue, CodeHostReadError>
   readonly detail: (ref: CodeReference) => Effect.Effect<CodeDetail, CodeHostReadError>
+  readonly review: (
+    ref: CodeReference,
+    caller: { readonly login: string }
+  ) => Effect.Effect<CodeReviewReading, CodeHostReadError>
   readonly diff: (ref: CodeReference, caller: { readonly login: string }) => Effect.Effect<CodeDiff, CodeHostReadError>
   readonly diffContent: (
     query: CodeDiffContentQuery,
@@ -82,6 +91,7 @@ const cacheFailure = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
 /** Internal constructor for service fixtures; the public entry never accepts an unpermissioned client. */
 export const makeCodeHostReadsFromClient = Effect.fn("CodeHostReads.bind")(function*(options: {
   readonly cache: HostCacheReads
+  readonly reviews: ReviewRunReader
   readonly references: CodeReferenceStore
   readonly configPath: string
   readonly permissionPath: string
@@ -160,6 +170,64 @@ export const makeCodeHostReadsFromClient = Effect.fn("CodeHostReads.bind")(funct
         destinationBranch: row.destinationBranch.slice(0, 256)
       }).pipe(cacheFailure)
     }),
+    review: Effect.fn("CodeHostReads.review")(function*(ref: CodeReference, caller: { readonly login: string }) {
+      return yield* boundedRead(Effect.gen(function*() {
+        const row = yield* exact(ref)
+        const client = yield* clientFor(caller)
+        const pullRequest = yield* Schema.decodeUnknownEffect(CachedPRToPullRequest)(row)
+        const diff = yield* loadPullRequestDiff(client, pullRequest)
+        const observedAt = yield* Clock.currentTimeMillis
+        const identity = {
+          namespace: "codecommit",
+          subjectId: ref,
+          revisionId: diff.revisionId,
+          baseRevision: diff.baseCommit,
+          headRevision: diff.headCommit
+        }
+        const run = yield* reviewRunSubject(pullRequest).pipe(
+          Effect.mapError(() => new ReviewRunStoreError({ operation: "read", reason: "invalid" })),
+          Effect.flatMap((subject) => options.reviews.read(reviewRunIdentity(subject, diff))),
+          Effect.map((saved): ReviewRunReading =>
+            saved === null ? { _tag: "NotRecorded" } : {
+              _tag: "Ready",
+              run: { ...saved, identity: { ...saved.identity, subjectId: ref } }
+            }
+          ),
+          Effect.tapError((failure) => Effect.logWarning("Code review history could not be read", failure)),
+          Effect.catchTag("ReviewRunStoreError", (failure) =>
+            Effect.succeed(
+              {
+                _tag: "Unavailable",
+                reason: failure.reason
+              } satisfies ReviewRunReading
+            ))
+        )
+        const conversations = yield* cache.comments({
+          accountId: row.awsAccountId,
+          region: row.accountRegion,
+          repository: row.repositoryName,
+          id: row.id
+        }).pipe(
+          Effect.flatMap((cached) => reviewConversationsOf(cached, diff)),
+          Effect.catchTag("HostCommentsReadError", (failure) =>
+            Effect.succeed({
+              _tag: "Unavailable",
+              reason: failure.reason
+            })),
+          cacheFailure
+        )
+        return yield* Schema.decodeUnknownEffect(CodeReviewReading, { onExcessProperty: "error" })({
+          diff: { ...diff, readAt: observedAt, cacheUpdatedAt: row.lastModifiedDate.getTime() },
+          workspace: {
+            identity,
+            observedAt,
+            run,
+            conversations,
+            checks: { _tag: "Unknown" }
+          }
+        })
+      }))
+    }),
     diff: Effect.fn("CodeHostReads.diff")(function*(ref: CodeReference, caller: { readonly login: string }) {
       return yield* boundedRead(Effect.gen(function*() {
         const row = yield* exact(ref)
@@ -218,8 +286,10 @@ export const makeCodeHostReads = Effect.fn("CodeHostReads.make")(function*(
         const references = yield* referenceStore.pipe(
           Effect.tapError((cause) => Effect.logWarning("Code reference store is unavailable", cause))
         )
+        const reviews = yield* makeReviewRunReader(path.join(directory, "reviews"))
         return yield* makeCodeHostReadsFromClient({
           cache,
+          reviews,
           references,
           configPath: path.join(directory, "config.json"),
           permissionPath: path.join(directory, "permissions.json")
@@ -242,6 +312,7 @@ export const makeCodeHostReads = Effect.fn("CodeHostReads.make")(function*(
   return {
     queue: (query) => read((reads) => reads.queue(query)),
     detail: (ref) => read((reads) => reads.detail(ref)),
+    review: (ref, caller) => read((reads) => reads.review(ref, caller)),
     diff: (ref, caller) => read((reads) => reads.diff(ref, caller)),
     diffContent: (query, caller) => read((reads) => reads.diffContent(query, caller))
   } satisfies CodeHostReads

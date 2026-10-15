@@ -11,7 +11,7 @@ import {
   makeFleetService,
   type WorkerStarted
 } from "@knpkv/herdr-fleet"
-import { Effect, Result, Schema } from "effect"
+import { Effect, FileSystem, Path, Result, Schema } from "effect"
 import * as HttpClientRequest from "effect/http/HttpClientRequest"
 import * as HttpClientResponse from "effect/http/HttpClientResponse"
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
@@ -707,5 +707,46 @@ printf '%s\\n' '{"result":{"agents":[{"launch_pending":false,"agent_status":"wor
         }
       }
     })
+  })
+})
+
+describe("host task signal producer", () => {
+  it.layer(NodeServices.layer)((it) => {
+    it.effect("publishes decoded lifecycle kinds without inferring missing tool or Work/CI evidence", () =>
+      Effect.gen(function*() {
+        const fs = yield* FileSystem.FileSystem
+        const paths = yield* Path.Path
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "host-task-kind-" })
+        const herdrCommand = paths.join(root, "herdr-test")
+        const cases = [
+          { status: "idle", expected: "idle" },
+          { status: "blocked", expected: "blocked" },
+          { status: "done", expected: "done" },
+          { status: "working", expected: "unknown" },
+          { status: "unknown", expected: "unknown" },
+          { status: "future-status", expected: "unknown" }
+        ]
+        const agents = cases.map(({ status }, index) => ({
+          agent: "codex",
+          agent_status: status,
+          cwd: "/test-build-failed",
+          pane_id: `w1:p${String(index + 1)}`,
+          state_change_seq: 1,
+          // Unsupported payload is not evidence and must not escape the host adapter.
+          activity: { tool: "write", content: "private tool content", exit_code: 1 },
+          tokens: { summary: "CI failed", work: "review pending" }
+        }))
+        yield* fs.writeFileString(
+          herdrCommand,
+          `#!/bin/sh\nprintf '%s\\n' '${JSON.stringify({ result: { agents } })}'\n`
+        )
+        yield* fs.chmod(herdrCommand, 0o700)
+        const operations = yield* makeHostOperations({ ...config(root, ["true"]), herdrCommand })
+        const inventory = yield* operations.listAgents()
+        expect(inventory.available).toBe(true)
+        expect(inventory.agents.map(({ taskKind }) => taskKind)).toEqual(cases.map(({ expected }) => expected))
+        expect(JSON.stringify(inventory)).not.toContain("private tool content")
+        expect(inventory.agents).toHaveLength(6)
+      }).pipe(Effect.scoped))
   })
 })

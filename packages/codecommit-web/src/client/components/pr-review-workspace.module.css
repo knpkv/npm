@@ -109,6 +109,30 @@
   padding: var(--rly-space-16) var(--rly-space-24);
 }
 
+.reviewHistory[data-warning="true"] {
+  padding-block: var(--rly-space-16);
+  padding-inline: var(--rly-space-24);
+}
+
+.historyWarning {
+  background: var(--rly-color-surface-1);
+  border: 1px solid var(--rly-color-border-1);
+  border-radius: var(--rly-radius-group);
+  color: var(--rly-color-text-1);
+  display: grid;
+  gap: 0.2rem;
+  min-inline-size: 0;
+  padding-block: 0.7rem;
+  padding-inline: 0.8rem;
+}
+
+.historyWarning > p {
+  font-size: 0.875rem;
+  line-height: 1.5;
+  margin: 0;
+  overflow-wrap: break-word;
+}
+
 .workbench {
   block-size: clamp(40rem, calc(100svh - 8rem), 56rem);
   display: grid;

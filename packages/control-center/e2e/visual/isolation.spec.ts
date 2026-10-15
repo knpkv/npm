@@ -89,4 +89,8 @@ test("P0-9 CodeCommit and Jira connection credentials and data stay isolated", a
       await expect(page.getByText("Fixture catalogue", { exact: true })).toBeVisible()
     }
   })
+  const reads = visualRuntime.apiRequests().filter(({ method }) => method === "GET" || method === "HEAD")
+  // The fixed clock prevents limiter refill; each scenario must fit one 120-read window with headroom.
+  expect(reads.length, "P0-9 frozen-clock read budget: at most 80 requests, including setup")
+    .toBeLessThanOrEqual(80)
 })

@@ -2,9 +2,13 @@ import { expect, type Page, test } from "@playwright/test"
 import { agentStatePresentation } from "../../src/agent-state.js"
 
 /** The actual SVG paths for the contact-sheet seeds, under the app's creature stylesheet. */
-const openBrowGrid = async (page: Page): Promise<void> => {
+const openBrowGrid = async (page: Page, state = "working", size = "stage"): Promise<void> => {
   await page.emulateMedia({ reducedMotion: "no-preference" })
-  await page.goto("/?brows")
+  await page.goto(
+    `/?brows&size=${size}&state=${state === "stale" ? "working" : state === "finished" ? "done" : state}&${
+      state === "stale" ? "stale" : ""
+    }`
+  )
   await expect(page.locator("[data-brow-grid] svg.connect-creature")).toHaveCount(64)
 }
 
@@ -75,25 +79,18 @@ const measure = (page: Page) =>
     })
 
 test.describe("Connect creatures", () => {
-  test("live while working when the reader allows motion", async ({ page }) => {
+  // connect--2a and CONNECT-MAP rev6 keep the working arc while ordinary faces stay still.
+  // The existing connect-creature-turn keyframe retains its 1800ms stylesheet clock.
+  test("rev6 working motion stays on the orbit while the ordinary face and body stay still", async ({ page }) => {
     await open(page, "no-preference")
-    // Breathing, blinking, reading and the light round the body: the working agent's life. Each eye blinks with
-    // three lid parts (the aperture's two edges and the lash) and reads with its own gaze.
-    expect(await running(page)).toEqual([
-      "connect-creature-blink",
-      "connect-creature-blink",
-      "connect-creature-blink",
-      "connect-creature-blink",
-      "connect-creature-blink-low",
-      "connect-creature-blink-low",
-      "connect-creature-bob",
-      "connect-creature-breathe",
-      "connect-creature-lash",
-      "connect-creature-lash",
-      "connect-creature-read",
-      "connect-creature-read",
-      "connect-creature-turn"
-    ])
+    expect(await running(page)).toEqual(["connect-creature-turn"])
+    const svg = page.locator(".connect-agent svg.connect-creature").first()
+    await expect(svg.locator(".connect-creature-orbit")).toHaveCSS("animation-duration", "1.8s")
+    const still = await svg.locator(
+      ".connect-creature-breath, .connect-creature-bob, .connect-creature-lid, .connect-creature-lash, .connect-creature-brow, .connect-creature-gaze"
+    ).evaluateAll((nodes) => nodes.map((node) => getComputedStyle(node).animationName))
+    expect(still.length).toBeGreaterThanOrEqual(11)
+    expect(still.every((name) => name === "none")).toBe(true)
   })
 
   // A rotating ellipse crosses a tall body's sides; the working light must travel along a fixed ring.
@@ -114,8 +111,8 @@ test.describe("Connect creatures", () => {
     expect(Math.abs(quarter.offset - start.offset)).toBeCloseTo(25, 2)
   })
 
-  // Only the body squashes: through a breath and an arrival's hop the pupils stay round and keep their size.
-  test("never squashes the eyes with the body", async ({ page }) => {
+  // Ordinary arrivals retain body scale, round pupils and the face's proportions.
+  test("keeps an ordinary arrival and its eyes at their true scale", async ({ page }) => {
     await open(page, "no-preference")
     await freeze(page, [], 0)
     const rest = await measure(page)
@@ -135,7 +132,7 @@ test.describe("Connect creatures", () => {
     for (const [names, share] of moments) {
       await freeze(page, names, share)
       const moment = await measure(page)
-      expect(moment.body, names.join()).not.toBe(rest.body)
+      expect(moment.body, names.join()).toBe(rest.body)
       expect(moment.width).toBeCloseTo(moment.height, 2)
       expect(moment.width).toBeCloseTo(rest.width, 2)
       expect(moment.browWidth).toBeCloseTo(rest.browWidth, 2)
@@ -143,8 +140,8 @@ test.describe("Connect creatures", () => {
     }
   })
 
-  // A shut eye must be the body's own skin: lids painted on top show as discs in another shade.
-  test("closes its eyes onto unbroken skin", async ({ page }) => {
+  // CONNECT-MAP rev6 archived eyes are shut and still. They expose the same skin, without the removed generic blink.
+  test("rev6 archived lids close onto unbroken skin without a blink", async ({ page }) => {
     await open(page, "no-preference")
     const svg = page.locator(".connect-agent svg.connect-creature").first()
     await svg.evaluate((node) =>
@@ -155,9 +152,8 @@ test.describe("Connect creatures", () => {
     )
     // A point on the eye's white beside the iris, clear of where the lash falls, read before the eyes go.
     const point = await svg.evaluate((node): readonly [number, number] => {
-      const eye = node.querySelector(".connect-creature-white")
-      const read = (name: string): number => Number(eye?.getAttribute(name) ?? 0)
-      return [read("cx") - read("rx") * 0.8, read("cy") - read("ry") * 0.1]
+      const eye = node.querySelector<SVGPathElement>(".connect-creature-white")?.getBBox()
+      return [eye === undefined ? 0 : eye.x + eye.width * 0.1, eye === undefined ? 0 : eye.y + eye.height * 0.45]
     })
     expect(point[0]).toBeGreaterThan(0)
     /** The RGB drawn at that point. */
@@ -186,10 +182,11 @@ test.describe("Connect creatures", () => {
     }
     const distance = (one: ReadonlyArray<number>, other: ReadonlyArray<number>) =>
       Math.max(...one.map((value, index) => Math.abs(value - (other[index] ?? 0))))
-    await freeze(page, ["connect-creature-blink", "connect-creature-lash"], 0.958)
-    const shut = await sample()
     await freeze(page, [], 0)
     const awake = await sample()
+    await svg.evaluate((node) => node.setAttribute("data-closed", ""))
+    expect(await svg.evaluate((node) => node.getAnimations({ subtree: true }).length)).toBe(0)
+    const shut = await sample()
     // The skin under the eye: the same creature with its eyes taken away.
     await svg.evaluate((node) => {
       for (const eye of node.querySelectorAll(".connect-creature-eye")) eye.remove()
@@ -204,7 +201,7 @@ test.describe("Connect creatures", () => {
     expect(await running(page)).toEqual([])
   })
 
-  // The hub's in-app setting zeroes rly's motion tokens; every pace is a multiple of one, so it stops too.
+  // The in-app preference selects the same static frames as the system preference.
   test("still under the in-app reduced-motion setting", async ({ page }) => {
     await open(page, "no-preference")
     await page.evaluate(() => document.body.setAttribute("data-rly-reduced-motion", "reduce"))
@@ -228,7 +225,7 @@ test.describe("Connect creatures", () => {
     for (const state of ["ready", "working", "needs-you", "finished", "stale"]) {
       test(`${size} brows clear sockets, silhouette and centre line across 64 seeds while ${state}`, async ({ page }) => {
         test.setTimeout(30_000)
-        await openBrowGrid(page)
+        await openBrowGrid(page, state, size)
         const failures = await page.locator("[data-brow-grid]").evaluate((grid, [drawnSize, shown]) => {
           const failures: Array<string> = []
           for (const [index, svg] of [...grid.querySelectorAll<SVGSVGElement>("svg")].entries()) {
@@ -249,7 +246,7 @@ test.describe("Connect creatures", () => {
             const body = svg.querySelector<SVGPathElement>(".connect-creature-body")
             const bob = svg.querySelector<SVGGElement>(".connect-creature-bob")
             const brows = [...svg.querySelectorAll<SVGPathElement>(".connect-creature-brow")]
-            const sockets = [...svg.querySelectorAll<SVGEllipseElement>(".connect-creature-socket")]
+            const sockets = [...svg.querySelectorAll<SVGPathElement>(".connect-creature-socket")]
             const bodyInverse = body?.getCTM()?.inverse()
             const bobInverse = bob?.getCTM()?.inverse()
             if (
@@ -286,10 +283,9 @@ test.describe("Connect creatures", () => {
                   if (side === 0 ? face.x >= 50 : face.x <= 50) {
                     failures.push(`Seed ${index}, side ${side}: crossed centre`)
                   }
-                  const x = (eye.x - socket.cx.baseVal.value) / socket.rx.baseVal.value
-                  if (Math.abs(x) <= 1) {
-                    const top = socket.cy.baseVal.value - socket.ry.baseVal.value * Math.sqrt(1 - x * x)
-                    clearance = Math.min(clearance, top - eye.y)
+                  const box = socket.getBBox()
+                  if (eye.x >= box.x && eye.x <= box.x + box.width) {
+                    clearance = Math.min(clearance, box.y - eye.y)
                   }
                 }
               }
@@ -305,43 +301,59 @@ test.describe("Connect creatures", () => {
     }
   }
 
-  test("ready brows share the wander clock and stay static under reduced motion", async ({ page }) => {
-    await open(page, "no-preference")
-    const svg = page.locator(".connect-agent svg.connect-creature").first()
-    await svg.evaluate((node) => node.setAttribute("data-bucket", "ready"))
-    const clocks = await svg.evaluate((node) => {
-      const style = (selector: string) => getComputedStyle(node.querySelector(selector) ?? node)
-      const brow = style(".connect-creature-brow")
-      const gaze = style(".connect-creature-gaze")
-      return {
-        brow: [brow.animationDuration, brow.animationDelay],
-        gaze: [gaze.animationDuration, gaze.animationDelay]
-      }
-    })
-    expect(clocks.brow).toEqual(clocks.gaze)
-    expect(clocks.brow[0]).not.toBe("0s")
+  // creature--focused--stage: loop 2400ms, frames 1–4 at 0/200/900/1500ms; ordinary rev6 agents never run this scan.
+  test("rev6 talking focused gaze follows the sheet's four positions on its 2400ms clock", async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: "no-preference" })
+    await page.goto("/?drawing=single&size=stage&mood=focused&talking")
+    const svg = page.locator("[data-drawing-case] .connect-creature")
+    await expect(svg).toHaveCount(1)
+    const gaze = svg.locator(".connect-creature-gaze").first()
+    await expect(gaze).toHaveCSS("animation-name", "connect-creature-focused-scan")
+    await expect(gaze).toHaveCSS("animation-duration", "2.4s")
+    expect(await gaze.evaluate((node) => Number.parseFloat(getComputedStyle(node).animationDelay))).toBeLessThan(0)
+    for (
+      const [time, x, y] of [[0, 0, 0.3], [200, -0.2, 0.8], [900, -0.85, 0.6], [
+        1500,
+        0.85,
+        0.6
+      ]] satisfies ReadonlyArray<readonly [number, number, number]>
+    ) {
+      const look = await svg.evaluate((node, at) => {
+        for (const animation of node.getAnimations({ subtree: true })) {
+          animation.pause()
+          const timing = animation.effect?.getTiming()
+          animation.currentTime = Number(timing?.delay ?? 0) + 2400 + at
+        }
+        const unit = Number.parseFloat(getComputedStyle(node).getPropertyValue("--connect-creature-unit"))
+        const eye = node.querySelector(".connect-creature-gaze")
+        const xy = eye === null ? [] : getComputedStyle(eye).translate.split(" ").map(Number.parseFloat)
+        return [(xy[0] ?? 0) / (0.85 * unit), ((xy[1] ?? 0) - 0.4 * unit) / (0.85 * unit)]
+      }, time)
+      expect(look[0], `frame at ${String(time)}ms`).toBeCloseTo(x, 2)
+      expect(look[1], `frame at ${String(time)}ms`).toBeCloseTo(y, 2)
+    }
     await page.emulateMedia({ reducedMotion: "reduce" })
-    expect(await running(page)).toEqual([])
+    expect(await svg.evaluate((node) => node.getAnimations({ subtree: true }).length)).toBe(0)
+    await page.emulateMedia({ reducedMotion: "no-preference" })
+    await page.evaluate(() => document.body.setAttribute("data-rly-reduced-motion", "reduce"))
+    expect(await svg.evaluate((node) => node.getAnimations({ subtree: true }).length)).toBe(0)
   })
 
-  test("stale brows flatten without inheriting working tilt, and forced colours make them opaque", async ({ page }) => {
-    await open(page, "reduce")
-    const svg = page.locator(".connect-agent svg.connect-creature").first()
-    await svg.evaluate((node) => node.setAttribute("data-stale", ""))
+  test("stale brows lower without distortion, and forced colours retain their stroke", async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" })
+    await page.goto("/?drawing=single&stale")
+    const svg = page.locator("[data-drawing-case] .connect-creature")
     const brow = svg.locator(".connect-creature-brow").first()
-    await expect(brow).toHaveCSS("opacity", "0.45")
-    await expect(brow).toHaveCSS("rotate", "0deg")
-    await expect(brow).toHaveCSS("scale", "1 0.45")
-    await expect(brow).toHaveCSS("translate", "0px 0.4px")
+    await expect(brow).toHaveCSS("scale", "none")
+    expect(await brow.evaluate((node) => getComputedStyle(node).translate)).not.toBe("none")
     await page.emulateMedia({ forcedColors: "active" })
     await expect(brow).toHaveCSS("opacity", "1")
-    expect(await brow.evaluate((node) => getComputedStyle(node).fill)).toBe(
+    expect(await brow.evaluate((node) => getComputedStyle(node).stroke)).toBe(
       await svg.locator(".connect-creature-pupil").first().evaluate((node) => getComputedStyle(node).fill)
     )
     await page.emulateMedia({ forcedColors: "none" })
     await page.evaluate(() => document.body.setAttribute("data-rly-forced-colors", "active"))
-    await expect(brow).toHaveCSS("opacity", "1")
-    expect(await brow.evaluate((node) => getComputedStyle(node).fill)).toBe(
+    expect(await brow.evaluate((node) => getComputedStyle(node).stroke)).toBe(
       await svg.locator(".connect-creature-pupil").first().evaluate((node) => getComputedStyle(node).fill)
     )
   })
@@ -354,7 +366,7 @@ test.describe("Connect creatures", () => {
           test(`brow fidelity ${size} ${state} ${theme} ${width}`, async ({ page }, testInfo) => {
             await page.setViewportSize({ height: 844, width })
             await page.emulateMedia({ colorScheme: theme })
-            await openBrowGrid(page)
+            await openBrowGrid(page, state, size)
             const presentation = agentStatePresentation(
               state === "stale" ? "working" : state === "finished" ? "done" : state === "needs-you" ? "waiting" : state
             )

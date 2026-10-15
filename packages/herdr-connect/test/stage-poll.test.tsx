@@ -370,7 +370,7 @@ describe("Connect stage across polls", () => {
         v: 1
       })
     )
-    agentsBody = listed([reviewer])
+    agentsBody = listed([{ ...reviewer, hue: "sky" }])
     const host = document.createElement("div")
     document.body.append(host)
     const root = createRoot(host)
@@ -385,7 +385,7 @@ describe("Connect stage across polls", () => {
     await settle()
     const stored = () =>
       Schema.decodeUnknownSync(Schema.fromJsonString(StoredPins))(window.localStorage.getItem("fleet-connect-pins"))
-    expect(stored().pins[0]?.seenAt).toBe(120_000)
+    expect(stored().pins[0]).toMatchObject({ seenAt: 120_000, hue: "sky" })
     agentsBody = JSON.stringify({
       agents: [],
       failures: [{ host: reviewer.host, reason: "timeout" }],
@@ -400,5 +400,10 @@ describe("Connect stage across polls", () => {
     await act(async () => more?.click())
     await settle()
     expect(host.querySelector(".connect-pins-entry[data-away]")?.textContent).toContain("not seen since")
+    expect(
+      host
+        .querySelector<SVGElement>(".connect-pins-entry[data-away] .connect-creature")
+        ?.style.getPropertyValue("--connect-creature-ink")
+    ).toBe("#022538")
   })
 })

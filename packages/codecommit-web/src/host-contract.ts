@@ -4,6 +4,7 @@
  * References are random persisted identifiers, not encoded provider locators.
  * @module
  */
+import { ReviewThread, ReviewWorkspace } from "@knpkv/review"
 import { Effect, Result, Schema } from "effect"
 
 export const CodeReference = Schema.String.check(
@@ -133,3 +134,24 @@ export const CodeDiffContentQuery = Schema.fromURLSearchParams(Schema.Struct({
   fileIndex: Schema.NumberFromString.check(Schema.isInt(), Schema.isBetween({ minimum: 0, maximum: 999 }))
 }))
 export type CodeDiffContentQuery = typeof CodeDiffContentQuery.Type
+
+/** Independent cached review/comments and current immutable diff; subject identities are opaque refs. */
+export const CodeReviewReading = Schema.Struct({ diff: CodeDiff, workspace: ReviewWorkspace }).check(Schema.makeFilter(
+  ({ diff, workspace }) =>
+    Schema.is(CodeReference)(workspace.identity.subjectId) &&
+    workspace.identity.namespace === "codecommit" && workspace.identity.revisionId === diff.revisionId &&
+    workspace.identity.baseRevision === diff.baseCommit && workspace.identity.headRevision === diff.headCommit,
+  { expected: "the current workspace identity matches this immutable diff and uses an opaque Code reference" }
+))
+export type CodeReviewReading = typeof CodeReviewReading.Type
+export const CodeReviewResult = Schema.Union([
+  CodeUnavailable,
+  Schema.TaggedStruct("Ready", { reading: CodeReviewReading })
+])
+export type CodeReviewResult = typeof CodeReviewResult.Type
+
+/** Browser-owned read selectors. Thread source/id is normalized, authenticated client-visible data. */
+export const CodeReviewPresentation = Schema.Literals(["review", "conversation", "guide"])
+export type CodeReviewPresentation = typeof CodeReviewPresentation.Type
+export const CodeReviewThreadTarget = Schema.Struct({ source: ReviewThread.fields.source, id: ReviewThread.fields.id })
+export type CodeReviewThreadTarget = typeof CodeReviewThreadTarget.Type

@@ -11,6 +11,8 @@ import {
   type StackDetailState,
   type StackListState
 } from "../views.js"
+import type { PlanState } from "../plan.js"
+import { readStackPlan } from "./plan.js"
 import { bootstrap } from "./bootstrap.js"
 import { readStackDetail } from "./stack-detail.js"
 import { readStackList } from "./stack-list.js"
@@ -32,6 +34,8 @@ const App = (): ReactElement => {
   useDocumentTheme("system")
   const [route, setRoute] = useState<ConsoleRoute>(initialRoute)
   const [page, setPage] = useState<PageState>(loading(initialRoute))
+  const [plan, setPlan] = useState<{ readonly id: string; readonly state: PlanState } | null>(null)
+  const [planReload, setPlanReload] = useState(0)
   const [session, setSession] = useState("Signing in…")
   const routeRef = useRef<ConsoleRoute>(initialRoute)
   const active = useRef<AbortController | null>(null)
@@ -118,6 +122,33 @@ const App = (): ReactElement => {
       window.removeEventListener("popstate", navigate)
     }
   }, [readAgain])
+  const planId =
+    route._tag === "Stack" && route.tab === "plan" && route.resource === null && page.state._tag === "Ready"
+      ? route.id
+      : null
+  useEffect(() => {
+    if (planId === null) {
+      setPlan(null)
+      return
+    }
+    const controller = new AbortController()
+    setPlan({ id: planId, state: { _tag: "Loading" } })
+    void runtime.runPromise(readStackPlan(planId), { signal: controller.signal }).then(
+      (result) => {
+        if (controller.signal.aborted) return
+        if (result._tag === "Plan") setPlan({ id: planId, state: result.state })
+        else {
+          setPage({ _tag: "Detail", state: result })
+          if (result._tag === "Unauthorized") setSession("Sign-in required")
+          if (result._tag === "Failed") setSession("Owner session not verified")
+        }
+      },
+      () => {
+        if (!controller.signal.aborted) setPlan({ id: planId, state: { _tag: "Unreachable" } })
+      }
+    )
+    return () => controller.abort()
+  }, [planId, planReload])
   const stack = page._tag === "Detail" && page.state._tag === "Ready" ? page.state.stack : null
   const resource =
     route._tag === "Stack" && route.resource !== null
@@ -199,6 +230,8 @@ const App = (): ReactElement => {
             state={page.state}
             copy={copy}
             onReadAgain={readAgain}
+            planState={plan?.id === planId ? plan.state : { _tag: "Loading" }}
+            onReadPlanAgain={() => setPlanReload((count) => count + 1)}
             tab={route._tag === "Stack" ? route.tab : "resources"}
             onTabChange={(tab) => {
               if (route._tag !== "Stack") return

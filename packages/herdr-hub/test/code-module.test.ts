@@ -18,6 +18,16 @@ const request = (listener: "serve" | "approval" | "tailnet" | "lan" | "work", se
     readJson: () => Effect.die("Code has no write routes")
   })
 
+const reviewRequest = (listener: "serve" | "approval" | "tailnet" | "lan" | "work", method = "GET", extra = "") =>
+  dispatchModuleRoute({
+    method,
+    listener,
+    url: new URL(`https://hub.example/v1/modules/code/review?ref=00000000-0000-4000-8000-000000000001${extra}`),
+    authorize: Effect.succeed({ login: "example-viewer" }),
+    sameOrigin: Effect.void,
+    readJson: () => Effect.die("Code has no write routes")
+  })
+
 const withModule = <A, E, R>(codeHost: FleetHostName | null, run: Effect.Effect<A, E, R>) =>
   Effect.gen(function*() {
     const context = yield* Layer.build(
@@ -32,6 +42,31 @@ const withModule = <A, E, R>(codeHost: FleetHostName | null, run: Effect.Effect<
   })
 
 describe("host-local Code module", () => {
+  it.effect("review is an authenticated same-host GET with no peer or command route", () =>
+    withModule(
+      other,
+      Effect.gen(function*() {
+        expect((yield* reviewRequest("serve"))?.body).toEqual({
+          _tag: "Unavailable",
+          reason: "other_host",
+          host: other
+        })
+        for (
+          const listener of ["approval", "tailnet", "lan", "work"] satisfies ReadonlyArray<
+            "approval" | "tailnet" | "lan" | "work"
+          >
+        ) {
+          expect(yield* reviewRequest(listener)).toBeNull()
+        }
+        for (const method of ["POST", "PUT", "PATCH", "DELETE"]) {
+          expect(yield* reviewRequest("serve", method)).toBeNull()
+        }
+        const invalid = yield* Effect.result(reviewRequest("serve", "GET", "&profile=spoofed"))
+        expect(invalid._tag).toBe("Failure")
+        if (invalid._tag === "Failure") expect(invalid.failure).toMatchObject({ status: 400, code: "invalid_query" })
+      })
+    ))
+
   it.layer(NodeServices.layer)((it) =>
     it.effect("includes only the current private owner origin even when the credential host cache is unavailable", () =>
       Effect.gen(function*() {

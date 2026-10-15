@@ -1,0 +1,12 @@
+id: no-production-review-write-spike-import
+valid:
+  - 'import { RelayFindingPublisher } from "./review/RelayFindingPublisher.js"'
+  - 'export { CodeHostView } from "./client/components/host-code-view.js"'
+  - 'const read = await import("./review/ReviewRunReader.js")'
+invalid:
+  - 'import { makeReviewWriteSpike } from "./review/ReviewWriteSpike.js"'
+  - 'export * from "./server/review/ReviewWriteSpike.js"'
+  - 'const writes = await import("../review/ReviewWriteSpike.js")'
+  - 'const writes = require("../review/ReviewWriteSpike")'
+  - 'import { makeReviewWriteSpike } from "./review/ReviewWriteSpike.ts"'
+  - 'const writes = await import("../review/ReviewWriteSpike.ts")'

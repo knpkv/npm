@@ -1,5 +1,36 @@
 # @knpkv/control-center
 
+## 0.18.2
+
+### Patch Changes
+
+- Updated dependencies [[`40877b7`](https://github.com/knpkv/npm/commit/40877b7ab5a8395e4c0a69099699a58154728f54), [`381ea6b`](https://github.com/knpkv/npm/commit/381ea6bba0c487987c3a2599c9e692ae3cd89009)]:
+  - @knpkv/clockify-api-client@4.0.0
+  - @knpkv/jira-api-client@3.0.0
+
+## 0.18.1
+
+### Patch Changes
+
+- [#879](https://github.com/knpkv/npm/pull/879) [`dc8e9fa`](https://github.com/knpkv/npm/commit/dc8e9faabf684a0bcc946fed6ed1295381530e7a) Thanks [@konopkov](https://github.com/konopkov)! - Workspaces with more than 50 releases keep their verified delivery links and readiness assessments when unchanged provider data synchronizes.
+
+## 0.18.0
+
+### Minor Changes
+
+- [#874](https://github.com/knpkv/npm/pull/874) [`efb12b9`](https://github.com/knpkv/npm/commit/efb12b9729b1b9637b7df6b36fba008cf530e2f0) Thanks [@konopkov](https://github.com/konopkov)! - Overview's live updates no longer disconnect after a keepalive, so changes appear immediately instead of after a growing reconnect delay. Connection summaries now expose an optional runtime revision so live refreshes reload only the connection details that changed.
+
+  An update already being read finishes before a normally closed live stream reconnects. Services retries unavailable connection details on the next refresh and shows completed syncs in other open clients.
+
+## 0.17.1
+
+### Patch Changes
+
+- Updated dependencies [[`1ffd400`](https://github.com/knpkv/npm/commit/1ffd4002d82cb981cb203b77c67844002179bcf9)]:
+  - @knpkv/rly@0.23.0
+  - @knpkv/relay-product@0.6.2
+  - @knpkv/review@0.4.13
+
 ## 0.17.0
 
 ### Minor Changes

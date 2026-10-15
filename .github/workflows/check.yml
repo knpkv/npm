@@ -262,7 +262,7 @@ jobs:
       CONTROL_CENTER_BENCHMARK_STORAGE_CLASS: local-ssd
     permissions:
       contents: read
-    timeout-minutes: 15
+    timeout-minutes: ${{ matrix.package == 'herdr-connect' && 25 || 15 }}
     strategy:
       fail-fast: false
       matrix:
@@ -271,6 +271,7 @@ jobs:
           - alchemy-console
           - codecommit-web
           - control-center
+          - design-conformance
           - herdr-connect
           - herdr-hub
           - herdr-monitor

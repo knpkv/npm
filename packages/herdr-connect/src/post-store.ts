@@ -3,6 +3,7 @@ import { Effect, Schema, SchemaIssue, Semaphore } from "effect"
 import type { DatabaseSync, SQLOutputValue } from "node:sqlite"
 import { initializePosts } from "./internal/post-database.js"
 import { makeSelfStateMethods } from "./internal/self-state-store.js"
+import { connectBusyTimeoutMillis, connectSqliteWrite } from "./internal/sqlite-write.js"
 import {
   Conflict,
   ConnectPost,
@@ -40,14 +41,33 @@ const decodeRow = (input: Readonly<Record<string, SQLOutputValue>>): ConnectPost
   return Schema.decodeUnknownSync(ConnectPost)(row.goal_step === null ? post : { ...post, goalStep: row.goal_step })
 }
 const unavailable = (operation: string) => () => new Unavailable({ operation })
-const prune = (database: DatabaseSync, now: number): void => {
-  database.prepare("DELETE FROM connect_posts WHERE created_at < ?").run(now - connectPostRetentionMillis)
-  database.exec(`DELETE FROM connect_posts WHERE sequence IN (
-    SELECT sequence FROM (
-      SELECT sequence, ROW_NUMBER() OVER (PARTITION BY host, agent_id ORDER BY sequence DESC) AS rank
-      FROM connect_posts
-    ) WHERE rank > ${connectPostsPerAgent}
-  )`)
+const expiredPostBatchSize = 256
+
+/** Each post write evicts one global batch, including its expired retry identity before reuse. */
+const evictExpiredPosts = (
+  database: DatabaseSync,
+  host: string,
+  agentId: string,
+  eventId: string,
+  now: number
+): void => {
+  const cutoff = now - connectPostRetentionMillis
+  database.prepare(`WITH retry AS (
+    SELECT sequence FROM connect_posts
+    WHERE host = ? AND agent_id = ? AND event_id = ? AND created_at < ?
+  ), expired AS (
+    SELECT sequence FROM connect_posts
+    WHERE created_at < ? AND sequence NOT IN (SELECT sequence FROM retry)
+    ORDER BY created_at, sequence LIMIT ? - (SELECT COUNT(*) FROM retry)
+  ) DELETE FROM connect_posts WHERE sequence IN (
+    SELECT sequence FROM retry UNION ALL SELECT sequence FROM expired
+  )`).run(host.toLowerCase(), agentId, eventId, cutoff, cutoff, expiredPostBatchSize)
+}
+
+const trimAgentPosts = (database: DatabaseSync, host: string, agentId: string): void => {
+  database.prepare(`DELETE FROM connect_posts WHERE host = ? AND agent_id = ? AND sequence NOT IN (
+    SELECT sequence FROM connect_posts WHERE host = ? AND agent_id = ? ORDER BY sequence DESC LIMIT ?
+  )`).run(host.toLowerCase(), agentId, host.toLowerCase(), agentId, connectPostsPerAgent)
 }
 
 /** Bounded reports and latest creature self-state. Post retries use authenticated host, stable agent ID and event ID. */
@@ -68,7 +88,10 @@ export class AgentPostStore {
     this.selfLatestMany = self.latestMany
   }
   static readonly open = Effect.fn("AgentPostStore.open")(function*(path: string) {
-    const opened = yield* openPrivateSqlite(path, { initialize: initializePosts }).pipe(
+    const opened = yield* openPrivateSqlite(path, {
+      busyTimeoutMillis: connectBusyTimeoutMillis,
+      initialize: initializePosts
+    }).pipe(
       Effect.mapError(unavailable("posts.open"))
     )
     return new AgentPostStore(path, yield* Semaphore.make(1), opened)
@@ -93,42 +116,45 @@ export class AgentPostStore {
     yield* Schema.decodeUnknownEffect(ConnectPost)({ ...body, host, agentId, createdAt: now, sequence: 1 }).pipe(
       Effect.mapError(() => new InvalidReport({ detail: "invalid post identity or timestamp" }))
     )
-    return yield* this.#transactions.withPermits(1)(
-      Effect.try({
-        try: () => {
-          this.#database.exec("BEGIN IMMEDIATE")
-          try {
-            prune(this.#database, now)
-            const previous = this.#database.prepare(
-              "SELECT * FROM connect_posts WHERE host = ? AND agent_id = ? AND event_id = ?"
-            ).get(host.toLowerCase(), agentId, body.eventId)
-            if (previous !== undefined) {
-              const post = decodeRow(previous)
-              if (post.kind !== body.kind || post.text !== body.text || post.goalStep !== body.goalStep) {
-                throw new Conflict({ eventId: body.eventId })
-              }
-              this.#database.exec("COMMIT")
-              return post
+    return yield* connectSqliteWrite(
+      "posts.post",
+      () => {
+        this.#database.exec("BEGIN IMMEDIATE")
+        try {
+          evictExpiredPosts(this.#database, host, agentId, body.eventId, now)
+          const previous = this.#database.prepare(
+            "SELECT * FROM connect_posts WHERE host = ? AND agent_id = ? AND event_id = ?"
+          ).get(host.toLowerCase(), agentId, body.eventId)
+          if (previous !== undefined) {
+            const post = decodeRow(previous)
+            if (post.kind !== body.kind || post.text !== body.text || post.goalStep !== body.goalStep) {
+              throw new Conflict({ eventId: body.eventId })
             }
-            const row = this.#database.prepare(`
+            this.#database.exec("COMMIT")
+            return post
+          }
+          const row = this.#database.prepare(`
             INSERT INTO connect_posts (host, agent_id, event_id, kind, text, goal_step, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING *
           `).get(host.toLowerCase(), agentId, body.eventId, body.kind, body.text, body.goalStep ?? null, now)
-            if (row === undefined) throw new Unavailable({ operation: "posts.insert" })
-            const post = decodeRow(row)
-            prune(this.#database, now)
-            this.#database.exec("COMMIT")
-            return post
-          } catch (cause) {
-            this.#database.exec("ROLLBACK")
-            throw cause
-          }
-        },
-        catch: (cause) => Schema.is(Conflict)(cause) ? cause : new Unavailable({ operation: "posts.post" })
-      }).pipe(Effect.tap(() => this.#secureFiles.pipe(Effect.mapError(unavailable("posts.permissions")))))
+          if (row === undefined) throw new Unavailable({ operation: "posts.insert" })
+          const post = decodeRow(row)
+          trimAgentPosts(this.#database, host, agentId)
+          this.#database.exec("COMMIT")
+          return post
+        } catch (cause) {
+          this.#database.exec("ROLLBACK")
+          throw cause
+        }
+      },
+      (cause) => Schema.is(Conflict)(cause) ? cause : new Unavailable({ operation: "posts.post" }),
+      true,
+      this.#transactions,
+      () => this.#secureFiles.pipe(Effect.mapError(unavailable("posts.permissions")))
     )
   })
 
+  /** WAL SELECTs must not queue behind writer backoff; secure lazy sidecars before returning. */
   readonly page = Effect.fn("AgentPostStore.page")(function*(
     this: AgentPostStore,
     host: string,
@@ -139,30 +165,28 @@ export class AgentPostStore {
     const cursor = yield* Schema.decodeUnknownEffect(Schema.NullOr(ConnectPostCursor))(input).pipe(
       Effect.mapError(() => new InvalidReport({ detail: "invalid post cursor" }))
     )
-    return yield* this.#transactions.withPermits(1)(
-      Effect.try({
-        try: () => {
-          prune(this.#database, now)
-          const rows = this.#database.prepare(`SELECT * FROM connect_posts
-          WHERE host = ? AND agent_id = ? AND sequence < ? ORDER BY sequence DESC LIMIT ?`)
-            .all(
-              host.toLowerCase(),
-              agentId,
-              cursor?.sequence ?? Number.MAX_SAFE_INTEGER,
-              connectPostPageMaxRecords + 1
-            )
-          const posts = rows.slice(0, connectPostPageMaxRecords).map(decodeRow)
-          const last = posts.at(-1)
-          return Schema.decodeUnknownSync(ConnectPostPage)({
-            posts,
-            nextCursor: rows.length > connectPostPageMaxRecords && last !== undefined
-              ? { sequence: last.sequence }
-              : null
-          })
-        },
-        catch: unavailable("posts.page")
-      }).pipe(Effect.tap(() => this.#secureFiles.pipe(Effect.mapError(unavailable("posts.permissions")))))
-    )
+    return yield* Effect.try({
+      try: () => {
+        const rows = this.#database.prepare(`SELECT * FROM connect_posts
+          WHERE host = ? AND agent_id = ? AND sequence < ? AND created_at >= ? ORDER BY sequence DESC LIMIT ?`)
+          .all(
+            host.toLowerCase(),
+            agentId,
+            cursor?.sequence ?? Number.MAX_SAFE_INTEGER,
+            now - connectPostRetentionMillis,
+            connectPostPageMaxRecords + 1
+          )
+        const posts = rows.slice(0, connectPostPageMaxRecords).map(decodeRow)
+        const last = posts.at(-1)
+        return Schema.decodeUnknownSync(ConnectPostPage)({
+          posts,
+          nextCursor: rows.length > connectPostPageMaxRecords && last !== undefined
+            ? { sequence: last.sequence }
+            : null
+        })
+      },
+      catch: unavailable("posts.page")
+    }).pipe(Effect.tap(() => this.#secureFiles.pipe(Effect.mapError(unavailable("posts.permissions")))))
   })
 
   readonly latest = Effect.fn("AgentPostStore.latest")(function*(
@@ -175,7 +199,7 @@ export class AgentPostStore {
     return posts[0] ?? null
   })
 
-  /** A directory poll prunes and secures once, then reads one indexed row for each requested identity. */
+  /** Reads only select retained rows; post writes own bounded global expiry eviction. */
   readonly latestMany = Effect.fn("AgentPostStore.latestMany")(function*(
     this: AgentPostStore,
     targets: ReadonlyArray<Pick<ConnectPost, "host" | "agentId">>,
@@ -184,12 +208,11 @@ export class AgentPostStore {
     return yield* this.#transactions.withPermits(1)(
       Effect.try({
         try: () => {
-          prune(this.#database, now)
           const query = this.#database.prepare(
-            "SELECT * FROM connect_posts WHERE host = ? AND agent_id = ? ORDER BY sequence DESC LIMIT 1"
+            "SELECT * FROM connect_posts WHERE host = ? AND agent_id = ? AND created_at >= ? ORDER BY sequence DESC LIMIT 1"
           )
           return targets.flatMap(({ agentId, host }) => {
-            const row = query.get(host.toLowerCase(), agentId)
+            const row = query.get(host.toLowerCase(), agentId, now - connectPostRetentionMillis)
             return row === undefined ? [] : [decodeRow(row)]
           })
         },

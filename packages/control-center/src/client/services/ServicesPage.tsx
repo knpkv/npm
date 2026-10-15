@@ -46,6 +46,8 @@ import {
   selectedServiceProvider,
   servicePairingPath
 } from "./serviceOnboarding.js"
+import { makeOverviewRefresh } from "./overviewRefresh.js"
+import { makeConnectionDetailTracker } from "./connectionDetailReads.js"
 import styles from "./ServicesPage.module.css"
 
 type AwsProfilesState =
@@ -79,7 +81,12 @@ const mergeConnections = (
   const rows = new Map<PluginConnectionId, PluginConnectionSummary>()
   for (const connection of [...current, ...incoming]) {
     const existing = rows.get(connection.pluginConnectionId)
-    if (existing === undefined || DateTime.Order(existing.updatedAt, connection.updatedAt) <= 0) {
+    if (
+      existing === undefined ||
+      DateTime.Order(existing.updatedAt, connection.updatedAt) < 0 ||
+      (DateTime.Order(existing.updatedAt, connection.updatedAt) === 0 &&
+        (existing.runtimeRevision ?? 0) <= (connection.runtimeRevision ?? 0))
+    ) {
       rows.set(connection.pluginConnectionId, connection)
     }
   }
@@ -564,7 +571,9 @@ export const ServicesPage = ({
   const [searchParams, setSearchParams] = useSearchParams()
   const { invalidateSession, state: sessionState } = useBrowserSession()
   const sessionKey = browserReadableSessionKey(sessionState)
-  const [requestRevision, setRequestRevision] = useState(0)
+  const overviewRefresh = useRef<ReturnType<typeof makeOverviewRefresh<PluginOverviewResponse>> | null>(null)
+  const detailTracker = useRef(makeConnectionDetailTracker())
+  const refreshOverview = useCallback(() => overviewRefresh.current?.refresh(), [])
   const [connectionsState, setConnectionsState] = useState<ConnectionsState>({ _tag: "idle" })
   const [awsProfilesState, setAwsProfilesState] = useState<AwsProfilesState>({ _tag: "idle" })
   const [atlassianProfilesState, setAtlassianProfilesState] = useState<AtlassianProfilesState>({ _tag: "idle" })
@@ -612,6 +621,7 @@ export const ServicesPage = ({
         (failure) => {
           if (request.signal.aborted) return
           administrationRequests.current.delete(pluginConnectionId)
+          detailTracker.current.failed(pluginConnectionId)
           if (Predicate.isTagged("UnauthorizedApiError")(failure)) invalidateSession(sessionKey)
           setAdministrationStates((current) => new Map(current).set(pluginConnectionId, { _tag: "failed" }))
         }
@@ -629,14 +639,14 @@ export const ServicesPage = ({
         signal: request.signal,
         onSessionExpired: invalidateSession,
         onInvalidation: () => {
-          if (!request.signal.aborted) setRequestRevision((current) => current + 1)
+          if (!request.signal.aborted) refreshOverview()
         }
       })
       .catch(() => {
         if (!request.signal.aborted) setConnectionsState((current) => overviewRefreshFailed(current, sessionKey))
       })
     return () => request.abort()
-  }, [invalidateSession, sessionKey, transport])
+  }, [invalidateSession, refreshOverview, sessionKey, transport])
 
   const refreshSynchronization = useCallback(
     (pluginConnectionId: PluginConnectionId): void => {
@@ -658,6 +668,7 @@ export const ServicesPage = ({
         (failure) => {
           if (request.signal.aborted) return
           synchronizationRequests.current.delete(pluginConnectionId)
+          detailTracker.current.failed(pluginConnectionId)
           if (Predicate.isTagged("UnauthorizedApiError")(failure)) invalidateSession(sessionKey)
           setSynchronizationStates((current) => new Map(current).set(pluginConnectionId, { _tag: "failed" }))
         }
@@ -708,86 +719,67 @@ export const ServicesPage = ({
       setConnectionsState({ _tag: "idle" })
       return
     }
-    const request = new AbortController()
-    setConnectionsState((current) =>
-      current._tag === "ready" && current.sessionKey === sessionKey
-        ? { ...current, refresh: "pending" }
-        : { _tag: "loading" }
-    )
-    transport.overview(request.signal).then(
-      (overview) => {
-        if (!request.signal.aborted) setConnectionsState((current) => receiveOverview(current, overview, sessionKey))
-      },
-      (failure) => {
-        if (request.signal.aborted) return
-        if (Predicate.isTagged("UnauthorizedApiError")(failure)) invalidateSession(sessionKey)
+    const pump = makeOverviewRefresh({
+      load: transport.overview,
+      onStarted: () =>
+        setConnectionsState((current) =>
+          current._tag === "ready" && current.sessionKey === sessionKey
+            ? { ...current, refresh: "pending" }
+            : { _tag: "loading" }
+        ),
+      onSuccess: (overview) => setConnectionsState((current) => receiveOverview(current, overview, sessionKey)),
+      onFailure: (cause) => {
+        if (Predicate.isTagged("UnauthorizedApiError")(cause)) {
+          pump.dispose()
+          invalidateSession(sessionKey)
+          return
+        }
         setConnectionsState((current) => overviewRefreshFailed(current, sessionKey))
       }
+    })
+    overviewRefresh.current = pump
+    pump.refresh()
+    return () => {
+      pump.dispose()
+      overviewRefresh.current = null
+      detailTracker.current.reset()
+    }
+  }, [invalidateSession, sessionKey, transport])
+
+  const connectionRows =
+    connectionsState._tag === "ready" && connectionsState.sessionKey === sessionKey
+      ? connectionsState.overview.connections
+      : null
+
+  useEffect(() => {
+    if (connectionRows === null) return
+    const { changed, removed } = detailTracker.current.reconcile(connectionRows)
+    const synchronizableIds = new Set(
+      connectionRows
+        .filter(({ supportsSynchronization }) => supportsSynchronization)
+        .map(({ pluginConnectionId }) => pluginConnectionId)
     )
-    return () => request.abort()
-  }, [invalidateSession, requestRevision, sessionKey, transport])
-
-  const connectionRows = connectionsState._tag === "ready" ? connectionsState.overview.connections : null
-
-  useEffect(() => {
-    if (connectionRows === null || transport.synchronization === undefined) return
-    const synchronizable = connectionRows.filter(({ supportsSynchronization }) => supportsSynchronization)
-    const synchronizableIds = new Set(synchronizable.map(({ pluginConnectionId }) => pluginConnectionId))
-    for (const [pluginConnectionId, request] of synchronizationRequests.current) {
-      if (synchronizableIds.has(pluginConnectionId)) continue
+    for (const [id, request] of synchronizationRequests.current) {
+      if (synchronizableIds.has(id)) continue
       request.abort()
-      synchronizationRequests.current.delete(pluginConnectionId)
+      synchronizationRequests.current.delete(id)
     }
-    for (const [pluginConnectionId, request] of synchronizeRequests.current) {
-      if (synchronizableIds.has(pluginConnectionId)) continue
+    for (const [id, request] of synchronizeRequests.current) {
+      if (synchronizableIds.has(id)) continue
       request.abort()
-      synchronizeRequests.current.delete(pluginConnectionId)
+      synchronizeRequests.current.delete(id)
     }
-    setSynchronizationStates((current) => {
-      const next = new Map(current)
-      let changed = false
-      for (const pluginConnectionId of next.keys()) {
-        if (synchronizableIds.has(pluginConnectionId)) continue
-        next.delete(pluginConnectionId)
-        changed = true
-      }
-      return changed ? next : current
-    })
-    for (const connection of synchronizable) refreshSynchronization(connection.pluginConnectionId)
-    return () => {
-      for (const connection of synchronizable) {
-        synchronizationRequests.current.get(connection.pluginConnectionId)?.abort()
-        synchronizationRequests.current.delete(connection.pluginConnectionId)
-      }
+    for (const id of removed) {
+      administrationRequests.current.get(id)?.abort()
+      administrationRequests.current.delete(id)
     }
-  }, [connectionRows, refreshSynchronization, transport.synchronization])
-
-  useEffect(() => {
-    if (connectionRows === null || transport.administration === undefined) return
-    const connectionIds = new Set(connectionRows.map(({ pluginConnectionId }) => pluginConnectionId))
-    for (const [pluginConnectionId, request] of administrationRequests.current) {
-      if (connectionIds.has(pluginConnectionId)) continue
-      request.abort()
-      administrationRequests.current.delete(pluginConnectionId)
+    setSynchronizationStates((current) => new Map([...current].filter(([id]) => synchronizableIds.has(id))))
+    setAdministrationStates((current) => new Map([...current].filter(([id]) => !removed.includes(id))))
+    for (const connection of changed) {
+      if (connection.supportsSynchronization) refreshSynchronization(connection.pluginConnectionId)
+      refreshAdministration(connection.pluginConnectionId)
     }
-    setAdministrationStates((current) => {
-      const next = new Map(current)
-      let changed = false
-      for (const pluginConnectionId of next.keys()) {
-        if (connectionIds.has(pluginConnectionId)) continue
-        next.delete(pluginConnectionId)
-        changed = true
-      }
-      return changed ? next : current
-    })
-    for (const pluginConnectionId of connectionIds) refreshAdministration(pluginConnectionId)
-    return () => {
-      for (const pluginConnectionId of connectionIds) {
-        administrationRequests.current.get(pluginConnectionId)?.abort()
-        administrationRequests.current.delete(pluginConnectionId)
-      }
-    }
-  }, [connectionRows, refreshAdministration, transport.administration])
+  }, [connectionRows, refreshAdministration, refreshSynchronization])
 
   useEffect(() => {
     if (sessionKey === null || (openProvider !== "codecommit" && openProvider !== "codepipeline")) return
@@ -920,7 +912,7 @@ export const ServicesPage = ({
           setTestStates((current) => new Map(current).set(pluginConnectionId, { _tag: "result", result }))
           refreshAdministration(pluginConnectionId)
           if (result._tag === "healthy" && refreshOverviewAfterHealthy) {
-            setRequestRevision((revision) => revision + 1)
+            refreshOverview()
           }
         },
         (failure) => {
@@ -931,7 +923,7 @@ export const ServicesPage = ({
         }
       )
     },
-    [invalidateSession, refreshAdministration, sessionKey, transport]
+    [invalidateSession, refreshAdministration, refreshOverview, sessionKey, transport]
   )
 
   const createConnections = useCallback(
@@ -1329,7 +1321,7 @@ export const ServicesPage = ({
       ) : connectionsState._tag === "failed" ? (
         <>
           <StatePanel
-            action={<Button onClick={() => setRequestRevision((revision) => revision + 1)}>Try again</Button>}
+            action={<Button onClick={() => refreshOverview()}>Try again</Button>}
             description="Control Center could not load connection details. The installed services remain visible below."
             title="Connections unavailable"
           />

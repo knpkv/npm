@@ -143,6 +143,10 @@ export default tseslint.config(
     }
   },
   {
+    files: ["design-refs/**/screens/*.js", "packages/design-conformance/test/fixtures/*.js"],
+    languageOptions: { ecmaVersion: 2022 }
+  },
+  {
     files: ["packages/*/src/**/*.{ts,tsx}", "packages/*/test/**/*.{ts,tsx}"],
     rules: {
       "no-console": "error"

@@ -1,3 +1,4 @@
+import { captureContext } from "@knpkv/design-conformance/capture"
 import { defineConfig } from "@playwright/test"
 
 export default defineConfig({
@@ -22,9 +23,7 @@ export default defineConfig({
   ],
   use: {
     browserName: "chromium",
-    reducedMotion: "reduce",
-    locale: "en-US",
-    timezoneId: "UTC",
+    ...captureContext,
     screenshot: "off",
     trace: "off"
   }

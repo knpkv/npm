@@ -1,5 +1,11 @@
 # @knpkv/clockify-api-client
 
+## 4.0.0
+
+### Major Changes
+
+- [#894](https://github.com/knpkv/npm/pull/894) [`40877b7`](https://github.com/knpkv/npm/commit/40877b7ab5a8395e4c0a69099699a58154728f54) Thanks [@konopkov](https://github.com/konopkov)! - Regenerate the Clockify client from the current specification while retaining published models that no endpoint references. Preserve struct types without JSON index signatures. Binary multipart request fields now accept Blob or File, and open custom-field values use JSON types. These generated contract corrections require a major version; the legacy string-valued expense model exports remain available.
+
 ## 3.0.1
 
 ### Patch Changes

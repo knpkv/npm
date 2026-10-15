@@ -20,6 +20,9 @@ export default defineConfig({
     "**/docs/**",
     "**/generated/**",
     "repos/**",
+    // Frozen external reference scripts are hash-verified inputs, not production source.
+    "design-refs/code-review/screens/**",
+    "design-refs/code-review/revisions/**/screens/**",
     // design-sync inputs: forks of the converter's lib modules and story ports. Their bytes key
     // the claude.ai/design sync anchor, so a lint-driven rewrite re-grades every component.
     ".design-sync/overrides/**",

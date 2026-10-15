@@ -1,0 +1,231 @@
+.summary,
+.threads {
+  display: grid;
+  min-inline-size: 0;
+  line-height: 1.5;
+  color: var(--rly-color-text-1);
+  background: var(--rly-color-surface-1);
+  border: 1px solid var(--rly-color-border-1);
+  border-radius: var(--rly-radius-group);
+}
+
+.summary {
+  gap: 0.9rem;
+  padding-block: 1rem 1.1rem;
+  padding-inline: 1.1rem;
+}
+
+.embeddedThreads {
+  display: grid;
+  min-inline-size: 0;
+  margin-block: 0.75rem;
+  margin-inline: 1rem;
+  line-height: 1.5;
+  color: var(--rly-color-text-1);
+}
+
+.heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding-block: 0.75rem;
+  padding-inline: 1rem;
+  border-block-end: 1px solid var(--rly-color-border-1);
+}
+
+.heading h2 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 620;
+}
+
+.noRun {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 620;
+  letter-spacing: -0.01em;
+}
+
+.notice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem 1rem;
+  align-items: center;
+  justify-content: space-between;
+  min-inline-size: 0;
+  padding-block: var(--review-notice-block, 0.75rem);
+  padding-inline: var(--review-notice-inline, 1rem);
+  border: 1px solid var(--rly-color-border-1);
+  border-radius: var(--rly-radius-group);
+  background: var(--rly-color-surface-1);
+}
+
+.copy {
+  display: grid;
+  gap: 0.2rem;
+  min-inline-size: 0;
+  overflow-wrap: break-word;
+}
+
+.copy p {
+  margin: 0;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  text-wrap: pretty;
+}
+
+.action {
+  display: flex;
+}
+
+.readAgain {
+  justify-self: start;
+}
+
+.verdict,
+.facts,
+.provenance {
+  display: grid;
+  gap: 0.2rem;
+  min-inline-size: 0;
+}
+
+.verdict small,
+.provenance small {
+  font-size: 0.8125rem;
+  color: var(--rly-color-text-2);
+}
+
+.quote {
+  margin: 0;
+}
+
+.quote p {
+  margin: 0;
+  font-size: 0.9375rem;
+  line-height: 1.55;
+  overflow-wrap: break-word;
+  text-wrap: pretty;
+}
+
+.quote p::before {
+  content: "“";
+}
+
+.quote p::after {
+  content: "”";
+}
+
+.facts {
+  gap: 0.3rem;
+}
+
+.facts h3 {
+  margin: 0;
+  font-size: 0.8125rem;
+  font-weight: 560;
+  color: var(--rly-color-text-2);
+}
+
+.facts ul {
+  list-style: disc;
+  display: grid;
+  gap: 0.25rem;
+  margin: 0;
+  padding-inline-start: 1.1em;
+  font-size: 0.875rem;
+}
+
+.facts p {
+  margin: 0;
+  font-size: 0.9375rem;
+  overflow-wrap: break-word;
+  white-space: pre-wrap;
+}
+
+.counts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.facts dl {
+  display: grid;
+  gap: 0.2rem;
+  margin: 0;
+  font-size: 0.875rem;
+}
+
+.countRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.75rem;
+}
+
+.countRow dt {
+  color: var(--rly-color-text-2);
+}
+
+.countRow dd {
+  margin: 0;
+  font-weight: 620;
+  font-variant-numeric: tabular-nums;
+  text-align: end;
+}
+
+.provenance {
+  gap: 0.1rem;
+  padding-block-start: 0.8rem;
+  border-block-start: 1px solid var(--rly-color-border-1);
+  font-size: 0.875rem;
+  overflow-wrap: break-word;
+}
+
+@media (max-width: 599px) {
+  .readAgain {
+    min-block-size: 2.75rem;
+  }
+}
+
+/* Missing history keeps the compact empty-summary rhythm; recorded summaries retain their own gap. */
+.summary[data-review-run-fallback="NotRecorded"] {
+  gap: 0.5rem;
+}
+
+.explanation {
+  display: grid;
+  gap: 0.6rem;
+  min-inline-size: 0;
+}
+.explanation small {
+  font-size: 0.833333em;
+  line-height: 1.5;
+  color: var(--rly-color-text-2);
+}
+.explanation h3 {
+  margin: 0;
+  font-size: 1.125rem;
+  line-height: 1.5;
+  font-weight: 620;
+}
+.explanation > p {
+  margin: 0;
+  font-size: 0.9375rem;
+  line-height: 1.55;
+  overflow-wrap: break-word;
+  text-wrap: pretty;
+}
+
+/* A fallback notice has its own inset inside the named thread panel. */
+.threads > .notice {
+  margin-block: 0.75rem;
+  margin-inline: 1rem;
+}
+
+.explanation h3 {
+  letter-spacing: -0.01em;
+}
+.explanation small {
+  color: var(--rly-color-text-1);
+}

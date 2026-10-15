@@ -1,5 +1,11 @@
 # @knpkv/jira-api-client
 
+## 3.0.0
+
+### Major Changes
+
+- [#897](https://github.com/knpkv/npm/pull/897) [`381ea6b`](https://github.com/knpkv/npm/commit/381ea6bba0c487987c3a2599c9e692ae3cd89009) Thanks [@konopkov](https://github.com/konopkov)! - Update the Jira specification and regenerate usable recursive unions, custom-field defaults and bulk-move requests. Retain every published model name. Binary attachment models now accept Blob or File; bulk-move required keys, mandatory string-array values and JSON map types follow the specification. These generated contract corrections require a major version. Add the upstream bulk agent-session operations.
+
 ## 2.1.1
 
 ### Patch Changes

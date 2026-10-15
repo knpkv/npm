@@ -3,15 +3,21 @@ import { describe, expect, it } from "@effect/vitest"
 import manifest from "../package.json" with { type: "json" }
 
 describe("CodeCommit web package contract", () => {
-  it("builds the shared review dependency before browser compilation", () => {
-    expect(manifest.devDependencies["@knpkv/review"]).toBe("workspace:^")
+  it("keeps the private write spike out of source and published package exports", () => {
+    for (const exports of [manifest.exports, manifest.publishConfig.exports]) {
+      expect(JSON.stringify(exports)).not.toContain("ReviewWriteSpike")
+      expect(Object.keys(exports).some((name) => name.includes("*"))).toBe(false)
+    }
+  })
+  it("declares the shared persisted and host review contracts as a runtime dependency", () => {
+    expect(manifest.dependencies["@knpkv/review"]).toBe("workspace:^")
     expect(manifest.scripts["test:browser"]).toContain("pnpm --filter \"@knpkv/review...\" build")
   })
 
   // The app is prebuilt; the views library exposes its shared runtimes as optional peers.
   it("keeps client-only libraries out of the runtime dependencies", () => {
     const runtime = Object.keys(manifest.dependencies)
-    for (const clientOnly of ["@knpkv/review", "@knpkv/rly", "react-dom", "vite", "tailwindcss", "@tailwindcss/vite"]) {
+    for (const clientOnly of ["@knpkv/rly", "react-dom", "vite", "tailwindcss", "@tailwindcss/vite"]) {
       expect(runtime).not.toContain(clientOnly)
     }
   })

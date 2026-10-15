@@ -27,6 +27,7 @@ export interface ReadinessProviderScenario {
   readonly boundedJiraCatchUp?: boolean
   readonly truncatedActions?: boolean
   readonly runbookTasks?: "checked" | "empty" | "unchecked"
+  readonly releaseCount?: number
 }
 
 const actionDeclarations = [
@@ -214,6 +215,13 @@ export const readinessCodeCommitClients = Layer.merge(
 
 /** Fake provider wire responses; no normalized pages or domain assessments are seeded. */
 export const readinessHttpTransport = (scenario: ReadinessProviderScenario, requestedPaths: Array<string>) => {
+  // Keep each fixture issue and runbook below their independent metadata bounds.
+  const releaseVersions = Array.from({ length: scenario.releaseCount ?? 1 }, (_, index) => ({
+    id: String(20000 + index),
+    name: `2.18.${index}`,
+    released: false,
+    archived: false
+  }))
   const version = { number: 1, createdAt: readinessProviderTime }
   const taskContent = scenario.runbookTasks === "empty" ? [] : [{
     type: "taskList",
@@ -233,7 +241,7 @@ export const readinessHttpTransport = (scenario: ReadinessProviderScenario, requ
     version,
     labels: {
       results: scenario.exactRunbookMetadata
-        ? [{ id: "label-1", prefix: "global", name: readinessReleaseVersion }]
+        ? releaseVersions.map(({ name }, index) => ({ id: `label-${index + 1}`, prefix: "global", name }))
         : [],
       meta: { hasMore: false }
     },
@@ -264,7 +272,7 @@ export const readinessHttpTransport = (scenario: ReadinessProviderScenario, requ
       issuetype: { name: "Story" },
       created: readinessProviderTime,
       updated: readinessProviderTime,
-      fixVersions: [{ id: "20000", name: readinessReleaseVersion, released: false, archived: false }]
+      fixVersions: releaseVersions
     }
   }
   let jiraSearchCount = 0

@@ -1,0 +1,19 @@
+{
+  "original": "Approved Export66 visual content retained. Lifecycle and region metadata changes are documented below.",
+  "corrected_export_sha256": "161c1a69e1246fb0aa5af169576d4953ccd8e54cd468092da3f019194187a807",
+  "themes": ["dark"],
+  "new_states": 18,
+  "rendered_dark_frames": 66,
+  "standalone_history": "Designed only in this Hub enrollment. Its separate owner requires its own runtime coverage.",
+  "region_mapping": {
+    "header": "At <=599px, existing bold Code mast text/reference and .superapp-phone-title/live; >=600px existing .titles/reference and actual page header/live. Exactly one header; tabs separate.",
+    "action": "Existing Read again button on both sides; wrapper has no action region.",
+    "summary": "Existing summary panel only; revision notice is a sibling region.",
+    "history-notice": "Only when both existing history and comment fallback panels render: history panel is history-notice, comment panel remains notice. Other single history panels remain notice. No wrapper or content removal."
+  },
+  "read_only_variants": 6,
+  "source_reload_fix": "Source-owned breakpoint-change guard. No enrollment lifecycle filter.",
+  "source_export": "25",
+  "verified_source_manifest_files": 17,
+  "reference_set": "Export25 replaces integrated23;24 was superseded and never integrated. Dismissed CARD label includescomma plus separate14px/430secondarypre-wrap note. INDEXentirestatus remains compact12px/520 identical23. Designer per-elementDOM/style proof limits changevs23 toCARDsplit. Four dual-notice mappings/multiplicity retained;17sourcehashesverified. No fresh product conformance verdict."
+}

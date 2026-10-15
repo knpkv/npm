@@ -16,9 +16,43 @@ The persisted payload is the decoded job payload; the hash is computed over that
 
 `AgentDelegate.mode` is the explicit model-dispatch intent. `consult` is a bounded Luna consultation at medium reasoning effort; `transition_summary` is a Luna summary at low effort. `review` and `work`, including coding, recovery, escalation, mutation, and public-contract changes, remain Sol work at high effort. Status and wait use their non-delegating operations and never become model dispatches. Adapters must switch on this required discriminator; prompt inference and a default route are invalid.
 
+## Agent task signals
+
+`AgentSummary.taskKind` is an additive, optional wire field with nine values:
+`reading`, `writing`, `testing`, `waiting`, `blocked`, `done`, `failing`, `idle`,
+and `unknown`. Older peers may omit it. Local `FleetService.agents()` and
+`status()` always supply a kind for each returned agent.
+
+`classifyAgentTask` accepts normalized `AgentTaskFacts`. Read/search activity
+maps to `reading`, edit/write to `writing`, and running test/build commands to
+`testing`. CI or review pending maps to `waiting`. Only failed CI or a failed
+test/build command can produce `failing`; a failed ordinary command cannot.
+`blocked` takes precedence because the agent needs input. CI failure then
+precedes active tools, which precede pending CI/review. Tool evidence applies
+only while working; CI and review can remain pending after the agent is idle
+or done. Without such evidence, those lifecycle states map to `idle` and `done`.
+Unsupported states or absent evidence are `unknown`.
+
+The host adapter currently supplies decoded Herdr lifecycle state only. It does
+not yet read provider session tools, command outcomes, or branch-linked Work/CI
+and review state. Working agents therefore report `unknown` until those
+producers are connected. Directory names, terminal text, and work labels are
+never evidence. `AgentTaskFacts` is a host-private input contract, not an agent
+wire field; tool content and command arguments do not enter `AgentSummary`.
+
+The Fleet service shares one observation sequence across both endpoints. It
+publishes the first observation immediately, then requires the same candidate
+at observations at least 500ms apart before changing the kind. An observed
+200ms tool blip cannot replace the published kind. This is polling debounce,
+not a claim about activity between observations. Unavailable/error inventories
+interrupt pending changes without inventing an idle state; complete absence
+forgets that agent. Restarting the service starts a new observation sequence.
+Only the task kind is delayed; lifecycle `status` remains current.
+
 The package exports:
 
-- Schema contracts for configuration, jobs, status, and agent inventory
+- Schema contracts for configuration, jobs, status, agent inventory, and task evidence
+- `classifyAgentTask`, the task-evidence classifier, and `agentTaskKindDebounceMs`
 - `AgentConnectTarget`, the canonical sanitized Connect URL for one exact host and stable agent ID
 - `JobStore`, the local SQLite persistence boundary
 - `makeFleetService`, the approval and execution state machine

@@ -1,7 +1,7 @@
 import { expect, it } from "@effect/vitest"
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
-import { CodeHostView, type CodeHostViewProps } from "../src/client/components/host-code-view.js"
+import { CodeHostView, type CodeHostViewProps, CodeReadStatusView } from "../src/client/components/host-code-view.js"
 import type { CodeUnavailable } from "../src/host-contract.js"
 
 const ref = "00000000-0000-4000-8000-000000000001"
@@ -166,4 +166,67 @@ it("marks a deep-linked diff possibly outdated using the exact cached detail whe
     })
   )
   expect(fresh).not.toContain("This diff may be outdated")
+})
+
+/** A composed host keeps one stable live region while the painted read states use the approved panels. */
+it("renders opt-in read-state panels without changing plain defaults or adding another live region", () => {
+  for (
+    const [state, kind, words] of [
+      [{ value: null, loading: true, failure: null }, "loading", "Reading cached details…"],
+      [{ value: null, loading: false, failure: "network" }, "failure", "The hub could not be reached."],
+      [
+        { value: { _tag: "Unavailable", reason: "other_host", host: "fixture-host" }, loading: false, failure: null },
+        "unavailable",
+        "Code unavailable"
+      ]
+    ] satisfies ReadonlyArray<readonly [Parameters<typeof CodeReadStatusView>[0]["state"], string, string]>
+  ) {
+    const panel = renderToStaticMarkup(
+      createElement(CodeReadStatusView, {
+        state,
+        ownerUIHref: null,
+        loadingLabel: "Reading cached details…",
+        announce: false,
+        presentation: "panel"
+      })
+    )
+    expect(panel).toContain(`data-code-read-notice="${kind}"`)
+    expect(panel).toContain(words)
+    expect(panel).not.toContain("role=\"status\"")
+    expect(panel).not.toContain("aria-live=")
+    const plain = renderToStaticMarkup(
+      createElement(CodeReadStatusView, { state, ownerUIHref: null, loadingLabel: "Reading cached details…" })
+    )
+    expect(plain).not.toContain("data-code-read-notice=")
+    expect(plain).toContain(words)
+  }
+})
+
+/** The host supplies one retry; a panel places it after copy without multiplying it across retained states. */
+it("embeds the single host action in the current panel and leaves plain callers unchanged", () => {
+  const action = createElement("button", { type: "button" }, "Read again")
+  for (
+    const state of [
+      { value: null, loading: false, failure: "network" },
+      { value: { _tag: "Unavailable", reason: "unavailable", host: null }, loading: false, failure: null },
+      { value: { _tag: "Unavailable", reason: "unavailable", host: null }, loading: true, failure: "network" }
+    ] satisfies ReadonlyArray<Parameters<typeof CodeReadStatusView>[0]["state"]>
+  ) {
+    const panel = renderToStaticMarkup(createElement(CodeReadStatusView, {
+      state,
+      ownerUIHref: null,
+      loadingLabel: "Reading file…",
+      presentation: "panel",
+      action
+    }))
+    expect(panel.match(/<button/gu)).toHaveLength(1)
+    expect(panel).toMatch(/data-code-read-notice="(?:failure|unavailable)"[^>]*>[\s\S]*Read again<\/button><\/div>/u)
+    const plain = renderToStaticMarkup(createElement(CodeReadStatusView, {
+      state,
+      ownerUIHref: null,
+      loadingLabel: "Reading file…",
+      action
+    }))
+    expect(plain).not.toContain("<button")
+  }
 })

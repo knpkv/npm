@@ -3,9 +3,10 @@ import { expect, it } from "@effect/vitest"
 import { BrowserOpener } from "@knpkv/browser-pairing/launch"
 import { type ConnectSelfBody, ConnectSelfState } from "@knpkv/herdr-connect"
 import type { HostConfiguration } from "@knpkv/herdr-fleet"
-import { Effect, FileSystem, Layer, Path, Result, Schema } from "effect"
+import { Deferred, Effect, Fiber, FileSystem, Layer, Path, Result, Schema } from "effect"
 import { Command } from "effect/cli"
 import { HttpClient, HttpClientResponse } from "effect/http"
+import { TestClock } from "effect/testing"
 import { makeRelaySelfCommand } from "../src/internal/relay-cli.js"
 import { RelayProbe, relayRootCommand } from "../src/internal/relay-open.js"
 import { submitRelaySelf } from "../src/internal/relay-self.js"
@@ -81,7 +82,7 @@ it.layer(layer)("relay me", (it) => {
       yield* Command.runWith(command, { version: "0" })(["me", "--help"])
     }))
 
-  it.effect("uses the current pane header, an identity-free body and canonical hub; identity failures stop before HTTP", () =>
+  it.effect("preserves exhausted store failures and current-pane authorization without retrying", () =>
     Effect.gen(function*() {
       const fs = yield* FileSystem.FileSystem
       const paths = yield* Path.Path
@@ -129,16 +130,32 @@ it.layer(layer)("relay me", (it) => {
       }
       let requests = 0
       let limited = false
+      let busy = false
+      let delayed = false
+      const slowStarted = yield* Deferred.make<void>()
       const client = HttpClient.make((request) =>
-        Effect.sync(() => {
+        Effect.gen(function*() {
           requests++
           expect(request.url).toBe("https://hub.example.test/v1/connect/me")
           expect(request.headers["x-herdr-agent-id"]).toBe("agent-one")
           if (request.body._tag !== "Uint8Array") throw new TypeError("JSON body missing")
           expect(new TextDecoder().decode(request.body.body)).toBe(JSON.stringify({ say: "Ready" }))
+          if (delayed) {
+            yield* Deferred.succeed(slowStarted, undefined)
+            yield* Effect.sleep("11 seconds")
+          }
           return HttpClientResponse.fromWeb(
             request,
-            limited
+            busy
+              ? Response.json({
+                error: "ConnectStoreBusyError",
+                operation: "self.update",
+                timeoutMillis: 5_000,
+                cause: "private SQLite detail"
+              }, {
+                status: 503
+              })
+              : limited
               ? Response.json({ error: "TooManySelfUpdates", retryAfterMillis: 10_000 }, { status: 429 })
               : Response.json({ say: "Ready", accessory: "none", at: 1, replyTo: null })
           )
@@ -154,9 +171,22 @@ it.layer(layer)("relay me", (it) => {
         retryAfterMillis: 10_000
       })
       expect(requests).toBe(2)
+      busy = true
+      expect(yield* Effect.result(submit())).toMatchObject({
+        failure: { _tag: "ConnectStoreBusyError", operation: "self.update", timeoutMillis: 5_000, cause: 503 }
+      })
+      expect(requests).toBe(3)
+      delayed = true
+      const pending = yield* Effect.forkScoped(Effect.result(submit()))
+      yield* Deferred.await(slowStarted)
+      yield* TestClock.adjust("11 seconds")
+      expect(yield* Fiber.join(pending)).toMatchObject({
+        failure: { _tag: "ConnectStoreBusyError", operation: "self.update", timeoutMillis: 5_000, cause: 503 }
+      })
+      expect(requests).toBe(4)
       yield* writeIdentity("w1:p2")
       const identityFailure = yield* Effect.result(submit())
       expect(Result.isFailure(identityFailure) && identityFailure.failure._tag).toBe("UnboundAgent")
-      expect(requests).toBe(2)
+      expect(requests).toBe(4)
     }).pipe(Effect.scoped))
 })

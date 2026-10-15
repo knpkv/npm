@@ -1,0 +1,87 @@
+.messages {
+  display: grid;
+  gap: var(--review-message-list-gap, 0.8rem);
+  padding: 0;
+  margin: 0;
+  min-inline-size: 0;
+  list-style: none;
+  font-family: var(--rly-font-ui);
+  color: var(--rly-color-text-1);
+}
+
+.message {
+  display: grid;
+  gap: var(--review-message-gap, 0.25rem);
+  min-inline-size: 0;
+}
+
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+  min-inline-size: 0;
+  font-size: var(--review-message-meta-size, 0.8125rem);
+  line-height: var(--review-message-meta-line-height, inherit);
+}
+
+.meta strong {
+  min-inline-size: 0;
+  font-weight: var(--review-message-author-weight, 560);
+  overflow-wrap: break-word;
+}
+
+.meta time {
+  font-size: var(--review-message-time-size, 0.75rem);
+  font-variant-numeric: var(--review-message-time-numeric, tabular-nums);
+  color: var(--rly-color-text-2);
+}
+
+.body {
+  display: grid;
+  gap: 0.6rem;
+  min-inline-size: 0;
+  font-size: var(--review-message-body-size, 0.875rem);
+  line-height: var(--review-message-body-line-height, 1.5);
+  overflow-wrap: break-word;
+}
+
+.body :where(p, ul, ol, pre, blockquote) {
+  margin: 0;
+}
+
+.body :where(ul, ol) {
+  padding-inline-start: 1.5rem;
+}
+
+.body pre {
+  padding-block: 0.4rem;
+  padding-inline: 0.6rem;
+  min-inline-size: 0;
+  background: var(--rly-color-surface-2);
+  border: 1px solid var(--rly-color-border-1);
+  border-radius: var(--rly-radius-field);
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+.body code {
+  font: 430 0.8125rem / 1.5 var(--rly-font-mono);
+}
+
+.body a {
+  color: var(--rly-color-text-1);
+  text-decoration: underline;
+}
+
+.body a:focus-visible {
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: var(--rly-focus-ring-offset);
+}
+
+.deleted {
+  margin: 0;
+  font-size: var(--review-message-body-size, 0.875rem);
+  line-height: var(--review-message-body-line-height, 1.5);
+  color: var(--rly-color-text-2);
+}

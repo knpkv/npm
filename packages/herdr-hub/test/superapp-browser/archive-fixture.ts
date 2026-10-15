@@ -1,5 +1,5 @@
 /** Schema-checked synthetic closures aligned with the export51 Home archive. */
-import { ConnectArchivePage } from "@knpkv/herdr-connect/model"
+import { type ConnectAgentHue, ConnectArchivePage } from "@knpkv/herdr-connect/model"
 import { Schema } from "effect"
 
 const rows = [
@@ -40,6 +40,18 @@ const rows = [
   { name: "seed-data", host: "cedar", at: "2026-10-02T08:15:00+02:00", words: "" }
 ]
 
+// Recorded export families, including its page-wide probing across live, Ready and archived fixtures.
+const recordedFamilies = new Map<string, ConnectAgentHue>([
+  ["fix-pins", "teal"],
+  ["doc-pass", "teal"],
+  ["probe-cedar", "sky"],
+  ["tok-audit", "amber"],
+  ["rev-tabs", "amber"],
+  ["pair-css", "sky"],
+  ["seed-data", "amber"],
+  ["older", "rose"]
+])
+
 export const archiveFixture = (older = false): ConnectArchivePage =>
   Schema.decodeUnknownSync(ConnectArchivePage)({
     agents: (older
@@ -55,12 +67,14 @@ export const archiveFixture = (older = false): ConnectArchivePage =>
           firstSeenAt: Date.parse(row.at) - 60_000,
           closedAt: Date.parse(row.at)
         }
+        const hue = recordedFamilies.get(row.name)
+        const colored = hue === undefined ? agent : { ...agent, hue }
         const related = "parent" in row
           ? {
-            ...agent,
+            ...colored,
             relationship: { parentAgentId: `agent-${row.parent}`, parentName: row.parent, relation: "delegated" }
           }
-          : agent
+          : colored
         return row.words.length === 0
           ? related
           : { ...related, lastWords: { text: row.words, createdAt: Date.parse(row.at) - 1000 } }

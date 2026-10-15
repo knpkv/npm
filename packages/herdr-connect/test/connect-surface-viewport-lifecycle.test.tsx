@@ -134,6 +134,12 @@ describe("ConnectSurface directory loading", () => {
         for (let index = 0; index < 40; index += 1) await Promise.resolve()
       })
       expect(host.querySelector(".connect-directory-error")).not.toBeNull()
+      if (kind === "network") {
+        expect(host.querySelector(".connect-directory-error h2")?.textContent).toBe("Couldn’t load the fleet directory")
+        expect(host.querySelector(".connect-directory-error p")?.textContent).toBe(
+          "Relay couldn’t reach the hub. It tries again every 5 seconds."
+        )
+      } else expect(host.textContent).not.toContain("couldn’t reach the hub")
       expect(host.textContent).not.toContain("timed out")
       expect(host.textContent).not.toContain("sensitive diagnostic")
     }

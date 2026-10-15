@@ -52,6 +52,7 @@ import {
   type RelayReviewCompletion
 } from "../review-session-state.js"
 import { runRelayReviewStream } from "../relay-review-stream.js"
+import { preserveReviewRunFocus } from "../review-run-focus.js"
 import {
   readRelayReviewSession,
   migrateRelayReviewSession,
@@ -156,7 +157,7 @@ const fileModeLabel = (file: PullRequestDiffResponse["files"][number]): string |
 }
 
 const priorityTone = (priority: RelayReviewFinding["priority"]): "critical" | "caution" | "neutral" =>
-  priority === "P1" || priority === "P2" ? "critical" : priority === "P3" ? "caution" : "neutral"
+  priority === "P0" || priority === "P1" || priority === "P2" ? "critical" : priority === "P3" ? "caution" : "neutral"
 
 const locationLabel = (finding: RelayReviewFinding): string => {
   switch (finding.location.scope) {
@@ -505,7 +506,32 @@ const LoadedFileDiff = ({
   )
 }
 
-const ReviewFindings = ({
+/** Keep the completed result when owner history persistence fails, with export 61's safe copy. */
+export const ReviewFindings = (props: Parameters<typeof ReviewFindingsBody>[0]): ReactElement => {
+  const warning = !props.isReviewing && props.review?.historyWarning !== undefined
+  return (
+    <>
+      <div
+        aria-atomic="true"
+        aria-live="polite"
+        className={styles.reviewHistory}
+        data-review-history-status=""
+        data-warning={warning ? "true" : undefined}
+        role="status"
+      >
+        {warning ? (
+          <div className={styles.historyWarning}>
+            <StateLabel icon="alert" label="Review history not saved" size="compact" tone="caution" />
+            <p>This completed review is still shown here. Its history couldn’t be saved on this host.</p>
+          </div>
+        ) : null}
+      </div>
+      <ReviewFindingsBody {...props} />
+    </>
+  )
+}
+
+const ReviewFindingsBody = ({
   canPost,
   dispositions,
   isReviewing,
@@ -784,6 +810,7 @@ const ReadyReviewWorkspace = ({
   const [sessionMigration, setSessionMigration] = useState<RelayReviewSessionMigrationState | null>(null)
   const [navigationNotice, setNavigationNotice] = useState<string | null>(null)
   const [isReviewing, setIsReviewing] = useState(false)
+  const relayPaneRef = useRef<HTMLElement>(null)
   const [progress, setProgress] = useState<
     ReadonlyArray<Extract<RelayReviewStreamEvent, { readonly type: "progress" }>>
   >([])
@@ -1232,6 +1259,7 @@ const ReadyReviewWorkspace = ({
       abortRef.current?.abort()
       const controller = new AbortController()
       abortRef.current = controller
+      preserveReviewRunFocus(relayPaneRef.current)
       setIsReviewing(true)
       setReviewFailure(null)
       setProgress([])
@@ -1497,7 +1525,6 @@ const ReadyReviewWorkspace = ({
   // resizing mid-finding keeps the pane in view. Moving focus elsewhere clears it.
   const relayHasFocus = useRef(false)
   const findingsTrigger = useRef<HTMLButtonElement>(null)
-  const relayPaneRef = useRef<HTMLElement>(null)
   useEffect(() => {
     setFindingsOpen(placement === "drawer" && relayHasFocus.current)
   }, [placement])

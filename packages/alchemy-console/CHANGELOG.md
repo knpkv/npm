@@ -1,5 +1,18 @@
 # @knpkv/alchemy-console
 
+## 0.5.0
+
+### Minor Changes
+
+- [#909](https://github.com/knpkv/npm/pull/909) [`fd92fa2`](https://github.com/knpkv/npm/commit/fd92fa2857c7418abc0152d93b5ca0aa6da553b2) Thanks [@konopkov](https://github.com/konopkov)! - Add a read-only Plan tab for verified CI publications, with authenticated bounded artifact reading and explicit stale, unavailable and access states. The console never executes stack code or displays property values.
+
+## 0.4.2
+
+### Patch Changes
+
+- Updated dependencies [[`1ffd400`](https://github.com/knpkv/npm/commit/1ffd4002d82cb981cb203b77c67844002179bcf9)]:
+  - @knpkv/rly@0.23.0
+
 ## 0.4.1
 
 ### Patch Changes

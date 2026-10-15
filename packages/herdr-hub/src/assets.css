@@ -1,9 +1,28 @@
+/* Preflight must be below components from the first import. Keep Connect/Fleet/Work/Hub order. */
+@layer theme, base, rly.fonts, rly.tokens, rly.reset, rly.base, rly.components, rly.state, connect, fleet, herdr-work, hub, components, utilities;
+
 @import "@knpkv/rly/styles.css";
 @import "@knpkv/herdr-connect/styles.css";
 @import "@knpkv/herdr-work/styles.css";
 @import "@knpkv/codecommit-web/host/style.css";
+@import "@knpkv/codecommit-web/views/style.css";
 @import "./styles.css";
 @import "./superapp.css";
 @import "./today.css";
 @import "./usage-details.css";
 @import "./blocked-connect.css";
+
+@layer fleet {
+  .code-review-read-announcement {
+    position: absolute;
+    inset-block-start: 0;
+    inset-inline-start: 0;
+    inline-size: 1px;
+    block-size: 1px;
+    margin: 0;
+    padding: 0;
+    overflow: clip;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}

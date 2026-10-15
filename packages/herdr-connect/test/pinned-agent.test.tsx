@@ -65,6 +65,10 @@ describe("PinnedAgents", () => {
       "Pinned: agent-worker, Working"
     ])
     expect(controls[0]?.querySelector("svg")?.getAttribute("aria-hidden")).toBe("true")
+    const state = document.querySelector(".connect-pin-state")
+    expect(state?.textContent).toBe("Working")
+    expect(state?.getAttribute("data-tone")).toBe("progress")
+    expect(state?.children).toHaveLength(0)
     expect(controls.map((button) => button.getAttribute("tabindex"))).toEqual(["-1", "0"])
   })
 

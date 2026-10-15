@@ -87,7 +87,7 @@ export const placeAll = (patch: Patch, findings: Findings): ReadonlyArray<Placed
 
 // ── Lookups the renderer uses ─────────────────────────────────────────────────
 
-export const SEVERITIES: ReadonlyArray<Severity> = ["P1", "P2", "P3", "P4"]
+export const SEVERITIES: ReadonlyArray<Severity> = ["P0", "P1", "P2", "P3", "P4"]
 
 export const bySeverity = (a: Issue, b: Issue): number =>
   SEVERITIES.indexOf(a.severity) - SEVERITIES.indexOf(b.severity) || a.id - b.id

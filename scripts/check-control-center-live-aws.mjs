@@ -234,7 +234,7 @@ const validateProbeWorkflow = (workflow) => {
       },
       {
         name: "Upload sealed AWS probe runner",
-        uses: "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+        uses: "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9",
         with: {
           name: "control-center-live-aws-runner-${{ github.sha }}",
           path: "${{ runner.temp }}/control-center-live-aws-runner.tgz",
@@ -249,7 +249,7 @@ const validateProbeWorkflow = (workflow) => {
     [
       {
         name: "Download sealed AWS probe runner",
-        uses: "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+        uses: "actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333",
         with: {
           name: "control-center-live-aws-runner-${{ github.sha }}",
           path: "${{ runner.temp }}/control-center-live-aws-artifact"
@@ -322,8 +322,8 @@ const validateProbeWorkflow = (workflow) => {
     .filter((uses) => uses !== undefined && !uses.startsWith("./"))
   assert.deepEqual(externalActions, [
     "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
-    "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
-    "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+    "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9",
+    "actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333",
     "aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd"
   ])
   for (const action of externalActions) {
@@ -759,9 +759,12 @@ const program = Effect.gen(function* () {
   )
   expectWorkflowInvalid(probeWorkflow, (fixture) =>
     fixture.replace(
-      "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+      "actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333",
       "actions/download-artifact@v8"
     )
+  )
+  expectWorkflowInvalid(probeWorkflow, (fixture) =>
+    fixture.replace("actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9", "actions/upload-artifact@v7")
   )
   expectWorkflowInvalid(probeWorkflow, (fixture) =>
     fixture.replace("      - name: Download sealed AWS probe runner", "      - name: Install dependencies")

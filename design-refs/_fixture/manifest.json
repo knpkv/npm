@@ -1,0 +1,112 @@
+{
+  "version": 1,
+  "product": "_fixture",
+  "fixture": "fixture.json",
+  "live": {
+    "package": "@knpkv/design-conformance",
+    "adapter": "packages/design-conformance/scripts/fixture.ts"
+  },
+  "enforcement": {
+    "touched": "required",
+    "legacy": {
+      "mode": "report-only",
+      "until": "2026-10-18T00:00:00.000Z"
+    }
+  },
+  "files": {
+    "fixture.json": "0571c39360773ed10d528a681574516a921ca9d3cf29ed134c2f204a6a5d7da6",
+    "screens/screen.css": "b2a8c186c9ee80d2b25397b58c05f9716eb8b6bd9337e77f9e63b6611174b0e5",
+    "screens/screen.html": "1c084d3cf2844137569a3f71bde753bf0f6d310d59e1e9605d16dd37a8464137",
+    "screens/screen.js": "0db09ecbeaa6e5d2abca173aa208c542bee7bce233a28d08005318f1e5e3ee67"
+  },
+  "states": [
+    {
+      "screen": "toy",
+      "state": "passing",
+      "route": "/screen.html",
+      "viewports": [390, 1280],
+      "themes": ["light", "dark"],
+      "status": "implemented",
+      "regions": ["content"],
+      "source": "html",
+      "ref": "screens/screen.html"
+    },
+    {
+      "screen": "toy",
+      "state": "copy",
+      "route": "/screen.html",
+      "viewports": [390, 1280],
+      "themes": ["light", "dark"],
+      "status": "implemented",
+      "regions": ["content"],
+      "source": "html",
+      "ref": "screens/screen.html"
+    },
+    {
+      "screen": "toy",
+      "state": "geometry",
+      "route": "/screen.html",
+      "viewports": [390, 1280],
+      "themes": ["light", "dark"],
+      "status": "implemented",
+      "regions": ["content"],
+      "source": "html",
+      "ref": "screens/screen.html"
+    },
+    {
+      "screen": "toy",
+      "state": "token",
+      "route": "/screen.html",
+      "viewports": [390, 1280],
+      "themes": ["light", "dark"],
+      "status": "implemented",
+      "regions": ["content"],
+      "source": "html",
+      "ref": "screens/screen.html"
+    },
+    {
+      "screen": "toy",
+      "state": "pixel",
+      "route": "/screen.html",
+      "viewports": [390, 1280],
+      "themes": ["light", "dark"],
+      "status": "implemented",
+      "regions": ["content"],
+      "source": "html",
+      "ref": "screens/screen.html"
+    },
+    {
+      "screen": "toy",
+      "state": "waived",
+      "route": "/screen.html",
+      "viewports": [390, 1280],
+      "themes": ["light", "dark"],
+      "status": "implemented",
+      "regions": ["content"],
+      "source": "html",
+      "ref": "screens/screen.html"
+    },
+    {
+      "screen": "toy",
+      "state": "stale",
+      "route": "/screen.html",
+      "viewports": [390, 1280],
+      "themes": ["light", "dark"],
+      "status": "implemented",
+      "regions": ["content"],
+      "source": "html",
+      "ref": "screens/screen.html"
+    },
+    {
+      "screen": "toy",
+      "state": "legacy",
+      "route": "/screen.html",
+      "viewports": [390, 1280],
+      "themes": ["light", "dark"],
+      "status": "implemented",
+      "regions": ["content"],
+      "source": "html",
+      "ref": "screens/screen.html"
+    }
+  ]
+}

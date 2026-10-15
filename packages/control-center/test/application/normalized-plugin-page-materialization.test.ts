@@ -13,12 +13,14 @@ import {
   GraphNodeId,
   PluginConnectionId,
   RelationshipId,
+  ReleaseId,
   RoleAssignmentId,
   WorkspaceId
 } from "../../src/domain/identifiers.js"
 import { MaximumPluginPayloadBytes } from "../../src/domain/plugins/bounds.js"
 import { NormalizedPluginEventV1, PluginCheckpointV1, PluginSyncPageV1 } from "../../src/domain/plugins/events.js"
-import { Release } from "../../src/domain/release.js"
+import { Release, ReleaseVersion } from "../../src/domain/release.js"
+import { deriveReleaseRelay } from "../../src/domain/releaseRelay.js"
 import { SourceRevision, VendorImmutableId } from "../../src/domain/sourceRevision.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
 import { DEFAULT_WORKSPACE_SETTINGS, type WorkspaceSettingsV1 } from "../../src/domain/workspaceSettings.js"
@@ -30,6 +32,7 @@ import {
 } from "../../src/server/application/normalizedPluginPageMaterialization.js"
 import { pipelineStatus } from "../../src/server/application/pipelineExecutionProjection.js"
 import {
+  materializeRelationshipInference,
   reconcileRelationshipInferencePolicy,
   stableRelationshipInferenceIdentity
 } from "../../src/server/application/relationshipInferenceMaterialization.js"
@@ -4754,7 +4757,8 @@ describe("normalized plugin page materialization", () => {
     30_000
   )
 
-  it.effect("supersedes rule-owned inference only after the release snapshot exceeds its bound", () =>
+  // Corrects the former supersede-at-51 contract: inventory size never revokes unchanged evidence.
+  it.effect("preserves rule-owned inference at 50 and 51 releases instead of retiring it by count", () =>
     withMaterializer(Effect.gen(function*() {
       const persistence = yield* Persistence
       yield* setup
@@ -4831,8 +4835,151 @@ describe("normalized plugin page materialization", () => {
         revision: null
       })
       if (beyondBound._tag !== "relationship") return yield* Effect.die("expected relationship beyond release bound")
-      assert.strictEqual(beyondBound.value.lifecycle._tag, "superseded")
+      assert.strictEqual(beyondBound.value.lifecycle._tag, "verified")
     })))
+
+  for (const releaseCount of [49, 50, 120]) {
+    it.effect(`preserves unchanged release links with ${releaseCount} releases`, () =>
+      withMaterializer(Effect.gen(function*() {
+        const persistence = yield* Persistence
+        yield* setup
+        yield* setupConnection(CODECOMMIT_PLUGIN_ID, "codecommit")
+        const synchronize = (
+          pluginConnectionId: PluginConnectionId,
+          providerId: "codecommit" | "jira",
+          expectedRevision: number,
+          page: typeof PluginSyncPageV1.Type
+        ) =>
+          materializeNormalizedPluginPage({
+            workspaceId: WORKSPACE_ID,
+            pluginConnectionId,
+            providerId,
+            streamKey: firstPartyStream(providerId),
+            expectedRevision,
+            committedAt: T3,
+            successfulHealth: { _tag: "healthy", checkedAt: T3 }
+          }, page)
+        yield* synchronize(PLUGIN_ID, "jira", 0, inferenceJiraReleasePage)
+        yield* synchronize(CODECOMMIT_PLUGIN_ID, "codecommit", 0, codeCommitRelationshipPage)
+        const release = (yield* persistence.releases.list(WORKSPACE_ID, 10))
+          .find(({ release }) => release.version === "2026.29")?.release
+        if (release === undefined) return yield* Effect.die("expected synchronized release")
+        const before = yield* persistence.deliveryGraph.read(WORKSPACE_ID, {
+          _tag: "releaseSlice",
+          releaseId: release.id,
+          environmentId: null,
+          limit: 100
+        })
+        if (before._tag !== "releaseSlice") return yield* Effect.die("expected release slice")
+        const relationship = before.value.relationships.find(
+          ({ kind, lifecycle }) => kind === "implements" && lifecycle._tag === "verified"
+        )
+        if (relationship === undefined) return yield* Effect.die("expected verified implementation")
+        const page = Schema.decodeSync(PluginSyncPageV1)({
+          checkpointAfterPage: `fixture-release-count-${releaseCount}`,
+          hasMore: false,
+          events: Array.from({ length: releaseCount - 1 }, (_, offset): typeof NormalizedPluginEventV1.Encoded => ({
+            _tag: "UpsertEntity",
+            eventId: `fixture-release-count-${offset + 1}`,
+            observedAt: "2026-07-19T09:02:40.000Z",
+            revision: `candidate:fixture-release-${offset + 1}`,
+            entityType: "release",
+            vendorImmutableId: `jira-version:fixture-release-${offset + 1}`,
+            sourceUrl: null,
+            title: `Fixture release ${offset + 1}`,
+            attributes: { serviceName: "Fixture service", version: `fixture-${offset + 1}`, lifecycle: "candidate" }
+          }))
+        })
+        yield* synchronize(PLUGIN_ID, "jira", 1, page)
+        assert.lengthOf(yield* persistence.releases.list(WORKSPACE_ID, 200), releaseCount)
+        const after = yield* persistence.deliveryGraph.read(WORKSPACE_ID, {
+          _tag: "relationship",
+          relationshipId: relationship.relationshipId,
+          revision: null
+        })
+        if (after._tag !== "relationship") return yield* Effect.die("expected retained implementation")
+        assert.strictEqual(after.value.lifecycle._tag, "verified")
+        assert.strictEqual(after.value.revision, relationship.revision, "unchanged evidence must not churn the edge")
+      })))
+  }
+
+  /** One bounded keyset page per 200 releases; an inference fold must never repeat that scan per release. */
+  it.effect("reads release enumeration pages once each across the old bound and the cursor boundary", () =>
+    Effect.forEach([49, 50, 51, 120, 201], (releaseCount) =>
+      withMaterializer(Effect.gen(function*() {
+        const persistence = yield* Persistence
+        const cryptoService = yield* Crypto.Crypto
+        yield* setup
+        yield* materializeNormalizedPluginPage({
+          workspaceId: WORKSPACE_ID,
+          pluginConnectionId: PLUGIN_ID,
+          providerId: "jira",
+          streamKey: firstPartyStream("jira"),
+          expectedRevision: 0,
+          committedAt: T3,
+          successfulHealth: { _tag: "healthy", checkedAt: T3 }
+        }, inferenceJiraReleasePage)
+        const original = (yield* persistence.releases.list(WORKSPACE_ID, 1))[0]
+        if (original === undefined) return yield* Effect.die("expected first release")
+        const freshness = original.release.freshness
+        if (freshness._tag !== "current") return yield* Effect.die("expected current fixture release")
+        for (let index = 1; index < releaseCount; index++) {
+          const version = ReleaseVersion.make(`fixture-cost-${index}`)
+          const id = ReleaseId.make(yield* stableRelationshipInferenceIdentity(cryptoService, version))
+          yield* persistence.releases.create(
+            WORKSPACE_ID,
+            Release.make({
+              ...original.release,
+              id,
+              version,
+              relay: deriveReleaseRelay(id),
+              sourceRevisions: original.release.sourceRevisions.map((source) => ({
+                ...source,
+                vendorImmutableId: VendorImmutableId.make(`jira-version:${version}`)
+              })),
+              freshness: {
+                ...freshness,
+                provenance: {
+                  ...freshness.provenance,
+                  sourceRevision: {
+                    ...freshness.provenance.sourceRevision,
+                    vendorImmutableId: VendorImmutableId.make(`jira-version:${version}`)
+                  }
+                }
+              }
+            })
+          )
+        }
+        let releasePageReads = 0
+        const measured = Persistence.of({
+          ...persistence,
+          releases: {
+            ...persistence.releases,
+            listForReconciliation: (...args: Parameters<PersistenceService["releases"]["listForReconciliation"]>) =>
+              Effect.sync(() => {
+                releasePageReads += 1
+              }).pipe(
+                Effect.andThen(persistence.releases.listForReconciliation(...args))
+              )
+          }
+        })
+        yield* materializeRelationshipInference(
+          measured,
+          (identity) => stableRelationshipInferenceIdentity(cryptoService, identity),
+          {
+            workspaceId: WORKSPACE_ID,
+            committedAt: T3,
+            streamKey: firstPartyStream("jira"),
+            successfulHealth: { _tag: "healthy", checkedAt: T3 }
+          },
+          DEFAULT_WORKSPACE_SETTINGS
+        )
+        assert.strictEqual(
+          releasePageReads,
+          Math.ceil(releaseCount / 200),
+          `${releaseCount} releases must use one scan of the bounded release pages`
+        )
+      })), { discard: true }))
 
   it.effect("keeps a missing implementation endpoint stable when the Jira issue key changes", () =>
     withMaterializer(Effect.gen(function*() {

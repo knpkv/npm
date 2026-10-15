@@ -1043,6 +1043,117 @@
         },
         "type": "object"
       },
+      "BulkAgentSessionInvocation": {
+        "additionalProperties": false,
+        "description": "One agent-session invocation for an issue.",
+        "properties": {
+          "agentId": {
+            "description": "Rovo agent ID.",
+            "example": "0010fa86-cd74-46eb-a2ee-229a98250b9c",
+            "type": "string"
+          },
+          "issueId": { "description": "Numeric issue ID as a string.", "example": "10001", "type": "string" },
+          "requestId": { "description": "Unique per-item UUID.", "format": "uuid", "type": "string" },
+          "userPrompt": { "description": "Optional prompt for this invocation.", "nullable": true, "type": "string" }
+        },
+        "required": ["agentId", "issueId", "requestId"],
+        "type": "object"
+      },
+      "BulkAgentSessionItemError": {
+        "additionalProperties": false,
+        "description": "An item-level error inside an HTTP 200 response.",
+        "nullable": true,
+        "properties": {
+          "message": { "description": "Error message.", "type": "string" },
+          "statusCode": { "description": "HTTP status code.", "format": "int32", "type": "integer" },
+          "type": {
+            "description": "Error type.",
+            "enum": [
+              "AGENT_NOT_ASSIGNABLE",
+              "AGENT_NOT_FOUND",
+              "INVALID_REQUEST_ID",
+              "ISSUE_NOT_FOUND",
+              "IDEMPOTENCY_CONFLICT",
+              "ISSUE_VERSION_MISSING",
+              "ISSUE_ACCESS_DENIED",
+              "RATE_LIMITED",
+              "CONCURRENCY_SATURATED",
+              "AGENT_TRIGGER_FAILED",
+              "IDEMPOTENCY_ERROR",
+              "PRIOR_ATTEMPT_FAILED",
+              "SESSION_NOT_STARTED",
+              "IN_DOUBT",
+              "UNEXPECTED_ERROR"
+            ],
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "BulkAgentSessionOutcome": {
+        "additionalProperties": false,
+        "description": "The start outcome for one invocation.",
+        "properties": {
+          "agentId": { "description": "The caller's Rovo agent ID.", "type": "string" },
+          "conversationId": {
+            "description": "Conversation ID for STARTED or ALREADY\\_STARTED only.",
+            "nullable": true,
+            "type": "string"
+          },
+          "error": { "$ref": "#/components/schemas/BulkAgentSessionItemError" },
+          "issueId": { "description": "Numeric issue ID.", "example": "10001", "type": "string" },
+          "requestId": {
+            "description": "The per-item requestId for batch; the shared clientMutationId for uniform.",
+            "type": "string"
+          },
+          "result": {
+            "description": "STARTED: session started; ALREADY\\_STARTED: recorded successful retry; FAILED: invocation failed; RATE\\_LIMITED: admission denied; IN\\_DOUBT: start could not be confirmed.",
+            "enum": ["STARTED", "ALREADY_STARTED", "FAILED", "RATE_LIMITED", "IN_DOUBT"],
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "BulkAgentSessionsResponse": {
+        "additionalProperties": false,
+        "description": "Session-start outcomes, not completion of the agent's work.",
+        "properties": {
+          "alreadyStartedCount": {
+            "description": "Number of ALREADY\\_STARTED items.",
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "failedCount": {
+            "description": "Number of FAILED and IN\\_DOUBT items.",
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "rateLimitedCount": {
+            "description": "Number of RATE\\_LIMITED items.",
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "results": {
+            "description": "One outcome per requested item.",
+            "items": { "$ref": "#/components/schemas/BulkAgentSessionOutcome" },
+            "type": "array"
+          },
+          "startedCount": {
+            "description": "Number of STARTED items.",
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "success": {
+            "description": "True when startedCount or alreadyStartedCount is greater than zero. Does not indicate that every item succeeded.",
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
       "BulkChangeOwnerDetails": {
         "additionalProperties": false,
         "description": "Details for changing owners of shareable entities",
@@ -1489,6 +1600,43 @@
           }
         },
         "required": ["results"],
+        "type": "object"
+      },
+      "BulkStartAgentSessionsBatchRequest": {
+        "additionalProperties": false,
+        "description": "A batch of agent-session invocations.",
+        "properties": {
+          "clientMutationId": { "description": "Caller-supplied UUID", "format": "uuid", "type": "string" },
+          "invocations": {
+            "description": "Between 1 and 50 invocations. Request IDs must be unique within the request.",
+            "items": { "$ref": "#/components/schemas/BulkAgentSessionInvocation" },
+            "type": "array"
+          }
+        },
+        "required": ["clientMutationId", "invocations"],
+        "type": "object"
+      },
+      "BulkStartUniformAgentSessionsRequest": {
+        "additionalProperties": false,
+        "description": "Start one agent across multiple issues with a shared optional prompt.",
+        "properties": {
+          "agentId": {
+            "description": "Rovo agent ID.",
+            "example": "0010fa86-cd74-46eb-a2ee-229a98250b9c",
+            "type": "string"
+          },
+          "clientMutationId": { "description": "Caller-supplied UUID.", "format": "uuid", "type": "string" },
+          "issueIds": {
+            "description": "Between 1 and 50 numeric issue-ID strings. IDs must be unique.",
+            "items": {
+              "description": "Between 1 and 50 numeric issue-ID strings. IDs must be unique.",
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "userPrompt": { "description": "Optional prompt applied to every issue.", "nullable": true, "type": "string" }
+        },
+        "required": ["agentId", "clientMutationId", "issueIds"],
         "type": "object"
       },
       "BulkTransitionGetAvailableTransitions": {
@@ -20253,10 +20401,178 @@
     "license": { "name": "Apache 2.0", "url": "http://www.apache.org/licenses/LICENSE-2.0.html" },
     "termsOfService": "https://developer.atlassian.com/platform/marketplace/atlassian-developer-terms/",
     "title": "The Jira Cloud platform REST API",
-    "version": "1001.0.0-SNAPSHOT-d8285b35176e627de42fb7c0a2202b5467ce28e0"
+    "version": "1001.0.0-SNAPSHOT-ea70632e0e06e672b6c58852a35aaed86a7d313e"
   },
   "openapi": "3.0.1",
   "paths": {
+    "/rest/api/3/agents/bulk/invoke/batch": {
+      "post": {
+        "deprecated": false,
+        "description": "Starts agent sessions for a batch of issues, with an agent and optional prompt specified per invocation. You can submit between 1 and 50 invocations in one request, including multiple invocations for the same issue. Supply numeric issue-ID strings and Rovo agent IDs. Session-start outcomes are returned inline; the agent's work continues asynchronously.\n\n**[Permissions](#permissions) required:**\n\n *  Global bulk change [permission](https://support.atlassian.com/jira-cloud-administration/docs/manage-global-permissions/).\n *  Browse [project permission](https://support.atlassian.com/jira-cloud-administration/docs/manage-project-permissions/) in all projects that contain the selected issues.\n *  If [issue-level security](https://confluence.atlassian.com/x/J4lKLg) is configured, issue-level security permission to view the issue.",
+        "operationId": "startBatch",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "clientMutationId": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+                "invocations": [
+                  {
+                    "agentId": "0010fa86-cd74-46eb-a2ee-229a98250b9c",
+                    "issueId": "10001",
+                    "requestId": "64cbeead-43ee-4de6-a535-281417003efd",
+                    "userPrompt": "Summarize the next steps for this issue."
+                  },
+                  {
+                    "agentId": "0010fa86-cd74-46eb-a2ee-229a98250b9c",
+                    "issueId": "10002",
+                    "requestId": "cf399ad9-9835-4fc5-b830-abae6c682f06"
+                  }
+                ]
+              },
+              "schema": { "$ref": "#/components/schemas/BulkStartAgentSessionsBatchRequest" }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": "{\"alreadyStartedCount\":0,\"failedCount\":1,\"rateLimitedCount\":0,\"results\":[{\"agentId\":\"0010fa86-cd74-46eb-a2ee-229a98250b9c\",\"conversationId\":\"873208ba-213e-4018-99ab-15d994ed94c2\",\"issueId\":\"10001\",\"requestId\":\"64cbeead-43ee-4de6-a535-281417003efd\",\"result\":\"STARTED\"},{\"agentId\":\"0010fa86-cd74-46eb-a2ee-229a98250b9c\",\"error\":{\"message\":\"The issue does not exist.\",\"statusCode\":400,\"type\":\"ISSUE_NOT_FOUND\"},\"issueId\":\"10002\",\"requestId\":\"cf399ad9-9835-4fc5-b830-abae6c682f06\",\"result\":\"FAILED\"}],\"startedCount\":1,\"success\":true}",
+                "schema": { "$ref": "#/components/schemas/BulkAgentSessionsResponse" }
+              }
+            },
+            "description": "Returned if the request is successful."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": "{\"errorMessages\":[\"Duplicate requestId values are not allowed.\"],\"errors\":{}}",
+                "schema": { "$ref": "#/components/schemas/ErrorCollection" }
+              }
+            },
+            "description": "Returned if the request is invalid."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": "{\"errorMessages\":[\"Authentication is required.\"],\"errors\":{}}",
+                "schema": { "$ref": "#/components/schemas/ErrorCollection" }
+              }
+            },
+            "description": "Returned if authentication credentials are incorrect or missing."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": "{\"errorMessages\":[\"The global bulk change permission is required.\"],\"errors\":{}}",
+                "schema": { "$ref": "#/components/schemas/ErrorCollection" }
+              }
+            },
+            "description": "Returned if the user does not have the required product access or global bulk change permission."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "example": "{\"errorMessages\":[\"The bulk agent session rate limit has been exceeded.\"],\"errors\":{}}",
+                "schema": { "$ref": "#/components/schemas/ErrorCollection" }
+              }
+            },
+            "description": "Returned if rate limiting rejects the request."
+          }
+        },
+        "security": [{ "basicAuth": [] }, { "OAuth2": ["write:jira-work"] }],
+        "summary": "Bulk start agent sessions (batch)",
+        "tags": ["Agents"],
+        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": true }],
+        "x-atlassian-oauth2-scopes": [
+          { "scheme": "OAuth2", "scopes": ["write:jira-work"], "state": "Current" },
+          { "scheme": "OAuth2", "scopes": ["write:issue:jira", "read:issue:jira"], "state": "Beta" }
+        ],
+        "x-experimental": true,
+        "x-atlassian-connect-scope": "INACCESSIBLE"
+      }
+    },
+    "/rest/api/3/agents/bulk/invoke/uniform": {
+      "post": {
+        "deprecated": false,
+        "description": "Starts the same agent on between 1 and 50 issues, with an optional prompt shared by every invocation. Supply numeric issue-ID strings, and a Rovo agent ID. Session-start outcomes are returned inline; the agent's work continues asynchronously.\n\n**[Permissions](#permissions) required:**\n\n *  Global bulk change [permission](https://support.atlassian.com/jira-cloud-administration/docs/manage-global-permissions/).\n *  Browse [project permission](https://support.atlassian.com/jira-cloud-administration/docs/manage-project-permissions/) in all projects that contain the selected issues.\n *  If [issue-level security](https://confluence.atlassian.com/x/J4lKLg) is configured, issue-level security permission to view the issue.",
+        "operationId": "startUniform",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "agentId": "0010fa86-cd74-46eb-a2ee-229a98250b9c",
+                "clientMutationId": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+                "issueIds": ["10001", "10002", "10003"],
+                "userPrompt": "Summarize the next steps for this issue."
+              },
+              "schema": { "$ref": "#/components/schemas/BulkStartUniformAgentSessionsRequest" }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": "{\"alreadyStartedCount\":1,\"failedCount\":1,\"rateLimitedCount\":1,\"results\":[{\"agentId\":\"0010fa86-cd74-46eb-a2ee-229a98250b9c\",\"conversationId\":\"873208ba-213e-4018-99ab-15d994ed94c2\",\"issueId\":\"10001\",\"requestId\":\"f47ac10b-58cc-4372-a567-0e02b2c3d479\",\"result\":\"ALREADY_STARTED\"},{\"agentId\":\"0010fa86-cd74-46eb-a2ee-229a98250b9c\",\"error\":{\"message\":\"Rate limit exceeded.\",\"statusCode\":429,\"type\":\"RATE_LIMITED\"},\"issueId\":\"10002\",\"requestId\":\"f47ac10b-58cc-4372-a567-0e02b2c3d479\",\"result\":\"RATE_LIMITED\"},{\"agentId\":\"0010fa86-cd74-46eb-a2ee-229a98250b9c\",\"error\":{\"message\":\"The session start could not be confirmed.\",\"statusCode\":500,\"type\":\"IN_DOUBT\"},\"issueId\":\"10003\",\"requestId\":\"f47ac10b-58cc-4372-a567-0e02b2c3d479\",\"result\":\"IN_DOUBT\"}],\"startedCount\":0,\"success\":true}",
+                "schema": { "$ref": "#/components/schemas/BulkAgentSessionsResponse" }
+              }
+            },
+            "description": "Returned if the request is successful."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": "{\"errorMessages\":[\"Duplicate issue IDs are not allowed.\"],\"errors\":{}}",
+                "schema": { "$ref": "#/components/schemas/ErrorCollection" }
+              }
+            },
+            "description": "Returned if the request is invalid."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": "{\"errorMessages\":[\"Authentication is required.\"],\"errors\":{}}",
+                "schema": { "$ref": "#/components/schemas/ErrorCollection" }
+              }
+            },
+            "description": "Returned if authentication credentials are incorrect or missing."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": "{\"errorMessages\":[\"The global bulk change permission is required.\"],\"errors\":{}}",
+                "schema": { "$ref": "#/components/schemas/ErrorCollection" }
+              }
+            },
+            "description": "Returned if the user does not have the required product access or global bulk change permission."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "example": "{\"errorMessages\":[\"The bulk agent session rate limit has been exceeded.\"],\"errors\":{}}",
+                "schema": { "$ref": "#/components/schemas/ErrorCollection" }
+              }
+            },
+            "description": "Returned if rate limiting rejects the request."
+          }
+        },
+        "security": [{ "basicAuth": [] }, { "OAuth2": ["write:jira-work"] }],
+        "summary": "Bulk start agent sessions (uniform)",
+        "tags": ["Agents"],
+        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": true }],
+        "x-atlassian-oauth2-scopes": [
+          { "scheme": "OAuth2", "scopes": ["write:jira-work"], "state": "Current" },
+          { "scheme": "OAuth2", "scopes": ["write:issue:jira", "read:issue:jira"], "state": "Beta" }
+        ],
+        "x-experimental": true,
+        "x-atlassian-connect-scope": "INACCESSIBLE"
+      }
+    },
     "/rest/api/3/announcementBanner": {
       "get": {
         "deprecated": false,
@@ -26944,6 +27260,12 @@
               }
             },
             "description": "Returned if the custom field is not found or the context doesn't match the custom field."
+          },
+          "422": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/LimitExceededResponseBean" } }
+            },
+            "description": "Returned if creating the options would exceed the maximum number of options allowed for the custom field."
           }
         },
         "security": [{ "basicAuth": [] }, { "OAuth2": ["manage:jira-configuration"] }],
@@ -29339,7 +29661,7 @@
         ],
         "responses": {
           "204": { "description": "Returned if the request is successful." },
-          "400": { "description": "Returned if the filter is not found." },
+          "400": { "description": "Returned if the filter is not found or is used by a board." },
           "401": { "description": "Returned if the user does not have permission to delete the filter." }
         },
         "security": [{ "basicAuth": [] }, { "OAuth2": ["write:jira-work"] }, {}],
@@ -38457,6 +38779,18 @@
             "in": "query",
             "name": "maxResults",
             "schema": { "default": 1000, "format": "int32", "type": "integer" }
+          },
+          {
+            "description": "Case-insensitive prefix used to filter labels before pagination.",
+            "in": "query",
+            "name": "query",
+            "schema": { "type": "string" }
+          },
+          {
+            "description": "RECENT\\_PROJECTS or ALL\\_BROWSEABLE\\_PROJECTS. Omitted scope retains the unbounded search. Blank or unrecognised values use ALL\\_BROWSEABLE\\_PROJECTS.",
+            "in": "query",
+            "name": "scope",
+            "schema": { "type": "string" }
           }
         ],
         "responses": {
@@ -56313,6 +56647,10 @@
   },
   "servers": [{ "url": "https://your-domain.atlassian.net" }],
   "tags": [
+    {
+      "description": "Use the APIs to invoke agents in bulk for multiple issues. Bulk invocation responses report session-start outcomes; the agent's work continues asynchronously.",
+      "name": "Agents"
+    },
     {
       "description": "This resource represents an announcement banner. Use it to retrieve and update banner configuration.",
       "name": "Announcement banner"

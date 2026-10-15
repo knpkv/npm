@@ -2,6 +2,8 @@
 import { createElement } from "react"
 
 import {
+  PlanView,
+  type PlanViewProps,
   ResourceDetailView,
   type ResourceDetailViewProps,
   type StackDetailState,
@@ -43,3 +45,6 @@ export const resourceProps: ResourceDetailViewProps = {
 }
 export const detailView = createElement(StackDetailView, detailProps)
 export const resourceView = createElement(ResourceDetailView, resourceProps)
+
+export const planProps: PlanViewProps = { state: { _tag: "NotConnected" }, onReadAgain: () => undefined }
+export const planView = createElement(PlanView, planProps)

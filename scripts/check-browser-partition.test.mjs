@@ -54,12 +54,13 @@ const [workflowText, browserPackages] = await runtime.runPromise(
 const jobs = parseDocument(workflowText).toJS().jobs
 const suiteJob = jobs["browser-suite"]
 const requiredJob = jobs.browser
+const suiteTimeout = "${{ matrix.package == 'herdr-connect' && 25 || 15 }}"
 
 test("the matrix runs exactly the packages that declare a browser suite", () => {
   assert(browserPackages.length > 0)
   assert.deepEqual([...suiteJob.strategy.matrix.package].sort(), browserPackages)
   assert.equal(suiteJob.strategy["fail-fast"], false)
-  assert.equal(suiteJob["timeout-minutes"], 15)
+  assert.equal(suiteJob["timeout-minutes"], suiteTimeout)
   assert.equal(suiteJob["continue-on-error"], undefined)
   assert(suiteJob.steps.some((step) => step.run === 'pnpm --filter "@knpkv/${{ matrix.package }}" run test:browser'))
   const buildStep = suiteJob.steps.findIndex((step) => step.run?.includes("${{ matrix.package }}^..."))
@@ -114,5 +115,66 @@ test("the Browser gate script fails for every matrix result except success", asy
       result === "success",
       `matrix result ${JSON.stringify(result)}`
     )
+  }
+})
+
+test("design conformance publishes the fixture explanation before its deliberate FAIL report", async () => {
+  await runtime.runPromise(
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem
+      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+      const workflow = parseDocument(
+        yield* fs.readFileString(fileURLToPath(new URL("../.github/workflows/design-conformance.yml", import.meta.url)))
+      ).toJS()
+      const publish = workflow.jobs.product.steps.find(
+        (step) => step.name === "Publish required and legacy drift results"
+      )
+      assert(publish, "design-conformance keeps a tested summary publication step")
+      const root = yield* fs.makeTempDirectoryScoped()
+      for (const product of ["_fixture", "workspace"]) {
+        const directory = `${root}/test-results/design-conformance/current/${product}`
+        yield* fs.makeDirectory(directory, { recursive: true })
+        yield* fs.writeFileString(
+          `${directory}/summary.md`,
+          product === "_fixture" ? "FAIL: deliberate fixture drift\n" : "Product report\n"
+        )
+        const summary = `${root}/${product}-summary.md`
+        const exitCode = yield* spawner.exitCode(
+          ChildProcess.make("/bin/bash", ["-e", "-o", "pipefail", "-c", publish.run], {
+            cwd: root,
+            env: { PRODUCT: product, GITHUB_STEP_SUMMARY: summary, PATH: "/usr/bin:/bin" },
+            extendEnv: false,
+            stdout: "ignore",
+            stderr: "pipe"
+          })
+        )
+        assert.equal(exitCode, ChildProcessSpawner.ExitCode(0))
+        const text = yield* fs.readFileString(summary)
+        if (product === "_fixture") {
+          assert.match(text, /Toy product tests assert/u)
+          assert.doesNotMatch(text, /FAIL/u)
+        } else assert.equal(text, "Product report\n")
+      }
+    }).pipe(Effect.scoped)
+  )
+})
+
+test("manual design conformance uses main while PR runs retain their base SHA in every comparison", async () => {
+  const workflow = parseDocument(
+    await runtime.runPromise(
+      FileSystem.FileSystem.pipe(
+        Effect.flatMap((fs) =>
+          fs.readFileString(fileURLToPath(new URL("../.github/workflows/design-conformance.yml", import.meta.url)))
+        )
+      )
+    )
+  ).toJS()
+  const discover = workflow.jobs.products.steps.find((step) => step.id === "matrix")
+  const waivers = workflow.jobs.products.steps.find((step) => step.name === "Flag waiver changes for review")
+  for (const base of [discover.env.DESIGN_BASE_REF, waivers.env.BASE_REF, workflow.jobs.product.env.DESIGN_BASE_REF]) {
+    assert.equal(base, "${{ github.event.pull_request.base.sha || 'origin/main' }}")
+  }
+  for (const job of [workflow.jobs.products, workflow.jobs.product]) {
+    assert.equal(job.steps.find((step) => step.uses?.startsWith("actions/checkout@")).with["fetch-depth"], 0)
   }
 })

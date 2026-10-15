@@ -39,5 +39,59 @@
       "readOnly": true,
       "type": "array"
     }
+  },
+  {
+    "op": "remove",
+    "path": "/components/schemas/JqlQueryClause/additionalProperties"
+  },
+  {
+    "op": "remove",
+    "path": "/components/schemas/WorkflowCondition/additionalProperties"
+  },
+  {
+    "op": "remove",
+    "path": "/components/schemas/CustomFieldContextDefaultValue/additionalProperties"
+  },
+  {
+    "op": "replace",
+    "path": "/components/schemas/IssueBulkMovePayload/required",
+    "value": ["targetToSourcesMapping"]
+  },
+  {
+    "op": "replace",
+    "path": "/components/schemas/targetToSourcesMapping/required/4",
+    "value": "issueIdsOrKeys"
+  },
+  {
+    "op": "remove",
+    "path": "/components/schemas/fields/additionalProperties"
+  },
+  {
+    "op": "remove",
+    "path": "/components/schemas/fields/properties"
+  },
+  {
+    "op": "remove",
+    "path": "/components/schemas/CustomContextVariable/additionalProperties"
+  },
+  {
+    "op": "replace",
+    "path": "/components/schemas/SecuritySchemeMembersRequest/required",
+    "value": ["members"]
+  },
+  {
+    "op": "add",
+    "path": "/components/schemas/UserContextVariable/properties/type/enum",
+    "value": ["user"]
+  },
+  {
+    "op": "add",
+    "path": "/components/schemas/IssueContextVariable/properties/type/enum",
+    "value": ["issue"]
+  },
+  {
+    "op": "add",
+    "path": "/components/schemas/JsonContextVariable/properties/type/enum",
+    "value": ["json"]
   }
 ]

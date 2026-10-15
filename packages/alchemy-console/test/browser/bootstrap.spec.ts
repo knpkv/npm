@@ -10,6 +10,7 @@ import { ResourceSummary, StackState } from "../../src/schema.js"
 import { Catalog } from "../../src/server/Catalog.js"
 import { requestLoginUrl } from "../../src/server/ControlSocket.js"
 import type { ControlError } from "../../src/server/ControlSocket.js"
+import { disconnectedLayer } from "../../src/server/PlanReader.js"
 import { makeServer } from "../../src/server/Server.js"
 import { FixtureSource, fixtureSourceLayer } from "../catalogFixture.js"
 import { detailFixtures, detailStack } from "../consumer/detail-fixtures.js"
@@ -49,7 +50,11 @@ const browserLayer = Layer.effect(
       })
     return BrowserFixture.of({ url, mint, set })
   })
-).pipe(Layer.provide(Catalog.layer.pipe(Layer.provideMerge(fixtureSourceLayer))), Layer.provide(NodeServices.layer))
+).pipe(
+  Layer.provide(disconnectedLayer),
+  Layer.provide(Catalog.layer.pipe(Layer.provideMerge(fixtureSourceLayer))),
+  Layer.provide(NodeServices.layer)
+)
 
 type Login = {
   readonly url: string
@@ -477,7 +482,9 @@ test("built views consumer loads creature and both fonts beneath /console/", asy
               await expect(page.getByRole("heading", { level: 1 })).toHaveCount(1)
               await page.evaluate(() => document.fonts.ready)
               expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
-              await expect(page.getByRole("tab", { name: "Plan", exact: true })).toHaveCount(0)
+              await expect(page.getByRole("tab", { name: "Plan", exact: true })).toHaveCount(
+                fixture.resource === null ? 1 : 0
+              )
               await expect(page.getByRole("button", { name: "Preview changes" })).toHaveCount(0)
               if (fixture.resource === null) {
                 await expect(
@@ -578,6 +585,34 @@ test("built views consumer loads creature and both fonts beneath /console/", asy
             }
           }
         }
+        // Plan's design region has a stable header and table rhythm independent of host shell width.
+        await page.setViewportSize({ width: 1054, height: 1100 })
+        await page.goto(`${url}?fixture=7a`)
+        await expect(page.getByRole("table", { name: "Latest CI plan" })).toBeVisible()
+        await page.evaluate(() => document.fonts.ready)
+        const planGeometry = await page.locator(".ac-detail").evaluate((element) => {
+          const origin = element.getBoundingClientRect()
+          const title = element.querySelector("h1")
+          const panel = element.querySelector(".ac-plan")
+          const columns = element.querySelector(".ac-plan-table thead tr")
+          return {
+            width: origin.width,
+            panelStart: panel === null ? null : panel.getBoundingClientRect().y - origin.y,
+            titleSize: title === null ? null : getComputedStyle(title).fontSize,
+            columnHeight: columns?.getBoundingClientRect().height ?? null
+          }
+        })
+        expect(planGeometry.width).toBe(974)
+        expect(planGeometry.titleSize).toBe("44px")
+        expect(planGeometry.panelStart).toBeCloseTo(259.8, 0)
+        expect(planGeometry.columnHeight).toBeCloseTo(36.6, 0)
+        await expect(page.getByRole("rowheader")).toHaveCount(6)
+        await page.setViewportSize({ width: 388, height: 1100 })
+        await page.evaluate(() => document.fonts.ready)
+        const mobilePlan = await page.getByRole("table", { name: "Latest CI plan" }).boundingBox()
+        const firstPlanRow = await page.getByRole("rowheader").first().locator("..").boundingBox()
+        expect(mobilePlan?.height).toBeCloseTo(1052.9, 0)
+        expect(firstPlanRow?.y).toBeCloseTo(mobilePlan?.y ?? -1, 0)
         for (const width of [320, 390]) {
           const context = await browser.newContext({
             viewport: { width, height: 960 },
@@ -587,6 +622,28 @@ test("built views consumer loads creature and both fonts beneath /console/", asy
           })
           try {
             const phone = await context.newPage()
+            await phone.goto(`${url}?fixture=7a`)
+            const planTable = phone.getByRole("table", { name: "Latest CI plan" })
+            await expect(planTable.getByRole("rowheader")).toHaveCount(6)
+            await phone.evaluate(() => document.fonts.ready)
+            const property = planTable.locator("code").first()
+            await property.evaluate((element) => {
+              element.textContent = "P".repeat(64)
+            })
+            await planTable.getByRole("rowheader").first().locator("b").evaluate((element) => {
+              element.textContent = `stack/${"unbreakable".repeat(40)}`
+            })
+            for (const token of [property, planTable.getByRole("rowheader").first().locator("b")]) {
+              const geometry = await token.evaluate((element) => ({
+                width: element.getBoundingClientRect().width,
+                cellWidth: element.closest("th,td")?.getBoundingClientRect().width ?? 0,
+                scrollWidth: element.scrollWidth,
+                clientWidth: element.clientWidth
+              }))
+              expect(geometry.width).toBeGreaterThan(0)
+              expect(geometry.width).toBeLessThanOrEqual(geometry.cellWidth)
+              expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.clientWidth + 1)
+            }
             for (const fixture of ["6a", "6g"]) {
               await phone.goto(`${url}?fixture=${fixture}`)
               await expect(phone.locator(".ac-detail-table tbody th").first()).toBeVisible()

@@ -56,7 +56,14 @@ import { makeFleetHubModuleViews } from "./fleet-module-view.js"
 import { TodayReadFailed } from "./today-module-view.js"
 import { makeUsageModuleViews, type UsageModuleReads } from "./usage-module-view.js"
 import { makeCodeModuleViews } from "./code-module-view.js"
-import { loadCodeQueue, loadCodeDetail, loadCodeDiff, loadCodeContent, type CodeModuleReads } from "./code-client.js"
+import {
+  loadCodeQueue,
+  loadCodeDetail,
+  loadCodeDiff,
+  loadCodeContent,
+  loadCodeReview,
+  type CodeModuleReads
+} from "./code-client.js"
 import { NeedsYouResult } from "./modules.js"
 import { RefreshStatus } from "./refresh-status.js"
 import { dashboardPolls } from "./internal/dashboard-polls.js"
@@ -799,6 +806,7 @@ const runCodeRead = <A, E>(effect: Effect.Effect<A, E, HttpClient.HttpClient>): 
 const codeReads: CodeModuleReads = {
   queue: (query) => runCodeRead(loadCodeQueue(query)),
   detail: (ref) => runCodeRead(loadCodeDetail(ref)),
+  review: (ref) => runCodeRead(loadCodeReview(ref)),
   diff: (ref) => runCodeRead(loadCodeDiff(ref)),
   content: (query) => runCodeRead(loadCodeContent(query))
 }

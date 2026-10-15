@@ -44,7 +44,7 @@ for (
         expect(dimensions.width).toBe(info.project.name === "phone" ? 24 : 32)
         expect(dimensions.height).toBe(dimensions.width)
         expect(dimensions.animations).toBe(0)
-        expect((await launcher.boundingBox())?.height).toBe(info.project.name === "phone" ? 44 : 32)
+        expect((await launcher.boundingBox())?.height).toBe(44)
         const padding = await launcher.evaluate((button) => {
           const box = button.getBoundingClientRect()
           const style = getComputedStyle(button)
@@ -147,11 +147,13 @@ test("switches pixel-sized drawings at the same breakpoint as the mark size", as
   const sidebar = page.locator(".superapp-sidebar .relay-chef-mark")
   for (const width of [639, 641]) {
     await page.setViewportSize({ width, height: 900 })
-    const size = width === 639 ? 24 : 32
+    const launcherSize = width === 639 ? 24 : 32
     // Installed chrome has a Home brand mark plus the single Ask Relay launcher.
     const visibleMarks = header.filter({ visible: true })
     expect(await visibleMarks.count()).toBeGreaterThan(0)
     for (const mark of await visibleMarks.all()) {
+      const brand = await mark.evaluate((node) => node.closest(".superapp-brand") !== null)
+      const size = brand ? 28 : launcherSize
       await expect(mark.locator("[data-relay-chef-drawing=\"mark\"]:visible")).toHaveCount(1)
       await expect(mark.locator("[data-relay-chef-drawing=\"mark\"]:visible")).toHaveAttribute(
         "data-relay-chef-size",
@@ -166,5 +168,57 @@ test("switches pixel-sized drawings at the same breakpoint as the mark size", as
     for (const drawing of await sidebar.locator("[data-relay-chef-size=\"24\"]").all()) {
       await expect(drawing).toHaveCSS("display", "none")
     }
+  }
+})
+
+/** Shared mast target geometry applies outside Code too; glyph size does not shrink its hit area. */
+test("shared mast keeps centred brand and full-sized controls", async ({ page }, info) => {
+  await page.goto("/?relayFixture=idle#fleet/work")
+  const header = page.locator(".superapp-header")
+  const controls = await header.evaluate((root) => {
+    const box = (node: Element) => {
+      const rect = node.getBoundingClientRect()
+      return { x: rect.x, width: rect.width, height: rect.height }
+    }
+    const brand = root.querySelector(".superapp-brand")
+    const mark = brand?.querySelector("svg")
+    const ask = root.querySelector("[data-rly-relay-launcher]")
+    const bell = root.querySelector(".superapp-notifications")
+    const bellIcon = bell?.querySelector("svg")
+    if (
+      brand === null || mark === undefined || mark === null || ask === null || bell === null ||
+      bellIcon === undefined || bellIcon === null
+    ) throw new Error("Missing shared mast control")
+    const style = getComputedStyle(ask)
+    return {
+      brand: box(brand),
+      mark: box(mark),
+      ask: box(ask),
+      bell: box(bell),
+      bellIcon: box(bellIcon),
+      size: style.fontSize,
+      weight: style.fontWeight,
+      padding: style.paddingInlineStart,
+      markSize: mark.querySelector("[data-relay-chef-drawing=mark]")?.getAttribute("data-relay-chef-size")
+    }
+  })
+  expect(controls.ask.height).toBe(44)
+  expect(controls.bell.height).toBe(44)
+  expect(controls.bell.width).toBe(44)
+  expect(controls.bellIcon.width).toBe(19)
+  expect(controls.size).toBe("14px")
+  expect(controls.weight).toBe("520")
+  expect(controls.padding).toBe("8px")
+  if (info.project.name === "desktop") {
+    const hint = header.locator("kbd")
+    await expect(hint).toBeVisible()
+    await expect(hint).toHaveCSS("border-start-start-radius", "4px")
+  }
+  if (info.project.name === "phone") {
+    expect(controls.brand).toMatchObject({ x: 8, width: 44, height: 44 })
+    expect(controls.mark).toMatchObject({ x: 16, width: 28, height: 28 })
+    expect(controls.markSize).toBe("28")
+    expect(controls.bell.x).toBe(214)
+    expect(controls.ask).toMatchObject({ x: 258, width: 116 })
   }
 })

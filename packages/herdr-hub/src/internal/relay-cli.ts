@@ -1,5 +1,14 @@
 import type { ConnectPostBody } from "@knpkv/herdr-connect"
-import { Conflict, ConnectPost, Denied, InvalidReport, Unavailable, UnboundAgent } from "@knpkv/herdr-connect"
+import {
+  Conflict,
+  ConnectPost,
+  connectReportResponseTimeoutMillis,
+  ConnectStoreBusyError,
+  Denied,
+  InvalidReport,
+  Unavailable,
+  UnboundAgent
+} from "@knpkv/herdr-connect"
 import { type ConnectSelfBody } from "@knpkv/herdr-connect/model"
 import { decodeBoundedResponseJson, loadConfiguration } from "@knpkv/herdr-fleet"
 import { type HostConfiguration } from "@knpkv/herdr-fleet/model"
@@ -9,6 +18,7 @@ import { HttpClient, HttpClientRequest } from "effect/http"
 import type { Mutable } from "effect/Types"
 import { fleetConfigPath } from "./config-path.js"
 import { decodeRelayPostBody } from "./relay-post-validation.js"
+import { RelayStoreBusyFailureBody } from "./relay-report-failure.js"
 import { resolveReportingAgent } from "./relay-report-identity.js"
 import { decodeRelaySelfBody, type RelaySelfOptions } from "./relay-self-validation.js"
 import { reportRelaySelf } from "./relay-self.js"
@@ -16,6 +26,7 @@ import { reportRelaySelf } from "./relay-self.js"
 export { resolveReportingAgent } from "./relay-report-identity.js"
 
 const ReportFailure = Schema.Union([
+  RelayStoreBusyFailureBody,
   Schema.Struct({ error: Schema.Literal("InvalidReport"), detail: Schema.String }),
   Schema.Struct({ error: Schema.Literal("UnboundAgent"), agentId: Schema.String }),
   Schema.Struct({ error: Schema.Literal("Denied") }),
@@ -46,6 +57,12 @@ export const submitRelayPost = Effect.fn("Relay.submitPost")(function*(
         Effect.mapError(() => new Unavailable({ operation: "post.response" }))
       )
       switch (failure.error) {
+        case "ConnectStoreBusyError":
+          return yield* new ConnectStoreBusyError({
+            operation: failure.operation,
+            timeoutMillis: failure.timeoutMillis,
+            cause: response.status
+          })
         case "InvalidReport":
           return yield* new InvalidReport({ detail: failure.detail })
         case "UnboundAgent":
@@ -71,7 +88,7 @@ export const submitRelayPost = Effect.fn("Relay.submitPost")(function*(
     return post
   }).pipe(
     Effect.timeoutOrElse({
-      duration: "10 seconds",
+      duration: connectReportResponseTimeoutMillis,
       orElse: () => Effect.fail(new Unavailable({ operation: "post.timeout" }))
     }),
     Effect.retry({ times: 2, while: Schema.is(Unavailable) })

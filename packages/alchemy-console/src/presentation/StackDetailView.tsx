@@ -1,5 +1,7 @@
 import { Tabs, Text } from "@knpkv/rly/primitives"
 import { useId, type ReactElement } from "react"
+import type { PlanState } from "../plan.js"
+import { PlanView } from "./PlanView.js"
 import type { StackListCopy } from "./StackListView.js"
 import type { ResourcePresentation, StackDetailState, StackPresentation, StackTab } from "./detail-model.js"
 import { DetailBoundary, DetailPanel, Missing, ProviderLink, RecordedTime, ResourceStatus } from "./detail-parts.js"
@@ -7,6 +9,8 @@ import { ResourceTree } from "./ResourceTree.js"
 
 export interface StackDetailViewProps {
   readonly state: StackDetailState
+  readonly planState?: PlanState
+  readonly onReadPlanAgain?: () => void
   readonly copy: StackListCopy
   readonly tab: StackTab
   readonly onTabChange: (tab: StackTab) => void
@@ -166,7 +170,9 @@ const Outputs = ({ outputs }: { readonly outputs: StackPresentation["outputs"] }
 export const StackDetailView = ({
   copy,
   onReadAgain,
+  onReadPlanAgain,
   onTabChange,
+  planState = { _tag: "NotConnected" },
   resourceHref,
   state,
   tab
@@ -179,7 +185,7 @@ export const StackDetailView = ({
     )
   const stack = state.stack
   return (
-    <div className="ac-detail">
+    <div className="ac-detail" data-plan={tab === "plan" ? "true" : undefined}>
       <header className="ac-detail-header">
         <div className="ac-detail-title-row">
           <Text as="h1" variant="page-title" className="ac-title">
@@ -216,7 +222,7 @@ export const StackDetailView = ({
         value={tab}
         data-mobile-layout="single-row"
         onValueChange={(value) => {
-          if (value === "resources" || value === "outputs" || value === "state") onTabChange(value)
+          if (value === "resources" || value === "outputs" || value === "state" || value === "plan") onTabChange(value)
         }}
         items={[
           { value: "resources", label: "Resources", content: <Resources stack={stack} resourceHref={resourceHref} /> },
@@ -232,6 +238,11 @@ export const StackDetailView = ({
                 resourceHref={resourceHref}
               />
             )
+          },
+          {
+            value: "plan",
+            label: "Plan",
+            content: <PlanView state={planState} onReadAgain={onReadPlanAgain ?? onReadAgain} />
           }
         ]}
       />

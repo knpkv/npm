@@ -14,7 +14,7 @@ it("round-trips only normalized UI identity and never retains unrelated query da
     const search of [
       "?stack=invalid",
       `?stack=${id}&stack=${id}`,
-      `?stack=${id}&tab=plan`,
+      `?stack=${id}&tab=apply`,
       `?stack=${id}&resource=Api%00Worker`,
       `?stack=${id}&resource=Api%2F%2FWorker`,
       "x".repeat(4097)

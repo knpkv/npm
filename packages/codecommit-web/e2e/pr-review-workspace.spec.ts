@@ -1,6 +1,6 @@
 import { expect, type Page, test } from "@playwright/test"
 import { Schema } from "effect"
-import { RelayReviewProfile, RelayReviewResult } from "../src/server/Api.js"
+import { type PullRequestRelayReviewResponse, RelayReviewProfile, RelayReviewResult } from "../src/server/Api.js"
 
 /** Relay's panel, opened from the app header or a finding's Discuss action: an overlay, or full screen on a phone. */
 const relayPanel = (page: Page) =>
@@ -10,6 +10,9 @@ const relayPanel = (page: Page) =>
 
 /** The page's findings deck, kept apart from Relay's panel, which may quote the same finding. */
 const findingDeck = (page: Page) => page.getByRole("region", { name: "Findings" })
+
+/** The retained drawer changes its name when the first review completes. */
+const reviewWorkspaceDrawer = (page: Page) => page.getByRole("dialog", { name: /^(Relay review|Findings \(\d+\))$/ })
 
 /** Discuss one finding in Relay: selects it and opens the panel with it as the composer's context. */
 const discussInRelay = async (page: Page, finding: RegExp): Promise<void> => {
@@ -47,6 +50,7 @@ test.use({ viewport: { height: 1080, width: 1920 } })
 
 declare global {
   interface Window {
+    reviewHistoryAnnouncements?: Array<string>
     emitReviewWorkspaceEvent?: (data: string) => number
     releaseRelayMigration?: () => void
     releaseRelayMigrationReady?: boolean
@@ -164,6 +168,7 @@ const expectExactProviderCoordinates = (requestUrl: string): void => {
 }
 
 interface ReviewWorkspaceOptions {
+  readonly historyWarning?: PullRequestRelayReviewResponse["historyWarning"]
   readonly commentCount?: () => number
   readonly commentFindingCount?: () => number
   readonly commentUnrelatedCount?: () => number
@@ -448,7 +453,10 @@ const routeReviewWorkspace = async (
       body: [
         JSON.stringify({ type: "progress", phase: "revision", message: "Checking exact revision" }),
         JSON.stringify({ type: "progress", phase: "agent", message: "Relay is reviewing the exact patch" }),
-        JSON.stringify({ type: "complete", review })
+        JSON.stringify({
+          type: "complete",
+          review: options?.historyWarning === undefined ? review : { ...review, historyWarning: options.historyWarning }
+        })
       ].join("\n") + "\n",
       contentType: "application/x-ndjson",
       status: 200
@@ -502,6 +510,132 @@ const routeReviewWorkspace = async (
 }
 
 const ContinuationTarget = Schema.Struct({ findingId: Schema.String })
+
+for (const width of [390, 1280]) {
+  for (const colorScheme of ["light", "dark"] satisfies ReadonlyArray<"light" | "dark">) {
+    test.describe(`history warning ${width} ${colorScheme}`, () => {
+      test.use({ colorScheme, hasTouch: width === 390, isMobile: width === 390, viewport: { width, height: 900 } })
+      test(
+        "RR3 keeps the completed review and announces the warning once per completed run",
+        async ({ page }, testInfo) => {
+          const rerun = Promise.withResolvers<void>()
+          await routeReviewWorkspace(page, "review", undefined, undefined, {
+            historyWarning: { reason: "io" },
+            runGate: (count) => count === 2 ? rerun.promise : Promise.resolve()
+          })
+          await page.goto("/accounts/111111111111/prs/42")
+          if (width === 1280) {
+            await page.getByRole("button", { exact: true, name: "Relay review" }).click()
+            await expect(reviewWorkspaceDrawer(page)).toBeVisible()
+          }
+          const panel = page.getByRole("complementary", { exact: true, name: "Relay findings" })
+          const status = panel.locator("[data-review-history-status]")
+          await expect(status).toHaveCount(1)
+          await expect(status).toHaveText("")
+          await status.evaluate((element) => {
+            window.reviewHistoryAnnouncements = []
+            const observer = new MutationObserver(() => {
+              window.reviewHistoryAnnouncements?.push(element.textContent ?? "")
+            })
+            observer.observe(element, { childList: true, subtree: true, characterData: true })
+          })
+          await panel.getByRole("button", { exact: true, name: "Run Relay" }).click()
+          const message = "This completed review is still shown here. Its history couldn’t be saved on this host."
+          await expect(status.getByText("Review history not saved", { exact: true })).toBeVisible()
+          await expect(status.getByText(message, { exact: true })).toBeVisible()
+          await expect(panel.getByText("One retry regression needs attention.", { exact: true })).toBeVisible()
+          await expect(findingDeck(page).getByRole("button", { name: /Retry amplification/ })).toBeVisible()
+          await expect(status).toHaveAttribute("aria-live", "polite")
+          await expect(status).toHaveAttribute("aria-atomic", "true")
+          await expect(status.locator("button, a, input, [tabindex]")).toHaveCount(0)
+          await expect.poll(() =>
+            page.evaluate(() =>
+              window.reviewHistoryAnnouncements?.filter((text) => text.startsWith("Review history not saved")).length
+            )
+          ).toBe(1)
+          await page.evaluate(() => document.fonts.ready)
+          await status.scrollIntoViewIfNeeded()
+          const bounds = await status.boundingBox()
+          expect(bounds).not.toBeNull()
+          if (bounds === null) throw new Error("Warning region must render before geometry is checked")
+          expect(bounds.width).toBeGreaterThan(250)
+          expect(bounds.x).toBeGreaterThanOrEqual(0)
+          expect(bounds.x + bounds.width).toBeLessThanOrEqual(width)
+          expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
+          const styles = await status.locator("p").evaluate((element) => {
+            const style = getComputedStyle(element)
+            const notice = element.parentElement
+            return {
+              fontSize: style.fontSize,
+              lineHeight: style.lineHeight,
+              border: notice === null ? null : getComputedStyle(notice).borderTopWidth,
+              padding: notice === null ? null : getComputedStyle(notice).padding,
+              radius: notice === null ? null : getComputedStyle(notice).borderRadius
+            }
+          })
+          expect(styles).toEqual({
+            fontSize: "14px",
+            lineHeight: "21px",
+            border: "1px",
+            padding: "11.2px 12.8px",
+            radius: "20px"
+          })
+          await page.screenshot({ path: testInfo.outputPath(`rr3-${width}-${colorScheme}.png`) })
+          await panel.getByRole("button", { exact: true, name: "Run again" }).click()
+          await expect(status).toHaveText("")
+          await expect(panel.getByText("Relay is reviewing", { exact: true })).toBeVisible()
+          rerun.resolve()
+          await expect(status.getByText(message, { exact: true })).toBeVisible()
+          await expect.poll(() =>
+            page.evaluate(() =>
+              window.reviewHistoryAnnouncements?.filter((text) => text.startsWith("Review history not saved")).length
+            )
+          ).toBe(2)
+          await page.reload()
+          if (width === 1280) await page.getByRole("button", { name: /^Findings/ }).click()
+          await expect(page.getByText(message, { exact: true })).toBeVisible()
+          await expect(findingDeck(page).getByRole("button", { name: /Retry amplification/ })).toBeVisible()
+        }
+      )
+    })
+  }
+}
+
+test.describe("RF-P2a rerun drawer focus", () => {
+  test.use({ viewport: { width: 1280, height: 900 } })
+  test("keeps keyboard focus through rerun and Escape closes only the findings drawer", async ({ page }) => {
+    const rerun = Promise.withResolvers<void>()
+    await routeReviewWorkspace(page, "review", undefined, undefined, {
+      runGate: (count) => count === 2 ? rerun.promise : Promise.resolve()
+    })
+    await page.goto("/accounts/111111111111/prs/42")
+    const prUrl = page.url()
+    await page.getByRole("button", { exact: true, name: "Relay review" }).click()
+    const drawer = reviewWorkspaceDrawer(page)
+    await expect(drawer).toBeVisible()
+    const pane = drawer.getByRole("complementary", { exact: true, name: "Relay findings" })
+    await pane.getByRole("button", { exact: true, name: "Run Relay" }).click()
+    const run = pane.getByRole("button", { exact: true, name: "Run again" })
+    await expect(run).toBeEnabled()
+    await run.focus()
+    await expect(run).toBeFocused()
+    try {
+      await page.keyboard.press("Enter")
+      await expect(pane.getByText("Relay is reviewing", { exact: true })).toBeVisible()
+      await expect(pane).toBeFocused()
+      expect(await pane.evaluate((element) => element.tabIndex)).toBe(-1)
+      rerun.resolve()
+      await expect(run).toBeEnabled()
+      await expect(pane).toBeFocused()
+      await page.keyboard.press("Escape")
+      await expect(drawer).not.toBeVisible()
+      await expect(page.getByRole("button", { name: /^Findings/ })).toBeFocused()
+      expect(page.url()).toBe(prUrl)
+    } finally {
+      rerun.resolve()
+    }
+  })
+})
 
 test("opens Relay from the header and discusses findings in its panel", async ({ page }, testInfo) => {
   const targets: Array<string> = []

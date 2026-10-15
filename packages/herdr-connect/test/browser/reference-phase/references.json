@@ -1,0 +1,224 @@
+{
+  "issue": "https://github.com/knpkv/npm/issues/896",
+  "adoptedAt": "2026-10-15",
+  "source": {
+    "export": 20,
+    "document": "02 Connect.dc.html",
+    "sha256": "72964971d1ca9943f914908503674d10731df03b0640d8585e8e948acd18048d"
+  },
+  "capture": {
+    "viewport": [1600, 1200],
+    "DPR": 1,
+    "locale": "en-GB",
+    "timezone": "Europe/Berlin",
+    "ALLVISIBLE": 1,
+    "wait_after_networkidle_ms": 3000,
+    "wait_after_figure_scroll_ms": 400,
+    "screenshot": "native figure, animations allow with retained relay-orbit instance paused at 0 ms",
+    "motion": "no-preference; known source orbit phase at 0 ms"
+  },
+  "frames": [
+    {
+      "label": "connect--2i--390-light",
+      "file": "connect--2i--390-light.png",
+      "sha256": "ee7280fb6e270c01618a6a150376d4082032807734d312d8e224a8bf80fc1619",
+      "pixels": [390, 1181],
+      "retiredUnknownPhaseSha256": "19c0fb83bf6812ddd2282bbd5c8dfac01533c39c33b62153248183d485886b2c",
+      "before": {
+        "animationCount": 1,
+        "sameAnimation": true,
+        "name": "relay-orbit",
+        "currentTime": 0,
+        "playState": "paused",
+        "pending": false,
+        "duration": 3500,
+        "localTime": 0,
+        "progress": 0,
+        "targetTag": "circle",
+        "targetInFigure": true,
+        "targetRect": {
+          "x": 152.5,
+          "y": 162.7924041748047,
+          "width": 198,
+          "height": 198.00001525878906
+        }
+      },
+      "after": {
+        "animationCount": 1,
+        "sameAnimation": true,
+        "name": "relay-orbit",
+        "currentTime": 0,
+        "playState": "paused",
+        "pending": false,
+        "duration": 3500,
+        "localTime": 0,
+        "progress": 0,
+        "targetTag": "circle",
+        "targetInFigure": true,
+        "targetRect": {
+          "x": 152.5,
+          "y": 162.7924041748047,
+          "width": 198,
+          "height": 198.00001525878906
+        }
+      }
+    },
+    {
+      "label": "connect--2i--390-dark",
+      "file": "connect--2i--390-dark.png",
+      "sha256": "f083a90c51f0496b582341401895b419504ee359e3c576d9c19405778482e2b3",
+      "pixels": [390, 1181],
+      "retiredUnknownPhaseSha256": "bbd3b61fbc3d8f8f8e43a24825b9f7d70618b525b82901314d7101570c5a3004",
+      "before": {
+        "animationCount": 1,
+        "sameAnimation": true,
+        "name": "relay-orbit",
+        "currentTime": 0,
+        "playState": "paused",
+        "pending": false,
+        "duration": 3500,
+        "localTime": 0,
+        "progress": 0,
+        "targetTag": "circle",
+        "targetInFigure": true,
+        "targetRect": {
+          "x": 582.5,
+          "y": 162.7924041748047,
+          "width": 198,
+          "height": 198.00001525878906
+        }
+      },
+      "after": {
+        "animationCount": 1,
+        "sameAnimation": true,
+        "name": "relay-orbit",
+        "currentTime": 0,
+        "playState": "paused",
+        "pending": false,
+        "duration": 3500,
+        "localTime": 0,
+        "progress": 0,
+        "targetTag": "circle",
+        "targetInFigure": true,
+        "targetRect": {
+          "x": 582.5,
+          "y": 162.7924041748047,
+          "width": 198,
+          "height": 198.00001525878906
+        }
+      }
+    },
+    {
+      "label": "connect--2i--1280-light",
+      "file": "connect--2i--1280-light.png",
+      "sha256": "d19d41c8924a957f735e8932a14c8358f6402e2e34330df17151c8f30dc47cd5",
+      "pixels": [1280, 1116],
+      "retiredUnknownPhaseSha256": "2c48d66d671f01bed4604d1ede83d457237bf885582d201641c7ad6c0079e5ea",
+      "before": {
+        "animationCount": 1,
+        "sameAnimation": true,
+        "name": "relay-orbit",
+        "currentTime": 0,
+        "playState": "paused",
+        "pending": false,
+        "duration": 3500,
+        "localTime": 0,
+        "progress": 0,
+        "targetTag": "circle",
+        "targetInFigure": true,
+        "targetRect": {
+          "x": 997.5,
+          "y": 194.7924041748047,
+          "width": 198,
+          "height": 198.00001525878906
+        }
+      },
+      "after": {
+        "animationCount": 1,
+        "sameAnimation": true,
+        "name": "relay-orbit",
+        "currentTime": 0,
+        "playState": "paused",
+        "pending": false,
+        "duration": 3500,
+        "localTime": 0,
+        "progress": 0,
+        "targetTag": "circle",
+        "targetInFigure": true,
+        "targetRect": {
+          "x": 997.5,
+          "y": 194.7924041748047,
+          "width": 198,
+          "height": 198.00001525878906
+        }
+      }
+    },
+    {
+      "label": "connect--2i--1280-dark",
+      "file": "connect--2i--1280-dark.png",
+      "sha256": "38aefeef1d7dffc904dbd6fdb6ea9612c4b3eff9e3d5336656e8b0da189b3abd",
+      "pixels": [1280, 1116],
+      "retiredUnknownPhaseSha256": "c8a9cdd2bac10da901c210d482e5c3dde5dc84231a7831a7da3caae130de7dc6",
+      "before": {
+        "animationCount": 1,
+        "sameAnimation": true,
+        "name": "relay-orbit",
+        "currentTime": 0,
+        "playState": "paused",
+        "pending": false,
+        "duration": 3500,
+        "localTime": 0,
+        "progress": 0,
+        "targetTag": "circle",
+        "targetInFigure": true,
+        "targetRect": {
+          "x": 997.5,
+          "y": 195.1049041748047,
+          "width": 198,
+          "height": 198.00001525878906
+        }
+      },
+      "after": {
+        "animationCount": 1,
+        "sameAnimation": true,
+        "name": "relay-orbit",
+        "currentTime": 0,
+        "playState": "paused",
+        "pending": false,
+        "duration": 3500,
+        "localTime": 0,
+        "progress": 0,
+        "targetTag": "circle",
+        "targetInFigure": true,
+        "targetRect": {
+          "x": 997.5,
+          "y": 195.1049041748047,
+          "width": 198,
+          "height": 198.00001525878906
+        }
+      }
+    }
+  ],
+  "unmapped": [
+    {
+      "label": "connect--2i-v4--390-light",
+      "_tag": "Unmapped",
+      "reason": "FutureGoalsBoard"
+    },
+    {
+      "label": "connect--2i-v4--390-dark",
+      "_tag": "Unmapped",
+      "reason": "FutureGoalsBoard"
+    },
+    {
+      "label": "connect--2i-v4--1280-light",
+      "_tag": "Unmapped",
+      "reason": "FutureGoalsBoard"
+    },
+    {
+      "label": "connect--2i-v4--1280-dark",
+      "_tag": "Unmapped",
+      "reason": "FutureGoalsBoard"
+    }
+  ]
+}

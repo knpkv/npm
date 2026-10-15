@@ -3,6 +3,7 @@ import "@knpkv/alchemy-console/views/style.css"
 import { ThemeProvider, useDocumentTheme } from "@knpkv/rly/foundations"
 import { useState, type ReactElement } from "react"
 import { createRoot } from "react-dom/client"
+import { planFixtures, planStack } from "./plan-fixtures.js"
 import { detailFixtures } from "./detail-fixtures.js"
 import "./fixture.css"
 import { props } from "./views.js"
@@ -13,11 +14,25 @@ const Consumer = (): ReactElement => {
   const selected = detailFixtures.find(
     (fixture) => fixture.name === new URLSearchParams(window.location.search).get("fixture")
   )
-  const [tab, setTab] = useState<StackTab>(selected?.tab ?? "resources")
+  const selectedPlan = planFixtures.find(
+    (fixture) => fixture.name === new URLSearchParams(window.location.search).get("fixture")
+  )
+  const [tab, setTab] = useState<StackTab>(selectedPlan === undefined ? (selected?.tab ?? "resources") : "plan")
   return (
     <ThemeProvider theme="system">
       <main className="consumer-main">
-        {selected === undefined ? (
+        {selectedPlan !== undefined ? (
+          <StackDetailView
+            state={{ _tag: "Ready", stack: planStack }}
+            copy={props.copy}
+            tab={tab}
+            onTabChange={setTab}
+            onReadAgain={() => undefined}
+            resourceHref={() => "?fixture=6e"}
+            planState={selectedPlan.state}
+            onReadPlanAgain={() => undefined}
+          />
+        ) : selected === undefined ? (
           <StackListView {...props} state={{ _tag: "Ready", list: { stacks: [], issues: [] }, checkedAt: "12:00" }} />
         ) : selected.resource !== null ? (
           <ResourceDetailView

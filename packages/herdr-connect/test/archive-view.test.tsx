@@ -88,6 +88,29 @@ const mount = async (embedded = false, key: string | null = null) => {
 }
 
 describe("archived directory selection", () => {
+  it.each([
+    { hue: undefined, ink: "#3a1500", label: "hash without served hue" },
+    { hue: "sky", ink: "#022538", label: "served snapshot hue" }
+  ])("keeps $label in both archived rows and the read-only stage", async ({ hue, ink }) => {
+    archive = async () =>
+      Response.json({
+        agents: [hue === undefined ? closure : { ...closure, hue }],
+        nextCursor: null
+      })
+    await mount(true, selectedKey)
+    await vi.waitFor(async () => {
+      await settle()
+      expect(document.querySelector(".connect-archive-stage .connect-creature")).not.toBeNull()
+    })
+    const creatures = document.querySelectorAll<SVGElement>(
+      ".connect-archive-agent .connect-creature, .connect-archive-stage .connect-creature"
+    )
+    expect(creatures).toHaveLength(2)
+    for (const creature of creatures) {
+      expect(creature.style.getPropertyValue("--connect-creature-ink")).toBe(`oklch(from ${ink} l calc(c * 0.1) h)`)
+    }
+  })
+
   it("a held archive reaches the failed state at ten seconds despite directory polls, and Retry recovers", async () => {
     vi.useFakeTimers()
     try {

@@ -724,6 +724,16 @@ const makePluginRuntimeRepository = Effect.gen(function*() {
           recordKey: `${pluginConnectionId}/${streamKey}/${attemptSequence}`
         })
       }
+      // Completion changes the summary token even when health was already recorded mid-attempt.
+      yield* sql`UPDATE plugin_runtime_state SET revision = revision + 1
+        WHERE workspace_id = ${workspaceId} AND plugin_connection_id = ${pluginConnectionId}`
+      if ((yield* readChanges(sql)) === 0) {
+        return yield* new RecordNotFoundError({
+          workspaceId,
+          recordKind: "plugin-runtime",
+          recordKey: pluginConnectionId
+        })
+      }
       return completed
     })).pipe(mapPersistenceOperation("plugin-runtime.complete-sync-attempt"))
   })

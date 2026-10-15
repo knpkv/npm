@@ -1,5 +1,130 @@
 # @knpkv/herdr-connect
 
+## 0.27.0
+
+### Minor Changes
+
+- [#902](https://github.com/knpkv/npm/pull/902) [`6e3abc8`](https://github.com/knpkv/npm/commit/6e3abc863ecf98f1b367643421964743ab971459) Thanks [@konopkov](https://github.com/konopkov)! - Keep completion state scoped to each agent, ignore stage reactions on rows and cast, and retain the last served hue in persisted pins while an agent is away. Keep all 1,024 supported directory identities cached across polls.
+
+## 0.26.0
+
+### Minor Changes
+
+- [#895](https://github.com/knpkv/npm/pull/895) [`fdbca63`](https://github.com/knpkv/npm/commit/fdbca63a2a259e25f61ad044feec713f8e1c0550) Thanks [@konopkov](https://github.com/konopkov)! - Add scoped, single-flight optional hue enrichment and bind it to the hub's server lifetime. Return an uncoloured directory when hue permission finalization exceeds its wait budget, while keeping mandatory activity observations independent. Shutdown interrupts the owned worker, joins for at most two seconds and closes its connection, logging a typed warning if uninterruptible cleanup remains pending.
+
+## 0.25.0
+
+### Minor Changes
+
+- [#857](https://github.com/knpkv/npm/pull/857) [`ab70d8a`](https://github.com/knpkv/npm/commit/ab70d8abd85e2470e0ad5667b8846e2d003e519e) Thanks [@konopkov](https://github.com/konopkov)! - Draw stable circle, squircle, pear, star and bean agent identities with flat colour families and state faces. Add optional hue, accessory, mood, talking and replayable stage reaction props, with closed and reduced-motion variants.
+
+  Canonicalize host casing for shape and fallback palette seeds, and share shape selection with persisted hue reservations. Upper-case host labels adopt their canonical lower-case shapes once, together with the rev6 redraw.
+
+  Match the rev6 body selector: unsigned FNV-1a of the lowercase host and stable ID payload without its transport `agent-` prefix, bits 8 upward modulo five. Names never select bodies. Existing stored body kinds refresh in the allocation transaction before overflow checks; mixed motion phases keep their identity. Every agent adopts this shape rule once with the redraw. Overflow agents whose new shape collides with an earlier holder of their hue may change colour once on upgrade; exclusive reservations stay fixed, and an unavoidable repeat keeps its recorded hue.
+
+  Use canonical stable IDs for first-sighting hue allocation, with unsigned FNV-1a modulo eight and per-host forward probing. Existing recorded families remain unchanged. Match state-tone circular rings, open idle and ready faces, neutral stale readings and curved closed lashes, and use 40px archive row creatures.
+
+  Match Home row framing and thin state rings, including 36px phone and 40px desktop archive slots. Fleet row tracks and app stage sizes stay unchanged.
+
+  Replay every poke effect together, settle done celebrations immediately under reduced motion, and reuse bounded identity geometry across renders. Probe repaired overflow hues from their recorded family, export the appearance prop types from the surface entry, and keep long desktop pins inside the viewport.
+
+## 0.24.1
+
+### Patch Changes
+
+- [#888](https://github.com/knpkv/npm/pull/888) [`b82fa1e`](https://github.com/knpkv/npm/commit/b82fa1ea10d6ba73d79e15a8621d1ea076d21741) Thanks [@konopkov](https://github.com/konopkov)! - Share one five-second acquisition and SQL retry budget across relationship and activity writes in a local inventory. Reporter peers receive the exhausted operation's safe busy metadata before their transport deadline instead of losing it to repeated per-write budgets. Keep post-commit finalization outside the lock timeout and under the store permit.
+
+- [#887](https://github.com/knpkv/npm/pull/887) [`4552a1f`](https://github.com/knpkv/npm/commit/4552a1f2192c3d7fb2e91a84d11c5c84e449d8bd) Thanks [@konopkov](https://github.com/konopkov)! - Let post pages read retained reports during local post and self-state write backoff. Keep page SQL read-only and secure lazy database sidecars to 0600 before returning, without waiting for the writer transaction permit.
+
+## 0.24.0
+
+### Minor Changes
+
+- [#877](https://github.com/knpkv/npm/pull/877) [`6de50ff`](https://github.com/knpkv/npm/commit/6de50ff3b833224069a5e2b4460d762e94c98002) Thanks [@konopkov](https://github.com/konopkov)! - Recover Connect writes from short-lived SQLite writer contention. Use 100 ms native lock waits, followed by asynchronous exponential retries with jitter and an approximately five-second budget, replaying the whole atomic statement or IMMEDIATE transaction. Export ConnectStoreBusyError for exhaustion and classify the hub's additive 503 response contract as minor. Keep archive enrichment isolated, preserve safe inventory diagnostics, and return an exhausted report's operation and budget as HTTP 503 without its private cause. Preserve WAL, FULL synchronous mode and owner-only database and sidecar files; leave Work, Code and Fleet job settings unchanged. Optional archive passes on live directory reads stop at the first failure, limiting writer contention to one native wait for the whole fleet and invalidating absence evidence for skipped hosts. Parent-name and voice/self-state enrichment each have a 100 ms deadline. Directory and post-page reads filter retained rows without pruning. Post writes evict one global batch of at most 256 expired reports under the asynchronous write budget, including reports from agents that never write again, and trim only the writer to 128 entries. Physical expiry eviction waits for post writes; dormant fleets retain hidden expired rows until posting resumes. Equal-time observations cannot clear archive taint; recovery must be strictly newer. Optional failures remain isolated and logged, preserving the browser's directory deadline.
+
+  Include transaction-permit queueing in the write deadline and retry SQLITE_LOCKED alongside SQLITE_BUSY. Preserve safe busy metadata for remote reporters, using the reporter timeout option on peer inventory reads while leaving ordinary directory deadlines unchanged. Stop a blocked-notification pass after its first store failure. New archive closure snapshots ignore expired reports, preserving the inclusive retention cutoff and existing recorded last words.
+
+  Stop notification admission on subscription-store failures too, while draining already-reserved provider sends and recording their definite outcomes. Bound optional hue allocation to half the peer-directory deadline. Preserve typed busy responses in Relay post and self-state clients, without repeating an exhausted post or exposing the server-private cause.
+
+  Request-facing hub stores use zero native lock waits and return typed failures immediately; Connect batch writers retain asynchronous retries. Export the shared report response deadline, derived from reporter inventory plus the primary write plus a transport margin, and use it in both report clients so exhausted busy responses arrive before cancellation.
+
+  Serialize activity observations and optional hue allocations through one store-wide permit, including file-permission finalization. Preserve the existing queue-inclusive write and optional hue deadlines. Secure lazy WAL and SHM sidecars after post-page SELECTs without reintroducing read-path pruning.
+
+  End the busy deadline after lock acquisition and SQL retries, before post-commit permission finalization. Keep the transaction permit through finalization without returning ConnectStoreBusyError for an already-committed write. Apply the same boundary to the optional hue lock budget.
+
+## 0.23.0
+
+### Minor Changes
+
+- [#875](https://github.com/knpkv/npm/pull/875) [`5a8885c`](https://github.com/knpkv/npm/commit/5a8885c94067f1fcde10746ccc0bb2397333eaa6) Thanks [@konopkov](https://github.com/konopkov)! - Add explicit terminal takeover across devices. A controlled terminal offers Take over, including when all four controller slots are occupied; the previous device shows Taken over on another device with Reconnect. Keep Connecting during bounded cleanup and cancel pending admission when the stage closes. Preserve recovery-dialog focus through directory refreshes. Require fresh authenticated remote-host capability before forwarding takeover, preserving the controlled state on older hosts. Export optional takeover selection and the capability and takeover-close schemas.
+
+  Ordinary reconnects wait for a closing controller's bounded release instead of being refused as already controlled. Live controllers remain exclusive; cancellation and newer takeovers retain the same cleanup barrier.
+
+## 0.22.0
+
+### Minor Changes
+
+- [#872](https://github.com/knpkv/npm/pull/872) [`8f2d743`](https://github.com/knpkv/npm/commit/8f2d743cc568d386801ef115628567eb3497005c) Thanks [@konopkov](https://github.com/konopkov)! - Persist per-agent hue families, resolve live-host collisions with shape-aware overflow, and serve retained family snapshots in the archive.
+
+## 0.21.0
+
+### Minor Changes
+
+- [#870](https://github.com/knpkv/npm/pull/870) [`1ffd400`](https://github.com/knpkv/npm/commit/1ffd4002d82cb981cb203b77c67844002179bcf9) Thanks [@konopkov](https://github.com/konopkov)! - Add the Connect home descriptor and migrate hub destinations only when their source pages are retired and their replacement pages are installed. Connect stage, approval, Work and Usage selectors survive redirects, while the shell preserves foreign history state.
+
+  Primary module links open their declared default page without resuming a previous object selection or filter. Module sections remain mounted while inactive; page-local state survives a page switch only when the pages render a shared owner component, as Fleet does.
+
+  Add an optional discriminated Home presentation to ConnectSurface, with a host-owned summary above the directory. Fleet remains the default; directory reads, stage selection, pins and terminal callbacks keep one owner.
+
+  Install Connect home as the canonical landing page, with flat installed-only sidebar and phone destinations, settings in More, and Fleet Approvals/Work through fleetHubModule. The standalone Fleet surface retains all four pages. Add typed primaryModules and optional FleetShell pages for canonical composition.
+
+  Add Usage By tool from the existing reported host/tool/model data; unknown hosts never count as zero. Move the authenticated summary API to /v1/modules/connect/needs-you; the retired Today API returns 404. needsYouRouteOwner identifies the reserved collector route.
+
+  Export one explicit Fleet/Home/push agent-group policy. Home includes Ready/Idle and truthful relationship labels, while Fleet's unknown-state fallback remains unchanged. Clearing filters in a hidden Connect owner no longer steals focus.
+
+  Add optional agentStatePresentation policy and Creature statePolicy, defaulting to Fleet. Home's unknown agent has caution wording without a needs-you pose. Fleet host filtering matches host names case-insensitively, consistently with Home and selectors.
+
+  Require SuperappShell session access and connection state from its composition. The footer distinguishes local/Tailscale access, retained readings while reconnecting, and an unreachable hub without claiming connected.
+
+  Add ConnectSurface active (default true) for inactive embedded modules: release the stage portal and watched-agent presence while keeping saved selection, polls, pins and terminal/session ownership alive.
+
+  Add the shell terminalOwnsKeys input so Connect Home retains Ask Relay summon keys until an active connected terminal reserves them; legacy Fleet Connect ownership is unchanged.
+
+  Only the displayed Fleet limits footer owns its poll. Home performs no limits read; Fleet starts that read after the directory loads and the footer is shown, including its terminal presentation policy.
+
+  Add optional ModuleViews.navigationBadge for owner-supplied bounded readings. Fleet uses its existing pending approvals, marks partial counts with a plus and stale counts as a previous reading, and shares expiry-aware counting with the app icon badge. Unknown readings have an accessible label without a visible zero badge. No unread notification count is claimed.
+
+  The active Connect terminal keeps its existing full-screen layout, hides shell chrome from focus and accessibility, and restores the Home document scroll on return.
+
+  Home's Done label uses the design's neutral shared check glyph through an additive AgentStateLabel statePolicy; Fleet retains its positive tone. Failed terminal focus transitions are announced with actionable words instead of internal reason codes.
+
+  Add an optional Home empty-state slot and shell-owned openHostAccess mount callback. Empty Home links only to existing Fleet Work and Host access. Silent-host Home rows say Unknown with cached work and reported last-activity time; Fleet retains its last-known labels.
+
+  Add an optional AgentStage presentation for Home navigation chrome. Phone Back and desktop Close use the existing selection close and focus-return path; Fleet's header and both stage bodies stay unchanged.
+
+  Add optional module-page `showInPhoneTitle` metadata for designed phone mast labels.
+
+  Connect Home retains Active/Archived navigation, including read-only closed stages and retained older-page recovery. The optional paired directoryLocation owns URL and navigation together; absent keeps standalone history unchanged. Embedded hub owners require that pair, build links from their saved Connect location and preserve shell/foreign history through the shell navigator. Inactive archive portals and expired-selection repair are suppressed while closure selection and loaded pages remain retained. Paging and retry transitions keep keyboard focus in the archive and move it to the new result or recovery control.
+
+  The canonical Connect module forwards the dashboard notification state to its stage footer, avoiding a competing device-state read.
+
+  Inactive Connect releases its document and viewport locks while retaining the terminal socket. Reactivation restores guarded terminal focus once. Leaving Active for Archived releases terminal ownership so shell chrome and summon keys recover. URL-selected stage close removes selectors through replace navigation without remounting the directory; a repeated incoming selection reopens it.
+
+  Returning to a module keeps its owner's arrival focus, such as Work goal details. History traversal also preserves focus claimed inside the destination; explicit page-focus requests stay unchanged. URL-owned stages follow history selector changes and return focus to their agent row; local stages and filters remain owned by the retained directory.
+
+  Empty Home keeps a compact Approvals unknown link when the independent approval reading is incomplete or failed. By tool retains its reported range during range updates and names failed retained readings with their timestamp and five-minute retry cadence.
+
+  Controlled Connect locations also supply selection dismissal. Archived-stage Close consumes the shell-owned pushed entry, or replaces a direct/reloaded selection, so Back does not reopen it. Standalone history stays unchanged. Approval-count copy uses the singular noun for one waiting approval.
+
+  Limit retry controls follow their owning Usage page. Home creature arrivals use Home's unknown-evidence policy, while Fleet keeps its safety fallback. Export normalized Connect URL-selection helpers shared by target resolution, retained terminal preference changes and stage ownership: unrelated query parameters or host-case changes keep the same terminal, and case-insensitive stage links clear their selectors on close.
+
+### Patch Changes
+
+- Updated dependencies [[`1ffd400`](https://github.com/knpkv/npm/commit/1ffd4002d82cb981cb203b77c67844002179bcf9)]:
+  - @knpkv/rly@0.23.0
+  - @knpkv/agent-usage@0.10.4
+  - @knpkv/herdr-work@0.12.2
+
 ## 0.20.2
 
 ### Patch Changes

@@ -1,3 +1,8 @@
+import {
+  type ConnectionState,
+  terminalAttachUrl,
+  terminalConnectionAfterClose
+} from "./internal/terminal-connection.js"
 import { useAtom, useAtomMount, useAtomRefresh, useAtomValue } from "@effect/atom-react"
 import { BrowserHttpClient } from "@effect/platform-browser"
 import { Button, StateLabel, Surface, Text } from "@knpkv/rly/primitives"
@@ -21,7 +26,7 @@ import {
   type ReactNode
 } from "react"
 import { applyTerminalInputIdentity, focusTerminalInput, trackTerminalInputFocus } from "./terminal-input-identity.js"
-import { clampTerminalDimensions, type TerminalDimensions, terminalResizeCommand } from "./terminal-dimensions.js"
+import { type TerminalDimensions, terminalResizeCommand } from "./terminal-dimensions.js"
 import {
   type ConnectAgent,
   type ConnectAgentCursor,
@@ -150,21 +155,11 @@ class ConnectInputQueueError extends Schema.TaggedError<ConnectInputQueueError>(
   detail: Schema.String
 }) {}
 
-type ConnectionState =
-  | { readonly _tag: "idle" }
-  | { readonly _tag: "connecting"; readonly agent: ConnectAgent }
-  | { readonly _tag: "connected"; readonly agent: ConnectAgent }
-  | { readonly _tag: "closed"; readonly agent: ConnectAgent }
-  | {
-      readonly _tag: "failed"
-      readonly agent: ConnectAgent
-      readonly detail: string
-      readonly entryFocusFailure?: ConnectWorkspaceFocusFailureReason
-    }
-
 type ConnectionRequest = {
   readonly agent: ConnectAgent
   readonly id: number
+  readonly takeover?: boolean
+  readonly retainStage?: boolean
 }
 
 const RememberedAgentKey = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(513))
@@ -394,7 +389,14 @@ const loadWork = Effect.gen(function* () {
 
 const browserRuntime = Atom.runtime(BrowserHttpClient.layerFetch)
 
-export { Creature, type CreatureProps } from "./creature.js"
+export {
+  Creature,
+  type CreatureAccessory,
+  type CreatureHueFamily,
+  type CreatureMood,
+  type CreatureProps,
+  type CreatureReaction
+} from "./creature.js"
 export { ConnectLimits } from "./limits-view.js"
 export { AgentCast, AgentStage, PinnedAgents } from "./stage.js"
 export { UsageTab, type UsageTabProps } from "./usage-view.js"
@@ -452,17 +454,8 @@ const ConnectLimitsOwner = ({ atoms }: { readonly atoms: ConnectAtoms }) => {
   return <ConnectLimits problem={limits.problem} view={limits.view} />
 }
 
-const socketUrl = (agent: ConnectAgent, dimensions: TerminalDimensions): string => {
-  const { cols, rows } = clampTerminalDimensions(dimensions)
-  const url = new URL("/v1/connect/session", window.location.href)
-  url.protocol = url.protocol === "https:" ? "wss:" : "ws:"
-  url.searchParams.set("host", agent.host)
-  url.searchParams.set("agent", agent.id)
-  url.searchParams.set("cols", String(cols))
-  url.searchParams.set("rows", String(rows))
-  url.searchParams.set("scrollState", "1")
-  return url.toString()
-}
+const socketUrl = (agent: ConnectAgent, dimensions: TerminalDimensions, takeover: boolean): string =>
+  terminalAttachUrl(agent, dimensions, window.location.href, takeover)
 
 type TerminalInputCommand = Extract<TerminalClientCommand, { readonly type: "terminal.input" }>
 
@@ -503,7 +496,8 @@ const terminalWorker = (
   container: HTMLElement,
   agent: ConnectAgent,
   update: (state: ConnectionState) => void,
-  keyboard: TerminalKeyboardCallbacks
+  keyboard: TerminalKeyboardCallbacks,
+  takeover: boolean
 ) =>
   Effect.scoped(
     Effect.gen(function* () {
@@ -644,7 +638,9 @@ const terminalWorker = (
       )
       const connectedSocket = yield* Effect.acquireRelease(
         Effect.callback<WebSocket, ConnectNetworkError>((resume) => {
-          const value = new WebSocket(socketUrl(agent, { cols: terminal.terminal.cols, rows: terminal.terminal.rows }))
+          const value = new WebSocket(
+            socketUrl(agent, { cols: terminal.terminal.cols, rows: terminal.terminal.rows }, takeover)
+          )
           value.binaryType = "arraybuffer"
           let settled = false
           value.addEventListener("open", () => {
@@ -716,15 +712,9 @@ const terminalWorker = (
           }
         }
         const close = (event: CloseEvent): void => {
-          update(
-            event.code === 1000
-              ? { _tag: "closed", agent }
-              : {
-                  _tag: "failed",
-                  agent,
-                  detail: event.reason || `connection closed (${event.code})`
-                }
-          )
+          ready = false
+          pendingInput.clear()
+          update(terminalConnectionAfterClose(agent, event))
           resume(Effect.void)
         }
         connectedSocket.addEventListener("message", message)
@@ -799,6 +789,7 @@ const ActiveConnectSurface = ({
   const remembered = useAtomValue(atoms.preference)
   const [connection, setConnection] = useAtom(atoms.connection)
   const [connectionRequest, setConnectionRequest] = useAtom(atoms.connectionRequest)
+  const [terminalEntry, setTerminalEntry] = useState<{ readonly enter: () => void } | null>(null)
   const [hostFilter, setHostFilter] = useAtom(atoms.hostFilter)
   const [preferenceError, setPreferenceError] = useAtom(atoms.preferenceError)
   const [query, setQuery] = useAtom(atoms.query)
@@ -958,68 +949,84 @@ const ActiveConnectSurface = ({
       if (requestId.current === terminalRequestId) requestId.current += 1
       setConnectionRequest(null)
     }
+    const applyTerminalState = (state: ConnectionState): void => {
+      if (!workerGuard.accepts(requestId.current)) return
+      if (state._tag === "connected" && !activeRef.current) {
+        // A retained worker can connect off-screen; only its visible owner may move focus or lock the document.
+        terminalActiveRequestRef.current = terminalRequestId
+      } else if (state._tag === "connected") {
+        const elements = workspaceElements()
+        const focusTarget = window.matchMedia("(pointer: fine)").matches
+          ? terminalFocusTargetRef.current
+          : terminalBackRef.current
+        if (elements === null || focusTarget === null) {
+          releaseTerminalFocus()
+          invalidateTerminalRequest()
+          setConnection({
+            _tag: "failed",
+            agent: state.agent,
+            entryFocusFailure: "detached_element",
+            detail: fleetPresentation
+              ? "terminal focus transition failed: detached_element"
+              : connectWorkspaceFocusFailureMessage("detached_element")
+          })
+          return
+        }
+        releaseTerminalEntryLock()
+        const lockedTransition = enterTerminalWorkspaceWithLock(elements, focusTarget, () =>
+          bindTerminalDocumentLock(window)
+        )
+        terminalEntryLockRef.current = lockedTransition.releaseLock
+        const transition = lockedTransition.transition
+        if (transition._tag === "failed") {
+          releaseTerminalEntryLock()
+          releaseTerminalFocus()
+          invalidateTerminalRequest()
+          setConnection({
+            _tag: "failed",
+            agent: state.agent,
+            entryFocusFailure: transition.reason,
+            detail: fleetPresentation
+              ? `terminal focus transition failed: ${transition.reason}`
+              : connectWorkspaceFocusFailureMessage(transition.reason)
+          })
+          return
+        }
+        setWorkspaceFocusFailure(null)
+        terminalActiveRequestRef.current = terminalRequestId
+      } else if (state._tag === "controlled" || state._tag === "taken-over") {
+        releaseTerminalEntryLock()
+        releaseTerminalFocus()
+        invalidateTerminalRequest()
+        terminalActiveRequestRef.current = null
+        setStageKey(connectAgentKey(state.agent))
+      } else if (state._tag === "closed" || state._tag === "failed") {
+        if (activeRef.current && terminalActiveRequestRef.current === terminalRequestId) {
+          const transition = restoreDirectoryFocus(state.agent)
+          if (transition._tag === "failed") {
+            setWorkspaceFocusFailure(transition.reason)
+          } else {
+            setWorkspaceFocusFailure(null)
+          }
+          terminalActiveRequestRef.current = null
+        }
+        invalidateTerminalRequest()
+      }
+      setConnection(state)
+    }
     const fiber = Effect.runFork(
       terminalWorker(
         container,
         connectionRequest.agent,
         (state) => {
           if (!workerGuard.accepts(requestId.current)) return
-          if (state._tag === "connected" && !activeRef.current) {
-            // A retained worker can connect off-screen; only its visible owner may move focus or lock the document.
-            terminalActiveRequestRef.current = terminalRequestId
-          } else if (state._tag === "connected") {
-            const elements = workspaceElements()
-            const focusTarget = window.matchMedia("(pointer: fine)").matches
-              ? terminalFocusTargetRef.current
-              : terminalBackRef.current
-            if (elements === null || focusTarget === null) {
-              releaseTerminalFocus()
-              invalidateTerminalRequest()
-              setConnection({
-                _tag: "failed",
-                agent: state.agent,
-                entryFocusFailure: "detached_element",
-                detail: fleetPresentation
-                  ? "terminal focus transition failed: detached_element"
-                  : connectWorkspaceFocusFailureMessage("detached_element")
-              })
-              return
-            }
-            releaseTerminalEntryLock()
-            const lockedTransition = enterTerminalWorkspaceWithLock(elements, focusTarget, () =>
-              bindTerminalDocumentLock(window)
-            )
-            terminalEntryLockRef.current = lockedTransition.releaseLock
-            const transition = lockedTransition.transition
-            if (transition._tag === "failed") {
-              releaseTerminalEntryLock()
-              releaseTerminalFocus()
-              invalidateTerminalRequest()
-              setConnection({
-                _tag: "failed",
-                agent: state.agent,
-                entryFocusFailure: transition.reason,
-                detail: fleetPresentation
-                  ? `terminal focus transition failed: ${transition.reason}`
-                  : connectWorkspaceFocusFailureMessage(transition.reason)
-              })
-              return
-            }
-            setWorkspaceFocusFailure(null)
-            terminalActiveRequestRef.current = terminalRequestId
-          } else if (state._tag === "closed" || state._tag === "failed") {
-            if (activeRef.current && terminalActiveRequestRef.current === terminalRequestId) {
-              const transition = restoreDirectoryFocus(state.agent)
-              if (transition._tag === "failed") {
-                setWorkspaceFocusFailure(transition.reason)
-              } else {
-                setWorkspaceFocusFailure(null)
-              }
-              terminalActiveRequestRef.current = null
-            }
-            invalidateTerminalRequest()
+          if (state._tag === "connected" && connectionRequest.retainStage === true) {
+            setStageKey(null)
+            // Enter after the stage's modal cleanup, so its isolation cannot reject terminal focus.
+            setTerminalEntry({ enter: () => applyTerminalState(state) })
+          } else {
+            applyTerminalState(state)
           }
-          setConnection(state)
         },
         {
           getModifier: () => terminalModifierRef.current,
@@ -1089,7 +1096,8 @@ const ActiveConnectSurface = ({
               setTerminalTextLines(null)
             }
           }
-        }
+        },
+        connectionRequest.takeover === true
       )
     )
     return () => {
@@ -1099,6 +1107,12 @@ const ActiveConnectSurface = ({
       container.replaceChildren()
     }
   }, [connectionRequest, copyTerminalText, releaseTerminalEntryLock, setConnection])
+
+  useEffect(() => {
+    if (terminalEntry === null) return
+    setTerminalEntry(null)
+    terminalEntry.enter()
+  }, [terminalEntry])
 
   // Worker cleanup above relinquishes callbacks before this owner clears its shared terminal state.
   // Inactivity does not run this cleanup: hidden modules keep their socket and selected agent.
@@ -1312,7 +1326,8 @@ const ActiveConnectSurface = ({
     host: agent.host,
     id: String(agent.id),
     key: connectAgentKey(agent),
-    name: agent.name
+    name: agent.name,
+    hue: agent.hue
   })
   const changePin = (agent: ConnectAgent, pinned: boolean): void => {
     setPinError(null)
@@ -1345,7 +1360,8 @@ const ActiveConnectSurface = ({
         host: agent.host,
         id: String(agent.id),
         key: connectAgentKey(agent),
-        name: agent.name
+        name: agent.name,
+        hue: agent.hue
       })),
       Date.now()
     )
@@ -1374,7 +1390,7 @@ const ActiveConnectSurface = ({
     stageAgent === null
       ? []
       : agents.filter((agent) => agent.host === stageAgent.host && agent.relationship?.parentAgentId === stageAgent.id)
-  const selectAgent = (agent: ConnectAgent): void => {
+  const selectAgent = (agent: ConnectAgent, takeover = false, retainStage = false): void => {
     if (connectAgentIdentityAmbiguous(agents, agent)) return
     preferenceApplied.current = true
     const key = connectAgentKey(agent)
@@ -1392,7 +1408,7 @@ const ActiveConnectSurface = ({
     setSelectedKey(key)
     setConnection({ _tag: "connecting", agent })
     requestId.current += 1
-    setConnectionRequest({ agent, id: requestId.current })
+    setConnectionRequest({ agent, id: requestId.current, takeover, retainStage })
     Effect.runFork(
       storeRememberedAgent(key).pipe(
         Effect.tap(() => Effect.sync(() => setPreferenceError(null))),
@@ -1513,6 +1529,7 @@ const ActiveConnectSurface = ({
 
   const firstLoadFailure = directory._tag === "Failure" ? Cause.squash(directory.cause) : null
   const firstLoadTimedOut = Schema.is(ConnectTimeoutError)(firstLoadFailure)
+  const firstLoadUnreachable = Schema.is(ConnectNetworkError)(firstLoadFailure)
   const firstLoadStatus = Schema.is(ConnectStatusError)(firstLoadFailure) ? firstLoadFailure.status : null
 
   const directoryScreen = (
@@ -1642,15 +1659,23 @@ const ActiveConnectSurface = ({
         )}
         {current === null ? (
           directory._tag === "Failure" ? (
-            <div className="connect-empty connect-directory-error">
+            <div className="connect-empty connect-directory-error" data-unreachable={firstLoadUnreachable || undefined}>
               <Icon decorative name="alert" size="default" />
               <div className="connect-directory-error-copy">
                 <Text as="h2" variant="card-title">
-                  {firstLoadTimedOut ? "The fleet directory didn't answer" : "Couldn't load the fleet directory"}
+                  {firstLoadTimedOut
+                    ? "The fleet directory didn't answer"
+                    : firstLoadUnreachable
+                      ? "Couldn’t load the fleet directory"
+                      : "Couldn't load the fleet directory"}
                 </Text>
                 {firstLoadTimedOut ? (
                   <Text as="p" tone="secondary">
                     The request timed out, so no agents are listed. Retry, or wait: Relay tries again every 5 seconds.
+                  </Text>
+                ) : firstLoadUnreachable ? (
+                  <Text as="p" tone="secondary">
+                    Relay couldn’t reach the hub. It tries again every 5 seconds.
                   </Text>
                 ) : firstLoadStatus === null ? null : (
                   <Text as="p" tone="secondary">
@@ -1744,12 +1769,26 @@ const ActiveConnectSurface = ({
               footer={stageFooter}
               agent={active ? stageAgent : null}
               presentation={presentation._tag}
+              terminalControl={
+                stageAgent !== null &&
+                connection._tag !== "idle" &&
+                connectAgentKey(stageAgent) === connectAgentKey(connection.agent) &&
+                (connection._tag === "controlled" ||
+                  connection._tag === "taken-over" ||
+                  (connection._tag === "connecting" && connectionRequest?.retainStage === true))
+                  ? {
+                      state: connection._tag,
+                      onAction: () => selectAgent(stageAgent, connection._tag === "controlled", true)
+                    }
+                  : undefined
+              }
               restoreFocus={restoreStageFocus}
               agents={agents}
               workSnapshots={currentWork}
               crew={stageCrew}
               onClose={() => {
                 const closing = stageKey
+                if (connection._tag === "connecting" && connectionRequest?.retainStage === true) disconnect()
                 stageUrlSelection.current = null
                 setStageKey(null)
                 const url = directoryLocation?.url
