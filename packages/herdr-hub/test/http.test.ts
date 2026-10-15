@@ -82,6 +82,7 @@ import {
   PendingApprovalSummary,
   PendingApprovalTarget
 } from "../src/dashboard-model.js"
+import { HostResources } from "../src/host-resources-model.js"
 import {
   budgetDashboardSnapshot,
   dashboardSnapshotBytes,
@@ -3387,6 +3388,35 @@ esac
       hueDatabase.exec("DROP TRIGGER hue_failure")
     })).pipe(provideNodeServices)
   })
+
+  it.effect("serves host resources read-only with usage authorization and no gate default", () =>
+    Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "host-resources-test-" })
+      const store = yield* Effect.acquireRelease(
+        JobStore.open(join(root, "jobs.sqlite")),
+        (opened) => Effect.sync(() => opened.close())
+      )
+      const fleet = yield* makeFleetService({ approvalEnabled: false, host: "ALPHA", operations, store })
+      const server = yield* Effect.acquireRelease(
+        Effect.promise(() => startHttpServer(config(root), fleet, assets, { terminalConnector: unusedTerminal })),
+        (running) => Effect.promise(running.close)
+      )
+      const denied = yield* Effect.promise(() =>
+        fetch(`${server.url}/v1/host/resources`, { headers: { "tailscale-user-login": "viewer@example.test" } })
+      )
+      expect(denied.status).toBe(403)
+      const response = yield* Effect.promise(() => fetch(`${server.url}/v1/host/resources`))
+      expect(response.status).toBe(200)
+      expect(response.headers.get("cache-control")).toBe("no-store")
+      const snapshot = yield* Schema.decodeUnknownEffect(HostResources)(yield* Effect.promise(() => response.json()))
+      expect(snapshot.host).toBe("ALPHA")
+      expect(snapshot.gate).toEqual({ _tag: "Unavailable", reason: "not_configured" })
+      expect(snapshot.heavyJobs).toEqual({ _tag: "Unavailable", reason: "not_configured" })
+      expect((yield* Effect.promise(() => fetch(`${server.url}/v1/host/resources`, { method: "POST" }))).status).toBe(
+        404
+      )
+    }).pipe(Effect.scoped, provideNodeServices))
 
   it.effect("serves this host's usage for the asked range and zone, and refuses a query it cannot pass on", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-http-usage-"))
