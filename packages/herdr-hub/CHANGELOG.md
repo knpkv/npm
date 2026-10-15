@@ -2,6 +2,20 @@
 
 Released as `@knpkv/herdr-approvals` up to 0.18.0; the headings below are that package's history.
 
+## 0.38.0
+
+### Minor Changes
+
+- [#917](https://github.com/knpkv/npm/pull/917) [`485fe8f`](https://github.com/knpkv/npm/commit/485fe8f4db2c273ca85181d3712609ed1661bbce) Thanks [@konopkov](https://github.com/konopkov)! - Add typed, debounced agent task kinds to Fleet inventory and status. The host adapter supplies lifecycle evidence; unsupported tool and Work/CI evidence remains unknown. Only CI and test/build failures can produce the failing kind.
+
+### Patch Changes
+
+- Updated dependencies [[`485fe8f`](https://github.com/knpkv/npm/commit/485fe8f4db2c273ca85181d3712609ed1661bbce)]:
+  - @knpkv/herdr-fleet@0.11.0
+  - @knpkv/herdr-connect@0.27.1
+  - @knpkv/herdr-coordinator@0.4.2
+  - @knpkv/herdr-work@0.12.3
+
 ## 0.37.3
 
 ### Patch Changes

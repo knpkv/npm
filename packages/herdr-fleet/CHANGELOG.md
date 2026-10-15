@@ -1,5 +1,11 @@
 # @knpkv/herdr-fleet
 
+## 0.11.0
+
+### Minor Changes
+
+- [#917](https://github.com/knpkv/npm/pull/917) [`485fe8f`](https://github.com/knpkv/npm/commit/485fe8f4db2c273ca85181d3712609ed1661bbce) Thanks [@konopkov](https://github.com/konopkov)! - Add typed, debounced agent task kinds to Fleet inventory and status. The host adapter supplies lifecycle evidence; unsupported tool and Work/CI evidence remains unknown. Only CI and test/build failures can produce the failing kind.
+
 ## 0.10.1
 
 ### Patch Changes
