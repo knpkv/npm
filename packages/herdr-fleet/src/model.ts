@@ -592,6 +592,10 @@ export const HostConfiguration = Schema.Struct({
    * Connect; absent turns limits off for this host.
    */
   agentUsageLimitsCommand: Schema.optionalKey(Command),
+  /** Read-only heavy gate inspection. Absent means gate and jobs are unavailable. */
+  heavyGate: Schema.optionalKey(Schema.Struct({
+    lockDirectory: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(1024), Schema.isPattern(/^\//))
+  })),
   coordinatorCommand: Command,
   herdrCommand: Schema.String,
   tailscaleCommand: Schema.String,

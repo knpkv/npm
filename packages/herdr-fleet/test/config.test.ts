@@ -1,7 +1,8 @@
 import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
-import { Effect, FileSystem, Path } from "effect"
+import { Effect, FileSystem, Path, Schema } from "effect"
 import { loadConfiguration } from "../src/config.js"
+import { HostConfiguration } from "../src/model.js"
 
 describe("fleet configuration", () => {
   it.layer(NodeServices.layer)((it) => {
@@ -20,4 +21,15 @@ describe("fleet configuration", () => {
         )
       }).pipe(Effect.scoped))
   })
+})
+
+it("keeps heavy gate configuration absent by default and requires an explicit absolute directory", () => {
+  const configuration = Schema.Struct({ heavyGate: HostConfiguration.fields.heavyGate })
+  expect(Schema.decodeUnknownSync(configuration)({})).toEqual({})
+  expect(Schema.decodeUnknownSync(configuration)({ heavyGate: { lockDirectory: "/run/heavy-gate" } })).toEqual({
+    heavyGate: { lockDirectory: "/run/heavy-gate" }
+  })
+  for (const lockDirectory of ["", "relative/path"]) {
+    expect(Schema.decodeUnknownResult(configuration)({ heavyGate: { lockDirectory } })._tag).toBe("Failure")
+  }
 })
