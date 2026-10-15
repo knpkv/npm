@@ -113,6 +113,26 @@ it("renders empty Limits with grouped header and a real tokens route, then resto
   expect(document.querySelector('.superapp-header[data-region="header"]')).not.toBeNull()
 })
 
+/** The empty mast's portaled tabs stay Usage navigation: focus lands on them and the current tab replaces history. */
+it("keeps empty Limits tabs owned by Usage for focus and same-page navigation", async () => {
+  await render({
+    usage: () => Effect.succeed({ fleet: emptyUsage, receivedAt: 1_000 }),
+    limits: Effect.succeed({ fleet: emptyLimits, receivedAt: 1_000 })
+  })
+  await act(async () => document.querySelector<HTMLAnchorElement>('.superapp-sidebar a[href*="#usage/"]')?.click())
+  await act(async () => {
+    await new Promise((resolve) => window.requestAnimationFrame(resolve))
+  })
+  const limitsTab = document.querySelector<HTMLAnchorElement>('.usage-empty-tabs a[data-module-page="limits"]')
+  expect(limitsTab).not.toBeNull()
+  expect(document.activeElement).toBe(limitsTab)
+  const push = vi.spyOn(window.history, "pushState")
+  const replace = vi.spyOn(window.history, "replaceState")
+  await act(async () => limitsTab?.click())
+  expect(push).not.toHaveBeenCalled()
+  expect(replace).toHaveBeenCalled()
+})
+
 /** Empty arrays with incomplete peer discovery are unknown evidence, not a successful empty state. */
 it("keeps ordinary Limits when peer discovery is incomplete", async () => {
   window.history.replaceState(null, "", "/?range=7d&timeZone=UTC#usage/limits")

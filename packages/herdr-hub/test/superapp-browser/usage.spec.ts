@@ -417,13 +417,15 @@ for (const width of [600, 640, 641]) {
   test(`empty Limits stays in the shell column at ${width}px`, async ({ page }, info) => {
     test.skip(info.project.name !== "desktop", "One responsive sweep")
     await page.setViewportSize({ width, height: 900 })
+    // The client rejects negative instants, so the fixture reads at the browser server's own clock.
+    const now = Date.now()
     await page.route(
       /\/v1\/connect\/usage(\?|$)/,
-      (route) => route.fulfill({ json: usageFixture({ range: "7d", timeZone: "UTC" }, 1_000, "empty-readings") })
+      (route) => route.fulfill({ json: usageFixture({ range: "7d", timeZone: "UTC" }, now, "empty-readings") })
     )
     await page.route(
       /\/v1\/connect\/limits(\?|$)/,
-      (route) => route.fulfill({ json: limitsFixture(1_000, "empty-readings") })
+      (route) => route.fulfill({ json: limitsFixture(now, "empty-readings") })
     )
     await page.goto("/?range=7d&timeZone=UTC#usage/limits")
     await expect(page.locator(".usage-limits-empty")).toBeVisible()
@@ -449,7 +451,8 @@ for (const width of [600, 640, 641]) {
     }
     await page.unroute(/\/v1\/connect\/usage(\?|$)/)
     await page.unroute(/\/v1\/connect\/limits(\?|$)/)
-    await page.goto("/?range=7d&timeZone=UTC#usage/limits")
+    // The hash is unchanged, so only a reload issues fresh reads.
+    await page.reload()
     await expect(page.locator(".usage-limits-empty")).toHaveCount(0)
     await expect(page.locator(".superapp-header")).toHaveCSS("grid-column-start", width <= 640 ? "1" : "2")
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)

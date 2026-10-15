@@ -211,7 +211,7 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
   )
   const prefix = useRef<FleetShortcutPrefix>(null)
   const [usageEmpty, setUsageEmpty] = useState(false)
-  const [usageAnnouncementOutlet, setUsageAnnouncementOutlet] = useState<HTMLElement | null>(null)
+  const [announcementOutlet, setAnnouncementOutlet] = useState<HTMLElement | null>(null)
   const [usageHeaderOutlet, setUsageHeaderOutlet] = useState<HTMLElement | null>(null)
   const usageEmptyChrome = useMemo(
     () => ({ host, headerOutlet: usageHeaderOutlet, setEmpty: setUsageEmpty }),
@@ -362,8 +362,9 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
       if (target === null) return
       event.preventDefault()
       const route = Result.isSuccess(target) ? readModuleRoute(target.success, descriptors) : null
+      const owner = anchor.closest<HTMLElement>("[data-module], [data-module-owner]")
       const samePage =
-        (anchor.closest<HTMLElement>("[data-module]")?.dataset.module === location.destination.module ||
+        ((owner?.dataset.module ?? owner?.dataset.moduleOwner) === location.destination.module ||
           anchor.closest('[aria-label="More modules"]') !== null) &&
         route !== null &&
         Result.isSuccess(route) &&
@@ -494,7 +495,7 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
     relay === undefined ? null : (
       <HubRelay
         key="relay"
-        announcementOutlet={emptyActive ? usageAnnouncementOutlet : null}
+        announcementOutlet={announcementOutlet}
         relay={relay}
         launcherLabels={{ desktop: "Ask Relay", phone: "Ask Relay" }}
         launcherMark="chef"
@@ -639,7 +640,8 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
     <UsageEmptyChromeContext.Provider value={usageEmptyChrome}>
       <PortalProvider>
         <div className="superapp-shell" data-usage-empty={emptyActive ? "true" : undefined}>
-          {emptyActive ? <div className="usage-empty-announcements" ref={setUsageAnnouncementOutlet} /> : null}
+          {/* One outlet for both layouts, so a layout change never reinserts Relay's populated status region. */}
+          <div className="superapp-announcements" ref={setAnnouncementOutlet} />
           {emptyActive ? sidebarElement : null}
           <div
             key="header"
@@ -649,7 +651,9 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
             inert={terminalActive}
           >
             {headerElement}
-            {emptyActive ? <div className="usage-empty-header-outlet" ref={setUsageHeaderOutlet} /> : null}
+            {emptyActive ? (
+              <div className="usage-empty-header-outlet" data-module-owner="usage" ref={setUsageHeaderOutlet} />
+            ) : null}
           </div>
           {emptyActive ? null : sidebarElement}
           <main className="superapp-main" id="main" tabIndex={-1}>

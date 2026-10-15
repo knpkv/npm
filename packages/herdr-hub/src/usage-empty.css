@@ -50,7 +50,6 @@
     min-inline-size: 0;
   }
 
-  .usage-empty-announcements,
   .usage-empty-header-outlet {
     display: contents;
   }
