@@ -5,7 +5,6 @@ import {
   Inventory,
   LiveProduct,
   RunnerFailure,
-  serveFiles,
   type StartProduct
 } from "@knpkv/design-conformance"
 import type { Page } from "@playwright/test"
@@ -13,6 +12,7 @@ import { Console, Effect, FileSystem, Path, Predicate, Result, Schema } from "ef
 import type { DashboardSnapshot } from "../src/dashboard-model.js"
 import { designDashboard, designReadings, UsageDesignFixture } from "./design-fixture.js"
 import { assertUsageFonts, usageChartsReady } from "./design-fonts.js"
+import { serveUsageDesignFiles } from "./design-server.js"
 
 interface BuiltAssetMap {
   [route: string]: string
@@ -152,7 +152,7 @@ export const start: StartProduct = Effect.fn("SuperappDesign.start")(function*(f
     yield* fs.copy(path.join(dist, name), path.join(temporary, name))
     files[`/assets/${name}`] = name
   }
-  const origin = yield* serveFiles(temporary, files)
+  const origin = yield* serveUsageDesignFiles(temporary, files)
   return LiveProduct.of({
     origin,
     inventory: inventory.usageLimitsInventory,
@@ -196,19 +196,7 @@ export const start: StartProduct = Effect.fn("SuperappDesign.start")(function*(f
             return
           }
           if (url.pathname === "/v1/relay/events") {
-            await route.fulfill({
-              contentType: "text/event-stream",
-              body: `data: ${
-                JSON.stringify({
-                  _tag: "Snapshot",
-                  session: "123456789012",
-                  seq: 0,
-                  messages: [],
-                  runIds: [],
-                  queued: []
-                })
-              }\n\n`
-            })
+            await route.continue()
             return
           }
           if (url.pathname === "/v1/connect/limits" || url.pathname === "/v1/connect/usage") {

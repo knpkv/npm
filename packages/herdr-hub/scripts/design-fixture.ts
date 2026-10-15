@@ -89,14 +89,14 @@ export const designReadings = (fixture: typeof UsageDesignFixture.Type, state: t
     }
   }
   const limits: FleetLimits = {
-    hosts: state.kind === "empty" ? [] : [{ host: data.tokens.host, readAt: fixtureNow, reading: latest }],
+    hosts: [{ host: data.tokens.host, readAt: fixtureNow, reading: latest }],
     failures: [],
     peersListed: true
   }
   const from = fixtureDay - data.tokens.days.length * day
   const periods = data.tokens.days.map((_, index) => ({ key: String(from + index * day), start: from + index * day }))
   const usage: FleetUsage = {
-    hosts: state.kind === "empty" ? [] : [{
+    hosts: [{
       host: data.tokens.host,
       readAt: fixtureNow,
       reading: {
@@ -108,13 +108,15 @@ export const designReadings = (fixture: typeof UsageDesignFixture.Type, state: t
           observedAt: fixtureNow,
           range: { preset: "7d", timeZone: "UTC", from, to: fixtureDay, bucket: "day" },
           periods,
-          tokens: data.tokens.days.flatMap((entry, period) =>
-            agents.flatMap((agent) =>
-              state.chart === "claudeOnly" && agent === "codex"
-                ? []
-                : [{ period, agent, model: `${agent}-model`, tokens: entry[agent] * 1_000_000 }]
-            )
-          ),
+          tokens: state.kind === "empty" ?
+            [] :
+            data.tokens.days.flatMap((entry, period) =>
+              agents.flatMap((agent) =>
+                state.chart === "claudeOnly" && agent === "codex"
+                  ? []
+                  : [{ period, agent, model: `${agent}-model`, tokens: entry[agent] * 1_000_000 }]
+              )
+            ),
           limits: []
         }
       }

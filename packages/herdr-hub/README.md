@@ -318,5 +318,6 @@ base without the inventory logs
 application route. No host, provider or agent-usage process runs. Region attributes
 in the shared Connect Usage view do not change its layout; Connect onboarding is separate.
 
-`legacy.until` is a placeholder of `2026-10-20T00:00:00.000Z`. Set it to the actual
-merge date plus seven days before merge. Drift stays in the report; no waivers are added.
+`legacy.until` is `2026-10-22T00:00:00.000Z`, seven days after the planned October 15 merge date.
+If the merge date changes, update it to that date plus seven days before merge.
+Drift stays in the report; no waivers are added.

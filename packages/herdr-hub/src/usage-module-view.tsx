@@ -76,6 +76,30 @@ const filterHosts = <A extends FleetUsage | FleetLimits>(fleet: A, host: string 
         failures: fleet.failures.filter((entry) => entry.host.toLowerCase() === host.toLowerCase())
       }
 
+/** Only complete matching host reads can establish that neither tokens nor limits have been recorded. */
+const emptyFleetReadings = (usage: FleetUsage, limits: FleetLimits): boolean => {
+  if (!usage.peersListed || !limits.peersListed || usage.failures.length > 0 || limits.failures.length > 0) return false
+  const usageHosts = new Set(usage.hosts.map(({ host }) => host.toLowerCase()))
+  const limitHosts = new Set(limits.hosts.map(({ host }) => host.toLowerCase()))
+  return (
+    usageHosts.size > 0 &&
+    usageHosts.size === usage.hosts.length &&
+    limitHosts.size === limits.hosts.length &&
+    usageHosts.size === limitHosts.size &&
+    [...usageHosts].every((host) => limitHosts.has(host)) &&
+    usage.hosts.every(
+      ({ reading }) =>
+        reading._tag === "Read" &&
+        reading.skipped === 0 &&
+        reading.usage.tokens.length === 0 &&
+        reading.usage.limits.length === 0
+    ) &&
+    limits.hosts.every(
+      ({ reading }) => reading._tag === "Read" && reading.skipped === 0 && reading.limits.latest.length === 0
+    )
+  )
+}
+
 const rangeLabels = { "24h": "24 hours", "7d": "7 days", "30d": "30 days" } satisfies Record<
   UsageSelection["range"],
   string
@@ -134,12 +158,7 @@ const UsagePage = ({
     page === "limits" &&
     AsyncResult.isSuccess(usage) &&
     AsyncResult.isSuccess(limits) &&
-    usage.value.fleet.peersListed &&
-    limits.value.fleet.peersListed &&
-    usage.value.fleet.hosts.length === 0 &&
-    limits.value.fleet.hosts.length === 0 &&
-    usage.value.fleet.failures.length === 0 &&
-    limits.value.fleet.failures.length === 0
+    emptyFleetReadings(usage.value.fleet, limits.value.fleet)
   const setEmpty = emptyChrome?.setEmpty
   useEffect(() => {
     setEmpty?.(mount.active && empty)

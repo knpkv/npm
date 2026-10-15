@@ -210,7 +210,7 @@
     text-decoration: none;
   }
 
-  @media (max-width: 599px) {
+  @media (max-width: 40rem) {
     .superapp-shell[data-usage-empty="true"] .superapp-header [data-rly-relay-launcher] {
       min-block-size: 44px;
       block-size: 44px;

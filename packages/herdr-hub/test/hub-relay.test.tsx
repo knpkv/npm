@@ -12,6 +12,7 @@ import {
 } from "@knpkv/relay-product/client"
 import { Effect, Exit } from "effect"
 import { makeUsageModuleViews } from "../src/usage-module-view.js"
+import { limitsFixture, usageFixture } from "./superapp-browser/usage-fixture.js"
 import { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -124,11 +125,14 @@ describe("Relay in the hub's masthead", () => {
     document.body.append(host)
     root = createRoot(host)
     window.history.replaceState(null, "", "/?range=7d&timeZone=UTC#usage/limits")
-    const empty = { hosts: [], failures: [], peersListed: true }
     const usage = makeUsageModuleViews({
       reads: {
-        usage: () => Effect.succeed({ fleet: empty, receivedAt: 1_000 }),
-        limits: Effect.succeed({ fleet: empty, receivedAt: 1_000 })
+        usage: () =>
+          Effect.succeed({
+            fleet: usageFixture({ range: "7d", timeZone: "UTC" }, 1_000, "empty-readings"),
+            receivedAt: 1_000
+          }),
+        limits: Effect.succeed({ fleet: limitsFixture(1_000, "empty-readings"), receivedAt: 1_000 })
       },
       viewerTimeZone: "UTC",
       now: 1_000,
@@ -147,6 +151,7 @@ describe("Relay in the hub's masthead", () => {
         />
       )
     )
+    expect(document.querySelector('.superapp-shell[data-usage-empty="true"]')).not.toBeNull()
     const launcher = document.querySelector("[data-rly-relay-launcher]")
     const subscriptions = subscribe.mock.calls.length
     const action = document.querySelector<HTMLAnchorElement>('[data-region="action"]')

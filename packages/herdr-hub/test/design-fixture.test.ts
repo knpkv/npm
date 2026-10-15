@@ -202,15 +202,18 @@ describe("Usage design transport", () => {
     expect(designDashboard(fixture, populated).directory?.links).toHaveLength(fixture.usageLimits.hosts.length - 1)
   })
 
-  it("counts only Claude after Codex sign-in expires and emits no hosts for empty", () => {
+  it("counts only Claude after Codex sign-in expires and seeds a successful empty local reading", () => {
     const signedOut = readingsFor("sign-in-required").usage.hosts[0]
     if (signedOut?.reading._tag !== "Read") return expect.unreachable()
     expect(new Set(signedOut.reading.usage.tokens.map((entry) => entry.agent))).toEqual(new Set(["claude"]))
     expect(signedOut.reading.usage.tokens.reduce((sum, entry) => sum + entry.tokens, 0)).toBe(142_000_000)
-    expect(readingsFor("empty")).toEqual({
-      limits: { hosts: [], failures: [], peersListed: true },
-      usage: { hosts: [], failures: [], peersListed: true }
-    })
+    const empty = readingsFor("empty")
+    expect(empty.usage.hosts).toHaveLength(1)
+    expect(empty.limits.hosts).toHaveLength(1)
+    expect(empty.usage.hosts[0]?.host).toBe(fixture.usageLimits.tokens.host)
+    expect(empty.limits.hosts[0]?.host).toBe(fixture.usageLimits.tokens.host)
+    expect(empty.usage.hosts[0]?.reading).toMatchObject({ _tag: "Read", skipped: 0, usage: { tokens: [], limits: [] } })
+    expect(empty.limits.hosts[0]?.reading).toMatchObject({ _tag: "Read", skipped: 0, limits: { latest: [] } })
   })
 })
 

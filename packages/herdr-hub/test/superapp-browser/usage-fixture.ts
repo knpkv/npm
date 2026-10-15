@@ -16,7 +16,7 @@ export const usageFixture = (query: UsageQuery, now: number, state: string): Fle
     : query.range === "30d"
     ? [900_000_000, 500_000_000, 215_000_000]
     : [218_000_000, 126_000_000, 68_000_000]
-  const names = state === "longhost"
+  const names = state === "empty-readings" ? ["atlas"] : state === "longhost"
     ? [LONG_USAGE_HOST, "birch", "cedar"]
     : state === "partial"
     ? ["atlas", "birch"]
@@ -40,7 +40,7 @@ export const usageFixture = (query: UsageQuery, now: number, state: string): Fle
             bucket: query.range === "24h" ? "hour" : "day"
           },
           periods,
-          tokens: periods.flatMap((_, period) => [
+          tokens: state === "empty-readings" ? [] : periods.flatMap((_, period) => [
             { period, agent: "claude", model: "model-a", tokens: Math.round((totals[index] ?? 0) * 0.65 / count) },
             { period, agent: "codex", model: "model-b", tokens: Math.round((totals[index] ?? 0) * 0.35 / count) }
           ]),
@@ -64,7 +64,7 @@ export const limitsFixture = (now: number, state: string): FleetLimits => ({
         v: 1,
         machine: "atlas",
         observedAt: now,
-        latest: [
+        latest: state === "empty-readings" ? [] : [
           {
             agent: "claude",
             machine: "atlas",
