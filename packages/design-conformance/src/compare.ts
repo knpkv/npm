@@ -73,27 +73,37 @@ export interface LiveChanges {
   readonly outsidePixelsChanged: boolean
 }
 
-// CSSOM emits legacy comma-separated sRGB and preserves numeric OKLCH function syntax.
+// CSSOM emits legacy comma-separated sRGB and preserves OKLCH missing components as none.
 // Other serializations stay strict until explicitly supported with comparator controls.
-const computedAlpha = String.raw`(?:0(?:\.[0-9]+)?|1(?:\.0+)?)`
 const computedNumber = String.raw`[+-]?(?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+)(?:e[+-]?[0-9]+)?`
+const computedAlpha = (value: string | undefined): boolean =>
+  value === undefined || (Number.isFinite(Number(value)) && Number(value) >= 0 && Number(value) <= 1)
 const computedRgb = new RegExp(
   String
-    .raw`^(rgb|rgba)\((${computedNumber}),\s*(${computedNumber}),\s*(${computedNumber})(?:,\s*(${computedAlpha}))?\)$`,
+    .raw`^(rgb|rgba)\((${computedNumber}),\s*(${computedNumber}),\s*(${computedNumber})(?:,\s*(${computedNumber}))?\)$`,
   "u"
 )
 const computedRgbColor = (value: string): boolean => {
   const match = computedRgb.exec(value)
-  if (match === null || (match[1] === "rgba") !== (match[5] !== undefined)) return false
+  if (match === null || (match[1] === "rgba") !== (match[5] !== undefined) || !computedAlpha(match[5])) return false
   return match.slice(2, 5).every((component) => {
     const channel = Number(component)
     return Number.isFinite(channel) && channel >= 0 && channel <= 255
   })
 }
+const computedOklchComponent = String.raw`(?:${computedNumber}|none)`
+// Unbounded chroma can retain positive infinity; L, hue and alpha resolve/clamp before serialization.
+const computedOklchChroma = String.raw`(?:${computedOklchComponent}|calc\(infinity\))`
 const computedOklch = new RegExp(
-  String.raw`^oklch\(${computedNumber}(?:\s+${computedNumber}){2}(?:\s+/\s+${computedAlpha})?\)$`,
+  String
+    .raw`^oklch\(${computedOklchComponent}\s+${computedOklchChroma}\s+${computedOklchComponent}(?:\s+/\s+(${computedNumber}|none))?\)$`,
   "u"
 )
+
+const computedOklchColor = (value: string): boolean => {
+  const match = computedOklch.exec(value)
+  return match !== null && (match[1] === "none" || computedAlpha(match[1]))
+}
 
 const unpaintedBorder = (value: string): boolean => {
   const shorthand =
@@ -101,7 +111,7 @@ const unpaintedBorder = (value: string): boolean => {
       .exec(value)
   if (shorthand === null || shorthand[2] === "hidden") return false
   const color = shorthand[3]
-  if (color === undefined || !(computedRgbColor(color) || computedOklch.test(color))) return false
+  if (color === undefined || !(computedRgbColor(color) || computedOklchColor(color))) return false
   const width = shorthand[1]
   return width !== undefined && (shorthand[2] === "none" || /^0(?:\.0+)?(?:px)?$/u.test(width))
 }

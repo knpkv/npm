@@ -26,7 +26,11 @@ DOM order, nearest region parent, horizontal page/region overflow, normalized vi
 text, and document-space boxes. Geometry tolerance is 2px at 390 and 4px at 1280.
 Resolved color, background, font, painted borders, radius, gaps and padding must match exactly.
 Only complete width/style/color shorthands with a known border style are normalized.
-Supported computed colors are numeric comma-separated `rgb()`/`rgba()` and numeric `oklch()` with optional alpha.
+Supported computed colors are numeric comma-separated `rgb()`/`rgba()` and complete `oklch()` with optional alpha.
+OKLCH accepts `none` in each of its three component slots and in alpha; chroma also accepts the computed
+`calc(infinity)` serialization. Numeric alpha, including exponent notation, must remain within 0 to 1. Percentages and angle units resolve to numbers before capture.
+RGB missing-component and color keywords resolve to numeric legacy RGB, or to `color(srgb …)`;
+that separate function remains strict, like other unsupported color spaces.
 RGB channels may be fractional and must remain within 0 to 255.
 Other color forms, incomplete functions and trailing tokens stay strict. These forms follow
 [computed color serialization](https://www.w3.org/TR/css-color-4/#serializing-color-values).

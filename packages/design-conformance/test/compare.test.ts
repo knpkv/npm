@@ -225,7 +225,25 @@ it.effect("unpainted border colors and styles do not create reference or touched
           "0px solid rgb(146.06, 107.46, 131.2)",
           "0px dashed rgb(0.125, 254.999, 255)",
           "0px solid oklch(0.9677 0.0027 286.35)",
-          "0px dashed oklch(0.5 0.1 20 / 0.5)"
+          "0px dashed oklch(0.5 0.1 20 / 0.5)",
+          "0px none oklch(1 0 none)",
+          "0px solid oklch(none 0.1 20)",
+          "0px dashed oklch(0.5 none 20)",
+          "0px solid oklch(none none 20)",
+          "0px dashed oklch(none 0.1 none)",
+          "0px solid oklch(0.5 none none)",
+          "0px dashed oklch(none none none)",
+          "0px solid oklch(0.5 0.1 20 / none)",
+          "0px dashed oklch(none 0.1 20 / none)",
+          "0px solid oklch(0.5 none 20 / none)",
+          "0px dashed oklch(0.5 0.1 none / none)",
+          "0px solid oklch(none none 20 / none)",
+          "0px dashed oklch(none 0.1 none / none)",
+          "0px solid oklch(0.5 none none / none)",
+          "0px dashed oklch(none none none / none)",
+          "0px solid oklch(1 calc(infinity) 20)",
+          "0px dashed oklch(none calc(infinity) none / none)",
+          "0px solid oklch(0.5 0.1 20 / 1.00000e-9)"
         ]
       ) {
         const current = evidence(border)
@@ -343,7 +361,24 @@ for (
     "rgb(1e309, 93.5, 51)",
     "rgba(0, 0, 0, 0.5) trailing",
     "oklch(0.5 0.1)",
-    "oklch(0.5 0.1 20) trailing"
+    "oklch(0.5 0.1 20) trailing",
+    "oklch(1 none)",
+    "oklch(none none)",
+    "oklch(none none none none)",
+    "oklch(none none none /)",
+    "oklch(none none none / none none)",
+    "oklch(none none none / auto)",
+    "oklch(1 0 none) trailing",
+    "oklch(1 0 nones)",
+    "oklch(1 calc(infinity) 20) trailing",
+    "oklch(1 calc(infinity + 1) 20)",
+    "rgb(none, 0, 0)",
+    "rgba(0, 0, 0, none)",
+    "rgba(0, 0, 0, -0.1)",
+    "rgba(0, 0, 0, 1.1)",
+    "oklch(0.5 0.1 20 / -0.1)",
+    "oklch(0.5 0.1 20 / 1.1)",
+    "oklch(0.5 0.1 20 / 1e309)"
   ]
 ) {
   it.effect(`malformed computed border color stays strict in both comparators: ${color}`, () =>
