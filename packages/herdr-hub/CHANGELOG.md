@@ -2,6 +2,22 @@
 
 Released as `@knpkv/herdr-approvals` up to 0.18.0; the headings below are that package's history.
 
+## 0.39.0
+
+### Minor Changes
+
+- [#914](https://github.com/knpkv/npm/pull/914) [`48a942e`](https://github.com/knpkv/npm/commit/48a942e637e0fd0417027b3f1fae5400df5ce50b) Thanks [@konopkov](https://github.com/konopkov)! - Add the read-only Host resources module with local memory and CPU history, disk capacity, heavy-gate ownership, running jobs, preview listeners and memory by pane. Publish the shared snapshot schema and view, with independently unavailable sections and retained stale or offline readings.
+
+  Add optional `heavyGate.lockDirectory` configuration without a default. Gate inspection follows inherited descriptors and reports bounded command display; it never changes jobs or locks. Preview protocol discovery runs separately from sampling and opens only verified tailnet DNS links.
+
+### Patch Changes
+
+- Updated dependencies [[`48a942e`](https://github.com/knpkv/npm/commit/48a942e637e0fd0417027b3f1fae5400df5ce50b)]:
+  - @knpkv/herdr-fleet@0.12.0
+  - @knpkv/herdr-connect@0.27.2
+  - @knpkv/herdr-coordinator@0.4.3
+  - @knpkv/herdr-work@0.12.4
+
 ## 0.38.0
 
 ### Minor Changes
