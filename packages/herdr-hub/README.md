@@ -208,3 +208,13 @@ Module page metadata `showInPhoneTitle` defaults to false. It appends the page l
 Canonical Connect owns its saved Active/Archived location through the shell navigator. Embedded `BlockedConnectSurface` requires one `directoryLocation` containing its URL, navigation and selection-close callbacks; standalone use retains the default browser history. The module forwards the dashboard notification state to the stage footer without another device-state read.
 
 The Connect live directory serves an optional `hue` palette assigned by each host's persisted activity store, also snapshotted on confirmed archive closure and served by `/v1/connect/archive`. Old peers and old archived rows may omit it. Allocations are transactional per host and stable agent ID: live holders reserve colours, unused families precede released ones, and released families are reused longest-closed first once no unused family remains. Each host releases absence from its own newer complete validated inventory; partial, failed, offline and equal-time absent inventories retain reservations. The canonical hub archives peers in its own database without writing into their stores. A shared host watermark rejects stale first allocations, and both seeds use lowercase host identity. Overflow above eight live colours avoids repeating the same seeded shape where possible. If every palette already has that shape, the hash fallback can repeat both. A returning archived identity retains its family only while it is unclaimed by a live agent; otherwise its new lifetime is reallocated. Reappearance still deletes the old archive row. UI consumption belongs to the creature drawing update.
+
+### Agent task signals
+
+The local Herdr inventory adapter supplies `taskKind` from decoded lifecycle
+state. Fleet debounces kind changes for 500ms across agent/status reads.
+Working agents without supported activity evidence report `unknown`; the
+adapter does not infer tasks or CI failures from terminal text, work labels, or
+non-zero command exits. Provider-session tool activity and branch-linked
+Work/CI and review producers remain a separate follow-up. Only the normalized
+kind enters the fleet agent wire contract.

@@ -6,6 +6,7 @@ import {
   type AgentInventory,
   AgentStableId,
   AgentSummary,
+  classifyAgentTask,
   type CoreJobPayload,
   FleetOperationError,
   type HostConfiguration,
@@ -287,6 +288,7 @@ export const makeHostOperations = Effect.fn("HostOperations.make")(function*(
                 parentAgentId: lineage.parentAgentId,
                 relation: lineage.relation,
                 status: agent.agent_status,
+                taskKind: classifyAgentTask({ status: agent.agent_status }),
                 work
               }).pipe(
                 Effect.mapError(operationError("herdr.agent_list.agent"))
