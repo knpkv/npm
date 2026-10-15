@@ -6275,40 +6275,43 @@ esac
       expect(opens).toBe(2)
     }).pipe(Effect.scoped, provideNodeServices))
 
-  it.effect("retries the complete terminal relay pair when its shared port is occupied on the hub address", () =>
-    Effect.gen(function*() {
-      const attempted: Array<number> = []
-      let blockedPort: number | undefined
-      const peer = yield* terminalRelayFixture("invalid", (port) =>
-        Effect.gen(function*() {
-          attempted.push(port)
-          if (blockedPort !== undefined) return
-          const blocker = yield* Effect.acquireRelease(
-            Effect.sync(() => createServer()),
-            (server) => Effect.promise(() => new Promise<void>((resolve) => server.close(() => resolve())))
-          )
-          yield* Effect.tryPromise({
-            try: () =>
-              new Promise<void>((resolve, reject) => {
-                blocker.once("error", reject)
-                blocker.listen(port, "127.0.0.1", resolve)
-              }),
-            catch: (cause) => new ApprovalStartFailed({ cause })
-          })
-          blockedPort = port
-        }))
-      const client = yield* controllerClient(peer.url, true, {
-        rejectUnauthorized: false,
-        headers: { origin: peer.origin }
-      })
-      expect(yield* Effect.promise(() => client.ready)).toBe(4_423)
-      expect(blockedPort).toBeDefined()
-      expect(attempted.length).toBeGreaterThanOrEqual(2)
-      expect(attempted.length).toBeLessThanOrEqual(5)
-      expect(attempted.at(-1)).not.toBe(blockedPort)
-      expect(peer.probes).toEqual(["/v1/connect/terminal/capabilities"])
-      expect(peer.upgrades).toEqual([])
-    }).pipe(Effect.scoped, provideNodeServices))
+  it.effect.each(["false", "invalid"] satisfies ReadonlyArray<"false" | "invalid">)(
+    "retries the complete terminal relay pair when capability is %s and its shared port is occupied",
+    (capability) =>
+      Effect.gen(function*() {
+        const attempted: Array<number> = []
+        let blockedPort: number | undefined
+        const peer = yield* terminalRelayFixture(capability, (port) =>
+          Effect.gen(function*() {
+            attempted.push(port)
+            if (blockedPort !== undefined) return
+            const blocker = yield* Effect.acquireRelease(
+              Effect.sync(() => createServer()),
+              (server) => Effect.promise(() => new Promise<void>((resolve) => server.close(() => resolve())))
+            )
+            yield* Effect.tryPromise({
+              try: () =>
+                new Promise<void>((resolve, reject) => {
+                  blocker.once("error", reject)
+                  blocker.listen(port, "127.0.0.1", resolve)
+                }),
+              catch: (cause) => new ApprovalStartFailed({ cause })
+            })
+            blockedPort = port
+          }))
+        const client = yield* controllerClient(peer.url, true, {
+          rejectUnauthorized: false,
+          headers: { origin: peer.origin }
+        })
+        expect(yield* Effect.promise(() => client.ready)).toBe(4_423)
+        expect(blockedPort).toBeDefined()
+        expect(attempted.length).toBeGreaterThanOrEqual(2)
+        expect(attempted.length).toBeLessThanOrEqual(5)
+        expect(attempted.at(-1)).not.toBe(blockedPort)
+        expect(peer.probes).toEqual(["/v1/connect/terminal/capabilities"])
+        expect(peer.upgrades).toEqual([])
+      }).pipe(Effect.scoped, provideNodeServices)
+  )
 
   it.effect.each(
     ["missing", "false", "invalid", "redirect"] satisfies ReadonlyArray<
