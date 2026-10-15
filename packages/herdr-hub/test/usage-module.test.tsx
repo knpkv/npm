@@ -20,6 +20,30 @@ afterEach(async () => {
 })
 const usage: FleetUsage = { hosts: [], failures: [], peersListed: true }
 const limits: FleetLimits = { hosts: [], failures: [], peersListed: true }
+const emptyUsageHost: FleetUsage["hosts"][number] = {
+  host: "ALPHA",
+  readAt: 1_000,
+  reading: {
+    _tag: "Read",
+    skipped: 0,
+    usage: {
+      v: 1,
+      machine: "ALPHA",
+      observedAt: 1_000,
+      range: { preset: "7d", timeZone: "UTC", from: 0, to: 86_400_000, bucket: "day" },
+      periods: [{ key: "1970-01-01", start: 0 }],
+      tokens: [],
+      limits: []
+    }
+  }
+}
+const emptyLimitsHost: FleetLimits["hosts"][number] = {
+  host: "ALPHA",
+  readAt: 1_000,
+  reading: { _tag: "Read", skipped: 0, limits: { v: 1, machine: "ALPHA", observedAt: 1_000, latest: [] } }
+}
+const emptyUsage: FleetUsage = { ...usage, hosts: [emptyUsageHost] }
+const emptyLimits: FleetLimits = { ...limits, hosts: [emptyLimitsHost] }
 const fleet: ModuleViews<typeof fleetModule> = {
   descriptor: fleetModule,
   pages: { approvals: () => <h1>Approvals</h1>, connect: () => null, work: () => null, usage: () => null }
@@ -50,6 +74,213 @@ const click = async (href: string) => {
   anchor.remove()
 }
 
+/** Successful empty readings use the designed notice and action, without fabricated zero-value cards. */
+it("renders empty Limits with grouped header and a real tokens route, then restores ordinary chrome", async () => {
+  window.history.replaceState(null, "", "/?range=7d&timeZone=UTC#usage/limits")
+  await render({
+    usage: () => Effect.succeed({ fleet: emptyUsage, receivedAt: 1_000 }),
+    limits: Effect.succeed({ fleet: emptyLimits, receivedAt: 1_000 })
+  })
+  expect(document.querySelector('.superapp-shell[data-usage-empty="true"]')).not.toBeNull()
+  expect(document.querySelector(".usage-limits-empty")).not.toBeNull()
+  expect(document.querySelector(".usage-empty")).toBeNull()
+  const sidebar = document.querySelector(".superapp-sidebar")
+  expect(sidebar?.getAttribute("data-region")).toBeNull()
+  expect(sidebar?.querySelector('[data-region="nav"]')?.textContent).toBe("FleetUsage")
+  expect([...document.querySelectorAll("[data-region]")].map((region) => region.getAttribute("data-region"))).toEqual([
+    "nav",
+    "header",
+    "tabs",
+    "notice",
+    "action",
+    "nav"
+  ])
+  const header = document.querySelector('[data-region="header"]')
+  expect(header?.querySelector('[data-region="tabs"]')).not.toBeNull()
+  expect(header?.textContent).toContain("Usage details on hub. Account readings stay on this machine.")
+  const notice = document.querySelector('[data-region="notice"]')
+  expect(notice?.textContent).toContain("No usage readings yet")
+  expect(notice?.textContent).toContain("hub hasn’t recorded any limits or token use. Unknown is not zero.")
+  const action = document.querySelector<HTMLAnchorElement>('[data-region="action"]')
+  expect(action?.textContent).toBe("See fleet token readings")
+  expect(action?.getAttribute("href")).toBe("?range=7d&timeZone=UTC#usage/tokens")
+  expect(document.querySelector('[data-region="cards"]')).toBeNull()
+  expect(document.querySelector('[data-region="detail"]')).toBeNull()
+  expect(document.querySelector('[data-region="footer"]')).toBeNull()
+  await click("/?range=7d&timeZone=UTC#usage/tokens")
+  expect(document.querySelector('.superapp-shell[data-usage-empty="true"]')).toBeNull()
+  expect(document.querySelector(".usage-empty-header-region")).toBeNull()
+  expect(document.querySelector('.superapp-header[data-region="header"]')).not.toBeNull()
+})
+
+/** Empty arrays with incomplete peer discovery are unknown evidence, not a successful empty state. */
+it("keeps ordinary Limits when peer discovery is incomplete", async () => {
+  window.history.replaceState(null, "", "/?range=7d&timeZone=UTC#usage/limits")
+  await render({
+    usage: () => Effect.succeed({ fleet: { ...usage, peersListed: false }, receivedAt: 1_000 }),
+    limits: Effect.succeed({ fleet: limits, receivedAt: 1_000 })
+  })
+  expect(document.querySelector('.superapp-shell[data-usage-empty="true"]')).toBeNull()
+  expect(document.querySelector(".usage-empty-notice")).toBeNull()
+  expect(document.querySelector('[data-region="cards"]')).not.toBeNull()
+})
+
+/** Empty peer reads are legitimate only when both complete reports name the same fleet. */
+it("accepts matching empty peer readings independent of host order and case", async () => {
+  window.history.replaceState(null, "", "/?range=7d&timeZone=UTC#usage/limits")
+  await render({
+    usage: () =>
+      Effect.succeed({
+        fleet: { ...emptyUsage, hosts: [emptyUsageHost, { ...emptyUsageHost, host: "BETA" }] },
+        receivedAt: 1_000
+      }),
+    limits: Effect.succeed({
+      fleet: { ...emptyLimits, hosts: [{ ...emptyLimitsHost, host: "beta" }, emptyLimitsHost] },
+      receivedAt: 1_000
+    })
+  })
+  expect(document.querySelector(".usage-limits-empty")).not.toBeNull()
+})
+
+/** Absence, partial decoding, unavailable hosts and one-sided host discovery cannot prove an empty fleet. */
+it.each([
+  { name: "no hosts", usage, limits },
+  { name: "missing limits host", usage: emptyUsage, limits },
+  { name: "duplicate hosts", usage: { ...emptyUsage, hosts: [emptyUsageHost, emptyUsageHost] }, limits: emptyLimits },
+  {
+    name: "mixed unavailable peer",
+    usage: {
+      ...emptyUsage,
+      hosts: [
+        emptyUsageHost,
+        { ...emptyUsageHost, host: "BETA", reading: { _tag: "Unavailable", reason: "not_configured", detail: "Off" } }
+      ]
+    },
+    limits: { ...emptyLimits, hosts: [emptyLimitsHost, { ...emptyLimitsHost, host: "BETA" }] }
+  },
+  { name: "usage discovery incomplete", usage: { ...emptyUsage, peersListed: false }, limits: emptyLimits },
+  { name: "limits discovery incomplete", usage: emptyUsage, limits: { ...emptyLimits, peersListed: false } },
+  {
+    name: "usage peer failed",
+    usage: { ...emptyUsage, failures: [{ host: "BETA", reason: "offline" }] },
+    limits: emptyLimits
+  },
+  {
+    name: "limits peer failed",
+    usage: emptyUsage,
+    limits: { ...emptyLimits, failures: [{ host: "BETA", reason: "offline" }] }
+  },
+  {
+    name: "host mismatch",
+    usage: emptyUsage,
+    limits: { ...emptyLimits, hosts: [{ ...emptyLimitsHost, host: "BETA" }] }
+  },
+  {
+    name: "not configured",
+    usage: {
+      ...emptyUsage,
+      hosts: [{ ...emptyUsageHost, reading: { _tag: "Unavailable", reason: "not_configured", detail: "Off" } }]
+    },
+    limits: emptyLimits
+  },
+  {
+    name: "limits unavailable",
+    usage: emptyUsage,
+    limits: {
+      ...emptyLimits,
+      hosts: [{ ...emptyLimitsHost, reading: { _tag: "Unavailable", reason: "failed", detail: "Offline" } }]
+    }
+  }
+] satisfies ReadonlyArray<{ readonly name: string; readonly usage: FleetUsage; readonly limits: FleetLimits }>)(
+  "keeps ordinary Limits for $name",
+  async ({ limits, usage }) => {
+    window.history.replaceState(null, "", "/?range=7d&timeZone=UTC#usage/limits")
+    await render({
+      usage: () => Effect.succeed({ fleet: usage, receivedAt: 1_000 }),
+      limits: Effect.succeed({ fleet: limits, receivedAt: 1_000 })
+    })
+    expect(document.querySelector(".usage-limits-empty")).toBeNull()
+  }
+)
+
+/** Nonzero skipped counts and any real token/limit evidence retain the ordinary reading surface. */
+it.each([
+  "skipped usage",
+  "skipped limits",
+  "tokens",
+  "historical limits",
+  "latest limits",
+  "zero tokens",
+  "unknown latest",
+  "zero latest"
+])("keeps ordinary Limits with %s", async (kind) => {
+  if (emptyUsageHost.reading._tag !== "Read" || emptyLimitsHost.reading._tag !== "Read") return expect.unreachable()
+  const snapshot = {
+    agent: "claude",
+    machine: "ALPHA",
+    source: "claude-oauth-usage",
+    label: "five_hour",
+    windowMinutes: 300,
+    observedAt: 1_000,
+    reading:
+      kind === "unknown latest"
+        ? { _tag: "Unknown", reason: "AuthExpired" }
+        : { _tag: "Known", usedPercent: kind === "zero latest" ? 0 : 10, resetsAt: 2_000 }
+  } satisfies (typeof emptyLimitsHost.reading.limits.latest)[number]
+  const reportedUsage: FleetUsage = {
+    ...emptyUsage,
+    hosts: [
+      {
+        ...emptyUsageHost,
+        reading: {
+          ...emptyUsageHost.reading,
+          skipped: kind === "skipped usage" ? 1 : 0,
+          usage: {
+            ...emptyUsageHost.reading.usage,
+            tokens:
+              kind === "tokens" || kind === "zero tokens"
+                ? [{ period: 0, agent: "claude", model: "model-a", tokens: kind === "zero tokens" ? 0 : 1 }]
+                : [],
+            limits:
+              kind === "historical limits"
+                ? [
+                    {
+                      agent: snapshot.agent,
+                      label: snapshot.label,
+                      windowMinutes: snapshot.windowMinutes,
+                      points: [{ at: snapshot.observedAt, reading: snapshot.reading }]
+                    }
+                  ]
+                : []
+          }
+        }
+      }
+    ]
+  }
+  const reportedLimits: FleetLimits = {
+    ...emptyLimits,
+    hosts: [
+      {
+        ...emptyLimitsHost,
+        reading: {
+          ...emptyLimitsHost.reading,
+          skipped: kind === "skipped limits" ? 1 : 0,
+          limits: {
+            ...emptyLimitsHost.reading.limits,
+            latest: kind === "latest limits" || kind === "unknown latest" || kind === "zero latest" ? [snapshot] : []
+          }
+        }
+      }
+    ]
+  }
+  window.history.replaceState(null, "", "/?range=7d&timeZone=UTC#usage/limits")
+  await render({
+    usage: () => Effect.succeed({ fleet: reportedUsage, receivedAt: 1_000 }),
+    limits: Effect.succeed({ fleet: reportedLimits, receivedAt: 1_000 })
+  })
+  expect(document.querySelector(".usage-limits-empty")).toBeNull()
+})
+
 /** A retained Limits error must not expose a Retry on a page that never reads Limits. */
 it("keeps Limits Retry on Limits after switching to healthy By tool", async () => {
   const reads: UsageModuleReads = {
@@ -65,6 +296,21 @@ it("keeps Limits Retry on Limits after switching to healthy By tool", async () =
   expect(retries()).toHaveLength(0)
   await click("?range=7d&timeZone=UTC#usage/limits")
   expect(retries()).toHaveLength(1)
+})
+
+/** A fresh Limits failure has no cards to show, so it must not claim the cards region the design omits. */
+it("tags no cards region for a fresh Limits failure while loading keeps it", async () => {
+  window.history.replaceState(null, "", "/?range=7d&timeZone=UTC#usage/limits")
+  await render({
+    usage: () => Effect.succeed({ fleet: usage, receivedAt: 1_000 }),
+    limits: Effect.fail(new FleetReadLoadError({ path: "/v1/connect/limits", reason: "network", cause: "offline" }))
+  })
+  expect(document.querySelector('[data-region="notice"]')).not.toBeNull()
+  expect(document.querySelector('[data-region="cards"]')).toBeNull()
+  await act(async () => root?.unmount())
+  document.body.replaceChildren()
+  await render({ usage: () => Effect.never, limits: Effect.never })
+  expect(document.querySelector('[data-region="cards"]')).not.toBeNull()
 })
 
 it("repairs selectors only on active Usage and keeps Fleet approval deep links after visiting Usage", async () => {

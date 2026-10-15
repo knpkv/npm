@@ -108,9 +108,14 @@ export const UsageTab = ({
       )}
 
       {fleet || presentation.page === "limits" ? (
-        <section aria-label="Limits now" className="usage-tab-now">
+        <section
+          aria-label="Limits now"
+          className="usage-tab-now"
+          // A fresh failure shows only its notice; the design has no cards region there.
+          data-region={fleet || (limits.view === null && limits.problem !== null) ? undefined : "cards"}
+        >
           {limits.problem === null ? null : (
-            <Text as="p" tone="secondary" variant="meta">
+            <Text as="p" tone="secondary" variant="meta" data-region={fleet ? undefined : "notice"}>
               {limits.problem}
             </Text>
           )}
@@ -130,7 +135,7 @@ export const UsageTab = ({
             ))
           )}
           {limits.view === null || limits.view.notes.length === 0 ? null : (
-            <ul className="usage-tab-notes">
+            <ul className="usage-tab-notes" data-region={fleet ? undefined : "notice"}>
               {limits.view.notes.map((note) => (
                 <li key={note}>
                   <Text as="span" tone="secondary" variant="meta">
@@ -143,7 +148,12 @@ export const UsageTab = ({
         </section>
       ) : null}
 
-      <section aria-busy={usage.loading} aria-labelledby={tokensId} className="usage-tab-panel">
+      <section
+        aria-busy={usage.loading}
+        aria-labelledby={tokensId}
+        className="usage-tab-panel"
+        data-region={fleet ? undefined : "detail"}
+      >
         <div className="usage-tab-panel-head">
           <Text as="h2" id={tokensId} variant="card-title">
             Tokens

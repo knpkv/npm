@@ -1,0 +1,465 @@
+{
+  "version": 1,
+  "data": {
+    "usageLimits": {
+      "meta": {
+        "about": "Synthetic fixture for the Usage, Limits screen (screens/usage-limits.html). All data is invented. Times are en-GB, 24-hour.",
+        "locale": "en-GB",
+        "date": "Sunday 11 October 2026",
+        "defaultState": "populated"
+      },
+      "shell": {
+        "product": "Relay",
+        "askRelay": "Ask Relay",
+        "askShortcut": "Ctrl J",
+        "modulesButton": "More",
+        "personalHeading": "",
+        "hostsLabel": "3 hosts configured",
+        "approvals": 3,
+        "currentModule": "usage",
+        "modules": [
+          {
+            "id": "connect",
+            "name": "Connect",
+            "icon": "home",
+            "group": "main",
+            "bar": true
+          },
+          {
+            "id": "fleet",
+            "name": "Fleet",
+            "icon": "fleet",
+            "group": "main",
+            "bar": true,
+            "showsApprovals": true
+          },
+          {
+            "id": "code",
+            "name": "Code",
+            "icon": "code",
+            "group": "personal",
+            "bar": true
+          },
+          {
+            "id": "usage",
+            "name": "Usage",
+            "icon": "usage",
+            "group": "personal",
+            "bar": true
+          },
+          {
+            "id": "hostResources",
+            "name": "Host resources",
+            "icon": "host",
+            "group": "personal",
+            "bar": false
+          }
+        ],
+        "hubHost": "atlas",
+        "session": {
+          "title": "Session on atlas",
+          "access": "Local access",
+          "aria": "Session on atlas, Local access, connected"
+        },
+        "settings": {
+          "label": "Settings",
+          "href": "#settings",
+          "aria": "Settings: host access and notifications"
+        },
+        "notificationsLabel": "Notifications",
+        "brandLabel": "Relay, go to Connect",
+        "brandHref": "#connect"
+      },
+      "page": {
+        "title": "Limits",
+        "lead": "Know when to wait, and when there\u2019s room for another bot.",
+        "tabs": [
+          {
+            "id": "limits",
+            "name": "Limits",
+            "current": true
+          },
+          {
+            "id": "tokens",
+            "name": "Tokens",
+            "current": false
+          },
+          {
+            "id": "by-tool",
+            "name": "By tool",
+            "current": false
+          }
+        ],
+        "footnote": "Limits and accounts stay on atlas. Relay reads tokens from other hosts, but doesn\u2019t pull their account limits here. Cost isn\u2019t reported.",
+        "purpose": "Limits and tokens, per host, tool and model"
+      },
+      "hosts": [
+        {
+          "id": "atlas",
+          "role": "Hub"
+        },
+        {
+          "id": "birch",
+          "role": "Worker"
+        },
+        {
+          "id": "cedar",
+          "role": "Worker"
+        }
+      ],
+      "tools": [
+        {
+          "id": "claude",
+          "name": "Claude",
+          "provider": "Anthropic",
+          "primaryLimit": "fiveHour"
+        },
+        {
+          "id": "codex",
+          "name": "Codex",
+          "provider": "OpenAI",
+          "primaryLimit": "weekly"
+        }
+      ],
+      "labels": {
+        "fiveHourUsed": "5-hour limit used",
+        "weeklyUsed": "Weekly limit used",
+        "weeklyUnknown": "Weekly limit",
+        "fiveHourLimit": "5-hour limit",
+        "fiveHourReset": "5-hour reset",
+        "weeklyLimit": "Weekly limit",
+        "weeklyReset": "Weekly reset",
+        "read": "read",
+        "signInRequired": "sign-in required",
+        "used": "used",
+        "asOf": "as of",
+        "unknown": "Unknown",
+        "fiveHourTrack": "5-hour limit",
+        "weeklyTrack": "weekly limit"
+      },
+      "tokens": {
+        "host": "atlas",
+        "window": "last 7 days",
+        "unit": "M",
+        "title": "Tokens on atlas, last 7 days",
+        "titleClaudeOnly": "Tokens on atlas, last 7 days, Claude only",
+        "link": "Fleet token overview",
+        "days": [
+          {
+            "day": "Sun",
+            "total": 20,
+            "claude": 13,
+            "codex": 7
+          },
+          {
+            "day": "Mon",
+            "total": 26,
+            "claude": 17,
+            "codex": 9
+          },
+          {
+            "day": "Tue",
+            "total": 41,
+            "claude": 27,
+            "codex": 14
+          },
+          {
+            "day": "Wed",
+            "total": 32,
+            "claude": 21,
+            "codex": 11
+          },
+          {
+            "day": "Thu",
+            "total": 45,
+            "claude": 29,
+            "codex": 16
+          },
+          {
+            "day": "Fri",
+            "total": 36,
+            "claude": 23,
+            "codex": 13
+          },
+          {
+            "day": "Sat",
+            "total": 18,
+            "claude": 12,
+            "codex": 6
+          }
+        ],
+        "totals": {
+          "total": 218,
+          "claude": 142,
+          "codex": 76
+        },
+        "legend": {
+          "total": "total",
+          "counted": "counted",
+          "excluded": "Unknown, excluded"
+        }
+      },
+      "states": {
+        "populated": {
+          "id06": "1a",
+          "name": "Room to work",
+          "summary": {
+            "verdict": "atlas has room for more work.",
+            "note": "Claude is at 72% of its 5-hour limit and 48% weekly. Codex is at 31% weekly."
+          },
+          "notices": [],
+          "limits": [
+            {
+              "tool": "claude",
+              "host": "atlas",
+              "readAt": "14:01",
+              "fiveHour": {
+                "used": 72,
+                "reset": "Today, 16:40"
+              },
+              "weekly": {
+                "used": 48,
+                "reset": "Wednesday, 07:00"
+              }
+            },
+            {
+              "tool": "codex",
+              "host": "atlas",
+              "readAt": "14:02",
+              "fiveHour": {
+                "used": 18,
+                "reset": "Today, 17:15"
+              },
+              "weekly": {
+                "used": 31,
+                "reset": "Tuesday, 03:29"
+              }
+            }
+          ],
+          "chart": "all"
+        },
+        "near-limit": {
+          "id06": "1b",
+          "name": "Near limit",
+          "summary": {
+            "verdict": "atlas is close to Claude\u2019s 5-hour limit.",
+            "note": "Claude is at 86% and resets today at 16:40. Codex has room: 31% weekly."
+          },
+          "notices": [],
+          "limits": [
+            {
+              "tool": "claude",
+              "host": "atlas",
+              "readAt": "14:01",
+              "fiveHour": {
+                "used": 86,
+                "reset": "Today, 16:40"
+              },
+              "weekly": {
+                "used": 55,
+                "reset": "Wednesday, 07:00"
+              },
+              "state": {
+                "label": "Near limit",
+                "tone": "caution"
+              },
+              "note": "14% left until 16:40."
+            },
+            {
+              "tool": "codex",
+              "host": "atlas",
+              "readAt": "14:02",
+              "fiveHour": {
+                "used": 18,
+                "reset": "Today, 17:15"
+              },
+              "weekly": {
+                "used": 31,
+                "reset": "Tuesday, 03:29"
+              }
+            }
+          ],
+          "chart": "all"
+        },
+        "limit-reached": {
+          "id06": "1c",
+          "name": "Limit reached",
+          "summary": {
+            "verdict": "Claude is at its 5-hour limit on atlas.",
+            "note": "New Claude work waits until 16:40. Codex still has room: 31% weekly."
+          },
+          "notices": [],
+          "limits": [
+            {
+              "tool": "claude",
+              "host": "atlas",
+              "readAt": "14:01",
+              "fiveHour": {
+                "used": 100,
+                "reset": "Today, 16:40"
+              },
+              "weekly": {
+                "used": 61,
+                "reset": "Wednesday, 07:00"
+              },
+              "state": {
+                "label": "Limit reached",
+                "tone": "critical"
+              },
+              "note": "New Claude work on atlas waits until 16:40."
+            },
+            {
+              "tool": "codex",
+              "host": "atlas",
+              "readAt": "14:02",
+              "fiveHour": {
+                "used": 18,
+                "reset": "Today, 17:15"
+              },
+              "weekly": {
+                "used": 31,
+                "reset": "Tuesday, 03:29"
+              }
+            }
+          ],
+          "chart": "all"
+        },
+        "stale": {
+          "id06": "1d",
+          "name": "Stale",
+          "summary": {
+            "verdict": "atlas\u2019s limits were last read at 09:12.",
+            "note": "As of then, Claude was at 64% of its 5-hour limit and Codex at 27% weekly. Read again before starting more work."
+          },
+          "notices": [
+            {
+              "tone": "caution",
+              "title": "Limits were last read at 09:12.",
+              "text": "They show how full each limit was then, not now. Read again on atlas."
+            }
+          ],
+          "limits": [
+            {
+              "tool": "claude",
+              "host": "atlas",
+              "readAt": "09:12",
+              "stale": true,
+              "fiveHour": {
+                "used": 64,
+                "reset": "Today, 16:40"
+              },
+              "weekly": {
+                "used": 44,
+                "reset": "Wednesday, 07:00"
+              },
+              "state": {
+                "label": "Stale, as of 09:12",
+                "tone": "neutral"
+              }
+            },
+            {
+              "tool": "codex",
+              "host": "atlas",
+              "readAt": "09:12",
+              "stale": true,
+              "fiveHour": {
+                "used": 12,
+                "reset": "Today, 17:15"
+              },
+              "weekly": {
+                "used": 27,
+                "reset": "Tuesday, 03:29"
+              },
+              "state": {
+                "label": "Stale, as of 09:12",
+                "tone": "neutral"
+              }
+            }
+          ],
+          "chart": "all"
+        },
+        "sign-in-required": {
+          "id06": "1e",
+          "name": "Codex sign-in required",
+          "summary": {
+            "verdict": "Claude has room on atlas; Codex is Unknown.",
+            "note": "Claude is at 72% of its 5-hour limit and 48% weekly. Codex can\u2019t be read until you sign in."
+          },
+          "notices": [
+            {
+              "tone": "caution",
+              "title": "Codex needs a fresh sign-in on atlas.",
+              "text": "Codex limits read Unknown until you sign in on atlas and read again. Claude is current."
+            }
+          ],
+          "limits": [
+            {
+              "tool": "claude",
+              "host": "atlas",
+              "readAt": "14:01",
+              "fiveHour": {
+                "used": 72,
+                "reset": "Today, 16:40"
+              },
+              "weekly": {
+                "used": 48,
+                "reset": "Wednesday, 07:00"
+              }
+            },
+            {
+              "tool": "codex",
+              "host": "atlas",
+              "signIn": true,
+              "fiveHour": {
+                "used": null,
+                "reset": null
+              },
+              "weekly": {
+                "used": null,
+                "reset": null
+              },
+              "state": {
+                "label": "Sign-in required",
+                "tone": "caution"
+              },
+              "note": "Unknown is not zero. Sign in on atlas, then read again."
+            }
+          ],
+          "chart": "claudeOnly"
+        },
+        "loading": {
+          "id06": "1f",
+          "name": "Loading",
+          "kind": "loading",
+          "loadingLabel": "Loading limits",
+          "skeletonRows": 3
+        },
+        "empty": {
+          "id06": "1g",
+          "name": "Empty",
+          "kind": "empty",
+          "lead": "Usage details on atlas. Account readings stay on this machine.",
+          "shell": {
+            "approvals": 0
+          },
+          "empty": {
+            "title": "No usage readings yet",
+            "text": "atlas hasn\u2019t recorded any limits or token use. Unknown is not zero.",
+            "link": "See fleet token readings"
+          }
+        },
+        "unavailable": {
+          "id06": "1h",
+          "name": "Error",
+          "kind": "error",
+          "error": {
+            "label": "Couldn\u2019t load",
+            "title": "Couldn\u2019t load limits",
+            "text": "Relay couldn\u2019t read usage on atlas. Nothing was changed.",
+            "action": "Retry"
+          }
+        }
+      }
+    }
+  }
+}

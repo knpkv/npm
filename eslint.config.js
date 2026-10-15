@@ -147,6 +147,14 @@ export default tseslint.config(
     languageOptions: { ecmaVersion: 2022 }
   },
   {
+    // Bytes are hash-pinned design exports, reviewed in ref PRs.
+    files: ["design-refs/*/screens/**/*.js"],
+    languageOptions: {
+      globals: { HTMLElement: "readonly", customElements: "readonly", module: "readonly", window: "readonly" }
+    },
+    rules: { "@effect/dprint": "off" }
+  },
+  {
     files: ["packages/*/src/**/*.{ts,tsx}", "packages/*/test/**/*.{ts,tsx}"],
     rules: {
       "no-console": "error"

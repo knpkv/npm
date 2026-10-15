@@ -12,3 +12,7 @@ docs/debt.md
 packages/*/.design-sync/overrides/
 packages/*/.design-sync/previews/
 packages/*/.design-sync/fixtures/*.json
+
+# Bytes are hash-pinned design exports, reviewed in ref PRs.
+design-refs/*/screens/**
+design-refs/*/fixture.json
