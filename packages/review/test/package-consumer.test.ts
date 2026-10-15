@@ -11,7 +11,36 @@ const ConsumerVersions = Schema.Struct({
   dependencies: Schema.Struct({ effect: Schema.String })
 })
 
-const InstalledVersion = Schema.Struct({ version: Schema.String })
+interface ListedDependency {
+  readonly version?: string | undefined
+  readonly dependencies?: { readonly [name: string]: ListedDependency } | undefined
+}
+const ListedDependency: Schema.Codec<ListedDependency> = Schema.Struct({
+  version: Schema.optional(Schema.String),
+  dependencies: Schema.optional(Schema.Record(Schema.String, Schema.suspend(() => ListedDependency)))
+})
+const ListedProjects = Schema.Array(ListedDependency)
+
+/** Registry versions resolved exactly once in the workspace's production tree; workspace links excluded. */
+const lockedVersions = (projects: ReadonlyArray<ListedDependency>): ReadonlyMap<string, string> => {
+  const seen = new Map<string, Set<string>>()
+  const walk = (dependencies: ListedDependency["dependencies"]): void => {
+    for (const [name, dependency] of Object.entries(dependencies ?? {})) {
+      const version = dependency.version
+      if (version !== undefined && !version.startsWith("link:") && !version.startsWith("file:")) {
+        seen.set(name, (seen.get(name) ?? new Set()).add(version))
+      }
+      walk(dependency.dependencies)
+    }
+  }
+  for (const project of projects) walk(project.dependencies)
+  const locked = new Map<string, string>()
+  for (const [name, versions] of seen) {
+    const [only] = versions
+    if (versions.size === 1 && only !== undefined) locked.set(name, only)
+  }
+  return locked
+}
 
 /** Run the real package manager and Node resolver outside the workspace and Vitest aliases. */
 const run = Effect.fn("ReviewConsumer.run")(function*(cwd: string, command: string, args: ReadonlyArray<string>) {
@@ -49,16 +78,27 @@ const consumer = Effect.fn("ReviewConsumer.install")(function*(ui: boolean) {
   const versions = yield* fs.readFileString(path.join(packageRoot, "package.json")).pipe(
     Effect.flatMap(Schema.decodeUnknownEffect(Schema.fromJsonString(ConsumerVersions)))
   )
-  // Offline installs resolve peer ranges against registry metadata, which can name a release the
-  // store lacks. Pin React to the workspace's locked install so every consumer stays offline.
-  const installed = Effect.fn("ReviewConsumer.installedVersion")(function*(name: string) {
-    const manifest = yield* fs.readFileString(path.join(packageRoot, "node_modules", name, "package.json")).pipe(
-      Effect.flatMap(Schema.decodeUnknownEffect(Schema.fromJsonString(InstalledVersion)))
-    )
-    return manifest.version
-  })
-  const react = yield* installed("react")
-  const reactDom = yield* installed("react-dom")
+  // A lockfile-free offline install resolves ranges against registry metadata, which can name a
+  // release the store lacks. Pin the packed packages' production tree to the workspace lockfile.
+  const locked = yield* run(path.resolve(packageRoot, "..", ".."), "pnpm", [
+    "--filter",
+    "@knpkv/review",
+    "--filter",
+    "@knpkv/rly",
+    "list",
+    "--prod",
+    "--depth",
+    "Infinity",
+    "--json"
+  ]).pipe(
+    Effect.flatMap(Schema.decodeUnknownEffect(Schema.fromJsonString(ListedProjects))),
+    Effect.map(lockedVersions)
+  )
+  const react = locked.get("react")
+  const reactDom = locked.get("react-dom")
+  if (react === undefined || reactDom === undefined) {
+    return yield* new PackageConsumerError({ detail: "The workspace lockfile does not resolve one React version" })
+  }
   const temporary = yield* fs.makeTempDirectoryScoped({ prefix: "review-peer-consumer-" })
   const archives = new Map<string, string>()
   for (const name of ["review", "rly"]) {
@@ -103,7 +143,12 @@ const consumer = Effect.fn("ReviewConsumer.install")(function*(ui: boolean) {
   // installed just because an override exists; the old hard dependency does install it.
   yield* fs.writeFileString(
     path.join(directory, "pnpm-workspace.yaml"),
-    `overrides:\n  "@knpkv/rly": "${archives.get("rly")}"\n  react: "${react}"\n  react-dom: "${reactDom}"\n`
+    [
+      "overrides:",
+      `  "@knpkv/rly": "${archives.get("rly")}"`,
+      ...[...locked].map(([name, version]) => `  "${name}": "${version}"`),
+      ""
+    ].join("\n")
   )
   const store = (yield* run(packageRoot, "pnpm", ["store", "path"])).trim()
   yield* run(directory, "pnpm", [
