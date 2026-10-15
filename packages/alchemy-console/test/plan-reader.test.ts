@@ -94,7 +94,7 @@ const fixtureSourceLayer = Layer.effectContext(Effect.gen(function*() {
                 name: "Native read-only plan",
                 started_at: current.paused === true
                   ? null
-                  : (current.runs?.find((run) => run.id === id) ?? producer).created_at,
+                  : (current.runs?.find((run) => run.id === id) ?? producer).run_started_at,
                 status: "completed",
                 conclusion: current.paused === true ? "skipped" : id === failed?.id ? failed.conclusion : "success"
               }]
@@ -262,7 +262,13 @@ layer(fixtures)("CI plan reader", (it) => {
     }))
   it.effect("retains a verified older publication when the newer stack run fails", () =>
     Effect.gen(function*() {
-      const failure: Run = { ...producer, id: 102, conclusion: "failure", created_at: DateTime.makeUnsafe(now) }
+      const failure: Run = {
+        ...producer,
+        id: 102,
+        conclusion: "failure",
+        created_at: DateTime.makeUnsafe(now),
+        run_started_at: DateTime.makeUnsafe(now)
+      }
       const state = yield* read({
         runs: [failure, producer],
         jobs: new Map([[102, [nativeJob("site", "failure", "failure", failure)]], [100, [
@@ -404,7 +410,13 @@ layer(fixtures)("CI plan reader", (it) => {
 
   it.effect("a cancelled stack run is Failed, with no invented last publication", () =>
     Effect.gen(function*() {
-      const cancelled: Run = { ...producer, id: 102, conclusion: "cancelled", created_at: DateTime.makeUnsafe(now) }
+      const cancelled: Run = {
+        ...producer,
+        id: 102,
+        conclusion: "cancelled",
+        created_at: DateTime.makeUnsafe(now),
+        run_started_at: DateTime.makeUnsafe(now)
+      }
       const state = yield* read({ runs: [cancelled], artifacts: [] })
       expect(state).toEqual({
         _tag: "Failed",
@@ -447,17 +459,61 @@ layer(fixtures)("CI plan reader", (it) => {
       name: "Native read-only plan",
       status: "completed",
       conclusion: planConclusion,
-      started_at: planConclusion === "skipped" ? null : run.created_at
+      started_at: planConclusion === "skipped" ? null : run.run_started_at
     }]
   })
-  const failedSite: Run = { ...producer, id: 102, conclusion: "failure", created_at: DateTime.makeUnsafe(now - 1000) }
-  const newerRun: Run = { ...producer, id: 103, created_at: DateTime.makeUnsafe(now) }
+  const failedSite: Run = {
+    ...producer,
+    id: 102,
+    conclusion: "failure",
+    created_at: DateTime.makeUnsafe(now - 1000),
+    run_started_at: DateTime.makeUnsafe(now - 1000)
+  }
+  const newerRun: Run = {
+    ...producer,
+    id: 103,
+    created_at: DateTime.makeUnsafe(now),
+    run_started_at: DateTime.makeUnsafe(now)
+  }
+  it.effect("selects a later-started rerun over a newer-created successful run, never by update time", () =>
+    Effect.gen(function*() {
+      const older = {
+        ...producer,
+        id: 102,
+        conclusion: "failure",
+        created_at: DateTime.makeUnsafe(now - 300_000),
+        run_started_at: DateTime.makeUnsafe(now - 300_000),
+        updated_at: DateTime.makeUnsafe(now + 100_000)
+      }
+      expect(
+        (yield* read({
+          runs: [older, producer],
+          jobs: new Map([[102, [nativeJob("site", "failure", "failure", older)]]])
+        }))._tag
+      ).toBe("Ready")
+      const rerun = { ...older, run_attempt: 2, run_started_at: DateTime.makeUnsafe(now - 1000) }
+      const state = yield* read({
+        runs: [rerun, producer],
+        jobs: new Map([[102, [nativeJob("site", "failure", "failure", rerun)]]])
+      })
+      expect(state._tag).toBe("Failed")
+      if (state._tag === "Failed") {
+        expect(state.runHref).toBe("https://github.com/knpkv/infra/actions/runs/102")
+        expect(state.lastPublished?.stale).toBe("failed")
+        expect(state.lastPublished?.rows).toEqual([{
+          fqn: "Site",
+          resourceType: "Cloudflare.Worker",
+          action: "update",
+          changedKeys: ["compatibilityDate", "routes"]
+        }])
+      }
+    }))
   it.effect("orders a failed attempt against its verified producer despite delayed publication and timestamp ties", () =>
     Effect.gen(function*() {
       const bytes = zip(JSON.stringify(receipt()))
       const delayed = { ...(yield* artifact(bytes)), created_at: DateTime.makeUnsafe(now) }
       for (const created_at of [DateTime.makeUnsafe(now - 100_000), producer.created_at]) {
-        const failure = { ...failedSite, created_at }
+        const failure = { ...failedSite, created_at, run_started_at: created_at }
         const state = yield* read({
           bytes,
           artifacts: [delayed],
@@ -475,7 +531,12 @@ layer(fixtures)("CI plan reader", (it) => {
           }])
         }
       }
-      const olderFailure = { ...failedSite, id: 99, created_at: producer.created_at }
+      const olderFailure = {
+        ...failedSite,
+        id: 99,
+        created_at: producer.created_at,
+        run_started_at: producer.run_started_at
+      }
       expect(
         (yield* read({
           bytes,

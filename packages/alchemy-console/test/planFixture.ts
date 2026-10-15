@@ -111,6 +111,7 @@ export const producer: Run = {
   status: "completed",
   conclusion: "success",
   run_attempt: 1,
+  run_started_at: instant(now - 200_000),
   created_at: instant(now - 200_000),
   updated_at: instant(now - 150_000),
   actor: { id: 833092 },

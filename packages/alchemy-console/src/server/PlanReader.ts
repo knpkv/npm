@@ -33,7 +33,8 @@ const mappedStack = (app: string, stage: string): InfraStack | null =>
   app === "site" && stage === "prod" ? "site" : app === "aws-org" && stage === "org" ? "aws-org" : null
 const repoId = 1288997422
 const compareProducerRuns = (a: Run, b: Run): number =>
-  DateTime.toEpochMillis(b.created_at) - DateTime.toEpochMillis(a.created_at) || b.id - a.id
+  DateTime.toEpochMillis(b.run_started_at) - DateTime.toEpochMillis(a.run_started_at) || b.id - a.id ||
+  b.run_attempt - a.run_attempt
 const runHref = (id: number): string => `https://github.com/knpkv/infra/actions/runs/${id}`
 const sourceFor = (artifact: Artifact, head: string, now: number, producer: Run | undefined): PlanSource => ({
   pr: producer?.pull_requests.find((pr) => pr.head.sha === head)?.number ?? null,

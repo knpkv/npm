@@ -109,6 +109,44 @@ layer(fixtures)("CI GitHub transport", (it) => {
         expect(JSON.stringify(result)).not.toContain("fixture-private-value")
       }))
   }
+  it.effect("classifies fixed repository and workflow discovery 404s as access refusals", () =>
+    Effect.gen(function*() {
+      const { service } = yield* useGithub(() => new Response("fixture-private-value", { status: 404 }))
+      for (
+        const request of [
+          service.workflow("infra.yml").pipe(Effect.asVoid),
+          service.runs("infra.yml").pipe(Effect.asVoid),
+          service.artifacts("site").pipe(Effect.asVoid),
+          service.latestMainSeenByCi().pipe(Effect.asVoid)
+        ]
+      ) {
+        const result = yield* Effect.result(request)
+        expect(result._tag === "Failure" && result.failure._tag).toBe("PlanCiRefused")
+        expect(JSON.stringify(result)).not.toContain("fixture-private-value")
+      }
+    }))
+  for (const status of [429, 500, 503]) {
+    it.effect(`keeps discovery HTTP ${status} retryable`, () =>
+      Effect.gen(function*() {
+        const { service } = yield* useGithub(() => new Response(null, { status }))
+        const result = yield* Effect.result(service.workflow("infra.yml"))
+        expect(result._tag === "Failure" && result.failure._tag).toBe("PlanCiUnreachable")
+      }))
+  }
+  it.effect("does not infer denied repository access from a missing individual run or artifact", () =>
+    Effect.gen(function*() {
+      const { service } = yield* useGithub(() => new Response(null, { status: 404 }))
+      for (
+        const request of [
+          service.run(100).pipe(Effect.asVoid),
+          service.jobs(100).pipe(Effect.asVoid),
+          service.download(301).pipe(Effect.asVoid)
+        ]
+      ) {
+        const result = yield* Effect.result(request)
+        expect(result._tag === "Failure" && result.failure._tag).toBe("PlanCiUnreachable")
+      }
+    }))
   for (
     const sample of [
       {
