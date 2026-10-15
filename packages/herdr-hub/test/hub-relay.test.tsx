@@ -117,8 +117,8 @@ const mount = async (conversations: RelayConversations) => {
 }
 
 describe("Relay in the hub's masthead", () => {
-  /** Empty-state header grouping must not restart the fleet conversation when the route changes. */
-  it("retains the launcher and conversation across empty Limits and Tokens", async () => {
+  /** Empty-state header grouping must not restart the conversation or reinsert its status region on route changes. */
+  it("retains the launcher, conversation and live region across empty Limits and Tokens", async () => {
     const { conversations } = fakeConversations({ ...initialRelayConversation, connection: "live" })
     const subscribe = vi.spyOn(conversations, "subscribe")
     const host = document.createElement("div")
@@ -153,11 +153,14 @@ describe("Relay in the hub's masthead", () => {
     )
     expect(document.querySelector('.superapp-shell[data-usage-empty="true"]')).not.toBeNull()
     const launcher = document.querySelector("[data-rly-relay-launcher]")
+    const live = document.querySelector(".fleet-shell-relay-live")
+    expect(live).not.toBeNull()
     const subscriptions = subscribe.mock.calls.length
     const action = document.querySelector<HTMLAnchorElement>('[data-region="action"]')
     expect(action).not.toBeNull()
     await act(async () => action?.dispatchEvent(new MouseEvent("click", { bubbles: true, button: 0 })))
     expect(document.querySelector("[data-rly-relay-launcher]")).toBe(launcher)
+    expect(document.querySelector(".fleet-shell-relay-live")).toBe(live)
     expect(subscribe.mock.calls).toHaveLength(subscriptions)
     expect(document.querySelector(".usage-empty-header-region")).toBeNull()
   })

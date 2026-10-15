@@ -164,7 +164,7 @@ Previews use the coordinator index's port ranges and process exclusions. Labels 
 
 CPU history breaks its path after a sampling gap longer than 15 seconds. Filesystem readings carry their observed `fsType`; only `tmpfs` uses `/tmp` memory/quota presentation. Other filesystem types use the same capacity row as `/` and `/home`.
 
-The resources superapp browser cases run inventory, theme and geometry checks without private design assets. After building Hub and its workspace dependencies, run `pnpm --filter @knpkv/herdr-hub test:browser:superapp`. Set `HOST_RESOURCES_DESIGN_DIRECTORY` to a reference directory to attach design PNGs as well. When set, every reference is mandatory: 11 states at 390/1280 in light/dark, named `host-resources--<state>--<width>-<theme>.png`. The collection regression runs without a browser or asset build and checks both the plain checkout and configured-reference paths.
+The resources superapp browser cases run inventory, theme and geometry checks without private design assets. `test:browser` builds Hub and runs this superapp suite after the approvals browser suite, so CI's herdr-hub browser leg covers it; to run it alone after building Hub and its workspace dependencies, use `pnpm --filter @knpkv/herdr-hub test:browser:superapp`. Set `HOST_RESOURCES_DESIGN_DIRECTORY` to a reference directory to attach design PNGs as well. When set, every reference is mandatory: 11 states at 390/1280 in light/dark, named `host-resources--<state>--<width>-<theme>.png`. The collection regression runs without a browser or asset build and checks both the plain checkout and configured-reference paths.
 
 ### Usage details
 

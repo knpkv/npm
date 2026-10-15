@@ -211,7 +211,7 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
   )
   const prefix = useRef<FleetShortcutPrefix>(null)
   const [usageEmpty, setUsageEmpty] = useState(false)
-  const [usageAnnouncementOutlet, setUsageAnnouncementOutlet] = useState<HTMLElement | null>(null)
+  const [announcementOutlet, setAnnouncementOutlet] = useState<HTMLElement | null>(null)
   const [usageHeaderOutlet, setUsageHeaderOutlet] = useState<HTMLElement | null>(null)
   const usageEmptyChrome = useMemo(
     () => ({ host, headerOutlet: usageHeaderOutlet, setEmpty: setUsageEmpty }),
@@ -362,8 +362,9 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
       if (target === null) return
       event.preventDefault()
       const route = Result.isSuccess(target) ? readModuleRoute(target.success, descriptors) : null
+      const owner = anchor.closest<HTMLElement>("[data-module], [data-module-owner]")
       const samePage =
-        (anchor.closest<HTMLElement>("[data-module]")?.dataset.module === location.destination.module ||
+        ((owner?.dataset.module ?? owner?.dataset.moduleOwner) === location.destination.module ||
           anchor.closest('[aria-label="More modules"]') !== null) &&
         route !== null &&
         Result.isSuccess(route) &&
@@ -490,11 +491,49 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
     location.error === null &&
     location.destination.module === "usage" &&
     location.destination.page === "limits"
+  // Readings can turn empty (or stop being empty) after arrival focus ran. The layout switch, and the empty
+  // mast moving into the header outlet once it mounts, unmount the focused page tab, so focus would fall to
+  // <body>; hand it to the same page's tab in the new layout.
+  // Only focus the switch itself removed is handed over: a poll that flips the layout while the reader rests on
+  // <body> must not pull focus to the tabs.
+  const emptyLayout = emptyActive ? (usageHeaderOutlet === null ? "inline" : "outlet") : "ordinary"
+  const previousEmptyLayout = useRef(emptyLayout)
+  const lastFocused = useRef<Element | null>(null)
+  useEffect(() => {
+    // focusin fires once the new element holds focus, so the document already names it. Chromium also fires
+    // focusout when the focused element is removed, so the record is dropped a microtask later, and only if that
+    // element is still in the document and no longer focused: a deliberate blur. The handoff's layout effect runs
+    // in the same commit as a removal, before that check.
+    const track = (): void => {
+      lastFocused.current = document.activeElement
+    }
+    const release = (): void => {
+      queueMicrotask(() => {
+        const left = lastFocused.current
+        if (left !== null && left.isConnected && document.activeElement !== left) lastFocused.current = null
+      })
+    }
+    document.addEventListener("focusin", track)
+    document.addEventListener("focusout", release)
+    return () => {
+      document.removeEventListener("focusin", track)
+      document.removeEventListener("focusout", release)
+    }
+  }, [])
+  useLayoutEffect(() => {
+    if (previousEmptyLayout.current === emptyLayout) return
+    previousEmptyLayout.current = emptyLayout
+    // The record is not cleared here: ordinary -> inline -> outlet can be two commits, and the second run's
+    // cleanup cancels the first handoff. Focus landing anywhere replaces the record through focusin.
+    const lost = lastFocused.current
+    if (location.error !== null || lost === null || lost.isConnected || document.activeElement !== document.body) return
+    return focusModulePage(location.destination.module, location.destination.page)
+  }, [emptyLayout, location])
   const relayElement =
     relay === undefined ? null : (
       <HubRelay
         key="relay"
-        announcementOutlet={emptyActive ? usageAnnouncementOutlet : null}
+        announcementOutlet={announcementOutlet}
         relay={relay}
         launcherLabels={{ desktop: "Ask Relay", phone: "Ask Relay" }}
         launcherMark="chef"
@@ -639,7 +678,8 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
     <UsageEmptyChromeContext.Provider value={usageEmptyChrome}>
       <PortalProvider>
         <div className="superapp-shell" data-usage-empty={emptyActive ? "true" : undefined}>
-          {emptyActive ? <div className="usage-empty-announcements" ref={setUsageAnnouncementOutlet} /> : null}
+          {/* One outlet for both layouts, so a layout change never reinserts Relay's populated status region. */}
+          <div className="superapp-announcements" ref={setAnnouncementOutlet} />
           {emptyActive ? sidebarElement : null}
           <div
             key="header"
@@ -649,7 +689,9 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
             inert={terminalActive}
           >
             {headerElement}
-            {emptyActive ? <div className="usage-empty-header-outlet" ref={setUsageHeaderOutlet} /> : null}
+            {emptyActive ? (
+              <div className="usage-empty-header-outlet" data-module-owner="usage" ref={setUsageHeaderOutlet} />
+            ) : null}
           </div>
           {emptyActive ? null : sidebarElement}
           <main className="superapp-main" id="main" tabIndex={-1}>
