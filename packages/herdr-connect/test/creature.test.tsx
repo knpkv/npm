@@ -3,8 +3,8 @@ import { Schema } from "effect"
 import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it } from "vitest"
 
-import { Creature, type CreatureAccessory, type CreatureMood } from "../src/creature.js"
-import { agentCharacter, FOOT } from "../src/character.js"
+import { Creature, type CreatureAccessory, type CreatureMood, type CreatureSize } from "../src/creature.js"
+import { agentCharacter, creatureBodySeed, FOOT } from "../src/character.js"
 import { ConnectAgent } from "../src/model.js"
 import { AgentDirectory } from "../src/view.js"
 
@@ -186,18 +186,18 @@ describe("Creature", () => {
     }
   })
 
-  // Rev6 closedCr rows have no ring and use the exported 0 2 32 32 body frame.
-  it("frames archived row bodies at the reference's 32 design units", () => {
+  // Archived rows have no ring and share the motion designs' 40-unit frame.
+  it("frames archived row bodies at the reference's 40 design units", () => {
     for (const id of ["agent-pair-codex", "agent-rev-auth", "agent-ds-rly"]) {
       const { unit } = agentCharacter("atlas", id)
       const markup = renderToStaticMarkup(<Creature closed host="atlas" id={id} size="row" state="working" />)
       const frame = /viewBox="([^"]+)"/.exec(markup)?.[1]?.split(" ").map(Number)
-      expect((frame?.[2] ?? 0) / unit).toBeCloseTo(32, 3)
+      expect((frame?.[2] ?? 0) / unit).toBeCloseTo(40, 3)
     }
   })
 
-  // The ring fits the body; headwear and marks must not shrink its row, pin or crew presentation.
-  it("meets the body floors in every row slot, including accessories", () => {
+  // Rows draw the body at the reference's own share of a 40-unit frame; headwear and marks must not shrink it.
+  it("keeps the reference body share in every row slot, including accessories", () => {
     for (const id of Array.from({ length: 64 }, (_, index) => `drawing-${String(index)}`)) {
       const {
         bounds: [, , width, height]
@@ -215,10 +215,10 @@ describe("Creature", () => {
         const frame = /viewBox="([^"]+)"/.exec(markup)?.[1]?.split(" ").map(Number)
         expect(frame).toHaveLength(4)
         const edge = frame?.[2] ?? Infinity
-        for (const track of [28, 32, 36]) {
-          expect((width / edge) * track).toBeGreaterThanOrEqual(track * 0.58)
-          expect((Math.max(width, height) / edge) * track).toBeGreaterThanOrEqual(track * 0.7)
-        }
+        const { unit } = agentCharacter("fixture-host", id)
+        expect(edge).toBeCloseTo(40 * unit, 3)
+        expect(width / edge).toBeGreaterThanOrEqual(0.5)
+        expect(Math.max(width, height) / edge).toBeGreaterThanOrEqual(0.55)
       }
     }
   })
@@ -347,5 +347,77 @@ describe("Creature", () => {
     expect(fresh.match(/class="connect-creature"/g)).toHaveLength(2)
     expect(fresh).not.toContain("data-stale")
     expect(directory(agents, true).match(/class="connect-creature"[^>]*data-stale=""/g)).toHaveLength(2)
+  })
+})
+
+describe("Creature framing", () => {
+  const ringOf = (markup: string) => {
+    const match = /class="connect-creature-halo" cx="50" cy="([\d.]+)" rx="([\d.]+)"/.exec(markup)
+    expect(match).not.toBeNull()
+    return { cy: Number(match?.[1]), r: Number(match?.[2]) }
+  }
+  const viewBoxOf = (markup: string) => (/viewBox="([^"]+)"/.exec(markup)?.[1] ?? "").split(" ").map(Number)
+
+  it("centres the stage ring on every body and encloses it, as the reference draw() does", () => {
+    for (let index = 0; index < 64; index++) {
+      const id = `drawing-${String(index)}`
+      const {
+        bodyKind,
+        bounds: [left, top, width, height],
+        unit
+      } = agentCharacter("fixture-host", id)
+      const seed = creatureBodySeed(bodyKind)
+      const { cy, r } = ringOf(
+        renderToStaticMarkup(<Creature host="fixture-host" id={id} size="stage" state="waiting" />)
+      )
+      // Reference: circle cx 16 at the seed's nominal centre, r at least max(w, h) / 2 + 2.25.
+      expect(cy).toBeCloseTo(FOOT - (seed.height * unit) / 2, 3)
+      expect(r).toBeGreaterThanOrEqual((Math.max(seed.width, seed.height) / 2 + 2.25) * unit - 1e-9)
+      expect(cy - r).toBeLessThanOrEqual(top)
+      expect(cy + r).toBeGreaterThanOrEqual(top + height)
+      expect(50 - r).toBeLessThanOrEqual(left)
+      expect(50 + r).toBeGreaterThanOrEqual(left + width)
+    }
+  })
+
+  it("keeps Home's state ring at the exact reference radius", () => {
+    for (let index = 0; index < 64; index++) {
+      const id = `drawing-${String(index)}`
+      const { bodyKind, unit } = agentCharacter("fixture-host", id)
+      const seed = creatureBodySeed(bodyKind)
+      const { r } = ringOf(
+        renderToStaticMarkup(<Creature host="fixture-host" id={id} size="row" state="waiting" statePolicy="home" />)
+      )
+      expect(r).toBeCloseTo((Math.max(seed.width, seed.height) / 2 + 2.25) * unit, 3)
+    }
+  })
+
+  it("keeps every body's state ring, stroke included, inside the frame", () => {
+    for (let index = 0; index < 64; index++) {
+      const id = `drawing-${String(index)}`
+      for (const size of ["stage", "row"] satisfies ReadonlyArray<CreatureSize>) {
+        const markup = renderToStaticMarkup(<Creature host="fixture-host" id={id} size={size} state="waiting" />)
+        const { cy, r } = ringOf(markup)
+        const { unit } = agentCharacter("fixture-host", id)
+        const [x = 0, y = 0, w = 0, h = 0] = viewBoxOf(markup)
+        const half = unit / 2
+        expect(cy - r - half).toBeGreaterThanOrEqual(y)
+        expect(cy + r + half).toBeLessThanOrEqual(y + h)
+        expect(50 - r - half).toBeGreaterThanOrEqual(x)
+        expect(50 + r + half).toBeLessThanOrEqual(x + w)
+      }
+    }
+  })
+
+  it("draws stage, rows and cast in the reference's -4 -4 40 40 box", () => {
+    for (const size of ["stage", "row", "cast"] satisfies ReadonlyArray<CreatureSize>) {
+      const markup = renderToStaticMarkup(<Creature host="atlas" id="agent-one" size={size} state="waiting" />)
+      const { unit } = agentCharacter("atlas", "agent-one")
+      const [x, y, w, h] = viewBoxOf(markup)
+      expect(w).toBeCloseTo(40 * unit, 3)
+      expect(h).toBeCloseTo(40 * unit, 3)
+      expect(x).toBeCloseTo(50 - 20 * unit, 3)
+      expect(y).toBeCloseTo(FOOT - 34.75 * unit, 3)
+    }
   })
 })

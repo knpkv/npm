@@ -54,7 +54,7 @@ const [workflowText, browserPackages] = await runtime.runPromise(
 const jobs = parseDocument(workflowText).toJS().jobs
 const suiteJob = jobs["browser-suite"]
 const requiredJob = jobs.browser
-const suiteTimeout = "${{ matrix.package == 'herdr-connect' && 25 || 15 }}"
+const suiteTimeout = "${{ (matrix.package == 'herdr-connect' || matrix.package == 'herdr-hub') && 25 || 15 }}"
 
 test("the matrix runs exactly the packages that declare a browser suite", () => {
   assert(browserPackages.length > 0)

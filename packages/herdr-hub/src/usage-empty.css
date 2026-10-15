@@ -9,11 +9,6 @@
     color: var(--rly-color-text-1);
   }
 
-  .superapp-shell[data-usage-empty="true"] .superapp-sidebar,
-  .superapp-shell[data-usage-empty="true"] .superapp-bottom {
-    font-weight: 430;
-  }
-
   .superapp-shell[data-usage-empty="true"] .superapp-header [data-rly-relay-launcher] {
     min-block-size: 44px;
     block-size: 44px;
@@ -50,7 +45,6 @@
     min-inline-size: 0;
   }
 
-  .usage-empty-announcements,
   .usage-empty-header-outlet {
     display: contents;
   }

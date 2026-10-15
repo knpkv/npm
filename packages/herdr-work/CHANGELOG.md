@@ -1,5 +1,11 @@
 # @knpkv/herdr-work
 
+## 0.12.5
+
+### Patch Changes
+
+- [#944](https://github.com/knpkv/npm/pull/944) [`681a8fa`](https://github.com/knpkv/npm/commit/681a8fae5258a7f29a366d17c63dfd9a494d1f25) Thanks [@konopkov](https://github.com/konopkov)! - Work rows no longer label planned goals "Stage: In progress". A planned goal with only the default local delivery shows no stage.
+
 ## 0.12.4
 
 ### Patch Changes

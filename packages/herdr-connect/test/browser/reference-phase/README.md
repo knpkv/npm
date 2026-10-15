@@ -7,6 +7,9 @@ before and after the shot. Screenshot `animations: "allow"` preserves that phase
 `capturePinnedReference` retains an uncertain PNG for diagnosis when evidence
 drifts; it does not approve a comparison from that PNG.
 
+The frames were re-captured from the reframed Connect design, which draws stage, row and cast creatures
+in the motion designs' 40-unit size, framed `-4 -4 40 40` so state rings fit, with the same paused-orbit capture.
+
 `references.json` pins the adopted PNGs, source document and renderer contract.
 The PNGs retain their native dimensions and complete figure contents. Adoption
 sets the comparison reference; it does not establish production pixel equality.

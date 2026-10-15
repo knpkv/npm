@@ -163,6 +163,10 @@
     min-inline-size: 2.75rem;
   }
 
+  .superapp-announcements {
+    display: contents;
+  }
+
   .superapp-icon {
     inline-size: 1.25rem;
     block-size: 1.25rem;
@@ -698,6 +702,12 @@
     place-items: center;
     padding-inline: 0.375rem;
     color: inherit;
+  }
+
+  /* The design sets module navigation in the 430 text weight in every layout; the current module uses 620. */
+  .superapp-sidebar,
+  .superapp-bottom {
+    font-weight: 430;
   }
 
   .superapp-module-nav {

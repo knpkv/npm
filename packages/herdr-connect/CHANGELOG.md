@@ -1,5 +1,17 @@
 # @knpkv/herdr-connect
 
+## 0.28.2
+
+### Patch Changes
+
+- [#941](https://github.com/knpkv/npm/pull/941) [`17869e1`](https://github.com/knpkv/npm/commit/17869e1525f0805bc418f34ee51294632e56259c) Thanks [@konopkov](https://github.com/konopkov)! - Draw stage creatures at the creature motion designs' framing: each body keeps its native reference size, 40 reference units across the stage, so a bean fills about 67% of the stage width instead of 78%. Stage slot sizes are unchanged.
+
+## 0.28.1
+
+### Patch Changes
+
+- [#929](https://github.com/knpkv/npm/pull/929) [`2801b6d`](https://github.com/knpkv/npm/commit/2801b6de0ba87ae085e2648d982b7ea62de595ed) Thanks [@konopkov](https://github.com/konopkov)! - Tag Usage Limits regions for design conformance and render its successful empty state with the designed notice and token-reading action. Other states retain their existing layout.
+
 ## 0.28.0
 
 ### Minor Changes

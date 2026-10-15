@@ -1286,18 +1286,15 @@
   .connect-creature-lid[data-low] {
     translate: 0 calc(var(--connect-creature-lid-low) * var(--connect-creature-lower) * 1px);
   }
+  /* The reference strokes its state ring one design unit wide; the ring radius leaves room for it in the frame. */
   .connect-creature-halo {
     fill: none;
     opacity: 0;
     stroke: var(--connect-creature-state-ring);
-    stroke-width: 2.5px;
-    vector-effect: non-scaling-stroke;
+    stroke-width: var(--connect-creature-unit);
   }
   .connect-creature[data-bucket="needs-you"]:not([data-stale], [data-closed]) .connect-creature-halo {
     opacity: 0.9;
-  }
-  .connect-creature[data-size="row"] .connect-creature-halo {
-    stroke-width: 2px;
   }
   .connect-creature-orbit {
     fill: none;
@@ -1309,11 +1306,6 @@
   }
   .connect-creature[data-size="row"] .connect-creature-orbit {
     stroke-width: var(--connect-creature-row-stroke);
-  }
-  /* Home export 66 uses one scaled design unit for its row rings. */
-  .connect-creature[data-row-presentation="home"] .connect-creature-halo {
-    stroke-width: var(--connect-creature-unit);
-    vector-effect: none;
   }
   .connect-creature[data-row-presentation="home"][data-bucket="needs-you"]:not([data-stale], [data-closed])
     .connect-creature-halo {

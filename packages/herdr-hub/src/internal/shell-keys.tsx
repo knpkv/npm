@@ -115,9 +115,13 @@ export const focusModulePage = (
     const tab = [...(slot?.querySelectorAll<HTMLElement>('[role="tab"]') ?? [])].find(
       (element) => element.dataset.tabValue === page
     )
-    const pageLink = [...(slot?.querySelectorAll<HTMLElement>("[data-module-page]") ?? [])].find(
-      (element) => element.dataset.modulePage === page
+    // A module may portal its page links into shell chrome; `data-module-owner` keeps them its own.
+    const owned = [...document.querySelectorAll<HTMLElement>("[data-module-owner]")].filter(
+      (element) => element.dataset.moduleOwner === module
     )
+    const pageLink = [slot, ...owned]
+      .flatMap((root) => [...(root?.querySelectorAll<HTMLElement>("[data-module-page]") ?? [])])
+      .find((element) => element.dataset.modulePage === page)
     const dialog = slot?.querySelector('[role="dialog"]')
     if (dialog !== null && dialog !== undefined) return
     const search = slot?.querySelector("#connect-agent-search")

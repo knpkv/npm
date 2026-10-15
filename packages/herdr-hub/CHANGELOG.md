@@ -2,6 +2,23 @@
 
 Released as `@knpkv/herdr-approvals` up to 0.18.0; the headings below are that package's history.
 
+## 0.41.1
+
+### Patch Changes
+
+- [#946](https://github.com/knpkv/npm/pull/946) [`b27b391`](https://github.com/knpkv/npm/commit/b27b391fedf7eb1b4100557f54b204148d1fa895) Thanks [@konopkov](https://github.com/konopkov)! - Empty Usage Limits tabs stay Usage navigation: focus lands on the current tab and clicking it replaces history instead of pushing. Relay's status region stays mounted when Usage enters or leaves its empty layout, so an unchanged status is not announced again.
+
+## 0.41.0
+
+### Minor Changes
+
+- [#929](https://github.com/knpkv/npm/pull/929) [`2801b6d`](https://github.com/knpkv/npm/commit/2801b6de0ba87ae085e2648d982b7ea62de595ed) Thanks [@konopkov](https://github.com/konopkov)! - Tag Usage Limits regions for design conformance and render its successful empty state with the designed notice and token-reading action. Other states retain their existing layout.
+
+### Patch Changes
+
+- Updated dependencies [[`2801b6d`](https://github.com/knpkv/npm/commit/2801b6de0ba87ae085e2648d982b7ea62de595ed)]:
+  - @knpkv/herdr-connect@0.28.1
+
 ## 0.40.2
 
 ### Patch Changes

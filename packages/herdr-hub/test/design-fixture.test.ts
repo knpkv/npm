@@ -217,15 +217,29 @@ describe("Usage design transport", () => {
   })
 })
 
+/** The preload helper re-exported from source, as a build's `font-preload.js` exports it, so no build is needed. */
+const preloadHelper = `export * from ${JSON.stringify(new URL("../src/font-preload.ts", import.meta.url).href)}\n`
+
+/** A supplied build holding the preload helper and, unless omitted, every font it names. */
+const fixtureBuild = Effect.fn("fixtureBuild")(function*(fonts: ReadonlyArray<string>) {
+  const fs = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
+  const dist = yield* fs.makeTempDirectoryScoped()
+  yield* fs.writeFileString(path.join(dist, "font-preload.js"), preloadHelper)
+  for (const file of fonts) yield* fs.writeFile(path.join(dist, file), new TextEncoder().encode(`woff2 ${file}`))
+  return dist
+})
+
 effectIt.layer(NodeServices.layer)("Usage inventory onboarding boundary", (it) => {
-  it.effect("uses the supplied build's real production preloads in initial and seeded HTML", () =>
+  it.effect("uses the supplied build's preload helper and fonts in initial and seeded HTML", () =>
     Effect.gen(function*() {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
-      const dist = yield* path.fromFileUrl(new URL("../dist/", import.meta.url))
+      const dist = yield* fixtureBuild(PRELOADED_FONTS)
       const fonts = new Map<string, Uint8Array>()
       for (const file of PRELOADED_FONTS) fonts.set(file, yield* fs.readFile(path.join(dist, file)))
       const expected = fontPreloadLink(fonts)
+      expect(expected).not.toBe("")
       const preload = yield* usageFontPreload(dist)
       expect(preload).toBe(expected)
       const state = fixture.usageLimits.states.empty
@@ -240,7 +254,7 @@ effectIt.layer(NodeServices.layer)("Usage inventory onboarding boundary", (it) =
             .toHaveLength(2)
         }
       }
-    }))
+    }).pipe(Effect.scoped))
 
   it.effect("fails before navigation when the supplied production helper or a required font is missing", () =>
     Effect.gen(function*() {
@@ -250,8 +264,7 @@ effectIt.layer(NodeServices.layer)("Usage inventory onboarding boundary", (it) =
       const absent = yield* Effect.result(usageFontPreload(dist))
       if (Result.isSuccess(absent)) return expect.unreachable("Missing production helper accepted")
       expect(absent.failure.detail).toContain(path.join(dist, "font-preload.js"))
-      const production = new URL("../dist/font-preload.js", import.meta.url).href
-      yield* fs.writeFileString(path.join(dist, "font-preload.js"), `export * from ${JSON.stringify(production)}`)
+      yield* fs.writeFileString(path.join(dist, "font-preload.js"), preloadHelper)
       const missing = yield* Effect.result(usageFontPreload(dist))
       if (Result.isSuccess(missing)) return expect.unreachable("Missing production font accepted")
       expect(missing.failure.detail).toContain(path.join(dist, PRELOADED_FONTS[0] ?? ""))

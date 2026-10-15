@@ -87,7 +87,8 @@ This directory contains automated CI/CD workflows for the @knpkv npm monorepo.
 #### Browser
 
 - One matrix leg per package that declares a `test:browser` script (`Browser (<package>)`),
-  each with a 15-minute timeout and `fail-fast: false`, so a slow suite cannot cancel the rest
+  each with a 15-minute timeout (25 for herdr-connect, and for herdr-hub, whose leg also builds Hub and
+  runs its superapp suite) and `fail-fast: false`, so a slow suite cannot cancel the rest
 - Each leg installs the Playwright-managed Chromium runtime and its system dependencies,
   builds the package's workspace dependencies, then runs that package's browser suite
 - The required `Browser` check is an aggregate job: it waits for every leg and passes only
