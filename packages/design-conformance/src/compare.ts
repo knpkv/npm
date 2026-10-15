@@ -73,11 +73,28 @@ export interface LiveChanges {
   readonly outsidePixelsChanged: boolean
 }
 
+// CSSOM emits legacy comma-separated sRGB and preserves numeric OKLCH function syntax.
+// Other serializations stay strict until explicitly supported with comparator controls.
+const computedRgbChannel = String.raw`(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])`
+const computedAlpha = String.raw`(?:0(?:\.[0-9]+)?|1(?:\.0+)?)`
+const computedNumber = String.raw`[+-]?(?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+)(?:e[+-]?[0-9]+)?`
+const computedRgb = new RegExp(
+  String
+    .raw`^(?:rgb\(${computedRgbChannel}(?:,\s*${computedRgbChannel}){2}\)|rgba\(${computedRgbChannel}(?:,\s*${computedRgbChannel}){2},\s*${computedAlpha}\))$`,
+  "u"
+)
+const computedOklch = new RegExp(
+  String.raw`^oklch\(${computedNumber}(?:\s+${computedNumber}){2}(?:\s+/\s+${computedAlpha})?\)$`,
+  "u"
+)
+
 const unpaintedBorder = (value: string): boolean => {
   const shorthand =
-    /^(0(?:\.0+)?(?:px)?|[0-9]+(?:\.[0-9]+)?px)\s+(none|hidden|dotted|dashed|solid|double|groove|ridge|inset|outset)\s+\S.*$/u
+    /^(0(?:\.0+)?(?:px)?|[0-9]+(?:\.[0-9]+)?px)\s+(none|hidden|dotted|dashed|solid|double|groove|ridge|inset|outset)\s+(.*)$/u
       .exec(value)
   if (shorthand === null || shorthand[2] === "hidden") return false
+  const color = shorthand[3]
+  if (color === undefined || !(computedRgb.test(color) || computedOklch.test(color))) return false
   const width = shorthand[1]
   return width !== undefined && (shorthand[2] === "none" || /^0(?:\.0+)?(?:px)?$/u.test(width))
 }

@@ -215,7 +215,16 @@ it.effect("unpainted border colors and styles do not create reference or touched
         regions: new Map([["content", RegionPixels.Image({ bytes: frame })]])
       })
       const base = evidence("0px none rgb(0, 0, 0)")
-      for (const border of ["0px solid rgb(255, 0, 0)", "0 dashed rgb(0, 0, 255)", "1px none rgb(0, 255, 0)"]) {
+      for (
+        const border of [
+          "0px solid rgb(255, 0, 0)",
+          "0 dashed rgb(0, 0, 255)",
+          "1px none rgb(0, 255, 0)",
+          "0px dashed rgba(0, 0, 255, 0.5)",
+          "0px solid oklch(0.9677 0.0027 286.35)",
+          "0px dashed oklch(0.5 0.1 20 / 0.5)"
+        ]
+      ) {
         const current = evidence(border)
         expect(compareSnapshots(identity, state, base.snapshot, current.snapshot), `${property}: ${border}`).toEqual([])
         expect(compareLiveRegions(identity, base, current, ["content"]).touchedRegions).toEqual([])
@@ -314,3 +323,46 @@ it.effect("incomplete or unknown-style border evidence never normalizes in eithe
       }
     }
   }))
+
+for (
+  const color of [
+    "nonsense",
+    "rgb(",
+    "rgb(0, 0, 0) trailing",
+    "rgb(0, 0)",
+    "rgba(0, 0, 0)",
+    "rgba(0, 0, 0, 0.5) trailing",
+    "oklch(0.5 0.1)",
+    "oklch(0.5 0.1 20) trailing"
+  ]
+) {
+  it.effect(`malformed computed border color stays strict in both comparators: ${color}`, () =>
+    Effect.sync(() => {
+      const image = new PNG({ width: 10, height: 10 })
+      image.data.fill(255)
+      const frame = PNG.sync.write(image)
+      for (const property of ["border-top", "border-right", "border-bottom", "border-left"]) {
+        const evidence = (border: string): Capture => ({
+          frame,
+          snapshot: {
+            ...snapshot,
+            regions: snapshot.regions.map((region) => ({ ...region, styles: { [property]: border } }))
+          },
+          regions: new Map([["content", RegionPixels.Image({ bytes: frame })]])
+        })
+        const complete = evidence("0px solid rgb(0, 0, 0)")
+        const malformed = evidence(`0px none ${color}`)
+        for (const pair of [{ before: malformed, after: complete }, { before: complete, after: malformed }]) {
+          expect({
+            reference: compareSnapshots(identity, state, pair.before.snapshot, pair.after.snapshot),
+            touched: compareLiveRegions(identity, pair.before, pair.after, ["content"]).touchedRegions
+          }).toEqual({
+            reference: [
+              expect.objectContaining({ region: "content", rule: "tokens", detail: expect.stringContaining(property) })
+            ],
+            touched: ["content"]
+          })
+        }
+      }
+    }))
+}

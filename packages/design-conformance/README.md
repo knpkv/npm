@@ -26,6 +26,9 @@ DOM order, nearest region parent, horizontal page/region overflow, normalized vi
 text, and document-space boxes. Geometry tolerance is 2px at 390 and 4px at 1280.
 Resolved color, background, font, painted borders, radius, gaps and padding must match exactly.
 Only complete width/style/color shorthands with a known border style are normalized.
+Supported computed colors are numeric comma-separated `rgb()`/`rgba()` and numeric `oklch()` with optional alpha.
+Other color forms, incomplete functions and trailing tokens stay strict. These forms follow
+[computed color serialization](https://www.w3.org/TR/css-color-4/#serializing-color-values).
 An unpainted border has zero width or style `none`; its color and style do not affect token comparisons.
 Style `hidden` always stays significant, including at zero width, because it suppresses adjacent collapsed-table borders.
 Raw captured styles stay unchanged, and painted-border changes still fail both reference and touched-region checks.
