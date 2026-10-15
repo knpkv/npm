@@ -6,11 +6,16 @@ import { AlchemyConsoleApi } from "../api.js"
 import { BootstrapRoutes } from "./Bootstrap.js"
 import { Catalog } from "./Catalog.js"
 import { ownerAuthLayer } from "./OwnerSession.js"
+import { PlanReader } from "./PlanReader.js"
 
 const handlers = HttpApiBuilder.group(AlchemyConsoleApi, "stacks", (handlers) =>
   Effect.gen(function*() {
     const catalog = yield* Catalog
-    return handlers.handle("list", () => catalog.list).handle("get", ({ params }) => catalog.get(params.id))
+    const plans = yield* PlanReader
+    return handlers.handle("list", () => catalog.list).handle("get", ({ params }) => catalog.get(params.id)).handle(
+      "plan",
+      ({ params }) => catalog.identify(params.id).pipe(Effect.flatMap((stack) => plans.read(stack.app, stack.stage)))
+    )
   }))
 
 /** Refuse unsafe/unmatched API requests before handlers; even refusals and missing routes cannot be cached. */

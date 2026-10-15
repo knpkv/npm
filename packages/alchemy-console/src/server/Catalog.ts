@@ -19,6 +19,7 @@ export class StackSource extends Context.Service<StackSource, {
 
 export class Catalog extends Context.Service<Catalog, {
   readonly list: Effect.Effect<StackList, CatalogReadError>
+  readonly identify: (id: StackId) => Effect.Effect<Omit<StackSummary, "id">, StackNotFound>
   readonly get: (id: StackId) => Effect.Effect<StackDetail, StackNotFound | CatalogReadError>
 }>()("@knpkv/alchemy-console/Catalog") {
   static readonly layer = Layer.effect(
@@ -98,7 +99,12 @@ export class Catalog extends Context.Service<Catalog, {
           }
         }
       })
-      return Catalog.of({ list: list(), get })
+      const identify = Effect.fn("AlchemyConsole.catalogIdentify")(function*(id: StackId) {
+        const entry = (yield* Ref.get(entries)).get(id)
+        if (entry === undefined) return yield* new StackNotFound({})
+        return entry.summary
+      })
+      return Catalog.of({ list: list(), get, identify })
     })
   )
 }

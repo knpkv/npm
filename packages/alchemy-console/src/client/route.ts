@@ -6,7 +6,7 @@ import type { StackTab } from "../views.js"
 const RouteFields = Schema.Struct({
   stack: StackId,
   resource: Schema.optionalKey(ResourceFqn),
-  tab: Schema.optionalKey(Schema.Literals(["resources", "outputs", "state"]))
+  tab: Schema.optionalKey(Schema.Literals(["resources", "outputs", "state", "plan"]))
 })
 
 /** URLs retain only normalized authenticated identifiers. No backend paths, provider selectors or bootstrap fragment. */

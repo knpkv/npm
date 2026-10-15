@@ -10,6 +10,7 @@ import process from "node:process"
 import { Catalog } from "./server/Catalog.js"
 import { loadConfig, Port, readPackageVersion, StartupError } from "./server/Config.js"
 import { runConsole } from "./server/Launch.js"
+import { configuredPlanLayer } from "./server/PlanReader.js"
 import { sourceLayer } from "./server/Sources.js"
 import { ssoCredentialsLayer } from "./sso-credentials.js"
 
@@ -48,7 +49,11 @@ const sources = Layer.unwrap(
     Effect.map(sourceLayer)
   )
 ).pipe(Layer.provide(FetchHttpClient.layer), Layer.provide(ssoCredentialsLayer()))
-const services = Layer.merge(Catalog.layer.pipe(Layer.provide(sources)), BrowserOpener.layer).pipe(
+const services = Layer.mergeAll(
+  Catalog.layer.pipe(Layer.provide(sources)),
+  BrowserOpener.layer,
+  configuredPlanLayer.pipe(Layer.provide(FetchHttpClient.layer))
+).pipe(
   Layer.provideMerge(NodeServices.layer)
 )
 const cli = readPackageVersion().pipe(Effect.flatMap((version) => Command.run(command, { version })))
