@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { BrowserFailure, type Identity, RunnerFailure } from "@knpkv/design-conformance"
+import { UsageTab } from "@knpkv/herdr-connect/usage"
 import { Effect, Result } from "effect"
 import { flushSync } from "react-dom"
 import { createRoot } from "react-dom/client"
@@ -8,13 +9,123 @@ import {
   type FontDocument,
   inspectCurrentFont,
   inspectFontDocument,
-  type RenderedFontReply
+  type RenderedFontReply,
+  usageChartsReady
 } from "../scripts/design-fonts.js"
 
 // Playwright's Node-side source mapper must not fetch source files through the DOM fixture's browser XHR.
 vi.hoisted(() => vi.stubGlobal("XMLHttpRequest", undefined))
 beforeEach(() => vi.stubGlobal("XMLHttpRequest", undefined))
 afterEach(() => vi.unstubAllGlobals())
+
+it("waits for the real chart's content-box observation and rejects each stale SVG width during resizing", () =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const observers: Array<ControlledResizeObserver> = []
+      class ControlledResizeObserver implements ResizeObserver {
+        readonly targets = new Set<Element>()
+        readonly callback: ResizeObserverCallback
+        constructor(callback: ResizeObserverCallback) {
+          this.callback = callback
+          observers.push(this)
+        }
+        observe(target: Element) {
+          this.targets.add(target)
+        }
+        unobserve(target: Element) {
+          this.targets.delete(target)
+        }
+        disconnect() {
+          this.targets.clear()
+        }
+      }
+      vi.stubGlobal("ResizeObserver", ControlledResizeObserver)
+      const host = document.createElement("div")
+      document.body.append(host)
+      const root = yield* Effect.acquireRelease(
+        Effect.sync(() => createRoot(host)),
+        (root) =>
+          Effect.sync(() => {
+            flushSync(() => root.unmount())
+            host.remove()
+          })
+      )
+      flushSync(() =>
+        root.render(
+          <section data-module="usage">
+            <UsageTab
+              presentation={{ page: "tokens", labelledBy: "chart-fixture" }}
+              onHubMachine={false}
+              onRangeChange={() => undefined}
+              range="7d"
+              limits={{ problem: null, view: null }}
+              usage={{
+                loading: false,
+                problem: null,
+                view: {
+                  periods: [{ key: "period", start: 0 }],
+                  range: { from: 0, to: 86_400_000, bucket: "day" },
+                  preset: "7d",
+                  cells: [{ period: 0, id: "synthetic", value: 1 }],
+                  labels: new Map([["synthetic", "Synthetic model"]]),
+                  totalTokens: 1,
+                  hosts: [],
+                  notes: []
+                }
+              }}
+            />
+          </section>
+        )
+      )
+      const chart = host.querySelector<HTMLElement>(".usage-chart")
+      const svg = chart?.querySelector("svg")
+      if (chart === null || svg === null || svg === undefined) return expect.unreachable("Chart not mounted")
+      chart.style.cssText = "box-sizing:border-box;padding:4px;border:2px solid"
+      let measured = 324
+      yield* Effect.acquireRelease(
+        Effect.sync(() =>
+          vi
+            .spyOn(chart, "getBoundingClientRect")
+            .mockImplementation(() => DOMRect.fromRect({ width: measured + 12, height: 260 }))
+        ),
+        (spy) => Effect.sync(() => spy.mockRestore())
+      )
+      yield* Effect.acquireRelease(
+        Effect.sync(() =>
+          vi
+            .spyOn(svg, "getBoundingClientRect")
+            .mockImplementation(() => DOMRect.fromRect({ width: measured, height: 260 }))
+        ),
+        (spy) => Effect.sync(() => spy.mockRestore())
+      )
+      expect(svg.getAttribute("width")).toBe("960")
+      expect(svg.getBoundingClientRect().width).toBe(324)
+      for (const width of [324, 420, 300]) {
+        measured = width
+        expect(usageChartsReady()).toBe(false)
+        let delivered = 0
+        flushSync(() => {
+          for (const observer of observers) {
+            if (!observer.targets.has(chart)) continue
+            const entry: ResizeObserverEntry = {
+              target: chart,
+              contentRect: DOMRect.fromRect({ width, height: 260 }),
+              borderBoxSize: [{ inlineSize: width + 12, blockSize: 260 }],
+              contentBoxSize: [{ inlineSize: width, blockSize: 260 }],
+              devicePixelContentBoxSize: [{ inlineSize: width, blockSize: 260 }]
+            }
+            observer.callback([entry], observer)
+            delivered += 1
+          }
+        })
+        expect(delivered).toBeGreaterThan(0)
+        expect(svg.getAttribute("width")).toBe(String(width))
+        expect(usageChartsReady()).toBe(true)
+      }
+      measured = 260
+      for (let pass = 0; pass < 3; pass += 1) expect(usageChartsReady()).toBe(false)
+    }).pipe(Effect.scoped)
+  ))
 
 const identity = { screen: "usage-limits", state: "populated", viewport: 390, theme: "light" } satisfies Identity
 const geist: RenderedFontReply = {
@@ -84,7 +195,13 @@ it("requeries current font targets when React replaces nodes between glyph inspe
     }).pipe(Effect.scoped)
   ))
 
-type Scenario = "replace-once" | "continuous-churn" | "stable-fallback" | "stale-without-change" | "connection-error"
+type Scenario =
+  | "replace-once"
+  | "continuous-churn"
+  | "protocol-invalidation"
+  | "stable-fallback"
+  | "stale-without-change"
+  | "connection-error"
 
 const changingFontDocument = Effect.fn("Test.changingFontDocument")(function* (scenario: Scenario) {
   const host = document.createElement("div")
@@ -124,6 +241,7 @@ const changingFontDocument = Effect.fn("Test.changingFontDocument")(function* (s
   let nextId = 1
   let reads = 0
   let snapshots = 0
+  let invalidation = 0
   const current = () =>
     Array.from(host.querySelectorAll("span"), (element) => {
       const previous = ids.get(element)
@@ -134,7 +252,7 @@ const changingFontDocument = Effect.fn("Test.changingFontDocument")(function* (s
       return id
     })
   const inspection = {
-    invalidationEpoch: () => 0,
+    invalidationEpoch: () => invalidation,
     snapshot: () =>
       Effect.sync(() => {
         snapshots += 1
@@ -155,6 +273,7 @@ const changingFontDocument = Effect.fn("Test.changingFontDocument")(function* (s
     fonts: (id: number) =>
       Effect.suspend((): Effect.Effect<RenderedFontReply, BrowserFailure | RunnerFailure> => {
         reads += 1
+        if (scenario === "protocol-invalidation") invalidation += 1
         if (scenario === "connection-error") {
           return Effect.fail(
             new BrowserFailure({ operation: "inspect rendered Usage font", cause: { message: "Session closed" } })
@@ -202,7 +321,29 @@ it("stops continuous same-count DOM churn after three whole attempts", () =>
       const result = yield* Effect.result(inspectFontDocument(fixture.inspection, identity))
       if (Result.isSuccess(result)) return expect.unreachable("Churning document accepted")
       expect(result.failure._tag).toBe("RunnerFailure")
-      if (result.failure._tag === "RunnerFailure") expect(result.failure.detail).toContain("after 3 attempts")
+      if (result.failure._tag === "RunnerFailure") {
+        expect(result.failure.detail).toContain("after 3 attempts")
+        expect(result.failure.detail).toContain('"mutationEpoch":{"before":2,"after":3}')
+        expect(result.failure.detail).toContain('"cdpInvalidationEpoch":{"before":0,"after":0}')
+        expect(result.failure.detail).toContain('"firstNodeChange":{"index":0')
+      }
+      expect(fixture.reads()).toBe(6)
+      expect(fixture.snapshots()).toBe(6)
+    }).pipe(Effect.scoped)
+  ))
+
+it("distinguishes protocol invalidation from an unchanged React document without accepting it", () =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const fixture = yield* changingFontDocument("protocol-invalidation")
+      const result = yield* Effect.result(inspectFontDocument(fixture.inspection, identity))
+      if (Result.isSuccess(result)) return expect.unreachable("Protocol invalidation accepted")
+      expect(result.failure._tag).toBe("RunnerFailure")
+      if (result.failure._tag === "RunnerFailure") {
+        expect(result.failure.detail).toContain('"mutationEpoch":{"before":0,"after":0}')
+        expect(result.failure.detail).toContain('"cdpInvalidationEpoch":{"before":4,"after":6}')
+        expect(result.failure.detail).toContain('"firstNodeChange":null')
+      }
       expect(fixture.reads()).toBe(6)
       expect(fixture.snapshots()).toBe(6)
     }).pipe(Effect.scoped)

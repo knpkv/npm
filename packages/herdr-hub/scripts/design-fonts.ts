@@ -77,6 +77,9 @@ interface FontDocumentInspection extends FontInspection {
 const sameFontDocument = (left: FontDocument, right: FontDocument) =>
   left.epoch === right.epoch && JSON.stringify(left.nodes) === JSON.stringify(right.nodes)
 
+const fontNodeDiagnostic = (node: FontDocument["nodes"][number] | undefined) =>
+  node === undefined ? null : { ...node, copy: node.copy.slice(0, 160) }
+
 /** A render invalidates the whole proof. Retry only observed churn, never a font mismatch or unrelated SDK error. */
 export const inspectFontDocument = Effect.fn("SuperappDesign.inspectFontDocument")(
   function*(inspection: FontDocumentInspection, identity: Identity) {
@@ -87,7 +90,24 @@ export const inspectFontDocument = Effect.fn("SuperappDesign.inspectFontDocument
     }
     const changed = Effect.fn("SuperappDesign.fontDocumentChanged")(function*() {
       const after = yield* inspection.snapshot()
-      return invalidation !== inspection.invalidationEpoch() || !sameFontDocument(before, after)
+      const currentInvalidation = inspection.invalidationEpoch()
+      if (invalidation === currentInvalidation && sameFontDocument(before, after)) return undefined
+      const changedIndex = before.nodes.findIndex((node, index) =>
+        JSON.stringify(node) !== JSON.stringify(after.nodes[index])
+      )
+      const index = changedIndex === -1 && before.nodes.length !== after.nodes.length
+        ? before.nodes.length
+        : changedIndex
+      return JSON.stringify({
+        mutationEpoch: { before: before.epoch, after: after.epoch },
+        cdpInvalidationEpoch: { before: invalidation, after: currentInvalidation },
+        nodeCount: { before: before.nodes.length, after: after.nodes.length },
+        firstNodeChange: index === -1 ? null : {
+          index,
+          before: fontNodeDiagnostic(before.nodes[index]),
+          after: fontNodeDiagnostic(after.nodes[index])
+        }
+      })
     })
     const attempt = Effect.gen(function*() {
       const evidence: Array<
@@ -98,9 +118,10 @@ export const inspectFontDocument = Effect.fn("SuperappDesign.inspectFontDocument
         const fonts = yield* Effect.fromResult(renderedFontUsage(identity, item.copy, item.mono, decoded))
         evidence.push({ copy: item.copy, weight: item.weight, fonts })
       }
-      if (yield* changed()) {
+      const change = yield* changed()
+      if (change !== undefined) {
         return yield* new FontDocumentChanged({
-          detail: `DOM changed during font inspection ${JSON.stringify(identity)}`
+          detail: `Font inspection invalidated ${JSON.stringify(identity)}: ${change}`
         })
       }
       return evidence
@@ -108,7 +129,10 @@ export const inspectFontDocument = Effect.fn("SuperappDesign.inspectFontDocument
     return yield* attempt.pipe(
       Effect.catchTag("FontTargetMissing", (error) =>
         Effect.gen(function*() {
-          if (yield* changed()) return yield* new FontDocumentChanged({ detail: error.detail })
+          const change = yield* changed()
+          if (change !== undefined) {
+            return yield* new FontDocumentChanged({ detail: `${error.detail}; ${change}` })
+          }
           return yield* new RunnerFailure({ detail: error.detail })
         })),
       Effect.catchTag("BrowserFailure", (error) =>
@@ -118,28 +142,45 @@ export const inspectFontDocument = Effect.fn("SuperappDesign.inspectFontDocument
             error.operation === "inspect rendered Usage font" && Result.isSuccess(cause) &&
             cause.success.message.endsWith(
               "Protocol error (CSS.getPlatformFontsForNode): Could not find node with given id"
-            ) &&
-            (yield* changed())
+            )
           ) {
-            return yield* new FontDocumentChanged({ detail: `${JSON.stringify(identity)}: ${cause.success.message}` })
+            const change = yield* changed()
+            if (change !== undefined) {
+              return yield* new FontDocumentChanged({
+                detail: `${JSON.stringify(identity)}: ${cause.success.message}; ${change}`
+              })
+            }
           }
           return yield* error
         }))
     )
   },
   (effect, _inspection, identity) =>
-    effect.pipe(
-      Effect.retry({ times: 2, while: (error) => error._tag === "FontDocumentChanged" }),
-      Effect.timeout("5 seconds"),
-      Effect.catchTag("FontDocumentChanged", (error) =>
-        Effect.fail(
-          new RunnerFailure({
-            detail: `Font document unstable after 3 attempts ${JSON.stringify(identity)}: ${error.detail}`
-          })
-        )),
-      Effect.catchTag("TimeoutError", () =>
-        Effect.fail(new RunnerFailure({ detail: `Font inspection exceeded 5 seconds ${JSON.stringify(identity)}` })))
-    )
+    Effect.suspend(() => {
+      let attempt = 0
+      return Effect.suspend(() => {
+        attempt += 1
+        return effect.pipe(Effect.tapError((error) =>
+          error._tag === "FontDocumentChanged"
+            ? Console.error(`Usage font inspection attempt ${attempt}: ${error.detail}`)
+            : Effect.void
+        ))
+      }).pipe(
+        Effect.retry({ times: 2, while: (error) => error._tag === "FontDocumentChanged" }),
+        Effect.timeout("5 seconds"),
+        Effect.catchTag("FontDocumentChanged", (error) =>
+          Effect.fail(
+            new RunnerFailure({
+              detail: `Font document unstable after 3 attempts ${JSON.stringify(identity)}: ${error.detail}`
+            })
+          )),
+        Effect.catchTag("TimeoutError", () =>
+          Effect.fail(new RunnerFailure({ detail: `Font inspection exceeded 5 seconds ${JSON.stringify(identity)}` }))),
+        Effect.tapError((error) =>
+          error._tag === "RunnerFailure" ? Console.error(error.detail) : Effect.void
+        )
+      )
+    })
 )
 
 /** Resolve each target in the current document immediately before inspecting its glyphs. */
@@ -173,6 +214,20 @@ export const renderedFontUsage = (identity: Identity, label: string, mono: boole
   }
   return Result.succeed(fonts)
 }
+
+/** The chart's SVG starts at a fallback width; CSS clamping does not prove ResizeObserver's React update landed. */
+export const usageChartsReady = () =>
+  Array.from(document.querySelectorAll<HTMLElement>("[data-module=\"usage\"] .usage-chart")).every((chart) => {
+    if (!chart.checkVisibility({ opacityProperty: true, visibilityProperty: true })) return true
+    const svg = chart.querySelector<SVGSVGElement>(":scope > svg")
+    if (svg === null) return true
+    const style = getComputedStyle(chart)
+    const width = chart.getBoundingClientRect().width -
+      Number.parseFloat(style.paddingLeft) - Number.parseFloat(style.paddingRight) -
+      Number.parseFloat(style.borderLeftWidth) - Number.parseFloat(style.borderRightWidth)
+    const rendered = Number(svg.getAttribute("width"))
+    return Number.isFinite(width) && width > 0 && Number.isFinite(rendered) && Math.abs(rendered - width) < 0.5
+  })
 
 /** Chromium reports the face used for each visible direct text node; both supplied apps must pass before capture. */
 export const assertUsageFonts = Effect.fn("SuperappDesign.assertUsageFonts")(

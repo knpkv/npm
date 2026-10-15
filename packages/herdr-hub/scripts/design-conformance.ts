@@ -12,7 +12,7 @@ import type { Page } from "@playwright/test"
 import { Console, Effect, FileSystem, Path, Predicate, Result, Schema } from "effect"
 import type { DashboardSnapshot } from "../src/dashboard-model.js"
 import { designDashboard, designReadings, UsageDesignFixture } from "./design-fixture.js"
-import { assertUsageFonts } from "./design-fonts.js"
+import { assertUsageFonts, usageChartsReady } from "./design-fonts.js"
 
 interface BuiltAssetMap {
   [route: string]: string
@@ -252,6 +252,7 @@ export const start: StartProduct = Effect.fn("SuperappDesign.start")(function*(f
           await module.locator(".usage-tab-panel[aria-busy=\"false\"]").first().waitFor()
         }
         await page.evaluate(() => document.fonts.ready)
+        await page.waitForFunction(usageChartsReady, undefined, { timeout: 5_000 })
       }).pipe(
         Effect.andThen(assertUsageFonts(page, identity)),
         Effect.asVoid,
