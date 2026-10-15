@@ -22,6 +22,7 @@ export const Run = Schema.Struct({
   status: Schema.String,
   conclusion: Schema.NullOr(Schema.String),
   run_attempt: Positive,
+  run_started_at: Timestamp,
   created_at: Timestamp,
   updated_at: Timestamp,
   actor: Repository,
@@ -91,44 +92,48 @@ export const githubLayer = (token: Redacted.Redacted<string>) =>
     PlanGithub,
     Effect.gen(function*() {
       const client = yield* HttpClient.HttpClient
-      const request = Effect.fn("AlchemyConsole.planGithubRequest")(function*(path: string) {
-        const response = yield* client.get(`https://api.github.com/repos/knpkv/infra/${path}`, {
-          headers: {
-            authorization: `Bearer ${Redacted.value(token)}`,
-            accept: "application/vnd.github+json",
-            "x-github-api-version": "2022-11-28"
-          }
-        }).pipe(
-          Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual", cache: "no-store" }),
-          Effect.mapError(() => new PlanCiUnreachable({}))
-        )
-        if (response.status === 401) return yield* new PlanCiRefused({})
-        if (response.status === 403) {
-          if (response.headers["x-ratelimit-remaining"] === "0" || response.headers["retry-after"] !== undefined) {
-            return yield* new PlanCiUnreachable({})
-          }
-          const bytes = yield* collectBounded(response.stream, 8192).pipe(
+      const request = Effect.fn("AlchemyConsole.planGithubRequest")(
+        function*(path: string, notFound: "refused" | "unreachable") {
+          const response = yield* client.get(`https://api.github.com/repos/knpkv/infra/${path}`, {
+            headers: {
+              authorization: `Bearer ${Redacted.value(token)}`,
+              accept: "application/vnd.github+json",
+              "x-github-api-version": "2022-11-28"
+            }
+          }).pipe(
+            Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual", cache: "no-store" }),
             Effect.mapError(() => new PlanCiUnreachable({}))
           )
-          const refusal = Option.getOrNull(Schema.decodeUnknownOption(RefusalBody)(new TextDecoder().decode(bytes)))
-          if (
-            refusal !== null &&
-            /\b(?:API rate limit exceeded|(?:primary|secondary) rate limit)\b/iu.test(refusal.message)
-          ) {
-            return yield* new PlanCiUnreachable({})
+          if (response.status === 401 || (response.status === 404 && notFound === "refused")) {
+            return yield* new PlanCiRefused({})
           }
-          return yield* new PlanCiRefused({})
+          if (response.status === 403) {
+            if (response.headers["x-ratelimit-remaining"] === "0" || response.headers["retry-after"] !== undefined) {
+              return yield* new PlanCiUnreachable({})
+            }
+            const bytes = yield* collectBounded(response.stream, 8192).pipe(
+              Effect.mapError(() => new PlanCiUnreachable({}))
+            )
+            const refusal = Option.getOrNull(Schema.decodeUnknownOption(RefusalBody)(new TextDecoder().decode(bytes)))
+            if (
+              refusal !== null &&
+              /\b(?:API rate limit exceeded|(?:primary|secondary) rate limit)\b/iu.test(refusal.message)
+            ) {
+              return yield* new PlanCiUnreachable({})
+            }
+            return yield* new PlanCiRefused({})
+          }
+          if (response.status !== 200 && response.status !== 302) return yield* new PlanCiUnreachable({})
+          return response
         }
-        if (response.status !== 200 && response.status !== 302) return yield* new PlanCiUnreachable({})
-        return response
-      })
+      )
       const body = (response: HttpClientResponse.HttpClientResponse, limit: number) =>
         collectBounded(response.stream, limit).pipe(Effect.catchTags({
           ByteLimitExceeded: () => Effect.fail(new PlanMetadataInvalid({})),
           HttpClientError: () => Effect.fail(new PlanCiUnreachable({}))
         }))
-      const json = <S extends Schema.Top>(path: string, schema: S) =>
-        request(path).pipe(
+      const json = <S extends Schema.Top>(path: string, schema: S, notFound: "refused" | "unreachable") =>
+        request(path, notFound).pipe(
           Effect.flatMap((response) =>
             response.status === 200
               ? body(response, metadataLimit).pipe(
@@ -141,12 +146,21 @@ export const githubLayer = (token: Redacted.Redacted<string>) =>
               : Effect.fail(new PlanMetadataInvalid({}))
           )
         )
-      const list = <S extends Schema.Top>(path: string, field: string, schema: S) =>
+      const list = <S extends Schema.Top>(
+        path: string,
+        field: string,
+        schema: S,
+        notFound: "refused" | "unreachable"
+      ) =>
         Effect.gen(function*() {
           const all: Array<S["Type"]> = []
           for (let page = 1; page <= 10; page++) {
             const envelope = Schema.Struct({ [field]: Schema.Array(schema).check(Schema.isMaxLength(100)) })
-            const body = yield* json(`${path}${path.includes("?") ? "&" : "?"}per_page=100&page=${page}`, envelope)
+            const body = yield* json(
+              `${path}${path.includes("?") ? "&" : "?"}per_page=100&page=${page}`,
+              envelope,
+              notFound
+            )
             const rows = body[field]
             if (rows === undefined) return yield* new PlanMetadataInvalid({})
             for (const row of rows) all.push(row)
@@ -155,16 +169,17 @@ export const githubLayer = (token: Redacted.Redacted<string>) =>
           return yield* new PlanMetadataInvalid({})
         })
       return PlanGithub.of({
-        workflow: (file) => json(`actions/workflows/${file}`, Workflow),
+        workflow: (file) => json(`actions/workflows/${file}`, Workflow, "refused"),
         runs: (file) =>
           list(
             `actions/workflows/${file}/runs?event=${file === "infra.yml" ? "pull_request" : "workflow_run"}`,
             "workflow_runs",
-            Run
+            Run,
+            "refused"
           ),
-        artifacts: () => list("actions/artifacts", "artifacts", Artifact),
-        run: (id) => json(`actions/runs/${id}`, Run),
-        jobs: (id) => list(`actions/runs/${id}/jobs?filter=latest`, "jobs", Job),
+        artifacts: () => list("actions/artifacts", "artifacts", Artifact, "refused"),
+        run: (id) => json(`actions/runs/${id}`, Run, "unreachable"),
+        jobs: (id) => list(`actions/runs/${id}/jobs?filter=latest`, "jobs", Job, "unreachable"),
         latestMainSeenByCi: () =>
           json(
             "actions/runs?branch=main&event=push&per_page=1",
@@ -178,10 +193,11 @@ export const githubLayer = (token: Redacted.Redacted<string>) =>
                   head_repository: Schema.Struct({ id: Schema.Literal(1288997422) })
                 })
               ).check(Schema.isMaxLength(1))
-            })
+            }),
+            "refused"
           ).pipe(Effect.map((body) => body.workflow_runs[0]?.head_sha ?? null)),
         download: Effect.fn("AlchemyConsole.downloadCiPlan")(function*(id: number) {
-          const response = yield* request(`actions/artifacts/${id}/zip`)
+          const response = yield* request(`actions/artifacts/${id}/zip`, "unreachable")
           if (response.status !== 302) return yield* new PlanMetadataInvalid({})
           const location = response.headers.location
           if (location === undefined || !URL.canParse(location)) return yield* new PlanMetadataInvalid({})

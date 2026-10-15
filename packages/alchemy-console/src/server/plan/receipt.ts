@@ -77,7 +77,7 @@ const pins = {
 } satisfies Readonly<Record<InfraStack, ReadonlyMap<string, string>>>
 export const stageFor = (stack: InfraStack): "prod" | "org" => stack === "site" ? "prod" : "org"
 
-/** Hashes use the producer's recursive sorted-key JSON representation. */
+/** SHA-256 of exact bytes. Archive verification and semantic canonicalization supply different byte representations. */
 export const hashBytes = Effect.fn("AlchemyConsole.planHash")(function*(bytes: Uint8Array) {
   const cryptoService = yield* Crypto.Crypto
   const hashed = yield* cryptoService.digest("SHA-256", bytes).pipe(Effect.mapError(() => new PlanDigestMismatch({})))
@@ -92,6 +92,7 @@ const sorted = (value: Schema.Json): Schema.Json => {
   }
   return value
 }
+/** Hash native.semantic as recursive sorted-key compact JSON encoded as UTF-8; preserve array order. */
 export const semanticHash = (value: Schema.Json) => hashBytes(new TextEncoder().encode(JSON.stringify(sorted(value))))
 
 /** Decode exact keys recursively, enforce the producer's identity pins, then independently recompute its semantic digest. */
