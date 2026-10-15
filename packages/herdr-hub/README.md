@@ -221,6 +221,9 @@ reported starting project's transcript directory; Codex UUIDv7 IDs resolve in
 the three possible local-date directories around their creation date. Explicit
 session paths must resolve inside the matching provider's session root.
 `CLAUDE_CONFIG_DIR` and `CODEX_HOME` override the default roots below `HOME`.
+Absolute overrides work without `HOME`; missing defaults and relative overrides
+remain unavailable for that provider. Claude project directories replace only
+`/`, `:` and `.`, preserving underscores and other characters.
 There is no newest-session fallback, and out-of-root symlinks are rejected.
 Each read seeks to at most the last 128KiB; a cut leading record is discarded,
 and malformed or incomplete trailing records produce unknown activity.
@@ -229,7 +232,8 @@ Direct Claude Read/Grep/Glob, Edit/Write and Bash calls and native Codex
 read/apply-patch/command calls classify from decoded records. Only simple direct
 read/search or test/build commands are recognized. Shell control flow and
 JavaScript orchestration wrappers remain unknown. Tool results are correlated
-by call ID; Claude error flags and structured native Codex exit codes can mark
+by a nonempty call ID; malformed calls without one reset activity to unknown.
+Unrelated Codex content-item results do not hide newer calls. Claude error flags and structured native Codex exit codes can mark
 a test/build failure. An ordinary non-zero exit never yields `failing`, and
 free-form result text is not parsed for a claimed exit status.
 
@@ -238,6 +242,11 @@ origin and branch match a unique open PR observation; stale, failed, ambiguous,
 unsupported-origin, detached-head and unmatched reads stay unknown. Work exposes
 only the oldest source failure, so any failure on the matching goal suppresses
 CI/review evidence, including an agent-only failure with an otherwise healthy PR.
+Any omitted goals or observations also suppress CI/review evidence because
+uniqueness cannot be established. A PR must have been confirmed within five
+minutes of the host read. This bounds retained task state when observation stops;
+an unchanged successful confirmation renews the limit without changing the
+first-observed time. Future-dated confirmations remain unknown.
 The adapter
 queries each distinct working directory once per inventory, with at most four
 directories in flight. Git children clear inherited repository-local environment

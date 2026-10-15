@@ -14,7 +14,7 @@ import {
   type LocalJobPayload,
   type WorkerStarted
 } from "@knpkv/herdr-fleet"
-import { Config, Effect, Option, Path, Schema, Stream } from "effect"
+import { Clock, Config, Effect, Option, Path, Schema, Stream } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 import { makeSessionTaskReader } from "./internal/agent-task-session.js"
 import { makeTaskWorkSource, registerTaskWorkSource } from "./internal/agent-task-work-source.js"
@@ -189,9 +189,17 @@ export const makeHostOperations = Effect.fn("HostOperations.make")(function*(
   const home = yield* Config.option(Config.String("HOME"))
   const claudeConfig = yield* Config.option(Config.String("CLAUDE_CONFIG_DIR"))
   const codexHome = yield* Config.option(Config.String("CODEX_HOME"))
-  const sessionReader = Option.isNone(home) ? null : yield* makeSessionTaskReader({
-    claudeProjects: paths.join(Option.getOrElse(claudeConfig, () => paths.join(home.value, ".claude")), "projects"),
-    codexSessions: paths.join(Option.getOrElse(codexHome, () => paths.join(home.value, ".codex")), "sessions")
+  const claudeRoot = Option.getOrElse(
+    claudeConfig,
+    () => Option.isSome(home) ? paths.join(home.value, ".claude") : undefined
+  )
+  const codexRoot = Option.getOrElse(
+    codexHome,
+    () => Option.isSome(home) ? paths.join(home.value, ".codex") : undefined
+  )
+  const sessionReader = yield* makeSessionTaskReader({
+    claudeProjects: claudeRoot === undefined ? undefined : paths.join(claudeRoot, "projects"),
+    codexSessions: codexRoot === undefined ? undefined : paths.join(codexRoot, "sessions")
   })
 
   const outputLimitError = (operation: string, observedBytes: number) =>
@@ -290,7 +298,9 @@ export const makeHostOperations = Effect.fn("HostOperations.make")(function*(
       Effect.flatMap((parsed) =>
         Effect.gen(function*() {
           const entries = parsed.result.agents.filter(isHerdrAgent)
-          const observations = yield* workSource.observations
+          const workSnapshot = yield* workSource.snapshot
+          const now = yield* Clock.currentTimeMillis
+          const observations = workSnapshot.observed ?? []
           const targets = new Map<string, TaskBranchTarget | undefined>()
           if (observations.some((observation) => observation.pullRequest !== null)) {
             const directories = [...new Set(entries.map((agent) => agent.foreground_cwd ?? agent.cwd))]
@@ -314,13 +324,13 @@ export const makeHostOperations = Effect.fn("HostOperations.make")(function*(
                   basename === "" ? "root" : basename
                 ).pipe(Effect.mapError(operationError("herdr.agent_list.work")))
                 const lineage = yield* decodeLineage(agent.tokens)
-                const activity = sessionReader === null || agent.agent_status !== "working"
+                const activity = agent.agent_status !== "working"
                   ? undefined
                   : yield* sessionReader({ provider: agent.agent, cwd: agent.cwd, session: agent.agent_session })
                 const target = targets.get(agent.foreground_cwd ?? agent.cwd)
                 const workFacts = target === undefined
                   ? { ci: "unknown", review: "unknown" } satisfies TaskWorkFacts
-                  : branchTaskFacts(observations, target)
+                  : branchTaskFacts(workSnapshot, target, now)
                 const taskFacts = activity === undefined
                   ? { status: agent.agent_status, ...workFacts }
                   : { status: agent.agent_status, activity, ...workFacts }

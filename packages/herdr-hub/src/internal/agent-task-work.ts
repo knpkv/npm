@@ -1,26 +1,38 @@
 import type { AgentTaskFacts } from "@knpkv/herdr-fleet"
-import { type WorkGoalObserved, WorkPullRequestObservation } from "@knpkv/herdr-work"
+import { type WorkGoalObserved, WorkPullRequestObservation, type WorkSnapshot } from "@knpkv/herdr-work"
 import { Result, Schema, SchemaGetter } from "effect"
 
 export type TaskBranchTarget = { readonly repository: string; readonly branch: string }
 export type TaskWorkFacts = Pick<AgentTaskFacts, "ci" | "review">
 export type TaskWorkObservation = Pick<WorkGoalObserved, "pullRequest" | "unknown" | "stale">
+export type TaskWorkSnapshot = Pick<WorkSnapshot, "observedOmitted" | "goalsOmitted"> & {
+  readonly observed?: ReadonlyArray<TaskWorkObservation>
+}
+
+/** Five minutes bounds retained CI/review evidence; reconfirmation, not a change in facts, renews it. */
+export const prTaskConfirmationMaxAgeMs = 5 * 60 * 1000
 
 /** Reads only a unique, current open PR for the agent's exact repository and branch. */
 export const branchTaskFacts = (
-  observations: ReadonlyArray<TaskWorkObservation>,
-  target: TaskBranchTarget
+  snapshot: TaskWorkSnapshot,
+  target: TaskBranchTarget,
+  now: number
 ): TaskWorkFacts => {
   const unknown: TaskWorkFacts = { ci: "unknown", review: "unknown" }
+  if ((snapshot.observedOmitted ?? 0) > 0 || (snapshot.goalsOmitted ?? 0) > 0) return unknown
   let candidate: WorkPullRequestObservation | undefined
-  for (const row of observations) {
+  for (const row of snapshot.observed ?? []) {
     const fact = row.pullRequest?.fact
     if (
       fact === undefined || fact.repository.toLowerCase() !== target.repository.toLowerCase() ||
       fact.branch !== target.branch || fact.state !== "open"
     ) continue
     // Work exposes only its oldest source failure, so any failure may hide a GitHub failure.
-    if (row.stale || row.unknown !== null) return unknown
+    const confirmedAt = row.pullRequest?.confirmedAt
+    if (
+      row.stale || row.unknown !== null || confirmedAt === undefined ||
+      confirmedAt > now || now - confirmedAt > prTaskConfirmationMaxAgeMs
+    ) return unknown
     if (
       candidate !== undefined &&
       (candidate.pullRequest !== fact.pullRequest || candidate.head !== fact.head || candidate.checks !== fact.checks ||

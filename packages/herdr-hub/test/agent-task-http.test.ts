@@ -1,12 +1,13 @@
 import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
 import { type HostConfiguration, HostStatus, JobStore, makeFleetService } from "@knpkv/herdr-fleet"
-import { makeWorkService, WorkStore } from "@knpkv/herdr-work"
-import { Effect, FileSystem, Path, Schema } from "effect"
+import { makeWorkService, WorkPullRequestObservation, WorkStore } from "@knpkv/herdr-work"
+import { Clock, Effect, FileSystem, Path, Schema } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 import { makeHostdOperations } from "../src/hostd.js"
 import { startHttpServer } from "../src/http.js"
-import { copyTaskWorkRegistration } from "../src/internal/agent-task-work-source.js"
+import { copyTaskWorkRegistration, makeTaskWorkSource } from "../src/internal/agent-task-work-source.js"
+import { branchTaskFacts } from "../src/internal/agent-task-work.js"
 import { makeHostCommand } from "../src/internal/host-command.js"
 
 const assets = {
@@ -19,10 +20,11 @@ const assets = {
 }
 
 describe("hostd existing Work task producer", () => {
-  it.layer(NodeServices.layer)((it) => {
+  it.layer(NodeServices.layer, { excludeTestServices: true })((it) => {
     it.effect("publishes actual stored PR facts through status and detaches them when HTTP closes", () =>
       Effect.gen(function*() {
         const fs = yield* FileSystem.FileSystem
+        const now = yield* Clock.currentTimeMillis
         const paths = yield* Path.Path
         const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
         const root = yield* fs.makeTempDirectoryScoped({ prefix: "task-http-source-" })
@@ -80,7 +82,7 @@ describe("hostd existing Work task producer", () => {
               yield* work.record({
                 version: "herdr.work.event.v1",
                 eventId: "fixture-created",
-                occurredAt: 1,
+                occurredAt: now,
                 goal: {
                   id: "fixture-goal",
                   title: "PRIVATE_PR_TITLE_SENTINEL",
@@ -96,15 +98,15 @@ describe("hostd existing Work task producer", () => {
                   review: {
                     state: "requested",
                     summary: null,
-                    updatedAt: 1,
+                    updatedAt: now,
                     url: "https://github.com/fixture/project/pull/12"
                   },
-                  createdAt: 1,
-                  updatedAt: 1
+                  createdAt: now,
+                  updatedAt: now
                 }
               })
               yield* work.observe([{
-                observedAt: 1,
+                observedAt: now,
                 observation: {
                   _tag: "pull_request",
                   repository: "fixture/project",
@@ -159,4 +161,37 @@ describe("hostd existing Work task producer", () => {
         expect((yield* operations.listAgents()).agents[0]?.taskKind).toBe("unknown")
       }).pipe(Effect.scoped))
   })
+})
+
+describe("HTTP Work snapshot completeness", () => {
+  for (const counter of ["observedOmitted", "goalsOmitted"]) {
+    it.effect(`does not infer a unique PR with ${counter}`, () =>
+      Effect.gen(function*() {
+        const rows = [{
+          unknown: null,
+          stale: false,
+          pullRequest: {
+            observedAt: 1,
+            confirmedAt: 1,
+            fact: Schema.decodeUnknownSync(WorkPullRequestObservation)({
+              _tag: "pull_request",
+              repository: "fixture/project",
+              branch: "feat/fixture",
+              pullRequest: 12,
+              head: "a".repeat(40),
+              state: "open",
+              closedAt: null,
+              checks: "failing",
+              review: "requested"
+            })
+          }
+        }]
+        const target = { repository: "fixture/project", branch: "feat/fixture" }
+        const source = yield* makeTaskWorkSource()
+        const registration = yield* source.register(Effect.succeed({ observed: rows, [counter]: 1 }))
+        yield* Effect.addFinalizer(() => registration.close)
+        expect(branchTaskFacts(yield* source.snapshot, target, 1)).toEqual({ ci: "unknown", review: "unknown" })
+        expect(branchTaskFacts({ observed: rows }, target, 1)).toEqual({ ci: "failed", review: "pending" })
+      }).pipe(Effect.scoped))
+  }
 })

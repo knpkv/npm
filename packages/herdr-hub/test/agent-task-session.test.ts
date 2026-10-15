@@ -39,6 +39,34 @@ describe("reported session task source", () => {
           .toEqual({ kind: "unknown", outcome: "unknown" })
       }).pipe(Effect.scoped))
 
+    it.effect("uses Claude project encoding for underscores, dots, colons and ordinary paths", () =>
+      Effect.gen(function*() {
+        const { fs, paths, roots } = yield* setup()
+        const cases: ReadonlyArray<readonly [string, string]> = [
+          ["/fixture/my_repo", "-fixture-my_repo"],
+          ["/fixture/repo", "-fixture-repo"],
+          ["/fixture/has.dot", "-fixture-has-dot"],
+          ["/fixture/a:b", "-fixture-a-b"]
+        ]
+        const read = yield* makeSessionTaskReader(roots)
+        for (const [cwd, encoded] of cases) {
+          const project = paths.join(roots.claudeProjects, encoded)
+          yield* fs.makeDirectory(project, { recursive: true })
+          yield* fs.writeFileString(
+            paths.join(project, "target.jsonl"),
+            JSON.stringify({
+              type: "assistant",
+              message: { content: [{ type: "tool_use", id: "call", name: "Read", input: {} }] }
+            }) + "\n"
+          )
+          expect(
+            yield* read({ provider: "claude", cwd, session: { agent: "claude", kind: "id", value: "target" } }),
+            cwd
+          )
+            .toEqual({ kind: "read", outcome: "running" })
+        }
+      }).pipe(Effect.scoped))
+
     it.effect("resolves a Codex v7 identity across a local-date boundary and accepts an explicit in-root path", () =>
       Effect.gen(function*() {
         const { fs, paths, roots } = yield* setup()

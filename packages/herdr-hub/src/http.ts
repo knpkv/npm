@@ -1941,7 +1941,7 @@ export const startHttpServer = async (
     const work = await httpRuntime.runPromise(makeWorkService(workStore))
     const { close: detachTaskWork } = await httpRuntime.runPromise(attachTaskWorkReader(
       service,
-      work.snapshots().pipe(Effect.map((snapshot) => snapshot.now.observed ?? []))
+      work.snapshots().pipe(Effect.map((snapshot) => snapshot.now))
     ))
     finalizers.unshift(() => httpRuntime.runPromise(detachTaskWork))
     // Relay's harness lives in this scope; closing the server closes it (and its store) before the stores

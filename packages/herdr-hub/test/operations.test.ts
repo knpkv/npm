@@ -16,6 +16,7 @@ import { ConfigProvider, Effect, FileSystem, Path, Result, Schema } from "effect
 import * as HttpClientRequest from "effect/http/HttpClientRequest"
 import * as HttpClientResponse from "effect/http/HttpClientResponse"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
+import { TestClock } from "effect/testing"
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -759,6 +760,60 @@ describe("host task signal producer", () => {
 
 describe("live host session producer", () => {
   it.layer(NodeServices.layer)((it) => {
+    const providers: ReadonlyArray<"claude" | "codex"> = ["claude", "codex"]
+    for (const provider of providers) {
+      it.effect(`reads an explicit ${provider} root without HOME and leaves missing/relative roots unknown`, () =>
+        Effect.gen(function*() {
+          const fs = yield* FileSystem.FileSystem
+          const paths = yield* Path.Path
+          const root = yield* fs.makeTempDirectoryScoped({ prefix: "host-explicit-session-" })
+          const providerRoot = paths.join(root, "provider")
+          const directory = paths.join(providerRoot, provider === "claude" ? "projects" : "sessions")
+          yield* fs.makeDirectory(directory, { recursive: true })
+          const file = paths.join(directory, "target.jsonl")
+          yield* fs.writeFileString(
+            file,
+            JSON.stringify(
+              provider === "claude"
+                ? {
+                  type: "assistant",
+                  message: { content: [{ type: "tool_use", id: "call", name: "Read", input: {} }] }
+                }
+                : {
+                  type: "response_item",
+                  payload: { type: "function_call", call_id: "call", name: "apply_patch", arguments: "{}" }
+                }
+            ) + "\n"
+          )
+          const herdrCommand = paths.join(root, "herdr-test")
+          const agents = [{
+            agent: provider,
+            agent_status: "working",
+            cwd: root,
+            pane_id: "w1:p1",
+            state_change_seq: 1,
+            agent_session: { agent: provider, kind: "path", value: file }
+          }]
+          yield* fs.writeFileString(
+            herdrCommand,
+            `#!/bin/sh\nprintf '%s\\n' '${JSON.stringify({ result: { agents } })}'\n`
+          )
+          yield* fs.chmod(herdrCommand, 0o700)
+          const variable = provider === "claude" ? "CLAUDE_CONFIG_DIR" : "CODEX_HOME"
+          const environments: ReadonlyArray<readonly [Readonly<Record<string, string>>, string]> = [
+            [{ [variable]: providerRoot }, provider === "claude" ? "reading" : "writing"],
+            [{}, "unknown"],
+            [{ [variable]: "relative" }, "unknown"]
+          ]
+          for (const [environment, expected] of environments) {
+            const operations = yield* makeHostOperations({ ...config(root, ["true"]), herdrCommand }).pipe(
+              Effect.provideService(ConfigProvider.ConfigProvider, ConfigProvider.fromUnknown(environment))
+            )
+            expect((yield* operations.listAgents()).agents[0]?.taskKind, variable).toBe(expected)
+          }
+        }).pipe(Effect.scoped))
+    }
+
     it.effect("serves reported Claude and Codex activity without leaking session identity, arguments or content", () =>
       Effect.gen(function*() {
         const fs = yield* FileSystem.FileSystem
@@ -856,6 +911,7 @@ describe("host branch Work task producer", () => {
         const paths = yield* Path.Path
         const realSpawner = yield* ChildProcessSpawner.ChildProcessSpawner
         const root = yield* fs.makeTempDirectoryScoped({ prefix: "host-work-task-" })
+        yield* TestClock.setTime(10)
         const decoy = paths.join(root, "decoy")
         expect(yield* realSpawner.exitCode(makeHostCommand("git", ["init", "-q", "--initial-branch=decoy", decoy])))
           .toBe(0)
@@ -937,7 +993,10 @@ describe("host branch Work task producer", () => {
             })
           }
         }]
-        const { close: closeOld } = yield* attachTaskWorkReader(operations.listAgents, Effect.succeed(rows("failing")))
+        const { close: closeOld } = yield* attachTaskWorkReader(
+          operations.listAgents,
+          Effect.succeed({ observed: rows("failing") })
+        )
         yield* Effect.addFinalizer(() => closeOld)
         const firstInventory = yield* operations.listAgents()
         expect(yield* fs.readFile(configPath)).toEqual(originalConfig)
@@ -947,14 +1006,14 @@ describe("host branch Work task producer", () => {
         expect(firstInventory.agents[0]?.taskKind).toBe("failing")
         const { close: closeCurrent } = yield* attachTaskWorkReader(
           operations.listAgents,
-          Effect.succeed(rows("pending"))
+          Effect.succeed({ observed: rows("pending") })
         )
         yield* Effect.addFinalizer(() => closeCurrent)
         yield* closeOld
         expect((yield* operations.listAgents()).agents[0]?.taskKind).toBe("waiting")
         yield* closeCurrent
         expect((yield* operations.listAgents()).agents[0]?.taskKind).toBe("unknown")
-        const reused = Effect.succeed(rows("failing"))
+        const reused = Effect.succeed({ observed: rows("failing") })
         const { close: closeFirstUse } = yield* attachTaskWorkReader(operations.listAgents, reused)
         yield* Effect.addFinalizer(() => closeFirstUse)
         const { close: closeSecondUse } = yield* attachTaskWorkReader(operations.listAgents, reused)

@@ -1,7 +1,10 @@
 import { DateTime, Effect, FileSystem, Path, Result, Schema } from "effect"
 import { readSessionTaskActivity, type TaskActivity } from "./agent-task-evidence.js"
 
-export type SessionTaskRoots = { readonly claudeProjects: string; readonly codexSessions: string }
+export type SessionTaskRoots = {
+  readonly claudeProjects: string | undefined
+  readonly codexSessions: string | undefined
+}
 export type SessionTaskInput = { readonly provider: string; readonly cwd: string; readonly session: unknown }
 
 const Session = Schema.Struct({
@@ -17,7 +20,7 @@ const unknownActivity: TaskActivity = { kind: "unknown", outcome: "unknown" }
 export const makeSessionTaskReader = Effect.fn("TaskEvidence.makeSessionReader")(function*(roots: SessionTaskRoots) {
   const fs = yield* FileSystem.FileSystem
   const paths = yield* Path.Path
-  const codexPath = Effect.fn("TaskEvidence.codexPath")(function*(id: string) {
+  const codexPath = Effect.fn("TaskEvidence.codexPath")(function*(id: string, root: string) {
     if (!uuidV7.test(id)) return undefined
     // UUIDv7 embeds creation time. Probe adjacent UTC dates because rollout directories use local dates.
     const timestamp = Number.parseInt(id.replaceAll("-", "").slice(0, 12), 16)
@@ -25,7 +28,7 @@ export const makeSessionTaskReader = Effect.fn("TaskEvidence.makeSessionReader")
     for (const day of [-1, 0, 1]) {
       const date = DateTime.formatIsoDateUtc(DateTime.makeUnsafe(timestamp + day * 24 * 60 * 60 * 1000))
       if (!/^\d{4}-\d{2}-\d{2}$/u.test(date)) return undefined
-      const directory = paths.join(roots.codexSessions, ...date.split("-"))
+      const directory = paths.join(root, ...date.split("-"))
       const names = yield* fs.readDirectory(directory).pipe(
         Effect.catch((error) => error.reason._tag === "NotFound" ? Effect.succeed([]) : Effect.fail(error))
       )
@@ -42,7 +45,7 @@ export const makeSessionTaskReader = Effect.fn("TaskEvidence.makeSessionReader")
     if (Result.isFailure(decoded) || decoded.success.agent !== input.provider) return unknownActivity
     const session = decoded.success
     const root = session.agent === "claude" ? roots.claudeProjects : roots.codexSessions
-    if (!paths.isAbsolute(root)) return unknownActivity
+    if (root === undefined || !paths.isAbsolute(root)) return unknownActivity
     let candidate: string | undefined
     if (session.kind === "path") {
       if (!paths.isAbsolute(session.value)) return unknownActivity
@@ -50,8 +53,8 @@ export const makeSessionTaskReader = Effect.fn("TaskEvidence.makeSessionReader")
     } else {
       if (!safeId(session.value)) return unknownActivity
       candidate = session.agent === "claude"
-        ? paths.join(root, input.cwd.replace(/[^A-Za-z0-9]/gu, "-"), `${session.value}.jsonl`)
-        : yield* codexPath(session.value)
+        ? paths.join(root, input.cwd.replace(/[/:.]/gu, "-"), `${session.value}.jsonl`)
+        : yield* codexPath(session.value, root)
     }
     if (candidate === undefined) return unknownActivity
     const actualRoot = yield* fs.realPath(root)

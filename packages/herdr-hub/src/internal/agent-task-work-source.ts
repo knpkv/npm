@@ -1,9 +1,9 @@
 import type { FleetService, HostOperations } from "@knpkv/herdr-fleet"
 import type { WorkProjectionError, WorkStoreError } from "@knpkv/herdr-work"
 import { Effect, Ref } from "effect"
-import type { TaskWorkObservation } from "./agent-task-work.js"
+import type { TaskWorkSnapshot } from "./agent-task-work.js"
 
-type TaskWorkRead = Effect.Effect<ReadonlyArray<TaskWorkObservation>, WorkStoreError | WorkProjectionError>
+type TaskWorkRead = Effect.Effect<TaskWorkSnapshot, WorkStoreError | WorkProjectionError>
 type TaskWorkOwner = HostOperations["listAgents"] | FleetService
 type TaskWorkRegistration = { readonly close: Effect.Effect<void> }
 type RegisterWork = (read: TaskWorkRead) => Effect.Effect<TaskWorkRegistration>
@@ -20,15 +20,15 @@ export const makeTaskWorkSource = Effect.fn("TaskEvidence.makeWorkSource")(funct
       close: Ref.update(current, (active) => active === registration ? null : active)
     } satisfies TaskWorkRegistration
   })
-  const observations = Effect.fn("TaskEvidence.workObservations")(function*() {
+  const snapshot = Effect.fn("TaskEvidence.workObservations")(function*() {
     const registration = yield* Ref.get(current)
-    if (registration === null) return []
+    if (registration === null) return {}
     return yield* registration.read.pipe(
       Effect.tapError((error) => Effect.logWarning("AgentTaskWorkUnavailable", { causeTag: error._tag })),
-      Effect.catch(() => Effect.succeed<ReadonlyArray<TaskWorkObservation>>([]))
+      Effect.catch(() => Effect.succeed<TaskWorkSnapshot>({}))
     )
   })
-  return { observations: observations(), register }
+  return { snapshot: snapshot(), register }
 })
 
 /** Package-private registration bridge. Nothing is added to public options, barrels or wire models. */

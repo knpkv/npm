@@ -56,6 +56,26 @@ describe("host-private provider task evidence", () => {
     expect(JSON.stringify(activity)).not.toContain("private")
   })
 
+  it.each([undefined, "", " "])("requires a nonempty Claude tool identity, got %s", (id) => {
+    const call = (id: string | undefined) => ({
+      type: "assistant",
+      message: { content: [{ type: "tool_use", id, name: "Edit", input: {} }] }
+    })
+    expect(parseSessionTaskActivity("claude", jsonl(claudeCall("Read"), call(id))))
+      .toEqual({ kind: "unknown", outcome: "unknown" })
+    expect(parseSessionTaskActivity("claude", jsonl(call("replacement")))).toEqual({ kind: "edit", outcome: "running" })
+  })
+
+  it.each([undefined, "", " "])("requires a nonempty Codex call identity, got %s", (callId) => {
+    const call = (call_id: string | undefined) => ({
+      ...codexCall("apply_patch"),
+      payload: { ...codexCall("apply_patch").payload, call_id }
+    })
+    expect(parseSessionTaskActivity("codex", jsonl(codexCall("read_file"), call(callId))))
+      .toEqual({ kind: "unknown", outcome: "unknown" })
+    expect(parseSessionTaskActivity("codex", jsonl(call("replacement")))).toEqual({ kind: "edit", outcome: "running" })
+  })
+
   it("ignores non-tool Codex metadata envelopes while decoding actual tool events", () => {
     expect(parseSessionTaskActivity(
       "codex",
@@ -65,6 +85,29 @@ describe("host-private provider task evidence", () => {
         codexCall("apply_patch")
       )
     )).toEqual({ kind: "edit", outcome: "running" })
+  })
+
+  it("skips unrelated Codex image content results without masking later supported calls", () => {
+    const imageResult = {
+      type: "response_item",
+      payload: {
+        type: "function_call_output",
+        call_id: "earlier-image",
+        output: [{ type: "input_image", image_url: "data:image/png;base64,AAA", detail: "high" }]
+      }
+    }
+    const patch = {
+      type: "response_item",
+      payload: { type: "custom_tool_call", call_id: "patch", name: "apply_patch", input: "private patch" }
+    }
+    expect(parseSessionTaskActivity("codex", jsonl(imageResult, patch))).toEqual({ kind: "edit", outcome: "running" })
+    expect(parseSessionTaskActivity("codex", jsonl(codexCall("read_file"), imageResult)))
+      .toEqual({ kind: "read", outcome: "running" })
+    const matching = { ...imageResult, payload: { ...imageResult.payload, call_id: "call-1" } }
+    expect(parseSessionTaskActivity("codex", jsonl(codexCall("read_file"), matching)))
+      .toEqual({ kind: "read", outcome: "unknown" })
+    expect(parseSessionTaskActivity("codex", jsonl(matching, patch)))
+      .toEqual({ kind: "edit", outcome: "running" })
   })
 
   it("uses only structured native Codex command outcomes and matching call identities", () => {

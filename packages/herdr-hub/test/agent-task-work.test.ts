@@ -37,6 +37,9 @@ const observed = (
 })
 const target = { repository: "fixture/project", branch: "feat/fixture" }
 
+const facts = (observations: ReadonlyArray<TaskWorkObservation>, target: { repository: string; branch: string }) =>
+  branchTaskFacts({ observed: observations }, target, 10)
+
 describe("existing branch PR task evidence", () => {
   it.each([
     ["pending", "not_requested", "waiting"],
@@ -49,22 +52,22 @@ describe("existing branch PR task evidence", () => {
       Schema.decodeUnknownSync(WorkPullRequestObservation.fields.checks)(checks),
       Schema.decodeUnknownSync(WorkPullRequestObservation.fields.review)(review)
     )
-    expect(classifyAgentTask({ status: "idle", ...branchTaskFacts([row], target) })).toBe(expected)
+    expect(classifyAgentTask({ status: "idle", ...facts([row], target) })).toBe(expected)
   })
 
   it("requires exact branch/repository identity and ignores stale or failed observations", () => {
     const row = observed("failing", "requested")
     const unknown = { ci: "unknown", review: "unknown" }
-    expect(branchTaskFacts([row], { repository: "other/project", branch: target.branch })).toEqual(unknown)
-    expect(branchTaskFacts([row], { repository: target.repository, branch: "other-branch" })).toEqual(unknown)
-    expect(branchTaskFacts([{ ...row, stale: true }], target)).toEqual(unknown)
+    expect(facts([row], { repository: "other/project", branch: target.branch })).toEqual(unknown)
+    expect(facts([row], { repository: target.repository, branch: "other-branch" })).toEqual(unknown)
+    expect(facts([{ ...row, stale: true }], target)).toEqual(unknown)
     expect(
-      branchTaskFacts(
+      facts(
         [{ ...row, unknown: { source: "github", reason: "unavailable", since: 2, lastGoodAt: 1 } }],
         target
       )
     ).toEqual(unknown)
-    expect(branchTaskFacts([row], { ...target, repository: "FIXTURE/PROJECT" })).toEqual({
+    expect(facts([row], { ...target, repository: "FIXTURE/PROJECT" })).toEqual({
       ci: "failed",
       review: "pending"
     })
@@ -76,8 +79,8 @@ describe("existing branch PR task evidence", () => {
     const other = second.pullRequest === null
       ? second
       : { ...second, pullRequest: { ...second.pullRequest, fact: { ...second.pullRequest.fact, pullRequest: 13 } } }
-    expect(branchTaskFacts([first, other], target)).toEqual({ ci: "unknown", review: "unknown" })
-    expect(branchTaskFacts([first, first], target)).toEqual({ ci: "failed", review: "pending" })
+    expect(facts([first, other], target)).toEqual({ ci: "unknown", review: "unknown" })
+    expect(facts([first, first], target)).toEqual({ ci: "failed", review: "pending" })
   })
 })
 
@@ -167,7 +170,7 @@ describe("lossy Work source health", () => {
           }
         ])
         const healthy = (yield* work.snapshots(2)).now.observed ?? []
-        expect(branchTaskFacts(healthy, target)).toEqual({ ci: "failed", review: "pending" })
+        expect(facts(healthy, target)).toEqual({ ci: "failed", review: "pending" })
         yield* work.observe([
           {
             observedAt: 3,
@@ -193,10 +196,10 @@ describe("lossy Work source health", () => {
         expect(failed[0]?.unknown?.source).toBe("herdr")
         expect(failed[0]?.pullRequest?.fact.checks).toBe("failing")
         expect(failed[0]?.stale).toBe(false)
-        expect(branchTaskFacts(failed, target)).toEqual({ ci: "unknown", review: "unknown" })
+        expect(facts(failed, target)).toEqual({ ci: "unknown", review: "unknown" })
         yield* work.observe([{ observedAt: 5, observation: pullRequest }])
         // The display projection still cannot prove which other sources have recovered.
-        expect(branchTaskFacts((yield* work.snapshots(5)).now.observed ?? [], target))
+        expect(facts((yield* work.snapshots(5)).now.observed ?? [], target))
           .toEqual({ ci: "unknown", review: "unknown" })
         yield* work.observe([{
           observedAt: 6,
@@ -204,7 +207,24 @@ describe("lossy Work source health", () => {
         }])
         const recovered = (yield* work.snapshots(6)).now.observed ?? []
         expect(recovered[0]?.unknown).toBeNull()
-        expect(branchTaskFacts(recovered, target)).toEqual({ ci: "failed", review: "pending" })
+        expect(facts(recovered, target)).toEqual({ ci: "failed", review: "pending" })
+        // Five minutes is the producer's maximum evidence age, independent of Work's owner-stale flag.
+        yield* TestClock.setTime(300_005)
+        expect(branchTaskFacts((yield* work.snapshots()).now, target, 300_005))
+          .toEqual({ ci: "failed", review: "pending" })
+        yield* TestClock.setTime(300_006)
+        const expired = (yield* work.snapshots()).now
+        expect(expired.observed?.[0]?.stale).toBe(false)
+        expect(branchTaskFacts(expired, target, 300_006)).toEqual({ ci: "unknown", review: "unknown" })
+        const thirtyDays = 30 * 24 * 60 * 60 * 1000
+        yield* TestClock.setTime(thirtyDays)
+        expect(branchTaskFacts((yield* work.snapshots()).now, target, thirtyDays))
+          .toEqual({ ci: "unknown", review: "unknown" })
+        yield* work.observe([{ observedAt: thirtyDays, observation: pullRequest }])
+        const reconfirmed = (yield* work.snapshots()).now
+        expect(reconfirmed.observed?.[0]?.pullRequest?.observedAt).toBe(2)
+        expect(reconfirmed.observed?.[0]?.pullRequest?.confirmedAt).toBe(thirtyDays)
+        expect(branchTaskFacts(reconfirmed, target, thirtyDays)).toEqual({ ci: "failed", review: "pending" })
       }).pipe(Effect.scoped))
   })
 })

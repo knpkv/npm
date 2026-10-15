@@ -38,7 +38,7 @@ const CodexEntry = Schema.Struct({
     name: Schema.optionalKey(Schema.String),
     call_id: Schema.optionalKey(Schema.String),
     arguments: Schema.optionalKey(Schema.String),
-    output: Schema.optionalKey(Schema.Union([Schema.String, ToolOutcome]))
+    output: Schema.optionalKey(Schema.Unknown)
   }))
 })
 
@@ -125,6 +125,11 @@ export const parseSessionTaskActivity = (provider: TaskProvider, tail: string): 
       for (const block of content) {
         if (entry.type === "assistant" && block.type === "tool_use") {
           callId = block.id
+          if (callId === undefined || callId.trim() === "") {
+            callId = undefined
+            activity = unknownActivity
+            continue
+          }
           activity = block.name === undefined ? unknownActivity : activityFor(block.name, block.input?.command)
         } else if (block.type === "tool_result" && callId !== undefined && block.tool_use_id === callId) {
           activity = { kind: activity.kind, outcome: block.is_error === true ? "failed" : "succeeded" }
@@ -139,6 +144,11 @@ export const parseSessionTaskActivity = (provider: TaskProvider, tail: string): 
       if (entry.type !== "response_item" || payload === undefined) continue
       if (payload.type === "function_call" || payload.type === "custom_tool_call") {
         callId = payload.call_id
+        if (callId === undefined || callId.trim() === "") {
+          callId = undefined
+          activity = unknownActivity
+          continue
+        }
         const args = payload.arguments === undefined
           ? undefined
           : Schema.decodeUnknownResult(Schema.fromJsonString(CommandInput))(payload.arguments)
