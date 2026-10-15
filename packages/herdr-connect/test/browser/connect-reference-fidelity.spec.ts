@@ -3,6 +3,7 @@ import { agentConnectTarget, AgentWorkerIdentity } from "@knpkv/herdr-fleet/mode
 import { WorkGoal, WorkSnapshots } from "@knpkv/herdr-work/model"
 import { expect, type Locator, type Page, test } from "@playwright/test"
 import { Schema } from "effect"
+import { agentCharacter, creatureBodySeed } from "../../src/character.js"
 import { ConnectAgent } from "../../src/model.js"
 import { failureSentences } from "../../src/unavailable-detail.js"
 import { referenceCreatureIdentities } from "../reference-creature-identities.js"
@@ -195,6 +196,24 @@ const openDirectory = async (page: Page, width: number, theme: string, agents = 
 }
 
 /** Read screen pixels, including SVG transforms, rather than the path's viewBox coordinates. */
+// Reference draw(): each body keeps its native seed size in a 40-unit frame, so its share of any square slot is
+// fixed. The state ring is the reference's r = max(w, h) / 2 + 2.25 units, widened only where it would cut the outline.
+const designShare = (key: string) => {
+  const [host = "", id = ""] = key.split(":")
+  const { bodyKind, bounds: [, , width, height], ringRadius } = agentCharacter(host, id)
+  const seed = creatureBodySeed(bodyKind)
+  expect(ringRadius).toBeGreaterThanOrEqual((Math.max(seed.width, seed.height) / 2 + 2.25) * 2.5 - 1e-9)
+  return { width: width / 100, max: Math.max(width, height) / 100, ring: (2 * ringRadius) / 100 }
+}
+const expectDesignBody = (body: { width: number; height: number }, track: number, key: string) => {
+  const share = designShare(key)
+  expect(Math.abs(body.width - share.width * track), key).toBeLessThan(1)
+  expect(Math.abs(Math.max(body.width, body.height) - share.max * track), key).toBeLessThan(1)
+}
+// Smallest reference shares across the five bodies: squircle 23/40 wide, 23/40 tall.
+const minimumWidthShare = 0.55
+const minimumMaxShare = 0.57
+
 const drawnBox = (node: Locator) =>
   node.evaluate((element) => {
     const { height, width, x, y } = element.getBoundingClientRect()
@@ -293,8 +312,7 @@ test.describe("creature fill fidelity", () => {
           expect(track.width).toBe(36)
           expect(track.height).toBe(36)
           const body = await drawnBox(row.locator(".connect-creature-body"))
-          expect(body.width).toBeGreaterThanOrEqual(track.width * 0.58)
-          expect(Math.max(body.width, body.height)).toBeGreaterThanOrEqual(track.width * 0.7)
+          expectDesignBody(body, track.width, `${fixture.host}:${fixture.id}`)
           await expectRingFitsTrack(row.locator("svg.connect-creature"))
         }
       })
@@ -315,8 +333,8 @@ test.describe("creature fill fidelity", () => {
           expect(creature.width).toBe(28)
           expect.soft(creature.height).toBe(28)
           const body = await drawnBox(svg.locator(".connect-creature-body"))
-          expect(body.width).toBeGreaterThanOrEqual(creature.width * 0.58)
-          expect(Math.max(body.width, body.height)).toBeGreaterThanOrEqual(creature.width * 0.7)
+          expect(body.width).toBeGreaterThanOrEqual(creature.width * minimumWidthShare)
+          expect(Math.max(body.width, body.height)).toBeGreaterThanOrEqual(creature.width * minimumMaxShare)
           await expectRingFitsTrack(svg)
         }
         const stack = await drawnBox(page.locator(".connect-pins[data-placement=\"float\"]"))
@@ -418,13 +436,12 @@ test.describe("creature fill fidelity", () => {
           const track = await drawnBox(creature)
           const body = await drawnBox(creature.locator(".connect-creature-body"))
           expect(track.width).toBe(36)
-          // Square framing and stroke clearance at the 28px crew minimum leave tall seeds at least 0.58 wide.
-          expect(body.width).toBeGreaterThanOrEqual(track.width * 0.58)
-          expect(Math.max(body.width, body.height)).toBeGreaterThanOrEqual(track.width * 0.7)
+          const key = await creature.evaluate((node) => node.parentElement?.getAttribute("data-agent-key") ?? "")
+          expectDesignBody(body, track.width, key)
           expect(body.x).toBeGreaterThanOrEqual(track.x - 1)
           expect(body.x + body.width).toBeLessThanOrEqual(track.x + track.width + 1)
           const ring = await drawnBox(creature.locator(".connect-creature-halo"))
-          expect(Math.max(ring.width, ring.height)).toBeGreaterThanOrEqual(32)
+          expect(Math.abs(Math.max(ring.width, ring.height) - designShare(key).ring * track.width)).toBeLessThan(1)
           expect(ring.width).toBeLessThanOrEqual(36)
           await expectRingFitsTrack(creature)
         }
@@ -441,11 +458,10 @@ test.describe("creature fill fidelity", () => {
         await expect(creature).toHaveCount(1)
         const track = await drawnBox(creature)
         const body = await drawnBox(creature.locator(".connect-creature-body"))
-        // rev5.2's PIN export renders a 28px creature in a 48px pill; the fill ratios still apply.
+        // rev5.2's PIN export renders a 28px creature in a 48px pill, framed like every other row.
         expect(track.width).toBe(28)
         expect((await drawnBox(creature.locator("../.."))).height).toBe(48)
-        expect(body.width).toBeGreaterThanOrEqual(track.width * 0.58)
-        expect(Math.max(body.width, body.height)).toBeGreaterThanOrEqual(track.width * 0.7)
+        expectDesignBody(body, track.width, "atlas:agent-ds-rly")
         expect(body.x).toBeGreaterThanOrEqual(track.x - 1)
         expect(body.x + body.width).toBeLessThanOrEqual(track.x + track.width + 1)
       })
@@ -464,20 +480,17 @@ test.describe("creature fill fidelity", () => {
           const ring = await drawnBox(state)
           expect(await state.evaluate((node) => Number(getComputedStyle(node).opacity))).toBeGreaterThan(0)
           expect(ring.width).toBeGreaterThan(body.width)
+          const slot = (await drawnBox(creature)).width
+          expectDesignBody(body, slot, key)
+          expect(Math.abs(ring.width - designShare(key).ring * slot)).toBeLessThan(1.5)
           if (width === 390) {
-            expect(body.width).toBeGreaterThanOrEqual(150)
-            expect(ring.width).toBeGreaterThanOrEqual(180)
             expect(ring.x - 2).toBeGreaterThanOrEqual(heroBox.x)
             expect(ring.y - 2).toBeGreaterThanOrEqual(heroBox.y)
             expect(ring.x + ring.width + 2).toBeLessThanOrEqual(heroBox.x + heroBox.width)
             expect(ring.y + ring.height + 2).toBeLessThanOrEqual(heroBox.y + heroBox.height)
           } else {
             // The desktop stage already matches: enlarging every stage would regress it.
-            expect((await drawnBox(creature)).width).toBe(128)
-            expect(body.width).toBeGreaterThanOrEqual(70)
-            expect(body.width).toBeLessThanOrEqual(105)
-            expect(ring.width).toBeGreaterThanOrEqual(115)
-            expect(ring.width).toBeLessThanOrEqual(120)
+            expect(slot).toBe(128)
           }
         })
       }

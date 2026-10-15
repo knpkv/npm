@@ -191,35 +191,18 @@ export const Creature = ({
   const referenceLeft = 50 - referenceWidth / 2
   const row = size === "row"
   const homeRow = row && statePolicy === "home"
-  const rowTrack = 28
-  const rowStroke = 2
-  const baseRx = (width / 2) * character.ringScale
-  const baseRy = (height / 2) * character.ringScale
-  const rowCy = character.ringCy
   // Keep body framing independent of mood. Overlays may paint outside this slot; screenshot masks include SVG paint bounds.
   const overlayTop = top - (4 + (accessory === "hard-hat" ? 2.5 : accessory === "headphones" ? 1.5 : 0)) * unit
-  // Reserve both 2px stroke edges at the 28px crew minimum; accessories and marks do not change body sizing.
-  const frameEdge = (2 * Math.max(baseRx, baseRy)) / (1 - (2 * rowStroke) / rowTrack)
-  const strokeHalf = frameEdge / rowTrack
-  // Home export 66 maps -6 -6 44 44 to the seeded body and uses a one-unit circular state ring.
-  const radius = homeRow
-    ? (Math.max(seed.width, seed.height) / 2 + 2.25) * unit
-    : row
-      ? Math.max(baseRx, baseRy) + strokeHalf
-      : 46
-  const ring = { cy: homeRow ? FOOT - referenceHeight / 2 : row ? rowCy : 55, rx: radius, ry: radius }
-  const frameLeft = homeRow ? 50 - 22 * unit : 50 - frameEdge / 2
-  const frameTop = homeRow ? FOOT - 36.75 * unit : rowCy - frameEdge / 2
+  // Connect frames stage, rows and cast in the reference's -4 -4 40 40: 40 units across, foot at 30.75, with room for
+  // the state ring. At STAGE_UNIT that box is exactly the stage's 0 0 100 100. Home export 66 keeps its own
+  // -6 -6 44 44 frame. Both draw the reference's circular state ring around the body's centre.
+  const frameEdge = (homeRow ? 44 : 40) * unit
+  const ring = { cy: character.ringCy, rx: character.ringRadius, ry: character.ringRadius }
+  const frameLeft = 50 - frameEdge / 2
+  const frameTop = FOOT - (homeRow ? 36.75 : 34.75) * unit
   const fixed = (value: number): string => value.toFixed(3)
   const dropRadius = row ? 1.4 : 1.05
-  // Fleet closed archive rows have no track: map the reference's 0 2 32 32 frame onto this scaled body.
-  const viewBox = homeRow
-    ? [frameLeft, frameTop, 44 * unit, 44 * unit].map(fixed).join(" ")
-    : row && closed
-      ? [50 - 16 * unit, FOOT - 28.75 * unit, 32 * unit, 32 * unit].map(fixed).join(" ")
-      : row
-        ? [frameLeft, frameTop, frameEdge, frameEdge].map(fixed).join(" ")
-        : "0 0 100 100"
+  const viewBox = [frameLeft, frameTop, frameEdge, frameEdge].map(fixed).join(" ")
   const eyeY = character.eyeY
   const eyes = [50 - character.eyeGap, 50 + character.eyeGap]
   const iris = character.eye[0] * IRIS_SHARE
@@ -255,9 +238,10 @@ export const Creature = ({
     "--connect-creature-eye-socket": String(socket),
     "--connect-creature-lid-low": String(shutY - lowerRest),
     "--connect-creature-lever": String(FOOT - eyeY),
-    "--connect-creature-origin-x": `${fixed(row ? 50 - frameLeft : 50)}px`,
-    "--connect-creature-origin-y": `${fixed(row ? FOOT - frameTop : 88)}px`,
-    "--connect-creature-row-stroke": String(homeRow ? unit : (frameEdge * rowStroke) / rowTrack),
+    "--connect-creature-origin-x": `${fixed(50 - frameLeft)}px`,
+    "--connect-creature-origin-y": `${fixed(FOOT - frameTop)}px`,
+    // The reference strokes its state ring one unit wide.
+    "--connect-creature-row-stroke": String(unit),
     "--connect-creature-gaze-x": `${String(pose.look[0] * ew * 0.4)}px`,
     "--connect-creature-gaze-y": `${String(0.08 * eh * 2 + pose.look[1] * eh * 0.34)}px`,
     "--connect-creature-iterations": pose.loops ? "infinite" : "1"
@@ -607,9 +591,9 @@ export const Creature = ({
         <g className="connect-creature-celebration">
           <ellipse
             cx="50"
-            cy={row ? rowCy : 55}
-            rx={row ? baseRx : 44}
-            ry={row ? baseRy : 44}
+            cy={ring.cy}
+            rx={ring.rx}
+            ry={ring.ry}
             fill="none"
             stroke={palette.p70}
             strokeWidth={0.6 * unit}

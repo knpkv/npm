@@ -524,7 +524,7 @@ for (const width of [390, 1280]) {
       await archiveRoute(page, pageOf(records))
       await mount(page, theme)
       await expect(rows(page)).toHaveCount(records.length)
-      // Rev6 arow: 40px creature, 12px padding/gap, 16px/1.3 title and 14px/1.4 last words.
+      // Rev6 arow: 40px creature in the reference 40-unit frame, 12px padding/gap, 16px/1.3 title and 14px/1.4 last words.
       // A1/A5 raster dividers are 65px apart without words and 86/87px with words.
       const geometry = await rows(page).evaluateAll((nodes) =>
         nodes.map((node) => {
@@ -552,7 +552,7 @@ for (const width of [390, 1280]) {
       for (const row of geometry) {
         expect(row.track).toBe(40)
         expect(row.trackHeight).toBe(40)
-        expect(row.designUnit).toBeCloseTo(40 / 32, 3)
+        expect(row.designUnit).toBeCloseTo(40 / 40, 3)
         expect(row.metadataLeading).toBe("16.8px")
         expect(row.gap).toBe("12px")
         expect(row.padding).toBe("12px")

@@ -1,7 +1,15 @@
 import { describe, expect, it } from "@effect/vitest"
 import { readFileSync } from "node:fs"
 
-import { agentCharacter, characterBodyKind, characterSeed, creaturePalette, FOOT } from "../src/character.js"
+import {
+  agentCharacter,
+  characterBodyKind,
+  characterSeed,
+  creatureBodySeed,
+  creaturePalette,
+  FOOT,
+  STAGE_UNIT
+} from "../src/character.js"
 import { referenceBodyKind, referenceCreatureIdentities } from "./reference-creature-identities.js"
 
 const fleet = Array.from({ length: 64 }, (_, index) => agentCharacter("fixture-host", `drawing-${String(index)}`))
@@ -67,17 +75,31 @@ describe("agentCharacter", () => {
   })
 
   it("stands all canonical bodies on one foot, centred within the existing stage bounds", () => {
-    for (const { bounds: [left, top, width, height], eye, eyeGap, eyeY, hues, ringScale } of fleet) {
+    for (const { bounds: [left, top, width, height], eye, eyeGap, eyeY, hues, ringCy, ringRadius } of fleet) {
       expect(left + width / 2).toBeCloseTo(50, 6)
       expect(top + height).toBeCloseTo(FOOT, 6)
-      expect(width).toBeLessThanOrEqual(78)
-      expect(height).toBeLessThanOrEqual(72)
+      expect(width).toBeLessThanOrEqual(70)
+      expect(height).toBeLessThanOrEqual(65)
       expect(eye[1]).toBeGreaterThan(eye[0])
       expect(eyeGap - eye[0]).toBeGreaterThan(4)
       expect(eyeY - eye[1]).toBeGreaterThan(top)
       expect(eyeY + eye[1]).toBeLessThan(FOOT)
-      expect(ringScale).toBeGreaterThan(1)
+      expect(ringCy - ringRadius).toBeLessThan(top)
+      expect(ringCy + ringRadius).toBeGreaterThan(top + height)
       for (const hue of hues) expect(hue).toBeGreaterThanOrEqual(0)
+    }
+  })
+
+  it("frames bodies at the motion designs' size: native seed size, 40 reference units across the stage", () => {
+    // Connect draws the reference in -4 -4 40 40: centre x 16, foot y 30.75. A 144px stage draws a 97.2px bean.
+    expect(STAGE_UNIT).toBe(2.5)
+    expect(FOOT).toBe(86.875)
+    const kinds = new Set(fleet.map(({ bodyKind }) => bodyKind))
+    expect(kinds.has("bean") && kinds.has("circle")).toBe(true)
+    for (const { bodyKind, bounds: [, , width], unit } of fleet) {
+      expect(unit).toBe(STAGE_UNIT)
+      if (bodyKind === "bean") expect((width / 100) * 144).toBeCloseTo(97.2, 1)
+      if (bodyKind === "circle") expect(width).toBeCloseTo(creatureBodySeed("circle").width * STAGE_UNIT, 6)
     }
   })
 

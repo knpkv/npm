@@ -24,7 +24,7 @@ const pinned: OrbitSample = {
   progress: 0,
   targetTag: "circle",
   targetInFigure: true,
-  targetRect: { x: 152.5, y: 162.7924041748047, width: 198, height: 198.00001525878906 }
+  targetRect: { x: 164.875, y: 191.078125, width: 173.25, height: 173.25 }
 }
 
 type RecordedSample = Omit<(typeof references.frames)[number]["before"], "targetRect"> & {
