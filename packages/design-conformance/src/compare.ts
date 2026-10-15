@@ -75,14 +75,21 @@ export interface LiveChanges {
 
 // CSSOM emits legacy comma-separated sRGB and preserves numeric OKLCH function syntax.
 // Other serializations stay strict until explicitly supported with comparator controls.
-const computedRgbChannel = String.raw`(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])`
 const computedAlpha = String.raw`(?:0(?:\.[0-9]+)?|1(?:\.0+)?)`
 const computedNumber = String.raw`[+-]?(?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+)(?:e[+-]?[0-9]+)?`
 const computedRgb = new RegExp(
   String
-    .raw`^(?:rgb\(${computedRgbChannel}(?:,\s*${computedRgbChannel}){2}\)|rgba\(${computedRgbChannel}(?:,\s*${computedRgbChannel}){2},\s*${computedAlpha}\))$`,
+    .raw`^(rgb|rgba)\((${computedNumber}),\s*(${computedNumber}),\s*(${computedNumber})(?:,\s*(${computedAlpha}))?\)$`,
   "u"
 )
+const computedRgbColor = (value: string): boolean => {
+  const match = computedRgb.exec(value)
+  if (match === null || (match[1] === "rgba") !== (match[5] !== undefined)) return false
+  return match.slice(2, 5).every((component) => {
+    const channel = Number(component)
+    return Number.isFinite(channel) && channel >= 0 && channel <= 255
+  })
+}
 const computedOklch = new RegExp(
   String.raw`^oklch\(${computedNumber}(?:\s+${computedNumber}){2}(?:\s+/\s+${computedAlpha})?\)$`,
   "u"
@@ -94,7 +101,7 @@ const unpaintedBorder = (value: string): boolean => {
       .exec(value)
   if (shorthand === null || shorthand[2] === "hidden") return false
   const color = shorthand[3]
-  if (color === undefined || !(computedRgb.test(color) || computedOklch.test(color))) return false
+  if (color === undefined || !(computedRgbColor(color) || computedOklch.test(color))) return false
   const width = shorthand[1]
   return width !== undefined && (shorthand[2] === "none" || /^0(?:\.0+)?(?:px)?$/u.test(width))
 }

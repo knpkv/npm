@@ -221,13 +221,18 @@ it.effect("unpainted border colors and styles do not create reference or touched
           "0 dashed rgb(0, 0, 255)",
           "1px none rgb(0, 255, 0)",
           "0px dashed rgba(0, 0, 255, 0.5)",
+          "0px none rgba(178.5, 93.5, 51, 0.5)",
+          "0px solid rgb(146.06, 107.46, 131.2)",
+          "0px dashed rgb(0.125, 254.999, 255)",
           "0px solid oklch(0.9677 0.0027 286.35)",
           "0px dashed oklch(0.5 0.1 20 / 0.5)"
         ]
       ) {
         const current = evidence(border)
-        expect(compareSnapshots(identity, state, base.snapshot, current.snapshot), `${property}: ${border}`).toEqual([])
-        expect(compareLiveRegions(identity, base, current, ["content"]).touchedRegions).toEqual([])
+        expect({
+          reference: compareSnapshots(identity, state, base.snapshot, current.snapshot),
+          touched: compareLiveRegions(identity, base, current, ["content"]).touchedRegions
+        }, `${property}: ${border}`).toEqual({ reference: [], touched: [] })
       }
       expect(base.snapshot.regions[0]?.styles[property]).toBe("0px none rgb(0, 0, 0)")
     }
@@ -331,6 +336,11 @@ for (
     "rgb(0, 0, 0) trailing",
     "rgb(0, 0)",
     "rgba(0, 0, 0)",
+    "rgba(178.5, 93.5, 51)",
+    "rgba(255.001, 93.5, 51, 0.5)",
+    "rgb(-0.001, 93.5, 51)",
+    "rgb(256, 93.5, 51)",
+    "rgb(1e309, 93.5, 51)",
     "rgba(0, 0, 0, 0.5) trailing",
     "oklch(0.5 0.1)",
     "oklch(0.5 0.1 20) trailing"
