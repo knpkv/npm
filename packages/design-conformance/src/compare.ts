@@ -73,6 +73,17 @@ export interface LiveChanges {
   readonly outsidePixelsChanged: boolean
 }
 
+const unpaintedBorder = (value: string): boolean => {
+  const [width, style] = value.split(/\s+/u)
+  return (width !== undefined && /^0(?:\.0+)?(?:px)?$/u.test(width)) || style === "none"
+}
+
+/** Ignore only border details that cannot paint; retain raw captured tokens for evidence. */
+const tokensMatch = (property: string, left: string | undefined, right: string | undefined): boolean =>
+  left === right ||
+  (/^border-(?:top|right|bottom|left)$/u.test(property) && left !== undefined && right !== undefined &&
+    unpaintedBorder(left) && unpaintedBorder(right))
+
 /** Compare merge-base and PR evidence for this shot; reference drift never selects touched regions. */
 export const compareLiveRegions = (
   identity: Identity,
@@ -105,7 +116,7 @@ export const compareLiveRegions = (
             Math.abs(region.box[coordinate] - current.box[coordinate]) > geometryTolerance(identity)
           ) ||
           Array.from(new Set([...Object.keys(region.styles), ...Object.keys(current.styles)])).some((token) =>
-            region.styles[token] !== current.styles[token]
+            !tokensMatch(token, region.styles[token], current.styles[token])
           )
       })
     if (name === "*") {
@@ -164,7 +175,7 @@ export const compareSnapshots = (
       }
     }
     for (const token of new Set([...Object.keys(reference.styles), ...Object.keys(region.styles)])) {
-      if (reference.styles[token] !== region.styles[token]) {
+      if (!tokensMatch(token, reference.styles[token], region.styles[token])) {
         fail(name, "tokens", `${token}: expected ${reference.styles[token]}, received ${region.styles[token]}`)
       }
     }

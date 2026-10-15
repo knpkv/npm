@@ -199,3 +199,59 @@ it.effect("frame enforcement catches outside-region pixels at the unchanged thre
     expect(compareLiveRegions(identity, base, { ...base, frame: PNG.sync.write(wider) }, ["content"]))
       .toEqual({ touchedRegions: ["*"], outsidePixelsChanged: true })
   }))
+
+it.effect("unpainted border colors and styles do not create reference or touched-region failures", () =>
+  Effect.sync(() => {
+    const image = new PNG({ width: 10, height: 10 })
+    image.data.fill(255)
+    const frame = PNG.sync.write(image)
+    for (const property of ["border-top", "border-right", "border-bottom", "border-left"]) {
+      const evidence = (border: string): Capture => ({
+        frame,
+        snapshot: {
+          ...snapshot,
+          regions: snapshot.regions.map((region) => ({ ...region, styles: { [property]: border } }))
+        },
+        regions: new Map([["content", RegionPixels.Image({ bytes: frame })]])
+      })
+      const base = evidence("0px none rgb(0, 0, 0)")
+      for (const border of ["0px solid rgb(255, 0, 0)", "0 dashed rgb(0, 0, 255)", "1px none rgb(0, 255, 0)"]) {
+        const current = evidence(border)
+        expect(compareSnapshots(identity, state, base.snapshot, current.snapshot), `${property}: ${border}`).toEqual([])
+        expect(compareLiveRegions(identity, base, current, ["content"]).touchedRegions).toEqual([])
+      }
+      expect(base.snapshot.regions[0]?.styles[property]).toBe("0px none rgb(0, 0, 0)")
+    }
+  }))
+
+it.effect("painted border color, style, width and removal remain required token differences", () =>
+  Effect.sync(() => {
+    const image = new PNG({ width: 10, height: 10 })
+    image.data.fill(255)
+    const frame = PNG.sync.write(image)
+    for (const property of ["border-top", "border-right", "border-bottom", "border-left"]) {
+      const evidence = (border: string): Capture => ({
+        frame,
+        snapshot: {
+          ...snapshot,
+          regions: snapshot.regions.map((region) => ({ ...region, styles: { [property]: border } }))
+        },
+        regions: new Map([["content", RegionPixels.Image({ bytes: frame })]])
+      })
+      const base = evidence("1px solid rgb(0, 0, 0)")
+      for (
+        const border of [
+          "1px solid rgb(255, 0, 0)",
+          "1px dashed rgb(0, 0, 0)",
+          "2px solid rgb(0, 0, 0)",
+          "0px none rgb(0, 0, 0)"
+        ]
+      ) {
+        const current = evidence(border)
+        expect(compareSnapshots(identity, state, base.snapshot, current.snapshot)).toEqual([
+          expect.objectContaining({ region: "content", rule: "tokens", detail: expect.stringContaining(property) })
+        ])
+        expect(compareLiveRegions(identity, base, current, ["content"]).touchedRegions).toEqual(["content"])
+      }
+    }
+  }))

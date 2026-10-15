@@ -24,7 +24,9 @@ and paths; manifest decoding rejects it for both HTML and PNG states.
 Declare every region in the manifest. The gate checks
 DOM order, nearest region parent, horizontal page/region overflow, normalized visible
 text, and document-space boxes. Geometry tolerance is 2px at 390 and 4px at 1280.
-Resolved color, background, font, borders, radius, gaps and padding must match exactly.
+Resolved color, background, font, painted borders, radius, gaps and padding must match exactly.
+An unpainted border has zero width or style `none`; its color and style do not affect token comparisons.
+Raw captured styles stay unchanged, and painted-border changes still fail both reference and touched-region checks.
 HTML pixel comparison allows at most 0.1% different pixels per region and whole frame,
 using pixelmatch anti-alias detection. UUIDs are masked in screenshots; UUID and ISO
 timestamp copy is normalized. Other timestamps must be deterministic fixture values.
@@ -53,8 +55,8 @@ for the complete HTML example. Its enforcement block is:
 Use `"legacy": "required"` after migration. At the deadline, existing drift becomes
 required automatically. Touched means a new shot/region, or that region's live pixels
 differing from its merge-base crop by more than the #844 0.1% threshold, including size
-changes. Copy, nesting, overflow and computed styles are compared directly; geometry
-uses the existing 2px/4px tolerance. Whole-frame `*` pixel findings are required only
+changes. Copy, nesting and overflow are compared directly. Computed styles use the same
+unpainted-border normalization as reference comparisons; geometry uses the existing 2px/4px tolerance. Whole-frame `*` pixel findings are required only
 when a changed named region also fails pixels, or pixels outside named regions changed.
 The outside comparison counts the original comparator's significant pixels outside
 both captures' region boxes; it does not change anti-alias detection or thresholds.
