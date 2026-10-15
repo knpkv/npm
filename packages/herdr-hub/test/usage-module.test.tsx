@@ -219,6 +219,10 @@ it("keeps ordinary Limits when peer discovery is incomplete", async () => {
   expect(document.querySelector('.superapp-shell[data-usage-empty="true"]')).toBeNull()
   expect(document.querySelector(".usage-empty-notice")).toBeNull()
   expect(document.querySelector('[data-region="cards"]')).not.toBeNull()
+  // The design's nav is the module list in every layout, never the whole sidebar with brand, Settings and session.
+  const sidebar = document.querySelector(".superapp-sidebar")
+  expect(sidebar?.getAttribute("data-region")).toBeNull()
+  expect(sidebar?.querySelector(":scope > .superapp-module-nav")?.getAttribute("data-region")).toBe("nav")
 })
 
 /** Empty peer reads are legitimate only when both complete reports name the same fleet. */

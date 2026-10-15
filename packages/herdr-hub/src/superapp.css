@@ -660,6 +660,12 @@
     display: none;
   }
 
+  /* The design sets module navigation in the 430 text weight in every layout; the current module uses 620. */
+  .superapp-sidebar,
+  .superapp-bottom {
+    font-weight: 430;
+  }
+
   .superapp-module-nav {
     display: grid;
     gap: 0.3rem;

@@ -602,14 +602,7 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
     </header>
   )
   const sidebarElement = (
-    <nav
-      aria-label="Modules"
-      key="sidebar"
-      className="superapp-sidebar"
-      hidden={terminalActive}
-      inert={terminalActive}
-      data-region={emptyActive ? undefined : "nav"}
-    >
+    <nav aria-label="Modules" key="sidebar" className="superapp-sidebar" hidden={terminalActive} inert={terminalActive}>
       <a
         className="superapp-sidebar-brand"
         href={moduleHref(landingModule, landing.page)}
@@ -621,7 +614,8 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
           <strong>Relay</strong>
         </div>
       </a>
-      <div className="superapp-module-nav" data-region={emptyActive ? "nav" : undefined}>
+      {/* The design's nav region is this module list in every layout; brand, Settings and session sit outside it. */}
+      <div className="superapp-module-nav" data-region="nav">
         {primaryDescriptors.map(moduleLink)}
         {secondaryDescriptors.length === 0 ? null : <span className="superapp-nav-divider" role="separator" />}
         {secondaryDescriptors.map(moduleLink)}
