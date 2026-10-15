@@ -1,5 +1,13 @@
 # @knpkv/herdr-fleet
 
+## 0.12.0
+
+### Minor Changes
+
+- [#914](https://github.com/knpkv/npm/pull/914) [`48a942e`](https://github.com/knpkv/npm/commit/48a942e637e0fd0417027b3f1fae5400df5ce50b) Thanks [@konopkov](https://github.com/konopkov)! - Add the read-only Host resources module with local memory and CPU history, disk capacity, heavy-gate ownership, running jobs, preview listeners and memory by pane. Publish the shared snapshot schema and view, with independently unavailable sections and retained stale or offline readings.
+
+  Add optional `heavyGate.lockDirectory` configuration without a default. Gate inspection follows inherited descriptors and reports bounded command display; it never changes jobs or locks. Preview protocol discovery runs separately from sampling and opens only verified tailnet DNS links.
+
 ## 0.11.0
 
 ### Minor Changes
