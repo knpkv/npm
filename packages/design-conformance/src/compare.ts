@@ -1,7 +1,7 @@
 import pixelmatch from "pixelmatch"
 import { PNG } from "pngjs"
 
-import type { Capture } from "./browser.js"
+import { type Capture, cropRegions } from "./browser.js"
 import { normalizeCopy } from "./capture.js"
 import type { Failure, Identity, Inventory, Manifest, Snapshot, State } from "./schema.js"
 
@@ -138,6 +138,11 @@ export const compareLiveRegions = (
     ])
   )
   if (base === undefined) return { touchedRegions: names, outsidePixelsChanged: true }
+  const baseNames = new Set(base.snapshot.regions.map((region) => region.name))
+  // These are pixel crops at PR coordinates, not region metadata attributed to the base.
+  const baseAtLiveBoxes = live.snapshot.regions.some((region) => !baseNames.has(region.name))
+    ? cropRegions(base.frame, live.snapshot)
+    : undefined
   const outsidePixelsChanged = compareOutsideRegions(base, live)
   const touchedRegions = names.filter((name) => {
     const before = base.snapshot.regions.filter((region) => region.name === name)
@@ -145,7 +150,7 @@ export const compareLiveRegions = (
     const metadataChanged = name === "*"
       ? base.snapshot.overflow !== live.snapshot.overflow ||
         base.snapshot.regions.map((region) => region.name).join("|") !==
-          live.snapshot.regions.map((region) => region.name).join("|")
+          live.snapshot.regions.filter((region) => baseNames.has(region.name)).map((region) => region.name).join("|")
       : before.length !== after.length || before.some((region, index) => {
         const current = after[index]
         return current === undefined || normalizeCopy(region.copy) !== normalizeCopy(current.copy) ||
@@ -162,6 +167,11 @@ export const compareLiveRegions = (
     }
     const previous = base.regions.get(name)
     const current = live.regions.get(name)
+    if (before.length === 0 && after.length === 1) {
+      const basePixels = baseAtLiveBoxes?.get(name)
+      return basePixels?._tag !== "Image" || current?._tag !== "Image" ||
+        comparePixels(basePixels.bytes, current.bytes).ratio > LIVE_CHANGE_MAX_DIFF_RATIO
+    }
     if (metadataChanged || previous?._tag !== current?._tag) return true
     return previous?._tag === "Image" && current?._tag === "Image" &&
       comparePixels(previous.bytes, current.bytes).ratio > LIVE_CHANGE_MAX_DIFF_RATIO

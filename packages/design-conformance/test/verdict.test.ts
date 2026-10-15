@@ -52,6 +52,94 @@ const capture = (nav: Uint8Array, content: Uint8Array): Capture => {
   }
 }
 
+it.effect("adding region tags over unchanged base pixels lists inherited drift without requiring it", () =>
+  Effect.sync(() => {
+    const white = pixels(255, 400)
+    const live = capture(pixels(0, 4), white)
+    const base: Capture = {
+      frame: live.frame,
+      snapshot: { overflow: false, regions: [] },
+      regions: new Map()
+    }
+    const changes = compareLiveRegions(identity, base, live, ["nav", "content"])
+    const findings = [
+      { ...failure, region: "nav", rule: "copy", detail: "Inherited navigation copy" },
+      { ...failure, region: "nav", rule: "geometry", detail: "Inherited navigation height" },
+      { ...failure, region: "nav", rule: "tokens", detail: "Inherited navigation color" },
+      { ...failure, region: "nav", rule: "pixels", detail: "Inherited navigation pixels" },
+      { ...failure, region: "*", rule: "pixels", detail: "Inherited frame pixels" }
+    ] satisfies ReadonlyArray<typeof failure>
+    const result = verdict(manifest, findings, [], [{ ...shot, ...changes }], before)
+    expect(result.passed).toBe(true)
+    expect(result.findings.map((finding) => finding.disposition)).toEqual([
+      "report-only",
+      "report-only",
+      "report-only",
+      "report-only",
+      "report-only"
+    ])
+    expect(changes).toEqual({ touchedRegions: [], outsidePixelsChanged: false })
+    for (const report of [renderReport(result), reportSummary(result)]) {
+      expect(report).toContain("Inherited navigation copy")
+      expect(report).toContain("Inherited navigation pixels")
+    }
+    expect(base.snapshot).toEqual({ overflow: false, regions: [] })
+    expect(base.regions.size).toBe(0)
+  }))
+
+it.effect("untagged base pixels still require changed content while inherited navigation stays listed", () =>
+  Effect.sync(() => {
+    const white = pixels(255, 400)
+    const nav = pixels(0, 4)
+    const base: Capture = {
+      frame: capture(nav, white).frame,
+      snapshot: { overflow: false, regions: [] },
+      regions: new Map()
+    }
+    const live = capture(nav, pixels(0, 400))
+    const changes = compareLiveRegions(identity, base, live, ["nav", "content"])
+    expect(changes).toEqual({ touchedRegions: ["content"], outsidePixelsChanged: false })
+    const result = verdict(
+      manifest,
+      [
+        { ...failure, region: "nav", rule: "pixels", detail: "Inherited navigation pixels" },
+        { ...failure, region: "content", rule: "pixels", detail: "Changed content pixels" },
+        { ...failure, region: "*", rule: "pixels", detail: "Changed frame pixels" }
+      ],
+      [],
+      [{ ...shot, ...changes }],
+      before
+    )
+    expect(result.passed).toBe(false)
+    expect(result.findings.map((finding) => [finding.region, finding.disposition])).toEqual([
+      ["nav", "report-only"],
+      ["content", "required"],
+      ["*", "required"]
+    ])
+    expect(renderReport(result)).toContain("Inherited navigation pixels")
+    expect(base.snapshot.regions).toEqual([])
+    expect(base.regions.size).toBe(0)
+  }))
+
+it.effect("a newly tagged unchanged rectangle does not discard existing region order or removal evidence", () =>
+  Effect.sync(() => {
+    const white = pixels(255, 400)
+    const live = capture(white, white)
+    const partial: Capture = {
+      ...live,
+      snapshot: { ...live.snapshot, regions: live.snapshot.regions.filter((region) => region.name === "nav") },
+      regions: new Map([...live.regions].filter(([name]) => name === "nav"))
+    }
+    expect(compareLiveRegions(identity, partial, live, ["nav", "content"]))
+      .toEqual({ touchedRegions: [], outsidePixelsChanged: false })
+    const reordered = { ...live, snapshot: { ...live.snapshot, regions: [...live.snapshot.regions].reverse() } }
+    expect(compareLiveRegions(identity, live, reordered, ["nav", "content"]).touchedRegions).toEqual(["*"])
+    expect(compareLiveRegions(identity, live, partial, ["nav", "content"]).touchedRegions).toEqual([
+      "*",
+      "content"
+    ])
+  }))
+
 it.effect("changed content does not require inherited nav drift with zero significant base-to-PR pixels", () =>
   Effect.sync(() => {
     const reference = pixels(255, 400)
