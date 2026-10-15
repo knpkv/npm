@@ -15,6 +15,7 @@ import {
   agentConnectTarget,
   type AgentDelegate,
   type AgentInventory,
+  type AgentTaskKind,
   type AgentWorkerIdentity,
   type AgentWorkerObservation,
   AgentWorkerObservations,
@@ -153,6 +154,27 @@ export type Approval = {
 }
 
 export const pendingApprovalPageMaxRecords = 8
+
+/** Requires repeated evidence for half a second, suppressing observed 200ms tool blips. */
+export const agentTaskKindDebounceMs = 500
+
+type TaskObservation = {
+  readonly kind: AgentTaskKind
+  readonly pending: AgentTaskKind
+  readonly since: number
+}
+
+/** Failed observations break continuity while retaining the last published kind. */
+const interruptTaskObservations = (
+  previous: ReadonlyMap<string, TaskObservation>,
+  timestamp: number
+): ReadonlyMap<string, TaskObservation> => {
+  const interrupted = new Map<string, TaskObservation>()
+  for (const [key, observation] of previous) {
+    interrupted.set(key, { kind: observation.kind, pending: observation.kind, since: timestamp })
+  }
+  return interrupted
+}
 
 type Options = {
   readonly host: string
@@ -798,15 +820,51 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
     }
   )
 
+  // Serialize source observations as well as state updates: a late inventory cannot overwrite a newer one.
+  const agentObservationPermit = yield* Semaphore.make(1)
+  const taskObservations = yield* Ref.make<ReadonlyMap<string, TaskObservation>>(new Map())
+  const agents = Effect.fn("FleetService.agents")(() =>
+    agentObservationPermit.withPermit(Effect.gen(function*() {
+      const inventory = yield* options.operations.listAgents().pipe(
+        Effect.tapError(() =>
+          Effect.gen(function*() {
+            const timestamp = yield* now
+            yield* Ref.update(taskObservations, (previous) => interruptTaskObservations(previous, timestamp))
+          })
+        )
+      )
+      const timestamp = yield* now
+      return yield* Ref.modify(taskObservations, (previous) => {
+        if (!inventory.available || inventory.error !== null) {
+          return [inventory, interruptTaskObservations(previous, timestamp)]
+        }
+        const next = new Map<string, TaskObservation>()
+        const observedAgents = inventory.agents.map((agent) => {
+          const key = JSON.stringify([agent.agentId, agent.paneId])
+          const candidate = agent.taskKind ?? "unknown"
+          const prior = previous.get(key)
+          const observation: TaskObservation = prior === undefined
+            ? { kind: candidate, pending: candidate, since: timestamp }
+            : prior.pending !== candidate || timestamp < prior.since
+            ? { kind: prior.kind, pending: candidate, since: timestamp }
+            : timestamp - prior.since >= agentTaskKindDebounceMs
+            ? { kind: candidate, pending: candidate, since: prior.since }
+            : prior
+          next.set(key, observation)
+          return { ...agent, taskKind: observation.kind }
+        })
+        return [{ ...inventory, agents: observedAgents }, next]
+      })
+    }))
+  )
+
   const status = Effect.fn("FleetService.status")(function*() {
     const state = yield* Effect.all({
-      herdr: options.operations.listAgents(),
+      herdr: agents(),
       details: options.operations.inspect()
     })
     return { host: options.host, ...state.details, herdr: state.herdr }
   })
-
-  const agents = Effect.fn("FleetService.agents")(() => options.operations.listAgents())
 
   const workers = Effect.fn("FleetService.workers")(function*() {
     const records = yield* options.store.listWorkers(

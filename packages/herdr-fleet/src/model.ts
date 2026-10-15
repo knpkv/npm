@@ -667,7 +667,23 @@ export const HostConfiguration = Schema.Struct({
 )
 export type HostConfiguration = typeof HostConfiguration.Type
 
+/** Current agent work signal. Unknown is explicit when no supported evidence identifies the task. */
+export const AgentTaskKind = Schema.Literals([
+  "reading",
+  "writing",
+  "testing",
+  "waiting",
+  "blocked",
+  "done",
+  "failing",
+  "idle",
+  "unknown"
+])
+export type AgentTaskKind = typeof AgentTaskKind.Type
+
 export const AgentSummary = Schema.Struct({
+  /** Optional on older peers; the local Fleet service supplies the debounced kind. */
+  taskKind: Schema.optionalKey(AgentTaskKind),
   agentId: Schema.NullOr(AgentStableId),
   activityRevision: Schema.Number,
   kind: Schema.String,
