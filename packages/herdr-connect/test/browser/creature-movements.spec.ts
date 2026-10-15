@@ -374,6 +374,35 @@ for (const theme of themes) {
       expect(await names(svg)).not.toContain("connect-creature-done")
     })
 
+    // The typed controller owns a completion from its first frame, so leaving task motion mid-celebration stays settled.
+    test("exiting task motion during the typed celebration never replays it as a legacy celebration", async ({ page }) => {
+      const svg = await open(page, "writing")
+      await page.getByLabel("Agent state").selectOption("done")
+      const done = svg.locator(".connect-creature-task-done")
+      await expect(done).toHaveCount(1)
+      await svg.evaluate((node) => {
+        for (const animation of node.getAnimations({ subtree: true })) {
+          animation.pause()
+          animation.currentTime = 225
+        }
+      })
+      await page.getByLabel("Task kind").selectOption("")
+      await expect(svg).not.toHaveAttribute("data-task-kind")
+      // Read once, without retrying: a replayed legacy celebration would latch happy again when it ends.
+      expect(
+        await svg.evaluate((node) => ({
+          mood: node.getAttribute("data-mood"),
+          celebration: node.querySelectorAll(".connect-creature-celebration").length
+        }))
+      ).toEqual({ mood: "happy", celebration: 0 })
+      expect(await names(svg)).not.toContain("connect-creature-done")
+      // A genuine later completion still celebrates.
+      await page.getByLabel("Agent state").selectOption("working")
+      await page.getByLabel("Agent state").selectOption("done")
+      await expect(svg).toHaveAttribute("data-mood", "done")
+      await expect(svg.locator(".connect-creature-celebration")).toHaveCount(1)
+    })
+
     test("raw needs-input cannot interrupt a running explicit failing wince", async ({ page }) => {
       const svg = await open(page, "testing")
       await page.getByLabel("Task kind").selectOption("failing")

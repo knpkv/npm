@@ -200,8 +200,9 @@ export const Creature = ({
     : undefined
   const { finish: finishTask, playback, still: stillTask } = useTaskPlayback(root, identity, requestedTask)
   const typed = requestedTask !== undefined
-  // The typed controller owns this completion too. Exiting to legacy motion must not celebrate it again.
-  if (typed && playback.current.kind === "done" && !playback.current.entered && selected === "done" && !settled) {
+  // The typed controller owns this completion from its first frame. Exiting to legacy motion, even mid-celebration,
+  // must not celebrate it again.
+  if (typed && playback.current.kind === "done" && selected === "done" && !settled) {
     setCompletion({ identity, state, override, complete: true })
   }
   const idle = typed && playback.current.kind === "idle"
