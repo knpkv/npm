@@ -8,9 +8,10 @@ class PackageConsumerError extends Schema.TaggedError<PackageConsumerError>()("P
 }) {}
 
 const ConsumerVersions = Schema.Struct({
-  dependencies: Schema.Struct({ effect: Schema.String }),
-  peerDependencies: Schema.Struct({ react: Schema.String, "react-dom": Schema.String })
+  dependencies: Schema.Struct({ effect: Schema.String })
 })
+
+const InstalledVersion = Schema.Struct({ version: Schema.String })
 
 /** Run the real package manager and Node resolver outside the workspace and Vitest aliases. */
 const run = Effect.fn("ReviewConsumer.run")(function*(cwd: string, command: string, args: ReadonlyArray<string>) {
@@ -48,6 +49,16 @@ const consumer = Effect.fn("ReviewConsumer.install")(function*(ui: boolean) {
   const versions = yield* fs.readFileString(path.join(packageRoot, "package.json")).pipe(
     Effect.flatMap(Schema.decodeUnknownEffect(Schema.fromJsonString(ConsumerVersions)))
   )
+  // Offline installs resolve peer ranges against registry metadata, which can name a release the
+  // store lacks. Pin React to the workspace's locked install so every consumer stays offline.
+  const installed = Effect.fn("ReviewConsumer.installedVersion")(function*(name: string) {
+    const manifest = yield* fs.readFileString(path.join(packageRoot, "node_modules", name, "package.json")).pipe(
+      Effect.flatMap(Schema.decodeUnknownEffect(Schema.fromJsonString(InstalledVersion)))
+    )
+    return manifest.version
+  })
+  const react = yield* installed("react")
+  const reactDom = yield* installed("react-dom")
   const temporary = yield* fs.makeTempDirectoryScoped({ prefix: "review-peer-consumer-" })
   const archives = new Map<string, string>()
   for (const name of ["review", "rly"]) {
@@ -76,8 +87,8 @@ const consumer = Effect.fn("ReviewConsumer.install")(function*(ui: boolean) {
     ? {
       ...headlessDependencies,
       "@knpkv/rly": archives.get("rly"),
-      react: versions.peerDependencies.react,
-      "react-dom": versions.peerDependencies["react-dom"]
+      react,
+      "react-dom": reactDom
     }
     : headlessDependencies
   yield* fs.writeFileString(
@@ -92,7 +103,7 @@ const consumer = Effect.fn("ReviewConsumer.install")(function*(ui: boolean) {
   // installed just because an override exists; the old hard dependency does install it.
   yield* fs.writeFileString(
     path.join(directory, "pnpm-workspace.yaml"),
-    `overrides:\n  "@knpkv/rly": "${archives.get("rly")}"\n`
+    `overrides:\n  "@knpkv/rly": "${archives.get("rly")}"\n  react: "${react}"\n  react-dom: "${reactDom}"\n`
   )
   const store = (yield* run(packageRoot, "pnpm", ["store", "path"])).trim()
   yield* run(directory, "pnpm", [
