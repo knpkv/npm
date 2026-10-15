@@ -1,5 +1,11 @@
 # @knpkv/alchemy-console
 
+## 0.5.1
+
+### Patch Changes
+
+- [#911](https://github.com/knpkv/npm/pull/911) [`851a243`](https://github.com/knpkv/npm/commit/851a24361f1c2eb72129f679ccf57b46ebc9306e) Thanks [@konopkov](https://github.com/konopkov)! - Order CI plan reruns by attempt start time, classify inaccessible fixed CI endpoints as access refusals, and document canonical receipt identity boundaries.
+
 ## 0.5.0
 
 ### Minor Changes
