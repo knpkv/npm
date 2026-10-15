@@ -380,6 +380,18 @@ describe("Creature framing", () => {
     }
   })
 
+  it("keeps Home's state ring at the exact reference radius", () => {
+    for (let index = 0; index < 64; index++) {
+      const id = `drawing-${String(index)}`
+      const { bodyKind, unit } = agentCharacter("fixture-host", id)
+      const seed = creatureBodySeed(bodyKind)
+      const { r } = ringOf(
+        renderToStaticMarkup(<Creature host="fixture-host" id={id} size="row" state="waiting" statePolicy="home" />)
+      )
+      expect(r).toBeCloseTo((Math.max(seed.width, seed.height) / 2 + 2.25) * unit, 3)
+    }
+  })
+
   it("keeps every body's state ring, stroke included, inside the frame", () => {
     for (let index = 0; index < 64; index++) {
       const id = `drawing-${String(index)}`

@@ -197,7 +197,9 @@ export const Creature = ({
   // the state ring. At STAGE_UNIT that box is exactly the stage's 0 0 100 100. Home export 66 keeps its own
   // -6 -6 44 44 frame. Both draw the reference's circular state ring around the body's centre.
   const frameEdge = (homeRow ? 44 : 40) * unit
-  const ring = { cy: character.ringCy, rx: character.ringRadius, ry: character.ringRadius }
+  // Home export 66 keeps the reference radius exactly; Connect widens it only where it would cut the outline.
+  const radius = homeRow ? (Math.max(seed.width, seed.height) / 2 + 2.25) * unit : character.ringRadius
+  const ring = { cy: character.ringCy, rx: radius, ry: radius }
   const frameLeft = 50 - frameEdge / 2
   const frameTop = FOOT - (homeRow ? 36.75 : 34.75) * unit
   const fixed = (value: number): string => value.toFixed(3)
