@@ -2,6 +2,9 @@ import { defineConfig } from "oxlint"
 
 export default defineConfig({
   ignorePatterns: [
+    // Bytes are hash-pinned design exports, reviewed in ref PRs.
+    "design-refs/*/screens/**",
+    "design-refs/*/fixture.json",
     ".agent/**",
     ".agents/**",
     ".claude/**",
