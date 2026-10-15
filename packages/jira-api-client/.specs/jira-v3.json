@@ -1531,6 +1531,14 @@
         },
         "type": "object"
       },
+      "BulkPolicyOperationResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "failed": { "items": { "$ref": "#/components/schemas/ProjectResult" }, "type": "array" },
+          "successful": { "items": { "$ref": "#/components/schemas/ProjectResult" }, "type": "array" }
+        },
+        "type": "object"
+      },
       "BulkProjectPermissionGrants": {
         "additionalProperties": false,
         "description": "List of project permissions and the projects and issues those permissions grant access to.",
@@ -1576,6 +1584,11 @@
           }
         },
         "required": ["permissions"],
+        "type": "object"
+      },
+      "BulkProjectPolicyRequest": {
+        "additionalProperties": false,
+        "properties": { "projectIds": { "items": { "format": "int64", "type": "integer" }, "type": "array" } },
         "type": "object"
       },
       "BulkRedactionRequest": {
@@ -3169,6 +3182,7 @@
             "grouppicker.multiple": "#/components/schemas/CustomFieldContextDefaultValueMultipleGroupPicker",
             "grouppicker.single": "#/components/schemas/CustomFieldContextDefaultValueSingleGroupPicker",
             "labels": "#/components/schemas/CustomFieldContextDefaultValueLabels",
+            "longtext": "#/components/schemas/CustomFieldContextDefaultValueLongText",
             "multi.user.select": "#/components/schemas/CustomFieldContextDefaultValueMultiUserPicker",
             "option.cascading": "#/components/schemas/CustomFieldContextDefaultValueCascadingOption",
             "option.multiple": "#/components/schemas/CustomFieldContextDefaultValueMultipleOption",
@@ -3200,6 +3214,7 @@
           { "$ref": "#/components/schemas/CustomFieldContextDefaultValueLabels" },
           { "$ref": "#/components/schemas/CustomFieldContextDefaultValueTextField" },
           { "$ref": "#/components/schemas/CustomFieldContextDefaultValueTextArea" },
+          { "$ref": "#/components/schemas/CustomFieldContextDefaultValueLongText" },
           { "$ref": "#/components/schemas/CustomFieldContextDefaultValueReadOnly" },
           { "$ref": "#/components/schemas/CustomFieldContextDefaultValueSingleVersionPicker" },
           { "$ref": "#/components/schemas/CustomFieldContextDefaultValueMultipleVersionPicker" },
@@ -3387,6 +3402,19 @@
           "type": { "type": "string" }
         },
         "required": ["contextId", "labels", "type"],
+        "type": "object"
+      },
+      "CustomFieldContextDefaultValueLongText": {
+        "description": "The default text for a plain text paragraph custom field.",
+        "properties": {
+          "contextId": { "description": "The ID of the context.", "type": "string" },
+          "text": {
+            "description": "The default text. Line breaks are preserved. The maximum length is the instance's text field character limit.",
+            "type": "string"
+          },
+          "type": { "type": "string" }
+        },
+        "required": ["contextId", "type"],
         "type": "object"
       },
       "CustomFieldContextDefaultValueMultiUserPicker": {
@@ -4308,6 +4336,14 @@
       "ErrorMessage": {
         "additionalProperties": false,
         "properties": { "message": { "type": "string" } },
+        "type": "object"
+      },
+      "ErrorResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "errorMessages": { "items": { "type": "string" }, "type": "array" },
+          "errors": { "additionalProperties": { "type": "string" }, "type": "object" }
+        },
         "type": "object"
       },
       "Errors": {
@@ -13015,6 +13051,40 @@
         },
         "type": "object"
       },
+      "PolicyApplicationViolation": {
+        "additionalProperties": false,
+        "properties": {
+          "entityId": { "type": "string" },
+          "entityName": { "type": "string" },
+          "entityType": { "type": "string" },
+          "remediationHint": { "type": "string" },
+          "ruleTypeId": { "type": "string" }
+        },
+        "type": "object"
+      },
+      "PolicySummary": {
+        "additionalProperties": false,
+        "properties": {
+          "appliedProjectIds": { "items": { "format": "int64", "type": "integer" }, "type": "array" },
+          "id": { "type": "string" },
+          "isDefault": { "type": "boolean" },
+          "policyDescription": { "type": "string" },
+          "policyName": { "type": "string" },
+          "version": { "format": "int64", "type": "integer" }
+        },
+        "type": "object"
+      },
+      "PolicySummaryResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "isLast": { "type": "boolean" },
+          "maxResults": { "format": "int32", "type": "integer" },
+          "startAt": { "format": "int64", "type": "integer" },
+          "total": { "format": "int64", "type": "integer" },
+          "values": { "items": { "$ref": "#/components/schemas/PolicySummary" }, "type": "array" }
+        },
+        "type": "object"
+      },
       "PreviewConditionGroupConfiguration": {
         "additionalProperties": false,
         "description": "Condition group configuration for workflow transitions.",
@@ -13887,6 +13957,15 @@
           "projectIdOrKey": { "description": "The project ID or key.", "type": "string" }
         },
         "required": ["action", "projectIdOrKey"],
+        "type": "object"
+      },
+      "ProjectResult": {
+        "additionalProperties": false,
+        "properties": {
+          "errors": { "items": { "$ref": "#/components/schemas/PolicyApplicationViolation" }, "type": "array" },
+          "message": { "type": "string" },
+          "projectId": { "format": "int64", "type": "integer" }
+        },
         "type": "object"
       },
       "ProjectRole": {
@@ -15567,6 +15646,11 @@
         "required": ["id"],
         "type": "object"
       },
+      "SetProjectPoliciesRequest": {
+        "additionalProperties": false,
+        "properties": { "policyIds": { "items": { "type": "string" }, "type": "array" } },
+        "type": "object"
+      },
       "SharePermission": {
         "additionalProperties": false,
         "description": "Details of a share permission for the filter.",
@@ -15802,6 +15886,32 @@
           "boardName": { "type": "string" },
           "simpleBoard": { "type": "boolean" },
           "totalBoardsInProject": { "format": "int64", "type": "integer" }
+        },
+        "type": "object"
+      },
+      "StatePolicyDocument": {
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string" },
+          "isDefault": { "type": "boolean" },
+          "policyDescription": { "type": "string" },
+          "policyName": { "type": "string" },
+          "rulesByDomain": {
+            "additionalProperties": { "items": { "$ref": "#/components/schemas/StatePolicyRule" }, "type": "array" },
+            "type": "object"
+          },
+          "version": { "format": "int64", "type": "integer" }
+        },
+        "type": "object"
+      },
+      "StatePolicyRule": {
+        "additionalProperties": false,
+        "properties": {
+          "description": { "type": "string" },
+          "domain": { "type": "string" },
+          "properties": { "additionalProperties": {}, "type": "object" },
+          "ruleId": { "type": "string" },
+          "ruleTypeId": { "type": "string" }
         },
         "type": "object"
       },
@@ -17811,6 +17921,11 @@
             "type": "string"
           }
         },
+        "type": "object"
+      },
+      "ValidatePolicyRequest": {
+        "additionalProperties": false,
+        "properties": { "policyIds": { "items": { "type": "string" }, "type": "array" } },
         "type": "object"
       },
       "ValidationOptionsForCreate": {
@@ -20401,7 +20516,7 @@
     "license": { "name": "Apache 2.0", "url": "http://www.apache.org/licenses/LICENSE-2.0.html" },
     "termsOfService": "https://developer.atlassian.com/platform/marketplace/atlassian-developer-terms/",
     "title": "The Jira Cloud platform REST API",
-    "version": "1001.0.0-SNAPSHOT-ea70632e0e06e672b6c58852a35aaed86a7d313e"
+    "version": "1001.0.0-SNAPSHOT-fe911bb6c9773b95ccc4938fe54b8b7edde34525"
   },
   "openapi": "3.0.1",
   "paths": {
@@ -26325,7 +26440,7 @@
     "/rest/api/3/field/{fieldId}/context/defaultValue": {
       "get": {
         "deprecated": true,
-        "description": "Returns a [paginated](#pagination) list of defaults for a custom field. The results can be filtered by `contextId`, otherwise all values are returned. If no defaults are set for a context, nothing is returned.  \nThe returned object depends on type of the custom field:\n\n *  `CustomFieldContextDefaultValueDate` (type `datepicker`) for date fields.\n *  `CustomFieldContextDefaultValueDateTime` (type `datetimepicker`) for date-time fields.\n *  `CustomFieldContextDefaultValueSingleOption` (type `option.single`) for single choice select lists and radio buttons.\n *  `CustomFieldContextDefaultValueMultipleOption` (type `option.multiple`) for multiple choice select lists and checkboxes.\n *  `CustomFieldContextDefaultValueCascadingOption` (type `option.cascading`) for cascading select lists.\n *  `CustomFieldContextSingleUserPickerDefaults` (type `single.user.select`) for single users.\n *  `CustomFieldContextDefaultValueMultiUserPicker` (type `multi.user.select`) for user lists.\n *  `CustomFieldContextDefaultValueSingleGroupPicker` (type `grouppicker.single`) for single choice group pickers.\n *  `CustomFieldContextDefaultValueMultipleGroupPicker` (type `grouppicker.multiple`) for multiple choice group pickers.\n *  `CustomFieldContextDefaultValueURL` (type `url`) for URLs.\n *  `CustomFieldContextDefaultValueProject` (type `project`) for project pickers.\n *  `CustomFieldContextDefaultValueFloat` (type `float`) for floats (floating-point numbers).\n *  `CustomFieldContextDefaultValueLabels` (type `labels`) for labels.\n *  `CustomFieldContextDefaultValueTextField` (type `textfield`) for text fields.\n *  `CustomFieldContextDefaultValueTextArea` (type `textarea`) for text area fields.\n *  `CustomFieldContextDefaultValueReadOnly` (type `readonly`) for read only (text) fields.\n *  `CustomFieldContextDefaultValueMultipleVersion` (type `version.multiple`) for single choice version pickers.\n *  `CustomFieldContextDefaultValueSingleVersion` (type `version.single`) for multiple choice version pickers.\n\nForge custom fields [types](https://developer.atlassian.com/platform/forge/manifest-reference/modules/jira-custom-field-type/#data-types) are also supported, returning:\n\n *  `CustomFieldContextDefaultValueForgeStringFieldBean` (type `forge.string`) for Forge string fields.\n *  `CustomFieldContextDefaultValueForgeMultiStringFieldBean` (type `forge.string.list`) for Forge string collection fields.\n *  `CustomFieldContextDefaultValueForgeObjectFieldBean` (type `forge.object`) for Forge object fields.\n *  `CustomFieldContextDefaultValueForgeDateTimeFieldBean` (type `forge.datetime`) for Forge date-time fields.\n *  `CustomFieldContextDefaultValueForgeGroupFieldBean` (type `forge.group`) for Forge group fields.\n *  `CustomFieldContextDefaultValueForgeMultiGroupFieldBean` (type `forge.group.list`) for Forge group collection fields.\n *  `CustomFieldContextDefaultValueForgeNumberFieldBean` (type `forge.number`) for Forge number fields.\n *  `CustomFieldContextDefaultValueForgeUserFieldBean` (type `forge.user`) for Forge user fields.\n *  `CustomFieldContextDefaultValueForgeMultiUserFieldBean` (type `forge.user.list`) for Forge user collection fields.\n\n**Deprecated:** This API is deprecated and will be removed in October 2026. A replacement API that supports multiple default values per issue type within a context is coming soon. See the deprecation notice [CHANGE-3082](https://developer.atlassian.com/cloud/jira/platform/changelog/#CHANGE-3082) for more details.\n\n**[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).",
+        "description": "Returns a [paginated](#pagination) list of defaults for a custom field. The results can be filtered by `contextId`, otherwise all values are returned. If no defaults are set for a context, nothing is returned.  \nThe returned object depends on type of the custom field:\n\n *  `CustomFieldContextDefaultValueDate` (type `datepicker`) for date fields.\n *  `CustomFieldContextDefaultValueDateTime` (type `datetimepicker`) for date-time fields.\n *  `CustomFieldContextDefaultValueSingleOption` (type `option.single`) for single choice select lists and radio buttons.\n *  `CustomFieldContextDefaultValueMultipleOption` (type `option.multiple`) for multiple choice select lists and checkboxes.\n *  `CustomFieldContextDefaultValueCascadingOption` (type `option.cascading`) for cascading select lists.\n *  `CustomFieldContextSingleUserPickerDefaults` (type `single.user.select`) for single users.\n *  `CustomFieldContextDefaultValueMultiUserPicker` (type `multi.user.select`) for user lists.\n *  `CustomFieldContextDefaultValueSingleGroupPicker` (type `grouppicker.single`) for single choice group pickers.\n *  `CustomFieldContextDefaultValueMultipleGroupPicker` (type `grouppicker.multiple`) for multiple choice group pickers.\n *  `CustomFieldContextDefaultValueURL` (type `url`) for URLs.\n *  `CustomFieldContextDefaultValueProject` (type `project`) for project pickers.\n *  `CustomFieldContextDefaultValueFloat` (type `float`) for floats (floating-point numbers).\n *  `CustomFieldContextDefaultValueLabels` (type `labels`) for labels.\n *  `CustomFieldContextDefaultValueTextField` (type `textfield`) for text fields.\n *  `CustomFieldContextDefaultValueTextArea` (type `textarea`) for text area fields.\n *  `CustomFieldContextDefaultValueLongText` (type `longtext`) for plain text paragraph fields.\n *  `CustomFieldContextDefaultValueReadOnly` (type `readonly`) for read only (text) fields.\n *  `CustomFieldContextDefaultValueMultipleVersion` (type `version.multiple`) for single choice version pickers.\n *  `CustomFieldContextDefaultValueSingleVersion` (type `version.single`) for multiple choice version pickers.\n\nForge custom fields [types](https://developer.atlassian.com/platform/forge/manifest-reference/modules/jira-custom-field-type/#data-types) are also supported, returning:\n\n *  `CustomFieldContextDefaultValueForgeStringFieldBean` (type `forge.string`) for Forge string fields.\n *  `CustomFieldContextDefaultValueForgeMultiStringFieldBean` (type `forge.string.list`) for Forge string collection fields.\n *  `CustomFieldContextDefaultValueForgeObjectFieldBean` (type `forge.object`) for Forge object fields.\n *  `CustomFieldContextDefaultValueForgeDateTimeFieldBean` (type `forge.datetime`) for Forge date-time fields.\n *  `CustomFieldContextDefaultValueForgeGroupFieldBean` (type `forge.group`) for Forge group fields.\n *  `CustomFieldContextDefaultValueForgeMultiGroupFieldBean` (type `forge.group.list`) for Forge group collection fields.\n *  `CustomFieldContextDefaultValueForgeNumberFieldBean` (type `forge.number`) for Forge number fields.\n *  `CustomFieldContextDefaultValueForgeUserFieldBean` (type `forge.user`) for Forge user fields.\n *  `CustomFieldContextDefaultValueForgeMultiUserFieldBean` (type `forge.user.list`) for Forge user collection fields.\n\n**Deprecated:** This API is deprecated and will be removed in October 2026. A replacement API that supports multiple default values per issue type within a context is coming soon. See the deprecation notice [CHANGE-3082](https://developer.atlassian.com/cloud/jira/platform/changelog/#CHANGE-3082) for more details.\n\n**[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).",
         "operationId": "getDefaultValues",
         "parameters": [
           {
@@ -26405,7 +26520,7 @@
       },
       "put": {
         "deprecated": true,
-        "description": "Sets default for contexts of a custom field. Default are defined using these objects:\n\n *  `CustomFieldContextDefaultValueDate` (type `datepicker`) for date fields.\n *  `CustomFieldContextDefaultValueDateTime` (type `datetimepicker`) for date-time fields.\n *  `CustomFieldContextDefaultValueSingleOption` (type `option.single`) for single choice select lists and radio buttons.\n *  `CustomFieldContextDefaultValueMultipleOption` (type `option.multiple`) for multiple choice select lists and checkboxes.\n *  `CustomFieldContextDefaultValueCascadingOption` (type `option.cascading`) for cascading select lists.\n *  `CustomFieldContextSingleUserPickerDefaults` (type `single.user.select`) for single users.\n *  `CustomFieldContextDefaultValueMultiUserPicker` (type `multi.user.select`) for user lists.\n *  `CustomFieldContextDefaultValueSingleGroupPicker` (type `grouppicker.single`) for single choice group pickers.\n *  `CustomFieldContextDefaultValueMultipleGroupPicker` (type `grouppicker.multiple`) for multiple choice group pickers.\n *  `CustomFieldContextDefaultValueURL` (type `url`) for URLs.\n *  `CustomFieldContextDefaultValueProject` (type `project`) for project pickers.\n *  `CustomFieldContextDefaultValueFloat` (type `float`) for floats (floating-point numbers).\n *  `CustomFieldContextDefaultValueLabels` (type `labels`) for labels.\n *  `CustomFieldContextDefaultValueTextField` (type `textfield`) for text fields.\n *  `CustomFieldContextDefaultValueTextArea` (type `textarea`) for text area fields.\n *  `CustomFieldContextDefaultValueReadOnly` (type `readonly`) for read only (text) fields.\n *  `CustomFieldContextDefaultValueMultipleVersion` (type `version.multiple`) for single choice version pickers.\n *  `CustomFieldContextDefaultValueSingleVersion` (type `version.single`) for multiple choice version pickers.\n\nForge custom fields [types](https://developer.atlassian.com/platform/forge/manifest-reference/modules/jira-custom-field-type/#data-types) are also supported, returning:\n\n *  `CustomFieldContextDefaultValueForgeStringFieldBean` (type `forge.string`) for Forge string fields.\n *  `CustomFieldContextDefaultValueForgeMultiStringFieldBean` (type `forge.string.list`) for Forge string collection fields.\n *  `CustomFieldContextDefaultValueForgeObjectFieldBean` (type `forge.object`) for Forge object fields.\n *  `CustomFieldContextDefaultValueForgeDateTimeFieldBean` (type `forge.datetime`) for Forge date-time fields.\n *  `CustomFieldContextDefaultValueForgeGroupFieldBean` (type `forge.group`) for Forge group fields.\n *  `CustomFieldContextDefaultValueForgeMultiGroupFieldBean` (type `forge.group.list`) for Forge group collection fields.\n *  `CustomFieldContextDefaultValueForgeNumberFieldBean` (type `forge.number`) for Forge number fields.\n *  `CustomFieldContextDefaultValueForgeUserFieldBean` (type `forge.user`) for Forge user fields.\n *  `CustomFieldContextDefaultValueForgeMultiUserFieldBean` (type `forge.user.list`) for Forge user collection fields.\n\nOnly one type of default object can be included in a request. To remove a default for a context, set the default parameter to `null`.\n\n**Deprecated:** This API is deprecated and will be removed in October 2026. A replacement API that supports multiple default values per issue type within a context is coming soon. See the deprecation notice [CHANGE-3082](https://developer.atlassian.com/cloud/jira/platform/changelog/#CHANGE-3082) for more details.\n\n**[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).",
+        "description": "Sets default for contexts of a custom field. Default are defined using these objects:\n\n *  `CustomFieldContextDefaultValueDate` (type `datepicker`) for date fields.\n *  `CustomFieldContextDefaultValueDateTime` (type `datetimepicker`) for date-time fields.\n *  `CustomFieldContextDefaultValueSingleOption` (type `option.single`) for single choice select lists and radio buttons.\n *  `CustomFieldContextDefaultValueMultipleOption` (type `option.multiple`) for multiple choice select lists and checkboxes.\n *  `CustomFieldContextDefaultValueCascadingOption` (type `option.cascading`) for cascading select lists.\n *  `CustomFieldContextSingleUserPickerDefaults` (type `single.user.select`) for single users.\n *  `CustomFieldContextDefaultValueMultiUserPicker` (type `multi.user.select`) for user lists.\n *  `CustomFieldContextDefaultValueSingleGroupPicker` (type `grouppicker.single`) for single choice group pickers.\n *  `CustomFieldContextDefaultValueMultipleGroupPicker` (type `grouppicker.multiple`) for multiple choice group pickers.\n *  `CustomFieldContextDefaultValueURL` (type `url`) for URLs.\n *  `CustomFieldContextDefaultValueProject` (type `project`) for project pickers.\n *  `CustomFieldContextDefaultValueFloat` (type `float`) for floats (floating-point numbers).\n *  `CustomFieldContextDefaultValueLabels` (type `labels`) for labels.\n *  `CustomFieldContextDefaultValueTextField` (type `textfield`) for text fields.\n *  `CustomFieldContextDefaultValueTextArea` (type `textarea`) for text area fields.\n *  `CustomFieldContextDefaultValueLongText` (type `longtext`) for plain text paragraph fields.\n *  `CustomFieldContextDefaultValueReadOnly` (type `readonly`) for read only (text) fields.\n *  `CustomFieldContextDefaultValueMultipleVersion` (type `version.multiple`) for single choice version pickers.\n *  `CustomFieldContextDefaultValueSingleVersion` (type `version.single`) for multiple choice version pickers.\n\nForge custom fields [types](https://developer.atlassian.com/platform/forge/manifest-reference/modules/jira-custom-field-type/#data-types) are also supported, returning:\n\n *  `CustomFieldContextDefaultValueForgeStringFieldBean` (type `forge.string`) for Forge string fields.\n *  `CustomFieldContextDefaultValueForgeMultiStringFieldBean` (type `forge.string.list`) for Forge string collection fields.\n *  `CustomFieldContextDefaultValueForgeObjectFieldBean` (type `forge.object`) for Forge object fields.\n *  `CustomFieldContextDefaultValueForgeDateTimeFieldBean` (type `forge.datetime`) for Forge date-time fields.\n *  `CustomFieldContextDefaultValueForgeGroupFieldBean` (type `forge.group`) for Forge group fields.\n *  `CustomFieldContextDefaultValueForgeMultiGroupFieldBean` (type `forge.group.list`) for Forge group collection fields.\n *  `CustomFieldContextDefaultValueForgeNumberFieldBean` (type `forge.number`) for Forge number fields.\n *  `CustomFieldContextDefaultValueForgeUserFieldBean` (type `forge.user`) for Forge user fields.\n *  `CustomFieldContextDefaultValueForgeMultiUserFieldBean` (type `forge.user.list`) for Forge user collection fields.\n\nOnly one type of default object can be included in a request. To remove a default for a context, set the default parameter to `null`.\n\n**Deprecated:** This API is deprecated and will be removed in October 2026. A replacement API that supports multiple default values per issue type within a context is coming soon. See the deprecation notice [CHANGE-3082](https://developer.atlassian.com/cloud/jira/platform/changelog/#CHANGE-3082) for more details.\n\n**[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).",
         "operationId": "setDefaultValues",
         "parameters": [
           {
@@ -41293,6 +41408,355 @@
         "security": [{ "basicAuth": [] }, { "OAuth2": ["write:jira-work"] }],
         "summary": "Trash plan",
         "tags": ["Plans"],
+        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": true }],
+        "x-experimental": true,
+        "x-atlassian-connect-scope": "INACCESSIBLE"
+      }
+    },
+    "/rest/api/3/policies": {
+      "get": {
+        "deprecated": false,
+        "description": "Returns a paginated summary of all known policies, including their names, descriptions, and which projects each policy is assigned to.\n\nResults are paginated using the standard startAt, maxResults, total, isLast and values fields.",
+        "operationId": "listPolicies",
+        "parameters": [
+          {
+            "description": "the index of the first item to return (0-based, default 0)",
+            "in": "query",
+            "name": "startAt",
+            "schema": { "default": 0, "format": "int64", "type": "integer" }
+          },
+          {
+            "description": "the maximum number of items to return per page (default 50, max 200)",
+            "in": "query",
+            "name": "maxResults",
+            "schema": { "default": 50, "format": "int32", "type": "integer" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PolicySummaryResponse" } } },
+            "description": "200 response"
+          },
+          "401": {
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } },
+            "description": "401 response"
+          },
+          "403": {
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } },
+            "description": "403 response"
+          }
+        },
+        "security": [{ "basicAuth": [] }, { "OAuth2": ["manage:jira-configuration"] }],
+        "summary": "Get all policies",
+        "tags": ["Policies"],
+        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": true }],
+        "x-experimental": true,
+        "x-atlassian-connect-scope": "INACCESSIBLE"
+      }
+    },
+    "/rest/api/3/policies/project/{projectIdOrKey}": {
+      "get": {
+        "deprecated": false,
+        "description": "Returns the policies applied to a project.",
+        "operationId": "getPolicyState",
+        "parameters": [
+          {
+            "description": "project ID or project key",
+            "in": "path",
+            "name": "projectIdOrKey",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": { "items": { "$ref": "#/components/schemas/StatePolicyDocument" }, "type": "array" }
+              }
+            },
+            "description": "200 response"
+          },
+          "401": {
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } },
+            "description": "401 response"
+          },
+          "403": {
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } },
+            "description": "403 response"
+          },
+          "404": {
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } },
+            "description": "404 response"
+          }
+        },
+        "security": [{ "basicAuth": [] }, { "OAuth2": ["manage:jira-project"] }],
+        "summary": "Get project policy state",
+        "tags": ["Policies"],
+        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": true }],
+        "x-experimental": true,
+        "x-atlassian-connect-scope": "INACCESSIBLE"
+      }
+    },
+    "/rest/api/3/policies/project/{projectIdOrKey}/policies": {
+      "put": {
+        "deprecated": false,
+        "description": "Sets the complete set of policies on a project (full replacement).\n\nA project may have at most one policy assigned. Jira Admin only.",
+        "operationId": "setProjectPolicies",
+        "parameters": [
+          {
+            "description": "project ID or project key",
+            "in": "path",
+            "name": "projectIdOrKey",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SetProjectPoliciesRequest" } } },
+          "description": "the request containing the full set of policy IDs to assign",
+          "required": true
+        },
+        "responses": {
+          "200": { "content": { "application/json": { "schema": {} } }, "description": "200 response" },
+          "400": {
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } },
+            "description": "400 response"
+          },
+          "401": {
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } },
+            "description": "401 response"
+          },
+          "403": {
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } },
+            "description": "403 response"
+          },
+          "404": {
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } },
+            "description": "404 response"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": { "items": { "$ref": "#/components/schemas/PolicyApplicationViolation" }, "type": "array" }
+              }
+            },
+            "description": "409 response"
+          }
+        },
+        "security": [{ "basicAuth": [] }, { "OAuth2": ["manage:jira-project"] }],
+        "summary": "Set the policies applied to a project",
+        "tags": ["Policies"],
+        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": true }],
+        "x-experimental": true,
+        "x-atlassian-connect-scope": "INACCESSIBLE"
+      }
+    },
+    "/rest/api/3/policies/project/{projectIdOrKey}/rules": {
+      "get": {
+        "deprecated": false,
+        "description": "Returns the configuration of the queried rule type IDs for a given project.\n\nUse this to check whether specific rules are active on a project, and if so, how they are configured.\n\nOnly rules that are actually active on the project are returned. Rules that are not active are omitted from the response.",
+        "operationId": "getProjectRules",
+        "parameters": [
+          {
+            "description": "project ID or project key",
+            "in": "path",
+            "name": "projectIdOrKey",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "description": "the set of rule type IDs to query",
+            "in": "query",
+            "name": "ruleTypeIds",
+            "schema": { "items": { "type": "string" }, "type": "array", "uniqueItems": true }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": { "items": { "$ref": "#/components/schemas/StatePolicyRule" }, "type": "array" }
+              }
+            },
+            "description": "200 response"
+          },
+          "401": {
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } },
+            "description": "401 response"
+          },
+          "403": {
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } },
+            "description": "403 response"
+          },
+          "404": {
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } },
+            "description": "404 response"
+          }
+        },
+        "security": [{ "basicAuth": [] }, { "OAuth2": ["manage:jira-project"] }],
+        "summary": "Get project policy rules",
+        "tags": ["Policies"],
+        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": true }],
+        "x-experimental": true,
+        "x-atlassian-connect-scope": "INACCESSIBLE"
+      }
+    },
+    "/rest/api/3/policies/project/{projectIdOrKey}/validate": {
+      "post": {
+        "deprecated": false,
+        "description": "Validates whether a set of policies can be applied to a project without actually applying them.\n\nRuns the compliance checks for each specified policy against the project's current configuration. This can be called before applying policies to preview potential issues. Jira Admin only.",
+        "operationId": "validatePolicyApplication",
+        "parameters": [
+          {
+            "description": "project ID or project key",
+            "in": "path",
+            "name": "projectIdOrKey",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ValidatePolicyRequest" } } },
+          "description": "the validation request containing policy IDs to check",
+          "required": true
+        },
+        "responses": {
+          "200": { "content": { "application/json": { "schema": {} } }, "description": "200 response" },
+          "400": {
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } },
+            "description": "400 response"
+          },
+          "401": {
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } },
+            "description": "401 response"
+          },
+          "403": {
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } },
+            "description": "403 response"
+          },
+          "404": {
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } },
+            "description": "404 response"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": { "items": { "$ref": "#/components/schemas/PolicyApplicationViolation" }, "type": "array" }
+              }
+            },
+            "description": "409 response"
+          }
+        },
+        "security": [{ "basicAuth": [] }, { "OAuth2": ["manage:jira-project"] }],
+        "summary": "Validate policy application to a project",
+        "tags": ["Policies"],
+        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": true }],
+        "x-experimental": true,
+        "x-atlassian-connect-scope": "INACCESSIBLE"
+      }
+    },
+    "/rest/api/3/policies/{policyId}/apply": {
+      "post": {
+        "deprecated": false,
+        "description": "Adds a policy to a set of projects. Handles partial results: each project is processed independently, and failures on individual projects do not prevent the operation from proceeding on the remaining projects.\n\nJira Admin only. Returns 200 with the successful and failed project results if at least one project succeeds, or 409 if none do.",
+        "operationId": "addPolicyToProjects",
+        "parameters": [
+          {
+            "description": "the policy ID to add",
+            "in": "path",
+            "name": "policyId",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BulkProjectPolicyRequest" } } },
+          "description": "the request containing the list of project IDs",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/BulkPolicyOperationResponse" } }
+            },
+            "description": "200 response"
+          },
+          "401": {
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } },
+            "description": "401 response"
+          },
+          "403": {
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } },
+            "description": "403 response"
+          },
+          "404": {
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } },
+            "description": "404 response"
+          },
+          "409": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/BulkPolicyOperationResponse" } }
+            },
+            "description": "409 response"
+          }
+        },
+        "security": [{ "basicAuth": [] }, { "OAuth2": ["manage:jira-configuration"] }],
+        "summary": "Apply a policy to projects",
+        "tags": ["Policies"],
+        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": true }],
+        "x-experimental": true,
+        "x-atlassian-connect-scope": "INACCESSIBLE"
+      }
+    },
+    "/rest/api/3/policies/{policyId}/remove": {
+      "post": {
+        "deprecated": false,
+        "description": "Removes a policy from a set of projects. Handles partial results: each project is processed independently, and failures on individual projects do not prevent the operation from proceeding on the remaining projects.\n\nJira Admin only. Returns 200 with the successful and failed project results if at least one project succeeds, or 409 if none do.",
+        "operationId": "removePolicyFromProjects",
+        "parameters": [
+          {
+            "description": "the policy ID to remove",
+            "in": "path",
+            "name": "policyId",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BulkProjectPolicyRequest" } } },
+          "description": "the request containing the list of project IDs",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/BulkPolicyOperationResponse" } }
+            },
+            "description": "200 response"
+          },
+          "401": {
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } },
+            "description": "401 response"
+          },
+          "403": {
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } },
+            "description": "403 response"
+          },
+          "404": {
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } },
+            "description": "404 response"
+          },
+          "409": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/BulkPolicyOperationResponse" } }
+            },
+            "description": "409 response"
+          }
+        },
+        "security": [{ "basicAuth": [] }, { "OAuth2": ["manage:jira-configuration"] }],
+        "summary": "Remove a policy from projects",
+        "tags": ["Policies"],
         "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": true }],
         "x-experimental": true,
         "x-atlassian-connect-scope": "INACCESSIBLE"
@@ -56888,6 +57352,10 @@
     {
       "description": "This resource represents plans. Use it to get, create, duplicate, update, trash and archive plans.",
       "name": "Plans"
+    },
+    {
+      "description": "This resource represents policies. Use it to get, create, update, and delete policies, to apply them to and remove them from projects, and to inspect the policies and rules that apply to a project.",
+      "name": "Policies"
     },
     {
       "description": "This resource represents issue priority schemes. Use it to get priority schemes and related information, and to create, update and delete priority schemes.",
