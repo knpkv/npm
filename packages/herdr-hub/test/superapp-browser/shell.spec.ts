@@ -113,7 +113,10 @@ for (const reducedMotion of ["no-preference", "reduce"] satisfies ReadonlyArray<
     const opener = moreOpener(page)
     await opener.click()
     const more = page.getByRole("dialog", { name: "More", exact: true })
-    await expect(more.getByRole("navigation", { name: "More modules" }).getByRole("link")).toHaveCount(0)
+    // Only modules outside the phone bar are listed: Host resources is the one such module.
+    const moreModules = more.getByRole("navigation", { name: "More modules" })
+    await expect(moreModules.getByRole("link")).toHaveCount(1)
+    await expect(moreModules.getByRole("link", { name: /^Host resources/ })).toBeVisible()
     await expect(more.getByText("Appearance", { exact: true })).toHaveCount(0)
     await expect(more.getByRole("button", { name: /^Host access/ })).toBeVisible()
     await expect(more.getByRole("button", { name: /^Notifications/ })).toBeVisible()
@@ -1255,4 +1258,57 @@ test("standalone URL-selected stage close replaces its selectors before Back", a
   await page.goBack()
   expect(new URL(page.url()).hash).toBe("#fleet/work")
   await expect(page.getByRole("dialog")).toHaveCount(0)
+})
+
+/**
+ * The Usage Limits design places every sidebar row at the same glyph column: 19px glyphs for primary modules,
+ * 17px for secondary modules and Settings, a 12px gap to the label, and the Relay wordmark as its own line box.
+ * Host resources draws the design's `host` chip glyph.
+ */
+test("sidebar rows, Settings and the wordmark follow the design geometry", async ({ page }, info) => {
+  test.skip(info.project.name !== "desktop", "Desktop sidebar")
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await page.goto("/#fleet/approvals")
+  await page.evaluate(() => document.fonts.ready)
+  const sidebar = page.locator(".superapp-sidebar")
+  await expect(sidebar.getByRole("link", { name: "Host resources" })).toBeVisible()
+  const geometry = await sidebar.evaluate((element) => {
+    const box = (node: Element | Range | null | undefined) => {
+      const rect = node?.getBoundingClientRect()
+      return rect === undefined ? null : { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+    }
+    const label = (row: Element) => {
+      const range = document.createRange()
+      const text = [...row.childNodes].find((node) => (node.textContent ?? "").trim() !== "" && node.nodeName !== "svg")
+      if (text === undefined) return null
+      range.selectNodeContents(text)
+      return box(range)
+    }
+    const rows = [...element.querySelectorAll(".superapp-module-nav > a, .superapp-settings")].map((row) => ({
+      name: (row.querySelector(":scope > span") ?? row).textContent?.trim() ?? "",
+      secondary: row.hasAttribute("data-secondary") || row.classList.contains("superapp-settings"),
+      glyph: box(row.querySelector("svg")),
+      label: label(row)
+    }))
+    const resources = element.querySelector("a[aria-label=\"Host resources\"] svg path")?.getAttribute("d")
+    return { rows, resources, wordmark: box(element.querySelector(".superapp-sidebar-brand strong")) }
+  })
+  expect(geometry.rows.map((row) => row.name)).toEqual([
+    "Connect",
+    "Fleet",
+    "Code",
+    "Usage",
+    "Host resources",
+    "Settings"
+  ])
+  for (const row of geometry.rows) {
+    const size = row.secondary ? 17 : 19
+    expect(row.glyph, row.name).toMatchObject({ width: size, height: size })
+    expect(row.glyph?.x, row.name).toBeCloseTo(27.2, 1)
+    expect(row.label?.x, row.name).toBeCloseTo(27.2 + size + 12, 1)
+  }
+  expect(geometry.resources).toBe("M6 6h12v12H6zM10 10h4v4h-4zM9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4")
+  expect(geometry.wordmark?.x).toBeCloseTo(65.6, 1)
+  expect(geometry.wordmark?.y).toBeCloseTo(31.52, 1)
+  expect(geometry.wordmark?.height).toBeCloseTo(24.96, 1)
 })
