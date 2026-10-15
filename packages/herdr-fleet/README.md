@@ -33,12 +33,20 @@ only while working; CI and review can remain pending after the agent is idle
 or done. Without such evidence, those lifecycle states map to `idle` and `done`.
 Unsupported states or absent evidence are `unknown`.
 
-The host adapter currently supplies decoded Herdr lifecycle state only. It does
-not yet read provider session tools, command outcomes, or branch-linked Work/CI
-and review state. Working agents therefore report `unknown` until those
-producers are connected. Directory names, terminal text, and work labels are
-never evidence. `AgentTaskFacts` is a host-private input contract, not an agent
-wire field; tool content and command arguments do not enter `AgentSummary`.
+The host adapter supplies decoded Herdr lifecycle state and bounded local
+session evidence for Claude and Codex. It matches existing Work PR observations
+to the agent's current Git origin and branch. Missing, unsupported, malformed,
+ambiguous, or unavailable evidence remains `unknown`. Directory names, terminal
+text, and work labels are never evidence. `AgentTaskFacts` is a host-private
+input contract, not an agent wire field; tool content, arguments, log paths,
+and PR details do not enter `AgentSummary`.
+
+Only direct supported tools and commands classify. Codex JavaScript
+orchestration wrappers remain unknown; their source is never parsed. A matching
+tool result ends running activity; structured test/build failure evidence can
+produce `failing`. CI/review facts use the existing local HTTP-owned Work view,
+with no new provider or peer fan-out. Hosts without those observations report
+unknown CI/review evidence. See the hub README for supported sources and bounds.
 
 The Fleet service shares one observation sequence across both endpoints. It
 publishes the first observation immediately, then requires the same candidate

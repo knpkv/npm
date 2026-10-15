@@ -4,6 +4,7 @@ import { Console, Effect, Path, Redacted, Scope } from "effect"
 import { readCodeHost } from "./code-module.js"
 import type { HostdOperationsCompositionError } from "./errors.js"
 import { startHttpServer } from "./http.js"
+import { copyTaskWorkRegistration } from "./internal/agent-task-work-source.js"
 import { fleetConfigPath } from "./internal/config-path.js"
 import { hasOutstandingWorkJob, noJobStore } from "./internal/outstanding-work-job.js"
 import { noStartedWorkerStore, startedWorker } from "./internal/started-worker.js"
@@ -53,13 +54,15 @@ export const makeHostdOperations = Effect.fn("Hostd.makeOperations")(function*(
   const defaultOperations = yield* makeHostOperations(config)
   if (composeOperations === undefined) return defaultOperations
   const fork: HostdLifetimeFork = (effect) => Effect.forkIn(effect, scope).pipe(Effect.asVoid)
-  return yield* composeOperations({
+  const composed = yield* composeOperations({
     config,
     defaultOperations,
     fork,
     hasOutstandingWorkJob: jobs === undefined ? noJobStore : hasOutstandingWorkJob(jobs),
     startedWorker: jobs === undefined ? noStartedWorkerStore : (jobId) => startedWorker(jobs, jobId)
   })
+  yield* copyTaskWorkRegistration(defaultOperations.listAgents, composed.listAgents)
+  return composed
 })
 
 /**
@@ -85,6 +88,7 @@ export const makeHostdProgram = Effect.fn("Hostd.makeProgram")(function*(
     operations,
     store
   })
+  yield* copyTaskWorkRegistration(operations.listAgents, service)
   const directory = paths.dirname(yield* paths.fromFileUrl(new URL(import.meta.url)))
   const assets = yield* loadUiAssets(directory)
   const relay = { directory: paths.join(config.stateDirectory, "relay") }

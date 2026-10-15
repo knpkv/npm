@@ -151,6 +151,7 @@ import { fontPreloadLink } from "./font-preload.js"
 import { readHostLimits, staleWhileRevalidate } from "./host-limits.js"
 import { makeHostResources } from "./host-resources.js"
 import { readHostUsage, usageCache } from "./host-usage.js"
+import { attachTaskWorkReader } from "./internal/agent-task-work-source.js"
 import { dashboardPage } from "./internal/dashboard-page.js"
 import { type ListenerMode, listenerServesWork } from "./internal/listener.js"
 import { decodeRelayPostRequest } from "./internal/relay-post-validation.js"
@@ -1943,6 +1944,11 @@ export const startHttpServer = async (
     const workStore = await httpRuntime.runPromise(WorkStore.open(statePath))
     finalizers.unshift(() => Promise.resolve().then(() => workStore.close()))
     const work = await httpRuntime.runPromise(makeWorkService(workStore))
+    const { close: detachTaskWork } = await httpRuntime.runPromise(attachTaskWorkReader(
+      service,
+      work.snapshots().pipe(Effect.map((snapshot) => snapshot.now))
+    ))
+    finalizers.unshift(() => httpRuntime.runPromise(detachTaskWork))
     // Relay's harness lives in this scope; closing the server closes it (and its store) before the stores
     // its capabilities read.
     const relayScope = await httpRuntime.runPromise(Scope.make())
