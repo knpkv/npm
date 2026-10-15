@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test"
-import { LONG_USAGE_HOST } from "./usage-fixture.js"
+import { limitsFixture, LONG_USAGE_HOST, usageFixture } from "./usage-fixture.js"
 
 /** By tool cannot retry a Limits read it does not own. */
 test("a retained Limits error has Retry only on the Limits page", async ({ page }) => {
@@ -411,3 +411,47 @@ test("By tool frames a retained range while updating, failing and retrying", asy
     release()
   }
 })
+
+/** The shell and empty header must share their structural breakpoint without introducing another grid column. */
+for (const width of [600, 640, 641]) {
+  test(`empty Limits stays in the shell column at ${width}px`, async ({ page }, info) => {
+    test.skip(info.project.name !== "desktop", "One responsive sweep")
+    await page.setViewportSize({ width, height: 900 })
+    await page.route(
+      /\/v1\/connect\/usage(\?|$)/,
+      (route) => route.fulfill({ json: usageFixture({ range: "7d", timeZone: "UTC" }, 1_000, "empty-readings") })
+    )
+    await page.route(
+      /\/v1\/connect\/limits(\?|$)/,
+      (route) => route.fulfill({ json: limitsFixture(1_000, "empty-readings") })
+    )
+    await page.goto("/?range=7d&timeZone=UTC#usage/limits")
+    await expect(page.locator(".usage-limits-empty")).toBeVisible()
+    await page.evaluate(() => document.fonts.ready)
+    const header = page.locator(".usage-empty-header-region")
+    await expect(header).toHaveCSS("grid-column-start", width <= 640 ? "1" : "2")
+    const geometry = await header.evaluate((element) => ({
+      header: element.getBoundingClientRect().toJSON(),
+      main: document.querySelector(".superapp-main")?.getBoundingClientRect().toJSON(),
+      scroll: document.documentElement.scrollWidth,
+      viewport: innerWidth
+    }))
+    expect(geometry.scroll).toBeLessThanOrEqual(geometry.viewport)
+    expect(geometry.main).toBeDefined()
+    expect(geometry.header.x).toBeCloseTo(geometry.main?.x ?? Infinity, 0)
+    expect(geometry.header.width).toBeCloseTo(geometry.main?.width ?? Infinity, 0)
+    if (width <= 640) {
+      await expect(page.locator(".usage-empty-titles")).toBeHidden()
+      await expect(page.locator(".superapp-bottom")).toBeVisible()
+    } else {
+      await expect(page.locator(".usage-empty-titles")).toBeVisible()
+      await expect(page.locator(".superapp-bottom")).toBeHidden()
+    }
+    await page.unroute(/\/v1\/connect\/usage(\?|$)/)
+    await page.unroute(/\/v1\/connect\/limits(\?|$)/)
+    await page.goto("/?range=7d&timeZone=UTC#usage/limits")
+    await expect(page.locator(".usage-limits-empty")).toHaveCount(0)
+    await expect(page.locator(".superapp-header")).toHaveCSS("grid-column-start", width <= 640 ? "1" : "2")
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
+  })
+}

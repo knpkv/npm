@@ -338,3 +338,31 @@ sample, not a fleet-wide estimate; lifecycle and Work signals remain independent
 On the full Code review page, retained-read failure, previous-reading time and any host-owned retry precede PR metadata. A retry for content alone sits in Diff. Read and focus ownership stay mounted across these placements; saved-history/comments failures keep their single workspace-owned retry.
 
 The default Code Review view attempts content reads for at most 20 files per reading, in order. Every changed-file row remains visible; later files use the existing aggregate display-limit notice. Narrowing the URL to a single file reads only that file, including files beyond the default limit.
+
+## Design conformance
+
+Usage › Limits is checked against the official export 63 in `design-refs/super-app/`.
+The fixture keeps only `data.usageLimits`, unchanged from that export. Its HTML,
+stylesheets, scripts and two font files are hashed; other super app screens are out
+of scope. Eight live states cover 390/1280 and light/dark. Successful empty Limits has no cards: it shows the designed notice and links to fleet token readings. Other states retain their existing presentation. The export's unknown-state
+reference stays designed, without inventing an application state or UI.
+
+Under the build/browser baton, run:
+
+```sh
+pnpm --filter @knpkv/design-conformance --filter '@knpkv/herdr-hub...' build
+pnpm design:check --product super-app
+```
+
+The adapter loads the built app and its independent state inventory from the supplied
+checkout. Only a checkout without the super app manifest may borrow the PR inventory. An
+onboarded checkout missing its built inventory fails with that path. A pre-onboarding
+base without the inventory logs
+`pre-inventory base: using PR inventory` while still rendering the base app.
+`seed` supplies fixture reads and state/theme identity before navigating the unchanged
+application route. No host, provider or agent-usage process runs. Region attributes
+in the shared Connect Usage view do not change its layout; Connect onboarding is separate.
+
+`legacy.until` is `2026-10-23T00:00:00.000Z`, seven days after the planned October 16 merge date.
+If the merge date changes, update it to that date plus seven days before merge.
+Drift stays in the report; no waivers are added.

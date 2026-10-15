@@ -13,7 +13,8 @@ packages/*/.design-sync/overrides/
 packages/*/.design-sync/previews/
 packages/*/.design-sync/fixtures/*.json
 
-# Frozen Design exports: source-manifest hashes validate their original bytes.
-design-refs/code-review/fixture.json
-design-refs/code-review/screens/
+# Bytes are hash-pinned design exports, reviewed in ref PRs.
+design-refs/*/screens/**
+design-refs/*/fixture.json
+# Frozen Design export revisions: source-manifest hashes validate their original bytes.
 design-refs/code-review/revisions/

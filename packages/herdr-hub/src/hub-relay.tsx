@@ -27,6 +27,7 @@ import {
 import { RelayLauncher, useRelayPresentation, useRelayShortcut, useRelaySummon } from "@knpkv/rly/patterns"
 import { Button, Text } from "@knpkv/rly/primitives"
 import { type ReactElement, useCallback, useRef, useState } from "react"
+import { createPortal } from "react-dom"
 import { RelayChefMark } from "./internal/relay-chef-mark.js"
 
 type RelayPhase = "idle" | "listening" | "thinking" | "answering" | "needs-you"
@@ -113,11 +114,14 @@ const useSpokenStatus = (
 
 /** Relay's launcher, status and panel for the masthead. */
 export const HubRelay = ({
+  announcementOutlet = null,
   launcherLabels,
   launcherMark = "creature",
   relay,
   terminalOwnsKeys
 }: {
+  /** Defaults to null, beside the launcher. A supplied shell outlet keeps the persistent live status outside the visual mast. */
+  readonly announcementOutlet?: HTMLElement | null
   readonly relay: HubRelayConversation
   /** The Connect tab shows: its terminal keeps Ctrl/⌘+J. */
   readonly terminalOwnsKeys: boolean
@@ -148,6 +152,15 @@ export const HubRelay = ({
   const spoken = useSpokenStatus(status, state.runIds)
   const phase = relayPhase(state, status, open && composerFocused)
   const avatar = <RelayAvatar phase={phase} />
+  const announcement = (
+    <>
+      {/* The status is announced here only while the panel is closed; once open, its transcript speaks. */}
+      <span aria-live="polite" className="fleet-shell-relay-live" role="status">
+        {/* Keyed by what is announced: a new run with the same words is a new node, so it is said again. */}
+        {open ? null : <span key={spoken.key}>{spoken.words}</span>}
+      </span>
+    </>
+  )
   return (
     <div className="fleet-shell-relay">
       <RelayLauncher
@@ -176,11 +189,7 @@ export const HubRelay = ({
           )}
         </span>
       )}
-      {/* The status is announced here only while the panel is closed; once open, its transcript speaks. */}
-      <span aria-live="polite" className="fleet-shell-relay-live" role="status">
-        {/* Keyed by what is announced: a new run with the same words is a new node, so it is said again. */}
-        {open ? null : <span key={spoken.key}>{spoken.words}</span>}
-      </span>
+      {announcementOutlet === null ? announcement : createPortal(announcement, announcementOutlet)}
       {open ? (
         <RelayConversationPanel
           avatar={avatar}

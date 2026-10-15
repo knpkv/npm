@@ -17,6 +17,8 @@ import { dashboardRefreshTime } from "./internal/dashboard-refresh.js"
 import { ShellIcon } from "./internal/shell-icon.js"
 import { RelayChefMark } from "./internal/relay-chef-mark.js"
 import { RelayChefMastMark } from "./internal/relay-chef-mast-mark.js"
+import { UsageEmptyChef } from "./internal/usage-empty-chef.js"
+import { UsageEmptyChromeContext } from "./internal/usage-empty-chrome.js"
 import { ShortcutsDialog, focusWhenShown, focusModulePage, isEditableTarget } from "./internal/shell-keys.js"
 import {
   canonicalModuleUrl,
@@ -210,6 +212,13 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
     [location.destination.module, location.destination.page]
   )
   const prefix = useRef<FleetShortcutPrefix>(null)
+  const [usageEmpty, setUsageEmpty] = useState(false)
+  const [usageAnnouncementOutlet, setUsageAnnouncementOutlet] = useState<HTMLElement | null>(null)
+  const [usageHeaderOutlet, setUsageHeaderOutlet] = useState<HTMLElement | null>(null)
+  const usageEmptyChrome = useMemo(
+    () => ({ host, headerOutlet: usageHeaderOutlet, setEmpty: setUsageEmpty }),
+    [host, usageHeaderOutlet]
+  )
   const header = useRef<HTMLElement>(null)
   const bottomBar = useRef<HTMLElement>(null)
   useLayoutEffect(() => {
@@ -482,253 +491,289 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
   const offBarModule =
     currentModule !== undefined && !mobileDescriptors.some((module) => module.id === currentModule.id)
   const terminalActive = terminalOwnsKeys && location.error === null && location.destination.module === "connect"
-  return (
-    <PortalProvider>
-      <div className="superapp-shell">
-        <header className="superapp-header" ref={header} hidden={terminalActive} inert={terminalActive}>
-          <a
-            className="superapp-brand"
-            href={moduleHref(landingModule, landing.page)}
-            aria-label="Relay home"
-            title="Home"
-          >
-            <RelayChefMastMark />
-          </a>
-          <strong className="superapp-phone-title" aria-hidden="true">
-            {location.error === null ? currentModule?.label : "Page not found"}
-            {currentPage?.showInPhoneTitle === true ? <span> {currentPage.label}</span> : null}
-          </strong>
-          {relay === undefined ? null : (
-            <HubRelay
-              relay={relay}
-              launcherLabels={{ desktop: "Ask Relay", phone: "Ask Relay" }}
-              launcherMark="chef"
-              terminalOwnsKeys={
-                location.error === null &&
-                ((location.destination.module === "connect" && terminalOwnsKeys) ||
-                  (location.destination.module === "fleet" && location.destination.page === "connect"))
-              }
-            />
-          )}
-          <nav aria-label="Current page" className="superapp-breadcrumb" data-route-found={location.error === null}>
-            <span className="superapp-breadcrumb-root">Relay</span>
-            <span aria-hidden="true" className="superapp-breadcrumb-root">
-              /
+  const emptyActive =
+    usageEmpty &&
+    location.error === null &&
+    location.destination.module === "usage" &&
+    location.destination.page === "limits"
+  const relayElement =
+    relay === undefined ? null : (
+      <HubRelay
+        key="relay"
+        announcementOutlet={emptyActive ? usageAnnouncementOutlet : null}
+        relay={relay}
+        launcherLabels={{ desktop: "Ask Relay", phone: "Ask Relay" }}
+        launcherMark="chef"
+        terminalOwnsKeys={
+          location.error === null &&
+          ((location.destination.module === "connect" && terminalOwnsKeys) ||
+            (location.destination.module === "fleet" && location.destination.page === "connect"))
+        }
+      />
+    )
+  const headerElement = (
+    <header
+      className="superapp-header"
+      ref={header}
+      hidden={terminalActive}
+      inert={terminalActive}
+      data-region={emptyActive ? undefined : "header"}
+    >
+      <a className="superapp-brand" href={moduleHref(landingModule, landing.page)} aria-label="Relay home" title="Home">
+        {emptyActive ? <UsageEmptyChef /> : <RelayChefMastMark />}
+      </a>
+      <strong className="superapp-phone-title" aria-hidden="true">
+        {location.error === null ? currentModule?.label : "Page not found"}
+        {currentPage?.showInPhoneTitle === true ? <span> {currentPage.label}</span> : null}
+      </strong>
+      {emptyActive ? null : relayElement}
+      <nav aria-label="Current page" className="superapp-breadcrumb" data-route-found={location.error === null}>
+        <span className="superapp-breadcrumb-root">Relay</span>
+        <span aria-hidden="true" className="superapp-breadcrumb-root">
+          /
+        </span>
+        {location.error === null ? (
+          <>
+            {currentModule === undefined || currentModule.pages.length === 1 ? null : (
+              <a href={moduleHref(currentModule, currentModule.defaultPage)} title={currentModule.label}>
+                <span>{currentModule.label}</span>
+              </a>
+            )}
+            {currentModule === undefined || currentModule.pages.length === 1 ? null : <span aria-hidden="true">/</span>}
+            <span aria-current="page" title={currentPage?.label}>
+              <bdi dir="ltr">{currentPage?.label}</bdi>
             </span>
-            {location.error === null ? (
+          </>
+        ) : (
+          <span>Page not found</span>
+        )}
+      </nav>
+      <button
+        type="button"
+        aria-label={`${hostLabel}: ${host}`}
+        className="superapp-control superapp-host"
+        onClick={() => openPanel("hosts")}
+      >
+        <ShellIcon name="host" />
+        <span>{hostLabel}</span>
+      </button>
+      <button
+        type="button"
+        className="superapp-control superapp-notifications"
+        onClick={() => openPanel("notifications")}
+        aria-label="Notifications"
+      >
+        <ShellIcon name="notifications" />
+      </button>
+      {emptyActive ? relayElement : null}
+    </header>
+  )
+  const sidebarElement = (
+    <nav
+      aria-label="Modules"
+      key="sidebar"
+      className="superapp-sidebar"
+      hidden={terminalActive}
+      inert={terminalActive}
+      data-region={emptyActive ? undefined : "nav"}
+    >
+      <a
+        className="superapp-sidebar-brand"
+        href={moduleHref(landingModule, landing.page)}
+        aria-label="Relay home"
+        title="Home"
+      >
+        <RelayChefMark />
+        <div>
+          <strong>Relay</strong>
+        </div>
+      </a>
+      <div className="superapp-module-nav" data-region={emptyActive ? "nav" : undefined}>
+        {primaryDescriptors.map(moduleLink)}
+        {secondaryDescriptors.length === 0 ? null : <span className="superapp-nav-divider" role="separator" />}
+        {secondaryDescriptors.map(moduleLink)}
+      </div>
+      <button
+        type="button"
+        className="superapp-control superapp-settings"
+        aria-haspopup="dialog"
+        aria-expanded={panel.open && panel.page === "modules"}
+        onClick={() => openPanel("modules")}
+      >
+        <ShellIcon name="host" /> Settings
+      </button>
+      <div className="superapp-session" data-state={session.connection}>
+        <span className="superapp-session-avatar" aria-hidden="true">
+          <ShellIcon name="host" />
+        </span>
+        <span aria-hidden="true">
+          Session on {host}
+          <small>
+            {session.connection === "connected" ? (
+              session.access === "loopback" ? (
+                "Local access"
+              ) : (
+                "Tailscale access"
+              )
+            ) : session.connection === "stale" ? (
               <>
-                {currentModule === undefined || currentModule.pages.length === 1 ? null : (
-                  <a href={moduleHref(currentModule, currentModule.defaultPage)} title={currentModule.label}>
-                    <span>{currentModule.label}</span>
-                  </a>
-                )}
-                {currentModule === undefined || currentModule.pages.length === 1 ? null : (
-                  <span aria-hidden="true">/</span>
-                )}
-                <span aria-current="page" title={currentPage?.label}>
-                  <bdi dir="ltr">{currentPage?.label}</bdi>
-                </span>
+                Reconnecting, last seen{" "}
+                <time dateTime={new Date(session.observedAt).toISOString()}>
+                  {dashboardRefreshTime(session.observedAt)}
+                </time>
               </>
             ) : (
-              <span>Page not found</span>
+              "Hub not reachable"
             )}
-          </nav>
-          <button
-            type="button"
-            aria-label={`${hostLabel}: ${host}`}
-            className="superapp-control superapp-host"
-            onClick={() => openPanel("hosts")}
-          >
-            <ShellIcon name="host" />
-            <span>{hostLabel}</span>
-          </button>
-          <button
-            type="button"
-            className="superapp-control superapp-notifications"
-            onClick={() => openPanel("notifications")}
-            aria-label="Notifications"
-          >
-            <ShellIcon name="notifications" />
-          </button>
-        </header>
-        <nav aria-label="Modules" className="superapp-sidebar" hidden={terminalActive} inert={terminalActive}>
-          <a
-            className="superapp-sidebar-brand"
-            href={moduleHref(landingModule, landing.page)}
-            aria-label="Relay home"
-            title="Home"
-          >
-            <RelayChefMark />
-            <div>
-              <strong>Relay</strong>
-            </div>
-          </a>
-          <div className="superapp-module-nav">
-            {primaryDescriptors.map(moduleLink)}
-            {secondaryDescriptors.length === 0 ? null : <span className="superapp-nav-divider" role="separator" />}
-            {secondaryDescriptors.map(moduleLink)}
-          </div>
-          <button
-            type="button"
-            className="superapp-control superapp-settings"
-            aria-haspopup="dialog"
-            aria-expanded={panel.open && panel.page === "modules"}
-            onClick={() => openPanel("modules")}
-          >
-            <ShellIcon name="host" /> Settings
-          </button>
-          <div className="superapp-session" data-state={session.connection}>
-            <span className="superapp-session-avatar" aria-hidden="true">
-              <ShellIcon name="host" />
-            </span>
-            <span aria-hidden="true">
-              Session on {host}
-              <small>
-                {session.connection === "connected" ? (
-                  session.access === "loopback" ? (
-                    "Local access"
-                  ) : (
-                    "Tailscale access"
-                  )
-                ) : session.connection === "stale" ? (
-                  <>
-                    Reconnecting, last seen{" "}
-                    <time dateTime={new Date(session.observedAt).toISOString()}>
-                      {dashboardRefreshTime(session.observedAt)}
-                    </time>
-                  </>
-                ) : (
-                  "Hub not reachable"
-                )}
-              </small>
-            </span>
-            <span className="superapp-session-announcement">
-              Session on {host}.{" "}
-              {session.connection === "connected"
-                ? `${session.access === "loopback" ? "Local access" : "Tailscale access"}, connected.`
-                : session.connection === "stale"
-                  ? `Reconnecting; last seen ${dashboardRefreshTime(session.observedAt)}.`
-                  : "Hub not reachable."}
-            </span>
-            {session.connection === "connected" ? (
-              <span className="superapp-session-online" data-state="connected" aria-hidden="true" />
-            ) : null}
-          </div>
-        </nav>
-        <main className="superapp-main" id="main" tabIndex={-1}>
-          {location.error === null ? null : (
-            <StatePanel
-              announce="assertive"
-              className="superapp-not-found"
-              title="This page doesn't exist in Relay."
-              description={
-                <>
-                  Nothing is registered at <code>{location.error}</code>.
-                </>
-              }
-              action={<a href={moduleHref(landingModule, landing.page)}>Back to {landingModule.label}</a>}
-            />
-          )}
-          {modules.map((view) => (
-            <ModuleSlot
-              key={view.descriptor.id}
-              view={view}
-              location={location}
-              navigate={navigate}
-              closeSelection={closeSelection}
-              openHostAccess={() => openPanel("hosts")}
-            />
-          ))}
-        </main>
-        <nav
-          aria-label="Mobile modules"
-          className="superapp-bottom"
-          ref={bottomBar}
-          hidden={terminalActive}
-          inert={terminalActive}
-        >
-          {mobileDescriptors.map(moduleLink)}
-          <button
-            type="button"
-            className="superapp-control"
-            aria-current={offBarModule ? "page" : undefined}
-            aria-expanded={panel.open && panel.page === "modules"}
-            aria-label={offBarModule ? `More, current module ${currentModule.label}` : undefined}
-            onClick={() => openPanel("modules")}
-          >
-            <ShellIcon name="modules" /> <span>More</span>
-          </button>
-        </nav>
-        <Dialog.Root
-          open={panel.open}
-          onOpenChange={(open) => {
-            if (!open) closePanel()
-          }}
-        >
-          <Dialog.Content
-            title={panel.page === "modules" ? "More" : panel.page === "hosts" ? "Hosts" : "Notifications"}
-            className="superapp-dialog"
-            restoreFocus={restorePanelFocus}
-          >
-            <span aria-hidden="true" className="superapp-dialog-title-icon">
-              <ShellIcon
-                name={panel.page === "modules" ? "modules" : panel.page === "hosts" ? "host" : "notifications"}
-              />
-            </span>
-            {panel.page === "modules" ? (
-              <div className="superapp-more">
-                <nav aria-label="More modules">
-                  {descriptors
-                    .filter((module) => !mobileDescriptors.includes(module))
-                    .map((module) => (
-                      <a
-                        key={module.id}
-                        href={moduleHref(module, module.defaultPage)}
-                        aria-current={
-                          location.error === null && module.id === location.destination.module ? "page" : undefined
-                        }
-                      >
-                        {modules.find((view) => view.descriptor.id === module.id)?.navigationIcon ?? (
-                          <ShellIcon name={module.id === "fleet" ? "fleet" : "modules"} />
-                        )}
-                        <span>
-                          <strong>{module.label}</strong>
-                          <small>{module.pages.map((page) => page.label).join(", ")}</small>
-                        </span>
-                      </a>
-                    ))}
-                </nav>
-                <section aria-labelledby="superapp-settings-heading">
-                  <h3 id="superapp-settings-heading">Settings</h3>
-                  <button type="button" onClick={() => openPanel("hosts")}>
-                    <span>Host access</span>
-                    <small>{hostLabel}</small>
-                  </button>
-                  <button type="button" onClick={() => openPanel("notifications")}>
-                    <span>Notifications</span>
-                    <small>Approvals and blocked agents</small>
-                  </button>
-                </section>
-              </div>
-            ) : panel.page === "hosts" ? (
-              <p>
-                {host}. {hostLabel}.
-              </p>
-            ) : (
-              notifications
-            )}
-            <IconButton
-              className="superapp-dialog-close"
-              icon="close"
-              label="Close"
-              onClick={closePanel}
-              size="default"
-              variant="quiet"
-            />
-          </Dialog.Content>
-        </Dialog.Root>
-        <ShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} restoreFocus={restoreShortcutsFocus} />
+          </small>
+        </span>
+        <span className="superapp-session-announcement">
+          Session on {host}.{" "}
+          {session.connection === "connected"
+            ? `${session.access === "loopback" ? "Local access" : "Tailscale access"}, connected.`
+            : session.connection === "stale"
+              ? `Reconnecting; last seen ${dashboardRefreshTime(session.observedAt)}.`
+              : "Hub not reachable."}
+        </span>
+        {session.connection === "connected" ? (
+          <span className="superapp-session-online" data-state="connected" aria-hidden="true" />
+        ) : null}
       </div>
-    </PortalProvider>
+    </nav>
+  )
+  return (
+    <UsageEmptyChromeContext.Provider value={usageEmptyChrome}>
+      <PortalProvider>
+        <div className="superapp-shell" data-usage-empty={emptyActive ? "true" : undefined}>
+          {emptyActive ? <div className="usage-empty-announcements" ref={setUsageAnnouncementOutlet} /> : null}
+          {emptyActive ? sidebarElement : null}
+          <div
+            key="header"
+            className={emptyActive ? "usage-empty-header-region" : "superapp-header-region"}
+            data-region={emptyActive ? "header" : undefined}
+            hidden={terminalActive}
+            inert={terminalActive}
+          >
+            {headerElement}
+            {emptyActive ? <div className="usage-empty-header-outlet" ref={setUsageHeaderOutlet} /> : null}
+          </div>
+          {emptyActive ? null : sidebarElement}
+          <main className="superapp-main" id="main" tabIndex={-1}>
+            {location.error === null ? null : (
+              <StatePanel
+                announce="assertive"
+                className="superapp-not-found"
+                title="This page doesn't exist in Relay."
+                description={
+                  <>
+                    Nothing is registered at <code>{location.error}</code>.
+                  </>
+                }
+                action={<a href={moduleHref(landingModule, landing.page)}>Back to {landingModule.label}</a>}
+              />
+            )}
+            {modules.map((view) => (
+              <ModuleSlot
+                key={view.descriptor.id}
+                view={view}
+                location={location}
+                navigate={navigate}
+                closeSelection={closeSelection}
+                openHostAccess={() => openPanel("hosts")}
+              />
+            ))}
+          </main>
+          <nav
+            aria-label="Mobile modules"
+            className="superapp-bottom"
+            ref={bottomBar}
+            data-region="nav"
+            hidden={terminalActive}
+            inert={terminalActive}
+          >
+            {mobileDescriptors.map(moduleLink)}
+            <button
+              type="button"
+              className="superapp-control"
+              aria-current={offBarModule ? "page" : undefined}
+              aria-expanded={panel.open && panel.page === "modules"}
+              aria-label={offBarModule ? `More, current module ${currentModule.label}` : undefined}
+              onClick={() => openPanel("modules")}
+            >
+              <ShellIcon name="modules" /> <span>More</span>
+            </button>
+          </nav>
+          <Dialog.Root
+            open={panel.open}
+            onOpenChange={(open) => {
+              if (!open) closePanel()
+            }}
+          >
+            <Dialog.Content
+              title={panel.page === "modules" ? "More" : panel.page === "hosts" ? "Hosts" : "Notifications"}
+              className="superapp-dialog"
+              restoreFocus={restorePanelFocus}
+            >
+              <span aria-hidden="true" className="superapp-dialog-title-icon">
+                <ShellIcon
+                  name={panel.page === "modules" ? "modules" : panel.page === "hosts" ? "host" : "notifications"}
+                />
+              </span>
+              {panel.page === "modules" ? (
+                <div className="superapp-more">
+                  <nav aria-label="More modules">
+                    {descriptors
+                      .filter((module) => !mobileDescriptors.includes(module))
+                      .map((module) => (
+                        <a
+                          key={module.id}
+                          href={moduleHref(module, module.defaultPage)}
+                          aria-current={
+                            location.error === null && module.id === location.destination.module ? "page" : undefined
+                          }
+                        >
+                          {modules.find((view) => view.descriptor.id === module.id)?.navigationIcon ?? (
+                            <ShellIcon name={module.id === "fleet" ? "fleet" : "modules"} />
+                          )}
+                          <span>
+                            <strong>{module.label}</strong>
+                            <small>{module.pages.map((page) => page.label).join(", ")}</small>
+                          </span>
+                        </a>
+                      ))}
+                  </nav>
+                  <section aria-labelledby="superapp-settings-heading">
+                    <h3 id="superapp-settings-heading">Settings</h3>
+                    <button type="button" onClick={() => openPanel("hosts")}>
+                      <span>Host access</span>
+                      <small>{hostLabel}</small>
+                    </button>
+                    <button type="button" onClick={() => openPanel("notifications")}>
+                      <span>Notifications</span>
+                      <small>Approvals and blocked agents</small>
+                    </button>
+                  </section>
+                </div>
+              ) : panel.page === "hosts" ? (
+                <p>
+                  {host}. {hostLabel}.
+                </p>
+              ) : (
+                notifications
+              )}
+              <IconButton
+                className="superapp-dialog-close"
+                icon="close"
+                label="Close"
+                onClick={closePanel}
+                size="default"
+                variant="quiet"
+              />
+            </Dialog.Content>
+          </Dialog.Root>
+          <ShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} restoreFocus={restoreShortcutsFocus} />
+        </div>
+      </PortalProvider>
+    </UsageEmptyChromeContext.Provider>
   )
 }

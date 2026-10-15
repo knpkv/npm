@@ -2,6 +2,12 @@
 
 Released as `@knpkv/herdr-approvals` up to 0.18.0; the headings below are that package's history.
 
+## 0.40.2
+
+### Patch Changes
+
+- [#940](https://github.com/knpkv/npm/pull/940) [`cbd2334`](https://github.com/knpkv/npm/commit/cbd2334f7c31866ca3384eacda6374500f008c1b) Thanks [@konopkov](https://github.com/konopkov)! - Align the Relay sidebar with its design: rows start on one glyph column with 17px glyphs for secondary modules and Settings, Settings uses the row gap, the wordmark keeps its own line box, and Host resources draws the design's chip glyph.
+
 ## 0.40.1
 
 ### Patch Changes

@@ -1,0 +1,128 @@
+{
+  "version": 1,
+  "product": "super-app",
+  "fixture": "fixture.json",
+  "live": {
+    "package": "@knpkv/herdr-hub",
+    "adapter": "packages/herdr-hub/scripts/design-conformance.ts"
+  },
+  "enforcement": {
+    "touched": "required",
+    "legacy": {
+      "mode": "report-only",
+      "until": "2026-10-23T00:00:00.000Z"
+    }
+  },
+  "files": {
+    "fixture.json": "7122b4e6dbeb92558d057af00810cb5c5343858e06c4ddfe95ca7c28526f7d1c",
+    "screens/usage-limits.html": "02bbbdd7d08575b17b8d4d603fdac465247e6ebcdb59a392a8bd4cea03c45c31",
+    "screens/rly.css": "35e7a411e4fb4a422ebdaa33ef63e6d3a1480a5e8d30389d2b035025e636b1c6",
+    "screens/chrome.css": "7a718ea0e12987880ca3bad6fe9de6810a49140ed72d80d311130269b583801d",
+    "screens/relay-chef-modern.js": "f4f5051e6b8a3d0a365c2d042a1adba7f1e14c425825ca9e3ffc455e27bdcd47",
+    "screens/relay-creature-states.js": "808e8412c89fbe773d45e6fb544608932d69431b6cffdedc14cc253405cb5ac6",
+    "screens/relay-screen-art.js": "c960ceaeda73bbc64e5fa429a38cbfa34f0cfb0010cb236f5a827b3fd9c518ac",
+    "screens/fonts/geist-variable.woff2": "19f9c92546aa300c312235e3125af1b81394d8db9a4bc4a425cd5b641d2d54e1",
+    "screens/fonts/geist-mono-variable.woff2": "684ad5b531f81d43c1e8c7038262d5db7cdc1f68006e04d6c7769efa8d33c8cc"
+  },
+  "states": [
+    {
+      "screen": "usage-limits",
+      "state": "populated",
+      "route": "/?range=7d&timeZone=UTC#usage/limits",
+      "viewports": [390, 1280],
+      "themes": ["light", "dark"],
+      "status": "implemented",
+      "regions": ["nav", "header", "tabs", "summary", "cards", "detail", "footer"],
+      "source": "html",
+      "ref": "screens/usage-limits.html"
+    },
+    {
+      "screen": "usage-limits",
+      "state": "near-limit",
+      "route": "/?range=7d&timeZone=UTC#usage/limits",
+      "viewports": [390, 1280],
+      "themes": ["light", "dark"],
+      "status": "implemented",
+      "regions": ["nav", "header", "tabs", "summary", "cards", "detail", "footer"],
+      "source": "html",
+      "ref": "screens/usage-limits.html"
+    },
+    {
+      "screen": "usage-limits",
+      "state": "limit-reached",
+      "route": "/?range=7d&timeZone=UTC#usage/limits",
+      "viewports": [390, 1280],
+      "themes": ["light", "dark"],
+      "status": "implemented",
+      "regions": ["nav", "header", "tabs", "summary", "cards", "detail", "footer"],
+      "source": "html",
+      "ref": "screens/usage-limits.html"
+    },
+    {
+      "screen": "usage-limits",
+      "state": "stale",
+      "route": "/?range=7d&timeZone=UTC#usage/limits",
+      "viewports": [390, 1280],
+      "themes": ["light", "dark"],
+      "status": "implemented",
+      "regions": ["nav", "header", "tabs", "notice", "summary", "cards", "detail", "footer"],
+      "source": "html",
+      "ref": "screens/usage-limits.html"
+    },
+    {
+      "screen": "usage-limits",
+      "state": "sign-in-required",
+      "route": "/?range=7d&timeZone=UTC#usage/limits",
+      "viewports": [390, 1280],
+      "themes": ["light", "dark"],
+      "status": "implemented",
+      "regions": ["nav", "header", "tabs", "notice", "summary", "cards", "detail", "footer"],
+      "source": "html",
+      "ref": "screens/usage-limits.html"
+    },
+    {
+      "screen": "usage-limits",
+      "state": "loading",
+      "route": "/?range=7d&timeZone=UTC#usage/limits",
+      "viewports": [390, 1280],
+      "themes": ["light", "dark"],
+      "status": "implemented",
+      "regions": ["nav", "header", "tabs", "cards"],
+      "source": "html",
+      "ref": "screens/usage-limits.html"
+    },
+    {
+      "screen": "usage-limits",
+      "state": "empty",
+      "route": "/?range=7d&timeZone=UTC#usage/limits",
+      "viewports": [390, 1280],
+      "themes": ["light", "dark"],
+      "status": "implemented",
+      "regions": ["nav", "header", "tabs", "notice", "action"],
+      "source": "html",
+      "ref": "screens/usage-limits.html"
+    },
+    {
+      "screen": "usage-limits",
+      "state": "unavailable",
+      "route": "/?range=7d&timeZone=UTC#usage/limits",
+      "viewports": [390, 1280],
+      "themes": ["light", "dark"],
+      "status": "implemented",
+      "regions": ["nav", "header", "tabs", "notice", "action"],
+      "source": "html",
+      "ref": "screens/usage-limits.html"
+    },
+    {
+      "screen": "usage-limits",
+      "state": "unknown",
+      "route": "/?range=7d&timeZone=UTC#usage/limits",
+      "viewports": [390, 1280],
+      "themes": ["light", "dark"],
+      "status": "designed",
+      "regions": ["notice"],
+      "source": "html",
+      "ref": "screens/usage-limits.html"
+    }
+  ]
+}
