@@ -1,6 +1,6 @@
 /** Persist only results from the already authorized owner review endpoints. @module */
 import type { PullRequest } from "@knpkv/codecommit-core/Domain.js"
-import { Clock, Config, Crypto, Effect, Path, Stream } from "effect"
+import { Clock, Config, Crypto, Effect, Option, Path, Stream } from "effect"
 import type { PullRequestRelayReviewResponse, RelayReviewStreamEvent } from "../Api.js"
 import { reviewRunOfResponse, reviewRunSubject } from "./review-run-projection.js"
 import { makeReviewRunStore, type ReviewRunSaved, ReviewRunStoreError } from "./ReviewRunStore.js"
@@ -40,12 +40,13 @@ export const recordCompletedReviewStream = <E, R>(
   ))
 
 export const makeReviewRunRecorder = Effect.fn("ReviewRunRecorder.make")(function*() {
-  const home = yield* Config.String("HOME").pipe(Config.orElse(() => Config.String("USERPROFILE")))
+  const home = yield* Config.option(Config.String("HOME").pipe(Config.orElse(() => Config.String("USERPROFILE"))))
   const path = yield* Path.Path
   const cryptoService = yield* Crypto.Crypto
-  const store = yield* makeReviewRunStore(path.join(home, ".codecommit", "reviews"))
+  const store = Option.isNone(home) ? null : yield* makeReviewRunStore(path.join(home.value, ".codecommit", "reviews"))
   return Effect.fn("ReviewRunRecorder.complete")(
     function*(pullRequest: PullRequest, response: PullRequestRelayReviewResponse) {
+      if (store === null) return yield* new ReviewRunStoreError({ operation: "save", reason: "private_path" })
       const id = yield* cryptoService.randomUUIDv4.pipe(
         Effect.mapError(() => new ReviewRunStoreError({ operation: "save", reason: "io" }))
       )

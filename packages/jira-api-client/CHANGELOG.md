@@ -1,5 +1,11 @@
 # @knpkv/jira-api-client
 
+## 3.1.0
+
+### Minor Changes
+
+- [#928](https://github.com/knpkv/npm/pull/928) [`cdcd001`](https://github.com/knpkv/npm/commit/cdcd00161a10b3cbdd0b5cda5405e7dd25a23d51) Thanks [@github-actions](https://github.com/apps/github-actions)! - Update the generated Schema-backed Jira API client.
+
 ## 3.0.0
 
 ### Major Changes

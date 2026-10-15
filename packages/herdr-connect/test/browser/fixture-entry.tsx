@@ -4,10 +4,12 @@ import "../../src/styles.css"
 import "@knpkv/herdr-work/styles.css"
 // The hub's own sheet styles Connect's header nav, so the fixture shows the header that ships.
 import "../../../herdr-hub/src/styles.css"
+import { AgentTaskKind } from "@knpkv/herdr-fleet/model"
 import { RegistryProvider } from "@effect/atom-react"
 import { useState } from "react"
 import { createRoot } from "react-dom/client"
 import { ConnectSurface, makeConnectAtoms } from "../../src/client.js"
+import { CreatureNeighbours } from "../../src/creature-neighbours.js"
 import { Creature, type CreatureHueFamily } from "../../src/creature.js"
 import { mountLegacyFleetColumn } from "./legacy-fleet-fixture.js"
 
@@ -34,6 +36,7 @@ type DrawingMood =
 type DrawingAccessory = "none" | "headphones" | "hard-hat" | "scarf" | "glasses"
 
 interface DrawingOptions {
+  taskKind?: AgentTaskKind
   closed: boolean
   stale: boolean
   talking: boolean
@@ -47,6 +50,7 @@ interface DrawingOptions {
 /** Isolated drawing cases still use the production component and stylesheet. */
 const DrawingFixture = () => {
   const [reactionKey, setReactionKey] = useState(0)
+  const [taskKind, setTaskKind] = useState(AgentTaskKind.literals.find((kind) => kind === parameters.get("taskKind")))
   const [state, setState] = useState(parameters.get("state") ?? "working")
   const moods: ReadonlyArray<DrawingMood> = [
     "happy",
@@ -72,6 +76,7 @@ const DrawingFixture = () => {
     stale: parameters.has("stale"),
     talking: parameters.has("talking")
   }
+  if (taskKind !== undefined) options.taskKind = taskKind
   if (accessory !== undefined) options.accessory = accessory
   if (mood !== undefined) options.mood = mood
   if (reaction !== undefined) {
@@ -82,28 +87,80 @@ const DrawingFixture = () => {
   const family = families.find((value) => value === parameters.get("family"))
   if (family !== undefined) options.hueFamily = family
   const size = parameters.get("size") === "row" ? "row" : parameters.get("size") === "cast" ? "cast" : "stage"
-  const count = parameters.get("drawing") === "grid" ? 64 : 1
+  const count = parameters.has("neighbours")
+    ? 2
+    : parameters.get("count") === "256"
+      ? 256
+      : parameters.get("drawing") === "grid"
+        ? 64
+        : 1
+  const pixels = ["28", "40", "60", "144"].find((value) => value === parameters.get("pixels"))
   return (
     <div data-drawing-fixture="">
+      <style>{`[data-fixture-pixels] > svg.connect-creature { width: 100%; height: 100%; }`}</style>
+      <label>
+        Task{" "}
+        <select
+          aria-label="Task kind"
+          value={taskKind ?? ""}
+          onChange={(event) => setTaskKind(AgentTaskKind.literals.find((kind) => kind === event.currentTarget.value))}
+        >
+          <option value="">No evidence</option>
+          {AgentTaskKind.literals.map((kind) => (
+            <option key={kind} value={kind}>
+              {kind}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label>
+        State{" "}
+        <select aria-label="Agent state" value={state} onChange={(event) => setState(event.currentTarget.value)}>
+          {["idle", "ready", "working", "waiting", "blocked", "done"].map((value) => (
+            <option key={value} value={value}>
+              {value}
+            </option>
+          ))}
+        </select>
+      </label>
       <button onClick={() => setReactionKey((key) => key + 1)} type="button">
         Replay reaction
       </button>
       <button onClick={() => setState("done")} type="button">
         Finish agent
       </button>
-      {Array.from({ length: count }, (_, index) => (
-        <div data-drawing-case={index} key={index}>
-          <Creature
-            {...{
-              ...options,
-              host: "fixture-host",
-              id: parameters.get("id") ?? `drawing-${String(index)}`,
-              size,
-              state
-            }}
-          />
-        </div>
-      ))}
+      <CreatureNeighbours
+        agents={
+          parameters.has("neighbours")
+            ? [0, 2].map((index) => ({
+                host: parameters.get("host") ?? "fixture-host",
+                id: `drawing-${String(index)}`,
+                name: `drawing-${String(index)}`,
+                hue: family,
+                taskKind
+              }))
+            : []
+        }
+      >
+        {Array.from({ length: count }, (_, index) => (
+          <div
+            data-drawing-case={index}
+            data-fixture-pixels={pixels}
+            style={pixels === undefined ? undefined : { width: Number(pixels), height: Number(pixels) }}
+            key={index}
+          >
+            <Creature
+              {...{
+                ...options,
+                host: parameters.get("host") ?? "fixture-host",
+                id: parameters.get("id") ?? `drawing-${String(parameters.has("neighbours") ? index * 2 : index)}`,
+                size,
+                state
+              }}
+            />
+          </div>
+        ))}
+      </CreatureNeighbours>
     </div>
   )
 }

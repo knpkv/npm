@@ -115,3 +115,28 @@ it.effect("reports oversized normalized threads separately from malformed timest
     expect(corrupt._tag).toBe("Failure")
     if (corrupt._tag === "Failure") expect(corrupt.failure.reason).toBe("corrupt")
   }))
+
+it.effect("requires both immutable commit IDs before placing current comment lines", () =>
+  Effect.gen(function*() {
+    for (
+      const commits of [
+        { beforeCommitId: "base-one" },
+        { afterCommitId: "head-one" },
+        {}
+      ]
+    ) {
+      const value = yield* reviewConversationsOf({
+        observedAt: 1_000,
+        locations: [{
+          ...commits,
+          filePath: "src/review.ts",
+          relativeFileVersion: "AFTER",
+          comments: [{ root: { ...root, lineNumber: 42 }, replies: [] }]
+        }]
+      }, diff)
+      expect(value._tag).toBe("Ready")
+      if (value._tag === "Ready") {
+        expect(value.threads[0]?.anchor).toEqual({ _tag: "File", path: "src/review.ts", outdated: false })
+      }
+    }
+  }))

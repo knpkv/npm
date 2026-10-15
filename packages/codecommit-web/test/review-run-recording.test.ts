@@ -1,3 +1,4 @@
+import { NodeServices } from "@effect/platform-node"
 import { expect, it } from "@effect/vitest"
 import {
   Account,
@@ -7,11 +8,15 @@ import {
   PullRequestId,
   RepositoryName
 } from "@knpkv/codecommit-core/Domain.js"
-import { Effect, Schema, Stream } from "effect"
+import { ConfigProvider, Effect, FileSystem, Schema, Stream } from "effect"
 import { PullRequestRelayReviewResponse, type RelayReviewStreamEvent } from "../src/server/Api.js"
 import { reviewRunOfResponse } from "../src/server/review/review-run-projection.js"
 import { ReviewRunStoreError } from "../src/server/review/ReviewRunReader.js"
-import { recordCompletedReview, recordCompletedReviewStream } from "../src/server/review/ReviewRunRecorder.js"
+import {
+  makeReviewRunRecorder,
+  recordCompletedReview,
+  recordCompletedReviewStream
+} from "../src/server/review/ReviewRunRecorder.js"
 
 const pr = new PullRequest({
   account: new Account({
@@ -101,3 +106,28 @@ it.effect("successful history saves leave completed output unchanged", () =>
     const record = recordCompletedReview(() => Effect.succeed({ _tag: "Saved", run }))
     expect(yield* record(pr, response)).toEqual(response)
   }))
+
+it.layer(NodeServices.layer)("recorder configuration", (it) => {
+  it.effect("missing home leaves route construction usable and only warns on completed history", () =>
+    Effect.gen(function*() {
+      const save = yield* makeReviewRunRecorder().pipe(
+        Effect.provideService(ConfigProvider.ConfigProvider, ConfigProvider.fromUnknown({}))
+      )
+      const completed = yield* recordCompletedReview(save)(pr, response)
+      expect(completed.result).toEqual(response.result)
+      expect(completed.historyWarning).toEqual({ reason: "private_path" })
+    }))
+
+  it.effect("a configured home still persists the completed result", () =>
+    Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      const home = yield* fs.makeTempDirectoryScoped()
+      const save = yield* makeReviewRunRecorder().pipe(
+        Effect.provideService(ConfigProvider.ConfigProvider, ConfigProvider.fromUnknown({ HOME: home }))
+      )
+      const saved = yield* save(pr, response)
+      expect(saved._tag).toBe("Saved")
+      expect(saved.run.summary).toBe(response.result.verdict)
+      expect((yield* fs.readDirectory(home + "/.codecommit/reviews")).length).toBe(1)
+    }))
+})

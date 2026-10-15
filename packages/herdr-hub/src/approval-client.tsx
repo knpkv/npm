@@ -54,6 +54,8 @@ import { DashboardWorkPollOwner } from "./work-poll-owner.js"
 import { SuperappShell } from "./superapp-view.js"
 import { makeFleetHubModuleViews } from "./fleet-module-view.js"
 import { TodayReadFailed } from "./today-module-view.js"
+import { makeResourcesModuleViews } from "./resources-module-view.js"
+import { loadHostResources } from "./resources-client.js"
 import { makeUsageModuleViews, type UsageModuleReads } from "./usage-module-view.js"
 import { makeCodeModuleViews } from "./code-module-view.js"
 import {
@@ -703,6 +705,7 @@ const DashboardApp = ({
     now: Date.now(),
     onHubMachine: onLoopback()
   })
+  const resources = makeResourcesModuleViews({ host: current.host, read: resourcesRead })
   const code = makeCodeModuleViews({ reads: codeReads, onHubMachine: onLoopback() })
   const connectConnection = useAtomValue(atoms.connect.connection)
   const fleetNavigationBadge = dashboardPendingNavigationBadge(pendingState, workNow, refreshFailed)
@@ -713,7 +716,7 @@ const DashboardApp = ({
       <DashboardWorkPollOwner atom={atoms.work} poll={atoms.workPoll} />
       {canonical ? (
         <SuperappShell
-          modules={[connect, fleetWithBadge, code, usage]}
+          modules={[connect, fleetWithBadge, code, usage, resources]}
           mobileModules={["connect", "fleet", "code", "usage"]}
           primaryModules={["connect", "fleet"]}
           landing={{ module: "connect", page: "overview" }}
@@ -803,6 +806,7 @@ const runCodeRead = <A, E>(effect: Effect.Effect<A, E, HttpClient.HttpClient>): 
       onExit: (exit) => resume(Exit.isSuccess(exit) ? Effect.succeed(exit.value) : Effect.failCause(exit.cause))
     })
   })
+const resourcesRead = runCodeRead(loadHostResources())
 const codeReads: CodeModuleReads = {
   queue: (query) => runCodeRead(loadCodeQueue(query)),
   detail: (ref) => runCodeRead(loadCodeDetail(ref)),

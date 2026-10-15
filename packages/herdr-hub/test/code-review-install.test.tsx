@@ -364,6 +364,56 @@ it("renders the default full-page diff as a bounded serial reading of all files"
   )
 })
 
+it("bounds default provider work to twenty attempts, keeps every file and narrows a selected file to one read", async () => {
+  const files = Array.from(
+    { length: 100 },
+    (_, index): Extract<CodeReviewResult, { _tag: "Ready" }>["reading"]["diff"]["files"][number] => ({
+      index,
+      path: `file-${index}.ts`,
+      previousPath: null,
+      status: "modified",
+      beforeMode: "100644",
+      afterMode: "100644"
+    })
+  )
+  const value = { ...reading, reading: { ...reading.reading, diff: { ...reading.reading.diff, files } } }
+  const read = vi.fn<CodeModuleReads["content"]>((query) =>
+    Effect.succeed({
+      _tag: "Ready",
+      content: {
+        fileIndex: query.fileIndex,
+        revisionId: query.revisionId,
+        state: "text",
+        before: "old\n",
+        after: "new\n"
+      }
+    })
+  )
+  const reads = { ...defaults, review: () => Effect.succeed(value), content: read }
+  await render(reads, `filter=reviews&ref=${ref}`)
+  await vi.waitFor(async () => {
+    await act(() => Promise.resolve())
+    expect(document.querySelector("[data-code-review-owner]")?.getAttribute("data-code-review-files-state")).toBe(
+      "Ready"
+    )
+  })
+  expect(read).toHaveBeenCalledTimes(20)
+  expect(read.mock.calls.map(([query]) => query.fileIndex)).toEqual(Array.from({ length: 20 }, (_, index) => index))
+  const headings = [...document.querySelectorAll("[data-code-review-diff] h3")].map((node) => node.textContent)
+  for (const file of files) expect(headings).toContain(file.path)
+  expect(document.querySelectorAll("[data-code-review-raw]")).toHaveLength(80)
+  read.mockClear()
+  await render(reads, `filter=reviews&ref=${ref}&file=99`)
+  await vi.waitFor(async () => {
+    await act(() => Promise.resolve())
+    expect(read).toHaveBeenCalledOnce()
+    expect(document.querySelector("[data-code-review-owner]")?.getAttribute("data-code-review-files-state")).toBe(
+      "Ready"
+    )
+  })
+  expect(read.mock.calls[0]?.[0].fileIndex).toBe(99)
+})
+
 it("keeps a later file's finding separate when the whole-page display budget is exhausted", async () => {
   const files = ["first.ts", "second.ts"].map(
     (path, index) =>

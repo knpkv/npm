@@ -1,0 +1,23 @@
+id: no-direct-hub-git-command
+snapshots:
+  ? |
+    ChildProcess.make("git", ["-C", repo, "config", "remote.origin.url", fixtureUrl], { cwd })
+  : labels:
+      - source: ChildProcess.make("git", ["-C", repo, "config", "remote.origin.url", fixtureUrl], { cwd })
+        style: primary
+        start: 0
+        end: 90
+  ? |
+    ChildProcess.make("git", ["init", repo])
+  : labels:
+      - source: ChildProcess.make("git", ["init", repo])
+        style: primary
+        start: 0
+        end: 40
+  ? |
+    ChildProcess.make(command, commandLine.slice(1), { cwd: config.repository })
+  : labels:
+      - source: "ChildProcess.make(command, commandLine.slice(1), { cwd: config.repository })"
+        style: primary
+        start: 0
+        end: 76

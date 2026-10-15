@@ -49,7 +49,8 @@ export const reviewConversationsOf = Effect.fn("ReviewComments.project")(
         const path = location.filePath ?? thread.root.filePath
         const anchor: ReviewAnchor = path === undefined
           ? { _tag: "Unanchored" }
-          : thread.root.lineNumber !== undefined && location.relativeFileVersion !== undefined
+          : thread.root.lineNumber !== undefined && location.relativeFileVersion !== undefined &&
+              location.beforeCommitId === diff.baseCommit && location.afterCommitId === diff.headCommit
           ? {
             _tag: "Line",
             path,

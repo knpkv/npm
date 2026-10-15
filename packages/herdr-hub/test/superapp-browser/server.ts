@@ -18,6 +18,7 @@ import { createServer, type ServerResponse } from "node:http"
 import { BlockedPushSettings } from "../../src/blocked-push-model.js"
 import { DashboardSnapshot, PendingApprovalTarget } from "../../src/dashboard-model.js"
 import { fontPreloadLink } from "../../src/font-preload.js"
+import { HostResources } from "../../src/host-resources-model.js"
 import { dashboardPage } from "../../src/internal/dashboard-page.js"
 import { NeedsYouResult } from "../../src/modules.js"
 import { relayIconSvg } from "../../src/relay-icon.js"
@@ -32,6 +33,7 @@ import {
   codeReviewFixture
 } from "./code-fixture.js"
 import { connectFixture } from "./connect-fixture.js"
+import { resourceFixtureNow, resourcesFixture, resourcesStates } from "./resources-fixture.js"
 import { limitsFixture, usageFixture } from "./usage-fixture.js"
 
 class FixtureStateError extends Schema.TaggedError<FixtureStateError>()("FixtureStateError", {
@@ -404,6 +406,25 @@ const program = Effect.gen(function*() {
         response.writeHead(404)
         response.end()
       }
+      return
+    }
+    if (url.pathname === "/v1/host/resources") {
+      const selected = request.headers.cookie?.match(/(?:^|;\s*)resources-fixture=([a-z-]+)/u)?.[1]
+      const state = resourcesStates.find((state) => state === selected) ?? "live-healthy"
+      const fixture = resourcesFixture(state, resourceFixtureNow)
+      if (fixture.loading) return
+      if (fixture.snapshot === null) {
+        response.writeHead(503, { "content-type": "application/json" })
+        response.end(JSON.stringify({ error: "unavailable" }))
+      } else {
+        response.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" })
+        response.end(Schema.encodeSync(Schema.fromJsonString(HostResources))(fixture.snapshot))
+      }
+      return
+    }
+    if (url.pathname === "/v1/dashboard" && request.headers.cookie?.includes("resources-fixture=") === true) {
+      response.writeHead(200, { "content-type": "application/json" })
+      response.end(Schema.encodeSync(Schema.fromJsonString(DashboardSnapshot))({ ...snapshot, host: "maple" }))
       return
     }
     if (url.pathname === "/v1/connect/usage" || url.pathname === "/v1/connect/limits") {

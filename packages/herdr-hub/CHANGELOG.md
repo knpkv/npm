@@ -2,6 +2,49 @@
 
 Released as `@knpkv/herdr-approvals` up to 0.18.0; the headings below are that package's history.
 
+## 0.40.1
+
+### Patch Changes
+
+- Updated dependencies [[`ca9f6a2`](https://github.com/knpkv/npm/commit/ca9f6a23a0cfd6ab1fdd21804156791864fbef07)]:
+  - @knpkv/herdr-connect@0.28.0
+
+## 0.40.0
+
+### Minor Changes
+
+- [#923](https://github.com/knpkv/npm/pull/923) [`a1152b5`](https://github.com/knpkv/npm/commit/a1152b51e8819c16bf9513a45fa0804f481d21ad) Thanks [@konopkov](https://github.com/konopkov)! - Produce agent task kinds from bounded, host-private Claude/Codex session evidence and existing branch PR facts. Keep unsupported sources unknown and send only the normalized kind over the fleet wire.
+
+## 0.39.0
+
+### Minor Changes
+
+- [#914](https://github.com/knpkv/npm/pull/914) [`48a942e`](https://github.com/knpkv/npm/commit/48a942e637e0fd0417027b3f1fae5400df5ce50b) Thanks [@konopkov](https://github.com/konopkov)! - Add the read-only Host resources module with local memory and CPU history, disk capacity, heavy-gate ownership, running jobs, preview listeners and memory by pane. Publish the shared snapshot schema and view, with independently unavailable sections and retained stale or offline readings.
+
+  Add optional `heavyGate.lockDirectory` configuration without a default. Gate inspection follows inherited descriptors and reports bounded command display; it never changes jobs or locks. Preview protocol discovery runs separately from sampling and opens only verified tailnet DNS links.
+
+### Patch Changes
+
+- Updated dependencies [[`48a942e`](https://github.com/knpkv/npm/commit/48a942e637e0fd0417027b3f1fae5400df5ce50b)]:
+  - @knpkv/herdr-fleet@0.12.0
+  - @knpkv/herdr-connect@0.27.2
+  - @knpkv/herdr-coordinator@0.4.3
+  - @knpkv/herdr-work@0.12.4
+
+## 0.38.0
+
+### Minor Changes
+
+- [#917](https://github.com/knpkv/npm/pull/917) [`485fe8f`](https://github.com/knpkv/npm/commit/485fe8f4db2c273ca85181d3712609ed1661bbce) Thanks [@konopkov](https://github.com/konopkov)! - Add typed, debounced agent task kinds to Fleet inventory and status. The host adapter supplies lifecycle evidence; unsupported tool and Work/CI evidence remains unknown. Only CI and test/build failures can produce the failing kind.
+
+### Patch Changes
+
+- Updated dependencies [[`485fe8f`](https://github.com/knpkv/npm/commit/485fe8f4db2c273ca85181d3712609ed1661bbce)]:
+  - @knpkv/herdr-fleet@0.11.0
+  - @knpkv/herdr-connect@0.27.1
+  - @knpkv/herdr-coordinator@0.4.2
+  - @knpkv/herdr-work@0.12.3
+
 ## 0.37.3
 
 ### Patch Changes

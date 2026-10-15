@@ -1,0 +1,950 @@
+{
+  "version": 1,
+  "data": {
+    "hostResources": {
+      "meta": {
+        "about": "Synthetic fixture for Host resources (screens/host-resources.html), from 09 Host resources.dc.html. All data is invented. Times are en-GB, 24-hour. Read-only: no kill, stop, release, retry or terminal controls.",
+        "locale": "en-GB",
+        "date": "Thursday 15 October 2026",
+        "defaultState": "live-healthy"
+      },
+      "shell": {
+        "product": "Relay",
+        "brandLabel": "Relay, go to Connect",
+        "navLabel": "Relay navigation",
+        "modulesLabel": "Modules",
+        "askRelay": "Ask Relay",
+        "askShortcut": "Ctrl J",
+        "hosts": {
+          "label": "3 hosts configured",
+          "aria": "3 hosts configured"
+        },
+        "notifications": {
+          "aria": "Notifications"
+        },
+        "more": {
+          "name": "More",
+          "icon": "grid"
+        },
+        "hubHost": "atlas",
+        "session": {
+          "title": "Session on atlas",
+          "access": "Tailscale access",
+          "aria": "Session on atlas, Tailscale access, connected"
+        },
+        "settings": {
+          "label": "Settings",
+          "href": "#settings",
+          "aria": "Settings: host access and notifications"
+        }
+      },
+      "modules": {
+        "connect": {
+          "name": "Connect",
+          "icon": "home",
+          "href": "#connect",
+          "purpose": "Who\u2019s working, who\u2019s blocked, who needs you",
+          "tabs": []
+        },
+        "fleet": {
+          "name": "Fleet",
+          "icon": "fleet",
+          "href": "#fleet/approvals",
+          "purpose": "Hosts, approvals and what they apply",
+          "tabs": ["Approvals", "Hosts", "Work"]
+        },
+        "design": {
+          "name": "Design",
+          "icon": "doc",
+          "href": "#design/projects",
+          "purpose": "Claude Design projects, exported refs and design | live",
+          "tabs": ["Projects", "Refs", "Compare"]
+        },
+        "code": {
+          "name": "Code",
+          "icon": "code",
+          "href": "#code/pull-requests",
+          "purpose": "Pull requests, reviews and diffs",
+          "tabs": ["Pull requests", "Reviews", "Diffs"]
+        },
+        "usage": {
+          "name": "Usage",
+          "icon": "usage",
+          "href": "#usage/limits",
+          "purpose": "Limits and tokens, per host, tool and model",
+          "tabs": ["Limits", "Tokens", "By tool"]
+        },
+        "hostResources": {
+          "name": "Host resources",
+          "icon": "host",
+          "href": "#host-resources",
+          "purpose": "Memory, CPU, disk and the heavy gate on one host",
+          "tabs": []
+        },
+        "delivery": {
+          "name": "Delivery",
+          "icon": "delivery",
+          "href": "#delivery/releases",
+          "purpose": "Releases, services, Jira and Confluence",
+          "tabs": ["Releases", "Services", "Jira", "Confluence"]
+        },
+        "stacks": {
+          "name": "Stacks",
+          "icon": "stacks",
+          "href": "#stacks",
+          "purpose": "Infrastructure state, read-only",
+          "tabs": []
+        },
+        "time": {
+          "name": "Time",
+          "icon": "time",
+          "href": "#time/week",
+          "purpose": "Your week in Jira and Clockify",
+          "tabs": ["Week", "Entries"]
+        }
+      },
+      "navs": {
+        "standard": {
+          "primary": ["connect", "fleet"],
+          "secondary": ["code", "usage", "hostResources"],
+          "bar": ["connect", "fleet", "code", "usage"]
+        }
+      },
+      "approvals": {
+        "badge": "3",
+        "badgeAria": "3 approvals waiting",
+        "navAria": "Fleet, 3 approvals waiting"
+      },
+      "host": "maple",
+      "cores": "8 cores",
+      "thresholds": {
+        "heavyStart": 8,
+        "abort": 3,
+        "chartMax": 16
+      },
+      "copy": {
+        "memory": "Memory",
+        "availableOf": "available of",
+        "swap": "Swap used",
+        "thresholds": "Thresholds",
+        "thresholdLine": "heavy start at 8 GiB, abort at 3 GiB",
+        "memRoom": "Room for a heavy job",
+        "memBelowStart": "Below heavy start",
+        "memBelowAbort": "Below abort",
+        "trend": "Memory available, last hour",
+        "trendNote": "10 s samples",
+        "trendAria": "Memory available over the last hour, 10 s samples, ranging",
+        "chartMax": "16 GiB",
+        "ruleStart": "Heavy start at 8 GiB",
+        "ruleAbort": "Abort at 3 GiB",
+        "axisFrom": "\u221260 min",
+        "axisMid": "\u221230 min",
+        "axisTo": "now",
+        "cpu": "CPU",
+        "against": "against",
+        "loadLabels": ["Load 1 min", "5 min", "15 min"],
+        "cpuNow": "CPU now",
+        "sparkAria": "CPU over the last hour",
+        "disk": "Disk",
+        "used": "used",
+        "freeOf": "free of",
+        "of": "of",
+        "gate": "Heavy gate",
+        "slot": "Slot",
+        "free": "Free",
+        "held": "Held",
+        "lane": "Lane",
+        "grant": "Grant",
+        "age": "Age",
+        "limit": "Limit",
+        "jobs": "Heavy jobs",
+        "running": "running",
+        "noJobs": "No heavy job running",
+        "processes": "Processes",
+        "previews": "Live previews",
+        "listening": "listening",
+        "open": "Open",
+        "showMore": "Show",
+        "more": "more",
+        "top": "Top memory by agent",
+        "colAgent": "Agent",
+        "colPane": "Pane",
+        "colRss": "RSS",
+        "colProcs": "Processes",
+        "process": "process",
+        "processesWord": "processes",
+        "lastValues": "last values, not current",
+        "noReadingYet": "no reading yet",
+        "neverText": "No reading from maple yet.",
+        "loading": "Loading host resources",
+        "notConfigured": "Not configured on this host",
+        "colProcess": "Process",
+        "unknown": "Unknown",
+        "holderUnknown": "Holder not readable on this host."
+      },
+      "disk": {
+        "mounts": [
+          {
+            "path": "/",
+            "used": "212 GiB",
+            "free": "300 GiB",
+            "size": "512 GiB"
+          },
+          {
+            "path": "/home",
+            "used": "1.3 TiB",
+            "free": "0.7 TiB",
+            "size": "2 TiB"
+          }
+        ],
+        "tmp": {
+          "path": "/tmp (memory)",
+          "used": "1.8 GiB",
+          "quota": "6 GiB quota",
+          "pct": 30,
+          "words": "30% of quota used"
+        }
+      },
+      "readings": {
+        "healthy": {
+          "sampled": "sampled 4s ago",
+          "memory": {
+            "available": 14.2,
+            "total": "32 GiB",
+            "swap": "0.2 GiB of 8 GiB"
+          },
+          "trend": [
+            14, 14.4, 14.1, 14.1, 14.4, 14.3, 14.2, 14.4, 14.4, 14.3, 14.4, 14.4, 14.5, 14.2, 14.3, 14.5, 14.5, 14.2,
+            14.5, 14.4, 14.7, 14.6, 14.3, 14.5, 14.7, 14.6, 14.6, 14.6, 14.7, 14.7, 14.5, 14.5, 14.7, 14.5, 14.4, 14.5,
+            14.6, 14.5, 14.8, 14.6, 14.7, 14.8, 14.4, 14.5, 14.7, 14.7, 14.6, 14.5, 14.9, 14.4, 14.6, 14.6, 14.8, 14.9,
+            14.7, 14.5, 14.6, 14.6, 14.6, 14.7, 14.6, 14.7, 14.8, 14.6, 14.9, 14.7, 14.9, 14.8, 14.8, 14.7, 14.7, 14.8,
+            14.9, 14.6, 14.8, 14.6, 14.7, 14.6, 14.6, 14.6, 14.8, 14.8, 14.4, 14.8, 14.4, 14.6, 14.4, 14.4, 14.9, 14.5,
+            14.7, 14.4, 14.5, 14.6, 14.4, 14.8, 14.7, 14.7, 14.7, 14.7, 14.6, 14.4, 14.2, 14.3, 14.2, 14.2, 14.5, 14.3,
+            14.5, 14.4, 14.5, 14.2, 14.6, 14.2, 14.3, 14.5, 14.1, 14.3, 14, 14.5, 14.3, 14.5, 14, 14.4, 14.1, 14.4,
+            14.2, 14.3, 14, 14, 14, 14.2, 13.9, 14.2, 14.2, 14.2, 14.1, 13.8, 13.8, 14.2, 13.8, 14.1, 14.2, 13.8, 14.2,
+            14.1, 14.2, 14.2, 14.1, 13.9, 13.8, 14, 14.1, 13.8, 13.7, 13.8, 14, 13.9, 13.8, 13.9, 13.9, 13.7, 13.9,
+            13.8, 13.6, 13.7, 14, 14, 13.8, 13.9, 14, 13.6, 13.8, 13.6, 13.7, 13.8, 13.9, 13.9, 13.7, 13.6, 13.7, 13.5,
+            13.8, 13.7, 13.7, 13.7, 13.8, 13.6, 13.8, 13.5, 13.6, 13.7, 13.6, 13.8, 13.6, 13.6, 13.8, 13.7, 13.5, 13.9,
+            13.9, 13.9, 13.9, 13.8, 14, 13.5, 13.9, 13.8, 13.9, 14, 13.5, 13.6, 13.6, 13.6, 13.6, 13.6, 13.9, 14, 13.7,
+            13.7, 13.7, 13.9, 13.7, 13.9, 14.1, 13.9, 14, 14.1, 13.9, 13.9, 13.7, 13.8, 14.1, 14.2, 13.8, 14.2, 14,
+            13.8, 13.9, 14.1, 13.9, 13.9, 14, 14.2, 14.1, 14.1, 14.4, 13.9, 14.1, 14.1, 13.9, 14, 14.2, 14, 14.1, 14.5,
+            14.4, 14.4, 14.3, 14.5, 14.5, 14.5, 14.4, 14.4, 14.3, 14.3, 14.4, 14.4, 14.4, 14.5, 14.5, 14.5, 14.6, 14.7,
+            14.6, 14.7, 14.5, 14.5, 14.7, 14.8, 14.5, 14.3, 14.5, 14.8, 14.7, 14.7, 14.8, 14.7, 14.5, 14.5, 14.8, 14.4,
+            14.8, 14.8, 14.7, 14.8, 14.7, 14.6, 14.8, 14.7, 14.9, 14.6, 14.8, 14.7, 14.6, 14.5, 14.7, 14.6, 14.9, 14.9,
+            14.6, 14.8, 14.9, 14.5, 14.6, 14.9, 14.4, 14.5, 14.6, 14.5, 14.8, 14.9, 14.5, 14.5, 14.9, 14.8, 14.5, 14.5,
+            14.7, 14.4, 14.8, 14.7, 14.8, 14.5, 14.5, 14.7, 14.8, 14.6, 14.7, 14.7, 14.7, 14.7, 14.6, 14.4, 14.3, 14.6,
+            14.4, 14.6, 14.4, 14.4, 14.6, 14.6, 14.6, 14.3, 14.7, 14.2, 14.5, 14.4, 14.6, 14.2
+          ],
+          "cpu": {
+            "load": ["1.8", "2.1", "2.0"],
+            "now": "21%",
+            "spark": [
+              19, 26, 24, 29, 28, 29, 24, 25, 25, 25, 27, 31, 25, 26, 28, 26, 21, 27, 21, 20, 19, 17, 20, 20, 20, 20,
+              12, 12, 13, 13, 20, 19, 13, 22, 23, 24, 24, 23, 24, 25, 28, 25, 29, 23, 25, 26, 26, 28, 26, 24, 25, 24,
+              28, 22, 24, 27, 20, 18, 25, 24
+            ]
+          }
+        },
+        "busy": {
+          "sampled": "sampled 4s ago",
+          "memory": {
+            "available": 6.1,
+            "total": "32 GiB",
+            "swap": "1.9 GiB of 8 GiB"
+          },
+          "trend": [
+            11.4, 11, 11.4, 11.2, 11.4, 11.2, 11.4, 11.3, 11.3, 11.4, 11.4, 11, 11.3, 11, 11, 11.4, 11.4, 11, 11, 11.1,
+            11.4, 11.4, 11.4, 11.1, 11, 11, 11.2, 11.2, 11, 11.1, 11.2, 11.1, 11, 11, 11, 11.3, 11.2, 11.4, 11.3, 11.2,
+            11.3, 11.1, 11.3, 11.4, 11.3, 11.4, 11.3, 11.3, 11.4, 11, 11, 11.3, 11.3, 11.2, 11.2, 11.1, 11.2, 11, 11,
+            11, 11.1, 11.1, 11.1, 11.3, 11, 11, 11, 11.4, 11.4, 11, 11.3, 11.1, 11.2, 11.4, 11.3, 11, 11.4, 11.1, 11.3,
+            11.2, 11, 11, 11.3, 11.3, 11.1, 11.4, 11.4, 11.1, 11.2, 11.1, 11.1, 11.4, 11.4, 11.3, 11.2, 11.4, 11.4,
+            11.4, 11.3, 11.4, 11.3, 11.1, 11.3, 11.1, 11.4, 11, 11.4, 11.3, 11.4, 11.2, 11.3, 11.4, 11, 11.1, 11, 11,
+            11.2, 11.4, 11.3, 11.4, 11.4, 11.4, 11.1, 11.2, 11.2, 11.1, 11.2, 11.3, 11.2, 11.1, 11.2, 11.1, 11.3, 11.3,
+            11.1, 11.1, 11.3, 11.2, 11.4, 11.2, 11.1, 11.3, 11.2, 11.3, 11.2, 11, 11, 10.9, 11, 11.1, 11.2, 11, 10.9,
+            10.8, 10.8, 10.6, 10.6, 10.5, 10.7, 10.6, 10.4, 10.7, 10.5, 10.5, 10.3, 10.7, 10.3, 10.3, 10.2, 10.2, 10.3,
+            10.1, 10.3, 10.3, 10.3, 10.3, 10.1, 10.3, 10.1, 9.8, 10, 10.1, 10.1, 9.9, 10.1, 9.7, 10, 9.5, 9.5, 9.6, 9.8,
+            9.8, 9.7, 9.6, 9.4, 9.5, 9.6, 9.3, 9.5, 9.4, 9.4, 9.5, 9.2, 9, 9.3, 9.2, 9.2, 9.2, 9.1, 8.8, 9.1, 9.2, 9.1,
+            9, 8.9, 8.7, 8.8, 8.8, 8.7, 8.4, 8.8, 8.7, 8.8, 8.4, 8.6, 8.7, 8.5, 8.5, 8.2, 8.2, 8.3, 8.2, 8, 8.2, 8.3,
+            8.3, 7.9, 8, 8.1, 8, 7.9, 7.8, 7.7, 7.8, 7.8, 7.9, 7.8, 7.8, 7.7, 7.7, 7.8, 7.8, 7.6, 7.7, 7.8, 7.6, 7.5,
+            7.6, 7.3, 7.4, 7.2, 7.6, 7.3, 7.3, 7.5, 7.3, 7.3, 7.2, 7.5, 7.3, 7.4, 7.5, 7.1, 7.5, 7.5, 7.4, 7.5, 7, 7.1,
+            7, 7.4, 7.2, 7.1, 7.2, 7.3, 7.2, 7.3, 6.9, 6.9, 7.1, 7.2, 6.8, 6.9, 7, 7.1, 7.1, 7, 6.8, 7.2, 7.2, 7, 7,
+            6.7, 7.1, 6.7, 6.8, 6.9, 6.8, 6.8, 7, 6.8, 6.8, 6.8, 6.5, 6.6, 6.6, 6.9, 6.6, 6.9, 6.7, 6.5, 6.6, 6.6, 6.4,
+            6.6, 6.7, 6.5, 6.4, 6.3, 6.6, 6.5, 6.3, 6.6, 6.2, 6.7, 6.5, 6.6, 6.5, 6.5, 6.5, 6.3, 6.4, 6.3, 6.1, 6.1,
+            6.1, 6.1, 6.3, 6.1, 6.1, 6.2, 6.3, 6.1, 6.1, 6.3, 6.3, 6.2, 6.3, 6, 6.1
+          ],
+          "cpu": {
+            "load": ["7.4", "6.8", "5.2"],
+            "now": "86%",
+            "spark": [
+              75, 71, 72, 77, 76, 79, 84, 84, 82, 83, 83, 85, 87, 82, 76, 82, 73, 76, 70, 65, 70, 67, 60, 62, 58, 54,
+              60, 58, 53, 57, 56, 57, 60, 62, 57, 65, 71, 72, 68, 78, 78, 82, 78, 80, 88, 82, 86, 90, 88, 86, 79, 79,
+              85, 77, 71, 74, 69, 71, 64, 59
+            ]
+          }
+        },
+        "abort": {
+          "sampled": "sampled 4s ago",
+          "memory": {
+            "available": 2.6,
+            "total": "32 GiB",
+            "swap": "5.8 GiB of 8 GiB"
+          },
+          "trend": [
+            9, 9, 9, 9, 9, 9.2, 9.2, 9, 8.9, 9.2, 9.1, 9.2, 8.9, 9.2, 9.2, 9.1, 9, 9.1, 9.2, 8.8, 9, 9, 9.1, 9.1, 9.1,
+            9.1, 8.8, 8.9, 9.1, 9, 8.8, 9, 9.2, 8.8, 9.2, 9.1, 9, 9.2, 9.2, 9.2, 8.8, 9.1, 8.9, 9.1, 8.8, 9, 8.8, 8.9,
+            8.9, 8.9, 8.9, 8.8, 8.9, 9, 9.2, 9.2, 8.8, 9, 9, 9.1, 8.8, 8.8, 9, 8.8, 8.9, 9.1, 8.8, 9.2, 9.2, 9, 8.8, 9,
+            9.1, 8.9, 9, 8.9, 8.9, 8.8, 8.8, 8.9, 9.1, 9.1, 8.8, 9.2, 8.8, 8.8, 9.1, 9.1, 9.1, 9, 9.2, 8.8, 8.9, 8.8,
+            8.9, 8.9, 8.9, 8.8, 8.8, 9, 9.2, 8.8, 9, 9.1, 8.8, 9.2, 9.1, 9.1, 9.2, 9.1, 8.8, 8.9, 9, 8.9, 8.8, 9, 9.1,
+            9.1, 9.1, 9.2, 9.2, 9, 8.8, 8.9, 9.2, 9.1, 9.1, 9.2, 9, 9.1, 8.9, 9, 8.8, 9, 8.8, 9, 9, 8.9, 8.8, 9, 8.8, 9,
+            8.8, 8.8, 9.1, 9, 9.2, 9.2, 9.1, 9.1, 9.2, 8.9, 9.2, 8.9, 8.9, 8.8, 8.8, 8.8, 8.8, 9, 9.1, 8.9, 8.8, 8.8,
+            9.1, 9.2, 9.2, 9.2, 9.2, 9.1, 9, 9.1, 8.8, 8.9, 9, 9, 9, 9, 9.1, 9, 9.1, 8.9, 9.1, 8.6, 8.6, 8.9, 9, 8.6,
+            8.5, 8.5, 8.4, 8.6, 8.6, 8.6, 8.4, 8.6, 8.2, 8.5, 8.5, 8.3, 8.2, 8.1, 8.3, 8, 8, 8.2, 7.8, 8.1, 8.2, 7.7,
+            8.1, 7.7, 7.9, 7.6, 8, 7.8, 7.6, 7.7, 7.6, 7.6, 7.5, 7.8, 7.6, 7.7, 7.6, 7.2, 7.2, 7.3, 7.3, 7, 7.2, 7, 7.1,
+            7.1, 7.2, 6.9, 6.8, 6.8, 6.8, 6.7, 7.1, 6.9, 6.9, 6.9, 6.5, 6.7, 6.8, 6.4, 6.5, 6.5, 6.6, 6.5, 6.6, 6.1,
+            6.2, 6.5, 6.4, 6.3, 6, 6.2, 6.1, 6.2, 6.1, 5.9, 5.8, 5.7, 5.9, 6.1, 5.9, 6, 6, 5.9, 5.8, 5.6, 5.7, 5.7, 5.7,
+            5.5, 5.6, 5.6, 5.5, 5.2, 5.5, 5.4, 5.1, 5.2, 5, 5.3, 5, 5, 5.2, 5.1, 5.1, 4.8, 5, 5, 4.6, 4.9, 4.7, 4.6,
+            4.5, 4.5, 4.6, 4.8, 4.6, 4.6, 4.3, 4.4, 4.3, 4.6, 4.1, 4.2, 4.3, 4.1, 4.4, 4, 4, 4.3, 4, 4.3, 3.9, 3.7, 4.1,
+            3.8, 3.8, 4, 3.8, 3.8, 3.8, 3.6, 3.4, 3.4, 3.3, 3.3, 3.3, 3.3, 3.2, 3.2, 3.2, 3.1, 3.1, 3.1, 3.1, 3, 3, 3,
+            3, 2.9, 2.9, 2.9, 2.8, 2.8, 2.8, 2.8, 2.7, 2.7, 2.7, 2.6, 2.6, 2.6
+          ],
+          "cpu": {
+            "load": ["9.1", "8.0", "6.1"],
+            "now": "94%",
+            "spark": [
+              78, 80, 80, 80, 86, 92, 93, 94, 90, 90, 95, 90, 87, 87, 89, 88, 87, 81, 81, 74, 73, 77, 72, 68, 66, 71,
+              64, 61, 64, 69, 68, 65, 70, 66, 71, 75, 73, 73, 81, 86, 82, 84, 91, 92, 87, 89, 91, 95, 93, 95, 92, 91,
+              89, 84, 85, 78, 77, 79, 71, 75
+            ]
+          },
+          "notice": {
+            "title": "Below abort.",
+            "text": "Heavy jobs should stop."
+          }
+        },
+        "lock": {
+          "sampled": "sampled 4s ago",
+          "memory": {
+            "available": 9.4,
+            "total": "32 GiB",
+            "swap": "0.6 GiB of 8 GiB"
+          },
+          "trend": [
+            9.6, 9.9, 9.7, 9.8, 9.8, 9.5, 9.8, 9.5, 9.7, 9.5, 9.5, 9.6, 9.8, 9.8, 9.9, 9.6, 9.5, 9.6, 9.5, 9.9, 9.8,
+            9.7, 9.9, 9.9, 9.8, 9.5, 9.7, 9.6, 9.9, 9.5, 9.8, 9.4, 9.8, 9.5, 9.6, 9.3, 9.4, 9.6, 9.7, 9.7, 9.5, 9.6,
+            9.7, 9.5, 9.8, 9.6, 9.5, 9.5, 9.4, 9.4, 9.3, 9.5, 9.4, 9.4, 9.6, 9.5, 9.7, 9.3, 9.3, 9.6, 9.3, 9.5, 9.4,
+            9.5, 9.5, 9.4, 9.3, 9.4, 9.4, 9.6, 9.2, 9.6, 9.2, 9.6, 9.4, 9.5, 9.4, 9.4, 9.4, 9.2, 9.4, 9.6, 9.4, 9.5,
+            9.4, 9.2, 9.4, 9.4, 9.6, 9.4, 9.3, 9.3, 9.2, 9.4, 9.5, 9.3, 9.6, 9.3, 9.3, 9.6, 9.5, 9.6, 9.6, 9.6, 9.4,
+            9.3, 9.4, 9.3, 9.5, 9.5, 9.4, 9.6, 9.5, 9.7, 9.2, 9.6, 9.5, 9.5, 9.3, 9.4, 9.6, 9.7, 9.5, 9.5, 9.6, 9.3,
+            9.5, 9.4, 9.7, 9.6, 9.7, 9.3, 9.6, 9.6, 9.3, 9.6, 9.7, 9.6, 9.3, 9.3, 9.5, 9.6, 9.3, 9.3, 9.7, 9.6, 9.4,
+            9.6, 9.6, 9.3, 9.6, 9.5, 9.5, 9.5, 9.6, 9.6, 9.8, 9.4, 9.8, 9.6, 9.6, 9.8, 9.7, 9.8, 9.5, 9.9, 9.5, 9.8,
+            9.6, 9.5, 9.7, 9.7, 9.8, 9.5, 9.9, 9.7, 9.9, 9.9, 9.8, 9.8, 9.9, 9.6, 9.8, 9.9, 9.9, 9.7, 9.7, 9.9, 9.8,
+            9.7, 9.9, 9.9, 9.9, 9.7, 10, 10.1, 9.7, 10, 10.1, 10.1, 9.7, 9.7, 9.7, 9.8, 10, 10.1, 9.7, 10.1, 9.9, 9.7,
+            9.7, 9.9, 10, 9.7, 9.9, 9.9, 9.9, 10, 10.1, 9.9, 9.8, 10.2, 10.2, 10.1, 10.2, 10, 9.9, 10, 9.8, 10.2, 10.3,
+            10.3, 9.9, 10, 10.1, 10, 9.9, 10.2, 10.2, 10.1, 9.9, 10.2, 10, 10, 10.3, 10.2, 10.3, 9.9, 10.3, 10.2, 10.3,
+            9.9, 10.1, 10.3, 10.1, 10.4, 10, 10.1, 9.9, 10, 10.2, 10.3, 10, 10.4, 10.2, 10.1, 10.2, 10.1, 10.3, 10.1,
+            10.1, 10.1, 10, 10, 10.1, 10.4, 10.4, 10, 10.3, 10.2, 10.3, 10.3, 10, 10.4, 10.3, 10.1, 10.3, 10.4, 10,
+            10.3, 10.4, 10.2, 10.1, 10.3, 10.4, 10.4, 10.4, 10.4, 10.1, 10.1, 10, 10.1, 10, 9.9, 10.4, 10.3, 10.4, 10.4,
+            10.1, 10.2, 10.2, 10.3, 10, 10, 10.4, 10.4, 10.3, 10, 10.4, 10.1, 10.1, 10.2, 10, 10.3, 10, 9.9, 9.9, 10,
+            10.2, 10, 10.2, 10.2, 9.8, 10.2, 9.9, 9.9, 10.2, 10, 9.9, 9.8, 9.9, 9.9, 10, 10.1, 10.1, 10.1, 9.9, 9.9,
+            9.9, 10.1, 9.8, 9.8, 9.7, 10, 10, 9.8, 10, 9.9, 9.8, 9.4
+          ],
+          "cpu": {
+            "load": ["3.2", "3.6", "3.4"],
+            "now": "38%",
+            "spark": [
+              37, 40, 41, 37, 41, 40, 39, 47, 46, 48, 44, 45, 47, 47, 41, 37, 43, 40, 37, 34, 31, 36, 31, 35, 26, 30,
+              24, 25, 28, 31, 31, 29, 33, 32, 30, 35, 37, 39, 37, 42, 35, 36, 46, 44, 40, 48, 48, 48, 47, 40, 43, 44,
+              45, 39, 43, 38, 39, 35, 32, 34
+            ]
+          }
+        },
+        "stale": {
+          "sampled": "Stale, sampled 2m ago",
+          "memory": {
+            "available": 6.1,
+            "total": "32 GiB",
+            "swap": "1.9 GiB of 8 GiB"
+          },
+          "trend": [
+            11.3, 11, 11, 11.4, 11.4, 11, 11, 11.1, 11.4, 11.4, 11.4, 11.1, 11, 11, 11.2, 11.2, 11, 11.1, 11.2, 11.1,
+            11, 11, 11, 11.3, 11.2, 11.4, 11.3, 11.2, 11.3, 11.1, 11.3, 11.4, 11.3, 11.4, 11.3, 11.3, 11.4, 11, 11,
+            11.3, 11.3, 11.2, 11.2, 11.1, 11.2, 11, 11, 11, 11.1, 11.1, 11.1, 11.3, 11, 11, 11, 11.4, 11.4, 11, 11.3,
+            11.1, 11.2, 11.4, 11.3, 11, 11.4, 11.1, 11.3, 11.2, 11, 11, 11.3, 11.3, 11.1, 11.4, 11.4, 11.1, 11.2, 11.1,
+            11.1, 11.4, 11.4, 11.3, 11.2, 11.4, 11.4, 11.4, 11.3, 11.4, 11.3, 11.1, 11.3, 11.1, 11.4, 11, 11.4, 11.3,
+            11.4, 11.2, 11.3, 11.4, 11, 11.1, 11, 11, 11.2, 11.4, 11.3, 11.4, 11.4, 11.4, 11.1, 11.2, 11.2, 11.1, 11.2,
+            11.3, 11.2, 11.1, 11.2, 11.1, 11.3, 11.3, 11.1, 11.1, 11.3, 11.2, 11.4, 11.2, 11.1, 11.3, 11.2, 11.3, 11.2,
+            11, 11, 10.9, 11, 11.1, 11.2, 11, 10.9, 10.8, 10.8, 10.6, 10.6, 10.5, 10.7, 10.6, 10.4, 10.7, 10.5, 10.5,
+            10.3, 10.7, 10.3, 10.3, 10.2, 10.2, 10.3, 10.1, 10.3, 10.3, 10.3, 10.3, 10.1, 10.3, 10.1, 9.8, 10, 10.1,
+            10.1, 9.9, 10.1, 9.7, 10, 9.5, 9.5, 9.6, 9.8, 9.8, 9.7, 9.6, 9.4, 9.5, 9.6, 9.3, 9.5, 9.4, 9.4, 9.5, 9.2, 9,
+            9.3, 9.2, 9.2, 9.2, 9.1, 8.8, 9.1, 9.2, 9.1, 9, 8.9, 8.7, 8.8, 8.8, 8.7, 8.4, 8.8, 8.7, 8.8, 8.4, 8.6, 8.7,
+            8.5, 8.5, 8.2, 8.2, 8.3, 8.2, 8, 8.2, 8.3, 8.3, 7.9, 8, 8.1, 8, 7.9, 7.8, 7.7, 7.8, 7.8, 7.9, 7.8, 7.8, 7.7,
+            7.7, 7.8, 7.8, 7.6, 7.7, 7.8, 7.6, 7.5, 7.6, 7.3, 7.4, 7.2, 7.6, 7.3, 7.3, 7.5, 7.3, 7.3, 7.2, 7.5, 7.3,
+            7.4, 7.5, 7.1, 7.5, 7.5, 7.4, 7.5, 7, 7.1, 7, 7.4, 7.2, 7.1, 7.2, 7.3, 7.2, 7.3, 6.9, 6.9, 7.1, 7.2, 6.8,
+            6.9, 7, 7.1, 7.1, 7, 6.8, 7.2, 7.2, 7, 7, 6.7, 7.1, 6.7, 6.8, 6.9, 6.8, 6.8, 7, 6.8, 6.8, 6.8, 6.5, 6.6,
+            6.6, 6.9, 6.6, 6.9, 6.7, 6.5, 6.6, 6.6, 6.4, 6.6, 6.7, 6.5, 6.4, 6.3, 6.6, 6.5, 6.3, 6.6, 6.2, 6.7, 6.5,
+            6.6, 6.5, 6.5, 6.5, 6.3, 6.4, 6.3, 6.1, 6.1, 6.1, 6.1, 6.3, 6.1, 6.1, 6.2, 6.3, 6.1, 6.1, 6.3, 6.3, 6.2,
+            6.3, 6, 6.1
+          ],
+          "cpu": {
+            "load": ["7.4", "6.8", "5.2"],
+            "now": "86%",
+            "spark": [
+              75, 71, 72, 77, 76, 79, 84, 84, 82, 83, 83, 85, 87, 82, 76, 82, 73, 76, 70, 65, 70, 67, 60, 62, 58, 54,
+              60, 58, 53, 57, 56, 57, 60, 62, 57, 65, 71, 72, 68, 78, 78, 82, 78, 80, 88, 82, 86, 90, 88, 86, 79, 79,
+              85, 77, 71, 74, 69, 71, 64, 59
+            ]
+          },
+          "fresh": "caution",
+          "old": true,
+          "gapSamples": 12
+        },
+        "offline": {
+          "sampled": "",
+          "memory": {
+            "available": 6.1,
+            "total": "32 GiB",
+            "swap": "1.9 GiB of 8 GiB"
+          },
+          "trend": [
+            11.4, 11, 11.4, 11.2, 11.4, 11.2, 11.4, 11.3, 11.3, 11.4, 11.4, 11, 11.3, 11, 11, 11.4, 11.4, 11, 11, 11.1,
+            11.4, 11.4, 11.4, 11.1, 11, 11, 11.2, 11.2, 11, 11.1, 11.2, 11.1, 11, 11, 11, 11.3, 11.2, 11.4, 11.3, 11.2,
+            11.3, 11.1, 11.3, 11.4, 11.3, 11.4, 11.3, 11.3, 11.4, 11, 11, 11.3, 11.3, 11.2, 11.2, 11.1, 11.2, 11, 11,
+            11, 11.1, 11.1, 11.1, 11.3, 11, 11, 11, 11.4, 11.4, 11, 11.3, 11.1, 11.2, 11.4, 11.3, 11, 11.4, 11.1, 11.3,
+            11.2, 11, 11, 11.3, 11.3, 11.1, 11.4, 11.4, 11.1, 11.2, 11.1, 11.1, 11.4, 11.4, 11.3, 11.2, 11.4, 11.4,
+            11.4, 11.3, 11.4, 11.3, 11.1, 11.3, 11.1, 11.4, 11, 11.4, 11.3, 11.4, 11.2, 11.3, 11.4, 11, 11.1, 11, 11,
+            11.2, 11.4, 11.3, 11.4, 11.4, 11.4, 11.1, 11.2, 11.2, 11.1, 11.2, 11.3, 11.2, 11.1, 11.2, 11.1, 11.3, 11.3,
+            11.1, 11.1, 11.3, 11.2, 11.4, 11.2, 11.1, 11.3, 11.2, 11.3, 11.2, 11, 11, 10.9, 11, 11.1, 11.2, 11, 10.9,
+            10.8, 10.8, 10.6, 10.6, 10.5, 10.7, 10.6, 10.4, 10.7, 10.5, 10.5, 10.3, 10.7, 10.3, 10.3, 10.2, 10.2, 10.3,
+            10.1, 10.3, 10.3, 10.3, 10.3, 10.1, 10.3, 10.1, 9.8, 10, 10.1, 10.1, 9.9, 10.1, 9.7, 10, 9.5, 9.5, 9.6, 9.8,
+            9.8, 9.7, 9.6, 9.4, 9.5, 9.6, 9.3, 9.5, 9.4, 9.4, 9.5, 9.2, 9, 9.3, 9.2, 9.2, 9.2, 9.1, 8.8, 9.1, 9.2, 9.1,
+            9, 8.9, 8.7, 8.8, 8.8, 8.7, 8.4, 8.8, 8.7, 8.8, 8.4, 8.6, 8.7, 8.5, 8.5, 8.2, 8.2, 8.3, 8.2, 8, 8.2, 8.3,
+            8.3, 7.9, 8, 8.1, 8, 7.9, 7.8, 7.7, 7.8, 7.8, 7.9, 7.8, 7.8, 7.7, 7.7, 7.8, 7.8, 7.6, 7.7, 7.8, 7.6, 7.5,
+            7.6, 7.3, 7.4, 7.2, 7.6, 7.3, 7.3, 7.5, 7.3, 7.3, 7.2, 7.5, 7.3, 7.4, 7.5, 7.1, 7.5, 7.5, 7.4, 7.5, 7, 7.1,
+            7, 7.4, 7.2, 7.1, 7.2, 7.3, 7.2, 7.3, 6.9, 6.9, 7.1, 7.2, 6.8, 6.9, 7, 7.1, 7.1, 7, 6.8, 7.2, 7.2, 7, 7,
+            6.7, 7.1, 6.7, 6.8, 6.9, 6.8, 6.8, 7, 6.8, 6.8, 6.8, 6.5, 6.6, 6.6, 6.9, 6.6, 6.9, 6.7, 6.5, 6.6, 6.6, 6.4,
+            6.6, 6.7, 6.5, 6.4, 6.3, 6.6, 6.5, 6.3, 6.6, 6.2, 6.7, 6.5, 6.6, 6.5, 6.5, 6.5, 6.3, 6.4, 6.3, 6.1, 6.1,
+            6.1, 6.1, 6.3, 6.1, 6.1, 6.2, 6.3, 6.1, 6.1, 6.3, 6.3, 6.2, 6.3, 6, 6.1
+          ],
+          "cpu": {
+            "load": ["7.4", "6.8", "5.2"],
+            "now": "86%",
+            "spark": [
+              75, 71, 72, 77, 76, 79, 84, 84, 82, 83, 83, 85, 87, 82, 76, 82, 73, 76, 70, 65, 70, 67, 60, 62, 58, 54,
+              60, 58, 53, 57, 56, 57, 60, 62, 57, 65, 71, 72, 68, 78, 78, 82, 78, 80, 88, 82, 86, 90, 88, 86, 79, 79,
+              85, 77, 71, 74, 69, 71, 64, 59
+            ]
+          },
+          "old": true,
+          "axisTo": "14:02",
+          "offlineNotice": "maple is offline. Last sample 14:02.",
+          "lastKnown": "Last known, 14:02"
+        },
+        "warm": {
+          "sampled": "sampled 4s ago",
+          "memory": {
+            "available": 14.2,
+            "total": "32 GiB",
+            "swap": "0.2 GiB of 8 GiB"
+          },
+          "trend": [
+            14.9, 14.5, 14.6, 14.9, 14.4, 14.5, 14.6, 14.5, 14.8, 14.9, 14.5, 14.5, 14.9, 14.8, 14.5, 14.5, 14.7, 14.4,
+            14.8, 14.7, 14.8, 14.5, 14.5, 14.7, 14.8, 14.6, 14.7, 14.7, 14.7, 14.7, 14.6, 14.4, 14.3, 14.6, 14.4, 14.6,
+            14.4, 14.4, 14.6, 14.6, 14.6, 14.3, 14.7, 14.2, 14.5, 14.4, 14.6, 14.2
+          ],
+          "cpu": {
+            "load": ["1.8", "2.1", "2.0"],
+            "now": "21%",
+            "spark": [
+              19, 26, 24, 29, 28, 29, 24, 25, 25, 25, 27, 31, 25, 26, 28, 26, 21, 27, 21, 20, 19, 17, 20, 20, 20, 20,
+              12, 12, 13, 13, 20, 19, 13, 22, 23, 24, 24, 23, 24, 25, 28, 25, 29, 23, 25, 26, 26, 28, 26, 24, 25, 24,
+              28, 22, 24, 27, 20, 18, 25, 24
+            ]
+          },
+          "historyNote": "8 min of history"
+        }
+      },
+      "gates": {
+        "free": {
+          "slots": [null, null]
+        },
+        "busy": {
+          "slots": [
+            {
+              "job": "git commit, full gate",
+              "lane": "ledger-cx",
+              "grant": "grant-demo-07",
+              "age": "12m",
+              "limit": "limit 30m"
+            },
+            {
+              "job": "build, storefront",
+              "lane": "atlas-orch",
+              "grant": "none",
+              "age": "4m",
+              "limit": "limit 30m"
+            }
+          ],
+          "waiting": "Full gate waiting for slot 2"
+        },
+        "over": {
+          "slots": [
+            {
+              "job": "git commit, full gate",
+              "lane": "ledger-cx",
+              "grant": "grant-demo-07",
+              "age": "41m",
+              "limit": "limit 30m",
+              "over": "Held past its 30m limit"
+            },
+            {
+              "job": "test, e2e",
+              "lane": "quill-rv",
+              "grant": "none",
+              "age": "23m",
+              "limit": "deadline 20m",
+              "over": "Held past its 20m deadline"
+            }
+          ]
+        },
+        "notConfigured": {
+          "notConfigured": true
+        },
+        "holderUnknown": {
+          "slots": [
+            {
+              "unknown": true
+            },
+            {
+              "job": "build, storefront",
+              "lane": "atlas-orch",
+              "grant": "none",
+              "age": "4m",
+              "limit": "limit 30m"
+            }
+          ]
+        }
+      },
+      "jobs": {
+        "none": [],
+        "busy": [
+          {
+            "lane": "ledger-cx",
+            "job": "git commit, full gate",
+            "rss": "3.1 GiB",
+            "grant": "grant-demo-07",
+            "started": "started 14:02",
+            "procs": [
+              ["41822", "node gate.js --full", "1.9 GiB"],
+              ["41840", "tsc -b", "0.8 GiB"],
+              ["41851", "vitest run", "0.3 GiB"],
+              ["41860", "eslint .", "0.1 GiB"]
+            ]
+          },
+          {
+            "lane": "atlas-orch",
+            "job": "build, storefront",
+            "rss": "2.4 GiB",
+            "grant": "no grant on cmdline",
+            "started": "started 14:10",
+            "procs": [
+              ["42011", "vite build", "1.7 GiB"],
+              ["42019", "esbuild --service", "0.7 GiB"]
+            ]
+          },
+          {
+            "lane": "quill-rv",
+            "job": "test, e2e",
+            "rss": "1.6 GiB",
+            "grant": "grant-demo-11",
+            "started": "started 14:08",
+            "procs": [
+              ["41977", "playwright test", "0.6 GiB"],
+              ["41990", "chromium --headless", "1.0 GiB"]
+            ]
+          }
+        ],
+        "over": [
+          {
+            "lane": "ledger-cx",
+            "job": "git commit, full gate",
+            "rss": "3.1 GiB",
+            "grant": "grant-demo-07",
+            "started": "started 13:21",
+            "procs": [
+              ["41822", "node gate.js --full", "1.9 GiB"],
+              ["41840", "tsc -b", "0.8 GiB"],
+              ["41851", "vitest run", "0.3 GiB"],
+              ["41860", "eslint .", "0.1 GiB"]
+            ]
+          },
+          {
+            "lane": "quill-rv",
+            "job": "test, e2e",
+            "rss": "1.6 GiB",
+            "grant": "no grant on cmdline",
+            "started": "started 13:39",
+            "procs": [
+              ["41977", "playwright test", "0.6 GiB"],
+              ["41990", "chromium --headless", "1.0 GiB"]
+            ]
+          }
+        ],
+        "holderUnknown": [
+          {
+            "lane": "atlas-orch",
+            "job": "build, storefront",
+            "rss": "2.4 GiB",
+            "grant": "no grant on cmdline",
+            "started": "started 14:10",
+            "procs": [
+              ["42011", "vite build", "1.7 GiB"],
+              ["42019", "esbuild --service", "0.7 GiB"]
+            ]
+          }
+        ]
+      },
+      "previews": {
+        "two": [
+          {
+            "label": "storefront",
+            "port": 5173
+          },
+          {
+            "label": "docs site",
+            "port": 5180
+          }
+        ],
+        "all": [
+          {
+            "label": "storefront",
+            "port": 5173
+          },
+          {
+            "label": "docs site",
+            "port": 5180
+          },
+          {
+            "label": "admin",
+            "port": 5187
+          },
+          {
+            "label": "checkout",
+            "port": 5194
+          },
+          {
+            "label": "design | live",
+            "port": 5201
+          },
+          {
+            "label": "storybook",
+            "port": 5208
+          },
+          {
+            "label": "api mock",
+            "port": 5215
+          },
+          {
+            "label": "email preview",
+            "port": 5222
+          },
+          {
+            "label": "status page",
+            "port": 5229
+          },
+          {
+            "label": "blog",
+            "port": 5236
+          },
+          {
+            "label": "search ui",
+            "port": 5243
+          },
+          {
+            "label": "onboarding",
+            "port": 5250
+          },
+          {
+            "label": "billing",
+            "port": 5257
+          },
+          {
+            "label": "reports",
+            "port": 5264
+          },
+          {
+            "label": "help centre",
+            "port": 5271
+          }
+        ]
+      },
+      "previewFold": 6,
+      "topFold": 8,
+      "top": {
+        "few": {
+          "agents": [
+            {
+              "agent": "ledger-cx",
+              "pane": "w2B:p19",
+              "rss": "1.2 GiB",
+              "procs": 3
+            },
+            {
+              "agent": "atlas-orch",
+              "pane": "w1A:p04",
+              "rss": "0.9 GiB",
+              "procs": 2
+            },
+            {
+              "agent": "quill-rv",
+              "pane": "w3C:p11",
+              "rss": "0.6 GiB",
+              "procs": 2
+            },
+            {
+              "agent": "tern-docs",
+              "pane": "w2B:p22",
+              "rss": "0.4 GiB",
+              "procs": 1
+            }
+          ],
+          "other": {
+            "agent": "Other (system, browsers)",
+            "rss": "11.7 GiB",
+            "procs": 214
+          }
+        },
+        "all": {
+          "agents": [
+            {
+              "agent": "ledger-cx",
+              "pane": "w2B:p19",
+              "rss": "3.4 GiB",
+              "procs": 7
+            },
+            {
+              "agent": "atlas-orch",
+              "pane": "w1A:p04",
+              "rss": "2.9 GiB",
+              "procs": 5
+            },
+            {
+              "agent": "quill-rv",
+              "pane": "w3C:p11",
+              "rss": "1.8 GiB",
+              "procs": 4
+            },
+            {
+              "agent": "tern-docs",
+              "pane": "w2B:p22",
+              "rss": "1.1 GiB",
+              "procs": 3
+            },
+            {
+              "agent": "moss-ci",
+              "pane": "w4A:p02",
+              "rss": "0.9 GiB",
+              "procs": 3
+            },
+            {
+              "agent": "fern-ux",
+              "pane": "w1A:p07",
+              "rss": "0.7 GiB",
+              "procs": 2
+            },
+            {
+              "agent": "slate-qa",
+              "pane": "w3C:p15",
+              "rss": "0.6 GiB",
+              "procs": 2
+            },
+            {
+              "agent": "kite-sec",
+              "pane": "w2B:p30",
+              "rss": "0.4 GiB",
+              "procs": 1
+            },
+            {
+              "agent": "wren-ops",
+              "pane": "w4A:p09",
+              "rss": "0.3 GiB",
+              "procs": 1
+            },
+            {
+              "agent": "pike-data",
+              "pane": "w1A:p12",
+              "rss": "0.2 GiB",
+              "procs": 1
+            },
+            {
+              "agent": "lark-ui",
+              "pane": "w3C:p18",
+              "rss": "0.1 GiB",
+              "procs": 1
+            }
+          ],
+          "other": {
+            "agent": "Other (system, browsers)",
+            "rss": "10.5 GiB",
+            "procs": 231
+          }
+        },
+        "pids": {
+          "notice": "Agent names unavailable: herdr is not answering.",
+          "agents": [
+            {
+              "agent": "pid 41822",
+              "pane": "\u2014",
+              "rss": "3.4 GiB",
+              "procs": 7
+            },
+            {
+              "agent": "pid 42011",
+              "pane": "\u2014",
+              "rss": "2.9 GiB",
+              "procs": 5
+            },
+            {
+              "agent": "pid 41977",
+              "pane": "\u2014",
+              "rss": "1.8 GiB",
+              "procs": 4
+            },
+            {
+              "agent": "pid 40310",
+              "pane": "\u2014",
+              "rss": "1.1 GiB",
+              "procs": 3
+            }
+          ],
+          "other": {
+            "agent": "Other (system, browsers)",
+            "rss": "11.7 GiB",
+            "procs": 214
+          }
+        }
+      },
+      "unknownState": {
+        "title": "Unknown state",
+        "text": "No state with that id in fixture.json.",
+        "known": "Known states"
+      },
+      "states": {
+        "live-healthy": {
+          "name": "Host resources, healthy",
+          "nav": "standard",
+          "module": "hostResources",
+          "reading": "healthy",
+          "gate": "free",
+          "jobs": "none",
+          "previews": "two",
+          "top": "few",
+          "regions": ["nav", "header", "memory", "trend", "cpu", "disk", "gate", "jobs", "previews", "top"]
+        },
+        "live-busy": {
+          "name": "Host resources, busy",
+          "nav": "standard",
+          "module": "hostResources",
+          "reading": "busy",
+          "gate": "busy",
+          "jobs": "busy",
+          "previews": "all",
+          "top": "all",
+          "openFirstJob": true,
+          "regions": ["nav", "header", "memory", "trend", "cpu", "disk", "gate", "jobs", "previews", "top"]
+        },
+        "gate-holder-unknown": {
+          "name": "Host resources, gate holder unknown",
+          "nav": "standard",
+          "module": "hostResources",
+          "reading": "busy",
+          "gate": "holderUnknown",
+          "jobs": "holderUnknown",
+          "previews": "all",
+          "top": "all",
+          "openFirstJob": false,
+          "regions": ["nav", "header", "memory", "trend", "cpu", "disk", "gate", "jobs", "previews", "top"]
+        },
+        "below-abort": {
+          "name": "Host resources, below abort",
+          "nav": "standard",
+          "module": "hostResources",
+          "reading": "abort",
+          "gate": "busy",
+          "jobs": "busy",
+          "previews": "all",
+          "top": "all",
+          "regions": ["nav", "header", "memory", "trend", "cpu", "disk", "gate", "jobs", "previews", "top"]
+        },
+        "lock-held-too-long": {
+          "name": "Host resources, gate held too long",
+          "nav": "standard",
+          "module": "hostResources",
+          "reading": "lock",
+          "gate": "over",
+          "jobs": "over",
+          "previews": "all",
+          "top": "all",
+          "regions": ["nav", "header", "memory", "trend", "cpu", "disk", "gate", "jobs", "previews", "top"]
+        },
+        "stale": {
+          "name": "Host resources, stale",
+          "nav": "standard",
+          "module": "hostResources",
+          "reading": "stale",
+          "gate": "busy",
+          "jobs": "busy",
+          "previews": "all",
+          "top": "all",
+          "regions": ["nav", "header", "memory", "trend", "cpu", "disk", "gate", "jobs", "previews", "top"]
+        },
+        "host-offline": {
+          "name": "Host resources, host offline",
+          "nav": "standard",
+          "module": "hostResources",
+          "reading": "offline",
+          "gate": "busy",
+          "jobs": "busy",
+          "previews": "all",
+          "top": "all",
+          "regions": ["nav", "header", "notice", "memory", "trend", "cpu", "disk", "gate", "jobs", "previews", "top"]
+        },
+        "host-offline-never": {
+          "name": "Host resources, no reading yet",
+          "nav": "standard",
+          "module": "hostResources",
+          "kind": "never",
+          "regions": ["nav", "header", "notice"]
+        },
+        "section-unavailable": {
+          "name": "Host resources, gate and agent names unavailable",
+          "nav": "standard",
+          "module": "hostResources",
+          "reading": "healthy",
+          "gate": "notConfigured",
+          "jobs": "notConfigured",
+          "previews": "two",
+          "top": "pids",
+          "regions": ["nav", "header", "memory", "trend", "cpu", "disk", "gate", "jobs", "previews", "top"]
+        },
+        "warming-up": {
+          "name": "Host resources, warming up",
+          "nav": "standard",
+          "module": "hostResources",
+          "reading": "warm",
+          "gate": "free",
+          "jobs": "none",
+          "previews": "two",
+          "top": "few",
+          "regions": ["nav", "header", "memory", "trend", "cpu", "disk", "gate", "jobs", "previews", "top"]
+        },
+        "loading": {
+          "name": "Host resources, loading",
+          "nav": "standard",
+          "module": "hostResources",
+          "kind": "loading",
+          "regions": ["nav", "header", "memory", "trend", "cpu", "disk", "gate", "jobs", "previews", "top"]
+        }
+      }
+    }
+  }
+}

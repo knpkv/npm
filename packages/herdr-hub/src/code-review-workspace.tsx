@@ -30,6 +30,8 @@ import { codeSelectionSearch, type CodeSelection } from "./code-selection.js"
 import { useCodeRead } from "./internal/use-code-read.js"
 import { codeModule, moduleHref, type ModulePageMount } from "./modules.js"
 
+const maximumDefaultContentReads = 20
+
 const fileFailureWords = {
   binary: "Binary content is not shown.",
   oversized: "This file exceeds the display limit. Use the Code owner UI on the credential host to inspect it.",
@@ -133,7 +135,17 @@ export function useCodeReviewWorkspace({
         const files: Array<ReviewFileReading> = []
         let before: string | null = null
         let after: string | null = null
-        for (const { file, query } of contentQueries) {
+        for (const [position, { file, query }] of contentQueries.entries()) {
+          if (position >= maximumDefaultContentReads) {
+            files.push({
+              file,
+              unavailable: null,
+              raw: null,
+              failure: null,
+              parsed: Result.fail(new ReviewDiffFileError({ reason: "display_limit" }))
+            })
+            continue
+          }
           const fetched = yield* Effect.result(reads.content(query))
           if (Result.isFailure(fetched)) {
             files.push({ file, unavailable: null, parsed: null, raw: null, failure: fetched.failure.reason })

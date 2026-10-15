@@ -1,6 +1,6 @@
 {
   "original": "Approved Export66 visual content retained. Lifecycle and region metadata changes are documented below.",
-  "corrected_export_sha256": "161c1a69e1246fb0aa5af169576d4953ccd8e54cd468092da3f019194187a807",
+  "corrected_export_sha256": "3217e9cd62724697b5a3b3e5c6734e53cc13a2aa9561577b90eada20afbc86e0",
   "themes": ["dark"],
   "new_states": 18,
   "rendered_dark_frames": 66,
@@ -13,7 +13,7 @@
   },
   "read_only_variants": 6,
   "source_reload_fix": "Source-owned breakpoint-change guard. No enrollment lifecycle filter.",
-  "source_export": "25",
+  "source_export": "26",
   "verified_source_manifest_files": 17,
-  "reference_set": "Export25 replaces integrated23;24 was superseded and never integrated. Dismissed CARD label includescomma plus separate14px/430secondarypre-wrap note. INDEXentirestatus remains compact12px/520 identical23. Designer per-elementDOM/style proof limits changevs23 toCARDsplit. Four dual-notice mappings/multiplicity retained;17sourcehashesverified. No fresh product conformance verdict."
+  "reference_set": "Export26 adds incoming main Host resources desktop nav data after Usage. Phone bar/HTML/CSS/fonts and all33state region catalogs unchanged. Designer proves33phone frames identical and33desktop differences limited to new nav item/height/Settings auto margin. Export25 revision retained immutable for existing pinned fixture unit datasets; current capture refs and fixture select26. No product/adapter/threshold change or fresh capture claim."
 }

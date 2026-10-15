@@ -1,7 +1,7 @@
 import { NodeServices } from "@effect/platform-node"
 import { expect, it } from "@effect/vitest"
 import { type ReviewRun } from "@knpkv/review"
-import { Effect, FileSystem, Path } from "effect"
+import { Effect, Exit, FileSystem, Option, Path, PlatformError } from "effect"
 import { makeReviewRunReader } from "../src/server/review/ReviewRunReader.js"
 import { makeReviewRunStore } from "../src/server/review/ReviewRunStore.js"
 
@@ -137,6 +137,55 @@ it.layer(NodeServices.layer)("completed review persistence", (it) => {
         yield* fs.writeFileString(file, text)
         expect((yield* store.save(run))._tag).toBe("Saved")
         expect(yield* reader.read(run.identity)).toEqual(run)
+      }
+    }))
+
+  it.effect("failed temporary cleanup cannot replace the typed history save failure", () =>
+    Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      for (
+        const { cleanupFails, renameFails } of [
+          { cleanupFails: false, renameFails: false },
+          { cleanupFails: true, renameFails: false },
+          { cleanupFails: false, renameFails: true },
+          { cleanupFails: true, renameFails: true }
+        ]
+      ) {
+        const directory = yield* fs.makeTempDirectoryScoped()
+        let cleanupAttempts = 0
+        const failing = FileSystem.makeNoop({
+          ...fs,
+          rename: (from, to) =>
+            renameFails ?
+              Effect.fail(PlatformError.systemError({
+                _tag: "PermissionDenied",
+                module: "FileSystem",
+                method: "rename"
+              })) :
+              fs.rename(from, to),
+          remove: (file, options) => {
+            cleanupAttempts++
+            return cleanupFails
+              ? Effect.fail(PlatformError.systemError({
+                _tag: "PermissionDenied",
+                module: "FileSystem",
+                method: "remove"
+              }))
+              : fs.remove(file, options)
+          }
+        })
+        const store = yield* makeReviewRunStore(directory).pipe(
+          Effect.provideService(FileSystem.FileSystem, failing)
+        )
+        const saved = yield* Effect.exit(store.save(run))
+        expect(Exit.hasDies(saved)).toBe(false)
+        expect(saved._tag).toBe(renameFails ? "Failure" : "Success")
+        if (saved._tag === "Success") expect(saved.value).toEqual({ _tag: "Saved", run })
+        const failure = Exit.findErrorOption(saved)
+        expect(Option.isSome(failure)).toBe(renameFails)
+        if (Option.isSome(failure)) expect(failure.value.reason).toBe("io")
+        expect(cleanupAttempts).toBe(1)
+        if (!cleanupFails && renameFails) expect(yield* fs.readDirectory(directory)).toEqual([])
       }
     }))
 })

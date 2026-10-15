@@ -155,3 +155,13 @@ export const codeModule = defineModule({
   listeners: ["serve"],
   requires: ["read"]
 })
+
+/** Local host observations only; no operational actions or peer aggregation. */
+export const resourcesModule = defineModule({
+  id: "resources",
+  label: "Host resources",
+  defaultPage: "overview",
+  pages: [{ id: "overview", label: "Host resources" }],
+  listeners: ["serve"],
+  requires: ["read"]
+})

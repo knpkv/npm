@@ -33,12 +33,20 @@ only while working; CI and review can remain pending after the agent is idle
 or done. Without such evidence, those lifecycle states map to `idle` and `done`.
 Unsupported states or absent evidence are `unknown`.
 
-The host adapter currently supplies decoded Herdr lifecycle state only. It does
-not yet read provider session tools, command outcomes, or branch-linked Work/CI
-and review state. Working agents therefore report `unknown` until those
-producers are connected. Directory names, terminal text, and work labels are
-never evidence. `AgentTaskFacts` is a host-private input contract, not an agent
-wire field; tool content and command arguments do not enter `AgentSummary`.
+The host adapter supplies decoded Herdr lifecycle state and bounded local
+session evidence for Claude and Codex. It matches existing Work PR observations
+to the agent's current Git origin and branch. Missing, unsupported, malformed,
+ambiguous, or unavailable evidence remains `unknown`. Directory names, terminal
+text, and work labels are never evidence. `AgentTaskFacts` is a host-private
+input contract, not an agent wire field; tool content, arguments, log paths,
+and PR details do not enter `AgentSummary`.
+
+Only direct supported tools and commands classify. Codex JavaScript
+orchestration wrappers remain unknown; their source is never parsed. A matching
+tool result ends running activity; structured test/build failure evidence can
+produce `failing`. CI/review facts use the existing local HTTP-owned Work view,
+with no new provider or peer fan-out. Hosts without those observations report
+unknown CI/review evidence. See the hub README for supported sources and bounds.
 
 The Fleet service shares one observation sequence across both endpoints. It
 publishes the first observation immediately, then requires the same candidate
@@ -68,6 +76,8 @@ The coordinator's orchestrator database (`@effect/sql-sqlite-node`) keeps its ow
 `HostConfiguration.machines` stores `{ host, nodeId }` for every fleet machine. Both fields must be unique. Tailscale adapters use the stable node ID as authority and treat the hostname only as a consistency check.
 
 `HostConfiguration.workBindAddress` is the explicit IPv4 loopback address (`127.0.0.0/8`) for the local-only Work listener. It defaults to `127.0.0.1`. That listener has no authentication of its own, so wildcard and non-loopback addresses are invalid; use `lanWork` for paired LAN access. The Work and local listeners must use distinct ports when `crossHost` is disabled.
+
+`HostConfiguration.heavyGate` optionally contains an absolute `lockDirectory` for hostd's read-only Host resources module. It has no default. The directory contains `heavy-gate.lock`, `heavy-gate-2.lock` and the optional `full-gate-waiting` marker. Omitting the object makes gate and heavy-job readings unavailable with `reason: "not_configured"`; this configuration does not acquire, release or change any lock. Configuration decoding rejects relative or empty paths.
 
 `HostConfiguration.lanWork` is an opt-in LAN Work listener configuration with an explicit bind `address`, browser `host`, and TCP `port`. Its port must not collide with the local, Work, or approval listeners. The approvals runtime exposes only the read-only Work pairing boundary on this listener; it prints a five-minute single-use code after startup, accepts pairing only from the exact configured origin, and keeps approvals, Connect, chat, secrets, agent control, and job submission unavailable. LAN Work uses plain HTTP and therefore requires a trusted LAN or an authenticated TLS boundary before credentials cross an untrusted link.
 

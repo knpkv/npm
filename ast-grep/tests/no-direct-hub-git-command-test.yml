@@ -1,0 +1,17 @@
+id: no-direct-hub-git-command
+valid:
+  - |
+    makeHostCommand("git", ["init", repo])
+  - |
+    makeHostCommand(command, commandLine.slice(1), { cwd })
+  - |
+    ChildProcess.make("nix", ["build"])
+  - |
+    ChildProcess.make(command.command, command.args, { ...command.options, env, extendEnv: true })
+invalid:
+  - |
+    ChildProcess.make("git", ["init", repo])
+  - |
+    ChildProcess.make("git", ["-C", repo, "config", "remote.origin.url", fixtureUrl], { cwd })
+  - |
+    ChildProcess.make(command, commandLine.slice(1), { cwd: config.repository })

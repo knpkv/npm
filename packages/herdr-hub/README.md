@@ -136,11 +136,35 @@ For target panels opened through `mount.navigate(href, "push", null)`, call `mou
 
 ### Connect home and flat navigation
 
-The canonical hub opens Connect at `#connect/overview`. Its flat sidebar and phone bar list installed Connect, Fleet, Code and Usage modules. More contains settings and any installed module outside the phone bar; it has no placeholders or Appearance control. `primaryModules` optionally groups the sidebar's primary destinations and is typed against the registered views. The required `session` prop supplies access (`tailscale` or `loopback`) and connection state. Connected shows the access label and green dot; stale carries `observedAt` and shows the retained reading time while reconnecting; unavailable means there is no reading. The dashboard composition always has its bootstrap and therefore emits stale, rather than unavailable, after a failed refresh. `terminalOwnsKeys` defaults to false; only an active connected Connect terminal reserves Ask Relay summon keys. Inactive module portals must follow `mount.active` while their owners stay alive.
+The canonical hub opens Connect at `#connect/overview`. Its flat sidebar lists Connect, Fleet, Code, Usage and Host resources, in that order. The phone bar keeps Connect, Fleet, Code and Usage; Host resources is available through More. More also contains settings and any other installed module outside the phone bar; it has no placeholders or Appearance control. `primaryModules` optionally groups the sidebar's primary destinations and is typed against the registered views. The required `session` prop supplies access (`tailscale` or `loopback`) and connection state. Connected shows the access label and green dot; stale carries `observedAt` and shows the retained reading time while reconnecting; unavailable means there is no reading. The dashboard composition always has its bootstrap and therefore emits stale, rather than unavailable, after a failed refresh. `terminalOwnsKeys` defaults to false; only an active connected Connect terminal reserves Ask Relay summon keys. Inactive module portals must follow `mount.active` while their owners stay alive.
 
 Canonical Fleet uses `fleetHubModule`, retaining only Approvals and Work. The standalone `fleetModule` keeps all four legacy pages. Connect home uses the existing Connect atoms and owner for the directory, stage and terminal. Ready and Idle share the Ready group; unknown states and remembered offline-host agents appear in Unknown with caution words. Recently done carries no claim about completion today. The approvals strip subscribes to the existing directory snapshot and polls the same bounded approval collector separately; approvals and agents have distinct counts.
 
 Historical `#today`, `#today/overview`, `#fleet/connect` and `?tab=connect` destinations migrate to Connect home only when the old page is absent and Connect is installed. `#fleet/usage` and `?tab=usage` then migrate to Usage By tool, retaining selectors. A source that remains registered stays reachable. The public `todayModule` and `TodayView` exports remain available for other embedders, but Today is absent from both canonical hub registries, and its old API returns 404.
+
+### Host resources
+
+`#resources/overview` opens read-only observations for the host serving this hub. `GET /v1/host/resources` uses the same listener authorization as `/v1/connect/usage`, sends `Cache-Control: no-store`, and never aggregates peers. The exported `HostResources` schema and `HostResourcesView` describe the wire snapshot and presentation. Each section is a `Reading` or an `Unavailable` with a reason, so a failed source does not erase other readings.
+
+hostd samples Linux memory, CPU/load, filesystem capacity, gate holders, heavy jobs, preview listeners and RSS by pane every ten seconds. Memory and CPU histories retain at most 360 timestamped samples in memory for one hour; restarting hostd starts fresh history. Memory uses `MemAvailable`, with exported thresholds of 8 GiB for heavy start and 3 GiB for abort. The browser polls only while this module is active and visible. Its own clock marks a sample stale after more than 30 seconds. A failed refresh retains the last values with an offline label; no previous sample produces the no-reading state.
+
+Set the optional fleet field `heavyGate.lockDirectory` to an absolute directory containing `heavy-gate.lock`, `heavy-gate-2.lock` and, when present, `full-gate-waiting`. There is no default. Omission makes gate and heavy-jobs sections `Unavailable` with `reason: "not_configured"`. For example:
+
+```json
+{ "heavyGate": { "lockDirectory": "/run/user/1000/heavy-gate" } }
+```
+
+Gate inspection is read-only. A lock record in a descriptor's own fdinfo proves retention after exact resolved-path and fstat device/inode checks, including after the acquiring process exits. Global kernel records only corroborate ownership; PID 0 and an absent global record do not erase a verified holder. Each slot reports `Held`, `Free` or `Unknown`, all proven retaining PIDs and its primary topmost retaining root. Exited processes and ordinary pipe, socket or anonymous descriptors do not prevent a free observation. Newly appeared PIDs are scanned directly; a retainer without process metadata, unreadable ownership evidence or an unresolved kernel lock yields `Unknown` with `reason: "ownership_unknown"`. A missing or unreadable configured directory makes gate and jobs unavailable; absent lock files inside a readable directory remain free. Unknown slots show no holder facts; Heavy jobs contains only proven roots. Heavy jobs lists every distinct proven root once, with disjoint process/RSS membership, including roots sharing a slot. A job retaining both slots appears once.
+
+Age starts at that process's start time; the earlier of its 30-minute limit and an actual descendant `timeout` deadline determines `heldTooLong`, including the limit kind and minutes. An explicit `--grant` is shown; absence reads "no grant on cmdline". Lane attribution uses the pane environment key and current Herdr names; missing or invalid names, including those longer than 1024 characters, retain PID fallback rows and pane IDs. Oversized optional argv or environment reads degrade that process only.
+
+Command display defaults to the executable basename plus an ellipsis. Only a complete match of the explicit pnpm, npm, git, node, tsc, vitest or eslint allow-list expands subcommands and value-less flags within 120 characters. Shells anywhere in wrapped argv remain opaque; assignments, URLs, unknown option values and long tokens never pass through. Timeout deadlines accept known GNU options and finite C-locale decimal durations; locale-specific and hexadecimal forms remain unproven. Raw argv, environment and working directories stay on the server. The normalized snapshot, pane IDs, grant IDs and bounded command display are authenticated client-visible operational data, not public status data.
+
+Previews use the coordinator index's port ranges and process exclusions. Labels come from the configured labels file or the basename of the real path of `/proc/<pid>/exe` plus the port. No argv entry, including argv[0], working directory or worktree name supplies label text. The full executable path stays on the server. If that executable link cannot be read, the label contains only the port. The ten-second scan lists listeners without HTTP requests. A separate scoped loop refreshes Tailscale's local DNS name and probes loopback status headers every 60 seconds, with four concurrent probes and a two-second timeout per request. Certificate verification is disabled only on that loopback probe client. Open links use the discovered scheme and local Tailscale DNS name, never the loopback probe URL or the approval hub's hostname. Unprobed, unreachable, loopback-only or unnamed previews remain listed with an unavailable reason. This module has no kill, stop, release, retry or terminal-open action.
+
+CPU history breaks its path after a sampling gap longer than 15 seconds. Filesystem readings carry their observed `fsType`; only `tmpfs` uses `/tmp` memory/quota presentation. Other filesystem types use the same capacity row as `/` and `/home`.
+
+The resources superapp browser cases run inventory, theme and geometry checks without private design assets. After building Hub and its workspace dependencies, run `pnpm --filter @knpkv/herdr-hub test:browser:superapp`. Set `HOST_RESOURCES_DESIGN_DIRECTORY` to a reference directory to attach design PNGs as well. When set, every reference is mandatory: 11 states at 390/1280 in light/dark, named `host-resources--<state>--<width>-<theme>.png`. The collection regression runs without a browser or asset build and checks both the plain checkout and configured-reference paths.
 
 ### Usage details
 
@@ -252,12 +276,65 @@ The Connect live directory serves an optional `hue` palette assigned by each hos
 
 ### Agent task signals
 
-The local Herdr inventory adapter supplies `taskKind` from decoded lifecycle
-state. Fleet debounces kind changes for 500ms across agent/status reads.
-Working agents without supported activity evidence report `unknown`; the
-adapter does not infer tasks or CI failures from terminal text, work labels, or
-non-zero command exits. Provider-session tool activity and branch-linked
-Work/CI and review producers remain a separate follow-up. Only the normalized
-kind enters the fleet agent wire contract.
+The local Herdr inventory adapter supplies `taskKind` from decoded lifecycle,
+session activity, and existing Work PR evidence. Fleet debounces changes for
+500ms across agent/status reads. Unsupported or unavailable evidence remains
+`unknown`; terminal text and work labels are never scraped or interpreted.
+
+Session identity comes from Herdr's `agent_session`. Claude IDs resolve in the
+reported starting project's transcript directory; Codex UUIDv7 IDs resolve in
+the three possible local-date directories around their creation date. Explicit
+session paths must resolve inside the matching provider's session root.
+`CLAUDE_CONFIG_DIR` and `CODEX_HOME` override the default roots below `HOME`.
+Absolute overrides work without `HOME`; missing defaults and relative overrides
+remain unavailable for that provider. Claude project directories replace every
+non-alphanumeric character with `-`, including underscores. Hashed names for
+encoded project paths longer than 200 characters are unsupported and remain unknown.
+There is no newest-session fallback, and out-of-root symlinks are rejected.
+Each read seeks to at most the last 128KiB; a cut leading record is discarded,
+and malformed or incomplete trailing records produce unknown activity.
+
+Direct Claude Read/Grep/Glob, Edit/Write and Bash calls and native Codex
+read/apply-patch/command calls classify from decoded records. Only simple direct
+read/search or test/build commands are recognized. Shell control flow and
+JavaScript orchestration wrappers remain unknown. Tool results are correlated
+by a nonempty call ID; malformed calls without one reset activity to unknown.
+Unrelated Codex content-item results do not hide newer calls. Claude error flags and structured native Codex exit codes can mark
+a test/build failure. An ordinary non-zero exit never yields `failing`, and
+free-form result text is not parsed for a claimed exit status.
+
+The HTTP scope privately registers its existing Work reader. Current Git
+origin and branch match a unique open PR observation; stale, failed, ambiguous,
+unsupported-origin, detached-head and unmatched reads stay unknown. Work exposes
+only the oldest source failure, so any failure on the matching goal suppresses
+CI/review evidence, including an agent-only failure with an otherwise healthy PR.
+Any omitted goals or observations also suppress CI/review evidence because
+uniqueness cannot be established. A PR must have been confirmed within five
+minutes of the host read. This bounds retained task state when observation stops;
+an unchanged successful confirmation renews the limit without changing the
+first-observed time. Future-dated confirmations remain unknown.
+The adapter
+queries each distinct working directory once per inventory, with at most four
+directories in flight. Git children clear inherited repository-local environment
+variables so a hook cannot redirect their reads or fixture writes to its repository.
+The registration follows operations composition and
+is detached before Work closes; late cleanup cannot detach a newer reader.
+No public callback or HTTP option is added. This reads the local Work view,
+including its omission/retention limits, without new provider or peer fan-out.
+Hosts whose Work view lacks the PR therefore have unknown CI/review evidence.
+
+Provider logs, origin locators and their paths are server-private and may be
+credential-bearing. They are read on the owning host only. Tool content,
+arguments, outputs, session paths and PR details are never added to fleet
+responses; only the normalized kind is added. Work-read warnings log the typed
+cause tag, not its contents.
+
+Codex orchestration-wrapper support is tracked in
+[#919](https://github.com/knpkv/npm/issues/919). In one bounded 1MiB rollout sample
+of 500 records, all 60 calls stayed unknown: 50 JavaScript wrappers and 10 sleep
+calls, with no separate typed nested read/write/command events. This is a local
+sample, not a fleet-wide estimate; lifecycle and Work signals remain independent.
 
 On the full Code review page, retained-read failure, previous-reading time and any host-owned retry precede PR metadata. A retry for content alone sits in Diff. Read and focus ownership stay mounted across these placements; saved-history/comments failures keep their single workspace-owned retry.
+
+The default Code Review view attempts content reads for at most 20 files per reading, in order. Every changed-file row remains visible; later files use the existing aggregate display-limit notice. Narrowing the URL to a single file reads only that file, including files beyond the default limit.

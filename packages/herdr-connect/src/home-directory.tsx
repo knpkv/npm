@@ -4,6 +4,7 @@ import { useId, useLayoutEffect, useRef, useState, type ComponentProps, type Rea
 import { AgentStateLabel } from "./agent-state.js"
 import { connectAgentGroup, type ConnectAgentGroup } from "./agent-state-core.js"
 import { Creature } from "./creature.js"
+import { CreatureNeighbours } from "./creature-neighbours.js"
 import type { AgentDirectory } from "./view.js"
 import {
   AgentStateGlyph,
@@ -166,90 +167,93 @@ export const ConnectHomeDirectory = ({
                 </button>
               )}
             </header>
-            <div className="connect-home-cards">
-              {grouped.map(({ agent, issue, key: rowKey }) => {
-                const key = connectAgentKey(agent)
-                const hostSilent = offline(agent.host)
-                const old = stale || hostSilent
-                const parent = agents.find(
-                  (candidate) =>
-                    candidate.host.toLowerCase() === agent.host.toLowerCase() &&
-                    candidate.id === agent.relationship?.parentAgentId
-                )
-                return (
-                  <button
-                    aria-pressed={selectedKey === key}
-                    className="connect-agent connect-home-agent"
-                    data-agent-key={key}
-                    data-lineage-issue={issue ?? "none"}
-                    disabled={connectAgentIdentityAmbiguous(agents, agent)}
-                    key={rowKey}
-                    onClick={() => onSelect(agent)}
-                    type="button"
-                  >
-                    <Creature
-                      arrived={arrivals.has(key)}
-                      host={agent.host}
-                      hueFamily={agent.hue}
-                      id={String(agent.id)}
-                      name={agent.name}
-                      size="row"
-                      stale={old}
-                      state={agent.state}
-                      statePolicy="home"
-                    />
-                    <AgentStateGlyph state={agent.state} />
-                    <span className="connect-agent-copy">
-                      <span className="connect-home-agent-title">
-                        <Text as="strong" variant="label">
-                          {agent.name}
-                        </Text>
-                        <span data-home-state="">
-                          {hostSilent ? (
-                            <StateLabel icon="minus" label="Unknown" tone="neutral" size="compact" />
-                          ) : (
-                            <AgentStateLabel state={agent.state} statePolicy="home" />
-                          )}
+            <CreatureNeighbours agents={grouped.map(({ agent }) => agent)}>
+              <div className="connect-home-cards">
+                {grouped.map(({ agent, issue, key: rowKey }) => {
+                  const key = connectAgentKey(agent)
+                  const hostSilent = offline(agent.host)
+                  const old = stale || hostSilent
+                  const parent = agents.find(
+                    (candidate) =>
+                      candidate.host.toLowerCase() === agent.host.toLowerCase() &&
+                      candidate.id === agent.relationship?.parentAgentId
+                  )
+                  return (
+                    <button
+                      aria-pressed={selectedKey === key}
+                      className="connect-agent connect-home-agent"
+                      data-agent-key={key}
+                      data-lineage-issue={issue ?? "none"}
+                      disabled={connectAgentIdentityAmbiguous(agents, agent)}
+                      key={rowKey}
+                      onClick={() => onSelect(agent)}
+                      type="button"
+                    >
+                      <Creature
+                        arrived={arrivals.has(key)}
+                        host={agent.host}
+                        hueFamily={agent.hue}
+                        taskKind={agent.taskKind}
+                        id={String(agent.id)}
+                        name={agent.name}
+                        size="row"
+                        stale={old}
+                        state={agent.state}
+                        statePolicy="home"
+                      />
+                      <AgentStateGlyph state={agent.state} />
+                      <span className="connect-agent-copy">
+                        <span className="connect-home-agent-title">
+                          <Text as="strong" variant="label">
+                            {agent.name}
+                          </Text>
+                          <span data-home-state="">
+                            {hostSilent ? (
+                              <StateLabel icon="minus" label="Unknown" tone="neutral" size="compact" />
+                            ) : (
+                              <AgentStateLabel state={agent.state} statePolicy="home" />
+                            )}
+                          </span>
                         </span>
-                      </span>
-                      <Text as="small" tone="secondary" variant="meta">
-                        {issue !== null ? (
-                          "Relationship unresolved"
-                        ) : agent.relationship === undefined ? (
-                          "Primary"
+                        <Text as="small" tone="secondary" variant="meta">
+                          {issue !== null ? (
+                            "Relationship unresolved"
+                          ) : agent.relationship === undefined ? (
+                            "Primary"
+                          ) : (
+                            <>
+                              {connectRelationLabel(agent.relationship.relation)}
+                              {parent === undefined ? null : ` with ${parent.name}`}
+                            </>
+                          )}
+                          {`, ${agent.host}`}
+                        </Text>
+                        {group === "ready" ? (
+                          <span>
+                            Idle since{" "}
+                            <time dateTime={new Date(agent.lastActivityAt).toISOString()}>
+                              {readTime(agent.lastActivityAt)}
+                            </time>
+                          </span>
                         ) : (
                           <>
-                            {connectRelationLabel(agent.relationship.relation)}
-                            {parent === undefined ? null : ` with ${parent.name}`}
+                            {group !== "finished" && !hostSilent ? null : (
+                              <span className="connect-home-last-activity">
+                                Last activity{" "}
+                                <time dateTime={new Date(agent.lastActivityAt).toISOString()}>
+                                  {readTime(agent.lastActivityAt)}
+                                </time>
+                              </span>
+                            )}
+                            <span className="connect-agent-work">{agent.voice?.text ?? agent.work}</span>
                           </>
                         )}
-                        {`, ${agent.host}`}
-                      </Text>
-                      {group === "ready" ? (
-                        <span>
-                          Idle since{" "}
-                          <time dateTime={new Date(agent.lastActivityAt).toISOString()}>
-                            {readTime(agent.lastActivityAt)}
-                          </time>
-                        </span>
-                      ) : (
-                        <>
-                          {group !== "finished" && !hostSilent ? null : (
-                            <span className="connect-home-last-activity">
-                              Last activity{" "}
-                              <time dateTime={new Date(agent.lastActivityAt).toISOString()}>
-                                {readTime(agent.lastActivityAt)}
-                              </time>
-                            </span>
-                          )}
-                          <span className="connect-agent-work">{agent.voice?.text ?? agent.work}</span>
-                        </>
-                      )}
-                    </span>
-                  </button>
-                )
-              })}
-            </div>
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+            </CreatureNeighbours>
           </section>
         )
       })}

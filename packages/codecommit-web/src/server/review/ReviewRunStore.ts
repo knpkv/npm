@@ -47,7 +47,11 @@ export const makeReviewRunStore = Effect.fn("ReviewRunStore.owner")(function*(di
       yield* Effect.acquireUseRelease(
         fs.writeFileString(temporary, text, { flag: "wx", mode: 0o600 }),
         () => fs.rename(temporary, destination),
-        () => fs.remove(temporary, { force: true }).pipe(Effect.orDie)
+        () =>
+          fs.remove(temporary, { force: true }).pipe(
+            Effect.catchTag("PlatformError", (failure) =>
+              Effect.logWarning("Completed review temporary-file cleanup failed", failure))
+          )
       )
       return { _tag: "Saved", run } satisfies ReviewRunSaved
     },
