@@ -255,3 +255,62 @@ it.effect("painted border color, style, width and removal remain required token 
       }
     }
   }))
+
+it.effect("hidden borders remain significant even at zero width in both comparators", () =>
+  Effect.sync(() => {
+    const image = new PNG({ width: 10, height: 10 })
+    image.data.fill(255)
+    const frame = PNG.sync.write(image)
+    for (const property of ["border-top", "border-right", "border-bottom", "border-left"]) {
+      const evidence = (border: string): Capture => ({
+        frame,
+        snapshot: {
+          ...snapshot,
+          regions: snapshot.regions.map((region) => ({ ...region, styles: { [property]: border } }))
+        },
+        regions: new Map([["content", RegionPixels.Image({ bytes: frame })]])
+      })
+      const hidden = evidence("0px hidden rgb(0, 0, 0)")
+      const none = evidence("0px none rgb(255, 0, 0)")
+      for (const pair of [{ before: hidden, after: none }, { before: none, after: hidden }]) {
+        expect(compareSnapshots(identity, state, pair.before.snapshot, pair.after.snapshot)).toEqual([
+          expect.objectContaining({ region: "content", rule: "tokens", detail: expect.stringContaining(property) })
+        ])
+        expect(compareLiveRegions(identity, pair.before, pair.after, ["content"]).touchedRegions).toEqual(["content"])
+      }
+      const solid = evidence("0px solid rgb(255, 0, 0)")
+      const dashed = evidence("0px dashed rgb(0, 0, 255)")
+      expect(compareSnapshots(identity, state, solid.snapshot, dashed.snapshot)).toEqual([])
+      expect(compareLiveRegions(identity, solid, dashed, ["content"]).touchedRegions).toEqual([])
+    }
+  }))
+
+it.effect("incomplete or unknown-style border evidence never normalizes in either comparator", () =>
+  Effect.sync(() => {
+    const image = new PNG({ width: 10, height: 10 })
+    image.data.fill(255)
+    const frame = PNG.sync.write(image)
+    for (const property of ["border-top", "border-right", "border-bottom", "border-left"]) {
+      const evidence = (border: string): Capture => ({
+        frame,
+        snapshot: {
+          ...snapshot,
+          regions: snapshot.regions.map((region) => ({ ...region, styles: { [property]: border } }))
+        },
+        regions: new Map([["content", RegionPixels.Image({ bytes: frame })]])
+      })
+      const complete = evidence("0px none rgb(0, 0, 0)")
+      for (
+        const value of ["0px", "0px nonsense", "0px nonsense rgb(0, 0, 0)", "0px none", "nonsense none rgb(0, 0, 0)"]
+      ) {
+        const incomplete = evidence(value)
+        for (const pair of [{ before: incomplete, after: complete }, { before: complete, after: incomplete }]) {
+          expect(compareSnapshots(identity, state, pair.before.snapshot, pair.after.snapshot), value).toEqual([
+            expect.objectContaining({ region: "content", rule: "tokens", detail: expect.stringContaining(property) })
+          ])
+          expect(compareLiveRegions(identity, pair.before, pair.after, ["content"]).touchedRegions, value)
+            .toEqual(["content"])
+        }
+      }
+    }
+  }))

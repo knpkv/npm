@@ -74,8 +74,12 @@ export interface LiveChanges {
 }
 
 const unpaintedBorder = (value: string): boolean => {
-  const [width, style] = value.split(/\s+/u)
-  return (width !== undefined && /^0(?:\.0+)?(?:px)?$/u.test(width)) || style === "none"
+  const shorthand =
+    /^(0(?:\.0+)?(?:px)?|[0-9]+(?:\.[0-9]+)?px)\s+(none|hidden|dotted|dashed|solid|double|groove|ridge|inset|outset)\s+\S.*$/u
+      .exec(value)
+  if (shorthand === null || shorthand[2] === "hidden") return false
+  const width = shorthand[1]
+  return width !== undefined && (shorthand[2] === "none" || /^0(?:\.0+)?(?:px)?$/u.test(width))
 }
 
 /** Ignore only border details that cannot paint; retain raw captured tokens for evidence. */

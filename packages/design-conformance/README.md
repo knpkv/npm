@@ -25,7 +25,9 @@ Declare every region in the manifest. The gate checks
 DOM order, nearest region parent, horizontal page/region overflow, normalized visible
 text, and document-space boxes. Geometry tolerance is 2px at 390 and 4px at 1280.
 Resolved color, background, font, painted borders, radius, gaps and padding must match exactly.
+Only complete width/style/color shorthands with a known border style are normalized.
 An unpainted border has zero width or style `none`; its color and style do not affect token comparisons.
+Style `hidden` always stays significant, including at zero width, because it suppresses adjacent collapsed-table borders.
 Raw captured styles stay unchanged, and painted-border changes still fail both reference and touched-region checks.
 HTML pixel comparison allows at most 0.1% different pixels per region and whole frame,
 using pixelmatch anti-alias detection. UUIDs are masked in screenshots; UUID and ISO
