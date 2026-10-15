@@ -65,7 +65,12 @@ const fixtureSourceLayer = Layer.effectContext(Effect.gen(function*() {
           )
           : Effect.succeed(current.artifacts)
       ),
-    run: (id) => withOptions((current) => Effect.succeed(id === 101 ? current.publisher ?? publisher : producer)),
+    run: (id) =>
+      withOptions((current) =>
+        Effect.succeed(
+          id === 101 ? current.publisher ?? publisher : current.runs?.find((run) => run.id === id) ?? producer
+        )
+      ),
     jobs: (id) =>
       withOptions((current) => {
         const failed = current.runs?.find((run) => run.conclusion === "failure" || run.conclusion === "cancelled")
@@ -119,6 +124,41 @@ const read = Effect.fn("PlanReaderFixture.read")(function*(options: FixtureOptio
 })
 
 layer(fixtures)("CI plan reader", (it) => {
+  it.effect("accepts exact ref-qualified workflow paths from real-shaped workflow runs", () =>
+    Effect.gen(function*() {
+      for (const ref of ["main", "refs/heads/main"]) {
+        const state = yield* read({
+          publisher: { ...publisher, path: `.github/workflows/infra-publish.yml@${ref}` },
+          runs: [{ ...producer, path: ".github/workflows/infra.yml@refs/pull/42/merge" }]
+        })
+        expect(state._tag).toBe("Ready")
+        if (state._tag === "Ready") expect(state.plan.source.pr).toBe(42)
+      }
+    }))
+  for (
+    const path of [
+      ".github/workflows/infra-publish.yml.evil@main",
+      ".github/workflows/infra-publish.yml@refs/heads/feature",
+      ".github/workflows/infra-publish.yml@main@main"
+    ]
+  ) {
+    it.effect(`rejects an unbound publisher workflow path ${path}`, () =>
+      Effect.gen(function*() {
+        expect((yield* read({ publisher: { ...publisher, path } }))._tag).toBe("Unverified")
+      }))
+  }
+  for (
+    const path of [
+      ".github/workflows/infra.yml.evil@main",
+      ".github/workflows/infra.yml@refs/pull/99/merge",
+      ".github/workflows/infra.yml@refs/heads/unrelated"
+    ]
+  ) {
+    it.effect(`rejects an unbound producer workflow path ${path}`, () =>
+      Effect.gen(function*() {
+        expect((yield* read({ runs: [{ ...producer, path }] }))._tag).toBe("Unverified")
+      }))
+  }
   it.effect("shows only verified normalized resource rows and short source hashes", () =>
     Effect.gen(function*() {
       const state = yield* read()
@@ -143,6 +183,60 @@ layer(fixtures)("CI plan reader", (it) => {
       const state = yield* read({ bytes: zip(JSON.stringify(receipt(false)), "plan.json", true) })
       expect(state._tag).toBe("Ready")
       if (state._tag === "Ready") expect(state.plan.rows.every((row) => row.action === "noop")).toBe(true)
+    }))
+  it.effect("accepts producer and publisher reruns bound to their jobs and the receipt's publication job", () =>
+    Effect.gen(function*() {
+      for (
+        const attempts of [{ producer: 2, publisher: 1 }, { producer: 1, publisher: 2 }, { producer: 2, publisher: 2 }]
+      ) {
+        const producingRun = { ...producer, run_attempt: attempts.producer }
+        const publishingRun = { ...publisher, run_attempt: attempts.publisher }
+        const publicationJob = {
+          id: 202,
+          name: "site / publish",
+          run_attempt: attempts.publisher,
+          status: "completed",
+          conclusion: "success",
+          steps: []
+        }
+        const options = {
+          runs: [producingRun],
+          publisher: publishingRun,
+          bytes: zip(JSON.stringify({ ...receipt(), publisherJobId: 202 })),
+          jobs: new Map([
+            [100, [nativeJob("site", "success", "success", producingRun)]],
+            [101, [publicationJob]]
+          ])
+        }
+        expect((yield* read(options))._tag).toBe("Ready")
+        expect(
+          (yield* read({
+            ...options,
+            jobs: new Map([...options.jobs, [100, [{
+              ...nativeJob("site", "success", "success", producingRun),
+              run_attempt: 3
+            }]]])
+          }))._tag
+        ).toBe("Unverified")
+        expect(
+          (yield* read({
+            ...options,
+            jobs: new Map([...options.jobs, [101, [{ ...publicationJob, run_attempt: 3 }]]])
+          }))._tag
+        ).toBe("Unverified")
+        expect(
+          (yield* read({
+            ...options,
+            runs: [newerRun, producingRun],
+            jobs: new Map([
+              ...options.jobs,
+              [100, [{ ...nativeJob("site", "success", "success", producingRun), run_attempt: 3 }]],
+              [103, [nativeJob("site", "success", "success", newerRun)]]
+            ])
+          }))._tag
+        ).toBe("Unverified")
+        expect((yield* read({ ...options, bytes: zip(JSON.stringify(receipt())) }))._tag).toBe("Unverified")
+      }
     }))
   it.effect("distinguishes stale publication age and main base without hiding verified rows", () =>
     Effect.gen(function*() {
@@ -346,7 +440,7 @@ layer(fixtures)("CI plan reader", (it) => {
   const nativeJob = (stack: string, conclusion: string, planConclusion: string, run: Run = producer): FixtureJob => ({
     id: 200,
     name: `${stack} / native`,
-    run_attempt: 1,
+    run_attempt: run.run_attempt,
     status: "completed",
     conclusion,
     steps: [{
@@ -358,6 +452,74 @@ layer(fixtures)("CI plan reader", (it) => {
   })
   const failedSite: Run = { ...producer, id: 102, conclusion: "failure", created_at: DateTime.makeUnsafe(now - 1000) }
   const newerRun: Run = { ...producer, id: 103, created_at: DateTime.makeUnsafe(now) }
+  it.effect("orders a failed attempt against its verified producer despite delayed publication and timestamp ties", () =>
+    Effect.gen(function*() {
+      const bytes = zip(JSON.stringify(receipt()))
+      const delayed = { ...(yield* artifact(bytes)), created_at: DateTime.makeUnsafe(now) }
+      for (const created_at of [DateTime.makeUnsafe(now - 100_000), producer.created_at]) {
+        const failure = { ...failedSite, created_at }
+        const state = yield* read({
+          bytes,
+          artifacts: [delayed],
+          runs: [failure, producer],
+          jobs: new Map([[102, [nativeJob("site", "failure", "failure", failure)]]])
+        })
+        expect(state._tag).toBe("Failed")
+        if (state._tag === "Failed") {
+          expect(state.lastPublished?.stale).toBe("failed")
+          expect(state.lastPublished?.rows).toEqual([{
+            fqn: "Site",
+            resourceType: "Cloudflare.Worker",
+            action: "update",
+            changedKeys: ["compatibilityDate", "routes"]
+          }])
+        }
+      }
+      const olderFailure = { ...failedSite, id: 99, created_at: producer.created_at }
+      expect(
+        (yield* read({
+          bytes,
+          artifacts: [delayed],
+          runs: [olderFailure],
+          jobs: new Map([[99, [nativeJob("site", "failure", "failure", olderFailure)]]])
+        }))._tag
+      ).toBe("Ready")
+    }))
+  for (const conclusion of ["action_required", "stale"]) {
+    it.effect(`a completed ${conclusion} stack attempt is Failed with or without a publication`, () =>
+      Effect.gen(function*() {
+        const run = { ...newerRun, conclusion }
+        const options = {
+          runs: [run, producer],
+          jobs: new Map([[103, [nativeJob("site", conclusion, conclusion, run)]]])
+        }
+        const retained = yield* read(options)
+        expect(retained._tag).toBe("Failed")
+        if (retained._tag === "Failed") {
+          expect(retained.lastPublished?.stale).toBe("failed")
+          expect(retained.lastPublished?.rows).toEqual([{
+            fqn: "Site",
+            resourceType: "Cloudflare.Worker",
+            action: "update",
+            changedKeys: ["compatibilityDate", "routes"]
+          }])
+        }
+        expect(yield* read({ ...options, artifacts: [] })).toEqual({
+          _tag: "Failed",
+          runHref: "https://github.com/knpkv/infra/actions/runs/103",
+          lastPublished: null
+        })
+      }))
+  }
+  it.effect("a completed neutral native job does not invent a failed attempt", () =>
+    Effect.gen(function*() {
+      expect(
+        (yield* read({
+          runs: [{ ...newerRun, conclusion: "neutral" }, producer],
+          jobs: new Map([[103, [nativeJob("site", "neutral", "neutral", newerRun)]]])
+        }))._tag
+      ).toBe("Ready")
+    }))
   for (const published of [true, false]) {
     it.effect(`a newer unselected Site job preserves the actual Site failure, publication ${published}`, () =>
       Effect.gen(function*() {

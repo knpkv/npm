@@ -99,8 +99,9 @@ The reader selects the newest non-expired matching artifact. It verifies its
 publication workflow on main, successful publisher and producer runs, PR/head/base
 identity, publisher job identity, ZIP SHA-256, exact receipt fields, pinned
 resource identities and the native semantic digest. Both archive and expanded
-JSON must be below 1 MB; metadata pagination stops at ten pages and the whole read
-has a 30-second timeout. ZIP inspection and decompression stay in memory. No
+JSON must be below 1 MB. API metadata has a separate 2 MiB per-response cap to
+accommodate full 100-row pages before schema projection. Metadata pagination stops
+at ten pages and the whole read has a 30-second timeout. ZIP inspection and decompression stay in memory. No
 payload is logged or extracted to disk.
 
 A publication becomes stale after 24 hours or when its base differs from the

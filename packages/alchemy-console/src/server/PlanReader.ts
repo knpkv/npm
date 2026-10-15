@@ -32,6 +32,8 @@ export class PlanReader extends Context.Service<PlanReader, {
 const mappedStack = (app: string, stage: string): InfraStack | null =>
   app === "site" && stage === "prod" ? "site" : app === "aws-org" && stage === "org" ? "aws-org" : null
 const repoId = 1288997422
+const compareProducerRuns = (a: Run, b: Run): number =>
+  DateTime.toEpochMillis(b.created_at) - DateTime.toEpochMillis(a.created_at) || b.id - a.id
 const runHref = (id: number): string => `https://github.com/knpkv/infra/actions/runs/${id}`
 const sourceFor = (artifact: Artifact, head: string, now: number, producer: Run | undefined): PlanSource => ({
   pr: producer?.pull_requests.find((pr) => pr.head.sha === head)?.number ?? null,
@@ -41,9 +43,32 @@ const sourceFor = (artifact: Artifact, head: string, now: number, producer: Run 
   ageDays: Math.max(0, Math.floor(now / 86_400_000) - Math.floor(publishedMillis(artifact) / 86_400_000)),
   runHref: runHref(artifact.workflow_run.id)
 })
-const privateRunMatches = (run: Run, workflowId: number, file: string, event: string): boolean =>
-  run.workflow_id === workflowId && run.path === `.github/workflows/${file}` && run.event === event &&
-  run.repository.id === repoId && run.head_repository.id === repoId && run.run_attempt === 1 &&
+const QualifiedWorkflowPath = Schema.TemplateLiteralParser([
+  ".github/workflows/",
+  Schema.Literals(["infra.yml", "infra-publish.yml"]),
+  "@",
+  Schema.NonEmptyString.check(Schema.isPattern(/^[^@]+$/u))
+])
+/** GitHub can qualify a workflow filename with a branch or PR merge ref; neither part is a prefix match. */
+const workflowPathMatches = (run: Run, file: "infra.yml" | "infra-publish.yml"): boolean => {
+  if (run.path === `.github/workflows/${file}`) return true
+  const qualified = Option.getOrNull(Schema.decodeUnknownOption(QualifiedWorkflowPath)(run.path))
+  if (qualified === null || qualified[1] !== file) return false
+  const ref = qualified[3]
+  return ref === "main" || ref === "refs/heads/main" ||
+    (file === "infra.yml" && (
+      ref === run.head_branch || ref === `refs/heads/${run.head_branch}` ||
+      run.pull_requests.some((pr) => ref === `refs/pull/${pr.number}/merge`)
+    ))
+}
+const privateRunMatches = (
+  run: Run,
+  workflowId: number,
+  file: "infra.yml" | "infra-publish.yml",
+  event: string
+): boolean =>
+  run.workflow_id === workflowId && workflowPathMatches(run, file) && run.event === event &&
+  run.repository.id === repoId && run.head_repository.id === repoId &&
   run.actor.id === 833092 && run.triggering_actor.id === 833092
 
 const project = (
@@ -94,7 +119,7 @@ export const readerLayer = Layer.effect(
         if (!publishing) return { _tag: "NotPublishing" }
         const producerRuns = (yield* github.runs("infra.yml")).filter((run) =>
           privateRunMatches(run, producerWorkflow.id, "infra.yml", "pull_request")
-        ).sort((a, b) => DateTime.toEpochMillis(b.created_at) - DateTime.toEpochMillis(a.created_at) || b.id - a.id)
+        ).sort(compareProducerRuns)
         const latest = producerRuns[0]
         const jobs = latest === undefined ? [] : yield* github.jobs(latest.id)
         const paused = jobs.length > 0 && jobs.every((job) => job.conclusion === "skipped")
@@ -119,8 +144,8 @@ export const readerLayer = Layer.effect(
           attempt = { run, job }
           break
         }
-        const failed = attempt?.run.status === "completed" &&
-            ["failure", "cancelled", "timed_out"].includes(attempt.job.conclusion ?? "")
+        const failed = attempt?.job.status === "completed" &&
+            ["failure", "cancelled", "timed_out", "action_required", "stale"].includes(attempt.job.conclusion ?? "")
           ? attempt.run :
           undefined
         const artifacts = (yield* github.artifacts(stack)).filter((artifact) =>
@@ -172,12 +197,21 @@ export const readerLayer = Layer.effect(
           const receipt = yield* decodeReceipt(yield* archiveText(bytes), stack)
           const producingRun = yield* github.run(receipt.producerRunId)
           const publicationJobs = yield* github.jobs(publisher.id)
+          const producingJobs = (yield* github.jobs(producingRun.id)).filter((job) => job.name === `${stack} / native`)
+          const producingJob = producingJobs[0]
+          const producingSteps = producingJob?.steps.filter((step) => step.name === "Native read-only plan") ?? []
+          const producingStep = producingSteps[0]
           if (
             receipt.runId !== publisher.id || receipt.base !== publisher.head_sha || receipt.head !== head ||
             receipt.native.stage !== stageFor(stack) ||
             !privateRunMatches(producingRun, producerWorkflow.id, "infra.yml", "pull_request") ||
             producingRun.head_sha !== receipt.head || producingRun.status !== "completed" ||
             producingRun.conclusion !== "success" ||
+            producingJobs.length !== 1 || producingJob === undefined ||
+            producingJob.run_attempt !== producingRun.run_attempt || producingJob.status !== "completed" ||
+            producingJob.conclusion !== "success" || producingSteps.length !== 1 || producingStep === undefined ||
+            producingStep.status !== "completed" || producingStep.conclusion !== "success" ||
+            producingStep.started_at === undefined || producingStep.started_at === null ||
             producingRun.referenced_workflows?.some((workflow) =>
                 [
                   "knpkv/infra/.github/workflows/_infra-plan.yml@main",
@@ -188,16 +222,17 @@ export const readerLayer = Layer.effect(
               pr.number === receipt.pr && pr.head.sha === receipt.head && pr.base.sha === receipt.base
             ) ||
             !publicationJobs.some((job) =>
-              job.id === receipt.publisherJobId && job.name === `${stack} / publish` && job.run_attempt === 1 &&
+              job.id === receipt.publisherJobId && job.name === `${stack} / publish` &&
+              job.run_attempt === publisher.run_attempt &&
               job.status === "completed" && job.conclusion === "success"
             )
           ) {
             return yield* new PlanProvenanceInvalid({})
           }
-          return project(receipt, source, yield* github.latestMainSeenByCi(), now, artifact)
+          return { plan: project(receipt, source, yield* github.latestMainSeenByCi(), now, artifact), producingRun }
         }).pipe(
-          Effect.map((plan): PlanState =>
-            failed !== undefined && DateTime.toEpochMillis(failed.created_at) > publishedMillis(artifact)
+          Effect.map(({ plan, producingRun }): PlanState =>
+            failed !== undefined && compareProducerRuns(failed, producingRun) < 0
               ? { _tag: "Failed", runHref: runHref(failed.id), lastPublished: { ...plan, stale: "failed" } }
               : { _tag: "Ready", plan }
           ),

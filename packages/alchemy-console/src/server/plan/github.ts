@@ -1,6 +1,6 @@
 /** Server-private GitHub transport. Token and signed download URLs stay here; body limits apply before buffering. */
 import { collectBounded } from "@knpkv/bounded-io"
-import { Context, DateTime, Effect, Layer, Redacted, Schema } from "effect"
+import { Context, DateTime, Effect, Layer, Option, Redacted, Schema } from "effect"
 import { FetchHttpClient, HttpClient, type HttpClientResponse } from "effect/http"
 import { archiveLimit } from "./archive.js"
 import { Digest, Positive, Sha } from "./receipt.js"
@@ -71,6 +71,9 @@ export const Job = Schema.Struct({
 export type Job = typeof Job.Type
 const Workflow = Schema.Struct({ id: Positive, path: Schema.String, state: Schema.String })
 export type Workflow = typeof Workflow.Type
+const RefusalBody = Schema.fromJsonString(Schema.Struct({ message: Schema.String }))
+// A 100-run page includes repository/user/commit envelopes before schema projection (~12 KiB per run).
+const metadataLimit = 2 * 1024 * 1024
 
 export class PlanGithub extends Context.Service<PlanGithub, {
   readonly workflow: (file: "infra.yml" | "infra-publish.yml") => Effect.Effect<Workflow, GithubFailure>
@@ -99,12 +102,28 @@ export const githubLayer = (token: Redacted.Redacted<string>) =>
           Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual", cache: "no-store" }),
           Effect.mapError(() => new PlanCiUnreachable({}))
         )
-        if (response.status === 401 || response.status === 403) return yield* new PlanCiRefused({})
+        if (response.status === 401) return yield* new PlanCiRefused({})
+        if (response.status === 403) {
+          if (response.headers["x-ratelimit-remaining"] === "0" || response.headers["retry-after"] !== undefined) {
+            return yield* new PlanCiUnreachable({})
+          }
+          const bytes = yield* collectBounded(response.stream, 8192).pipe(
+            Effect.mapError(() => new PlanCiUnreachable({}))
+          )
+          const refusal = Option.getOrNull(Schema.decodeUnknownOption(RefusalBody)(new TextDecoder().decode(bytes)))
+          if (
+            refusal !== null &&
+            /\b(?:API rate limit exceeded|(?:primary|secondary) rate limit)\b/iu.test(refusal.message)
+          ) {
+            return yield* new PlanCiUnreachable({})
+          }
+          return yield* new PlanCiRefused({})
+        }
         if (response.status !== 200 && response.status !== 302) return yield* new PlanCiUnreachable({})
         return response
       })
-      const body = (response: HttpClientResponse.HttpClientResponse) =>
-        collectBounded(response.stream, archiveLimit - 1).pipe(Effect.catchTags({
+      const body = (response: HttpClientResponse.HttpClientResponse, limit: number) =>
+        collectBounded(response.stream, limit).pipe(Effect.catchTags({
           ByteLimitExceeded: () => Effect.fail(new PlanMetadataInvalid({})),
           HttpClientError: () => Effect.fail(new PlanCiUnreachable({}))
         }))
@@ -112,7 +131,7 @@ export const githubLayer = (token: Redacted.Redacted<string>) =>
         request(path).pipe(
           Effect.flatMap((response) =>
             response.status === 200
-              ? body(response).pipe(
+              ? body(response, metadataLimit).pipe(
                 Effect.flatMap((bytes) =>
                   Schema.decodeUnknownEffect(Schema.fromJsonString(schema))(new TextDecoder().decode(bytes)).pipe(
                     Effect.mapError(() => new PlanMetadataInvalid({}))
@@ -178,7 +197,7 @@ export const githubLayer = (token: Redacted.Redacted<string>) =>
             Effect.mapError(() => new PlanCiUnreachable({}))
           )
           if (blob.status !== 200) return yield* new PlanCiUnreachable({})
-          return yield* body(blob)
+          return yield* body(blob, archiveLimit - 1)
         })
       })
     })

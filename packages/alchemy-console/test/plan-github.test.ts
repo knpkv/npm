@@ -1,7 +1,8 @@
 import { expect, layer } from "@effect/vitest"
-import { Context, Effect, Layer, Option, Redacted, Ref } from "effect"
+import { Context, Effect, Layer, Option, Redacted, Ref, Schema } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientResponse } from "effect/http"
-import { githubLayer, PlanGithub } from "../src/server/plan/github.js"
+import { githubLayer, PlanGithub, Run } from "../src/server/plan/github.js"
+import { producer } from "./planFixture.js"
 
 const token = Redacted.make("fixture-private-token")
 type ResponseHandler = (url: URL) => Response
@@ -108,6 +109,67 @@ layer(fixtures)("CI GitHub transport", (it) => {
         expect(JSON.stringify(result)).not.toContain("fixture-private-value")
       }))
   }
+  for (
+    const sample of [
+      {
+        name: "primary rate limit headers",
+        headers: { "x-ratelimit-remaining": "0", "x-ratelimit-reset": "1792074000" },
+        message: "fixture-private-value",
+        expected: "PlanCiUnreachable"
+      },
+      {
+        name: "secondary rate limit header",
+        headers: { "retry-after": "60", "x-ratelimit-remaining": "17" },
+        message: "fixture-private-value",
+        expected: "PlanCiUnreachable"
+      },
+      {
+        name: "primary rate limit message",
+        headers: {},
+        message: "API rate limit exceeded for fixture-private-value",
+        expected: "PlanCiUnreachable"
+      },
+      {
+        name: "secondary rate limit message",
+        headers: {},
+        message: "You have exceeded a secondary rate limit. fixture-private-value",
+        expected: "PlanCiUnreachable"
+      },
+      {
+        name: "authorization refusal with rate limit budget remaining",
+        headers: { "x-ratelimit-remaining": "17", "x-ratelimit-reset": "1792074000" },
+        message: "Resource not accessible by fixture-private-value",
+        expected: "PlanCiRefused"
+      }
+    ]
+  ) {
+    it.effect(`classifies 403 ${sample.name} without emitting the error body`, () =>
+      Effect.gen(function*() {
+        const { service } = yield* useGithub(() =>
+          Response.json({ message: sample.message }, { status: 403, headers: sample.headers })
+        )
+        const result = yield* Effect.result(service.workflow("infra.yml"))
+        expect(result._tag === "Failure" && result.failure._tag).toBe(sample.expected)
+        expect(JSON.stringify(result)).not.toContain("fixture-private-value")
+      }))
+  }
+  it.effect("reads a full workflow page with realistic repository and commit envelopes", () =>
+    Effect.gen(function*() {
+      const runs = Array.from({ length: 100 }, (_, index) => ({
+        ...Schema.encodeSync(Run)(producer),
+        id: index + 1,
+        repository: { ...producer.repository, description: "r".repeat(4096) },
+        head_repository: { ...producer.head_repository, description: "h".repeat(4096) },
+        head_commit: { message: "c".repeat(4096) }
+      }))
+      const { requests, service } = yield* useGithub((url) => {
+        const pageSize = Number(url.searchParams.get("per_page"))
+        const page = Number(url.searchParams.get("page"))
+        return Response.json({ workflow_runs: runs.slice((page - 1) * pageSize, page * pageSize) })
+      })
+      expect((yield* service.runs("infra.yml")).map((run) => run.id)).toEqual(runs.map((run) => run.id))
+      expect((yield* Ref.get(requests)).length).toBe(2)
+    }))
   it.effect("caps streamed downloads and metadata bodies before buffering or decoding", () =>
     Effect.gen(function*() {
       const { service } = yield* useGithub((url) =>
@@ -124,7 +186,14 @@ layer(fixtures)("CI GitHub transport", (it) => {
       )
       const result = yield* Effect.result(service.download(301))
       expect(result._tag === "Failure" && result.failure._tag).toBe("PlanMetadataInvalid")
-      const metadata = yield* useGithub(() => new Response("x".repeat(1_000_000)))
+      const metadata = yield* useGithub(() =>
+        Response.json({
+          id: 10,
+          path: ".github/workflows/infra.yml",
+          state: "active",
+          description: "x".repeat(2 * 1024 * 1024)
+        })
+      )
       const result2 = yield* Effect.result(metadata.service.workflow("infra.yml"))
       expect(result2._tag === "Failure" && result2.failure._tag).toBe("PlanMetadataInvalid")
     }))
