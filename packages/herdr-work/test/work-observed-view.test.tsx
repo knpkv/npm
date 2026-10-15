@@ -114,6 +114,16 @@ describe("Work triage with the observed overlay", () => {
     expect(metadata).toContain("ui2-b · Stage: In progress")
     expect(metadata).toContain("ui2-b · Stage: In review")
   })
+  it("shows no stage for a planned goal that has only the default local delivery", async () => {
+    const host = await mount(
+      snapshotOf([goal("plan", { state: "planned", delivery: "local" }), goal("work", { delivery: "local" })], {
+        observed: []
+      })
+    )
+    const metadata = [...host.querySelectorAll(".work-row-meta")].map(({ textContent }) => textContent)
+    expect(metadata).toEqual(expect.arrayContaining(["ui2-b", "ui2-b · Stage: In progress"]))
+    expect(metadata.filter((text) => text?.includes("Stage:"))).toHaveLength(1)
+  })
   it("groups by the observed state and dates done from the pull request's close", () => {
     const rows = workTriage({
       asOf: NOW,

@@ -1115,16 +1115,19 @@ export const WorkBoard = ({
     const agentName = goal.agentHierarchy?.agent.name ?? goal.owner.name
     const pr = observed?.pullRequest?.fact
     const terminal = shown === "completed" || shown === "deployed" || shown === "abandoned"
+    // A planned goal still carries the default `local` delivery, which would read as "In progress".
     const stage =
-      pr === undefined
-        ? `Stage: ${deliveryLabel[goal.delivery]}`
-        : `PR #${pr.pullRequest} ${pullRequestStateLabel[pr.state]}, ${checksLabel[pr.checks]}${pr.review === "not_requested" ? "" : ` · Review ${reviewPresentation[pr.review].label.toLowerCase()}`}`
+      pr !== undefined
+        ? ` · PR #${pr.pullRequest} ${pullRequestStateLabel[pr.state]}, ${checksLabel[pr.checks]}${pr.review === "not_requested" ? "" : ` · Review ${reviewPresentation[pr.review].label.toLowerCase()}`}`
+        : shown === "planned" && goal.delivery === "local"
+          ? ""
+          : ` · Stage: ${deliveryLabel[goal.delivery]}`
     const metadata =
       goal.owner.name === "Unassigned"
         ? `Unassigned · ${goal.repository.repository}`
         : terminal
           ? `${agentName} · ${shown === "abandoned" ? "" : goal.delivery === "merged" || pr?.state === "merged" ? "Merged · " : "Done · "}${displayPresentation[shown].label} ${ageOf(workGoalFinishedAt(goal, observed), snapshot.asOf)}`
-          : `${agentName}${host === undefined ? "" : ` on ${host}`} · ${stage}${blockersFor(goal).length === 0 || open.length > 0 ? "" : ` · ${blockersFor(goal)[0]?.summary ?? "Blocked"}`}`
+          : `${agentName}${host === undefined ? "" : ` on ${host}`}${stage}${blockersFor(goal).length === 0 || open.length > 0 ? "" : ` · ${blockersFor(goal)[0]?.summary ?? "Blocked"}`}`
     const hasCaption = open.length > 0 || observed?.stale === true || observed?.unknown != null
     const content = (
       <>
