@@ -199,3 +199,215 @@ it.effect("frame enforcement catches outside-region pixels at the unchanged thre
     expect(compareLiveRegions(identity, base, { ...base, frame: PNG.sync.write(wider) }, ["content"]))
       .toEqual({ touchedRegions: ["*"], outsidePixelsChanged: true })
   }))
+
+it.effect("unpainted border colors and styles do not create reference or touched-region failures", () =>
+  Effect.sync(() => {
+    const image = new PNG({ width: 10, height: 10 })
+    image.data.fill(255)
+    const frame = PNG.sync.write(image)
+    for (const property of ["border-top", "border-right", "border-bottom", "border-left"]) {
+      const evidence = (border: string): Capture => ({
+        frame,
+        snapshot: {
+          ...snapshot,
+          regions: snapshot.regions.map((region) => ({ ...region, styles: { [property]: border } }))
+        },
+        regions: new Map([["content", RegionPixels.Image({ bytes: frame })]])
+      })
+      const base = evidence("0px none rgb(0, 0, 0)")
+      for (
+        const border of [
+          "0px solid rgb(255, 0, 0)",
+          "0 dashed rgb(0, 0, 255)",
+          "1px none rgb(0, 255, 0)",
+          "0px dashed rgba(0, 0, 255, 0.5)",
+          "0px none rgba(178.5, 93.5, 51, 0.5)",
+          "0px solid rgb(146.06, 107.46, 131.2)",
+          "0px dashed rgb(0.125, 254.999, 255)",
+          "0px solid oklch(0.9677 0.0027 286.35)",
+          "0px dashed oklch(0.5 0.1 20 / 0.5)",
+          "0px none oklch(1 0 none)",
+          "0px solid oklch(none 0.1 20)",
+          "0px dashed oklch(0.5 none 20)",
+          "0px solid oklch(none none 20)",
+          "0px dashed oklch(none 0.1 none)",
+          "0px solid oklch(0.5 none none)",
+          "0px dashed oklch(none none none)",
+          "0px solid oklch(0.5 0.1 20 / none)",
+          "0px dashed oklch(none 0.1 20 / none)",
+          "0px solid oklch(0.5 none 20 / none)",
+          "0px dashed oklch(0.5 0.1 none / none)",
+          "0px solid oklch(none none 20 / none)",
+          "0px dashed oklch(none 0.1 none / none)",
+          "0px solid oklch(0.5 none none / none)",
+          "0px dashed oklch(none none none / none)",
+          "0px solid oklch(1 calc(infinity) 20)",
+          "0px dashed oklch(none calc(infinity) none / none)",
+          "0px solid oklch(0.5 0.1 20 / 1.00000e-9)"
+        ]
+      ) {
+        const current = evidence(border)
+        expect({
+          reference: compareSnapshots(identity, state, base.snapshot, current.snapshot),
+          touched: compareLiveRegions(identity, base, current, ["content"]).touchedRegions
+        }, `${property}: ${border}`).toEqual({ reference: [], touched: [] })
+      }
+      expect(base.snapshot.regions[0]?.styles[property]).toBe("0px none rgb(0, 0, 0)")
+    }
+  }))
+
+it.effect("painted border color, style, width and removal remain required token differences", () =>
+  Effect.sync(() => {
+    const image = new PNG({ width: 10, height: 10 })
+    image.data.fill(255)
+    const frame = PNG.sync.write(image)
+    for (const property of ["border-top", "border-right", "border-bottom", "border-left"]) {
+      const evidence = (border: string): Capture => ({
+        frame,
+        snapshot: {
+          ...snapshot,
+          regions: snapshot.regions.map((region) => ({ ...region, styles: { [property]: border } }))
+        },
+        regions: new Map([["content", RegionPixels.Image({ bytes: frame })]])
+      })
+      const base = evidence("1px solid rgb(0, 0, 0)")
+      for (
+        const border of [
+          "1px solid rgb(255, 0, 0)",
+          "1px dashed rgb(0, 0, 0)",
+          "2px solid rgb(0, 0, 0)",
+          "0px none rgb(0, 0, 0)"
+        ]
+      ) {
+        const current = evidence(border)
+        expect(compareSnapshots(identity, state, base.snapshot, current.snapshot)).toEqual([
+          expect.objectContaining({ region: "content", rule: "tokens", detail: expect.stringContaining(property) })
+        ])
+        expect(compareLiveRegions(identity, base, current, ["content"]).touchedRegions).toEqual(["content"])
+      }
+    }
+  }))
+
+it.effect("hidden borders remain significant even at zero width in both comparators", () =>
+  Effect.sync(() => {
+    const image = new PNG({ width: 10, height: 10 })
+    image.data.fill(255)
+    const frame = PNG.sync.write(image)
+    for (const property of ["border-top", "border-right", "border-bottom", "border-left"]) {
+      const evidence = (border: string): Capture => ({
+        frame,
+        snapshot: {
+          ...snapshot,
+          regions: snapshot.regions.map((region) => ({ ...region, styles: { [property]: border } }))
+        },
+        regions: new Map([["content", RegionPixels.Image({ bytes: frame })]])
+      })
+      const hidden = evidence("0px hidden rgb(0, 0, 0)")
+      const none = evidence("0px none rgb(255, 0, 0)")
+      for (const pair of [{ before: hidden, after: none }, { before: none, after: hidden }]) {
+        expect(compareSnapshots(identity, state, pair.before.snapshot, pair.after.snapshot)).toEqual([
+          expect.objectContaining({ region: "content", rule: "tokens", detail: expect.stringContaining(property) })
+        ])
+        expect(compareLiveRegions(identity, pair.before, pair.after, ["content"]).touchedRegions).toEqual(["content"])
+      }
+      const solid = evidence("0px solid rgb(255, 0, 0)")
+      const dashed = evidence("0px dashed rgb(0, 0, 255)")
+      expect(compareSnapshots(identity, state, solid.snapshot, dashed.snapshot)).toEqual([])
+      expect(compareLiveRegions(identity, solid, dashed, ["content"]).touchedRegions).toEqual([])
+    }
+  }))
+
+it.effect("incomplete or unknown-style border evidence never normalizes in either comparator", () =>
+  Effect.sync(() => {
+    const image = new PNG({ width: 10, height: 10 })
+    image.data.fill(255)
+    const frame = PNG.sync.write(image)
+    for (const property of ["border-top", "border-right", "border-bottom", "border-left"]) {
+      const evidence = (border: string): Capture => ({
+        frame,
+        snapshot: {
+          ...snapshot,
+          regions: snapshot.regions.map((region) => ({ ...region, styles: { [property]: border } }))
+        },
+        regions: new Map([["content", RegionPixels.Image({ bytes: frame })]])
+      })
+      const complete = evidence("0px none rgb(0, 0, 0)")
+      for (
+        const value of ["0px", "0px nonsense", "0px nonsense rgb(0, 0, 0)", "0px none", "nonsense none rgb(0, 0, 0)"]
+      ) {
+        const incomplete = evidence(value)
+        for (const pair of [{ before: incomplete, after: complete }, { before: complete, after: incomplete }]) {
+          expect(compareSnapshots(identity, state, pair.before.snapshot, pair.after.snapshot), value).toEqual([
+            expect.objectContaining({ region: "content", rule: "tokens", detail: expect.stringContaining(property) })
+          ])
+          expect(compareLiveRegions(identity, pair.before, pair.after, ["content"]).touchedRegions, value)
+            .toEqual(["content"])
+        }
+      }
+    }
+  }))
+
+for (
+  const color of [
+    "nonsense",
+    "rgb(",
+    "rgb(0, 0, 0) trailing",
+    "rgb(0, 0)",
+    "rgba(0, 0, 0)",
+    "rgba(178.5, 93.5, 51)",
+    "rgba(255.001, 93.5, 51, 0.5)",
+    "rgb(-0.001, 93.5, 51)",
+    "rgb(256, 93.5, 51)",
+    "rgb(1e309, 93.5, 51)",
+    "rgba(0, 0, 0, 0.5) trailing",
+    "oklch(0.5 0.1)",
+    "oklch(0.5 0.1 20) trailing",
+    "oklch(1 none)",
+    "oklch(none none)",
+    "oklch(none none none none)",
+    "oklch(none none none /)",
+    "oklch(none none none / none none)",
+    "oklch(none none none / auto)",
+    "oklch(1 0 none) trailing",
+    "oklch(1 0 nones)",
+    "oklch(1 calc(infinity) 20) trailing",
+    "oklch(1 calc(infinity + 1) 20)",
+    "rgb(none, 0, 0)",
+    "rgba(0, 0, 0, none)",
+    "rgba(0, 0, 0, -0.1)",
+    "rgba(0, 0, 0, 1.1)",
+    "oklch(0.5 0.1 20 / -0.1)",
+    "oklch(0.5 0.1 20 / 1.1)",
+    "oklch(0.5 0.1 20 / 1e309)"
+  ]
+) {
+  it.effect(`malformed computed border color stays strict in both comparators: ${color}`, () =>
+    Effect.sync(() => {
+      const image = new PNG({ width: 10, height: 10 })
+      image.data.fill(255)
+      const frame = PNG.sync.write(image)
+      for (const property of ["border-top", "border-right", "border-bottom", "border-left"]) {
+        const evidence = (border: string): Capture => ({
+          frame,
+          snapshot: {
+            ...snapshot,
+            regions: snapshot.regions.map((region) => ({ ...region, styles: { [property]: border } }))
+          },
+          regions: new Map([["content", RegionPixels.Image({ bytes: frame })]])
+        })
+        const complete = evidence("0px solid rgb(0, 0, 0)")
+        const malformed = evidence(`0px none ${color}`)
+        for (const pair of [{ before: malformed, after: complete }, { before: complete, after: malformed }]) {
+          expect({
+            reference: compareSnapshots(identity, state, pair.before.snapshot, pair.after.snapshot),
+            touched: compareLiveRegions(identity, pair.before, pair.after, ["content"]).touchedRegions
+          }).toEqual({
+            reference: [
+              expect.objectContaining({ region: "content", rule: "tokens", detail: expect.stringContaining(property) })
+            ],
+            touched: ["content"]
+          })
+        }
+      }
+    }))
+}

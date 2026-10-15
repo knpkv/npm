@@ -24,7 +24,19 @@ and paths; manifest decoding rejects it for both HTML and PNG states.
 Declare every region in the manifest. The gate checks
 DOM order, nearest region parent, horizontal page/region overflow, normalized visible
 text, and document-space boxes. Geometry tolerance is 2px at 390 and 4px at 1280.
-Resolved color, background, font, borders, radius, gaps and padding must match exactly.
+Resolved color, background, font, painted borders, radius, gaps and padding must match exactly.
+Only complete width/style/color shorthands with a known border style are normalized.
+Supported computed colors are numeric comma-separated `rgb()`/`rgba()` and complete `oklch()` with optional alpha.
+OKLCH accepts `none` in each of its three component slots and in alpha; chroma also accepts the computed
+`calc(infinity)` serialization. Numeric alpha, including exponent notation, must remain within 0 to 1. Percentages and angle units resolve to numbers before capture.
+RGB missing-component and color keywords resolve to numeric legacy RGB, or to `color(srgb …)`;
+that separate function remains strict, like other unsupported color spaces.
+RGB channels may be fractional and must remain within 0 to 255.
+Other color forms, incomplete functions and trailing tokens stay strict. These forms follow
+[computed color serialization](https://www.w3.org/TR/css-color-4/#serializing-color-values).
+An unpainted border has zero width or style `none`; its color and style do not affect token comparisons.
+Style `hidden` always stays significant, including at zero width, because it suppresses adjacent collapsed-table borders.
+Raw captured styles stay unchanged, and painted-border changes still fail both reference and touched-region checks.
 HTML pixel comparison allows at most 0.1% different pixels per region and whole frame,
 using pixelmatch anti-alias detection. UUIDs are masked in screenshots; UUID and ISO
 timestamp copy is normalized. Other timestamps must be deterministic fixture values.
@@ -53,8 +65,8 @@ for the complete HTML example. Its enforcement block is:
 Use `"legacy": "required"` after migration. At the deadline, existing drift becomes
 required automatically. Touched means a new shot/region, or that region's live pixels
 differing from its merge-base crop by more than the #844 0.1% threshold, including size
-changes. Copy, nesting, overflow and computed styles are compared directly; geometry
-uses the existing 2px/4px tolerance. Whole-frame `*` pixel findings are required only
+changes. Copy, nesting and overflow are compared directly. Computed styles use the same
+unpainted-border normalization as reference comparisons; geometry uses the existing 2px/4px tolerance. Whole-frame `*` pixel findings are required only
 when a changed named region also fails pixels, or pixels outside named regions changed.
 The outside comparison counts the original comparator's significant pixels outside
 both captures' region boxes; it does not change anti-alias detection or thresholds.
