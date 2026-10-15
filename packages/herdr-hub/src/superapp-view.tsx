@@ -491,6 +491,37 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
     location.error === null &&
     location.destination.module === "usage" &&
     location.destination.page === "limits"
+  // Readings can turn empty (or stop being empty) after arrival focus ran. The layout switch, and the empty
+  // mast moving into the header outlet once it mounts, unmount the focused page tab, so focus would fall to
+  // <body>; hand it to the same page's tab in the new layout.
+  // Only focus the switch itself removed is handed over: a poll that flips the layout while the reader rests on
+  // <body> must not pull focus to the tabs.
+  const emptyLayout = emptyActive ? (usageHeaderOutlet === null ? "inline" : "outlet") : "ordinary"
+  const previousEmptyLayout = useRef(emptyLayout)
+  const lastFocused = useRef<Element | null>(null)
+  useEffect(() => {
+    // focusin fires once the new element holds focus, so the document already names it. A deliberate blur fires
+    // focusout and clears it; removing the focused element fires none, which is what the handoff looks for.
+    const track = (): void => {
+      lastFocused.current = document.activeElement
+    }
+    const release = (): void => {
+      lastFocused.current = null
+    }
+    document.addEventListener("focusin", track)
+    document.addEventListener("focusout", release)
+    return () => {
+      document.removeEventListener("focusin", track)
+      document.removeEventListener("focusout", release)
+    }
+  }, [])
+  useLayoutEffect(() => {
+    if (previousEmptyLayout.current === emptyLayout) return
+    previousEmptyLayout.current = emptyLayout
+    const lost = lastFocused.current
+    if (location.error !== null || lost === null || lost.isConnected || document.activeElement !== document.body) return
+    return focusModulePage(location.destination.module, location.destination.page)
+  }, [emptyLayout, location])
   const relayElement =
     relay === undefined ? null : (
       <HubRelay

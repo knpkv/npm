@@ -133,6 +133,57 @@ it("keeps empty Limits tabs owned by Usage for focus and same-page navigation", 
   expect(replace).toHaveBeenCalled()
 })
 
+/** Readings that turn out empty after arrival move focus with the page tab instead of dropping it. */
+it("moves focus to the empty Limits tab when empty readings arrive after navigation", async () => {
+  const gate = Promise.withResolvers<void>()
+  await render({
+    usage: () => Effect.promise(() => gate.promise.then(() => ({ fleet: emptyUsage, receivedAt: 1_000 }))),
+    limits: Effect.promise(() => gate.promise.then(() => ({ fleet: emptyLimits, receivedAt: 1_000 })))
+  })
+  await act(async () => document.querySelector<HTMLAnchorElement>('.superapp-sidebar a[href*="#usage/"]')?.click())
+  await act(async () => {
+    await new Promise((resolve) => window.requestAnimationFrame(resolve))
+  })
+  expect(document.activeElement).toBe(document.querySelector('.usage-details-tabs a[data-module-page="limits"]'))
+  await act(async () => {
+    gate.resolve()
+    await gate.promise
+  })
+  await act(async () => {
+    await new Promise((resolve) => window.requestAnimationFrame(resolve))
+  })
+  const limitsTab = document.querySelector<HTMLAnchorElement>('.usage-empty-tabs a[data-module-page="limits"]')
+  expect(limitsTab).not.toBeNull()
+  expect(document.activeElement).toBe(limitsTab)
+})
+
+/** A layout flip that removes nothing focused leaves focus where the reader put it. */
+it("does not pull focus to the tabs when empty readings arrive while focus rests on the page", async () => {
+  const gate = Promise.withResolvers<void>()
+  await render({
+    usage: () => Effect.promise(() => gate.promise.then(() => ({ fleet: emptyUsage, receivedAt: 1_000 }))),
+    limits: Effect.promise(() => gate.promise.then(() => ({ fleet: emptyLimits, receivedAt: 1_000 })))
+  })
+  await act(async () => document.querySelector<HTMLAnchorElement>('.superapp-sidebar a[href*="#usage/"]')?.click())
+  await act(async () => {
+    await new Promise((resolve) => window.requestAnimationFrame(resolve))
+  })
+  const limitsTab = document.querySelector<HTMLAnchorElement>('.usage-details-tabs a[data-module-page="limits"]')
+  expect(document.activeElement).toBe(limitsTab)
+  // The reader clicks page text: the tab loses focus deliberately before the poll removes it.
+  await act(async () => limitsTab?.blur())
+  expect(document.activeElement).toBe(document.body)
+  await act(async () => {
+    gate.resolve()
+    await gate.promise
+  })
+  await act(async () => {
+    await new Promise((resolve) => window.requestAnimationFrame(resolve))
+  })
+  expect(document.querySelector(".usage-empty-tabs")).not.toBeNull()
+  expect(document.activeElement).toBe(document.body)
+})
+
 /** Empty arrays with incomplete peer discovery are unknown evidence, not a successful empty state. */
 it("keeps ordinary Limits when peer discovery is incomplete", async () => {
   window.history.replaceState(null, "", "/?range=7d&timeZone=UTC#usage/limits")

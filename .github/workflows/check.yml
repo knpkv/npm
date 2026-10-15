@@ -262,7 +262,7 @@ jobs:
       CONTROL_CENTER_BENCHMARK_STORAGE_CLASS: local-ssd
     permissions:
       contents: read
-    timeout-minutes: ${{ matrix.package == 'herdr-connect' && 25 || 15 }}
+    timeout-minutes: ${{ (matrix.package == 'herdr-connect' || matrix.package == 'herdr-hub') && 25 || 15 }}
     strategy:
       fail-fast: false
       matrix:
