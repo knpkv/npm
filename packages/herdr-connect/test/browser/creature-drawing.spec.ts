@@ -349,8 +349,9 @@ for (const theme of ["light", "dark"] satisfies ReadonlyArray<"light" | "dark">)
         expect(geometry?.size, measured).toBe("row")
         expect(geometry?.root.width, measured).toBeCloseTo(32, 2)
         expect(geometry?.root.height, measured).toBeCloseTo(32, 2)
-        expect(geometry?.painted.width, measured).toBeGreaterThanOrEqual(2.45)
-        expect(geometry?.painted.height, measured).toBeGreaterThanOrEqual(3.8)
+        // 2.8 x 4.48 reference units in the 40-unit frame: 2.24 x 3.58px at 32px.
+        expect(geometry?.painted.width, measured).toBeGreaterThanOrEqual(2.2)
+        expect(geometry?.painted.height, measured).toBeGreaterThanOrEqual(3.5)
         expect(
           await creature.locator(".connect-creature-sweat").evaluate((node) => Number(getComputedStyle(node).opacity))
         ).toBeGreaterThanOrEqual(0.9)

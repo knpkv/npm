@@ -4,10 +4,10 @@ export interface AgentCharacter {
   readonly bodyKind: BodyKind
   /** Actual outline bounds: left, top, width, height. */
   readonly bounds: readonly [number, number, number, number]
-  /** Encloses the outline between vertices, with clearance for the row's stroke. */
-  readonly ringScale: number
-  /** Vertical centre of the enclosing ellipse; tapered bodies need it below their bounding-box centre. */
+  /** State ring centre: the reference's nominal body centre. */
   readonly ringCy: number
+  /** The reference ring radius, widened where it would cut the outline (squircle corners) so the ring encloses it. */
+  readonly ringRadius: number
   /** Retained seed hue coordinates; rendered colours come from creaturePalette. */
   readonly hues: readonly [number, number, number]
   readonly eye: readonly [number, number]
@@ -37,7 +37,13 @@ const bodySeeds = {
   bean: { width: 27, height: 22, eyeGap: 4.4, eyeY: 0.55, highlightX: 3, highlightRotation: -70 }
 } satisfies Readonly<Record<BodyKind, BodySeed>>
 export const creatureBodySeed = (kind: BodyKind): BodySeed => bodySeeds[kind]
-export const FOOT = 88
+/**
+ * Connect framing: the reference draws each body at its native seed size, centred on x 16 with its foot on
+ * y 30.75, and Connect shows it in a 40-unit viewBox (-4 -4 40 40). That is the motion designs' size, raised four
+ * units so the state ring always fits. In the character's 0 0 100 100 box: 2.5 per unit, centre 50, foot 86.875.
+ */
+export const STAGE_UNIT = 100 / 40
+export const FOOT = (30.75 + 4) * STAGE_UNIT
 export const IRIS_SHARE = 0.74
 
 type Point = readonly [number, number]
@@ -203,21 +209,6 @@ const beanBody = (width: number, height: number): Outline => {
   return { ...outline, originTop: top }
 }
 
-/** Fit the ellipse to the outline itself. Its maximum normalized radius is convex in the vertical centre. */
-const ringCentre = (points: ReadonlyArray<Point>, top: number, width: number, height: number): number => {
-  const radiusAt = (centre: number): number =>
-    Math.max(...points.map(([x, y]) => Math.hypot((x - 50) / (width / 2), (y - centre) / (height / 2))))
-  let low = top
-  let high = top + height
-  for (let step = 0; step < 32; step++) {
-    const lower = (2 * low + high) / 3
-    const upper = (low + 2 * high) / 3
-    if (radiusAt(lower) < radiusAt(upper)) high = upper
-    else low = lower
-  }
-  return (low + high) / 2
-}
-
 // Stable identities share geometry across polls and surfaces.
 const characterCache = new Map<string, AgentCharacter>()
 // One full supported directory must survive the next stable-order poll without eviction.
@@ -237,7 +228,7 @@ export const agentCharacter = (host: string, id: string): AgentCharacter => {
   const spread = 18 + field(seed, 9, 30)
   const bodyKind = characterBodyKind(host, id)
   const drawing = creatureBodySeed(bodyKind)
-  const unit = Math.min(3, 78 / drawing.width, 72 / drawing.height)
+  const unit = STAGE_UNIT
   const height = drawing.height * unit
   const width = drawing.width * unit
   const radius = width / 2
@@ -269,10 +260,10 @@ export const agentCharacter = (host: string, id: string): AgentCharacter => {
   const top = Math.min(...ys)
   const actualWidth = Math.max(...xs) - left
   const actualHeight = Math.max(...ys) - top
-  const ringCy = ringCentre(outline.points, top, actualWidth, actualHeight)
-  const ringScale = Math.max(
-    ...outline.points.map(([x, y]) => Math.hypot((x - 50) / (actualWidth / 2), (y - ringCy) / (actualHeight / 2)))
-  ) * 1.015
+  const ringCy = FOOT - height / 2
+  const reach = Math.max(...outline.points.map(([x, y]) => Math.hypot(x - 50, y - ringCy)))
+  // The ring's one-unit stroke keeps its inner edge clear of the outline.
+  const ringRadius = Math.max((Math.max(drawing.width, drawing.height) / 2 + 2.25) * unit, reach + 0.6 * unit)
   const character: AgentCharacter = {
     body: outline.path,
     bodyKind,
@@ -282,8 +273,8 @@ export const agentCharacter = (host: string, id: string): AgentCharacter => {
     eyeY: outline.originTop + height * drawing.eyeY,
     hues: [hue, (hue + spread) % 360, (hue + 360 - Math.round(spread / 2)) % 360],
     phase: -(1 + field(seed, 4, 997)) / 1000,
-    ringScale,
     ringCy,
+    ringRadius,
     unit
   }
   if (characterCache.size >= CHARACTER_CACHE_LIMIT) {
