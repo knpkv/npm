@@ -3,7 +3,7 @@ import { expect, it } from "@effect/vitest"
 import { Clock, Config, ConfigProvider, Effect, FileSystem, Option, Path, PlatformError, Schema, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { runCommand } from "../src/host-limits.js"
-import type { HostResources } from "../src/host-resources-model.js"
+import { HostResources } from "../src/host-resources-model.js"
 import { makeHostResources } from "../src/host-resources.js"
 import { deadlineFromCmdline } from "../src/internal/host-resources/parsers.js"
 
@@ -12,6 +12,7 @@ interface FixtureProcess {
   readonly parent: number
   readonly age: number
   readonly argv: ReadonlyArray<string>
+  readonly readError?: "NotFound" | "PermissionDenied"
   readonly environment?: string
 }
 interface GateFixture {
@@ -25,6 +26,10 @@ interface GateFixture {
   readonly descriptorError?: "NotFound" | "PermissionDenied"
   readonly denyOwnership?: boolean
   readonly unlocked?: boolean
+  readonly fdinfoOwner?: number
+  readonly omitGlobalLocks?: boolean
+  readonly unreadableGlobal?: boolean
+  readonly latePids?: ReadonlyArray<number>
 }
 const parent: FixtureProcess = {
   pid: 42,
@@ -58,8 +63,8 @@ const gateFixture = Effect.fn("ResourcesTest.gateFixture")(function*(fixture: Ga
   const slots = fixture.oneSlot === true ? [1] : [1, 2]
   const owns = (pid: number, slot: number) =>
     (fixture.slotHolders?.[String(slot)] ?? holders).includes(pid) || pid === fixture.collisionPid
-  const lock = (slot: number) =>
-    `${slot}: FLOCK ADVISORY WRITE ${acquirers[slot - 1]} 00:${minor.toString(16)}:${inode(slot)} 0 EOF\n`
+  const lock = (slot: number, owner = acquirers[slot - 1]) =>
+    `${slot}: FLOCK ADVISORY WRITE ${owner} 00:${minor.toString(16)}:${inode(slot)} 0 EOF\n`
   const identityFor = (path: string) => {
     const descriptor = /^\/proc\/(\d+)\/fd\/(\d+)$/.exec(path)
     const slot = descriptor === null ? path.endsWith("heavy-gate-2.lock") ? 2 : 1 : Number(descriptor[2]) === 8 ? 2 : 1
@@ -69,6 +74,7 @@ const gateFixture = Effect.fn("ResourcesTest.gateFixture")(function*(fixture: Ga
       ino: Option.some(inode(slot))
     }
   }
+  let inventoryReads = 0
   const fs = FileSystem.makeNoop({
     stat: (path) => Effect.succeed(identityFor(path)),
     open: (path, options) =>
@@ -77,7 +83,13 @@ const gateFixture = Effect.fn("ResourcesTest.gateFixture")(function*(fixture: Ga
       ),
     exists: () => Effect.succeed(false),
     readDirectory: (path) => {
-      if (path === "/proc") return Effect.succeed(fixture.processes.map((p) => String(p.pid)))
+      if (path === "/proc") {
+        inventoryReads++
+        return Effect.succeed([
+          ...fixture.processes.map((p) => String(p.pid)),
+          ...(inventoryReads > 1 ? (fixture.latePids ?? []).map(String) : [])
+        ])
+      }
       const pid = Number(/^\/proc\/(\d+)\/fd$/.exec(path)?.[1])
       return Effect.succeed(
         [
@@ -109,9 +121,23 @@ const gateFixture = Effect.fn("ResourcesTest.gateFixture")(function*(fixture: Ga
       )
     },
     stream: (path) => {
+      if (path === "/proc/locks" && fixture.unreadableGlobal === true) {
+        return Stream.fail(
+          new PlatformError.PlatformError(
+            new PlatformError.SystemError({ _tag: "PermissionDenied", module: "FileSystem", method: "stream" })
+          )
+        )
+      }
       const match = /^\/proc\/(\d+)\/(stat|status|cmdline|environ|fdinfo\/(\d+))$/.exec(path)
       const process = fixture.processes.find((p) => p.pid === Number(match?.[1]))
       const field = match?.[2]
+      if (field === "stat" && process?.readError !== undefined) {
+        return Stream.fail(
+          new PlatformError.PlatformError(
+            new PlatformError.SystemError({ _tag: process.readError, module: "FileSystem", method: "stream" })
+          )
+        )
+      }
       const text = path === "/proc/meminfo"
         ? "MemTotal: 16000000 kB\nMemAvailable: 9000000 kB\nSwapTotal: 0 kB\nSwapFree: 0 kB\n"
         : path === "/proc/loadavg"
@@ -119,7 +145,7 @@ const gateFixture = Effect.fn("ResourcesTest.gateFixture")(function*(fixture: Ga
         : path === "/proc/stat"
         ? `cpu 100 0 20 500 0 0 0 0\ncpu0 100 0 20 500\nbtime ${boot}\n`
         : path === "/proc/locks"
-        ? fixture.unlocked === true ? "" : slots.map(lock).join("")
+        ? fixture.unlocked === true || fixture.omitGlobalLocks === true ? "" : slots.map((slot) => lock(slot)).join("")
         : field === "stat" && process !== undefined
         ? `${process.pid} (node fixture) ${
           [
@@ -139,7 +165,7 @@ const gateFixture = Effect.fn("ResourcesTest.gateFixture")(function*(fixture: Ga
         ? process?.environment ?? "HERDR_PANE_ID=w1:p1\0"
         : field?.startsWith("fdinfo/") === true
         ? `pos:\t0\nflags:\t0100002\nino:\t${inode(Number(match?.[3]) === 8 ? 2 : 1)}\nlock:\t${
-          lock(Number(match?.[3]) === 8 ? 2 : 1)
+          lock(Number(match?.[3]) === 8 ? 2 : 1, fixture.fdinfoOwner)
         }`
         : ""
       return Stream.succeed(new TextEncoder().encode(text))
@@ -170,6 +196,21 @@ it.live("resolves an exited flock acquirer to every retaining process and its to
     expect(held(snapshot)[0]?.holder?.processes.map((p) => p.pid)).toEqual([42, 43])
     expect(held(snapshot)[0]?.holder?.rssBytes).toBe(200 * 1024)
   }))
+for (const lockEvidence of ["pid-zero", "no-global-record", "unreadable-global"]) {
+  it.live(`trusts verified descriptor lock evidence with ${lockEvidence}`, () =>
+    Effect.gen(function*() {
+      const snapshot = yield* runFixture({
+        processes: [parent, child],
+        holders: [42, 43],
+        fdinfoOwner: lockEvidence === "pid-zero" ? 0 : 44,
+        omitGlobalLocks: lockEvidence === "no-global-record",
+        unreadableGlobal: lockEvidence === "unreadable-global"
+      })
+      expect(held(snapshot).map((slot) => slot.holder?.pid)).toEqual([42, 42])
+      expect(held(snapshot)[0]?.holderPids).toEqual([42, 43])
+    }))
+}
+
 it.live("does not charge a future timeout argument to the parent's earlier start", () =>
   Effect.gen(function*() {
     const snapshot = yield* runFixture({ processes: [parent, child], holders: [42, 43] })
@@ -219,7 +260,7 @@ it.live("joins Btrfs fdinfo lock identity with the exact descriptor target and e
     expect(held(snapshot).map((slot) => slot.holder?.pid)).toEqual([42, 42])
     expect(held(snapshot)[0]?.holder?.processes.map((p) => p.pid)).toEqual([42, 43])
   }))
-it.live("only emits bounded display commands with executable and path argument basenames", () =>
+it.live("elides the entire unknown argument form rather than truncating private values", () =>
   Effect.gen(function*() {
     const job = { ...parent, argv: ["/private/bin/node", "/private/project/build.mjs", "--flag", "x".repeat(200)] }
     const snapshot = yield* runFixture({ processes: [job], holders: [42] })
@@ -228,9 +269,7 @@ it.live("only emits bounded display commands with executable and path argument b
       : []
     expect(commands.length).toBeGreaterThan(0)
     expect(
-      commands.every((command) =>
-        command.length <= 120 && !command.includes("/private/") && command.startsWith("node build.mjs")
-      )
+      commands.every((command) => command === "node …")
     ).toBe(true)
   }))
 
@@ -260,7 +299,7 @@ const realRetainedLock = Effect.fn("ResourcesTest.retainedLock")(function*(direc
   const lock = `${root}/heavy-gate.lock`
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
   const script =
-    "exec 9>\"$1\"; flock -n 9 & acquirer=$!; wait \"$acquirer\"; sleep 2 & child=$!; printf \"%s %s %s\\n\" \"$$\" \"$child\" \"$acquirer\"; read -r release; wait \"$child\""
+    "exec 9>\"$1\"; flock -n 9 & acquirer=$!; wait \"$acquirer\"; mkfifo \"$1.release\"; cat \"$1.release\" >/dev/null & child=$!; printf \"%s %s %s\\n\" \"$$\" \"$child\" \"$acquirer\"; read -r release; printf done >\"$1.release\"; wait \"$child\""
   const handle = yield* spawner.spawn(ChildProcess.make("sh", ["-c", script, "lock-fixture", lock]))
   yield* Effect.addFinalizer(() =>
     Stream.make(new TextEncoder().encode("done\n")).pipe(
@@ -320,7 +359,10 @@ for (
 it.live("does not prove a slot free when all ownership evidence is denied", () =>
   Effect.gen(function*() {
     const snapshot = yield* runFixture({ processes: [parent], holders: [42], denyOwnership: true })
-    expect(snapshot.gate._tag).toBe("Unavailable")
+    expect(snapshot.gate._tag === "Reading" ? snapshot.gate.value.slots.map((slot) => slot.status) : []).toEqual([
+      "Unknown",
+      "Unknown"
+    ])
   }))
 it.live("keeps ancestor and descendant jobs separate when they retain different slots", () =>
   Effect.gen(function*() {
@@ -372,3 +414,90 @@ for (const secondRoot of [42, 52]) {
       }
     }))
 }
+
+it.live("keeps wrapped shell and unknown argument secrets out of every wire command", () =>
+  Effect.gen(function*() {
+    for (
+      const argv of [
+        ["timeout", "20m", "bash", "-lc", "export BUILD_TOKEN=fixture-secret; sleep 600"],
+        ["curl", "-H", "Authorization: Bearer fixture-secret"],
+        ["tool", "--client-secret", "fixture-secret"]
+      ]
+    ) {
+      const snapshot = yield* runFixture({ processes: [{ ...parent, argv }], holders: [42] })
+      const commands = snapshot.heavyJobs._tag === "Reading"
+        ? snapshot.heavyJobs.value.flatMap((job) => [job.command, ...job.processes.map((proc) => proc.command)]) :
+        []
+      expect(commands.length).toBeGreaterThan(0)
+      expect(commands.join(" ")).not.toContain("fixture-secret")
+      expect(JSON.stringify(snapshot)).not.toContain("BUILD_TOKEN")
+    }
+  }))
+it.live("isolates malformed pane environments and keeps the complete snapshot decodable", () =>
+  Effect.gen(function*() {
+    const snapshot = yield* runFixture({
+      processes: [{ ...parent, environment: `HERDR_PANE_ID=${"x".repeat(1025)}\0` }]
+    })
+    expect(snapshot.topMemory._tag === "Reading" ? snapshot.topMemory.value.groups[0]?.pane : "unavailable").toBeNull()
+    expect(Schema.decodeUnknownSync(HostResources)(snapshot)).toEqual(snapshot)
+  }))
+
+it.layer(NodeServices.layer, { excludeTestServices: true })("filesystem capacity", (it) => {
+  it.effect("reports the actual filesystem type with the sampled capacity", () =>
+    Effect.gen(function*() {
+      const expected = (yield* runCommand(["stat", "-f", "-c", "%T", "/tmp"])).trim()
+      const snapshot = yield* runFixture({ processes: [] })
+      expect(snapshot.tmp._tag === "Reading" ? snapshot.tmp.value.fsType : "unavailable").toBe(expected)
+    }))
+})
+
+it.live("reports unresolved positive lock evidence as unknown, retaining only proven jobs", () =>
+  Effect.gen(function*() {
+    const snapshot = yield* runFixture({
+      processes: [child],
+      acquirers: [44, 45],
+      slotHolders: { "1": [42], "2": [43] }
+    })
+    expect(snapshot.gate._tag).toBe("Reading")
+    if (snapshot.gate._tag === "Reading") {
+      expect(snapshot.gate.value.slots[0]).toMatchObject({
+        status: "Unknown",
+        reason: "ownership_unknown",
+        holder: null
+      })
+      expect(snapshot.gate.value.slots[1]).toMatchObject({ status: "Held", holder: { pid: 43 } })
+    }
+    expect(snapshot.heavyJobs._tag === "Reading" ? snapshot.heavyJobs.value.map((job) => job.pid) : []).toEqual([43])
+  }))
+for (
+  const readError of ["NotFound", "PermissionDenied"] satisfies ReadonlyArray<NonNullable<FixtureProcess["readError"]>>
+) {
+  it.live(`never infers free from an inventory missing a ${readError} process`, () =>
+    Effect.gen(function*() {
+      const snapshot = yield* runFixture({
+        processes: [{ ...parent, readError }, child],
+        omitGlobalLocks: true,
+        slotHolders: { "1": [42], "2": [43] }
+      })
+      expect(snapshot.gate._tag === "Reading" ? snapshot.gate.value.slots[0]?.status : "unavailable").toBe("Unknown")
+      const free = yield* runFixture({ processes: [], holders: [], unlocked: true })
+      expect(free.gate._tag === "Reading" ? free.gate.value.slots.map((slot) => slot.status) : []).toEqual([
+        "Free",
+        "Free"
+      ])
+    }))
+}
+
+it.live("does not prove free when a new process appears after the metadata inventory", () =>
+  Effect.gen(function*() {
+    const snapshot = yield* runFixture({
+      processes: [child],
+      latePids: [52],
+      omitGlobalLocks: true,
+      slotHolders: { "1": [52], "2": [43] }
+    })
+    expect(snapshot.gate._tag === "Reading" ? snapshot.gate.value.slots.map((slot) => slot.status) : []).toEqual([
+      "Unknown",
+      "Held"
+    ])
+  }))

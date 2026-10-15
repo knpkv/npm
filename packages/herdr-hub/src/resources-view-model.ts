@@ -2,6 +2,8 @@ import {
   heavyAbortBytes,
   heavyStartBytes,
   type HostResources,
+  type ResourceCpu,
+  resourcesIntervalMillis,
   resourcesStatus,
   type ResourceTrendPoint
 } from "./host-resources-model.js"
@@ -67,4 +69,16 @@ export const memoryPaths = (
     const line = segment.map((point, i) => `${i > 0 ? "L" : "M"}${x(point)} ${y(point)}`).join("")
     return [{ line, area: `${line}L${x(last)} 200L${x(first)} 200Z` }]
   })
+}
+
+/** Start a new subpath after a missed CPU sample rather than drawing through unobserved time. */
+export const cpuPath = (points: ResourceCpu["history"], sampledAt: number): string => {
+  const visible = points.filter((point) => point.sampledAt >= sampledAt - 3_590_000 && point.sampledAt <= sampledAt)
+  return visible.map((point, index) => {
+    const previous = visible[index - 1]
+    const move = previous === undefined || point.sampledAt - previous.sampledAt > resourcesIntervalMillis * 1.5
+    const x = Math.max(0, Math.min(160, (point.sampledAt - sampledAt + 3_590_000) / 3_590_000 * 160)).toFixed(1)
+    const y = (36 - point.percent / 100 * 36).toFixed(1)
+    return `${move ? "M" : "L"}${x} ${y}`
+  }).join("")
 }

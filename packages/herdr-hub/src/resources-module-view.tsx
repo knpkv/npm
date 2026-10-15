@@ -6,6 +6,7 @@ import {
   heavyStartBytes,
   type HostResources,
   type ResourceJob,
+  type ResourceDisk,
   type ResourcePreview,
   type ResourceUnavailable
 } from "./host-resources-model.js"
@@ -13,6 +14,7 @@ import { ShellIcon } from "./internal/shell-icon.js"
 import { type ModulePageMount, type ModuleViews, resourcesModule } from "./modules.js"
 import type { ResourcesReadFailed } from "./resources-client.js"
 import {
+  cpuPath,
   memoryPaths,
   memoryState,
   resourceAge,
@@ -62,6 +64,16 @@ const MemoryStatus = ({ available }: { readonly available: number }): ReactEleme
     <StateLabel {...state} />
   )
 }
+
+const DiskRow = ({ disk }: { readonly disk: typeof ResourceDisk.Type }): ReactElement => (
+  <div>
+    <b>{disk.mount}</b>
+    <span className="hr-num">{resourceBytes(disk.usedBytes)} used</span>
+    <small>
+      {resourceBytes(disk.totalBytes - disk.usedBytes, false, disk.totalBytes)} free of {resourceBytes(disk.totalBytes)}
+    </small>
+  </div>
+)
 
 const Panel = ({
   children,
@@ -335,15 +347,7 @@ export const HostResourcesView = ({ now, ...state }: HostResourcesViewProps): Re
                   role="img"
                   aria-label={`CPU over the last hour${old ? ", last values, not current" : ""}`}
                 >
-                  <path
-                    d={cpu.value.history
-                      .filter((point) => point.sampledAt >= snapshot.sampledAt - 3_590_000)
-                      .map(
-                        (point, i) =>
-                          `${i > 0 ? "L" : "M"}${Math.max(0, Math.min(160, ((point.sampledAt - snapshot.sampledAt + 3_590_000) / 3_590_000) * 160)).toFixed(1)} ${(36 - (point.percent / 100) * 36).toFixed(1)}`
-                      )
-                      .join("")}
-                  />
+                  <path d={cpuPath(cpu.value.history, snapshot.sampledAt)} />
                 </svg>
               </div>
             </>
@@ -354,19 +358,12 @@ export const HostResourcesView = ({ now, ...state }: HostResourcesViewProps): Re
             {disks._tag === "Unavailable" ? (
               <p className="hr-empty">{unavailableCopy(disks)}</p>
             ) : (
-              disks.value.map((disk) => (
-                <div key={disk.mount}>
-                  <b>{disk.mount}</b>
-                  <span className="hr-num">{resourceBytes(disk.usedBytes)} used</span>
-                  <small>
-                    {resourceBytes(disk.totalBytes - disk.usedBytes, false, disk.totalBytes)} free of{" "}
-                    {resourceBytes(disk.totalBytes)}
-                  </small>
-                </div>
-              ))
+              disks.value.map((disk) => <DiskRow key={disk.mount} disk={disk} />)
             )}
             {tmp._tag === "Unavailable" ? (
               <p className="hr-empty">{unavailableCopy(tmp)}</p>
+            ) : tmp.value.fsType !== "tmpfs" ? (
+              <DiskRow disk={tmp.value} />
             ) : (
               <div>
                 <b>/tmp (memory)</b>
@@ -406,7 +403,7 @@ export const HostResourcesView = ({ now, ...state }: HostResourcesViewProps): Re
                     <div className="hr-slot-head">
                       <b>Slot {slot.slot}</b>
                       {slot.heldTooLong === null ? (
-                        <span className="hr-word">{slot.holder === null ? "Free" : "Held"}</span>
+                        <span className="hr-word">{slot.status}</span>
                       ) : (
                         <StateLabel
                           label={`Held past its ${slot.heldTooLong.minutes}m ${slot.heldTooLong.kind}`}
@@ -415,7 +412,9 @@ export const HostResourcesView = ({ now, ...state }: HostResourcesViewProps): Re
                         />
                       )}
                     </div>
-                    {slot.holder === null ? null : (
+                    {slot.status === "Unknown" ? (
+                      <p className="hr-wait">Holder not readable on this host.</p>
+                    ) : slot.holder === null ? null : (
                       <>
                         <p className="hr-job">{slot.holder.command}</p>
                         <dl className="hr-kv">

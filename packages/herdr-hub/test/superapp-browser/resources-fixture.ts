@@ -1,6 +1,7 @@
 import { Schema } from "effect"
 import {
   HostResources,
+  type ResourceCpu,
   type ResourceJob,
   type ResourceLimit,
   type ResourceMemoryGroup,
@@ -25,14 +26,17 @@ const RawPerson = Schema.Struct({
   rss: Schema.String,
   procs: Schema.Int
 })
-const RawSlot = Schema.Struct({
-  job: Schema.String,
-  lane: Schema.String,
-  grant: Schema.String,
-  age: Schema.String,
-  limit: Schema.String,
-  over: Schema.optionalKey(Schema.String)
-})
+const RawSlot = Schema.Union([
+  Schema.Struct({ unknown: Schema.Literal(true) }),
+  Schema.Struct({
+    job: Schema.String,
+    lane: Schema.String,
+    grant: Schema.String,
+    age: Schema.String,
+    limit: Schema.String,
+    over: Schema.optionalKey(Schema.String)
+  })
+])
 const RawJob = Schema.Struct({
   lane: Schema.String,
   job: Schema.String,
@@ -80,6 +84,7 @@ export const resourceFixtureNow = new Date(2026, 9, 15, 14, 14, 4).getTime()
 const ResourcesFixtureState = Schema.Literals([
   "live-healthy",
   "live-busy",
+  "gate-holder-unknown",
   "below-abort",
   "lock-held-too-long",
   "stale",
@@ -103,6 +108,26 @@ const time = (value: string, now: number): number => {
 const read = <A>(value: A) => ({ _tag: "Reading", value } satisfies { readonly _tag: "Reading"; readonly value: A })
 const absent = { _tag: "Unavailable", reason: "not_configured" } satisfies ResourceUnavailable
 
+/** Fill the exported CPU control segments without shifting their vertices or exceeding the history bound. */
+const cpuFixtureHistory = (values: ReadonlyArray<number>, sampledAt: number): ResourceCpu["history"] => {
+  const at = (index: number) =>
+    values.length < 2 ? sampledAt : sampledAt - (values.length - 1 - index) / (values.length - 1) * 3_590_000
+  return values.flatMap((percent, index) => {
+    const previous = values[index - 1]
+    const currentAt = at(index)
+    if (previous === undefined) return [{ sampledAt: currentAt, percent }]
+    const previousAt = at(index - 1)
+    const segments = Math.ceil((currentAt - previousAt) / 15_000)
+    return Array.from({ length: segments }, (_, step) =>
+      step + 1 === segments
+        ? { sampledAt: currentAt, percent }
+        : {
+          sampledAt: previousAt + (currentAt - previousAt) * (step + 1) / segments,
+          percent: previous + (percent - previous) * (step + 1) / segments
+        })
+  })
+}
+
 /** Exported synthetic data drives unit tests and the real browser fixture, independently of the view. */
 export const resourcesFixture = (state: ResourcesFixtureState, now = resourceFixtureNow): ResourcesViewState => {
   const selected = data.states[state]
@@ -123,20 +148,29 @@ export const resourcesFixture = (state: ResourcesFixtureState, now = resourceFix
     processes: job.procs.map(([pid, command, rss]) => ({ pid: Number(pid), command, rssBytes: quantity(rss) }))
   }))
   const gate = data.gates[selected?.gate ?? ""]
-  const slots = (gate?.slots ?? []).map((slot, index) => {
+  const slots = (gate?.slots ?? []).map((slot, index): ResourceSlot => {
+    const number = index === 0 ? 1 : 2
+    const empty = {
+      slot: number,
+      holder: null,
+      holderPids: [],
+      limit: { kind: "limit", minutes: 30 } satisfies ResourceLimit,
+      heldTooLong: null
+    } satisfies Omit<ResourceSlot, "status">
+    if (slot !== null && "unknown" in slot) return { ...empty, status: "Unknown", reason: "ownership_unknown" }
     const holder = slot === null ? null : jobs.find((job) => job.lane === slot.lane) ?? null
-    const limit: ResourceLimit = slot !== null && slot.limit.startsWith("deadline")
+    if (holder === null || slot === null) return { ...empty, status: "Free" }
+    const limit: ResourceLimit = slot.limit.startsWith("deadline")
       ? { kind: "deadline", minutes: Number(/deadline (\d+)/.exec(slot.limit)?.[1]) }
       : { kind: "limit", minutes: 30 }
     return {
-      slot: index === 0 ? 1 : 2,
-      holder: holder === null || slot === null
-        ? null
-        : { ...holder, startedAt: sampledAt - Number(/(\d+)m/.exec(slot.age)?.[1]) * 60_000 },
-      holderPids: holder === null ? [] : [holder.pid],
+      slot: number,
+      status: "Held",
+      holder: { ...holder, startedAt: sampledAt - Number(/(\d+)m/.exec(slot.age)?.[1]) * 60_000 },
+      holderPids: [holder.pid],
       limit,
-      heldTooLong: slot?.over === undefined ? null : limit
-    } satisfies typeof ResourceSlot.Type
+      heldTooLong: slot.over === undefined ? null : limit
+    }
   })
   const top = data.top[selected?.top ?? ""]
   const groups: ReadonlyArray<ResourceMemoryGroup> = [...(top?.agents ?? []), ...(top === undefined ? [] : [top.other])]
@@ -167,19 +201,22 @@ export const resourcesFixture = (state: ResourcesFixtureState, now = resourceFix
       cores: 8,
       percent: Number(values.cpu.now.replace("%", "")),
       load: values.cpu.load.map(Number),
-      history: values.cpu.spark.map((percent, index) => ({
-        sampledAt: sampledAt - (values.cpu.spark.length - 1 - index) / (values.cpu.spark.length - 1) * 3_590_000,
-        percent
-      }))
+      history: cpuFixtureHistory(values.cpu.spark, sampledAt)
     }),
     disks: read(
       data.disk.mounts.map((mount) => ({
         mount: mount.path,
+        fsType: "unknown",
         totalBytes: quantity(mount.size),
         usedBytes: quantity(mount.used)
       }))
     ),
-    tmp: read({ mount: "/tmp", totalBytes: quantity(data.disk.tmp.quota), usedBytes: quantity(data.disk.tmp.used) }),
+    tmp: read({
+      mount: "/tmp",
+      fsType: "tmpfs",
+      totalBytes: quantity(data.disk.tmp.quota),
+      usedBytes: quantity(data.disk.tmp.used)
+    }),
     gate: gate?.notConfigured === true ? absent : read({ slots, fullGateWaiting: gate?.waiting !== undefined }),
     heavyJobs: selected?.jobs === "notConfigured" ? absent : read(jobs),
     previews: read(

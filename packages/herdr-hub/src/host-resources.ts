@@ -9,6 +9,7 @@ import {
   type ResourceJob,
   type ResourceLimit,
   type ResourcePreview,
+  type ResourceSlot,
   type ResourceUnavailable
 } from "./host-resources-model.js"
 import {
@@ -76,6 +77,7 @@ const Labels = Schema.Record(
   ])
 )
 const DiskNumbers = Schema.Tuple([
+  Schema.String,
   Schema.Number.check(Schema.isFinite(), Schema.isGreaterThan(0)),
   Schema.Number.check(Schema.isFinite(), Schema.isGreaterThanOrEqualTo(0)),
   Schema.Number.check(Schema.isFinite(), Schema.isGreaterThanOrEqualTo(0))
@@ -131,12 +133,12 @@ export const makeHostResources = Effect.fn("HostResources.make")(
     }).pipe(Effect.catchTag("CpuSourceError", () => Effect.succeed(unavailable("failed"))))
     const readDisk = Effect.fn("HostResources.readDisk")(function*(mount: string) {
       // stat -f calls statfs; free blocks keep reserved capacity out of the used count.
-      const output = yield* command(["stat", "-f", "-c", "%S %b %f", "--", mount])
-      const [blockSize, blocks, available] = yield* Schema.decodeUnknownEffect(DiskNumbers)(
-        output.trim().split(/\s+/).map(Number)
+      const output = yield* command(["stat", "-f", "-c", "%T %S %b %f", "--", mount])
+      const [fsType, blockSize, blocks, available] = yield* Schema.decodeUnknownEffect(DiskNumbers)(
+        output.trim().split(/\s+/).map((part, index) => index === 0 ? part : Number(part))
       )
       if (available > blocks) return yield* new DiskSourceError({ cause: "inconsistent filesystem blocks" })
-      return { mount, totalBytes: blockSize * blocks, usedBytes: blockSize * (blocks - available) }
+      return { mount, fsType, totalBytes: blockSize * blocks, usedBytes: blockSize * (blocks - available) }
     }, Effect.mapError((cause) => new DiskSourceError({ cause })))
 
     const readProcesses = Effect.gen(function*() {
@@ -176,7 +178,10 @@ export const makeHostResources = Effect.fn("HostResources.make")(
               ? Effect.succeed(null)
               : Effect.fail(error))
         ), { concurrency: 16 })
-      return processes.filter((proc) => proc !== null)
+      return {
+        processes: processes.filter((proc) => proc !== null),
+        complete: processes.every((proc) => proc !== null)
+      }
     }).pipe(Effect.timeout("5 seconds"), Effect.mapError((cause) => new ProcessSourceError({ cause })))
 
     const readNames = command([config.herdrCommand, "agent", "list"], 1024 * 1024).pipe(
@@ -224,12 +229,24 @@ export const makeHostResources = Effect.fn("HostResources.make")(
     }, Effect.mapError((cause) => new PreviewSourceError({ cause })))
 
     const readGate = Effect.fn("HostResources.readGate")(
-      function*(processes: ReadonlyArray<ProcInfo>, names: ReadonlyMap<string, string>, now: number) {
+      function*(
+        processes: ReadonlyArray<ProcInfo>,
+        names: ReadonlyMap<string, string>,
+        now: number,
+        inventoryComplete: boolean
+      ) {
         const directory = config.heavyGate?.lockDirectory
         if (directory === undefined) {
           return { gate: unavailable("not_configured"), heavyJobs: unavailable("not_configured") }
         }
-        const locks = yield* boundedText("/proc/locks", 1024 * 1024).pipe(Effect.flatMap(parseLocks))
+        const globalLocks = yield* boundedText("/proc/locks", 1024 * 1024).pipe(
+          Effect.flatMap(parseLocks),
+          Effect.result
+        )
+        const locks = Result.isSuccess(globalLocks) ? globalLocks.success : []
+        const currentPids = (yield* fs.readDirectory("/proc")).filter((name) => /^\d+$/.test(name))
+        const knownPids = new Set(processes.map((proc) => String(proc.pid)))
+        const inventoryKnown = inventoryComplete && currentPids.every((pid) => knownPids.has(pid))
         const evidence = yield* Effect.forEach([1, 2] satisfies ReadonlyArray<1 | 2>, (slot) =>
           Effect.gen(function*() {
             const file = paths.join(directory, slot === 1 ? "heavy-gate.lock" : "heavy-gate-2.lock")
@@ -240,7 +257,8 @@ export const makeHostResources = Effect.fn("HostResources.make")(
                 (error) => error.reason._tag === "NotFound" ? Effect.succeed(Option.none()) : Effect.fail(error)
               )
             )
-            if (Option.isNone(info)) return { slot, holders: [] }
+            if (Option.isNone(info)) return { slot, holders: [], unknown: false }
+            if (Option.isNone(info.value.ino)) return { slot, holders: [], unknown: true }
             const resolved = yield* fs.realPath(file)
             const holders = yield* Effect.forEach(processes, (proc) =>
               Effect.gen(function*() {
@@ -248,7 +266,7 @@ export const makeHostResources = Effect.fn("HostResources.make")(
                   Effect.result
                 )
                 if (Result.isFailure(descriptorList)) {
-                  return { holder: null, incomplete: descriptorList.failure.reason._tag !== "NotFound" }
+                  return { holder: null, incomplete: true }
                 }
                 const descriptors = descriptorList.success
                 let incomplete = false
@@ -262,7 +280,7 @@ export const makeHostResources = Effect.fn("HostResources.make")(
                   const path = paths.join("/proc", String(proc.pid), "fd", fd)
                   const target = yield* fs.realPath(path).pipe(Effect.result)
                   if (Result.isFailure(target)) {
-                    if (target.failure.reason._tag !== "NotFound") incomplete = true
+                    incomplete = true
                     continue
                   }
                   if (target.success !== resolved) continue
@@ -280,18 +298,11 @@ export const makeHostResources = Effect.fn("HostResources.make")(
                       ).join("\n")
                     )
                     const retainedInode = descriptorInfo.ino.value
-                    return retained.some((record) =>
-                      record.inode === String(retainedInode) &&
-                      locks.some((lock) =>
-                        lock.inode === record.inode && lock.major === record.major && lock.minor === record.minor &&
-                        lock.pid === record.pid
-                      )
-                    )
+                    // fdinfo belongs to this verified open file description, even after its acquirer exits.
+                    return retained.some((record) => record.inode === String(retainedInode))
                   })).pipe(Effect.result)
                   if (Result.isFailure(same)) {
-                    if (
-                      !(same.failure._tag === "PlatformError" && same.failure.reason._tag === "NotFound")
-                    ) incomplete = true
+                    incomplete = true
                     continue
                   }
                   if (same.success) return { holder: proc, incomplete }
@@ -299,15 +310,11 @@ export const makeHostResources = Effect.fn("HostResources.make")(
                 return { holder: null, incomplete }
               }), { concurrency: 16 })
             const retained = holders.flatMap((result) => result.holder === null ? [] : [result.holder])
-            if (
-              retained.length === 0 && holders.some((result) => result.incomplete) &&
+            const unknown = retained.length === 0 && (
+              !inventoryKnown || Result.isFailure(globalLocks) || holders.some((result) => result.incomplete) ||
               locks.some((lock) => lock.inode === String(Option.getOrNull(info.value.ino)))
-            ) {
-              return yield* new LocksSourceError({
-                cause: "ownership evidence unavailable for a potentially held slot"
-              })
-            }
-            return { slot, holders: retained }
+            )
+            return { slot, holders: retained, unknown }
           }))
         const rootFor = (holder: ProcInfo, retainers: ReadonlySet<number>): ProcInfo => {
           let root = holder
@@ -320,13 +327,13 @@ export const makeHostResources = Effect.fn("HostResources.make")(
           }
           return root
         }
-        const resolvedSlots = evidence.map(({ holders, slot }) => {
+        const resolvedSlots = evidence.map(({ holders, slot, unknown }) => {
           const retainers = new Set(holders.map((holder) => holder.pid))
           const roots = [...new Map(holders.map((holder) => {
             const root = rootFor(holder, retainers)
             return [root.pid, root] satisfies readonly [number, ProcInfo]
           })).values()].sort((a, b) => a.startedAt - b.startedAt || a.pid - b.pid)
-          return { slot, holders, roots }
+          return { slot, holders, roots, unknown }
         })
         const jobRoots = new Set(resolvedSlots.flatMap((slot) => slot.roots.map((root) => root.pid)))
         const belongsTo = (proc: ProcInfo, root: ProcInfo): boolean => {
@@ -387,12 +394,14 @@ export const makeHostResources = Effect.fn("HostResources.make")(
         const jobs = new Map(
           entries.map((entry) => [entry.holder.pid, entry] satisfies readonly [number, typeof entry])
         )
-        const slots = resolvedSlots.map(({ holders, roots, slot }) => {
+        const slots = resolvedSlots.map(({ holders, roots, slot, unknown }) => {
           const primary = roots[0]
           const job = primary === undefined ? undefined : jobs.get(primary.pid)
+          const empty = { slot, holderPids: [], holder: null, limit: jobLimit(null), heldTooLong: null }
+          if (unknown) return { ...empty, status: "Unknown", reason: "ownership_unknown" } satisfies ResourceSlot
           return job === undefined
-            ? { slot, holderPids: [], holder: null, limit: jobLimit(null), heldTooLong: null }
-            : { slot, holderPids: holders.map((holder) => holder.pid), ...job }
+            ? { ...empty, status: "Free" } satisfies ResourceSlot
+            : { slot, status: "Held", holderPids: holders.map((holder) => holder.pid), ...job } satisfies ResourceSlot
         })
         const fullGateWaiting = yield* fs.exists(paths.join(directory, "full-gate-waiting"))
         return { gate: reading({ slots, fullGateWaiting }), heavyJobs: reading(entries.map((entry) => entry.holder)) }
@@ -428,17 +437,20 @@ export const makeHostResources = Effect.fn("HostResources.make")(
       const nameMap = Result.isSuccess(names) ? names.success : new Map<string, string>()
       const { gateAndJobs, previews } = yield* Effect.all({
         gateAndJobs: Result.isSuccess(processes)
-          ? readGate(processes.success, nameMap, sampledAt)
+          ? readGate(processes.success.processes, nameMap, sampledAt, processes.success.complete)
           : Effect.succeed({
             gate: unavailable(config.heavyGate === undefined ? "not_configured" : "failed"),
             heavyJobs: unavailable(config.heavyGate === undefined ? "not_configured" : "failed")
           }),
         previews: Result.isSuccess(processes)
-          ? source(readPreviews(processes.success))
+          ? source(readPreviews(processes.success.processes))
           : Effect.succeed(unavailable("failed"))
       }, { concurrency: "unbounded" })
       const topMemory = Result.isSuccess(processes)
-        ? reading({ namesAvailable: Result.isSuccess(names), groups: groupMemory(processes.success, nameMap) })
+        ? reading({
+          namesAvailable: Result.isSuccess(names),
+          groups: groupMemory(processes.success.processes, nameMap)
+        })
         : unavailable("failed")
       const snapshot: HostResources = {
         host: config.host,

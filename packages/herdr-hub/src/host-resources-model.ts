@@ -35,7 +35,7 @@ export const ResourceCpu = Schema.Struct({
   load: Schema.Tuple([Amount, Amount, Amount])
 })
 export type ResourceCpu = typeof ResourceCpu.Type
-export const ResourceDisk = Schema.Struct({ mount: Text, totalBytes: Amount, usedBytes: Amount })
+export const ResourceDisk = Schema.Struct({ mount: Text, fsType: Text, totalBytes: Amount, usedBytes: Amount })
 export const ResourceLimit = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("limit"), minutes: Schema.Literal(30) }),
   Schema.Struct({ kind: Schema.Literal("deadline"), minutes: Amount })
@@ -57,13 +57,23 @@ export const ResourceJob = Schema.Struct({
   processes: Schema.Array(ResourceProcess).check(Schema.isMaxLength(8192))
 })
 export type ResourceJob = typeof ResourceJob.Type
-export const ResourceSlot = Schema.Struct({
+const SlotFields = {
   slot: Schema.Literals([1, 2]),
-  holder: Schema.NullOr(ResourceJob),
   holderPids: Schema.Array(Count).check(Schema.isMaxLength(8192)),
   limit: ResourceLimit,
   heldTooLong: Schema.NullOr(ResourceLimit)
-})
+}
+export const ResourceSlot = Schema.Union([
+  Schema.Struct({ ...SlotFields, status: Schema.Literal("Held"), holder: ResourceJob }),
+  Schema.Struct({ ...SlotFields, status: Schema.Literal("Free"), holder: Schema.Null }),
+  Schema.Struct({
+    ...SlotFields,
+    status: Schema.Literal("Unknown"),
+    holder: Schema.Null,
+    reason: Schema.Literal("ownership_unknown")
+  })
+])
+export type ResourceSlot = typeof ResourceSlot.Type
 export const ResourcePreview = Schema.Struct({
   open: Schema.Union([
     Schema.TaggedStruct("Ready", {

@@ -178,7 +178,9 @@
         "neverText": "No reading from maple yet.",
         "loading": "Loading host resources",
         "notConfigured": "Not configured on this host",
-        "colProcess": "Process"
+        "colProcess": "Process",
+        "unknown": "Unknown",
+        "holderUnknown": "Holder not readable on this host."
       },
       "disk": {
         "mounts": [
@@ -506,6 +508,20 @@
         },
         "notConfigured": {
           "notConfigured": true
+        },
+        "holderUnknown": {
+          "slots": [
+            {
+              "unknown": true
+            },
+            {
+              "job": "build, storefront",
+              "lane": "atlas-orch",
+              "grant": "none",
+              "age": "4m",
+              "limit": "limit 30m"
+            }
+          ]
         }
       },
       "jobs": {
@@ -570,6 +586,19 @@
             "procs": [
               ["41977", "playwright test", "0.6 GiB"],
               ["41990", "chromium --headless", "1.0 GiB"]
+            ]
+          }
+        ],
+        "holderUnknown": [
+          {
+            "lane": "atlas-orch",
+            "job": "build, storefront",
+            "rss": "2.4 GiB",
+            "grant": "no grant on cmdline",
+            "started": "started 14:10",
+            "procs": [
+              ["42011", "vite build", "1.7 GiB"],
+              ["42019", "esbuild --service", "0.7 GiB"]
             ]
           }
         ]
@@ -821,6 +850,18 @@
           "previews": "all",
           "top": "all",
           "openFirstJob": true,
+          "regions": ["nav", "header", "memory", "trend", "cpu", "disk", "gate", "jobs", "previews", "top"]
+        },
+        "gate-holder-unknown": {
+          "name": "Host resources, gate holder unknown",
+          "nav": "standard",
+          "module": "hostResources",
+          "reading": "busy",
+          "gate": "holderUnknown",
+          "jobs": "holderUnknown",
+          "previews": "all",
+          "top": "all",
+          "openFirstJob": false,
           "regions": ["nav", "header", "memory", "trend", "cpu", "disk", "gate", "jobs", "previews", "top"]
         },
         "below-abort": {

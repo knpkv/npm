@@ -5,6 +5,8 @@ import { HostResourcesView } from "../src/resources-module-view.js"
 import { memoryPaths } from "../src/resources-view-model.js"
 import { resourceFixtureNow, resourcesFixture, resourcesStates } from "./superapp-browser/resources-fixture.js"
 
+import exported from "./fixtures/host-resources.json" with { type: "json" }
+
 const regions = ["memory", "trend", "cpu", "disk", "gate", "jobs", "previews", "top"]
 describe("host resource reference states", () => {
   it.each(resourcesStates)("renders %s with distinct reference regions and read-only controls", (state) => {
@@ -132,4 +134,101 @@ describe("host resource reference states", () => {
     expect(root.querySelectorAll('[data-region="previews"] a')).toHaveLength(0)
     expect(root.textContent).toContain("Open unavailable")
   })
+})
+
+it("breaks CPU paths at missing sampling intervals while retaining ordinary jitter", () => {
+  for (const [times, moves] of [
+    [[-40_000, -30_000, 0], 2],
+    [[-25_000, -15_000, 0], 1]
+  ] satisfies ReadonlyArray<readonly [ReadonlyArray<number>, number]>) {
+    const fixture = resourcesFixture("live-healthy")
+    const snapshot = fixture.snapshot
+    if (snapshot === null || snapshot.cpu._tag !== "Reading") throw new TypeError("CPU fixture missing")
+    const root = document.createElement("div")
+    root.innerHTML = renderToStaticMarkup(
+      <HostResourcesView
+        {...fixture}
+        snapshot={{
+          ...snapshot,
+          cpu: {
+            _tag: "Reading",
+            value: {
+              ...snapshot.cpu.value,
+              history: times.map((offset, index) => ({
+                sampledAt: snapshot.sampledAt + offset,
+                percent: 10 + index * 10
+              }))
+            }
+          }
+        }}
+        now={resourceFixtureNow}
+      />
+    )
+    const path = root.querySelector('[data-region="cpu"] .hr-spark path')?.getAttribute("d") ?? ""
+    expect(path.match(/M/g)).toHaveLength(moves)
+    expect(path.match(/L/g)).toHaveLength(3 - moves)
+  }
+})
+it("densifies reference CPU controls without losing any original vertex or inventing gaps", () => {
+  const fixture = resourcesFixture("live-healthy")
+  const snapshot = fixture.snapshot
+  if (snapshot === null || snapshot.cpu._tag !== "Reading") throw new TypeError("CPU fixture missing")
+  const points = snapshot.cpu.value.history
+  const controls = exported.data.hostResources.readings.healthy.cpu.spark
+  expect(controls).toHaveLength(60)
+  expect(points.length).toBeLessThanOrEqual(360)
+  for (let i = 1; i < points.length; i++)
+    expect((points[i]?.sampledAt ?? 0) - (points[i - 1]?.sampledAt ?? 0)).toBeLessThanOrEqual(15_000)
+  const root = document.createElement("div")
+  root.innerHTML = renderToStaticMarkup(<HostResourcesView {...fixture} now={resourceFixtureNow} />)
+  const path = root.querySelector('[data-region="cpu"] .hr-spark path')?.getAttribute("d") ?? ""
+  expect(path.match(/M/g)).toHaveLength(1)
+  for (const [index, percent] of controls.entries()) {
+    expect(points).toContainEqual({
+      sampledAt: snapshot.sampledAt - ((controls.length - 1 - index) / (controls.length - 1)) * 3_590_000,
+      percent
+    })
+    expect(path).toContain(
+      `${((index / (controls.length - 1)) * 160).toFixed(1)} ${(36 - (percent / 100) * 36).toFixed(1)}`
+    )
+  }
+})
+it("describes disk-backed and unknown /tmp as filesystem capacity, keeping tmpfs memory quota wording", () => {
+  for (const fsType of ["overlayfs", "unknown", "tmpfs"]) {
+    const fixture = resourcesFixture("live-healthy")
+    const snapshot = fixture.snapshot
+    if (snapshot === null || snapshot.tmp._tag !== "Reading") throw new TypeError("tmp fixture missing")
+    const root = document.createElement("div")
+    root.innerHTML = renderToStaticMarkup(
+      <HostResourcesView
+        {...fixture}
+        snapshot={{ ...snapshot, tmp: { _tag: "Reading", value: { ...snapshot.tmp.value, fsType } } }}
+        now={resourceFixtureNow}
+      />
+    )
+    const disk = root.querySelector('[data-region="disk"]')
+    const tmp = [...(disk?.querySelectorAll(".hr-fs > div") ?? [])].find((row) =>
+      row.querySelector("b")?.textContent?.startsWith("/tmp")
+    )
+    expect(tmp?.querySelector("b")?.textContent).toBe(fsType === "tmpfs" ? "/tmp (memory)" : "/tmp")
+    expect(tmp?.textContent?.includes("quota")).toBe(fsType === "tmpfs")
+    if (fsType !== "tmpfs") {
+      expect(tmp?.textContent).toContain("1.8 GiB used")
+      expect(tmp?.textContent).toContain("4.2 GiB free of 6 GiB")
+      expect(tmp?.querySelector('[role="meter"]')).toBeNull()
+    }
+  }
+})
+it("shows the designed unknown slot without claiming Free or exposing invented holder facts", () => {
+  const fixture = resourcesFixture("gate-holder-unknown")
+  const root = document.createElement("div")
+  root.innerHTML = renderToStaticMarkup(<HostResourcesView {...fixture} now={resourceFixtureNow} />)
+  const unknown = root.querySelector('[data-region="gate"] .hr-slot')
+  expect(unknown?.querySelector(".hr-word")?.textContent).toBe("Unknown")
+  expect(unknown?.textContent).toContain("Holder not readable on this host.")
+  expect(unknown?.querySelector(".hr-wait")?.textContent).toBe("Holder not readable on this host.")
+  expect(unknown?.textContent).not.toMatch(/Free|Held|Lane|Grant/)
+  expect(unknown?.querySelector("dl")).toBeNull()
+  expect(root.querySelector('[data-region="gate"] .hr-slot:nth-child(2)')?.textContent).toContain("Held")
+  expect(root.querySelectorAll('[data-region="jobs"] .hr-jrow')).toHaveLength(1)
 })

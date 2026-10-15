@@ -1,4 +1,4 @@
-import { Effect, Schema } from "effect"
+import { Effect, Option, Schema } from "effect"
 import type { ResourceLimit, ResourceMemoryGroup, ResourcePreview } from "../../host-resources-model.js"
 import { ResourceMemory, resourcesTrendPoints } from "../../host-resources-model.js"
 
@@ -125,35 +125,64 @@ export const parseProcStat = Effect.fn("HostResources.parseProcStat")(
   }
 )
 export const cmdline = (text: string): ReadonlyArray<string> => text.split("\0").filter((part) => part !== "")
+const PaneId = Schema.String.check(
+  Schema.isMaxLength(64),
+  Schema.isTrimmed(),
+  Schema.isPattern(/^w[0-9A-Za-z]+:p[0-9A-Za-z]+$/)
+)
+const decodePaneId = Schema.decodeUnknownOption(PaneId)
 export const paneFromEnvironment = (text: string): string | null =>
-  text.split("\0").find((part) => part.startsWith("HERDR_PANE_ID="))?.slice("HERDR_PANE_ID=".length) || null
+  Option.getOrNull(
+    decodePaneId(text.split("\0").find((part) => part.startsWith("HERDR_PANE_ID="))?.slice("HERDR_PANE_ID=".length))
+  )
 export const grantFromCmdline = (argv: ReadonlyArray<string>): string | null => {
   const index = argv.indexOf("--grant")
   const value = index < 0 ? undefined : argv[index + 1]
   return value !== undefined && /^[a-zA-Z0-9_.-]{1,256}$/.test(value) ? value : null
 }
-/** GNU timeout durations are seconds unless followed by s, m, h or d. */
+const durationMinutes = (value: string): number | null => {
+  // The process locale is not part of the snapshot; only finite C-locale decimal forms are proven.
+  const match = /^(\+?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)([smhd]?)$/.exec(value)
+  if (match === null || match[0] !== value) return null
+  const factor = match[2] === "d" ? 1440 : match[2] === "h" ? 60 : match[2] === "m" ? 1 : 1 / 60
+  const minutes = Number(match[1]) * factor
+  return minutes >= 0 && Number.isFinite(minutes) ? minutes : null
+}
+
+/** Options precede the duration and command; only an actual timeout executable supplies a deadline. */
 export const deadlineFromCmdline = (argv: ReadonlyArray<string>): number | null => {
   if (argv[0]?.split("/").at(-1) !== "timeout") return null
-  const index = 0
-  const valueOptions = new Set(["-k", "--kill-after", "-s", "--signal"])
-  for (let i = index + 1; i < argv.length; i++) {
+  const optionValue = (option: string, value: string | undefined): boolean => {
+    if (value === undefined || value === "" || value.trim() !== value) return false
+    return option === "k" ? durationMinutes(value) !== null : /^(?:[A-Za-z][A-Za-z0-9]*(?:[+-]\d+)?|\d+)$/.test(value)
+  }
+  let i = 1
+  for (; i < argv.length; i++) {
     const part = argv[i] ?? ""
-    if (valueOptions.has(part)) {
+    if (part === "--") {
       i++
+      break
+    }
+    if (!part.startsWith("-")) break
+    if (["--foreground", "--preserve-status", "--verbose"].includes(part)) continue
+    const long = /^--(signal|kill-after)(?:=(.*))?$/.exec(part)
+    if (long !== null) {
+      const value = long[2] === undefined ? argv[++i] : long[2]
+      if (!optionValue(long[1] === "kill-after" ? "k" : "s", value)) return null
       continue
     }
-    if (part === "--") continue
-    if (["--foreground", "--preserve-status", "--verbose"].includes(part)) continue
-    if (/^(?:--(?:signal|kill-after)=.+|-[sk].+)$/.test(part)) continue
-    if (part.startsWith("-")) return null
-    const match = /^(\d+(?:\.\d+)?)([smhd]?)$/.exec(part)
-    if (match === null) return null
-    const factor = match[2] === "d" ? 1440 : match[2] === "h" ? 60 : match[2] === "m" ? 1 : 1 / 60
-    const minutes = Number(match[1]) * factor
-    return minutes > 0 && Number.isFinite(minutes) ? minutes : null
+    if (part.startsWith("--") || part === "-") return null
+    for (let j = 1; j < part.length; j++) {
+      const option = part[j] ?? ""
+      if (["v", "f", "p"].includes(option)) continue
+      if (option !== "s" && option !== "k") return null
+      const value = j + 1 < part.length ? part.slice(j + 1) : argv[++i]
+      if (!optionValue(option, value)) return null
+      break
+    }
   }
-  return null
+  const minutes = durationMinutes(argv[i] ?? "")
+  return minutes !== null && minutes > 0 && i + 1 < argv.length ? minutes : null
 }
 export const jobLimit = (deadlineMinutes: number | null): ResourceLimit =>
   deadlineMinutes !== null && deadlineMinutes < 30
@@ -240,7 +269,12 @@ export const previewRows = (
   listeners.flatMap((listener) => {
     const proc = processes.find((p) => p.pid === listener.pid)
     const command = proc?.argv.join(" ") ?? ""
-    if (/hostd\/index\.mjs|codex|syncthing|chromium/.test(command)) return []
+    const executable = proc?.argv[0]?.split("/").at(-1) ?? ""
+    const nodeScript = proc?.argv[1] ?? ""
+    if (
+      ["hostd", "codex", "syncthing", "chromium", "chromium-browser"].includes(executable) ||
+      (executable === "node" && /(?:^|\/)hostd\/index\.mjs$/.test(nodeScript))
+    ) return []
     const cwd = proc?.cwd ?? ""
     const worktree = /worktrees\/[^/\s]+\/([^/\s]+)/.exec(`${cwd} ${command}`)?.[1]
     const directory = /--directory (\S+)/.exec(command)?.[1]
@@ -260,27 +294,53 @@ export const previewRows = (
     }]
   })
 
-/** Bounded display copy only. Paths, assignments and shell script bodies do not cross the snapshot. */
+const safeCommandArguments = new Map(Object.entries({
+  pnpm:
+    /^(?:test|build|check|lint|typecheck|format|run (?:test|build|check|lint|typecheck|format))(?: (?:--run|--offline|--frozen-lockfile|--if-present|--ignore-scripts|--silent|--recursive|--parallel|--workspace-root|-r|-w|-s))*$/,
+  npm:
+    /^(?:test|build|check|lint|typecheck|format|run (?:test|build|check|lint|typecheck|format))(?: (?:--silent|--offline|--ignore-scripts|--if-present|--workspaces))*$/,
+  git:
+    /^(?:commit|status|diff|log|show|fetch|pull|push)(?: (?:--amend|--no-edit|--stat|--quiet|--short|--cached|--staged|--oneline|--check))*$/,
+  node: /^(?:gate\.js|build\.m?js|server\.(?:js|ts)|index\.mjs)(?: (?:--full|--watch|--check))*$/,
+  tsc:
+    /^(?:-b|--build|--noEmit|--incremental|--pretty|--force|--watch)(?: (?:-b|--build|--noEmit|--incremental|--pretty|--force|--watch))*$/,
+  vitest: /^(?:run|watch|--run|--coverage)(?: (?:--run|--coverage|--watch))*$/,
+  eslint: /^(?:--fix|--quiet|--no-cache)(?: (?:--fix|--quiet|--no-cache))*$/
+}))
+const shellExecutables = new Set([
+  "sh",
+  "bash",
+  "zsh",
+  "dash",
+  "ash",
+  "ksh",
+  "mksh",
+  "fish",
+  "csh",
+  "tcsh",
+  "nu",
+  "pwsh",
+  "powershell"
+])
+
+/** Only complete, explicitly safe argv forms cross the command-display boundary; all others are opaque. */
 export const displayCommand = (argv: ReadonlyArray<string>): string => {
-  const executable = argv[0]?.split("/").at(-1) ?? "process"
-  if (
-    ["sh", "bash", "zsh", "dash"].includes(executable) &&
-    argv.slice(1).some((arg) => /^-[^-]*c/.test(arg) || arg === "--command" || arg.startsWith("--command="))
-  ) return `${executable} -c …`
-  let redact = false
-  const words = argv.slice(0, 5).map((word, index) => {
-    if (redact) {
-      redact = false
-      return "[redacted]"
-    }
-    if (index > 0 && /^(?:--?(?:token|password|secret|api-key|authorization)|-c)$/.test(word)) {
-      redact = true
-      return word
-    }
-    if (index > 0 && /^[A-Za-z_][A-Za-z0-9_]*=/.test(word)) return "[assignment]"
-    if (/^--?(?:token|password|secret|api-key|authorization)=/.test(word)) return `${word.split("=")[0]}=[redacted]`
-    return word.replace(/\p{Cc}/gu, " ").split("/").at(-1) ?? ""
-  })
-  const command = words.join(" ").trim() || "process"
-  return command.length > 120 ? `${command.slice(0, 119)}…` : command
+  const basename = (value: string) => value.split("/").at(-1) ?? ""
+  const shell = argv.map(basename).find((word) => shellExecutables.has(word))
+  if (shell !== undefined) return `${shell} -c …`
+  const name = basename(argv[0] ?? "process")
+  const executable = /^[A-Za-z0-9_.+-]{1,64}$/.test(name) && name.trim() === name && argv[0]?.includes("://") !== true
+    ? name
+    : "process"
+  if (argv.length < 2) return executable
+  const opaque = `${executable} …`
+  const policy = safeCommandArguments.get(executable)
+  if (policy === undefined) return opaque
+  const args = argv.slice(1)
+  if (args.some((arg) => /[=\s\p{Cc}]|:\/\/|[?#]/u.test(arg))) return opaque
+  const words = executable === "node" ? args.map((arg, index) => index === 0 ? basename(arg) : arg) : args
+  if (words.some((word) => !/^[A-Za-z0-9._-]{1,64}$/.test(word))) return opaque
+  const argumentsText = words.join(" ")
+  const command = `${executable} ${argumentsText}`
+  return policy.test(argumentsText) && command.length <= 120 ? command : opaque
 }

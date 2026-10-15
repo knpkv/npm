@@ -1,14 +1,21 @@
 import { expect, test } from "@playwright/test"
-import { Config, Effect } from "effect"
+import { Config, Effect, Option } from "effect"
 import { access } from "node:fs/promises"
 import { join } from "node:path"
 import { resourceFixtureNow, resourcesStates } from "./resources-fixture.js"
 
-const referenceDirectory = await Effect.runPromise(Config.String("HOST_RESOURCES_DESIGN_DIRECTORY"))
-for (const state of resourcesStates) {
-  for (const width of [390, 1280]) {
-    for (const theme of ["light", "dark"]) {
-      await access(join(referenceDirectory, `host-resources--${state}--${width}-${theme}.png`))
+// Free slot: 24px header, 0.8rem padding on both sides, and two 1px borders.
+const freeSlotHeight = 51.6
+
+const referenceDirectory = Option.getOrUndefined(
+  await Effect.runPromise(Config.option(Config.String("HOST_RESOURCES_DESIGN_DIRECTORY")))
+)
+if (referenceDirectory !== undefined) {
+  for (const state of resourcesStates) {
+    for (const width of [390, 1280]) {
+      for (const theme of ["light", "dark"]) {
+        await access(join(referenceDirectory, `host-resources--${state}--${width}-${theme}.png`))
+      }
     }
   }
 }
@@ -109,7 +116,11 @@ for (const state of resourcesStates) {
             if (title === null || detail === null) throw new TypeError("abort notice text missing")
             expect(detail.y).toBeGreaterThanOrEqual(title.y + title.height)
           }
-          if (["live-busy", "below-abort", "stale", "host-offline", "lock-held-too-long"].includes(state)) {
+          if (
+            ["live-busy", "gate-holder-unknown", "below-abort", "stale", "host-offline", "lock-held-too-long"].includes(
+              state
+            )
+          ) {
             const jobs = view.locator("[data-region=\"jobs\"] .hr-jrow")
             expect(await jobs.count()).toBeGreaterThan(0)
             for (const job of await jobs.all()) {
@@ -135,7 +146,11 @@ for (const state of resourcesStates) {
           if (last === null) throw new TypeError("last top memory row missing")
           const fold = view.locator("[data-region=\"top\"] .hr-more-row button")
           await expect(fold).toHaveCount(
-            ["live-busy", "below-abort", "stale", "host-offline", "lock-held-too-long"].includes(state) ? 1 : 0
+            ["live-busy", "gate-holder-unknown", "below-abort", "stale", "host-offline", "lock-held-too-long"].includes(
+                state
+              )
+              ? 1
+              : 0
           )
           const foldCount = await fold.count()
           const button = foldCount === 1 ? await fold.boundingBox() : null
@@ -202,8 +217,14 @@ for (const state of resourcesStates) {
             await expect(slots).toHaveCount(2)
             for (const slot of await slots.all()) {
               await expect(slot).toHaveCSS("background-color", colors.canvas)
+              if (state === "live-healthy") {
+                await expect(slot.locator(".hr-word")).toHaveText("Free")
+                const box = await slot.boundingBox()
+                if (box === null) throw new TypeError("free slot missing")
+                expect(box.height).toBeCloseTo(freeSlotHeight, 1)
+              }
             }
-            if (state === "lock-held-too-long" || state === "live-busy") {
+            if (state === "lock-held-too-long" || state === "live-busy" || state === "gate-holder-unknown") {
               const values = slots.locator("dd")
               expect(await values.count()).toBeGreaterThan(0)
               for (const value of await values.all()) {
@@ -240,9 +261,47 @@ for (const state of resourcesStates) {
             }
           }
         }
+        if (state === "gate-holder-unknown") {
+          const unknown = view.locator("[data-region=\"gate\"] .hr-slot").first()
+          await expect(unknown.locator(".hr-word")).toHaveText("Unknown")
+          const explanation = unknown.locator("p")
+          await expect(explanation).toHaveText("Holder not readable on this host.")
+          await expect(explanation).toHaveCSS("font-size", "13px")
+          await expect(explanation).toHaveCSS("line-height", "19.5px")
+          await expect(explanation).toHaveCSS("max-inline-size", "none")
+          const line = await explanation.boundingBox()
+          const slot = await unknown.boundingBox()
+          if (line === null || slot === null) throw new TypeError("unknown slot explanation missing")
+          if (info.project.name === "phone") {
+            expect(line.height).toBeCloseTo(19.5, 1)
+            expect(slot.height - freeSlotHeight).toBeCloseTo(8 + 19.5, 1)
+          } else {
+            expect(line.height).toBeCloseTo(39, 1)
+            const wrap = await explanation.evaluate((element) => {
+              const text = element.firstChild
+              if (text === null) throw new TypeError("unknown slot explanation text missing")
+              const first = document.createRange()
+              first.setStart(text, 0)
+              first.setEnd(text, "Holder not readable on".length)
+              const second = document.createRange()
+              second.setStart(text, "Holder not readable on ".length)
+              second.setEnd(text, text.textContent?.length ?? 0)
+              return {
+                firstLines: first.getClientRects().length,
+                secondLines: second.getClientRects().length,
+                offset: second.getBoundingClientRect().y - first.getBoundingClientRect().y
+              }
+            })
+            expect(wrap).toEqual({ firstLines: 1, secondLines: 1, offset: 19.5 })
+          }
+          await expect(unknown.locator("dl")).toHaveCount(0)
+          await expect(view.locator("[data-region=\"jobs\"] .hr-jrow")).toHaveCount(1)
+        }
         const capture = await page.screenshot({ path: image, fullPage: true, animations: "disabled" })
         await info.attach("live", { path: image, contentType: "image/png" })
-        await info.attach("design", { path: join(referenceDirectory, name), contentType: "image/png" })
+        if (referenceDirectory !== undefined) {
+          await info.attach("design", { path: join(referenceDirectory, name), contentType: "image/png" })
+        }
         if (theme === "light") lightImage = capture
         else {
           expect(lightImage, "Capture the light/dark pair together").not.toBeNull()

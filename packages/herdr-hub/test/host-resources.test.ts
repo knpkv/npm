@@ -282,5 +282,91 @@ it("keeps shell source opaque for standalone, combined and long command flags", 
       )
     }
   }
-  expect(displayCommand(["node", "/private/project/build.mjs", "--flag", "value"])).toBe("node build.mjs --flag value")
+  expect(displayCommand(["node", "/private/project/build.mjs", "--full"])).toBe("node build.mjs --full")
+})
+
+it("defaults to opaque arguments and expands only a whole known-safe command", () => {
+  const cases: ReadonlyArray<readonly [ReadonlyArray<string>, string]> = [
+    [["timeout", "20m", "bash", "-lc", "export BUILD_TOKEN=fixture-secret; sleep 600"], "bash -c …"],
+    [
+      ["env", "BUILD_TOKEN=fixture-secret", "nice", "nohup", "flock", "lock", "fish", "--command=fixture-secret"],
+      "fish -c …"
+    ],
+    [["heavy-run.sh", "--grant", "grant-demo-07", "sh", "-c", "fixture-secret"], "sh -c …"],
+    [["fish", "--command=env BUILD_TOKEN=fixture-secret sleep 600"], "fish -c …"],
+    [["curl", "-H", "Authorization: Bearer fixture-secret"], "curl …"],
+    [["tool", "--client-secret", "fixture-secret"], "tool …"],
+    [["tool", "harmless"], "tool …"],
+    [["constructor", "fixture-secret"], "constructor …"],
+    [["__proto__", "fixture-secret"], "__proto__ …"],
+    [["env", "BUILD_TOKEN=fixture-secret", "pnpm", "test"], "env …"],
+    [["pnpm", "test", "https://example.test/fixture-secret"], "pnpm …"],
+    [["pnpm", "test", "fixture-secret"], "pnpm …"],
+    [["node", "/project/build.mjs", "--flag", "value"], "node …"],
+    [["node", "/project/build.mjs", "--full", "x".repeat(200)], "node …"],
+    [["pnpm", "test", "--run"], "pnpm test --run"],
+    [["pnpm", "run", "build", "--offline"], "pnpm run build --offline"],
+    [["npm", "test", "--silent"], "npm test --silent"],
+    [["git", "commit", "--amend", "--no-edit"], "git commit --amend --no-edit"],
+    [["/private/bin/node", "/private/project/gate.js", "--full"], "node gate.js --full"],
+    [["tsc", "--noEmit", "--incremental"], "tsc --noEmit --incremental"],
+    [["vitest", "run", "--coverage"], "vitest run --coverage"],
+    [["eslint", "--fix"], "eslint --fix"],
+    [["git", "commit", "--message=fixture-secret"], "git …"],
+    [["npm"], "npm"],
+    [["unknown"], "unknown"]
+  ]
+  for (const [argv, expected] of cases) expect(displayCommand(argv), argv[0]).toBe(expected)
+})
+
+it("rejects malformed or oversized pane identities instead of poisoning the snapshot", () => {
+  for (const pane of ["x".repeat(1025), "w2:p3\n", "w2:p3/secret", "w:p3", "w2:p", "w2:pé", `w${"2".repeat(62)}:p3`]) {
+    expect(paneFromEnvironment(`HERDR_PANE_ID=${pane}\0`)).toBeNull()
+  }
+  expect(paneFromEnvironment("HERDR_PANE_ID=w2G:p5\0")).toBe("w2G:p5")
+  expect(paneFromEnvironment(`HERDR_PANE_ID=w${"2".repeat(60)}:p3\0`)).toHaveLength(64)
+})
+
+it("excludes preview services by executable identity, never a repository path or later argument", () => {
+  const listener = [{ port: 4791, pid: 42, tailnet: true }]
+  for (
+    const argv of [
+      ["node", "/srv/codex-ui/server.ts"],
+      ["node", "/srv/syncthing-site/server.ts"],
+      ["node", "server.ts", "--directory", "/srv/chromium-preview"],
+      ["node", "server.ts", "/opt/hostd/index.mjs"]
+    ]
+  ) {
+    expect(previewRows(listener, [{ ...proc(42, 1, null, 0), argv }], new Map())).toHaveLength(1)
+  }
+  for (const argv of [["/usr/bin/codex"], ["syncthing"], ["chromium"], ["hostd"], ["node", "/opt/hostd/index.mjs"]]) {
+    expect(previewRows(listener, [{ ...proc(42, 1, null, 0), argv }], new Map())).toHaveLength(0)
+  }
+})
+
+it("parses GNU timeout flags and finite decimal durations before the command operand", () => {
+  const cases: ReadonlyArray<readonly [ReadonlyArray<string>, number | null]> = [
+    [["timeout", "-v", ".5m", "pnpm", "test"], 0.5],
+    [["timeout", "+.5m", "pnpm"], 0.5],
+    [["timeout", "--signal=RTMIN+1", "20m", "pnpm"], 20],
+    [["timeout", "-s", "RTMAX-1", "20m", "pnpm"], 20],
+    [["timeout", "-vfp", "-s", "TERM", "-k", "5s", ".5m", "pnpm"], 0.5],
+    [["timeout", "-vsTERM", "-k5s", "1.m", "pnpm"], 1],
+    [
+      ["timeout", "--foreground", "--preserve-status", "--signal=TERM", "--kill-after=5s", "--verbose", "20m", "pnpm"],
+      20
+    ],
+    [["timeout", "--signal", "9", "--kill-after", "0", "1e1s", "pnpm"], 1 / 6],
+    [["timeout", "--", ".5m", "pnpm"], 0.5],
+    [["timeout", "--", "--verbose", "20m", "pnpm"], null],
+    [["timeout", "--unknown", "20m", "pnpm"], null],
+    [["timeout", "-x", "20m", "pnpm"], null],
+    [["timeout", "--signal=", "20m", "pnpm"], null],
+    [["timeout", "-k", "invalid", "20m", "pnpm"], null],
+    [["timeout", "20m"], null],
+    [["timeout", "inf", "pnpm"], null],
+    [["timeout", "0x1p0d", "pnpm"], null],
+    [["timeout", "0,5m", "pnpm"], null]
+  ]
+  for (const [argv, expected] of cases) expect(deadlineFromCmdline(argv), argv.join(" ")).toBe(expected)
 })
