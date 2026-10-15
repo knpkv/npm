@@ -93,6 +93,35 @@ test("a delayed unknown-host repair keeps focus on a range control", async ({ pa
   }
 })
 
+/** Chromium fires focusout when React removes the focused tab; late empty readings still land focus on the empty tab. */
+test("empty readings that arrive after navigation move focus to the empty Limits tab", async ({ page }, info) => {
+  test.skip(info.project.name !== "desktop", "Desktop empty mast")
+  let release = () => {}
+  const gate = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  // The client rejects negative instants, so the fixture reads at the browser server's own clock.
+  const now = Date.now()
+  await page.route(/\/v1\/connect\/usage(\?|$)/, async (route) => {
+    await gate
+    await route.fulfill({ json: usageFixture({ range: "7d", timeZone: "UTC" }, now, "empty-readings") })
+  })
+  await page.route(/\/v1\/connect\/limits(\?|$)/, async (route) => {
+    await gate
+    await route.fulfill({ json: limitsFixture(now, "empty-readings") })
+  })
+  try {
+    await page.goto("/#fleet/approvals")
+    await page.locator(".superapp-sidebar").getByRole("link", { name: "Usage", exact: true }).click()
+    await expect(page.locator(".usage-details-tabs [data-module-page=\"limits\"]")).toBeFocused()
+    release()
+    await expect(page.locator(".usage-limits-empty")).toBeVisible()
+    await expect(page.locator(".usage-empty-tabs [data-module-page=\"limits\"]")).toBeFocused()
+  } finally {
+    release()
+  }
+})
+
 test("Usage selectors drive range, zone and local host filtering with replaced history", async ({ page }) => {
   const queries: Array<URLSearchParams> = []
   page.on("request", (request) => {

@@ -500,13 +500,18 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
   const previousEmptyLayout = useRef(emptyLayout)
   const lastFocused = useRef<Element | null>(null)
   useEffect(() => {
-    // focusin fires once the new element holds focus, so the document already names it. A deliberate blur fires
-    // focusout and clears it; removing the focused element fires none, which is what the handoff looks for.
+    // focusin fires once the new element holds focus, so the document already names it. Chromium also fires
+    // focusout when the focused element is removed, so the record is dropped a microtask later, and only if that
+    // element is still in the document and no longer focused: a deliberate blur. The handoff's layout effect runs
+    // in the same commit as a removal, before that check.
     const track = (): void => {
       lastFocused.current = document.activeElement
     }
     const release = (): void => {
-      lastFocused.current = null
+      queueMicrotask(() => {
+        const left = lastFocused.current
+        if (left !== null && left.isConnected && document.activeElement !== left) lastFocused.current = null
+      })
     }
     document.addEventListener("focusin", track)
     document.addEventListener("focusout", release)
@@ -518,6 +523,8 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
   useLayoutEffect(() => {
     if (previousEmptyLayout.current === emptyLayout) return
     previousEmptyLayout.current = emptyLayout
+    // The record is not cleared here: ordinary -> inline -> outlet can be two commits, and the second run's
+    // cleanup cancels the first handoff. Focus landing anywhere replaces the record through focusin.
     const lost = lastFocused.current
     if (location.error !== null || lost === null || lost.isConnected || document.activeElement !== document.body) return
     return focusModulePage(location.destination.module, location.destination.page)

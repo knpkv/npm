@@ -157,6 +157,31 @@ it("moves focus to the empty Limits tab when empty readings arrive after navigat
   expect(document.activeElement).toBe(limitsTab)
 })
 
+/** Chromium fires focusout as React removes the focused tab; that event must not cancel the handoff. */
+it("still hands focus over when removing the focused tab fires focusout", async () => {
+  const gate = Promise.withResolvers<void>()
+  await render({
+    usage: () => Effect.promise(() => gate.promise.then(() => ({ fleet: emptyUsage, receivedAt: 1_000 }))),
+    limits: Effect.promise(() => gate.promise.then(() => ({ fleet: emptyLimits, receivedAt: 1_000 })))
+  })
+  await act(async () => document.querySelector<HTMLAnchorElement>('.superapp-sidebar a[href*="#usage/"]')?.click())
+  await act(async () => {
+    await new Promise((resolve) => window.requestAnimationFrame(resolve))
+  })
+  const ordinaryTab = document.querySelector('.usage-details-tabs a[data-module-page="limits"]')
+  expect(document.activeElement).toBe(ordinaryTab)
+  // happy-dom fires nothing on removal; dispatch Chromium's focusout while the tab is still focused and attached.
+  await act(async () => {
+    ordinaryTab?.dispatchEvent(new FocusEvent("focusout", { bubbles: true }))
+    gate.resolve()
+    await gate.promise
+  })
+  await act(async () => {
+    await new Promise((resolve) => window.requestAnimationFrame(resolve))
+  })
+  expect(document.activeElement).toBe(document.querySelector('.usage-empty-tabs a[data-module-page="limits"]'))
+})
+
 /** A layout flip that removes nothing focused leaves focus where the reader put it. */
 it("does not pull focus to the tabs when empty readings arrive while focus rests on the page", async () => {
   const gate = Promise.withResolvers<void>()
