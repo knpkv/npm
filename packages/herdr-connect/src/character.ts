@@ -57,6 +57,10 @@ const identitySeed = (host: string, identity: string): number => {
   return hash >>> 0
 }
 
+/** Hue allocation and motion share the exact unsigned FNV input, before family collision probing. */
+export const creatureHueSeed = (host: string, id: string): number =>
+  identitySeed(host, id.startsWith("agent-") ? id.slice(6) : id)
+
 /** Case-insensitive host identity; unsigned FNV-1a with the murmur3 finaliser separates neighbouring IDs. */
 export const characterSeed = (host: string, id: string): number => {
   let hash = 2166136261
@@ -321,6 +325,45 @@ const colours = {
   sky: { ink: "#022538", base: "#0e89c4", shade: "#07658d", highlight: "#66b0e3", blush: "#7eabf6", ring: "#0e89c4" },
   iris: { ink: "#1c1c41", base: "#7173d7", shade: "#4c52a9", highlight: "#9c9ef1", blush: "#b998ea", ring: "#7173d7" }
 } satisfies Record<CreatureHueFamily, HueSet>
+
+export type CreatureHabit = "tilt" | "flick" | "hop" | "squint"
+export interface CreatureSignature {
+  readonly seed: number
+  readonly tempo: number
+  readonly amplitude: number
+  /** Share of the task loop, and separately of the eight-second habit loop. */
+  readonly phase: number
+  readonly habit: CreatureHabit
+}
+
+/** Page17 uses hue-seed bytes; only the rendered family's index changes the habit, never the seed. */
+export const creatureSignature = (host: string, id: string, family: CreatureHueFamily): CreatureSignature => {
+  const seed = creatureHueSeed(host, id)
+  const habits: ReadonlyArray<CreatureHabit> = ["tilt", "flick", "hop", "squint"]
+  return {
+    seed,
+    tempo: Math.round((0.85 + (seed & 255) / 255 * 0.3) * 100) / 100,
+    amplitude: Math.round((0.8 + ((seed >>> 8) & 255) / 255 * 0.4) * 100) / 100,
+    phase: ((seed >>> 16) & 255) / 256,
+    habit: habits[(((seed >>> 24) & 255) + families.indexOf(family)) % habits.length] ?? "tilt"
+  }
+}
+
+/** Page17 adjusts only a visible neighbour's phase; callers provide the actual rendered order. */
+export const guardCreatureNeighbours = (
+  entries: ReadonlyArray<{ readonly task: string; readonly signature: CreatureSignature }>
+): ReadonlyArray<CreatureSignature> => {
+  const result: Array<CreatureSignature> = []
+  for (const [index, entry] of entries.entries()) {
+    const previous = result[index - 1]
+    const distance = previous === undefined ? 1 : Math.abs(entry.signature.phase - previous.phase)
+    const close = previous !== undefined && entries[index - 1]?.task === entry.task &&
+      Math.min(distance, 1 - distance) < 0.15 &&
+      Math.abs(entry.signature.tempo - previous.tempo) / previous.tempo < 0.15
+    result.push(close ? { ...entry.signature, phase: (entry.signature.phase + 1 / 3) % 1 } : entry.signature)
+  }
+  return result
+}
 
 /** Pure hash-only family assignment; a served family overrides it. The chef's plum family is outside the agent set.
  * The fallback may collide when older peers omit their served family. Chroma scales only closed/stale paint.

@@ -953,6 +953,7 @@ describe("Connect public seams", () => {
             parentAgentId: null,
             relation: null,
             status: "working",
+            taskKind: "waiting",
             work: "project"
           }]
         }),
@@ -973,7 +974,7 @@ describe("Connect public seams", () => {
       expect(yield* relationships.persist(retained, "trusted_live_inventory")).toEqual(retained)
       const directory = yield* localConnectAgents(hostConfiguration(root), source, activity, relationships, 2_000)
       expect(directory.agents).toHaveLength(1)
-      expect(directory.agents[0]).toMatchObject({ id: original.agentId, name: "Moving root" })
+      expect(directory.agents[0]).toMatchObject({ id: original.agentId, name: "Moving root", taskKind: "waiting" })
       expect(directory.agents[0]?.relationship).toBeUndefined()
       expect(yield* relationships.list()).toEqual([
         { ...original, paneId: "w2:p2", observedAt: 2_000 },

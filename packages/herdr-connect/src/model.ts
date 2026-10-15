@@ -1,4 +1,4 @@
-import { AgentStableId, AgentWorkerIdentity, AgentWorkerRelationship } from "@knpkv/herdr-fleet/model"
+import { AgentStableId, AgentTaskKind, AgentWorkerIdentity, AgentWorkerRelationship } from "@knpkv/herdr-fleet/model"
 import { Schema } from "effect"
 import { ConnectLastWords } from "./posts.js"
 import { ConnectSelfState } from "./self-model.js"
@@ -44,6 +44,7 @@ export const ConnectAgent = Schema.Struct({
   name: AgentWorkerIdentity.fields.name,
   kind: BoundedString,
   state: BoundedString,
+  taskKind: Schema.optionalKey(AgentTaskKind),
   work: AgentWorkLabel,
   lastActivityAt: ActivityTimestamp,
   hue: Schema.optionalKey(ConnectAgentHue),
