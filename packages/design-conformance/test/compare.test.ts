@@ -2,7 +2,7 @@ import { expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import { PNG } from "pngjs"
 
-import { type Capture, RegionPixels } from "../src/browser.js"
+import { type Capture, cropRegions, RegionPixels } from "../src/browser.js"
 import { compareLiveRegions, comparePixels, compareSnapshots, coverageFailures, shotKey } from "../src/compare.js"
 import { identity, manifest, snapshot, state } from "./models.js"
 
@@ -109,6 +109,59 @@ it.effect("region touched comparison keeps the 0.1% boundary and requires real c
     const changed = evidence(PNG.sync.write(image))
     expect(comparePixels(base.frame, changed.frame).ratio).toBe(0.002)
     expect(compareLiveRegions(identity, base, changed, ["content"]).touchedRegions).toEqual(["content"])
+  }))
+
+it.effect("new region tags compare their own raw rectangle at the unchanged pixel threshold", () =>
+  Effect.sync(() => {
+    const region = snapshot.regions[0]
+    if (region === undefined) return expect.unreachable()
+    const image = new PNG({ width: 200, height: 10 })
+    image.data.fill(255)
+    const frame = PNG.sync.write(image)
+    const base: Capture = { frame, snapshot: { overflow: false, regions: [] }, regions: new Map() }
+    const tagged = { ...snapshot, regions: [{ ...region, box: { x: 100, y: 0, width: 100, height: 10 } }] }
+    const evidence = (): Capture => {
+      const bytes = PNG.sync.write(image)
+      return { frame: bytes, snapshot: tagged, regions: cropRegions(bytes, tagged) }
+    }
+    for (let channel = 100 * 4; channel < 100 * 4 + 3; channel++) image.data[channel] = 0
+    expect(compareLiveRegions(identity, base, evidence(), ["content"]))
+      .toEqual({ touchedRegions: [], outsidePixelsChanged: false })
+    for (let channel = 101 * 4; channel < 101 * 4 + 3; channel++) image.data[channel] = 0
+    expect(compareLiveRegions(identity, base, evidence(), ["content"]))
+      .toEqual({ touchedRegions: ["content"], outsidePixelsChanged: false })
+    image.data.fill(255)
+    for (let pixel = 0; pixel < 9; pixel++) {
+      for (let channel = 0; channel < 3; channel++) image.data[pixel * 4 + channel] = 0
+    }
+    expect(compareLiveRegions(identity, base, evidence(), ["content"]))
+      .toEqual({ touchedRegions: ["*"], outsidePixelsChanged: true })
+  }))
+
+it.effect("a new region without usable base or current pixels cannot be inherited", () =>
+  Effect.sync(() => {
+    const region = snapshot.regions[0]
+    if (region === undefined) return expect.unreachable()
+    const image = new PNG({ width: 20, height: 20 })
+    image.data.fill(255)
+    const frame = PNG.sync.write(image)
+    const base: Capture = { frame, snapshot: { overflow: false, regions: [] }, regions: new Map() }
+    for (const box of [{ x: 30, y: 0, width: 10, height: 10 }, { x: 0, y: 0, width: 0, height: 10 }]) {
+      const tagged = { ...snapshot, regions: [{ ...region, box }] }
+      const current: Capture = { frame, snapshot: tagged, regions: cropRegions(frame, tagged) }
+      expect(compareLiveRegions(identity, base, current, ["content"]).touchedRegions).toContain("content")
+    }
+    const larger = new PNG({ width: 40, height: 20 })
+    larger.data.fill(255)
+    const biggerFrame = PNG.sync.write(larger)
+    const tagged = { ...snapshot, regions: [{ ...region, box: { x: 30, y: 0, width: 10, height: 10 } }] }
+    expect(
+      compareLiveRegions(identity, base, {
+        frame: biggerFrame,
+        snapshot: tagged,
+        regions: cropRegions(biggerFrame, tagged)
+      }, ["content"]).touchedRegions
+    ).toContain("content")
   }))
 
 it.effect("base metadata uses existing rule tolerances and inherited overflow stays untouched", () =>

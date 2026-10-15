@@ -1,6 +1,6 @@
 import { Schema } from "effect"
 import type { DatabaseSync } from "node:sqlite"
-import { characterBodyKind } from "../character.js"
+import { characterBodyKind, creatureHueSeed } from "../character.js"
 import { type ConnectAgent, ConnectAgentHue } from "../model.js"
 
 const BodyKind = Schema.Literals(["circle", "squircle", "pear", "star", "bean"])
@@ -14,14 +14,6 @@ const HueRow = Schema.Struct({
 })
 type HueRow = typeof HueRow.Type
 const HostRow = Schema.Struct({ observed_at: Schema.Number })
-
-/** Rev6 first sighting uses un-mixed FNV-1a over the normalized host and stable ID payload. */
-const hueSeed = (host: string, id: string): number => {
-  const canonicalId = id.startsWith("agent-") ? id.slice(6) : id
-  let hash = 2166136261
-  for (const char of `${host}:${canonicalId}`) hash = Math.imul(hash ^ char.charCodeAt(0), 16777619)
-  return hash >>> 0
-}
 
 /** The assigning host owns reservations and its observation watermark, even when archives live elsewhere. */
 export const initializeHues = (database: DatabaseSync): void => {
@@ -182,7 +174,7 @@ export const assignHues = (
     const bodyKind = characterBodyKind(normalized, agent.id)
     const families = ConnectAgentHue.literals
     const hashFamily = Schema.decodeUnknownSync(ConnectAgentHue)(
-      families[hueSeed(normalized, String(agent.id)) % families.length]
+      families[creatureHueSeed(normalized, String(agent.id)) % families.length]
     )
     const hue = chooseHue(agent.id, hashFamily, current, bodyKind)
     const exclusive = current.some((row) =>
