@@ -1,5 +1,11 @@
 # @knpkv/herdr-connect
 
+## 0.28.1
+
+### Patch Changes
+
+- [#929](https://github.com/knpkv/npm/pull/929) [`2801b6d`](https://github.com/knpkv/npm/commit/2801b6de0ba87ae085e2648d982b7ea62de595ed) Thanks [@konopkov](https://github.com/konopkov)! - Tag Usage Limits regions for design conformance and render its successful empty state with the designed notice and token-reading action. Other states retain their existing layout.
+
 ## 0.28.0
 
 ### Minor Changes
