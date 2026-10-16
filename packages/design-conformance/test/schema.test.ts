@@ -2,7 +2,16 @@ import { expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 
-import { Fixture, Inventory, Manifest, Name, RelativeFile, Waivers } from "../src/schema.js"
+import {
+  declaredRegions,
+  Fixture,
+  Inventory,
+  Manifest,
+  Name,
+  RelativeFile,
+  viewportSize,
+  Waivers
+} from "../src/schema.js"
 import { manifest as decodedManifest, manifestInput as manifest, state, waiver } from "./models.js"
 
 it.effect("manifest and live routes preserve query and fragment while rejecting external URLs", () =>
@@ -161,4 +170,45 @@ it.effect("PNG tolerance rejects fully permissive thresholds and accepts the doc
       files
     }).pipe(Effect.result)
     expect(reserved._tag).toBe("Failure")
+  }))
+
+it.effect("states may capture at phone 360 and 390 and desktop 1280, and no other width", () =>
+  Effect.gen(function*() {
+    const decoded = yield* Schema.decodeUnknownEffect(Manifest)({
+      ...manifest,
+      states: [{ ...state, viewports: [360, 390, 1280] }]
+    })
+    expect(decoded.states[0]?.viewports).toEqual([360, 390, 1280])
+    const rejected = yield* Schema.decodeUnknownEffect(Manifest)({
+      ...manifest,
+      states: [{ ...state, viewports: [375] }]
+    })
+      .pipe(Effect.exit)
+    expect(rejected._tag).toBe("Failure")
+  }))
+
+it.effect("each viewport captures at a fixed phone or desktop size", () =>
+  Effect.sync(() => {
+    expect(viewportSize(360)).toEqual({ width: 360, height: 780 })
+    expect(viewportSize(390)).toEqual({ width: 390, height: 844 })
+    expect(viewportSize(1280)).toEqual({ width: 1280, height: 800 })
+  }))
+
+it.effect("a state may declare its regions per viewport class when the phone layout differs", () =>
+  Effect.gen(function*() {
+    const decoded = yield* Schema.decodeUnknownEffect(Manifest)({
+      ...manifest,
+      states: [{ ...state, viewports: [360, 390, 1280], regions: { phone: ["list"], desktop: ["canvas", "legend"] } }]
+    })
+    const declared = decoded.states[0]
+    if (declared === undefined) return expect.unreachable()
+    expect(declaredRegions(declared, 360)).toEqual(["list"])
+    expect(declaredRegions(declared, 390)).toEqual(["list"])
+    expect(declaredRegions(declared, 1280)).toEqual(["canvas", "legend"])
+    expect(declaredRegions(state, 1280)).toEqual(["content"])
+    const empty = yield* Schema.decodeUnknownEffect(Manifest)({
+      ...manifest,
+      states: [{ ...state, regions: { phone: [], desktop: ["canvas"] } }]
+    }).pipe(Effect.exit)
+    expect(empty._tag).toBe("Failure")
   }))

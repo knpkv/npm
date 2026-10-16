@@ -3,6 +3,7 @@ import * as Effect from "effect/Effect"
 
 import { baseCaptureMode, isReferenceOnlyChange } from "../scripts/product.js"
 import { coverageFailures, shotKey } from "../src/compare.js"
+import type { Manifest } from "../src/schema.js"
 import { identity, manifest, state } from "./models.js"
 
 it.effect("existing product package moves cannot discard previously captured deleted states", () =>
@@ -48,6 +49,18 @@ it.effect("new products may lack a base package while available legacy apps stil
     expect(yield* baseCaptureMode(manifest, [{ ...manifest, product: "other" }], false)).toBe("new")
     expect(yield* baseCaptureMode(manifest, [], true)).toBe("capture")
     expect(yield* baseCaptureMode(manifest, [manifest], true)).toBe("capture")
+  }))
+
+it.effect("the first implementation after a refs-only base is a new product, even before its package existed", () =>
+  Effect.gen(function*() {
+    const refsOnly: Manifest = {
+      ...manifest,
+      states: manifest.states.map((designed) => ({ ...designed, status: "designed" }))
+    }
+    expect(yield* baseCaptureMode(manifest, [refsOnly], false)).toBe("new")
+    expect(yield* baseCaptureMode(manifest, [refsOnly], true)).toBe("capture")
+    // A previously implemented product still keeps its inventory.
+    expect((yield* baseCaptureMode(manifest, [manifest], false).pipe(Effect.result))._tag).toBe("Failure")
   }))
 
 it.effect("only a nonempty refs-only diff exempts states from touched enforcement", () =>

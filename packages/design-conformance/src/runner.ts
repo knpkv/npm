@@ -27,13 +27,15 @@ import {
   BaseComparison,
   BrowserFailure,
   type CaptureNavigationFailure,
+  declaredRegions,
   type Failure,
   Identity,
   Inventory,
   RunnerFailure,
   type ShotArtifacts,
   type ShotResult,
-  Snapshot
+  Snapshot,
+  viewportSize
 } from "./schema.js"
 import { serveVerifiedFiles } from "./server.js"
 import { verdict } from "./verdict.js"
@@ -60,7 +62,7 @@ const withPage = Effect.fn("DesignConformance.withPage")(
         browser.newContext({
           ...captureContext,
           serviceWorkers: "block",
-          viewport: { width: identity.viewport, height: identity.viewport === 390 ? 844 : 800 },
+          viewport: viewportSize(identity.viewport),
           colorScheme: identity.theme
         })),
       (context) => browserCall("close context", () => context.close()).pipe(Effect.orDie)
@@ -151,7 +153,13 @@ export const runConformance = Effect.fn("DesignConformance.run")(function*(refs:
         base = { frame, snapshot, regions }
       }
       const changes = referenceOnly ? { touchedRegions: [], outsidePixelsChanged: false } : yield* Effect.try({
-        try: () => compareLiveRegions(identity, base, actual, reference?.regions ?? []),
+        try: () =>
+          compareLiveRegions(
+            identity,
+            base,
+            actual,
+            reference === undefined ? [] : declaredRegions(reference, identity.viewport)
+          ),
         catch: (cause) => new BrowserFailure({ operation: "compare base regions", cause })
       })
       if (options.captureOnly !== true && refOrigin !== undefined) {
@@ -186,7 +194,7 @@ export const runConformance = Effect.fn("DesignConformance.run")(function*(refs:
           }
           artifacts.ref = yield* write(`${key}-ref.png`, expected.frame)
           const limit = reference.source === "html" ? LIVE_CHANGE_MAX_DIFF_RATIO : reference.pixelMaxDiffRatio
-          for (const name of ["*", ...reference.regions]) {
+          for (const name of ["*", ...declaredRegions(reference, identity.viewport)]) {
             const ref = name === "*" ? RegionPixels.Image({ bytes: expected.frame }) : expected.regions.get(name)
             const livePixels = name === "*" ? RegionPixels.Image({ bytes: actual.frame }) : actual.regions.get(name)
             if (ref === undefined || livePixels === undefined) continue

@@ -6,7 +6,7 @@ import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 
 import { readJson } from "../src/references.js"
-import { Manifest, RunnerFailure } from "../src/schema.js"
+import { hasImplementedState, Manifest, RunnerFailure } from "../src/schema.js"
 
 /** Hook-local Git routing and identity must not leak into another checkout or fixture. */
 export const gitChildEnvironment = {
@@ -87,10 +87,27 @@ export const discoverReferenceManifests = Effect.fn("DesignConformance.discoverR
   }
 )
 
-/** Current package metadata wins for retained products; deleted products retain base metadata. */
-export const productMatrix = (current: ReadonlyArray<Manifest>, base: ReadonlyArray<Manifest>) => ({
-  include: Array.from(new Map([...base, ...current].map((manifest) => [manifest.product, {
-    product: manifest.product,
-    package: manifest.live.package
-  }])).values()).sort((left, right) => left.product.localeCompare(right.product))
-})
+/**
+ * One gate job per product with an implemented state in the PR or its base. A refs-only product, every state still
+ * designed on both sides, has no live screen to compare yet; its refs are hash-checked by the matrix step instead.
+ * Current package metadata wins for retained products; deleted products retain base metadata.
+ */
+export const productMatrix = (current: ReadonlyArray<Manifest>, base: ReadonlyArray<Manifest>) => {
+  const gated = new Set([...base, ...current].filter(hasImplementedState).map((manifest) => manifest.product))
+  return {
+    include: Array.from(new Map(
+      [...base, ...current].filter((manifest) => gated.has(manifest.product)).map((
+        manifest
+      ) => [manifest.product, { product: manifest.product, package: manifest.live.package }])
+    ).values()).sort((
+      left,
+      right
+    ) => left.product.localeCompare(right.product))
+  }
+}
+
+/** Products the matrix leaves out because every state is still designed; their refs must still verify. */
+export const refsOnlyProducts = (current: ReadonlyArray<Manifest>, base: ReadonlyArray<Manifest>) => {
+  const gated = new Set(productMatrix(current, base).include.map((item) => item.product))
+  return current.filter((manifest) => !gated.has(manifest.product)).map((manifest) => manifest.product)
+}
