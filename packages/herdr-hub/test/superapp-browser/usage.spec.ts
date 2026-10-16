@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test"
+import { ok } from "node:assert/strict"
 import { limitsFixture, LONG_USAGE_HOST, usageFixture } from "./usage-fixture.js"
 
 /** By tool cannot retry a Limits read it does not own. */
@@ -400,6 +401,40 @@ for (const layout of limitsLayouts) {
     await expect(page.getByRole("heading", { level: 1 })).toHaveAccessibleName("Usage")
   })
 }
+
+/** The grouped phone header draws the title one header gap after the chef, in both Limits layouts, as the design does. */
+test("phone Limits title sits on the design's position in both layouts", async ({ page }, info) => {
+  test.skip(info.project.name !== "phone", "Phone header")
+  await page.setViewportSize({ width: 390, height: 844 })
+  const titleOffset = async (layout: "readings" | "empty") => {
+    if (layout === "empty") {
+      const now = Date.now()
+      await page.route(
+        /\/v1\/connect\/usage(\?|$)/,
+        (route) => route.fulfill({ json: usageFixture({ range: "7d", timeZone: "UTC" }, now, "empty-readings") })
+      )
+      await page.route(
+        /\/v1\/connect\/limits(\?|$)/,
+        (route) => route.fulfill({ json: limitsFixture(now, "empty-readings") })
+      )
+      // Same URL as the readings pass, so only a reload reads again.
+      await page.reload()
+    } else {
+      await page.goto("/?range=7d&timeZone=UTC#usage/limits")
+    }
+    await expect(page.locator(layout === "empty" ? ".usage-limits-empty" : ".usage-tab-now")).toBeVisible()
+    const title = page.locator(".superapp-phone-title")
+    await expect(title).toHaveText("Usage Limits")
+    const brand = await page.locator(".superapp-header > .superapp-brand").boundingBox()
+    const text = await title.boundingBox()
+    ok(brand !== null && text !== null)
+    return { x: text.x, gap: text.x - (brand.x + brand.width) }
+  }
+  const readings = await titleOffset("readings")
+  const empty = await titleOffset("empty")
+  expect(readings.gap).toBe(8)
+  expect(readings.x).toBe(empty.x)
+})
 
 test("Limits matches the shared Usage chrome geometry", async ({ page }, info) => {
   await page.goto("/#usage/limits")
