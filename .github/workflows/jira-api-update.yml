@@ -24,6 +24,8 @@ jobs:
     timeout-minutes: 15
     outputs:
       updated: ${{ steps.regenerate.outputs.updated }}
+      bump: ${{ steps.changeset.outputs.bump }}
+      release-notes: ${{ steps.changeset.outputs.release-notes }}
 
     steps:
       - name: Checkout
@@ -69,19 +71,19 @@ jobs:
           pnpm --filter @knpkv/jira-cli test
           pnpm --filter @knpkv/jira-clockify test
 
+      # The release follows the spec diff: removed or incompatible contract is major.
       - name: Create changeset
+        id: changeset
         if: steps.regenerate.outputs.updated == 'true'
         run: |
-          mkdir -p .changeset
-          cat > .changeset/jira-api-spec-update-${GITHUB_RUN_ID}.md <<'CHANGESET'
-          ---
-          "@knpkv/jira-api-client": minor
-          "@knpkv/jira-cli": patch
-          "@knpkv/jira-clockify": patch
-          ---
-
-          Update the generated Schema-backed Jira API client.
-          CHANGESET
+          node scripts/openapi-changeset.ts \
+            --package @knpkv/jira-api-client \
+            --spec packages/jira-api-client/.specs/jira-v3.json \
+            --patch @knpkv/jira-cli \
+            --patch @knpkv/jira-clockify \
+            --summary "Update the generated Schema-backed Jira API client." \
+            --out ".changeset/jira-api-spec-update-${GITHUB_RUN_ID}.md" \
+            --github-output "$GITHUB_OUTPUT"
 
       - name: Export update patch
         if: steps.regenerate.outputs.updated == 'true'
@@ -154,10 +156,13 @@ jobs:
             - `packages/jira-api-client/src/JiraApiClient.ts`
             - `packages/jira-api-client/src/generated/JiraApi.ts`
 
-            Review the published generated exports before merging. The client
-            changeset defaults to minor; use major for removed exports or
-            incompatible schemas in this stable package. Patch is appropriate
-            only when the generated public contract is unchanged.
+            ${{ needs.check-spec.outputs.release-notes }}
+
+            The release comes from a diff of the previous and updated specs
+            (`scripts/openapi-spec-diff.ts`). Review the published generated
+            exports before merging: raise the changeset if the diff missed a
+            breaking change, and lower it to patch only when the generated
+            public contract is unchanged.
           branch: chore/jira-api-spec-update
           delete-branch: true
           labels: |
