@@ -1,5 +1,5 @@
 ---
-"@knpkv/codecommit-web": patch
+"@knpkv/codecommit-web": minor
 ---
 
 Code in the hub:

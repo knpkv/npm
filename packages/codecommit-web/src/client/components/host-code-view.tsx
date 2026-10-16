@@ -80,15 +80,21 @@ const failureWords = {
   invalid_response: "The hub returned an unexpected reading.",
   timeout: "The Code read timed out."
 } satisfies Record<NonNullable<CodeReadState<unknown>["failure"]>, string>
-/** The owner refreshes every few minutes by default; a queue an hour behind its reading has stopped refreshing. */
+/**
+ * The owner refreshes every few minutes by default; a queue an hour behind its reading has stopped refreshing.
+ * The reading's time is the hub's clock and the row fetch times are the owner's: the hour absorbs any skew.
+ */
 const STALE_QUEUE_MILLIS = 3_600_000
 
 /**
- * When the cache last heard from AWS, if that is over an hour before this reading: the newest row's fetch
- * time, which every successful owner refresh rewrites. Null when the queue is current or no row says.
+ * When the cache last heard from AWS, if that is over an hour before this reading: the newest open row's
+ * fetch time, which every successful owner refresh rewrites. Merged and closed rows keep their old fetch
+ * time, so they say nothing. Null when the queue is current or no open row says.
  */
 export const staleQueueSince = (queue: Extract<CodeQueue, { readonly _tag: "Ready" }>): number | null => {
-  const fetched = queue.items.flatMap((item) => (item.observedAt === null ? [] : [item.observedAt]))
+  const fetched = queue.items.flatMap((item) =>
+    item.status !== "OPEN" || item.observedAt === null ? [] : [item.observedAt]
+  )
   if (fetched.length === 0) return null
   const newest = Math.max(...fetched)
   return queue.observedAt - newest > STALE_QUEUE_MILLIS ? newest : null
@@ -394,6 +400,7 @@ export const CodeHostView = (props: CodeHostViewProps): ReactElement => {
     string
   >
   const queue = props.queue.value
+  const staleSince = queue?._tag === "Ready" ? staleQueueSince(queue) : null
   const detail = props.detail.value
   const selectedItem = queue?._tag === "Ready" ? queue.items.find((item) => item.ref === props.selected) : undefined
   const detailUpdatedAt = detail?._tag === "Ready" && detail.item.ref === props.selected ? detail.item.updatedAt : null
@@ -524,7 +531,7 @@ export const CodeHostView = (props: CodeHostViewProps): ReactElement => {
           </a>
         ))}
       </nav>
-      {queue?._tag === "Ready" && staleQueueSince(queue) !== null ? (
+      {staleSince !== null ? (
         <Notice
           tone="caution"
           action={
@@ -540,9 +547,8 @@ export const CodeHostView = (props: CodeHostViewProps): ReactElement => {
             </>
           }
         >
-          <strong>Not refreshed since {date(staleQueueSince(queue) ?? queue.observedAt)}.</strong> The Code owner
-          refreshes this cache from AWS. Its AWS sign-in may have expired. Open the Code owner UI to check, then read
-          again.
+          <strong>Not refreshed since {date(staleSince)}.</strong> The Code owner refreshes this cache from AWS. Its AWS
+          sign-in may have expired. Open the Code owner UI to check, then read again.
         </Notice>
       ) : null}
       <div className="code-host-controls">

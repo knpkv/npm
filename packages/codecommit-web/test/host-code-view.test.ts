@@ -264,13 +264,13 @@ it("puts the selected pull request's diff before the queue on Diffs", () => {
 it("says when a queue the owner hasn't refreshed for over an hour last heard from AWS", () => {
   const hour = 3_600_000
   const lastRead = Date.UTC(2026, 9, 7, 21, 42)
-  const item = (observedAt: number | null): CodePullRequest => ({
+  const item = (observedAt: number | null, status: CodePullRequest["status"] = "OPEN"): CodePullRequest => ({
     ref,
     id: "7",
     repository: "example-repository",
     title: "Example change",
     author: "example-author",
-    status: "OPEN",
+    status,
     approval: "waiting",
     createdAt: 1,
     updatedAt: 1,
@@ -294,4 +294,11 @@ it("says when a queue the owner hasn't refreshed for over an hour last heard fro
   expect(stale).toContain("href=\"http://127.0.0.1:4780\"")
   expect(render(lastRead + 10 * 60_000, [item(lastRead)])).not.toContain("Not refreshed since")
   expect(render(lastRead + 8 * 24 * hour, [item(null)])).not.toContain("Not refreshed since")
+  // A refresh rewrites only open rows: old merged or closed rows in "All cached" say nothing about it.
+  expect(render(lastRead + 8 * 24 * hour, [item(lastRead, "MERGED"), item(lastRead, "CLOSED")])).not.toContain(
+    "Not refreshed since"
+  )
+  expect(
+    render(lastRead + 8 * 24 * hour, [item(lastRead + 8 * 24 * hour - 60_000), item(lastRead, "MERGED")])
+  ).not.toContain("Not refreshed since")
 })
