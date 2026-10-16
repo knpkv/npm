@@ -69,6 +69,54 @@ for (const theme of themes) {
       })
     }
 
+    // Page17's squint overlay paints a 60% FLAT lid, not a curved fill beneath a flat lash.
+    for (const [size, pixels] of [["stage", "144"], ["row", "40"]]) {
+      test(`typed idle squint retains the flat fill and lash ${size}`, async ({ page }) => {
+        const svg = await open(page, size, pixels, "amber")
+        await expect(svg).toHaveAttribute("data-idle-habit", "squint")
+        await expect(svg).toHaveAttribute("data-motion-visible", "")
+        const sampled = await svg.evaluate((node) => {
+          return node.getAnimations({ subtree: true }).map((animation) => {
+            animation.pause()
+            const timing = animation.effect?.getComputedTiming()
+            const squint = "animationName" in animation && String(animation.animationName).includes("squint")
+            if (timing?.delay !== undefined) {
+              animation.currentTime = timing.delay + Number(timing.duration) * (squint ? 3.5 : 3.4)
+            }
+            return {
+              name: "animationName" in animation ? String(animation.animationName) : "?",
+              timing,
+              time: animation.currentTime
+            }
+          })
+        })
+        const face = svg.locator(".connect-creature-idle-squint")
+        await expect(face, JSON.stringify(sampled)).toHaveCSS("opacity", "1")
+        for (
+          const [selector, curve] of [[".connect-creature-idle-squint", 0], [".connect-creature-idle-open-face", 0.5]]
+        ) {
+          const painted = svg.locator(String(selector)).locator(".connect-creature-idle-lid-fill")
+          await expect(painted).toHaveCount(2)
+          const differences = await painted.evaluateAll((nodes) =>
+            nodes.map((node) => {
+              const path = node.getAttribute("d") ?? ""
+              const values = /Q[-\d.]+ ([-\d.]+) [-\d.]+ ([-\d.]+)/.exec(path)
+              const unit = Number(node.closest("svg")?.style.getPropertyValue("--connect-creature-unit"))
+              return (Number(values?.[1]) - Number(values?.[2])) / unit
+            })
+          )
+          for (const difference of differences) expect(difference).toBeCloseTo(Number(curve), 3)
+        }
+        const lashes = await face.locator(".connect-creature-lash").evaluateAll((nodes) =>
+          nodes.map((node) => {
+            const values = /Q[-\d.]+ ([-\d.]+) [-\d.]+ ([-\d.]+)/.exec(node.getAttribute("d") ?? "")
+            return Number(values?.[1]) - Number(values?.[2])
+          })
+        )
+        expect(lashes).toEqual([0, 0])
+      })
+    }
+
     // draw() clips iris + painted lid inside the true eye, without separately cutting the white.
     // Its upper edge spans ew+0.5 per side, 5.25 total units, and its brows are 90% ink.
     for (const [size, pixels] of [["stage", "144"], ["row", "40"]]) {
@@ -269,8 +317,12 @@ for (const theme of themes) {
           .toBe(true)
       }
       await page.getByRole("combobox", { name: "Task kind" }).selectOption("waiting")
+      // Movements adds page14's Waiting sway; exiting idle no longer means exiting all task motion.
+      await expect(svg).toHaveAttribute("data-task-kind", "waiting")
+      await expect(svg).toHaveAttribute("data-task-transition", "settled")
       await expect(svg).not.toHaveAttribute("data-idle-motion")
-      expect(await svg.evaluate((node) => node.getAnimations({ subtree: true }).length)).toBe(0)
+      await expect(svg.locator(".connect-creature-idle-habit")).toHaveCount(0)
+      await expect(svg.locator(".connect-creature-task-body")).toHaveCSS("animation-name", "connect-creature-task-sway")
     })
 
     test("visible idle neighbours shift only the second near-synchronous phase", async ({ page }) => {
