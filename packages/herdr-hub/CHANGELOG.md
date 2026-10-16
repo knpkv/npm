@@ -2,6 +2,12 @@
 
 Released as `@knpkv/herdr-approvals` up to 0.18.0; the headings below are that package's history.
 
+## 0.41.5
+
+### Patch Changes
+
+- [#960](https://github.com/knpkv/npm/pull/960) [`978c99a`](https://github.com/knpkv/npm/commit/978c99ae28cc8b4a967c68a8dd1f9017b6c8a02f) Thanks [@konopkov](https://github.com/konopkov)! - Usage Limits groups its page title and tabs with the shell header in every state, as the design's header region does, and draws that header to the design: 430 body type, 16px tab region, the phone tab inset, and hosts and notifications read before Ask Relay. The page heading is now a single screen-reader heading outside the header; on phones the visible title and lead are no longer shown in the header.
+
 ## 0.41.4
 
 ### Patch Changes
