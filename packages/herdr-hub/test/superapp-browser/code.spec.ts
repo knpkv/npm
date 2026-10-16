@@ -2,7 +2,6 @@ import * as NodeServices from "@effect/platform-node/NodeServices"
 import {
   CodeDiffContentQuery,
   CodeDiffContentResult,
-  CodeDiffResult,
   type CodeQueue,
   CodeReviewResult
 } from "@knpkv/codecommit-web/host"
@@ -177,10 +176,12 @@ test("exact cached details need no provider read, then intentional diff navigati
   await queueLink.click()
   await expect(canvas).toHaveCount(0)
   await page.getByRole("navigation", { name: "Code pages" }).getByRole("link", { name: "Diffs", exact: true }).click()
-  await page.locator(".code-host-row").first().click()
+  const diffRow = page.locator(".code-host-row").first()
+  await diffRow.click()
   await expect(page.getByRole("dialog")).toHaveCount(0)
   await expect(page.locator(".code-host-diff")).toContainText("Revision revision-752")
-  await expect(page.locator(".code-host-tabs [data-module-page=\"diffs\"]")).toBeFocused()
+  // Choosing a diff on the same page keeps focus on the row the reader activated.
+  await expect(diffRow).toBeFocused()
   expect(diffs).toBe(1)
   await page.getByRole("navigation", { name: "Changed files" }).getByRole("link", { name: "src/reading.ts modified" })
     .click()
@@ -234,7 +235,8 @@ test("keyboard targets focus their full page and deliberate targets add one hist
   await expect(page.locator(".code-host-diff")).toContainText("Revision revision-752")
   await page.goBack()
   await expect(page.getByText("Choose a pull request to read its diff.")).toBeVisible()
-  await expect(page.locator(".code-host-tabs [data-module-page=\"diffs\"]")).toBeFocused()
+  // Leaving the last selection through history restores the row that opened it.
+  await expect(first).toBeFocused()
 })
 
 test("changing cached PR data marks a retained diff as possibly outdated without a provider call", async ({ context, page }) => {
@@ -273,7 +275,9 @@ test("unknown opaque targets return a closed not-found state with a working clos
   await expect(canvas).toContainText("reference is no longer available")
   await returnToQueue(page).click()
   await expect(canvas).toHaveCount(0)
-  await expect(page.locator(".code-host-tabs [data-module-page=\"pull-requests\"]")).toBeFocused()
+  // Shipped behaviour: an unknown target has no opener row, so focus lands on the queue's page heading. This also
+  // fails if focus is lost to <body>.
+  await expect(page.getByRole("heading", { name: "Pull requests", exact: true })).toBeFocused()
   expect(new URL(page.url()).searchParams.has("ref")).toBe(false)
 })
 
@@ -584,7 +588,9 @@ for (const state of ["normal", "commentsfailed"]) {
     if (state === "commentsfailed") await expect(buttons.first()).toHaveText("All")
     else await expect(buttons.first()).toHaveText(/^All \d+$/u)
     for (const button of await buttons.all()) {
-      await button.scrollIntoViewIfNeeded()
+      // Measure the button clear of the fixed bottom bar: at the initial scroll the last row sits partly under it,
+      // and scrollIntoViewIfNeeded leaves an already-visible target there.
+      await button.evaluate((element) => element.scrollIntoView({ block: "center" }))
       const target = await button.evaluate((element) => {
         const rect = element.getBoundingClientRect()
         const pseudo = getComputedStyle(element, "::after")
@@ -1171,7 +1177,9 @@ for (const outdated of [false, true]) {
     const phases = [
       { article: inline, size: "15px", line: outdated ? "22.5px" : "24px", author: "620", time: "13px" },
       {
-        article: owner(page).locator("[data-review-presentation='conversation'] article:has([data-review-message-id])"),
+        // The feed also carries the agent finding's own discussion (shipped Conversation design); judge the human thread.
+        article: owner(page).locator("[data-review-presentation='conversation'] article:has([data-review-message-id])")
+          .filter({ has: page.getByRole("heading", { name: "CodeCommit", exact: true }) }),
         size: "14px",
         line: "21px",
         author: "600",
@@ -1270,15 +1278,24 @@ test("dismissed notes use their actual inline or separate card rhythm", async ({
 test("rejected raw review files retain source lines without horizontal overflow", async ({ page }) => {
   const before = "\n".repeat(20) + "before source\n"
   const after = "\n".repeat(20) + "long recorded source ".repeat(30) + "\n"
-  await page.route(/\/v1\/modules\/code\/diff\?/, async (route) => {
-    const response = await route.fetch()
-    const value = Schema.decodeUnknownSync(CodeDiffResult)(await response.json())
-    ok(value._tag === "Ready")
-    const invalid = Schema.decodeUnknownSync(CodeDiffResult)({
+  // The Review view takes its file inventory from the review reading, not the Diffs page's diff read.
+  await page.route(/\/v1\/modules\/code\/review\?/, async (route) => {
+    const value = codeReviewFixture(CODE_REF, 1_700_000_000_000, "normal")
+    ok(value?._tag === "Ready")
+    const invalid = Schema.decodeUnknownSync(CodeReviewResult)({
       ...value,
-      diff: { ...value.diff, files: value.diff.files.map((file) => ({ ...file, beforeMode: "invalid-mode" })) }
+      reading: {
+        ...value.reading,
+        diff: {
+          ...value.reading.diff,
+          files: value.reading.diff.files.map((file) => ({ ...file, beforeMode: "invalid-mode" }))
+        }
+      }
     })
-    await route.fulfill({ response, body: Schema.encodeSync(Schema.fromJsonString(CodeDiffResult))(invalid) })
+    await route.fulfill({
+      contentType: "application/json",
+      body: Schema.encodeSync(Schema.fromJsonString(CodeReviewResult))(invalid)
+    })
   })
   await page.route(/\/v1\/modules\/code\/diff-content\?/, async (route) => {
     const response = await route.fetch()

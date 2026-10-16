@@ -1,5 +1,5 @@
 /* Preflight must be below components from the first import. Keep Connect/Fleet/Work/Hub order. */
-@layer theme, base, rly.fonts, rly.tokens, rly.reset, rly.base, rly.components, rly.state, connect, fleet, herdr-work, hub, components, utilities;
+@layer theme, base, hub-preflight, rly.fonts, rly.tokens, rly.reset, rly.base, rly.components, rly.state, connect, fleet, herdr-work, hub, components, utilities;
 
 @import "@knpkv/rly/styles.css";
 @import "@knpkv/herdr-connect/styles.css";
@@ -13,6 +13,14 @@
 @import "./usage-empty.css";
 @import "./blocked-connect.css";
 @import "./host-resources.css";
+
+/* Code review's bundled Tailwind preflight zeroes form-control padding hub-wide; give unstyled controls their browser
+   padding back below every Rly and Hub layer, so only component styles set it. */
+@layer hub-preflight {
+  :where(button, input, select, textarea) {
+    padding: revert;
+  }
+}
 
 @layer fleet {
   .code-review-read-announcement {
