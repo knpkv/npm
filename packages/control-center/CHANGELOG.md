@@ -1,5 +1,13 @@
 # @knpkv/control-center
 
+## 0.18.5
+
+### Patch Changes
+
+- Updated dependencies [[`0954249`](https://github.com/knpkv/npm/commit/0954249550a49dfb924294e9f368f9a43721b1a8), [`8d9ebb3`](https://github.com/knpkv/npm/commit/8d9ebb30835a3ec808a9e8689f1fac81980d4489)]:
+  - @knpkv/clockify-api-client@5.0.0
+  - @knpkv/jira-api-client@3.2.0
+
 ## 0.18.4
 
 ### Patch Changes

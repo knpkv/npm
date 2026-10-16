@@ -1,5 +1,14 @@
 # @knpkv/codecommit-web
 
+## 0.37.0
+
+### Minor Changes
+
+- [#972](https://github.com/knpkv/npm/pull/972) [`d43f9c6`](https://github.com/knpkv/npm/commit/d43f9c6e3fb37b8569e73827f9d370a6d3368e12) Thanks [@konopkov](https://github.com/konopkov)! - Code in the hub:
+
+  - **Diffs:** Read diff lands on the diff. The selected pull request's diff now comes before the queue and takes focus, instead of rendering under every cached row.
+  - **Stale queue:** when the newest cached row is over an hour older than the reading, a caution notice says when the cache last heard from AWS. It sends you to the Code owner UI to check its sign-in, with Read again.
+
 ## 0.36.0
 
 ### Minor Changes

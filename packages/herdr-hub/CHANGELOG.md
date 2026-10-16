@@ -2,6 +2,21 @@
 
 Released as `@knpkv/herdr-approvals` up to 0.18.0; the headings below are that package's history.
 
+## 0.43.0
+
+### Minor Changes
+
+- [#970](https://github.com/knpkv/npm/pull/970) [`4a47179`](https://github.com/knpkv/npm/commit/4a47179344419423632e32045c9e53d4dafa3bee) Thanks [@konopkov](https://github.com/konopkov)! - Add sandbox pool job kinds (lease, extend, release, approval-gated reset and budget lift) that only the pool's owning host runs, with fleetctl submission and approval display.
+
+### Patch Changes
+
+- Updated dependencies [[`d43f9c6`](https://github.com/knpkv/npm/commit/d43f9c6e3fb37b8569e73827f9d370a6d3368e12), [`4a47179`](https://github.com/knpkv/npm/commit/4a47179344419423632e32045c9e53d4dafa3bee)]:
+  - @knpkv/codecommit-web@0.37.0
+  - @knpkv/herdr-fleet@0.15.0
+  - @knpkv/herdr-connect@0.29.3
+  - @knpkv/herdr-coordinator@0.4.7
+  - @knpkv/herdr-work@0.12.8
+
 ## 0.42.2
 
 ### Patch Changes
