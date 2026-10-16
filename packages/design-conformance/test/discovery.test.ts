@@ -129,4 +129,17 @@ layer(NodeServices.layer)("reference product discovery", (it) => {
         "retained"
       ])
     }))
+  it.effect("refs-only products, with every state still designed, stay out of the live gate until one is implemented", () =>
+    Effect.sync(() => {
+      const designedOnly = (product: string): Manifest => ({
+        ...manifest,
+        product,
+        states: manifest.states.map((state) => ({ ...state, status: "designed" }))
+      })
+      expect(productMatrix([designedOnly("canvas"), manifest], []).include.map((item) => item.product)).toEqual([
+        "toy"
+      ])
+      // A product that regresses from implemented to designed-only keeps its gate.
+      expect(productMatrix([designedOnly("toy")], [manifest]).include.map((item) => item.product)).toEqual(["toy"])
+    }))
 })

@@ -4,6 +4,7 @@ import { PNG } from "pngjs"
 
 import { type Capture, cropRegions, RegionPixels } from "../src/browser.js"
 import { compareLiveRegions, comparePixels, compareSnapshots, coverageFailures, shotKey } from "../src/compare.js"
+import type { Identity } from "../src/schema.js"
 import { identity, manifest, snapshot, state } from "./models.js"
 
 it.effect("copy, geometry, token equality and overflow each detect their original defect shape", () =>
@@ -34,6 +35,30 @@ it.effect("copy, geometry, token equality and overflow each detect their origina
         regions: [{ ...region, box: { ...region.box, x: 20 } }]
       })
     ).toEqual([])
+  }))
+
+it.effect("a 360 phone uses the phone geometry tolerance, like 390", () =>
+  Effect.sync(() => {
+    const region = snapshot.regions[0]
+    if (region === undefined) return expect.unreachable()
+    const shifted = (x: number) => ({ ...snapshot, regions: [{ ...region, box: { ...region.box, x } }] })
+    const phone: Identity = { ...identity, viewport: 360 }
+    expect(compareSnapshots(phone, state, snapshot, shifted(region.box.x + 2))).toEqual([])
+    expect(
+      compareSnapshots(phone, state, snapshot, shifted(region.box.x + 4)).some((failure) => failure.rule === "geometry")
+    )
+      .toBe(true)
+  }))
+
+it.effect("per-viewport regions: a desktop-only region on a phone capture is undeclared there", () =>
+  Effect.sync(() => {
+    const region = snapshot.regions[0]
+    if (region === undefined) return expect.unreachable()
+    const split = { ...state, regions: { phone: ["other"], desktop: [region.name] } }
+    expect(compareSnapshots({ ...identity, viewport: 1280 }, split, snapshot, snapshot)).toEqual([])
+    expect(compareSnapshots(identity, split, snapshot, snapshot).some((failure) => failure.rule === "geometry")).toBe(
+      true
+    )
   }))
 
 it.effect("missing, duplicated, undeclared, reordered and reparented regions fail geometry", () =>

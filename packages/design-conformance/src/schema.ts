@@ -14,7 +14,19 @@ const Instant = Schema.String.check(Schema.makeFilter((value) => {
     "Expected a valid ISO calendar date"
 })).pipe(Schema.decodeTo(Schema.DateTimeUtcFromString))
 export const Theme = Schema.Literals(["light", "dark"])
-export const Viewport = Schema.Literals([390, 1280])
+export const Viewport = Schema.Literals([360, 390, 1280])
+export type Viewport = typeof Viewport.Type
+/** Phone widths share the phone layout and its tighter geometry tolerance. */
+export const isPhoneViewport = (viewport: Viewport): boolean => viewport !== 1280
+/** The browser window each viewport captures in. */
+export interface ViewportSize {
+  readonly width: Viewport
+  readonly height: number
+}
+export const viewportSize = (viewport: Viewport): ViewportSize => ({
+  width: viewport,
+  height: viewport === 360 ? 780 : viewport === 390 ? 844 : 800
+})
 const Themes = Schema.Array(Theme).check(Schema.isMinLength(1), Schema.isUnique())
 const Viewports = Schema.Array(Viewport).check(Schema.isMinLength(1), Schema.isUnique())
 // PNG exports allow modest renderer drift; larger deviations require explicit review waivers.
@@ -48,10 +60,14 @@ export interface Inventory extends Schema.Schema.Type<typeof Inventory> {}
 
 export const BaseComparison = Schema.Struct({ referenceOnly: Schema.Boolean })
 
+const RegionList = Schema.Array(RegionName).check(Schema.isMinLength(1), Schema.isUnique())
 const StateFields = {
   ...LiveState.fields,
   status: Schema.Literals(["designed", "implemented"]),
-  regions: Schema.Array(RegionName).check(Schema.isMinLength(1), Schema.isUnique())
+  regions: Schema.Union([
+    RegionList,
+    Schema.Struct({ phone: RegionList, desktop: RegionList })
+  ])
 }
 const PngRef = Schema.Struct({ viewport: Viewport, theme: Theme, image: RelativeFile, metadata: RelativeFile })
 export const State = Schema.Union([
@@ -64,6 +80,18 @@ export const State = Schema.Union([
   })
 ])
 export type State = Schema.Schema.Type<typeof State>
+
+/** The regions a state declares for one capture: one list for every width, or one per phone and desktop layout. */
+export const declaredRegions = (
+  state: {
+    readonly regions: ReadonlyArray<string> | {
+      readonly phone: ReadonlyArray<string>
+      readonly desktop: ReadonlyArray<string>
+    }
+  },
+  viewport: Viewport
+): ReadonlyArray<string> =>
+  "phone" in state.regions ? (isPhoneViewport(viewport) ? state.regions.phone : state.regions.desktop) : state.regions
 export const Enforcement = Schema.Struct({
   touched: Schema.Literal("required"),
   legacy: Schema.Union([

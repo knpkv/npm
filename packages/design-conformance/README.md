@@ -25,7 +25,10 @@ Declare every region in the manifest. The gate checks
 DOM order, nearest region parent, horizontal page/region overflow, normalized visible
 text, and document-space boxes. Order is compared over the regions both the reference and
 the product render. A region missing on either side is reported once, as that region's
-own geometry finding, not again as an order change. Geometry tolerance is 2px at 390 and 4px at 1280.
+own geometry finding, not again as an order change. States capture at phone 360 (360×780) or 390 (390×844)
+and desktop 1280 (1280×800). Geometry tolerance is 2px on both phones and 4px at 1280.
+A state declares its regions once for every width, or as `{ "phone": [...], "desktop": [...] }` when the phone
+layout differs; each capture is judged against the list for its own width.
 Resolved color, background, font, painted borders, radius, gaps and padding must match exactly.
 Only complete width/style/color shorthands with a known border style are normalized.
 Supported computed colors are numeric comma-separated `rgb()`/`rgba()` and complete `oklch()` with optional alpha.
@@ -147,7 +150,10 @@ missing route entry from a selected state.
 The inventory must come from the application, independently of reference states.
 Each live route needs at least one state. Inventory states supply screen, state,
 route, viewports and themes. The gate also checks every implemented reference has
-a capture. Designed states may precede implementation in a ref PR.
+a capture. Designed states may precede implementation in a ref PR. A product whose states are all `designed`,
+in the PR and its base, gets no gate job yet: the matrix step verifies its reference hashes and reports it as
+refs-only. Its first `implemented` state brings the live gate, and a product that loses its last implemented
+state keeps the gate.
 The adapter's origin is the only allowed live network origin; fake provider I/O
 inside the application. The toy adapter is [`scripts/fixture.ts`](scripts/fixture.ts).
 

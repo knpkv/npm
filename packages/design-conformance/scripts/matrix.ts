@@ -7,8 +7,9 @@ import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 import * as Schema from "effect/Schema"
 
+import { loadReferences } from "../src/references.js"
 import { Name } from "../src/schema.js"
-import { discoverReferenceManifests, productMatrix } from "./discovery.js"
+import { discoverReferenceManifests, productMatrix, refsOnlyProducts } from "./discovery.js"
 
 const Matrix = Schema.Struct({ include: Schema.Array(Schema.Struct({ product: Name, package: Schema.String })) })
 const program = Effect.gen(function*() {
@@ -17,6 +18,11 @@ const program = Effect.gen(function*() {
   const repository = yield* path.fromFileUrl(new URL("../../../", import.meta.url))
   const baseRef = yield* Config.String("DESIGN_BASE_REF").pipe(Config.withDefault("origin/main"))
   const manifests = yield* discoverReferenceManifests(repository, baseRef)
+  // Refs-only products get no gate job yet; their files must still match the manifest hashes.
+  for (const product of refsOnlyProducts(manifests.current, manifests.base)) {
+    yield* loadReferences(path.join(repository, "design-refs", product))
+    yield* Console.log(`refs-only ${product}: references verified, no live gate until a state is implemented`)
+  }
   const json = yield* Schema.encodeEffect(Schema.fromJsonString(Matrix))(
     productMatrix(manifests.current, manifests.base)
   )

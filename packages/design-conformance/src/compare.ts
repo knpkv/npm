@@ -3,7 +3,16 @@ import { PNG } from "pngjs"
 
 import { type Capture, cropRegions } from "./browser.js"
 import { normalizeCopy } from "./capture.js"
-import type { Failure, Identity, Inventory, Manifest, Snapshot, State } from "./schema.js"
+import {
+  declaredRegions,
+  type Failure,
+  type Identity,
+  type Inventory,
+  isPhoneViewport,
+  type Manifest,
+  type Snapshot,
+  type State
+} from "./schema.js"
 
 export const shotKey = (identity: Identity): string =>
   `${identity.screen}--${identity.state}--${identity.viewport}--${identity.theme}`
@@ -16,7 +25,7 @@ export const stateShots = (state: Inventory["states"][number]): ReadonlyArray<Id
 
 export const LIVE_CHANGE_MAX_DIFF_RATIO = 0.001
 const pixelOptions = { threshold: 0.2, includeAA: false }
-const geometryTolerance = (identity: Identity): number => identity.viewport === 390 ? 2 : 4
+const geometryTolerance = (identity: Identity): number => isPhoneViewport(identity.viewport) ? 2 : 4
 
 /** A dimension change always differs. Include anti-alias detection like the #844 comparison. */
 export const comparePixels = (reference: Uint8Array, live: Uint8Array) => {
@@ -198,14 +207,15 @@ export const compareSnapshots = (
   const shared = (names: ReadonlyArray<string>, other: ReadonlyArray<string>) =>
     names.filter((name) => other.includes(name)).join("|")
   if (shared(refNames, liveNames) !== shared(liveNames, refNames)) fail("*", "geometry", "Region order differs")
-  for (const name of new Set([...state.regions, ...refNames, ...liveNames])) {
+  const declared = declaredRegions(state, identity.viewport)
+  for (const name of new Set([...declared, ...refNames, ...liveNames])) {
     const expected = ref.regions.filter((region) => region.name === name)
     const actual = live.regions.filter((region) => region.name === name)
     const reference = expected[0]
     const region = actual[0]
     if (
       expected.length !== 1 || actual.length !== 1 || reference === undefined || region === undefined ||
-      !state.regions.includes(name)
+      !declared.includes(name)
     ) {
       fail(name, "geometry", "Each declared region must occur exactly once on both sides; undeclared regions forbidden")
       continue
