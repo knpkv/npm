@@ -2,6 +2,12 @@
 
 Released as `@knpkv/herdr-approvals` up to 0.18.0; the headings below are that package's history.
 
+## 0.41.2
+
+### Patch Changes
+
+- [#950](https://github.com/knpkv/npm/pull/950) [`d0498ba`](https://github.com/knpkv/npm/commit/d0498ba7b715ac86e2c15934467b039059df0e11) Thanks [@konopkov](https://github.com/konopkov)! - The desktop sidebar's design-conformance `nav` region is now the module list in every layout, as in the design, instead of the whole sidebar with its brand, Settings and session.
+
 ## 0.41.1
 
 ### Patch Changes
