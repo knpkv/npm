@@ -6,7 +6,13 @@ import { MemoryRouter } from "react-router"
 import { assert, describe, expect, it, vi } from "@effect/vitest"
 
 import { SessionSummary } from "../../src/api/session.js"
-import { PluginSynchronizationState } from "../../src/api/plugins.js"
+import {
+  PluginConnectionAdministration,
+  PluginConnectionTestResult,
+  PluginSynchronizationState
+} from "../../src/api/plugins.js"
+import { ConnectionAdministration } from "../../src/client/services/ConnectionAdministration.js"
+import { ConnectionTestEvidence } from "../../src/client/services/ConnectionTestEvidence.js"
 import { DEFAULT_WORKSPACE_SETTINGS } from "../../src/domain/workspaceSettings.js"
 import {
   BrowserSessionStatusView,
@@ -152,5 +158,67 @@ describe("controlled views", () => {
       )
     expect(viewAt(new Date("2026-07-14T10:02:00.000Z"))).toContain("Synced 2 min ago")
     expect(viewAt(new Date("2026-07-14T10:07:00.000Z"))).toContain("Synced 7 min ago")
+  })
+
+  // A connection card reads like the Overview's Sources panel: "14 Jul 2026, 10:00 UTC", never ISO text.
+  it("shows connection test and sync times as readable UTC times", () => {
+    const pluginConnectionId = "01890f6f-6d6a-7cc0-98d2-000000000091"
+    const result = Schema.decodeUnknownSync(PluginConnectionTestResult)({
+      _tag: "healthy",
+      pluginConnectionId,
+      providerId: "jira",
+      checkedAt: "2026-07-14T10:00:00.000Z",
+      latencyMilliseconds: 12,
+      identity: { kind: "user", label: "Atlassian user", displayName: "Release Owner", providerImmutableId: "owner" }
+    })
+    const evidence = renderView(<ConnectionTestEvidence state={{ _tag: "result", result }} />)
+    expect(evidence).toContain('Checked <time dateTime="2026-07-14T10:00:00.000Z">14 Jul 2026, 10:00 UTC</time>')
+
+    const administration = Schema.decodeUnknownSync(PluginConnectionAdministration)({
+      connection: {
+        pluginConnectionId,
+        providerId: "jira",
+        displayName: "Release Jira",
+        isEnabled: true,
+        health: null,
+        updatedAt: "2026-07-14T10:00:00.000Z"
+      },
+      configuration: { pluginConnectionId, revision: 1, values: [], updatedAt: "2026-07-14T10:00:00.000Z" },
+      metadata: {
+        pluginConnectionId,
+        pluginId: "dev.knpkv.jira.read",
+        contractVersion: { major: 1, minor: 0, patch: 0 },
+        adapterVersion: { major: 1, minor: 0, patch: 0 },
+        configurationFields: [],
+        capabilities: []
+      },
+      credentialFields: [],
+      permissions: [],
+      schedule: { mode: "manual", nextRunAt: null },
+      synchronization: {
+        pluginConnectionId,
+        providerId: "jira",
+        streamKey: "fixture",
+        lastAttemptAt: "2026-07-14T10:00:00.000Z",
+        lastSuccessAt: "2026-07-14T10:00:00.000Z",
+        result: "synchronized",
+        pagesCommitted: 1,
+        failure: null
+      },
+      diagnostics: []
+    })
+    const card = renderView(
+      <ConnectionAdministration
+        canConfigure
+        onReauthorize={() => Promise.resolve(true)}
+        onRevoke={() => Promise.resolve(true)}
+        onStartAtlassianOAuth={undefined}
+        state={{ _tag: "ready", administration }}
+      />
+    )
+    expect(card).toContain(
+      'Last successful sync <time dateTime="2026-07-14T10:00:00.000Z">14 Jul 2026, 10:00 UTC</time>'
+    )
+    expect(card).not.toContain("DateTime")
   })
 })
