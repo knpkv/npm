@@ -73,6 +73,7 @@ import {
   forbiddenApiError,
   invalidRequestApiError,
   liveStreamCapacityApiError,
+  mapApplicationAwsSignInRequired,
   mapApplicationConflict,
   mapApplicationInvalidRequest,
   mapApplicationNotFound,
@@ -550,6 +551,7 @@ export const pluginHandlersLayer = HttpApiBuilder.group(
               return yield* Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
             }
             return yield* discoverAwsResources(payload).pipe(Effect.catchTags({
+              ApplicationAwsSignInRequired: mapApplicationAwsSignInRequired,
               ApplicationInvalidRequest: mapApplicationInvalidRequest,
               ApplicationRateLimited: mapApplicationRateLimited,
               ApplicationServiceUnavailable: mapApplicationUnavailable

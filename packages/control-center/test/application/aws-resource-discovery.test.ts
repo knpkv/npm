@@ -4,6 +4,7 @@ import * as CodeCommit from "@knpkv/codecommit-core/ReadClient.js"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Logger from "effect/Logger"
+import * as Predicate from "effect/Predicate"
 import * as Ref from "effect/Ref"
 import * as References from "effect/References"
 import * as Result from "effect/Result"
@@ -11,7 +12,11 @@ import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 
 import { AwsResourceDiscoveryRequest } from "../../src/api/plugins.js"
-import { ApplicationInvalidRequest, ApplicationRateLimited } from "../../src/server/api/ApplicationServices.js"
+import {
+  ApplicationAwsSignInRequired,
+  ApplicationInvalidRequest,
+  ApplicationRateLimited
+} from "../../src/server/api/ApplicationServices.js"
 import { AwsResourceDiscovery, makeAwsResourceDiscovery } from "../../src/server/application/awsResourceDiscovery.js"
 import {
   CodePipelineNamePage,
@@ -250,6 +255,13 @@ describe("AWS resource discovery", () => {
         })
       ).pipe(Effect.result)
       assert.isTrue(Result.isFailure(result))
+      if (Result.isFailure(result)) {
+        assert.instanceOf(result.failure, ApplicationAwsSignInRequired)
+        assert.deepStrictEqual(
+          Predicate.isTagged(result.failure, "ApplicationAwsSignInRequired") ? result.failure.profile : null,
+          request.profile
+        )
+      }
       assert.strictEqual(yield* Ref.get(listCalls), 0)
     }))
 

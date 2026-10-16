@@ -16,6 +16,7 @@ import {
 import { ProviderId } from "../domain/sourceRevision.js"
 import { UtcTimestamp } from "../domain/utcTimestamp.js"
 import {
+  AwsSignInRequiredApiError,
   ConflictApiError,
   ForbiddenApiError,
   InvalidRequestApiError,
@@ -274,7 +275,9 @@ export type PluginServiceCatalogEntry = typeof PluginServiceCatalogEntry.Type
 /** One local AWS CLI profile available to first-party AWS adapters. */
 export const DiscoveredAwsProfile = Schema.Struct({
   profile: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200)),
-  region: Schema.NullOr(Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(100)))
+  region: Schema.NullOr(Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(100))),
+  /** Present when the profile signs in through IAM Identity Center, so `aws sso login` renews it. */
+  sso: Schema.optionalKey(Schema.Literal(true))
 }).annotate({ identifier: "DiscoveredAwsProfile" })
 
 /** Decoded local AWS profile metadata; credentials never cross this contract. */
@@ -845,7 +848,7 @@ const discoverAwsProfiles = HttpApiEndpoint.get("discoverAwsProfiles", "/discove
 const discoverAwsResources = HttpApiEndpoint.post("discoverAwsResources", "/discovery/aws-resources", {
   payload: AwsResourceDiscoveryRequest,
   success: AwsResourceDiscoveryResponse,
-  error: [...pluginReadErrors, InvalidRequestApiError]
+  error: [...pluginReadErrors, InvalidRequestApiError, AwsSignInRequiredApiError]
 })
   .middleware(SessionCookieAuth)
   .middleware(SessionMutationAuth)

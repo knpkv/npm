@@ -51,6 +51,9 @@ export const syncLine = (state: PluginSynchronizationState, now: Date): SyncLine
         tone: "positive"
       }
     case "source-unavailable":
+      return state.failure?.failureClass === "configuration"
+        ? { label: "Needs correction", tone: "critical" }
+        : { label: "Sync failed", tone: "critical" }
     case "interrupted":
       return { label: "Sync failed", tone: "critical" }
   }
@@ -64,14 +67,15 @@ export const isAccountSyncFailure = (failureClass: PluginFailureClass): boolean 
   failureClass === "authentication" || failureClass === "authorization"
 
 const failureSentences = {
-  authentication: "The provider rejected the account's credentials. Sign in again, then sync again.",
+  authentication: "The provider refused the account’s credentials. Sign in again or renew them, then sync again.",
   authorization: "The account's credentials can't read this resource. Grant access, then sync again.",
   "rate-limit": "The provider is limiting requests. Wait a minute, then sync again.",
   timeout: "The provider took too long to answer. Sync again.",
   "malformed-response":
     "The provider sent data Control Center couldn't read. Sync again; report it if it keeps failing.",
   outage: "The provider is unavailable right now. Sync again later.",
-  unknown: "The provider couldn't be read. Sync again."
+  configuration: "This connection’s settings don’t match the provider. Check them, then edit the connection.",
+  unknown: "The provider couldn’t be read. Check the connection, then sync again."
 } satisfies Readonly<Record<PluginFailureClass, string>>
 
 /** The account-level sentence for a credential failure, stated once on the account card. */
@@ -83,7 +87,10 @@ export const syncFailureSentence = (state: PluginSynchronizationState): string |
     case "interrupted":
       return "The sync stopped before it finished. Sync again."
     case "source-unavailable":
-      return failureSentences[state.failure?.failureClass ?? "unknown"]
+      // A configuration failure carries the server's sentence naming what to fix; others use the class sentence.
+      return state.failure?.failureClass === "configuration"
+        ? state.failure.safeMessage
+        : failureSentences[state.failure?.failureClass ?? "unknown"]
     case "never":
     case "queued":
     case "running":

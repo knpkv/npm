@@ -47,7 +47,27 @@ describe("sync presentation", () => {
       failure: { failureClass: "rate-limit", safeMessage: "Rate limited." }
     }))).toBe("The provider is limiting requests. Wait a minute, then sync again.")
     expect(syncFailureSentence(state("interrupted"))).toBe("The sync stopped before it finished. Sync again.")
-    expect(syncFailureSentence(state("source-unavailable"))).toBe("The provider couldn't be read. Sync again.")
+    expect(syncFailureSentence(state("source-unavailable"))).toBe(
+      "The provider couldn’t be read. Check the connection, then sync again."
+    )
+    expect(syncFailureSentence(state("source-unavailable", {
+      failure: { failureClass: "authentication", safeMessage: "Provider authentication failed." }
+    }))).toBe("The provider refused the account’s credentials. Sign in again or renew them, then sync again.")
     expect(syncFailureSentence(state("synchronized"))).toBeNull()
+  })
+
+  // A resource that doesn't exist won't appear by syncing again: name it and point at the connection.
+  it("never offers another sync for a configuration failure", () => {
+    const failed = state("source-unavailable", {
+      failure: {
+        failureClass: "configuration",
+        safeMessage:
+          "The repository wasn’t found in this account and region. Check the repository name or region, then edit the connection."
+      }
+    })
+    expect(syncFailureSentence(failed)).toBe(
+      "The repository wasn’t found in this account and region. Check the repository name or region, then edit the connection."
+    )
+    expect(syncLine(failed, NOW)).toEqual({ label: "Needs correction", tone: "critical" })
   })
 })

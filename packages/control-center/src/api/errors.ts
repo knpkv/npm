@@ -109,6 +109,16 @@ export class RateLimitedApiError extends Schema.TaggedError<RateLimitedApiError>
   { httpApiStatus: 429 }
 ) {}
 
+/** The chosen local AWS profile needs its sign-in renewed (for example `aws sso login`) before it can be verified. */
+export class AwsSignInRequiredApiError extends Schema.TaggedError<AwsSignInRequiredApiError>()(
+  "AwsSignInRequiredApiError",
+  {
+    ...commonErrorFields,
+    code: Schema.Literal("aws-sign-in-required")
+  },
+  { httpApiStatus: 422 }
+) {}
+
 /** A required local or provider service is temporarily unavailable. */
 export class ServiceUnavailableApiError extends Schema.TaggedError<ServiceUnavailableApiError>()(
   "ServiceUnavailableApiError",

@@ -86,9 +86,23 @@ export interface PortfolioReleasePresentation {
   readonly version: PortfolioSnapshot["releases"][number]["version"]
 }
 
+/** One source connection in the Overview's Sources panel: its provider, health in words and the reason or check time. */
+export interface PortfolioSourceRowPresentation {
+  readonly id: PortfolioSnapshot["plugins"][number]["pluginConnectionId"]
+  readonly name: string
+  readonly service: RlyService
+  readonly healthLabel: string
+  readonly healthTone: RlyStateTone
+  readonly detail: string | null
+  /** ISO time of the check the detail names, or null when the detail is a reason. */
+  readonly detailDateTime: string | null
+}
+
 export interface PortfolioPresentation {
   /** Providers with at least one enabled connection, in catalog order. Empty means nothing is connected. */
   readonly connectedProviders: ReadonlyArray<PortfolioSnapshot["plugins"][number]["providerId"]>
+  /** Every source connection with its own health, in catalog order. */
+  readonly sources: ReadonlyArray<PortfolioSourceRowPresentation>
   readonly generatedAt: string
   readonly generatedTime: string
   readonly releases: ReadonlyArray<PortfolioReleasePresentation>
@@ -165,6 +179,19 @@ const formattedTime = (timestamp: PortfolioSnapshot["generatedAt"]): string =>
     timeZoneName: "short"
   })
 
+/** A check time with its year, as the Sources panel shows it: "11 Oct 2026, 13:59 UTC". */
+const formattedCheckTime = (timestamp: PortfolioSnapshot["generatedAt"]): string =>
+  DateTime.formatUtc(timestamp, {
+    day: "numeric",
+    hour: "2-digit",
+    hour12: false,
+    locale: "en-GB",
+    minute: "2-digit",
+    month: "short",
+    timeZoneName: "short",
+    year: "numeric"
+  })
+
 const failureClassLabels = {
   authentication: "authentication",
   authorization: "authorization",
@@ -172,6 +199,7 @@ const failureClassLabels = {
   timeout: "timeout",
   "malformed-response": "malformed response",
   outage: "outage",
+  configuration: "configuration",
   unknown: "unknown failure"
 } satisfies Readonly<Record<PluginFailureClass, string>>
 
@@ -578,8 +606,28 @@ const connectedProvidersOf = (
   return catalogOrder.filter((providerId) => enabled.has(providerId))
 }
 
+const sourceRowOf = (plugin: PortfolioSnapshot["plugins"][number]): PortfolioSourceRowPresentation => {
+  const health = plugin.isEnabled ? healthPresentation(plugin.health) : DISABLED_SOURCE_HEALTH
+  const checkedAt = plugin.isEnabled && plugin.health !== null && health.message === null
+    ? plugin.health.checkedAt
+    : null
+  return {
+    detail: checkedAt === null ? health.message : `Checked ${formattedCheckTime(checkedAt)}`,
+    detailDateTime: checkedAt === null ? null : DateTime.formatIso(checkedAt),
+    healthLabel: health.label,
+    healthTone: health.tone,
+    id: plugin.pluginConnectionId,
+    name: plugin.displayName,
+    service: serviceForProvider(plugin.providerId)
+  }
+}
+
+const sourceRowsOf = (plugins: PortfolioSnapshot["plugins"]): ReadonlyArray<PortfolioSourceRowPresentation> =>
+  catalogOrder.flatMap((providerId) => plugins.filter((plugin) => plugin.providerId === providerId).map(sourceRowOf))
+
 export const presentPortfolio = (snapshot: PortfolioSnapshot): PortfolioPresentation => ({
   connectedProviders: connectedProvidersOf(snapshot.plugins),
+  sources: sourceRowsOf(snapshot.plugins),
   generatedAt: DateTime.formatIso(snapshot.generatedAt),
   generatedTime: formattedTime(snapshot.generatedAt),
   releases: snapshot.releases.map((release) => releasePresentation(release, snapshot.plugins, snapshot.workspaceId)),

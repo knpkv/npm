@@ -4,7 +4,11 @@ import { Fragment, type ReactElement, type ReactNode } from "react"
 import { Link, useLocation } from "react-router"
 import { firstPartyServiceIdentities } from "../../domain/firstPartyServices.js"
 import { serviceSetupPath } from "../services/serviceOnboarding.js"
-import type { PortfolioPresentation, PortfolioReleasePresentation } from "./presentPortfolio.js"
+import type {
+  PortfolioPresentation,
+  PortfolioReleasePresentation,
+  PortfolioSourceRowPresentation
+} from "./presentPortfolio.js"
 import type { PortfolioConnectionState, PortfolioLoadFailure } from "./livePortfolioState.js"
 import {
   filterPortfolioReleases,
@@ -120,12 +124,9 @@ const serviceLauncher = (
   </nav>
 )
 
-const listNames = (names: ReadonlyArray<string>): string =>
-  names.length <= 1 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`
-
 /**
- * The portfolio has no releases. With nothing connected that is a first run; with sources connected it
- * says what is connected and what still produces a release, so setup never looks undone.
+ * The portfolio has no releases. With nothing connected that is a first run; otherwise it says what still
+ * produces a release. Whether each source works is the Sources panel's job, so this copy never claims it.
  */
 const EmptyPortfolio = ({
   connectedProviders
@@ -147,9 +148,6 @@ const EmptyPortfolio = ({
       </section>
     )
   }
-  const connectedNames = firstPartyServiceIdentities
-    .filter(({ providerId }) => connectedProviders.includes(providerId))
-    .map(({ displayName }) => displayName)
   const remaining = firstPartyServiceIdentities.filter(({ providerId }) => !connectedProviders.includes(providerId))
   const jiraConnected = connectedProviders.includes("jira")
   return (
@@ -160,14 +158,55 @@ const EmptyPortfolio = ({
         </Text>
         <Text tone="secondary" variant="body-large">
           {jiraConnected
-            ? `${listNames(connectedNames)} connected. A release appears here once a Jira release version has items.`
-            : `${listNames(connectedNames)} connected. Releases come from Jira release versions: connect Jira to start tracking them, and this evidence attaches automatically.`}
+            ? "A release appears here once a Jira release version has items."
+            : "Releases come from Jira release versions: connect Jira to start tracking them, and this evidence attaches automatically."}
         </Text>
       </div>
       {remaining.length === 0 ? null : serviceLauncher(remaining, "More services to enable")}
     </section>
   )
 }
+
+/** Every source connection with its health in words and either the reason or when it was last checked. */
+const SourcesPanel = ({
+  sources
+}: {
+  readonly sources: ReadonlyArray<PortfolioSourceRowPresentation>
+}): ReactElement => (
+  <section aria-labelledby="portfolio-sources-title" className={styles.sources}>
+    <Text as="h2" className={styles.sourcesTitle} id="portfolio-sources-title" variant="card-title">
+      Sources <span className={styles.sourcesCount}>{sources.length}</span>
+    </Text>
+    <ul className={styles.sourceList}>
+      {sources.map((source) => (
+        <li className={styles.sourceRow} key={source.id}>
+          <span className={styles.sourceName}>
+            <ServiceMark name="hidden" service={source.service} />
+            <Text as="span" variant="label">
+              {source.name}
+            </Text>
+          </span>
+          <StateLabel label={source.healthLabel} size="compact" tone={source.healthTone} />
+          {source.detail === null ? null : source.detailDateTime === null ? (
+            <Text as="p" className={styles.sourceDetail} tone="secondary" variant="meta">
+              {source.detail}
+            </Text>
+          ) : (
+            <Text
+              as="time"
+              className={styles.sourceDetail}
+              dateTime={source.detailDateTime}
+              tone="secondary"
+              variant="meta"
+            >
+              {source.detail}
+            </Text>
+          )}
+        </li>
+      ))}
+    </ul>
+  </section>
+)
 
 const LoadingPortfolio = (): ReactElement => (
   <div className={styles.loading}>
@@ -456,12 +495,15 @@ export const PortfolioOverviewView = ({
       {state._tag === "loading" ? <LoadingPortfolio /> : null}
       {state._tag === "failed" ? <FailedPortfolio failure={state.failure} onRetry={onRetry} /> : null}
       {state._tag === "ready" ? (
-        <ReadyPortfolio
-          onPreviewRelease={onPreviewRelease}
-          portfolio={state.portfolio}
-          {...(renderRelease === undefined ? {} : { renderRelease })}
-          {...(transitionNamesForRelease === undefined ? {} : { transitionNamesForRelease })}
-        />
+        <div className={styles.readyLayout}>
+          <ReadyPortfolio
+            onPreviewRelease={onPreviewRelease}
+            portfolio={state.portfolio}
+            {...(renderRelease === undefined ? {} : { renderRelease })}
+            {...(transitionNamesForRelease === undefined ? {} : { transitionNamesForRelease })}
+          />
+          {state.portfolio.sources.length === 0 ? null : <SourcesPanel sources={state.portfolio.sources} />}
+        </div>
       ) : null}
     </div>
   </section>

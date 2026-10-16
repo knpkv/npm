@@ -14,7 +14,12 @@ import {
 } from "../../src/api/workspaceSettings.js"
 import { CsrfToken, SessionSummary } from "../../src/api/session.js"
 import { BrowserSessionProvider, useBrowserSession } from "../../src/client/BrowserSession.js"
-import { AppShell, canInspectWorkspaceSettings, canOpenCodeCommitPullRequest } from "../../src/client/AppShell.js"
+import {
+  AppShell,
+  canInspectWorkspaceSettings,
+  canOpenCodeCommitPullRequest,
+  shellWorkspaceId
+} from "../../src/client/AppShell.js"
 import { pairedBrowserDestination } from "../../src/client/PairPage.js"
 import { publishWorkspacePresentation } from "../../src/client/settings/workspaceSettingsSignals.js"
 import { useWorkspaceDefaultLandingPath } from "../../src/client/settings/useWorkspaceDefaultLanding.js"
@@ -147,6 +152,20 @@ describe("useWorkspaceDefaultLandingPath", () => {
     expect(canOpenCodeCommitPullRequest({ _tag: "authenticated", session: approver }, session.workspaceId)).toBe(true)
     expect(canOpenCodeCommitPullRequest({ _tag: "storage-unavailable", session }, session.workspaceId)).toBe(false)
     expect(canOpenCodeCommitPullRequest({ _tag: "authenticated", session }, foreignWorkspaceId)).toBe(false)
+  })
+
+  // A paired owner configuring connections on /services or /open-pr keeps the workspace; a visitor doesn't.
+  it("keeps the paired workspace on routes outside /w/, and the routed workspace wins", () => {
+    const reviewer = SessionSummary.make({ ...session, permission: "reviewer" })
+    const otherWorkspaceId = Schema.decodeSync(WorkspaceId)("01890f6f-6d6a-7cc0-98d2-000000000099")
+    expect(shellWorkspaceId("/services", { _tag: "authenticated", session })).toBe(session.workspaceId)
+    expect(shellWorkspaceId("/open-pr", { _tag: "authenticated", session })).toBe(session.workspaceId)
+    expect(shellWorkspaceId("/services", { _tag: "storage-unavailable", session })).toBe(session.workspaceId)
+    expect(shellWorkspaceId("/services", { _tag: "storage-unavailable", session: null })).toBeNull()
+    expect(shellWorkspaceId("/services", { _tag: "anonymous" })).toBeNull()
+    expect(shellWorkspaceId("/services", { _tag: "checking" })).toBeNull()
+    expect(shellWorkspaceId("/services", { _tag: "authenticated", session: reviewer })).toBeNull()
+    expect(shellWorkspaceId(`/w/${otherWorkspaceId}/items`, { _tag: "authenticated", session })).toBe(otherWorkspaceId)
   })
 
   it("loads shared active-work presentation for a reviewer", async () => {

@@ -21,6 +21,7 @@ export const PluginFailureClass = Schema.Literals([
   "timeout",
   "malformed-response",
   "outage",
+  "configuration",
   "unknown"
 ])
 

@@ -50,6 +50,63 @@
   gap: clamp(2.5rem, 6vw, 5rem);
 }
 
+/* Releases beside the Sources panel on wide screens; stacked, releases first, on narrow ones. */
+.readyLayout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(15rem, 17.5rem);
+  gap: 1.5rem;
+  align-items: start;
+}
+
+.sources {
+  display: grid;
+  gap: var(--rly-space-12);
+  padding: var(--rly-space-16);
+  border: 1px solid var(--rly-color-border-1);
+  border-radius: var(--rly-radius-group);
+  background: var(--rly-color-surface-1);
+}
+
+.sourcesTitle {
+  margin: 0;
+}
+
+.sourcesCount {
+  color: var(--rly-color-text-2);
+  font-weight: 430;
+}
+
+.sourceList {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sourceRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--rly-space-4) var(--rly-space-8);
+  align-items: center;
+  padding-block: var(--rly-space-12);
+}
+
+.sourceRow + .sourceRow {
+  border-block-start: 1px solid var(--rly-color-border-1);
+}
+
+.sourceName {
+  display: flex;
+  min-inline-size: 0;
+  align-items: center;
+  gap: var(--rly-space-8);
+}
+
+.sourceDetail {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
 .filters {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -269,6 +326,10 @@
 }
 
 @media (max-width: 48rem) {
+  .readyLayout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .root {
     gap: 4rem;
   }

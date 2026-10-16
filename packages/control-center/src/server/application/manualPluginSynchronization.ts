@@ -30,7 +30,7 @@ import type {
 } from "../persistence/repositories/pluginRuntimeModels.js"
 import { PluginStreamKey } from "../persistence/repositories/pluginRuntimeModels.js"
 import type { PluginFailure } from "../plugins/failures.js"
-import { pluginFailureClass, PluginMalformedResponseFailure } from "../plugins/failures.js"
+import { pluginFailureClass, pluginFailureSafeMessage, PluginMalformedResponseFailure } from "../plugins/failures.js"
 import { firstPartySyncStreamKey, supportsFirstPartySynchronization } from "../plugins/firstPartySynchronization.js"
 import { PluginConnection, type PluginConnectionV1 } from "../plugins/PluginConnection.js"
 import type { PluginConnectionMapV1 } from "../plugins/PluginConnectionMap.js"
@@ -173,7 +173,7 @@ const safeFailureMessage = (failure: PluginFailure): string => {
     case "PluginUnsupportedCapabilityFailure":
       return "Provider synchronization is not supported."
     case "PluginConfigurationFailure":
-      return "Provider configuration is incomplete."
+      return pluginFailureSafeMessage(failure)
     case "PluginUnknownOutcomeFailure":
       return "Provider synchronization outcome is unknown."
   }

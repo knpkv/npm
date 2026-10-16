@@ -102,7 +102,16 @@ export type PluginFailure =
 /** Stable health classification for a typed plugin failure. */
 export const pluginFailureClass = (
   failure: PluginFailure
-): "authentication" | "authorization" | "rate-limit" | "timeout" | "malformed-response" | "outage" | "unknown" => {
+):
+  | "authentication"
+  | "authorization"
+  | "rate-limit"
+  | "timeout"
+  | "malformed-response"
+  | "outage"
+  | "configuration"
+  | "unknown" =>
+{
   switch (failure._tag) {
     case "PluginAuthenticationFailure":
       return "authentication"
@@ -119,8 +128,18 @@ export const pluginFailureClass = (
     case "PluginCancellationFailure":
     case "PluginConflictFailure":
     case "PluginUnsupportedCapabilityFailure":
-    case "PluginConfigurationFailure":
     case "PluginUnknownOutcomeFailure":
       return "unknown"
+    case "PluginConfigurationFailure":
+      return "configuration"
   }
 }
+
+/**
+ * What to fix for a configuration failure, safe to show: it names the missing resource kind, never a
+ * provider locator. Syncing again can't fix these, so the sentence points at the connection instead.
+ */
+export const pluginFailureSafeMessage = (failure: PluginConfigurationFailure): string =>
+  failure.diagnosticCode === "codecommit-provider-object-not-found"
+    ? "The repository wasn’t found in this account and region. Check the repository name or region, then edit the connection."
+    : "This connection’s settings don’t match the provider. Check them, then edit the connection."

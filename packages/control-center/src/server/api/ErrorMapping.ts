@@ -6,6 +6,7 @@ import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Option from "effect/Option"
 
 import {
+  AwsSignInRequiredApiError,
   ConflictApiError,
   CorrelationId,
   ForbiddenApiError,
@@ -25,6 +26,7 @@ import type {
 } from "../auth/errors.js"
 import type { RequestSecurityError } from "../security/RequestSecurity.js"
 import type {
+  ApplicationAwsSignInRequired,
   ApplicationConflict,
   ApplicationInvalidRequest,
   ApplicationRateLimited,
@@ -187,6 +189,19 @@ export const mapApplicationConflict = (_error: ApplicationConflict) =>
 
 export const mapApplicationInvalidRequest = (_error: ApplicationInvalidRequest) =>
   Effect.flatMap(invalidRequestApiError, Effect.fail)
+
+/** The profile is not sent back: the browser already holds it, and the error stays secret-free. */
+export const mapApplicationAwsSignInRequired = (_error: ApplicationAwsSignInRequired) =>
+  Effect.flatMap(
+    withCorrelation((correlationId) =>
+      new AwsSignInRequiredApiError({
+        code: "aws-sign-in-required",
+        correlationId,
+        message: "The AWS profile needs a fresh sign-in."
+      })
+    ),
+    Effect.fail
+  )
 
 /** Mutable assembly of the optional budget field; the emitted error stays immutable. */
 interface RequestBudgetFields {
