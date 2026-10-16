@@ -46,6 +46,7 @@ import {
 import type {
   FleetJobConflictError,
   FleetOperationUnavailableError,
+  FleetRepositoryNotAbsoluteError,
   FleetService,
   FleetStoreBusyError,
   FleetStoreError,
@@ -316,6 +317,7 @@ type ApiError =
   | FleetJobNotFoundError
   | FleetOperationError
   | FleetOperationUnavailableError
+  | FleetRepositoryNotAbsoluteError
   | FleetStoreBusyError
   | FleetStoreError
   | FleetTransitionConflictError
@@ -456,6 +458,8 @@ const apiError = (error: ApiError): ApiErrorResponse => {
       return { status: 400, body: { error: error._tag, detail: error.detail } }
     case "FleetOperationUnavailableError":
       return { status: 422, body: { error: error._tag, kind: error.kind, detail: error.detail } }
+    case "FleetRepositoryNotAbsoluteError":
+      return { status: 400, body: { error: error._tag, repository: error.repository } }
     case "LanWorkPairingMalformedError":
       return { status: 400, body: { error: error._tag, detail: error.detail } }
     case "LanWorkSelectionMalformedError":

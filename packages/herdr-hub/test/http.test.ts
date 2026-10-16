@@ -5415,6 +5415,22 @@ esac
           )
           expect(accepted.status).toBe(202)
           expect(yield* fleet.history(10)).toHaveLength(1)
+
+          const relative = yield* Effect.promise(() =>
+            fetch(`${server.url}/v1/jobs`, {
+              body: JSON.stringify({
+                payload: { kind: "agent.delegate", mode: "work", prompt: "ship", repository: "nix" }
+              }),
+              headers: { "content-type": "application/json" },
+              method: "POST"
+            })
+          )
+          expect(relative.status).toBe(400)
+          expect(yield* Effect.promise(() => relative.json())).toEqual({
+            error: "FleetRepositoryNotAbsoluteError",
+            repository: "nix"
+          })
+          expect(yield* fleet.history(10)).toHaveLength(1)
         }).pipe(Effect.scoped),
       (store) =>
         Effect.sync(() => {

@@ -58,6 +58,15 @@ export class FleetOperationUnavailableError extends Schema.TaggedError<FleetOper
   { kind: Schema.String, detail: Schema.String }
 ) {}
 
+/**
+ * A delegated job named a repository that is not an absolute path. Hosts resolve it in their own
+ * filesystem, so a path relative to the submitter's working directory is refused before a job exists.
+ */
+export class FleetRepositoryNotAbsoluteError extends Schema.TaggedError<FleetRepositoryNotAbsoluteError>()(
+  "FleetRepositoryNotAbsoluteError",
+  { repository: Schema.String }
+) {}
+
 export class FleetOperationError extends Schema.TaggedError<FleetOperationError>()(
   "FleetOperationError",
   {

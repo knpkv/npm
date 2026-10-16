@@ -5,6 +5,7 @@ import {
   FleetJobNotFoundError,
   FleetOperationError,
   FleetOperationUnavailableError,
+  FleetRepositoryNotAbsoluteError,
   FleetStoreError,
   FleetTransitionConflictError,
   FleetValidationError
@@ -290,6 +291,9 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
         detail: `this host has no composed Work adapter for ${kind}`
       })
     }
+    if (request.payload.kind === "agent.delegate" && !request.payload.repository.startsWith("/")) {
+      return yield* new FleetRepositoryNotAbsoluteError({ repository: request.payload.repository })
+    }
     const timestamp = yield* now
     const approval = submissionRequiresApproval(request.payload, provenance)
     if (approval && options.approvalEnabled === false) {
@@ -571,17 +575,28 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
     return { accepted, current, lifecycle, transitions, workerStarted }
   })
 
-  const failOperation = Effect.fn("FleetService.failOperation")(function*(
-    latest: JobRecord,
-    error: FleetOperationError | FleetValidationError
-  ) {
+  /** `<cause tag>: <detail>`, falling back to the error's own tag when its cause carries none. */
+  const taggedDetail = (error: FleetOperationError | FleetValidationError): string => {
     const causeTag = error._tag === "FleetOperationError" &&
         Predicate.hasProperty(error.cause, "_tag") && Predicate.isString(error.cause._tag)
       ? error.cause._tag
       : error._tag
-    const detail = error._tag === "FleetOperationError" && error.disposition === "rejected"
-      ? summarizeHostOperationTerminalDetail(`${causeTag}: ${error.detail}`)
-      : error.detail
+    return `${causeTag}: ${error.detail}`
+  }
+
+  /**
+   * The failure summary for a durable job restart recovery could not resume. The coordinator may
+   * already hold its request, so the summary tells the reader to check before resubmitting.
+   */
+  const unresumableDetail = (cause: string): string =>
+    summarizeHostOperationTerminalDetail(
+      `hostd could not resume this job; the coordinator may still hold its request, so check it before resubmitting: ${cause}`
+    )
+
+  const failOperation = Effect.fn("FleetService.failOperation")(function*(
+    latest: JobRecord,
+    detail: string
+  ) {
     const timestamp = yield* now
     const failed: JobChange = latest.worker === undefined
       ? { status: "failed", result: null, error: detail }
@@ -698,7 +713,12 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
           updated(latest, terminalObservedAt, succeeded)
         )
       }
-      return yield* failOperation(latest, result.failure)
+      return yield* failOperation(
+        latest,
+        result.failure._tag === "FleetOperationError" && result.failure.disposition === "rejected"
+          ? summarizeHostOperationTerminalDetail(taggedDetail(result.failure))
+          : result.failure.detail
+      )
     }))
   })
 
@@ -942,25 +962,22 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
         const receipt = record.acceptedReceipt ?? null
         const durableOperation = record.durableOperation === true || receipt !== null
         if (durableOperation) {
-          if (
-            options.operations.recovery === undefined ||
-            record.payload.kind === "browser.mcp.recover"
-          ) {
-            return yield* new FleetOperationError({
-              cause: record.id,
-              detail: "durable fleet job has no recovery operation",
-              operation: "fleet.recover_durable"
-            })
+          // A job that cannot be resumed fails alone, so hostd keeps starting and recovers the rest.
+          // Only a rejection before acceptance proves nothing was committed; other failures say so.
+          const recovery = options.operations.recovery
+          if (recovery === undefined || record.payload.kind === "browser.mcp.recover") {
+            yield* failOperation(record, unresumableDetail("durable fleet job has no recovery operation"))
+            continue
           }
-          if (!options.operations.recovery.matches(record.payload)) {
-            return yield* new FleetOperationError({
-              cause: record.id,
-              detail: "durable fleet job no longer matches its recovery operation",
-              operation: "fleet.recover_durable"
-            })
+          if (!recovery.matches(record.payload)) {
+            yield* failOperation(
+              record,
+              unresumableDetail("durable fleet job no longer matches its recovery operation")
+            )
+            continue
           }
           const resumed = yield* makeOperationLifecycle(record, receipt !== null, true)
-          const result = yield* Effect.result(options.operations.recovery.resume(
+          const result = yield* Effect.result(recovery.resume(
             record.payload,
             resumed.workerStarted,
             record.id,
@@ -972,12 +989,15 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
           if (Result.isFailure(result)) {
             yield* resumed.transitions.withPermit(Effect.gen(function*() {
               const latest = yield* Ref.get(resumed.current)
-              if (
-                result.failure.disposition !== "rejected" ||
-                latest.acceptedReceipt !== null && latest.acceptedReceipt !== undefined
-              ) return yield* result.failure
               if (latest.status !== "running") return
-              const failed = yield* failOperation(latest, result.failure)
+              const committedNothing = result.failure.disposition === "rejected" &&
+                (latest.acceptedReceipt === null || latest.acceptedReceipt === undefined)
+              const failed = yield* failOperation(
+                latest,
+                committedNothing
+                  ? summarizeHostOperationTerminalDetail(taggedDetail(result.failure))
+                  : unresumableDetail(taggedDetail(result.failure))
+              )
               yield* Ref.set(resumed.current, failed)
             }))
           }
