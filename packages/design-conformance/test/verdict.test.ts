@@ -5,11 +5,11 @@ import * as Schema from "effect/Schema"
 import { PNG } from "pngjs"
 
 import { type Capture, RegionPixels } from "../src/browser.js"
-import { compareLiveRegions, comparePixels } from "../src/compare.js"
+import { compareLiveRegions, comparePixels, compareSnapshots } from "../src/compare.js"
 import { renderReport, reportSummary } from "../src/report.js"
 import { Manifest } from "../src/schema.js"
 import { verdict, waiverMatches } from "../src/verdict.js"
-import { failure, identity, manifest, manifestInput, waiver } from "./models.js"
+import { failure, identity, manifest, manifestInput, state, waiver } from "./models.js"
 
 const shot = { ...identity, touched: false, touchedRegions: [], outsidePixelsChanged: false, artifacts: {} }
 const before = DateTime.makeUnsafe("2026-10-17T23:59:59.999Z")
@@ -51,6 +51,48 @@ const capture = (nav: Uint8Array, content: Uint8Array): Capture => {
     }
   }
 }
+
+/** A reference region the product lacks, with the reference's own position between shared ones. */
+const withSummary = (live: Capture): Capture["snapshot"] => {
+  const [nav, content] = live.snapshot.regions
+  if (nav === undefined || content === undefined) throw new Error("fixture needs nav and content")
+  return { ...live.snapshot, regions: [nav, { ...nav, name: "summary", copy: "summary" }, content] }
+}
+const summaryState = { ...state, regions: ["nav", "summary", "content"] }
+
+it.effect("a region missing from the product is its own finding, not an order change, and stays inherited", () =>
+  Effect.sync(() => {
+    const white = pixels(255, 400)
+    const live = capture(white, white)
+    const reference = compareSnapshots(identity, summaryState, withSummary(live), live.snapshot)
+    expect(reference.filter((finding) => finding.region === "*")).toEqual([])
+    expect(reference.map((finding) => [finding.region, finding.rule])).toEqual([["summary", "geometry"]])
+    const changes = compareLiveRegions(identity, live, live, summaryState.regions)
+    expect(changes.touchedRegions).toEqual([])
+    const result = verdict(manifest, reference, [], [{ ...shot, ...changes }], before)
+    expect(result.passed).toBe(true)
+    expect(result.findings.map((finding) => [finding.region, finding.disposition])).toEqual([
+      ["summary", "report-only"]
+    ])
+  }))
+
+it.effect("a real reorder of shared regions still fails order and is required once the frame is touched", () =>
+  Effect.sync(() => {
+    const white = pixels(255, 400)
+    const base = capture(white, white)
+    const live: Capture = {
+      ...base,
+      snapshot: { ...base.snapshot, regions: [...base.snapshot.regions].reverse() }
+    }
+    const reference = compareSnapshots(identity, summaryState, withSummary(base), live.snapshot)
+    expect(reference).toContainEqual({ ...identity, region: "*", rule: "geometry", detail: "Region order differs" })
+    expect(reference.filter((finding) => finding.region === "summary")).toHaveLength(1)
+    const changes = compareLiveRegions(identity, base, live, summaryState.regions)
+    expect(changes.touchedRegions).toContain("*")
+    const result = verdict(manifest, reference, [], [{ ...shot, ...changes }], before)
+    expect(result.passed).toBe(false)
+    expect(result.findings.find((finding) => finding.region === "*")?.disposition).toBe("required")
+  }))
 
 it.effect("adding region tags over unchanged base pixels lists inherited drift without requiring it", () =>
   Effect.sync(() => {

@@ -193,7 +193,11 @@ export const compareSnapshots = (
   const refNames = ref.regions.map((region) => region.name)
   const liveNames = live.regions.map((region) => region.name)
   if (ref.overflow || live.overflow) fail("*", "geometry", "Horizontal page overflow")
-  if (refNames.join("|") !== liveNames.join("|")) fail("*", "geometry", "Region order or membership differs")
+  // Order is judged over regions both sides have; a missing or extra region is its own declared-region finding
+  // below, so it is never counted twice as an order change.
+  const shared = (names: ReadonlyArray<string>, other: ReadonlyArray<string>) =>
+    names.filter((name) => other.includes(name)).join("|")
+  if (shared(refNames, liveNames) !== shared(liveNames, refNames)) fail("*", "geometry", "Region order differs")
   for (const name of new Set([...state.regions, ...refNames, ...liveNames])) {
     const expected = ref.regions.filter((region) => region.name === name)
     const actual = live.regions.filter((region) => region.name === name)
