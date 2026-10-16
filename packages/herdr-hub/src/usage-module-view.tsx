@@ -164,6 +164,11 @@ const UsagePage = ({
     setEmpty?.(mount.active && empty)
     return () => setEmpty?.(false)
   }, [empty, mount.active, setEmpty])
+  const setGrouped = emptyChrome?.setGrouped
+  useEffect(() => {
+    setGrouped?.(mount.active && page === "limits")
+    return () => setGrouped?.(false)
+  }, [mount.active, page, setGrouped])
   const knownHosts = [
     ...new Set([
       ...(usageReading?.fleet.hosts.map((entry) => entry.host) ?? []),
@@ -244,6 +249,21 @@ const UsagePage = ({
     usage: usageState(filteredUsage, content.now),
     limits: limitsState(filteredLimits, content.now)
   }
+  /** The Usage page tabs; the shell's grouped header and the module page style them by class. */
+  const pageTabs = (className: string) => (
+    <nav aria-label="Usage pages" className={className} data-region="tabs">
+      {usageModule.pages.map((entry) => (
+        <a
+          key={entry.id}
+          href={moduleHref(usageModule, entry.id, decoded.success.search)}
+          aria-current={page === entry.id ? "page" : undefined}
+          data-module-page={entry.id}
+        >
+          {entry.label}
+        </a>
+      ))}
+    </nav>
+  )
   const toolReading = hostTotals.find((host) => host.host.toLowerCase() === breakdownHost?.toLowerCase())?.reading
   const toolFailure = shown?.fleet.failures.find((entry) => entry.host.toLowerCase() === breakdownHost?.toLowerCase())
   const toolTotal =
@@ -252,25 +272,20 @@ const UsagePage = ({
     const mast = (
       <div className="usage-empty-mast">
         <div className="usage-empty-titles">
-          <h1 id={headingId}>Usage</h1>
+          <div className="usage-empty-title" aria-hidden="true">
+            Usage
+          </div>
           <p>Usage details on {emptyChrome.host}. Account readings stay on this machine.</p>
         </div>
-        <nav aria-label="Usage pages" className="usage-empty-tabs" data-region="tabs">
-          {usageModule.pages.map((entry) => (
-            <a
-              key={entry.id}
-              href={moduleHref(usageModule, entry.id, decoded.success.search)}
-              aria-current={page === entry.id ? "page" : undefined}
-              data-module-page={entry.id}
-            >
-              {entry.label}
-            </a>
-          ))}
-        </nav>
+        {pageTabs("usage-empty-tabs")}
       </div>
     )
     return (
       <div className="usage-limits-empty" data-usage-page="limits" data-usage-empty="true" aria-label="Usage Limits">
+        {/* The page heading stays out of the header region, whose copy follows the design, and is read once. */}
+        <h1 id={headingId} className="usage-page-heading">
+          Usage
+        </h1>
         {emptyChrome.headerOutlet === null ? mast : createPortal(mast, emptyChrome.headerOutlet)}
         <section className="usage-empty-notice" data-region="notice">
           <UsageEmptyArt />
@@ -287,27 +302,45 @@ const UsagePage = ({
       </div>
     )
   }
+  const detailsMast = (
+    <div className="usage-details-mast">
+      <header className="usage-details-intro">
+        <h1 id={headingId}>Usage</h1>
+        <p>Limits and tokens, per host, tool and model</p>
+        {repaired ? <p>Some URL selectors were reset. Valid selections were kept.</p> : null}
+      </header>
+      {pageTabs("usage-details-tabs")}
+    </div>
+  )
+  // Limits groups its title and tabs with the shell header (the design's header region). The empty slot keeps the
+  // grid gap that followed the mast, so the controls stay where they were.
+  const mastOutlet = page === "limits" ? (emptyChrome?.headerOutlet ?? null) : null
   return (
     <div className="usage-details" data-usage-page={page}>
-      <div className="usage-details-mast">
-        <header className="usage-details-intro">
-          <h1 id={headingId}>Usage</h1>
-          <p>Limits and tokens, per host, tool and model</p>
-          {repaired ? <p>Some URL selectors were reset. Valid selections were kept.</p> : null}
-        </header>
-        <nav aria-label="Usage pages" className="usage-details-tabs" data-region="tabs">
-          {usageModule.pages.map((entry) => (
-            <a
-              key={entry.id}
-              href={moduleHref(usageModule, entry.id, decoded.success.search)}
-              aria-current={page === entry.id ? "page" : undefined}
-              data-module-page={entry.id}
-            >
-              {entry.label}
-            </a>
-          ))}
-        </nav>
-      </div>
+      {mastOutlet === null ? (
+        detailsMast
+      ) : (
+        <>
+          <h1 id={headingId} className="usage-page-heading">
+            Usage
+          </h1>
+          <div className="usage-details-mast-slot" />
+          {createPortal(
+            // The grouped header shares the empty layout's mast, which is drawn to the design's header region.
+            <div className="usage-empty-mast">
+              <div className="usage-empty-titles">
+                <div className="usage-empty-title" aria-hidden="true">
+                  Usage
+                </div>
+                <p>Limits and tokens, per host, tool and model</p>
+                {repaired ? <p>Some URL selectors were reset. Valid selections were kept.</p> : null}
+              </div>
+              {pageTabs("usage-empty-tabs")}
+            </div>,
+            mastOutlet
+          )}
+        </>
+      )}
       <div className="usage-details-controls">
         <label htmlFor={hostId}>
           Host

@@ -66,6 +66,11 @@ const render = async (reads: UsageModuleReads) => {
     )
   )
 }
+/** Level-one headings outside hidden module slots: what the shown page offers assistive technology. */
+const shownHeadings = () =>
+  [...document.querySelectorAll("h1")]
+    .filter((heading) => heading.closest("[hidden]") === null)
+    .map((heading) => heading.textContent)
 const click = async (href: string) => {
   const anchor = document.createElement("a")
   anchor.href = href
@@ -84,6 +89,8 @@ it("renders empty Limits with grouped header and a real tokens route, then resto
   expect(document.querySelector('.superapp-shell[data-usage-empty="true"]')).not.toBeNull()
   expect(document.querySelector(".usage-limits-empty")).not.toBeNull()
   expect(document.querySelector(".usage-empty")).toBeNull()
+  expect(shownHeadings()).toEqual(["Usage"])
+  expect(document.querySelector('[data-region="header"] h1')).toBeNull()
   const sidebar = document.querySelector(".superapp-sidebar")
   expect(sidebar?.getAttribute("data-region")).toBeNull()
   expect(sidebar?.querySelector('[data-region="nav"]')?.textContent).toBe("FleetUsage")
@@ -144,7 +151,7 @@ it("moves focus to the empty Limits tab when empty readings arrive after navigat
   await act(async () => {
     await new Promise((resolve) => window.requestAnimationFrame(resolve))
   })
-  expect(document.activeElement).toBe(document.querySelector('.usage-details-tabs a[data-module-page="limits"]'))
+  expect(document.activeElement).toBe(document.querySelector('[data-region="tabs"] a[data-module-page="limits"]'))
   await act(async () => {
     gate.resolve()
     await gate.promise
@@ -168,7 +175,7 @@ it("still hands focus over when removing the focused tab fires focusout", async 
   await act(async () => {
     await new Promise((resolve) => window.requestAnimationFrame(resolve))
   })
-  const ordinaryTab = document.querySelector('.usage-details-tabs a[data-module-page="limits"]')
+  const ordinaryTab = document.querySelector('[data-region="tabs"] a[data-module-page="limits"]')
   expect(document.activeElement).toBe(ordinaryTab)
   // happy-dom fires nothing on removal; dispatch Chromium's focusout while the tab is still focused and attached.
   await act(async () => {
@@ -193,7 +200,7 @@ it("does not pull focus to the tabs when empty readings arrive while focus rests
   await act(async () => {
     await new Promise((resolve) => window.requestAnimationFrame(resolve))
   })
-  const limitsTab = document.querySelector<HTMLAnchorElement>('.usage-details-tabs a[data-module-page="limits"]')
+  const limitsTab = document.querySelector<HTMLAnchorElement>('[data-region="tabs"] a[data-module-page="limits"]')
   expect(document.activeElement).toBe(limitsTab)
   // The reader clicks page text: the tab loses focus deliberately before the poll removes it.
   await act(async () => limitsTab?.blur())
@@ -207,6 +214,36 @@ it("does not pull focus to the tabs when empty readings arrive while focus rests
   })
   expect(document.querySelector(".usage-empty-tabs")).not.toBeNull()
   expect(document.activeElement).toBe(document.body)
+})
+
+/** The design's header is the mast, page title and tabs together, on every Limits state, in nav-first order. */
+const limitsStates: ReadonlyArray<readonly [string, () => UsageModuleReads["limits"]]> = [
+  ["readings", () => Effect.succeed({ fleet: limits, receivedAt: 1_000 })],
+  [
+    "a failed read",
+    () => Effect.fail(new FleetReadLoadError({ path: "/v1/connect/limits", reason: "network", cause: "offline" }))
+  ],
+  ["a pending read", () => Effect.never]
+]
+it.each(limitsStates)("groups the Limits header with its title and tabs for %s", async (_, limitsRead) => {
+  window.history.replaceState(null, "", "/?range=7d&timeZone=UTC#usage/limits")
+  await render({ usage: () => Effect.succeed({ fleet: usage, receivedAt: 1_000 }), limits: limitsRead() })
+  expect(document.querySelector('.superapp-shell[data-usage-empty="true"]')).toBeNull()
+  const regions = [...document.querySelectorAll("[data-region]")].map((region) => region.getAttribute("data-region"))
+  expect(regions.slice(0, 3)).toEqual(["nav", "header", "tabs"])
+  const header = document.querySelector('[data-region="header"]')
+  expect(header?.querySelector(".superapp-header")).not.toBeNull()
+  expect(header?.querySelector('[data-region="tabs"]')).not.toBeNull()
+  // One page heading, outside the header region whose copy the design checks; the visible title is not read twice.
+  expect(shownHeadings()).toEqual(["Usage"])
+  expect(header?.querySelector("h1")).toBeNull()
+  expect(header?.querySelector(".usage-empty-title")?.getAttribute("aria-hidden")).toBe("true")
+  expect(document.querySelector(".superapp-main .usage-details-tabs")).toBeNull()
+  // The grid gap that followed the mast in <main> still precedes the controls.
+  expect(document.querySelector(".superapp-main .usage-details > .usage-details-mast-slot")).not.toBeNull()
+  await click("/?range=7d&timeZone=UTC#usage/tokens")
+  expect(document.querySelector(".usage-empty-header-region")).toBeNull()
+  expect(document.querySelector('.superapp-header[data-region="header"]')).not.toBeNull()
 })
 
 /** Empty arrays with incomplete peer discovery are unknown evidence, not a successful empty state. */

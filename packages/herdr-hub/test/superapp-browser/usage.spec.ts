@@ -6,11 +6,13 @@ test("a retained Limits error has Retry only on the Limits page", async ({ page 
   await page.route(/\/v1\/connect\/limits(\?|$)/, (route) => route.fulfill({ status: 503, body: "unavailable" }))
   await page.goto("/?range=7d&timeZone=UTC#usage/limits")
   const module = page.locator("[data-module=\"usage\"]")
+  // On Limits the page tabs sit in the header outlet Usage owns; elsewhere they stay in its slot.
+  const usage = page.locator("[data-module=\"usage\"], [data-module-owner=\"usage\"]")
   await expect(module.getByRole("button", { name: "Retry", exact: true })).toBeVisible()
-  await module.getByRole("link", { name: "By tool", exact: true }).click()
+  await usage.getByRole("link", { name: "By tool", exact: true }).click()
   await expect(page.locator(".usage-by-tool-total")).toContainText("tokens")
   await expect(module.getByRole("button", { name: "Retry", exact: true })).toHaveCount(0)
-  await module.getByRole("link", { name: "Limits", exact: true }).click()
+  await usage.getByRole("link", { name: "Limits", exact: true }).click()
   await expect(module.getByRole("button", { name: "Retry", exact: true })).toBeVisible()
 })
 
@@ -113,7 +115,7 @@ test("empty readings that arrive after navigation move focus to the empty Limits
   try {
     await page.goto("/#fleet/approvals")
     await page.locator(".superapp-sidebar").getByRole("link", { name: "Usage", exact: true }).click()
-    await expect(page.locator(".usage-details-tabs [data-module-page=\"limits\"]")).toBeFocused()
+    await expect(page.locator("[data-region=\"tabs\"]:visible [data-module-page=\"limits\"]")).toBeFocused()
     release()
     await expect(page.locator(".usage-limits-empty")).toBeVisible()
     await expect(page.locator(".usage-empty-tabs [data-module-page=\"limits\"]")).toBeFocused()
@@ -341,9 +343,67 @@ test("By tool matches its installed masthead and toolbar geometry", async ({ pag
 })
 
 /** Limits shares the designed module mast and tabs while its shipped body stays unchanged. */
+/** The Limits header is the design's header region: its weight, tab type, phone inset and reading order. */
+test("the grouped Limits header follows the design's type, order and phone inset", async ({ page }, info) => {
+  await page.goto("/?range=7d&timeZone=UTC#usage/limits")
+  // Hidden module slots keep their own region tags; the shown page has one header.
+  const header = page.locator("[data-region=\"header\"]:visible")
+  const tabs = header.locator("[data-region=\"tabs\"]")
+  await expect(tabs.getByRole("link", { name: "Limits", exact: true })).toBeVisible()
+  await page.evaluate(() => document.fonts.ready)
+  await expect(header).toHaveCSS("font-weight", "430")
+  await expect(tabs).toHaveCSS("font-size", "16px")
+  await expect(tabs).toHaveCSS("line-height", "24px")
+  // The tab labels keep their own 15px type; only the region's inherited type follows the design.
+  await expect(tabs.getByRole("link", { name: "Limits", exact: true })).toHaveCSS("font-size", "15px")
+  if (info.project.name === "phone") {
+    // The phone header shows only the module title: no page heading or lead, and the tabs sit on the mast's inset.
+    await expect(header.locator(".usage-empty-titles")).toHaveCSS("display", "none")
+    await expect(tabs).toHaveCSS("background-color", "rgba(0, 0, 0, 0)")
+    await expect(tabs).toHaveCSS("padding-left", "0px")
+    await expect(tabs).toHaveCSS("padding-right", "0px")
+    const box = await tabs.boundingBox()
+    expect(box?.x).toBe(8)
+    expect(box?.width).toBe(374)
+  } else {
+    // Hosts and notifications read before Ask Relay, as in the design; the grid still places Ask Relay last.
+    const order = await header.locator(".superapp-header").evaluate((element) => {
+      const hosts = element.querySelector(".superapp-host")
+      const relay = element.querySelector(".fleet-shell-relay")
+      return hosts !== null && relay !== null
+        ? hosts.compareDocumentPosition(relay) & Node.DOCUMENT_POSITION_FOLLOWING
+        : -1
+    })
+    // Node.DOCUMENT_POSITION_FOLLOWING: the relay comes after the hosts control in document order.
+    expect(order).toBe(4)
+  }
+})
+
+/** Each Limits layout offers assistive technology exactly one page heading at every width, with no visible change. */
+const limitsLayouts: ReadonlyArray<"readings" | "empty"> = ["readings", "empty"]
+for (const layout of limitsLayouts) {
+  test(`${layout} Limits has one level-one heading`, async ({ page }) => {
+    if (layout === "empty") {
+      const now = Date.now()
+      await page.route(
+        /\/v1\/connect\/usage(\?|$)/,
+        (route) => route.fulfill({ json: usageFixture({ range: "7d", timeZone: "UTC" }, now, "empty-readings") })
+      )
+      await page.route(
+        /\/v1\/connect\/limits(\?|$)/,
+        (route) => route.fulfill({ json: limitsFixture(now, "empty-readings") })
+      )
+    }
+    await page.goto("/?range=7d&timeZone=UTC#usage/limits")
+    await expect(page.locator(layout === "empty" ? ".usage-limits-empty" : ".usage-tab-now")).toBeVisible()
+    await expect(page.getByRole("heading", { level: 1 })).toHaveCount(1)
+    await expect(page.getByRole("heading", { level: 1 })).toHaveAccessibleName("Usage")
+  })
+}
+
 test("Limits matches the shared Usage chrome geometry", async ({ page }, info) => {
   await page.goto("/#usage/limits")
-  const tabs = page.locator(".usage-details[data-usage-page=\"limits\"] .usage-details-tabs")
+  const tabs = page.locator("[data-region=\"header\"]:visible [data-region=\"tabs\"]")
   await expect(tabs).toBeVisible()
   const chrome = await tabs.evaluate((element) => {
     const link = element.querySelector("a")
@@ -355,7 +415,7 @@ test("Limits matches the shared Usage chrome geometry", async ({ page }, info) =
       top: bounds.top,
       height: bounds.height,
       headerBottom: document.querySelector(".superapp-header")?.getBoundingClientRect().bottom,
-      fontSize: getComputedStyle(element).fontSize,
+      fontSize: getComputedStyle(link).fontSize,
       padding: getComputedStyle(link).paddingInlineStart,
       viewport: innerWidth
     }
@@ -366,8 +426,9 @@ test("Limits matches the shared Usage chrome geometry", async ({ page }, info) =
   expect(chrome.fontSize).toBe("15px")
   expect(chrome.padding).toBe(info.project.name === "phone" ? "12px" : "4px")
   if (info.project.name === "phone") {
-    expect(chrome.left).toBe(0)
-    expect(chrome.right).toBe(chrome.viewport)
+    // The design's phone tabs sit on the mast's 8px inset.
+    expect(chrome.left).toBe(8)
+    expect(chrome.right).toBe(chrome.viewport - 8)
     expect(chrome.top).toBe(chrome.headerBottom)
   }
 })

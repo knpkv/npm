@@ -14,8 +14,8 @@
     }
   },
   "files": {
-    "fixture.json": "7122b4e6dbeb92558d057af00810cb5c5343858e06c4ddfe95ca7c28526f7d1c",
-    "screens/usage-limits.html": "02bbbdd7d08575b17b8d4d603fdac465247e6ebcdb59a392a8bd4cea03c45c31",
+    "fixture.json": "10a1527cfc9928244bce29825591b91ddf3495ad5981a4c691cfaa2b4ef98301",
+    "screens/usage-limits.html": "d5c607ba70ed899244a0f00e7915443e7c77caf8fc35981aec67c01c6b57ca5d",
     "screens/rly.css": "35e7a411e4fb4a422ebdaa33ef63e6d3a1480a5e8d30389d2b035025e636b1c6",
     "screens/chrome.css": "7a718ea0e12987880ca3bad6fe9de6810a49140ed72d80d311130269b583801d",
     "screens/relay-chef-modern.js": "f4f5051e6b8a3d0a365c2d042a1adba7f1e14c425825ca9e3ffc455e27bdcd47",
@@ -109,7 +109,7 @@
       "viewports": [390, 1280],
       "themes": ["light", "dark"],
       "status": "implemented",
-      "regions": ["nav", "header", "tabs", "notice", "action"],
+      "regions": ["nav", "header", "tabs", "action", "notice"],
       "source": "html",
       "ref": "screens/usage-limits.html"
     },
