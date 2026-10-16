@@ -336,23 +336,24 @@ const snapshotPublishCondition =
   "github.repository_owner == 'knpkv' && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main'))"
 const normalizedCondition = (condition) => (Predicate.isString(condition) ? condition.replace(/\s/gu, "") : "")
 
-// A job holding a GitHub App key may run only git and third-party actions: anything from the
-// workspace (a local action, a script, a package binary) could read the key from /proc.
+// A job holding a GitHub App key may run only `git apply` and third-party actions: anything from
+// the workspace (a local action, a script, a package binary) could read the key from /proc. The
+// exception is that one plain form: no environment prefix or git global option (`-c alias.x='!…'`
+// runs a shell), and no command or process substitution anywhere in the command.
 const holdsAppPrivateKey = (job, steps) =>
   steps.some((step) => usesAction(step?.uses, "actions/create-github-app-token")) ||
   referencedSecretNames(job).some((name) => name.endsWith("PRIVATE_KEY"))
-const runsOnlyGit = (source) =>
+const runsOnlyGitApply = (source) =>
   shellCommandSegments(source.replace(/\\\r?\n/gu, " ")).every((command) => {
+    if (/\$\(|`|[<>]\(/u.test(command)) return false
     const words = shellWords(command)
-    let executableIndex = 0
-    while (/^[A-Z_][A-Z0-9_]*=/iu.test(words[executableIndex] ?? "")) executableIndex += 1
-    return words.length === 0 || ["git", "'git'", '"git"'].includes(words[executableIndex] ?? "")
+    return words.length === 0 || (words[0] === "git" && words[1] === "apply")
   })
 const workspaceCodeStepIndex = (steps) =>
   steps.findIndex(
     (step) =>
       (Predicate.isString(step?.uses) && step.uses.startsWith("./")) ||
-      (step?.run !== undefined && !(Predicate.isString(step.run) && runsOnlyGit(step.run)))
+      (step?.run !== undefined && !(Predicate.isString(step.run) && runsOnlyGitApply(step.run)))
   )
 
 const localReusableWorkflowPath = (uses) => {
@@ -1370,6 +1371,30 @@ jobs:
     /step 2 runs workspace code/u
   )
   assert.deepEqual(validateWorkflowSecretBoundaries(appTokenAfterPatchOnly, "App token after patch fixture"), [])
+  for (const command of [
+    'git apply "$(node scripts/resolve-patch.mjs)"',
+    "git apply `node scripts/resolve-patch.mjs`",
+    "git apply <(node scripts/resolve-patch.mjs)",
+    "git -c alias.regenerate='!node scripts/regenerate.mjs' regenerate",
+    "GIT_EXEC_PATH=./bin git apply update.patch",
+    "git status"
+  ]) {
+    const workflow = parse(`
+on:
+  schedule:
+    - cron: "0 6 * * *"
+jobs:
+  open-pr:
+    steps:
+      - uses: actions/checkout@${"a".repeat(40)}
+      - run: ${JSON.stringify(command)}${appTokenSteps}
+`)
+    assert.match(
+      validateWorkflowSecretBoundaries(workflow, `App token after ${command}`).join("\n"),
+      /step 2 runs workspace code/u,
+      command
+    )
+  }
   assert.equal(validateWorkflowSecretBoundaries(invalid, "invalid fixture").length, 1)
   assert.equal(validateWorkflowSecretBoundaries(invalidJobOidcAuthority, "job OIDC fixture").length, 1)
   assert.equal(validateWorkflowSecretBoundaries(invalidInheritedOidcAuthority, "inherited OIDC fixture").length, 1)
