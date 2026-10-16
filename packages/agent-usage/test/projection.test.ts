@@ -49,6 +49,11 @@ describe("projectWindow", () => {
     })
   })
 
+  it("takes a reading exactly at the hour boundary over an older one", () => {
+    expect(fiveHour([at(90, known(10, now + HOUR)), at(60, known(40, now + HOUR)), at(0, known(60, now + HOUR))]))
+      .toEqual({ _tag: "LastsUntilReset", burnPerHour: 20, atReset: 80 })
+  })
+
   it("averages a burst over the hour instead of extrapolating it", () => {
     expect(fiveHour([at(60, known(40)), at(5, known(40)), at(0, known(50))])).toMatchObject({ burnPerHour: 10 })
   })
