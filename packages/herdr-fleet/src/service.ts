@@ -23,6 +23,7 @@ import {
   type CoreJobPayload,
   type HostDetails,
   HostOperationReceipt,
+  isSandboxJobKind,
   isWorkJobKind,
   JobActor,
   type JobHash,
@@ -31,6 +32,7 @@ import {
   type JobRequest,
   type LocalJobPayload,
   type PendingApprovalCursor,
+  type SandboxJobKind,
   type SubmissionProvenance,
   submissionRequiresApproval,
   workerObservationMaxLength,
@@ -140,6 +142,12 @@ export type HostOperations = {
    * means the host executes none.
    */
   readonly workJobKinds?: ReadonlySet<WorkJobKind>
+  /**
+   * Sandbox job kinds this host executes: declared only by the host that owns
+   * the sandbox pool. Submission refuses any other sandbox kind with
+   * `FleetOperationUnavailableError` before a job or approval request exists.
+   */
+  readonly sandboxJobKinds?: ReadonlySet<SandboxJobKind>
 }
 
 /** Persisted Fleet approval, distinct from the job's submitting actor. */
@@ -293,6 +301,12 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
     }
     if (request.payload.kind === "agent.delegate" && !request.payload.repository.startsWith("/")) {
       return yield* new FleetRepositoryNotAbsoluteError({ repository: request.payload.repository })
+    }
+    if (isSandboxJobKind(kind) && options.operations.sandboxJobKinds?.has(kind) !== true) {
+      return yield* new FleetOperationUnavailableError({
+        kind,
+        detail: `this host does not own a sandbox pool, so it cannot run ${kind}`
+      })
     }
     const timestamp = yield* now
     const approval = submissionRequiresApproval(request.payload, provenance)

@@ -386,6 +386,73 @@ export const WorkJobKind = Schema.Literals([
 export type WorkJobKind = typeof WorkJobKind.Type
 export const isWorkJobKind = Schema.is(WorkJobKind)
 
+const SandboxAccountId = Schema.String.check(Schema.isPattern(/^\d{12}$/))
+
+/**
+ * A lease holder is the job's authenticated actor, never a payload field: a
+ * submitted `holder` fails to decode, so no caller can act as another holder.
+ */
+const NoHolder = { holder: Schema.optionalKey(Schema.Never) }
+
+/** Lease the longest-idle pool account to the submitting actor. */
+export const SandboxLease = Schema.Struct({ kind: Schema.Literal("sandbox.lease"), ...NoHolder })
+export type SandboxLease = typeof SandboxLease.Type
+
+/** Add 8 hours to the actor's lease, up to 24 hours from its start. */
+export const SandboxExtend = Schema.Struct({
+  kind: Schema.Literal("sandbox.extend"),
+  accountId: SandboxAccountId,
+  ...NoHolder
+})
+export type SandboxExtend = typeof SandboxExtend.Type
+
+/** Hand the actor's lease back; the account is reset in the same job. */
+export const SandboxRelease = Schema.Struct({
+  kind: Schema.Literal("sandbox.release"),
+  accountId: SandboxAccountId,
+  ...NoHolder
+})
+export type SandboxRelease = typeof SandboxRelease.Type
+
+/**
+ * An approved reset outside a lease end: `Manual` empties an available or
+ * leased account, `Retry` re-runs a quarantined one. Released and Expired
+ * resets are hostd's own and cannot be submitted.
+ */
+export const SandboxReset = Schema.Struct({
+  kind: Schema.Literal("sandbox.reset"),
+  accountId: SandboxAccountId,
+  reason: Schema.Literals(["Manual", "Retry"])
+})
+export type SandboxReset = typeof SandboxReset.Type
+
+/** An approved lift of the account's budget stop. */
+export const SandboxBudgetLift = Schema.Struct({
+  kind: Schema.Literal("sandbox.budget.lift"),
+  accountId: SandboxAccountId
+})
+export type SandboxBudgetLift = typeof SandboxBudgetLift.Type
+
+/** Fleet job kinds for the sandbox pool; only the host that owns the pool executes them. */
+export const SandboxJobKind = Schema.Literals([
+  "sandbox.lease",
+  "sandbox.extend",
+  "sandbox.release",
+  "sandbox.reset",
+  "sandbox.budget.lift"
+])
+export type SandboxJobKind = typeof SandboxJobKind.Type
+export const isSandboxJobKind = Schema.is(SandboxJobKind)
+
+export const SandboxJobPayload = Schema.Union([
+  SandboxLease,
+  SandboxExtend,
+  SandboxRelease,
+  SandboxReset,
+  SandboxBudgetLift
+])
+export type SandboxJobPayload = typeof SandboxJobPayload.Type
+
 export const BrowserMcpRecover = Schema.Struct({
   kind: Schema.Literal("browser.mcp.recover")
 })
@@ -397,7 +464,8 @@ export const CoreJobPayload = Schema.Union([
   WorkAdmit,
   WorkRecover,
   WorkReassign,
-  WorkAbandon
+  WorkAbandon,
+  SandboxJobPayload
 ])
 export type CoreJobPayload = typeof CoreJobPayload.Type
 
@@ -741,6 +809,8 @@ export const requiresApproval = (payload: JobPayload): boolean =>
   payload.kind === "work.recover" ||
   payload.kind === "work.reassign" ||
   payload.kind === "work.abandon" ||
+  payload.kind === "sandbox.reset" ||
+  payload.kind === "sandbox.budget.lift" ||
   (payload.kind === "agent.delegate" && payload.mode === "work")
 
 /**
@@ -760,7 +830,7 @@ export const LocalListenerApprovalExemptKind = Schema.Literals(
     "nix.apply",
     "agent.delegate",
     "agent.message"
-  ] satisfies ReadonlyArray<Exclude<JobPayload["kind"], WorkJobKind>>
+  ] satisfies ReadonlyArray<Exclude<JobPayload["kind"], WorkJobKind | SandboxJobKind>>
 )
 export type LocalListenerApprovalExemptKind = typeof LocalListenerApprovalExemptKind.Type
 export const isLocalListenerApprovalExempt = Schema.is(LocalListenerApprovalExemptKind)

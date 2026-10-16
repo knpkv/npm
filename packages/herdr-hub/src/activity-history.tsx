@@ -119,7 +119,12 @@ const jobKindTitles = {
   "work.admit": "Prospectively admit existing Work owner",
   "work.recover": "Link existing unlinked Work goal",
   "work.reassign": "Reassign Work goal owner",
-  "work.abandon": "Abandon Work goal"
+  "work.abandon": "Abandon Work goal",
+  "sandbox.lease": "Lease a sandbox account",
+  "sandbox.extend": "Extend a sandbox lease",
+  "sandbox.release": "Release a sandbox account",
+  "sandbox.reset": "Reset a sandbox account",
+  "sandbox.budget.lift": "Lift a sandbox budget stop"
 } satisfies Record<JobPayload["kind"], string>
 
 /** Fleet's generic operation word, for summaries that deliberately omit the request payload. */
@@ -152,6 +157,16 @@ const safeSummary = (record: SanitizedJobRecord): string => {
       return `Reassigned ${record.payload.goalId} from ${record.payload.from.name} to ${record.payload.to.name}.`
     case "work.abandon":
       return `Abandon ${record.payload.goalId}: ${record.payload.reason}`
+    case "sandbox.lease":
+      return "Lease a sandbox account."
+    case "sandbox.extend":
+      return `Extend the lease on ${record.payload.accountId}.`
+    case "sandbox.release":
+      return `Release ${record.payload.accountId} and reset it.`
+    case "sandbox.reset":
+      return `${record.payload.reason} reset of ${record.payload.accountId}.`
+    case "sandbox.budget.lift":
+      return `Lift the budget stop on ${record.payload.accountId}.`
   }
 }
 

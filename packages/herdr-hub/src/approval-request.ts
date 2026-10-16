@@ -635,6 +635,32 @@ export const approvalRequestFor = (payload: JobPayloadType): ApprovalRequest => 
         kind: payload.kind,
         title: "Abandon one Work goal"
       }
+    case "sandbox.lease":
+      return { fields: [], kind: payload.kind, title: "Lease a sandbox account" }
+    case "sandbox.extend":
+      return {
+        fields: [field("accountId", "Sandbox account", payload.accountId)],
+        kind: payload.kind,
+        title: "Extend one sandbox lease"
+      }
+    case "sandbox.release":
+      return {
+        fields: [field("accountId", "Sandbox account", payload.accountId)],
+        kind: payload.kind,
+        title: "Release and empty one sandbox account"
+      }
+    case "sandbox.reset":
+      return {
+        fields: [field("accountId", "Sandbox account", payload.accountId), field("reason", "Reason", payload.reason)],
+        kind: payload.kind,
+        title: payload.reason === "Manual" ? "Empty one sandbox account" : "Retry one quarantined sandbox account"
+      }
+    case "sandbox.budget.lift":
+      return {
+        fields: [field("accountId", "Sandbox account", payload.accountId)],
+        kind: payload.kind,
+        title: "Lift one sandbox account's budget stop"
+      }
   }
 }
 
@@ -663,6 +689,11 @@ export const sanitizeJobPayload = (payload: JobPayloadType): JobPayloadType => {
     case "work.recover":
     case "work.reassign":
     case "work.abandon":
+    case "sandbox.lease":
+    case "sandbox.extend":
+    case "sandbox.release":
+    case "sandbox.reset":
+    case "sandbox.budget.lift":
       return payload
   }
 }

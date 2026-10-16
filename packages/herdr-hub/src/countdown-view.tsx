@@ -363,8 +363,9 @@ const requestIdentity = (item: PendingItem): string =>
 
 /** The sanitized primary target stays visible while full arguments remain folded. */
 const requestTarget = (payload: JobPayload, host: string): string =>
-  approvalRequestFor(payload).fields.find((field) => ["ref", "repository", "session", "goalId"].includes(field.key))
-    ?.value ?? host
+  approvalRequestFor(payload).fields.find((field) =>
+    ["ref", "repository", "session", "goalId", "accountId"].includes(field.key)
+  )?.value ?? host
 
 /** What approving this kind of request authorizes, beside its exact arguments. */
 const requestConsequence = (payload: JobPayload, host: string): string => {
@@ -389,6 +390,18 @@ const requestConsequence = (payload: JobPayload, host: string): string => {
       return `Reassigns this Work goal to the specified owner on ${host}.`
     case "work.abandon":
       return `Abandons this Work goal on ${host}.`
+    case "sandbox.lease":
+      return `Leases a sandbox account on ${host}.`
+    case "sandbox.extend":
+      return `Extends this sandbox lease on ${host}.`
+    case "sandbox.release":
+      return `Releases this sandbox account on ${host} and empties it.`
+    case "sandbox.reset":
+      return payload.reason === "Manual"
+        ? `Empties this sandbox account on ${host}, ending any lease on it.`
+        : `Retries emptying this quarantined sandbox account on ${host}.`
+    case "sandbox.budget.lift":
+      return `Lifts this sandbox account's budget stop on ${host}, so it can spend again.`
   }
 }
 
