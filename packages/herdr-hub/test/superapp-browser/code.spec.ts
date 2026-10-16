@@ -430,6 +430,22 @@ for (const reducedMotion of ["no-preference", "reduce"] satisfies ReadonlyArray<
   })
 }
 
+/** The preflight padding revert is Usage's alone: Code's Read again keeps its design's zero block padding, Usage's Retry the browser's. */
+test("preflight padding revert stays inside Usage views", async ({ page }) => {
+  await page.goto(route("pull-requests"))
+  const readAgain = page.locator(".code-host-controls").getByRole("button", { name: "Read again", exact: true })
+  await expect(readAgain).toBeVisible()
+  await expect(readAgain).toHaveCSS("padding-top", "0px")
+  await expect(readAgain).toHaveCSS("padding-bottom", "0px")
+
+  await page.route(/\/v1\/connect\/limits(\?|$)/, (request) => request.fulfill({ status: 503, body: "unavailable" }))
+  await page.goto("/?range=7d&timeZone=UTC#usage/limits")
+  const retry = page.locator("[data-module=\"usage\"]").getByRole("button", { name: "Retry", exact: true })
+  await expect(retry).toBeVisible()
+  await expect(retry).toHaveCSS("padding-top", "1px")
+  await expect(retry).toHaveCSS("padding-bottom", "1px")
+})
+
 /** HI2: consume the actual complete hub CSS, not an isolated component sheet or source declaration. */
 test("full-bundle preflight stays below Rly and Connect controls without removing intentional zero padding", async ({ page }) => {
   await page.goto(route("pull-requests"))

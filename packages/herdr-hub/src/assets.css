@@ -14,10 +14,11 @@
 @import "./blocked-connect.css";
 @import "./host-resources.css";
 
-/* Code review's bundled Tailwind preflight zeroes form-control padding hub-wide; give unstyled controls their browser
-   padding back below every Rly and Hub layer, so only component styles set it. */
+/* Code review's bundled Tailwind preflight zeroes form-control padding hub-wide. Usage's design keeps the browser's
+   padding, so Usage views (its module and the header outlet it owns) get it back below every Rly and Hub layer. Code
+   keeps the zero block padding its design was drawn with. */
 @layer hub-preflight {
-  :where(button, input, select, textarea) {
+  :where([data-module="usage"], [data-module-owner="usage"]) :where(button, input, select, textarea) {
     padding: revert;
   }
 }
