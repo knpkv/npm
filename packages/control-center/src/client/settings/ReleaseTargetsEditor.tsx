@@ -1,5 +1,4 @@
 import { Button, StateLabel, StatePanel, Text } from "@knpkv/rly/primitives"
-import * as DateTime from "effect/DateTime"
 import { useId, useRef, type ReactElement } from "react"
 
 import type {
@@ -10,6 +9,7 @@ import type {
 } from "../../domain/releaseTargets.js"
 import styles from "./WorkspaceSettingsPage.module.css"
 import { releaseTargetErrorMessage } from "./releaseTargetErrorMessage.js"
+import { formatCheckTime } from "../formatTime.js"
 
 export interface ReleaseTargetsEditorProps {
   readonly mappings: ReadonlyArray<PipelineReleaseTarget>
@@ -123,7 +123,7 @@ export const ReleaseTargetsEditor = ({
               ? "Unavailable"
               : pipeline?.observedAt === null || pipeline?.observedAt === undefined
                 ? "Stale · observation time unavailable"
-                : `Stale since ${DateTime.formatIso(pipeline.observedAt)}`
+                : `Stale since ${formatCheckTime(pipeline.observedAt)}`
         const patchRange = (previous: ReleaseEnvironmentRange, range: ReleaseEnvironmentRange) => {
           rangeKeys.current.set(range, rangeKey(previous))
           update(index, {

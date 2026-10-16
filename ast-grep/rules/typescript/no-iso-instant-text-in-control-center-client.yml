@@ -1,0 +1,31 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-iso-instant-text-in-control-center-client
+language: tsx
+severity: error
+message: "Show an instant with formatCheckTime; keep DateTime.formatIso for the <time dateTime> attribute"
+
+rule:
+  pattern: DateTime.formatIso($$$ARGS)
+  any:
+    - inside:
+        kind: template_substitution
+        stopBy: neighbor
+    - inside:
+        kind: jsx_expression
+        stopBy: neighbor
+        not:
+          inside:
+            kind: jsx_attribute
+            stopBy: neighbor
+
+files:
+  - "packages/control-center/src/client/**/*.ts"
+  - "packages/control-center/src/client/**/*.tsx"
+
+note: |
+  Readers see instants as "14 Jul 2026, 10:00 UTC" via `formatCheckTime` from
+  `src/client/formatTime.ts`, inside `<time dateTime={DateTime.formatIso(t)}>`. ISO text in a
+  template literal or a JSX child is a raw timestamp on screen. Cache keys, presenter
+  `dateTime` fields and transport payloads stay allowed. A raw `${utcValue}` interpolation
+  (a DateTime's toString) can't be recognized without types, so tests cover that shape.

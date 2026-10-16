@@ -15,6 +15,7 @@ import {
   browserSessionAdministrationTransport,
   type BrowserSessionAdministrationTransport
 } from "./browserSessionTransport.js"
+import { formatCheckTime } from "../formatTime.js"
 
 type SessionsState =
   | { readonly _tag: "failed" }
@@ -33,10 +34,10 @@ const sessionExpired = (session: SessionSummary, now = DateTime.nowUnsafe()): bo
 
 export const sessionStatus = (session: SessionSummary, now = DateTime.nowUnsafe()): string =>
   session.revokedAt !== null
-    ? `Revoked ${DateTime.formatIso(session.revokedAt)}`
+    ? `Revoked ${formatCheckTime(session.revokedAt)}`
     : sessionExpired(session, now)
-      ? `Expired · last used ${DateTime.formatIso(session.lastSeenAt)}`
-      : `Active · last used ${DateTime.formatIso(session.lastSeenAt)}`
+      ? `Expired · last used ${formatCheckTime(session.lastSeenAt)}`
+      : `Active · last used ${formatCheckTime(session.lastSeenAt)}`
 
 const copyPairingCode = async (pairingCode: string): Promise<boolean> => {
   try {
@@ -177,7 +178,7 @@ export const BrowserSessionsPanel = ({
             </Text>
             <Text as="p" tone="secondary">
               In the other browser, open <strong>/pair</strong> and paste this code before{" "}
-              {DateTime.formatIso(issued.expiresAt)}.
+              <time dateTime={DateTime.formatIso(issued.expiresAt)}>{formatCheckTime(issued.expiresAt)}</time>.
             </Text>
           </div>
           <code className={styles.code}>{issued.pairingCode}</code>

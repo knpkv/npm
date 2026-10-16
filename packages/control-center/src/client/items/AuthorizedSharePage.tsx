@@ -17,6 +17,7 @@ import { useBrowserSession } from "../BrowserSession.js"
 import { browserAuthorizedShareTransport, type AuthorizedShareTransport } from "./authorizedShareTransport.js"
 import { serviceFor, statusFor, statusPresentation } from "./presentWorkspaceItems.js"
 import styles from "./AuthorizedSharePage.module.css"
+import { formatCheckTime } from "../formatTime.js"
 
 type AuthorizedSharePageState =
   | { readonly _tag: "idle" }
@@ -193,11 +194,19 @@ export const AuthorizedSharePage = ({
           </div>
           <div>
             <dt>Observed</dt>
-            <dd>{DateTime.formatIso(state.resolution.item.recordedAt)}</dd>
+            <dd>
+              <time dateTime={DateTime.formatIso(state.resolution.item.recordedAt)}>
+                {formatCheckTime(state.resolution.item.recordedAt)}
+              </time>
+            </dd>
           </div>
           <div>
             <dt>Expires</dt>
-            <dd>{DateTime.formatIso(state.resolution.share.expiresAt)}</dd>
+            <dd>
+              <time dateTime={DateTime.formatIso(state.resolution.share.expiresAt)}>
+                {formatCheckTime(state.resolution.share.expiresAt)}
+              </time>
+            </dd>
           </div>
         </dl>
       </Surface>

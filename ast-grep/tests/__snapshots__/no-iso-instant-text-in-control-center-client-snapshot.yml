@@ -1,0 +1,24 @@
+id: no-iso-instant-text-in-control-center-client
+snapshots:
+  ? |
+    const status = `Stale since ${DateTime.formatIso(pipeline.observedAt)}`
+  : labels:
+      - source: DateTime.formatIso(pipeline.observedAt)
+        style: primary
+        start: 30
+        end: 69
+      - source: ${DateTime.formatIso(pipeline.observedAt)}
+        style: secondary
+        start: 28
+        end: 70
+  ? |
+    const view = <dd>{DateTime.formatIso(share.expiresAt)}</dd>
+  : labels:
+      - source: DateTime.formatIso(share.expiresAt)
+        style: primary
+        start: 18
+        end: 53
+      - source: "{DateTime.formatIso(share.expiresAt)}"
+        style: secondary
+        start: 17
+        end: 54

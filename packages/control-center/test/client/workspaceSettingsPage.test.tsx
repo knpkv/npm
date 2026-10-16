@@ -329,7 +329,7 @@ it("disables only stale pipeline edits and keeps stale mapping removal available
   )
   expect(host.querySelector<HTMLInputElement>('input[value="Staging"]')?.disabled).toBe(true)
   expect(host.querySelector<HTMLInputElement>('input[value="Production"]')?.disabled).toBe(false)
-  expect(host.textContent).toContain("Stale since 2026-07-30T09:00:00.000Z")
+  expect(host.textContent).toContain("Stale since 30 Jul 2026, 09:00 UTC")
   const remove = Array.from(host.querySelectorAll("button")).find(
     (button) => button.textContent === "Remove pipeline fixture-stale"
   )

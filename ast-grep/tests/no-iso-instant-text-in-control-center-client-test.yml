@@ -1,0 +1,13 @@
+id: no-iso-instant-text-in-control-center-client
+valid:
+  - |
+    const view = <time dateTime={DateTime.formatIso(instant)}>{formatCheckTime(instant)}</time>
+  - |
+    const key = JSON.stringify([DateTime.formatIso(connection.updatedAt), connection.isEnabled])
+  - |
+    const presentation = { dateTime: DateTime.formatIso(value), label: formatCheckTime(value) }
+invalid:
+  - |
+    const view = <dd>{DateTime.formatIso(share.expiresAt)}</dd>
+  - |
+    const status = `Stale since ${DateTime.formatIso(pipeline.observedAt)}`
