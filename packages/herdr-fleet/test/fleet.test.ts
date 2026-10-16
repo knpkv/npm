@@ -176,15 +176,17 @@ describe("fleet local authority", () => {
   }
 
   for (const acceptance of ["none", "run", "resume"]) {
-    it.effect(`preserves uncertain recovery and accepted receipts, acceptance=${acceptance}`, () => {
+    it.effect(`fails only the job whose recovery fails, acceptance=${acceptance}`, () => {
       const root = mkdtempSync(join(tmpdir(), "herdr-recovery-disposition-test-"))
+      const ids = ["job-broken-recovery", "job-healthy-recovery"]
+      const resumed: Array<string> = []
       return Effect.acquireUseRelease(
         JobStore.open(join(root, "jobs.sqlite")),
         (store) =>
           Effect.gen(function*() {
             const errorFields = {
-              cause: "transport lost",
-              detail: "submission outcome unknown",
+              cause: { _tag: "GitCommandFailed" },
+              detail: "git -C nix exited 128",
               operation: "test.resume"
             }
             const failure = acceptance === "none"
@@ -193,15 +195,14 @@ describe("fleet local authority", () => {
             const service = yield* makeFleetService({
               approvalEnabled: false,
               host: "SER8",
-              id: Effect.succeed("job-accepted-disposition"),
+              id: Effect.sync(() => ids.shift() ?? "job-unexpected"),
               now: Effect.succeed(1_000),
               operations: {
                 ...operations,
-                run: (_payload, _workerStarted, _jobId, _actor, lifecycle) =>
+                run: (_payload, _workerStarted, jobId, _actor, lifecycle) =>
                   Effect.gen(function*() {
-                    if (acceptance === "run") {
+                    if (acceptance === "run" && jobId === "job-broken-recovery") {
                       yield* lifecycle.accepted("receipt")
-                      return yield* failure
                     }
                     return yield* new FleetOperationError({
                       cause: "transport lost",
@@ -211,8 +212,10 @@ describe("fleet local authority", () => {
                   }),
                 recovery: {
                   matches: () => true,
-                  resume: (_payload, _workerStarted, _jobId, _actor, _receipt, lifecycle) =>
+                  resume: (_payload, _workerStarted, jobId, _actor, _receipt, lifecycle) =>
                     Effect.gen(function*() {
+                      resumed.push(jobId)
+                      if (jobId !== "job-broken-recovery") return
                       if (acceptance === "resume") yield* lifecycle.accepted("receipt")
                       return yield* failure
                     })
@@ -220,13 +223,20 @@ describe("fleet local authority", () => {
               },
               store
             })
-            const queued = yield* service.submit({ payload: { kind: "nix.check" } }, "owner")
-            yield* Effect.result(service.run(queued.id))
-            expect(yield* Effect.result(service.recover())).toMatchObject({ failure: { operation: "test.resume" } })
-            expect(yield* service.get(queued.id)).toMatchObject({
-              status: "running",
-              acceptedReceipt: acceptance === "none" ? null : "receipt"
+            const broken = yield* service.submit({ payload: { kind: "nix.check" } }, "owner")
+            const healthy = yield* service.submit({ payload: { kind: "nix.check" } }, "owner")
+            yield* Effect.result(service.run(broken.id))
+            yield* Effect.result(service.run(healthy.id))
+            expect(yield* service.recover()).toEqual([])
+            expect(resumed).toEqual([broken.id, healthy.id])
+            expect(yield* service.get(broken.id)).toMatchObject({
+              status: "failed",
+              acceptedReceipt: acceptance === "none" ? null : "receipt",
+              error: summarizeHostOperationTerminalDetail(
+                "hostd could not resume this job; the coordinator may still hold its request, so check it before resubmitting: GitCommandFailed: git -C nix exited 128"
+              )
             })
+            expect(yield* service.get(healthy.id)).toMatchObject({ status: "running", error: null })
           }),
         (store) =>
           Effect.sync(() => {
@@ -236,6 +246,114 @@ describe("fleet local authority", () => {
       ).pipe(provideNodeServices)
     })
   }
+
+  for (const composition of ["no recovery", "no longer matches"]) {
+    it.effect(`fails only the durable job hostd has no recovery for, ${composition}`, () => {
+      const root = mkdtempSync(join(tmpdir(), "herdr-recovery-composition-test-"))
+      const ids = ["job-orphaned", "job-healthy", "job-queued"]
+      const resumed: Array<string> = []
+      return Effect.acquireUseRelease(
+        JobStore.open(join(root, "jobs.sqlite")),
+        (store) =>
+          Effect.gen(function*() {
+            const first = yield* makeFleetService({
+              approvalEnabled: false,
+              host: "SER8",
+              id: Effect.sync(() => ids.shift() ?? "job-unexpected"),
+              now: Effect.succeed(1_000),
+              operations: {
+                ...operations,
+                recovery: { matches: () => true, resume: () => Effect.void },
+                run: () => new FleetOperationError({ cause: "lost", detail: "uncertain", operation: "test.run" })
+              },
+              store
+            })
+            const orphaned = yield* first.submit({ payload: { kind: "nix.check" } }, "owner")
+            const healthy = yield* first.submit(
+              { payload: { kind: "nix.apply", ref: "main" } },
+              "owner",
+              "verified_local_listener"
+            )
+            const queued = yield* first.submit({ payload: { kind: "nix.check" } }, "owner")
+            yield* Effect.result(first.run(orphaned.id))
+            yield* Effect.result(first.run(healthy.id))
+            const restarted = yield* makeFleetService({
+              approvalEnabled: false,
+              host: "SER8",
+              now: Effect.succeed(2_000),
+              operations: composition === "no recovery" ? operations : {
+                ...operations,
+                recovery: {
+                  matches: (payload) => payload.kind !== "nix.check",
+                  resume: (_payload, _workerStarted, jobId) => Effect.sync(() => void resumed.push(jobId))
+                }
+              },
+              store
+            })
+            expect(yield* restarted.recover()).toEqual([queued.id])
+            const reason = composition === "no recovery"
+              ? "durable fleet job has no recovery operation"
+              : "durable fleet job no longer matches its recovery operation"
+            expect(yield* restarted.get(orphaned.id)).toMatchObject({
+              status: "failed",
+              error: summarizeHostOperationTerminalDetail(
+                `hostd could not resume this job; the coordinator may still hold its request, so check it before resubmitting: ${reason}`
+              )
+            })
+            if (composition === "no recovery") {
+              expect(yield* restarted.get(healthy.id)).toMatchObject({ status: "failed" })
+            } else {
+              expect(resumed).toEqual([healthy.id])
+              expect(yield* restarted.get(healthy.id)).toMatchObject({ status: "running", error: null })
+            }
+          }),
+        (store) =>
+          Effect.sync(() => {
+            store.close()
+            rmSync(root, { force: true, recursive: true })
+          })
+      ).pipe(provideNodeServices)
+    })
+  }
+
+  it.effect("refuses a delegated repository that is not an absolute path before storing a job", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-relative-repository-test-"))
+    return Effect.acquireUseRelease(
+      JobStore.open(join(root, "jobs.sqlite")),
+      (store) =>
+        Effect.gen(function*() {
+          const service = yield* makeFleetService({
+            approvalEnabled: true,
+            host: "SER8",
+            id: Effect.succeed("job-relative-repository"),
+            nonce: Effect.succeed("relative-approval"),
+            now: Effect.succeed(1_000),
+            operations,
+            store
+          })
+          for (const repository of ["nix", "./nix", "~/nix"]) {
+            const refused = yield* Effect.result(service.submit({
+              payload: { kind: "agent.delegate", mode: "work", prompt: "ship", repository }
+            }, "owner"))
+            expect(refused).toMatchObject({
+              failure: { _tag: "FleetRepositoryNotAbsoluteError", repository }
+            })
+          }
+          expect(yield* Effect.result(service.get("job-relative-repository"))).toMatchObject({
+            failure: { _tag: "FleetJobNotFoundError" }
+          })
+          const accepted = yield* service.submit({
+            payload: { kind: "agent.delegate", mode: "work", prompt: "ship", repository: "/repo" }
+          }, "owner")
+          expect(accepted.status).toBe("pending_approval")
+        }),
+      (store) =>
+        Effect.sync(() => {
+          store.close()
+          rmSync(root, { force: true, recursive: true })
+        })
+    ).pipe(provideNodeServices)
+  })
 
   it.effect("bounds rejected failure details and retains the error tag when no cause tag exists", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-rejected-detail-test-"))
