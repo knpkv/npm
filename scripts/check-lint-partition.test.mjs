@@ -82,6 +82,7 @@ test("default lint retains every original check and both CI partitions", () => {
     "node --test scripts/check-test-typecheck-coverage.test.mjs",
     "node --test scripts/check-browser-partition.test.mjs",
     "node --test scripts/precheck.test.mjs",
+    "node --test scripts/openapi-spec-diff.test.ts",
     "tsc -p scripts/tsconfig.local-tools.json",
     "node --test scripts/build-typescript.test.mjs scripts/run-eslint.test.mjs"
   ])

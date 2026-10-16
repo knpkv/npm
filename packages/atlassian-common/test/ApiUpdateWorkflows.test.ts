@@ -103,11 +103,47 @@ const patchGuidanceDiagnostics = (
 // Generated changesets must not reuse a fixed path: the workflow regenerates the PR branch
 // from the base, so a fixed name overwrites a still-pending changeset from an earlier update.
 const changesetPathDiagnostics = (source: string): ReadonlyArray<string> =>
-  [...source.matchAll(/cat\s+>\s+(\.changeset\/[^\s]+\.md)/gu)].flatMap(([, changesetPath]) =>
+  [...source.matchAll(/(?:cat\s+>|--out)\s+"?(\.changeset\/[^\s"]+\.md)/gu)].flatMap(([, changesetPath]) =>
     changesetPath !== undefined && changesetPath.includes("${GITHUB_RUN_ID}")
       ? []
       : [`Generated changeset ${changesetPath ?? ""} must be unique per workflow run`]
   )
+
+// A hand-written release level ships breaking spec changes as minor: the client's changeset
+// must come from the spec diff, and the pull request must show what decided it.
+const specDiffReleaseDiagnostics = (source: string, client: string): ReadonlyArray<string> => {
+  const workflow: unknown = parse(source)
+  if (!isRecord(workflow) || !isRecord(workflow.jobs)) return ["API update workflow could not be inspected"]
+  const jobs = Object.entries(workflow.jobs).flatMap(([name, job]) =>
+    isRecord(job) && Array.isArray(job.steps) ? [{ name, job, steps: job.steps.filter(isRecord) }] : []
+  )
+  const writing =
+    jobs.flatMap(({ job, name, steps }) =>
+      steps.flatMap((step) =>
+        Predicate.isString(step.run) && step.run.includes("node scripts/openapi-changeset.ts")
+          ? [{ name, job, step, run: step.run.replace(/\\\n\s*/gu, " ") }]
+          : []
+      )
+    )[0]
+  if (writing === undefined) return [`${client} release must be written by scripts/openapi-changeset.ts`]
+  const exported = (output: string) =>
+    isRecord(writing.job.outputs) && Predicate.isString(writing.job.outputs[output]) &&
+    Predicate.isString(writing.step.id) &&
+    writing.job.outputs[output].replace(/\s/gu, "") === `\${{steps.${writing.step.id}.outputs.${output}}}`
+  const bodies = jobs.flatMap(({ steps }) =>
+    steps.flatMap((step) => isRecord(step.with) && Predicate.isString(step.with.body) ? [step.with.body] : [])
+  )
+  return [
+    ...(/cat\s+>\s+\.changeset\//u.test(source) ? ["Generated changesets must not hard-code a release level"] : []),
+    ...(writing.run.includes(`--package ${client}`) ? [] : [`openapi-changeset.ts must classify ${client}`]),
+    ...(/--github-output "\$GITHUB_OUTPUT"/u.test(writing.run) && exported("release-notes")
+      ? []
+      : ["The spec diff's release notes must be exported from the detection job"]),
+    ...(bodies.some((body) => body.includes(`\${{ needs.${writing.name}.outputs.release-notes }}`))
+      ? []
+      : ["The update pull request body must include the spec diff's release notes"])
+  ]
+}
 
 // A regenerated-client-only diff is generator churn, not an upstream change: the
 // detection step must compare only the workflow's own client `specsDir`, and the
@@ -364,14 +400,75 @@ jobs:
     expect(
       changesetPathDiagnostics("run: cat > .changeset/clockify-api-spec-update-${GITHUB_RUN_ID}.md <<'CHANGESET'")
     ).toEqual([])
+    expect(changesetPathDiagnostics(`--out ".changeset/clockify-api-spec-update.md"`)).toEqual([
+      "Generated changeset .changeset/clockify-api-spec-update.md must be unique per workflow run"
+    ])
+    expect(changesetPathDiagnostics(`--out ".changeset/clockify-api-spec-update-\${GITHUB_RUN_ID}.md"`)).toEqual([])
   })
 
   it.effect("writes every generated changeset to a per-run path", () =>
     Effect.gen(function*() {
       for (const name of ["clockify-api-update.yml", "jira-api-update.yml", "confluence-api-update.yml"]) {
         const source = yield* loadWorkflow(name)
-        expect(source).toMatch(/cat\s+>\s+\.changeset\//u)
+        expect(source).toMatch(/--out\s+"\.changeset\//u)
         expect(changesetPathDiagnostics(source)).toEqual([])
+      }
+    }))
+
+  it("rejects a hand-written release level and accepts one taken from the spec diff", () => {
+    const workflow = (changeset: string, outputs: string, body: string) => `
+jobs:
+  check-spec:
+    outputs:
+${outputs}
+    steps:
+      - name: Create changeset
+        id: changeset
+        run: |
+${changeset}
+  open-pr:
+    needs: check-spec
+    steps:
+      - name: Create pull request
+        with:
+          body: |
+            ${body}
+`
+    const generated = `          node scripts/openapi-changeset.ts \\
+            --package @knpkv/jira-api-client \\
+            --spec packages/jira-api-client/.specs/jira-v3.json \\
+            --out ".changeset/jira-\${GITHUB_RUN_ID}.md" \\
+            --github-output "$GITHUB_OUTPUT"`
+    const outputs = "      release-notes: ${{ steps.changeset.outputs.release-notes }}"
+    const body = "${{ needs.check-spec.outputs.release-notes }}"
+    const client = "@knpkv/jira-api-client"
+    expect(specDiffReleaseDiagnostics(workflow(generated, outputs, body), client)).toEqual([])
+    expect(
+      specDiffReleaseDiagnostics(
+        workflow(
+          `          cat > .changeset/jira-\${GITHUB_RUN_ID}.md <<'CHANGESET'\n          ---\n          "${client}": minor\n          ---\n          CHANGESET`,
+          outputs,
+          body
+        ),
+        client
+      )
+    ).toEqual([`${client} release must be written by scripts/openapi-changeset.ts`])
+    expect(specDiffReleaseDiagnostics(workflow(generated, outputs, body), "@knpkv/jira-cli")).toEqual([
+      "openapi-changeset.ts must classify @knpkv/jira-cli"
+    ])
+    expect(specDiffReleaseDiagnostics(workflow(generated, "      updated: x", body), client)).toEqual([
+      "The spec diff's release notes must be exported from the detection job"
+    ])
+    expect(specDiffReleaseDiagnostics(workflow(generated, outputs, "Review the client."), client)).toEqual([
+      "The update pull request body must include the spec diff's release notes"
+    ])
+  })
+
+  it.effect("takes every generated client's release from the spec diff", () =>
+    Effect.gen(function*() {
+      for (const client of ["clockify", "jira", "confluence"]) {
+        const source = yield* loadWorkflow(`${client}-api-update.yml`)
+        expect(specDiffReleaseDiagnostics(source, `@knpkv/${client}-api-client`)).toEqual([])
       }
     }))
 

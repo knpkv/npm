@@ -21,6 +21,8 @@ jobs:
     timeout-minutes: 15
     outputs:
       updated: ${{ steps.check.outputs.updated }}
+      bump: ${{ steps.changeset.outputs.bump }}
+      release-notes: ${{ steps.changeset.outputs.release-notes }}
 
     steps:
       - name: Checkout
@@ -60,18 +62,19 @@ jobs:
           pnpm --filter @knpkv/confluence-to-markdown check
           pnpm --filter @knpkv/confluence-to-markdown test
 
+      # The release follows the spec diff: removed or incompatible contract is major.
       - name: Create changeset
+        id: changeset
         if: steps.check.outputs.updated == 'true'
         run: |
-          mkdir -p .changeset
-          cat > .changeset/confluence-api-spec-update-${GITHUB_RUN_ID}.md <<'CHANGESET'
-          ---
-          "@knpkv/confluence-api-client": minor
-          "@knpkv/confluence-to-markdown": patch
-          ---
-
-          Update the generated Confluence API clients from Atlassian's latest OpenAPI specifications.
-          CHANGESET
+          node scripts/openapi-changeset.ts \
+            --package @knpkv/confluence-api-client \
+            --spec packages/confluence-api-client/.specs/confluence-v1.json \
+            --spec packages/confluence-api-client/.specs/confluence-v2.json \
+            --patch @knpkv/confluence-to-markdown \
+            --summary "Update the generated Confluence API clients from Atlassian's latest OpenAPI specifications." \
+            --out ".changeset/confluence-api-spec-update-${GITHUB_RUN_ID}.md" \
+            --github-output "$GITHUB_OUTPUT"
 
       - name: Export update patch
         if: steps.check.outputs.updated == 'true'
@@ -139,10 +142,13 @@ jobs:
             committed JSON patches, regenerated both Schema-backed Effect
             clients, and built and tested their confluence-to-markdown consumer.
 
-            Review the published generated exports before merging. The client
-            changeset defaults to minor; use major for removed exports or
-            incompatible schemas in this stable package. Patch is appropriate
-            only when the generated public contract is unchanged.
+            ${{ needs.check-spec.outputs.release-notes }}
+
+            The release comes from a diff of the previous and updated specs
+            (`scripts/openapi-spec-diff.ts`). Review the published generated
+            exports before merging: raise the changeset if the diff missed a
+            breaking change, and lower it to patch only when the generated
+            public contract is unchanged.
 
             Review these files closely:
             - `packages/confluence-api-client/.specs/confluence-v1.json`
