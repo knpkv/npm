@@ -62,6 +62,16 @@ const pnpmEntryName = (entry: string): string => {
   return (version === -1 ? entry : entry.slice(0, version)).replace("+", "/")
 }
 
+/** `@scope+name@1.2.3_peer@4` in node_modules/.pnpm is version `1.2.3`. */
+const pnpmEntryVersion = (entry: string): string => entry.slice(entry.indexOf("@", 1) + 1).split("_")[0] ?? ""
+
+/**
+ * The runtime packages that must resolve to exactly the pinned `effect` release. `@effect/platform-node` reaches
+ * `@effect/platform-node-shared` through a caret range, so a fresh install can otherwise pick a release that needs a
+ * newer `effect`.
+ */
+const pinnedRuntime = ["effect", "@effect/platform-node-shared"]
+
 const tuiNeedsBun = "codecommit: the terminal UI needs Bun. Install it from https://bun.sh and run codecommit again, " +
   "or run `codecommit web` for the browser UI."
 
@@ -108,6 +118,7 @@ const program = Effect.scoped(
     const archives = path.join(temporary, "archives")
     yield* fs.makeDirectory(archives)
     const tarballs = new Map<string, string>()
+    let pinnedEffect: string | undefined
     const pending = [packageRoot]
     for (let root = pending.pop(); root !== undefined; root = pending.pop()) {
       const manifest = yield* fs.readFileString(path.join(root, "package.json")).pipe(
@@ -115,6 +126,7 @@ const program = Effect.scoped(
         Effect.mapError(() => new PackedCliError({ message: `Could not read the manifest in ${root}` }))
       )
       if (tarballs.has(manifest.name)) continue
+      if (root === packageRoot) pinnedEffect = manifest.dependencies?.["effect"]
       const before = new Set(yield* fs.readDirectory(archives))
       yield* run("pnpm", ["pack", "--pack-destination", archives], root)
       const packed = (yield* fs.readDirectory(archives)).find((file) => !before.has(file))
@@ -149,9 +161,25 @@ const program = Effect.scoped(
 
     // What a user downloads: nothing on the never-installed list, and a size within the budget.
     const installed = path.join(consumer, "node_modules")
-    const packages = (yield* fs.readDirectory(path.join(installed, ".pnpm")))
+    const entries = (yield* fs.readDirectory(path.join(installed, ".pnpm")))
       .filter((entry) => entry !== "node_modules" && entry !== "lock.yaml")
-      .map(pnpmEntryName)
+    const packages = entries.map(pnpmEntryName)
+    // One copy of each pinned runtime package, at the release codecommit pins: a second copy splits the runtime.
+    const runtime: ReadonlyArray<readonly [string, ReadonlyArray<string>]> = pinnedRuntime.map((name) => [
+      name,
+      [...new Set(entries.filter((entry) => pnpmEntryName(entry) === name).map(pnpmEntryVersion))]
+    ])
+    yield* Console.log(
+      `codecommit resolves ${runtime.map(([name, versions]) => `${name}@${versions.join(",")}`).join(", ")}`
+    )
+    const drifted = runtime.filter(([, versions]) => versions.length !== 1 || versions[0] !== pinnedEffect)
+    if (pinnedEffect === undefined || drifted.length > 0) {
+      return yield* new PackedCliError({
+        message: `The install resolves ${
+          drifted.map(([name, versions]) => `${name}@${versions.join(",") || "none"}`).join(", ") || "no effect pin"
+        } instead of exactly effect ${pinnedEffect ?? "(unpinned)"}.`
+      })
+    }
     // Two `du` runs: one counts a file once across all its operands, so the total needs its own.
     const du = (script: string) =>
       spawner.string(ChildProcess.make("sh", ["-c", script], { cwd: installed })).pipe(
