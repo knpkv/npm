@@ -1,7 +1,7 @@
 /** Controlled read-only Code view. Only normalized host DTOs enter; provider locators never do. @module */
 import { ServiceMark } from "@knpkv/rly/patterns"
-import { Button, Dialog, IconButton, StateLabel } from "@knpkv/rly/primitives"
-import { useId, useLayoutEffect, useRef, type ReactElement, type ReactNode } from "react"
+import { Button, Dialog, IconButton, Notice, StateLabel } from "@knpkv/rly/primitives"
+import { useEffect, useId, useLayoutEffect, useRef, type ReactElement, type ReactNode } from "react"
 import { canRenderCodeText } from "./host-diff-text.js"
 import reviewPageStyles from "./review-page.module.css"
 import type {
@@ -80,6 +80,20 @@ const failureWords = {
   invalid_response: "The hub returned an unexpected reading.",
   timeout: "The Code read timed out."
 } satisfies Record<NonNullable<CodeReadState<unknown>["failure"]>, string>
+/** The owner refreshes every few minutes by default; a queue an hour behind its reading has stopped refreshing. */
+const STALE_QUEUE_MILLIS = 3_600_000
+
+/**
+ * When the cache last heard from AWS, if that is over an hour before this reading: the newest row's fetch
+ * time, which every successful owner refresh rewrites. Null when the queue is current or no row says.
+ */
+export const staleQueueSince = (queue: Extract<CodeQueue, { readonly _tag: "Ready" }>): number | null => {
+  const fetched = queue.items.flatMap((item) => (item.observedAt === null ? [] : [item.observedAt]))
+  if (fetched.length === 0) return null
+  const newest = Math.max(...fetched)
+  return queue.observedAt - newest > STALE_QUEUE_MILLIS ? newest : null
+}
+
 const date = (timestamp: number): string =>
   new Intl.DateTimeFormat("en-GB", {
     dateStyle: "medium",
@@ -260,10 +274,13 @@ const Diff = ({
   cacheUpdatedAt,
   content,
   file,
+  headingId,
   hrefForFile,
   ownerUIHref,
   state
 }: {
+  /** Names the section, which is the focus target when a pull request's diff opens on Diffs. */
+  readonly headingId: string
   readonly state: CodeReadState<CodeDiffResult>
   readonly content: CodeReadState<CodeDiffContentResult>
   readonly file: number | null
@@ -271,8 +288,8 @@ const Diff = ({
   readonly ownerUIHref: string | null
   readonly cacheUpdatedAt: number | null
 }): ReactElement => (
-  <section className="code-host-diff">
-    <h2>Read-only diff</h2>
+  <section className="code-host-diff" tabIndex={-1} aria-labelledby={headingId} data-code-diff="">
+    <h2 id={headingId}>Read-only diff</h2>
     <Problem state={state} />
     {state.loading ? <p role="status">Reading diff…</p> : null}
     {state.value?._tag === "Unavailable" ? <Unavailable value={state.value} ownerUIHref={ownerUIHref} /> : null}
@@ -345,6 +362,7 @@ const Diff = ({
 export const CodeHostView = (props: CodeHostViewProps): ReactElement => {
   const searchId = useId()
   const filterId = useId()
+  const diffHeadingId = useId()
   const pageRoot = useRef<HTMLElement>(null)
   const previousSelection = useRef<CodeReference | null>(null)
   const reviewPage = props.selected !== null && props.page !== "diffs" && props.reviewWorkspace !== undefined
@@ -362,6 +380,15 @@ export const CodeHostView = (props: CodeHostViewProps): ReactElement => {
       target?.focus({ preventScroll: true })
     }
   }, [props.active, props.selected, reviewPage])
+  // Read diff from a pull request's sheet lands on the diff above the queue. Only an arrival from another page
+  // moves focus: choosing a row on Diffs keeps it on the row the reader activated. It runs after the sheet closed.
+  const previousPage = useRef<CodeHostPage>(props.page)
+  useEffect(() => {
+    const arrived = previousPage.current !== "diffs" && props.page === "diffs"
+    previousPage.current = props.page
+    if (!props.active || !arrived || props.selected === null) return
+    pageRoot.current?.querySelector<HTMLElement>("[data-code-diff]")?.focus()
+  }, [props.active, props.page, props.selected])
   const title = { "pull-requests": "Pull requests", reviews: "Reviews", diffs: "Diffs" } satisfies Record<
     CodeHostPage,
     string
@@ -497,6 +524,27 @@ export const CodeHostView = (props: CodeHostViewProps): ReactElement => {
           </a>
         ))}
       </nav>
+      {queue?._tag === "Ready" && staleQueueSince(queue) !== null ? (
+        <Notice
+          tone="caution"
+          action={
+            <>
+              {props.ownerUIHref === null ? null : (
+                <a className="code-host-action" href={props.ownerUIHref} target="_blank" rel="noopener noreferrer">
+                  Open Code owner UI
+                </a>
+              )}
+              <Button size="compact" variant="quiet" onClick={props.onRefresh}>
+                Read again
+              </Button>
+            </>
+          }
+        >
+          <strong>Not refreshed since {date(staleQueueSince(queue) ?? queue.observedAt)}.</strong> The Code owner
+          refreshes this cache from AWS. Its AWS sign-in may have expired. Open the Code owner UI to check, then read
+          again.
+        </Notice>
+      ) : null}
       <div className="code-host-controls">
         <label htmlFor={searchId}>
           Find a pull request
@@ -531,6 +579,23 @@ export const CodeHostView = (props: CodeHostViewProps): ReactElement => {
           Read again
         </Button>
       </div>
+      {props.page === "diffs" ? (
+        props.selected === null ? (
+          <p>Choose a pull request to read its diff.</p>
+        ) : props.reviewWorkspace !== undefined ? (
+          props.reviewWorkspace
+        ) : (
+          <Diff
+            state={props.diff}
+            content={props.content}
+            file={props.selectedFile}
+            headingId={diffHeadingId}
+            hrefForFile={props.hrefForFile}
+            ownerUIHref={props.ownerUIHref}
+            cacheUpdatedAt={cacheUpdatedAt}
+          />
+        )
+      ) : null}
       <Problem state={props.queue} />
       {props.queue.loading ? <p role="status">Reading cached queue…</p> : null}
       {queue?._tag === "Unavailable" ? <Unavailable value={queue} ownerUIHref={props.ownerUIHref} /> : null}
@@ -558,22 +623,6 @@ export const CodeHostView = (props: CodeHostViewProps): ReactElement => {
           Next cached page
         </a>
       )}
-      {props.page === "diffs" ? (
-        props.selected === null ? (
-          <p>Choose a pull request to read its diff.</p>
-        ) : props.reviewWorkspace !== undefined ? (
-          props.reviewWorkspace
-        ) : (
-          <Diff
-            state={props.diff}
-            content={props.content}
-            file={props.selectedFile}
-            hrefForFile={props.hrefForFile}
-            ownerUIHref={props.ownerUIHref}
-            cacheUpdatedAt={cacheUpdatedAt}
-          />
-        )
-      ) : null}
       <Dialog.Root
         open={props.active && props.selected !== null && props.page !== "diffs"}
         onOpenChange={(open) => {
