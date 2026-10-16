@@ -7,12 +7,13 @@ import type { StartProduct } from "../src/live.js"
 import { LiveProduct } from "../src/live.js"
 import { loadReferences } from "../src/references.js"
 import { runConformance } from "../src/runner.js"
-import { InvalidContract, type Manifest, RunnerFailure } from "../src/schema.js"
+import { hasImplementedState, InvalidContract, type Manifest, RunnerFailure } from "../src/schema.js"
 
 /** Existing products retain their package until a migration can preserve the previous live inventory. */
 export const baseCaptureMode = Effect.fn("DesignConformance.baseCaptureMode")(
   function*(current: Manifest, base: ReadonlyArray<Manifest>, packageExists: boolean) {
-    const previous = base.find((manifest) => manifest.product === current.product)
+    // A refs-only base never had a live inventory, so its first implementation starts as a new product.
+    const previous = base.find((manifest) => manifest.product === current.product && hasImplementedState(manifest))
     if (previous !== undefined && previous.live.package !== current.live.package) {
       return yield* new RunnerFailure({
         detail:

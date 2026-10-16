@@ -136,6 +136,10 @@ export const Manifest = Schema.Struct({
 }))
 export interface Manifest extends Schema.Schema.Type<typeof Manifest> {}
 
+/** A product with no implemented state is refs-only: it has never had a live inventory. */
+export const hasImplementedState = (manifest: Manifest): boolean =>
+  manifest.states.some((state) => state.status === "implemented")
+
 /** Product adapters decode their own domain data after this shared JSON boundary. */
 export const Fixture = Schema.Struct({ version: Schema.Literal(1), data: Schema.Record(Schema.String, Schema.Json) })
 export interface Fixture extends Schema.Schema.Type<typeof Fixture> {}

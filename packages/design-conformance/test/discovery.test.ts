@@ -141,5 +141,7 @@ layer(NodeServices.layer)("reference product discovery", (it) => {
       ])
       // A product that regresses from implemented to designed-only keeps its gate.
       expect(productMatrix([designedOnly("toy")], [manifest]).include.map((item) => item.product)).toEqual(["toy"])
+      // Its first implementation after a refs-only base gets the gate job.
+      expect(productMatrix([manifest], [designedOnly("toy")]).include.map((item) => item.product)).toEqual(["toy"])
     }))
 })

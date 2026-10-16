@@ -152,8 +152,8 @@ Each live route needs at least one state. Inventory states supply screen, state,
 route, viewports and themes. The gate also checks every implemented reference has
 a capture. Designed states may precede implementation in a ref PR. A product whose states are all `designed`,
 in the PR and its base, gets no gate job yet: the matrix step verifies its reference hashes and reports it as
-refs-only. Its first `implemented` state brings the live gate, and a product that loses its last implemented
-state keeps the gate.
+refs-only. Its first `implemented` state brings the live gate as a new product, even when its live package did not
+exist at the merge-base, and a product that loses its last implemented state keeps the gate.
 The adapter's origin is the only allowed live network origin; fake provider I/O
 inside the application. The toy adapter is [`scripts/fixture.ts`](scripts/fixture.ts).
 
