@@ -62,6 +62,7 @@ import {
   loadCodeQueue,
   loadCodeDetail,
   loadCodeDiff,
+  loadCodeCanvas,
   loadCodeContent,
   loadCodeReview,
   type CodeModuleReads
@@ -812,7 +813,8 @@ const codeReads: CodeModuleReads = {
   detail: (ref) => runCodeRead(loadCodeDetail(ref)),
   review: (ref) => runCodeRead(loadCodeReview(ref)),
   diff: (ref) => runCodeRead(loadCodeDiff(ref)),
-  content: (query) => runCodeRead(loadCodeContent(query))
+  content: (query) => runCodeRead(loadCodeContent(query)),
+  canvas: (ref) => runCodeRead(loadCodeCanvas(ref))
 }
 const relayConversations = makeRelayConversations(
   makeRelayClient({ base: "/v1/relay", origin: window.location.href }),

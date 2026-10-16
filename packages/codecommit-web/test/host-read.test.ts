@@ -261,7 +261,33 @@ describe("Code host read service", () => {
       for (const privateValue of [row.accountProfile, row.accountRegion, row.awsAccountId]) {
         expect(JSON.stringify(reading.workspace)).not.toContain(privateValue)
       }
-      expect(Object.keys(test.reads).sort()).toEqual(["detail", "diff", "diffContent", "queue", "review"])
+      expect(Object.keys(test.reads).sort()).toEqual(["canvas", "detail", "diff", "diffContent", "queue", "review"])
+    }))
+
+  it.effect("reads the canvas through fresh saved grants, with every review-context source not recorded", () =>
+    Effect.gen(function*() {
+      const test = yield* fixture()
+      // The test clock never reaches the grace period, so the read waits for the graph.
+      const reading = yield* test.reads.canvas(ref, { login: "Reviewer" })
+      expect(reading.graph).toEqual({
+        _tag: "Ready",
+        graph: {
+          headRevision: "a".repeat(40),
+          files: [],
+          dependencies: { _tag: "NotRecorded", language: null },
+          partitions: { _tag: "NotRecorded" }
+        }
+      })
+      expect(reading.context).toEqual({
+        lastLook: { _tag: "NotRecorded" },
+        readingPath: { _tag: "NotRecorded" },
+        findings: { _tag: "NotRecorded" },
+        tests: { _tag: "NotRecorded" }
+      })
+      yield* Ref.set(test.policy, "allow")
+      const refused = yield* Effect.result(test.reads.canvas(ref, { login: "Reviewer" }))
+      if (Result.isFailure(refused)) expect(refused.failure.reason).toBe("permission_required")
+      else expect.fail("Would-ask canvas read executed")
     }))
 
   /** An unreadable enabled set must never reuse the previous visible accounts. */

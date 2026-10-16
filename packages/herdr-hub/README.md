@@ -212,6 +212,11 @@ checks and unavailable cached comments remain explicit. Selected PRs on Pull req
 install the read-only Review/Conversation workspace. The existing Diffs page keeps its explicit,
 cached diff owner and Back/Forward behavior.
 
+`GET /v1/modules/code/canvas?ref=…` returns that revision's canvas reading through the same boundary.
+`view=canvas` on a selected PR opens the review canvas; the page re-reads a building map once a second
+until it is ready, and reads one file's text only at Diff zoom. "Mark handled" is a reading mark for
+this page only; nothing is posted.
+
 Code reads bring a native SQLite dependency into hostd. A JavaScript bundle alone is insufficient:
 the installed `@libsql/client` native packages must match the host platform and runtime. Before
 restarting hostd, the deployment gate must load the installed driver and execute an in-memory

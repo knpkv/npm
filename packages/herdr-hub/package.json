@@ -95,6 +95,7 @@
     "@knpkv/herdr-work": "workspace:^",
     "@knpkv/relay": "workspace:^",
     "@knpkv/relay-product": "workspace:^",
+    "@knpkv/review": "workspace:^",
     "@knpkv/rly": "workspace:^",
     "effect": "4.0.0",
     "web-push": "3.6.7",

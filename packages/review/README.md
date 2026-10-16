@@ -41,6 +41,16 @@ retain their own timestamp and deletion state. Schemas bound text, threads and m
 duplicate thread identities. Decode persisted or transported data with `onExcessProperty: "error"`.
 These contracts supply no provider, publication or fix-execution authority.
 
+## Review canvas
+
+`@knpkv/review/canvas` holds the canvas contracts and the pure parts: `CanvasReading` (the change graph
+of one head plus its review context), per-file views, deterministic layout for the Overview, Cluster,
+File and Diff zoom levels, the zoom and keyboard state machine, and every sentence the canvas generates.
+Every source has an explicit `NotRecorded` state: a missing language reader shows "no dependency data",
+never an empty edge list. Decode transported readings with `onExcessProperty: "error"`.
+`@knpkv/review/canvas/react` exports `ReviewCanvas`, a controlled Rly view; the host owns readings,
+navigation and the view state. Import `@knpkv/review/canvas/styles.css` once.
+
 ## Guided reviews
 
 `@knpkv/review/guide` owns the guide and findings schemas, chapter coverage, and

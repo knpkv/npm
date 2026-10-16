@@ -1,5 +1,6 @@
 /** Host-local reads only: no peer address, provider locator, owner cookie or mutation request. @module */
 import {
+  CodeCanvasResult,
   CodeDetail,
   type CodeDiffContentQuery,
   CodeDiffContentResult,
@@ -23,6 +24,7 @@ export interface CodeModuleReads {
   readonly review: (ref: CodeReference) => Effect.Effect<CodeReviewResult, CodeReadFailed>
   readonly diff: (ref: CodeReference) => Effect.Effect<CodeDiffResult, CodeReadFailed>
   readonly content: (query: CodeDiffContentQuery) => Effect.Effect<CodeDiffContentResult, CodeReadFailed>
+  readonly canvas: (ref: CodeReference) => Effect.Effect<CodeCanvasResult, CodeReadFailed>
 }
 
 const load = Effect.fn("CodeClient.load")(
@@ -79,3 +81,5 @@ export const loadCodeContent = (query: CodeDiffContentQuery) =>
     CodeDiffContentResult,
     16_777_216
   )
+export const loadCodeCanvas = (ref: CodeReference) =>
+  load(`canvas?${new URLSearchParams({ ref })}`, CodeCanvasResult, 8_388_608)

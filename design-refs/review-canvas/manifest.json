@@ -4,7 +4,7 @@
   "fixture": "revisions/export-1/fixture.json",
   "live": {
     "package": "@knpkv/herdr-hub",
-    "adapter": "packages/herdr-hub/test/design-conformance/adapter.ts"
+    "adapter": "packages/herdr-hub/test/design-conformance/canvas-adapter.ts"
   },
   "enforcement": {
     "touched": "required",
@@ -27,10 +27,10 @@
     {
       "screen": "review-canvas",
       "state": "overview",
-      "route": "/?state=overview#code/pull-requests/review-canvas",
+      "route": "/?filter=open&search=&offset=0&ref=00000000-0000-4000-8000-000000000463&view=canvas#code/pull-requests",
       "viewports": [360, 390, 1280],
-      "themes": ["light", "dark"],
-      "status": "designed",
+      "themes": ["dark"],
+      "status": "implemented",
       "regions": {
         "phone": ["header", "minimap", "list", "nav"],
         "desktop": ["nav", "header", "tabs", "toolbar", "canvas", "legend", "minimap"]
@@ -41,10 +41,10 @@
     {
       "screen": "review-canvas",
       "state": "cluster",
-      "route": "/?state=cluster#code/pull-requests/review-canvas",
+      "route": "/?filter=open&search=&offset=0&ref=00000000-0000-4000-8000-000000000463&view=canvas#code/pull-requests",
       "viewports": [360, 390, 1280],
-      "themes": ["light", "dark"],
-      "status": "designed",
+      "themes": ["dark"],
+      "status": "implemented",
       "regions": {
         "phone": ["header", "minimap", "list", "nav"],
         "desktop": ["nav", "header", "tabs", "toolbar", "canvas", "minimap"]
@@ -55,10 +55,10 @@
     {
       "screen": "review-canvas",
       "state": "file",
-      "route": "/?state=file#code/pull-requests/review-canvas",
+      "route": "/?filter=open&search=&offset=0&ref=00000000-0000-4000-8000-000000000463&view=canvas#code/pull-requests",
       "viewports": [360, 390, 1280],
-      "themes": ["light", "dark"],
-      "status": "designed",
+      "themes": ["dark"],
+      "status": "implemented",
       "regions": {
         "phone": ["header", "minimap", "list", "nav"],
         "desktop": ["nav", "header", "tabs", "toolbar", "canvas", "minimap"]
@@ -69,10 +69,10 @@
     {
       "screen": "review-canvas",
       "state": "diff",
-      "route": "/?state=diff#code/pull-requests/review-canvas",
+      "route": "/?filter=open&search=&offset=0&ref=00000000-0000-4000-8000-000000000463&view=canvas#code/pull-requests",
       "viewports": [360, 390, 1280],
-      "themes": ["light", "dark"],
-      "status": "designed",
+      "themes": ["dark"],
+      "status": "implemented",
       "regions": {
         "phone": ["header", "list", "card", "action", "nav"],
         "desktop": ["nav", "header", "tabs", "toolbar", "canvas", "action", "minimap"]
@@ -83,10 +83,10 @@
     {
       "screen": "review-canvas",
       "state": "keyboard",
-      "route": "/?state=keyboard#code/pull-requests/review-canvas",
+      "route": "/?filter=open&search=&offset=0&ref=00000000-0000-4000-8000-000000000463&view=canvas#code/pull-requests",
       "viewports": [360, 390, 1280],
-      "themes": ["light", "dark"],
-      "status": "designed",
+      "themes": ["dark"],
+      "status": "implemented",
       "regions": {
         "phone": ["header", "minimap", "list", "nav"],
         "desktop": ["nav", "header", "tabs", "toolbar", "canvas", "card", "minimap"]
@@ -97,10 +97,10 @@
     {
       "screen": "review-canvas",
       "state": "map-building",
-      "route": "/?state=map-building#code/pull-requests/review-canvas",
+      "route": "/?filter=open&search=&offset=0&ref=00000000-0000-4000-8000-000000000463&view=canvas#code/pull-requests",
       "viewports": [360, 390, 1280],
-      "themes": ["light", "dark"],
-      "status": "designed",
+      "themes": ["dark"],
+      "status": "implemented",
       "regions": {
         "phone": ["header", "notice", "list", "nav"],
         "desktop": ["nav", "header", "tabs", "toolbar", "canvas", "list"]
@@ -111,10 +111,10 @@
     {
       "screen": "review-canvas",
       "state": "no-dependency-data",
-      "route": "/?state=no-dependency-data#code/pull-requests/review-canvas",
+      "route": "/?filter=open&search=&offset=0&ref=00000000-0000-4000-8000-000000000463&view=canvas#code/pull-requests",
       "viewports": [360, 390, 1280],
-      "themes": ["light", "dark"],
-      "status": "designed",
+      "themes": ["dark"],
+      "status": "implemented",
       "regions": {
         "phone": ["header", "notice", "minimap", "list", "nav"],
         "desktop": ["nav", "header", "tabs", "toolbar", "notice", "canvas", "legend", "minimap"]

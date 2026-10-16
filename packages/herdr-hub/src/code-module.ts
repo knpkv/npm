@@ -1,5 +1,6 @@
 /** Host-local Code mount. No discovery, fan-out, grant, write or publish authority. @module */
 import {
+  CodeCanvasResult,
   CodeDetail,
   CodeDiffContentQuery,
   CodeDiffContentResult,
@@ -123,6 +124,14 @@ export const makeCodeModule = (configuration: {
             return recover(
               mounted.reader.diffContent(query, caller).pipe(
                 Effect.map((content): CodeDiffContentResult => ({ _tag: "Ready", content }))
+              )
+            )
+          }),
+          moduleReadRoute("/canvas", CodeTargetQuery, CodeCanvasResult, ({ ref }, caller) => {
+            if (mounted._tag === "Unavailable") return Effect.succeed(mounted)
+            return recover(
+              mounted.reader.canvas(ref, caller).pipe(
+                Effect.map((reading): CodeCanvasResult => ({ _tag: "Ready", reading }))
               )
             )
           })

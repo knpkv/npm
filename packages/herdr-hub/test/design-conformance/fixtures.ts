@@ -435,46 +435,19 @@ export const makeReviewContents = (
   })
 }
 
-/** Minimal canonical shell readings. No background provider requests or decision endpoints exist. */
-export const makeCodeReadings = (data: Fixture["data"], state: ReviewFixtureState = "review-ready-readonly-legacy") => {
-  const { approvals, observedAt, review, shell, states } = referenceReading(data)
-  const key = states[state]?.variant
-  const saved = Schema.decodeUnknownSync(SavedState)(key === undefined ? undefined : review.variants[key])
-  const updated = Schema.decodeUnknownSync(ClockTime)(
-    (saved.pr?.updated ?? review.pr.updated).replace(/^Updated /u, "")
-  )
-  const unavailable = { _tag: "Unavailable", reason: "other_host", host: "build-host" }
-  const detail = Schema.decodeUnknownSync(CodeDetail)(
-    state === "code-owner-unavailable" ? unavailable : {
-      _tag: "Ready",
-      item: {
-        ref: CODE_REFERENCE,
-        id: review.pr.number,
-        repository: review.pr.repo,
-        title: review.pr.title,
-        author: review.pr.author.replace(/^Opened by /u, ""),
-        status: "OPEN",
-        approval: "waiting",
-        createdAt: observedAt,
-        updatedAt: Date.parse(`2026-10-11T${updated}:00.000Z`),
-        observedAt
-      },
-      description: "",
-      sourceBranch: review.pr.branch,
-      destinationBranch: review.pr.base
-    }
-  )
-  const queue = Schema.decodeUnknownSync(CodeQueue)(
-    state === "code-owner-unavailable" ? unavailable : {
-      _tag: "Ready",
-      observedAt,
-      more: false,
-      items: detail._tag === "Ready" ? [detail.item] : []
-    }
-  )
-  const hostCount = Schema.decodeUnknownSync(
-    Schema.NumberFromString.check(Schema.isInt(), Schema.isBetween({ minimum: 1, maximum: 256 }))
-  )(shell.hosts.label.split(" ")[0])
+/**
+ * Minimal canonical shell readings: approvals badge, peer hosts and an idle Relay. No background provider requests
+ * or decision endpoints exist.
+ */
+export const makeShellReadings = (options: {
+  readonly hubHost: string
+  readonly hostCount: number
+  readonly badge: number
+  readonly observedAt: number
+}) => {
+  const { badge, hostCount, hubHost, observedAt } = options
+  const shell = { hubHost }
+  const approvals = { badge }
   const pending = Array.from({ length: approvals.badge }, (_, index) => ({
     id: `fixture-approval-${index}`,
     actor: "Synthetic requester",
@@ -546,19 +519,53 @@ export const makeCodeReadings = (data: Fixture["data"], state: ReviewFixtureStat
   const backends = Schema.decodeUnknownSync(Schema.Array(BackendStatus))([])
   const limits = Schema.decodeUnknownSync(FleetLimits)({ hosts: [], failures: [], peersListed: true })
   const usage = Schema.decodeUnknownSync(FleetUsage)({ hosts: [], failures: [], peersListed: true })
+  return { snapshot, needsYou, work, agents, blockedSettings, relayEvent, session, backends, limits, usage }
+}
+
+export const makeCodeReadings = (data: Fixture["data"], state: ReviewFixtureState = "review-ready-readonly-legacy") => {
+  const { approvals, observedAt, review, shell, states } = referenceReading(data)
+  const key = states[state]?.variant
+  const saved = Schema.decodeUnknownSync(SavedState)(key === undefined ? undefined : review.variants[key])
+  const updated = Schema.decodeUnknownSync(ClockTime)(
+    (saved.pr?.updated ?? review.pr.updated).replace(/^Updated /u, "")
+  )
+  const unavailable = { _tag: "Unavailable", reason: "other_host", host: "build-host" }
+  const detail = Schema.decodeUnknownSync(CodeDetail)(
+    state === "code-owner-unavailable" ? unavailable : {
+      _tag: "Ready",
+      item: {
+        ref: CODE_REFERENCE,
+        id: review.pr.number,
+        repository: review.pr.repo,
+        title: review.pr.title,
+        author: review.pr.author.replace(/^Opened by /u, ""),
+        status: "OPEN",
+        approval: "waiting",
+        createdAt: observedAt,
+        updatedAt: Date.parse(`2026-10-11T${updated}:00.000Z`),
+        observedAt
+      },
+      description: "",
+      sourceBranch: review.pr.branch,
+      destinationBranch: review.pr.base
+    }
+  )
+  const queue = Schema.decodeUnknownSync(CodeQueue)(
+    state === "code-owner-unavailable" ? unavailable : {
+      _tag: "Ready",
+      observedAt,
+      more: false,
+      items: detail._tag === "Ready" ? [detail.item] : []
+    }
+  )
+  const hostCount = Schema.decodeUnknownSync(
+    Schema.NumberFromString.check(Schema.isInt(), Schema.isBetween({ minimum: 1, maximum: 256 }))
+  )(shell.hosts.label.split(" ")[0])
+  const shellReadings = makeShellReadings({ hubHost: shell.hubHost, hostCount, badge: approvals.badge, observedAt })
   return {
-    snapshot,
+    ...shellReadings,
     queue,
     detail,
-    needsYou,
-    work,
-    agents,
-    blockedSettings,
-    relayEvent,
-    session,
-    backends,
-    limits,
-    usage,
     review: makeReviewFixture(data, state),
     contents: makeReviewContents(data, state)
   }
