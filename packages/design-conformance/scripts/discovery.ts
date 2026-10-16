@@ -87,10 +87,10 @@ export const discoverReferenceManifests = Effect.fn("DesignConformance.discoverR
   }
 )
 
-/** Current package metadata wins for retained products; deleted products retain base metadata. */
 /**
  * One gate job per product with an implemented state in the PR or its base. A refs-only product, every state still
  * designed on both sides, has no live screen to compare yet; its refs are hash-checked by the matrix step instead.
+ * Current package metadata wins for retained products; deleted products retain base metadata.
  */
 export const productMatrix = (current: ReadonlyArray<Manifest>, base: ReadonlyArray<Manifest>) => {
   const gated = new Set([...base, ...current].filter(hasImplementedState).map((manifest) => manifest.product))
