@@ -8,8 +8,16 @@ import { FreshnessStamp } from "@knpkv/rly/patterns"
 import { LimitTrack, StateLabel, Surface, Text } from "@knpkv/rly/primitives"
 import { useId } from "react"
 import type { BalanceReading, LimitSnapshot } from "../core/Model.js"
+import type { LimitSeries } from "../shared/contracts.js"
 import { describeReason, formatAge, formatBalance, formatInstant, formatPercent } from "./format.js"
-import { agentName, type LimitTone, NEAR_PERCENT, summarizeLimits, type WindowSummary } from "./model.js"
+import {
+  agentName,
+  describeProjection,
+  type LimitTone,
+  NEAR_PERCENT,
+  summarizeLimits,
+  type WindowSummary
+} from "./model.js"
 
 interface ToneLabel {
   readonly label: string
@@ -26,6 +34,7 @@ const toneLabel = {
 const WindowRow = (props: { readonly agent: string; readonly window: WindowSummary; readonly now: number }) => {
   const { window } = props
   const tone = toneLabel[window.tone]
+  const pace = describeProjection(window.projection, props.now)
   return (
     <li className="usage-window" data-tone={window.tone}>
       <div className="usage-window-head">
@@ -49,7 +58,9 @@ const WindowRow = (props: { readonly agent: string; readonly window: WindowSumma
             near={NEAR_PERCENT}
             stale={window.freshness === "stale"}
             value={window.usedPercent}
-            valueText={`${formatPercent(window.usedPercent)} used${window.freshness === "stale" ? ", old reading" : ""}`}
+            valueText={`${formatPercent(window.usedPercent)} used${window.freshness === "stale" ? ", old reading" : ""}${
+              pace === null ? "" : `, ${pace.text}`
+            }`}
           />
           {/* The meter already announces the value; read once, not twice. */}
           <span aria-hidden="true" className="usage-window-value">
@@ -59,11 +70,24 @@ const WindowRow = (props: { readonly agent: string; readonly window: WindowSumma
       )}
       <div className="usage-window-meta">
         {window.reset === null || window.resetsAt === null ? null : (
-          <Text as="span" tone="secondary" variant="meta">
-            <time dateTime={new Date(window.resetsAt).toISOString()} title={formatInstant(window.resetsAt)}>
-              {window.reset}
-            </time>
-          </Text>
+          <span className="usage-window-when">
+            <Text as="span" tone="secondary" variant="meta">
+              <time dateTime={new Date(window.resetsAt).toISOString()} title={formatInstant(window.resetsAt)}>
+                {window.reset}
+              </time>
+            </Text>
+            {/* The pace at the last hour's burn: when the window runs out, or that it lasts. */}
+            {pace === null ? null : (
+              <>
+                <Text aria-hidden="true" as="span" tone="tertiary" variant="meta">
+                  ·
+                </Text>
+                <Text as="span" title={pace.title ?? undefined} tone={pace.tone} variant="meta">
+                  {pace.text}
+                </Text>
+              </>
+            )}
+          </span>
         )}
         {window.freshness === "stale" ? (
           <FreshnessStamp
@@ -90,15 +114,18 @@ const balanceName = (kind: BalanceReading["kind"]): string =>
 /**
  * The latest limits as cards, one per agent. `now` is on the same clock as the snapshots. `title`
  * names the section ("Limits now" by default); several can share a page, each with its own heading.
+ * Given the limit series behind `latest` (reaching back at least an hour), each window also says
+ * how long it lasts at the current pace.
  */
 export const LimitsSummary = (props: {
   readonly latest: ReadonlyArray<LimitSnapshot>
+  readonly series?: ReadonlyArray<LimitSeries>
   readonly balances: ReadonlyArray<BalanceReading>
   readonly now: number
   readonly title?: string
 }) => {
   const titleId = useId()
-  const groups = summarizeLimits(props.latest, props.now)
+  const groups = summarizeLimits(props.latest, props.now, props.series)
   return (
     <section aria-labelledby={titleId} className="usage-limits-now">
       <Text as="h2" id={titleId} variant="card-title">
