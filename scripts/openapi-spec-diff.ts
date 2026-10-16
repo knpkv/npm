@@ -147,6 +147,51 @@ const compareProperties = (at: string, before: JsonRecord, after: JsonRecord, us
   ]
 }
 
+/** Keywords the pinned generator enforces in its decoders, by which direction narrows. */
+const LOWER_BOUNDS = ["minLength", "minimum", "minItems", "minProperties", "exclusiveMinimum"]
+const UPPER_BOUNDS = ["maxLength", "maximum", "maxItems", "maxProperties", "exclusiveMaximum"]
+const EXACT_CONSTRAINTS = ["pattern", "multipleOf", "format", "const"]
+
+/** Narrowing a constraint rejects values the published client accepted: major. Widening: minor. */
+const compareConstraints = (at: string, before: JsonRecord, after: JsonRecord): ReadonlyArray<Change> => {
+  const bound = (key: string, narrows: (previous: number, updated: number) => boolean): ReadonlyArray<Change> => {
+    const previous = before[key]
+    const updated = after[key]
+    if (same(previous, updated)) return []
+    if (previous === undefined && updated !== undefined) {
+      return [change("major", at, `${key} added: ${render(updated)}`)]
+    }
+    if (previous !== undefined && updated === undefined) {
+      return [change("minor", at, `${key} removed (was ${render(previous)})`)]
+    }
+    if (previous === undefined || updated === undefined) return []
+    // OpenAPI 3.0's boolean exclusive bounds, or any non-numeric value, cannot be ordered.
+    const level = Predicate.isNumber(previous) && Predicate.isNumber(updated) && !narrows(previous, updated)
+      ? "minor"
+      : "major"
+    return [change(level, at, `${key} changed from ${render(previous)} to ${render(updated)}`)]
+  }
+  const unique = (before.uniqueItems === true) === (after.uniqueItems === true)
+    ? []
+    : [
+      change(
+        after.uniqueItems === true ? "major" : "minor",
+        at,
+        `uniqueItems changed from ${String(before.uniqueItems === true)} to ${String(after.uniqueItems === true)}`
+      )
+    ]
+  return [
+    ...LOWER_BOUNDS.flatMap((key) => bound(key, (previous, updated) => updated > previous)),
+    ...UPPER_BOUNDS.flatMap((key) => bound(key, (previous, updated) => updated < previous)),
+    ...EXACT_CONSTRAINTS.flatMap((key) => bound(key, () => true)),
+    ...unique
+  ]
+}
+
+/**
+ * Members are matched by content first, so reordering them is no change; only the members
+ * left unmatched on either side are compared, in order, or reported as removed or added.
+ */
 const compareVariants = (
   at: string,
   key: "allOf" | "oneOf" | "anyOf",
@@ -154,17 +199,25 @@ const compareVariants = (
   after: JsonRecord,
   usage: Usage
 ): ReadonlyArray<Change> => {
-  const previous = list(before[key])
-  const updated = list(after[key])
+  const previous = list(before[key]).map((schema, index) => ({ schema, index, id: canonical(schema) }))
+  const updated = list(after[key]).map((schema, index) => ({ schema, index, id: canonical(schema) }))
+  const unmatchedUpdated = [...updated]
+  const unmatchedPrevious = previous.filter((member) => {
+    const match = unmatchedUpdated.findIndex((candidate) => candidate.id === member.id)
+    if (match === -1) return true
+    unmatchedUpdated.splice(match, 1)
+    return false
+  })
   return [
-    ...previous.flatMap((variant, index) =>
-      index < updated.length
-        ? compareSchema(`${at}/${key}/${index}`, variant, updated[index], usage)
-        : [change("major", at, `removed ${key} member ${index}`)]
-    ),
+    ...unmatchedPrevious.flatMap((member, position) => {
+      const counterpart = unmatchedUpdated[position]
+      return counterpart === undefined
+        ? [change("major", at, `removed ${key} member ${member.index}`)]
+        : compareSchema(`${at}/${key}/${counterpart.index}`, member.schema, counterpart.schema, usage)
+    }),
     // A new allOf member constrains every value; a new oneOf/anyOf member only widens.
-    ...updated.slice(previous.length).map((_, offset) =>
-      change(key === "allOf" ? "major" : "minor", at, `added ${key} member ${previous.length + offset}`)
+    ...unmatchedUpdated.slice(unmatchedPrevious.length).map((member) =>
+      change(key === "allOf" ? "major" : "minor", at, `added ${key} member ${member.index}`)
     )
   ]
 }
@@ -196,6 +249,7 @@ const compareSchema = (
       : [change("major", at, `${key} changed`)]
   return [
     ...compareEnum(at, before, after, usage),
+    ...compareConstraints(at, before, after),
     ...compareProperties(at, before, after, usage),
     ...nested("items"),
     ...nested("additionalProperties"),
@@ -346,7 +400,13 @@ const compareOperation = (
   const responses = keyed(previousResponses, updatedResponses)
   const hadBody = before.requestBody !== undefined
   const hasBody = after.requestBody !== undefined
+  // The generator names the client method and its request/response exports after the operation id.
+  const previousId = Predicate.isString(before.operationId) ? before.operationId : "(none)"
+  const updatedId = Predicate.isString(after.operationId) ? after.operationId : "(none)"
   return [
+    ...(previousId === updatedId
+      ? []
+      : [change("major", at, `operation id changed from ${previousId} to ${updatedId}`)]),
     ...parameters.removed.map((key) => change("major", at, `removed ${key}`)),
     ...parameters.added.map((key) =>
       updatedParameters.get(key)?.required === true

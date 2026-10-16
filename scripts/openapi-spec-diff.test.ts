@@ -297,3 +297,67 @@ test("release notes list breaking changes before additions and cap each list", (
   )
   assert.equal(releaseNotes({ bump: "patch", changes: [] }), "Release: patch (no contract change).")
 })
+
+test("a renamed, added or removed operationId is major: the generated method is renamed", () => {
+  const paths = (operation: Record<string, Schema.Json>) =>
+    spec({ paths: { "/plans": { get: { ...operation, responses: { "200": { description: "ok" } } } } } })
+  const at = "#/paths/~1plans/get"
+  assert.deepEqual(classify(paths({ operationId: "getPlan" }), paths({ operationId: "fetchPlan" })).changes, [{
+    level: "major",
+    at,
+    change: "operation id changed from getPlan to fetchPlan"
+  }])
+  assert.equal(classify(paths({}), paths({ operationId: "getPlan" })).bump, "major")
+  assert.equal(classify(paths({ operationId: "getPlan" }), paths({})).bump, "major")
+  assert.equal(
+    classify(
+      paths({ operationId: "getPlan", summary: "Plans" }),
+      paths({ operationId: "getPlan", summary: "All plans" })
+    )
+      .bump,
+    "patch"
+  )
+})
+
+test("validation constraints: tightening is major, loosening is minor, a changed pattern is major", () => {
+  const withId = (id: Record<string, Schema.Json>) =>
+    spec({ plan: plan((p) => ({ ...p, id: { type: "string", ...id } })) })
+  const at = "#/components/schemas/Plan/properties/id"
+  const level = (before: Record<string, Schema.Json>, after: Record<string, Schema.Json>) =>
+    classify(withId(before), withId(after)).changes.map((entry) => [entry.level, entry.change])
+  assert.deepEqual(level({ maxLength: 100 }, { maxLength: 10 }), [["major", "maxLength changed from 100 to 10"]])
+  assert.deepEqual(level({ maxLength: 10 }, { maxLength: 100 }), [["minor", "maxLength changed from 10 to 100"]])
+  assert.deepEqual(level({}, { minLength: 1 }), [["major", "minLength added: 1"]])
+  assert.deepEqual(level({ minLength: 1 }, {}), [["minor", "minLength removed (was 1)"]])
+  assert.deepEqual(level({ minimum: 0 }, { minimum: 1 }), [["major", "minimum changed from 0 to 1"]])
+  assert.deepEqual(level({ pattern: "^a" }, { pattern: "^b" }), [["major", "pattern changed from ^a to ^b"]])
+  assert.deepEqual(level({}, { format: "uuid" }), [["major", "format added: uuid"]])
+  assert.deepEqual(level({ uniqueItems: false }, { uniqueItems: true }), [[
+    "major",
+    "uniqueItems changed from false to true"
+  ]])
+  assert.equal(classify(withId({ maxLength: 10 }), withId({ maxLength: 10 })).bump, "patch")
+  assert.equal(classify(withId({ maxLength: 100 }), withId({ maxLength: 10 })).changes[0]?.at, at)
+})
+
+test("reordering oneOf/anyOf members changes nothing; a changed member is still compared", () => {
+  const variants = (key: string, members: ReadonlyArray<Schema.Json>) =>
+    spec({ plan: plan((p) => ({ ...p, owner: { [key]: [...members] } })) })
+  const text = { type: "string" }
+  const count = { type: "integer" }
+  const ref = { $ref: "#/components/schemas/NewPlan" }
+  for (const key of ["oneOf", "anyOf", "allOf"]) {
+    assert.deepEqual(classify(variants(key, [text, count, ref]), variants(key, [ref, text, count])), {
+      bump: "patch",
+      changes: []
+    })
+  }
+  assert.deepEqual(
+    classify(variants("oneOf", [text, count]), variants("oneOf", [{ type: "boolean" }, text])).changes,
+    [{
+      level: "major",
+      at: "#/components/schemas/Plan/properties/owner/oneOf/0",
+      change: "type changed from integer to boolean"
+    }]
+  )
+})
