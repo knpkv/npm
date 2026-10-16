@@ -2,6 +2,12 @@
 
 Released as `@knpkv/herdr-approvals` up to 0.18.0; the headings below are that package's history.
 
+## 0.44.0
+
+### Minor Changes
+
+- [#987](https://github.com/knpkv/npm/pull/987) [`1d9798a`](https://github.com/knpkv/npm/commit/1d9798a8f17bf00c036d5847f165badf308d7694) Thanks [@konopkov](https://github.com/konopkov)! - The Code page's "Open Code owner UI" link now works on the hub's tailnet URL, not only on loopback. The hub decides on the server: `/v1/modules/code/queue` returns `ownerUi` only when the request's WhoIs-authenticated tailnet node is the hub's own node (`approvalHub.nodeId`), never from `Host`, `X-Forwarded-*` or login headers. Module callers carry a server-computed `sameNode`, false unless an authorizer proves it.
+
 ## 0.43.0
 
 ### Minor Changes
