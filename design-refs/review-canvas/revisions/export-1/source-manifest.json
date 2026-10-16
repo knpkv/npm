@@ -1,0 +1,866 @@
+{
+  "version": 1,
+  "fixture": {
+    "path": "fixture.json",
+    "shape": "{ version: 1, data: { usageLimits, connectHome } }"
+  },
+  "viewports": [
+    {
+      "name": "phone",
+      "width": 390
+    },
+    {
+      "name": "desktop",
+      "width": 1280
+    }
+  ],
+  "themes": [
+    "light",
+    "dark"
+  ],
+  "screens": [
+    {
+      "id": "review-canvas",
+      "file": "screens/review-canvas.html",
+      "source": "16 Review D - Canvas.dc.html",
+      "fixtureKey": "data.reviewDirections.canvas",
+      "query": {
+        "state": "state",
+        "theme": "theme"
+      },
+      "defaultState": "overview",
+      "ready": {
+        "attribute": "data-design-ready",
+        "dataset": "designReady",
+        "value": "true",
+        "neverOnFixtureError": true,
+        "neverOnFontError": true
+      },
+      "viewports": [
+        {
+          "name": "phone",
+          "width": 360
+        },
+        {
+          "name": "phone",
+          "width": 390
+        },
+        {
+          "name": "desktop",
+          "width": 1280
+        }
+      ],
+      "regionsBy": "viewport",
+      "states": [
+        {
+          "id": "overview",
+          "name": "Canvas, overview zoom",
+          "regions": {
+            "phone": [
+              "header",
+              "minimap",
+              "list",
+              "nav"
+            ],
+            "desktop": [
+              "nav",
+              "header",
+              "tabs",
+              "toolbar",
+              "canvas",
+              "legend",
+              "minimap"
+            ]
+          }
+        },
+        {
+          "id": "cluster",
+          "name": "Canvas, cluster zoom on partition A",
+          "regions": {
+            "phone": [
+              "header",
+              "minimap",
+              "list",
+              "nav"
+            ],
+            "desktop": [
+              "nav",
+              "header",
+              "tabs",
+              "toolbar",
+              "canvas",
+              "minimap"
+            ]
+          }
+        },
+        {
+          "id": "file",
+          "name": "Canvas, file zoom on socket.ts",
+          "regions": {
+            "phone": [
+              "header",
+              "minimap",
+              "list",
+              "nav"
+            ],
+            "desktop": [
+              "nav",
+              "header",
+              "tabs",
+              "toolbar",
+              "canvas",
+              "minimap"
+            ]
+          }
+        },
+        {
+          "id": "diff",
+          "name": "Canvas, diff zoom on connect()",
+          "regions": {
+            "phone": [
+              "header",
+              "list",
+              "card",
+              "action",
+              "nav"
+            ],
+            "desktop": [
+              "nav",
+              "header",
+              "tabs",
+              "toolbar",
+              "canvas",
+              "action",
+              "minimap"
+            ]
+          }
+        },
+        {
+          "id": "keyboard",
+          "name": "Canvas, keyboard and focus",
+          "regions": {
+            "phone": [
+              "header",
+              "minimap",
+              "list",
+              "nav"
+            ],
+            "desktop": [
+              "nav",
+              "header",
+              "tabs",
+              "toolbar",
+              "canvas",
+              "card",
+              "minimap"
+            ]
+          }
+        },
+        {
+          "id": "map-building",
+          "name": "Canvas, map building",
+          "regions": {
+            "phone": [
+              "header",
+              "notice",
+              "list",
+              "nav"
+            ],
+            "desktop": [
+              "nav",
+              "header",
+              "tabs",
+              "toolbar",
+              "canvas",
+              "list"
+            ]
+          }
+        },
+        {
+          "id": "no-dependency-data",
+          "name": "Canvas, no dependency data",
+          "regions": {
+            "phone": [
+              "header",
+              "notice",
+              "minimap",
+              "list",
+              "nav"
+            ],
+            "desktop": [
+              "nav",
+              "header",
+              "tabs",
+              "toolbar",
+              "notice",
+              "canvas",
+              "legend",
+              "minimap"
+            ]
+          }
+        },
+        {
+          "id": "reading-path",
+          "name": "Canvas, reading path",
+          "regions": {
+            "phone": [
+              "header",
+              "card",
+              "minimap",
+              "list",
+              "nav"
+            ],
+            "desktop": [
+              "nav",
+              "header",
+              "tabs",
+              "toolbar",
+              "canvas",
+              "card",
+              "minimap"
+            ]
+          }
+        },
+        {
+          "id": "since-you-looked",
+          "name": "Canvas, since you looked",
+          "regions": {
+            "phone": [
+              "header",
+              "card",
+              "minimap",
+              "list",
+              "nav"
+            ],
+            "desktop": [
+              "nav",
+              "header",
+              "tabs",
+              "toolbar",
+              "canvas",
+              "card",
+              "minimap"
+            ]
+          }
+        },
+        {
+          "id": "evidence",
+          "name": "Canvas, evidence pinned in place",
+          "regions": {
+            "phone": [
+              "header",
+              "minimap",
+              "list",
+              "nav"
+            ],
+            "desktop": [
+              "nav",
+              "header",
+              "tabs",
+              "toolbar",
+              "canvas",
+              "minimap"
+            ]
+          }
+        },
+        {
+          "id": "linear-fallback",
+          "name": "Files list, linear fallback",
+          "regions": {
+            "phone": [
+              "header",
+              "minimap",
+              "list",
+              "nav"
+            ],
+            "desktop": [
+              "nav",
+              "header",
+              "tabs",
+              "toolbar",
+              "list"
+            ]
+          }
+        },
+        {
+          "id": "large-pr",
+          "name": "Canvas, large PR, modules collapsed",
+          "regions": {
+            "phone": [
+              "header",
+              "minimap",
+              "list",
+              "nav"
+            ],
+            "desktop": [
+              "nav",
+              "header",
+              "tabs",
+              "toolbar",
+              "canvas",
+              "minimap"
+            ]
+          }
+        },
+        {
+          "id": "context-on",
+          "name": "Canvas, context on",
+          "regions": {
+            "phone": [
+              "header",
+              "card",
+              "tabs",
+              "minimap",
+              "list",
+              "nav"
+            ],
+            "desktop": [
+              "nav",
+              "header",
+              "tabs",
+              "toolbar",
+              "canvas",
+              "legend",
+              "minimap"
+            ]
+          }
+        },
+        {
+          "id": "you-are-here",
+          "name": "Canvas, you are here brief",
+          "regions": {
+            "phone": [
+              "header",
+              "card",
+              "tabs",
+              "minimap",
+              "list",
+              "nav"
+            ],
+            "desktop": [
+              "nav",
+              "header",
+              "tabs",
+              "toolbar",
+              "card",
+              "canvas",
+              "legend",
+              "minimap"
+            ]
+          }
+        },
+        {
+          "id": "context-card",
+          "name": "Canvas, context card on sync-worker",
+          "regions": {
+            "phone": [
+              "header",
+              "card",
+              "tabs",
+              "minimap",
+              "list",
+              "nav"
+            ],
+            "desktop": [
+              "nav",
+              "header",
+              "tabs",
+              "toolbar",
+              "canvas",
+              "card"
+            ]
+          }
+        },
+        {
+          "id": "radius",
+          "name": "Canvas, what could this break",
+          "regions": {
+            "phone": [
+              "header",
+              "card",
+              "tabs",
+              "minimap",
+              "list",
+              "nav"
+            ],
+            "desktop": [
+              "nav",
+              "header",
+              "tabs",
+              "toolbar",
+              "card",
+              "canvas",
+              "legend",
+              "minimap"
+            ]
+          }
+        },
+        {
+          "id": "i-know-this-area",
+          "name": "Canvas, context collapsed",
+          "regions": {
+            "phone": [
+              "header",
+              "card",
+              "tabs",
+              "minimap",
+              "list",
+              "nav"
+            ],
+            "desktop": [
+              "nav",
+              "header",
+              "tabs",
+              "toolbar",
+              "card",
+              "canvas",
+              "legend",
+              "minimap"
+            ]
+          }
+        },
+        {
+          "id": "context-missing",
+          "name": "Canvas, context from code only",
+          "regions": {
+            "phone": [
+              "header",
+              "card",
+              "tabs",
+              "minimap",
+              "list",
+              "nav"
+            ],
+            "desktop": [
+              "nav",
+              "header",
+              "tabs",
+              "toolbar",
+              "card",
+              "canvas",
+              "legend",
+              "minimap"
+            ]
+          }
+        },
+        {
+          "id": "linear-with-context",
+          "name": "Files list with context first",
+          "regions": {
+            "phone": [
+              "header",
+              "card",
+              "tabs",
+              "minimap",
+              "list",
+              "nav"
+            ],
+            "desktop": [
+              "nav",
+              "header",
+              "tabs",
+              "toolbar",
+              "card",
+              "list"
+            ]
+          }
+        },
+        {
+          "id": "sign-off",
+          "name": "Agent sign-off, docked",
+          "regions": {
+            "phone": [
+              "header",
+              "card",
+              "action",
+              "nav"
+            ],
+            "desktop": [
+              "nav",
+              "header",
+              "tabs",
+              "toolbar",
+              "canvas",
+              "card",
+              "action"
+            ]
+          }
+        },
+        {
+          "id": "sign-off-plan-step",
+          "name": "Agent sign-off, plan step selected",
+          "regions": {
+            "phone": [
+              "header",
+              "list",
+              "nav"
+            ],
+            "desktop": [
+              "nav",
+              "header",
+              "tabs",
+              "toolbar",
+              "canvas",
+              "card",
+              "action"
+            ]
+          }
+        },
+        {
+          "id": "sign-off-blocked",
+          "name": "Agent sign-off, blocked",
+          "regions": {
+            "phone": [
+              "header",
+              "card",
+              "action",
+              "nav"
+            ],
+            "desktop": [
+              "nav",
+              "header",
+              "tabs",
+              "toolbar",
+              "canvas",
+              "card",
+              "action"
+            ]
+          }
+        },
+        {
+          "id": "request-preview",
+          "name": "Request changes, full-screen preview",
+          "regions": {
+            "phone": [
+              "header",
+              "nav",
+              "fullscreen",
+              "pane-list",
+              "actionbar"
+            ],
+            "desktop": [
+              "nav",
+              "header",
+              "tabs",
+              "toolbar",
+              "canvas",
+              "fullscreen",
+              "pane-list",
+              "pane-code",
+              "actionbar"
+            ]
+          }
+        },
+        {
+          "id": "request-preview-item",
+          "name": "Request changes, item code",
+          "regions": {
+            "phone": [
+              "header",
+              "nav",
+              "fullscreen",
+              "pane-code",
+              "actionbar"
+            ],
+            "desktop": [
+              "nav",
+              "header",
+              "tabs",
+              "toolbar",
+              "canvas",
+              "fullscreen",
+              "pane-list",
+              "pane-code",
+              "actionbar"
+            ]
+          }
+        },
+        {
+          "id": "request-preview-editing",
+          "name": "Request changes, editing a comment",
+          "regions": {
+            "phone": [
+              "header",
+              "nav",
+              "fullscreen",
+              "pane-list",
+              "actionbar"
+            ],
+            "desktop": [
+              "nav",
+              "header",
+              "tabs",
+              "toolbar",
+              "canvas",
+              "fullscreen",
+              "pane-list",
+              "pane-code",
+              "actionbar"
+            ]
+          }
+        },
+        {
+          "id": "request-sent",
+          "name": "Request changes, sent receipt over the canvas",
+          "regions": {
+            "phone": [
+              "header",
+              "nav",
+              "fullscreen",
+              "pane-list",
+              "actionbar"
+            ],
+            "desktop": [
+              "nav",
+              "header",
+              "tabs",
+              "toolbar",
+              "canvas",
+              "card",
+              "action",
+              "fullscreen",
+              "pane-list",
+              "pane-code",
+              "actionbar"
+            ]
+          }
+        },
+        {
+          "id": "request-waiting",
+          "name": "Request changes, waiting on pair-codex",
+          "regions": {
+            "phone": [
+              "header",
+              "nav",
+              "fullscreen",
+              "pane-list",
+              "actionbar"
+            ],
+            "desktop": [
+              "nav",
+              "header",
+              "tabs",
+              "toolbar",
+              "canvas",
+              "card"
+            ]
+          }
+        },
+        {
+          "id": "request-rereview",
+          "name": "Request changes, re-review comparison over the canvas",
+          "regions": {
+            "phone": [
+              "header",
+              "nav",
+              "fullscreen",
+              "pane-list",
+              "actionbar"
+            ],
+            "desktop": [
+              "nav",
+              "header",
+              "tabs",
+              "toolbar",
+              "canvas",
+              "card",
+              "action",
+              "fullscreen",
+              "pane-list",
+              "pane-code",
+              "actionbar"
+            ]
+          }
+        },
+        {
+          "id": "templates-settings",
+          "name": "Settings, review templates on laptop-a",
+          "regions": {
+            "phone": [
+              "header",
+              "tabs",
+              "settings",
+              "notice",
+              "action",
+              "nav"
+            ],
+            "desktop": [
+              "nav",
+              "header",
+              "tabs",
+              "settings",
+              "notice",
+              "action"
+            ]
+          }
+        },
+        {
+          "id": "templates-none",
+          "name": "Settings, no review template on desk-b",
+          "regions": {
+            "phone": [
+              "header",
+              "tabs",
+              "settings",
+              "notice",
+              "nav"
+            ],
+            "desktop": [
+              "nav",
+              "header",
+              "tabs",
+              "settings",
+              "notice"
+            ]
+          }
+        },
+        {
+          "id": "checklist",
+          "name": "Review checklist on the canvas",
+          "regions": {
+            "phone": [
+              "header",
+              "checklist",
+              "card",
+              "action",
+              "nav"
+            ],
+            "desktop": [
+              "nav",
+              "header",
+              "tabs",
+              "toolbar",
+              "canvas",
+              "checklist",
+              "card",
+              "action"
+            ]
+          }
+        },
+        {
+          "id": "checklist-no-issue",
+          "name": "Review checklist, a No without an issue",
+          "regions": {
+            "phone": [
+              "header",
+              "checklist",
+              "card",
+              "action",
+              "nav"
+            ],
+            "desktop": [
+              "nav",
+              "header",
+              "tabs",
+              "toolbar",
+              "canvas",
+              "checklist",
+              "card",
+              "action"
+            ]
+          }
+        },
+        {
+          "id": "checklist-posting-preview",
+          "name": "Review checklist, posting preview",
+          "regions": {
+            "phone": [
+              "header",
+              "checklist",
+              "preview",
+              "card",
+              "action",
+              "nav"
+            ],
+            "desktop": [
+              "nav",
+              "header",
+              "tabs",
+              "toolbar",
+              "preview",
+              "canvas",
+              "checklist",
+              "card",
+              "action"
+            ]
+          }
+        },
+        {
+          "id": "checklist-feeds-request",
+          "name": "Review checklist feeds Request changes",
+          "regions": {
+            "phone": [
+              "header",
+              "nav",
+              "fullscreen",
+              "pane-list",
+              "actionbar"
+            ],
+            "desktop": [
+              "nav",
+              "header",
+              "tabs",
+              "toolbar",
+              "canvas",
+              "card",
+              "action"
+            ]
+          }
+        },
+        {
+          "id": "unknown",
+          "name": "Unknown state",
+          "regions": {
+            "phone": [
+              "notice"
+            ],
+            "desktop": [
+              "notice"
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "knownGaps": [],
+  "scripts": [
+    "screens/relay-chef-modern.js",
+    "screens/relay-creature-states.js",
+    "screens/relay-screen-art.js"
+  ],
+  "fonts": {
+    "display": "block",
+    "files": [
+      "screens/fonts/geist-variable.woff2",
+      "screens/fonts/geist-mono-variable.woff2"
+    ],
+    "readyRequires": "document.fonts.check(\"16px Geist\") === true"
+  },
+  "nav": {
+    "shipped": "installed-only",
+    "sidebar": [
+      "connect",
+      "fleet",
+      "|",
+      "code",
+      "usage"
+    ],
+    "phoneBar": [
+      "connect",
+      "fleet",
+      "code",
+      "usage",
+      "more"
+    ],
+    "hiddenUntilRegistered": [
+      "design",
+      "delivery",
+      "stacks",
+      "time"
+    ]
+  },
+  "styles": [
+    "rly.css",
+    "chrome.css"
+  ]
+}

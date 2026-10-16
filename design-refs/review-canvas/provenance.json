@@ -1,0 +1,15 @@
+{
+  "design": "Relay super app, page 16 Review D - Canvas, conformance screen screens/review-canvas.html",
+  "source_export": "export-1",
+  "states": 35,
+  "viewports": [360, 390, 1280],
+  "status": "All states designed. Each flips to implemented in the phase that builds it, with its live route.",
+  "fixture": "Only data.reviewDirections.canvas, the one key the screen reads. Synthetic role-based names only.",
+  "regions": "Phone and desktop declare separate regions where the phone layout has no canvas.",
+  "notes": [
+    "Full-screen states (request-preview, request-sent, request-rereview) keep the canvas page behind them, inactive and hidden from screen readers; its regions stay declared.",
+    "request-sent and request-rereview each combine two page-16 frames (receipt or comparison over the canvas).",
+    "Phone layouts for request-preview-editing, request-rereview, templates-settings, templates-none and checklist-feeds-request have no page-16 frame and were chosen in the screen.",
+    "The screen uses 15:04 as the sent time; page 16's 5c canvas still reads 14:58."
+  ]
+}

@@ -17,4 +17,4 @@ packages/*/.design-sync/fixtures/*.json
 design-refs/*/screens/**
 design-refs/*/fixture.json
 # Frozen Design export revisions: source-manifest hashes validate their original bytes.
-design-refs/code-review/revisions/
+design-refs/*/revisions/
