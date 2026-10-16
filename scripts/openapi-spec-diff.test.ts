@@ -401,3 +401,24 @@ test("a property named like a documentation keyword is still a property", () => 
     "patch"
   )
 })
+
+test("a retyped property named like a documentation keyword inside a composition member is major", () => {
+  for (const key of ["oneOf", "anyOf", "allOf"]) {
+    for (const name of ["description", "title", "example"]) {
+      const member = (type: string) => ({ type: "object", required: [name], properties: { [name]: { type } } })
+      const withMember = (type: string) => spec({ plan: plan((p) => ({ ...p, owner: { [key]: [member(type)] } })) })
+      assert.equal(classify(withMember("string"), withMember("integer")).bump, "major", `${key} ${name}`)
+    }
+  }
+})
+
+test("removing const is major: the generated literal type widens", () => {
+  const withId = (id: Record<string, Schema.Json>) =>
+    spec({ plan: plan((p) => ({ ...p, id: { type: "string", ...id } })) })
+  assert.deepEqual(
+    classify(withId({ const: "x" }), withId({})).changes.map((entry) => [entry.level, entry.change]),
+    [["major", "const removed (was x)"]]
+  )
+  assert.equal(classify(withId({ const: "x" }), withId({ const: "x" })).bump, "patch")
+  assert.equal(classify(withId({ maxLength: 5 }), withId({ maxLength: 50 })).bump, "minor")
+})

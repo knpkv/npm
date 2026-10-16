@@ -183,7 +183,8 @@ const compareConstraints = (at: string, before: JsonRecord, after: JsonRecord): 
       return [change("major", at, `${key} added: ${render(updated)}`)]
     }
     if (previous !== undefined && updated === undefined) {
-      return [change("minor", at, `${key} removed (was ${render(previous)})`)]
+      // `const` is the generated type itself (`"x"`, not `string`): dropping it widens that type.
+      return [change(key === "const" ? "major" : "minor", at, `${key} removed (was ${render(previous)})`)]
     }
     if (previous === undefined || updated === undefined) return []
     // OpenAPI 3.0's boolean exclusive bounds, or any non-numeric value, cannot be ordered.
