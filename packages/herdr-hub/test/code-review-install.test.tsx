@@ -105,7 +105,7 @@ const render = async (reads: CodeModuleReads, search: string, active = true) => 
     root = createRoot(host)
   }
   const navigate = vi.fn<ModulePageMount["navigate"]>()
-  const views = makeCodeModuleViews({ reads, onHubMachine: false })
+  const views = makeCodeModuleViews({ reads })
   await act(async () =>
     root?.render(
       <PortalProvider>

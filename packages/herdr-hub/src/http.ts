@@ -598,7 +598,8 @@ const relayManifest = JSON.stringify({
   ]
 })
 
-const tailnetActor = Effect.fn("ApprovalHttp.tailnetActor")(function*(
+/** The WhoIs-authorized login and the tailnet node it came from: server facts, never request headers. */
+const tailnetIdentity = Effect.fn("ApprovalHttp.tailnetIdentity")(function*(
   request: IncomingMessage,
   config: HostConfiguration,
   requiredNodeIds: ReadonlyArray<string> | null
@@ -618,7 +619,7 @@ const tailnetActor = Effect.fn("ApprovalHttp.tailnetActor")(function*(
         })
     )
   )
-  return yield* authorizeWhois(
+  const login = yield* authorizeWhois(
     identity,
     config.allowedUsers,
     requiredNodeIds
@@ -627,7 +628,20 @@ const tailnetActor = Effect.fn("ApprovalHttp.tailnetActor")(function*(
       (error: TailscaleAuthorizationError) => new FleetAuthorizationError({ actor: error.actor })
     )
   )
+  return { login, nodeId: identity.Node.StableID }
 })
+
+const tailnetActor = Effect.fn("ApprovalHttp.tailnetActor")(function*(
+  request: IncomingMessage,
+  config: HostConfiguration,
+  requiredNodeIds: ReadonlyArray<string> | null
+) {
+  return (yield* tailnetIdentity(request, config, requiredNodeIds)).login
+})
+
+/** A viewer on the hub machine is the hub's own tailnet node calling this hub. */
+const onHubNode = (config: HostConfiguration, nodeId: string): boolean =>
+  config.host.toLowerCase() === config.approvalHub.host.toLowerCase() && nodeId === config.approvalHub.nodeId
 
 const readBody = (request: IncomingMessage) =>
   Effect.tryPromise({
@@ -3089,7 +3103,11 @@ export const startHttpServer = async (
                 method: request.method ?? "GET",
                 url,
                 listener: mode,
-                authorize: authorized.pipe(Effect.map((login) => ({ login }))),
+                authorize: mode === "approval" || mode === "tailnet" || mode === "serve"
+                  ? tailnetIdentity(request, config, mode === "approval" ? config.approvalNodes : null).pipe(
+                    Effect.map(({ login, nodeId }) => ({ login, sameNode: onHubNode(config, nodeId) }))
+                  )
+                  : authorized.pipe(Effect.map((login) => ({ login, sameNode: false }))),
                 sameOrigin: sameOrigin(request, expectedOrigin()),
                 readJson: () => readJson(request, Schema.Json)
               }).pipe(Effect.provideService(ModuleServer.ModuleRegistry, registry), Effect.result)

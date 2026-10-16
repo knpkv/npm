@@ -15,9 +15,9 @@ import { useCodeReviewWorkspace } from "./code-review-workspace.js"
 import { ShellIcon } from "./internal/shell-icon.js"
 import { codeModule, moduleHref, type ModulePageMount, type ModuleViews } from "./modules.js"
 
+/** The hub sends `ownerUi` only to a viewer on its own tailnet node, so the page links what it receives. */
 interface CodeModuleContent {
   readonly reads: CodeModuleReads
-  readonly onHubMachine: boolean
 }
 
 const CodePage = ({
@@ -71,7 +71,7 @@ const CodePage = ({
     page,
     mount,
     enabled: enabled && page !== "diffs",
-    ownerUIHref: content.onHubMachine && queue.failure === null ? (queue.value?.ownerUi ?? null) : null
+    ownerUIHref: queue.failure === null ? (queue.value?.ownerUi ?? null) : null
   })
   const diffRead = useMemo(() => (ref === null ? Effect.never : content.reads.diff(ref)), [content.reads.diff, ref])
   const diff = useCodeRead<CodeDiffResult>(
@@ -183,9 +183,7 @@ const CodePage = ({
               )
             : null
         }
-        ownerUIHref={
-          content.onHubMachine && !queue.loading && queue.failure === null ? (queue.value?.ownerUi ?? null) : null
-        }
+        ownerUIHref={!queue.loading && queue.failure === null ? (queue.value?.ownerUi ?? null) : null}
         onSearch={(text) => change({ ...selection, search: text, offset: 0 }, "replace")}
         onFilter={(filter) => change({ ...selection, filter, offset: 0 }, "replace")}
         onClose={() => {

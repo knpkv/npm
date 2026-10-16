@@ -8,12 +8,17 @@ import { dispatchModuleRoute, makeModuleLayer } from "../src/module-server.js"
 
 const host = Schema.decodeUnknownSync(FleetHostName)("atlas")
 const other = Schema.decodeUnknownSync(FleetHostName)("cedar")
-const request = (listener: "serve" | "approval" | "tailnet" | "lan" | "work", search = "", method = "GET") =>
+const request = (
+  listener: "serve" | "approval" | "tailnet" | "lan" | "work",
+  search = "",
+  method = "GET",
+  sameNode = true
+) =>
   dispatchModuleRoute({
     method,
     listener,
     url: new URL(`https://hub.example/v1/modules/code/queue${search}`),
-    authorize: Effect.succeed({ login: "example-viewer" }),
+    authorize: Effect.succeed({ login: "example-viewer", sameNode }),
     sameOrigin: Effect.void,
     readJson: () => Effect.die("Code has no write routes")
   })
@@ -23,7 +28,7 @@ const reviewRequest = (listener: "serve" | "approval" | "tailnet" | "lan" | "wor
     method,
     listener,
     url: new URL(`https://hub.example/v1/modules/code/review?ref=00000000-0000-4000-8000-000000000001${extra}`),
-    authorize: Effect.succeed({ login: "example-viewer" }),
+    authorize: Effect.succeed({ login: "example-viewer", sameNode: false }),
     sameOrigin: Effect.void,
     readJson: () => Effect.die("Code has no write routes")
   })
@@ -92,6 +97,8 @@ describe("host-local Code module", () => {
             yield* fs.writeFileString(file, JSON.stringify({ origin: "http://127.0.0.1:4781", token }))
             expect((yield* request("serve"))?.body).toMatchObject({ ownerUi: "http://127.0.0.1:4781" })
             expect(JSON.stringify(first?.body)).not.toContain(token)
+            // The owner UI is a loopback origin: only a viewer on the hub's own node can open it.
+            expect((yield* request("serve", "", "GET", false))?.body).not.toHaveProperty("ownerUi")
             yield* fs.chmod(file, 0o644)
             expect((yield* request("serve"))?.body).not.toHaveProperty("ownerUi")
             yield* fs.chmod(file, 0o600)
