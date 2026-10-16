@@ -59,13 +59,34 @@ const pointer = (segment: string): string => segment.replaceAll("~", "~0").repla
 
 const change = (level: Level, at: string, description: string): Change => ({ level, at, change: description })
 
-/** Key-order-independent JSON identity, ignoring documentation-only keys. */
-const canonical = (value: Schema.Json | undefined): string => {
-  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`
+/**
+ * Maps whose keys are names the API chose (a property called `description`, a response
+ * called `title`), not keywords: every key of these is contract.
+ */
+const NAMED_MAPS = new Set([
+  "properties",
+  "patternProperties",
+  "$defs",
+  "definitions",
+  "content",
+  "responses",
+  "parameters",
+  "requestBodies",
+  "headers",
+  "schemas",
+  "securitySchemes"
+])
+
+/**
+ * Key-order-independent JSON identity, ignoring documentation-only keywords. `named` marks
+ * a map keyed by API-chosen names, whose keys are all kept.
+ */
+const canonical = (value: Schema.Json | undefined, named = false): string => {
+  if (Array.isArray(value)) return `[${value.map((item) => canonical(item)).join(",")}]`
   if (isRecord(value)) {
     return `{${
-      Object.keys(value).filter((key) => !DOC_KEYS.has(key)).sort().map((key) =>
-        `${JSON.stringify(key)}:${canonical(value[key])}`
+      Object.keys(value).filter((key) => named || !DOC_KEYS.has(key)).sort().map((key) =>
+        `${JSON.stringify(key)}:${canonical(value[key], !named && NAMED_MAPS.has(key))}`
       ).join(",")
     }}`
   }

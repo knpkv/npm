@@ -13,6 +13,7 @@ const spec = (overrides: {
   readonly newPlan?: Record<string, Schema.Json>
   readonly extraSchemas?: Record<string, Schema.Json>
   readonly getParameters?: ReadonlyArray<Schema.Json>
+  readonly responses?: Record<string, Schema.Json>
 } = {}): Schema.Json => ({
   openapi: "3.0.1",
   info: { title: "Fixture", version: "1" },
@@ -53,7 +54,8 @@ const spec = (overrides: {
         properties: { name: { type: "string" }, color: { type: "string" } }
       },
       ...overrides.extraSchemas
-    }
+    },
+    responses: overrides.responses ?? {}
   }
 })
 
@@ -359,5 +361,43 @@ test("reordering oneOf/anyOf members changes nothing; a changed member is still 
       at: "#/components/schemas/Plan/properties/owner/oneOf/0",
       change: "type changed from integer to boolean"
     }]
+  )
+})
+
+test("a property named like a documentation keyword is still a property", () => {
+  const member = (properties: Record<string, Schema.Json>) => ({ type: "object", properties })
+  const withVariant = (properties: Record<string, Schema.Json>) =>
+    spec({ plan: plan((p) => ({ ...p, owner: { oneOf: [member(properties), { type: "string" }] } })) })
+  const both = { description: { type: "string" }, labels: { type: "string" } }
+  assert.equal(classify(withVariant(both), withVariant({ labels: { type: "string" } })).bump, "major")
+  assert.equal(classify(withVariant(both), withVariant({ description: { type: "string" } })).bump, "major")
+  // Editing a property's description text is documentation, not contract.
+  assert.equal(
+    classify(
+      withVariant(both),
+      withVariant({ ...both, description: { type: "string", description: "what the plan is for" } })
+    ).bump,
+    "patch"
+  )
+
+  const withResponse = (properties: Record<string, Schema.Json>) =>
+    spec({
+      responses: {
+        Err: { description: "error", content: { "application/json": { schema: { type: "object", properties } } } }
+      }
+    })
+  assert.equal(
+    classify(
+      withResponse({ title: { type: "string" }, code: { type: "integer" } }),
+      withResponse({ code: { type: "integer" } })
+    ).bump,
+    "major"
+  )
+  assert.equal(
+    classify(
+      withResponse({ code: { type: "integer" } }),
+      withResponse({ code: { type: "integer", description: "error code" } })
+    ).bump,
+    "patch"
   )
 })
