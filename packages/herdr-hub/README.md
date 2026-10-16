@@ -297,12 +297,8 @@ and malformed or incomplete trailing records produce unknown activity.
 Direct Claude Read/Grep/Glob, Edit/Write and Bash calls and native Codex
 read/apply-patch/command calls classify from decoded records. Only simple direct
 read/search or test/build commands are recognized, and shell control flow stays
-unknown. A Codex `sleep` call is a `wait` activity. While a Codex JavaScript
-orchestration wrapper (`custom_tool_call` named `exec`) has no output yet, each
-completed `CommandExecution` event replaces its activity using only Codex's own
-`parsed_cmd` types: all `read`, `search` or `list_files` gives `read`; anything
-else, including `unknown` or an empty list, gives unknown. The command text,
-argv and output are never read. Tool results are correlated
+unknown. A Codex `sleep` call is a `wait` activity. Codex JavaScript
+orchestration wrappers remain unknown. Tool results are correlated
 by a nonempty call ID; malformed calls without one reset activity to unknown.
 Unrelated Codex content-item results do not hide newer calls. Claude error flags and structured native Codex exit codes can mark
 a test/build failure. An ordinary non-zero exit never yields `failing`, and
@@ -334,14 +330,14 @@ arguments, outputs, session paths and PR details are never added to fleet
 responses; only the normalized kind is added. Work-read warnings log the typed
 cause tag, not its contents.
 
-Codex orchestration-wrapper coverage is tracked in
-[#919](https://github.com/knpkv/npm/issues/919). Codex's `parsed_cmd` has no test,
-build, write or version-control kinds, so those wrappers stay unknown. In local
-rollouts, 23% of command records were fully typed reads; a 500-record tail with 40
-wrappers and 20 sleeps classifies 20 as waiting and 3 as reading. Codex records the
-typed parse when the command completes, typically milliseconds before the wrapper's
-output, so a wrapper reads as `reading` only briefly. These are local samples, not
-fleet-wide estimates; lifecycle and Work signals remain independent.
+Codex orchestration-wrapper support is tracked in
+[#919](https://github.com/knpkv/npm/issues/919). Codex types a wrapper's commands
+(`parsed_cmd`) only when each one completes, and emits no start event, so a typed
+read says nothing about the command running next; wrappers therefore stay unknown.
+Its vocabulary also has no test, build, write or version-control kinds. A measured
+500-record tail with 40 wrappers and 20 sleeps classifies the 20 sleeps as waiting.
+This is a local sample, not a fleet-wide estimate; lifecycle and Work signals remain
+independent.
 
 On the full Code review page, retained-read failure, previous-reading time and any host-owned retry precede PR metadata. A retry for content alone sits in Diff. Read and focus ownership stay mounted across these placements; saved-history/comments failures keep their single workspace-owned retry.
 

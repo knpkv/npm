@@ -42,10 +42,8 @@ input contract, not an agent wire field; tool content, arguments, log paths,
 and PR details do not enter `AgentSummary`.
 
 Only direct supported tools and commands classify. A running sleep or timer
-call is a `wait` activity and classifies as `waiting`. A Codex JavaScript
-orchestration wrapper classifies as `reading` only while every command it ran
-was typed by Codex itself as a read, search or listing; any other wrapper stays
-unknown, and its source is never parsed. A matching
+call is a `wait` activity and classifies as `waiting`. Codex JavaScript
+orchestration wrappers remain unknown; their source is never parsed. A matching
 tool result ends running activity; structured test/build failure evidence can
 produce `failing`. CI/review facts use the existing local HTTP-owned Work view,
 with no new provider or peer fan-out. Hosts without those observations report
