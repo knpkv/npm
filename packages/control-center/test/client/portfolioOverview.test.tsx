@@ -75,6 +75,19 @@ describe("PortfolioOverviewView", () => {
     expect(markup).toContain('href="/services?enable=jira"')
   })
 
+  // The row prints the connection's name beside the mark, so the mark keeps only its glyph and accessible name.
+  it("prints each source's name once, beside its mark", () => {
+    const markup = renderOverview({
+      _tag: "ready",
+      ...livePortfolioState,
+      portfolio: presentPortfolio(makePortfolioSnapshot("connected-empty"))
+    })
+    const panel = markup.slice(markup.indexOf('aria-labelledby="portfolio-sources-title"'))
+    expect(panel.match(/role="img"/g)?.length).toBeGreaterThan(0)
+    // A printed mark name is a hidden span straight after the glyph.
+    expect(panel).not.toContain('</svg><span aria-hidden="true"')
+  })
+
   it("names connected sources once Jira is connected but no release has items", () => {
     const markup = renderOverview({
       _tag: "ready",

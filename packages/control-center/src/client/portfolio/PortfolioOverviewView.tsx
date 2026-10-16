@@ -181,7 +181,7 @@ const SourcesPanel = ({
       {sources.map((source) => (
         <li className={styles.sourceRow} key={source.id}>
           <span className={styles.sourceName}>
-            <ServiceMark service={source.service} />
+            <ServiceMark name="hidden" service={source.service} />
             <Text as="span" variant="label">
               {source.name}
             </Text>
