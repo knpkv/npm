@@ -1,5 +1,11 @@
 # @knpkv/herdr-connect
 
+## 0.29.0
+
+### Minor Changes
+
+- [#952](https://github.com/knpkv/npm/pull/952) [`31be523`](https://github.com/knpkv/npm/commit/31be52376da7100b172a8fc620f9c967892d01c3) Thanks [@konopkov](https://github.com/konopkov)! - Render typed reading, writing, testing, waiting, blocked, failing, done and unknown task evidence with distinct motion and settled poses. Keep task updates stable, queue changes through finite one-shots, and respect reduced motion, forced colours and offscreen pause. Existing callers without task evidence keep their state presentation.
+
 ## 0.28.2
 
 ### Patch Changes
