@@ -125,7 +125,12 @@ const Dashboard = () => {
         {limits.value === null ? (
           <Skeleton decorative={false} height="9rem" label="Loading limits" variant="block" />
         ) : (
-          <LimitsSummary balances={limits.value.limits.balances} latest={limits.value.limits.latest} now={now} />
+          <LimitsSummary
+            balances={limits.value.limits.balances}
+            latest={limits.value.limits.latest}
+            now={now}
+            series={limits.value.limits.series}
+          />
         )}
 
         <div className="usage-bar">

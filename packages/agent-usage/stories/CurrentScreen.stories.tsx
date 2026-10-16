@@ -8,7 +8,8 @@ import { LimitChart } from "../src/usage/LimitChart.js"
 import { LimitsSummary } from "../src/limits/LimitsSummary.js"
 import { StatusStrip } from "../src/ui/StatusStrip.js"
 import { UsageChart } from "../src/usage/UsageChart.js"
-import type { ServerStatus } from "../src/shared/contracts.js"
+import type { LimitReading, LimitSnapshot } from "../src/core/Model.js"
+import type { LimitSeries, ServerStatus } from "../src/shared/contracts.js"
 import { buildWeek, type Scenario, TIME_ZONE } from "./fixtures/week.js"
 
 /**
@@ -64,10 +65,82 @@ export const LimitsNow: Story = {
     const { week } = viewOf("binding")
     return (
       <Page>
-        <LimitsSummary balances={week.limits.balances} latest={week.limits.latest} now={week.now} />
+        <LimitsSummary
+          balances={week.limits.balances}
+          latest={week.limits.latest}
+          now={week.now}
+          series={week.limits.series}
+        />
       </Page>
     )
   }
+}
+
+const MINUTE = 60_000
+const HOUR = 60 * MINUTE
+const projectionNow = Date.UTC(2026, 9, 16, 10, 0)
+const known = (usedPercent: number, resetsAt: number): LimitReading => ({ _tag: "Known", usedPercent, resetsAt })
+const fiveHourReset = projectionNow + 4 * HOUR + 12 * MINUTE
+const weeklyReset = projectionNow + 3 * 24 * HOUR + 4 * HOUR
+const projectionLatest: ReadonlyArray<LimitSnapshot> = [
+  {
+    agent: "claude",
+    machine: "workstation",
+    source: "claude-oauth-usage",
+    label: "five_hour",
+    windowMinutes: 300,
+    observedAt: projectionNow - 2 * MINUTE,
+    reading: known(62, fiveHourReset)
+  },
+  {
+    agent: "claude",
+    machine: "workstation",
+    source: "claude-oauth-usage",
+    label: "seven_day",
+    windowMinutes: 10_080,
+    observedAt: projectionNow - 2 * MINUTE,
+    reading: known(41, weeklyReset)
+  },
+  {
+    agent: "codex",
+    machine: "workstation",
+    source: "codex-rollout",
+    label: "primary",
+    windowMinutes: 300,
+    observedAt: projectionNow - 5 * MINUTE,
+    reading: known(12, projectionNow + 3 * HOUR + 40 * MINUTE)
+  }
+]
+const projectionSeries: ReadonlyArray<LimitSeries> = [
+  {
+    agent: "claude",
+    label: "five_hour",
+    windowMinutes: 300,
+    points: [{ at: projectionNow - 90 * MINUTE, reading: known(46, fiveHourReset) }]
+  },
+  {
+    agent: "claude",
+    label: "seven_day",
+    windowMinutes: 10_080,
+    points: [{ at: projectionNow - 90 * MINUTE, reading: known(41, weeklyReset) }]
+  }
+]
+
+/**
+ * Each window's pace: Claude 5-hour runs out before its reset (Near limit under 80%), Weekly
+ * lasts until its reset, Codex has too few readings to say.
+ */
+export const LimitProjection: Story = {
+  play: async ({ canvas }) => {
+    await expect(canvas.getByText(/at this pace: out/)).toBeVisible()
+    await expect(canvas.getByText("lasts until reset")).toBeVisible()
+    await expect(canvas.getByText("pace unknown · too few readings")).toBeVisible()
+  },
+  render: () => (
+    <Page>
+      <LimitsSummary balances={[]} latest={projectionLatest} now={projectionNow} series={projectionSeries} />
+    </Page>
+  )
 }
 
 export const UsageByBooking: Story = {

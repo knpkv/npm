@@ -50,6 +50,14 @@
   justify-content: space-between;
 }
 
+/* The reset and the pace read as one phrase; the read stamp keeps the far end. */
+.usage-window-when {
+  align-items: center;
+  column-gap: var(--rly-space-4);
+  display: flex;
+  flex-wrap: wrap;
+}
+
 .usage-window-meter {
   align-items: center;
   display: flex;

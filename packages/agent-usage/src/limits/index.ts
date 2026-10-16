@@ -21,12 +21,15 @@ export { LimitsSummary } from "./LimitsSummary.js"
 export {
   type AgentLimits,
   agentName,
+  describeProjection,
   type LimitTone,
   limitTone,
   NEAR_PERCENT,
+  type ProjectionText,
   relativeReset,
   STALE_AFTER_MILLIS,
   summarizeLimits,
   windowName,
   type WindowSummary
 } from "./model.js"
+export { type Projection, type ProjectionGap, projectionMaxAge, projectWindow } from "./projection.js"

@@ -15,7 +15,8 @@
  */
 import { type Agent, failureCovers, type LimitReading, type LimitSnapshot, type UnknownReason } from "../core/Model.js"
 import type { LimitSeries } from "../shared/contracts.js"
-import { describeReason } from "./format.js"
+import { describeReason, formatProjectedTime } from "./format.js"
+import { type Projection, projectWindow } from "./projection.js"
 import { seriesIdentity } from "./series.js"
 
 /** A failed reading in words, with what exactly went wrong when that is known. */
@@ -106,6 +107,8 @@ export interface WindowSummary {
   readonly observedAt: number
   /** Why the reading failed, in words; null when it did not. */
   readonly problem: string | null
+  /** How long the window lasts at the last hour's pace; null when no series was given. */
+  readonly projection: Projection | null
 }
 
 export interface AgentLimits {
@@ -117,19 +120,88 @@ export interface AgentLimits {
   readonly problem: { readonly reason: string; readonly observedAt: number } | null
 }
 
-const summarize = (snapshot: LimitSnapshot, name: string, now: number): WindowSummary => {
+/** The series' readings with the latest snapshot after them: a series keeps changes only. */
+const projectSnapshot = (snapshot: LimitSnapshot, series: LimitSeries | undefined, now: number): Projection => {
+  const points = series?.points ?? []
+  const last = points.at(-1)
+  const tail = last === undefined || last.at < snapshot.observedAt
+    ? [{ at: snapshot.observedAt, reading: snapshot.reading }]
+    : []
+  return projectWindow({ windowMinutes: snapshot.windowMinutes, points: [...points, ...tail], now })
+}
+
+const STALE_PROJECTION: Projection = { _tag: "Unknown", reason: "Stale" }
+
+/** A window that runs out before its reset is near its limit, whatever share it has used. */
+const projectedTone = (tone: LimitTone, projection: Projection | null): LimitTone =>
+  tone === "ok" && projection?._tag === "RunsOut" ? "near" : tone
+
+const summarize = (
+  snapshot: LimitSnapshot,
+  name: string,
+  now: number,
+  series: ReadonlyMap<string, LimitSeries> | undefined
+): WindowSummary => {
   const reading = snapshot.reading
   const resetsAt = reading._tag === "Known" ? reading.resetsAt : null
+  const id = seriesIdentity(snapshot)
+  const freshness = now - snapshot.observedAt > STALE_AFTER_MILLIS ? "stale" : "current"
+  // A row that reads stale has no pace either, whatever the window's own freshness allows.
+  const projection = series === undefined
+    ? null
+    : freshness === "stale" && reading._tag === "Known"
+    ? STALE_PROJECTION
+    : projectSnapshot(snapshot, series.get(id), now)
   return {
-    id: seriesIdentity(snapshot),
+    id,
     name,
-    tone: limitTone(reading),
+    tone: projectedTone(limitTone(reading), projection),
     usedPercent: reading._tag === "Known" ? reading.usedPercent : null,
     reset: resetsAt === null ? null : relativeReset(resetsAt, now),
     resetsAt,
-    freshness: now - snapshot.observedAt > STALE_AFTER_MILLIS ? "stale" : "current",
+    freshness,
     observedAt: snapshot.observedAt,
-    problem: reading._tag === "Unknown" ? describeUnknown(reading) : null
+    problem: reading._tag === "Unknown" ? describeUnknown(reading) : null,
+    projection
+  }
+}
+
+/** A projection in words for a row's meta line, or null when the row says nothing about pace. */
+export interface ProjectionText {
+  readonly text: string
+  readonly tone: "secondary" | "tertiary"
+  readonly title: string | null
+}
+
+/**
+ * "at this pace: out at 14:20", "lasts until reset" or "pace unknown · …". Nothing at the limit
+ * (the badge and the reset already say it), without a reset time, or without a reading.
+ */
+export const describeProjection = (projection: Projection | null, now: number): ProjectionText | null => {
+  if (projection === null) return null
+  switch (projection._tag) {
+    case "RunsOut":
+      return {
+        text: `at this pace: out ${formatProjectedTime(projection.at, now)}`,
+        tone: "secondary",
+        title: "Projected from the burn over the last hour"
+      }
+    case "LastsUntilReset":
+      return { text: "lasts until reset", tone: "tertiary", title: null }
+    case "OutNow":
+      return null
+    case "Unknown":
+      switch (projection.reason) {
+        case "Stale":
+          return { text: "pace unknown · old reading", tone: "secondary", title: null }
+        case "TooFewSamples":
+          return { text: "pace unknown · too few readings", tone: "secondary", title: null }
+        case "Malformed":
+          return { text: "pace unknown", tone: "secondary", title: null }
+        case "NoReset":
+        case "NoReading":
+          return null
+      }
   }
 }
 
@@ -138,9 +210,16 @@ const byCloseness = (left: WindowSummary, right: WindowSummary): number =>
 
 /**
  * The latest limits, per agent, closest-to-the-limit first. Windows that reset since they were
- * read, or were read before a poll that then failed for the whole agent, are left out.
+ * read, or were read before a poll that then failed for the whole agent, are left out. Given the
+ * series behind them (the page's limit series, reaching back at least an hour), each window also
+ * gets its projection, and one that runs out before its reset counts as near.
  */
-export const summarizeLimits = (latest: ReadonlyArray<LimitSnapshot>, now: number): ReadonlyArray<AgentLimits> => {
+export const summarizeLimits = (
+  latest: ReadonlyArray<LimitSnapshot>,
+  now: number,
+  series?: ReadonlyArray<LimitSeries>
+): ReadonlyArray<AgentLimits> => {
+  const byIdentity = series === undefined ? undefined : new Map(series.map((entry) => [seriesIdentity(entry), entry]))
   const agents: ReadonlyArray<Agent> = ["claude", "codex"]
   const groups = agents.flatMap((agent): ReadonlyArray<AgentLimits> => {
     const own = latest.filter((snapshot) => snapshot.agent === agent)
@@ -158,8 +237,8 @@ export const summarizeLimits = (latest: ReadonlyArray<LimitSnapshot>, now: numbe
     const unnamed: Array<WindowSummary> = []
     for (const snapshot of live) {
       const name = windowName(snapshot)
-      if (name === null) unnamed.push(summarize(snapshot, `Unnamed allowance (${snapshot.label})`, now))
-      else named.push(summarize(snapshot, name, now))
+      if (name === null) unnamed.push(summarize(snapshot, `Unnamed allowance (${snapshot.label})`, now, byIdentity))
+      else named.push(summarize(snapshot, name, now, byIdentity))
     }
     const problem = failure !== undefined &&
         failure.reading._tag === "Unknown" &&

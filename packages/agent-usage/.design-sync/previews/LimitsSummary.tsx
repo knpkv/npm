@@ -7,7 +7,7 @@ const summary = (scenario: Parameters<typeof viewOf>[0]) => {
   const { week } = viewOf(scenario)
   return (
     <Page>
-      <LimitsSummary balances={week.limits.balances} latest={week.limits.latest} now={week.now} />
+      <LimitsSummary balances={week.limits.balances} latest={week.limits.latest} now={week.now} series={week.limits.series} />
     </Page>
   )
 }

@@ -31,6 +31,20 @@ export const formatShortInstant = (instant: number): string =>
     instant
   )
 
+const clock = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" })
+const weekdayClock = new Intl.DateTimeFormat(undefined, {
+  weekday: "short",
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23"
+})
+
+/** "at 14:20" later today, "Thu 09:10" on another day: when a window is projected to run out. */
+export const formatProjectedTime = (instant: number, now: number): string =>
+  new Date(instant).toDateString() === new Date(now).toDateString()
+    ? `at ${clock.format(instant)}`
+    : weekdayClock.format(instant)
+
 /** A period label: weekday and date for days and weeks, time for hours. */
 export const formatPeriod = (start: number, bucket: "hour" | "day" | "week"): string =>
   bucket === "hour"

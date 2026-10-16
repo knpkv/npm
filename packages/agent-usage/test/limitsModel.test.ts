@@ -2,6 +2,7 @@ import { describe, expect, it } from "@effect/vitest"
 import { limitTrackTone, type RlyLimitTrackTone } from "@knpkv/rly/primitives"
 import type { LimitSnapshot } from "../src/core/Model.js"
 import {
+  describeProjection,
   limitRows,
   limitSegments,
   type LimitTone,
@@ -11,6 +12,7 @@ import {
   summarizeLimits,
   windowName
 } from "../src/limits/model.js"
+import type { LimitSeries } from "../src/shared/contracts.js"
 import { PLOT, timeTicks } from "../src/usage/axis.js"
 
 const HOUR = 3_600_000
@@ -266,5 +268,91 @@ describe("windowName", () => {
     expect(codex(90)).toBe("90-minute")
     expect(codex(30)).toBe("30-minute")
     expect(windowName({ agent: "claude", label: "spend", windowMinutes: null })).toBe("Spend")
+  })
+})
+
+describe("summarizeLimits with the series behind the latest readings", () => {
+  const series = (usedPercent: number): ReadonlyArray<LimitSeries> => [{
+    agent: "claude",
+    label: "five_hour",
+    windowMinutes: 300,
+    points: [{ at: now - HOUR, reading: { _tag: "Known", usedPercent, resetsAt: now + 2 * HOUR } }]
+  }]
+  const latest = (usedPercent: number) =>
+    snapshot({ observedAt: now - 60_000, reading: { _tag: "Known", usedPercent, resetsAt: now + 2 * HOUR } })
+
+  it("raises a window that runs out before its reset to near, under 80%", () => {
+    const window = summarizeLimits([latest(40)], now, series(10))[0]?.windows[0]
+    expect(window?.tone).toBe("near")
+    expect(window?.projection).toMatchObject({ _tag: "RunsOut" })
+  })
+
+  it("keeps the tone of a window that lasts until its reset", () => {
+    const window = summarizeLimits([latest(40)], now, series(35))[0]?.windows[0]
+    expect(window?.tone).toBe("ok")
+    expect(window?.projection).toMatchObject({ _tag: "LastsUntilReset" })
+  })
+
+  it("projects from the latest reading when the series stopped at an unchanged one", () => {
+    const window = summarizeLimits([latest(40)], now, series(40))[0]?.windows[0]
+    expect(window?.projection).toEqual({ _tag: "LastsUntilReset", burnPerHour: 0, atReset: 40 })
+  })
+
+  it("has no projection without the series", () => {
+    expect(summarizeLimits([latest(40)], now)[0]?.windows[0]?.projection).toBeNull()
+  })
+})
+
+describe("describeProjection", () => {
+  it("says when a window runs out: a time today, a weekday and time on another day", () => {
+    expect(describeProjection({ _tag: "RunsOut", at: now + HOUR, burnPerHour: 20 }, now)).toMatchObject({
+      text: expect.stringMatching(/^at this pace: out at \d{2}:\d{2}$/),
+      tone: "secondary",
+      title: "Projected from the burn over the last hour"
+    })
+    expect(describeProjection({ _tag: "RunsOut", at: now + 3 * 24 * HOUR, burnPerHour: 1 }, now)?.text).toMatch(
+      /^at this pace: out \p{L}+\.? \d{2}:\d{2}$/u
+    )
+  })
+
+  it("is quiet when the window lasts, and never a time or zero when the pace is unknown", () => {
+    expect(describeProjection({ _tag: "LastsUntilReset", burnPerHour: 0, atReset: 40 }, now)).toEqual({
+      text: "lasts until reset",
+      tone: "tertiary",
+      title: null
+    })
+    expect(describeProjection({ _tag: "Unknown", reason: "Stale" }, now)?.text).toBe("pace unknown · old reading")
+    expect(describeProjection({ _tag: "Unknown", reason: "TooFewSamples" }, now)?.text).toBe(
+      "pace unknown · too few readings"
+    )
+    expect(describeProjection({ _tag: "Unknown", reason: "Malformed" }, now)?.text).toBe("pace unknown")
+  })
+
+  it("says nothing at the limit, without a reset, or without a reading", () => {
+    expect(describeProjection({ _tag: "OutNow" }, now)).toBeNull()
+    expect(describeProjection({ _tag: "Unknown", reason: "NoReset" }, now)).toBeNull()
+    expect(describeProjection({ _tag: "Unknown", reason: "NoReading" }, now)).toBeNull()
+    expect(describeProjection(null, now)).toBeNull()
+  })
+})
+
+describe("a stale reading's projection", () => {
+  it("is pace unknown once the row reads stale, even where the weekly pace would still hold", () => {
+    const weekly = snapshot({
+      label: "seven_day",
+      windowMinutes: 10_080,
+      observedAt: now - 30 * 60_000,
+      reading: { _tag: "Known", usedPercent: 40, resetsAt: now + 50 * HOUR }
+    })
+    const series: ReadonlyArray<LimitSeries> = [{
+      agent: "claude",
+      label: "seven_day",
+      windowMinutes: 10_080,
+      points: [{ at: now - 2 * HOUR, reading: { _tag: "Known", usedPercent: 10, resetsAt: now + 50 * HOUR } }]
+    }]
+    const window = summarizeLimits([weekly], now, series)[0]?.windows[0]
+    expect(window?.freshness).toBe("stale")
+    expect(window?.projection).toEqual({ _tag: "Unknown", reason: "Stale" })
+    expect(window?.tone).toBe("ok")
   })
 })
