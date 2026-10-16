@@ -1,5 +1,12 @@
 # @knpkv/codecommit-core
 
+## 0.27.0
+
+### Minor Changes
+
+- [#935](https://github.com/knpkv/npm/pull/935) [`a4d13af`](https://github.com/knpkv/npm/commit/a4d13af29b77e1b6b6752715799c219fd91070b2) Thanks [@konopkov](https://github.com/konopkov)! - Add a bounded, strict read-only projection of existing owner comment snapshots, with exact target selection and cached timestamps.
+  Legacy comment rows are adopted only for the exact cached PR; requests for another repository or region no longer inherit that row.
+
 ## 0.26.0
 
 ### Minor Changes
