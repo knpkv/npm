@@ -158,6 +158,9 @@ importers:
       '@effect/platform-node':
         specifier: 4.0.0
         version: 4.0.0(effect@4.0.0)(redis@6.2.1(@opentelemetry/api@1.9.1))
+      '@effect/platform-node-shared':
+        specifier: 4.0.0
+        version: 4.0.0(effect@4.0.0)
       effect:
         specifier: 4.0.0
         version: 4.0.0
@@ -180,6 +183,9 @@ importers:
       '@effect/platform-node':
         specifier: 4.0.0
         version: 4.0.0(effect@4.0.0)(redis@6.2.1(@opentelemetry/api@1.9.1))
+      '@effect/platform-node-shared':
+        specifier: 4.0.0
+        version: 4.0.0(effect@4.0.0)
       '@effect/sql-sqlite-node':
         specifier: 4.0.0
         version: 4.0.0(effect@4.0.0)
@@ -346,6 +352,9 @@ importers:
       '@effect/platform-node':
         specifier: 4.0.0
         version: 4.0.0(effect@4.0.0)(redis@6.2.1(@opentelemetry/api@1.9.1))
+      '@effect/platform-node-shared':
+        specifier: 4.0.0
+        version: 4.0.0(effect@4.0.0)
       '@knpkv/bounded-io':
         specifier: workspace:^
         version: link:../bounded-io
@@ -404,6 +413,9 @@ importers:
       '@effect/platform-node':
         specifier: 4.0.0
         version: 4.0.0(effect@4.0.0)(redis@6.2.1(@opentelemetry/api@1.9.1))
+      '@effect/platform-node-shared':
+        specifier: 4.0.0
+        version: 4.0.0(effect@4.0.0)
       remark-gfm:
         specifier: ^4.0.1
         version: 4.0.1(supports-color@7.2.0)
@@ -543,6 +555,9 @@ importers:
       '@effect/platform-node':
         specifier: 4.0.0
         version: 4.0.0(effect@4.0.0)(redis@6.2.1(@opentelemetry/api@1.9.1))
+      '@effect/platform-node-shared':
+        specifier: 4.0.0
+        version: 4.0.0(effect@4.0.0)
       '@knpkv/agent-skills':
         specifier: workspace:^
         version: link:../agent-skills
@@ -635,6 +650,9 @@ importers:
       '@effect/platform-node':
         specifier: 4.0.0
         version: 4.0.0(effect@4.0.0)(redis@6.2.1(@opentelemetry/api@1.9.1))
+      '@effect/platform-node-shared':
+        specifier: 4.0.0
+        version: 4.0.0(effect@4.0.0)
       '@knpkv/codecommit-core':
         specifier: workspace:^
         version: link:../codecommit-core
@@ -666,6 +684,9 @@ importers:
       '@effect/platform-node':
         specifier: 4.0.0
         version: 4.0.0(effect@4.0.0)(redis@6.2.1(@opentelemetry/api@1.9.1))
+      '@effect/platform-node-shared':
+        specifier: 4.0.0
+        version: 4.0.0(effect@4.0.0)
       '@knpkv/ai-claude':
         specifier: workspace:^
         version: link:../ai-claude
@@ -835,6 +856,9 @@ importers:
       '@effect/platform-node':
         specifier: 4.0.0
         version: 4.0.0(effect@4.0.0)(redis@6.2.1(@opentelemetry/api@1.9.1))
+      '@effect/platform-node-shared':
+        specifier: 4.0.0
+        version: 4.0.0(effect@4.0.0)
       '@knpkv/agent-skills':
         specifier: workspace:^
         version: link:../agent-skills
@@ -893,6 +917,9 @@ importers:
       '@effect/platform-node':
         specifier: 4.0.0
         version: 4.0.0(effect@4.0.0)(redis@6.2.1(@opentelemetry/api@1.9.1))
+      '@effect/platform-node-shared':
+        specifier: 4.0.0
+        version: 4.0.0(effect@4.0.0)
       '@effect/sql-libsql':
         specifier: 4.0.0
         version: 4.0.0(effect@4.0.0)
@@ -1042,6 +1069,9 @@ importers:
       '@effect/platform-node':
         specifier: 4.0.0
         version: 4.0.0(effect@4.0.0)(redis@6.2.1(@opentelemetry/api@1.9.1))
+      '@effect/platform-node-shared':
+        specifier: 4.0.0
+        version: 4.0.0(effect@4.0.0)
       '@playwright/test':
         specifier: 1.63.0
         version: 1.63.0
@@ -1174,6 +1204,9 @@ importers:
       '@effect/platform-node':
         specifier: 4.0.0
         version: 4.0.0(effect@4.0.0)(redis@6.2.1(@opentelemetry/api@1.9.1))
+      '@effect/platform-node-shared':
+        specifier: 4.0.0
+        version: 4.0.0(effect@4.0.0)
       '@effect/sql-sqlite-node':
         specifier: 4.0.0
         version: 4.0.0(effect@4.0.0)
@@ -1242,6 +1275,9 @@ importers:
       '@effect/platform-node':
         specifier: 4.0.0
         version: 4.0.0(effect@4.0.0)(redis@6.2.1(@opentelemetry/api@1.9.1))
+      '@effect/platform-node-shared':
+        specifier: 4.0.0
+        version: 4.0.0(effect@4.0.0)
       '@knpkv/bounded-io':
         specifier: workspace:^
         version: link:../bounded-io
@@ -1339,6 +1375,9 @@ importers:
       '@effect/platform-node':
         specifier: 4.0.0
         version: 4.0.0(effect@4.0.0)(redis@6.2.1(@opentelemetry/api@1.9.1))
+      '@effect/platform-node-shared':
+        specifier: 4.0.0
+        version: 4.0.0(effect@4.0.0)
       effect:
         specifier: 4.0.0
         version: 4.0.0
@@ -1459,6 +1498,9 @@ importers:
       '@effect/platform-node':
         specifier: 4.0.0
         version: 4.0.0(effect@4.0.0)(redis@6.2.1(@opentelemetry/api@1.9.1))
+      '@effect/platform-node-shared':
+        specifier: 4.0.0
+        version: 4.0.0(effect@4.0.0)
       '@knpkv/browser-pairing':
         specifier: workspace:^
         version: link:../browser-pairing
@@ -1541,6 +1583,9 @@ importers:
       '@effect/platform-node':
         specifier: 4.0.0
         version: 4.0.0(effect@4.0.0)(redis@6.2.1(@opentelemetry/api@1.9.1))
+      '@effect/platform-node-shared':
+        specifier: 4.0.0
+        version: 4.0.0(effect@4.0.0)
       '@knpkv/agent-skills':
         specifier: workspace:^
         version: link:../agent-skills
@@ -1584,6 +1629,9 @@ importers:
       '@effect/platform-node':
         specifier: 4.0.0
         version: 4.0.0(effect@4.0.0)(redis@6.2.1(@opentelemetry/api@1.9.1))
+      '@effect/platform-node-shared':
+        specifier: 4.0.0
+        version: 4.0.0(effect@4.0.0)
       '@knpkv/agent-skills':
         specifier: workspace:^
         version: link:../agent-skills

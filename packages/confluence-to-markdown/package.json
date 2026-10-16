@@ -104,6 +104,7 @@
     "@atlaskit/editor-json-transformer": "^10.0.0",
     "@atlaskit/editor-markdown-transformer": "^6.3.1",
     "@effect/platform-node": "4.0.0",
+    "@effect/platform-node-shared": "4.0.0",
     "@knpkv/agent-skills": "workspace:^",
     "@knpkv/atlassian-common": "workspace:*",
     "@knpkv/confluence-api-client": "workspace:^",

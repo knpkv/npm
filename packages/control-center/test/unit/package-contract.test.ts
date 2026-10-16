@@ -19,6 +19,7 @@ const validManifest = {
     "@effect/ai-openai-compat": "4.0.0",
     "@effect/platform-browser": "4.0.0",
     "@effect/platform-node": "4.0.0",
+    "@effect/platform-node-shared": "4.0.0",
     "@effect/sql-libsql": "4.0.0",
     "@knpkv/ai-claude": "workspace:^",
     "@knpkv/ai-codex": "workspace:^",
@@ -63,6 +64,7 @@ const effectAlignmentCases: ReadonlyArray<readonly [keyof typeof validManifest.d
   ["@effect/ai-openai-compat", "@effect/ai-openai-compat must align with the pinned Effect release"],
   ["@effect/platform-browser", "@effect/platform-browser must align with the pinned Effect release"],
   ["@effect/platform-node", "@effect/platform-node must align with the pinned Effect release"],
+  ["@effect/platform-node-shared", "@effect/platform-node-shared must align with the pinned Effect release"],
   ["@effect/sql-libsql", "@effect/sql-libsql must align with the pinned Effect release"],
   ["effect", "effect must align with the pinned Effect release"]
 ]

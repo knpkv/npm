@@ -86,6 +86,7 @@
     "@effect/ai-openai-compat": "4.0.0",
     "@effect/platform-browser": "4.0.0",
     "@effect/platform-node": "4.0.0",
+    "@effect/platform-node-shared": "4.0.0",
     "@effect/sql-libsql": "4.0.0",
     "@knpkv/ai-claude": "workspace:^",
     "@knpkv/ai-codex": "workspace:^",
