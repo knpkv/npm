@@ -111,36 +111,54 @@ const changesetPathDiagnostics = (source: string): ReadonlyArray<string> =>
 
 // A regenerated-client-only diff is generator churn, not an upstream change: the
 // detection step must compare only the workflow's own client `specsDir`, and the
-// pull request must be gated on it.
+// pull request must be gated on it, either as a step `if` in the detection job or,
+// when the PR opens in a later job, through that job's `needs` and the detection
+// job's `updated` output.
 const specOnlyGuardDiagnostics = (source: string, specsDir: string): ReadonlyArray<string> => {
   const workflow: unknown = parse(source)
   if (!isRecord(workflow) || !isRecord(workflow.jobs)) return ["API update workflow could not be inspected"]
 
-  return Object.values(workflow.jobs).flatMap((job) => {
-    if (!isRecord(job) || !Array.isArray(job.steps)) return []
-    const steps = job.steps.filter(isRecord)
-    const detection = steps.find((step) => Predicate.isString(step.run) && step.run.includes("updated=true"))
-    if (detection === undefined || !Predicate.isString(detection.id) || !Predicate.isString(detection.run)) {
-      return ["API update workflow must detect upstream spec changes"]
-    }
-    const pathspecs = detection.run.replace(/\\\n\s*/gu, " ").match(/git diff --quiet -- ([^;\n]+)/u)?.[1]
-      ?.trim().split(/\s+/u) ?? []
-    const pathspecDiagnostics = pathspecs.length === 0
-      ? ["API update workflow must compare spec paths with git diff --quiet"]
-      : pathspecs.flatMap((pathspec) =>
-        pathspec === specsDir || pathspec.startsWith(`${specsDir}/`)
-          ? []
-          : [`API update workflow must open a pull request only for spec changes, not ${pathspec}`]
+  const jobs = Object.entries(workflow.jobs).flatMap(([name, job]) =>
+    isRecord(job) && Array.isArray(job.steps) ? [{ name, job, steps: job.steps.filter(isRecord) }] : []
+  )
+  const detecting =
+    jobs.flatMap(({ job, name, steps }) =>
+      steps.flatMap((step) =>
+        Predicate.isString(step.run) && step.run.includes("updated=true") ? [{ name, job, step }] : []
       )
-    const gate = `steps.${detection.id}.outputs.updated == 'true'`
-    const pullRequestDiagnostics = steps.flatMap((step) =>
-      Predicate.isString(step.uses) && step.uses.startsWith("peter-evans/create-pull-request@")
-        && !(Predicate.isString(step.if) && step.if.includes(gate))
+    )[0]
+  if (detecting === undefined || !Predicate.isString(detecting.step.id) || !Predicate.isString(detecting.step.run)) {
+    return ["API update workflow must detect upstream spec changes"]
+  }
+  const pathspecs = detecting.step.run.replace(/\\\n\s*/gu, " ").match(/git diff --quiet -- ([^;\n]+)/u)?.[1]
+    ?.trim().split(/\s+/u) ?? []
+  const pathspecDiagnostics = pathspecs.length === 0
+    ? ["API update workflow must compare spec paths with git diff --quiet"]
+    : pathspecs.flatMap((pathspec) =>
+      pathspec === specsDir || pathspec.startsWith(`${specsDir}/`)
+        ? []
+        : [`API update workflow must open a pull request only for spec changes, not ${pathspec}`]
+    )
+  const stepGate = `steps.${detecting.step.id}.outputs.updated == 'true'`
+  const jobGate = `needs.${detecting.name}.outputs.updated == 'true'`
+  const exportsDetection = isRecord(detecting.job.outputs) &&
+    Predicate.isString(detecting.job.outputs.updated) &&
+    detecting.job.outputs.updated.replace(/\s/gu, "") === `\${{steps.${detecting.step.id}.outputs.updated}}`
+  const gated = (job: Record<string, Schema.Json>, name: string, step: Record<string, Schema.Json>) =>
+    name === detecting.name
+      ? Predicate.isString(step.if) && step.if.includes(stepGate)
+      : exportsDetection &&
+        (job.needs === detecting.name || (Array.isArray(job.needs) && job.needs.includes(detecting.name))) &&
+        Predicate.isString(job.if) && job.if.includes(jobGate)
+  const pullRequestDiagnostics = jobs.flatMap(({ job, name, steps }) =>
+    steps.flatMap((step) =>
+      Predicate.isString(step.uses) && step.uses.startsWith("peter-evans/create-pull-request@") &&
+        !gated(job, name, step)
         ? ["API update pull request must be gated on the spec-change detection step"]
         : []
     )
-    return [...pathspecDiagnostics, ...pullRequestDiagnostics]
-  })
+  )
+  return [...pathspecDiagnostics, ...pullRequestDiagnostics]
 }
 
 const releaseWorkflow = (name: string, release: string, guidance = "Review the generated API.") => `
@@ -391,6 +409,40 @@ jobs:
     ])
     expect(specOnlyGuardDiagnostics(workflow("packages/x/.specs/x-v1.json", gate), specs)).toEqual([])
     expect(specOnlyGuardDiagnostics(workflow("packages/x/.specs", gate), specs)).toEqual([])
+  })
+
+  it("accepts a pull request job gated through the detection job's output, and nothing weaker", () => {
+    const workflow = (output: string, needs: string, jobIf: string) => `
+jobs:
+  check-spec:
+    outputs:
+      updated: ${output}
+    steps:
+      - name: Detect spec changes
+        id: check
+        run: |
+          if git diff --quiet -- packages/x/.specs; then
+            echo "updated=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "updated=true" >> "$GITHUB_OUTPUT"
+          fi
+  open-pr:
+    needs: ${needs}
+    if: ${jobIf}
+    steps:
+      - name: Create pull request
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1
+`
+    const output = "${{ steps.check.outputs.updated }}"
+    const jobIf = "needs.check-spec.outputs.updated == 'true' && github.ref == 'refs/heads/main'"
+    const specs = "packages/x/.specs"
+    const ungated = ["API update pull request must be gated on the spec-change detection step"]
+    expect(specOnlyGuardDiagnostics(workflow(output, "check-spec", jobIf), specs)).toEqual([])
+    expect(specOnlyGuardDiagnostics(workflow(output, "check-spec", "github.ref == 'refs/heads/main'"), specs))
+      .toEqual(ungated)
+    expect(specOnlyGuardDiagnostics(workflow(output, "other", jobIf), specs)).toEqual(ungated)
+    expect(specOnlyGuardDiagnostics(workflow("${{ steps.other.outputs.updated }}", "check-spec", jobIf), specs))
+      .toEqual(ungated)
   })
 
   it.effect("opens API update pull requests only for spec changes", () =>
