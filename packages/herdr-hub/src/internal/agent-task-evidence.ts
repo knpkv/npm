@@ -92,6 +92,8 @@ const toolKind = (name: string, command: string | undefined): TaskActivity["kind
     case "write":
     case "write_file":
       return "write"
+    case "sleep":
+      return "wait"
     case "bash":
     case "exec_command":
     case "shell_command":

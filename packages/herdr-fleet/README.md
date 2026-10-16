@@ -41,7 +41,8 @@ text, and work labels are never evidence. `AgentTaskFacts` is a host-private
 input contract, not an agent wire field; tool content, arguments, log paths,
 and PR details do not enter `AgentSummary`.
 
-Only direct supported tools and commands classify. Codex JavaScript
+Only direct supported tools and commands classify. A running sleep or timer
+call is a `wait` activity and classifies as `waiting`. Codex JavaScript
 orchestration wrappers remain unknown; their source is never parsed. A matching
 tool result ends running activity; structured test/build failure evidence can
 produce `failing`. CI/review facts use the existing local HTTP-owned Work view,

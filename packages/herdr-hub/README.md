@@ -296,8 +296,9 @@ and malformed or incomplete trailing records produce unknown activity.
 
 Direct Claude Read/Grep/Glob, Edit/Write and Bash calls and native Codex
 read/apply-patch/command calls classify from decoded records. Only simple direct
-read/search or test/build commands are recognized. Shell control flow and
-JavaScript orchestration wrappers remain unknown. Tool results are correlated
+read/search or test/build commands are recognized, and shell control flow stays
+unknown. A Codex `sleep` call is a `wait` activity. Codex JavaScript
+orchestration wrappers remain unknown. Tool results are correlated
 by a nonempty call ID; malformed calls without one reset activity to unknown.
 Unrelated Codex content-item results do not hide newer calls. Claude error flags and structured native Codex exit codes can mark
 a test/build failure. An ordinary non-zero exit never yields `failing`, and
@@ -330,10 +331,13 @@ responses; only the normalized kind is added. Work-read warnings log the typed
 cause tag, not its contents.
 
 Codex orchestration-wrapper support is tracked in
-[#919](https://github.com/knpkv/npm/issues/919). In one bounded 1MiB rollout sample
-of 500 records, all 60 calls stayed unknown: 50 JavaScript wrappers and 10 sleep
-calls, with no separate typed nested read/write/command events. This is a local
-sample, not a fleet-wide estimate; lifecycle and Work signals remain independent.
+[#919](https://github.com/knpkv/npm/issues/919). Codex types a wrapper's commands
+(`parsed_cmd`) only when each one completes, and emits no start event, so a typed
+read says nothing about the command running next; wrappers therefore stay unknown.
+Its vocabulary also has no test, build, write or version-control kinds. A measured
+500-record tail with 40 wrappers and 20 sleeps classifies the 20 sleeps as waiting.
+This is a local sample, not a fleet-wide estimate; lifecycle and Work signals remain
+independent.
 
 On the full Code review page, retained-read failure, previous-reading time and any host-owned retry precede PR metadata. A retry for content alone sits in Diff. Read and focus ownership stay mounted across these placements; saved-history/comments failures keep their single workspace-owned retry.
 

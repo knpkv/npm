@@ -5,7 +5,7 @@ import type { AgentTaskKind } from "./model.js"
 export const AgentTaskFacts = Schema.Struct({
   status: Schema.String,
   activity: Schema.optionalKey(Schema.Struct({
-    kind: Schema.Literals(["read", "search", "edit", "write", "test", "build", "other", "unknown"]),
+    kind: Schema.Literals(["read", "search", "edit", "write", "test", "build", "wait", "other", "unknown"]),
     outcome: Schema.Literals(["running", "succeeded", "failed", "unknown"])
   })),
   ci: Schema.optionalKey(Schema.Literals(["pending", "passed", "failed", "unknown"])),
@@ -31,6 +31,9 @@ export const classifyAgentTask = (facts: AgentTaskFacts): AgentTaskKind => {
       case "test":
       case "build":
         return "testing"
+      // A running sleep or timer call: the agent is waiting on something, not working.
+      case "wait":
+        return "waiting"
     }
   }
   if (facts.ci === "pending" || facts.review === "pending") return "waiting"

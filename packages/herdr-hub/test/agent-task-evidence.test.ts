@@ -165,6 +165,62 @@ describe("host-private provider task evidence", () => {
     ).toEqual({ kind: "unknown", outcome: "unknown" })
   })
 
+  describe("Codex typed command evidence", () => {
+    const wrapper = (callId: string) => ({
+      type: "response_item",
+      payload: { type: "custom_tool_call", call_id: callId, name: "exec", input: "private orchestration source" }
+    })
+    // Codex's own parse of the command; the private command and output stay unread.
+    const commandDone = (...types: ReadonlyArray<string>) => ({
+      type: "event_msg",
+      payload: {
+        type: "item_completed",
+        item: {
+          type: "CommandExecution",
+          command: ["zsh", "-lc", "private command"],
+          aggregated_output: "private output",
+          parsed_cmd: types.map((type) => ({ type, cmd: "private command" })),
+          status: "completed"
+        }
+      }
+    })
+    const sleep = (callId: string) => ({
+      type: "response_item",
+      payload: { type: "function_call", call_id: callId, name: "sleep", arguments: JSON.stringify({ ms: 30000 }) }
+    })
+
+    it("maps a running sleep call to wait, so the agent reads as waiting", () => {
+      const activity = parseSessionTaskActivity("codex", jsonl(sleep("nap")))
+      expect(activity).toEqual({ kind: "wait", outcome: "running" })
+      expect(classifyAgentTask({ status: "working", activity })).toBe("waiting")
+    })
+
+    // Codex records a command's typed parse only when it completes, and emits no start event. A completed read says
+    // nothing about the wrapper's next command (for example a long test run), so it never classifies the wrapper.
+    it("keeps a wrapper unknown after a typed read completes, while its next command runs", () => {
+      const midWrapper = parseSessionTaskActivity("codex", jsonl(wrapper("w"), commandDone("search")))
+      expect(midWrapper).toEqual({ kind: "unknown", outcome: "unknown" })
+      expect(classifyAgentTask({ status: "working", activity: midWrapper })).toBe("unknown")
+      expect(parseSessionTaskActivity("codex", jsonl(wrapper("w"), commandDone("read", "search", "list_files"))))
+        .toEqual({ kind: "unknown", outcome: "unknown" })
+    })
+
+    // Measured on a real rollout tail (500 records): 40 wrapper calls, 3 of them only typed reads, and 20 sleep calls.
+    // Each call is classified while it runs.
+    it("classifies the measured sample: sleeps wait and every wrapper stays unknown", () => {
+      const calls = [
+        ...Array.from({ length: 20 }, (_, i) => [sleep(`s${i}`)]),
+        ...Array.from({ length: 3 }, (_, i) => [wrapper(`r${i}`), commandDone("read", "search")]),
+        ...Array.from({ length: 37 }, (_, i) => [wrapper(`u${i}`), commandDone("unknown")])
+      ]
+      const kinds = calls.map((records) =>
+        classifyAgentTask({ status: "working", activity: parseSessionTaskActivity("codex", jsonl(...records)) })
+      )
+      expect(kinds.filter((kind) => kind === "waiting")).toHaveLength(20)
+      expect(kinds.filter((kind) => kind === "unknown")).toHaveLength(40)
+    })
+  })
+
   it("maps direct Codex custom apply_patch calls without reading the patch body", () => {
     expect(
       parseSessionTaskActivity(
