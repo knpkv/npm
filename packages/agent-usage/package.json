@@ -92,6 +92,7 @@
   "dependencies": {
     "@effect/atom-react": "4.0.0",
     "@effect/platform-node": "4.0.0",
+    "@effect/platform-node-shared": "4.0.0",
     "@effect/sql-sqlite-node": "4.0.0",
     "@knpkv/browser-pairing": "workspace:^",
     "@knpkv/rly": "workspace:^",

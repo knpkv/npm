@@ -22,6 +22,7 @@ const alignedPackages = new Set([
   "@effect/platform-browser",
   "@effect/platform-bun",
   "@effect/platform-node",
+  "@effect/platform-node-shared",
   "@effect/sql-libsql",
   "@effect/vitest",
   "effect"
@@ -34,6 +35,7 @@ const referenceManifests = [
   "repos/effect/packages/platform/browser/package.json",
   "repos/effect/packages/platform/bun/package.json",
   "repos/effect/packages/platform/node/package.json",
+  "repos/effect/packages/platform/node-shared/package.json",
   "repos/effect/packages/sql/libsql/package.json",
   "repos/effect/packages/vitest/package.json",
   "repos/effect/packages/effect/package.json"
@@ -54,6 +56,13 @@ const ReferenceManifest = Schema.fromJsonString(
   Schema.Struct({
     name: Schema.String,
     version: Schema.String
+  })
+)
+
+const PlatformManifest = Schema.fromJsonString(
+  Schema.Struct({
+    name: Schema.String,
+    dependencies: Schema.optional(Schema.Record(Schema.String, Schema.String))
   })
 )
 
@@ -150,6 +159,27 @@ const validateAlignment = ({ metadata, provenance, referenceVersions, tagCommit,
   return violations
 }
 
+/**
+ * The Effect platform packages that depend on `@effect/platform-node-shared` (node, bun and deno in the vendored
+ * reference) declare it with a caret range once published, so a fresh install of a package of ours resolves the
+ * newest shared release even though `effect` is pinned. That release can require a newer `effect` (4.0.5 imports
+ * `Path.make`, absent from 4.0.0). Every manifest that depends on one of those platforms therefore pins
+ * `@effect/platform-node-shared` in its own dependencies; the aligned-package check holds that pin to the reference
+ * release. Development-only use never reaches a consumer.
+ */
+const publishedSections = ["dependencies", "optionalDependencies", "peerDependencies"]
+const missingSharedPins = (manifests, sharedDependents) =>
+  manifests.flatMap(([manifestPath, manifest]) => {
+    const platforms = sharedDependents.filter((name) =>
+      publishedSections.some((scope) => manifest[scope]?.[name] !== undefined)
+    )
+    return platforms.length > 0 && manifest.dependencies?.["@effect/platform-node-shared"] === undefined
+      ? [
+          `${manifestPath} depends on ${platforms.join(", ")} without pinning @effect/platform-node-shared in dependencies`
+        ]
+      : []
+  })
+
 const runSelfTest = () => {
   const releaseCommit = "b5946ece2b33a4468ef927a39821d7c3db463af3"
   const releaseTree = "d0308e864242aab0c8b03a0e8811e99a3e7919b7"
@@ -195,6 +225,41 @@ const runSelfTest = () => {
     }).join("\n"),
     /instead of 4\.0\.0-rc\.109/u,
     "a nearby workspace release mismatch must fail"
+  )
+  const sharedDependents = ["@effect/platform-node", "@effect/platform-bun", "@effect/platform-deno"]
+  const pins = (manifest) => missingSharedPins([["packages/a/package.json", manifest]], sharedDependents)
+  assert.deepEqual(
+    pins({ dependencies: { "@effect/platform-node": "4.0.0", "@effect/platform-node-shared": "4.0.0" } }),
+    [],
+    "a platform-node dependency with its shared pin must pass"
+  )
+  assert.match(
+    pins({ dependencies: { "@effect/platform-node": "4.0.0" } }).join("\n"),
+    /without pinning @effect\/platform-node-shared/u,
+    "a platform-node dependency without the shared pin must fail"
+  )
+  assert.match(
+    pins({ dependencies: { "@effect/platform-bun": "4.0.0" } }).join("\n"),
+    /@effect\/platform-bun without pinning/u,
+    "a bun-only platform dependency without the shared pin must fail"
+  )
+  assert.deepEqual(
+    pins({ dependencies: { "@effect/platform-bun": "4.0.0", "@effect/platform-node-shared": "4.0.0" } }),
+    [],
+    "a bun-only platform dependency with the shared pin must pass"
+  )
+  assert.match(
+    pins({
+      dependencies: { "@effect/platform-node": "4.0.0" },
+      devDependencies: { "@effect/platform-node-shared": "4.0.0" }
+    }).join("\n"),
+    /without pinning/u,
+    "a shared pin outside dependencies does not reach a package's consumers"
+  )
+  assert.deepEqual(
+    pins({ devDependencies: { "@effect/platform-node": "4.0.0" } }),
+    [],
+    "development-only platform use needs no shared pin"
   )
   assert.deepEqual(validateUpstreamUrl(canonicalUpstreamUrl), [], "the canonical Effect remote must pass")
   assert.match(
@@ -408,6 +473,19 @@ const program = Effect.gen(function* () {
     referenceVersions.push([manifest.name, manifest.version])
   }
 
+  // Platforms whose vendored manifest depends on the shared package carry its caret range once published.
+  const platformManifestPaths = (yield* git(["ls-files", "-z", "--", "repos/effect/packages/platform/*/package.json"]))
+    .split("\0")
+    .filter(Boolean)
+  const sharedDependents = []
+  for (const manifestPath of platformManifestPaths) {
+    const manifest = yield* readJson(fileSystem, path.join(repositoryRoot, manifestPath), PlatformManifest)
+    if (manifest.dependencies?.["@effect/platform-node-shared"] !== undefined) sharedDependents.push(manifest.name)
+  }
+  if (!sharedDependents.includes("@effect/platform-node")) {
+    return yield* fail("Effect reference platform manifests no longer name @effect/platform-node-shared dependents")
+  }
+
   const manifestPaths = (yield* git([
     "ls-files",
     "-z",
@@ -419,8 +497,10 @@ const program = Effect.gen(function* () {
     .split("\0")
     .filter(Boolean)
   const workspaceVersions = []
+  const workspaceManifests = []
   for (const manifestPath of manifestPaths) {
     const manifest = yield* readJson(fileSystem, path.join(repositoryRoot, manifestPath), WorkspaceManifest)
+    workspaceManifests.push([manifestPath, manifest])
     for (const scope of dependencySections) {
       for (const [name, version] of Object.entries(manifest[scope] ?? {})) {
         if (alignedPackages.has(name)) workspaceVersions.push([`${manifestPath}#${scope}`, name, version])
@@ -428,14 +508,17 @@ const program = Effect.gen(function* () {
     }
   }
 
-  const violations = validateAlignment({
-    metadata,
-    provenance,
-    referenceVersions,
-    tagCommit: remoteTag.commit,
-    tree,
-    workspaceVersions
-  })
+  const violations = [
+    ...validateAlignment({
+      metadata,
+      provenance,
+      referenceVersions,
+      tagCommit: remoteTag.commit,
+      tree,
+      workspaceVersions
+    }),
+    ...missingSharedPins(workspaceManifests, sharedDependents)
+  ]
   if (violations.length > 0) {
     return yield* fail(violations.map((violation) => `- ${violation}`).join("\n"))
   }

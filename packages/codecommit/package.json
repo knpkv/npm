@@ -35,6 +35,7 @@
     "@effect/atom-react": "4.0.0",
     "@effect/platform-bun": "4.0.0",
     "@effect/platform-node": "4.0.0",
+    "@effect/platform-node-shared": "4.0.0",
     "@knpkv/agent-skills": "workspace:^",
     "@knpkv/ai-codex": "workspace:^",
     "@knpkv/bounded-io": "workspace:^",

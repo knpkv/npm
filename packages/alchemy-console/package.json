@@ -81,6 +81,7 @@
   "dependencies": {
     "@aws-sdk/credential-provider-sso": "^3.973.16",
     "@effect/platform-node": "4.0.0",
+    "@effect/platform-node-shared": "4.0.0",
     "@distilled.cloud/aws": "^1.0.0-rc.13",
     "@knpkv/bounded-io": "workspace:^",
     "@knpkv/browser-pairing": "workspace:^",

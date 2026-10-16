@@ -52,6 +52,7 @@
   "dependencies": {
     "@effect/atom-react": "4.0.0",
     "@effect/platform-node": "4.0.0",
+    "@effect/platform-node-shared": "4.0.0",
     "@knpkv/browser-pairing": "workspace:^",
     "@knpkv/jira-clockify": "workspace:^",
     "@knpkv/rly": "workspace:^",
