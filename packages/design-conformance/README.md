@@ -159,6 +159,13 @@ Before sampling regions, the conformance runner finishes finite animations,
 resets infinite animations and disables transitions. UUID masking and native paint
 readiness precede both metadata and screenshots. Screenshots keep that frozen frame
 with `animations: "allow"`; they do not perform a second animation reset.
+Full-page Chromium capture can itself re-evaluate media queries and font selection.
+The runner waits for fonts and native paint after each screenshot, then re-reads
+region boxes, copy, tokens and document size. It publishes only a frame whose
+before/after evidence agrees. Changed evidence discards that frame and retries,
+up to three screenshots; continued change fails with `BrowserFailure`. Adapters
+must still wait for their application state before capture. This check does not
+replace application readiness or accept a visual mismatch.
 Script-created `element.animate()` calls during capture are cancelled and produce
 a typed `BrowserFailure`, even if they start after metadata sampling. New CSS
 animation identities also fail, including finished forwards-filled animations.

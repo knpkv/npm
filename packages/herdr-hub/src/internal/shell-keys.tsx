@@ -89,10 +89,18 @@ export const isEditableTarget = (target: EventTarget | null): boolean => {
   return Predicate.hasProperty(target, "role") && target.role === "textbox"
 }
 
-/** Exact approvals win over their tab; modal portals own focus while their module slot is hidden. */
-export const focusModulePage = (module: string, page: string, preserveOwnerFocus = false): (() => void) => {
+/**
+ * Exact approvals win over their tab; modal portals own focus while their module slot is hidden.
+ * Pass the navigation-time focus origin to preserve targets claimed by earlier child layout effects.
+ */
+export const focusModulePage = (
+  module: string,
+  page: string,
+  preserveOwnerFocus = false,
+  focusBeforeNavigation: Element | null = document.activeElement
+): (() => void) => {
   let cancelSearch: (() => void) | undefined
-  const previousFocus = document.activeElement
+  const previousFocus = focusBeforeNavigation
   const frame = window.requestAnimationFrame(() => {
     const slot = [...document.querySelectorAll<HTMLElement>("[data-module]")].find(
       (element) => element.dataset.module === module && element.hidden === false

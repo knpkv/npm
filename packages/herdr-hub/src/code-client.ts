@@ -6,7 +6,8 @@ import {
   CodeDiffResult,
   CodeQueue,
   type CodeQueueQuery,
-  type CodeReference
+  type CodeReference,
+  CodeReviewResult
 } from "@knpkv/codecommit-web/host"
 import { decodeBoundedResponseJson } from "@knpkv/herdr-fleet/response"
 import { Effect, Schema } from "effect"
@@ -19,6 +20,7 @@ export class CodeReadFailed extends Schema.TaggedError<CodeReadFailed>()("CodeRe
 export interface CodeModuleReads {
   readonly queue: (query: CodeQueueQuery) => Effect.Effect<CodeQueue, CodeReadFailed>
   readonly detail: (ref: CodeReference) => Effect.Effect<CodeDetail, CodeReadFailed>
+  readonly review: (ref: CodeReference) => Effect.Effect<CodeReviewResult, CodeReadFailed>
   readonly diff: (ref: CodeReference) => Effect.Effect<CodeDiffResult, CodeReadFailed>
   readonly content: (query: CodeDiffContentQuery) => Effect.Effect<CodeDiffContentResult, CodeReadFailed>
 }
@@ -56,6 +58,15 @@ export const loadCodeDetail = (ref: CodeReference) =>
   load(`detail?${new URLSearchParams({ ref })}`, CodeDetail, 131_072)
 export const loadCodeDiff = (ref: CodeReference) =>
   load(`diff?${new URLSearchParams({ ref })}`, CodeDiffResult, 8_388_608)
+export const loadCodeReview = (ref: CodeReference) =>
+  load(
+    `review?${new URLSearchParams({ ref })}`,
+    CodeReviewResult.check(Schema.makeFilter(
+      (result) => result._tag === "Unavailable" || result.reading.workspace.identity.subjectId === ref,
+      { expected: "review reading belongs to the requested opaque Code reference" }
+    )),
+    12_582_912
+  )
 export const loadCodeContent = (query: CodeDiffContentQuery) =>
   load(
     `diff-content?${new URLSearchParams({

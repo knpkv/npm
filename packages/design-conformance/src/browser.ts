@@ -124,6 +124,76 @@ const assertCaptureMotion = async (motion: JSHandle<MotionGuard>): Promise<void>
   }
 }
 
+/** Read the same evidence before and after screenshot-induced style and viewport recalculation. */
+const readCaptureSnapshot = async (page: Page): Promise<Snapshot> => {
+  const raw = await page.evaluate(() => {
+    const properties = [
+      "color",
+      "background-color",
+      "font-family",
+      "font-size",
+      "font-weight",
+      "line-height",
+      "border-top",
+      "border-right",
+      "border-bottom",
+      "border-left",
+      "border-radius",
+      "row-gap",
+      "column-gap",
+      "padding-top",
+      "padding-right",
+      "padding-bottom",
+      "padding-left"
+    ]
+    const elements = Array.from(document.querySelectorAll<HTMLElement>("[data-region]"))
+    return {
+      overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+      regions: elements.filter((element) =>
+        element.checkVisibility({ opacityProperty: true, visibilityProperty: true })
+      ).map((element) => {
+        const rect = element.getBoundingClientRect()
+        const style = getComputedStyle(element)
+        return {
+          name: element.dataset.region,
+          copy: element.innerText,
+          box: { x: rect.x + window.scrollX, y: rect.y + window.scrollY, width: rect.width, height: rect.height },
+          parent: element.parentElement?.closest<HTMLElement>("[data-region]")?.dataset.region ?? null,
+          overflow: element.scrollWidth > element.clientWidth,
+          styles: Object.fromEntries(properties.map((property) => [property, style.getPropertyValue(property)]))
+        }
+      })
+    }
+  })
+  return Schema.decodeUnknownSync(Snapshot)(raw)
+}
+
+const readFrameSize = async (page: Page) =>
+  Schema.decodeUnknownSync(FrameSize)(
+    await page.evaluate(() => ({
+      width: Math.ceil(
+        Math.max(
+          document.body.scrollWidth,
+          document.documentElement.scrollWidth,
+          document.body.offsetWidth,
+          document.documentElement.offsetWidth,
+          document.body.clientWidth,
+          document.documentElement.clientWidth
+        ) * window.devicePixelRatio
+      ),
+      height: Math.ceil(
+        Math.max(
+          document.body.scrollHeight,
+          document.documentElement.scrollHeight,
+          document.body.offsetHeight,
+          document.documentElement.offsetHeight,
+          document.body.clientHeight,
+          document.documentElement.clientHeight
+        ) * window.devicePixelRatio
+      )
+    }))
+  )
+
 /** Visible named regions, resolved tokens, document-space boxes, DOM order and nearest region parent. */
 export const capturePage = (page: Page, shot = page.url()) =>
   browserCall("capture regions", async (): Promise<Capture> => {
@@ -138,76 +208,29 @@ export const capturePage = (page: Page, shot = page.url()) =>
       const restore = await maskUuidText(page)
       try {
         await waitForCapturePaint(page)
-        const raw = await page.evaluate(() => {
-          const properties = [
-            "color",
-            "background-color",
-            "font-family",
-            "font-size",
-            "font-weight",
-            "line-height",
-            "border-top",
-            "border-right",
-            "border-bottom",
-            "border-left",
-            "border-radius",
-            "row-gap",
-            "column-gap",
-            "padding-top",
-            "padding-right",
-            "padding-bottom",
-            "padding-left"
-          ]
-          const elements = Array.from(document.querySelectorAll<HTMLElement>("[data-region]"))
-          return {
-            overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
-            regions: elements.filter((element) =>
-              element.checkVisibility({ opacityProperty: true, visibilityProperty: true })
-            ).map((element) => {
-              const rect = element.getBoundingClientRect()
-              const style = getComputedStyle(element)
-              return {
-                name: element.dataset.region,
-                copy: element.innerText,
-                box: { x: rect.x + window.scrollX, y: rect.y + window.scrollY, width: rect.width, height: rect.height },
-                parent: element.parentElement?.closest<HTMLElement>("[data-region]")?.dataset.region ?? null,
-                overflow: element.scrollWidth > element.clientWidth,
-                styles: Object.fromEntries(properties.map((property) => [property, style.getPropertyValue(property)]))
-              }
-            })
-          }
-        })
-        const snapshot = Schema.decodeUnknownSync(Snapshot)(raw)
-        Schema.decodeUnknownSync(FrameSize)(
-          await page.evaluate(() => ({
-            width: Math.ceil(
-              Math.max(
-                document.body.scrollWidth,
-                document.documentElement.scrollWidth,
-                document.body.offsetWidth,
-                document.documentElement.offsetWidth,
-                document.body.clientWidth,
-                document.documentElement.clientWidth
-              ) * window.devicePixelRatio
-            ),
-            height: Math.ceil(
-              Math.max(
-                document.body.scrollHeight,
-                document.documentElement.scrollHeight,
-                document.body.offsetHeight,
-                document.documentElement.offsetHeight,
-                document.body.clientHeight,
-                document.documentElement.clientHeight
-              ) * window.devicePixelRatio
-            )
-          }))
-        )
         const masks = page.locator("[data-visual-uuid]")
-        const frame = await page.screenshot({ ...frozenScreenshotSettings, mask: [masks], fullPage: true })
-        const scale = await page.evaluate(() => window.devicePixelRatio)
-        const regions = cropRegions(frame, snapshot, scale)
-        await assertCaptureMotion(motion)
-        return { snapshot, frame, regions }
+        // A full-page screenshot can re-evaluate media queries and font selection. Never crop
+        // its pixels with metadata from the preceding layout, or silently accept perpetual drift.
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+          const snapshot = await readCaptureSnapshot(page)
+          const size = await readFrameSize(page)
+          const frame = await page.screenshot({ ...frozenScreenshotSettings, mask: [masks], fullPage: true })
+          await page.evaluate("document.fonts.ready")
+          await waitForCapturePaint(page)
+          await assertCaptureMotion(motion)
+          const after = await readCaptureSnapshot(page)
+          const afterSize = await readFrameSize(page)
+          if (
+            JSON.stringify(snapshot) === JSON.stringify(after) && JSON.stringify(size) === JSON.stringify(afterSize)
+          ) {
+            const scale = await page.evaluate(() => window.devicePixelRatio)
+            return { snapshot, frame, regions: cropRegions(frame, snapshot, scale) }
+          }
+        }
+        throw new BrowserFailure({
+          operation: "capture did not settle",
+          cause: "Region evidence or document size changed across three consecutive screenshots"
+        })
       } finally {
         try {
           await restore.evaluate((undo) => {

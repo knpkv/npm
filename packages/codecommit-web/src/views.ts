@@ -14,7 +14,9 @@ export {
   type CodeHostPage,
   CodeHostView,
   type CodeHostViewProps,
-  type CodeReadState
+  codeReadFailureMessage,
+  type CodeReadState,
+  CodeReadStatusView
 } from "./client/components/host-code-view.js"
 export {
   ApproversCard,
@@ -65,6 +67,17 @@ export {
 export { PRRevisionView, type PRRevisionViewProps } from "./client/components/pr-revision-view.js"
 export { PRRow, type PRRowProps } from "./client/components/pr-row.js"
 export { RecentActivityView, type RecentActivityViewProps } from "./client/components/recent-activity-view.js"
+export { ReviewFindingCard, type ReviewFindingCardProps } from "./client/components/review-finding-card.js"
+export { ReviewRunFallbackView, type ReviewRunFallbackViewProps } from "./client/components/review-run-fallback-view.js"
+export { ReviewSummaryView, type ReviewSummaryViewProps } from "./client/components/review-summary-view.js"
+export {
+  ReviewThreadsFallbackView,
+  type ReviewThreadsFallbackViewProps
+} from "./client/components/review-threads-fallback-view.js"
+export {
+  ReviewWorkspaceNotices,
+  type ReviewWorkspaceNoticesProps
+} from "./client/components/review-workspace-notices.js"
 export { RollingStatus, type RollingStatusProps } from "./client/components/rolling-status.js"
 export { SandboxViewContent, type SandboxViewContentProps } from "./client/components/sandbox-view-content.js"
 export { SandboxesPageView, type SandboxesPageViewProps } from "./client/components/sandboxes-page-view.js"
@@ -89,3 +102,34 @@ export {
   type StalePRsProps
 } from "./client/components/stats-charts.js"
 export { WorkbenchRailView, type WorkbenchRailViewProps } from "./client/components/workbench-rail-view.js"
+export {
+  type CodeReviewReadCompletion,
+  type CodeReviewReadError,
+  type CodeReviewReadFailure,
+  type CodeReviewReadOptions,
+  type CodeReviewReadState,
+  useCodeReviewReading
+} from "./client/hooks/use-code-review-reading.js"
+
+export {
+  ReviewFindingsIndexView,
+  type ReviewFindingsIndexViewProps
+} from "./client/components/review-findings-index-view.js"
+export { reviewThreadElementId, type ReviewThreadTarget } from "./client/review-thread-target.js"
+
+export {
+  ReviewThreadMessagesView,
+  type ReviewThreadMessagesViewProps
+} from "./client/components/review-thread-messages-view.js"
+
+export {
+  ReviewDifferentRevisionView,
+  type ReviewDifferentRevisionViewProps
+} from "./client/components/review-different-revision-view.js"
+
+export { reviewWorkspaceThreads } from "@knpkv/review"
+export { canRenderCodeText } from "./client/components/host-diff-text.js"
+export { type ReviewReadAgainActions, ReviewReadAgainButton } from "./client/components/review-read-again-button.js"
+export { ReviewWorkspaceView, type ReviewWorkspaceViewProps } from "./client/components/review-workspace-view.js"
+export { parseReviewDiffFile, ReviewDiffFileError } from "./client/review-diff-file.js"
+export type { ReviewDiffPlacementError, ReviewParsedDiff } from "./client/review-diff-placement.js"

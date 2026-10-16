@@ -1,12 +1,39 @@
+/* Preflight must be below components from the first import. Keep Connect/Fleet/Work/Hub order. */
+@layer theme, base, hub-preflight, rly.fonts, rly.tokens, rly.reset, rly.base, rly.components, rly.state, connect, fleet, herdr-work, hub, components, utilities;
+
 @import "@knpkv/rly/styles.css";
 @import "@knpkv/herdr-connect/styles.css";
 @import "@knpkv/herdr-work/styles.css";
 @import "@knpkv/codecommit-web/host/style.css";
+@import "@knpkv/codecommit-web/views/style.css";
 @import "./styles.css";
 @import "./superapp.css";
 @import "./today.css";
 @import "./usage-details.css";
 @import "./usage-empty.css";
 @import "./blocked-connect.css";
-
 @import "./host-resources.css";
+
+/* Code review's bundled Tailwind preflight zeroes form-control padding hub-wide. Usage's design keeps the browser's
+   padding, so Usage views (its module and the header outlet it owns) get it back below every Rly and Hub layer. Code
+   keeps the zero block padding its design was drawn with. */
+@layer hub-preflight {
+  :where([data-module="usage"], [data-module-owner="usage"]) :where(button, input, select, textarea) {
+    padding: revert;
+  }
+}
+
+@layer fleet {
+  .code-review-read-announcement {
+    position: absolute;
+    inset-block-start: 0;
+    inset-inline-start: 0;
+    inline-size: 1px;
+    block-size: 1px;
+    margin: 0;
+    padding: 0;
+    overflow: clip;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}

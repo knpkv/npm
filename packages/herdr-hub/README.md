@@ -205,6 +205,13 @@ server-private and never enter HTTP responses or logs. Missing or invalid metada
 field, with no fixed-port fallback. Only a browser viewing this machine's hub uses the link;
 remote viewers retain the credential-host instructions. No extra route, poll or login request is added.
 
+`GET /v1/modules/code/review?ref=…` reads the current immutable diff, completed owner review and
+cached comments through the same authenticated credential-host boundary. It adds no command or
+provider-comment operation. Reviewed revisions remain independent of the current head; unknown
+checks and unavailable cached comments remain explicit. Selected PRs on Pull requests and Reviews
+install the read-only Review/Conversation workspace. The existing Diffs page keeps its explicit,
+cached diff owner and Back/Forward behavior.
+
 Code reads bring a native SQLite dependency into hostd. A JavaScript bundle alone is insufficient:
 the installed `@libsql/client` native packages must match the host platform and runtime. Before
 restarting hostd, the deployment gate must load the installed driver and execute an in-memory
@@ -218,6 +225,40 @@ Only the opaque reference is a normalized authenticated client-visible identifie
 coordinates are never emitted as browser fields or log payloads. References survive restart and
 distinguish accounts. The map retains 10,000 entries and evicts the least recently seen on minting;
 an unknown, tampered or evicted reference returns 404. This bookkeeping grants no provider authority.
+
+Code review selection stays inside the shell's exact Code page. With a valid opaque `ref`, `view`
+selects Review or Conversation, and `thread` stores a JSON object containing only the
+normalized authenticated client-visible `source` and `id`. Neither message/finding prose nor
+provider PR coordinates belong in that URL. Invalid view/thread selectors are repaired independently,
+preserving valid queue/reference fields. Deliberate finding activation delegates one shell-owned
+push with focus null; modified links retain the complete module href. Workspace installation must
+switch to Review, expand secondary if needed and then focus the shared card target. These selectors
+grant no review execution or write authority.
+
+The review controller reads once for an active, visible PR or explicit Read again and interrupts
+when inactive. Ref changes drop the other PR's output immediately. Retained failures and in-flight
+previous values say Previous reading; unauthorized/not-found failures drop protected output.
+One focusable review owner stays mounted through loading and retry. A deliberate thread selector
+waits for a fresh same-ref reading, opens secondary before focusing and is consumed once. Repeated
+activation can focus the same target without requiring a new URL or read. Parent refreshes never
+re-arm focus, and another modal keeps its focus.
+
+One mounted polite atomic host region reuses the existing loading, failure, Code-unavailable and
+absolute Read-time words. Only an accepted same-ref completion replaces its child; parent renders
+and stale/aborted reads do not. Inactive or hidden owners turn it off. The visible loading/failure
+words remain without a duplicate status role. No extra poll, relative-age timer or review action.
+
+Selected PRs occupy the full Code page, with one PR header and recorded checks. The queue returns with its search/filter/page context and focused row. Review stacks files from the immutable diff inventory, reading them serially within one cumulative display budget for rendered text and explicit raw fallbacks. Refused responses consume no display allowance; an explicit file selector narrows that reading. Valid file
+selectors work on the PR pages too; missing indices are replaced without losing the PR/queue.
+Conversation performs no hidden file read. Exact parsed objects feed both Rly rendering and global
+Current-only finding placement and exact current human-discussion anchors; unplaced or outdated rows remain separate, and parse/identity failures are explicit. All, Findings and Comments filters change the thread index without hiding diff/card targets.
+The views stylesheet is loaded alongside the host stylesheet; its shared base layers must remain
+below Rly/host styling. Cross-module browser geometry is part of the final stylesheet gate.
+
+Guide is not installed in the hub until its backing reader exists. A direct `view=guide` link
+is replaced with Review on the same Code page, preserving the PR and valid queue/diff context
+and clearing its thread target. The repair creates no history entry or Guide read. Standalone
+Guide ownership is unchanged.
 
 `GET /v1/modules/connect/needs-you` returns one decoded, deduplicated list per poll. Connect starts a serial approval read when active and visible, repeats five seconds after each read finishes, and interrupts it when hidden or inactive. A six-second browser deadline keeps a stalled read from blocking subsequent polls. A failed refresh retains its previous reading with explicit old-reading copy. Partial readings say At least, failed refreshes say Previous reading, and missing readings say Unknown. Only unexpired requests count as approvals waiting.
 
@@ -293,6 +334,10 @@ Codex orchestration-wrapper support is tracked in
 of 500 records, all 60 calls stayed unknown: 50 JavaScript wrappers and 10 sleep
 calls, with no separate typed nested read/write/command events. This is a local
 sample, not a fleet-wide estimate; lifecycle and Work signals remain independent.
+
+On the full Code review page, retained-read failure, previous-reading time and any host-owned retry precede PR metadata. A retry for content alone sits in Diff. Read and focus ownership stay mounted across these placements; saved-history/comments failures keep their single workspace-owned retry.
+
+The default Code Review view attempts content reads for at most 20 files per reading, in order. Every changed-file row remains visible; later files use the existing aggregate display-limit notice. Narrowing the URL to a single file reads only that file, including files beyond the default limit.
 
 ## Design conformance
 

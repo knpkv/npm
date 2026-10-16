@@ -1,0 +1,19 @@
+{
+  "original": "Approved Export66 visual content retained. Lifecycle and region metadata changes are documented below.",
+  "corrected_export_sha256": "aae9d83e3878d9ccb882b443a4545cc8a25681f4c032dc200cf028ee4b9ca451",
+  "themes": ["dark"],
+  "new_states": 18,
+  "rendered_dark_frames": 66,
+  "standalone_history": "Designed only in this Hub enrollment. Its separate owner requires its own runtime coverage.",
+  "region_mapping": {
+    "header": "At <=599px, existing bold Code mast text/reference and .superapp-phone-title/live; >=600px existing .titles/reference and actual page header/live. Exactly one header; tabs separate.",
+    "action": "Existing Read again button on both sides; wrapper has no action region.",
+    "summary": "Existing summary panel only; revision notice is a sibling region.",
+    "history-notice": "Only when both existing history and comment fallback panels render: history panel is history-notice, comment panel remains notice. Other single history panels remain notice. No wrapper or content removal."
+  },
+  "read_only_variants": 6,
+  "source_reload_fix": "Source-owned breakpoint-change guard. No enrollment lifecycle filter.",
+  "source_export": "28",
+  "verified_source_manifest_files": 17,
+  "reference_set": "Export28 changes only the shell session access line to Local access (the product's loopback session), following main. Export26 added Host resources desktop nav data after Usage. Phone frames, HTML/CSS/fonts and all 33 state region catalogs are unchanged; the designer's DOM diff vs 27 shows exactly one changed element per desktop state (the session line). Export25 revision retained immutable for existing pinned fixture unit datasets; Export26 retained; current capture refs and fixture select 28. No product/adapter/threshold change."
+}

@@ -583,6 +583,7 @@
 
     .superapp-bottom {
       display: grid;
+      font-weight: 430;
       grid-template-columns: repeat(5, minmax(0, 1fr));
       align-items: center;
       gap: 0;
@@ -660,6 +661,49 @@
     display: none;
   }
 
+  /* Mast controls share the design's44px target without changing launchers in other owners. */
+  .superapp-header {
+    gap: var(--rly-space-8);
+  }
+
+  .superapp-header [data-rly-relay-launcher] {
+    min-block-size: 2.75rem;
+    block-size: 2.75rem;
+    padding-inline: var(--rly-space-8);
+    font-size: 0.875rem;
+    font-weight: 520;
+    line-height: 1.2;
+  }
+
+  .superapp-header kbd {
+    min-inline-size: 0;
+    padding-block: 0.2rem;
+    padding-inline: 0.35rem;
+    font: 430 0.75rem / 1 var(--rly-font-mono);
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: 0.25rem;
+    background: var(--rly-color-surface-2);
+  }
+
+  .superapp-header .superapp-icon {
+    inline-size: 1.1875rem;
+    block-size: 1.1875rem;
+  }
+
+  .superapp-header > .superapp-host {
+    gap: 0.4rem;
+    padding-block: 1px;
+    padding-inline: var(--rly-space-8);
+    line-height: 1.2;
+  }
+
+  .superapp-header > .superapp-notifications {
+    display: grid;
+    place-items: center;
+    padding-inline: 0.375rem;
+    color: inherit;
+  }
+
   /* The design sets module navigation in the 430 text weight in every layout; the current module uses 620. */
   .superapp-sidebar,
   .superapp-bottom {
@@ -668,6 +712,7 @@
 
   .superapp-module-nav {
     display: grid;
+    font-weight: 430;
     gap: 0.3rem;
   }
 
@@ -685,6 +730,11 @@
   .superapp-module-nav .superapp-icon {
     inline-size: 1.1875rem;
     block-size: 1.1875rem;
+  }
+
+  .superapp-module-nav > a[data-secondary] .superapp-icon {
+    inline-size: 1.0625rem;
+    block-size: 1.0625rem;
   }
 
   .superapp-host {
@@ -1036,15 +1086,22 @@
     .superapp-header {
       grid-template-columns: auto minmax(0, 1fr) auto auto;
       grid-template-rows: minmax(0, 1fr);
-      gap: var(--rly-space-8);
+      gap: 0;
       padding-block: 0;
+      padding-inline: var(--rly-space-16);
     }
 
     .superapp-header > .superapp-brand {
-      display: flex;
+      display: grid;
+      place-items: center;
       grid-column: 1;
       min-block-size: 2.75rem;
       min-inline-size: 2.75rem;
+      margin-inline: calc(-1 * var(--rly-space-8)) var(--rly-space-8);
+    }
+
+    .superapp-header > .superapp-brand .relay-chef-mark {
+      inline-size: 1.75rem;
     }
 
     .superapp-header > .fleet-shell-relay {
@@ -1064,8 +1121,10 @@
       display: block;
       grid-column: 2;
       grid-row: 1;
+      justify-self: start;
       font-size: 1.0625rem;
       font-weight: 650;
+      line-height: 1.5;
       min-inline-size: 0;
       overflow: clip;
       text-overflow: ellipsis;

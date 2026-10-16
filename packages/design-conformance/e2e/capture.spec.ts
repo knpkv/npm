@@ -46,7 +46,7 @@ test("capture waits for native frames after masking, even with a paused clock", 
   const result = await capture
   expect(result.frame.byteLength).toBeGreaterThan(0)
   expect(screenshots).toBe(1)
-  expect(barriers).toBe(2)
+  expect(barriers).toBe(3)
   expect(await page.locator("[data-visual-uuid]").count()).toBe(0)
 })
 
@@ -431,4 +431,76 @@ test("motion spawned by a freeze event is rejected before sampling or taking a s
     failure: { _tag: "BrowserFailure", cause: { _tag: "BrowserFailure", operation: "late capture animation" } }
   })
   expect(screenshots).toBe(0)
+})
+
+/** Full-page Chromium capture re-evaluates media queries even when the breakpoint is unchanged. */
+test("the first capture settles screenshot-triggered layout before publishing unchanged-source evidence", async ({ page }) => {
+  await installCaptureClock(page)
+  await page.clock.pauseAt(new Date(VISUAL_TIME))
+  await page.setViewportSize({ width: 1280, height: 260 })
+  await page.setContent(`
+    <style>
+      body { margin: 0; }
+      main { inline-size: 120px; block-size: 40px; background: rgb(255, 0, 0); }
+      .measured { block-size: 80px; }
+      footer { margin-block-start: 400px; }
+    </style>
+    <main data-region=content></main><footer>Below the viewport</footer>
+    <script>
+      matchMedia("(max-width: 599px)").addEventListener("change", () => {
+        document.querySelector("main").classList.add("measured");
+      });
+    </script>
+  `)
+  const originalSource = await page.locator("script").textContent()
+  expect(await page.locator("main").evaluate((element) => element.getBoundingClientRect().height)).toBe(40)
+  const first = await Effect.runPromise(capturePage(page))
+  const control = await Effect.runPromise(capturePage(page))
+  expect(await page.locator("script").textContent()).toBe(originalSource)
+  expect(first.snapshot).toEqual(control.snapshot)
+  expect(first.frame).toEqual(control.frame)
+  expect(first.snapshot.regions[0]?.box).toEqual({ x: 0, y: 0, width: 120, height: 80 })
+  expect(paintedBox(PNG.sync.read(Buffer.from(first.frame)), { red: 255, green: 0, blue: 0 }))
+    .toEqual(first.snapshot.regions[0]?.box)
+})
+
+/** A discarded warm-up frame must not make an endlessly changing document look conformant. */
+test("capture refuses geometry that changes on every screenshot and restores UUID masking", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 260 })
+  await page.setContent(`
+    <style>body { margin: 0; } main { inline-size: 120px; block-size: 40px; } footer { margin-block-start: 400px; }</style>
+    <main data-region=content>12345678-1234-1234-1234-123456789012</main><footer>Below the viewport</footer>
+    <script>
+      let height = 40;
+      matchMedia("(max-width: 599px)").addEventListener("change", () => {
+        document.querySelector("main").style.blockSize = ++height + "px";
+      });
+    </script>
+  `)
+  const result = await Effect.runPromise(capturePage(page).pipe(Effect.result))
+  expect(result).toMatchObject({
+    _tag: "Failure",
+    failure: { _tag: "BrowserFailure", cause: { _tag: "BrowserFailure", operation: "capture did not settle" } }
+  })
+  expect(await page.locator("[data-visual-uuid]").count()).toBe(0)
+  expect(await page.locator("main").textContent()).toBe("12345678-1234-1234-1234-123456789012")
+})
+
+/** Whole-frame extent is evidence even if every named region stays still. */
+test("capture settles document size changes outside named regions", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 260 })
+  await page.setContent(`
+    <style>body { margin: 0; } main { block-size: 40px; } footer { block-size: 400px; }</style>
+    <main data-region=content>Workspace</main><footer></footer>
+    <script>
+      matchMedia("(max-width: 599px)").addEventListener("change", () => {
+        document.querySelector("footer").style.blockSize = "800px";
+      });
+    </script>
+  `)
+  const first = await Effect.runPromise(capturePage(page))
+  const control = await Effect.runPromise(capturePage(page))
+  expect(first.snapshot).toEqual(control.snapshot)
+  expect(first.frame).toEqual(control.frame)
+  expect(PNG.sync.read(Buffer.from(first.frame)).height).toBe(840)
 })

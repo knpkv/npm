@@ -1,0 +1,33 @@
+id: no-production-review-write-spike-import
+language: tsx
+severity: error
+message: "The private review write spike must remain outside production entries and routes"
+rule:
+  any:
+    - kind: import_statement
+      has:
+        field: source
+        regex: 'ReviewWriteSpike(?:\.(?:[cm]?[jt]s|tsx|jsx))?["'']$'
+    - kind: export_statement
+      has:
+        field: source
+        regex: 'ReviewWriteSpike(?:\.(?:[cm]?[jt]s|tsx|jsx))?["'']$'
+    - pattern: import($SOURCE)
+      has:
+        field: arguments
+        regex: 'ReviewWriteSpike(?:\.(?:[cm]?[jt]s|tsx|jsx))?["'']'
+    - pattern: require($SOURCE)
+      has:
+        field: arguments
+        regex: 'ReviewWriteSpike(?:\.(?:[cm]?[jt]s|tsx|jsx))?["'']'
+files:
+  - "packages/*/src/**/*.ts"
+  - "packages/*/src/**/*.tsx"
+ignores:
+  - "**/*.test.ts"
+  - "**/*.test.tsx"
+  - "**/generated/**"
+note: |
+  This default-off experiment has no installed authority. Tests may import it
+  directly. No application entry, route or barrel may install it, even behind
+  a conditional import. Computed imports still require package graph review.

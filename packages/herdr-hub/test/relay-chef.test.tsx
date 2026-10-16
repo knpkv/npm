@@ -5,6 +5,7 @@ import { Crypto, Effect } from "effect"
 import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it } from "@effect/vitest"
 import { relayChefArt } from "../src/internal/relay-chef-art.js"
+import { RelayChefMastMark } from "../src/internal/relay-chef-mast-mark.js"
 import { RelayChefMark } from "../src/internal/relay-chef-mark.js"
 
 interface DrawingNode {
@@ -41,6 +42,8 @@ const drawing = (root: Element) => {
 describe("Chef logo drawing", () => {
   it.layer(NodeServices.layer)("Approved source hashes", (it) => {
     const hashes = {
+      markMast: "e751213f0a6346b1d337eee925d63516a24356644a242c77263bebf7b5af0255",
+      contrastMast: "afc4f530316bba42d45f2fc5a70794043e54607a54f91fcb997806a5a137abb7",
       mark: "e183fe6ef1d345f56307ea513cae00cb5ec2ef6cc2113e682812d5d23b698878",
       contrast: "4ca92cc4b077609b0e628546ba79221f1dcf8f77bd27f407d80d44bc0909447d",
       markPhone: "6b43adf5e19375dbca5c7e23f1c979f40ae3c078bfa6b51bd7f24f0b2bc98554",
@@ -53,6 +56,8 @@ describe("Chef logo drawing", () => {
     for (const variant of [
       "mark",
       "contrast",
+      "markMast",
+      "contrastMast",
       "markPhone",
       "contrastPhone",
       "contrastBadge",
@@ -99,11 +104,26 @@ describe("Chef logo drawing", () => {
     expect(host.querySelector("title,desc")).toBeNull()
   })
 
+  it("renders the approved28px mast drawing without reusing the24px launcher geometry", () => {
+    const host = document.createElement("div")
+    host.innerHTML = renderToStaticMarkup(<RelayChefMastMark />)
+    expect(host.querySelector("svg")?.getAttribute("width")).toBe("28")
+    for (const variant of ["markMast", "contrastMast"] satisfies ReadonlyArray<keyof typeof relayChefArt>) {
+      const kind = variant === "markMast" ? "mark" : "contrast"
+      const actual = host.querySelector(`[data-relay-chef-drawing="${kind}"][data-relay-chef-size="28"]`)
+      expect(actual).not.toBeNull()
+      if (actual === null) return
+      const expected = new DOMParser().parseFromString(relayChefArt[variant], "image/svg+xml").documentElement
+      expect(drawing(actual)).toEqual(drawing(expected))
+    }
+  })
+
   it("keeps every clip local when the sidebar and launcher render together", () => {
     const host = document.createElement("div")
     host.innerHTML = renderToStaticMarkup(
       <>
         <RelayChefMark />
+        <RelayChefMastMark />
         <RelayChefMark />
       </>
     )

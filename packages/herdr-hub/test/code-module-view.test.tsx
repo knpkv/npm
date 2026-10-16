@@ -24,6 +24,7 @@ describe("Code module reads", { concurrent: false }, () => {
   const defaults: CodeModuleReads = {
     queue: () => Effect.succeed(queue),
     detail: () => Effect.succeed({ _tag: "Unavailable", reason: "permission_required", host: null }),
+    review: () => Effect.succeed({ _tag: "Unavailable", reason: "permission_required", host: null }),
     diff: () => Effect.succeed({ _tag: "Unavailable", reason: "permission_required", host: null }),
     content: () => Effect.succeed({ _tag: "Unavailable", reason: "permission_required", host: null })
   }
@@ -109,12 +110,77 @@ describe("Code module reads", { concurrent: false }, () => {
       "pull-requests",
       closeSelection
     )
-    await act(async () => vi.waitFor(() => expect(document.querySelector('[role="dialog"]')).not.toBeNull()))
-    const close = document.querySelector<HTMLButtonElement>('button[aria-label="Close pull request"]')
+    expect(document.querySelector("[data-code-review-page]")).not.toBeNull()
+    const close = document.querySelector<HTMLAnchorElement>('[aria-label="Code pages"] a[aria-current="page"]')
     if (close === null) return expect.unreachable()
     await act(async () => close.click())
     expect(closeSelection).toHaveBeenCalledExactlyOnceWith("?filter=all&search=ready&offset=50#code/pull-requests")
     expect(navigate).not.toHaveBeenCalled()
+  })
+
+  it("keeps the queue PR link and ordinary delegated selection identical, leaving modified clicks native", async () => {
+    const target: CodeReference = "00000000-0000-4000-8000-000000000002"
+    const read = vi.fn(
+      () =>
+        ({
+          ...queue,
+          items: [
+            {
+              ref: target,
+              id: "8",
+              repository: "example",
+              title: "Other pull request",
+              author: "contributor",
+              status: "OPEN",
+              approval: "waiting",
+              createdAt: 1_000,
+              updatedAt: 1_000,
+              observedAt: 1_000
+            }
+          ]
+        }) satisfies CodeQueue
+    )
+    const reads = { ...defaults, queue: () => Effect.sync(read) }
+    const query = new URLSearchParams({
+      filter: "all",
+      search: "ready",
+      offset: "50"
+    })
+    const navigate = await render(reads, query.toString())
+    await act(async () => vi.waitFor(() => expect(read).toHaveBeenCalledOnce()))
+    const link = document.querySelector<HTMLAnchorElement>(".code-host-row")
+    if (link === null) return expect.unreachable()
+    const expected = `?filter=all&search=ready&offset=50&ref=${target}#code/pull-requests`
+    expect(link.getAttribute("href")).toBe(expected)
+    const modified = new MouseEvent("click", { bubbles: true, cancelable: true, button: 0, ctrlKey: true })
+    await act(async () => link.dispatchEvent(modified))
+    expect(modified.defaultPrevented).toBe(false)
+    expect(navigate).not.toHaveBeenCalled()
+    const ordinary = new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 })
+    await act(async () => link.dispatchEvent(ordinary))
+    expect(ordinary.defaultPrevented).toBe(true)
+    expect(navigate).toHaveBeenCalledExactlyOnceWith(expected, "push", null)
+  })
+
+  it("repairs an uninstalled Guide selection to Review with one replace, preserving its PR and queue context", async () => {
+    const query = new URLSearchParams({
+      filter: "all",
+      search: "ready",
+      offset: "50",
+      ref,
+      view: "guide",
+      thread: JSON.stringify({ source: "agent", id: "F1" })
+    })
+    const navigate = await render(defaults, query.toString())
+    expect(navigate).toHaveBeenCalledExactlyOnceWith(
+      `?filter=all&search=ready&offset=50&ref=${ref}#code/pull-requests`,
+      "replace",
+      null
+    )
+    expect(document.querySelector("[data-code-review-page]")).not.toBeNull()
+    expect(document.querySelector('[role="dialog"]')).toBeNull()
+    expect(document.body.textContent).not.toContain("No guide")
+    expect([...document.querySelectorAll("a, button")].some((element) => element.textContent === "Guide")).toBe(false)
   })
 
   it("repairs only active Code selectors without taking focus or rewriting Fleet approval targets", async () => {

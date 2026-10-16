@@ -45,7 +45,7 @@ const builtinSkills: ReadonlyArray<ReviewSkillDefinition> = [
       "Apply the PR Review playbook:",
       "- Review correctness, security, reliability, performance, maintainability, accessibility, architecture, and tests.",
       "- Report only concrete, actionable defects introduced by the supplied patch.",
-      "- Assign P1 Critical to broken functionality, security vulnerabilities, or data loss; P2 High to significant bugs, poor UX, or missing validation; P3 Medium to maintainability problems or minor bugs; and P4 Low to style, documentation, or minor improvements.",
+      "- Assign P0 Blocker to an immediate release-blocking exploit or irreversible data loss; P1 Critical to broken functionality, security vulnerabilities, or data loss; P2 High to significant bugs, poor UX, or missing validation; P3 Medium to maintainability problems or minor bugs; and P4 Low to style, documentation, or minor improvements.",
       "- Give each issue an exact changed coordinate when the patch supports one.",
       "- Make the summary scannable and the recommendation directly implementable."
     ].join("\n")

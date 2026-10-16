@@ -75,6 +75,20 @@ Governed merge remains deliberately unavailable. CodeCommit’s pull-request mer
 
 Local SQLite cache via `@effect/sql-libsql`. Stores PRs, comments, notifications, and subscriptions for instant search and offline access.
 
+`CacheService/HostReads.js` attaches an existing owner cache without migration or permission repair.
+Its `comments` method reads a persisted `pr_comments` snapshot by the exact server-private account,
+region, repository and PR coordinates. Legacy coordinate-free rows are accepted only when the unique
+cached PR has those exact coordinates; an exact comment row wins. It makes no provider call and exposes
+no comment writer. Missing snapshots return `null`; cached empty conversations return an empty locations
+array with their cached capture timestamp. Corrupt snapshots fail with `HostCommentsReadError`
+reason `corrupt`; valid snapshots larger than the host view can show fail with reason `over_limit`.
+SQL or cache attachment failures remain `CacheError`. The owner writes all provider pages; this reader
+accepts at most 500 locations, 64 reply levels and 20,000 JSON nodes. JSON is capped at 1 MiB in SQLite
+before transfer. A 256-level structural bound precedes strict recursive decoding.
+The result remains server-private: provider author identifiers and commit locators require normalization
+before authenticated HTTP and must not appear in public or unauthenticated output. The capture timestamp
+does not assert that comments are current at the provider.
+
 **Repos** — Each uses `Effect.Service` with `dependencies: [DatabaseLive]`:
 
 - `PullRequestRepo` — CRUD + full-text search via FTS5

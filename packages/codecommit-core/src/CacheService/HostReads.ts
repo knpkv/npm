@@ -12,8 +12,12 @@ import * as SqlClient from "effect/sql/SqlClient"
 import * as Statement from "effect/sql/Statement"
 import { AuditLogRepo, type NewAuditLogEntry } from "../PermissionService/AuditLog.js"
 import { CacheError } from "./CacheError.js"
+import { type HostCachedComments, type HostCommentsReadError, readHostComments } from "./internal/HostComments.js"
 import { verifyExistingPrivateDatabasePath } from "./internal/PrivateDatabasePathNode.js"
 import { CachedPullRequest } from "./repos/PullRequestRepo/internal.js"
+
+export { HostCommentsReadError } from "./internal/HostComments.js"
+export type { HostCachedComments } from "./internal/HostComments.js"
 
 const MigrationRows = Schema.Array(Schema.Struct({ migrationId: Schema.Int }))
 const QueueQuery = Schema.Struct({
@@ -41,6 +45,10 @@ export interface HostCacheReads {
     readonly profiles: ReadonlyArray<string> | null
   }) => Effect.Effect<ReadonlyArray<CachedPullRequest>, CacheError>
   readonly exact: (coordinates: HostCacheCoordinates) => Effect.Effect<CachedPullRequest | null, CacheError>
+  /** Existing owner comments only; null means no snapshot, never an empty conversation. */
+  readonly comments: (
+    coordinates: HostCacheCoordinates
+  ) => Effect.Effect<HostCachedComments | null, CacheError | HostCommentsReadError>
   readonly log: (entry: NewAuditLogEntry) => Effect.Effect<void, CacheError>
 }
 
@@ -121,6 +129,10 @@ export const attachHostCache = Effect.fn("CacheService.attachHostCache")(functio
         yield* verifySchema()
         yield* auditRepo.log(entry)
       })).pipe(cacheError("HostCache.audit"))
+    }),
+    comments: Effect.fn("HostCache.comments")(function*(coordinates: HostCacheCoordinates) {
+      yield* verifySchema()
+      return yield* readHostComments(sql, coordinates)
     })
   } satisfies HostCacheReads
 })

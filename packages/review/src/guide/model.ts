@@ -3,10 +3,11 @@
  *
  * `guide.json` is Plannotator's shape, unchanged, so the same file still feeds
  * `plannotator guide export`. `findings.json` is ours: the Secure Coding Review
- * checklist and the P1–P4 Issues a review wrote, each Issue pointing at a file and,
+ * checklist and the P0–P4 Issues a review wrote, each Issue pointing at a file and,
  * when the review gave one, a line. The patch is a plain `git diff`.
  */
 import * as Schema from "effect/Schema"
+import { ReviewSeverity } from "../model.js"
 
 /** One attributable run; missing counters are unknown, never zero. */
 const Count = Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0))
@@ -85,7 +86,7 @@ export type Guide = typeof Guide.Type
 
 // ── findings.json ─────────────────────────────────────────────────────────────
 
-export const Severity = Schema.Literals(["P1", "P2", "P3", "P4"])
+export const Severity = ReviewSeverity
 export type Severity = typeof Severity.Type
 
 export const Verdict = Schema.Literals(["Yes", "No", "N/A"])

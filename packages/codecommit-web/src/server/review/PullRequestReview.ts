@@ -11,6 +11,7 @@ import * as Crypto from "effect/Crypto"
 import * as FileSystem from "effect/FileSystem"
 import type * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import type * as Semaphore from "effect/Semaphore"
+import { quoteGitPath } from "../../internal/git-path.js"
 
 import {
   type PullRequestDiffContentResponse,
@@ -341,49 +342,6 @@ export const loadPullRequestDiffContent = Effect.fn("PullRequestReview.loadPullR
   }
 })
 
-const gitPathEscape = (byte: number): string | undefined => {
-  switch (byte) {
-    case 0x07:
-      return "\\a"
-    case 0x08:
-      return "\\b"
-    case 0x09:
-      return "\\t"
-    case 0x0a:
-      return "\\n"
-    case 0x0b:
-      return "\\v"
-    case 0x0c:
-      return "\\f"
-    case 0x0d:
-      return "\\r"
-    case 0x22:
-      return "\\\""
-    case 0x5c:
-      return "\\\\"
-    default:
-      return byte < 0x20 || byte === 0x7f || byte >= 0x80
-        ? `\\${byte.toString(8).padStart(3, "0")}`
-        : undefined
-  }
-}
-
-/** Match Git's default C-style path quoting while leaving ordinary paths readable. */
-const quoteGitPath = (path: string): string => {
-  let escaped = ""
-  let requiresQuotes = false
-  for (const byte of new TextEncoder().encode(path)) {
-    const replacement = gitPathEscape(byte)
-    if (replacement === undefined) {
-      escaped += String.fromCharCode(byte)
-    } else {
-      escaped += replacement
-      requiresQuotes = true
-    }
-  }
-  return requiresQuotes ? `"${escaped}"` : escaped
-}
-
 const patchSidePath = (
   side: "a" | "b",
   metadata: ReadClient.CodeCommitBlobMetadata | null
@@ -686,7 +644,7 @@ export const makeRelayReviewPrompt = (
     : [
       focusByKind[kind],
       "Apply a broad PR review and a high-confidence diff review. Report only concrete, actionable defects introduced by the supplied patch and distinguish observed evidence from inference.",
-      "Return one JSON object and no prose or Markdown. Shape: {\"findings\":[{\"id\":\"F1\",\"priority\":\"P1|P2|P3|P4\",\"title\":\"short issue title\",\"summary\":\"one-line impact summary\",\"details\":\"evidence and failure mode\",\"recommendation\":\"specific fix\",\"verification\":\"evidence checked; say Static patch review only when no check ran\",\"publicationTarget\":\"pr-comment|line-comment\",\"location\":{\"scope\":\"general\"}|{\"scope\":\"file\",\"filePath\":\"path\"}|{\"scope\":\"line\",\"filePath\":\"path\",\"line\":1,\"side\":\"before|after\"}}],\"verdict\":\"short verdict\"}.",
+      "Return one JSON object and no prose or Markdown. Shape: {\"findings\":[{\"id\":\"F1\",\"priority\":\"P0|P1|P2|P3|P4\",\"title\":\"short issue title\",\"summary\":\"one-line impact summary\",\"details\":\"evidence and failure mode\",\"recommendation\":\"specific fix\",\"verification\":\"evidence checked; say Static patch review only when no check ran\",\"publicationTarget\":\"pr-comment|line-comment\",\"location\":{\"scope\":\"general\"}|{\"scope\":\"file\",\"filePath\":\"path\"}|{\"scope\":\"line\",\"filePath\":\"path\",\"line\":1,\"side\":\"before|after\"}}],\"verdict\":\"short verdict\"}.",
       "Assign stable unique IDs F1, F2, and so on. Use a line location only when the exact changed line is visible; otherwise use file or general. Return an empty findings array when there are no actionable defects."
     ]
   return [

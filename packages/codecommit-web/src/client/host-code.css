@@ -66,6 +66,27 @@
     color: var(--rly-color-text-1);
     font-weight: 600;
   }
+  [data-code-review-owner] > .code-host-tabs {
+    flex-wrap: nowrap;
+    gap: 0.25rem;
+    overflow-x: auto;
+    scrollbar-width: none;
+    font-weight: 430;
+  }
+  [data-code-review-owner] > .code-host-tabs a {
+    padding-inline: 0.75rem;
+    flex: none;
+    margin-block-end: -1px;
+    font-size: 0.9375rem;
+    line-height: 1.5;
+    white-space: nowrap;
+  }
+  [data-code-review-owner] > .code-host-tabs [aria-current="page"] {
+    font-weight: 560;
+  }
+  [data-code-review-owner] > .code-host-tabs a:focus-visible {
+    outline-offset: calc(-1 * var(--rly-focus-ring-width));
+  }
   .code-host-controls {
     display: flex;
     flex-wrap: wrap;
@@ -341,5 +362,52 @@
       padding-inline: var(--rly-space-20);
       padding-block-start: max(var(--rly-space-20), env(safe-area-inset-top, 0px));
     }
+  }
+  .code-review-status,
+  .code-review-pending {
+    min-inline-size: 0;
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-group);
+    color: var(--rly-color-text-1);
+    background: var(--rly-color-surface-1);
+  }
+  .code-review-status {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.6rem 1rem;
+    padding-block: 0.75rem;
+    padding-inline: 1rem;
+  }
+  .code-review-status-copy {
+    display: grid;
+    gap: 0.2rem;
+    min-inline-size: 0;
+  }
+  .code-review-status p {
+    margin: 0;
+    font-size: 0.875rem;
+    line-height: 1.5;
+    white-space: pre-line;
+  }
+  .code-review-status p + p {
+    color: var(--rly-color-text-2);
+  }
+  .code-review-status-body {
+    display: grid;
+    gap: 0.2rem;
+    min-inline-size: 0;
+  }
+
+  .code-review-pending {
+    padding-block: 2rem;
+    padding-inline: 1.25rem;
+  }
+  .code-review-pending p {
+    margin: 0;
+    font-size: 0.9375rem;
+    line-height: 1.5;
+    color: var(--rly-color-text-2);
   }
 }

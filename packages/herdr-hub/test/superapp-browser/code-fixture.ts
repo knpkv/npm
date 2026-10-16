@@ -5,11 +5,24 @@ import type {
   CodePullRequest,
   CodeQueue,
   CodeQueueQuery,
+  CodeReviewResult,
   CodeUnavailable
 } from "@knpkv/codecommit-web/host"
+import { CodeReviewResult as CodeReviewResultSchema } from "@knpkv/codecommit-web/host"
+import { Schema } from "effect"
 
 export const CODE_REF = "00000000-0000-4000-8000-000000000001"
 export const CODE_OTHER_REF = "00000000-0000-4000-8000-000000000002"
+export const CODE_PRIMARY_CLAIM = "The cached reading needs an explicit guard."
+export const CODE_SECONDARY_CLAIM = "Keep the bound visible."
+export const CODE_REVIEW_STATES = [
+  "normal",
+  "historyfailed",
+  "commentsfailed",
+  "bothfailed",
+  "different",
+  "unavailable"
+]
 const unavailable = (state: string): CodeUnavailable | null => {
   const reason = state === "permission"
     ? "permission_required"
@@ -128,3 +141,101 @@ export const codeContentFixture = (index: number, revisionId: string, state: str
           : "export const bound = 100\n"
       }
     }
+
+/** Synthetic saved snapshots only. No review execution or provider comments read. */
+export const codeReviewFixture = (ref: string, now: number, state: string): CodeReviewResult | null => {
+  const diff = codeDiffFixture(ref, now, state)
+  if (diff === null || diff._tag === "Unavailable") return diff
+  const identity = {
+    namespace: "codecommit",
+    subjectId: ref,
+    revisionId: diff.diff.revisionId,
+    baseRevision: diff.diff.baseCommit,
+    headRevision: diff.diff.headCommit
+  }
+  const finding = (severity: "P1" | "P2", claim: string) => ({
+    severity,
+    claim,
+    axis: null,
+    confidence: null,
+    summary: null,
+    why: "Recorded evidence from the saved review.",
+    recommendation: "Keep the reading explicit.",
+    verification: "Check the saved reading.",
+    requirement: null,
+    patch: null,
+    disposition: { _tag: "Open" }
+  })
+  return Schema.decodeUnknownSync(CodeReviewResultSchema, { onExcessProperty: "error" })({
+    _tag: "Ready",
+    reading: {
+      diff: diff.diff,
+      workspace: {
+        identity,
+        observedAt: now,
+        run: state === "historyfailed" || state === "bothfailed" ? { _tag: "Unavailable", reason: "invalid" } : {
+          _tag: "Ready",
+          run: {
+            id: "saved-run",
+            identity: state === "different" ? { ...identity, headRevision: "old-head" } : identity,
+            profile: null,
+            kind: "review",
+            completedAt: now - 60_000,
+            summary: ref === CODE_REF
+              ? "Keep the cached reading and bound explicit."
+              : "The other saved review is independent.",
+            explanation: null,
+            risks: null,
+            focus: null,
+            rules: null,
+            threads: [
+              {
+                id: "primary",
+                source: "agent",
+                anchor: { _tag: "Line", path: "src/reading.ts", line: 1, side: "after", outdated: false },
+                resolved: false,
+                messages: [],
+                finding: finding("P1", CODE_PRIMARY_CLAIM)
+              },
+              {
+                id: "secondary",
+                source: "agent",
+                anchor: { _tag: "Line", path: "src/bounds.ts", line: 1, side: "after", outdated: false },
+                resolved: false,
+                messages: [{
+                  id: "discussion",
+                  author: "Example reviewer",
+                  createdAt: now - 30_000,
+                  text: "A recorded discussion about the bound.",
+                  deleted: false
+                }],
+                finding: finding("P2", CODE_SECONDARY_CLAIM)
+              }
+            ]
+          }
+        },
+        conversations: state === "commentsfailed" || state === "bothfailed" ?
+          { _tag: "Unavailable", reason: "not_cached" } :
+          {
+            _tag: "Ready",
+            observedAt: now,
+            threads: [{
+              id: "human",
+              source: "codecommit",
+              anchor: { _tag: "Unanchored" },
+              resolved: false,
+              finding: null,
+              messages: [{
+                id: "note",
+                author: "Example author",
+                createdAt: now - 20_000,
+                text: "Cached discussion remains available.",
+                deleted: false
+              }]
+            }]
+          },
+        checks: { _tag: "Unknown" }
+      }
+    }
+  })
+}

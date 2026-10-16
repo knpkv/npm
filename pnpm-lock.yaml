@@ -705,6 +705,9 @@ importers:
       '@knpkv/relay':
         specifier: workspace:^
         version: link:../relay
+      '@knpkv/review':
+        specifier: workspace:^
+        version: link:../review
       diff:
         specifier: 9.0.0
         version: 9.0.0
@@ -730,9 +733,6 @@ importers:
       '@knpkv/relay-product':
         specifier: workspace:^
         version: link:../relay-product
-      '@knpkv/review':
-        specifier: workspace:^
-        version: link:../review
       '@knpkv/rly':
         specifier: workspace:^
         version: link:../rly
@@ -1779,9 +1779,6 @@ importers:
 
   packages/review:
     dependencies:
-      '@knpkv/rly':
-        specifier: workspace:^
-        version: link:../rly
       effect:
         specifier: 4.0.0
         version: 4.0.0
@@ -1792,6 +1789,9 @@ importers:
       '@effect/vitest':
         specifier: 4.0.0
         version: 4.0.0(effect@4.0.0)(vitest@5.0.3)
+      '@knpkv/rly':
+        specifier: workspace:^
+        version: link:../rly
       '@playwright/test':
         specifier: 1.63.0
         version: 1.63.0

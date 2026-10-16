@@ -260,7 +260,8 @@
     .superapp-shell[data-usage-header="grouped"] .superapp-header > .superapp-brand {
       display: grid;
       place-items: center;
-      margin-inline-start: -8px;
+      /* Both sides: the shell's phone brand also sets an end margin, which would push the title off the design. */
+      margin-inline: -8px 0;
     }
 
     .usage-empty-chef {

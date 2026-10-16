@@ -30,6 +30,7 @@ import {
 import { ReviewKind, ReviewProfileConfig, reviewProfileSkillLimit } from "@knpkv/codecommit-core/ReviewProfile.js"
 import { WeeklyStats } from "@knpkv/codecommit-core/StatsService/WeeklyStats.js"
 import { BackendStatus, DecisionState, RelayBackendId, SessionInfo } from "@knpkv/relay"
+import { ReviewHistoryFailureReason, ReviewSeverity } from "@knpkv/review"
 import { Schema } from "effect"
 import {
   HttpApi,
@@ -207,7 +208,7 @@ const RelayReviewLocation = Schema.Union([
 
 export const RelayReviewFinding = Schema.Struct({
   id: RelayReviewFindingId,
-  priority: Schema.Literals(["P1", "P2", "P3", "P4"]),
+  priority: ReviewSeverity,
   title: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200)),
   summary: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(500)),
   details: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(4_000)),
@@ -274,7 +275,8 @@ export const PullRequestRelayReviewResponse = Schema.Struct({
   headCommit: Schema.String,
   kind: RelayReviewKind,
   profile: RelayReviewProfile,
-  result: RelayReviewResult
+  result: RelayReviewResult,
+  historyWarning: Schema.optionalKey(Schema.Struct({ reason: ReviewHistoryFailureReason }))
 }).check(
   Schema.makeFilter(
     (response) =>

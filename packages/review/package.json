@@ -61,12 +61,12 @@
     "test:browser": "pnpm --filter '@knpkv/review^...' --sort run build && pnpm build && playwright test"
   },
   "dependencies": {
-    "@knpkv/rly": "workspace:^",
     "effect": "4.0.0"
   },
   "devDependencies": {
     "@effect/platform-node": "4.0.0",
     "@effect/vitest": "4.0.0",
+    "@knpkv/rly": "workspace:^",
     "@playwright/test": "1.63.0",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
@@ -81,7 +81,13 @@
     "vitest": "catalog:"
   },
   "peerDependencies": {
+    "@knpkv/rly": "workspace:^",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
+  },
+  "peerDependenciesMeta": {
+    "@knpkv/rly": {
+      "optional": true
+    }
   }
 }

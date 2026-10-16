@@ -4,10 +4,42 @@ Provider-neutral review contracts, pure browser runtime transitions, and control
 
 The package owns exact thread identity, complete execution-profile selection, and retained-result presentation. Product adapters keep authentication, CSRF, provider execution, governance, publication, and persistence local.
 
+## Installation
+
+Headless imports from `@knpkv/review` do not need Rly. Rly is an optional peer so
+contract-only consumers do not install the UI dependency tree.
+
+Install `@knpkv/rly` explicitly when using `@knpkv/review/react`,
+`@knpkv/review/guide`, `@knpkv/review/guide/react` or `@knpkv/review/guide/export`.
+The guide entry includes Rly-backed diff placement as well as schemas. React UI
+and guide exports also require the React peers:
+
+```sh
+pnpm add @knpkv/review @knpkv/rly react react-dom
+```
+
 ```ts
 import { presentReviewResult, resolveReviewProfile } from "@knpkv/review"
 import { ReviewProfileControl, ReviewResultStatus } from "@knpkv/review/react"
 ```
+
+## Workspace readings
+
+`ReviewWorkspace` joins the current immutable PR identity with a retained completed `ReviewRun`,
+cached conversation threads and an independent checks reading. The run keeps its reviewed base/head
+when the current PR moves; a suggested patch must name that reviewed head and its anchored file.
+Unknown checks, absent runs and unavailable conversations remain explicit. `ReviewRunReading`
+distinguishes `NotRecorded`, `Ready` and `Unavailable`; unavailable history never discards the
+current diff or comments. A conversation failure
+distinguishes missing cache, oversized output and corrupt data. Adapters must state which sources
+they read; a CodeCommit cache does not establish Slack availability.
+
+Findings preserve P0 through P4, axis and confidence when reported, and nullable provenance when
+the producer does not report it. Explain output remains separate from findings. Thread identity is
+the source and thread ID within the exact PR reading; message authors are display data. Messages
+retain their own timestamp and deletion state. Schemas bound text, threads and messages, and reject
+duplicate thread identities. Decode persisted or transported data with `onExcessProperty: "error"`.
+These contracts supply no provider, publication or fix-execution authority.
 
 ## Guided reviews
 
@@ -97,7 +129,7 @@ head and any supplied comparison base. Optional
 `source.pr` contains `url`, `number`, and `title`; optional `generator` contains
 `engine` and `model`. Findings contain `checklist` entries with `item`,
 `verdict` (`Yes`, `No`, `N/A`), and optional `note`; plus `issues` with unique
-numeric `id`, `severity` (`P1` through `P4`), `file`, `summary`, and optional
+numeric `id`, `severity` (`P0` through `P4`), `file`, `summary`, and optional
 `line`, `side` (`old` or `new`, default new), `explanation`, `recommendation`, and `status`.
 `line` must be a positive integer. A supplied `status` replaces the fix recommendation.
 Keep `summary` short; put the trigger, code path, and consequence in Markdown `explanation`.
@@ -138,3 +170,13 @@ as not recorded, while measured zero stays zero. Cost display preserves the
 supplied numeric precision, including sub-cent amounts. Runs stay separate because
 implementation, review, and guide sessions may overlap. Product adapters own
 telemetry collection, provider locators, storage, and publishing.
+
+### Thread projection
+
+`reviewWorkspaceThreads` joins the readable run and conversation snapshots without changing thread identities, anchors or dispositions. It returns a typed `ThreadsConflict` on duplicate source/id within or across snapshots. A UI must show that conflict separately; it must not replace it with an empty list or an unavailable-history state.
+
+P0/P1 finding rows form `primary`; P2-P4 form `secondary`, intended for the collapsed group. Both use the schema's severity order and preserve input order for ties. Non-finding `conversations` remain a separate list in run-then-conversations input order. The total counts all threads, without filtering on resolved or disposition. `NotRecorded` is known absence; an unavailable run or conversation snapshot yields `{ _tag: "AtLeast", n }` instead of an exact total. AtLeast zero means unknown, never zero threads. This projection performs no reads, mutations or review commands.
+
+`reviewRunReadingForWorkspace` derives presentation from a decoded workspace. NotRecorded and Unavailable keep their original object and reason. A readable run becomes Current only when namespace, subject, revision, base and head all match the reading identity, with null base equal only to null base. DifferentRevision keeps the original immutable run and the current identity; it makes no ancestry claim and changes no persisted/wire record.
+
+`currentReviewLineFindings` accepts only the Current variant. It returns non-outdated line-anchored findings in recorded order, preserving their thread/finding objects. General, file-level and outdated findings stay with the parent index/read panels. A renderer still verifies each candidate path/side/line exists in the exact diff and keeps unplaced rows visible separately. Current is relative to this read's identity, never write permission: command owners still recheck head, permission and idempotency.

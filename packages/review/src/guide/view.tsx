@@ -53,7 +53,9 @@ const Severity = ({ issue }: { readonly issue: Issue }) => (
   <StateLabel
     label={issue.severity}
     size="compact"
-    tone={issue.severity === "P1" ? "critical" : issue.severity === "P2" ? "caution" : "neutral"}
+    tone={
+      issue.severity === "P0" || issue.severity === "P1" ? "critical" : issue.severity === "P2" ? "caution" : "neutral"
+    }
   />
 )
 

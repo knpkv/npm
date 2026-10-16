@@ -6,7 +6,8 @@ import {
   CodeDiffContentResult,
   CodeDiffResult,
   CodeQueue,
-  CodeQueueQuery
+  CodeQueueQuery,
+  CodeReviewResult
 } from "@knpkv/codecommit-web/host"
 import { FleetLimits, FleetUsage } from "@knpkv/herdr-connect"
 import { FleetConnectAgentPage } from "@knpkv/herdr-connect/model"
@@ -21,7 +22,16 @@ import { HostResources } from "../../src/host-resources-model.js"
 import { dashboardPage } from "../../src/internal/dashboard-page.js"
 import { NeedsYouResult } from "../../src/modules.js"
 import { relayIconSvg } from "../../src/relay-icon.js"
-import { codeContentFixture, codeDetailFixture, codeDiffFixture, codeQueueFixture } from "./code-fixture.js"
+import {
+  CODE_OTHER_REF,
+  CODE_REF,
+  CODE_REVIEW_STATES,
+  codeContentFixture,
+  codeDetailFixture,
+  codeDiffFixture,
+  codeQueueFixture,
+  codeReviewFixture
+} from "./code-fixture.js"
 import { connectFixture } from "./connect-fixture.js"
 import { resourceFixtureNow, resourcesFixture, resourcesStates } from "./resources-fixture.js"
 import { limitsFixture, usageFixture } from "./usage-fixture.js"
@@ -39,6 +49,16 @@ const program = Effect.gen(function*() {
   const fs = yield* FileSystem.FileSystem
   const now = yield* Clock.currentTimeMillis
   const port = yield* Config.Int("SUPERAPP_FIXTURE_PORT")
+  const reviewReadings = new Map<string, CodeReviewResult>()
+  for (const state of CODE_REVIEW_STATES) {
+    for (const ref of [CODE_REF, CODE_OTHER_REF]) {
+      const reading = yield* Effect.try({
+        try: () => codeReviewFixture(ref, now, state),
+        catch: (cause) => new FixtureStateError({ state: `code-review/${state}/${ref}`, cause })
+      })
+      if (reading !== null) reviewReadings.set(`${state}/${ref}`, reading)
+    }
+  }
   // Decode every synthetic state before listening; a bad fixture names its state and cannot kill a mid-run server.
   const connectReadings = new Map<string, FleetConnectAgentPage>()
   for (const state of ["normal", "ready", "empty", "partial", "unknown", "design", "designready", "designpartial"]) {
@@ -449,6 +469,15 @@ const program = Effect.gen(function*() {
           return
         }
         response.end(Schema.encodeSync(Schema.fromJsonString(CodeDetail))(reading))
+      } else if (url.pathname.endsWith("/review")) {
+        const ref = url.searchParams.get("ref") ?? ""
+        const reading = reviewReadings.get(`${CODE_REVIEW_STATES.includes(state) ? state : "normal"}/${ref}`)
+        if (reading === undefined) {
+          response.writeHead(404)
+          response.end()
+          return
+        }
+        response.end(Schema.encodeSync(Schema.fromJsonString(CodeReviewResult))(reading))
       } else if (url.pathname.endsWith("/diff")) {
         const reading = codeDiffFixture(url.searchParams.get("ref") ?? "", now, state)
         if (reading === null) {

@@ -12,6 +12,11 @@ const boundedIdentifier = (maximumLength: number) =>
 export const ReviewKind = Schema.Literals(["review", "security", "tests", "explain"])
 export type ReviewKind = typeof ReviewKind.Type
 
+/** P0 is blocking; P4 remains valid for the shipped guide and review contracts. */
+export const ReviewSeverity = Schema.Literals(["P0", "P1", "P2", "P3", "P4"])
+export type ReviewSeverity = typeof ReviewSeverity.Type
+export const reviewSeverityOrder: ReadonlyArray<ReviewSeverity> = ReviewSeverity.literals
+
 export const ReviewExecutionProfile = Schema.Struct({
   id: boundedIdentifier(128),
   name: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200)),

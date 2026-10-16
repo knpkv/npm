@@ -1,8 +1,9 @@
 /** Controlled read-only Code view. Only normalized host DTOs enter; provider locators never do. @module */
 import { ServiceMark } from "@knpkv/rly/patterns"
-import { Button, Dialog, IconButton } from "@knpkv/rly/primitives"
-import { useId, type ReactElement } from "react"
+import { Button, Dialog, IconButton, StateLabel } from "@knpkv/rly/primitives"
+import { useId, useLayoutEffect, useRef, type ReactElement, type ReactNode } from "react"
 import { canRenderCodeText } from "./host-diff-text.js"
+import reviewPageStyles from "./review-page.module.css"
 import type {
   CodeDetail,
   CodeDiffContentResult,
@@ -43,6 +44,14 @@ export interface CodeHostViewProps {
   readonly onRefresh: () => void
   /** Decline to use Dialog's default opener restore, or handle navigation focus after cleanup. */
   readonly restoreFocus?: (opener: HTMLElement | null) => boolean
+  /** Optional host-owned recorded review body. Its read/focus owner stays outside changing content. */
+  readonly reviewWorkspace?: ReactNode
+  /** Retained-read diagnostics before the PR header. The host keeps its read/focus owner mounted separately. */
+  readonly reviewBeforeDetail?: ReactNode
+  /** Full-page review owner status. Only matching detail loading/failure/availability is deduplicated; independent detail failures remain visible. */
+  readonly reviewStatus?: CodeReadState<CodeUnavailable>
+  /** Recorded workspace checks in the full-page PR header. Absent adds no checks or status claim. */
+  readonly reviewChecks?: ReactNode
 }
 
 const approvalWords = {
@@ -53,10 +62,10 @@ const approvalWords = {
 } satisfies Record<CodePullRequest["approval"], string>
 const unavailableWords = {
   not_configured: "Code has not been configured on this hub.",
-  other_host: "Code is available only on its credential host's own hub.",
+  other_host: "Code is available only on its credential host’s own hub.",
   cache_unavailable:
     "The Code owner cache could not be read. Check the Code owner service and hub log on this host, then read again.",
-  config_unavailable: "Code's enabled accounts could not be read. Repair the configuration in the Code owner UI.",
+  config_unavailable: "Code’s enabled accounts could not be read. Repair the configuration in the Code owner UI.",
   permission_required:
     "This read needs a saved always-allow grant. Open the Code owner UI on this host to review it, then read again.",
   denied: "The owner has denied this provider read. Review the policy in the Code owner UI.",
@@ -78,34 +87,127 @@ const date = (timestamp: number): string =>
   }).format(timestamp)
 
 const Unavailable = ({
+  action,
   ownerUIHref,
+  panel = false,
   value
 }: {
   readonly value: CodeUnavailable
   readonly ownerUIHref: string | null
-}): ReactElement => (
-  <div className="code-host-notice">
-    <h2>Code unavailable</h2>
-    {value.reason === "other_host" && value.host !== null ? (
-      <p>Code lives on {value.host}. Open that host's hub.</p>
-    ) : null}
-    <p>{unavailableWords[value.reason]}</p>
-    {ownerUIHref === null ? (
-      <p>Use the Code owner UI on the credential host.</p>
-    ) : (
-      <a className="code-host-action" href={ownerUIHref} target="_blank" rel="noopener noreferrer">
-        Open Code owner UI on this machine
-      </a>
-    )}
-  </div>
-)
+  readonly panel?: boolean
+  readonly action?: ReactNode
+}): ReactElement => {
+  const body = (
+    <>
+      {value.reason === "other_host" && value.host !== null ? (
+        <p>Code lives on {value.host}. Open that host’s hub.</p>
+      ) : null}
+      <p>{unavailableWords[value.reason]}</p>
+      {ownerUIHref === null ? (
+        <p>Use the Code owner UI on the credential host.</p>
+      ) : (
+        <a className="code-host-action" href={ownerUIHref} target="_blank" rel="noopener noreferrer">
+          Open Code owner UI on this machine
+        </a>
+      )}
+    </>
+  )
+  return (
+    <div
+      className={panel ? "code-host-notice code-review-status" : "code-host-notice"}
+      data-code-read-notice={panel ? "unavailable" : undefined}
+    >
+      {panel ? (
+        <>
+          <div className="code-review-status-copy">
+            <StateLabel icon="alert" label="Code unavailable" size="compact" tone="caution" />
+            <div className="code-review-status-body">{body}</div>
+          </div>
+          {action}
+        </>
+      ) : (
+        <>
+          <h2>Code unavailable</h2>
+          {body}
+        </>
+      )}
+    </div>
+  )
+}
 
-const Problem = ({ state }: { readonly state: CodeReadState<unknown> }): ReactElement | null =>
+const Problem = ({
+  announce = true,
+  state
+}: {
+  readonly state: CodeReadState<unknown>
+  readonly announce?: boolean
+}): ReactElement | null =>
   state.failure === null ? null : (
-    <p className="code-host-problem" role="status">
+    <p className="code-host-problem" role={announce ? "status" : undefined}>
       {failureWords[state.failure]} {state.value === null ? "" : "Showing the previous reading."}
     </p>
   )
+
+/** Shared closed read-failure/availability words, without raw transport detail or command clients. */
+export const CodeReadStatusView = ({
+  action,
+  announce = true,
+  loadingLabel,
+  ownerUIHref,
+  presentation = "plain",
+  state
+}: {
+  readonly state: CodeReadState<CodeUnavailable>
+  readonly ownerUIHref: string | null
+  readonly loadingLabel: string
+  /** Defaults true for inserted loading/failure statuses. False lets a composed host own one stable live region. */
+  readonly announce?: boolean
+  /** Plain preserves existing embedding defaults. Panel opts into the full-page read-state styling. */
+  readonly presentation?: "plain" | "panel"
+  /**
+   * Optional host-owned action in panel presentation only; absent renders none. It follows the copy
+   * in the first visible panel, once even for retained loading/failure states. The host supplies its
+   * callback and persistent focus owner. This view derives no retry or command authority.
+   */
+  readonly action?: ReactNode
+}): ReactElement =>
+  presentation === "panel" ? (
+    <>
+      {state.failure === null ? null : (
+        <div className="code-review-status" data-code-read-notice="failure" role={announce ? "status" : undefined}>
+          <div className="code-review-status-copy">
+            <StateLabel icon="alert" label={failureWords[state.failure]} size="compact" tone="caution" />
+            {state.value === null ? null : <p>Showing the previous reading.</p>}
+          </div>
+          {action}
+        </div>
+      )}
+      {state.loading ? (
+        <div className="code-review-pending" data-code-read-notice="loading" role={announce ? "status" : undefined}>
+          <p>{loadingLabel}</p>
+          {state.failure === null ? action : null}
+        </div>
+      ) : null}
+      {state.value === null ? null : (
+        <Unavailable
+          panel
+          value={state.value}
+          ownerUIHref={ownerUIHref}
+          action={state.failure === null && !state.loading ? action : undefined}
+        />
+      )}
+    </>
+  ) : (
+    <>
+      <Problem state={state} announce={announce} />
+      {state.loading ? <p role={announce ? "status" : undefined}>{loadingLabel}</p> : null}
+      {state.value === null ? null : <Unavailable value={state.value} ownerUIHref={ownerUIHref} />}
+    </>
+  )
+
+/** Closed transport words shared by the visible read status and its host-owned completion announcement. */
+export const codeReadFailureMessage = (reason: NonNullable<CodeReadState<never>["failure"]>): string =>
+  failureWords[reason]
 
 const Row = ({
   href,
@@ -118,6 +220,7 @@ const Row = ({
 }): ReactElement => (
   <li>
     <a
+      data-code-ref={item.ref}
       className="code-host-row"
       href={href}
       onClick={(event) => {
@@ -242,6 +345,23 @@ const Diff = ({
 export const CodeHostView = (props: CodeHostViewProps): ReactElement => {
   const searchId = useId()
   const filterId = useId()
+  const pageRoot = useRef<HTMLElement>(null)
+  const previousSelection = useRef<CodeReference | null>(null)
+  const reviewPage = props.selected !== null && props.page !== "diffs" && props.reviewWorkspace !== undefined
+  useLayoutEffect(() => {
+    const previous = previousSelection.current
+    previousSelection.current = props.selected
+    if (!props.active || previous === props.selected || pageRoot.current === null) return
+    const modal = document.activeElement?.closest('[role="dialog"], [role="alertdialog"]')
+    if (modal !== null && modal !== undefined && !pageRoot.current.contains(modal)) return
+    if (reviewPage) pageRoot.current.focus({ preventScroll: true })
+    else if (props.selected === null && previous !== null) {
+      const row = pageRoot.current.querySelector<HTMLElement>(`[data-code-ref="${previous}"]`)
+      const heading = pageRoot.current.querySelector<HTMLElement>("h1")
+      const target = row ?? heading
+      target?.focus({ preventScroll: true })
+    }
+  }, [props.active, props.selected, reviewPage])
   const title = { "pull-requests": "Pull requests", reviews: "Reviews", diffs: "Diffs" } satisfies Record<
     CodeHostPage,
     string
@@ -256,10 +376,100 @@ export const CodeHostView = (props: CodeHostViewProps): ReactElement => {
       : detailUpdatedAt === null
         ? selectedItem.updatedAt
         : Math.max(selectedItem.updatedAt, detailUpdatedAt)
+  if (reviewPage) {
+    const reviewStatus = props.reviewStatus
+    const detailUnavailable = detail?._tag === "Unavailable" ? detail : null
+    const detailStatus: CodeReadState<CodeUnavailable> = {
+      loading: props.detail.loading && reviewStatus?.loading !== true,
+      failure: props.detail.failure === reviewStatus?.failure ? null : props.detail.failure,
+      value:
+        detailUnavailable !== null &&
+        reviewStatus?.value?.reason === detailUnavailable.reason &&
+        reviewStatus.value.host === detailUnavailable.host
+          ? null
+          : detailUnavailable
+    }
+    return (
+      <section
+        className={reviewPageStyles.page}
+        data-code-review-page=""
+        data-code-detail-state={
+          props.detail.loading ? "Loading" : props.detail.failure !== null ? "Failed" : (detail?._tag ?? "Idle")
+        }
+        ref={pageRoot}
+        tabIndex={-1}
+        aria-label="Pull request review"
+      >
+        <header className={reviewPageStyles.heading}>
+          <h1>Code</h1>
+          <p>Pull requests, reviews and diffs</p>
+        </header>
+        <nav className={reviewPageStyles.pages} aria-label="Code pages">
+          {(["pull-requests", "reviews", "diffs"] satisfies ReadonlyArray<CodeHostPage>).map((page) => (
+            <a
+              key={page}
+              data-module-page={page}
+              href={props.tabs[page].href}
+              aria-current={props.page === page ? "page" : undefined}
+              onClick={(event) => {
+                if (
+                  page !== props.page ||
+                  event.button !== 0 ||
+                  event.ctrlKey ||
+                  event.metaKey ||
+                  event.altKey ||
+                  event.shiftKey
+                )
+                  return
+                event.preventDefault()
+                props.onClose()
+              }}
+            >
+              {props.tabs[page].label}
+            </a>
+          ))}
+        </nav>
+        <div className={reviewPageStyles.body}>
+          {props.reviewBeforeDetail}
+          <Problem state={{ ...props.detail, failure: detailStatus.failure }} />
+          {detailStatus.loading ? <p role="status">Reading cached details…</p> : null}
+          {detailStatus.value !== null ? (
+            <Unavailable value={detailStatus.value} ownerUIHref={props.ownerUIHref} />
+          ) : null}
+          {detail?._tag === "Ready" ? (
+            <header className={reviewPageStyles.pullRequest} data-code-review-header="">
+              <div className={reviewPageStyles.reference}>
+                <span>{detail.item.repository}</span>
+                <b>#{detail.item.id}</b>
+              </div>
+              <h2>{detail.item.title}</h2>
+              <div className={reviewPageStyles.metadata}>
+                <span>
+                  <code>{detail.sourceBranch}</code> → <code>{detail.destinationBranch}</code>
+                </span>
+                <span>Opened by {detail.item.author}</span>
+                <span>
+                  Updated{" "}
+                  {new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit" }).format(
+                    detail.item.updatedAt
+                  )}
+                </span>
+                <span>{approvalWords[detail.item.approval]}</span>
+              </div>
+              {props.reviewChecks === undefined || props.reviewChecks === null ? null : (
+                <div className={reviewPageStyles.checks}>{props.reviewChecks}</div>
+              )}
+            </header>
+          ) : null}
+          {props.reviewWorkspace}
+        </div>
+      </section>
+    )
+  }
   return (
-    <section className="code-host">
+    <section className="code-host" ref={pageRoot}>
       <header className="code-host-intro">
-        <h1>{title[props.page]}</h1>
+        <h1 tabIndex={-1}>{title[props.page]}</h1>
         <p>
           {props.page === "reviews"
             ? "Cached approvals waiting. This list does not identify reviews requested of you."
@@ -351,6 +561,8 @@ export const CodeHostView = (props: CodeHostViewProps): ReactElement => {
       {props.page === "diffs" ? (
         props.selected === null ? (
           <p>Choose a pull request to read its diff.</p>
+        ) : props.reviewWorkspace !== undefined ? (
+          props.reviewWorkspace
         ) : (
           <Diff
             state={props.diff}
@@ -390,10 +602,12 @@ export const CodeHostView = (props: CodeHostViewProps): ReactElement => {
               <p>
                 {detail.item.repository} / #{detail.item.id} by {detail.item.author}
               </p>
-              <nav className="code-host-tabs code-host-summary-tabs" aria-label="Pull request views">
-                <span aria-current="page">Summary</span>
-                <a href={props.tabs.diffs.href}>Read diff</a>
-              </nav>
+              {props.reviewWorkspace === undefined ? (
+                <nav className="code-host-tabs code-host-summary-tabs" aria-label="Pull request views">
+                  <span aria-current="page">Summary</span>
+                  <a href={props.tabs.diffs.href}>Read diff</a>
+                </nav>
+              ) : null}
               <dl className="code-host-properties">
                 <div>
                   <dt>Repository</dt>
@@ -421,6 +635,7 @@ export const CodeHostView = (props: CodeHostViewProps): ReactElement => {
               <div className="code-host-description">{detail.description || "No cached description."}</div>
             </section>
           ) : null}
+          {props.reviewWorkspace}
         </Dialog.Content>
       </Dialog.Root>
     </section>
