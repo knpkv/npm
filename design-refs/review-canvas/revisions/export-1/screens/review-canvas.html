@@ -557,7 +557,7 @@ html[data-fs], html[data-fs] body { overflow: hidden; }
     const soNodes = (o) => d.files.map((x) => {
       const [nx, ny] = SL4.nodes[x.path];
       const y = o.ready ? { ...x, failing: false, findings: (x.findings || []).filter((id) => id !== "F1") } : x;
-      const marks = [...(x.path === SO.unplanned.file ? [{ g: "alert", w: T.signOff.unplanned, ink: HELD }] : []), ...marksOf(y)];
+      const marks = [...(x.path === SO.unplanned.file ? [{ g: "alert", w: T.signOff.unplanned, ink: HELD }] : []), ...(o.pass && x.path === "sync-worker/socket.ts" ? [{ g: "check", w: SO.passing.fixed, ink: OK }] : []), ...marksOf(y)];
       const n = node(y, { x: nx, y: ny, w: x.w }, { marks, focus: o.focusP1 && x.path === "sync-worker/socket.ts" });
       n.op = o.step && stepOf[x.path] !== o.step && x.path !== SO.unplanned.file ? 0.32 : 1;
       return n;
@@ -579,7 +579,7 @@ html[data-fs], html[data-fs] body { overflow: hidden; }
       unp: SO.unplanned, critic: SO.critic[o.ready ? "ready" : "blocked"],
       gate: (() => { const gt = SO.gates[o.ready ? "ready" : "blocked"]; return { ...gt, tint: TINT[gt.tone] }; })(),
       judgements: SO.judgements.map((j) => ({ ...j, node: byPath[j.file].name })),
-      off: !o.ready, offWhy: SO.offWhy, receipt: SO.receipt,
+      off: !o.ready, offWhy: SO.offWhy, receipt: o.ready ? SO.passing.receipt : SO.receipt,
     });
     const stepFiles = order.filter((p) => stepOf[p] === 2);
 
@@ -604,7 +604,7 @@ html[data-fs], html[data-fs] body { overflow: hidden; }
       if (mode === "preview" || mode === "edit") { const n = mode === "preview" ? 4 : 3; return { ...b0, badge: R.previewBadge, tone: "neutral", title: R.previewTitle, meta: R.previewMeta, summary: RQ.summary[mode], commentsTitle: fill(R.previewComments, { n }), defLabel: R.becomesIssue, defTone: "neutral", recipients: RQ.recipients, receives: RQ.receives.replace("{n}", n), actions: [[R.send, "primary"], [R.editSummary, "secondary"], [R.cancel, "quiet"]], foot: [{ g: "minus", t: RQ.cancelLine }] }; }
       if (mode === "sent") return { ...b0, badge: R.sentBadge, tone: "caution", title: R.sentTitle, meta: RQ.sent.line, next: [{ g: "clock", t: fill(R.next, { at: RQ.sent.at }) }], commentsTitle: R.comments3, defLabel: R.issueOpened, defTone: "positive", defText: opened, signoff: RQ.sent.signoff, actions: [[R.withdraw, "quiet"]] };
       if (mode === "waiting") return { ...b0, badge: R.sentBadge, tone: "caution", title: R.waitTitle, meta: RQ.sent.line, next: [{ g: "check", t: RQ.ack.line }, { g: "clock", t: RQ.ack.next }], commentsTitle: R.comments3, defLabel: R.issueOpened, defTone: "positive", defText: opened, signoff: RQ.sent.signoff };
-      return { ...b0, badge: R.reBadge, tone: "neutral", title: R.reTitle, meta: fill(R.reMeta, { at: RQ.rereview.at, run: RQ.rereview.run }), next: [{ g: "clock", t: RQ.rereview.next }], commentsTitle: R.reComments, defLabel: R.issueOpened, defTone: "positive", defText: fill(R.issueOutside, { issue: RQ.deferred.issue }), round: RQ.rereview.round, actions: [[R.reviewNew, "primary"], [T.signOff.approve, "secondary", true]], foot: [{ g: "alert", t: RQ.rereview.approveOff }] };
+      return { ...b0, badge: R.reBadge, tone: "neutral", title: R.reTitle, meta: fill(R.reMeta, { at: RQ.rereview.at, run: RQ.rereview.run, requested: RQ.rereview.requestedOn }), next: [{ g: "clock", t: RQ.rereview.next }], commentsTitle: R.reComments, defLabel: R.issueOpened, defTone: "positive", defText: fill(R.issueOutside, { issue: RQ.deferred.issue }), round: RQ.rereview.round, actions: [[R.reviewNew, "primary"], [T.signOff.approve, "secondary", true]], foot: [{ g: "alert", t: RQ.rereview.approveOff }] };
     };
     const rcCanvas = (mode) => {
       const nh = mode === "rereview";
@@ -665,7 +665,7 @@ html[data-fs], html[data-fs] body { overflow: hidden; }
       const b1 = { mode, groups, blocks, behind: FSD.canvasNote, recipients: RQ.recipients, label: FT.preview.label };
       if (mode === "preview" || mode === "edit") { const n = mode === "preview" ? 4 : 3; return { ...b1, crumb: FT.preview.crumb, title: FT.preview.title, badge: FT.preview.badge, tone: "neutral", head: RQ.head, meta: FT.preview.meta, summaryTitle: FT.preview.summary, summary: RQ.summary[mode], editable: true, toTitle: FT.preview.to, receives: RQ.receives.replace("{n}", n), count: FSD.counts[mode], barLines: [{ g: "minus", t: RQ.cancelLine }, { g: "arrow", t: FSD.checklistLine }], actions: [[R.cancel, "quiet"], [R.editSummary, "secondary"], [R.send, "primary"]] }; }
       if (mode === "sent") return { ...b1, crumb: FT.sent.crumb, title: fill(FT.sent.title, { at: RQ.sent.at }), badge: FT.sent.badge, tone: "caution", head: RQ.head, meta: RQ.sent.line + ". " + FT.sent.readOnly, summaryTitle: FT.sent.summary, summary: RQ.summary.edit, editable: false, toTitle: FT.sent.to, receives: RQ.receives.replace("receives", "received").replace("{n}", 3), count: FSD.counts.sent, barLines: [{ g: "minus", t: RQ.sent.signoff }], actions: [[FT.sent.back, "primary"]] };
-      return { ...b1, label: FT.compare.label, crumb: FT.compare.crumb, title: FT.compare.title, badge: FT.compare.badge, tone: "neutral", head: RQ.rereview.head, meta: fill(FT.compare.meta, { at: RQ.rereview.at, run: RQ.rereview.run, round: RQ.rereview.round }), summaryTitle: fill(FT.compare.summary, { at: RQ.sent.at }), summary: RQ.summary.edit, editable: false, recipients: null, count: FSD.counts.compare, barLines: [{ g: "alert", t: RQ.rereview.approveOff }], actions: [[FT.compare.approve, "secondary", true], [FT.compare.review, "primary"]] };
+      return { ...b1, label: FT.compare.label, crumb: FT.compare.crumb, title: FT.compare.title, badge: FT.compare.badge, tone: "neutral", head: RQ.rereview.head, meta: fill(FT.compare.meta, { at: RQ.rereview.at, run: RQ.rereview.run, round: RQ.rereview.round }), summaryTitle: fill(FT.compare.summary, { at: RQ.sent.at, requested: RQ.rereview.requestedOn }), summary: RQ.summary.edit, editable: false, recipients: null, count: FSD.counts.compare, barLines: [{ g: "alert", t: RQ.rereview.approveOff }], actions: [[FT.compare.approve, "secondary", true], [FT.compare.review, "primary"]] };
     };
     const waitRows = rcComments("waiting");
     const receipt5 = { title: fill(FT.sent.title, { at: RQ.sent.at }), lines: [{ g: "check", t: RQ.sent.line + "." }, { g: "check", t: RQ.ack.line }, { g: "clock", t: RQ.ack.next }, { g: "check", t: fill(FT.phone.p3, { issue: RQ.deferred.issue }) }, { g: "minus", t: RQ.sent.signoff }], rows: waitRows };
@@ -697,7 +697,7 @@ html[data-fs], html[data-fs] body { overflow: hidden; }
     const rcPrev = rcCard("preview");
     const ckRcRows = ckItems("rc").filter((it) => it.verdict === "No").map((it) => ({ id: "Item " + it.n, sev: it.issue.p, where: R.checklistPrefix + it.title + ", " + it.issue.id, state: RS.fromChecklist, tone: "caution", text: it.note, act: R.edit }));
     const rcCvP = rcCanvas("preview"), drN = rcCvP.map["sync-worker/drafts.ts"];
-    const dockSo = (o) => ({ ...soCanvas(o), so: soCard(o), by: true });
+    const dockSo = (o) => ({ ...soCanvas({ ...o, pass: o.ready }), so: soCard(o), by: true, pass: o.ready ? SO.passing : null });
     const fsWith = (canvasMode, fs, extra = {}) => ({ ...rcCanvas(canvasMode), fs, by: true, ...extra });
     Object.assign(views, {
       soReady: dockSo({ ready: true }),
@@ -757,7 +757,7 @@ html[data-fs], html[data-fs] body { overflow: hidden; }
         ${so.steps.map((s) => `<button type="button" class="step" aria-pressed="${s.sel}"><span class="stopn">${s.n}</span><span class="st">${esc(s.step)}</span><span class="go">${phone ? g("arrow", 16) : ""}</span><span class="row">${sl(S.matched, "positive")}<span class="small">${esc(s.count)}</span><span class="mk small">${g("check")}${esc(S.read)}</span></span><span class="chips">${s.nodes.map((n) => `<code>${esc(n)}</code>`).join("")}</span></button>`).join("")}
         <div class="unp"><span class="row">${sl(S.unplanned, "caution")}<code style="font-size: .75rem; font-weight: 520">${esc(so.unp.file)}</code><span class="mono small">${esc(so.unp.size)}</span></span><span class="small" style="font-size: .8125rem">${esc(so.unp.note)}</span></div>
       </div>
-      <div class="bx"><h3>${esc(S.critic)}</h3><span>${sl(so.critic.label, so.critic.tone)}</span><span class="small" style="font-size: .8125rem">${esc(so.critic.line)}</span></div>
+      <div class="bx"><h3>${esc(M.fill(S.critic, { head: so.critic.head }))}</h3><span>${sl(so.critic.label, so.critic.tone)}</span><span class="small" style="font-size: .8125rem">${esc(so.critic.line)}</span></div>
       <section class="gate" aria-label="${esc(S.gateLabel)}"><div class="gh" style="background: ${so.gate.tint}"><span class="row">${sl(so.gate.sum, so.gate.tone, false)}<code style="font-weight: 560">${esc(so.gate.head)}</code></span><span>${esc(so.gate.reason)}</span><span class="small">${esc(so.gate.computed)}. ${esc(S.computedSuffix)}</span></div>
         <dl>${so.gate.rows.map((r) => `<div><dt>${esc(r.k)}</dt><dd><span class="row"><b>${esc(r.v)}</b>${sl(r.s, r.t)}</span><span class="small">${esc(r.note)}</span></dd></div>`).join("")}</dl></section>
       <div class="bx judg"><h3>${esc(S.judge)}</h3><ol>${so.judgements.map((j) => `<li>${g("fleet", 16)}<span>${esc(j.text)}</span><span class="small">${esc(M.fill(S.judgementPin, { n: j.n }))} <code style="color: ${TX1}">${esc(j.node)}</code></span></li>`).join("")}</ol></div>
@@ -857,7 +857,7 @@ html[data-fs], html[data-fs] body { overflow: hidden; }
     } else {
       const fs = src;
       title = fs.mode === "compare" ? FT.compare.title : fs.mode === "sent" ? PH.receiptTitle : FT.preview.crumb; badge = fs.badge; tone = fs.tone; back = PH.canvas;
-      body = `<span class="mono small">${esc(PH.prLine)}</span>
+      body = `<span class="mono small">${esc(fs.mode === "compare" ? PH.prLineRe : PH.prLine)}</span>
         <section style="display: grid; gap: 6px"><h2 style="margin: 0; font-size: 1rem; font-weight: 620">${esc(fs.summaryTitle)}</h2>${fs.editable ? ta(fs.summary, fs.summaryTitle, 6) : `<p style="margin: 0; font-size: .9375rem">${esc(fs.summary)}</p>`}</section>
         ${fs.groups.map((gr) => `<section style="display: grid; gap: 6px"><h2 style="margin: 0; font-size: .875rem; font-weight: 620; color: ${TX2}">${esc(gr.title)}</h2><ol class="prows">${gr.rows.map((r) => `<li><a href="#" class="prow" style="grid-template-columns: minmax(0, 1fr) auto" aria-label="${esc(M.fill(A.phoneOpen, { id: r.id, where: r.where, state: r.state }))}"><span class="b" style="gap: 4px"><span class="row" style="gap: 4px 6px">${pb(r.id)}${r.sev ? pb(r.sev) : ""}<code style="${r.removed ? "text-decoration: line-through" : ""}">${esc(r.where)}</code></span><span class="row">${sl(r.state, r.tone)}${r.issue ? `<span class="mono small">${esc(r.issue)}</span>` : ""}</span></span><span aria-hidden="true" style="font-size: 1.25rem; color: ${TX2}">›</span></a></li>`).join("")}</ol></section>`).join("")}
         ${fs.recipients ? `<section class="pcard"><h2 style="font-size: .875rem; color: ${TX2}">${esc(fs.toTitle)}</h2>${fs.recipients.map((rp) => `<span style="display: grid; font-size: .9375rem"><b style="font-weight: 620">${esc(rp.name)}</b><span class="small" style="font-size: .8125rem">${esc(rp.role)}</span></span>`).join("")}<span style="font-size: .8125rem">${esc(fs.receives)}</span></section>` : ""}`;
@@ -901,7 +901,7 @@ html[data-fs], html[data-fs] body { overflow: hidden; }
     else if (V.fs) overlay = pfHtml(M, "list", V.fs);
     else if (V.fsList) overlay = pfHtml(M, "list", V.fsList);
     const crumb = settings ? [T.settings.title, T.settings.current] : [X.crumb.parent, X.crumb.current];
-    const summary = settings || overlay || st.view === "soStep" ? "" : `<div class="psum" style="padding: 8px 16px 0"><span class="repo">${esc(X.pr.repo)}</span><h1>${esc(d.pr.title)}</h1><span class="mk">${sl(T.agentWritten, "neutral")}<span class="muted">${esc(T.writtenBy)}</span></span><span class="muted">${esc(X.pr.line)}</span></div>`;
+    const summary = settings || overlay || st.view === "soStep" ? "" : `<div class="psum" style="padding: 8px 16px 0"><span class="repo">${esc(X.pr.repo)}</span><h1>${esc(d.pr.title)}</h1><span class="mk">${sl(T.agentWritten, "neutral")}<span class="muted">${esc(T.writtenBy)}</span></span><span class="muted">${esc(X.pr.line)}</span>${V.pass ? `<span class="mk">${sl(V.pass.checks, "positive")}<span class="muted">${esc(V.pass.headLabel)} <code>${esc(V.pass.head)}</code></span></span>` : ""}</div>`;
     const header = `<div data-region="header"><header class="mast"><a href="${esc(mods.connect.href)}" class="mast-brand" aria-label="${esc(sh.brandLabel)}"><relay-chef size="28"></relay-chef></a><p class="mast-title"><b>${esc(settings ? T.settings.title : mods.code.name)}</b>${settings ? "" : `<span>${esc(X.pr.num)}</span>`}</p><div class="tools"><button type="button" class="bell" aria-label="${esc(sh.notifications.aria)}" aria-expanded="false"><relay-glyph name="bell" size="19"></relay-glyph></button><button type="button" class="ask" aria-expanded="false"><span class="chef-desk"><relay-chef size="32"></relay-chef></span><span class="chef-phone"><relay-chef size="24"></relay-chef></span><span>${esc(sh.askRelay)}</span></button></div></header>
       <nav class="crumb" aria-label="Breadcrumb"><span class="parents"><span><a href="#">${esc(crumb[0])}</a><span aria-hidden="true">&nbsp;/&nbsp;</span></span></span><span class="cur" aria-current="page">${esc(crumb[1])}</span></nav>${summary}</div>`;
     let main = "";
@@ -947,8 +947,8 @@ html[data-fs], html[data-fs] body { overflow: hidden; }
         <div class="meta">
           ${large ? "" : `<span><code>${esc(d.pr.branch)}</code> ${esc(X.pr.into)} <code>${esc(d.pr.base)}</code></span>`}
           <span>${esc(P.line)}</span>
-          ${large ? "" : `<span>${sl(X.pr.check, "critical")}<code>${esc(X.pr.checkName)}</code></span>`}
-          <span>${esc(P.review)}</span>
+          ${large ? "" : V.pass ? `<span>${sl(V.pass.checks, "positive")}<span>${esc(V.pass.headLabel)}</span><code>${esc(V.pass.head)}</code></span>` : `<span>${sl(X.pr.check, "critical")}<code>${esc(X.pr.checkName)}</code></span>`}
+          <span>${esc(V.pass ? V.pass.review : P.review)}</span>
           ${V.by ? `<span>${sl(M.T.agentWritten, "neutral")}<span>${esc(M.T.byLine)}</span></span>` : ""}
         </div>
       </div>`}

@@ -1832,7 +1832,7 @@
           }
         },
         "signOff": {
-          "about": "Agent sign-off on the canvas, after page 13 frame 1e. 4a and 4b show the scenario where the gate passes on e81f0c9, so the approve path is visible; 4c is the fixture as it stands.",
+          "about": "Agent sign-off on the canvas, after page 13 frame 1e. 4a and 4b show the passing case: a later head, 7a2c4f1, where unit-tests passes (run 8831 on 7a2c4f1) and the P1 is fixed, so the approve path is visible. 4c is the fixture as it stands on e81f0c9.",
           "author": "pair-codex",
           "time": "About 2 min",
           "asked": {
@@ -1889,32 +1889,34 @@
             "ready": {
               "label": "No blocking findings",
               "tone": "positive",
-              "line": "sec-cc, round 2 on e81f0c9 at 14:22. 2 P2 and 1 P3 open, none blocking."
+              "line": "sec-cc, round 2 on 7a2c4f1 at 14:46. The P1 is fixed; 2 P2 and 1 P3 open, none blocking.",
+              "head": "7a2c4f1"
             },
             "blocked": {
               "label": "1 blocking finding",
               "tone": "critical",
-              "line": "sec-cc, round 1 on e81f0c9 at 14:22. The P1 on connect() is still open."
+              "line": "sec-cc, round 1 on e81f0c9 at 14:22. The P1 on connect() is still open.",
+              "head": "e81f0c9"
             }
           },
           "gates": {
             "ready": {
-              "head": "e81f0c9",
-              "computed": "Computed 14:24 from e81f0c9",
+              "head": "7a2c4f1",
+              "computed": "Computed 14:48 from 7a2c4f1",
               "sum": "Gate passed",
               "tone": "positive",
-              "reason": "Passed on e81f0c9. 2 tests outside the diff don’t run here.",
+              "reason": "Passed on 7a2c4f1. 2 tests outside the diff don’t run here.",
               "rows": [
                 {
                   "k": "Head",
-                  "v": "e81f0c9",
+                  "v": "7a2c4f1",
                   "s": "Pinned",
                   "t": "positive",
                   "note": "Every row below is for this SHA"
                 },
                 {
                   "k": "CI run",
-                  "v": "Run 8819 on e81f0c9",
+                  "v": "Run 8831 on 7a2c4f1",
                   "s": "Success",
                   "t": "positive",
                   "note": "The run’s conclusion, not the check list"
@@ -2114,6 +2116,15 @@
                 476
               ]
             }
+          },
+          "passing": {
+            "head": "7a2c4f1",
+            "at": "14:40",
+            "checks": "All checks passed",
+            "headLabel": "Head",
+            "review": "sec-cc review, 14:46 on 7a2c4f1: P1 fixed, 2 P2, 1 P3",
+            "fixed": "Fixed at 7a2c4f1",
+            "receipt": "You read all 4 steps, the unplanned hunk and the “You are here” brief. Approval covers these, on 7a2c4f1."
           }
         },
         "requestChanges": {
@@ -2229,7 +2240,8 @@
               ]
             },
             "reply": "pair-codex replied: StageId already keys the store at line 12; the port is only the cache key.",
-            "approveOff": "Approve stays off until you open the 3 changed hunks. 0 of 3 opened."
+            "approveOff": "Approve stays off until you open the 3 changed hunks. 0 of 3 opened.",
+            "requestedOn": "Requested on e81f0c9"
           },
           "fullscreen": {
             "counts": {
@@ -3388,7 +3400,7 @@
               "nodes": "{n} nodes",
               "read": "Read",
               "unplanned": "Unplanned",
-              "critic": "Critic on e81f0c9",
+              "critic": "Critic on {head}",
               "computedSuffix": "Computed, never typed.",
               "judge": "Only you can judge",
               "judgementPin": "Judgement {n}, pinned to",
@@ -3430,7 +3442,7 @@
               "waitTitle": "Waiting on pair-codex",
               "reBadge": "New head 9c1d2e4",
               "reTitle": "pair-codex pushed 9c1d2e4",
-              "reMeta": "At {at}. {run}.",
+              "reMeta": "At {at}. {run}. {requested}.",
               "reComments": "3 comments against 9c1d2e4",
               "reSince": "You requested changes at {at}. 1 commit since: 9c1d2e4.",
               "whoNext": "Who acts next",
@@ -3536,7 +3548,7 @@
                 "title": "Since you requested changes",
                 "badge": "New head 9c1d2e4",
                 "meta": "e81f0c9 → 9c1d2e4 at {at}. {run}. {round}.",
-                "summary": "Your request, sent {at}",
+                "summary": "Your request, sent {at}. {requested}",
                 "label": "Since you requested changes, full screen",
                 "approve": "Approve what you read",
                 "review": "Review the new head"
@@ -3551,7 +3563,8 @@
                 "p3": "P3 opened as {issue}.",
                 "prLine": "relay/web #463 · head e81f0c9 · by pair-codex",
                 "opens": "Opens its code",
-                "scrolls": "Code, scrolls sideways"
+                "scrolls": "Code, scrolls sideways",
+                "prLineRe": "relay/web #463 · head 9c1d2e4 · by pair-codex"
               },
               "head": "Head",
               "aria": {
