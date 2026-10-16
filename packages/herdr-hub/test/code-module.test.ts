@@ -3,6 +3,7 @@ import { describe, expect, it } from "@effect/vitest"
 import { FleetHostName } from "@knpkv/herdr-fleet/model"
 import { ConfigProvider, Effect, FileSystem, Layer, Logger, Result, Schema } from "effect"
 import { makeCodeModule, readCodeHost } from "../src/code-module.js"
+import { moduleCallerFor, onHubNode } from "../src/internal/hub-node.js"
 import { codeModule } from "../src/module-contract.js"
 import { dispatchModuleRoute, makeModuleLayer } from "../src/module-server.js"
 
@@ -19,6 +20,19 @@ const request = (
     listener,
     url: new URL(`https://hub.example/v1/modules/code/queue${search}`),
     authorize: Effect.succeed({ login: "example-viewer", sameNode }),
+    sameOrigin: Effect.void,
+    readJson: () => Effect.die("Code has no write routes")
+  })
+
+/** The hub's own config, and another server's: only `host` and `approvalHub` decide the caller. */
+const hubConfig = { host, approvalHub: { host, nodeId: "node-hub", url: "https://atlas.example/" } }
+const peerConfig = { ...hubConfig, host: other }
+const queueAs = (caller: { readonly login: string; readonly sameNode: boolean }) =>
+  dispatchModuleRoute({
+    method: "GET",
+    listener: "serve",
+    url: new URL("https://hub.example/v1/modules/code/queue"),
+    authorize: Effect.succeed(caller),
     sameOrigin: Effect.void,
     readJson: () => Effect.die("Code has no write routes")
   })
@@ -45,6 +59,20 @@ const withModule = <A, E, R>(codeHost: FleetHostName | null, run: Effect.Effect<
     )
     return yield* run.pipe(Effect.provideContext(context))
   })
+
+describe("hub-node caller", () => {
+  // Only the hub's own node, calling the hub itself, is "on the hub machine".
+  it("is the hub's own node on the hub server, and nothing else", () => {
+    expect(onHubNode(hubConfig, "node-hub")).toBe(true)
+    expect(onHubNode({ ...hubConfig, host: Schema.decodeUnknownSync(FleetHostName)("ATLAS") }, "node-hub")).toBe(true)
+    expect(onHubNode(hubConfig, "node-phone")).toBe(false)
+    expect(onHubNode(peerConfig, "node-hub")).toBe(false)
+    expect(moduleCallerFor(peerConfig, { login: "example-viewer", nodeId: "node-hub" })).toEqual({
+      login: "example-viewer",
+      sameNode: false
+    })
+  })
+})
 
 describe("host-local Code module", () => {
   it.effect("review is an authenticated same-host GET with no peer or command route", () =>
@@ -99,6 +127,12 @@ describe("host-local Code module", () => {
             expect(JSON.stringify(first?.body)).not.toContain(token)
             // The owner UI is a loopback origin: only a viewer on the hub's own node can open it.
             expect((yield* request("serve", "", "GET", false))?.body).not.toHaveProperty("ownerUi")
+            // The production WhoIs-to-caller mapping, end to end through /queue.
+            const viewer = (config: typeof hubConfig, nodeId: string) =>
+              queueAs(moduleCallerFor(config, { login: "example-viewer", nodeId }))
+            expect((yield* viewer(hubConfig, "node-hub"))?.body).toMatchObject({ ownerUi: "http://127.0.0.1:4781" })
+            expect((yield* viewer(hubConfig, "node-phone"))?.body).not.toHaveProperty("ownerUi")
+            expect((yield* viewer(peerConfig, "node-hub"))?.body).not.toHaveProperty("ownerUi")
             yield* fs.chmod(file, 0o644)
             expect((yield* request("serve"))?.body).not.toHaveProperty("ownerUi")
             yield* fs.chmod(file, 0o600)
