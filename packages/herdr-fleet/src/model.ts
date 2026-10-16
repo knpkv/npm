@@ -390,7 +390,8 @@ const SandboxAccountId = Schema.String.check(Schema.isPattern(/^\d{12}$/))
 
 /**
  * A lease holder is the job's authenticated actor, never a payload field: a
- * submitted `holder` fails to decode, so no caller can act as another holder.
+ * submitted `holder` fails to decode on every sandbox kind, so no caller can
+ * act as another holder.
  */
 const NoHolder = { holder: Schema.optionalKey(Schema.Never) }
 
@@ -422,14 +423,16 @@ export type SandboxRelease = typeof SandboxRelease.Type
 export const SandboxReset = Schema.Struct({
   kind: Schema.Literal("sandbox.reset"),
   accountId: SandboxAccountId,
-  reason: Schema.Literals(["Manual", "Retry"])
+  reason: Schema.Literals(["Manual", "Retry"]),
+  ...NoHolder
 })
 export type SandboxReset = typeof SandboxReset.Type
 
 /** An approved lift of the account's budget stop. */
 export const SandboxBudgetLift = Schema.Struct({
   kind: Schema.Literal("sandbox.budget.lift"),
-  accountId: SandboxAccountId
+  accountId: SandboxAccountId,
+  ...NoHolder
 })
 export type SandboxBudgetLift = typeof SandboxBudgetLift.Type
 

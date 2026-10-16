@@ -53,9 +53,7 @@ const withStore = <A, E, R>(use: (store: JobStore) => Effect.Effect<A, E, R>) =>
 layer(NodeServices.layer)("sandbox job kinds", (it) => {
   it("decode the pool's typed payloads and refuse a payload holder, a bad account or an internal reset reason", () => {
     for (const raw of sandboxPayloads) expect(decode(raw)).toEqual(raw)
-    expect(() => decode({ kind: "sandbox.lease", holder: "agent-b" })).toThrow()
-    expect(() => decode({ kind: "sandbox.extend", accountId, holder: "agent-b" })).toThrow()
-    expect(() => decode({ kind: "sandbox.release", accountId, holder: "agent-b" })).toThrow()
+    for (const raw of sandboxPayloads) expect(() => decode({ ...raw, holder: "agent-b" }), raw.kind).toThrow()
     expect(() => decode({ kind: "sandbox.extend", accountId: "12" })).toThrow()
     for (const reason of ["Released", "Expired"]) {
       expect(() => decode({ kind: "sandbox.reset", accountId, reason })).toThrow()
