@@ -57,6 +57,7 @@ export const inspectPackageContract = <UnparsedInput>(value: UnparsedInput): Rea
     "@effect/ai-openai-compat",
     "@effect/platform-browser",
     "@effect/platform-node",
+    "@effect/platform-node-shared",
     "@effect/sql-libsql",
     "@knpkv/ai-claude",
     "@knpkv/ai-codex",
@@ -141,6 +142,10 @@ export const inspectPackageContract = <UnparsedInput>(value: UnparsedInput): Rea
   }
   if (manifest.dependencies["@effect/platform-node"] !== "4.0.0") {
     violations.push("@effect/platform-node must align with the pinned Effect release")
+  }
+  // platform-node reaches it through a caret range; without this pin a fresh install can need a newer effect.
+  if (manifest.dependencies["@effect/platform-node-shared"] !== "4.0.0") {
+    violations.push("@effect/platform-node-shared must align with the pinned Effect release")
   }
   if (manifest.dependencies["@effect/platform-browser"] !== "4.0.0") {
     violations.push("@effect/platform-browser must align with the pinned Effect release")

@@ -53,6 +53,7 @@
   "dependencies": {
     "@effect/platform-bun": "4.0.0",
     "@effect/platform-node": "4.0.0",
+    "@effect/platform-node-shared": "4.0.0",
     "@knpkv/ai-claude": "workspace:^",
     "@knpkv/ai-codex": "workspace:^",
     "@knpkv/browser-pairing": "workspace:^",

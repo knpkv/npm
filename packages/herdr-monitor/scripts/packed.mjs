@@ -108,7 +108,11 @@ void [publication, monitor];`
     )
     assert.doesNotMatch(css, /url\(["']?\/(?!\/)/)
     const manifest = JSON.parse(await readFile(join(temp, "package", "package.json"), "utf8"))
-    assert.deepEqual(Object.keys(manifest.dependencies).sort(), ["@effect/platform-node", "effect"])
+    assert.deepEqual(Object.keys(manifest.dependencies).sort(), [
+      "@effect/platform-node",
+      "@effect/platform-node-shared",
+      "effect"
+    ])
     for (const entry of Object.values(manifest.exports)) await readFile(join(temp, "package", entry.types))
   })
   await test("packed CLI fails closed without leaking input paths or keys", async () => {
