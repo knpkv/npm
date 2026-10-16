@@ -1,7 +1,7 @@
 {
   "openapi": "3.0.1",
   "info": {
-    "description": "## Introduction\nBy using this REST API, you can easily integrate Clockify with your own add-ons, push and pull data\nbetween Clockify and other tools, and create custom add-ons on [CAKE.com Marketplace](https://marketplace.cake.com).\nWhether you’re looking to automate time tracking, generate custom reports, or build other custom\nintegrations, our API provides the flexibility and power you need to get the job done. If you\nhave any questions or run into any issues while using our API, don’t hesitate to reach out to us for help.\nYou can also post questions on Stack Overflow with the Clockify tag to get help from the community.\n## Authentication\nTo authenticate your requests to your API, make sure to include either the ‘X-Api-Key’ or the\n‘X-Addon-Token’ in the request header, containing your API or Addon key. If your workspace is\non a subdomain (e.g. subdomain.clockify.me), you’ll need to generate a new API key in your\nProfile Settings that will work specifically for that workspace. This ensures that you’re\naccessing data from the correct workspace and helps maintain the security of your data.\n## Webhooks\nWebhooks can enhance your workflow by keeping your add-on up-to-date with the latest changes in\nClockify. With Clockify’s webhooks you can receive real-time notifications when certain events such as\nstarting a timer or deleting a time entry occur in Clockify.\nDepending on the workspace plan, workspace owners and admins can create:\n\n* Up to 3 webhooks on **FREE** plan\n* Up to 10 webhooks per user, with a total of 100 webhooks per entire workspace\non **BASIC**, **STANDARD** and **PRO** plans\n* Up to 100 webhooks per user, with a total of 300 webhooks per entire workspace on **ENTERPRISE** plan\n\n## Rate limiting\nOur REST API has a specific rate limit of 50 requests per second (by addon on one workspace) when\naccessed using X-Addon-Token. Exceeding this limit will result in an error message with the description\n\"Too many requests\".\n## Pagination\nOur REST API supports pagination for all synchronous GET endpoints that retrieve lists of entities.\nWhen an endpoint accepts the `page` and `pageSize` query parameters, it will return a paginated response.\n\nTo control the data returned in a paginated request, you can use the following optional query parameters.\n\n- **page** (integer): The page number you wish to retrieve. This is 1-indexed. If this parameter is omitted,\nthe API will default to the first page (page=1).\n- **pageSize** (integer): The number of items to include on each page. If this parameter is omitted,\na default page size will be used.\n\nEvery response from an endpoint that supports these parameters will include a custom `Last-Page` header.\nThis header provides a simple way to determine if you have reached the end of the data set.\n\n- **true:** The current page is the final page; no more data is available.\n- **false:** Additional pages can be fetched.\n## API URLs\nRefer to the list on what URL to use base on the subdomain and data region settings of your workspace.\n* Global - can be used by workspaces with or without subdomain.\n    * Regular: https://api.clockify.me/api/v1/file/image\n    * Reports: https://reports.api.clockify.me/v1/workspaces/{workspaceId}/reports/detailed\n* Regional\n    * Non-subdomain\n        * Regular: https://euc1.clockify.me/api/v1/file/image\n        * Reports: https://use2.clockify.me/report/v1/workspaces/{workspaceId}/reports/detailed\n    * Subdomain\n        * Regular: https://euc1.clockify.me/api/v1/file/image\n        * Reports: https://yoursubdomainname.clockify.me/report/v1/workspaces/{workspaceId}/reports/detailed\n* Developer\n    * Regular: https://developer.clockify.me/api/v1/file/image\n    * Reports: https://developer.clockify.me/report/v1/workspaces/{workspaceId}/reports/detailed\n## Regional Server Prefixes\nIf your workspace is in a specific region, you need to change your URL prefix to access v1 API endpoints.\nFor example, this is how **backend** api [v1/file/image](#tag/User/operation/uploadImage) endpoint\nwould look in EU region:\n[https://euc1.clockify.me/api/v1/file/image](https://euc1.clockify.me)\n\nBelow are the available regional server prefixes:\n* **EU (Germany)**: euc1\n* **USA**: use2\n* **UK**: euw2\n* **AU**: apse2\n\n\n## Breaking changes\nBreaking changes in APIs are modifications that disrupt existing integrations,\nrequiring users to update their applications to maintain functionality.\nThese changes can lead to failures or unexpected results if not addressed.\nSee the list of [breaking changes](breaking-changes/).\n\n## Experimental APIs\nThe experimental API has been thoroughly tested and is ready for use in production. However, please note that user feedback may lead to changes in the API’s structure or functionality. If you choose to use the experimental API, be prepared to modify your application code accordingly to accommodate any updates.",
+    "description": "## Introduction\nBy using this REST API, you can easily integrate Clockify with your own add-ons, push and pull data\nbetween Clockify and other tools, and create custom add-ons on [CAKE.com Marketplace](https://marketplace.cake.com).\nWhether you’re looking to automate time tracking, generate custom reports, or build other custom\nintegrations, our API provides the flexibility and power you need to get the job done. If you\nhave any questions or run into any issues while using our API, don’t hesitate to reach out to us for help.\nYou can also post questions on Stack Overflow with the Clockify tag to get help from the community.\n## Authentication\nTo authenticate your requests to your API, make sure to include either the ‘X-Api-Key’ or the\n‘X-Addon-Token’ in the request header, containing your API or Addon key. If your workspace is\non a subdomain (e.g. subdomain.clockify.me), you’ll need to generate a new API key in your\nProfile Settings that will work specifically for that workspace. This ensures that you’re\naccessing data from the correct workspace and helps maintain the security of your data.\n## Webhooks\nWebhooks can enhance your workflow by keeping your add-on up-to-date with the latest changes in\nClockify. With Clockify’s webhooks you can receive real-time notifications when certain events such as\nstarting a timer or deleting a time entry occur in Clockify.\nDepending on the workspace plan, workspace owners and admins can create:\n\n* Up to 3 webhooks on **FREE** plan\n* Up to 10 webhooks per user, with a total of 100 webhooks per entire workspace\non **BASIC**, **STANDARD** and **PRO** plans\n* Up to 100 webhooks per user, with a total of 300 webhooks per entire workspace on **ENTERPRISE** plan\n\n## Rate limiting\n\n### API Key Rate Limits\nThe rate limit for requests authenticated with the `X-Api-Key` header depends on your workspace plan and\nare counted per workspace:\n\n* **FREE**: 30 requests per hour\n* **TRIAL**: 20 requests per second\n* **BASIC**, **STANDARD**, and **PRO**: 20 requests per second\n* **ENTERPRISE**: 50 requests per second\n\n### Add-on Rate Limits\nOur REST API has a specific rate limit of 50 requests per second (by addon on one workspace) when\naccessed using X-Addon-Token. Exceeding this limit will result in an error message with the description\n\"Too many requests\".\n## Pagination\nOur REST API supports pagination for all synchronous GET endpoints that retrieve lists of entities.\nWhen an endpoint accepts the `page` and `pageSize` query parameters, it will return a paginated response.\n\nTo control the data returned in a paginated request, you can use the following optional query parameters.\n\n- **page** (integer): The page number you wish to retrieve. This is 1-indexed. If this parameter is omitted,\nthe API will default to the first page (page=1).\n- **pageSize** (integer): The number of items to include on each page. If this parameter is omitted,\na default page size will be used.\n\nEvery response from an endpoint that supports these parameters will include a custom `Last-Page` header.\nThis header provides a simple way to determine if you have reached the end of the data set.\n\n- **true:** The current page is the final page; no more data is available.\n- **false:** Additional pages can be fetched.\n## API URLs\nRefer to the list on what URL to use base on the subdomain and data region settings of your workspace.\n* Global - can be used by workspaces with or without subdomain.\n    * Regular: https://api.clockify.me/api/v1/file/image\n    * Reports: https://reports.api.clockify.me/v1/workspaces/{workspaceId}/reports/detailed\n* Regional\n    * Non-subdomain\n        * Regular: https://euc1.clockify.me/api/v1/file/image\n        * Reports: https://use2.clockify.me/report/v1/workspaces/{workspaceId}/reports/detailed\n    * Subdomain\n        * Regular: https://euc1.clockify.me/api/v1/file/image\n        * Reports: https://yoursubdomainname.clockify.me/report/v1/workspaces/{workspaceId}/reports/detailed\n* Developer\n    * Regular: https://developer.clockify.me/api/v1/file/image\n    * Reports: https://developer.clockify.me/report/v1/workspaces/{workspaceId}/reports/detailed\n## Regional Server Prefixes\nIf your workspace is in a specific region, you need to change your URL prefix to access v1 API endpoints.\nFor example, this is how **backend** api [v1/file/image](#tag/User/operation/uploadImage) endpoint\nwould look in EU region:\n[https://euc1.clockify.me/api/v1/file/image](https://euc1.clockify.me)\n\nBelow are the available regional server prefixes:\n* **EU (Germany)**: euc1\n* **USA**: use2\n* **UK**: euw2\n* **AU**: apse2\n\n\n## Breaking changes\nBreaking changes in APIs are modifications that disrupt existing integrations,\nrequiring users to update their applications to maintain functionality.\nThese changes can lead to failures or unexpected results if not addressed.\nSee the list of [breaking changes](breaking-changes/).\n\n## Experimental APIs\nThe experimental API has been thoroughly tested and is ready for use in production. However, please note that user feedback may lead to changes in the API’s structure or functionality. If you choose to use the experimental API, be prepared to modify your application code accordingly to accommodate any updates.",
     "title": "Clockify API",
     "version": "v1",
     "x-logo": {
@@ -12245,7 +12245,7 @@
         "type": "object",
         "default": null,
         "description": "Represents an entity creation permission enum.",
-        "example": "ADMINS",
+        "example": "EVERYONE",
         "oneOf": [{ "type": "string", "enum": ["ADMINS", "ADMINS_AND_PROJECT_MANAGERS", "EVERYONE"] }],
         "properties": {
           "ADMINS": { "type": "string", "enum": ["ADMINS", "ADMINS_AND_PROJECT_MANAGERS", "EVERYONE"] },
@@ -12270,7 +12270,7 @@
       "EntityIdNameDto": {
         "type": "object",
         "properties": { "id": { "type": "string" }, "name": { "type": "string" } },
-        "description": "Contains names of users that are assigned to holiday.",
+        "description": "Contains names of user groups that are assigned to holiday.",
         "default": null
       },
       "EstimateDtoV1": {
@@ -13015,6 +13015,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -13067,7 +13068,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           }
         ],
@@ -13109,6 +13111,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -13161,7 +13164,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "ADD_TIME_FOR_OTHERS": {
@@ -13201,6 +13205,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -13253,7 +13258,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "ADMIN_PANEL": {
@@ -13293,6 +13299,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -13345,7 +13352,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "ALERTS": {
@@ -13385,6 +13393,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -13437,7 +13446,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "APPROVAL": {
@@ -13477,6 +13487,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -13529,7 +13540,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "ATTENDANCE_REPORT": {
@@ -13569,6 +13581,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -13621,7 +13634,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "AUDIT_LOG": {
@@ -13661,6 +13675,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -13713,7 +13728,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "AUTOMATIC_LOCK": {
@@ -13753,6 +13769,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -13805,7 +13822,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "BILLABLE_HOURS": {
@@ -13845,6 +13863,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -13897,7 +13916,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "BRANDED_REPORTS": {
@@ -13937,6 +13957,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -13989,7 +14010,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "BREAKS": {
@@ -14029,6 +14051,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -14081,7 +14104,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "BULK_EDIT": {
@@ -14121,6 +14145,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -14173,7 +14198,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "CLIENT_CURRENCY": {
@@ -14213,6 +14239,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -14265,7 +14292,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "CREATION_PERMISSIONS": {
@@ -14305,6 +14333,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -14357,7 +14386,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "CSV_EXPORT": {
@@ -14397,6 +14427,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -14449,7 +14480,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "CUSTOM_FIELDS": {
@@ -14489,6 +14521,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -14541,7 +14574,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "CUSTOM_REPORTING": {
@@ -14581,6 +14615,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -14633,7 +14668,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "CUSTOM_SUBDOMAIN": {
@@ -14673,6 +14709,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -14725,7 +14762,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "DECIMAL_FORMAT": {
@@ -14765,6 +14803,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -14817,7 +14856,102 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
+            ]
+          },
+          "DEFAULT_BILLABLE_PROJECT": {
+            "type": "string",
+            "enum": [
+              "ACTIVITY_MONITORING",
+              "ADD_TIME_FOR_OTHERS",
+              "ADMIN_PANEL",
+              "ALERTS",
+              "APPROVAL",
+              "AUDIT_LOG",
+              "AUTOMATIC_LOCK",
+              "BRANDED_REPORTS",
+              "BULK_EDIT",
+              "CUSTOM_FIELDS",
+              "CUSTOM_REPORTING",
+              "CUSTOM_SUBDOMAIN",
+              "CREATION_PERMISSIONS",
+              "DECIMAL_FORMAT",
+              "DISABLE_MANUAL_MODE",
+              "EDIT_MEMBER_PROFILE",
+              "EXCLUDE_NON_BILLABLE_FROM_ESTIMATE",
+              "EXPENSES",
+              "FILE_IMPORT",
+              "TIMESHEET_IMPORT",
+              "USER_IMPORT",
+              "HIDE_PAGES",
+              "HISTORIC_RATES",
+              "INVOICING",
+              "INVOICE_EMAILS",
+              "INVOICE_REMINDERS",
+              "LABOR_COST",
+              "LOCATIONS",
+              "MANAGER_ROLE",
+              "MULTI_FACTOR_AUTHENTICATION",
+              "PROJECT_BUDGET",
+              "PROJECT_TEMPLATES",
+              "GRANT_PROJECT_MANAGER_ROLE",
+              "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
+              "QUICKBOOKS_INTEGRATION",
+              "RECURRING_ESTIMATES",
+              "RECURRING_INVOICES",
+              "REQUIRED_FIELDS",
+              "SCHEDULED_REPORTS",
+              "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
+              "SCREENSHOTS",
+              "SSO",
+              "SUMMARY_ESTIMATE",
+              "TARGETS_AND_REMINDERS",
+              "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
+              "TIME_OFF",
+              "TOIL",
+              "UNLIMITED_REPORTS",
+              "USER_CUSTOM_FIELDS",
+              "WHO_CAN_CHANGE_TIMEENTRY_BILLABILITY",
+              "BREAKS",
+              "KIOSK_SESSION_DURATION",
+              "KIOSK_PIN_REQUIRED",
+              "WHO_CAN_SEE_ALL_TIME_ENTRIES",
+              "WHO_CAN_SEE_PROJECT_STATUS",
+              "WHO_CAN_SEE_PUBLIC_PROJECTS_ENTRIES",
+              "WHO_CAN_SEE_TEAMS_DASHBOARD",
+              "WORKSPACE_LOCK_TIMEENTRIES",
+              "WORKSPACE_TIME_AUDIT",
+              "WORKSPACE_TIME_ROUNDING",
+              "KIOSK",
+              "KIOSK_SIX_DIGIT_PIN",
+              "KIOSK_QR_CODE",
+              "KIOSK_PHOTO_CAPTURE",
+              "LIMITED_USERS",
+              "FORECASTING",
+              "TIME_TRACKING",
+              "ATTENDANCE_REPORT",
+              "WEEKLY_OVERTIME_CALCULATION_PERIOD",
+              "MONTHLY_OVERTIME_CALCULATION_PERIOD",
+              "WORKSPACE_TRANSFER",
+              "FAVORITE_ENTRIES",
+              "SPLIT_TIME_ENTRY",
+              "CLIENT_CURRENCY",
+              "SCHEDULING_FORECASTING",
+              "SCIM",
+              "UNLIMITED_USER_SEATS",
+              "BILLABLE_HOURS",
+              "PROJECT_ESTIMATE",
+              "CSV_EXPORT",
+              "XLSX_EXPORT",
+              "ONE_MONTH_RANGE_REPORTS",
+              "ONE_YEAR_RANGE_REPORTS",
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "DISABLE_MANUAL_MODE": {
@@ -14857,6 +14991,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -14909,7 +15044,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "EDIT_MEMBER_PROFILE": {
@@ -14949,6 +15085,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -15001,7 +15138,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "EXCLUDE_NON_BILLABLE_FROM_ESTIMATE": {
@@ -15041,6 +15179,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -15093,7 +15232,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "EXPENSES": {
@@ -15133,6 +15273,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -15185,7 +15326,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "FAVORITE_ENTRIES": {
@@ -15225,6 +15367,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -15277,7 +15420,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "FILE_IMPORT": {
@@ -15317,6 +15461,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -15369,7 +15514,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "FORECASTING": {
@@ -15409,6 +15555,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -15461,7 +15608,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "GRANT_PROJECT_MANAGER_ROLE": {
@@ -15501,6 +15649,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -15553,7 +15702,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "HIDE_PAGES": {
@@ -15593,6 +15743,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -15645,7 +15796,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "HISTORIC_RATES": {
@@ -15685,6 +15837,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -15737,7 +15890,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "INVOICE_EMAILS": {
@@ -15777,6 +15931,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -15829,7 +15984,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "INVOICE_REMINDERS": {
@@ -15869,6 +16025,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -15921,7 +16078,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "INVOICING": {
@@ -15961,6 +16119,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -16013,7 +16172,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "KIOSK": {
@@ -16053,6 +16213,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -16105,7 +16266,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "KIOSK_PHOTO_CAPTURE": {
@@ -16145,6 +16307,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -16197,7 +16360,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "KIOSK_PIN_REQUIRED": {
@@ -16237,6 +16401,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -16289,7 +16454,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "KIOSK_QR_CODE": {
@@ -16329,6 +16495,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -16381,7 +16548,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "KIOSK_SESSION_DURATION": {
@@ -16421,6 +16589,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -16473,7 +16642,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "KIOSK_SIX_DIGIT_PIN": {
@@ -16513,6 +16683,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -16565,7 +16736,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "LABOR_COST": {
@@ -16605,6 +16777,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -16657,7 +16830,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "LIMITED_USERS": {
@@ -16697,6 +16871,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -16749,7 +16924,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "LOCATIONS": {
@@ -16789,6 +16965,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -16841,7 +17018,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "MANAGER_ROLE": {
@@ -16881,6 +17059,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -16933,7 +17112,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "MONTHLY_OVERTIME_CALCULATION_PERIOD": {
@@ -16973,6 +17153,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -17025,7 +17206,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "MULTI_FACTOR_AUTHENTICATION": {
@@ -17065,6 +17247,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -17117,7 +17300,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "ONE_MONTH_RANGE_REPORTS": {
@@ -17157,6 +17341,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -17209,7 +17394,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "ONE_YEAR_RANGE_REPORTS": {
@@ -17249,6 +17435,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -17301,7 +17488,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "PRIVATE_PROJECT_ACCESS": {
@@ -17341,6 +17529,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -17393,7 +17582,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "PROJECT_BUDGET": {
@@ -17433,6 +17623,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -17485,7 +17676,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "PROJECT_ESTIMATE": {
@@ -17525,6 +17717,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -17577,7 +17770,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "PROJECT_TEMPLATES": {
@@ -17617,6 +17811,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -17669,7 +17864,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "QUICKBOOKS_INTEGRATION": {
@@ -17709,6 +17905,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -17761,7 +17958,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "RECURRING_ESTIMATES": {
@@ -17801,6 +17999,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -17853,7 +18052,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "RECURRING_INVOICES": {
@@ -17893,6 +18093,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -17945,7 +18146,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "REQUIRED_FIELDS": {
@@ -17985,6 +18187,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -18037,7 +18240,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "SCHEDULED_REPORTS": {
@@ -18077,6 +18281,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -18129,7 +18334,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "SCHEDULING": {
@@ -18169,6 +18375,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -18221,7 +18428,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "SCHEDULING_BILLABLE_AND_COST_AMOUNT": {
@@ -18261,6 +18469,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -18313,7 +18522,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "SCHEDULING_FORECASTING": {
@@ -18353,6 +18563,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -18405,7 +18616,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "SCIM": {
@@ -18445,6 +18657,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -18497,7 +18710,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "SCREENSHOTS": {
@@ -18537,6 +18751,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -18589,7 +18804,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "SHARED_REPORTS": {
@@ -18629,6 +18845,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -18681,7 +18898,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "SPLIT_TIME_ENTRY": {
@@ -18721,6 +18939,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -18773,7 +18992,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "SSO": {
@@ -18813,6 +19033,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -18865,7 +19086,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "SUMMARY_ESTIMATE": {
@@ -18905,6 +19127,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -18957,7 +19180,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "TARGETS_AND_REMINDERS": {
@@ -18997,6 +19221,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -19049,7 +19274,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "TASK_COST_RATES": {
@@ -19089,6 +19315,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -19141,7 +19368,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "TASK_HOURLY_RATES": {
@@ -19181,6 +19409,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -19233,7 +19462,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "TASK_RATES": {
@@ -19273,6 +19503,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -19325,7 +19556,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "TIMESHEET_IMPORT": {
@@ -19365,6 +19597,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -19417,7 +19650,102 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
+            ]
+          },
+          "TIME_ENTRY_ROUNDING": {
+            "type": "string",
+            "enum": [
+              "ACTIVITY_MONITORING",
+              "ADD_TIME_FOR_OTHERS",
+              "ADMIN_PANEL",
+              "ALERTS",
+              "APPROVAL",
+              "AUDIT_LOG",
+              "AUTOMATIC_LOCK",
+              "BRANDED_REPORTS",
+              "BULK_EDIT",
+              "CUSTOM_FIELDS",
+              "CUSTOM_REPORTING",
+              "CUSTOM_SUBDOMAIN",
+              "CREATION_PERMISSIONS",
+              "DECIMAL_FORMAT",
+              "DISABLE_MANUAL_MODE",
+              "EDIT_MEMBER_PROFILE",
+              "EXCLUDE_NON_BILLABLE_FROM_ESTIMATE",
+              "EXPENSES",
+              "FILE_IMPORT",
+              "TIMESHEET_IMPORT",
+              "USER_IMPORT",
+              "HIDE_PAGES",
+              "HISTORIC_RATES",
+              "INVOICING",
+              "INVOICE_EMAILS",
+              "INVOICE_REMINDERS",
+              "LABOR_COST",
+              "LOCATIONS",
+              "MANAGER_ROLE",
+              "MULTI_FACTOR_AUTHENTICATION",
+              "PROJECT_BUDGET",
+              "PROJECT_TEMPLATES",
+              "GRANT_PROJECT_MANAGER_ROLE",
+              "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
+              "QUICKBOOKS_INTEGRATION",
+              "RECURRING_ESTIMATES",
+              "RECURRING_INVOICES",
+              "REQUIRED_FIELDS",
+              "SCHEDULED_REPORTS",
+              "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
+              "SCREENSHOTS",
+              "SSO",
+              "SUMMARY_ESTIMATE",
+              "TARGETS_AND_REMINDERS",
+              "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
+              "TIME_OFF",
+              "TOIL",
+              "UNLIMITED_REPORTS",
+              "USER_CUSTOM_FIELDS",
+              "WHO_CAN_CHANGE_TIMEENTRY_BILLABILITY",
+              "BREAKS",
+              "KIOSK_SESSION_DURATION",
+              "KIOSK_PIN_REQUIRED",
+              "WHO_CAN_SEE_ALL_TIME_ENTRIES",
+              "WHO_CAN_SEE_PROJECT_STATUS",
+              "WHO_CAN_SEE_PUBLIC_PROJECTS_ENTRIES",
+              "WHO_CAN_SEE_TEAMS_DASHBOARD",
+              "WORKSPACE_LOCK_TIMEENTRIES",
+              "WORKSPACE_TIME_AUDIT",
+              "WORKSPACE_TIME_ROUNDING",
+              "KIOSK",
+              "KIOSK_SIX_DIGIT_PIN",
+              "KIOSK_QR_CODE",
+              "KIOSK_PHOTO_CAPTURE",
+              "LIMITED_USERS",
+              "FORECASTING",
+              "TIME_TRACKING",
+              "ATTENDANCE_REPORT",
+              "WEEKLY_OVERTIME_CALCULATION_PERIOD",
+              "MONTHLY_OVERTIME_CALCULATION_PERIOD",
+              "WORKSPACE_TRANSFER",
+              "FAVORITE_ENTRIES",
+              "SPLIT_TIME_ENTRY",
+              "CLIENT_CURRENCY",
+              "SCHEDULING_FORECASTING",
+              "SCIM",
+              "UNLIMITED_USER_SEATS",
+              "BILLABLE_HOURS",
+              "PROJECT_ESTIMATE",
+              "CSV_EXPORT",
+              "XLSX_EXPORT",
+              "ONE_MONTH_RANGE_REPORTS",
+              "ONE_YEAR_RANGE_REPORTS",
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "TIME_OFF": {
@@ -19457,6 +19785,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -19509,7 +19838,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "TIME_TRACKING": {
@@ -19549,6 +19879,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -19601,7 +19932,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "TOIL": {
@@ -19641,6 +19973,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -19693,7 +20026,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "UNLIMITED_REPORTS": {
@@ -19733,6 +20067,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -19785,7 +20120,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "UNLIMITED_USER_SEATS": {
@@ -19825,6 +20161,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -19877,7 +20214,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "USER_CUSTOM_FIELDS": {
@@ -19917,6 +20255,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -19969,7 +20308,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "USER_IMPORT": {
@@ -20009,6 +20349,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -20061,7 +20402,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "WEEKLY_OVERTIME_CALCULATION_PERIOD": {
@@ -20101,6 +20443,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -20153,7 +20496,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "WHO_CAN_CHANGE_TIMEENTRY_BILLABILITY": {
@@ -20193,6 +20537,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -20245,7 +20590,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "WHO_CAN_SEE_ALL_TIME_ENTRIES": {
@@ -20285,6 +20631,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -20337,7 +20684,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "WHO_CAN_SEE_PROJECT_STATUS": {
@@ -20377,6 +20725,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -20429,7 +20778,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "WHO_CAN_SEE_PUBLIC_PROJECTS_ENTRIES": {
@@ -20469,6 +20819,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -20521,7 +20872,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "WHO_CAN_SEE_TEAMS_DASHBOARD": {
@@ -20561,6 +20913,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -20613,7 +20966,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "WORKSPACE_LOCK_TIMEENTRIES": {
@@ -20653,6 +21007,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -20705,7 +21060,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "WORKSPACE_TIME_AUDIT": {
@@ -20745,6 +21101,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -20797,7 +21154,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "WORKSPACE_TIME_ROUNDING": {
@@ -20837,6 +21195,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -20889,7 +21248,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "WORKSPACE_TRANSFER": {
@@ -20929,6 +21289,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -20981,7 +21342,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "XLSX_EXPORT": {
@@ -21021,6 +21383,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -21073,7 +21436,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           }
         }
@@ -21126,6 +21490,7 @@
                 "PROJECT_TEMPLATES",
                 "GRANT_PROJECT_MANAGER_ROLE",
                 "PRIVATE_PROJECT_ACCESS",
+                "DEFAULT_BILLABLE_PROJECT",
                 "QUICKBOOKS_INTEGRATION",
                 "RECURRING_ESTIMATES",
                 "RECURRING_INVOICES",
@@ -21178,7 +21543,8 @@
                 "XLSX_EXPORT",
                 "ONE_MONTH_RANGE_REPORTS",
                 "ONE_YEAR_RANGE_REPORTS",
-                "SHARED_REPORTS"
+                "SHARED_REPORTS",
+                "TIME_ENTRY_ROUNDING"
               ]
             }
           },
@@ -23640,7 +24006,7 @@
           },
           "currency": { "type": "string", "description": "Represents a currency.", "example": "USD", "default": "" }
         },
-        "description": "Represents hourly rate object.",
+        "description": "Represents cost rate object.",
         "default": null
       },
       "RateDtoV1": {
@@ -23654,7 +24020,7 @@
           },
           "currency": { "type": "string", "description": "Represents a currency.", "example": "USD", "default": "" }
         },
-        "description": "Represents hourly rate object.",
+        "description": "Represents cost rate object.",
         "default": null
       },
       "RateWithCurrencyRequestV1": {
@@ -25191,9 +25557,7 @@
             "example": "5b715612b079875110792222",
             "default": ""
           }
-        },
-        "description": "Represents the array of time off requests.",
-        "default": null
+        }
       },
       "TimeOffRequestPeriodDto": {
         "type": "object",
@@ -25203,7 +25567,13 @@
           "halfDayPeriod": { "type": "string" },
           "period": { "$ref": "#/components/schemas/Period" }
         },
-        "description": "Represents the period the time off request.",
+        "description": "Represents the period of the time off request.",
+        "example": {
+          "period": { "start": "2021-12-23T00:00:00Z", "end": "2021-12-23T23:59:59.999999Z" },
+          "halfDay": false,
+          "halfDayPeriod": "NOT_DEFINED",
+          "halfDayHours": null
+        },
         "default": null
       },
       "TimeOffRequestPeriodV1Request": {
@@ -25226,7 +25596,12 @@
           "period": { "$ref": "#/components/schemas/PeriodV1Request" },
           "timeOffHalfDayPeriod": { "type": "string", "enum": ["FIRST_HALF", "SECOND_HALF", "NOT_DEFINED"] }
         },
-        "description": "Provide the period you would like to use for creating the time off request. If `timeZone` isn't set, should be aligned with time zone for user in settings. Can be shifted from user time zone with explicit setting of `timeZone`.",
+        "description": "Provide the period you would like to use for creating the time off request. If `timeZone` isn't set, it will be aligned with time zone for user in settings. Can be shifted from user time zone with explicit setting of `timeZone`.",
+        "example": {
+          "period": { "start": "2021-12-23", "end": "2021-12-25", "days": 3 },
+          "isHalfDay": false,
+          "halfDayPeriod": "NOT_DEFINED"
+        },
         "default": null
       },
       "TimeOffRequestStatus": {
@@ -25240,7 +25615,16 @@
           "note": { "type": "string" },
           "statusType": { "type": "string", "enum": ["PENDING", "APPROVED", "REJECTED", "ALL"] }
         },
-        "description": "Represents the status the time off request.",
+        "description": "Represents the status of the time off request.",
+        "example": {
+          "statusType": "APPROVED",
+          "changedByUserId": "5b715612b079875110794444",
+          "changedByUserName": "Nicholas",
+          "changedForUserName": "John",
+          "changedAt": "2022-08-26T08:32:01.640708Z",
+          "changedAtTimeZone": "Europe/Budapest",
+          "note": "Approved"
+        },
         "default": null
       },
       "TimeOffRequestV1Dto": {
@@ -29910,6 +30294,7 @@
               "PROJECT_TEMPLATES",
               "GRANT_PROJECT_MANAGER_ROLE",
               "PRIVATE_PROJECT_ACCESS",
+              "DEFAULT_BILLABLE_PROJECT",
               "QUICKBOOKS_INTEGRATION",
               "RECURRING_ESTIMATES",
               "RECURRING_INVOICES",
@@ -29962,7 +30347,8 @@
               "XLSX_EXPORT",
               "ONE_MONTH_RANGE_REPORTS",
               "ONE_YEAR_RANGE_REPORTS",
-              "SHARED_REPORTS"
+              "SHARED_REPORTS",
+              "TIME_ENTRY_ROUNDING"
             ]
           },
           "payloadType": {
