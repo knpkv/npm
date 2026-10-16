@@ -1,0 +1,542 @@
+{
+  "version": 1,
+  "product": "review-canvas",
+  "fixture": "revisions/export-1/fixture.json",
+  "live": {
+    "package": "@knpkv/herdr-hub",
+    "adapter": "packages/herdr-hub/test/design-conformance/adapter.ts"
+  },
+  "enforcement": {
+    "touched": "required",
+    "legacy": "required"
+  },
+  "files": {
+    "provenance.json": "adeb93fcb2359377ce7d1ca433af644fad34fe054f6bc708db77f697e018fb83",
+    "revisions/export-1/fixture.json": "211030397bc8af75b73162571210b09272c29a04591496b5119f008be156ed56",
+    "revisions/export-1/screens/chrome.css": "7a718ea0e12987880ca3bad6fe9de6810a49140ed72d80d311130269b583801d",
+    "revisions/export-1/screens/fonts/geist-mono-variable.woff2": "684ad5b531f81d43c1e8c7038262d5db7cdc1f68006e04d6c7769efa8d33c8cc",
+    "revisions/export-1/screens/fonts/geist-variable.woff2": "19f9c92546aa300c312235e3125af1b81394d8db9a4bc4a425cd5b641d2d54e1",
+    "revisions/export-1/screens/relay-chef-modern.js": "f4f5051e6b8a3d0a365c2d042a1adba7f1e14c425825ca9e3ffc455e27bdcd47",
+    "revisions/export-1/screens/relay-creature-states.js": "808e8412c89fbe773d45e6fb544608932d69431b6cffdedc14cc253405cb5ac6",
+    "revisions/export-1/screens/relay-screen-art.js": "1cf249020877889dd660402646e615a18531373ad70cd91affe5a436c0e8b65b",
+    "revisions/export-1/screens/review-canvas.html": "879f7241c5b069055c8ca5f45ac71dc2c3297e9adbe608de2c65e37e503a925a",
+    "revisions/export-1/screens/rly.css": "35e7a411e4fb4a422ebdaa33ef63e6d3a1480a5e8d30389d2b035025e636b1c6",
+    "revisions/export-1/source-manifest.json": "ffb92f2c88c5df6b8848d4990e9e61aae743aa61bc748ca7c778d3f792a91fb1"
+  },
+  "states": [
+    {
+      "screen": "review-canvas",
+      "state": "overview",
+      "route": "/?state=overview#code/pull-requests/review-canvas",
+      "viewports": [360, 390, 1280],
+      "themes": ["light", "dark"],
+      "status": "designed",
+      "regions": {
+        "phone": ["header", "minimap", "list", "nav"],
+        "desktop": ["nav", "header", "tabs", "toolbar", "canvas", "legend", "minimap"]
+      },
+      "source": "html",
+      "ref": "revisions/export-1/screens/review-canvas.html"
+    },
+    {
+      "screen": "review-canvas",
+      "state": "cluster",
+      "route": "/?state=cluster#code/pull-requests/review-canvas",
+      "viewports": [360, 390, 1280],
+      "themes": ["light", "dark"],
+      "status": "designed",
+      "regions": {
+        "phone": ["header", "minimap", "list", "nav"],
+        "desktop": ["nav", "header", "tabs", "toolbar", "canvas", "minimap"]
+      },
+      "source": "html",
+      "ref": "revisions/export-1/screens/review-canvas.html"
+    },
+    {
+      "screen": "review-canvas",
+      "state": "file",
+      "route": "/?state=file#code/pull-requests/review-canvas",
+      "viewports": [360, 390, 1280],
+      "themes": ["light", "dark"],
+      "status": "designed",
+      "regions": {
+        "phone": ["header", "minimap", "list", "nav"],
+        "desktop": ["nav", "header", "tabs", "toolbar", "canvas", "minimap"]
+      },
+      "source": "html",
+      "ref": "revisions/export-1/screens/review-canvas.html"
+    },
+    {
+      "screen": "review-canvas",
+      "state": "diff",
+      "route": "/?state=diff#code/pull-requests/review-canvas",
+      "viewports": [360, 390, 1280],
+      "themes": ["light", "dark"],
+      "status": "designed",
+      "regions": {
+        "phone": ["header", "list", "card", "action", "nav"],
+        "desktop": ["nav", "header", "tabs", "toolbar", "canvas", "action", "minimap"]
+      },
+      "source": "html",
+      "ref": "revisions/export-1/screens/review-canvas.html"
+    },
+    {
+      "screen": "review-canvas",
+      "state": "keyboard",
+      "route": "/?state=keyboard#code/pull-requests/review-canvas",
+      "viewports": [360, 390, 1280],
+      "themes": ["light", "dark"],
+      "status": "designed",
+      "regions": {
+        "phone": ["header", "minimap", "list", "nav"],
+        "desktop": ["nav", "header", "tabs", "toolbar", "canvas", "card", "minimap"]
+      },
+      "source": "html",
+      "ref": "revisions/export-1/screens/review-canvas.html"
+    },
+    {
+      "screen": "review-canvas",
+      "state": "map-building",
+      "route": "/?state=map-building#code/pull-requests/review-canvas",
+      "viewports": [360, 390, 1280],
+      "themes": ["light", "dark"],
+      "status": "designed",
+      "regions": {
+        "phone": ["header", "notice", "list", "nav"],
+        "desktop": ["nav", "header", "tabs", "toolbar", "canvas", "list"]
+      },
+      "source": "html",
+      "ref": "revisions/export-1/screens/review-canvas.html"
+    },
+    {
+      "screen": "review-canvas",
+      "state": "no-dependency-data",
+      "route": "/?state=no-dependency-data#code/pull-requests/review-canvas",
+      "viewports": [360, 390, 1280],
+      "themes": ["light", "dark"],
+      "status": "designed",
+      "regions": {
+        "phone": ["header", "notice", "minimap", "list", "nav"],
+        "desktop": ["nav", "header", "tabs", "toolbar", "notice", "canvas", "legend", "minimap"]
+      },
+      "source": "html",
+      "ref": "revisions/export-1/screens/review-canvas.html"
+    },
+    {
+      "screen": "review-canvas",
+      "state": "reading-path",
+      "route": "/?state=reading-path#code/pull-requests/review-canvas",
+      "viewports": [360, 390, 1280],
+      "themes": ["light", "dark"],
+      "status": "designed",
+      "regions": {
+        "phone": ["header", "card", "minimap", "list", "nav"],
+        "desktop": ["nav", "header", "tabs", "toolbar", "canvas", "card", "minimap"]
+      },
+      "source": "html",
+      "ref": "revisions/export-1/screens/review-canvas.html"
+    },
+    {
+      "screen": "review-canvas",
+      "state": "since-you-looked",
+      "route": "/?state=since-you-looked#code/pull-requests/review-canvas",
+      "viewports": [360, 390, 1280],
+      "themes": ["light", "dark"],
+      "status": "designed",
+      "regions": {
+        "phone": ["header", "card", "minimap", "list", "nav"],
+        "desktop": ["nav", "header", "tabs", "toolbar", "canvas", "card", "minimap"]
+      },
+      "source": "html",
+      "ref": "revisions/export-1/screens/review-canvas.html"
+    },
+    {
+      "screen": "review-canvas",
+      "state": "evidence",
+      "route": "/?state=evidence#code/pull-requests/review-canvas",
+      "viewports": [360, 390, 1280],
+      "themes": ["light", "dark"],
+      "status": "designed",
+      "regions": {
+        "phone": ["header", "minimap", "list", "nav"],
+        "desktop": ["nav", "header", "tabs", "toolbar", "canvas", "minimap"]
+      },
+      "source": "html",
+      "ref": "revisions/export-1/screens/review-canvas.html"
+    },
+    {
+      "screen": "review-canvas",
+      "state": "linear-fallback",
+      "route": "/?state=linear-fallback#code/pull-requests/review-canvas",
+      "viewports": [360, 390, 1280],
+      "themes": ["light", "dark"],
+      "status": "designed",
+      "regions": {
+        "phone": ["header", "minimap", "list", "nav"],
+        "desktop": ["nav", "header", "tabs", "toolbar", "list"]
+      },
+      "source": "html",
+      "ref": "revisions/export-1/screens/review-canvas.html"
+    },
+    {
+      "screen": "review-canvas",
+      "state": "large-pr",
+      "route": "/?state=large-pr#code/pull-requests/review-canvas",
+      "viewports": [360, 390, 1280],
+      "themes": ["light", "dark"],
+      "status": "designed",
+      "regions": {
+        "phone": ["header", "minimap", "list", "nav"],
+        "desktop": ["nav", "header", "tabs", "toolbar", "canvas", "minimap"]
+      },
+      "source": "html",
+      "ref": "revisions/export-1/screens/review-canvas.html"
+    },
+    {
+      "screen": "review-canvas",
+      "state": "context-on",
+      "route": "/?state=context-on#code/pull-requests/review-canvas",
+      "viewports": [360, 390, 1280],
+      "themes": ["light", "dark"],
+      "status": "designed",
+      "regions": {
+        "phone": ["header", "card", "tabs", "minimap", "list", "nav"],
+        "desktop": ["nav", "header", "tabs", "toolbar", "canvas", "legend", "minimap"]
+      },
+      "source": "html",
+      "ref": "revisions/export-1/screens/review-canvas.html"
+    },
+    {
+      "screen": "review-canvas",
+      "state": "you-are-here",
+      "route": "/?state=you-are-here#code/pull-requests/review-canvas",
+      "viewports": [360, 390, 1280],
+      "themes": ["light", "dark"],
+      "status": "designed",
+      "regions": {
+        "phone": ["header", "card", "tabs", "minimap", "list", "nav"],
+        "desktop": ["nav", "header", "tabs", "toolbar", "card", "canvas", "legend", "minimap"]
+      },
+      "source": "html",
+      "ref": "revisions/export-1/screens/review-canvas.html"
+    },
+    {
+      "screen": "review-canvas",
+      "state": "context-card",
+      "route": "/?state=context-card#code/pull-requests/review-canvas",
+      "viewports": [360, 390, 1280],
+      "themes": ["light", "dark"],
+      "status": "designed",
+      "regions": {
+        "phone": ["header", "card", "tabs", "minimap", "list", "nav"],
+        "desktop": ["nav", "header", "tabs", "toolbar", "canvas", "card"]
+      },
+      "source": "html",
+      "ref": "revisions/export-1/screens/review-canvas.html"
+    },
+    {
+      "screen": "review-canvas",
+      "state": "radius",
+      "route": "/?state=radius#code/pull-requests/review-canvas",
+      "viewports": [360, 390, 1280],
+      "themes": ["light", "dark"],
+      "status": "designed",
+      "regions": {
+        "phone": ["header", "card", "tabs", "minimap", "list", "nav"],
+        "desktop": ["nav", "header", "tabs", "toolbar", "card", "canvas", "legend", "minimap"]
+      },
+      "source": "html",
+      "ref": "revisions/export-1/screens/review-canvas.html"
+    },
+    {
+      "screen": "review-canvas",
+      "state": "i-know-this-area",
+      "route": "/?state=i-know-this-area#code/pull-requests/review-canvas",
+      "viewports": [360, 390, 1280],
+      "themes": ["light", "dark"],
+      "status": "designed",
+      "regions": {
+        "phone": ["header", "card", "tabs", "minimap", "list", "nav"],
+        "desktop": ["nav", "header", "tabs", "toolbar", "card", "canvas", "legend", "minimap"]
+      },
+      "source": "html",
+      "ref": "revisions/export-1/screens/review-canvas.html"
+    },
+    {
+      "screen": "review-canvas",
+      "state": "context-missing",
+      "route": "/?state=context-missing#code/pull-requests/review-canvas",
+      "viewports": [360, 390, 1280],
+      "themes": ["light", "dark"],
+      "status": "designed",
+      "regions": {
+        "phone": ["header", "card", "tabs", "minimap", "list", "nav"],
+        "desktop": ["nav", "header", "tabs", "toolbar", "card", "canvas", "legend", "minimap"]
+      },
+      "source": "html",
+      "ref": "revisions/export-1/screens/review-canvas.html"
+    },
+    {
+      "screen": "review-canvas",
+      "state": "linear-with-context",
+      "route": "/?state=linear-with-context#code/pull-requests/review-canvas",
+      "viewports": [360, 390, 1280],
+      "themes": ["light", "dark"],
+      "status": "designed",
+      "regions": {
+        "phone": ["header", "card", "tabs", "minimap", "list", "nav"],
+        "desktop": ["nav", "header", "tabs", "toolbar", "card", "list"]
+      },
+      "source": "html",
+      "ref": "revisions/export-1/screens/review-canvas.html"
+    },
+    {
+      "screen": "review-canvas",
+      "state": "sign-off",
+      "route": "/?state=sign-off#code/pull-requests/review-canvas",
+      "viewports": [360, 390, 1280],
+      "themes": ["light", "dark"],
+      "status": "designed",
+      "regions": {
+        "phone": ["header", "card", "action", "nav"],
+        "desktop": ["nav", "header", "tabs", "toolbar", "canvas", "card", "action"]
+      },
+      "source": "html",
+      "ref": "revisions/export-1/screens/review-canvas.html"
+    },
+    {
+      "screen": "review-canvas",
+      "state": "sign-off-plan-step",
+      "route": "/?state=sign-off-plan-step#code/pull-requests/review-canvas",
+      "viewports": [360, 390, 1280],
+      "themes": ["light", "dark"],
+      "status": "designed",
+      "regions": {
+        "phone": ["header", "list", "nav"],
+        "desktop": ["nav", "header", "tabs", "toolbar", "canvas", "card", "action"]
+      },
+      "source": "html",
+      "ref": "revisions/export-1/screens/review-canvas.html"
+    },
+    {
+      "screen": "review-canvas",
+      "state": "sign-off-blocked",
+      "route": "/?state=sign-off-blocked#code/pull-requests/review-canvas",
+      "viewports": [360, 390, 1280],
+      "themes": ["light", "dark"],
+      "status": "designed",
+      "regions": {
+        "phone": ["header", "card", "action", "nav"],
+        "desktop": ["nav", "header", "tabs", "toolbar", "canvas", "card", "action"]
+      },
+      "source": "html",
+      "ref": "revisions/export-1/screens/review-canvas.html"
+    },
+    {
+      "screen": "review-canvas",
+      "state": "request-preview",
+      "route": "/?state=request-preview#code/pull-requests/review-canvas",
+      "viewports": [360, 390, 1280],
+      "themes": ["light", "dark"],
+      "status": "designed",
+      "regions": {
+        "phone": ["header", "nav", "fullscreen", "pane-list", "actionbar"],
+        "desktop": ["nav", "header", "tabs", "toolbar", "canvas", "fullscreen", "pane-list", "pane-code", "actionbar"]
+      },
+      "source": "html",
+      "ref": "revisions/export-1/screens/review-canvas.html"
+    },
+    {
+      "screen": "review-canvas",
+      "state": "request-preview-item",
+      "route": "/?state=request-preview-item#code/pull-requests/review-canvas",
+      "viewports": [360, 390, 1280],
+      "themes": ["light", "dark"],
+      "status": "designed",
+      "regions": {
+        "phone": ["header", "nav", "fullscreen", "pane-code", "actionbar"],
+        "desktop": ["nav", "header", "tabs", "toolbar", "canvas", "fullscreen", "pane-list", "pane-code", "actionbar"]
+      },
+      "source": "html",
+      "ref": "revisions/export-1/screens/review-canvas.html"
+    },
+    {
+      "screen": "review-canvas",
+      "state": "request-preview-editing",
+      "route": "/?state=request-preview-editing#code/pull-requests/review-canvas",
+      "viewports": [360, 390, 1280],
+      "themes": ["light", "dark"],
+      "status": "designed",
+      "regions": {
+        "phone": ["header", "nav", "fullscreen", "pane-list", "actionbar"],
+        "desktop": ["nav", "header", "tabs", "toolbar", "canvas", "fullscreen", "pane-list", "pane-code", "actionbar"]
+      },
+      "source": "html",
+      "ref": "revisions/export-1/screens/review-canvas.html"
+    },
+    {
+      "screen": "review-canvas",
+      "state": "request-sent",
+      "route": "/?state=request-sent#code/pull-requests/review-canvas",
+      "viewports": [360, 390, 1280],
+      "themes": ["light", "dark"],
+      "status": "designed",
+      "regions": {
+        "phone": ["header", "nav", "fullscreen", "pane-list", "actionbar"],
+        "desktop": [
+          "nav",
+          "header",
+          "tabs",
+          "toolbar",
+          "canvas",
+          "card",
+          "action",
+          "fullscreen",
+          "pane-list",
+          "pane-code",
+          "actionbar"
+        ]
+      },
+      "source": "html",
+      "ref": "revisions/export-1/screens/review-canvas.html"
+    },
+    {
+      "screen": "review-canvas",
+      "state": "request-waiting",
+      "route": "/?state=request-waiting#code/pull-requests/review-canvas",
+      "viewports": [360, 390, 1280],
+      "themes": ["light", "dark"],
+      "status": "designed",
+      "regions": {
+        "phone": ["header", "nav", "fullscreen", "pane-list", "actionbar"],
+        "desktop": ["nav", "header", "tabs", "toolbar", "canvas", "card"]
+      },
+      "source": "html",
+      "ref": "revisions/export-1/screens/review-canvas.html"
+    },
+    {
+      "screen": "review-canvas",
+      "state": "request-rereview",
+      "route": "/?state=request-rereview#code/pull-requests/review-canvas",
+      "viewports": [360, 390, 1280],
+      "themes": ["light", "dark"],
+      "status": "designed",
+      "regions": {
+        "phone": ["header", "nav", "fullscreen", "pane-list", "actionbar"],
+        "desktop": [
+          "nav",
+          "header",
+          "tabs",
+          "toolbar",
+          "canvas",
+          "card",
+          "action",
+          "fullscreen",
+          "pane-list",
+          "pane-code",
+          "actionbar"
+        ]
+      },
+      "source": "html",
+      "ref": "revisions/export-1/screens/review-canvas.html"
+    },
+    {
+      "screen": "review-canvas",
+      "state": "templates-settings",
+      "route": "/?state=templates-settings#code/pull-requests/review-canvas",
+      "viewports": [360, 390, 1280],
+      "themes": ["light", "dark"],
+      "status": "designed",
+      "regions": {
+        "phone": ["header", "tabs", "settings", "notice", "action", "nav"],
+        "desktop": ["nav", "header", "tabs", "settings", "notice", "action"]
+      },
+      "source": "html",
+      "ref": "revisions/export-1/screens/review-canvas.html"
+    },
+    {
+      "screen": "review-canvas",
+      "state": "templates-none",
+      "route": "/?state=templates-none#code/pull-requests/review-canvas",
+      "viewports": [360, 390, 1280],
+      "themes": ["light", "dark"],
+      "status": "designed",
+      "regions": {
+        "phone": ["header", "tabs", "settings", "notice", "nav"],
+        "desktop": ["nav", "header", "tabs", "settings", "notice"]
+      },
+      "source": "html",
+      "ref": "revisions/export-1/screens/review-canvas.html"
+    },
+    {
+      "screen": "review-canvas",
+      "state": "checklist",
+      "route": "/?state=checklist#code/pull-requests/review-canvas",
+      "viewports": [360, 390, 1280],
+      "themes": ["light", "dark"],
+      "status": "designed",
+      "regions": {
+        "phone": ["header", "checklist", "card", "action", "nav"],
+        "desktop": ["nav", "header", "tabs", "toolbar", "canvas", "checklist", "card", "action"]
+      },
+      "source": "html",
+      "ref": "revisions/export-1/screens/review-canvas.html"
+    },
+    {
+      "screen": "review-canvas",
+      "state": "checklist-no-issue",
+      "route": "/?state=checklist-no-issue#code/pull-requests/review-canvas",
+      "viewports": [360, 390, 1280],
+      "themes": ["light", "dark"],
+      "status": "designed",
+      "regions": {
+        "phone": ["header", "checklist", "card", "action", "nav"],
+        "desktop": ["nav", "header", "tabs", "toolbar", "canvas", "checklist", "card", "action"]
+      },
+      "source": "html",
+      "ref": "revisions/export-1/screens/review-canvas.html"
+    },
+    {
+      "screen": "review-canvas",
+      "state": "checklist-posting-preview",
+      "route": "/?state=checklist-posting-preview#code/pull-requests/review-canvas",
+      "viewports": [360, 390, 1280],
+      "themes": ["light", "dark"],
+      "status": "designed",
+      "regions": {
+        "phone": ["header", "checklist", "preview", "card", "action", "nav"],
+        "desktop": ["nav", "header", "tabs", "toolbar", "preview", "canvas", "checklist", "card", "action"]
+      },
+      "source": "html",
+      "ref": "revisions/export-1/screens/review-canvas.html"
+    },
+    {
+      "screen": "review-canvas",
+      "state": "checklist-feeds-request",
+      "route": "/?state=checklist-feeds-request#code/pull-requests/review-canvas",
+      "viewports": [360, 390, 1280],
+      "themes": ["light", "dark"],
+      "status": "designed",
+      "regions": {
+        "phone": ["header", "nav", "fullscreen", "pane-list", "actionbar"],
+        "desktop": ["nav", "header", "tabs", "toolbar", "canvas", "card", "action"]
+      },
+      "source": "html",
+      "ref": "revisions/export-1/screens/review-canvas.html"
+    },
+    {
+      "screen": "review-canvas",
+      "state": "unknown",
+      "route": "/?state=unknown#code/pull-requests/review-canvas",
+      "viewports": [360, 390, 1280],
+      "themes": ["light", "dark"],
+      "status": "designed",
+      "regions": {
+        "phone": ["notice"],
+        "desktop": ["notice"]
+      },
+      "source": "html",
+      "ref": "revisions/export-1/screens/review-canvas.html"
+    }
+  ]
+}

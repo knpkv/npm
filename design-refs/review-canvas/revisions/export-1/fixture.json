@@ -1,0 +1,3651 @@
+{
+  "version": 1,
+  "data": {
+    "reviewDirections": {
+      "canvas": {
+        "meta": {
+          "about": "Synthetic fixture for 16 Review D, Canvas (a direction, not a final build). All data is invented. Coordinates are canvas px on a 1016 × 640 surface. Times are en-GB, 24-hour.",
+          "locale": "en-GB",
+          "you": "Alex"
+        },
+        "pr": {
+          "repo": "relay/web",
+          "number": "#463",
+          "title": "Move stage sync into a shared worker",
+          "branch": "stage-sync-worker",
+          "base": "main",
+          "files": 14,
+          "modules": 4,
+          "added": 612,
+          "removed": 240,
+          "review": "sec-cc review, 14:22",
+          "findingsLine": "1 P1, 2 P2, 1 P3",
+          "check": {
+            "name": "unit-tests",
+            "label": "1 check failed",
+            "result": "1 of 58 tests failed: opens one socket for two tabs",
+            "file": "tests/socket.test.ts"
+          },
+          "lastLook": "13:20",
+          "head": "e81f0c9",
+          "commitsSince": [
+            {
+              "sha": "3b6d0a5",
+              "at": "13:41"
+            },
+            {
+              "sha": "e81f0c9",
+              "at": "14:18"
+            }
+          ],
+          "changedSince": 4
+        },
+        "modules": [
+          {
+            "id": "stage",
+            "label": "stage",
+            "files": 4,
+            "x": 16,
+            "y": 56,
+            "w": 316,
+            "h": 388
+          },
+          {
+            "id": "sync-worker",
+            "label": "sync-worker",
+            "files": 4,
+            "x": 344,
+            "y": 56,
+            "w": 340,
+            "h": 388
+          },
+          {
+            "id": "composer",
+            "label": "composer",
+            "files": 3,
+            "x": 692,
+            "y": 236,
+            "w": 312,
+            "h": 208
+          },
+          {
+            "id": "tests",
+            "label": "tests",
+            "files": 3,
+            "x": 344,
+            "y": 464,
+            "w": 392,
+            "h": 162
+          }
+        ],
+        "partitions": [
+          {
+            "id": "A",
+            "title": "Worker owns the socket",
+            "files": 6,
+            "x": 24,
+            "y": 88,
+            "w": 628,
+            "h": 168,
+            "why": "Every edit here touches the socket’s def-use chain: who opens it, who reconnects it."
+          },
+          {
+            "id": "B",
+            "title": "Composer reads drafts from the worker",
+            "files": 5,
+            "x": 24,
+            "y": 268,
+            "w": 972,
+            "h": 164,
+            "why": "Every edit here touches the draft’s def-use chain: where it’s stored and who reads it."
+          }
+        ],
+        "files": [
+          {
+            "id": "stage/useStageSocket.ts",
+            "name": "useStageSocket.ts",
+            "path": "stage/useStageSocket.ts",
+            "module": "stage",
+            "partition": "A",
+            "x": 36,
+            "y": 112,
+            "w": 139,
+            "add": 24,
+            "rem": 118,
+            "risk": "high",
+            "findings": [
+              "F2"
+            ],
+            "changed": true
+          },
+          {
+            "id": "stage/StageProvider.tsx",
+            "name": "StageProvider.tsx",
+            "path": "stage/StageProvider.tsx",
+            "module": "stage",
+            "partition": "A",
+            "x": 36,
+            "y": 180,
+            "w": 134,
+            "add": 31,
+            "rem": 40,
+            "risk": "medium"
+          },
+          {
+            "id": "stage/reconnect.ts",
+            "name": "reconnect.ts",
+            "path": "stage/reconnect.ts",
+            "module": "stage",
+            "partition": "A",
+            "x": 180,
+            "y": 180,
+            "w": 112,
+            "add": 18,
+            "rem": 36,
+            "risk": "medium"
+          },
+          {
+            "id": "sync-worker/worker.ts",
+            "name": "worker.ts",
+            "path": "sync-worker/worker.ts",
+            "module": "sync-worker",
+            "partition": "A",
+            "x": 356,
+            "y": 112,
+            "w": 125,
+            "add": 96,
+            "rem": 0,
+            "risk": "high"
+          },
+          {
+            "id": "sync-worker/protocol.ts",
+            "name": "protocol.ts",
+            "path": "sync-worker/protocol.ts",
+            "module": "sync-worker",
+            "partition": "A",
+            "x": 503,
+            "y": 112,
+            "w": 110,
+            "add": 48,
+            "rem": 0,
+            "risk": "medium",
+            "findings": [
+              "F4"
+            ]
+          },
+          {
+            "id": "sync-worker/socket.ts",
+            "name": "socket.ts",
+            "path": "sync-worker/socket.ts",
+            "module": "sync-worker",
+            "partition": "A",
+            "x": 356,
+            "y": 180,
+            "w": 139,
+            "add": 142,
+            "rem": 0,
+            "risk": "high",
+            "findings": [
+              "F1"
+            ],
+            "changed": true
+          },
+          {
+            "id": "stage/StageView.tsx",
+            "name": "StageView.tsx",
+            "path": "stage/StageView.tsx",
+            "module": "stage",
+            "partition": "B",
+            "x": 36,
+            "y": 292,
+            "w": 108,
+            "add": 12,
+            "rem": 0,
+            "risk": "low"
+          },
+          {
+            "id": "sync-worker/drafts.ts",
+            "name": "drafts.ts",
+            "path": "sync-worker/drafts.ts",
+            "module": "sync-worker",
+            "partition": "B",
+            "x": 520,
+            "y": 360,
+            "w": 115,
+            "add": 64,
+            "rem": 0,
+            "risk": "high",
+            "findings": [
+              "F3"
+            ],
+            "changed": true
+          },
+          {
+            "id": "composer/useDraft.ts",
+            "name": "useDraft.ts",
+            "path": "composer/useDraft.ts",
+            "module": "composer",
+            "partition": "B",
+            "x": 700,
+            "y": 292,
+            "w": 116,
+            "add": 52,
+            "rem": 14,
+            "risk": "medium"
+          },
+          {
+            "id": "composer/Composer.tsx",
+            "name": "Composer.tsx",
+            "path": "composer/Composer.tsx",
+            "module": "composer",
+            "partition": "B",
+            "x": 824,
+            "y": 292,
+            "w": 106,
+            "add": 22,
+            "rem": 10,
+            "risk": "low"
+          },
+          {
+            "id": "composer/draftStore.ts",
+            "name": "draftStore.ts",
+            "path": "composer/draftStore.ts",
+            "module": "composer",
+            "partition": "B",
+            "x": 700,
+            "y": 360,
+            "w": 110,
+            "add": 40,
+            "rem": 6,
+            "risk": "medium"
+          },
+          {
+            "id": "tests/reconnect.test.ts",
+            "name": "reconnect.test.ts",
+            "path": "tests/reconnect.test.ts",
+            "module": "tests",
+            "partition": null,
+            "x": 356,
+            "y": 496,
+            "w": 134,
+            "add": 9,
+            "rem": 16,
+            "risk": "low"
+          },
+          {
+            "id": "tests/socket.test.ts",
+            "name": "socket.test.ts",
+            "path": "tests/socket.test.ts",
+            "module": "tests",
+            "partition": null,
+            "x": 494,
+            "y": 496,
+            "w": 114,
+            "add": 30,
+            "rem": 0,
+            "risk": "low",
+            "failing": true,
+            "changed": true
+          },
+          {
+            "id": "tests/drafts.test.ts",
+            "name": "drafts.test.ts",
+            "path": "tests/drafts.test.ts",
+            "module": "tests",
+            "partition": null,
+            "x": 612,
+            "y": 496,
+            "w": 114,
+            "add": 24,
+            "rem": 0,
+            "risk": "low"
+          }
+        ],
+        "edges": [
+          {
+            "from": "stage/StageProvider.tsx",
+            "to": "stage/useStageSocket.ts",
+            "rel": "calls"
+          },
+          {
+            "from": "stage/useStageSocket.ts",
+            "to": "sync-worker/worker.ts",
+            "rel": "calls"
+          },
+          {
+            "from": "sync-worker/worker.ts",
+            "to": "sync-worker/socket.ts",
+            "rel": "calls"
+          },
+          {
+            "from": "sync-worker/worker.ts",
+            "to": "sync-worker/protocol.ts",
+            "rel": "imports"
+          },
+          {
+            "from": "stage/reconnect.ts",
+            "to": "sync-worker/socket.ts",
+            "rel": "moved from"
+          },
+          {
+            "from": "sync-worker/socket.ts",
+            "to": "sync-worker/drafts.ts",
+            "rel": "calls"
+          },
+          {
+            "from": "stage/StageView.tsx",
+            "to": "composer/useDraft.ts",
+            "rel": "imports"
+          },
+          {
+            "from": "composer/Composer.tsx",
+            "to": "composer/useDraft.ts",
+            "rel": "calls"
+          },
+          {
+            "from": "composer/useDraft.ts",
+            "to": "sync-worker/drafts.ts",
+            "rel": "calls"
+          },
+          {
+            "from": "composer/useDraft.ts",
+            "to": "composer/draftStore.ts",
+            "rel": "imports"
+          },
+          {
+            "from": "tests/reconnect.test.ts",
+            "to": "stage/reconnect.ts",
+            "rel": "imports"
+          },
+          {
+            "from": "tests/socket.test.ts",
+            "to": "sync-worker/socket.ts",
+            "rel": "imports"
+          },
+          {
+            "from": "tests/drafts.test.ts",
+            "to": "sync-worker/drafts.ts",
+            "rel": "imports"
+          }
+        ],
+        "findings": {
+          "F1": {
+            "id": "F1",
+            "p": "P1",
+            "file": "sync-worker/socket.ts",
+            "fn": "connect()",
+            "at": "socket.ts, between lines 16 and 17",
+            "life": "Still open",
+            "title": "Two tabs opening at once get two sockets",
+            "body": "Line 16 only returns an open socket. A second connect() while the first is still connecting passes the check and opens another WebSocket, so every frame arrives twice.",
+            "evidence": "Failing in unit-tests: socket.test.ts, “opens one socket for two tabs”",
+            "raised": "Raised 11:40 on 7d2e1b4, still open at e81f0c9"
+          },
+          "F2": {
+            "id": "F2",
+            "p": "P2",
+            "file": "stage/useStageSocket.ts",
+            "fn": "sendFrame()",
+            "life": "New",
+            "title": "Frames sent before the port is ready are dropped"
+          },
+          "F3": {
+            "id": "F3",
+            "p": "P2",
+            "file": "sync-worker/drafts.ts",
+            "fn": "put()",
+            "life": "Still open",
+            "title": "Draft write isn’t awaited before the ack"
+          },
+          "F4": {
+            "id": "F4",
+            "p": "P3",
+            "file": "sync-worker/protocol.ts",
+            "fn": "FrameType",
+            "life": "New",
+            "title": "Frame type names collide with stage events"
+          },
+          "F5": {
+            "id": "F5",
+            "p": "P2",
+            "file": "stage/useStageSocket.ts",
+            "fn": "useStageSocket()",
+            "life": "Fixed at 3b6d0a5",
+            "title": "Reconnect timer survived unmount"
+          }
+        },
+        "clusterA": {
+          "boxes": [
+            {
+              "file": "stage/useStageSocket.ts",
+              "col": "stage",
+              "x": 24,
+              "y": 88,
+              "w": 300,
+              "fns": [
+                {
+                  "n": "useStageSocket()",
+                  "kind": "Modified",
+                  "lines": 18
+                },
+                {
+                  "n": "sendFrame()",
+                  "kind": "Modified",
+                  "lines": 6,
+                  "f": "F2"
+                },
+                {
+                  "n": "openSocket()",
+                  "kind": "Moved to socket.ts",
+                  "lines": 118
+                }
+              ]
+            },
+            {
+              "file": "stage/StageProvider.tsx",
+              "col": "stage",
+              "x": 24,
+              "y": 292,
+              "w": 300,
+              "fns": [
+                {
+                  "n": "StageProvider()",
+                  "kind": "Modified",
+                  "lines": 71
+                }
+              ]
+            },
+            {
+              "file": "stage/reconnect.ts",
+              "col": "stage",
+              "x": 24,
+              "y": 412,
+              "w": 300,
+              "fns": [
+                {
+                  "n": "scheduleReconnect()",
+                  "kind": "Modified",
+                  "lines": 20
+                },
+                {
+                  "n": "backoffDelay()",
+                  "kind": "Moved to socket.ts",
+                  "lines": 34
+                }
+              ]
+            },
+            {
+              "file": "sync-worker/socket.ts",
+              "col": "sync-worker",
+              "x": 540,
+              "y": 88,
+              "w": 270,
+              "fns": [
+                {
+                  "n": "connect()",
+                  "kind": "Added",
+                  "lines": 46,
+                  "f": "F1"
+                },
+                {
+                  "n": "onMessage()",
+                  "kind": "Added",
+                  "lines": 38
+                },
+                {
+                  "n": "reconnect()",
+                  "kind": "Added",
+                  "lines": 34
+                },
+                {
+                  "n": "close()",
+                  "kind": "Added",
+                  "lines": 12
+                }
+              ]
+            },
+            {
+              "file": "sync-worker/worker.ts",
+              "col": "sync-worker",
+              "x": 540,
+              "y": 332,
+              "w": 270,
+              "fns": [
+                {
+                  "n": "onconnect()",
+                  "kind": "Added",
+                  "lines": 52
+                },
+                {
+                  "n": "routeFrame()",
+                  "kind": "Added",
+                  "lines": 44
+                }
+              ]
+            },
+            {
+              "file": "sync-worker/protocol.ts",
+              "col": "sync-worker",
+              "x": 540,
+              "y": 488,
+              "w": 270,
+              "fns": [
+                {
+                  "n": "FrameType",
+                  "kind": "Added",
+                  "lines": 22,
+                  "f": "F4"
+                }
+              ]
+            }
+          ],
+          "edges": [
+            {
+              "from": [
+                "stage/StageProvider.tsx",
+                0
+              ],
+              "to": [
+                "stage/useStageSocket.ts",
+                "bottom"
+              ],
+              "rel": "calls"
+            },
+            {
+              "from": [
+                "stage/useStageSocket.ts",
+                1
+              ],
+              "to": [
+                "sync-worker/worker.ts",
+                1
+              ],
+              "rel": "calls"
+            },
+            {
+              "from": [
+                "stage/useStageSocket.ts",
+                2
+              ],
+              "to": [
+                "sync-worker/socket.ts",
+                0
+              ],
+              "rel": "moved from"
+            },
+            {
+              "from": [
+                "stage/reconnect.ts",
+                1
+              ],
+              "to": [
+                "sync-worker/socket.ts",
+                2
+              ],
+              "rel": "moved from"
+            },
+            {
+              "from": [
+                "sync-worker/worker.ts",
+                "top"
+              ],
+              "to": [
+                "sync-worker/socket.ts",
+                "bottom"
+              ],
+              "rel": "calls"
+            },
+            {
+              "from": [
+                "sync-worker/worker.ts",
+                "bottom"
+              ],
+              "to": [
+                "sync-worker/protocol.ts",
+                "top"
+              ],
+              "rel": "imports"
+            }
+          ],
+          "stubs": [
+            {
+              "label": "tests/socket.test.ts",
+              "line": "imports connect(), 1 failing",
+              "x": 846,
+              "y": 88,
+              "w": 158,
+              "toFile": "sync-worker/socket.ts",
+              "toFn": 0,
+              "dir": "in"
+            },
+            {
+              "label": "drafts.ts, in B",
+              "line": "onMessage() calls put()",
+              "x": 846,
+              "y": 176,
+              "w": 158,
+              "toFile": "sync-worker/socket.ts",
+              "toFn": 1,
+              "dir": "out"
+            },
+            {
+              "label": "useDraft.ts, in B",
+              "line": "calls routeFrame()",
+              "x": 846,
+              "y": 392,
+              "w": 158,
+              "toFile": "sync-worker/worker.ts",
+              "toFn": 1,
+              "dir": "in"
+            }
+          ]
+        },
+        "fileZoom": {
+          "file": "sync-worker/socket.ts",
+          "box": {
+            "x": 230,
+            "y": 72,
+            "w": 520
+          },
+          "fns": [
+            {
+              "n": "connect()",
+              "kind": "Added",
+              "lines": 46,
+              "range": "14–59",
+              "f": "F1"
+            },
+            {
+              "n": "onMessage()",
+              "kind": "Added",
+              "lines": 38,
+              "range": "61–98"
+            },
+            {
+              "n": "reconnect()",
+              "kind": "Moved from reconnect.ts",
+              "lines": 34,
+              "range": "100–133"
+            },
+            {
+              "n": "close()",
+              "kind": "Added",
+              "lines": 12,
+              "range": "135–146"
+            },
+            {
+              "n": "imports and types",
+              "kind": "Added",
+              "lines": 12,
+              "range": "1–12"
+            }
+          ],
+          "callers": [
+            {
+              "file": "worker.ts",
+              "line": "onconnect() calls connect()",
+              "fn": 0
+            },
+            {
+              "file": "socket.test.ts",
+              "line": "tests connect(), 1 failing",
+              "fn": 0,
+              "failing": true
+            },
+            {
+              "file": "reconnect.ts",
+              "line": "backoffDelay() moved into reconnect()",
+              "fn": 2
+            }
+          ],
+          "callees": [
+            {
+              "file": "WebSocket",
+              "line": "platform, opened by connect()",
+              "fn": 0
+            },
+            {
+              "file": "protocol.ts",
+              "line": "onMessage() calls decode()",
+              "fn": 1
+            },
+            {
+              "file": "drafts.ts, in B",
+              "line": "onMessage() calls put()",
+              "fn": 1
+            }
+          ]
+        },
+        "diff": {
+          "file": "sync-worker/socket.ts",
+          "fn": "connect()",
+          "head": "@@ −0,0 +14,11 @@ export async function connect",
+          "readLine": "Diff read 14:24, head e81f0c9",
+          "lines": [
+            {
+              "n": 14,
+              "c": "export async function connect(stageId: string) {"
+            },
+            {
+              "n": 15,
+              "c": "  const existing = sockets.get(stageId);"
+            },
+            {
+              "n": 16,
+              "c": "  if (existing?.state === \"open\") return existing.handle;",
+              "f": "F1"
+            },
+            {
+              "n": 17,
+              "c": "  const ws = new WebSocket(urlFor(stageId));"
+            },
+            {
+              "n": 18,
+              "c": "  sockets.set(stageId, { ws, state: \"connecting\" });"
+            },
+            {
+              "n": 19,
+              "c": "  await opened(ws);"
+            },
+            {
+              "n": 20,
+              "c": "  sockets.set(stageId, { ws, state: \"open\", handle: wrap(ws) });"
+            },
+            {
+              "n": 21,
+              "c": "  ws.addEventListener(\"message\", onMessage);"
+            },
+            {
+              "n": 22,
+              "c": "  ws.addEventListener(\"close\", () => reconnect(stageId));"
+            },
+            {
+              "n": 23,
+              "c": "  return sockets.get(stageId).handle;"
+            },
+            {
+              "n": 24,
+              "c": "}"
+            }
+          ],
+          "neighbours": [
+            {
+              "label": "worker.ts",
+              "line": "calls connect()",
+              "x": -56,
+              "y": 180,
+              "w": 150,
+              "side": "left"
+            },
+            {
+              "label": "socket.test.ts",
+              "line": "1 failing",
+              "x": -56,
+              "y": 300,
+              "w": 150,
+              "side": "left",
+              "failing": true
+            },
+            {
+              "label": "protocol.ts",
+              "line": "imported",
+              "x": 930,
+              "y": 180,
+              "w": 150,
+              "side": "right"
+            },
+            {
+              "label": "onMessage()",
+              "line": "next in socket.ts",
+              "x": 330,
+              "y": 604,
+              "w": 180,
+              "side": "bottom"
+            }
+          ]
+        },
+        "keys": [
+          {
+            "k": [
+              "←",
+              "↑",
+              "→",
+              "↓"
+            ],
+            "what": "Move along an edge to the next node"
+          },
+          {
+            "k": [
+              "Enter",
+              "+"
+            ],
+            "what": "Zoom in on the focused node"
+          },
+          {
+            "k": [
+              "Esc",
+              "−"
+            ],
+            "what": "Zoom out one level"
+          },
+          {
+            "k": [
+              "f"
+            ],
+            "what": "Fit the whole change"
+          },
+          {
+            "k": [
+              "/"
+            ],
+            "what": "Search files and functions"
+          },
+          {
+            "k": [
+              "l"
+            ],
+            "what": "Open the linear file list"
+          }
+        ],
+        "focus": {
+          "file": "sync-worker/socket.ts",
+          "line": "socket.ts, sync-worker, partition A. High risk, P1 still open, changed since you looked. 4 edges: ↑ worker.ts calls it, ← reconnect.ts moved into it, ↓ socket.test.ts imports it, → it calls drafts.ts."
+        },
+        "building": {
+          "line": "Building the map: reading call and import relations, 9 of 14 files",
+          "list": "The file list works now. The map opens when every file is placed."
+        },
+        "noDeps": {
+          "notice": "Edges are missing: there’s no dependency data for TypeScript in relay/web yet. Files are grouped by module only, so partitions A and B can’t be drawn either."
+        },
+        "readingPath": {
+          "chapters": [
+            {
+              "n": 1,
+              "id": "A",
+              "title": "Worker owns the socket",
+              "why": "Riskiest: the P1, the failing test and the widest blast radius"
+            },
+            {
+              "n": 2,
+              "id": "B",
+              "title": "Composer reads drafts from the worker",
+              "why": "1 P2 on the draft write"
+            },
+            {
+              "n": 3,
+              "id": "T",
+              "title": "Tests",
+              "why": "Test-only, 1 failing"
+            }
+          ],
+          "order": [
+            "sync-worker/socket.ts",
+            "stage/useStageSocket.ts",
+            "sync-worker/worker.ts",
+            "sync-worker/protocol.ts",
+            "stage/reconnect.ts",
+            "stage/StageProvider.tsx",
+            "sync-worker/drafts.ts",
+            "composer/useDraft.ts",
+            "composer/draftStore.ts",
+            "composer/Composer.tsx",
+            "stage/StageView.tsx",
+            "tests/socket.test.ts",
+            "tests/reconnect.test.ts",
+            "tests/drafts.test.ts"
+          ],
+          "read": [
+            "sync-worker/socket.ts",
+            "stage/useStageSocket.ts",
+            "sync-worker/worker.ts"
+          ],
+          "current": "sync-worker/protocol.ts",
+          "receiptNote": "Approval covers only what you opened."
+        },
+        "since": {
+          "changed": [
+            "sync-worker/socket.ts",
+            "stage/useStageSocket.ts",
+            "sync-worker/drafts.ts",
+            "tests/socket.test.ts"
+          ],
+          "fixed": {
+            "file": "stage/useStageSocket.ts",
+            "id": "F5"
+          },
+          "main": {
+            "file": "composer/Composer.tsx",
+            "label": "Main moved 14:02, not a finding"
+          },
+          "rows": [
+            {
+              "g": "clock",
+              "text": "4 files changed by the author: socket.ts, useStageSocket.ts, drafts.ts, socket.test.ts"
+            },
+            {
+              "g": "check",
+              "text": "Fixed at 3b6d0a5: the P2 on useStageSocket.ts, reconnect timer survived unmount",
+              "positive": true
+            },
+            {
+              "g": "clock",
+              "text": "New: P2 on sendFrame(), P3 on FrameType"
+            },
+            {
+              "g": "minus",
+              "text": "Main moved Composer.tsx at 14:02. Labelled apart, never a finding."
+            }
+          ],
+          "foot": "Your mark moves to e81f0c9 when you post."
+        },
+        "hunks": {
+          "sync-worker/drafts.ts": [
+            {
+              "fn": "put()",
+              "kind": "Added",
+              "lines": "+40",
+              "f": "F3"
+            },
+            {
+              "fn": "get()",
+              "kind": "Added",
+              "lines": "+24"
+            }
+          ],
+          "composer/useDraft.ts": [
+            {
+              "fn": "useDraft()",
+              "kind": "Modified",
+              "lines": "+52 −14"
+            }
+          ],
+          "composer/draftStore.ts": [
+            {
+              "fn": "draftStore",
+              "kind": "Modified",
+              "lines": "+40 −6"
+            }
+          ],
+          "composer/Composer.tsx": [
+            {
+              "fn": "Composer()",
+              "kind": "Modified",
+              "lines": "+22 −10"
+            }
+          ],
+          "stage/StageView.tsx": [
+            {
+              "fn": "StageView()",
+              "kind": "Modified",
+              "lines": "+12"
+            }
+          ],
+          "tests/socket.test.ts": [
+            {
+              "fn": "opens one socket for two tabs",
+              "kind": "Added",
+              "lines": "+14",
+              "check": "failed"
+            },
+            {
+              "fn": "reconnects after close",
+              "kind": "Added",
+              "lines": "+10",
+              "check": "passed"
+            },
+            {
+              "fn": "routes draft frames",
+              "kind": "Added",
+              "lines": "+6",
+              "check": "passed"
+            }
+          ],
+          "tests/reconnect.test.ts": [
+            {
+              "fn": "backs off up to 30 s",
+              "kind": "Modified",
+              "lines": "+5 −9",
+              "check": "passed"
+            },
+            {
+              "fn": "stops after unmount",
+              "kind": "Modified",
+              "lines": "+4 −7",
+              "check": "passed"
+            }
+          ],
+          "tests/drafts.test.ts": [
+            {
+              "fn": "keeps the draft across tabs",
+              "kind": "Added",
+              "lines": "+24",
+              "check": "passed"
+            }
+          ]
+        },
+        "evidence": {
+          "boxes": [
+            {
+              "file": "sync-worker/worker.ts",
+              "x": 24,
+              "y": 80,
+              "w": 236,
+              "fns": [
+                {
+                  "n": "onconnect()",
+                  "lines": "+52",
+                  "check": "covered"
+                },
+                {
+                  "n": "routeFrame()",
+                  "lines": "+44",
+                  "check": "untested"
+                }
+              ]
+            },
+            {
+              "file": "sync-worker/socket.ts",
+              "x": 300,
+              "y": 80,
+              "w": 300,
+              "fns": [
+                {
+                  "n": "connect()",
+                  "lines": "+46",
+                  "f": "F1",
+                  "check": "failed"
+                },
+                {
+                  "n": "onMessage()",
+                  "lines": "+38",
+                  "check": "covered"
+                },
+                {
+                  "n": "reconnect()",
+                  "lines": "+34",
+                  "check": "covered"
+                },
+                {
+                  "n": "close()",
+                  "lines": "+12",
+                  "check": "untested"
+                }
+              ]
+            },
+            {
+              "file": "stage/reconnect.ts",
+              "x": 300,
+              "y": 340,
+              "w": 300,
+              "fns": [
+                {
+                  "n": "scheduleReconnect()",
+                  "lines": "±20",
+                  "check": "covered"
+                },
+                {
+                  "n": "backoffDelay()",
+                  "lines": "−34",
+                  "kind": "Moved to socket.ts"
+                }
+              ]
+            },
+            {
+              "file": "tests/socket.test.ts",
+              "x": 660,
+              "y": 96,
+              "w": 330,
+              "test": true,
+              "fns": [
+                {
+                  "n": "opens one socket for two tabs",
+                  "check": "failed"
+                },
+                {
+                  "n": "reconnects after close",
+                  "check": "passed"
+                },
+                {
+                  "n": "routes draft frames",
+                  "check": "passed"
+                }
+              ]
+            },
+            {
+              "file": "tests/reconnect.test.ts",
+              "x": 660,
+              "y": 356,
+              "w": 330,
+              "test": true,
+              "fns": [
+                {
+                  "n": "backs off up to 30 s",
+                  "check": "passed"
+                },
+                {
+                  "n": "stops after unmount",
+                  "check": "passed"
+                }
+              ]
+            }
+          ],
+          "edges": [
+            {
+              "from": [
+                "sync-worker/worker.ts",
+                0
+              ],
+              "to": [
+                "sync-worker/socket.ts",
+                0
+              ],
+              "rel": "calls"
+            },
+            {
+              "from": [
+                "tests/socket.test.ts",
+                0
+              ],
+              "to": [
+                "sync-worker/socket.ts",
+                0
+              ],
+              "rel": "fails",
+              "strong": true
+            },
+            {
+              "from": [
+                "tests/socket.test.ts",
+                1
+              ],
+              "to": [
+                "sync-worker/socket.ts",
+                2
+              ],
+              "rel": "covers"
+            },
+            {
+              "from": [
+                "tests/socket.test.ts",
+                2
+              ],
+              "to": [
+                "sync-worker/socket.ts",
+                1
+              ],
+              "rel": "covers"
+            },
+            {
+              "from": [
+                "tests/reconnect.test.ts",
+                0
+              ],
+              "to": [
+                "stage/reconnect.ts",
+                0
+              ],
+              "rel": "covers"
+            },
+            {
+              "from": [
+                "tests/reconnect.test.ts",
+                1
+              ],
+              "to": [
+                "stage/reconnect.ts",
+                0
+              ],
+              "rel": "covers"
+            }
+          ],
+          "note": {
+            "x": 24,
+            "y": 520,
+            "w": 470,
+            "who": "sec-cc note on partition A, not tied to a line",
+            "body": "The worker now owns reconnect, but no test restarts the worker. Worth one before merge."
+          },
+          "check": "unit-tests: 1 of 58 failed, opens one socket for two tabs"
+        },
+        "phone": {
+          "selected": "sync-worker/socket.ts",
+          "next": "stage/useStageSocket.ts"
+        },
+        "large": {
+          "pr": {
+            "num": "#471",
+            "repo": "relay/web #471",
+            "title": "Move stage sync into a shared worker and rename stage events",
+            "line": "60 files in 5 modules, +1,660 −700",
+            "review": "sec-cc review, 14:22: 1 P1, 3 P2, 1 P3",
+            "since": "First look: no earlier mark."
+          },
+          "modules": [
+            {
+              "id": "stage",
+              "files": 14,
+              "add": 420,
+              "rem": 310,
+              "risk": "high",
+              "counts": {
+                "A": 6,
+                "B": 3,
+                "C": 5
+              },
+              "finds": {
+                "A": [
+                  "P2"
+                ]
+              }
+            },
+            {
+              "id": "sync-worker",
+              "files": 9,
+              "add": 388,
+              "rem": 20,
+              "risk": "high",
+              "counts": {
+                "A": 7,
+                "B": 2
+              },
+              "finds": {
+                "A": [
+                  "P1",
+                  "P3"
+                ],
+                "B": [
+                  "P2"
+                ]
+              }
+            },
+            {
+              "id": "composer",
+              "files": 11,
+              "add": 260,
+              "rem": 140,
+              "risk": "medium",
+              "counts": {
+                "B": 7,
+                "C": 4
+              },
+              "finds": {
+                "B": [
+                  "P2"
+                ]
+              }
+            },
+            {
+              "id": "shared",
+              "files": 8,
+              "add": 190,
+              "rem": 186,
+              "risk": "low",
+              "counts": {
+                "A": 2,
+                "C": 6
+              },
+              "finds": {}
+            },
+            {
+              "id": "tests",
+              "files": 18,
+              "add": 402,
+              "rem": 44,
+              "risk": "low",
+              "counts": {
+                "A": 2,
+                "B": 1,
+                "C": 7,
+                "none": 8
+              },
+              "finds": {}
+            }
+          ],
+          "partitions": [
+            {
+              "id": "A",
+              "title": "Worker owns the socket",
+              "files": 17,
+              "risk": "High risk",
+              "y": 120
+            },
+            {
+              "id": "B",
+              "title": "Composer reads drafts from the worker",
+              "files": 13,
+              "risk": "Medium risk",
+              "y": 232
+            },
+            {
+              "id": "C",
+              "title": "Rename stage events",
+              "files": 22,
+              "risk": "Low risk, mechanical",
+              "y": 344
+            }
+          ],
+          "none": 8
+        },
+        "context": {
+          "about": "Context layer: the unchanged surroundings, for reviewers new to the area. Every sentence cites CONTEXT.md, decision record 0007 or a file path.",
+          "canvasH": 800,
+          "regions": [
+            {
+              "id": "stage",
+              "label": "stage",
+              "count": "4 changed, 3 unchanged shown",
+              "x": 16,
+              "y": 56,
+              "w": 316,
+              "h": 544
+            },
+            {
+              "id": "sync-worker",
+              "label": "sync-worker",
+              "count": "4 changed",
+              "x": 344,
+              "y": 56,
+              "w": 340,
+              "h": 388
+            },
+            {
+              "id": "composer",
+              "label": "composer",
+              "count": "3 changed, 3 unchanged shown",
+              "x": 692,
+              "y": 56,
+              "w": 312,
+              "h": 388
+            },
+            {
+              "id": "tests",
+              "label": "tests",
+              "count": "3 changed, 4 unchanged shown",
+              "x": 344,
+              "y": 464,
+              "w": 392,
+              "h": 228
+            },
+            {
+              "id": "shell",
+              "label": "shell",
+              "count": "1 unchanged shown",
+              "x": 748,
+              "y": 456,
+              "w": 256,
+              "h": 104
+            }
+          ],
+          "neighbours": [
+            {
+              "rank": 1,
+              "path": "stage/StageRoom.tsx",
+              "purpose": "renders a live stage for its participants",
+              "hop": "1 hop",
+              "via": "calls useStageSocket()",
+              "to": "stage/useStageSocket.ts",
+              "x": 28,
+              "y": 448,
+              "w": 296
+            },
+            {
+              "rank": 2,
+              "path": "stage/presence.ts",
+              "purpose": "sends who is here and who is typing",
+              "hop": "1 hop",
+              "via": "calls sendFrame()",
+              "to": "stage/useStageSocket.ts",
+              "x": 28,
+              "y": 496,
+              "w": 296
+            },
+            {
+              "rank": 3,
+              "path": "composer/ComposerPanel.tsx",
+              "purpose": "hosts the composer beside a stage",
+              "hop": "1 hop",
+              "via": "calls useDraft()",
+              "to": "composer/useDraft.ts",
+              "x": 700,
+              "y": 88,
+              "w": 296
+            },
+            {
+              "rank": 4,
+              "path": "composer/useAutosave.ts",
+              "purpose": "saves the draft every few seconds",
+              "hop": "1 hop",
+              "via": "calls draftStore.save()",
+              "to": "composer/draftStore.ts",
+              "x": 700,
+              "y": 136,
+              "w": 296
+            },
+            {
+              "rank": 5,
+              "path": "composer/drafts.ts",
+              "purpose": "keeps unsent composer text per stage",
+              "hop": "1 hop",
+              "via": "calls draftStore.load()",
+              "to": "composer/draftStore.ts",
+              "x": 700,
+              "y": 184,
+              "w": 296
+            },
+            {
+              "rank": 6,
+              "path": "stage/StageList.tsx",
+              "purpose": "lists the stages you can join",
+              "hop": "2 hops",
+              "via": "via StageRoom.tsx",
+              "to": "stage/StageRoom.tsx",
+              "x": 28,
+              "y": 544,
+              "w": 296
+            },
+            {
+              "rank": 7,
+              "path": "shell/StageRoute.tsx",
+              "purpose": "mounts a stage and its composer",
+              "hop": "2 hops",
+              "via": "via StageRoom, ComposerPanel",
+              "to": "composer/ComposerPanel.tsx",
+              "x": 760,
+              "y": 496,
+              "w": 232
+            },
+            {
+              "rank": 8,
+              "path": "tests/presence.test.ts",
+              "purpose": "guards presence frames",
+              "hop": "2 hops",
+              "via": "covers presence.ts",
+              "to": "stage/presence.ts",
+              "test": true,
+              "runs": true,
+              "x": 352,
+              "y": 588,
+              "w": 186
+            },
+            {
+              "rank": 9,
+              "path": "tests/stageRoom.test.ts",
+              "purpose": "guards joining and leaving",
+              "hop": "2 hops",
+              "via": "covers StageRoom.tsx",
+              "to": "stage/StageRoom.tsx",
+              "test": true,
+              "runs": true,
+              "x": 546,
+              "y": 588,
+              "w": 186
+            },
+            {
+              "rank": 10,
+              "path": "tests/autosave.test.ts",
+              "purpose": "guards draft autosave",
+              "hop": "2 hops",
+              "via": "covers useAutosave.ts",
+              "to": "composer/useAutosave.ts",
+              "test": true,
+              "runs": false,
+              "why": "marked slow, runs on main only",
+              "x": 352,
+              "y": 636,
+              "w": 186
+            },
+            {
+              "rank": 11,
+              "path": "tests/e2e/two-tabs.spec.ts",
+              "purpose": "guards two tabs, one socket",
+              "hop": "3 hops",
+              "via": "covers StageRoute.tsx",
+              "to": "shell/StageRoute.tsx",
+              "test": true,
+              "runs": false,
+              "why": "e2e, runs nightly, not on pull requests",
+              "x": 546,
+              "y": 636,
+              "w": 186
+            }
+          ],
+          "brief": {
+            "title": "You are here: sync-worker",
+            "meta": "Built 14:22 at e81f0c9 from CONTEXT.md, decision record 0007 and 5 files",
+            "sections": [
+              {
+                "title": "What sync-worker is for",
+                "items": [
+                  {
+                    "text": "sync-worker is a shared worker that every open tab of a stage talks to, so a stage keeps one connection however many tabs are open.",
+                    "cites": [
+                      "CONTEXT.md",
+                      "sync-worker/worker.ts"
+                    ]
+                  }
+                ]
+              },
+              {
+                "title": "How a stage connects",
+                "items": [
+                  {
+                    "text": "A tab’s useStageSocket() posts to the worker. The worker’s connect() opens the stage’s WebSocket once and routes each frame back to every tab.",
+                    "cites": [
+                      "stage/useStageSocket.ts",
+                      "sync-worker/socket.ts"
+                    ]
+                  },
+                  {
+                    "text": "The rule: one socket per stage, owned by the worker.",
+                    "cites": [
+                      "Decision record 0007 “Stage sync owns one socket per stage”"
+                    ]
+                  }
+                ]
+              },
+              {
+                "title": "Where drafts live",
+                "items": [
+                  {
+                    "text": "Unsent composer text is kept per stage in composer/drafts.ts. This PR makes sync-worker/drafts.ts the copy of record, so a draft survives a reconnect.",
+                    "cites": [
+                      "composer/drafts.ts",
+                      "sync-worker/drafts.ts",
+                      "CONTEXT.md"
+                    ]
+                  }
+                ]
+              }
+            ],
+            "foot": "Built from these sources only: CONTEXT.md, decision record 0007 and the files cited. A sentence without a source is left out, never invented."
+          },
+          "briefLine": "sync-worker keeps one socket per stage for every tab and keeps drafts through a reconnect.",
+          "card": {
+            "title": "sync-worker",
+            "meta": "Context card, every line cites its source",
+            "sections": [
+              {
+                "title": "Purpose",
+                "items": [
+                  {
+                    "text": "Owns one WebSocket per stage for every open tab, and keeps drafts in the worker so they survive a reconnect.",
+                    "cites": [
+                      "CONTEXT.md",
+                      "Decision record 0007"
+                    ]
+                  }
+                ]
+              },
+              {
+                "title": "Callers and callees",
+                "items": [
+                  {
+                    "text": "Called from 6 places in 2 modules: stage 4, composer 2.",
+                    "cites": [
+                      "stage/useStageSocket.ts",
+                      "composer/useDraft.ts"
+                    ]
+                  },
+                  {
+                    "text": "Calls 3 platform APIs: WebSocket, IndexedDB, BroadcastChannel.",
+                    "cites": [
+                      "sync-worker/socket.ts",
+                      "sync-worker/drafts.ts"
+                    ]
+                  }
+                ]
+              },
+              {
+                "title": "Data and types",
+                "items": [
+                  {
+                    "text": "StageId: which stage a frame or draft belongs to",
+                    "cites": [
+                      "sync-worker/protocol.ts"
+                    ]
+                  },
+                  {
+                    "text": "Frame: one message on the stage socket",
+                    "cites": [
+                      "sync-worker/protocol.ts"
+                    ]
+                  },
+                  {
+                    "text": "DraftSnapshot: unsent text and caret for one stage",
+                    "cites": [
+                      "sync-worker/drafts.ts"
+                    ]
+                  }
+                ]
+              },
+              {
+                "title": "Invariants and contracts",
+                "items": [
+                  {
+                    "text": "One open socket per stage",
+                    "cites": [
+                      "Decision record 0007"
+                    ],
+                    "labels": [
+                      {
+                        "label": "Failed: socket.test.ts",
+                        "tone": "critical"
+                      },
+                      {
+                        "label": "Not run: e2e/two-tabs.spec.ts",
+                        "tone": "caution"
+                      }
+                    ]
+                  },
+                  {
+                    "text": "Drafts survive reconnect",
+                    "cites": [
+                      "CONTEXT.md"
+                    ],
+                    "labels": [
+                      {
+                        "label": "Passed: drafts.test.ts",
+                        "tone": "positive"
+                      },
+                      {
+                        "label": "Not run: autosave.test.ts",
+                        "tone": "caution"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "title": "Recent history",
+                "items": [
+                  {
+                    "text": "#448 “Reconnect backoff”, merged 3 weeks ago",
+                    "cites": [
+                      "#448"
+                    ]
+                  },
+                  {
+                    "text": "Incident “Duplicate frames after reconnect”, 9 Oct",
+                    "cites": [
+                      "Incident, 9 Oct"
+                    ]
+                  }
+                ]
+              },
+              {
+                "title": "Owners",
+                "items": [
+                  {
+                    "text": "relay-web team, Mira",
+                    "cites": [
+                      "CODEOWNERS"
+                    ]
+                  }
+                ]
+              }
+            ],
+            "layout": {
+              "region": {
+                "id": "sync-worker",
+                "label": "sync-worker",
+                "count": "4 changed, 2 unchanged shown",
+                "x": 16,
+                "y": 56,
+                "w": 424,
+                "h": 336
+              },
+              "files": {
+                "sync-worker/worker.ts": [
+                  32,
+                  96
+                ],
+                "sync-worker/protocol.ts": [
+                  236,
+                  96
+                ],
+                "sync-worker/socket.ts": [
+                  32,
+                  168
+                ],
+                "sync-worker/drafts.ts": [
+                  236,
+                  168
+                ]
+              },
+              "unchanged": [
+                {
+                  "path": "sync-worker/ports.ts",
+                  "purpose": "tracks which tabs are attached to each stage",
+                  "x": 32,
+                  "y": 254,
+                  "w": 392
+                },
+                {
+                  "path": "sync-worker/idb.ts",
+                  "purpose": "opens the worker’s IndexedDB",
+                  "x": 32,
+                  "y": 306,
+                  "w": 392
+                }
+              ],
+              "stubs": [
+                {
+                  "label": "stage",
+                  "line": "4 call sites into sync-worker",
+                  "x": 16,
+                  "y": 412,
+                  "w": 206,
+                  "in": true
+                },
+                {
+                  "label": "composer",
+                  "line": "2 call sites into sync-worker",
+                  "x": 234,
+                  "y": 412,
+                  "w": 206,
+                  "in": true
+                },
+                {
+                  "label": "WebSocket",
+                  "line": "sync-worker calls it",
+                  "x": 16,
+                  "y": 500,
+                  "w": 134
+                },
+                {
+                  "label": "IndexedDB",
+                  "line": "sync-worker calls it",
+                  "x": 158,
+                  "y": 500,
+                  "w": 134
+                },
+                {
+                  "label": "BroadcastChannel",
+                  "line": "sync-worker calls it",
+                  "x": 300,
+                  "y": 500,
+                  "w": 140
+                }
+              ]
+            }
+          },
+          "radius": {
+            "title": "What could this break",
+            "badge": "11 outside the diff",
+            "p1": {
+              "text": "P1 on connect(): two tabs opening at once get two sockets. It breaks the invariant “One open socket per stage”.",
+              "cites": [
+                "Decision record 0007",
+                "Invariant: one open socket per stage"
+              ],
+              "guard": "Guarded by socket.test.ts, failing here, and e2e/two-tabs.spec.ts, which doesn’t run on this PR."
+            }
+          },
+          "missing": {
+            "badge": "No docs for this area",
+            "sections": [
+              {
+                "title": "What sync-worker is for",
+                "items": [
+                  {
+                    "text": "sync-worker/worker.ts registers a SharedWorker that tabs reach through onconnect().",
+                    "cites": [
+                      "sync-worker/worker.ts"
+                    ]
+                  }
+                ]
+              },
+              {
+                "title": "How a stage connects",
+                "items": [
+                  {
+                    "text": "useStageSocket() posts to the worker; connect() opens a WebSocket keyed by StageId.",
+                    "cites": [
+                      "stage/useStageSocket.ts",
+                      "sync-worker/socket.ts"
+                    ]
+                  }
+                ]
+              },
+              {
+                "title": "Where drafts live",
+                "items": [
+                  {
+                    "text": "composer/drafts.ts and sync-worker/drafts.ts both store DraftSnapshot.",
+                    "cites": [
+                      "composer/drafts.ts",
+                      "sync-worker/drafts.ts"
+                    ]
+                  }
+                ]
+              }
+            ],
+            "foot": "No CONTEXT.md or decision record covers sync-worker, so this brief is built from code only: it says what the code does, not why. Unchanged files show their path, never a guessed purpose."
+          },
+          "phone": {
+            "rows": [
+              "Purpose: one socket per stage for every tab; drafts kept through reconnect",
+              "2 invariants, 1 broken by the P1",
+              "Radius: 7 callers and 4 tests outside the diff, 2 not run here"
+            ]
+          }
+        },
+        "signOff": {
+          "about": "Agent sign-off on the canvas, after page 13 frame 1e. 4a and 4b show the scenario where the gate passes on e81f0c9, so the approve path is visible; 4c is the fixture as it stands.",
+          "author": "pair-codex",
+          "time": "About 2 min",
+          "asked": {
+            "text": "Move stage sync into a shared worker so two tabs share one socket per stage.",
+            "by": "Jonas",
+            "at": "10:52"
+          },
+          "plan": [
+            {
+              "n": 1,
+              "step": "Open the stage socket inside a shared worker",
+              "files": [
+                "sync-worker/worker.ts",
+                "sync-worker/socket.ts",
+                "sync-worker/protocol.ts"
+              ]
+            },
+            {
+              "n": 2,
+              "step": "Composer reads drafts from the worker",
+              "files": [
+                "sync-worker/drafts.ts",
+                "composer/useDraft.ts",
+                "composer/draftStore.ts",
+                "composer/Composer.tsx",
+                "stage/StageView.tsx"
+              ]
+            },
+            {
+              "n": 3,
+              "step": "Route stage frames through the worker",
+              "files": [
+                "stage/useStageSocket.ts",
+                "stage/StageProvider.tsx"
+              ]
+            },
+            {
+              "n": 4,
+              "step": "Cover two tabs and drafts with tests",
+              "files": [
+                "tests/socket.test.ts",
+                "tests/drafts.test.ts",
+                "tests/reconnect.test.ts"
+              ]
+            }
+          ],
+          "unplanned": {
+            "file": "stage/reconnect.ts",
+            "size": "+18 −36",
+            "note": "backoffDelay() moved into socket.ts, and the retry delay changed from 2,000 to 1,500 ms. Not in the plan.",
+            "why": "Every stage now retries sooner after a drop. The 9 Oct incident “Duplicate frames after reconnect” started on this path."
+          },
+          "critic": {
+            "ready": {
+              "label": "No blocking findings",
+              "tone": "positive",
+              "line": "sec-cc, round 2 on e81f0c9 at 14:22. 2 P2 and 1 P3 open, none blocking."
+            },
+            "blocked": {
+              "label": "1 blocking finding",
+              "tone": "critical",
+              "line": "sec-cc, round 1 on e81f0c9 at 14:22. The P1 on connect() is still open."
+            }
+          },
+          "gates": {
+            "ready": {
+              "head": "e81f0c9",
+              "computed": "Computed 14:24 from e81f0c9",
+              "sum": "Gate passed",
+              "tone": "positive",
+              "reason": "Passed on e81f0c9. 2 tests outside the diff don’t run here.",
+              "rows": [
+                {
+                  "k": "Head",
+                  "v": "e81f0c9",
+                  "s": "Pinned",
+                  "t": "positive",
+                  "note": "Every row below is for this SHA"
+                },
+                {
+                  "k": "CI run",
+                  "v": "Run 8819 on e81f0c9",
+                  "s": "Success",
+                  "t": "positive",
+                  "note": "The run’s conclusion, not the check list"
+                },
+                {
+                  "k": "Unresolved threads on this head",
+                  "v": "0",
+                  "s": "None",
+                  "t": "positive",
+                  "note": "Re-read at merge"
+                },
+                {
+                  "k": "Design compare",
+                  "v": "No touched states",
+                  "s": "Not needed",
+                  "t": "neutral",
+                  "note": "No UI state changed"
+                },
+                {
+                  "k": "Risk class",
+                  "v": "Concurrency",
+                  "s": "Declared",
+                  "t": "neutral",
+                  "note": "Moves socket ownership into a shared worker"
+                },
+                {
+                  "k": "Radius",
+                  "v": "4 tests outside the diff",
+                  "s": "2 not run",
+                  "t": "caution",
+                  "note": "autosave.test.ts and e2e/two-tabs.spec.ts don’t run on pull requests"
+                }
+              ]
+            },
+            "blocked": {
+              "head": "e81f0c9",
+              "computed": "Computed 14:24 from e81f0c9",
+              "sum": "Gate blocked",
+              "tone": "critical",
+              "reason": "Run 8819 failed on e81f0c9, and the P1 is still open.",
+              "rows": [
+                {
+                  "k": "Head",
+                  "v": "e81f0c9",
+                  "s": "Pinned",
+                  "t": "positive",
+                  "note": "Every row below is for this SHA"
+                },
+                {
+                  "k": "CI run",
+                  "v": "Run 8819 on e81f0c9",
+                  "s": "Failure",
+                  "t": "critical",
+                  "note": "unit-tests job: 1 of 58 tests failed, opens one socket for two tabs"
+                },
+                {
+                  "k": "Unresolved threads on this head",
+                  "v": "1",
+                  "s": "Unresolved",
+                  "t": "critical",
+                  "note": "The P1 thread on connect()"
+                },
+                {
+                  "k": "Design compare",
+                  "v": "No touched states",
+                  "s": "Not needed",
+                  "t": "neutral",
+                  "note": "No UI state changed"
+                },
+                {
+                  "k": "Risk class",
+                  "v": "Concurrency",
+                  "s": "Declared",
+                  "t": "neutral",
+                  "note": "Moves socket ownership into a shared worker"
+                },
+                {
+                  "k": "Radius",
+                  "v": "4 tests outside the diff",
+                  "s": "2 not run",
+                  "t": "caution",
+                  "note": "autosave.test.ts and e2e/two-tabs.spec.ts don’t run on pull requests"
+                }
+              ]
+            }
+          },
+          "judgements": [
+            {
+              "n": 1,
+              "text": "Should one socket per stage also hold when a stage is open in two browsers, not only two tabs?",
+              "file": "sync-worker/socket.ts"
+            },
+            {
+              "n": 2,
+              "text": "Keep the unplanned retry change here, or split it out?",
+              "file": "stage/reconnect.ts"
+            }
+          ],
+          "receipt": "You read all 4 steps, the unplanned hunk and the “You are here” brief. Approval covers these, on e81f0c9.",
+          "offWhy": "Approve is off. Run 8819 failed on e81f0c9, and the P1 on connect() is still open.",
+          "layout": {
+            "canvasW": 600,
+            "canvasH": 572,
+            "regions": [
+              {
+                "id": "stage",
+                "label": "stage",
+                "count": "4 files",
+                "x": 8,
+                "y": 56,
+                "w": 288,
+                "h": 300
+              },
+              {
+                "id": "sync-worker",
+                "label": "sync-worker",
+                "count": "4 files",
+                "x": 304,
+                "y": 56,
+                "w": 288,
+                "h": 300
+              },
+              {
+                "id": "composer",
+                "label": "composer",
+                "count": "3 files",
+                "x": 8,
+                "y": 368,
+                "w": 288,
+                "h": 196
+              },
+              {
+                "id": "tests",
+                "label": "tests",
+                "count": "3 files",
+                "x": 304,
+                "y": 368,
+                "w": 288,
+                "h": 196
+              }
+            ],
+            "nodes": {
+              "stage/useStageSocket.ts": [
+                20,
+                88
+              ],
+              "stage/StageView.tsx": [
+                170,
+                88
+              ],
+              "stage/StageProvider.tsx": [
+                20,
+                164
+              ],
+              "stage/reconnect.ts": [
+                170,
+                164
+              ],
+              "sync-worker/worker.ts": [
+                316,
+                88
+              ],
+              "sync-worker/protocol.ts": [
+                452,
+                88
+              ],
+              "sync-worker/socket.ts": [
+                316,
+                164
+              ],
+              "sync-worker/drafts.ts": [
+                316,
+                260
+              ],
+              "composer/useDraft.ts": [
+                20,
+                400
+              ],
+              "composer/Composer.tsx": [
+                150,
+                400
+              ],
+              "composer/draftStore.ts": [
+                20,
+                476
+              ],
+              "tests/reconnect.test.ts": [
+                316,
+                400
+              ],
+              "tests/drafts.test.ts": [
+                460,
+                400
+              ],
+              "tests/socket.test.ts": [
+                316,
+                476
+              ]
+            }
+          }
+        },
+        "requestChanges": {
+          "about": "Request changes on #463, previewed full screen before anything is sent. Head e81f0c9. Sent 15:04, acknowledged 15:12, new head 9c1d2e4 at 15:31.",
+          "head": "e81f0c9",
+          "you": "Alex",
+          "comments": [
+            {
+              "id": "C1",
+              "sev": "P1",
+              "finding": "F1",
+              "file": "sync-worker/socket.ts",
+              "line": 16,
+              "fn": "connect()",
+              "text": "Treat a connecting socket as taken: return its pending handle, so a second tab can’t open another WebSocket. unit-tests run 8819 fails on this."
+            },
+            {
+              "id": "C2",
+              "sev": "P2",
+              "finding": "F3",
+              "file": "sync-worker/drafts.ts",
+              "line": 31,
+              "fn": "put()",
+              "text": "Await the IndexedDB write before you ack the frame. A reload right after typing can lose the draft today.",
+              "issue": "relay/web#473",
+              "issueTitle": "Draft write isn’t awaited before the ack"
+            },
+            {
+              "id": "C3",
+              "sev": "",
+              "mine": true,
+              "file": "sync-worker/drafts.ts",
+              "line": 44,
+              "fn": "keyFor()",
+              "text": "Key drafts by StageId, not by port, so a draft survives a reconnect.",
+              "edited": "Key drafts by StageId, not by port, so a draft survives a reconnect. Decision record 0007 says the stage owns this state."
+            },
+            {
+              "id": "C4",
+              "sev": "",
+              "critic": true,
+              "file": "partition A",
+              "line": null,
+              "fn": "",
+              "text": "sec-cc note: add a test that restarts the worker. Nothing covers reconnect from inside it yet.",
+              "removedIn": "5b"
+            }
+          ],
+          "deferred": {
+            "finding": "F4",
+            "sev": "P3",
+            "file": "sync-worker/protocol.ts",
+            "fn": "FrameType",
+            "text": "Frame type names collide with stage events. Opened as an issue in relay/web when you send, and linked from this request.",
+            "issue": "relay/web#472"
+          },
+          "summary": {
+            "preview": "Two things must change before #463 can merge. A second tab can still open a second socket (the P1; unit-tests run 8819 fails on it), and drafts are acked before they’re saved (a P2). Also one naming comment of yours and one sec-cc note. The P3 becomes an issue.",
+            "edit": "Two things must change before #463 can merge. A second tab can still open a second socket (the P1; unit-tests run 8819 fails on it), and drafts are acked before they’re saved (a P2). Also one naming comment of yours. The P3 becomes an issue."
+          },
+          "recipients": [
+            {
+              "name": "pair-codex",
+              "role": "Author agent, wrote #463"
+            },
+            {
+              "name": "Jonas",
+              "role": "Briefed pair-codex, gets a copy"
+            }
+          ],
+          "receives": "pair-codex receives the summary, {n} inline comments, the failing unit-tests run 8819 and the head they apply to, e81f0c9.",
+          "cancelLine": "Cancel keeps this draft on e81f0c9. Nothing is sent until Send request.",
+          "sent": {
+            "at": "15:04",
+            "by": "Alex",
+            "line": "On e81f0c9, sent 15:04 by Alex to pair-codex and Jonas",
+            "signoff": "Approval is off until a new head. Changes are requested on e81f0c9."
+          },
+          "ack": {
+            "at": "15:12",
+            "line": "pair-codex acknowledged at 15:12. Working on 2 of 3 comments.",
+            "next": "Next: pair-codex, since 15:12. Then you, when a new head lands.",
+            "states": {
+              "C1": "Working",
+              "C2": "Working",
+              "C3": "Not started"
+            }
+          },
+          "rereview": {
+            "head": "9c1d2e4",
+            "at": "15:31",
+            "run": "Run 8824 on 9c1d2e4: Success",
+            "round": "Round 2 of a usual 1–2",
+            "next": "Next: you, since 15:31.",
+            "touched": [
+              "sync-worker/socket.ts",
+              "sync-worker/drafts.ts",
+              "tests/socket.test.ts"
+            ],
+            "hunks": 3,
+            "states": {
+              "C1": [
+                "Addressed",
+                "positive"
+              ],
+              "C2": [
+                "Not addressed",
+                "caution"
+              ],
+              "C3": [
+                "Replied",
+                "neutral"
+              ]
+            },
+            "reply": "pair-codex replied: StageId already keys the store at line 12; the port is only the cache key.",
+            "approveOff": "Approve stays off until you open the 3 changed hunks. 0 of 3 opened."
+          },
+          "fullscreen": {
+            "counts": {
+              "preview": "4 comments, 1 issue, to pair-codex",
+              "edit": "3 comments, 1 issue, to pair-codex",
+              "sent": "3 comments, 1 issue, sent to pair-codex",
+              "compare": "3 comments: 1 addressed, 1 not addressed, 1 replied"
+            },
+            "checklistLine": "Plus 2 checklist Nos, each with its linked issue.",
+            "canvasNote": "The canvas stays open behind this view.",
+            "items": [
+              {
+                "id": "C1",
+                "group": "request",
+                "node": "sync-worker/socket.ts",
+                "code": {
+                  "label": "sync-worker/socket.ts, lines 14–22, added in e81f0c9",
+                  "mark": 16,
+                  "lines": [
+                    [
+                      14,
+                      "+",
+                      "export async function connect(stageId: string) {"
+                    ],
+                    [
+                      15,
+                      "+",
+                      "  const existing = sockets.get(stageId);"
+                    ],
+                    [
+                      16,
+                      "+",
+                      "  if (existing?.state === \"open\") return existing.handle;"
+                    ],
+                    [
+                      17,
+                      "+",
+                      "  const ws = new WebSocket(urlFor(stageId));"
+                    ],
+                    [
+                      18,
+                      "+",
+                      "  sockets.set(stageId, { ws, state: \"connecting\" });"
+                    ],
+                    [
+                      19,
+                      "+",
+                      "  await opened(ws);"
+                    ],
+                    [
+                      20,
+                      "+",
+                      "  sockets.set(stageId, { ws, state: \"open\", handle: wrap(ws) });"
+                    ],
+                    [
+                      21,
+                      "+",
+                      "  ws.addEventListener(\"message\", onMessage);"
+                    ],
+                    [
+                      22,
+                      "+",
+                      "  ws.addEventListener(\"close\", () => reconnect(stageId));"
+                    ]
+                  ]
+                }
+              },
+              {
+                "id": "C2",
+                "group": "request",
+                "node": "sync-worker/drafts.ts",
+                "code": {
+                  "label": "sync-worker/drafts.ts, lines 26–33, added in e81f0c9",
+                  "mark": 31,
+                  "lines": [
+                    [
+                      26,
+                      "+",
+                      "export async function put(stageId: StageId, draft: DraftSnapshot) {"
+                    ],
+                    [
+                      27,
+                      "+",
+                      "  const db = await openDrafts();"
+                    ],
+                    [
+                      28,
+                      "+",
+                      "  const tx = db.transaction(\"drafts\", \"readwrite\");"
+                    ],
+                    [
+                      29,
+                      "+",
+                      "  tx.objectStore(\"drafts\").put(draft, keyFor(stageId, currentPort));"
+                    ],
+                    [
+                      30,
+                      "+",
+                      "  cache.set(stageId, draft);"
+                    ],
+                    [
+                      31,
+                      "+",
+                      "  broadcast({ type: \"draft-ack\", stageId });"
+                    ],
+                    [
+                      32,
+                      "+",
+                      "  return tx.done;"
+                    ],
+                    [
+                      33,
+                      "+",
+                      "}"
+                    ]
+                  ]
+                }
+              },
+              {
+                "id": "C3",
+                "group": "request",
+                "node": "sync-worker/drafts.ts",
+                "code": {
+                  "label": "sync-worker/drafts.ts, lines 40–47, added in e81f0c9",
+                  "mark": 44,
+                  "lines": [
+                    [
+                      40,
+                      "+",
+                      "// One cached copy per attached tab."
+                    ],
+                    [
+                      41,
+                      "+",
+                      "const cache = new Map<StageId, DraftSnapshot>();"
+                    ],
+                    [
+                      42,
+                      "+",
+                      ""
+                    ],
+                    [
+                      43,
+                      "+",
+                      "function keyFor(stageId: StageId, port: MessagePort) {"
+                    ],
+                    [
+                      44,
+                      "+",
+                      "  return stageId + \":\" + portId(port);"
+                    ],
+                    [
+                      45,
+                      "+",
+                      "}"
+                    ],
+                    [
+                      46,
+                      "+",
+                      ""
+                    ],
+                    [
+                      47,
+                      "+",
+                      "export function get(stageId: StageId) {"
+                    ]
+                  ]
+                }
+              },
+              {
+                "id": "C4",
+                "group": "request",
+                "node": "partition A",
+                "noCode": "Not tied to a line. Pinned to partition A: worker.ts, socket.ts, protocol.ts, useStageSocket.ts, StageProvider.tsx, reconnect.ts."
+              },
+              {
+                "id": "P3",
+                "group": "issue",
+                "finding": "F4",
+                "file": "sync-worker/protocol.ts",
+                "line": 4,
+                "node": "sync-worker/protocol.ts",
+                "code": {
+                  "label": "sync-worker/protocol.ts, lines 1–8, added in e81f0c9",
+                  "mark": 4,
+                  "lines": [
+                    [
+                      1,
+                      "+",
+                      "export type StageId = string;"
+                    ],
+                    [
+                      2,
+                      "+",
+                      ""
+                    ],
+                    [
+                      3,
+                      "+",
+                      "export enum FrameType {"
+                    ],
+                    [
+                      4,
+                      "+",
+                      "  Join = \"join\","
+                    ],
+                    [
+                      5,
+                      "+",
+                      "  Leave = \"leave\","
+                    ],
+                    [
+                      6,
+                      "+",
+                      "  Draft = \"draft\","
+                    ],
+                    [
+                      7,
+                      "+",
+                      "  Presence = \"presence\","
+                    ],
+                    [
+                      8,
+                      "+",
+                      "}"
+                    ]
+                  ]
+                }
+              },
+              {
+                "id": "Item 2",
+                "group": "checklist",
+                "n": 2,
+                "file": "sync-worker/idb.ts",
+                "line": 6,
+                "node": "sync-worker/idb.ts",
+                "code": {
+                  "label": "sync-worker/idb.ts, lines 1–7, unchanged in this PR",
+                  "mark": 6,
+                  "lines": [
+                    [
+                      1,
+                      " ",
+                      "import { openDB } from \"./vendor/idb\";"
+                    ],
+                    [
+                      2,
+                      " ",
+                      ""
+                    ],
+                    [
+                      3,
+                      " ",
+                      "const DB_NAME = \"relay-sync\";"
+                    ],
+                    [
+                      4,
+                      " ",
+                      ""
+                    ],
+                    [
+                      5,
+                      " ",
+                      "export function openDrafts() {"
+                    ],
+                    [
+                      6,
+                      " ",
+                      "  return openDB(DB_NAME, 2, { upgrade: createStores });"
+                    ],
+                    [
+                      7,
+                      " ",
+                      "}"
+                    ]
+                  ]
+                }
+              },
+              {
+                "id": "Item 4",
+                "group": "checklist",
+                "n": 4,
+                "file": "CONTEXT.md",
+                "line": 20,
+                "node": "sync-worker/drafts.ts",
+                "code": {
+                  "label": "CONTEXT.md, lines 18–23, unchanged in this PR",
+                  "mark": 20,
+                  "lines": [
+                    [
+                      18,
+                      " ",
+                      "## Drafts"
+                    ],
+                    [
+                      19,
+                      " ",
+                      ""
+                    ],
+                    [
+                      20,
+                      " ",
+                      "Unsent composer text lives in composer/drafts.ts,"
+                    ],
+                    [
+                      21,
+                      " ",
+                      "keyed by stage. The composer reads it on mount and"
+                    ],
+                    [
+                      22,
+                      " ",
+                      "writes it on every change."
+                    ],
+                    [
+                      23,
+                      " ",
+                      ""
+                    ]
+                  ]
+                }
+              },
+              {
+                "id": "F2",
+                "group": "other",
+                "finding": "F2",
+                "file": "stage/useStageSocket.ts",
+                "line": 42,
+                "node": "stage/useStageSocket.ts",
+                "code": {
+                  "label": "stage/useStageSocket.ts, lines 40–45, modified in e81f0c9",
+                  "mark": 42,
+                  "lines": [
+                    [
+                      40,
+                      " ",
+                      "export function sendFrame(frame: Frame) {"
+                    ],
+                    [
+                      41,
+                      "+",
+                      "  if (!portReady) {"
+                    ],
+                    [
+                      42,
+                      "+",
+                      "    return;"
+                    ],
+                    [
+                      43,
+                      "+",
+                      "  }"
+                    ],
+                    [
+                      44,
+                      "+",
+                      "  worker.port.postMessage(frame);"
+                    ],
+                    [
+                      45,
+                      " ",
+                      "}"
+                    ]
+                  ]
+                }
+              }
+            ],
+            "compare": {
+              "C1": {
+                "label": "sync-worker/socket.ts, lines 14–20, e81f0c9 → 9c1d2e4",
+                "mark": 16,
+                "lines": [
+                  [
+                    14,
+                    " ",
+                    "export async function connect(stageId: string) {"
+                  ],
+                  [
+                    15,
+                    " ",
+                    "  const existing = sockets.get(stageId);"
+                  ],
+                  [
+                    16,
+                    "-",
+                    "  if (existing?.state === \"open\") return existing.handle;"
+                  ],
+                  [
+                    16,
+                    "+",
+                    "  if (existing) return existing.ready;"
+                  ],
+                  [
+                    17,
+                    " ",
+                    "  const ws = new WebSocket(urlFor(stageId));"
+                  ],
+                  [
+                    18,
+                    "-",
+                    "  sockets.set(stageId, { ws, state: \"connecting\" });"
+                  ],
+                  [
+                    18,
+                    "+",
+                    "  const ready = opened(ws).then(() => wrap(ws));"
+                  ],
+                  [
+                    19,
+                    "+",
+                    "  sockets.set(stageId, { ws, ready });"
+                  ],
+                  [
+                    20,
+                    " ",
+                    "  return ready;"
+                  ]
+                ]
+              },
+              "C2": {
+                "note": "No change to put() in 9c1d2e4. The ack still goes out at line 31, before the write is done."
+              },
+              "C3": {
+                "note": "No code change in 9c1d2e4. pair-codex replied instead."
+              }
+            }
+          }
+        },
+        "templates": {
+          "about": "Review templates are machine-local. The product ships only the mechanism and one neutral example; real templates live in each machine’s config and are never shown here. Scenario for 6c–6g: the gate passes on e81f0c9, as in 4a.",
+          "machines": {
+            "withTemplate": "laptop-a",
+            "without": "desk-b"
+          },
+          "readAt": "13:02",
+          "sources": [
+            "This machine",
+            "Repository",
+            "Built-in example"
+          ],
+          "precedence": "Relay uses the first template it finds: This machine, then Repository, then Built-in example.",
+          "example": {
+            "name": "Example review checklist",
+            "source": "This machine",
+            "path": "~/.config/relay/review-templates/example.json",
+            "items": [
+              "Readable and maintainable",
+              "Secrets and personal data handled safely",
+              "Fits the existing architecture",
+              "Docs updated",
+              "Tests cover the change"
+            ],
+            "verdicts": [
+              "Yes",
+              "No",
+              "N/A"
+            ],
+            "rules": [
+              "Every item needs a note.",
+              "Every No links an issue with a severity, P1 Critical to P4 Low.",
+              "A No’s note says what would flip it to Yes."
+            ],
+            "output": "The PR description, as audit evidence, when you approve."
+          },
+          "severities": [
+            {
+              "p": "P1",
+              "w": "Critical"
+            },
+            {
+              "p": "P2",
+              "w": "High"
+            },
+            {
+              "p": "P3",
+              "w": "Medium"
+            },
+            {
+              "p": "P4",
+              "w": "Low"
+            }
+          ],
+          "repoPath": "relay/web: .relay/review-template.json",
+          "addLine": "To add one, put a JSON file in ~/.config/relay/review-templates/ on desk-b. Relay reads it at the next review.",
+          "unchangedLine": "Nothing else changes on desk-b: no checklist on the sign-off card, nothing added to the PR description.",
+          "suggestions": [
+            {
+              "n": 1,
+              "verdict": "Yes",
+              "note": "Small functions with one job each; socket.ts reads top to bottom.",
+              "nodes": [
+                "sync-worker/socket.ts",
+                "sync-worker/worker.ts"
+              ]
+            },
+            {
+              "n": 2,
+              "verdict": "Yes",
+              "note": "Draft text stays in the worker’s IndexedDB on this device and never leaves the browser.",
+              "nodes": [
+                "sync-worker/drafts.ts",
+                "composer/draftStore.ts"
+              ]
+            },
+            {
+              "n": 3,
+              "verdict": "Yes",
+              "note": "Follows decision record 0007: one socket per stage, owned by the worker.",
+              "nodes": [
+                "sync-worker/worker.ts",
+                "sync-worker/protocol.ts"
+              ]
+            },
+            {
+              "n": 4,
+              "verdict": "No",
+              "note": "CONTEXT.md still says drafts live in composer/drafts.ts. Yes once it says the worker keeps them.",
+              "nodes": [
+                "sync-worker/drafts.ts"
+              ],
+              "issue": {
+                "id": "relay/web#474",
+                "p": "P4",
+                "w": "Low",
+                "title": "CONTEXT.md doesn’t say the worker keeps drafts"
+              }
+            },
+            {
+              "n": 5,
+              "verdict": "Yes",
+              "note": "socket.test.ts and drafts.test.ts cover the change. 2 tests outside the diff don’t run here.",
+              "nodes": [
+                "tests/socket.test.ts",
+                "tests/drafts.test.ts"
+              ]
+            }
+          ],
+          "flip": {
+            "n": 2,
+            "note": "Draft text stays on the device after sign-out.",
+            "flipDraft": "Yes once sign-out clears the worker’s drafts store.",
+            "issue": {
+              "id": "relay/web#475",
+              "p": "P2",
+              "w": "High",
+              "title": "Drafts outlive sign-out in the worker’s IndexedDB"
+            }
+          },
+          "approveReason": "No on item 2 needs a linked issue",
+          "confirmReason": "2 items need you to confirm or flip them",
+          "postTitle": "Review checklist (Example review checklist, from This machine)",
+          "postFoot": "Added to the PR description when you approve, signed by you at e81f0c9. pair-codex’s suggestions are kept as suggestions."
+        },
+        "screen": {
+          "about": "Values the page computed inline, for screens/review-canvas.html. Everything else comes from the rest of data.reviewDirections.canvas.",
+          "meta": {
+            "defaultState": "overview"
+          },
+          "unknownState": {
+            "title": "Unknown state",
+            "text": "No state with that id in fixture.json.",
+            "known": "Known states"
+          },
+          "shell": {
+            "product": "Relay",
+            "brandLabel": "Relay, go to Connect",
+            "navLabel": "Relay navigation",
+            "modulesLabel": "Modules",
+            "askRelay": "Ask Relay",
+            "askShortcut": "Ctrl J",
+            "hosts": {
+              "label": "3 hosts configured",
+              "aria": "3 hosts configured"
+            },
+            "notifications": {
+              "aria": "Notifications"
+            },
+            "more": {
+              "name": "More",
+              "icon": "grid"
+            },
+            "session": {
+              "title": "Session on atlas",
+              "access": "Local access",
+              "aria": "Session on atlas, Local access, connected"
+            },
+            "settings": {
+              "label": "Settings",
+              "href": "#settings",
+              "aria": "Settings: host access and notifications"
+            }
+          },
+          "modules": {
+            "connect": {
+              "name": "Connect",
+              "icon": "home",
+              "href": "#connect"
+            },
+            "fleet": {
+              "name": "Fleet",
+              "icon": "fleet",
+              "href": "#fleet/approvals"
+            },
+            "code": {
+              "name": "Code",
+              "icon": "code",
+              "href": "#code/pull-requests"
+            },
+            "usage": {
+              "name": "Usage",
+              "icon": "usage",
+              "href": "#usage/limits"
+            },
+            "hostResources": {
+              "name": "Host resources",
+              "icon": "host",
+              "href": "#resources/overview"
+            }
+          },
+          "nav": {
+            "primary": [
+              "connect",
+              "fleet"
+            ],
+            "secondary": [
+              "code",
+              "usage",
+              "hostResources"
+            ],
+            "bar": [
+              "connect",
+              "fleet",
+              "code",
+              "usage"
+            ]
+          },
+          "approvals": {
+            "badge": "3",
+            "badgeAria": "3 approvals waiting",
+            "navAria": "Fleet, 3 approvals waiting"
+          },
+          "module": "code",
+          "page": "Review",
+          "crumb": {
+            "parent": "Code",
+            "parentHref": "#code/pull-requests",
+            "current": "Review"
+          },
+          "pr": {
+            "num": "#463",
+            "repo": "relay/web #463",
+            "line": "14 files in 4 modules, +612 −240",
+            "review": "sec-cc review, 14:22: 1 P1, 2 P2, 1 P3",
+            "since": "You looked at 13:20. 2 commits since, 4 files changed.",
+            "check": "1 check failed",
+            "checkName": "unit-tests",
+            "into": "into",
+            "crumbs": [
+              "Code",
+              "Pull requests",
+              "#463"
+            ]
+          },
+          "copy": {
+            "view": "View",
+            "canvas": "Canvas",
+            "files": "Files",
+            "filesKey": "l",
+            "familiarity": "Context layer, key c",
+            "newToArea": "New to this area",
+            "knowArea": "I know this area",
+            "ctxKey": "c",
+            "search": "Search files and functions",
+            "searchKey": "/",
+            "zoom": "Zoom level",
+            "levels": [
+              "Overview",
+              "Cluster",
+              "File",
+              "Diff"
+            ],
+            "visualAid": "A visual aid; the Files list (l) has the whole review",
+            "legend": {
+              "title": "Legend",
+              "high": "High risk",
+              "medium": "Medium",
+              "low": "Low",
+              "size": "Box size: changed lines",
+              "edges": "Call or import this change touches, to the callee",
+              "moved": "Moved from",
+              "partition": "Partition: edits sharing a def-use chain",
+              "noEdges": "No edges or partitions: dependency data missing",
+              "finding": "sec-cc finding",
+              "changed": "Changed since 13:20",
+              "ctxPurpose": "Dashed: unchanged code, with what it’s for",
+              "ctxOutline": "Outline: unchanged code, collapsed (c)",
+              "ctxPath": "Dashed: unchanged, path only, no docs",
+              "ctxRadius": "Dashed: outside the diff, numbered by distance"
+            },
+            "map": "Map",
+            "keysTitle": "Keys on the canvas",
+            "filesTitle": "Files, 14",
+            "building": "Building",
+            "pinned": "Pinned to connect(), between lines 16 and 17",
+            "enterOpens": "Enter opens the lines",
+            "newFile": "New file, +142 −0",
+            "changedSince": "Changed since you looked",
+            "markHandled": "Mark handled",
+            "handledLine": "Handled is your reading mark; nothing posts.",
+            "failed": "Failed",
+            "readReceipt": "Read receipt",
+            "walk": "n and p walk the trail.",
+            "sinceTitle": "Since you looked at 13:20",
+            "evidenceRegion": "beside the code they cover",
+            "testFile": "Test file, beside the code it covers",
+            "failedHere": "unit-tests failed here",
+            "linTitle": "Review in reading order",
+            "here": "You’re here, kept from the canvas",
+            "ctxBadge": "Built from sources",
+            "collapsed": "Collapsed",
+            "collapsedMeta": "c opens the brief and context",
+            "missingMeta": "Built 14:22 at e81f0c9 from 6 files",
+            "radiusMeta": "Ranked by distance from the change",
+            "linCtxTitle": "0. Context, before the change",
+            "radiusCallers": "Downstream callers outside the diff, 7",
+            "radiusTests": "Tests outside the diff, 4",
+            "radiusP1": "What the P1 breaks",
+            "runs": "Runs in unit-tests",
+            "notRun": "Not run in this PR’s checks",
+            "notRunShort": "Not run in PR checks",
+            "p1Open": "P1, still open",
+            "phone": {
+              "title": "Move stage sync into a shared worker",
+              "meta": "14 files, +612 −240. sec-cc review, 14:22.",
+              "since": "You looked at 13:20. 2 commits since.",
+              "mapLabel": "Map of the change. socket.ts is selected: sync-worker, partition A.",
+              "mapCap": "Selected: socket.ts, in sync-worker and partition A. The map is a picture; the list below is the review.",
+              "briefTitle": "You are here: sync-worker",
+              "briefFoot": "Built from CONTEXT.md, decision record 0007 and the files cited only; never invented.",
+              "missingFoot": "No CONTEXT.md or decision record covers sync-worker, so this brief is built from code only.",
+              "switchOff": "Off: context is shown",
+              "switchOn": "On: context is collapsed",
+              "context": "Context",
+              "show": "Show",
+              "back": "Reading order",
+              "file": "socket.ts",
+              "filePath": "sync-worker/socket.ts",
+              "fileMeta": "Stop 1 of 14, partition A. High risk, +142 −0.",
+              "hunk": "connect(), lines 14–24",
+              "next": "Next: useStageSocket.ts",
+              "changed": "Changed since 13:20",
+              "building": "Building the map. The list works now.",
+              "byModule": "Files by module, no partitions",
+              "largeTitle": "Partitions, in reading order"
+            }
+          },
+          "ndOrder": [
+            "stage",
+            "sync-worker",
+            "composer",
+            "tests"
+          ],
+          "arrowWords": {
+            "sync-worker/worker.ts": "↑ worker.ts",
+            "stage/reconnect.ts": "← reconnect.ts",
+            "tests/socket.test.ts": "↓ socket.test.ts",
+            "sync-worker/drafts.ts": "→ drafts.ts"
+          },
+          "linNote": "Screen readers get this list first; the canvas is a visual aid. l switches back and keeps your place.",
+          "linCtxNote": "Context first, then partitions, files and hunks. Screen readers get this list first; l switches back to the canvas and keeps your place.",
+          "states": {
+            "overview": {
+              "frame": "1a",
+              "phoneFrame": "2e",
+              "name": "Overview zoom",
+              "view": "overview",
+              "level": 0,
+              "levelLine": "Overview: the whole change",
+              "status": "14 files, 13 edges this change touches, 2 partitions. Enter on a partition zooms into it.",
+              "canvasLabel": "PR #463 canvas, Overview",
+              "miniLabel": "Map: the whole change is in view"
+            },
+            "cluster": {
+              "frame": "1b",
+              "phoneFrame": "2e",
+              "name": "Cluster zoom, partition A",
+              "view": "cluster",
+              "level": 1,
+              "levelLine": "Cluster: partition A, 6 files",
+              "status": "Partition A, 6 files in stage and sync-worker. Faint stubs at the edge lead out of A: to partition B and to tests.",
+              "canvasLabel": "PR #463 canvas, Cluster, partition A",
+              "miniLabel": "Map: partition A is in view"
+            },
+            "file": {
+              "frame": "1c",
+              "phoneFrame": "2e",
+              "name": "File zoom, socket.ts",
+              "view": "file",
+              "level": 2,
+              "levelLine": "File: sync-worker/socket.ts",
+              "status": "socket.ts, 5 changed parts. Callers on the left, callees on the right; each stub says where it leads.",
+              "canvasLabel": "PR #463 canvas, File, socket.ts",
+              "miniLabel": "Map: socket.ts is in view"
+            },
+            "diff": {
+              "frame": "1d",
+              "phoneFrame": "2f",
+              "name": "Diff zoom, connect()",
+              "view": "diff",
+              "level": 3,
+              "levelLine": "Diff: connect(), lines 14–24",
+              "status": "Lines 14–24 of socket.ts, the P1 between 16 and 17. Neighbours stay at the edge: worker.ts and socket.test.ts on the left, protocol.ts on the right, onMessage() below.",
+              "canvasLabel": "PR #463 canvas, Diff, connect()",
+              "miniLabel": "Map: connect() in socket.ts is in view"
+            },
+            "keyboard": {
+              "frame": "1e",
+              "phoneFrame": "2e",
+              "name": "Keyboard and focus",
+              "view": "keys",
+              "level": 0,
+              "levelLine": "Overview: the whole change",
+              "status": "socket.ts, sync-worker, partition A. High risk, P1 still open, changed since you looked. 4 edges: ↑ worker.ts calls it, ← reconnect.ts moved into it, ↓ socket.test.ts imports it, → it calls drafts.ts.",
+              "canvasLabel": "PR #463 canvas, Overview, focus on socket.ts",
+              "miniLabel": "Map: the whole change is in view, focus on socket.ts"
+            },
+            "map-building": {
+              "frame": "1f",
+              "phoneFrame": "2e",
+              "name": "Map building",
+              "view": "building",
+              "level": 0,
+              "levelLine": "Zoom opens when the map is ready",
+              "status": "Building the map: reading call and import relations, 9 of 14 files",
+              "canvasLabel": "PR #463 canvas, building",
+              "miniLabel": ""
+            },
+            "no-dependency-data": {
+              "frame": "1g",
+              "phoneFrame": "2e",
+              "name": "No dependency data",
+              "view": "nodeps",
+              "level": 0,
+              "levelLine": "Overview: files by module",
+              "status": "14 files placed by module. Cluster zoom opens a module; File and Diff zoom work as usual.",
+              "canvasLabel": "PR #463 canvas, Overview, by module only",
+              "miniLabel": "Map: the whole change is in view"
+            },
+            "reading-path": {
+              "frame": "2a",
+              "phoneFrame": "2e",
+              "name": "Reading path on the canvas",
+              "view": "trail",
+              "level": 0,
+              "levelLine": "Overview: reading path",
+              "status": "Stop 4 of 14: protocol.ts, chapter 1. n goes to reconnect.ts and zooms in on it; p goes back to worker.ts.",
+              "canvasLabel": "PR #463 canvas, Overview, reading path",
+              "miniLabel": "Map: the whole change is in view"
+            },
+            "since-you-looked": {
+              "frame": "2b",
+              "phoneFrame": "2e",
+              "name": "Since you looked",
+              "view": "since",
+              "level": 0,
+              "levelLine": "Overview: since 13:20",
+              "status": "Since 13:20: 3b6d0a5 at 13:41 and e81f0c9 at 14:18. Main’s move is drawn dashed and never counts as a finding.",
+              "canvasLabel": "PR #463 canvas, Overview, since you looked",
+              "miniLabel": "Map: the whole change is in view"
+            },
+            "evidence": {
+              "frame": "2c",
+              "phoneFrame": "2e",
+              "name": "Evidence pinned in place",
+              "view": "evidence",
+              "level": 1,
+              "levelLine": "Cluster: partition A with its tests",
+              "status": "unit-tests: 1 of 58 failed, opens one socket for two tabs. Pinned on the test and on connect(), the function it exercises. routeFrame() and close() have no test.",
+              "canvasLabel": "PR #463 canvas, Cluster, partition A with evidence",
+              "miniLabel": "Map: partition A is in view"
+            },
+            "linear-fallback": {
+              "frame": "2d",
+              "phoneFrame": "2e",
+              "name": "Linear fallback",
+              "view": "linear",
+              "level": null,
+              "levelLine": "",
+              "status": "Files view, in reading order. Your place is kept: socket.ts, connect(). Press l to go back to the canvas at the same spot.",
+              "canvasLabel": "",
+              "miniLabel": ""
+            },
+            "large-pr": {
+              "frame": "2g",
+              "phoneFrame": "2e",
+              "name": "Large PR, 60 files",
+              "view": "large",
+              "level": 0,
+              "levelLine": "Overview: 60 files, modules collapsed",
+              "status": "60 files collapsed into 5 module nodes, each with its count. Partitions stay drawn across them. The reading path starts at 1, partition A, the riskiest: 1 P1, 1 P2, 1 P3. Enter on a module opens its files.",
+              "canvasLabel": "PR #471 canvas, Overview, modules collapsed",
+              "miniLabel": "Map: the whole change is in view"
+            },
+            "context-on": {
+              "frame": "3a",
+              "phoneFrame": "3h",
+              "name": "Context on: new to this area",
+              "view": "ctxOn",
+              "level": 0,
+              "levelLine": "Overview: context on",
+              "status": "Context on. 14 changed files at full strength; 11 unchanged neighbours dimmed, each with a one-line purpose. c collapses them.",
+              "canvasLabel": "PR #463 canvas, Overview, context on",
+              "miniLabel": "Map: the whole change and its surroundings are in view"
+            },
+            "you-are-here": {
+              "frame": "3b",
+              "phoneFrame": "3h",
+              "name": "You are here",
+              "view": "brief",
+              "level": 0,
+              "levelLine": "Overview: context on",
+              "status": "The brief comes before any diff. Each sentence links to its source.",
+              "canvasLabel": "PR #463 canvas, Overview, context on, after the brief",
+              "miniLabel": "Map: the whole change and its surroundings are in view"
+            },
+            "context-card": {
+              "frame": "3c",
+              "phoneFrame": "3h",
+              "name": "Context card: sync-worker",
+              "view": "card",
+              "level": 1,
+              "levelLine": "Cluster: sync-worker module, with context",
+              "status": "Context card on sync-worker: purpose, callers and callees, types, invariants with the tests that guard them, history and owners.",
+              "canvasLabel": "PR #463 canvas, Cluster, sync-worker with its context card",
+              "miniLabel": ""
+            },
+            "radius": {
+              "frame": "3d",
+              "phoneFrame": "3h",
+              "name": "What could this break",
+              "view": "radius",
+              "level": 0,
+              "levelLine": "Overview: radius of the change",
+              "status": "7 callers and 4 tests outside the diff, numbered by distance. 2 of the tests don’t run in this PR’s checks.",
+              "canvasLabel": "PR #463 canvas, Overview, radius of the change",
+              "miniLabel": "Map: the whole change and its surroundings are in view"
+            },
+            "i-know-this-area": {
+              "frame": "3e",
+              "phoneFrame": "3h",
+              "name": "I know this area",
+              "view": "known",
+              "level": 0,
+              "levelLine": "Overview: context collapsed",
+              "status": "I know this area: context collapses to outlines and the brief to one line. Changed files stay as they are. c brings it back.",
+              "canvasLabel": "PR #463 canvas, Overview, context collapsed",
+              "miniLabel": "Map: the whole change and its surroundings are in view"
+            },
+            "context-missing": {
+              "frame": "3f",
+              "phoneFrame": "3h",
+              "name": "Context missing",
+              "view": "ctxMissing",
+              "level": 0,
+              "levelLine": "Overview: context from code only",
+              "status": "No CONTEXT.md or decision record here. The brief is code only and says so; unchanged neighbours show their path, not a guessed purpose.",
+              "canvasLabel": "PR #463 canvas, Overview, context from code only",
+              "miniLabel": "Map: the whole change and its surroundings are in view"
+            },
+            "linear-with-context": {
+              "frame": "3g",
+              "phoneFrame": "3h",
+              "name": "Linear fallback with context",
+              "view": "linCtx",
+              "level": null,
+              "levelLine": "",
+              "status": "Files view, in reading order, context first. Your place is kept: socket.ts, connect(). Press l to go back to the canvas.",
+              "canvasLabel": "",
+              "miniLabel": ""
+            },
+            "sign-off": {
+              "frame": "4a",
+              "phoneFrame": "4d",
+              "name": "Agent sign-off, docked",
+              "view": "soReady",
+              "level": 0,
+              "levelLine": "Overview: plan against diff",
+              "status": "Each node carries the plan step that touched it. reconnect.ts carries no step: it’s the unplanned hunk. Judgements are pinned to the nodes they’re about.",
+              "canvasLabel": "PR #463 canvas, Overview, agent sign-off",
+              "miniLabel": ""
+            },
+            "sign-off-plan-step": {
+              "frame": "4b",
+              "phoneFrame": "4e",
+              "name": "Plan step selected",
+              "view": "soStep",
+              "level": 0,
+              "levelLine": "Overview: plan step 2",
+              "status": "Step 2 selected: its 5 nodes and their 4 edges stay; the rest dims. The unplanned reconnect.ts stays at full strength with why it matters.",
+              "canvasLabel": "PR #463 canvas, Overview, plan step 2 selected",
+              "miniLabel": ""
+            },
+            "sign-off-blocked": {
+              "frame": "4c",
+              "phoneFrame": "4d, blocked",
+              "name": "Sign-off blocked",
+              "view": "soBlocked",
+              "level": 0,
+              "levelLine": "Overview: gate blocked",
+              "status": "Gate blocked on e81f0c9. Focus is on socket.ts, where the P1 sits on connect(); Enter opens the lines.",
+              "canvasLabel": "PR #463 canvas, Overview, agent sign-off blocked",
+              "miniLabel": ""
+            },
+            "request-preview": {
+              "frame": "5a",
+              "phoneFrame": "5f list",
+              "name": "Request changes, full screen",
+              "view": "fsPreview",
+              "level": 0,
+              "levelLine": "",
+              "status": "",
+              "canvasLabel": "PR #463 canvas, request changes preview",
+              "miniLabel": ""
+            },
+            "request-preview-item": {
+              "frame": "5a",
+              "phoneFrame": "5f item",
+              "name": "Request changes, item code",
+              "view": "fsItem",
+              "level": 0,
+              "levelLine": "",
+              "status": "",
+              "canvasLabel": "PR #463 canvas, request changes preview",
+              "miniLabel": ""
+            },
+            "request-preview-editing": {
+              "frame": "5b",
+              "phoneFrame": "5f list, editing",
+              "name": "Request changes, editing",
+              "view": "fsEdit",
+              "level": 0,
+              "levelLine": "",
+              "status": "",
+              "canvasLabel": "PR #463 canvas, request changes preview",
+              "miniLabel": ""
+            },
+            "request-sent": {
+              "frame": "5c receipt and canvas",
+              "phoneFrame": "5g",
+              "name": "Request sent",
+              "view": "fsSent",
+              "level": 0,
+              "levelLine": "Overview: changes requested",
+              "status": "Changes requested on e81f0c9 at 15:04. Each pin now reads Sent. Approval is off until a new head.",
+              "canvasLabel": "PR #463 canvas, changes requested",
+              "miniLabel": ""
+            },
+            "request-waiting": {
+              "frame": "5d",
+              "phoneFrame": "5g",
+              "name": "Waiting on pair-codex",
+              "view": "rcWait",
+              "level": 0,
+              "levelLine": "Overview: waiting on pair-codex",
+              "status": "pair-codex acknowledged at 15:12 and is working on 2 of 3 comments. Next: pair-codex, since 15:12.",
+              "canvasLabel": "PR #463 canvas, waiting on the author agent",
+              "miniLabel": ""
+            },
+            "request-rereview": {
+              "frame": "5e canvas and compare",
+              "phoneFrame": "5e, list",
+              "name": "Re-review loop",
+              "view": "fsCompare",
+              "level": 0,
+              "levelLine": "Overview: new head 9c1d2e4",
+              "status": "9c1d2e4 touched 3 files since you requested changes. C1 addressed, C2 not addressed, C3 replied. Approve opens once you’ve opened the 3 changed hunks.",
+              "canvasLabel": "PR #463 canvas, re-review of 9c1d2e4",
+              "miniLabel": ""
+            },
+            "templates-settings": {
+              "frame": "6a",
+              "phoneFrame": "6a, stacked",
+              "name": "Settings, review templates on laptop-a",
+              "view": "setA",
+              "level": null,
+              "levelLine": "",
+              "status": "",
+              "canvasLabel": "",
+              "miniLabel": ""
+            },
+            "templates-none": {
+              "frame": "6b",
+              "phoneFrame": "6b, stacked",
+              "name": "Settings, no template on desk-b",
+              "view": "setB",
+              "level": null,
+              "levelLine": "",
+              "status": "",
+              "canvasLabel": "",
+              "miniLabel": ""
+            },
+            "checklist": {
+              "frame": "6c",
+              "phoneFrame": "6g, suggested",
+              "name": "Checklist on the canvas",
+              "view": "ckSuggest",
+              "level": 0,
+              "levelLine": "Overview: review checklist",
+              "status": "pair-codex pre-filled all 5 items. Pins show the nodes it looked at for each. You’ve confirmed 1, 3 and 4.",
+              "canvasLabel": "PR #463 canvas, review checklist",
+              "miniLabel": ""
+            },
+            "checklist-no-issue": {
+              "frame": "6d",
+              "phoneFrame": "6g",
+              "name": "A No without an issue",
+              "view": "ckFlip",
+              "level": 0,
+              "levelLine": "Overview: review checklist",
+              "status": "Item 2 flipped to No. Link or create an issue with a severity, and say what would flip it to Yes.",
+              "canvasLabel": "PR #463 canvas, review checklist, item 2 needs an issue",
+              "miniLabel": ""
+            },
+            "checklist-posting-preview": {
+              "frame": "6e",
+              "phoneFrame": "6g, with preview",
+              "name": "Posting preview",
+              "view": "ckPost",
+              "level": 0,
+              "levelLine": "Overview: review checklist",
+              "status": "The table above is exactly what Approve adds to the PR description. Each Edit goes back to its item.",
+              "canvasLabel": "PR #463 canvas, sign-off preview with checklist",
+              "miniLabel": ""
+            },
+            "checklist-feeds-request": {
+              "frame": "6f",
+              "phoneFrame": "5f list, with checklist items",
+              "name": "Checklist feeds Request changes",
+              "view": "ckRc",
+              "level": 0,
+              "levelLine": "Overview: request preview",
+              "status": "Each checklist No becomes an item in the change request, with its note and linked issue.",
+              "canvasLabel": "PR #463 canvas, request changes with checklist items",
+              "miniLabel": ""
+            }
+          },
+          "t": {
+            "agentWritten": "Agent-written",
+            "byLine": "pair-codex, from Jonas’s brief",
+            "signOff": {
+              "title": "Agent sign-off",
+              "asked": "What was asked",
+              "briefBy": "Brief from {by} to pair-codex, {at}",
+              "plan": "Plan against diff",
+              "matched": "Matched",
+              "nodes": "{n} nodes",
+              "read": "Read",
+              "unplanned": "Unplanned",
+              "critic": "Critic on e81f0c9",
+              "computedSuffix": "Computed, never typed.",
+              "judge": "Only you can judge",
+              "judgementPin": "Judgement {n}, pinned to",
+              "approve": "Approve what you read",
+              "requestChanges": "Request changes",
+              "approveKey": "a",
+              "approveWord": "approve",
+              "showP1": "Show the P1 on socket.ts",
+              "gateLabel": "Gate card",
+              "judgementPinCanvas": "Judgement {n}",
+              "p1Pin": "P1 blocks approval",
+              "unplannedNote": "Unplanned: reconnect.ts, {size}"
+            },
+            "step": {
+              "back": "Agent sign-off",
+              "of": "Plan step 2 of 4",
+              "meta": "5 files in reading order, partition B. Read at 14:31.",
+              "tap": "Tap a file to open its diff with findings inline, as in 2f.",
+              "read": "Read"
+            },
+            "rc": {
+              "previewBadge": "Preview, not sent",
+              "previewTitle": "Request changes",
+              "previewMeta": "Compiled from your marks on e81f0c9. Every part is editable.",
+              "previewComments": "{n} inline comments, pinned on the canvas",
+              "becomesIssue": "Becomes an issue",
+              "issueOpened": "Issue opened",
+              "issueOpenedText": "Opened as {issue} at {at}, linked from this request.",
+              "issueOutside": "Opened as {issue}, outside this round.",
+              "send": "Send request",
+              "editSummary": "Edit summary",
+              "cancel": "Cancel",
+              "withdraw": "Withdraw request",
+              "reviewNew": "Review the new head",
+              "sentBadge": "Changes requested",
+              "sentTitle": "Changes requested on e81f0c9",
+              "next": "Next: pair-codex, since {at}.",
+              "comments3": "3 inline comments",
+              "waitTitle": "Waiting on pair-codex",
+              "reBadge": "New head 9c1d2e4",
+              "reTitle": "pair-codex pushed 9c1d2e4",
+              "reMeta": "At {at}. {run}.",
+              "reComments": "3 comments against 9c1d2e4",
+              "reSince": "You requested changes at {at}. 1 commit since: 9c1d2e4.",
+              "whoNext": "Who acts next",
+              "summary": "Summary",
+              "goesTo": "Goes to",
+              "signoff": "Agent sign-off",
+              "p3where": "protocol.ts, FrameType",
+              "states": {
+                "needsFix": "Needs a fix",
+                "fromCritic": "From sec-cc",
+                "yours": "Your comment",
+                "removed": "Removed from this request",
+                "editing": "Editing",
+                "sent": "Sent",
+                "fromChecklist": "From the checklist"
+              },
+              "lineWord": "line",
+              "pinnedTo": "Pinned to",
+              "edit": "Edit",
+              "undo": "Undo",
+              "ckSummaryAdd": " The checklist adds 2 Nos: item 2 (drafts outlive sign-out) and item 4 (docs).",
+              "ckComments": "4 inline comments and 2 checklist items",
+              "ckReceives": " Each checklist No goes with its note and linked issue.",
+              "ckPin": "Items 2, 4: No",
+              "checklistPrefix": "Checklist: "
+            },
+            "fs": {
+              "groups": {
+                "request": "In this request",
+                "issue": "Becomes an issue",
+                "checklist": "From the review checklist",
+                "other": "Not in this request"
+              },
+              "compareGroup": "Comments against 9c1d2e4",
+              "states": {
+                "needsFix": "Needs a fix",
+                "fromCritic": "From sec-cc",
+                "yours": "Your comment",
+                "issue": "Becomes an issue",
+                "checklist": "No, issue linked",
+                "other": "Not in this request",
+                "removed": "Removed from this request",
+                "editing": "Editing",
+                "sent": "Sent",
+                "issueOpened": "Issue opened"
+              },
+              "crumbs": [
+                "Code",
+                "Pull requests",
+                "#463 canvas"
+              ],
+              "esc": "Esc",
+              "escWord": "goes back",
+              "opensOnSend": "Opens on send",
+              "noLine": "Partition A, no line",
+              "origin": {
+                "finding": "From finding {id}, {p}, sec-cc: {title}",
+                "critic": "sec-cc note on partition A, not tied to a line",
+                "yours": "Your comment, on top of the findings",
+                "checklist": "Review checklist item {n}, {item}: No, {who}",
+                "flipped": "flipped by you",
+                "confirmed": "suggested by pair-codex, confirmed by you",
+                "other": "Finding {id}, {p}, sec-cc",
+                "otherText": "{title}. sec-cc raised it; it isn’t in this request."
+              },
+              "textLabel": {
+                "comment": "Comment to pair-codex",
+                "issue": "Issue text",
+                "checklist": "Note, with what would flip it to Yes",
+                "other": "Finding"
+              },
+              "word": {
+                "commented": "Commented line",
+                "flagged": "Flagged line"
+              },
+              "showOnCanvas": "Show on canvas",
+              "backToItem": "Back to item",
+              "linkedIssue": "Linked issue",
+              "editingNote": "Editing in place. The list and the count follow as you type.",
+              "done": "Done",
+              "remove": "Remove",
+              "addToRequest": "Add to request",
+              "preview": {
+                "crumb": "Request changes",
+                "title": "Request changes on #463",
+                "badge": "Not sent",
+                "meta": "Compiled from your marks on e81f0c9. Everything here is editable until you send.",
+                "summary": "Summary",
+                "to": "Goes to",
+                "label": "Request changes on #463, full screen"
+              },
+              "sent": {
+                "crumb": "Sent",
+                "title": "Sent to pair-codex at {at}",
+                "badge": "Changes requested",
+                "readOnly": "Read-only.",
+                "summary": "Summary, as sent",
+                "to": "Sent to",
+                "back": "Back to canvas"
+              },
+              "compare": {
+                "crumb": "Since you requested changes",
+                "title": "Since you requested changes",
+                "badge": "New head 9c1d2e4",
+                "meta": "e81f0c9 → 9c1d2e4 at {at}. {run}. {round}.",
+                "summary": "Your request, sent {at}",
+                "label": "Since you requested changes, full screen",
+                "approve": "Approve what you read",
+                "review": "Review the new head"
+              },
+              "phone": {
+                "canvas": "Canvas",
+                "list": "List",
+                "itemTitle": "C1, socket.ts:16",
+                "receiptBadge": "Sent",
+                "receiptTitle": "Changes requested",
+                "backToList": "Back to the list",
+                "p3": "P3 opened as {issue}.",
+                "prLine": "relay/web #463 · head e81f0c9 · by pair-codex",
+                "opens": "Opens its code",
+                "scrolls": "Code, scrolls sideways"
+              },
+              "head": "Head",
+              "aria": {
+                "list": "Issues and comments",
+                "code": "Code context",
+                "bar": "Request actions",
+                "expand": "Expand {id} here",
+                "collapse": "Collapse {id} here",
+                "canvas": "Show on canvas: opens the canvas zoomed to {node}",
+                "tracker": "Open {issue} in the tracker",
+                "phoneOpen": "{id}, {where}, {state}. Opens its code"
+              }
+            },
+            "settings": {
+              "title": "Settings",
+              "lead": "Relay on {machine}. These settings apply to this machine only.",
+              "tabs": [
+                "Host access",
+                "Notifications",
+                "Appearance",
+                "Review templates"
+              ],
+              "current": "Review templates",
+              "heading": "Review templates",
+              "about": "A review template adds a checklist next to the Agent sign-off card. Templates live in config; Relay reads them and never edits them here.",
+              "open": "Open config file",
+              "readAgain": "Read again",
+              "items": "Items",
+              "verdicts": "Verdicts",
+              "rules": "Rules",
+              "output": "Output",
+              "templatesOn": "Templates on {machine}",
+              "noTemplate": "No template",
+              "shipsWith": "Ships with Relay",
+              "noneHere": "No review template on this machine",
+              "emptyDir": "~/.config/relay/review-templates/ is empty",
+              "activeFor": "Active for relay/web",
+              "none": "None",
+              "off": "Off",
+              "builtIn": "Built-in example, ships with Relay",
+              "readNotice": "Read from config at {at}. Relay doesn’t edit templates here: change the file, then read it again.",
+              "offNotice": "The built-in example is listed so you can see the mechanism. It stays off; reviews on desk-b show no checklist."
+            },
+            "ck": {
+              "title": "Review checklist",
+              "chip": "{name}, from This machine",
+              "meta": "{n} of 5 confirmed. Verdicts Yes, No, N/A; every item needs a note.",
+              "confirm": "Confirm",
+              "origin": {
+                "flipped": "Flipped by you",
+                "confirmed": "Confirmed by you",
+                "suggested": "Suggested by pair-codex"
+              },
+              "looked": "pair-codex looked at",
+              "lookedFlipped": "pair-codex suggested Yes after looking at",
+              "needsIssue": "This No needs a linked issue with a severity.",
+              "link": "Link issue",
+              "create": "Create issue",
+              "severity": "Severity, pick one",
+              "flipQ": "What would flip this to Yes?",
+              "verdictGroup": "Item {n} verdict",
+              "severityGroup": "Severity",
+              "gate": "Gate passed",
+              "scenario": "Scenario, as in 4a",
+              "approveOff": "Approve is off: {reason}.",
+              "approvePost": "Approve and post",
+              "allConfirmed": "5 of 5 items confirmed. Every No has an issue and a note.",
+              "pin": "Item {n}",
+              "pins": "Items {n}",
+              "confirmedAt": [
+                1,
+                3,
+                4
+              ],
+              "post": {
+                "badge": "Preview, not posted",
+                "title": "Sign-off preview: what Approve posts",
+                "where": "Into the PR description of #463",
+                "cols": [
+                  "Item",
+                  "Verdict",
+                  "Note",
+                  "Issue",
+                  "Edit"
+                ],
+                "none": "None",
+                "sign": "Signed by Alex at e81f0c9, 14:40.",
+                "editItem": "Edit item {n}"
+              }
+            },
+            "writtenBy": "Written by pair-codex from Jonas’s brief."
+          }
+        }
+      }
+    }
+  }
+}

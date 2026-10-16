@@ -1,0 +1,1140 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Code, PR review canvas</title>
+<link rel="stylesheet" href="rly.css">
+<link rel="stylesheet" href="chrome.css">
+<script src="relay-chef-modern.js"></script>
+<script src="relay-creature-states.js"></script>
+<script src="relay-screen-art.js"></script>
+<style>
+@font-face { font-display: block; font-family: "Geist Variable"; font-style: normal; font-weight: 100 900; src: url("fonts/geist-variable.woff2") format("woff2-variations"), url("fonts/geist-variable.woff2") format("woff2"); }
+@font-face { font-display: block; font-family: "Geist"; font-style: normal; font-weight: 100 900; src: url("fonts/geist-variable.woff2") format("woff2-variations"), url("fonts/geist-variable.woff2") format("woff2"); }
+@font-face { font-display: block; font-family: "Geist Mono Variable"; font-style: normal; font-weight: 100 900; src: url("fonts/geist-mono-variable.woff2") format("woff2-variations"), url("fonts/geist-mono-variable.woff2") format("woff2"); }
+@font-face { font-display: block; font-family: "Geist Mono"; font-style: normal; font-weight: 100 900; src: url("fonts/geist-mono-variable.woff2") format("woff2-variations"), url("fonts/geist-mono-variable.woff2") format("woff2"); }
+html, body { margin: 0; }
+body { font: 430 1rem/1.5 var(--rly-font-ui); color: var(--rly-color-text-1); background: var(--rly-color-canvas); }
+a { color: inherit; text-decoration: none; }
+a:hover { color: var(--rly-color-text-1); }
+button { font: inherit; }
+code, .mono { font-family: var(--rly-font-mono); }
+.sr { position: absolute; inline-size: 1px; block-size: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.fail { padding: 2rem; display: grid; gap: .75rem; max-inline-size: 40em; }
+.fail h1 { margin: 0; font-size: 2rem; font-weight: 620; letter-spacing: -0.03em; }
+.fail p { margin: 0; color: var(--rly-color-text-2); }
+.fail code { font: 430 .875rem/1.4 var(--rly-font-mono); color: var(--rly-color-text-1); }
+.pb { font: 650 .6875rem/1 var(--rly-font-mono); padding: 2px 4px; border: 1px solid var(--rly-color-border-2); border-radius: var(--rly-radius-tag); background: var(--rly-color-surface-1); white-space: nowrap; }
+.kbd { font: 430 .75rem/1 var(--rly-font-mono); padding: 2px 5px; border: 1px solid var(--rly-color-border-1); border-radius: var(--rly-radius-tag); color: var(--rly-color-text-2); }
+.mk { display: flex; gap: 4px; align-items: center; }
+.muted { color: var(--rly-color-text-2); }
+
+/* Desktop */
+.prhead { padding: 20px 40px 10px; display: grid; gap: 8px; }
+.prhead .crumbs { display: flex; gap: .6rem; align-items: center; font-size: .875rem; color: var(--rly-color-text-2); }
+.prhead .crumbs a { text-decoration: underline; text-underline-offset: .2em; }
+.prhead .repo { font: 520 .8125rem/1.3 var(--rly-font-mono); color: var(--rly-color-text-2); }
+.prhead h1 { margin: 0; font-size: 2rem; font-weight: 620; letter-spacing: -0.03em; line-height: 1.15; }
+.prhead .meta { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; font-size: .875rem; color: var(--rly-color-text-2); }
+.prhead .meta > span { flex: none; white-space: nowrap; display: flex; gap: 6px; align-items: center; }
+.prhead .meta code { color: var(--rly-color-text-1); }
+.tabsrow { padding: 8px 20px 0; display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; }
+.seg2 { display: inline-flex; align-items: center; gap: 2px; padding: 2px; border: 1px solid var(--rly-color-border-1); border-radius: var(--rly-radius-control); background: var(--rly-color-surface-1); }
+.seg2 button { display: inline-flex; gap: .45rem; align-items: center; min-block-size: 36px; padding-inline: .8rem; font-size: .875rem; color: var(--rly-color-text-2); background: transparent; border: 0; border-radius: calc(var(--rly-radius-control) - 2px); }
+.seg2 button[aria-pressed="true"] { font-weight: 620; color: var(--rly-color-text-1); background: var(--rly-color-surface-3); }
+.seg2 .kbd { margin-inline: 4px 6px; }
+.toolbar { padding: 10px 20px; display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; }
+.ladder { display: inline-flex; gap: 2px; padding: 2px; border: 1px solid var(--rly-color-border-1); border-radius: var(--rly-radius-control); background: var(--rly-color-surface-1); }
+.ladder button { display: inline-flex; gap: 6px; align-items: center; min-block-size: 32px; padding-inline: .6rem; font-size: .8125rem; color: var(--rly-color-text-2); background: transparent; border: 0; border-radius: calc(var(--rly-radius-control) - 2px); }
+.ladder button[aria-current="true"] { font-weight: 620; color: var(--rly-color-text-1); background: var(--rly-color-surface-3); }
+.ladder button[aria-disabled="true"] { color: var(--rly-color-text-3); }
+.ladder .n { font: 430 .6875rem/1 var(--rly-font-mono); color: var(--rly-color-text-2); }
+.levelline { font-size: .8125rem; }
+.search { display: flex; gap: .5rem; align-items: center; inline-size: 300px; min-block-size: 40px; box-sizing: border-box; padding-inline: .75rem .5rem; border: 1px solid var(--rly-color-border-1); border-radius: var(--rly-radius-field); background: var(--rly-color-surface-1); }
+.search input { flex: 1; min-inline-size: 0; border: 0; background: transparent; color: inherit; font: 430 .875rem/1.2 var(--rly-font-ui); outline: none; }
+.sinceline { margin-inline-start: auto; display: flex; gap: 6px; align-items: center; font-size: .875rem; color: var(--rly-color-text-2); }
+.notice-wrap { padding: 0 20px 10px; }
+.docwrap { padding: 0 20px 12px; }
+.doc { inline-size: 100%; max-inline-size: 1016px; box-sizing: border-box; display: grid; gap: 12px; padding: 16px 18px; border: 1px solid var(--rly-color-border-1); border-radius: var(--rly-radius-group); background: var(--rly-color-surface-1); }
+.doc-head { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; }
+.doc-head h2 { margin: 0; font-size: 1.125rem; font-weight: 620; }
+.doc-head .meta { margin-inline-start: auto; font-size: .8125rem; color: var(--rly-color-text-2); }
+.doc p.lead { margin: 0; font-size: .9375rem; }
+.doc .cols { column-gap: 24px; }
+.sec { display: grid; gap: 6px; align-content: start; break-inside: avoid; margin-block-end: 12px; }
+.sec h3 { margin: 0; font-size: .875rem; font-weight: 620; }
+.sec ol { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+.sec li { display: grid; gap: 4px; font-size: .875rem; }
+.sec li .t { display: flex; gap: 8px; align-items: baseline; }
+.cites { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; }
+.cite { display: inline-flex; align-items: center; font: 430 .75rem/1.35 var(--rly-font-mono); padding: 1px 6px; border: 1px solid var(--rly-color-border-1); border-radius: var(--rly-radius-tag); color: var(--rly-color-text-2); overflow-wrap: anywhere; }
+.doc .foot { margin: 0; padding-block-start: 10px; border-block-start: 1px solid var(--rly-color-border-1); display: flex; gap: 6px; align-items: center; font-size: .8125rem; color: var(--rly-color-text-2); }
+.cvwrap { padding: 0 20px 24px; display: grid; gap: 8px; min-inline-size: 0; }
+.cvscroll { overflow: hidden; }
+.cvfit { transform-origin: 0 0; }
+.cv { position: relative; inline-size: 1016px; overflow: clip; border: 1px solid var(--rly-color-border-1); border-radius: var(--rly-radius-group); background: radial-gradient(circle, var(--rly-color-border-1) 1px, transparent 1.2px) 0 0 / 20px 20px, var(--rly-color-canvas); }
+.cv > * { position: absolute; }
+.edges { inset: 0; pointer-events: none; overflow: visible; }
+.region { border-radius: 20px; background: var(--rly-color-surface-2); border: 1px solid var(--rly-color-border-1); }
+.region > span { position: absolute; left: 12px; top: 8px; display: flex; gap: 8px; align-items: baseline; font-size: .75rem; color: var(--rly-color-text-2); }
+.region b { font: 620 .8125rem/1.2 var(--rly-font-mono); color: var(--rly-color-text-1); }
+.band { pointer-events: none; border: 1.5px dashed var(--rly-color-text-2); border-radius: 14px; }
+.band > span { position: absolute; display: flex; gap: 6px; align-items: center; padding: 1px 8px; font-size: .75rem; white-space: nowrap; background: var(--rly-color-canvas); border: 1px solid var(--rly-color-border-2); border-radius: var(--rly-radius-tag); }
+.band b { font: 650 .75rem/1.4 var(--rly-font-mono); }
+.stopn { display: grid; place-items: center; inline-size: 18px; block-size: 18px; border-radius: 50%; font: 650 .6875rem/1 var(--rly-font-mono); color: var(--rly-color-canvas); background: var(--rly-color-text-1); }
+.hl { box-sizing: border-box; border-radius: 12px; }
+.hl > span { position: absolute; left: 6px; display: flex; gap: 4px; align-items: center; padding: 0 6px; font-size: .6875rem; line-height: 16px; white-space: nowrap; background: var(--rly-color-canvas); border: 1px solid var(--rly-color-border-1); border-radius: var(--rly-radius-tag); }
+.ctxn { block-size: 44px; box-sizing: border-box; display: grid; align-content: center; gap: 1px; padding: 3px 8px; border: 1px dashed var(--rly-color-border-2); border-radius: var(--rly-radius-control); color: var(--rly-color-text-2); font: 430 .6875rem/1.4 var(--rly-font-ui); }
+.ctxn .nm { display: flex; gap: 6px; align-items: center; min-inline-size: 0; }
+.ctxn .nm span, .ctxn .ln span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ctxn .nm span { font: 520 .6875rem/1.4 var(--rly-font-mono); }
+.ctxn .ln { display: flex; gap: 4px; align-items: center; min-inline-size: 0; }
+.elabel { transform: translate(-50%, -50%); padding: 1px 6px; font-size: .6875rem; line-height: 1.4; white-space: nowrap; background: var(--rly-color-surface-1); border: 1px solid var(--rly-color-border-1); border-radius: var(--rly-radius-tag); }
+.nd { box-sizing: border-box; display: grid; gap: 1px; align-content: start; padding: 6px 8px; text-align: start; color: var(--rly-color-text-1); background: var(--rly-color-surface-1); border-radius: var(--rly-radius-control); outline-offset: 3px; font: 430 .6875rem/1.35 var(--rly-font-ui); }
+.nd .nm { font: 560 .6875rem/1.4 var(--rly-font-mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nd .badges { position: absolute; inset-block-start: -9px; inset-inline-end: 6px; display: flex; gap: 3px; }
+.stop { inline-size: 20px; block-size: 20px; box-sizing: border-box; display: grid; place-items: center; border-radius: 50%; font: 650 .6875rem/1 var(--rly-font-mono); border: 1.5px solid var(--rly-color-text-1); }
+.col { box-sizing: border-box; border-radius: var(--rly-radius-group); background: var(--rly-color-surface-1); }
+.col .hd { padding: 7px 10px; display: grid; gap: 1px; font-size: .75rem; color: var(--rly-color-text-2); }
+.col .hd b { font: 620 .8125rem/1.3 var(--rly-font-mono); color: var(--rly-color-text-1); }
+.chip { position: absolute; left: 8px; right: 8px; display: flex; gap: 6px; align-items: center; justify-content: space-between; min-block-size: 30px; box-sizing: border-box; padding: 4px 8px; border-radius: var(--rly-radius-control); background: var(--rly-color-surface-2); font-size: .75rem; }
+.note { box-sizing: border-box; display: grid; gap: 4px; padding: 10px 12px; border: 1px solid var(--rly-color-border-2); border-radius: var(--rly-radius-group); background: var(--rly-color-surface-1); font-size: .8125rem; }
+.box { box-sizing: border-box; display: grid; align-content: start; background: var(--rly-color-surface-1); border-radius: var(--rly-radius-group); }
+.box .hd { block-size: 52px; box-sizing: border-box; padding: 7px 10px 0; display: grid; gap: 2px; }
+.box .hd b { font: 620 .8125rem/1.3 var(--rly-font-mono); }
+.box .hd > span { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; font-size: .75rem; color: var(--rly-color-text-2); }
+.fn { block-size: 34px; margin: 0 6px 4px; padding-inline: 8px; display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; gap: 8px; align-items: center; border-radius: var(--rly-radius-tag); background: var(--rly-color-surface-2); font-size: .75rem; }
+.fn code { font: 520 .8125rem/1.2 var(--rly-font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fn .ln { font: 430 .75rem/1 var(--rly-font-mono); color: var(--rly-color-text-2); }
+.stub { box-sizing: border-box; display: grid; gap: 1px; padding: 6px 9px; border: 1px dashed var(--rly-color-border-2); border-radius: var(--rly-radius-control); background: var(--rly-color-canvas); font-size: .6875rem; color: var(--rly-color-text-2); }
+.stub b { font: 520 .75rem/1.35 var(--rly-font-mono); color: var(--rly-color-text-1); }
+.fz { left: 230px; top: 72px; inline-size: 520px; box-sizing: border-box; display: grid; align-content: start; padding-block-end: 6px; background: var(--rly-color-surface-1); border: 2px solid var(--rly-color-text-1); border-radius: var(--rly-radius-group); }
+.fz .hd { block-size: 48px; box-sizing: border-box; padding: 8px 14px 0; display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; font-size: .8125rem; color: var(--rly-color-text-2); }
+.fz .hd b { font: 620 .9375rem/1.3 var(--rly-font-mono); color: var(--rly-color-text-1); }
+.fzr { block-size: 44px; box-sizing: border-box; margin-inline: 8px; padding-inline: 8px; display: grid; grid-template-columns: 112px minmax(0, 1fr) 72px 36px 104px; gap: 8px; align-items: center; border-block-start: 1px solid var(--rly-color-border-1); font-size: .8125rem; }
+.fzr code { font: 560 .8125rem/1.2 var(--rly-font-mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fzr .k { color: var(--rly-color-text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bar { block-size: 8px; border-radius: 4px; background: var(--rly-color-surface-3); }
+.bar span { display: block; block-size: 8px; box-sizing: border-box; border-radius: 4px; }
+.fzf { block-size: 120px; box-sizing: border-box; margin: 0 14px 8px; padding: 10px 12px; display: grid; gap: 4px; align-content: start; border: 1px solid var(--rly-color-border-2); border-radius: var(--rly-radius-field); background: var(--rly-color-surface-2); }
+.fzf .t { font-size: .9375rem; font-weight: 620; }
+.small { font-size: .75rem; color: var(--rly-color-text-2); }
+.dz { left: 120px; top: 64px; inline-size: 700px; box-sizing: border-box; display: grid; align-content: start; background: var(--rly-color-surface-1); border: 2px solid var(--rly-color-text-1); border-radius: var(--rly-radius-group); overflow: clip; }
+.dz .hd { padding: 8px 14px; display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; border-block-end: 1px solid var(--rly-color-border-1); }
+.dz .hd b { font: 620 .875rem/1.3 var(--rly-font-mono); }
+.dl { block-size: 24px; display: grid; grid-template-columns: 52px 18px minmax(0, 1fr); align-items: center; font: 430 .8125rem/24px var(--rly-font-mono); background: var(--rly-color-success-tint); }
+.dl .no { text-align: end; padding-inline-end: 10px; color: var(--rly-color-text-2); }
+.dl .c { white-space: pre; overflow: hidden; text-overflow: ellipsis; }
+.fcard { margin: 8px 12px; padding: 12px 14px; display: grid; gap: 6px; border: 1px solid var(--rly-color-border-2); border-radius: var(--rly-radius-group); background: var(--rly-color-surface-1); font-size: .875rem; }
+.fcard .row { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; }
+.fcard .t { font-size: 1rem; font-weight: 620; }
+.bl { left: 12px; top: 64px; inline-size: 300px; block-size: 564px; box-sizing: border-box; display: grid; grid-template-rows: auto auto minmax(0, 1fr); gap: 4px; padding: 10px; background: var(--rly-color-surface-1); border: 1px solid var(--rly-color-border-1); border-radius: var(--rly-radius-group); }
+.bl ul { margin: 0; padding: 0; list-style: none; display: grid; align-content: start; }
+.bl li { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; align-items: center; block-size: 32px; padding-inline: 6px; border-block-start: 1px solid var(--rly-color-border-1); font-size: .75rem; }
+.bl li a { font: 520 .75rem/1.2 var(--rly-font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.panel { box-sizing: border-box; display: grid; gap: 8px; padding: 10px 12px; background: var(--rly-color-surface-1); border: 1px solid var(--rly-color-border-2); border-radius: var(--rly-radius-group); font-size: .75rem; }
+.panel > b { font-size: .8125rem; font-weight: 620; }
+.panel .pr { display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: 6px; align-items: start; }
+.panel .pbar { display: block; margin-inline-start: 20px; block-size: 6px; border-radius: 3px; background: var(--rly-color-surface-3); }
+.panel .pbar span { display: block; block-size: 6px; border-radius: 3px; background: var(--rly-color-text-1); }
+.keyrow { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 8px; align-items: center; }
+.keyrow > span:first-child { display: flex; gap: 3px; flex-wrap: wrap; }
+.legend { left: 12px; bottom: 12px; inline-size: 324px; box-sizing: border-box; display: grid; gap: 3px; padding: 8px 12px; background: var(--rly-color-surface-1); border: 1px solid var(--rly-color-border-1); border-radius: var(--rly-radius-group); font-size: .75rem; }
+.legend > b { font-size: .8125rem; font-weight: 620; }
+.legend > span { display: flex; gap: 8px; align-items: center; }
+.sw { flex: none; inline-size: 14px; block-size: 10px; border-radius: 3px; }
+.ln22 { flex: none; inline-size: 22px; }
+.minimap { right: 12px; bottom: 12px; inline-size: 168px; box-sizing: border-box; padding: 6px; display: grid; gap: 4px; background: var(--rly-color-surface-1); border: 1px solid var(--rly-color-border-1); border-radius: var(--rly-radius-field); font-size: .6875rem; color: var(--rly-color-text-2); }
+.minimap svg { display: block; inline-size: 100%; block-size: auto; }
+.sheet { z-index: 3; box-sizing: border-box; display: grid; gap: 10px; padding: 14px 16px; background: var(--rly-color-surface-1); border: 1px solid var(--rly-color-border-2); border-radius: var(--rly-radius-group); }
+.sheet h2 { margin: 0; font: 620 1rem/1.3 var(--rly-font-mono); }
+.status { display: flex; gap: 8px; align-items: center; min-block-size: 32px; font-size: .8125rem; color: var(--rly-color-text-2); }
+.linear { box-sizing: border-box; display: grid; gap: 14px; padding: 16px 20px; border: 1px solid var(--rly-color-border-1); border-radius: var(--rly-radius-group); background: var(--rly-color-surface-1); max-inline-size: 1016px; }
+.linear > div:first-child { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: baseline; justify-content: space-between; }
+.linear h2 { margin: 0; font-size: 1.125rem; font-weight: 620; }
+.linear ol { margin: 0; padding: 0; list-style: none; }
+.chap { display: grid; gap: 8px; }
+.chap h3 { margin: 0; display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; font-size: 1rem; font-weight: 620; }
+.chap h3 span + span { font-size: .8125rem; font-weight: 430; color: var(--rly-color-text-2); }
+.lfiles { display: grid; border: 1px solid var(--rly-color-border-1); border-radius: var(--rly-radius-field); }
+.lfile { display: grid; gap: 4px; padding: 8px 12px; }
+.lfile + .lfile { border-block-start: 1px solid var(--rly-color-border-1); }
+.lfile .hd { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; }
+.lfile .hd code { font: 560 .875rem/1.3 var(--rly-font-mono); }
+.lfile ul { margin: 0; padding: 0 0 0 28px; list-style: none; display: grid; gap: 2px; }
+.hunk { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; min-block-size: 26px; padding: 2px 8px; font-size: .8125rem; border-radius: var(--rly-radius-tag); }
+.hunk[aria-current="true"] { background: var(--rly-color-surface-2); outline: 2px solid var(--rly-color-focus); outline-offset: 1px; }
+.hunk code { font: 520 .8125rem/1.3 var(--rly-font-mono); }
+
+/* Sections 4–6 */
+.dockgrid { display: grid; grid-template-columns: minmax(0, 600fr) minmax(320px, 385fr); gap: 16px; align-items: start; padding: 0 20px 24px; }
+.dockgrid .cvwrap { padding: 0; }
+@media (max-width: 899px) { .dockgrid { grid-template-columns: minmax(0, 1fr); } }
+.dk { display: grid; gap: 12px; min-inline-size: 0; }
+.dk h2 { margin: 0; font-size: 1.125rem; font-weight: 620; }
+.row { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; }
+.bx { display: grid; gap: 6px; padding: 12px 14px; border: 1px solid var(--rly-color-border-1); border-radius: var(--rly-radius-group); background: var(--rly-color-surface-1); }
+.bx h3 { margin: 0; font-size: .8125rem; font-weight: 620; color: var(--rly-color-text-2); }
+.bx blockquote { margin: 0; font-size: .9375rem; }
+.bx ol { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+.step { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 3px 8px; align-items: start; min-block-size: 48px; padding: 8px 10px; text-align: start; color: inherit; font: 430 .875rem/1.4 var(--rly-font-ui); background: transparent; border: 1px solid var(--rly-color-border-1); border-radius: var(--rly-radius-control); }
+.step[aria-pressed="true"] { background: var(--rly-color-surface-2); border: 1.5px solid var(--rly-color-text-1); }
+.step .stopn { grid-row: span 3; }
+.step .go { grid-row: span 3; color: var(--rly-color-text-2); }
+.step .st { font-weight: 560; }
+.chips { display: flex; flex-wrap: wrap; gap: 3px 4px; }
+.chips code { font: 430 .6875rem/1.4 var(--rly-font-mono); padding: 0 5px; border: 1px solid var(--rly-color-border-1); border-radius: var(--rly-radius-tag); color: var(--rly-color-text-2); }
+.unp { display: grid; gap: 3px; padding: 8px 10px; border: 1px dashed var(--rly-color-border-2); border-radius: var(--rly-radius-control); }
+.gate { display: grid; border: 1px solid var(--rly-color-border-2); border-radius: var(--rly-radius-group); overflow: clip; background: var(--rly-color-surface-1); }
+.gate .gh { display: grid; gap: 4px; padding: 12px 14px; border-block-end: 1px solid var(--rly-color-border-1); font-size: .875rem; }
+.gate dl { margin: 0; display: grid; }
+.gate dl > div { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 2px 10px; padding: 8px 14px; border-block-start: 1px solid var(--rly-color-border-1); }
+.gate dl > div:first-child { border-block-start: 0; }
+.gate dt { font-size: .75rem; color: var(--rly-color-text-2); }
+.gate dd { margin: 0; display: grid; gap: 2px; }
+.gate dd b { font-size: .8125rem; font-weight: 560; }
+.judg li { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 2px 8px; font-size: .875rem; }
+.judg li > .small { grid-column: 2; }
+.acts { display: grid; gap: 8px; }
+.why { display: grid; gap: 4px; }
+.why a { justify-self: start; display: inline-flex; gap: 6px; align-items: center; min-block-size: 44px; font-size: .875rem; font-weight: 520; text-decoration: underline; text-underline-offset: .2em; }
+.pin { box-sizing: border-box; display: flex; gap: 5px; align-items: start; padding: 2px 7px; font-size: .6875rem; line-height: 1.45; white-space: nowrap; color: var(--rly-color-text-1); background: var(--rly-color-surface-1); border: 1px solid var(--rly-color-border-2); border-radius: var(--rly-radius-tag); z-index: 2; }
+.pin > span:first-child { flex: none; display: flex; padding-block-start: 2px; }
+.cmt { display: grid; gap: 4px; padding: 8px 10px; border: 1px solid var(--rly-color-border-1); border-radius: var(--rly-radius-control); }
+.lnk { display: inline-flex; align-items: center; min-block-size: 32px; font-size: .8125rem; text-decoration: underline; text-underline-offset: .2em; }
+.ckc { display: grid; gap: 10px; min-inline-size: 0; }
+.ckc > ol { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+.cki { display: grid; gap: 6px; padding: 12px 14px; border: 1px solid var(--rly-color-border-1); border-radius: var(--rly-radius-group); background: var(--rly-color-surface-1); }
+.cki[data-editing] { border: 1.5px solid var(--rly-color-text-1); }
+.tchip { justify-self: start; display: inline-flex; gap: 6px; align-items: center; padding: 2px 8px; font-size: .75rem; border: 1px solid var(--rly-color-border-2); border-radius: var(--rly-radius-round); }
+.seg3 { display: grid; gap: 2px; padding: 2px; border: 1px solid var(--rly-color-border-1); border-radius: var(--rly-radius-control); background: var(--rly-color-surface-1); }
+.seg3 button { display: inline-flex; gap: 5px; align-items: center; justify-content: center; min-block-size: 32px; padding-inline: 6px; font-size: .8125rem; color: var(--rly-color-text-2); background: transparent; border: 0; border-radius: calc(var(--rly-radius-control) - 2px); }
+.seg3 button[aria-checked="true"] { font-weight: 620; color: var(--rly-color-text-1); background: var(--rly-color-surface-3); }
+.ta { box-sizing: border-box; inline-size: 100%; resize: vertical; padding: 8px 10px; font: 430 .875rem/1.5 var(--rly-font-ui); color: var(--rly-color-text-1); background: var(--rly-color-canvas); border: 1px solid var(--rly-color-border-2); border-radius: var(--rly-radius-field); }
+.post { min-inline-size: 0; display: grid; gap: 12px; padding: 16px 18px; border: 1px solid var(--rly-color-border-2); border-radius: var(--rly-radius-group); background: var(--rly-color-surface-1); max-inline-size: 1016px; box-sizing: border-box; }
+.post .inner { position: relative; min-inline-size: 0; display: grid; gap: 8px; padding: 14px 16px; border: 1px solid var(--rly-color-border-1); border-radius: var(--rly-radius-field); background: var(--rly-color-canvas); overflow-x: auto; }
+.post table { inline-size: 100%; border-collapse: collapse; font-size: .8125rem; }
+.post th, .post td { text-align: start; padding: 6px 8px; border-block-end: 1px solid var(--rly-color-border-1); vertical-align: top; }
+.post th { border-block-end-color: var(--rly-color-border-2); font-weight: 620; }
+html[data-fs], html[data-fs] body { overflow: hidden; }
+.fs { position: fixed; inset: 0; z-index: 50; display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; background: var(--rly-color-canvas); color: var(--rly-color-text-1); }
+.fs > header { block-size: 56px; box-sizing: border-box; padding-inline: 32px; display: flex; align-items: center; gap: 16px; border-block-end: 1px solid var(--rly-color-border-1); background: var(--rly-color-surface-1); }
+.fs .crumbs { display: flex; gap: .6rem; align-items: center; font-size: .875rem; color: var(--rly-color-text-2); }
+.fs .crumbs a { text-decoration: underline; text-underline-offset: .2em; }
+.fs .titlebar { padding: 16px 32px 14px; display: grid; gap: 6px; border-block-end: 1px solid var(--rly-color-border-1); }
+.fs .titlebar h1 { margin: 0; font-size: 1.75rem; font-weight: 620; letter-spacing: -0.03em; line-height: 1.2; }
+.headchip { display: inline-flex; gap: 6px; align-items: center; padding: 2px 8px; font-size: .8125rem; border: 1px solid var(--rly-color-border-2); border-radius: var(--rly-radius-tag); }
+.panes { display: grid; grid-template-columns: 440px minmax(0, 1fr); min-block-size: 0; }
+.pane-list { position: relative; overflow: auto; min-block-size: 0; padding: 20px 20px 24px 32px; display: grid; gap: 18px; align-content: start; border-inline-end: 1px solid var(--rly-color-border-1); }
+.pane-list h2 { margin: 0; font-size: .875rem; font-weight: 620; color: var(--rly-color-text-2); }
+.pane-list h2.big { font-size: 1rem; color: var(--rly-color-text-1); }
+.pane-list ol { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; }
+.fsrow { display: grid; border-radius: var(--rly-radius-field); background: var(--rly-color-surface-1); border: 1px solid var(--rly-color-border-1); }
+.fsrow[data-on] { background: var(--rly-color-surface-2); border: 1.5px solid var(--rly-color-text-1); }
+.fsrow > div { display: grid; grid-template-columns: minmax(0, 1fr) 44px; }
+.fsrow a { display: grid; gap: 4px; min-block-size: 48px; box-sizing: border-box; padding: 8px 10px; }
+.fsrow button { min-block-size: 44px; display: grid; place-items: center; background: transparent; border: 0; color: var(--rly-color-text-2); }
+.fsrow .exp { display: grid; gap: 4px; padding: 8px 12px 10px; font-size: .8125rem; border-block-start: 1px solid var(--rly-color-border-1); }
+.pane-code { position: relative; overflow: auto; min-block-size: 0; padding: 20px 32px 24px; display: grid; gap: 16px; align-content: start; background: var(--rly-color-surface-2); }
+.blk { display: grid; gap: 10px; padding: 14px 16px; border: 1px solid var(--rly-color-border-1); border-radius: var(--rly-radius-group); background: var(--rly-color-surface-1); }
+.blk[data-on] { border: 1.5px solid var(--rly-color-text-1); }
+.blk .links { margin-inline-start: auto; display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; }
+.codefig { margin: 0; border: 1px solid var(--rly-color-border-1); border-radius: var(--rly-radius-field); overflow: clip; background: var(--rly-color-canvas); }
+.codefig figcaption { padding: 6px 10px; font: 430 .75rem/1.4 var(--rly-font-mono); color: var(--rly-color-text-2); border-block-end: 1px solid var(--rly-color-border-1); }
+.codefig .scroll { position: relative; overflow-x: auto; overscroll-behavior-x: contain; }
+.codefig .lines { min-inline-size: max-content; display: grid; padding-block: 4px; }
+.cl { display: grid; grid-template-columns: 40px 16px max-content auto; align-items: center; min-block-size: 24px; font: 430 .8125rem/24px var(--rly-font-mono); }
+.cl[data-mark] { outline: 1.5px solid var(--rly-color-text-1); outline-offset: -1.5px; }
+.cl .no { text-align: end; padding-inline-end: 8px; color: var(--rly-color-text-2); }
+.cl .c { white-space: pre; padding-inline-end: 12px; }
+.cl .mw { display: flex; gap: 4px; align-items: center; padding-inline: 4px 10px; font: 560 .6875rem/1 var(--rly-font-ui); white-space: nowrap; }
+.nocode { margin: 0; padding: 8px 10px; display: flex; gap: 6px; align-items: start; font-size: .8125rem; color: var(--rly-color-text-2); border: 1px dashed var(--rly-color-border-2); border-radius: var(--rly-radius-field); }
+.abar { display: flex; flex-wrap: wrap; gap: 10px 20px; align-items: center; padding: 12px 32px; border-block-start: 1px solid var(--rly-color-border-2); background: var(--rly-color-surface-1); }
+.abar .btns { margin-inline-start: auto; display: flex; flex-wrap: wrap; gap: 8px; }
+.pfs { position: fixed; inset: 0; z-index: 50; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; background: var(--rly-color-canvas); color: var(--rly-color-text-1); }
+.pfs > header { min-block-size: 60px; box-sizing: border-box; padding: 6px 12px 6px 4px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 6px; align-items: center; border-block-end: 1px solid var(--rly-color-border-1); background: var(--rly-color-surface-1); }
+.pfs > header a { display: inline-flex; gap: 4px; align-items: center; min-block-size: 44px; min-inline-size: 44px; padding-inline: 8px; font-size: .875rem; }
+.pfs > header b { font-size: 1rem; font-weight: 620; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pfs .body { position: relative; overflow: auto; min-block-size: 0; padding: 14px 16px 20px; display: grid; gap: 16px; align-content: start; }
+.pfs .pbar2 { display: grid; gap: 8px; padding: 10px 16px 14px; border-block-start: 1px solid var(--rly-color-border-2); background: var(--rly-color-surface-1); }
+.pfs .two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.wide { inline-size: 100%; }
+.set { padding: 28px 40px 40px; display: grid; gap: 20px; align-content: start; }
+.set h1 { margin: 0; font-size: 2rem; font-weight: 620; letter-spacing: -0.03em; line-height: 1.15; }
+.set .stabs { display: flex; gap: 4px; overflow-x: auto; overflow-y: hidden; border-block-end: 1px solid var(--rly-color-border-1); }
+.set .stabs a { flex: none; display: inline-flex; align-items: center; min-block-size: 44px; padding-inline: 12px; margin-block-end: -1px; font-size: .9375rem; color: var(--rly-color-text-2); border-block-end: 2px solid transparent; white-space: nowrap; }
+.set .stabs a[aria-current="page"] { font-weight: 620; color: var(--rly-color-text-1); border-block-end-color: var(--rly-color-text-1); }
+.set .cols2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: 20px; align-items: start; }
+.tlist { margin: 0; padding: 0; list-style: none; display: grid; border: 1px solid var(--rly-color-border-1); border-radius: var(--rly-radius-group); background: var(--rly-color-surface-1); overflow: clip; }
+.tlist li { display: grid; gap: 3px; padding: 12px 14px; }
+.tlist li + li { border-block-start: 1px solid var(--rly-color-border-1); }
+.tlist li[data-on] { background: var(--rly-color-surface-2); }
+.tdet { display: grid; gap: 14px; padding: 16px 18px; border: 1px solid var(--rly-color-border-1); border-radius: var(--rly-radius-group); background: var(--rly-color-surface-1); min-inline-size: 0; }
+.tdet dl { margin: 0; display: grid; grid-template-columns: 9rem minmax(0, 1fr); gap: 10px 14px; font-size: .875rem; }
+.tdet dd { margin: 0; }
+.tdet dd ol, .tdet dd ul { margin: 0; padding-inline-start: 1.2em; display: grid; gap: 2px; }
+
+/* Phone */
+.crumb { display: none; box-sizing: border-box; block-size: 32px; padding: 8px 16px 0; align-items: center; min-inline-size: 0; white-space: nowrap; font: 430 .75rem/1.3 var(--rly-font-ui); color: var(--rly-color-text-2); }
+.crumb .parents { flex: 0 1 auto; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; direction: rtl; }
+.crumb .parents > span { direction: ltr; unicode-bidi: isolate; }
+.crumb a { text-decoration: underline; text-underline-offset: .2em; }
+.crumb .cur { flex: none; max-inline-size: 100%; overflow: hidden; text-overflow: ellipsis; font-weight: 520; color: var(--rly-color-text-1); }
+.pmain { padding: 8px 16px 112px; display: grid; gap: 18px; min-inline-size: 0; }
+.pmain > * { min-inline-size: 0; }
+.psum { display: grid; gap: 6px; }
+.psum h1 { margin: 0; font-size: 1.375rem; font-weight: 620; letter-spacing: -0.02em; line-height: 1.2; }
+.psum .repo { font: 520 .75rem/1.3 var(--rly-font-mono); color: var(--rly-color-text-2); }
+.psum span { font-size: .8125rem; }
+.pcard { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--rly-color-border-1); border-radius: var(--rly-radius-group); background: var(--rly-color-surface-1); }
+.pcard h2 { margin: 0; font-size: 1rem; font-weight: 620; }
+.pcard .it { display: grid; gap: 4px; font-size: .875rem; }
+.switch { display: flex; align-items: center; gap: 12px; min-block-size: 56px; padding: 6px 12px; border: 1px solid var(--rly-color-border-1); border-radius: var(--rly-radius-field); background: var(--rly-color-surface-1); color: inherit; text-align: start; inline-size: 100%; box-sizing: border-box; }
+.switch .lbl { flex: 1; display: grid; font-size: .9375rem; }
+.switch small { font-size: .75rem; color: var(--rly-color-text-2); }
+.track { flex: none; position: relative; inline-size: 44px; block-size: 26px; box-sizing: border-box; border-radius: 13px; border: 1.5px solid var(--rly-color-border-2); background: var(--rly-color-surface-3); }
+.track span { position: absolute; top: 3px; inline-size: 17px; block-size: 17px; border-radius: 50%; }
+.ctxsum { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 10px; align-items: center; min-block-size: 48px; padding: 10px 12px; border: 1px solid var(--rly-color-border-1); border-radius: var(--rly-radius-group); background: var(--rly-color-surface-1); color: inherit; text-align: start; font: 430 .875rem/1.4 var(--rly-font-ui); inline-size: 100%; box-sizing: border-box; }
+.ctxsum > span:last-child { grid-column: 1 / -1; display: grid; gap: 2px; font-size: .8125rem; color: var(--rly-color-text-2); }
+.pmap { margin: 0; display: grid; gap: 6px; }
+.pmap .fr { border: 1px solid var(--rly-color-border-1); border-radius: var(--rly-radius-field); background: var(--rly-color-surface-1); overflow: clip; }
+.pmap svg { display: block; inline-size: 100%; block-size: auto; }
+.pmap figcaption { font-size: .75rem; color: var(--rly-color-text-2); }
+.pchap { display: grid; gap: 6px; }
+.pchap h2 { margin: 0; font-size: 1rem; font-weight: 620; line-height: 1.3; }
+.pchap > span { font-size: .8125rem; color: var(--rly-color-text-2); }
+.prows { margin: 0; padding: 0; list-style: none; border: 1px solid var(--rly-color-border-1); border-radius: var(--rly-radius-group); background: var(--rly-color-surface-1); overflow: clip; }
+.prows li + li { border-block-start: 1px solid var(--rly-color-border-1); }
+.prow { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; gap: 2px 10px; align-items: center; min-block-size: 56px; box-sizing: border-box; padding: 8px 10px; }
+.prow[aria-current="true"] { background: var(--rly-color-surface-2); }
+.prow .n { display: grid; place-items: center; inline-size: 22px; block-size: 22px; border-radius: 50%; font: 650 .6875rem/1 var(--rly-font-mono); border: 1.5px solid var(--rly-color-text-1); }
+.prow .b { display: grid; gap: 1px; min-inline-size: 0; }
+.prow .b code { font: 560 .8125rem/1.3 var(--rly-font-mono); overflow-wrap: anywhere; }
+.prow .b > span { font-size: .75rem; color: var(--rly-color-text-2); }
+.prow .bd { display: flex; gap: 3px; }
+.pback { justify-self: start; display: inline-flex; gap: .4rem; align-items: center; min-block-size: 44px; margin-block: -8px -6px; font-size: .875rem; color: var(--rly-color-text-2); }
+.pfile { display: grid; gap: 3px; }
+.pfile h1 { margin: 0; font: 620 1.25rem/1.25 var(--rly-font-mono); }
+.pfile span, .pfile code { font-size: .8125rem; color: var(--rly-color-text-2); }
+.pdiff { display: grid; border: 1px solid var(--rly-color-border-1); border-radius: var(--rly-radius-group); background: var(--rly-color-surface-1); overflow: clip; }
+.pdiff .hd { display: grid; gap: 2px; padding: 8px 10px; border-block-end: 1px solid var(--rly-color-border-1); }
+.pdiff .hd b { font: 620 .8125rem/1.3 var(--rly-font-mono); }
+.pdl { display: grid; grid-template-columns: 28px 12px minmax(0, 1fr); padding-block: 2px; font: 430 .75rem/1.5 var(--rly-font-mono); background: var(--rly-color-success-tint); }
+.pdl .no { text-align: end; padding-inline-end: 6px; color: var(--rly-color-text-2); }
+.pdl .c { white-space: pre-wrap; overflow-wrap: anywhere; padding-inline-end: 8px; }
+.pdiff .fcard { margin: 8px; padding: 12px; }
+.pact { display: grid; gap: 8px; }
+@media (max-width: 599px) {
+  body { padding-block-end: env(safe-area-inset-bottom); }
+  .set { padding: 8px 16px 112px; }
+  .set .cols2 { grid-template-columns: minmax(0, 1fr); }
+  .tdet dl { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .tdet dd { margin-block-end: 8px; }
+  .gate dl > div { grid-template-columns: minmax(0, 1fr); }
+  .seg3 button { min-block-size: 44px; }
+  .step { min-block-size: 56px; }
+  .cite { min-block-size: 44px; box-sizing: border-box; padding: 0 10px; }
+  .cites { gap: 6px; }
+  .crumb { display: flex; }
+}
+</style>
+</head>
+<body data-rly-root data-theme="light">
+<div id="app"></div>
+<script>
+(() => {
+  const params = new URLSearchParams(location.search);
+  const theme = params.get("theme") === "dark" ? "dark" : "light";
+  const app = document.getElementById("app"), root = document.documentElement;
+  document.body.dataset.theme = theme;
+  root.dataset.theme = theme;
+  root.style.colorScheme = theme;
+
+  const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const svgI = (inner) => `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" focusable="false" aria-hidden="true">${inner}</svg>`;
+  const TONE_ICON = {
+    caution: svgI('<circle cx="12" cy="12" r="10"></circle><path d="M12 6v6l4 2"></path>'),
+    critical: svgI('<circle cx="12" cy="12" r="10"></circle><line x1="12" x2="12" y1="8" y2="12"></line><line x1="12" x2="12.01" y1="16" y2="16"></line>'),
+    progress: svgI('<path d="M21 12a9 9 0 1 1-6.22-8.56"></path>'),
+    positive: svgI('<circle cx="12" cy="12" r="10"></circle><path d="m9 12 2 2 4-4"></path>'),
+    neutral: svgI('<path d="M5 12h14"></path>'),
+  };
+  const sl = (label, tone, compact = true) => `<span class="rly_StateLabel-module__root rly_StateLabel-module__${esc(tone)} rly_StateLabel-module__${compact ? "compact" : "defaultSize"}">${TONE_ICON[tone] || ""}<span>${esc(label)}</span></span>`;
+  const notice = (tone, text, region) => `<div class="rly_Notice-module__root rly_Notice-module__${esc(tone)}"${region ? ` data-region="${region}"` : ""}><div class="rly_Notice-module__lead"><span aria-hidden="true" class="rly_Notice-module__icon">${TONE_ICON[tone] || ""}</span><div class="rly_Notice-module__message"><span>${esc(text)}</span></div></div></div>`;
+  const btn = (label, variant = "secondary", size = "dense", extra = "") => `<button class="rly_Button-module__root rly_Button-module__${variant} rly_Button-module__${size}" type="button"${extra}><span class="rly_Button-module__content"><span class="rly_Button-module__label">${esc(label)}</span></span></button>`;
+  const skel = (style) => `<div aria-hidden="true" class="rly_Skeleton-module__root rly_Skeleton-module__block" role="presentation" style="${style}"></div>`;
+  const g = (name, size = 12) => `<relay-glyph name="${esc(name)}" size="${size}"></relay-glyph>`;
+  const pb = (p) => `<b class="pb">${esc(p)}</b>`;
+  const kbd = (k) => `<kbd class="kbd">${esc(k)}</kbd>`;
+  const mk = (m) => `<span class="mk" style="color: ${m.ink}">${g(m.g)}<span>${esc(m.w)}</span></span>`;
+
+  const loadFonts = async () => {
+    const specs = ['430 16px "Geist"', '620 16px "Geist"', '430 16px "Geist Variable"', '620 16px "Geist Variable"', '430 16px "Geist Mono"', '430 16px "Geist Mono Variable"'];
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const res = await Promise.allSettled(specs.map((f) => document.fonts.load(f)));
+      res.forEach((r, i) => { if (r.status === "rejected") console.warn("font load failed", specs[i], r.reason); });
+      const faces = [...document.fonts].filter((f) => f.family.replace(/"/g, "") === "Geist");
+      const faceRes = await Promise.allSettled(faces.map((f) => f.load()));
+      faceRes.forEach((r) => { if (r.status === "rejected") console.warn("Geist face failed", r.reason); });
+      try { await document.fonts.ready; } catch (e) { console.warn("fonts.ready failed", e); }
+      if (document.fonts.check("16px Geist")) return true;
+      await new Promise((r) => setTimeout(r, 150));
+    }
+    return document.fonts.check("16px Geist");
+  };
+  const settle = async () => {
+    try { await Promise.all([customElements.whenDefined("relay-glyph"), customElements.whenDefined("relay-chef")]); } catch (e) { console.warn("custom elements not defined", e); }
+    const ok = await loadFonts();
+    if (!ok) { app.innerHTML = `<main class="fail" role="alert"><h1>Fonts didn’t load</h1><p>Geist isn’t available from screens/fonts, so the screen can’t be captured.</p></main>`; return; }
+    requestAnimationFrame(() => requestAnimationFrame(() => { root.dataset.designReady = "true"; }));
+  };
+
+  // Layout model: everything below comes from data.reviewDirections.canvas; geometry follows page 16.
+  const model = (d) => {
+    const F = d.findings, X = d.screen, CP = X.copy;
+    const TXT2 = "var(--rly-color-text-2)", RED = "var(--rly-color-blocked-ink)";
+    const RISK = { high: ["2px solid var(--rly-color-text-1)", "High risk"], medium: ["1px solid var(--rly-color-border-2)", "Medium risk"], low: ["1px dashed var(--rly-color-border-2)", "Low risk"] };
+    const byPath = Object.fromEntries(d.files.map((x) => [x.path, x]));
+    const size = (x) => `+${x.add} −${x.rem}`;
+    const marksOf = (x) => [x.failing ? { g: "alert", w: "Failing", ink: RED } : null, x.changed ? { g: "clock", w: "Changed", ink: TXT2 } : null].filter(Boolean);
+    const node = (x, pos, opt = {}) => {
+      const marks = opt.marks || marksOf(x), badges = (x.findings || []).map((id) => F[id].p);
+      return { ...pos, h: 46 + 16 * marks.length, name: x.name, size: size(x), marks, badges, border: RISK[x.risk][0], focus: !!opt.focus,
+        aria: [x.name, x.module, x.partition ? "partition " + x.partition : "", size(x), RISK[x.risk][1].toLowerCase(), ...badges, x.failing ? "failing test" : "", x.changed ? "changed since you looked" : ""].filter(Boolean).join(", ") };
+    };
+    const ovNodes = (focus) => d.files.map((x) => node(x, { x: x.x, y: x.y, w: x.w }, { focus: x.path === focus }));
+    const center = (r) => [r.x + r.w / 2, r.y + r.h / 2];
+    const clip = (r, [cx, cy], [tx, ty]) => { const dx = tx - cx, dy = ty - cy; const t = Math.min(dx ? Math.abs((r.w / 2) / dx) : Infinity, dy ? Math.abs((r.h / 2) / dy) : Infinity); return [cx + dx * t, cy + dy * t]; };
+    const link = (a, b) => { const ca = center(a), cb = center(b); return [...clip(a, ca, cb), ...clip(b, cb, ca)]; };
+    const ovMap = (ns) => Object.fromEntries(ns.map((n, i) => [d.files[i].path, n]));
+    const ovEdges = (focus) => { const ns = ovMap(ovNodes()); return d.edges.map((e) => { const p = link(ns[e.from], ns[e.to]); return { p, dash: e.rel === "moved from", strong: !!focus && (e.from === focus || e.to === focus), e, mid: [(p[0] + p[2]) / 2, (p[1] + p[3]) / 2] }; }); };
+    const regions = d.modules.map((m) => ({ ...m, count: m.files + " files" }));
+    const bands = d.partitions.map((b) => ({ ...b, tabX: 12, tabY: b.h - 11 }));
+    const full = { x: 0, y: 0, w: 1016, h: 640 };
+    const S = X.states;
+    const base = { regions: [], bands: [], lines: [], labels: [], nodes: [], hl: [], ctx: [], stops: [], cols: [], notes: [], boxes: [], stubs: [], H: 640, legend: null, mini: { rects: d.modules, files: true, bands: true, vp: full, W: 1016, H: 640 }, panel: null, keys: false, sheet: null, doc: null, notice: null, fileZoom: null, diffZoom: null, building: false, linear: null, ctxToggle: null, files: false };
+
+    // Cluster A
+    const CA = d.clusterA;
+    const boxes = CA.boxes.map((b) => {
+      const x = byPath[b.file], isNew = x.rem === 0;
+      const fns = b.fns.map((fn) => ({ n: fn.n, kind: isNew ? "" : fn.kind, lines: fn.kind.startsWith("Moved to") ? "−" + fn.lines : isNew ? "+" + fn.lines : "±" + fn.lines, p: fn.f ? F[fn.f].p : "", life: fn.f ? F[fn.f].life : "" }));
+      return { ...b, h: 52 + b.fns.length * 38 + 6, path: b.file, size: (isNew ? "New file, " : "") + size(x), risk: RISK[x.risk][1], border: RISK[x.risk][0], marks: marksOf(x).filter((m) => m.g === "clock"), fns, aria: `${b.file}, ${RISK[x.risk][1].toLowerCase()}, ${b.fns.length} functions changed` };
+    });
+    const bx = Object.fromEntries(boxes.map((b) => [b.file, b]));
+    const rowY = (b, i) => b.y + 52 + i * 38 + 17;
+    const anchor = (b, spec, other) => spec === "top" ? [b.x + b.w / 2, b.y] : spec === "bottom" ? [b.x + b.w / 2, b.y + b.h] : [other.x > b.x ? b.x + b.w : b.x, rowY(b, spec)];
+    const clusterLines = CA.edges.map((e) => { const a = bx[e.from[0]], b = bx[e.to[0]]; const p1 = e.from[1] === 0 && a.x === b.x ? [a.x + a.w / 2, a.y] : anchor(a, e.from[1], b); const p2 = anchor(b, e.to[1], a); return { p: [...p1, ...p2], dash: e.rel === "moved from", rel: e.rel, mid: [(p1[0] + p2[0]) / 2, (p1[1] + p2[1]) / 2] }; });
+    const stubLines = CA.stubs.map((s) => { const b = bx[s.toFile], sp = [s.x, s.y + 24], bp = [b.x + b.w, rowY(b, s.toFn)]; return { p: s.dir === "in" ? [...sp, ...bp] : [...bp, ...sp], dash: true, ink: "faint" }; });
+    const stubOf = (s, align) => ({ ...s, align, failing: (s.line || "").includes("failing") || !!s.failing });
+
+    // File zoom
+    const FZ = d.fileZoom;
+    const fzRowY = (i) => 72 + 48 + 22 + i * 44 + (i >= 1 ? 128 : 0);
+    const callerY = [112, 176, fzRowY(2) - 24], calleeY = [112, fzRowY(1) - 46, fzRowY(1) + 18];
+    const fileZoom = { rows: FZ.fns.map((fn) => ({ ...fn, bar: Math.round((fn.lines / 46) * 100) + "%", moved: fn.kind.startsWith("Moved") })) };
+    const fzStubs = [...FZ.callers.map((c, i) => stubOf({ label: c.file, line: c.line, x: 24, y: callerY[i], w: 180, failing: !!c.failing }, "end")), ...FZ.callees.map((c, i) => stubOf({ label: c.file, line: c.line, x: 784, y: calleeY[i], w: 210 }, "start"))];
+    const fzLines = [...FZ.callers.map((c, i) => ({ p: [204, callerY[i] + 24, 230, fzRowY(c.fn)], dash: true, ink: "faint" })), ...FZ.callees.map((c, i) => ({ p: [750, fzRowY(c.fn), 784, calleeY[i] + 24], dash: true, ink: "faint" }))];
+
+    // Diff zoom
+    const DF = d.diff;
+    const dfStubs = DF.neighbours.map((n) => stubOf({ ...n }, n.side === "left" ? "end" : "start"));
+    const dfLines = [[94, 204, 120, 112], [94, 324, 120, 300], [820, 112, 930, 204], [420, 560, 420, 604]].map((p) => ({ p, dash: true, ink: "faint" }));
+
+    // No dependency data
+    const ndRegions = X.ndOrder.map((id, i) => ({ id, label: id, count: d.modules.find((m) => m.id === id).files + " files", x: 16 + i * 250, y: 64, w: 238, h: 336 }));
+    const ndNodes = X.ndOrder.flatMap((id, i) => d.files.filter((x) => x.module === id).map((x, j) => node({ ...x, partition: null }, { x: 28 + i * 250, y: 104 + j * 72, w: Math.min(x.w + 40, 214) })));
+
+    // Reading path
+    const RP = d.readingPath, order = RP.order;
+    const chFiles = (id) => id === "T" ? order.filter((p) => byPath[p].module === "tests") : order.filter((p) => byPath[p].partition === id);
+    const trailNodes = d.files.map((x) => node(x, { x: x.x, y: x.y, w: x.w }, { focus: x.path === RP.current, marks: RP.read.includes(x.path) ? [{ g: "check", w: "Read", ink: TXT2 }] : x.path === RP.current ? [{ g: "arrow", w: "Reading", ink: "var(--rly-color-text-1)" }] : [] }));
+    const tn = ovMap(trailNodes), curIdx = order.indexOf(RP.current);
+    const trail = order.slice(1).map((p, i) => { const walked = i < curIdx; return { p: link(tn[order[i]], tn[p]), ink: walked ? "strong" : "normal", strong: true, dash: !walked }; });
+    const stops = order.map((p, i) => { const read = RP.read.includes(p); return { n: i + 1, x: tn[p].x - 10, y: tn[p].y - 10, read }; });
+    const receipt = RP.chapters.map((ch) => { const fs = chFiles(ch.id), r = fs.filter((p) => RP.read.includes(p)).length, cur = fs.includes(RP.current); return { g: r === fs.length ? "check" : r ? "arrow" : "minus", text: (ch.id === "T" ? "Tests" : ch.id + ", " + ch.title) + ": " + r + " of " + fs.length + " read" + (cur ? ", 1 reading" : ""), bar: Math.round((r / fs.length) * 100) + "%" }; });
+
+    // Since you looked
+    const SN = d.since;
+    const sinceNodes = d.files.map((x) => node(x, { x: x.x, y: x.y, w: x.w }, { marks: x.path === SN.fixed.file ? [{ g: "check", w: F[SN.fixed.id].life, ink: "var(--rly-color-success-ink)" }] : x.failing ? [{ g: "alert", w: "Failing", ink: RED }] : [] }));
+    const sn = ovMap(sinceNodes);
+    const hl = [...SN.changed.map((p) => { const n = sn[p]; return { x: n.x - 6, y: n.y - 6, w: n.w + 12, h: n.h + 12, border: "1.5px solid var(--rly-color-deploying-ink)", bg: "color-mix(in srgb, var(--rly-color-deploying-ink) 10%, transparent)", g: "clock", label: CP.legend.changed.replace(/^C/, "C"), lt: -15 }; }),
+      (() => { const n = sn[SN.main.file]; return { x: n.x - 6, y: n.y - 6, w: n.w + 12, h: n.h + 12, border: "1.5px dashed var(--rly-color-text-2)", bg: "var(--rly-color-surface-3)", g: "minus", label: SN.main.label, lt: n.h + 4 }; })()];
+
+    // Evidence
+    const EV = d.evidence;
+    const CHK = { failed: ["Failed", "critical"], passed: ["Passed", "positive"], covered: ["Covered", "neutral"], untested: ["No test", "neutral"] };
+    const evBoxes = EV.boxes.map((b) => {
+      const x = byPath[b.file];
+      const fns = b.fns.map((fn) => ({ n: fn.n, kind: fn.kind || "", lines: fn.lines || "", p: fn.f ? F[fn.f].p : "", life: "", check: fn.check ? CHK[fn.check] : null }));
+      return { ...b, h: 52 + b.fns.length * 38 + 6, path: b.file, size: size(x), risk: b.test ? CP.testFile : RISK[x.risk][1], border: RISK[x.risk][0], marks: x.failing ? [{ g: "alert", w: CP.failedHere, ink: RED }] : [], fns, aria: b.file + ", " + b.fns.length + (b.test ? " tests" : " functions") };
+    });
+    const ebx = Object.fromEntries(evBoxes.map((b) => [b.file, b]));
+    const evLines = EV.edges.map((e) => { const a = ebx[e.from[0]], b = ebx[e.to[0]], p1 = anchor(a, e.from[1], b), p2 = anchor(b, e.to[1], a); return { p: [...p1, ...p2], rel: e.rel, ink: e.strong ? "strong" : "normal", strong: !!e.strong, mid: [(p1[0] + p2[0]) / 2, (p1[1] + p2[1]) / 2] }; });
+
+    // Linear list
+    const LBL = (label, tone) => ({ label, tone });
+    const hunksOf = (p) => { const b = CA.boxes.find((bb) => bb.file === p); return b ? b.fns.map((fn) => ({ fn: fn.n, kind: fn.kind, lines: fn.kind.startsWith("Moved to") ? "−" + fn.lines : byPath[p].rem === 0 ? "+" + fn.lines : "±" + fn.lines, f: fn.f })) : (d.hunks[p] || []); };
+    const lin = RP.chapters.map((ch) => {
+      const fs = chFiles(ch.id);
+      return { title: ch.n + ". " + (ch.id === "T" ? "" : "Partition " + ch.id + ", ") + ch.title, meta: fs.length + " files. " + ch.why + ".",
+        files: fs.map((p) => {
+          const x = byPath[p];
+          const labels = [RP.read.includes(p) ? LBL("Read", "positive") : null, SN.changed.includes(p) ? LBL(CP.legend.changed, "caution") : null, x.failing ? LBL("Failing", "critical") : null, p === SN.main.file ? LBL(SN.main.label, "neutral") : null].filter(Boolean);
+          const hunks = hunksOf(p).map((hk, j) => {
+            const finds = [hk.f ? F[hk.f] : null, p === SN.fixed.file && hk.fn === F[SN.fixed.id].fn ? F[SN.fixed.id] : null].filter(Boolean).map((fd) => ({ p: fd.p, life: fd.life, title: fd.title, tone: fd.life.startsWith("Fixed") ? "positive" : "caution" }));
+            return { fn: hk.fn, meta: hk.kind + ", " + hk.lines, finds, labels: hk.check ? [LBL(CHK[hk.check][0], CHK[hk.check][1])] : [], here: p === d.focus.file && j === 0 };
+          });
+          return { n: order.indexOf(p) + 1, path: p, meta: RISK[x.risk][1] + ", " + size(x) + ".", labels, hunks };
+        }) };
+    });
+
+    // Large PR
+    const LG = d.large;
+    const lgBands = LG.partitions.map((p, i) => ({ id: p.id, title: p.title, files: p.files, x: 12, y: 132 + i * 108, w: 992, h: 96, tabX: 20, tabY: 6, stop: i + 1, extra: ", " + p.risk, z: 2 }));
+    const cols = LG.modules.map((m, i) => ({ x: 24 + i * 196, y: 64, w: 180, h: 436, border: RISK[m.risk][0], name: m.id, meta: m.files + " files, +" + m.add + " −" + m.rem, risk: RISK[m.risk][1], aria: m.id + ", " + m.files + " files, " + RISK[m.risk][1].toLowerCase(),
+      chips: [...LG.partitions.map((p, j) => m.counts[p.id] ? { top: 132 + j * 108 + 44 - 64, text: m.counts[p.id] + " in " + p.id, badges: m.finds[p.id] || [] } : null).filter(Boolean), ...(m.counts.none ? [{ top: 456 - 64, text: m.counts.none + " not in a partition", badges: [] }] : [])] }));
+
+    // Context layer
+    const CX = d.context;
+    const secs = (ss) => ss.map((s) => ({ title: s.title, items: s.items.map((it) => ({ text: it.text, cites: it.cites || [], labels: it.labels || [], n: it.n || "" })) }));
+    const short = (p) => p.split("/").pop();
+    const cxNode = (n, mode) => {
+      const b = { x: n.x, y: n.y, w: n.w };
+      if (mode === "outline") return { ...b, outline: true };
+      if (mode === "path") return { ...b, name: n.path, aria: n.path + ", unchanged" };
+      if (mode === "radius") { const nr = n.test && !n.runs; return { ...b, name: short(n.path), rank: n.rank, line: n.test ? (nr ? CP.notRunShort : CP.runs) : n.hop + ", " + n.via, g: n.test ? (nr ? "alert" : "check") : "", ink: nr ? "var(--rly-color-held-ink)" : TXT2, aria: "Rank " + n.rank + ", " + n.path + ", " + n.hop + ", " + (n.test ? (nr ? "not run in this PR’s checks: " + n.why : "runs in unit-tests") : n.via) }; }
+      return { ...b, name: short(n.path), line: n.purpose, aria: n.path + ", unchanged: " + n.purpose };
+    };
+    const ovE = ovEdges(null);
+    const CXH = CX.canvasH, cxMini = { rects: CX.regions, files: true, bands: true, vp: { x: 0, y: 0, w: 1016, h: CXH }, W: 1016, H: CXH };
+    const ctxFrame = (mode, legendKey) => ({ H: CXH, ctxToggle: mode === "outline" ? "known" : "new", regions: CX.regions, bands, lines: ovE, nodes: ovNodes(), ctx: CX.neighbours.map((n) => cxNode(n, mode)), legend: { edges: true, ctx: CP.legend[legendKey] }, mini: cxMini });
+    const briefDoc = { title: CX.brief.title, badge: CP.ctxBadge, tone: "neutral", meta: CX.brief.meta, cols: 3, sections: secs(CX.brief.sections), foot: CX.brief.foot, footG: "check" };
+    const cardSecs = secs(CX.card.sections);
+    const NB = CX.neighbours;
+    const radiusSecs = [
+      { title: CP.radiusCallers, items: NB.filter((n) => !n.test).map((n) => ({ n: n.rank, text: n.path + ", " + n.hop + ": " + n.via, cites: [], labels: [] })) },
+      { title: CP.radiusTests, items: NB.filter((n) => n.test).map((n) => ({ n: n.rank, text: n.path + ", " + n.hop + ": " + n.via + (n.runs ? "" : ". " + n.why[0].toUpperCase() + n.why.slice(1) + "."), cites: [], labels: [n.runs ? { label: CP.runs, tone: "positive" } : { label: CP.notRun, tone: "caution" }] })) },
+      { title: CP.radiusP1, items: [{ text: CX.radius.p1.text, cites: CX.radius.p1.cites, labels: [{ label: CP.p1Open, tone: "caution" }] }, { text: CX.radius.p1.guard, cites: ["tests/socket.test.ts", "tests/e2e/two-tabs.spec.ts"], labels: [] }] },
+    ];
+    const rects = Object.fromEntries([...ovNodes().map((n, i) => [d.files[i].path, n]), ...NB.map((n) => [n.path, { x: n.x, y: n.y, w: n.w, h: 44 }])]);
+    const radLines = NB.map((n) => ({ p: link(rects[n.path], rects[n.to]), dash: true, ink: "faint" }));
+    const CL = CX.card.layout;
+    const cardNodes = Object.entries(CL.files).map(([p, [x, y]]) => node(byPath[p], { x, y, w: 196 }));
+    const cardLines = CL.stubs.filter((s) => s.in).map((s) => ({ p: [s.x + s.w / 2, s.y, s.x + s.w / 2, CL.region.y + CL.region.h], dash: true, ink: "faint" }));
+    const MS = CX.missing;
+    const linCtxDoc = { title: CP.linCtxTitle, badge: CP.ctxBadge, tone: "neutral", meta: CX.brief.meta, cols: 1, sections: [...secs(CX.brief.sections).map((s) => ({ ...s, title: "You are here: " + s.title })), ...cardSecs.map((s) => ({ ...s, title: "sync-worker: " + s.title })), ...radiusSecs], foot: CX.brief.foot, footG: "check" };
+
+    const views = {
+      overview: { regions, bands, lines: ovE, nodes: ovNodes(), legend: { edges: true } },
+      cluster: { bands: [{ id: "A", title: d.partitions[0].title, files: d.partitions[0].files, x: 12, y: 60, w: 818, h: 534, tabX: 540, tabY: -11 }], lines: [...clusterLines, ...stubLines], labels: clusterLines.map((l) => ({ x: Math.round(l.mid[0]), y: Math.round(l.mid[1]), t: l.rel })), boxes, stubs: CA.stubs.map((s) => stubOf(s, "start")), mini: { ...base.mini, vp: d.partitions[0] } },
+      file: { fileZoom, stubs: fzStubs, lines: fzLines, mini: { ...base.mini, vp: { x: 340, y: 168, w: 170, h: 84 } } },
+      diff: { diffZoom: true, stubs: dfStubs, lines: dfLines, mini: { ...base.mini, vp: { x: 356, y: 180, w: 60, h: 40 } } },
+      keys: (() => { const kbE = ovEdges(d.focus.file), ns = ovMap(ovNodes()); return { regions, bands, lines: kbE, nodes: ovNodes(d.focus.file), keys: true, labels: kbE.filter((l) => l.strong).map((l) => { const other = l.e.from === d.focus.file ? l.e.to : l.e.from, a = ns[l.e.from], b = ns[l.e.to], sh = Math.hypot(l.p[2] - l.p[0], l.p[3] - l.p[1]) < 120; return { x: Math.round(l.mid[0]), y: Math.round(sh ? Math.min(a.y, b.y) - 10 : l.mid[1]), t: X.arrowWords[other] }; }) }; })(),
+      building: { building: true, mini: null, ladderOff: true },
+      nodeps: { regions: ndRegions, nodes: ndNodes, legend: { noEdges: true }, notice: d.noDeps.notice, mini: { rects: ndRegions, files: false, bands: false, vp: full, W: 1016, H: 640 } },
+      trail: { regions, bands, lines: [...ovE.map((e) => ({ ...e, ink: "faint", strong: false })), ...trail], nodes: trailNodes, stops, panel: { title: CP.readReceipt, rows: receipt.map((r) => ({ ...r, hasBar: true })), foot: RP.receiptNote + " " + CP.walk } },
+      since: { regions, bands, lines: ovE, nodes: sinceNodes, hl, panel: { title: CP.sinceTitle, rows: SN.rows.map((r) => ({ g: r.g, text: r.text, ink: r.positive ? "var(--rly-color-success-ink)" : TXT2 })), foot: SN.foot } },
+      evidence: { regions: [{ id: "tests", label: "tests", count: CP.evidenceRegion, x: 648, y: 60, w: 356, h: 440 }], bands: [{ id: "A", title: d.partitions[0].title, files: d.partitions[0].files, x: 12, y: 60, w: 620, h: 440, tabX: 300, tabY: -11 }], boxes: evBoxes, lines: [...evLines, { p: [60, 500, 60, 520], dash: true, ink: "faint" }], labels: evLines.map((l) => ({ x: Math.round(l.mid[0]), y: Math.round(l.mid[1]), t: l.rel })), notes: [EV.note], mini: { ...base.mini, vp: d.partitions[0] } },
+      linear: { linear: { note: X.linNote }, files: true, mini: null },
+      large: { bands: lgBands, cols, mini: { rects: cols, files: false, bands: false, vp: full, W: 1016, H: 640 } },
+      ctxOn: ctxFrame("purpose", "ctxPurpose"),
+      brief: { ...ctxFrame("purpose", "ctxPurpose"), doc: briefDoc },
+      card: { H: 720, ctxToggle: "new", regions: [CL.region], nodes: cardNodes, ctx: CL.unchanged.map((n) => cxNode(n, "purpose")), stubs: CL.stubs.map((s) => stubOf(s, "start")), lines: cardLines, sheet: { title: CX.card.title, meta: CX.card.meta, x: 460, y: 12, w: 544, sections: cardSecs }, mini: null },
+      radius: { ...ctxFrame("radius", "ctxRadius"), lines: [...ovE, ...radLines], doc: { title: CX.radius.title, badge: CX.radius.badge, tone: "caution", meta: CP.radiusMeta, cols: 3, sections: radiusSecs } },
+      known: { ...ctxFrame("outline", "ctxOutline"), doc: { title: CX.brief.title, badge: CP.collapsed, tone: "neutral", meta: CP.collapsedMeta, lead: CX.briefLine, sections: [] } },
+      ctxMissing: { ...ctxFrame("path", "ctxPath"), doc: { title: CX.brief.title, badge: MS.badge, tone: "caution", meta: CP.missingMeta, cols: 3, sections: secs(MS.sections), foot: MS.foot, footG: "minus" } },
+      linCtx: { linear: { note: X.linCtxNote }, files: true, mini: null, ctxToggle: "new", doc: linCtxDoc },
+    };
+
+    // Section 4: agent sign-off
+    const T = X.t, SO = d.signOff, SL4 = SO.layout, RQ = d.requestChanges, TP = d.templates, EX = TP.example;
+    const fill = (s, o) => String(s).replace(/\{(\w+)\}/g, (_, k) => (o[k] ?? ""));
+    const TINT = { positive: "var(--rly-color-success-tint)", critical: "var(--rly-color-blocked-tint)", caution: "var(--rly-color-held-tint)", neutral: "var(--rly-color-surface-2)" };
+    const HELD = "var(--rly-color-held-ink)", OK = "var(--rly-color-success-ink)";
+    const stepOf = Object.fromEntries(SO.plan.flatMap((s) => s.files.map((p) => [p, s.n])));
+    const soNodes = (o) => d.files.map((x) => {
+      const [nx, ny] = SL4.nodes[x.path];
+      const y = o.ready ? { ...x, failing: false, findings: (x.findings || []).filter((id) => id !== "F1") } : x;
+      const marks = [...(x.path === SO.unplanned.file ? [{ g: "alert", w: T.signOff.unplanned, ink: HELD }] : []), ...marksOf(y)];
+      const n = node(y, { x: nx, y: ny, w: x.w }, { marks, focus: o.focusP1 && x.path === "sync-worker/socket.ts" });
+      n.op = o.step && stepOf[x.path] !== o.step && x.path !== SO.unplanned.file ? 0.32 : 1;
+      return n;
+    });
+    const smallCanvas = { W: SL4.canvasW, H: SL4.canvasH, regions: SL4.regions, mini: null };
+    const soCanvas = (o) => {
+      const ns = soNodes(o), map = ovMap(ns);
+      const lines = d.edges.map((e) => { const on = o.step ? stepOf[e.from] === o.step && stepOf[e.to] === o.step : true; return { p: link(map[e.from], map[e.to]), dash: e.rel === "moved from", strong: !!o.step && on, ink: o.step ? (on ? "strong" : "faint") : "normal" }; });
+      const stopsS = d.files.filter((x) => stepOf[x.path] && (!o.step || stepOf[x.path] === o.step)).map((x) => ({ n: stepOf[x.path], x: map[x.path].x - 10, y: map[x.path].y - 10, read: true }));
+      const sk = map["sync-worker/socket.ts"], rc = map["stage/reconnect.ts"];
+      const pins = [{ x: sk.x + sk.w + 6, y: sk.y + 4, g: "fleet", label: fill(T.signOff.judgementPinCanvas, { n: 1 }), ink: TXT2 },
+        ...(o.step ? [] : [{ x: rc.x, y: rc.y + rc.h + 6, g: "fleet", label: fill(T.signOff.judgementPinCanvas, { n: 2 }), ink: TXT2 }]),
+        ...(o.focusP1 ? [{ x: sk.x + sk.w + 6, y: sk.y + 32, g: "alert", label: T.signOff.p1Pin, ink: RED }] : [])];
+      return { ...smallCanvas, nodes: ns, lines, stops: stopsS, pins, notes: o.step ? [{ x: 16, y: rc.y + rc.h + 10, w: 272, who: fill(T.signOff.unplannedNote, { size: SO.unplanned.size }), body: SO.unplanned.why }] : [] };
+    };
+    const soCard = (o) => ({
+      time: SO.time, asked: SO.asked,
+      steps: SO.plan.map((s) => ({ n: s.n, step: s.step, nodes: s.files.map((p) => byPath[p].name), count: fill(T.signOff.nodes, { n: s.files.length }), sel: o.step === s.n })),
+      unp: SO.unplanned, critic: SO.critic[o.ready ? "ready" : "blocked"],
+      gate: (() => { const gt = SO.gates[o.ready ? "ready" : "blocked"]; return { ...gt, tint: TINT[gt.tone] }; })(),
+      judgements: SO.judgements.map((j) => ({ ...j, node: byPath[j.file].name })),
+      off: !o.ready, offWhy: SO.offWhy, receipt: SO.receipt,
+    });
+    const stepFiles = order.filter((p) => stepOf[p] === 2);
+
+    // Section 5: request changes
+    const short5 = (p) => p.split("/").pop();
+    const R = T.rc, RS = R.states;
+    const cmWhere = (cm) => cm.line ? short5(cm.file) + ", " + R.lineWord + " " + cm.line + (cm.fn ? ", " + cm.fn : "") : R.pinnedTo + " " + cm.file;
+    const rcComments = (mode) => RQ.comments.filter((cm) => !(cm.critic && mode !== "preview" && mode !== "edit")).map((cm) => {
+      const removed = mode === "edit" && cm.critic, editing = mode === "edit" && cm.id === "C3";
+      let state = cm.critic ? RS.fromCritic : cm.mine ? RS.yours : RS.needsFix, tone = "neutral", text = cm.text, act = R.edit, hasReply = false;
+      if (cm.finding) { state = RS.needsFix; tone = "caution"; }
+      if (removed) { state = RS.removed; act = R.undo; }
+      if (editing) { state = RS.editing; text = cm.edited; act = ""; }
+      if (mode === "sent") { state = RS.sent; tone = "positive"; act = ""; text = cm.edited || cm.text; }
+      if (mode === "waiting") { state = RQ.ack.states[cm.id]; tone = "neutral"; act = ""; text = cm.edited || cm.text; }
+      if (mode === "rereview") { [state, tone] = RQ.rereview.states[cm.id]; act = ""; text = cm.edited || cm.text; hasReply = cm.id === "C3"; }
+      return { id: cm.id, sev: cm.sev, where: cmWhere(cm), state, tone, text, removed, editing, reply: hasReply ? RQ.rereview.reply : "", act };
+    });
+    const rcCard = (mode) => {
+      const b0 = { comments: rcComments(mode), defText: RQ.deferred.text, next: [], summary: "", recipients: null, signoff: "", round: "", actions: [], foot: [] };
+      const opened = fill(R.issueOpenedText, { issue: RQ.deferred.issue, at: RQ.sent.at });
+      if (mode === "preview" || mode === "edit") { const n = mode === "preview" ? 4 : 3; return { ...b0, badge: R.previewBadge, tone: "neutral", title: R.previewTitle, meta: R.previewMeta, summary: RQ.summary[mode], commentsTitle: fill(R.previewComments, { n }), defLabel: R.becomesIssue, defTone: "neutral", recipients: RQ.recipients, receives: RQ.receives.replace("{n}", n), actions: [[R.send, "primary"], [R.editSummary, "secondary"], [R.cancel, "quiet"]], foot: [{ g: "minus", t: RQ.cancelLine }] }; }
+      if (mode === "sent") return { ...b0, badge: R.sentBadge, tone: "caution", title: R.sentTitle, meta: RQ.sent.line, next: [{ g: "clock", t: fill(R.next, { at: RQ.sent.at }) }], commentsTitle: R.comments3, defLabel: R.issueOpened, defTone: "positive", defText: opened, signoff: RQ.sent.signoff, actions: [[R.withdraw, "quiet"]] };
+      if (mode === "waiting") return { ...b0, badge: R.sentBadge, tone: "caution", title: R.waitTitle, meta: RQ.sent.line, next: [{ g: "check", t: RQ.ack.line }, { g: "clock", t: RQ.ack.next }], commentsTitle: R.comments3, defLabel: R.issueOpened, defTone: "positive", defText: opened, signoff: RQ.sent.signoff };
+      return { ...b0, badge: R.reBadge, tone: "neutral", title: R.reTitle, meta: fill(R.reMeta, { at: RQ.rereview.at, run: RQ.rereview.run }), next: [{ g: "clock", t: RQ.rereview.next }], commentsTitle: R.reComments, defLabel: R.issueOpened, defTone: "positive", defText: fill(R.issueOutside, { issue: RQ.deferred.issue }), round: RQ.rereview.round, actions: [[R.reviewNew, "primary"], [T.signOff.approve, "secondary", true]], foot: [{ g: "alert", t: RQ.rereview.approveOff }] };
+    };
+    const rcCanvas = (mode) => {
+      const nh = mode === "rereview";
+      const ns = d.files.map((x) => { const [nx, ny] = SL4.nodes[x.path]; return node(nh ? { ...x, failing: false } : x, { x: nx, y: ny, w: x.w }); });
+      const map = ovMap(ns);
+      const lines = d.edges.map((e) => ({ p: link(map[e.from], map[e.to]), dash: e.rel === "moved from", ink: "normal" }));
+      const sk = map["sync-worker/socket.ts"], dr = map["sync-worker/drafts.ts"], pr = map["sync-worker/protocol.ts"];
+      const cms = Object.fromEntries(rcComments(mode).map((q) => [q.id, q]));
+      const pre = mode === "preview" || mode === "edit";
+      const pinFor = (id, x, y) => { const q = cms[id]; if (!q) return null; const label = id === "C4" ? (q.removed ? "C4: Removed" : pre ? "C4, partition A, " + R.edit : "C4: " + q.state) : pre ? id + ", " + R.lineWord + " " + RQ.comments.find((z) => z.id === id).line + ", " + R.edit : id + ": " + q.state;
+        return { x, y, label, g: q.removed ? "minus" : mode === "sent" || q.tone === "positive" ? "check" : q.tone === "caution" ? "alert" : "arrow", ink: q.tone === "positive" ? OK : q.tone === "caution" ? HELD : TXT2 }; };
+      const pins = [pinFor("C1", sk.x + sk.w + 6, sk.y + 8), pinFor("C2", dr.x + dr.w + 6, dr.y + 2), pinFor("C3", dr.x + dr.w + 6, dr.y + 28), pinFor("C4", 440, 60),
+        { x: pr.x - 6, y: pr.y + pr.h + 3, g: pre ? "arrow" : "check", label: pre ? "P3: " + R.becomesIssue : "P3: " + R.issueOpened, ink: TXT2 }].filter(Boolean);
+      const hlR = nh ? RQ.rereview.touched.map((p) => { const n = map[p]; return { x: n.x - 6, y: n.y - 6, w: n.w + 12, h: n.h + 12, border: "1.5px solid var(--rly-color-deploying-ink)", bg: "color-mix(in srgb, var(--rly-color-deploying-ink) 10%, transparent)", g: "clock", label: T.fs.compare.title, lt: p === "tests/socket.test.ts" ? -15 : n.h + 4 }; }) : [];
+      return { ...smallCanvas, nodes: ns, lines, pins, hl: hlR, map };
+    };
+
+    // Section 5, full screen
+    const FSD = RQ.fullscreen, FT = T.fs, FST = FT.states, CMx = Object.fromEntries(RQ.comments.map((q) => [q.id, q]));
+    const keyOf = (id) => id.toLowerCase().replace(/\s+/g, "-");
+    const linesOf = (code, word) => code.lines.map(([n, s, t]) => ({ n, s, c: t, mark: n === code.mark && s !== "-", word, aria: (s === "+" ? "Added" : s === "-" ? "Removed" : "Unchanged") + " line " + n + (n === code.mark && s !== "-" ? ", " + word.toLowerCase() : ""), bg: s === "+" ? "var(--rly-color-success-tint)" : s === "-" ? "var(--rly-color-blocked-tint)" : "transparent" }));
+    const infoOf = (it) => {
+      const q = CMx[it.id];
+      if (q) return { sev: q.sev, where: q.line ? short5(q.file) + ":" + q.line + (q.fn ? ", " + q.fn : "") : FT.noLine, text: q.text, edited: q.edited, origin: q.finding ? fill(FT.origin.finding, { id: q.finding, p: F[q.finding].p, title: F[q.finding].title }) : q.critic ? FT.origin.critic : FT.origin.yours, originG: q.finding || q.critic ? "arrow" : "check", issue: q.issue || "", issueTitle: q.issueTitle || "", textLabel: FT.textLabel.comment, word: FT.word.commented };
+      const fd = F[it.finding];
+      if (it.group === "issue") return { sev: fd.p, where: short5(it.file) + ":" + it.line + ", " + fd.fn, text: RQ.deferred.text, origin: fill(FT.origin.finding, { id: fd.id, p: fd.p, title: fd.title }), originG: "arrow", issue: "", issueTitle: fd.title, textLabel: FT.textLabel.issue, word: FT.word.flagged };
+      if (it.group === "checklist") { const sg = TP.suggestions.find((z) => z.n === it.n), fl = it.n === TP.flip.n, iss = fl ? TP.flip.issue : sg.issue; return { sev: iss.p, where: (it.file.includes("/") ? short5(it.file) : it.file) + ":" + it.line, text: fl ? TP.flip.note + " " + TP.flip.flipDraft : sg.note, origin: fill(FT.origin.checklist, { n: it.n, item: EX.items[it.n - 1], who: fl ? FT.origin.flipped : FT.origin.confirmed }), originG: "check", issue: iss.id, issueTitle: iss.title, textLabel: FT.textLabel.checklist, word: FT.word.flagged }; }
+      return { sev: fd.p, where: short5(it.file) + ":" + it.line + ", " + fd.fn, text: fill(FT.origin.otherText, { title: fd.title }), origin: fill(FT.origin.other, { id: fd.id, p: fd.p }), originG: "arrow", issue: "", issueTitle: "", textLabel: FT.textLabel.other, word: FT.word.flagged };
+    };
+    const stOf = (it, mode) => {
+      const q = CMx[it.id];
+      if (mode === "compare") return RQ.rereview.states[it.id];
+      if (mode === "sent") return it.group === "issue" ? [FST.issueOpened, "positive"] : it.group === "other" ? [FST.other, "neutral"] : [FST.sent, "positive"];
+      if (mode === "edit" && it.id === "C4") return [FST.removed, "neutral"];
+      if (mode === "edit" && it.id === "C3") return [FST.editing, "neutral"];
+      if (q) return q.finding ? [FST.needsFix, "caution"] : q.critic ? [FST.fromCritic, "neutral"] : [FST.yours, "neutral"];
+      if (it.group === "issue") return [FST.issue, "neutral"];
+      if (it.group === "checklist") return [FST.checklist, "caution"];
+      return [FST.other, "neutral"];
+    };
+    const fsView = (mode, sel, expanded) => {
+      const ro = mode === "sent" || mode === "compare";
+      const items = FSD.items.filter((it) => mode === "compare" ? ["C1", "C2", "C3"].includes(it.id) : !(mode === "sent" && it.id === "C4"));
+      const rows = [], blocks = [];
+      items.forEach((it) => {
+        const nf = infoOf(it), [state, tone] = stOf(it, mode), key = keyOf(it.id), on = it.id === sel;
+        const removed = mode === "edit" && it.id === "C4", editing = mode === "edit" && it.id === "C3";
+        const issue = it.group === "issue" ? (ro ? RQ.deferred.issue : FT.opensOnSend) : nf.issue;
+        const text = (editing || ro) && nf.edited ? nf.edited : nf.text;
+        const cmp = mode === "compare" ? FSD.compare[it.id] : null;
+        const code = cmp && cmp.lines ? cmp : it.code || null;
+        rows.push({ group: it.group, id: it.id, key, sev: nf.sev, where: nf.where, state, tone, issue, on, expanded: it.id === expanded, text, origin: nf.origin, removed });
+        const acts = ro ? [] : removed ? [[R.undo, "secondary"]] : editing ? [[FT.done, "secondary"]] : it.group === "other" ? [[FT.addToRequest, "secondary"]] : CMx[it.id] ? [[R.edit, "quiet"], [FT.remove, "quiet"]] : [[R.edit, "quiet"]];
+        blocks.push({ id: it.id, key, on, sev: nf.sev, where: nf.where, state, tone, node: it.node.includes("/") ? short5(it.node) : it.node, issue: issue && issue !== FT.opensOnSend ? issue : "", issueTitle: nf.issueTitle, origin: nf.origin, originG: nf.originG,
+          code: code ? { label: code.label, lines: linesOf(code, nf.word) } : null, noCode: (cmp && cmp.note) || it.noCode || "", textLabel: nf.textLabel, text, editing, removed, reply: mode === "compare" && it.id === "C3" ? RQ.rereview.reply : "", acts });
+      });
+      const groups = mode === "compare" ? [{ title: FT.compareGroup, rows }] : Object.keys(FT.groups).map((gk) => ({ title: FT.groups[gk], rows: rows.filter((r) => r.group === gk) })).filter((gr) => gr.rows.length);
+      const b1 = { mode, groups, blocks, behind: FSD.canvasNote, recipients: RQ.recipients, label: FT.preview.label };
+      if (mode === "preview" || mode === "edit") { const n = mode === "preview" ? 4 : 3; return { ...b1, crumb: FT.preview.crumb, title: FT.preview.title, badge: FT.preview.badge, tone: "neutral", head: RQ.head, meta: FT.preview.meta, summaryTitle: FT.preview.summary, summary: RQ.summary[mode], editable: true, toTitle: FT.preview.to, receives: RQ.receives.replace("{n}", n), count: FSD.counts[mode], barLines: [{ g: "minus", t: RQ.cancelLine }, { g: "arrow", t: FSD.checklistLine }], actions: [[R.cancel, "quiet"], [R.editSummary, "secondary"], [R.send, "primary"]] }; }
+      if (mode === "sent") return { ...b1, crumb: FT.sent.crumb, title: fill(FT.sent.title, { at: RQ.sent.at }), badge: FT.sent.badge, tone: "caution", head: RQ.head, meta: RQ.sent.line + ". " + FT.sent.readOnly, summaryTitle: FT.sent.summary, summary: RQ.summary.edit, editable: false, toTitle: FT.sent.to, receives: RQ.receives.replace("receives", "received").replace("{n}", 3), count: FSD.counts.sent, barLines: [{ g: "minus", t: RQ.sent.signoff }], actions: [[FT.sent.back, "primary"]] };
+      return { ...b1, label: FT.compare.label, crumb: FT.compare.crumb, title: FT.compare.title, badge: FT.compare.badge, tone: "neutral", head: RQ.rereview.head, meta: fill(FT.compare.meta, { at: RQ.rereview.at, run: RQ.rereview.run, round: RQ.rereview.round }), summaryTitle: fill(FT.compare.summary, { at: RQ.sent.at }), summary: RQ.summary.edit, editable: false, recipients: null, count: FSD.counts.compare, barLines: [{ g: "alert", t: RQ.rereview.approveOff }], actions: [[FT.compare.approve, "secondary", true], [FT.compare.review, "primary"]] };
+    };
+    const waitRows = rcComments("waiting");
+    const receipt5 = { title: fill(FT.sent.title, { at: RQ.sent.at }), lines: [{ g: "check", t: RQ.sent.line + "." }, { g: "check", t: RQ.ack.line }, { g: "clock", t: RQ.ack.next }, { g: "check", t: fill(FT.phone.p3, { issue: RQ.deferred.issue }) }, { g: "minus", t: RQ.sent.signoff }], rows: waitRows };
+
+    // Section 6: review templates
+    const ST = T.settings;
+    const tRow = (o) => ({ dim: false, on: false, ...o });
+    const detail = (state, tone, source, noticeText, hasOpen) => ({ name: EX.name, state, tone, source, notice: noticeText, hasOpen, items: EX.items, verdicts: EX.verdicts.join(", "), rules: EX.rules, output: EX.output });
+    const stA = { machine: TP.machines.withTemplate, lines: [], list: [tRow({ name: EX.name, source: TP.sources[0], path: EX.path, state: ST.activeFor, tone: "positive", on: true }), tRow({ name: ST.noTemplate, source: TP.sources[1], path: TP.repoPath, state: ST.none, tone: "neutral", dim: true }), tRow({ name: EX.name, source: TP.sources[2], path: ST.shipsWith, state: ST.off, tone: "neutral" })],
+      d: detail(ST.activeFor, "positive", TP.sources[0] + ": " + EX.path, fill(ST.readNotice, { at: TP.readAt }), true) };
+    const stB = { machine: TP.machines.without, lines: [{ g: "minus", t: ST.noneHere + "." }, { g: "arrow", t: TP.addLine }, { g: "check", t: TP.unchangedLine }],
+      list: [tRow({ name: ST.noneHere, source: TP.sources[0], path: ST.emptyDir, state: ST.none, tone: "neutral", dim: true }), tRow({ name: ST.noTemplate, source: TP.sources[1], path: TP.repoPath, state: ST.none, tone: "neutral", dim: true }), tRow({ name: EX.name, source: TP.sources[2], path: ST.shipsWith, state: ST.off, tone: "neutral", on: true })],
+      d: detail(ST.off, "neutral", ST.builtIn, ST.offNotice, false) };
+    const K6 = T.ck;
+    const ckItems = (mode) => TP.suggestions.map((s) => {
+      const flipped = s.n === TP.flip.n && mode !== "suggest", confirmed = mode !== "suggest" || K6.confirmedAt.includes(s.n), linked = flipped && (mode === "post" || mode === "rc");
+      const iss = flipped ? (linked ? TP.flip.issue : null) : s.issue;
+      return { n: s.n, title: EX.items[s.n - 1], verdict: flipped ? "No" : s.verdict, note: flipped ? TP.flip.note + (linked ? " " + TP.flip.flipDraft : "") : s.note,
+        origin: flipped ? K6.origin.flipped : confirmed ? K6.origin.confirmed : K6.origin.suggested, originTone: flipped || confirmed ? "positive" : "neutral", confirm: !confirmed && !flipped,
+        lookedLabel: flipped ? K6.lookedFlipped : K6.looked, looked: s.nodes.map((p) => byPath[p].name), issue: iss, editing: flipped && mode === "flip", flipDraft: TP.flip.flipDraft };
+    });
+    const ckCard = (mode) => ({ chip: fill(K6.chip, { name: EX.name }), meta: fill(K6.meta, { n: mode === "suggest" ? 3 : 5 }), items: ckItems(mode) });
+    const scBox = (mode) => mode === "suggest" ? { off: true, label: T.signOff.approve, reasons: [{ g: "alert", ink: HELD, t: fill(K6.approveOff, { reason: TP.confirmReason }) }] }
+      : mode === "flip" ? { off: true, label: T.signOff.approve, reasons: [{ g: "alert", ink: HELD, t: TP.approveReason + "." }] }
+      : { off: false, label: K6.approvePost, reasons: [{ g: "check", ink: OK, t: K6.allConfirmed }, { g: "check", ink: OK, t: SO.receipt }] };
+    const ckDesk = (mode) => { const cv = soCanvas({ ready: true }), map = ovMap(cv.nodes), by = {}; TP.suggestions.forEach((s) => s.nodes.forEach((p) => (by[p] = [...(by[p] || []), s.n])));
+      return { ...cv, stops: [], pins: Object.entries(by).map(([p, ns]) => ({ x: map[p].x, y: map[p].y + map[p].h + 3, g: "arrow", label: fill(ns.length > 1 ? K6.pins : K6.pin, { n: ns.join(", ") }), ink: TXT2 })), ck: ckCard(mode), sc: scBox(mode), by: true }; };
+    const post = { title: TP.postTitle, rows: ckItems("post").map((it) => ({ n: it.n, item: it.title, verdict: it.verdict, note: it.note, issue: it.issue ? it.issue.id + ", " + it.issue.p + " " + it.issue.w : K6.post.none })), foot: TP.postFoot };
+    const rcPrev = rcCard("preview");
+    const ckRcRows = ckItems("rc").filter((it) => it.verdict === "No").map((it) => ({ id: "Item " + it.n, sev: it.issue.p, where: R.checklistPrefix + it.title + ", " + it.issue.id, state: RS.fromChecklist, tone: "caution", text: it.note, act: R.edit }));
+    const rcCvP = rcCanvas("preview"), drN = rcCvP.map["sync-worker/drafts.ts"];
+    const dockSo = (o) => ({ ...soCanvas(o), so: soCard(o), by: true });
+    const fsWith = (canvasMode, fs, extra = {}) => ({ ...rcCanvas(canvasMode), fs, by: true, ...extra });
+    Object.assign(views, {
+      soReady: dockSo({ ready: true }),
+      soStep: { ...dockSo({ ready: true, step: 2 }), stepList: { title: SO.plan[1].step, files: stepFiles } },
+      soBlocked: dockSo({ ready: false, focusP1: true }),
+      fsPreview: fsWith("preview", fsView("preview", "C1", "P3")),
+      fsItem: fsWith("preview", fsView("preview", "C1", "P3"), { phoneItem: "C1" }),
+      fsEdit: fsWith("edit", fsView("edit", "C2", "")),
+      fsSent: fsWith("sent", fsView("sent", "C1", ""), { rc: rcCard("sent"), receipt: receipt5 }),
+      rcWait: { ...rcCanvas("waiting"), rc: rcCard("waiting"), by: true, receipt: receipt5 },
+      fsCompare: fsWith("rereview", fsView("compare", "C1", ""), { rc: rcCard("rereview"), since: fill(R.reSince, { at: RQ.sent.at }) }),
+      setA: { settings: stA },
+      setB: { settings: stB },
+      ckSuggest: ckDesk("suggest"),
+      ckFlip: ckDesk("flip"),
+      ckPost: { ...ckDesk("post"), post },
+      ckRc: { ...rcCvP, pins: [...rcCvP.pins, { x: drN.x, y: drN.y + drN.h + 3, g: "alert", label: R.ckPin, ink: HELD }], by: true, fsList: fsView("preview", "", ""),
+        rc: { ...rcPrev, summary: rcPrev.summary + R.ckSummaryAdd, commentsTitle: R.ckComments, comments: [...rcPrev.comments, ...ckRcRows], receives: RQ.receives.replace("{n}", "4") + R.ckReceives } },
+    });
+    return { F, X, CP, T, RISK, byPath, size, marksOf, d, base, views, lin, order, chFiles, RP, SN, CX, LG, TXT2, RED, fill };
+  };
+
+  // Rendering
+  const INK = { normal: "var(--rly-color-text-3)", strong: "var(--rly-color-text-1)", faint: "var(--rly-color-border-2)" };
+  const edges = (lines, W, H) => `<svg class="edges" width="${W}" height="${H}" aria-hidden="true">${lines.map((l) => {
+    const [x1, y1, x2, y2] = l.p, len = Math.hypot(x2 - x1, y2 - y1) || 1, ux = (x2 - x1) / len, uy = (y2 - y1) / len;
+    const ex = x2 - ux * 2, ey = y2 - uy * 2, s = l.strong ? 9 : 7, w = l.strong ? 4.5 : 3.5, col = INK[l.ink || "normal"];
+    const r = (n) => Math.round(n * 10) / 10;
+    return `<g><line x1="${r(x1)}" y1="${r(y1)}" x2="${r(ex - ux * (s - 1))}" y2="${r(ey - uy * (s - 1))}" style="stroke: ${col}; stroke-width: ${l.strong ? 2 : 1.25}; stroke-dasharray: ${l.dash ? "5 4" : "none"}"></line><polygon points="${r(ex)},${r(ey)} ${r(ex - ux * s - uy * w)},${r(ey - uy * s + ux * w)} ${r(ex - ux * s + uy * w)},${r(ey - uy * s - ux * w)}" style="fill: ${col}"></polygon></g>`;
+  }).join("")}</svg>`;
+  const pos = (o) => `left: ${o.x}px; top: ${o.y}px;${o.w != null ? ` inline-size: ${o.w}px;` : ""}${o.h != null ? ` block-size: ${o.h}px;` : ""}`;
+  const minimapSvg = (mini, M, sel) => {
+    if (!mini) return "";
+    const fileRects = mini.files ? M.d.files.map((x) => { const isSel = x.path === sel; return `<rect x="${x.x}" y="${x.y}" width="${x.w}" height="46" rx="6" style="fill: ${isSel ? "var(--rly-color-text-1)" : "var(--rly-color-surface-1)"}; stroke: var(--rly-color-border-2); stroke-width: ${isSel ? 0 : 3}"></rect>`; }).join("") : "";
+    const bandRects = mini.bands ? M.d.partitions.map((b) => `<rect x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" rx="12" style="fill: none; stroke: var(--rly-color-text-2); stroke-width: 4; stroke-dasharray: 14 10"></rect>`).join("") : "";
+    const vp = mini.vp;
+    return `<svg viewBox="0 0 ${mini.W} ${mini.H}" aria-hidden="true">${mini.rects.map((r) => `<rect x="${r.x}" y="${r.y}" width="${r.w}" height="${r.h}" rx="18" style="fill: var(--rly-color-surface-3)"></rect>`).join("")}${bandRects}${fileRects}${sel === undefined ? `<rect x="${vp.x}" y="${vp.y}" width="${vp.w}" height="${vp.h}" rx="6" style="fill: none; stroke: var(--rly-color-text-1); stroke-width: 8"></rect>` : ""}</svg>`;
+  };
+  const secsHtml = (sections) => sections.map((s) => `<section class="sec"><h3>${esc(s.title)}</h3><ol>${s.items.map((it) => `<li><span class="t">${it.n ? pb(it.n) : ""}<span>${esc(it.text)}</span></span>${(it.labels.length || it.cites.length) ? `<span class="cites">${it.labels.map((l) => sl(l.label, l.tone)).join("")}${it.cites.map((c) => `<a href="#" class="cite" aria-label="Source: ${esc(c)}">${esc(c)}</a>`).join("")}</span>` : ""}</li>`).join("")}</ol></section>`).join("");
+
+
+  // Sections 4–6 renderers
+  const TX1 = "var(--rly-color-text-1)", TX2 = "var(--rly-color-text-2)";
+  const line = (gl, t, ink, size = ".875rem") => `<span class="mk" style="align-items: start; font-size: ${size}"><span style="flex: none; display: flex; padding-block-start: 3px; color: ${ink || TX2}">${g(gl, 14)}</span><span>${esc(t)}</span></span>`;
+  const seg = (label, opts, cur, n) => `<div role="radiogroup" aria-label="${esc(label)}" class="seg3" style="grid-template-columns: repeat(${n}, minmax(0, 1fr))">${opts.map((op) => `<button type="button" role="radio" aria-checked="${op === cur}">${op === cur ? g("check") : ""}${esc(op)}</button>`).join("")}</div>`;
+  const ta = (text, label, rows) => `<textarea class="ta" rows="${rows}" aria-label="${esc(label)}" data-default="${esc(text)}"></textarea>`;
+  const wideBtn = (label, variant, size, extra = "") => btn(label, variant, size, ` style="inline-size: 100%"${extra}`);
+  const pinsHtml = (pins) => (pins || []).map((p) => `<span class="pin" style="left: ${p.x}px; top: ${p.y}px"><span style="color: ${p.ink}">${g(p.g)}</span><span>${esc(p.label)}</span></span>`).join("");
+
+  const soCardHtml = (M, so, phone) => {
+    const S = M.T.signOff, bs = phone ? "principal" : "defaultSize";
+    return `<section class="dk" aria-label="${esc(S.title)}, #463" data-region="card">
+      <div class="row">${sl(M.T.agentWritten, "neutral")}<span class="mk" style="font-size: .8125rem">${g("clock", 14)}<span>${esc(so.time)}</span></span></div>
+      <h2>${esc(S.title)}</h2>
+      <div class="bx"><h3>${esc(S.asked)}</h3><blockquote>“${esc(so.asked.text)}”</blockquote><span class="small">${esc(M.fill(S.briefBy, so.asked))}</span></div>
+      <div class="bx"><h3>${esc(S.plan)}</h3>
+        ${so.steps.map((s) => `<button type="button" class="step" aria-pressed="${s.sel}"><span class="stopn">${s.n}</span><span class="st">${esc(s.step)}</span><span class="go">${phone ? g("arrow", 16) : ""}</span><span class="row">${sl(S.matched, "positive")}<span class="small">${esc(s.count)}</span><span class="mk small">${g("check")}${esc(S.read)}</span></span><span class="chips">${s.nodes.map((n) => `<code>${esc(n)}</code>`).join("")}</span></button>`).join("")}
+        <div class="unp"><span class="row">${sl(S.unplanned, "caution")}<code style="font-size: .75rem; font-weight: 520">${esc(so.unp.file)}</code><span class="mono small">${esc(so.unp.size)}</span></span><span class="small" style="font-size: .8125rem">${esc(so.unp.note)}</span></div>
+      </div>
+      <div class="bx"><h3>${esc(S.critic)}</h3><span>${sl(so.critic.label, so.critic.tone)}</span><span class="small" style="font-size: .8125rem">${esc(so.critic.line)}</span></div>
+      <section class="gate" aria-label="${esc(S.gateLabel)}"><div class="gh" style="background: ${so.gate.tint}"><span class="row">${sl(so.gate.sum, so.gate.tone, false)}<code style="font-weight: 560">${esc(so.gate.head)}</code></span><span>${esc(so.gate.reason)}</span><span class="small">${esc(so.gate.computed)}. ${esc(S.computedSuffix)}</span></div>
+        <dl>${so.gate.rows.map((r) => `<div><dt>${esc(r.k)}</dt><dd><span class="row"><b>${esc(r.v)}</b>${sl(r.s, r.t)}</span><span class="small">${esc(r.note)}</span></dd></div>`).join("")}</dl></section>
+      <div class="bx judg"><h3>${esc(S.judge)}</h3><ol>${so.judgements.map((j) => `<li>${g("fleet", 16)}<span>${esc(j.text)}</span><span class="small">${esc(M.fill(S.judgementPin, { n: j.n }))} <code style="color: ${TX1}">${esc(j.node)}</code></span></li>`).join("")}</ol></div>
+      <div class="acts" data-region="action">
+        <div class="row">${phone ? wideBtn(S.approve, "primary", bs, so.off ? ' disabled aria-describedby="so-why"' : "") + wideBtn(S.requestChanges, "secondary", bs) : btn(S.approve, "primary", bs, so.off ? ' disabled aria-describedby="so-why"' : "") + btn(S.requestChanges, "secondary", bs) + `<span class="mk small">${kbd(S.approveKey)}${esc(S.approveWord)}</span>`}</div>
+        ${so.off ? `<div class="why" id="so-why">${line("alert", so.offWhy, M.RED)}<a href="#">${esc(S.showP1)}${g("arrow", 14)}</a></div>` : ""}
+        ${line("check", so.receipt, TX2, ".8125rem")}
+      </div>
+    </section>`;
+  };
+
+  const rcCardHtml = (M, rc, phone) => {
+    const R = M.T.rc, sm = phone ? "defaultSize" : "compact";
+    return `<section class="dk" aria-label="${esc(rc.title)}" data-region="card">
+      <div style="display: grid; gap: 4px"><span>${sl(rc.badge, rc.tone)}</span><h2>${esc(rc.title)}</h2><span class="small" style="font-size: .8125rem">${esc(rc.meta)}</span></div>
+      ${rc.next.length ? `<div class="bx"><h3>${esc(R.whoNext)}</h3>${rc.next.map((nx) => line(nx.g, nx.t)).join("")}</div>` : ""}
+      ${rc.summary ? `<div class="bx"><h3>${esc(R.summary)}</h3><p style="margin: 0; font-size: .875rem">${esc(rc.summary)}</p></div>` : ""}
+      <div class="bx"><h3>${esc(rc.commentsTitle)}</h3><ol>${rc.comments.map((q) => `<li class="cmt"${q.editing ? ' style="border: 1.5px solid var(--rly-color-text-1); background: var(--rly-color-surface-2)"' : ""}><span class="row">${pb(q.id)}${q.sev ? pb(q.sev) : ""}<code style="font-size: .75rem">${esc(q.where)}</code>${sl(q.state, q.tone)}</span><span style="font-size: .8125rem${q.removed ? "; color: var(--rly-color-text-3); text-decoration: line-through" : ""}">${esc(q.text)}</span>${q.reply ? line("arrow", q.reply, TX2, ".8125rem") : ""}${q.act ? `<span>${btn(q.act, "quiet", sm)}</span>` : ""}</li>`).join("")}</ol></div>
+      <div class="bx"><span class="row">${pb("P3")}<code style="font-size: .75rem">${esc(R.p3where)}</code>${sl(rc.defLabel, rc.defTone)}</span><span class="small" style="font-size: .8125rem">${esc(rc.defText)}</span></div>
+      ${rc.recipients ? `<div class="bx"><h3>${esc(R.goesTo)}</h3>${rc.recipients.map((rp) => `<span class="row" style="font-size: .875rem"><b style="font-weight: 620">${esc(rp.name)}</b><span class="small">${esc(rp.role)}</span></span>`).join("")}<span class="small" style="font-size: .8125rem">${esc(rc.receives)}</span></div>` : ""}
+      ${rc.signoff ? `<div class="bx"><h3>${esc(R.signoff)}</h3><span>${btn(M.T.signOff.approve, "primary", "defaultSize", " disabled")}</span>${line("minus", rc.signoff, TX2, ".8125rem")}</div>` : ""}
+      ${rc.round ? line("clock", rc.round) : ""}
+      ${rc.actions.length ? `<div class="acts" data-region="action"><div class="row">${rc.actions.map(([l, v, off]) => btn(l, v, "defaultSize", off ? " disabled" : "")).join("")}</div>${rc.foot.map((ft) => line(ft.g, ft.t, ft.g === "alert" ? "var(--rly-color-held-ink)" : TX2, ".8125rem")).join("")}</div>` : ""}
+    </section>`;
+  };
+
+  const ckHtml = (M, ck, phone) => {
+    const K = M.T.ck, EX = M.d.templates.example, sm = phone ? "defaultSize" : "compact";
+    return `<section class="ckc" aria-label="${esc(K.title)}" data-region="checklist">
+      <div style="display: grid; gap: 4px"><span class="tchip">${g("check")}<span>${esc(ck.chip)}</span></span><h2 style="margin: 0; font-size: 1.125rem; font-weight: 620">${esc(K.title)}</h2><span class="small" style="font-size: .8125rem">${esc(ck.meta)}</span></div>
+      <ol>${ck.items.map((it) => `<li class="cki"${it.editing ? " data-editing" : ""}>
+        <span class="row" style="align-items: baseline; flex-wrap: nowrap">${pb(it.n)}<b style="font-size: .875rem; font-weight: 620">${esc(it.title)}</b></span>
+        ${seg(M.fill(K.verdictGroup, { n: it.n }), EX.verdicts, it.verdict, 3)}
+        <span style="font-size: .8125rem">${esc(it.note)}</span>
+        <span class="row">${sl(it.origin, it.originTone)}${it.confirm ? btn(K.confirm, "secondary", sm) : ""}</span>
+        <span class="cites small"><span>${esc(it.lookedLabel)}</span>${it.looked.map((n) => `<a href="#" class="cite">${esc(n)}</a>`).join("")}</span>
+        ${it.issue ? `<span class="row" style="font-size: .8125rem">${pb(it.issue.p + " " + it.issue.w)}<a href="#" class="lnk">${esc(it.issue.id)}</a><span class="muted">${esc(it.issue.title)}</span></span>` : ""}
+        ${it.editing ? `<div style="display: grid; gap: 8px; padding-block-start: 8px; border-block-start: 1px solid var(--rly-color-border-1)">${line("alert", K.needsIssue, "var(--rly-color-held-ink)", ".8125rem")}<div class="row">${btn(K.link, "secondary", sm)}${btn(K.create, "secondary", sm)}</div><span class="small">${esc(K.severity)}</span>${seg(K.severityGroup, M.d.templates.severities.map((v) => v.p + " " + v.w), "", phone ? 2 : 4)}<label class="small" style="display: grid; gap: 4px"><span>${esc(K.flipQ)}</span>${ta(it.flipDraft, K.flipQ, 2)}</label></div>` : ""}
+      </li>`).join("")}</ol>
+    </section>`;
+  };
+  const scHtml = (M, sc, phone) => `<section class="bx" aria-label="${esc(M.T.signOff.title)}" data-region="card"><h3>${esc(M.T.signOff.title)}</h3><span class="row">${sl(M.T.ck.gate, "positive")}<code>${esc(M.d.requestChanges.head)}</code><span class="small">${esc(M.T.ck.scenario)}</span></span>
+    <div class="acts" data-region="action">${phone ? wideBtn(sc.label, "primary", "principal", sc.off ? ' disabled aria-describedby="sc-why"' : "") : `<span>${btn(sc.label, "primary", "defaultSize", sc.off ? ' disabled aria-describedby="sc-why"' : "")}</span>`}<div id="sc-why" style="display: grid; gap: 4px">${sc.reasons.map((r) => line(r.g, r.t, r.ink)).join("")}</div></div></section>`;
+  const postHtml = (M, pp) => { const P = M.T.ck.post; return `<section class="post" aria-label="${esc(P.title)}" data-region="preview">
+    <div class="row">${sl(P.badge, "neutral")}<h2 style="margin: 0; font-size: 1.125rem; font-weight: 620">${esc(P.title)}</h2><span class="small" style="margin-inline-start: auto">${esc(P.where)}</span></div>
+    <div class="inner"><h3 style="margin: 0; font-size: 1rem; font-weight: 620">${esc(pp.title)}</h3>
+      <table><thead><tr>${P.cols.map((cn, i) => `<th scope="col">${i === 4 ? `<span class="sr">${esc(cn)}</span>` : esc(cn)}</th>`).join("")}</tr></thead><tbody>${pp.rows.map((r) => `<tr><td>${r.n}. ${esc(r.item)}</td><td style="font-weight: 620">${esc(r.verdict)}</td><td>${esc(r.note)}</td><td class="mono" style="font-size: .75rem">${esc(r.issue)}</td><td><a href="#" class="lnk" aria-label="${esc(M.fill(P.editItem, { n: r.n }))}">${esc(P.cols[4])}</a></td></tr>`).join("")}</tbody></table>
+      <span class="small">${esc(P.sign)}</span></div>
+    ${line("check", pp.foot, TX2, ".8125rem")}</section>`; };
+
+  const codeFig = (code, attrs = "") => `<figure class="codefig"><figcaption>${esc(code.label)}</figcaption><div class="scroll"${attrs}><div class="lines">${code.lines.map((ln) => `<div class="cl"${ln.mark ? " data-mark" : ""} aria-label="${esc(ln.aria)}" style="background: ${ln.bg}"><span class="no">${ln.n}</span><span aria-hidden="true" class="muted">${esc(ln.s)}</span><span class="c">${esc(ln.c)}</span>${ln.mark ? `<span class="mw">${g("arrow")}${esc(ln.word)}</span>` : "<span></span>"}</div>`).join("")}</div></div></figure>`;
+  const fsHtml = (M, fs) => {
+    const FT = M.T.fs, A = FT.aria, R = M.T.rc;
+    return `<div class="fs" role="dialog" aria-modal="true" aria-label="${esc(fs.label)}" data-region="fullscreen">
+      <header><nav class="crumbs" aria-label="Breadcrumb"><a href="#code">${esc(FT.crumbs[0])}</a><span aria-hidden="true">/</span><a href="#code/pull-requests">${esc(FT.crumbs[1])}</a><span aria-hidden="true">/</span><a href="#">${esc(FT.crumbs[2])}</a><span aria-hidden="true">/</span><b aria-current="page" style="font-weight: 520; color: ${TX1}">${esc(fs.crumb)}</b></nav>
+        <span class="mk small" style="margin-inline-start: auto; font-size: .8125rem"><span>${esc(fs.behind)}</span>${kbd(FT.esc)}<span>${esc(FT.escWord)}</span></span></header>
+      <div class="titlebar"><span class="mono small" style="font-size: .8125rem">${esc(M.X.pr.repo)} · ${esc(M.d.pr.title)} · pair-codex</span>
+        <div class="row" style="gap: 8px 14px"><h1>${esc(fs.title)}</h1>${sl(fs.badge, fs.tone, false)}<span class="headchip">${esc(FT.head)}<code style="font-weight: 560">${esc(fs.head)}</code></span></div>
+        <span class="muted" style="font-size: .875rem">${esc(fs.meta)}</span></div>
+      <div class="panes">
+        <div class="pane-list" role="region" aria-label="${esc(A.list)}" data-region="pane-list">
+          <section style="display: grid; gap: 8px"><h2 class="big">${esc(fs.summaryTitle)}</h2>${fs.editable ? ta(fs.summary, fs.summaryTitle, 6) : `<p style="margin: 0; font-size: .875rem">${esc(fs.summary)}</p>`}</section>
+          ${fs.groups.map((gr) => `<section style="display: grid; gap: 6px"><h2>${esc(gr.title)}</h2><ol>${gr.rows.map((r) => `<li class="fsrow"${r.on ? " data-on" : ""} data-fs-row="${r.key}"><div><a href="#" data-fs-go="${r.key}" aria-current="${r.on}"><span class="row" style="gap: 4px 8px">${pb(r.id)}${r.sev ? pb(r.sev) : ""}<code style="font-size: .8125rem; font-weight: 520${r.removed ? "; text-decoration: line-through" : ""}">${esc(r.where)}</code></span><span class="row">${sl(r.state, r.tone)}${r.issue ? `<span class="mono small">${esc(r.issue)}</span>` : ""}</span></a><button type="button" aria-expanded="${r.expanded}" aria-label="${esc(M.fill(r.expanded ? A.collapse : A.expand, { id: r.id }))}">${r.expanded ? "▾" : "▸"}</button></div>${r.expanded ? `<div class="exp"><span>${esc(r.text)}</span><span class="muted">${esc(r.origin)}</span></div>` : ""}</li>`).join("")}</ol></section>`).join("")}
+          ${fs.recipients ? `<section class="bx"><h3>${esc(fs.toTitle)}</h3>${fs.recipients.map((rp) => `<span class="row" style="font-size: .875rem"><b style="font-weight: 620">${esc(rp.name)}</b><span class="small" style="font-size: .8125rem">${esc(rp.role)}</span></span>`).join("")}<span style="font-size: .8125rem">${esc(fs.receives)}</span></section>` : ""}
+        </div>
+        <div class="pane-code" role="region" aria-label="${esc(A.code)}" data-region="pane-code" data-fs-scroll>
+          ${fs.blocks.map((b) => `<article class="blk"${b.on ? " data-on" : ""} data-fs-key="${b.key}" data-fs-target="${b.on}" aria-label="${esc(b.id + ", " + b.where + ", " + b.state)}">
+            <div class="row" style="gap: 6px 10px">${pb(b.id)}${b.sev ? pb(b.sev) : ""}<code style="font-size: .875rem; font-weight: 560">${esc(b.where)}</code>${sl(b.state, b.tone)}<span class="links"><a href="#" class="lnk" aria-label="${esc(M.fill(A.canvas, { node: b.node }))}">${esc(FT.showOnCanvas)}${g("arrow")}</a><a href="#" class="lnk" data-fs-back="${b.key}">${esc(FT.backToItem)}</a>${b.issue ? `<a href="#" class="lnk mono" aria-label="${esc(M.fill(A.tracker, { issue: b.issue }))}">${esc(b.issue)} <span aria-hidden="true">↗</span></a>` : ""}</span></div>
+            ${line(b.originG, b.origin, TX2, ".8125rem")}
+            ${b.issue && b.issueTitle ? `<span style="font-size: .8125rem">${esc(FT.linkedIssue)} <a href="#" class="mono lnk" style="min-block-size: 0">${esc(b.issue)}</a>: ${esc(b.issueTitle)}</span>` : ""}
+            ${b.code ? codeFig(b.code) : ""}${b.noCode ? `<p class="nocode">${g("minus")}<span>${esc(b.noCode)}</span></p>` : ""}
+            <div style="display: grid; gap: 6px"><span class="small" style="font-weight: 620">${esc(b.textLabel)}</span>${b.editing ? ta(b.text, b.textLabel + ", " + b.id, 3) + `<span class="small">${esc(FT.editingNote)}</span>` : `<p style="margin: 0; font-size: .9375rem${b.removed ? "; color: var(--rly-color-text-3); text-decoration: line-through" : ""}">${esc(b.text)}</p>`}${b.reply ? line("arrow", b.reply) : ""}${b.acts.length ? `<div class="row">${b.acts.map(([l, v]) => btn(l, v)).join("")}</div>` : ""}</div>
+          </article>`).join("")}
+        </div>
+      </div>
+      <div class="abar" role="toolbar" aria-label="${esc(A.bar)}" data-region="actionbar"><div style="display: grid; gap: 2px; min-inline-size: 0"><b style="font-size: .9375rem; font-weight: 620">${esc(fs.count)}</b>${fs.barLines.map((bl) => line(bl.g, bl.t, TX2, ".8125rem")).join("")}</div>
+        <div class="btns">${fs.actions.map(([l, v, off]) => btn(l, v, "defaultSize", off ? " disabled" : "")).join("")}</div></div>
+    </div>`;
+  };
+
+  const pfHtml = (M, kind, src) => {
+    const FT = M.T.fs, PH = FT.phone, A = FT.aria, R = M.T.rc;
+    let title, badge, tone, back, body, bar, region = "pane-list";
+    if (kind === "receipt") {
+      title = PH.receiptTitle; badge = PH.receiptBadge; tone = "positive"; back = PH.canvas;
+      body = `<span>${sl(R.sentBadge, "caution", false)}</span><h1 style="margin: 0; font-size: 1.375rem; font-weight: 620; letter-spacing: -0.02em; line-height: 1.25">${esc(src.title)}</h1>${src.lines.map((l) => line(l.g, l.t, TX2, ".9375rem")).join("")}
+        <ol class="prows">${src.rows.map((q) => `<li style="display: grid; gap: 4px; padding: 10px 12px"><span class="row">${pb(q.id)}<code style="font-size: .8125rem">${esc(q.where)}</code></span><span>${sl(q.state, q.tone)}</span></li>`).join("")}</ol>`;
+      bar = wideBtn(PH.backToList, "primary", "principal");
+    } else if (kind === "item") {
+      const b = src.blocks.find((x) => x.id === src.item);
+      title = PH.itemTitle; badge = src.badge; tone = src.tone; back = PH.list; region = "pane-code";
+      body = `<span class="row" style="gap: 4px 6px">${pb(b.id)}${b.sev ? pb(b.sev) : ""}${sl(b.state, b.tone)}</span><h1 style="margin: 0; font: 620 1.125rem/1.35 var(--rly-font-mono); overflow-wrap: anywhere">${esc(b.where)}</h1><span class="small" style="font-size: .8125rem">${esc(b.origin)}</span>
+        ${b.code ? codeFig(b.code, ` role="region" aria-label="${esc(PH.scrolls)}" tabindex="0"`) : ""}
+        ${b.issue ? `<div class="bx"><span class="small">${esc(FT.linkedIssue)}</span><a href="#" class="mono" style="display: inline-flex; align-items: center; min-block-size: 44px">${esc(b.issue)} ↗</a><span>${esc(b.issueTitle)}</span></div>` : ""}
+        <div style="display: grid; gap: 4px"><span class="small" style="font-weight: 620">${esc(b.textLabel)}</span><p style="margin: 0; font-size: .9375rem">${esc(b.text)}</p></div>
+        <a href="#" class="mk" style="min-block-size: 44px; font-size: .875rem; text-decoration: underline; text-underline-offset: .2em">${esc(FT.showOnCanvas)}${g("arrow")}</a>`;
+    } else {
+      const fs = src;
+      title = fs.mode === "compare" ? FT.compare.title : fs.mode === "sent" ? PH.receiptTitle : FT.preview.crumb; badge = fs.badge; tone = fs.tone; back = PH.canvas;
+      body = `<span class="mono small">${esc(PH.prLine)}</span>
+        <section style="display: grid; gap: 6px"><h2 style="margin: 0; font-size: 1rem; font-weight: 620">${esc(fs.summaryTitle)}</h2>${fs.editable ? ta(fs.summary, fs.summaryTitle, 6) : `<p style="margin: 0; font-size: .9375rem">${esc(fs.summary)}</p>`}</section>
+        ${fs.groups.map((gr) => `<section style="display: grid; gap: 6px"><h2 style="margin: 0; font-size: .875rem; font-weight: 620; color: ${TX2}">${esc(gr.title)}</h2><ol class="prows">${gr.rows.map((r) => `<li><a href="#" class="prow" style="grid-template-columns: minmax(0, 1fr) auto" aria-label="${esc(M.fill(A.phoneOpen, { id: r.id, where: r.where, state: r.state }))}"><span class="b" style="gap: 4px"><span class="row" style="gap: 4px 6px">${pb(r.id)}${r.sev ? pb(r.sev) : ""}<code style="${r.removed ? "text-decoration: line-through" : ""}">${esc(r.where)}</code></span><span class="row">${sl(r.state, r.tone)}${r.issue ? `<span class="mono small">${esc(r.issue)}</span>` : ""}</span></span><span aria-hidden="true" style="font-size: 1.25rem; color: ${TX2}">›</span></a></li>`).join("")}</ol></section>`).join("")}
+        ${fs.recipients ? `<section class="pcard"><h2 style="font-size: .875rem; color: ${TX2}">${esc(fs.toTitle)}</h2>${fs.recipients.map((rp) => `<span style="display: grid; font-size: .9375rem"><b style="font-weight: 620">${esc(rp.name)}</b><span class="small" style="font-size: .8125rem">${esc(rp.role)}</span></span>`).join("")}<span style="font-size: .8125rem">${esc(fs.receives)}</span></section>` : ""}`;
+    }
+    if (kind !== "receipt") {
+      const fs = src;
+      if (fs.mode === "compare") bar = `<span style="font-size: .8125rem; font-weight: 560">${esc(fs.count)}</span>${line("alert", fs.barLines[0].t, "var(--rly-color-held-ink)", ".75rem")}${wideBtn(fs.actions[0][0], "secondary", "defaultSize", " disabled")}${wideBtn(fs.actions[1][0], "primary", "principal")}`;
+      else bar = `<span style="font-size: .8125rem; font-weight: 560">${esc(fs.count)}</span><div class="two">${wideBtn(R.cancel, "secondary", "defaultSize")}${wideBtn(R.editSummary, "secondary", "defaultSize")}</div>${wideBtn(R.send, "primary", "principal")}<span class="small">${esc(M.d.requestChanges.cancelLine)}</span>`;
+    }
+    return `<div class="pfs" role="dialog" aria-modal="true" aria-label="${esc(title)}" data-region="fullscreen">
+      <header><a href="#"><span aria-hidden="true">←</span><span>${esc(back)}</span></a><b>${esc(title)}</b>${sl(badge, tone)}</header>
+      <div class="body" data-region="${region}">${body}</div>
+      <div class="pbar2" role="toolbar" aria-label="${esc(A.bar)}" data-region="actionbar">${bar}</div></div>`;
+  };
+
+  const settingsHtml = (M, st, phone) => {
+    const S = M.T.settings, EX = M.d.templates.example, dd = st.d, bs = phone ? "defaultSize" : "dense";
+    return `<div class="set"><div style="display: grid; gap: 4px"><h1>${esc(S.title)}</h1><p class="muted" style="margin: 0">${esc(M.fill(S.lead, { machine: st.machine }))}</p></div>
+      <nav class="stabs" aria-label="${esc(S.title)}" data-region="tabs">${S.tabs.map((t) => `<a href="#" aria-current="${t === S.current ? "page" : "false"}">${esc(t)}</a>`).join("")}</nav>
+      <div style="display: grid; gap: 4px"><h2 style="margin: 0; font-size: 1.25rem; font-weight: 620">${esc(S.heading)}</h2><p class="muted" style="margin: 0; font-size: .9375rem; max-inline-size: 48em">${esc(S.about)}</p></div>
+      <div class="cols2" data-region="settings">
+        <section aria-label="${esc(M.fill(S.templatesOn, { machine: st.machine }))}" style="display: grid; gap: 10px">
+          <ol class="tlist">${st.list.map((r) => `<li${r.on ? " data-on" : ""}><span class="row" style="justify-content: space-between"><b style="font-size: .9375rem; font-weight: ${r.dim ? 430 : 620}; color: ${r.dim ? TX2 : TX1}">${esc(r.name)}</b>${sl(r.state, r.tone)}</span><span style="font-size: .8125rem">${esc(r.source)}</span><code class="small" style="overflow-wrap: anywhere">${esc(r.path)}</code></li>`).join("")}</ol>
+          ${line("arrow", M.d.templates.precedence, TX2, ".8125rem")}${st.lines.map((l) => line(l.g, l.t)).join("")}
+        </section>
+        <section class="tdet" aria-label="${esc(dd.name + ", " + dd.state)}"><div style="display: grid; gap: 4px"><span class="row"><h3 style="margin: 0; font-size: 1.0625rem; font-weight: 620">${esc(dd.name)}</h3>${sl(dd.state, dd.tone)}</span><span class="small" style="font-size: .8125rem; overflow-wrap: anywhere">${esc(dd.source)}</span></div>
+          ${notice("neutral", dd.notice, "notice")}
+          ${dd.hasOpen ? `<div class="row" data-region="action">${btn(S.open, "secondary", bs, ` aria-label="${esc(S.open + ", " + EX.path)}"`)}${btn(S.readAgain, "quiet", bs)}</div>` : ""}
+          <dl><dt class="muted">${esc(S.items)}</dt><dd><ol>${dd.items.map((i) => `<li>${esc(i)}</li>`).join("")}</ol></dd><dt class="muted">${esc(S.verdicts)}</dt><dd>${esc(dd.verdicts)}</dd><dt class="muted">${esc(S.rules)}</dt><dd><ul>${dd.rules.map((i) => `<li>${esc(i)}</li>`).join("")}</ul></dd><dt class="muted">${esc(S.output)}</dt><dd>${esc(dd.output)}</dd></dl>
+        </section>
+      </div></div>`;
+  };
+
+  const V46 = ["soReady", "soStep", "soBlocked", "fsPreview", "fsItem", "fsEdit", "fsSent", "rcWait", "fsCompare", "setA", "setB", "ckSuggest", "ckFlip", "ckPost", "ckRc"];
+  const phone46 = (M, st, V, nav) => {
+    const { X, T, d, F } = M, sh = X.shell, mods = X.modules;
+    const settings = !!V.settings;
+    let overlay = "";
+    if (st.view === "fsItem") overlay = pfHtml(M, "item", { ...V.fs, item: V.phoneItem });
+    else if (st.view === "fsSent" || st.view === "rcWait") overlay = pfHtml(M, "receipt", V.receipt);
+    else if (V.fs) overlay = pfHtml(M, "list", V.fs);
+    else if (V.fsList) overlay = pfHtml(M, "list", V.fsList);
+    const crumb = settings ? [T.settings.title, T.settings.current] : [X.crumb.parent, X.crumb.current];
+    const summary = settings || overlay || st.view === "soStep" ? "" : `<div class="psum" style="padding: 8px 16px 0"><span class="repo">${esc(X.pr.repo)}</span><h1>${esc(d.pr.title)}</h1><span class="mk">${sl(T.agentWritten, "neutral")}<span class="muted">${esc(T.writtenBy)}</span></span><span class="muted">${esc(X.pr.line)}</span></div>`;
+    const header = `<div data-region="header"><header class="mast"><a href="${esc(mods.connect.href)}" class="mast-brand" aria-label="${esc(sh.brandLabel)}"><relay-chef size="28"></relay-chef></a><p class="mast-title"><b>${esc(settings ? T.settings.title : mods.code.name)}</b>${settings ? "" : `<span>${esc(X.pr.num)}</span>`}</p><div class="tools"><button type="button" class="bell" aria-label="${esc(sh.notifications.aria)}" aria-expanded="false"><relay-glyph name="bell" size="19"></relay-glyph></button><button type="button" class="ask" aria-expanded="false"><span class="chef-desk"><relay-chef size="32"></relay-chef></span><span class="chef-phone"><relay-chef size="24"></relay-chef></span><span>${esc(sh.askRelay)}</span></button></div></header>
+      <nav class="crumb" aria-label="Breadcrumb"><span class="parents"><span><a href="#">${esc(crumb[0])}</a><span aria-hidden="true">&nbsp;/&nbsp;</span></span></span><span class="cur" aria-current="page">${esc(crumb[1])}</span></nav>${summary}</div>`;
+    let main = "";
+    if (settings) return `<div class="work">${header}${settingsHtml(M, V.settings, true)}</div>${nav}`;
+    if (st.view === "soStep") {
+      const S = T.step;
+      main = `<a href="#" class="pback"><span aria-hidden="true">←</span><span>${esc(S.back)}</span></a>
+        <div style="display: grid; gap: 4px"><span class="mk small" style="font-size: .8125rem"><span class="stopn">2</span><span>${esc(S.of)}</span>${sl(T.signOff.matched, "positive")}</span><h1 style="margin: 0; font-size: 1.375rem; font-weight: 620; letter-spacing: -0.02em; line-height: 1.2">${esc(V.stepList.title)}</h1><span class="small" style="font-size: .8125rem">${esc(S.meta)}</span></div>
+        <ol class="prows" data-region="list">${V.stepList.files.map((p) => { const x = M.byPath[p]; const marks = [{ g: "check", w: S.read, ink: M.TXT2 }, ...M.marksOf(x).map((m) => m.g === "clock" ? { ...m, w: M.CP.legend.changed } : m)]; return `<li><a href="#" class="prow"><span class="n">${M.order.indexOf(p) + 1}</span><span class="b"><code>${esc(x.name)}</code><span>${esc(x.module)}, ${esc(M.RISK[x.risk][1].toLowerCase())}, ${esc(M.size(x))}</span>${marks.map(mk).join("")}</span><span class="bd" style="align-items: center">${(x.findings || []).map((id) => pb(F[id].p)).join("")}${g("arrow", 16)}</span></a></li>`; }).join("")}</ol>
+        <span class="small">${esc(S.tap)}</span>`;
+    } else if (V.so) main = soCardHtml(M, V.so, true);
+    else if (V.ck) main = ckHtml(M, V.ck, true) + (V.post ? postHtml(M, V.post) : "") + scHtml(M, V.sc, true);
+    const inert = overlay ? ' inert aria-hidden="true"' : "";
+    return `<div class="work"${inert}>${header}<main class="pmain">${main}</main></div>${overlay ? nav.replace("<nav ", '<nav inert aria-hidden="true" ') : nav}${overlay}`;
+  };
+
+  const desktop = (M, st, V) => {
+    const { CP, X, d, F } = M;
+    const sh = X.shell, mods = X.modules, N = X.nav, ap = X.approvals;
+    const navItem = (k, secondary) => { const m = mods[k], aria = k === "fleet" ? ap.navAria : m.name; return `<a href="${esc(m.href)}" class="nav-item"${secondary ? " data-secondary" : ""} data-bar="${N.bar.includes(k)}" aria-label="${esc(aria)}" aria-current="${k === X.module && !V.settings ? "page" : "false"}"><span class="g19"><relay-glyph name="${esc(m.icon)}" size="${secondary ? 17 : 19}"></relay-glyph></span><span class="g24"><relay-glyph name="${esc(m.icon)}" size="24"></relay-glyph></span><span class="side-name">${esc(m.name)}</span><span class="bar-name">${esc(m.name)}</span>${k === "fleet" ? `<span class="count" aria-label="${esc(ap.badgeAria)}">${esc(ap.badge)}</span>` : ""}</a>`; };
+    const nav = `<aside class="side" aria-label="${esc(sh.navLabel)}"><div class="side-in">
+      <a href="${esc(mods.connect.href)}" class="brand" aria-label="${esc(sh.brandLabel)}"><relay-chef size="32"></relay-chef><span>${esc(sh.product)}</span></a>
+      <nav class="nav" aria-label="${esc(sh.modulesLabel)}" data-region="nav">${N.primary.map((k) => navItem(k, false)).join("")}<div class="nav-sep" role="separator"></div>${N.secondary.map((k) => navItem(k, true)).join("")}<button type="button" class="nav-more" aria-label="${esc(sh.more.name)}" aria-haspopup="dialog" aria-expanded="false" aria-current="false" data-current="false"><relay-glyph name="${esc(sh.more.icon)}" size="24"></relay-glyph><span>${esc(sh.more.name)}</span></button></nav>
+      <a href="${esc(sh.settings.href)}" class="nav-item side-settings" data-secondary aria-label="${esc(sh.settings.aria)}" aria-current="${V.settings ? "page" : "false"}"><span class="g19"><relay-glyph name="shield" size="17"></relay-glyph></span><span class="side-name">${esc(sh.settings.label)}</span></a>
+      <button type="button" class="session" aria-label="${esc(sh.session.aria)}"><span class="avatar" aria-hidden="true"><relay-glyph name="shield" size="17"></relay-glyph></span><span>${esc(sh.session.title)}<small>${esc(sh.session.access)}</small></span><span class="online" aria-hidden="true"></span></button>
+    </div></aside>`;
+    const large = st.view === "large";
+    const P = large ? { ...X.pr, ...d.large.pr, crumbs: [X.pr.crumbs[0], X.pr.crumbs[1], d.large.pr.num] } : { ...X.pr, title: d.pr.title };
+    const header = `<div data-region="header">
+      <header class="mast">
+        <a href="${esc(mods.connect.href)}" class="mast-brand" aria-label="${esc(sh.brandLabel)}"><relay-chef size="28"></relay-chef></a>
+        <p class="mast-title"><b>${esc(mods.code.name)}</b><span>${esc(P.num)}</span></p>
+        <div class="tools">
+          <button type="button" class="hosts" aria-label="${esc(sh.hosts.aria)}"><relay-glyph name="shield" size="19"></relay-glyph><span>${esc(sh.hosts.label)}</span></button>
+          <button type="button" class="bell" aria-label="${esc(sh.notifications.aria)}" aria-expanded="false"><relay-glyph name="bell" size="19"></relay-glyph></button>
+          <button type="button" class="ask" aria-expanded="false"><span class="chef-desk"><relay-chef size="32"></relay-chef></span><span class="chef-phone"><relay-chef size="24"></relay-chef></span><span>${esc(sh.askRelay)}</span><kbd>${esc(sh.askShortcut)}</kbd></button>
+        </div>
+      </header>
+      ${V.settings ? "" : `<div class="prhead">
+        <nav class="crumbs" aria-label="Breadcrumb"><a href="#code">${esc(P.crumbs[0])}</a><span aria-hidden="true">/</span><a href="#code/pull-requests">${esc(P.crumbs[1])}</a><span aria-hidden="true">/</span><b aria-current="page" style="font-weight: 520; color: var(--rly-color-text-1)">${esc(P.crumbs[2])}</b></nav>
+        <span class="repo">${esc(P.repo)}</span>
+        <h1>${esc(P.title)}</h1>
+        <div class="meta">
+          ${large ? "" : `<span><code>${esc(d.pr.branch)}</code> ${esc(X.pr.into)} <code>${esc(d.pr.base)}</code></span>`}
+          <span>${esc(P.line)}</span>
+          ${large ? "" : `<span>${sl(X.pr.check, "critical")}<code>${esc(X.pr.checkName)}</code></span>`}
+          <span>${esc(P.review)}</span>
+          ${V.by ? `<span>${sl(M.T.agentWritten, "neutral")}<span>${esc(M.T.byLine)}</span></span>` : ""}
+        </div>
+      </div>`}
+    </div>`;
+    const filesOn = !!V.files;
+    const ct = V.ctxToggle;
+    const tabs = `<div class="tabsrow" data-region="tabs">
+      <div role="group" aria-label="${esc(CP.view)}" class="seg2"><button type="button" aria-pressed="${!filesOn}">${esc(CP.canvas)}</button><button type="button" aria-pressed="${filesOn}">${esc(CP.files)}${kbd(CP.filesKey)}</button></div>
+      ${ct ? `<div role="group" aria-label="${esc(CP.familiarity)}" class="seg2"><button type="button" aria-pressed="${ct === "new"}">${ct === "new" ? g("check", 14) : ""}${esc(CP.newToArea)}</button><button type="button" aria-pressed="${ct === "known"}">${ct === "known" ? g("check", 14) : ""}${esc(CP.knowArea)}</button><span aria-hidden="true">${kbd(CP.ctxKey)}</span></div>` : ""}
+    </div>`;
+    const ladder = st.level == null ? "" : `<div role="group" aria-label="${esc(CP.zoom)}" class="ladder">${CP.levels.map((lv, i) => `<button type="button" aria-current="${i === st.level}" aria-disabled="${!!V.ladderOff}"><span class="n">${i + 1}</span>${esc(lv)}</button>`).join("")}</div><span class="levelline">${esc(st.levelLine)}</span>`;
+    const toolbar = `<div class="toolbar" data-region="toolbar">${ladder}
+      <label class="search"><span class="sr">${esc(CP.search)}</span><input type="search" placeholder="${esc(CP.search)}">${kbd(CP.searchKey)}</label>
+      <span class="sinceline">${g("clock", 14)}<span>${esc(V.since || (large ? d.large.pr.since : X.pr.since))}</span></span>
+    </div>`;
+    const noticeHtml = V.notice ? `<div class="notice-wrap">${notice("neutral", V.notice, "notice")}</div>` : "";
+    const doc = V.doc ? `<div class="docwrap"><section class="doc" aria-label="${esc(V.doc.title)}" data-region="card">
+      <div class="doc-head"><h2>${esc(V.doc.title)}</h2>${sl(V.doc.badge, V.doc.tone)}<span class="meta">${esc(V.doc.meta)}</span></div>
+      ${V.doc.lead ? `<p class="lead">${esc(V.doc.lead)}</p>` : ""}
+      ${V.doc.sections.length ? `<div class="cols" style="columns: ${V.doc.cols}">${secsHtml(V.doc.sections)}</div>` : ""}
+      ${V.doc.foot ? `<p class="foot">${g(V.doc.footG, 14)}<span>${esc(V.doc.foot)}</span></p>` : ""}
+    </section></div>` : "";
+
+    if (V.settings) return `<div class="shell">${nav}<div class="work">${header}<main>${settingsHtml(M, V.settings, false)}</main></div></div>`;
+    let body;
+    if (V.linear) {
+      body = `<div class="cvwrap"><section class="linear" aria-label="${esc(CP.linTitle)}" data-region="list"><div><h2>${esc(CP.linTitle)}</h2><span class="small">${esc(V.linear.note)}</span></div>
+        <ol style="display: grid; gap: 18px">${M.lin.map((ch) => `<li class="chap"><h3><span>${esc(ch.title)}</span><span>${esc(ch.meta)}</span></h3><ol class="lfiles">${ch.files.map((f) => `<li class="lfile"><div class="hd"><span class="small mono">${f.n}</span><code>${esc(f.path)}</code><span class="small">${esc(f.meta)}</span>${f.labels.map((l) => sl(l.label, l.tone)).join("")}</div><ul>${f.hunks.map((hk) => `<li class="hunk" aria-current="${hk.here}"><code>${esc(hk.fn)}</code><span class="muted">${esc(hk.meta)}</span>${hk.finds.map((fd) => `<span class="mk">${pb(fd.p)}${sl(fd.life, fd.tone)}<span>${esc(fd.title)}</span></span>`).join("")}${hk.labels.map((l) => sl(l.label, l.tone)).join("")}${hk.here ? `<b style="font-weight: 620">${esc(CP.here)}</b>` : ""}</li>`).join("")}</ul></li>`).join("")}</ol></li>`).join("")}</ol>
+      </section><div class="status" role="status"><span>${esc(st.status)}</span></div></div>`;
+    } else {
+      const W = V.W || 1016, H = V.H;
+      const parts = [];
+      V.regions.forEach((r) => parts.push(`<div class="region" aria-hidden="true" style="${pos(r)}"><span><b>${esc(r.label)}</b><span>${esc(r.count)}</span></span></div>`));
+      V.ctx.forEach((c) => parts.push(c.outline ? `<div class="ctxn" aria-hidden="true" style="${pos(c)} background: transparent"></div>` : `<div class="ctxn" role="group" aria-label="${esc(c.aria)}" style="${pos(c)} background: var(--rly-color-canvas)"><span class="nm">${c.rank ? pb(c.rank) : ""}<span>${esc(c.name)}</span></span>${c.line ? `<span class="ln" style="color: ${c.ink || "var(--rly-color-text-2)"}">${c.g ? g(c.g) : ""}<span>${esc(c.line)}</span></span>` : ""}</div>`));
+      V.hl.forEach((x) => parts.push(`<div class="hl" style="${pos(x)} border: ${x.border}; background: ${x.bg}"><span style="top: ${x.lt}px">${g(x.g)}<span>${esc(x.label)}</span></span></div>`));
+      V.cols.forEach((c) => parts.push(`<div class="col" role="group" aria-label="${esc(c.aria)}" style="${pos(c)} border: ${c.border}"><div class="hd"><b>${esc(c.name)}</b><span>${esc(c.meta)}</span><span>${esc(c.risk)}</span></div>${c.chips.map((ch) => `<div class="chip" style="top: ${ch.top}px"><span>${esc(ch.text)}</span><span style="display: flex; gap: 3px">${ch.badges.map(pb).join("")}</span></div>`).join("")}</div>`));
+      if (V.lines.length) parts.push(edges(V.lines, W, H));
+      V.bands.forEach((b) => parts.push(`<div class="band" style="${pos(b)}${b.z ? ` z-index: ${b.z};` : ""}"><span style="left: ${b.tabX}px; top: ${b.tabY}px">${b.stop ? `<span class="stopn">${b.stop}</span>` : ""}<b>${esc(b.id)}</b><span>${esc(b.title)}, ${esc(b.files)} files${esc(b.extra || "")}</span></span></div>`));
+      V.labels.forEach((l) => parts.push(`<span class="elabel" aria-hidden="true" style="left: ${l.x}px; top: ${l.y}px">${esc(l.t)}</span>`));
+      V.nodes.forEach((n) => parts.push(`<button type="button" class="nd" aria-label="${esc(n.aria)}" style="${pos(n)} border: ${n.border}; outline: ${n.focus ? "2px solid var(--rly-color-focus)" : "none"}; opacity: ${n.op ?? 1}"><span class="nm">${esc(n.name)}</span><span class="muted" style="font-variant-numeric: tabular-nums">${esc(n.size)}</span>${n.marks.map(mk).join("")}${n.badges.length ? `<span class="badges">${n.badges.map(pb).join("")}</span>` : ""}</button>`));
+      V.stops.forEach((s) => parts.push(`<span class="stop" aria-hidden="true" style="left: ${s.x}px; top: ${s.y}px; color: ${s.read ? "var(--rly-color-canvas)" : "var(--rly-color-text-1)"}; background: ${s.read ? "var(--rly-color-text-1)" : "var(--rly-color-surface-1)"}">${s.n}</span>`));
+      parts.push(pinsHtml(V.pins));
+      V.notes.forEach((nt) => parts.push(`<div class="note" role="note" style="${pos(nt)}"><span class="mk small">${g("arrow")}<span>${esc(nt.who)}</span></span><span>${esc(nt.body)}</span></div>`));
+      V.boxes.forEach((b) => parts.push(`<div class="box" role="group" aria-label="${esc(b.aria)}" style="${pos(b)} border: ${b.border}"><div class="hd"><b>${esc(b.path)}</b><span><span>${esc(b.size)}</span><span>${esc(b.risk)}</span>${b.marks.map(mk).join("")}</span></div>${b.fns.map((fn) => `<div class="fn"><code>${esc(fn.n)}</code><span class="muted" style="white-space: nowrap">${esc(fn.kind)}</span><span class="ln">${esc(fn.lines)}</span><span class="mk">${fn.p ? pb(fn.p) : ""}${fn.life ? sl(fn.life, "caution") : ""}${fn.check ? sl(fn.check[0], fn.check[1]) : ""}</span></div>`).join("")}</div>`));
+      V.stubs.forEach((s) => parts.push(`<div class="stub" style="${pos(s)} text-align: ${s.align}"><b>${esc(s.label)}</b><span class="mk" style="justify-content: ${s.align === "end" ? "flex-end" : "flex-start"}; color: ${s.failing ? M.RED : "var(--rly-color-text-2)"}">${s.failing ? g("alert") : ""}<span>${esc(s.line)}</span></span></div>`));
+      if (V.fileZoom) parts.push(`<div class="fz" role="group" aria-label="sync-worker/socket.ts, high risk, 5 parts changed"><div class="hd"><b>${esc(d.fileZoom.file)}</b><span>${esc(CP.newFile)}</span><span>${esc(M.RISK.high[1])}</span><span class="mk">${g("clock")}${esc(CP.changedSince)}</span></div>${V.fileZoom.rows.map((fr) => `<div><div class="fzr"><code>${esc(fr.n)}</code><span class="k">${esc(fr.kind)}, lines ${esc(fr.range)}</span><span class="bar" aria-hidden="true"><span style="inline-size: ${fr.bar}; background: ${fr.moved ? "transparent" : "var(--rly-color-text-2)"}; border: ${fr.moved ? "1.5px dashed var(--rly-color-text-2)" : "0"}"></span></span><span class="mono" style="text-align: end">+${fr.lines}</span><span class="mk" style="justify-content: end">${fr.f ? pb(F[fr.f].p) + sl(F[fr.f].life, "caution") : ""}</span></div>${fr.f ? `<div class="fzf" role="note" aria-label="Finding ${esc(fr.f)}, pinned to ${esc(fr.n)}"><span class="mk small">${g("arrow")}${esc(CP.pinned)}</span><span class="t">${esc(F[fr.f].title)}</span><span class="small">${esc(F[fr.f].evidence)}</span><span class="mk small"><span>${esc(CP.enterOpens)}</span>${kbd("Enter")}</span></div>` : ""}</div>`).join("")}</div>`);
+      if (V.diffZoom) { const DF = d.diff, f1 = F.F1; parts.push(`<div class="dz" role="group" aria-label="Diff of ${esc(DF.fn)} in ${esc(DF.file)}"><div class="hd"><b>${esc(DF.file)}, ${esc(DF.fn)}</b><code class="small">${esc(DF.head)}</code><span class="small" style="margin-inline-start: auto">${esc(DF.readLine)}</span></div>${DF.lines.map((ln) => `<div><div class="dl" aria-label="Added line ${ln.n}"><span class="no">${ln.n}</span><span aria-hidden="true">+</span><span class="c">${esc(ln.c)}</span></div>${ln.f ? `<div class="fcard" role="note" aria-label="Finding ${esc(ln.f)}, between lines 16 and 17"><div class="row">${pb(f1.p)}${sl(f1.life, "caution")}<span class="small">${esc(f1.raised)}</span></div><span class="t">${esc(f1.title)}</span><span class="muted">${esc(f1.body)}</span><span class="mk">${sl(CP.failed, "critical")}<span>${esc(f1.evidence)}</span></span><div class="row" data-region="action">${btn(CP.markHandled)}<span class="small" style="font-size: .8125rem">${esc(CP.handledLine)}</span></div></div>` : ""}</div>`).join("")}</div>`); }
+      if (V.building) {
+        parts.push(`<div class="bl" data-region="list"><b style="font-size: .875rem; font-weight: 620">${esc(CP.filesTitle)}</b><span class="small">${esc(d.building.list)}</span><ul>${d.files.map((x) => `<li><a href="#">${esc(x.path)}</a><span style="display: flex; gap: 3px">${(x.findings || []).map((id) => pb(F[id].p)).join("")}</span><span class="mono muted">${esc(M.size(x))}</span></li>`).join("")}</ul></div>`);
+        [[332, 64, 320, 300], [668, 64, 336, 300], [332, 380, 320, 200], [668, 380, 336, 200]].forEach(([x, y, w, h]) => parts.push(`<div style="${pos({ x, y, w, h })}">${skel(`block-size: ${h}px`)}</div>`));
+      }
+      if (V.keys) parts.push(`<div class="panel" role="region" aria-label="${esc(CP.keysTitle)}" data-region="card" style="right: 12px; top: 12px; inline-size: 300px"><b>${esc(CP.keysTitle)}</b>${d.keys.map((k) => `<div class="keyrow"><span>${k.k.map(kbd).join("")}</span><span>${esc(k.what)}</span></div>`).join("")}</div>`);
+      if (V.panel) parts.push(`<div class="panel" role="region" aria-label="${esc(V.panel.title)}" data-region="card" style="right: 12px; top: 12px; inline-size: 304px"><b>${esc(V.panel.title)}</b>${V.panel.rows.map((r) => `<div style="display: grid; gap: 4px"><span class="pr" style="color: ${r.ink || "var(--rly-color-text-2)"}">${g(r.g)}<span style="color: var(--rly-color-text-1)">${esc(r.text)}</span></span>${r.hasBar ? `<span class="pbar" aria-hidden="true"><span style="inline-size: ${r.bar}"></span></span>` : ""}</div>`).join("")}<span class="muted">${esc(V.panel.foot)}</span></div>`);
+      if (V.sheet) parts.push(`<section class="sheet" aria-label="Context card, ${esc(V.sheet.title)}" data-region="card" style="${pos(V.sheet)}"><div style="display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline"><h2>${esc(V.sheet.title)}</h2><span class="small">${esc(V.sheet.meta)}</span></div><div style="columns: 2; column-gap: 20px">${secsHtml(V.sheet.sections)}</div></section>`);
+      if (V.legend) { const L = CP.legend; parts.push(`<div class="legend" role="region" aria-label="${esc(L.title)}" data-region="legend"><b>${esc(L.title)}</b>
+        <span><span class="sw" style="border: 2px solid var(--rly-color-text-1)"></span>${esc(L.high)}<span class="sw" style="border: 1px solid var(--rly-color-border-2)"></span>${esc(L.medium)}<span class="sw" style="border: 1px dashed var(--rly-color-border-2)"></span>${esc(L.low)}</span>
+        <span class="muted">${esc(L.size)}</span>
+        ${V.legend.edges ? `<span><span class="ln22" style="border-block-start: 1.5px solid var(--rly-color-text-2)"></span>${esc(L.edges)}</span><span><span class="ln22" style="border-block-start: 1.5px dashed var(--rly-color-text-2)"></span>${esc(L.moved)}</span><span><span class="ln22" style="block-size: 10px; border: 1.5px dashed var(--rly-color-text-2); border-radius: 4px"></span>${esc(L.partition)}</span>` : ""}
+        ${V.legend.noEdges ? `<span>${g("minus")}${esc(L.noEdges)}</span>` : ""}
+        ${V.legend.ctx ? `<span><span class="sw" style="border: 1px dashed var(--rly-color-border-2)"></span>${esc(V.legend.ctx)}</span>` : ""}
+        <span>${pb("P1")}${esc(L.finding)}${g("clock")}${esc(L.changed)}</span></div>`); }
+      if (V.mini) parts.push(`<div class="minimap" role="img" aria-label="${esc(st.miniLabel)}" data-region="minimap"><span>${esc(CP.map)}, ${esc(CP.levels[st.level])}</span>${minimapSvg(V.mini, M)}</div>`);
+      body = `<div class="cvwrap"><div data-region="canvas" style="display: grid; gap: 8px"><div class="cvscroll" style="block-size: ${H}px"><div class="cvfit"><div class="cv" role="region" aria-label="${esc(st.canvasLabel)}. ${esc(CP.visualAid)}" style="block-size: ${H}px; inline-size: ${W}px">${parts.join("")}</div></div></div>
+        <div class="status" role="status">${V.building ? sl(CP.building, "progress") : ""}<span>${esc(st.status)}</span></div></div></div>`;
+    }
+    const dock = V.so ? soCardHtml(M, V.so, false) : V.ck ? ckHtml(M, V.ck, false) + scHtml(M, V.sc, false) : V.rc ? rcCardHtml(M, V.rc, false) : "";
+    if (dock) body = `<div class="dockgrid"><div style="min-inline-size: 0">${body}</div><div style="display: grid; gap: 16px; min-inline-size: 0">${dock}</div></div>`;
+    const pre = V.post ? `<div class="docwrap">${postHtml(M, V.post)}</div>` : "";
+    return `<div class="shell"${V.fs ? ' inert aria-hidden="true"' : ""}>${nav}<div class="work">${header}<main>${tabs}${toolbar}${noticeHtml}${doc}${pre}${body}</main></div></div>${V.fs ? fsHtml(M, V.fs) : ""}`;
+  };
+
+  const phone = (M, st, V) => {
+    const { CP, X, d, F, CX } = M, PH = CP.phone;
+    const sh = X.shell, mods = X.modules, N = X.nav, ap = X.approvals;
+    const navItem = (k) => { const m = mods[k], aria = k === "fleet" ? ap.navAria : m.name; return `<a href="${esc(m.href)}" class="nav-item" data-bar="${N.bar.includes(k)}" aria-label="${esc(aria)}" aria-current="${k === X.module ? "page" : "false"}"><span class="g19"><relay-glyph name="${esc(m.icon)}" size="19"></relay-glyph></span><span class="g24"><relay-glyph name="${esc(m.icon)}" size="24"></relay-glyph></span><span class="side-name">${esc(m.name)}</span><span class="bar-name">${esc(m.name)}</span>${k === "fleet" ? `<span class="count" aria-label="${esc(ap.badgeAria)}">${esc(ap.badge)}</span>` : ""}</a>`; };
+    const nav = `<nav class="nav" aria-label="${esc(sh.modulesLabel)}" data-region="nav">${[...N.primary, ...N.secondary].map(navItem).join("")}<button type="button" class="nav-more" aria-label="${esc(sh.more.name)}" aria-haspopup="dialog" aria-expanded="false" aria-current="false" data-current="false"><relay-glyph name="${esc(sh.more.icon)}" size="24"></relay-glyph><span>${esc(sh.more.name)}</span></button></nav>`;
+    const large = st.view === "large";
+    const num = large ? d.large.pr.num : X.pr.num;
+    if (V46.includes(st.view)) return phone46(M, st, V, nav);
+    const isDiff = st.view === "diff";
+    const header = `<div data-region="header">
+      <header class="mast">
+        <a href="${esc(mods.connect.href)}" class="mast-brand" aria-label="${esc(sh.brandLabel)}"><relay-chef size="28"></relay-chef></a>
+        <p class="mast-title"><b>${esc(mods.code.name)}</b><span>${esc(num)}</span></p>
+        <div class="tools"><button type="button" class="bell" aria-label="${esc(sh.notifications.aria)}" aria-expanded="false"><relay-glyph name="bell" size="19"></relay-glyph></button><button type="button" class="ask" aria-expanded="false"><span class="chef-desk"><relay-chef size="32"></relay-chef></span><span class="chef-phone"><relay-chef size="24"></relay-chef></span><span>${esc(sh.askRelay)}</span></button></div>
+      </header>
+      <nav class="crumb" aria-label="Breadcrumb"><span class="parents"><span><a href="${esc(X.crumb.parentHref)}">${esc(X.crumb.parent)}</a><span aria-hidden="true">&nbsp;/&nbsp;</span></span></span><span class="cur" aria-current="page">${esc(X.crumb.current)}</span></nav>
+      ${isDiff ? "" : `<div class="psum" style="padding: 8px 16px 0"><span class="repo">${esc(large ? d.large.pr.repo : X.pr.repo)}</span><h1>${esc(large ? d.large.pr.title : PH.title)}</h1><span class="muted">${esc(large ? d.large.pr.line : PH.meta)}</span>${large ? "" : `<span class="mk">${sl(X.pr.check, "critical")}<code>${esc(X.pr.checkName)}</code></span>`}<span class="mk muted">${g("clock", 14)}<span>${esc(large ? d.large.pr.since : PH.since)}</span></span></div>`}
+    </div>`;
+    const sel = d.phone.selected;
+    let main = "";
+    if (isDiff) {
+      const DF = d.diff, f1 = F.F1;
+      main = `<a href="#" class="pback"><span aria-hidden="true">←</span><span>${esc(PH.back)}</span></a>
+        <div class="pfile"><h1>${esc(PH.file)}</h1><code>${esc(PH.filePath)}</code><span>${esc(PH.fileMeta)}</span><span class="mk" style="color: var(--rly-color-text-1)">${g("clock")}<span>${esc(PH.changed)}</span></span></div>
+        <div class="pdiff" data-region="list"><div class="hd"><b>${esc(PH.hunk)}</b><span class="small" style="font-size: .6875rem">${esc(DF.readLine)}</span></div>
+        ${DF.lines.map((ln) => `<div><div class="pdl" aria-label="Added line ${ln.n}"><span class="no">${ln.n}</span><span aria-hidden="true">+</span><span class="c">${esc(ln.c)}</span></div>${ln.f ? `<div class="fcard" role="note" aria-label="Finding ${esc(ln.f)}, between lines 16 and 17" data-region="card"><div class="row">${pb(f1.p)}${sl(f1.life, "caution")}</div><span class="t">${esc(f1.title)}</span><span class="muted">${esc(f1.body)}</span><span class="mk" style="flex-wrap: wrap">${sl(CP.failed, "critical")}<span>${esc(f1.evidence)}</span></span></div>` : ""}</div>`).join("")}</div>
+        <div class="pact" data-region="action">${btn(CP.markHandled, "secondary", "defaultSize", ' style="inline-size: 100%"')}<span class="small">${esc(CP.handledLine)}</span>${btn(PH.next, "secondary", "defaultSize", ' style="inline-size: 100%"')}</div>`;
+    } else {
+      const ctxView = ["ctxOn", "brief", "card", "radius", "known", "ctxMissing", "linCtx"].includes(st.view);
+      const known = st.view === "known", missing = st.view === "ctxMissing";
+      if (ctxView) {
+        const items = missing ? CX.missing.sections.map((s) => s.items[0]) : CX.brief.sections.map((s) => s.items[0]);
+        main += `<section class="pcard" aria-label="${esc(PH.briefTitle)}" data-region="card"><h2>${esc(PH.briefTitle)}</h2>${missing ? `<span>${sl(CX.missing.badge, "caution")}</span>` : ""}
+          ${known ? `<p style="margin: 0; font-size: .875rem">${esc(CX.briefLine)}</p>` : items.map((it) => `<div class="it"><span>${esc(it.text)}</span><span class="cites">${it.cites.map((c) => `<a href="#" class="cite" aria-label="Source: ${esc(c)}">${esc(c)}</a>`).join("")}</span></div>`).join("")}
+          <span class="small">${esc(missing ? PH.missingFoot : PH.briefFoot)}</span>
+          ${known ? "" : `<button type="button" class="ctxsum" aria-expanded="false"><b style="font-size: 1rem; font-weight: 620">${esc(PH.context)}</b><span class="small" style="font-size: .8125rem">${esc(PH.show)} <span aria-hidden="true">▾</span></span><span>${CX.phone.rows.map((r) => `<span>${esc(r)}</span>`).join("")}</span></button>`}
+        </section>
+        <div data-region="tabs"><button type="button" role="switch" aria-checked="${known}" class="switch"><span class="lbl"><span>${esc(CP.knowArea)}</span><small>${esc(known ? PH.switchOn : PH.switchOff)}</small></span><span class="track" aria-hidden="true" style="${known ? "background: var(--rly-color-text-1); border-color: var(--rly-color-text-1)" : ""}"><span style="${known ? "left: 21px; background: var(--rly-color-canvas)" : "left: 3px; background: var(--rly-color-text-2)"}"></span></span></button></div>`;
+      }
+      if (V.panel) main += `<section class="pcard" aria-label="${esc(V.panel.title)}" data-region="card"><h2>${esc(V.panel.title)}</h2>${V.panel.rows.map((r) => `<div style="display: grid; gap: 4px; font-size: .875rem"><span class="mk" style="align-items: start; color: ${r.ink || "var(--rly-color-text-2)"}"><span style="display: flex; padding-block-start: 3px">${g(r.g)}</span><span style="color: var(--rly-color-text-1)">${esc(r.text)}</span></span>${r.hasBar ? `<span class="pbar" aria-hidden="true" style="display: block; margin-inline-start: 16px; block-size: 6px; border-radius: 3px; background: var(--rly-color-surface-3)"><span style="display: block; block-size: 6px; border-radius: 3px; background: var(--rly-color-text-1); inline-size: ${r.bar}"></span></span>` : ""}</div>`).join("")}<span class="small">${esc(V.panel.foot)}</span></section>`;
+      if (V.notice) main += notice("neutral", V.notice, "notice");
+      if (V.building) main += `<div data-region="notice" role="status" class="mk" style="flex-wrap: wrap; font-size: .875rem">${sl(CP.building, "progress")}<span>${esc(d.building.line)}</span></div>`;
+      // Minimap
+      if (!V.building) {
+        const mini = large ? { rects: V.mini.rects, files: false, bands: false, W: 1016, H: 640, vp: V.mini.vp } : st.view === "nodeps" ? V.mini : ctxView ? { rects: CX.regions, files: true, bands: true, W: 1016, H: CX.canvasH } : { rects: d.modules, files: true, bands: true, W: 1016, H: 640 };
+        main += `<figure class="pmap" data-region="minimap"><div class="fr" role="img" aria-label="${esc(large ? st.miniLabel : PH.mapLabel)}">${minimapSvg(mini, M, large ? undefined : sel)}</div><figcaption>${esc(large ? st.miniLabel : PH.mapCap)}</figcaption></figure>`;
+      }
+      // List
+      const row = (p, i) => { const x = M.byPath[p], isSel = p === sel; const marks = (st.view === "trail" && M.RP.read.includes(p) ? [{ g: "check", w: "Read", ink: M.TXT2 }] : []).concat(M.marksOf(x).map((m) => m.g === "clock" ? { ...m, w: CP.legend.changed } : m)); return `<li><a href="#" class="prow" aria-current="${isSel}"><span class="n">${M.order.indexOf(p) + 1}</span><span class="b"><code>${esc(x.name)}</code><span>${esc(x.module)}, ${esc(M.RISK[x.risk][1].toLowerCase())}, ${esc(M.size(x))}</span>${marks.map((m) => `<span class="mk" style="color: ${m.ink}">${g(m.g)}<span>${esc(m.w)}</span></span>`).join("")}</span><span class="bd">${(x.findings || []).map((id) => pb(F[id].p)).join("")}</span></a></li>`; };
+      if (large) {
+        main += `<div data-region="list" style="display: grid; gap: 8px"><h2 style="margin: 0; font-size: 1rem; font-weight: 620">${esc(PH.largeTitle)}</h2><ol class="prows">${d.large.partitions.map((p, i) => { const finds = d.large.modules.flatMap((m) => m.finds[p.id] || []); return `<li><a href="#" class="prow"><span class="n">${i + 1}</span><span class="b"><code>${esc(p.id)}, ${esc(p.title)}</code><span>${esc(p.files)} files, ${esc(p.risk)}</span><span>${esc(d.large.modules.filter((m) => m.counts[p.id]).map((m) => m.counts[p.id] + " in " + m.id).join(", "))}</span></span><span class="bd">${finds.map(pb).join("")}</span></a></li>`; }).join("")}</ol></div>`;
+      } else if (st.view === "nodeps" || V.building) {
+        const groups = M.X.ndOrder.map((id) => ({ id, files: d.files.filter((x) => x.module === id) }));
+        main += `<div data-region="list" style="display: grid; gap: 14px">${V.building ? "" : `<span class="small">${esc(PH.byModule)}</span>`}${groups.map((gr) => `<section class="pchap"><h2 class="mono">${esc(gr.id)}</h2><ul class="prows" style="list-style: none">${gr.files.map((x) => `<li><a href="#" class="prow" style="grid-template-columns: minmax(0, 1fr) auto"><span class="b"><code>${esc(x.name)}</code><span>${esc(M.RISK[x.risk][1])}, ${esc(M.size(x))}</span>${M.marksOf(x).map(mk).join("")}</span><span class="bd">${(x.findings || []).map((id) => pb(F[id].p)).join("")}</span></a></li>`).join("")}</ul></section>`).join("")}</div>`;
+      } else {
+        main += `<div data-region="list" style="display: grid; gap: 18px">${M.RP.chapters.map((ch) => { const fs = M.chFiles(ch.id); const fc = fs.flatMap((p) => (M.byPath[p].findings || []).map((id) => F[id].p)); return `<section class="pchap"><h2>${esc(ch.n + ". " + (ch.id === "T" ? "" : ch.id + ", ") + ch.title)}</h2><span>${esc(fs.length + " files" + (fc.length ? ", " + fc.join(", ") : "") + ". " + ch.why + ".")}</span><ol class="prows">${fs.map(row).join("")}</ol></section>`; }).join("")}</div>`;
+      }
+    }
+    return `<div class="work">${header}<main class="pmain">${main}</main></div>${nav}`;
+  };
+
+  let M = null;
+  const fit = () => {
+    app.querySelectorAll(".cvscroll").forEach((sc) => {
+      const inner = sc.firstElementChild, cv = inner && inner.firstElementChild;
+      if (!cv) return;
+      const s = Math.min(1, sc.clientWidth / cv.offsetWidth);
+      inner.style.transform = s < 1 ? `scale(${s})` : "";
+      sc.style.blockSize = Math.ceil(cv.offsetHeight * s) + "px";
+    });
+  };
+  new ResizeObserver(() => fit()).observe(app);
+  const draw = () => {
+    const req = params.get("state") || M.X.meta.defaultState;
+    const st = Object.prototype.hasOwnProperty.call(M.X.states, req) ? M.X.states[req] : null;
+    root.dataset.state = st ? req : "unknown";
+    if (!st) {
+      const U = M.X.unknownState;
+      app.innerHTML = `<main class="fail" role="alert" data-region="notice"><h1>${esc(U.title)}</h1><p>${esc(U.text)} <code>${esc(req)}</code></p><p>${esc(U.known)}: ${Object.keys(M.X.states).map((k) => `<code>${esc(k)}</code>`).join(", ")}</p></main>`;
+    } else {
+      const V = { ...M.base, ...M.views[st.view] };
+      const isPhone = matchMedia("(max-width: 599px)").matches;
+      app.innerHTML = isPhone ? phone(M, st, V) : desktop(M, st, V);
+      root.dataset.layout = isPhone ? "phone" : "desktop";
+      fit();
+      app.querySelectorAll("textarea[data-default]").forEach((t) => { t.defaultValue = t.dataset.default; });
+      root.toggleAttribute("data-fs", !!app.querySelector(".fs, .pfs"));
+      app.querySelectorAll("[data-fs-scroll]").forEach((sc) => { const t = sc.querySelector('[data-fs-target="true"]'); if (t) sc.scrollTop = Math.max(0, t.offsetTop - 20); });
+    }
+    root.dataset.regions = [...new Set([...app.querySelectorAll("[data-region]")].map((e) => e.dataset.region))].join(" ");
+  };
+
+  fetch("../fixture.json", { cache: "no-store" })
+    .then((r) => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+    .then((fx) => {
+      const C = fx && fx.version === 1 && fx.data && fx.data.reviewDirections && fx.data.reviewDirections.canvas;
+      if (!C || !C.screen) throw new Error("fixture.json has no data.reviewDirections.canvas.screen (version 1)");
+      M = model(C);
+      draw();
+      matchMedia("(max-width: 599px)").addEventListener("change", draw);
+      app.addEventListener("click", (e) => {
+        const go = e.target.closest("[data-fs-go]"), back = e.target.closest("[data-fs-back]");
+        if (!go && !back) return;
+        e.preventDefault();
+        const dlg = e.target.closest('[role="dialog"]'); if (!dlg) return;
+        if (go) { const sc = dlg.querySelector("[data-fs-scroll]"), t = dlg.querySelector('[data-fs-key="' + go.dataset.fsGo + '"]'); if (sc && t) sc.scrollTo({ top: Math.max(0, t.offsetTop - 20), behavior: "smooth" }); }
+        if (back) { const r = dlg.querySelector('[data-fs-row="' + back.dataset.fsBack + '"]'); if (r) { const p = r.closest(".pane-list"); if (p) p.scrollTo({ top: Math.max(0, r.offsetTop - 20), behavior: "smooth" }); const a = r.querySelector("a"); if (a) a.focus({ preventScroll: true }); } }
+      });
+      settle();
+    })
+    .catch((e) => {
+      console.error(e);
+      app.innerHTML = `<main class="fail" role="alert"><h1>Couldn’t load fixture.json</h1><p>${esc(e.message)}. Serve the project folder over HTTP and open this page from it.</p></main>`;
+    });
+})();
+</script>
+</body>
+</html>
