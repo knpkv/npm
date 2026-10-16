@@ -32,9 +32,16 @@ export const renderCaptureDocument = (
   preloads: typeof FontModule.Type
 ): string => app.dashboardPage(snapshot, preloads.fontPreloadLink(fonts))
 
-/** Annotate existing semantic nodes only. Missing regions remain missing evidence for the gate. */
+/**
+ * Annotate existing semantic nodes only. Missing regions remain missing evidence for the gate.
+ * The shell tags its own regions for other products; this product's catalog replaces them, so each region
+ * occurs exactly once.
+ */
 const markActualRegions = (page: Page, state: ReviewState) =>
   browserCall("mark actual Code regions", async () => {
+    await page.evaluate(() => {
+      for (const element of document.querySelectorAll("[data-region]")) element.removeAttribute("data-region")
+    })
     const codePage = page.locator("[data-code-review-page]")
     const owner = codePage.locator("[data-code-review-owner]")
     const conversation = owner.locator(
