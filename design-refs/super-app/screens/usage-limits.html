@@ -67,10 +67,11 @@ main { padding: 2rem 40px 1rem; max-inline-size: 1520px; }
 .loading { display: grid; gap: .75rem; }
 .empty { display: grid; justify-items: start; gap: 1rem; padding-block: 1.5rem; max-inline-size: 34em; }
 .empty h2 { margin: 0; font-size: 1.6rem; font-weight: 620; letter-spacing: -0.025em; line-height: 1.25; text-wrap: balance; }
-.empty p, .error p { margin: 0; color: var(--rly-color-text-2); }
+.empty p { margin: 0; color: var(--rly-color-text-2); }
 .linkbtn { justify-self: start; display: inline-flex; align-items: center; gap: .4rem; min-block-size: 44px; padding-inline: 1rem; border: 1px solid var(--rly-color-border-1); border-radius: var(--rly-radius-control); background: var(--rly-color-surface-1); font-size: .875rem; font-weight: 520; color: var(--rly-color-text-1); }
-.error { display: grid; justify-items: start; gap: 1rem; padding: 1.5rem; border: 1px solid var(--rly-color-border-1); border-radius: var(--rly-radius-group); background: var(--rly-color-surface-1); max-inline-size: 40em; }
-.error h2 { margin: 0; font-size: 1.4rem; font-weight: 620; letter-spacing: -0.02em; line-height: 1.25; }
+.unavailable { display: grid; gap: 1.5rem; min-inline-size: 0; }
+.unavailable .controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: .5rem 1.5rem; min-block-size: 44px; }
+.unavailable .retry-line { margin: 0; font-size: .75rem; font-weight: 520; line-height: 1rem; color: var(--rly-color-text-2); }
 .fail { padding: 2rem; display: grid; gap: .75rem; max-inline-size: 40em; }
 .fail h1 { margin: 0; font-size: 2rem; font-weight: 620; letter-spacing: -0.03em; }
 .fail p { margin: 0; color: var(--rly-color-text-2); }
@@ -231,7 +232,7 @@ main { padding: 2rem 40px 1rem; max-inline-size: 1520px; }
     } else if (S.kind === "empty") {
       body = `<section class="empty" data-region="notice"><relay-agent agent="pkgsrc" host="birch" state="ready" size="88"></relay-agent><h2>${esc(S.empty.title)}</h2><p>${esc(S.empty.text)}</p><a href="#" class="linkbtn" data-region="action">${esc(S.empty.link)}</a></section>`;
     } else if (S.kind === "error") {
-      body = `<section class="error" role="alert" data-region="notice">${stateLabel(S.error.label, "critical", false)}<h2>${esc(S.error.title)}</h2><p>${esc(S.error.text)}</p>${button(S.error.action, "action")}</section>`;
+      body = `<div class="unavailable"><div class="controls">${button(S.error.action, "action")}</div><p class="retry-line" role="status" data-region="notice">${esc(S.error.notice)}</p></div>`;
     } else {
       body = (S.notices.length ? `<div class="notices" data-region="notice">${S.notices.map(notice).join("")}</div>` : "")
         + `<section class="summary" aria-label="Room to work" data-region="summary"><h2>${esc(S.summary.verdict)}</h2><p>${esc(S.summary.note)}</p></section>`

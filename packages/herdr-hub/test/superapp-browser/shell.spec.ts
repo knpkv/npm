@@ -1132,7 +1132,8 @@ for (const readyWhileHidden of [false, true]) {
     await terminal.getByRole("button", { name: "Agents", exact: true }).click()
     await page.locator(".superapp-sidebar, .superapp-bottom").filter({ visible: true })
       .getByRole("link", { name: "Usage", exact: true }).click()
-    await expect(page.locator("[data-module=\"usage\"] [data-module-page=\"limits\"]")).toBeFocused()
+    // The Limits tab sits in the header outlet Usage owns.
+    await expect(page.locator("[data-module-owner=\"usage\"] [data-module-page=\"limits\"]")).toBeFocused()
   })
 }
 
