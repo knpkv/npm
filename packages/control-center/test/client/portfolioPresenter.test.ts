@@ -2,6 +2,7 @@ import * as Schema from "effect/Schema"
 import { describe, expect, it } from "vitest"
 
 import { presentPortfolio } from "../../src/client/portfolio/presentPortfolio.js"
+import { PluginConnectionId } from "../../src/domain/identifiers.js"
 import { ReadinessFinding } from "../../src/domain/readiness/projections.js"
 import { makePortfolioSnapshot } from "./portfolioFixtures.js"
 
@@ -14,7 +15,7 @@ describe("portfolio presenter", () => {
         healthLabel: "Healthy",
         healthTone: "positive",
         id: "01890f6f-6d6a-7cc0-98d2-000000000091",
-        name: "CodeCommit",
+        name: "dev / cc-release-e2e-kan-3",
         service: "codecommit"
       }
     ])
@@ -23,13 +24,30 @@ describe("portfolio presenter", () => {
         detail: "Jira did not answer the latest health check.",
         healthLabel: "Unavailable",
         healthTone: "critical",
-        name: "Jira"
+        name: "Payments Jira"
       })
     ])
     expect(presentPortfolio(makePortfolioSnapshot("disabled")).sources).toEqual([
-      expect.objectContaining({ healthLabel: "Disabled", healthTone: "neutral", name: "Jira" })
+      expect.objectContaining({ healthLabel: "Disabled", healthTone: "neutral", name: "Payments Jira" })
     ])
     expect(presentPortfolio(makePortfolioSnapshot("empty")).sources).toEqual([])
+  })
+
+  // Two connections to one provider must be told apart: each row is named by its connection, the mark says the service.
+  it("names each source by its connection, so two connections to one provider stay distinct", () => {
+    const snapshot = makePortfolioSnapshot("connected-empty")
+    const [plugin] = snapshot.plugins
+    if (plugin === undefined) return expect.unreachable()
+    const second = {
+      ...plugin,
+      displayName: "prod / payments",
+      pluginConnectionId: Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000092")
+    }
+    const rows = presentPortfolio({ ...snapshot, plugins: [plugin, second] }).sources
+    expect(rows.map(({ name, service }) => [name, service])).toEqual([
+      ["dev / cc-release-e2e-kan-3", "codecommit"],
+      ["prod / payments", "codecommit"]
+    ])
   })
 
   it("names a degraded source's reason and an unchecked source without a time", () => {

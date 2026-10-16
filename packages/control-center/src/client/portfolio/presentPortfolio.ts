@@ -10,7 +10,6 @@ import type { RlyStateTone } from "@knpkv/rly/primitives"
 import * as DateTime from "effect/DateTime"
 
 import type { PortfolioReleaseRole, PortfolioSnapshot } from "../../api/portfolio.js"
-import { firstPartyServiceIdentityByProvider } from "../../domain/firstPartyServices.js"
 import type { PluginFailureClass, PluginHealth, SourceUnavailableFreshness } from "../../domain/freshness.js"
 import { describeReadinessGateWaiver } from "../../domain/readiness/projections.js"
 import type {
@@ -618,7 +617,7 @@ const sourceRowOf = (plugin: PortfolioSnapshot["plugins"][number]): PortfolioSou
     healthLabel: health.label,
     healthTone: health.tone,
     id: plugin.pluginConnectionId,
-    name: firstPartyServiceIdentityByProvider[plugin.providerId].displayName,
+    name: plugin.displayName,
     service: serviceForProvider(plugin.providerId)
   }
 }
