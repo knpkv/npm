@@ -1,5 +1,11 @@
 # @knpkv/herdr-fleet
 
+## 0.15.0
+
+### Minor Changes
+
+- [#970](https://github.com/knpkv/npm/pull/970) [`4a47179`](https://github.com/knpkv/npm/commit/4a47179344419423632e32045c9e53d4dafa3bee) Thanks [@konopkov](https://github.com/konopkov)! - Add sandbox pool job kinds (lease, extend, release, approval-gated reset and budget lift) that only the pool's owning host runs, with fleetctl submission and approval display.
+
 ## 0.14.0
 
 ### Minor Changes
