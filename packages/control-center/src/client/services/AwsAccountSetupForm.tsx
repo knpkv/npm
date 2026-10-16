@@ -1,4 +1,5 @@
-import { Button, Field, StateLabel, Text } from "@knpkv/rly/primitives"
+import { Button, Field, Notice, StateLabel, Text } from "@knpkv/rly/primitives"
+import * as Predicate from "effect/Predicate"
 import { type FormEvent, type ReactElement, useEffect, useRef, useState } from "react"
 
 import type {
@@ -16,8 +17,19 @@ const MAXIMUM_FOLLOWED_RESOURCES = 20
 type ResourceDiscoveryState =
   | { readonly _tag: "idle" }
   | { readonly _tag: "loading" }
-  | { readonly _tag: "failed" }
-  | { readonly _tag: "ready"; readonly response: AwsResourceDiscoveryResponse }
+  | { readonly _tag: "failed"; readonly reason: "sign-in-required" | "no-answer"; readonly profile: string }
+  | { readonly _tag: "profile-not-found"; readonly profile: string }
+  | { readonly _tag: "ready"; readonly response: AwsResourceDiscoveryResponse; readonly region: string }
+
+/** The account check's rejection, read only by tag: a profile whose sign-in expired, or anything else. */
+const discoveryFailureReason = <Rejection,>(failure: Rejection): "sign-in-required" | "no-answer" =>
+  Predicate.isTagged(failure, "AwsSignInRequiredApiError") ? "sign-in-required" : "no-answer"
+
+const isEmptyDiscovery = ({ codeCommit, codePipeline }: AwsResourceDiscoveryResponse): boolean =>
+  codeCommit._tag === "available" &&
+  codeCommit.names.length === 0 &&
+  codePipeline._tag === "available" &&
+  codePipeline.names.length === 0
 
 const parseResourceNames = (input: string): ReadonlyArray<string> => [
   ...new Set(
@@ -302,6 +314,10 @@ export const AwsAccountSetupForm = ({
       setSetupError("Add an AWS profile and region before testing discovery.")
       return
     }
+    if (awsProfilesState === "ready" && !awsProfiles.some((candidate) => candidate.profile === request.profile)) {
+      setDiscoveryState({ _tag: "profile-not-found", profile: request.profile })
+      return
+    }
     discoveryRequest.current?.abort()
     const controller = new AbortController()
     discoveryRequest.current = controller
@@ -310,12 +326,12 @@ export const AwsAccountSetupForm = ({
       (response) => {
         if (controller.signal.aborted) return
         discoveryRequest.current = null
-        setDiscoveryState({ _tag: "ready", response })
+        setDiscoveryState({ _tag: "ready", response, region: request.region })
       },
-      () => {
+      <Rejection,>(failure: Rejection) => {
         if (controller.signal.aborted) return
         discoveryRequest.current = null
-        setDiscoveryState({ _tag: "failed" })
+        setDiscoveryState({ _tag: "failed", reason: discoveryFailureReason(failure), profile: request.profile })
       }
     )
   }
@@ -386,7 +402,16 @@ export const AwsAccountSetupForm = ({
           />
         )}
       </Field>
-      <Field label="AWS profile" required>
+      <Field
+        label="AWS profile"
+        required
+        {...(discoveryState._tag === "profile-not-found"
+          ? {
+              description: `Detected on this machine: ${awsProfiles.map((candidate) => candidate.profile).join(", ")}.`,
+              error: `No AWS profile named ${discoveryState.profile} on this machine. Choose a detected profile, or add it to your AWS config, then test again.`
+            }
+          : {})}
+      >
         {(controlProps) => (
           <input
             {...controlProps}
@@ -425,12 +450,26 @@ export const AwsAccountSetupForm = ({
             Verified AWS account {discoveryState.response.accountId}
           </Text>
         ) : discoveryState._tag === "failed" ? (
-          <Text as="p" className={styles.error} role="alert" variant="body">
-            Account verification failed. Check the profile and region, or enter resource names manually.
-          </Text>
+          <Notice announce="assertive" tone="critical">
+            {discoveryState.reason === "sign-in-required" ? (
+              <>
+                Sign-in for {discoveryState.profile} has expired. Run{" "}
+                <code>aws sso login --profile {discoveryState.profile}</code> in a terminal on this machine, then test
+                again.
+              </>
+            ) : (
+              "AWS didn’t answer the account check. Test again; if it keeps failing, check this machine’s network."
+            )}
+          </Notice>
         ) : null}
       </div>
-      {discoveryState._tag === "ready" ? (
+      {discoveryState._tag === "ready" && isEmptyDiscovery(discoveryState.response) ? (
+        <Text as="p" tone="secondary" variant="body">
+          No CodeCommit repositories or CodePipeline pipelines in {discoveryState.region} for this account. Try another
+          region, or add names manually.
+        </Text>
+      ) : null}
+      {discoveryState._tag === "ready" && !isEmptyDiscovery(discoveryState.response) ? (
         <div className={styles.resources}>
           <ResourcePicker
             label="Repositories"

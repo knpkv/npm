@@ -2708,6 +2708,75 @@ describe("ServicesPage connection tests", () => {
     ).toEqual(["payments-api", "risk-engine", "payments-production"])
   })
 
+  describe("AWS account check outcomes", () => {
+    const discoveryHost = async (
+      discoverAwsResources: NonNullable<ConnectionTestTransport["discoverAwsResources"]>,
+      profile: string
+    ) => {
+      const transport: ConnectionTestTransport = {
+        create: vi.fn(),
+        discoverAwsProfiles: () => Promise.resolve([{ profile: "production", region: "eu-west-1" }]),
+        discoverAwsResources,
+        overview: () => Promise.resolve({ ...overview, connections: [] }),
+        makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
+        setEnabled: vi.fn(),
+        test: vi.fn()
+      }
+      const host = await renderServices(transport, "/services?enable=codecommit")
+      await act(async () => undefined)
+      const inputs = host.querySelectorAll<HTMLInputElement>("input")
+      if (inputs[1] !== undefined) await setControlValue(inputs[1], profile)
+      if (inputs[2] !== undefined) await setControlValue(inputs[2], "eu-west-1")
+      const discover = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+        textContent?.includes("Test & discover")
+      )
+      await act(async () => discover?.click())
+      return host
+    }
+
+    it("names an expired sign-in and the exact command that renews it", async () => {
+      const host = await discoveryHost(() => Promise.reject({ _tag: "AwsSignInRequiredApiError" }), "production")
+      expect(host.textContent).toContain(
+        "Sign-in for production has expired. Run aws sso login --profile production in a terminal on this machine, then test again."
+      )
+      expect(host.querySelector("code")?.textContent).toBe("aws sso login --profile production")
+      expect(host.textContent).not.toContain("Account verification failed")
+    })
+
+    it("refuses a profile this machine doesn't have before asking AWS", async () => {
+      const discoverAwsResources = vi.fn<NonNullable<ConnectionTestTransport["discoverAwsResources"]>>()
+      const host = await discoveryHost(discoverAwsResources, "staging")
+      expect(discoverAwsResources).not.toHaveBeenCalled()
+      expect(host.textContent).toContain(
+        "No AWS profile named staging on this machine. Choose a detected profile, or add it to your AWS config, then test again."
+      )
+      expect(host.querySelectorAll("input")[1]?.getAttribute("aria-invalid")).toBe("true")
+      expect(host.textContent).toContain("Detected on this machine: production.")
+    })
+
+    it("says AWS didn't answer when the check fails for any other reason", async () => {
+      const host = await discoveryHost(() => Promise.reject({ _tag: "ServiceUnavailableApiError" }), "production")
+      expect(host.textContent).toContain(
+        "AWS didn’t answer the account check. Test again; if it keeps failing, check this machine’s network."
+      )
+    })
+
+    it("points a verified account with nothing in the region at another region", async () => {
+      const host = await discoveryHost(
+        () =>
+          Promise.resolve({
+            accountId: "123456789012",
+            codeCommit: { _tag: "available", names: [], truncated: false },
+            codePipeline: { _tag: "available", names: [], truncated: false }
+          }),
+        "production"
+      )
+      expect(host.textContent).toContain(
+        "No CodeCommit repositories or CodePipeline pipelines in eu-west-1 for this account. Try another region, or add names manually."
+      )
+    })
+  })
+
   it("discovers, searches, selects, and preserves AWS resources across refresh", async () => {
     const discoverAwsResources = vi
       .fn<NonNullable<ConnectionTestTransport["discoverAwsResources"]>>()
@@ -2971,7 +3040,7 @@ describe("ServicesPage connection tests", () => {
     )
     await act(async () => discover?.click())
 
-    expect(host.textContent).toContain("Account verification failed")
+    expect(host.textContent).toContain("AWS didn’t answer the account check.")
     expect(host.textContent).not.toContain("provider secret")
     expect(host.querySelectorAll("textarea")).toHaveLength(2)
   })
@@ -4301,7 +4370,7 @@ describe("ServicesPage first sync", () => {
       [...(repository?.querySelectorAll("button") ?? [])].some(({ textContent }) => textContent === "Sync now")
     ).toBe(true)
     expect(pipeline?.querySelector("summary")?.textContent).toContain("Sync failed")
-    const credentialSentence = "The provider rejected the account's credentials."
+    const credentialSentence = "The account’s sign-in has expired."
     expect(host.textContent?.split(credentialSentence).length).toBe(2)
     expect(pipeline?.textContent).not.toContain(credentialSentence)
   })

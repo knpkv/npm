@@ -16,6 +16,7 @@ import {
 import { ProviderId } from "../domain/sourceRevision.js"
 import { UtcTimestamp } from "../domain/utcTimestamp.js"
 import {
+  AwsSignInRequiredApiError,
   ConflictApiError,
   ForbiddenApiError,
   InvalidRequestApiError,
@@ -845,7 +846,7 @@ const discoverAwsProfiles = HttpApiEndpoint.get("discoverAwsProfiles", "/discove
 const discoverAwsResources = HttpApiEndpoint.post("discoverAwsResources", "/discovery/aws-resources", {
   payload: AwsResourceDiscoveryRequest,
   success: AwsResourceDiscoveryResponse,
-  error: [...pluginReadErrors, InvalidRequestApiError]
+  error: [...pluginReadErrors, InvalidRequestApiError, AwsSignInRequiredApiError]
 })
   .middleware(SessionCookieAuth)
   .middleware(SessionMutationAuth)

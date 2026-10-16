@@ -131,6 +131,12 @@ export class ApplicationServiceUnavailable extends Schema.TaggedError<Applicatio
   { retryAt: Schema.NullOr(UtcTimestamp) }
 ) {}
 
+/** The named local AWS profile has no usable credentials: its sign-in session expired or was never started. */
+export class ApplicationAwsSignInRequired extends Schema.TaggedError<ApplicationAwsSignInRequired>()(
+  "ApplicationAwsSignInRequired",
+  { profile: Schema.String }
+) {}
+
 /** A provider-specific read budget was exhausted. */
 export class ApplicationRateLimited extends Schema.TaggedError<ApplicationRateLimited>()(
   "ApplicationRateLimited",
@@ -196,7 +202,7 @@ export interface PluginAdministrationService {
     request: AwsResourceDiscoveryRequest
   ) => Effect.Effect<
     AwsResourceDiscoveryResponse,
-    ApplicationInvalidRequest | ApplicationRateLimited | ApplicationServiceUnavailable
+    ApplicationAwsSignInRequired | ApplicationInvalidRequest | ApplicationRateLimited | ApplicationServiceUnavailable
   >
   readonly discoverAtlassianProfiles?: () => Effect.Effect<
     AtlassianProfileDiscoveryResponse,

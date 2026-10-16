@@ -17,7 +17,12 @@ import type { UtcTimestamp } from "../../domain/utcTimestamp.js"
 import { SourceIdentityMismatchError } from "../persistence/errors.js"
 import { Persistence, type PersistenceOperationFailure } from "../persistence/Persistence.js"
 import { PluginStreamKey } from "../persistence/repositories/pluginRuntimeModels.js"
-import { type PluginFailure, pluginFailureClass, PluginMalformedResponseFailure } from "../plugins/failures.js"
+import {
+  type PluginFailure,
+  pluginFailureClass,
+  pluginFailureSafeMessage,
+  PluginMalformedResponseFailure
+} from "../plugins/failures.js"
 import { PluginConnection } from "../plugins/PluginConnection.js"
 import { PluginConnectionMap } from "../plugins/PluginConnectionMap.js"
 import { DomainEventWakeups } from "../runtime/DomainEventWakeups.js"
@@ -91,7 +96,7 @@ const safeFailureMessage = (failure: PluginFailure): string => {
     case "PluginUnsupportedCapabilityFailure":
       return "Provider synchronization is not supported."
     case "PluginConfigurationFailure":
-      return "Provider configuration is incomplete."
+      return pluginFailureSafeMessage(failure)
     case "PluginUnknownOutcomeFailure":
       return "Provider synchronization outcome is unknown."
   }

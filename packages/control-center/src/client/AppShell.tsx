@@ -34,6 +34,19 @@ const workspaceIdFromPathname = (pathname: string): WorkspaceId | null => {
   return segments[1] === "w" && isWorkspaceRouteId(workspaceId) ? workspaceId : null
 }
 
+/**
+ * The workspace the shell belongs to: the routed one, or on routes outside `/w/` (Services, Open PR) the
+ * paired session's workspace for a workspace-wide reader. A visitor without one keeps the outside nav. @internal
+ */
+export const shellWorkspaceId = (pathname: string, state: BrowserSessionState): WorkspaceId | null => {
+  const routed = workspaceIdFromPathname(pathname)
+  if (routed !== null) return routed
+  const session = state._tag === "authenticated" ? state.session : null
+  return session !== null && (session.permission === "workspace-owner" || session.permission === "workspace-approver")
+    ? session.workspaceId
+    : null
+}
+
 /** Decide whether workspace settings belong in the current session's navigation. @internal */
 export const canInspectWorkspaceSettings = (state: BrowserSessionState, workspaceId: WorkspaceId | null): boolean => {
   const session = state._tag === "authenticated" || state._tag === "storage-unavailable" ? state.session : null
@@ -103,8 +116,8 @@ export const AppShell = (): ReactElement => {
   const location = useLocation()
   const browserSession = useBrowserSession()
   const isAuthorizedShare = location.pathname.startsWith("/shares/")
-  const overviewPath = workspaceOverviewPath(location.pathname)
-  const workspaceId = workspaceIdFromPathname(location.pathname)
+  const workspaceId = shellWorkspaceId(location.pathname, browserSession.state)
+  const overviewPath = workspaceId === null ? workspaceOverviewPath(location.pathname) : `/w/${workspaceId}/overview`
   const includeSettings = canInspectWorkspaceSettings(browserSession.state, workspaceId)
   const includeOpenPullRequest = canOpenCodeCommitPullRequest(browserSession.state, workspaceId)
   const [density, setDensity] = useState<"comfortable" | "compact">("comfortable")

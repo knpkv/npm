@@ -14,6 +14,7 @@ import type {
   AwsServiceResourceDiscovery
 } from "../../api/plugins.js"
 import {
+  ApplicationAwsSignInRequired,
   ApplicationInvalidRequest,
   ApplicationRateLimited,
   ApplicationServiceUnavailable
@@ -36,7 +37,11 @@ class AwsResourcePaginationFailure extends Schema.TaggedError<AwsResourcePaginat
   {}
 ) {}
 
-type AwsIdentityDiscoveryError = ApplicationInvalidRequest | ApplicationRateLimited | ApplicationServiceUnavailable
+type AwsIdentityDiscoveryError =
+  | ApplicationAwsSignInRequired
+  | ApplicationInvalidRequest
+  | ApplicationRateLimited
+  | ApplicationServiceUnavailable
 type AwsResourceFailureClass = Extract<AwsServiceResourceDiscovery, { readonly _tag: "failed" }>["failureClass"]
 
 /** Testable, credential-free application boundary for explicit AWS discovery. */
@@ -72,13 +77,16 @@ const isRateLimitCause = (cause: unknown): boolean =>
     "TooManyRequestsException"
   ])
 
-const mapIdentityFailure = (failure: CodeCommit.CodeCommitReadError): AwsIdentityDiscoveryError => {
-  if (Predicate.isTagged(failure, "AwsCredentialError")) return new ApplicationInvalidRequest()
+/** Expired or missing credentials ask for a fresh sign-in; a profile that can sign in but isn't allowed stays invalid. */
+const mapIdentityFailure = (
+  profile: string,
+  failure: CodeCommit.CodeCommitReadError
+): AwsIdentityDiscoveryError => {
+  if (Predicate.isTagged(failure, "AwsCredentialError")) return new ApplicationAwsSignInRequired({ profile })
   if (Predicate.isTagged(failure, "AwsThrottleError")) return new ApplicationRateLimited({ retryAt: null })
   if (Predicate.isTagged(failure, "AwsApiError")) {
-    if (isAuthenticationCause(failure.cause) || isAuthorizationCause(failure.cause)) {
-      return new ApplicationInvalidRequest()
-    }
+    if (isAuthenticationCause(failure.cause)) return new ApplicationAwsSignInRequired({ profile })
+    if (isAuthorizationCause(failure.cause)) return new ApplicationInvalidRequest()
     if (isRateLimitCause(failure.cause)) return new ApplicationRateLimited({ retryAt: null })
   }
   return new ApplicationServiceUnavailable({ retryAt: null })
@@ -211,7 +219,9 @@ export const makeAwsResourceDiscovery = Effect.fn("AwsResourceDiscovery.make")(f
     const account = yield* Schema.decodeUnknownEffect(CodeCommit.CodeCommitReadAccount)(request).pipe(
       Effect.mapError(() => new ApplicationInvalidRequest())
     )
-    const identity = yield* codeCommit.discoverAccount(account).pipe(Effect.mapError(mapIdentityFailure))
+    const identity = yield* codeCommit.discoverAccount(account).pipe(
+      Effect.mapError((failure) => mapIdentityFailure(request.profile, failure))
+    )
     const pipelineAccount = {
       profile: request.profile,
       region: request.region,

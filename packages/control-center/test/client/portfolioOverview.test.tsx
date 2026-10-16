@@ -68,8 +68,9 @@ describe("PortfolioOverviewView", () => {
     })
     expect(markup).not.toContain("Choose your first service")
     expect(markup).toContain("No releases yet")
-    expect(markup).toContain("CodeCommit connected")
     expect(markup).toContain("connect Jira to start tracking them")
+    expect(markup).toContain("Sources")
+    expect(markup).toContain("Healthy")
     expect(markup).not.toContain('href="/services?enable=codecommit"')
     expect(markup).toContain('href="/services?enable=jira"')
   })
@@ -80,9 +81,24 @@ describe("PortfolioOverviewView", () => {
       ...livePortfolioState,
       portfolio: { ...presentPortfolio(makePortfolioSnapshot("empty")), connectedProviders: ["codecommit", "jira"] }
     })
-    expect(markup).toContain("CodeCommit and Jira connected")
-    expect(markup).toContain("once a Jira release version has items")
+    expect(markup).toContain("A release appears here once a Jira release version has items.")
     expect(markup).not.toContain('href="/services?enable=jira"')
+  })
+
+  it("shows a failing source as unavailable instead of calling it connected", () => {
+    const snapshot = makePortfolioSnapshot("connected-empty")
+    const health: (typeof snapshot.plugins)[number]["health"] = {
+      _tag: "unavailable",
+      checkedAt: snapshot.generatedAt,
+      failureClass: "unknown",
+      retryAt: null,
+      safeMessage: "The connection could not be verified."
+    }
+    const failing = { ...snapshot, plugins: snapshot.plugins.map((plugin) => ({ ...plugin, health })) }
+    const markup = renderOverview({ _tag: "ready", ...livePortfolioState, portfolio: presentPortfolio(failing) })
+    expect(markup).not.toContain("connected.")
+    expect(markup).toContain("Unavailable")
+    expect(markup).toContain("The connection could not be verified.")
   })
 
   it("explains the authenticated empty portfolio without fake metrics", () => {

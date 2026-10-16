@@ -6,6 +6,58 @@ import { ReadinessFinding } from "../../src/domain/readiness/projections.js"
 import { makePortfolioSnapshot } from "./portfolioFixtures.js"
 
 describe("portfolio presenter", () => {
+  it("lists each source connection with its health in words, never assuming a connection works", () => {
+    expect(presentPortfolio(makePortfolioSnapshot("connected-empty")).sources).toEqual([
+      {
+        detail: "Checked 14 Jul 2026, 10:04 UTC",
+        detailDateTime: "2026-07-14T10:04:00.000Z",
+        healthLabel: "Healthy",
+        healthTone: "positive",
+        id: "01890f6f-6d6a-7cc0-98d2-000000000091",
+        name: "CodeCommit",
+        service: "codecommit"
+      }
+    ])
+    expect(presentPortfolio(makePortfolioSnapshot("unavailable")).sources).toEqual([
+      expect.objectContaining({
+        detail: "Jira did not answer the latest health check.",
+        healthLabel: "Unavailable",
+        healthTone: "critical",
+        name: "Jira"
+      })
+    ])
+    expect(presentPortfolio(makePortfolioSnapshot("disabled")).sources).toEqual([
+      expect.objectContaining({ healthLabel: "Disabled", healthTone: "neutral", name: "Jira" })
+    ])
+    expect(presentPortfolio(makePortfolioSnapshot("empty")).sources).toEqual([])
+  })
+
+  it("names a degraded source's reason and an unchecked source without a time", () => {
+    const snapshot = makePortfolioSnapshot("connected-empty")
+    const withHealth = (health: (typeof snapshot.plugins)[number]["health"]) =>
+      presentPortfolio({ ...snapshot, plugins: snapshot.plugins.map((plugin) => ({ ...plugin, health })) }).sources
+    expect(withHealth(null)).toEqual([
+      expect.objectContaining({ detail: null, detailDateTime: null, healthLabel: "Not checked", healthTone: "neutral" })
+    ])
+    const checkedAt = snapshot.generatedAt
+    expect(
+      withHealth({
+        _tag: "degraded",
+        checkedAt,
+        failureClass: "timeout",
+        retryAt: null,
+        safeMessage: "Slow responses."
+      })
+    ).toEqual([
+      expect.objectContaining({
+        detail: "Slow responses.",
+        detailDateTime: null,
+        healthLabel: "Degraded",
+        healthTone: "caution"
+      })
+    ])
+  })
+
   const heldCases: ReadonlyArray<{
     readonly finding: typeof ReadinessFinding.Encoded
     readonly label: string

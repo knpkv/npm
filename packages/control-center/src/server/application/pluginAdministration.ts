@@ -64,7 +64,7 @@ import {
 } from "../plugins/atlassian/AtlassianOAuthGrants.js"
 import { discoverAtlassianProfiles, loadAtlassianProfile } from "../plugins/atlassian/AtlassianProfiles.js"
 import { firstPartyService, firstPartyServiceCatalog } from "../plugins/catalog/firstPartyServiceCatalog.js"
-import { type PluginFailure, pluginFailureClass } from "../plugins/failures.js"
+import { type PluginFailure, pluginFailureClass, pluginFailureSafeMessage } from "../plugins/failures.js"
 import { supportsFirstPartySynchronization } from "../plugins/firstPartySynchronization.js"
 import { negotiatePluginDescriptorV1 } from "../plugins/negotiation.js"
 import { PluginConnection } from "../plugins/PluginConnection.js"
@@ -507,9 +507,10 @@ const failureMessage = (failure: PluginFailure): string => {
       return "The provider is currently unavailable."
     case "PluginCancellationFailure":
       return "The connection check was interrupted."
+    case "PluginConfigurationFailure":
+      return pluginFailureSafeMessage(failure)
     case "PluginConflictFailure":
     case "PluginUnsupportedCapabilityFailure":
-    case "PluginConfigurationFailure":
     case "PluginUnknownOutcomeFailure":
       return "The connection could not be verified."
   }
