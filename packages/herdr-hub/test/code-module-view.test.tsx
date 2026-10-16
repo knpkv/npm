@@ -33,8 +33,7 @@ describe("Code module reads", { concurrent: false }, () => {
     search: string,
     active = true,
     page: "pull-requests" | "reviews" | "diffs" = "pull-requests",
-    closeSelection: ModulePageMount["closeSelection"] = () => undefined,
-    onHubMachine = false
+    closeSelection: ModulePageMount["closeSelection"] = () => undefined
   ) => {
     if (root === null) {
       const host = document.createElement("div")
@@ -42,7 +41,7 @@ describe("Code module reads", { concurrent: false }, () => {
       root = createRoot(host)
     }
     const navigate = vi.fn<ModulePageMount["navigate"]>()
-    const module = makeCodeModuleViews({ reads, onHubMachine })
+    const module = makeCodeModuleViews({ reads })
     await act(async () =>
       root?.render(
         <PortalProvider>
@@ -53,7 +52,8 @@ describe("Code module reads", { concurrent: false }, () => {
     return navigate
   }
 
-  it("uses the queue's current owner origin locally, with no remote, missing or failed-reading fallback", async () => {
+  // The hub returns ownerUi only to a viewer on its own tailnet node, so the page shows exactly what it gets.
+  it("links the owner origin the queue returns, with no missing or failed-reading fallback", async () => {
     const unavailable = {
       _tag: "Unavailable",
       reason: "cache_unavailable",
@@ -63,14 +63,12 @@ describe("Code module reads", { concurrent: false }, () => {
     const reads = { ...defaults, queue: () => Effect.sync(read) }
     const link = () => document.querySelector<HTMLAnchorElement>('a[href^="http://127.0.0.1:"]')
     const search = "filter=open&search=&offset=0"
-    await render(reads, search, true, "pull-requests", () => undefined, true)
+    await render(reads, search)
     await act(async () => vi.waitFor(() => expect(read).toHaveBeenCalledOnce()))
     expect(link()?.href).toBe("http://127.0.0.1:4780/")
-    await render(reads, search)
-    expect(link()).toBeNull()
     const next = vi.fn(() => ({ ...unavailable, ownerUi: "http://127.0.0.1:4781" }))
     const changed = { ...defaults, queue: () => Effect.sync(next) }
-    await render(changed, search, true, "pull-requests", () => undefined, true)
+    await render(changed, search, true, "pull-requests", () => undefined)
     await act(async () => vi.waitFor(() => expect(next).toHaveBeenCalledOnce()))
     expect(link()?.href).toBe("http://127.0.0.1:4781/")
     const failed = vi.fn(() => new CodeReadFailed({ reason: "network" }))
@@ -79,25 +77,17 @@ describe("Code module reads", { concurrent: false }, () => {
       search,
       true,
       "pull-requests",
-      () => undefined,
-      true
+      () => undefined
     )
     await act(async () => vi.waitFor(() => expect(failed).toHaveBeenCalledOnce()))
     expect(document.body.textContent).toContain("hub could not be reached")
     expect(link()).toBeNull()
     const absent = vi.fn(() => unavailable)
-    await render(
-      { ...defaults, queue: () => Effect.sync(absent) },
-      search,
-      true,
-      "pull-requests",
-      () => undefined,
-      true
-    )
+    await render({ ...defaults, queue: () => Effect.sync(absent) }, search, true, "pull-requests", () => undefined)
     await act(async () => vi.waitFor(() => expect(absent).toHaveBeenCalledOnce()))
     expect(document.body.textContent).not.toContain("hub could not be reached")
     expect(link()).toBeNull()
-    await render(reads, search, false, "pull-requests", () => undefined, true)
+    await render(reads, search, false, "pull-requests", () => undefined)
     expect(read).toHaveBeenCalledOnce()
   })
 

@@ -7139,9 +7139,11 @@ describe("Relay in the hub", () => {
   ) =>
     Effect.gen(function*() {
       const identityMode = join(root, "identity-mode")
+      const whoisNodeFile = join(root, "whois-node")
       const tailscaleCommand = join(root, "tailscale-test")
       const statusFile = join(root, "tailscale-status")
       writeFileSync(identityMode, "allowed")
+      writeFileSync(whoisNodeFile, "node-phone")
       writeFileSync(
         statusFile,
         JSON.stringify({
@@ -7161,9 +7163,9 @@ case "$1" in
   ip) printf '%s\\n' '127.0.0.1' ;;
   whois)
     if [ "$(cat '${identityMode}')" = allowed ]; then
-      printf '%s\\n' '{"Node":{"StableID":"node-phone"},"UserProfile":{"LoginName":"owner@example.com"}}'
+      printf '{"Node":{"StableID":"%s"},"UserProfile":{"LoginName":"owner@example.com"}}\\n' "$(cat '${whoisNodeFile}')"
     else
-      printf '%s\\n' '{"Node":{"StableID":"node-phone"},"UserProfile":{"LoginName":"mallory@example.com"}}'
+      printf '{"Node":{"StableID":"%s"},"UserProfile":{"LoginName":"mallory@example.com"}}\\n' "$(cat '${whoisNodeFile}')"
     fi ;;
   status) cat '${statusFile}' ;;
 esac
@@ -7209,7 +7211,9 @@ esac
         origin,
         statusFile,
         deny: () => writeFileSync(identityMode, "denied"),
-        allow: () => writeFileSync(identityMode, "allowed")
+        allow: () => writeFileSync(identityMode, "allowed"),
+        /** The tailnet node WhoIs reports for every caller; the hub itself is `node-ser8`. */
+        whoisNode: (stableId: string) => writeFileSync(whoisNodeFile, stableId)
       }
     })
 
@@ -7451,6 +7455,12 @@ esac
                   callers.push(caller.login)
                   return caller.login
                 })
+            ),
+            moduleReadRoute(
+              "/same-node",
+              Schema.fromURLSearchParams(Schema.Struct({})),
+              Schema.Boolean,
+              (_query, caller) => Effect.succeed(caller.sameNode)
             )
           ]
         })
@@ -7479,6 +7489,24 @@ esac
         hubRequest(`${hub.serveUrl}/v1/modules/code/queue`, { method: "POST", headers: hub.headers })
       )
       expect(write.status).toBe(404)
+
+      // "On the hub machine" is the WhoIs peer being the hub's own node, never a header the browser sends.
+      const sameNode = (headers: Record<string, string> = {}) =>
+        Effect.promise(() =>
+          hubRequest(`${hub.serveUrl}/v1/modules/caller-fixture/same-node`, { headers: { ...hub.headers, ...headers } })
+        ).pipe(Effect.map((response) => JSON.parse(response.body)))
+      const spoofed = {
+        "tailscale-user-login": "owner@example.com",
+        "x-forwarded-for": "127.0.0.1",
+        "x-real-ip": "127.0.0.1",
+        forwarded: "for=127.0.0.1;host=ser8",
+        "x-tailscale-node": "node-ser8"
+      }
+      expect(yield* sameNode()).toBe(false)
+      expect(yield* sameNode(spoofed)).toBe(false)
+      hub.whoisNode("node-ser8")
+      expect(yield* sameNode()).toBe(true)
+      hub.whoisNode("node-phone")
       for (const url of [hub.server.url, hub.server.tailnetUrl]) {
         if (url === null) return yield* Effect.die("Expected a listener URL")
         const remote = yield* Effect.promise(() => fetch(`${url}/v1/modules/code/queue`))
