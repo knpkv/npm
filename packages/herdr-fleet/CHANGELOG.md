@@ -1,5 +1,11 @@
 # @knpkv/herdr-fleet
 
+## 0.13.0
+
+### Minor Changes
+
+- [#963](https://github.com/knpkv/npm/pull/963) [`311bf0f`](https://github.com/knpkv/npm/commit/311bf0fd1c5a62de3fdb9a0142debbee2098eda0) Thanks [@konopkov](https://github.com/konopkov)! - Refuse delegated jobs whose repository is not an absolute path with `FleetRepositoryNotAbsoluteError`, and fail only the job whose restart recovery fails so hostd keeps starting.
+
 ## 0.12.0
 
 ### Minor Changes

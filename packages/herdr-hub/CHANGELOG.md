@@ -2,6 +2,17 @@
 
 Released as `@knpkv/herdr-approvals` up to 0.18.0; the headings below are that package's history.
 
+## 0.42.1
+
+### Patch Changes
+
+- [#963](https://github.com/knpkv/npm/pull/963) [`311bf0f`](https://github.com/knpkv/npm/commit/311bf0fd1c5a62de3fdb9a0142debbee2098eda0) Thanks [@konopkov](https://github.com/konopkov)! - Refuse delegated jobs whose repository is not an absolute path with `FleetRepositoryNotAbsoluteError`, and fail only the job whose restart recovery fails so hostd keeps starting.
+- Updated dependencies [[`311bf0f`](https://github.com/knpkv/npm/commit/311bf0fd1c5a62de3fdb9a0142debbee2098eda0)]:
+  - @knpkv/herdr-fleet@0.13.0
+  - @knpkv/herdr-connect@0.29.1
+  - @knpkv/herdr-coordinator@0.4.5
+  - @knpkv/herdr-work@0.12.6
+
 ## 0.42.0
 
 ### Minor Changes
