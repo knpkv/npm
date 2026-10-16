@@ -1,5 +1,14 @@
 # @knpkv/jira-cli
 
+## 1.6.7
+
+### Patch Changes
+
+- [#958](https://github.com/knpkv/npm/pull/958) [`fb09f42`](https://github.com/knpkv/npm/commit/fb09f424ddd8b8b7b65fc71d6361dd7e2caca418) Thanks [@konopkov](https://github.com/konopkov)! - Pin `@effect/platform-node-shared` to the same release as `effect`. `@effect/platform-node` declares it with a caret range, so a fresh install picked up a newer release that imports `Path.make`, which `effect` 4.0.0 lacks. The CLI then failed at startup with npm or pnpm.
+- Updated dependencies [[`fb09f42`](https://github.com/knpkv/npm/commit/fb09f424ddd8b8b7b65fc71d6361dd7e2caca418)]:
+  - @knpkv/agent-skills@0.3.6
+  - @knpkv/atlassian-common@1.9.4
+
 ## 1.6.6
 
 ### Patch Changes
