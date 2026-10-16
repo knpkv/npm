@@ -16,12 +16,12 @@ import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import type { OpenAPISpec } from "effect/http-api/OpenApi"
 import * as HttpClient from "effect/http/HttpClient"
-import type * as JsonSchema from "effect/JsonSchema"
 import * as Layer from "effect/Layer"
 import * as Path from "effect/Path"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import { format as formatSource } from "prettier"
+import { normalizeSchema } from "./normalizeSchema.js"
 
 type ApiVersion = "v1" | "v2"
 
@@ -129,14 +129,6 @@ const formattedJson = (value: Schema.Json, version: ApiVersion) =>
     ),
     Effect.mapError((cause) => new RegenerateError({ message: `Could not format Confluence ${version} spec`, cause }))
   )
-
-/** Convert OpenAPI 3.0 nullable metadata into JSON Schema understood by Effect. */
-const normalizeSchema = (schema: JsonSchema.JsonSchema): JsonSchema.JsonSchema => {
-  const { default: _default, examples: _examples, ...withoutMetadata } = schema
-  if (!Predicate.hasProperty(withoutMetadata, "nullable")) return withoutMetadata
-  const { nullable, ...normalized } = withoutMetadata
-  return nullable === true ? { anyOf: [normalized, { type: "null" }] } : normalized
-}
 
 const stripTrailingWhitespace = (source: string): string => source.replace(/[ \t]+$/gm, "")
 
