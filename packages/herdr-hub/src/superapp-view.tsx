@@ -213,10 +213,11 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
   )
   const prefix = useRef<FleetShortcutPrefix>(null)
   const [usageEmpty, setUsageEmpty] = useState(false)
+  const [usageGrouped, setUsageGrouped] = useState(false)
   const [announcementOutlet, setAnnouncementOutlet] = useState<HTMLElement | null>(null)
   const [usageHeaderOutlet, setUsageHeaderOutlet] = useState<HTMLElement | null>(null)
   const usageEmptyChrome = useMemo(
-    () => ({ host, headerOutlet: usageHeaderOutlet, setEmpty: setUsageEmpty }),
+    () => ({ host, headerOutlet: usageHeaderOutlet, setEmpty: setUsageEmpty, setGrouped: setUsageGrouped }),
     [host, usageHeaderOutlet]
   )
   const header = useRef<HTMLElement>(null)
@@ -492,17 +493,19 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
   const offBarModule =
     currentModule !== undefined && !mobileDescriptors.some((module) => module.id === currentModule.id)
   const terminalActive = terminalOwnsKeys && location.error === null && location.destination.module === "connect"
-  const emptyActive =
-    usageEmpty &&
-    location.error === null &&
-    location.destination.module === "usage" &&
-    location.destination.page === "limits"
+  const limitsActive =
+    location.error === null && location.destination.module === "usage" && location.destination.page === "limits"
+  const emptyActive = usageEmpty && limitsActive
+  // The design's Limits header wraps the shell mast, page title and tabs, so Limits groups them in every state.
+  const headerGrouped = (usageGrouped || usageEmpty) && limitsActive
   // Readings can turn empty (or stop being empty) after arrival focus ran. The layout switch, and the empty
   // mast moving into the header outlet once it mounts, unmount the focused page tab, so focus would fall to
   // <body>; hand it to the same page's tab in the new layout.
   // Only focus the switch itself removed is handed over: a poll that flips the layout while the reader rests on
   // <body> must not pull focus to the tabs.
-  const emptyLayout = emptyActive ? (usageHeaderOutlet === null ? "inline" : "outlet") : "ordinary"
+  const emptyLayout = `${emptyActive ? "empty" : "ordinary"}:${
+    headerGrouped ? (usageHeaderOutlet === null ? "inline" : "outlet") : "shell"
+  }`
   const previousEmptyLayout = useRef(emptyLayout)
   const lastFocused = useRef<Element | null>(null)
   useEffect(() => {
@@ -556,16 +559,17 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
       ref={header}
       hidden={terminalActive}
       inert={terminalActive}
-      data-region={emptyActive ? undefined : "header"}
+      data-region={headerGrouped ? undefined : "header"}
     >
       <a className="superapp-brand" href={moduleHref(landingModule, landing.page)} aria-label="Relay home" title="Home">
-        {emptyActive ? <UsageEmptyChef /> : <RelayChefMastMark />}
+        {headerGrouped ? <UsageEmptyChef /> : <RelayChefMastMark />}
       </a>
       <strong className="superapp-phone-title" aria-hidden="true">
         {location.error === null ? currentModule?.label : "Page not found"}
         {currentPage?.showInPhoneTitle === true ? <span> {currentPage.label}</span> : null}
       </strong>
-      {emptyActive ? null : relayElement}
+      {/* The grouped header reads hosts and notifications before Ask Relay, as the design does; the grid places it. */}
+      {headerGrouped ? null : relayElement}
       <nav aria-label="Current page" className="superapp-breadcrumb" data-route-found={location.error === null}>
         <span className="superapp-breadcrumb-root">Relay</span>
         <span aria-hidden="true" className="superapp-breadcrumb-root">
@@ -604,7 +608,7 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
       >
         <ShellIcon name="notifications" />
       </button>
-      {emptyActive ? relayElement : null}
+      {headerGrouped ? relayElement : null}
     </header>
   )
   const sidebarElement = (
@@ -677,23 +681,27 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
   return (
     <UsageEmptyChromeContext.Provider value={usageEmptyChrome}>
       <PortalProvider>
-        <div className="superapp-shell" data-usage-empty={emptyActive ? "true" : undefined}>
+        <div
+          className="superapp-shell"
+          data-usage-empty={emptyActive ? "true" : undefined}
+          data-usage-header={headerGrouped ? "grouped" : undefined}
+        >
           {/* One outlet for both layouts, so a layout change never reinserts Relay's populated status region. */}
           <div className="superapp-announcements" ref={setAnnouncementOutlet} />
-          {emptyActive ? sidebarElement : null}
+          {headerGrouped ? sidebarElement : null}
           <div
             key="header"
-            className={emptyActive ? "usage-empty-header-region" : "superapp-header-region"}
-            data-region={emptyActive ? "header" : undefined}
+            className={headerGrouped ? "usage-empty-header-region" : "superapp-header-region"}
+            data-region={headerGrouped ? "header" : undefined}
             hidden={terminalActive}
             inert={terminalActive}
           >
             {headerElement}
-            {emptyActive ? (
+            {headerGrouped ? (
               <div className="usage-empty-header-outlet" data-module-owner="usage" ref={setUsageHeaderOutlet} />
             ) : null}
           </div>
-          {emptyActive ? null : sidebarElement}
+          {headerGrouped ? null : sidebarElement}
           <main className="superapp-main" id="main" tabIndex={-1}>
             {location.error === null ? null : (
               <StatePanel

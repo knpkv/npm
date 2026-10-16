@@ -453,9 +453,7 @@
           "name": "Error",
           "kind": "error",
           "error": {
-            "label": "Couldn\u2019t load",
-            "title": "Couldn\u2019t load limits",
-            "text": "Relay couldn\u2019t read usage on atlas. Nothing was changed.",
+            "notice": "Couldn't load limits. Trying again every minute.",
             "action": "Retry"
           }
         }

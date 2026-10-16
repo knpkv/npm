@@ -371,12 +371,12 @@ test("zero-height live regions retain membership findings and obey legacy grace 
       const output = yield* fs.makeTempDirectoryScoped()
       const required = yield* runConformance(refs, { output }).pipe(Effect.provideService(LiveProduct, live))
       expect(required?.passed).toBe(false)
+      // The extra region is reported once, as its own finding; shared regions keep their order, so no order finding.
       expect(
         required?.findings.some((finding) =>
-          finding.rule === "geometry" && finding.region === "*" &&
-          finding.detail === "Region order or membership differs" && finding.disposition === "required"
+          finding.rule === "geometry" && finding.region === "*" && finding.detail === "Region order differs"
         )
-      ).toBe(true)
+      ).toBe(false)
       expect(
         required?.findings.some((finding) =>
           finding.rule === "geometry" && finding.region === "cards" && finding.disposition === "required"

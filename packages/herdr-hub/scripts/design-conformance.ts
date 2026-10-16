@@ -61,6 +61,12 @@ interface ReadinessValues {
   readonly limitsPageCurrent: boolean
 }
 
+/**
+ * Usage's title and tabs: inside its module slot, or (on Limits, grouped with the shell header as the design's header
+ * region is) inside the header outlet Usage owns. Both checkouts are driven by this adapter, so it accepts either.
+ */
+const usageMast = (page: Page) => page.locator("[data-module=\"usage\"]:visible, [data-module-owner=\"usage\"]")
+
 /** Keep the failing identity, all readiness terms and the original browser cause in the adapter's typed failure. */
 export const readinessFailure = (identity: Identity, values: ReadinessValues, cause: unknown): RunnerFailure =>
   new RunnerFailure({
@@ -220,7 +226,10 @@ export const start: StartProduct = Effect.fn("SuperappDesign.start")(function*(f
             ".usage-empty-notice, [data-module=\"usage\"] .usage-tab-panel[aria-busy=\"false\"]"
           ).first().waitFor()
         } else {
-          await module.getByRole("heading", { name: "Usage", exact: true }).waitFor()
+          // Attached, not visible: the design's phone header shows only the module title.
+          await usageMast(page).getByRole("heading", { name: "Usage", exact: true, includeHidden: true }).waitFor({
+            state: "attached"
+          })
         }
         await page.locator("[data-module-page=\"limits\"][aria-current=\"page\"]:visible").waitFor()
         await page.waitForFunction(({ state, theme }) =>
@@ -247,8 +256,9 @@ export const start: StartProduct = Effect.fn("SuperappDesign.start")(function*(f
         Effect.catchTag("BrowserFailure", (failure) =>
           Effect.gen(function*() {
             const inspection = yield* browserCall("inspect Usage Limits readiness", async () => {
-              const module = page.locator("[data-module=\"usage\"]:visible")
-              const headingFound = await module.getByRole("heading", { name: "Usage", exact: true }).isVisible()
+              const headingFound =
+                (await usageMast(page).getByRole("heading", { name: "Usage", exact: true, includeHidden: true })
+                  .count()) > 0
               const limitsPageCurrent = await page.locator(
                 "[data-module-page=\"limits\"][aria-current=\"page\"]:visible"
               )

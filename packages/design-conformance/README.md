@@ -23,7 +23,9 @@ Names must be unique per state. `frame` is reserved for whole-frame artifact key
 and paths; manifest decoding rejects it for both HTML and PNG states.
 Declare every region in the manifest. The gate checks
 DOM order, nearest region parent, horizontal page/region overflow, normalized visible
-text, and document-space boxes. Geometry tolerance is 2px at 390 and 4px at 1280.
+text, and document-space boxes. Order is compared over the regions both the reference and
+the product render. A region missing on either side is reported once, as that region's
+own geometry finding, not again as an order change. Geometry tolerance is 2px at 390 and 4px at 1280.
 Resolved color, background, font, painted borders, radius, gaps and padding must match exactly.
 Only complete width/style/color shorthands with a known border style are normalized.
 Supported computed colors are numeric comma-separated `rgb()`/`rgba()` and complete `oklch()` with optional alpha.
