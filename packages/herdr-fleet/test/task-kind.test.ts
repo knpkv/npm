@@ -43,6 +43,8 @@ describe("task evidence classification", () => {
     ["write tool", { status: "working", activity: { kind: "write", outcome: "running" } }, "writing"],
     ["test command", { status: "working", activity: { kind: "test", outcome: "running" } }, "testing"],
     ["build command", { status: "working", activity: { kind: "build", outcome: "running" } }, "testing"],
+    ["sleep call", { status: "working", activity: { kind: "wait", outcome: "running" } }, "waiting"],
+    ["finished sleep", { status: "working", activity: { kind: "wait", outcome: "succeeded" } }, "unknown"],
     ["failed test command", { status: "working", activity: { kind: "test", outcome: "failed" } }, "failing"],
     ["failed build command", { status: "working", activity: { kind: "build", outcome: "failed" } }, "failing"],
     ["CI failed", { status: "working", ci: "failed" }, "failing"],

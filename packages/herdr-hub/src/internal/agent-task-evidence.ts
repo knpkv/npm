@@ -42,6 +42,19 @@ const CodexEntry = Schema.Struct({
   }))
 })
 
+/** Codex's own typed parse of a wrapper's command; the command text and output are never read. */
+const CodexCommandDone = Schema.Struct({
+  type: Schema.Literal("event_msg"),
+  payload: Schema.Struct({
+    type: Schema.Literal("item_completed"),
+    item: Schema.Struct({
+      type: Schema.Literal("CommandExecution"),
+      parsed_cmd: Schema.Array(Schema.Struct({ type: Schema.String }))
+    })
+  })
+})
+const typedReads: ReadonlySet<string> = new Set(["read", "search", "list_files"])
+
 /** Only direct commands are classified. Shell control flow and wrappers require their own producer. */
 const commandKind = (command: string, depth = 0): TaskActivity["kind"] => {
   if (depth >= 4) return "other"
@@ -92,6 +105,8 @@ const toolKind = (name: string, command: string | undefined): TaskActivity["kind
     case "write":
     case "write_file":
       return "write"
+    case "sleep":
+      return "wait"
     case "bash":
     case "exec_command":
     case "shell_command":
@@ -111,6 +126,8 @@ export const parseSessionTaskActivity = (provider: TaskProvider, tail: string): 
   if (tail === "" || !tail.endsWith("\n")) return unknownActivity
   let activity = unknownActivity
   let callId: string | undefined
+  // A Codex orchestration wrapper whose output has not arrived yet; its commands report typed parses meanwhile.
+  let wrapperOpen = false
   for (const line of tail.split("\n").slice(0, -1)) {
     if (line === "") continue
     const envelope = Schema.decodeUnknownResult(Schema.fromJsonString(Envelope))(line)
@@ -136,6 +153,16 @@ export const parseSessionTaskActivity = (provider: TaskProvider, tail: string): 
         }
       }
     } else {
+      if (envelope.success.type === "event_msg") {
+        if (!wrapperOpen) continue
+        const done = Schema.decodeUnknownResult(Schema.fromJsonString(CodexCommandDone))(line)
+        if (Result.isFailure(done)) continue
+        const parsed = done.success.payload.item.parsed_cmd
+        activity = parsed.length > 0 && parsed.every((command) => typedReads.has(command.type))
+          ? { kind: "read", outcome: "running" }
+          : unknownActivity
+        continue
+      }
       if (envelope.success.type !== "response_item") continue
       const decoded = Schema.decodeUnknownResult(Schema.fromJsonString(CodexEntry))(line)
       if (Result.isFailure(decoded)) return unknownActivity
@@ -144,6 +171,7 @@ export const parseSessionTaskActivity = (provider: TaskProvider, tail: string): 
       if (entry.type !== "response_item" || payload === undefined) continue
       if (payload.type === "function_call" || payload.type === "custom_tool_call") {
         callId = payload.call_id
+        wrapperOpen = false
         if (callId === undefined || callId.trim() === "") {
           callId = undefined
           activity = unknownActivity
@@ -156,10 +184,12 @@ export const parseSessionTaskActivity = (provider: TaskProvider, tail: string): 
           ? args.success.cmd ?? args.success.command
           : undefined
         activity = payload.name === undefined ? unknownActivity : activityFor(payload.name, command)
+        wrapperOpen = payload.type === "custom_tool_call" && payload.name === "exec"
       } else if (
         (payload.type === "function_call_output" || payload.type === "custom_tool_call_output") &&
         callId !== undefined && payload.call_id === callId
       ) {
+        wrapperOpen = false
         const output = payload.output
         const decodedOutput = Schema.is(Schema.String)(output)
           ? Schema.decodeUnknownResult(Schema.fromJsonString(ToolOutcome))(output)

@@ -165,6 +165,81 @@ describe("host-private provider task evidence", () => {
     ).toEqual({ kind: "unknown", outcome: "unknown" })
   })
 
+  describe("Codex typed command evidence", () => {
+    const wrapper = (callId: string) => ({
+      type: "response_item",
+      payload: { type: "custom_tool_call", call_id: callId, name: "exec", input: "private orchestration source" }
+    })
+    const wrapperOutput = (callId: string) => ({
+      type: "response_item",
+      payload: {
+        type: "custom_tool_call_output",
+        call_id: callId,
+        output: [{ type: "input_text", text: "private output" }]
+      }
+    })
+    // Codex's own parse of the command; the private command and output stay unread.
+    const commandDone = (...types: ReadonlyArray<string>) => ({
+      type: "event_msg",
+      payload: {
+        type: "item_completed",
+        item: {
+          type: "CommandExecution",
+          command: ["zsh", "-lc", "private command"],
+          aggregated_output: "private output",
+          parsed_cmd: types.map((type) => ({ type, cmd: "private command" })),
+          status: "completed"
+        }
+      }
+    })
+    const sleep = (callId: string) => ({
+      type: "response_item",
+      payload: { type: "function_call", call_id: callId, name: "sleep", arguments: JSON.stringify({ ms: 30000 }) }
+    })
+
+    it("maps a running sleep call to wait, so the agent reads as waiting", () => {
+      const activity = parseSessionTaskActivity("codex", jsonl(sleep("nap")))
+      expect(activity).toEqual({ kind: "wait", outcome: "running" })
+      expect(classifyAgentTask({ status: "working", activity })).toBe("waiting")
+    })
+
+    it("reads a wrapper as reading only when every parsed command is a typed read, search or listing", () => {
+      expect(parseSessionTaskActivity("codex", jsonl(wrapper("w"), commandDone("read", "search", "list_files"))))
+        .toEqual({ kind: "read", outcome: "running" })
+      expect(parseSessionTaskActivity("codex", jsonl(wrapper("w"), commandDone("read", "unknown"))))
+        .toEqual({ kind: "unknown", outcome: "unknown" })
+      expect(parseSessionTaskActivity("codex", jsonl(wrapper("w"), commandDone())))
+        .toEqual({ kind: "unknown", outcome: "unknown" })
+      expect(parseSessionTaskActivity("codex", jsonl(wrapper("w"), commandDone("read"), wrapperOutput("w"))).outcome)
+        .not.toBe("running")
+    })
+
+    it("uses the wrapper's latest command and ignores commands outside a running wrapper", () => {
+      expect(parseSessionTaskActivity("codex", jsonl(wrapper("w"), commandDone("read"), commandDone("unknown"))))
+        .toEqual({ kind: "unknown", outcome: "unknown" })
+      expect(parseSessionTaskActivity("codex", jsonl(commandDone("read"))))
+        .toEqual({ kind: "unknown", outcome: "unknown" })
+      expect(parseSessionTaskActivity("codex", jsonl(wrapper("w"), wrapperOutput("w"), commandDone("read"))).kind)
+        .not.toBe("read")
+    })
+
+    // Measured on a real rollout tail (500 records): 40 wrapper calls, 3 whose parsed commands were all typed reads,
+    // and 20 sleep calls. Each call is classified while it runs.
+    it("classifies the measured sample: sleeps wait, typed reads read, every other wrapper stays unknown", () => {
+      const calls = [
+        ...Array.from({ length: 20 }, (_, i) => [sleep(`s${i}`)]),
+        ...Array.from({ length: 3 }, (_, i) => [wrapper(`r${i}`), commandDone("read", "search")]),
+        ...Array.from({ length: 37 }, (_, i) => [wrapper(`u${i}`), commandDone("unknown")])
+      ]
+      const kinds = calls.map((records) =>
+        classifyAgentTask({ status: "working", activity: parseSessionTaskActivity("codex", jsonl(...records)) })
+      )
+      expect(kinds.filter((kind) => kind === "waiting")).toHaveLength(20)
+      expect(kinds.filter((kind) => kind === "reading")).toHaveLength(3)
+      expect(kinds.filter((kind) => kind === "unknown")).toHaveLength(37)
+    })
+  })
+
   it("maps direct Codex custom apply_patch calls without reading the patch body", () => {
     expect(
       parseSessionTaskActivity(
