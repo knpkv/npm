@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { limitTrackTone, type RlyLimitTrackTone } from "@knpkv/rly/primitives"
 import type { LimitSnapshot } from "../src/core/Model.js"
+import { formatInstant } from "../src/limits/format.js"
 import {
   describeProjection,
   limitRows,
@@ -308,7 +309,7 @@ describe("describeProjection", () => {
     expect(describeProjection({ _tag: "RunsOut", at: now + HOUR, burnPerHour: 20 }, now)).toMatchObject({
       text: expect.stringMatching(/^at this pace: out at \d{2}:\d{2}$/),
       tone: "secondary",
-      title: "Projected from the burn over the last hour"
+      title: formatInstant(now + HOUR)
     })
     expect(describeProjection({ _tag: "RunsOut", at: now + 3 * 24 * HOUR, burnPerHour: 1 }, now)?.text).toMatch(
       /^at this pace: out \p{L}+\.? \d{2}:\d{2}$/u

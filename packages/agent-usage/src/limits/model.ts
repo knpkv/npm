@@ -15,7 +15,7 @@
  */
 import { type Agent, failureCovers, type LimitReading, type LimitSnapshot, type UnknownReason } from "../core/Model.js"
 import type { LimitSeries } from "../shared/contracts.js"
-import { describeReason, formatProjectedTime } from "./format.js"
+import { describeReason, formatInstant, formatProjectedTime } from "./format.js"
 import { type Projection, projectWindow } from "./projection.js"
 import { seriesIdentity } from "./series.js"
 
@@ -184,7 +184,7 @@ export const describeProjection = (projection: Projection | null, now: number): 
       return {
         text: `at this pace: out ${formatProjectedTime(projection.at, now)}`,
         tone: "secondary",
-        title: "Projected from the burn over the last hour"
+        title: formatInstant(projection.at)
       }
     case "LastsUntilReset":
       return { text: "lasts until reset", tone: "tertiary", title: null }
