@@ -8,9 +8,10 @@ on:
   # Manual trigger
   workflow_dispatch:
 
+# The PR is pushed and opened with the automation App's token, so CI runs on it
+# (GITHUB_TOKEN-created PRs trigger no workflows); this token only checks out.
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 concurrency:
   group: jira-api-spec-update
@@ -19,6 +20,9 @@ concurrency:
 jobs:
   check-spec:
     name: Check Jira API Spec Updates
+    # The automation App's key is a long-lived credential: main only, behind an environment.
+    if: github.ref == 'refs/heads/main' && github.repository_owner == 'knpkv'
+    environment: automation
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -80,6 +84,16 @@ jobs:
           Update the generated Schema-backed Jira API client.
           CHANGESET
 
+      - name: Create automation App token
+        id: app-token
+        if: steps.regenerate.outputs.updated == 'true'
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ secrets.AUTOMATION_APP_ID }}
+          private-key: ${{ secrets.AUTOMATION_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+
       - name: Create Pull Request
         if: steps.regenerate.outputs.updated == 'true'
         uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8
@@ -88,7 +102,7 @@ jobs:
         env:
           HUSKY: "0"
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ steps.app-token.outputs.token }}
           commit-message: "chore(jira-api-client): update OpenAPI client"
           title: "chore(jira-api-client): update OpenAPI client"
           body: |
