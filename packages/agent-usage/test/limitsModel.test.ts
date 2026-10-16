@@ -282,7 +282,7 @@ describe("summarizeLimits with the series behind the latest readings", () => {
     snapshot({ observedAt: now - 60_000, reading: { _tag: "Known", usedPercent, resetsAt: now + 2 * HOUR } })
 
   it("raises a window that runs out before its reset to near, under 80%", () => {
-    const window = summarizeLimits([latest(40)], now, series(10))[0]?.windows[0]
+    const window = summarizeLimits([latest(40)], now, series(5))[0]?.windows[0]
     expect(window?.tone).toBe("near")
     expect(window?.projection).toMatchObject({ _tag: "RunsOut" })
   })

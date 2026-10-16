@@ -77,6 +77,19 @@ describe("projectWindow", () => {
       .toMatchObject({ _tag: "RunsOut", burnPerHour: 20 })
   })
 
+  it("holds the latest level until now, so a reading's age does not inflate the burn", () => {
+    expect(fiveHour([at(120, known(40)), at(14, known(50))])).toEqual({
+      _tag: "LastsUntilReset",
+      burnPerHour: 10,
+      atReset: 80
+    })
+  })
+
+  it("keeps a weekly pace when its last change is most of an hour old", () => {
+    expect(projectWindow({ windowMinutes: 10_080, points: [at(180, known(40)), at(50, known(41))], now }))
+      .toMatchObject({ _tag: "LastsUntilReset", burnPerHour: 1 })
+  })
+
   it("needs a quarter hour of the cycle to call a pace", () => {
     expect(fiveHour([at(0, known(40))])).toEqual({ _tag: "Unknown", reason: "TooFewSamples" })
     expect(fiveHour([at(10, known(1)), at(0, known(3))])).toEqual({ _tag: "Unknown", reason: "TooFewSamples" })

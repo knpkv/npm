@@ -1,14 +1,15 @@
 /**
- * How long a limit window lasts at the current pace: the burn over the last hour of the window's
- * current reset cycle, carried forward to the limit or the reset, whichever comes first. The same
+ * How long a limit window lasts at the current pace: the burn over the hour up to now within the
+ * window's current reset cycle, carried forward to the limit or the reset, whichever comes first. The same
  * model the coordinator's `agent-limits` routes by, so the page and the router never disagree.
  *
  * **Mental model**
  *
  * - **A level holds until the next reading.** Readings arrive on change (claude-statusline) or on a
- *   poll, so the level at the hour's start is the last reading before it.
- * - **One cycle only.** Readings belong to a cycle by their reset time (a second of jitter apart is
- *   the same reset). A reading lower than the one before it starts a new cycle: a manual reset.
+ *   poll, so the level at the hour's start is the last reading before it, and the latest level is
+ *   still the level now: time since the last reading burned nothing.
+ * - **One cycle only.** Readings belong to a cycle by their reset time (up to a minute of jitter
+ *   apart is the same reset). A reading lower than the one before it starts a new cycle: a manual reset.
  * - **Unknown is not zero.** An old reading, a short history or no reset time gives no projection,
  *   never a time or a 0.
  *
@@ -87,23 +88,23 @@ export const projectWindow = (input: {
       : []
   )
   const current: Level = { at: latest.at, usedPercent, resetsAt }
-  const cycle = currentCycle(levels, current)
+  // The pace runs from the level an hour ago (or the cycle's first reading since) to now, where
+  // the latest level still holds; a single reading has nothing to compare with.
+  const earlier = currentCycle(levels, current).filter((level) => level.at < current.at)
   const hourStart = now - HOUR
-  const anchor = Option.getOrUndefined(Arr.findLast(cycle, (level) => level.at < hourStart))
-  const first = anchor !== undefined && hourStart < current.at
-    ? { ...anchor, at: hourStart }
-    : cycle.find((level) => level.at >= hourStart)
-  if (first === undefined || current.at - first.at < MIN_SPAN_MILLIS) return gap("TooFewSamples")
+  const anchor = Option.getOrUndefined(Arr.findLast(earlier, (level) => level.at <= hourStart))
+  const first = anchor === undefined
+    ? earlier.find((level) => level.at > hourStart)
+    : { ...anchor, at: hourStart }
+  if (first === undefined || now - first.at < MIN_SPAN_MILLIS) return gap("TooFewSamples")
 
-  const burnPerHour = Math.max(0, ((current.usedPercent - first.usedPercent) * HOUR) / (current.at - first.at))
-  const crossing = burnPerHour === 0
-    ? Number.POSITIVE_INFINITY
-    : current.at + ((ceiling - current.usedPercent) / burnPerHour) * HOUR
+  const burnPerHour = Math.max(0, ((usedPercent - first.usedPercent) * HOUR) / (now - first.at))
+  const crossing = burnPerHour === 0 ? Number.POSITIVE_INFINITY : now + ((ceiling - usedPercent) / burnPerHour) * HOUR
   return crossing < resetsAt
     ? { _tag: "RunsOut", at: crossing, burnPerHour }
     : {
       _tag: "LastsUntilReset",
       burnPerHour,
-      atReset: Math.min(100, current.usedPercent + (burnPerHour * (resetsAt - current.at)) / HOUR)
+      atReset: Math.min(100, usedPercent + (burnPerHour * (resetsAt - now)) / HOUR)
     }
 }
