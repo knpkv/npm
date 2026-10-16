@@ -87,8 +87,9 @@ All inherited findings remain listed with their reference drift in HTML and CI s
 The PR's refs, fixture and adapter drive both captures. During onboarding, the base
 app is captured even when its checkout has no refs or gate package. A state is new
 only when absent from the base live inventory. A missing base live package means
-all current states are new only for a product with no base manifest. For an existing
-product, a missing base package fails. Every existing product's `live.package` change
+all current states are new only for a product with no base manifest, or with a refs-only
+base manifest (no `implemented` state, so no live inventory to preserve). For an existing
+product with an implemented state, a missing base package fails. Its `live.package` change
 also fails, even if the destination package exists on the base. Package migrations
 need a path that preserves the previous package's live inventory.
 Ref-only PRs leave states untouched, while coverage,
