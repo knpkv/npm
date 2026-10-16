@@ -8,6 +8,7 @@ import {
   FleetValidationError,
   JobPayload,
   type JobRecord,
+  type SandboxJobKind,
   WorkAbandon,
   WorkAdmit,
   type WorkJobKind,
@@ -76,6 +77,11 @@ export const usage = [
   "  submit HOST work.recover PAYLOAD_JSON",
   "  submit HOST work.reassign PAYLOAD_JSON",
   "  submit HOST work.abandon PAYLOAD_JSON",
+  "  submit HOST sandbox.lease",
+  "  submit HOST sandbox.extend ACCOUNT_ID",
+  "  submit HOST sandbox.release ACCOUNT_ID",
+  "  submit HOST sandbox.reset ACCOUNT_ID Manual|Retry",
+  "  submit HOST sandbox.budget.lift ACCOUNT_ID",
   ...workLines,
   "  apply-everywhere REF",
   "",
@@ -146,7 +152,12 @@ export const jobKinds: ReadonlyArray<string> = [
   "work.admit",
   "work.recover",
   "work.reassign",
-  "work.abandon"
+  "work.abandon",
+  "sandbox.lease",
+  "sandbox.extend",
+  "sandbox.release",
+  "sandbox.reset",
+  "sandbox.budget.lift"
 ]
 
 /** One line naming the unknown host and the hosts this machine knows. */
@@ -209,3 +220,30 @@ const describeIssue = (issue: SchemaIssue.Issue): string =>
       return `${at.length === 0 ? "" : `${at.join(".")}: `}${message.replaceAll(/\s+/gu, " ")}`
     })
     .join("; ")
+
+/** The usage of each sandbox kind, after `fleetctl submit HOST`. The holder is always the submitting actor. */
+const sandboxUsage = {
+  "sandbox.lease": "sandbox.lease takes no arguments",
+  "sandbox.extend": "sandbox.extend requires ACCOUNT_ID",
+  "sandbox.release": "sandbox.release requires ACCOUNT_ID",
+  "sandbox.reset": "sandbox.reset requires ACCOUNT_ID and Manual or Retry",
+  "sandbox.budget.lift": "sandbox.budget.lift requires ACCOUNT_ID"
+} satisfies Record<SandboxJobKind, string>
+
+export const sandboxPayload = Effect.fn("Fleetctl.sandboxPayload")(function*(
+  kind: SandboxJobKind,
+  args: ReadonlyArray<string>
+) {
+  const [, accountId, reason] = args
+  const raw = kind === "sandbox.lease"
+    ? args.length === 1 ? { kind } : null
+    : kind === "sandbox.reset"
+    ? args.length === 3 ? { kind, accountId, reason } : null
+    : args.length === 2
+    ? { kind, accountId }
+    : null
+  if (raw === null) return yield* new FleetValidationError({ detail: sandboxUsage[kind] })
+  return yield* Schema.decodeUnknownEffect(JobPayload)(raw).pipe(
+    Effect.mapError((cause) => new FleetValidationError({ detail: `invalid job: ${String(cause)}` }))
+  )
+})

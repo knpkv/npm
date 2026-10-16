@@ -39,6 +39,7 @@ import {
   formatUsageError,
   oneLine,
   parseInvocation,
+  sandboxPayload,
   unknownHostDetail,
   unknownKindDetail,
   usage,
@@ -284,6 +285,12 @@ export const payloadFrom = Effect.fn("Fleetctl.payloadFrom")(function*(args: Rea
       return yield* workPayload("work.reassign", args)
     case "work.abandon":
       return yield* workPayload("work.abandon", args)
+    case "sandbox.lease":
+    case "sandbox.extend":
+    case "sandbox.release":
+    case "sandbox.reset":
+    case "sandbox.budget.lift":
+      return yield* sandboxPayload(kind, args)
     default:
       return yield* new FleetValidationError({ detail: unknownKindDetail(kind) })
   }

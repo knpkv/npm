@@ -79,6 +79,16 @@ const jobSummary = (record: Pick<SanitizedJobRecord, "payload">): string => {
       return `${record.payload.goalId}: ${record.payload.from.name} → ${record.payload.to.name}`
     case "work.abandon":
       return `${record.payload.goalId}: abandon`
+    case "sandbox.lease":
+      return "Sandbox lease"
+    case "sandbox.extend":
+      return `${record.payload.accountId}: extend lease`
+    case "sandbox.release":
+      return `${record.payload.accountId}: release`
+    case "sandbox.reset":
+      return `${record.payload.accountId}: ${record.payload.reason.toLowerCase()} reset`
+    case "sandbox.budget.lift":
+      return `${record.payload.accountId}: lift budget stop`
   }
 }
 

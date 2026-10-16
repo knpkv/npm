@@ -1,6 +1,7 @@
 import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
 import {
+  type CoreJobPayload,
   decodeBoundedResponseJson,
   fleetResponseBodyMaxBytes,
   type HostConfiguration,
@@ -230,6 +231,31 @@ printf '%s\\n' "{\\"jobId\\":\\"$job_id\\",\\"protocol\\":\\"herdr.coordinator.c
           rmSync(root, { force: true, recursive: true })
         })
     ).pipe(provideNodeServices)
+  })
+
+  it.effect("refuses sandbox jobs as rejected on a host that does not own the pool", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-sandbox-refusal-test-"))
+    return Effect.gen(function*() {
+      const operations = yield* makeHostOperations(config(root, ["true"]))
+      for (
+        const payload of [
+          { kind: "sandbox.lease" },
+          { kind: "sandbox.extend", accountId: "111111111111" },
+          { kind: "sandbox.release", accountId: "111111111111" },
+          { kind: "sandbox.reset", accountId: "111111111111", reason: "Manual" },
+          { kind: "sandbox.budget.lift", accountId: "111111111111" }
+        ] satisfies ReadonlyArray<CoreJobPayload>
+      ) {
+        expect(yield* Effect.flip(operations.run(payload, () => Effect.void, "job-sandbox"))).toMatchObject({
+          _tag: "FleetOperationError",
+          disposition: "rejected",
+          operation: payload.kind
+        })
+      }
+    }).pipe(
+      Effect.ensuring(Effect.sync(() => rmSync(root, { force: true, recursive: true }))),
+      provideNodeServices
+    )
   })
 
   it.effect("passes the apply command the ref and then the job id", () => {

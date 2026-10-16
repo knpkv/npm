@@ -11,6 +11,7 @@ The host that receives a job owns its durable SQLite record and every state tran
 - **`work.recover`:** `repository`, `pullRequest`, `reviewUrl`, `goalId`, `laneId`, `operationId`, `expectedGoalEventId`, `expectedGoalUpdatedAt`, `expectedHistoryToken`, `head`, `baseHead`, `owner` (`id`, `name`), `sessionId`, `expectedWork`, the worker's `host`, `agentId`, `name`, `paneId` and optional `relationship` (`parentAgentId`, `relation`), `worktree` and `branch`.
 - **`work.reassign`:** `goalId`, `from` and `to` (`id`, `name`), `toAgent` (its tag, and for `set` the agent's `host`, `agentId`, `name`, `paneId` and optional `relationship`), `reason`, `expectedGoalEventId` and `expectedGoalUpdatedAt`.
 - **`work.abandon`:** `goalId`, `owner` (`id`, `name`), `reason`, `expectedGoalEventId` and `expectedGoalUpdatedAt`.
+- **Sandbox kinds:** none for `sandbox.lease`; `accountId` for `sandbox.extend`, `sandbox.release` and `sandbox.budget.lift`; `accountId` and `reason` for `sandbox.reset`.
 
 The persisted payload is the decoded job payload; the hash is computed over that canonical form, so field order never changes it. Raw credentials and provider secrets never enter this hash or the persisted job payload.
 
@@ -91,6 +92,18 @@ Only an operation that definitively committed nothing may return `FleetOperation
 `agent.delegate` accepts optional `newWork: { branch, title }` to request a new Work goal before delegation. Branches follow the Work Git branch rules and are capped at 256 characters. Titles are nonempty single-line text without control characters or lone surrogates, capped at 4,096 characters. Both fields enter the approval hash, so changing the proposed goal requires its own approval. Payloads without `newWork` retain their existing hashes.
 
 Work authority jobs (`work.reconcile`, `work.admit`, `work.recover`, `work.reassign`, `work.abandon`) run only through a composed Work adapter. That adapter is wired by the host's operations composer, not by the default operations. An adapter declares the kinds it executes in `HostOperations.workJobKinds`. `submit` refuses any other Work kind with `FleetOperationUnavailableError` before a job or approval request exists, so an approver is never asked to approve a job that this host cannot run. When `workJobKinds` is absent, the host runs no Work kinds.
+
+Sandbox jobs lease and reset the accounts of an ephemeral AWS sandbox pool:
+
+| Kind                  | Payload                                   | Approval |
+| --------------------- | ----------------------------------------- | -------- |
+| `sandbox.lease`       | none                                      | never    |
+| `sandbox.extend`      | `accountId`                               | never    |
+| `sandbox.release`     | `accountId`                               | never    |
+| `sandbox.reset`       | `accountId`, `reason` (`Manual`, `Retry`) | always   |
+| `sandbox.budget.lift` | `accountId`                               | always   |
+
+The lease holder is the job's authenticated actor, never a payload field: a payload of any sandbox kind carrying `holder` fails to decode, so no caller can extend or release another actor's lease. Reset and budget lift wait for approval whatever the provenance, the local listener included. Released and Expired resets belong to the host that owns the pool and cannot be submitted. Only that host declares the kinds in `HostOperations.sandboxJobKinds`; `submit` on any other host refuses them with `FleetOperationUnavailableError` before a job or approval request exists. A sandbox job's result is the account's record, which includes its `accountId` and the holder's actor id: both are client-visible on authenticated job routes and never on unauthenticated ones.
 
 Fleet stores a bounded terminal summary, not the coordinator's authoritative result. Pass coordinator results and failure details through `summarizeHostOperationTerminalDetail` before calling `terminal`; the authoritative full value remains in the coordinator event store. Summaries are limited to 20,000 UTF-8 bytes so successful coordinator-chat results retain the existing `CoordinatorReply` contract. The lifecycle callback validates its receipt and terminal schema before persistence, so every admitted value fits the complete Fleet record envelope.
 

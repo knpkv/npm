@@ -27,6 +27,14 @@ export const canonicalJobPayload = (payload: JobPayload): string => {
           ? ""
           : `,"newWork":${JSON.stringify({ branch: payload.newWork.branch, title: payload.newWork.title })}`
       },"prompt":${text(payload.prompt)},"repository":${text(payload.repository)}}`
+    case "sandbox.lease":
+      return `{"kind":${text(payload.kind)}}`
+    case "sandbox.extend":
+    case "sandbox.release":
+    case "sandbox.budget.lift":
+      return `{"accountId":${text(payload.accountId)},"kind":${text(payload.kind)}}`
+    case "sandbox.reset":
+      return `{"accountId":${text(payload.accountId)},"kind":${text(payload.kind)},"reason":${text(payload.reason)}}`
     case "agent.message":
       return `{"kind":${text(payload.kind)},"message":${text(payload.message)},"session":${text(payload.session)}}`
     case "work.reconcile":

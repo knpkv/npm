@@ -1224,7 +1224,12 @@ describe("sanitized approval requests", () => {
     "work.admit": true,
     "work.recover": true,
     "work.reassign": true,
-    "work.abandon": true
+    "work.abandon": true,
+    "sandbox.lease": true,
+    "sandbox.extend": true,
+    "sandbox.release": true,
+    "sandbox.reset": true,
+    "sandbox.budget.lift": true
   } satisfies Record<JobPayloadType["kind"], boolean>
   const jsonPayloads = [
     { kind: "browser.mcp.recover" },
@@ -1240,7 +1245,12 @@ describe("sanitized approval requests", () => {
       reason: "Release ownership",
       expectedGoalEventId: "event-1",
       expectedGoalUpdatedAt: 500
-    }
+    },
+    { kind: "sandbox.lease" },
+    { kind: "sandbox.extend", accountId: "111111111111" },
+    { kind: "sandbox.release", accountId: "111111111111" },
+    { kind: "sandbox.reset", accountId: "111111111111", reason: "Manual" },
+    { kind: "sandbox.budget.lift", accountId: "111111111111" }
   ]
   it("covers each request kind in the normalized JSON allowlist guard", () => {
     expect(jsonPayloads.map(({ kind }) => kind).sort()).toEqual(Object.keys(jsonKinds).sort())
@@ -1301,8 +1311,17 @@ describe("sanitized approval requests", () => {
       ? Object.entries(value).flatMap(([key, child]) => canonicalLeaves(child, path === "" ? key : `${path}.${key}`))
       : [[path, value]]
 
-  for (const raw of workPayloads) {
-    it(`displays every canonical hash-bound ${raw.kind} field and its value`, () => {
+  const sandboxPayloads = [
+    { kind: "sandbox.lease" },
+    { kind: "sandbox.extend", accountId: "111111111111" },
+    { kind: "sandbox.release", accountId: "111111111111" },
+    { kind: "sandbox.reset", accountId: "111111111111", reason: "Manual" },
+    { kind: "sandbox.reset", accountId: "111111111111", reason: "Retry" },
+    { kind: "sandbox.budget.lift", accountId: "111111111111" }
+  ]
+
+  for (const raw of [...workPayloads, ...sandboxPayloads]) {
+    it(`displays every canonical hash-bound ${raw.kind}${"reason" in raw ? ` ${raw.reason}` : ""} field and its value`, () => {
       const payload = Schema.decodeUnknownSync(JobPayload)(raw)
       const displayed = new Map(approvalRequestFor(payload).fields.map(({ key, value }) => [key, value]))
       const canonical = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json))(canonicalJobPayload(payload))

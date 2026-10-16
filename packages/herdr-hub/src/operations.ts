@@ -518,6 +518,20 @@ export const makeHostOperations = Effect.fn("HostOperations.make")(function*(
             operation: payload.kind
           })
         )
+      case "sandbox.lease":
+      case "sandbox.extend":
+      case "sandbox.release":
+      case "sandbox.reset":
+      case "sandbox.budget.lift":
+        return Effect.fail(
+          new FleetOperationError({
+            cause: payload.kind,
+            detail: "sandbox jobs run only on the host that owns the sandbox pool",
+            // Refused before any sandbox state is read, so nothing was committed.
+            disposition: "rejected",
+            operation: payload.kind
+          })
+        )
     }
   }
 
