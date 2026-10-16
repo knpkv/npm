@@ -1642,7 +1642,10 @@ export const makePluginAdministrationWithConnections = Effect.fn("PluginAdminist
       )
       if (profiles.length > MAXIMUM_DISCOVERED_AWS_PROFILES) return yield* unavailable()
       return profiles
-        .map(({ name, region }) => ({ profile: name, region: region ?? null }))
+        .map(({ name, region, sso }) => {
+          const profile = { profile: name, region: region ?? null }
+          return sso === true ? { ...profile, sso } : profile
+        })
         .sort((left, right) => left.profile.localeCompare(right.profile))
     }),
     ...(!(Option.isNone(awsResourceDiscovery)) && { discoverAwsResources: awsResourceDiscovery.value.discover }),

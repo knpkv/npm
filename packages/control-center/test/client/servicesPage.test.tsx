@@ -2709,13 +2709,19 @@ describe("ServicesPage connection tests", () => {
   })
 
   describe("AWS account check outcomes", () => {
+    const detectedProfiles: AwsProfileDiscoveryResponse = [
+      { profile: "production", region: "eu-west-1", sso: true },
+      { profile: "static-keys", region: "eu-west-1" }
+    ]
     const discoveryHost = async (
       discoverAwsResources: NonNullable<ConnectionTestTransport["discoverAwsResources"]>,
-      profile: string
+      profile: string,
+      discoverAwsProfiles: NonNullable<ConnectionTestTransport["discoverAwsProfiles"]> = () =>
+        Promise.resolve(detectedProfiles)
     ) => {
       const transport: ConnectionTestTransport = {
         create: vi.fn(),
-        discoverAwsProfiles: () => Promise.resolve([{ profile: "production", region: "eu-west-1" }]),
+        discoverAwsProfiles,
         discoverAwsResources,
         overview: () => Promise.resolve({ ...overview, connections: [] }),
         makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
@@ -2743,15 +2749,49 @@ describe("ServicesPage connection tests", () => {
       expect(host.textContent).not.toContain("Account verification failed")
     })
 
+    // aws sso login only renews Identity Center profiles; for keys or a credential process it would be a dead end.
+    it("asks for renewed credentials, not an SSO sign-in, when a non-SSO profile is refused", async () => {
+      const host = await discoveryHost(() => Promise.reject({ _tag: "AwsSignInRequiredApiError" }), "static-keys")
+      expect(host.textContent).toContain(
+        "The credentials for static-keys were refused. Renew them in your AWS config, then test again."
+      )
+      expect(host.textContent).not.toContain("aws sso login")
+    })
+
     it("refuses a profile this machine doesn't have before asking AWS", async () => {
       const discoverAwsResources = vi.fn<NonNullable<ConnectionTestTransport["discoverAwsResources"]>>()
-      const host = await discoveryHost(discoverAwsResources, "staging")
+      const discoverAwsProfiles = vi.fn(() => Promise.resolve(detectedProfiles))
+      const host = await discoveryHost(discoverAwsResources, "staging", discoverAwsProfiles)
       expect(discoverAwsResources).not.toHaveBeenCalled()
+      // The list loaded when the form opened; it is read again before refusing.
+      expect(discoverAwsProfiles).toHaveBeenCalledTimes(2)
       expect(host.textContent).toContain(
         "No AWS profile named staging on this machine. Choose a detected profile, or add it to your AWS config, then test again."
       )
       expect(host.querySelectorAll("input")[1]?.getAttribute("aria-invalid")).toBe("true")
-      expect(host.textContent).toContain("Detected on this machine: production.")
+      expect(host.textContent).toContain("Detected on this machine: production, static-keys.")
+    })
+
+    // The refusal tells the user to add the profile and test again, so that test must see the new profile.
+    it("tests a profile added to the AWS config after the form opened", async () => {
+      const discoverAwsResources = vi.fn<NonNullable<ConnectionTestTransport["discoverAwsResources"]>>(() =>
+        Promise.resolve({
+          accountId: "123456789012",
+          codeCommit: { _tag: "available", names: ["example-repository"], truncated: false },
+          codePipeline: { _tag: "available", names: [], truncated: false }
+        })
+      )
+      const discoverAwsProfiles = vi
+        .fn<NonNullable<ConnectionTestTransport["discoverAwsProfiles"]>>()
+        .mockResolvedValueOnce(detectedProfiles)
+        .mockResolvedValue([...detectedProfiles, { profile: "staging", region: "eu-west-1" }])
+      const host = await discoveryHost(discoverAwsResources, "staging", discoverAwsProfiles)
+      expect(discoverAwsResources).toHaveBeenCalledWith(
+        { profile: "staging", region: "eu-west-1" },
+        expect.any(AbortSignal)
+      )
+      expect(host.textContent).not.toContain("No AWS profile named staging")
+      expect(host.textContent).toContain("example-repository")
     })
 
     it("says AWS didn't answer when the check fails for any other reason", async () => {
@@ -2775,6 +2815,45 @@ describe("ServicesPage connection tests", () => {
         "No CodeCommit repositories or CodePipeline pipelines in eu-west-1 for this account. Try another region, or add names manually."
       )
     })
+  })
+
+  // A selection discovery no longer returns stays visible, so it can be inspected or cleared before submitting.
+  it("keeps a selected resource visible when a refresh finds nothing", async () => {
+    const discoverAwsResources = vi
+      .fn<NonNullable<ConnectionTestTransport["discoverAwsResources"]>>()
+      .mockResolvedValueOnce({
+        accountId: "123456789012",
+        codeCommit: { _tag: "available", names: ["example-repository"], truncated: false },
+        codePipeline: { _tag: "available", names: [], truncated: false }
+      })
+      .mockResolvedValueOnce({
+        accountId: "123456789012",
+        codeCommit: { _tag: "available", names: [], truncated: false },
+        codePipeline: { _tag: "available", names: [], truncated: false }
+      })
+    const transport: ConnectionTestTransport = {
+      create: vi.fn(),
+      discoverAwsResources,
+      overview: () => Promise.resolve({ ...overview, connections: [] }),
+      makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
+      setEnabled: vi.fn(),
+      test: vi.fn()
+    }
+    const host = await renderServices(transport, "/services?enable=codecommit")
+    await act(async () => undefined)
+    const region = host.querySelectorAll<HTMLInputElement>("input")[2]
+    if (region !== undefined) await setControlValue(region, "eu-west-1")
+    const button = (text: string) =>
+      [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) => textContent?.includes(text))
+    await act(async () => button("Test & discover")?.click())
+    const choice = () =>
+      [...host.querySelectorAll<HTMLLabelElement>("label")]
+        .find(({ textContent }) => textContent?.includes("example-repository"))
+        ?.querySelector<HTMLInputElement>('input[type="checkbox"]')
+    await act(async () => choice()?.click())
+    await act(async () => button("Refresh discovery")?.click())
+    expect(host.textContent).toContain("No CodeCommit repositories or CodePipeline pipelines in eu-west-1")
+    expect(choice()?.checked).toBe(true)
   })
 
   it("discovers, searches, selects, and preserves AWS resources across refresh", async () => {
@@ -4370,7 +4449,7 @@ describe("ServicesPage first sync", () => {
       [...(repository?.querySelectorAll("button") ?? [])].some(({ textContent }) => textContent === "Sync now")
     ).toBe(true)
     expect(pipeline?.querySelector("summary")?.textContent).toContain("Sync failed")
-    const credentialSentence = "The account’s sign-in has expired."
+    const credentialSentence = "The provider refused the account’s credentials."
     expect(host.textContent?.split(credentialSentence).length).toBe(2)
     expect(pipeline?.textContent).not.toContain(credentialSentence)
   })

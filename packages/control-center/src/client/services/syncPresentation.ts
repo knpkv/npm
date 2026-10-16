@@ -67,8 +67,7 @@ export const isAccountSyncFailure = (failureClass: PluginFailureClass): boolean 
   failureClass === "authentication" || failureClass === "authorization"
 
 const failureSentences = {
-  authentication:
-    "The account’s sign-in has expired. Run aws sso login for its profile on this machine, then sync again.",
+  authentication: "The provider refused the account’s credentials. Sign in again or renew them, then sync again.",
   authorization: "The account's credentials can't read this resource. Grant access, then sync again.",
   "rate-limit": "The provider is limiting requests. Wait a minute, then sync again.",
   timeout: "The provider took too long to answer. Sync again.",

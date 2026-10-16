@@ -419,6 +419,7 @@ const CatalogCard = ({
   onCancel,
   onDiscoverAws,
   onOpen,
+  onReloadAwsProfiles,
   onStartAtlassianOAuth,
   onSubmit,
   onSubmitAtlassian,
@@ -442,6 +443,7 @@ const CatalogCard = ({
     signal: AbortSignal
   ) => Promise<AwsResourceDiscoveryResponse>
   readonly onOpen: () => void
+  readonly onReloadAwsProfiles: (signal: AbortSignal) => Promise<AwsProfileDiscoveryResponse>
   readonly onStartAtlassianOAuth: (
     providers: AtlassianOAuthProviderIntent,
     signal: AbortSignal,
@@ -481,6 +483,7 @@ const CatalogCard = ({
             isSubmitting={isSubmitting}
             onCancel={onCancel}
             onDiscover={onDiscoverAws}
+            onReloadAwsProfiles={onReloadAwsProfiles}
             onSubmit={onSubmitAws}
           />
         ) : isAtlassian ? (
@@ -1485,6 +1488,16 @@ export const ServicesPage = ({
                       setAtlassianSetupIntent(missingAtlassianIntent)
                     }
                     setOpenProvider(catalog.providerId)
+                  }}
+                  onReloadAwsProfiles={(signal) => {
+                    const discoverProfiles = transport.discoverAwsProfiles
+                    if (discoverProfiles === undefined) {
+                      return Promise.resolve(awsProfilesState._tag === "ready" ? awsProfilesState.profiles : [])
+                    }
+                    return discoverProfiles(signal).then((profiles) => {
+                      if (!signal.aborted) setAwsProfilesState({ _tag: "ready", profiles })
+                      return profiles
+                    })
                   }}
                   onStartAtlassianOAuth={(providers, signal, configuration) => {
                     const start = transport.startAtlassianOAuthGrant

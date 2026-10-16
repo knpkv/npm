@@ -105,3 +105,24 @@ region = us=east=1`
     expect(result[0]!.region).toBe("us=east=1")
   })
 })
+
+// Control Center says "aws sso login" only for profiles that sign in through IAM Identity Center.
+describe("parseAwsConfig SSO", () => {
+  it("marks profiles that sign in through Identity Center and skips sso-session sections", () => {
+    const content = [
+      "[sso-session example-session]",
+      "sso_region = eu-west-1",
+      "sso_start_url = https://example.invalid/start",
+      "[profile sso-new]",
+      "sso_session = example-session",
+      "region = eu-west-1",
+      "[profile sso-legacy]",
+      "sso_start_url = https://example.invalid/start",
+      "[profile static-keys]",
+      "region = eu-west-1"
+    ].join("\n")
+    const result = parseAwsConfig(content)
+    expect(result.map((profile) => profile.name)).toEqual(["sso-new", "sso-legacy", "static-keys"])
+    expect(result.map((profile) => profile.sso === true)).toEqual([true, true, false])
+  })
+})

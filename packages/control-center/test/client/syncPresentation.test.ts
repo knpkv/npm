@@ -52,7 +52,7 @@ describe("sync presentation", () => {
     )
     expect(syncFailureSentence(state("source-unavailable", {
       failure: { failureClass: "authentication", safeMessage: "Provider authentication failed." }
-    }))).toBe("The account’s sign-in has expired. Run aws sso login for its profile on this machine, then sync again.")
+    }))).toBe("The provider refused the account’s credentials. Sign in again or renew them, then sync again.")
     expect(syncFailureSentence(state("synchronized"))).toBeNull()
   })
 

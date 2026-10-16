@@ -261,6 +261,7 @@ export const AwsAccountSetupForm = ({
   isSubmitting,
   onCancel,
   onDiscover,
+  onReloadAwsProfiles,
   onSubmit
 }: {
   readonly awsProfiles: AwsProfileDiscoveryResponse
@@ -272,6 +273,8 @@ export const AwsAccountSetupForm = ({
     request: AwsResourceDiscoveryRequest,
     signal: AbortSignal
   ) => Promise<AwsResourceDiscoveryResponse>
+  /** Reads this machine's AWS profiles again and returns them; called before refusing a profile the list lacks. */
+  readonly onReloadAwsProfiles: (signal: AbortSignal) => Promise<AwsProfileDiscoveryResponse>
   readonly onSubmit: (drafts: ReadonlyArray<ServiceConnectionDraft>) => Promise<boolean>
 }): ReactElement => {
   const codeCommit = catalogs.find(({ providerId }) => providerId === "codecommit")
@@ -314,14 +317,27 @@ export const AwsAccountSetupForm = ({
       setSetupError("Add an AWS profile and region before testing discovery.")
       return
     }
-    if (awsProfilesState === "ready" && !awsProfiles.some((candidate) => candidate.profile === request.profile)) {
-      setDiscoveryState({ _tag: "profile-not-found", profile: request.profile })
-      return
-    }
     discoveryRequest.current?.abort()
     const controller = new AbortController()
     discoveryRequest.current = controller
     setDiscoveryState({ _tag: "loading" })
+    const hasProfile = (profiles: AwsProfileDiscoveryResponse): boolean =>
+      profiles.some((candidate) => candidate.profile === request.profile)
+    // The list was read when the form opened. Read it again before refusing, so a profile added since counts;
+    // when that read fails, AWS decides.
+    const profileExists =
+      awsProfilesState !== "ready" || hasProfile(awsProfiles)
+        ? Promise.resolve(true)
+        : onReloadAwsProfiles(controller.signal).then(hasProfile, () => true)
+    void profileExists.then((exists) => {
+      if (controller.signal.aborted) return
+      if (exists) return runDiscovery(request, controller)
+      discoveryRequest.current = null
+      setDiscoveryState({ _tag: "profile-not-found", profile: request.profile })
+    })
+  }
+
+  const runDiscovery = (request: AwsResourceDiscoveryRequest, controller: AbortController): void => {
     onDiscover(request, controller.signal).then(
       (response) => {
         if (controller.signal.aborted) return
@@ -451,12 +467,15 @@ export const AwsAccountSetupForm = ({
           </Text>
         ) : discoveryState._tag === "failed" ? (
           <Notice announce="assertive" tone="critical">
-            {discoveryState.reason === "sign-in-required" ? (
+            {discoveryState.reason === "sign-in-required" &&
+            awsProfiles.some((candidate) => candidate.profile === discoveryState.profile && candidate.sso === true) ? (
               <>
                 Sign-in for {discoveryState.profile} has expired. Run{" "}
                 <code>aws sso login --profile {discoveryState.profile}</code> in a terminal on this machine, then test
                 again.
               </>
+            ) : discoveryState.reason === "sign-in-required" ? (
+              `The credentials for ${discoveryState.profile} were refused. Renew them in your AWS config, then test again.`
             ) : (
               "AWS didn’t answer the account check. Test again; if it keeps failing, check this machine’s network."
             )}
@@ -469,7 +488,8 @@ export const AwsAccountSetupForm = ({
           region, or add names manually.
         </Text>
       ) : null}
-      {discoveryState._tag === "ready" && !isEmptyDiscovery(discoveryState.response) ? (
+      {discoveryState._tag === "ready" &&
+      (!isEmptyDiscovery(discoveryState.response) || selectedRepositories.size + selectedPipelines.size > 0) ? (
         <div className={styles.resources}>
           <ResourcePicker
             label="Repositories"

@@ -936,8 +936,8 @@ const expectVisibleTransitionGeometry = (geometry: ReleaseTransitionGeometry): v
   expect(geometry.opacity).toBeGreaterThan(0)
   expect(geometry.right).toBeGreaterThan(0)
   expect(geometry.bottom).toBeGreaterThan(0)
-  expect(geometry.left).toBeLessThan(geometry.viewportWidth)
-  expect(geometry.top).toBeLessThan(geometry.viewportHeight)
+  expect(geometry.left, `${geometry.name} left`).toBeLessThan(geometry.viewportWidth)
+  expect(geometry.top, `${geometry.name} top`).toBeLessThan(geometry.viewportHeight)
   expect(geometry.visibility).toBe("visible")
   expect(geometry.computedName).toBe(geometry.name)
 }
@@ -1863,6 +1863,11 @@ test("shares Relay, version, and verdict geometry across the sole orchestrated t
   await page.addStyleTag({
     content: "[role=\"dialog\"][data-state=\"open\"] { animation-duration: 10s !important; }"
   })
+  // At 1280x800 the first release row sits at the fold beside the Sources panel. A user previews a row they can
+  // see, so bring the whole row on screen; the geometry checks below then hold its parts to the viewport.
+  await page.locator(`[data-portfolio-release-id="${release.releaseId}"]`).evaluate((row) =>
+    row.scrollIntoView({ block: "center" })
+  )
 
   await page.getByRole("button", { name: "Preview Solar Grove" }).click()
   await expect(page.getByRole("dialog", { name: "Release preview: 2.18.0-rc.1 Solar Grove" })).toBeVisible()

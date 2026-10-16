@@ -41,7 +41,7 @@ const workspaceIdFromPathname = (pathname: string): WorkspaceId | null => {
 export const shellWorkspaceId = (pathname: string, state: BrowserSessionState): WorkspaceId | null => {
   const routed = workspaceIdFromPathname(pathname)
   if (routed !== null) return routed
-  const session = state._tag === "authenticated" ? state.session : null
+  const session = state._tag === "authenticated" || state._tag === "storage-unavailable" ? state.session : null
   return session !== null && (session.permission === "workspace-owner" || session.permission === "workspace-approver")
     ? session.workspaceId
     : null

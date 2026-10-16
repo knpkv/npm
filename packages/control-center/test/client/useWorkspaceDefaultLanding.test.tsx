@@ -160,6 +160,8 @@ describe("useWorkspaceDefaultLandingPath", () => {
     const otherWorkspaceId = Schema.decodeSync(WorkspaceId)("01890f6f-6d6a-7cc0-98d2-000000000099")
     expect(shellWorkspaceId("/services", { _tag: "authenticated", session })).toBe(session.workspaceId)
     expect(shellWorkspaceId("/open-pr", { _tag: "authenticated", session })).toBe(session.workspaceId)
+    expect(shellWorkspaceId("/services", { _tag: "storage-unavailable", session })).toBe(session.workspaceId)
+    expect(shellWorkspaceId("/services", { _tag: "storage-unavailable", session: null })).toBeNull()
     expect(shellWorkspaceId("/services", { _tag: "anonymous" })).toBeNull()
     expect(shellWorkspaceId("/services", { _tag: "checking" })).toBeNull()
     expect(shellWorkspaceId("/services", { _tag: "authenticated", session: reviewer })).toBeNull()

@@ -29,7 +29,9 @@ const legacyDefaultSandboxImage = "codercom/code-server:latest"
 
 export class DetectedProfile extends Schema.Class<DetectedProfile>("DetectedProfile")({
   name: Schema.NonEmptyString.pipe(Schema.brand("AwsProfileName")),
-  region: Schema.optionalKey(AwsRegion)
+  region: Schema.optionalKey(AwsRegion),
+  /** Present when the profile signs in through IAM Identity Center (`sso_session` or `sso_start_url`). */
+  sso: Schema.optionalKey(Schema.Literal(true))
 }) {}
 
 export const SandboxConfig = Schema.Struct({
@@ -117,12 +119,17 @@ const decodeDetectedProfile = Schema.decodeUnknownOption(DetectedProfile)
 interface RawSection {
   readonly name: string
   readonly region?: string
+  readonly sso?: true
 }
+
+/** `[sso-session …]` and `[services …]` sections configure sign-in and endpoints; they are not profiles. */
+const nonProfileSection = /^(?:sso-session|services)\s/u
+const ssoKeys: ReadonlySet<string> = new Set(["sso_session", "sso_start_url"])
 
 const parseIniSections = (content: string): Array<RawSection> => {
   const lines = content.split("\n")
   const sections: Array<RawSection> = []
-  let current: { name: string; region?: string } | null = null
+  let current: { name: string; region?: string; sso?: true } | null = null
 
   for (const line of lines) {
     const trimmed = line.trim()
@@ -131,10 +138,13 @@ const parseIniSections = (content: string): Array<RawSection> => {
     const profileMatch = trimmed.match(/^\[(?:profile\s+)?(.+)\]$/)
     if (profileMatch?.[1] !== undefined) {
       if (current !== null) sections.push(current)
-      current = { name: profileMatch[1].trim() }
+      const header = profileMatch[1].trim()
+      current = nonProfileSection.test(header) ? null : { name: header }
     } else if (current !== null && trimmed.includes("=")) {
       const [key, ...valueParts] = trimmed.split("=")
-      if (key?.trim().toLowerCase() === "region") {
+      const name = key?.trim().toLowerCase() ?? ""
+      if (ssoKeys.has(name) && valueParts.join("=").trim().length > 0) current.sso = true
+      if (name === "region") {
         const region = valueParts.join("=").trim()
         if (region.length === 0) delete current.region
         else current.region = region
