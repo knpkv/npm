@@ -138,6 +138,19 @@ test("Reviews name cached approvals rather than personal review requests", async
   await expect(page.getByRole("combobox", { name: "Cached queue" })).toHaveCount(0)
 })
 
+/** Arriving on Diffs with a pull request chosen lands on its diff, above the queue, not under every cached row. */
+test("arriving on Diffs with a pull request chosen focuses its diff above the queue", async ({ page }) => {
+  await page.goto(route("pull-requests", CODE_REF))
+  await expect(reviewPage(page).getByRole("heading", { name: "Make the queue reading explicit" })).toBeVisible()
+  await page.getByRole("navigation", { name: "Code pages" }).getByRole("link", { name: "Diffs", exact: true }).click()
+  const diff = page.locator(".code-host-diff")
+  await expect(diff).toContainText("Revision revision-752")
+  await expect(diff).toBeFocused()
+  const diffTop = await diff.evaluate((element) => element.getBoundingClientRect().top)
+  const queueTop = await page.locator(".code-host-queue").evaluate((element) => element.getBoundingClientRect().top)
+  expect(diffTop).toBeLessThan(queueTop)
+})
+
 test("exact cached details need no provider read, then intentional diff navigation keeps page focus", async ({ page }) => {
   const warnings: Array<string> = []
   page.on("console", (message) => {

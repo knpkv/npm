@@ -2,7 +2,7 @@ import { expect, it } from "@effect/vitest"
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 import { CodeHostView, type CodeHostViewProps, CodeReadStatusView } from "../src/client/components/host-code-view.js"
-import type { CodeUnavailable } from "../src/host-contract.js"
+import type { CodePullRequest, CodeUnavailable } from "../src/host-contract.js"
 
 const ref = "00000000-0000-4000-8000-000000000001"
 const props: CodeHostViewProps = {
@@ -229,4 +229,76 @@ it("embeds the single host action in the current panel and leaves plain callers 
     }))
     expect(plain).not.toContain("<button")
   }
+})
+
+// Read diff from a PR lands on Diffs: the chosen diff is the page's subject, so it comes before the queue
+// rather than under every cached row, and it is the focus target the shell moves to.
+it("puts the selected pull request's diff before the queue on Diffs", () => {
+  const item: CodePullRequest = {
+    ref,
+    id: "7",
+    repository: "example-repository",
+    title: "Example change",
+    author: "example-author",
+    status: "OPEN",
+    approval: "waiting",
+    createdAt: 1,
+    updatedAt: 1,
+    observedAt: 1
+  }
+  const markup = renderToStaticMarkup(
+    createElement(CodeHostView, {
+      ...props,
+      queue: { value: { _tag: "Ready", items: [item], more: false, observedAt: 1 }, loading: false, failure: null }
+    })
+  )
+  const diffAt = markup.indexOf("Read-only diff")
+  const queueAt = markup.indexOf("code-host-queue")
+  expect(diffAt).toBeGreaterThan(-1)
+  expect(queueAt).toBeGreaterThan(-1)
+  expect(diffAt).toBeLessThan(queueAt)
+  expect(markup).toMatch(/<section class="code-host-diff" tabindex="-1" aria-labelledby="[^"]+"/u)
+})
+
+// The hub can't see why the owner stopped refreshing, only when the cache last heard from AWS.
+it("says when a queue the owner hasn't refreshed for over an hour last heard from AWS", () => {
+  const hour = 3_600_000
+  const lastRead = Date.UTC(2026, 9, 7, 21, 42)
+  const item = (observedAt: number | null, status: CodePullRequest["status"] = "OPEN"): CodePullRequest => ({
+    ref,
+    id: "7",
+    repository: "example-repository",
+    title: "Example change",
+    author: "example-author",
+    status,
+    approval: "waiting",
+    createdAt: 1,
+    updatedAt: 1,
+    observedAt
+  })
+  const render = (observedAt: number, items: ReadonlyArray<CodePullRequest>) =>
+    renderToStaticMarkup(
+      createElement(CodeHostView, {
+        ...props,
+        page: "pull-requests",
+        selected: null,
+        ownerUIHref: "http://127.0.0.1:4780",
+        queue: { value: { _tag: "Ready", items, more: false, observedAt }, loading: false, failure: null }
+      })
+    )
+  const stale = render(lastRead + 8 * 24 * hour, [item(lastRead), item(lastRead - hour)])
+  expect(stale).toContain("Not refreshed since")
+  expect(stale).toContain(
+    "The Code owner refreshes this cache from AWS. Its AWS sign-in may have expired. Open the Code owner UI to check, then read again."
+  )
+  expect(stale).toContain("href=\"http://127.0.0.1:4780\"")
+  expect(render(lastRead + 10 * 60_000, [item(lastRead)])).not.toContain("Not refreshed since")
+  expect(render(lastRead + 8 * 24 * hour, [item(null)])).not.toContain("Not refreshed since")
+  // A refresh rewrites only open rows: old merged or closed rows in "All cached" say nothing about it.
+  expect(render(lastRead + 8 * 24 * hour, [item(lastRead, "MERGED"), item(lastRead, "CLOSED")])).not.toContain(
+    "Not refreshed since"
+  )
+  expect(
+    render(lastRead + 8 * 24 * hour, [item(lastRead + 8 * 24 * hour - 60_000), item(lastRead, "MERGED")])
+  ).not.toContain("Not refreshed since")
 })
