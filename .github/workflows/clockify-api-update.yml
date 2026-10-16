@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 # The PR is pushed and opened with the automation App's token, so CI runs on it
-# (GITHUB_TOKEN-created PRs trigger no workflows); this token only checks out.
+# (GITHUB_TOKEN-created PRs trigger no workflows); GITHUB_TOKEN only checks out.
 permissions:
   contents: read
 
@@ -17,11 +17,10 @@ concurrency:
 jobs:
   check-spec:
     name: Check Clockify API Spec Updates
-    # The automation App's key is a long-lived credential: main only, behind an environment.
-    if: github.ref == 'refs/heads/main' && github.repository_owner == 'knpkv'
-    environment: automation
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    outputs:
+      updated: ${{ steps.check.outputs.updated }}
 
     steps:
       - name: Checkout
@@ -78,9 +77,48 @@ jobs:
           Update the generated Clockify API client from the latest OpenAPI specification.
           CHANGESET
 
+      - name: Export update patch
+        if: steps.check.outputs.updated == 'true'
+        run: |
+          git add --all
+          git diff --cached --binary > "$RUNNER_TEMP/openapi-update.patch"
+
+      - name: Upload update patch
+        if: steps.check.outputs.updated == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: openapi-update-patch
+          path: ${{ runner.temp }}/openapi-update.patch
+          if-no-files-found: error
+          retention-days: 1
+
+  # Generated code from the upstream spec ran in check-spec, so the App key never
+  # enters that job: this one only applies the patch and opens the PR.
+  open-pr:
+    name: Open Clockify API Update PR
+    needs: check-spec
+    if: needs.check-spec.outputs.updated == 'true' && github.ref == 'refs/heads/main' && github.repository_owner == 'knpkv'
+    environment: automation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Download update patch
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: openapi-update-patch
+          path: ${{ runner.temp }}/openapi-update
+
+      - name: Apply update patch
+        run: git apply "$RUNNER_TEMP/openapi-update/openapi-update.patch"
+
       - name: Create automation App token
         id: app-token
-        if: steps.check.outputs.updated == 'true'
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           app-id: ${{ secrets.AUTOMATION_APP_ID }}
@@ -89,7 +127,6 @@ jobs:
           permission-pull-requests: write
 
       - name: Create pull request
-        if: steps.check.outputs.updated == 'true'
         uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8
         # The husky pre-commit gate needs the effect-upstream remote and a full
         # local toolchain; this workflow already ran the focused build and tests.

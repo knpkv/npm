@@ -336,6 +336,25 @@ const snapshotPublishCondition =
   "github.repository_owner == 'knpkv' && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main'))"
 const normalizedCondition = (condition) => (Predicate.isString(condition) ? condition.replace(/\s/gu, "") : "")
 
+// A job holding a GitHub App key may run only git and third-party actions: anything from the
+// workspace (a local action, a script, a package binary) could read the key from /proc.
+const holdsAppPrivateKey = (job, steps) =>
+  steps.some((step) => usesAction(step?.uses, "actions/create-github-app-token")) ||
+  referencedSecretNames(job).some((name) => name.endsWith("PRIVATE_KEY"))
+const runsOnlyGit = (source) =>
+  shellCommandSegments(source.replace(/\\\r?\n/gu, " ")).every((command) => {
+    const words = shellWords(command)
+    let executableIndex = 0
+    while (/^[A-Z_][A-Z0-9_]*=/iu.test(words[executableIndex] ?? "")) executableIndex += 1
+    return words.length === 0 || ["git", "'git'", '"git"'].includes(words[executableIndex] ?? "")
+  })
+const workspaceCodeStepIndex = (steps) =>
+  steps.findIndex(
+    (step) =>
+      (Predicate.isString(step?.uses) && step.uses.startsWith("./")) ||
+      (step?.run !== undefined && !(Predicate.isString(step.run) && runsOnlyGit(step.run)))
+  )
+
 const localReusableWorkflowPath = (uses) => {
   if (!Predicate.isString(uses) || !uses.startsWith("./") || uses.includes("${{")) return undefined
   const path = uses.slice(2)
@@ -356,6 +375,14 @@ export const validateWorkflowSecretBoundaries = (document, location, workflowDoc
         if (!Predicate.isString(step?.uses)) continue
         for (const inputName of duplicateActionInputNames(step)) {
           diagnostics.push(`${jobLocation} step ${stepIndex + 1} has duplicate action input ${inputName}`)
+        }
+      }
+      if (holdsAppPrivateKey(job, steps)) {
+        const stepIndex = workspaceCodeStepIndex(steps)
+        if (stepIndex !== -1) {
+          diagnostics.push(
+            `${jobLocation} step ${stepIndex + 1} runs workspace code in a job holding a GitHub App private key`
+          )
         }
       }
       const inheritedSecretContext = { workflowEnv: currentDocument?.env, job }
@@ -1287,6 +1314,62 @@ jobs:
         env:
           JIRA_API_KEY: \${{ secrets.JIRA_API_KEY }}
 `)
+  const appTokenSteps = `
+      - uses: actions/create-github-app-token@${"a".repeat(40)}
+        id: app-token
+        with:
+          app-id: \${{ secrets.AUTOMATION_APP_ID }}
+          private-key: \${{ secrets.AUTOMATION_APP_PRIVATE_KEY }}
+      - uses: peter-evans/create-pull-request@${"a".repeat(40)}
+        with:
+          token: \${{ steps.app-token.outputs.token }}`
+  const appTokenAfterBuild = parse(`
+on:
+  schedule:
+    - cron: "0 6 * * *"
+jobs:
+  update:
+    steps:
+      - uses: actions/checkout@${"a".repeat(40)}
+      - uses: ./.github/actions/setup
+      - run: pnpm regenerate && pnpm test${appTokenSteps}
+`)
+  const appTokenAfterScript = parse(`
+on:
+  schedule:
+    - cron: "0 6 * * *"
+jobs:
+  update:
+    steps:
+      - uses: actions/checkout@${"a".repeat(40)}
+      - run: git apply update.patch && node scripts/fixup.mjs${appTokenSteps}
+`)
+  const appTokenAfterPatchOnly = parse(`
+on:
+  schedule:
+    - cron: "0 6 * * *"
+jobs:
+  regenerate:
+    steps:
+      - uses: actions/checkout@${"a".repeat(40)}
+      - uses: ./.github/actions/setup
+      - run: pnpm regenerate && pnpm test
+  open-pr:
+    needs: regenerate
+    steps:
+      - uses: actions/checkout@${"a".repeat(40)}
+      - uses: actions/download-artifact@${"a".repeat(40)}
+      - run: git apply "$RUNNER_TEMP/update.patch"${appTokenSteps}
+`)
+  assert.match(
+    validateWorkflowSecretBoundaries(appTokenAfterBuild, "App token after build fixture").join("\n"),
+    /step 2 runs workspace code in a job holding a GitHub App private key/u
+  )
+  assert.match(
+    validateWorkflowSecretBoundaries(appTokenAfterScript, "App token after script fixture").join("\n"),
+    /step 2 runs workspace code/u
+  )
+  assert.deepEqual(validateWorkflowSecretBoundaries(appTokenAfterPatchOnly, "App token after patch fixture"), [])
   assert.equal(validateWorkflowSecretBoundaries(invalid, "invalid fixture").length, 1)
   assert.equal(validateWorkflowSecretBoundaries(invalidJobOidcAuthority, "job OIDC fixture").length, 1)
   assert.equal(validateWorkflowSecretBoundaries(invalidInheritedOidcAuthority, "inherited OIDC fixture").length, 1)
