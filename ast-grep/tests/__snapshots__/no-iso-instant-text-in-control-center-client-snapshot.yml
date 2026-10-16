@@ -12,6 +12,17 @@ snapshots:
         start: 28
         end: 70
   ? |
+    const view = <StateLabel label={DateTime.formatIso(checkedAt)} tone="neutral" />
+  : labels:
+      - source: DateTime.formatIso(checkedAt)
+        style: primary
+        start: 32
+        end: 61
+      - source: "{DateTime.formatIso(checkedAt)}"
+        style: secondary
+        start: 31
+        end: 62
+  ? |
     const view = <dd>{DateTime.formatIso(share.expiresAt)}</dd>
   : labels:
       - source: DateTime.formatIso(share.expiresAt)
@@ -22,3 +33,25 @@ snapshots:
         style: secondary
         start: 17
         end: 54
+  ? |
+    const view = <dd>{expired ? DateTime.formatIso(share.expiresAt) : "-"}</dd>
+  : labels:
+      - source: DateTime.formatIso(share.expiresAt)
+        style: primary
+        start: 28
+        end: 63
+      - source: '{expired ? DateTime.formatIso(share.expiresAt) : "-"}'
+        style: secondary
+        start: 17
+        end: 70
+  ? |
+    const view = <p>{"at " + DateTime.formatIso(share.expiresAt)}</p>
+  : labels:
+      - source: DateTime.formatIso(share.expiresAt)
+        style: primary
+        start: 25
+        end: 60
+      - source: '{"at " + DateTime.formatIso(share.expiresAt)}'
+        style: secondary
+        start: 16
+        end: 61
