@@ -2,6 +2,17 @@
 
 Released as `@knpkv/herdr-approvals` up to 0.18.0; the headings below are that package's history.
 
+## 0.42.2
+
+### Patch Changes
+
+- [#966](https://github.com/knpkv/npm/pull/966) [`7603f36`](https://github.com/knpkv/npm/commit/7603f3641fb7d2658f93d4ce45d8949aeb9ecc35) Thanks [@konopkov](https://github.com/konopkov)! - Codex agents waiting on a sleep call now show as waiting instead of unknown. `AgentTaskFacts` activity gains a `wait` kind, which classifies as waiting while the call runs.
+- Updated dependencies [[`7603f36`](https://github.com/knpkv/npm/commit/7603f3641fb7d2658f93d4ce45d8949aeb9ecc35)]:
+  - @knpkv/herdr-fleet@0.14.0
+  - @knpkv/herdr-connect@0.29.2
+  - @knpkv/herdr-coordinator@0.4.6
+  - @knpkv/herdr-work@0.12.7
+
 ## 0.42.1
 
 ### Patch Changes

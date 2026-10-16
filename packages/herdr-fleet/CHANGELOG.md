@@ -1,5 +1,11 @@
 # @knpkv/herdr-fleet
 
+## 0.14.0
+
+### Minor Changes
+
+- [#966](https://github.com/knpkv/npm/pull/966) [`7603f36`](https://github.com/knpkv/npm/commit/7603f3641fb7d2658f93d4ce45d8949aeb9ecc35) Thanks [@konopkov](https://github.com/konopkov)! - Codex agents waiting on a sleep call now show as waiting instead of unknown. `AgentTaskFacts` activity gains a `wait` kind, which classifies as waiting while the call runs.
+
 ## 0.13.0
 
 ### Minor Changes
