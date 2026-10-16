@@ -3,6 +3,7 @@ import * as DateTime from "effect/DateTime"
 import type { ReactElement } from "react"
 
 import type { PluginConnectionTestResult } from "../../api/plugins.js"
+import { formatCheckTime } from "../formatTime.js"
 import type { ConnectionTestState } from "./connectionState.js"
 import styles from "./ServicesPage.module.css"
 
@@ -51,7 +52,8 @@ export const ConnectionTestEvidence = ({ state }: ConnectionTestEvidenceProps): 
         </Text>
       )}
       <Text tone="secondary" variant="meta">
-        Checked <time dateTime={checkedAtIso}>{checkedAtIso}</time> · {result.latencyMilliseconds} ms
+        Checked <time dateTime={checkedAtIso}>{formatCheckTime(result.checkedAt)}</time> · {result.latencyMilliseconds}{" "}
+        ms
       </Text>
     </div>
   )

@@ -1,5 +1,6 @@
 import { Button, Field, StateLabel, Text } from "@knpkv/rly/primitives"
 import { type FormEvent, type ReactElement, useEffect, useRef, useState } from "react"
+import * as DateTime from "effect/DateTime"
 
 import type {
   AtlassianOAuthClientConfiguration,
@@ -8,6 +9,7 @@ import type {
   PluginConnectionAdministration,
   PluginCredentialReplacement
 } from "../../api/plugins.js"
+import { formatCheckTime } from "../formatTime.js"
 import { rememberAtlassianOAuthSetupIntent } from "./atlassianOAuthSetupIntentStorage.js"
 
 import styles from "./ServicesPage.module.css"
@@ -183,9 +185,16 @@ export const ConnectionAdministration = ({
             ? "Manual synchronization"
             : "This provider does not support synchronization"}
           {administration.synchronization?.lastSuccessAt === null ||
-          administration.synchronization?.lastSuccessAt === undefined
-            ? " · No successful sync recorded"
-            : ` · Last successful sync ${administration.synchronization.lastSuccessAt}`}
+          administration.synchronization?.lastSuccessAt === undefined ? (
+            " · No successful sync recorded"
+          ) : (
+            <>
+              {" · Last successful sync "}
+              <time dateTime={DateTime.formatIso(administration.synchronization.lastSuccessAt)}>
+                {formatCheckTime(administration.synchronization.lastSuccessAt)}
+              </time>
+            </>
+          )}
         </Text>
       </div>
       <div className={styles.administrationSection}>
