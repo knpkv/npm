@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
-import type { CodeQueue, CodeQueueQuery, CodeReference } from "@knpkv/codecommit-web/host"
+import type { CodeCanvasResult, CodeQueue, CodeQueueQuery, CodeReference } from "@knpkv/codecommit-web/host"
+import type { CanvasFile, CanvasReviewContext } from "@knpkv/review/canvas"
 import { PortalProvider } from "@knpkv/rly/foundations"
 import { Effect } from "effect"
 import { act } from "react"
@@ -26,7 +27,8 @@ describe("Code module reads", { concurrent: false }, () => {
     detail: () => Effect.succeed({ _tag: "Unavailable", reason: "permission_required", host: null }),
     review: () => Effect.succeed({ _tag: "Unavailable", reason: "permission_required", host: null }),
     diff: () => Effect.succeed({ _tag: "Unavailable", reason: "permission_required", host: null }),
-    content: () => Effect.succeed({ _tag: "Unavailable", reason: "permission_required", host: null })
+    content: () => Effect.succeed({ _tag: "Unavailable", reason: "permission_required", host: null }),
+    canvas: () => Effect.succeed({ _tag: "Unavailable", reason: "permission_required", host: null })
   }
   const render = async (
     reads: CodeModuleReads,
@@ -304,4 +306,178 @@ describe("Code module reads", { concurrent: false }, () => {
     expect(calls).toEqual([ref, other, ref])
     expect(document.body.textContent).not.toContain("This diff may be outdated")
   })
+
+  it("opens the review canvas for view=canvas, re-reading a building map until it is ready", async () => {
+    const file: CanvasFile = {
+      path: "src/a.ts",
+      status: "added",
+      previousPath: null,
+      added: 3,
+      removed: 0,
+      parts: { _tag: "NotRecorded" }
+    }
+    const context: CanvasReviewContext = {
+      lastLook: { _tag: "NotRecorded" },
+      readingPath: { _tag: "NotRecorded" },
+      findings: { _tag: "NotRecorded" },
+      tests: { _tag: "NotRecorded" }
+    }
+    const building: CodeCanvasResult = {
+      _tag: "Ready",
+      reading: { graph: { _tag: "Building", headRevision: "head", placed: 0, total: 1, files: [file] }, context }
+    }
+    const ready: CodeCanvasResult = {
+      _tag: "Ready",
+      reading: {
+        graph: {
+          _tag: "Ready",
+          graph: {
+            headRevision: "head",
+            files: [file],
+            dependencies: { _tag: "Recorded", edges: [] },
+            partitions: { _tag: "NotRecorded" }
+          }
+        },
+        context
+      }
+    }
+    const canvas = vi.fn().mockReturnValueOnce(building).mockReturnValue(ready)
+    const reads: CodeModuleReads = {
+      ...defaults,
+      detail: () =>
+        Effect.succeed({
+          _tag: "Ready",
+          item: {
+            ref,
+            id: "7",
+            repository: "example",
+            title: "Read the canvas",
+            author: "author",
+            status: "OPEN",
+            approval: "waiting",
+            createdAt: 1_000,
+            updatedAt: 1_000,
+            observedAt: 1_000
+          },
+          description: "",
+          sourceBranch: "feature",
+          destinationBranch: "main"
+        }),
+      canvas: () => Effect.sync(canvas)
+    }
+    await render(reads, `filter=open&search=&offset=0&ref=${ref}&view=canvas`)
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Building the map"), { timeout: 3_000 })
+    expect(document.body.textContent).toContain("Read the canvas")
+    await vi.waitFor(() => expect(document.querySelector('[data-canvas-node="src/a.ts"]')).not.toBeNull(), {
+      timeout: 5_000
+    })
+    expect(canvas).toHaveBeenCalledTimes(2)
+  }, 10_000)
+
+  const canvasFile: CanvasFile = {
+    path: "src/a.ts",
+    status: "added",
+    previousPath: null,
+    added: 3,
+    removed: 0,
+    parts: { _tag: "NotRecorded" }
+  }
+  const noContext: CanvasReviewContext = {
+    lastLook: { _tag: "NotRecorded" },
+    readingPath: { _tag: "NotRecorded" },
+    findings: { _tag: "NotRecorded" },
+    tests: { _tag: "NotRecorded" }
+  }
+  const canvasDetail: CodeModuleReads["detail"] = () =>
+    Effect.succeed({
+      _tag: "Ready",
+      item: {
+        ref,
+        id: "7",
+        repository: "example",
+        title: "Read the canvas",
+        author: "author",
+        status: "OPEN",
+        approval: "waiting",
+        createdAt: 1_000,
+        updatedAt: 1_000,
+        observedAt: 1_000
+      },
+      description: "",
+      sourceBranch: "feature",
+      destinationBranch: "main"
+    })
+  const readyCanvas = (headRevision: string): CodeCanvasResult => ({
+    _tag: "Ready",
+    reading: {
+      graph: {
+        _tag: "Ready",
+        graph: {
+          headRevision,
+          files: [canvasFile],
+          dependencies: { _tag: "Recorded", edges: [] },
+          partitions: { _tag: "NotRecorded" }
+        }
+      },
+      context: noContext
+    }
+  })
+
+  it("does not join a map and lines read at different heads, and reads both again on request", async () => {
+    const canvas = vi.fn().mockReturnValueOnce(readyCanvas("head-b")).mockReturnValue(readyCanvas("head-c"))
+    const reads: CodeModuleReads = {
+      ...defaults,
+      detail: canvasDetail,
+      canvas: () => Effect.sync(canvas),
+      diff: () =>
+        Effect.succeed({
+          _tag: "Ready",
+          diff: {
+            pullRequestId: "7",
+            revisionId: "rev",
+            baseCommit: "base",
+            headCommit: "head-c",
+            readAt: 1,
+            cacheUpdatedAt: 1,
+            files: []
+          }
+        })
+    }
+    await render(reads, `filter=open&search=&offset=0&ref=${ref}&view=canvas`)
+    await vi.waitFor(() => expect(document.querySelector("[data-code-canvas-heads]")).not.toBeNull(), {
+      timeout: 3_000
+    })
+    expect(document.body.textContent).toContain("The map is for head head-b, and the change is now at head-c.")
+    const again = [...document.querySelectorAll("button")].find((button) => button.textContent === "Read again")
+    await act(async () => again?.click())
+    await vi.waitFor(() => expect(document.querySelector("[data-code-canvas-heads]")).toBeNull(), { timeout: 3_000 })
+    expect(canvas).toHaveBeenCalledTimes(2)
+  })
+
+  it("shows a failed re-read of a building map and stops re-reading it", async () => {
+    const building: CodeCanvasResult = {
+      _tag: "Ready",
+      reading: {
+        graph: { _tag: "Building", headRevision: "head", placed: 0, total: 1, files: [canvasFile] },
+        context: noContext
+      }
+    }
+    let calls = 0
+    const reads: CodeModuleReads = {
+      ...defaults,
+      detail: canvasDetail,
+      canvas: () =>
+        Effect.suspend(() => {
+          calls += 1
+          return calls === 1 ? Effect.succeed(building) : Effect.fail(new CodeReadFailed({ reason: "not_found" }))
+        })
+    }
+    await render(reads, `filter=open&search=&offset=0&ref=${ref}&view=canvas`)
+    await vi.waitFor(() => expect(calls).toBe(2), { timeout: 4_000 })
+    await vi.waitFor(() => expect(document.querySelector("[data-code-canvas-failure]")).not.toBeNull(), {
+      timeout: 2_000
+    })
+    await new Promise((resolve) => setTimeout(resolve, 2_500))
+    expect(calls).toBe(2)
+  }, 10_000)
 })

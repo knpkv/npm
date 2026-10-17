@@ -6,6 +6,7 @@
 @import "@knpkv/herdr-work/styles.css";
 @import "@knpkv/codecommit-web/host/style.css";
 @import "@knpkv/codecommit-web/views/style.css";
+@import "@knpkv/review/canvas/styles.css";
 @import "./styles.css";
 @import "./superapp.css";
 @import "./today.css";

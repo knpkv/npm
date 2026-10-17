@@ -458,7 +458,7 @@ export function useCodeReviewWorkspace({
           <>
             <ReviewWorkspaceView
               workspace={reading.workspace}
-              presentation={selection.view}
+              presentation={selection.view === "conversation" ? "conversation" : "review"}
               scope={scope}
               secondary={{ open: secondaryOpen, onOpenChange: (open) => setSecondary({ revision: revisionKey, open }) }}
               focusTarget={() => owner.current}

@@ -48,6 +48,7 @@ const program = Effect.gen(function*() {
   const embeddedDiagrams = yield* bundle("src/guide/diagrams.ts", { platform: "browser", format: "esm" })
   yield* fs.writeFileString("dist/guide/diagrams.js", embeddedDiagrams)
   yield* fs.copyFile("src/guide/style.css", "dist/guide/style.css")
+  yield* fs.copyFile("src/canvas/style.css", "dist/canvas/style.css")
 })
 
 // Build platform services in the main fiber's scope, then run the finite script.
