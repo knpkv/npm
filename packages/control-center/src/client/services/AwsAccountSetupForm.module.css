@@ -51,7 +51,6 @@
 }
 
 .area {
-  min-block-size: 7rem;
   padding: var(--rly-space-8) var(--rly-space-12);
   line-height: 22px;
   resize: vertical;

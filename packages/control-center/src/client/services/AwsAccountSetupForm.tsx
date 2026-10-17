@@ -528,8 +528,9 @@ export const AwsAccountSetupForm = ({
     resetDiscovery()
   }
 
+  // A policy denial is the outcome to act on, so the verified notice stays out of its way.
   const verifiedNotice =
-    ready === null ? null : (
+    ready === null || policyDenied ? null : (
       <Notice tone="positive">
         {ready.profile} verified in {ready.region} at{" "}
         <time dateTime={DateTime.formatIso(ready.checkedAt)}>
@@ -787,6 +788,7 @@ export const AwsAccountSetupForm = ({
                 className={`${styles.control} ${styles.area} ${styles.mono}`}
                 maxLength={4_096}
                 onChange={(event) => setRepositoryNames(event.currentTarget.value)}
+                rows={2}
                 value={repositoryNames}
               />
             )}
@@ -798,6 +800,7 @@ export const AwsAccountSetupForm = ({
                 className={`${styles.control} ${styles.area} ${styles.mono}`}
                 maxLength={4_096}
                 onChange={(event) => setPipelineNames(event.currentTarget.value)}
+                rows={2}
                 value={pipelineNames}
               />
             )}

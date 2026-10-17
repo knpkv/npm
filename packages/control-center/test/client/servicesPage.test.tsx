@@ -2816,6 +2816,7 @@ describe("ServicesPage connection tests", () => {
       )
       // The policy message replaces both per-service "Not allowed" rows.
       expect(host.textContent).not.toContain("Not allowed")
+      expect(host.textContent).not.toContain("Account details masked.")
       expect(buttonNamed(host, "Refresh discovery")).toBeDefined()
     })
 
