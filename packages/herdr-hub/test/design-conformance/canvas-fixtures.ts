@@ -277,7 +277,7 @@ const canvasGraph = (canvas: Canvas, state: CanvasState) => {
     }
   })
   const graph = {
-    headRevision: canvas.pr.head,
+    headRevision: full(canvas.pr.head),
     files,
     dependencies: state === "no-dependency-data"
       ? { _tag: "NotRecorded", language: "TypeScript" }
@@ -296,7 +296,7 @@ const canvasGraph = (canvas: Canvas, state: CanvasState) => {
   const placed = /(\d+) of (\d+) files$/u.exec(canvas.building.line)
   return {
     _tag: "Building",
-    headRevision: canvas.pr.head,
+    headRevision: full(canvas.pr.head),
     placed: Number(placed?.[1] ?? 0),
     total: Number(placed?.[2] ?? files.length),
     files

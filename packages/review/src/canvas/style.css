@@ -268,6 +268,11 @@
       radial-gradient(circle, var(--rly-color-border-1) 1px, transparent 1.2px) 0 0 / 20px 20px,
       var(--rly-color-canvas);
   }
+  /* The canvas takes focus back after a zoom removes the focused node. */
+  .rc-cv:focus-visible {
+    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+    outline-offset: calc(var(--rly-focus-ring-width) * -1);
+  }
   .rc-cv > * {
     position: absolute;
   }
@@ -448,17 +453,32 @@
     font: 620 0.9375rem/1.3 var(--rly-font-mono);
     color: var(--rly-color-text-1);
   }
+  /* A part row is a button that selects the part; it draws as a plain row. */
   .rc-fzr {
+    appearance: none;
+    inline-size: calc(100% - 16px);
     block-size: 44px;
     box-sizing: border-box;
     margin-inline: 8px;
+    padding-block: 0;
     padding-inline: 8px;
     display: grid;
     grid-template-columns: 112px minmax(0, 1fr) 72px 36px 104px;
     gap: 8px;
     align-items: center;
+    border: 0;
     border-block-start: 1px solid var(--rly-color-border-1);
+    border-radius: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
     font-size: 0.8125rem;
+    text-align: start;
+    cursor: pointer;
+  }
+  .rc-fzr:focus-visible {
+    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+    outline-offset: calc(var(--rly-focus-ring-width) * -1);
   }
   .rc-fzr code {
     font: 560 0.8125rem/1.2 var(--rly-font-mono);

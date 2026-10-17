@@ -752,7 +752,16 @@ const FileParts = ({ scene, shared }: { readonly shared: Shared; readonly scene:
           const evidence = card === undefined ? null : evidenceWords(notes[card.id])
           return (
             <div key={row.part.name}>
-              <div className="rc-fzr" aria-current={props.state.part === row.part.name ? "true" : undefined}>
+              <button
+                type="button"
+                className="rc-fzr"
+                aria-current={props.state.part === row.part.name ? "true" : undefined}
+                onClick={() => props.onCommand({ _tag: "FocusPart", part: row.part.name })}
+                onDoubleClick={() => {
+                  props.onCommand({ _tag: "FocusPart", part: row.part.name })
+                  props.onCommand({ _tag: "ZoomIn" })
+                }}
+              >
                 <code>{row.part.name}</code>
                 <span className="rc-k">
                   {partKind(row.part, false)}
@@ -774,7 +783,7 @@ const FileParts = ({ scene, shared }: { readonly shared: Shared; readonly scene:
                   {finding === undefined ? null : <Badge>{finding.severity}</Badge>}
                   {finding === undefined ? null : <LifeLabel note={notes[finding.id]} />}
                 </span>
-              </div>
+              </button>
               {card === undefined ? null : (
                 <div className="rc-fzf" role="note" aria-label={`Finding ${card.id}, pinned to ${row.part.name}`}>
                   <span className="rc-mk rc-small">
@@ -822,7 +831,8 @@ const FindingCard = ({
   const { notes, props, world } = shared
   const note = notes[finding.id]
   const evidence = note?.evidence ?? null
-  const raised = raisedWords(note, world.graph.headRevision, props.timeZone)
+  // The graph carries the full head commit; the card names it the way commits are named everywhere else, by 7.
+  const raised = raisedWords(note, world.graph.headRevision.slice(0, 7), props.timeZone)
   const handled = props.handled.has(finding.id)
   return (
     <div
@@ -988,6 +998,8 @@ const useFit = (width: number, height: number) => {
   return { scroll, scale, style: { blockSize: Math.ceil(height * scale) } }
 }
 
+const canvasControls = 'a[href], button, input, select, textarea, [contenteditable="true"]'
+
 const CanvasFrame = ({ shared }: { readonly shared: Shared }) => {
   const { props, world } = shared
   const state = props.state
@@ -1004,13 +1016,26 @@ const CanvasFrame = ({ shared }: { readonly shared: Shared }) => {
           : world.overview
   const fit = useFit(scene.width, scene.height)
   const frame = useRef<HTMLDivElement>(null)
+  // While the keyboard drives the canvas, focus follows the focused file or part. A zoom can remove the focused
+  // element, which drops focus to the body; the canvas then takes it back so the next key still reaches it.
   useEffect(() => {
     const root = frame.current
-    if (root === null || !state.keyboard || !root.contains(document.activeElement)) return
-    root.querySelector<HTMLElement>(`[data-canvas-node="${CSS.escape(state.focus)}"]`)?.focus({ preventScroll: true })
-  }, [state.focus, state.keyboard])
+    const active = document.activeElement
+    if (root === null || !state.keyboard) return
+    if (active !== null && active !== document.body && !root.contains(active)) return
+    const target =
+      root.querySelector<HTMLElement>(`[data-canvas-node="${CSS.escape(state.focus)}"]`) ??
+      root.querySelector<HTMLElement>('.rc-fzr[aria-current="true"]') ??
+      root
+    target.focus({ preventScroll: true })
+  }, [state.focus, state.keyboard, state.part, level])
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.altKey || event.ctrlKey || event.metaKey) return
+    // Keys on a control inside the canvas (Mark handled, a link) belong to that control. File nodes and part rows
+    // are the canvas's own targets.
+    // A key event's target is the focused element.
+    const control = document.activeElement?.closest(canvasControls) ?? null
+    if (control !== null && !control.matches("[data-canvas-node], .rc-fzr")) return
     const command = canvasKeyCommand(event.key)
     if (command === null) return
     event.preventDefault()
@@ -1029,6 +1054,7 @@ const CanvasFrame = ({ shared }: { readonly shared: Shared }) => {
               ref={frame}
               className="rc-cv"
               role="region"
+              tabIndex={-1}
               aria-label={`${canvasLabel(world, state, props.pullRequest.number)}. A visual aid; the Files list (l) has the whole review`}
               style={{ blockSize: scene.height, inlineSize: scene.width }}
               onKeyDown={onKeyDown}

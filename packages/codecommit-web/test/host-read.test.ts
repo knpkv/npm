@@ -58,8 +58,21 @@ const unused = () => Effect.die("Unexpected host provider operation")
 const fixture = Effect.fn("CodeHostTest.fixture")(function*(options: {
   readonly comments?: HostCacheReads["comments"]
   readonly reviews?: ReviewRunReader
+  /** Added files the provider lists, each with a small text blob. */
+  readonly files?: number
 } = {}) {
   const config = yield* Ref.make<string | null>(null)
+  const inventoryCalls = yield* Ref.make(0)
+  const changed = Array.from({ length: options.files ?? 0 }, (_, index) =>
+    new ReadClient.CodeCommitChangedFile({
+      status: "added",
+      before: null,
+      after: new ReadClient.CodeCommitBlobMetadata({
+        blobId: ReadClient.CodeCommitBlobId.make(`blob-${index}`),
+        path: `src/file-${index}.ts`,
+        mode: "100644"
+      })
+    }))
   const policy = yield* Ref.make("always_allow")
   const providerCalls = yield* Ref.make(0)
   const audit = yield* Ref.make<ReadonlyArray<NewAuditLogEntry>>([])
@@ -72,7 +85,9 @@ const fixture = Effect.fn("CodeHostTest.fixture")(function*(options: {
     readFileString: (path) =>
       path === "/fixture/permissions.json"
         ? Ref.get(policy).pipe(
-          Effect.map((grant) => JSON.stringify({ permissions: { getPullRequest: grant, getDifferences: grant } }))
+          Effect.map((grant) =>
+            JSON.stringify({ permissions: { getPullRequest: grant, getDifferences: grant, getBlob: grant } })
+          )
         )
         : Ref.get(config).pipe(Effect.map((value) => value ?? "{}"))
   })
@@ -101,7 +116,13 @@ const fixture = Effect.fn("CodeHostTest.fixture")(function*(options: {
   }
   const inner: ReadClient.CodeCommitReadClientService = {
     discoverAccount: unused,
-    getBlob: unused,
+    getBlob: (request) =>
+      Effect.succeed(
+        new ReadClient.CodeCommitBlobContent({
+          blobId: ReadClient.CodeCommitBlobId.make(request.blobId),
+          bytes: new TextEncoder().encode(`export const value = "${request.blobId}"\n`)
+        })
+      ),
     getRepositoryIdentity: unused,
     listPullRequestIdsPage: unused,
     listPullRequestsPage: unused,
@@ -127,9 +148,12 @@ const fixture = Effect.fn("CodeHostTest.fixture")(function*(options: {
         })
       )),
     getChangedFilesPage: () =>
-      Ref.update(providerCalls, (n) => n + 1).pipe(Effect.as(
-        new ReadClient.CodeCommitChangedFilesPage({ files: [], nextToken: null, providerPageLimit: 100 })
-      ))
+      Ref.update(providerCalls, (n) => n + 1).pipe(
+        Effect.andThen(Ref.update(inventoryCalls, (n) => n + 1)),
+        Effect.as(
+          new ReadClient.CodeCommitChangedFilesPage({ files: changed, nextToken: null, providerPageLimit: 100 })
+        )
+      )
   }
   const reads = yield* makeCodeHostReadsFromClient({
     cache,
@@ -138,7 +162,7 @@ const fixture = Effect.fn("CodeHostTest.fixture")(function*(options: {
     configPath: "/fixture/config.json",
     permissionPath: "/fixture/permissions.json"
   }, inner).pipe(Effect.provideService(FileSystem.FileSystem, fs))
-  return { reads, config, policy, providerCalls, audit, profileQueries }
+  return { reads, config, policy, providerCalls, inventoryCalls, audit, profileQueries }
 })
 
 describe("Code host read service", () => {
@@ -288,6 +312,18 @@ describe("Code host read service", () => {
       const refused = yield* Effect.result(test.reads.canvas(ref, { login: "Reviewer" }))
       if (Result.isFailure(refused)) expect(refused.failure.reason).toBe("permission_required")
       else expect.fail("Would-ask canvas read executed")
+    }))
+
+  it.effect("lists a change's files once per canvas read, not once per file", () =>
+    Effect.gen(function*() {
+      const test = yield* fixture({ files: 3 })
+      const reading = yield* test.reads.canvas(ref, { login: "Reviewer" })
+      expect(reading.graph._tag === "Ready" ? reading.graph.graph.files.map((file) => file.path) : []).toEqual([
+        "src/file-0.ts",
+        "src/file-1.ts",
+        "src/file-2.ts"
+      ])
+      expect(yield* Ref.get(test.inventoryCalls)).toBe(1)
     }))
 
   /** An unreadable enabled set must never reuse the previous visible accounts. */

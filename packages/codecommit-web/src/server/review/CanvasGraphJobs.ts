@@ -1,13 +1,13 @@
 /**
  * Background canvas graph reads, one per PR head. The first request starts reading the change's files. A request
  * waits up to the grace period for the graph, so a small change answers Ready at once; a larger one answers with
- * the progress so far and is read again. A failed read is reported once and the next request starts again. Only
- * the most recent heads are kept.
+ * the progress so far and is read again. A failed or crashed read is reported once and the next request starts
+ * again. Only the most recent heads are kept.
  * @module
  */
 import type { CanvasGraph, CanvasGraphReading } from "@knpkv/review/canvas"
 import { Deferred, type Duration, Effect, Fiber, Ref, Semaphore } from "effect"
-import type { CodeHostReadError } from "../host-model.js"
+import { CodeHostReadError } from "../host-model.js"
 import { buildCanvasGraph, canvasFileOf, type CanvasSourceFile } from "./CanvasGraphBuilder.js"
 
 type Building = Extract<CanvasGraphReading, { readonly _tag: "Building" }>
@@ -75,6 +75,12 @@ export const makeCanvasGraphJobs = Effect.fn("CanvasGraphJobs.make")(function*(
       yield* Ref.set(state, { _tag: "Done", graph: buildCanvasGraph(headRevision, sources) })
     }).pipe(
       Effect.catch((error) => Ref.set(state, { _tag: "Failed", error })),
+      // A crash (a dying load, a throwing build) fails the job too, so a read reports it instead of building forever.
+      Effect.catchDefect((defect) =>
+        Effect.logError("Canvas graph job crashed", defect).pipe(
+          Effect.andThen(Ref.set(state, { _tag: "Failed", error: new CodeHostReadError({ reason: "unavailable" }) }))
+        )
+      ),
       Effect.ensuring(Deferred.succeed(settled, undefined))
     )
     const fiber = yield* Effect.forkIn(work, scope)

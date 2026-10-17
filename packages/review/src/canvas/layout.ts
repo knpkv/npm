@@ -728,8 +728,9 @@ export const layoutDiff = (
 ): DiffScene => {
   const file = files.find((entry) => entry.path === path)
   const parts = orderedParts(file?.parts ?? [])
-  const index = parts.findIndex((part) => part.name === partName)
-  const part = parts[index] ?? parts[0] ?? {
+  // An unknown part name shows the first part; "next" always follows the part actually shown.
+  const shown = Math.max(0, parts.findIndex((part) => part.name === partName))
+  const part = parts[shown] ?? {
     name: partName,
     kind: "modified",
     movedPath: null,
@@ -754,11 +755,12 @@ export const layoutDiff = (
       y: 180 + row * 120,
       w: 150,
       h: 48,
-      target: box.y + DIFF_HEADER + row * 188
+      // Links land on the box's line area, however many neighbours a short part has.
+      target: Math.min(box.y + DIFF_HEADER + row * 188, box.y + box.h - 12)
     }))
   const left = side("callers", DIFF_BOX.x - 176)
   const right = side("callees", DIFF_BOX.x + DIFF_BOX.w + 110)
-  const nextPart = parts[index + 1] ?? null
+  const nextPart = parts[shown + 1] ?? null
   const bottom = nextPart === null
     ? null
     : {
@@ -805,7 +807,11 @@ export const layoutDiff = (
   const strip = ({ target: _target, ...stub }: SceneStub & { readonly target: number }): SceneStub => stub
   return {
     width: CANVAS_WIDTH,
-    height: Math.max(CANVAS_MIN_HEIGHT, (bottom?.y ?? box.y + box.h) + 60),
+    height: Math.max(
+      CANVAS_MIN_HEIGHT,
+      (bottom?.y ?? box.y + box.h) + 60,
+      ...[...left, ...right].map((stub) => stub.y + stub.h + 40)
+    ),
     path,
     part,
     box,

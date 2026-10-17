@@ -22,6 +22,7 @@ import {
   reduceCanvasView
 } from "@knpkv/review/canvas"
 import { ReviewCanvas, type ReviewCanvasChecks, type ReviewCanvasText } from "@knpkv/review/canvas/react"
+import { Button, Notice } from "@knpkv/rly/primitives"
 import { Effect, Fiber, Result } from "effect"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import type { CodeModuleReads } from "./code-client.js"
@@ -42,17 +43,29 @@ const useCanvasReading = (reads: CodeModuleReads, ref: CodeReference, enabled: b
   }, [state.value, ref])
   const value = state.value ?? (last?.ref === ref ? last.value : null)
   const building = value?._tag === "Ready" && value.reading.graph._tag === "Building"
+  // A failed re-read stops the loop: the page shows the failure over the previous reading and waits for Read again.
   useEffect(() => {
-    if (!enabled || !building || state.loading) return
+    if (!enabled || !building || state.loading || state.failure !== null) return
     const fiber = Effect.runFork(
       Effect.sleep("2 seconds").pipe(Effect.andThen(Effect.sync(() => setTick((n) => n + 1))))
     )
     return () => {
       Effect.runFork(Fiber.interrupt(fiber))
     }
-  }, [enabled, building, state.loading])
+  }, [enabled, building, state.loading, state.failure])
   return { ...state, value }
 }
+
+/**
+ * The canvas joins three separate reads: the map, the review and the file list with its lines. A push between them
+ * can leave them at different heads. Findings and lines join the map only at the map's own head; `other` names a
+ * head another read is already at, so the page can say so and offer to read again.
+ */
+export const canvasReadHeads = (map: string, review: string | null, lines: string | null) => ({
+  findings: review === map,
+  lines: lines === map,
+  other: [review, lines].find((head) => head !== null && head !== map) ?? null
+})
 
 export const CodeCanvasPage = ({
   enabled,
@@ -68,17 +81,33 @@ export const CodeCanvasPage = ({
   readonly selection: CodeSelection & { readonly ref: CodeReference }
 }) => {
   const ref = selection.ref
+  // Read again re-reads every source together, on top of the host's own refresh.
+  const [again, setAgain] = useState(0)
+  const reread = refresh + again
+  const readAgain = useCallback(() => setAgain((count) => count + 1), [])
   const detailRead = useMemo(() => reads.detail(ref), [reads.detail, ref])
-  const detail = useCodeRead<CodeDetail>(ref, detailRead, enabled, true, refresh)
+  const detail = useCodeRead<CodeDetail>(ref, detailRead, enabled, true, reread)
   const reviewRead = useMemo(() => reads.review(ref), [reads.review, ref])
-  const review = useCodeRead<CodeReviewResult>(ref, reviewRead, enabled, false, refresh)
-  const canvas = useCanvasReading(reads, ref, enabled, refresh)
+  const review = useCodeRead<CodeReviewResult>(ref, reviewRead, enabled, false, reread)
+  const canvas = useCanvasReading(reads, ref, enabled, reread)
   const diffRead = useMemo(() => reads.diff(ref), [reads.diff, ref])
-  const diff = useCodeRead<CodeDiffResult>(ref, diffRead, enabled, false, refresh)
+  const diff = useCodeRead<CodeDiffResult>(ref, diffRead, enabled, false, reread)
 
   const reading: CanvasReading | null = canvas.value?._tag === "Ready" ? canvas.value.reading : null
   const workspace = review.value?._tag === "Ready" ? review.value.reading.workspace : null
-  const findings = useMemo(() => (workspace === null ? [] : canvasFindings(workspace)), [workspace])
+  const inventory = diff.value?._tag === "Ready" ? diff.value.diff : null
+  const mapHead =
+    reading === null
+      ? null
+      : reading.graph._tag === "Ready"
+        ? reading.graph.graph.headRevision
+        : reading.graph.headRevision
+  const heads =
+    mapHead === null
+      ? null
+      : canvasReadHeads(mapHead, workspace?.identity.headRevision ?? null, inventory?.headCommit ?? null)
+  const reviewAtMap = heads !== null && heads.findings ? workspace : null
+  const findings = useMemo(() => (reviewAtMap === null ? [] : canvasFindings(reviewAtMap)), [reviewAtMap])
   const world = useMemo(
     () => (reading === null ? null : canvasWorldOf(reading.graph, reading.context, findings)),
     [reading, findings]
@@ -106,10 +135,10 @@ export const CodeCanvasPage = ({
     })
   }, [])
 
-  const inventory = diff.value?._tag === "Ready" ? diff.value.diff : null
+  const linesAtMap = heads !== null && heads.lines
   const focusedFile =
     state === null || inventory === null ? null : (inventory.files.find((file) => file.path === state.focus) ?? null)
-  const wantsText = state !== null && state.level === "diff" && focusedFile !== null && inventory !== null
+  const wantsText = state !== null && state.level === "diff" && focusedFile !== null && inventory !== null && linesAtMap
   const contentQuery = useMemo(
     () =>
       wantsText && focusedFile !== null && inventory !== null
@@ -135,6 +164,9 @@ export const CodeCanvasPage = ({
     refresh
   )
   const text: ReviewCanvasText = useMemo(() => {
+    if (inventory !== null && !linesAtMap) {
+      return { _tag: "Unavailable", message: "These lines are at another head than the map. Read again." }
+    }
     if (contentQuery === null || inventory === null || focusedFile === null) return { _tag: "Loading" }
     if (content.failure !== null) return { _tag: "Unavailable", message: "The lines could not be read. Read again." }
     const value = content.value
@@ -157,19 +189,19 @@ export const CodeCanvasPage = ({
       headCommit: short(inventory.headCommit),
       lines: lines.map((line, index) => ({ number: index + 1, text: line, added: added.has(index + 1) }))
     }
-  }, [contentQuery, inventory, focusedFile, content.failure, content.value])
+  }, [contentQuery, inventory, focusedFile, content.failure, content.value, linesAtMap])
 
-  const run = workspace === null ? null : reviewRunReadingForWorkspace(workspace)
+  const run = reviewAtMap === null ? null : reviewRunReadingForWorkspace(reviewAtMap)
   const reviewMeta =
     run?._tag === "Current"
       ? { reviewer: run.run.profile?.name ?? run.run.kind, completedAt: run.run.completedAt }
       : null
   const checks: ReviewCanvasChecks =
-    workspace === null || workspace.checks._tag === "Unknown"
+    reviewAtMap === null || reviewAtMap.checks._tag === "Unknown"
       ? { _tag: "Unknown" }
       : {
           _tag: "Ready",
-          failed: workspace.checks.items.filter((check) => check.state === "failed").map((check) => check.name)
+          failed: reviewAtMap.checks.items.filter((check) => check.state === "failed").map((check) => check.name)
         }
   const item = detail.value?._tag === "Ready" ? detail.value : null
   const href = (page: "pull-requests", next: CodeSelection) => moduleHref(codeModule, page, codeSelectionSearch(next))
@@ -192,8 +224,25 @@ export const CodeCanvasPage = ({
       </section>
     )
   }
+  const readAgainButton = (
+    <Button onClick={readAgain} size="dense" variant="quiet">
+      Read again
+    </Button>
+  )
   return (
     <div className="code-canvas" data-code-canvas-state={reading.graph._tag}>
+      {/* Always mounted, so a notice added later lands in a live region screen readers already watch. */}
+      <div aria-live="polite" role="status">
+        {heads?.other != null && mapHead !== null ? (
+          <Notice action={readAgainButton} data-code-canvas-heads="" tone="caution">
+            The map is for head {short(mapHead)}, and the change is now at {short(heads.other)}.
+          </Notice>
+        ) : canvas.failure !== null ? (
+          <Notice action={readAgainButton} data-code-canvas-failure="" tone="critical">
+            Couldn’t read the map again. Previous reading shown.
+          </Notice>
+        ) : null}
+      </div>
       <ReviewCanvas
         pullRequest={{
           repository: item.item.repository,

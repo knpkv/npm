@@ -214,8 +214,10 @@ cached diff owner and Back/Forward behavior.
 
 `GET /v1/modules/code/canvas?ref=…` returns that revision's canvas reading through the same boundary.
 `view=canvas` on a selected PR opens the review canvas; the page re-reads a building map every two seconds
-until it is ready, and reads one file's text only at Diff zoom. "Mark handled" is a reading mark for
-this page only; nothing is posted.
+until it is ready, and reads one file's text only at Diff zoom. A failed re-read stops that loop and says so over
+the previous reading, with Read again. The map, the review and the file list are separate reads: findings and
+lines join the map only at the map's own head, and a read at another head is named with Read again. "Mark
+handled" is a reading mark for this page only; nothing is posted.
 
 Code reads bring a native SQLite dependency into hostd. A JavaScript bundle alone is insufficient:
 the installed `@libsql/client` native packages must match the host platform and runtime. Before

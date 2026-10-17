@@ -92,4 +92,24 @@ describe("scanScript", () => {
       { name: "handle()", start: 7, end: 9 }
     ])
   })
+
+  it("does not take data that only holds callbacks for a function", () => {
+    const text = [
+      "const config = { retry: () => 3 }",
+      "const ids = rows.map((row) => row.id)",
+      "const pick = flag ? (value) => value : fallback",
+      "export const load = async (ref: string) => ref",
+      "const step = function* () {",
+      "  yield 1",
+      "}",
+      "const one = value => value",
+      "const pinned = <F extends () => void>(f: F): F => f"
+    ].join("\n")
+    expect(scanScript(text).declarations.map((declaration) => declaration.name)).toEqual([
+      "load()",
+      "step()",
+      "one()",
+      "pinned()"
+    ])
+  })
 })

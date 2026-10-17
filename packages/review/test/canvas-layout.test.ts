@@ -203,4 +203,39 @@ describe("diff layout", () => {
       "tests/socket.test.ts"
     ])
   })
+
+  it("names the part after the one shown as next, also when the requested part is unknown", () => {
+    const scene = layoutDiff(sampleGraph, files, sampleFindings, "sync-worker/socket.ts", "")
+    expect(scene.part.name).toBe("connect()")
+    expect(scene.next).toBe("onMessage()")
+  })
+
+  it("keeps many neighbours of a short part inside the scene and points them at the box", () => {
+    const callers = [
+      "stage/useStageSocket.ts",
+      "stage/StageProvider.tsx",
+      "stage/reconnect.ts",
+      "sync-worker/worker.ts",
+      "sync-worker/protocol.ts",
+      "tests/drafts.test.ts"
+    ]
+    const graph: CanvasGraph = {
+      ...sampleGraph,
+      dependencies: {
+        _tag: "Recorded",
+        edges: callers.map((from) => ({
+          from,
+          to: "composer/draftStore.ts",
+          relation: "imports",
+          fromPart: null,
+          toPart: null
+        }))
+      }
+    }
+    const scene = layoutDiff(graph, canvasFiles(graph, sampleContext, sampleFindings), [], "composer/draftStore.ts", "")
+    expect(scene.left).toHaveLength(6)
+    expect(scene.left.filter((stub) => stub.y + stub.h > scene.height)).toEqual([])
+    const boxEdge = scene.links.filter((link) => link.x2 === scene.box.x)
+    expect(boxEdge.filter((link) => link.y2 < scene.box.y || link.y2 > scene.box.y + scene.box.h)).toEqual([])
+  })
 })

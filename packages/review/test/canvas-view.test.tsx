@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it } from "vitest"
-import type { CanvasGraphReading } from "../src/canvas/model.js"
+import type { CanvasGraphReading, CanvasReviewContext } from "../src/canvas/model.js"
 import { type CanvasViewState, initialCanvasView, makeCanvasWorld } from "../src/canvas/view-state.js"
 import { ReviewCanvas, type ReviewCanvasProps, type ReviewCanvasText } from "../src/canvas/view.js"
 import { sampleContext, sampleFindings, sampleGraph } from "./canvas-fixture.js"
@@ -12,6 +12,7 @@ const render = (
     readonly graph?: CanvasGraphReading
     readonly state?: Partial<CanvasViewState>
     readonly text?: ReviewCanvasText
+    readonly context?: CanvasReviewContext
   } = {}
 ) => {
   const props: ReviewCanvasProps = {
@@ -22,7 +23,10 @@ const render = (
       sourceBranch: "stage-sync-worker",
       destinationBranch: "main"
     },
-    reading: { graph: overrides.graph ?? { _tag: "Ready", graph: sampleGraph }, context: sampleContext },
+    reading: {
+      graph: overrides.graph ?? { _tag: "Ready", graph: sampleGraph },
+      context: overrides.context ?? sampleContext
+    },
     findings: sampleFindings,
     review: { reviewer: "sec-cc", completedAt: Date.UTC(2026, 9, 16, 14, 22) },
     checks: { _tag: "Ready", failed: ["unit-tests"] },
@@ -91,6 +95,32 @@ describe("ReviewCanvas", () => {
     expect(markup.indexOf("Added line 16")).toBeLessThan(markup.indexOf("Finding F1"))
     expect(markup.indexOf("Finding F1")).toBeLessThan(markup.indexOf("Added line 17"))
     expect(markup).toContain("Mark handled")
+  })
+
+  it("names the head a finding is still open at by its short commit", () => {
+    const lines = Array.from({ length: 60 }, (_, index) => ({
+      number: index + 1,
+      text: `line ${index + 1}`,
+      added: true
+    }))
+    const markup = render({
+      graph: { _tag: "Ready", graph: { ...sampleGraph, headRevision: "e81f0c9".padEnd(40, "0") } },
+      context: {
+        ...sampleContext,
+        findings: {
+          _tag: "Recorded",
+          notes: {
+            F1: {
+              life: { _tag: "StillOpen", raisedAt: Date.UTC(2026, 9, 16, 11, 40), raisedHead: "7d2e1b4" },
+              evidence: null
+            }
+          }
+        }
+      },
+      state: { level: "diff", part: "connect()" },
+      text: { _tag: "Ready", readAt: Date.UTC(2026, 9, 16, 14, 24), headCommit: "e81f0c9", lines }
+    })
+    expect(markup).toContain("Raised 11:40 on 7d2e1b4, still open at e81f0c9<")
   })
 
   it("says when the lines cannot be read", () => {

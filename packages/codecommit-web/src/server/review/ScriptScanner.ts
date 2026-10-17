@@ -84,6 +84,53 @@ const initializerOf = (statement: string): string | null => {
   return match === null ? null : statement.slice(match.index + 1)
 }
 
+/**
+ * The index just past the bracket that closes the one at `start`, or -1. A `>` that ends `=>` is not a closing angle.
+ */
+const closing = (text: string, start: number, open: string, close: string): number => {
+  let depth = 0
+  for (let index = start; index < text.length; index += 1) {
+    const char = text[index]
+    if (char === open) depth += 1
+    else if (char === close && !(close === ">" && text[index - 1] === "=")) {
+      depth -= 1
+      if (depth === 0) return index + 1
+    }
+  }
+  return -1
+}
+
+/** Whether `text` starts with an arrow: optional type parameters, a parameter list or name, an optional return type. */
+const startsWithArrow = (text: string): boolean => {
+  if (/^[A-Za-z_$][\w$]*\s*=>/u.test(text)) return true
+  const params = text.startsWith("<") ? closing(text, 0, "<", ">") : 0
+  if (params < 0 || text[params] === undefined) return false
+  const rest = text.slice(params).trimStart()
+  if (!rest.startsWith("(")) return false
+  const end = closing(rest, 0, "(", ")")
+  if (end < 0) return false
+  const after = rest.slice(end).trimStart()
+  return after.startsWith("=>") || (after.startsWith(":") && after.includes("=>"))
+}
+
+/**
+ * Whether a variable's initializer is a function value: a function expression, an arrow (plain, generic, typed or
+ * async), or a call whose result is called with one, such as `Effect.fn("name")(function*() {...})`. Data that only
+ * holds callbacks, like `{ retry: () => 3 }` or `rows.map((row) => row.id)`, is not a function.
+ */
+const holdsFunction = (initializer: string): boolean => {
+  const text = initializer.trim().replace(/^async\b\s*/u, "")
+  if (/^function\b/u.test(text) || startsWithArrow(text)) return true
+  const callee = /^[A-Za-z_$][\w$.]*\s*/u.exec(text)
+  if (callee === null || text[callee[0].length] !== "(") return false
+  const first = closing(text, callee[0].length, "(", ")")
+  if (first < 0) return false
+  const next = text.slice(first).trimStart()
+  if (!next.startsWith("(")) return false
+  const argument = next.slice(1).trimStart().replace(/^async\b\s*/u, "")
+  return /^function\b/u.test(argument) || startsWithArrow(argument)
+}
+
 /** Overload signatures and their implementation are one part: merge same-name ranges, keeping first-seen order. */
 const merge = (declarations: ReadonlyArray<ScriptDeclaration>): ReadonlyArray<ScriptDeclaration> => {
   const byName = new Map<string, ScriptDeclaration>()
@@ -104,8 +151,8 @@ const merge = (declarations: ReadonlyArray<ScriptDeclaration>): ReadonlyArray<Sc
 }
 
 /**
- * A variable is a part only when its initializer holds a function: an arrow, a function expression, or a call such
- * as `Effect.fn("name")(function*() {...})` that wraps one. `const total = (a + b) * 2` is not a part.
+ * Top-level functions, classes and function-valued variables (see `holdsFunction`) with their line ranges, and the
+ * module specifiers the file imports. `const total = (a + b) * 2` and `const config = { retry: () => 3 }` are not parts.
  */
 export const scanScript = (text: string): ScriptScan => {
   const { code, literals } = mask(text)
@@ -147,7 +194,7 @@ export const scanScript = (text: string): ScriptScan => {
     // A body that opened and closed ends here; an expression body ends with its statement.
     if (opened || !/(?:=>|[=(,+\-*/?:&|<])$/u.test(line.trimEnd())) {
       const initializer = kind === "variable" ? initializerOf(lines.slice(start - 1, number).join("\n")) : null
-      if (kind !== "variable" || (initializer !== null && /=>|\bfunction\b/u.test(initializer))) {
+      if (kind !== "variable" || (initializer !== null && holdsFunction(initializer))) {
         declarations.push({ name: kind === "class" ? name : `${name}()`, start, end: number })
       }
       name = null

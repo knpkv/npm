@@ -21,23 +21,23 @@ export const canvasInventory = (): Inventory => {
   return { routes: [canvasRoute()], states }
 }
 
-/** A checkout from before the canvas has neither its host contract nor its view. A partial build is refused. */
+/**
+ * A checkout from before the canvas has neither the canvas view nor the Code page that mounts it. Both are read from
+ * the Hub's own built bundle, so the inventory depends only on this package's build. A partial build is refused.
+ */
 export const readCanvasCapability = Effect.fn("CanvasConformance.readCanvasCapability")(
   function*(repository: string) {
     const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
     const approval = yield* fs.readFileString(path.join(repository, "packages/herdr-hub/dist/approval.js"))
-    const contract = yield* fs.readFileString(
-      path.join(repository, "packages/codecommit-web/dist/dts/host-contract.d.ts")
-    )
-    const markers = [approval.includes("data-review-canvas"), /export declare const CodeCanvasResult\b/u.test(contract)]
+    const markers = [approval.includes("data-review-canvas"), approval.includes("data-code-canvas-state")]
     if (markers.every(Boolean)) return "canvas"
     if (markers.every((present) => !present)) return "legacy"
-    return yield* new RunnerFailure({ detail: "Built canvas UI and host contract disagree" })
+    return yield* new RunnerFailure({ detail: "Built canvas view and Code canvas page disagree" })
   },
   Effect.mapError((cause) =>
     cause._tag === "RunnerFailure"
       ? cause
-      : new RunnerFailure({ detail: `Cannot inspect required Code product build: ${cause.message}` })
+      : new RunnerFailure({ detail: `Cannot inspect required Hub build: ${cause.message}` })
   )
 )

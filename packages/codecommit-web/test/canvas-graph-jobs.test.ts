@@ -52,6 +52,19 @@ describe("canvas graph jobs", () => {
       expect((yield* jobs.read("ref:head", "head", 1, load))._tag).toBe("Ready")
     }))
 
+  it.effect("reports a job that dies as unavailable once, instead of building forever", () =>
+    Effect.gen(function*() {
+      const jobs = yield* makeCanvasGraphJobs(4, "1 second")
+      const attempts = yield* Ref.make(0)
+      const load = (index: number) =>
+        Ref.updateAndGet(attempts, (count) => count + 1).pipe(
+          Effect.flatMap((attempt) => attempt === 1 ? Effect.die("provider crashed") : Effect.succeed(source(index)))
+        )
+      const failure = yield* Effect.result(jobs.read("ref:head", "head", 1, load))
+      expect(failure._tag === "Failure" ? failure.failure.reason : null).toBe("unavailable")
+      expect((yield* jobs.read("ref:head", "head", 1, load))._tag).toBe("Ready")
+    }))
+
   it.effect("keeps only the most recent heads", () =>
     Effect.gen(function*() {
       const jobs = yield* makeCanvasGraphJobs(1, "1 second")

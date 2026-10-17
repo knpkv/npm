@@ -34,7 +34,11 @@ import { codePullRequest } from "./host-presentation.js"
 import { makePermissionedReadClient } from "./internal/PermissionedReadClient.js"
 import type { CanvasSourceFile } from "./review/CanvasGraphBuilder.js"
 import { makeCanvasGraphJobs } from "./review/CanvasGraphJobs.js"
-import { loadPullRequestDiff, loadPullRequestDiffContent } from "./review/PullRequestReview.js"
+import {
+  loadPullRequestDiff,
+  loadPullRequestDiffContent,
+  makePullRequestChangedFilesSource
+} from "./review/PullRequestReview.js"
 import { reviewConversationsOf } from "./review/review-comments-projection.js"
 import { reviewRunIdentity, reviewRunSubject } from "./review/review-run-projection.js"
 import { makeReviewRunReader, type ReviewRunReader, ReviewRunStoreError } from "./review/ReviewRunReader.js"
@@ -270,19 +274,21 @@ export const makeCodeHostReadsFromClient = Effect.fn("CodeHostReads.bind")(funct
       }
     ),
     canvas: Effect.fn("CodeHostReads.canvas")(function*(ref: CodeReference, caller: { readonly login: string }) {
-      const { diff, pullRequest } = yield* boundedRead(Effect.gen(function*() {
+      const { changedFiles, diff, pullRequest } = yield* boundedRead(Effect.gen(function*() {
         const row = yield* exact(ref)
         const client = yield* clientFor(caller)
         const pullRequest = yield* Schema.decodeUnknownEffect(CachedPRToPullRequest)(row)
-        const diff = yield* loadPullRequestDiff(client, pullRequest)
-        return { diff, pullRequest }
+        // One changed-file inventory for the whole job: each file load reuses it instead of listing the change again.
+        const changedFiles = yield* makePullRequestChangedFilesSource(client)
+        const diff = yield* loadPullRequestDiff(client, pullRequest, changedFiles)
+        return { changedFiles, diff, pullRequest }
       }))
       const load = (index: number): Effect.Effect<CanvasSourceFile, CodeHostReadError> =>
         boundedReadIn(canvasLane)(Effect.gen(function*() {
           const file = diff.files[index]
           if (file === undefined) return yield* new CodeHostReadError({ reason: "unavailable" })
           const client = yield* clientFor(caller)
-          const content = yield* loadPullRequestDiffContent(client, pullRequest, diff, index)
+          const content = yield* loadPullRequestDiffContent(client, pullRequest, diff, index, changedFiles)
           const text: CanvasSourceFile["content"] = content.state === "text"
             ? { _tag: "Text", before: content.before, after: content.after }
             : { _tag: "Opaque" }
