@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import {
   CommitLabel,
+  type CommitSummary,
   type CommitSummaryReading,
   CommitSummaryProvider,
   commitTimeWords,
@@ -168,5 +169,64 @@ describe("useCommitWords for an optional commit", () => {
     )
     expect(container.textContent).toBe("none")
     expect(requested).toEqual([])
+  })
+})
+
+describe("useCommitSummaries across loaders and failures", () => {
+  const Labels = (props: { readonly load: (commitId: string) => Promise<CommitSummary>; readonly show: boolean }) => {
+    const source = useCommitSummaries(props.load, now, "UTC")
+    return (
+      <CommitSummaryProvider source={source}>{props.show ? <CommitLabel commit="head" /> : null}</CommitSummaryProvider>
+    )
+  }
+  const mount = () => {
+    const container = document.createElement("div")
+    document.body.append(container)
+    root = createRoot(container)
+    return container
+  }
+
+  it("asks again for a commit whose read failed, once a label asks for it again", async () => {
+    let calls = 0
+    const load = () => {
+      calls += 1
+      return calls === 1
+        ? Promise.reject(new TypeError("refused"))
+        : Promise.resolve({ title: "Second try", committedAt: now })
+    }
+    const container = mount()
+    await act(async () => root?.render(<Labels load={load} show />))
+    expect(container.textContent).toContain("Commit title unavailable")
+    await act(async () => root?.render(<Labels load={load} show={false} />))
+    await act(async () => root?.render(<Labels load={load} show />))
+    expect(calls).toBe(2)
+    expect(container.textContent).toContain("“Second try, 15:00”")
+  })
+
+  it("ignores a previous loader's late answer", async () => {
+    let finishOld: (summary: CommitSummary) => void = () => undefined
+    const old = () =>
+      new Promise<CommitSummary>((resolve) => {
+        finishOld = resolve
+      })
+    const current = () => Promise.resolve({ title: "Current pull request", committedAt: now })
+    const container = mount()
+    await act(async () => root?.render(<Labels load={old} show />))
+    await act(async () => root?.render(<Labels load={current} show />))
+    await act(async () => finishOld({ title: "Previous pull request", committedAt: now }))
+    expect(container.textContent).toContain("“Current pull request, 15:00”")
+  })
+})
+
+describe("copying a commit id", () => {
+  it("says so when the browser refuses the copy", async () => {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: () => Promise.reject(new TypeError("denied")) }
+    })
+    const view = render({ _tag: "Ready", title: "Restore the draft on reconnect", committedAt: now })
+    expect(view.querySelector("[role='status'], [role='alert']")).toBeNull()
+    await act(async () => view.querySelector<HTMLButtonElement>("button[aria-label='Copy commit id']")?.click())
+    expect(view.querySelector("[role='alert']")?.textContent).toBe("Couldn’t copy the commit id")
   })
 })

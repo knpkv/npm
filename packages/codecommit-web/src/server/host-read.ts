@@ -14,22 +14,7 @@ import { CachedPRToPullRequest } from "@knpkv/codecommit-core/PRService/internal
 import * as ReadClient from "@knpkv/codecommit-core/ReadClient.js"
 import type { ReviewRunReading } from "@knpkv/review"
 import { type CanvasLastLook, CanvasReading } from "@knpkv/review/canvas"
-import {
-  Cache,
-  Clock,
-  Config,
-  Context,
-  Data,
-  DateTime,
-  Duration,
-  Effect,
-  Exit,
-  Layer,
-  Result,
-  Schema,
-  ScopedCache,
-  Semaphore
-} from "effect"
+import { Clock, Config, Context, Duration, Effect, Exit, Layer, Result, Schema, ScopedCache, Semaphore } from "effect"
 import type { Scope } from "effect"
 import type * as Crypto from "effect/Crypto"
 import * as FileSystem from "effect/FileSystem"
@@ -51,6 +36,7 @@ import { codePullRequest } from "./host-presentation.js"
 import { makePermissionedReadClient } from "./internal/PermissionedReadClient.js"
 import type { CanvasSourceFile } from "./review/CanvasGraphBuilder.js"
 import { makeCanvasGraphJobs } from "./review/CanvasGraphJobs.js"
+import { commitSummaryWire } from "./review/CommitSummaries.js"
 import {
   loadPullRequestDiff,
   loadPullRequestDiffContent,
@@ -85,9 +71,6 @@ export interface CodeHostReads {
 }
 
 const notRecorded = { _tag: "NotRecorded" } satisfies CanvasLastLook
-
-/** One caller's read of one commit, equal by value so the cache finds it again. */
-class CommitKey extends Data.Class<{ readonly caller: string; readonly commit: string; readonly ref: CodeReference }> {}
 
 /** Decode only recognized failure tags; provider causes remain private and are classified recursively. */
 const ProviderReadFailure = Schema.Union([
@@ -185,27 +168,6 @@ export const makeCodeHostReadsFromClient = Effect.fn("CodeHostReads.bind")(funct
         })
       )
   const boundedRead = boundedReadIn(concurrency)
-  // Commits never change, so a summary is kept for good, per caller so each read still passes that
-  // caller's grants once. Failures are not kept: a grant given afterwards takes effect at once.
-  const commits = yield* Cache.makeWith(
-    (key: CommitKey) =>
-      boundedRead(Effect.gen(function*() {
-        const row = yield* exact(key.ref)
-        const client = yield* clientFor({ login: key.caller })
-        const pullRequest = yield* Schema.decodeUnknownEffect(CachedPRToPullRequest)(row)
-        const summary = yield* client.getCommit({
-          account: { profile: pullRequest.account.profile, region: pullRequest.account.region },
-          repositoryName: pullRequest.repositoryName,
-          commitId: key.commit
-        })
-        return yield* Schema.decodeUnknownEffect(CodeCommitSummary)({
-          commitId: summary.commitId,
-          title: summary.title,
-          committedAt: DateTime.toEpochMillis(summary.committedAt)
-        })
-      })),
-    { capacity: 1024, timeToLive: (exit) => Exit.isSuccess(exit) ? Duration.infinity : Duration.zero }
-  )
 
   return {
     queue: Effect.fn("CodeHostReads.queue")(function*(query: CodeQueueQuery) {
@@ -320,7 +282,19 @@ export const makeCodeHostReadsFromClient = Effect.fn("CodeHostReads.bind")(funct
       }
     ),
     commit: Effect.fn("CodeHostReads.commit")(function*(query: CodeCommitQuery, caller: { readonly login: string }) {
-      return yield* Cache.get(commits, new CommitKey({ caller: caller.login, commit: query.commit, ref: query.ref }))
+      // Not cached: every read goes through the caller's saved grants and audit, so a revoked grant
+      // refuses the next one. The Hub reads each commit once per page.
+      return yield* boundedRead(Effect.gen(function*() {
+        const row = yield* exact(query.ref)
+        const client = yield* clientFor(caller)
+        const pullRequest = yield* Schema.decodeUnknownEffect(CachedPRToPullRequest)(row)
+        const summary = yield* client.getCommit({
+          account: { profile: pullRequest.account.profile, region: pullRequest.account.region },
+          repositoryName: pullRequest.repositoryName,
+          commitId: query.commit
+        })
+        return yield* Schema.decodeUnknownEffect(CodeCommitSummary)(commitSummaryWire(summary))
+      }))
     }),
     canvas: Effect.fn("CodeHostReads.canvas")(function*(ref: CodeReference, caller: { readonly login: string }) {
       const { changedFiles, diff, pullRequest } = yield* boundedRead(Effect.gen(function*() {

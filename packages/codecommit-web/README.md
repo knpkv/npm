@@ -238,9 +238,10 @@ alone fails on touch and keyboard. Inside the shrunk canvas drawing the button i
 keep a 44px target there; copy is available at full zoom and in the detail views.
 
 Titles come from `codecommit:GetCommit` through the same permission rules and audit as other reads: the owner
-API serves `GET /prs/:account/:pr/commits/:commitId`, and the Hub reads `/v1/modules/code/commit`. A commit is
-read once and kept, since commits never change; a failed read is not kept, and its label reads “Commit title
-unavailable” without blocking the review.
+API serves `GET /prs/:account/:pr/commits/:commitId`, and the Hub reads `/v1/modules/code/commit`. The server keeps
+no copy: every read passes the caller's saved grants and audit, so a revoked grant refuses the next one. A page reads
+each commit once, and asks again for one whose read failed; a failed read's label reads “Commit title unavailable”
+without blocking the review. A refused clipboard write is announced.
 
 ### Review controller focus
 

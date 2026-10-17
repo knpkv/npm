@@ -109,6 +109,14 @@ export const CommitLabel = ({
   useEffect(() => request?.(commit), [request, commit])
   const reading = source.read(commit)
   const [title, time] = labelWords(reading, source.now, source.timeZone)
+  const [copyFailed, setCopyFailed] = useState(false)
+  const copyId = () => {
+    setCopyFailed(false)
+    // Older or locked-down browsers have no clipboard; say so rather than doing nothing.
+    const written = navigator.clipboard?.writeText(commit)
+    if (written === undefined) setCopyFailed(true)
+    else written.catch(() => setCopyFailed(true))
+  }
   return (
     <span className={["rv-commit", className].filter(Boolean).join(" ")} data-commit-label="">
       <span
@@ -126,11 +134,17 @@ export const CommitLabel = ({
           className="rv-commit-copy"
           icon="copy"
           label="Copy commit id"
-          onClick={() => void navigator.clipboard?.writeText(commit)}
+          onClick={copyId}
           size="compact"
           title="Copy commit id"
           variant="quiet"
         />
+      ) : null}
+      {copy && copyFailed ? (
+        // Inserted only on failure: an alert announces when it appears, and the page keeps its one status region.
+        <span className="rv-commit-status" role="alert">
+          Couldn’t copy the commit id
+        </span>
       ) : null}
     </span>
   )
@@ -179,14 +193,21 @@ export const useCommitSummaries = (
     (commitId: string) => {
       if (requested.current.ids.has(commitId)) return
       requested.current.ids.add(commitId)
-      const settle = (reading: CommitSummaryReading) =>
+      // A loader replaced since (another pull request) has its late answers dropped.
+      const settle = (reading: CommitSummaryReading) => {
+        if (requested.current.load !== load) return
         setStore((current) => ({
           load,
           readings: new Map(current.load === load ? current.readings : noReadings).set(commitId, reading)
         }))
+      }
       load(commitId).then(
         (summary) => settle({ _tag: "Ready", ...summary }),
-        () => settle(unavailable)
+        () => {
+          // Asked for again by the next label that needs it, e.g. once access is granted.
+          if (requested.current.load === load) requested.current.ids.delete(commitId)
+          settle(unavailable)
+        }
       )
     },
     [load]

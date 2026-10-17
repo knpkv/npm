@@ -156,7 +156,8 @@ const isNotFoundCause = (cause: unknown): boolean =>
   Predicate.isTagged(cause, "BlobIdDoesNotExistException") ||
   Predicate.isTagged(cause, "PullRequestDoesNotExistException") ||
   Predicate.isTagged(cause, "RepositoryDoesNotExistException") ||
-  Predicate.isTagged(cause, "CommitDoesNotExistException")
+  Predicate.isTagged(cause, "CommitDoesNotExistException") ||
+  Predicate.isTagged(cause, "CommitIdDoesNotExistException")
 
 const mapProviderError = (operation: string) => (error: AwsClientError): CodeCommitReadError => {
   if (error._tag !== "AwsApiError") return error

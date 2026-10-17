@@ -623,7 +623,12 @@ export function PRDetail() {
         }
       }}
       renderReviewWorkspace={(input) => (
-        <PullRequestCommitSummaries accountId={input.accountId} pullRequest={input.pullRequest}>
+        <PullRequestCommitSummaries
+          accountId={input.accountId}
+          // One set of commit summaries per pull request: another one starts afresh.
+          key={`${input.accountId}:${input.pullRequest.account.region}:${input.pullRequest.repositoryName}:${input.pullRequest.id}`}
+          pullRequest={input.pullRequest}
+        >
           <PullRequestReviewWorkspace {...input} />
         </PullRequestCommitSummaries>
       )}

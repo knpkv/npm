@@ -196,28 +196,31 @@ describe("CodeCommitReadClient", () => {
       })
     ))
 
-  it.effect("retains a missing commit as a typed not-found read failure", () =>
-    runWithProvider(
-      baseProvider({
-        getCommit: () =>
-          Effect.fail(
-            new AwsApiError({
-              operation: "getCommit",
-              profile: account.profile,
-              region: account.region,
-              cause: { _tag: "CommitDoesNotExistException" }
-            })
+  it.effect.each(["CommitDoesNotExistException", "CommitIdDoesNotExistException"])(
+    "retains a missing commit (%s) as a typed not-found read failure",
+    (tag) =>
+      runWithProvider(
+        baseProvider({
+          getCommit: () =>
+            Effect.fail(
+              new AwsApiError({
+                operation: "getCommit",
+                profile: account.profile,
+                region: account.region,
+                cause: { _tag: tag }
+              })
+            )
+        }),
+        Effect.gen(function*() {
+          const client = yield* CodeCommitReadClient
+          const result = yield* client.getCommit({ account, repositoryName: "payments-api", commitId: "c41e7a2" }).pipe(
+            Effect.result
           )
-      }),
-      Effect.gen(function*() {
-        const client = yield* CodeCommitReadClient
-        const result = yield* client.getCommit({ account, repositoryName: "payments-api", commitId: "c41e7a2" }).pipe(
-          Effect.result
-        )
-        assert.isTrue(Result.isFailure(result))
-        if (Result.isFailure(result)) assert.instanceOf(result.failure, CodeCommitReadNotFoundError)
-      })
-    ))
+          assert.isTrue(Result.isFailure(result))
+          if (Result.isFailure(result)) assert.instanceOf(result.failure, CodeCommitReadNotFoundError)
+        })
+      )
+  )
 
   it.effect("rejects blob bytes above the read-client bound with exact metadata", () =>
     runWithProvider(

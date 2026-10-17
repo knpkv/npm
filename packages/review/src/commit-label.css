@@ -27,7 +27,6 @@
   flex: none;
   inline-size: 28px;
   block-size: 28px;
-  color: var(--rly-color-text-1);
 }
 
 /* A 44px target around the compact button without changing the line it sits in. */
@@ -35,4 +34,14 @@
   content: "";
   position: absolute;
   inset: min(0px, calc((100% - 44px) / 2));
+}
+
+/* A refused copy, announced without taking space in the line. */
+.rv-commit-status {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  overflow: clip;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }

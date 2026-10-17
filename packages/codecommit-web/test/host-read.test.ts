@@ -267,20 +267,27 @@ describe("Code host read service", () => {
       }
     }))
 
-  it.effect("names a commit by title and time, reading each commit once per caller", () =>
+  it.effect("names a commit by title and time", () =>
     Effect.gen(function*() {
       const test = yield* fixture()
       const commit = "c".repeat(40)
-      const first = yield* test.reads.commit({ ref, commit }, { login: "Reviewer" })
-      expect(first).toEqual({
+      expect(yield* test.reads.commit({ ref, commit }, { login: "Reviewer" })).toEqual({
         commitId: commit,
         title: "Restore the draft on reconnect",
         committedAt: Date.UTC(2026, 9, 17, 14, 18)
       })
+    }))
+
+  it.effect("re-checks the caller's saved grant on every commit read, so a revoked grant refuses the next one", () =>
+    Effect.gen(function*() {
+      const test = yield* fixture()
+      const commit = "c".repeat(40)
       yield* test.reads.commit({ ref, commit }, { login: "Reviewer" })
+      yield* Ref.set(test.policy, "allow")
+      const refused = yield* Effect.result(test.reads.commit({ ref, commit }, { login: "Reviewer" }))
+      expect(Result.isFailure(refused)).toBe(true)
+      if (Result.isFailure(refused)) expect(refused.failure.reason).toBe("permission_required")
       expect(yield* Ref.get(test.commitCalls)).toBe(1)
-      yield* test.reads.commit({ ref, commit }, { login: "Second-reviewer" })
-      expect(yield* Ref.get(test.commitCalls)).toBe(2)
     }))
 
   it.effect("commit reads obey fresh saved grants before provider calls", () =>
