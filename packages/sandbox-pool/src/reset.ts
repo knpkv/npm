@@ -1,7 +1,8 @@
-import { Context, DateTime, Effect, type Redacted, Schema } from "effect"
-import { discoveryFailures, protectedListed, wouldRemove } from "./guard.js"
+import { Context, DateTime, Effect, type Redacted, Ref, Schema } from "effect"
+import { discoveryFailures, outputTail, protectedListed, wouldRemove } from "./guard.js"
 import { InvalidTransition, resetFailed, resetSucceeded, type RunId, type Sandbox, StaleRun } from "./lease.js"
 import type { PoolContract } from "./pool.js"
+import { type RunEntry, RunLog, type RunStep } from "./run-log.js"
 
 /**
  * Reset: empty one pool account with aws-nuke, keep everything the
@@ -171,7 +172,9 @@ const requirePool = (sandbox: Sandbox, runId: RunId, contract: PoolContract) => 
   if (state._tag !== "Cleaning") {
     return Effect.fail(new InvalidTransition({ accountId: sandbox.accountId, from: state._tag, event: "reset" }))
   }
-  return state.runId === runId ? Effect.void : Effect.fail(new StaleRun({ accountId: sandbox.accountId, runId }))
+  return state.runId === runId
+    ? Effect.succeed(state.reason)
+    : Effect.fail(new StaleRun({ accountId: sandbox.accountId, runId }))
 }
 
 /**
@@ -231,39 +234,92 @@ const nukeStep = (
 /**
  * Reset one account for one run and return its next state: Available on
  * success, Quarantined with a blocker otherwise. Only precondition errors fail.
+ * Each step is recorded in `RunLog`, with the aws-nuke output tail for nuke
+ * steps; a failed record is logged as a warning and changes nothing.
  */
 export const resetAccount = Effect.fn("SandboxPool.resetAccount")(function*(
   contract: PoolContract,
   sandbox: Sandbox,
   runId: RunId
 ) {
-  yield* requirePool(sandbox, runId, contract)
+  const reason = yield* requirePool(sandbox, runId, contract)
   const access = yield* PoolAccess
   const nuke = yield* Nuke
-  const attempt = Effect.gen(function*() {
-    const session = yield* access.session(sandbox.accountId)
-    yield* access.ensureBaseline(sandbox.accountId, session)
-    const configPath = yield* nuke.writeConfig(sandbox.accountId, renderNukeConfig(contract, sandbox.accountId))
-    const dryRun = yield* nuke.run({ configPath, session, live: false })
-    yield* nukeStep("dry run", dryRun, { complete: true })
-    yield* requireNothingProtected(contract, dryRun.output)
-    yield* nukeStep("nuke", yield* nuke.run({ configPath, session, live: true }), { complete: false })
-    yield* nukeStep("verify", yield* nuke.run({ configPath, session, live: false }), { complete: true, removable: 0 })
-    // The nuke must not have touched the baseline; re-assert it.
-    yield* access.ensureBaseline(sandbox.accountId, session)
-    // Reset owns the read's step name, so no access-layer failure can read as a hold.
-    const held = yield* access.budgetHold(sandbox.accountId, session).pipe(
-      Effect.mapError(({ detail }) => new ResetBlocked({ step: "budget hold check", detail }))
+  const log = yield* RunLog
+  const record = (entry: RunEntry) =>
+    log.record(entry).pipe(
+      Effect.catch((failure) => Effect.logWarning("sandbox run log write failed", runId, failure.detail))
     )
-    if (held) {
-      return yield* new ResetBlocked({ step: budgetHoldStep, detail: `${contract.denyAllPolicy} ${budgetHoldLift}` })
-    }
+  const lastOutput = yield* Ref.make("")
+  const runNuke = (configPath: string, session: PoolSession, live: boolean) =>
+    nuke.run({ configPath, session, live }).pipe(Effect.tap((outcome) => Ref.set(lastOutput, outcome.output)))
+  const step = <A>(name: RunStep, effect: Effect.Effect<A, ResetBlocked>) =>
+    Effect.gen(function*() {
+      const at = yield* DateTime.now
+      yield* record({ _tag: "Step", runId, step: name, status: "started", at, detail: null, output: [] })
+      const result = yield* Effect.result(effect)
+      const output = outputTail(yield* Ref.getAndSet(lastOutput, ""))
+      const detail = result._tag === "Failure" ? `${result.failure.step}: ${result.failure.detail}`.slice(0, 500) : null
+      const status = result._tag === "Failure" ? "failed" : "ok"
+      yield* record({ _tag: "Step", runId, step: name, status, at: yield* DateTime.now, detail, output })
+      return yield* Effect.fromResult(result)
+    })
+  yield* record({ _tag: "Started", runId, accountId: sandbox.accountId, reason, at: yield* DateTime.now })
+  const attempt = Effect.gen(function*() {
+    const session = yield* step("sign in", access.session(sandbox.accountId))
+    yield* step("baseline", access.ensureBaseline(sandbox.accountId, session))
+    const configPath = yield* step(
+      "dry run",
+      Effect.gen(function*() {
+        const path = yield* nuke.writeConfig(sandbox.accountId, renderNukeConfig(contract, sandbox.accountId))
+        const dryRun = yield* runNuke(path, session, false)
+        yield* nukeStep("dry run", dryRun, { complete: true })
+        yield* requireNothingProtected(contract, dryRun.output)
+        return path
+      })
+    )
+    yield* step(
+      "nuke",
+      Effect.flatMap(runNuke(configPath, session, true), (live) => nukeStep("nuke", live, { complete: false }))
+    )
+    yield* step(
+      "verify",
+      Effect.flatMap(
+        runNuke(configPath, session, false),
+        (verify) => nukeStep("verify", verify, { complete: true, removable: 0 })
+      )
+    )
+    // The nuke must not have touched the baseline; re-assert it.
+    yield* step("baseline re-check", access.ensureBaseline(sandbox.accountId, session))
+    yield* step(
+      "budget hold",
+      Effect.gen(function*() {
+        // Reset owns the read's step name, so no access-layer failure can read as a hold.
+        const held = yield* access.budgetHold(sandbox.accountId, session).pipe(
+          Effect.mapError(({ detail }) => new ResetBlocked({ step: "budget hold check", detail }))
+        )
+        if (held) {
+          return yield* new ResetBlocked({
+            step: budgetHoldStep,
+            detail: `${contract.denyAllPolicy} ${budgetHoldLift}`
+          })
+        }
+      })
+    )
   })
   const result = yield* Effect.result(attempt)
   const now = yield* DateTime.now
-  return result._tag === "Success"
+  const next = result._tag === "Success"
     ? yield* resetSucceeded(sandbox, runId, now)
     : yield* resetFailed(sandbox, runId, `${result.failure.step}: ${result.failure.detail}`, now)
+  yield* record({
+    _tag: "Finished",
+    runId,
+    outcome: next.state._tag === "Quarantined" ? "Quarantined" : "Available",
+    blocker: next.state._tag === "Quarantined" ? next.state.blocker : null,
+    at: now
+  })
+  return next
 })
 
 /**
