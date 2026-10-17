@@ -12,6 +12,22 @@ import { loadUiAssets } from "./internal/ui-assets.js"
 import { makeHostOperations } from "./operations.js"
 
 export { HostdOperationsCompositionError } from "./errors.js"
+export {
+  ApprovalRequired,
+  BudgetControl,
+  BudgetLiftFailed,
+  makeSandboxPool,
+  NotBudgetHeld,
+  runSandboxSweep,
+  SandboxJobInvalid,
+  sandboxJobKinds,
+  type SandboxPool,
+  type SandboxPoolServices,
+  sandboxSweepInterval,
+  type SweepReport,
+  withSandboxOperations
+} from "./sandbox-jobs.js"
+export { openSandboxDatabase } from "./sandbox-store.js"
 export { runWorkAbandon } from "./work-abandon.js"
 export { runWorkReassign } from "./work-reassign.js"
 
