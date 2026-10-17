@@ -2,11 +2,15 @@ import { describe, expect, it } from "@effect/vitest"
 import { Effect, Redacted, Schema } from "effect"
 import {
   blockerFrom,
+  budgetHoldBlocker,
   discoveryFailures,
+  isBudgetHold,
+  isBudgetHoldFor,
   Nuke,
   nukeArgs,
   type NukeOutcome,
   PoolAccess,
+  PoolContract,
   removable,
   renderNukeConfig,
   resetAccount,
@@ -14,7 +18,7 @@ import {
   RunId,
   Sandbox
 } from "../src/index.js"
-import { contract } from "./fixtures.js"
+import { contract, contractInput } from "./fixtures.js"
 
 const run1 = Schema.decodeUnknownSync(RunId)("run-1")
 const cleaning = (accountId = "111111111111") =>
@@ -36,8 +40,15 @@ const scan = (nukeable: number) =>
     summary(nukeable)
   ].join("\n")
 
-/** Fakes record every step so tests can assert order and arguments. */
-const harness = (outcomes: Array<NukeOutcome>, baseline?: ResetBlocked) => {
+/**
+ * Fakes record every step so tests can assert order and arguments. `hold` is the budget-hold read: whether the
+ * deny-all SCP is attached, or the failure of that read.
+ */
+const harness = (
+  outcomes: Array<NukeOutcome>,
+  baseline?: ResetBlocked,
+  hold: Effect.Effect<boolean, ResetBlocked> = Effect.succeed(false)
+) => {
   const steps: Array<string> = []
   const access = PoolAccess.of({
     session: (accountId) =>
@@ -52,7 +63,8 @@ const harness = (outcomes: Array<NukeOutcome>, baseline?: ResetBlocked) => {
       Effect.suspend(() => {
         steps.push(`baseline ${accountId}`)
         return baseline === undefined ? Effect.void : Effect.fail(baseline)
-      })
+      }),
+    budgetHold: (accountId) => Effect.sync(() => steps.push(`budget hold ${accountId}`)).pipe(Effect.andThen(hold))
   })
   const nuke = Nuke.of({
     writeConfig: (accountId, config) =>
@@ -174,8 +186,67 @@ describe("sandbox reset", () => {
         "nuke dry",
         "nuke live",
         "nuke dry",
-        "baseline 111111111111"
+        "baseline 111111111111",
+        "budget hold 111111111111"
       ])
+    }))
+
+  /** Three clean runs: dry run, live run, an empty verify. */
+  const clean = () => [
+    { exitCode: 0, output: scan(2) },
+    { exitCode: 0, output: scan(2) },
+    { exitCode: 0, output: scan(0) }
+  ]
+
+  it("names the budget hold with the contract's deny-all policy, verbatim", () => {
+    const pool = Schema.decodeUnknownSync(PoolContract)({ ...contractInput, denyAllPolicy: "EphemeralDenyAll" })
+    expect(budgetHoldBlocker(pool)).toBe("budget hold: EphemeralDenyAll attached; lift via sandbox.budget.lift")
+    expect(isBudgetHold(budgetHoldBlocker(pool))).toBe(true)
+    expect(isBudgetHold(budgetHoldBlocker(contract))).toBe(true)
+    expect(isBudgetHold("budget hold check: AccessDenied")).toBe(false)
+    expect(isBudgetHold("verify: 2 resources still removable.")).toBe(false)
+    expect(isBudgetHoldFor(pool, budgetHoldBlocker(pool))).toBe(true)
+    expect(isBudgetHoldFor(pool, budgetHoldBlocker(contract))).toBe(false)
+  })
+
+  it.effect("a clean account still under a budget hold ends Quarantined, never Available", () =>
+    Effect.gen(function*() {
+      const h = harness(clean(), undefined, Effect.succeed(true))
+      const next = yield* h.run()
+      expect(next.state).toMatchObject({ _tag: "Quarantined", runId: run1, blocker: budgetHoldBlocker(contract) })
+      expect(h.steps.at(-1)).toBe("budget hold 111111111111")
+    }))
+
+  it.effect("a failed budget-hold read quarantines under its own step, whatever the access layer called it", () =>
+    Effect.gen(function*() {
+      // The failure carries the hold's own step and lift text; reset still must not report it as a hold.
+      const lookalike = new ResetBlocked({
+        step: "budget hold",
+        detail: "PoolDenyAll attached; lift via sandbox.budget.lift"
+      })
+      for (const failure of [new ResetBlocked({ step: "scp", detail: "AccessDenied" }), lookalike]) {
+        const h = harness(clean(), undefined, Effect.fail(failure))
+        const next = yield* h.run()
+        expect(next.state).toMatchObject({ _tag: "Quarantined", blocker: `budget hold check: ${failure.detail}` })
+        expect(next.state._tag === "Quarantined" && isBudgetHold(next.state.blocker)).toBe(false)
+        expect(next.state._tag === "Quarantined" && isBudgetHoldFor(contract, next.state.blocker)).toBe(false)
+      }
+    }))
+
+  it.effect("the budget hold is read only after a verified clean", () =>
+    Effect.gen(function*() {
+      const h = harness(
+        [{ exitCode: 0, output: scan(2) }, { exitCode: 0, output: scan(2) }, {
+          exitCode: 0,
+          output: scan(1)
+        }],
+        undefined,
+        Effect.succeed(true)
+      )
+      const next = yield* h.run()
+      expect(next.state).toMatchObject({ _tag: "Quarantined" })
+      expect(next.state._tag === "Quarantined" && isBudgetHold(next.state.blocker)).toBe(false)
+      expect(h.steps.some((step) => step.startsWith("budget hold"))).toBe(false)
     }))
 
   it.effect("a verify run that still finds resources quarantines with the count", () =>
