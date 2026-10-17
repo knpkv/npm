@@ -415,23 +415,51 @@ export const SandboxRelease = Schema.Struct({
 })
 export type SandboxRelease = typeof SandboxRelease.Type
 
+const SandboxObservedInstant = Schema.String.check(
+  Schema.isPattern(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/)
+)
+
+/**
+ * The pool record a reset or budget-lift approval was bound to. `holder` and
+ * `endsAt` are present together, and only when `state` is Leased.
+ */
+export const SandboxObservation = Schema.Struct({
+  version: Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0)),
+  state: Schema.Literals(["Available", "Leased", "Cleaning", "Quarantined"]),
+  holder: Schema.NullOr(Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(256))),
+  endsAt: Schema.NullOr(SandboxObservedInstant)
+}).check(
+  Schema.makeFilter(
+    (observed) => {
+      const leased = observed.state === "Leased"
+      const held = observed.holder !== null && observed.endsAt !== null
+      return leased ? held : observed.holder === null && observed.endsAt === null
+    },
+    { expected: "holder and endsAt together, and only when the state is Leased" }
+  )
+)
+export type SandboxObservation = typeof SandboxObservation.Type
+
 /**
  * An approved reset outside a lease end: `Manual` empties an available or
  * leased account, `Retry` re-runs a quarantined one. Released and Expired
- * resets are hostd's own and cannot be submitted.
+ * resets are hostd's own and cannot be submitted. `observed` is the record
+ * the owner host bound this approval to; a client-supplied value is replaced.
  */
 export const SandboxReset = Schema.Struct({
   kind: Schema.Literal("sandbox.reset"),
   accountId: SandboxAccountId,
   reason: Schema.Literals(["Manual", "Retry"]),
+  observed: Schema.optionalKey(SandboxObservation),
   ...NoHolder
 })
 export type SandboxReset = typeof SandboxReset.Type
 
-/** An approved lift of the account's budget stop. */
+/** An approved lift of the account's budget stop, bound to `observed` the same way as a reset. */
 export const SandboxBudgetLift = Schema.Struct({
   kind: Schema.Literal("sandbox.budget.lift"),
   accountId: SandboxAccountId,
+  observed: Schema.optionalKey(SandboxObservation),
   ...NoHolder
 })
 export type SandboxBudgetLift = typeof SandboxBudgetLift.Type

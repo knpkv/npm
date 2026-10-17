@@ -14,6 +14,7 @@ import {
   makeFleetService,
   requiresApproval,
   SandboxJobKind,
+  type SandboxObservation,
   submissionRequiresApproval
 } from "../src/index.js"
 
@@ -28,6 +29,12 @@ const operations: HostOperations = {
 
 const decode = Schema.decodeUnknownSync(JobPayload)
 const accountId = "111111111111"
+const availableObservation = {
+  endsAt: null,
+  holder: null,
+  state: "Available",
+  version: 0
+} satisfies SandboxObservation
 const sandboxPayloads = [
   { kind: "sandbox.lease" },
   { kind: "sandbox.extend", accountId },
@@ -84,6 +91,27 @@ layer(NodeServices.layer)("sandbox job kinds", (it) => {
       expect(canonicalJobPayload(decode({ kind: "sandbox.reset", accountId, reason: "Manual" }))).toBe(
         `{"accountId":"111111111111","kind":"sandbox.reset","reason":"Manual"}`
       )
+      const leased = decode({
+        kind: "sandbox.reset",
+        accountId,
+        reason: "Manual",
+        observed: {
+          endsAt: "2026-10-16T18:00:00.000Z",
+          holder: "agent-a",
+          state: "Leased",
+          version: 2
+        }
+      })
+      const other = decode({
+        kind: "sandbox.reset",
+        accountId,
+        reason: "Manual",
+        observed: { ...availableObservation }
+      })
+      expect(canonicalJobPayload(leased)).toBe(
+        `{"accountId":"111111111111","kind":"sandbox.reset","observed":{"endsAt":"2026-10-16T18:00:00.000Z","holder":"agent-a","state":"Leased","version":2},"reason":"Manual"}`
+      )
+      expect(canonicalJobPayload(leased)).not.toBe(canonicalJobPayload(other))
       const hashes = new Set<string>()
       for (const raw of sandboxPayloads) hashes.add(yield* jobHash("SER8", "owner", decode(raw)))
       hashes.add(yield* jobHash("SER8", "owner", decode({ kind: "sandbox.extend", accountId: "222222222222" })))
@@ -111,10 +139,60 @@ layer(NodeServices.layer)("sandbox job kinds", (it) => {
             kind: raw.kind
           })
           expect(yield* store.get("job-without-pool")).toBeUndefined()
-          const owner = yield* make({ ...operations, sandboxJobKinds: new Set(SandboxJobKind.literals) }, "job-owner")
-          const record = yield* owner.submit({ payload }, "agent-a", "authenticated_remote")
+          const owner = yield* make({
+            ...operations,
+            sandboxJobKinds: new Set(SandboxJobKind.literals),
+            bindSandboxApproval: () => Effect.succeed(availableObservation)
+          }, "job-owner")
+          const record = yield* owner.submit(
+            {
+              payload: payload.kind === "sandbox.reset" || payload.kind === "sandbox.budget.lift"
+                ? {
+                  ...payload,
+                  observed: {
+                    endsAt: "2026-10-16T18:00:00.000Z",
+                    holder: "agent-a",
+                    state: "Leased",
+                    version: 9
+                  }
+                }
+                : payload
+            },
+            "agent-a",
+            "authenticated_remote"
+          )
           expect(record.status).toBe(requiresApproval(payload) ? "pending_approval" : "queued")
+          if (payload.kind === "sandbox.reset" || payload.kind === "sandbox.budget.lift") {
+            expect(record.payload).toMatchObject({ observed: availableObservation })
+          }
         })
       ))
   }
+
+  it.effect("reset and budget lift without a binder store nothing", () =>
+    withStore((store) =>
+      Effect.gen(function*() {
+        const fleet = yield* makeFleetService({
+          approvalEnabled: true,
+          host: "SER8",
+          id: Effect.succeed("job-unbound"),
+          nonce: Effect.succeed("nonce-sandbox"),
+          now: Effect.succeed(1_000),
+          operations: { ...operations, sandboxJobKinds: new Set(SandboxJobKind.literals) },
+          store
+        })
+        for (const raw of sandboxPayloads) {
+          if (raw.kind !== "sandbox.reset" && raw.kind !== "sandbox.budget.lift") continue
+          const error = yield* Effect.flip(
+            fleet.submit({ payload: decode(raw) }, "agent-a", "authenticated_remote")
+          )
+          expect(error).toMatchObject({
+            _tag: "FleetOperationUnavailableError",
+            detail: "unbound",
+            kind: raw.kind
+          })
+        }
+        expect(yield* store.get("job-unbound")).toBeUndefined()
+      })
+    ))
 })

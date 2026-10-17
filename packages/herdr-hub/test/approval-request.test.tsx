@@ -5,7 +5,7 @@ import { canonicalJobPayload } from "@knpkv/herdr-fleet"
 import { renderToStaticMarkup } from "react-dom/server"
 import { JobPayload } from "@knpkv/herdr-fleet/model"
 import type { JobPayload as JobPayloadType, JobRecord, WorkReassignAgent } from "@knpkv/herdr-fleet/model"
-import { Schema } from "effect"
+import { DateTime, Schema } from "effect"
 import { ApprovalRequestDisclosure } from "../src/approval-request-view.js"
 import { DashboardSnapshot } from "../src/dashboard-model.js"
 import { DashboardView } from "../src/dashboard-view.js"
@@ -1302,7 +1302,11 @@ describe("sanitized approval requests", () => {
     ["toAgent.agent.paneId", "toAgentPane"],
     ["toAgent.agent.name", "toAgentName"],
     ["toAgent.agent.relationship.parentAgentId", "toAgentLineage"],
-    ["toAgent.agent.relationship.relation", "toAgentLineage"]
+    ["toAgent.agent.relationship.relation", "toAgentLineage"],
+    ["observed.version", "version"],
+    ["observed.state", "state"],
+    ["observed.holder", "holder"],
+    ["observed.endsAt", "endsAt"]
   ])
   type Json = typeof Schema.Json.Type
   const isJsonObject = Schema.is(Schema.Record(Schema.String, Schema.Json))
@@ -1317,11 +1321,24 @@ describe("sanitized approval requests", () => {
     { kind: "sandbox.release", accountId: "111111111111" },
     { kind: "sandbox.reset", accountId: "111111111111", reason: "Manual" },
     { kind: "sandbox.reset", accountId: "111111111111", reason: "Retry" },
-    { kind: "sandbox.budget.lift", accountId: "111111111111" }
+    { kind: "sandbox.budget.lift", accountId: "111111111111" },
+    {
+      kind: "sandbox.reset",
+      accountId: "111111111111",
+      reason: "Manual",
+      observed: {
+        endsAt: "2026-10-16T18:00:00.000Z",
+        holder: "agent-a",
+        state: "Leased",
+        version: 2
+      }
+    }
   ]
 
   for (const raw of [...workPayloads, ...sandboxPayloads]) {
-    it(`displays every canonical hash-bound ${raw.kind}${"reason" in raw ? ` ${raw.reason}` : ""} field and its value`, () => {
+    it(`displays every canonical hash-bound ${raw.kind}${"reason" in raw ? ` ${raw.reason}` : ""}${
+      "observed" in raw ? " observed" : ""
+    } field and its value`, () => {
       const payload = Schema.decodeUnknownSync(JobPayload)(raw)
       const displayed = new Map(approvalRequestFor(payload).fields.map(({ key, value }) => [key, value]))
       const canonical = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json))(canonicalJobPayload(payload))
@@ -1335,6 +1352,31 @@ describe("sanitized approval requests", () => {
       expect(missing).toEqual([])
     })
   }
+
+  it("shows the holder, the lease end and the time left for a bound reset", () => {
+    const payload = Schema.decodeUnknownSync(JobPayload)({
+      kind: "sandbox.reset",
+      accountId: "111111111111",
+      reason: "Manual",
+      observed: {
+        endsAt: "2026-10-16T18:00:00.000Z",
+        holder: "agent-a",
+        state: "Leased",
+        version: 2
+      }
+    })
+    const displayed = new Map(
+      approvalRequestFor(payload, DateTime.makeUnsafe("2026-10-16T10:00:00.000Z")).fields.map(({ key, value }) => [
+        key,
+        value
+      ])
+    )
+    expect(displayed.get("holder")).toBe("agent-a")
+    expect(displayed.get("endsAt")).toBe("2026-10-16T18:00:00.000Z")
+    expect(displayed.get("version")).toBe("2")
+    expect(displayed.get("state")).toBe("Leased")
+    expect(displayed.get("timeLeft")).toBe("8h")
+  })
 
   it("shows every hash-bound existing-owner reconciliation field", () => {
     const payload = Schema.decodeUnknownSync(JobPayload)({

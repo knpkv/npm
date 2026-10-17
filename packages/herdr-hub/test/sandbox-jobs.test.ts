@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import type { ApprovedJobIdentity } from "@knpkv/herdr-fleet"
-import { JobHash, type SandboxJobPayload } from "@knpkv/herdr-fleet/model"
+import { JobHash, type SandboxJobPayload, type SandboxObservation } from "@knpkv/herdr-fleet/model"
 import {
   budgetHoldBlocker,
   Holder,
@@ -11,9 +11,12 @@ import {
   type NukeOutcome,
   PoolAccess,
   PoolContract,
+  RunId,
   Sandbox,
+  SandboxState,
   SandboxStoreUnavailable,
-  seedPool
+  seedPool,
+  StaleVersion
 } from "@knpkv/sandbox-pool"
 import { DateTime, Duration, Effect, Fiber, Latch, Redacted, Schema } from "effect"
 import { TestClock } from "effect/testing"
@@ -42,6 +45,21 @@ const approval: ApprovedJobIdentity = {
   hash: Schema.decodeUnknownSync(JobHash)("a".repeat(64))
 }
 const decodeResult = Schema.decodeUnknownSync(Schema.fromJsonString(Sandbox))
+const availableObserved = {
+  endsAt: null,
+  holder: null,
+  state: "Available",
+  version: 0
+} satisfies SandboxObservation
+const observe = (sandbox: Sandbox): SandboxObservation =>
+  sandbox.state._tag === "Leased"
+    ? {
+      endsAt: DateTime.formatIso(sandbox.state.endsAt),
+      holder: sandbox.state.holder,
+      state: "Leased",
+      version: sandbox.version
+    }
+    : { endsAt: null, holder: null, state: sandbox.state._tag, version: sandbox.version }
 const clean = `Scan complete: 5 total, 0 nukeable, 5 filtered.`
 
 interface FakeOptions {
@@ -56,6 +74,8 @@ interface FakeOptions {
   readonly liftFails?: boolean
   /** Fails every put as the store does when it cannot tell whether the write landed. */
   readonly putFails?: boolean
+  /** The compare-and-set loses, as another writer landed first. */
+  readonly putStale?: boolean
 }
 
 /** A pool over the memory store and run log, with fakes that record every AWS-side call. */
@@ -70,6 +90,10 @@ const fixture = (options: FakeOptions = {}, initial: ReadonlyArray<Sandbox> = se
       put: (next: Sandbox) =>
         options.putFails === true
           ? Effect.fail(new SandboxStoreUnavailable({ operation: "put", detail: "chmod failed after commit" }))
+          : options.putStale === true
+          ? Effect.fail(
+            new StaleVersion({ accountId: next.accountId, expected: next.version - 1, actual: next.version })
+          )
           : memory.put(next)
     }
     const runLog = yield* makeMemoryRunLog
@@ -156,17 +180,117 @@ describe("sandbox jobs", () => {
       expect(f.calls).toEqual([])
     }))
 
+  it.effect("an approved reset with no bound record is rejected before anything is nuked", () =>
+    Effect.gen(function*() {
+      const f = yield* fixture()
+      const error = yield* Effect.flip(
+        f.job({ kind: "sandbox.reset", accountId: accountA, reason: "Manual" }, "owner", "job-1", true)
+      )
+      expect(error).toMatchObject({ disposition: "rejected" })
+      expect(error.detail).toContain("ApprovalUnbound")
+      expect(yield* f.store.get(accountA)).toMatchObject({ version: 0, state: { _tag: "Available" } })
+      expect(f.calls).toEqual([])
+    }))
+
+  it.effect("a reset bound to a record that has since been leased is rejected and the lease stays", () =>
+    Effect.gen(function*() {
+      const f = yield* fixture()
+      const leased = yield* f.job({ kind: "sandbox.lease" }, "agent-a", "job-1")
+      const error = yield* Effect.flip(
+        f.job(
+          { kind: "sandbox.reset", accountId: leased.accountId, reason: "Manual", observed: availableObserved },
+          "owner",
+          "job-2",
+          true
+        )
+      )
+      expect(error).toMatchObject({ disposition: "rejected" })
+      expect(error.detail).toContain("RecordMoved")
+      expect(yield* f.store.get(leased.accountId)).toEqual(leased)
+      expect(f.calls).toEqual([])
+    }))
+
+  it.effect("a lost compare-and-set on reset is rejected before nuke", () =>
+    Effect.gen(function*() {
+      const f = yield* fixture({ putStale: true })
+      const before = yield* f.store.get(accountA)
+      const error = yield* Effect.flip(
+        f.job(
+          { kind: "sandbox.reset", accountId: accountA, reason: "Manual", observed: availableObserved },
+          "owner",
+          "job-1",
+          true
+        )
+      )
+      expect(error).toMatchObject({ disposition: "rejected" })
+      expect(error.detail).toContain("RecordMoved")
+      expect(yield* f.store.get(accountA)).toEqual(before)
+      expect(f.calls).toEqual([])
+    }))
+
+  it.effect("a budget lift bound to a record that moved does not detach the policy", () =>
+    Effect.gen(function*() {
+      const f = yield* fixture({ hold: true })
+      const error = yield* Effect.flip(
+        f.job(
+          {
+            kind: "sandbox.budget.lift",
+            accountId: accountA,
+            observed: { endsAt: null, holder: null, state: "Quarantined", version: 3 }
+          },
+          "owner",
+          "job-1",
+          true
+        )
+      )
+      expect(error).toMatchObject({ disposition: "rejected" })
+      expect(error.detail).toContain("RecordMoved")
+      expect(f.calls.some((call) => call.startsWith("lift"))).toBe(false)
+    }))
+
+  it.effect("a lost compare-and-set after the policy was lifted is not a rejection", () =>
+    Effect.gen(function*() {
+      const now = yield* DateTime.now
+      const initial = seedPool(contract).map((sandbox): Sandbox =>
+        sandbox.accountId === accountA
+          ? {
+            ...sandbox,
+            state: SandboxState.cases.Quarantined.make({
+              blocker: budgetHoldBlocker(contract),
+              runId: Schema.decodeUnknownSync(RunId)("prior-run"),
+              since: now
+            }),
+            version: 1
+          }
+          : sandbox
+      )
+      const held = initial.find((sandbox) => sandbox.accountId === accountA)
+      if (held === undefined) return yield* Effect.die("account A missing from the seed")
+      const f = yield* fixture({ putStale: true }, initial)
+      const error = yield* Effect.flip(
+        f.job({ kind: "sandbox.budget.lift", accountId: accountA, observed: observe(held) }, "owner", "job-1", true)
+      )
+      expect(error.disposition).toBeUndefined()
+      expect(error.detail).toContain("StaleVersion")
+      expect(f.calls).toContain(`lift ${accountA}`)
+    }))
+
   it.effect("a held account quarantines; an approved lift detaches the policy and resets it to Available", () =>
     Effect.gen(function*() {
       const f = yield* fixture({ hold: true })
       const reset = yield* f.job(
-        { kind: "sandbox.reset", accountId: accountA, reason: "Manual" },
+        { kind: "sandbox.reset", accountId: accountA, reason: "Manual", observed: availableObserved },
         "owner",
         "job-1",
         true
       )
       expect(reset.state).toMatchObject({ _tag: "Quarantined", blocker: budgetHoldBlocker(contract) })
-      const lifted = yield* f.job({ kind: "sandbox.budget.lift", accountId: accountA }, "owner", "job-2", true)
+      const lifted = yield* f.job(
+        { kind: "sandbox.budget.lift", accountId: accountA, observed: observe(reset) },
+        "owner",
+        "job-2",
+        true
+      )
       expect(lifted.state._tag).toBe("Available")
       expect(f.calls).toContain(`lift ${accountA}`)
     }))
@@ -175,14 +299,14 @@ describe("sandbox jobs", () => {
     Effect.gen(function*() {
       const f = yield* fixture({ runs: [{ exitCode: 1, output: "boom" }] })
       const failed = yield* f.job(
-        { kind: "sandbox.reset", accountId: accountA, reason: "Manual" },
+        { kind: "sandbox.reset", accountId: accountA, reason: "Manual", observed: availableObserved },
         "owner",
         "job-1",
         true
       )
       expect(failed.state._tag).toBe("Quarantined")
       const error = yield* Effect.flip(
-        f.job({ kind: "sandbox.budget.lift", accountId: accountA }, "owner", "job-2", true)
+        f.job({ kind: "sandbox.budget.lift", accountId: accountA, observed: observe(failed) }, "owner", "job-2", true)
       )
       expect(error).toMatchObject({ disposition: "rejected" })
       expect(error.detail).toContain("NotBudgetHeld")
@@ -192,9 +316,14 @@ describe("sandbox jobs", () => {
   it.effect("a lift that errors after it was called is not reported as rejected", () =>
     Effect.gen(function*() {
       const f = yield* fixture({ hold: true, liftFails: true })
-      yield* f.job({ kind: "sandbox.reset", accountId: accountA, reason: "Manual" }, "owner", "job-1", true)
+      const reset = yield* f.job(
+        { kind: "sandbox.reset", accountId: accountA, reason: "Manual", observed: availableObserved },
+        "owner",
+        "job-1",
+        true
+      )
       const error = yield* Effect.flip(
-        f.job({ kind: "sandbox.budget.lift", accountId: accountA }, "owner", "job-2", true)
+        f.job({ kind: "sandbox.budget.lift", accountId: accountA, observed: observe(reset) }, "owner", "job-2", true)
       )
       expect(error.detail).toContain("BudgetLiftFailed")
       expect(error.disposition).toBeUndefined()

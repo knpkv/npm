@@ -10,9 +10,10 @@ import type {
   AgentDelegate,
   JobPayload as JobPayloadType,
   JobRecord,
+  SandboxObservation,
   WorkReassignAgent
 } from "@knpkv/herdr-fleet/model"
-import { Schema } from "effect"
+import { DateTime, Schema } from "effect"
 
 const requestTextMaxLength = 16 * 1_024
 const redactedInternalPrompt = "[redacted internal prompt]"
@@ -438,6 +439,36 @@ const field = (key: string, label: string, value: string, redacted = false): App
   value
 })
 
+/** Whole hours and minutes until a bound lease ends. `ended` once that instant has passed. */
+const leaseTimeLeft = (endsAt: string, now: DateTime.Utc): string => {
+  const leftMs = DateTime.toEpochMillis(DateTime.makeUnsafe(endsAt)) - DateTime.toEpochMillis(now)
+  if (leftMs <= 0) return "ended"
+  const minutes = Math.floor(leftMs / 60_000)
+  const hours = Math.floor(minutes / 60)
+  const remainder = minutes % 60
+  if (hours > 0) return remainder === 0 ? `${hours}h` : `${hours}h ${remainder}m`
+  return `${minutes}m`
+}
+
+/** Version and state are always shown. A lease also names its holder, its end, and the time left when `now` is known. */
+const observationFields = (
+  observed: SandboxObservation | undefined,
+  now: DateTime.Utc | undefined
+): ReadonlyArray<ApprovalRequestField> => {
+  if (observed === undefined) return []
+  const bound = [
+    field("version", "Record version", String(observed.version)),
+    field("state", "Account state", observed.state)
+  ]
+  if (observed.holder === null || observed.endsAt === null) return bound
+  return [
+    ...bound,
+    field("holder", "Lease holder", observed.holder),
+    field("endsAt", "Lease ends", observed.endsAt),
+    ...(now === undefined ? [] : [field("timeLeft", "Time left", leaseTimeLeft(observed.endsAt, now))])
+  ]
+}
+
 /** `root`, or `relation:parentAgentId`: the lineage fields bound into the approval hash. */
 const agentLineage = (agent: AgentWorkerIdentity): string =>
   agent.relationship === undefined ? "root" : `${agent.relationship.relation}:${agent.relationship.parentAgentId}`
@@ -463,7 +494,7 @@ const reassignAgentFields = (toAgent: WorkReassignAgent): ReadonlyArray<Approval
   }
 }
 
-export const approvalRequestFor = (payload: JobPayloadType): ApprovalRequest => {
+export const approvalRequestFor = (payload: JobPayloadType, now?: DateTime.Utc): ApprovalRequest => {
   switch (payload.kind) {
     case "browser.mcp.recover":
       return {
@@ -651,13 +682,20 @@ export const approvalRequestFor = (payload: JobPayloadType): ApprovalRequest => 
       }
     case "sandbox.reset":
       return {
-        fields: [field("accountId", "Sandbox account", payload.accountId), field("reason", "Reason", payload.reason)],
+        fields: [
+          field("accountId", "Sandbox account", payload.accountId),
+          field("reason", "Reason", payload.reason),
+          ...observationFields(payload.observed, now)
+        ],
         kind: payload.kind,
         title: payload.reason === "Manual" ? "Empty one sandbox account" : "Retry one quarantined sandbox account"
       }
     case "sandbox.budget.lift":
       return {
-        fields: [field("accountId", "Sandbox account", payload.accountId)],
+        fields: [
+          field("accountId", "Sandbox account", payload.accountId),
+          ...observationFields(payload.observed, now)
+        ],
         kind: payload.kind,
         title: "Lift one sandbox account's budget stop"
       }

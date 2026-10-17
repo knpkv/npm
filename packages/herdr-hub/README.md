@@ -182,6 +182,8 @@ A card is the account id, name and state. `label` is `left the pool` when that i
 
 Needs-you adds `sandbox-quarantined` or `sandbox-budget-hold`, one per quarantined account, aimed at the account page. A budget hold that already has a pending `sandbox.budget.lift` approval is left out. Each contribution includes `asOf`, the last sweep's epoch milliseconds, or null when none was recorded. The sidebar page is a later change. Opening this reader does not start pool jobs or the sweep.
 
+A reset or budget-lift approval is bound to the pool record read at submit: its version, its state, and, when that state is leased, the holder and the time the lease ends. The approval page shows those fields, plus the time left when the page has a clock. Running the job re-reads that record under the account lock and rejects the job when it has moved, before a reset or a lift changes the account. An approved job with no bound record is rejected as unbound.
+
 ### Usage details
 
 The read-only Usage module opens Limits at `#usage/limits`, with Tokens at `#usage/tokens` and By tool at `#usage/by-tool`. By tool uses the first reported host by default; an explicit host selector wins. Each tool/model split stays on that one host, and unavailable readings stay Unknown. Selectors use the document query, for example `?range=30d&timeZone=Europe/Amsterdam&host=atlas#usage/tokens`. `canonicalUsageSelection` validates each field independently and preserves valid selections when repairing another field. It drops excess selectors and refuses an invalid caller-supplied viewer zone. Only the active Usage module may replace the URL; hidden modules must retain another module's deep-link selectors.
