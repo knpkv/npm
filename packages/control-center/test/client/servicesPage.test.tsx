@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import {
   type AwsProfileDiscoveryResponse,
+  type AwsRegionDiscoveryResponse,
   type AtlassianProfileDiscoveryResponse,
   type AtlassianOAuthGrantStartResponse,
   type AtlassianOAuthProviderIntent,
@@ -2835,6 +2836,10 @@ describe("ServicesPage connection tests", () => {
       expect(host.textContent).not.toContain("Shown in Control Center only.")
       expect(awsControl(host, "AWS region").getAttribute("aria-invalid")).toBeNull()
       expect(host.textContent).not.toContain("Add an AWS profile and region")
+      // The error is announced and focus moves to the field, so the stop isn't silent.
+      expect(host.ownerDocument.activeElement).toBe(name)
+      const errorId = name.getAttribute("aria-describedby")?.split(" ")[0] ?? ""
+      expect(host.ownerDocument.getElementById(errorId)?.getAttribute("role")).toBe("alert")
     })
 
     it("opens with manual entry closed and focus on its heading", async () => {
@@ -2893,6 +2898,43 @@ describe("ServicesPage connection tests", () => {
       expect(host.textContent).toContain("Kept from the last check")
       expect(box()?.checked).toBe(true)
       expect(awsFollowButton(host)?.textContent).toBe("Follow 1 resource")
+    })
+
+    // A region picked after discovery ran (here: the region lookup for a profile added mid-test) must not carry
+    // that discovery's selections into another region.
+    it("drops a discovery when the region changes under it", async () => {
+      let resolveRegions: ((answer: AwsRegionDiscoveryResponse) => void) | undefined
+      const createBatch = vi.fn<NonNullable<ConnectionTestTransport["createBatch"]>>()
+      const host = await setupHost({
+        createBatch,
+        discoverAwsProfiles: vi
+          .fn<NonNullable<ConnectionTestTransport["discoverAwsProfiles"]>>()
+          .mockResolvedValueOnce([])
+          .mockResolvedValue([{ profile: "staging", region: "eu-west-1" }]),
+        discoverAwsRegions: () =>
+          new Promise((resolve) => {
+            resolveRegions = resolve
+          }),
+        discoverAwsResources: () =>
+          Promise.resolve({
+            accountId: "123456789012",
+            codeCommit: { _tag: "available", names: ["paper-crane"], truncated: false },
+            codePipeline: { _tag: "available", names: [], truncated: false }
+          })
+      })
+      await setControlValue(awsControl(host, "AWS profile"), "staging")
+      await setControlValue(awsControl(host, "AWS region"), "us-east-1")
+      await act(async () => buttonNamed(host, "Test & discover")?.click())
+      expect(host.textContent).toContain("staging verified in us-east-1")
+      const box = [...host.querySelectorAll<HTMLLabelElement>("label")]
+        .find(({ textContent }) => textContent === "paper-crane")
+        ?.querySelector<HTMLInputElement>('input[type="checkbox"]')
+      await act(async () => box?.click())
+      await act(async () => resolveRegions?.({ _tag: "available", regions: ["eu-west-1", "us-east-1"] }))
+      expect(awsSelect(host, "AWS region").value).toBe("eu-west-1")
+      expect(host.textContent).not.toContain("verified in us-east-1")
+      expect(awsFollowButton(host)).toBeUndefined()
+      expect(createBatch).not.toHaveBeenCalled()
     })
 
     it("counts every followed resource on the follow button", async () => {

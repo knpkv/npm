@@ -224,7 +224,7 @@ const SetupField = ({
         id
       })}
       {error === undefined ? null : (
-        <span className={styles.fieldError} id={errorId}>
+        <span className={styles.fieldError} id={errorId} role="alert">
           <StateLabel label="Invalid" size="compact" tone="critical" />
           <span>{error}</span>
         </span>
@@ -334,8 +334,18 @@ export const AwsAccountSetupForm = ({
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({})
   const [setupError, setSetupError] = useState<string | null>(null)
   const discoveryRequest = useRef<AbortController | null>(null)
+  // The region the current discovery (in flight or done) checked; its results only hold for that region.
+  const discoveredRegion = useRef<string | null>(null)
+  const form = useRef<HTMLFormElement>(null)
+  // Bumped when validation stops an action, so focus moves to the first invalid field after it renders.
+  const [invalidFocus, setInvalidFocus] = useState(0)
 
   useEffect(() => () => discoveryRequest.current?.abort(), [])
+
+  useEffect(() => {
+    if (invalidFocus === 0) return
+    form.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus()
+  }, [invalidFocus])
 
   // Once profiles are detected the select can only hold a detected one: keep the current profile when it is
   // listed, otherwise start on "default" when it exists, otherwise the first.
@@ -384,10 +394,17 @@ export const AwsAccountSetupForm = ({
   const resetDiscovery = (): void => {
     discoveryRequest.current?.abort()
     discoveryRequest.current = null
+    discoveredRegion.current = null
     setDiscoveryState({ _tag: "idle" })
     setSelectedRepositories(new Set())
     setSelectedPipelines(new Set())
   }
+
+  // However the region changed (the user, or the enabled-region lookup), a discovery for another region and its
+  // selections no longer describe what Follow would connect.
+  useEffect(() => {
+    if (discoveredRegion.current !== null && discoveredRegion.current !== region.trim()) resetDiscovery()
+  })
 
   const requiredFieldErrors = (): FieldErrors => ({
     ...(accountName.trim().length === 0 && { accountName: "Add an account name." }),
@@ -399,8 +416,12 @@ export const AwsAccountSetupForm = ({
     setSetupError(null)
     const errors = requiredFieldErrors()
     setFieldErrors(errors)
-    if (Object.keys(errors).length > 0) return
+    if (Object.keys(errors).length > 0) {
+      setInvalidFocus((count) => count + 1)
+      return
+    }
     const request = { profile: profile.trim(), region: region.trim() }
+    discoveredRegion.current = request.region
     discoveryRequest.current?.abort()
     const controller = new AbortController()
     discoveryRequest.current = controller
@@ -457,7 +478,10 @@ export const AwsAccountSetupForm = ({
     }
     const errors = requiredFieldErrors()
     setFieldErrors(errors)
-    if (Object.keys(errors).length > 0) return
+    if (Object.keys(errors).length > 0) {
+      setInvalidFocus((count) => count + 1)
+      return
+    }
     if (followedCount === 0) {
       setSetupError("Select or manually add at least one repository or pipeline to follow.")
       return
@@ -547,7 +571,7 @@ export const AwsAccountSetupForm = ({
     )
 
   return (
-    <form className={styles.form} noValidate onSubmit={submit}>
+    <form className={styles.form} noValidate onSubmit={submit} ref={form}>
       <div className={styles.fields}>
         <SetupField
           error={fieldErrors.accountName}
