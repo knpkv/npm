@@ -1,5 +1,11 @@
 # @knpkv/rly
 
+## 0.23.1
+
+### Patch Changes
+
+- [#997](https://github.com/knpkv/npm/pull/997) [`4f84e0a`](https://github.com/knpkv/npm/commit/4f84e0a2f45cffb7b2ecf273a9af23545403671f) Thanks [@konopkov](https://github.com/konopkov)! - The Overview's first-service cards lose their 3px service-coloured top bar and keep an even 1px border, as the design draws them. rly's stripe lint now treats a card's block-start (top) edge like an inline side: a coloured or thick top bar, as a border or as an inset shadow, is a stripe; block-end underlines (tabs) stay allowed. Existing top bars elsewhere are baselined with their reason.
+
 ## 0.23.0
 
 ### Minor Changes
