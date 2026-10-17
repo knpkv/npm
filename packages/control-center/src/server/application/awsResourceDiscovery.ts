@@ -259,7 +259,7 @@ export const makeAwsResourceDiscovery = Effect.fn("AwsResourceDiscovery.make")(f
       { concurrency: "unbounded" }
     )
     // CodeCommit names the SCP; CodePipeline's authorization failure carries no message, so this says an
-    // organization policy blocks both services here, not that the region itself is disallowed.
+    // organization policy blocks CodeCommit here and CodePipeline is denied too, not that the region is disallowed.
     const organizationPolicyDenied = (yield* Ref.get(deniedByPolicy)) &&
       services.codePipeline._tag === "failed" &&
       services.codePipeline.failureClass === "authorization"

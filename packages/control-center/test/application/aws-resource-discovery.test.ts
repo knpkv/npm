@@ -309,7 +309,7 @@ describe("AWS resource discovery", () => {
       })
     ))
 
-  // A pool account's region allowlist is an SCP; AWS names it in the denial, so the form can say the region isn't allowed.
+  // AWS names a service control policy in CodeCommit's denial; a pool account's region allowlist is one possible cause.
   describe("services denied by an organization policy", () => {
     const denied = (message: string) =>
       codeCommitClient({
@@ -328,7 +328,8 @@ describe("AWS resource discovery", () => {
     })
 
     // Only CodeCommit's denial is proven to be an SCP (CodePipeline's authorization failure carries no message),
-    // so the flag means "an organization policy blocks these services here", never "this region is not allowed".
+    // so the flag means "an organization policy blocks CodeCommit here, CodePipeline is denied too", never
+    // "this region is not allowed".
     it.effect("is reported for an SCP CodeCommit denial beside a CodePipeline authorization failure", () =>
       runDiscovery(
         denied(

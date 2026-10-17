@@ -345,8 +345,8 @@ export const AwsResourceDiscoveryResponse = Schema.Struct({
   codePipeline: AwsServiceResourceDiscovery,
   /**
    * Present when CodeCommit's denial names a service control policy and CodePipeline is denied too: an
-   * organization policy blocks these services here. It may be a region allowlist or a service-wide deny, so
-   * the form names the region as a possible cause, never as the proven one.
+   * organization policy blocks CodeCommit here, and CodePipeline's denial gives no reason. The policy may be a
+   * region allowlist or a service-wide deny, so the form names the region as a possible cause, never the proven one.
    */
   organizationPolicyDenied: Schema.optionalKey(Schema.Literal(true))
 }).annotate({ identifier: "AwsResourceDiscoveryResponse" })
