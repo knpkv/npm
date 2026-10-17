@@ -1,0 +1,30 @@
+id: no-aws-org-coordinates-in-source
+snapshots:
+  ? |
+    const link = `https://example-org.awsapps.com/start/#/console?account_id=${id}`
+  : labels:
+      - source: "`https://example-org.awsapps.com/start/#/console?account_id=${id}`"
+        style: primary
+        start: 13
+        end: 79
+  ? |
+    const pool = [{ name: "pool-a", accountId: "210987654321" }]
+  : labels:
+      - source: '"210987654321"'
+        style: primary
+        start: 43
+        end: 57
+  ? |
+    const start = "https://example-org.awsapps.com/start"
+  : labels:
+      - source: '"https://example-org.awsapps.com/start"'
+        style: primary
+        start: 14
+        end: 53
+  ? |
+    export const blocklist = ["908172635445"]
+  : labels:
+      - source: '"908172635445"'
+        style: primary
+        start: 26
+        end: 40

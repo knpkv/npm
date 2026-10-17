@@ -1,0 +1,21 @@
+id: no-aws-org-coordinates-in-source
+valid:
+  - |
+    const AccountId = Schema.String.check(Schema.isPattern(/^\d{12}$/))
+  - |
+    const fixture = { accountId: "111111111111" }
+  - |
+    const example = "123456789012"
+  - |
+    const order = "1234567890123"
+  - |
+    const portal = "https://portal.example.invalid/start"
+invalid:
+  - |
+    const pool = [{ name: "pool-a", accountId: "210987654321" }]
+  - |
+    export const blocklist = ["908172635445"]
+  - |
+    const start = "https://example-org.awsapps.com/start"
+  - |
+    const link = `https://example-org.awsapps.com/start/#/console?account_id=${id}`

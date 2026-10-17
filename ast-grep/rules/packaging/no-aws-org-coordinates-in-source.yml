@@ -1,0 +1,32 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-aws-org-coordinates-in-source
+language: tsx
+severity: error
+message: "A 12-digit AWS account ID or an awsapps.com portal URL in published source maps a real organization; take it from configuration instead"
+
+rule:
+  any:
+    - kind: string
+      regex: '^["''`]\d{12}["''`]$'
+      not:
+        regex: '^["''`](000000000000|111111111111|222222222222|333333333333|444444444444|555555555555|666666666666|777777777777|888888888888|999999999999|123456789012)["''`]$'
+    - kind: string
+      regex: 'https?://[a-z0-9-]+\.awsapps\.com'
+    - kind: template_string
+      regex: 'https?://[a-z0-9-]+\.awsapps\.com'
+
+files:
+  - "packages/*/src/**/*.ts"
+  - "packages/*/src/**/*.tsx"
+
+ignores:
+  - "**/generated/**"
+  - "**/vendor/**"
+
+note: |
+  Account IDs, the management account and the Identity Center portal of a real
+  organization belong in the deploying repository or host configuration. A
+  publishable package accepts them as input (for example a decoded pool
+  contract). Fixtures use AWS's documented example ID 123456789012 or a repeated digit
+  such as 111111111111; those are allowed.
