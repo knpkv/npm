@@ -164,28 +164,27 @@ export const ConnectionAdministration = ({
         <Text as="h4" variant="label">
           Permissions
         </Text>
-        <Text tone="secondary" variant="meta">
-          What this account can do, as last reported by {providerName}.
-        </Text>
-        {permissions.available === null && permissions.disabled === null ? (
+        {permissions.operations === null ? (
           <Text tone="secondary" variant="meta">
             No provider operations were negotiated.
           </Text>
         ) : (
-          <dl className={styles.permissionFacts}>
-            {permissions.available === null ? null : (
+          <>
+            <Text tone="secondary" variant="meta">
+              What Control Center does with this connection.
+            </Text>
+            <dl className={styles.permissionFacts}>
               <div>
                 <dt>{providerName}</dt>
-                <dd>{permissions.available}</dd>
+                <dd>{permissions.operations}</dd>
               </div>
-            )}
-            {permissions.disabled === null ? null : (
-              <div>
-                <dt>Turned off</dt>
-                <dd>{permissions.disabled}</dd>
-              </div>
-            )}
-          </dl>
+            </dl>
+            {permissions.paused ? (
+              <Text tone="secondary" variant="meta">
+                Paused while this connection is turned off.
+              </Text>
+            ) : null}
+          </>
         )}
       </div>
       <div className={styles.administrationSection}>
