@@ -4,7 +4,7 @@
  * @category Read client
  * @module
  */
-import { Context, Effect, Layer, Option, Predicate, Schema, Stream } from "effect"
+import { Context, DateTime, Effect, Layer, Option, Predicate, Schema, Stream } from "effect"
 
 import type { AwsClientError } from "../Errors.js"
 import {
@@ -21,6 +21,8 @@ import {
   CodeCommitBlobMetadata,
   CodeCommitChangedFile,
   CodeCommitChangedFilesPage,
+  CodeCommitCommitId,
+  CodeCommitCommitSummary,
   CodeCommitPageToken,
   CodeCommitPullRequestIdsPage,
   CodeCommitPullRequestPage,
@@ -33,6 +35,7 @@ import {
   CodeCommitReadProvider,
   CodeCommitReadProviderLive,
   type GetBlobProviderRequest,
+  type GetCommitProviderRequest,
   type GetDifferencesProviderPageRequest,
   type GetPullRequestProviderRequest,
   type GetRepositoryProviderRequest,
@@ -64,6 +67,20 @@ const RawRepositoryIdentity = Schema.Struct({
 })
 
 const RawBlobResponse = Schema.Struct({ content: Schema.Uint8Array })
+
+// Git's "<seconds since epoch> <zone offset>", e.g. "1484167798 -0800".
+const GitTimestamp = Schema.String.check(Schema.isPattern(/^\d{1,12} [+-]\d{4}$/))
+
+const RawCommitResponse = Schema.Struct({
+  commit: Schema.Struct({
+    message: Schema.optional(Schema.String),
+    committer: Schema.Struct({ date: GitTimestamp })
+  })
+})
+
+/** The first non-blank line of a commit message, or null when it has none. */
+const commitTitle = (message: string | undefined): string | null =>
+  (message ?? "").split("\n").map((line) => line.trim()).find((line) => line !== "") ?? null
 
 const RawPullRequestTarget = Schema.Struct({
   repositoryName: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty()),
@@ -139,7 +156,8 @@ const isNotFoundCause = (cause: unknown): boolean =>
   Predicate.isTagged(cause, "BlobIdDoesNotExistException") ||
   Predicate.isTagged(cause, "PullRequestDoesNotExistException") ||
   Predicate.isTagged(cause, "RepositoryDoesNotExistException") ||
-  Predicate.isTagged(cause, "CommitDoesNotExistException")
+  Predicate.isTagged(cause, "CommitDoesNotExistException") ||
+  Predicate.isTagged(cause, "CommitIdDoesNotExistException")
 
 const mapProviderError = (operation: string) => (error: AwsClientError): CodeCommitReadError => {
   if (error._tag !== "AwsApiError") return error
@@ -156,8 +174,10 @@ const mapProviderError = (operation: string) => (error: AwsClientError): CodeCom
 
 // Effect Schema error messages embed the rejected value. That is a useful
 // field-level diagnostic for metadata operations, but get-blob carries raw
-// repository file bytes, so its message must never reach the logs.
-const operationLogsRejectedValue = (operation: string): boolean => operation !== "get-blob"
+// repository file bytes and get-commit carries committer names and addresses, so
+// their messages must never reach the logs.
+const operationLogsRejectedValue = (operation: string): boolean =>
+  operation !== "get-blob" && operation !== "get-commit"
 
 const decodeProvider = <S extends Schema.Codec<unknown, unknown, never, never>, UnparsedInput>(
   operation: string,
@@ -251,6 +271,10 @@ export interface CodeCommitReadClientService {
   readonly getBlob: (
     request: GetBlobProviderRequest
   ) => Effect.Effect<CodeCommitBlobContent, CodeCommitReadError>
+  /** One commit's title and commit time, for naming it to a person. */
+  readonly getCommit: (
+    request: GetCommitProviderRequest
+  ) => Effect.Effect<CodeCommitCommitSummary, CodeCommitReadError>
   readonly listPullRequestsPage: (
     request: Omit<ListPullRequestsProviderPageRequest, "maximumResults">
   ) => Effect.Effect<CodeCommitPullRequestPage, CodeCommitReadError>
@@ -398,6 +422,19 @@ export class CodeCommitReadClient extends Context.Service<CodeCommitReadClient, 
             )
         )
 
+      const getCommit = Effect.fn("CodeCommitReadClient.getCommit")(function*(request: GetCommitProviderRequest) {
+        const raw = yield* provider.getCommit(request).pipe(
+          Effect.mapError(mapProviderError("get-commit"))
+        )
+        const response = yield* decodeProvider("get-commit", RawCommitResponse, raw)
+        const seconds = Number(response.commit.committer.date.split(" ")[0])
+        return new CodeCommitCommitSummary({
+          commitId: CodeCommitCommitId.make(request.commitId),
+          title: commitTitle(response.commit.message),
+          committedAt: DateTime.makeUnsafe(seconds * 1000)
+        })
+      })
+
       const streamChangedFiles: CodeCommitReadClientService["streamChangedFiles"] = (request) =>
         Stream.paginate<string | null, CodeCommitChangedFile, CodeCommitReadError>(
           null,
@@ -414,6 +451,7 @@ export class CodeCommitReadClient extends Context.Service<CodeCommitReadClient, 
         discoverAccount,
         getBlob,
         getChangedFilesPage,
+        getCommit,
         getPullRequest,
         getRepositoryIdentity,
         listPullRequestIdsPage,

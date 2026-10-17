@@ -4,7 +4,7 @@ import { CachedPullRequest } from "@knpkv/codecommit-core/CacheService/repos/Pul
 import { Account, AwsProfileName, PullRequest } from "@knpkv/codecommit-core/Domain.js"
 import type { NewAuditLogEntry } from "@knpkv/codecommit-core/PermissionService/AuditLog.js"
 import * as ReadClient from "@knpkv/codecommit-core/ReadClient.js"
-import { Effect, Ref, Result, Schema, Stream } from "effect"
+import { DateTime, Effect, Ref, Result, Schema, Stream } from "effect"
 import * as FileSystem from "effect/FileSystem"
 import { type CodeQueueQuery, CodeReference } from "../src/host-contract.js"
 import { cachedPullRequest } from "../src/server/handlers/prs-live.js"
@@ -63,6 +63,7 @@ const fixture = Effect.fn("CodeHostTest.fixture")(function*(options: {
 } = {}) {
   const config = yield* Ref.make<string | null>(null)
   const inventoryCalls = yield* Ref.make(0)
+  const commitCalls = yield* Ref.make(0)
   const changed = Array.from({ length: options.files ?? 0 }, (_, index) =>
     new ReadClient.CodeCommitChangedFile({
       status: "added",
@@ -86,7 +87,9 @@ const fixture = Effect.fn("CodeHostTest.fixture")(function*(options: {
       path === "/fixture/permissions.json"
         ? Ref.get(policy).pipe(
           Effect.map((grant) =>
-            JSON.stringify({ permissions: { getPullRequest: grant, getDifferences: grant, getBlob: grant } })
+            JSON.stringify({
+              permissions: { getPullRequest: grant, getDifferences: grant, getBlob: grant, getCommit: grant }
+            })
           )
         )
         : Ref.get(config).pipe(Effect.map((value) => value ?? "{}"))
@@ -123,6 +126,14 @@ const fixture = Effect.fn("CodeHostTest.fixture")(function*(options: {
           bytes: new TextEncoder().encode(`export const value = "${request.blobId}"\n`)
         })
       ),
+    getCommit: (request) =>
+      Ref.update(commitCalls, (n) => n + 1).pipe(Effect.as(
+        new ReadClient.CodeCommitCommitSummary({
+          commitId: ReadClient.CodeCommitCommitId.make(request.commitId),
+          title: "Restore the draft on reconnect",
+          committedAt: DateTime.makeUnsafe(Date.UTC(2026, 9, 17, 14, 18))
+        })
+      )),
     getRepositoryIdentity: unused,
     listPullRequestIdsPage: unused,
     listPullRequestsPage: unused,
@@ -162,7 +173,7 @@ const fixture = Effect.fn("CodeHostTest.fixture")(function*(options: {
     configPath: "/fixture/config.json",
     permissionPath: "/fixture/permissions.json"
   }, inner).pipe(Effect.provideService(FileSystem.FileSystem, fs))
-  return { reads, config, policy, providerCalls, inventoryCalls, audit, profileQueries }
+  return { reads, config, policy, providerCalls, inventoryCalls, commitCalls, audit, profileQueries }
 })
 
 describe("Code host read service", () => {
@@ -256,6 +267,39 @@ describe("Code host read service", () => {
       }
     }))
 
+  it.effect("names a commit by title and time", () =>
+    Effect.gen(function*() {
+      const test = yield* fixture()
+      const commit = "c".repeat(40)
+      expect(yield* test.reads.commit({ ref, commit }, { login: "Reviewer" })).toEqual({
+        commitId: commit,
+        title: "Restore the draft on reconnect",
+        committedAt: Date.UTC(2026, 9, 17, 14, 18)
+      })
+    }))
+
+  it.effect("re-checks the caller's saved grant on every commit read, so a revoked grant refuses the next one", () =>
+    Effect.gen(function*() {
+      const test = yield* fixture()
+      const commit = "c".repeat(40)
+      yield* test.reads.commit({ ref, commit }, { login: "Reviewer" })
+      yield* Ref.set(test.policy, "allow")
+      const refused = yield* Effect.result(test.reads.commit({ ref, commit }, { login: "Reviewer" }))
+      expect(Result.isFailure(refused)).toBe(true)
+      if (Result.isFailure(refused)) expect(refused.failure.reason).toBe("permission_required")
+      expect(yield* Ref.get(test.commitCalls)).toBe(1)
+    }))
+
+  it.effect("commit reads obey fresh saved grants before provider calls", () =>
+    Effect.gen(function*() {
+      const test = yield* fixture()
+      yield* Ref.set(test.policy, "allow")
+      const refused = yield* Effect.result(test.reads.commit({ ref, commit: "c".repeat(40) }, { login: "Reviewer" }))
+      expect(Result.isFailure(refused)).toBe(true)
+      if (Result.isFailure(refused)) expect(refused.failure.reason).toBe("permission_required")
+      expect(yield* Ref.get(test.commitCalls)).toBe(0)
+    }))
+
   it.effect("review reads obey fresh saved grants before provider calls", () =>
     Effect.gen(function*() {
       const test = yield* fixture()
@@ -285,7 +329,15 @@ describe("Code host read service", () => {
       for (const privateValue of [row.accountProfile, row.accountRegion, row.awsAccountId]) {
         expect(JSON.stringify(reading.workspace)).not.toContain(privateValue)
       }
-      expect(Object.keys(test.reads).sort()).toEqual(["canvas", "detail", "diff", "diffContent", "queue", "review"])
+      expect(Object.keys(test.reads).sort()).toEqual([
+        "canvas",
+        "commit",
+        "detail",
+        "diff",
+        "diffContent",
+        "queue",
+        "review"
+      ])
     }))
 
   it.effect("reads the canvas through fresh saved grants, with every review-context source not recorded", () =>

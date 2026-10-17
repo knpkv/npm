@@ -20,6 +20,8 @@ import type * as Crypto from "effect/Crypto"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 import {
+  type CodeCommitQuery,
+  CodeCommitSummary,
   CodeDetail,
   CodeDiff,
   CodeDiffContent,
@@ -34,6 +36,7 @@ import { codePullRequest } from "./host-presentation.js"
 import { makePermissionedReadClient } from "./internal/PermissionedReadClient.js"
 import type { CanvasSourceFile } from "./review/CanvasGraphBuilder.js"
 import { makeCanvasGraphJobs } from "./review/CanvasGraphJobs.js"
+import { commitSummaryWire } from "./review/CommitSummaries.js"
 import {
   loadPullRequestDiff,
   loadPullRequestDiffContent,
@@ -55,6 +58,11 @@ export interface CodeHostReads {
     query: CodeDiffContentQuery,
     caller: { readonly login: string }
   ) => Effect.Effect<CodeDiffContent, CodeHostReadError>
+  /** One commit's title and time, so the hub can name it instead of showing its id. */
+  readonly commit: (
+    query: CodeCommitQuery,
+    caller: { readonly login: string }
+  ) => Effect.Effect<CodeCommitSummary, CodeHostReadError>
   /** The canvas graph of the current revision; Building until every changed file is read. */
   readonly canvas: (
     ref: CodeReference,
@@ -273,6 +281,21 @@ export const makeCodeHostReadsFromClient = Effect.fn("CodeHostReads.bind")(funct
         }))
       }
     ),
+    commit: Effect.fn("CodeHostReads.commit")(function*(query: CodeCommitQuery, caller: { readonly login: string }) {
+      // Not cached: every read goes through the caller's saved grants and audit, so a revoked grant
+      // refuses the next one. The Hub reads each commit once per page.
+      return yield* boundedRead(Effect.gen(function*() {
+        const row = yield* exact(query.ref)
+        const client = yield* clientFor(caller)
+        const pullRequest = yield* Schema.decodeUnknownEffect(CachedPRToPullRequest)(row)
+        const summary = yield* client.getCommit({
+          account: { profile: pullRequest.account.profile, region: pullRequest.account.region },
+          repositoryName: pullRequest.repositoryName,
+          commitId: query.commit
+        })
+        return yield* Schema.decodeUnknownEffect(CodeCommitSummary)(commitSummaryWire(summary))
+      }))
+    }),
     canvas: Effect.fn("CodeHostReads.canvas")(function*(ref: CodeReference, caller: { readonly login: string }) {
       const { changedFiles, diff, pullRequest } = yield* boundedRead(Effect.gen(function*() {
         const row = yield* exact(ref)
@@ -377,6 +400,7 @@ export const makeCodeHostReads = Effect.fn("CodeHostReads.make")(function*(
     review: (ref, caller) => read((reads) => reads.review(ref, caller)),
     diff: (ref, caller) => read((reads) => reads.diff(ref, caller)),
     diffContent: (query, caller) => read((reads) => reads.diffContent(query, caller)),
+    commit: (query, caller) => read((reads) => reads.commit(query, caller)),
     canvas: (ref, caller) => read((reads) => reads.canvas(ref, caller))
   } satisfies CodeHostReads
 })

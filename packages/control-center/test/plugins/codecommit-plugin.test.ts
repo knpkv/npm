@@ -109,6 +109,7 @@ const baseReadClient = (
     ),
   listRepositoriesPage: () =>
     Effect.succeed(new ReadClient.CodeCommitRepositoryPage({ repositoryNames: [], nextToken: null })),
+  getCommit: () => Effect.die("unused getCommit"),
   getBlob: () =>
     Effect.succeed(
       new ReadClient.CodeCommitBlobContent({

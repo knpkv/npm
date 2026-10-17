@@ -11,6 +11,7 @@ import type { dashboardPage } from "../../src/internal/dashboard-page.js"
 import type { loadUiAssets } from "../../src/internal/ui-assets.js"
 import { CANVAS_REFERENCE, CanvasState, makeCanvasReadings } from "./canvas-fixtures.js"
 import { canvasInventory, readCanvasCapability } from "./canvas-inventory.js"
+import { designCommitResult } from "./fixtures.js"
 
 const PageModule = Schema.Struct({
   dashboardPage: Schema.declare((value): value is typeof dashboardPage => Predicate.isFunction(value))
@@ -110,6 +111,10 @@ export const resolveCanvasRead = (readings: Readings, url: URL) => {
         ? readings.diff
         : readings.canvas
     }
+    case "/v1/modules/code/commit":
+      return url.searchParams.get("ref") === CANVAS_REFERENCE
+        ? designCommitResult(readings.commits, url.searchParams.get("commit"))
+        : undefined
     case "/v1/modules/code/diff-content": {
       const query = Schema.decodeUnknownResult(CodeDiffContentQuery)(url.searchParams)
       if (Result.isFailure(query) || readings.diff._tag !== "Ready") return undefined

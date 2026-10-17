@@ -1,4 +1,5 @@
 import type {
+  CodeCommitSummaryResult,
   CodeDetail,
   CodeDiffContentResult,
   CodeDiffResult,
@@ -89,6 +90,24 @@ export const codeDetailFixture = (ref: string, now: number, state: string): Code
       destinationBranch: "main"
     }
 }
+
+/** The two commits the fixture diff names, by title and an hour apart. */
+export const codeCommitFixture = (commit: string, now: number): CodeCommitSummaryResult | null => {
+  const titles = new Map([
+    ["base-commit", { title: "Read the queue on request", hoursAgo: 2 }],
+    ["head-commit", { title: "Make the queue reading explicit", hoursAgo: 1 }]
+  ])
+  const found = titles.get(commit)
+  return found === undefined ? null : {
+    _tag: "Ready",
+    commit: {
+      commitId: (commit === "base-commit" ? "b" : "c").repeat(40),
+      title: found.title,
+      committedAt: now - found.hoursAgo * 3_600_000
+    }
+  }
+}
+
 export const codeDiffFixture = (ref: string, now: number, state: string): CodeDiffResult | null => {
   const failure = unavailable(state)
   if (failure !== null) return failure

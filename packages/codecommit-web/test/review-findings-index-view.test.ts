@@ -284,7 +284,8 @@ it("gives a recorded pushed fix its status glyph and keeps Open rows unlabelled"
     secondary: { open: false, onOpenChange: () => {} }
   }))
   const links = fixture.host.querySelectorAll("a")
-  expect(links[0]?.textContent).toContain("Fix pushed in recorded-head, waiting for re-review")
+  expect(links[0]?.textContent).toContain("Fix pushed in “Commit title unavailable”, waiting for re-review")
+  expect(links[0]?.textContent).not.toContain("recorded-head")
   expect(links[0]?.querySelector("svg")).not.toBeNull()
   expect(links[1]?.querySelector("svg")).toBeNull()
   expect(fixture.host.querySelector("button")).toBeNull()

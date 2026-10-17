@@ -7,6 +7,7 @@
 @import "@knpkv/codecommit-web/host/style.css";
 @import "@knpkv/codecommit-web/views/style.css";
 @import "@knpkv/review/canvas/styles.css";
+@import "@knpkv/review/commit-label.css";
 @import "./styles.css";
 @import "./superapp.css";
 @import "./today.css";

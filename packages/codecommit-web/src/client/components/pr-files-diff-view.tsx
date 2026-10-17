@@ -1,4 +1,5 @@
 import type * as Domain from "@knpkv/codecommit-core/Domain.js"
+import { CommitLabel } from "@knpkv/review/react"
 import { DiffFileTree, type RlyDiffInventory } from "@knpkv/rly/diff/workbench"
 import { Button, StatePanel, Surface, Text } from "@knpkv/rly/primitives"
 import type { ReactNode, Ref, RefObject } from "react"
@@ -59,7 +60,7 @@ export function PRFilesDiffView({
           </Text>
           <Text tone="secondary" variant="meta">
             {diff.files.length} changed {diff.files.length === 1 ? "file" : "files"} at head{" "}
-            {diff.headCommit.slice(0, 12)}
+            <CommitLabel commit={diff.headCommit} />
           </Text>
         </div>
         {findings.placement === "drawer" ? (

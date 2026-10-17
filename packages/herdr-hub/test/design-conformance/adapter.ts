@@ -9,7 +9,7 @@ import { serveFiles } from "../../../design-conformance/src/server.js"
 import type { fontPreloadLink } from "../../src/font-preload.js"
 import type { dashboardPage } from "../../src/internal/dashboard-page.js"
 import type { loadUiAssets } from "../../src/internal/ui-assets.js"
-import { CODE_REFERENCE, makeCodeReadings } from "./fixtures.js"
+import { CODE_REFERENCE, designCommitResult, makeCodeReadings } from "./fixtures.js"
 import { isConversationState, readReviewCapability, reviewInventory, ReviewState } from "./inventory.js"
 
 const PageModule = Schema.Struct({
@@ -150,6 +150,10 @@ export const resolveFixtureRead = (readings: ReturnType<typeof makeCodeReadings>
       if (Result.isFailure(query) || query.success.ref !== CODE_REFERENCE) return undefined
       return url.pathname.endsWith("/detail") ? readings.detail : readings.review
     }
+    case "/v1/modules/code/commit":
+      return url.searchParams.get("ref") === CODE_REFERENCE
+        ? designCommitResult(readings.commits, url.searchParams.get("commit"))
+        : undefined
     case "/v1/modules/code/diff-content": {
       const query = Schema.decodeUnknownResult(CodeDiffContentQuery)(url.searchParams)
       if (Result.isFailure(query) || readings.review._tag !== "Ready") return undefined

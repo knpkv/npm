@@ -95,7 +95,22 @@ test.beforeEach(async ({ page }) => {
     "**/api/prs/comments*",
     (route) => route.fulfill({ body: "[]", contentType: "application/json", status: 200 })
   )
+  // Commits are named by title and time; the two heads the fixture moves between.
+  await page.route("**/api/prs/*/*/commits/*", (route) => {
+    const commit = new URL(route.request().url()).pathname.split("/").at(-1) ?? ""
+    return route.fulfill({
+      body: JSON.stringify({
+        commitId: commit,
+        title: commit.startsWith("c") ? headTitles.c : headTitles.b,
+        committedAt: Date.UTC(2026, 9, 17, 14, 18)
+      }),
+      contentType: "application/json",
+      status: 200
+    })
+  })
 })
+
+const headTitles = { b: "Retry the stage socket with backoff", c: "Keep the draft when the socket drops" }
 
 const pullRequest = {
   account: {
@@ -2061,7 +2076,7 @@ test("reloads after a completed manual refresh without refetching for ordinary S
   })
 
   await page.goto("/accounts/111111111111/prs/42")
-  await expect(page.getByText(`head ${"b".repeat(12)}`)).toBeVisible()
+  await expect(page.getByText(headTitles.b).first()).toBeVisible()
   await page.getByRole("button", { name: "Run Relay" }).click()
   await expect(findingDeck(page).getByRole("button", { name: /Retry amplification/ })).toBeVisible()
   await expect(page.getByLabel("P2 finding: Retry amplification")).toBeVisible()
@@ -2076,7 +2091,7 @@ test("reloads after a completed manual refresh without refetching for ordinary S
 
   await refreshButton.click()
   await expect(refreshButton).toBeEnabled()
-  await expect(page.getByText(`head ${"b".repeat(12)}`)).toBeVisible()
+  await expect(page.getByText(headTitles.b).first()).toBeVisible()
   expect(diffRequestCount).toBe(2)
 
   await refreshButton.click()
@@ -2085,14 +2100,17 @@ test("reloads after a completed manual refresh without refetching for ordinary S
   changedRevisionRefresh.resolve()
   await expect(page.getByText("Latest diff unavailable")).toBeVisible()
   await expect(findingDeck(page).getByRole("button", { name: /Retry amplification/ })).toBeVisible()
-  await expect(page.getByText(`head ${"b".repeat(12)}`)).toBeVisible()
+  await expect(page.getByText(headTitles.b).first()).toBeVisible()
   expect(diffRequestCount).toBe(3)
 
   await expect(refreshButton).toBeEnabled()
   await refreshButton.click()
-  await expect(page.getByText(`head ${"c".repeat(12)}`)).toBeVisible()
+  await expect(page.getByText(headTitles.c).first()).toBeVisible()
   await expect(page.getByText("export const retries = 4")).toBeVisible()
-  const staleReviewMessage = `This finding deck reviewed ${"b".repeat(12)}; current head is ${"c".repeat(12)}.`
+  const staleReviewMessage = new RegExp(
+    `^This finding deck reviewed “${headTitles.b}, [^”]+”; current head is “${headTitles.c}, [^”]+”\\.$`,
+    "u"
+  )
   await expect(page.getByText(staleReviewMessage)).toBeVisible()
   await expect(page.getByRole("button", { name: "Re-review latest" })).toBeVisible()
   await expect(page.getByLabel("P2 finding: Retry amplification")).toHaveCount(0)
@@ -2263,7 +2281,7 @@ test("invalidates approver refreshes once per observed head without polling chur
   })
 
   await page.goto("/accounts/111111111111/prs/42")
-  await expect(page.getByText(`head ${"b".repeat(12)}`)).toBeVisible()
+  await expect(page.getByText(headTitles.b).first()).toBeVisible()
   expect(diffRequestCount).toBe(1)
   const initialRefreshRequestCount = refreshRequestCount
 
@@ -2271,7 +2289,7 @@ test("invalidates approver refreshes once per observed head without polling chur
   await expect.poll(() => approvalRequests).toBe(1)
   await page.clock.fastForward(501)
   await expect.poll(() => refreshRequestCount).toBeGreaterThan(initialRefreshRequestCount)
-  await expect(page.getByText(`head ${"c".repeat(12)}`)).toBeVisible()
+  await expect(page.getByText(headTitles.c).first()).toBeVisible()
   expect(diffRequestCount).toBe(2)
 
   await page.clock.fastForward(10_000)

@@ -135,6 +135,7 @@ const baseReadClient = (
     Effect.succeed(
       new CodeCommitRepositoryPage({ repositoryNames: [RepositoryName.make("payments-api")], nextToken: null })
     ),
+  getCommit: () => Effect.die("unused getCommit"),
   getBlob: () =>
     Effect.succeed(
       new CodeCommitBlobContent({

@@ -49,6 +49,7 @@ const program = Effect.gen(function*() {
   yield* fs.writeFileString("dist/guide/diagrams.js", embeddedDiagrams)
   yield* fs.copyFile("src/guide/style.css", "dist/guide/style.css")
   yield* fs.copyFile("src/canvas/style.css", "dist/canvas/style.css")
+  yield* fs.copyFile("src/commit-label.css", "dist/commit-label.css")
 })
 
 // Build platform services in the main fiber's scope, then run the finite script.

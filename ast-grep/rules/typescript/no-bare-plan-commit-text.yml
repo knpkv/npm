@@ -1,0 +1,42 @@
+id: no-bare-plan-commit-text
+language: tsx
+severity: error
+message: "A plan's head or base commit id tells a person nothing; keep it in a tooltip or name the commit with CommitLabel"
+rule:
+  any:
+    - pattern: $OBJ.$PROP.slice(0, $N)
+    - all:
+        - kind: jsx_expression
+        - not:
+            inside:
+              kind: jsx_attribute
+        # Any depth ({a.head ?? "unknown"}, ternaries), except where the id is passed along rather than shown:
+        # an attribute (a tooltip, commit={…}), a call's arguments, or a comparison.
+        - has:
+            stopBy: end
+            all:
+              - kind: member_expression
+              - has:
+                  field: property
+                  regex: "^(head|base)$"
+              - not:
+                  inside:
+                    stopBy: end
+                    any:
+                      - kind: jsx_attribute
+                      - kind: arguments
+                      - kind: binary_expression
+                        has:
+                          field: operator
+                          regex: "^(===|!==|==|!=)$"
+constraints:
+  PROP:
+    regex: "^(head|base)$"
+files:
+  - "packages/alchemy-console/src/presentation/**/*.tsx"
+ignores:
+  - "**/generated/**"
+  - "**/vendor/**"
+note: |
+  Companion to no-bare-commit-id-text for alchemy-console, whose plan sources name commits as `head` and
+  `base`. Ids in attributes, such as a title tooltip, stay allowed.

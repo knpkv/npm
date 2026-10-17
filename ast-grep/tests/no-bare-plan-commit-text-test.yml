@@ -1,0 +1,12 @@
+id: no-bare-plan-commit-text
+valid:
+  - "const view = <span title={`Head ${source.head}`}>published</span>"
+  - "const view = <span>published {publishedLabel(source)}</span>"
+  - 'const view = <span>{condition ? <Thing title={source.head} /> : "unknown"}</span>'
+  - 'const view = <span>{source.head === current ? "current" : "older"}</span>'
+invalid:
+  - "const view = <span>head {source.head}</span>"
+  - "const view = <span>base {source.base}</span>"
+  - 'const view = <span>{source.head ?? "unknown"}</span>'
+  - 'const view = <span>{ready ? source.base : "unknown"}</span>'
+  - "const short = source.head.slice(0, 7)"

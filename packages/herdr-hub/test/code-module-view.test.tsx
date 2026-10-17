@@ -28,7 +28,8 @@ describe("Code module reads", { concurrent: false }, () => {
     review: () => Effect.succeed({ _tag: "Unavailable", reason: "permission_required", host: null }),
     diff: () => Effect.succeed({ _tag: "Unavailable", reason: "permission_required", host: null }),
     content: () => Effect.succeed({ _tag: "Unavailable", reason: "permission_required", host: null }),
-    canvas: () => Effect.succeed({ _tag: "Unavailable", reason: "permission_required", host: null })
+    canvas: () => Effect.succeed({ _tag: "Unavailable", reason: "permission_required", host: null }),
+    commit: () => Effect.succeed({ _tag: "Unavailable", reason: "permission_required", host: null })
   }
   const render = async (
     reads: CodeModuleReads,
@@ -298,7 +299,7 @@ describe("Code module reads", { concurrent: false }, () => {
     await render(reads, `filter=all&search=&offset=0&ref=${ref}`, true, "diffs")
     expect(document.body.textContent).toContain(`Revision ${ref}`)
     expect(document.body.textContent).toContain("This diff may be outdated")
-    expect(document.body.textContent).toContain("Base base. Head head.")
+    expect(document.body.textContent).toContain("Base “Commit title unavailable”. Head “Commit title unavailable”.")
     expect(document.body.textContent).toContain("Read ")
     expect(calls).toEqual([ref, other])
     const refresh = [...document.querySelectorAll("button")].find((button) => button.textContent === "Read again")
@@ -429,6 +430,15 @@ describe("Code module reads", { concurrent: false }, () => {
       ...defaults,
       detail: canvasDetail,
       canvas: () => Effect.sync(canvas),
+      commit: ({ commit }) =>
+        Effect.succeed({
+          _tag: "Ready",
+          commit: {
+            commitId: commit,
+            title: commit === "head-b" ? "Save the draft per stage" : "Restore the draft on reconnect",
+            committedAt: 1
+          }
+        }),
       diff: () =>
         Effect.succeed({
           _tag: "Ready",
@@ -447,7 +457,15 @@ describe("Code module reads", { concurrent: false }, () => {
     await vi.waitFor(() => expect(document.querySelector("[data-code-canvas-heads]")).not.toBeNull(), {
       timeout: 3_000
     })
-    expect(document.body.textContent).toContain("The map is for head head-b, and the change is now at head-c.")
+    // The heads are named by their titles; the ids are in tooltips only.
+    await vi.waitFor(
+      () =>
+        expect(document.querySelector("[data-code-canvas-heads]")?.textContent).toMatch(
+          /^The map is for head “Save the draft per stage, [^”]+”, and the change is now at “Restore the draft on reconnect, [^”]+”\./u
+        ),
+      { timeout: 3_000 }
+    )
+    expect(document.querySelector("[data-code-canvas-heads]")?.textContent).not.toContain("head-b")
     const again = [...document.querySelectorAll("button")].find((button) => button.textContent === "Read again")
     await act(async () => again?.click())
     await vi.waitFor(() => expect(document.querySelector("[data-code-canvas-heads]")).toBeNull(), { timeout: 3_000 })

@@ -1,5 +1,6 @@
 import "./layers.css"
 import "@knpkv/rly/styles.css"
+import "@knpkv/review/commit-label.css"
 import "./index.css"
 
 import React from "react"

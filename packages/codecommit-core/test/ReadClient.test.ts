@@ -1,4 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
+import * as DateTime from "effect/DateTime"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
@@ -47,6 +48,18 @@ const pullRequestResponse = (pullRequestId = "17") => ({
   }
 })
 
+const commitResponse = (
+  commitId: string,
+  message = "Restore the draft on reconnect\n\nKeeps the composer text.\n"
+) => ({
+  commit: {
+    commitId,
+    message,
+    author: { name: "author-01", email: "author-01@example.com", date: "1760698200 +0200" },
+    committer: { name: "author-01", email: "author-01@example.com", date: "1760705400 +0200" }
+  }
+})
+
 const providerLayer = (provider: CodeCommitReadProviderService) => Layer.succeed(CodeCommitReadProvider, provider)
 
 const runWithProvider = <A, E>(
@@ -66,6 +79,7 @@ const baseProvider = (overrides: Partial<CodeCommitReadProviderService> = {}): C
       Arn: "arn:aws:sts::123456789012:assumed-role/Developer/alice"
     }),
   getBlob: () => Effect.succeed({ content: new Uint8Array([1, 2, 3]) }),
+  getCommit: ({ commitId }) => Effect.succeed(commitResponse(commitId)),
   listPullRequestsPage: () => Effect.succeed({ pullRequestIds: ["17"], nextToken: "next-pr-page" }),
   getPullRequest: ({ pullRequestId }) => Effect.succeed(pullRequestResponse(pullRequestId)),
   getRepository: () =>
@@ -142,6 +156,71 @@ describe("CodeCommitReadClient", () => {
         assert.deepStrictEqual(blob.bytes, new Uint8Array([1, 2, 3]))
       })
     ))
+
+  it.effect("names a commit by its message's first line and when it was committed", () =>
+    runWithProvider(
+      baseProvider(),
+      Effect.gen(function*() {
+        const client = yield* CodeCommitReadClient
+        const summary = yield* client.getCommit({ account, repositoryName: "payments-api", commitId: "c41e7a2" })
+
+        assert.strictEqual(summary.commitId, "c41e7a2")
+        assert.strictEqual(summary.title, "Restore the draft on reconnect")
+        assert.strictEqual(DateTime.toEpochMillis(summary.committedAt), 1760705400_000)
+      })
+    ))
+
+  it.effect("keeps a commit with an empty message, without a title", () =>
+    runWithProvider(
+      baseProvider({ getCommit: ({ commitId }) => Effect.succeed(commitResponse(commitId, "  \n\n")) }),
+      Effect.gen(function*() {
+        const client = yield* CodeCommitReadClient
+        const summary = yield* client.getCommit({ account, repositoryName: "payments-api", commitId: "c41e7a2" })
+        assert.isNull(summary.title)
+      })
+    ))
+
+  it.effect("rejects a commit whose committer date is not a git timestamp", () =>
+    runWithProvider(
+      baseProvider({
+        getCommit: ({ commitId }) =>
+          Effect.succeed({ commit: { commitId, message: "Title", committer: { date: "yesterday" } } })
+      }),
+      Effect.gen(function*() {
+        const client = yield* CodeCommitReadClient
+        const result = yield* client.getCommit({ account, repositoryName: "payments-api", commitId: "c41e7a2" }).pipe(
+          Effect.result
+        )
+        assert.isTrue(Result.isFailure(result))
+        if (Result.isFailure(result)) assert.instanceOf(result.failure, CodeCommitMalformedResponseError)
+      })
+    ))
+
+  it.effect.each(["CommitDoesNotExistException", "CommitIdDoesNotExistException"])(
+    "retains a missing commit (%s) as a typed not-found read failure",
+    (tag) =>
+      runWithProvider(
+        baseProvider({
+          getCommit: () =>
+            Effect.fail(
+              new AwsApiError({
+                operation: "getCommit",
+                profile: account.profile,
+                region: account.region,
+                cause: { _tag: tag }
+              })
+            )
+        }),
+        Effect.gen(function*() {
+          const client = yield* CodeCommitReadClient
+          const result = yield* client.getCommit({ account, repositoryName: "payments-api", commitId: "c41e7a2" }).pipe(
+            Effect.result
+          )
+          assert.isTrue(Result.isFailure(result))
+          if (Result.isFailure(result)) assert.instanceOf(result.failure, CodeCommitReadNotFoundError)
+        })
+      )
+  )
 
   it.effect("rejects blob bytes above the read-client bound with exact metadata", () =>
     runWithProvider(

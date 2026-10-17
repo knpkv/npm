@@ -3,6 +3,7 @@
  * at Diff zoom, the focused file's text; owns the canvas view state. Read-only: no provider or command client.
  * @module
  */
+import { CommitLabel } from "@knpkv/review/react"
 import type {
   CodeCanvasResult,
   CodeDetail,
@@ -29,8 +30,6 @@ import type { CodeModuleReads } from "./code-client.js"
 import { codeSelectionSearch, type CodeSelection } from "./code-selection.js"
 import { useCodeRead } from "./internal/use-code-read.js"
 import { codeModule, moduleHref } from "./modules.js"
-
-const short = (commit: string): string => commit.slice(0, 7)
 
 /** Re-read a building canvas every two seconds until its graph is ready. */
 const useCanvasReading = (reads: CodeModuleReads, ref: CodeReference, enabled: boolean, refresh: number) => {
@@ -186,7 +185,7 @@ export const CodeCanvasPage = ({
     return {
       _tag: "Ready",
       readAt: inventory.readAt,
-      headCommit: short(inventory.headCommit),
+      headCommit: inventory.headCommit,
       lines: lines.map((line, index) => ({ number: index + 1, text: line, added: added.has(index + 1) }))
     }
   }, [contentQuery, inventory, focusedFile, content.failure, content.value, linesAtMap])
@@ -235,7 +234,8 @@ export const CodeCanvasPage = ({
       <div aria-live="polite" role="status">
         {heads?.other != null && mapHead !== null ? (
           <Notice action={readAgainButton} data-code-canvas-heads="" tone="caution">
-            The map is for head {short(mapHead)}, and the change is now at {short(heads.other)}.
+            The map is for head <CommitLabel commit={mapHead} />, and the change is now at{" "}
+            <CommitLabel commit={heads.other} />.
           </Notice>
         ) : canvas.failure !== null ? (
           <Notice action={readAgainButton} data-code-canvas-failure="" tone="critical">

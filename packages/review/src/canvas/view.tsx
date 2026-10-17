@@ -35,6 +35,7 @@ import {
   statusLine,
   timeOfDay
 } from "./copy.js"
+import { CommitLabel } from "../commit-label.js"
 import { canvasBaseName, type CanvasFileView, type CanvasFinding, type CanvasRisk } from "./derive.js"
 import { CanvasGlyph, type CanvasGlyphName } from "./glyph.js"
 import {
@@ -814,13 +815,28 @@ const hunkHeader = (scene: DiffScene, newFile: boolean, first: string | undefine
   return `@@ ${newFile ? "−0,0 " : ""}+${scene.lines.start},${count} @@${context === "" ? "" : ` ${context}`}`
 }
 
-const raisedWords = (note: CanvasFindingNote | undefined, head: string, timeZone?: string): string | null =>
-  note?.life._tag === "StillOpen"
-    ? `Raised ${timeOfDay(note.life.raisedAt, timeZone)} on ${note.life.raisedHead}, still open at ${head}`
-    : null
+/** "Raised 11:40 on “Title, 11:31”, still open at “Title, 14:18”", or nothing for a finding not still open. */
+const Raised = ({
+  copy,
+  head,
+  note,
+  timeZone
+}: {
+  readonly copy: boolean
+  readonly head: string
+  readonly note: CanvasFindingNote | undefined
+  readonly timeZone: string | undefined
+}): ReactNode =>
+  note?.life._tag === "StillOpen" ? (
+    <span className="rc-small">
+      Raised {timeOfDay(note.life.raisedAt, timeZone)} on <CommitLabel commit={note.life.raisedHead} copy={copy} />,
+      still open at <CommitLabel commit={head} copy={copy} />
+    </span>
+  ) : null
 
 const FindingCard = ({
   after,
+  copy = true,
   finding,
   phone,
   shared
@@ -829,12 +845,12 @@ const FindingCard = ({
   readonly shared: Shared
   readonly after: number
   readonly phone: boolean
+  /** False inside the shrunk drawing, where a copy button cannot keep its 44px target. */
+  readonly copy?: boolean
 }) => {
   const { notes, props, world } = shared
   const note = notes[finding.id]
   const evidence = note?.evidence ?? null
-  // The graph carries the full head commit; the card names it the way commits are named everywhere else, by 7.
-  const raised = raisedWords(note, world.graph.headRevision.slice(0, 7), props.timeZone)
   const handled = props.handled.has(finding.id)
   return (
     <div
@@ -846,7 +862,7 @@ const FindingCard = ({
       <div className="rc-row">
         <Badge>{finding.severity}</Badge>
         <LifeLabel note={note} />
-        {phone || raised === null ? null : <span className="rc-small">{raised}</span>}
+        {phone ? null : <Raised copy={copy} head={world.graph.headRevision} note={note} timeZone={props.timeZone} />}
       </div>
       <span className="rc-t">{finding.title}</span>
       {finding.body === "" ? null : <span className="rc-muted">{finding.body}</span>}
@@ -875,7 +891,15 @@ const diffRows = (scene: DiffScene, text: ReviewCanvasText) =>
     ? text.lines.filter((line) => line.number >= scene.lines.start && line.number <= scene.lines.end)
     : []
 
-const DiffParts = ({ scene, shared }: { readonly shared: Shared; readonly scene: DiffScene }) => {
+const DiffParts = ({
+  scene,
+  shared,
+  shrunk
+}: {
+  readonly shared: Shared
+  readonly scene: DiffScene
+  readonly shrunk: boolean
+}) => {
   const { props, world } = shared
   const file = world.files.find((entry) => entry.path === scene.path)
   const rows = diffRows(scene, props.text)
@@ -903,7 +927,8 @@ const DiffParts = ({ scene, shared }: { readonly shared: Shared; readonly scene:
           <code className="rc-small">{hunkHeader(scene, file?.status === "added", rows[0]?.text)}</code>
           {text._tag === "Ready" ? (
             <span className="rc-small" style={{ marginInlineStart: "auto" }}>
-              Diff read {timeOfDay(text.readAt, props.timeZone)}, head {text.headCommit}
+              Diff read {timeOfDay(text.readAt, props.timeZone)}, head{" "}
+              <CommitLabel commit={text.headCommit} copy={!shrunk} />
             </span>
           ) : null}
         </div>
@@ -932,6 +957,7 @@ const DiffParts = ({ scene, shared }: { readonly shared: Shared; readonly scene:
                   : [
                       <FindingCard
                         key={card.finding}
+                        copy={!shrunk}
                         finding={finding}
                         shared={shared}
                         after={card.after}
@@ -1071,7 +1097,7 @@ const CanvasFrame = ({ shared }: { readonly shared: Shared }) => {
               ) : "rows" in scene ? (
                 <FileParts shared={shared} scene={scene} />
               ) : "cards" in scene ? (
-                <DiffParts shared={shared} scene={scene} />
+                <DiffParts shared={shared} scene={scene} shrunk={fit.scale < 1} />
               ) : (
                 <OverviewParts shared={shared} scene={world.overview} />
               )}
@@ -1423,7 +1449,7 @@ const PhoneDiff = ({ shared }: { readonly shared: Shared }) => {
           </b>
           {text._tag === "Ready" ? (
             <span className="rc-small" style={{ fontSize: ".6875rem" }}>
-              Diff read {timeOfDay(text.readAt, props.timeZone)}, head {text.headCommit}
+              Diff read {timeOfDay(text.readAt, props.timeZone)}, head <CommitLabel commit={text.headCommit} />
             </span>
           ) : null}
         </div>

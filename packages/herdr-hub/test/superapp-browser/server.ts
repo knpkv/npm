@@ -2,6 +2,7 @@
 import { NodeRuntime, NodeServices } from "@effect/platform-node"
 import { StackDetailResult, StackPlanResult, StacksOverviewResult } from "@knpkv/alchemy-console/host"
 import {
+  CodeCommitSummaryResult,
   CodeDetail,
   CodeDiffContentQuery,
   CodeDiffContentResult,
@@ -27,6 +28,7 @@ import {
   CODE_OTHER_REF,
   CODE_REF,
   CODE_REVIEW_STATES,
+  codeCommitFixture,
   codeContentFixture,
   codeDetailFixture,
   codeDiffFixture,
@@ -503,6 +505,14 @@ const program = Effect.gen(function*() {
           return
         }
         response.end(Schema.encodeSync(Schema.fromJsonString(CodeReviewResult))(reading))
+      } else if (url.pathname.endsWith("/commit")) {
+        const reading = codeCommitFixture(url.searchParams.get("commit") ?? "", now)
+        if (reading === null) {
+          response.writeHead(404)
+          response.end()
+          return
+        }
+        response.end(Schema.encodeSync(Schema.fromJsonString(CodeCommitSummaryResult))(reading))
       } else if (url.pathname.endsWith("/diff")) {
         const reading = codeDiffFixture(url.searchParams.get("ref") ?? "", now, state)
         if (reading === null) {

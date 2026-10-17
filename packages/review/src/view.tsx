@@ -4,6 +4,8 @@ import type { ReactElement } from "react"
 import type { ReviewExecutionProfile } from "./model.js"
 import type { ReviewResultPresentation } from "./runtime.js"
 
+export * from "./commit-label.js"
+
 export interface ReviewProfileControlProps {
   readonly accessibleName?: string
   readonly className?: string

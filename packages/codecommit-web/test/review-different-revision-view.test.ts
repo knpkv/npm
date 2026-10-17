@@ -63,9 +63,11 @@ it("accepts only DifferentRevision and states two changed heads without an ances
   } satisfies ReviewDifferentRevisionViewProps["reading"]
   const fixture = await mountFixture(createElement(ReviewDifferentRevisionView, { reading }))
   expect(fixture.host.querySelector("[role=\"status\"]")?.textContent).toContain("Review is for a different revision")
-  expect(fixture.host.querySelector("p")?.textContent).toBe(`${text} Reviewed a1b2c3d; the branch is now at e7f8a9b.`)
+  expect(fixture.host.querySelector("p")?.textContent).toBe(
+    `${text} Reviewed “Commit title unavailable”; the branch is now at “Commit title unavailable”.`
+  )
   expect(fixture.host.textContent).not.toContain("New commits")
-  expect(fixture.host.querySelector("button, a, input, textarea")).toBeNull()
+  expect(fixture.host.querySelector("button:not([aria-label=\"Copy commit id\"]), a, input, textarea")).toBeNull()
 })
 
 it("uses the universal caution for base-only, revision-only and absent-base differences with no false head sentence", async () => {
@@ -83,7 +85,7 @@ it("uses the universal caution for base-only, revision-only and absent-base diff
     expect(fixture.host.textContent).toContain("Review is for a different revision")
     expect(fixture.host.querySelector("p")?.textContent).toBe(text)
     expect(fixture.host.textContent).not.toContain("the branch is now at")
-    expect(fixture.host.querySelector("button, a")).toBeNull()
+    expect(fixture.host.querySelector("button:not([aria-label=\"Copy commit id\"]), a")).toBeNull()
   }
 })
 
@@ -100,7 +102,7 @@ it("keeps a clean or Explain mismatch visible without claiming absent findings a
     }))
     expect(fixture.host.textContent).toContain("Review is for a different revision")
     expect(fixture.host.querySelector("p")?.textContent).toBe(
-      "This recorded review doesn’t match the current diff. Reviewed a1b2c3d; the branch is now at e7f8a9b."
+      "This recorded review doesn’t match the current diff. Reviewed “Commit title unavailable”; the branch is now at “Commit title unavailable”."
     )
     expect(fixture.host.textContent).not.toContain("Findings are shown")
   }
