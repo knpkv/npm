@@ -1,5 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { expect, layer } from "@effect/vitest"
+import * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
@@ -48,6 +49,39 @@ layer(NodeServices.layer)("reference filesystem", (it) => {
         _tag: "ReferenceFailure",
         detail: "Hash inventory must include every reference file, and only existing files"
       })
+    }))
+
+  // Design uploads are source material (prototypes, screenshots) that can carry real names; refs are exports only.
+  it.effect("a design upload fails even when hashed, while a file merely named uploads loads", () =>
+    Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const cryptoService = yield* Crypto.Crypto
+      const source = yield* path.fromFileUrl(new URL("../../../design-refs/_fixture/", import.meta.url))
+      const hashed = (root: string, relative: string, body: string) =>
+        Effect.gen(function*() {
+          yield* fs.makeDirectory(path.dirname(path.join(root, relative)), { recursive: true })
+          yield* fs.writeFileString(path.join(root, relative), body)
+          const manifestPath = path.join(root, "manifest.json")
+          const manifest: { files: Record<string, string> } = JSON.parse(yield* fs.readFileString(manifestPath))
+          const digest = yield* cryptoService.digest("SHA-256", new TextEncoder().encode(body))
+          manifest.files[relative] = Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join("")
+          yield* fs.writeFileString(manifestPath, JSON.stringify(manifest))
+        })
+      for (const relative of ["uploads/prototype.html", "revisions/export-1/uploads/prototype.html"]) {
+        const root = yield* fs.makeTempDirectoryScoped()
+        yield* fs.copy(source, root)
+        yield* hashed(root, relative, "<p>prototype</p>")
+        expect(yield* loadReferences(root).pipe(Effect.flip)).toMatchObject({
+          _tag: "ReferenceFailure",
+          file: relative,
+          detail: "Design uploads are never reference files"
+        })
+      }
+      const root = yield* fs.makeTempDirectoryScoped()
+      yield* fs.copy(source, root)
+      yield* hashed(root, "screens/uploads.css", "p {}")
+      expect((yield* loadReferences(root)).manifest.product).toBe("_fixture")
     }))
 
   it.effect("reference symlinks cannot bypass the hash inventory", () =>

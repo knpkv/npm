@@ -50,6 +50,10 @@ read the pull request's title and description with the GitHub API.
 - **Agent names.** The name of an agent, pane or session from the author's tooling, used to say who did the work
   or who to ask.
 - **`workers/` paths.** Any path into a `workers/` directory.
+- **Design uploads.** Any added or renamed file whose path has an `uploads/` segment under `design-refs/`, whatever
+  its content and even inside the excluded `revisions/` and `screens/` trees: judge it from the PR's file list.
+  Uploads are design source material (prototypes, screenshots) that can hold real names; refs are exports only.
+  The reference loader also rejects them.
 - **Machine-local paths.** A home directory (`/home/<user>/`, `/Users/<user>/`, `C:\Users\<user>\`), a `~/`
   path outside a documented, generic example, or a path into a private checkout or cache.
 - **Hostnames and network names.** A machine's hostname, a tailnet name (`*.ts.net`), a Tailscale address
