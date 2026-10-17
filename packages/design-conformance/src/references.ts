@@ -71,7 +71,7 @@ export const loadReferences = Effect.fn("DesignConformance.loadReferences")(func
       }
       const info = yield* fs.stat(file)
       if (info.type === "Directory") pending.push(file)
-      else if (relative.split("/").includes("uploads")) {
+      else if (relative.split("/").some((segment) => segment.toLowerCase() === "uploads")) {
         // Design uploads are source material (prototypes, screenshots) that can hold real names; refs are exports.
         return yield* new ReferenceFailure({ file: relative, detail: "Design uploads are never reference files" })
       } else if (relative !== "manifest.json" && relative !== "waivers.json") files.push(relative)

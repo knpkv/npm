@@ -68,7 +68,9 @@ layer(NodeServices.layer)("reference filesystem", (it) => {
           manifest.files[relative] = Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join("")
           yield* fs.writeFileString(manifestPath, JSON.stringify(manifest))
         })
-      for (const relative of ["uploads/prototype.html", "revisions/export-1/uploads/prototype.html"]) {
+      for (
+        const relative of ["uploads/prototype.html", "revisions/export-1/uploads/prototype.html", "Uploads/shot.png"]
+      ) {
         const root = yield* fs.makeTempDirectoryScoped()
         yield* fs.copy(source, root)
         yield* hashed(root, relative, "<p>prototype</p>")

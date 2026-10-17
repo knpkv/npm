@@ -56,7 +56,7 @@ interrupted or cancelled transfers fail with `ReferenceFailure` even after succe
 and page readiness. Context closure and global timeouts are not completion signals.
 The file inventory includes the fixture, HTML, scripts, CSS, fonts and images.
 Only `manifest.json` and `waivers.json` are outside the hash inventory. Symlinks fail.
-Any file under an `uploads/` directory fails, even when hashed: design uploads are source material
+Any file under an `uploads/` directory, in any case, fails even when hashed: design uploads are source material
 that can hold real names, and refs are exports only.
 
 See [`design-refs/_fixture/manifest.json`](../../design-refs/_fixture/manifest.json)
