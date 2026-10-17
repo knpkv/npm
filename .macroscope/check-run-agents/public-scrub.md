@@ -18,8 +18,9 @@ include:
   - "**/.design-sync/fixtures/**"
   - "**/test/fixtures/**"
   - "design-refs/*/*.json"
-# Design exports are hash-pinned bytes reviewed in their ref PRs, and large
-# enough to exhaust the run budget.
+# Design exports are hash-pinned bytes, large enough to exhaust the run budget,
+# so no scrub reads them, even in their own ref PRs: those PRs are scrubbed by
+# the manual DOM diff against the previous export.
 exclude:
   - "design-refs/*/revisions/**"
   - "design-refs/*/screens/**"
