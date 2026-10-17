@@ -11,5 +11,6 @@
     "request-sent and request-rereview each combine two page-16 frames (receipt or comparison over the canvas).",
     "Phone layouts for request-preview-editing, request-rereview, templates-settings, templates-none and checklist-feeds-request have no page-16 frame and were chosen in the screen.",
     "The screen uses 15:04 as the sent time; page 16's 5c canvas still reads 14:58."
-  ]
+  ],
+  "stacks_nav": "Stacks row: the desktop nav's secondary list gains stacks after hostResources, as the shell registers it (Relay export-4 shared nav: Host resources, Sandboxes, Stacks). Sandboxes joins with its own module's registration. Fixture data only; exported HTML unchanged."
 }

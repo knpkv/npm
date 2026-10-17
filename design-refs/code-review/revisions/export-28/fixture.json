@@ -8988,7 +8988,8 @@
           "secondary": [
             "code",
             "usage",
-            "hostResources"
+            "hostResources",
+            "stacks"
           ],
           "bar": [
             "connect",
