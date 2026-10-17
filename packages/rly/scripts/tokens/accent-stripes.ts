@@ -109,21 +109,21 @@ const isNeutralHairline = (value: string): boolean => {
 }
 
 /**
- * A width list's edges, each marked inline or not: `border-width` lists top/right/bottom/left,
+ * A width list's edges, each marked as a stripe edge (inline or top) or not: `border-width` lists top/right/bottom/left,
  * `border-inline-width` lists start/end.
  */
 const widthEdges = (
   property: string,
   value: string
-): ReadonlyArray<{ readonly width: string; readonly inline: boolean }> => {
+): ReadonlyArray<{ readonly width: string; readonly stripeEdge: boolean }> => {
   const [first = "0", second = first, third = first, fourth = second] = splitTopLevel(value.trim(), /\s/)
   return property === "border-inline-width"
-    ? [{ inline: true, width: first }, { inline: true, width: second }]
+    ? [{ stripeEdge: true, width: first }, { stripeEdge: true, width: second }]
     : [
-      { inline: true, width: first },
-      { inline: true, width: second },
-      { inline: false, width: third },
-      { inline: true, width: fourth }
+      { stripeEdge: true, width: first },
+      { stripeEdge: true, width: second },
+      { stripeEdge: false, width: third },
+      { stripeEdge: true, width: fourth }
     ]
 }
 
@@ -143,16 +143,16 @@ const statesNeutralColor = (rule: string): boolean => {
 }
 
 /**
- * A width list that marks one inline edge: the only edge thicker than a hairline, or the only edge
+ * A width list that marks one stripe edge (inline or top): the only edge thicker than a hairline, or the only edge
  * drawn at all while its rule leaves the colour unstated or coloured. A thick block edge alone is an
  * underline and passes.
  */
 const isOneSidedWidth = (property: string, value: string, rule: string): boolean => {
   const edges = widthEdges(property, value)
   const thick = edges.filter((edge) => !HAIRLINE.test(edge.width))
-  if (thick.length === 1) return thick[0]?.inline === true
+  if (thick.length === 1) return thick[0]?.stripeEdge === true
   const drawn = edges.filter((edge) => !ZERO_LENGTH.test(edge.width))
-  return thick.length === 0 && drawn.length === 1 && drawn[0]?.inline === true && !statesNeutralColor(rule)
+  return thick.length === 0 && drawn.length === 1 && drawn[0]?.stripeEdge === true && !statesNeutralColor(rule)
 }
 
 const isStripe = (property: string, value: string, rule: string): boolean => {

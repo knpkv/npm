@@ -11,22 +11,22 @@
   {
     "declaration": "box-shadow: inset 0 4px var(--rly-color-service-codecommit)",
     "path": "packages/control-center/src/client/timeline/TimelinePage.module.css",
-    "reason": "Timeline summary tiles mark their source with a 4px service-coloured top inset; replacing it needs a design 07/Timeline compare (follow-up issue)."
+    "reason": "Timeline summary tiles mark each event source with a 4px top inset: a service colour for action, relationship and plugin-sync events, the focus colour for system events. Replacing it needs a Timeline design compare (#993)."
   },
   {
     "declaration": "box-shadow: inset 0 4px var(--rly-color-service-codepipeline)",
     "path": "packages/control-center/src/client/timeline/TimelinePage.module.css",
-    "reason": "Timeline summary tiles mark their source with a 4px service-coloured top inset; replacing it needs a design 07/Timeline compare (follow-up issue)."
+    "reason": "Timeline summary tiles mark each event source with a 4px top inset: a service colour for action, relationship and plugin-sync events, the focus colour for system events. Replacing it needs a Timeline design compare (#993)."
   },
   {
     "declaration": "box-shadow: inset 0 4px var(--rly-color-service-jira)",
     "path": "packages/control-center/src/client/timeline/TimelinePage.module.css",
-    "reason": "Timeline summary tiles mark their source with a 4px service-coloured top inset; replacing it needs a design 07/Timeline compare (follow-up issue)."
+    "reason": "Timeline summary tiles mark each event source with a 4px top inset: a service colour for action, relationship and plugin-sync events, the focus colour for system events. Replacing it needs a Timeline design compare (#993)."
   },
   {
     "declaration": "box-shadow: inset 0 4px var(--rly-color-focus)",
     "path": "packages/control-center/src/client/timeline/TimelinePage.module.css",
-    "reason": "Timeline summary tiles mark their source with a 4px service-coloured top inset; replacing it needs a design 07/Timeline compare (follow-up issue)."
+    "reason": "Timeline summary tiles mark each event source with a 4px top inset: a service colour for action, relationship and plugin-sync events, the focus colour for system events. Replacing it needs a Timeline design compare (#993)."
   },
   {
     "declaration": "border-block-start: var(--rly-space-4) solid var(--rly-color-service-codecommit)",
