@@ -1,5 +1,13 @@
 # @knpkv/agent-usage
 
+## 0.11.1
+
+### Patch Changes
+
+- [#997](https://github.com/knpkv/npm/pull/997) [`4f84e0a`](https://github.com/knpkv/npm/commit/4f84e0a2f45cffb7b2ecf273a9af23545403671f) Thanks [@konopkov](https://github.com/konopkov)! - Mark drawn lines that the stricter stripe lint now reads as top-edge bars: the usage chart's legend line swatches and the archive spinner's arc each carry a `stripe-ok` reason. No visual change.
+- Updated dependencies [[`4f84e0a`](https://github.com/knpkv/npm/commit/4f84e0a2f45cffb7b2ecf273a9af23545403671f)]:
+  - @knpkv/rly@0.23.1
+
 ## 0.11.0
 
 ### Minor Changes
