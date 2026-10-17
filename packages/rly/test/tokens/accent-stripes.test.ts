@@ -203,6 +203,26 @@ describe("findAccentStripes", () => {
     ).toEqual([])
   })
 
+  // A coloured bar across a card's top is the same accent stripe turned on its side; tab underlines
+  // sit on the block-end edge and stay allowed.
+  it("flags a top bar on a card, however it is spelled, and keeps bottom underlines", () => {
+    expect(
+      declarations(
+        ".card { border: 1px solid var(--rly-color-border-1); border-block-start-width: 3px; border-block-start-color: var(--rly-color-service-jira); }"
+      )
+    ).toHaveLength(2)
+    expect(declarations(".card { border-block-start: 4px solid var(--rly-color-service-codecommit); }")).toHaveLength(1)
+    expect(declarations(".card { border-top: 3px solid var(--rly-color-held-ink); }")).toHaveLength(1)
+    expect(declarations(".card { border: solid var(--rly-color-agent); border-width: 3px 0 0; }")).toEqual([
+      "border-width: 3px 0 0"
+    ])
+    expect(declarations(".card { box-shadow: inset 0 3px 0 var(--rly-color-agent); }")).toHaveLength(1)
+    expect(declarations(".tab { border-block-end: 2px solid var(--rly-color-focus); }")).toEqual([])
+    expect(declarations(".tab { border-width: 0 0 2px; border-style: solid; }")).toEqual([])
+    expect(declarations(".tab { box-shadow: inset 0 -2px 0 var(--rly-color-focus); }")).toEqual([])
+    expect(declarations(".row + .row { border-block-start: 1px solid var(--rly-color-border-1); }")).toEqual([])
+  })
+
   it("reports the line of the offending declaration", () => {
     const [violation] = findAccentStripes(
       "x.css",

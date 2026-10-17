@@ -5209,7 +5209,7 @@
     inline-size: 0.875rem;
     block-size: 0.875rem;
     border: 2px solid var(--rly-color-border-1);
-    border-block-start-color: currentColor;
+    border-block-start-color: currentColor; /* stripe-ok: spinner arc, rotated */
     border-radius: 50%;
   }
   .connect-home-archive-skeleton-creature,

@@ -200,31 +200,10 @@
   gap: var(--rly-space-24);
   padding: var(--rly-space-20);
   border: 1px solid var(--rly-color-border-1);
-  border-block-start-width: 3px;
   border-radius: var(--rly-radius-group);
   background: var(--rly-color-surface-1);
   color: var(--rly-color-text-1);
   text-decoration: none;
-}
-
-.serviceChoice[data-service="codecommit"] {
-  border-block-start-color: var(--rly-color-service-codecommit);
-}
-
-.serviceChoice[data-service="codepipeline"] {
-  border-block-start-color: var(--rly-color-service-codepipeline);
-}
-
-.serviceChoice[data-service="jira"] {
-  border-block-start-color: var(--rly-color-service-jira);
-}
-
-.serviceChoice[data-service="confluence"] {
-  border-block-start-color: var(--rly-color-service-confluence);
-}
-
-.serviceChoice[data-service="clockify"] {
-  border-block-start-color: var(--rly-color-service-clockify);
 }
 
 @media (hover: hover) and (pointer: fine) {
