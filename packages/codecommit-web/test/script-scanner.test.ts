@@ -112,4 +112,28 @@ describe("scanScript", () => {
       "pinned()"
     ])
   })
+
+  it("takes a function passed straight to a wrapper for a function, but not one passed to an array method", () => {
+    const text = [
+      "export const run = Effect.fn(function* (ref: string) {",
+      "  return ref",
+      "})",
+      "const quick = Effect.fnUntraced(function* () {",
+      "  yield* Effect.void",
+      "})",
+      "const Row = memo((props: Props) => props.label)",
+      "const Field = forwardRef<HTMLInputElement, Props>((props, ref) => null)",
+      "const kept = rows.filter((row) => row.kept)",
+      "const total = rows.reduce((sum, row) => sum + row.size, 0)",
+      "const program = Effect.gen(function* () {",
+      "  yield* Effect.void",
+      "})"
+    ].join("\n")
+    expect(scanScript(text).declarations.map((declaration) => declaration.name)).toEqual([
+      "run()",
+      "quick()",
+      "Row()",
+      "Field()"
+    ])
+  })
 })

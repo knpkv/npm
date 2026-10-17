@@ -161,7 +161,7 @@ export const CodeCanvasPage = ({
     contentRead,
     enabled && contentQuery !== null,
     false,
-    refresh
+    reread
   )
   const text: ReviewCanvasText = useMemo(() => {
     if (inventory !== null && !linesAtMap) {

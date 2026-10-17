@@ -113,22 +113,46 @@ const startsWithArrow = (text: string): boolean => {
   return after.startsWith("=>") || (after.startsWith(":") && after.includes("=>"))
 }
 
+/** Calls that take a function but return data or run it: array and iterator methods, and `Effect.gen`. */
+const runsItsArgument = new Set([
+  "map",
+  "filter",
+  "flatMap",
+  "reduce",
+  "forEach",
+  "find",
+  "some",
+  "every",
+  "sort",
+  "gen"
+])
+
+const isFunctionLiteral = (text: string): boolean => {
+  const body = text.trimStart().replace(/^async\b\s*/u, "")
+  return /^function\b/u.test(body) || startsWithArrow(body)
+}
+
 /**
  * Whether a variable's initializer is a function value: a function expression, an arrow (plain, generic, typed or
- * async), or a call whose result is called with one, such as `Effect.fn("name")(function*() {...})`. Data that only
- * holds callbacks, like `{ retry: () => 3 }` or `rows.map((row) => row.id)`, is not a function.
+ * async), a wrapper called with one (`memo((props) => ...)`, `Effect.fn(function* () {...})`), or a call whose result
+ * is called with one (`Effect.fn("name")(function* () {...})`). Data that only holds callbacks, like
+ * `{ retry: () => 3 }`, `rows.map((row) => row.id)` or `Effect.gen(function* () {...})`, is not a function.
  */
 const holdsFunction = (initializer: string): boolean => {
-  const text = initializer.trim().replace(/^async\b\s*/u, "")
-  if (/^function\b/u.test(text) || startsWithArrow(text)) return true
-  const callee = /^[A-Za-z_$][\w$.]*\s*/u.exec(text)
-  if (callee === null || text[callee[0].length] !== "(") return false
-  const first = closing(text, callee[0].length, "(", ")")
+  const text = initializer.trim()
+  if (isFunctionLiteral(text)) return true
+  const callee = /^[A-Za-z_$][\w$.]*/u.exec(text)
+  if (callee === null) return false
+  // Type arguments, as in `forwardRef<H, P>(...)`, sit between the callee and its arguments.
+  const after = callee[0].length + (/^\s*/u.exec(text.slice(callee[0].length))?.[0].length ?? 0)
+  const open = text[after] === "<" ? closing(text, after, "<", ">") : after
+  if (open < 0 || text[open] !== "(") return false
+  const method = callee[0].split(".").at(-1) ?? ""
+  if (!runsItsArgument.has(method) && isFunctionLiteral(text.slice(open + 1))) return true
+  const first = closing(text, open, "(", ")")
   if (first < 0) return false
   const next = text.slice(first).trimStart()
-  if (!next.startsWith("(")) return false
-  const argument = next.slice(1).trimStart().replace(/^async\b\s*/u, "")
-  return /^function\b/u.test(argument) || startsWithArrow(argument)
+  return next.startsWith("(") && isFunctionLiteral(next.slice(1))
 }
 
 /** Overload signatures and their implementation are one part: merge same-name ranges, keeping first-seen order. */
