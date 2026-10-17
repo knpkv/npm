@@ -148,8 +148,8 @@ export const makeSandboxPool = Effect.fn("SandboxPool.make")(function*(services:
   const lastSweep = yield* Ref.make<SweepReport | null>(null)
 
   /**
-   * A record is in the pool only when the contract names its exact account id and name. Rows kept for an
-   * account that left the contract, or was renamed in it, are history: never leased, changed or swept.
+   * A record is in the pool only when the contract names its exact account id and name. Any other row
+   * is history: never leased, changed or swept. The durable store renames a same-id row when it opens.
    */
   const inPool = (sandbox: Sandbox) =>
     contract.accounts.some(({ accountId, name }) => accountId === sandbox.accountId && name === sandbox.name)

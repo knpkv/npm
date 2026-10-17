@@ -77,6 +77,44 @@ it.layer(NodeServices.layer)("sandbox store", (it) => {
       expect(yield* Effect.flip(store.get("999999999999"))).toMatchObject({ _tag: "SandboxNotFound" })
     }).pipe(Effect.scoped))
 
+  it.effect("renames a same-id account on open and keeps an account that left", () =>
+    Effect.gen(function*() {
+      const path = yield* databasePath
+      const leased = yield* Effect.scoped(
+        Effect.gen(function*() {
+          const { store } = yield* openSandboxDatabase(path, contract)
+          return yield* store.put(yield* lease(yield* store.list, holder, now))
+        })
+      )
+      const renamed = Schema.decodeUnknownSync(PoolContract)({
+        ...contractInput,
+        accounts: [
+          { name: "sandbox-renamed", accountId: leased.accountId },
+          { name: "sandbox-c", accountId: "999999999992" }
+        ]
+      })
+      const migrated = yield* Effect.scoped(
+        Effect.gen(function*() {
+          const { store } = yield* openSandboxDatabase(path, renamed)
+          const record = yield* store.get(leased.accountId)
+          expect(record.name).toBe("sandbox-renamed")
+          expect(record.version).toBe(leased.version)
+          expect(record.state).toEqual(leased.state)
+          // The other original account left the contract. Its row stays under the old name.
+          const left = contractInput.accounts.find(({ accountId }) => accountId !== leased.accountId)
+          if (left === undefined) return yield* Effect.die("missing sibling account")
+          expect(yield* store.get(left.accountId)).toMatchObject({ name: left.name, version: 0 })
+          return record
+        })
+      )
+      yield* Effect.scoped(
+        Effect.gen(function*() {
+          const { store } = yield* openSandboxDatabase(path, renamed)
+          expect(yield* store.get(leased.accountId)).toEqual(migrated)
+        })
+      )
+    }))
+
   it.effect("two connections racing on one version: exactly one write lands", () =>
     Effect.gen(function*() {
       const path = yield* databasePath

@@ -22,7 +22,7 @@ export class RecordMismatch extends Schema.TaggedError<RecordMismatch>()("Record
 
 /** The store itself could not be read or written, e.g. its database is unavailable. Nothing was written. */
 export class SandboxStoreUnavailable extends Schema.TaggedError<SandboxStoreUnavailable>()("SandboxStoreUnavailable", {
-  operation: Schema.Literals(["list", "get", "put", "sweep"]),
+  operation: Schema.Literals(["list", "get", "put", "sweep", "rename"]),
   detail: Schema.String
 }) {}
 
@@ -35,9 +35,11 @@ export class SandboxNotFound extends Schema.TaggedError<SandboxNotFound>()("Sand
  * The pool's stored records, one per account. Every transition bumps `version`
  * by one, so `put(next)` writes only when the stored record is still at
  * `next.version - 1`, the version the transition was computed from, and
- * describes the same account (`RecordMismatch` otherwise). A durable store fails with
- * `SandboxStoreUnavailable` when it cannot be reached; the memory store never does.
- * `sweepAt` is the last successful sweep's epoch milliseconds, or null until one is recorded.
+ * describes the same account (`RecordMismatch` otherwise). `rename` is the explicit
+ * name change: it keeps the version and state, and a name that already matches
+ * changes nothing. A durable store fails with `SandboxStoreUnavailable` when it
+ * cannot be reached; the memory store never does. `sweepAt` is the last successful
+ * sweep's epoch milliseconds, or null until one is recorded.
  */
 export interface SandboxStoreService {
   readonly list: Effect.Effect<ReadonlyArray<Sandbox>, SandboxStoreUnavailable>
@@ -45,6 +47,10 @@ export interface SandboxStoreService {
   readonly put: (
     next: Sandbox
   ) => Effect.Effect<Sandbox, StaleVersion | SandboxNotFound | RecordMismatch | SandboxStoreUnavailable>
+  readonly rename: (
+    accountId: string,
+    name: Sandbox["name"]
+  ) => Effect.Effect<Sandbox, SandboxNotFound | SandboxStoreUnavailable>
   readonly sweepAt: Effect.Effect<number | null, SandboxStoreUnavailable>
   readonly markSweep: (at: number) => Effect.Effect<void, SandboxStoreUnavailable>
 }
@@ -100,6 +106,17 @@ export const makeMemorySandboxStore = (initial: ReadonlyArray<Sandbox>): Effect.
               return [Effect.fail(stale), map]
             }
             return [Effect.succeed(next), new Map(map).set(next.accountId, next)]
+          }
+        ).pipe(Effect.flatten),
+      rename: (accountId, name) =>
+        Ref.modify(
+          records,
+          (map): [Effect.Effect<Sandbox, SandboxNotFound>, Map<string, Sandbox>] => {
+            const current = map.get(accountId)
+            if (current === undefined) return [Effect.fail(new SandboxNotFound({ accountId })), map]
+            if (current.name === name) return [Effect.succeed(current), map]
+            const renamed = { ...current, name }
+            return [Effect.succeed(renamed), new Map(map).set(accountId, renamed)]
           }
         ).pipe(Effect.flatten),
       sweepAt: Ref.get(sweptAt),

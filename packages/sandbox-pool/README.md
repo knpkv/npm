@@ -49,7 +49,7 @@ Transitions are pure and bump `version` by one. A `Holder` is an agent, pane or 
 
 ## Store
 
-`SandboxStore` holds one record per pool account. `put(next)` writes only when the stored record is still at `next.version - 1`, the version the transition was computed from. Otherwise it fails with `StaleVersion`: re-read and apply the transition again. A record whose name differs from the stored one fails with `RecordMismatch`. `makeMemorySandboxStore` builds a fresh in-memory store for tests and fixtures (`memorySandboxStore` is the same as a layer); `seedPool(contract)` gives every pool account as Available at version 0. A durable store fails with `SandboxStoreUnavailable` when it cannot be reached, and writes nothing. `sweepAt` is the last successful sweep's epoch milliseconds, or null until `markSweep` records one.
+`SandboxStore` holds one record per pool account. `put(next)` writes only when the stored record is still at `next.version - 1`, the version the transition was computed from. Otherwise it fails with `StaleVersion`: re-read and apply the transition again. A record whose name differs from the stored one fails with `RecordMismatch`. `rename(accountId, name)` is the name change that `put` refuses: the version and state stay, and a name that already matches writes nothing. `makeMemorySandboxStore` builds a fresh in-memory store for tests and fixtures (`memorySandboxStore` is the same as a layer); `seedPool(contract)` gives every pool account as Available at version 0. A durable store fails with `SandboxStoreUnavailable` when it cannot be reached, and writes nothing. `sweepAt` is the last successful sweep's epoch milliseconds, or null until `markSweep` records one.
 
 ## Reset
 

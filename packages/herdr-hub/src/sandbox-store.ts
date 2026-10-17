@@ -59,10 +59,9 @@ type PutOutcome =
 
 /**
  * Opens `<path>` in the caller's scope; failing to open is the private database's own error. The pool's accounts are seeded as Available at version 0 the
- * first time each appears in the contract; a stored record is never deleted or renamed, so an account
- * that leaves the contract keeps its row and its history. Renaming an account in the contract (same id) is
- * not a migration: the row keeps its old name, the pool treats it as history, and the account cannot be
- * leased again until its row is migrated explicitly.
+ * first time each appears in the contract. An account that leaves the contract keeps its row.
+ * A contract that keeps the id and changes the name is migrated on open: `rename` writes the new
+ * name and leaves the version and state. A later open of the same name changes nothing.
  *
  * Records and run entries are server-private: entries carry aws-nuke output naming the account's
  * resources and are served to the pool owner only.
@@ -163,7 +162,21 @@ export const openSandboxDatabase = Effect.fn("SandboxDatabase.open")(function*(p
             )
             .run(at),
         storeFailure("sweep")
-      ).pipe(Effect.andThen(secure(storeFailure("sweep"))), Effect.asVoid)
+      ).pipe(Effect.andThen(secure(storeFailure("sweep"))), Effect.asVoid),
+    rename: (accountId, name) =>
+      attempt((): { readonly _tag: "Missing" } | { readonly _tag: "Same" | "Renamed"; readonly sandbox: Sandbox } => {
+        const current = readRecord(accountId)
+        if (current === undefined) return { _tag: "Missing" }
+        if (current.name === name) return { _tag: "Same", sandbox: current }
+        const renamed = { ...current, name }
+        database.prepare("UPDATE sandboxes SET record = ? WHERE account_id = ?").run(encodeSandbox(renamed), accountId)
+        return { _tag: "Renamed", sandbox: renamed }
+      }, storeFailure("rename")).pipe(
+        Effect.tap((outcome) => outcome._tag === "Renamed" ? secure(storeFailure("rename")) : Effect.void),
+        Effect.flatMap((outcome) =>
+          outcome._tag === "Missing" ? Effect.fail(new SandboxNotFound({ accountId })) : Effect.succeed(outcome.sandbox)
+        )
+      )
   })
 
   const entriesOf = (runIds: ReadonlyArray<string>): ReadonlyArray<RunEntry> =>
@@ -228,6 +241,9 @@ export const openSandboxDatabase = Effect.fn("SandboxDatabase.open")(function*(p
         )
       )
   })
+
+  // Same id, new contract name: the row is this account, not a second one. Ids absent from the contract stay.
+  yield* Effect.forEach(contract.accounts, ({ accountId, name }) => store.rename(accountId, name), { discard: true })
 
   return { store, runLog }
 })

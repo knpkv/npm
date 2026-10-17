@@ -239,6 +239,7 @@ describe("sandbox read model", () => {
         list: Effect.fail(new SandboxStoreUnavailable({ operation: "list", detail: "disk full" })),
         get: () => Effect.fail(new SandboxStoreUnavailable({ operation: "get", detail: "disk full" })),
         put: () => Effect.die("unread"),
+        rename: () => Effect.die("unread"),
         sweepAt: Effect.succeed(null),
         markSweep: () => Effect.die("unread")
       })

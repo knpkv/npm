@@ -87,6 +87,20 @@ describe("sandbox store", () => {
       expect(yield* store.get(current.accountId)).toEqual(current)
     }).pipe(seeded))
 
+  it.effect("renames an account in place and leaves a matching name untouched", () =>
+    Effect.gen(function*() {
+      const store = yield* SandboxStore
+      const [current] = yield* store.list
+      if (current === undefined) return yield* Effect.die("empty pool")
+      const name = SandboxName.make("sandbox-renamed")
+      const renamed = yield* store.rename(current.accountId, name)
+      expect(renamed).toEqual({ ...current, name })
+      expect(yield* store.rename(current.accountId, name)).toEqual(renamed)
+      expect(yield* Effect.flip(store.rename(AccountId.make("123456789012"), name))).toMatchObject({
+        _tag: "SandboxNotFound"
+      })
+    }).pipe(seeded))
+
   it.effect("reports an account outside the pool", () =>
     Effect.gen(function*() {
       const store = yield* SandboxStore
