@@ -1143,7 +1143,10 @@ describe("ServicesPage connection tests", () => {
       expect.arrayContaining(["Add repository", "Add pipeline", "Edit account name"])
     )
     expect(host.textContent).toContain("Permissions")
-    expect(host.textContent).toContain("entity.read v1")
+    expect(host.textContent).toContain("What Control Center does with this connection.")
+    expect(host.textContent).not.toContain("as last reported by")
+    expect(host.textContent).toContain("Read items")
+    expect(host.textContent).not.toContain("entity.read")
     expect(host.textContent).toContain("Manual synchronization")
     expect(host.textContent).toContain("The provider connection is healthy.")
 

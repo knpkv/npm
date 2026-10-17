@@ -9,8 +9,10 @@ import type {
   PluginConnectionAdministration,
   PluginCredentialReplacement
 } from "../../api/plugins.js"
+import { firstPartyServiceIdentityByProvider } from "../../domain/firstPartyServices.js"
 import { formatCheckTime } from "../formatTime.js"
 import { rememberAtlassianOAuthSetupIntent } from "./atlassianOAuthSetupIntentStorage.js"
+import { permissionSummary } from "./capabilityWords.js"
 
 import styles from "./ServicesPage.module.css"
 
@@ -82,6 +84,8 @@ export const ConnectionAdministration = ({
   }
 
   const { administration } = state
+  const providerName = firstPartyServiceIdentityByProvider[administration.connection.providerId].displayName
+  const permissions = permissionSummary(administration.permissions)
   const manualCredentialFields = administration.credentialFields.filter(({ key }) => key !== "oauthProfileId")
   const supportsOAuthRecovery =
     administration.credentialFields.some(({ key }) => key === "oauthProfileId") &&
@@ -160,21 +164,28 @@ export const ConnectionAdministration = ({
         <Text as="h4" variant="label">
           Permissions
         </Text>
-        <div className={styles.administrationLabels}>
-          {administration.permissions.map((permission) => (
-            <StateLabel
-              key={`${permission.capabilityId}:${permission.version}`}
-              label={`${permission.capabilityId} v${permission.version}`}
-              size="compact"
-              tone={permission.state === "available" ? "positive" : "neutral"}
-            />
-          ))}
-          {administration.permissions.length === 0 ? (
+        {permissions.operations === null ? (
+          <Text tone="secondary" variant="meta">
+            No provider operations were negotiated.
+          </Text>
+        ) : (
+          <>
             <Text tone="secondary" variant="meta">
-              No provider operations were negotiated.
+              What Control Center does with this connection.
             </Text>
-          ) : null}
-        </div>
+            <dl className={styles.permissionFacts}>
+              <div>
+                <dt>{providerName}</dt>
+                <dd>{permissions.operations}</dd>
+              </div>
+            </dl>
+            {permissions.paused ? (
+              <Text tone="secondary" variant="meta">
+                Paused while this connection is turned off.
+              </Text>
+            ) : null}
+          </>
+        )}
       </div>
       <div className={styles.administrationSection}>
         <Text as="h4" variant="label">

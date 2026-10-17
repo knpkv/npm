@@ -220,5 +220,32 @@ describe("controlled views", () => {
       'Last successful sync <time dateTime="2026-07-14T10:00:00.000Z">14 Jul 2026, 10:00 UTC</time>'
     )
     expect(card).not.toContain("DateTime")
+    // Nothing negotiated: no intro line above the empty-state sentence.
+    expect(card).toContain("No provider operations were negotiated.")
+    expect(card).not.toContain("What Control Center does with this connection.")
+
+    const turnedOff = renderView(
+      <ConnectionAdministration
+        canConfigure
+        onReauthorize={() => Promise.resolve(true)}
+        onRevoke={() => Promise.resolve(true)}
+        onStartAtlassianOAuth={undefined}
+        state={{
+          _tag: "ready",
+          administration: {
+            ...administration,
+            connection: { ...administration.connection, isEnabled: false },
+            permissions: [
+              { capabilityId: "entity.read", version: 1, state: "disabled" },
+              { capabilityId: "sync.incremental", version: 1, state: "disabled" }
+            ]
+          }
+        }}
+      />
+    )
+    expect(turnedOff).toContain("What Control Center does with this connection.")
+    expect(turnedOff).toContain("Read items, sync changes")
+    expect(turnedOff).toContain("Paused while this connection is turned off.")
+    expect(turnedOff).not.toContain("Turned off</dt>")
   })
 })

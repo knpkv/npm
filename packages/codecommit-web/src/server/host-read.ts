@@ -13,6 +13,7 @@ import { makeSavedPermissionCheck } from "@knpkv/codecommit-core/PermissionServi
 import { CachedPRToPullRequest } from "@knpkv/codecommit-core/PRService/internal.js"
 import * as ReadClient from "@knpkv/codecommit-core/ReadClient.js"
 import type { ReviewRunReading } from "@knpkv/review"
+import { type CanvasLastLook, CanvasReading } from "@knpkv/review/canvas"
 import { Clock, Config, Context, Duration, Effect, Exit, Layer, Result, Schema, ScopedCache, Semaphore } from "effect"
 import type { Scope } from "effect"
 import type * as Crypto from "effect/Crypto"
@@ -31,7 +32,13 @@ import {
 import { CodeHostReadError, type CodeReferenceStore } from "./host-model.js"
 import { codePullRequest } from "./host-presentation.js"
 import { makePermissionedReadClient } from "./internal/PermissionedReadClient.js"
-import { loadPullRequestDiff, loadPullRequestDiffContent } from "./review/PullRequestReview.js"
+import type { CanvasSourceFile } from "./review/CanvasGraphBuilder.js"
+import { makeCanvasGraphJobs } from "./review/CanvasGraphJobs.js"
+import {
+  loadPullRequestDiff,
+  loadPullRequestDiffContent,
+  makePullRequestChangedFilesSource
+} from "./review/PullRequestReview.js"
 import { reviewConversationsOf } from "./review/review-comments-projection.js"
 import { reviewRunIdentity, reviewRunSubject } from "./review/review-run-projection.js"
 import { makeReviewRunReader, type ReviewRunReader, ReviewRunStoreError } from "./review/ReviewRunReader.js"
@@ -48,7 +55,14 @@ export interface CodeHostReads {
     query: CodeDiffContentQuery,
     caller: { readonly login: string }
   ) => Effect.Effect<CodeDiffContent, CodeHostReadError>
+  /** The canvas graph of the current revision; Building until every changed file is read. */
+  readonly canvas: (
+    ref: CodeReference,
+    caller: { readonly login: string }
+  ) => Effect.Effect<CanvasReading, CodeHostReadError>
 }
+
+const notRecorded = { _tag: "NotRecorded" } satisfies CanvasLastLook
 
 /** Decode only recognized failure tags; provider causes remain private and are classified recursively. */
 const ProviderReadFailure = Schema.Union([
@@ -99,6 +113,10 @@ export const makeCodeHostReadsFromClient = Effect.fn("CodeHostReads.bind")(funct
   const fs = yield* FileSystem.FileSystem
   const check = yield* makeSavedPermissionCheck(options.permissionPath)
   const concurrency = yield* Semaphore.make(2)
+  // Background canvas reads take their own lane, so a building map never queues ahead of an interactive read.
+  const canvasLane = yield* Semaphore.make(1)
+  // A small change answers Ready on its first read; a large one answers Building and the view reads again.
+  const canvasJobs = yield* makeCanvasGraphJobs(8, "750 millis")
   const { cache, references } = options
   const exact = Effect.fn("CodeHostReads.exact")(function*(ref: CodeReference) {
     const coordinates = yield* references.resolve(ref)
@@ -129,17 +147,19 @@ export const makeCodeHostReadsFromClient = Effect.fn("CodeHostReads.bind")(funct
       caller: caller.login,
       check
     }).pipe(Effect.provideService(AuditLogRepo, audit))
-  const boundedRead = <A, E>(effect: Effect.Effect<A, E>): Effect.Effect<A, CodeHostReadError> =>
-    concurrency.withPermits(1)(effect).pipe(
-      Effect.timeout("15 seconds"),
-      Effect.tapError((cause) => Effect.logWarning("Code host provider read refused", cause)),
-      Effect.mapError((cause) => {
-        const decoded = Schema.decodeUnknownResult(ProviderReadFailure)(cause)
-        return Result.isSuccess(decoded)
-          ? readFailure(decoded.success)
-          : new CodeHostReadError({ reason: "unavailable" })
-      })
-    )
+  const boundedReadIn =
+    (lane: Semaphore.Semaphore) => <A, E>(effect: Effect.Effect<A, E>): Effect.Effect<A, CodeHostReadError> =>
+      lane.withPermits(1)(effect).pipe(
+        Effect.timeout("15 seconds"),
+        Effect.tapError((cause) => Effect.logWarning("Code host provider read refused", cause)),
+        Effect.mapError((cause) => {
+          const decoded = Schema.decodeUnknownResult(ProviderReadFailure)(cause)
+          return Result.isSuccess(decoded)
+            ? readFailure(decoded.success)
+            : new CodeHostReadError({ reason: "unavailable" })
+        })
+      )
+  const boundedRead = boundedReadIn(concurrency)
 
   return {
     queue: Effect.fn("CodeHostReads.queue")(function*(query: CodeQueueQuery) {
@@ -252,7 +272,49 @@ export const makeCodeHostReadsFromClient = Effect.fn("CodeHostReads.bind")(funct
           return yield* Schema.decodeUnknownEffect(CodeDiffContent)(result)
         }))
       }
-    )
+    ),
+    canvas: Effect.fn("CodeHostReads.canvas")(function*(ref: CodeReference, caller: { readonly login: string }) {
+      const { changedFiles, diff, pullRequest } = yield* boundedRead(Effect.gen(function*() {
+        const row = yield* exact(ref)
+        const client = yield* clientFor(caller)
+        const pullRequest = yield* Schema.decodeUnknownEffect(CachedPRToPullRequest)(row)
+        // One changed-file inventory for the whole job: each file load reuses it instead of listing the change again.
+        const changedFiles = yield* makePullRequestChangedFilesSource(client)
+        const diff = yield* loadPullRequestDiff(client, pullRequest, changedFiles)
+        return { changedFiles, diff, pullRequest }
+      }))
+      const load = (index: number): Effect.Effect<CanvasSourceFile, CodeHostReadError> =>
+        boundedReadIn(canvasLane)(Effect.gen(function*() {
+          const file = diff.files[index]
+          if (file === undefined) return yield* new CodeHostReadError({ reason: "unavailable" })
+          const client = yield* clientFor(caller)
+          const content = yield* loadPullRequestDiffContent(client, pullRequest, diff, index, changedFiles)
+          const text: CanvasSourceFile["content"] = content.state === "text"
+            ? { _tag: "Text", before: content.before, after: content.after }
+            : { _tag: "Opaque" }
+          const source: CanvasSourceFile = {
+            path: file.path,
+            status: file.status,
+            previousPath: file.previousPath,
+            content: text
+          }
+          return source
+        }))
+      const graph = yield* canvasJobs.read(
+        JSON.stringify([ref, diff.revisionId, diff.headCommit, caller.login]),
+        diff.headCommit,
+        diff.files.length,
+        load
+      )
+      const reading = {
+        graph,
+        context: { lastLook: notRecorded, readingPath: notRecorded, findings: notRecorded, tests: notRecorded }
+      }
+      return yield* Schema.decodeUnknownEffect(CanvasReading, { onExcessProperty: "error" })(reading).pipe(
+        Effect.tapError((cause) => Effect.logWarning("Code canvas reading is invalid", cause)),
+        Effect.mapError(() => new CodeHostReadError({ reason: "unavailable" }))
+      )
+    })
   } satisfies CodeHostReads
 })
 
@@ -314,6 +376,7 @@ export const makeCodeHostReads = Effect.fn("CodeHostReads.make")(function*(
     detail: (ref) => read((reads) => reads.detail(ref)),
     review: (ref, caller) => read((reads) => reads.review(ref, caller)),
     diff: (ref, caller) => read((reads) => reads.diff(ref, caller)),
-    diffContent: (query, caller) => read((reads) => reads.diffContent(query, caller))
+    diffContent: (query, caller) => read((reads) => reads.diffContent(query, caller)),
+    canvas: (ref, caller) => read((reads) => reads.canvas(ref, caller))
   } satisfies CodeHostReads
 })

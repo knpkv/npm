@@ -11,6 +11,7 @@ import {
 } from "./code-selection.js"
 import { focusModulePage } from "./internal/shell-keys.js"
 import { useCodeRead } from "./internal/use-code-read.js"
+import { CodeCanvasPage } from "./code-canvas-page.js"
 import { useCodeReviewWorkspace } from "./code-review-workspace.js"
 import { ShellIcon } from "./internal/shell-icon.js"
 import { codeModule, moduleHref, type ModulePageMount, type ModuleViews } from "./modules.js"
@@ -70,7 +71,7 @@ const CodePage = ({
     selection,
     page,
     mount,
-    enabled: enabled && page !== "diffs",
+    enabled: enabled && page !== "diffs" && selection.view !== "canvas",
     ownerUIHref: queue.failure === null ? (queue.value?.ownerUi ?? null) : null
   })
   const diffRead = useMemo(() => (ref === null ? Effect.never : content.reads.diff(ref)), [content.reads.diff, ref])
@@ -144,6 +145,17 @@ const CodePage = ({
         offset: 0,
         file: null
       })
+    )
+  }
+  if (ref !== null && page !== "diffs" && selection.view === "canvas") {
+    return (
+      <CodeCanvasPage
+        enabled={enabled}
+        ownerUIHref={queue.failure === null ? (queue.value?.ownerUi ?? null) : null}
+        reads={content.reads}
+        refresh={refresh}
+        selection={{ ...selection, ref }}
+      />
     )
   }
   return (

@@ -93,6 +93,14 @@ distinct reported states; none is an empty conversation.
 `@knpkv/review` is a runtime dependency for these persisted and host contracts. Its server-imported
 entry contains schemas and pure transitions; the review React views remain separate entries.
 
+The host canvas reader (`CodeHostReads.canvas`) reads every changed file of the current revision through
+the same saved read grants and audits, one file at a time in the background, and answers `Building` with
+the files read so far until the graph is ready. TypeScript and JavaScript files get import edges resolved
+only between files of the change, and their changed top-level declarations; other languages are
+recorded as having no dependency data. Call edges, moves, partitions and the review context
+(last look, reading path, finding history, failing tests) are `NotRecorded` until their readers exist.
+Paths are the change's repository-relative diff paths; no provider locator crosses the boundary.
+
 Owner review endpoints persist completed output in version-1 JSON records under the private review
 directory. The hashed storage key comprises namespace and a server-private subject tuple of caller
 account identity, region, repository and PR ID. Profile labels are excluded, so a rename does not

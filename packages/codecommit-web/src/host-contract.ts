@@ -5,6 +5,7 @@
  * @module
  */
 import { ReviewThread, ReviewWorkspace } from "@knpkv/review"
+import { CanvasReading } from "@knpkv/review/canvas"
 import { Effect, Result, Schema } from "effect"
 
 export const CodeReference = Schema.String.check(
@@ -150,8 +151,18 @@ export const CodeReviewResult = Schema.Union([
 ])
 export type CodeReviewResult = typeof CodeReviewResult.Type
 
+/**
+ * The canvas reading of the same immutable revision: changed files, import edges between them and their changed
+ * parts. Paths are repository-relative change paths, as in the diff; no provider locator crosses this boundary.
+ */
+export const CodeCanvasResult = Schema.Union([
+  CodeUnavailable,
+  Schema.TaggedStruct("Ready", { reading: CanvasReading })
+])
+export type CodeCanvasResult = typeof CodeCanvasResult.Type
+
 /** Browser-owned read selectors. Thread source/id is normalized, authenticated client-visible data. */
-export const CodeReviewPresentation = Schema.Literals(["review", "conversation", "guide"])
+export const CodeReviewPresentation = Schema.Literals(["review", "conversation", "guide", "canvas"])
 export type CodeReviewPresentation = typeof CodeReviewPresentation.Type
 export const CodeReviewThreadTarget = Schema.Struct({ source: ReviewThread.fields.source, id: ReviewThread.fields.id })
 export type CodeReviewThreadTarget = typeof CodeReviewThreadTarget.Type
