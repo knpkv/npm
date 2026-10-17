@@ -17,6 +17,12 @@ export interface Rect {
 
 export const CANVAS_WIDTH = 1016
 export const CANVAS_MIN_HEIGHT = 640
+/** The minimap the view draws over the canvas's bottom-right corner, `inset` from both edges (see `.rc-minimap`). */
+export const CANVAS_MINIMAP = {
+  w: 168,
+  h: 135,
+  inset: 12
+}
 /** The changed part that holds a file's imports and type declarations. Listed after its functions. */
 export const CANVAS_MODULE_PART = "imports and types"
 
@@ -521,7 +527,12 @@ export const layoutCluster = (
   const bandBottom = bottom + 28
   return {
     width: Math.max(CANVAS_WIDTH, right + 36 + STUB_W + 12),
-    height: Math.max(CANVAS_MIN_HEIGHT, bandBottom + 40, ...stubs.map((stub) => stub.y + stub.h + 40)),
+    // The stubs share the minimap's column, so the canvas reaches past the lowest stub by a gap and the minimap.
+    height: Math.max(
+      CANVAS_MIN_HEIGHT,
+      bandBottom + 40,
+      ...stubs.map((stub) => stub.y + stub.h + 12 + CANVAS_MINIMAP.h + CANVAS_MINIMAP.inset)
+    ),
     target,
     band: partition === undefined
       ? null

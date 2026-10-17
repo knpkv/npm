@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { canvasFiles } from "../src/canvas/derive.js"
 import {
+  CANVAS_MINIMAP,
   CANVAS_WIDTH,
   canvasNodeHeight,
   clusterOf,
@@ -10,7 +11,7 @@ import {
   layoutOverview,
   type Rect
 } from "../src/canvas/layout.js"
-import type { CanvasGraph } from "../src/canvas/model.js"
+import type { CanvasGraph, CanvasPart } from "../src/canvas/model.js"
 import { noContext, sampleContext, sampleFindings, sampleGraph } from "./canvas-fixture.js"
 
 const overlaps = (left: Rect, right: Rect): boolean =>
@@ -120,6 +121,39 @@ describe("cluster layout", () => {
     const scene = layoutCluster(sampleGraph, files, { kind: "partition", id: "A" })
     expect(scene.stubs.find((stub) => stub.path === "sync-worker/drafts.ts")?.label).toBe("drafts.ts, in B")
     expect(scene.stubs.find((stub) => stub.path === "tests/socket.test.ts")?.label).toBe("tests/socket.test.ts")
+  })
+
+  it("keeps every stub clear of the minimap in the bottom-right corner", () => {
+    // Parts on worker.ts and protocol.ts push socket.ts, and the stubs leaving it, down towards the minimap.
+    const added = (name: string, index: number): CanvasPart => ({
+      name,
+      kind: "added",
+      movedPath: null,
+      lines: { start: 1 + index * 10, end: 9 + index * 10 },
+      added: 9,
+      removed: 0
+    })
+    const withParts =
+      (path: string, names: ReadonlyArray<string>) =>
+      (entry: CanvasGraph["files"][number]): CanvasGraph["files"][number] =>
+        entry.path !== path ? entry : { ...entry, parts: { _tag: "Recorded", items: names.map(added) } }
+    const graph: CanvasGraph = {
+      ...sampleGraph,
+      files: sampleGraph.files
+        .map(withParts("sync-worker/worker.ts", ["onconnect()", "routeFrame()"]))
+        .map(withParts("sync-worker/protocol.ts", ["FrameType"]))
+    }
+    const scene = layoutCluster(graph, canvasFiles(graph, sampleContext, sampleFindings), {
+      kind: "partition",
+      id: "A"
+    })
+    const minimap = {
+      x: scene.width - CANVAS_MINIMAP.inset - CANVAS_MINIMAP.w,
+      y: scene.height - CANVAS_MINIMAP.inset - CANVAS_MINIMAP.h,
+      w: CANVAS_MINIMAP.w,
+      h: CANVAS_MINIMAP.h
+    }
+    expect(scene.stubs.filter((stub) => overlaps(stub, minimap)).map((stub) => stub.path)).toEqual([])
   })
 })
 
