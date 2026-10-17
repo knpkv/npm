@@ -323,8 +323,15 @@ const causeOf = (issue: Issue, count: number): Cause => {
       fix: "check those profiles’ S3 permissions"
     }
   }
-  if (issue.source === "local" && issue.reason === "io") {
+  if (issue.source === "local" && issue.reason === "skipped") {
     return { cause: "some project folders under the stacks root couldn’t be read", cost: "the rest were", fix: null }
+  }
+  if (issue.source === "local" && issue.reason === "io") {
+    return {
+      cause: "the local stacks root or a project’s state couldn’t be read",
+      cost: "those local stacks weren’t listed",
+      fix: null
+    }
   }
   return {
     cause: `the ${issue.source === "s3" ? "state bucket" : "local"} read failed (${issue.reason})`,
@@ -448,16 +455,19 @@ const OverviewPage = ({
     const stacks = result.list.stacks
     const found = causes(result.list.issues)
     if (stacks.length === 0) {
-      // An unreadable source must not read as an empty inventory: name the first cause and its fix.
-      const first = found[0]
-      if (first === undefined) {
+      // An unreadable source must not read as an empty inventory: name every cause and its fix.
+      if (found.length === 0) {
         return (
           <StateCard eyebrow="No stacks" title="No alchemy stacks found under this host’s projects." tone="neutral" />
         )
       }
       return (
-        <StateCard eyebrow="Read failed" title={`Couldn’t read stacks: ${first.cause}.`} tone="caution">
-          {first.fix === null ? "Reload to try again; nothing was changed." : `Fix: ${first.fix}.`}
+        <StateCard eyebrow="Read failed" title="Couldn’t read stacks." tone="caution">
+          {found.map((cause) => (
+            <span className="stacks-issue" data-source-issue="" key={cause.cause}>
+              {causeWords(cause)}
+            </span>
+          ))}
         </StateCard>
       )
     }

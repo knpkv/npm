@@ -181,7 +181,7 @@ describe("Stacks module pages", { concurrent: false }, () => {
 
   it("never names stacks as unreadable from a missing count; source problems read one line per cause", async () => {
     const issues: ReadonlyArray<DiscoveryIssue> = [
-      { source: "local", reason: "io" },
+      { source: "local", reason: "skipped" },
       ...Array.from({ length: 8 }, (): DiscoveryIssue => ({ source: "s3", reason: "authentication" }))
     ]
     await render(reads({ overview: Effect.succeed({ _tag: "Ready", list: { ...overviewList, issues } }) }), "overview")
@@ -193,19 +193,39 @@ describe("Stacks module pages", { concurrent: false }, () => {
     ])
   })
 
-  it("says plainly when no stack could be read, with the fix", async () => {
+  it("says plainly when no stack could be read, naming every cause and its fix", async () => {
     await render(
       reads({
         overview: Effect.succeed({
           _tag: "Ready",
-          list: { stacks: [], issues: [{ source: "s3", reason: "authentication" }] }
+          list: {
+            stacks: [],
+            issues: [
+              { source: "s3", reason: "authentication" },
+              { source: "local", reason: "io" }
+            ]
+          }
         })
       }),
       "overview"
     )
-    expect(text()).toContain("Couldn’t read stacks: sign-in expired for 1 AWS profile.")
-    expect(text()).toContain("Fix: run aws sso login for it on the stacks host.")
+    expect(text()).toContain("Couldn’t read stacks.")
+    expect(text()).toContain(
+      "Sign-in expired for 1 AWS profile, so its state buckets weren’t read. Fix: run aws sso login for it on the stacks host."
+    )
+    expect(text()).toContain("The local stacks root or a project’s state couldn’t be read")
     expect(text()).not.toContain("No alchemy stacks found")
+  })
+
+  it("never claims the rest were read when the local root itself failed", async () => {
+    await render(
+      reads({
+        overview: Effect.succeed({ _tag: "Ready", list: { stacks: [], issues: [{ source: "local", reason: "io" }] } })
+      }),
+      "overview"
+    )
+    expect(text()).not.toContain("the rest were")
+    expect(text()).not.toContain("some project folders")
   })
 
   it("says why stacks aren't available on this hub, naming the setting", async () => {

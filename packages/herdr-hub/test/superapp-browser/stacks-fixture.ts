@@ -13,7 +13,7 @@ export const stacksStates: ReadonlyArray<StacksState> = ["overview", "partial", 
 
 /** A host where some project folders and most AWS profiles couldn't be read. */
 const partialIssues: StacksOverviewReady["list"]["issues"] = [
-  { source: "local", reason: "io" },
+  { source: "local", reason: "skipped" },
   ...Array.from({ length: 8 }, (): StacksOverviewReady["list"]["issues"][number] => ({
     source: "s3",
     reason: "authentication"

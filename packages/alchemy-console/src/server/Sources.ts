@@ -39,7 +39,7 @@ export const sourceLayer = (options: SourceOptions) =>
         if (discovered._tag === "Failure") issues.push({ source: "local", reason: discovered.failure.reason })
         else {
           // Entries the walk couldn't read are reported once; the projects it did find are still read.
-          if (discovered.success.unreadable > 0) issues.push({ source: "local", reason: "io" })
+          if (discovered.success.unreadable > 0) issues.push({ source: "local", reason: "skipped" })
           if (discovered.success.projects.length > 1000) return yield* new CatalogReadError({ reason: "limit" })
           for (const project of discovered.success.projects) {
             const found = yield* Effect.result(
@@ -94,10 +94,14 @@ export const sourceLayer = (options: SourceOptions) =>
               continue
             }
             if (buckets.success.length > 1000) return yield* new CatalogReadError({ reason: "limit" })
+            // One issue per profile and reason: an expired profile with eight buckets is one sign-in problem.
+            const reported = new Set<string>()
             for (const bucket of buckets.success) {
               const found = yield* Effect.result(discoverS3Stacks(bucket).pipe(Effect.provideService(S3Reader, reader)))
-              if (found._tag === "Failure") issues.push({ source: "s3", reason: found.failure.reason })
-              else {
+              if (found._tag === "Failure") {
+                if (!reported.has(found.failure.reason)) issues.push({ source: "s3", reason: found.failure.reason })
+                reported.add(found.failure.reason)
+              } else {
                 for (const stack of found.success) {
                   stacks.push({
                     key: JSON.stringify([
