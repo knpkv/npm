@@ -1,14 +1,18 @@
-import { Button, Field, Notice, StateLabel, Text } from "@knpkv/rly/primitives"
+import { Button, Notice, StateLabel, Text } from "@knpkv/rly/primitives"
+import type { RlyStateTone } from "@knpkv/rly/primitives"
+import * as DateTime from "effect/DateTime"
 import * as Predicate from "effect/Predicate"
-import { type FormEvent, type ReactElement, useEffect, useRef, useState } from "react"
+import { type FormEvent, type ReactElement, type ReactNode, useEffect, useId, useRef, useState } from "react"
 
 import type {
   AwsProfileDiscoveryResponse,
+  AwsRegionDiscoveryResponse,
   AwsResourceDiscoveryRequest,
   AwsResourceDiscoveryResponse,
   AwsServiceResourceDiscovery,
   PluginServiceCatalogEntry
 } from "../../api/plugins.js"
+import { COMPACT_VIEWPORT_QUERY, useMediaQuery } from "../useMediaQuery.js"
 import styles from "./AwsAccountSetupForm.module.css"
 import { type ServiceConnectionDraft, serviceSetupValues } from "./serviceSetupValues.js"
 
@@ -19,7 +23,28 @@ type ResourceDiscoveryState =
   | { readonly _tag: "loading" }
   | { readonly _tag: "failed"; readonly reason: "sign-in-required" | "no-answer"; readonly profile: string }
   | { readonly _tag: "profile-not-found"; readonly profile: string }
-  | { readonly _tag: "ready"; readonly response: AwsResourceDiscoveryResponse; readonly region: string }
+  | {
+      readonly _tag: "ready"
+      readonly checkedAt: DateTime.Utc
+      readonly profile: string
+      readonly region: string
+      readonly response: AwsResourceDiscoveryResponse
+    }
+
+/**
+ * Where the region comes from. `list` offers the account's enabled regions; `typed` is the fallback when the
+ * profile can't list them (denied, unreachable, or no detected profiles), so the region is entered by hand.
+ */
+type RegionSource =
+  | { readonly _tag: "loading"; readonly profile: string }
+  | { readonly _tag: "list"; readonly profile: string; readonly regions: ReadonlyArray<string> }
+  | { readonly _tag: "typed" }
+
+type FieldErrors = {
+  readonly accountName?: string
+  readonly profile?: string
+  readonly region?: string
+}
 
 /** The account check's rejection, read only by tag: a profile whose sign-in expired, or anything else. */
 const discoveryFailureReason = <Rejection,>(failure: Rejection): "sign-in-required" | "no-answer" =>
@@ -50,13 +75,25 @@ export const refreshedAwsResourceChoices = (
   selected: ReadonlySet<string>
 ): ReadonlyArray<string> => [...new Set([...discovered, ...selected])].sort((left, right) => left.localeCompare(right))
 
-/** Case-insensitive resource search used by both AWS service lists. */
-export const searchAwsResourceNames = (names: ReadonlyArray<string>, query: string): ReadonlyArray<string> => {
-  const normalizedQuery = query.trim().toLocaleLowerCase()
-  return normalizedQuery.length === 0
-    ? names
-    : names.filter((name) => name.toLocaleLowerCase().includes(normalizedQuery))
-}
+/**
+ * The region the region select lands on once the enabled regions arrive: the region already chosen when the
+ * account has it enabled (a typed and verified region never flips), otherwise the profile's configured region
+ * when it is enabled, otherwise the first enabled region.
+ */
+export const initialAwsRegion = (
+  regions: ReadonlyArray<string>,
+  configured: string | null | undefined,
+  current: string
+): string =>
+  regions.includes(current)
+    ? current
+    : configured !== null && configured !== undefined && regions.includes(configured)
+      ? configured
+      : (regions[0] ?? current)
+
+/** The count beside a resource list: discovery returns at most 20 names and only says whether more exist. */
+export const awsResourceListCount = (shown: number, truncated: boolean): string =>
+  truncated ? `First ${shown} shown` : `${shown} of ${shown} shown`
 
 const connectionDrafts = ({
   accountName,
@@ -101,19 +138,6 @@ const connectionDrafts = ({
   }))
 ]
 
-const profileDiscoveryMessage = (profileCount: number, state: "failed" | "idle" | "loading" | "ready"): string => {
-  switch (state) {
-    case "loading":
-      return "Discovering local AWS profiles…"
-    case "ready":
-      return `${profileCount} local AWS ${profileCount === 1 ? "profile" : "profiles"} detected`
-    case "failed":
-      return "Profile discovery unavailable. Enter a profile manually."
-    case "idle":
-      return "AWS profiles are discovered locally by the Control Center server."
-  }
-}
-
 type DiscoveryFailure = Extract<AwsServiceResourceDiscovery, { readonly _tag: "failed" }>
 
 /** One sentence per failure: what went wrong for this service and profile, and what to do next. */
@@ -124,131 +148,144 @@ export const discoveryFailureMessage = (
 ): string => {
   switch (failure.failureClass) {
     case "authentication":
-      return `Can't sign in to ${service} with ${profile}. Check this profile's credentials or sign-in session, then refresh.`
+      return `Can’t sign in to ${service} with ${profile}. Check this profile’s credentials or sign-in session, then refresh.`
     case "authorization":
-      return `${profile} isn't allowed to list ${service} resources. Enter names manually or update the profile's permissions.`
+      return `${profile} isn’t allowed to list ${service} resources. Enter names manually or update the profile’s permissions.`
     case "rate-limit":
       return `AWS is limiting ${service} requests. Wait a minute, then refresh.`
     case "timeout":
-      return `${service} didn't answer in time. Refresh to try again.`
+      return `${service} didn’t answer in time. Refresh to try again.`
     case "malformed-response":
-      return `${service} sent a response Control Center can't read. Enter names manually.`
+      return `${service} sent a response Control Center can’t read. Enter names manually.`
     case "unavailable":
-      return `${service} couldn't be reached. Refresh to try again, or enter names manually.`
+      return `${service} couldn’t be reached. Refresh to try again, or enter names manually.`
   }
 }
 
-const ResourcePicker = ({
+/** The word and tone that tag a failure row; the message carries the detail. */
+interface DiscoveryFailureTag {
+  readonly label: string
+  readonly tone: RlyStateTone
+}
+
+const discoveryFailureTag = (failure: DiscoveryFailure): DiscoveryFailureTag => {
+  switch (failure.failureClass) {
+    case "authentication":
+      return { label: "Sign-in failed", tone: "critical" }
+    case "authorization":
+      return { label: "Not allowed", tone: "critical" }
+    case "rate-limit":
+      return { label: "Rate-limited", tone: "caution" }
+    case "timeout":
+      return { label: "Timed out", tone: "caution" }
+    case "malformed-response":
+      return { label: "Unreadable", tone: "critical" }
+    case "unavailable":
+      return { label: "Unavailable", tone: "critical" }
+  }
+}
+
+/** The organization-policy message, worded as a possible region cause, never a proven one. */
+export const organizationPolicyDeniedMessage = (region: string): string =>
+  `An organization policy blocks CodeCommit in ${region}, and CodePipeline was denied too. This region may not be allowed for this account; choose another.`
+
+/**
+ * One labelled control in the design's order: label, control, then the error (with an "Invalid" label), then
+ * the hint. The control receives its id and description wiring through `children`.
+ */
+const SetupField = ({
+  children,
+  error,
+  hint,
+  label
+}: {
+  readonly children: (control: {
+    readonly "aria-describedby": string | undefined
+    readonly "aria-invalid": true | undefined
+    readonly id: string
+  }) => ReactNode
+  readonly error?: string | undefined
+  readonly hint?: string | undefined
+  readonly label: string
+}): ReactElement => {
+  const id = useId()
+  const errorId = `${id}-error`
+  const hintId = `${id}-hint`
+  const describedBy = [error === undefined ? null : errorId, hint === undefined ? null : hintId]
+    .filter((value): value is string => value !== null)
+    .join(" ")
+  return (
+    <div className={styles.field}>
+      <label className={styles.fieldLabel} htmlFor={id}>
+        {label}
+      </label>
+      {children({
+        "aria-describedby": describedBy.length === 0 ? undefined : describedBy,
+        "aria-invalid": error === undefined ? undefined : true,
+        id
+      })}
+      {error === undefined ? null : (
+        <span className={styles.fieldError} id={errorId} role="alert">
+          <StateLabel label="Invalid" size="compact" tone="critical" />
+          <span>{error}</span>
+        </span>
+      )}
+      {hint === undefined ? null : (
+        <span className={styles.fieldHint} id={hintId}>
+          {hint}
+        </span>
+      )}
+    </div>
+  )
+}
+
+const ResourceList = ({
   label,
-  profile,
-  query,
   selected,
   service,
-  setQuery,
   setSelected
 }: {
   readonly label: string
-  readonly profile: string
-  readonly query: string
   readonly selected: ReadonlySet<string>
-  readonly service: AwsServiceResourceDiscovery
-  readonly setQuery: (query: string) => void
+  /** This check's answer for the service; null when the check itself failed. */
+  readonly service: AwsServiceResourceDiscovery | null
   readonly setSelected: (selected: ReadonlySet<string>) => void
-}): ReactElement => {
-  if (service._tag === "failed") {
-    const preservedNames = [...selected].sort((left, right) => left.localeCompare(right))
-    return (
-      <div className={styles.resourcePanel}>
-        <div className={styles.resourcePanelHeading}>
-          <Text as="h4" variant="card-title">
-            {label}
-          </Text>
-          <StateLabel label={`${selected.size} selected`} size="compact" tone="neutral" />
-        </div>
-        <Text as="p" className={styles.error} role="status" variant="body">
-          {discoveryFailureMessage(label === "Repositories" ? "CodeCommit" : "CodePipeline", profile, service)}
-        </Text>
-        {preservedNames.length === 0 ? null : (
-          <>
-            <Text tone="secondary" variant="meta">
-              Preserved from the previous discovery. Clear any resource you no longer want to connect.
-            </Text>
-            <div className={styles.choiceList}>
-              {preservedNames.map((name) => (
-                <label className={styles.choice} key={name}>
-                  <input
-                    checked
-                    onChange={() => {
-                      const next = new Set(selected)
-                      next.delete(name)
-                      setSelected(next)
-                    }}
-                    type="checkbox"
-                  />
-                  <span>{name}</span>
-                </label>
-              ))}
-            </div>
-          </>
-        )}
-      </div>
-    )
-  }
-  const names = refreshedAwsResourceChoices(service.names, selected)
-  const visibleNames = searchAwsResourceNames(names, query)
+}): ReactElement | null => {
+  // A service (or a whole check) that failed this time still lists what was already selected, so every name
+  // "Follow N" counts stays visible and can be cleared.
+  const names = refreshedAwsResourceChoices(service?._tag === "available" ? service.names : [], selected)
+  if (names.length === 0) return null
   return (
-    <div className={styles.resourcePanel}>
-      <div className={styles.resourcePanelHeading}>
-        <Text as="h4" variant="card-title">
+    <div className={styles.list}>
+      <div className={styles.listHeading}>
+        <Text as="h3" variant="label">
           {label}
         </Text>
-        <StateLabel label={`${selected.size} selected`} size="compact" tone="neutral" />
+        <span className={styles.listCount}>
+          {service?._tag === "available"
+            ? awsResourceListCount(service.names.length, service.truncated)
+            : "Kept from the last check"}
+        </span>
       </div>
-      {names.length === 0 ? (
-        <Text tone="secondary" variant="body">
-          No {label.toLocaleLowerCase()} were found in this region.
-        </Text>
-      ) : (
-        <>
-          <Field label={`Search ${label.toLocaleLowerCase()}`}>
-            {(controlProps) => (
+      <ul className={styles.choices}>
+        {names.map((name) => (
+          <li key={name}>
+            <label className={styles.choice}>
               <input
-                {...controlProps}
-                onChange={(event) => setQuery(event.currentTarget.value)}
-                type="search"
-                value={query}
+                checked={selected.has(name)}
+                onChange={(event) => {
+                  const next = new Set(selected)
+                  if (event.currentTarget.checked) next.add(name)
+                  else next.delete(name)
+                  setSelected(next)
+                }}
+                type="checkbox"
               />
-            )}
-          </Field>
-          <div className={styles.choiceList}>
-            {visibleNames.map((name) => (
-              <label className={styles.choice} key={name}>
-                <input
-                  checked={selected.has(name)}
-                  onChange={(event) => {
-                    const next = new Set(selected)
-                    if (event.currentTarget.checked) next.add(name)
-                    else next.delete(name)
-                    setSelected(next)
-                  }}
-                  type="checkbox"
-                />
-                <span>{name}</span>
-              </label>
-            ))}
-          </div>
-          {visibleNames.length === 0 ? (
-            <Text tone="secondary" variant="body">
-              No matching resources.
-            </Text>
-          ) : null}
-          {service.truncated ? (
-            <Text tone="secondary" variant="meta">
-              Showing the first 20 names. Use manual entry for another name.
-            </Text>
-          ) : null}
-        </>
-      )}
+              {name}
+            </label>
+          </li>
+        ))}
+      </ul>
     </div>
   )
 }
@@ -261,6 +298,7 @@ export const AwsAccountSetupForm = ({
   isSubmitting,
   onCancel,
   onDiscover,
+  onDiscoverRegions,
   onReloadAwsProfiles,
   onSubmit
 }: {
@@ -273,50 +311,122 @@ export const AwsAccountSetupForm = ({
     request: AwsResourceDiscoveryRequest,
     signal: AbortSignal
   ) => Promise<AwsResourceDiscoveryResponse>
+  /** Lists the chosen profile's enabled regions; any rejection falls back to a typed region. */
+  readonly onDiscoverRegions: (profile: string, signal: AbortSignal) => Promise<AwsRegionDiscoveryResponse>
   /** Reads this machine's AWS profiles again and returns them; called before refusing a profile the list lacks. */
   readonly onReloadAwsProfiles: (signal: AbortSignal) => Promise<AwsProfileDiscoveryResponse>
   readonly onSubmit: (drafts: ReadonlyArray<ServiceConnectionDraft>) => Promise<boolean>
 }): ReactElement => {
   const codeCommit = catalogs.find(({ providerId }) => providerId === "codecommit")
   const codePipeline = catalogs.find(({ providerId }) => providerId === "codepipeline")
+  const profilesListed = awsProfilesState === "ready" && awsProfiles.length > 0
+  // Phone gets touch-size buttons, as the field controls do.
+  const buttonSize = useMediaQuery(COMPACT_VIEWPORT_QUERY, false) ? "default" : "dense"
   const [accountName, setAccountName] = useState("AWS account")
   const [profile, setProfile] = useState("default")
   const [region, setRegion] = useState("")
+  const [regionSource, setRegionSource] = useState<RegionSource>({ _tag: "typed" })
   const [repositoryNames, setRepositoryNames] = useState("")
   const [pipelineNames, setPipelineNames] = useState("")
   const [selectedRepositories, setSelectedRepositories] = useState<ReadonlySet<string>>(new Set())
   const [selectedPipelines, setSelectedPipelines] = useState<ReadonlySet<string>>(new Set())
-  const [repositoryQuery, setRepositoryQuery] = useState("")
-  const [pipelineQuery, setPipelineQuery] = useState("")
-  const [isManualEntryOpen, setIsManualEntryOpen] = useState(true)
+  const [isManualEntryOpen, setIsManualEntryOpen] = useState(false)
   const [discoveryState, setDiscoveryState] = useState<ResourceDiscoveryState>({ _tag: "idle" })
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({})
   const [setupError, setSetupError] = useState<string | null>(null)
   const discoveryRequest = useRef<AbortController | null>(null)
+  // The region the current discovery (in flight or done) checked; its results only hold for that region.
+  const discoveredRegion = useRef<string | null>(null)
+  const form = useRef<HTMLFormElement>(null)
+  // Bumped when validation stops an action, so focus moves to the first invalid field after it renders.
+  const [invalidFocus, setInvalidFocus] = useState(0)
 
   useEffect(() => () => discoveryRequest.current?.abort(), [])
 
   useEffect(() => {
-    const detectedRegion = awsProfiles.find((candidate) => candidate.profile === profile)?.region
-    if (detectedRegion !== null && detectedRegion !== undefined) {
-      setRegion((current) => (current.trim().length === 0 ? detectedRegion : current))
+    if (invalidFocus === 0) return
+    form.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus()
+  }, [invalidFocus])
+
+  const profileRefused = discoveryState._tag === "profile-not-found"
+  // A check in flight re-reads the profiles before it can refuse one; the typed profile must survive that re-read.
+  const profileHeld = profileRefused || discoveryState._tag === "loading"
+  // Once profiles are detected the select can only hold a detected one: keep the current profile when it is
+  // listed, otherwise start on "default" when it exists, otherwise the first. A typed profile the not-found error
+  // names stays until the user changes it, so the form never swaps in a profile nobody chose.
+  useEffect(() => {
+    if (!profilesListed || profileHeld) return
+    setProfile((current) =>
+      awsProfiles.some((candidate) => candidate.profile === current)
+        ? current
+        : ((awsProfiles.find((candidate) => candidate.profile === "default") ?? awsProfiles[0])?.profile ?? current)
+    )
+  }, [awsProfiles, profileHeld, profilesListed])
+
+  // The chosen profile's enabled regions. Only a detected profile is asked; a typed one is never looked up per
+  // keystroke, so its region is typed too.
+  useEffect(() => {
+    const configured = awsProfiles.find((candidate) => candidate.profile === profile)?.region
+    if (!profilesListed || configured === undefined) {
+      setRegionSource({ _tag: "typed" })
+      if (configured !== undefined && configured !== null) {
+        setRegion((current) => (current.trim().length === 0 ? configured : current))
+      }
+      return
     }
-  }, [awsProfiles, profile])
+    const controller = new AbortController()
+    setRegionSource({ _tag: "loading", profile })
+    onDiscoverRegions(profile, controller.signal).then(
+      (answer) => {
+        if (controller.signal.aborted) return
+        if (answer._tag === "available" && answer.regions.length > 0) {
+          setRegionSource({ _tag: "list", profile, regions: answer.regions })
+          setRegion((current) => initialAwsRegion(answer.regions, configured, current))
+          return
+        }
+        setRegionSource({ _tag: "typed" })
+        setRegion((current) => (current.trim().length > 0 ? current : (configured ?? "")))
+      },
+      () => {
+        if (controller.signal.aborted) return
+        setRegionSource({ _tag: "typed" })
+        setRegion((current) => (current.trim().length > 0 ? current : (configured ?? "")))
+      }
+    )
+    return () => controller.abort()
+  }, [awsProfiles, onDiscoverRegions, profile, profilesListed])
 
   const resetDiscovery = (): void => {
     discoveryRequest.current?.abort()
     discoveryRequest.current = null
+    discoveredRegion.current = null
     setDiscoveryState({ _tag: "idle" })
     setSelectedRepositories(new Set())
     setSelectedPipelines(new Set())
   }
 
+  // However the region changed (the user, or the enabled-region lookup), a discovery for another region and its
+  // selections no longer describe what Follow would connect.
+  useEffect(() => {
+    if (discoveredRegion.current !== null && discoveredRegion.current !== region.trim()) resetDiscovery()
+  }, [region])
+
+  const requiredFieldErrors = (): FieldErrors => ({
+    ...(accountName.trim().length === 0 && { accountName: "Add an account name." }),
+    ...(profile.trim().length === 0 && { profile: "Choose an AWS profile." }),
+    ...(region.trim().length === 0 && { region: "Add an AWS region." })
+  })
+
   const discover = (): void => {
     setSetupError(null)
-    const request = { profile: profile.trim(), region: region.trim() }
-    if (request.profile.length === 0 || request.region.length === 0) {
-      setSetupError("Add an AWS profile and region before testing discovery.")
+    const errors = requiredFieldErrors()
+    setFieldErrors(errors)
+    if (Object.keys(errors).length > 0) {
+      setInvalidFocus((count) => count + 1)
       return
     }
+    const request = { profile: profile.trim(), region: region.trim() }
+    discoveredRegion.current = request.region
     discoveryRequest.current?.abort()
     const controller = new AbortController()
     discoveryRequest.current = controller
@@ -342,7 +452,13 @@ export const AwsAccountSetupForm = ({
       (response) => {
         if (controller.signal.aborted) return
         discoveryRequest.current = null
-        setDiscoveryState({ _tag: "ready", response, region: request.region })
+        setDiscoveryState({
+          _tag: "ready",
+          checkedAt: DateTime.nowUnsafe(),
+          profile: request.profile,
+          region: request.region,
+          response
+        })
       },
       <Rejection,>(failure: Rejection) => {
         if (controller.signal.aborted) return
@@ -352,6 +468,12 @@ export const AwsAccountSetupForm = ({
     )
   }
 
+  const followed = {
+    pipelines: mergeResourceNames(selectedPipelines, isManualEntryOpen ? pipelineNames : ""),
+    repositories: mergeResourceNames(selectedRepositories, isManualEntryOpen ? repositoryNames : "")
+  }
+  const followedCount = followed.repositories.length + followed.pipelines.length
+
   const submit = (event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault()
     setSetupError(null)
@@ -359,213 +481,383 @@ export const AwsAccountSetupForm = ({
       setSetupError("The installed AWS adapters are unavailable.")
       return
     }
-    const normalizedAccountName = accountName.trim()
-    const normalizedProfile = profile.trim()
-    const normalizedRegion = region.trim()
-    if (normalizedAccountName.length === 0 || normalizedProfile.length === 0 || normalizedRegion.length === 0) {
-      setSetupError("Add an account name, AWS profile, and region.")
+    const errors = requiredFieldErrors()
+    setFieldErrors(errors)
+    if (Object.keys(errors).length > 0) {
+      setInvalidFocus((count) => count + 1)
       return
     }
-    const repositories = mergeResourceNames(selectedRepositories, isManualEntryOpen ? repositoryNames : "")
-    const pipelines = mergeResourceNames(selectedPipelines, isManualEntryOpen ? pipelineNames : "")
-    if (repositories.length === 0 && pipelines.length === 0) {
+    // Profiles still loading: the profile field can't be chosen yet, so nothing may be followed under it.
+    if (awsProfilesState === "loading") return
+    // The profile was refused, so nothing may be followed under it.
+    if (profileRefused) {
+      setInvalidFocus((count) => count + 1)
+      return
+    }
+    if (followedCount === 0) {
       setSetupError("Select or manually add at least one repository or pipeline to follow.")
       return
     }
-    if (repositories.length > MAXIMUM_FOLLOWED_RESOURCES || pipelines.length > MAXIMUM_FOLLOWED_RESOURCES) {
+    if (
+      followed.repositories.length > MAXIMUM_FOLLOWED_RESOURCES ||
+      followed.pipelines.length > MAXIMUM_FOLLOWED_RESOURCES
+    ) {
       setSetupError(`Follow at most ${MAXIMUM_FOLLOWED_RESOURCES} repositories and pipelines per account.`)
       return
     }
-    if ([...repositories, ...pipelines].some((name) => name.length > 100)) {
+    if ([...followed.repositories, ...followed.pipelines].some((name) => name.length > 100)) {
       setSetupError("Repository and pipeline names must be 100 characters or fewer.")
       return
     }
     const drafts = connectionDrafts({
-      accountName: normalizedAccountName,
+      accountName: accountName.trim(),
       codeCommit,
       codePipeline,
-      pipelineNames: pipelines,
-      profile: normalizedProfile,
-      region: normalizedRegion,
-      repositoryNames: repositories
+      pipelineNames: followed.pipelines,
+      profile: profile.trim(),
+      region: region.trim(),
+      repositoryNames: followed.repositories
     })
     void onSubmit(drafts).then((didCreate) => {
       if (!didCreate) setSetupError("Some AWS resources could not be connected. Review the cards below and retry.")
     })
   }
 
+  const ready = discoveryState._tag === "ready" ? discoveryState : null
+  const policyDenied = ready?.response.organizationPolicyDenied === true
+  const services: ReadonlyArray<{
+    readonly outcome: AwsServiceResourceDiscovery
+    readonly service: "CodeCommit" | "CodePipeline"
+  }> =
+    ready === null || policyDenied
+      ? []
+      : [
+          { outcome: ready.response.codeCommit, service: "CodeCommit" },
+          { outcome: ready.response.codePipeline, service: "CodePipeline" }
+        ]
+  const failedServices = services.flatMap(({ outcome, service }) =>
+    outcome._tag === "failed" ? [{ outcome, service }] : []
+  )
+  const checkFailed = discoveryState._tag === "failed" && discoveryState.reason === "no-answer"
+  const discoveryLabel =
+    checkFailed || policyDenied || failedServices.length > 0 ? "Refresh discovery" : "Test & discover"
+  const errorTone = checkFailed || policyDenied || failedServices.length > 0
+  const isLoadingProfiles = awsProfilesState === "loading"
+  const regionError =
+    fieldErrors.region ?? (policyDenied && ready !== null ? organizationPolicyDeniedMessage(ready.region) : undefined)
+  const profileNotFound = discoveryState._tag === "profile-not-found" ? discoveryState : null
+  const signInProfile =
+    discoveryState._tag === "failed" && discoveryState.reason === "sign-in-required" ? discoveryState.profile : null
+
+  // A detected profile brings its configured region; a typed one keeps the region already typed.
+  const changeProfile = (nextProfile: string): void => {
+    const configured = awsProfiles.find((candidate) => candidate.profile === nextProfile)?.region
+    setProfile(nextProfile)
+    if (configured !== undefined && configured !== null) setRegion(configured)
+    setFieldErrors(({ profile: _profile, ...rest }) => rest)
+    resetDiscovery()
+  }
+
+  const changeRegion = (nextRegion: string): void => {
+    setRegion(nextRegion)
+    setFieldErrors(({ region: _region, ...rest }) => rest)
+    resetDiscovery()
+  }
+
+  // A policy denial is the outcome to act on, so the verified notice stays out of its way.
+  const verifiedNotice =
+    ready === null || policyDenied ? null : (
+      <Notice tone="positive">
+        {ready.profile} verified in {ready.region} at{" "}
+        <time dateTime={DateTime.formatIso(ready.checkedAt)}>
+          {DateTime.formatUtc(ready.checkedAt, {
+            hour: "2-digit",
+            hour12: false,
+            locale: "en-GB",
+            minute: "2-digit",
+            timeZoneName: "short"
+          })}
+        </time>
+        . Account details masked.
+      </Notice>
+    )
+
   return (
-    <form className={styles.form} onSubmit={submit}>
-      <div className={styles.intro}>
-        <Text as="h3" variant="card-title">
-          One account. Many delivery streams.
-        </Text>
-        <Text tone="secondary" variant="body">
-          Choose one local AWS profile and region, verify its account, then select CodeCommit repositories and
-          CodePipeline pipelines.
-        </Text>
-        <Text tone="secondary" variant="meta">
-          {profileDiscoveryMessage(awsProfiles.length, awsProfilesState)}
-        </Text>
-      </div>
-      <Field label="Account name" required>
-        {(controlProps) => (
-          <input
-            {...controlProps}
-            maxLength={90}
-            onChange={(event) => setAccountName(event.currentTarget.value)}
-            value={accountName}
-          />
-        )}
-      </Field>
-      <Field
-        label="AWS profile"
-        required
-        {...(discoveryState._tag === "profile-not-found"
-          ? {
-              description: `Detected on this machine: ${awsProfiles.map((candidate) => candidate.profile).join(", ")}.`,
-              error: `No AWS profile named ${discoveryState.profile} on this machine. Choose a detected profile, or add it to your AWS config, then test again.`
-            }
-          : {})}
-      >
-        {(controlProps) => (
-          <input
-            {...controlProps}
-            list={awsProfiles.length > 0 ? "aws-account-profiles" : undefined}
-            maxLength={200}
-            onChange={(event) => {
-              const nextProfile = event.currentTarget.value
-              const detectedRegion = awsProfiles.find((candidate) => candidate.profile === nextProfile)?.region
-              setProfile(nextProfile)
-              setRegion(detectedRegion ?? "")
-              resetDiscovery()
-            }}
-            value={profile}
-          />
-        )}
-      </Field>
-      <Field label="AWS region" required>
-        {(controlProps) => (
-          <input
-            {...controlProps}
-            maxLength={100}
-            onChange={(event) => {
-              setRegion(event.currentTarget.value)
-              resetDiscovery()
-            }}
-            value={region}
-          />
-        )}
-      </Field>
-      <div className={styles.discoveryActions}>
-        <Button loading={discoveryState._tag === "loading"} onClick={discover} type="button" variant="secondary">
-          {discoveryState._tag === "ready" ? "Refresh discovery" : "Test & discover"}
-        </Button>
-        {discoveryState._tag === "ready" ? (
-          <Text tone="secondary" variant="body">
-            Verified AWS account {discoveryState.response.accountId}
-          </Text>
-        ) : discoveryState._tag === "failed" ? (
-          <Notice announce="assertive" tone="critical">
-            {discoveryState.reason === "sign-in-required" &&
-            awsProfiles.some((candidate) => candidate.profile === discoveryState.profile && candidate.sso === true) ? (
-              <>
-                Sign-in for {discoveryState.profile} has expired. Run{" "}
-                <code>aws sso login --profile {discoveryState.profile}</code> in a terminal on this machine, then test
-                again.
-              </>
-            ) : discoveryState.reason === "sign-in-required" ? (
-              `The credentials for ${discoveryState.profile} were refused. Renew them in your AWS config, then test again.`
-            ) : (
-              "AWS didn’t answer the account check. Test again; if it keeps failing, check this machine’s network."
+    <form className={styles.form} noValidate onSubmit={submit} ref={form}>
+      <div className={styles.fields}>
+        <SetupField
+          error={fieldErrors.accountName}
+          hint={fieldErrors.accountName === undefined ? "Shown in Control Center only." : undefined}
+          label="Account name"
+        >
+          {(control) => (
+            <input
+              {...control}
+              className={styles.control}
+              maxLength={90}
+              onChange={(event) => {
+                setAccountName(event.currentTarget.value)
+                setFieldErrors(({ accountName: _accountName, ...rest }) => rest)
+              }}
+              value={accountName}
+            />
+          )}
+        </SetupField>
+        {isLoadingProfiles ? (
+          <div className={styles.field}>
+            <span className={styles.fieldLabel}>AWS profile</span>
+            <div className={styles.fieldStatus} role="status">
+              <StateLabel label="Discovering local AWS profiles…" size="compact" tone="progress" />
+            </div>
+          </div>
+        ) : profilesListed && profileNotFound === null ? (
+          <SetupField
+            error={fieldErrors.profile}
+            hint="From this computer’s AWS configuration. Credentials stay there."
+            label="AWS profile"
+          >
+            {(control) => (
+              <select
+                {...control}
+                className={`${styles.control} ${styles.mono}`}
+                onChange={(event) => changeProfile(event.currentTarget.value)}
+                value={profile}
+              >
+                {awsProfiles.map((candidate) => (
+                  <option key={candidate.profile} value={candidate.profile}>
+                    {candidate.profile}
+                  </option>
+                ))}
+              </select>
             )}
-          </Notice>
-        ) : null}
+          </SetupField>
+        ) : (
+          <SetupField
+            error={
+              profileNotFound === null
+                ? fieldErrors.profile
+                : `No AWS profile named ${profileNotFound.profile} on this machine. Choose a detected profile, or add it to your AWS config, then test again.`
+            }
+            hint={
+              profileNotFound !== null && awsProfiles.length > 0
+                ? `Detected on this machine: ${awsProfiles.map((candidate) => candidate.profile).join(", ")}.`
+                : profileNotFound === null
+                  ? "No AWS profiles found on this machine. Type a profile name from your AWS config."
+                  : undefined
+            }
+            label="AWS profile"
+          >
+            {(control) => (
+              <input
+                {...control}
+                autoComplete="off"
+                className={`${styles.control} ${styles.mono}`}
+                maxLength={200}
+                onChange={(event) => changeProfile(event.currentTarget.value)}
+                value={profile}
+              />
+            )}
+          </SetupField>
+        )}
+        {regionSource._tag === "loading" ? (
+          <SetupField hint="Regions this account has enabled." label="AWS region">
+            {(control) => (
+              <select {...control} className={`${styles.control} ${styles.mono}`} disabled value="loading">
+                <option value="loading">Reading enabled regions…</option>
+              </select>
+            )}
+          </SetupField>
+        ) : regionSource._tag === "list" ? (
+          <SetupField error={regionError} label="AWS region">
+            {(control) => (
+              <select
+                {...control}
+                className={`${styles.control} ${styles.mono}`}
+                onChange={(event) => changeRegion(event.currentTarget.value)}
+                value={region}
+              >
+                {regionSource.regions.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            )}
+          </SetupField>
+        ) : (
+          <SetupField
+            error={regionError}
+            hint={
+              profilesListed
+                ? "This profile can’t list the account’s regions, so type one."
+                : "Type the region to check."
+            }
+            label="AWS region"
+          >
+            {(control) => (
+              <input
+                {...control}
+                autoComplete="off"
+                className={`${styles.control} ${styles.mono}`}
+                maxLength={100}
+                onChange={(event) => changeRegion(event.currentTarget.value)}
+                value={region}
+              />
+            )}
+          </SetupField>
+        )}
       </div>
-      {discoveryState._tag === "ready" && isEmptyDiscovery(discoveryState.response) ? (
-        <Text as="p" tone="secondary" variant="body">
-          No CodeCommit repositories or CodePipeline pipelines in {discoveryState.region} for this account. Try another
-          region, or add names manually.
-        </Text>
+      {isLoadingProfiles ? (
+        <p className={styles.note}>
+          Test & discover is offered once a profile is found. You can still enter resource names manually.
+        </p>
       ) : null}
-      {discoveryState._tag === "ready" &&
-      (!isEmptyDiscovery(discoveryState.response) || selectedRepositories.size + selectedPipelines.size > 0) ? (
-        <div className={styles.resources}>
-          <ResourcePicker
-            label="Repositories"
-            profile={profile.trim()}
-            query={repositoryQuery}
-            selected={selectedRepositories}
-            service={discoveryState.response.codeCommit}
-            setQuery={setRepositoryQuery}
-            setSelected={setSelectedRepositories}
-          />
-          <ResourcePicker
-            label="Pipelines"
-            profile={profile.trim()}
-            query={pipelineQuery}
-            selected={selectedPipelines}
-            service={discoveryState.response.codePipeline}
-            setQuery={setPipelineQuery}
-            setSelected={setSelectedPipelines}
-          />
-        </div>
+      {checkFailed ? (
+        <Notice announce="assertive" tone="critical">
+          AWS didn’t answer the account check. Test again; if it keeps failing, check this machine’s network.
+        </Notice>
       ) : null}
-      <div>
-        <Button onClick={() => setIsManualEntryOpen((current) => !current)} type="button" variant="quiet">
+      {failedServices.length === 0 ? null : (
+        <ul className={styles.messages}>
+          {failedServices.map(({ outcome, service }) => {
+            const tag = discoveryFailureTag(outcome)
+            return (
+              <li key={service}>
+                <StateLabel label={tag.label} size="compact" tone={tag.tone} />
+                <span>{discoveryFailureMessage(service, ready?.profile ?? profile.trim(), outcome)}</span>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+      <div className={styles.buttons}>
+        {isLoadingProfiles ? null : (
+          <Button
+            size={buttonSize}
+            disabled={regionSource._tag === "loading"}
+            loading={discoveryState._tag === "loading"}
+            onClick={discover}
+            type="button"
+            variant="primary"
+          >
+            {discoveryLabel}
+          </Button>
+        )}
+        <Button
+          size={buttonSize}
+          aria-expanded={isManualEntryOpen}
+          onClick={() => setIsManualEntryOpen((current) => !current)}
+          type="button"
+          variant={errorTone ? "secondary" : "quiet"}
+        >
           {isManualEntryOpen ? "Hide manual name entry" : "Enter resource names manually"}
         </Button>
+        {followedCount > 0 ? null : (
+          <Button size={buttonSize} disabled={isSubmitting} onClick={onCancel} type="button" variant="quiet">
+            Cancel
+          </Button>
+        )}
       </div>
+      {signInProfile === null ? null : (
+        <Notice announce="assertive" tone="critical">
+          {awsProfiles.some((candidate) => candidate.profile === signInProfile && candidate.sso === true) ? (
+            <span>
+              Sign-in for {signInProfile} has expired. Run{" "}
+              <code className={styles.command}>aws sso login --profile {signInProfile}</code> in a terminal on this
+              machine, then test again.
+            </span>
+          ) : (
+            `The credentials for ${signInProfile} were refused. Renew them in your AWS config, then test again.`
+          )}
+        </Notice>
+      )}
+      {verifiedNotice}
+      {ready !== null && !policyDenied && isEmptyDiscovery(ready.response) ? (
+        <p className={styles.note}>
+          No CodeCommit repositories or CodePipeline pipelines in {ready.region} for this account. Try another region,
+          or add names manually.
+        </p>
+      ) : null}
+      {ready === null || policyDenied ? (
+        <>
+          <ResourceList
+            label="Repository names"
+            selected={selectedRepositories}
+            service={null}
+            setSelected={setSelectedRepositories}
+          />
+          <ResourceList
+            label="Pipeline names"
+            selected={selectedPipelines}
+            service={null}
+            setSelected={setSelectedPipelines}
+          />
+        </>
+      ) : (
+        <>
+          <ResourceList
+            label="Repository names"
+            selected={selectedRepositories}
+            service={ready.response.codeCommit}
+            setSelected={setSelectedRepositories}
+          />
+          {ready.response.codeCommit._tag === "available" && ready.response.codeCommit.truncated ? (
+            <p className={styles.note}>More repositories may exist. Enter their names manually to follow them.</p>
+          ) : null}
+          <ResourceList
+            label="Pipeline names"
+            selected={selectedPipelines}
+            service={ready.response.codePipeline}
+            setSelected={setSelectedPipelines}
+          />
+          {ready.response.codePipeline._tag === "available" && ready.response.codePipeline.truncated ? (
+            <p className={styles.note}>More pipelines may exist. Enter their names manually to follow them.</p>
+          ) : null}
+        </>
+      )}
       {isManualEntryOpen ? (
-        <div className={styles.resources}>
-          <Field description="Comma or line separated. Maximum 20 including selected names." label="Repository names">
-            {(controlProps) => (
+        <div className={styles.manual}>
+          <SetupField hint="Comma or line separated. Up to 20 including selected names." label="Repository names">
+            {(control) => (
               <textarea
-                {...controlProps}
+                {...control}
+                className={`${styles.control} ${styles.area} ${styles.mono}`}
                 maxLength={4_096}
                 onChange={(event) => setRepositoryNames(event.currentTarget.value)}
-                placeholder={"payments-api\nrisk-engine"}
+                rows={2}
                 value={repositoryNames}
               />
             )}
-          </Field>
-          <Field description="Comma or line separated. Maximum 20 including selected names." label="Pipeline names">
-            {(controlProps) => (
+          </SetupField>
+          <SetupField hint="Comma or line separated. Up to 20 including selected names." label="Pipeline names">
+            {(control) => (
               <textarea
-                {...controlProps}
+                {...control}
+                className={`${styles.control} ${styles.area} ${styles.mono}`}
                 maxLength={4_096}
                 onChange={(event) => setPipelineNames(event.currentTarget.value)}
-                placeholder={"payments-production\nrisk-production"}
+                rows={2}
                 value={pipelineNames}
               />
             )}
-          </Field>
+          </SetupField>
         </div>
       ) : null}
-      {awsProfiles.length > 0 ? (
-        <datalist id="aws-account-profiles">
-          {awsProfiles.map((candidate) => (
-            <option
-              key={candidate.profile}
-              label={candidate.region ?? "Region not configured"}
-              value={candidate.profile}
-            />
-          ))}
-        </datalist>
-      ) : null}
       {setupError === null ? null : (
-        <Text as="p" className={styles.error} role="alert" variant="body">
+        <Notice announce="assertive" tone="critical">
           {setupError}
-        </Text>
+        </Notice>
       )}
-      <div className={styles.actions}>
-        <Button disabled={isSubmitting} onClick={onCancel} type="button" variant="secondary">
-          Cancel
-        </Button>
-        <Button loading={isSubmitting} type="submit" variant="primary">
-          Connect AWS account
-        </Button>
-      </div>
+      {followedCount === 0 ? null : (
+        <div className={styles.buttons}>
+          <Button disabled={isLoadingProfiles} size={buttonSize} loading={isSubmitting} type="submit" variant="primary">
+            {`Follow ${followedCount} ${followedCount === 1 ? "resource" : "resources"}`}
+          </Button>
+          <Button size={buttonSize} disabled={isSubmitting} onClick={onCancel} type="button" variant="quiet">
+            Cancel
+          </Button>
+        </div>
+      )}
     </form>
   )
 }

@@ -14,6 +14,7 @@ import type {
   AtlassianOAuthProviderIntent,
   AtlassianProfileDiscoveryResponse,
   AwsProfileDiscoveryResponse,
+  AwsRegionDiscoveryResponse,
   AwsResourceDiscoveryRequest,
   AwsResourceDiscoveryResponse,
   CreatePluginConnectionRequest,
@@ -403,6 +404,50 @@ const SetupForm = ({
   )
 }
 
+/**
+ * The open AWS form: one account across CodeCommit and CodePipeline, so it takes the setup panel's own header
+ * and the whole card row. Opening it scrolls it into view and moves focus to its heading, so a phone user lands
+ * on the form rather than the card that opened it.
+ */
+const AwsSetupPanel = ({
+  isRecovery,
+  ...props
+}: Parameters<typeof AwsAccountSetupForm>[0] & { readonly isRecovery: boolean }): ReactElement => {
+  const heading = useRef<HTMLHeadingElement>(null)
+  useEffect(() => {
+    const element = heading.current
+    if (element === null) return
+    element.focus({ preventScroll: true })
+    element.closest("article")?.scrollIntoView({ block: "start" })
+  }, [])
+  return (
+    <Surface
+      aria-labelledby="aws-setup-title"
+      as="article"
+      className={`${styles.card} ${styles.setupPanel}`}
+      form="grouped"
+      padding="default"
+    >
+      <header className={styles.setupHeader}>
+        <div className={styles.setupTitleRow}>
+          <div className={styles.setupTitle}>
+            <ServiceMark service="codecommit" size="compact" />
+            <ServiceMark service="codepipeline" size="compact" />
+            <Text as="h2" id="aws-setup-title" ref={heading} tabIndex={-1} variant="card-title">
+              Connect AWS account
+            </Text>
+          </div>
+          {isRecovery ? <StateLabel label="Needs correction" tone="critical" /> : null}
+        </div>
+        <Text tone="secondary" variant="body">
+          One account. Many delivery streams.
+        </Text>
+      </header>
+      <AwsAccountSetupForm {...props} />
+    </Surface>
+  )
+}
+
 const CatalogCard = ({
   atlassianProfiles,
   atlassianProfilesState,
@@ -418,6 +463,7 @@ const CatalogCard = ({
   isSubmitting,
   onCancel,
   onDiscoverAws,
+  onDiscoverAwsRegions,
   onOpen,
   onReloadAwsProfiles,
   onStartAtlassianOAuth,
@@ -442,6 +488,7 @@ const CatalogCard = ({
     request: AwsResourceDiscoveryRequest,
     signal: AbortSignal
   ) => Promise<AwsResourceDiscoveryResponse>
+  readonly onDiscoverAwsRegions: (profile: string, signal: AbortSignal) => Promise<AwsRegionDiscoveryResponse>
   readonly onOpen: () => void
   readonly onReloadAwsProfiles: (signal: AbortSignal) => Promise<AwsProfileDiscoveryResponse>
   readonly onStartAtlassianOAuth: (
@@ -455,6 +502,22 @@ const CatalogCard = ({
 }): ReactElement => {
   const isAws = catalog.providerId === "codecommit" || catalog.providerId === "codepipeline"
   const isAtlassian = catalog.providerId === "jira" || catalog.providerId === "confluence"
+  if (isOpen && isAws) {
+    return (
+      <AwsSetupPanel
+        isRecovery={isRecovery}
+        awsProfiles={awsProfiles}
+        awsProfilesState={awsProfilesState}
+        catalogs={catalogs}
+        isSubmitting={isSubmitting}
+        onCancel={onCancel}
+        onDiscover={onDiscoverAws}
+        onDiscoverRegions={onDiscoverAwsRegions}
+        onReloadAwsProfiles={onReloadAwsProfiles}
+        onSubmit={onSubmitAws}
+      />
+    )
+  }
   return (
     <Surface as="article" className={styles.card} padding="default" form="grouped">
       <div className={styles.cardHeading}>
@@ -475,18 +538,7 @@ const CatalogCard = ({
         {catalog.description}
       </Text>
       {isOpen ? (
-        isAws ? (
-          <AwsAccountSetupForm
-            awsProfiles={awsProfiles}
-            awsProfilesState={awsProfilesState}
-            catalogs={catalogs}
-            isSubmitting={isSubmitting}
-            onCancel={onCancel}
-            onDiscover={onDiscoverAws}
-            onReloadAwsProfiles={onReloadAwsProfiles}
-            onSubmit={onSubmitAws}
-          />
-        ) : isAtlassian ? (
+        isAtlassian ? (
           <AtlassianAccountSetupForm
             catalogs={catalogs}
             isSubmitting={isSubmitting}
@@ -565,6 +617,9 @@ const ServicePreviewCard = ({
 )
 
 /** Manage fixed first-party providers and prove configured identities with owner-only live checks. */
+/** One empty list for "not detected yet", so the setup form doesn't see a new list on every render. */
+const NO_AWS_PROFILES: AwsProfileDiscoveryResponse = []
+
 export const ServicesPage = ({
   transport = browserConnectionTestTransport
 }: {
@@ -579,6 +634,19 @@ export const ServicesPage = ({
   const refreshOverview = useCallback(() => overviewRefresh.current?.refresh(), [])
   const [connectionsState, setConnectionsState] = useState<ConnectionsState>({ _tag: "idle" })
   const [awsProfilesState, setAwsProfilesState] = useState<AwsProfilesState>({ _tag: "idle" })
+  const awsProfiles = awsProfilesState._tag === "ready" ? awsProfilesState.profiles : NO_AWS_PROFILES
+  // Stable across renders: the setup form re-asks for regions whenever this identity changes.
+  const discoverAwsRegions = useCallback(
+    (profile: string, signal: AbortSignal): Promise<AwsRegionDiscoveryResponse> => {
+      const discoverRegions = transport.discoverAwsRegions
+      if (discoverRegions === undefined) return Promise.resolve({ _tag: "denied" })
+      return discoverRegions(profile, signal).catch(<UnparsedInput,>(failure: UnparsedInput) => {
+        if (sessionKey !== null && Predicate.isTagged("UnauthorizedApiError")(failure)) invalidateSession(sessionKey)
+        return Promise.reject(failure)
+      })
+    },
+    [invalidateSession, sessionKey, transport]
+  )
   const [atlassianProfilesState, setAtlassianProfilesState] = useState<AtlassianProfilesState>({ _tag: "idle" })
   const [testStates, setTestStates] = useState<ReadonlyMap<PluginConnectionId, ConnectionTestState>>(new Map())
   const [enablementStates, setEnablementStates] = useState<ReadonlyMap<PluginConnectionId, ConnectionEnablementState>>(
@@ -1452,7 +1520,7 @@ export const ServicesPage = ({
                   atlassianProfiles={atlassianProfilesState._tag === "ready" ? atlassianProfilesState.profiles : []}
                   atlassianProfilesState={atlassianProfilesState._tag}
                   atlassianSetupIntent={setupIntent}
-                  awsProfiles={awsProfilesState._tag === "ready" ? awsProfilesState.profiles : []}
+                  awsProfiles={awsProfiles}
                   awsProfilesState={awsProfilesState._tag}
                   canConfigure={canConfigure}
                   catalog={catalog}
@@ -1480,6 +1548,7 @@ export const ServicesPage = ({
                       return Promise.reject(failure)
                     })
                   }}
+                  onDiscoverAwsRegions={discoverAwsRegions}
                   onOpen={() => {
                     if (openProvider !== catalog.providerId) {
                       completedBatchDrafts.current.delete(catalog.providerId)
@@ -1492,7 +1561,7 @@ export const ServicesPage = ({
                   onReloadAwsProfiles={(signal) => {
                     const discoverProfiles = transport.discoverAwsProfiles
                     if (discoverProfiles === undefined) {
-                      return Promise.resolve(awsProfilesState._tag === "ready" ? awsProfilesState.profiles : [])
+                      return Promise.resolve(awsProfiles)
                     }
                     return discoverProfiles(signal).then((profiles) => {
                       if (!signal.aborted) setAwsProfilesState({ _tag: "ready", profiles })

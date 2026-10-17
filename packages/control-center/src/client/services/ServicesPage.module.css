@@ -275,6 +275,34 @@
   }
 }
 
+/* The open AWS setup panel takes the whole row of the card grid, at the design's readable width. */
+.setupPanel {
+  grid-column: 1 / -1;
+  gap: var(--rly-space-20);
+  max-inline-size: 880px;
+  padding: clamp(16px, 2vw, 24px);
+}
+
+.setupHeader {
+  display: grid;
+  gap: var(--rly-space-6);
+}
+
+.setupTitle {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--rly-space-8) var(--rly-space-12);
+}
+
+.setupTitleRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--rly-space-8) var(--rly-space-16);
+}
+
 /* Permissions as label | value rows, as the setup design's fact lists. The connection card is narrow, so a row
    stacks label over value until the list itself has room for the design's 180px label column. */
 .permissionFacts {

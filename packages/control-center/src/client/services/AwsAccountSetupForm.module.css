@@ -1,73 +1,186 @@
 .form {
   display: grid;
   gap: var(--rly-space-20);
+  min-inline-size: 0;
 }
 
-.intro {
+.fields,
+.manual {
   display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+  gap: var(--rly-space-16) var(--rly-space-20);
+}
+
+.field {
+  display: grid;
+  align-content: start;
   gap: var(--rly-space-4);
+  min-inline-size: 0;
 }
 
-.resources {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--rly-space-12);
+.fieldLabel {
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 20px;
 }
 
-.resources textarea {
-  min-block-size: 7rem;
+.control {
+  box-sizing: border-box;
+  inline-size: 100%;
+  min-inline-size: 0;
+  min-block-size: 36px;
+  padding: 0 var(--rly-space-12);
+  border: 1px solid var(--rly-color-border-2);
+  border-radius: var(--rly-radius-field);
+  background: var(--rly-color-surface-1);
+  color: var(--rly-color-text-1);
+  font: inherit;
+  font-size: 15px;
+}
+
+.control[aria-invalid="true"] {
+  border: 2px solid var(--rly-color-text-1);
+}
+
+.control:disabled {
+  color: var(--rly-color-text-2);
+}
+
+.mono {
+  font-family: var(--rly-font-mono);
+}
+
+.area {
+  padding: var(--rly-space-8) var(--rly-space-12);
+  line-height: 22px;
   resize: vertical;
 }
 
-.discoveryActions,
-.resourcePanelHeading {
+.fieldStatus {
+  display: flex;
+  align-items: center;
+  min-block-size: 36px;
+  padding: 0 var(--rly-space-12);
+  border: 1px dashed var(--rly-color-border-2);
+  border-radius: var(--rly-radius-field);
+}
+
+.fieldError {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--rly-space-8);
+  gap: var(--rly-space-4) var(--rly-space-8);
+  font-size: 13px;
+  line-height: 20px;
 }
 
-.resourcePanel {
+.fieldHint {
+  color: var(--rly-color-text-2);
+  font-size: 12px;
+  line-height: 16px;
+  overflow-wrap: break-word;
+}
+
+.buttons {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--rly-space-8) var(--rly-space-12);
+}
+
+/* Every form action is a 44px touch target, at any width. */
+.buttons button {
+  min-block-size: 44px;
+  min-inline-size: 44px;
+}
+
+.note {
+  margin: 0;
+  color: var(--rly-color-text-2);
+  font-size: 14px;
+  line-height: 20px;
+  text-wrap: pretty;
+}
+
+.messages {
   display: grid;
-  align-content: start;
-  gap: var(--rly-space-8);
-  min-inline-size: 0;
-  padding: var(--rly-space-12);
-  border: 1px solid var(--rly-color-border-2);
-  border-radius: var(--rly-radius-control);
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--rly-color-border-1);
+  border-radius: var(--rly-radius-group);
+  list-style: none;
 }
 
-.resourcePanelHeading {
-  justify-content: space-between;
-}
-
-.choiceList {
+.messages li {
   display: grid;
   gap: var(--rly-space-4);
-  max-block-size: 13rem;
-  overflow: auto;
+  padding: var(--rly-space-12);
+  font-size: 14px;
+  line-height: 20px;
+  overflow-wrap: break-word;
+  text-wrap: pretty;
+}
+
+.messages li + li {
+  border-block-start: 1px solid var(--rly-color-border-1);
+}
+
+.command {
+  font-family: var(--rly-font-mono);
+  font-size: 0.93em;
+  overflow-wrap: break-word;
+}
+
+.list {
+  display: grid;
+  gap: var(--rly-space-8);
+}
+
+.listHeading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--rly-space-4) var(--rly-space-12);
+}
+
+.listCount {
+  color: var(--rly-color-text-2);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.choices {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr));
+  gap: 0 var(--rly-space-16);
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
 .choice {
   display: flex;
   align-items: center;
   gap: var(--rly-space-8);
-  padding: var(--rly-space-4);
+  min-block-size: 36px;
+  font: 13px/20px var(--rly-font-mono);
+  overflow-wrap: break-word;
+  cursor: pointer;
 }
 
-.actions {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: var(--rly-space-8);
-}
-
-.error {
-  color: var(--rly-color-blocked-ink);
+.choice input {
+  flex: none;
+  inline-size: 18px;
+  block-size: 18px;
+  margin: 0;
+  accent-color: var(--rly-color-text-1);
 }
 
 @media (max-width: 40rem) {
-  .resources {
-    grid-template-columns: 1fr;
+  .control,
+  .fieldStatus,
+  .choice {
+    min-block-size: 44px;
   }
 }

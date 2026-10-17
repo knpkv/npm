@@ -2,6 +2,7 @@ import * as BrowserCrypto from "@effect/platform-browser/BrowserCrypto"
 import * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
 import * as FetchHttpClient from "effect/http/FetchHttpClient"
+import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
 
 import { makeControlCenterApiClient } from "../../api/client.js"
@@ -27,7 +28,11 @@ import type {
   PluginOverviewResponse,
   PluginSynchronizationState
 } from "../../api/index.js"
-import type { DiscoveredAtlassianProfile, ProviderAccountSummary } from "../../api/plugins.js"
+import type {
+  AwsRegionDiscoveryResponse,
+  DiscoveredAtlassianProfile,
+  ProviderAccountSummary
+} from "../../api/plugins.js"
 import { PluginConnectionId, type ProviderAccountId } from "../../domain/identifiers.js"
 import { makeAuthenticatedMutationClient } from "../authenticatedMutationClient.js"
 import { observePortfolioInvalidations } from "../portfolio/usePortfolioSnapshot.js"
@@ -47,6 +52,8 @@ export interface ConnectionTestTransport {
     request: AwsResourceDiscoveryRequest,
     signal: AbortSignal
   ) => Promise<AwsResourceDiscoveryResponse>
+  /** The enabled regions of one profile's account, or `denied` when the profile may not list them. */
+  readonly discoverAwsRegions?: (profile: string, signal: AbortSignal) => Promise<AwsRegionDiscoveryResponse>
   readonly discoverAtlassianProfiles?: (signal: AbortSignal) => Promise<AtlassianProfileDiscoveryResponse>
   readonly startAtlassianOAuthGrant?: (
     providers: AtlassianOAuthProviderIntent,
@@ -159,6 +166,18 @@ export const browserConnectionTestTransport: ConnectionTestTransport = {
         const client = yield* makeControlCenterApiClient()
         return yield* client.plugins.discoverAwsProfiles()
       }).pipe(Effect.provide(FetchHttpClient.layer)),
+      { signal }
+    ),
+  // Request-scoped: each run builds and releases its own HTTP layer.
+  discoverAwsRegions: (profile, signal) =>
+    Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function*() {
+          const context = yield* Layer.build(FetchHttpClient.layer)
+          const client = yield* makeAuthenticatedMutationClient.pipe(Effect.provideContext(context))
+          return yield* client.plugins.discoverAwsRegions({ payload: { profile } })
+        })
+      ),
       { signal }
     ),
   discoverAwsResources: (request, signal) =>
