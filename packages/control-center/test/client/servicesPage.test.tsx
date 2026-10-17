@@ -2900,9 +2900,9 @@ describe("ServicesPage connection tests", () => {
       expect(awsFollowButton(host)?.textContent).toBe("Follow 1 resource")
     })
 
-    // A region picked after discovery ran (here: the region lookup for a profile added mid-test) must not carry
-    // that discovery's selections into another region.
-    it("drops a discovery when the region changes under it", async () => {
+    // A region list arriving after discovery (here: for a profile added mid-test) keeps the region already
+    // chosen when the account has it enabled, so the verified discovery and its selections stand.
+    it("keeps a verified region when the region list arrives afterwards", async () => {
       let resolveRegions: ((answer: AwsRegionDiscoveryResponse) => void) | undefined
       const createBatch = vi.fn<NonNullable<ConnectionTestTransport["createBatch"]>>()
       const host = await setupHost({
@@ -2931,10 +2931,10 @@ describe("ServicesPage connection tests", () => {
         ?.querySelector<HTMLInputElement>('input[type="checkbox"]')
       await act(async () => box?.click())
       await act(async () => resolveRegions?.({ _tag: "available", regions: ["eu-west-1", "us-east-1"] }))
-      expect(awsSelect(host, "AWS region").value).toBe("eu-west-1")
-      expect(host.textContent).not.toContain("verified in us-east-1")
-      expect(awsFollowButton(host)).toBeUndefined()
-      expect(createBatch).not.toHaveBeenCalled()
+      expect(awsSelect(host, "AWS region").value).toBe("us-east-1")
+      expect(host.textContent).toContain("staging verified in us-east-1")
+      expect(box?.checked).toBe(true)
+      expect(awsFollowButton(host)?.textContent).toBe("Follow 1 resource")
     })
 
     it("counts every followed resource on the follow button", async () => {

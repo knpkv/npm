@@ -76,18 +76,19 @@ export const refreshedAwsResourceChoices = (
 ): ReadonlyArray<string> => [...new Set([...discovered, ...selected])].sort((left, right) => left.localeCompare(right))
 
 /**
- * The region the region select starts on: the profile's configured region when the account has it enabled,
- * otherwise the region already chosen when it is still offered, otherwise the first enabled region.
+ * The region the region select lands on once the enabled regions arrive: the region already chosen when the
+ * account has it enabled (a typed and verified region never flips), otherwise the profile's configured region
+ * when it is enabled, otherwise the first enabled region.
  */
 export const initialAwsRegion = (
   regions: ReadonlyArray<string>,
   configured: string | null | undefined,
   current: string
 ): string =>
-  configured !== null && configured !== undefined && regions.includes(configured)
-    ? configured
-    : regions.includes(current)
-      ? current
+  regions.includes(current)
+    ? current
+    : configured !== null && configured !== undefined && regions.includes(configured)
+      ? configured
       : (regions[0] ?? current)
 
 /** The count beside a resource list: discovery returns at most 20 names and only says whether more exist. */
@@ -404,7 +405,7 @@ export const AwsAccountSetupForm = ({
   // selections no longer describe what Follow would connect.
   useEffect(() => {
     if (discoveredRegion.current !== null && discoveredRegion.current !== region.trim()) resetDiscovery()
-  })
+  }, [region])
 
   const requiredFieldErrors = (): FieldErrors => ({
     ...(accountName.trim().length === 0 && { accountName: "Add an account name." }),
