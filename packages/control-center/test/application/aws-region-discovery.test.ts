@@ -1,5 +1,10 @@
 import { assert, describe, it } from "@effect/vitest"
+import { codeCommitMockAwsClientConfig } from "@knpkv/codecommit-core/MockTransport.js"
+import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
+import * as HttpClient from "effect/http/HttpClient"
+import * as Layer from "effect/Layer"
+import * as Option from "effect/Option"
 import * as Result from "effect/Result"
 
 import {
@@ -16,6 +21,7 @@ import {
   decodeEnabledRegions,
   makeAwsRegionDiscovery
 } from "../../src/server/application/awsRegionDiscovery.js"
+import { awsResourceDiscoveryLayerWithCodeCommitHttpClient } from "../../src/server/application/awsResourceDiscovery.js"
 
 const run = <A, E>(
   enabledRegions: AwsRegionReader["Service"]["enabledRegions"],
@@ -107,4 +113,21 @@ describe("AWS region discovery", () => {
       })
     )
   })
+
+  // The injected-transport composition is the deterministic (mock) runtime: no host profile, no public Account API.
+  it.effect("is absent from the injected-transport composition, so mock mode never reads a host profile", () =>
+    Effect.gen(function*() {
+      const requests: Array<string> = []
+      const transport = HttpClient.make((request) => {
+        requests.push(request.url)
+        return Effect.die("region discovery used the injected transport")
+      })
+      const context = yield* Layer.build(
+        awsResourceDiscoveryLayerWithCodeCommitHttpClient(transport, codeCommitMockAwsClientConfig).pipe(
+          Layer.provide(Layer.succeed(HttpClient.HttpClient, transport))
+        )
+      )
+      assert.isTrue(Option.isNone(Context.getOption(context, AwsRegionDiscovery)))
+      assert.deepStrictEqual(requests, [])
+    }).pipe(Effect.scoped))
 })

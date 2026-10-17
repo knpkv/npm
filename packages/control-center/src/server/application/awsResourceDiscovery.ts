@@ -289,17 +289,16 @@ const discoveryClients = (
 
 /**
  * Production AWS discovery with only CodeCommit identity and repository calls on a dedicated transport.
- * Region discovery reads `account:ListRegions` on that same transport.
+ * This is the deterministic (mock) composition, so it carries no region discovery: that reader resolves host
+ * profiles and calls the public Account API, which the CodeCommit mock does not route. The region endpoint
+ * then answers unavailable and the setup form falls back to typing a region.
  */
 export const awsResourceDiscoveryLayerWithCodeCommitHttpClient = (
   codeCommitHttpClient: HttpClient.HttpClient,
   codeCommitAwsConfiguration?: Layer.Layer<AwsClientConfig.AwsClientConfig>
 ) =>
-  Layer.merge(
-    Layer.effect(AwsResourceDiscovery, makeAwsResourceDiscovery()).pipe(
-      Layer.provide(discoveryClients(codeCommitHttpClient, codeCommitAwsConfiguration))
-    ),
-    awsRegionDiscoveryLayer.pipe(Layer.provide(Layer.succeed(HttpClient.HttpClient, codeCommitHttpClient)))
+  Layer.effect(AwsResourceDiscovery, makeAwsResourceDiscovery()).pipe(
+    Layer.provide(discoveryClients(codeCommitHttpClient, codeCommitAwsConfiguration))
   )
 
 /** Production AWS discovery layer with bounded provider timeouts, and region discovery beside it. */

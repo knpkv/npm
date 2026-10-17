@@ -1902,6 +1902,12 @@ export const makePluginAdministrationWithOAuth = Effect.fn("PluginAdministration
   return yield* makePluginAdministrationWithConnections(pluginConnections, publicOrigin, grants)
 })
 
+/**
+ * Resource discovery, optionally with region discovery beside it. Region discovery is read with
+ * `Context.getOption`, so a composition without it (the deterministic mock) leaves its endpoint unavailable.
+ */
+type AwsDiscoveryLayer = Layer.Layer<AwsResourceDiscovery, never, HttpClient.HttpClient>
+
 /** Live plugin administration layer. */
 export const pluginAdministrationLayer = Layer.effect(PluginAdministration, makePluginAdministration).pipe(
   Layer.provide(awsResourceDiscoveryLayer)
@@ -1910,7 +1916,7 @@ export const pluginAdministrationLayer = Layer.effect(PluginAdministration, make
 /** Live administration layer with browser Atlassian OAuth grants. */
 export const pluginAdministrationOAuthLayer = (
   publicOrigin: string,
-  resourceDiscovery = awsResourceDiscoveryLayer
+  resourceDiscovery: AwsDiscoveryLayer = awsResourceDiscoveryLayer
 ): Layer.Layer<PluginAdministration, never, Exclude<PluginAdministrationOAuthRequirements, Scope.Scope>> =>
   Layer.effect(PluginAdministration, makePluginAdministrationWithOAuth(null, publicOrigin)).pipe(
     Layer.provide(resourceDiscovery)
@@ -1929,7 +1935,7 @@ export const pluginAdministrationLayerWithConnections = (
 export const pluginAdministrationOAuthLayerWithConnections = (
   pluginConnections: PluginConnectionMapV1,
   publicOrigin: string,
-  resourceDiscovery = awsResourceDiscoveryLayer
+  resourceDiscovery: AwsDiscoveryLayer = awsResourceDiscoveryLayer
 ): Layer.Layer<PluginAdministration, never, Exclude<PluginAdministrationOAuthRequirements, Scope.Scope>> =>
   Layer.effect(PluginAdministration, makePluginAdministrationWithOAuth(pluginConnections, publicOrigin)).pipe(
     Layer.provide(resourceDiscovery)
