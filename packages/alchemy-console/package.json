@@ -73,6 +73,7 @@
   },
   "devDependencies": {
     "@knpkv/rly": "workspace:^",
+    "esbuild": "^0.28.2",
     "@effect/vitest": "4.0.0",
     "@playwright/test": "1.63.0",
     "@types/node": "^26.6.4",
@@ -93,7 +94,6 @@
     "@distilled.cloud/aws": "^1.0.0-rc.13",
     "@knpkv/bounded-io": "workspace:^",
     "@knpkv/browser-pairing": "workspace:^",
-    "jsonc-parser": "^3.3.1",
     "yaml": "^2.9.1"
   }
 }
