@@ -56,6 +56,8 @@ interrupted or cancelled transfers fail with `ReferenceFailure` even after succe
 and page readiness. Context closure and global timeouts are not completion signals.
 The file inventory includes the fixture, HTML, scripts, CSS, fonts and images.
 Only `manifest.json` and `waivers.json` are outside the hash inventory. Symlinks fail.
+Any file under an `uploads/` directory, in any case, fails even when hashed: design uploads are source material
+that can hold real names, and refs are exports only.
 
 See [`design-refs/_fixture/manifest.json`](../../design-refs/_fixture/manifest.json)
 for the complete HTML example. Its enforcement block is:
@@ -222,6 +224,7 @@ where creating symlinks requires additional privileges.
 ## Waivers and reference review
 
 A waiver names screen, state, region, rule, reason, detail and HTTPS decision link.
+Its reason is `design-impossible` or `owner-decision`, the repository owner's call.
 Optional viewport/theme narrow its scope. `region: "*"` names the whole frame;
 it is not a wildcard matching all regions. Each waiver must match an actual failure.
 A stale waiver fails even during legacy grace. Coverage and hash integrity cannot
