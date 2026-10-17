@@ -34,6 +34,7 @@
     { "name": "Classification Level", "description": "" },
     { "name": "Comment", "description": "" },
     { "name": "Content", "description": "" },
+    { "name": "Content Permissions", "description": "" },
     { "name": "Content Properties", "description": "" },
     { "name": "Custom Content", "description": "" },
     { "name": "Database", "description": "" },
@@ -57,6 +58,1866 @@
     { "name": "Whiteboard", "description": "" }
   ],
   "paths": {
+    "/pages/{id}/restriction-state": {
+      "get": {
+        "tags": ["Content Permissions"],
+        "operationId": "getPageRestrictionState",
+        "summary": "Get page restriction state",
+        "description": "Returns the restriction state of a page.\n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\nPermission to view the page.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The ID of the page.",
+            "schema": { "format": "int64", "type": "integer" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Returned if the restriction state is successfully retrieved.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RestrictionStateResponse" } } }
+          },
+          "401": {
+            "description": "Returned if the authentication credentials are incorrect or missing from the request.",
+            "content": {}
+          },
+          "404": {
+            "description": "Returned if the content was not found or the calling user does not have permission to perform this operation.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionErrorResponse" } }
+            }
+          }
+        },
+        "security": [{ "basicAuth": [] }, { "oAuthDefinitions": ["read:page:confluence"] }],
+        "x-atlassian-oauth2-scopes": [
+          { "scheme": "oAuthDefinitions", "state": "Current", "scopes": ["read:page:confluence"] }
+        ],
+        "x-atlassian-connect-scope": "READ",
+        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": false }]
+      },
+      "put": {
+        "tags": ["Content Permissions"],
+        "operationId": "setPageRestrictionState",
+        "summary": "Set page restriction state",
+        "description": "Sets the restriction state of a page.\n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\nPermission to edit the page or administer the space.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The ID of the page.",
+            "schema": { "format": "int64", "type": "integer" }
+          },
+          {
+            "name": "allow-self-lockout",
+            "in": "query",
+            "required": false,
+            "description": "If `false` (default), the request is rejected when it would remove the calling user's own edit access.\nSet to `true` to allow the operation even when it locks out the caller.",
+            "schema": { "type": "boolean", "default": false }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["state"],
+                "properties": { "state": { "$ref": "#/components/schemas/ContentRestrictionState" } }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Returned if the state was successfully updated.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RestrictionStateResponse" } } }
+          },
+          "400": {
+            "description": "Returned if the request body is invalid.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionErrorResponse" } }
+            }
+          },
+          "401": {
+            "description": "Returned if the authentication credentials are incorrect or missing from the request.",
+            "content": {}
+          },
+          "404": {
+            "description": "Returned if the content was not found or the calling user does not have permission to perform this operation.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionErrorResponse" } }
+            }
+          }
+        },
+        "security": [{ "basicAuth": [] }, { "oAuthDefinitions": ["write:page:confluence"] }],
+        "x-atlassian-oauth2-scopes": [
+          { "scheme": "oAuthDefinitions", "state": "Current", "scopes": ["write:page:confluence"] }
+        ],
+        "x-atlassian-connect-scope": "WRITE",
+        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": false }]
+      }
+    },
+    "/blogposts/{id}/restriction-state": {
+      "get": {
+        "tags": ["Content Permissions"],
+        "operationId": "getBlogPostRestrictionState",
+        "summary": "Get blog post restriction state",
+        "description": "Returns the restriction state of a blog post.\n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\nPermission to view the blog post.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The ID of the blog post.",
+            "schema": { "format": "int64", "type": "integer" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Returned if the restriction state is successfully retrieved.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RestrictionStateResponse" } } }
+          },
+          "401": {
+            "description": "Returned if the authentication credentials are incorrect or missing from the request.",
+            "content": {}
+          },
+          "404": {
+            "description": "Returned if the content was not found or the calling user does not have permission to perform this operation.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionErrorResponse" } }
+            }
+          }
+        },
+        "security": [{ "basicAuth": [] }, { "oAuthDefinitions": ["read:page:confluence"] }],
+        "x-atlassian-oauth2-scopes": [
+          { "scheme": "oAuthDefinitions", "state": "Current", "scopes": ["read:page:confluence"] }
+        ],
+        "x-atlassian-connect-scope": "READ",
+        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": false }]
+      },
+      "put": {
+        "tags": ["Content Permissions"],
+        "operationId": "setBlogPostRestrictionState",
+        "summary": "Set blog post restriction state",
+        "description": "Sets the restriction state of a blog post.\n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\nPermission to edit the blog post or administer the space.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The ID of the blog post.",
+            "schema": { "format": "int64", "type": "integer" }
+          },
+          {
+            "name": "allow-self-lockout",
+            "in": "query",
+            "required": false,
+            "description": "If `false` (default), the request is rejected when it would remove the calling user's own edit access.\nSet to `true` to allow the operation even when it locks out the caller.",
+            "schema": { "type": "boolean", "default": false }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["state"],
+                "properties": { "state": { "$ref": "#/components/schemas/ContentRestrictionState" } }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Returned if the state was successfully updated.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RestrictionStateResponse" } } }
+          },
+          "400": {
+            "description": "Returned if the request body is invalid.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionErrorResponse" } }
+            }
+          },
+          "401": {
+            "description": "Returned if the authentication credentials are incorrect or missing from the request.",
+            "content": {}
+          },
+          "404": {
+            "description": "Returned if the content was not found or the calling user does not have permission to perform this operation.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionErrorResponse" } }
+            }
+          }
+        },
+        "security": [{ "basicAuth": [] }, { "oAuthDefinitions": ["write:page:confluence"] }],
+        "x-atlassian-oauth2-scopes": [
+          { "scheme": "oAuthDefinitions", "state": "Current", "scopes": ["write:page:confluence"] }
+        ],
+        "x-atlassian-connect-scope": "WRITE",
+        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": false }]
+      }
+    },
+    "/databases/{id}/restriction-state": {
+      "get": {
+        "tags": ["Content Permissions"],
+        "operationId": "getDatabaseRestrictionState",
+        "summary": "Get database restriction state",
+        "description": "Returns the restriction state of a database.\n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\nPermission to view the database.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The ID of the database.",
+            "schema": { "format": "int64", "type": "integer" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Returned if the restriction state is successfully retrieved.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RestrictionStateResponse" } } }
+          },
+          "401": {
+            "description": "Returned if the authentication credentials are incorrect or missing from the request.",
+            "content": {}
+          },
+          "404": {
+            "description": "Returned if the content was not found or the calling user does not have permission to perform this operation.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionErrorResponse" } }
+            }
+          }
+        },
+        "security": [{ "basicAuth": [] }, { "oAuthDefinitions": ["read:database:confluence"] }],
+        "x-atlassian-oauth2-scopes": [
+          { "scheme": "oAuthDefinitions", "state": "Current", "scopes": ["read:database:confluence"] }
+        ],
+        "x-atlassian-connect-scope": "READ",
+        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": false }]
+      },
+      "put": {
+        "tags": ["Content Permissions"],
+        "operationId": "setDatabaseRestrictionState",
+        "summary": "Set database restriction state",
+        "description": "Sets the restriction state of a database.\n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\nPermission to edit the database or administer the space.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The ID of the database.",
+            "schema": { "format": "int64", "type": "integer" }
+          },
+          {
+            "name": "allow-self-lockout",
+            "in": "query",
+            "required": false,
+            "description": "If `false` (default), the request is rejected when it would remove the calling user's own edit access.\nSet to `true` to allow the operation even when it locks out the caller.",
+            "schema": { "type": "boolean", "default": false }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["state"],
+                "properties": { "state": { "$ref": "#/components/schemas/ContentRestrictionState" } }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Returned if the state was successfully updated.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RestrictionStateResponse" } } }
+          },
+          "400": {
+            "description": "Returned if the request body is invalid.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionErrorResponse" } }
+            }
+          },
+          "401": {
+            "description": "Returned if the authentication credentials are incorrect or missing from the request.",
+            "content": {}
+          },
+          "404": {
+            "description": "Returned if the content was not found or the calling user does not have permission to perform this operation.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionErrorResponse" } }
+            }
+          }
+        },
+        "security": [{ "basicAuth": [] }, { "oAuthDefinitions": ["write:database:confluence"] }],
+        "x-atlassian-oauth2-scopes": [
+          { "scheme": "oAuthDefinitions", "state": "Current", "scopes": ["write:database:confluence"] }
+        ],
+        "x-atlassian-connect-scope": "WRITE",
+        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": false }]
+      }
+    },
+    "/whiteboards/{id}/restriction-state": {
+      "get": {
+        "tags": ["Content Permissions"],
+        "operationId": "getWhiteboardRestrictionState",
+        "summary": "Get whiteboard restriction state",
+        "description": "Returns the restriction state of a whiteboard.\n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\nPermission to view the whiteboard.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The ID of the whiteboard.",
+            "schema": { "format": "int64", "type": "integer" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Returned if the restriction state is successfully retrieved.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RestrictionStateResponse" } } }
+          },
+          "401": {
+            "description": "Returned if the authentication credentials are incorrect or missing from the request.",
+            "content": {}
+          },
+          "404": {
+            "description": "Returned if the content was not found or the calling user does not have permission to perform this operation.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionErrorResponse" } }
+            }
+          }
+        },
+        "security": [{ "basicAuth": [] }, { "oAuthDefinitions": ["read:whiteboard:confluence"] }],
+        "x-atlassian-oauth2-scopes": [
+          { "scheme": "oAuthDefinitions", "state": "Current", "scopes": ["read:whiteboard:confluence"] }
+        ],
+        "x-atlassian-connect-scope": "READ",
+        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": false }]
+      },
+      "put": {
+        "tags": ["Content Permissions"],
+        "operationId": "setWhiteboardRestrictionState",
+        "summary": "Set whiteboard restriction state",
+        "description": "Sets the restriction state of a whiteboard.\n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\nPermission to edit the whiteboard or administer the space.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The ID of the whiteboard.",
+            "schema": { "format": "int64", "type": "integer" }
+          },
+          {
+            "name": "allow-self-lockout",
+            "in": "query",
+            "required": false,
+            "description": "If `false` (default), the request is rejected when it would remove the calling user's own edit access.\nSet to `true` to allow the operation even when it locks out the caller.",
+            "schema": { "type": "boolean", "default": false }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["state"],
+                "properties": { "state": { "$ref": "#/components/schemas/ContentRestrictionState" } }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Returned if the state was successfully updated.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RestrictionStateResponse" } } }
+          },
+          "400": {
+            "description": "Returned if the request body is invalid.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionErrorResponse" } }
+            }
+          },
+          "401": {
+            "description": "Returned if the authentication credentials are incorrect or missing from the request.",
+            "content": {}
+          },
+          "404": {
+            "description": "Returned if the content was not found or the calling user does not have permission to perform this operation.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionErrorResponse" } }
+            }
+          }
+        },
+        "security": [{ "basicAuth": [] }, { "oAuthDefinitions": ["write:whiteboard:confluence"] }],
+        "x-atlassian-oauth2-scopes": [
+          { "scheme": "oAuthDefinitions", "state": "Current", "scopes": ["write:whiteboard:confluence"] }
+        ],
+        "x-atlassian-connect-scope": "WRITE",
+        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": false }]
+      }
+    },
+    "/folders/{id}/restriction-state": {
+      "get": {
+        "tags": ["Content Permissions"],
+        "operationId": "getFolderRestrictionState",
+        "summary": "Get folder restriction state",
+        "description": "Returns the restriction state of a folder.\n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\nPermission to view the folder.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The ID of the folder.",
+            "schema": { "format": "int64", "type": "integer" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Returned if the restriction state is successfully retrieved.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RestrictionStateResponse" } } }
+          },
+          "401": {
+            "description": "Returned if the authentication credentials are incorrect or missing from the request.",
+            "content": {}
+          },
+          "404": {
+            "description": "Returned if the content was not found or the calling user does not have permission to perform this operation.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionErrorResponse" } }
+            }
+          }
+        },
+        "security": [{ "basicAuth": [] }, { "oAuthDefinitions": ["read:folder:confluence"] }],
+        "x-atlassian-oauth2-scopes": [
+          { "scheme": "oAuthDefinitions", "state": "Current", "scopes": ["read:folder:confluence"] }
+        ],
+        "x-atlassian-connect-scope": "READ",
+        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": false }]
+      },
+      "put": {
+        "tags": ["Content Permissions"],
+        "operationId": "setFolderRestrictionState",
+        "summary": "Set folder restriction state",
+        "description": "Sets the restriction state of a folder.\n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\nPermission to edit the folder or administer the space.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The ID of the folder.",
+            "schema": { "format": "int64", "type": "integer" }
+          },
+          {
+            "name": "allow-self-lockout",
+            "in": "query",
+            "required": false,
+            "description": "If `false` (default), the request is rejected when it would remove the calling user's own edit access.\nSet to `true` to allow the operation even when it locks out the caller.",
+            "schema": { "type": "boolean", "default": false }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["state"],
+                "properties": { "state": { "$ref": "#/components/schemas/ContentRestrictionState" } }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Returned if the state was successfully updated.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RestrictionStateResponse" } } }
+          },
+          "400": {
+            "description": "Returned if the request body is invalid.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionErrorResponse" } }
+            }
+          },
+          "401": {
+            "description": "Returned if the authentication credentials are incorrect or missing from the request.",
+            "content": {}
+          },
+          "404": {
+            "description": "Returned if the content was not found or the calling user does not have permission to perform this operation.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionErrorResponse" } }
+            }
+          }
+        },
+        "security": [{ "basicAuth": [] }, { "oAuthDefinitions": ["write:folder:confluence"] }],
+        "x-atlassian-oauth2-scopes": [
+          { "scheme": "oAuthDefinitions", "state": "Current", "scopes": ["write:folder:confluence"] }
+        ],
+        "x-atlassian-connect-scope": "WRITE",
+        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": false }]
+      }
+    },
+    "/pages/{id}/permissions": {
+      "get": {
+        "tags": ["Content Permissions"],
+        "operationId": "getPagePermissions",
+        "summary": "Get page permissions",
+        "description": "Returns the direct content permissions on a page with optional filtering by operation, principal-type, and principal-id.\nResults are cursor-paginated (max 250 per page).\n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\nPermission to view the page.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The ID of the page.",
+            "schema": { "format": "int64", "type": "integer" }
+          },
+          {
+            "name": "operation",
+            "in": "query",
+            "required": false,
+            "description": "Filter by operation (`read` or `update`).",
+            "schema": { "type": "string", "enum": ["read", "update"] }
+          },
+          {
+            "name": "principal-type",
+            "in": "query",
+            "required": false,
+            "description": "Filter by principal type (`user` or `group`). May be used without `principal-id` to return all permissions for that type.",
+            "schema": { "type": "string", "enum": ["user", "group"] }
+          },
+          {
+            "name": "principal-id",
+            "in": "query",
+            "required": false,
+            "description": "Filter by principal ID. Must be provided together with `principal-type`.",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "Opaque cursor for pagination. Use the value from the previous response's `_links.next`.",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Maximum number of permission entries to return. Must be between 1 and 250.",
+            "schema": { "format": "int32", "type": "integer", "minimum": 1, "maximum": 250, "default": 100 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Returned if the permissions are successfully retrieved.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "MultiEntityResult<ContentPermissionOutput>",
+                  "type": "object",
+                  "properties": {
+                    "results": { "type": "array", "items": { "$ref": "#/components/schemas/ContentPermissionOutput" } },
+                    "_links": { "$ref": "#/components/schemas/MultiEntityLinks" }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Returned if the request parameters are invalid (e.g. `principal-id` provided without `principal-type`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionErrorResponse" } }
+            }
+          },
+          "401": {
+            "description": "Returned if the authentication credentials are incorrect or missing from the request.",
+            "content": {}
+          },
+          "404": {
+            "description": "Returned if the content was not found or the calling user does not have permission to perform this operation.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionErrorResponse" } }
+            }
+          }
+        },
+        "security": [{ "basicAuth": [] }, { "oAuthDefinitions": ["read:page:confluence"] }],
+        "x-atlassian-oauth2-scopes": [
+          { "scheme": "oAuthDefinitions", "state": "Current", "scopes": ["read:page:confluence"] }
+        ],
+        "x-atlassian-connect-scope": "READ",
+        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": false }]
+      },
+      "post": {
+        "tags": ["Content Permissions"],
+        "operationId": "addPagePermissions",
+        "summary": "Add page permissions",
+        "description": "Adds or replaces direct content permissions for the specified principals on a page. Permissions for other principals are preserved; use `PUT` to replace all permissions at once.\n\nA principal can hold only one `read` or `update` permission. Adding `read` for a principal that currently has `update` downgrades that principal to `read`; adding `update` upgrades them. If the same request contains both operations for a principal, `update` takes precedence.\n\nReasserting a principal's existing permission is idempotent and returns a successful response without creating a duplicate entry.\n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\nPermission to edit the page or administer the space.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The ID of the page.",
+            "schema": { "format": "int64", "type": "integer" }
+          },
+          {
+            "name": "allow-self-lockout",
+            "in": "query",
+            "required": false,
+            "description": "If `false` (default), the request is rejected when it would remove the calling user's own edit access.\nSet to `true` to allow the operation even when it locks out the caller.",
+            "schema": { "type": "boolean", "default": false }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionsRequest" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "Returned if the permissions are successfully added.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionsResponse" } }
+            }
+          },
+          "400": {
+            "description": "Returned if the request body is invalid or the operation would result in an invalid permission state.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionErrorResponse" } }
+            }
+          },
+          "401": {
+            "description": "Returned if the authentication credentials are incorrect or missing from the request.",
+            "content": {}
+          },
+          "404": {
+            "description": "Returned if the content was not found or the calling user does not have permission to perform this operation.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionErrorResponse" } }
+            }
+          }
+        },
+        "security": [{ "basicAuth": [] }, { "oAuthDefinitions": ["write:page:confluence"] }],
+        "x-atlassian-oauth2-scopes": [
+          { "scheme": "oAuthDefinitions", "state": "Current", "scopes": ["write:page:confluence"] }
+        ],
+        "x-atlassian-connect-scope": "WRITE",
+        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": false }]
+      },
+      "put": {
+        "tags": ["Content Permissions"],
+        "operationId": "setPagePermissions",
+        "summary": "Set page permissions",
+        "description": "Replaces all direct content permissions on a page with the provided set. Any permissions not included in the request body are removed.\n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\nPermission to edit the page or administer the space.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The ID of the page.",
+            "schema": { "format": "int64", "type": "integer" }
+          },
+          {
+            "name": "allow-self-lockout",
+            "in": "query",
+            "required": false,
+            "description": "If `false` (default), the request is rejected when it would remove the calling user's own edit access.\nSet to `true` to allow the operation even when it locks out the caller.",
+            "schema": { "type": "boolean", "default": false }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionsRequest" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "Returned if the permissions are successfully replaced.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionsResponse" } }
+            }
+          },
+          "400": {
+            "description": "Returned if the request body is invalid or the operation would result in an invalid permission state.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionErrorResponse" } }
+            }
+          },
+          "401": {
+            "description": "Returned if the authentication credentials are incorrect or missing from the request.",
+            "content": {}
+          },
+          "404": {
+            "description": "Returned if the content was not found or the calling user does not have permission to perform this operation.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionErrorResponse" } }
+            }
+          }
+        },
+        "security": [{ "basicAuth": [] }, { "oAuthDefinitions": ["write:page:confluence"] }],
+        "x-atlassian-oauth2-scopes": [
+          { "scheme": "oAuthDefinitions", "state": "Current", "scopes": ["write:page:confluence"] }
+        ],
+        "x-atlassian-connect-scope": "WRITE",
+        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": false }]
+      },
+      "delete": {
+        "tags": ["Content Permissions"],
+        "operationId": "deletePagePermissions",
+        "summary": "Delete page permissions",
+        "description": "Deletes direct content permissions from a page. Filters narrow the deletion scope; omitting all filters deletes all direct permissions.\n\nThe following filter combinations are supported:\n- No filters: deletes all direct permissions.\n- `principal-type` + `principal-id`: deletes the principal's direct `read` or `update` permission.\n- `operation` + `principal-type` + `principal-id`: deletes the permission only when its operation matches.\n\nProviding `operation` without `principal-type`/`principal-id`, or providing only one of `principal-type`/`principal-id`, returns a 400 error.\n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\nPermission to edit the page or administer the space.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The ID of the page.",
+            "schema": { "format": "int64", "type": "integer" }
+          },
+          {
+            "name": "operation",
+            "in": "query",
+            "required": false,
+            "description": "Filter by operation. Must be provided together with `principal-type` and `principal-id`.",
+            "schema": { "type": "string", "enum": ["read", "update"] }
+          },
+          {
+            "name": "principal-type",
+            "in": "query",
+            "required": false,
+            "description": "Filter by principal type. Must be provided together with `principal-id`.",
+            "schema": { "type": "string", "enum": ["user", "group"] }
+          },
+          {
+            "name": "principal-id",
+            "in": "query",
+            "required": false,
+            "description": "Filter by principal ID. Must be provided together with `principal-type`.",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "allow-self-lockout",
+            "in": "query",
+            "required": false,
+            "description": "If `false` (default), the request is rejected when it would remove the calling user's own edit access.\nSet to `true` to allow the operation even when it locks out the caller.",
+            "schema": { "type": "boolean", "default": false }
+          }
+        ],
+        "responses": {
+          "204": { "description": "Returned if the permissions are successfully deleted." },
+          "400": {
+            "description": "Returned if the filter combination is invalid or the operation would result in an invalid permission state.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionErrorResponse" } }
+            }
+          },
+          "401": {
+            "description": "Returned if the authentication credentials are incorrect or missing from the request.",
+            "content": {}
+          },
+          "404": {
+            "description": "Returned if the content was not found or the calling user does not have permission to perform this operation.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionErrorResponse" } }
+            }
+          }
+        },
+        "security": [{ "basicAuth": [] }, { "oAuthDefinitions": ["write:page:confluence"] }],
+        "x-atlassian-oauth2-scopes": [
+          { "scheme": "oAuthDefinitions", "state": "Current", "scopes": ["write:page:confluence"] }
+        ],
+        "x-atlassian-connect-scope": "WRITE",
+        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": false }]
+      }
+    },
+    "/blogposts/{id}/permissions": {
+      "get": {
+        "tags": ["Content Permissions"],
+        "operationId": "getBlogPostPermissions",
+        "summary": "Get blog post permissions",
+        "description": "Returns the direct content permissions on a blog post with optional filtering by operation, principal-type, and principal-id.\nResults are cursor-paginated (max 250 per page).\n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\nPermission to view the blog post.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The ID of the blog post.",
+            "schema": { "format": "int64", "type": "integer" }
+          },
+          {
+            "name": "operation",
+            "in": "query",
+            "required": false,
+            "description": "Filter by operation (`read` or `update`).",
+            "schema": { "type": "string", "enum": ["read", "update"] }
+          },
+          {
+            "name": "principal-type",
+            "in": "query",
+            "required": false,
+            "description": "Filter by principal type (`user` or `group`). May be used without `principal-id` to return all permissions for that type.",
+            "schema": { "type": "string", "enum": ["user", "group"] }
+          },
+          {
+            "name": "principal-id",
+            "in": "query",
+            "required": false,
+            "description": "Filter by principal ID. Must be provided together with `principal-type`.",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "Opaque cursor for pagination. Use the value from the previous response's `_links.next`.",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Maximum number of permission entries to return. Must be between 1 and 250.",
+            "schema": { "format": "int32", "type": "integer", "minimum": 1, "maximum": 250, "default": 100 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Returned if the permissions are successfully retrieved.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "MultiEntityResult<ContentPermissionOutput>",
+                  "type": "object",
+                  "properties": {
+                    "results": { "type": "array", "items": { "$ref": "#/components/schemas/ContentPermissionOutput" } },
+                    "_links": { "$ref": "#/components/schemas/MultiEntityLinks" }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Returned if the request parameters are invalid (e.g. `principal-id` provided without `principal-type`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionErrorResponse" } }
+            }
+          },
+          "401": {
+            "description": "Returned if the authentication credentials are incorrect or missing from the request.",
+            "content": {}
+          },
+          "404": {
+            "description": "Returned if the content was not found or the calling user does not have permission to perform this operation.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionErrorResponse" } }
+            }
+          }
+        },
+        "security": [{ "basicAuth": [] }, { "oAuthDefinitions": ["read:page:confluence"] }],
+        "x-atlassian-oauth2-scopes": [
+          { "scheme": "oAuthDefinitions", "state": "Current", "scopes": ["read:page:confluence"] }
+        ],
+        "x-atlassian-connect-scope": "READ",
+        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": false }]
+      },
+      "post": {
+        "tags": ["Content Permissions"],
+        "operationId": "addBlogPostPermissions",
+        "summary": "Add blog post permissions",
+        "description": "Adds or replaces direct content permissions for the specified principals on a blog post. Permissions for other principals are preserved; use `PUT` to replace all permissions at once.\n\nA principal can hold only one `read` or `update` permission. Adding `read` for a principal that currently has `update` downgrades that principal to `read`; adding `update` upgrades them. If the same request contains both operations for a principal, `update` takes precedence.\n\nReasserting a principal's existing permission is idempotent and returns a successful response without creating a duplicate entry.\n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\nPermission to edit the blog post or administer the space.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The ID of the blog post.",
+            "schema": { "format": "int64", "type": "integer" }
+          },
+          {
+            "name": "allow-self-lockout",
+            "in": "query",
+            "required": false,
+            "description": "If `false` (default), the request is rejected when it would remove the calling user's own edit access.\nSet to `true` to allow the operation even when it locks out the caller.",
+            "schema": { "type": "boolean", "default": false }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionsRequest" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "Returned if the permissions are successfully added.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionsResponse" } }
+            }
+          },
+          "400": {
+            "description": "Returned if the request body is invalid or the operation would result in an invalid permission state.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionErrorResponse" } }
+            }
+          },
+          "401": {
+            "description": "Returned if the authentication credentials are incorrect or missing from the request.",
+            "content": {}
+          },
+          "404": {
+            "description": "Returned if the content was not found or the calling user does not have permission to perform this operation.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionErrorResponse" } }
+            }
+          }
+        },
+        "security": [{ "basicAuth": [] }, { "oAuthDefinitions": ["write:page:confluence"] }],
+        "x-atlassian-oauth2-scopes": [
+          { "scheme": "oAuthDefinitions", "state": "Current", "scopes": ["write:page:confluence"] }
+        ],
+        "x-atlassian-connect-scope": "WRITE",
+        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": false }]
+      },
+      "put": {
+        "tags": ["Content Permissions"],
+        "operationId": "setBlogPostPermissions",
+        "summary": "Set blog post permissions",
+        "description": "Replaces all direct content permissions on a blog post with the provided set. Any permissions not included in the request body are removed.\n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\nPermission to edit the blog post or administer the space.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The ID of the blog post.",
+            "schema": { "format": "int64", "type": "integer" }
+          },
+          {
+            "name": "allow-self-lockout",
+            "in": "query",
+            "required": false,
+            "description": "If `false` (default), the request is rejected when it would remove the calling user's own edit access.\nSet to `true` to allow the operation even when it locks out the caller.",
+            "schema": { "type": "boolean", "default": false }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionsRequest" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "Returned if the permissions are successfully replaced.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionsResponse" } }
+            }
+          },
+          "400": {
+            "description": "Returned if the request body is invalid or the operation would result in an invalid permission state.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionErrorResponse" } }
+            }
+          },
+          "401": {
+            "description": "Returned if the authentication credentials are incorrect or missing from the request.",
+            "content": {}
+          },
+          "404": {
+            "description": "Returned if the content was not found or the calling user does not have permission to perform this operation.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionErrorResponse" } }
+            }
+          }
+        },
+        "security": [{ "basicAuth": [] }, { "oAuthDefinitions": ["write:page:confluence"] }],
+        "x-atlassian-oauth2-scopes": [
+          { "scheme": "oAuthDefinitions", "state": "Current", "scopes": ["write:page:confluence"] }
+        ],
+        "x-atlassian-connect-scope": "WRITE",
+        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": false }]
+      },
+      "delete": {
+        "tags": ["Content Permissions"],
+        "operationId": "deleteBlogPostPermissions",
+        "summary": "Delete blog post permissions",
+        "description": "Deletes direct content permissions from a blog post. See `DELETE /pages/{id}/permissions` for filter semantics.\n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\nPermission to edit the blog post or administer the space.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The ID of the blog post.",
+            "schema": { "format": "int64", "type": "integer" }
+          },
+          {
+            "name": "operation",
+            "in": "query",
+            "required": false,
+            "description": "Filter by operation. Must be provided together with `principal-type` and `principal-id`.",
+            "schema": { "type": "string", "enum": ["read", "update"] }
+          },
+          {
+            "name": "principal-type",
+            "in": "query",
+            "required": false,
+            "description": "Filter by principal type. Must be provided together with `principal-id`.",
+            "schema": { "type": "string", "enum": ["user", "group"] }
+          },
+          {
+            "name": "principal-id",
+            "in": "query",
+            "required": false,
+            "description": "Filter by principal ID. Must be provided together with `principal-type`.",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "allow-self-lockout",
+            "in": "query",
+            "required": false,
+            "description": "If `false` (default), the request is rejected when it would remove the calling user's own edit access.\nSet to `true` to allow the operation even when it locks out the caller.",
+            "schema": { "type": "boolean", "default": false }
+          }
+        ],
+        "responses": {
+          "204": { "description": "Returned if the permissions are successfully deleted." },
+          "400": {
+            "description": "Returned if the filter combination is invalid or the operation would result in an invalid permission state.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionErrorResponse" } }
+            }
+          },
+          "401": {
+            "description": "Returned if the authentication credentials are incorrect or missing from the request.",
+            "content": {}
+          },
+          "404": {
+            "description": "Returned if the content was not found or the calling user does not have permission to perform this operation.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionErrorResponse" } }
+            }
+          }
+        },
+        "security": [{ "basicAuth": [] }, { "oAuthDefinitions": ["write:page:confluence"] }],
+        "x-atlassian-oauth2-scopes": [
+          { "scheme": "oAuthDefinitions", "state": "Current", "scopes": ["write:page:confluence"] }
+        ],
+        "x-atlassian-connect-scope": "WRITE",
+        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": false }]
+      }
+    },
+    "/databases/{id}/permissions": {
+      "get": {
+        "tags": ["Content Permissions"],
+        "operationId": "getDatabasePermissions",
+        "summary": "Get database permissions",
+        "description": "Returns the direct content permissions on a database with optional filtering.\nResults are cursor-paginated (max 250 per page).\n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\nPermission to view the database.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The ID of the database.",
+            "schema": { "format": "int64", "type": "integer" }
+          },
+          {
+            "name": "operation",
+            "in": "query",
+            "required": false,
+            "description": "Filter by operation (`read` or `update`).",
+            "schema": { "type": "string", "enum": ["read", "update"] }
+          },
+          {
+            "name": "principal-type",
+            "in": "query",
+            "required": false,
+            "description": "Filter by principal type (`user` or `group`). May be used without `principal-id` to return all permissions for that type.",
+            "schema": { "type": "string", "enum": ["user", "group"] }
+          },
+          {
+            "name": "principal-id",
+            "in": "query",
+            "required": false,
+            "description": "Filter by principal ID. Must be provided together with `principal-type`.",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "Opaque cursor for pagination. Use the value from the previous response's `_links.next`.",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Maximum number of permission entries to return. Must be between 1 and 250.",
+            "schema": { "format": "int32", "type": "integer", "minimum": 1, "maximum": 250, "default": 100 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Returned if the permissions are successfully retrieved.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "MultiEntityResult<ContentPermissionOutput>",
+                  "type": "object",
+                  "properties": {
+                    "results": { "type": "array", "items": { "$ref": "#/components/schemas/ContentPermissionOutput" } },
+                    "_links": { "$ref": "#/components/schemas/MultiEntityLinks" }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Returned if the request parameters are invalid (e.g. `principal-id` provided without `principal-type`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionErrorResponse" } }
+            }
+          },
+          "401": {
+            "description": "Returned if the authentication credentials are incorrect or missing from the request.",
+            "content": {}
+          },
+          "404": {
+            "description": "Returned if the content was not found or the calling user does not have permission to perform this operation.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionErrorResponse" } }
+            }
+          }
+        },
+        "security": [{ "basicAuth": [] }, { "oAuthDefinitions": ["read:database:confluence"] }],
+        "x-atlassian-oauth2-scopes": [
+          { "scheme": "oAuthDefinitions", "state": "Current", "scopes": ["read:database:confluence"] }
+        ],
+        "x-atlassian-connect-scope": "READ",
+        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": false }]
+      },
+      "post": {
+        "tags": ["Content Permissions"],
+        "operationId": "addDatabasePermissions",
+        "summary": "Add database permissions",
+        "description": "Adds or replaces direct content permissions for the specified principals on a database. Permissions for other principals are preserved; use `PUT` to replace all permissions at once.\n\nA principal can hold only one `read` or `update` permission. Adding `read` for a principal that currently has `update` downgrades that principal to `read`; adding `update` upgrades them. If the same request contains both operations for a principal, `update` takes precedence.\n\nReasserting a principal's existing permission is idempotent and returns a successful response without creating a duplicate entry.\n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\nPermission to edit the database or administer the space.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The ID of the database.",
+            "schema": { "format": "int64", "type": "integer" }
+          },
+          {
+            "name": "allow-self-lockout",
+            "in": "query",
+            "required": false,
+            "description": "If `false` (default), the request is rejected when it would remove the calling user's own edit access.\nSet to `true` to allow the operation even when it locks out the caller.",
+            "schema": { "type": "boolean", "default": false }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionsRequest" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "Returned if the permissions are successfully added.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionsResponse" } }
+            }
+          },
+          "400": {
+            "description": "Returned if the request body is invalid.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionErrorResponse" } }
+            }
+          },
+          "401": {
+            "description": "Returned if the authentication credentials are incorrect or missing from the request.",
+            "content": {}
+          },
+          "404": {
+            "description": "Returned if the content was not found or the calling user does not have permission to perform this operation.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionErrorResponse" } }
+            }
+          }
+        },
+        "security": [{ "basicAuth": [] }, { "oAuthDefinitions": ["write:database:confluence"] }],
+        "x-atlassian-oauth2-scopes": [
+          { "scheme": "oAuthDefinitions", "state": "Current", "scopes": ["write:database:confluence"] }
+        ],
+        "x-atlassian-connect-scope": "WRITE",
+        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": false }]
+      },
+      "put": {
+        "tags": ["Content Permissions"],
+        "operationId": "setDatabasePermissions",
+        "summary": "Set database permissions",
+        "description": "Replaces all direct content permissions on a database with the provided set.\n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\nPermission to edit the database or administer the space.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The ID of the database.",
+            "schema": { "format": "int64", "type": "integer" }
+          },
+          {
+            "name": "allow-self-lockout",
+            "in": "query",
+            "required": false,
+            "description": "If `false` (default), the request is rejected when it would remove the calling user's own edit access.\nSet to `true` to allow the operation even when it locks out the caller.",
+            "schema": { "type": "boolean", "default": false }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionsRequest" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "Returned if the permissions are successfully replaced.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionsResponse" } }
+            }
+          },
+          "400": {
+            "description": "Returned if the request body is invalid.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionErrorResponse" } }
+            }
+          },
+          "401": {
+            "description": "Returned if the authentication credentials are incorrect or missing from the request.",
+            "content": {}
+          },
+          "404": {
+            "description": "Returned if the content was not found or the calling user does not have permission to perform this operation.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionErrorResponse" } }
+            }
+          }
+        },
+        "security": [{ "basicAuth": [] }, { "oAuthDefinitions": ["write:database:confluence"] }],
+        "x-atlassian-oauth2-scopes": [
+          { "scheme": "oAuthDefinitions", "state": "Current", "scopes": ["write:database:confluence"] }
+        ],
+        "x-atlassian-connect-scope": "WRITE",
+        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": false }]
+      },
+      "delete": {
+        "tags": ["Content Permissions"],
+        "operationId": "deleteDatabasePermissions",
+        "summary": "Delete database permissions",
+        "description": "Deletes direct content permissions from a database. See `DELETE /pages/{id}/permissions` for filter semantics.\n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\nPermission to edit the database or administer the space.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The ID of the database.",
+            "schema": { "format": "int64", "type": "integer" }
+          },
+          {
+            "name": "operation",
+            "in": "query",
+            "required": false,
+            "description": "Filter by operation. Must be provided together with `principal-type` and `principal-id`.",
+            "schema": { "type": "string", "enum": ["read", "update"] }
+          },
+          {
+            "name": "principal-type",
+            "in": "query",
+            "required": false,
+            "description": "Filter by principal type. Must be provided together with `principal-id`.",
+            "schema": { "type": "string", "enum": ["user", "group"] }
+          },
+          {
+            "name": "principal-id",
+            "in": "query",
+            "required": false,
+            "description": "Filter by principal ID. Must be provided together with `principal-type`.",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "allow-self-lockout",
+            "in": "query",
+            "required": false,
+            "description": "If `false` (default), the request is rejected when it would remove the calling user's own edit access.\nSet to `true` to allow the operation even when it locks out the caller.",
+            "schema": { "type": "boolean", "default": false }
+          }
+        ],
+        "responses": {
+          "204": { "description": "Returned if the permissions are successfully deleted." },
+          "400": {
+            "description": "Returned if the filter combination is invalid.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionErrorResponse" } }
+            }
+          },
+          "401": {
+            "description": "Returned if the authentication credentials are incorrect or missing from the request.",
+            "content": {}
+          },
+          "404": {
+            "description": "Returned if the content was not found or the calling user does not have permission to perform this operation.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionErrorResponse" } }
+            }
+          }
+        },
+        "security": [{ "basicAuth": [] }, { "oAuthDefinitions": ["write:database:confluence"] }],
+        "x-atlassian-oauth2-scopes": [
+          { "scheme": "oAuthDefinitions", "state": "Current", "scopes": ["write:database:confluence"] }
+        ],
+        "x-atlassian-connect-scope": "WRITE",
+        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": false }]
+      }
+    },
+    "/whiteboards/{id}/permissions": {
+      "get": {
+        "tags": ["Content Permissions"],
+        "operationId": "getWhiteboardPermissions",
+        "summary": "Get whiteboard permissions",
+        "description": "Returns the direct content permissions on a whiteboard with optional filtering.\nResults are cursor-paginated (max 250 per page).\n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\nPermission to view the whiteboard.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The ID of the whiteboard.",
+            "schema": { "format": "int64", "type": "integer" }
+          },
+          {
+            "name": "operation",
+            "in": "query",
+            "required": false,
+            "description": "Filter by operation (`read` or `update`).",
+            "schema": { "type": "string", "enum": ["read", "update"] }
+          },
+          {
+            "name": "principal-type",
+            "in": "query",
+            "required": false,
+            "description": "Filter by principal type (`user` or `group`). May be used without `principal-id` to return all permissions for that type.",
+            "schema": { "type": "string", "enum": ["user", "group"] }
+          },
+          {
+            "name": "principal-id",
+            "in": "query",
+            "required": false,
+            "description": "Filter by principal ID. Must be provided together with `principal-type`.",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "Opaque cursor for pagination. Use the value from the previous response's `_links.next`.",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Maximum number of permission entries to return. Must be between 1 and 250.",
+            "schema": { "format": "int32", "type": "integer", "minimum": 1, "maximum": 250, "default": 100 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Returned if the permissions are successfully retrieved.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "MultiEntityResult<ContentPermissionOutput>",
+                  "type": "object",
+                  "properties": {
+                    "results": { "type": "array", "items": { "$ref": "#/components/schemas/ContentPermissionOutput" } },
+                    "_links": { "$ref": "#/components/schemas/MultiEntityLinks" }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Returned if the request parameters are invalid (e.g. `principal-id` provided without `principal-type`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionErrorResponse" } }
+            }
+          },
+          "401": {
+            "description": "Returned if the authentication credentials are incorrect or missing from the request.",
+            "content": {}
+          },
+          "404": {
+            "description": "Returned if the content was not found or the calling user does not have permission to perform this operation.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionErrorResponse" } }
+            }
+          }
+        },
+        "security": [{ "basicAuth": [] }, { "oAuthDefinitions": ["read:whiteboard:confluence"] }],
+        "x-atlassian-oauth2-scopes": [
+          { "scheme": "oAuthDefinitions", "state": "Current", "scopes": ["read:whiteboard:confluence"] }
+        ],
+        "x-atlassian-connect-scope": "READ",
+        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": false }]
+      },
+      "post": {
+        "tags": ["Content Permissions"],
+        "operationId": "addWhiteboardPermissions",
+        "summary": "Add whiteboard permissions",
+        "description": "Adds or replaces direct content permissions for the specified principals on a whiteboard. Permissions for other principals are preserved; use `PUT` to replace all permissions at once.\n\nA principal can hold only one `read` or `update` permission. Adding `read` for a principal that currently has `update` downgrades that principal to `read`; adding `update` upgrades them. If the same request contains both operations for a principal, `update` takes precedence.\n\nReasserting a principal's existing permission is idempotent and returns a successful response without creating a duplicate entry.\n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\nPermission to edit the whiteboard or administer the space.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The ID of the whiteboard.",
+            "schema": { "format": "int64", "type": "integer" }
+          },
+          {
+            "name": "allow-self-lockout",
+            "in": "query",
+            "required": false,
+            "description": "If `false` (default), the request is rejected when it would remove the calling user's own edit access.\nSet to `true` to allow the operation even when it locks out the caller.",
+            "schema": { "type": "boolean", "default": false }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionsRequest" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "Returned if the permissions are successfully added.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionsResponse" } }
+            }
+          },
+          "400": {
+            "description": "Returned if the request body is invalid.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionErrorResponse" } }
+            }
+          },
+          "401": {
+            "description": "Returned if the authentication credentials are incorrect or missing from the request.",
+            "content": {}
+          },
+          "404": {
+            "description": "Returned if the content was not found or the calling user does not have permission to perform this operation.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionErrorResponse" } }
+            }
+          }
+        },
+        "security": [{ "basicAuth": [] }, { "oAuthDefinitions": ["write:whiteboard:confluence"] }],
+        "x-atlassian-oauth2-scopes": [
+          { "scheme": "oAuthDefinitions", "state": "Current", "scopes": ["write:whiteboard:confluence"] }
+        ],
+        "x-atlassian-connect-scope": "WRITE",
+        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": false }]
+      },
+      "put": {
+        "tags": ["Content Permissions"],
+        "operationId": "setWhiteboardPermissions",
+        "summary": "Set whiteboard permissions",
+        "description": "Replaces all direct content permissions on a whiteboard with the provided set.\n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\nPermission to edit the whiteboard or administer the space.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The ID of the whiteboard.",
+            "schema": { "format": "int64", "type": "integer" }
+          },
+          {
+            "name": "allow-self-lockout",
+            "in": "query",
+            "required": false,
+            "description": "If `false` (default), the request is rejected when it would remove the calling user's own edit access.\nSet to `true` to allow the operation even when it locks out the caller.",
+            "schema": { "type": "boolean", "default": false }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionsRequest" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "Returned if the permissions are successfully replaced.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionsResponse" } }
+            }
+          },
+          "400": {
+            "description": "Returned if the request body is invalid.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionErrorResponse" } }
+            }
+          },
+          "401": {
+            "description": "Returned if the authentication credentials are incorrect or missing from the request.",
+            "content": {}
+          },
+          "404": {
+            "description": "Returned if the content was not found or the calling user does not have permission to perform this operation.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionErrorResponse" } }
+            }
+          }
+        },
+        "security": [{ "basicAuth": [] }, { "oAuthDefinitions": ["write:whiteboard:confluence"] }],
+        "x-atlassian-oauth2-scopes": [
+          { "scheme": "oAuthDefinitions", "state": "Current", "scopes": ["write:whiteboard:confluence"] }
+        ],
+        "x-atlassian-connect-scope": "WRITE",
+        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": false }]
+      },
+      "delete": {
+        "tags": ["Content Permissions"],
+        "operationId": "deleteWhiteboardPermissions",
+        "summary": "Delete whiteboard permissions",
+        "description": "Deletes direct content permissions from a whiteboard. See `DELETE /pages/{id}/permissions` for filter semantics.\n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\nPermission to edit the whiteboard or administer the space.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The ID of the whiteboard.",
+            "schema": { "format": "int64", "type": "integer" }
+          },
+          {
+            "name": "operation",
+            "in": "query",
+            "required": false,
+            "description": "Filter by operation. Must be provided together with `principal-type` and `principal-id`.",
+            "schema": { "type": "string", "enum": ["read", "update"] }
+          },
+          {
+            "name": "principal-type",
+            "in": "query",
+            "required": false,
+            "description": "Filter by principal type. Must be provided together with `principal-id`.",
+            "schema": { "type": "string", "enum": ["user", "group"] }
+          },
+          {
+            "name": "principal-id",
+            "in": "query",
+            "required": false,
+            "description": "Filter by principal ID. Must be provided together with `principal-type`.",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "allow-self-lockout",
+            "in": "query",
+            "required": false,
+            "description": "If `false` (default), the request is rejected when it would remove the calling user's own edit access.\nSet to `true` to allow the operation even when it locks out the caller.",
+            "schema": { "type": "boolean", "default": false }
+          }
+        ],
+        "responses": {
+          "204": { "description": "Returned if the permissions are successfully deleted." },
+          "400": {
+            "description": "Returned if the filter combination is invalid.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionErrorResponse" } }
+            }
+          },
+          "401": {
+            "description": "Returned if the authentication credentials are incorrect or missing from the request.",
+            "content": {}
+          },
+          "404": {
+            "description": "Returned if the content was not found or the calling user does not have permission to perform this operation.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionErrorResponse" } }
+            }
+          }
+        },
+        "security": [{ "basicAuth": [] }, { "oAuthDefinitions": ["write:whiteboard:confluence"] }],
+        "x-atlassian-oauth2-scopes": [
+          { "scheme": "oAuthDefinitions", "state": "Current", "scopes": ["write:whiteboard:confluence"] }
+        ],
+        "x-atlassian-connect-scope": "WRITE",
+        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": false }]
+      }
+    },
+    "/folders/{id}/permissions": {
+      "get": {
+        "tags": ["Content Permissions"],
+        "operationId": "getFolderPermissions",
+        "summary": "Get folder permissions",
+        "description": "Returns the direct content permissions on a folder with optional filtering.\nResults are cursor-paginated (max 250 per page).\n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\nPermission to view the folder.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The ID of the folder.",
+            "schema": { "format": "int64", "type": "integer" }
+          },
+          {
+            "name": "operation",
+            "in": "query",
+            "required": false,
+            "description": "Filter by operation (`read` or `update`).",
+            "schema": { "type": "string", "enum": ["read", "update"] }
+          },
+          {
+            "name": "principal-type",
+            "in": "query",
+            "required": false,
+            "description": "Filter by principal type (`user` or `group`). May be used without `principal-id` to return all permissions for that type.",
+            "schema": { "type": "string", "enum": ["user", "group"] }
+          },
+          {
+            "name": "principal-id",
+            "in": "query",
+            "required": false,
+            "description": "Filter by principal ID. Must be provided together with `principal-type`.",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "Opaque cursor for pagination. Use the value from the previous response's `_links.next`.",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Maximum number of permission entries to return. Must be between 1 and 250.",
+            "schema": { "format": "int32", "type": "integer", "minimum": 1, "maximum": 250, "default": 100 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Returned if the permissions are successfully retrieved.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "MultiEntityResult<ContentPermissionOutput>",
+                  "type": "object",
+                  "properties": {
+                    "results": { "type": "array", "items": { "$ref": "#/components/schemas/ContentPermissionOutput" } },
+                    "_links": { "$ref": "#/components/schemas/MultiEntityLinks" }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Returned if the request parameters are invalid (e.g. `principal-id` provided without `principal-type`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionErrorResponse" } }
+            }
+          },
+          "401": {
+            "description": "Returned if the authentication credentials are incorrect or missing from the request.",
+            "content": {}
+          },
+          "404": {
+            "description": "Returned if the content was not found or the calling user does not have permission to perform this operation.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionErrorResponse" } }
+            }
+          }
+        },
+        "security": [{ "basicAuth": [] }, { "oAuthDefinitions": ["read:folder:confluence"] }],
+        "x-atlassian-oauth2-scopes": [
+          { "scheme": "oAuthDefinitions", "state": "Current", "scopes": ["read:folder:confluence"] }
+        ],
+        "x-atlassian-connect-scope": "READ",
+        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": false }]
+      },
+      "post": {
+        "tags": ["Content Permissions"],
+        "operationId": "addFolderPermissions",
+        "summary": "Add folder permissions",
+        "description": "Adds or replaces direct content permissions for the specified principals on a folder. Permissions for other principals are preserved; use `PUT` to replace all permissions at once.\n\nA principal can hold only one `read` or `update` permission. Adding `read` for a principal that currently has `update` downgrades that principal to `read`; adding `update` upgrades them. If the same request contains both operations for a principal, `update` takes precedence.\n\nReasserting a principal's existing permission is idempotent and returns a successful response without creating a duplicate entry.\n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\nPermission to edit the folder or administer the space.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The ID of the folder.",
+            "schema": { "format": "int64", "type": "integer" }
+          },
+          {
+            "name": "allow-self-lockout",
+            "in": "query",
+            "required": false,
+            "description": "If `false` (default), the request is rejected when it would remove the calling user's own edit access.\nSet to `true` to allow the operation even when it locks out the caller.",
+            "schema": { "type": "boolean", "default": false }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionsRequest" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "Returned if the permissions are successfully added.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionsResponse" } }
+            }
+          },
+          "400": {
+            "description": "Returned if the request body is invalid.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionErrorResponse" } }
+            }
+          },
+          "401": {
+            "description": "Returned if the authentication credentials are incorrect or missing from the request.",
+            "content": {}
+          },
+          "404": {
+            "description": "Returned if the content was not found or the calling user does not have permission to perform this operation.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionErrorResponse" } }
+            }
+          }
+        },
+        "security": [{ "basicAuth": [] }, { "oAuthDefinitions": ["write:folder:confluence"] }],
+        "x-atlassian-oauth2-scopes": [
+          { "scheme": "oAuthDefinitions", "state": "Current", "scopes": ["write:folder:confluence"] }
+        ],
+        "x-atlassian-connect-scope": "WRITE",
+        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": false }]
+      },
+      "put": {
+        "tags": ["Content Permissions"],
+        "operationId": "setFolderPermissions",
+        "summary": "Set folder permissions",
+        "description": "Replaces all direct content permissions on a folder with the provided set.\n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\nPermission to edit the folder or administer the space.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The ID of the folder.",
+            "schema": { "format": "int64", "type": "integer" }
+          },
+          {
+            "name": "allow-self-lockout",
+            "in": "query",
+            "required": false,
+            "description": "If `false` (default), the request is rejected when it would remove the calling user's own edit access.\nSet to `true` to allow the operation even when it locks out the caller.",
+            "schema": { "type": "boolean", "default": false }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionsRequest" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "Returned if the permissions are successfully replaced.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionsResponse" } }
+            }
+          },
+          "400": {
+            "description": "Returned if the request body is invalid.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionErrorResponse" } }
+            }
+          },
+          "401": {
+            "description": "Returned if the authentication credentials are incorrect or missing from the request.",
+            "content": {}
+          },
+          "404": {
+            "description": "Returned if the content was not found or the calling user does not have permission to perform this operation.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionErrorResponse" } }
+            }
+          }
+        },
+        "security": [{ "basicAuth": [] }, { "oAuthDefinitions": ["write:folder:confluence"] }],
+        "x-atlassian-oauth2-scopes": [
+          { "scheme": "oAuthDefinitions", "state": "Current", "scopes": ["write:folder:confluence"] }
+        ],
+        "x-atlassian-connect-scope": "WRITE",
+        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": false }]
+      },
+      "delete": {
+        "tags": ["Content Permissions"],
+        "operationId": "deleteFolderPermissions",
+        "summary": "Delete folder permissions",
+        "description": "Deletes direct content permissions from a folder. See `DELETE /pages/{id}/permissions` for filter semantics.\n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\nPermission to edit the folder or administer the space.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The ID of the folder.",
+            "schema": { "format": "int64", "type": "integer" }
+          },
+          {
+            "name": "operation",
+            "in": "query",
+            "required": false,
+            "description": "Filter by operation. Must be provided together with `principal-type` and `principal-id`.",
+            "schema": { "type": "string", "enum": ["read", "update"] }
+          },
+          {
+            "name": "principal-type",
+            "in": "query",
+            "required": false,
+            "description": "Filter by principal type. Must be provided together with `principal-id`.",
+            "schema": { "type": "string", "enum": ["user", "group"] }
+          },
+          {
+            "name": "principal-id",
+            "in": "query",
+            "required": false,
+            "description": "Filter by principal ID. Must be provided together with `principal-type`.",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "allow-self-lockout",
+            "in": "query",
+            "required": false,
+            "description": "If `false` (default), the request is rejected when it would remove the calling user's own edit access.\nSet to `true` to allow the operation even when it locks out the caller.",
+            "schema": { "type": "boolean", "default": false }
+          }
+        ],
+        "responses": {
+          "204": { "description": "Returned if the permissions are successfully deleted." },
+          "400": {
+            "description": "Returned if the filter combination is invalid.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionErrorResponse" } }
+            }
+          },
+          "401": {
+            "description": "Returned if the authentication credentials are incorrect or missing from the request.",
+            "content": {}
+          },
+          "404": {
+            "description": "Returned if the content was not found or the calling user does not have permission to perform this operation.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ContentPermissionErrorResponse" } }
+            }
+          }
+        },
+        "security": [{ "basicAuth": [] }, { "oAuthDefinitions": ["write:folder:confluence"] }],
+        "x-atlassian-oauth2-scopes": [
+          { "scheme": "oAuthDefinitions", "state": "Current", "scopes": ["write:folder:confluence"] }
+        ],
+        "x-atlassian-connect-scope": "WRITE",
+        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": false }]
+      }
+    },
     "/admin-key": {
       "get": {
         "tags": ["Admin Key"],
@@ -6163,6 +8024,207 @@
         "security": [{ "basicAuth": [] }, { "oAuthDefinitions": ["read:content.metadata:confluence"] }],
         "x-atlassian-oauth2-scopes": [
           { "scheme": "oAuthDefinitions", "state": "Current", "scopes": ["read:content.metadata:confluence"] }
+        ],
+        "x-atlassian-connect-scope": "READ",
+        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": false }]
+      }
+    },
+    "/databases/{id}/fields": {
+      "get": {
+        "tags": ["Database"],
+        "operationId": "getDatabaseFields",
+        "summary": "Get fields for database",
+        "description": "Returns the field definitions (schema) for a database, ordered by the\nuser-defined column order, using cursor-based pagination.\n\n> **Consistency:** Responses may not immediately reflect recent changes.\nClients requiring read-after-write confirmation should poll with bounded backoff.\n\n> **Experimental:** This operation is experimental and may change in backwards-incompatible ways without notice.\n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\nPermission to view the database and its corresponding space.",
+        "parameters": [
+          { "$ref": "#/components/parameters/DatabaseIdParameter" },
+          { "$ref": "#/components/parameters/DatabasePageLimitParameter" },
+          { "$ref": "#/components/parameters/DatabaseCursorParameter" },
+          { "$ref": "#/components/parameters/DatabaseIfNoneMatchParameter" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Returned if the requested database fields are returned.",
+            "headers": {
+              "Atl-Database-Version": { "$ref": "#/components/headers/AtlDatabaseVersion" },
+              "Cache-Control": { "$ref": "#/components/headers/DatabaseCacheControl" },
+              "ETag": { "$ref": "#/components/headers/DatabaseEtag" },
+              "Link": { "$ref": "#/components/headers/DatabaseNextLink" }
+            },
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/DatabaseFieldListResponse" } }
+            }
+          },
+          "304": { "$ref": "#/components/responses/DatabaseNotModified" },
+          "400": { "$ref": "#/components/responses/DatabasePaginationBadRequest" },
+          "401": { "$ref": "#/components/responses/DatabaseUnauthorized" },
+          "403": { "$ref": "#/components/responses/DatabaseForbidden" },
+          "404": { "$ref": "#/components/responses/DatabaseNotFound" },
+          "413": { "$ref": "#/components/responses/DatabaseTooLarge" },
+          "429": { "$ref": "#/components/responses/DatabaseRateLimited" },
+          "502": { "$ref": "#/components/responses/DatabaseBadGateway" },
+          "503": { "$ref": "#/components/responses/DatabaseServiceUnavailable" },
+          "504": { "$ref": "#/components/responses/DatabaseGatewayTimeout" }
+        },
+        "security": [{ "basicAuth": [] }, { "oAuthDefinitions": ["read:database:confluence"] }],
+        "x-experimental": true,
+        "x-atlassian-experimental": true,
+        "x-atlassian-oauth2-scopes": [
+          { "scheme": "oAuthDefinitions", "state": "Current", "scopes": ["read:database:confluence"] }
+        ],
+        "x-atlassian-connect-scope": "READ",
+        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": false }]
+      }
+    },
+    "/databases/{id}/views": {
+      "get": {
+        "tags": ["Database"],
+        "operationId": "getDatabaseViews",
+        "summary": "Get views for database",
+        "description": "Returns the views defined on a database using cursor-based pagination.\nOnly view IDs, names, and types are returned; view configuration is not exposed.\n\n> **Consistency:** Responses may not immediately reflect recent changes.\nClients requiring read-after-write confirmation should poll with bounded backoff.\n\n> **Experimental:** This operation is experimental and may change in backwards-incompatible ways without notice.\n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\nPermission to view the database and its corresponding space.",
+        "parameters": [
+          { "$ref": "#/components/parameters/DatabaseIdParameter" },
+          { "$ref": "#/components/parameters/DatabasePageLimitParameter" },
+          { "$ref": "#/components/parameters/DatabaseCursorParameter" },
+          { "$ref": "#/components/parameters/DatabaseIfNoneMatchParameter" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Returned if the requested database views are returned.",
+            "headers": {
+              "Atl-Database-Version": { "$ref": "#/components/headers/AtlDatabaseVersion" },
+              "Cache-Control": { "$ref": "#/components/headers/DatabaseCacheControl" },
+              "ETag": { "$ref": "#/components/headers/DatabaseEtag" },
+              "Link": { "$ref": "#/components/headers/DatabaseNextLink" }
+            },
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DatabaseViewListResponse" } } }
+          },
+          "304": { "$ref": "#/components/responses/DatabaseNotModified" },
+          "400": { "$ref": "#/components/responses/DatabasePaginationBadRequest" },
+          "401": { "$ref": "#/components/responses/DatabaseUnauthorized" },
+          "403": { "$ref": "#/components/responses/DatabaseForbidden" },
+          "404": { "$ref": "#/components/responses/DatabaseNotFound" },
+          "413": { "$ref": "#/components/responses/DatabaseTooLarge" },
+          "429": { "$ref": "#/components/responses/DatabaseRateLimited" },
+          "502": { "$ref": "#/components/responses/DatabaseBadGateway" },
+          "503": { "$ref": "#/components/responses/DatabaseServiceUnavailable" },
+          "504": { "$ref": "#/components/responses/DatabaseGatewayTimeout" }
+        },
+        "security": [{ "basicAuth": [] }, { "oAuthDefinitions": ["read:database:confluence"] }],
+        "x-experimental": true,
+        "x-atlassian-experimental": true,
+        "x-atlassian-oauth2-scopes": [
+          { "scheme": "oAuthDefinitions", "state": "Current", "scopes": ["read:database:confluence"] }
+        ],
+        "x-atlassian-connect-scope": "READ",
+        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": false }]
+      }
+    },
+    "/databases/{id}/entries": {
+      "get": {
+        "tags": ["Database"],
+        "operationId": "getDatabaseEntries",
+        "summary": "Get entries for database",
+        "description": "Returns the entries (rows) of a database, with optional filtering, sorting,\nand cursor-based pagination. Entry values are keyed by field ID; use\nGet fields for database (`GET /databases/{id}/fields`) to map field IDs to\nnames.\n\nFiltering is expressed with bracket-scoped query parameters keyed on field\nID. The exact operators vary by field type and are documented on the\n`filter` parameter. Multiple filters are combined with AND. Unsupported\noperators and non-filterable fields return distinct structured `400`\nresponses.\n\nPagination uses opaque, offset-based continuation tokens and is best effort\nwhile a database is changing. Concurrent inserts, deletes, or changes to a\nsort value can cause duplicate or omitted rows across pages. Restart from\nthe first page when a consistent export is required.\n\nResults are based on the database, not a particular view. A view's filters,\nsorting, grouping, and field visibility do not affect the response.\n\n> **Consistency:** Responses may not immediately reflect recent changes.\nClients requiring read-after-write confirmation should poll with bounded backoff.\n\n> **Experimental:** This operation is experimental and may change in backwards-incompatible ways without notice.\n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\nPermission to view the database and its corresponding space.",
+        "parameters": [
+          { "$ref": "#/components/parameters/DatabaseIdParameter" },
+          { "$ref": "#/components/parameters/DatabasePageLimitParameter" },
+          { "$ref": "#/components/parameters/DatabaseCursorParameter" },
+          { "$ref": "#/components/parameters/DatabaseIfNoneMatchParameter" },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "description": "Used to sort the result by a single field ID. Prefix the field ID with\n`-` to sort in descending order. Text, number, checkbox, date, select,\nand hyperlink fields are sortable. Other field types return\n`FIELD_NOT_SORTABLE`. The `fieldId:modifier` form is reserved and\nreturns `UNSUPPORTED_SORT_MODIFIER`.\n\nEmpty values sort after non-empty values in both directions. Text uses\nthe projected `plain` value and fixed, locale-independent `en-US`\ncollation with numeric comparison and upper-case before lower-case.\nNumbers compare numerically, checkboxes order `false` before `true`, and\nselect values use configured option order. Date-only values compare\nchronologically; datetime values compare as absolute UTC instants.\nFor hyperlinks, each link's key is its non-empty label or, when the\nlabel is absent or empty, its URL. A multi-link value uses the minimum\nlink key under the same fixed string collation. AI Summary and all\ndependency-backed field types are not sortable.",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "filter",
+            "in": "query",
+            "required": false,
+            "description": "Filters entries by field value. Bracket-scoped on field ID, for example\n`filter[fieldId]=value`. The grammar forms are:\n- `filter[fieldId]=value` (implicit equality)\n- `filter[fieldId]=eq:value` (explicit equality)\n- `filter[fieldId]=in:value1,value2`\n- `filter[fieldId]=$empty`\n- `filter[fieldId][gte|lte|gt|lt]=value` (date and number fields only)\n\nThe supported capability matrix is:\n\n| Field type | Operators |\n| --- | --- |\n| `text` | `eq`, `$empty` |\n| `number` | `eq`, `in`, `gte`, `lte`, `gt`, `lt`, `$empty` |\n| `checkbox` | `eq` |\n| `date` | `eq`, `gte`, `lte`, `gt`, `lt`, `$empty` |\n| `select` | `eq`, `in`, `$empty` |\n| `user`, `pageLink`, `jiraIssue`, `entryLink` | `eq`, `in`, `$empty` |\n| `attachment` | `$empty` only |\n| all other field types | not filterable |\n\nBare equality and `eq:` use projected scalar identifiers; `in:` uses\na comma-separated list of those identifiers. Text and reference-field\nvalues remain strings even when they resemble booleans, `null`,\nnumbers, operators, or sentinels. Checkbox accepts only boolean\nequality, and an unset checkbox is treated as `false`. Date values\nmust match the field's `includesTime` mode: `YYYY-MM-DD` for a\ndate-only field, or an offset-bearing datetime for a datetime field.\nNumber values are canonical finite decimals.\n\nAn initial `<prefix>:` is operator-like only when the colon is not\nimmediately followed by `/`, so a URL such as `https://example.com`\nis an ordinary bare literal. A recognized leading `eq:` or `in:`\nselects that operator; any unknown operator-like prefix is an\nunsupported operator. Use explicit equality to escape a literal\ncontaining such a prefix, for example `eq:foo:bar`. A leading `$` is\nreserved for sentinels: `$empty` is accepted only where the matrix\nlists it, while `eq:$value` compares the literal string `$value`. An\nunknown bare `$...` value returns `INVALID_FILTER`. The `in:` syntax\ntreats every comma as a value delimiter and provides no escaping for\ncommas within a member. Use equality for a single comma-bearing\nliteral; such a literal cannot be included as one member of a\nmulti-value `in:` expression. An unknown operator, or an operator\nunsupported by the referenced field type, returns\n`UNSUPPORTED_FILTER_OPERATOR`. A field type with no filtering support\nreturns `FIELD_NOT_FILTERABLE`.\n\nNote: This two-level nesting pattern is not represented portably\nacross OpenAPI generators. Consumers may need to construct the\nbracket-scoped parameter names explicitly.",
+            "style": "deepObject",
+            "explode": true,
+            "schema": { "type": "object", "additionalProperties": true }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Returned if the requested database entries are returned.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/DatabaseEntryListResponse" } }
+            },
+            "headers": {
+              "Atl-Database-Version": { "$ref": "#/components/headers/AtlDatabaseVersion" },
+              "Cache-Control": { "$ref": "#/components/headers/DatabaseCacheControl" },
+              "ETag": { "$ref": "#/components/headers/DatabaseEtag" },
+              "Link": { "$ref": "#/components/headers/DatabaseNextLink" }
+            }
+          },
+          "304": { "$ref": "#/components/responses/DatabaseNotModified" },
+          "400": { "$ref": "#/components/responses/DatabaseEntriesBadRequest" },
+          "401": { "$ref": "#/components/responses/DatabaseUnauthorized" },
+          "403": { "$ref": "#/components/responses/DatabaseForbidden" },
+          "404": { "$ref": "#/components/responses/DatabaseNotFound" },
+          "413": { "$ref": "#/components/responses/DatabaseTooLarge" },
+          "429": { "$ref": "#/components/responses/DatabaseRateLimited" },
+          "502": { "$ref": "#/components/responses/DatabaseBadGateway" },
+          "503": { "$ref": "#/components/responses/DatabaseServiceUnavailable" },
+          "504": { "$ref": "#/components/responses/DatabaseGatewayTimeout" }
+        },
+        "security": [{ "basicAuth": [] }, { "oAuthDefinitions": ["read:database:confluence"] }],
+        "x-experimental": true,
+        "x-atlassian-experimental": true,
+        "x-atlassian-oauth2-scopes": [
+          { "scheme": "oAuthDefinitions", "state": "Current", "scopes": ["read:database:confluence"] }
+        ],
+        "x-atlassian-connect-scope": "READ",
+        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": false }]
+      }
+    },
+    "/databases/{id}/entries/{entryId}": {
+      "get": {
+        "tags": ["Database"],
+        "operationId": "getDatabaseEntryById",
+        "summary": "Get entry by id",
+        "description": "Returns a single entry (row) from a database by ID.\n\n> **Consistency:** Responses may not immediately reflect recent changes.\nClients requiring read-after-write confirmation should poll with bounded backoff.\n\n> **Experimental:** This operation is experimental and may change in backwards-incompatible ways without notice.\n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\nPermission to view the database and its corresponding space.",
+        "parameters": [
+          { "$ref": "#/components/parameters/DatabaseIdParameter" },
+          {
+            "name": "entryId",
+            "in": "path",
+            "required": true,
+            "description": "The ID of the entry to be returned.",
+            "schema": { "type": "string" }
+          },
+          { "$ref": "#/components/parameters/DatabaseIfNoneMatchParameter" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Returned if the requested database entry is returned.",
+            "headers": {
+              "Atl-Database-Version": { "$ref": "#/components/headers/AtlDatabaseVersion" },
+              "Cache-Control": { "$ref": "#/components/headers/DatabaseCacheControl" },
+              "ETag": { "$ref": "#/components/headers/DatabaseEtag" }
+            },
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/DatabaseEntrySingleResponse" } }
+            }
+          },
+          "304": { "$ref": "#/components/responses/DatabaseNotModified" },
+          "401": { "$ref": "#/components/responses/DatabaseUnauthorized" },
+          "403": { "$ref": "#/components/responses/DatabaseForbidden" },
+          "404": { "$ref": "#/components/responses/DatabaseEntryNotFound" },
+          "413": { "$ref": "#/components/responses/DatabaseTooLarge" },
+          "429": { "$ref": "#/components/responses/DatabaseRateLimited" },
+          "502": { "$ref": "#/components/responses/DatabaseBadGateway" },
+          "503": { "$ref": "#/components/responses/DatabaseServiceUnavailable" },
+          "504": { "$ref": "#/components/responses/DatabaseGatewayTimeout" }
+        },
+        "security": [{ "basicAuth": [] }, { "oAuthDefinitions": ["read:database:confluence"] }],
+        "x-experimental": true,
+        "x-atlassian-experimental": true,
+        "x-atlassian-oauth2-scopes": [
+          { "scheme": "oAuthDefinitions", "state": "Current", "scopes": ["read:database:confluence"] }
         ],
         "x-atlassian-connect-scope": "READ",
         "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": false }]
@@ -13941,6 +16003,141 @@
         }
       }
     },
+    "parameters": {
+      "DatabaseIdParameter": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "description": "The Confluence content ID of the database, represented as an ASCII decimal-digit string.",
+        "schema": { "type": "string", "pattern": "^[0-9]+$" },
+        "example": "12345"
+      },
+      "DatabasePageLimitParameter": {
+        "name": "limit",
+        "in": "query",
+        "required": false,
+        "description": "Maximum number of results to return. The value must be a positive integer\nwithout a sign, decimal point, or leading zero. The default is 50 and the\nmaximum is 250.",
+        "schema": { "type": "integer", "format": "int32", "default": 50, "minimum": 1, "maximum": 250 }
+      },
+      "DatabaseCursorParameter": {
+        "name": "cursor",
+        "in": "query",
+        "required": false,
+        "description": "Opaque, offset-based continuation token obtained from `_links.next` or the\n`Link` response header. A cursor is scoped to the database, collection\nendpoint, filters, sort, and page size that produced it. Reusing a\nwell-formed cursor with any different query context returns\n`CURSOR_QUERY_MISMATCH`; malformed or structurally invalid cursors return\n`INVALID_CURSOR`, and a decoded but unsupported version returns\n`UNSUPPORTED_CURSOR_VERSION`.\n\nCursor versions remain decodable for at least 24 hours, but the API does\nnot promise TTL-expiration detection. Cursors are continuation state, not\ncaller-scoped credentials, and authorization is re-evaluated on every\nrequest. Their query-context fingerprint is unsigned and must not be\ntreated as authentication or tamper protection.\n\nPagination is best effort under concurrent mutation. Inserts, deletes, or\nchanges to sort values can cause duplicate or omitted rows; restart from\nthe first page when a consistent export is required.",
+        "schema": { "type": "string" }
+      },
+      "DatabaseIfNoneMatchParameter": {
+        "name": "If-None-Match",
+        "in": "header",
+        "required": false,
+        "description": "One or more entity tags previously returned for this exact request URL.\nA matching strong or weak validator returns `304` with no response body.",
+        "schema": { "type": "string" }
+      }
+    },
+    "headers": {
+      "AtlDatabaseVersion": {
+        "description": "Databases API representation version. This is distinct from the\n`/wiki/api/v2` platform URL version. Responses generated outside the\nDatabases API, such as authentication, authorization, rate-limit, or\ngateway responses, may omit this header.",
+        "schema": { "type": "string", "enum": ["1"] }
+      },
+      "DatabaseCacheControl": {
+        "description": "Authenticated responses may be stored only in a private cache and must be\nrevalidated before reuse.",
+        "schema": { "type": "string", "enum": ["private, max-age=0"] }
+      },
+      "DatabaseEtag": {
+        "description": "Opaque strong validator for the exact serialized representation. Cache it\nper request URL; different endpoints, filters, sorts, limits, and pages\ngenerally have different values.",
+        "schema": { "type": "string" },
+        "example": "\"5021e624e752b001ce3e3846e8f158ed4aeb93a4c9a72fdb35a0c5b14a0eea84\""
+      },
+      "DatabaseNextLink": {
+        "description": "Path-only URL for the next page, emitted only when another page exists.\nFormat: `Link: </wiki/api/v2/databases/12345/entries?cursor=...>; rel=\"next\"`.",
+        "schema": { "type": "string" }
+      },
+      "DatabaseRetryAfter": {
+        "description": "Minimum number of seconds to wait before retrying the request.",
+        "schema": { "type": "integer", "format": "int32", "minimum": 0 }
+      },
+      "DatabaseRateLimitReason": {
+        "description": "Opaque attribution for the policy or limiter that throttled the request.",
+        "schema": { "type": "string" }
+      },
+      "DatabaseRateLimitLimit": {
+        "description": "Maximum request capacity enforced for the applicable rate-limit scope.",
+        "schema": { "type": "integer", "minimum": 0 }
+      },
+      "DatabaseRateLimitRemaining": {
+        "description": "Remaining request capacity in the applicable rate-limit window.",
+        "schema": { "type": "integer", "minimum": 0 }
+      },
+      "DatabaseRateLimitReset": {
+        "description": "ISO 8601 timestamp when the applicable rate-limit window resets.",
+        "schema": { "type": "string", "format": "date-time" }
+      }
+    },
+    "responses": {
+      "DatabaseNotModified": {
+        "description": "Returned without a body when `If-None-Match` matches the selected\nrepresentation. A `304 Not Modified` means that the selected representation\nhas not changed. It does not guarantee that a recent upstream write has\nfinished propagating. A `304` for one endpoint, query, or page says\nnothing about any other representation.",
+        "headers": {
+          "Atl-Database-Version": { "$ref": "#/components/headers/AtlDatabaseVersion" },
+          "Cache-Control": { "$ref": "#/components/headers/DatabaseCacheControl" },
+          "ETag": { "$ref": "#/components/headers/DatabaseEtag" }
+        }
+      },
+      "DatabasePaginationBadRequest": {
+        "description": "Returned for invalid pagination input. `INVALID_CURSOR` means the token is\nmalformed or structurally invalid. `UNSUPPORTED_CURSOR_VERSION` means it\ndecoded successfully but uses an unsupported version.\n`CURSOR_QUERY_MISMATCH` means a well-formed cursor was issued for a\ndifferent database, collection endpoint, filter, sort, or page size.\n`INVALID_PAGE_LIMIT` means `limit` is outside the documented syntax or\nrange. Restart from the first page after a query-context mismatch.",
+        "headers": { "Atl-Database-Version": { "$ref": "#/components/headers/AtlDatabaseVersion" } },
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DatabaseErrorResponse" } } }
+      },
+      "DatabaseEntriesBadRequest": {
+        "description": "Returned for invalid pagination, filtering, or sorting input.\n`INVALID_CURSOR` is limited to malformed or structurally invalid tokens;\n`UNSUPPORTED_CURSOR_VERSION` identifies a decoded unsupported version;\nand `CURSOR_QUERY_MISMATCH` identifies a well-formed cursor used with a\ndifferent database, collection endpoint, filter, sort, or page size.\n`UNSUPPORTED_FILTER_OPERATOR` identifies either an unknown operator or one\nthat the referenced field type does not support. Other possible codes are\n`INVALID_PAGE_LIMIT`, `INVALID_FILTER`, `FIELD_NOT_FILTERABLE`,\n`INVALID_SORT`, `UNSUPPORTED_SORT_MODIFIER`, and `FIELD_NOT_SORTABLE`.",
+        "headers": { "Atl-Database-Version": { "$ref": "#/components/headers/AtlDatabaseVersion" } },
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DatabaseErrorResponse" } } }
+      },
+      "DatabaseUnauthorized": {
+        "description": "Returned when authentication credentials are missing, invalid, or are not\naccepted for this operation. Only the HTTP status is part of the Databases\ncontract.",
+        "content": {}
+      },
+      "DatabaseForbidden": {
+        "description": "Returned when an authenticated request is forbidden by an applicable app\naccess or authorization policy. Only the HTTP status is part of the\nDatabases contract.",
+        "content": {}
+      },
+      "DatabaseNotFound": {
+        "description": "Returned with `DATABASE_NOT_FOUND` when the database does not exist,\ncannot be returned, the feature is unavailable, or the caller lacks\npermission to view it. These cases are intentionally indistinguishable.",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DatabaseErrorResponse" } } }
+      },
+      "DatabaseEntryNotFound": {
+        "description": "Returned with `DATABASE_NOT_FOUND` for an unavailable or inaccessible\ndatabase, or with `ENTRY_NOT_FOUND` when the entry does not exist in the\ndatabase.",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DatabaseErrorResponse" } } }
+      },
+      "DatabaseTooLarge": {
+        "description": "Returned with `DATABASE_TOO_LARGE` when the database exceeds a\ndatabase-wide size limit evaluated before pagination or a\nserialized-response size limit. The error detail identifies the limit\nexceeded. Pagination, filtering, and a smaller limit do not bypass the\ndatabase-wide limit.",
+        "headers": { "Atl-Database-Version": { "$ref": "#/components/headers/AtlDatabaseVersion" } },
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DatabaseErrorResponse" } } }
+      },
+      "DatabaseRateLimited": {
+        "description": "Returned when the request is throttled by a service handling the request.\nThis response does not guarantee a Databases error envelope or application\nerror code. Clients must honor `Retry-After` when it is supplied.\n`RateLimit-Reason` is opaque limiter attribution; it and the legacy\n`X-RateLimit-Limit`, `X-RateLimit-Remaining`, and `X-RateLimit-Reset`\nheaders are conditional.",
+        "headers": {
+          "Retry-After": { "$ref": "#/components/headers/DatabaseRetryAfter" },
+          "RateLimit-Reason": { "$ref": "#/components/headers/DatabaseRateLimitReason" },
+          "X-RateLimit-Limit": { "$ref": "#/components/headers/DatabaseRateLimitLimit" },
+          "X-RateLimit-Remaining": { "$ref": "#/components/headers/DatabaseRateLimitRemaining" },
+          "X-RateLimit-Reset": { "$ref": "#/components/headers/DatabaseRateLimitReset" }
+        },
+        "content": {}
+      },
+      "DatabaseBadGateway": {
+        "description": "Returned without a body when a dependent service returns `401` or `403`;\nwhen an upstream `5xx` response is unknown, malformed, untrusted, or not\nallowlisted; or when another dependent-service I/O failure occurs.",
+        "content": {}
+      },
+      "DatabaseServiceUnavailable": {
+        "description": "Returned with `SERVICE_DISABLED` when the requested operation is not\ncurrently available, or with `SERVICE_UNAVAILABLE` when a service handling\nthe request or a required dependency is temporarily unavailable. Clients\nmay retry `SERVICE_UNAVAILABLE`. `Retry-After` is conditional and may be\nomitted; clients must honor it when present.",
+        "headers": { "Retry-After": { "$ref": "#/components/headers/DatabaseRetryAfter" } },
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DatabaseErrorResponse" } } }
+      },
+      "DatabaseGatewayTimeout": {
+        "description": "Returned with `REQUEST_TIMEOUT` and a structured error when an allowlisted\ndependent-service response reports that the request timed out. A connection,\nsocket, or proxy transport timeout is returned without a response body.",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DatabaseErrorResponse" } } }
+      }
+    },
     "schemas": {
       "AdminKeyResponse": {
         "type": "object",
@@ -16237,7 +18434,1013 @@
         "type": "string",
         "enum": ["RED", "RED_BOLD", "ORANGE", "YELLOW", "GREEN", "BLUE", "NAVY", "TEAL", "PURPLE", "GREY", "LIME"]
       },
-      "ClassificationLevelStatus": { "type": "string", "enum": ["DRAFT", "PUBLISHED", "ARCHIVED"] }
+      "ClassificationLevelStatus": { "type": "string", "enum": ["DRAFT", "PUBLISHED", "ARCHIVED"] },
+      "DatabaseField": {
+        "description": "A field definition whose strict settings shape is selected by `type`.",
+        "oneOf": [
+          { "$ref": "#/components/schemas/DatabaseTextField" },
+          { "$ref": "#/components/schemas/DatabaseAiSummaryField" },
+          { "$ref": "#/components/schemas/DatabaseNumberField" },
+          { "$ref": "#/components/schemas/DatabaseCheckboxField" },
+          { "$ref": "#/components/schemas/DatabaseDateField" },
+          { "$ref": "#/components/schemas/DatabaseSelectField" },
+          { "$ref": "#/components/schemas/DatabaseHyperlinkField" },
+          { "$ref": "#/components/schemas/DatabaseUserField" },
+          { "$ref": "#/components/schemas/DatabaseAttachmentField" },
+          { "$ref": "#/components/schemas/DatabaseJiraIssueField" },
+          { "$ref": "#/components/schemas/DatabasePageLinkField" },
+          { "$ref": "#/components/schemas/DatabaseEntryLinkField" },
+          { "$ref": "#/components/schemas/DatabaseEntryDetailsField" },
+          { "$ref": "#/components/schemas/DatabaseBacklinkField" },
+          { "$ref": "#/components/schemas/DatabasePageDetailsField" },
+          { "$ref": "#/components/schemas/DatabasePageLabelsField" },
+          { "$ref": "#/components/schemas/DatabasePageStatusField" },
+          { "$ref": "#/components/schemas/DatabaseJiraIssueDetailsField" }
+        ],
+        "discriminator": {
+          "propertyName": "type",
+          "mapping": {
+            "text": "#/components/schemas/DatabaseTextField",
+            "aiSummary": "#/components/schemas/DatabaseAiSummaryField",
+            "number": "#/components/schemas/DatabaseNumberField",
+            "checkbox": "#/components/schemas/DatabaseCheckboxField",
+            "date": "#/components/schemas/DatabaseDateField",
+            "select": "#/components/schemas/DatabaseSelectField",
+            "hyperlink": "#/components/schemas/DatabaseHyperlinkField",
+            "user": "#/components/schemas/DatabaseUserField",
+            "attachment": "#/components/schemas/DatabaseAttachmentField",
+            "jiraIssue": "#/components/schemas/DatabaseJiraIssueField",
+            "pageLink": "#/components/schemas/DatabasePageLinkField",
+            "entryLink": "#/components/schemas/DatabaseEntryLinkField",
+            "entryDetails": "#/components/schemas/DatabaseEntryDetailsField",
+            "backlink": "#/components/schemas/DatabaseBacklinkField",
+            "pageDetails": "#/components/schemas/DatabasePageDetailsField",
+            "pageLabels": "#/components/schemas/DatabasePageLabelsField",
+            "pageStatus": "#/components/schemas/DatabasePageStatusField",
+            "jiraIssueDetails": "#/components/schemas/DatabaseJiraIssueDetailsField"
+          }
+        }
+      },
+      "DatabaseFieldBase": {
+        "type": "object",
+        "required": ["id", "name", "description"],
+        "properties": {
+          "id": { "type": "string", "description": "Stable identifier of the field." },
+          "name": { "type": "string", "description": "User-visible field name." },
+          "description": { "type": "string", "nullable": true, "description": "User-set field description." }
+        }
+      },
+      "DatabaseFieldType": {
+        "type": "string",
+        "description": "The type of a database field.",
+        "enum": [
+          "text",
+          "aiSummary",
+          "number",
+          "checkbox",
+          "date",
+          "select",
+          "hyperlink",
+          "user",
+          "attachment",
+          "jiraIssue",
+          "pageLink",
+          "entryLink",
+          "entryDetails",
+          "backlink",
+          "pageDetails",
+          "pageLabels",
+          "pageStatus",
+          "jiraIssueDetails"
+        ]
+      },
+      "DatabaseFieldSettings": {
+        "description": "Strict settings shape selected by the parent `DatabaseField.type`.\nLookup-field settings expose source identifiers but lookup values remain\n`null` in this representation version. Types without projected settings\nreturn an empty object.",
+        "anyOf": [
+          { "$ref": "#/components/schemas/DatabaseTextFieldSettings" },
+          { "$ref": "#/components/schemas/DatabaseAiSummaryFieldSettings" },
+          { "$ref": "#/components/schemas/DatabaseNumberFieldSettings" },
+          { "$ref": "#/components/schemas/DatabaseSelectFieldSettings" },
+          { "$ref": "#/components/schemas/DatabaseDateFieldSettings" },
+          { "$ref": "#/components/schemas/DatabaseJiraIssueFieldSettings" },
+          { "$ref": "#/components/schemas/DatabaseEntryDetailsFieldSettings" },
+          { "$ref": "#/components/schemas/DatabaseJiraIssueDetailsFieldSettings" },
+          { "$ref": "#/components/schemas/DatabasePageDetailsFieldSettings" },
+          { "$ref": "#/components/schemas/DatabaseSourceFieldSettings" },
+          { "$ref": "#/components/schemas/DatabaseBacklinkFieldSettings" },
+          { "$ref": "#/components/schemas/DatabaseEmptyFieldSettings" }
+        ]
+      },
+      "DatabaseTextFieldSettings": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["richText"],
+        "properties": {
+          "richText": { "type": "boolean", "description": "`true` when the field accepts rich text (ADF)." }
+        }
+      },
+      "DatabaseAiSummaryFieldSettings": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": { "aiRunMetadata": { "$ref": "#/components/schemas/DatabaseAiSummaryRunMetadata" } }
+      },
+      "DatabaseAiSummaryRunMetadata": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["lastAiRunUserAccountId"],
+        "properties": {
+          "lastAiRunUserAccountId": {
+            "type": "string",
+            "nullable": true,
+            "description": "Account ID of the user who last triggered the AI summary run."
+          }
+        }
+      },
+      "DatabaseNumberFieldSettings": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": { "format": { "$ref": "#/components/schemas/DatabaseNumberFormat" } }
+      },
+      "DatabaseNumberFormat": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type"],
+        "properties": {
+          "type": { "type": "string", "enum": ["number", "percent", "currency", "custom"] },
+          "prefix": { "type": "string", "description": "Display symbol before the value (e.g. \"$\")." },
+          "suffix": { "type": "string", "description": "Display symbol after the value (e.g. \"%\")." },
+          "decimalPlaces": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Explicit decimal precision; absent when using the format default."
+          }
+        }
+      },
+      "DatabaseSelectFieldSettings": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["options"],
+        "properties": {
+          "options": {
+            "type": "array",
+            "description": "Ordered list of configured options.",
+            "items": { "$ref": "#/components/schemas/DatabaseSelectOption" }
+          }
+        }
+      },
+      "DatabaseSelectOption": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "label"],
+        "properties": { "id": { "type": "string" }, "label": { "type": "string" } }
+      },
+      "DatabaseDateFieldSettings": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["includesTime"],
+        "properties": {
+          "includesTime": {
+            "type": "boolean",
+            "description": "When `true`, values are offset-bearing datetimes in the form\n`YYYY-MM-DDTHH:mm[:ss[.fraction]]Z` or the equivalent with\n`+/-HH:MM`. When `false`, values are date-only (`YYYY-MM-DD`)."
+          }
+        }
+      },
+      "DatabaseJiraIssueFieldSettings": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "cloudId": { "type": "string", "description": "Connected Jira Cloud site ID." },
+          "serverId": { "type": "string", "description": "Connected Jira Server/Data Center site ID." }
+        }
+      },
+      "DatabaseEntryDetailsFieldSettings": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "sourceFieldId": { "type": "string", "description": "The link field this lookup field derives from." },
+          "lookupFieldId": { "type": "string", "description": "The field being looked up." }
+        }
+      },
+      "DatabaseJiraIssueDetailsFieldSettings": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "sourceFieldId": { "type": "string", "description": "The Jira issue field this lookup derives from." },
+          "jiraFieldKey": { "type": "string", "description": "The selected Jira field key." }
+        }
+      },
+      "DatabasePageDetailsFieldSettings": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "sourceFieldId": { "type": "string", "description": "The page-link field this lookup derives from." },
+          "pagePropertyKey": { "type": "string", "description": "The selected page property key." }
+        }
+      },
+      "DatabaseSourceFieldSettings": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "sourceFieldId": { "type": "string", "description": "The source field this lookup derives from." }
+        }
+      },
+      "DatabaseBacklinkFieldSettings": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "sourceDatabaseContentId": {
+            "type": "string",
+            "description": "Confluence content ID of the source database."
+          }
+        }
+      },
+      "DatabaseEmptyFieldSettings": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Field types with no type-specific settings."
+      },
+      "DatabaseTextField": {
+        "allOf": [
+          { "$ref": "#/components/schemas/DatabaseFieldBase" },
+          {
+            "type": "object",
+            "required": ["type", "settings"],
+            "properties": {
+              "type": { "type": "string", "enum": ["text"] },
+              "settings": { "$ref": "#/components/schemas/DatabaseTextFieldSettings" }
+            }
+          }
+        ]
+      },
+      "DatabaseAiSummaryField": {
+        "allOf": [
+          { "$ref": "#/components/schemas/DatabaseFieldBase" },
+          {
+            "type": "object",
+            "required": ["type", "settings"],
+            "properties": {
+              "type": { "type": "string", "enum": ["aiSummary"] },
+              "settings": { "$ref": "#/components/schemas/DatabaseAiSummaryFieldSettings" }
+            }
+          }
+        ]
+      },
+      "DatabaseNumberField": {
+        "allOf": [
+          { "$ref": "#/components/schemas/DatabaseFieldBase" },
+          {
+            "type": "object",
+            "required": ["type", "settings"],
+            "properties": {
+              "type": { "type": "string", "enum": ["number"] },
+              "settings": { "$ref": "#/components/schemas/DatabaseNumberFieldSettings" }
+            }
+          }
+        ]
+      },
+      "DatabaseCheckboxField": {
+        "allOf": [
+          { "$ref": "#/components/schemas/DatabaseFieldBase" },
+          {
+            "type": "object",
+            "required": ["type", "settings"],
+            "properties": {
+              "type": { "type": "string", "enum": ["checkbox"] },
+              "settings": { "$ref": "#/components/schemas/DatabaseEmptyFieldSettings" }
+            }
+          }
+        ]
+      },
+      "DatabaseDateField": {
+        "allOf": [
+          { "$ref": "#/components/schemas/DatabaseFieldBase" },
+          {
+            "type": "object",
+            "required": ["type", "settings"],
+            "properties": {
+              "type": { "type": "string", "enum": ["date"] },
+              "settings": { "$ref": "#/components/schemas/DatabaseDateFieldSettings" }
+            }
+          }
+        ]
+      },
+      "DatabaseSelectField": {
+        "allOf": [
+          { "$ref": "#/components/schemas/DatabaseFieldBase" },
+          {
+            "type": "object",
+            "required": ["type", "settings"],
+            "properties": {
+              "type": { "type": "string", "enum": ["select"] },
+              "settings": { "$ref": "#/components/schemas/DatabaseSelectFieldSettings" }
+            }
+          }
+        ]
+      },
+      "DatabaseHyperlinkField": {
+        "allOf": [
+          { "$ref": "#/components/schemas/DatabaseFieldBase" },
+          {
+            "type": "object",
+            "required": ["type", "settings"],
+            "properties": {
+              "type": { "type": "string", "enum": ["hyperlink"] },
+              "settings": { "$ref": "#/components/schemas/DatabaseEmptyFieldSettings" }
+            }
+          }
+        ]
+      },
+      "DatabaseUserField": {
+        "allOf": [
+          { "$ref": "#/components/schemas/DatabaseFieldBase" },
+          {
+            "type": "object",
+            "required": ["type", "settings"],
+            "properties": {
+              "type": { "type": "string", "enum": ["user"] },
+              "settings": { "$ref": "#/components/schemas/DatabaseEmptyFieldSettings" }
+            }
+          }
+        ]
+      },
+      "DatabaseAttachmentField": {
+        "allOf": [
+          { "$ref": "#/components/schemas/DatabaseFieldBase" },
+          {
+            "type": "object",
+            "required": ["type", "settings"],
+            "properties": {
+              "type": { "type": "string", "enum": ["attachment"] },
+              "settings": { "$ref": "#/components/schemas/DatabaseEmptyFieldSettings" }
+            }
+          }
+        ]
+      },
+      "DatabaseJiraIssueField": {
+        "allOf": [
+          { "$ref": "#/components/schemas/DatabaseFieldBase" },
+          {
+            "type": "object",
+            "required": ["type", "settings"],
+            "properties": {
+              "type": { "type": "string", "enum": ["jiraIssue"] },
+              "settings": { "$ref": "#/components/schemas/DatabaseJiraIssueFieldSettings" }
+            }
+          }
+        ]
+      },
+      "DatabasePageLinkField": {
+        "allOf": [
+          { "$ref": "#/components/schemas/DatabaseFieldBase" },
+          {
+            "type": "object",
+            "required": ["type", "settings"],
+            "properties": {
+              "type": { "type": "string", "enum": ["pageLink"] },
+              "settings": { "$ref": "#/components/schemas/DatabaseEmptyFieldSettings" }
+            }
+          }
+        ]
+      },
+      "DatabaseEntryLinkField": {
+        "allOf": [
+          { "$ref": "#/components/schemas/DatabaseFieldBase" },
+          {
+            "type": "object",
+            "required": ["type", "settings"],
+            "properties": {
+              "type": { "type": "string", "enum": ["entryLink"] },
+              "settings": { "$ref": "#/components/schemas/DatabaseEmptyFieldSettings" }
+            }
+          }
+        ]
+      },
+      "DatabaseEntryDetailsField": {
+        "allOf": [
+          { "$ref": "#/components/schemas/DatabaseFieldBase" },
+          {
+            "type": "object",
+            "required": ["type", "settings"],
+            "properties": {
+              "type": { "type": "string", "enum": ["entryDetails"] },
+              "settings": { "$ref": "#/components/schemas/DatabaseEntryDetailsFieldSettings" }
+            }
+          }
+        ]
+      },
+      "DatabaseBacklinkField": {
+        "allOf": [
+          { "$ref": "#/components/schemas/DatabaseFieldBase" },
+          {
+            "type": "object",
+            "required": ["type", "settings"],
+            "properties": {
+              "type": { "type": "string", "enum": ["backlink"] },
+              "settings": { "$ref": "#/components/schemas/DatabaseBacklinkFieldSettings" }
+            }
+          }
+        ]
+      },
+      "DatabasePageDetailsField": {
+        "allOf": [
+          { "$ref": "#/components/schemas/DatabaseFieldBase" },
+          {
+            "type": "object",
+            "required": ["type", "settings"],
+            "properties": {
+              "type": { "type": "string", "enum": ["pageDetails"] },
+              "settings": { "$ref": "#/components/schemas/DatabasePageDetailsFieldSettings" }
+            }
+          }
+        ]
+      },
+      "DatabasePageLabelsField": {
+        "allOf": [
+          { "$ref": "#/components/schemas/DatabaseFieldBase" },
+          {
+            "type": "object",
+            "required": ["type", "settings"],
+            "properties": {
+              "type": { "type": "string", "enum": ["pageLabels"] },
+              "settings": { "$ref": "#/components/schemas/DatabaseSourceFieldSettings" }
+            }
+          }
+        ]
+      },
+      "DatabasePageStatusField": {
+        "allOf": [
+          { "$ref": "#/components/schemas/DatabaseFieldBase" },
+          {
+            "type": "object",
+            "required": ["type", "settings"],
+            "properties": {
+              "type": { "type": "string", "enum": ["pageStatus"] },
+              "settings": { "$ref": "#/components/schemas/DatabaseSourceFieldSettings" }
+            }
+          }
+        ]
+      },
+      "DatabaseJiraIssueDetailsField": {
+        "allOf": [
+          { "$ref": "#/components/schemas/DatabaseFieldBase" },
+          {
+            "type": "object",
+            "required": ["type", "settings"],
+            "properties": {
+              "type": { "type": "string", "enum": ["jiraIssueDetails"] },
+              "settings": { "$ref": "#/components/schemas/DatabaseJiraIssueDetailsFieldSettings" }
+            }
+          }
+        ]
+      },
+      "DatabaseView": {
+        "type": "object",
+        "description": "Metadata for a named view on a database.",
+        "additionalProperties": false,
+        "required": ["id", "name", "type"],
+        "properties": {
+          "id": { "type": "string", "description": "Stable identifier of the view." },
+          "name": { "type": "string", "description": "User-visible view name." },
+          "type": { "type": "string", "enum": ["table", "gallery", "board", "calendar", "timeline"] }
+        }
+      },
+      "DatabaseEntry": {
+        "type": "object",
+        "description": "A single entry (row) within a database.",
+        "additionalProperties": false,
+        "required": ["id", "databaseId", "values"],
+        "properties": {
+          "id": { "type": "string", "description": "Stable identifier of the entry." },
+          "databaseId": { "type": "string", "description": "The Confluence content ID of the parent database." },
+          "values": {
+            "type": "object",
+            "description": "Map of field ID to field value. Every field on the database is present;\nunset values are represented as an object with a null `value` rather\nthan omitted.",
+            "additionalProperties": { "$ref": "#/components/schemas/DatabaseFieldValue" }
+          }
+        }
+      },
+      "DatabaseFieldValue": {
+        "description": "The value of a single field on an entry, discriminated on `type`. Shape\nvaries by field type: some are stored directly, some are stable references\nto other resources, and lookup-derived field values are objects with a\n`value` property of `null`.",
+        "oneOf": [
+          { "$ref": "#/components/schemas/DatabaseTextValue" },
+          { "$ref": "#/components/schemas/DatabaseAiSummaryValue" },
+          { "$ref": "#/components/schemas/DatabaseNumberValue" },
+          { "$ref": "#/components/schemas/DatabaseCheckboxValue" },
+          { "$ref": "#/components/schemas/DatabaseDateValue" },
+          { "$ref": "#/components/schemas/DatabaseSelectValue" },
+          { "$ref": "#/components/schemas/DatabaseHyperlinkValue" },
+          { "$ref": "#/components/schemas/DatabaseUserValue" },
+          { "$ref": "#/components/schemas/DatabaseAttachmentValue" },
+          { "$ref": "#/components/schemas/DatabaseJiraIssueValue" },
+          { "$ref": "#/components/schemas/DatabasePageLinkValue" },
+          { "$ref": "#/components/schemas/DatabaseEntryLinkValue" },
+          { "$ref": "#/components/schemas/DatabaseNullLookupValue" }
+        ],
+        "discriminator": {
+          "propertyName": "type",
+          "mapping": {
+            "text": "#/components/schemas/DatabaseTextValue",
+            "aiSummary": "#/components/schemas/DatabaseAiSummaryValue",
+            "number": "#/components/schemas/DatabaseNumberValue",
+            "checkbox": "#/components/schemas/DatabaseCheckboxValue",
+            "date": "#/components/schemas/DatabaseDateValue",
+            "select": "#/components/schemas/DatabaseSelectValue",
+            "hyperlink": "#/components/schemas/DatabaseHyperlinkValue",
+            "user": "#/components/schemas/DatabaseUserValue",
+            "attachment": "#/components/schemas/DatabaseAttachmentValue",
+            "jiraIssue": "#/components/schemas/DatabaseJiraIssueValue",
+            "pageLink": "#/components/schemas/DatabasePageLinkValue",
+            "entryLink": "#/components/schemas/DatabaseEntryLinkValue",
+            "entryDetails": "#/components/schemas/DatabaseNullLookupValue",
+            "backlink": "#/components/schemas/DatabaseNullLookupValue",
+            "pageDetails": "#/components/schemas/DatabaseNullLookupValue",
+            "pageLabels": "#/components/schemas/DatabaseNullLookupValue",
+            "pageStatus": "#/components/schemas/DatabaseNullLookupValue",
+            "jiraIssueDetails": "#/components/schemas/DatabaseNullLookupValue"
+          }
+        }
+      },
+      "DatabaseTextValue": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "plain", "rich"],
+        "properties": {
+          "type": { "type": "string", "enum": ["text"] },
+          "plain": { "type": "string", "nullable": true },
+          "rich": { "$ref": "#/components/schemas/DatabaseAdfDocument" }
+        }
+      },
+      "DatabaseAdfDocument": {
+        "type": "object",
+        "nullable": true,
+        "description": "Minimal Atlassian Document Format envelope.",
+        "required": ["version", "type"],
+        "properties": {
+          "version": { "type": "integer" },
+          "type": { "type": "string", "enum": ["doc"] },
+          "content": { "type": "array", "items": {} }
+        }
+      },
+      "DatabaseAiSummaryValue": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "plain", "rich", "metadata"],
+        "properties": {
+          "type": { "type": "string", "enum": ["aiSummary"] },
+          "plain": { "type": "string", "nullable": true },
+          "rich": { "$ref": "#/components/schemas/DatabaseAdfDocument" },
+          "metadata": { "$ref": "#/components/schemas/DatabaseAiSummaryValueMetadata" }
+        }
+      },
+      "DatabaseAiSummaryValueMetadata": {
+        "type": "object",
+        "nullable": true,
+        "additionalProperties": false,
+        "required": ["lastUpdatedAt", "lastUpdatedBy", "lastUpdatedUserAccountId"],
+        "properties": {
+          "lastUpdatedAt": { "type": "string", "nullable": true, "description": "ISO 8601 timestamp." },
+          "lastUpdatedBy": { "type": "string", "nullable": true, "enum": ["ai", "user"] },
+          "lastUpdatedUserAccountId": { "type": "string", "nullable": true }
+        }
+      },
+      "DatabaseNumberValue": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "value"],
+        "properties": {
+          "type": { "type": "string", "enum": ["number"] },
+          "value": {
+            "type": "string",
+            "nullable": true,
+            "pattern": "^(-?0\\.\\d+|0|-?[1-9]\\d*(\\.\\d+)?)([eE][+-]?\\d+)?$",
+            "description": "Canonical finite decimal string, locale-invariant. `null` when unset."
+          }
+        }
+      },
+      "DatabaseCheckboxValue": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "value"],
+        "properties": {
+          "type": { "type": "string", "enum": ["checkbox"] },
+          "value": { "type": "boolean", "nullable": true }
+        }
+      },
+      "DatabaseDateValue": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "value"],
+        "properties": {
+          "type": { "type": "string", "enum": ["date"] },
+          "value": {
+            "type": "string",
+            "nullable": true,
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}(?:T\\d{2}:\\d{2}(?::\\d{2}(?:\\.\\d+)?)?(?:Z|[+-]\\d{2}:\\d{2}))?$",
+            "description": "Valid ISO date (`YYYY-MM-DD`) or offset-bearing datetime\n(`YYYY-MM-DDTHH:mm[:ss[.fraction]]Z` or the equivalent with\n`+/-HH:MM`), depending on the field's `includesTime` setting. Seconds\nand fractional seconds are optional, and valid stored precision is\npreserved. A datetime without `Z` or an explicit offset is invalid."
+          }
+        }
+      },
+      "DatabaseSelectValue": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "value"],
+        "properties": {
+          "type": { "type": "string", "enum": ["select"] },
+          "value": {
+            "type": "array",
+            "nullable": true,
+            "items": { "$ref": "#/components/schemas/DatabaseSelectOption" }
+          }
+        }
+      },
+      "DatabaseHyperlinkItem": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["url"],
+        "properties": { "url": { "type": "string" }, "label": { "type": "string" } }
+      },
+      "DatabaseHyperlinkValue": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "value"],
+        "properties": {
+          "type": { "type": "string", "enum": ["hyperlink"] },
+          "value": {
+            "type": "array",
+            "nullable": true,
+            "items": { "$ref": "#/components/schemas/DatabaseHyperlinkItem" }
+          }
+        }
+      },
+      "DatabaseUserRef": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["accountId"],
+        "properties": { "accountId": { "type": "string" } }
+      },
+      "DatabaseUserValue": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "value"],
+        "properties": {
+          "type": { "type": "string", "enum": ["user"] },
+          "value": { "type": "array", "nullable": true, "items": { "$ref": "#/components/schemas/DatabaseUserRef" } }
+        }
+      },
+      "DatabaseAttachmentRef": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["mediaId"],
+        "properties": { "mediaId": { "type": "string" } }
+      },
+      "DatabaseAttachmentValue": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "value"],
+        "properties": {
+          "type": { "type": "string", "enum": ["attachment"] },
+          "value": {
+            "type": "array",
+            "nullable": true,
+            "items": { "$ref": "#/components/schemas/DatabaseAttachmentRef" }
+          }
+        }
+      },
+      "DatabaseJiraIssueRef": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["key"],
+        "properties": { "key": { "type": "string" }, "cloudId": { "type": "string" }, "serverId": { "type": "string" } }
+      },
+      "DatabaseJiraIssueValue": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "value"],
+        "properties": {
+          "type": { "type": "string", "enum": ["jiraIssue"] },
+          "value": {
+            "type": "array",
+            "nullable": true,
+            "items": { "$ref": "#/components/schemas/DatabaseJiraIssueRef" }
+          }
+        }
+      },
+      "DatabasePageRef": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["contentId"],
+        "properties": { "contentId": { "type": "string" } }
+      },
+      "DatabasePageLinkValue": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "value"],
+        "properties": {
+          "type": { "type": "string", "enum": ["pageLink"] },
+          "value": { "type": "array", "nullable": true, "items": { "$ref": "#/components/schemas/DatabasePageRef" } }
+        }
+      },
+      "DatabaseEntryRef": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["entryId"],
+        "properties": {
+          "entryId": { "type": "string" },
+          "databaseContentId": {
+            "type": "string",
+            "description": "Absent when the target entry is in the same database."
+          }
+        }
+      },
+      "DatabaseEntryLinkValue": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "value"],
+        "properties": {
+          "type": { "type": "string", "enum": ["entryLink"] },
+          "value": { "type": "array", "nullable": true, "items": { "$ref": "#/components/schemas/DatabaseEntryRef" } }
+        }
+      },
+      "DatabaseNullLookupValue": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Lookup-derived field types (entryDetails, backlink, pageDetails,\npageLabels, pageStatus, jiraIssueDetails) return objects with a `value`\nproperty of `null`.",
+        "required": ["type", "value"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["entryDetails", "backlink", "pageDetails", "pageLabels", "pageStatus", "jiraIssueDetails"]
+          },
+          "value": { "nullable": true, "enum": [null], "description": "Always `null`." }
+        }
+      },
+      "DatabaseFieldListResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["results", "_links", "meta"],
+        "properties": {
+          "results": { "type": "array", "items": { "$ref": "#/components/schemas/DatabaseField" } },
+          "_links": { "$ref": "#/components/schemas/DatabasesPublicApiLinks" },
+          "meta": { "$ref": "#/components/schemas/DatabasePaginationMeta" }
+        }
+      },
+      "DatabaseViewListResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["results", "_links", "meta"],
+        "properties": {
+          "results": { "type": "array", "items": { "$ref": "#/components/schemas/DatabaseView" } },
+          "_links": { "$ref": "#/components/schemas/DatabasesPublicApiLinks" },
+          "meta": { "$ref": "#/components/schemas/DatabasePaginationMeta" }
+        }
+      },
+      "DatabaseEntryListResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["results", "_links", "meta"],
+        "properties": {
+          "results": { "type": "array", "items": { "$ref": "#/components/schemas/DatabaseEntry" } },
+          "_links": { "$ref": "#/components/schemas/DatabasesPublicApiLinks" },
+          "meta": { "$ref": "#/components/schemas/DatabasePaginationMeta" }
+        }
+      },
+      "DatabasesPublicApiLinks": {
+        "type": "object",
+        "description": "Links for a Databases API representation. `self` and `next` are\npath-only URLs. `base` is the absolute canonical Confluence site base URL.\n`next` is present only when another page exists. Additional future link\nrelations may be added without a representation-version bump.",
+        "required": ["self", "base"],
+        "properties": {
+          "self": {
+            "type": "string",
+            "pattern": "^/wiki/api/v2/databases/",
+            "description": "Path-only URL of this resource or result page."
+          },
+          "base": {
+            "type": "string",
+            "format": "uri",
+            "description": "Absolute canonical site base URL, including the `/wiki` context path."
+          },
+          "next": {
+            "type": "string",
+            "pattern": "^/wiki/api/v2/databases/",
+            "description": "Path-only URL of the next page."
+          }
+        }
+      },
+      "DatabasePaginationMeta": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["pageSize", "hasMore"],
+        "properties": {
+          "pageSize": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 1,
+            "maximum": 250,
+            "description": "Requested page size used to produce this page."
+          },
+          "cursor": { "type": "string", "description": "Cursor that produced this page; absent on the first page." },
+          "hasMore": { "type": "boolean", "description": "Whether another page exists after this page." }
+        }
+      },
+      "DatabaseEntrySingleResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "A single entry, not wrapped in a `results` array, with a `_links.self`\npath and an absolute `_links.base` URL.",
+        "required": ["id", "databaseId", "values", "_links"],
+        "properties": {
+          "id": { "type": "string", "description": "Stable identifier of the entry." },
+          "databaseId": { "type": "string", "description": "The Confluence content ID of the parent database." },
+          "values": {
+            "type": "object",
+            "description": "Map of field ID to field value. Every field on the database is present;\nunset values are represented as an object with a null `value` rather\nthan omitted.",
+            "additionalProperties": { "$ref": "#/components/schemas/DatabaseFieldValue" }
+          },
+          "_links": { "$ref": "#/components/schemas/DatabasesPublicApiLinks" }
+        }
+      },
+      "DatabaseErrorResponse": {
+        "type": "object",
+        "description": "Structured Confluence V2 error envelope. The HTTP status and `code` are\nthe stable machine-readable contract. `title` and `detail` are\nhuman-readable, and their exact text is not stable; clients must not use\nthem for program logic.",
+        "required": ["errors"],
+        "properties": {
+          "errors": { "type": "array", "minItems": 1, "items": { "$ref": "#/components/schemas/DatabaseError" } }
+        }
+      },
+      "DatabaseError": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["status", "code", "title"],
+        "properties": {
+          "id": { "type": "string", "format": "uuid", "description": "Optional server-generated correlation ID." },
+          "status": {
+            "type": "integer",
+            "format": "int32",
+            "description": "HTTP status code duplicated from the response status."
+          },
+          "code": {
+            "type": "string",
+            "description": "Stable machine-readable error code.",
+            "enum": [
+              "INVALID_CURSOR",
+              "UNSUPPORTED_CURSOR_VERSION",
+              "CURSOR_QUERY_MISMATCH",
+              "INVALID_FILTER",
+              "UNSUPPORTED_FILTER_OPERATOR",
+              "FIELD_NOT_FILTERABLE",
+              "FIELD_NOT_SORTABLE",
+              "UNSUPPORTED_SORT_MODIFIER",
+              "INVALID_SORT",
+              "INVALID_PAGE_LIMIT",
+              "DATABASE_NOT_FOUND",
+              "ENTRY_NOT_FOUND",
+              "DATABASE_TOO_LARGE",
+              "SERVICE_DISABLED",
+              "SERVICE_UNAVAILABLE",
+              "REQUEST_TIMEOUT"
+            ]
+          },
+          "title": { "type": "string", "description": "Human-readable summary of the error." },
+          "detail": {
+            "type": "string",
+            "nullable": true,
+            "description": "Human-readable detail; may be absent when it is unsafe to expose."
+          }
+        }
+      },
+      "ContentRestrictionState": {
+        "type": "string",
+        "description": "The direct restriction state of a content item. Inherited restrictions are not represented by this REST enum.\n- `OPEN` – No direct restrictions. Effective access may still be restricted by a parent.\n- `EDIT_RESTRICTED` – Direct viewing is open but editing is restricted to explicitly granted users/groups.\n- `VIEW_RESTRICTED` – Direct viewing and editing are restricted to explicitly granted users/groups.",
+        "enum": ["OPEN", "EDIT_RESTRICTED", "VIEW_RESTRICTED"]
+      },
+      "RestrictionStateResponse": {
+        "type": "object",
+        "description": "The direct restriction state of a content item. Inherited restrictions are not included.",
+        "required": ["state"],
+        "properties": {
+          "state": { "$ref": "#/components/schemas/ContentRestrictionState" },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO-8601 timestamp of when the restriction was set. Absent when the state is `OPEN`."
+          },
+          "createdBy": {
+            "type": "string",
+            "description": "Atlassian Account ID of the user who set the restriction. Absent when the state is `OPEN`."
+          },
+          "createdByAaid": {
+            "type": "string",
+            "deprecated": true,
+            "description": "Deprecated alias for `createdBy`. Use `createdBy` instead. Absent when the state is `OPEN`."
+          }
+        }
+      },
+      "ContentPermissionPrincipal": {
+        "type": "object",
+        "description": "A user or group principal on a content permission entry.",
+        "required": ["principalType", "principalId"],
+        "properties": {
+          "principalType": { "type": "string", "description": "The type of principal.", "enum": ["user", "group"] },
+          "principalId": {
+            "type": "string",
+            "description": "The identifier of the principal. For users, this is the Atlassian Account ID; for groups, this is the group ID."
+          }
+        }
+      },
+      "ContentPermissionOutput": {
+        "type": "object",
+        "description": "A single direct-permission entry on a content item.",
+        "required": ["operation", "principal"],
+        "properties": {
+          "operation": {
+            "type": "string",
+            "description": "The operation the permission grants.",
+            "enum": ["read", "update"]
+          },
+          "principal": { "$ref": "#/components/schemas/ContentPermissionPrincipal" },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO-8601 timestamp of when the permission was created."
+          },
+          "createdBy": {
+            "type": "string",
+            "description": "Atlassian Account ID of the user who created the permission entry."
+          },
+          "createdByAaid": {
+            "type": "string",
+            "deprecated": true,
+            "description": "Deprecated alias for `createdBy`. Use `createdBy` instead."
+          }
+        }
+      },
+      "ContentPermissionsResponse": {
+        "type": "object",
+        "description": "Contains up to 250 direct permissions on a content item. GET responses support cursor pagination to retrieve additional entries.\n\nPOST and PUT responses contain only the first 250 permissions from the resulting direct-permission set. Use the corresponding GET permissions endpoint to retrieve any remaining entries.",
+        "required": ["results", "_links"],
+        "properties": {
+          "results": {
+            "type": "array",
+            "maxItems": 250,
+            "items": { "$ref": "#/components/schemas/ContentPermissionOutput" }
+          },
+          "_links": { "$ref": "#/components/schemas/MultiEntityLinks" }
+        }
+      },
+      "ContentPermissionErrorResponse": {
+        "type": "object",
+        "description": "An error response that follows the Atlassian REST API error standard.",
+        "required": ["errors"],
+        "properties": {
+          "errors": { "type": "array", "items": { "$ref": "#/components/schemas/ContentPermissionError" } }
+        }
+      },
+      "ContentPermissionError": {
+        "type": "object",
+        "required": ["status", "code", "title"],
+        "properties": {
+          "status": {
+            "type": "integer",
+            "format": "int32",
+            "description": "HTTP status code associated with the error."
+          },
+          "code": { "type": "string", "description": "Stable identifier for the error category." },
+          "title": { "type": "string", "description": "Human-readable summary of the error." },
+          "detail": {
+            "type": "string",
+            "nullable": true,
+            "description": "Additional details about the error, when available."
+          }
+        }
+      },
+      "ContentPrincipalInput": {
+        "type": "object",
+        "description": "Identifies a user or group to assign a permission to.",
+        "required": ["principalType", "principalId"],
+        "properties": {
+          "principalType": { "type": "string", "description": "The type of principal.", "enum": ["user", "group"] },
+          "principalId": {
+            "type": "string",
+            "description": "The identifier of the principal. For users, this is the Atlassian Account ID; for groups, this is the group ID."
+          }
+        }
+      },
+      "OperationPermissionsInput": {
+        "type": "object",
+        "description": "A set of principals to assign a given operation permission to.",
+        "required": ["operation", "principals"],
+        "properties": {
+          "operation": { "type": "string", "description": "The operation to grant.", "enum": ["read", "update"] },
+          "principals": { "type": "array", "items": { "$ref": "#/components/schemas/ContentPrincipalInput" } }
+        }
+      },
+      "ContentPermissionsRequest": {
+        "type": "object",
+        "description": "A list of operation-grouped permission assignments.\n\nThe resulting direct-permission set cannot exceed 500 entries. Requests that would exceed this limit return a `400` response.",
+        "required": ["permissions"],
+        "properties": {
+          "permissions": { "type": "array", "items": { "$ref": "#/components/schemas/OperationPermissionsInput" } }
+        }
+      }
     },
     "securitySchemes": {
       "basicAuth": { "type": "http", "description": "You can access this resource via basic auth.", "scheme": "basic" },
