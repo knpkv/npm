@@ -154,6 +154,8 @@ describe("AuthorizedSharePage", () => {
     expect(transport.resolve).toHaveBeenCalledWith(WORKSET_WORKSPACE_ID, shareId, expect.any(AbortSignal))
     expect(host.textContent).toContain(source.projection.title)
     expect(host.textContent).not.toContain("Authentication required")
+    expect(host.textContent).toContain("18 Jul 2099, 10:00 UTC")
+    expect(host.textContent).not.toMatch(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/)
   })
 
   it("rejects a share URL scoped to another workspace before resolving its identifier", async () => {

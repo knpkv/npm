@@ -32,6 +32,7 @@
     "src/client/BrowserSessionStatusView.tsx",
     "src/client/services/ConnectionSynchronizationView.tsx",
     "src/client/portfolio/portfolioFilters.ts",
+    "src/client/formatTime.ts",
     "src/client/portfolio/presentPortfolio.ts",
     "src/client/portfolio/livePortfolioState.ts",
     "src/client/services/serviceOnboarding.ts",

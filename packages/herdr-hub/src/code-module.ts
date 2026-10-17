@@ -93,9 +93,10 @@ export const makeCodeModule = (configuration: {
         )
       return {
         routes: [
-          moduleReadRoute("/queue", CodeQueueQuery, CodeQueue, (query) =>
+          moduleReadRoute("/queue", CodeQueueQuery, CodeQueue, (query, caller) =>
             Effect.gen(function*() {
-              const origin = yield* ownerUi
+              // The owner UI is a loopback origin; only a viewer on the hub's own node can open it.
+              const origin = caller.sameNode ? yield* ownerUi : Option.none<string>()
               const reading = mounted._tag === "Unavailable"
                 ? mounted :
                 yield* recover(mounted.reader.queue(query))

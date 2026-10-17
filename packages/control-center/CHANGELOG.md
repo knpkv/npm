@@ -1,5 +1,17 @@
 # @knpkv/control-center
 
+## 0.19.2
+
+### Patch Changes
+
+- [#991](https://github.com/knpkv/npm/pull/991) [`5b98d96`](https://github.com/knpkv/npm/commit/5b98d968b38fa2335794ca3c8b74fede890a78b6) Thanks [@konopkov](https://github.com/konopkov)! - Browser sessions ("Revoked", "last used", the pairing code's expiry), a stale release target ("Stale since"), and authorized shares (the link's expiry, and the shared item's observed and expiry times) now read as "14 Jul 2026, 10:00 UTC" instead of raw ISO text, each inside a `<time datetime>` with the exact instant.
+
+## 0.19.1
+
+### Patch Changes
+
+- [#985](https://github.com/knpkv/npm/pull/985) [`eb14276`](https://github.com/knpkv/npm/commit/eb1427678f568c86ac94e0e48fc61716b2bd59fd) Thanks [@konopkov](https://github.com/konopkov)! - The connection card shows its test and last-sync times as readable UTC times ("14 Jul 2026, 10:00 UTC"), like the Overview's Sources panel. Before, it showed raw ISO text, and the last successful sync rendered as an internal `DateTime.Utc(…)` string. Both now sit in a `<time datetime>` element carrying the exact instant.
+
 ## 0.19.0
 
 ### Minor Changes

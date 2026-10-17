@@ -1,0 +1,55 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-iso-instant-text-in-control-center-client
+language: tsx
+severity: error
+message: "Show an instant with formatCheckTime; keep DateTime.formatIso for the <time dateTime> attribute"
+
+utils:
+  # Where the search stops: a value that becomes data (a call argument, an object field, an array
+  # element) or the machine-readable `dateTime` attribute, also when that sits inside a conditional.
+  data-boundary:
+    any:
+      - kind: call_expression
+      - kind: object
+      - kind: array
+      - kind: jsx_attribute
+        has:
+          kind: property_identifier
+          regex: "^dateTime$"
+          stopBy: neighbor
+
+rule:
+  pattern: DateTime.formatIso($$$ARGS)
+  any:
+    - inside:
+        kind: template_substitution
+        stopBy:
+          matches: data-boundary
+    - inside:
+        kind: jsx_expression
+        stopBy:
+          matches: data-boundary
+        not:
+          inside:
+            kind: jsx_attribute
+            stopBy: neighbor
+            has:
+              kind: property_identifier
+              regex: "^dateTime$"
+              stopBy: neighbor
+
+files:
+  - "packages/control-center/src/client/**/*.ts"
+  - "packages/control-center/src/client/**/*.tsx"
+
+note: |
+  Readers see instants as "14 Jul 2026, 10:00 UTC" via `formatCheckTime` from
+  `src/client/formatTime.ts`, inside `<time dateTime={DateTime.formatIso(t)}>`. ISO text in a
+  template literal, a JSX child, or any JSX attribute but `dateTime` (`label`, `title`,
+  `aria-label` are all read) is a raw timestamp on screen, also when wrapped in a ternary or a
+  string concatenation. The search stops at a call argument, object field or array element, so
+  cache keys and presenter `dateTime` fields stay allowed. Not matched: a raw `${utcValue}`
+  interpolation (a DateTime's toString, which needs types) and an aliased
+  `import { formatIso } from "effect/DateTime"` (none exist; import the namespace). Tests cover the
+  first.

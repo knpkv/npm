@@ -10,9 +10,14 @@ import {
 import { collectNeedsYou } from "./module-needs-you-server.js"
 import { type NeedsYouProviderResult, NeedsYouResult } from "./module-needs-you.js"
 
-/** Authenticated login from the listener authorization result, never client-supplied selectors. */
+/**
+ * Authenticated login from the listener authorization result, never client-supplied selectors.
+ * `sameNode` is true only when the server proved the caller is the hub's own tailnet node; an
+ * authorizer that does not say decodes as false.
+ */
 export const ModuleCaller = Schema.Struct({
-  login: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(254), Schema.isPattern(/^[^\s\p{Cc}]+$/u))
+  login: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(254), Schema.isPattern(/^[^\s\p{Cc}]+$/u)),
+  sameNode: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(false)))
 })
 export type ModuleCaller = typeof ModuleCaller.Type
 
@@ -212,7 +217,7 @@ export const dispatchModuleRoute = Effect.fn("ModuleRegistry.dispatch")(
     readonly method: string
     readonly url: URL
     readonly listener: ModuleListener | "work"
-    readonly authorize: Effect.Effect<ModuleCaller, E, R>
+    readonly authorize: Effect.Effect<typeof ModuleCaller.Encoded, E, R>
     readonly sameOrigin: Effect.Effect<unknown, OriginError, R>
     readonly readJson: () => Effect.Effect<Schema.Json, BodyError, R>
   }): Effect.fn.Return<ModuleResponse | null, E | OriginError | BodyError | ModuleRouteFailure, R | ModuleRegistry> {

@@ -8,6 +8,7 @@ import viewsConfig from "../vite.views.config.js"
 
 const viewModules = new Set([
   "BrowserSessionStatusView.tsx",
+  "formatTime.ts",
   "portfolio/PortfolioOverviewView.tsx",
   "portfolio/portfolioFilters.ts",
   "portfolio/presentPortfolio.ts",

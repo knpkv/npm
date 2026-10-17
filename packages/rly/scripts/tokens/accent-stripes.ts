@@ -4,6 +4,9 @@
  * drawn as `box-shadow: inset 3px 0 0 …`). Severity and state belong in words, an even border or a
  * flat tint, never a side bar.
  *
+ * A stripe edge is an inline side or the block-start (top) edge: a coloured bar across a card's top
+ * is the same accent turned on its side. Block-end (bottom) edges stay allowed, as tab underlines.
+ *
  * A side border is allowed only when it is zeroed (`0`, `none`) or a hairline (1px or less) in a
  * neutral divider colour (`border-1`, `border-2`, `transparent`); anything else counts as a stripe,
  * whatever unit or colour spelling it uses. Inset shadows are allowed as full rings
@@ -26,13 +29,13 @@ export interface AccentStripeViolation {
   readonly declaration: string
 }
 
-const ONE_SIDE = String.raw`border-(?:left|right|inline-start|inline-end)`
+const ONE_SIDE = String.raw`border-(?:left|right|inline-start|inline-end|top|block-start)`
 const DECLARATION_NAME = new RegExp(
   String.raw`^(?:${ONE_SIDE}(?:-width|-color)?|border-inline-width|border-width|box-shadow)$`,
   "i"
 )
 const RULE_COLOR =
-  /(?:^|[;{\s])(border(?:-color|-(?:left|right|inline-start|inline-end|inline)-color)?)\s*:\s*([^;}]+)/gi
+  /(?:^|[;{\s])(border(?:-color|-(?:left|right|inline-start|inline-end|inline|top|block-start)-color)?)\s*:\s*([^;}]+)/gi
 const ZEROED = /^\s*(?:0|none|0px|var\(--rly-space-0\))\s*$/i
 const NEUTRAL_COLOR = /^(?:var\(\s*--rly-color-border-[12]\s*\)|transparent)$/i
 const HAIRLINE = /^(?:0?\.\d+|1)px$|^(?:0|0px|var\(\s*--rly-space-0\s*\))$/i
@@ -75,10 +78,16 @@ const isOneSidedInset = (layer: string): boolean => {
   const [x, y, blur, spread] = offsets
   if (x === undefined || y === undefined) return false
   const flat = (length: string | undefined): boolean => length === undefined || ZERO_LENGTH.test(length)
-  if (ZERO_LENGTH.test(x) || !ZERO_LENGTH.test(y) || !flat(blur) || !flat(spread)) return false
+  if (!flat(blur) || !flat(spread)) return false
+  // An inline bar (x offset only) or a top bar (a positive y offset only); a negative y is a
+  // block-end underline, like a pressed tab, and passes.
+  const inlineBar = !ZERO_LENGTH.test(x) && ZERO_LENGTH.test(y)
+  const topBar = ZERO_LENGTH.test(x) && !ZERO_LENGTH.test(y) && !y.startsWith("-")
+  if (!inlineBar && !topBar) return false
+  const bar = inlineBar ? x : y
   // A 1px bar in a neutral divider colour is a column divider, allowed as it is for borders.
   const colors = tokens.filter((token) => token.toLowerCase() !== "inset" && COLOR_TOKEN.test(token))
-  const hairline = HAIRLINE.test(x.replace(/^-/, ""))
+  const hairline = HAIRLINE.test(bar.replace(/^-/, ""))
   return !(hairline && colors.length > 0 && colors.every((color) => NEUTRAL_COLOR.test(color)))
 }
 
@@ -100,21 +109,21 @@ const isNeutralHairline = (value: string): boolean => {
 }
 
 /**
- * A width list's edges, each marked inline or not: `border-width` lists top/right/bottom/left,
+ * A width list's edges, each marked as a stripe edge (inline or top) or not: `border-width` lists top/right/bottom/left,
  * `border-inline-width` lists start/end.
  */
 const widthEdges = (
   property: string,
   value: string
-): ReadonlyArray<{ readonly width: string; readonly inline: boolean }> => {
+): ReadonlyArray<{ readonly width: string; readonly stripeEdge: boolean }> => {
   const [first = "0", second = first, third = first, fourth = second] = splitTopLevel(value.trim(), /\s/)
   return property === "border-inline-width"
-    ? [{ inline: true, width: first }, { inline: true, width: second }]
+    ? [{ stripeEdge: true, width: first }, { stripeEdge: true, width: second }]
     : [
-      { inline: false, width: first },
-      { inline: true, width: second },
-      { inline: false, width: third },
-      { inline: true, width: fourth }
+      { stripeEdge: true, width: first },
+      { stripeEdge: true, width: second },
+      { stripeEdge: false, width: third },
+      { stripeEdge: true, width: fourth }
     ]
 }
 
@@ -134,16 +143,16 @@ const statesNeutralColor = (rule: string): boolean => {
 }
 
 /**
- * A width list that marks one inline edge: the only edge thicker than a hairline, or the only edge
+ * A width list that marks one stripe edge (inline or top): the only edge thicker than a hairline, or the only edge
  * drawn at all while its rule leaves the colour unstated or coloured. A thick block edge alone is an
  * underline and passes.
  */
 const isOneSidedWidth = (property: string, value: string, rule: string): boolean => {
   const edges = widthEdges(property, value)
   const thick = edges.filter((edge) => !HAIRLINE.test(edge.width))
-  if (thick.length === 1) return thick[0]?.inline === true
+  if (thick.length === 1) return thick[0]?.stripeEdge === true
   const drawn = edges.filter((edge) => !ZERO_LENGTH.test(edge.width))
-  return thick.length === 0 && drawn.length === 1 && drawn[0]?.inline === true && !statesNeutralColor(rule)
+  return thick.length === 0 && drawn.length === 1 && drawn[0]?.stripeEdge === true && !statesNeutralColor(rule)
 }
 
 const isStripe = (property: string, value: string, rule: string): boolean => {
@@ -160,6 +169,8 @@ const isStripe = (property: string, value: string, rule: string): boolean => {
 type EdgeName = "top" | "right" | "bottom" | "left"
 const EDGES: ReadonlyArray<EdgeName> = ["top", "right", "bottom", "left"]
 const INLINE: ReadonlySet<EdgeName> = new Set(["left", "right"])
+/** Edges where a lone coloured or thick border is a stripe: the inline sides and the top. */
+const STRIPE_EDGES: ReadonlySet<EdgeName> = new Set(["left", "right", "top"])
 
 /** One edge of a rule's border as its declarations leave it, and the declaration that set it last. */
 interface Edge {
@@ -293,10 +304,10 @@ const edgeStripe = (rule: Rule): Declaration | undefined => {
     return edge !== undefined && visible(edge) ? [{ edge, name }] : []
   })
   const lone = (items: ReadonlyArray<{ readonly edge: Edge; readonly name: EdgeName }>) =>
-    items.length === 1 && items[0] !== undefined && INLINE.has(items[0].name) ? items[0].edge.by : undefined
+    items.length === 1 && items[0] !== undefined && STRIPE_EDGES.has(items[0].name) ? items[0].edge.by : undefined
   if (shown.length === 1) {
     const [only] = shown
-    return only !== undefined && INLINE.has(only.name) && (thick(only.edge) || !neutral(only.edge))
+    return only !== undefined && STRIPE_EDGES.has(only.name) && (thick(only.edge) || !neutral(only.edge))
       ? only.edge.by
       : undefined
   }

@@ -707,7 +707,7 @@ const DashboardApp = ({
     onHubMachine: onLoopback()
   })
   const resources = makeResourcesModuleViews({ host: current.host, read: resourcesRead })
-  const code = makeCodeModuleViews({ reads: codeReads, onHubMachine: onLoopback() })
+  const code = makeCodeModuleViews({ reads: codeReads })
   const connectConnection = useAtomValue(atoms.connect.connection)
   const fleetNavigationBadge = dashboardPendingNavigationBadge(pendingState, workNow, refreshFailed)
   const fleetWithBadge =

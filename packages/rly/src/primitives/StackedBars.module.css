@@ -129,7 +129,7 @@
   }
   .nearSwatch {
     block-size: 0;
-    border-block-start: 1px dashed var(--rly-color-text-3);
+    border-block-start: 1px dashed var(--rly-color-text-3); /* stripe-ok: legend line swatch, a zero-height sample of the near line */
     flex: none;
     inline-size: var(--rly-space-12);
   }

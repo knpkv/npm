@@ -19,6 +19,7 @@ import type {
   ReadinessVerdict
 } from "../../domain/readiness/projections.js"
 import type { ReleaseLifecycle } from "../../domain/release.js"
+import { formatCheckTime } from "../formatTime.js"
 
 const READINESS_STAGES: ReadonlyArray<string> = ["Build", "Verify", "Production"]
 
@@ -177,19 +178,6 @@ const formattedTime = (timestamp: PortfolioSnapshot["generatedAt"]): string =>
     minute: "2-digit",
     month: "short",
     timeZoneName: "short"
-  })
-
-/** A check time with its year, as the Sources panel shows it: "11 Oct 2026, 13:59 UTC". */
-const formattedCheckTime = (timestamp: PortfolioSnapshot["generatedAt"]): string =>
-  DateTime.formatUtc(timestamp, {
-    day: "numeric",
-    hour: "2-digit",
-    hour12: false,
-    locale: "en-GB",
-    minute: "2-digit",
-    month: "short",
-    timeZoneName: "short",
-    year: "numeric"
   })
 
 const failureClassLabels = {
@@ -612,7 +600,7 @@ const sourceRowOf = (plugin: PortfolioSnapshot["plugins"][number]): PortfolioSou
     ? plugin.health.checkedAt
     : null
   return {
-    detail: checkedAt === null ? health.message : `Checked ${formattedCheckTime(checkedAt)}`,
+    detail: checkedAt === null ? health.message : `Checked ${formatCheckTime(checkedAt)}`,
     detailDateTime: checkedAt === null ? null : DateTime.formatIso(checkedAt),
     healthLabel: health.label,
     healthTone: health.tone,
