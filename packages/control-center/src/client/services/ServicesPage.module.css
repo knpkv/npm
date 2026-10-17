@@ -275,17 +275,19 @@
   }
 }
 
-/* Permissions as label | value rows, one per provider, as the setup design's fact lists. */
+/* Permissions as label | value rows, as the setup design's fact lists. The connection card is narrow, so a row
+   stacks label over value until the list itself has room for the design's 180px label column. */
 .permissionFacts {
   display: grid;
   margin: 0;
   border: 1px solid var(--rly-color-border-1);
   border-radius: var(--rly-radius-group);
+  container-type: inline-size;
 }
 
 .permissionFacts > div {
   display: grid;
-  grid-template-columns: 180px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--rly-space-2) var(--rly-space-16);
   padding: var(--rly-space-8) var(--rly-space-12);
 }
@@ -307,8 +309,8 @@
   overflow-wrap: break-word;
 }
 
-@media (max-width: 40rem) {
+@container (min-width: 32rem) {
   .permissionFacts > div {
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: 180px minmax(0, 1fr);
   }
 }
