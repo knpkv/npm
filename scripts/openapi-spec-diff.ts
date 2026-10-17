@@ -508,6 +508,7 @@ const noteList = (heading: string, changes: ReadonlyArray<Change>, limit: number
   changes.length === 0 ? [] : [
     "",
     `${heading}:`,
+    "",
     ...changes.slice(0, limit).map((entry) => `- ${entry.change} at \`${entry.at.replaceAll("`", "'")}\``),
     ...(changes.length > limit ? [`- and ${changes.length - limit} more`] : [])
   ]
@@ -517,7 +518,7 @@ const count = (amount: number, noun: string): string => `${amount} ${noun}${amou
 /**
  * Markdown for the changeset and the update pull request:
  *
- *   releaseNotes(classify(previous, updated)) // "Release: major (2 breaking, 1 addition).\n\nBreaking:\n- ..."
+ *   releaseNotes(classify(previous, updated)) // "Release: major (2 breaking, 1 addition).\n\nBreaking:\n\n- ..."
  *
  * Lists at most `limit` changes per level, breaking first.
  */
