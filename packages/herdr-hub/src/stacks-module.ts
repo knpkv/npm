@@ -59,7 +59,8 @@ export const makeStacksModule = (configuration: {
         reason,
         host: stacksHost
       })
-      const matches = stacksHost !== null && isHub && stacksHost.toLowerCase() === host.toLowerCase()
+      const named = stacksHost !== null && stacksHost.toLowerCase() === host.toLowerCase()
+      const matches = named && isHub
       const scope = yield* Effect.acquireRelease(Scope.make(), (child) => Scope.close(child, Exit.void))
       const started = matches ?
         yield* Effect.result(
@@ -71,7 +72,7 @@ export const makeStacksModule = (configuration: {
         null
       const mounted: StacksUnavailable | { readonly _tag: "Ready"; readonly reads: StacksHostReads } =
         started === null ?
-          unavailable(stacksHost === null ? "not_configured" : "other_host") :
+          unavailable(stacksHost === null ? "not_configured" : named ? "not_hub" : "other_host") :
           started._tag === "Failure"
           ? unavailable("unavailable")
           : { _tag: "Ready", reads: started.success }

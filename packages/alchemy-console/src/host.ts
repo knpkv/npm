@@ -9,9 +9,12 @@ import { PlanState } from "./plan.js"
 export { SourceFailureReason, StackDetail, StackId, StackList, StackSummary } from "./api.js"
 export { PlanState } from "./plan.js"
 
-/** Why the host can't read stacks at all: not configured, configured for another host, or its reader failed. */
+/**
+ * Why the host can't read stacks at all: not configured, configured for another host, configured for this
+ * host but this host isn't the hub, or its reader failed to start.
+ */
 export const StacksUnavailable = Schema.TaggedStruct("Unavailable", {
-  reason: Schema.Literals(["not_configured", "other_host", "unavailable"]),
+  reason: Schema.Literals(["not_configured", "other_host", "not_hub", "unavailable"]),
   host: Schema.NullOr(Schema.String)
 })
 export type StacksUnavailable = typeof StacksUnavailable.Type

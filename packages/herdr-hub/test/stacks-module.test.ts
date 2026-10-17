@@ -50,11 +50,12 @@ const fakeReads: StacksHostReads = {
 const withModule = <A, E, R>(
   stacksHost: FleetHostName | null,
   run: Effect.Effect<A, E, R>,
-  reads: Effect.Effect<StacksHostReads, unknown> = Effect.succeed(fakeReads)
+  reads: Effect.Effect<StacksHostReads, unknown> = Effect.succeed(fakeReads),
+  isHub = true
 ) =>
   Effect.gen(function*() {
     const context = yield* Layer.build(
-      makeModuleLayer([stacksModule], [makeStacksModule({ host, isHub: true, stacksHost, home: "/fixture", reads })])
+      makeModuleLayer([stacksModule], [makeStacksModule({ host, isHub, stacksHost, home: "/fixture", reads })])
         .pipe(Layer.provide(Layer.merge(NodeServices.layer, NodeHttpClient.layerNodeHttp)))
     )
     return yield* run.pipe(Effect.provideContext(context))
@@ -97,6 +98,9 @@ describe("host-local Stacks module", () => {
       expect(notConfigured?.body).toEqual({ _tag: "Unavailable", reason: "not_configured", host: null })
       const elsewhere = yield* withModule(other, request(`plan?id=${id}`))
       expect(elsewhere?.body).toEqual({ _tag: "Unavailable", reason: "other_host", host: other })
+      // This host is the named one but isn't the hub: say so, rather than point at itself.
+      const notHub = yield* withModule(host, request("overview"), Effect.succeed(fakeReads), false)
+      expect(notHub?.body).toEqual({ _tag: "Unavailable", reason: "not_hub", host })
     }))
 
   // A reader that can't start (no AWS config, no state root) is a remote fact, never a startup failure.

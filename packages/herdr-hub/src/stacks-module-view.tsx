@@ -1,5 +1,12 @@
 /** Stacks pages: the host's alchemy stacks and one stack's state and published plan. Read-only. @module */
-import type { PlanState, StackDetailResult, StackId, StacksOverviewResult } from "@knpkv/alchemy-console/host"
+import type {
+  PlanState,
+  StackDetailResult,
+  StackId,
+  StackPlanResult,
+  StacksOverviewResult,
+  StacksUnavailable
+} from "@knpkv/alchemy-console/host"
 import {
   StackDetailView,
   type StackDetailState,
@@ -20,59 +27,70 @@ const tabs: ReadonlyArray<StackTab> = ["resources", "outputs", "state", "plan"]
 const isTab = (value: string | null): value is StackTab => tabs.some((tab) => tab === value)
 const decodeStackId = Schema.decodeUnknownOption(StackIdSchema)
 
-type ReadOutcome<A> = Result.Result<A, StacksReadFailed>
+/** One settled read and when it settled. */
+interface Settled<A> {
+  readonly result: Result.Result<A, StacksReadFailed>
+  readonly at: string
+}
 
 /**
  * Runs `read` while the page is active; a new `generation` reads again and leaving the page aborts it.
- * `read` must keep its identity across renders (memoise it), or every render reads again.
+ * `read` must keep its identity across renders (memoise it), or every render reads again. The time is
+ * stamped when the read settles, so a later re-render keeps the time the data was read.
  */
 const useRead = <A,>(read: Effect.Effect<A, StacksReadFailed> | null, active: boolean, generation: number) => {
-  const [outcome, setOutcome] = useState<ReadOutcome<A> | null>(null)
+  const [settled, setSettled] = useState<Settled<A> | null>(null)
   useEffect(() => {
     if (!active || read === null) return
-    setOutcome(null)
+    setSettled(null)
     const controller = new AbortController()
-    void Effect.runPromise(Effect.result(read), { signal: controller.signal }).then((next) => {
-      if (!controller.signal.aborted) setOutcome(next)
+    void Effect.runPromise(Effect.result(read), { signal: controller.signal }).then((result) => {
+      if (!controller.signal.aborted) setSettled({ result, at: DateTime.formatIso(DateTime.nowUnsafe()) })
     })
     return () => controller.abort()
   }, [read, active, generation])
-  return outcome
+  return settled
 }
 
-const unavailableCopy = (reason: "not_configured" | "other_host" | "unavailable", host: string | null) =>
-  reason === "not_configured"
-    ? "Stacks aren’t available on this hub. Set RELAY_STACKS_HOST to the host that holds the AWS profiles."
-    : reason === "other_host"
-      ? `Stacks are read on ${host ?? "another host"}. Open this hub on that host to see them.`
-      : `Stacks couldn’t start on ${host ?? "this host"}. Check its AWS configuration and state root, then reload.`
+const unavailableCopy = (reason: StacksUnavailable["reason"], host: string | null): string => {
+  switch (reason) {
+    case "not_configured":
+      return "Stacks aren’t available on this hub. Set RELAY_STACKS_HOST to the host that holds the AWS profiles."
+    case "other_host":
+      return `Stacks are read on ${host ?? "another host"}. Open this hub on that host to see them.`
+    case "not_hub":
+      return `RELAY_STACKS_HOST names ${host ?? "this host"}, but this host isn’t the hub. Stacks are read by the hub only.`
+    case "unavailable":
+      return `Stacks couldn’t start on ${host ?? "this host"}. Check its AWS configuration and state root, then reload.`
+  }
+}
 
-const Unavailable = ({
-  host,
-  reason
-}: {
-  readonly reason: "not_configured" | "other_host" | "unavailable"
-  readonly host: string | null
-}): ReactElement => <StatePanel title="Stacks unavailable" description={unavailableCopy(reason, host)} tone="neutral" />
+const Unavailable = ({ host, reason }: Omit<StacksUnavailable, "_tag">): ReactElement => (
+  <StatePanel title="Stacks unavailable" description={unavailableCopy(reason, host)} tone="neutral" />
+)
 
-const overviewState = (
-  exit: ReadOutcome<StacksOverviewResult> | null,
-  checkedAt: string
-):
-  | StackListState
-  | {
-      readonly _tag: "Unavailable"
-      readonly reason: "not_configured" | "other_host" | "unavailable"
-      readonly host: string | null
-    } => {
-  if (exit === null) return { _tag: "Loading" }
-  if (Result.isFailure(exit)) return { _tag: "Failed", reason: "transport" }
-  const result = exit.success
-  return result._tag === "Ready"
-    ? { _tag: "Ready", list: result.list, checkedAt }
-    : result._tag === "Failed"
-      ? { _tag: "Failed", reason: result.reason }
-      : result
+/** A failed transport read: an expired hub session asks to sign in again; anything else is a transport failure. */
+type TransportFailure =
+  | { readonly _tag: "Unauthorized"; readonly reason: "session" }
+  | { readonly _tag: "Failed"; readonly reason: "transport" }
+
+const transportFailure = (failure: StacksReadFailed): TransportFailure =>
+  failure.reason === "unauthorized"
+    ? { _tag: "Unauthorized", reason: "session" }
+    : { _tag: "Failed", reason: "transport" }
+
+const overviewState = (read: Settled<StacksOverviewResult> | null): StackListState | StacksUnavailable => {
+  if (read === null) return { _tag: "Loading" }
+  if (Result.isFailure(read.result)) return transportFailure(read.result.failure)
+  const result = read.result.success
+  switch (result._tag) {
+    case "Ready":
+      return { _tag: "Ready", list: result.list, checkedAt: read.at }
+    case "Failed":
+      return { _tag: "Failed", reason: result.reason }
+    case "Unavailable":
+      return result
+  }
 }
 
 const OverviewPage = ({
@@ -83,8 +101,7 @@ const OverviewPage = ({
   readonly mount: ModulePageMount
 }): ReactElement => {
   const [generation, setGeneration] = useState(0)
-  const exit = useRead(reads.overview, mount.active, generation)
-  const state = overviewState(exit, DateTime.formatIso(DateTime.nowUnsafe()))
+  const state = overviewState(useRead(reads.overview, mount.active, generation))
   if (state._tag === "Unavailable") return <Unavailable reason={state.reason} host={state.host} />
   return (
     <StackListView
@@ -96,27 +113,27 @@ const OverviewPage = ({
   )
 }
 
-const detailState = (
-  exit: ReadOutcome<StackDetailResult> | null,
-  known: boolean
-):
-  | StackDetailState
-  | {
-      readonly _tag: "Unavailable"
-      readonly reason: "not_configured" | "other_host" | "unavailable"
-      readonly host: string | null
-    } => {
+const detailState = (read: Settled<StackDetailResult> | null, known: boolean): StackDetailState | StacksUnavailable => {
   if (!known) return { _tag: "NotFound" }
-  if (exit === null) return { _tag: "Loading" }
-  if (Result.isFailure(exit)) {
-    return exit.failure.reason === "not_found" ? { _tag: "NotFound" } : { _tag: "Failed", reason: "transport" }
+  if (read === null) return { _tag: "Loading" }
+  if (Result.isFailure(read.result)) {
+    return read.result.failure.reason === "not_found" ? { _tag: "NotFound" } : transportFailure(read.result.failure)
   }
-  const result = exit.success
-  return result._tag === "Ready"
-    ? { _tag: "Ready", stack: result.detail.state }
-    : result._tag === "Failed"
-      ? { _tag: "Failed", reason: result.reason }
-      : result
+  const result = read.result.success
+  switch (result._tag) {
+    case "Ready":
+      return { _tag: "Ready", stack: result.detail.state }
+    case "Failed":
+      return { _tag: "Failed", reason: result.reason }
+    case "Unavailable":
+      return result
+  }
+}
+
+const planState = (read: Settled<StackPlanResult> | null): PlanState => {
+  if (read === null) return { _tag: "Loading" }
+  if (Result.isFailure(read.result)) return { _tag: "Unreachable" }
+  return read.result.success._tag === "Ready" ? read.result.success.plan : { _tag: "NotConnected" }
 }
 
 const StackPage = ({
@@ -139,18 +156,9 @@ const StackPage = ({
     () => (stackId === null || tab !== "plan" ? null : reads.plan(stackId)),
     [reads, stackId, tab]
   )
-  const exit = useRead(stackRead, mount.active, generation)
-  const planExit = useRead(planRead, mount.active, planGeneration)
-  const state = detailState(exit, stackId !== null)
+  const state = detailState(useRead(stackRead, mount.active, generation), stackId !== null)
+  const plan = planState(useRead(planRead, mount.active, planGeneration))
   if (state._tag === "Unavailable") return <Unavailable reason={state.reason} host={state.host} />
-  const planState: PlanState | undefined =
-    planExit === null
-      ? { _tag: "Loading" }
-      : Result.isFailure(planExit)
-        ? { _tag: "Unreachable" }
-        : planExit.success._tag === "Ready"
-          ? planExit.success.plan
-          : { _tag: "NotConnected" }
   const href = (next: StackTab) =>
     moduleHref(stacksModule, "stack", new URLSearchParams({ id: stackId ?? "", view: next }))
   return (
@@ -159,7 +167,7 @@ const StackPage = ({
       onReadAgain={() => setGeneration((count) => count + 1)}
       onReadPlanAgain={() => setPlanGeneration((count) => count + 1)}
       onTabChange={(next) => mount.navigate(href(next), "replace", null)}
-      planState={planState}
+      planState={plan}
       resourceHref={() => href("resources")}
       state={state}
       tab={tab}

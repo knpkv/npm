@@ -5,7 +5,7 @@ import { Effect } from "effect"
 import { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import type { StacksModuleReads } from "../src/stacks-client.js"
+import { type StacksModuleReads, StacksReadFailed } from "../src/stacks-client.js"
 import { makeStacksModuleViews } from "../src/stacks-module-view.js"
 import type { ModulePageMount } from "../src/modules.js"
 
@@ -97,6 +97,26 @@ describe("Stacks module pages", { concurrent: false }, () => {
     expect(document.body.textContent).toContain("aws-org")
     const buttons = [...document.querySelectorAll("button")].map(({ textContent }) => textContent ?? "")
     expect(buttons.some((text) => /apply|destroy|deploy|preview changes/iu.test(text))).toBe(false)
+  })
+
+  it("asks to sign in again when the hub session lapsed, on both pages", async () => {
+    const lapsed = Effect.fail(new StacksReadFailed({ reason: "unauthorized" }))
+    await render(reads({ overview: lapsed, stack: () => lapsed }), "overview")
+    expect(document.body.textContent).toContain("Reload this page to sign in again.")
+    await render(reads({ overview: lapsed, stack: () => lapsed }), "stack", `id=${id}`)
+    expect(document.body.textContent).toContain("Reload this page to sign in again.")
+  })
+
+  it("stamps the overview with the time its read finished, not the last render", async () => {
+    // The check time shows on an empty list. One reads object: re-rendering it must not read again.
+    const empty = reads({ overview: Effect.succeed({ _tag: "Ready", list: { stacks: [], issues: [] } }) })
+    vi.useFakeTimers({ now: new Date("2026-10-17T10:00:00Z"), toFake: ["Date"] })
+    await render(empty, "overview")
+    expect(document.body.textContent).toContain("Checked 2026-10-17T10:00:00")
+    vi.setSystemTime(new Date("2026-10-17T11:30:00Z"))
+    await render(empty, "overview")
+    expect(document.body.textContent).toContain("Checked 2026-10-17T10:00:00")
+    vi.useRealTimers()
   })
 
   it("reports an unknown or missing stack id as not found", async () => {
