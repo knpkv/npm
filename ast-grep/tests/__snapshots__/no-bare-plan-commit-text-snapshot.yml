@@ -34,3 +34,31 @@ snapshots:
         style: secondary
         start: 25
         end: 36
+  'const view = <span>{ready ? source.base : "unknown"}</span>':
+    labels:
+      - source: '{ready ? source.base : "unknown"}'
+        style: primary
+        start: 19
+        end: 52
+      - source: base
+        style: secondary
+        start: 35
+        end: 39
+      - source: source.base
+        style: secondary
+        start: 28
+        end: 39
+  const view = <span>{source.head ?? "unknown"}</span>:
+    labels:
+      - source: '{source.head ?? "unknown"}'
+        style: primary
+        start: 19
+        end: 45
+      - source: head
+        style: secondary
+        start: 27
+        end: 31
+      - source: source.head
+        style: secondary
+        start: 20
+        end: 31

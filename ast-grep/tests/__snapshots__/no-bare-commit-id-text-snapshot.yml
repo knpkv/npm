@@ -22,10 +22,46 @@ snapshots:
         end: 49
   const view = <p>head {diff.headCommit.slice(0, 12)}</p>:
     labels:
-      - source: diff.headCommit.slice(0, 12)
+      - source: "{diff.headCommit.slice(0, 12)}"
         style: primary
+        start: 21
+        end: 51
+      - source: headCommit
+        style: secondary
+        start: 27
+        end: 37
+      - source: diff.headCommit
+        style: secondary
         start: 22
-        end: 50
+        end: 37
+  const view = <p>{diff.headCommit ?? "unknown"}</p>:
+    labels:
+      - source: '{diff.headCommit ?? "unknown"}'
+        style: primary
+        start: 16
+        end: 46
+      - source: headCommit
+        style: secondary
+        start: 22
+        end: 32
+      - source: diff.headCommit
+        style: secondary
+        start: 17
+        end: 32
+  'const view = <p>{stale ? diff.baseCommit : "current"}</p>':
+    labels:
+      - source: '{stale ? diff.baseCommit : "current"}'
+        style: primary
+        start: 16
+        end: 53
+      - source: baseCommit
+        style: secondary
+        start: 30
+        end: 40
+      - source: diff.baseCommit
+        style: secondary
+        start: 25
+        end: 40
   const view = <small>head {finding.patch.headRevision}</small>:
     labels:
       - source: "{finding.patch.headRevision}"

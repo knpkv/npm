@@ -4,9 +4,14 @@ valid:
   - "const key = `${review.revisionId}:${review.headCommit}`"
   - "const view = <p>{diff.files.length} files</p>"
   - "const head = diff.headCommit"
+  - 'const view = <p>{stale ? <CommitLabel commit={diff.headCommit} /> : "current"}</p>'
+  - "const view = <p>{commitWords(diff.headCommit)}</p>"
+  - 'const view = <p>{diff.headCommit === shown ? "this head" : "an earlier head"}</p>'
 invalid:
   - "const view = <p>head {diff.headCommit.slice(0, 12)}</p>"
   - "const short = run.identity.headRevision.slice(0, 7)"
   - "const view = <small>head {finding.patch.headRevision}</small>"
   - "const view = <p>Base {state.value.diff.baseCommit}.</p>"
   - "const view = <span>Raised on {note.life.raisedHead}</span>"
+  - 'const view = <p>{diff.headCommit ?? "unknown"}</p>'
+  - 'const view = <p>{stale ? diff.baseCommit : "current"}</p>'

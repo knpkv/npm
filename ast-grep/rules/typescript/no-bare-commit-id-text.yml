@@ -10,11 +10,25 @@ rule:
         - not:
             inside:
               kind: jsx_attribute
+        # Any depth ({a.head ?? "unknown"}, ternaries), except where the id is passed along rather than shown:
+        # an attribute (a tooltip, commit={…}), a call's arguments, or a comparison.
         - has:
-            kind: member_expression
-            has:
-              field: property
-              regex: "(?i)(commit|revision|raisedHead)$"
+            stopBy: end
+            all:
+              - kind: member_expression
+              - has:
+                  field: property
+                  regex: "(?i)(commit|revision|raisedHead)$"
+              - not:
+                  inside:
+                    stopBy: end
+                    any:
+                      - kind: jsx_attribute
+                      - kind: arguments
+                      - kind: binary_expression
+                        has:
+                          field: operator
+                          regex: "^(===|!==|==|!=)$"
 constraints:
   PROP:
     regex: "(?i)(commit|revision|raisedHead)$"
