@@ -91,7 +91,9 @@ const labelWords = (
 
 /**
  * One commit, as “Title, 14:18”. `copy={false}` leaves the copy button out where it cannot keep a
- * 44px target, such as inside the shrunk canvas drawing; the tooltip still carries the id there.
+ * 44px target, such as inside the shrunk canvas drawing. The tooltip alone does not reach touch or
+ * keyboard, so only use it where the same commit has a copyable label nearby: the canvas draws the line
+ * with its button once the drawing is at full size, and the review and diff pages label the same heads.
  */
 export const CommitLabel = ({
   className,

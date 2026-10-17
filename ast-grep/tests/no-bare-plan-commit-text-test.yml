@@ -1,0 +1,8 @@
+id: no-bare-plan-commit-text
+valid:
+  - "const view = <span title={`Head ${source.head}`}>published</span>"
+  - "const view = <span>published {publishedLabel(source)}</span>"
+invalid:
+  - "const view = <span>head {source.head}</span>"
+  - "const view = <span>base {source.base}</span>"
+  - "const short = source.head.slice(0, 7)"
