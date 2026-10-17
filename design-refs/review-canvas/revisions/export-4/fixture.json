@@ -47,35 +47,35 @@
             "files": 4,
             "x": 16,
             "y": 56,
-            "w": 316,
-            "h": 388
+            "w": 296,
+            "h": 404
           },
           {
             "id": "sync-worker",
             "label": "sync-worker",
             "files": 4,
-            "x": 344,
+            "x": 324,
             "y": 56,
-            "w": 340,
-            "h": 388
+            "w": 285,
+            "h": 404
           },
           {
             "id": "composer",
             "label": "composer",
             "files": 3,
-            "x": 692,
-            "y": 236,
-            "w": 312,
-            "h": 208
+            "x": 621,
+            "y": 268,
+            "w": 272,
+            "h": 192
           },
           {
             "id": "tests",
             "label": "tests",
             "files": 3,
             "x": 344,
-            "y": 464,
-            "w": 392,
-            "h": 162
+            "y": 480,
+            "w": 406,
+            "h": 126
           }
         ],
         "partitions": [
@@ -85,7 +85,7 @@
             "files": 6,
             "x": 24,
             "y": 88,
-            "w": 628,
+            "w": 577,
             "h": 168,
             "why": "Every edit here touches the socket’s def-use chain: who opens it, who reconnects it."
           },
@@ -94,9 +94,9 @@
             "title": "Composer reads drafts from the worker",
             "files": 5,
             "x": 24,
-            "y": 268,
-            "w": 972,
-            "h": 164,
+            "y": 300,
+            "w": 861,
+            "h": 152,
             "why": "Every edit here touches the draft’s def-use chain: where it’s stored and who reads it."
           }
         ],
@@ -125,7 +125,7 @@
             "module": "stage",
             "partition": "A",
             "x": 36,
-            "y": 180,
+            "y": 186,
             "w": 134,
             "add": 31,
             "rem": 40,
@@ -138,7 +138,7 @@
             "module": "stage",
             "partition": "A",
             "x": 180,
-            "y": 180,
+            "y": 186,
             "w": 112,
             "add": 18,
             "rem": 36,
@@ -150,7 +150,7 @@
             "path": "sync-worker/worker.ts",
             "module": "sync-worker",
             "partition": "A",
-            "x": 356,
+            "x": 344,
             "y": 112,
             "w": 125,
             "add": 96,
@@ -163,7 +163,7 @@
             "path": "sync-worker/protocol.ts",
             "module": "sync-worker",
             "partition": "A",
-            "x": 503,
+            "x": 479,
             "y": 112,
             "w": 110,
             "add": 48,
@@ -179,8 +179,8 @@
             "path": "sync-worker/socket.ts",
             "module": "sync-worker",
             "partition": "A",
-            "x": 356,
-            "y": 180,
+            "x": 344,
+            "y": 170,
             "w": 139,
             "add": 142,
             "rem": 0,
@@ -197,7 +197,7 @@
             "module": "stage",
             "partition": "B",
             "x": 36,
-            "y": 292,
+            "y": 324,
             "w": 108,
             "add": 12,
             "rem": 0,
@@ -209,8 +209,8 @@
             "path": "sync-worker/drafts.ts",
             "module": "sync-worker",
             "partition": "B",
-            "x": 520,
-            "y": 360,
+            "x": 344,
+            "y": 324,
             "w": 115,
             "add": 64,
             "rem": 0,
@@ -226,8 +226,8 @@
             "path": "composer/useDraft.ts",
             "module": "composer",
             "partition": "B",
-            "x": 700,
-            "y": 292,
+            "x": 641,
+            "y": 324,
             "w": 116,
             "add": 52,
             "rem": 14,
@@ -239,8 +239,8 @@
             "path": "composer/Composer.tsx",
             "module": "composer",
             "partition": "B",
-            "x": 824,
-            "y": 292,
+            "x": 767,
+            "y": 324,
             "w": 106,
             "add": 22,
             "rem": 10,
@@ -252,8 +252,8 @@
             "path": "composer/draftStore.ts",
             "module": "composer",
             "partition": "B",
-            "x": 700,
-            "y": 360,
+            "x": 641,
+            "y": 382,
             "w": 110,
             "add": 40,
             "rem": 6,
@@ -266,7 +266,7 @@
             "module": "tests",
             "partition": null,
             "x": 356,
-            "y": 496,
+            "y": 512,
             "w": 134,
             "add": 9,
             "rem": 16,
@@ -278,8 +278,8 @@
             "path": "tests/socket.test.ts",
             "module": "tests",
             "partition": null,
-            "x": 494,
-            "y": 496,
+            "x": 500,
+            "y": 512,
             "w": 114,
             "add": 30,
             "rem": 0,
@@ -293,8 +293,8 @@
             "path": "tests/drafts.test.ts",
             "module": "tests",
             "partition": null,
-            "x": 612,
-            "y": 496,
+            "x": 624,
+            "y": 512,
             "w": 114,
             "add": 24,
             "rem": 0,
@@ -421,7 +421,7 @@
               "col": "stage",
               "x": 24,
               "y": 88,
-              "w": 300,
+              "w": 290,
               "fns": [
                 {
                   "n": "useStageSocket()",
@@ -446,7 +446,7 @@
               "col": "stage",
               "x": 24,
               "y": 292,
-              "w": 300,
+              "w": 290,
               "fns": [
                 {
                   "n": "StageProvider()",
@@ -459,8 +459,8 @@
               "file": "stage/reconnect.ts",
               "col": "stage",
               "x": 24,
-              "y": 412,
-              "w": 300,
+              "y": 420,
+              "w": 290,
               "fns": [
                 {
                   "n": "scheduleReconnect()",
@@ -475,41 +475,11 @@
               ]
             },
             {
-              "file": "sync-worker/socket.ts",
-              "col": "sync-worker",
-              "x": 540,
-              "y": 88,
-              "w": 270,
-              "fns": [
-                {
-                  "n": "connect()",
-                  "kind": "Added",
-                  "lines": 46,
-                  "f": "F1"
-                },
-                {
-                  "n": "onMessage()",
-                  "kind": "Added",
-                  "lines": 38
-                },
-                {
-                  "n": "reconnect()",
-                  "kind": "Added",
-                  "lines": 34
-                },
-                {
-                  "n": "close()",
-                  "kind": "Added",
-                  "lines": 12
-                }
-              ]
-            },
-            {
               "file": "sync-worker/worker.ts",
               "col": "sync-worker",
-              "x": 540,
-              "y": 332,
-              "w": 270,
+              "x": 510,
+              "y": 88,
+              "w": 290,
               "fns": [
                 {
                   "n": "onconnect()",
@@ -526,9 +496,9 @@
             {
               "file": "sync-worker/protocol.ts",
               "col": "sync-worker",
-              "x": 540,
-              "y": 488,
-              "w": 270,
+              "x": 510,
+              "y": 254,
+              "w": 290,
               "fns": [
                 {
                   "n": "FrameType",
@@ -537,108 +507,166 @@
                   "f": "F4"
                 }
               ]
-            }
-          ],
-          "edges": [
-            {
-              "from": [
-                "stage/StageProvider.tsx",
-                0
-              ],
-              "to": [
-                "stage/useStageSocket.ts",
-                "bottom"
-              ],
-              "rel": "calls"
             },
             {
-              "from": [
-                "stage/useStageSocket.ts",
-                1
-              ],
-              "to": [
-                "sync-worker/worker.ts",
-                1
-              ],
-              "rel": "calls"
-            },
-            {
-              "from": [
-                "stage/useStageSocket.ts",
-                2
-              ],
-              "to": [
-                "sync-worker/socket.ts",
-                0
-              ],
-              "rel": "moved from"
-            },
-            {
-              "from": [
-                "stage/reconnect.ts",
-                1
-              ],
-              "to": [
-                "sync-worker/socket.ts",
-                2
-              ],
-              "rel": "moved from"
-            },
-            {
-              "from": [
-                "sync-worker/worker.ts",
-                "top"
-              ],
-              "to": [
-                "sync-worker/socket.ts",
-                "bottom"
-              ],
-              "rel": "calls"
-            },
-            {
-              "from": [
-                "sync-worker/worker.ts",
-                "bottom"
-              ],
-              "to": [
-                "sync-worker/protocol.ts",
-                "top"
-              ],
-              "rel": "imports"
+              "file": "sync-worker/socket.ts",
+              "col": "sync-worker",
+              "x": 510,
+              "y": 382,
+              "w": 290,
+              "fns": [
+                {
+                  "n": "connect()",
+                  "kind": "Added",
+                  "lines": 11,
+                  "f": "F1"
+                },
+                {
+                  "n": "onMessage()",
+                  "kind": "Added",
+                  "lines": 38
+                },
+                {
+                  "n": "reconnect()",
+                  "kind": "Moved from reconnect.ts",
+                  "lines": 34
+                },
+                {
+                  "n": "close()",
+                  "kind": "Added",
+                  "lines": 12
+                },
+                {
+                  "n": "imports and types",
+                  "kind": "Added",
+                  "lines": 12
+                }
+              ]
             }
           ],
           "stubs": [
             {
+              "label": "tests/reconnect.test.ts",
+              "line": "imports reconnect.ts",
+              "failing": false,
+              "x": 836,
+              "y": 422,
+              "w": 168
+            },
+            {
               "label": "tests/socket.test.ts",
               "line": "imports connect(), 1 failing",
-              "x": 846,
-              "y": 88,
-              "w": 158,
-              "toFile": "sync-worker/socket.ts",
-              "toFn": 0,
-              "dir": "in"
+              "failing": true,
+              "x": 836,
+              "y": 482,
+              "w": 168
             },
             {
               "label": "drafts.ts, in B",
               "line": "onMessage() calls put()",
-              "x": 846,
-              "y": 176,
-              "w": 158,
-              "toFile": "sync-worker/socket.ts",
-              "toFn": 1,
-              "dir": "out"
+              "failing": false,
+              "x": 836,
+              "y": 542,
+              "w": 168
+            }
+          ],
+          "lines": [
+            {
+              "p": [
+                169,
+                292,
+                169,
+                260
+              ],
+              "dash": false,
+              "ink": "normal",
+              "rel": "calls"
             },
             {
-              "label": "useDraft.ts, in B",
-              "line": "calls routeFrame()",
-              "x": 846,
-              "y": 392,
-              "w": 158,
-              "toFile": "sync-worker/worker.ts",
-              "toFn": 1,
-              "dir": "in"
+              "p": [
+                314,
+                195,
+                510,
+                195
+              ],
+              "dash": false,
+              "ink": "normal",
+              "rel": "calls"
+            },
+            {
+              "p": [
+                655,
+                222,
+                655,
+                382
+              ],
+              "dash": false,
+              "ink": "normal",
+              "rel": "calls"
+            },
+            {
+              "p": [
+                655,
+                222,
+                655,
+                254
+              ],
+              "dash": false,
+              "ink": "normal",
+              "rel": "imports"
+            },
+            {
+              "p": [
+                314,
+                527,
+                510,
+                527
+              ],
+              "dash": true,
+              "ink": "normal",
+              "rel": "moved from"
+            },
+            {
+              "p": [
+                836,
+                446,
+                314,
+                446
+              ],
+              "dash": true,
+              "ink": "faint",
+              "rel": null
+            },
+            {
+              "p": [
+                836,
+                506,
+                800,
+                451
+              ],
+              "dash": true,
+              "ink": "faint",
+              "rel": null
+            },
+            {
+              "p": [
+                800,
+                489,
+                836,
+                566
+              ],
+              "dash": true,
+              "ink": "faint",
+              "rel": null
             }
-          ]
+          ],
+          "band": [
+            12,
+            60,
+            808,
+            598
+          ],
+          "H": 749
         },
         "fileZoom": {
           "file": "sync-worker/socket.ts",
@@ -651,8 +679,8 @@
             {
               "n": "connect()",
               "kind": "Added",
-              "lines": 46,
-              "range": "14–59",
+              "lines": 11,
+              "range": "14–24",
               "f": "F1"
             },
             {
@@ -680,40 +708,69 @@
               "range": "1–12"
             }
           ],
-          "callers": [
+          "stubs": [
             {
-              "file": "worker.ts",
-              "line": "onconnect() calls connect()",
-              "fn": 0
+              "side": "left",
+              "label": "worker.ts",
+              "line": "calls socket.ts",
+              "failing": false,
+              "x": 24,
+              "y": 112,
+              "w": 180
             },
             {
-              "file": "socket.test.ts",
-              "line": "tests connect(), 1 failing",
-              "fn": 0,
-              "failing": true
+              "side": "left",
+              "label": "socket.test.ts",
+              "line": "imports connect(), 1 failing",
+              "failing": true,
+              "x": 24,
+              "y": 176,
+              "w": 180
             },
             {
-              "file": "reconnect.ts",
+              "side": "left",
+              "label": "reconnect.ts",
               "line": "backoffDelay() moved into reconnect()",
-              "fn": 2
+              "failing": false,
+              "x": 24,
+              "y": 328,
+              "w": 180
+            },
+            {
+              "side": "right",
+              "label": "drafts.ts, in B",
+              "line": "onMessage() calls put()",
+              "failing": false,
+              "x": 784,
+              "y": 284,
+              "w": 210
             }
           ],
-          "callees": [
-            {
-              "file": "WebSocket",
-              "line": "platform, opened by connect()",
-              "fn": 0
-            },
-            {
-              "file": "protocol.ts",
-              "line": "onMessage() calls decode()",
-              "fn": 1
-            },
-            {
-              "file": "drafts.ts, in B",
-              "line": "onMessage() calls put()",
-              "fn": 1
-            }
+          "lines": [
+            [
+              204,
+              136,
+              230,
+              142
+            ],
+            [
+              204,
+              200,
+              230,
+              142
+            ],
+            [
+              204,
+              352,
+              230,
+              358
+            ],
+            [
+              750,
+              314,
+              784,
+              308
+            ]
           ]
         },
         "diff": {
@@ -768,41 +825,86 @@
               "c": "}"
             }
           ],
-          "neighbours": [
+          "links": [
+            [
+              94,
+              204,
+              120,
+              116
+            ],
+            [
+              94,
+              324,
+              120,
+              304
+            ],
+            [
+              94,
+              444,
+              120,
+              492
+            ],
+            [
+              820,
+              116,
+              930,
+              204
+            ],
+            [
+              470,
+              576,
+              470,
+              620
+            ]
+          ],
+          "stubs": [
             {
+              "side": "left",
               "label": "worker.ts",
-              "line": "calls connect()",
+              "line": "calls socket.ts",
+              "failing": false,
               "x": -56,
               "y": 180,
-              "w": 150,
-              "side": "left"
+              "w": 150
             },
             {
-              "label": "socket.test.ts",
-              "line": "1 failing",
+              "side": "left",
+              "label": "reconnect.ts",
+              "line": "backoffDelay() moved into reconnect()",
+              "failing": false,
               "x": -56,
               "y": 300,
-              "w": 150,
-              "side": "left",
-              "failing": true
+              "w": 150
             },
             {
-              "label": "protocol.ts",
-              "line": "imported",
+              "side": "left",
+              "label": "socket.test.ts",
+              "line": "imports connect(), 1 failing",
+              "failing": true,
+              "x": -56,
+              "y": 420,
+              "w": 150
+            },
+            {
+              "side": "right",
+              "label": "drafts.ts, in B",
+              "line": "onMessage() calls put()",
+              "failing": false,
               "x": 930,
               "y": 180,
-              "w": 150,
-              "side": "right"
+              "w": 150
             },
             {
+              "side": "bottom",
               "label": "onMessage()",
               "line": "next in socket.ts",
-              "x": 330,
-              "y": 604,
-              "w": 180,
-              "side": "bottom"
+              "failing": false,
+              "x": 380,
+              "y": 620,
+              "w": 180
             }
-          ]
+          ],
+          "H": 680
         },
         "keys": [
           {
@@ -1828,6 +1930,92 @@
               "Purpose: one socket per stage for every tab; drafts kept through reconnect",
               "2 invariants, 1 broken by the P1",
               "Radius: 7 callers and 4 tests outside the diff, 2 not run here"
+            ]
+          },
+          "files": {
+            "stage/useStageSocket.ts": [
+              36,
+              112,
+              139
+            ],
+            "stage/StageProvider.tsx": [
+              36,
+              180,
+              134
+            ],
+            "stage/reconnect.ts": [
+              180,
+              180,
+              112
+            ],
+            "sync-worker/worker.ts": [
+              356,
+              112,
+              125
+            ],
+            "sync-worker/protocol.ts": [
+              503,
+              112,
+              110
+            ],
+            "sync-worker/socket.ts": [
+              356,
+              180,
+              139
+            ],
+            "stage/StageView.tsx": [
+              36,
+              292,
+              108
+            ],
+            "sync-worker/drafts.ts": [
+              520,
+              360,
+              115
+            ],
+            "composer/useDraft.ts": [
+              700,
+              292,
+              116
+            ],
+            "composer/Composer.tsx": [
+              824,
+              292,
+              106
+            ],
+            "composer/draftStore.ts": [
+              700,
+              360,
+              110
+            ],
+            "tests/reconnect.test.ts": [
+              356,
+              496,
+              134
+            ],
+            "tests/socket.test.ts": [
+              494,
+              496,
+              114
+            ],
+            "tests/drafts.test.ts": [
+              612,
+              496,
+              114
+            ]
+          },
+          "partitions": {
+            "A": [
+              24,
+              88,
+              628,
+              168
+            ],
+            "B": [
+              24,
+              268,
+              972,
+              164
             ]
           }
         },
@@ -3007,8 +3195,8 @@
           "arrowWords": {
             "sync-worker/worker.ts": "↑ worker.ts",
             "stage/reconnect.ts": "← reconnect.ts",
-            "tests/socket.test.ts": "↓ socket.test.ts",
-            "sync-worker/drafts.ts": "→ drafts.ts"
+            "sync-worker/drafts.ts": "↓ drafts.ts",
+            "tests/socket.test.ts": "→ socket.test.ts"
           },
           "linNote": "Screen readers get this list first; the canvas is a visual aid. l switches back and keeps your place.",
           "linCtxNote": "Context first, then partitions, files and hunks. Screen readers get this list first; l switches back to the canvas and keeps your place.",
@@ -3031,7 +3219,7 @@
               "view": "cluster",
               "level": 1,
               "levelLine": "Cluster: partition A, 6 files",
-              "status": "Partition A, 6 files in stage and sync-worker. Faint stubs at the edge lead out of A: to partition B and to tests.",
+              "status": "Partition A, 6 files in stage and sync-worker. Faint stubs at the edge lead out of A: to tests and to partition B.",
               "canvasLabel": "PR #463 canvas, Cluster, partition A",
               "miniLabel": "Map: partition A is in view"
             },
@@ -3053,7 +3241,7 @@
               "view": "diff",
               "level": 3,
               "levelLine": "Diff: connect(), lines 14–24",
-              "status": "Lines 14–24 of socket.ts, the P1 between 16 and 17. Neighbours stay at the edge: worker.ts and socket.test.ts on the left, protocol.ts on the right, onMessage() below.",
+              "status": "Lines 14–24 of socket.ts, the P1 between 16 and 17. Neighbours stay at the edge: worker.ts, reconnect.ts and socket.test.ts on the left, drafts.ts on the right, onMessage() below.",
               "canvasLabel": "PR #463 canvas, Diff, connect()",
               "miniLabel": "Map: connect() in socket.ts is in view"
             },
@@ -3064,7 +3252,7 @@
               "view": "keys",
               "level": 0,
               "levelLine": "Overview: the whole change",
-              "status": "socket.ts, sync-worker, partition A. High risk, P1 still open, changed since you looked. 4 edges: ↑ worker.ts calls it, ← reconnect.ts moved into it, ↓ socket.test.ts imports it, → it calls drafts.ts.",
+              "status": "socket.ts, sync-worker, partition A. High risk, P1 still open, changed since you looked. 4 edges: ↑ worker.ts calls it, ← reconnect.ts moved into it, ↓ it calls drafts.ts, → socket.test.ts imports it.",
               "canvasLabel": "PR #463 canvas, Overview, focus on socket.ts",
               "miniLabel": "Map: the whole change is in view, focus on socket.ts"
             },
@@ -3657,7 +3845,8 @@
             },
             "writtenBy": "Written by pair-codex from Jonas’s brief."
           }
-        }
+        },
+        "canvasH": 656
       }
     }
   }
