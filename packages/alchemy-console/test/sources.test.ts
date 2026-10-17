@@ -6,6 +6,7 @@ import { S3ReadError } from "../src/s3-reader.js"
 import { StackSource } from "../src/server/Catalog.js"
 import { sourceLayer } from "../src/server/Sources.js"
 import { SsoCredentials } from "../src/sso-credentials.js"
+import { lockedFileSystem } from "./lockedFileSystem.js"
 
 class SourceFixture extends Context.Service<SourceFixture, {
   readonly requests: Ref.Ref<ReadonlyArray<string>>
@@ -121,9 +122,9 @@ region=us-east-1
       yield* fs.writeFileString(awsConfigFile, "")
       const locked = path.join(root, "locked")
       yield* fs.makeDirectory(locked)
-      yield* fs.chmod(locked, 0o000)
-      yield* Effect.addFinalizer(() => fs.chmod(locked, 0o755).pipe(Effect.orDie))
-      const walked = yield* Layer.build(sourceLayer({ root, awsConfigFile }))
+      const walked = yield* Layer.build(sourceLayer({ root, awsConfigFile })).pipe(
+        Effect.provideService(FileSystem.FileSystem, yield* lockedFileSystem(yield* fs.realPath(locked)))
+      )
       expect((yield* Context.get(walked, StackSource).discover).issues).toEqual([{
         source: "local",
         reason: "skipped"

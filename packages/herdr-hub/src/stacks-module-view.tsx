@@ -318,8 +318,8 @@ const causeOf = (issue: Issue, count: number): Cause => {
   }
   if (issue.source === "s3" && issue.reason === "denied") {
     return {
-      cause: `access was denied for ${plural(count, "state bucket", "state buckets")}`,
-      cost: count === 1 ? "it wasn’t read" : "they weren’t read",
+      cause: `access was denied for ${plural(count, "AWS profile", "AWS profiles")}`,
+      cost: count === 1 ? "its state buckets weren’t read" : "their state buckets weren’t read",
       fix: "check those profiles’ S3 permissions"
     }
   }

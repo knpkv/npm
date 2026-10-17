@@ -4,6 +4,7 @@ import { Effect, FileSystem, Path } from "effect"
 import { discoverProjects } from "../src/discovery.js"
 import { readLocalState } from "../src/local-state.js"
 import { readAlchemyVersion } from "../src/version.js"
+import { lockedFileSystem } from "./lockedFileSystem.js"
 
 const setup = Effect.gen(function*() {
   const fs = yield* FileSystem.FileSystem
@@ -51,12 +52,12 @@ layer(NodeServices.layer)("local readers", (it) => {
       const { fs, path, root } = yield* setup
       const locked = path.join(root, "locked")
       yield* fs.makeDirectory(path.join(locked, "inner"), { recursive: true })
-      yield* fs.chmod(locked, 0o000)
-      yield* Effect.addFinalizer(() => fs.chmod(locked, 0o755).pipe(Effect.orDie))
       const project = path.join(root, "app")
       yield* fs.makeDirectory(project)
       yield* fs.writeFileString(path.join(project, "alchemy.run.ts"), "")
-      const found = yield* discoverProjects(root)
+      const found = yield* discoverProjects(root).pipe(
+        Effect.provideService(FileSystem.FileSystem, yield* lockedFileSystem(yield* fs.realPath(locked)))
+      )
       expect(found.projects.map((item) => item.directory)).toEqual([project])
       expect(found.unreadable).toBe(1)
     }).pipe(Effect.scoped))

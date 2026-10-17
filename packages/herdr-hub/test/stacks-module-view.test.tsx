@@ -217,6 +217,15 @@ describe("Stacks module pages", { concurrent: false }, () => {
     expect(text()).not.toContain("No alchemy stacks found")
   })
 
+  it("counts denied S3 reads per profile, as discovery reports them", async () => {
+    const issues: ReadonlyArray<DiscoveryIssue> = [
+      { source: "s3", reason: "denied" },
+      { source: "s3", reason: "denied" }
+    ]
+    await render(reads({ overview: Effect.succeed({ _tag: "Ready", list: { ...overviewList, issues } }) }), "overview")
+    expect(text()).toContain("Access was denied for 2 AWS profiles, so their state buckets weren’t read.")
+  })
+
   it("never claims the rest were read when the local root itself failed", async () => {
     await render(
       reads({
