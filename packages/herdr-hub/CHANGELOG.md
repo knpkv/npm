@@ -2,6 +2,12 @@
 
 Released as `@knpkv/herdr-approvals` up to 0.18.0; the headings below are that package's history.
 
+## 0.44.1
+
+### Patch Changes
+
+- [#992](https://github.com/knpkv/npm/pull/992) [`42817f7`](https://github.com/knpkv/npm/commit/42817f7bf9e1d01a97d655b5b97f5ecc82773cea) Thanks [@konopkov](https://github.com/konopkov)! - Pin that only the hub's own tailnet node, calling the hub server itself, is treated as a viewer on the hub machine: a hub-node WhoIs on another server, or another node on the hub, gets no Code owner UI link. The WhoIs-to-caller mapping is now one internal function shared by the listener and its tests.
+
 ## 0.44.0
 
 ### Minor Changes
