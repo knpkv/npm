@@ -2961,6 +2961,17 @@ describe("ServicesPage connection tests", () => {
       expect(host.ownerDocument.activeElement).toBe(awsControl(host, "AWS profile"))
     })
 
+    // The profile field can't be chosen yet, so nothing may be followed under a profile nobody picked.
+    it("won't follow before the local profiles are read", async () => {
+      const createBatch = vi.fn<NonNullable<ConnectionTestTransport["createBatch"]>>()
+      const host = await setupHost({ createBatch, discoverAwsProfiles: () => new Promise(() => undefined) })
+      expect(host.textContent).toContain("Discovering local AWS profiles…")
+      await setControlValue(await awsManualNames(host, "Repository names"), "paper-crane")
+      expect(awsFollowButton(host)?.disabled).toBe(true)
+      await act(async () => awsFollowButton(host)?.click())
+      expect(createBatch).not.toHaveBeenCalled()
+    })
+
     it("counts every followed resource on the follow button", async () => {
       const host = await setupHost({
         discoverAwsRegions: () => Promise.resolve({ _tag: "available", regions: ["eu-west-1"] }),

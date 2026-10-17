@@ -487,6 +487,8 @@ export const AwsAccountSetupForm = ({
       setInvalidFocus((count) => count + 1)
       return
     }
+    // Profiles still loading: the profile field can't be chosen yet, so nothing may be followed under it.
+    if (awsProfilesState === "loading") return
     // The profile was refused, so nothing may be followed under it.
     if (profileRefused) {
       setInvalidFocus((count) => count + 1)
@@ -848,7 +850,7 @@ export const AwsAccountSetupForm = ({
       )}
       {followedCount === 0 ? null : (
         <div className={styles.buttons}>
-          <Button size={buttonSize} loading={isSubmitting} type="submit" variant="primary">
+          <Button disabled={isLoadingProfiles} size={buttonSize} loading={isSubmitting} type="submit" variant="primary">
             {`Follow ${followedCount} ${followedCount === 1 ? "resource" : "resources"}`}
           </Button>
           <Button size={buttonSize} disabled={isSubmitting} onClick={onCancel} type="button" variant="quiet">
