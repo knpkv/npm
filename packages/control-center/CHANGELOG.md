@@ -1,5 +1,17 @@
 # @knpkv/control-center
 
+## 0.20.0
+
+### Minor Changes
+
+- [#999](https://github.com/knpkv/npm/pull/999) [`09576ea`](https://github.com/knpkv/npm/commit/09576ea791d11b44cb5d760be7300162f2955dce) Thanks [@konopkov](https://github.com/konopkov)! - Add owner-only AWS region discovery: `POST /api/v1/plugins/discovery/aws-regions` lists the enabled regions of a local AWS profile's account through one read-only `account:ListRegions` call, so the setup form can offer them; a profile without that action gets `{ _tag: "denied" }` rather than an outage. Resource discovery also reports `organizationPolicyDenied: true` when CodeCommit's denial names a service control policy and CodePipeline is denied too, so the form can say an organization policy blocks CodeCommit in the chosen region (CodePipeline is denied too) instead of showing two permission failures.
+
+### Patch Changes
+
+- [#1006](https://github.com/knpkv/npm/pull/1006) [`6720eb1`](https://github.com/knpkv/npm/commit/6720eb18d882e54a5ceec490a22023d83f633b66) Thanks [@konopkov](https://github.com/konopkov)! - The connection card's Permissions section names the operations Control Center uses with the connection in plain words ("Read items, read file changes, read pipeline logs") instead of capability ids such as `entity.read v1`, and says when they are paused because the connection is turned off.
+- Updated dependencies [[`f878a60`](https://github.com/knpkv/npm/commit/f878a60b1c00f5eda9db72488f749b5b322a6b03)]:
+  - @knpkv/review@0.6.0
+
 ## 0.19.3
 
 ### Patch Changes

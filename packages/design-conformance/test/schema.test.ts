@@ -106,6 +106,16 @@ it.effect("PNG states require hashed metadata for every viewport and theme", () 
     ) expect((yield* Schema.decodeUnknownEffect(Manifest)(invalid).pipe(Effect.exit))._tag).toBe("Failure")
   }))
 
+it.effect("a waiver's reason is design-impossible or the repository owner's decision", () =>
+  Effect.gen(function*() {
+    for (const reason of ["design-impossible", "owner-decision"]) {
+      expect(yield* Schema.decodeUnknownEffect(Waivers)([{ ...waiver, reason }])).toEqual([{ ...waiver, reason }])
+    }
+    expect((yield* Schema.decodeUnknownEffect(Waivers)([{ ...waiver, reason: "taste" }]).pipe(Effect.exit))._tag).toBe(
+      "Failure"
+    )
+  }))
+
 it.effect("coverage and integrity cannot be waived", () =>
   Effect.gen(function*() {
     for (const rule of ["coverage", "integrity", "stale-waiver"]) {
