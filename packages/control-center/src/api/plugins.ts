@@ -342,11 +342,48 @@ export type AwsServiceResourceDiscovery = typeof AwsServiceResourceDiscovery.Typ
 export const AwsResourceDiscoveryResponse = Schema.Struct({
   accountId: Schema.String.check(Schema.isPattern(/^[0-9]{12}$/u, { expected: "a 12-digit AWS account id" })),
   codeCommit: AwsServiceResourceDiscovery,
-  codePipeline: AwsServiceResourceDiscovery
+  codePipeline: AwsServiceResourceDiscovery,
+  /**
+   * Present when CodeCommit's denial names a service control policy and CodePipeline is denied too: an
+   * organization policy blocks CodeCommit here, and CodePipeline's denial gives no reason. The policy may be a
+   * region allowlist or a service-wide deny, so the form names the region as a possible cause, never the proven one.
+   */
+  organizationPolicyDenied: Schema.optionalKey(Schema.Literal(true))
 }).annotate({ identifier: "AwsResourceDiscoveryResponse" })
 
 /** Decoded identity and independent service discovery outcomes. */
 export type AwsResourceDiscoveryResponse = typeof AwsResourceDiscoveryResponse.Type
+
+/** The most regions an account can have enabled; a longer list is malformed. */
+export const MAXIMUM_DISCOVERED_AWS_REGIONS = 64
+
+/** One local AWS profile whose enabled regions the setup form lists. */
+export const AwsRegionDiscoveryRequest = Schema.Struct({
+  profile: AwsResourceDiscoveryRequest.fields.profile
+}).annotate({ identifier: "AwsRegionDiscoveryRequest" })
+
+/** Decoded region discovery request. */
+export type AwsRegionDiscoveryRequest = typeof AwsRegionDiscoveryRequest.Type
+
+/** The account's enabled regions, sorted and unique. */
+export const DiscoveredAwsRegions = Schema.Array(AwsResourceDiscoveryRequest.fields.region).check(
+  Schema.makeFilter((regions) => regions.length <= MAXIMUM_DISCOVERED_AWS_REGIONS, {
+    expected: `at most ${MAXIMUM_DISCOVERED_AWS_REGIONS} AWS regions`
+  }),
+  Schema.makeFilter((regions) => new Set(regions).size === regions.length, { expected: "unique AWS regions" })
+)
+
+/**
+ * The profile's enabled regions, or `denied` when it may not call `account:ListRegions`: a new IAM action
+ * most profiles lack, so the form falls back to typing a region rather than reporting an outage.
+ */
+export const AwsRegionDiscoveryResponse = Schema.Union([
+  Schema.TaggedStruct("available", { regions: DiscoveredAwsRegions }),
+  Schema.TaggedStruct("denied", {})
+]).annotate({ identifier: "AwsRegionDiscoveryResponse" })
+
+/** Decoded enabled-region list. */
+export type AwsRegionDiscoveryResponse = typeof AwsRegionDiscoveryResponse.Type
 
 /** One local OAuth profile available to first-party Atlassian adapters. */
 export const DiscoveredAtlassianProfile = Schema.Struct({
@@ -853,6 +890,14 @@ const discoverAwsResources = HttpApiEndpoint.post("discoverAwsResources", "/disc
   .middleware(SessionCookieAuth)
   .middleware(SessionMutationAuth)
 
+const discoverAwsRegions = HttpApiEndpoint.post("discoverAwsRegions", "/discovery/aws-regions", {
+  payload: AwsRegionDiscoveryRequest,
+  success: AwsRegionDiscoveryResponse,
+  error: [...pluginReadErrors, InvalidRequestApiError, AwsSignInRequiredApiError]
+})
+  .middleware(SessionCookieAuth)
+  .middleware(SessionMutationAuth)
+
 const discoverAtlassianProfiles = HttpApiEndpoint.get(
   "discoverAtlassianProfiles",
   "/discovery/atlassian-profiles",
@@ -1018,6 +1063,7 @@ export class PluginsApiGroup extends HttpApiGroup.make("plugins")
     overview,
     discoverAwsProfiles,
     discoverAwsResources,
+    discoverAwsRegions,
     discoverAtlassianProfiles,
     createAtlassianOAuthGrant,
     exchangeAtlassianOAuthGrant,

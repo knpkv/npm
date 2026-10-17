@@ -309,6 +309,65 @@ describe("AWS resource discovery", () => {
       })
     ))
 
+  // AWS names a service control policy in CodeCommit's denial; a pool account's region allowlist is one possible cause.
+  describe("services denied by an organization policy", () => {
+    const denied = (message: string) =>
+      codeCommitClient({
+        listRepositoriesPage: ({ account }) =>
+          Effect.fail(
+            new AwsApiError({
+              operation: "listRepositoriesPage",
+              profile: account.profile,
+              region: account.region,
+              cause: { _tag: "AccessDeniedException", message }
+            })
+          )
+      })
+    const pipelinesDenied = codePipelineClient({
+      listPipelinesPage: () => Effect.fail(new PluginAuthorizationFailure({ operation: "list-pipelines" }))
+    })
+
+    // Only CodeCommit's denial is proven to be an SCP (CodePipeline's authorization failure carries no message),
+    // so the flag means "an organization policy blocks CodeCommit here, CodePipeline is denied too", never
+    // "this region is not allowed".
+    it.effect("is reported for an SCP CodeCommit denial beside a CodePipeline authorization failure", () =>
+      runDiscovery(
+        denied(
+          "User: arn:aws:sts::123456789012:assumed-role/Developer/x is not authorized to perform: codecommit:ListRepositories with an explicit deny in a service control policy"
+        ),
+        pipelinesDenied,
+        Effect.gen(function*() {
+          const discovery = yield* AwsResourceDiscovery
+          const result = yield* discovery.discover(request)
+          assert.strictEqual(result.organizationPolicyDenied, true)
+          assert.deepStrictEqual(result.codeCommit, { _tag: "failed", failureClass: "authorization" })
+        })
+      ))
+
+    it.effect("is not reported when CodePipeline is readable", () =>
+      runDiscovery(
+        denied(
+          "not authorized to perform: codecommit:ListRepositories with an explicit deny in a service control policy"
+        ),
+        codePipelineClient(),
+        Effect.gen(function*() {
+          const discovery = yield* AwsResourceDiscovery
+          assert.notProperty(yield* discovery.discover(request), "organizationPolicyDenied")
+        })
+      ))
+
+    it.effect("is not reported for an ordinary IAM denial", () =>
+      runDiscovery(
+        denied("User is not authorized to perform: codecommit:ListRepositories"),
+        pipelinesDenied,
+        Effect.gen(function*() {
+          const discovery = yield* AwsResourceDiscovery
+          const result = yield* discovery.discover(request)
+          assert.notProperty(result, "organizationPolicyDenied")
+        })
+      ))
+  })
+
   it.effect("redacts a typed CodePipeline permission failure independently", () =>
     runDiscovery(
       codeCommitClient({ listRepositoriesPage: () => Effect.succeed(repositoryPage(["payments"])) }),

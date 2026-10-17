@@ -53,6 +53,8 @@ import type {
   AtlassianOAuthProviderIntent,
   AtlassianProfileDiscoveryResponse,
   AwsProfileDiscoveryResponse,
+  AwsRegionDiscoveryRequest,
+  AwsRegionDiscoveryResponse,
   AwsResourceDiscoveryRequest,
   AwsResourceDiscoveryResponse,
   CreatePluginConnectionRequest,
@@ -202,6 +204,12 @@ export interface PluginAdministrationService {
     request: AwsResourceDiscoveryRequest
   ) => Effect.Effect<
     AwsResourceDiscoveryResponse,
+    ApplicationAwsSignInRequired | ApplicationInvalidRequest | ApplicationRateLimited | ApplicationServiceUnavailable
+  >
+  readonly discoverAwsRegions?: (
+    request: AwsRegionDiscoveryRequest
+  ) => Effect.Effect<
+    AwsRegionDiscoveryResponse,
     ApplicationAwsSignInRequired | ApplicationInvalidRequest | ApplicationRateLimited | ApplicationServiceUnavailable
   >
   readonly discoverAtlassianProfiles?: () => Effect.Effect<

@@ -17,6 +17,7 @@ import type * as Scope from "effect/Scope"
 
 import * as Predicate from "effect/Predicate"
 import type {
+  AwsRegionDiscoveryRequest,
   CreatePluginConnectionBatchResult,
   CreatePluginConnectionRequest,
   CreatePluginConnectionResponse,
@@ -72,6 +73,7 @@ import type { PluginConnectionMapV1 } from "../plugins/PluginConnectionMap.js"
 import { DomainEventWakeups } from "../runtime/DomainEventWakeups.js"
 import { SecretRef } from "../secrets/SecretRef.js"
 import { SecretStore } from "../secrets/SecretStore.js"
+import { AwsRegionDiscovery } from "./awsRegionDiscovery.js"
 import { AwsResourceDiscovery, awsResourceDiscoveryLayer } from "./awsResourceDiscovery.js"
 import { assertConnectionOwnership, materializeConnectionOwnership } from "./connectionOwnership.js"
 import { mapPersistenceRead, mapPersistenceReadError, mapPersistenceWriteError } from "./errors.js"
@@ -1349,6 +1351,9 @@ export const makePluginAdministrationWithConnections = Effect.fn("PluginAdminist
   const awsResourceDiscovery = yield* Effect.contextWith((context: Context.Context<never>) =>
     Effect.succeed(Context.getOption(context, AwsResourceDiscovery))
   )
+  const awsRegionDiscovery = yield* Effect.contextWith((context: Context.Context<never>) =>
+    Effect.succeed(Context.getOption(context, AwsRegionDiscovery))
+  )
   const manualSynchronization = pluginConnections === null
     ? null
     : yield* Effect.flatMap(
@@ -1649,6 +1654,9 @@ export const makePluginAdministrationWithConnections = Effect.fn("PluginAdminist
         .sort((left, right) => left.profile.localeCompare(right.profile))
     }),
     ...(!(Option.isNone(awsResourceDiscovery)) && { discoverAwsResources: awsResourceDiscovery.value.discover }),
+    ...(!(Option.isNone(awsRegionDiscovery)) && {
+      discoverAwsRegions: (request: AwsRegionDiscoveryRequest) => awsRegionDiscovery.value.regions(request.profile)
+    }),
     discoverAtlassianProfiles: Effect.fn("PluginAdministration.discoverAtlassianProfiles")(function*() {
       const profiles = yield* discoverAtlassianProfiles().pipe(
         Effect.provide([
@@ -1894,6 +1902,12 @@ export const makePluginAdministrationWithOAuth = Effect.fn("PluginAdministration
   return yield* makePluginAdministrationWithConnections(pluginConnections, publicOrigin, grants)
 })
 
+/**
+ * Resource discovery, optionally with region discovery beside it. Region discovery is read with
+ * `Context.getOption`, so a composition without it (the deterministic mock) leaves its endpoint unavailable.
+ */
+type AwsDiscoveryLayer = Layer.Layer<AwsResourceDiscovery, never, HttpClient.HttpClient>
+
 /** Live plugin administration layer. */
 export const pluginAdministrationLayer = Layer.effect(PluginAdministration, makePluginAdministration).pipe(
   Layer.provide(awsResourceDiscoveryLayer)
@@ -1902,7 +1916,7 @@ export const pluginAdministrationLayer = Layer.effect(PluginAdministration, make
 /** Live administration layer with browser Atlassian OAuth grants. */
 export const pluginAdministrationOAuthLayer = (
   publicOrigin: string,
-  resourceDiscovery = awsResourceDiscoveryLayer
+  resourceDiscovery: AwsDiscoveryLayer = awsResourceDiscoveryLayer
 ): Layer.Layer<PluginAdministration, never, Exclude<PluginAdministrationOAuthRequirements, Scope.Scope>> =>
   Layer.effect(PluginAdministration, makePluginAdministrationWithOAuth(null, publicOrigin)).pipe(
     Layer.provide(resourceDiscovery)
@@ -1921,7 +1935,7 @@ export const pluginAdministrationLayerWithConnections = (
 export const pluginAdministrationOAuthLayerWithConnections = (
   pluginConnections: PluginConnectionMapV1,
   publicOrigin: string,
-  resourceDiscovery = awsResourceDiscoveryLayer
+  resourceDiscovery: AwsDiscoveryLayer = awsResourceDiscoveryLayer
 ): Layer.Layer<PluginAdministration, never, Exclude<PluginAdministrationOAuthRequirements, Scope.Scope>> =>
   Layer.effect(PluginAdministration, makePluginAdministrationWithOAuth(pluginConnections, publicOrigin)).pipe(
     Layer.provide(resourceDiscovery)
