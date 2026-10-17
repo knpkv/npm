@@ -3,6 +3,8 @@ import type { ApprovedJobIdentity } from "@knpkv/herdr-fleet"
 import { JobHash, type SandboxJobPayload } from "@knpkv/herdr-fleet/model"
 import {
   budgetHoldBlocker,
+  Holder,
+  lease,
   makeMemoryRunLog,
   makeMemorySandboxStore,
   Nuke,
@@ -10,9 +12,10 @@ import {
   PoolAccess,
   PoolContract,
   Sandbox,
+  SandboxStoreUnavailable,
   seedPool
 } from "@knpkv/sandbox-pool"
-import { Duration, Effect, Fiber, Latch, Redacted, Schema } from "effect"
+import { DateTime, Duration, Effect, Fiber, Latch, Redacted, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import { BudgetControl, BudgetLiftFailed, makeSandboxPool, runSandboxSweep } from "../src/sandbox-jobs.js"
 
@@ -50,6 +53,8 @@ interface FakeOptions {
   readonly listGate?: Effect.Effect<void>
   /** Makes the budget lift fail, as a detach that errored after it may have changed the account. */
   readonly liftFails?: boolean
+  /** Fails every put as the store does when it cannot tell whether the write landed. */
+  readonly putFails?: boolean
 }
 
 /** A pool over the memory store and run log, with fakes that record every AWS-side call. */
@@ -58,7 +63,14 @@ const fixture = (options: FakeOptions = {}, initial: ReadonlyArray<Sandbox> = se
     const calls: Array<string> = []
     let held = options.hold ?? false
     const memory = yield* makeMemorySandboxStore(initial)
-    const store = { ...memory, list: Effect.tap(memory.list, () => options.listGate ?? Effect.void) }
+    const store = {
+      ...memory,
+      list: Effect.tap(memory.list, () => options.listGate ?? Effect.void),
+      put: (next: Sandbox) =>
+        options.putFails === true
+          ? Effect.fail(new SandboxStoreUnavailable({ operation: "put", detail: "chmod failed after commit" }))
+          : memory.put(next)
+    }
     const runLog = yield* makeMemoryRunLog
     const pool = yield* makeSandboxPool({
       contract,
@@ -283,5 +295,44 @@ describe("sandbox sweep", () => {
       yield* Fiber.interrupt(fiber)
       yield* TestClock.adjust(Duration.minutes(5))
       expect(yield* f.pool.lastSweep).toEqual(second)
+    }))
+
+  it.effect("an account that left the contract is never leased and cannot be extended", () =>
+    Effect.gen(function*() {
+      const retired = Schema.decodeUnknownSync(PoolContract)({
+        ...Schema.encodeSync(PoolContract)(contract),
+        accounts: [{ name: "sandbox-z", accountId: "999999999992" }]
+      })
+      const now = DateTime.makeUnsafe("2026-10-17T08:00:00Z")
+      const retiredLeased = yield* lease(seedPool(retired), Schema.decodeUnknownSync(Holder)("agent-a"), now)
+      const retiredFree = seedPool(
+        Schema.decodeUnknownSync(PoolContract)({
+          ...Schema.encodeSync(PoolContract)(contract),
+          accounts: [{ name: "sandbox-y", accountId: "999999999993" }]
+        })
+      )
+      const f = yield* fixture({}, [...retiredFree, retiredLeased, ...seedPool(contract)])
+      const leased = [
+        yield* f.job({ kind: "sandbox.lease" }, "agent-a", "job-1"),
+        yield* f.job({ kind: "sandbox.lease" }, "agent-a", "job-2")
+      ]
+      expect(leased.map(({ accountId }) => accountId).sort()).toEqual(["999999999990", "999999999991"])
+      const none = yield* Effect.flip(f.job({ kind: "sandbox.lease" }, "agent-a", "job-3"))
+      expect(none).toMatchObject({ disposition: "rejected" })
+      expect(none.detail).toContain("NoneAvailable")
+      const extend = yield* Effect.flip(
+        f.job({ kind: "sandbox.extend", accountId: retiredLeased.accountId }, "agent-a", "job-4")
+      )
+      expect(extend).toMatchObject({ disposition: "rejected" })
+      expect(extend.detail).toContain("AccountNotInPool")
+      expect(yield* f.store.get(retiredLeased.accountId)).toEqual(retiredLeased)
+    }))
+
+  it.effect("a put the store cannot confirm is a failure, never a rejection", () =>
+    Effect.gen(function*() {
+      const f = yield* fixture({ putFails: true })
+      const error = yield* Effect.flip(f.job({ kind: "sandbox.lease" }, "agent-a", "job-1"))
+      expect(error.detail).toContain("SandboxStoreUnavailable")
+      expect(error.disposition).toBeUndefined()
     }))
 })

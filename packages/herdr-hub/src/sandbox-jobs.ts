@@ -28,7 +28,8 @@ import {
   RunId,
   RunLog,
   Sandbox,
-  type SandboxStore
+  type SandboxStore,
+  SandboxStoreUnavailable
 } from "@knpkv/sandbox-pool"
 import { Context, DateTime, Duration, Effect, Option, Ref, Schedule, Schema, Semaphore } from "effect"
 
@@ -82,6 +83,7 @@ export interface SweepReport {
 type SweepOutcome = "idle" | "expired" | "resumed" | "failed"
 
 const encodeSandbox = Schema.encodeSync(Schema.fromJsonString(Sandbox))
+const isStoreUnavailable = Schema.is(SandboxStoreUnavailable)
 
 /** A tagged error's tag and fields, for the job's failure detail. */
 const describe = (error: { readonly _tag: string }) => JSON.stringify(error)
@@ -106,9 +108,12 @@ export const makeSandboxPool = Effect.fn("SandboxPool.make")(function*(services:
   for (const { accountId } of contract.accounts) locks.set(accountId, yield* Semaphore.make(1))
   const lastSweep = yield* Ref.make<SweepReport | null>(null)
 
-  /** `rejected` asserts nothing was committed: the failure came before any record was written. */
+  /**
+   * `rejected` asserts nothing was committed: the failure came before any record was written. A put the
+   * store could not confirm (`SandboxStoreUnavailable` on put) may have landed, so it is never rejected.
+   */
   const fail = (operation: string, error: { readonly _tag: string }, rejected: boolean) =>
-    rejected
+    rejected && !(isStoreUnavailable(error) && error.operation === "put")
       ? new FleetOperationError({ operation, detail: describe(error), cause: error, disposition: "rejected" })
       : new FleetOperationError({ operation, detail: describe(error), cause: error })
 
@@ -186,7 +191,8 @@ export const makeSandboxPool = Effect.fn("SandboxPool.make")(function*(services:
       case "sandbox.lease": {
         const now = yield* DateTime.now
         const leased = yield* store.list.pipe(
-          Effect.flatMap((pool) => lease(pool, holder, now)),
+          // Rows kept for accounts that left the contract are history, not candidates.
+          Effect.flatMap((pool) => lease(pool.filter(({ accountId }) => locks.has(accountId)), holder, now)),
           Effect.flatMap(store.put),
           Effect.retry({ times: 3, while: (error) => error._tag === "StaleVersion" }),
           Effect.mapError((error) => fail(operation, error, true))
@@ -194,6 +200,7 @@ export const makeSandboxPool = Effect.fn("SandboxPool.make")(function*(services:
         return done(leased)
       }
       case "sandbox.extend":
+        yield* lockFor(operation, payload.accountId)
         return done(
           yield* transition(payload.accountId, (current) => extend(current, holder)).pipe(
             Effect.mapError((error) => fail(operation, error, true))

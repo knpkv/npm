@@ -94,6 +94,8 @@ export const openSandboxDatabase = Effect.fn("SandboxDatabase.open")(function*(p
     return row === undefined ? undefined : decodeSandbox(Schema.decodeUnknownSync(SandboxRow)(row).record)
   }
 
+  // A put that committed but could not re-secure the files fails as SandboxStoreUnavailable: the row may
+  // have landed, so callers must not report it as "nothing written".
   const store = SandboxStore.of({
     list: attempt(
       () =>
@@ -167,7 +169,9 @@ export const openSandboxDatabase = Effect.fn("SandboxDatabase.open")(function*(p
       attempt(() => {
         const runs = decodeRows(RunRow)(
           database
-            .prepare("SELECT run_id FROM sandbox_run_entries WHERE started = 1 ORDER BY seq DESC LIMIT ?")
+            .prepare(
+              "SELECT run_id FROM sandbox_run_entries WHERE started = 1 GROUP BY run_id ORDER BY MAX(seq) DESC LIMIT ?"
+            )
             .all(Math.max(0, Math.floor(limit)))
         )
         return summarizeRuns(entriesOf(runs.map(({ run_id }) => run_id)))

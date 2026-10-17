@@ -143,5 +143,14 @@ it.layer(NodeServices.layer)("sandbox store", (it) => {
         "run-a:nuke"
       ])
       expect((yield* runLog.recent(1)).map(({ runId }) => runId)).toEqual(["run-b"])
+      // A resumed run records a second Started entry; it still counts as one run.
+      yield* runLog.record(entry({
+        _tag: "Started",
+        runId: "run-b",
+        accountId: "999999999991",
+        reason: "Expired",
+        at: "2026-10-17T09:05:00Z"
+      }))
+      expect((yield* runLog.recent(2)).map(({ runId }) => runId)).toEqual(["run-b", "run-a"])
     }).pipe(Effect.scoped))
 })
