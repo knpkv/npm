@@ -202,8 +202,8 @@ When writing or refactoring Effect code:
   tagged `@stability unstable`.
 - Prefer `Context.Service` class syntax plus explicit `Layer.effect` or
   `Layer.succeed` layers.
-- Accept both `Data.TaggedError` and `Schema.TaggedError`; use schema-backed
-  errors when runtime encoding, API responses, or transport boundaries matter.
+- Declare new errors with `Schema.TaggedError`. Existing `Data.TaggedError`
+  classes are legacy and stay until their code is touched for another reason.
 - Preserve unknown failure details in tagged error `cause` fields. When code
   must inspect an unknown failure, use `Predicate.isError`,
   `Predicate.hasProperty`, or `Predicate.isTagged`.

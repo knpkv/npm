@@ -241,13 +241,14 @@ regeneration and patch-review instructions.
   1. Checkout repository
   2. Install dependencies using existing setup action
   3. Run changesets action for version management and publishing
+  4. Label the Version Packages pull request `release` (creating the label if missing), so review bots skip it
 - **Commands**:
   - `pnpm changeset:version` - Version packages based on changesets
   - `pnpm changeset:publish` - Build and publish packages to npm
 - **Timeout**: 30 minutes
 - **Required Secrets**:
   - `TOKEN_NPM` - npm authentication token passed to the configured npm registry
-  - `TOKEN_GITHUB` - GitHub token passed to Changesets for releases and PRs
+  - `TOKEN_GITHUB` - GitHub token passed to Changesets for releases and PRs, and used to label the release PR
 
 **Release Process**:
 
