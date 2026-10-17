@@ -437,5 +437,6 @@ test("release notes are already prettier-formatted markdown", async () => {
       { level: "minor", at: "#/paths", change: "added path /rooms" }
     ]
   }, 1)
-  assert.equal(await Prettier.format(notes, { parser: "markdown" }), `${notes}\n`)
+  const config = await Prettier.resolveConfig(".changeset/release-notes.md")
+  assert.equal(await Prettier.format(notes, { ...config, parser: "markdown" }), `${notes}\n`)
 })
