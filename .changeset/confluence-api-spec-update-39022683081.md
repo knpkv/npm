@@ -8,6 +8,7 @@ Update the generated Confluence API clients from Atlassian's latest OpenAPI spec
 Release: minor (0 breaking, 118 additions).
 
 Additions:
+
 - added headers component AtlDatabaseVersion at `confluence-v2.json#/components/headers`
 - added headers component DatabaseCacheControl at `confluence-v2.json#/components/headers`
 - added headers component DatabaseEtag at `confluence-v2.json#/components/headers`
