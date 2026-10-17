@@ -1,7 +1,7 @@
 import { Effect, FileSystem, Path, Schema } from "effect"
-import { parse as parseJsonc, type ParseError } from "jsonc-parser"
 import { parse as parseYaml } from "yaml"
 import { exists, readText, withinRoot } from "./internal/files.js"
+import { lockfileJsonText } from "./internal/lockfile-json.js"
 import { StateReadError } from "./schema.js"
 
 const Dependency = Schema.Struct({ version: Schema.String })
@@ -29,13 +29,7 @@ const pnpmVersion = Effect.fn("AlchemyConsole.pnpmVersion")(function*(text: stri
 })
 
 const bunVersion = Effect.fn("AlchemyConsole.bunVersion")(function*(text: string) {
-  const errors: Array<ParseError> = []
-  const raw: unknown = yield* Effect.try({
-    try: () => parseJsonc(text, errors, { allowTrailingComma: true }),
-    catch: () => new StateReadError({ reason: "invalid-lockfile" })
-  })
-  if (errors.length > 0) return yield* new StateReadError({ reason: "invalid-lockfile" })
-  const lock = yield* Schema.decodeUnknownEffect(BunLock)(raw).pipe(
+  const lock = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(BunLock))(lockfileJsonText(text)).pipe(
     Effect.mapError(() => new StateReadError({ reason: "invalid-lockfile" }))
   )
   const resolved = lock.packages.alchemy?.[0]

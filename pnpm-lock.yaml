@@ -361,9 +361,6 @@ importers:
       '@knpkv/browser-pairing':
         specifier: workspace:^
         version: link:../browser-pairing
-      jsonc-parser:
-        specifier: ^3.3.1
-        version: 3.3.1
       yaml:
         specifier: 2.9.1
         version: 2.9.1
@@ -392,6 +389,9 @@ importers:
       effect:
         specifier: 4.0.0
         version: 4.0.0
+      esbuild:
+        specifier: ^0.28.2
+        version: 0.28.2
       react:
         specifier: ^19.3.0
         version: 19.3.0
