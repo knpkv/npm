@@ -1,4 +1,5 @@
 /** Controlled read-only Code view. Only normalized host DTOs enter; provider locators never do. @module */
+import { CommitLabel } from "@knpkv/review/react"
 import { ServiceMark } from "@knpkv/rly/patterns"
 import { Button, Dialog, IconButton, Notice, StateLabel } from "@knpkv/rly/primitives"
 import { useEffect, useId, useLayoutEffect, useRef, type ReactElement, type ReactNode } from "react"
@@ -306,7 +307,8 @@ const Diff = ({
           Revision {state.value.diff.revisionId}. {state.value.diff.files.length} files in this immutable reading.
         </p>
         <p>
-          Base {state.value.diff.baseCommit}. Head {state.value.diff.headCommit}.
+          Base <CommitLabel commit={state.value.diff.baseCommit} />. Head{" "}
+          <CommitLabel commit={state.value.diff.headCommit} />.
         </p>
         {cacheUpdatedAt !== null && cacheUpdatedAt !== state.value.diff.cacheUpdatedAt ? (
           <p className="code-host-problem">

@@ -1,4 +1,5 @@
 /** Recorded agent output is prose, not approval authority or a computed verdict. @module */
+import { CommitLabel } from "@knpkv/review/react"
 import type { ReviewRun, ReviewWorkspaceThreads, ThreadsConflict } from "@knpkv/review"
 import { Result, type DateTime } from "effect"
 import type { ReactElement } from "react"
@@ -93,7 +94,7 @@ export function ReviewSummaryView({ run, threads, timeZone }: ReviewSummaryViewP
           <time dateTime={time.iso} title={time.full}>
             {time.clock}
           </time>
-          , head {run.identity.headRevision}
+          , head <CommitLabel commit={run.identity.headRevision} />
         </small>
       </div>
     </section>

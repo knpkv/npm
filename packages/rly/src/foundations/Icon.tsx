@@ -12,6 +12,7 @@ import {
   ChevronUp,
   CircleAlert,
   Clock,
+  Copy,
   ExternalLink,
   File,
   Link,
@@ -50,7 +51,8 @@ export const RLY_ICON_NAMES = defineNames([
   "search",
   "user",
   "close",
-  "pin"
+  "pin",
+  "copy"
 ])
 
 /** A stable glyph name owned by rly rather than its icon implementation. */
@@ -100,6 +102,7 @@ const glyphs = {
   "chevron-up": ChevronUp,
   alert: CircleAlert,
   clock: Clock,
+  copy: Copy,
   "external-link": ExternalLink,
   file: File,
   link: Link,

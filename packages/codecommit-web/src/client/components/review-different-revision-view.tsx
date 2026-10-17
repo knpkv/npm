@@ -1,4 +1,5 @@
 /** Read-only revision mismatch notice. Comparison never implies commit ancestry. @module */
+import { CommitLabel } from "@knpkv/review/react"
 import type { ReviewRunWorkspaceReading } from "@knpkv/review"
 import { StateLabel } from "@knpkv/rly/primitives"
 import type { ReactElement } from "react"
@@ -21,9 +22,13 @@ export function ReviewDifferentRevisionView({
           {run.threads.some((thread) => thread.finding !== null)
             ? " Findings are shown separately from current diff lines."
             : null}
-          {run.identity.headRevision !== current.headRevision
-            ? ` Reviewed ${run.identity.headRevision}; the branch is now at ${current.headRevision}.`
-            : null}
+          {run.identity.headRevision !== current.headRevision ? (
+            <>
+              {" "}
+              Reviewed <CommitLabel commit={run.identity.headRevision} />; the branch is now at{" "}
+              <CommitLabel commit={current.headRevision} />.
+            </>
+          ) : null}
         </p>
       </div>
     </div>

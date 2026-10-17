@@ -35,6 +35,7 @@ import {
   RelayReviewStreamRequest
 } from "../Api.js"
 import { BackgroundScope } from "../internal/BackgroundScope.js"
+import { makeCommitSummaryReader } from "../review/CommitSummaries.js"
 import {
   loadPullRequestDiff,
   loadPullRequestDiffContent,
@@ -332,6 +333,7 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
     const readClient = yield* ReadClient.CodeCommitReadClient
     const pullRequestRepo = yield* CacheService.PullRequestRepo
     const changedFiles = yield* makePullRequestChangedFilesSource(readClient)
+    const commitSummaries = yield* makeCommitSummaryReader(readClient.getCommit)
     const relaySemaphore = yield* Semaphore.make(1)
     const notificationRepo = yield* CacheService.NotificationRepo
     const ownerScope = yield* BackgroundScope
@@ -411,6 +413,15 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
         Effect.gen(function*() {
           const pullRequest = yield* cachedPullRequest(pullRequestRepo, params.awsAccountId, params.prId, query)
           return yield* loadPullRequestDiff(readClient, pullRequest, changedFiles)
+        }).pipe(Effect.mapError((error) => new ApiError({ message: error.message }))))
+      .handle("commit", ({ params, query }) =>
+        Effect.gen(function*() {
+          const pullRequest = yield* cachedPullRequest(pullRequestRepo, params.awsAccountId, params.prId, query)
+          return yield* commitSummaries({
+            account: { profile: pullRequest.account.profile, region: pullRequest.account.region },
+            repositoryName: pullRequest.repositoryName,
+            commit: params.commitId
+          })
         }).pipe(Effect.mapError((error) => new ApiError({ message: error.message }))))
       .handleRaw("diffContent", ({ params, query }) =>
         Effect.gen(function*() {

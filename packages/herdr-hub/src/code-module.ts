@@ -1,6 +1,8 @@
 /** Host-local Code mount. No discovery, fan-out, grant, write or publish authority. @module */
 import {
   CodeCanvasResult,
+  CodeCommitQuery,
+  CodeCommitSummaryResult,
   CodeDetail,
   CodeDiffContentQuery,
   CodeDiffContentResult,
@@ -125,6 +127,14 @@ export const makeCodeModule = (configuration: {
             return recover(
               mounted.reader.diffContent(query, caller).pipe(
                 Effect.map((content): CodeDiffContentResult => ({ _tag: "Ready", content }))
+              )
+            )
+          }),
+          moduleReadRoute("/commit", CodeCommitQuery, CodeCommitSummaryResult, (query, caller) => {
+            if (mounted._tag === "Unavailable") return Effect.succeed(mounted)
+            return recover(
+              mounted.reader.commit(query, caller).pipe(
+                Effect.map((commit): CodeCommitSummaryResult => ({ _tag: "Ready", commit }))
               )
             )
           }),

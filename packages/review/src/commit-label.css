@@ -1,0 +1,38 @@
+/* CommitLabel: the title truncates, the time and the copy button stay. */
+.rv-commit {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  max-inline-size: 100%;
+  min-inline-size: 0;
+  vertical-align: middle;
+  font-family: var(--rly-font-ui);
+}
+
+.rv-commit-words {
+  display: inline-flex;
+  min-inline-size: 0;
+  white-space: nowrap;
+}
+
+.rv-commit-title {
+  min-inline-size: 0;
+  overflow: clip;
+  text-overflow: ellipsis;
+}
+
+/* The design draws the copy button at 28px inside running text; its target stays 44px through ::after. */
+.rv-commit-copy {
+  position: relative;
+  flex: none;
+  inline-size: 28px;
+  block-size: 28px;
+  color: var(--rly-color-text-1);
+}
+
+/* A 44px target around the compact button without changing the line it sits in. */
+.rv-commit-copy::after {
+  content: "";
+  position: absolute;
+  inset: min(0px, calc((100% - 44px) / 2));
+}

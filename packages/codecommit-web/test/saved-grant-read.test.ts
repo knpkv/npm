@@ -31,6 +31,7 @@ const fixture = Effect.fn("SavedGrantReadTest.fixture")(
     const audit = yield* Ref.make<ReadonlyArray<NewAuditLogEntry>>([])
     const inner: ReadClient.CodeCommitReadClientService = {
       discoverAccount: () => unused(),
+      getCommit: () => Effect.die("unused getCommit"),
       getBlob: ({ blobId }) =>
         Ref.update(providerCalls, (n) => n + 1).pipe(
           Effect.as(

@@ -155,7 +155,7 @@ it("marks a deep-linked diff possibly outdated using the exact cached detail whe
   }
   const old = renderToStaticMarkup(createElement(CodeHostView, { ...props, detail }))
   expect(old).toContain("This diff may be outdated")
-  expect(old).toContain("Base base. Head head.")
+  expect(old.replace(/<[^>]+>/gu, "")).toContain("Base “Commit title unavailable”. Head “Commit title unavailable”.")
   expect(old).toContain("Read ")
   if (props.diff.value?._tag !== "Ready") return expect.unreachable()
   const fresh = renderToStaticMarkup(

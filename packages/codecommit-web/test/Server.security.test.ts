@@ -88,6 +88,7 @@ const makeObservedReadClient = (
   calls: Ref.Ref<{ readonly blob: number; readonly differences: number }>
 ): ReadClient.CodeCommitReadClientService => ({
   discoverAccount: () => unused(),
+  getCommit: () => Effect.die("unused getCommit"),
   getBlob: ({ blobId }) =>
     Ref.update(calls, (count) => ({ ...count, blob: count.blob + 1 })).pipe(
       Effect.as(

@@ -91,7 +91,7 @@ it("composes the recorded verdict, finding evidence/replies, human anchor and su
   expect(fixture.host.querySelector("[data-immutable-diff]")).not.toBeNull()
   expect(fixture.host.querySelector("textarea, input, img")).toBeNull()
   expect(
-    [...fixture.host.querySelectorAll("button")].every((button) =>
+    [...fixture.host.querySelectorAll("button:not([aria-label=\"Copy commit id\"])")].every((button) =>
       button.closest("[aria-label=\"Thread list filters\"]") !== null
     )
   ).toBe(true)
@@ -108,7 +108,7 @@ it("keeps verdict and diff on a thread conflict while replacing all joined rows 
   expect(fixture.host.textContent).toContain("Recorded verdict")
   expect(fixture.host.textContent).toContain("Threads could not be combined")
   expect(fixture.host.querySelector("[data-immutable-diff]")).not.toBeNull()
-  expect(fixture.host.querySelectorAll("button")).toHaveLength(1)
+  expect(fixture.host.querySelectorAll("button:not([aria-label=\"Copy commit id\"])")).toHaveLength(1)
   for (const text of ["Recorded claim", "Recorded human comment", "By severity"]) {
     expect(fixture.host.textContent).not.toContain(text)
   }
@@ -120,9 +120,13 @@ it("keeps different-revision findings separate and displays the mismatch beside 
     workspace: { ...workspace, identity: { ...identity, headRevision: "head-2" } }
   }))
   expect(fixture.host.textContent).toContain("Review is for a different revision")
-  expect(fixture.host.textContent).toContain("Reviewed head-1; the branch is now at head-2.")
+  expect(fixture.host.textContent).toContain(
+    "Reviewed “Commit title unavailable”; the branch is now at “Commit title unavailable”."
+  )
   expect(fixture.host.textContent).toContain("Recorded claim")
-  expect(fixture.host.querySelector("[data-review-summary=\"recorded\"]")?.textContent).toContain("head head-1")
+  expect(fixture.host.querySelector("[data-review-summary=\"recorded\"]")?.textContent).toContain(
+    "head “Commit title unavailable”"
+  )
 })
 
 it("renders Conversation from recorded messages without summary/diff and scopes both retained presentations separately", async () => {

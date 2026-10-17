@@ -1,0 +1,2141 @@
+{
+  "version": 1,
+  "fixture": {
+    "path": "fixture.json",
+    "shape": "{ version: 1, data: { usageLimits, connectHome } }"
+  },
+  "viewports": [
+    {
+      "name": "phone",
+      "width": 390
+    },
+    {
+      "name": "desktop",
+      "width": 1280
+    }
+  ],
+  "themes": [
+    "light",
+    "dark"
+  ],
+  "screens": [
+    {
+      "id": "connect-home",
+      "file": "screens/connect-home.html",
+      "source": "08 Navigation.dc.html",
+      "fixtureKey": "data.connectHome",
+      "query": {
+        "state": "state",
+        "theme": "theme"
+      },
+      "defaultState": "connect-home",
+      "ready": {
+        "attribute": "data-design-ready",
+        "dataset": "designReady",
+        "value": "true",
+        "neverOnFixtureError": true
+      },
+      "states": [
+        {
+          "id": "connect-home",
+          "name": "Connect home",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "strip",
+            "cards"
+          ]
+        },
+        {
+          "id": "connect-archived",
+          "name": "Connect home, Archived",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "list",
+            "action"
+          ]
+        },
+        {
+          "id": "connect-archived-loading-older",
+          "name": "Connect home, Archived, loading older",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "list",
+            "action"
+          ]
+        },
+        {
+          "id": "connect-archived-older-failed",
+          "name": "Connect home, Archived, older failed",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "list",
+            "action"
+          ]
+        },
+        {
+          "id": "connect-archived-loading",
+          "name": "Connect home, Archived, loading",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "list"
+          ]
+        },
+        {
+          "id": "connect-archived-empty",
+          "name": "Connect home, Archived, none",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "list"
+          ]
+        },
+        {
+          "id": "connect-archived-failed",
+          "name": "Connect home, Archived, failed",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "notice",
+            "action"
+          ]
+        },
+        {
+          "id": "connect-home-ready",
+          "name": "Connect home, ready and idle agents",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "strip",
+            "cards"
+          ]
+        },
+        {
+          "id": "brand-home",
+          "name": "Brand goes home",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "list"
+          ]
+        },
+        {
+          "id": "connect-stage",
+          "name": "Agent stage from a deep link",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "strip",
+            "cards",
+            "detail"
+          ]
+        },
+        {
+          "id": "connect-terminal-controlled",
+          "name": "Agent stage, terminal controlled elsewhere",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "strip",
+            "cards",
+            "detail",
+            "notice",
+            "action"
+          ]
+        },
+        {
+          "id": "connect-terminal-taken-over",
+          "name": "Agent stage, terminal taken over",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "strip",
+            "cards",
+            "detail",
+            "notice",
+            "action"
+          ]
+        },
+        {
+          "id": "connect-empty",
+          "name": "Connect, no agents",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "notice",
+            "action"
+          ]
+        },
+        {
+          "id": "connect-empty-partial",
+          "name": "Connect, no agents, approvals unknown",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "strip",
+            "notice",
+            "action"
+          ]
+        },
+        {
+          "id": "connect-empty-stale",
+          "name": "Connect, no agents, previous reading",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "notice",
+            "action"
+          ]
+        },
+        {
+          "id": "connect-partial",
+          "name": "Connect, one host not answering",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "notice",
+            "action",
+            "strip",
+            "cards"
+          ]
+        },
+        {
+          "id": "connect-stale",
+          "name": "Connect, stale",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "notice",
+            "strip",
+            "cards"
+          ]
+        },
+        {
+          "id": "connect-refresh-failed",
+          "name": "Connect, refresh failed",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "notice",
+            "strip",
+            "cards"
+          ]
+        },
+        {
+          "id": "strip-partial",
+          "name": "Today strip, partial count",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "strip",
+            "cards"
+          ]
+        },
+        {
+          "id": "strip-unknown",
+          "name": "Today strip, approvals unknown",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "strip",
+            "cards"
+          ]
+        },
+        {
+          "id": "footer-tailnet-connected",
+          "name": "Footer, Tailscale, connected",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "strip",
+            "cards"
+          ]
+        },
+        {
+          "id": "footer-local-connected",
+          "name": "Footer, local, connected",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "strip",
+            "cards"
+          ]
+        },
+        {
+          "id": "footer-stale",
+          "name": "Footer, reconnecting",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "strip",
+            "cards"
+          ]
+        },
+        {
+          "id": "footer-unavailable",
+          "name": "Footer, hub not reachable",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "strip",
+            "cards"
+          ]
+        },
+        {
+          "id": "connect-terminal-refused",
+          "name": "Connect, terminal refused",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "strip",
+            "notice",
+            "cards"
+          ]
+        },
+        {
+          "id": "connect-terminal-detached",
+          "name": "Connect, terminal detached",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "strip",
+            "notice",
+            "cards"
+          ]
+        },
+        {
+          "id": "unknown",
+          "name": "Unknown state",
+          "regions": [
+            "notice"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "usage-limits",
+      "file": "screens/usage-limits.html",
+      "source": "06 Usage.dc.html",
+      "fixtureKey": "data.usageLimits",
+      "query": {
+        "state": "state",
+        "theme": "theme"
+      },
+      "defaultState": "populated",
+      "ready": {
+        "attribute": "data-design-ready",
+        "dataset": "designReady",
+        "value": "true",
+        "neverOnFixtureError": true
+      },
+      "states": [
+        {
+          "id": "populated",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "summary",
+            "cards",
+            "detail",
+            "footer"
+          ]
+        },
+        {
+          "id": "near-limit",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "summary",
+            "cards",
+            "detail",
+            "footer"
+          ]
+        },
+        {
+          "id": "limit-reached",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "summary",
+            "cards",
+            "detail",
+            "footer"
+          ]
+        },
+        {
+          "id": "stale",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "notice",
+            "summary",
+            "cards",
+            "detail",
+            "footer"
+          ]
+        },
+        {
+          "id": "sign-in-required",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "notice",
+            "summary",
+            "cards",
+            "detail",
+            "footer"
+          ]
+        },
+        {
+          "id": "loading",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "cards"
+          ]
+        },
+        {
+          "id": "empty",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "notice",
+            "action"
+          ]
+        },
+        {
+          "id": "unavailable",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "notice",
+            "action"
+          ]
+        },
+        {
+          "id": "unknown",
+          "regions": [
+            "notice"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "more-sheet",
+      "file": "screens/more-sheet.html",
+      "source": "08 Navigation.dc.html",
+      "fixtureKey": "data.moreSheet",
+      "query": {
+        "state": "state",
+        "theme": "theme"
+      },
+      "defaultState": "more-sheet-v2",
+      "ready": {
+        "attribute": "data-design-ready",
+        "dataset": "designReady",
+        "value": "true",
+        "neverOnFixtureError": true
+      },
+      "regionsBy": "viewport",
+      "states": [
+        {
+          "id": "more-sheet-v2",
+          "name": "More sheet, Usage active",
+          "regions": {
+            "phone": [
+              "nav",
+              "header",
+              "tabs",
+              "list",
+              "sheet",
+              "action"
+            ],
+            "desktop": [
+              "nav",
+              "header",
+              "tabs",
+              "list"
+            ]
+          }
+        },
+        {
+          "id": "installed",
+          "name": "Installed modules only",
+          "regions": {
+            "phone": [
+              "nav",
+              "header",
+              "tabs",
+              "strip",
+              "cards"
+            ],
+            "desktop": [
+              "nav",
+              "header",
+              "tabs",
+              "strip",
+              "cards"
+            ]
+          }
+        },
+        {
+          "id": "installed-more",
+          "name": "Installed only, More open",
+          "regions": {
+            "phone": [
+              "nav",
+              "header",
+              "tabs",
+              "strip",
+              "cards",
+              "sheet",
+              "action"
+            ],
+            "desktop": [
+              "nav",
+              "header",
+              "tabs",
+              "strip",
+              "cards"
+            ]
+          }
+        },
+        {
+          "id": "installed-settings-desktop",
+          "name": "Installed, Settings dialog (desktop)",
+          "regions": {
+            "phone": [
+              "nav",
+              "header",
+              "tabs",
+              "strip",
+              "cards",
+              "sheet",
+              "action"
+            ],
+            "desktop": [
+              "nav",
+              "header",
+              "tabs",
+              "strip",
+              "cards",
+              "sheet",
+              "action"
+            ]
+          }
+        },
+        {
+          "id": "unknown",
+          "name": "Unknown state",
+          "regions": {
+            "phone": [
+              "notice"
+            ],
+            "desktop": [
+              "notice"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "usage-by-tool",
+      "file": "screens/usage-by-tool.html",
+      "source": "08 Navigation.dc.html",
+      "fixtureKey": "data.usageByTool",
+      "query": {
+        "state": "state",
+        "theme": "theme"
+      },
+      "defaultState": "usage-by-tool",
+      "ready": {
+        "attribute": "data-design-ready",
+        "dataset": "designReady",
+        "value": "true",
+        "neverOnFixtureError": true
+      },
+      "states": [
+        {
+          "id": "usage-by-tool",
+          "name": "Usage, By tool",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "action",
+            "summary",
+            "list",
+            "footer"
+          ]
+        },
+        {
+          "id": "usage-by-tool-refresh-failed",
+          "name": "Usage, By tool, refresh failed",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "action",
+            "notice",
+            "retry",
+            "summary",
+            "list",
+            "footer"
+          ]
+        },
+        {
+          "id": "usage-by-tool-updating",
+          "name": "Usage, By tool, updating range",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "action",
+            "summary",
+            "list",
+            "footer"
+          ]
+        },
+        {
+          "id": "unknown",
+          "name": "Unknown state",
+          "regions": [
+            "notice"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "fleet",
+      "file": "screens/fleet.html",
+      "source": "08 Navigation.dc.html",
+      "fixtureKey": "data.fleet",
+      "query": {
+        "state": "state",
+        "theme": "theme"
+      },
+      "defaultState": "fleet-approvals",
+      "ready": {
+        "attribute": "data-design-ready",
+        "dataset": "designReady",
+        "value": "true",
+        "neverOnFixtureError": true,
+        "neverOnFontError": true
+      },
+      "regionsBy": "viewport",
+      "states": [
+        {
+          "id": "fleet-approvals",
+          "name": "Fleet, Approvals",
+          "regions": {
+            "phone": [
+              "nav",
+              "header",
+              "tabs",
+              "list",
+              "footer"
+            ],
+            "desktop": [
+              "nav",
+              "header",
+              "tabs",
+              "list",
+              "footer"
+            ]
+          }
+        },
+        {
+          "id": "approval-phone",
+          "name": "Approval request",
+          "regions": {
+            "phone": [
+              "nav",
+              "header",
+              "detail",
+              "action"
+            ],
+            "desktop": [
+              "nav",
+              "header",
+              "tabs",
+              "list",
+              "footer",
+              "detail",
+              "action"
+            ]
+          }
+        },
+        {
+          "id": "approval-precheck",
+          "name": "Approval, checking",
+          "regions": {
+            "phone": [
+              "nav",
+              "header",
+              "detail",
+              "notice"
+            ],
+            "desktop": [
+              "nav",
+              "header",
+              "tabs",
+              "list",
+              "footer",
+              "detail",
+              "notice"
+            ]
+          }
+        },
+        {
+          "id": "approval-sending",
+          "name": "Approval, sending",
+          "regions": {
+            "phone": [
+              "nav",
+              "header",
+              "detail",
+              "notice"
+            ],
+            "desktop": [
+              "nav",
+              "header",
+              "tabs",
+              "list",
+              "footer",
+              "detail",
+              "notice"
+            ]
+          }
+        },
+        {
+          "id": "approval-expired",
+          "name": "Approval, expired",
+          "regions": {
+            "phone": [
+              "nav",
+              "header",
+              "detail",
+              "notice",
+              "action"
+            ],
+            "desktop": [
+              "nav",
+              "header",
+              "tabs",
+              "list",
+              "footer",
+              "detail",
+              "notice",
+              "action"
+            ]
+          }
+        },
+        {
+          "id": "approval-unavailable",
+          "name": "Approval, check failed",
+          "regions": {
+            "phone": [
+              "nav",
+              "header",
+              "detail",
+              "notice",
+              "action"
+            ],
+            "desktop": [
+              "nav",
+              "header",
+              "tabs",
+              "list",
+              "footer",
+              "detail",
+              "notice",
+              "action"
+            ]
+          }
+        },
+        {
+          "id": "fleet-hosts",
+          "name": "Fleet, Hosts",
+          "regions": {
+            "phone": [
+              "nav",
+              "header",
+              "tabs",
+              "list",
+              "footer"
+            ],
+            "desktop": [
+              "nav",
+              "header",
+              "tabs",
+              "list",
+              "footer"
+            ]
+          },
+          "status": "future: Hosts tab not installed"
+        },
+        {
+          "id": "fleet-hosts-loading",
+          "name": "Fleet, Hosts, loading",
+          "regions": {
+            "phone": [
+              "nav",
+              "header",
+              "tabs",
+              "list"
+            ],
+            "desktop": [
+              "nav",
+              "header",
+              "tabs",
+              "list"
+            ]
+          },
+          "status": "future: Hosts tab not installed"
+        },
+        {
+          "id": "fleet-hosts-error",
+          "name": "Fleet, Hosts, error",
+          "regions": {
+            "phone": [
+              "nav",
+              "header",
+              "tabs",
+              "notice",
+              "action",
+              "list",
+              "footer"
+            ],
+            "desktop": [
+              "nav",
+              "header",
+              "tabs",
+              "notice",
+              "action",
+              "list",
+              "footer"
+            ]
+          },
+          "status": "future: Hosts tab not installed"
+        },
+        {
+          "id": "unknown",
+          "name": "Unknown state",
+          "regions": {
+            "phone": [
+              "notice"
+            ],
+            "desktop": [
+              "notice"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "for-you",
+      "file": "screens/for-you.html",
+      "source": "coord ruling (new module)",
+      "fixtureKey": "data.forYou",
+      "query": {
+        "state": "state",
+        "theme": "theme"
+      },
+      "defaultState": "for-you-list",
+      "nav": "future: Connect, For you, Fleet | Code, Usage; phone Connect, Fleet, For you, Code, More",
+      "ready": {
+        "attribute": "data-design-ready",
+        "dataset": "designReady",
+        "value": "true",
+        "neverOnFixtureError": true,
+        "neverOnFontError": true
+      },
+      "states": [
+        {
+          "id": "for-you-list",
+          "name": "For you",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "list",
+            "footer"
+          ]
+        },
+        {
+          "id": "for-you-expanded",
+          "name": "For you, one item open",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "list",
+            "detail",
+            "action",
+            "footer"
+          ]
+        },
+        {
+          "id": "unknown",
+          "name": "Unknown state",
+          "regions": [
+            "notice"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "code-review",
+      "file": "screens/code-review.html",
+      "source": "03 Code.dc.html (PR detail), redesigned",
+      "fixtureKey": "data.codeReview",
+      "query": {
+        "state": "state",
+        "theme": "theme"
+      },
+      "defaultState": "review-findings",
+      "ready": {
+        "attribute": "data-design-ready",
+        "dataset": "designReady",
+        "value": "true",
+        "neverOnFixtureError": true
+      },
+      "states": [
+        {
+          "id": "review-findings",
+          "name": "PR review, findings",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "detail",
+            "summary",
+            "action",
+            "list",
+            "diff",
+            "unanchored"
+          ]
+        },
+        {
+          "id": "review-clean",
+          "name": "PR review, clean",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "detail",
+            "summary",
+            "list",
+            "diff"
+          ]
+        },
+        {
+          "id": "review-clean-readonly",
+          "name": "PR review, clean, read-only",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "subtabs",
+            "detail",
+            "summary",
+            "list",
+            "diff"
+          ]
+        },
+        {
+          "id": "review-p2-expanded",
+          "name": "PR review, P2 and below open",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "detail",
+            "summary",
+            "action",
+            "list",
+            "diff",
+            "unanchored"
+          ]
+        },
+        {
+          "id": "review-p2-expanded-readonly",
+          "name": "PR review, P2 and below open, read-only",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "subtabs",
+            "detail",
+            "summary",
+            "list",
+            "diff",
+            "unanchored"
+          ]
+        },
+        {
+          "id": "review-reviewing",
+          "name": "PR review, reviewing",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "detail",
+            "summary",
+            "action",
+            "list",
+            "diff"
+          ]
+        },
+        {
+          "id": "review-applying-fix",
+          "name": "PR review, applying a fix",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "detail",
+            "summary",
+            "action",
+            "list",
+            "diff",
+            "unanchored"
+          ]
+        },
+        {
+          "id": "review-fix-pushed",
+          "name": "PR review, fix pushed",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "detail",
+            "summary",
+            "action",
+            "list",
+            "diff",
+            "unanchored"
+          ]
+        },
+        {
+          "id": "review-fix-pushed-readonly",
+          "name": "PR review, fix pushed, read-only",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "subtabs",
+            "detail",
+            "summary",
+            "list",
+            "diff",
+            "unanchored"
+          ]
+        },
+        {
+          "id": "review-fix-failed",
+          "name": "PR review, fix failed",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "detail",
+            "summary",
+            "action",
+            "list",
+            "diff",
+            "unanchored"
+          ]
+        },
+        {
+          "id": "review-fix-all",
+          "name": "PR review, fixing all P1",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "detail",
+            "summary",
+            "action",
+            "list",
+            "diff",
+            "unanchored"
+          ]
+        },
+        {
+          "id": "review-rereview",
+          "name": "PR review, re-review",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "detail",
+            "summary",
+            "list",
+            "diff"
+          ]
+        },
+        {
+          "id": "review-stale",
+          "name": "PR review, stale",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "detail",
+            "summary",
+            "notice",
+            "list",
+            "diff",
+            "unanchored"
+          ]
+        },
+        {
+          "id": "review-threads",
+          "name": "PR review, threads",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "detail",
+            "subtabs",
+            "summary",
+            "action",
+            "list",
+            "diff",
+            "unanchored"
+          ]
+        },
+        {
+          "id": "review-ask",
+          "name": "PR review, asking about a finding",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "detail",
+            "subtabs",
+            "summary",
+            "action",
+            "list",
+            "diff",
+            "unanchored"
+          ]
+        },
+        {
+          "id": "review-dismiss",
+          "name": "PR review, dismissing a finding",
+          "regions": {
+            "desktop": [
+              "nav",
+              "header",
+              "tabs",
+              "detail",
+              "subtabs",
+              "summary",
+              "action",
+              "list",
+              "diff",
+              "unanchored",
+              "form"
+            ],
+            "phone": [
+              "nav",
+              "header",
+              "tabs",
+              "detail",
+              "subtabs",
+              "summary",
+              "action",
+              "list",
+              "diff",
+              "unanchored",
+              "sheet",
+              "form"
+            ]
+          }
+        },
+        {
+          "id": "review-dismissed",
+          "name": "PR review, finding dismissed",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "detail",
+            "subtabs",
+            "summary",
+            "action",
+            "list",
+            "diff",
+            "unanchored"
+          ]
+        },
+        {
+          "id": "review-dismissed-readonly",
+          "name": "PR review, finding dismissed, read-only",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "subtabs",
+            "detail",
+            "summary",
+            "list",
+            "diff",
+            "unanchored"
+          ]
+        },
+        {
+          "id": "review-resolved",
+          "name": "PR review, threads resolved",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "detail",
+            "subtabs",
+            "summary",
+            "action",
+            "list",
+            "diff",
+            "unanchored"
+          ]
+        },
+        {
+          "id": "review-resolved-readonly",
+          "name": "PR review, finding resolved, read-only",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "subtabs",
+            "detail",
+            "summary",
+            "list",
+            "diff",
+            "unanchored"
+          ]
+        },
+        {
+          "id": "review-conversation",
+          "name": "PR review, conversation",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "detail",
+            "subtabs",
+            "list"
+          ]
+        },
+        {
+          "id": "review-conversation-readonly",
+          "name": "PR review, conversation, read-only",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "detail",
+            "subtabs",
+            "list"
+          ]
+        },
+        {
+          "id": "review-post",
+          "name": "PR review, post to CodeCommit",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "detail",
+            "subtabs",
+            "summary",
+            "action",
+            "list",
+            "diff",
+            "unanchored",
+            "sheet"
+          ]
+        },
+        {
+          "id": "review-post-failed",
+          "name": "PR review, post failed",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "detail",
+            "subtabs",
+            "notice",
+            "summary",
+            "action",
+            "list",
+            "diff",
+            "unanchored"
+          ]
+        },
+        {
+          "id": "review-guide",
+          "name": "PR review, guide",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "detail",
+            "subtabs",
+            "chapters",
+            "guide",
+            "diff",
+            "action"
+          ]
+        },
+        {
+          "id": "review-guide-checklist",
+          "name": "PR review, guide, chapter 4 with checklist",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "detail",
+            "subtabs",
+            "chapters",
+            "guide",
+            "diff",
+            "checklist"
+          ]
+        },
+        {
+          "id": "review-checks",
+          "name": "PR review, checks expanded",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "detail",
+            "checks",
+            "summary",
+            "action",
+            "list",
+            "diff",
+            "unanchored"
+          ]
+        },
+        {
+          "id": "review-checks-running",
+          "name": "PR review, checks running",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "detail",
+            "checks",
+            "summary",
+            "action",
+            "list",
+            "diff",
+            "unanchored"
+          ]
+        },
+        {
+          "id": "review-keyboard",
+          "name": "PR review, keyboard shortcuts",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "detail",
+            "subtabs",
+            "summary",
+            "action",
+            "list",
+            "diff",
+            "unanchored",
+            "sheet"
+          ]
+        },
+        {
+          "id": "review-phone-focus",
+          "name": "PR review, single finding focus",
+          "regions": {
+            "desktop": [
+              "nav",
+              "header",
+              "tabs",
+              "detail",
+              "diff",
+              "action"
+            ],
+            "phone": [
+              "header",
+              "tabs",
+              "detail",
+              "diff",
+              "action"
+            ]
+          }
+        },
+        {
+          "id": "review-history-not-saved",
+          "name": "PR review, history not saved",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "detail",
+            "summary",
+            "notice",
+            "action",
+            "list",
+            "diff",
+            "unanchored"
+          ]
+        },
+        {
+          "id": "review-run-unavailable",
+          "name": "PR review, agent review unavailable",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "detail",
+            "subtabs",
+            "summary",
+            "notice",
+            "action",
+            "list",
+            "diff"
+          ]
+        },
+        {
+          "id": "review-not-recorded",
+          "name": "PR review, no agent review yet",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "detail",
+            "subtabs",
+            "summary",
+            "action",
+            "list",
+            "diff"
+          ]
+        },
+        {
+          "id": "review-not-recorded-readonly",
+          "name": "PR review, no agent review yet, read-only",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "detail",
+            "subtabs",
+            "summary",
+            "list",
+            "diff"
+          ]
+        },
+        {
+          "id": "review-guide-no-run",
+          "name": "PR review, guide without an agent review",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "detail",
+            "subtabs",
+            "chapters",
+            "guide",
+            "diff",
+            "action"
+          ]
+        },
+        {
+          "id": "review-guide-none",
+          "name": "PR review, no guide yet",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "detail",
+            "subtabs",
+            "guide",
+            "action"
+          ]
+        },
+        {
+          "id": "review-guide-none-readonly",
+          "name": "PR review, no guide yet, read-only",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "detail",
+            "subtabs",
+            "guide"
+          ]
+        },
+        {
+          "id": "review-run-unavailable-no-comments",
+          "name": "PR review, agent review and comments unavailable (not cached)",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "detail",
+            "subtabs",
+            "summary",
+            "notice",
+            "list",
+            "diff",
+            "action",
+            "history-notice"
+          ]
+        },
+        {
+          "id": "review-run-unavailable-comments-over-limit",
+          "name": "PR review, agent review unavailable, comments over limit",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "detail",
+            "subtabs",
+            "summary",
+            "notice",
+            "list",
+            "diff",
+            "action",
+            "history-notice"
+          ]
+        },
+        {
+          "id": "review-run-unavailable-comments-corrupt",
+          "name": "PR review, agent review unavailable, comments unreadable",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "detail",
+            "subtabs",
+            "summary",
+            "notice",
+            "list",
+            "diff",
+            "action",
+            "history-notice"
+          ]
+        },
+        {
+          "id": "review-conversation-comments-unavailable",
+          "name": "PR review, conversation, comments unavailable",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "detail",
+            "subtabs",
+            "list",
+            "notice",
+            "action",
+            "history-notice"
+          ]
+        },
+        {
+          "id": "review-threads-conflict",
+          "name": "PR review, threads could not be combined",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "detail",
+            "subtabs",
+            "summary",
+            "list",
+            "diff",
+            "action",
+            "notice"
+          ]
+        },
+        {
+          "id": "review-conversation-threads-conflict",
+          "name": "PR review, conversation, threads could not be combined",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "detail",
+            "subtabs",
+            "list",
+            "notice",
+            "action"
+          ]
+        },
+        {
+          "id": "review-ready-readonly-legacy",
+          "name": "PR review, legacy read-only review",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "detail",
+            "subtabs",
+            "summary",
+            "list",
+            "diff",
+            "unanchored"
+          ]
+        },
+        {
+          "id": "different-revision-findings-head",
+          "name": "PR review, different revision, findings, head moved",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "subtabs",
+            "detail",
+            "summary",
+            "notice",
+            "list",
+            "recorded",
+            "diff"
+          ]
+        },
+        {
+          "id": "different-revision-findings-base",
+          "name": "PR review, different revision, findings, base changed",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "subtabs",
+            "detail",
+            "summary",
+            "notice",
+            "list",
+            "recorded",
+            "diff"
+          ]
+        },
+        {
+          "id": "different-revision-no-findings",
+          "name": "PR review, different revision, no findings",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "subtabs",
+            "detail",
+            "summary",
+            "notice",
+            "diff"
+          ]
+        },
+        {
+          "id": "recorded-explain",
+          "name": "PR review, recorded change explanation",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "subtabs",
+            "detail",
+            "summary",
+            "diff"
+          ]
+        },
+        {
+          "id": "recorded-extra-fields",
+          "name": "PR review, recorded findings with optional fields",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "subtabs",
+            "detail",
+            "summary",
+            "list",
+            "diff"
+          ]
+        },
+        {
+          "id": "deleted-comment",
+          "name": "PR review, conversation, deleted comment",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "detail",
+            "subtabs",
+            "list"
+          ]
+        },
+        {
+          "id": "conversation-agent-summary",
+          "name": "PR review, conversation, agent summary",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "detail",
+            "subtabs",
+            "list"
+          ]
+        },
+        {
+          "id": "conversation-finding-discussion",
+          "name": "PR review, conversation, finding discussion",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "detail",
+            "subtabs",
+            "list"
+          ]
+        },
+        {
+          "id": "conversation-incomplete",
+          "name": "PR review, conversation, review history unreadable",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "detail",
+            "subtabs",
+            "notice",
+            "action",
+            "list"
+          ]
+        },
+        {
+          "id": "read-pending",
+          "name": "PR review, reading cached details",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "status"
+          ]
+        },
+        {
+          "id": "read-retained",
+          "name": "PR review, previous reading retained",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "subtabs",
+            "status",
+            "action",
+            "detail",
+            "summary",
+            "list",
+            "diff",
+            "unanchored"
+          ]
+        },
+        {
+          "id": "comments-only-unavailable",
+          "name": "PR review, comments unavailable",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "detail",
+            "subtabs",
+            "summary",
+            "notice",
+            "action",
+            "list",
+            "diff",
+            "unanchored"
+          ]
+        },
+        {
+          "id": "review-transport-failed",
+          "name": "PR review, hub not reached",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "notice",
+            "action"
+          ]
+        },
+        {
+          "id": "code-owner-unavailable",
+          "name": "PR review, Code unavailable on this hub",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "notice",
+            "action"
+          ]
+        },
+        {
+          "id": "diff-reading",
+          "name": "PR review, reading a file",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "subtabs",
+            "detail",
+            "summary",
+            "list",
+            "unanchored",
+            "diff",
+            "status"
+          ]
+        },
+        {
+          "id": "diff-unavailable",
+          "name": "PR review, file unavailable",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "subtabs",
+            "detail",
+            "summary",
+            "list",
+            "unanchored",
+            "diff",
+            "notice",
+            "action"
+          ]
+        },
+        {
+          "id": "diff-rejected",
+          "name": "PR review, file reading rejected",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "subtabs",
+            "detail",
+            "summary",
+            "list",
+            "unanchored",
+            "diff",
+            "notice"
+          ]
+        },
+        {
+          "id": "placement-refused",
+          "name": "PR review, findings not placed in the diff",
+          "regions": [
+            "nav",
+            "header",
+            "tabs",
+            "subtabs",
+            "detail",
+            "summary",
+            "list",
+            "unanchored",
+            "notice",
+            "diff"
+          ]
+        },
+        {
+          "id": "unknown",
+          "name": "Unknown state",
+          "regions": [
+            "notice"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "host-resources",
+      "file": "screens/host-resources.html",
+      "source": "09 Host resources.dc.html",
+      "fixtureKey": "data.hostResources",
+      "query": {
+        "state": "state",
+        "theme": "theme"
+      },
+      "defaultState": "live-healthy",
+      "ready": {
+        "attribute": "data-design-ready",
+        "dataset": "designReady",
+        "value": "true",
+        "neverOnFixtureError": true
+      },
+      "states": [
+        {
+          "id": "live-healthy",
+          "name": "Host resources, healthy",
+          "regions": [
+            "nav",
+            "header",
+            "memory",
+            "trend",
+            "cpu",
+            "disk",
+            "gate",
+            "jobs",
+            "previews",
+            "top"
+          ]
+        },
+        {
+          "id": "live-busy",
+          "name": "Host resources, busy",
+          "regions": [
+            "nav",
+            "header",
+            "memory",
+            "trend",
+            "cpu",
+            "disk",
+            "gate",
+            "jobs",
+            "previews",
+            "top"
+          ]
+        },
+        {
+          "id": "gate-holder-unknown",
+          "name": "Host resources, gate holder unknown",
+          "regions": [
+            "nav",
+            "header",
+            "memory",
+            "trend",
+            "cpu",
+            "disk",
+            "gate",
+            "jobs",
+            "previews",
+            "top"
+          ]
+        },
+        {
+          "id": "below-abort",
+          "name": "Host resources, below abort",
+          "regions": [
+            "nav",
+            "header",
+            "memory",
+            "trend",
+            "cpu",
+            "disk",
+            "gate",
+            "jobs",
+            "previews",
+            "top"
+          ]
+        },
+        {
+          "id": "lock-held-too-long",
+          "name": "Host resources, gate held too long",
+          "regions": [
+            "nav",
+            "header",
+            "memory",
+            "trend",
+            "cpu",
+            "disk",
+            "gate",
+            "jobs",
+            "previews",
+            "top"
+          ]
+        },
+        {
+          "id": "stale",
+          "name": "Host resources, stale",
+          "regions": [
+            "nav",
+            "header",
+            "memory",
+            "trend",
+            "cpu",
+            "disk",
+            "gate",
+            "jobs",
+            "previews",
+            "top"
+          ]
+        },
+        {
+          "id": "host-offline",
+          "name": "Host resources, host offline",
+          "regions": [
+            "nav",
+            "header",
+            "notice",
+            "memory",
+            "trend",
+            "cpu",
+            "disk",
+            "gate",
+            "jobs",
+            "previews",
+            "top"
+          ]
+        },
+        {
+          "id": "host-offline-never",
+          "name": "Host resources, no reading yet",
+          "regions": [
+            "nav",
+            "header",
+            "notice"
+          ]
+        },
+        {
+          "id": "section-unavailable",
+          "name": "Host resources, gate and agent names unavailable",
+          "regions": [
+            "nav",
+            "header",
+            "memory",
+            "trend",
+            "cpu",
+            "disk",
+            "gate",
+            "jobs",
+            "previews",
+            "top"
+          ]
+        },
+        {
+          "id": "warming-up",
+          "name": "Host resources, warming up",
+          "regions": [
+            "nav",
+            "header",
+            "memory",
+            "trend",
+            "cpu",
+            "disk",
+            "gate",
+            "jobs",
+            "previews",
+            "top"
+          ]
+        },
+        {
+          "id": "loading",
+          "name": "Host resources, loading",
+          "regions": [
+            "nav",
+            "header",
+            "memory",
+            "trend",
+            "cpu",
+            "disk",
+            "gate",
+            "jobs",
+            "previews",
+            "top"
+          ]
+        }
+      ]
+    }
+  ],
+  "sha256": {
+    "connect-home.html": "f305103fd35ae7ec73185a6ac867fc51f854d84ce9d6b90529e04ac575c5cf98",
+    "usage-limits.html": "02bbbdd7d08575b17b8d4d603fdac465247e6ebcdb59a392a8bd4cea03c45c31",
+    "fixture.json": "74b00983d71da024edf779a9471a72073851b0390b826c0d07e13e1ce9bc6b54",
+    "rly.css": "35e7a411e4fb4a422ebdaa33ef63e6d3a1480a5e8d30389d2b035025e636b1c6",
+    "README.md": "064a2a8f3ff61b6236f4d3da7384e2e07bffe3b00f9454ae384941ca7a6dc854",
+    "relay-creature-states.js": "808e8412c89fbe773d45e6fb544608932d69431b6cffdedc14cc253405cb5ac6",
+    "relay-chef-modern.js": "f4f5051e6b8a3d0a365c2d042a1adba7f1e14c425825ca9e3ffc455e27bdcd47",
+    "relay-screen-art.js": "1cf249020877889dd660402646e615a18531373ad70cd91affe5a436c0e8b65b",
+    "more-sheet.html": "8cd0fb9f30ff1895d4a83baec351ce329dc322ab2c65e2b1c8081530ba2b0b0f",
+    "usage-by-tool.html": "978b3834e74786a69394f9c8912857147bd06fd052b4117859d57996e50e95e4",
+    "fonts/geist-variable.woff2": "19f9c92546aa300c312235e3125af1b81394d8db9a4bc4a425cd5b641d2d54e1",
+    "fonts/geist-mono-variable.woff2": "684ad5b531f81d43c1e8c7038262d5db7cdc1f68006e04d6c7769efa8d33c8cc",
+    "fleet.html": "5e8726c751216d8c5af5c7e3a43ac3ba8f082af8007199df5acbaf0d2dee5029",
+    "for-you.html": "8970d75763a9c2f470178a0ad4168c79f069ab1c510f5549d1ee5ba7a84b10e5",
+    "chrome.css": "7a718ea0e12987880ca3bad6fe9de6810a49140ed72d80d311130269b583801d",
+    "code-review.html": "fe85aa3ece1c46a40aa41d8df0904aed04fb8ff34d464c68aa39c800511ec61b",
+    "host-resources.html": "d62bb74308bfbc75eb98f0ae77c4ea86a8d78c5445c49071c1c589ea2d62ab04"
+  },
+  "knownGaps": [],
+  "scripts": [
+    "screens/relay-chef-modern.js",
+    "screens/relay-creature-states.js",
+    "screens/relay-screen-art.js"
+  ],
+  "fonts": {
+    "display": "block",
+    "files": [
+      "screens/fonts/geist-variable.woff2",
+      "screens/fonts/geist-mono-variable.woff2"
+    ],
+    "readyRequires": "document.fonts.check(\"16px Geist\") === true"
+  },
+  "nav": {
+    "shipped": "installed-only",
+    "sidebar": [
+      "connect",
+      "fleet",
+      "|",
+      "code",
+      "usage"
+    ],
+    "phoneBar": [
+      "connect",
+      "fleet",
+      "code",
+      "usage",
+      "more"
+    ],
+    "hiddenUntilRegistered": [
+      "design",
+      "delivery",
+      "stacks",
+      "time"
+    ]
+  },
+  "styles": [
+    "rly.css",
+    "chrome.css"
+  ]
+}

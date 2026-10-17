@@ -1,0 +1,30 @@
+id: no-bare-commit-id-text
+language: tsx
+severity: error
+message: "Name a commit with <CommitLabel commit={…} /> (title and time); a commit id, short or full, tells a person nothing"
+rule:
+  any:
+    - pattern: $OBJ.$PROP.slice(0, $N)
+    - all:
+        - kind: jsx_expression
+        - not:
+            inside:
+              kind: jsx_attribute
+        - has:
+            kind: member_expression
+            has:
+              field: property
+              regex: "(?i)(commit|revision|raisedHead)$"
+constraints:
+  PROP:
+    regex: "(?i)(commit|revision|raisedHead)$"
+files:
+  - "packages/codecommit-web/src/client/**/*.tsx"
+  - "packages/review/src/**/*.tsx"
+  - "packages/herdr-hub/src/**/*.tsx"
+ignores:
+  - "**/generated/**"
+  - "**/vendor/**"
+note: |
+  The id stays reachable through the label's tooltip and copy button. Keys, queries and props that
+  pass an id along (commit={diff.headCommit}) are fine; rendering one as text is not.

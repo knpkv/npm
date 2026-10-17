@@ -1,9 +1,15 @@
 /** Read-only finding navigation. Severity grouping stays with the decoded thread projection. @module */
+import { useCommitWords } from "@knpkv/review/react"
 import { StateLabel } from "@knpkv/rly/primitives"
 import type { ReviewFindingRow, ReviewWorkspaceThreads } from "@knpkv/review"
 import { useEffect, useId, useState, type ReactElement, type ReactNode } from "react"
 import { reviewThreadElementId, type ReviewThreadTarget } from "../review-thread-target.js"
-import { reviewConfidenceWords, reviewDispositionText, reviewDispositionTones } from "./review-finding-words.js"
+import {
+  fixedCommit,
+  reviewConfidenceWords,
+  reviewDispositionText,
+  reviewDispositionTones
+} from "./review-finding-words.js"
 import styles from "./review-findings-index-view.module.css"
 
 export interface ReviewFindingsIndexViewProps {
@@ -39,7 +45,7 @@ function FindingLink({
   readonly row: ReviewFindingRow
 }): ReactElement {
   const anchor = thread.anchor
-  const disposition = reviewDispositionText(finding.disposition)
+  const disposition = reviewDispositionText(finding.disposition, useCommitWords(fixedCommit(finding.disposition)))
   return (
     <a
       className={styles.row}

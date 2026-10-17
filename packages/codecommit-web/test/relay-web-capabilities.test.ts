@@ -69,6 +69,7 @@ const unused = <A>(): Effect.Effect<A> => Effect.die("unused read-client operati
 
 const readClient = (current: ReadClient.CodeCommitPullRequestRevision): ReadClient.CodeCommitReadClientService => ({
   discoverAccount: () => unused(),
+  getCommit: () => Effect.die("unused getCommit"),
   getBlob: ({ blobId }) =>
     Effect.succeed(
       new ReadClient.CodeCommitBlobContent({

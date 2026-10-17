@@ -1,9 +1,15 @@
 /** Read-only finding prose from export 66. Recommendation is never treated as an executable patch. @module */
+import { CommitLabel, useCommitWords } from "@knpkv/review/react"
 import { StateLabel } from "@knpkv/rly/primitives"
 import type { ReviewFindingRow } from "@knpkv/review"
 import { useId, type ReactElement } from "react"
 import { reviewThreadElementId } from "../review-thread-target.js"
-import { reviewConfidenceWords, reviewDispositionText, reviewDispositionTones } from "./review-finding-words.js"
+import {
+  fixedCommit,
+  reviewConfidenceWords,
+  reviewDispositionText,
+  reviewDispositionTones
+} from "./review-finding-words.js"
 import styles from "./review-finding-card.module.css"
 
 export interface ReviewFindingCardProps {
@@ -21,7 +27,8 @@ export function ReviewFindingCard({ row: { finding, thread }, scope }: ReviewFin
       ? finding.disposition.note
       : null
   const disposition = reviewDispositionText(
-    finding.disposition._tag === "Dismissed" ? { ...finding.disposition, note: null } : finding.disposition
+    finding.disposition._tag === "Dismissed" ? { ...finding.disposition, note: null } : finding.disposition,
+    useCommitWords(fixedCommit(finding.disposition))
   )
   const why = [
     ...new Set([finding.summary, finding.why].filter((text) => text !== null).filter((text) => text.length > 0))
@@ -100,7 +107,7 @@ export function ReviewFindingCard({ row: { finding, thread }, scope }: ReviewFin
         <div className={styles.prose}>
           <h4>Suggested patch</h4>
           <small>
-            {finding.patch.path}, head {finding.patch.headRevision}
+            {finding.patch.path}, head <CommitLabel commit={finding.patch.headRevision} />
           </small>
           <pre className={styles.patch}>
             <code>{finding.patch.text}</code>

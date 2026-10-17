@@ -50,6 +50,7 @@ const codeCommitClient = (
         arn: "arn:aws:sts::123456789012:assumed-role/Developer/alice"
       })
     ),
+  getCommit: () => Effect.die("unused getCommit"),
   getBlob: () => Effect.die("unused"),
   getChangedFilesPage: () => Effect.die("unused"),
   getPullRequest: () => Effect.die("unused"),

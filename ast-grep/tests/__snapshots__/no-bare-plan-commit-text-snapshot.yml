@@ -1,0 +1,36 @@
+id: no-bare-plan-commit-text
+snapshots:
+  const short = source.head.slice(0, 7):
+    labels:
+      - source: source.head.slice(0, 7)
+        style: primary
+        start: 14
+        end: 37
+  const view = <span>base {source.base}</span>:
+    labels:
+      - source: "{source.base}"
+        style: primary
+        start: 24
+        end: 37
+      - source: base
+        style: secondary
+        start: 32
+        end: 36
+      - source: source.base
+        style: secondary
+        start: 25
+        end: 36
+  const view = <span>head {source.head}</span>:
+    labels:
+      - source: "{source.head}"
+        style: primary
+        start: 24
+        end: 37
+      - source: head
+        style: secondary
+        start: 32
+        end: 36
+      - source: source.head
+        style: secondary
+        start: 25
+        end: 36

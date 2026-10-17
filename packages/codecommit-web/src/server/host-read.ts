@@ -14,12 +14,29 @@ import { CachedPRToPullRequest } from "@knpkv/codecommit-core/PRService/internal
 import * as ReadClient from "@knpkv/codecommit-core/ReadClient.js"
 import type { ReviewRunReading } from "@knpkv/review"
 import { type CanvasLastLook, CanvasReading } from "@knpkv/review/canvas"
-import { Clock, Config, Context, Duration, Effect, Exit, Layer, Result, Schema, ScopedCache, Semaphore } from "effect"
+import {
+  Cache,
+  Clock,
+  Config,
+  Context,
+  Data,
+  DateTime,
+  Duration,
+  Effect,
+  Exit,
+  Layer,
+  Result,
+  Schema,
+  ScopedCache,
+  Semaphore
+} from "effect"
 import type { Scope } from "effect"
 import type * as Crypto from "effect/Crypto"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 import {
+  type CodeCommitQuery,
+  CodeCommitSummary,
   CodeDetail,
   CodeDiff,
   CodeDiffContent,
@@ -55,6 +72,11 @@ export interface CodeHostReads {
     query: CodeDiffContentQuery,
     caller: { readonly login: string }
   ) => Effect.Effect<CodeDiffContent, CodeHostReadError>
+  /** One commit's title and time, so the hub can name it instead of showing its id. */
+  readonly commit: (
+    query: CodeCommitQuery,
+    caller: { readonly login: string }
+  ) => Effect.Effect<CodeCommitSummary, CodeHostReadError>
   /** The canvas graph of the current revision; Building until every changed file is read. */
   readonly canvas: (
     ref: CodeReference,
@@ -63,6 +85,9 @@ export interface CodeHostReads {
 }
 
 const notRecorded = { _tag: "NotRecorded" } satisfies CanvasLastLook
+
+/** One caller's read of one commit, equal by value so the cache finds it again. */
+class CommitKey extends Data.Class<{ readonly caller: string; readonly commit: string; readonly ref: CodeReference }> {}
 
 /** Decode only recognized failure tags; provider causes remain private and are classified recursively. */
 const ProviderReadFailure = Schema.Union([
@@ -160,6 +185,27 @@ export const makeCodeHostReadsFromClient = Effect.fn("CodeHostReads.bind")(funct
         })
       )
   const boundedRead = boundedReadIn(concurrency)
+  // Commits never change, so a summary is kept for good, per caller so each read still passes that
+  // caller's grants once. Failures are not kept: a grant given afterwards takes effect at once.
+  const commits = yield* Cache.makeWith(
+    (key: CommitKey) =>
+      boundedRead(Effect.gen(function*() {
+        const row = yield* exact(key.ref)
+        const client = yield* clientFor({ login: key.caller })
+        const pullRequest = yield* Schema.decodeUnknownEffect(CachedPRToPullRequest)(row)
+        const summary = yield* client.getCommit({
+          account: { profile: pullRequest.account.profile, region: pullRequest.account.region },
+          repositoryName: pullRequest.repositoryName,
+          commitId: key.commit
+        })
+        return yield* Schema.decodeUnknownEffect(CodeCommitSummary)({
+          commitId: summary.commitId,
+          title: summary.title,
+          committedAt: DateTime.toEpochMillis(summary.committedAt)
+        })
+      })),
+    { capacity: 1024, timeToLive: (exit) => Exit.isSuccess(exit) ? Duration.infinity : Duration.zero }
+  )
 
   return {
     queue: Effect.fn("CodeHostReads.queue")(function*(query: CodeQueueQuery) {
@@ -273,6 +319,9 @@ export const makeCodeHostReadsFromClient = Effect.fn("CodeHostReads.bind")(funct
         }))
       }
     ),
+    commit: Effect.fn("CodeHostReads.commit")(function*(query: CodeCommitQuery, caller: { readonly login: string }) {
+      return yield* Cache.get(commits, new CommitKey({ caller: caller.login, commit: query.commit, ref: query.ref }))
+    }),
     canvas: Effect.fn("CodeHostReads.canvas")(function*(ref: CodeReference, caller: { readonly login: string }) {
       const { changedFiles, diff, pullRequest } = yield* boundedRead(Effect.gen(function*() {
         const row = yield* exact(ref)
@@ -377,6 +426,7 @@ export const makeCodeHostReads = Effect.fn("CodeHostReads.make")(function*(
     review: (ref, caller) => read((reads) => reads.review(ref, caller)),
     diff: (ref, caller) => read((reads) => reads.diff(ref, caller)),
     diffContent: (query, caller) => read((reads) => reads.diffContent(query, caller)),
+    commit: (query, caller) => read((reads) => reads.commit(query, caller)),
     canvas: (ref, caller) => read((reads) => reads.canvas(ref, caller))
   } satisfies CodeHostReads
 })

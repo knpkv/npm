@@ -1,1 +1,24 @@
-[]
+[
+  {
+    "screen": "review-canvas",
+    "state": "diff",
+    "viewport": 390,
+    "theme": "dark",
+    "region": "*",
+    "rule": "pixels",
+    "reason": "owner-decision",
+    "detail": "Text antialiasing only: every region box (header, list, card, action, nav) matches the reference to 1/64 px; the button labels, one text line and the nav icons rasterize about half a pixel differently at 390. Geometry and copy stay required.",
+    "decisionLink": "https://github.com/knpkv/npm/pull/1020#issuecomment-6239613334"
+  },
+  {
+    "screen": "review-canvas",
+    "state": "diff",
+    "viewport": 390,
+    "theme": "dark",
+    "region": "action",
+    "rule": "pixels",
+    "reason": "owner-decision",
+    "detail": "Text antialiasing only: every region box (header, list, card, action, nav) matches the reference to 1/64 px; the button labels, one text line and the nav icons rasterize about half a pixel differently at 390. Geometry and copy stay required.",
+    "decisionLink": "https://github.com/knpkv/npm/pull/1020#issuecomment-6239613334"
+  }
+]

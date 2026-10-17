@@ -1,5 +1,11 @@
 /** Synthetic read inputs shared by reference and live capture. No provider or write authority. @module */
-import { CodeDetail, CodeDiffContentResult, CodeQueue, CodeReviewResult } from "@knpkv/codecommit-web/host"
+import {
+  CodeCommitSummaryResult,
+  CodeDetail,
+  CodeDiffContentResult,
+  CodeQueue,
+  CodeReviewResult
+} from "@knpkv/codecommit-web/host"
 import { WorkSnapshots } from "@knpkv/herdr-work/model"
 import { BackendStatus, RelayEvent, SessionInfo } from "@knpkv/relay/wire"
 import { Schema } from "effect"
@@ -13,6 +19,64 @@ import { NeedsYouResult } from "../../src/module-needs-you.js"
 import type { ReviewState as ReviewFixtureState } from "./inventory.js"
 
 export const CODE_REFERENCE = "00000000-0000-4000-8000-000000000451"
+
+const CommitToken = /\{commit:([0-9a-f]{7,40})\}/gu
+
+const JsonText = Schema.fromJsonString(Schema.Json)
+
+/** Design copy names a commit as `{commit:a1b2c3d}`; the live readings carry the id itself. */
+export const untokenCommits = (value: Schema.Json): Schema.Json =>
+  Schema.decodeUnknownSync(JsonText)(Schema.encodeSync(JsonText)(value).replace(CommitToken, "$1"))
+
+export const DesignCommits = Schema.Record(
+  Schema.String,
+  Schema.Struct({
+    id: Schema.String.check(Schema.isPattern(/^[0-9a-f]{40}$/u)),
+    title: Schema.NonEmptyString,
+    at: Schema.String.check(Schema.isPattern(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/u))
+  })
+)
+
+/** A design commit: its short id, full id, title and commit time. */
+export interface DesignCommit {
+  readonly short: string
+  readonly id: string
+  readonly title: string
+  readonly committedAt: number
+}
+
+/**
+ * The commits a design names, timed on `day` when given (the reading's own day, so a label shows only the
+ * time, as the design draws it) and on the design's own date otherwise.
+ */
+export const designCommits = (
+  commits: typeof DesignCommits.Type | undefined,
+  day?: string
+): ReadonlyArray<DesignCommit> =>
+  commits === undefined ? [] : Object.entries(commits).map(
+    ([short, commit]) => ({
+      short,
+      id: commit.id,
+      title: commit.title,
+      committedAt: Date.parse(`${day ?? commit.at.slice(0, 10)}T${commit.at.slice(11)}:00.000Z`)
+    })
+  )
+
+const CodeReviewCommits = Schema.Struct({ codeReview: Schema.Struct({ commits: Schema.optionalKey(DesignCommits) }) })
+
+/** The /commit reading for a live id: the design commit it starts with, or none. */
+export const designCommitResult = (
+  commits: ReadonlyArray<DesignCommit>,
+  commit: string | null
+): CodeCommitSummaryResult | undefined => {
+  const found = commit === null ? undefined : commits.find((entry) => commit.startsWith(entry.short))
+  return found === undefined
+    ? undefined
+    : Schema.decodeUnknownSync(CodeCommitSummaryResult)({
+      _tag: "Ready",
+      commit: { commitId: found.id, title: found.title, committedAt: found.committedAt }
+    })
+}
 export type { ReviewState as ReviewFixtureState } from "./inventory.js"
 type RecordedRun = Extract<
   Extract<CodeReviewResult, { readonly _tag: "Ready" }>["reading"]["workspace"]["run"],
@@ -173,14 +237,15 @@ const Provenance = Schema.Tuple([
 const ReadingStamp = Schema.Struct({ at: ClockTime, head: Schema.NonEmptyString })
 
 const referenceReading = (data: Fixture["data"]) => {
-  const { approvals, review, shell, states } = Schema.decodeUnknownSync(ReferenceData)(data).codeReview
+  const { approvals, review, shell, states } = Schema.decodeUnknownSync(ReferenceData)(untokenCommits(data)).codeReview
   const legacy = Schema.decodeUnknownSync(LegacyVariant)(review.variants["ready-readonly-legacy"])
   const provenance = Schema.decodeUnknownSync(Provenance)(legacy.legacy.reviewerLine.split(", "))
   const raw = /^Reviewed (\d{2}:\d{2}), head (\S+)$/u.exec(legacy.summary.reviewed)
   const stamp = Schema.decodeUnknownSync(ReadingStamp)({ at: raw?.[1], head: raw?.[2] })
   // The synthetic reference's Sunday is 11 October 2026; no wall clock is consulted.
   const observedAt = Date.parse(`2026-10-11T${stamp.at}:00.000Z`)
-  return { review, shell, approvals, legacy, provenance, stamp, observedAt, states }
+  const commits = designCommits(Schema.decodeUnknownSync(CodeReviewCommits)(data).codeReview.commits)
+  return { review, shell, approvals, legacy, provenance, stamp, observedAt, states, commits }
 }
 
 /** Legacy snapshots contain prose and provenance, without inventing optional structured findings. */
@@ -523,7 +588,7 @@ export const makeShellReadings = (options: {
 }
 
 export const makeCodeReadings = (data: Fixture["data"], state: ReviewFixtureState = "review-ready-readonly-legacy") => {
-  const { approvals, observedAt, review, shell, states } = referenceReading(data)
+  const { approvals, commits, observedAt, review, shell, states } = referenceReading(data)
   const key = states[state]?.variant
   const saved = Schema.decodeUnknownSync(SavedState)(key === undefined ? undefined : review.variants[key])
   const updated = Schema.decodeUnknownSync(ClockTime)(
@@ -567,6 +632,7 @@ export const makeCodeReadings = (data: Fixture["data"], state: ReviewFixtureStat
     queue,
     detail,
     review: makeReviewFixture(data, state),
-    contents: makeReviewContents(data, state)
+    contents: makeReviewContents(data, state),
+    commits
   }
 }

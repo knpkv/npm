@@ -51,6 +51,26 @@ never an empty edge list. Decode transported readings with `onExcessProperty: "e
 `@knpkv/review/canvas/react` exports `ReviewCanvas`, a controlled Rly view; the host owns readings,
 navigation and the view state. Import `@knpkv/review/canvas/styles.css` once.
 
+## Commit labels
+
+`@knpkv/review/react` names a commit the way a person reads one: its title and commit time, never its id.
+
+```tsx
+import { CommitLabel, CommitSummaryProvider, useCommitSummaries } from "@knpkv/review/react"
+import "@knpkv/review/commit-label.css"
+
+const source = useCommitSummaries(loadCommit, reading.observedAt)
+<CommitSummaryProvider source={source}>
+  Reviewed 14:02, head <CommitLabel commit={headCommit} />
+</CommitSummaryProvider>
+```
+
+The label reads “Restore the draft on reconnect, 14:18”: the time alone for a commit made the day of `now`
+(the reading's time), the date too otherwise, never a relative time. The full id is in the tooltip and behind
+a Copy commit id button; pass `copy={false}` where the button cannot keep a 44px target, such as inside the
+shrunk canvas drawing. A failed load reads “Commit title unavailable” and keeps the copy button.
+`useCommitWords(commit)` gives the same words as plain text for places that take only text.
+
 ## Guided reviews
 
 `@knpkv/review/guide` owns the guide and findings schemas, chapter coverage, and

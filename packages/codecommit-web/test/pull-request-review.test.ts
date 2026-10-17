@@ -111,6 +111,7 @@ const makeReadClient = (
   currentChangedFile = changedFile
 ): ReadClient.CodeCommitReadClientService => ({
   discoverAccount: () => unused(),
+  getCommit: () => Effect.die("unused getCommit"),
   getBlob: ({ blobId }) =>
     Effect.succeed(
       new ReadClient.CodeCommitBlobContent({
