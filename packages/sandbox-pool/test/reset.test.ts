@@ -2,6 +2,7 @@ import { describe, expect, it } from "@effect/vitest"
 import { Effect, Redacted, Schema } from "effect"
 import {
   blockerFrom,
+  discoveryFailures,
   Nuke,
   nukeArgs,
   type NukeOutcome,
@@ -74,6 +75,38 @@ const harness = (outcomes: Array<NukeOutcome>, baseline?: ResetBlocked) => {
   return { steps, run }
 }
 
+/** aws-nuke's glob: `*` matches any run of characters, everything else literally. */
+const globMatches = (glob: string, value: string) =>
+  new RegExp(`^${glob.split("*").map((part) => part.replace(/[.+?^${}()|[\]\\]/g, "\\$&")).join(".*")}$`).test(value)
+
+/** An identifier filter as aws-nuke reads it: an exact string, or a glob on the identifier. */
+const IdentifierFilter = Schema.Union([
+  Schema.String,
+  Schema.Struct({
+    property: Schema.optionalKey(Schema.String),
+    type: Schema.optionalKey(Schema.String),
+    value: Schema.String
+  })
+])
+
+/** The generated config's filters for the pool account, decoded at the JSON boundary. */
+const accountFilters = () =>
+  Schema.decodeUnknownSync(Schema.Record(Schema.String, Schema.Array(IdentifierFilter)))(
+    JSON.parse(renderNukeConfig(contract, "111111111111")).accounts["111111111111"].filters
+  )
+
+/** Whether any filter of one resource type keeps a resource with this identifier. */
+const kept = (filters: ReadonlyArray<typeof IdentifierFilter.Type> | undefined, id: string) =>
+  (filters ?? []).some((filter) =>
+    Schema.is(Schema.String)(filter)
+      ? filter === id
+      : filter.property === undefined && filter.type === "glob" && globMatches(filter.value, id)
+  )
+
+/** A libnuke listing failure as aws-nuke logs it with colours off. */
+const listingFailed =
+  `time="2026-10-16T09:00:00Z" level=error msg="listing failed: AccessDenied" owner=eu-central-1 resource_type=S3Bucket`
+
 describe("sandbox reset", () => {
   it("nuke config keeps org-owned resources and blocks every non-pool account", () => {
     const config = JSON.parse(renderNukeConfig(contract, "111111111111"))
@@ -98,6 +131,18 @@ describe("sandbox reset", () => {
       value: "arn:aws:iam::*:policy/pool/PoolBoundary"
     })
     expect(filters.IAMSAMLProvider.length).toBeGreaterThan(0)
+  })
+
+  it("keeps the access and budget-action roles with their policies, and nothing else of the same kind", () => {
+    const filters = accountFilters()
+    for (const role of ["PoolAccessRole", "example-pool-budget-action"]) {
+      expect(kept(filters.IAMRole, role)).toBe(true)
+      expect(kept(filters.IAMRolePolicyAttachment, `${role} -> AdministratorAccess`)).toBe(true)
+      expect(kept(filters.IAMRolePolicy, `${role} -> inline`)).toBe(true)
+    }
+    expect(kept(filters.IAMRole, "scratch-role")).toBe(false)
+    expect(kept(filters.IAMRolePolicyAttachment, "scratch-role -> AdministratorAccess")).toBe(false)
+    expect(kept(filters.IAMRolePolicy, "scratch-role -> inline")).toBe(false)
   })
 
   it("summary parsing and blocker extraction", () => {
@@ -141,6 +186,49 @@ describe("sandbox reset", () => {
       expect(next.state._tag === "Quarantined" ? next.state.blocker : "").toMatch(
         /^verify: 1 resources still removable/
       )
+    }))
+
+  it.effect("a dry run that could not list a resource type quarantines before the live run", () =>
+    Effect.gen(function*() {
+      const h = harness([{ exitCode: 0, output: `${listingFailed}\n${summary(0)}` }])
+      const next = yield* h.run()
+      expect(next.state).toMatchObject({ _tag: "Quarantined", blocker: `dry run: incomplete scan: ${listingFailed}` })
+      expect(h.steps.filter((step) => step.startsWith("nuke"))).toEqual(["nuke dry"])
+    }))
+
+  it.effect("a verify run that could not list a resource type quarantines, though it counts nothing", () =>
+    Effect.gen(function*() {
+      const h = harness([
+        { exitCode: 0, output: scan(3) },
+        { exitCode: 0, output: scan(3) },
+        { exitCode: 0, output: [listingFailed, `us-east-1 - ${listingFailed}`, summary(0)].join("\n") }
+      ])
+      const next = yield* h.run()
+      expect(next.state).toMatchObject({
+        _tag: "Quarantined",
+        blocker: `verify: incomplete scan and 1 more: ${listingFailed}`
+      })
+    }))
+
+  it("finds error-level log fields whatever prefixes them, and in JSON logs", () => {
+    expect(discoveryFailures(`us-east-1 - ${listingFailed}`)).toEqual([`us-east-1 - ${listingFailed}`])
+    expect(discoveryFailures(`\u001b[31mERRO\u001b[0m level=fatal msg=x`)).toEqual(["ERRO level=fatal msg=x"])
+    const json = `{"level":"error","msg":"listing failed: AccessDenied","resource_type":"S3Bucket"}`
+    expect(discoveryFailures(json)).toEqual([json])
+    expect(discoveryFailures(`time="t" level=warning msg="level=error in a message"`)).toEqual([])
+  })
+
+  it.effect("info logs, live-run errors and resources named after errors do not block a complete scan", () =>
+    Effect.gen(function*() {
+      const errorNamed =
+        `eu-central-1 - S3Bucket - s3://error-logs - [Name: "level=error"] - filtered: filtered by config`
+      const info = `time="2026-10-16T09:00:00Z" level=info msg="scan complete"`
+      const h = harness([
+        { exitCode: 0, output: [info, scan(2)].join("\n") },
+        { exitCode: 0, output: [listingFailed, scan(2)].join("\n") },
+        { exitCode: 0, output: [info, errorNamed, summary(0)].join("\n") }
+      ])
+      expect((yield* h.run()).state._tag).toBe("Available")
     }))
 
   it.effect("a failing live run quarantines and skips verify", () =>
@@ -188,7 +276,9 @@ describe("sandbox reset", () => {
       "/tmp/c.yaml",
       "--no-prompt",
       "--prompt-delay",
-      "3"
+      "3",
+      "--log-disable-colors",
+      "--log-full-timestamp"
     ])
     expect(nukeArgs("/tmp/c.yaml", true).slice(-1)).toEqual(["--no-dry-run"])
   })

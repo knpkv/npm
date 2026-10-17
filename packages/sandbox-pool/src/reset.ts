@@ -1,5 +1,5 @@
 import { Context, DateTime, Effect, type Redacted, Schema } from "effect"
-import { protectedListed, wouldRemove } from "./guard.js"
+import { discoveryFailures, protectedListed, wouldRemove } from "./guard.js"
 import { InvalidTransition, resetFailed, resetSucceeded, type RunId, type Sandbox, StaleRun } from "./lease.js"
 import type { PoolContract } from "./pool.js"
 
@@ -63,8 +63,10 @@ export class Nuke extends Context.Service<
 
 /**
  * aws-nuke v3 config. JSON is valid YAML, so the config is rendered as JSON.
- * Kept: Identity Center roles and SAML provider, the contract's access role,
- * service-linked roles, its boundary, and the org-owned CloudTrail/GuardDuty/Config/Security Hub.
+ * Kept: Identity Center roles and SAML provider, the contract's access and
+ * budget-action roles with their policies, service-linked roles, its boundary,
+ * and the org-owned CloudTrail/GuardDuty/Config/Security Hub. aws-nuke 3.68.3
+ * has no account-alias or Organizations policy type, so neither needs a filter.
  */
 export const renderNukeConfig = (contract: PoolContract, accountId: string): string =>
   JSON.stringify(
@@ -89,13 +91,19 @@ export const renderNukeConfig = (contract: PoolContract, accountId: string): str
               { property: "Path", type: "glob", value: "/aws-service-role/*" },
               { type: "glob", value: "AWSReservedSSO_*" },
               contract.accountAccessRole,
+              contract.budgetActionRole,
               { type: "glob", value: "stacksets-exec-*" }
             ],
             IAMRolePolicyAttachment: [
               { type: "glob", value: `${contract.accountAccessRole} -> *` },
+              { type: "glob", value: `${contract.budgetActionRole} -> *` },
               { type: "glob", value: "AWSReservedSSO_* -> *" }
             ],
-            IAMRolePolicy: [{ type: "glob", value: "AWSReservedSSO_*" }],
+            IAMRolePolicy: [
+              { type: "glob", value: "AWSReservedSSO_*" },
+              { type: "glob", value: `${contract.accountAccessRole} -> *` },
+              { type: "glob", value: `${contract.budgetActionRole} -> *` }
+            ],
             IAMPolicy: [{
               type: "glob",
               value: `arn:aws:iam::*:policy${contract.boundaryPath}${contract.boundaryName}`
@@ -172,11 +180,24 @@ const requireNothingProtected = (contract: PoolContract, output: string): Effect
   )
 }
 
-const nukeStep = (step: string, outcome: NukeOutcome, expectRemovable?: 0): Effect.Effect<void, ResetBlocked> => {
+/** A scan run (dry or verify) must have listed every resource type; a live run is checked by its verify. */
+const nukeStep = (
+  step: string,
+  outcome: NukeOutcome,
+  scan: { readonly complete: boolean; readonly removable?: 0 }
+): Effect.Effect<void, ResetBlocked> => {
   const count = removable(outcome.output)
   if (outcome.exitCode !== 0 || count === undefined) {
     return Effect.fail(new ResetBlocked({ step, detail: blockerFrom(outcome.output) }))
   }
+  const [failure, ...more] = scan.complete ? discoveryFailures(outcome.output) : []
+  if (failure !== undefined) {
+    const rest = more.length > 0 ? ` and ${more.length} more` : ""
+    return Effect.fail(
+      new ResetBlocked({ step, detail: `incomplete scan${rest}: ${failure}`.slice(0, 500) })
+    )
+  }
+  const expectRemovable = scan.removable
   return expectRemovable !== undefined && count !== expectRemovable
     ? Effect.fail(
       new ResetBlocked({ step, detail: `${count} resources still removable. ${blockerFrom(outcome.output)}` })
@@ -201,10 +222,10 @@ export const resetAccount = Effect.fn("SandboxPool.resetAccount")(function*(
     yield* access.ensureBaseline(sandbox.accountId, session)
     const configPath = yield* nuke.writeConfig(sandbox.accountId, renderNukeConfig(contract, sandbox.accountId))
     const dryRun = yield* nuke.run({ configPath, session, live: false })
-    yield* nukeStep("dry run", dryRun)
+    yield* nukeStep("dry run", dryRun, { complete: true })
     yield* requireNothingProtected(contract, dryRun.output)
-    yield* nukeStep("nuke", yield* nuke.run({ configPath, session, live: true }))
-    yield* nukeStep("verify", yield* nuke.run({ configPath, session, live: false }), 0)
+    yield* nukeStep("nuke", yield* nuke.run({ configPath, session, live: true }), { complete: false })
+    yield* nukeStep("verify", yield* nuke.run({ configPath, session, live: false }), { complete: true, removable: 0 })
     // The nuke must not have touched the baseline; re-assert it.
     yield* access.ensureBaseline(sandbox.accountId, session)
   })
@@ -218,6 +239,7 @@ export const resetAccount = Effect.fn("SandboxPool.resetAccount")(function*(
 /**
  * aws-nuke v3 arguments for a host's `Nuke.run`. Without `--no-dry-run` it only
  * lists. The binary refuses a prompt delay under 3 seconds (seen with 3.68.3).
+ * Uncoloured, full-timestamp logs keep `discoveryFailures` on one line shape.
  */
 export const nukeArgs = (configPath: string, live: boolean): ReadonlyArray<string> => [
   "run",
@@ -226,5 +248,7 @@ export const nukeArgs = (configPath: string, live: boolean): ReadonlyArray<strin
   "--no-prompt",
   "--prompt-delay",
   "3",
+  "--log-disable-colors",
+  "--log-full-timestamp",
   ...(live ? ["--no-dry-run"] : [])
 ]

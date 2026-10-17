@@ -41,6 +41,25 @@ const terminalStyle = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g")
 /** One output line without terminal colour codes or a trailing carriage return. */
 const plainLine = (line: string): string => line.replace(terminalStyle, "").trim()
 
+/**
+ * Error-level log lines: a resource type aws-nuke could not list. The run can
+ * still exit 0 with a clean summary, so a scan with one is incomplete. Fails
+ * closed on a `level=error|fatal|panic` field anywhere in the line, whatever
+ * prefixes it, but not inside a quoted value or a resource's `[...]`
+ * properties, so a resource whose name or properties say "level=error" is not
+ * one. An unquoted identifier can still contain `=` (IAM names allow it), so a
+ * resource named `level=error` quarantines a clean account: the safe direction.
+ * Colours are off (see `nukeArgs` in reset.ts); JSON logs are matched too.
+ */
+const logLevel = /(?:^|\s)level=(?:error|fatal|panic)(?:\s|$)|"level":"(?:error|fatal|panic)"/
+
+/** The line without quoted values or bracketed properties, which resources and messages control. */
+const logFields = (line: string): string => line.replace(/\[[^\]]*\]/g, " ").replace(/"(?:[^"\\]|\\.)*"/g, "\"\"")
+
+/** Every line of a run that reports failed discovery, colour codes removed. */
+export const discoveryFailures = (output: string): ReadonlyArray<string> =>
+  output.split("\n").map(plainLine).filter((line) => logLevel.test(line.startsWith("{") ? line : logFields(line)))
+
 /** The resources an aws-nuke run lists for removal, one line each, colour codes removed. */
 export const wouldRemove = (output: string): ReadonlyArray<string> =>
   output
