@@ -168,7 +168,7 @@ The resources superapp browser cases run inventory, theme and geometry checks wi
 
 ### Stacks
 
-`#stacks/overview` lists the alchemy stacks that alchemy-console discovers on the credential host, grouped by app, with each stage's resource count and latest CI-published plan. `#stacks/stack?id=…` shows one stage: its Activity (last plan, with a link to the CI run that published it), and Resources, State, Outputs and Plan tabs built from alchemy-console's exported views. The pages are read-only; the only outbound links are CI runs.
+`#stacks/overview` lists the alchemy stacks that alchemy-console discovers on the credential host, grouped by app, with each stage's resource count and latest CI-published plan. `?id=…#stacks/stack` shows one stage: its Activity (last plan, with a link to the CI run that published it), and Resources, State, Outputs and Plan tabs built from alchemy-console's exported views. The pages are read-only; the only outbound links are CI runs.
 
 Set `RELAY_STACKS_HOST` to the host that holds the AWS profiles. Only that host's hub builds the reader and answers `GET /v1/modules/stacks/{overview,stack,plan}`. Any other hub, a missing setting, or a reader that can't start answers `Unavailable` with its reason, and the page names the fix. Paths, profiles and credentials never leave the host; only alchemy-console's `./host` result schemas cross the API. Last apply, Drift and Gate show "Not checked yet" until those readings exist.
 

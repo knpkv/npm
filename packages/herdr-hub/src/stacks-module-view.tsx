@@ -401,9 +401,17 @@ const OverviewPage = ({
     }
     if (result._tag === "Failed") return <ProblemPanel problem={{ _tag: "Failed", reason: result.reason }} />
     const stacks = result.list.stacks
+    const failedSources = [...new Set(result.list.issues.map((issue) => `${issue.source}: ${issue.reason}`))]
+    const sourcesNotice = (ending: string) =>
+      failedSources.length === 0 ? null : (
+        <Notice tone="caution">{`Some sources couldn’t be read (${failedSources.join(", ")}). ${ending}`}</Notice>
+      )
     if (stacks.length === 0) {
+      // An unreadable source must not read as an empty inventory.
       return (
-        <StateCard eyebrow="No stacks" title="No alchemy stacks found under this host’s projects." tone="neutral" />
+        sourcesNotice("No stacks could be listed.") ?? (
+          <StateCard eyebrow="No stacks" title="No alchemy stacks found under this host’s projects." tone="neutral" />
+        )
       )
     }
     const apps = new Set(stacks.map((stack) => stack.app)).size
@@ -417,11 +425,7 @@ const OverviewPage = ({
           {attention === 0 ? "." : `, ${attention} ${attention === 1 ? "needs" : "need"} attention.`}
         </p>
         {partial === null ? null : <Notice tone="neutral">{partial}</Notice>}
-        {result.list.issues.length === 0 ? null : (
-          <Notice tone="caution">
-            {`Some sources couldn’t be read (${[...new Set(result.list.issues.map((issue) => `${issue.source}: ${issue.reason}`))].join(", ")}). Stacks that could be read are listed.`}
-          </Notice>
-        )}
+        {sourcesNotice("Stacks that could be read are listed.")}
         <OverviewTable active={mount.active} reads={reads} stacks={stacks} />
       </div>
     )

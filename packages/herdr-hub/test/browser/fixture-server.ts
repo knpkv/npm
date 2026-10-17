@@ -15,7 +15,8 @@ const bundle = await build({
     "connect-controls": "test/browser/connect-controls-entry.tsx"
   },
   format: "iife",
-  loader: { ".woff2": "file" },
+  // Module stylesheets carry SVG art; the hub build inlines it the same way.
+  loader: { ".svg": "dataurl", ".woff2": "file" },
   outdir: "fixture-out",
   platform: "browser",
   target: BROWSER_TARGET,

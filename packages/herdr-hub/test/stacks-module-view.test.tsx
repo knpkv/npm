@@ -178,6 +178,20 @@ describe("Stacks module pages", { concurrent: false }, () => {
     expect(activity?.textContent).not.toContain("UTC")
   })
 
+  it("shows source failures, not an empty inventory, when discovery found nothing and some sources failed", async () => {
+    await render(
+      reads({
+        overview: Effect.succeed({
+          _tag: "Ready",
+          list: { stacks: [], issues: [{ source: "s3", reason: "authentication" }] }
+        })
+      }),
+      "overview"
+    )
+    expect(text()).toContain("Some sources couldn’t be read (s3: authentication).")
+    expect(text()).not.toContain("No alchemy stacks found")
+  })
+
   it("names the stacks that couldn’t be read", async () => {
     await render(reads(), "overview")
     expect(text()).toContain("site prod couldn’t be read, so its resources read Unknown. The other stacks were read.")
