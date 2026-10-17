@@ -6,6 +6,7 @@ import * as Effect from "effect/Effect"
 import * as HttpClient from "effect/http/HttpClient"
 import * as Layer from "effect/Layer"
 import * as Predicate from "effect/Predicate"
+import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
 
 import type {
@@ -22,6 +23,7 @@ import {
 import { CodePipelineReadClient } from "../plugins/codepipeline/CodePipelineReadClient.js"
 import type { CodePipelineNamePage } from "../plugins/codepipeline/CodePipelineReadClient.js"
 import type { CodePipelineProviderFailure } from "../plugins/codepipeline/CodePipelineReadProvider.js"
+import { awsRegionDiscoveryLayer } from "./awsRegionDiscovery.js"
 
 const MAXIMUM_RESOURCE_NAMES = 20
 const MAXIMUM_PROVIDER_PAGES = 5
@@ -61,6 +63,14 @@ const hasAwsTag = (cause: unknown, tags: ReadonlyArray<string>): boolean =>
 
 const isAuthorizationCause = (cause: unknown): boolean =>
   hasAwsTag(cause, ["AccessDenied", "AccessDeniedException", "UnauthorizedException"])
+
+/** AWS names the policy type in an SCP denial: "… with an explicit deny in a service control policy". */
+const isServiceControlPolicyDenial = (failure: CodeCommit.CodeCommitReadError | AwsResourcePaginationFailure) =>
+  Predicate.isTagged(failure, "AwsApiError") &&
+  isAuthorizationCause(failure.cause) &&
+  Predicate.hasProperty(failure.cause, "message") &&
+  Predicate.isString(failure.cause.message) &&
+  failure.cause.message.includes("service control policy")
 
 const isAuthenticationCause = (cause: unknown): boolean =>
   isCredentialInvalidCause(cause) || hasAwsTag(cause, ["CredentialsProviderError"])
@@ -227,11 +237,15 @@ export const makeAwsResourceDiscovery = Effect.fn("AwsResourceDiscovery.make")(f
       region: request.region,
       operationTimeoutMillis: OPERATION_TIMEOUT_MILLIS
     }
+    const deniedByPolicy = yield* Ref.make(false)
     const services = yield* Effect.all(
       {
         codeCommit: collectCodeCommitRepositories(codeCommit, account).pipe(
           Effect.matchEffect({
-            onFailure: (failure) => failed(request.profile, "codecommit", codeCommitFailureClass(failure), failure),
+            onFailure: (failure) =>
+              Ref.set(deniedByPolicy, isServiceControlPolicyDenial(failure)).pipe(
+                Effect.andThen(failed(request.profile, "codecommit", codeCommitFailureClass(failure), failure))
+              ),
             onSuccess: (collection) => Effect.succeed(available(collection))
           })
         ),
@@ -244,7 +258,13 @@ export const makeAwsResourceDiscovery = Effect.fn("AwsResourceDiscovery.make")(f
       },
       { concurrency: "unbounded" }
     )
-    return { accountId: identity.accountId, ...services }
+    // An SCP region allowlist denies every regional service: both lists fail on authorization.
+    const regionDenied = (yield* Ref.get(deniedByPolicy)) &&
+      services.codePipeline._tag === "failed" &&
+      services.codePipeline.failureClass === "authorization"
+    const response: AwsResourceDiscoveryResponse = { accountId: identity.accountId, ...services }
+    const denied: AwsResourceDiscoveryResponse = { ...response, regionDenied: true }
+    return regionDenied ? denied : response
   })
   return AwsResourceDiscovery.of({ discover })
 })
@@ -266,16 +286,23 @@ const discoveryClients = (
     CodePipelineReadClient.live
   )
 
-/** Production AWS discovery with only CodeCommit identity and repository calls on a dedicated transport. */
+/**
+ * Production AWS discovery with only CodeCommit identity and repository calls on a dedicated transport.
+ * Region discovery reads `account:ListRegions` on that same transport.
+ */
 export const awsResourceDiscoveryLayerWithCodeCommitHttpClient = (
   codeCommitHttpClient: HttpClient.HttpClient,
   codeCommitAwsConfiguration?: Layer.Layer<AwsClientConfig.AwsClientConfig>
 ) =>
-  Layer.effect(AwsResourceDiscovery, makeAwsResourceDiscovery()).pipe(
-    Layer.provide(discoveryClients(codeCommitHttpClient, codeCommitAwsConfiguration))
+  Layer.merge(
+    Layer.effect(AwsResourceDiscovery, makeAwsResourceDiscovery()).pipe(
+      Layer.provide(discoveryClients(codeCommitHttpClient, codeCommitAwsConfiguration))
+    ),
+    awsRegionDiscoveryLayer.pipe(Layer.provide(Layer.succeed(HttpClient.HttpClient, codeCommitHttpClient)))
   )
 
-/** Production AWS discovery layer with bounded provider timeouts. */
-export const awsResourceDiscoveryLayer = Layer.effect(AwsResourceDiscovery, makeAwsResourceDiscovery()).pipe(
-  Layer.provide(discoveryClients())
+/** Production AWS discovery layer with bounded provider timeouts, and region discovery beside it. */
+export const awsResourceDiscoveryLayer = Layer.merge(
+  Layer.effect(AwsResourceDiscovery, makeAwsResourceDiscovery()).pipe(Layer.provide(discoveryClients())),
+  awsRegionDiscoveryLayer
 )

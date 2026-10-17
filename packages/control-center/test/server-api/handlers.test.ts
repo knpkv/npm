@@ -1890,6 +1890,38 @@ describe("Control Center API handlers", () => {
       assert.notInclude(JSON.stringify(result), "credential")
     }))
 
+  it.effect("lists a profile's enabled AWS regions through the owner mutation boundary", () =>
+    Effect.gen(function*() {
+      const plugins = PluginAdministration.of({
+        configuration: () => Effect.die("not used"),
+        configurationMetadata: () => Effect.die("not used"),
+        discoverAwsRegions: (request) => {
+          assert.deepStrictEqual(request, { profile: "production" })
+          return Effect.succeed(["eu-central-1", "eu-west-1"])
+        },
+        health: () => Effect.die("not used"),
+        list: () => Effect.die("not used"),
+        patchConfiguration: () => Effect.die("not used"),
+        testConnection: () => Effect.die("not used")
+      })
+      const handler = pluginHandlersLayer.pipe(
+        Layer.provide(sessionMiddlewareLayer),
+        Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(Layer.succeed(PluginAdministration, plugins))
+      )
+      const result = yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["plugins"])
+        return yield* client.plugins.discoverAwsRegions({ payload: { profile: "production" } })
+      }).pipe(Effect.provide([
+        NodeHttpServer.layerHttpServices,
+        mutationMiddlewareLayer,
+        sessionMiddlewareLayer,
+        handler
+      ]))
+
+      assert.deepStrictEqual(result, ["eu-central-1", "eu-west-1"])
+    }))
+
   it.effect("discovers secret-free Atlassian OAuth profile metadata for workspace owners", () =>
     Effect.gen(function*() {
       const expected: AtlassianProfileDiscoveryResponse = [{

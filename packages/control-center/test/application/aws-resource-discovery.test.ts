@@ -309,6 +309,50 @@ describe("AWS resource discovery", () => {
       })
     ))
 
+  // A pool account's region allowlist is an SCP; AWS names it in the denial, so the form can say the region isn't allowed.
+  describe("a region denied by policy", () => {
+    const denied = (message: string) =>
+      codeCommitClient({
+        listRepositoriesPage: ({ account }) =>
+          Effect.fail(
+            new AwsApiError({
+              operation: "listRepositoriesPage",
+              profile: account.profile,
+              region: account.region,
+              cause: { _tag: "AccessDeniedException", message }
+            })
+          )
+      })
+    const pipelinesDenied = codePipelineClient({
+      listPipelinesPage: () => Effect.fail(new PluginAuthorizationFailure({ operation: "list-pipelines" }))
+    })
+
+    it.effect("is reported when both services are denied by a service control policy", () =>
+      runDiscovery(
+        denied(
+          "User: arn:aws:sts::123456789012:assumed-role/Developer/x is not authorized to perform: codecommit:ListRepositories with an explicit deny in a service control policy"
+        ),
+        pipelinesDenied,
+        Effect.gen(function*() {
+          const discovery = yield* AwsResourceDiscovery
+          const result = yield* discovery.discover(request)
+          assert.strictEqual(result.regionDenied, true)
+          assert.deepStrictEqual(result.codeCommit, { _tag: "failed", failureClass: "authorization" })
+        })
+      ))
+
+    it.effect("is not reported for an ordinary IAM denial", () =>
+      runDiscovery(
+        denied("User is not authorized to perform: codecommit:ListRepositories"),
+        pipelinesDenied,
+        Effect.gen(function*() {
+          const discovery = yield* AwsResourceDiscovery
+          const result = yield* discovery.discover(request)
+          assert.notProperty(result, "regionDenied")
+        })
+      ))
+  })
+
   it.effect("redacts a typed CodePipeline permission failure independently", () =>
     runDiscovery(
       codeCommitClient({ listRepositoriesPage: () => Effect.succeed(repositoryPage(["payments"])) }),

@@ -557,6 +557,23 @@ export const pluginHandlersLayer = HttpApiBuilder.group(
               ApplicationServiceUnavailable: mapApplicationUnavailable
             }))
           }))
+        .handle("discoverAwsRegions", ({ payload }) =>
+          Effect.gen(function*() {
+            const session = yield* CurrentSession
+            if (session.permission !== "workspace-owner") {
+              return yield* Effect.flatMap(forbiddenApiError, Effect.fail)
+            }
+            const discoverAwsRegions = plugins.discoverAwsRegions
+            if (discoverAwsRegions === undefined) {
+              return yield* Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
+            }
+            return yield* discoverAwsRegions(payload).pipe(Effect.catchTags({
+              ApplicationAwsSignInRequired: mapApplicationAwsSignInRequired,
+              ApplicationInvalidRequest: mapApplicationInvalidRequest,
+              ApplicationRateLimited: mapApplicationRateLimited,
+              ApplicationServiceUnavailable: mapApplicationUnavailable
+            }))
+          }))
         .handle("discoverAtlassianProfiles", () =>
           Effect.gen(function*() {
             const session = yield* CurrentSession
