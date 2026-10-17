@@ -253,15 +253,61 @@ const renderAnonymousServices = async (transport: ConnectionTestTransport): Prom
   return host
 }
 
-const setControlValue = async (control: HTMLInputElement | HTMLTextAreaElement, value: string): Promise<void> => {
-  const prototype = control.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
+type FormControl = HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement
+
+const isFormControl = (element: Element | null): element is FormControl =>
+  element !== null && ["INPUT", "SELECT", "TEXTAREA"].includes(element.tagName)
+
+const isSelect = (control: FormControl): control is HTMLSelectElement => control.tagName === "SELECT"
+
+const isTextarea = (control: FormControl): control is HTMLTextAreaElement => control.tagName === "TEXTAREA"
+
+/** Set a control's value the way a user would, so React sees an input (text) or change (select) event. */
+const setControlValue = async (control: FormControl, value: string): Promise<void> => {
+  const prototype = isSelect(control)
+    ? HTMLSelectElement.prototype
+    : isTextarea(control)
+      ? HTMLTextAreaElement.prototype
+      : HTMLInputElement.prototype
   const setValue = Object.getOwnPropertyDescriptor(prototype, "value")?.set
   if (setValue === undefined) throw new Error("Expected the control value setter")
   await act(async () => {
     setValue.call(control, value)
-    control.dispatchEvent(new Event("input", { bubbles: true }))
+    control.dispatchEvent(new Event(isSelect(control) ? "change" : "input", { bubbles: true }))
   })
 }
+
+/** The AWS setup control whose visible label is exactly `label`. */
+const awsControl = (host: HTMLElement, label: string): FormControl => {
+  const element = [...host.querySelectorAll("label")].find(({ textContent }) => textContent === label)
+  const control = element === undefined ? null : host.ownerDocument.getElementById(element.htmlFor)
+  if (!isFormControl(control)) throw new Error(`Expected the AWS setup control labelled ${label}`)
+  return control
+}
+
+const awsSelect = (host: HTMLElement, label: string): HTMLSelectElement => {
+  const control = awsControl(host, label)
+  if (!isSelect(control)) throw new Error(`Expected ${label} to be a select`)
+  return control
+}
+
+const buttonNamed = (host: HTMLElement, text: string): HTMLButtonElement | undefined =>
+  [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) => textContent?.includes(text))
+
+/** Open AWS manual name entry (closed by default) and return the textarea labelled `label`. */
+const awsManualNames = async (
+  host: HTMLElement,
+  label: "Pipeline names" | "Repository names"
+): Promise<FormControl> => {
+  const open = buttonNamed(host, "Enter resource names manually")
+  if (open !== undefined) await act(async () => open.click())
+  return awsControl(host, label)
+}
+
+const awsFollowButton = (host: HTMLElement): HTMLButtonElement | undefined =>
+  [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+    /^Follow \d+ resources?$/u.test(textContent ?? "")
+  )
 
 const successfulCreate: ConnectionTestTransport["create"] = (request) =>
   Promise.resolve(
@@ -846,14 +892,12 @@ describe("ServicesPage connection tests", () => {
     await act(async () => undefined)
 
     expect(discoverAwsProfiles).toHaveBeenCalledWith(expect.any(AbortSignal))
-    expect(host.querySelectorAll("datalist option")).toHaveLength(2)
-    const profile = host.querySelector<HTMLInputElement>('input[list="aws-account-profiles"]')
-    expect(profile).not.toBeNull()
-    if (profile !== null) {
-      await setControlValue(profile, "production")
-    }
-    expect([...host.querySelectorAll<HTMLInputElement>("input")].map(({ value }) => value)).toContain("production")
-    expect([...host.querySelectorAll<HTMLInputElement>("input")].map(({ value }) => value)).toContain("eu-west-1")
+    const profile = awsSelect(host, "AWS profile")
+    expect([...profile.options].map(({ value }) => value)).toEqual(["default", "production"])
+    expect(profile.value).toBe("default")
+    await setControlValue(profile, "production")
+    expect(awsSelect(host, "AWS profile").value).toBe("production")
+    expect(awsControl(host, "AWS region").value).toBe("eu-west-1")
     const discover = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
       textContent?.includes("Test & discover")
     )
@@ -1551,13 +1595,11 @@ describe("ServicesPage connection tests", () => {
     )
     await act(async () => addRepository?.click())
     expect(host.textContent).not.toContain("Needs correction")
-    const region = host.querySelectorAll<HTMLInputElement>("input")[2]
+    const region = awsControl(host, "AWS region")
     if (region !== undefined) await setControlValue(region, "eu-west-1")
-    const repositories = host.querySelectorAll<HTMLTextAreaElement>("textarea")[0]
+    const repositories = await awsManualNames(host, "Repository names")
     if (repositories !== undefined) await setControlValue(repositories, "risk-engine")
-    const submit = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
-      textContent?.includes("Connect AWS account")
-    )
+    const submit = awsFollowButton(host)
     await act(async () => {
       submit?.click()
       await Promise.resolve()
@@ -1603,13 +1645,11 @@ describe("ServicesPage connection tests", () => {
     }
     const host = await renderServices(transport, "/services?enable=codecommit")
     await act(async () => undefined)
-    const region = host.querySelectorAll<HTMLInputElement>("input")[2]
+    const region = awsControl(host, "AWS region")
     if (region !== undefined) await setControlValue(region, "eu-west-1")
-    const repositories = host.querySelectorAll<HTMLTextAreaElement>("textarea")[0]
+    const repositories = await awsManualNames(host, "Repository names")
     if (repositories !== undefined) await setControlValue(repositories, "payments-api")
-    const firstSubmit = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
-      textContent?.includes("Connect AWS account")
-    )
+    const firstSubmit = awsFollowButton(host)
     await act(async () => {
       firstSubmit?.click()
       await Promise.resolve()
@@ -1620,13 +1660,11 @@ describe("ServicesPage connection tests", () => {
       ({ textContent }) => textContent === "Configure AWS account"
     )
     await act(async () => configurePipeline?.click())
-    const nextRegion = host.querySelectorAll<HTMLInputElement>("input")[2]
+    const nextRegion = awsControl(host, "AWS region")
     if (nextRegion !== undefined) await setControlValue(nextRegion, "eu-west-1")
-    const pipelines = host.querySelectorAll<HTMLTextAreaElement>("textarea")[1]
+    const pipelines = await awsManualNames(host, "Pipeline names")
     if (pipelines !== undefined) await setControlValue(pipelines, "payments-release")
-    const secondSubmit = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
-      textContent?.includes("Connect AWS account")
-    )
+    const secondSubmit = awsFollowButton(host)
     await act(async () => {
       secondSubmit?.click()
       await Promise.resolve()
@@ -1655,13 +1693,11 @@ describe("ServicesPage connection tests", () => {
     }
     const host = await renderServices(transport, "/services?enable=codecommit")
     await act(async () => undefined)
-    const region = host.querySelectorAll<HTMLInputElement>("input")[2]
+    const region = awsControl(host, "AWS region")
     if (region !== undefined) await setControlValue(region, "eu-west-1")
-    const repositories = host.querySelectorAll<HTMLTextAreaElement>("textarea")[0]
+    const repositories = await awsManualNames(host, "Repository names")
     if (repositories !== undefined) await setControlValue(repositories, "payments-api")
-    const submit = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
-      textContent?.includes("Connect AWS account")
-    )
+    const submit = awsFollowButton(host)
     await act(async () => {
       submit?.click()
       await Promise.resolve()
@@ -2674,9 +2710,8 @@ describe("ServicesPage connection tests", () => {
     const host = await renderServices(transport, "/services?enable=codecommit")
     await act(async () => undefined)
 
-    const inputs = host.querySelectorAll<HTMLInputElement>("input")
-    if (inputs[0] !== undefined) await setControlValue(inputs[0], "Payments production")
-    if (inputs[1] !== undefined) await setControlValue(inputs[1], "production")
+    await setControlValue(awsControl(host, "Account name"), "Payments production")
+    await setControlValue(awsControl(host, "AWS profile"), "production")
     const discover = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
       textContent?.includes("Test & discover")
     )
@@ -2685,11 +2720,8 @@ describe("ServicesPage connection tests", () => {
       .find(({ textContent }) => textContent?.includes("payments-production"))
       ?.querySelector<HTMLInputElement>('input[type="checkbox"]')
     await act(async () => pipelineChoice?.click())
-    const textareas = host.querySelectorAll<HTMLTextAreaElement>("textarea")
-    if (textareas[0] !== undefined) await setControlValue(textareas[0], "payments-api\nrisk-engine")
-    const submit = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
-      textContent?.includes("Connect AWS account")
-    )
+    await setControlValue(await awsManualNames(host, "Repository names"), "payments-api\nrisk-engine")
+    const submit = awsFollowButton(host)
     await act(async () => submit?.click())
 
     expect(create).not.toHaveBeenCalled()
@@ -2706,6 +2738,133 @@ describe("ServicesPage connection tests", () => {
         (request) => request.values.find(({ key }) => key === "repositoryName" || key === "pipelineName")?.value
       )
     ).toEqual(["payments-api", "risk-engine", "payments-production"])
+  })
+
+  describe("AWS setup form", () => {
+    const detected: AwsProfileDiscoveryResponse = [
+      { profile: "default", region: "eu-west-1" },
+      { profile: "studio-ops", region: "us-east-1" }
+    ]
+    const setupHost = async (overrides: Partial<ConnectionTestTransport> = {}) => {
+      const transport: ConnectionTestTransport = {
+        create: vi.fn(),
+        discoverAwsProfiles: () => Promise.resolve(detected),
+        overview: () => Promise.resolve({ ...overview, connections: [] }),
+        makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
+        setEnabled: vi.fn(),
+        test: vi.fn(),
+        ...overrides
+      }
+      const host = await renderServices(transport, "/services?enable=codecommit")
+      await act(async () => undefined)
+      return host
+    }
+
+    it("offers the account's enabled regions, starting on the profile's own", async () => {
+      const discoverAwsRegions = vi.fn<NonNullable<ConnectionTestTransport["discoverAwsRegions"]>>(() =>
+        Promise.resolve({ _tag: "available", regions: ["eu-central-1", "eu-west-1", "us-east-1"] })
+      )
+      const host = await setupHost({ discoverAwsRegions })
+      expect(discoverAwsRegions).toHaveBeenCalledWith("default", expect.any(AbortSignal))
+      const region = awsSelect(host, "AWS region")
+      expect(region.tagName).toBe("SELECT")
+      expect([...region.options].map(({ value }) => value)).toEqual(["eu-central-1", "eu-west-1", "us-east-1"])
+      expect(region.value).toBe("eu-west-1")
+      await setControlValue(awsControl(host, "AWS profile"), "studio-ops")
+      expect(discoverAwsRegions).toHaveBeenLastCalledWith("studio-ops", expect.any(AbortSignal))
+      expect(awsSelect(host, "AWS region").value).toBe("us-east-1")
+    })
+
+    it("waits for the enabled regions before offering Test & discover", async () => {
+      const host = await setupHost({ discoverAwsRegions: () => new Promise(() => undefined) })
+      const region = awsSelect(host, "AWS region")
+      expect(region.disabled).toBe(true)
+      expect(region.textContent).toBe("Reading enabled regions…")
+      expect(host.textContent).toContain("Regions this account has enabled.")
+      expect(buttonNamed(host, "Test & discover")?.disabled).toBe(true)
+    })
+
+    // account:ListRegions is a new IAM action; a profile without it types its region instead of seeing an outage.
+    it("falls back to a typed region when the profile can't list regions", async () => {
+      const host = await setupHost({ discoverAwsRegions: () => Promise.resolve({ _tag: "denied" }) })
+      const region = awsControl(host, "AWS region")
+      expect(region.tagName).toBe("INPUT")
+      expect(region.value).toBe("eu-west-1")
+      expect(host.textContent).toContain("This profile can’t list the account’s regions, so type one.")
+      expect(host.querySelector('[role="alert"]')).toBeNull()
+    })
+
+    it("names an organization policy on the region field, as a possible cause", async () => {
+      const host = await setupHost({
+        discoverAwsRegions: () => Promise.resolve({ _tag: "available", regions: ["eu-central-2", "eu-west-1"] }),
+        discoverAwsResources: () =>
+          Promise.resolve({
+            accountId: "123456789012",
+            codeCommit: { _tag: "failed", failureClass: "authorization" },
+            codePipeline: { _tag: "failed", failureClass: "authorization" },
+            organizationPolicyDenied: true
+          })
+      })
+      await setControlValue(awsControl(host, "AWS region"), "eu-central-2")
+      await act(async () => buttonNamed(host, "Test & discover")?.click())
+      const region = awsControl(host, "AWS region")
+      expect(region.getAttribute("aria-invalid")).toBe("true")
+      const describedBy = region.getAttribute("aria-describedby")?.split(" ") ?? []
+      const message = describedBy.map((id) => host.ownerDocument.getElementById(id)?.textContent ?? "").join(" ")
+      expect(message).toContain(
+        "An organization policy blocks CodeCommit in eu-central-2, and CodePipeline was denied too. This region may not be allowed for this account; choose another."
+      )
+      // The policy message replaces both per-service "Not allowed" rows.
+      expect(host.textContent).not.toContain("Not allowed")
+      expect(buttonNamed(host, "Refresh discovery")).toBeDefined()
+    })
+
+    it("puts a missing value's error on its own field, with no banner", async () => {
+      const discoverAwsResources = vi.fn<NonNullable<ConnectionTestTransport["discoverAwsResources"]>>()
+      const host = await setupHost({ discoverAwsResources })
+      await setControlValue(awsControl(host, "Account name"), "")
+      await act(async () => buttonNamed(host, "Test & discover")?.click())
+      expect(discoverAwsResources).not.toHaveBeenCalled()
+      const name = awsControl(host, "Account name")
+      expect(name.getAttribute("aria-invalid")).toBe("true")
+      expect(host.textContent).toContain("Add an account name.")
+      expect(host.textContent).not.toContain("Shown in Control Center only.")
+      expect(awsControl(host, "AWS region").getAttribute("aria-invalid")).toBeNull()
+      expect(host.textContent).not.toContain("Add an AWS profile and region")
+    })
+
+    it("opens with manual entry closed and focus on its heading", async () => {
+      const host = await setupHost()
+      expect(host.querySelectorAll("textarea")).toHaveLength(0)
+      expect(buttonNamed(host, "Enter resource names manually")?.getAttribute("aria-expanded")).toBe("false")
+      const heading = host.ownerDocument.getElementById("aws-setup-title")
+      expect(heading?.textContent).toBe("Connect AWS account")
+      expect(host.ownerDocument.activeElement).toBe(heading)
+      expect(awsFollowButton(host)).toBeUndefined()
+    })
+
+    it("counts every followed resource on the follow button", async () => {
+      const host = await setupHost({
+        discoverAwsRegions: () => Promise.resolve({ _tag: "available", regions: ["eu-west-1"] }),
+        discoverAwsResources: () =>
+          Promise.resolve({
+            accountId: "123456789012",
+            codeCommit: { _tag: "available", names: ["paper-crane", "paper-crane-infra"], truncated: true },
+            codePipeline: { _tag: "available", names: ["crane-production"], truncated: false }
+          })
+      })
+      await act(async () => buttonNamed(host, "Test & discover")?.click())
+      expect(host.textContent).toContain("First 2 shown")
+      expect(host.textContent).toContain("More repositories may exist. Enter their names manually to follow them.")
+      expect(host.textContent).toContain("1 of 1 shown")
+      for (const name of ["paper-crane", "crane-production"]) {
+        const box = [...host.querySelectorAll<HTMLLabelElement>("label")]
+          .find(({ textContent }) => textContent === name)
+          ?.querySelector<HTMLInputElement>('input[type="checkbox"]')
+        await act(async () => box?.click())
+      }
+      expect(awsFollowButton(host)?.textContent).toBe("Follow 2 resources")
+    })
   })
 
   describe("AWS account check outcomes", () => {
@@ -2730,9 +2889,8 @@ describe("ServicesPage connection tests", () => {
       }
       const host = await renderServices(transport, "/services?enable=codecommit")
       await act(async () => undefined)
-      const inputs = host.querySelectorAll<HTMLInputElement>("input")
-      if (inputs[1] !== undefined) await setControlValue(inputs[1], profile)
-      if (inputs[2] !== undefined) await setControlValue(inputs[2], "eu-west-1")
+      await setControlValue(awsControl(host, "AWS profile"), profile)
+      await setControlValue(awsControl(host, "AWS region"), "eu-west-1")
       const discover = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
         textContent?.includes("Test & discover")
       )
@@ -2758,9 +2916,10 @@ describe("ServicesPage connection tests", () => {
       expect(host.textContent).not.toContain("aws sso login")
     })
 
+    // With profiles detected the field is a select of them; a typed profile only exists when none were found.
     it("refuses a profile this machine doesn't have before asking AWS", async () => {
       const discoverAwsResources = vi.fn<NonNullable<ConnectionTestTransport["discoverAwsResources"]>>()
-      const discoverAwsProfiles = vi.fn(() => Promise.resolve(detectedProfiles))
+      const discoverAwsProfiles = vi.fn(() => Promise.resolve<AwsProfileDiscoveryResponse>([]))
       const host = await discoveryHost(discoverAwsResources, "staging", discoverAwsProfiles)
       expect(discoverAwsResources).not.toHaveBeenCalled()
       // The list loaded when the form opened; it is read again before refusing.
@@ -2768,8 +2927,7 @@ describe("ServicesPage connection tests", () => {
       expect(host.textContent).toContain(
         "No AWS profile named staging on this machine. Choose a detected profile, or add it to your AWS config, then test again."
       )
-      expect(host.querySelectorAll("input")[1]?.getAttribute("aria-invalid")).toBe("true")
-      expect(host.textContent).toContain("Detected on this machine: production, static-keys.")
+      expect(awsControl(host, "AWS profile").getAttribute("aria-invalid")).toBe("true")
     })
 
     // The refusal tells the user to add the profile and test again, so that test must see the new profile.
@@ -2783,7 +2941,7 @@ describe("ServicesPage connection tests", () => {
       )
       const discoverAwsProfiles = vi
         .fn<NonNullable<ConnectionTestTransport["discoverAwsProfiles"]>>()
-        .mockResolvedValueOnce(detectedProfiles)
+        .mockResolvedValueOnce([])
         .mockResolvedValue([...detectedProfiles, { profile: "staging", region: "eu-west-1" }])
       const host = await discoveryHost(discoverAwsResources, "staging", discoverAwsProfiles)
       expect(discoverAwsResources).toHaveBeenCalledWith(
@@ -2841,7 +2999,7 @@ describe("ServicesPage connection tests", () => {
     }
     const host = await renderServices(transport, "/services?enable=codecommit")
     await act(async () => undefined)
-    const region = host.querySelectorAll<HTMLInputElement>("input")[2]
+    const region = awsControl(host, "AWS region")
     if (region !== undefined) await setControlValue(region, "eu-west-1")
     const button = (text: string) =>
       [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) => textContent?.includes(text))
@@ -2851,7 +3009,7 @@ describe("ServicesPage connection tests", () => {
         .find(({ textContent }) => textContent?.includes("example-repository"))
         ?.querySelector<HTMLInputElement>('input[type="checkbox"]')
     await act(async () => choice()?.click())
-    await act(async () => button("Refresh discovery")?.click())
+    await act(async () => button("Test & discover")?.click())
     expect(host.textContent).toContain("No CodeCommit repositories or CodePipeline pipelines in eu-west-1")
     expect(choice()?.checked).toBe(true)
   })
@@ -2879,7 +3037,7 @@ describe("ServicesPage connection tests", () => {
     }
     const host = await renderServices(transport, "/services?enable=codecommit")
     await act(async () => undefined)
-    const region = host.querySelectorAll<HTMLInputElement>("input")[2]
+    const region = awsControl(host, "AWS region")
     if (region !== undefined) await setControlValue(region, "eu-west-1")
     const discover = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
       textContent?.includes("Test & discover")
@@ -2890,12 +3048,9 @@ describe("ServicesPage connection tests", () => {
       { profile: "default", region: "eu-west-1" },
       expect.any(AbortSignal)
     )
-    expect(host.textContent).toContain("Verified AWS account 123456789012")
-    expect(host.textContent).toContain("isn't allowed to list CodePipeline resources")
-    const search = host.querySelector<HTMLInputElement>('input[type="search"]')
-    if (search !== null) await setControlValue(search, "payments")
-    expect(host.textContent).toContain("payments-api")
-    expect(host.textContent).not.toContain("risk-engine")
+    expect(host.textContent).toMatch(/verified in [a-z0-9-]+ at \d\d:\d\d UTC\. Account details masked\./u)
+    expect(host.textContent).toContain("isn’t allowed to list CodePipeline resources")
+    expect(host.textContent).toContain("Not allowed")
     const paymentChoice = [...host.querySelectorAll<HTMLLabelElement>("label")]
       .find(({ textContent }) => textContent?.includes("payments-api"))
       ?.querySelector<HTMLInputElement>('input[type="checkbox"]')
@@ -2910,7 +3065,7 @@ describe("ServicesPage connection tests", () => {
       .find(({ textContent }) => textContent?.includes("payments-api"))
       ?.querySelector<HTMLInputElement>('input[type="checkbox"]')
     expect(refreshedPayment?.checked).toBe(true)
-    expect(host.textContent).toContain("No pipelines were found")
+    expect(host.textContent).not.toContain("Pipeline names")
   })
 
   it("preserves a verified manual region when profile discovery finishes later", async () => {
@@ -2934,21 +3089,19 @@ describe("ServicesPage connection tests", () => {
     }
     const host = await renderServices(transport, "/services?enable=codecommit")
     await act(async () => undefined)
-    const region = host.querySelectorAll<HTMLInputElement>("input")[2]
-    if (region !== undefined) await setControlValue(region, "us-east-1")
-    const discover = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
-      textContent?.includes("Test & discover")
-    )
-    await act(async () => discover?.click())
+    // Test & discover waits for the profile list, but a region typed meanwhile is kept.
+    await setControlValue(awsControl(host, "AWS region"), "us-east-1")
+    expect(buttonNamed(host, "Test & discover")).toBeUndefined()
+
+    await act(async () => resolveProfiles?.([{ profile: "default", region: "eu-west-1" }]))
+
+    expect(awsControl(host, "AWS region").value).toBe("us-east-1")
+    await act(async () => buttonNamed(host, "Test & discover")?.click())
+    expect(host.textContent).toMatch(/default verified in us-east-1 at \d\d:\d\d UTC\. Account details masked\./u)
     const repositoryChoice = [...host.querySelectorAll<HTMLLabelElement>("label")]
       .find(({ textContent }) => textContent?.includes("payments-api"))
       ?.querySelector<HTMLInputElement>('input[type="checkbox"]')
     await act(async () => repositoryChoice?.click())
-
-    await act(async () => resolveProfiles?.([{ profile: "default", region: "eu-west-1" }]))
-
-    expect(region?.value).toBe("us-east-1")
-    expect(host.textContent).toContain("Verified AWS account 123456789012")
     expect(repositoryChoice?.checked).toBe(true)
   })
 
@@ -2997,13 +3150,13 @@ describe("ServicesPage connection tests", () => {
     }
     const host = await renderServices(transport, "/services?enable=codecommit")
     await act(async () => undefined)
-    const region = host.querySelectorAll<HTMLInputElement>("input")[2]
+    const region = awsControl(host, "AWS region")
     if (region !== undefined) await setControlValue(region, "eu-west-1")
     const discover = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
       textContent?.includes("Test & discover")
     )
     await act(async () => discover?.click())
-    const repositoryNames = host.querySelectorAll<HTMLTextAreaElement>("textarea")[0]
+    const repositoryNames = await awsManualNames(host, "Repository names")
     if (repositoryNames !== undefined) await setControlValue(repositoryNames, "manual-repository")
     const pipelineChoice = [...host.querySelectorAll<HTMLLabelElement>("label")]
       .find(({ textContent }) => textContent?.includes("payments-production"))
@@ -3013,9 +3166,7 @@ describe("ServicesPage connection tests", () => {
       textContent?.includes("Hide manual name entry")
     )
     await act(async () => hideManualEntry?.click())
-    const submit = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
-      textContent?.includes("Connect AWS account")
-    )
+    const submit = awsFollowButton(host)
     await act(async () => submit?.click())
 
     expect(host.querySelectorAll("textarea")).toHaveLength(0)
@@ -3048,7 +3199,7 @@ describe("ServicesPage connection tests", () => {
     }
     const host = await renderServices(transport, "/services?enable=codepipeline")
     await act(async () => undefined)
-    const region = host.querySelectorAll<HTMLInputElement>("input")[2]
+    const region = awsControl(host, "AWS region")
     if (region !== undefined) await setControlValue(region, "eu-west-1")
     const discover = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
       textContent?.includes("Test & discover")
@@ -3059,11 +3210,12 @@ describe("ServicesPage connection tests", () => {
       ?.querySelector<HTMLInputElement>('input[type="checkbox"]')
     await act(async () => pipelineChoice?.click())
     const refresh = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
-      textContent?.includes("Refresh discovery")
+      textContent?.includes("Test & discover")
     )
     await act(async () => refresh?.click())
 
-    expect(host.textContent).toContain("isn't allowed to list CodePipeline resources")
+    expect(host.textContent).toContain("isn’t allowed to list CodePipeline resources")
+    expect(host.textContent).toContain("Kept from the last check")
     expect(host.textContent).toContain("payments-production")
     const preservedChoice = [...host.querySelectorAll<HTMLLabelElement>("label")]
       .find(({ textContent }) => textContent?.includes("payments-production"))
@@ -3090,7 +3242,7 @@ describe("ServicesPage connection tests", () => {
     }
     const host = await renderServices(transport, "/services?enable=codecommit")
     await act(async () => undefined)
-    const region = host.querySelectorAll<HTMLInputElement>("input")[2]
+    const region = awsControl(host, "AWS region")
     if (region !== undefined) await setControlValue(region, "eu-west-1")
     const discover = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
       textContent?.includes("Test & discover")
@@ -3112,7 +3264,7 @@ describe("ServicesPage connection tests", () => {
     }
     const host = await renderServices(transport, "/services?enable=codecommit")
     await act(async () => undefined)
-    const region = host.querySelectorAll<HTMLInputElement>("input")[2]
+    const region = awsControl(host, "AWS region")
     if (region !== undefined) await setControlValue(region, "eu-west-1")
     const discover = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
       textContent?.includes("Test & discover")
@@ -3121,6 +3273,8 @@ describe("ServicesPage connection tests", () => {
 
     expect(host.textContent).toContain("AWS didn’t answer the account check.")
     expect(host.textContent).not.toContain("provider secret")
+    expect(host.querySelectorAll("textarea")).toHaveLength(0)
+    await awsManualNames(host, "Repository names")
     expect(host.querySelectorAll("textarea")).toHaveLength(2)
   })
 
@@ -3491,11 +3645,9 @@ describe("ServicesPage connection tests", () => {
     const inputs = host.querySelectorAll<HTMLInputElement>("input")
     if (inputs[0] !== undefined) await setControlValue(inputs[0], "Payments production")
     if (inputs[2] !== undefined) await setControlValue(inputs[2], "eu-west-1")
-    const repositories = host.querySelectorAll<HTMLTextAreaElement>("textarea")[0]
+    const repositories = await awsManualNames(host, "Repository names")
     if (repositories !== undefined) await setControlValue(repositories, "payments-api\nrisk-engine")
-    const submit = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
-      textContent?.includes("Connect AWS account")
-    )
+    const submit = awsFollowButton(host)
     await act(async () => submit?.click())
     await act(async () => completeBatch?.())
 
@@ -3527,18 +3679,16 @@ describe("ServicesPage connection tests", () => {
     const host = await renderServices(transport, "/services?enable=codecommit")
     await act(async () => undefined)
 
-    const region = host.querySelectorAll<HTMLInputElement>("input")[2]
+    const region = awsControl(host, "AWS region")
     if (region !== undefined) await setControlValue(region, "eu-west-1")
-    const repositories = host.querySelectorAll<HTMLTextAreaElement>("textarea")[0]
+    const repositories = await awsManualNames(host, "Repository names")
     if (repositories !== undefined) {
       await setControlValue(
         repositories,
         Array.from({ length: 21 }, (_, index) => `repository-${index + 1}`).join("\n")
       )
     }
-    const submit = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
-      textContent?.includes("Connect AWS account")
-    )
+    const submit = awsFollowButton(host)
     await act(async () => submit?.click())
 
     expect(create).not.toHaveBeenCalled()
@@ -3616,16 +3766,14 @@ describe("ServicesPage connection tests", () => {
       textContent?.includes("Configure AWS account")
     )
     await act(async () => configure?.click())
-    const name = host.querySelectorAll<HTMLInputElement>("input")[0]
+    const name = awsControl(host, "Account name")
     expect(name).not.toBeNull()
     if (name !== undefined) await setControlValue(name, "Payments")
-    const region = host.querySelectorAll<HTMLInputElement>("input")[2]
+    const region = awsControl(host, "AWS region")
     if (region !== undefined) await setControlValue(region, "eu-west-1")
-    const repositories = host.querySelectorAll<HTMLTextAreaElement>("textarea")[0]
+    const repositories = await awsManualNames(host, "Repository names")
     if (repositories !== undefined) await setControlValue(repositories, "payments-api")
-    const submit = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
-      textContent?.includes("Connect AWS account")
-    )
+    const submit = awsFollowButton(host)
     await act(async () => submit?.click())
     expect(create).toHaveBeenCalledTimes(1)
     expect(host.textContent).toContain("Production account")
@@ -3678,13 +3826,11 @@ describe("ServicesPage connection tests", () => {
       textContent?.includes("Configure AWS account")
     )
     await act(async () => configure?.click())
-    const region = host.querySelectorAll<HTMLInputElement>("input")[2]
+    const region = awsControl(host, "AWS region")
     if (region !== undefined) await setControlValue(region, "eu-west-1")
-    const repositories = host.querySelectorAll<HTMLTextAreaElement>("textarea")[0]
+    const repositories = await awsManualNames(host, "Repository names")
     if (repositories !== undefined) await setControlValue(repositories, "payments-api")
-    const submit = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
-      textContent?.includes("Connect AWS account")
-    )
+    const submit = awsFollowButton(host)
     await act(async () => submit?.click())
 
     expect(host.textContent).toContain("The provider rejected these credentials.")
@@ -4139,17 +4285,10 @@ describe("ServicesPage first sync", () => {
         test: vi.fn()
       }
       const host = await renderServices(transport, "/services?enable=codecommit")
-      const inputs = host.querySelectorAll<HTMLInputElement>("input")
-      const name = inputs[0]
-      const region = inputs[2]
-      const repository = host.querySelector<HTMLTextAreaElement>("textarea")
-      if (name === undefined || region === undefined || repository === null) return expect.fail("Expected AWS setup")
-      await setControlValue(name, "Fixture account")
-      await setControlValue(region, "us-east-1")
-      await setControlValue(repository, "fixture-repository")
-      const submit = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
-        textContent?.includes("Connect AWS account")
-      )
+      await setControlValue(awsControl(host, "Account name"), "Fixture account")
+      await setControlValue(awsControl(host, "AWS region"), "us-east-1")
+      await setControlValue(await awsManualNames(host, "Repository names"), "fixture-repository")
+      const submit = awsFollowButton(host)
       if (submit === undefined) return expect.fail("Expected account connection action")
       await act(async () => submit.click())
       expect(create).toHaveBeenCalledTimes(1)
@@ -4330,18 +4469,14 @@ describe("ServicesPage first sync", () => {
     }
     const host = await renderServices(transport, "/services?enable=codecommit")
     await act(async () => undefined)
-    const inputs = host.querySelectorAll<HTMLInputElement>("input")
-    if (inputs[0] !== undefined) await setControlValue(inputs[0], "Payments production")
-    if (inputs[1] !== undefined) await setControlValue(inputs[1], "production")
+    await setControlValue(awsControl(host, "Account name"), "Payments production")
+    await setControlValue(awsControl(host, "AWS profile"), "production")
     const discover = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
       textContent?.includes("Test & discover")
     )
     await act(async () => discover?.click())
-    const textareas = host.querySelectorAll<HTMLTextAreaElement>("textarea")
-    if (textareas[0] !== undefined) await setControlValue(textareas[0], "payments-api\nrisk-engine")
-    const submit = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
-      textContent?.includes("Connect AWS account")
-    )
+    await setControlValue(await awsManualNames(host, "Repository names"), "payments-api\nrisk-engine")
+    const submit = awsFollowButton(host)
     await act(async () => submit?.click())
     await act(async () => undefined)
 
@@ -4597,18 +4732,14 @@ describe("ServicesPage first sync", () => {
     }
     const host = await renderServices(transport, "/services?enable=codecommit")
     await act(async () => undefined)
-    const inputs = host.querySelectorAll<HTMLInputElement>("input")
-    if (inputs[0] !== undefined) await setControlValue(inputs[0], "Payments production")
-    if (inputs[1] !== undefined) await setControlValue(inputs[1], "production")
+    await setControlValue(awsControl(host, "Account name"), "Payments production")
+    await setControlValue(awsControl(host, "AWS profile"), "production")
     const discover = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
       textContent?.includes("Test & discover")
     )
     await act(async () => discover?.click())
-    const textareas = host.querySelectorAll<HTMLTextAreaElement>("textarea")
-    if (textareas[0] !== undefined) await setControlValue(textareas[0], "payments-api\nrisk-engine")
-    const submit = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
-      textContent?.includes("Connect AWS account")
-    )
+    await setControlValue(await awsManualNames(host, "Repository names"), "payments-api\nrisk-engine")
+    const submit = awsFollowButton(host)
     await act(async () => submit?.click())
     await act(async () => undefined)
 
