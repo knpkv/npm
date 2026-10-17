@@ -9,8 +9,10 @@ import type {
   PluginConnectionAdministration,
   PluginCredentialReplacement
 } from "../../api/plugins.js"
+import { firstPartyServiceIdentityByProvider } from "../../domain/firstPartyServices.js"
 import { formatCheckTime } from "../formatTime.js"
 import { rememberAtlassianOAuthSetupIntent } from "./atlassianOAuthSetupIntentStorage.js"
+import { permissionSummary } from "./capabilityWords.js"
 
 import styles from "./ServicesPage.module.css"
 
@@ -82,6 +84,8 @@ export const ConnectionAdministration = ({
   }
 
   const { administration } = state
+  const providerName = firstPartyServiceIdentityByProvider[administration.connection.providerId].displayName
+  const permissions = permissionSummary(administration.permissions)
   const manualCredentialFields = administration.credentialFields.filter(({ key }) => key !== "oauthProfileId")
   const supportsOAuthRecovery =
     administration.credentialFields.some(({ key }) => key === "oauthProfileId") &&
@@ -160,21 +164,29 @@ export const ConnectionAdministration = ({
         <Text as="h4" variant="label">
           Permissions
         </Text>
-        <div className={styles.administrationLabels}>
-          {administration.permissions.map((permission) => (
-            <StateLabel
-              key={`${permission.capabilityId}:${permission.version}`}
-              label={`${permission.capabilityId} v${permission.version}`}
-              size="compact"
-              tone={permission.state === "available" ? "positive" : "neutral"}
-            />
-          ))}
-          {administration.permissions.length === 0 ? (
-            <Text tone="secondary" variant="meta">
-              No provider operations were negotiated.
-            </Text>
-          ) : null}
-        </div>
+        <Text tone="secondary" variant="meta">
+          What this account can do, as last reported by {providerName}.
+        </Text>
+        {permissions.available === null && permissions.disabled === null ? (
+          <Text tone="secondary" variant="meta">
+            No provider operations were negotiated.
+          </Text>
+        ) : (
+          <dl className={styles.permissionFacts}>
+            {permissions.available === null ? null : (
+              <div>
+                <dt>{providerName}</dt>
+                <dd>{permissions.available}</dd>
+              </div>
+            )}
+            {permissions.disabled === null ? null : (
+              <div>
+                <dt>Turned off</dt>
+                <dd>{permissions.disabled}</dd>
+              </div>
+            )}
+          </dl>
+        )}
       </div>
       <div className={styles.administrationSection}>
         <Text as="h4" variant="label">

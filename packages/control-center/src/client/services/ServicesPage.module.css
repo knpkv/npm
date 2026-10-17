@@ -159,7 +159,6 @@
   border-block: 1px solid var(--rly-color-border-2);
 }
 
-.administrationLabels,
 .diagnostic,
 .accountEditAction {
   display: flex;
@@ -273,5 +272,43 @@
   .resourceStatus {
     inline-size: 100%;
     justify-content: space-between;
+  }
+}
+
+/* Permissions as label | value rows, one per provider, as the setup design's fact lists. */
+.permissionFacts {
+  display: grid;
+  margin: 0;
+  border: 1px solid var(--rly-color-border-1);
+  border-radius: var(--rly-radius-group);
+}
+
+.permissionFacts > div {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr);
+  gap: var(--rly-space-2) var(--rly-space-16);
+  padding: var(--rly-space-8) var(--rly-space-12);
+}
+
+.permissionFacts > div + div {
+  border-block-start: 1px solid var(--rly-color-border-1);
+}
+
+.permissionFacts dt {
+  color: var(--rly-color-text-2);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.permissionFacts dd {
+  margin: 0;
+  font-size: 14px;
+  line-height: 20px;
+  overflow-wrap: break-word;
+}
+
+@media (max-width: 40rem) {
+  .permissionFacts > div {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
