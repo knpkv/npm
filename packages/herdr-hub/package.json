@@ -85,6 +85,7 @@
     "@effect/platform-browser": "4.0.0",
     "@effect/platform-node": "4.0.0",
     "@effect/platform-node-shared": "4.0.0",
+    "@knpkv/alchemy-console": "workspace:^",
     "@knpkv/bounded-io": "workspace:^",
     "@knpkv/browser-pairing": "workspace:^",
     "@knpkv/capability": "workspace:^",
