@@ -22,7 +22,8 @@ const reading = NeedsYouProviderResult.make({
     createdAt: 10,
     expiresAt: 100
   }],
-  issues: []
+  issues: [],
+  asOf: null
 })
 
 const readApprovals = Effect.fnUntraced(function*(providers: ReadonlyArray<ServerModule>) {
@@ -61,7 +62,8 @@ it.effect("rejects a provider emitting another module's destination", () =>
             state: "failed",
             reason: "invalid_response"
           }
-        }]
+        }],
+        contributions: [{ provider: "code", asOf: null }]
       }
     })
   }))
@@ -72,10 +74,13 @@ it.effect("caps a provider at 256 sorted rows and reports truncation", () =>
     if (first === undefined) return yield* Effect.die("Fixture must contain one item")
     const rows = NeedsYouProviderResult.make({
       issues: [],
+      asOf: null,
       items: Array.from({ length: 300 }, (_, index) => ({
         ...first,
         sourceKey: `cedar:job-${index}`,
-        destination: { ...first.destination, jobId: `job-${index}` },
+        destination: first.destination._tag === "FleetApproval"
+          ? { ...first.destination, jobId: `job-${index}` }
+          : first.destination,
         createdAt: 300 - index,
         expiresAt: 300 - index
       }))
@@ -104,24 +109,28 @@ it.effect("caps a provider at 256 sorted rows and reports truncation", () =>
 it.effect("deduplicates whole rows by local identity and sorts expiry, creation and key", () =>
   Effect.gen(function*() {
     const first = reading.items[0]
-    if (first === undefined) return yield* Effect.die("Fixture must contain one item")
+    if (first === undefined || first.destination._tag !== "FleetApproval") {
+      return yield* Effect.die("Fixture must contain one fleet approval")
+    }
+    const destination = first.destination
     const rows = NeedsYouProviderResult.make({
       issues: [],
+      asOf: null,
       items: [
         { ...first, sourceKey: "cedar:job-1", createdAt: 20, expiresAt: 50 },
-        { ...first, sourceKey: "cedar:job-2", destination: { ...first.destination, jobId: "job-2" }, expiresAt: null },
+        { ...first, sourceKey: "cedar:job-2", destination: { ...destination, jobId: "job-2" }, expiresAt: null },
         {
           ...first,
           sourceKey: "cedar:job-1",
-          destination: { ...first.destination, host: "CEDAR" },
+          destination: { ...destination, host: "CEDAR" },
           createdAt: 10,
           expiresAt: 100
         },
-        { ...first, sourceKey: "cedar:job-3", destination: { ...first.destination, jobId: "job-3" }, expiresAt: 60 },
+        { ...first, sourceKey: "cedar:job-3", destination: { ...destination, jobId: "job-3" }, expiresAt: 60 },
         {
           ...first,
           sourceKey: "cedar:job-4",
-          destination: { ...first.destination, jobId: "job-4" },
+          destination: { ...destination, jobId: "job-4" },
           expiresAt: 60,
           createdAt: 5
         }
@@ -179,6 +188,59 @@ it.effect("returns a Partial list after a provider exceeds the four-second deadl
     })
   }))
 
+it.effect("rejects a module page with an illegal query or a page the provider does not own", () =>
+  Effect.gen(function*() {
+    const page = (query: Record<string, string>, pageId = "overview"): NeedsYouProviderResult => ({
+      items: [{
+        sourceKey: "account:1",
+        destination: { _tag: "ModulePage", module: "code", page: pageId, query },
+        kind: "sandbox-quarantined",
+        actor: "sandbox-pool",
+        createdAt: 1,
+        expiresAt: null
+      }],
+      issues: [],
+      asOf: null
+    })
+    const rejected = [
+      page({ a: "1", b: "2", c: "3", d: "4", e: "5" }),
+      page({ "Bad Key": "1" }),
+      page({ id: "" }),
+      page({ id: "x".repeat(129) }),
+      page({ note: "has space" }),
+      page({ id: "999999999990" }, "missing")
+    ]
+    for (const body of rejected) {
+      const response = yield* readApprovals([{
+        descriptor: codeModule,
+        handlers: Layer.succeed(ModuleHandlers, { routes: [], needsYou: Effect.succeed(body) })
+      }])
+      expect(response).toMatchObject({
+        body: {
+          _tag: "Partial",
+          items: [],
+          sources: [{ provider: "code", issue: { state: "failed", reason: "invalid_response" } }]
+        }
+      })
+    }
+    const accepted = yield* readApprovals([{
+      descriptor: codeModule,
+      handlers: Layer.succeed(ModuleHandlers, {
+        routes: [],
+        needsYou: Effect.succeed(page({ id: "999999999990" }))
+      })
+    }])
+    expect(accepted).toMatchObject({
+      body: {
+        _tag: "Complete",
+        items: [{
+          destination: { _tag: "ModulePage", module: "code", page: "overview", query: { id: "999999999990" } },
+          kind: "sandbox-quarantined"
+        }]
+      }
+    })
+  }))
+
 it.effect("refuses unknown operation kinds before rendering a provider reading", () =>
   Effect.gen(function*() {
     const first = reading.items[0]
@@ -190,7 +252,7 @@ it.effect("refuses unknown operation kinds before rendering a provider reading",
         descriptor: fleetModule,
         handlers: Layer.succeed(ModuleHandlers, {
           routes: [],
-          needsYou: Effect.succeed({ items: [row], issues: [] })
+          needsYou: Effect.succeed({ items: [row], issues: [], asOf: null })
         })
       }])
       expect(response).toEqual({
@@ -198,7 +260,8 @@ it.effect("refuses unknown operation kinds before rendering a provider reading",
         body: {
           _tag: "Partial",
           items: [],
-          sources: [{ provider: "fleet", issue: { state: "failed", reason: "invalid_response" } }]
+          sources: [{ provider: "fleet", issue: { state: "failed", reason: "invalid_response" } }],
+          contributions: [{ provider: "fleet", asOf: null }]
         }
       })
     }

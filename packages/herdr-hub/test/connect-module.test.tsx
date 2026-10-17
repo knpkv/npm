@@ -34,7 +34,7 @@ it("forwards archived-stage close to the mounted selection owner", async () => {
     atoms,
     now: 2000,
     notificationState: "enabled",
-    readApprovals: Effect.succeed({ _tag: "Complete", items: [] })
+    readApprovals: Effect.succeed({ _tag: "Complete", items: [], contributions: [] })
   })
   const host = document.createElement("div")
   document.body.append(host)
@@ -96,7 +96,7 @@ const renderEmpty = (hosts: ReadonlyArray<string> | undefined, stale: boolean): 
     atoms,
     now: 2_000,
     notificationState: "enabled",
-    readApprovals: Effect.succeed({ _tag: "Complete", items: [] })
+    readApprovals: Effect.succeed({ _tag: "Complete", items: [], contributions: [] })
   })
   try {
     return renderToStaticMarkup(
@@ -162,15 +162,17 @@ it.each<"complete" | "partial" | "failed" | "one">(["complete", "partial", "fail
                   createdAt: 1000,
                   expiresAt: null
                 }
-              ]
+              ],
+              contributions: []
             }
           : state === "partial"
             ? {
                 _tag: "Partial",
                 items: [],
-                sources: [{ provider: "fleet", issue: { state: "failed", reason: "offline" } }]
+                sources: [{ provider: "fleet", issue: { state: "failed", reason: "offline" } }],
+                contributions: []
               }
-            : { _tag: "Complete", items: [] }
+            : { _tag: "Complete", items: [], contributions: [] }
       return Effect.succeed(result)
     })
     const views = makeConnectModuleViews({ atoms, now: 2000, notificationState: "enabled", readApprovals: read })

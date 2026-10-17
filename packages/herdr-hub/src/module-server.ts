@@ -32,6 +32,28 @@ export class ModuleRouteFailure extends Schema.TaggedError<ModuleRouteFailure>()
   code: Schema.String
 }) {}
 
+/** Plain unavailable copy for a host-local module. `product` is a plural noun, such as "sandboxes". */
+export const moduleUnavailableCopy = (
+  product: string,
+  setting: string,
+  reason: "not_configured" | "other_host" | "not_hub" | "pool_mismatch" | "unavailable",
+  host: string | null
+): string => {
+  const titled = product.length === 0 ? product : `${product.slice(0, 1).toUpperCase()}${product.slice(1)}`
+  switch (reason) {
+    case "not_configured":
+      return `Set ${setting} to the host that reads ${product}.`
+    case "other_host":
+      return `${titled} are read on ${host ?? "the configured host"}.`
+    case "not_hub":
+      return `${setting} names this host, but ${product} are read by the hub only.`
+    case "pool_mismatch":
+      return `${setting} names this hub, but it has no sandbox pool configured.`
+    case "unavailable":
+      return `${titled} couldn't be read.`
+  }
+}
+
 const ModuleRouteTypeId = Symbol("ModuleApiRoute")
 /** The agent home owns the fleet-wide approvals summary; providers are composed once by the hub. */
 export const needsYouRouteOwner = connectModule.id
@@ -71,7 +93,8 @@ export class ModuleHandlers extends Context.Service<
   {
     readonly routes: ReadonlyArray<ModuleApiRoute>
     /** Closed over services at layer build; expected source failures are returned as issues. */
-    readonly needsYou?: Effect.Effect<NeedsYouProviderResult>
+    /** Expected source failures reject; the collector records them and keeps the other providers. */
+    readonly needsYou?: Effect.Effect<NeedsYouProviderResult, unknown>
   }
 >()("@knpkv/herdr-hub/ModuleHandlers") {}
 
@@ -135,7 +158,11 @@ export const makeModuleLayer = <E, R>(
       const providers = mounted.flatMap((module) =>
         module.needsYou === undefined
           ? [] :
-          [{ id: module.descriptor.id, read: module.needsYou }]
+          [{
+            id: module.descriptor.id,
+            pages: module.descriptor.pages.map((page) => page.id),
+            read: module.needsYou
+          }]
       )
       const readNeedsYou = collectNeedsYou(providers)
       return {

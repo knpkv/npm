@@ -1,0 +1,166 @@
+/**
+ * Server half of the hosted sandbox read model. `makeSandboxHostReads` turns the pool store and run log
+ * into tagged results. Records, role names and aws-nuke output stay in this process.
+ *
+ * @module
+ */
+import { DateTime, Effect } from "effect"
+import {
+  redactSandboxText,
+  type SandboxCard,
+  type SandboxesOverview,
+  type SandboxesReadFailed,
+  type SandboxRuns,
+  type SandboxRunsQuery,
+  sweepIsStale
+} from "./host.js"
+import type { RunId, Sandbox } from "./lease.js"
+import type { AccountId, PoolContract } from "./pool.js"
+import { isBudgetHoldFor } from "./reset.js"
+import type { RunLog, UnknownRunCursor } from "./run-log.js"
+import type { SandboxNotFound, SandboxStore, SandboxStoreUnavailable } from "./store.js"
+
+/** A quarantined row the needs-you collector can turn into one item. A budget hold is not also "quarantined". */
+export interface SandboxAttention {
+  readonly asOf: number | null
+  readonly rows: ReadonlyArray<{
+    readonly accountId: AccountId
+    readonly since: number
+    readonly kind: "quarantined" | "budget-hold"
+  }>
+}
+
+/** Reads as the hosting server serves them. A failed store or log is a result; an unknown id or cursor fails. */
+export interface SandboxHostReads {
+  readonly overview: Effect.Effect<SandboxesOverview>
+  readonly runs: (
+    query: SandboxRunsQuery
+  ) => Effect.Effect<SandboxRuns, SandboxNotFound | UnknownRunCursor>
+  /** Store failures stay failures so a caller cannot treat them as an empty queue. */
+  readonly attention: Effect.Effect<SandboxAttention, SandboxStoreUnavailable>
+}
+
+const failed: typeof SandboxesReadFailed.Type = { _tag: "Failed", reason: "unavailable" }
+
+const readFailure = {
+  SandboxStoreUnavailable: () => Effect.succeed(failed),
+  RunLogUnavailable: () => Effect.succeed(failed)
+}
+
+/**
+ * Cards and run pages for one pool. `sweepAt` is the store's last successful sweep; null is stale.
+ * The current step is taken from that account's newest runs, and only when the run id matches the record.
+ */
+export const makeSandboxHostReads = (input: {
+  readonly contract: PoolContract
+  readonly store: SandboxStore["Service"]
+  readonly runLog: RunLog["Service"]
+}): Effect.Effect<SandboxHostReads> => {
+  const roles = [input.contract.accountAccessRole, input.contract.budgetActionRole]
+  const poolIds = new Set(input.contract.accounts.map((account) => account.accountId))
+  const currentStep = (accountId: Sandbox["accountId"], runId: RunId) =>
+    input.runLog.forAccount(accountId, { limit: 20 }).pipe(
+      Effect.map((page) => {
+        const summary = page.runs.find((run) => run.runId === runId)
+        return summary === undefined ? null : summary.current
+      }),
+      Effect.catchTag("UnknownRunCursor", (error) => Effect.die(error))
+    )
+  const card = Effect.fnUntraced(function*(sandbox: Sandbox) {
+    const label: SandboxCard["label"] = poolIds.has(sandbox.accountId) ? null : "left the pool"
+    const state = sandbox.state
+    switch (state._tag) {
+      case "Available":
+        return {
+          accountId: sandbox.accountId,
+          name: sandbox.name,
+          label,
+          state: { _tag: "Available" }
+        } satisfies SandboxCard
+      case "Leased":
+        return {
+          accountId: sandbox.accountId,
+          name: sandbox.name,
+          label,
+          state: { _tag: "Leased", holder: state.holder, endsAt: state.endsAt }
+        } satisfies SandboxCard
+      case "Cleaning":
+        return {
+          accountId: sandbox.accountId,
+          name: sandbox.name,
+          label,
+          state: {
+            _tag: "Cleaning",
+            runId: state.runId,
+            step: yield* currentStep(sandbox.accountId, state.runId)
+          }
+        } satisfies SandboxCard
+      case "Quarantined":
+        return {
+          accountId: sandbox.accountId,
+          name: sandbox.name,
+          label,
+          state: {
+            _tag: "Quarantined",
+            runId: state.runId,
+            blocker: redactSandboxText(state.blocker, roles),
+            step: yield* currentStep(sandbox.accountId, state.runId)
+          }
+        } satisfies SandboxCard
+    }
+  })
+  const overview = Effect.fn("SandboxHost.overview")(function*() {
+    const records = yield* input.store.list
+    const asOf = yield* input.store.sweepAt
+    const now = DateTime.toEpochMillis(yield* DateTime.now)
+    const sandboxes = (yield* Effect.forEach(records, card)).sort((left, right) =>
+      left.accountId < right.accountId ? -1 : left.accountId > right.accountId ? 1 : 0
+    )
+    const stale = sweepIsStale(asOf, now)
+    return {
+      _tag: "Ready",
+      sandboxes,
+      badge: {
+        quarantined: sandboxes.filter((item) => item.state._tag === "Quarantined").length,
+        stale,
+        partial: stale,
+        asOf
+      }
+    } satisfies SandboxesOverview
+  })
+  const attention = Effect.fn("SandboxHost.attention")(function*() {
+    const records = yield* input.store.list
+    const asOf = yield* input.store.sweepAt
+    const rows: Array<SandboxAttention["rows"][number]> = []
+    for (const sandbox of records) {
+      const state = sandbox.state
+      if (state._tag !== "Quarantined") continue
+      rows.push({
+        accountId: sandbox.accountId,
+        since: DateTime.toEpochMillis(state.since),
+        kind: isBudgetHoldFor(input.contract, state.blocker) ? "budget-hold" : "quarantined"
+      })
+    }
+    return { asOf, rows }
+  })
+  const runs = Effect.fn("SandboxHost.runs")(function*(query: SandboxRunsQuery) {
+    yield* input.store.get(query.id)
+    const page = yield* input.runLog.forAccount(query.id, { limit: query.limit ?? 20, before: query.before })
+    return {
+      _tag: "Ready",
+      accountId: query.id,
+      runs: page.runs.map((summary) => ({
+        runId: summary.runId,
+        step: summary.current,
+        blocker: summary.blocker === null ? null : redactSandboxText(summary.blocker, roles),
+        outcome: summary.outcome
+      })),
+      next: page.next
+    } satisfies SandboxRuns
+  })
+  return Effect.succeed({
+    overview: overview().pipe(Effect.catchTags(readFailure)),
+    runs: (query) => runs(query).pipe(Effect.catchTags(readFailure)),
+    attention: attention()
+  })
+}

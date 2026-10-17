@@ -172,6 +172,16 @@ The resources superapp browser cases run inventory, theme and geometry checks wi
 
 Set `RELAY_STACKS_HOST` to the host that holds the AWS profiles. Only that host's hub builds the reader and answers `GET /v1/modules/stacks/{overview,stack,plan}`. Any other hub, a missing setting, or a reader that can't start answers `Unavailable` with its reason, and the page names the fix. Paths, profiles and credentials never leave the host; only alchemy-console's `./host` result schemas cross the API. Last apply, Drift and Gate show "Not checked yet" until those readings exist.
 
+### Sandboxes
+
+The read-only Sandboxes module answers on the host named by `RELAY_SANDBOXES_HOST`, when that host is this hub and `sandboxPool` decodes. `GET /v1/modules/sandboxes/overview` lists the pool. `GET /v1/modules/sandboxes/runs?id=` pages one account's runs (`limit` 1–50, default 20, `before` a run id). `GET /v1/sandboxes` and `GET /v1/sandboxes/<12-digit id>/runs` are those same reads. Bodies are `@knpkv/sandbox-pool/host` schemas.
+
+A missing setting, a different host, a process that is not the hub, a hub with no pool, or a reader that cannot open its database answers `Unavailable` with `not_configured`, `other_host`, `not_hub`, `pool_mismatch` or `unavailable`. A store or run-log failure answers `Failed`. That is a failed read, and the list is omitted. An unknown account is 404. An unknown run cursor is 400.
+
+A card is the account id, name and state. `label` is `left the pool` when that id is absent from the current contract; a lease that left the pool stays Leased, with its holder id and end. Cleaning and quarantine include the run id and current step. A quarantine blocker is redacted: no role names, no ARNs, no raw aws-nuke lines. The account id and the budget-hold policy name stay. The badge counts quarantined rows, including accounts that left the pool. It is stale when the last recorded sweep is missing or older than 10 minutes.
+
+Needs-you adds `sandbox-quarantined` or `sandbox-budget-hold`, one per quarantined account, aimed at the account page. A budget hold that already has a pending `sandbox.budget.lift` approval is left out. Each contribution includes `asOf`, the last sweep's epoch milliseconds, or null when none was recorded. The sidebar page is a later change. Opening this reader does not start pool jobs or the sweep.
+
 ### Usage details
 
 The read-only Usage module opens Limits at `#usage/limits`, with Tokens at `#usage/tokens` and By tool at `#usage/by-tool`. By tool uses the first reported host by default; an explicit host selector wins. Each tool/model split stays on that one host, and unavailable readings stay Unknown. Selectors use the document query, for example `?range=30d&timeZone=Europe/Amsterdam&host=atlas#usage/tokens`. `canonicalUsageSelection` validates each field independently and preserves valid selections when repairing another field. It drops excess selectors and refuses an invalid caller-supplied viewer zone. Only the active Usage module may replace the URL; hidden modules must retain another module's deep-link selectors.

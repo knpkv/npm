@@ -1,6 +1,7 @@
 /** The pool owner's private sandbox records and reset run log, in one SQLite database. @module */
 import { openPrivateSqlite } from "@knpkv/herdr-fleet/sqlite"
 import {
+  pageRuns,
   type PoolContract,
   RecordMismatch,
   RunEntry,
@@ -27,6 +28,7 @@ const encodeEntry = Schema.encodeSync(entryJson)
 const SandboxRow = Schema.Struct({ record: Schema.String })
 const EntryRow = Schema.Struct({ entry: Schema.String })
 const RunRow = Schema.Struct({ run_id: Schema.String })
+const SweepRow = Schema.Struct({ swept_at: Schema.NullOr(Schema.Int) })
 const decodeRows = <A>(row: Schema.Codec<A>) => Schema.decodeUnknownSync(Schema.Array(row))
 
 /** Every driver throw and undecodable row ends in this store's typed error, never a defect. */
@@ -44,7 +46,7 @@ const transaction = <A>(database: DatabaseSync, run: () => A): A => {
   }
 }
 
-const storeFailure = (operation: "list" | "get" | "put") => (cause: unknown) =>
+const storeFailure = (operation: SandboxStoreUnavailable["operation"]) => (cause: unknown) =>
   new SandboxStoreUnavailable({ operation, detail: String(cause) })
 const logFailure = (cause: unknown) => new RunLogUnavailable({ detail: String(cause) })
 
@@ -79,6 +81,10 @@ export const openSandboxDatabase = Effect.fn("SandboxDatabase.open")(function*(p
             seq INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL, started INTEGER NOT NULL, entry TEXT NOT NULL
           );
           CREATE INDEX IF NOT EXISTS sandbox_run_entries_run ON sandbox_run_entries (run_id, seq);
+          CREATE TABLE IF NOT EXISTS sandbox_sweep (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            swept_at INTEGER
+          );
         `)
         const insert = database.prepare(
           "INSERT OR IGNORE INTO sandboxes (account_id, version, record) VALUES (?, 0, ?)"
@@ -143,7 +149,21 @@ export const openSandboxDatabase = Effect.fn("SandboxDatabase.open")(function*(p
               )
           }
         })
-      )
+      ),
+    sweepAt: attempt(() => {
+      const row = database.prepare("SELECT swept_at FROM sandbox_sweep WHERE id = 1").get()
+      return row === undefined ? null : Schema.decodeUnknownSync(SweepRow)(row).swept_at
+    }, storeFailure("sweep")),
+    markSweep: (at) =>
+      attempt(
+        () =>
+          database
+            .prepare(
+              "INSERT INTO sandbox_sweep (id, swept_at) VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET swept_at = excluded.swept_at"
+            )
+            .run(at),
+        storeFailure("sweep")
+      ).pipe(Effect.andThen(secure(storeFailure("sweep"))), Effect.asVoid)
   })
 
   const entriesOf = (runIds: ReadonlyArray<string>): ReadonlyArray<RunEntry> =>
@@ -177,7 +197,36 @@ export const openSandboxDatabase = Effect.fn("SandboxDatabase.open")(function*(p
             .all(Math.max(0, Math.floor(limit)))
         )
         return summarizeRuns(entriesOf(runs.map(({ run_id }) => run_id)))
-      }, logFailure)
+      }, logFailure),
+    forAccount: (accountId, options) =>
+      attempt(() => {
+        const started = decodeRows(EntryRow)(
+          database.prepare("SELECT entry FROM sandbox_run_entries WHERE started = 1 ORDER BY seq DESC").all()
+        ).flatMap((row) => {
+          const decoded = decodeEntry(row.entry)
+          return decoded._tag === "Started" && decoded.accountId === accountId ? [decoded.runId] : []
+        })
+        return started
+      }, logFailure).pipe(
+        Effect.flatMap((runIds) => pageRuns(runIds.map((runId) => ({ runId })), options)),
+        Effect.flatMap(({ next, page }) =>
+          attempt(() => {
+            const byId = new Map(
+              summarizeRuns(entriesOf(page.map((item) => item.runId))).map((summary) => [
+                summary.runId,
+                summary
+              ])
+            )
+            return {
+              runs: page.flatMap((item) => {
+                const summary = byId.get(item.runId)
+                return summary === undefined ? [] : [summary]
+              }),
+              next
+            }
+          }, logFailure)
+        )
+      )
   })
 
   return { store, runLog }

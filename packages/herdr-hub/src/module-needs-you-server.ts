@@ -1,14 +1,23 @@
 import { Cause, Effect, Exit, Option, Result, Schema } from "effect"
 import {
+  type NeedsYouContribution,
   type NeedsYouItem,
   NeedsYouProviderResult,
   type NeedsYouResult,
   type NeedsYouSource
 } from "./module-needs-you.js"
 
+interface Reading {
+  readonly provider: NeedsYouContribution["provider"]
+  readonly asOf: NeedsYouContribution["asOf"]
+  readonly items: ReadonlyArray<NeedsYouItem>
+  readonly sources: ReadonlyArray<NeedsYouSource>
+}
+
 export interface NeedsYouProvider {
   readonly id: string
-  readonly read: Effect.Effect<NeedsYouProviderResult>
+  readonly pages: ReadonlyArray<string>
+  readonly read: Effect.Effect<NeedsYouProviderResult, unknown>
 }
 
 /**
@@ -23,11 +32,16 @@ export const collectNeedsYou = Effect.fn("ModuleRegistry.collectNeedsYou")(funct
     Effect.fnUntraced(function*(provider) {
       const result = yield* Effect.exit(provider.read.pipe(Effect.timeoutOption("4 seconds")))
       if (Exit.isFailure(result)) {
-        if (Cause.hasInterrupts(result.cause)) return yield* Effect.failCause(result.cause)
+        if (Cause.hasInterrupts(result.cause)) {
+          const [fiberId] = Cause.interruptors(result.cause)
+          return yield* Effect.failCause(Cause.interrupt(fiberId))
+        }
         yield* Effect.logError("Needs-you provider failed", result.cause).pipe(
           Effect.annotateLogs("module", provider.id)
         )
         return {
+          provider: provider.id,
+          asOf: null,
           items: [],
           sources: [{
             provider: provider.id,
@@ -36,10 +50,12 @@ export const collectNeedsYou = Effect.fn("ModuleRegistry.collectNeedsYou")(funct
               reason: "internal"
             }
           }]
-        } satisfies { readonly items: ReadonlyArray<NeedsYouItem>; readonly sources: ReadonlyArray<NeedsYouSource> }
+        } satisfies Reading
       }
       if (Option.isNone(result.value)) {
         return {
+          provider: provider.id,
+          asOf: null,
           items: [],
           sources: [{
             provider: provider.id,
@@ -48,13 +64,20 @@ export const collectNeedsYou = Effect.fn("ModuleRegistry.collectNeedsYou")(funct
               reason: "timeout"
             }
           }]
-        } satisfies { readonly items: ReadonlyArray<NeedsYouItem>; readonly sources: ReadonlyArray<NeedsYouSource> }
+        } satisfies Reading
       }
       const decoded = Schema.decodeUnknownResult(NeedsYouProviderResult, { onExcessProperty: "error" })(
         result.value.value
       )
-      if (Result.isFailure(decoded) || decoded.success.items.some((item) => item.destination.module !== provider.id)) {
+      const invalidDestination = Result.isSuccess(decoded) &&
+        decoded.success.items.some((item) =>
+          item.destination.module !== provider.id ||
+          (item.destination._tag === "ModulePage" && !provider.pages.includes(item.destination.page))
+        )
+      if (Result.isFailure(decoded) || invalidDestination) {
         return {
+          provider: provider.id,
+          asOf: null,
           items: [],
           sources: [{
             provider: provider.id,
@@ -63,16 +86,18 @@ export const collectNeedsYou = Effect.fn("ModuleRegistry.collectNeedsYou")(funct
               reason: "invalid_response"
             }
           }]
-        } satisfies { readonly items: ReadonlyArray<NeedsYouItem>; readonly sources: ReadonlyArray<NeedsYouSource> }
+        } satisfies Reading
       }
       return {
+        provider: provider.id,
+        asOf: decoded.success.asOf,
         items: decoded.success.items.map(({ sourceKey, ...item }) => ({
           ...item,
           provider: provider.id,
           key: `${provider.id}:${sourceKey}`
         })),
         sources: decoded.success.issues.map((issue) => ({ provider: provider.id, issue }))
-      }
+      } satisfies Reading
     }),
     { concurrency: 4 }
   )
@@ -107,5 +132,8 @@ export const collectNeedsYou = Effect.fn("ModuleRegistry.collectNeedsYou")(funct
       sources.push({ provider, issue: { state: "truncated" } })
     }
   }
-  return sources.length === 0 ? { _tag: "Complete", items: bounded } : { _tag: "Partial", items: bounded, sources }
+  const contributions = readings.map((reading) => ({ provider: reading.provider, asOf: reading.asOf }))
+  return sources.length === 0
+    ? { _tag: "Complete", items: bounded, contributions }
+    : { _tag: "Partial", items: bounded, sources, contributions }
 })

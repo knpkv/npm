@@ -71,7 +71,7 @@ it.each(notificationStates)("forwards page-owned notification state %s", async (
       atoms,
       now: 2_000,
       notificationState,
-      readApprovals: Effect.succeed({ _tag: "Complete", items: [] })
+      readApprovals: Effect.succeed({ _tag: "Complete", items: [], contributions: [] })
     })
     await act(async () =>
       root.render(

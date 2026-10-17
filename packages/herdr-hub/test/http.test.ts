@@ -7536,7 +7536,7 @@ esac
             routes: [],
             needsYou: Effect.sync(() => {
               reads += 1
-              return { items: [], issues: [] }
+              return { items: [], issues: [], asOf: null }
             })
           })
         }
@@ -7671,6 +7671,10 @@ esac
         items: [],
         sources: [
           { provider: "fleet", issue: { state: "hosts", hosts: [{ host: "SER8", reason: "request_failed" }] } }
+        ],
+        contributions: [
+          { provider: "sandboxes", asOf: null },
+          { provider: "fleet", asOf: null }
         ]
       })
       writeFileSync(hub.statusFile, "invalid status JSON")
@@ -7681,6 +7685,10 @@ esac
         sources: [
           { provider: "fleet", issue: { state: "failed", reason: "request_failed" } },
           { provider: "fleet", issue: { state: "hosts", hosts: [{ host: "SER8", reason: "request_failed" }] } }
+        ],
+        contributions: [
+          { provider: "sandboxes", asOf: null },
+          { provider: "fleet", asOf: null }
         ]
       })
       expect(discoveryFailure.body).not.toContain("fixture busy")

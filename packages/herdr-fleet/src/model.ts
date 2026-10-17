@@ -667,6 +667,11 @@ export const HostConfiguration = Schema.Struct({
   heavyGate: Schema.optionalKey(Schema.Struct({
     lockDirectory: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(1024), Schema.isPattern(/^\//))
   })),
+  /**
+   * This host's sandbox pool, decoded again by the hub as a pool contract. Absent means this host
+   * does not own a pool. Role names stay in this document. Account ids are the read model's identity.
+   */
+  sandboxPool: Schema.optionalKey(Schema.Record(Schema.String, Schema.Json)),
   coordinatorCommand: Command,
   herdrCommand: Schema.String,
   tailscaleCommand: Schema.String,

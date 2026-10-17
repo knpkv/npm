@@ -169,6 +169,23 @@ export const stacksModule = defineModule({
   requires: ["read"]
 })
 
+/**
+ * Sandbox pool reads on the configured host only (`RELAY_SANDBOXES_HOST`), and only when that host's
+ * configuration carries the pool. Lease, reset and budget-lift stay Fleet jobs. No peer transport.
+ */
+export const sandboxesModule = defineModule({
+  id: "sandboxes",
+  label: "Sandboxes",
+  defaultPage: "overview",
+  pages: [
+    { id: "overview", label: "Overview" },
+    { id: "account", label: "Account" },
+    { id: "runs", label: "Runs" }
+  ],
+  listeners: ["serve"],
+  requires: ["read"]
+})
+
 /** Local host observations only; no operational actions or peer aggregation. */
 export const resourcesModule = defineModule({
   id: "resources",

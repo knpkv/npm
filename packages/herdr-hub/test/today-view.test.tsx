@@ -21,7 +21,7 @@ const render = (state: TodayReadState, now = 1_000) => {
   return host
 }
 const ready = (items: ReadonlyArray<NeedsYouItem>): TodayReadState => ({
-  reading: { result: { _tag: "Complete", items }, checkedAt: 1_000 },
+  reading: { result: { _tag: "Complete", items, contributions: [] }, checkedAt: 1_000 },
   failed: false
 })
 
@@ -64,7 +64,8 @@ describe("Today view", () => {
           sources: [
             { provider: "fleet", issue: { state: "hosts", hosts: [{ host: "ALPHA", reason: "offline" }] } },
             { provider: "fleet", issue: { state: "truncated" } }
-          ]
+          ],
+          contributions: []
         }
       },
       failed: false
@@ -97,7 +98,12 @@ describe("Today view", () => {
     const host = render({
       reading: {
         checkedAt: 1_000,
-        result: { _tag: "Partial", items: [item], sources: [{ provider: "fleet", issue: { state: "truncated" } }] }
+        result: {
+          _tag: "Partial",
+          items: [item],
+          sources: [{ provider: "fleet", issue: { state: "truncated" } }],
+          contributions: []
+        }
       },
       failed: true
     })

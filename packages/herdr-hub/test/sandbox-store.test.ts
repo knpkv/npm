@@ -153,4 +153,19 @@ it.layer(NodeServices.layer)("sandbox store", (it) => {
       }))
       expect((yield* runLog.recent(2)).map(({ runId }) => runId)).toEqual(["run-b", "run-a"])
     }).pipe(Effect.scoped))
+
+  it.effect("keeps the sweep time across reopen", () =>
+    Effect.gen(function*() {
+      const path = yield* databasePath
+      yield* Effect.scoped(Effect.gen(function*() {
+        const { store } = yield* openSandboxDatabase(path, contract)
+        expect(yield* store.sweepAt).toBeNull()
+        yield* store.markSweep(1_700_000_000_000)
+        expect(yield* store.sweepAt).toBe(1_700_000_000_000)
+      }))
+      yield* Effect.scoped(Effect.gen(function*() {
+        const { store } = yield* openSandboxDatabase(path, contract)
+        expect(yield* store.sweepAt).toBe(1_700_000_000_000)
+      }))
+    }))
 })
