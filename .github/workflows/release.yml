@@ -79,14 +79,14 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.TOKEN_NPM }}
           HUSKY: 0
       # Review bots skip pull requests labelled release, so the Version Packages PR gets the label. The
-      # action sets pullRequestNumber only when it opened or updated that PR. --force creates the label
+      # action sets pr-number only when it opened or updated that PR. --force creates the label
       # or leaves an existing one as configured here.
       - name: Label the release pull request
-        if: steps.changesets.outputs.pullRequestNumber != ''
+        if: steps.changesets.outputs.pr-number != ''
         env:
           GH_TOKEN: ${{ secrets.TOKEN_GITHUB }}
           GH_REPO: ${{ github.repository }}
-          PULL_REQUEST: ${{ steps.changesets.outputs.pullRequestNumber }}
+          PULL_REQUEST: ${{ steps.changesets.outputs.pr-number }}
         run: |
           gh label create release --force --color ededed --description "Version Packages pull request"
           gh pr edit "$PULL_REQUEST" --add-label release
