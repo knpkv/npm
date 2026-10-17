@@ -6,7 +6,7 @@
  * @module
  */
 import type { CanvasGraph, CanvasGraphReading } from "@knpkv/review/canvas"
-import { Deferred, type Duration, Effect, Fiber, Ref } from "effect"
+import { Deferred, type Duration, Effect, Fiber, Ref, Semaphore } from "effect"
 import type { CodeHostReadError } from "../host-model.js"
 import { buildCanvasGraph, canvasFileOf, type CanvasSourceFile } from "./CanvasGraphBuilder.js"
 
@@ -25,7 +25,10 @@ interface Job {
 }
 
 export interface CanvasGraphJobs {
-  /** Read the graph for `key` (a PR reference and its head), loading files `0..total-1` on first use. */
+  /**
+   * Read the graph for `key`, loading files `0..total-1` on first use. The key must name everything the reads depend
+   * on: the PR reference, its revision and head, and the caller whose grants and audit the loads use.
+   */
   readonly read: (
     key: string,
     headRevision: string,
@@ -41,6 +44,8 @@ export const makeCanvasGraphJobs = Effect.fn("CanvasGraphJobs.make")(function*(
 ) {
   const scope = yield* Effect.scope
   const jobs = yield* Ref.make<ReadonlyMap<string, Job>>(new Map())
+  // Finding or starting a job is one step, so concurrent first reads share a single job.
+  const admission = yield* Semaphore.make(1)
   const start = Effect.fn("CanvasGraphJobs.start")(function*(
     headRevision: string,
     total: number,
@@ -100,9 +105,13 @@ export const makeCanvasGraphJobs = Effect.fn("CanvasGraphJobs.make")(function*(
     })
   const read: CanvasGraphJobs["read"] = Effect.fn("CanvasGraphJobs.read")(
     function*(key, headRevision, total, load) {
-      const known = (yield* Ref.get(jobs)).get(key)
-      const job = known ?? (yield* start(headRevision, total, load))
-      if (known === undefined) yield* register(key, job)
+      const job = yield* admission.withPermits(1)(Effect.gen(function*() {
+        const known = (yield* Ref.get(jobs)).get(key)
+        if (known !== undefined) return known
+        const started = yield* start(headRevision, total, load)
+        yield* register(key, started)
+        return started
+      }))
       yield* Deferred.await(job.settled).pipe(Effect.timeoutOption(grace))
       const state = yield* Ref.get(job.state)
       switch (state._tag) {

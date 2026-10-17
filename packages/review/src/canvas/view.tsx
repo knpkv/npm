@@ -846,7 +846,7 @@ const FindingCard = ({
       )}
       {phone ? null : (
         <div className="rc-row" data-canvas-part="action">
-          <Button aria-pressed={handled} onClick={() => props.onToggleHandled(finding.id)}>
+          <Button size="default" aria-pressed={handled} onClick={() => props.onToggleHandled(finding.id)}>
             {handled ? "Handled" : "Mark handled"}
           </Button>
           <span className="rc-small" style={{ fontSize: ".8125rem" }}>

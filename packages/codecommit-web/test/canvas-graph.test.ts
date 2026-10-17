@@ -132,4 +132,19 @@ describe("buildCanvasGraph", () => {
     }])
     expect(binary.files[0]).toMatchObject({ added: 0, removed: 0, parts: { _tag: "NotRecorded" } })
   })
+
+  it("records no parts for a file with more parts than the canvas can show", () => {
+    const many = Array.from({ length: 201 }, (_, index) => `export function f${index}() {}`).join("\n")
+    const graph = buildCanvasGraph("head", [added("generated.ts", `${many}\n`)])
+    expect(graph.files[0]?.parts).toEqual({ _tag: "NotRecorded" })
+  })
+
+  it("records no dependency data past the edge limit instead of failing the reading", () => {
+    const sources = Array.from({ length: 72 }, (_, index) =>
+      added(
+        `src/f${index}.ts`,
+        Array.from({ length: 72 }, (_, other) => `import "./f${other}"`).join("\n") + "\n"
+      ))
+    expect(buildCanvasGraph("head", sources).dependencies).toEqual({ _tag: "NotRecorded", language: null })
+  })
 })

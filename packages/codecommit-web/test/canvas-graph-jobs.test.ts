@@ -62,4 +62,16 @@ describe("canvas graph jobs", () => {
       yield* jobs.read("a", "head-a", 1, load)
       expect(yield* Ref.get(loads)).toBe(3)
     }))
+
+  it.effect("shares one job between concurrent first reads", () =>
+    Effect.gen(function*() {
+      const jobs = yield* makeCanvasGraphJobs(4, "1 second")
+      const loads = yield* Ref.make(0)
+      const load = (index: number) => Ref.update(loads, (count) => count + 1).pipe(Effect.as(source(index)))
+      const readings = yield* Effect.all([jobs.read("k", "head", 3, load), jobs.read("k", "head", 3, load)], {
+        concurrency: "unbounded"
+      })
+      expect(readings.map((reading) => reading._tag)).toEqual(["Ready", "Ready"])
+      expect(yield* Ref.get(loads)).toBe(3)
+    }))
 })

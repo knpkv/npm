@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { canvasFiles } from "../src/canvas/derive.js"
 import {
+  CANVAS_WIDTH,
   canvasNodeHeight,
   clusterOf,
   layoutCluster,
@@ -71,6 +72,9 @@ describe("overview layout", () => {
     expect(modules.lines).toEqual([])
     expect(modules.regions.map((region) => region.id)).toEqual(["stage", "sync-worker", "composer", "tests"])
     expect(pairs(modules.nodes).filter(([left, right]) => overlaps(left, right))).toEqual([])
+    expect(new Set(modules.regions.map((region) => region.h)).size).toBe(1)
+    // Four columns end at 1004; the frame keeps the column gap after them, so it stays the standard width.
+    expect(modules.width).toBe(CANVAS_WIDTH)
   })
 
   it("draws edges without bands when partitions were not recorded", () => {
@@ -134,6 +138,11 @@ describe("file layout", () => {
 
   it("pins the most severe finding under its part", () => {
     expect(scene.card).toEqual({ row: 0, finding: "F1" })
+  })
+
+  it("sizes the box to its content and its 2px border", () => {
+    // Header 48, five rows of 44, the pinned card 128, 6 below the last row, and the border top and bottom.
+    expect(scene.box.h).toBe(48 + 5 * 44 + 128 + 6 + 4)
   })
 
   it("puts callers on the left and callees on the right, without overlaps", () => {

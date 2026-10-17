@@ -38,8 +38,8 @@ const Fn = Schema.Struct({
   f: Schema.optionalKey(Schema.String)
 })
 
-/** A drawn edge leaves a function row by index, or the box's top or bottom. */
-const Anchor = Schema.Union([Schema.Int, Schema.Literals(["top", "bottom"])])
+/** A stub at the canvas edge: which file it stands for and the phrase that says how it meets the drawn file. */
+const Stub = Schema.Struct({ label: Schema.NonEmptyString, line: Schema.String })
 
 const CanvasData = Schema.Struct({
   reviewDirections: Schema.Struct({
@@ -85,19 +85,18 @@ const CanvasData = Schema.Struct({
         })
       ),
       clusterA: Schema.Struct({
-        boxes: Schema.Array(Schema.Struct({ file: Schema.NonEmptyString, fns: Schema.Array(Fn) })),
-        edges: Schema.Array(Schema.Struct({
-          from: Schema.Tuple([Schema.NonEmptyString, Anchor]),
-          to: Schema.Tuple([Schema.NonEmptyString, Anchor]),
-          rel: Schema.String
+        boxes: Schema.Array(Schema.Struct({
+          file: Schema.NonEmptyString,
+          x: Schema.Number,
+          y: Schema.Number,
+          w: Schema.Number,
+          fns: Schema.Array(Fn)
         })),
-        stubs: Schema.Array(Schema.Struct({
-          toFile: Schema.NonEmptyString,
-          toFn: Schema.Int,
-          dir: Schema.Literals(["in", "out"]),
-          label: Schema.NonEmptyString,
-          line: Schema.String
-        }))
+        lines: Schema.Array(Schema.Struct({
+          p: Schema.Tuple([Schema.Number, Schema.Number, Schema.Number, Schema.Number]),
+          rel: Schema.NullOr(Schema.String)
+        })),
+        stubs: Schema.Array(Stub)
       }),
       fileZoom: Schema.Struct({
         file: Schema.NonEmptyString,
@@ -106,13 +105,15 @@ const CanvasData = Schema.Struct({
           kind: Schema.NonEmptyString,
           lines: Schema.Int,
           range: Schema.String.check(Schema.isPattern(/^\d+–\d+$/u))
-        }))
+        })),
+        stubs: Schema.Array(Stub)
       }),
       diff: Schema.Struct({
         file: Schema.NonEmptyString,
         fn: Schema.NonEmptyString,
         readLine: Schema.String,
-        lines: Schema.Array(Schema.Struct({ n: Schema.Int, c: Schema.String }))
+        lines: Schema.Array(Schema.Struct({ n: Schema.Int, c: Schema.String })),
+        stubs: Schema.Array(Stub)
       }),
       building: Schema.Struct({ line: Schema.String }),
       readingPath: Schema.Struct({
@@ -195,6 +196,62 @@ const relations = { calls: "calls", imports: "imports", "moved from": "moved_fro
   "calls" | "imports" | "moved_from"
 >
 
+interface EdgeParts {
+  readonly fromPart: string | null
+  readonly toPart: string | null
+}
+
+/** Cluster boxes are 52 px of header, 38 px per function row and a 6 px foot; a row's centre is 17 px into it. */
+const rowAt = (canvas: Canvas, path: string, x: number, y: number): string | null => {
+  const box = canvas.clusterA.boxes.find((entry) => entry.file === path)
+  if (box === undefined || (x !== box.x && x !== box.x + box.w)) return null
+  const row = (y - box.y - 52 - 17) / 38
+  return Number.isInteger(row) ? box.fns[row]?.n ?? null : null
+}
+
+/** A cluster line that ends on a function row's centre names that function. */
+const drawnParts = (canvas: Canvas, from: string, to: string): EdgeParts => {
+  const inside = (path: string, x: number, y: number) => {
+    const box = canvas.clusterA.boxes.find((entry) => entry.file === path)
+    if (box === undefined) return false
+    const h = 52 + box.fns.length * 38 + 6
+    return x >= box.x && x <= box.x + box.w && y >= box.y && y <= box.y + h
+  }
+  const line = canvas.clusterA.lines.find(({ p: [x1, y1, x2, y2], rel }) =>
+    rel !== null && inside(from, x1, y1) && inside(to, x2, y2)
+  )
+  if (line === undefined) return { fromPart: null, toPart: null }
+  const [x1, y1, x2, y2] = line.p
+  return { fromPart: rowAt(canvas, from, x1, y1), toPart: rowAt(canvas, to, x2, y2) }
+}
+
+const stubFile = (canvas: Canvas, label: string): string | undefined => {
+  const name = label.split(",")[0] ?? label
+  return canvas.files.find((file) => file.path === name || file.path.endsWith(`/${name}`))?.path
+}
+
+/** A stub's phrase names the parts it joins: "A() calls B()", "A() moved into B()" or "imports B()". */
+const phrasedParts = (canvas: Canvas, from: string, to: string): EdgeParts => {
+  const boxes = canvas.clusterA.boxes.map((box) => box.file)
+  const groups = [
+    { drawn: boxes, stubs: canvas.clusterA.stubs },
+    { drawn: [canvas.fileZoom.file], stubs: canvas.fileZoom.stubs },
+    { drawn: [canvas.diff.file], stubs: canvas.diff.stubs }
+  ]
+  for (const group of groups) {
+    for (const stub of group.stubs) {
+      const file = stubFile(canvas, stub.label)
+      const joins = (file === from && group.drawn.includes(to)) || (file === to && group.drawn.includes(from))
+      if (!joins) continue
+      const joined = /^(\S+\(\)) (?:calls|moved into) (\S+\(\))/u.exec(stub.line)
+      if (joined !== null) return { fromPart: joined[1] ?? null, toPart: joined[2] ?? null }
+      const imported = file === from ? /^imports (\S+\(\))/u.exec(stub.line) : null
+      if (imported !== null) return { fromPart: null, toPart: imported[1] ?? null }
+    }
+  }
+  return { fromPart: null, toPart: null }
+}
+
 const canvasGraph = (canvas: Canvas, state: CanvasState) => {
   const files = canvas.files.map((file) => {
     const newFile = file.rem === 0
@@ -208,24 +265,15 @@ const canvasGraph = (canvas: Canvas, state: CanvasState) => {
       parts: parts === null ? { _tag: "NotRecorded" } : { _tag: "Recorded", items: parts }
     }
   })
-  const fnName = (path: string, index: number | "top" | "bottom"): string | null => {
-    if (index === "top" || index === "bottom") return null
-    return canvas.clusterA.boxes.find((box) => box.file === path)?.fns[index]?.n ?? null
-  }
   const edges = canvas.edges.map((edge) => {
-    const drawn = canvas.clusterA.edges.find((entry) => entry.from[0] === edge.from && entry.to[0] === edge.to)
-    const stub = canvas.clusterA.stubs.find((entry) =>
-      entry.dir === "in" ? edge.from === entry.label && edge.to === entry.toFile : edge.from === entry.toFile &&
-        edge.to.endsWith(`/${entry.label.split(",")[0]}`)
-    )
-    const stubPart = stub === undefined ? null : fnName(stub.toFile, stub.toFn)
-    const called = stub?.dir === "out" ? /calls (\S+\(\))$/u.exec(stub.line)?.[1] ?? null : null
+    const parts = drawnParts(canvas, edge.from, edge.to)
+    const phrased = phrasedParts(canvas, edge.from, edge.to)
     return {
       from: edge.from,
       to: edge.to,
       relation: relations[edge.rel],
-      fromPart: drawn === undefined ? (stub?.dir === "out" ? stubPart : null) : fnName(edge.from, drawn.from[1]),
-      toPart: drawn === undefined ? (stub?.dir === "in" ? stubPart : called) : fnName(edge.to, drawn.to[1])
+      fromPart: parts.fromPart ?? phrased.fromPart,
+      toPart: parts.toPart ?? phrased.toPart
     }
   })
   const graph = {

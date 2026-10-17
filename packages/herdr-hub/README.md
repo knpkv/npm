@@ -213,7 +213,7 @@ install the read-only Review/Conversation workspace. The existing Diffs page kee
 cached diff owner and Back/Forward behavior.
 
 `GET /v1/modules/code/canvas?ref=…` returns that revision's canvas reading through the same boundary.
-`view=canvas` on a selected PR opens the review canvas; the page re-reads a building map once a second
+`view=canvas` on a selected PR opens the review canvas; the page re-reads a building map every two seconds
 until it is ready, and reads one file's text only at Diff zoom. "Mark handled" is a reading mark for
 this page only; nothing is posted.
 

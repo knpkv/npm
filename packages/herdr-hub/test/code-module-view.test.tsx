@@ -379,8 +379,8 @@ describe("Code module reads", { concurrent: false }, () => {
     await vi.waitFor(() => expect(document.body.textContent).toContain("Building the map"), { timeout: 3_000 })
     expect(document.body.textContent).toContain("Read the canvas")
     await vi.waitFor(() => expect(document.querySelector('[data-canvas-node="src/a.ts"]')).not.toBeNull(), {
-      timeout: 3_000
+      timeout: 5_000
     })
     expect(canvas).toHaveBeenCalledTimes(2)
-  })
+  }, 10_000)
 })

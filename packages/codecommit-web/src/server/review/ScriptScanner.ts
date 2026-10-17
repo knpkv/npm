@@ -67,16 +67,46 @@ const mask = (text: string): Masked => {
 
 const importBefore = /(?:\bfrom|(?:^|[\n;{}])\s*import|\bimport\s*\(|\brequire\s*\()\s*$/u
 
-const declarationPatterns: ReadonlyArray<{ readonly pattern: RegExp; readonly suffix: string }> = [
-  { pattern: /^(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s*\*?\s*([A-Za-z_$][\w$]*)/u, suffix: "()" },
+type DeclarationKind = "function" | "class" | "variable"
+
+const declarationPatterns: ReadonlyArray<{ readonly pattern: RegExp; readonly kind: DeclarationKind }> = [
   {
-    pattern:
-      /^(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][\w$]*)(?:\s*:[^=]+)?\s*=\s*(?:async\s+)?(?:function\b|\(|[A-Za-z_$][\w$]*\s*=>)/u,
-    suffix: "()"
+    pattern: /^(?:export\s+)?(?:default\s+)?(?:declare\s+)?(?:async\s+)?function\s*\*?\s*([A-Za-z_$][\w$]*)/u,
+    kind: "function"
   },
-  { pattern: /^(?:export\s+)?(?:default\s+)?(?:abstract\s+)?class\s+([A-Za-z_$][\w$]*)/u, suffix: "" }
+  { pattern: /^(?:export\s+)?(?:declare\s+)?(?:const|let|var)\s+([A-Za-z_$][\w$]*)/u, kind: "variable" },
+  { pattern: /^(?:export\s+)?(?:default\s+)?(?:abstract\s+)?class\s+([A-Za-z_$][\w$]*)/u, kind: "class" }
 ]
 
+/** The initializer of a variable statement: the text after its first `=` that is not part of `=>`, `==` or `<=`. */
+const initializerOf = (statement: string): string | null => {
+  const match = /(?<![=!<>])=(?![=>])/u.exec(statement)
+  return match === null ? null : statement.slice(match.index + 1)
+}
+
+/** Overload signatures and their implementation are one part: merge same-name ranges, keeping first-seen order. */
+const merge = (declarations: ReadonlyArray<ScriptDeclaration>): ReadonlyArray<ScriptDeclaration> => {
+  const byName = new Map<string, ScriptDeclaration>()
+  for (const declaration of declarations) {
+    const known = byName.get(declaration.name)
+    byName.set(
+      declaration.name,
+      known === undefined
+        ? declaration
+        : {
+          name: declaration.name,
+          start: Math.min(known.start, declaration.start),
+          end: Math.max(known.end, declaration.end)
+        }
+    )
+  }
+  return Array.from(byName.values())
+}
+
+/**
+ * A variable is a part only when its initializer holds a function: an arrow, a function expression, or a call such
+ * as `Effect.fn("name")(function*() {...})` that wraps one. `const total = (a + b) * 2` is not a part.
+ */
 export const scanScript = (text: string): ScriptScan => {
   const { code, literals } = mask(text)
   const specifiers = literals.flatMap((literal) =>
@@ -86,16 +116,18 @@ export const scanScript = (text: string): ScriptScan => {
   const declarations: Array<ScriptDeclaration> = []
   let depth = 0
   let name: string | null = null
+  let kind: DeclarationKind = "function"
   let start = 0
   let opened = false
   let bracket = 0
   for (const [index, line] of lines.entries()) {
     const number = index + 1
     if (name === null && depth === 0) {
-      for (const { pattern, suffix } of declarationPatterns) {
-        const match = pattern.exec(line)
+      for (const candidate of declarationPatterns) {
+        const match = candidate.pattern.exec(line)
         if (match?.[1] !== undefined) {
-          name = `${match[1]}${suffix}`
+          name = match[1]
+          kind = candidate.kind
           start = number
           opened = false
           bracket = 0
@@ -113,10 +145,13 @@ export const scanScript = (text: string): ScriptScan => {
     }
     if (name === null || depth > 0 || bracket > 0) continue
     // A body that opened and closed ends here; an expression body ends with its statement.
-    if (opened || !/(?:=>|[=(,+\-*/?:&|])$/u.test(line.trimEnd())) {
-      declarations.push({ name, start, end: number })
+    if (opened || !/(?:=>|[=(,+\-*/?:&|<])$/u.test(line.trimEnd())) {
+      const initializer = kind === "variable" ? initializerOf(lines.slice(start - 1, number).join("\n")) : null
+      if (kind !== "variable" || (initializer !== null && /=>|\bfunction\b/u.test(initializer))) {
+        declarations.push({ name: kind === "class" ? name : `${name}()`, start, end: number })
+      }
       name = null
     }
   }
-  return { specifiers, declarations }
+  return { specifiers, declarations: merge(declarations) }
 }

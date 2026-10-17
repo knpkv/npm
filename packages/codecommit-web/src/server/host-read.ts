@@ -109,6 +109,8 @@ export const makeCodeHostReadsFromClient = Effect.fn("CodeHostReads.bind")(funct
   const fs = yield* FileSystem.FileSystem
   const check = yield* makeSavedPermissionCheck(options.permissionPath)
   const concurrency = yield* Semaphore.make(2)
+  // Background canvas reads take their own lane, so a building map never queues ahead of an interactive read.
+  const canvasLane = yield* Semaphore.make(1)
   // A small change answers Ready on its first read; a large one answers Building and the view reads again.
   const canvasJobs = yield* makeCanvasGraphJobs(8, "750 millis")
   const { cache, references } = options
@@ -141,17 +143,19 @@ export const makeCodeHostReadsFromClient = Effect.fn("CodeHostReads.bind")(funct
       caller: caller.login,
       check
     }).pipe(Effect.provideService(AuditLogRepo, audit))
-  const boundedRead = <A, E>(effect: Effect.Effect<A, E>): Effect.Effect<A, CodeHostReadError> =>
-    concurrency.withPermits(1)(effect).pipe(
-      Effect.timeout("15 seconds"),
-      Effect.tapError((cause) => Effect.logWarning("Code host provider read refused", cause)),
-      Effect.mapError((cause) => {
-        const decoded = Schema.decodeUnknownResult(ProviderReadFailure)(cause)
-        return Result.isSuccess(decoded)
-          ? readFailure(decoded.success)
-          : new CodeHostReadError({ reason: "unavailable" })
-      })
-    )
+  const boundedReadIn =
+    (lane: Semaphore.Semaphore) => <A, E>(effect: Effect.Effect<A, E>): Effect.Effect<A, CodeHostReadError> =>
+      lane.withPermits(1)(effect).pipe(
+        Effect.timeout("15 seconds"),
+        Effect.tapError((cause) => Effect.logWarning("Code host provider read refused", cause)),
+        Effect.mapError((cause) => {
+          const decoded = Schema.decodeUnknownResult(ProviderReadFailure)(cause)
+          return Result.isSuccess(decoded)
+            ? readFailure(decoded.success)
+            : new CodeHostReadError({ reason: "unavailable" })
+        })
+      )
+  const boundedRead = boundedReadIn(concurrency)
 
   return {
     queue: Effect.fn("CodeHostReads.queue")(function*(query: CodeQueueQuery) {
@@ -274,7 +278,7 @@ export const makeCodeHostReadsFromClient = Effect.fn("CodeHostReads.bind")(funct
         return { diff, pullRequest }
       }))
       const load = (index: number): Effect.Effect<CanvasSourceFile, CodeHostReadError> =>
-        boundedRead(Effect.gen(function*() {
+        boundedReadIn(canvasLane)(Effect.gen(function*() {
           const file = diff.files[index]
           if (file === undefined) return yield* new CodeHostReadError({ reason: "unavailable" })
           const client = yield* clientFor(caller)
@@ -291,7 +295,7 @@ export const makeCodeHostReadsFromClient = Effect.fn("CodeHostReads.bind")(funct
           return source
         }))
       const graph = yield* canvasJobs.read(
-        JSON.stringify([ref, diff.revisionId, diff.headCommit]),
+        JSON.stringify([ref, diff.revisionId, diff.headCommit, caller.login]),
         diff.headCommit,
         diff.files.length,
         load

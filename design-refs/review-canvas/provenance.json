@@ -1,6 +1,6 @@
 {
   "design": "Relay super app, page 16 Review D - Canvas, conformance screen screens/review-canvas.html",
-  "source_export": "export-1",
+  "source_export": "export-3",
   "states": 35,
   "viewports": [360, 390, 1280],
   "status": "All states designed. Each flips to implemented in the phase that builds it, with its live route.",

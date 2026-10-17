@@ -31,7 +31,7 @@ import { codeModule, moduleHref } from "./modules.js"
 
 const short = (commit: string): string => commit.slice(0, 7)
 
-/** Re-read a building canvas once a second until its graph is ready. */
+/** Re-read a building canvas every two seconds until its graph is ready. */
 const useCanvasReading = (reads: CodeModuleReads, ref: CodeReference, enabled: boolean, refresh: number) => {
   const [tick, setTick] = useState(0)
   const read = useMemo(() => reads.canvas(ref), [reads.canvas, ref, tick])
@@ -45,7 +45,7 @@ const useCanvasReading = (reads: CodeModuleReads, ref: CodeReference, enabled: b
   useEffect(() => {
     if (!enabled || !building || state.loading) return
     const fiber = Effect.runFork(
-      Effect.sleep("1 second").pipe(Effect.andThen(Effect.sync(() => setTick((n) => n + 1))))
+      Effect.sleep("2 seconds").pipe(Effect.andThen(Effect.sync(() => setTick((n) => n + 1))))
     )
     return () => {
       Effect.runFork(Fiber.interrupt(fiber))

@@ -60,4 +60,36 @@ describe("scanScript", () => {
     const text = ["export function outer() {", "  function inner() {", "    return 1", "  }", "}"].join("\n")
     expect(scanScript(text).declarations).toEqual([{ name: "outer()", start: 1, end: 5 }])
   })
+
+  it("keeps overload signatures and their implementation as one part", () => {
+    const text = [
+      "export function parse(value: string): number",
+      "export function parse(value: number): number",
+      "export function parse(value: string | number): number {",
+      "  return Number(value)",
+      "}"
+    ].join("\n")
+    expect(scanScript(text).declarations).toEqual([{ name: "parse()", start: 1, end: 5 }])
+  })
+
+  it("finds function-valued constants however they are written", () => {
+    const text = [
+      "export const read = Effect.fn(\"Reads.read\")(function*(ref: string) {",
+      "  return ref",
+      "})",
+      "export const id = <A>(value: A): A => {",
+      "  return value",
+      "}",
+      "export const handle: (value: number) => void = (value) => {",
+      "  void value",
+      "}",
+      "const total = (a + b) * 2",
+      "const config = { retries: 3 }"
+    ].join("\n")
+    expect(scanScript(text).declarations).toEqual([
+      { name: "read()", start: 1, end: 3 },
+      { name: "id()", start: 4, end: 6 },
+      { name: "handle()", start: 7, end: 9 }
+    ])
+  })
 })

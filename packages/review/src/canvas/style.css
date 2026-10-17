@@ -560,6 +560,11 @@
   .rc-fcard .rc-row {
     gap: 6px 12px;
   }
+  /* The finding's actions read heavier than tool buttons, as the design draws them. */
+  .rc-fcard [data-canvas-part="action"] > button {
+    font-size: 0.875rem;
+    font-weight: 600;
+  }
   .rc-fcard .rc-t {
     font-size: 1rem;
   }
@@ -839,8 +844,9 @@
   .rc-psum > span {
     font-size: 0.8125rem;
   }
+  /* The host reserves room for its own bottom bar; this is only the space after the list. */
   .rc-pmain {
-    padding: 8px 16px 112px;
+    padding: 8px 16px 36px;
     display: grid;
     gap: 18px;
     min-inline-size: 0;
@@ -1010,6 +1016,10 @@
   .rc-pact {
     display: grid;
     gap: 8px;
+  }
+  .rc-pact > button {
+    font-size: 1rem;
+    font-weight: 600;
   }
 
   @media (hover: hover) and (pointer: fine) {

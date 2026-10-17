@@ -25,6 +25,10 @@ export interface CanvasSourceFile {
     | { readonly _tag: "Opaque" }
 }
 
+/** Past these bounds a file's parts, or the change's edges, are not recorded rather than truncated. */
+const MAXIMUM_PARTS = 200
+const MAXIMUM_EDGES = 5_000
+
 const scriptExtensions = new Set(["ts", "mts", "cts", "tsx", "js", "mjs", "cjs", "jsx"])
 
 const languages = new Map<string, string>([
@@ -173,13 +177,14 @@ export const canvasFileOf = (source: CanvasSourceFile): CanvasFile => {
   const before = source.content.before ?? ""
   const after = source.content.after ?? ""
   const changes = lineChanges(before, after)
+  const parts = isScript(source.path) ? partsOf(source.status, before, after, changes) : []
   return {
     ...base,
     added: changes.added.size,
     removed: changes.removed.size,
-    parts: !isScript(source.path)
+    parts: !isScript(source.path) || parts.length > MAXIMUM_PARTS
       ? { _tag: "NotRecorded" }
-      : { _tag: "Recorded", items: partsOf(source.status, before, after, changes) }
+      : { _tag: "Recorded", items: parts }
   }
 }
 
@@ -254,5 +259,10 @@ export const buildCanvasGraph = (headRevision: string, sources: ReadonlyArray<Ca
       return [{ from: source.path, to, relation: "imports", fromPart: null, toPart: null }]
     })
   })
-  return { headRevision, files, dependencies: { _tag: "Recorded", edges }, partitions: { _tag: "NotRecorded" } }
+  return {
+    headRevision,
+    files,
+    dependencies: edges.length > MAXIMUM_EDGES ? { _tag: "NotRecorded", language: null } : { _tag: "Recorded", edges },
+    partitions: { _tag: "NotRecorded" }
+  }
 }

@@ -286,7 +286,7 @@ html[data-fs], html[data-fs] body { overflow: hidden; }
 .psum { display: grid; gap: 6px; }
 .psum h1 { margin: 0; font-size: 1.375rem; font-weight: 620; letter-spacing: -0.02em; line-height: 1.2; }
 .psum .repo { font: 520 .75rem/1.3 var(--rly-font-mono); color: var(--rly-color-text-2); }
-.psum span { font-size: .8125rem; }
+.psum > span { font-size: .8125rem; }
 .pcard { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--rly-color-border-1); border-radius: var(--rly-radius-group); background: var(--rly-color-surface-1); }
 .pcard h2 { margin: 0; font-size: 1rem; font-weight: 620; }
 .pcard .it { display: grid; gap: 4px; font-size: .875rem; }
@@ -325,6 +325,8 @@ html[data-fs], html[data-fs] body { overflow: hidden; }
 .pdl .c { white-space: pre-wrap; overflow-wrap: anywhere; padding-inline-end: 8px; }
 .pdiff .fcard { margin: 8px; padding: 12px; }
 .pact { display: grid; gap: 8px; }
+.fcard [data-region="action"] .rly_Button-module__root { font-weight: 600; font-size: .875rem; }
+.pact .rly_Button-module__root { font-weight: 600; font-size: 1rem; }
 @media (max-width: 599px) {
   body { padding-block-end: env(safe-area-inset-bottom); }
   .set { padding: 8px 16px 112px; }
@@ -408,10 +410,13 @@ html[data-fs], html[data-fs] body { overflow: hidden; }
     const clip = (r, [cx, cy], [tx, ty]) => { const dx = tx - cx, dy = ty - cy; const t = Math.min(dx ? Math.abs((r.w / 2) / dx) : Infinity, dy ? Math.abs((r.h / 2) / dy) : Infinity); return [cx + dx * t, cy + dy * t]; };
     const link = (a, b) => { const ca = center(a), cb = center(b); return [...clip(a, ca, cb), ...clip(b, cb, ca)]; };
     const ovMap = (ns) => Object.fromEntries(ns.map((n, i) => [d.files[i].path, n]));
+    const ovFilesM = d.modules.flatMap((m) => d.files.filter((x) => x.module === m.id));
+    const ovNodesM = (focus) => ovFilesM.map((x) => node(x, { x: x.x, y: x.y, w: x.w }, { focus: x.path === focus }));
     const ovEdges = (focus) => { const ns = ovMap(ovNodes()); return d.edges.map((e) => { const p = link(ns[e.from], ns[e.to]); return { p, dash: e.rel === "moved from", strong: !!focus && (e.from === focus || e.to === focus), e, mid: [(p[0] + p[2]) / 2, (p[1] + p[3]) / 2] }; }); };
     const regions = d.modules.map((m) => ({ ...m, count: m.files + " files" }));
     const bands = d.partitions.map((b) => ({ ...b, tabX: 12, tabY: b.h - 11 }));
     const full = { x: 0, y: 0, w: 1016, h: 640 };
+    const CH = d.canvasH, full1 = { x: 0, y: 0, w: 1016, h: CH }, mini1 = (vp) => ({ rects: d.modules, files: true, bands: true, vp, W: 1016, H: CH });
     const S = X.states;
     const base = { regions: [], bands: [], lines: [], labels: [], nodes: [], hl: [], ctx: [], stops: [], cols: [], notes: [], boxes: [], stubs: [], H: 640, legend: null, mini: { rects: d.modules, files: true, bands: true, vp: full, W: 1016, H: 640 }, panel: null, keys: false, sheet: null, doc: null, notice: null, fileZoom: null, diffZoom: null, building: false, linear: null, ctxToggle: null, files: false };
 
@@ -425,26 +430,23 @@ html[data-fs], html[data-fs] body { overflow: hidden; }
     const bx = Object.fromEntries(boxes.map((b) => [b.file, b]));
     const rowY = (b, i) => b.y + 52 + i * 38 + 17;
     const anchor = (b, spec, other) => spec === "top" ? [b.x + b.w / 2, b.y] : spec === "bottom" ? [b.x + b.w / 2, b.y + b.h] : [other.x > b.x ? b.x + b.w : b.x, rowY(b, spec)];
-    const clusterLines = CA.edges.map((e) => { const a = bx[e.from[0]], b = bx[e.to[0]]; const p1 = e.from[1] === 0 && a.x === b.x ? [a.x + a.w / 2, a.y] : anchor(a, e.from[1], b); const p2 = anchor(b, e.to[1], a); return { p: [...p1, ...p2], dash: e.rel === "moved from", rel: e.rel, mid: [(p1[0] + p2[0]) / 2, (p1[1] + p2[1]) / 2] }; });
-    const stubLines = CA.stubs.map((s) => { const b = bx[s.toFile], sp = [s.x, s.y + 24], bp = [b.x + b.w, rowY(b, s.toFn)]; return { p: s.dir === "in" ? [...sp, ...bp] : [...bp, ...sp], dash: true, ink: "faint" }; });
+    const clusterLines = CA.lines.map((l) => ({ p: l.p, dash: l.dash, ink: l.ink, rel: l.rel, mid: [(l.p[0] + l.p[2]) / 2, (l.p[1] + l.p[3]) / 2] }));
     const stubOf = (s, align) => ({ ...s, align, failing: (s.line || "").includes("failing") || !!s.failing });
 
     // File zoom
     const FZ = d.fileZoom;
-    const fzRowY = (i) => 72 + 48 + 22 + i * 44 + (i >= 1 ? 128 : 0);
-    const callerY = [112, 176, fzRowY(2) - 24], calleeY = [112, fzRowY(1) - 46, fzRowY(1) + 18];
-    const fileZoom = { rows: FZ.fns.map((fn) => ({ ...fn, bar: Math.round((fn.lines / 46) * 100) + "%", moved: fn.kind.startsWith("Moved") })) };
-    const fzStubs = [...FZ.callers.map((c, i) => stubOf({ label: c.file, line: c.line, x: 24, y: callerY[i], w: 180, failing: !!c.failing }, "end")), ...FZ.callees.map((c, i) => stubOf({ label: c.file, line: c.line, x: 784, y: calleeY[i], w: 210 }, "start"))];
-    const fzLines = [...FZ.callers.map((c, i) => ({ p: [204, callerY[i] + 24, 230, fzRowY(c.fn)], dash: true, ink: "faint" })), ...FZ.callees.map((c, i) => ({ p: [750, fzRowY(c.fn), 784, calleeY[i] + 24], dash: true, ink: "faint" }))];
+    const fileZoom = { rows: FZ.fns.map((fn) => ({ ...fn, bar: Math.round((fn.lines / Math.max(...FZ.fns.map((q) => q.lines))) * 100) + "%", moved: fn.kind.startsWith("Moved") })) };
+    const fzStubs = FZ.stubs.map((s) => stubOf(s, s.side === "left" ? "end" : "start"));
+    const fzLines = FZ.lines.map((p) => ({ p, dash: true, ink: "faint" }));
 
     // Diff zoom
     const DF = d.diff;
-    const dfStubs = DF.neighbours.map((n) => stubOf({ ...n }, n.side === "left" ? "end" : "start"));
-    const dfLines = [[94, 204, 120, 112], [94, 324, 120, 300], [820, 112, 930, 204], [420, 560, 420, 604]].map((p) => ({ p, dash: true, ink: "faint" }));
+    const dfStubs = DF.stubs.map((s) => stubOf(s, s.side === "left" ? "end" : "start"));
+    const dfLines = DF.links.map((p) => ({ p, dash: true, ink: "faint" }));
 
     // No dependency data
     const ndRegions = X.ndOrder.map((id, i) => ({ id, label: id, count: d.modules.find((m) => m.id === id).files + " files", x: 16 + i * 250, y: 64, w: 238, h: 336 }));
-    const ndNodes = X.ndOrder.flatMap((id, i) => d.files.filter((x) => x.module === id).map((x, j) => node({ ...x, partition: null }, { x: 28 + i * 250, y: 104 + j * 72, w: Math.min(x.w + 40, 214) })));
+    const ndNodes = X.ndOrder.flatMap((id, i) => { let top = 104, prev = null; return d.files.filter((x) => x.module === id).map((x) => { if (prev) top += Math.max(72, prev.h + 10); prev = node({ ...x, partition: null }, { x: 28 + i * 250, y: top, w: Math.min(x.w + 40, 214) }); return prev; }); });
 
     // Reading path
     const RP = d.readingPath, order = RP.order;
@@ -527,11 +529,11 @@ html[data-fs], html[data-fs] body { overflow: hidden; }
     const linCtxDoc = { title: CP.linCtxTitle, badge: CP.ctxBadge, tone: "neutral", meta: CX.brief.meta, cols: 1, sections: [...secs(CX.brief.sections).map((s) => ({ ...s, title: "You are here: " + s.title })), ...cardSecs.map((s) => ({ ...s, title: "sync-worker: " + s.title })), ...radiusSecs], foot: CX.brief.foot, footG: "check" };
 
     const views = {
-      overview: { regions, bands, lines: ovE, nodes: ovNodes(), legend: { edges: true } },
-      cluster: { bands: [{ id: "A", title: d.partitions[0].title, files: d.partitions[0].files, x: 12, y: 60, w: 818, h: 534, tabX: 540, tabY: -11 }], lines: [...clusterLines, ...stubLines], labels: clusterLines.map((l) => ({ x: Math.round(l.mid[0]), y: Math.round(l.mid[1]), t: l.rel })), boxes, stubs: CA.stubs.map((s) => stubOf(s, "start")), mini: { ...base.mini, vp: d.partitions[0] } },
-      file: { fileZoom, stubs: fzStubs, lines: fzLines, mini: { ...base.mini, vp: { x: 340, y: 168, w: 170, h: 84 } } },
-      diff: { diffZoom: true, stubs: dfStubs, lines: dfLines, mini: { ...base.mini, vp: { x: 356, y: 180, w: 60, h: 40 } } },
-      keys: (() => { const kbE = ovEdges(d.focus.file), ns = ovMap(ovNodes()); return { regions, bands, lines: kbE, nodes: ovNodes(d.focus.file), keys: true, labels: kbE.filter((l) => l.strong).map((l) => { const other = l.e.from === d.focus.file ? l.e.to : l.e.from, a = ns[l.e.from], b = ns[l.e.to], sh = Math.hypot(l.p[2] - l.p[0], l.p[3] - l.p[1]) < 120; return { x: Math.round(l.mid[0]), y: Math.round(sh ? Math.min(a.y, b.y) - 10 : l.mid[1]), t: X.arrowWords[other] }; }) }; })(),
+      overview: { regions, bands, lines: ovE, nodes: ovNodesM(), legend: { edges: true }, H: CH, mini: mini1(full1) },
+      cluster: { bands: [{ id: "A", title: d.partitions[0].title, files: d.partitions[0].files, x: CA.band[0], y: CA.band[1], w: CA.band[2], h: CA.band[3], tabX: 12, tabY: -11 }], lines: clusterLines, labels: clusterLines.filter((l) => l.rel != null).map((l) => ({ x: Math.round(l.mid[0]), y: Math.round(l.mid[1]), t: l.rel })), boxes, stubs: CA.stubs.map((s) => stubOf(s, "start")), H: CA.H, mini: mini1({ x: d.partitions[0].x, y: d.partitions[0].y, w: d.partitions[0].w, h: d.partitions[0].h }) },
+      file: { fileZoom, stubs: fzStubs, lines: fzLines, mini: mini1({ x: 328, y: 158, w: 171, h: 84 }) },
+      diff: { diffZoom: true, stubs: dfStubs, lines: dfLines, H: DF.H, mini: mini1({ x: 344, y: 170, w: 60, h: 40 }) },
+      keys: (() => { const kbE = ovEdges(d.focus.file), ns = ovMap(ovNodes()); return { regions, bands, lines: kbE, nodes: ovNodesM(d.focus.file), keys: true, H: CH, mini: mini1(full1), labels: kbE.filter((l) => l.strong).map((l) => { const other = l.e.from === d.focus.file ? l.e.to : l.e.from, a = ns[l.e.from], b = ns[l.e.to], sh = Math.hypot(l.p[2] - l.p[0], l.p[3] - l.p[1]) < 120; return { x: Math.round(l.mid[0]), y: Math.round(sh ? Math.min(a.y, b.y) - 10 : l.mid[1]), t: X.arrowWords[other] }; }) }; })(),
       building: { building: true, mini: null, ladderOff: true },
       nodeps: { regions: ndRegions, nodes: ndNodes, legend: { noEdges: true }, notice: d.noDeps.notice, mini: { rects: ndRegions, files: false, bands: false, vp: full, W: 1016, H: 640 } },
       trail: { regions, bands, lines: [...ovE.map((e) => ({ ...e, ink: "faint", strong: false })), ...trail], nodes: trailNodes, stops, panel: { title: CP.readReceipt, rows: receipt.map((r) => ({ ...r, hasBar: true })), foot: RP.receiptNote + " " + CP.walk } },
@@ -902,8 +904,8 @@ html[data-fs], html[data-fs] body { overflow: hidden; }
     else if (V.fsList) overlay = pfHtml(M, "list", V.fsList);
     const crumb = settings ? [T.settings.title, T.settings.current] : [X.crumb.parent, X.crumb.current];
     const summary = settings || overlay || st.view === "soStep" ? "" : `<div class="psum" style="padding: 8px 16px 0"><span class="repo">${esc(X.pr.repo)}</span><h1>${esc(d.pr.title)}</h1><span class="mk">${sl(T.agentWritten, "neutral")}<span class="muted">${esc(T.writtenBy)}</span></span><span class="muted">${esc(X.pr.line)}</span>${V.pass ? `<span class="mk">${sl(V.pass.checks, "positive")}<span class="muted">${esc(V.pass.headLabel)} <code>${esc(V.pass.head)}</code></span></span>` : ""}</div>`;
-    const header = `<div data-region="header"><header class="mast"><a href="${esc(mods.connect.href)}" class="mast-brand" aria-label="${esc(sh.brandLabel)}"><relay-chef size="28"></relay-chef></a><p class="mast-title"><b>${esc(settings ? T.settings.title : mods.code.name)}</b>${settings ? "" : `<span>${esc(X.pr.num)}</span>`}</p><div class="tools"><button type="button" class="bell" aria-label="${esc(sh.notifications.aria)}" aria-expanded="false"><relay-glyph name="bell" size="19"></relay-glyph></button><button type="button" class="ask" aria-expanded="false"><span class="chef-desk"><relay-chef size="32"></relay-chef></span><span class="chef-phone"><relay-chef size="24"></relay-chef></span><span>${esc(sh.askRelay)}</span></button></div></header>
-      <nav class="crumb" aria-label="Breadcrumb"><span class="parents"><span><a href="#">${esc(crumb[0])}</a><span aria-hidden="true">&nbsp;/&nbsp;</span></span></span><span class="cur" aria-current="page">${esc(crumb[1])}</span></nav>${summary}</div>`;
+    const header = `<div><header class="mast"><a href="${esc(mods.connect.href)}" class="mast-brand" aria-label="${esc(sh.brandLabel)}"><relay-chef size="28"></relay-chef></a><p class="mast-title"><b>${esc(settings ? T.settings.title : mods.code.name)}</b></p><div class="tools"><button type="button" class="bell" aria-label="${esc(sh.notifications.aria)}" aria-expanded="false"><relay-glyph name="bell" size="19"></relay-glyph></button><button type="button" class="ask" aria-expanded="false"><span class="chef-desk"><relay-chef size="32"></relay-chef></span><span class="chef-phone"><relay-chef size="24"></relay-chef></span><span>${esc(sh.askRelay)}</span></button></div></header>
+      <div data-region="header"><nav class="crumb" aria-label="Breadcrumb"><span class="parents"><span><a href="#">${esc(crumb[0])}</a><span aria-hidden="true">&nbsp;/&nbsp;</span></span></span><span class="cur" aria-current="page">${esc(crumb[1])}</span></nav>${summary}</div></div>`;
     let main = "";
     if (settings) return `<div class="work">${header}${settingsHtml(M, V.settings, true)}</div>${nav}`;
     if (st.view === "soStep") {
@@ -930,17 +932,17 @@ html[data-fs], html[data-fs] body { overflow: hidden; }
     </div></aside>`;
     const large = st.view === "large";
     const P = large ? { ...X.pr, ...d.large.pr, crumbs: [X.pr.crumbs[0], X.pr.crumbs[1], d.large.pr.num] } : { ...X.pr, title: d.pr.title };
-    const header = `<div data-region="header">
+    const header = `<div${V.settings ? ' data-region="header"' : ""}>
       <header class="mast">
         <a href="${esc(mods.connect.href)}" class="mast-brand" aria-label="${esc(sh.brandLabel)}"><relay-chef size="28"></relay-chef></a>
-        <p class="mast-title"><b>${esc(mods.code.name)}</b><span>${esc(P.num)}</span></p>
+        <p class="mast-title"><b>${esc(mods.code.name)}</b></p>
         <div class="tools">
           <button type="button" class="hosts" aria-label="${esc(sh.hosts.aria)}"><relay-glyph name="shield" size="19"></relay-glyph><span>${esc(sh.hosts.label)}</span></button>
           <button type="button" class="bell" aria-label="${esc(sh.notifications.aria)}" aria-expanded="false"><relay-glyph name="bell" size="19"></relay-glyph></button>
           <button type="button" class="ask" aria-expanded="false"><span class="chef-desk"><relay-chef size="32"></relay-chef></span><span class="chef-phone"><relay-chef size="24"></relay-chef></span><span>${esc(sh.askRelay)}</span><kbd>${esc(sh.askShortcut)}</kbd></button>
         </div>
       </header>
-      ${V.settings ? "" : `<div class="prhead">
+      ${V.settings ? "" : `<div class="prhead" data-region="header">
         <nav class="crumbs" aria-label="Breadcrumb"><a href="#code">${esc(P.crumbs[0])}</a><span aria-hidden="true">/</span><a href="#code/pull-requests">${esc(P.crumbs[1])}</a><span aria-hidden="true">/</span><b aria-current="page" style="font-weight: 520; color: var(--rly-color-text-1)">${esc(P.crumbs[2])}</b></nav>
         <span class="repo">${esc(P.repo)}</span>
         <h1>${esc(P.title)}</h1>
@@ -995,7 +997,7 @@ html[data-fs], html[data-fs] body { overflow: hidden; }
       V.boxes.forEach((b) => parts.push(`<div class="box" role="group" aria-label="${esc(b.aria)}" style="${pos(b)} border: ${b.border}"><div class="hd"><b>${esc(b.path)}</b><span><span>${esc(b.size)}</span><span>${esc(b.risk)}</span>${b.marks.map(mk).join("")}</span></div>${b.fns.map((fn) => `<div class="fn"><code>${esc(fn.n)}</code><span class="muted" style="white-space: nowrap">${esc(fn.kind)}</span><span class="ln">${esc(fn.lines)}</span><span class="mk">${fn.p ? pb(fn.p) : ""}${fn.life ? sl(fn.life, "caution") : ""}${fn.check ? sl(fn.check[0], fn.check[1]) : ""}</span></div>`).join("")}</div>`));
       V.stubs.forEach((s) => parts.push(`<div class="stub" style="${pos(s)} text-align: ${s.align}"><b>${esc(s.label)}</b><span class="mk" style="justify-content: ${s.align === "end" ? "flex-end" : "flex-start"}; color: ${s.failing ? M.RED : "var(--rly-color-text-2)"}">${s.failing ? g("alert") : ""}<span>${esc(s.line)}</span></span></div>`));
       if (V.fileZoom) parts.push(`<div class="fz" role="group" aria-label="sync-worker/socket.ts, high risk, 5 parts changed"><div class="hd"><b>${esc(d.fileZoom.file)}</b><span>${esc(CP.newFile)}</span><span>${esc(M.RISK.high[1])}</span><span class="mk">${g("clock")}${esc(CP.changedSince)}</span></div>${V.fileZoom.rows.map((fr) => `<div><div class="fzr"><code>${esc(fr.n)}</code><span class="k">${esc(fr.kind)}, lines ${esc(fr.range)}</span><span class="bar" aria-hidden="true"><span style="inline-size: ${fr.bar}; background: ${fr.moved ? "transparent" : "var(--rly-color-text-2)"}; border: ${fr.moved ? "1.5px dashed var(--rly-color-text-2)" : "0"}"></span></span><span class="mono" style="text-align: end">+${fr.lines}</span><span class="mk" style="justify-content: end">${fr.f ? pb(F[fr.f].p) + sl(F[fr.f].life, "caution") : ""}</span></div>${fr.f ? `<div class="fzf" role="note" aria-label="Finding ${esc(fr.f)}, pinned to ${esc(fr.n)}"><span class="mk small">${g("arrow")}${esc(CP.pinned)}</span><span class="t">${esc(F[fr.f].title)}</span><span class="small">${esc(F[fr.f].evidence)}</span><span class="mk small"><span>${esc(CP.enterOpens)}</span>${kbd("Enter")}</span></div>` : ""}</div>`).join("")}</div>`);
-      if (V.diffZoom) { const DF = d.diff, f1 = F.F1; parts.push(`<div class="dz" role="group" aria-label="Diff of ${esc(DF.fn)} in ${esc(DF.file)}"><div class="hd"><b>${esc(DF.file)}, ${esc(DF.fn)}</b><code class="small">${esc(DF.head)}</code><span class="small" style="margin-inline-start: auto">${esc(DF.readLine)}</span></div>${DF.lines.map((ln) => `<div><div class="dl" aria-label="Added line ${ln.n}"><span class="no">${ln.n}</span><span aria-hidden="true">+</span><span class="c">${esc(ln.c)}</span></div>${ln.f ? `<div class="fcard" role="note" aria-label="Finding ${esc(ln.f)}, between lines 16 and 17"><div class="row">${pb(f1.p)}${sl(f1.life, "caution")}<span class="small">${esc(f1.raised)}</span></div><span class="t">${esc(f1.title)}</span><span class="muted">${esc(f1.body)}</span><span class="mk">${sl(CP.failed, "critical")}<span>${esc(f1.evidence)}</span></span><div class="row" data-region="action">${btn(CP.markHandled)}<span class="small" style="font-size: .8125rem">${esc(CP.handledLine)}</span></div></div>` : ""}</div>`).join("")}</div>`); }
+      if (V.diffZoom) { const DF = d.diff, f1 = F.F1; parts.push(`<div class="dz" role="group" aria-label="Diff of ${esc(DF.fn)} in ${esc(DF.file)}"><div class="hd"><b>${esc(DF.file)}, ${esc(DF.fn)}</b><code class="small">${esc(DF.head)}</code><span class="small" style="margin-inline-start: auto">${esc(DF.readLine)}</span></div>${DF.lines.map((ln) => `<div><div class="dl" aria-label="Added line ${ln.n}"><span class="no">${ln.n}</span><span aria-hidden="true">+</span><span class="c">${esc(ln.c)}</span></div>${ln.f ? `<div class="fcard" role="note" aria-label="Finding ${esc(ln.f)}, between lines 16 and 17"><div class="row">${pb(f1.p)}${sl(f1.life, "caution")}<span class="small">${esc(f1.raised)}</span></div><span class="t">${esc(f1.title)}</span><span class="muted">${esc(f1.body)}</span><span class="mk">${sl(CP.failed, "critical")}<span>${esc(f1.evidence)}</span></span><div class="row" data-region="action">${btn(CP.markHandled, "secondary", "defaultSize")}<span class="small" style="font-size: .8125rem">${esc(CP.handledLine)}</span></div></div>` : ""}</div>`).join("")}</div>`); }
       if (V.building) {
         parts.push(`<div class="bl" data-region="list"><b style="font-size: .875rem; font-weight: 620">${esc(CP.filesTitle)}</b><span class="small">${esc(d.building.list)}</span><ul>${d.files.map((x) => `<li><a href="#">${esc(x.path)}</a><span style="display: flex; gap: 3px">${(x.findings || []).map((id) => pb(F[id].p)).join("")}</span><span class="mono muted">${esc(M.size(x))}</span></li>`).join("")}</ul></div>`);
         [[332, 64, 320, 300], [668, 64, 336, 300], [332, 380, 320, 200], [668, 380, 336, 200]].forEach(([x, y, w, h]) => parts.push(`<div style="${pos({ x, y, w, h })}">${skel(`block-size: ${h}px`)}</div>`));
@@ -1029,14 +1031,14 @@ html[data-fs], html[data-fs] body { overflow: hidden; }
     const num = large ? d.large.pr.num : X.pr.num;
     if (V46.includes(st.view)) return phone46(M, st, V, nav);
     const isDiff = st.view === "diff";
-    const header = `<div data-region="header">
+    const header = `<div>
       <header class="mast">
         <a href="${esc(mods.connect.href)}" class="mast-brand" aria-label="${esc(sh.brandLabel)}"><relay-chef size="28"></relay-chef></a>
-        <p class="mast-title"><b>${esc(mods.code.name)}</b><span>${esc(num)}</span></p>
+        <p class="mast-title"><b>${esc(mods.code.name)}</b></p>
         <div class="tools"><button type="button" class="bell" aria-label="${esc(sh.notifications.aria)}" aria-expanded="false"><relay-glyph name="bell" size="19"></relay-glyph></button><button type="button" class="ask" aria-expanded="false"><span class="chef-desk"><relay-chef size="32"></relay-chef></span><span class="chef-phone"><relay-chef size="24"></relay-chef></span><span>${esc(sh.askRelay)}</span></button></div>
       </header>
-      <nav class="crumb" aria-label="Breadcrumb"><span class="parents"><span><a href="${esc(X.crumb.parentHref)}">${esc(X.crumb.parent)}</a><span aria-hidden="true">&nbsp;/&nbsp;</span></span></span><span class="cur" aria-current="page">${esc(X.crumb.current)}</span></nav>
-      ${isDiff ? "" : `<div class="psum" style="padding: 8px 16px 0"><span class="repo">${esc(large ? d.large.pr.repo : X.pr.repo)}</span><h1>${esc(large ? d.large.pr.title : PH.title)}</h1><span class="muted">${esc(large ? d.large.pr.line : PH.meta)}</span>${large ? "" : `<span class="mk">${sl(X.pr.check, "critical")}<code>${esc(X.pr.checkName)}</code></span>`}<span class="mk muted">${g("clock", 14)}<span>${esc(large ? d.large.pr.since : PH.since)}</span></span></div>`}
+      <div data-region="header"><nav class="crumb" aria-label="Breadcrumb"><span class="parents"><span><a href="${esc(X.crumb.parentHref)}">${esc(X.crumb.parent)}</a><span aria-hidden="true">&nbsp;/&nbsp;</span></span></span><span class="cur" aria-current="page">${esc(X.crumb.current)}</span></nav>
+      ${isDiff ? "" : `<div class="psum" style="padding: 8px 16px 0"><span class="repo">${esc(large ? d.large.pr.repo : X.pr.repo)}</span><h1>${esc(large ? d.large.pr.title : PH.title)}</h1><span class="muted">${esc(large ? d.large.pr.line : PH.meta)}</span>${large ? "" : `<span class="mk">${sl(X.pr.check, "critical")}<code>${esc(X.pr.checkName)}</code></span>`}<span class="mk muted">${g("clock", 14)}<span>${esc(large ? d.large.pr.since : PH.since)}</span></span></div>`}</div>
     </div>`;
     const sel = d.phone.selected;
     let main = "";
@@ -1064,7 +1066,7 @@ html[data-fs], html[data-fs] body { overflow: hidden; }
       if (V.building) main += `<div data-region="notice" role="status" class="mk" style="flex-wrap: wrap; font-size: .875rem">${sl(CP.building, "progress")}<span>${esc(d.building.line)}</span></div>`;
       // Minimap
       if (!V.building) {
-        const mini = large ? { rects: V.mini.rects, files: false, bands: false, W: 1016, H: 640, vp: V.mini.vp } : st.view === "nodeps" ? V.mini : ctxView ? { rects: CX.regions, files: true, bands: true, W: 1016, H: CX.canvasH } : { rects: d.modules, files: true, bands: true, W: 1016, H: 640 };
+        const mini = large ? { rects: V.mini.rects, files: false, bands: false, W: 1016, H: 640, vp: V.mini.vp } : st.view === "nodeps" ? V.mini : ctxView ? { rects: CX.regions, files: true, bands: true, W: 1016, H: CX.canvasH } : { rects: d.modules, files: true, bands: true, W: 1016, H: d.canvasH };
         main += `<figure class="pmap" data-region="minimap"><div class="fr" role="img" aria-label="${esc(large ? st.miniLabel : PH.mapLabel)}">${minimapSvg(mini, M, large ? undefined : sel)}</div><figcaption>${esc(large ? st.miniLabel : PH.mapCap)}</figcaption></figure>`;
       }
       // List

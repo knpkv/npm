@@ -152,7 +152,7 @@ const flow = (files: ReadonlyArray<CanvasFileView>, max: number = CELL_MAX): Flo
 
 const layoutModulesOnly = (files: ReadonlyArray<CanvasFileView>): OverviewScene => {
   const modules = canvasModules(files)
-  const regions: Array<SceneRegion> = []
+  const columns: Array<SceneRegion> = []
   const nodes: Array<SceneNode> = []
   modules.forEach((module, column) => {
     const x = LEFT + column * 250
@@ -168,13 +168,17 @@ const layoutModulesOnly = (files: ReadonlyArray<CanvasFileView>): OverviewScene 
       })
       y += Math.max(72, h + 10)
     }
-    regions.push({ id: module.id, files: module.files.length, x, y: 64, w: 238, h: Math.max(336, y - 64 + 14) })
+    columns.push({ id: module.id, files: module.files.length, x, y: 64, w: 238, h: Math.max(336, y - 64 + 14) })
   })
+  // Columns share the tallest one's height, so the row reads as one band.
+  const tallest = Math.max(0, ...columns.map((region) => region.h))
+  const regions = columns.map((region) => ({ ...region, h: tallest }))
   const right = Math.max(...regions.map((region) => region.x + region.w), 0)
   const bottom = Math.max(...regions.map((region) => region.y + region.h), 0)
   return {
     mode: "modules",
-    width: Math.max(CANVAS_WIDTH, right + LEFT),
+    // After the last column, keep the 12px gap the columns have between them.
+    width: Math.max(CANVAS_WIDTH, right + 12),
     height: Math.max(CANVAS_MIN_HEIGHT, bottom + OVERLAY_RESERVE),
     regions,
     bands: [],
@@ -445,7 +449,7 @@ export const layoutCluster = (
     if (from === undefined || to === undefined) continue
     const anchor = (box: SceneBox, other: SceneBox, part: string | null, top: boolean): readonly [number, number] => {
       const row = partRow(box, part)
-      if (box.x === other.x && row < 0) return [box.x + box.w / 2, top ? box.y : box.y + box.h]
+      if (box.x === other.x) return [box.x + box.w / 2, top ? box.y : box.y + box.h]
       return [other.x > box.x ? box.x + box.w : box.x, row < 0 ? box.y + 26 : rowCenter(box, row)]
     }
     const [x1, y1] = anchor(from, to, edge.fromPart, from.y > to.y)
@@ -561,6 +565,8 @@ const FILE_BOX = { x: 230, y: 72, w: 520 }
 const FILE_HEADER = 48
 const FILE_ROW = 44
 const FILE_CARD = 128
+/** The box is border-box with a 2px border, top and bottom. */
+const FILE_BORDER = 4
 
 const findingsOf = (
   findings: ReadonlyArray<CanvasFinding>,
@@ -622,7 +628,7 @@ export const layoutFile = (
   const rowTop = (row: number) =>
     FILE_BOX.y + FILE_HEADER + row * FILE_ROW + (pinned !== undefined && row > pinned.row ? FILE_CARD : 0)
   const rows = parts.map((part, row) => ({ part, findings: findingsOf(findings, path, part), y: rowTop(row) }))
-  const height = FILE_HEADER + parts.length * FILE_ROW + (pinned === undefined ? 0 : FILE_CARD) + 6
+  const height = FILE_HEADER + parts.length * FILE_ROW + (pinned === undefined ? 0 : FILE_CARD) + 6 + FILE_BORDER
   const box = { ...FILE_BOX, h: height }
   const centerOfPart = (name: string | null) => {
     const row = parts.findIndex((part) => part.name === name)
