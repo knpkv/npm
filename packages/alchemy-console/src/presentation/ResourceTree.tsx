@@ -51,7 +51,7 @@ export const ResourceTree = ({
           {resources.length} {resources.length === 1 ? "resource" : "resources"}
           {constructs.length === 0
             ? ""
-            : ` · ${constructs.filter((construct) => construct.parent !== null).length} constructs`}
+            : `, ${constructs.filter((construct) => construct.parent !== null).length} constructs`}
         </Text>
       </div>
       {resources.length === 0 ? (

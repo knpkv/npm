@@ -214,9 +214,6 @@
 .ac-plan-footer {
   justify-content: space-between;
 }
-.ac-plan-digest {
-  font-family: var(--rly-font-mono);
-}
 .ac-plan-mobile-label {
   display: none;
 }

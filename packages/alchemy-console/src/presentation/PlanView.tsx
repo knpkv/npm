@@ -33,21 +33,31 @@ const publishedLabel = (source: PlanSource, expired: boolean): string => {
   })
   return source.ageDays === 0
     ? `${time} today`
-    : `${DateTime.format(parsed, { day: "numeric", month: "short", timeZone: "UTC", locale: "en-GB" })} · ${time}`
+    : `${DateTime.format(parsed, { day: "numeric", month: "short", timeZone: "UTC", locale: "en-GB" })}, ${time}`
 }
 const SourceLine = ({
+  digest = null,
   expired = false,
   showBase = true,
   source
 }: {
   readonly source: PlanSource
+  readonly digest?: string | null
   readonly expired?: boolean
   readonly showBase?: boolean
 }): ReactElement => (
-  // Commit hashes tell people nothing; they stay in the tooltip for whoever needs to match a run.
+  // Commit hashes and digests tell people nothing; they stay in the tooltip for whoever needs to match a run.
   <p className="ac-plan-source">
-    {source.pr === null ? null : <span>PR #{source.pr} ·</span>}
-    <span title={showBase && source.base !== null ? `Head ${source.head}, base ${source.base}` : `Head ${source.head}`}>
+    {source.pr === null ? null : <span>PR #{source.pr},</span>}
+    <span
+      title={[
+        `Head ${source.head}`,
+        showBase && source.base !== null ? `base ${source.base}` : null,
+        digest === null ? null : `digest ${digest}`
+      ]
+        .filter((part) => part !== null)
+        .join(", ")}
+    >
       published {publishedLabel(source, expired)}
     </span>
   </p>
@@ -69,7 +79,7 @@ const Published = ({ plan, title }: { readonly plan: PublishedPlan; readonly tit
           {title}
         </Text>
         <div className="ac-plan-source-row">
-          <SourceLine source={plan.source} />
+          <SourceLine digest={plan.digest} source={plan.source} />
           <RunLink href={plan.source.runHref} />
         </div>
         <small className="ac-plan-assurance">
@@ -91,7 +101,7 @@ const Published = ({ plan, title }: { readonly plan: PublishedPlan; readonly tit
       <div className="ac-plan-summary">
         {updates === 0
           ? "No changes in this plan."
-          : `${updates} ${updates === 1 ? "update" : "updates"} · ${unchanged} unchanged`}
+          : `${updates} ${updates === 1 ? "update" : "updates"}, ${unchanged} unchanged`}
       </div>
       <table role="table" className="ac-plan-table" aria-labelledby={heading}>
         <thead role="rowgroup">
@@ -153,7 +163,6 @@ const Published = ({ plan, title }: { readonly plan: PublishedPlan; readonly tit
       </table>
       <footer className="ac-plan-footer">
         <span>CI publishes property names only; values aren’t shown.</span>
-        <span className="ac-plan-digest">Digest {plan.digest}</span>
       </footer>
     </>
   )

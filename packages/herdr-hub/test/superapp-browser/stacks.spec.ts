@@ -36,7 +36,10 @@ for (const shot of pages) {
       )
       expect(overflow).toBeLessThanOrEqual(0)
       // Commit hashes stay in tooltips; no visible text carries one.
-      expect(await page.locator(".stacks-page").innerText()).not.toMatch(/\b[0-9a-f]{7}\b/u)
+      const visible = await page.locator(".stacks-page").innerText()
+      expect(visible).not.toMatch(/\b[0-9a-f]{7}\b/u)
+      // Relay copy separates with commas, never middots.
+      expect(visible).not.toContain("·")
       const actions = await page.locator(".stacks-page button").allTextContents()
       expect(actions.some((label) => /apply|destroy|deploy|approve/iu.test(label))).toBe(false)
       if (shotsDirectory !== undefined) {

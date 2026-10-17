@@ -7,3 +7,5 @@ Export the stack page's parts from `./views` so a host can compose its own page 
 The empty-state creatures are now CSS backgrounds instead of `<img>` elements whose URL came from `import.meta.url`, so `./views` loads in bundles without `import.meta.url`. A consumer's CSS build must resolve the stylesheet's SVG `url()`s.
 
 The plan's source line no longer prints commit hashes: it reads "PR #n · published <time>", with the head and base commits in its tooltip.
+
+The plan digest moves into that tooltip too, and the stack page's counts and dates use commas instead of middots.

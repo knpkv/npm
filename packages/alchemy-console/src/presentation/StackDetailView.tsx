@@ -46,8 +46,8 @@ export const StackResourcesView = ({
         {stack.resources.length > 0 ? (
           <Text variant="meta" tone="secondary">
             {stack.resources.length} {stack.resources.length === 1 ? "resource" : "resources"}
-            {failed > 0 ? ` · ${failed} failed` : ""}
-            {unknown > 0 ? ` · ${unknown} Unknown` : ""}
+            {failed > 0 ? `, ${failed} failed` : ""}
+            {unknown > 0 ? `, ${unknown} Unknown` : ""}
           </Text>
         ) : null}
       </div>
@@ -124,7 +124,7 @@ export const StackOutputsView = ({ outputs }: { readonly outputs: StackPresentat
         </Text>
         {outputs !== null && outputs.length > 0 ? (
           <Text variant="meta" tone="secondary">
-            {outputs.length} {outputs.length === 1 ? "output" : "outputs"} · {hidden} hidden
+            {outputs.length} {outputs.length === 1 ? "output" : "outputs"}, {hidden} hidden
           </Text>
         ) : null}
       </div>

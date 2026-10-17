@@ -231,6 +231,10 @@ describe("Stacks module pages", { concurrent: false }, () => {
     expect(panel?.textContent).toContain("published")
     expect(panel?.textContent).not.toMatch(/\b[0-9a-f]{7}\b/u)
     expect(panel?.querySelector("[title*='a1b2c3d']")).not.toBeNull()
+    // Opaque ids (the plan digest too) live in the tooltip; Relay copy uses commas, never middots.
+    expect(panel?.textContent).not.toContain("ab12…cd34")
+    expect(panel?.querySelector("[title*='ab12…cd34']")).not.toBeNull()
+    expect(document.querySelector(".stacks-page")?.textContent).not.toContain("·")
   })
 
   it("reports an unknown or missing stack id as not found", async () => {
