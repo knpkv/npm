@@ -15,5 +15,6 @@
   "source_reload_fix": "Source-owned breakpoint-change guard. No enrollment lifecycle filter.",
   "source_export": "28",
   "verified_source_manifest_files": 17,
-  "reference_set": "Export28 changes only the shell session access line to Local access (the product's loopback session), following main. Export26 added Host resources desktop nav data after Usage. Phone frames, HTML/CSS/fonts and all 33 state region catalogs are unchanged; the designer's DOM diff vs 27 shows exactly one changed element per desktop state (the session line). Export25 revision retained immutable for existing pinned fixture unit datasets; Export26 retained; current capture refs and fixture select 28. No product/adapter/threshold change."
+  "reference_set": "Export28 changes only the shell session access line to Local access (the product's loopback session), following main. Export26 added Host resources desktop nav data after Usage. Phone frames, HTML/CSS/fonts and all 33 state region catalogs are unchanged; the designer's DOM diff vs 27 shows exactly one changed element per desktop state (the session line). Export25 revision retained immutable for existing pinned fixture unit datasets; Export26 retained; current capture refs and fixture select 28. No product/adapter/threshold change.",
+  "stacks_nav": "Stacks row: the desktop nav's secondary list gains stacks after hostResources, as the shell registers it (Relay export-4 shared nav: Host resources, Sandboxes, Stacks). Sandboxes joins with its own module's registration. Fixture data only; exported HTML unchanged."
 }

@@ -507,9 +507,12 @@
   }
 }
 
+/* Decorative art is drawn from CSS so the views load in bundles without import.meta.url. */
 .ac-empty-state-creature {
+  flex: none;
   block-size: 3.5rem;
   inline-size: 3.5rem;
+  background: url("./assets/empty-state-creature.svg") center / contain no-repeat;
 }
 
 .ac-empty-state {

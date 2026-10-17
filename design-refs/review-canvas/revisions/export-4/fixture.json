@@ -3047,6 +3047,11 @@
               "name": "Host resources",
               "icon": "host",
               "href": "#resources/overview"
+            },
+            "stacks": {
+              "name": "Stacks",
+              "icon": "stacks",
+              "href": "#stacks"
             }
           },
           "nav": {
@@ -3057,7 +3062,8 @@
             "secondary": [
               "code",
               "usage",
-              "hostResources"
+              "hostResources",
+              "stacks"
             ],
             "bar": [
               "connect",

@@ -158,14 +158,13 @@ export const codeModule = defineModule({
 
 /**
  * Alchemy stacks read on the configured credential host only (`RELAY_STACKS_HOST`). Read-only: actions are
- * links to their GitHub runs and reviews; no peer or Relay transport carries provider data. Not registered
- * in the server or the shell yet: the overview and stack pages land with their design.
+ * links to their GitHub runs and reviews; no peer or Relay transport carries provider data.
  */
 export const stacksModule = defineModule({
   id: "stacks",
   label: "Stacks",
   defaultPage: "overview",
-  pages: [{ id: "overview", label: "Stacks" }, { id: "stack", label: "Stack" }],
+  pages: [{ id: "overview", label: "Overview" }, { id: "stack", label: "Stack" }],
   listeners: ["serve"],
   requires: ["read"]
 })

@@ -1,5 +1,6 @@
 /** Loopback fixture serving the real built hub clients against schema-checked API responses. */
 import { NodeRuntime, NodeServices } from "@effect/platform-node"
+import { StackDetailResult, StackPlanResult, StacksOverviewResult } from "@knpkv/alchemy-console/host"
 import {
   CodeDetail,
   CodeDiffContentQuery,
@@ -34,6 +35,7 @@ import {
 } from "./code-fixture.js"
 import { connectFixture } from "./connect-fixture.js"
 import { resourceFixtureNow, resourcesFixture, resourcesStates } from "./resources-fixture.js"
+import { stackDetailFixture, stackPlanFixture, stacksOverviewFixture, stacksStates } from "./stacks-fixture.js"
 import { limitsFixture, usageFixture } from "./usage-fixture.js"
 
 class FixtureStateError extends Schema.TaggedError<FixtureStateError>()("FixtureStateError", {
@@ -443,6 +445,29 @@ const program = Effect.gen(function*() {
         } satisfies Parameters<typeof usageFixture>[0]
         response.end(Schema.encodeSync(Schema.fromJsonString(FleetUsage))(usageFixture(query, now, state)))
       } else response.end(Schema.encodeSync(Schema.fromJsonString(FleetLimits))(limitsFixture(now, state)))
+      return
+    }
+    if (url.pathname.startsWith("/v1/modules/stacks/")) {
+      const selected = request.headers.cookie?.match(/(?:^|;\s*)stacks-fixture=([a-z-]+)/u)?.[1]
+      const state = stacksStates.find((candidate) => candidate === selected) ?? "overview"
+      // Loading never answers, so the page stays in its reading state.
+      if (state === "loading") return
+      response.setHeader("content-type", "application/json")
+      const id = url.searchParams.get("id") ?? ""
+      if (url.pathname.endsWith("/overview")) {
+        response.end(Schema.encodeSync(Schema.fromJsonString(StacksOverviewResult))(stacksOverviewFixture(state)))
+      } else if (url.pathname.endsWith("/stack")) {
+        const detail = stackDetailFixture(id)
+        if (detail === null) {
+          response.writeHead(404)
+          response.end()
+        } else response.end(Schema.encodeSync(Schema.fromJsonString(StackDetailResult))(detail))
+      } else if (url.pathname.endsWith("/plan")) {
+        response.end(Schema.encodeSync(Schema.fromJsonString(StackPlanResult))(stackPlanFixture(id)))
+      } else {
+        response.writeHead(404)
+        response.end()
+      }
       return
     }
     if (url.pathname.startsWith("/v1/modules/code/")) {

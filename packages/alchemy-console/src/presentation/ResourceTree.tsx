@@ -3,8 +3,6 @@ import { Text } from "@knpkv/rly/primitives"
 import { useId, useState, type ReactElement } from "react"
 import type { ResourcePresentation } from "./detail-model.js"
 
-const emptyStateCreature = new URL("./assets/empty-state-creature.svg?no-inline", import.meta.url).href
-
 interface Construct {
   readonly parent: string | null
   readonly resources: Array<ResourcePresentation>
@@ -38,7 +36,8 @@ export const ResourceTree = ({
   readonly app: string
   readonly stage: string
   readonly resources: ReadonlyArray<ResourcePresentation>
-  readonly resourceHref: (resource: ResourcePresentation) => string
+  /** Each resource's page; null when the host has none, and names render as plain text. */
+  readonly resourceHref: ((resource: ResourcePresentation) => string) | null
 }): ReactElement => {
   const headingId = useId()
   const constructs = groupResourceTree(resources)
@@ -52,19 +51,12 @@ export const ResourceTree = ({
           {resources.length} {resources.length === 1 ? "resource" : "resources"}
           {constructs.length === 0
             ? ""
-            : ` · ${constructs.filter((construct) => construct.parent !== null).length} constructs`}
+            : `, ${constructs.filter((construct) => construct.parent !== null).length} constructs`}
         </Text>
       </div>
       {resources.length === 0 ? (
         <div className="ac-detail-panel ac-empty-state">
-          <img
-            className="ac-empty-state-creature"
-            src={emptyStateCreature}
-            alt=""
-            aria-hidden="true"
-            width="56"
-            height="56"
-          />
+          <span className="ac-empty-state-creature" aria-hidden="true" />
           <div className="ac-empty-state-copy">
             <Text as="p" className="ac-detail-panel-title">
               No resources in state
@@ -98,7 +90,8 @@ const ConstructGroup = ({
 }: {
   readonly construct: Construct
   readonly initiallyOpen: boolean
-  readonly resourceHref: (resource: ResourcePresentation) => string
+  /** Each resource's page; null when the host has none, and names render as plain text. */
+  readonly resourceHref: ((resource: ResourcePresentation) => string) | null
 }): ReactElement => {
   const [open, setOpen] = useState(initiallyOpen)
   return (
@@ -119,10 +112,16 @@ const ConstructGroup = ({
             <ul>
               {rows.map((resource) => (
                 <li key={resource.fqn}>
-                  <a href={resourceHref(resource)} className="ac-tree-resource ac-detail-link">
-                    <span>{resource.logicalId}</span>
-                    <Icon name="chevron-right" decorative size="small" />
-                  </a>
+                  {resourceHref === null ? (
+                    <span className="ac-tree-resource">
+                      <span>{resource.logicalId}</span>
+                    </span>
+                  ) : (
+                    <a href={resourceHref(resource)} className="ac-tree-resource ac-detail-link">
+                      <span>{resource.logicalId}</span>
+                      <Icon name="chevron-right" decorative size="small" />
+                    </a>
+                  )}
                 </li>
               ))}
             </ul>

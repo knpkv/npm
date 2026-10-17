@@ -53,6 +53,13 @@
             "icon": "host",
             "group": "personal",
             "bar": false
+          },
+          {
+            "id": "stacks",
+            "name": "Stacks",
+            "icon": "stacks",
+            "group": "personal",
+            "bar": false
           }
         ],
         "hubHost": "atlas",

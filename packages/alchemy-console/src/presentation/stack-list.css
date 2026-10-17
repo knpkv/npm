@@ -246,10 +246,12 @@
   max-inline-size: 13.5em;
 }
 
+/* Decorative art is drawn from CSS so the views load in bundles without import.meta.url. */
 .ac-empty-creature {
-  block-size: auto;
+  aspect-ratio: 1;
   flex: none;
   inline-size: 5.5em;
+  background: url("./assets/empty-creature.svg") center / contain no-repeat;
 }
 
 .ac-empty-description {
