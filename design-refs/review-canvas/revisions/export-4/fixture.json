@@ -666,7 +666,7 @@
             808,
             598
           ],
-          "H": 698
+          "H": 749
         },
         "fileZoom": {
           "file": "sync-worker/socket.ts",
@@ -1930,6 +1930,92 @@
               "Purpose: one socket per stage for every tab; drafts kept through reconnect",
               "2 invariants, 1 broken by the P1",
               "Radius: 7 callers and 4 tests outside the diff, 2 not run here"
+            ]
+          },
+          "files": {
+            "stage/useStageSocket.ts": [
+              36,
+              112,
+              139
+            ],
+            "stage/StageProvider.tsx": [
+              36,
+              180,
+              134
+            ],
+            "stage/reconnect.ts": [
+              180,
+              180,
+              112
+            ],
+            "sync-worker/worker.ts": [
+              356,
+              112,
+              125
+            ],
+            "sync-worker/protocol.ts": [
+              503,
+              112,
+              110
+            ],
+            "sync-worker/socket.ts": [
+              356,
+              180,
+              139
+            ],
+            "stage/StageView.tsx": [
+              36,
+              292,
+              108
+            ],
+            "sync-worker/drafts.ts": [
+              520,
+              360,
+              115
+            ],
+            "composer/useDraft.ts": [
+              700,
+              292,
+              116
+            ],
+            "composer/Composer.tsx": [
+              824,
+              292,
+              106
+            ],
+            "composer/draftStore.ts": [
+              700,
+              360,
+              110
+            ],
+            "tests/reconnect.test.ts": [
+              356,
+              496,
+              134
+            ],
+            "tests/socket.test.ts": [
+              494,
+              496,
+              114
+            ],
+            "tests/drafts.test.ts": [
+              612,
+              496,
+              114
+            ]
+          },
+          "partitions": {
+            "A": [
+              24,
+              88,
+              628,
+              168
+            ],
+            "B": [
+              24,
+              268,
+              972,
+              164
             ]
           }
         },

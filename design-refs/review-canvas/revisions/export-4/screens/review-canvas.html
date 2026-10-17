@@ -510,8 +510,14 @@ html[data-fs], html[data-fs] body { overflow: hidden; }
       return { ...b, name: short(n.path), line: n.purpose, aria: n.path + ", unchanged: " + n.purpose };
     };
     const ovE = ovEdges(null);
-    const CXH = CX.canvasH, cxMini = { rects: CX.regions, files: true, bands: true, vp: { x: 0, y: 0, w: 1016, h: CXH }, W: 1016, H: CXH };
-    const ctxFrame = (mode, legendKey) => ({ H: CXH, ctxToggle: mode === "outline" ? "known" : "new", regions: CX.regions, bands, lines: ovE, nodes: ovNodes(), ctx: CX.neighbours.map((n) => cxNode(n, mode)), legend: { edges: true, ctx: CP.legend[legendKey] }, mini: cxMini });
+    const cxFiles = d.files.map((x) => { const [px, py, pw] = CX.files[x.path]; return { ...x, x: px, y: py, w: pw }; });
+    const cxParts = d.partitions.map((b) => { const [px, py, pw, ph] = CX.partitions[b.id]; return { ...b, x: px, y: py, w: pw, h: ph }; });
+    const cxBands = cxParts.map((b) => ({ ...b, tabX: 12, tabY: b.h - 11 }));
+    const cxNodes = () => cxFiles.map((x) => node(x, { x: x.x, y: x.y, w: x.w }));
+    const cxMap = Object.fromEntries(cxNodes().map((n, i) => [cxFiles[i].path, n]));
+    const cxE = d.edges.map((e) => { const p = link(cxMap[e.from], cxMap[e.to]); return { p, dash: e.rel === "moved from", strong: false, e, mid: [(p[0] + p[2]) / 2, (p[1] + p[3]) / 2] }; });
+    const CXH = CX.canvasH, cxMini = { rects: CX.regions, files: true, bands: true, fileList: cxFiles, bandList: cxParts, vp: { x: 0, y: 0, w: 1016, h: CXH }, W: 1016, H: CXH };
+    const ctxFrame = (mode, legendKey) => ({ H: CXH, ctxToggle: mode === "outline" ? "known" : "new", regions: CX.regions, bands: cxBands, lines: cxE, nodes: cxNodes(), ctx: CX.neighbours.map((n) => cxNode(n, mode)), legend: { edges: true, ctx: CP.legend[legendKey] }, mini: cxMini });
     const briefDoc = { title: CX.brief.title, badge: CP.ctxBadge, tone: "neutral", meta: CX.brief.meta, cols: 3, sections: secs(CX.brief.sections), foot: CX.brief.foot, footG: "check" };
     const cardSecs = secs(CX.card.sections);
     const NB = CX.neighbours;
@@ -520,7 +526,7 @@ html[data-fs], html[data-fs] body { overflow: hidden; }
       { title: CP.radiusTests, items: NB.filter((n) => n.test).map((n) => ({ n: n.rank, text: n.path + ", " + n.hop + ": " + n.via + (n.runs ? "" : ". " + n.why[0].toUpperCase() + n.why.slice(1) + "."), cites: [], labels: [n.runs ? { label: CP.runs, tone: "positive" } : { label: CP.notRun, tone: "caution" }] })) },
       { title: CP.radiusP1, items: [{ text: CX.radius.p1.text, cites: CX.radius.p1.cites, labels: [{ label: CP.p1Open, tone: "caution" }] }, { text: CX.radius.p1.guard, cites: ["tests/socket.test.ts", "tests/e2e/two-tabs.spec.ts"], labels: [] }] },
     ];
-    const rects = Object.fromEntries([...ovNodes().map((n, i) => [d.files[i].path, n]), ...NB.map((n) => [n.path, { x: n.x, y: n.y, w: n.w, h: 44 }])]);
+    const rects = Object.fromEntries([...cxNodes().map((n, i) => [cxFiles[i].path, n]), ...NB.map((n) => [n.path, { x: n.x, y: n.y, w: n.w, h: 44 }])]);
     const radLines = NB.map((n) => ({ p: link(rects[n.path], rects[n.to]), dash: true, ink: "faint" }));
     const CL = CX.card.layout;
     const cardNodes = Object.entries(CL.files).map(([p, [x, y]]) => node(byPath[p], { x, y, w: 196 }));
@@ -544,7 +550,7 @@ html[data-fs], html[data-fs] body { overflow: hidden; }
       ctxOn: ctxFrame("purpose", "ctxPurpose"),
       brief: { ...ctxFrame("purpose", "ctxPurpose"), doc: briefDoc },
       card: { H: 720, ctxToggle: "new", regions: [CL.region], nodes: cardNodes, ctx: CL.unchanged.map((n) => cxNode(n, "purpose")), stubs: CL.stubs.map((s) => stubOf(s, "start")), lines: cardLines, sheet: { title: CX.card.title, meta: CX.card.meta, x: 460, y: 12, w: 544, sections: cardSecs }, mini: null },
-      radius: { ...ctxFrame("radius", "ctxRadius"), lines: [...ovE, ...radLines], doc: { title: CX.radius.title, badge: CX.radius.badge, tone: "caution", meta: CP.radiusMeta, cols: 3, sections: radiusSecs } },
+      radius: { ...ctxFrame("radius", "ctxRadius"), lines: [...cxE, ...radLines], doc: { title: CX.radius.title, badge: CX.radius.badge, tone: "caution", meta: CP.radiusMeta, cols: 3, sections: radiusSecs } },
       known: { ...ctxFrame("outline", "ctxOutline"), doc: { title: CX.brief.title, badge: CP.collapsed, tone: "neutral", meta: CP.collapsedMeta, lead: CX.briefLine, sections: [] } },
       ctxMissing: { ...ctxFrame("path", "ctxPath"), doc: { title: CX.brief.title, badge: MS.badge, tone: "caution", meta: CP.missingMeta, cols: 3, sections: secs(MS.sections), foot: MS.foot, footG: "minus" } },
       linCtx: { linear: { note: X.linCtxNote }, files: true, mini: null, ctxToggle: "new", doc: linCtxDoc },
@@ -733,8 +739,8 @@ html[data-fs], html[data-fs] body { overflow: hidden; }
   const pos = (o) => `left: ${o.x}px; top: ${o.y}px;${o.w != null ? ` inline-size: ${o.w}px;` : ""}${o.h != null ? ` block-size: ${o.h}px;` : ""}`;
   const minimapSvg = (mini, M, sel) => {
     if (!mini) return "";
-    const fileRects = mini.files ? M.d.files.map((x) => { const isSel = x.path === sel; return `<rect x="${x.x}" y="${x.y}" width="${x.w}" height="46" rx="6" style="fill: ${isSel ? "var(--rly-color-text-1)" : "var(--rly-color-surface-1)"}; stroke: var(--rly-color-border-2); stroke-width: ${isSel ? 0 : 3}"></rect>`; }).join("") : "";
-    const bandRects = mini.bands ? M.d.partitions.map((b) => `<rect x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" rx="12" style="fill: none; stroke: var(--rly-color-text-2); stroke-width: 4; stroke-dasharray: 14 10"></rect>`).join("") : "";
+    const fileRects = mini.files ? (mini.fileList || M.d.files).map((x) => { const isSel = x.path === sel; return `<rect x="${x.x}" y="${x.y}" width="${x.w}" height="46" rx="6" style="fill: ${isSel ? "var(--rly-color-text-1)" : "var(--rly-color-surface-1)"}; stroke: var(--rly-color-border-2); stroke-width: ${isSel ? 0 : 3}"></rect>`; }).join("") : "";
+    const bandRects = mini.bands ? (mini.bandList || M.d.partitions).map((b) => `<rect x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" rx="12" style="fill: none; stroke: var(--rly-color-text-2); stroke-width: 4; stroke-dasharray: 14 10"></rect>`).join("") : "";
     const vp = mini.vp;
     return `<svg viewBox="0 0 ${mini.W} ${mini.H}" aria-hidden="true">${mini.rects.map((r) => `<rect x="${r.x}" y="${r.y}" width="${r.w}" height="${r.h}" rx="18" style="fill: var(--rly-color-surface-3)"></rect>`).join("")}${bandRects}${fileRects}${sel === undefined ? `<rect x="${vp.x}" y="${vp.y}" width="${vp.w}" height="${vp.h}" rx="6" style="fill: none; stroke: var(--rly-color-text-1); stroke-width: 8"></rect>` : ""}</svg>`;
   };
@@ -1066,7 +1072,7 @@ html[data-fs], html[data-fs] body { overflow: hidden; }
       if (V.building) main += `<div data-region="notice" role="status" class="mk" style="flex-wrap: wrap; font-size: .875rem">${sl(CP.building, "progress")}<span>${esc(d.building.line)}</span></div>`;
       // Minimap
       if (!V.building) {
-        const mini = large ? { rects: V.mini.rects, files: false, bands: false, W: 1016, H: 640, vp: V.mini.vp } : st.view === "nodeps" ? V.mini : ctxView ? { rects: CX.regions, files: true, bands: true, W: 1016, H: CX.canvasH } : { rects: d.modules, files: true, bands: true, W: 1016, H: d.canvasH };
+        const mini = large ? { rects: V.mini.rects, files: false, bands: false, W: 1016, H: 640, vp: V.mini.vp } : st.view === "nodeps" ? V.mini : ctxView ? { rects: CX.regions, files: true, bands: true, fileList: M.d.files.map((x) => { const [px, py, pw] = CX.files[x.path]; return { ...x, x: px, y: py, w: pw }; }), bandList: M.d.partitions.map((b) => { const [px, py, pw, ph] = CX.partitions[b.id]; return { ...b, x: px, y: py, w: pw, h: ph }; }), W: 1016, H: CX.canvasH } : { rects: d.modules, files: true, bands: true, W: 1016, H: d.canvasH };
         main += `<figure class="pmap" data-region="minimap"><div class="fr" role="img" aria-label="${esc(large ? st.miniLabel : PH.mapLabel)}">${minimapSvg(mini, M, large ? undefined : sel)}</div><figcaption>${esc(large ? st.miniLabel : PH.mapCap)}</figcaption></figure>`;
       }
       // List
