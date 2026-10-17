@@ -1278,6 +1278,9 @@ importers:
       '@effect/platform-node-shared':
         specifier: 4.0.0
         version: 4.0.0(effect@4.0.0)
+      '@knpkv/alchemy-console':
+        specifier: workspace:^
+        version: link:../alchemy-console
       '@knpkv/bounded-io':
         specifier: workspace:^
         version: link:../bounded-io

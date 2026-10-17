@@ -26,6 +26,14 @@
       "types": "./dist/api.d.ts",
       "import": "./dist/api.js"
     },
+    "./host": {
+      "types": "./dist/host.d.ts",
+      "import": "./dist/host.js"
+    },
+    "./host/server": {
+      "types": "./dist/host-server.d.ts",
+      "import": "./dist/host-server.js"
+    },
     "./views": {
       "types": "./dist/views.d.ts",
       "import": "./dist/views/index.js"
