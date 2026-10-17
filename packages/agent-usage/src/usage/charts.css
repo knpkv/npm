@@ -132,7 +132,7 @@ g[data-active="true"] .usage-segment {
 }
 
 .usage-key-level {
-  border-block-start: 2px solid var(--rly-color-text-1);
+  border-block-start: 2px solid var(--rly-color-text-1); /* stripe-ok: legend line swatch, a zero-height sample of the plotted line */
 }
 
 .usage-key-near {
@@ -151,7 +151,7 @@ g[data-active="true"] .usage-segment {
 }
 
 .usage-key-reset {
-  border-block-start: 2px dotted var(--rly-color-text-3);
+  border-block-start: 2px dotted var(--rly-color-text-3); /* stripe-ok: legend line swatch, a zero-height sample of the reset line */
 }
 
 .usage-key-unknown {
