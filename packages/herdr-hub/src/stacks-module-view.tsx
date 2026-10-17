@@ -15,7 +15,7 @@ import { StackId as StackIdSchema } from "@knpkv/alchemy-console/host"
 import { PlanView, StackOutputsView, StackResourcesView, StackStateTree } from "@knpkv/alchemy-console/views"
 import { Icon, type RlyIconName } from "@knpkv/rly/foundations"
 import { Notice, Skeleton, Tabs } from "@knpkv/rly/primitives"
-import { Effect, Result, Schema } from "effect"
+import { Cause, Effect, Exit, Result, Schema } from "effect"
 import { type ReactElement, type ReactNode, useEffect, useId, useMemo, useState } from "react"
 import { ShellIcon } from "./internal/shell-icon.js"
 import { moduleHref, type ModulePageMount, type ModuleViews, stacksModule } from "./modules.js"
@@ -42,12 +42,57 @@ const useRead = <A,>(read: Effect.Effect<A, StacksReadFailed> | null, active: bo
     if (!active || read === null) return
     setSettled(null)
     const controller = new AbortController()
-    void Effect.runPromise(Effect.result(read), { signal: controller.signal }).then((result) => {
-      if (!controller.signal.aborted) setSettled(result)
-    })
+    runUntilAborted(
+      Effect.result(read).pipe(Effect.tap((result) => Effect.sync(() => setSettled(result)))),
+      controller.signal
+    )
     return () => controller.abort()
   }, [read, active, generation])
   return settled
+}
+
+/**
+ * Runs a page read until `signal` aborts. Leaving the page interrupts it quietly; a defect still surfaces
+ * as an unhandled rejection rather than being swallowed.
+ */
+const runUntilAborted = (effect: Effect.Effect<unknown>, signal: AbortSignal): void => {
+  void Effect.runPromiseExit(effect, { signal }).then((exit) => {
+    if (Exit.isFailure(exit) && !Cause.hasInterruptsOnly(exit.cause)) throw Cause.squash(exit.cause)
+  })
+}
+
+/** Plan reads reach the CI provider's API; the overview keeps at most this many in flight. */
+const planReadConcurrency = 3
+
+/** Each listed stack's last plan, read a few at a time while the page is active. Unread rows are absent. */
+const usePlans = (
+  reads: StacksModuleReads,
+  stacks: ReadonlyArray<StackSummary>,
+  active: boolean
+): ReadonlyMap<StackId, PlanState> => {
+  const [plans, setPlans] = useState<ReadonlyMap<StackId, PlanState>>(new Map())
+  useEffect(() => {
+    if (!active) return
+    setPlans(new Map())
+    const controller = new AbortController()
+    runUntilAborted(
+      Effect.forEach(
+        stacks,
+        (stack) =>
+          Effect.result(reads.plan(stack.id)).pipe(
+            Effect.tap((result) =>
+              Effect.sync(() =>
+                setPlans((previous) => new Map(previous).set(stack.id, planOf(result) ?? { _tag: "Loading" }))
+              )
+            )
+          ),
+        { concurrency: planReadConcurrency, discard: true }
+      ),
+      controller.signal
+    )
+    return () => controller.abort()
+  }, [reads, stacks, active])
+  return plans
 }
 
 type CardTone = "neutral" | "caution" | "critical"
@@ -221,8 +266,10 @@ const planChange = (plan: PlanState | null): string => {
 const planWhen = (plan: PlanState | null): string | null => {
   if (plan?._tag !== "Ready") return null
   const { ageDays, head, publishedAt } = plan.plan.source
-  const time = utcTime.format(new Date(publishedAt))
-  return `${time} UTC, ${ageDays === 0 ? "today" : `${ageDays} d ago`}${head === null ? "" : `, ${head}`}`
+  // publishedAt is an unvalidated string on the wire: a malformed one drops the time, not the page.
+  const date = new Date(publishedAt)
+  const time = Number.isNaN(date.getTime()) ? null : `${utcTime.format(date)} UTC`
+  return [time, ageDays === 0 ? "today" : `${ageDays} d ago`, head].filter((part) => part !== null).join(", ")
 }
 
 const planOf = (result: Result.Result<StackPlanResult, StacksReadFailed> | null): PlanState | null =>
@@ -233,20 +280,6 @@ const planOf = (result: Result.Result<StackPlanResult, StacksReadFailed> | null)
       : result.success._tag === "Ready"
         ? result.success.plan
         : { _tag: "NotConnected" }
-
-/** One stack's last plan on the overview; each row reads its own. */
-const LastPlan = ({
-  active,
-  id,
-  reads
-}: {
-  readonly reads: StacksModuleReads
-  readonly id: StackId
-  readonly active: boolean
-}): ReactElement => {
-  const read = useMemo(() => reads.plan(id), [reads, id])
-  return <>{planWords(planOf(useRead(read, active, 0)))}</>
-}
 
 const stackHref = (stack: StackSummary) => moduleHref(stacksModule, "stack", new URLSearchParams({ id: stack.id }))
 
@@ -271,7 +304,7 @@ const unreadable = (stacks: ReadonlyArray<StackSummary>): string | null => {
     names.length === 1
       ? `${names[0]} couldn’t be read, so its resources read`
       : `${names.join(", ")} couldn’t be read, so their resources read`
-  return `${subject} Unknown. Every other stack is current.`
+  return `${subject} Unknown. The other stacks were read.`
 }
 
 const Fact = ({ children, label }: { readonly label: string; readonly children: ReactNode }): ReactElement => (
@@ -286,58 +319,59 @@ const OverviewTable = ({
   readonly stacks: ReadonlyArray<StackSummary>
   readonly reads: StacksModuleReads
   readonly active: boolean
-}): ReactElement => (
-  <div className="stacks-table-frame">
-    <table className="stacks-table">
-      <thead>
-        <tr>
-          <th scope="col">Stack</th>
-          <th scope="col">Resources</th>
-          <th scope="col">Last plan</th>
-          <th scope="col">Last apply</th>
-          <th scope="col">Drift</th>
-          <th scope="col">Gate</th>
-        </tr>
-      </thead>
-      <tbody>
-        {byApp(stacks).map(({ app, members }) => [
-          <tr className="stacks-group" data-app={app} key={`app:${app}`}>
-            <th colSpan={6} scope="colgroup">
-              <span className="stacks-mono">{app}</span>
-              {`, ${members.length} ${members.length === 1 ? "stack" : "stacks"}`}
-            </th>
-          </tr>,
-          ...members.map((stack) => (
-            <tr key={stack.id}>
-              <th scope="row">
-                <a className="stacks-name" href={stackHref(stack)}>
-                  {stack.stage}
-                </a>
+}): ReactElement => {
+  const plans = usePlans(reads, stacks, active)
+  return (
+    <div className="stacks-table-frame">
+      <table className="stacks-table">
+        <thead>
+          <tr>
+            <th scope="col">Stack</th>
+            <th scope="col">Resources</th>
+            <th scope="col">Last plan</th>
+            <th scope="col">Last apply</th>
+            <th scope="col">Drift</th>
+            <th scope="col">Gate</th>
+          </tr>
+        </thead>
+        <tbody>
+          {byApp(stacks).map(({ app, members }) => [
+            <tr className="stacks-group" data-app={app} key={`app:${app}`}>
+              <th colSpan={6} scope="colgroup">
+                <span className="stacks-mono">{app}</span>
+                {`, ${members.length} ${members.length === 1 ? "stack" : "stacks"}`}
               </th>
-              <Fact label="Resources">
-                <span className={stack.resourceCount === null ? "stacks-muted" : "stacks-count"}>
-                  {stack.resourceCount === null ? "Unknown" : stack.resourceCount}
-                </span>
-              </Fact>
-              <Fact label="Last plan">
-                <LastPlan active={active} id={stack.id} reads={reads} />
-              </Fact>
-              <Fact label="Last apply">
-                <Unchecked />
-              </Fact>
-              <Fact label="Drift">
-                <Unchecked />
-              </Fact>
-              <Fact label="Gate">
-                <Unchecked />
-              </Fact>
-            </tr>
-          ))
-        ])}
-      </tbody>
-    </table>
-  </div>
-)
+            </tr>,
+            ...members.map((stack) => (
+              <tr key={stack.id}>
+                <th scope="row">
+                  <a className="stacks-name" href={stackHref(stack)}>
+                    {stack.stage}
+                  </a>
+                </th>
+                <Fact label="Resources">
+                  <span className={stack.resourceCount === null ? "stacks-muted" : "stacks-count"}>
+                    {stack.resourceCount === null ? "Unknown" : stack.resourceCount}
+                  </span>
+                </Fact>
+                <Fact label="Last plan">{planWords(plans.get(stack.id) ?? null)}</Fact>
+                <Fact label="Last apply">
+                  <Unchecked />
+                </Fact>
+                <Fact label="Drift">
+                  <Unchecked />
+                </Fact>
+                <Fact label="Gate">
+                  <Unchecked />
+                </Fact>
+              </tr>
+            ))
+          ])}
+        </tbody>
+      </table>
+    </div>
+  )
+}
 
 const OverviewPage = ({
   mount,

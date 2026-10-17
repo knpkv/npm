@@ -164,7 +164,7 @@ export const stacksModule = defineModule({
   id: "stacks",
   label: "Stacks",
   defaultPage: "overview",
-  pages: [{ id: "overview", label: "Stacks" }, { id: "stack", label: "Stack" }],
+  pages: [{ id: "overview", label: "Overview" }, { id: "stack", label: "Stack" }],
   listeners: ["serve"],
   requires: ["read"]
 })

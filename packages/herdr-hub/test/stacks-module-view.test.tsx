@@ -1,5 +1,11 @@
 // @vitest-environment happy-dom
-import type { PlanState, StackDetailResult, StacksOverviewResult, StackSummary } from "@knpkv/alchemy-console/host"
+import type {
+  PlanState,
+  StackDetailResult,
+  StackPlanResult,
+  StacksOverviewResult,
+  StackSummary
+} from "@knpkv/alchemy-console/host"
 import { PortalProvider } from "@knpkv/rly/foundations"
 import { Effect } from "effect"
 import { act } from "react"
@@ -130,9 +136,51 @@ describe("Stacks module pages", { concurrent: false }, () => {
     expect(orgRow?.querySelector("a")?.getAttribute("href")).toBe(`?id=${org}#stacks/stack`)
   })
 
+  it("reads at most three plans at once, however many stacks are listed", async () => {
+    const ids = Array.from({ length: 7 }, (_, index) => `00000000-0000-4000-8000-00000000010${index}`)
+    let inFlight = 0
+    let most = 0
+    const many: StacksOverviewResult = {
+      _tag: "Ready",
+      list: { stacks: ids.map((id, index) => summary(id, "fleet", `stage-${index}`, 1)), issues: [] }
+    }
+    await render(
+      reads({
+        overview: Effect.succeed(many),
+        plan: () =>
+          Effect.sync(() => {
+            inFlight += 1
+            most = Math.max(most, inFlight)
+          }).pipe(
+            Effect.andThen(Effect.sleep("5 millis")),
+            Effect.ensuring(Effect.sync(() => (inFlight -= 1))),
+            Effect.as({ _tag: "Ready", plan: { _tag: "NotPublishing" } } satisfies StackPlanResult)
+          )
+      }),
+      "overview"
+    )
+    await act(async () => await new Promise((resolve) => setTimeout(resolve, 60)))
+    expect(most).toBe(3)
+    const rows = [...document.querySelectorAll("tbody tr:not([data-app])")]
+    expect(rows).toHaveLength(7)
+    expect(rows.every((row) => row.textContent?.includes("Not publishing") === true)).toBe(true)
+  })
+
+  it("keeps the stack page up when a plan's publish time is malformed", async () => {
+    const malformed: PlanState =
+      published._tag === "Ready"
+        ? { ...published, plan: { ...published.plan, source: { ...published.plan.source, publishedAt: "not a date" } } }
+        : published
+    await render(reads({ plan: () => Effect.succeed({ _tag: "Ready", plan: malformed }) }), "stack", `id=${org}`)
+    const activity = document.querySelector("[aria-label='Activity']")
+    expect(activity?.textContent).toContain("No changes")
+    expect(activity?.textContent).toContain("today, a1b2c3d")
+    expect(activity?.textContent).not.toContain("UTC")
+  })
+
   it("names the stacks that couldn’t be read", async () => {
     await render(reads(), "overview")
-    expect(text()).toContain("site prod couldn’t be read, so its resources read Unknown. Every other stack is current.")
+    expect(text()).toContain("site prod couldn’t be read, so its resources read Unknown. The other stacks were read.")
   })
 
   it("says why stacks aren't available on this hub, naming the setting", async () => {
