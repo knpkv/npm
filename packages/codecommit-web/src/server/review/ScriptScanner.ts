@@ -113,19 +113,11 @@ const startsWithArrow = (text: string): boolean => {
   return after.startsWith("=>") || (after.startsWith(":") && after.includes("=>"))
 }
 
-/** Calls that take a function but return data or run it: array and iterator methods, and `Effect.gen`. */
-const runsItsArgument = new Set([
-  "map",
-  "filter",
-  "flatMap",
-  "reduce",
-  "forEach",
-  "find",
-  "some",
-  "every",
-  "sort",
-  "gen"
-])
+/**
+ * Wrappers that return a function built from the one they are called with. Any other call that takes a callback
+ * (`Effect.sync`, `rows.findLast`, `setTimeout`) is taken to return data, so its line stays in the module part.
+ */
+const functionWrappers = new Set(["fn", "fnUntraced", "memo", "forwardRef", "useCallback", "pipe", "flow"])
 
 const isFunctionLiteral = (text: string): boolean => {
   const body = text.trimStart().replace(/^async\b\s*/u, "")
@@ -134,8 +126,8 @@ const isFunctionLiteral = (text: string): boolean => {
 
 /**
  * Whether a variable's initializer is a function value: a function expression, an arrow (plain, generic, typed or
- * async), a wrapper called with one (`memo((props) => ...)`, `Effect.fn(function* () {...})`), or a call whose result
- * is called with one (`Effect.fn("name")(function* () {...})`). Data that only holds callbacks, like
+ * async), a known wrapper called with one (`memo((props) => ...)`, `Effect.fn(function* () {...})`), or a call
+ * whose result is called with one (`Effect.fn("name")(function* () {...})`). Data that only holds callbacks, like
  * `{ retry: () => 3 }`, `rows.map((row) => row.id)` or `Effect.gen(function* () {...})`, is not a function.
  */
 const holdsFunction = (initializer: string): boolean => {
@@ -148,7 +140,7 @@ const holdsFunction = (initializer: string): boolean => {
   const open = text[after] === "<" ? closing(text, after, "<", ">") : after
   if (open < 0 || text[open] !== "(") return false
   const method = callee[0].split(".").at(-1) ?? ""
-  if (!runsItsArgument.has(method) && isFunctionLiteral(text.slice(open + 1))) return true
+  if (functionWrappers.has(method) && isFunctionLiteral(text.slice(open + 1))) return true
   const first = closing(text, open, "(", ")")
   if (first < 0) return false
   const next = text.slice(first).trimStart()

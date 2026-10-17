@@ -757,6 +757,8 @@ const FileParts = ({ scene, shared }: { readonly shared: Shared; readonly scene:
                 className="rc-fzr"
                 aria-current={props.state.part === row.part.name ? "true" : undefined}
                 onClick={() => props.onCommand({ _tag: "FocusPart", part: row.part.name })}
+                // Keyboard focus selects the row too, so Enter opens the row it is on.
+                onFocus={() => props.onCommand({ _tag: "FocusPart", part: row.part.name })}
                 onDoubleClick={() => {
                   props.onCommand({ _tag: "FocusPart", part: row.part.name })
                   props.onCommand({ _tag: "ZoomIn" })

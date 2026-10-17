@@ -98,6 +98,14 @@ describe("ReviewCanvas interaction", () => {
     expect(host.textContent).toContain("sync-worker/socket.ts, onMessage()")
   })
 
+  it("opens the part row that has keyboard focus, not the one selected before", async () => {
+    const { host } = await mount({ level: "file", focus: "sync-worker/socket.ts", part: "connect()" })
+    const row = partRow(host, "onMessage()")
+    await act(async () => row?.focus())
+    await key(row ?? document.body, "Enter")
+    expect(host.textContent).toContain("sync-worker/socket.ts, onMessage()")
+  })
+
   it("keeps keyboard focus in the canvas when a zoom replaces the focused node", async () => {
     const { commands, host } = await mount({ focus: "sync-worker/socket.ts" })
     const node = host.querySelector<HTMLElement>('[data-canvas-node="sync-worker/socket.ts"]')

@@ -127,7 +127,10 @@ describe("scanScript", () => {
       "const total = rows.reduce((sum, row) => sum + row.size, 0)",
       "const program = Effect.gen(function* () {",
       "  yield* Effect.void",
-      "})"
+      "})",
+      "const later = Effect.sync(() => 1)",
+      "const last = rows.findLast((row) => row.kept)",
+      "const timer = setTimeout(() => run(), 10)"
     ].join("\n")
     expect(scanScript(text).declarations.map((declaration) => declaration.name)).toEqual([
       "run()",
