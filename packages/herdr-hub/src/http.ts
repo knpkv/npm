@@ -154,6 +154,7 @@ import { makeHostResources } from "./host-resources.js"
 import { readHostUsage, usageCache } from "./host-usage.js"
 import { attachTaskWorkReader } from "./internal/agent-task-work-source.js"
 import { dashboardPage } from "./internal/dashboard-page.js"
+import { moduleCallerFor } from "./internal/hub-node.js"
 import { type ListenerMode, listenerServesWork } from "./internal/listener.js"
 import { decodeRelayPostRequest } from "./internal/relay-post-validation.js"
 import { decodeRelaySelfBody } from "./internal/relay-self-validation.js"
@@ -638,10 +639,6 @@ const tailnetActor = Effect.fn("ApprovalHttp.tailnetActor")(function*(
 ) {
   return (yield* tailnetIdentity(request, config, requiredNodeIds)).login
 })
-
-/** A viewer on the hub machine is the hub's own tailnet node calling this hub. */
-const onHubNode = (config: HostConfiguration, nodeId: string): boolean =>
-  config.host.toLowerCase() === config.approvalHub.host.toLowerCase() && nodeId === config.approvalHub.nodeId
 
 const readBody = (request: IncomingMessage) =>
   Effect.tryPromise({
@@ -3105,7 +3102,7 @@ export const startHttpServer = async (
                 listener: mode,
                 authorize: mode === "approval" || mode === "tailnet" || mode === "serve"
                   ? tailnetIdentity(request, config, mode === "approval" ? config.approvalNodes : null).pipe(
-                    Effect.map(({ login, nodeId }) => ({ login, sameNode: onHubNode(config, nodeId) }))
+                    Effect.map((identity) => moduleCallerFor(config, identity))
                   )
                   : authorized.pipe(Effect.map((login) => ({ login, sameNode: false }))),
                 sameOrigin: sameOrigin(request, expectedOrigin()),
