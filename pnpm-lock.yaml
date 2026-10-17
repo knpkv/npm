@@ -1317,6 +1317,9 @@ importers:
       '@knpkv/rly':
         specifier: workspace:^
         version: link:../rly
+      '@knpkv/sandbox-pool':
+        specifier: workspace:^
+        version: link:../sandbox-pool
       effect:
         specifier: 4.0.0
         version: 4.0.0

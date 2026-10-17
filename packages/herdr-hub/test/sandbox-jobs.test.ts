@@ -1,0 +1,287 @@
+import { describe, expect, it } from "@effect/vitest"
+import type { ApprovedJobIdentity } from "@knpkv/herdr-fleet"
+import { JobHash, type SandboxJobPayload } from "@knpkv/herdr-fleet/model"
+import {
+  budgetHoldBlocker,
+  makeMemoryRunLog,
+  makeMemorySandboxStore,
+  Nuke,
+  type NukeOutcome,
+  PoolAccess,
+  PoolContract,
+  Sandbox,
+  seedPool
+} from "@knpkv/sandbox-pool"
+import { Duration, Effect, Fiber, Latch, Redacted, Schema } from "effect"
+import { TestClock } from "effect/testing"
+import { BudgetControl, BudgetLiftFailed, makeSandboxPool, runSandboxSweep } from "../src/sandbox-jobs.js"
+
+/** An invented pool: no real organization's IDs or names. */
+const contract = Schema.decodeUnknownSync(PoolContract)({
+  accounts: [
+    { name: "sandbox-a", accountId: "999999999990" },
+    { name: "sandbox-b", accountId: "999999999991" }
+  ],
+  nukeBlocklist: ["999999999900"],
+  regions: ["eu-central-1"],
+  accountAccessRole: "PoolAccessRole",
+  boundaryPath: "/pool/",
+  boundaryName: "PoolBoundary",
+  accountAliasPrefix: "example-pool-",
+  budgetActionRole: "example-pool-budget-action",
+  denyAllPolicy: "PoolDenyAll"
+})
+const accountA = "999999999990"
+const approval: ApprovedJobIdentity = {
+  approvedBy: "owner",
+  approvedAt: 0,
+  hash: Schema.decodeUnknownSync(JobHash)("a".repeat(64))
+}
+const decodeResult = Schema.decodeUnknownSync(Schema.fromJsonString(Sandbox))
+const clean = `Scan complete: 5 total, 0 nukeable, 5 filtered.`
+
+interface FakeOptions {
+  readonly hold?: boolean
+  /** Outputs each aws-nuke call returns in order; a clean scan once they run out. */
+  readonly runs?: Array<NukeOutcome>
+  /** Holds every aws-nuke call until this effect completes. */
+  readonly gate?: Effect.Effect<void>
+  /** Holds the store's `list` after it has read, so a sweep acts on a snapshot that ages. */
+  readonly listGate?: Effect.Effect<void>
+  /** Makes the budget lift fail, as a detach that errored after it may have changed the account. */
+  readonly liftFails?: boolean
+}
+
+/** A pool over the memory store and run log, with fakes that record every AWS-side call. */
+const fixture = (options: FakeOptions = {}, initial: ReadonlyArray<Sandbox> = seedPool(contract)) =>
+  Effect.gen(function*() {
+    const calls: Array<string> = []
+    let held = options.hold ?? false
+    const memory = yield* makeMemorySandboxStore(initial)
+    const store = { ...memory, list: Effect.tap(memory.list, () => options.listGate ?? Effect.void) }
+    const runLog = yield* makeMemoryRunLog
+    const pool = yield* makeSandboxPool({
+      contract,
+      store,
+      runLog,
+      access: PoolAccess.of({
+        session: () =>
+          Effect.succeed({
+            accessKeyId: "ASIATEST",
+            secretAccessKey: Redacted.make("secret"),
+            sessionToken: Redacted.make("token")
+          }),
+        ensureBaseline: () => Effect.void,
+        budgetHold: () => Effect.sync(() => held)
+      }),
+      nuke: Nuke.of({
+        writeConfig: (accountId) => Effect.succeed(`/tmp/nuke-${accountId}.json`),
+        run: ({ live }) =>
+          Effect.sync(() => calls.push(live ? "nuke live" : "nuke dry")).pipe(
+            Effect.andThen(options.gate ?? Effect.void),
+            Effect.as(options.runs?.shift() ?? { exitCode: 0, output: clean })
+          )
+      }),
+      budget: BudgetControl.of({
+        lift: (accountId) =>
+          options.liftFails === true
+            ? Effect.fail(new BudgetLiftFailed({ accountId, detail: "throttled" }))
+            : Effect.sync(() => {
+              calls.push(`lift ${accountId}`)
+              held = false
+            })
+      })
+    })
+    const job = (payload: SandboxJobPayload, actor: string, id: string, approved = false) =>
+      pool.run(payload, id, actor, approved ? approval : null).pipe(Effect.map(decodeResult))
+    return { pool, store, runLog, calls, job }
+  })
+
+describe("sandbox jobs", () => {
+  it.effect("the job's actor leases, extends and releases; release resets in the same job", () =>
+    Effect.gen(function*() {
+      const f = yield* fixture()
+      const leased = yield* f.job({ kind: "sandbox.lease" }, "agent-a", "job-1")
+      expect(leased.state).toMatchObject({ _tag: "Leased", holder: "agent-a" })
+      const extended = yield* f.job({ kind: "sandbox.extend", accountId: leased.accountId }, "agent-a", "job-2")
+      expect(extended.version).toBe(leased.version + 1)
+      const released = yield* f.job({ kind: "sandbox.release", accountId: leased.accountId }, "agent-a", "job-3")
+      expect(released.state._tag).toBe("Available")
+      expect(f.calls).toEqual(["nuke dry", "nuke live", "nuke dry"])
+      expect(yield* f.runLog.recent(5)).toMatchObject([{ runId: "job-3", reason: "Released", outcome: "Available" }])
+    }))
+
+  it.effect("another actor can neither extend nor release a lease, and nothing is written", () =>
+    Effect.gen(function*() {
+      const f = yield* fixture()
+      const leased = yield* f.job({ kind: "sandbox.lease" }, "agent-a", "job-1")
+      const foreign: ReadonlyArray<SandboxJobPayload> = [
+        { kind: "sandbox.extend", accountId: leased.accountId },
+        { kind: "sandbox.release", accountId: leased.accountId }
+      ]
+      for (const payload of foreign) {
+        const error = yield* Effect.flip(f.job(payload, "agent-b", `job-${payload.kind}`))
+        expect(error).toMatchObject({ _tag: "FleetOperationError", disposition: "rejected" })
+        expect(error.detail).toContain("NotHolder")
+      }
+      expect(yield* f.store.get(leased.accountId)).toEqual(leased)
+      expect(f.calls).toEqual([])
+    }))
+
+  it.effect("reset and budget lift refuse to run without a persisted approval", () =>
+    Effect.gen(function*() {
+      const f = yield* fixture()
+      for (
+        const payload of [
+          { kind: "sandbox.reset", accountId: accountA, reason: "Manual" },
+          { kind: "sandbox.budget.lift", accountId: accountA }
+        ] satisfies ReadonlyArray<SandboxJobPayload>
+      ) {
+        const error = yield* Effect.flip(f.job(payload, "owner", "job-x"))
+        expect(error.detail).toContain("ApprovalRequired")
+      }
+      expect(f.calls).toEqual([])
+    }))
+
+  it.effect("a held account quarantines; an approved lift detaches the policy and resets it to Available", () =>
+    Effect.gen(function*() {
+      const f = yield* fixture({ hold: true })
+      const reset = yield* f.job(
+        { kind: "sandbox.reset", accountId: accountA, reason: "Manual" },
+        "owner",
+        "job-1",
+        true
+      )
+      expect(reset.state).toMatchObject({ _tag: "Quarantined", blocker: budgetHoldBlocker(contract) })
+      const lifted = yield* f.job({ kind: "sandbox.budget.lift", accountId: accountA }, "owner", "job-2", true)
+      expect(lifted.state._tag).toBe("Available")
+      expect(f.calls).toContain(`lift ${accountA}`)
+    }))
+
+  it.effect("a lift on an account that is not budget-held is rejected before anything is detached", () =>
+    Effect.gen(function*() {
+      const f = yield* fixture({ runs: [{ exitCode: 1, output: "boom" }] })
+      const failed = yield* f.job(
+        { kind: "sandbox.reset", accountId: accountA, reason: "Manual" },
+        "owner",
+        "job-1",
+        true
+      )
+      expect(failed.state._tag).toBe("Quarantined")
+      const error = yield* Effect.flip(
+        f.job({ kind: "sandbox.budget.lift", accountId: accountA }, "owner", "job-2", true)
+      )
+      expect(error).toMatchObject({ disposition: "rejected" })
+      expect(error.detail).toContain("NotBudgetHeld")
+      expect(f.calls.some((call) => call.startsWith("lift"))).toBe(false)
+    }))
+
+  it.effect("a lift that errors after it was called is not reported as rejected", () =>
+    Effect.gen(function*() {
+      const f = yield* fixture({ hold: true, liftFails: true })
+      yield* f.job({ kind: "sandbox.reset", accountId: accountA, reason: "Manual" }, "owner", "job-1", true)
+      const error = yield* Effect.flip(
+        f.job({ kind: "sandbox.budget.lift", accountId: accountA }, "owner", "job-2", true)
+      )
+      expect(error.detail).toContain("BudgetLiftFailed")
+      expect(error.disposition).toBeUndefined()
+    }))
+
+  it.effect("a failed reset step ends Quarantined as a result, not a failed job", () =>
+    Effect.gen(function*() {
+      const f = yield* fixture({
+        runs: [{ exitCode: 0, output: clean }, { exitCode: 0, output: clean }, {
+          exitCode: 0,
+          output:
+            "eu-central-1 - S3Bucket - s3://left - [] - would remove\nScan complete: 6 total, 1 nukeable, 5 filtered."
+        }]
+      })
+      const leased = yield* f.job({ kind: "sandbox.lease" }, "agent-a", "job-1")
+      const released = yield* f.job({ kind: "sandbox.release", accountId: leased.accountId }, "agent-a", "job-2")
+      expect(released.state).toMatchObject({ _tag: "Quarantined", runId: "job-2" })
+    }))
+})
+
+describe("sandbox sweep", () => {
+  it.effect("expires a lease at its end, resets it, and leaves the others alone", () =>
+    Effect.gen(function*() {
+      const f = yield* fixture()
+      const leased = yield* f.job({ kind: "sandbox.lease" }, "agent-a", "job-1")
+      yield* TestClock.adjust(Duration.hours(7))
+      expect(yield* f.pool.sweepOnce).toMatchObject({ expired: 0, resumed: 0, failed: 0 })
+      expect((yield* f.store.get(leased.accountId)).state._tag).toBe("Leased")
+      yield* TestClock.adjust(Duration.hours(1))
+      expect(yield* f.pool.sweepOnce).toMatchObject({ expired: 1, resumed: 0 })
+      expect((yield* f.store.get(leased.accountId)).state._tag).toBe("Available")
+      expect((yield* f.runLog.recent(5))[0]).toMatchObject({ reason: "Expired", outcome: "Available" })
+    }))
+
+  it.effect("resumes a reset left in Cleaning with its own run id, once", () =>
+    Effect.gen(function*() {
+      const stuck = Schema.decodeUnknownSync(Sandbox)({
+        accountId: accountA,
+        name: "sandbox-a",
+        state: { _tag: "Cleaning", since: "1970-01-01T00:00:00Z", runId: "job-crashed", reason: "Released" },
+        version: 3
+      })
+      const [, other] = seedPool(contract)
+      const f = yield* fixture({}, other === undefined ? [stuck] : [stuck, other])
+      expect(yield* f.pool.sweepOnce).toMatchObject({ resumed: 1 })
+      expect(yield* f.store.get(accountA)).toMatchObject({ version: 4, state: { _tag: "Available" } })
+      expect((yield* f.runLog.recent(5))[0]).toMatchObject({ runId: "job-crashed" })
+      expect(yield* f.pool.sweepOnce).toMatchObject({ resumed: 0 })
+    }))
+
+  it.effect("never resets from a stale snapshot: a job that finished meanwhile wins", () =>
+    Effect.gen(function*() {
+      const nukeGate = yield* Latch.make(false)
+      const listGate = yield* Latch.make(true)
+      const f = yield* fixture({ gate: nukeGate.await, listGate: listGate.await })
+      const leased = yield* f.job({ kind: "sandbox.lease" }, "agent-a", "job-1")
+      const releasing = yield* Effect.forkChild(
+        f.job({ kind: "sandbox.release", accountId: leased.accountId }, "agent-a", "job-2")
+      )
+      yield* Effect.yieldNow
+      // The sweep lists while the account is Cleaning, then waits before acting on that snapshot.
+      yield* listGate.close
+      const sweeping = yield* Effect.forkChild(f.pool.sweepOnce)
+      yield* Effect.yieldNow
+      yield* nukeGate.open
+      expect((yield* Fiber.join(releasing)).state._tag).toBe("Available")
+      yield* listGate.open
+      expect(yield* Fiber.join(sweeping)).toMatchObject({ resumed: 0, failed: 0 })
+      expect(f.calls.filter((call) => call === "nuke live")).toHaveLength(1)
+      expect((yield* f.store.get(leased.accountId)).state._tag).toBe("Available")
+    }))
+
+  it.effect("skips an account whose reset a job is running", () =>
+    Effect.gen(function*() {
+      const gate = yield* Latch.make(false)
+      const f = yield* fixture({ gate: gate.await })
+      const leased = yield* f.job({ kind: "sandbox.lease" }, "agent-a", "job-1")
+      const releasing = yield* Effect.forkChild(
+        f.job({ kind: "sandbox.release", accountId: leased.accountId }, "agent-a", "job-2")
+      )
+      yield* Effect.yieldNow
+      expect((yield* f.store.get(leased.accountId)).state._tag).toBe("Cleaning")
+      expect(yield* f.pool.sweepOnce).toMatchObject({ resumed: 0 })
+      yield* gate.open
+      expect((yield* Fiber.join(releasing)).state._tag).toBe("Available")
+      expect(f.calls.filter((call) => call === "nuke live")).toHaveLength(1)
+    }))
+
+  it.effect("the sweep fiber runs now and every five minutes, and stops with its fiber", () =>
+    Effect.gen(function*() {
+      const f = yield* fixture()
+      const fiber = yield* Effect.forkChild(runSandboxSweep(f.pool))
+      yield* Effect.yieldNow
+      const first = yield* f.pool.lastSweep
+      expect(first).not.toBeNull()
+      yield* TestClock.adjust(Duration.minutes(5))
+      const second = yield* f.pool.lastSweep
+      expect(second?.at).not.toEqual(first?.at)
+      yield* Fiber.interrupt(fiber)
+      yield* TestClock.adjust(Duration.minutes(5))
+      expect(yield* f.pool.lastSweep).toEqual(second)
+    }))
+})
