@@ -174,7 +174,7 @@ layer(NodeServices.layer)("sandbox job kinds", (it) => {
       Effect.gen(function*() {
         const fleet = yield* makeFleetService({
           approvalEnabled: true,
-          host: "SER8",
+          host: "host-a",
           id: Effect.succeed("job-unbound"),
           nonce: Effect.succeed("nonce-sandbox"),
           now: Effect.succeed(1_000),
