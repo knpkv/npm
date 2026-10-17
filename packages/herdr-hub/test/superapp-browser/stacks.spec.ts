@@ -29,11 +29,14 @@ for (const shot of pages) {
       await expect(page.locator(".stacks-page h1", { hasText: "Stacks" })).toBeAttached()
       if (shot.state !== "loading") await expect(page.locator(".stacks-page [aria-busy]")).toHaveCount(0)
       if (shot.name === "stacks-overview") await expect(page.locator("tbody tr:not([data-app])")).toHaveCount(4)
+      if (shot.name === "stacks-overview") await expect(page.getByText("3 updates, 1 d ago")).toBeVisible()
       if (shot.name === "stacks-stack") await expect(page.getByRole("rowheader", { name: "org-trail" })).toBeVisible()
       const overflow = await page.evaluate(() =>
         document.documentElement.scrollWidth - document.documentElement.clientWidth
       )
       expect(overflow).toBeLessThanOrEqual(0)
+      // Commit hashes stay in tooltips; no visible text carries one.
+      expect(await page.locator(".stacks-page").innerText()).not.toMatch(/\b[0-9a-f]{7}\b/u)
       const actions = await page.locator(".stacks-page button").allTextContents()
       expect(actions.some((label) => /apply|destroy|deploy|approve/iu.test(label))).toBe(false)
       if (shotsDirectory !== undefined) {

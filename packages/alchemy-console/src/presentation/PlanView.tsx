@@ -44,11 +44,12 @@ const SourceLine = ({
   readonly expired?: boolean
   readonly showBase?: boolean
 }): ReactElement => (
+  // Commit hashes tell people nothing; they stay in the tooltip for whoever needs to match a run.
   <p className="ac-plan-source">
-    {source.pr === null ? null : <span>PR #{source.pr}</span>}
-    <span>· head {source.head}</span>
-    {showBase && source.base !== null ? <span>· base {source.base}</span> : null}
-    {showBase || expired ? <span>· published {publishedLabel(source, expired)}</span> : null}
+    {source.pr === null ? null : <span>PR #{source.pr} ·</span>}
+    <span title={showBase && source.base !== null ? `Head ${source.head}, base ${source.base}` : `Head ${source.head}`}>
+      published {publishedLabel(source, expired)}
+    </span>
   </p>
 )
 const MobileLabel = ({ children }: { readonly children: string }): ReactElement => (

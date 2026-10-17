@@ -174,7 +174,7 @@ describe("Stacks module pages", { concurrent: false }, () => {
     await render(reads({ plan: () => Effect.succeed({ _tag: "Ready", plan: malformed }) }), "stack", `id=${org}`)
     const activity = document.querySelector("[aria-label='Activity']")
     expect(activity?.textContent).toContain("No changes")
-    expect(activity?.textContent).toContain("today, a1b2c3d")
+    expect(activity?.textContent).toContain("today")
     expect(activity?.textContent).not.toContain("UTC")
   })
 
@@ -201,7 +201,10 @@ describe("Stacks module pages", { concurrent: false }, () => {
     expect(activity?.textContent).toContain("Last apply")
     expect(activity?.textContent).toContain("Not checked yet")
     expect(activity?.textContent).toContain("No changes")
-    expect(activity?.textContent).toContain("12:15 UTC, today, a1b2c3d")
+    expect(activity?.textContent).toContain("12:15 UTC, today")
+    // Hashes tell people nothing: the commit is only in the tooltip.
+    expect(activity?.textContent).not.toMatch(/\b[0-9a-f]{7}\b/u)
+    expect(activity?.querySelector("[title*='a1b2c3d']")).not.toBeNull()
     expect(document.querySelector(".ac-resource-name")?.tagName).toBe("SPAN")
     expect(activity?.querySelector("a")?.getAttribute("href")).toBe("https://github.com/knpkv/infra/actions/runs/101")
     expect([...document.querySelectorAll("[role='tab']")].map(({ textContent }) => textContent)).toEqual([
@@ -220,6 +223,14 @@ describe("Stacks module pages", { concurrent: false }, () => {
     expect(text()).toContain("Reload this page to sign in again.")
     await render(reads({ overview: lapsed, stack: () => lapsed }), "stack", `id=${org}`)
     expect(text()).toContain("Reload this page to sign in again.")
+  })
+
+  it("names the plan's commit only in a tooltip on the Plan tab", async () => {
+    await render(reads(), "stack", `id=${org}&view=plan`)
+    const panel = document.querySelector("[aria-label='Latest CI plan']")
+    expect(panel?.textContent).toContain("published")
+    expect(panel?.textContent).not.toMatch(/\b[0-9a-f]{7}\b/u)
+    expect(panel?.querySelector("[title*='a1b2c3d']")).not.toBeNull()
   })
 
   it("reports an unknown or missing stack id as not found", async () => {

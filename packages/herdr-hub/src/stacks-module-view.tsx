@@ -262,14 +262,14 @@ const planChange = (plan: PlanState | null): string => {
   return updates === 0 ? "No changes" : `${updates} ${updates === 1 ? "update" : "updates"}`
 }
 
-/** When and from which commit the plan was published: "12:15 UTC, today, a1b2c3d". */
+/** When the plan was published: "12:15 UTC, today". */
 const planWhen = (plan: PlanState | null): string | null => {
   if (plan?._tag !== "Ready") return null
-  const { ageDays, head, publishedAt } = plan.plan.source
+  const { ageDays, publishedAt } = plan.plan.source
   // publishedAt is an unvalidated string on the wire: a malformed one drops the time, not the page.
   const date = new Date(publishedAt)
   const time = Number.isNaN(date.getTime()) ? null : `${utcTime.format(date)} UTC`
-  return [time, ageDays === 0 ? "today" : `${ageDays} d ago`, head].filter((part) => part !== null).join(", ")
+  return [time, ageDays === 0 ? "today" : `${ageDays} d ago`].filter((part) => part !== null).join(", ")
 }
 
 const planOf = (result: Result.Result<StackPlanResult, StacksReadFailed> | null): PlanState | null =>
@@ -462,7 +462,12 @@ const Activity = ({ plan }: { readonly plan: PlanState | null }): ReactElement =
         <div>
           <dt>Last plan</dt>
           <dd className="stacks-status">{planChange(plan)}</dd>
-          {when === null ? null : <dd className="stacks-when">{when}</dd>}
+          {/* Commit hashes tell people nothing; the commit stays in the tooltip. */}
+          {when === null || plan?._tag !== "Ready" ? null : (
+            <dd className="stacks-when" title={`Commit ${plan.plan.source.head}`}>
+              {when}
+            </dd>
+          )}
           {plan?._tag === "Ready" ? (
             <dd className="stacks-run">
               <a href={plan.plan.source.runHref} rel="noreferrer" target="_blank">
