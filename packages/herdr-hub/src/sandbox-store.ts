@@ -58,7 +58,9 @@ type PutOutcome =
 /**
  * Opens `<path>` in the caller's scope; failing to open is the private database's own error. The pool's accounts are seeded as Available at version 0 the
  * first time each appears in the contract; a stored record is never deleted or renamed, so an account
- * that leaves the contract keeps its row and its history.
+ * that leaves the contract keeps its row and its history. Renaming an account in the contract (same id) is
+ * not a migration: the row keeps its old name, the pool treats it as history, and the account cannot be
+ * leased again until its row is migrated explicitly.
  *
  * Records and run entries are server-private: entries carry aws-nuke output naming the account's
  * resources and are served to the pool owner only.

@@ -109,6 +109,15 @@ export const makeSandboxPool = Effect.fn("SandboxPool.make")(function*(services:
   const lastSweep = yield* Ref.make<SweepReport | null>(null)
 
   /**
+   * A record is in the pool only when the contract names its exact account id and name. Rows kept for an
+   * account that left the contract, or was renamed in it, are history: never leased, changed or swept.
+   */
+  const inPool = (sandbox: Sandbox) =>
+    contract.accounts.some(({ accountId, name }) => accountId === sandbox.accountId && name === sandbox.name)
+  const member = (sandbox: Sandbox): Effect.Effect<void, AccountNotInPool> =>
+    inPool(sandbox) ? Effect.void : Effect.fail(new AccountNotInPool({ accountId: sandbox.accountId }))
+
+  /**
    * `rejected` asserts nothing was committed: the failure came before any record was written. A put the
    * store could not confirm (`SandboxStoreUnavailable` on put) may have landed, so it is never rejected.
    */
@@ -159,7 +168,10 @@ export const makeSandboxPool = Effect.fn("SandboxPool.make")(function*(services:
     committed = false
   ) {
     const now = yield* DateTime.now
-    const cleaning = yield* transition(accountId, (current) => toCleaning(current, now)).pipe(
+    const cleaning = yield* transition(
+      accountId,
+      (current) => member(current).pipe(Effect.andThen(toCleaning(current, now)))
+    ).pipe(
       Effect.mapError((error) => fail(operation, error, !committed))
     )
     return yield* reset(cleaning, runId).pipe(Effect.mapError((error) => fail(operation, error, false)))
@@ -191,8 +203,7 @@ export const makeSandboxPool = Effect.fn("SandboxPool.make")(function*(services:
       case "sandbox.lease": {
         const now = yield* DateTime.now
         const leased = yield* store.list.pipe(
-          // Rows kept for accounts that left the contract are history, not candidates.
-          Effect.flatMap((pool) => lease(pool.filter(({ accountId }) => locks.has(accountId)), holder, now)),
+          Effect.flatMap((pool) => lease(pool.filter(inPool), holder, now)),
           Effect.flatMap(store.put),
           Effect.retry({ times: 3, while: (error) => error._tag === "StaleVersion" }),
           Effect.mapError((error) => fail(operation, error, true))
@@ -200,9 +211,11 @@ export const makeSandboxPool = Effect.fn("SandboxPool.make")(function*(services:
         return done(leased)
       }
       case "sandbox.extend":
-        yield* lockFor(operation, payload.accountId)
         return done(
-          yield* transition(payload.accountId, (current) => extend(current, holder)).pipe(
+          yield* transition(
+            payload.accountId,
+            (current) => member(current).pipe(Effect.andThen(extend(current, holder)))
+          ).pipe(
             Effect.mapError((error) => fail(operation, error, true))
           )
         )
@@ -232,6 +245,7 @@ export const makeSandboxPool = Effect.fn("SandboxPool.make")(function*(services:
         const accountId = payload.accountId
         const lifted = Effect.gen(function*() {
           const current = yield* store.get(accountId).pipe(Effect.mapError((error) => fail(operation, error, true)))
+          yield* member(current).pipe(Effect.mapError((error) => fail(operation, error, true)))
           if (current.state._tag !== "Quarantined" || !isBudgetHoldFor(contract, current.state.blocker)) {
             return yield* fail(operation, new NotBudgetHeld({ accountId }), true)
           }
@@ -258,12 +272,13 @@ export const makeSandboxPool = Effect.fn("SandboxPool.make")(function*(services:
   const sweepAccount = (snapshot: Sandbox, now: DateTime.Utc) => {
     const lock = locks.get(snapshot.accountId)
     const pending = snapshot.state
-    if (lock === undefined || !(leaseEnded(snapshot, now) || pending._tag === "Cleaning")) {
+    if (lock === undefined || !inPool(snapshot) || !(leaseEnded(snapshot, now) || pending._tag === "Cleaning")) {
       return Effect.succeed<SweepOutcome>("idle")
     }
     const decide = Effect.gen(function*() {
       const current = yield* store.get(snapshot.accountId)
       const state = current.state
+      if (!inPool(current)) return "idle" satisfies SweepOutcome
       if (leaseEnded(current, now)) {
         const runId = Schema.decodeUnknownSync(RunId)(`sweep-${DateTime.toEpochMillis(now)}-${current.accountId}`)
         yield* store.put(expire(current, runId, now)).pipe(Effect.flatMap((cleaning) => reset(cleaning, runId)))

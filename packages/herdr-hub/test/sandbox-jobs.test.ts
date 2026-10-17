@@ -35,6 +35,7 @@ const contract = Schema.decodeUnknownSync(PoolContract)({
   denyAllPolicy: "PoolDenyAll"
 })
 const accountA = "999999999990"
+const accountB = "999999999991"
 const approval: ApprovedJobIdentity = {
   approvedBy: "owner",
   approvedAt: 0,
@@ -334,5 +335,38 @@ describe("sandbox sweep", () => {
       const error = yield* Effect.flip(f.job({ kind: "sandbox.lease" }, "agent-a", "job-1"))
       expect(error.detail).toContain("SandboxStoreUnavailable")
       expect(error.disposition).toBeUndefined()
+    }))
+
+  it.effect("a record whose account was renamed in the contract is history: not leased, changed or swept", () =>
+    Effect.gen(function*() {
+      const renamed = Schema.decodeUnknownSync(PoolContract)({
+        ...Schema.encodeSync(PoolContract)(contract),
+        accounts: [{ name: "sandbox-old", accountId: accountA }]
+      })
+      // On the test clock, so the sweep below runs past this lease's end.
+      const now = yield* DateTime.now
+      const oldLease = yield* lease(seedPool(renamed), Schema.decodeUnknownSync(Holder)("agent-a"), now)
+      const current = seedPool(contract).filter(({ accountId }) => accountId !== accountA)
+      const f = yield* fixture({}, [oldLease, ...current])
+      const leased = yield* f.job({ kind: "sandbox.lease" }, "agent-a", "job-1")
+      expect(leased.accountId).toBe(accountB)
+      expect((yield* Effect.flip(f.job({ kind: "sandbox.lease" }, "agent-a", "job-2"))).detail).toContain(
+        "NoneAvailable"
+      )
+      for (
+        const payload of [
+          { kind: "sandbox.extend", accountId: accountA },
+          { kind: "sandbox.release", accountId: accountA }
+        ] satisfies ReadonlyArray<SandboxJobPayload>
+      ) {
+        const error = yield* Effect.flip(f.job(payload, "agent-a", `job-${payload.kind}`))
+        expect(error).toMatchObject({ disposition: "rejected" })
+        expect(error.detail).toContain("AccountNotInPool")
+      }
+      yield* TestClock.adjust(Duration.hours(9))
+      // Only the current account's own lease expires; the renamed record is left as it was.
+      expect(yield* f.pool.sweepOnce).toMatchObject({ expired: 1, resumed: 0, failed: 0 })
+      expect(yield* f.store.get(accountA)).toEqual(oldLease)
+      expect((yield* f.store.get(accountB)).state._tag).toBe("Available")
     }))
 })
