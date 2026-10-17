@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import type { DiscoveryIssue } from "@knpkv/alchemy-console/api"
 import type {
   PlanState,
   StackDetailResult,
@@ -35,10 +36,8 @@ describe("Stacks module pages", { concurrent: false }, () => {
     lastDeploy: null,
     resourceCount
   })
-  const overview: StacksOverviewResult = {
-    _tag: "Ready",
-    list: { stacks: [summary(site, "site", "prod", null), summary(org, "infra", "org", 8)], issues: [] }
-  }
+  const overviewList = { stacks: [summary(site, "site", "prod", null), summary(org, "infra", "org", 8)], issues: [] }
+  const overview: StacksOverviewResult = { _tag: "Ready", list: overviewList }
   const published: PlanState = {
     _tag: "Ready",
     plan: {
@@ -116,7 +115,9 @@ describe("Stacks module pages", { concurrent: false }, () => {
     await render(reads(), "overview")
     expect(document.querySelector("h1")?.textContent).toBe("Stacks")
     expect(text()).toContain("Infrastructure state, read-only")
-    expect(text()).toContain("2 stacks in 2 apps, 1 needs attention.")
+    // A missing count isn't a failure: S3 listings don't count resources.
+    expect(text()).toContain("2 stacks in 2 apps.")
+    expect(text()).not.toContain("attention")
   })
 
   it("lists each stack with its resources and last plan, and phase-2 facts as not checked yet", async () => {
@@ -131,7 +132,7 @@ describe("Stacks module pages", { concurrent: false }, () => {
     expect(orgRow?.textContent).toContain("No changes")
     expect(orgRow?.querySelectorAll("[data-unchecked]")).toHaveLength(3)
     expect(orgRow?.textContent).toContain("Not checked yet")
-    expect(row("prod")?.textContent).toContain("Unknown")
+    expect(row("prod")?.textContent).toContain("Not counted")
     expect(row("prod")?.textContent).toContain("Not publishing")
     expect(orgRow?.querySelector("a")?.getAttribute("href")).toBe(`?id=${org}#stacks/stack`)
   })
@@ -178,7 +179,21 @@ describe("Stacks module pages", { concurrent: false }, () => {
     expect(activity?.textContent).not.toContain("UTC")
   })
 
-  it("shows source failures, not an empty inventory, when discovery found nothing and some sources failed", async () => {
+  it("never names stacks as unreadable from a missing count; source problems read one line per cause", async () => {
+    const issues: ReadonlyArray<DiscoveryIssue> = [
+      { source: "local", reason: "io" },
+      ...Array.from({ length: 8 }, (): DiscoveryIssue => ({ source: "s3", reason: "authentication" }))
+    ]
+    await render(reads({ overview: Effect.succeed({ _tag: "Ready", list: { ...overviewList, issues } }) }), "overview")
+    expect(text()).not.toContain("couldn’t be read, so")
+    const notes = [...document.querySelectorAll("[data-source-issue]")].map(({ textContent }) => textContent)
+    expect(notes).toEqual([
+      "Sign-in expired for 8 AWS profiles, so their state buckets weren’t read. Fix: run aws sso login for them on the stacks host.",
+      "Some project folders under the stacks root couldn’t be read; the rest were."
+    ])
+  })
+
+  it("says plainly when no stack could be read, with the fix", async () => {
     await render(
       reads({
         overview: Effect.succeed({
@@ -188,13 +203,9 @@ describe("Stacks module pages", { concurrent: false }, () => {
       }),
       "overview"
     )
-    expect(text()).toContain("Some sources couldn’t be read (s3: authentication).")
+    expect(text()).toContain("Couldn’t read stacks: sign-in expired for 1 AWS profile.")
+    expect(text()).toContain("Fix: run aws sso login for it on the stacks host.")
     expect(text()).not.toContain("No alchemy stacks found")
-  })
-
-  it("names the stacks that couldn’t be read", async () => {
-    await render(reads(), "overview")
-    expect(text()).toContain("site prod couldn’t be read, so its resources read Unknown. The other stacks were read.")
   })
 
   it("says why stacks aren't available on this hub, naming the setting", async () => {

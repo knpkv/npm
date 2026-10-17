@@ -1,4 +1,4 @@
-export { discoverProjects, Project } from "./discovery.js"
+export { type DiscoveredProjects, discoverProjects, Project } from "./discovery.js"
 export { readLocalState } from "./local-state.js"
 export { discoverSsoProfiles, SsoProfile, SsoProfileError } from "./profiles.js"
 export { s3ReaderLayer } from "./s3-live.js"

@@ -8,8 +8,17 @@ import type {
   StackSummary
 } from "@knpkv/alchemy-console/host"
 
-export type StacksState = "overview" | "empty" | "unavailable" | "loading"
-export const stacksStates: ReadonlyArray<StacksState> = ["overview", "empty", "unavailable", "loading"]
+export type StacksState = "overview" | "partial" | "empty" | "unavailable" | "loading"
+export const stacksStates: ReadonlyArray<StacksState> = ["overview", "partial", "empty", "unavailable", "loading"]
+
+/** A host where some project folders and most AWS profiles couldn't be read. */
+const partialIssues: StacksOverviewReady["list"]["issues"] = [
+  { source: "local", reason: "io" },
+  ...Array.from({ length: 8 }, (): StacksOverviewReady["list"]["issues"][number] => ({
+    source: "s3",
+    reason: "authentication"
+  }))
+]
 
 export const STACK_ORG = "00000000-0000-4000-8000-0000000000a1"
 const STACK_SITE = "00000000-0000-4000-8000-0000000000a2"
@@ -36,7 +45,11 @@ const stacks: ReadonlyArray<StackSummary> = [
 export const stacksOverviewFixture = (state: StacksState): StacksOverviewResult =>
   state === "unavailable"
     ? { _tag: "Unavailable", reason: "not_configured", host: null }
-    : { _tag: "Ready", list: { stacks: state === "empty" ? [] : stacks, issues: [] } }
+    : {
+      _tag: "Ready",
+      list: { stacks: state === "empty" ? [] : stacks, issues: state === "partial" ? partialIssues : [] }
+    }
+type StacksOverviewReady = Extract<StacksOverviewResult, { readonly _tag: "Ready" }>
 
 const resource = (logicalId: string, resourceType: string, providerId: string, updatedAt: string): ResourceSummary => ({
   fqn: logicalId,

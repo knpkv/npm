@@ -35,11 +35,13 @@ export const sourceLayer = (options: SourceOptions) =>
       const discover = Effect.fn("AlchemyConsole.discoverSources")(function*() {
         const stacks: Array<DiscoveredStack> = []
         const issues: Array<DiscoveryIssue> = []
-        const projects = yield* Effect.result(local(discoverProjects(options.root)))
-        if (projects._tag === "Failure") issues.push({ source: "local", reason: projects.failure.reason })
+        const discovered = yield* Effect.result(local(discoverProjects(options.root)))
+        if (discovered._tag === "Failure") issues.push({ source: "local", reason: discovered.failure.reason })
         else {
-          if (projects.success.length > 1000) return yield* new CatalogReadError({ reason: "limit" })
-          for (const project of projects.success) {
+          // Entries the walk couldn't read are reported once; the projects it did find are still read.
+          if (discovered.success.unreadable > 0) issues.push({ source: "local", reason: "io" })
+          if (discovered.success.projects.length > 1000) return yield* new CatalogReadError({ reason: "limit" })
+          for (const project of discovered.success.projects) {
             const found = yield* Effect.result(
               local(Effect.gen(function*() {
                 const version = yield* readAlchemyVersion(project.directory, options.root)

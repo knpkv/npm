@@ -23,18 +23,42 @@ layer(NodeServices.layer)("local readers", (it) => {
       yield* fs.writeFileString(path.join(project, "alchemy.run.ts"), "throw new Error(\"must not execute\")")
       yield* fs.writeFileString(path.join(dependency, "alchemy.run.ts"), "")
       yield* fs.symlink(root, path.join(project, "cycle"))
-      expect(yield* discoverProjects(root)).toEqual([{
-        directory: project,
-        entrypoint: path.join(project, "alchemy.run.ts")
-      }])
+      expect(yield* discoverProjects(root)).toEqual({
+        projects: [{ directory: project, entrypoint: path.join(project, "alchemy.run.ts") }],
+        unreadable: 0
+      })
     }).pipe(Effect.scoped))
 
-  it.effect("rejects discovery symlinks outside the search root", () =>
+  // A link that leaves the root is never followed; a dangling one leads nowhere. Neither stops the walk.
+  it.effect("skips symlinks that escape the root or dangle, and keeps discovering", () =>
     Effect.gen(function*() {
       const { fs, path, root } = yield* setup
-      const outside = yield* fs.makeTempDirectoryScoped()
+      const outside = yield* fs.makeTempDirectoryScoped({ prefix: "alchemy-outside-" })
+      yield* fs.writeFileString(path.join(outside, "alchemy.run.ts"), "")
       yield* fs.symlink(outside, path.join(root, "escape"))
-      expect(yield* Effect.flip(discoverProjects(root))).toMatchObject({ reason: "outside-root" })
+      yield* fs.symlink(path.join(root, "missing"), path.join(root, "dangling"))
+      const project = path.join(root, "app")
+      yield* fs.makeDirectory(project)
+      yield* fs.writeFileString(path.join(project, "alchemy.run.ts"), "")
+      expect(yield* discoverProjects(root)).toEqual({
+        projects: [{ directory: project, entrypoint: path.join(project, "alchemy.run.ts") }],
+        unreadable: 0
+      })
+    }).pipe(Effect.scoped))
+
+  it.effect("counts a directory it can't read and keeps discovering the rest", () =>
+    Effect.gen(function*() {
+      const { fs, path, root } = yield* setup
+      const locked = path.join(root, "locked")
+      yield* fs.makeDirectory(path.join(locked, "inner"), { recursive: true })
+      yield* fs.chmod(locked, 0o000)
+      yield* Effect.addFinalizer(() => fs.chmod(locked, 0o755).pipe(Effect.orDie))
+      const project = path.join(root, "app")
+      yield* fs.makeDirectory(project)
+      yield* fs.writeFileString(path.join(project, "alchemy.run.ts"), "")
+      const found = yield* discoverProjects(root)
+      expect(found.projects.map((item) => item.directory)).toEqual([project])
+      expect(found.unreadable).toBe(1)
     }).pipe(Effect.scoped))
 
   it.effect("reads multiple stages, ignores output/tmp files, and preserves namespace parents", () =>
