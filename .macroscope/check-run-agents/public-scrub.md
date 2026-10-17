@@ -6,9 +6,23 @@ tools:
   - git_tools
   - github_api_read_only
   - modify_pr
+# An explicit include restores files ignore.md skips; the recorded data below is
+# listed by name as well, since it is where private values leak.
 include:
   - "**"
+  - "**/*.json"
+  - "**/package.json"
+  - ".specs/**"
+  - "scripts/fixtures/**"
+  - "**/stories/fixtures/**"
+  - "**/.design-sync/fixtures/**"
+  - "**/test/fixtures/**"
+  - "design-refs/*/*.json"
+# Design exports are hash-pinned bytes reviewed in their ref PRs, and large
+# enough to exhaust the run budget.
 exclude:
+  - "design-refs/*/revisions/**"
+  - "design-refs/*/screens/**"
   - "repos/**"
   - "pnpm-lock.yaml"
   - "docs/debt.md"

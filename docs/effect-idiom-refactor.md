@@ -144,7 +144,6 @@ Untouched code that predates a rule is not a finding.
 - A fallback is correct when the failure is expected and the fallback is the intended behavior, and the reader can
   still tell it happened, for example a visible warning naming what was dropped. Say which case the code is in
   before flagging.
-- Flag `Effect.catchCause` or defect recovery that turns interruption or defects into success.
 
 ### Types and boundaries
 
