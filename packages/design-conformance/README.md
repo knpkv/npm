@@ -222,6 +222,7 @@ where creating symlinks requires additional privileges.
 ## Waivers and reference review
 
 A waiver names screen, state, region, rule, reason, detail and HTTPS decision link.
+Its reason is `design-impossible` or `owner-decision`, the repository owner's call.
 Optional viewport/theme narrow its scope. `region: "*"` names the whole frame;
 it is not a wildcard matching all regions. Each waiver must match an actual failure.
 A stale waiver fails even during legacy grace. Coverage and hash integrity cannot

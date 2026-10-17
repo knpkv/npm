@@ -151,7 +151,7 @@ export const Waiver = Schema.Struct({
   theme: Schema.optionalKey(Theme),
   region: Schema.Union([Name, Schema.Literal("*")]),
   rule: Schema.Literals(["copy", "geometry", "tokens", "pixels"]),
-  reason: Schema.Literals(["design-impossible", "andrey-decision"]),
+  reason: Schema.Literals(["design-impossible", "owner-decision"]),
   detail: Schema.NonEmptyString,
   decisionLink: Schema.String.check(Schema.isPattern(/^https:\/\/[^\s]+$/u))
 })
