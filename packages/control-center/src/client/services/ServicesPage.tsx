@@ -617,6 +617,9 @@ const ServicePreviewCard = ({
 )
 
 /** Manage fixed first-party providers and prove configured identities with owner-only live checks. */
+/** One empty list for "not detected yet", so the setup form doesn't see a new list on every render. */
+const NO_AWS_PROFILES: AwsProfileDiscoveryResponse = []
+
 export const ServicesPage = ({
   transport = browserConnectionTestTransport
 }: {
@@ -631,6 +634,19 @@ export const ServicesPage = ({
   const refreshOverview = useCallback(() => overviewRefresh.current?.refresh(), [])
   const [connectionsState, setConnectionsState] = useState<ConnectionsState>({ _tag: "idle" })
   const [awsProfilesState, setAwsProfilesState] = useState<AwsProfilesState>({ _tag: "idle" })
+  const awsProfiles = awsProfilesState._tag === "ready" ? awsProfilesState.profiles : NO_AWS_PROFILES
+  // Stable across renders: the setup form re-asks for regions whenever this identity changes.
+  const discoverAwsRegions = useCallback(
+    (profile: string, signal: AbortSignal): Promise<AwsRegionDiscoveryResponse> => {
+      const discoverRegions = transport.discoverAwsRegions
+      if (discoverRegions === undefined) return Promise.resolve({ _tag: "denied" })
+      return discoverRegions(profile, signal).catch(<UnparsedInput,>(failure: UnparsedInput) => {
+        if (sessionKey !== null && Predicate.isTagged("UnauthorizedApiError")(failure)) invalidateSession(sessionKey)
+        return Promise.reject(failure)
+      })
+    },
+    [invalidateSession, sessionKey, transport]
+  )
   const [atlassianProfilesState, setAtlassianProfilesState] = useState<AtlassianProfilesState>({ _tag: "idle" })
   const [testStates, setTestStates] = useState<ReadonlyMap<PluginConnectionId, ConnectionTestState>>(new Map())
   const [enablementStates, setEnablementStates] = useState<ReadonlyMap<PluginConnectionId, ConnectionEnablementState>>(
@@ -1504,7 +1520,7 @@ export const ServicesPage = ({
                   atlassianProfiles={atlassianProfilesState._tag === "ready" ? atlassianProfilesState.profiles : []}
                   atlassianProfilesState={atlassianProfilesState._tag}
                   atlassianSetupIntent={setupIntent}
-                  awsProfiles={awsProfilesState._tag === "ready" ? awsProfilesState.profiles : []}
+                  awsProfiles={awsProfiles}
                   awsProfilesState={awsProfilesState._tag}
                   canConfigure={canConfigure}
                   catalog={catalog}
@@ -1532,16 +1548,7 @@ export const ServicesPage = ({
                       return Promise.reject(failure)
                     })
                   }}
-                  onDiscoverAwsRegions={(profile, signal) => {
-                    const discoverRegions = transport.discoverAwsRegions
-                    if (discoverRegions === undefined) return Promise.resolve({ _tag: "denied" })
-                    return discoverRegions(profile, signal).catch(<UnparsedInput,>(failure: UnparsedInput) => {
-                      if (sessionKey !== null && Predicate.isTagged("UnauthorizedApiError")(failure)) {
-                        invalidateSession(sessionKey)
-                      }
-                      return Promise.reject(failure)
-                    })
-                  }}
+                  onDiscoverAwsRegions={discoverAwsRegions}
                   onOpen={() => {
                     if (openProvider !== catalog.providerId) {
                       completedBatchDrafts.current.delete(catalog.providerId)
@@ -1554,7 +1561,7 @@ export const ServicesPage = ({
                   onReloadAwsProfiles={(signal) => {
                     const discoverProfiles = transport.discoverAwsProfiles
                     if (discoverProfiles === undefined) {
-                      return Promise.resolve(awsProfilesState._tag === "ready" ? awsProfilesState.profiles : [])
+                      return Promise.resolve(awsProfiles)
                     }
                     return discoverProfiles(signal).then((profiles) => {
                       if (!signal.aborted) setAwsProfilesState({ _tag: "ready", profiles })

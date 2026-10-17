@@ -2843,6 +2843,54 @@ describe("ServicesPage connection tests", () => {
       expect(awsFollowButton(host)).toBeUndefined()
     })
 
+    // A parent re-render (here: submitting) must not restart the lookup and blank the region select.
+    it("asks for a profile's regions once, however often the page re-renders", async () => {
+      const discoverAwsRegions = vi.fn<NonNullable<ConnectionTestTransport["discoverAwsRegions"]>>(() =>
+        Promise.resolve({ _tag: "available", regions: ["eu-west-1", "us-east-1"] })
+      )
+      const host = await setupHost({
+        createBatch: () => new Promise(() => undefined),
+        discoverAwsRegions
+      })
+      await setControlValue(await awsManualNames(host, "Repository names"), "paper-crane")
+      await act(async () => awsFollowButton(host)?.click())
+      expect(discoverAwsRegions).toHaveBeenCalledTimes(1)
+      expect(awsSelect(host, "AWS region").disabled).toBe(false)
+    })
+
+    it("keeps a typed region when the typed profile changes", async () => {
+      const host = await setupHost({ discoverAwsProfiles: () => Promise.resolve([]) })
+      await setControlValue(awsControl(host, "AWS region"), "eu-central-1")
+      await setControlValue(awsControl(host, "AWS profile"), "studio-stage")
+      expect(awsControl(host, "AWS region").value).toBe("eu-central-1")
+    })
+
+    it("keeps listing selected names after a failed refresh, so Follow N counts only what is shown", async () => {
+      const discoverAwsResources = vi
+        .fn<NonNullable<ConnectionTestTransport["discoverAwsResources"]>>()
+        .mockResolvedValueOnce({
+          accountId: "123456789012",
+          codeCommit: { _tag: "available", names: ["paper-crane"], truncated: false },
+          codePipeline: { _tag: "available", names: [], truncated: false }
+        })
+        .mockRejectedValueOnce({ _tag: "ServiceUnavailableApiError" })
+      const host = await setupHost({
+        discoverAwsRegions: () => Promise.resolve({ _tag: "available", regions: ["eu-west-1"] }),
+        discoverAwsResources
+      })
+      await act(async () => buttonNamed(host, "Test & discover")?.click())
+      const box = () =>
+        [...host.querySelectorAll<HTMLLabelElement>("label")]
+          .find(({ textContent }) => textContent === "paper-crane")
+          ?.querySelector<HTMLInputElement>('input[type="checkbox"]')
+      await act(async () => box()?.click())
+      await act(async () => buttonNamed(host, "Test & discover")?.click())
+      expect(host.textContent).toContain("AWS didn’t answer the account check.")
+      expect(host.textContent).toContain("Kept from the last check")
+      expect(box()?.checked).toBe(true)
+      expect(awsFollowButton(host)?.textContent).toBe("Follow 1 resource")
+    })
+
     it("counts every followed resource on the follow button", async () => {
       const host = await setupHost({
         discoverAwsRegions: () => Promise.resolve({ _tag: "available", regions: ["eu-west-1"] }),

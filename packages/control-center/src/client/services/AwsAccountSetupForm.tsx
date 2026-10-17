@@ -246,11 +246,13 @@ const ResourceList = ({
 }: {
   readonly label: string
   readonly selected: ReadonlySet<string>
-  readonly service: AwsServiceResourceDiscovery
+  /** This check's answer for the service; null when the check itself failed. */
+  readonly service: AwsServiceResourceDiscovery | null
   readonly setSelected: (selected: ReadonlySet<string>) => void
 }): ReactElement | null => {
-  // A service that failed this time still lists what was already selected, so it can be checked or cleared.
-  const names = refreshedAwsResourceChoices(service._tag === "available" ? service.names : [], selected)
+  // A service (or a whole check) that failed this time still lists what was already selected, so every name
+  // "Follow N" counts stays visible and can be cleared.
+  const names = refreshedAwsResourceChoices(service?._tag === "available" ? service.names : [], selected)
   if (names.length === 0) return null
   return (
     <div className={styles.list}>
@@ -259,7 +261,7 @@ const ResourceList = ({
           {label}
         </Text>
         <span className={styles.listCount}>
-          {service._tag === "available"
+          {service?._tag === "available"
             ? awsResourceListCount(service.names.length, service.truncated)
             : "Kept from the last check"}
         </span>
@@ -511,9 +513,11 @@ export const AwsAccountSetupForm = ({
   const signInProfile =
     discoveryState._tag === "failed" && discoveryState.reason === "sign-in-required" ? discoveryState.profile : null
 
+  // A detected profile brings its configured region; a typed one keeps the region already typed.
   const changeProfile = (nextProfile: string): void => {
+    const configured = awsProfiles.find((candidate) => candidate.profile === nextProfile)?.region
     setProfile(nextProfile)
-    setRegion(awsProfiles.find((candidate) => candidate.profile === nextProfile)?.region ?? "")
+    if (configured !== undefined && configured !== null) setRegion(configured)
     setFieldErrors(({ profile: _profile, ...rest }) => rest)
     resetDiscovery()
   }
@@ -737,7 +741,22 @@ export const AwsAccountSetupForm = ({
           or add names manually.
         </p>
       ) : null}
-      {ready === null || policyDenied ? null : (
+      {ready === null || policyDenied ? (
+        <>
+          <ResourceList
+            label="Repository names"
+            selected={selectedRepositories}
+            service={null}
+            setSelected={setSelectedRepositories}
+          />
+          <ResourceList
+            label="Pipeline names"
+            selected={selectedPipelines}
+            service={null}
+            setSelected={setSelectedPipelines}
+          />
+        </>
+      ) : (
         <>
           <ResourceList
             label="Repository names"
