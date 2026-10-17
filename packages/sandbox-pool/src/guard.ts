@@ -50,15 +50,25 @@ const plainLine = (line: string): string => line.replace(terminalStyle, "").trim
  * one. An unquoted identifier can still contain `=` (IAM names allow it), so a
  * resource named `level=error` quarantines a clean account: the safe direction.
  * Colours are off (see `nukeArgs` in reset.ts); JSON logs are matched too.
+ *
+ * One warning also means a short scan: libnuke stops enqueueing a resource type
+ * when its scan queue fills, and counts only what it kept. That log line, at any
+ * level, is incomplete discovery too; other warnings are not. The wording is
+ * libnuke 1.3.0's, as shipped in aws-nuke 3.68.3: re-check it on an aws-nuke bump.
  */
 const logLevel = /(?:^|\s)level=(?:error|fatal|panic)(?:\s|$)|"level":"(?:error|fatal|panic)"/
+const anyLevel = /(?:^|\s)level=\w+(?:\s|$)|"level":"\w+"/
+const queueFull = "not all resources will be enqueued"
 
 /** The line without quoted values or bracketed properties, which resources and messages control. */
 const logFields = (line: string): string => line.replace(/\[[^\]]*\]/g, " ").replace(/"(?:[^"\\]|\\.)*"/g, "\"\"")
 
 /** Every line of a run that reports failed discovery, colour codes removed. */
 export const discoveryFailures = (output: string): ReadonlyArray<string> =>
-  output.split("\n").map(plainLine).filter((line) => logLevel.test(line.startsWith("{") ? line : logFields(line)))
+  output.split("\n").map(plainLine).filter((line) => {
+    const fields = line.startsWith("{") ? line : logFields(line)
+    return logLevel.test(fields) || (anyLevel.test(fields) && line.includes(queueFull))
+  })
 
 /** The resources an aws-nuke run lists for removal, one line each, colour codes removed. */
 export const wouldRemove = (output: string): ReadonlyArray<string> =>

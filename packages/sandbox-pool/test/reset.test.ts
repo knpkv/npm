@@ -107,6 +107,10 @@ const kept = (filters: ReadonlyArray<typeof IdentifierFilter.Type> | undefined, 
 const listingFailed =
   `time="2026-10-16T09:00:00Z" level=error msg="listing failed: AccessDenied" owner=eu-central-1 resource_type=S3Bucket`
 
+/** libnuke's warning when a resource type's scan queue fills and later resources are dropped. */
+const queueFull =
+  `time="2026-10-16T09:00:00Z" level=warning msg="item queue is full, not all resources will be enqueued" owner=eu-central-1 resource_type=CloudWatchLogsLogGroup`
+
 describe("sandbox reset", () => {
   it("nuke config keeps org-owned resources and blocks every non-pool account", () => {
     const config = JSON.parse(renderNukeConfig(contract, "111111111111"))
@@ -209,6 +213,34 @@ describe("sandbox reset", () => {
         blocker: `verify: incomplete scan and 1 more: ${listingFailed}`
       })
     }))
+
+  it.effect("a scan whose queue filled quarantines in the dry run and in verify", () =>
+    Effect.gen(function*() {
+      const dry = harness([{ exitCode: 0, output: `${queueFull}\n${summary(0)}` }])
+      expect((yield* dry.run()).state).toMatchObject({
+        _tag: "Quarantined",
+        blocker: `dry run: incomplete scan: ${queueFull}`
+      })
+      expect(dry.steps.filter((step) => step.startsWith("nuke"))).toEqual(["nuke dry"])
+      const verify = harness([
+        { exitCode: 0, output: scan(1) },
+        { exitCode: 0, output: scan(1) },
+        { exitCode: 0, output: `${queueFull}\n${summary(0)}` }
+      ])
+      expect((yield* verify.run()).state).toMatchObject({
+        _tag: "Quarantined",
+        blocker: `verify: incomplete scan: ${queueFull}`
+      })
+    }))
+
+  it("other warnings, and resources named after the queue warning, are not incomplete scans", () => {
+    expect(discoveryFailures(`time="t" level=warning msg="rate limited, retrying"`)).toEqual([])
+    expect(
+      discoveryFailures(
+        `eu-central-1 - CloudWatchLogsLogGroup - not all resources will be enqueued - [Name: "x"] - filtered: filtered by config`
+      )
+    ).toEqual([])
+  })
 
   it("finds error-level log fields whatever prefixes them, and in JSON logs", () => {
     expect(discoveryFailures(`us-east-1 - ${listingFailed}`)).toEqual([`us-east-1 - ${listingFailed}`])
