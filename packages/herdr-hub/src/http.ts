@@ -123,7 +123,6 @@ import { ChildProcessSpawner } from "effect/process"
 import type * as SemaphoreModule from "effect/Semaphore"
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http"
 import { createServer as createSecureServer } from "node:https"
-import { homedir } from "node:os"
 import type { Duplex } from "node:stream"
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
@@ -206,7 +205,6 @@ import { relayIconSvg } from "./relay-icon.js"
 import { hubCapabilities, HubReadFailed, type HubRelayReads, type PendingJob } from "./relay/capabilities.js"
 import { cliBackends, makeRelayHubMount, type RelayHubBackends, type RelayHubMount } from "./relay/mount.js"
 import { handleRelayRoute } from "./relay/routes.js"
-import { makeStacksModule } from "./stacks-module.js"
 import { ApprovalAppStore } from "./store.js"
 import { workCheckpointPath, workPullRequestAttachPath, workSnapshotPath } from "./work-checkpoint.js"
 
@@ -377,8 +375,6 @@ export type HubRelayOptions = {
 export type HttpServerOptions = {
   /** Explicit server-private credential host. Missing means Code is unavailable, never discovered. */
   readonly codeHost?: FleetHostName
-  /** Explicit server-private Stacks host (`RELAY_STACKS_HOST`). Missing means Stacks is unavailable. */
-  readonly stacksHost?: FleetHostName
   /** Additional product layers join the shared registry at startup; handlers close their requirements. */
   readonly modules?: ReadonlyArray<ServerModule<unknown, HttpClient.HttpClient | Tailscale | Crypto.Crypto>>
   readonly lanWork?: LanWorkListenerOptions
@@ -1870,12 +1866,6 @@ export const startHttpServer = async (
         isHub,
         stateDirectory: config.stateDirectory,
         codeHost: options.codeHost ?? null
-      }),
-      makeStacksModule({
-        host: config.host,
-        isHub,
-        stacksHost: options.stacksHost ?? null,
-        home: homedir()
       }),
       {
         descriptor: fleetHubModule,

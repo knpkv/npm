@@ -10,7 +10,6 @@ import { hasOutstandingWorkJob, noJobStore } from "./internal/outstanding-work-j
 import { noStartedWorkerStore, startedWorker } from "./internal/started-worker.js"
 import { loadUiAssets } from "./internal/ui-assets.js"
 import { makeHostOperations } from "./operations.js"
-import { readStacksHost } from "./stacks-module.js"
 
 export { HostdOperationsCompositionError } from "./errors.js"
 export { runWorkAbandon } from "./work-abandon.js"
@@ -78,7 +77,6 @@ export const makeHostdProgram = Effect.fn("Hostd.makeProgram")(function*(
   const configPath = yield* fleetConfigPath
   const config = yield* loadConfiguration(configPath)
   const codeHost = yield* readCodeHost
-  const stacksHost = yield* readStacksHost
   const store = yield* Effect.acquireRelease(
     JobStore.open(paths.join(config.stateDirectory, "jobs.sqlite")),
     (opened) => Effect.sync(() => opened.close())
@@ -95,9 +93,7 @@ export const makeHostdProgram = Effect.fn("Hostd.makeProgram")(function*(
   const assets = yield* loadUiAssets(directory)
   const relay = { directory: paths.join(config.stateDirectory, "relay") }
   const relayOptions = config.lanWork === undefined ? { relay } : { relay, lanWork: config.lanWork }
-  // Absent hosts stay absent: the server reads a missing key as "not configured".
-  const withCode = codeHost === null ? relayOptions : { ...relayOptions, codeHost }
-  const serverOptions = stacksHost === null ? withCode : { ...withCode, stacksHost }
+  const serverOptions = codeHost === null ? relayOptions : { ...relayOptions, codeHost }
   const server = yield* Effect.acquireRelease(
     Effect.tryPromise({
       try: () => startHttpServer(config, service, assets, serverOptions),

@@ -2,4 +2,4 @@
 "@knpkv/herdr-hub": minor
 ---
 
-Add a read-only Stacks module to the Hub: the host's alchemy stacks, one stack's resources, state and outputs, and its latest published plan, using alchemy-console's own views. It is read on the host named by `RELAY_STACKS_HOST` only, and reports when it is not configured, configured for another host, or its reader can't start. Nothing in it applies, plans or approves.
+Add `stacksModule` and the Stacks module server side: a read-only module that serves the host's alchemy stacks, one stack's state and its latest published plan from alchemy-console, on the host named by `RELAY_STACKS_HOST` only. It is not registered yet, so nothing changes in the Hub until its pages land.

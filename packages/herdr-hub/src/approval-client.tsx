@@ -58,8 +58,6 @@ import { makeResourcesModuleViews } from "./resources-module-view.js"
 import { loadHostResources } from "./resources-client.js"
 import { makeUsageModuleViews, type UsageModuleReads } from "./usage-module-view.js"
 import { makeCodeModuleViews } from "./code-module-view.js"
-import { loadStack, loadStackPlan, loadStacksOverview, type StacksModuleReads } from "./stacks-client.js"
-import { makeStacksModuleViews } from "./stacks-module-view.js"
 import {
   loadCodeQueue,
   loadCodeDetail,
@@ -710,7 +708,6 @@ const DashboardApp = ({
   })
   const resources = makeResourcesModuleViews({ host: current.host, read: resourcesRead })
   const code = makeCodeModuleViews({ reads: codeReads })
-  const stacks = makeStacksModuleViews({ reads: stacksReads })
   const connectConnection = useAtomValue(atoms.connect.connection)
   const fleetNavigationBadge = dashboardPendingNavigationBadge(pendingState, workNow, refreshFailed)
   const fleetWithBadge =
@@ -720,7 +717,7 @@ const DashboardApp = ({
       <DashboardWorkPollOwner atom={atoms.work} poll={atoms.workPoll} />
       {canonical ? (
         <SuperappShell
-          modules={[connect, fleetWithBadge, code, usage, resources, stacks]}
+          modules={[connect, fleetWithBadge, code, usage, resources]}
           mobileModules={["connect", "fleet", "code", "usage"]}
           primaryModules={["connect", "fleet"]}
           landing={{ module: "connect", page: "overview" }}
@@ -818,11 +815,6 @@ const codeReads: CodeModuleReads = {
   diff: (ref) => runCodeRead(loadCodeDiff(ref)),
   content: (query) => runCodeRead(loadCodeContent(query)),
   canvas: (ref) => runCodeRead(loadCodeCanvas(ref))
-}
-const stacksReads: StacksModuleReads = {
-  overview: runCodeRead(loadStacksOverview),
-  stack: (id) => runCodeRead(loadStack(id)),
-  plan: (id) => runCodeRead(loadStackPlan(id))
 }
 const relayConversations = makeRelayConversations(
   makeRelayClient({ base: "/v1/relay", origin: window.location.href }),
