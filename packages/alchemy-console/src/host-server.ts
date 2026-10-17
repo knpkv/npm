@@ -3,8 +3,7 @@
  * plan reader the standalone console runs; `makeStacksHostReads` turns them into tagged results. Paths and
  * tokens stay in this process: nothing here crosses the host's API except the results in `./host`.
  */
-import { Effect, Layer, Path } from "effect"
-import * as Config from "effect/Config"
+import { Config, Effect, Layer, Path } from "effect"
 import type { StackId, StackNotFound } from "./api.js"
 import type { StackDetailResult, StackPlanResult, StacksOverviewResult } from "./host.js"
 import { Catalog } from "./server/Catalog.js"

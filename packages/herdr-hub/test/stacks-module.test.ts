@@ -6,7 +6,7 @@ import { FleetHostName } from "@knpkv/herdr-fleet/model"
 import { ConfigProvider, Effect, Layer, Result, Schema } from "effect"
 import { stacksModule } from "../src/module-contract.js"
 import { dispatchModuleRoute, makeModuleLayer } from "../src/module-server.js"
-import { makeStacksModule, readStacksHost } from "../src/stacks-module.js"
+import { makeStacksModule, readStacksHost, StacksReaderStartError } from "../src/stacks-module.js"
 
 const host = Schema.decodeUnknownSync(FleetHostName)("atlas")
 const other = Schema.decodeUnknownSync(FleetHostName)("cedar")
@@ -50,7 +50,7 @@ const fakeReads: StacksHostReads = {
 const withModule = <A, E, R>(
   stacksHost: FleetHostName | null,
   run: Effect.Effect<A, E, R>,
-  reads: Effect.Effect<StacksHostReads, unknown> = Effect.succeed(fakeReads),
+  reads: Effect.Effect<StacksHostReads, StacksReaderStartError> = Effect.succeed(fakeReads),
   isHub = true
 ) =>
   Effect.gen(function*() {
@@ -110,7 +110,7 @@ describe("host-local Stacks module", () => {
       Effect.gen(function*() {
         expect((yield* request("overview"))?.body).toEqual({ _tag: "Unavailable", reason: "unavailable", host })
       }),
-      Effect.fail("no state root")
+      Effect.fail(new StacksReaderStartError({ cause: "no state root" }))
     ))
 
   it.effect("reads RELAY_STACKS_HOST: missing is none, invalid fails startup", () =>

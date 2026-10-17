@@ -31,12 +31,17 @@ export const readStacksHost = Config.option(Config.String("RELAY_STACKS_HOST")).
   )
 )
 
+/** The Stacks reader couldn't start: configuration, AWS profiles or the state root. Routes report it as unavailable. */
+export class StacksReaderStartError extends Schema.TaggedError<StacksReaderStartError>()("StacksReaderStartError", {
+  cause: Schema.Defect()
+}) {}
+
 /** The production reader: the same discovery, SSO and plan reader the standalone console runs. */
 const liveReads = Effect.fn("StacksModule.liveReads")(function*(home: string) {
   const options = yield* stacksHostOptions(home)
   const context = yield* Layer.build(stacksHostLayer(options))
   return yield* makeStacksHostReads.pipe(Effect.provideContext(context))
-})
+}, Effect.mapError((cause) => new StacksReaderStartError({ cause })))
 
 /**
  * Only the configured credential host's own hub builds the reader. `reads` replaces the live reader in
@@ -47,7 +52,7 @@ export const makeStacksModule = (configuration: {
   readonly isHub: boolean
   readonly stacksHost: FleetHostName | null
   readonly home: string
-  readonly reads?: Effect.Effect<StacksHostReads, unknown, Scope.Scope>
+  readonly reads?: Effect.Effect<StacksHostReads, StacksReaderStartError, Scope.Scope>
 }) => ({
   descriptor: stacksModule,
   handlers: Layer.effect(
