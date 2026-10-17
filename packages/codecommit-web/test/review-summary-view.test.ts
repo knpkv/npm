@@ -80,7 +80,7 @@ it("keeps the legacy verdict verbatim, counts separately, and never invents appr
   expect(fixture.host.textContent).toContain("Saved review profile, Claude Code, Opus, Code review")
   expect(fixture.host.querySelector("time")?.textContent).toBe("14:02")
   expect(fixture.host.querySelector("time")?.getAttribute("datetime")).toBe("2026-10-05T14:02:00.000Z")
-  expect(fixture.host.querySelector("button, input, textarea, a")).toBeNull()
+  expect(fixture.host.querySelector("button:not([aria-label=\"Copy commit id\"]), input, textarea, a")).toBeNull()
   for (const absent of ["What changed", "By axis", "Confidence", "Risks", "Fix all", "Approve", "Post", "Rules"]) {
     expect(fixture.host.textContent).not.toContain(absent)
   }
@@ -95,7 +95,8 @@ it("hides every count for conflicting threads while keeping the recorded verdict
   expect(fixture.host.querySelector("dl")).toBeNull()
   expect(fixture.host.textContent).not.toContain("By severity")
   expect(fixture.host.querySelector("blockquote p")?.textContent).toBe(run.summary)
-  expect(fixture.host.textContent).toContain("Reviewed 14:02, head head")
+  expect(fixture.host.textContent).toContain("Reviewed 14:02, head “Commit title unavailable”")
+  expect(fixture.host.querySelector("button[aria-label=\"Copy commit id\"]")).not.toBeNull()
   expect(fixture.host.textContent).not.toContain("private-conflict")
 })
 
@@ -107,7 +108,7 @@ it("does not make up a reviewer or engine when their recorded profile is absent"
   expect(fixture.host.textContent).toContain("Security review")
   expect(fixture.host.textContent).not.toContain("Saved review profile")
   expect(fixture.host.textContent).not.toContain("Claude Code")
-  expect(fixture.host.querySelector("img, svg")).toBeNull()
+  expect(fixture.host.querySelector("img, :not(button[aria-label=\"Copy commit id\"]) > svg")).toBeNull()
 })
 
 it("preserves Explain output without presenting an empty finding count as a review verdict", async () => {
@@ -124,7 +125,7 @@ it("preserves Explain output without presenting an empty finding count as a revi
   expect(fixture.host.textContent).toContain("Recorded change explanation.")
   expect(fixture.host.querySelector("blockquote p")?.textContent).toBe(run.summary)
   expect(fixture.host.querySelector("dl")).toBeNull()
-  expect(fixture.host.querySelector("button")).toBeNull()
+  expect(fixture.host.querySelector("button:not([aria-label=\"Copy commit id\"])")).toBeNull()
 })
 
 /** Empty verdicts must not draw quote punctuation or reserve a line before recorded Explain prose. */

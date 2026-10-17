@@ -104,7 +104,8 @@ it("shows only a real immutable suggested patch, keeping its head and path next 
     })
   )
   expect(fixture.host.querySelector("pre code")?.textContent).toBe(patch.text)
-  expect(fixture.host.textContent).toContain("src/example.ts, head reviewed-head")
+  expect(fixture.host.textContent).toContain("src/example.ts, head “Commit title unavailable”")
+  expect(fixture.host.textContent).not.toContain("reviewed-head")
   expect(fixture.host.textContent).toContain("Security")
   expect(fixture.host.textContent).toContain("High confidence")
   expect([...fixture.host.querySelectorAll("article > header > *")].map((element) => element.textContent)).toEqual([
@@ -112,7 +113,7 @@ it("shows only a real immutable suggested patch, keeping its head and path next 
     "Security",
     "src/example.ts, High confidence"
   ])
-  expect(fixture.host.querySelector("script, button")).toBeNull()
+  expect(fixture.host.querySelector("script, button:not([aria-label=\"Copy commit id\"])")).toBeNull()
 })
 
 it("renders every recorded disposition with exact reason words and no invented actor or controls", async () => {
@@ -120,7 +121,7 @@ it("renders every recorded disposition with exact reason words and no invented a
   for (
     const [disposition, expected] of [
       [{ _tag: "Open" }, null],
-      [{ _tag: "FixedVerify", commit: "d4e5f6a" }, "Fix pushed in d4e5f6a, waiting for re-review"],
+      [{ _tag: "FixedVerify", commit: "d4e5f6a" }, "Fix pushed in “Commit title unavailable”, waiting for re-review"],
       [{ _tag: "Resolved" }, "Resolved"],
       [
         { _tag: "Dismissed", reason: "false_positive", note: "Recorded evidence" },
@@ -151,7 +152,7 @@ it("renders every recorded disposition with exact reason words and no invented a
       expect(status?.previousElementSibling?.tagName).toBe("HEADER")
       expect(status?.nextElementSibling?.tagName).toBe("H3")
     }
-    expect(fixture.host.querySelector("button, input, a")).toBeNull()
+    expect(fixture.host.querySelector("button:not([aria-label=\"Copy commit id\"]), input, a")).toBeNull()
     expect(fixture.host.textContent).not.toContain("Dismissed by")
     expect(fixture.host.textContent).not.toContain("Resolved by")
   }

@@ -200,7 +200,10 @@ test("exact cached details need no provider read, then intentional diff navigati
     .click()
   await expect(page.locator(".code-host-file pre").last()).toContainText("'explicit'")
   await expect(page.locator(".code-host-diff")).toContainText("Read ")
-  await expect(page.locator(".code-host-diff")).toContainText("Base base-commit. Head head-commit.")
+  await expect(page.locator(".code-host-diff")).toContainText("Base “Read the queue on request, ")
+  await expect(page.locator(".code-host-diff")).toContainText("Head “Make the queue reading explicit, ")
+  await expect(page.locator(".code-host-diff")).not.toContainText("head-commit")
+  await expect(page.locator(".code-host-diff").getByRole("button", { name: "Copy commit id" })).toHaveCount(2)
 })
 
 test("Back/Forward reuses explicit diffs and only Read again authorizes another read", async ({ page }) => {

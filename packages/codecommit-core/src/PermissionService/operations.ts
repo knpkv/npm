@@ -43,6 +43,7 @@ const BuiltinOperations = {
   listBranches: op("read", "List branches"),
   getDifferences: op("read", "Diff stats"),
   getBlob: op("read", "Read immutable file content"),
+  getCommit: op("read", "Read a commit's title and time"),
   createPullRequest: op("write", "Create a pull request"),
   updatePullRequestTitle: op("write", "Edit PR title"),
   updatePullRequestDescription: op("write", "Edit PR description"),

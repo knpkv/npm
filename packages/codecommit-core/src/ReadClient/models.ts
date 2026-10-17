@@ -27,6 +27,16 @@ export const CodeCommitCommitId = NonEmptyString.pipe(Schema.brand("CodeCommitCo
 /** Decoded immutable CodeCommit commit identifier. */
 export type CodeCommitCommitId = typeof CodeCommitCommitId.Type
 
+/**
+ * A commit as a person names it: the first line of its message and when it was committed.
+ * `title` is null when the message has no text.
+ */
+export class CodeCommitCommitSummary extends Schema.Class<CodeCommitCommitSummary>("CodeCommitCommitSummary")({
+  commitId: CodeCommitCommitId,
+  title: Schema.NullOr(Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty())),
+  committedAt: Schema.DateTimeUtc
+}) {}
+
 /** Stable immutable CodeCommit blob identifier. */
 export const CodeCommitBlobId = NonEmptyString.pipe(Schema.brand("CodeCommitBlobId"))
 

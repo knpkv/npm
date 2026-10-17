@@ -7,6 +7,9 @@ import { sampleContext, sampleFindings, sampleGraph } from "./canvas-fixture.js"
 
 const start = initialCanvasView(makeCanvasWorld(sampleGraph, sampleContext, sampleFindings))
 
+/** What a reader sees: the markup without its tags. */
+const textOf = (markup: string): string => markup.replace(/<[^>]+>/gu, "")
+
 const render = (
   overrides: {
     readonly graph?: CanvasGraphReading
@@ -90,14 +93,16 @@ describe("ReviewCanvas", () => {
       state: { level: "diff", part: "connect()" },
       text: { _tag: "Ready", readAt: Date.UTC(2026, 9, 16, 14, 24), headCommit: "e81f0c9", lines }
     })
-    expect(markup).toContain("Diff read 14:24, head e81f0c9")
+    expect(textOf(markup)).toContain("Diff read 14:24, head “Commit title unavailable”")
+    expect(textOf(markup)).not.toContain("e81f0c9")
+    expect(markup).toContain('title="Commit e81f0c9"')
     expect(markup).toContain('aria-label="Finding F1, between lines 16 and 17"')
     expect(markup.indexOf("Added line 16")).toBeLessThan(markup.indexOf("Finding F1"))
     expect(markup.indexOf("Finding F1")).toBeLessThan(markup.indexOf("Added line 17"))
     expect(markup).toContain("Mark handled")
   })
 
-  it("names the head a finding is still open at by its short commit", () => {
+  it("names the commits a still-open finding was raised on and is open at, ids in tooltips only", () => {
     const lines = Array.from({ length: 60 }, (_, index) => ({
       number: index + 1,
       text: `line ${index + 1}`,
@@ -120,7 +125,12 @@ describe("ReviewCanvas", () => {
       state: { level: "diff", part: "connect()" },
       text: { _tag: "Ready", readAt: Date.UTC(2026, 9, 16, 14, 24), headCommit: "e81f0c9", lines }
     })
-    expect(markup).toContain("Raised 11:40 on 7d2e1b4, still open at e81f0c9<")
+    expect(textOf(markup)).toContain(
+      "Raised 11:40 on “Commit title unavailable”, still open at “Commit title unavailable”"
+    )
+    expect(textOf(markup)).not.toMatch(/7d2e1b4|e81f0c9/u)
+    expect(markup).toContain('title="Commit 7d2e1b4"')
+    expect(markup).toContain(`title="Commit ${"e81f0c9".padEnd(40, "0")}"`)
   })
 
   it("says when the lines cannot be read", () => {

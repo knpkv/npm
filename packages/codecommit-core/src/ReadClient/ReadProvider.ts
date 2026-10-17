@@ -49,6 +49,13 @@ export interface GetBlobProviderRequest {
   readonly blobId: string
 }
 
+/** Parameters for one immutable commit read. */
+export interface GetCommitProviderRequest {
+  readonly account: CodeCommitReadAccount
+  readonly repositoryName: string
+  readonly commitId: string
+}
+
 /** Parameters for a bounded provider changed-file page. */
 export interface GetDifferencesProviderPageRequest {
   readonly account: CodeCommitReadAccount
@@ -69,6 +76,7 @@ export interface ListRepositoriesProviderPageRequest {
 export interface CodeCommitReadProviderService {
   readonly getCallerIdentity: (account: CodeCommitReadAccount) => Effect.Effect<unknown, AwsClientError>
   readonly getBlob: (request: GetBlobProviderRequest) => Effect.Effect<unknown, AwsClientError>
+  readonly getCommit: (request: GetCommitProviderRequest) => Effect.Effect<unknown, AwsClientError>
   readonly listPullRequestsPage: (
     request: ListPullRequestsProviderPageRequest
   ) => Effect.Effect<unknown, AwsClientError>
@@ -129,6 +137,14 @@ export const CodeCommitReadProviderLive = Layer.effect(
             "getBlob",
             request.account,
             codecommit.getBlob({ repositoryName: request.repositoryName, blobId: request.blobId })
+          )
+        ),
+      getCommit: (request) =>
+        provideRuntime(
+          callProvider(
+            "getCommit",
+            request.account,
+            codecommit.getCommit({ repositoryName: request.repositoryName, commitId: request.commitId })
           )
         ),
       listPullRequestsPage: (request) =>

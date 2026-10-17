@@ -65,6 +65,7 @@ import {
   loadCodeDetail,
   loadCodeDiff,
   loadCodeCanvas,
+  loadCodeCommit,
   loadCodeContent,
   loadCodeReview,
   type CodeModuleReads
@@ -817,7 +818,8 @@ const codeReads: CodeModuleReads = {
   review: (ref) => runCodeRead(loadCodeReview(ref)),
   diff: (ref) => runCodeRead(loadCodeDiff(ref)),
   content: (query) => runCodeRead(loadCodeContent(query)),
-  canvas: (ref) => runCodeRead(loadCodeCanvas(ref))
+  canvas: (ref) => runCodeRead(loadCodeCanvas(ref)),
+  commit: (query) => runCodeRead(loadCodeCommit(query))
 }
 const stacksReads: StacksModuleReads = {
   overview: runCodeRead(loadStacksOverview),

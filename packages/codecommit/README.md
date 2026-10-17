@@ -41,6 +41,7 @@ CLI and TUI for AWS CodeCommit pull requests.
   - `codecommit:GetPullRequestApprovalStates` — who approved
   - `codecommit:GetDifferences` — exact-revision changed files in TUI and web review workbenches
   - `codecommit:GetBlob` — TUI/web API diff previews, web Relay review, Relay `post_line_comment`, and mandatory exact-line publication validation
+  - `codecommit:GetCommit` — web review and Hub Code pages name commits by title and time instead of their ids; without it a label reads "Commit title unavailable" and the review still works
   - `codecommit:GitPull` — explicit exact-head local diffs, detached worktrees, and TUI Relay review
   - `codecommit:CreatePullRequest` — create
   - `codecommit:UpdatePullRequestTitle`, `codecommit:UpdatePullRequestDescription` — update

@@ -14,7 +14,7 @@ import {
 } from "@knpkv/codecommit-web/host"
 import { Schema } from "effect"
 import type { Fixture } from "../../../design-conformance/src/schema.js"
-import { makeShellReadings } from "./fixtures.js"
+import { DesignCommits, designCommits, makeShellReadings, untokenCommits } from "./fixtures.js"
 
 export const CANVAS_REFERENCE = "00000000-0000-4000-8000-000000000463"
 
@@ -139,7 +139,15 @@ const day = "2026-10-16"
 const at = (time: string): number => Date.parse(`${day}T${time}:00.000Z`)
 const full = (sha: string): string => sha.padEnd(40, "0")
 
-const decode = (data: Fixture["data"]) => Schema.decodeUnknownSync(CanvasData)(data).reviewDirections.canvas
+const decode = (data: Fixture["data"]) =>
+  Schema.decodeUnknownSync(CanvasData)(untokenCommits(data)).reviewDirections.canvas
+
+const CanvasCommits = Schema.Struct({
+  reviewDirections: Schema.Struct({ canvas: Schema.Struct({ commits: Schema.optionalKey(DesignCommits) }) })
+})
+
+const canvasCommits = (data: Fixture["data"]) =>
+  designCommits(Schema.decodeUnknownSync(CanvasCommits)(data).reviewDirections.canvas.commits, day)
 
 type Canvas = ReturnType<typeof decode>
 
@@ -508,5 +516,15 @@ export const makeCanvasReadings = (data: Fixture["data"], state: CanvasState = "
       after: `${lines.join("\n")}\n`
     }
   })
-  return { ...shell, queue, detail, review, canvas: canvasResult, diff: diffResult, diffFile, content }
+  return {
+    ...shell,
+    queue,
+    detail,
+    review,
+    canvas: canvasResult,
+    diff: diffResult,
+    diffFile,
+    content,
+    commits: canvasCommits(data)
+  }
 }

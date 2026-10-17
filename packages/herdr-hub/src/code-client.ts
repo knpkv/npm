@@ -1,6 +1,8 @@
 /** Host-local reads only: no peer address, provider locator, owner cookie or mutation request. @module */
 import {
   CodeCanvasResult,
+  type CodeCommitQuery,
+  CodeCommitSummaryResult,
   CodeDetail,
   type CodeDiffContentQuery,
   CodeDiffContentResult,
@@ -25,6 +27,7 @@ export interface CodeModuleReads {
   readonly diff: (ref: CodeReference) => Effect.Effect<CodeDiffResult, CodeReadFailed>
   readonly content: (query: CodeDiffContentQuery) => Effect.Effect<CodeDiffContentResult, CodeReadFailed>
   readonly canvas: (ref: CodeReference) => Effect.Effect<CodeCanvasResult, CodeReadFailed>
+  readonly commit: (query: CodeCommitQuery) => Effect.Effect<CodeCommitSummaryResult, CodeReadFailed>
 }
 
 const load = Effect.fn("CodeClient.load")(
@@ -58,6 +61,8 @@ export const loadCodeQueue = (query: CodeQueueQuery) =>
   )
 export const loadCodeDetail = (ref: CodeReference) =>
   load(`detail?${new URLSearchParams({ ref })}`, CodeDetail, 131_072)
+export const loadCodeCommit = (query: CodeCommitQuery) =>
+  load(`commit?${new URLSearchParams({ ref: query.ref, commit: query.commit })}`, CodeCommitSummaryResult, 4_096)
 export const loadCodeDiff = (ref: CodeReference) =>
   load(`diff?${new URLSearchParams({ ref })}`, CodeDiffResult, 8_388_608)
 export const loadCodeReview = (ref: CodeReference) =>

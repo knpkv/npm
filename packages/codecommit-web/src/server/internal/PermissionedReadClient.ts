@@ -314,6 +314,12 @@ const makePermissionedReadClientImpl = Effect.fn("PermissionedReadClient.make")(
       nested,
       inner.getBlob
     ),
+    getCommit: gated(
+      "getCommit",
+      (request) => `Read commit title and time in ${request.repositoryName}`,
+      nested,
+      inner.getCommit
+    ),
     listPullRequestIdsPage,
     listPullRequestsPage,
     streamPullRequests,

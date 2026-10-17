@@ -315,6 +315,7 @@ const unusedCodeCommitClients = (() => {
   const readClient = Layer.succeed(ReadClient.CodeCommitReadClient, {
     discoverAccount: () => Effect.die("unused discoverAccount"),
     listRepositoriesPage: () => Effect.die("unused listRepositoriesPage"),
+    getCommit: () => Effect.die("unused getCommit"),
     getBlob: () => Effect.die("unused getBlob"),
     listPullRequestIdsPage: () => Effect.die("unused listPullRequestIdsPage"),
     listPullRequestsPage: () => Effect.die("unused listPullRequestsPage"),
@@ -395,6 +396,7 @@ describe("first-party plugin runtime", () => {
               nextToken: null
             })
           ),
+        getCommit: () => Effect.die("unused getCommit"),
         getBlob: () => Effect.die("unused getBlob"),
         listPullRequestIdsPage: () => Effect.die("unused listPullRequestIdsPage"),
         listPullRequestsPage: () =>
@@ -2555,6 +2557,7 @@ describe("first-party plugin runtime", () => {
               nextToken: null
             })
           ),
+        getCommit: () => Effect.die("unused getCommit"),
         getBlob: () => Effect.die("unused getBlob"),
         listPullRequestIdsPage: () => Effect.die("unused listPullRequestIdsPage"),
         listPullRequestsPage: () =>

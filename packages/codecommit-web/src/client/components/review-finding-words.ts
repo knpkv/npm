@@ -22,10 +22,17 @@ const dismissalReasons = {
   other: "Other"
 } satisfies Record<Extract<ReviewDisposition, { readonly _tag: "Dismissed" }>["reason"], string>
 
-/** Recorded state only. The read model has no actor or resolution time to attribute. */
-export function reviewDispositionText(disposition: ReviewDisposition): string | null {
+/** The commit a pushed fix names, for `useCommitWords`; null for every other disposition. */
+export const fixedCommit = (disposition: ReviewDisposition): string | null =>
+  disposition._tag === "FixedVerify" ? disposition.commit : null
+
+/**
+ * Recorded state only. The read model has no actor or resolution time to attribute. A pushed fix
+ * names its commit by `commitWords` (its title and time), never by its id.
+ */
+export function reviewDispositionText(disposition: ReviewDisposition, commitWords: string | null): string | null {
   if (disposition._tag === "FixedVerify") {
-    return `${dispositionWords.FixedVerify} in ${disposition.commit}, waiting for re-review`
+    return `${dispositionWords.FixedVerify} in “${commitWords ?? "Commit title unavailable"}”, waiting for re-review`
   }
   if (disposition._tag === "Dismissed") {
     const note = disposition.note === null || disposition.note.length === 0 ? "" : `, ‘${disposition.note}’`

@@ -229,6 +229,19 @@ Both comment tools post through the same permission rules, prompt and audit log 
 read `codecommit:GetPullRequest`, `codecommit:GetDifferences` and `codecommit:GetBlob`, as the review
 workbench does.
 
+### Commit labels
+
+Review pages never show a commit id as text. A commit reads as its title and commit time, for example
+“Restore the draft on reconnect, 14:18” (the time alone for a commit made the day of the reading, with the
+date otherwise). The full id is in the label's tooltip and behind a Copy commit id button, since a tooltip
+alone fails on touch and keyboard. Inside the shrunk canvas drawing the button is left out because it cannot
+keep a 44px target there; copy is available at full zoom and in the detail views.
+
+Titles come from `codecommit:GetCommit` through the same permission rules and audit as other reads: the owner
+API serves `GET /prs/:account/:pr/commits/:commitId`, and the Hub reads `/v1/modules/code/commit`. A commit is
+read once and kept, since commits never change; a failed read is not kept, and its label reads “Commit title
+unavailable” without blocking the review.
+
 ### Review controller focus
 
 Before a review controller disables its focused activation control or replaces focused findings with progress, it moves focus to the retained, named review pane. Focus outside that pane stays with its current owner. The pane stays focused through completion; Escape closes only the open findings drawer and restores its opener. The same rule applies to the controlled P2 review workspace.

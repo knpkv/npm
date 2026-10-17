@@ -1,4 +1,5 @@
 import type * as Domain from "@knpkv/codecommit-core/Domain.js"
+import { useCommitWords } from "@knpkv/review/react"
 import {
   PullRequestConversation,
   PullRequestConversationAmbiguous,
@@ -375,6 +376,7 @@ export const CodeCommitRelayThread = ({
     () => makeCodeCommitRelayConversation(accountId, pullRequest, selection),
     [accountId, pullRequest.account.region, pullRequest.id, pullRequest.repositoryName, repositoryAccountId, selection]
   )
+  const headWords = useCommitWords(diff.headCommit)
   const registration = useMemo<RelayPullRequestDockRegistration>(() => {
     return makeCodeCommitRelayThreadRegistration({
       about: codeCommitRelayAbout(selectedFindingId, review, onClearFinding),
@@ -382,7 +384,7 @@ export const CodeCommitRelayThread = ({
       context: [
         { id: "repository", label: "Repository", value: pullRequest.repositoryName },
         { id: "pull-request", label: "Pull request", value: `#${pullRequest.id}` },
-        { id: "head", label: "Current head", value: diff.headCommit.slice(0, 12) }
+        { id: "head", label: "Current head", value: headWords }
       ],
       continueReview,
       conversation,
@@ -396,7 +398,7 @@ export const CodeCommitRelayThread = ({
   }, [
     conversation,
     continueReview,
-    diff.headCommit,
+    headWords,
     isReviewing,
     onClearFinding,
     profile,

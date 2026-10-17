@@ -88,7 +88,8 @@ const defaults: CodeModuleReads = {
   review: () => Effect.succeed(reading),
   diff: () => Effect.succeed({ _tag: "Unavailable", reason: "permission_required", host: null }),
   content: () => Effect.succeed({ _tag: "Unavailable", reason: "permission_required", host: null }),
-  canvas: () => Effect.succeed({ _tag: "Unavailable", reason: "permission_required", host: null })
+  canvas: () => Effect.succeed({ _tag: "Unavailable", reason: "permission_required", host: null }),
+  commit: () => Effect.succeed({ _tag: "Unavailable", reason: "permission_required", host: null })
 }
 let root: Root | null = null
 beforeEach(() => vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true))

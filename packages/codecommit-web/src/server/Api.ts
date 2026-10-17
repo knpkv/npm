@@ -40,6 +40,7 @@ import {
   HttpApiSchema,
   HttpApiSecurity
 } from "effect/http-api"
+import { CodeCommitId, CodeCommitSummary } from "../host-contract.js"
 import {
   MAXIMUM_RELAY_REVIEW_MESSAGE_BYTES,
   MAXIMUM_RELAY_REVIEW_MESSAGE_JSON_BYTES,
@@ -473,6 +474,14 @@ export class PrsGroup extends HttpApiGroup.make("prs")
       params: Schema.Struct({ awsAccountId: Schema.String, prId: PullRequestId }),
       query: PullRequestCoordinates,
       success: PullRequestDiffResponse,
+      error: ApiError
+    })
+  )
+  .add(
+    HttpApiEndpoint.get("commit", "/:awsAccountId/:prId/commits/:commitId", {
+      params: Schema.Struct({ awsAccountId: Schema.String, prId: PullRequestId, commitId: CodeCommitId }),
+      query: PullRequestCoordinates,
+      success: CodeCommitSummary,
       error: ApiError
     })
   )

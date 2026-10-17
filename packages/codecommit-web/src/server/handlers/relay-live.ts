@@ -33,9 +33,10 @@ const streamFailed = encoder.encode(`data: ${JSON.stringify({ _tag: "StreamFaile
 /**
  * A findings set as the model reads it: which head it was reviewed at, then each finding as JSON. The
  * model is told the head may have moved, and post_line_comment refuses a revision that is no longer current.
+ * The label is what a person sees, so it names no commit id; the exact head is in the body.
  */
 export const renderFindingsContext = (context: RelayReviewFindingsContext): MessageContext => ({
-  label: `${context.findings.length} review findings, reviewed at head ${context.reviewedHead.headCommit.slice(0, 7)}`,
+  label: `${context.findings.length} review ${context.findings.length === 1 ? "finding" : "findings"}`,
   body: [
     `Reviewed head: ${JSON.stringify(context.reviewedHead)}.`,
     "If the pull request's head has moved since, say these findings are from an older head.",

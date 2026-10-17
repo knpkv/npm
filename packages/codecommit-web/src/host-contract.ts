@@ -136,6 +136,26 @@ export const CodeDiffContentQuery = Schema.fromURLSearchParams(Schema.Struct({
 }))
 export type CodeDiffContentQuery = typeof CodeDiffContentQuery.Type
 
+/** A full git commit id: 40 lowercase hex characters. */
+export const CodeCommitId = Schema.String.check(Schema.isPattern(/^[0-9a-f]{40}$/))
+
+/** A commit as a person names it; `title` is null when its message has no text. */
+export const CodeCommitSummary = Schema.Struct({
+  commitId: CodeCommitId,
+  title: Schema.NullOr(Text),
+  committedAt: Schema.Number
+})
+export type CodeCommitSummary = typeof CodeCommitSummary.Type
+
+export const CodeCommitSummaryResult = Schema.Union([
+  CodeUnavailable,
+  Schema.TaggedStruct("Ready", { commit: CodeCommitSummary })
+])
+export type CodeCommitSummaryResult = typeof CodeCommitSummaryResult.Type
+
+export const CodeCommitQuery = Schema.fromURLSearchParams(Schema.Struct({ ref: CodeReference, commit: CodeCommitId }))
+export type CodeCommitQuery = typeof CodeCommitQuery.Type
+
 /** Independent cached review/comments and current immutable diff; subject identities are opaque refs. */
 export const CodeReviewReading = Schema.Struct({ diff: CodeDiff, workspace: ReviewWorkspace }).check(Schema.makeFilter(
   ({ diff, workspace }) =>

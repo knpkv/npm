@@ -12,6 +12,7 @@ import {
 import { focusModulePage } from "./internal/shell-keys.js"
 import { useCodeRead } from "./internal/use-code-read.js"
 import { CodeCanvasPage } from "./code-canvas-page.js"
+import { CodeCommitSummaries } from "./code-commit-summaries.js"
 import { useCodeReviewWorkspace } from "./code-review-workspace.js"
 import { ShellIcon } from "./internal/shell-icon.js"
 import { codeModule, moduleHref, type ModulePageMount, type ModuleViews } from "./modules.js"
@@ -149,17 +150,27 @@ const CodePage = ({
   }
   if (ref !== null && page !== "diffs" && selection.view === "canvas") {
     return (
-      <CodeCanvasPage
-        enabled={enabled}
-        ownerUIHref={queue.failure === null ? (queue.value?.ownerUi ?? null) : null}
+      <CodeCommitSummaries
+        observedAt={queue.value?._tag === "Ready" ? queue.value.observedAt : null}
         reads={content.reads}
-        refresh={refresh}
-        selection={{ ...selection, ref }}
-      />
+        reference={ref}
+      >
+        <CodeCanvasPage
+          enabled={enabled}
+          ownerUIHref={queue.failure === null ? (queue.value?.ownerUi ?? null) : null}
+          reads={content.reads}
+          refresh={refresh}
+          selection={{ ...selection, ref }}
+        />
+      </CodeCommitSummaries>
     )
   }
   return (
-    <>
+    <CodeCommitSummaries
+      observedAt={queue.value?._tag === "Ready" ? queue.value.observedAt : null}
+      reads={content.reads}
+      reference={ref}
+    >
       {repaired ? (
         <p className="code-host-selection-notice" role="status">
           Some Code selectors were invalid and have been reset.
@@ -218,7 +229,7 @@ const CodePage = ({
         reviewStatus={reviewWorkspace.status}
         reviewChecks={reviewWorkspace.checks}
       />
-    </>
+    </CodeCommitSummaries>
   )
 }
 

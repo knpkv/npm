@@ -54,7 +54,8 @@ describe("PRFilesDiffView", () => {
   it("shows immutable head and modes, injects content and forwards file/layout/wrap choices", async () => {
     const props = makeProps()
     const { host } = await mountFixture(createElement(PRFilesDiffView, props))
-    expect(host.textContent).toContain("2 changed files at head abcdef012345")
+    expect(host.textContent).toContain("2 changed files at head “Commit title unavailable”")
+    expect(host.textContent).not.toContain("abcdef012345")
     expect(host.textContent).toContain("100644 → 100755")
     expect(host.querySelector("[aria-label=\"Selected file diff\"]")?.textContent).toContain("Fixture file content")
     const fileButton = [...host.querySelectorAll("button")].find((button) => button.textContent?.includes("new.ts"))

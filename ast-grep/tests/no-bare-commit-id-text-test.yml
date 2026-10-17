@@ -1,0 +1,12 @@
+id: no-bare-commit-id-text
+valid:
+  - "const label = <CommitLabel commit={diff.headCommit} />"
+  - "const key = `${review.revisionId}:${review.headCommit}`"
+  - "const view = <p>{diff.files.length} files</p>"
+  - "const head = diff.headCommit"
+invalid:
+  - "const view = <p>head {diff.headCommit.slice(0, 12)}</p>"
+  - "const short = run.identity.headRevision.slice(0, 7)"
+  - "const view = <small>head {finding.patch.headRevision}</small>"
+  - "const view = <p>Base {state.value.diff.baseCommit}.</p>"
+  - "const view = <span>Raised on {note.life.raisedHead}</span>"

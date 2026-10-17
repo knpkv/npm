@@ -1,4 +1,5 @@
 /** PR detail controller: owns route lookup, mutations, shortcuts, reminders and refresh timers. */
+import { PullRequestCommitSummaries } from "../commit-summaries.js"
 import { useAtomSet, useAtomValue } from "@effect/atom-react"
 import { AwsRegion, currentApprovers, PullRequestId } from "@knpkv/codecommit-core/Domain.js"
 import { calculateHealthScore, type HealthScore, healthUnknownReason } from "@knpkv/codecommit-core/HealthScore.js"
@@ -621,7 +622,11 @@ export function PRDetail() {
           onContinue: handleDockerContinue
         }
       }}
-      renderReviewWorkspace={(input) => <PullRequestReviewWorkspace {...input} />}
+      renderReviewWorkspace={(input) => (
+        <PullRequestCommitSummaries accountId={input.accountId} pullRequest={input.pullRequest}>
+          <PullRequestReviewWorkspace {...input} />
+        </PullRequestCommitSummaries>
+      )}
       renderComments={(input) => <CommentsSection {...input} />}
       renderLifecycle={(pr) => <LifecycleInfo pr={pr} />}
     />

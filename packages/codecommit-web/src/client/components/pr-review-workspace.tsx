@@ -1,4 +1,5 @@
 import { useAtomSet, useAtomValue } from "@effect/atom-react"
+import { CommitLabel } from "@knpkv/review/react"
 import type * as Domain from "@knpkv/codecommit-core/Domain.js"
 import { BoundedDiffCodeView, type RlyDiffCodeAnnotation, type RlyDiffCodeItem } from "@knpkv/rly/diff/bounded"
 import { type RlyDiffFile, type RlyDiffFileContent, type RlyDiffInventory } from "@knpkv/rly/diff/workbench"
@@ -1684,8 +1685,9 @@ const ReadyReviewWorkspace = ({
       {reviewIsStale ? (
         <div className={styles.staleReview}>
           <span>
-            This finding deck reviewed {completedReview?.value.headCommit.slice(0, 12)}; current head is{" "}
-            {diff.headCommit.slice(0, 12)}.
+            This finding deck reviewed{" "}
+            {completedReview === null ? "an earlier head" : <CommitLabel commit={completedReview.value.headCommit} />};
+            current head is <CommitLabel commit={diff.headCommit} />.
           </span>
           <Button
             disabled={isReviewing || selectedProfile === undefined}
