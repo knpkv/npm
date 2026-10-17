@@ -20,6 +20,12 @@ export class RecordMismatch extends Schema.TaggedError<RecordMismatch>()("Record
   received: Schema.String
 }) {}
 
+/** The store itself could not be read or written, e.g. its database is unavailable. Nothing was written. */
+export class SandboxStoreUnavailable extends Schema.TaggedError<SandboxStoreUnavailable>()("SandboxStoreUnavailable", {
+  operation: Schema.Literals(["list", "get", "put"]),
+  detail: Schema.String
+}) {}
+
 /** The account has no stored sandbox: it is not in the pool. */
 export class SandboxNotFound extends Schema.TaggedError<SandboxNotFound>()("SandboxNotFound", {
   accountId: Schema.String
@@ -29,12 +35,15 @@ export class SandboxNotFound extends Schema.TaggedError<SandboxNotFound>()("Sand
  * The pool's stored records, one per account. Every transition bumps `version`
  * by one, so `put(next)` writes only when the stored record is still at
  * `next.version - 1`, the version the transition was computed from, and
- * describes the same account (`RecordMismatch` otherwise).
+ * describes the same account (`RecordMismatch` otherwise). A durable store fails
+ * with `SandboxStoreUnavailable` when it cannot be reached; the memory store never does.
  */
 export interface SandboxStoreService {
-  readonly list: Effect.Effect<ReadonlyArray<Sandbox>>
-  readonly get: (accountId: string) => Effect.Effect<Sandbox, SandboxNotFound>
-  readonly put: (next: Sandbox) => Effect.Effect<Sandbox, StaleVersion | SandboxNotFound | RecordMismatch>
+  readonly list: Effect.Effect<ReadonlyArray<Sandbox>, SandboxStoreUnavailable>
+  readonly get: (accountId: string) => Effect.Effect<Sandbox, SandboxNotFound | SandboxStoreUnavailable>
+  readonly put: (
+    next: Sandbox
+  ) => Effect.Effect<Sandbox, StaleVersion | SandboxNotFound | RecordMismatch | SandboxStoreUnavailable>
 }
 
 export class SandboxStore extends Context.Service<SandboxStore, SandboxStoreService>()("SandboxPool/SandboxStore") {}

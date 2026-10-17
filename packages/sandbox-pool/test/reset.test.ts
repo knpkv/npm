@@ -6,6 +6,7 @@ import {
   discoveryFailures,
   isBudgetHold,
   isBudgetHoldFor,
+  makeMemoryRunLog,
   Nuke,
   nukeArgs,
   type NukeOutcome,
@@ -16,6 +17,8 @@ import {
   resetAccount,
   ResetBlocked,
   RunId,
+  RunLog,
+  RunLogUnavailable,
   Sandbox
 } from "../src/index.js"
 import { contract, contractInput } from "./fixtures.js"
@@ -79,10 +82,16 @@ const harness = (
         return outcomes.shift() ?? { exitCode: 1, output: "no more runs" }
       })
   })
-  const run = (sandbox = cleaning()) =>
-    resetAccount(contract, sandbox, run1).pipe(
-      Effect.provideService(PoolAccess, access),
-      Effect.provideService(Nuke, nuke)
+  /** Runs the reset with `log`, or a fresh memory run log. */
+  const run = (sandbox = cleaning(), log?: RunLog["Service"]) =>
+    Effect.flatMap(
+      log === undefined ? makeMemoryRunLog : Effect.succeed(log),
+      (runLog) =>
+        resetAccount(contract, sandbox, run1).pipe(
+          Effect.provideService(PoolAccess, access),
+          Effect.provideService(Nuke, nuke),
+          Effect.provideService(RunLog, runLog)
+        )
     )
   return { steps, run }
 }
@@ -197,6 +206,61 @@ describe("sandbox reset", () => {
     { exitCode: 0, output: scan(2) },
     { exitCode: 0, output: scan(0) }
   ]
+
+  it.effect("records each step of a clean run, with the aws-nuke output tail, then the outcome", () =>
+    Effect.gen(function*() {
+      const log = yield* makeMemoryRunLog
+      const next = yield* harness(clean()).run(cleaning(), log)
+      expect(next.state._tag).toBe("Available")
+      const entries = yield* log.entries(run1)
+      expect(entries.map((entry) => entry._tag === "Step" ? `${entry.step} ${entry.status}` : entry._tag)).toEqual([
+        "Started",
+        ...["sign in", "baseline", "dry run", "nuke", "verify", "baseline re-check", "budget hold"].flatMap((step) => [
+          `${step} started`,
+          `${step} ok`
+        ]),
+        "Finished"
+      ])
+      const verify = entries.find((entry) => entry._tag === "Step" && entry.step === "verify" && entry.status === "ok")
+      expect(verify?._tag === "Step" && verify.output).toEqual([summary(0)])
+      expect(yield* log.recent(5)).toMatchObject([{ runId: run1, reason: "Released", outcome: "Available" }])
+    }))
+
+  it.effect("records the failed step with its detail and output, skips the rest, and finishes Quarantined", () =>
+    Effect.gen(function*() {
+      const log = yield* makeMemoryRunLog
+      const h = harness([{ exitCode: 0, output: scan(2) }, { exitCode: 0, output: scan(2) }, {
+        exitCode: 0,
+        output: scan(1)
+      }])
+      const next = yield* h.run(cleaning(), log)
+      const entries = yield* log.entries(run1)
+      const failed = entries.filter((entry) => entry._tag === "Step" && entry.status === "failed")
+      expect(failed).toMatchObject([{
+        step: "verify",
+        detail: expect.stringContaining("verify: 1 resources still removable.")
+      }])
+      expect(failed[0]?._tag === "Step" && failed[0].output.at(-1)).toBe(summary(1))
+      expect(entries.some((entry) => entry._tag === "Step" && entry.step === "baseline re-check")).toBe(false)
+      expect(entries.at(-1)).toMatchObject({
+        _tag: "Finished",
+        outcome: "Quarantined",
+        blocker: next.state._tag === "Quarantined" ? next.state.blocker : "missing"
+      })
+    }))
+
+  it.effect("a run log that cannot be written changes nothing about the reset", () =>
+    Effect.gen(function*() {
+      const broken = RunLog.of({
+        record: () => Effect.fail(new RunLogUnavailable({ detail: "disk full" })),
+        entries: () => Effect.succeed([]),
+        recent: () => Effect.succeed([])
+      })
+      const next = yield* harness(clean()).run(cleaning(), broken)
+      expect(next.state._tag).toBe("Available")
+      const quarantined = yield* harness([{ exitCode: 1, output: "boom" }]).run(cleaning(), broken)
+      expect(quarantined.state._tag).toBe("Quarantined")
+    }))
 
   it("names the budget hold with the contract's deny-all policy, verbatim", () => {
     const pool = Schema.decodeUnknownSync(PoolContract)({ ...contractInput, denyAllPolicy: "EphemeralDenyAll" })

@@ -42,6 +42,14 @@ const terminalStyle = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g")
 const plainLine = (line: string): string => line.replace(terminalStyle, "").trim()
 
 /**
+ * The last lines of an aws-nuke run as the run log keeps them: uncoloured, blank lines dropped, at most `lines`
+ * lines of at most 300 characters. They name the pool account's resources, so they are as private as the account.
+ */
+export const outputTail = (output: string, lines = 40): ReadonlyArray<string> =>
+  output.split("\n").map(plainLine).filter((line) => line.length > 0).slice(-lines)
+    .map((line) => Array.from(line).slice(0, 300).join(""))
+
+/**
  * Error-level log lines: a resource type aws-nuke could not list. The run can
  * still exit 0 with a clean summary, so a scan with one is incomplete. Fails
  * closed on a `level=error|fatal|panic` field anywhere in the line, whatever
