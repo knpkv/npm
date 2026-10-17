@@ -348,16 +348,20 @@ export const AwsAccountSetupForm = ({
     form.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus()
   }, [invalidFocus])
 
+  const profileRefused = discoveryState._tag === "profile-not-found"
+  // A check in flight re-reads the profiles before it can refuse one; the typed profile must survive that re-read.
+  const profileHeld = profileRefused || discoveryState._tag === "loading"
   // Once profiles are detected the select can only hold a detected one: keep the current profile when it is
-  // listed, otherwise start on "default" when it exists, otherwise the first.
+  // listed, otherwise start on "default" when it exists, otherwise the first. A typed profile the not-found error
+  // names stays until the user changes it, so the form never swaps in a profile nobody chose.
   useEffect(() => {
-    if (!profilesListed) return
+    if (!profilesListed || profileHeld) return
     setProfile((current) =>
       awsProfiles.some((candidate) => candidate.profile === current)
         ? current
         : ((awsProfiles.find((candidate) => candidate.profile === "default") ?? awsProfiles[0])?.profile ?? current)
     )
-  }, [awsProfiles, profilesListed])
+  }, [awsProfiles, profileHeld, profilesListed])
 
   // The chosen profile's enabled regions. Only a detected profile is asked; a typed one is never looked up per
   // keystroke, so its region is typed too.
@@ -480,6 +484,11 @@ export const AwsAccountSetupForm = ({
     const errors = requiredFieldErrors()
     setFieldErrors(errors)
     if (Object.keys(errors).length > 0) {
+      setInvalidFocus((count) => count + 1)
+      return
+    }
+    // The profile was refused, so nothing may be followed under it.
+    if (profileRefused) {
       setInvalidFocus((count) => count + 1)
       return
     }

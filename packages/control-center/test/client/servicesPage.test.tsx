@@ -2937,6 +2937,30 @@ describe("ServicesPage connection tests", () => {
       expect(awsFollowButton(host)?.textContent).toBe("Follow 1 resource")
     })
 
+    // A profile re-read that doesn't list the typed profile must not swap in another one the user never chose.
+    it("keeps the typed profile the not-found error names, and won't follow under it", async () => {
+      const createBatch = vi.fn<NonNullable<ConnectionTestTransport["createBatch"]>>()
+      const discoverAwsResources = vi.fn<NonNullable<ConnectionTestTransport["discoverAwsResources"]>>()
+      const host = await setupHost({
+        createBatch,
+        discoverAwsResources,
+        discoverAwsProfiles: vi
+          .fn<NonNullable<ConnectionTestTransport["discoverAwsProfiles"]>>()
+          .mockResolvedValueOnce([])
+          .mockResolvedValue([{ profile: "default", region: "eu-west-1" }])
+      })
+      await setControlValue(awsControl(host, "AWS profile"), "staging")
+      await setControlValue(awsControl(host, "AWS region"), "us-east-1")
+      await setControlValue(await awsManualNames(host, "Repository names"), "paper-crane")
+      await act(async () => buttonNamed(host, "Test & discover")?.click())
+      expect(discoverAwsResources).not.toHaveBeenCalled()
+      expect(host.textContent).toContain("No AWS profile named staging on this machine.")
+      expect(awsControl(host, "AWS profile").value).toBe("staging")
+      await act(async () => awsFollowButton(host)?.click())
+      expect(createBatch).not.toHaveBeenCalled()
+      expect(host.ownerDocument.activeElement).toBe(awsControl(host, "AWS profile"))
+    })
+
     it("counts every followed resource on the follow button", async () => {
       const host = await setupHost({
         discoverAwsRegions: () => Promise.resolve({ _tag: "available", regions: ["eu-west-1"] }),
