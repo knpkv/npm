@@ -103,6 +103,10 @@ describe("browser sessions panel", () => {
 
     await vi.waitFor(() => expect(host.textContent).toContain(issued.pairingCode))
     expect(issuePairingCode).toHaveBeenCalledWith("workspace-owner", expect.any(AbortSignal))
+    // Session times and the code's expiry read like the rest of Control Center, never as ISO text.
+    expect(host.textContent).toContain("7 Aug 2026, 10:15 UTC")
+    expect(host.textContent).toMatch(/last used \d{1,2} \w{3} \d{4}, \d{2}:\d{2} UTC/)
+    expect(host.textContent).not.toMatch(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/)
 
     const revokeButton = Array.from(host.querySelectorAll<HTMLButtonElement>("button")).find(
       (button) => button.textContent === "Revoke"

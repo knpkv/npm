@@ -178,6 +178,9 @@ describe("ItemsPage boundaries", () => {
     await act(async () => Promise.resolve())
 
     expect(host.querySelector('[aria-label*="collaborators"]')?.textContent).toContain("Avery Bell")
+    // The hover title names the sync time in words too, never the ISO instant the <time> carries.
+    const synchronized = host.querySelector<HTMLTimeElement>('time[title^="Synchronized"]')
+    expect(synchronized?.title).toMatch(/^Synchronized \d{1,2} \w{3} \d{4}, \d{2}:\d{2} UTC$/)
     expect(host.textContent).toContain("Author · Operator")
     expect(host.textContent).toContain("20+ people · More not shown")
     const expand = [...host.querySelectorAll<HTMLButtonElement>("button")].find(

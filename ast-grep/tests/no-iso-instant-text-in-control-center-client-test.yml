@@ -1,0 +1,21 @@
+id: no-iso-instant-text-in-control-center-client
+valid:
+  - |
+    const view = <time dateTime={DateTime.formatIso(instant)}>{formatCheckTime(instant)}</time>
+  - |
+    const key = JSON.stringify([DateTime.formatIso(connection.updatedAt), connection.isEnabled])
+  - |
+    const presentation = { dateTime: DateTime.formatIso(value), label: formatCheckTime(value) }
+  - |
+    const view = <p>{ready ? <time dateTime={DateTime.formatIso(t)}>{formatCheckTime(t)}</time> : null}</p>
+invalid:
+  - |
+    const view = <dd>{DateTime.formatIso(share.expiresAt)}</dd>
+  - |
+    const status = `Stale since ${DateTime.formatIso(pipeline.observedAt)}`
+  - |
+    const view = <dd>{expired ? DateTime.formatIso(share.expiresAt) : "-"}</dd>
+  - |
+    const view = <p>{"at " + DateTime.formatIso(share.expiresAt)}</p>
+  - |
+    const view = <StateLabel label={DateTime.formatIso(checkedAt)} tone="neutral" />

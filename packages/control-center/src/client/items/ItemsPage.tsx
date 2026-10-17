@@ -443,7 +443,7 @@ export const ItemsPage = ({
                     : `${item.releaseIds.length}${item.releaseMembershipsTruncated ? "+" : ""} release${item.releaseIds.length === 1 ? "" : "s"}`}
                 </span>
                 <ItemOwners item={item} />
-                <time dateTime={item.freshness} title={`Synchronized ${item.freshness}`}>
+                <time dateTime={item.freshness} title={`Synchronized ${formatItemFreshness(item.freshness)} UTC`}>
                   {formatItemFreshness(item.freshness)}
                 </time>
               </div>

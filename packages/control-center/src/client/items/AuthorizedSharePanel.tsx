@@ -13,6 +13,7 @@ import {
   type CreateAuthorizedShareTransportInput
 } from "./authorizedShareTransport.js"
 import styles from "./ItemsPage.module.css"
+import { formatCheckTime } from "../formatTime.js"
 
 interface ShareGrantee {
   readonly displayName: string
@@ -23,8 +24,8 @@ type AuthorizedSharePanelState =
   | { readonly _tag: "idle" }
   | { readonly _tag: "creating" }
   | { readonly _tag: "failed" }
-  | { readonly _tag: "ready"; readonly shareId: ShareId; readonly expiresAt: string }
-  | { readonly _tag: "revoking"; readonly shareId: ShareId; readonly expiresAt: string }
+  | { readonly _tag: "ready"; readonly shareId: ShareId; readonly expiresAt: DateTime.Utc }
+  | { readonly _tag: "revoking"; readonly shareId: ShareId; readonly expiresAt: DateTime.Utc }
   | { readonly _tag: "revoked" }
 
 export interface AuthorizedSharePanelProps {
@@ -109,7 +110,7 @@ export const AuthorizedSharePanel = ({
           setState({
             _tag: "ready",
             shareId: share.shareId,
-            expiresAt: DateTime.formatIso(share.expiresAt)
+            expiresAt: share.expiresAt
           })
         },
         () => {
@@ -118,7 +119,7 @@ export const AuthorizedSharePanel = ({
       )
   }
 
-  const revoke = (shareId: ShareId, expiresAt: string): void => {
+  const revoke = (shareId: ShareId, expiresAt: DateTime.Utc): void => {
     currentRequest.current?.abort()
     const request = new AbortController()
     currentRequest.current = request
@@ -161,7 +162,10 @@ export const AuthorizedSharePanel = ({
           <Text as="h3" variant="body-large">
             Authorized link ready
           </Text>
-          <Text tone="secondary">Only the selected person can open this exact item. Expires {state.expiresAt}.</Text>
+          <Text tone="secondary">
+            Only the selected person can open this exact item. Expires{" "}
+            <time dateTime={DateTime.formatIso(state.expiresAt)}>{formatCheckTime(state.expiresAt)}</time>.
+          </Text>
         </div>
         <Link to={sharePath}>{sharePath}</Link>
         <Button disabled={state._tag === "revoking"} onClick={() => revoke(state.shareId, state.expiresAt)}>
