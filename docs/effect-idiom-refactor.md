@@ -110,3 +110,46 @@ The durable checks should cover:
 - `pnpm lint`, `pnpm check`, and `pnpm test` pass.
 - A second independent Luna review reports no unresolved material findings
   before the pull request is opened.
+
+## Review conventions
+
+New and changed code follows these rules. The Effect Conventions check (`.macroscope/check-run-agents/effect-conventions.md`)
+reviews pull requests against this section and reads it from this file, so a change here changes the check.
+Untouched code that predates a rule is not a finding.
+
+### Imports
+
+- Both styles are accepted: named imports from the bare `"effect"` package and namespace imports from subpaths
+  such as `import * as Effect from "effect/Effect"`. Within one file, use one style.
+- Flag a changed import that introduces the other style into a file that consistently uses one. Do not flag a
+  file that already mixes them, and never ask to convert existing imports: import churn is not a fix.
+- Import Effect modules from their stable paths (`effect/http`, `effect/sql`, `effect/process`). Flag imports
+  from `repos/effect`.
+
+### Errors
+
+- New failures are `Schema.TaggedError` classes with structured fields. `Data.TaggedError` is legacy: flag it on
+  a changed line that declares a new error, not on untouched declarations.
+- One named, tagged error per failure, so a caller can tell failures apart and handle the one it cares about.
+  Flag `new Error("…")`, a thrown value, a string or `unknown` in the error channel, and one generic error reused
+  for unrelated failures where callers need to distinguish them.
+- Keep failures in the typed error channel. Wrap a rejected promise or a thrown library error in a tagged error at
+  that boundary.
+
+### No quiet fallbacks
+
+- Flag recovery that hides a failure the caller or user should see: `Effect.orElseSucceed`, `Effect.catch` or
+  `catchTag` returning a default, `Option.getOrElse` or `?? []` applied to a failed read, an empty list shown for
+  an unreadable source, or a log line in place of a typed failure.
+- A fallback is correct when the failure is expected and the fallback is the intended behavior, and the reader can
+  still tell it happened, for example a visible warning naming what was dropped. Say which case the code is in
+  before flagging.
+
+### Types and boundaries
+
+- No `any`, explicit or implied through an untyped parameter or a widening cast. Prefer a real type or `unknown`
+  followed by decoding.
+- Validate at the boundary and trust the type after: decode HTTP bodies, browser storage, environment, files,
+  provider responses and persisted rows with Schema where they enter, then pass the decoded type. Flag untrusted
+  data assigned to a domain type without decoding, and flag re-validation or casts deeper in, which signal the
+  boundary is missing.

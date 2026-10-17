@@ -66,6 +66,7 @@ jobs:
       # publish when none are pending. After a release it only versions what is pending, and while npm's
       # metadata still lags a publish it only versions, so it cannot try to republish.
       - name: Create Release Pull Request or Publish
+        id: changesets
         if: steps.released.outputs.pending == 'true' || (steps.released.outputs.outstanding != 'true' && steps.released.outputs.propagating != 'true')
         uses: changesets/action@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
         with:
@@ -77,3 +78,15 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.TOKEN_NPM }}
           HUSKY: 0
+      # Review bots skip pull requests labelled release, so the Version Packages PR gets the label. The
+      # action sets pr-number only when it opened or updated that PR. --force creates the label
+      # or leaves an existing one as configured here.
+      - name: Label the release pull request
+        if: steps.changesets.outputs.pr-number != ''
+        env:
+          GH_TOKEN: ${{ secrets.TOKEN_GITHUB }}
+          GH_REPO: ${{ github.repository }}
+          PULL_REQUEST: ${{ steps.changesets.outputs.pr-number }}
+        run: |
+          gh label create release --force --color ededed --description "Version Packages pull request"
+          gh pr edit "$PULL_REQUEST" --add-label release
