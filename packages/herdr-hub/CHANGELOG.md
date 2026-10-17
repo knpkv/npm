@@ -2,6 +2,18 @@
 
 Released as `@knpkv/herdr-approvals` up to 0.18.0; the headings below are that package's history.
 
+## 0.45.0
+
+### Minor Changes
+
+- [#984](https://github.com/knpkv/npm/pull/984) [`f878a60`](https://github.com/knpkv/npm/commit/f878a60b1c00f5eda9db72488f749b5b322a6b03) Thanks [@konopkov](https://github.com/konopkov)! - Review canvas, phase 1: `@knpkv/review/canvas` and `@knpkv/review/canvas/react` add the canvas contracts, layout, zoom state and Rly view; the Code host reads a file-level TypeScript import graph and changed parts per revision; the Hub opens it with `view=canvas`.
+
+### Patch Changes
+
+- Updated dependencies [[`f878a60`](https://github.com/knpkv/npm/commit/f878a60b1c00f5eda9db72488f749b5b322a6b03)]:
+  - @knpkv/review@0.6.0
+  - @knpkv/codecommit-web@0.38.0
+
 ## 0.44.1
 
 ### Patch Changes
