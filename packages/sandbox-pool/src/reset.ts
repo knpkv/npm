@@ -12,8 +12,10 @@ import type { PoolContract } from "./pool.js"
  *   3. re-assert the account alias and EphemeralBoundary
  *   4. aws-nuke dry run; stop if it lists a protected resource (the guard)
  *   5. live run, then a verifying dry run that must find nothing
+ *   6. re-assert the baseline; a clean account still under a budget hold
+ *      (the deny-all SCP attached) is quarantined, never freed
  *
- * Steps 2–5 never fail the job: their errors become the quarantine blocker.
+ * Steps 2–6 never fail the job: their errors become the quarantine blocker.
  */
 
 export class AccountNotInPool extends Schema.TaggedError<AccountNotInPool>()("AccountNotInPool", {
@@ -40,6 +42,8 @@ export class PoolAccess extends Context.Service<
     readonly session: (accountId: string) => Effect.Effect<PoolSession, ResetBlocked>
     /** Idempotent: create the alias and boundary policy if missing, fix boundary drift. */
     readonly ensureBaseline: (accountId: string, session: PoolSession) => Effect.Effect<void, ResetBlocked>
+    /** Whether the budget action's deny-all SCP is attached to the account. Never detaches it. */
+    readonly budgetHold: (accountId: string, session: PoolSession) => Effect.Effect<boolean, ResetBlocked>
   }
 >()("SandboxPool/PoolAccess") {}
 
@@ -47,6 +51,25 @@ export interface NukeOutcome {
   readonly exitCode: number
   readonly output: string
 }
+
+const budgetHoldStep = "budget hold"
+const budgetHoldLift = "attached; lift via sandbox.budget.lift"
+
+/**
+ * The quarantine blocker of a clean account whose budget action attached the deny-all SCP: the month's spend is
+ * over the cap. Reset never detaches it; only the approval-gated `sandbox.budget.lift` does. The text is a contract
+ * the UI and approvals match on, through `isBudgetHold`.
+ */
+export const budgetHoldBlocker = (contract: PoolContract): string =>
+  `${budgetHoldStep}: ${contract.denyAllPolicy} ${budgetHoldLift}`
+
+/** Whether a quarantine blocker is a budget hold, as opposed to a failed reset step. For display. */
+export const isBudgetHold = (blocker: string): boolean =>
+  blocker.startsWith(`${budgetHoldStep}: `) && blocker.endsWith(` ${budgetHoldLift}`)
+
+/** Whether a blocker is exactly this pool's budget hold. Approvals for `sandbox.budget.lift` match with this. */
+export const isBudgetHoldFor = (contract: PoolContract, blocker: string): boolean =>
+  blocker === budgetHoldBlocker(contract)
 
 /** Runs the aws-nuke binary. Nix provides it on the reset host. */
 export class Nuke extends Context.Service<
@@ -228,6 +251,13 @@ export const resetAccount = Effect.fn("SandboxPool.resetAccount")(function*(
     yield* nukeStep("verify", yield* nuke.run({ configPath, session, live: false }), { complete: true, removable: 0 })
     // The nuke must not have touched the baseline; re-assert it.
     yield* access.ensureBaseline(sandbox.accountId, session)
+    // Reset owns the read's step name, so no access-layer failure can read as a hold.
+    const held = yield* access.budgetHold(sandbox.accountId, session).pipe(
+      Effect.mapError(({ detail }) => new ResetBlocked({ step: "budget hold check", detail }))
+    )
+    if (held) {
+      return yield* new ResetBlocked({ step: budgetHoldStep, detail: `${contract.denyAllPolicy} ${budgetHoldLift}` })
+    }
   })
   const result = yield* Effect.result(attempt)
   const now = yield* DateTime.now
