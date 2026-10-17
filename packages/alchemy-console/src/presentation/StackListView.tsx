@@ -24,7 +24,8 @@ export interface StackListViewProps {
   readonly stackHref?: (stack: StackSummary) => string
 }
 
-const issueCopy = (issue: DiscoveryIssue) => {
+/** What a discovery issue means to the reader, and what to do about it. */
+export const issueCopy = (issue: DiscoveryIssue) => {
   if (issue.source === "s3") {
     if (issue.reason === "denied") {
       return {
@@ -47,6 +48,14 @@ const issueCopy = (issue: DiscoveryIssue) => {
       title: "State bucket discovery is incomplete.",
       body: "Some stacks in the state bucket may be missing. The stacks below were read normally.",
       hint: `Reason: ${issue.reason}. Check state bucket access, then Read again.`
+    } satisfies { readonly tone: "caution"; readonly title: string; readonly body: string; readonly hint: string }
+  }
+  if (issue.reason === "skipped") {
+    return {
+      tone: "caution",
+      title: "Some project folders were skipped.",
+      body: "Discovery couldn’t read some folders under its root, so stacks inside them may be missing. The stacks below were read normally.",
+      hint: "Check those folders’ permissions, then Read again."
     } satisfies { readonly tone: "caution"; readonly title: string; readonly body: string; readonly hint: string }
   }
   return {

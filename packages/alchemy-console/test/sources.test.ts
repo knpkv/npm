@@ -6,6 +6,7 @@ import { S3ReadError } from "../src/s3-reader.js"
 import { StackSource } from "../src/server/Catalog.js"
 import { sourceLayer } from "../src/server/Sources.js"
 import { SsoCredentials } from "../src/sso-credentials.js"
+import { lockedFileSystem } from "./lockedFileSystem.js"
 
 class SourceFixture extends Context.Service<SourceFixture, {
   readonly requests: Ref.Ref<ReadonlyArray<string>>
@@ -112,6 +113,78 @@ region=us-east-1
       expect((yield* source.discover).issues).toEqual([
         { source: "local", reason: "unsupported-version" },
         { source: "s3", reason: "invalid-config" }
+      ])
+    }).pipe(Effect.scoped))
+
+  it.effect("tells a skipped folder apart from an unreadable root", () =>
+    Effect.gen(function*() {
+      const { awsConfigFile, fs, path, root } = yield* setup
+      yield* fs.writeFileString(awsConfigFile, "")
+      const locked = path.join(root, "locked")
+      yield* fs.makeDirectory(locked)
+      const walked = yield* Layer.build(sourceLayer({ root, awsConfigFile })).pipe(
+        Effect.provideService(FileSystem.FileSystem, yield* lockedFileSystem(yield* fs.realPath(locked)))
+      )
+      expect((yield* Context.get(walked, StackSource).discover).issues).toEqual([{
+        source: "local",
+        reason: "skipped"
+      }])
+      const missing = yield* Layer.build(sourceLayer({ root: path.join(root, "missing"), awsConfigFile }))
+      expect((yield* Context.get(missing, StackSource).discover).issues).toEqual([{ source: "local", reason: "io" }])
+    }).pipe(Effect.scoped))
+})
+
+/** One profile whose bucket listing works and whose every bucket read then fails sign-in. */
+const expiringProfile = Layer.succeedContext(
+  Context.make(
+    HttpClient.HttpClient,
+    HttpClient.make((request, url) =>
+      Effect.succeed(
+        url.searchParams.has("versions") ?
+          HttpClientResponse.fromWeb(
+            request,
+            new Response("<Error><Code>ExpiredToken</Code><Message>expired</Message></Error>", { status: 400 })
+          ) :
+          HttpClientResponse.fromWeb(
+            request,
+            new Response(
+              `<ListAllMyBucketsResult><Buckets>${
+                ["fixture-alchemy-state-a", "fixture-alchemy-state-b"].map((name) =>
+                  `<Bucket><Name>${name}</Name><BucketRegion>eu-west-1</BucketRegion></Bucket>`
+                ).join("")
+              }</Buckets></ListAllMyBucketsResult>`
+            )
+          )
+      )
+    )
+  ).pipe(
+    Context.add(
+      SsoCredentials,
+      SsoCredentials.of({
+        resolve: (profile) =>
+          Effect.succeed({
+            accessKeyId: Redacted.make("fixture-access"),
+            secretAccessKey: Redacted.make("fixture-secret"),
+            sessionToken: Redacted.make("fixture-token"),
+            region: profile.region
+          })
+      })
+    )
+  )
+)
+
+layer(Layer.merge(NodeServices.layer, expiringProfile))("source issue scope", (it) => {
+  it.effect("reports one sign-in issue per profile, however many of its buckets failed", () =>
+    Effect.gen(function*() {
+      const { awsConfigFile, fs, root } = yield* setup
+      yield* fs.writeFileString(
+        awsConfigFile,
+        "[profile fixture-reader]\nsso_account_id=fixture-account\nsso_role_name=FixtureReader\nsso_region=us-east-1\nsso_start_url=https://fixture.invalid/start\nregion=us-east-1\n"
+      )
+      const context = yield* Layer.build(sourceLayer({ root, awsConfigFile }))
+      const discovered = yield* Context.get(context, StackSource).discover
+      expect(discovered.issues).toEqual([
+        { source: "s3", reason: "authentication" }
       ])
     }).pipe(Effect.scoped))
 })

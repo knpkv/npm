@@ -218,8 +218,17 @@ state metadata and SSO/S3 readers for server-side consumers.
 
 `discoverProjects(directory)` scans an explicit root for `alchemy.run.ts` without
 importing or executing it. It skips `.git`, `node_modules`, `.alchemy`, `.direnv`,
-`.cache`, and `dist`, deduplicates directory aliases, and rejects symlinks outside
-the root. Directory errors fail the scan rather than hiding inaccessible projects.
+`.cache`, and `dist`, and deduplicates directory aliases. It returns
+`{ projects, unreadable }`:
+
+- Symlinks that leave the root are never followed, and dangling symlinks lead
+  nowhere, so both are skipped.
+- Any other entry it can't read is counted in `unreadable` and skipped, so one
+  unreadable folder doesn't hide the projects beside it.
+- Only an unreadable root (or the entry limit) fails the scan.
+- The catalog reports a scan with `unreadable > 0` as one `local: skipped`
+  discovery issue next to the stacks it found. A failed scan or state read is
+  `local: io`.
 
 `readAlchemyVersion(projectDirectory, searchRoot)` reads the nearest pnpm or Bun
 text lockfile within the root. pnpm resolves the project's exact workspace

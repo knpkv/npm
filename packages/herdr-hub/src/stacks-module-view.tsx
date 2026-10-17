@@ -297,15 +297,66 @@ const byApp = (stacks: ReadonlyArray<StackSummary>): ReadonlyArray<AppGroup> => 
     .map(([app, members]): AppGroup => ({ app, members: [...members].sort((a, b) => a.stage.localeCompare(b.stage)) }))
 }
 
-const unreadable = (stacks: ReadonlyArray<StackSummary>): string | null => {
-  const names = stacks.filter((stack) => stack.resourceCount === null).map((stack) => `${stack.app} ${stack.stage}`)
-  if (names.length === 0) return null
-  const subject =
-    names.length === 1
-      ? `${names[0]} couldn’t be read, so its resources read`
-      : `${names.join(", ")} couldn’t be read, so their resources read`
-  return `${subject} Unknown. The other stacks were read.`
+type StacksOverviewReady = Extract<StacksOverviewResult, { readonly _tag: "Ready" }>
+type Issue = StacksOverviewReady["list"]["issues"][number]
+const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`
+
+/** What one kind of source problem means, what it cost, and how to fix it. Never a list of stacks. */
+interface Cause {
+  readonly cause: string
+  readonly cost: string
+  readonly fix: string | null
 }
+
+const causeOf = (issue: Issue, count: number): Cause => {
+  if (issue.source === "s3" && issue.reason === "authentication") {
+    return {
+      cause: `sign-in expired for ${plural(count, "AWS profile", "AWS profiles")}`,
+      cost: count === 1 ? "its state buckets weren’t read" : "their state buckets weren’t read",
+      fix: `run aws sso login for ${count === 1 ? "it" : "them"} on the stacks host`
+    }
+  }
+  if (issue.source === "s3" && issue.reason === "denied") {
+    return {
+      cause: `access was denied for ${plural(count, "AWS profile", "AWS profiles")}`,
+      cost: count === 1 ? "its state buckets weren’t read" : "their state buckets weren’t read",
+      fix: "check those profiles’ S3 permissions"
+    }
+  }
+  if (issue.source === "local" && issue.reason === "skipped") {
+    return { cause: "some project folders under the stacks root couldn’t be read", cost: "the rest were", fix: null }
+  }
+  if (issue.source === "local" && issue.reason === "io") {
+    return {
+      cause: "the local stacks root or a project’s state couldn’t be read",
+      cost: "those local stacks weren’t listed",
+      fix: null
+    }
+  }
+  return {
+    cause: `the ${issue.source === "s3" ? "state bucket" : "local"} read failed (${issue.reason})`,
+    cost: plural(count, "source was skipped", "sources were skipped"),
+    fix: null
+  }
+}
+
+/** Issues grouped by source and reason: S3 problems first, each kind once with its count. */
+const causes = (issues: ReadonlyArray<Issue>): ReadonlyArray<Cause> => {
+  const groups = new Map<string, { readonly issue: Issue; readonly count: number }>()
+  for (const issue of issues) {
+    const key = `${issue.source}:${issue.reason}`
+    groups.set(key, { issue, count: (groups.get(key)?.count ?? 0) + 1 })
+  }
+  return [...groups.values()]
+    .sort((a, b) => Number(b.issue.source === "s3") - Number(a.issue.source === "s3"))
+    .map(({ count, issue }) => causeOf(issue, count))
+}
+
+/** "Sign-in expired …, so … weren’t read. Fix: …." — or "…; the rest were." when nothing was lost. */
+const causeWords = ({ cause, cost, fix }: Cause): string =>
+  `${cause.charAt(0).toUpperCase()}${cause.slice(1)}${cost === "the rest were" ? "; the rest were." : `, so ${cost}.`}${
+    fix === null ? "" : ` Fix: ${fix}.`
+  }`
 
 const Fact = ({ children, label }: { readonly label: string; readonly children: ReactNode }): ReactElement => (
   <td data-label={label}>{children}</td>
@@ -350,8 +401,9 @@ const OverviewTable = ({
                   </a>
                 </th>
                 <Fact label="Resources">
+                  {/* S3 listings don't open each state, so they carry no count; that isn't a failure. */}
                   <span className={stack.resourceCount === null ? "stacks-muted" : "stacks-count"}>
-                    {stack.resourceCount === null ? "Unknown" : stack.resourceCount}
+                    {stack.resourceCount === null ? "Not counted" : stack.resourceCount}
                   </span>
                 </Fact>
                 <Fact label="Last plan">{planWords(plans.get(stack.id) ?? null)}</Fact>
@@ -401,31 +453,37 @@ const OverviewPage = ({
     }
     if (result._tag === "Failed") return <ProblemPanel problem={{ _tag: "Failed", reason: result.reason }} />
     const stacks = result.list.stacks
-    const failedSources = [...new Set(result.list.issues.map((issue) => `${issue.source}: ${issue.reason}`))]
-    const sourcesNotice = (ending: string) =>
-      failedSources.length === 0 ? null : (
-        <Notice tone="caution">{`Some sources couldn’t be read (${failedSources.join(", ")}). ${ending}`}</Notice>
-      )
+    const found = causes(result.list.issues)
     if (stacks.length === 0) {
-      // An unreadable source must not read as an empty inventory.
-      return (
-        sourcesNotice("No stacks could be listed.") ?? (
+      // An unreadable source must not read as an empty inventory: name every cause and its fix.
+      if (found.length === 0) {
+        return (
           <StateCard eyebrow="No stacks" title="No alchemy stacks found under this host’s projects." tone="neutral" />
         )
+      }
+      return (
+        <StateCard eyebrow="Read failed" title="Couldn’t read stacks." tone="caution">
+          {found.map((cause) => (
+            <span className="stacks-issue" data-source-issue="" key={cause.cause}>
+              {causeWords(cause)}
+            </span>
+          ))}
+        </StateCard>
       )
     }
     const apps = new Set(stacks.map((stack) => stack.app)).size
-    const partial = unreadable(stacks)
-    // Phase 1 knows one reason a stack needs attention: its state couldn't be read.
-    const attention = stacks.filter((stack) => stack.resourceCount === null).length
     return (
       <div className="stacks-stack">
-        <p className="stacks-summary">
-          {`${stacks.length} ${stacks.length === 1 ? "stack" : "stacks"} in ${apps} ${apps === 1 ? "app" : "apps"}`}
-          {attention === 0 ? "." : `, ${attention} ${attention === 1 ? "needs" : "need"} attention.`}
-        </p>
-        {partial === null ? null : <Notice tone="neutral">{partial}</Notice>}
-        {sourcesNotice("Stacks that could be read are listed.")}
+        <p className="stacks-summary">{`${plural(stacks.length, "stack", "stacks")} in ${plural(apps, "app", "apps")}.`}</p>
+        {found.length === 0 ? null : (
+          <Notice tone="caution">
+            {found.map((cause) => (
+              <span className="stacks-issue" data-source-issue="" key={cause.cause}>
+                {causeWords(cause)}
+              </span>
+            ))}
+          </Notice>
+        )}
         <OverviewTable active={mount.active} reads={reads} stacks={stacks} />
       </div>
     )

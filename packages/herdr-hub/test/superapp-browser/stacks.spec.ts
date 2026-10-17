@@ -30,6 +30,10 @@ for (const shot of pages) {
       if (shot.state !== "loading") await expect(page.locator(".stacks-page [aria-busy]")).toHaveCount(0)
       if (shot.name === "stacks-overview") await expect(page.locator("tbody tr:not([data-app])")).toHaveCount(4)
       if (shot.name === "stacks-overview") await expect(page.getByText("3 updates, 1 d ago")).toBeVisible()
+      if (shot.name === "stacks-partial") {
+        await expect(page.locator("[data-source-issue]")).toHaveCount(2)
+        await expect(page.getByText("Unknown", { exact: true })).toHaveCount(0)
+      }
       if (shot.name === "stacks-stack") await expect(page.getByRole("rowheader", { name: "org-trail" })).toBeVisible()
       const overflow = await page.evaluate(() =>
         document.documentElement.scrollWidth - document.documentElement.clientWidth
