@@ -12,6 +12,8 @@ import {
   AwsRegionDiscovery,
   AwsRegionReader,
   AwsRegionReadFailure,
+  classifyRegionReadCause,
+  decodeEnabledRegions,
   makeAwsRegionDiscovery
 } from "../../src/server/application/awsRegionDiscovery.js"
 
@@ -31,7 +33,7 @@ describe("AWS region discovery", () => {
       Effect.gen(function*() {
         const discovery = yield* AwsRegionDiscovery
         const regions = yield* discovery.regions("production")
-        assert.deepStrictEqual(regions, ["eu-central-1", "eu-west-1", "us-east-1"])
+        assert.deepStrictEqual(regions, { _tag: "available", regions: ["eu-central-1", "eu-west-1", "us-east-1"] })
       })
     ))
 
@@ -58,6 +60,35 @@ describe("AWS region discovery", () => {
         Effect.flatMap(AwsRegionDiscovery, (discovery) => Effect.flip(discovery.regions("production")))
       )
       assert.instanceOf(unavailable, ApplicationServiceUnavailable)
+    }))
+
+  // account:ListRegions is a new IAM action; a profile without it is a fact for the form, not an outage.
+  it.effect("reports a profile that may not list regions as denied, not unavailable", () =>
+    run(
+      () => Effect.fail(new AwsRegionReadFailure({ reason: "denied" })),
+      Effect.gen(function*() {
+        const discovery = yield* AwsRegionDiscovery
+        assert.deepStrictEqual(yield* discovery.regions("production"), { _tag: "denied" })
+      })
+    ))
+
+  it("classifies provider causes without keeping them", () => {
+    assert.strictEqual(classifyRegionReadCause({ _tag: "AccessDeniedException", message: "x" }).reason, "denied")
+    assert.strictEqual(classifyRegionReadCause({ name: "UnauthorizedException" }).reason, "denied")
+    assert.strictEqual(classifyRegionReadCause({ _tag: "ThrottlingException" }).reason, "throttled")
+    assert.strictEqual(classifyRegionReadCause({ _tag: "CredentialsProviderError" }).reason, "sign-in")
+    assert.strictEqual(classifyRegionReadCause({ _tag: "InternalFailure" }).reason, "unavailable")
+  })
+
+  it.effect("decodes region names and refuses a malformed or overlong list instead of trimming it", () =>
+    Effect.gen(function*() {
+      assert.deepStrictEqual(yield* decodeEnabledRegions(["eu-west-1", "us-east-1"]), ["eu-west-1", "us-east-1"])
+      const malformed = yield* Effect.flip(decodeEnabledRegions(["eu-west-1", "not a region"]))
+      assert.strictEqual(malformed.reason, "unavailable")
+      const overlong = yield* Effect.flip(
+        decodeEnabledRegions(Array.from({ length: 65 }, (_, index) => `eu-west-${index}`))
+      )
+      assert.strictEqual(overlong.reason, "unavailable")
     }))
 
   it.effect("refuses a malformed profile name before asking AWS", () => {

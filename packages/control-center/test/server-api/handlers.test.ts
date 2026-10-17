@@ -1897,7 +1897,7 @@ describe("Control Center API handlers", () => {
         configurationMetadata: () => Effect.die("not used"),
         discoverAwsRegions: (request) => {
           assert.deepStrictEqual(request, { profile: "production" })
-          return Effect.succeed(["eu-central-1", "eu-west-1"])
+          return Effect.succeed({ _tag: "available", regions: ["eu-central-1", "eu-west-1"] })
         },
         health: () => Effect.die("not used"),
         list: () => Effect.die("not used"),
@@ -1919,7 +1919,7 @@ describe("Control Center API handlers", () => {
         handler
       ]))
 
-      assert.deepStrictEqual(result, ["eu-central-1", "eu-west-1"])
+      assert.deepStrictEqual(result, { _tag: "available", regions: ["eu-central-1", "eu-west-1"] })
     }))
 
   it.effect("discovers secret-free Atlassian OAuth profile metadata for workspace owners", () =>

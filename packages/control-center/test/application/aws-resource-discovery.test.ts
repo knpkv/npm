@@ -310,7 +310,7 @@ describe("AWS resource discovery", () => {
     ))
 
   // A pool account's region allowlist is an SCP; AWS names it in the denial, so the form can say the region isn't allowed.
-  describe("a region denied by policy", () => {
+  describe("services denied by an organization policy", () => {
     const denied = (message: string) =>
       codeCommitClient({
         listRepositoriesPage: ({ account }) =>
@@ -327,7 +327,9 @@ describe("AWS resource discovery", () => {
       listPipelinesPage: () => Effect.fail(new PluginAuthorizationFailure({ operation: "list-pipelines" }))
     })
 
-    it.effect("is reported when both services are denied by a service control policy", () =>
+    // Only CodeCommit's denial is proven to be an SCP (CodePipeline's authorization failure carries no message),
+    // so the flag means "an organization policy blocks these services here", never "this region is not allowed".
+    it.effect("is reported for an SCP CodeCommit denial beside a CodePipeline authorization failure", () =>
       runDiscovery(
         denied(
           "User: arn:aws:sts::123456789012:assumed-role/Developer/x is not authorized to perform: codecommit:ListRepositories with an explicit deny in a service control policy"
@@ -336,8 +338,20 @@ describe("AWS resource discovery", () => {
         Effect.gen(function*() {
           const discovery = yield* AwsResourceDiscovery
           const result = yield* discovery.discover(request)
-          assert.strictEqual(result.regionDenied, true)
+          assert.strictEqual(result.organizationPolicyDenied, true)
           assert.deepStrictEqual(result.codeCommit, { _tag: "failed", failureClass: "authorization" })
+        })
+      ))
+
+    it.effect("is not reported when CodePipeline is readable", () =>
+      runDiscovery(
+        denied(
+          "not authorized to perform: codecommit:ListRepositories with an explicit deny in a service control policy"
+        ),
+        codePipelineClient(),
+        Effect.gen(function*() {
+          const discovery = yield* AwsResourceDiscovery
+          assert.notProperty(yield* discovery.discover(request), "organizationPolicyDenied")
         })
       ))
 
@@ -348,7 +362,7 @@ describe("AWS resource discovery", () => {
         Effect.gen(function*() {
           const discovery = yield* AwsResourceDiscovery
           const result = yield* discovery.discover(request)
-          assert.notProperty(result, "regionDenied")
+          assert.notProperty(result, "organizationPolicyDenied")
         })
       ))
   })

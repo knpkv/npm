@@ -258,13 +258,14 @@ export const makeAwsResourceDiscovery = Effect.fn("AwsResourceDiscovery.make")(f
       },
       { concurrency: "unbounded" }
     )
-    // An SCP region allowlist denies every regional service: both lists fail on authorization.
-    const regionDenied = (yield* Ref.get(deniedByPolicy)) &&
+    // CodeCommit names the SCP; CodePipeline's authorization failure carries no message, so this says an
+    // organization policy blocks both services here, not that the region itself is disallowed.
+    const organizationPolicyDenied = (yield* Ref.get(deniedByPolicy)) &&
       services.codePipeline._tag === "failed" &&
       services.codePipeline.failureClass === "authorization"
     const response: AwsResourceDiscoveryResponse = { accountId: identity.accountId, ...services }
-    const denied: AwsResourceDiscoveryResponse = { ...response, regionDenied: true }
-    return regionDenied ? denied : response
+    const denied: AwsResourceDiscoveryResponse = { ...response, organizationPolicyDenied: true }
+    return organizationPolicyDenied ? denied : response
   })
   return AwsResourceDiscovery.of({ discover })
 })

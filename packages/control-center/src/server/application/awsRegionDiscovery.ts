@@ -17,7 +17,8 @@ import * as Layer from "effect/Layer"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 
-import { AwsRegionDiscoveryRequest, MAXIMUM_DISCOVERED_AWS_REGIONS } from "../../api/plugins.js"
+import type { AwsRegionDiscoveryResponse } from "../../api/plugins.js"
+import { AwsRegionDiscoveryRequest, DiscoveredAwsRegions } from "../../api/plugins.js"
 import {
   ApplicationAwsSignInRequired,
   ApplicationInvalidRequest,
@@ -25,9 +26,12 @@ import {
   ApplicationServiceUnavailable
 } from "../api/ApplicationServices.js"
 
-/** Why the enabled regions could not be read; never carries the provider's cause. */
+/**
+ * Why the enabled regions could not be read; never carries the provider's cause. `denied` is the profile
+ * lacking `account:ListRegions`, which the API answers as a `denied` result rather than an error.
+ */
 export class AwsRegionReadFailure extends Schema.TaggedError<AwsRegionReadFailure>()("AwsRegionReadFailure", {
-  reason: Schema.Literals(["sign-in", "throttled", "unavailable"])
+  reason: Schema.Literals(["denied", "sign-in", "throttled", "unavailable"])
 }) {}
 
 /** The provider boundary: the enabled region names for one profile, unsorted. */
@@ -40,28 +44,42 @@ export class AwsRegionDiscovery extends Context.Service<AwsRegionDiscovery, {
   readonly regions: (
     profile: string
   ) => Effect.Effect<
-    ReadonlyArray<string>,
+    AwsRegionDiscoveryResponse,
     ApplicationAwsSignInRequired | ApplicationInvalidRequest | ApplicationRateLimited | ApplicationServiceUnavailable
   >
 }>()("@knpkv/control-center/AwsRegionDiscovery") {}
 
 const decodeRequest = Schema.decodeUnknownEffect(AwsRegionDiscoveryRequest)
+const decodeRegions = Schema.decodeUnknownEffect(DiscoveredAwsRegions)
+
+/**
+ * Sort, drop repeats and validate provider region names. A malformed name or a list over the contract's bound
+ * is a provider fault, never trimmed to fit. @internal
+ */
+export const decodeEnabledRegions = (names: ReadonlyArray<string>) =>
+  decodeRegions([...new Set(names)].sort((left, right) => left.localeCompare(right))).pipe(
+    Effect.mapError(() => new AwsRegionReadFailure({ reason: "unavailable" }))
+  )
 
 /** Construct region discovery over an injected reader. @internal */
 export const makeAwsRegionDiscovery = Effect.fn("AwsRegionDiscovery.make")(function*() {
   const reader = yield* AwsRegionReader
   const regions = Effect.fn("AwsRegionDiscovery.regions")(function*(profile: string) {
     const request = yield* decodeRequest({ profile }).pipe(Effect.mapError(() => new ApplicationInvalidRequest()))
-    const names = yield* reader.enabledRegions(request.profile).pipe(
-      Effect.mapError((failure) =>
-        failure.reason === "sign-in"
-          ? new ApplicationAwsSignInRequired({ profile: request.profile })
-          : failure.reason === "throttled"
-          ? new ApplicationRateLimited({ retryAt: null })
-          : new ApplicationServiceUnavailable({ retryAt: null })
-      )
+    return yield* reader.enabledRegions(request.profile).pipe(
+      Effect.flatMap(decodeEnabledRegions),
+      Effect.map((regions): AwsRegionDiscoveryResponse => ({ _tag: "available", regions })),
+      Effect.catchTag("AwsRegionReadFailure", (failure) =>
+        failure.reason === "denied"
+          ? Effect.succeed<AwsRegionDiscoveryResponse>({ _tag: "denied" })
+          : Effect.fail(
+            failure.reason === "sign-in"
+              ? new ApplicationAwsSignInRequired({ profile: request.profile })
+              : failure.reason === "throttled"
+              ? new ApplicationRateLimited({ retryAt: null })
+              : new ApplicationServiceUnavailable({ retryAt: null })
+          ))
     )
-    return [...new Set(names)].sort((left, right) => left.localeCompare(right)).slice(0, MAXIMUM_DISCOVERED_AWS_REGIONS)
   })
   return AwsRegionDiscovery.of({ regions })
 })
@@ -72,23 +90,31 @@ const AwsCredentialIdentity = Schema.Struct({
   sessionToken: Schema.optionalKey(Schema.String.check(Schema.isNonEmpty()))
 })
 
+/** Matches a provider error by `_tag`, `name`, or the `errorTag` of an undeclared (`UnknownAwsError`) one. */
 const hasTag = (cause: unknown, tags: ReadonlyArray<string>): boolean =>
   tags.some((tag) =>
     Predicate.isTagged(cause, tag) ||
-    (Predicate.hasProperty(cause, "name") && Predicate.isString(cause.name) && cause.name === tag)
+    (Predicate.hasProperty(cause, "name") && Predicate.isString(cause.name) && cause.name === tag) ||
+    (Predicate.hasProperty(cause, "errorTag") && Predicate.isString(cause.errorTag) && cause.errorTag === tag)
   )
 
-const classify = (cause: unknown): AwsRegionReadFailure =>
+/** Map a provider cause to a read failure, dropping the cause itself. @internal */
+export const classifyRegionReadCause = (cause: unknown): AwsRegionReadFailure =>
   new AwsRegionReadFailure({
     reason: isCredentialInvalidCause(cause) || hasTag(cause, [...credentialInvalidTags, "CredentialsProviderError"])
       ? "sign-in"
+      : hasTag(cause, ["AccessDenied", "AccessDeniedException", "UnauthorizedException"])
+      ? "denied"
       : hasTag(cause, ["Throttling", "ThrottlingException", "TooManyRequestsException"])
       ? "throttled"
       : "unavailable"
   })
 
 const resolveProfileCredentials = makeProfileCredentialProvider({ sso: fromSSO, fallback: fromIni })
-/** ListRegions is served from the Account API's home region, whatever the profile's region is. */
+/**
+ * ListRegions is served from the Account API's home region, whatever the profile's region is. This is the
+ * commercial partition's; GovCloud and China profiles are not supported and fail as unavailable.
+ */
 const ACCOUNT_API_REGION = "us-east-1"
 const MAXIMUM_PAGES = 5
 const OPERATION_TIMEOUT = "10 seconds"
@@ -120,7 +146,7 @@ export const AwsRegionReaderLive = Layer.effect(
           ),
           Effect.provideService(DistilledRegion.Region, Effect.succeed(ACCOUNT_API_REGION)),
           Effect.provideService(HttpClient.HttpClient, httpClient),
-          Effect.mapError(classify)
+          Effect.mapError(classifyRegionReadCause)
         )
         for (const region of response.Regions ?? []) if (region.RegionName !== undefined) names.push(region.RegionName)
         nextToken = response.NextToken

@@ -343,8 +343,12 @@ export const AwsResourceDiscoveryResponse = Schema.Struct({
   accountId: Schema.String.check(Schema.isPattern(/^[0-9]{12}$/u, { expected: "a 12-digit AWS account id" })),
   codeCommit: AwsServiceResourceDiscovery,
   codePipeline: AwsServiceResourceDiscovery,
-  /** Present when a service control policy denies this region for the account, so the form names the region. */
-  regionDenied: Schema.optionalKey(Schema.Literal(true))
+  /**
+   * Present when CodeCommit's denial names a service control policy and CodePipeline is denied too: an
+   * organization policy blocks these services here. It may be a region allowlist or a service-wide deny, so
+   * the form names the region as a possible cause, never as the proven one.
+   */
+  organizationPolicyDenied: Schema.optionalKey(Schema.Literal(true))
 }).annotate({ identifier: "AwsResourceDiscoveryResponse" })
 
 /** Decoded identity and independent service discovery outcomes. */
@@ -362,12 +366,21 @@ export const AwsRegionDiscoveryRequest = Schema.Struct({
 export type AwsRegionDiscoveryRequest = typeof AwsRegionDiscoveryRequest.Type
 
 /** The account's enabled regions, sorted and unique. */
-export const AwsRegionDiscoveryResponse = Schema.Array(AwsResourceDiscoveryRequest.fields.region).check(
+export const DiscoveredAwsRegions = Schema.Array(AwsResourceDiscoveryRequest.fields.region).check(
   Schema.makeFilter((regions) => regions.length <= MAXIMUM_DISCOVERED_AWS_REGIONS, {
     expected: `at most ${MAXIMUM_DISCOVERED_AWS_REGIONS} AWS regions`
   }),
   Schema.makeFilter((regions) => new Set(regions).size === regions.length, { expected: "unique AWS regions" })
 )
+
+/**
+ * The profile's enabled regions, or `denied` when it may not call `account:ListRegions`: a new IAM action
+ * most profiles lack, so the form falls back to typing a region rather than reporting an outage.
+ */
+export const AwsRegionDiscoveryResponse = Schema.Union([
+  Schema.TaggedStruct("available", { regions: DiscoveredAwsRegions }),
+  Schema.TaggedStruct("denied", {})
+]).annotate({ identifier: "AwsRegionDiscoveryResponse" })
 
 /** Decoded enabled-region list. */
 export type AwsRegionDiscoveryResponse = typeof AwsRegionDiscoveryResponse.Type
