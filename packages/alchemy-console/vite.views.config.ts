@@ -18,10 +18,12 @@ export default defineConfig({
   css: {
     postcss: {
       plugins: [{
-        postcssPlugin: "alchemy-external-fonts",
+        postcssPlugin: "alchemy-external-assets",
         Declaration(declaration) {
-          // Vite library mode otherwise inlines fonts despite assetsInlineLimit. Keep CSP self-only.
-          if (declaration.prop === "src") declaration.value = declaration.value.replace(/url\("([^"?]+\.woff2)"\)/g, 'url("$1?no-inline")')
+          // Vite library mode otherwise inlines fonts and art despite assetsInlineLimit. Keep CSP self-only.
+          if (declaration.prop === "src" || declaration.prop === "background") {
+            declaration.value = declaration.value.replace(/url\("([^"?]+\.(?:woff2|svg))"\)/g, "url(\"$1?no-inline\")")
+          }
         }
       }]
     }

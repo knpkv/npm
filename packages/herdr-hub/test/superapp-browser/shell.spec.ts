@@ -113,10 +113,11 @@ for (const reducedMotion of ["no-preference", "reduce"] satisfies ReadonlyArray<
     const opener = moreOpener(page)
     await opener.click()
     const more = page.getByRole("dialog", { name: "More", exact: true })
-    // Only modules outside the phone bar are listed: Host resources is the one such module.
+    // Only modules outside the phone bar are listed: Host resources and Stacks.
     const moreModules = more.getByRole("navigation", { name: "More modules" })
-    await expect(moreModules.getByRole("link")).toHaveCount(1)
+    await expect(moreModules.getByRole("link")).toHaveCount(2)
     await expect(moreModules.getByRole("link", { name: /^Host resources/ })).toBeVisible()
+    await expect(moreModules.getByRole("link", { name: /^Stacks/ })).toBeVisible()
     await expect(more.getByText("Appearance", { exact: true })).toHaveCount(0)
     await expect(more.getByRole("button", { name: /^Host access/ })).toBeVisible()
     await expect(more.getByRole("button", { name: /^Notifications/ })).toBeVisible()
@@ -1305,6 +1306,7 @@ test("sidebar rows, Settings and the wordmark follow the design geometry", async
     "Code",
     "Usage",
     "Host resources",
+    "Stacks",
     "Settings"
   ])
   for (const row of geometry.rows) {

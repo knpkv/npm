@@ -3,8 +3,6 @@ import { Button, Notice, Skeleton, Text } from "@knpkv/rly/primitives"
 import { useId, type ReactElement } from "react"
 import type { DiscoveryIssue, SourceFailureReason, StackList, StackSummary } from "../api.js"
 
-const emptyCreature = new URL("./assets/empty-creature.svg?no-inline", import.meta.url).href
-
 /** Safe presentation labels supplied by the mounting application, without provider coordinates. */
 export interface StackListCopy {
   readonly product: string
@@ -252,7 +250,7 @@ export const StackListView = ({ copy, onReadAgain, stackHref, state }: StackList
         </section>
       ) : empty ? (
         <div className="ac-empty">
-          <img className="ac-empty-creature" src={emptyCreature} alt="" width="88" height="88" />
+          <span className="ac-empty-creature" aria-hidden="true" />
           <Text as="h2" className="ac-empty-title" variant="section-title">
             No stacks found in local state or the state bucket.
           </Text>

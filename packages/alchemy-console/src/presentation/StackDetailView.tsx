@@ -25,12 +25,14 @@ const Label = ({ children }: { readonly children: string }): ReactElement => (
   </span>
 )
 
-const Resources = ({
+/** One stack's resource table: logical name, type, physical ID, status and last update. */
+export const StackResourcesView = ({
   resourceHref,
   stack
 }: {
   readonly stack: StackPresentation
-  readonly resourceHref: StackDetailViewProps["resourceHref"]
+  /** Each resource's page; null when the host has none, and names render as plain text. */
+  readonly resourceHref: StackDetailViewProps["resourceHref"] | null
 }): ReactElement => {
   const headingId = useId()
   const failed = stack.resources.filter((resource) => resource.status === "failed").length
@@ -73,9 +75,13 @@ const Resources = ({
                 <tr key={resource.fqn}>
                   <th scope="row">
                     <Label>Logical name</Label>
-                    <a data-rly-hit-area className="ac-detail-link ac-resource-name" href={resourceHref(resource)}>
-                      {resource.logicalId}
-                    </a>
+                    {resourceHref === null ? (
+                      <span className="ac-resource-name">{resource.logicalId}</span>
+                    ) : (
+                      <a data-rly-hit-area className="ac-detail-link ac-resource-name" href={resourceHref(resource)}>
+                        {resource.logicalId}
+                      </a>
+                    )}
                   </th>
                   <td className="ac-resource-type">
                     <Label>Type</Label>
@@ -106,7 +112,8 @@ const Resources = ({
   )
 }
 
-const Outputs = ({ outputs }: { readonly outputs: StackPresentation["outputs"] }): ReactElement => {
+/** One stack's outputs: keys only, values Hidden unless explicitly safe; null means unavailable. */
+export const StackOutputsView = ({ outputs }: { readonly outputs: StackPresentation["outputs"] }): ReactElement => {
   const headingId = useId()
   const hidden = outputs?.filter((output) => output.value._tag === "Hidden").length ?? 0
   return (
@@ -225,8 +232,12 @@ export const StackDetailView = ({
           if (value === "resources" || value === "outputs" || value === "state" || value === "plan") onTabChange(value)
         }}
         items={[
-          { value: "resources", label: "Resources", content: <Resources stack={stack} resourceHref={resourceHref} /> },
-          { value: "outputs", label: "Outputs", content: <Outputs outputs={stack.outputs} /> },
+          {
+            value: "resources",
+            label: "Resources",
+            content: <StackResourcesView stack={stack} resourceHref={resourceHref} />
+          },
+          { value: "outputs", label: "Outputs", content: <StackOutputsView outputs={stack.outputs} /> },
           {
             value: "state",
             label: "State",

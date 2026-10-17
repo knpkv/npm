@@ -18,6 +18,15 @@ import { readMobileCellGeometry } from "./cell-geometry.js"
 import { type ListFixture, listFixtures, populated } from "./list-fixtures.js"
 import { rejectedViewStyles } from "./style-policy.js"
 
+/** Decorative art is a CSS background: resolve its URL and load it the way the browser would. */
+const backgroundArtLoads = (element: Element): Promise<boolean> => {
+  const match = /^url\("(.+)"\)$/u.exec(getComputedStyle(element).backgroundImage)
+  if (match?.[1] === undefined) return Promise.resolve(false)
+  const image = new Image()
+  image.src = match[1]
+  return image.decode().then(() => image.naturalWidth > 0, () => false)
+}
+
 /** Fixture-only credentials stay in the private runtime and browser navigation, never reports or traces. */
 class BrowserFixture extends Context.Service<BrowserFixture, {
   readonly url: string
@@ -207,12 +216,7 @@ for (const width of [390, 1280]) {
           await expect(page.getByText("Local discovery and the state bucket returned no stack state.", { exact: true }))
             .toBeVisible()
           await expect(page.locator(".ac-empty-creature")).toBeVisible()
-          expect(
-            await page.locator(".ac-empty-creature").evaluate(() => {
-              const image = document.querySelector<HTMLImageElement>("img.ac-empty-creature")
-              return image !== null && image.complete && image.naturalWidth > 0
-            })
-          ).toBe(true)
+          expect(await page.locator(".ac-empty-creature").evaluate(backgroundArtLoads)).toBe(true)
         }
         if (fixture.name.startsWith("1d") || fixture.name.startsWith("1e")) {
           await expect(page.getByText("storefront prod", { exact: true })).toBeVisible()
@@ -446,14 +450,9 @@ test("built views consumer loads creature and both fonts beneath /console/", asy
             status: response.status()
           }))
         await page.goto(url)
-        const creature = page.locator("img.ac-empty-creature")
+        const creature = page.locator(".ac-empty-creature")
         await expect(creature).toBeVisible()
-        await expect.poll(() =>
-          creature.evaluate(() => {
-            const image = document.querySelector<HTMLImageElement>("img.ac-empty-creature")
-            return image !== null && image.complete && image.naturalWidth > 0
-          })
-        ).toBe(true)
+        await expect.poll(() => creature.evaluate(backgroundArtLoads)).toBe(true)
         fontLoads = await page.evaluate(async () => {
           const fonts = await Promise.all([
             document.fonts.load("16px \"Geist Variable\""),
@@ -566,19 +565,14 @@ test("built views consumer loads creature and both fonts beneath /console/", asy
               }
               if (fixture.name === "2c") {
                 await expect(page.getByText("No resources in state", { exact: true })).toBeVisible()
-                const illustration = page.locator("img.ac-empty-state-creature")
+                const illustration = page.locator(".ac-empty-state-creature")
                 await expect(illustration).toBeVisible()
                 expect(
                   await illustration.evaluate((element) =>
-                    element.getAttribute("aria-hidden") === "true" && element.getAttribute("width") === "56"
+                    element.getAttribute("aria-hidden") === "true" && element.getBoundingClientRect().width === 56
                   )
                 ).toBe(true)
-                await expect.poll(() =>
-                  illustration.evaluate(() => {
-                    const image = document.querySelector<HTMLImageElement>("img.ac-empty-state-creature")
-                    return image !== null && image.complete && image.naturalWidth > 0
-                  })
-                ).toBe(true)
+                await expect.poll(() => illustration.evaluate(backgroundArtLoads)).toBe(true)
               }
               expect(await page.evaluate(rejectedViewStyles)).toEqual([])
               frames.push({ fixture: fixture.name, width, theme: colorScheme })

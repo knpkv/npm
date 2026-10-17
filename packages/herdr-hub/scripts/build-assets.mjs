@@ -37,7 +37,8 @@ await Promise.all([
     assetNames: "[name]",
     entryNames: "index",
     entryPoints: ["src/assets.css"],
-    loader: { ".woff2": "file" },
+    // SVG art from module stylesheets inlines; the server serves fonts only.
+    loader: { ".svg": "dataurl", ".woff2": "file" },
     outdir: "dist"
   })
 ])
