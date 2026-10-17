@@ -3,6 +3,8 @@ import test from "node:test"
 
 import type * as Schema from "effect/Schema"
 
+import * as Prettier from "prettier"
+
 import { type Classification, classify, releaseNotes } from "./openapi-spec-diff.ts"
 
 // One spec builder for every fixture: `Plan` is read by GET /plans (output only),
@@ -290,10 +292,12 @@ test("release notes list breaking changes before additions and cap each list", (
       "Release: major (2 breaking, 1 addition).",
       "",
       "Breaking:",
+      "",
       "- removed property note at `#/components/schemas/Plan`",
       "- and 1 more",
       "",
       "Additions:",
+      "",
       "- added path /kiosks at `#/paths`"
     ].join("\n")
   )
@@ -421,4 +425,18 @@ test("removing const is major: the generated literal type widens", () => {
   )
   assert.equal(classify(withId({ const: "x" }), withId({ const: "x" })).bump, "patch")
   assert.equal(classify(withId({ maxLength: 5 }), withId({ maxLength: 50 })).bump, "minor")
+})
+
+// The notes become a changeset file, and CI runs `prettier --check .` over it.
+test("release notes are already prettier-formatted markdown", async () => {
+  const notes = releaseNotes({
+    bump: "major",
+    changes: [
+      { level: "major", at: "#/components/schemas/Plan", change: "removed property note" },
+      { level: "minor", at: "#/paths", change: "added path /kiosks" },
+      { level: "minor", at: "#/paths", change: "added path /rooms" }
+    ]
+  }, 1)
+  const config = await Prettier.resolveConfig(".changeset/release-notes.md")
+  assert.equal(await Prettier.format(notes, { ...config, parser: "markdown" }), `${notes}\n`)
 })
