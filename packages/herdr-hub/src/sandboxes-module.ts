@@ -47,8 +47,10 @@ const unavailableCopy = (reason: SandboxesUnavailable["reason"], host: string | 
 
 /**
  * Only the configured pool host's own hub opens the database. `reads` replaces that reader in tests.
- * A reader that can't start is unavailable on every route, never a startup failure. Needs-you is empty
- * until the reader is up; a later store or pending-lift failure rejects so the collector keeps the hole.
+ * A reader that can't start is unavailable on every route, never a startup failure. Needs-you stays
+ * empty when this host does not own the pool. A reader that fails to start reports one failed
+ * `unavailable` issue, so Today does not call that an empty list. A later store or pending-lift
+ * failure rejects so the collector keeps the hole.
  */
 export const makeSandboxesModule = (configuration: {
   readonly host: string
@@ -106,9 +108,14 @@ export const makeSandboxesModule = (configuration: {
               code: error._tag === "SandboxNotFound" ? "not_found" : "invalid_query"
             })
           ))
-      const needsYou = mounted._tag === "Unavailable"
-        ? Effect.succeed({ items: [], issues: [], asOf: null })
-        : Effect.gen(function*() {
+      const emptyNeedsYou = NeedsYouProviderResult.make({ items: [], issues: [], asOf: null })
+      const readerDown = NeedsYouProviderResult.make({
+        items: [],
+        issues: [{ state: "failed", reason: "unavailable" }],
+        asOf: null
+      })
+      const needsYou = mounted._tag === "Ready"
+        ? Effect.gen(function*() {
           const attention = yield* mounted.reads.attention
           const pending = yield* configuration.pendingLifts
           return NeedsYouProviderResult.make({
@@ -131,6 +138,9 @@ export const makeSandboxesModule = (configuration: {
             asOf: attention.asOf
           })
         })
+        : started !== null && started._tag === "Failure"
+        ? Effect.succeed(readerDown)
+        : Effect.succeed(emptyNeedsYou)
       return {
         routes: [
           moduleReadRoute("/overview", SandboxesOverviewQuery, SandboxesOverview, () => overview),

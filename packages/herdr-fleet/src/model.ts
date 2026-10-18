@@ -1,4 +1,4 @@
-import { Schema } from "effect"
+import { DateTime, Option, Schema } from "effect"
 import { fleetJobRecordMaxBytes } from "./limits.js"
 
 export const JobIdentifier = Schema.String.check(
@@ -416,7 +416,11 @@ export const SandboxRelease = Schema.Struct({
 export type SandboxRelease = typeof SandboxRelease.Type
 
 const SandboxObservedInstant = Schema.String.check(
-  Schema.isPattern(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/)
+  Schema.isPattern(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/),
+  Schema.makeFilter(
+    (value) => Option.isSome(DateTime.make(value)),
+    { expected: "a parseable UTC instant" }
+  )
 )
 
 /**

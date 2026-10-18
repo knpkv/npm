@@ -184,6 +184,26 @@ describe("host-local Sandboxes module", () => {
       })
     }))
 
+  it.effect("a reader that cannot start is a failed needs-you source, and another host stays empty", () =>
+    Effect.gen(function*() {
+      const read = request("connect/needs-you")
+      const failed = yield* withModule(host, read, {
+        reads: Effect.fail(new SandboxReaderStartError({ cause: "database unavailable" }))
+      })
+      expect(failed?.body).toEqual({
+        _tag: "Partial",
+        items: [],
+        sources: [{ provider: "sandboxes", issue: { state: "failed", reason: "unavailable" } }],
+        contributions: [{ provider: "sandboxes", asOf: null }]
+      })
+      const elsewhere = yield* withModule(other, read)
+      expect(elsewhere?.body).toEqual({
+        _tag: "Complete",
+        items: [],
+        contributions: [{ provider: "sandboxes", asOf: null }]
+      })
+    }))
+
   it.effect("is unavailable, not a startup failure, when the reader cannot start", () =>
     withModule(
       host,

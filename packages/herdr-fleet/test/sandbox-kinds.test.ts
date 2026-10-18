@@ -58,6 +58,24 @@ const withStore = <A, E, R>(use: (store: JobStore) => Effect.Effect<A, E, R>) =>
 }
 
 layer(NodeServices.layer)("sandbox job kinds", (it) => {
+  it("rejects an observed instant that is not a real UTC time", () => {
+    const leased = {
+      holder: "agent-a",
+      state: "Leased",
+      version: 2
+    }
+    for (const endsAt of ["2026-13-01T00:00:00Z", "2026-01-01T25:00:00Z"]) {
+      expect(() => decode({ kind: "sandbox.reset", accountId, reason: "Manual", observed: { ...leased, endsAt } }))
+        .toThrow()
+    }
+    expect(decode({
+      kind: "sandbox.reset",
+      accountId,
+      reason: "Manual",
+      observed: { ...leased, endsAt: "2026-10-16T18:00:00.000Z" }
+    })).toMatchObject({ observed: { endsAt: "2026-10-16T18:00:00.000Z", holder: "agent-a", state: "Leased" } })
+  })
+
   it("decode the pool's typed payloads and refuse a payload holder, a bad account or an internal reset reason", () => {
     for (const raw of sandboxPayloads) expect(decode(raw)).toEqual(raw)
     for (const raw of sandboxPayloads) expect(() => decode({ ...raw, holder: "agent-b" }), raw.kind).toThrow()

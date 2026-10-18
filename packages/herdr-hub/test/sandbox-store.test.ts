@@ -115,6 +115,34 @@ it.layer(NodeServices.layer)("sandbox store", (it) => {
       )
     }))
 
+  it.effect("rename keeps a leased record and refuses to write once its version moved", () =>
+    Effect.gen(function*() {
+      const path = yield* databasePath
+      const writer = yield* openSandboxDatabase(path, contract)
+      const reader = yield* openSandboxDatabase(path, contract)
+      const leased = yield* writer.store.put(yield* lease(yield* writer.store.list, holder, now))
+      const name = Schema.decodeUnknownSync(SandboxName)("sandbox-renamed")
+      const renamed = yield* reader.store.rename(leased.accountId, name)
+      expect(renamed).toMatchObject({ name, version: leased.version, state: leased.state })
+      expect(yield* writer.store.get(leased.accountId)).toEqual(renamed)
+      const raw = yield* Effect.acquireRelease(
+        openPrivateSqlite(path, { initialize: () => undefined }),
+        (opened) => Effect.sync(() => opened.database.close())
+      )
+      const versionOf = () =>
+        raw.database.prepare("SELECT version FROM sandboxes WHERE account_id = ?").get(leased.accountId)
+      expect(versionOf()).toEqual({ version: leased.version })
+      raw.database.prepare("UPDATE sandboxes SET version = ? WHERE account_id = ?").run(4, leased.accountId)
+      const moved = Schema.decodeUnknownSync(SandboxName)("sandbox-moved")
+      expect(yield* Effect.flip(reader.store.rename(leased.accountId, moved))).toMatchObject({
+        _tag: "SandboxStoreUnavailable",
+        operation: "rename",
+        detail: "sandbox version changed during rename"
+      })
+      expect(yield* writer.store.get(leased.accountId)).toEqual(renamed)
+      expect(versionOf()).toEqual({ version: 4 })
+    }).pipe(Effect.scoped))
+
   it.effect("two connections racing on one version: exactly one write lands", () =>
     Effect.gen(function*() {
       const path = yield* databasePath

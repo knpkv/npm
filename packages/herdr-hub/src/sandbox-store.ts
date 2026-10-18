@@ -57,6 +57,12 @@ type PutOutcome =
   | { readonly _tag: "Mismatch"; readonly stored: string }
   | { readonly _tag: "Stale"; readonly actual: number }
 
+/** A rename's outcome inside its transaction. Conflict means the version moved and nothing was written. */
+type RenameOutcome =
+  | { readonly _tag: "Missing" }
+  | { readonly _tag: "Same" | "Renamed"; readonly sandbox: Sandbox }
+  | { readonly _tag: "Conflict" }
+
 /**
  * Opens `<path>` in the caller's scope; failing to open is the private database's own error. The pool's accounts are seeded as Available at version 0 the
  * first time each appears in the contract. An account that leaves the contract keeps its row.
@@ -164,18 +170,32 @@ export const openSandboxDatabase = Effect.fn("SandboxDatabase.open")(function*(p
         storeFailure("sweep")
       ).pipe(Effect.andThen(secure(storeFailure("sweep"))), Effect.asVoid),
     rename: (accountId, name) =>
-      attempt((): { readonly _tag: "Missing" } | { readonly _tag: "Same" | "Renamed"; readonly sandbox: Sandbox } => {
-        const current = readRecord(accountId)
-        if (current === undefined) return { _tag: "Missing" }
-        if (current.name === name) return { _tag: "Same", sandbox: current }
-        const renamed = { ...current, name }
-        database.prepare("UPDATE sandboxes SET record = ? WHERE account_id = ?").run(encodeSandbox(renamed), accountId)
-        return { _tag: "Renamed", sandbox: renamed }
-      }, storeFailure("rename")).pipe(
-        Effect.tap((outcome) => outcome._tag === "Renamed" ? secure(storeFailure("rename")) : Effect.void),
-        Effect.flatMap((outcome) =>
-          outcome._tag === "Missing" ? Effect.fail(new SandboxNotFound({ accountId })) : Effect.succeed(outcome.sandbox)
-        )
+      attempt(
+        () =>
+          transaction(database, (): RenameOutcome => {
+            const current = readRecord(accountId)
+            if (current === undefined) return { _tag: "Missing" }
+            if (current.name === name) return { _tag: "Same", sandbox: current }
+            const renamed = { ...current, name }
+            const written = database
+              .prepare("UPDATE sandboxes SET record = ? WHERE account_id = ? AND version = ?")
+              .run(encodeSandbox(renamed), accountId, current.version)
+            return written.changes === 1 ? { _tag: "Renamed", sandbox: renamed } : { _tag: "Conflict" }
+          }),
+        storeFailure("rename")
+      ).pipe(
+        Effect.flatMap((outcome): Effect.Effect<Sandbox, SandboxNotFound | SandboxStoreUnavailable> => {
+          switch (outcome._tag) {
+            case "Missing":
+              return Effect.fail(new SandboxNotFound({ accountId }))
+            case "Conflict":
+              return Effect.fail(storeFailure("rename")("sandbox version changed during rename"))
+            case "Same":
+              return Effect.succeed(outcome.sandbox)
+            case "Renamed":
+              return secure(storeFailure("rename")).pipe(Effect.as(outcome.sandbox))
+          }
+        })
       )
   })
 
