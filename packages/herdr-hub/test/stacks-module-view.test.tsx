@@ -295,6 +295,10 @@ describe("Stacks module pages", { concurrent: false }, () => {
       expect(button?.getAttribute("tabindex")).not.toBe("-1")
       await act(async () => button?.click())
       expect(writeText).toHaveBeenCalledWith("a1b2c3d")
+      expect(activity?.querySelector("[aria-live='polite']")?.textContent).toBe("Copied")
+      expect(activity?.querySelector("button svg")?.getAttribute("class")).toContain("lucide-check")
+      expect(activity?.querySelector("[role='alert']")).toBeNull()
+      expect(activity?.textContent).not.toMatch(/\b[0-9a-f]{7}\b/u)
     } finally {
       if (prior === undefined) {
         Object.defineProperty(navigator, "clipboard", { configurable: true, value: undefined })
@@ -353,6 +357,9 @@ describe("Stacks module pages", { concurrent: false }, () => {
         expect(button?.getAttribute("tabindex")).not.toBe("-1")
         await act(async () => button?.click())
         expect(writeText).toHaveBeenCalledWith(value)
+        expect(button?.parentElement?.querySelector("[aria-live='polite']")?.textContent).toBe("Copied")
+        expect(button?.querySelector("svg")?.getAttribute("class")).toContain("lucide-check")
+        expect(panel?.textContent).not.toMatch(/\b[0-9a-f]{7}\b/u)
       }
     } finally {
       if (prior === undefined) {

@@ -1069,7 +1069,7 @@ export const componentManifest = {
       styles: ["src/primitives/IconButton.module.css"],
       variants: [
         { defaultValue: "secondary", name: "variant", values: ["primary", "secondary", "quiet"] },
-        { defaultValue: "dense", name: "size", values: ["dense", "compact", "default", "principal"] }
+        { defaultValue: "dense", name: "size", values: ["inline", "dense", "compact", "default", "principal"] }
       ],
       visual: {
         story: "stories/primitives/IconButton.stories.tsx",

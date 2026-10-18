@@ -2679,6 +2679,7 @@
         "default",
         "dense",
         "disabled",
+        "inline",
         "loading",
         "primary",
         "principal",
@@ -2703,6 +2704,10 @@
             {
               "description": "Use dense for the size presentation.",
               "name": "dense"
+            },
+            {
+              "description": "Use inline for the size presentation.",
+              "name": "inline"
             },
             {
               "description": "Use principal for the size presentation.",
