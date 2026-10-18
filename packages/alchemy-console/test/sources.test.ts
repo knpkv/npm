@@ -1,12 +1,22 @@
 import { NodeServices } from "@effect/platform-node"
 import { expect, layer } from "@effect/vitest"
-import { Context, Effect, FileSystem, Layer, Path, Redacted, Ref } from "effect"
+import { Context, Deferred, Effect, Fiber, FileSystem, Layer, Path, Redacted, Ref } from "effect"
 import { HttpClient, HttpClientResponse } from "effect/http"
+import { TestClock } from "effect/testing"
+import * as NodeFs from "node:fs"
 import { S3ReadError } from "../src/s3-reader.js"
 import { StackSource } from "../src/server/Catalog.js"
 import { sourceLayer } from "../src/server/Sources.js"
 import { SsoCredentials } from "../src/sso-credentials.js"
+import { clockedFileSystem, type ClockedIo } from "./clockedFileSystem.js"
 import { lockedFileSystem } from "./lockedFileSystem.js"
+
+const nodeClockIo: ClockedIo = {
+  readDirectory: (directory) => NodeFs.readdirSync(directory),
+  realPath: (path) => NodeFs.realpathSync(path),
+  exists: (path) => NodeFs.existsSync(path),
+  stat: (path) => NodeFs.statSync(path)
+}
 
 class SourceFixture extends Context.Service<SourceFixture, {
   readonly requests: Ref.Ref<ReadonlyArray<string>>
@@ -73,9 +83,12 @@ layer(Layer.merge(NodeServices.layer, providers))("source composition", (it) => 
       )
       yield* fs.writeFileString(
         awsConfigFile,
-        ["fixture-expired", "fixture-reader"].map((name) =>
+        [
+          ["fixture-expired", "fixture-expired-account"],
+          ["fixture-reader", "fixture-reader-account"]
+        ].map(([name, account]) =>
           `[profile ${name}]
-sso_account_id=fixture-account
+sso_account_id=${account}
 sso_role_name=FixtureReader
 sso_region=us-east-1
 sso_start_url=https://fixture.invalid/start
@@ -99,6 +112,83 @@ region=us-east-1
       expect(JSON.stringify(state)).not.toContain(root)
       expect(JSON.stringify(state)).not.toContain("fixture-secret")
       expect(yield* Ref.get(fixture.requests)).toHaveLength(2)
+    }).pipe(Effect.scoped))
+
+  it.effect("lists one bucket once when two profile names reach the same account", () =>
+    Effect.gen(function*() {
+      const { awsConfigFile, fs, root } = yield* setup
+      const fixture = yield* SourceFixture
+      yield* Ref.set(fixture.requests, [])
+      yield* fs.writeFileString(
+        awsConfigFile,
+        ["fixture-a", "fixture-b"].map((name) =>
+          `[profile ${name}]
+sso_account_id=fixture-account
+sso_role_name=FixtureReader
+sso_region=us-east-1
+sso_start_url=https://fixture.invalid/start
+region=us-east-1
+`
+        ).join("\n")
+      )
+      const context = yield* Layer.build(sourceLayer({ root, awsConfigFile }))
+      const result = yield* Context.get(context, StackSource).discover
+      expect(result.stacks.filter((stack) => stack.summary.backend === "s3")).toHaveLength(1)
+      expect(yield* Ref.get(fixture.requests)).toHaveLength(2)
+    }).pipe(Effect.scoped))
+
+  // Same account with a different role is a different identity, so both buckets are listed.
+  it.effect("lists both roles when two profile names share an account", () =>
+    Effect.gen(function*() {
+      const { awsConfigFile, fs, root } = yield* setup
+      const fixture = yield* SourceFixture
+      yield* Ref.set(fixture.requests, [])
+      yield* fs.writeFileString(
+        awsConfigFile,
+        ["FixtureReader", "FixtureAdmin"].map((role) =>
+          `[profile fixture-${role}]
+sso_account_id=fixture-account
+sso_role_name=${role}
+sso_region=us-east-1
+sso_start_url=https://fixture.invalid/start
+region=us-east-1
+`
+        ).join("\n")
+      )
+      const context = yield* Layer.build(sourceLayer({ root, awsConfigFile }))
+      const result = yield* Context.get(context, StackSource).discover
+      expect(result.stacks.filter((stack) => stack.summary.backend === "s3")).toHaveLength(2)
+      expect(yield* Ref.get(fixture.requests)).toHaveLength(4)
+    }).pipe(Effect.scoped))
+
+  it.effect("keeps a local stack when the project walk runs out of time", () =>
+    Effect.gen(function*() {
+      const { awsConfigFile, fs, path, root } = yield* setup
+      yield* fs.writeFileString(awsConfigFile, "")
+      const project = path.join(root, "z-app")
+      const dir = path.join(project, ".alchemy", "state", "fixture-app", "preview")
+      yield* fs.makeDirectory(dir, { recursive: true })
+      yield* fs.writeFileString(path.join(project, "alchemy.run.ts"), "throw new Error('must not execute')")
+      yield* fs.writeFileString(
+        path.join(project, "bun.lock"),
+        "{\"packages\":{\"alchemy\":[\"alchemy@2.0.0-beta.77\",\"\",{},\"fixture-integrity\"]}}"
+      )
+      yield* fs.writeFileString(
+        path.join(dir, "Storage__Assets.json"),
+        yield* fs.readFileString(path.join(import.meta.dirname, "fixtures/resource.json"))
+      )
+      for (const name of ["a", "b", "c", "d", "e", "f"]) yield* fs.makeDirectory(path.join(root, name))
+      // Root, the project, then three later folders. The next one sees the 5 second budget.
+      const slow = yield* clockedFileSystem(5, nodeClockIo)
+      const context = yield* Layer.build(sourceLayer({ root, awsConfigFile })).pipe(
+        Effect.provideService(FileSystem.FileSystem, slow.fs)
+      )
+      const fiber = yield* Context.get(context, StackSource).discover.pipe(Effect.forkChild)
+      yield* Deferred.await(slow.started)
+      yield* TestClock.adjust("9 seconds")
+      const result = yield* Fiber.join(fiber)
+      expect(result.stacks.map((stack) => stack.summary.backend)).toEqual(["local"])
+      expect(result.issues).toEqual([{ source: "local", reason: "limit" }])
     }).pipe(Effect.scoped))
 
   it.effect("reports local and config failures distinctly; missing state cannot invent a stage", () =>
@@ -186,5 +276,149 @@ layer(Layer.merge(NodeServices.layer, expiringProfile))("source issue scope", (i
       expect(discovered.issues).toEqual([
         { source: "s3", reason: "authentication" }
       ])
+    }).pipe(Effect.scoped))
+})
+
+class ProfilePace extends Context.Service<ProfilePace, {
+  readonly maxInFlight: Ref.Ref<number>
+  readonly release: Deferred.Deferred<void>
+}>()("AlchemyConsole/ProfilePace") {}
+
+const bucketList = (names: ReadonlyArray<string>) =>
+  `<ListAllMyBucketsResult><Buckets>${
+    names.map((name) => `<Bucket><Name>${name}</Name><BucketRegion>eu-west-1</BucketRegion></Bucket>`).join("")
+  }</Buckets></ListAllMyBucketsResult>`
+
+const versionList =
+  `<ListVersionsResult><IsTruncated>false</IsTruncated><Version><Key>fixture-app/prod/Storage__Assets.json</Key><VersionId>fixture-version</VersionId><IsLatest>true</IsLatest></Version></ListVersionsResult>`
+
+const credentialsFor = (profile: { readonly name: string; readonly region: string }) => ({
+  accessKeyId: Redacted.make("fixture-access"),
+  secretAccessKey: Redacted.make("fixture-secret"),
+  sessionToken: Redacted.make("fixture-token"),
+  region: profile.region
+})
+
+/** Bucket listings block until released, so the test can see how many profiles run at once. */
+const pacingProviders = Layer.effectContext(Effect.gen(function*() {
+  const maxInFlight = yield* Ref.make(0)
+  const inFlight = yield* Ref.make(0)
+  const release = yield* Deferred.make<void>()
+  const client = HttpClient.make((request, url) =>
+    Effect.gen(function*() {
+      if (!url.searchParams.has("versions")) {
+        const now = yield* Ref.updateAndGet(inFlight, (count) => count + 1)
+        yield* Ref.update(maxInFlight, (max) => Math.max(max, now))
+        yield* Deferred.await(release)
+        yield* Ref.update(inFlight, (count) => count - 1)
+      }
+      return HttpClientResponse.fromWeb(
+        request,
+        new Response(url.searchParams.has("versions") ? versionList : bucketList(["fixture-alchemy-state"]))
+      )
+    })
+  )
+  return Context.make(ProfilePace, { maxInFlight, release }).pipe(
+    Context.add(HttpClient.HttpClient, client),
+    Context.add(SsoCredentials, SsoCredentials.of({ resolve: (profile) => Effect.succeed(credentialsFor(profile)) }))
+  )
+}))
+
+const profileIni = (profiles: ReadonlyArray<{ readonly name: string; readonly account: string }>) =>
+  profiles.map(({ account, name }) =>
+    `[profile ${name}]
+sso_account_id=${account}
+sso_role_name=FixtureReader
+sso_region=us-east-1
+sso_start_url=https://fixture.invalid/start
+region=us-east-1
+`
+  ).join("\n")
+
+layer(Layer.merge(NodeServices.layer, pacingProviders))("profile read pace", (it) => {
+  it.effect("reads at most three profiles at once", () =>
+    Effect.gen(function*() {
+      const { awsConfigFile, fs, root } = yield* setup
+      const pace = yield* ProfilePace
+      yield* fs.writeFileString(
+        awsConfigFile,
+        profileIni(
+          ["a", "b", "c", "d", "e", "f"].map((name) => ({
+            name: `fixture-${name}`,
+            account: `fixture-account-${name}`
+          }))
+        )
+      )
+      const context = yield* Layer.build(sourceLayer({ root, awsConfigFile }))
+      const fiber = yield* Context.get(context, StackSource).discover.pipe(Effect.forkChild)
+      yield* Effect.repeat(Effect.yieldNow, { times: 40 })
+      expect(yield* Ref.get(pace.maxInFlight)).toBe(3)
+      yield* Deferred.succeed(pace.release, undefined)
+      yield* Fiber.join(fiber)
+    }).pipe(
+      Effect.scoped,
+      Effect.ensuring(Effect.gen(function*() {
+        const pace = yield* Effect.serviceOption(ProfilePace)
+        if (pace._tag === "Some") yield* Deferred.succeed(pace.value.release, undefined).pipe(Effect.ignore)
+      }))
+    ))
+})
+
+class SlowSignIn extends Context.Service<SlowSignIn, {
+  readonly started: Deferred.Deferred<void>
+}>()("AlchemyConsole/SlowSignIn") {}
+
+/** One profile's sign-in never returns; the other account answers immediately. */
+const stalledProfile = Layer.effectContext(Effect.gen(function*() {
+  const started = yield* Deferred.make<void>()
+  const client = HttpClient.make((request, url) =>
+    Effect.succeed(
+      HttpClientResponse.fromWeb(
+        request,
+        new Response(
+          url.searchParams.has("versions") ? versionList : bucketList([
+            "fixture-alchemy-state"
+          ])
+        )
+      )
+    )
+  )
+  const credentials = SsoCredentials.of({
+    resolve: (profile) =>
+      profile.name === "a-slow" ?
+        Deferred.succeed(started, undefined).pipe(
+          Effect.andThen(Effect.sleep("30 seconds")),
+          Effect.as(credentialsFor(profile))
+        ) :
+        Effect.succeed(credentialsFor(profile))
+  })
+  return Context.make(SlowSignIn, { started }).pipe(
+    Context.add(HttpClient.HttpClient, client),
+    Context.add(SsoCredentials, credentials)
+  )
+}))
+
+layer(Layer.merge(NodeServices.layer, stalledProfile))("profile deadline", (it) => {
+  it.effect("keeps stacks from profiles that finished when one profile misses its deadline", () =>
+    Effect.gen(function*() {
+      const { awsConfigFile, fs, root } = yield* setup
+      yield* fs.writeFileString(
+        awsConfigFile,
+        profileIni([
+          { name: "a-slow", account: "fixture-slow" },
+          { name: "b-fast", account: "fixture-fast" }
+        ])
+      )
+      const stall = yield* SlowSignIn
+      const context = yield* Layer.build(sourceLayer({ root, awsConfigFile }))
+      const fiber = yield* Context.get(context, StackSource).discover.pipe(Effect.forkChild)
+      yield* Deferred.await(stall.started)
+      // The fast profile finishes without the clock. Then the slow profile misses its deadline.
+      yield* Effect.repeat(Effect.yieldNow, { times: 40 })
+      yield* TestClock.adjust("9 seconds")
+      expect(fiber.pollUnsafe()?._tag).toBe("Success")
+      const result = yield* Fiber.join(fiber)
+      expect(result.stacks.filter((stack) => stack.summary.backend === "s3")).toHaveLength(1)
+      expect(result.issues).toContainEqual({ source: "s3", reason: "provider" })
     }).pipe(Effect.scoped))
 })

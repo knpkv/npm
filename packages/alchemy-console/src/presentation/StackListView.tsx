@@ -58,6 +58,14 @@ export const issueCopy = (issue: DiscoveryIssue) => {
       hint: "Check those folders’ permissions, then Read again."
     } satisfies { readonly tone: "caution"; readonly title: string; readonly body: string; readonly hint: string }
   }
+  if (issue.reason === "limit") {
+    return {
+      tone: "caution",
+      title: "The project walk stopped early.",
+      body: "Projects already found are listed. Folders past the time or size limit were not scanned.",
+      hint: "Read again to scan from the start."
+    } satisfies { readonly tone: "caution"; readonly title: string; readonly body: string; readonly hint: string }
+  }
   return {
     tone: "caution",
     title: "Local discovery is incomplete.",

@@ -1,9 +1,9 @@
-import { Effect, FileSystem, Layer, Path } from "effect"
+import { Clock, Effect, FileSystem, Layer, Path } from "effect"
 import { HttpClient } from "effect/http"
 import { CatalogReadError, type DiscoveryIssue } from "../api.js"
 import { discoverProjects } from "../discovery.js"
 import { readLocalState } from "../local-state.js"
-import { discoverSsoProfiles } from "../profiles.js"
+import { dedupeSsoProfiles, discoverSsoProfiles, type SsoProfile } from "../profiles.js"
 import { makeS3Reader } from "../s3-live.js"
 import { S3Reader } from "../s3-reader.js"
 import { discoverS3Buckets, discoverS3Stacks, readS3State } from "../s3-state.js"
@@ -17,6 +17,19 @@ export interface SourceOptions {
   readonly awsConfigFile: string
 }
 
+interface ProfileDiscovery {
+  readonly stacks: ReadonlyArray<DiscoveredStack>
+  readonly issues: ReadonlyArray<DiscoveryIssue>
+}
+
+/** How many AWS profiles an overview reads at once, and how long one of them may take. */
+const profileReadConcurrency = 3
+const profileReadDeadline = "8 seconds"
+const missedProfileDeadline: ProfileDiscovery = {
+  stacks: [],
+  issues: [{ source: "s3", reason: "provider" }]
+}
+
 /** Reads only when the authenticated catalog is requested; each project/profile/bucket reports its own failure. */
 export const sourceLayer = (options: SourceOptions) =>
   Layer.effect(
@@ -24,10 +37,11 @@ export const sourceLayer = (options: SourceOptions) =>
     Effect.gen(function*() {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
+      const clock = yield* Clock.Clock
       // Capture the source adapter's services once; read closures need no transport/request context.
       const client = yield* HttpClient.HttpClient
       const sso = yield* SsoCredentials
-      const local = <A, E>(effect: Effect.Effect<A, E, FileSystem.FileSystem | Path.Path>) =>
+      const local = <A, E, R>(effect: Effect.Effect<A, E, FileSystem.FileSystem | Path.Path | R>) =>
         effect.pipe(
           Effect.provideService(FileSystem.FileSystem, fs),
           Effect.provideService(Path.Path, path)
@@ -40,6 +54,8 @@ export const sourceLayer = (options: SourceOptions) =>
         else {
           // Entries the walk couldn't read are reported once; the projects it did find are still read.
           if (discovered.success.unreadable > 0) issues.push({ source: "local", reason: "skipped" })
+          // A time or size stop keeps those projects and says the walk did not finish.
+          if (discovered.success.truncated) issues.push({ source: "local", reason: "limit" })
           if (discovered.success.projects.length > 1000) return yield* new CatalogReadError({ reason: "limit" })
           for (const project of discovered.success.projects) {
             const found = yield* Effect.result(
@@ -83,57 +99,82 @@ export const sourceLayer = (options: SourceOptions) =>
         if (profiles._tag === "Failure") issues.push({ source: "s3", reason: profiles.failure.reason })
         else {
           if (profiles.success.length > 100) return yield* new CatalogReadError({ reason: "limit" })
-          for (const profile of profiles.success) {
-            const reader = yield* makeS3Reader(profile).pipe(
-              Effect.provideService(HttpClient.HttpClient, client),
-              Effect.provideService(SsoCredentials, sso)
-            )
-            const buckets = yield* Effect.result(discoverS3Buckets().pipe(Effect.provideService(S3Reader, reader)))
-            if (buckets._tag === "Failure") {
-              issues.push({ source: "s3", reason: buckets.failure.reason })
-              continue
-            }
-            if (buckets.success.length > 1000) return yield* new CatalogReadError({ reason: "limit" })
-            // One issue per profile and reason: an expired profile with eight buckets is one sign-in problem.
-            const reported = new Set<string>()
-            for (const bucket of buckets.success) {
-              const found = yield* Effect.result(discoverS3Stacks(bucket).pipe(Effect.provideService(S3Reader, reader)))
-              if (found._tag === "Failure") {
-                if (!reported.has(found.failure.reason)) issues.push({ source: "s3", reason: found.failure.reason })
-                reported.add(found.failure.reason)
-              } else {
-                for (const stack of found.success) {
-                  stacks.push({
-                    key: JSON.stringify([
-                      "s3",
-                      profile.name,
-                      profile.account,
-                      bucket.name,
-                      stack.prefix,
-                      stack.app,
-                      stack.stage
-                    ]),
-                    summary: {
-                      app: stack.app,
-                      stage: stack.stage,
-                      backend: "s3",
-                      alchemyVersion: null,
-                      lastDeploy: null,
-                      resourceCount: null
-                    },
-                    read: readS3State(stack).pipe(
-                      Effect.provideService(S3Reader, reader),
-                      Effect.mapError((error) => new CatalogReadError({ reason: error.reason }))
-                    )
-                  })
+          const readProfile = (profile: SsoProfile) =>
+            Effect.gen(function*() {
+              const reader = yield* makeS3Reader(profile).pipe(
+                Effect.provideService(HttpClient.HttpClient, client),
+                Effect.provideService(SsoCredentials, sso)
+              )
+              const foundStacks: Array<DiscoveredStack> = []
+              const foundIssues: Array<DiscoveryIssue> = []
+              const buckets = yield* Effect.result(discoverS3Buckets().pipe(Effect.provideService(S3Reader, reader)))
+              if (buckets._tag === "Failure") {
+                foundIssues.push({ source: "s3", reason: buckets.failure.reason })
+                return { stacks: foundStacks, issues: foundIssues }
+              }
+              if (buckets.success.length > 1000) return yield* new CatalogReadError({ reason: "limit" })
+              // One issue per profile and reason: an expired profile with eight buckets is one sign-in problem.
+              const reported = new Set<string>()
+              for (const bucket of buckets.success) {
+                const found = yield* Effect.result(
+                  discoverS3Stacks(bucket).pipe(Effect.provideService(S3Reader, reader))
+                )
+                if (found._tag === "Failure") {
+                  if (!reported.has(found.failure.reason)) {
+                    foundIssues.push({ source: "s3", reason: found.failure.reason })
+                  }
+                  reported.add(found.failure.reason)
+                } else {
+                  for (const stack of found.success) {
+                    foundStacks.push({
+                      key: JSON.stringify([
+                        "s3",
+                        profile.name,
+                        profile.account,
+                        bucket.name,
+                        stack.prefix,
+                        stack.app,
+                        stack.stage
+                      ]),
+                      summary: {
+                        app: stack.app,
+                        stage: stack.stage,
+                        backend: "s3",
+                        alchemyVersion: null,
+                        lastDeploy: null,
+                        resourceCount: null
+                      },
+                      read: readS3State(stack).pipe(
+                        Effect.provideService(S3Reader, reader),
+                        Effect.mapError((error) => new CatalogReadError({ reason: error.reason }))
+                      )
+                    })
+                  }
+                }
+                if (foundStacks.length > 1000 || foundIssues.length > 1000) {
+                  return yield* new CatalogReadError({ reason: "limit" })
                 }
               }
-              if (stacks.length > 1000 || issues.length > 1000) return yield* new CatalogReadError({ reason: "limit" })
-            }
+              return { stacks: foundStacks, issues: foundIssues }
+            }).pipe(Effect.timeoutOrElse({
+              duration: profileReadDeadline,
+              // A profile that misses its deadline drops only the stacks it had not finished.
+              orElse: () => Effect.succeed(missedProfileDeadline)
+            }))
+          // Same account, role, start URL, session and region is one read. The earlier name wins.
+          const profileReads = yield* Effect.forEach(dedupeSsoProfiles(profiles.success), readProfile, {
+            concurrency: profileReadConcurrency
+          })
+          for (const read of profileReads) {
+            for (const issue of read.issues) issues.push(issue)
+            for (const stack of read.stacks) stacks.push(stack)
+            if (stacks.length > 1000 || issues.length > 1000) return yield* new CatalogReadError({ reason: "limit" })
           }
         }
         return { stacks, issues }
       })
-      return StackSource.of({ discover: discover() })
+      return StackSource.of({
+        discover: discover().pipe(Effect.provideService(Clock.Clock, clock))
+      })
     })
   )

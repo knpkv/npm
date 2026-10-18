@@ -22,6 +22,9 @@ export type SsoCredentialProviderFactory = typeof fromSSO
 export const ssoCredentialsLayer = (provider: SsoCredentialProviderFactory = fromSSO) =>
   Layer.succeed(SsoCredentials, {
     resolve: Effect.fn("AlchemyConsole.resolveSsoCredentials")(function*(profile: SsoProfile) {
+      // Leave ignoreCache unset. The SDK reads the SSO token from the session cache and still
+      // requests role credentials for this account and role. Setting it would skip that token cache
+      // on every call. The account and role are explicit, so a cached token cannot select another profile.
       const request: FromSSOInit & SsoCredentialsParameters = {
         profile: profile.name,
         configFilepath: profile.configFile,
@@ -29,8 +32,7 @@ export const ssoCredentialsLayer = (provider: SsoCredentialProviderFactory = fro
         ssoRoleName: profile.role,
         ssoRegion: profile.ssoRegion,
         ssoStartUrl: profile.startUrl,
-        clientConfig: { region: profile.ssoRegion },
-        ignoreCache: true
+        clientConfig: { region: profile.ssoRegion }
       }
       if (profile.session !== null) request.ssoSession = profile.session
       const raw = yield* Effect.tryPromise({

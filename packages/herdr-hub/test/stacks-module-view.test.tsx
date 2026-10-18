@@ -237,6 +237,20 @@ describe("Stacks module pages", { concurrent: false }, () => {
     expect(text()).not.toContain("some project folders")
   })
 
+  it("says a capped local walk stopped early and kept what it found", async () => {
+    await render(
+      reads({
+        overview: Effect.succeed({
+          _tag: "Ready",
+          list: { ...overviewList, issues: [{ source: "local", reason: "limit" }] }
+        })
+      }),
+      "overview"
+    )
+    expect(text()).toContain("The project walk stopped early, so projects already found are listed.")
+    expect(text()).not.toContain("read failed (limit)")
+  })
+
   it("says why stacks aren't available on this hub, naming the setting", async () => {
     await render(
       reads({ overview: Effect.succeed({ _tag: "Unavailable", reason: "not_configured", host: null }) }),

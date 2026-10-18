@@ -8,8 +8,15 @@ import type {
   StackSummary
 } from "@knpkv/alchemy-console/host"
 
-export type StacksState = "overview" | "partial" | "empty" | "unavailable" | "loading"
-export const stacksStates: ReadonlyArray<StacksState> = ["overview", "partial", "empty", "unavailable", "loading"]
+export type StacksState = "overview" | "partial" | "limit" | "empty" | "unavailable" | "loading"
+export const stacksStates: ReadonlyArray<StacksState> = [
+  "overview",
+  "partial",
+  "limit",
+  "empty",
+  "unavailable",
+  "loading"
+]
 
 /** A host where some project folders and most AWS profiles couldn't be read. */
 const partialIssues: StacksOverviewReady["list"]["issues"] = [
@@ -47,7 +54,14 @@ export const stacksOverviewFixture = (state: StacksState): StacksOverviewResult 
     ? { _tag: "Unavailable", reason: "not_configured", host: null }
     : {
       _tag: "Ready",
-      list: { stacks: state === "empty" ? [] : stacks, issues: state === "partial" ? partialIssues : [] }
+      list: {
+        stacks: state === "empty" ? [] : stacks,
+        issues: state === "partial"
+          ? partialIssues
+          : state === "limit"
+          ? [{ source: "local", reason: "limit" }]
+          : []
+      }
     }
 type StacksOverviewReady = Extract<StacksOverviewResult, { readonly _tag: "Ready" }>
 
