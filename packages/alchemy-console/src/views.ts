@@ -7,6 +7,7 @@ export type {
   StackPresentation,
   StackTab
 } from "./presentation/detail-model.js"
+export { PlanIdCopy } from "./presentation/PlanIdCopy.js"
 export { PlanView } from "./presentation/PlanView.js"
 export type { PlanViewProps } from "./presentation/PlanView.js"
 export { ResourceDetailView } from "./presentation/ResourceDetailView.js"

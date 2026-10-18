@@ -45,3 +45,22 @@ it("base freshness names the CI-observed mismatch without claiming ancestry or t
     expect(otherHtml).not.toContain("latest main commit CI has seen")
   }
 })
+
+const visibleText = (html: string): string => html.replace(/<[^>]*>/g, "")
+
+it("names head, base and digest on copy buttons, not in the visible plan line", () => {
+  const fixture = planFixtures.find((entry) => entry.name === "7a")
+  if (fixture === undefined || fixture.state._tag !== "Ready") throw new TypeError("ready fixture missing")
+  const html = renderToStaticMarkup(createElement(PlanView, { state: fixture.state, onReadAgain: () => undefined }))
+  const text = visibleText(html)
+  expect(text).toContain("published 14:05 today")
+  expect(text).toContain("Head")
+  expect(text).toContain("Base")
+  expect(text).toContain("Digest")
+  expect(text).not.toMatch(/\b[0-9a-f]{7}\b/u)
+  expect(text).not.toContain("9be1…c04a")
+  expect(html).toContain("aria-label=\"Copy head 3f9c2e1\"")
+  expect(html).toContain("aria-label=\"Copy base 8a41d07\"")
+  expect(html).toContain("aria-label=\"Copy digest 9be1…c04a\"")
+  expect(html).toContain("<button")
+})

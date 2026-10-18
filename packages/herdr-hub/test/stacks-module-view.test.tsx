@@ -256,9 +256,10 @@ describe("Stacks module pages", { concurrent: false }, () => {
     expect(activity?.textContent).toContain("Not checked yet")
     expect(activity?.textContent).toContain("No changes")
     expect(activity?.textContent).toContain("12:15 UTC, today")
-    // Hashes tell people nothing: the commit is only in the tooltip.
+    expect(activity?.textContent).toContain("Head")
+    // The short id is the copy button's name, not visible text.
     expect(activity?.textContent).not.toMatch(/\b[0-9a-f]{7}\b/u)
-    expect(activity?.querySelector("[title*='a1b2c3d']")).not.toBeNull()
+    expect(activity?.querySelector("button[aria-label='Copy head a1b2c3d']")).not.toBeNull()
     expect(document.querySelector(".ac-resource-name")?.tagName).toBe("SPAN")
     expect(activity?.querySelector("a")?.getAttribute("href")).toBe("https://github.com/knpkv/infra/actions/runs/101")
     expect([...document.querySelectorAll("[role='tab']")].map(({ textContent }) => textContent)).toEqual([
@@ -279,15 +280,98 @@ describe("Stacks module pages", { concurrent: false }, () => {
     expect(text()).toContain("Reload this page to sign in again.")
   })
 
-  it("names the plan's commit only in a tooltip on the Plan tab", async () => {
+  it("copies the activity head without showing the id", async () => {
+    const writeText = vi.fn(() => Promise.resolve())
+    const prior = Object.getOwnPropertyDescriptor(navigator, "clipboard")
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } })
+    try {
+      await render(reads(), "stack", `id=${org}`)
+      const activity = document.querySelector("[aria-label='Activity']")
+      expect(activity?.textContent).toContain("Head")
+      expect(activity?.textContent).toContain("12:15 UTC, today")
+      expect(activity?.textContent).not.toMatch(/\b[0-9a-f]{7}\b/u)
+      const button = activity?.querySelector<HTMLButtonElement>("button[aria-label='Copy head a1b2c3d']")
+      expect(button).not.toBeNull()
+      expect(button?.getAttribute("tabindex")).not.toBe("-1")
+      await act(async () => button?.click())
+      expect(writeText).toHaveBeenCalledWith("a1b2c3d")
+    } finally {
+      if (prior === undefined) {
+        Object.defineProperty(navigator, "clipboard", { configurable: true, value: undefined })
+      } else Object.defineProperty(navigator, "clipboard", prior)
+    }
+  })
+
+  it("says when the activity head cannot be copied", async () => {
+    const prior = Object.getOwnPropertyDescriptor(navigator, "clipboard")
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: undefined })
+    try {
+      await render(reads(), "stack", `id=${org}`)
+      const activity = document.querySelector("[aria-label='Activity']")
+      const button = activity?.querySelector<HTMLButtonElement>("button[aria-label='Copy head a1b2c3d']")
+      await act(async () => button?.click())
+      expect(activity?.querySelector("[role='alert']")?.textContent).toBe("Couldn’t copy the head")
+      expect(activity?.textContent).not.toMatch(/\b[0-9a-f]{7}\b/u)
+    } finally {
+      if (prior === undefined) {
+        Object.defineProperty(navigator, "clipboard", { configurable: true, value: undefined })
+      } else Object.defineProperty(navigator, "clipboard", prior)
+    }
+  })
+
+  it("copies head, base and digest from the plan line without showing them", async () => {
+    const writeText = vi.fn(() => Promise.resolve())
+    const prior = Object.getOwnPropertyDescriptor(navigator, "clipboard")
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } })
+    try {
+      if (published._tag !== "Ready") throw new Error("fixture")
+      const plan: PlanState = {
+        _tag: "Ready",
+        plan: {
+          ...published.plan,
+          source: { ...published.plan.source, base: "b4b5b6b" }
+        }
+      }
+      await render(reads({ plan: () => Effect.succeed({ _tag: "Ready", plan }) }), "stack", `id=${org}&view=plan`)
+      const panel = document.querySelector("[aria-label='Latest CI plan']")
+      const text = panel?.textContent ?? ""
+      expect(text).toContain("Head")
+      expect(text).toContain("Base")
+      expect(text).toContain("Digest")
+      expect(text).toContain("published")
+      expect(text).not.toMatch(/\b[0-9a-f]{7}\b/u)
+      expect(text).not.toContain("ab12…cd34")
+      expect(text).not.toContain("·")
+      const copies: ReadonlyArray<readonly [string, string]> = [
+        ["Copy head a1b2c3d", "a1b2c3d"],
+        ["Copy base b4b5b6b", "b4b5b6b"],
+        ["Copy digest ab12…cd34", "ab12…cd34"]
+      ]
+      for (const [name, value] of copies) {
+        const button = panel?.querySelector<HTMLButtonElement>(`button[aria-label='${name}']`)
+        expect(button).not.toBeNull()
+        expect(button?.getAttribute("tabindex")).not.toBe("-1")
+        await act(async () => button?.click())
+        expect(writeText).toHaveBeenCalledWith(value)
+      }
+    } finally {
+      if (prior === undefined) {
+        Object.defineProperty(navigator, "clipboard", { configurable: true, value: undefined })
+      } else Object.defineProperty(navigator, "clipboard", prior)
+    }
+  })
+
+  it("names the plan head and digest on copy buttons on the Plan tab", async () => {
     await render(reads(), "stack", `id=${org}&view=plan`)
     const panel = document.querySelector("[aria-label='Latest CI plan']")
     expect(panel?.textContent).toContain("published")
+    expect(panel?.textContent).toContain("Head")
+    expect(panel?.textContent).toContain("Digest")
     expect(panel?.textContent).not.toMatch(/\b[0-9a-f]{7}\b/u)
-    expect(panel?.querySelector("[title*='a1b2c3d']")).not.toBeNull()
-    // Opaque ids (the plan digest too) live in the tooltip; Relay copy uses commas, never middots.
+    expect(panel?.querySelector("button[aria-label='Copy head a1b2c3d']")).not.toBeNull()
+    // The digest is a copy button too. Relay copy uses commas, never middots.
     expect(panel?.textContent).not.toContain("ab12…cd34")
-    expect(panel?.querySelector("[title*='ab12…cd34']")).not.toBeNull()
+    expect(panel?.querySelector("button[aria-label='Copy digest ab12…cd34']")).not.toBeNull()
     expect(document.querySelector(".stacks-page")?.textContent).not.toContain("·")
   })
 
