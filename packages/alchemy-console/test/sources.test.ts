@@ -189,7 +189,7 @@ region=us-east-1
       yield* TestClock.adjust("9 seconds")
       const result = yield* Fiber.join(fiber)
       expect(result.stacks.map((stack) => stack.summary.backend)).toEqual(["local"])
-      expect(result.issues).toEqual([{ source: "local", reason: "limit" }])
+      expect(result.issues).toEqual([{ source: "local", reason: "truncated" }])
     }).pipe(Effect.scoped))
 
   it.effect("reports local and config failures distinctly; missing state cannot invent a stage", () =>

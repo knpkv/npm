@@ -58,7 +58,7 @@ export const issueCopy = (issue: DiscoveryIssue) => {
       hint: "Check those folders’ permissions, then Read again."
     } satisfies { readonly tone: "caution"; readonly title: string; readonly body: string; readonly hint: string }
   }
-  if (issue.reason === "limit") {
+  if (issue.reason === "truncated") {
     return {
       tone: "caution",
       title: "The project walk stopped early.",

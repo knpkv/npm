@@ -9,10 +9,17 @@ describe("discovery issue copy", () => {
     expect(issueCopy({ source: "local", reason: "io" }).body).toContain("state file")
   })
 
-  it("says a capped walk stopped early and kept the projects it found", () => {
+  it("says a state file size limit is an incomplete local read", () => {
     const limit = issueCopy({ source: "local", reason: "limit" })
-    expect(limit.title).toBe("The project walk stopped early.")
-    expect(limit.body).toContain("already found")
-    expect(limit.body).not.toContain("state file")
+    expect(limit.title).toBe("Local discovery is incomplete.")
+    expect(limit.body).toContain("state file")
+    expect(limit.body).not.toContain("already found")
+  })
+
+  it("says a stopped walk kept the projects already found", () => {
+    const truncated = issueCopy({ source: "local", reason: "truncated" })
+    expect(truncated.title).toBe("The project walk stopped early.")
+    expect(truncated.body).toContain("already found")
+    expect(truncated.body).not.toContain("state file")
   })
 })

@@ -242,13 +242,27 @@ describe("Stacks module pages", { concurrent: false }, () => {
       reads({
         overview: Effect.succeed({
           _tag: "Ready",
-          list: { ...overviewList, issues: [{ source: "local", reason: "limit" }] }
+          list: { ...overviewList, issues: [{ source: "local", reason: "truncated" }] }
         })
       }),
       "overview"
     )
     expect(text()).toContain("The project walk stopped early, so projects already found are listed.")
-    expect(text()).not.toContain("read failed (limit)")
+    expect(text()).not.toContain("read failed (truncated)")
+  })
+
+  it("does not use the stopped-walk sentence for a local state limit", async () => {
+    await render(
+      reads({
+        overview: Effect.succeed({
+          _tag: "Ready",
+          list: { ...overviewList, issues: [{ source: "local", reason: "limit" }] }
+        })
+      }),
+      "overview"
+    )
+    expect(text()).not.toContain("project walk stopped early")
+    expect(text()).toContain("local read failed (limit)")
   })
 
   it("says why stacks aren't available on this hub, naming the setting", async () => {

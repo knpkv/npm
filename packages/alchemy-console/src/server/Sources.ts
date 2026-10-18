@@ -59,7 +59,7 @@ export const sourceLayer = (options: SourceOptions) =>
           // Entries the walk couldn't read are reported once; the projects it did find are still read.
           if (discovered.success.unreadable > 0) issues.push({ source: "local", reason: "skipped" })
           // A time or size stop keeps those projects and says the walk did not finish.
-          if (discovered.success.truncated) issues.push({ source: "local", reason: "limit" })
+          if (discovered.success.truncated) issues.push({ source: "local", reason: "truncated" })
           if (discovered.success.projects.length > 1000) return yield* new CatalogReadError({ reason: "limit" })
           for (const project of discovered.success.projects) {
             const found = yield* Effect.result(

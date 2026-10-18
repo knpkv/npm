@@ -59,7 +59,7 @@ export const stacksOverviewFixture = (state: StacksState): StacksOverviewResult 
         issues: state === "partial"
           ? partialIssues
           : state === "limit"
-          ? [{ source: "local", reason: "limit" }]
+          ? [{ source: "local", reason: "truncated" }]
           : []
       }
     }
