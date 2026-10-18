@@ -281,7 +281,9 @@ layer(Layer.merge(NodeServices.layer, expiringProfile))("source issue scope", (i
 })
 
 class ProfilePace extends Context.Service<ProfilePace, {
+  readonly inFlight: Ref.Ref<number>
   readonly maxInFlight: Ref.Ref<number>
+  readonly started: Deferred.Deferred<void>
   readonly release: Deferred.Deferred<void>
 }>()("AlchemyConsole/ProfilePace") {}
 
@@ -300,16 +302,18 @@ const credentialsFor = (profile: { readonly name: string; readonly region: strin
   region: profile.region
 })
 
-/** Bucket listings block until released, so the test can see how many profiles run at once. */
+/** Bucket listings hold their profile slot until `release`. `started` opens once three are inside. */
 const pacingProviders = Layer.effectContext(Effect.gen(function*() {
   const maxInFlight = yield* Ref.make(0)
   const inFlight = yield* Ref.make(0)
+  const started = yield* Deferred.make<void>()
   const release = yield* Deferred.make<void>()
   const client = HttpClient.make((request, url) =>
     Effect.gen(function*() {
       if (!url.searchParams.has("versions")) {
         const now = yield* Ref.updateAndGet(inFlight, (count) => count + 1)
-        yield* Ref.update(maxInFlight, (max) => Math.max(max, now))
+        const opened = yield* Ref.modify(maxInFlight, (max) => [max < 3 && now >= 3, Math.max(max, now)])
+        if (opened) yield* Deferred.succeed(started, undefined)
         yield* Deferred.await(release)
         yield* Ref.update(inFlight, (count) => count - 1)
       }
@@ -319,7 +323,7 @@ const pacingProviders = Layer.effectContext(Effect.gen(function*() {
       )
     })
   )
-  return Context.make(ProfilePace, { maxInFlight, release }).pipe(
+  return Context.make(ProfilePace, { inFlight, maxInFlight, started, release }).pipe(
     Context.add(HttpClient.HttpClient, client),
     Context.add(SsoCredentials, SsoCredentials.of({ resolve: (profile) => Effect.succeed(credentialsFor(profile)) }))
   )
@@ -352,10 +356,13 @@ layer(Layer.merge(NodeServices.layer, pacingProviders))("profile read pace", (it
       )
       const context = yield* Layer.build(sourceLayer({ root, awsConfigFile }))
       const fiber = yield* Context.get(context, StackSource).discover.pipe(Effect.forkChild)
-      yield* Effect.repeat(Effect.yieldNow, { times: 40 })
+      // Wait until three listings are inside. Sampling earlier reads 0 on a slow runner.
+      yield* Deferred.await(pace.started)
+      expect(yield* Ref.get(pace.inFlight)).toBe(3)
       expect(yield* Ref.get(pace.maxInFlight)).toBe(3)
       yield* Deferred.succeed(pace.release, undefined)
       yield* Fiber.join(fiber)
+      expect(yield* Ref.get(pace.maxInFlight)).toBe(3)
     }).pipe(
       Effect.scoped,
       Effect.ensuring(Effect.gen(function*() {
