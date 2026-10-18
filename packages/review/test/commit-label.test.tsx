@@ -219,14 +219,57 @@ describe("useCommitSummaries across loaders and failures", () => {
 })
 
 describe("copying a commit id", () => {
+  afterEach(() => vi.useRealTimers())
+
+  const live = (view: HTMLElement): string => view.querySelector("[aria-live='polite']")?.textContent ?? ""
+  const glyph = (view: HTMLElement): string => view.querySelector("button svg")?.getAttribute("class") ?? ""
+
   it("says so when the browser refuses the copy", async () => {
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
       value: { writeText: () => Promise.reject(new TypeError("denied")) }
     })
     const view = render({ _tag: "Ready", title: "Restore the draft on reconnect", committedAt: now })
-    expect(view.querySelector("[role='status'], [role='alert']")).toBeNull()
+    expect(view.querySelector("[role='alert']")).toBeNull()
+    expect(live(view)).toBe("")
     await act(async () => view.querySelector<HTMLButtonElement>("button[aria-label='Copy commit id']")?.click())
     expect(view.querySelector("[role='alert']")?.textContent).toBe("Couldn’t copy the commit id")
+    expect(live(view)).toBe("")
+    expect(glyph(view)).toContain("lucide-copy")
+    expect(glyph(view)).not.toContain("lucide-check")
+  })
+
+  it("says Copied in a polite region, then clears it", async () => {
+    vi.useFakeTimers()
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: () => Promise.resolve() }
+    })
+    const view = render({ _tag: "Ready", title: "Restore the draft on reconnect", committedAt: now })
+    const box = view.querySelector("button")?.className
+    expect(glyph(view)).toContain("lucide-copy")
+    await act(async () => view.querySelector<HTMLButtonElement>("button[aria-label='Copy commit id']")?.click())
+    const region = view.querySelector("[aria-live='polite']")
+    expect(region?.getAttribute("role")).not.toBe("alert")
+    expect(region?.textContent).toBe("Copied")
+    expect(region?.textContent).not.toContain(fullId)
+    expect(view.querySelector("[role='alert']")).toBeNull()
+    expect(glyph(view)).toContain("lucide-check")
+    expect(view.querySelector("button")?.className).toBe(box)
+    expect(view.querySelector("button")?.getAttribute("aria-label")).toBe("Copy commit id")
+    await act(async () => vi.advanceTimersByTime(1999))
+    expect(live(view)).toBe("Copied")
+    await act(async () => vi.advanceTimersByTime(1))
+    expect(live(view)).toBe("")
+    expect(glyph(view)).toContain("lucide-copy")
+    await act(async () => view.querySelector<HTMLButtonElement>("button[aria-label='Copy commit id']")?.click())
+    await act(async () => vi.advanceTimersByTime(1500))
+    await act(async () => view.querySelector<HTMLButtonElement>("button[aria-label='Copy commit id']")?.click())
+    await act(async () => vi.advanceTimersByTime(1999))
+    expect(live(view)).toBe("Copied")
+    expect(glyph(view)).toContain("lucide-check")
+    await act(async () => vi.advanceTimersByTime(1))
+    expect(live(view)).toBe("")
+    expect(glyph(view)).toContain("lucide-copy")
   })
 })

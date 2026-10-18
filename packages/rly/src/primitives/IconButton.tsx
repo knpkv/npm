@@ -23,6 +23,11 @@ export const RLY_ICON_BUTTON_VARIANTS = defineVariants({
     }
   },
   size: {
+    inline: {
+      className: style("inline"),
+      purpose: "Icon action inside running text",
+      tokens: ["control-height-inline"]
+    },
     dense: {
       className: style("dense"),
       purpose: "Tool-density icon target; the default",
@@ -71,9 +76,14 @@ export const IconButton = ({
       className
     )}
     data-loading={loading ? "true" : undefined}
+    data-rly-hit-area={size === "inline" ? "" : undefined}
     disabled={disabled || loading}
     type={type ?? "button"}
   >
-    <Icon decorative name={loading ? "loader" : icon} size={size === "compact" ? "small" : "default"} />
+    <Icon
+      decorative
+      name={loading ? "loader" : icon}
+      size={size === "compact" || size === "inline" ? "small" : "default"}
+    />
   </button>
 )

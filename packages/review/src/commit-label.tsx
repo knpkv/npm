@@ -109,13 +109,39 @@ export const CommitLabel = ({
   useEffect(() => request?.(commit), [request, commit])
   const reading = source.read(commit)
   const [title, time] = labelWords(reading, source.now, source.timeZone)
+  const [copied, setCopied] = useState(false)
   const [copyFailed, setCopyFailed] = useState(false)
-  const copyId = () => {
+  const copiedTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  useEffect(
+    () => () => {
+      if (copiedTimer.current !== undefined) clearTimeout(copiedTimer.current)
+    },
+    []
+  )
+  const stopCopied = () => {
+    if (copiedTimer.current !== undefined) clearTimeout(copiedTimer.current)
+    copiedTimer.current = undefined
+  }
+  const showCopied = () => {
+    stopCopied()
     setCopyFailed(false)
+    setCopied(true)
+    // Polite text has to leave, or the next success is the same string and is not announced.
+    copiedTimer.current = setTimeout(() => {
+      copiedTimer.current = undefined
+      setCopied(false)
+    }, 2000)
+  }
+  const showFailed = () => {
+    stopCopied()
+    setCopied(false)
+    setCopyFailed(true)
+  }
+  const copyId = () => {
     // Older or locked-down browsers have no clipboard; say so rather than doing nothing.
     const written = navigator.clipboard?.writeText(commit)
-    if (written === undefined) setCopyFailed(true)
-    else written.catch(() => setCopyFailed(true))
+    if (written === undefined) showFailed()
+    else written.then(showCopied, showFailed)
   }
   return (
     <span className={["rv-commit", className].filter(Boolean).join(" ")} data-commit-label="">
@@ -132,16 +158,21 @@ export const CommitLabel = ({
       {copy ? (
         <IconButton
           className="rv-commit-copy"
-          icon="copy"
+          icon={copied ? "check" : "copy"}
           label="Copy commit id"
           onClick={copyId}
-          size="compact"
+          size="inline"
           title="Copy commit id"
           variant="quiet"
         />
       ) : null}
+      {copy ? (
+        <span aria-live="polite" className="rv-commit-status">
+          {copied ? "Copied" : ""}
+        </span>
+      ) : null}
       {copy && copyFailed ? (
-        // Inserted only on failure: an alert announces when it appears, and the page keeps its one status region.
+        // Inserted only on failure: an alert announces when it appears.
         <span className="rv-commit-status" role="alert">
           Couldn’t copy the commit id
         </span>

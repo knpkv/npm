@@ -61,4 +61,13 @@ describe("IconButton", () => {
   it("rejects blank accessible labels", () => {
     expect(() => renderToStaticMarkup(<IconButton icon="menu" label=" " />)).toThrow("visible text")
   })
+
+  it("sizes an inline action to the 28px control and a 16px icon", () => {
+    const inline = RLY_ICON_BUTTON_VARIANTS.size.inline
+    expect(inline.tokens).toEqual(["control-height-inline"])
+    const button = render(<IconButton icon="copy" label="Copy digest" size="inline" />)
+    expect(button?.className).toContain(inline.className)
+    expect(button?.getAttribute("data-rly-hit-area")).toBe("")
+    expect(button?.querySelector("svg")?.getAttribute("width")).toBe("16")
+  })
 })

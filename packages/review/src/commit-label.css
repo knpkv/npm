@@ -21,22 +21,13 @@
   text-overflow: ellipsis;
 }
 
-/* The design draws the copy button at 28px inside running text; its target stays 44px through ::after. */
+/* Layout only. The 28px box and the 44px hit area belong to IconButton size inline. */
 .rv-commit-copy {
   position: relative;
   flex: none;
-  inline-size: 28px;
-  block-size: 28px;
 }
 
-/* A 44px target around the compact button without changing the line it sits in. */
-.rv-commit-copy::after {
-  content: "";
-  position: absolute;
-  inset: min(0px, calc((100% - 44px) / 2));
-}
-
-/* A refused copy, announced without taking space in the line. */
+/* A copy result, announced without taking space in the line. Success is polite and clears. Failure is an alert. */
 .rv-commit-status {
   position: absolute;
   inline-size: 1px;

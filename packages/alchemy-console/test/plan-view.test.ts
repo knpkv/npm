@@ -63,4 +63,5 @@ it("names head, base and digest on copy buttons, not in the visible plan line", 
   expect(html).toContain("aria-label=\"Copy base 8a41d07\"")
   expect(html).toContain("aria-label=\"Copy digest 9be1…c04a\"")
   expect(html).toContain("<button")
+  expect(html).toContain("data-rly-hit-area=\"\"")
 })

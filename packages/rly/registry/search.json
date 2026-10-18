@@ -734,6 +734,7 @@
         "dense",
         "disabled",
         "iconbutton",
+        "inline",
         "loading",
         "primary",
         "primitive",

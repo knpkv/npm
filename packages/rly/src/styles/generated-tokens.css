@@ -62,6 +62,7 @@
     --rly-radius-group: 20px;
     --rly-radius-overlay: 28px;
     --rly-radius-round: 999px;
+    --rly-control-height-inline: 28px;
     --rly-control-height-dense: 32px;
     --rly-control-height-compact: 40px;
     --rly-control-height-default: 48px;
@@ -220,6 +221,7 @@
 
   @media (pointer: coarse) {
     :root {
+    --rly-control-height-inline: 28px;
     --rly-control-height-dense: 44px;
     --rly-control-height-compact: 44px;
     --rly-control-height-default: 48px;
