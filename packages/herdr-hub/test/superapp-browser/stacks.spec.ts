@@ -39,9 +39,10 @@ for (const shot of pages) {
         document.documentElement.scrollWidth - document.documentElement.clientWidth
       )
       expect(overflow).toBeLessThanOrEqual(0)
-      // Commit hashes stay in tooltips; no visible text carries one.
+      // Short ids stay off the visible text. Head, base and digest are words; the id is on the copy button.
       const visible = await page.locator(".stacks-page").innerText()
       expect(visible).not.toMatch(/\b[0-9a-f]{7}\b/u)
+      expect(visible).not.toContain("ab12…cd34")
       // Relay copy separates with commas, never middots.
       expect(visible).not.toContain("·")
       const actions = await page.locator(".stacks-page button").allTextContents()

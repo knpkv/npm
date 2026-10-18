@@ -1,6 +1,6 @@
 /**
  * Stacks pages, Hub-native: the host's alchemy stacks in one table, and one stack's activity and state.
- * Read-only: the only actions are links to the CI run that published a plan. @module
+ * Read-only: the actions are the CI run link and copying a plan id. @module
  */
 import type {
   PlanState,
@@ -12,7 +12,13 @@ import type {
   StacksUnavailable
 } from "@knpkv/alchemy-console/host"
 import { StackId as StackIdSchema } from "@knpkv/alchemy-console/host"
-import { PlanView, StackOutputsView, StackResourcesView, StackStateTree } from "@knpkv/alchemy-console/views"
+import {
+  PlanIdCopy,
+  PlanView,
+  StackOutputsView,
+  StackResourcesView,
+  StackStateTree
+} from "@knpkv/alchemy-console/views"
 import { Icon, type RlyIconName } from "@knpkv/rly/foundations"
 import { Notice, Skeleton, Tabs } from "@knpkv/rly/primitives"
 import { Cause, Effect, Exit, Result, Schema } from "effect"
@@ -524,10 +530,10 @@ const Activity = ({ plan }: { readonly plan: PlanState | null }): ReactElement =
         <div>
           <dt>Last plan</dt>
           <dd className="stacks-status">{planChange(plan)}</dd>
-          {/* Commit hashes tell people nothing; the commit stays in the tooltip. */}
           {when === null || plan?._tag !== "Ready" ? null : (
-            <dd className="stacks-when" title={`Commit ${plan.plan.source.head}`}>
+            <dd className="stacks-when">
               {when}
+              <PlanIdCopy id={plan.plan.source.head} kind="head" />
             </dd>
           )}
           {plan?._tag === "Ready" ? (

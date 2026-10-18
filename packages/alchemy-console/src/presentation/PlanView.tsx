@@ -2,6 +2,7 @@ import { Button, Skeleton, StateLabel, Text } from "@knpkv/rly/primitives"
 import { DateTime, Option, Schema } from "effect"
 import { useId, type ReactElement } from "react"
 import type { PlanSource, PlanState, PublishedPlan } from "../plan.js"
+import { PlanIdCopy } from "./PlanIdCopy.js"
 
 export interface PlanViewProps {
   readonly state: PlanState
@@ -46,20 +47,13 @@ const SourceLine = ({
   readonly expired?: boolean
   readonly showBase?: boolean
 }): ReactElement => (
-  // Commit hashes and digests tell people nothing; they stay in the tooltip for whoever needs to match a run.
+  // No commit-summary loader here, so the ids stay off the text. Each copy button names and copies one.
   <p className="ac-plan-source">
     {source.pr === null ? null : <span>PR #{source.pr},</span>}
-    <span
-      title={[
-        `Head ${source.head}`,
-        showBase && source.base !== null ? `base ${source.base}` : null,
-        digest === null ? null : `digest ${digest}`
-      ]
-        .filter((part) => part !== null)
-        .join(", ")}
-    >
-      published {publishedLabel(source, expired)}
-    </span>
+    <span>published {publishedLabel(source, expired)}</span>
+    <PlanIdCopy id={source.head} kind="head" />
+    {showBase && source.base !== null ? <PlanIdCopy id={source.base} kind="base" /> : null}
+    {digest === null ? null : <PlanIdCopy id={digest} kind="digest" />}
   </p>
 )
 const MobileLabel = ({ children }: { readonly children: string }): ReactElement => (

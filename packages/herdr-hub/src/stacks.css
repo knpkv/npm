@@ -230,8 +230,12 @@
   }
 
   .stacks-when {
-    grid-area: when;
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
     font-size: 0.875rem;
+    gap: var(--rly-space-4) var(--rly-space-8);
+    grid-area: when;
   }
 
   .stacks-run {

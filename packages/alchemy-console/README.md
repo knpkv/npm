@@ -179,7 +179,7 @@ synthetic fixtures.
 
 ## Browser views
 
-Import `StackListView`, `StackDetailView`, `PlanView` and `ResourceDetailView` from `@knpkv/alchemy-console/views` and its stylesheet from
+Import `StackListView`, `StackDetailView`, `PlanView`, `PlanIdCopy` and `ResourceDetailView` from `@knpkv/alchemy-console/views` and its stylesheet from
 `@knpkv/alchemy-console/views/style.css`. Mount them inside a Rly style/theme boundary.
 Views consumers supply the optional React, React DOM and Rly peers; the standalone
 browser shell already bundles them.
@@ -189,7 +189,10 @@ optional `stackHref`; without a destination, stages and counts remain text.
 `StackDetailView` has controlled Resources/Outputs/State/Plan tabs and `resourceHref`. Supply
 `planState` and `onReadPlanAgain` for CI reading; without `planState`, Plan shows
 Not connected. `PlanView` accepts the same controlled state and a read-only
-`onReadAgain` callback.
+`onReadAgain` callback. A published plan shows the words Head, Base and Digest.
+Each short id is that copy button's accessible name and clipboard value, not
+visible text. These surfaces have no commit-summary loader, so the words are
+not commit titles.
 `ResourceDetailView` accepts `stackHref` and `resourceHref`. Views fetch nothing,
 read no configuration and persist no data. The standalone detail wrapper adds
 breadcrumbs and Read again outside the referenced module content. Phone list

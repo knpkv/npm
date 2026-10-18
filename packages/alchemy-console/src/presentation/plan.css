@@ -82,12 +82,38 @@
   min-inline-size: 0;
 }
 .ac-plan-source {
+  align-items: center;
   color: var(--rly-color-text-1);
   display: flex;
   flex-wrap: wrap;
   font: 430 0.8125rem/1.6 var(--rly-font-mono);
-  gap: 0 0.4rem;
+  gap: var(--rly-space-4) var(--rly-space-8);
   min-inline-size: 0;
+}
+.ac-id {
+  align-items: center;
+  display: inline-flex;
+  gap: var(--rly-space-4);
+  position: relative;
+  white-space: nowrap;
+}
+.ac-id-copy {
+  flex: none;
+  position: relative;
+}
+/* A 44px target around the compact button without changing the line it sits in. */
+.ac-id-copy::after {
+  content: "";
+  inset: min(0px, calc((100% - 44px) / 2));
+  position: absolute;
+}
+.ac-id-status {
+  block-size: 1px;
+  clip-path: inset(50%);
+  inline-size: 1px;
+  overflow: clip;
+  position: absolute;
+  white-space: nowrap;
 }
 .ac-plan-source span {
   white-space: nowrap;
