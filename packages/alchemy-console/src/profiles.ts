@@ -80,3 +80,26 @@ export const discoverSsoProfiles = Effect.fn("AlchemyConsole.discoverSsoProfiles
   }
   return profiles.sort((a, b) => a.name.localeCompare(b.name))
 })
+
+/**
+ * One read per account, role, start URL, session and region. A second profile name for that same
+ * identity is dropped. Input order is kept, so the earliest name wins when the list is already sorted.
+ */
+export const dedupeSsoProfiles = (profiles: ReadonlyArray<SsoProfile>): ReadonlyArray<SsoProfile> => {
+  const seen = new Set<string>()
+  const unique: Array<SsoProfile> = []
+  for (const profile of profiles) {
+    const key = JSON.stringify([
+      profile.account,
+      profile.role,
+      profile.startUrl,
+      profile.session,
+      profile.ssoRegion,
+      profile.region
+    ])
+    if (seen.has(key)) continue
+    seen.add(key)
+    unique.push(profile)
+  }
+  return unique
+}

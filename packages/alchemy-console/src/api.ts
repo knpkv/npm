@@ -26,10 +26,13 @@ export const SourceFailureReason = Schema.Literals([
   "invalid-source"
 ])
 
-/** `skipped`: the local walk passed over entries it couldn't read and still read the rest. */
+/**
+ * `skipped`: the walk passed over entries it couldn't read and still read the rest.
+ * `truncated`: the walk stopped early and kept the projects already found.
+ */
 export const DiscoveryIssue = Schema.Struct({
   source: Schema.Literals(["local", "s3"]),
-  reason: Schema.Union([SourceFailureReason, Schema.Literal("skipped")])
+  reason: Schema.Union([SourceFailureReason, Schema.Literals(["skipped", "truncated"])])
 })
 export type DiscoveryIssue = typeof DiscoveryIssue.Type
 
