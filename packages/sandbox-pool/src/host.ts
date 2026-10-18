@@ -23,18 +23,31 @@ export const sweepIsStale = (asOf: number | null, nowMillis: number): boolean =>
   asOf === null || nowMillis - asOf > sweepStaleAfterMillis
 
 const arnPattern = /arn:[a-z0-9-]+:[^\s]+/gi
-const nukeLinePattern = /would remove|scan complete:/i
+/** A removal line, a scan summary, or a discovery log that names a resource type. */
+const nukeCue = /would remove|scan complete:|resource_type=/i
+/** `region - ResourceType - id`, including a step prefix such as `nuke:`. */
+const nukeListing = /(?:^|[\s:])(?:global|[a-z]{2}-[a-z]+-\d) - [A-Z][A-Za-z0-9]+ - /
+/** `S3Bucket ephemeral-a - failed: BucketNotEmpty`, with or without a step prefix. */
+const nukeFailure = /(?:^|:\s)[A-Z][A-Za-z0-9]+ \S+ - failed:/
+
+/** Identity Center and service-linked role names. The contract's own roles are passed in. */
+const stripGeneratedRoleNames = (line: string): string =>
+  line.replace(/AWSReservedSSO_[A-Za-z0-9_-]*|AWSServiceRole[A-Za-z0-9]*/g, "")
+
+const isRawNukeLine = (line: string): boolean => nukeCue.test(line) || nukeListing.test(line) || nukeFailure.test(line)
 
 /**
- * Remove role names, ARNs and aws-nuke resource lines from text that is about to be served.
- * Longer roles are removed first. Account ids and the budget-hold policy name stay.
+ * Remove role names, ARNs and raw aws-nuke lines from text that is about to be served.
+ * A raw line is a listing, a `would remove` or `Scan complete` line, a `resource_type=`
+ * discovery line, or a resource `failed:` line. Longer contract roles are removed first.
+ * Account ids and the budget-hold policy name stay.
  */
 export const redactSandboxText = (text: string, roles: ReadonlyArray<string>): string => {
   const ordered = [...roles].filter((role) => role.length > 0).sort((left, right) => right.length - left.length)
   const kept: Array<string> = []
   for (const line of text.split("\n")) {
-    if (nukeLinePattern.test(line)) continue
-    let next = line.replace(arnPattern, "")
+    if (isRawNukeLine(line)) continue
+    let next = stripGeneratedRoleNames(line.replace(arnPattern, ""))
     for (const role of ordered) next = next.split(role).join("")
     const collapsed = next.replace(/[ \t]{2,}/g, " ").trim()
     if (collapsed.length > 0) kept.push(collapsed)

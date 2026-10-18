@@ -345,6 +345,27 @@ describe("sandbox jobs", () => {
 })
 
 describe("sandbox sweep", () => {
+  it.effect("records the sweep time only when every account succeeded", () =>
+    Effect.gen(function*() {
+      const stuck = Schema.decodeUnknownSync(Sandbox)({
+        accountId: accountA,
+        name: "sandbox-a",
+        state: { _tag: "Cleaning", since: "1970-01-01T00:00:00Z", runId: "job-crashed", reason: "Released" },
+        version: 3
+      })
+      const [, other] = seedPool(contract)
+      const failed = yield* fixture({ putFails: true }, other === undefined ? [stuck] : [stuck, other])
+      yield* failed.store.markSweep(1)
+      expect(yield* failed.pool.sweepOnce).toMatchObject({ failed: 1 })
+      expect(yield* failed.store.sweepAt).toBe(1)
+
+      const done = yield* fixture()
+      expect(yield* done.store.sweepAt).toBeNull()
+      expect(yield* done.pool.sweepOnce).toMatchObject({ expired: 0, resumed: 0, failed: 0 })
+      const recorded = yield* done.store.sweepAt
+      expect(recorded).not.toBeNull()
+    }))
+
   it.effect("expires a lease at its end, resets it, and leaves the others alone", () =>
     Effect.gen(function*() {
       const f = yield* fixture()

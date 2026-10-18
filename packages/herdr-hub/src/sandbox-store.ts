@@ -213,11 +213,14 @@ export const openSandboxDatabase = Effect.fn("SandboxDatabase.open")(function*(p
       }, logFailure),
     forAccount: (accountId, options) =>
       attempt(() => {
+        const seen = new Set<RunId>()
         const started = decodeRows(EntryRow)(
           database.prepare("SELECT entry FROM sandbox_run_entries WHERE started = 1 ORDER BY seq DESC").all()
         ).flatMap((row) => {
           const decoded = decodeEntry(row.entry)
-          return decoded._tag === "Started" && decoded.accountId === accountId ? [decoded.runId] : []
+          if (decoded._tag !== "Started" || decoded.accountId !== accountId || seen.has(decoded.runId)) return []
+          seen.add(decoded.runId)
+          return [decoded.runId]
         })
         return started
       }, logFailure).pipe(

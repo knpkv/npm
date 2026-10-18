@@ -192,6 +192,37 @@ it.layer(NodeServices.layer)("sandbox store", (it) => {
       expect((yield* runLog.recent(2)).map(({ runId }) => runId)).toEqual(["run-b", "run-a"])
     }).pipe(Effect.scoped))
 
+  it.effect("pages a resumed run once, and the cursor moves to the older run", () =>
+    Effect.gen(function*() {
+      const { runLog } = yield* openSandboxDatabase(yield* databasePath, contract)
+      const entry = Schema.decodeUnknownSync(RunEntry)
+      const started = (runId: string, at: string) =>
+        entry({
+          _tag: "Started",
+          runId,
+          accountId: "999999999990",
+          reason: "Manual",
+          at
+        })
+      yield* runLog.record(started("run-old", "2026-10-17T08:00:00Z"))
+      yield* runLog.record(started("run-new", "2026-10-17T09:00:00Z"))
+      yield* runLog.record(started("run-new", "2026-10-17T09:05:00Z"))
+      const accountId = Schema.decodeUnknownSync(AccountId)("999999999990")
+      const page = yield* runLog.forAccount(accountId, { limit: 1 })
+      expect(page.runs.map(({ runId }) => runId)).toEqual(["run-new"])
+      expect(page.next).toBe("run-new")
+      const older = yield* runLog.forAccount(accountId, {
+        limit: 1,
+        before: Schema.decodeUnknownSync(RunId)("run-new")
+      })
+      expect(older.runs.map(({ runId }) => runId)).toEqual(["run-old"])
+      expect(older.next).toBeNull()
+      expect((yield* runLog.forAccount(accountId, { limit: 20 })).runs.map(({ runId }) => runId)).toEqual([
+        "run-new",
+        "run-old"
+      ])
+    }).pipe(Effect.scoped))
+
   it.effect("keeps the sweep time across reopen", () =>
     Effect.gen(function*() {
       const path = yield* databasePath

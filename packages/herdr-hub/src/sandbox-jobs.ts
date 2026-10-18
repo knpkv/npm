@@ -418,12 +418,15 @@ export const makeSandboxPool = Effect.fn("SandboxPool.make")(function*(services:
       failed: outcomes.filter((outcome) => outcome === "failed").length
     }
     yield* Ref.set(lastSweep, report)
-    yield* store.markSweep(DateTime.toEpochMillis(now)).pipe(
-      Effect.catchTag(
-        "SandboxStoreUnavailable",
-        (error) => Effect.logWarning("sandbox sweep time was not recorded", error.detail)
+    // A failed account is not a successful sweep. The previous time stays, so the badge stays partial.
+    if (report.failed === 0) {
+      yield* store.markSweep(DateTime.toEpochMillis(now)).pipe(
+        Effect.catchTag(
+          "SandboxStoreUnavailable",
+          (error) => Effect.logWarning("sandbox sweep time was not recorded", error.detail)
+        )
       )
-    )
+    }
     return report
   })
 

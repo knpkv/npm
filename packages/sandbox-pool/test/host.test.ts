@@ -24,6 +24,7 @@ import {
   SandboxStore,
   SandboxStoreUnavailable
 } from "../src/index.js"
+import { dryRunListedSamlProvider } from "./dry-run-fixture.js"
 import { contract } from "./fixtures.js"
 
 const entry = Schema.decodeUnknownSync(RunEntry)
@@ -82,6 +83,45 @@ describe("sandbox read model", () => {
       "budget hold: PoolDenyAll attached; lift via sandbox.budget.lift"
     )
   })
+
+  it.effect("serves neither a raw nuke line nor a role name on the overview or the runs page", () =>
+    Effect.gen(function*() {
+      const bucketNotEmpty = "nuke: S3Bucket ephemeral-a - failed: BucketNotEmpty"
+      const listing =
+        `time="2026-10-16T09:00:00Z" level=error msg="listing failed: AccessDenied" owner=eu-central-1 resource_type=S3Bucket`
+      const leaked = [
+        bucketNotEmpty,
+        listing,
+        dryRunListedSamlProvider,
+        "sign in failed for AWSReservedSSO_PoolDeveloper_84e6a56c0ae5642a after AWSServiceRoleForOrganizations"
+      ].join("\n")
+      expect(redactSandboxText(bucketNotEmpty, roles)).toBe("")
+      expect(redactSandboxText(listing, roles)).toBe("")
+      expect(redactSandboxText(dryRunListedSamlProvider, roles)).toBe("")
+      expect(redactSandboxText(leaked, roles)).toBe("sign in failed for after")
+      const store = yield* makeMemorySandboxStore([quarantined("222222222222", "sandbox-b", leaked)])
+      const log = yield* makeMemoryRunLog
+      yield* log.record(started("run-current", "222222222222", "2026-10-16T08:00:00.000Z"))
+      yield* log.record(finished("run-current", "Quarantined", "2026-10-16T08:03:00.000Z", leaked))
+      const reads = yield* makeSandboxHostReads({ contract, store, runLog: log })
+      const overview = yield* reads.overview
+      const runs = yield* reads.runs({ id: account("222222222222") })
+      const served = `${JSON.stringify(overview)}\n${JSON.stringify(runs)}`
+      for (
+        const secret of ["BucketNotEmpty", "ephemeral-a", "resource_type=S3Bucket", "AWSReservedSSO_", "AWSServiceRole"]
+      ) {
+        expect(served).not.toContain(secret)
+      }
+      expect(served).toContain("sign in failed for after")
+      expect(overview).toMatchObject({
+        _tag: "Ready",
+        sandboxes: [{ state: { _tag: "Quarantined", blocker: "sign in failed for after" } }]
+      })
+      expect(runs).toMatchObject({
+        _tag: "Ready",
+        runs: [{ blocker: "sign in failed for after" }]
+      })
+    }))
 
   it("treats a missing or old sweep as stale and a sweep inside 10 minutes as fresh", () => {
     expect(sweepStaleAfterMillis).toBe(10 * minute)
