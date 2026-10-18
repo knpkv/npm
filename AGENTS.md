@@ -390,6 +390,27 @@ A new `exports` entry is proven only from a real build.
 4.  The CI will create a version PR automatically.
 5.  Merge the version PR to publish the changes.
 
+## Cursor Cloud specific instructions
+
+The Cloud Agent image also has Node.js 22 earlier on `PATH` than `/usr/local/bin`. The environment install links Node.js 26.7.0, pnpm 11.21.0, and Bun 1.3.14 from `/usr/local/cargo/bin`, which login shells and agent commands search first. `node --version` must print `v26.7.0`, `pnpm --version` must print `11.21.0`, and `bun --version` must print `1.3.14`. Node.js 26 does not ship Corepack, so pnpm is installed with `npm install --global pnpm@11.21.0` into that Node prefix. Nix and direnv are optional and are not part of this environment.
+
+`pnpm install --frozen-lockfile` is the dependency install and is safe to repeat. Workspace bin links that point at `dist/` warn until that package is built. A package `check` typechecks against its workspace dependencies' built `dist`. Before `pnpm --filter @knpkv/control-center dev` or `check` on a fresh tree, build those dependencies:
+
+```bash
+pnpm --filter "@knpkv/control-center^..." build
+```
+
+Run the authenticated Control Center server with:
+
+```bash
+pnpm --filter @knpkv/control-center build
+CONTROL_CENTER_DATA_ROOT=/tmp/control-center-data pnpm --filter @knpkv/control-center start serve
+```
+
+It listens at `http://127.0.0.1:4173` and prints a ten-minute single-use pairing code. Pair the browser at `/pair`. `pnpm --filter @knpkv/control-center dev` serves only the Vite frontend on `127.0.0.1:5173`. Several other package `dev` scripts bind that same port, so run one of them at a time.
+
+`pnpm test:unit` runs Vitest from source. `pnpm test` also runs packed-executable checks, so run `pnpm build` first. Bun 1.3.14 is the CodeCommit runtime used by those packed and child-process tests.
+
 <!-- effect-reference:start -->
 
 ## Effect Source Reference
