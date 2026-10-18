@@ -65,6 +65,8 @@ export const discoverProjects = Effect.fn("AlchemyConsole.discoverProjects")(fun
       continue
     }
     for (const name of names.success) {
+      // One wide directory stats every child. Read the clock per entry so that work stops on the budget.
+      if ((yield* clock.currentTimeMillis) - started >= budget) return finish(true)
       if (excluded.has(name)) continue
       const link = path.join(current, name)
       const resolved = yield* Effect.result(withinRoot(root, link))

@@ -4,6 +4,7 @@ import { Context, Deferred, Effect, Fiber, FileSystem, Layer, Path, Redacted, Re
 import { HttpClient, HttpClientResponse } from "effect/http"
 import { TestClock } from "effect/testing"
 import * as NodeFs from "node:fs"
+import type { DiscoveryIssue } from "../src/api.js"
 import { S3ReadError } from "../src/s3-reader.js"
 import { StackSource } from "../src/server/Catalog.js"
 import { sourceLayer } from "../src/server/Sources.js"
@@ -420,5 +421,64 @@ layer(Layer.merge(NodeServices.layer, stalledProfile))("profile deadline", (it) 
       const result = yield* Fiber.join(fiber)
       expect(result.stacks.filter((stack) => stack.summary.backend === "s3")).toHaveLength(1)
       expect(result.issues).toContainEqual({ source: "s3", reason: "provider" })
+    }).pipe(Effect.scoped))
+})
+
+class SlowProfiles extends Context.Service<SlowProfiles, {
+  readonly started: Deferred.Deferred<void>
+}>()("AlchemyConsole/SlowProfiles") {}
+
+/** Every profile's sign-in sleeps. Twelve of them must not stack past the overview deadline. */
+const allProfilesSlow = Layer.effectContext(Effect.gen(function*() {
+  const started = yield* Deferred.make<void>()
+  const armed = yield* Ref.make(false)
+  const client = HttpClient.make((request, url) =>
+    Effect.succeed(
+      HttpClientResponse.fromWeb(
+        request,
+        new Response(url.searchParams.has("versions") ? versionList : bucketList(["fixture-alchemy-state"]))
+      )
+    )
+  )
+  const credentials = SsoCredentials.of({
+    resolve: (profile) =>
+      Effect.gen(function*() {
+        if (!(yield* Ref.getAndSet(armed, true))) yield* Deferred.succeed(started, undefined)
+        yield* Effect.sleep("60 seconds")
+        return credentialsFor(profile)
+      })
+  })
+  return Context.make(SlowProfiles, { started }).pipe(
+    Context.add(HttpClient.HttpClient, client),
+    Context.add(SsoCredentials, credentials)
+  )
+}))
+
+layer(Layer.merge(NodeServices.layer, allProfilesSlow))("overview deadline", (it) => {
+  it.effect("returns partial results before 20 seconds when twelve profiles are slow", () =>
+    Effect.gen(function*() {
+      const { awsConfigFile, fs, root } = yield* setup
+      yield* fs.writeFileString(
+        awsConfigFile,
+        profileIni(
+          Array.from({ length: 12 }, (_, index) => ({
+            name: `fixture-${index}`,
+            account: `fixture-account-${index}`
+          }))
+        )
+      )
+      const slow = yield* SlowProfiles
+      const context = yield* Layer.build(sourceLayer({ root, awsConfigFile }))
+      const fiber = yield* Context.get(context, StackSource).discover.pipe(Effect.forkChild)
+      yield* Deferred.await(slow.started)
+      yield* Effect.repeat(Effect.yieldNow, { times: 40 })
+      yield* TestClock.adjust("19 seconds")
+      expect(fiber.pollUnsafe()?._tag).not.toBe("Success")
+      yield* TestClock.adjust("1 second")
+      expect(fiber.pollUnsafe()?._tag).toBe("Success")
+      const result = yield* Fiber.join(fiber)
+      expect(result.stacks.filter((stack) => stack.summary.backend === "s3")).toHaveLength(0)
+      const unfinished = { source: "s3", reason: "provider" } satisfies DiscoveryIssue
+      expect(result.issues).toEqual(Array.from({ length: 12 }, () => unfinished))
     }).pipe(Effect.scoped))
 })

@@ -45,26 +45,39 @@ const missing = (method: "realPath" | "stat", path: string) =>
   PlatformError.systemError({ _tag: "NotFound", module: "FileSystem", method, pathOrDescriptor: path })
 
 /**
- * Directory reads sleep on the test clock, then use `io`.
- * `started` completes when the first read is about to sleep. Await it, then adjust.
- * Reads after `delayReads` do not sleep, so a state read cannot wait on a clock move that finished.
+ * Directory reads and stats sleep on the test clock, then use `io`.
+ * `started` completes when the first delayed read or stat is about to sleep. Await it, then adjust.
+ * Reads after `delayReads`, and stats after `delayStats`, do not sleep.
  */
-export const clockedFileSystem = Effect.fnUntraced(function*(delayReads: number, io: ClockedIo) {
+export const clockedFileSystem = Effect.fnUntraced(function*(
+  delayReads: number,
+  io: ClockedIo,
+  delayStats = 0
+) {
   const real = yield* FileSystem.FileSystem
   const started = yield* Deferred.make<void>()
   const reads = yield* Ref.make(0)
+  const stats = yield* Ref.make(0)
   const fs = FileSystem.FileSystem.of({
     ...real,
     readDirectory: (directory) =>
       Effect.gen(function*() {
         const count = yield* Ref.updateAndGet(reads, (value) => value + 1)
-        if (count === 1) yield* Deferred.succeed(started, undefined)
+        if (count === 1 && delayReads > 0) yield* Deferred.succeed(started, undefined)
         if (count <= delayReads) yield* Effect.sleep("1 second")
         return io.readDirectory(directory)
       }),
     realPath: (path) => Effect.try({ try: () => io.realPath(path), catch: () => missing("realPath", path) }),
     exists: (path) => Effect.sync(() => io.exists(path)),
-    stat: (path) => Effect.try({ try: () => infoFor(io.stat(path)), catch: () => missing("stat", path) })
+    stat: (path) =>
+      Effect.gen(function*() {
+        const count = yield* Ref.updateAndGet(stats, (value) => value + 1)
+        if (count <= delayStats) {
+          if (delayReads === 0 && count === 1) yield* Deferred.succeed(started, undefined)
+          yield* Effect.sleep("1 second")
+        }
+        return yield* Effect.try({ try: () => infoFor(io.stat(path)), catch: () => missing("stat", path) })
+      })
   })
   return { fs, started }
 })
