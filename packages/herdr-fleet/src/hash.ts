@@ -1,9 +1,19 @@
 import { Crypto, Effect } from "effect"
 import { Hex } from "effect/encoding"
 import { FleetOperationError } from "./errors.js"
-import type { JobPayload } from "./model.js"
+import type { JobPayload, SandboxObservation } from "./model.js"
 
 const text = (value: string): string => JSON.stringify(value)
+
+/** Present only when the owner host stamped a record. Key order is fixed so the hash does not move. */
+const observedSuffix = (observed: SandboxObservation | undefined): string => {
+  if (observed === undefined) return ""
+  const endsAt = observed.endsAt === null ? "null" : text(observed.endsAt)
+  const holder = observed.holder === null ? "null" : text(observed.holder)
+  return `,"observed":{"endsAt":${endsAt},"holder":${holder},"state":${
+    text(observed.state)
+  },"version":${observed.version}}`
+}
 
 /**
  * The exact payload text bound into a job's approval hash. Approval displays
@@ -31,10 +41,13 @@ export const canonicalJobPayload = (payload: JobPayload): string => {
       return `{"kind":${text(payload.kind)}}`
     case "sandbox.extend":
     case "sandbox.release":
-    case "sandbox.budget.lift":
       return `{"accountId":${text(payload.accountId)},"kind":${text(payload.kind)}}`
+    case "sandbox.budget.lift":
+      return `{"accountId":${text(payload.accountId)},"kind":${text(payload.kind)}${observedSuffix(payload.observed)}}`
     case "sandbox.reset":
-      return `{"accountId":${text(payload.accountId)},"kind":${text(payload.kind)},"reason":${text(payload.reason)}}`
+      return `{"accountId":${text(payload.accountId)},"kind":${text(payload.kind)}${
+        observedSuffix(payload.observed)
+      },"reason":${text(payload.reason)}}`
     case "agent.message":
       return `{"kind":${text(payload.kind)},"message":${text(payload.message)},"session":${text(payload.session)}}`
     case "work.reconcile":

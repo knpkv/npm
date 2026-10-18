@@ -1,6 +1,13 @@
 import type { AgentWorkerIdentity, FleetStoreError, HostConfiguration, HostOperations } from "@knpkv/herdr-fleet"
-import { FleetOperationError, JobStore, loadConfiguration, makeFleetService } from "@knpkv/herdr-fleet"
-import { Console, Effect, Path, Redacted, Scope } from "effect"
+import {
+  FleetOperationError,
+  FleetValidationError,
+  JobStore,
+  loadConfiguration,
+  makeFleetService
+} from "@knpkv/herdr-fleet"
+import { PoolContract } from "@knpkv/sandbox-pool"
+import { Console, Effect, Path, Redacted, Schema, Scope } from "effect"
 import { readCodeHost } from "./code-module.js"
 import type { HostdOperationsCompositionError } from "./errors.js"
 import { startHttpServer } from "./http.js"
@@ -10,6 +17,7 @@ import { hasOutstandingWorkJob, noJobStore } from "./internal/outstanding-work-j
 import { noStartedWorkerStore, startedWorker } from "./internal/started-worker.js"
 import { loadUiAssets } from "./internal/ui-assets.js"
 import { makeHostOperations } from "./operations.js"
+import { readSandboxesHost } from "./sandboxes-module.js"
 import { readStacksHost } from "./stacks-module.js"
 
 export { HostdOperationsCompositionError } from "./errors.js"
@@ -95,6 +103,12 @@ export const makeHostdProgram = Effect.fn("Hostd.makeProgram")(function*(
   const config = yield* loadConfiguration(configPath)
   const codeHost = yield* readCodeHost
   const stacksHost = yield* readStacksHost
+  const sandboxesHost = yield* readSandboxesHost
+  const sandboxPool = config.sandboxPool === undefined
+    ? null
+    : yield* Schema.decodeUnknownEffect(PoolContract)(config.sandboxPool).pipe(
+      Effect.mapError(() => new FleetValidationError({ detail: "sandboxPool must decode as a pool contract" }))
+    )
   const store = yield* Effect.acquireRelease(
     JobStore.open(paths.join(config.stateDirectory, "jobs.sqlite")),
     (opened) => Effect.sync(() => opened.close())
@@ -113,7 +127,9 @@ export const makeHostdProgram = Effect.fn("Hostd.makeProgram")(function*(
   const relayOptions = config.lanWork === undefined ? { relay } : { relay, lanWork: config.lanWork }
   // Absent hosts stay absent: the server reads a missing key as "not configured".
   const withCode = codeHost === null ? relayOptions : { ...relayOptions, codeHost }
-  const serverOptions = stacksHost === null ? withCode : { ...withCode, stacksHost }
+  const withStacks = stacksHost === null ? withCode : { ...withCode, stacksHost }
+  const withSandboxesHost = sandboxesHost === null ? withStacks : { ...withStacks, sandboxesHost }
+  const serverOptions = sandboxPool === null ? withSandboxesHost : { ...withSandboxesHost, sandboxPool }
   const server = yield* Effect.acquireRelease(
     Effect.tryPromise({
       try: () => startHttpServer(config, service, assets, serverOptions),

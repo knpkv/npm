@@ -23,7 +23,7 @@ import {
   Region
 } from "@knpkv/rly/patterns"
 import { Button, LimitTrack, Notice, StateLabel, TrackKey } from "@knpkv/rly/primitives"
-import { Predicate } from "effect"
+import { DateTime, Predicate } from "effect"
 import { type KeyboardEvent, type ReactElement, type ReactNode, useEffect, useRef, useState } from "react"
 import { jobTitle } from "./activity-history.js"
 import { approvalRequestFor } from "./approval-request.js"
@@ -459,7 +459,7 @@ const RequestDetail = ({
       <ApprovalRequestDisclosure
         id={facts.id}
         key={`${facts.host}:${facts.id}`}
-        request={{ ...approvalRequestFor(payload), title: facts.title }}
+        request={{ ...approvalRequestFor(payload, DateTime.makeUnsafe(now)), title: facts.title }}
         format="json"
         summary="Full request"
         consequence={requestConsequence(payload, facts.host)}

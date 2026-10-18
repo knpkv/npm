@@ -2,15 +2,23 @@
  * Fleet `sandbox.*` jobs and the pool sweep, for the one host that owns the sandbox pool. @module
  *
  * Every write reads the record, applies a pure `@knpkv/sandbox-pool` transition and puts it with a
- * compare-and-set, retrying a `StaleVersion` from a fresh read. The lease holder is always the job's
- * authenticated actor. Releasing or resetting an account runs its reset inside the same job, with the
- * job id as the run id; one lock per account keeps a job and the sweep from resetting it twice.
+ * compare-and-set. Lease, extend and release retry a `StaleVersion` from a fresh read. Reset and
+ * budget lift do not: they re-check the record the approval was bound to, once, under the account
+ * lock, and reject when it has moved. The lease holder is always the job's authenticated actor.
+ * Releasing or resetting an account runs its reset inside the same job, with the job id as the run
+ * id; one lock per account keeps a job and the sweep from resetting it twice.
  *
  * Nothing here talks to AWS: `PoolAccess`, `Nuke` and `BudgetControl` are supplied by the host.
  */
 import type { ApprovedJobIdentity, HostOperations, JobActor } from "@knpkv/herdr-fleet"
 import { FleetOperationError } from "@knpkv/herdr-fleet"
-import { type SandboxJobKind, SandboxJobPayload } from "@knpkv/herdr-fleet/model"
+import {
+  type SandboxBudgetLift,
+  type SandboxJobKind,
+  SandboxJobPayload,
+  type SandboxObservation,
+  type SandboxReset
+} from "@knpkv/herdr-fleet/model"
 import {
   AccountNotInPool,
   expire,
@@ -47,6 +55,18 @@ export class SandboxJobInvalid extends Schema.TaggedError<SandboxJobInvalid>()("
 
 /** `sandbox.reset` and `sandbox.budget.lift` run only with a persisted Fleet approval. */
 export class ApprovalRequired extends Schema.TaggedError<ApprovalRequired>()("ApprovalRequired", {}) {}
+
+/** An approved reset or budget lift carried no bound record. Nothing was written. */
+export class ApprovalUnbound extends Schema.TaggedError<ApprovalUnbound>()("ApprovalUnbound", {
+  reason: Schema.Literal("unbound")
+}) {}
+
+/** The approved record is no longer the stored one. Nothing was written when this precedes any external effect. */
+export class RecordMoved extends Schema.TaggedError<RecordMoved>()("RecordMoved", {
+  accountId: Schema.String,
+  expectedVersion: Schema.Int,
+  actualVersion: Schema.Int
+}) {}
 
 /** A budget lift on an account that is not quarantined by this pool's budget hold. */
 export class NotBudgetHeld extends Schema.TaggedError<NotBudgetHeld>()("NotBudgetHeld", {
@@ -85,6 +105,25 @@ type SweepOutcome = "idle" | "expired" | "resumed" | "failed"
 const encodeSandbox = Schema.encodeSync(Schema.fromJsonString(Sandbox))
 const isStoreUnavailable = Schema.is(SandboxStoreUnavailable)
 
+/** The record a reset or budget-lift approval binds to. A lease names its holder and end; every other state names neither. */
+export const observationOf = (sandbox: Sandbox): SandboxObservation =>
+  sandbox.state._tag === "Leased"
+    ? {
+      version: sandbox.version,
+      state: "Leased",
+      holder: sandbox.state.holder,
+      endsAt: DateTime.formatIso(sandbox.state.endsAt)
+    }
+    : { version: sandbox.version, state: sandbox.state._tag, holder: null, endsAt: null }
+
+const sameObservation = (sandbox: Sandbox, observed: SandboxObservation): boolean => {
+  if (sandbox.version !== observed.version || sandbox.state._tag !== observed.state) return false
+  if (sandbox.state._tag === "Leased") {
+    return observed.holder === sandbox.state.holder && observed.endsAt === DateTime.formatIso(sandbox.state.endsAt)
+  }
+  return observed.holder === null && observed.endsAt === null
+}
+
 /** A tagged error's tag and fields, for the job's failure detail. */
 const describe = (error: { readonly _tag: string }) => JSON.stringify(error)
 
@@ -109,8 +148,8 @@ export const makeSandboxPool = Effect.fn("SandboxPool.make")(function*(services:
   const lastSweep = yield* Ref.make<SweepReport | null>(null)
 
   /**
-   * A record is in the pool only when the contract names its exact account id and name. Rows kept for an
-   * account that left the contract, or was renamed in it, are history: never leased, changed or swept.
+   * A record is in the pool only when the contract names its exact account id and name. Any other row
+   * is history: never leased, changed or swept. The durable store renames a same-id row when it opens.
    */
   const inPool = (sandbox: Sandbox) =>
     contract.accounts.some(({ accountId, name }) => accountId === sandbox.accountId && name === sandbox.name)
@@ -177,6 +216,50 @@ export const makeSandboxPool = Effect.fn("SandboxPool.make")(function*(services:
     return yield* reset(cleaning, runId).pipe(Effect.mapError((error) => fail(operation, error, false)))
   })
 
+  /**
+   * One compare-and-set for an approval-bound reset. A mismatch or a lost put before any external
+   * effect is `RecordMoved` and rejected. After a budget lift, `committed` keeps that failure recoverable.
+   */
+  const boundClean = Effect.fn("SandboxPool.boundClean")(function*<E extends { readonly _tag: string }>(
+    operation: string,
+    accountId: string,
+    runId: RunId,
+    observed: SandboxObservation,
+    toCleaning: (current: Sandbox, now: DateTime.Utc) => Effect.Effect<Sandbox, E>,
+    committed: boolean
+  ): Effect.fn.Return<Sandbox, FleetOperationError> {
+    const now = yield* DateTime.now
+    const current = yield* store.get(accountId).pipe(
+      Effect.mapError((error) => fail(operation, error, !committed))
+    )
+    if (!sameObservation(current, observed)) {
+      return yield* fail(
+        operation,
+        new RecordMoved({ accountId, expectedVersion: observed.version, actualVersion: current.version }),
+        !committed
+      )
+    }
+    yield* member(current).pipe(Effect.mapError((error) => fail(operation, error, !committed)))
+    const next = yield* toCleaning(current, now).pipe(
+      Effect.mapError((error) => fail(operation, error, !committed))
+    )
+    const isOperationError = Schema.is(FleetOperationError)
+    const cleaning = yield* store.put(next).pipe(
+      Effect.catchTag("StaleVersion", (error) =>
+        Effect.fail(
+          fail(
+            operation,
+            committed
+              ? error
+              : new RecordMoved({ accountId, expectedVersion: observed.version, actualVersion: error.actual }),
+            !committed
+          )
+        )),
+      Effect.mapError((error) => isOperationError(error) ? error : fail(operation, error, !committed))
+    )
+    return yield* reset(cleaning, runId).pipe(Effect.mapError((error) => fail(operation, error, false)))
+  })
+
   const run = Effect.fn("SandboxPool.run")(function*(
     payload: SandboxJobPayload,
     jobId: string,
@@ -227,32 +310,56 @@ export const makeSandboxPool = Effect.fn("SandboxPool.make")(function*(services:
             cleanThenReset(operation, payload.accountId, runId, (current, now) => release(current, holder, runId, now))
           )
         )
-      case "sandbox.reset":
+      case "sandbox.reset": {
+        const observed = payload.observed
         return done(
           yield* locked(
             operation,
             payload.accountId,
-            cleanThenReset(
-              operation,
-              payload.accountId,
-              runId,
-              (current, now) =>
-                payload.reason === "Manual" ? manualReset(current, runId, now) : retry(current, runId, now)
-            )
+            observed === undefined
+              ? Effect.fail(fail(operation, new ApprovalUnbound({ reason: "unbound" }), true))
+              : boundClean(
+                operation,
+                payload.accountId,
+                runId,
+                observed,
+                (current, now) =>
+                  payload.reason === "Manual" ? manualReset(current, runId, now) : retry(current, runId, now),
+                false
+              )
           )
         )
+      }
       case "sandbox.budget.lift": {
         const accountId = payload.accountId
+        const observed = payload.observed
         const lifted = Effect.gen(function*() {
+          if (observed === undefined) {
+            return yield* fail(operation, new ApprovalUnbound({ reason: "unbound" }), true)
+          }
           const current = yield* store.get(accountId).pipe(Effect.mapError((error) => fail(operation, error, true)))
           yield* member(current).pipe(Effect.mapError((error) => fail(operation, error, true)))
+          if (!sameObservation(current, observed)) {
+            return yield* fail(
+              operation,
+              new RecordMoved({ accountId, expectedVersion: observed.version, actualVersion: current.version }),
+              true
+            )
+          }
           if (current.state._tag !== "Quarantined" || !isBudgetHoldFor(contract, current.state.blocker)) {
             return yield* fail(operation, new NotBudgetHeld({ accountId }), true)
           }
           // Once lift is called the policy may be detached, so nothing after it is "rejected"; a rerun
-          // converges because lift is idempotent. Then reset again, re-verifying and re-reading the hold.
+          // converges because lift is idempotent. The following put still has to be the approved record.
           yield* services.budget.lift(accountId).pipe(Effect.mapError((error) => fail(operation, error, false)))
-          return yield* cleanThenReset(operation, accountId, runId, (latest, now) => retry(latest, runId, now), true)
+          return yield* boundClean(
+            operation,
+            accountId,
+            runId,
+            observed,
+            (latest, now) => retry(latest, runId, now),
+            true
+          )
         })
         return done(yield* locked(operation, accountId, lifted))
       }
@@ -311,10 +418,29 @@ export const makeSandboxPool = Effect.fn("SandboxPool.make")(function*(services:
       failed: outcomes.filter((outcome) => outcome === "failed").length
     }
     yield* Ref.set(lastSweep, report)
+    // A failed account is not a successful sweep. The previous time stays, so the badge stays partial.
+    if (report.failed === 0) {
+      yield* store.markSweep(DateTime.toEpochMillis(now)).pipe(
+        Effect.catchTag(
+          "SandboxStoreUnavailable",
+          (error) => Effect.logWarning("sandbox sweep time was not recorded", error.detail)
+        )
+      )
+    }
     return report
   })
 
-  return { run, sweepOnce, lastSweep: Ref.get(lastSweep) }
+  const bindSandboxApproval = (payload: SandboxReset | SandboxBudgetLift) =>
+    store.get(payload.accountId).pipe(
+      Effect.flatMap((sandbox) =>
+        inPool(sandbox)
+          ? Effect.succeed(observationOf(sandbox))
+          : Effect.fail(new AccountNotInPool({ accountId: payload.accountId }))
+      ),
+      Effect.mapError((error) => fail(payload.kind, error, true))
+    )
+
+  return { run, sweepOnce, lastSweep: Ref.get(lastSweep), bindSandboxApproval }
 })
 
 export type SandboxPool = Effect.Success<ReturnType<typeof makeSandboxPool>>
@@ -337,10 +463,12 @@ const isSandboxJob = Schema.is(SandboxJobPayload)
 /**
  * Adds the pool's jobs to a host's operations: sandbox kinds run against `pool`, everything else
  * goes to `base`, and `sandboxJobKinds` declares every sandbox kind so submission accepts them.
+ * `bindSandboxApproval` stamps the record a reset or budget lift is approved against.
  */
 export const withSandboxOperations = (base: HostOperations, pool: SandboxPool): HostOperations => ({
   ...base,
   sandboxJobKinds,
+  bindSandboxApproval: (payload) => pool.bindSandboxApproval(payload),
   run: (payload, workerStarted, jobId, actor, lifecycle, approval) =>
     isSandboxJob(payload)
       ? pool.run(payload, jobId, actor, approval ?? null)

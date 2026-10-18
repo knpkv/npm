@@ -15,7 +15,8 @@ const fleetReading = NeedsYouProviderResult.make({
     createdAt: 10,
     expiresAt: 100
   }],
-  issues: []
+  issues: [],
+  asOf: null
 })
 
 describe("module server boundary", () => {
@@ -149,7 +150,8 @@ describe("module server boundary", () => {
               actor: "operator",
               createdAt: 10,
               expiresAt: 100
-            }]
+            }],
+            contributions: [{ provider: "fleet", asOf: null }]
           }
         })
       }

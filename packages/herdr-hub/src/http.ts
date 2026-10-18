@@ -96,6 +96,7 @@ import {
   WorkPullRequestLinkRequest,
   WorkRecoveryTarget
 } from "@knpkv/herdr-work/model"
+import type { PoolContract } from "@knpkv/sandbox-pool"
 import {
   Cause,
   Clock,
@@ -206,6 +207,7 @@ import { relayIconSvg } from "./relay-icon.js"
 import { hubCapabilities, HubReadFailed, type HubRelayReads, type PendingJob } from "./relay/capabilities.js"
 import { cliBackends, makeRelayHubMount, type RelayHubBackends, type RelayHubMount } from "./relay/mount.js"
 import { handleRelayRoute } from "./relay/routes.js"
+import { makeSandboxesModule, sandboxesModuleUrl } from "./sandboxes-module.js"
 import { makeStacksModule } from "./stacks-module.js"
 import { ApprovalAppStore } from "./store.js"
 import { workCheckpointPath, workPullRequestAttachPath, workSnapshotPath } from "./work-checkpoint.js"
@@ -379,6 +381,10 @@ export type HttpServerOptions = {
   readonly codeHost?: FleetHostName
   /** Explicit server-private Stacks host (`RELAY_STACKS_HOST`). Missing means Stacks is unavailable. */
   readonly stacksHost?: FleetHostName
+  /** Explicit server-private Sandboxes host (`RELAY_SANDBOXES_HOST`). Missing means Sandboxes is unavailable. */
+  readonly sandboxesHost?: FleetHostName
+  /** Pool contract for this host. Missing while `sandboxesHost` names this hub is a pool mismatch. */
+  readonly sandboxPool?: PoolContract | null
   /** Additional product layers join the shared registry at startup; handlers close their requirements. */
   readonly modules?: ReadonlyArray<ServerModule<unknown, HttpClient.HttpClient | Tailscale | Crypto.Crypto>>
   readonly lanWork?: LanWorkListenerOptions
@@ -1253,7 +1259,8 @@ const readFleetNeedsYou = Effect.fn("HostHttp.readFleetNeedsYou")(function*(
       createdAt: job.createdAt,
       expiresAt: job.expiresAt
     })),
-    issues
+    issues,
+    asOf: null
   }
 })
 
@@ -1865,6 +1872,23 @@ export const startHttpServer = async (
       { descriptor: connectModule, handlers: Layer.succeed(ModuleServer.ModuleHandlers, { routes: [] }) },
       { descriptor: usageModule, handlers: Layer.succeed(ModuleServer.ModuleHandlers, { routes: [] }) },
       { descriptor: resourcesModule, handlers: Layer.succeed(ModuleServer.ModuleHandlers, { routes: [] }) },
+      makeSandboxesModule({
+        host: config.host,
+        isHub,
+        sandboxesHost: options.sandboxesHost ?? null,
+        stateDirectory: config.stateDirectory,
+        pool: options.sandboxPool ?? null,
+        // Build the effect on read. Calling pendingApprovals here would list the store at startup.
+        pendingLifts: Effect.suspend(() =>
+          service.pendingApprovals().pipe(Effect.map((records) => {
+            const ids = new Set<string>()
+            for (const record of records) {
+              if (record.payload.kind === "sandbox.budget.lift") ids.add(record.payload.accountId)
+            }
+            return ids
+          }))
+        )
+      }),
       makeCodeModule({
         host: config.host,
         isHub,
@@ -3100,7 +3124,8 @@ export const startHttpServer = async (
             remoteAddress: request.socket.remoteAddress
           })
 
-          if (url.pathname === "/v1/modules" || url.pathname.startsWith("/v1/modules/")) {
+          const moduleUrl = sandboxesModuleUrl(request.method ?? "GET", url) ?? url
+          if (moduleUrl.pathname === "/v1/modules" || moduleUrl.pathname.startsWith("/v1/modules/")) {
             if (mode === "local") {
               json(response, 404, { error: "not_found" })
               return
@@ -3108,7 +3133,7 @@ export const startHttpServer = async (
             const result = await runRequest(
               ModuleServer.dispatchModuleRoute({
                 method: request.method ?? "GET",
-                url,
+                url: moduleUrl,
                 listener: mode,
                 authorize: mode === "approval" || mode === "tailnet" || mode === "serve"
                   ? tailnetIdentity(request, config, mode === "approval" ? config.approvalNodes : null).pipe(

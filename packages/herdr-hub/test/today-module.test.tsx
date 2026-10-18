@@ -54,7 +54,7 @@ const click = async (href: string) => {
 
 it("lands on Today, keeps document anchors, and sends legacy approval selectors to Fleet", async () => {
   window.history.replaceState(null, "", "/#main")
-  await render(Effect.succeed({ _tag: "Complete", items: [] }))
+  await render(Effect.succeed({ _tag: "Complete", items: [], contributions: [] }))
   expect(window.location.hash).toBe("#main")
   expect(document.querySelector('[data-module="today"]')?.hasAttribute("hidden")).toBe(false)
   expect(document.querySelector('[aria-label="Current page"]')?.textContent).toBe("Relay/Today")
@@ -65,7 +65,7 @@ it("lands on Today, keeps document anchors, and sends legacy approval selectors 
 })
 
 it("canonicalizes a bare hub URL to Today", async () => {
-  await render(Effect.succeed({ _tag: "Complete", items: [] }))
+  await render(Effect.succeed({ _tag: "Complete", items: [], contributions: [] }))
   expect(window.location.hash).toBe("#today/overview")
 })
 
@@ -91,7 +91,7 @@ it("starts one read when active and visible, aborts it on navigation and ignores
   expect(started).toBe(1)
   await click("?#fleet/approvals")
   await vi.waitFor(() => expect(interrupted).toBe(1))
-  await act(async () => answers[0]?.(Effect.succeed({ _tag: "Complete", items: [] })))
+  await act(async () => answers[0]?.(Effect.succeed({ _tag: "Complete", items: [], contributions: [] })))
   expect(document.querySelector('[data-module="today"] h1')?.textContent).toBe("Checking your fleet.")
   await click("?#today/overview")
   expect(started).toBe(2)

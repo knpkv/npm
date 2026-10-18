@@ -77,6 +77,72 @@ it.layer(NodeServices.layer)("sandbox store", (it) => {
       expect(yield* Effect.flip(store.get("999999999999"))).toMatchObject({ _tag: "SandboxNotFound" })
     }).pipe(Effect.scoped))
 
+  it.effect("renames a same-id account on open and keeps an account that left", () =>
+    Effect.gen(function*() {
+      const path = yield* databasePath
+      const leased = yield* Effect.scoped(
+        Effect.gen(function*() {
+          const { store } = yield* openSandboxDatabase(path, contract)
+          return yield* store.put(yield* lease(yield* store.list, holder, now))
+        })
+      )
+      const renamed = Schema.decodeUnknownSync(PoolContract)({
+        ...contractInput,
+        accounts: [
+          { name: "sandbox-renamed", accountId: leased.accountId },
+          { name: "sandbox-c", accountId: "999999999992" }
+        ]
+      })
+      const migrated = yield* Effect.scoped(
+        Effect.gen(function*() {
+          const { store } = yield* openSandboxDatabase(path, renamed)
+          const record = yield* store.get(leased.accountId)
+          expect(record.name).toBe("sandbox-renamed")
+          expect(record.version).toBe(leased.version)
+          expect(record.state).toEqual(leased.state)
+          // The other original account left the contract. Its row stays under the old name.
+          const left = contractInput.accounts.find(({ accountId }) => accountId !== leased.accountId)
+          if (left === undefined) return yield* Effect.die("missing sibling account")
+          expect(yield* store.get(left.accountId)).toMatchObject({ name: left.name, version: 0 })
+          return record
+        })
+      )
+      yield* Effect.scoped(
+        Effect.gen(function*() {
+          const { store } = yield* openSandboxDatabase(path, renamed)
+          expect(yield* store.get(leased.accountId)).toEqual(migrated)
+        })
+      )
+    }))
+
+  it.effect("rename keeps a leased record and refuses to write once its version moved", () =>
+    Effect.gen(function*() {
+      const path = yield* databasePath
+      const writer = yield* openSandboxDatabase(path, contract)
+      const reader = yield* openSandboxDatabase(path, contract)
+      const leased = yield* writer.store.put(yield* lease(yield* writer.store.list, holder, now))
+      const name = Schema.decodeUnknownSync(SandboxName)("sandbox-renamed")
+      const renamed = yield* reader.store.rename(leased.accountId, name)
+      expect(renamed).toMatchObject({ name, version: leased.version, state: leased.state })
+      expect(yield* writer.store.get(leased.accountId)).toEqual(renamed)
+      const raw = yield* Effect.acquireRelease(
+        openPrivateSqlite(path, { initialize: () => undefined }),
+        (opened) => Effect.sync(() => opened.database.close())
+      )
+      const versionOf = () =>
+        raw.database.prepare("SELECT version FROM sandboxes WHERE account_id = ?").get(leased.accountId)
+      expect(versionOf()).toEqual({ version: leased.version })
+      raw.database.prepare("UPDATE sandboxes SET version = ? WHERE account_id = ?").run(4, leased.accountId)
+      const moved = Schema.decodeUnknownSync(SandboxName)("sandbox-moved")
+      expect(yield* Effect.flip(reader.store.rename(leased.accountId, moved))).toMatchObject({
+        _tag: "SandboxStoreUnavailable",
+        operation: "rename",
+        detail: "sandbox version changed during rename"
+      })
+      expect(yield* writer.store.get(leased.accountId)).toEqual(renamed)
+      expect(versionOf()).toEqual({ version: 4 })
+    }).pipe(Effect.scoped))
+
   it.effect("two connections racing on one version: exactly one write lands", () =>
     Effect.gen(function*() {
       const path = yield* databasePath
@@ -153,4 +219,50 @@ it.layer(NodeServices.layer)("sandbox store", (it) => {
       }))
       expect((yield* runLog.recent(2)).map(({ runId }) => runId)).toEqual(["run-b", "run-a"])
     }).pipe(Effect.scoped))
+
+  it.effect("pages a resumed run once, and the cursor moves to the older run", () =>
+    Effect.gen(function*() {
+      const { runLog } = yield* openSandboxDatabase(yield* databasePath, contract)
+      const entry = Schema.decodeUnknownSync(RunEntry)
+      const started = (runId: string, at: string) =>
+        entry({
+          _tag: "Started",
+          runId,
+          accountId: "999999999990",
+          reason: "Manual",
+          at
+        })
+      yield* runLog.record(started("run-old", "2026-10-17T08:00:00Z"))
+      yield* runLog.record(started("run-new", "2026-10-17T09:00:00Z"))
+      yield* runLog.record(started("run-new", "2026-10-17T09:05:00Z"))
+      const accountId = Schema.decodeUnknownSync(AccountId)("999999999990")
+      const page = yield* runLog.forAccount(accountId, { limit: 1 })
+      expect(page.runs.map(({ runId }) => runId)).toEqual(["run-new"])
+      expect(page.next).toBe("run-new")
+      const older = yield* runLog.forAccount(accountId, {
+        limit: 1,
+        before: Schema.decodeUnknownSync(RunId)("run-new")
+      })
+      expect(older.runs.map(({ runId }) => runId)).toEqual(["run-old"])
+      expect(older.next).toBeNull()
+      expect((yield* runLog.forAccount(accountId, { limit: 20 })).runs.map(({ runId }) => runId)).toEqual([
+        "run-new",
+        "run-old"
+      ])
+    }).pipe(Effect.scoped))
+
+  it.effect("keeps the sweep time across reopen", () =>
+    Effect.gen(function*() {
+      const path = yield* databasePath
+      yield* Effect.scoped(Effect.gen(function*() {
+        const { store } = yield* openSandboxDatabase(path, contract)
+        expect(yield* store.sweepAt).toBeNull()
+        yield* store.markSweep(1_700_000_000_000)
+        expect(yield* store.sweepAt).toBe(1_700_000_000_000)
+      }))
+      yield* Effect.scoped(Effect.gen(function*() {
+        const { store } = yield* openSandboxDatabase(path, contract)
+        expect(yield* store.sweepAt).toBe(1_700_000_000_000)
+      }))
+    }))
 })

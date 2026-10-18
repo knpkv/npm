@@ -32,7 +32,10 @@ import {
   type JobRequest,
   type LocalJobPayload,
   type PendingApprovalCursor,
+  type SandboxBudgetLift,
   type SandboxJobKind,
+  type SandboxObservation,
+  type SandboxReset,
   type SubmissionProvenance,
   submissionRequiresApproval,
   workerObservationMaxLength,
@@ -148,6 +151,14 @@ export type HostOperations = {
    * `FleetOperationUnavailableError` before a job or approval request exists.
    */
   readonly sandboxJobKinds?: ReadonlySet<SandboxJobKind>
+  /**
+   * Reads the pool record a reset or budget-lift approval is bound to. `submit`
+   * stamps that observation onto the payload before the hash, replacing any
+   * client-supplied `observed`. Absent refuses those two kinds before a job exists.
+   */
+  readonly bindSandboxApproval?: (
+    payload: SandboxReset | SandboxBudgetLift
+  ) => Effect.Effect<SandboxObservation, FleetOperationError>
 }
 
 /** Persisted Fleet approval, distinct from the job's submitting actor. */
@@ -222,6 +233,24 @@ const updated = (
   now: number,
   change: JobChange
 ): JobRecord => ({ ...record, ...change, updatedAt: now })
+
+/**
+ * Reset and budget lift name the record the approver will see. The owner host
+ * supplies it; a client value is discarded. Other kinds pass through.
+ */
+const stampSandboxObservation = (
+  operations: HostOperations,
+  payload: JobPayload
+): Effect.Effect<JobPayload, FleetOperationUnavailableError | FleetOperationError> => {
+  if (payload.kind !== "sandbox.reset" && payload.kind !== "sandbox.budget.lift") {
+    return Effect.succeed(payload)
+  }
+  const bind = operations.bindSandboxApproval
+  if (bind === undefined) {
+    return Effect.fail(new FleetOperationUnavailableError({ kind: payload.kind, detail: "unbound" }))
+  }
+  return Effect.map(bind(payload), (observed) => ({ ...payload, observed }))
+}
 
 export const makeFleetService = Effect.fn("FleetService.make")(function*(options: Options) {
   const cryptoService = yield* Crypto.Crypto
@@ -315,12 +344,13 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
         detail: "cross-host approval is disabled on this machine"
       })
     }
+    const payload = yield* stampSandboxObservation(options.operations, request.payload)
     const record: JobRecord = {
       id: yield* id,
       createdAt: timestamp,
       updatedAt: timestamp,
       actor: validatedActor,
-      hash: yield* jobHash(options.host, validatedActor, request.payload).pipe(
+      hash: yield* jobHash(options.host, validatedActor, payload).pipe(
         Effect.provideService(Crypto.Crypto, cryptoService)
       ),
       approvalNonce: approval ? yield* nonce : null,
@@ -331,7 +361,7 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
       rejectedAt: null,
       expiredAt: null,
       status: approval ? "pending_approval" : "queued",
-      payload: request.payload,
+      payload,
       result: null,
       acceptedReceipt: null,
       error: null

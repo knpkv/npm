@@ -38,6 +38,24 @@ const destinationHref = (destination: NeedsYouDestination): string => {
           approvalJob: destination.jobId
         })
       )
+    case "ModulePage": {
+      const params = new URLSearchParams()
+      for (const [key, value] of Object.entries(destination.query)) params.set(key, value)
+      params.delete("tab")
+      const encoded = params.toString()
+      return `?${encoded}#${destination.module}/${destination.page}`
+    }
+  }
+}
+
+const rowTitle = (kind: NeedsYouItem["kind"]): string => {
+  switch (kind) {
+    case "sandbox-quarantined":
+      return "Quarantined sandbox"
+    case "sandbox-budget-hold":
+      return "Sandbox budget hold"
+    default:
+      return jobKindTitle(kind)
   }
 }
 
@@ -75,6 +93,18 @@ const sourceCopy = (source: NeedsYouSource): string => {
 }
 
 const RequestRow = ({ item, now }: { readonly item: NeedsYouItem; readonly now: number }): ReactElement => {
+  if (item.destination._tag === "ModulePage") {
+    return (
+      <li>
+        <a className="today-request" href={destinationHref(item.destination)}>
+          <span className="today-request-copy">
+            <small>{item.destination.module}</small>
+            <strong>{rowTitle(item.kind)}</strong>
+          </span>
+        </a>
+      </li>
+    )
+  }
   const expired = item.expiresAt !== null && item.expiresAt <= now
   const urgent = item.expiresAt !== null && item.expiresAt > now && item.expiresAt - now <= 300_000
   return (
@@ -83,7 +113,7 @@ const RequestRow = ({ item, now }: { readonly item: NeedsYouItem; readonly now: 
         <Creature host={item.destination.host} id={item.actor} size="row" state={expired ? "done" : "waiting"} />
         <span className="today-request-copy">
           <small>Fleet / Approvals</small>
-          <strong>{jobKindTitle(item.kind)}</strong>
+          <strong>{rowTitle(item.kind)}</strong>
           <span>
             {item.actor} asks on {item.destination.host}
           </span>

@@ -254,7 +254,8 @@ describe("sandbox reset", () => {
       const broken = RunLog.of({
         record: () => Effect.fail(new RunLogUnavailable({ detail: "disk full" })),
         entries: () => Effect.succeed([]),
-        recent: () => Effect.succeed([])
+        recent: () => Effect.succeed([]),
+        forAccount: () => Effect.succeed({ runs: [], next: null })
       })
       const next = yield* harness(clean()).run(cleaning(), broken)
       expect(next.state._tag).toBe("Available")
