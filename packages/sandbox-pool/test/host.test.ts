@@ -3,9 +3,11 @@ import { DateTime, Effect, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import { makeSandboxHostReads } from "../src/host-server.js"
 import {
-  redactSandboxText,
+  SandboxBlocker,
+  SandboxesOverview,
   SandboxesOverviewQuery,
   sandboxNavigationBadge,
+  SandboxRuns,
   SandboxRunsQuery,
   sweepIsStale,
   sweepStaleAfterMillis
@@ -33,7 +35,102 @@ const account = Schema.decodeUnknownSync(AccountId)
 const sandbox = Schema.decodeUnknownSync(Sandbox)
 const minute = 60_000
 const t0 = DateTime.makeUnsafe("2026-10-16T08:00:00.000Z")
-const roles = [contract.accountAccessRole, contract.budgetActionRole]
+
+/** A served blocker is one of these five. The copy is fixed; tests repeat it so a drifted constant fails. */
+type ServedBlocker =
+  | { readonly _tag: "ResourcesRemain"; readonly count: number; readonly text: string }
+  | { readonly _tag: "NukeFailed"; readonly resourceType: string | null; readonly text: string }
+  | { readonly _tag: "BudgetHold"; readonly text: string }
+  | { readonly _tag: "ScanIncomplete"; readonly text: string }
+  | { readonly _tag: "Unknown"; readonly text: string }
+
+const budgetHold = {
+  _tag: "BudgetHold",
+  text: "Budget hold. Lift it with sandbox.budget.lift"
+} satisfies ServedBlocker
+const scanIncomplete = { _tag: "ScanIncomplete", text: "The scan did not finish" } satisfies ServedBlocker
+const unknown = { _tag: "Unknown", text: "Reset failed" } satisfies ServedBlocker
+const remain = (count: number): ServedBlocker => ({
+  _tag: "ResourcesRemain",
+  count,
+  text: count === 1 ? "1 resource still removable" : `${count} resources still removable`
+})
+const nukeFailed = (resourceType: string | null): ServedBlocker => ({
+  _tag: "NukeFailed",
+  resourceType,
+  text: resourceType === null ? "A resource could not be removed" : `${resourceType} could not be removed`
+})
+
+const listingFailed =
+  `time="2026-10-16T09:00:00Z" level=error msg="listing failed: AccessDenied" owner=eu-central-1 resource_type=S3Bucket`
+const queueFull =
+  `time="2026-10-16T09:00:00Z" level=warning msg="item queue is full, not all resources will be enqueued" owner=eu-central-1 resource_type=CloudWatchLogsLogGroup`
+const protectedListed =
+  "global - IAMSAMLProvider - arn:aws:iam::111111111111:saml-provider/AWSSSO_x_DO_NOT_DELETE - [] - would remove"
+const esc = String.fromCharCode(27)
+const colouredDryRun = dryRunListedSamlProvider
+  .split("\n")
+  .map((row) => `${esc}[36m${row.replace(" - would remove", ` - ${esc}[32mwould remove${esc}[0m`)}\r`)
+  .join("\n")
+
+/** Every stored blocker the reset tests and the dry-run fixture can produce, plus junk. */
+const storedBlockers: ReadonlyArray<{ readonly stored: string; readonly blocker: ServedBlocker }> = [
+  { stored: budgetHoldBlocker(contract), blocker: budgetHold },
+  { stored: "budget hold: EphemeralDenyAll attached; lift via sandbox.budget.lift", blocker: budgetHold },
+  { stored: "budget hold check: AccessDenied", blocker: unknown },
+  { stored: "budget hold check: PoolDenyAll attached; lift via sandbox.budget.lift", blocker: unknown },
+  { stored: "verify: 2 resources still removable.", blocker: remain(2) },
+  {
+    stored: "verify: 1 resources still removable. CodeBuildProject x - failed: in use",
+    blocker: remain(1)
+  },
+  { stored: "verify: 3 resources still removable.", blocker: remain(3) },
+  { stored: `dry run: incomplete scan: ${listingFailed}`, blocker: scanIncomplete },
+  { stored: `verify: incomplete scan and 1 more: ${listingFailed}`, blocker: scanIncomplete },
+  { stored: `dry run: incomplete scan: ${queueFull}`, blocker: scanIncomplete },
+  { stored: `verify: incomplete scan: ${queueFull}`, blocker: scanIncomplete },
+  { stored: "nuke: S3Bucket ephemeral-a - failed: BucketNotEmpty", blocker: nukeFailed("S3Bucket") },
+  { stored: "S3Bucket ephemeral-x - failed: AccessDenied", blocker: nukeFailed("S3Bucket") },
+  {
+    stored: `${esc}[31mnuke: S3Bucket ephemeral-a - failed: BucketNotEmpty${esc}[0m\r`,
+    blocker: nukeFailed("S3Bucket")
+  },
+  { stored: "nuke: not-a-type id - failed: BucketNotEmpty", blocker: nukeFailed(null) },
+  { stored: "baseline: AccessDenied", blocker: unknown },
+  {
+    stored: `guard: protected resource listed (Identity Center SAML provider): ${protectedListed}`,
+    blocker: unknown
+  },
+  { stored: "guard: dry run counts 1 removable resources but lists 0 removal lines", blocker: unknown },
+  { stored: dryRunListedSamlProvider, blocker: unknown },
+  { stored: colouredDryRun, blocker: unknown },
+  { stored: "customer-private-data", blocker: unknown }
+]
+
+const forbidden = [
+  "BucketNotEmpty",
+  "ephemeral-a",
+  "ephemeral-x",
+  "resource_type=",
+  "AWSReservedSSO_",
+  "AWSServiceRole",
+  "CodeBuildProject",
+  "in use",
+  "customer-private-data",
+  "arn:",
+  "PoolDenyAll",
+  "EphemeralDenyAll",
+  "AccessDenied",
+  "listing failed",
+  "would remove",
+  "AWSSSO_",
+  "Scan complete",
+  "not all resources will be enqueued",
+  "Identity Center",
+  "\\u001b",
+  "\\r",
+  "\r"
+]
 
 const started = (id: string, accountId: string, time: string) =>
   entry({ _tag: "Started", runId: id, accountId, reason: "Manual", at: time })
@@ -69,59 +166,73 @@ const quarantined = (accountId: string, name: string, blocker: string) =>
   })
 
 describe("sandbox read model", () => {
-  it("drops ARNs, role names and nuke lines, and keeps the budget-hold contract", () => {
-    expect(redactSandboxText(
-      "sign in failed for 111111111111 arn:aws:iam::111111111111:role/Other",
-      roles
-    )).toBe("sign in failed for 111111111111")
-    expect(redactSandboxText("kept RoleAdmin", ["Role", "RoleAdmin"])).toBe("kept")
-    expect(redactSandboxText(
-      "Scan complete: 5 total, 0 nukeable, 5 filtered.\nwould remove bucket\nstill here",
-      roles
-    )).toBe("still here")
-    expect(redactSandboxText(budgetHoldBlocker(contract), roles)).toBe(
-      "budget hold: PoolDenyAll attached; lift via sandbox.budget.lift"
-    )
-  })
-
-  it.effect("serves neither a raw nuke line nor a role name on the overview or the runs page", () =>
+  it.effect("serves every stored blocker as one closed tag, and drops the stored line", () =>
     Effect.gen(function*() {
-      const bucketNotEmpty = "nuke: S3Bucket ephemeral-a - failed: BucketNotEmpty"
-      const listing =
-        `time="2026-10-16T09:00:00Z" level=error msg="listing failed: AccessDenied" owner=eu-central-1 resource_type=S3Bucket`
-      const leaked = [
-        bucketNotEmpty,
-        listing,
-        dryRunListedSamlProvider,
-        "sign in failed for AWSReservedSSO_PoolDeveloper_84e6a56c0ae5642a after AWSServiceRoleForOrganizations"
-      ].join("\n")
-      expect(redactSandboxText(bucketNotEmpty, roles)).toBe("")
-      expect(redactSandboxText(listing, roles)).toBe("")
-      expect(redactSandboxText(dryRunListedSamlProvider, roles)).toBe("")
-      expect(redactSandboxText(leaked, roles)).toBe("sign in failed for after")
-      const store = yield* makeMemorySandboxStore([quarantined("222222222222", "sandbox-b", leaked)])
-      const log = yield* makeMemoryRunLog
-      yield* log.record(started("run-current", "222222222222", "2026-10-16T08:00:00.000Z"))
-      yield* log.record(finished("run-current", "Quarantined", "2026-10-16T08:03:00.000Z", leaked))
-      const reads = yield* makeSandboxHostReads({ contract, store, runLog: log })
-      const overview = yield* reads.overview
-      const runs = yield* reads.runs({ id: account("222222222222") })
-      const served = `${JSON.stringify(overview)}\n${JSON.stringify(runs)}`
-      for (
-        const secret of ["BucketNotEmpty", "ephemeral-a", "resource_type=S3Bucket", "AWSReservedSSO_", "AWSServiceRole"]
-      ) {
-        expect(served).not.toContain(secret)
+      for (const sample of storedBlockers) {
+        const store = yield* makeMemorySandboxStore([quarantined("222222222222", "sandbox-b", sample.stored)])
+        const log = yield* makeMemoryRunLog
+        yield* log.record(started("run-current", "222222222222", "2026-10-16T08:00:00.000Z"))
+        yield* log.record(finished("run-current", "Quarantined", "2026-10-16T08:03:00.000Z", sample.stored))
+        const reads = yield* makeSandboxHostReads({ contract, store, runLog: log })
+        const overview = yield* reads.overview
+        const runs = yield* reads.runs({ id: account("222222222222") })
+        expect(Schema.decodeUnknownSync(SandboxesOverview)(overview), sample.stored).toEqual(overview)
+        expect(Schema.decodeUnknownSync(SandboxRuns)(runs), sample.stored).toEqual(runs)
+        const served = `${JSON.stringify(overview)}\n${JSON.stringify(runs)}`
+        for (const secret of forbidden) {
+          expect(served, sample.stored).not.toContain(secret)
+        }
+        expect(served, sample.stored).not.toContain(sample.stored)
+        if (overview._tag !== "Ready") throw new Error("expected a ready overview")
+        const card = overview.sandboxes[0]
+        if (card?.state._tag !== "Quarantined") throw new Error("expected a quarantined card")
+        expect(card.state.blocker, sample.stored).toEqual(sample.blocker)
+        if (runs._tag !== "Ready") throw new Error("expected a ready runs page")
+        expect(runs.runs[0]?.blocker, sample.stored).toEqual(sample.blocker)
       }
-      expect(served).toContain("sign in failed for after")
-      expect(overview).toMatchObject({
-        _tag: "Ready",
-        sandboxes: [{ state: { _tag: "Quarantined", blocker: "sign in failed for after" } }]
-      })
-      expect(runs).toMatchObject({
-        _tag: "Ready",
-        runs: [{ blocker: "sign in failed for after" }]
-      })
     }))
+
+  it("rejects stored free text and a blocker whose copy was rewritten", () => {
+    expect(
+      Schema.decodeUnknownResult(SandboxBlocker)(
+        "verify: 1 resources still removable. CodeBuildProject x - failed: in use"
+      )._tag
+    ).toBe("Failure")
+    expect(Schema.decodeUnknownResult(SandboxBlocker)({ _tag: "Unknown", text: "customer-private-data" })._tag).toBe(
+      "Failure"
+    )
+    expect(
+      Schema.decodeUnknownResult(SandboxBlocker)({
+        _tag: "ResourcesRemain",
+        count: 1,
+        text: "1 resources still removable"
+      })._tag
+    ).toBe("Failure")
+    expect(
+      Schema.decodeUnknownResult(SandboxBlocker)({
+        _tag: "NukeFailed",
+        resourceType: "ephemeral-a",
+        text: "A resource could not be removed"
+      })._tag
+    ).toBe("Failure")
+    expect(
+      Schema.decodeUnknownResult(SandboxBlocker)({
+        _tag: "NukeFailed",
+        resourceType: null,
+        text: "S3Bucket could not be removed"
+      })._tag
+    ).toBe("Failure")
+    expect(
+      Schema.decodeUnknownResult(SandboxBlocker)({
+        _tag: "BudgetHold",
+        text: "budget hold: PoolDenyAll attached; lift via sandbox.budget.lift"
+      })._tag
+    ).toBe("Failure")
+    expect(Schema.decodeUnknownSync(SandboxBlocker)(budgetHold)).toEqual(budgetHold)
+    expect(Schema.decodeUnknownSync(SandboxBlocker)(remain(1))).toEqual(remain(1))
+    expect(Schema.decodeUnknownSync(SandboxBlocker)(nukeFailed("S3Bucket"))).toEqual(nukeFailed("S3Bucket"))
+    expect(Schema.decodeUnknownSync(SandboxBlocker)(nukeFailed(null))).toEqual(nukeFailed(null))
+  })
 
   it("treats a missing or old sweep as stale and a sweep inside 10 minutes as fresh", () => {
     expect(sweepStaleAfterMillis).toBe(10 * minute)
@@ -226,14 +337,14 @@ describe("sandbox read model", () => {
           _tag: "Quarantined",
           runId: "run-current",
           step: null,
-          blocker: "verify failed after"
+          blocker: unknown
         }
       })
       expect(byId.get(account("999999999991"))).toMatchObject({
         label: "left the pool",
         state: {
           _tag: "Quarantined",
-          blocker: "budget hold: PoolDenyAll attached; lift via sandbox.budget.lift"
+          blocker: budgetHold
         }
       })
       expect(JSON.stringify(overview)).not.toContain("arn:")
@@ -247,7 +358,7 @@ describe("sandbox read model", () => {
         _tag: "Ready",
         accountId: "222222222222",
         next: "run-current",
-        runs: [{ runId: "run-current", step: null, blocker: "verify failed after", outcome: "Quarantined" }]
+        runs: [{ runId: "run-current", step: null, blocker: unknown, outcome: "Quarantined" }]
       })
       const rest = yield* reads.runs({ id: account("222222222222"), limit: 1, before: runId("run-current") })
       expect(rest).toMatchObject({

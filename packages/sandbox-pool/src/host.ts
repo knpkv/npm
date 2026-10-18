@@ -1,16 +1,17 @@
 /**
  * Contracts for hosting the sandbox read model inside another server.
  *
- * A card persists the account id, name, state tag, holder id, lease end, run id, current step and a
- * redacted blocker. `label` is `"left the pool"` when that id is absent from the current contract; the
- * state tag stays, including Leased. Version, cleaning reason, quarantine time and reset time stay in
- * the store. Role names, ARNs and raw aws-nuke lines are not part of this view.
+ * A card persists the account id, name, state tag, holder id, lease end, run id and current step.
+ * A quarantine blocker is a closed tag with fixed copy; the stored reset line stays in the store.
+ * `label` is `"left the pool"` when that id is absent from the current contract; the state tag stays,
+ * including Leased. Version, cleaning reason, quarantine time and reset time stay in the store.
  *
  * @module
  */
 import { Schema } from "effect"
 import { Holder, RunId } from "./lease.js"
 import { AccountId, SandboxName } from "./pool.js"
+import { isBudgetHold } from "./reset.js"
 import { RunStep } from "./run-log.js"
 
 const Instant = Schema.DateTimeUtcFromString
@@ -22,37 +23,87 @@ export const sweepStaleAfterMillis = 10 * 60 * 1000
 export const sweepIsStale = (asOf: number | null, nowMillis: number): boolean =>
   asOf === null || nowMillis - asOf > sweepStaleAfterMillis
 
-const arnPattern = /arn:[a-z0-9-]+:[^\s]+/gi
-/** A removal line, a scan summary, or a discovery log that names a resource type. */
-const nukeCue = /would remove|scan complete:|resource_type=/i
-/** `region - ResourceType - id`, including a step prefix such as `nuke:`. */
-const nukeListing = /(?:^|[\s:])(?:global|[a-z]{2}-[a-z]+-\d) - [A-Z][A-Za-z0-9]+ - /
-/** `S3Bucket ephemeral-a - failed: BucketNotEmpty`, with or without a step prefix. */
-const nukeFailure = /(?:^|:\s)[A-Z][A-Za-z0-9]+ \S+ - failed:/
+const budgetHoldText = "Budget hold. Lift it with sandbox.budget.lift"
+const scanIncompleteText = "The scan did not finish"
+const unknownText = "Reset failed"
 
-/** Identity Center and service-linked role names. The contract's own roles are passed in. */
-const stripGeneratedRoleNames = (line: string): string =>
-  line.replace(/AWSReservedSSO_[A-Za-z0-9_-]*|AWSServiceRole[A-Za-z0-9]*/g, "")
+const resourcesRemainText = (count: number): string =>
+  count === 1 ? "1 resource still removable" : `${count} resources still removable`
 
-const isRawNukeLine = (line: string): boolean => nukeCue.test(line) || nukeListing.test(line) || nukeFailure.test(line)
+const nukeFailedText = (resourceType: string | null): string =>
+  resourceType === null ? "A resource could not be removed" : `${resourceType} could not be removed`
+
+/** A PascalCase resource type, never a resource name. One to 64 characters. */
+const resourceTypePattern = /^[A-Z][A-Za-z0-9]{0,63}$/
+const ResourceType = Schema.String.check(Schema.isPattern(resourceTypePattern))
+const RemainCount = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 1_000_000 }))
+
+const ResourcesRemain = Schema.TaggedStruct("ResourcesRemain", {
+  count: RemainCount,
+  text: Schema.String
+}).check(Schema.makeFilter(
+  (value) => value.text === resourcesRemainText(value.count) || "resources-remain copy is fixed"
+))
+
+const NukeFailed = Schema.TaggedStruct("NukeFailed", {
+  resourceType: Schema.NullOr(ResourceType),
+  text: Schema.String
+}).check(Schema.makeFilter(
+  (value) => value.text === nukeFailedText(value.resourceType) || "nuke-failed copy is fixed"
+))
+
+const BudgetHold = Schema.TaggedStruct("BudgetHold", {
+  text: Schema.Literal(budgetHoldText)
+})
+
+const ScanIncomplete = Schema.TaggedStruct("ScanIncomplete", {
+  text: Schema.Literal(scanIncompleteText)
+})
+
+const UnknownBlocker = Schema.TaggedStruct("Unknown", {
+  text: Schema.Literal(unknownText)
+})
+
+/** The only blocker the read routes serve. Anything else in the stored line is dropped. */
+export const SandboxBlocker = Schema.Union([
+  ResourcesRemain,
+  NukeFailed,
+  BudgetHold,
+  ScanIncomplete,
+  UnknownBlocker
+])
+export type SandboxBlocker = typeof SandboxBlocker.Type
+
+/** ESC, `[`, parameters, `m`. Same shape the guard strips, so a coloured line still classifies. */
+const terminalStyle = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g")
+const resourcesRemain = /(\d+) resources still removable/
+/** `S3Bucket ephemeral-a - failed:`, with or without a step prefix. The type token is the only kept part. */
+const nukeFailure = /(?:^|[\s:])([A-Z][A-Za-z0-9]{0,63}) \S+ - failed:/
+
+const plainBlocker = (stored: string): string => stored.replaceAll("\r", "").replaceAll(terminalStyle, "")
 
 /**
- * Remove role names, ARNs and raw aws-nuke lines from text that is about to be served.
- * A raw line is a listing, a `would remove` or `Scan complete` line, a `resource_type=`
- * discovery line, or a resource `failed:` line. Longer contract roles are removed first.
- * Account ids and the budget-hold policy name stay.
+ * Map one stored quarantine line to the closed blocker. Budget hold, then an incomplete scan, then a
+ * removable count, then a resource-failure type; everything else is Unknown. The returned text is the
+ * fixed copy for that tag, never the stored line.
  */
-export const redactSandboxText = (text: string, roles: ReadonlyArray<string>): string => {
-  const ordered = [...roles].filter((role) => role.length > 0).sort((left, right) => right.length - left.length)
-  const kept: Array<string> = []
-  for (const line of text.split("\n")) {
-    if (isRawNukeLine(line)) continue
-    let next = stripGeneratedRoleNames(line.replace(arnPattern, ""))
-    for (const role of ordered) next = next.split(role).join("")
-    const collapsed = next.replace(/[ \t]{2,}/g, " ").trim()
-    if (collapsed.length > 0) kept.push(collapsed)
+export const sandboxBlockerFrom = (stored: string): SandboxBlocker => {
+  const plain = plainBlocker(stored)
+  if (isBudgetHold(plain)) return { _tag: "BudgetHold", text: budgetHoldText }
+  if (plain.includes("incomplete scan")) return { _tag: "ScanIncomplete", text: scanIncompleteText }
+  const countDigits = resourcesRemain.exec(plain)?.[1]
+  if (countDigits !== undefined && countDigits.length <= 7) {
+    const count = Number(countDigits)
+    if (Number.isInteger(count) && count >= 1 && count <= 1_000_000) {
+      return { _tag: "ResourcesRemain", count, text: resourcesRemainText(count) }
+    }
   }
-  return kept.join("\n")
+  const resourceType = nukeFailure.exec(plain)?.[1]
+  if (resourceType !== undefined && resourceTypePattern.test(resourceType)) {
+    return { _tag: "NukeFailed", resourceType, text: nukeFailedText(resourceType) }
+  }
+  if (plain.includes(" - failed:")) return { _tag: "NukeFailed", resourceType: null, text: nukeFailedText(null) }
+  return { _tag: "Unknown", text: unknownText }
 }
 
 /**
@@ -104,7 +155,7 @@ export const SandboxCardState = Schema.TaggedUnion({
   Available: {},
   Leased: { holder: Holder, endsAt: Instant },
   Cleaning: { runId: RunId, step: Schema.NullOr(RunStep) },
-  Quarantined: { runId: RunId, blocker: Schema.String, step: Schema.NullOr(RunStep) }
+  Quarantined: { runId: RunId, blocker: SandboxBlocker, step: Schema.NullOr(RunStep) }
 })
 export type SandboxCardState = typeof SandboxCardState.Type
 
@@ -130,7 +181,7 @@ export type SandboxesOverview = typeof SandboxesOverview.Type
 export const SandboxRunView = Schema.Struct({
   runId: RunId,
   step: Schema.NullOr(RunStep),
-  blocker: Schema.NullOr(Schema.String),
+  blocker: Schema.NullOr(SandboxBlocker),
   outcome: Schema.NullOr(Schema.Literals(["Available", "Quarantined"]))
 })
 export interface SandboxRunView extends Schema.Schema.Type<typeof SandboxRunView> {}

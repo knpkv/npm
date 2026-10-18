@@ -1,12 +1,13 @@
 /**
  * Server half of the hosted sandbox read model. `makeSandboxHostReads` turns the pool store and run log
- * into tagged results. Records, role names and aws-nuke output stay in this process.
+ * into tagged results. Records and stored blocker lines stay in this process.
  *
  * @module
  */
-import { DateTime, Effect } from "effect"
+import { DateTime, Effect, Schema } from "effect"
 import {
-  redactSandboxText,
+  SandboxBlocker,
+  sandboxBlockerFrom,
   type SandboxCard,
   type SandboxesOverview,
   type SandboxesReadFailed,
@@ -42,6 +43,10 @@ export interface SandboxHostReads {
 
 const failed: typeof SandboxesReadFailed.Type = { _tag: "Failed", reason: "unavailable" }
 
+/** A stored line becomes a closed blocker. A copy that misses the schema is a defect, not a served string. */
+const servedBlocker = (stored: string) =>
+  Schema.decodeUnknownEffect(SandboxBlocker)(sandboxBlockerFrom(stored)).pipe(Effect.orDie)
+
 const readFailure = {
   SandboxStoreUnavailable: () => Effect.succeed(failed),
   RunLogUnavailable: () => Effect.succeed(failed)
@@ -56,7 +61,6 @@ export const makeSandboxHostReads = (input: {
   readonly store: SandboxStore["Service"]
   readonly runLog: RunLog["Service"]
 }): Effect.Effect<SandboxHostReads> => {
-  const roles = [input.contract.accountAccessRole, input.contract.budgetActionRole]
   const poolIds = new Set(input.contract.accounts.map((account) => account.accountId))
   const currentStep = (accountId: Sandbox["accountId"], runId: RunId) =>
     input.runLog.forAccount(accountId, { limit: 20 }).pipe(
@@ -103,7 +107,7 @@ export const makeSandboxHostReads = (input: {
           state: {
             _tag: "Quarantined",
             runId: state.runId,
-            blocker: redactSandboxText(state.blocker, roles),
+            blocker: yield* servedBlocker(state.blocker),
             step: yield* currentStep(sandbox.accountId, state.runId)
           }
         } satisfies SandboxCard
@@ -149,12 +153,15 @@ export const makeSandboxHostReads = (input: {
     return {
       _tag: "Ready",
       accountId: query.id,
-      runs: page.runs.map((summary) => ({
-        runId: summary.runId,
-        step: summary.current,
-        blocker: summary.blocker === null ? null : redactSandboxText(summary.blocker, roles),
-        outcome: summary.outcome
-      })),
+      runs: yield* Effect.forEach(page.runs, (summary) =>
+        Effect.gen(function*() {
+          return {
+            runId: summary.runId,
+            step: summary.current,
+            blocker: summary.blocker === null ? null : yield* servedBlocker(summary.blocker),
+            outcome: summary.outcome
+          }
+        })),
       next: page.next
     } satisfies SandboxRuns
   })
