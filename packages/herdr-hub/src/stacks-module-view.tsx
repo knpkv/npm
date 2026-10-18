@@ -332,6 +332,9 @@ const causeOf = (issue: Issue, count: number): Cause => {
   if (issue.source === "local" && issue.reason === "skipped") {
     return { cause: "some project folders under the stacks root couldn’t be read", cost: "the rest were", fix: null }
   }
+  if (issue.source === "local" && issue.reason === "truncated") {
+    return { cause: "the project walk stopped early", cost: "projects already found are listed", fix: null }
+  }
   if (issue.source === "local" && issue.reason === "io") {
     return {
       cause: "the local stacks root or a project’s state couldn’t be read",

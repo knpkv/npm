@@ -1,4 +1,4 @@
-import { Effect, FileSystem, Path, Result, Schema } from "effect"
+import { Clock, Duration, Effect, FileSystem, Path, Result, Schema } from "effect"
 import { entries, stat, withinRoot } from "./internal/files.js"
 import { StateReadError } from "./schema.js"
 
@@ -8,31 +8,56 @@ export interface Project extends Schema.Schema.Type<typeof Project> {}
 
 const excluded = new Set([".git", "node_modules", ".alchemy", ".direnv", ".cache", "dist"])
 
+/** How far one overview walk may go before it returns what it already found. */
+export const projectWalkDirectoryCap = 50_000
+export const projectWalkBudget = Duration.seconds(5)
+
 /** Projects found, and how many entries below the root couldn't be read (the walk went on without them). */
 export interface DiscoveredProjects {
   readonly projects: ReadonlyArray<Project>
   readonly unreadable: number
+  /** The walk stopped at the directory cap or the time budget. Projects already found are kept. */
+  readonly truncated: boolean
+}
+
+export interface ProjectWalkLimits {
+  readonly maxDirectories?: number
+  readonly budget?: Duration.Duration
 }
 
 /**
  * Read directory metadata only. No stack imports, evaluation, subprocesses, or credential reads.
  * Symlinks that leave the root are never followed and dangling ones lead nowhere, so both are skipped;
  * any other entry that can't be read is counted and skipped. Only an unreadable root fails.
+ * The directory cap and the time budget stop the walk early and keep the projects already found.
  */
-export const discoverProjects = Effect.fn("AlchemyConsole.discoverProjects")(function*(directory: string) {
+export const discoverProjects = Effect.fn("AlchemyConsole.discoverProjects")(function*(
+  directory: string,
+  limits?: ProjectWalkLimits
+) {
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
+  const clock = yield* Clock.Clock
+  const started = yield* clock.currentTimeMillis
+  const maxDirectories = limits?.maxDirectories ?? projectWalkDirectoryCap
+  const budget = Duration.toMillis(limits?.budget ?? projectWalkBudget)
   const root = yield* fs.realPath(directory).pipe(Effect.mapError(() => new StateReadError({ reason: "io" })))
   const pending = [root]
   const visited = new Set<string>()
   const projects: Array<Project> = []
   let unreadable = 0
+  const finish = (truncated: boolean): DiscoveredProjects => ({
+    projects: projects.sort((a, b) => a.directory.localeCompare(b.directory)),
+    unreadable,
+    truncated
+  })
   while (pending.length > 0) {
     const current = pending.pop()
     if (current === undefined) break
     if (visited.has(current)) continue
     visited.add(current)
-    if (visited.size > 50_000) return yield* new StateReadError({ reason: "limit" })
+    const elapsed = (yield* clock.currentTimeMillis) - started
+    if (visited.size > maxDirectories || elapsed >= budget) return finish(true)
     const names = yield* Effect.result(entries(current))
     if (Result.isFailure(names)) {
       if (names.failure.reason === "limit" || current === root) return yield* names.failure
@@ -40,6 +65,8 @@ export const discoverProjects = Effect.fn("AlchemyConsole.discoverProjects")(fun
       continue
     }
     for (const name of names.success) {
+      // One wide directory stats every child. Read the clock per entry so that work stops on the budget.
+      if ((yield* clock.currentTimeMillis) - started >= budget) return finish(true)
       if (excluded.has(name)) continue
       const link = path.join(current, name)
       const resolved = yield* Effect.result(withinRoot(root, link))
@@ -63,8 +90,5 @@ export const discoverProjects = Effect.fn("AlchemyConsole.discoverProjects")(fun
       }
     }
   }
-  return {
-    projects: projects.sort((a, b) => a.directory.localeCompare(b.directory)),
-    unreadable
-  } satisfies DiscoveredProjects
+  return finish(false)
 })

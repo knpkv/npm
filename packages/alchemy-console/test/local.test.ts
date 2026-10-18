@@ -1,10 +1,20 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { expect, layer } from "@effect/vitest"
-import { Effect, FileSystem, Path } from "effect"
+import { Deferred, Duration, Effect, Fiber, FileSystem, Path } from "effect"
+import { TestClock } from "effect/testing"
+import * as NodeFs from "node:fs"
 import { discoverProjects } from "../src/discovery.js"
 import { readLocalState } from "../src/local-state.js"
 import { readAlchemyVersion } from "../src/version.js"
+import { clockedFileSystem, type ClockedIo } from "./clockedFileSystem.js"
 import { lockedFileSystem } from "./lockedFileSystem.js"
+
+const nodeClockIo: ClockedIo = {
+  readDirectory: (directory) => NodeFs.readdirSync(directory),
+  realPath: (path) => NodeFs.realpathSync(path),
+  exists: (path) => NodeFs.existsSync(path),
+  stat: (path) => NodeFs.statSync(path)
+}
 
 const setup = Effect.gen(function*() {
   const fs = yield* FileSystem.FileSystem
@@ -26,7 +36,8 @@ layer(NodeServices.layer)("local readers", (it) => {
       yield* fs.symlink(root, path.join(project, "cycle"))
       expect(yield* discoverProjects(root)).toEqual({
         projects: [{ directory: project, entrypoint: path.join(project, "alchemy.run.ts") }],
-        unreadable: 0
+        unreadable: 0,
+        truncated: false
       })
     }).pipe(Effect.scoped))
 
@@ -43,7 +54,8 @@ layer(NodeServices.layer)("local readers", (it) => {
       yield* fs.writeFileString(path.join(project, "alchemy.run.ts"), "")
       expect(yield* discoverProjects(root)).toEqual({
         projects: [{ directory: project, entrypoint: path.join(project, "alchemy.run.ts") }],
-        unreadable: 0
+        unreadable: 0,
+        truncated: false
       })
     }).pipe(Effect.scoped))
 
@@ -60,6 +72,58 @@ layer(NodeServices.layer)("local readers", (it) => {
       )
       expect(found.projects.map((item) => item.directory)).toEqual([project])
       expect(found.unreadable).toBe(1)
+    }).pipe(Effect.scoped))
+
+  // The cap is the same stop as the time budget: projects already visited stay, and the walk says it stopped.
+  it.effect("keeps projects already found when the directory cap is hit", () =>
+    Effect.gen(function*() {
+      const { fs, path, root } = yield* setup
+      const project = path.join(root, "z-app")
+      yield* fs.makeDirectory(project)
+      yield* fs.writeFileString(path.join(project, "alchemy.run.ts"), "")
+      yield* fs.makeDirectory(path.join(root, "a-later"))
+      yield* fs.makeDirectory(path.join(root, "b-later"))
+      const found = yield* discoverProjects(root, { maxDirectories: 2 })
+      expect(found.truncated).toBe(true)
+      expect(found.projects.map((item) => item.directory)).toEqual([project])
+    }).pipe(Effect.scoped))
+
+  it.effect("returns projects found when the walk budget runs out", () =>
+    Effect.gen(function*() {
+      const { fs, path, root } = yield* setup
+      const project = path.join(root, "z-app")
+      yield* fs.makeDirectory(project)
+      yield* fs.writeFileString(path.join(project, "alchemy.run.ts"), "")
+      for (const name of ["a", "b", "c", "d", "e", "f"]) yield* fs.makeDirectory(path.join(root, name))
+      // Root, the project, then three later folders. The next one sees the 5 second budget.
+      const slow = yield* clockedFileSystem(5, nodeClockIo)
+      const fiber = yield* discoverProjects(root).pipe(
+        Effect.provideService(FileSystem.FileSystem, slow.fs),
+        Effect.forkChild
+      )
+      yield* Deferred.await(slow.started)
+      yield* TestClock.adjust("6 seconds")
+      expect(fiber.pollUnsafe()?._tag).toBe("Success")
+      const found = yield* Fiber.join(fiber)
+      expect(found.truncated).toBe(true)
+      expect(found.projects.map((item) => item.directory)).toEqual([project])
+    }).pipe(Effect.scoped))
+
+  // Six children, each stat sleeping 1s, on a 5s budget. The clock is read per entry, so this returns truncated.
+  it.effect("stops one wide directory on the walk budget", () =>
+    Effect.gen(function*() {
+      const { fs, path, root } = yield* setup
+      for (const name of ["a", "b", "c", "d", "e", "f"]) yield* fs.writeFileString(path.join(root, name), "")
+      const slow = yield* clockedFileSystem(0, nodeClockIo, 6)
+      const fiber = yield* discoverProjects(root, { budget: Duration.seconds(5) }).pipe(
+        Effect.provideService(FileSystem.FileSystem, slow.fs),
+        Effect.forkChild
+      )
+      yield* Deferred.await(slow.started)
+      yield* TestClock.adjust("5 seconds")
+      expect(fiber.pollUnsafe()?._tag).toBe("Success")
+      const found = yield* Fiber.join(fiber)
+      expect(found.truncated).toBe(true)
     }).pipe(Effect.scoped))
 
   it.effect("reads multiple stages, ignores output/tmp files, and preserves namespace parents", () =>

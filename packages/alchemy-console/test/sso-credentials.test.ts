@@ -35,9 +35,9 @@ layer(ssoCredentialsLayer(sdk.fromSSO))("SSO credentials boundary", (it) => {
         ssoRegion: profile.ssoRegion,
         ssoStartUrl: profile.startUrl,
         ssoSession: profile.session,
-        clientConfig: { region: profile.ssoRegion },
-        ignoreCache: true
+        clientConfig: { region: profile.ssoRegion }
       })
+      expect(sdk.fromSSO.mock.calls.at(-1)?.[0]).not.toHaveProperty("ignoreCache")
       expect(result.region).toBe(profile.region)
       expect(JSON.stringify(result)).not.toContain("fixture-secret")
       expect(JSON.stringify(result)).not.toContain("fixture-token")

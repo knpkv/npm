@@ -34,6 +34,10 @@ for (const shot of pages) {
         await expect(page.locator("[data-source-issue]")).toHaveCount(2)
         await expect(page.getByText("Unknown", { exact: true })).toHaveCount(0)
       }
+      if (shot.name === "stacks-limit") {
+        await expect(page.getByText("The project walk stopped early, so projects already found are listed."))
+          .toBeVisible()
+      }
       if (shot.name === "stacks-stack") await expect(page.getByRole("rowheader", { name: "org-trail" })).toBeVisible()
       const overflow = await page.evaluate(() =>
         document.documentElement.scrollWidth - document.documentElement.clientWidth
