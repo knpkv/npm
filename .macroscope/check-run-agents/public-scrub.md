@@ -21,7 +21,10 @@ include:
 # Design exports are hash-pinned bytes, large enough to exhaust the run budget,
 # so no scrub reads them, even in their own ref PRs: those PRs are scrubbed by
 # the manual DOM diff against the previous export.
+# Vendor OpenAPI specs are fetched verbatim and their examples are upstream's;
+# our *.patch.json edits beside them stay scrubbed.
 exclude:
+  - "packages/*-api-client/.specs/*-v?.json"
   - "design-refs/*/revisions/**"
   - "design-refs/*/screens/**"
   - "repos/**"
