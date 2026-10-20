@@ -58,12 +58,18 @@ test("ready versions publish before pending changesets are versioned", () => {
 // "Fetched data from GitHub has missing data" (2026-10-17 on). The check names the cause first.
 test("the release token is checked before any step that needs it", () => {
   const check = stepIndex("Check the release token")
-  const prepare = stepIndex("Prepare versions ready to publish")
-  assert.ok(check >= 0 && check < prepare)
+  assert.ok(check >= 0)
   assert.equal(steps[check].env.GH_TOKEN, "${{ secrets.TOKEN_GITHUB }}")
-  // The same kind of call changelog-github makes, so a token it would reject fails here.
+  // Every other step that holds the token comes after the check, including any added later.
+  steps.forEach((step, index) => {
+    if (index !== check && JSON.stringify(step).includes("secrets.TOKEN_GITHUB")) assert.ok(check < index, step.name)
+  })
+  // The same kind of call changelog-github makes, so a token it would reject fails here. Only a
+  // 401 is blamed on the token; anything else (5xx, network) is reported as such, with gh's output.
   assert.match(steps[check].run, /gh api graphql/u)
+  assert.match(steps[check].run, /Bad credentials/u)
   assert.match(steps[check].run, /::error title=TOKEN_GITHUB rejected::/u)
+  assert.match(steps[check].run, /::error title=Could not reach GitHub::/u)
   for (const step of steps.filter(changesetsAction)) {
     assert.equal(step.with["github-token"], "${{ secrets.TOKEN_GITHUB }}", step.name)
   }
