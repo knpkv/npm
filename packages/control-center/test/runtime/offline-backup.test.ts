@@ -608,8 +608,14 @@ describe("offline backup commands", () => {
       assert.strictEqual(unsupported.stdout, "")
       assert.strictEqual(
         unsupported.stderr,
-        "Usage: control-center [--no-open | serve | recover-owner | backup <archive> | verify-backup <archive> | restore <archive>]\n"
+        "Usage: control-center [--help | --no-open | serve | recover-owner | backup <archive> | verify-backup <archive> | restore <archive>]\n"
       )
+
+      // `--help` is the same usage on stdout and a clean exit, so `npx … --help` succeeds.
+      const help = yield* runBuiltCli(cliEntry, ["--help"], configuredRoot)
+      assert.strictEqual(help.exitCode, ChildProcessSpawner.ExitCode(0))
+      assert.strictEqual(help.stdout, unsupported.stderr)
+      assert.strictEqual(help.stderr, "")
 
       const missingArchive = yield* runBuiltCli(
         cliEntry,
@@ -929,7 +935,7 @@ describe("offline backup commands", () => {
         assert.strictEqual(unsupported.stdout, "")
         assert.strictEqual(
           unsupported.stderr,
-          "Usage: control-center [--no-open | serve | recover-owner | backup <archive> | verify-backup <archive> | restore <archive>]\n"
+          "Usage: control-center [--help | --no-open | serve | recover-owner | backup <archive> | verify-backup <archive> | restore <archive>]\n"
         )
 
         const server = yield* runBuiltCli(cliEntry, ["serve"], configuredRoot, undefined, invalidActiveTelemetry)
