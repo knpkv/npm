@@ -204,6 +204,74 @@ describe("Sandboxes overview", { concurrent: false }, () => {
     expect(row("ephemeral-05")).toBe("22 h 55 minEnds 12:00 tomorrow")
   })
 
+  it("names one end for a lease stored past the 24 h cap", async () => {
+    await render(
+      ready([leased("ephemeral-05", "999999999994", "agent-b", "2026-10-17T09:00:00.000Z", "2026-10-18T12:00:00.000Z")])
+    )
+    const card = text('[data-account="ephemeral-05"]')
+    expect(card).toContain("Ends 12:00 tomorrow")
+    expect(card).toContain("24 h cap reached, ends 12:00 tomorrow")
+    expect(card).not.toContain("09:00 tomorrow")
+  })
+
+  it("says the sweep has not run when there is no sweep time", async () => {
+    await render({ _tag: "Ready", sandboxes: [], badge: { quarantined: 0, stale: true, partial: true, asOf: null } })
+    expect(text(".sandboxes-page")).toContain("Sweep has not run yet")
+  })
+
+  it("does not count accounts that left the pool as free or freeing", async () => {
+    await render(
+      ready([
+        card({
+          accountId: "999999999998",
+          name: "ephemeral-09",
+          label: "left the pool",
+          state: { _tag: "Available", lastResetAt: null }
+        }),
+        leased(
+          "ephemeral-08",
+          "999999999997",
+          "agent-b",
+          "2026-10-17T09:00:00.000Z",
+          "2026-10-17T14:00:00.000Z",
+          "left the pool"
+        ),
+        leased("ephemeral-01", "999999999990", "agent-b", "2026-10-17T09:20:00.000Z", "2026-10-17T17:20:00.000Z")
+      ])
+    )
+    expect(button("Lease an account")?.hasAttribute("disabled")).toBe(true)
+    expect(text(".sandboxes-page")).toContain("No account is free until 17:20.")
+    expect(text("[data-pool-notice]")).toBe("The only account is leased. The next one frees at 17:20.")
+    // The retired cards stay on screen.
+    expect(document.querySelectorAll("[data-account]")).toHaveLength(3)
+  })
+
+  it("names the next free time from leases that have not ended yet", async () => {
+    await render(
+      ready([
+        leased("ephemeral-01", "999999999990", "agent-b", "2026-10-17T04:05:00.000Z", "2026-10-17T12:05:00.000Z"),
+        leased("ephemeral-02", "999999999991", "agent-b", "2026-10-17T09:20:00.000Z", "2026-10-17T17:20:00.000Z")
+      ])
+    )
+    expect(text("[data-pool-notice]")).toBe("Both accounts are leased. The next one frees at 17:20.")
+    expect(text(".sandboxes-page")).toContain("No account is free until 17:20.")
+  })
+
+  it("does not claim a write failed when it may have been sent", async () => {
+    const writes: SandboxesModuleWrites = {
+      lease: Effect.die("connection reset"),
+      extend: () => Effect.void,
+      release: () => Effect.void
+    }
+    await render(ready([available("ephemeral-02", "999999999991", null)]), { writes })
+    await openDialog(button("Lease an account"))
+    await act(async () => button("Lease longest idle", '[role="dialog"]')?.click())
+    await settle()
+    expect(text('[role="dialog"] [role="alert"]')).toBe(
+      "The lease may not have been submitted. Check the cards before trying again."
+    )
+  })
+
   it("says above the cards when every account is leased and when the next one frees", async () => {
     await render(
       ready([

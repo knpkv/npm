@@ -146,6 +146,10 @@ const extendWords = (startedAt: DateTime.Utc, endsAt: DateTime.Utc): string => {
         : `extended ${extends_} times`
 }
 
+/** Cards for accounts still in the pool contract. One that left the pool shows, but is no capacity. */
+const inPool = (cards: ReadonlyArray<SandboxCard>): ReadonlyArray<SandboxCard> =>
+  cards.filter((item) => item.label === null)
+
 /** Same order as `lease`: a null last reset is idle longest, then the oldest reset. */
 const longestIdle = (cards: ReadonlyArray<SandboxCard>) =>
   cards
@@ -158,10 +162,12 @@ const longestIdle = (cards: ReadonlyArray<SandboxCard>) =>
           : millis(left.lastResetAt) - millis(right.lastResetAt)
     )[0]
 
-/** Soonest leased end. That is when an account next becomes free. */
-const nextFreeAt = (cards: ReadonlyArray<SandboxCard>): DateTime.Utc | undefined =>
+/** Soonest leased end still ahead. An ended lease waits for the sweep, so it names no time. */
+const nextFreeAt = (cards: ReadonlyArray<SandboxCard>, now: DateTime.Utc): DateTime.Utc | undefined =>
   cards
-    .flatMap((item) => (item.state._tag === "Leased" ? [item.state.endsAt] : []))
+    .flatMap((item) =>
+      item.state._tag === "Leased" && millis(item.state.endsAt) > millis(now) ? [item.state.endsAt] : []
+    )
     .sort((l, r) => millis(l) - millis(r))[0]
 
 /** Fresh sweep names the clock. A stale badge says late; an older day says yesterday or the date. */
@@ -171,7 +177,8 @@ const sweepWords = (times: Times, asOf: number, stale: boolean, now: DateTime.Ut
 }
 
 /** Above the cards when nothing is free: how much is leased, and when the next lease ends. */
-const noneFreeWords = (times: Times, cards: ReadonlyArray<SandboxCard>): string | null => {
+const noneFreeWords = (times: Times, all: ReadonlyArray<SandboxCard>, now: DateTime.Utc): string | null => {
+  const cards = inPool(all)
   if (cards.length === 0 || cards.some((item) => item.state._tag === "Available")) return null
   const leased = cards.filter((item) => item.state._tag === "Leased").length
   const lead =
@@ -182,7 +189,7 @@ const noneFreeWords = (times: Times, cards: ReadonlyArray<SandboxCard>): string 
         : cards.length === 2
           ? "Both accounts are leased."
           : `All ${cards.length} accounts are leased.`
-  const freeAt = nextFreeAt(cards)
+  const freeAt = nextFreeAt(cards, now)
   return freeAt === undefined ? lead : `${lead} The next one frees at ${times.clock(freeAt)}.`
 }
 
@@ -298,7 +305,9 @@ const unchangedCopy = {
 const refusedCopy = (action: Action, reason: SandboxesWriteFailed["reason"] | "defect"): string =>
   reason === "unauthorized"
     ? `Only the pool owner can ${action} here. ${unchangedCopy[action]}`
-    : `The ${action} wasn’t submitted. ${unchangedCopy[action]}`
+    : reason === "defect"
+      ? `The ${action} may not have been submitted. Check the cards before trying again.`
+      : `The ${action} wasn’t submitted. ${unchangedCopy[action]}`
 
 const cliCopy = {
   lease: "Lease from the CLI for now.",
@@ -453,7 +462,7 @@ const cardRows = (
             main={`Started ${times.clock(state.startedAt)}, ${extendWords(state.startedAt, state.endsAt)}`}
             sub={
               capped
-                ? `24 h cap reached, ends ${times.when(cap, now)}`
+                ? `24 h cap reached, ends ${times.when(state.endsAt, now)}`
                 : `${span(state.endsAt, cap)} of the 24 h cap left`
             }
           />
@@ -652,8 +661,8 @@ const LeaseAction = ({
   readonly writes: SandboxesModuleWrites | null
 }): ReactElement => {
   const times = useContext(TimesContext)
-  const chosen = longestIdle(overview.sandboxes)
-  const freeAt = nextFreeAt(overview.sandboxes)
+  const chosen = longestIdle(inPool(overview.sandboxes))
+  const freeAt = nextFreeAt(inPool(overview.sandboxes), now)
   if (chosen === undefined) {
     return (
       <div className="sandboxes-lease">
@@ -731,6 +740,7 @@ const OverviewPage = ({
     readAgain(false)
   }
   const count = pool?.overview.sandboxes.length
+  const noneFree = pool === null ? null : noneFreeWords(times, pool.overview.sandboxes, pool.stale ? pool.readAt : now)
   return (
     <section className="sandboxes-page">
       <header className="sandboxes-head">
@@ -786,7 +796,9 @@ const OverviewPage = ({
               <span data-pool-summary="">{summary(view.overview.sandboxes)}</span>
               <span data-pool-read="">{`Read ${times.clock(view.readAt)} from hostd`}</span>
             </div>
-            {view.overview.badge.asOf === null ? null : view.overview.badge.stale ? (
+            {view.overview.badge.asOf === null ? (
+              <StateLabel icon="clock" label="Sweep has not run yet" size="compact" tone="caution" />
+            ) : view.overview.badge.stale ? (
               <StateLabel
                 icon="clock"
                 label={sweepWords(times, view.overview.badge.asOf, true, now)}
@@ -797,9 +809,9 @@ const OverviewPage = ({
               <span>{sweepWords(times, view.overview.badge.asOf, false, now)}</span>
             )}
           </div>
-          {noneFreeWords(times, view.overview.sandboxes) === null ? null : (
+          {noneFree === null ? null : (
             <Notice data-pool-notice="" tone="neutral">
-              {noneFreeWords(times, view.overview.sandboxes)}
+              {noneFree}
             </Notice>
           )}
           <div className="sandboxes-grid">
