@@ -28,6 +28,11 @@
     border-color: var(--rly-color-surface-2);
     color: var(--rly-color-text-1);
   }
+  .inline {
+    block-size: var(--rly-control-height-inline);
+    inline-size: var(--rly-control-height-inline);
+    position: relative;
+  }
   .dense {
     block-size: var(--rly-control-height-dense);
     border-radius: var(--rly-radius-tag);

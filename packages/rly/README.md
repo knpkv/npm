@@ -174,6 +174,8 @@ Controls default to tool density. `Button`, `IconButton`, `Select`, and the
 default and sizes a button to its text with a small radius; on coarse pointers
 the dense and compact heights rise to a 44px touch target. Pass
 `size="default"` or `"principal"` where an action needs more presence.
+`IconButton` `size="inline"` is 28px with a 16px glyph and stays 28px on a coarse
+pointer. It sets `data-rly-hit-area`, so the 44px target does not stretch the line.
 
 `ToggleGroup` chooses one of a few peer options, such as a range or a measure,
 and is always controlled: exactly one option is on, pressing it again changes

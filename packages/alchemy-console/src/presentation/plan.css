@@ -97,16 +97,12 @@
   position: relative;
   white-space: nowrap;
 }
+/* Layout only. The 28px box and the 44px hit area belong to IconButton size inline. */
 .ac-id-copy {
   flex: none;
   position: relative;
 }
-/* A 44px target around the compact button without changing the line it sits in. */
-.ac-id-copy::after {
-  content: "";
-  inset: min(0px, calc((100% - 44px) / 2));
-  position: absolute;
-}
+/* A copy result, announced without taking space in the line. Success is polite and clears. Failure is an alert. */
 .ac-id-status {
   block-size: 1px;
   clip-path: inset(50%);

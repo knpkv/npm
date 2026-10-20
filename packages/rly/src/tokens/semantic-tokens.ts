@@ -97,6 +97,7 @@ export const RLY_EASING_TOKEN_NAMES = tokenNames([
 export type RlyEasingToken = (typeof RLY_EASING_TOKEN_NAMES)[number]
 
 export const RLY_CONTROL_HEIGHT_TOKEN_NAMES = tokenNames([
+  "inline",
   "dense",
   "compact",
   "default",

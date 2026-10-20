@@ -68,7 +68,10 @@ const source = useCommitSummaries(loadCommit, reading.observedAt)
 The label reads “Restore the draft on reconnect, 14:18”: the time alone for a commit made the day of `now`
 (the reading's time), the date too otherwise, never a relative time. The full id is in the tooltip and behind
 a Copy commit id button; pass `copy={false}` where the button cannot keep a 44px target, such as inside the
-shrunk canvas drawing. A failed load reads “Commit title unavailable” and keeps the copy button.
+shrunk canvas drawing. A successful copy says Copied in a polite live region for about 2 seconds, without the
+id, and the button shows a check in the same box. A refused copy says Couldn’t copy the commit id
+in an alert and keeps the copy icon. The status text does not take space in the line. A failed
+load reads “Commit title unavailable” and keeps the copy button.
 `useCommitWords(commit)` gives the same words as plain text for places that take only text.
 
 ## Guided reviews

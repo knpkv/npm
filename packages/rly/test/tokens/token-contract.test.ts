@@ -32,9 +32,17 @@ describe("semantic token contract", () => {
     expect(RLY_CONTROL_HEIGHT_TOKEN_NAMES).toEqual(controlHeightTokenSource.map(({ name }) => name))
   })
 
+  it("keeps an inline control at 28px so running text does not grow on a coarse pointer", () => {
+    expect(controlHeightTokenSource).toContainEqual({ name: "inline", value: "28px", coarse: "28px" })
+    const css = renderTokenCss()
+    expect(css).toContain("--rly-control-height-inline: 28px;")
+    const coarse = css.slice(css.indexOf("@media (pointer: coarse)"))
+    expect(coarse).toContain("--rly-control-height-inline: 28px;")
+  })
+
   it("gives every control one shared height per size, with 44px touch targets on coarse pointers", () => {
     const css = renderTokenCss()
-    expect(RLY_CONTROL_HEIGHT_TOKEN_NAMES).toEqual(["dense", "compact", "default", "principal"])
+    expect(RLY_CONTROL_HEIGHT_TOKEN_NAMES).toEqual(["inline", "dense", "compact", "default", "principal"])
     expect(css).toContain("--rly-control-height-dense: 32px;")
     expect(css).toContain("--rly-control-height-default: 48px;")
     const coarse = css.slice(css.indexOf("@media (pointer: coarse)"))

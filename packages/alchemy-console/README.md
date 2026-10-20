@@ -191,7 +191,11 @@ optional `stackHref`; without a destination, stages and counts remain text.
 Not connected. `PlanView` accepts the same controlled state and a read-only
 `onReadAgain` callback. A published plan shows the words Head, Base and Digest.
 Each short id is that copy button's accessible name and clipboard value, not
-visible text. These surfaces have no commit-summary loader, so the words are
+visible text. The button is IconButton size inline: a 28px box and the shared
+44px hit area. A successful copy says Copied in a polite live region for about
+2 seconds, without the id, and the button shows a check in the same box. A refused
+copy names the kind in an alert and keeps the copy icon. The status text does not
+take space in the line. These surfaces have no commit-summary loader, so the words are
 not commit titles.
 `ResourceDetailView` accepts `stackHref` and `resourceHref`. Views fetch nothing,
 read no configuration and persist no data. The standalone detail wrapper adds
