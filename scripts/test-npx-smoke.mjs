@@ -8,6 +8,7 @@
  *
  *   pnpm build && pnpm -r --filter "./packages/*" pack --pack-destination /tmp/packs
  *   node scripts/test-npx-smoke.mjs --tarballs /tmp/packs                 # every @knpkv dependency from the packs
+ *   node scripts/test-npx-smoke.mjs --tarballs /tmp/packs --install-through sfw   # CI: through Socket Firewall
  *   node scripts/test-npx-smoke.mjs --tarballs /tmp/packs --registry-for-published
  *
  * `--registry-for-published` takes every version npm already has from the registry and only the rest from the
@@ -98,17 +99,27 @@ export const npxSmokeCases = [
   }
 ]
 
-/** Repeated `--tarballs <dir>` (exactly one), `--registry-for-published` and `--case <bin>`; anything else is null. */
+/**
+ * `--tarballs <dir>` (exactly one), `--registry-for-published`, `--install-through <wrapper>` (at most one) and
+ * repeated `--case <bin>`; anything else is null.
+ */
 export const parseSmokeArguments = (args) => {
-  const parsed = { tarballs: undefined, registryForPublished: false, cases: [] }
+  const parsed = { tarballs: undefined, registryForPublished: false, installThrough: undefined, cases: [] }
   for (let index = 0; index < args.length; index += 1) {
     const flag = args[index]
     const value = args[index + 1]
     if (flag === "--registry-for-published") parsed.registryForPublished = true
-    else if ((flag === "--tarballs" || flag === "--case") && value !== undefined && !value.startsWith("--")) {
+    else if (
+      (flag === "--tarballs" || flag === "--case" || flag === "--install-through") &&
+      value !== undefined &&
+      !value.startsWith("--")
+    ) {
       if (flag === "--tarballs") {
         if (parsed.tarballs !== undefined) return null
         parsed.tarballs = value
+      } else if (flag === "--install-through") {
+        if (parsed.installThrough !== undefined) return null
+        parsed.installThrough = value
       } else parsed.cases.push(value)
       index += 1
     } else return null
@@ -157,6 +168,29 @@ export const packIdentity = (fileName) => {
   return match === null ? undefined : { name: `@knpkv/${match[1]}`, version: match[2] }
 }
 
+const npmInstall = ["install", "--no-audit", "--no-fund", "--loglevel=error"]
+
+/**
+ * The project install as `[command, args]`. CI names Socket Firewall (`sfw`), which every other dependency
+ * install in this repository goes through; without a wrapper it is plain npm, for a local run.
+ */
+export const installCommand = (installThrough) =>
+  installThrough === undefined ? ["npm", npmInstall] : [installThrough, ["npm", ...npmInstall]]
+
+/**
+ * What `npm view <name>@<version> version` said. Only npm's own answer for a missing version counts as
+ * unpublished (E404 from npm 11; empty output from older npm). Anything else, a timeout, a 5xx or a rate limit,
+ * is unknown and fails the run: read as unpublished it would quietly test the tarball instead of what npm serves.
+ */
+export const classifyNpmView = ({ name, version, exitCode, stdout, stderr }) => {
+  const answer = stdout.trim()
+  if (exitCode === 0 && answer === version) return { _tag: "Published" }
+  if (exitCode === 0 && answer === "") return { _tag: "Unpublished" }
+  if (exitCode !== 0 && /\bE404\b/u.test(stderr)) return { _tag: "Unpublished" }
+  const said = (stderr.trim() || answer).split("\n")[0]
+  return { _tag: "Unknown", reason: `npm view ${name}@${version} gave no clear answer (exit ${exitCode}): ${said}` }
+}
+
 const freePort = Effect.callback((resume) => {
   const probe = createServer()
   probe.once("error", (error) => resume(Effect.fail(new SmokeFailed({ reason: `no free port: ${error.message}` }))))
@@ -200,17 +234,23 @@ const runToEnd = Effect.fn("NpxSmoke.runToEnd")(function* (command, args, cwd, e
   return stdout
 })
 
-/** Which `name@version` of the packs npm already serves; a version it does not know is simply absent. */
+/** Which `name@version` of the packs npm already serves; fails when npm gives no clear answer for one. */
 const publishedVersions = Effect.fn("NpxSmoke.publishedVersions")(function* (packs, cwd) {
+  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+  const searchPath = yield* Config.String("PATH")
   const found = new Set()
   for (const pack of packs) {
-    const version = yield* runToEnd("npm", ["view", `${pack.name}@${pack.version}`, "version"], cwd, {
-      HOME: cwd
-    }).pipe(
-      Effect.map((out) => out.trim()),
-      Effect.orElseSucceed(() => "")
+    const handle = yield* spawner.spawn(
+      ChildProcess.make("npm", ["view", `${pack.name}@${pack.version}`, "version"], {
+        cwd,
+        env: { PATH: searchPath, HOME: cwd },
+        extendEnv: false
+      })
     )
-    if (version === pack.version) found.add(`${pack.name}@${pack.version}`)
+    const [stdout, stderr, exitCode] = yield* collect(handle)
+    const answer = classifyNpmView({ ...pack, exitCode, stdout, stderr })
+    if (answer._tag === "Unknown") return yield* new SmokeFailed({ reason: answer.reason })
+    if (answer._tag === "Published") found.add(`${pack.name}@${pack.version}`)
   }
   return found
 })
@@ -256,7 +296,7 @@ const runCase = Effect.fn("NpxSmoke.runCase")(function* (smokeCase, project) {
   const output = Option.getOrElse(seen, () => [])
   if (!output.some((line) => smokeCase.ready.test(line))) {
     const reason = Option.isNone(seen) ? "printed no ready line within 90 seconds" : "exited before its ready line"
-    return `${reason}:\n${output
+    return `${reason} (port ${port}):\n${output
       .filter((line) => !line.startsWith("npm notice"))
       .slice(-8)
       .join("\n")}`
@@ -276,7 +316,8 @@ const program = Effect.gen(function* () {
   const options = parseSmokeArguments(yield* stdio.args)
   if (options === null) {
     return yield* new SmokeFailed({
-      reason: "usage: node scripts/test-npx-smoke.mjs --tarballs <dir> [--registry-for-published] [--case <bin>]..."
+      reason:
+        "usage: node scripts/test-npx-smoke.mjs --tarballs <dir> [--registry-for-published] [--install-through <wrapper>] [--case <bin>]..."
     })
   }
   const fs = yield* FileSystem.FileSystem
@@ -298,7 +339,8 @@ const program = Effect.gen(function* () {
   yield* Console.log(
     `installing ${Object.keys(manifest.dependencies).length} apps; ${Object.keys(manifest.overrides).length} @knpkv packages from tarballs`
   )
-  yield* runToEnd("npm", ["install", "--no-audit", "--no-fund", "--loglevel=error"], project, { HOME: project })
+  const [installer, installArgs] = installCommand(options.installThrough)
+  yield* runToEnd(installer, installArgs, project, { HOME: project })
   const failures = []
   for (const smokeCase of cases) {
     const reason = yield* runCase(smokeCase, project).pipe(

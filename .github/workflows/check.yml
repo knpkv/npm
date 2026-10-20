@@ -230,7 +230,7 @@ jobs:
       - name: Pack every workspace package
         run: pnpm -r --filter "./packages/*" pack --pack-destination "$RUNNER_TEMP/packs"
       - name: Run each app from its tarball
-        run: node scripts/test-npx-smoke.mjs --tarballs "$RUNNER_TEMP/packs"
+        run: node scripts/test-npx-smoke.mjs --tarballs "$RUNNER_TEMP/packs" --install-through sfw
 
   test:
     name: Test
