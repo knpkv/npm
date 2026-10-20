@@ -102,7 +102,7 @@ const overview = Effect.suspend(() => {
 
 // The sheets confirm into a write that never settles, so a capture keeps the sheet open.
 const writes: SandboxesModuleWrites = { lease: Effect.never, extend: () => Effect.never, release: () => Effect.never }
-const module = makeSandboxesModuleViews({ owner: state !== "8a", reads: { overview }, viewer, writes })
+const module = makeSandboxesModuleViews({ owner: state !== "8a", reads: { overview }, timeZone: "UTC", viewer, writes })
 const root = document.querySelector("#root")
 if (root !== null) {
   createRoot(root).render(

@@ -716,7 +716,15 @@ const DashboardApp = ({
   const stacks = makeStacksModuleViews({ reads: stacksReads })
   // Owner identity and writes arrive with the sandbox jobs route; until then every viewer reads only.
   const sandboxes = current.approvalApp.sandboxesEnabled
-    ? [makeSandboxesModuleViews({ owner: false, reads: sandboxesReads, viewer: "", writes: null })]
+    ? [
+        makeSandboxesModuleViews({
+          owner: false,
+          reads: sandboxesReads,
+          timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          viewer: "",
+          writes: null
+        })
+      ]
     : []
   const connectConnection = useAtomValue(atoms.connect.connection)
   const fleetNavigationBadge = dashboardPendingNavigationBadge(pendingState, workNow, refreshFailed)

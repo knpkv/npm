@@ -13506,6 +13506,7 @@
             "code",
             "usage",
             "hostResources",
+            "sandboxes",
             "stacks"
           ],
           "bar": [
@@ -19968,6 +19969,13 @@
           "icon": "host",
           "href": "#host-resources",
           "purpose": "Memory, CPU, disk and the heavy gate on one host",
+          "tabs": []
+        },
+        "sandboxes": {
+          "name": "Sandboxes",
+          "icon": "shield",
+          "href": "#sandboxes/overview",
+          "purpose": "Ephemeral AWS accounts: lease, extend, release",
           "tabs": []
         },
         "delivery": {

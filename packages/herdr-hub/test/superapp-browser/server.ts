@@ -588,7 +588,7 @@ const program = Effect.gen(function*() {
     }
     if (url.pathname === "/v1/modules/sandboxes/overview") {
       response.writeHead(200, { "content-type": "application/json" })
-      response.end(Schema.encodeSync(Schema.fromJsonString(SandboxesOverview))(sandboxesOverviewFixture))
+      response.end(Schema.encodeSync(Schema.fromJsonString(SandboxesOverview))(sandboxesOverviewFixture(now)))
       return
     }
     if (url.pathname === "/v1/push/stage-heartbeat" && request.method === "POST") {

@@ -5,8 +5,8 @@
  */
 import { leaseCap, leaseDuration, type SandboxCard, type SandboxesOverview } from "@knpkv/sandbox-pool/host"
 import { Button, Notice, Sheet, Skeleton, StateLabel, type RlyStateTone } from "@knpkv/rly/primitives"
-import { Clock, DateTime, Effect, Exit, Fiber, Schedule, Schema } from "effect"
-import { type ReactElement, type ReactNode, useEffect, useRef, useState } from "react"
+import { Clock, DateTime, Effect, Exit, Fiber, Result, Schedule, Schema } from "effect"
+import { createContext, type ReactElement, type ReactNode, useContext, useEffect, useRef, useState } from "react"
 import { ShellIcon } from "./internal/shell-icon.js"
 import { moduleHref, type ModulePageMount, type ModuleViews, sandboxesModule } from "./modules.js"
 import { SandboxesClientError } from "./sandboxes-client.js"
@@ -83,8 +83,6 @@ const wipeSteps: ReadonlyArray<string> = ["Dry run", "Nuke", "Verify"]
 const policyLine =
   "A lease lasts 8 h. Each extend adds 8 h, up to 24 h after the lease started. Ending a lease wipes the account: dry run, nuke, verify."
 
-const clock = DateTime.formatUtc({ hour: "2-digit", hourCycle: "h23", locale: "en-GB", minute: "2-digit" })
-
 const millis = DateTime.toEpochMillis
 
 /** "1 h 23 min", "8 h", "0 min". Negative spans read as zero. */
@@ -98,17 +96,32 @@ const span = (from: DateTime.Utc, to: DateTime.Utc): string => {
   return parts.length === 0 ? "0 min" : parts.join(" ")
 }
 
-const dayOf = (instant: DateTime.Utc): number => Math.floor(millis(instant) / 86_400_000)
-
-/** Clock time today, "tomorrow" on the next UTC day, and the date on any other day. */
-const when = (instant: DateTime.Utc, now: DateTime.Utc): string => {
-  const days = dayOf(instant) - dayOf(now)
-  return days === 0
-    ? clock(instant)
-    : days === 1
-      ? `${clock(instant)} tomorrow`
-      : `${clock(instant)} on ${DateTime.formatIsoDateUtc(instant)}`
+/** Clock words in the viewer's time zone. */
+interface Times {
+  readonly clock: (instant: DateTime.Utc) => string
+  /** Clock time today, "tomorrow" on the next day, and the date on any other day. */
+  readonly when: (instant: DateTime.Utc, now: DateTime.Utc) => string
+  /** Clock time today, "yesterday" on the day before, and the date before that. */
+  readonly since: (instant: DateTime.Utc, now: DateTime.Utc) => string
 }
+
+/** `timeZone` is an IANA name, such as the browser's own. Days are that zone's calendar days. */
+const timesIn = (timeZone: string): Times => {
+  const clock = (instant: DateTime.Utc): string =>
+    DateTime.format(instant, { hour: "2-digit", hourCycle: "h23", locale: "en-GB", minute: "2-digit", timeZone })
+  const date = (instant: DateTime.Utc): string =>
+    DateTime.format(instant, { day: "2-digit", locale: "en-CA", month: "2-digit", timeZone, year: "numeric" })
+  const dayOf = (instant: DateTime.Utc): number => Math.floor(millis(DateTime.makeUnsafe(date(instant))) / 86_400_000)
+  const words = (instant: DateTime.Utc, days: number, next: string): string =>
+    days === 0 ? clock(instant) : days === 1 ? `${clock(instant)} ${next}` : `${clock(instant)} on ${date(instant)}`
+  return {
+    clock,
+    when: (instant, now) => words(instant, dayOf(instant) - dayOf(now), "tomorrow"),
+    since: (instant, now) => words(instant, dayOf(now) - dayOf(instant), "yesterday")
+  }
+}
+
+const TimesContext = createContext<Times>(timesIn("UTC"))
 
 const capOf = (startedAt: DateTime.Utc): DateTime.Utc => DateTime.addDuration(startedAt, leaseCap)
 
@@ -151,23 +164,32 @@ const nextFreeAt = (cards: ReadonlyArray<SandboxCard>): DateTime.Utc | undefined
     .flatMap((item) => (item.state._tag === "Leased" ? [item.state.endsAt] : []))
     .sort((l, r) => millis(l) - millis(r))[0]
 
-/** Fresh sweep names the clock. A stale badge says late; an older UTC day says yesterday or the date. */
-const sweepWords = (asOf: number, stale: boolean, now: DateTime.Utc): string => {
-  const instant = DateTime.makeUnsafe(asOf)
-  const days = dayOf(now) - dayOf(instant)
-  const time =
-    days === 0
-      ? clock(instant)
-      : days === 1
-        ? `${clock(instant)} yesterday`
-        : `${clock(instant)} on ${DateTime.formatIsoDateUtc(instant)}`
+/** Fresh sweep names the clock. A stale badge says late; an older day says yesterday or the date. */
+const sweepWords = (times: Times, asOf: number, stale: boolean, now: DateTime.Utc): string => {
+  const time = times.since(DateTime.makeUnsafe(asOf), now)
   return stale ? `Sweep late, last ran ${time}` : `Sweep last ${time}.`
 }
 
-const leaseLead = (lastResetAt: DateTime.Utc | null, now: DateTime.Utc): string =>
+/** Above the cards when nothing is free: how much is leased, and when the next lease ends. */
+const noneFreeWords = (times: Times, cards: ReadonlyArray<SandboxCard>): string | null => {
+  if (cards.length === 0 || cards.some((item) => item.state._tag === "Available")) return null
+  const leased = cards.filter((item) => item.state._tag === "Leased").length
+  const lead =
+    leased < cards.length
+      ? "No account is free."
+      : cards.length === 1
+        ? "The only account is leased."
+        : cards.length === 2
+          ? "Both accounts are leased."
+          : `All ${cards.length} accounts are leased.`
+  const freeAt = nextFreeAt(cards)
+  return freeAt === undefined ? lead : `${lead} The next one frees at ${times.clock(freeAt)}.`
+}
+
+const leaseLead = (times: Times, lastResetAt: DateTime.Utc | null, now: DateTime.Utc): string =>
   lastResetAt === null
-    ? "Longest idle: never reset."
-    : `Longest idle: free since ${clock(lastResetAt)} (${span(lastResetAt, now)}).`
+    ? "Longest idle now: never reset."
+    : `Longest idle now: free since ${times.clock(lastResetAt)} (${span(lastResetAt, now)}).`
 
 /** Quarantined, then leased by soonest end, then cleaning, then available. The payload stays in account-id order. */
 const byPool = (left: SandboxCard, right: SandboxCard): number => {
@@ -266,11 +288,17 @@ const CopyAccountId = ({ accountId }: { readonly accountId: string }): ReactElem
 
 type Action = "lease" | "extend" | "release"
 
-const refusedCopy = {
-  lease: "The lease wasn’t submitted. Nothing was leased.",
-  extend: "The extend wasn’t submitted. The lease end is unchanged.",
-  release: "The release wasn’t submitted. The lease is unchanged."
+const unchangedCopy = {
+  lease: "Nothing was leased.",
+  extend: "The lease end is unchanged.",
+  release: "The lease is unchanged."
 } satisfies Record<Action, string>
+
+/** Why a write was refused, then what did not change. A refusal for the owner rule says so. */
+const refusedCopy = (action: Action, reason: SandboxesWriteFailed["reason"] | "defect"): string =>
+  reason === "unauthorized"
+    ? `Only the pool owner can ${action} here. ${unchangedCopy[action]}`
+    : `The ${action} wasn’t submitted. ${unchangedCopy[action]}`
 
 const cliCopy = {
   lease: "Lease from the CLI for now.",
@@ -308,17 +336,23 @@ const ConfirmSheet = ({
   readonly triggerVariant: "primary" | "secondary"
 }): ReactElement => {
   const [open, setOpen] = useState(false)
-  const [phase, setPhase] = useState<"idle" | "sending" | "refused">("idle")
+  const [phase, setPhase] = useState<
+    | { readonly _tag: "Idle" }
+    | { readonly _tag: "Sending" }
+    | { readonly _tag: "Refused"; readonly reason: SandboxesWriteFailed["reason"] | "defect" }
+  >({ _tag: "Idle" })
   const opener = useRef<HTMLButtonElement | null>(null)
   const send = (effect: Effect.Effect<void, SandboxesWriteFailed>) => {
-    setPhase("sending")
-    void Effect.runPromiseExit(effect).then((exit) => {
-      if (Exit.isSuccess(exit)) {
-        setPhase("idle")
+    setPhase({ _tag: "Sending" })
+    void Effect.runPromiseExit(Effect.result(effect)).then((exit) => {
+      if (Exit.isFailure(exit)) {
+        setPhase({ _tag: "Refused", reason: "defect" })
+      } else if (Result.isFailure(exit.value)) {
+        setPhase({ _tag: "Refused", reason: exit.value.failure.reason })
+      } else {
+        setPhase({ _tag: "Idle" })
         setOpen(false)
         done()
-      } else {
-        setPhase("refused")
       }
     })
   }
@@ -328,7 +362,7 @@ const ConfirmSheet = ({
         className="sandboxes-trigger"
         disabled={disabled}
         onClick={() => {
-          setPhase("idle")
+          setPhase({ _tag: "Idle" })
           setOpen(true)
         }}
         ref={opener}
@@ -345,7 +379,7 @@ const ConfirmSheet = ({
             </div>
             <p className="sandboxes-sheet-lead">{lead}</p>
             {children}
-            {phase === "refused" ? <p role="alert">{refusedCopy[action]}</p> : null}
+            {phase._tag === "Refused" ? <p role="alert">{refusedCopy(action, phase.reason)}</p> : null}
           </Sheet.Body>
           <Sheet.Footer className="sandboxes-sheet-foot">
             <Button onClick={() => setOpen(false)} variant="quiet">
@@ -354,7 +388,7 @@ const ConfirmSheet = ({
             {submit === null ? (
               <p className="sandboxes-muted">{cliCopy[action]}</p>
             ) : (
-              <Button disabled={phase === "sending"} onClick={() => send(submit)} variant="primary">
+              <Button disabled={phase._tag === "Sending"} onClick={() => send(submit)} variant="primary">
                 {confirm}
               </Button>
             )}
@@ -393,6 +427,7 @@ const Value = ({
 
 /** Card facts per state. Times come from the card; quarantine time and the cleaning reason stay in the store. */
 const cardRows = (
+  times: Times,
   item: SandboxCard,
   viewer: string,
   now: DateTime.Utc
@@ -404,13 +439,22 @@ const cardRows = (
       const capped = atCap(state.startedAt, state.endsAt)
       return [
         ["Holder", <Value main={state.holder === viewer ? `You (${viewer})` : state.holder} />],
-        ["Time left", <Value main={span(now, state.endsAt)} strong sub={`Ends ${when(state.endsAt, now)}`} />],
+        [
+          "Time left",
+          millis(state.endsAt) <= millis(now) ? (
+            <Value main="Ended" strong sub={`Ended ${times.when(state.endsAt, now)}`} />
+          ) : (
+            <Value main={span(now, state.endsAt)} strong sub={`Ends ${times.when(state.endsAt, now)}`} />
+          )
+        ],
         [
           "Lease",
           <Value
-            main={`Started ${clock(state.startedAt)}, ${extendWords(state.startedAt, state.endsAt)}`}
+            main={`Started ${times.clock(state.startedAt)}, ${extendWords(state.startedAt, state.endsAt)}`}
             sub={
-              capped ? `24 h cap reached, ends ${when(cap, now)}` : `${span(state.endsAt, cap)} of the 24 h cap left`
+              capped
+                ? `24 h cap reached, ends ${times.when(cap, now)}`
+                : `${span(state.endsAt, cap)} of the 24 h cap left`
             }
           />
         ]
@@ -420,7 +464,7 @@ const cardRows = (
       return [
         ["Holder", <Value main="No one" />],
         ["Idle", <Value main={state.lastResetAt === null ? "Never reset" : span(state.lastResetAt, now)} />],
-        ["Last reset", <Value main={state.lastResetAt === null ? "Never" : clock(state.lastResetAt)} />]
+        ["Last reset", <Value main={state.lastResetAt === null ? "Never" : times.clock(state.lastResetAt)} />]
       ]
     case "Cleaning":
       return [["Holder", <Value main="No one" sub="The account is being cleaned" />]]
@@ -476,10 +520,11 @@ const PoolCard = ({
   readonly viewer: string
   readonly writes: SandboxesModuleWrites | null
 }): ReactElement => {
+  const times = useContext(TimesContext)
   const { label, tone } = stateLabel(item.state._tag)
   const state = item.state
   const mine = owner && state._tag === "Leased" && state.holder === viewer
-  const old = lastKnown === null ? "" : `, last known at ${clock(lastKnown)}`
+  const old = lastKnown === null ? "" : `, last known at ${times.clock(lastKnown)}`
   return (
     <article
       aria-label={`${item.name}, ${label}${old}`}
@@ -496,7 +541,7 @@ const PoolCard = ({
             <CopyAccountId accountId={item.accountId} />
           </div>
           {item.label === null ? null : <small>Left the pool</small>}
-          {lastKnown === null ? null : <small>{`Last known at ${clock(lastKnown)}`}</small>}
+          {lastKnown === null ? null : <small>{`Last known at ${times.clock(lastKnown)}`}</small>}
         </div>
         <StateLabel data-pool-state="" {...(tone === "neutral" ? { icon: "minus" } : {})} label={label} tone={tone} />
       </header>
@@ -508,7 +553,7 @@ const PoolCard = ({
           </a>
         </div>
       ) : null}
-      <Facts rows={cardRows(item, viewer, now)} />
+      <Facts rows={cardRows(times, item, viewer, now)} />
       {state._tag === "Cleaning" ? (
         <div className="sandboxes-card-block">
           <CleanupSteps step={state.step} />
@@ -541,6 +586,7 @@ const OwnLease = ({
   readonly state: Extract<CardState, { readonly _tag: "Leased" }>
   readonly writes: SandboxesModuleWrites | null
 }): ReactElement => {
+  const times = useContext(TimesContext)
   const next = extendedEnd(state.startedAt, state.endsAt)
   const cap = capOf(state.startedAt)
   const capped = atCap(state.startedAt, state.endsAt)
@@ -549,7 +595,7 @@ const OwnLease = ({
       <div className="sandboxes-card-buttons">
         <ConfirmSheet
           action="extend"
-          confirm={`Extend to ${clock(next)}`}
+          confirm={`Extend to ${times.clock(next)}`}
           account={item}
           lead="Adds 8 h to your lease."
           disabled={capped}
@@ -561,9 +607,9 @@ const OwnLease = ({
         >
           <Facts
             rows={[
-              ["Ends now", when(state.endsAt, now)],
-              ["New end", <span className="sandboxes-strong">{when(next, now)}</span>],
-              ["Cap left after", `${span(next, cap)}, cap at ${when(cap, now)}`]
+              ["Ends now", times.when(state.endsAt, now)],
+              ["New end", <span className="sandboxes-strong">{times.when(next, now)}</span>],
+              ["Cap left after", `${span(next, cap)}, cap at ${times.when(cap, now)}`]
             ]}
           />
           <small className="sandboxes-muted">A lease can run up to 24 h after it started.</small>
@@ -587,7 +633,9 @@ const OwnLease = ({
           <Notice tone="caution">{`Everything in ${item.name} is deleted. This can’t be undone.`}</Notice>
         </ConfirmSheet>
       </div>
-      {capped ? <small className="sandboxes-muted">{`Extend: 24-hour cap reached at ${when(cap, now)}.`}</small> : null}
+      {capped ? (
+        <small className="sandboxes-muted">{`Extend: 24-hour cap reached at ${times.when(cap, now)}.`}</small>
+      ) : null}
     </div>
   )
 }
@@ -603,6 +651,7 @@ const LeaseAction = ({
   readonly overview: Ready
   readonly writes: SandboxesModuleWrites | null
 }): ReactElement => {
+  const times = useContext(TimesContext)
   const chosen = longestIdle(overview.sandboxes)
   const freeAt = nextFreeAt(overview.sandboxes)
   if (chosen === undefined) {
@@ -612,7 +661,7 @@ const LeaseAction = ({
           Lease an account
         </Button>
         <small className="sandboxes-muted">
-          {freeAt === undefined ? "No account is free." : `No account is free until ${clock(freeAt)}.`}
+          {freeAt === undefined ? "No account is free." : `No account is free until ${times.clock(freeAt)}.`}
         </small>
       </div>
     )
@@ -622,9 +671,9 @@ const LeaseAction = ({
     <div className="sandboxes-lease">
       <ConfirmSheet
         action="lease"
-        confirm={`Lease ${chosen.item.name}`}
+        confirm="Lease longest idle"
         account={chosen.item}
-        lead={leaseLead(chosen.lastResetAt, now)}
+        lead={leaseLead(times, chosen.lastResetAt, now)}
         done={done}
         submit={writes === null ? null : writes.lease}
         title="Lease an account"
@@ -633,12 +682,15 @@ const LeaseAction = ({
       >
         <Facts
           rows={[
-            ["Starts", `Now, ${clock(now)}`],
-            ["Ends", <span className="sandboxes-strong">{clock(ends)}</span>],
-            ["Extend up to", when(capOf(now), now)]
+            ["Starts", `Now, ${times.clock(now)}`],
+            ["Ends", <span className="sandboxes-strong">{times.clock(ends)}</span>],
+            ["Extend up to", times.when(capOf(now), now)]
           ]}
         />
-        <small className="sandboxes-muted">When the lease ends the account is cleaned: dry run, nuke, verify.</small>
+        <small className="sandboxes-muted">
+          Fleet leases whichever account is longest idle when the job runs. When the lease ends the account is cleaned:
+          dry run, nuke, verify.
+        </small>
       </ConfirmSheet>
     </div>
   )
@@ -668,9 +720,16 @@ const OverviewPage = ({
   readonly viewer: string
   readonly writes: SandboxesModuleWrites | null
 }): ReactElement => {
+  const times = useContext(TimesContext)
   const { now, readAgain, view } = usePool(reads.overview, mount.active)
   const pool = view._tag === "Pool" ? view : null
-  const reread = () => readAgain(false)
+  // A job runs after it is submitted, so the next read can still show the old card; say so for a minute.
+  const [submittedAt, setSubmittedAt] = useState<DateTime.Utc | null>(null)
+  const submitted = submittedAt !== null && millis(now) - millis(submittedAt) < 60_000
+  const reread = () => {
+    setSubmittedAt(DateTime.nowUnsafe())
+    readAgain(false)
+  }
   const count = pool?.overview.sandboxes.length
   return (
     <section className="sandboxes-page">
@@ -685,9 +744,14 @@ const OverviewPage = ({
           </div>
         </div>
         {owner && pool !== null ? (
-          <LeaseAction done={reread} now={now} overview={pool.overview} writes={writes} />
+          <LeaseAction done={reread} now={now} overview={pool.overview} writes={pool.stale ? null : writes} />
         ) : null}
       </header>
+      {submitted ? (
+        <p className="sandboxes-muted" data-pool-submitted="" role="status">
+          Submitted to Fleet. The cards update when the job runs.
+        </p>
+      ) : null}
       {!owner && pool !== null ? (
         <p className="sandboxes-muted">
           Only the owner can lease or reset sandboxes here. Agents lease through Fleet jobs.
@@ -720,19 +784,24 @@ const OverviewPage = ({
           <div className="sandboxes-meta">
             <div className="sandboxes-meta-line">
               <span data-pool-summary="">{summary(view.overview.sandboxes)}</span>
-              <span data-pool-read="">{`Read ${clock(view.readAt)} from hostd`}</span>
+              <span data-pool-read="">{`Read ${times.clock(view.readAt)} from hostd`}</span>
             </div>
             {view.overview.badge.asOf === null ? null : view.overview.badge.stale ? (
               <StateLabel
                 icon="clock"
-                label={sweepWords(view.overview.badge.asOf, true, now)}
+                label={sweepWords(times, view.overview.badge.asOf, true, now)}
                 size="compact"
                 tone="caution"
               />
             ) : (
-              <span>{sweepWords(view.overview.badge.asOf, false, now)}</span>
+              <span>{sweepWords(times, view.overview.badge.asOf, false, now)}</span>
             )}
           </div>
+          {noneFreeWords(times, view.overview.sandboxes) === null ? null : (
+            <Notice data-pool-notice="" tone="neutral">
+              {noneFreeWords(times, view.overview.sandboxes)}
+            </Notice>
+          )}
           <div className="sandboxes-grid">
             {[...view.overview.sandboxes].sort(byPool).map((item) => (
               <PoolCard
@@ -761,21 +830,29 @@ const OverviewPage = ({
 export const makeSandboxesModuleViews = ({
   owner,
   reads,
+  timeZone,
   viewer,
   writes
 }: {
   readonly owner: boolean
   readonly reads: SandboxesModuleReads
+  /** The viewer's IANA time zone; every clock time and day on the page is in it. */
+  readonly timeZone: string
   readonly writes: SandboxesModuleWrites | null
   readonly viewer: string
-}): ModuleViews<typeof sandboxesModule> => ({
-  descriptor: sandboxesModule,
-  navigationIcon: <ShellIcon name="sandboxes" />,
-  pages: {
-    overview: (_search, mount) => (
-      <OverviewPage mount={mount} owner={owner} reads={reads} viewer={viewer} writes={writes} />
-    ),
-    account: () => null,
-    runs: () => null
+}): ModuleViews<typeof sandboxesModule> => {
+  const times = timesIn(timeZone)
+  return {
+    descriptor: sandboxesModule,
+    navigationIcon: <ShellIcon name="sandboxes" />,
+    pages: {
+      overview: (_search, mount) => (
+        <TimesContext value={times}>
+          <OverviewPage mount={mount} owner={owner} reads={reads} viewer={viewer} writes={writes} />
+        </TimesContext>
+      ),
+      account: () => null,
+      runs: () => null
+    }
   }
-})
+}

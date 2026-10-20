@@ -72,6 +72,7 @@ describe("Sandboxes overview", { concurrent: false }, () => {
       readonly read?: SandboxesModuleReads["overview"]
       readonly owner?: boolean
       readonly writes?: SandboxesModuleWrites | null
+      readonly timeZone?: string
     } = {}
   ) => {
     if (root === null) {
@@ -85,6 +86,7 @@ describe("Sandboxes overview", { concurrent: false }, () => {
       reads,
       writes: options.writes === undefined ? null : options.writes,
       owner: options.owner ?? true,
+      timeZone: options.timeZone ?? "UTC",
       viewer: "agent-a"
     })
     await act(async () =>
@@ -171,10 +173,62 @@ describe("Sandboxes overview", { concurrent: false }, () => {
 
   it("names the date of an end that is not today or tomorrow", async () => {
     await render(
-      ready([leased("ephemeral-01", "999999999990", "agent-b", "2026-10-14T09:20:00.000Z", "2026-10-14T17:20:00.000Z")])
+      ready([leased("ephemeral-01", "999999999990", "agent-b", "2026-10-19T09:20:00.000Z", "2026-10-19T17:20:00.000Z")])
     )
-    expect(text('[data-account="ephemeral-01"]')).toContain("Ends 17:20 on 2026-10-14")
+    expect(text('[data-account="ephemeral-01"]')).toContain("Ends 17:20 on 2026-10-19")
     expect(text('[data-account="ephemeral-01"]')).not.toContain("tomorrow")
+  })
+
+  it("keeps time left and the end in agreement on either side of the clock", async () => {
+    const row = (name: string) =>
+      [...document.querySelectorAll(`[data-account="${name}"] dt`)].find((node) => node.textContent === "Time left")
+        ?.nextElementSibling?.textContent
+    await render(
+      ready([
+        // Ends later today.
+        leased("ephemeral-01", "999999999990", "agent-b", "2026-10-17T09:20:00.000Z", "2026-10-17T17:20:00.000Z"),
+        // Ends tomorrow.
+        leased("ephemeral-02", "999999999991", "agent-b", "2026-10-17T12:00:00.000Z", "2026-10-18T04:00:00.000Z"),
+        // Ended an hour ago; the sweep has not expired it yet.
+        leased("ephemeral-03", "999999999992", "agent-b", "2026-10-17T04:05:00.000Z", "2026-10-17T12:05:00.000Z"),
+        // Ended days ago.
+        leased("ephemeral-04", "999999999993", "agent-b", "2026-10-14T09:20:00.000Z", "2026-10-14T17:20:00.000Z"),
+        // Ends beyond the 24 h cap (a record written before the cap).
+        leased("ephemeral-05", "999999999994", "agent-b", "2026-10-17T09:00:00.000Z", "2026-10-18T12:00:00.000Z")
+      ])
+    )
+    expect(row("ephemeral-01")).toBe("4 h 15 minEnds 17:20")
+    expect(row("ephemeral-02")).toBe("14 h 55 minEnds 04:00 tomorrow")
+    expect(row("ephemeral-03")).toBe("EndedEnded 12:05")
+    expect(row("ephemeral-04")).toBe("EndedEnded 17:20 on 2026-10-14")
+    expect(row("ephemeral-05")).toBe("22 h 55 minEnds 12:00 tomorrow")
+  })
+
+  it("says above the cards when every account is leased and when the next one frees", async () => {
+    await render(
+      ready([
+        leased("ephemeral-01", "999999999990", "agent-b", "2026-10-17T09:20:00.000Z", "2026-10-17T17:20:00.000Z"),
+        leased("ephemeral-02", "999999999991", "agent-a", "2026-10-17T13:05:00.000Z", "2026-10-17T21:05:00.000Z")
+      ])
+    )
+    expect(text("[data-pool-notice]")).toBe("Both accounts are leased. The next one frees at 17:20.")
+    const notice = document.querySelector("[data-pool-notice]")
+    const firstCard = document.querySelector("[data-account]")
+    expect(
+      notice !== null &&
+        firstCard !== null &&
+        (notice.compareDocumentPosition(firstCard) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0
+    ).toBe(true)
+  })
+
+  it("has no pool notice while an account is free", async () => {
+    await render(
+      ready([
+        leased("ephemeral-01", "999999999990", "agent-b", "2026-10-17T09:20:00.000Z", "2026-10-17T17:20:00.000Z"),
+        available("ephemeral-02", "999999999991", null)
+      ])
+    )
+    expect(document.querySelector("[data-pool-notice]")).toBeNull()
   })
 
   it("keeps a retired lease Leased and says it left the pool", async () => {
@@ -266,17 +320,20 @@ describe("Sandboxes overview", { concurrent: false }, () => {
       { writes }
     )
     const dialog = await openDialog(button("Lease an account"))
-    expect(dialog?.textContent).toContain("Longest idle: free since 11:42 (1 h 23 min).")
+    expect(dialog?.textContent).toContain("Longest idle now: free since 11:42 (1 h 23 min).")
+    // The job picks the account when it runs, so the sheet does not promise this one.
+    expect(dialog?.textContent).toContain("Fleet leases whichever account is longest idle when the job runs.")
     expect(dialog?.textContent).toContain("ephemeral-02")
     expect(dialog?.textContent).toContain("999999999991")
     expect(dialog?.textContent).toContain("21:05")
     expect(dialog?.textContent).toContain("13:05 tomorrow")
     expect(buttons("[data-account] [data-pool-state]")).toEqual(["Available", "Available"])
     expect(lease).not.toHaveBeenCalled()
-    await act(async () => button("Lease ephemeral-02", '[role="dialog"]')?.click())
+    await act(async () => button("Lease longest idle", '[role="dialog"]')?.click())
     await settle()
     expect(lease).toHaveBeenCalledTimes(1)
     await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')).toBeNull())
+    expect(text("[data-pool-submitted]")).toBe("Submitted to Fleet. The cards update when the job runs.")
   })
 
   it("keeps the sheet open and says so when the lease is refused", async () => {
@@ -287,9 +344,50 @@ describe("Sandboxes overview", { concurrent: false }, () => {
     }
     await render(ready([available("ephemeral-02", "999999999991", null)]), { writes })
     await openDialog(button("Lease an account"))
-    await act(async () => button("Lease ephemeral-02", '[role="dialog"]')?.click())
+    await act(async () => button("Lease longest idle", '[role="dialog"]')?.click())
     await settle()
     expect(text('[role="dialog"] [role="alert"]')).toBe("The lease wasn’t submitted. Nothing was leased.")
+  })
+
+  it("says when only the owner may submit", async () => {
+    const writes: SandboxesModuleWrites = {
+      lease: Effect.fail(new SandboxesWriteFailed({ reason: "unauthorized" })),
+      extend: () => Effect.void,
+      release: () => Effect.void
+    }
+    await render(ready([available("ephemeral-02", "999999999991", null)]), { writes })
+    await openDialog(button("Lease an account"))
+    await act(async () => button("Lease longest idle", '[role="dialog"]')?.click())
+    await settle()
+    expect(text('[role="dialog"] [role="alert"]')).toBe("Only the pool owner can lease here. Nothing was leased.")
+  })
+
+  it("leases only from the CLI while the pool on screen is stale", async () => {
+    let calls = 0
+    const overview = ready([available("ephemeral-02", "999999999991", null)])
+    const read = Effect.suspend(() => {
+      calls += 1
+      return calls === 1 ? Effect.succeed(overview) : Effect.fail(new SandboxesClientError({ detail: "network" }))
+    })
+    const writes: SandboxesModuleWrites = { lease: Effect.void, extend: () => Effect.void, release: () => Effect.void }
+    await render(overview, { read, writes })
+    await act(async () => await vi.advanceTimersByTimeAsync(30_000))
+    const lease = await openDialog(button("Lease an account"))
+    expect(lease?.textContent).toContain("Lease from the CLI for now")
+    expect(buttons('[role="dialog"] button')).not.toContain("Lease longest idle")
+  })
+
+  it("names times in the viewer's time zone", async () => {
+    await render(
+      ready([
+        leased("ephemeral-01", "999999999990", "agent-b", "2026-10-17T09:20:00.000Z", "2026-10-17T22:30:00.000Z")
+      ]),
+      { timeZone: "Europe/Amsterdam" }
+    )
+    // 22:30 UTC is 00:30 the next day in Amsterdam (CEST, +2).
+    expect(text('[data-account="ephemeral-01"]')).toContain("Ends 00:30 tomorrow")
+    expect(text('[data-account="ephemeral-01"]')).toContain("Started 11:20")
+    expect(text("[data-pool-read]")).toBe("Read 15:05 from hostd")
   })
 
   it("points to the CLI instead of a confirm while the hub can't submit jobs", async () => {
@@ -301,7 +399,7 @@ describe("Sandboxes overview", { concurrent: false }, () => {
     )
     const lease = await openDialog(button("Lease an account"))
     expect(lease?.textContent).toContain("Lease from the CLI for now")
-    expect(buttons('[role="dialog"] button')).not.toContain("Lease ephemeral-02")
+    expect(buttons('[role="dialog"] button')).not.toContain("Lease longest idle")
   })
 
   it("disables lease when nothing is free and names when the next one ends", async () => {

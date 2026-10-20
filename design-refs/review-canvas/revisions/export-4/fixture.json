@@ -3048,11 +3048,6 @@
               "icon": "host",
               "href": "#resources/overview"
             },
-            "sandboxes": {
-              "name": "Sandboxes",
-              "icon": "shield",
-              "href": "#sandboxes/overview"
-            },
             "stacks": {
               "name": "Stacks",
               "icon": "stacks",
@@ -3068,7 +3063,6 @@
               "code",
               "usage",
               "hostResources",
-              "sandboxes",
               "stacks"
             ],
             "bar": [
