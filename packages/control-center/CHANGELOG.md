@@ -1,5 +1,28 @@
 # @knpkv/control-center
 
+## 0.21.0
+
+### Minor Changes
+
+- [#1005](https://github.com/knpkv/npm/pull/1005) [`3aaf395`](https://github.com/knpkv/npm/commit/3aaf39582fc38ce15bef2c22e24dc3387c01b797) Thanks [@konopkov](https://github.com/konopkov)! - Rebuild the AWS account setup form to its design. The open form is one panel across CodeCommit and CodePipeline that spans the card row. Opening it scrolls it into view and moves focus to its heading.
+
+  - **Profile and region:** the profile is a select of the profiles detected on this machine, and the region is a select of the account's enabled regions, starting on the profile's own. A profile that can't list regions types one instead.
+  - **Errors:** a missing value is marked on its own field, with no banner. When an organization policy blocks CodeCommit and CodePipeline is denied too, the region field says the region may not be allowed. Per-service discovery failures are listed with a short label each.
+  - **Discovered resources:** they appear as checkbox grids with their counts, and a service that fails on refresh still lists the names already selected.
+  - **Following:** manual name entry starts closed, and the submit button counts the resources it will follow.
+
+### Patch Changes
+
+- Updated dependencies [[`f0f1efb`](https://github.com/knpkv/npm/commit/f0f1efb45da5eb4636b38e8cc00b7849b3c5b4b0), [`7015e2c`](https://github.com/knpkv/npm/commit/7015e2cd1315f80a6198e62c0344bb41cb3d68dd), [`c3c109c`](https://github.com/knpkv/npm/commit/c3c109ca2888b63a04b14135169f8479c5c05bfc), [`aa4b0e4`](https://github.com/knpkv/npm/commit/aa4b0e44163bea9f5416be905653e88bbc50006f), [`bf62e19`](https://github.com/knpkv/npm/commit/bf62e19a1db55acd14169dbd315e694cc9e15e8a)]:
+  - @knpkv/clockify-api-client@5.1.0
+  - @knpkv/codecommit-core@0.29.0
+  - @knpkv/review@0.7.0
+  - @knpkv/rly@0.24.0
+  - @knpkv/confluence-api-client@2.1.0
+  - @knpkv/confluence-to-markdown@2.5.5
+  - @knpkv/jira-api-client@3.3.0
+  - @knpkv/relay-product@0.6.3
+
 ## 0.20.0
 
 ### Minor Changes

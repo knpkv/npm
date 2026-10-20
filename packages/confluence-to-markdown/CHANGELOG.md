@@ -1,5 +1,30 @@
 # @knpkv/confluence-to-markdown
 
+## 2.5.5
+
+### Patch Changes
+
+- [#1011](https://github.com/knpkv/npm/pull/1011) [`c3c109c`](https://github.com/knpkv/npm/commit/c3c109ca2888b63a04b14135169f8479c5c05bfc) Thanks [@knpkv-automation](https://github.com/apps/knpkv-automation)! - Update the generated Confluence API clients from Atlassian's latest OpenAPI specifications.
+
+  Release: minor (0 breaking, 118 additions).
+
+  Additions:
+
+  - added headers component AtlDatabaseVersion at `confluence-v2.json#/components/headers`
+  - added headers component DatabaseCacheControl at `confluence-v2.json#/components/headers`
+  - added headers component DatabaseEtag at `confluence-v2.json#/components/headers`
+  - added headers component DatabaseNextLink at `confluence-v2.json#/components/headers`
+  - added headers component DatabaseRetryAfter at `confluence-v2.json#/components/headers`
+  - added headers component DatabaseRateLimitReason at `confluence-v2.json#/components/headers`
+  - added headers component DatabaseRateLimitLimit at `confluence-v2.json#/components/headers`
+  - added headers component DatabaseRateLimitRemaining at `confluence-v2.json#/components/headers`
+  - added headers component DatabaseRateLimitReset at `confluence-v2.json#/components/headers`
+  - added parameters component DatabaseIdParameter at `confluence-v2.json#/components/parameters`
+  - and 108 more
+
+- Updated dependencies [[`c3c109c`](https://github.com/knpkv/npm/commit/c3c109ca2888b63a04b14135169f8479c5c05bfc)]:
+  - @knpkv/confluence-api-client@2.1.0
+
 ## 2.5.4
 
 ### Patch Changes

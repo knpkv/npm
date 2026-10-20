@@ -1,5 +1,22 @@
 # @knpkv/jira-api-client
 
+## 3.3.0
+
+### Minor Changes
+
+- [#1034](https://github.com/knpkv/npm/pull/1034) [`aa4b0e4`](https://github.com/knpkv/npm/commit/aa4b0e44163bea9f5416be905653e88bbc50006f) Thanks [@knpkv-automation](https://github.com/apps/knpkv-automation)! - Update the generated Schema-backed Jira API client.
+
+  Release: minor (0 breaking, 6 additions).
+
+  Additions:
+
+  - added schema AuditEntry at `#/components/schemas`
+  - added schema AuditPage at `#/components/schemas`
+  - added schema AuditUser at `#/components/schemas`
+  - added schema AuditUserAvatarUrls at `#/components/schemas`
+  - added path /rest/api/3/invalid-jqls-access-log at `#/paths`
+  - added response 503 at `#/paths/~1rest~1api~13~1priority~1{id}/delete`
+
 ## 3.2.0
 
 ### Minor Changes
