@@ -590,6 +590,65 @@ describe("offline backup commands", () => {
       )
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped), { timeout: 30_000 })
 
+  it.layer(NodeServices.layer)((it) => {
+    // Runs the built CLI with no override, its working directory and HOME under a fresh temporary directory.
+    const runWithoutOverride = Effect.fn("OfflineBackupTest.runWithoutOverride")(function*(
+      args: ReadonlyArray<string>,
+      cwd: string,
+      home: string
+    ) {
+      const path = yield* Path.Path
+      const cliEntry = yield* path.fromFileUrl(new URL("../../dist/server/server/cli.js", import.meta.url))
+      const handle = yield* ChildProcess.make("node", [cliEntry, ...args], {
+        cwd,
+        env: {
+          ...inactiveTelemetryEnvironment,
+          CONTROL_CENTER_DATA_ROOT: undefined,
+          HOME: home,
+          XDG_DATA_HOME: undefined
+        },
+        extendEnv: true
+      })
+      const [stdout, stderr, exitCode] = yield* Effect.all([
+        handle.stdout.pipe(Stream.decodeText(), Stream.runFold(() => "", (output, chunk) => output + chunk)),
+        handle.stderr.pipe(Stream.decodeText(), Stream.runFold(() => "", (output, chunk) => output + chunk)),
+        handle.exitCode
+      ], { concurrency: "unbounded" })
+      return { exitCode, stderr, stdout }
+    })
+
+    // Before the per-user default, the root was `.control-center` in the directory the CLI ran from. An owner
+    // who still has one is told where it is and how to keep or move it; it is never touched.
+    it.effect("names an old working-directory data root once and leaves it alone", () =>
+      Effect.gen(function*() {
+        const fileSystem = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const parent = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-built-legacy-" })
+        const work = path.join(parent, "work")
+        const home = path.join(parent, "home")
+        yield* fileSystem.makeDirectory(path.join(work, ".control-center"), { recursive: true })
+        yield* fileSystem.makeDirectory(home)
+        const legacyRoot = path.join(work, ".control-center")
+        const dataRoot = path.join(home, ".local", "share", "control-center")
+
+        const backup = yield* runWithoutOverride(["backup", path.join(parent, "archive")], work, home)
+        assert.strictEqual(backup.exitCode, ChildProcessSpawner.ExitCode(1))
+        assert.include(
+          backup.stderr,
+          `Control Center found data at ${legacyRoot}, its old location. It now uses ${dataRoot}.`
+        )
+        assert.include(backup.stderr, `CONTROL_CENTER_DATA_ROOT=${legacyRoot} control-center backup <archive>`)
+        assert.strictEqual(backup.stderr.split("its old location").length, 2)
+        assert.deepStrictEqual(yield* fileSystem.readDirectory(legacyRoot), [])
+        assert.isFalse(yield* fileSystem.exists(path.join(home, ".local")))
+
+        // Without an old root there is nothing to say.
+        yield* fileSystem.remove(legacyRoot, { recursive: true })
+        const quiet = yield* runWithoutOverride(["backup", path.join(parent, "archive")], work, home)
+        assert.notInclude(quiet.stderr, "old location")
+      }).pipe(Effect.scoped), { timeout: 30_000 })
+  })
+
   it.effect("runs the built CLI backup, verify, and restore commands", () =>
     Effect.gen(function*() {
       const { configuredRoot, parent } = yield* makePreparedRoot("control-center-built-cli-")

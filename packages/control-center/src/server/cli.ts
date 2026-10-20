@@ -37,6 +37,7 @@ import {
   resolvePreparedControlCenterDataRoot
 } from "./cliConfiguration.js"
 import { openControlCenter } from "./ControlCenterOpen.js"
+import { chooseControlCenterDataRoot, legacyDataRootCandidate, legacyDataRootNotice } from "./dataRootDefault.js"
 import { ControlCenterObservabilityLive } from "./observability.js"
 import {
   type BackupVerification,
@@ -66,8 +67,6 @@ const commaSeparated = (value: string): ReadonlyArray<string> =>
     .split(",")
     .map((part) => part.trim())
     .filter((part) => part.length > 0)
-
-const dataRootConfiguration = Config.String("CONTROL_CENTER_DATA_ROOT").pipe(Config.withDefault(".control-center"))
 
 const serverConfiguration = Config.all({
   agentClaudeExecutable: Config.String("CONTROL_CENTER_AGENT_CLAUDE_EXECUTABLE").pipe(Config.withDefault("")),
@@ -115,6 +114,23 @@ const writeStdoutLine = (value: string) =>
 
 const writeStderrLine = (value: string) =>
   Stdio.Stdio.use((stdio) => Stream.make(`${value}\n`).pipe(Stream.run(stdio.stderr())))
+
+/** `CONTROL_CENTER_DATA_ROOT`, else the per-user default; an old working-directory root gets one notice. */
+const dataRootConfiguration = Effect.gen(function*() {
+  const choice = yield* chooseControlCenterDataRoot(
+    yield* Config.all({
+      configured: Config.option(Config.String("CONTROL_CENTER_DATA_ROOT")),
+      xdgDataHome: Config.option(Config.String("XDG_DATA_HOME")),
+      home: Config.option(Config.String("HOME"))
+    })
+  )
+  const legacyRoot = yield* legacyDataRootCandidate(choice)
+  const fileSystem = yield* FileSystem.FileSystem
+  if (Option.isSome(legacyRoot) && (yield* fileSystem.exists(legacyRoot.value))) {
+    yield* writeStderrLine(legacyDataRootNotice({ legacyRoot: legacyRoot.value, dataRoot: choice.dataRoot }))
+  }
+  return choice.dataRoot
+})
 
 const verificationLine = (complete: string, degraded: string, verification: BackupVerification): string =>
   verification._tag === "Complete"
