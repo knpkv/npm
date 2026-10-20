@@ -5,6 +5,7 @@ import { Effect, Option, Path } from "effect"
 import {
   chooseControlCenterDataRoot,
   ControlCenterHomeUnset,
+  legacyDataRootAction,
   legacyDataRootCandidate,
   legacyDataRootNotice
 } from "../../src/server/dataRootDefault.js"
@@ -77,12 +78,39 @@ describe("Control Center default data root", () => {
       }))
   })
 
+  // An upgrade must not quietly start an empty app beside the owner's data: with the old root on disk and no
+  // default root yet, the CLI refuses and creates nothing. `restore` is the move itself, so it may create it.
+  it("refuses to start fresh while only the old root exists, and only notes it otherwise", () => {
+    const legacyRoot = Option.some("/work/.control-center")
+    const base = { legacyRoot, legacyExists: true, defaultExists: false, creatingDefault: false }
+    assert.deepStrictEqual(legacyDataRootAction(base), { _tag: "Refuse", legacyRoot: "/work/.control-center" })
+    assert.deepStrictEqual(legacyDataRootAction({ ...base, defaultExists: true }), {
+      _tag: "Notice",
+      legacyRoot: "/work/.control-center"
+    })
+    assert.deepStrictEqual(legacyDataRootAction({ ...base, creatingDefault: true }), {
+      _tag: "Notice",
+      legacyRoot: "/work/.control-center"
+    })
+    assert.deepStrictEqual(legacyDataRootAction({ ...base, legacyExists: false }), { _tag: "None" })
+    assert.deepStrictEqual(legacyDataRootAction({ ...base, legacyRoot: Option.none() }), { _tag: "None" })
+  })
+
+  it("says it did not start, and how to start fresh, when it refuses", () => {
+    const paths = { legacyRoot: "/work/.control-center", dataRoot: "/home/owner/.local/share/control-center" }
+    const refused = legacyDataRootNotice({ ...paths, refused: true })
+    assert.include(refused, "Control Center did not start")
+    assert.include(refused, "CONTROL_CENTER_DATA_ROOT=/home/owner/.local/share/control-center")
+    assert.notInclude(legacyDataRootNotice({ ...paths, refused: false }), "did not start")
+  })
+
   // A plain `mv` would break the root: it is a claim bound to its basename. The notice offers the two moves
   // that keep it valid, and never moves anything itself.
   it("tells the owner where the old root is and how to keep or move it", () => {
     const notice = legacyDataRootNotice({
       legacyRoot: "/work/.control-center",
-      dataRoot: "/home/owner/.local/share/control-center"
+      dataRoot: "/home/owner/.local/share/control-center",
+      refused: false
     })
     assert.include(notice, "/work/.control-center")
     assert.include(notice, "/home/owner/.local/share/control-center")

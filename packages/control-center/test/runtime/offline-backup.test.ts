@@ -595,7 +595,7 @@ describe("offline backup commands", () => {
     const runWithoutOverride = Effect.fn("OfflineBackupTest.runWithoutOverride")(function*(
       args: ReadonlyArray<string>,
       cwd: string,
-      home: string
+      home: string | undefined
     ) {
       const path = yield* Path.Path
       const cliEntry = yield* path.fromFileUrl(new URL("../../dist/server/server/cli.js", import.meta.url))
@@ -605,6 +605,7 @@ describe("offline backup commands", () => {
           ...inactiveTelemetryEnvironment,
           CONTROL_CENTER_DATA_ROOT: undefined,
           HOME: home,
+          USERPROFILE: undefined,
           XDG_DATA_HOME: undefined
         },
         extendEnv: true
@@ -642,10 +643,30 @@ describe("offline backup commands", () => {
         assert.deepStrictEqual(yield* fileSystem.readDirectory(legacyRoot), [])
         assert.isFalse(yield* fileSystem.exists(path.join(home, ".local")))
 
+        // `serve` with only the old root on disk refuses: no empty app, no new pairing code, no new root.
+        const serve = yield* runWithoutOverride(["serve"], work, home)
+        assert.strictEqual(serve.exitCode, ChildProcessSpawner.ExitCode(1))
+        assert.include(serve.stderr, "Control Center did not start")
+        assert.notInclude(serve.stderr, "Pairing code")
+        assert.notInclude(serve.stderr, "Control Center command failed")
+        assert.strictEqual(serve.stdout, "")
+        assert.isFalse(yield* fileSystem.exists(path.join(home, ".local")))
+        assert.deepStrictEqual(yield* fileSystem.readDirectory(legacyRoot), [])
+
         // Without an old root there is nothing to say.
         yield* fileSystem.remove(legacyRoot, { recursive: true })
         const quiet = yield* runWithoutOverride(["backup", path.join(parent, "archive")], work, home)
         assert.notInclude(quiet.stderr, "old location")
+      }).pipe(Effect.scoped), { timeout: 30_000 })
+
+    it.effect("asks for CONTROL_CENTER_DATA_ROOT or HOME when neither is set", () =>
+      Effect.gen(function*() {
+        const fileSystem = yield* FileSystem.FileSystem
+        const work = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-built-no-home-" })
+        const result = yield* runWithoutOverride(["serve"], work, undefined)
+        assert.strictEqual(result.exitCode, ChildProcessSpawner.ExitCode(1))
+        assert.include(result.stderr, "Control Center has no data root: set CONTROL_CENTER_DATA_ROOT or HOME.")
+        assert.deepStrictEqual(yield* fileSystem.readDirectory(work), [])
       }).pipe(Effect.scoped), { timeout: 30_000 })
   })
 

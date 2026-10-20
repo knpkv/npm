@@ -14,6 +14,18 @@ export class ControlCenterHomeUnset extends Schema.TaggedError<ControlCenterHome
   {}
 ) {}
 
+/** The old working-directory root is on disk and the default root is not: starting would open an empty app. */
+export class ControlCenterLegacyDataRootFound extends Schema.TaggedError<ControlCenterLegacyDataRootFound>()(
+  "ControlCenterLegacyDataRootFound",
+  { legacyRoot: Schema.String }
+) {}
+
+/** What to do about an old root: nothing, a notice, or refusing to start beside it. */
+export type LegacyDataRootAction =
+  | { readonly _tag: "None" }
+  | { readonly _tag: "Notice"; readonly legacyRoot: string }
+  | { readonly _tag: "Refuse"; readonly legacyRoot: string }
+
 const DATA_ROOT_DIRECTORY = "control-center"
 const LEGACY_DATA_ROOT = ".control-center"
 
@@ -61,14 +73,38 @@ export const legacyDataRootCandidate = Effect.fn("legacyDataRootCandidate")(func
 })
 
 /**
- * One stderr line block for an old root that is still on disk. A data root is a claim bound to its basename,
- * so a plain move breaks it: the notice offers keeping it with the override, or moving it with backup and
- * restore, which publish a valid root at the new default.
+ * An old root still on disk while the default root does not exist yet refuses the start, so an upgrade never
+ * opens an empty app with a fresh pairing code beside the owner's data. Once the default exists, or the command
+ * is `restore` (which creates it from a backup), the old root only gets the notice.
  */
-export const legacyDataRootNotice = (paths: { readonly legacyRoot: string; readonly dataRoot: string }): string =>
+export const legacyDataRootAction = (input: {
+  readonly legacyRoot: Option.Option<string>
+  readonly legacyExists: boolean
+  readonly defaultExists: boolean
+  readonly creatingDefault: boolean
+}): LegacyDataRootAction => {
+  if (Option.isNone(input.legacyRoot) || !input.legacyExists) return { _tag: "None" }
+  return input.defaultExists || input.creatingDefault
+    ? { _tag: "Notice", legacyRoot: input.legacyRoot.value }
+    : { _tag: "Refuse", legacyRoot: input.legacyRoot.value }
+}
+
+/**
+ * The stderr lines for an old root that is still on disk. A data root is a claim bound to its basename, so a
+ * plain move breaks it: the notice offers keeping it with the override, or moving it with backup and restore,
+ * which publish a valid root at the new default. A refused start also says how to start fresh instead.
+ */
+export const legacyDataRootNotice = (paths: {
+  readonly legacyRoot: string
+  readonly dataRoot: string
+  readonly refused: boolean
+}): string =>
   [
+    ...(paths.refused ? ["Control Center did not start, so it would not open an empty app beside your data."] : []),
     `Control Center found data at ${paths.legacyRoot}, its old location. It now uses ${paths.dataRoot}.`,
     `To keep using the old data, start it with CONTROL_CENTER_DATA_ROOT=${paths.legacyRoot} control-center.`,
     `To move it, stop Control Center, then run CONTROL_CENTER_DATA_ROOT=${paths.legacyRoot} control-center backup <archive>`,
-    `and control-center restore <archive>. Nothing was moved.`
+    `and control-center restore <archive>.`,
+    ...(paths.refused ? [`To start fresh instead, set CONTROL_CENTER_DATA_ROOT=${paths.dataRoot}.`] : []),
+    "Nothing was moved."
   ].join("\n")

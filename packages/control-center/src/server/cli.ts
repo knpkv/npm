@@ -37,7 +37,13 @@ import {
   resolvePreparedControlCenterDataRoot
 } from "./cliConfiguration.js"
 import { openControlCenter } from "./ControlCenterOpen.js"
-import { chooseControlCenterDataRoot, legacyDataRootCandidate, legacyDataRootNotice } from "./dataRootDefault.js"
+import {
+  chooseControlCenterDataRoot,
+  ControlCenterLegacyDataRootFound,
+  legacyDataRootAction,
+  legacyDataRootCandidate,
+  legacyDataRootNotice
+} from "./dataRootDefault.js"
 import { ControlCenterObservabilityLive } from "./observability.js"
 import {
   type BackupVerification,
@@ -115,20 +121,33 @@ const writeStdoutLine = (value: string) =>
 const writeStderrLine = (value: string) =>
   Stdio.Stdio.use((stdio) => Stream.make(`${value}\n`).pipe(Stream.run(stdio.stderr())))
 
-/** `CONTROL_CENTER_DATA_ROOT`, else the per-user default; an old working-directory root gets one notice. */
-const dataRootConfiguration = Effect.gen(function*() {
+/**
+ * `CONTROL_CENTER_DATA_ROOT`, else the per-user default under `HOME` (`USERPROFILE` on Windows). An old
+ * working-directory root gets a notice, and refuses the start while the default does not exist yet unless
+ * the command creates it from a backup (`restore`).
+ */
+const dataRootConfiguration = Effect.fn("ControlCenterCli.dataRootConfiguration")(function*(
+  creatingDefault: boolean
+) {
   const choice = yield* chooseControlCenterDataRoot(
     yield* Config.all({
       configured: Config.option(Config.String("CONTROL_CENTER_DATA_ROOT")),
       xdgDataHome: Config.option(Config.String("XDG_DATA_HOME")),
-      home: Config.option(Config.String("HOME"))
+      home: Config.option(Config.String("HOME").pipe(Config.orElse(() => Config.String("USERPROFILE"))))
     })
   )
   const legacyRoot = yield* legacyDataRootCandidate(choice)
   const fileSystem = yield* FileSystem.FileSystem
-  if (Option.isSome(legacyRoot) && (yield* fileSystem.exists(legacyRoot.value))) {
-    yield* writeStderrLine(legacyDataRootNotice({ legacyRoot: legacyRoot.value, dataRoot: choice.dataRoot }))
-  }
+  const action = legacyDataRootAction({
+    legacyRoot,
+    legacyExists: Option.isSome(legacyRoot) && (yield* fileSystem.exists(legacyRoot.value)),
+    defaultExists: yield* fileSystem.exists(choice.dataRoot),
+    creatingDefault
+  })
+  if (action._tag === "None") return choice.dataRoot
+  const refused = action._tag === "Refuse"
+  yield* writeStderrLine(legacyDataRootNotice({ legacyRoot: action.legacyRoot, dataRoot: choice.dataRoot, refused }))
+  if (refused) return yield* new ControlCenterLegacyDataRootFound({ legacyRoot: action.legacyRoot })
   return choice.dataRoot
 })
 
@@ -166,7 +185,7 @@ const program = Effect.scoped(
       return
     }
 
-    const configuredDataRoot = yield* dataRootConfiguration
+    const configuredDataRoot = yield* dataRootConfiguration(invocation._tag === "restore")
     if (invocation._tag === "restore") {
       const restored = yield* restoreBackup({
         archiveRoot: invocation.archiveRoot,
@@ -457,6 +476,13 @@ const reportProgramFailure = <E>(cause: Cause.Cause<E>) => {
     (value) => Predicate.hasProperty(value, "_tag") && value._tag === "ControlCenterCliUsageError"
   )
   if (isUsageError) return Effect.void
+  const errorTagIs = (tag: string) =>
+    Option.exists(error, (value) => Predicate.hasProperty(value, "_tag") && value._tag === tag)
+  // The notice already said what to do; a second, generic line would bury it.
+  if (errorTagIs("ControlCenterLegacyDataRootFound")) return Effect.void
+  if (errorTagIs("ControlCenterHomeUnset")) {
+    return writeStderrLine("Control Center has no data root: set CONTROL_CENTER_DATA_ROOT or HOME.")
+  }
   const databaseInitializationError = Option.flatMap(
     error,
     (value) => Option.fromNullishOr(findDatabaseInitializationError(value))
