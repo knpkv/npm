@@ -368,6 +368,8 @@ export type UserPickerUser = { readonly "accountId"?: string, readonly "accountT
 export const UserPickerUser = Schema.Struct({ "accountId": Schema.optionalKey(Schema.String.annotate({ "description": "The account ID of the user, which uniquely identifies the user across all Atlassian products. For example, *5b10ac8d82e05b22cc7d4ef5*." })), "accountType": Schema.optionalKey(Schema.Literals(["atlassian", "app", "customer", "unknown"]).annotate({ "description": "The user account type. Can take the following values:\n\n *  `atlassian` regular Atlassian user account\n *  `app` system account used for Connect applications and OAuth to represent external systems\n *  `customer` Jira Service Desk account representing an external service desk" })), "avatarUrl": Schema.optionalKey(Schema.String.annotate({ "description": "The avatar URL of the user.", "format": "uri" })), "displayName": Schema.optionalKey(Schema.String.annotate({ "description": "The display name of the user. Depending on the user’s privacy setting, this may be returned as null." })), "html": Schema.optionalKey(Schema.String.annotate({ "description": "The display name, email address, and key of the user with the matched query string highlighted with the HTML bold tag." })), "key": Schema.optionalKey(Schema.String.annotate({ "description": "This property is no longer available. See the [deprecation notice](https://developer.atlassian.com/cloud/jira/platform/deprecation-notice-user-privacy-api-migration-guide/) for details." })), "name": Schema.optionalKey(Schema.String.annotate({ "description": "This property is no longer available . See the [deprecation notice](https://developer.atlassian.com/cloud/jira/platform/deprecation-notice-user-privacy-api-migration-guide/) for details." })) }).annotate({ "description": "A user found in a search.", "identifier": "UserPickerUser" })
 export type LicensedApplication = { readonly "id": string, readonly "plan": "UNLICENSED" | "FREE" | "PAID" }
 export const LicensedApplication = Schema.Struct({ "id": Schema.String.annotate({ "description": "The ID of the application.", "readOnly": true }), "plan": Schema.Literals(["UNLICENSED", "FREE", "PAID"]).annotate({ "description": "The licensing plan.", "readOnly": true }) }).annotate({ "description": "Details about a licensed Jira application.", "identifier": "LicensedApplication" })
+export type AuditUserAvatarUrls = { readonly "16x16"?: string, readonly "24x24"?: string, readonly "32x32"?: string, readonly "48x48"?: string }
+export const AuditUserAvatarUrls = Schema.Struct({ "16x16": Schema.optionalKey(Schema.String.annotate({ "format": "uri" })), "24x24": Schema.optionalKey(Schema.String.annotate({ "format": "uri" })), "32x32": Schema.optionalKey(Schema.String.annotate({ "format": "uri" })), "48x48": Schema.optionalKey(Schema.String.annotate({ "format": "uri" })) }).annotate({ "identifier": "AuditUserAvatarUrls" })
 export type StatusCategory = { readonly "colorName"?: string, readonly "id"?: number, readonly "key"?: string, readonly "name"?: string, readonly "self"?: string }
 export const StatusCategory = Schema.Struct({ "colorName": Schema.optionalKey(Schema.String.annotate({ "description": "The name of the color used to represent the status category.", "readOnly": true })), "id": Schema.optionalKey(Schema.Number.annotate({ "description": "The ID of the status category.", "readOnly": true, "format": "int64" }).check(Schema.isInt().annotate({ "expected": "an integer" }))), "key": Schema.optionalKey(Schema.String.annotate({ "description": "The key of the status category.", "readOnly": true })), "name": Schema.optionalKey(Schema.String.annotate({ "description": "The name of the status category.", "readOnly": true })), "self": Schema.optionalKey(Schema.String.annotate({ "description": "The URL of the status category.", "readOnly": true })) }).annotate({ "description": "A status category.", "identifier": "StatusCategory" })
 export type FieldUpdateOperation = { readonly "add"?: Schema.Json, readonly "copy"?: Schema.Json, readonly "edit"?: Schema.Json, readonly "remove"?: Schema.Json, readonly "set"?: Schema.Json }
@@ -1114,6 +1116,8 @@ export type FoundUsers = { readonly "header"?: string, readonly "total"?: number
 export const FoundUsers = Schema.Struct({ "header": Schema.optionalKey(Schema.String.annotate({ "description": "Header text indicating the number of users in the response and the total number of users found in the search." })), "total": Schema.optionalKey(Schema.Number.annotate({ "description": "The total number of users found in the search.", "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" }))), "users": Schema.optionalKey(Schema.Array(UserPickerUser)) }).annotate({ "description": "The list of users found in a search, including header text (Showing X of Y matching users) and total of matched users.", "identifier": "FoundUsers" })
 export type License = { readonly "applications": ReadonlyArray<LicensedApplication> }
 export const License = Schema.Struct({ "applications": Schema.Array(LicensedApplication).annotate({ "description": "The applications under this license.", "readOnly": true }) }).annotate({ "description": "Details about a license for the Jira instance.", "identifier": "License" })
+export type AuditUser = { readonly "accountId"?: string, readonly "active"?: boolean, readonly "avatarUrls"?: AuditUserAvatarUrls, readonly "displayName"?: string, readonly "key"?: string, readonly "name"?: string, readonly "self"?: string }
+export const AuditUser = Schema.Struct({ "accountId": Schema.optionalKey(Schema.String), "active": Schema.optionalKey(Schema.Boolean), "avatarUrls": Schema.optionalKey(AuditUserAvatarUrls), "displayName": Schema.optionalKey(Schema.String), "key": Schema.optionalKey(Schema.String), "name": Schema.optionalKey(Schema.String), "self": Schema.optionalKey(Schema.String.annotate({ "format": "uri" })) }).annotate({ "identifier": "AuditUser" })
 export type NestedResponse = { readonly "errorCollection"?: ErrorCollection, readonly "status"?: number, readonly "warningCollection"?: WarningCollection }
 export const NestedResponse = Schema.Struct({ "errorCollection": Schema.optionalKey(ErrorCollection), "status": Schema.optionalKey(Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" }))), "warningCollection": Schema.optionalKey(WarningCollection) }).annotate({ "identifier": "NestedResponse" })
 export type Errors = { readonly "issueIsSubtask"?: Error, readonly "issuesInArchivedProjects"?: Error, readonly "issuesInUnlicensedProjects"?: Error, readonly "issuesNotFound"?: Error, readonly "userDoesNotHavePermission"?: Error }
@@ -1494,6 +1498,8 @@ export type PageBeanFieldConfigurationSchemeProjects = { readonly "isLast"?: boo
 export const PageBeanFieldConfigurationSchemeProjects = Schema.Struct({ "isLast": Schema.optionalKey(Schema.Boolean.annotate({ "description": "Whether this is the last page.", "readOnly": true })), "maxResults": Schema.optionalKey(Schema.Number.annotate({ "description": "The maximum number of items that could be returned.", "readOnly": true, "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" }))), "nextPage": Schema.optionalKey(Schema.String.annotate({ "description": "If there is another page of results, the URL of the next page.", "readOnly": true, "format": "uri" })), "self": Schema.optionalKey(Schema.String.annotate({ "description": "The URL of the page.", "readOnly": true, "format": "uri" })), "startAt": Schema.optionalKey(Schema.Number.annotate({ "description": "The index of the first item returned.", "readOnly": true, "format": "int64" }).check(Schema.isInt().annotate({ "expected": "an integer" }))), "total": Schema.optionalKey(Schema.Number.annotate({ "description": "The number of items returned.", "readOnly": true, "format": "int64" }).check(Schema.isInt().annotate({ "expected": "an integer" }))), "values": Schema.optionalKey(Schema.Array(FieldConfigurationSchemeProjects).annotate({ "description": "The list of items.", "readOnly": true })) }).annotate({ "description": "A page of items.", "identifier": "PageBeanFieldConfigurationSchemeProjects" })
 export type FoundGroups = { readonly "groups"?: ReadonlyArray<FoundGroup>, readonly "header"?: string, readonly "total"?: number }
 export const FoundGroups = Schema.Struct({ "groups": Schema.optionalKey(Schema.Array(FoundGroup)), "header": Schema.optionalKey(Schema.String.annotate({ "description": "Header text indicating the number of groups in the response and the total number of groups found in the search." })), "total": Schema.optionalKey(Schema.Number.annotate({ "description": "The total number of groups found in the search.", "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" }))) }).annotate({ "description": "The list of groups found in a search, including header text (Showing X of Y matching groups) and total of matched groups.", "identifier": "FoundGroups" })
+export type AuditEntry = { readonly "caller"?: string, readonly "createdAt"?: string, readonly "filterId"?: string, readonly "jql"?: string, readonly "requestUrl"?: string, readonly "user"?: AuditUser, readonly "userAgent"?: string, readonly "validationMessage"?: string }
+export const AuditEntry = Schema.Struct({ "caller": Schema.optionalKey(Schema.String), "createdAt": Schema.optionalKey(Schema.String), "filterId": Schema.optionalKey(Schema.String), "jql": Schema.optionalKey(Schema.String), "requestUrl": Schema.optionalKey(Schema.String), "user": Schema.optionalKey(AuditUser), "userAgent": Schema.optionalKey(Schema.String), "validationMessage": Schema.optionalKey(Schema.String) }).annotate({ "identifier": "AuditEntry" })
 export type CreatedIssue = { readonly "id"?: string, readonly "key"?: string, readonly "self"?: string, readonly "transition"?: NestedResponse, readonly "watchers"?: NestedResponse }
 export const CreatedIssue = Schema.Struct({ "id": Schema.optionalKey(Schema.String.annotate({ "description": "The ID of the created issue or subtask.", "readOnly": true })), "key": Schema.optionalKey(Schema.String.annotate({ "description": "The key of the created issue or subtask.", "readOnly": true })), "self": Schema.optionalKey(Schema.String.annotate({ "description": "The URL of the created issue or subtask.", "readOnly": true })), "transition": Schema.optionalKey(Schema.suspend((): Schema.Codec<NestedResponse> => NestedResponse).annotate({ "description": "The response code and messages related to any requested transition.", "readOnly": true })), "watchers": Schema.optionalKey(Schema.suspend((): Schema.Codec<NestedResponse> => NestedResponse).annotate({ "description": "The response code and messages related to any requested watchers.", "readOnly": true })) }).annotate({ "description": "Details about a created issue or subtask.", "identifier": "CreatedIssue" })
 export type IssueArchivalSyncResponse = { readonly "errors"?: Errors, readonly "numberOfIssuesUpdated"?: number }
@@ -1694,6 +1700,8 @@ export type IssueFieldOptionCreateBean = { readonly "config"?: IssueFieldOptionC
 export const IssueFieldOptionCreateBean = Schema.Struct({ "config": Schema.optionalKey(IssueFieldOptionConfiguration), "properties": Schema.optionalKey(Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" })).annotate({ "description": "The properties of the option as arbitrary key-value pairs. These properties can be searched using JQL, if the extractions (see https://developer.atlassian.com/cloud/jira/platform/modules/issue-field-option-property-index/) are defined in the descriptor for the issue field module." })), "value": Schema.String.annotate({ "description": "The option's name, which is displayed in Jira." }) }).annotate({ "identifier": "IssueFieldOptionCreateBean" })
 export type FoundUsersAndGroups = { readonly "groups"?: FoundGroups, readonly "users"?: FoundUsers }
 export const FoundUsersAndGroups = Schema.Struct({ "groups": Schema.optionalKey(FoundGroups), "users": Schema.optionalKey(FoundUsers) }).annotate({ "description": "List of users and groups found in a search.", "identifier": "FoundUsersAndGroups" })
+export type AuditPage = { readonly "entries"?: ReadonlyArray<AuditEntry>, readonly "isLast"?: boolean, readonly "nextPageToken"?: string, readonly "nextPageURL"?: string }
+export const AuditPage = Schema.Struct({ "entries": Schema.optionalKey(Schema.Array(AuditEntry)), "isLast": Schema.optionalKey(Schema.Boolean), "nextPageToken": Schema.optionalKey(Schema.String), "nextPageURL": Schema.optionalKey(Schema.String) }).annotate({ "identifier": "AuditPage" })
 export type CreatedIssues = { readonly "errors"?: ReadonlyArray<BulkOperationErrorResult>, readonly "issues"?: ReadonlyArray<CreatedIssue> }
 export const CreatedIssues = Schema.Struct({ "errors": Schema.optionalKey(Schema.Array(BulkOperationErrorResult).annotate({ "description": "Error details for failed issue creation requests.", "readOnly": true })), "issues": Schema.optionalKey(Schema.Array(CreatedIssue).annotate({ "description": "Details of the issues created.", "readOnly": true })) }).annotate({ "description": "Details about the issues created and the errors for requests that failed.", "identifier": "CreatedIssues" })
 export type RemoteIssueLink = { readonly "application"?: Application, readonly "globalId"?: string, readonly "id"?: number, readonly "object"?: RemoteObject, readonly "relationship"?: string, readonly "self"?: string }
@@ -3374,6 +3382,18 @@ export type GetLicense200 = License
 export const GetLicense200 = License
 export type GetLicense401 = Schema.Json
 export const GetLicense401 = Schema.Json.annotate({ "expected": "JSON value" })
+export type GetAuditEntriesParams = { readonly "userAccountId"?: string, readonly "nextPageToken"?: string, readonly "maxResults"?: number }
+export const GetAuditEntriesParams = Schema.Struct({ "userAccountId": Schema.optionalKey(Schema.String), "nextPageToken": Schema.optionalKey(Schema.String), "maxResults": Schema.optionalKey(Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" }))) })
+export type GetAuditEntries200 = AuditPage
+export const GetAuditEntries200 = AuditPage
+export type GetAuditEntries400 = Schema.Json
+export const GetAuditEntries400 = Schema.Json.annotate({ "expected": "JSON value" })
+export type GetAuditEntries401 = Schema.Json
+export const GetAuditEntries401 = Schema.Json.annotate({ "expected": "JSON value" })
+export type GetAuditEntries403 = Schema.Json
+export const GetAuditEntries403 = Schema.Json.annotate({ "expected": "JSON value" })
+export type GetAuditEntries404 = Schema.Json
+export const GetAuditEntries404 = Schema.Json.annotate({ "expected": "JSON value" })
 export type CreateIssueParams = { readonly "updateHistory"?: boolean }
 export const CreateIssueParams = Schema.Struct({ "updateHistory": Schema.optionalKey(Schema.Boolean) })
 export type CreateIssueRequestJson = IssueUpdateDetails
@@ -5004,6 +5024,8 @@ export type DeletePriority404 = ErrorCollection
 export const DeletePriority404 = ErrorCollection
 export type DeletePriority409 = ErrorCollection
 export const DeletePriority409 = ErrorCollection
+export type DeletePriority503 = ErrorCollection
+export const DeletePriority503 = ErrorCollection
 export type GetPrioritySchemesParams = { readonly "startAt"?: string, readonly "maxResults"?: string, readonly "priorityId"?: ReadonlyArray<number>, readonly "schemeId"?: ReadonlyArray<number>, readonly "schemeName"?: string, readonly "onlyDefault"?: boolean, readonly "orderBy"?: "name" | "+name" | "-name", readonly "expand"?: string }
 export const GetPrioritySchemesParams = Schema.Struct({ "startAt": Schema.optionalKey(Schema.String), "maxResults": Schema.optionalKey(Schema.String), "priorityId": Schema.optionalKey(Schema.Array(Schema.Number.annotate({ "format": "int64" }).check(Schema.isInt().annotate({ "expected": "an integer" }))).check(Schema.isUnique().annotate({ "expected": "an array with unique items" }))), "schemeId": Schema.optionalKey(Schema.Array(Schema.Number.annotate({ "format": "int64" }).check(Schema.isInt().annotate({ "expected": "an integer" }))).check(Schema.isUnique().annotate({ "expected": "an array with unique items" }))), "schemeName": Schema.optionalKey(Schema.String), "onlyDefault": Schema.optionalKey(Schema.Boolean), "orderBy": Schema.optionalKey(Schema.Literals(["name", "+name", "-name"])), "expand": Schema.optionalKey(Schema.String) })
 export type GetPrioritySchemes200 = PageBeanPrioritySchemeWithPaginatedPrioritiesAndProjects
@@ -9258,6 +9280,17 @@ export const make = (
       orElse: unexpectedStatus
     }))
     ),
+    "getAuditEntries": (options) => HttpClientRequest.get("/rest/api/3/invalid-jqls-access-log").pipe(
+      HttpClientRequest.setUrlParams({ "userAccountId": options?.params?.["userAccountId"] as any, "nextPageToken": options?.params?.["nextPageToken"] as any, "maxResults": options?.params?.["maxResults"] as any }),
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
+      "2xx": decodeSuccess(GetAuditEntries200),
+      "400": decodeError("GetAuditEntries400", GetAuditEntries400),
+      "401": decodeError("GetAuditEntries401", GetAuditEntries401),
+      "403": decodeError("GetAuditEntries403", GetAuditEntries403),
+      "404": decodeError("GetAuditEntries404", GetAuditEntries404),
+      orElse: unexpectedStatus
+    }))
+    ),
     "createIssue": (options) => HttpClientRequest.post("/rest/api/3/issue").pipe(
       HttpClientRequest.setUrlParams({ "updateHistory": options.params?.["updateHistory"] as any }),
       HttpClientRequest.bodyJsonUnsafe(options.payload),
@@ -11322,6 +11355,7 @@ export const make = (
       "403": decodeError("DeletePriority403", DeletePriority403),
       "404": decodeError("DeletePriority404", DeletePriority404),
       "409": decodeError("DeletePriority409", DeletePriority409),
+      "503": decodeError("DeletePriority503", DeletePriority503),
       orElse: unexpectedStatus
     }))
     ))
@@ -15984,6 +16018,14 @@ readonly "findUsersAndGroups": <Config extends OperationConfig>(options: { reado
 */
 readonly "getLicense": <Config extends OperationConfig>(options: { readonly config?: Config | undefined } | undefined) => Effect.Effect<WithOptionalResponse<typeof GetLicense200.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"GetLicense401", typeof GetLicense401.Type>>
   /**
+* Returns JQL searches that need updating because Jira can no longer support them. Use the entries to find affected saved filters and JQL used by apps, automations, scripts, or REST integrations.
+*
+* Entries are ordered by creation time, newest first, and retained for three days. Pass the `nextPageToken` returned in a previous response to retrieve the next page. Results may be restricted to a user by external account ID.
+*
+* **[Permissions](#permissions) required:** *Administer Jira* global permission.
+*/
+readonly "getAuditEntries": <Config extends OperationConfig>(options: { readonly params?: typeof GetAuditEntriesParams.Encoded | undefined; readonly config?: Config | undefined } | undefined) => Effect.Effect<WithOptionalResponse<typeof GetAuditEntries200.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"GetAuditEntries400", typeof GetAuditEntries400.Type> | JiraApiError<"GetAuditEntries401", typeof GetAuditEntries401.Type> | JiraApiError<"GetAuditEntries403", typeof GetAuditEntries403.Type> | JiraApiError<"GetAuditEntries404", typeof GetAuditEntries404.Type>>
+  /**
 * Creates an issue or, where the option to create subtasks is enabled in Jira, a subtask. A transition may be applied, to move the issue or subtask to a workflow step other than the default start step, and issue properties set.
 *
 * The content of the issue or subtask is defined using `update` and `fields`. The fields that can be set in the issue or subtask are determined using the [ Get create issue metadata](#api-rest-api-3-issue-createmeta-get). These are the same fields that appear on the issue's create screen. Note that the `description`, `environment`, and any `textarea` type custom fields (multi-line text fields) take Atlassian Document Format content. Single line custom fields (`textfield`) accept a string and don't handle Atlassian Document Format content.
@@ -18196,7 +18238,7 @@ readonly "updatePriority": <Config extends OperationConfig>(id: string, options:
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "deletePriority": <Config extends OperationConfig>(id: string, options: { readonly config?: Config | undefined } | undefined) => Effect.Effect<WithOptionalResponse<typeof DeletePriority303.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"DeletePriority400", typeof DeletePriority400.Type> | JiraApiError<"DeletePriority401", typeof DeletePriority401.Type> | JiraApiError<"DeletePriority403", typeof DeletePriority403.Type> | JiraApiError<"DeletePriority404", typeof DeletePriority404.Type> | JiraApiError<"DeletePriority409", typeof DeletePriority409.Type>>
+readonly "deletePriority": <Config extends OperationConfig>(id: string, options: { readonly config?: Config | undefined } | undefined) => Effect.Effect<WithOptionalResponse<typeof DeletePriority303.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"DeletePriority400", typeof DeletePriority400.Type> | JiraApiError<"DeletePriority401", typeof DeletePriority401.Type> | JiraApiError<"DeletePriority403", typeof DeletePriority403.Type> | JiraApiError<"DeletePriority404", typeof DeletePriority404.Type> | JiraApiError<"DeletePriority409", typeof DeletePriority409.Type> | JiraApiError<"DeletePriority503", typeof DeletePriority503.Type>>
   /**
 * Returns a [paginated](#pagination) list of priority schemes.
 *
