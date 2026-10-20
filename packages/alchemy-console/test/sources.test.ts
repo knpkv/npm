@@ -374,19 +374,28 @@ layer(Layer.merge(NodeServices.layer, pacingProviders))("profile read pace", (it
 
 class SlowSignIn extends Context.Service<SlowSignIn, {
   readonly started: Deferred.Deferred<void>
+  /** Opens once the fast profile's last provider read, its version listing, has answered. */
+  readonly answered: Deferred.Deferred<void>
 }>()("AlchemyConsole/SlowSignIn") {}
 
-/** One profile's sign-in never returns; the other account answers immediately. */
+/**
+ * One profile's sign-in never returns; the other account's provider answers after a real delay, the way a
+ * loaded runner does. Only the fast profile reaches the provider, since the slow one never signs in.
+ */
 const stalledProfile = Layer.effectContext(Effect.gen(function*() {
   const started = yield* Deferred.make<void>()
+  const answered = yield* Deferred.make<void>()
   const client = HttpClient.make((request, url) =>
-    Effect.succeed(
-      HttpClientResponse.fromWeb(
-        request,
-        new Response(
-          url.searchParams.has("versions") ? versionList : bucketList([
-            "fixture-alchemy-state"
-          ])
+    TestClock.withLive(Effect.sleep("20 millis")).pipe(
+      Effect.andThen(url.searchParams.has("versions") ? Deferred.succeed(answered, undefined) : Effect.void),
+      Effect.as(
+        HttpClientResponse.fromWeb(
+          request,
+          new Response(
+            url.searchParams.has("versions") ? versionList : bucketList([
+              "fixture-alchemy-state"
+            ])
+          )
         )
       )
     )
@@ -400,7 +409,7 @@ const stalledProfile = Layer.effectContext(Effect.gen(function*() {
         ) :
         Effect.succeed(credentialsFor(profile))
   })
-  return Context.make(SlowSignIn, { started }).pipe(
+  return Context.make(SlowSignIn, { started, answered }).pipe(
     Context.add(HttpClient.HttpClient, client),
     Context.add(SsoCredentials, credentials)
   )
@@ -421,7 +430,10 @@ layer(Layer.merge(NodeServices.layer, stalledProfile))("profile deadline", (it) 
       const context = yield* Layer.build(sourceLayer({ root, awsConfigFile }))
       const fiber = yield* Context.get(context, StackSource).discover.pipe(Effect.forkChild)
       yield* Deferred.await(stall.started)
-      // The fast profile finishes without the clock. Then the slow profile misses its deadline.
+      // The fast profile finishes without the clock, but its provider reads take real time. Moving the
+      // clock before they answer would expire it too, so wait for its last read; only in-memory parsing
+      // remains after that. Then the slow profile misses its deadline.
+      yield* Deferred.await(stall.answered)
       yield* Effect.repeat(Effect.yieldNow, { times: 40 })
       yield* TestClock.adjust("9 seconds")
       expect(fiber.pollUnsafe()?._tag).toBe("Success")
