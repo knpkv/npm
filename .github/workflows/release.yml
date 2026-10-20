@@ -36,6 +36,20 @@ jobs:
         with:
           node-version: 26.7.0
           registry-url: https://registry.npmjs.org
+      # changelog-github reads commits and pull requests over GraphQL with TOKEN_GITHUB. Making the
+      # same kind of call first turns an expired or revoked token into a named failure instead of
+      # "Fetched data from GitHub has missing data" halfway through versioning.
+      - name: Check the release token
+        env:
+          GH_TOKEN: ${{ secrets.TOKEN_GITHUB }}
+          OWNER: ${{ github.repository_owner }}
+          NAME: ${{ github.event.repository.name }}
+        run: |
+          if ! gh api graphql -f owner="$OWNER" -f name="$NAME" \
+            -f query='query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { id } }' >/dev/null; then
+            echo "::error title=TOKEN_GITHUB rejected::GitHub refused TOKEN_GITHUB, most likely expired. Rotate the secret (contents and pull requests write on this repository), then re-run this workflow."
+            exit 1
+          fi
       # changesets/action publishes only when no changeset is pending; otherwise it
       # versions. A Version Packages merge that lands after newer changesets reached
       # main would then publish nothing (#589). So this step asks npm which versions

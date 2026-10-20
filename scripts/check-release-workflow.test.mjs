@@ -53,3 +53,18 @@ test("ready versions publish before pending changesets are versioned", () => {
   assert.equal(steps[usual].with["version-script"], "pnpm changeset:version")
   assert.equal(steps[usual].with["publish-script"], "pnpm changeset:publish")
 })
+
+// TOKEN_GITHUB is a personal token; when it expired every release failed with changelog-github's
+// "Fetched data from GitHub has missing data" (2026-10-17 on). The check names the cause first.
+test("the release token is checked before any step that needs it", () => {
+  const check = stepIndex("Check the release token")
+  const prepare = stepIndex("Prepare versions ready to publish")
+  assert.ok(check >= 0 && check < prepare)
+  assert.equal(steps[check].env.GH_TOKEN, "${{ secrets.TOKEN_GITHUB }}")
+  // The same kind of call changelog-github makes, so a token it would reject fails here.
+  assert.match(steps[check].run, /gh api graphql/u)
+  assert.match(steps[check].run, /::error title=TOKEN_GITHUB rejected::/u)
+  for (const step of steps.filter(changesetsAction)) {
+    assert.equal(step.with["github-token"], "${{ secrets.TOKEN_GITHUB }}", step.name)
+  }
+})
