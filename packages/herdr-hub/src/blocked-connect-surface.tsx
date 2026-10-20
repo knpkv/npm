@@ -338,7 +338,7 @@ export const BlockedConnectSurface = ({
       embedded={embedded}
       presentation={presentation}
       onStageChange={setTarget}
-      stageFooter={footer}
+      stageFooter={push ? footer : undefined}
     />
   )
 }
