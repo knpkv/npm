@@ -47,7 +47,12 @@ const request = (
 
 const overview: SandboxesOverview = {
   _tag: "Ready",
-  sandboxes: [{ accountId: account, name: sandboxName, label: null, state: { _tag: "Available" } }],
+  sandboxes: [{
+    accountId: account,
+    name: sandboxName,
+    label: null,
+    state: { _tag: "Available", lastResetAt: null }
+  }],
   badge: { quarantined: 0, stale: true, partial: true, asOf: null }
 }
 

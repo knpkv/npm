@@ -207,7 +207,7 @@ import { relayIconSvg } from "./relay-icon.js"
 import { hubCapabilities, HubReadFailed, type HubRelayReads, type PendingJob } from "./relay/capabilities.js"
 import { cliBackends, makeRelayHubMount, type RelayHubBackends, type RelayHubMount } from "./relay/mount.js"
 import { handleRelayRoute } from "./relay/routes.js"
-import { makeSandboxesModule, sandboxesModuleUrl } from "./sandboxes-module.js"
+import { makeSandboxesModule, sandboxesModuleUrl, servesSandboxes } from "./sandboxes-module.js"
 import { makeStacksModule } from "./stacks-module.js"
 import { ApprovalAppStore } from "./store.js"
 import { workCheckpointPath, workPullRequestAttachPath, workSnapshotPath } from "./work-checkpoint.js"
@@ -3263,7 +3263,13 @@ export const startHttpServer = async (
                   canonical: mode === "serve",
                   canonicalUrl: config.approvalHub.url,
                   pushEnabled: mode === "serve",
-                  workEnabled: listenerServesWork(mode, config.crossHost)
+                  workEnabled: listenerServesWork(mode, config.crossHost),
+                  sandboxesEnabled: mode === "serve" && servesSandboxes({
+                    host: config.host,
+                    isHub,
+                    sandboxesHost: options.sandboxesHost ?? null,
+                    pool: options.sandboxPool ?? null
+                  })
                 },
                 work: null,
                 status: state.status,

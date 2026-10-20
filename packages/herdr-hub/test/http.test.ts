@@ -1980,7 +1980,8 @@ esac
           canonicalUrl: "https://ser8.example.test:4779/",
           chatEnabled: true,
           pushEnabled: true,
-          workEnabled: false
+          workEnabled: false,
+          sandboxesEnabled: false
         },
         approvalsEnabled: true,
         chat: null,
@@ -2059,7 +2060,8 @@ esac
           canonicalUrl: "https://ser8.example.test:4779/",
           chatEnabled: true,
           pushEnabled: true,
-          workEnabled: false
+          workEnabled: false,
+          sandboxesEnabled: false
         },
         approvalsEnabled: true,
         chat: null,
@@ -2113,7 +2115,8 @@ esac
           canonicalUrl: "https://ser8.example.test:4779/",
           chatEnabled: true,
           pushEnabled: true,
-          workEnabled: false
+          workEnabled: false,
+          sandboxesEnabled: false
         },
         approvalsEnabled: true,
         chat: null,

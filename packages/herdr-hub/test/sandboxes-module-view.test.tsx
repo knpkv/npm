@@ -1,0 +1,484 @@
+// @vitest-environment happy-dom
+import { SandboxCard, type SandboxesOverview, type SandboxCard as SandboxCardType } from "@knpkv/sandbox-pool/host"
+import { PortalProvider } from "@knpkv/rly/foundations"
+import { DateTime, Effect, Schema } from "effect"
+import { act } from "react"
+import { createRoot, type Root } from "react-dom/client"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import type { ModulePageMount } from "../src/modules.js"
+import {
+  makeSandboxesModuleViews,
+  SandboxesClientError,
+  type SandboxesModuleReads,
+  type SandboxesModuleWrites,
+  SandboxesWriteFailed
+} from "../src/sandboxes-module-view.js"
+
+const card = Schema.decodeUnknownSync(SandboxCard)
+
+const now = "2026-10-17T13:05:00.000Z"
+
+const ready = (sandboxes: ReadonlyArray<SandboxCardType>): SandboxesOverview => ({
+  _tag: "Ready",
+  sandboxes,
+  badge: {
+    quarantined: sandboxes.filter((item) => item.state._tag === "Quarantined").length,
+    stale: false,
+    partial: false,
+    asOf: null
+  }
+})
+
+const leased = (
+  name: string,
+  accountId: string,
+  holder: string,
+  startedAt: string,
+  endsAt: string,
+  label: string | null = null
+) => card({ accountId, name, label, state: { _tag: "Leased", holder, startedAt, endsAt } })
+
+const available = (name: string, accountId: string, lastResetAt: string | null) =>
+  card({ accountId, name, label: null, state: { _tag: "Available", lastResetAt } })
+
+const text = (selector: string): string => document.querySelector(selector)?.textContent ?? ""
+
+const buttons = (selector = "button"): Array<string | null> =>
+  [...document.querySelectorAll(selector)].map((node) => node.textContent)
+
+const button = (label: string, scope = "") =>
+  [...document.querySelectorAll<HTMLButtonElement>(`${scope} button`)].find((node) => node.textContent === label)
+
+const settle = () => act(async () => await vi.advanceTimersByTimeAsync(0))
+
+describe("Sandboxes overview", { concurrent: false }, () => {
+  let root: Root | null = null
+  beforeEach(() => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true)
+    vi.useFakeTimers({ shouldAdvanceTime: false })
+    vi.setSystemTime(new Date(now))
+  })
+  afterEach(async () => {
+    await act(async () => root?.unmount())
+    root = null
+    document.body.replaceChildren()
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
+  })
+
+  const render = async (
+    overview: SandboxesOverview,
+    options: {
+      readonly read?: SandboxesModuleReads["overview"]
+      readonly owner?: boolean
+      readonly writes?: SandboxesModuleWrites | null
+    } = {}
+  ) => {
+    if (root === null) {
+      const host = document.createElement("div")
+      document.body.append(host)
+      root = createRoot(host)
+    }
+    const navigate = vi.fn<ModulePageMount["navigate"]>()
+    const reads: SandboxesModuleReads = { overview: options.read ?? Effect.succeed(overview) }
+    const module = makeSandboxesModuleViews({
+      reads,
+      writes: options.writes === undefined ? null : options.writes,
+      owner: options.owner ?? true,
+      viewer: "agent-a"
+    })
+    await act(async () =>
+      root?.render(
+        <PortalProvider>
+          {module.pages.overview(new URLSearchParams(), { active: true, navigate, closeSelection: () => undefined })}
+        </PortalProvider>
+      )
+    )
+    await settle()
+    return navigate
+  }
+
+  const openDialog = async (trigger: HTMLButtonElement | undefined) => {
+    expect(trigger).toBeInstanceOf(HTMLButtonElement)
+    await act(async () => trigger?.click())
+    await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')).not.toBeNull())
+    return document.querySelector('[role="dialog"]')
+  }
+
+  it("orders the pool quarantined, then leased by soonest end, then cleaning, then available", async () => {
+    await render(
+      ready([
+        available("ephemeral-02", "999999999991", null),
+        card({
+          accountId: "999999999993",
+          name: "ephemeral-04",
+          label: null,
+          state: { _tag: "Cleaning", runId: "run-clean", step: null }
+        }),
+        leased("ephemeral-01", "999999999990", "agent-a", "2026-10-17T10:00:00.000Z", "2026-10-17T18:00:00.000Z"),
+        leased("ephemeral-05", "999999999994", "agent-b", "2026-10-16T21:05:00.000Z", "2026-10-17T21:05:00.000Z"),
+        card({
+          accountId: "999999999992",
+          name: "ephemeral-03",
+          label: null,
+          state: { _tag: "Quarantined", runId: "run-q", step: null, blocker: { _tag: "Unknown", text: "Reset failed" } }
+        })
+      ])
+    )
+    expect(text("h1")).toBe("Sandboxes")
+    const names = [...document.querySelectorAll("[data-account]")].map((node) => node.getAttribute("data-account"))
+    expect(names).toEqual(["ephemeral-03", "ephemeral-01", "ephemeral-05", "ephemeral-04", "ephemeral-02"])
+    expect(buttons("[data-account] [data-pool-state]")).toEqual([
+      "Quarantined",
+      "Leased",
+      "Leased",
+      "Cleaning",
+      "Available"
+    ])
+  })
+
+  it("counts the pool in the summary and names when it was read", async () => {
+    await render(
+      ready([
+        leased("ephemeral-01", "999999999990", "agent-b", "2026-10-17T09:20:00.000Z", "2026-10-17T17:20:00.000Z"),
+        available("ephemeral-02", "999999999991", "2026-10-17T11:42:00.000Z")
+      ])
+    )
+    expect(text("[data-pool-summary]")).toBe("1 leased, 1 available.")
+    expect(text("[data-pool-read]")).toBe("Read 13:05 from hostd")
+  })
+
+  it("shows holder, time left, lease and cap on a lease card, and idle time on an available card", async () => {
+    await render(
+      ready([
+        leased("ephemeral-01", "999999999990", "agent-a", "2026-10-17T01:20:00.000Z", "2026-10-17T17:20:00.000Z"),
+        leased("ephemeral-03", "999999999992", "agent-b", "2026-10-17T09:20:00.000Z", "2026-10-17T17:20:00.000Z"),
+        available("ephemeral-02", "999999999991", "2026-10-17T11:42:00.000Z")
+      ])
+    )
+    const row = (name: string, key: string) =>
+      [...document.querySelectorAll(`[data-account="${name}"] dt`)].find((node) => node.textContent === key)
+        ?.nextElementSibling?.textContent
+    expect(row("ephemeral-01", "Holder")).toBe("You (agent-a)")
+    expect(row("ephemeral-01", "Time left")).toBe("4 h 15 minEnds 17:20")
+    expect(row("ephemeral-01", "Lease")).toBe("Started 01:20, extended once8 h of the 24 h cap left")
+    expect(row("ephemeral-03", "Holder")).toBe("agent-b")
+    expect(row("ephemeral-03", "Lease")).toBe("Started 09:20, not extended16 h of the 24 h cap left")
+    expect(row("ephemeral-02", "Holder")).toBe("No one")
+    expect(row("ephemeral-02", "Idle")).toBe("1 h 23 min")
+    expect(row("ephemeral-02", "Last reset")).toBe("11:42")
+  })
+
+  it("names the date of an end that is not today or tomorrow", async () => {
+    await render(
+      ready([leased("ephemeral-01", "999999999990", "agent-b", "2026-10-14T09:20:00.000Z", "2026-10-14T17:20:00.000Z")])
+    )
+    expect(text('[data-account="ephemeral-01"]')).toContain("Ends 17:20 on 2026-10-14")
+    expect(text('[data-account="ephemeral-01"]')).not.toContain("tomorrow")
+  })
+
+  it("keeps a retired lease Leased and says it left the pool", async () => {
+    await render(
+      ready([
+        leased(
+          "ephemeral-09",
+          "999999999998",
+          "agent-b",
+          "2026-10-17T09:20:00.000Z",
+          "2026-10-17T17:20:00.000Z",
+          "left the pool"
+        )
+      ])
+    )
+    expect(text('[data-account="ephemeral-09"] [data-pool-state]')).toBe("Leased")
+    expect(text('[data-account="ephemeral-09"]')).toContain("Left the pool")
+  })
+
+  it("shows the quarantine blocker words and a link to the account's runs, never a stored reset line", async () => {
+    await render(
+      ready([
+        card({
+          accountId: "999999999992",
+          name: "ephemeral-03",
+          label: null,
+          state: {
+            _tag: "Quarantined",
+            runId: "release-7f3a",
+            step: "verify",
+            blocker: { _tag: "ResourcesRemain", count: 3, text: "3 resources still removable" }
+          }
+        })
+      ])
+    )
+    const quarantined = text('[data-account="ephemeral-03"]')
+    expect(quarantined).toContain("3 resources still removable")
+    expect(quarantined).not.toContain("verify:")
+    const viewRun = [...document.querySelectorAll<HTMLAnchorElement>('[data-account="ephemeral-03"] a')].find(
+      (node) => node.textContent === "View run"
+    )
+    expect(viewRun?.getAttribute("href")).toBe("?id=999999999992#sandboxes/runs")
+  })
+
+  it("lists the cleanup steps as done, in progress and waiting from the card's current step", async () => {
+    await render(
+      ready([
+        card({
+          accountId: "999999999991",
+          name: "ephemeral-02",
+          label: null,
+          state: { _tag: "Cleaning", runId: "run-clean", step: "nuke" }
+        })
+      ])
+    )
+    const steps = [...document.querySelectorAll('[data-account="ephemeral-02"] ol[aria-label="Cleanup steps"] li')].map(
+      (node) => [
+        node.querySelector("[data-step-name]")?.textContent,
+        node.querySelector("[data-step-state]")?.textContent
+      ]
+    )
+    expect(steps).toEqual([
+      ["Signing in", "Done"],
+      ["Checking baseline", "Done"],
+      ["Dry run", "Done"],
+      ["Removing", "In progress"],
+      ["Verifying empty", "Waiting"],
+      ["Re-checking baseline", "Waiting"],
+      ["Checking budget hold", "Waiting"]
+    ])
+    expect(text('[data-account="ephemeral-02"]')).toContain("run-clean")
+    expect(
+      document.querySelector('[data-account="ephemeral-02"] li[aria-current="step"] [data-step-name]')?.textContent
+    ).toBe("Removing")
+  })
+
+  it("names the longest-idle account on the lease sheet and leases it through the writes", async () => {
+    const lease = vi.fn(() => Effect.void)
+    const writes: SandboxesModuleWrites = {
+      lease: Effect.suspend(lease),
+      extend: () => Effect.void,
+      release: () => Effect.void
+    }
+    await render(
+      ready([
+        available("ephemeral-01", "999999999990", "2026-10-17T12:30:00.000Z"),
+        available("ephemeral-02", "999999999991", "2026-10-17T11:42:00.000Z")
+      ]),
+      { writes }
+    )
+    const dialog = await openDialog(button("Lease an account"))
+    expect(dialog?.textContent).toContain("Longest idle: free since 11:42 (1 h 23 min).")
+    expect(dialog?.textContent).toContain("ephemeral-02")
+    expect(dialog?.textContent).toContain("999999999991")
+    expect(dialog?.textContent).toContain("21:05")
+    expect(dialog?.textContent).toContain("13:05 tomorrow")
+    expect(buttons("[data-account] [data-pool-state]")).toEqual(["Available", "Available"])
+    expect(lease).not.toHaveBeenCalled()
+    await act(async () => button("Lease ephemeral-02", '[role="dialog"]')?.click())
+    await settle()
+    expect(lease).toHaveBeenCalledTimes(1)
+    await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')).toBeNull())
+  })
+
+  it("keeps the sheet open and says so when the lease is refused", async () => {
+    const writes: SandboxesModuleWrites = {
+      lease: Effect.fail(new SandboxesWriteFailed({ reason: "rejected" })),
+      extend: () => Effect.void,
+      release: () => Effect.void
+    }
+    await render(ready([available("ephemeral-02", "999999999991", null)]), { writes })
+    await openDialog(button("Lease an account"))
+    await act(async () => button("Lease ephemeral-02", '[role="dialog"]')?.click())
+    await settle()
+    expect(text('[role="dialog"] [role="alert"]')).toBe("The lease wasn’t submitted. Nothing was leased.")
+  })
+
+  it("points to the CLI instead of a confirm while the hub can't submit jobs", async () => {
+    await render(
+      ready([
+        available("ephemeral-02", "999999999991", null),
+        leased("ephemeral-01", "999999999990", "agent-a", "2026-10-17T09:20:00.000Z", "2026-10-17T17:20:00.000Z")
+      ])
+    )
+    const lease = await openDialog(button("Lease an account"))
+    expect(lease?.textContent).toContain("Lease from the CLI for now")
+    expect(buttons('[role="dialog"] button')).not.toContain("Lease ephemeral-02")
+  })
+
+  it("disables lease when nothing is free and names when the next one ends", async () => {
+    await render(
+      ready([
+        leased("ephemeral-01", "999999999990", "agent-b", "2026-10-17T09:20:00.000Z", "2026-10-17T17:20:00.000Z"),
+        leased("ephemeral-02", "999999999991", "agent-a", "2026-10-17T13:05:00.000Z", "2026-10-17T21:05:00.000Z")
+      ])
+    )
+    expect(button("Lease an account")?.hasAttribute("disabled")).toBe(true)
+    expect(text(".sandboxes-page")).toContain("No account is free until 17:20.")
+  })
+
+  it("extends only the viewer's lease and names the new end", async () => {
+    const extend = vi.fn((_accountId: string) => Effect.void)
+    await render(
+      ready([
+        leased("ephemeral-02", "999999999991", "agent-b", "2026-10-16T21:05:00.000Z", "2026-10-17T21:05:00.000Z"),
+        leased("ephemeral-01", "999999999990", "agent-a", "2026-10-17T09:20:00.000Z", "2026-10-17T17:20:00.000Z")
+      ]),
+      { writes: { lease: Effect.void, extend, release: () => Effect.void } }
+    )
+    expect(buttons('[data-account="ephemeral-01"] button')).toEqual(["Copy", "Extend", "Release"])
+    expect(buttons('[data-account="ephemeral-02"] button')).toEqual(["Copy"])
+    const dialog = await openDialog(button("Extend", '[data-account="ephemeral-01"]'))
+    expect(dialog?.textContent).toContain("Adds 8 h to your lease.")
+    expect(dialog?.textContent).toContain("17:20")
+    expect(dialog?.textContent).toContain("01:20 tomorrow")
+    expect(dialog?.textContent).toContain("8 h, cap at 09:20 tomorrow")
+    expect(text('[data-account="ephemeral-01"] [data-pool-state]')).toBe("Leased")
+    await act(async () => button("Extend to 01:20", '[role="dialog"]')?.click())
+    await settle()
+    expect(extend).toHaveBeenCalledWith("999999999990")
+  })
+
+  it("keeps extend visible and disabled once the lease is at the 24h cap", async () => {
+    await render(
+      ready([leased("ephemeral-01", "999999999990", "agent-a", "2026-10-17T09:20:00.000Z", "2026-10-18T09:20:00.000Z")])
+    )
+    expect(button("Extend", '[data-account="ephemeral-01"]')?.hasAttribute("disabled")).toBe(true)
+    expect(text('[data-account="ephemeral-01"]')).toContain("Extend: 24-hour cap reached at 09:20 tomorrow.")
+  })
+
+  it("confirms release by naming the wipe and releases through the writes", async () => {
+    const release = vi.fn((_accountId: string) => Effect.void)
+    await render(
+      ready([
+        leased("ephemeral-01", "999999999990", "agent-a", "2026-10-17T09:20:00.000Z", "2026-10-17T17:20:00.000Z")
+      ]),
+      { writes: { lease: Effect.void, extend: () => Effect.void, release } }
+    )
+    const dialog = await openDialog(button("Release"))
+    expect(dialog?.textContent).toContain("Releasing ends your lease now and wipes the account.")
+    expect(dialog?.textContent).toContain("Dry run")
+    expect(dialog?.textContent).toContain("Nuke")
+    expect(dialog?.textContent).toContain("Verify")
+    expect(dialog?.textContent).toContain("Everything in ephemeral-01 is deleted. This can’t be undone.")
+    expect(text('[data-account="ephemeral-01"] [data-pool-state]')).toBe("Leased")
+    expect(release).not.toHaveBeenCalled()
+    await act(async () => button("Release and wipe", '[role="dialog"]')?.click())
+    await settle()
+    expect(release).toHaveBeenCalledWith("999999999990")
+  })
+
+  it("keeps two skeleton cards while the first read is pending", async () => {
+    await render(ready([]), { read: Effect.never })
+    expect(document.querySelectorAll("[data-skeleton]")).toHaveLength(2)
+    expect(document.querySelector("[data-account]")).toBeNull()
+  })
+
+  it("shows one panel when the read fails and reads again from that panel", async () => {
+    let reads = 0
+    const read = Effect.suspend(() => {
+      reads += 1
+      return Effect.fail(new SandboxesClientError({ detail: "network" }))
+    })
+    await render(ready([]), { read })
+    expect(document.querySelector("[data-account]")).toBeNull()
+    expect(document.querySelectorAll("[data-skeleton]")).toHaveLength(0)
+    expect(text(".sandboxes-page")).toContain("Can’t read the pool from hostd")
+    expect(text(".sandboxes-page")).toContain(
+      "Accounts and leases aren’t shown until the lease store answers. Nothing was changed."
+    )
+    expect(reads).toBe(1)
+    await act(async () => button("Read again")?.click())
+    await settle()
+    expect(reads).toBe(2)
+    expect(document.querySelector("[data-account]")).toBeNull()
+  })
+
+  it("treats a failed store read and a reader that could not start as the same failed panel", async () => {
+    for (const overview of [
+      { _tag: "Failed", reason: "unavailable" },
+      { _tag: "Unavailable", reason: "unavailable", host: "host-a", message: "down" }
+    ] satisfies ReadonlyArray<SandboxesOverview>) {
+      await render(overview)
+      expect(text(".sandboxes-page")).toContain("Can’t read the pool from hostd")
+      expect(button("Read again")).toBeInstanceOf(HTMLButtonElement)
+      expect(button("Lease an account")).toBeUndefined()
+    }
+  })
+
+  it("shows one calm panel and no lease when this hub has no pool", async () => {
+    await render({ _tag: "Unavailable", reason: "not_configured", host: null, message: "not configured" })
+    expect(text(".sandboxes-page")).toContain("Not set up")
+    expect(text(".sandboxes-page")).toContain("Sandboxes aren’t set up on this hub.")
+    expect(button("Lease an account")).toBeUndefined()
+    expect(document.querySelector("[data-pool-summary]")).toBeNull()
+  })
+
+  it("names the host whose pool is not configured", async () => {
+    await render({ _tag: "Unavailable", reason: "pool_mismatch", host: "host-a", message: "mismatch" })
+    expect(text(".sandboxes-page")).toContain("Not configured")
+    expect(text(".sandboxes-page")).toContain("The pool isn’t configured on host-a.")
+    expect(button("Lease an account")).toBeUndefined()
+  })
+
+  it("keeps the last values marked last known when a later read fails", async () => {
+    let calls = 0
+    const overview = ready([
+      leased("ephemeral-01", "999999999990", "agent-b", "2026-10-17T09:20:00.000Z", "2026-10-17T17:20:00.000Z")
+    ])
+    const read = Effect.suspend(() => {
+      calls += 1
+      return calls === 1 ? Effect.succeed(overview) : Effect.fail(new SandboxesClientError({ detail: "network" }))
+    })
+    await render(overview, { read })
+    expect(document.querySelector('[role="status"][aria-live="polite"]')?.textContent ?? "").toBe("")
+    await act(async () => await vi.advanceTimersByTimeAsync(120_000))
+    expect(calls).toBeGreaterThan(1)
+    expect(text('[role="status"][aria-live="polite"]')).toBe("Stale, updated 2m ago")
+    expect(text('[data-account="ephemeral-01"]')).toContain("Last known at 13:05")
+    // The card's times stay as they were read, not as the clock moves on.
+    expect(text('[data-account="ephemeral-01"]')).toContain("4 h 15 min")
+    expect(text('[data-account="ephemeral-01"] [data-pool-state]')).toBe("Leased")
+    expect(text("[data-pool-read]")).toBe("Read 13:05 from hostd")
+  })
+
+  it("hides lease, extend and release from a viewer and still copies the account id", async () => {
+    const writeText = vi.fn(() => Promise.resolve())
+    const prior = Object.getOwnPropertyDescriptor(navigator, "clipboard")
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } })
+    try {
+      await render(
+        ready([
+          leased("ephemeral-01", "999999999990", "agent-a", "2026-10-17T09:20:00.000Z", "2026-10-17T17:20:00.000Z")
+        ]),
+        { owner: false }
+      )
+      const labels = buttons()
+      expect(labels).not.toContain("Lease an account")
+      expect(labels).not.toContain("Extend")
+      expect(labels).not.toContain("Release")
+      expect(text(".sandboxes-page")).toContain(
+        "Only the owner can lease or reset sandboxes here. Agents lease through Fleet jobs."
+      )
+      const copy = document.querySelector<HTMLButtonElement>("button[aria-label='Copy account ID 999999999990']")
+      expect(copy).not.toBeNull()
+      await act(async () => copy?.click())
+      expect(writeText).toHaveBeenCalledWith("999999999990")
+    } finally {
+      if (prior === undefined) Object.defineProperty(navigator, "clipboard", { configurable: true, value: undefined })
+      else Object.defineProperty(navigator, "clipboard", prior)
+    }
+  })
+
+  it("shows the last sweep time and no sweep button", async () => {
+    const asOf = DateTime.makeUnsafe("2026-10-17T13:03:00.000Z").epochMilliseconds
+    await render({ _tag: "Ready", sandboxes: [], badge: { quarantined: 0, stale: false, partial: false, asOf } })
+    expect(text(".sandboxes-page")).toContain("Sweep last 13:03")
+    expect(buttons().some((label) => /sweep/i.test(label ?? ""))).toBe(false)
+  })
+
+  it("says the sweep is late when the badge is stale", async () => {
+    const asOf = DateTime.makeUnsafe("2026-10-16T13:51:00.000Z").epochMilliseconds
+    await render({ _tag: "Ready", sandboxes: [], badge: { quarantined: 0, stale: true, partial: true, asOf } })
+    expect(text(".sandboxes-page")).toContain("Sweep late, last ran 13:51 yesterday")
+    expect(buttons().some((label) => /sweep/i.test(label ?? ""))).toBe(false)
+  })
+})

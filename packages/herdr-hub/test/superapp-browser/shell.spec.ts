@@ -113,10 +113,11 @@ for (const reducedMotion of ["no-preference", "reduce"] satisfies ReadonlyArray<
     const opener = moreOpener(page)
     await opener.click()
     const more = page.getByRole("dialog", { name: "More", exact: true })
-    // Only modules outside the phone bar are listed: Host resources and Stacks.
+    // Only modules outside the phone bar are listed: Host resources, Sandboxes and Stacks.
     const moreModules = more.getByRole("navigation", { name: "More modules" })
-    await expect(moreModules.getByRole("link")).toHaveCount(2)
+    await expect(moreModules.getByRole("link")).toHaveCount(3)
     await expect(moreModules.getByRole("link", { name: /^Host resources/ })).toBeVisible()
+    await expect(moreModules.getByRole("link", { name: /^Sandboxes/ })).toBeVisible()
     await expect(moreModules.getByRole("link", { name: /^Stacks/ })).toBeVisible()
     await expect(more.getByText("Appearance", { exact: true })).toHaveCount(0)
     await expect(more.getByRole("button", { name: /^Host access/ })).toBeVisible()
@@ -1293,9 +1294,11 @@ test("sidebar rows, Settings and the wordmark follow the design geometry", async
       label: label(row)
     }))
     const resources = element.querySelector("a[aria-label=\"Host resources\"] svg path")?.getAttribute("d")
+    const sandboxes = element.querySelector("a[aria-label=\"Sandboxes\"] svg path")?.getAttribute("d")
     return {
       rows,
       resources,
+      sandboxes,
       wordmark: box(element.querySelector(".superapp-sidebar-brand strong")),
       weight: getComputedStyle(element.querySelector(".superapp-module-nav") ?? element).fontWeight
     }
@@ -1306,6 +1309,7 @@ test("sidebar rows, Settings and the wordmark follow the design geometry", async
     "Code",
     "Usage",
     "Host resources",
+    "Sandboxes",
     "Stacks",
     "Settings"
   ])
@@ -1315,6 +1319,7 @@ test("sidebar rows, Settings and the wordmark follow the design geometry", async
     expect(row.glyph?.x, row.name).toBeCloseTo(27.2, 1)
     expect(row.label?.x, row.name).toBeCloseTo(27.2 + size + 12, 1)
   }
+  expect(geometry.sandboxes).toBe("m12 2 8 3v6c0 6-8 11-8 11S4 17 4 11V5l8-3M8 11l3 3 5-6")
   expect(geometry.resources).toBe("M6 6h12v12H6zM10 10h4v4h-4zM9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4")
   expect(geometry.wordmark?.x).toBeCloseTo(65.6, 1)
   expect(geometry.wordmark?.y).toBeCloseTo(31.52, 1)
@@ -1327,4 +1332,26 @@ test("the phone module bar uses the design's navigation text weight", async ({ p
   test.skip(info.project.name !== "phone", "Phone bar")
   await page.goto("/#fleet/approvals")
   await expect(page.locator(".superapp-bottom")).toHaveCSS("font-weight", "430")
+})
+
+test("a hub without the sandbox pool leaves the Sandboxes row out", async ({ page }, info) => {
+  test.skip(info.project.name !== "desktop", "Desktop sidebar")
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await page.goto("/?nosandboxes#fleet/approvals")
+  const sidebar = page.locator(".superapp-sidebar")
+  await expect(sidebar.getByRole("link", { name: "Stacks" })).toBeVisible()
+  await expect(sidebar.getByRole("link", { name: "Sandboxes" })).toHaveCount(0)
+})
+
+test("the Sandboxes row opens the pool read-only", async ({ page }, info) => {
+  test.skip(info.project.name !== "desktop", "Desktop sidebar")
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await page.goto("/#fleet/approvals")
+  await page.locator(".superapp-sidebar").getByRole("link", { name: "Sandboxes" }).click()
+  await expect(page).toHaveURL(/#sandboxes\/overview$/)
+  await expect(page.getByRole("heading", { level: 1, name: "Sandboxes" })).toBeVisible()
+  await expect(page.locator("[data-account]")).toHaveCount(2)
+  await expect(page.getByText("Only the owner can lease or reset sandboxes here. Agents lease through Fleet jobs."))
+    .toBeVisible()
+  await expect(page.getByRole("button", { name: "Lease an account" })).toHaveCount(0)
 })

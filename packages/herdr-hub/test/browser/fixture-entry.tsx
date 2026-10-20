@@ -120,7 +120,13 @@ const empty = ["empty", "fresh-install", "host-unchecked", "paged-first-empty"].
 const failed = state === "host-read-failed"
 const paged = state === "paged" || state === "paged-first-empty"
 const base: DashboardSnapshot = {
-  approvalApp: { canonical: true, canonicalUrl: "https://hub.example.test/", pushEnabled: true, workEnabled: false },
+  approvalApp: {
+    canonical: true,
+    canonicalUrl: "https://hub.example.test/",
+    pushEnabled: true,
+    workEnabled: false,
+    sandboxesEnabled: false
+  },
   approvalsEnabled: state !== "approvals-off",
   directory: null,
   historyNextCursor: paged ? { createdAt: start - 2 * 60 * 60_000, id: "decided-admission" } : null,

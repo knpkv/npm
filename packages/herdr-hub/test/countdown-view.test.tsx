@@ -37,7 +37,8 @@ const snapshot = (overrides: Partial<DashboardSnapshot> = {}): DashboardSnapshot
     canonical: true,
     canonicalUrl: "https://hub.example.test/",
     pushEnabled: false,
-    workEnabled: false
+    workEnabled: false,
+    sandboxesEnabled: false
   },
   approvalsEnabled: true,
   directory: null,

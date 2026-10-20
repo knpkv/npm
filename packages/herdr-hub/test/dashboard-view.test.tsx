@@ -28,7 +28,8 @@ const snapshot = (approvalsEnabled: boolean): DashboardSnapshot => {
       canonical: false,
       canonicalUrl: "https://ser8.example.test/",
       pushEnabled: false,
-      workEnabled: false
+      workEnabled: false,
+      sandboxesEnabled: false
     },
     approvalsEnabled,
     work: null,

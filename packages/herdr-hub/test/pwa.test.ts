@@ -56,7 +56,8 @@ describe("approval PWA", () => {
         canonical: true,
         canonicalUrl: "https://ser8.example.test:4779/",
         pushEnabled: true,
-        workEnabled: false
+        workEnabled: false,
+        sandboxesEnabled: false
       },
       approvalsEnabled: true,
       directory: null,

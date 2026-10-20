@@ -153,7 +153,7 @@ export const designDashboard = (
     host,
     observedAt: fixtureNow,
     approvalsEnabled: true,
-    approvalApp: { canonical: true, canonicalUrl: "/", pushEnabled: false, workEnabled: false },
+    approvalApp: { canonical: true, canonicalUrl: "/", pushEnabled: false, workEnabled: false, sandboxesEnabled: true },
     work: null,
     status: {
       host,

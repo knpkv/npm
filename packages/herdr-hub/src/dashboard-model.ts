@@ -86,7 +86,9 @@ export const DashboardSnapshot = Schema.Struct({
     canonicalUrl: Schema.String,
     pushEnabled: Schema.Boolean,
     // Whether this listener serves the Work snapshot, so the page never polls an endpoint it lacks.
-    workEnabled: Schema.Boolean
+    workEnabled: Schema.Boolean,
+    // Whether this listener serves the Sandboxes pool, so the shell mounts its nav row. The one place the shell reads it.
+    sandboxesEnabled: Schema.Boolean
   }),
   work: Schema.NullOr(WorkSnapshots),
   status: HostStatus,

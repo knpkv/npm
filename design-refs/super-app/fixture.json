@@ -55,6 +55,13 @@
             "bar": false
           },
           {
+            "id": "sandboxes",
+            "name": "Sandboxes",
+            "icon": "shield",
+            "group": "personal",
+            "bar": false
+          },
+          {
             "id": "stacks",
             "name": "Stacks",
             "icon": "stacks",

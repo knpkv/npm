@@ -1,20 +1,24 @@
 /**
  * Contracts for hosting the sandbox read model inside another server.
  *
- * A card persists the account id, name, state tag, holder id, lease end, run id and current step.
+ * A card persists the account id, name, state tag, holder id, lease start and end, last reset, run id and current step.
  * A quarantine blocker is a closed tag with fixed copy; the stored reset line stays in the store.
  * `label` is `"left the pool"` when that id is absent from the current contract; the state tag stays,
- * including Leased. Version, cleaning reason, quarantine time and reset time stay in the store.
+ * including Leased. A lease card keeps `startedAt` and `endsAt`. An available card keeps `lastResetAt`.
+ * Version, cleaning reason and quarantine time stay in the store.
  *
  * @module
  */
 import { Schema } from "effect"
-import { Holder, RunId } from "./lease.js"
+import { Holder, leaseCap, leaseDuration, RunId } from "./lease.js"
 import { AccountId, SandboxName } from "./pool.js"
 import { isBudgetHold } from "./reset.js"
 import { RunStep } from "./run-log.js"
 
 const Instant = Schema.DateTimeUtcFromString
+
+/** Eight hours, and the 24-hour cap `extend` clamps to. The sheets name those times. */
+export { leaseCap, leaseDuration }
 
 /** Ten minutes. A missing sweep, or one older than this, makes the quarantine badge stale. */
 export const sweepStaleAfterMillis = 10 * 60 * 1000
@@ -152,8 +156,8 @@ export const sandboxNavigationBadge = (badge: {
 }
 
 export const SandboxCardState = Schema.TaggedUnion({
-  Available: {},
-  Leased: { holder: Holder, endsAt: Instant },
+  Available: { lastResetAt: Schema.NullOr(Instant) },
+  Leased: { holder: Holder, startedAt: Instant, endsAt: Instant },
   Cleaning: { runId: RunId, step: Schema.NullOr(RunStep) },
   Quarantined: { runId: RunId, blocker: SandboxBlocker, step: Schema.NullOr(RunStep) }
 })

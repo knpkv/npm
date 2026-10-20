@@ -16,6 +16,7 @@
 @import "./blocked-connect.css";
 @import "./host-resources.css";
 @import "./stacks.css";
+@import "./sandboxes.css";
 @import "@knpkv/alchemy-console/views/style.css";
 
 /* Code review's bundled Tailwind preflight zeroes form-control padding hub-wide. Usage's design keeps the browser's

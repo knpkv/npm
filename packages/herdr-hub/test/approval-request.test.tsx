@@ -55,7 +55,8 @@ const dashboardFor = (record: JobRecord): DashboardSnapshot => ({
     canonical: true,
     canonicalUrl: "https://ser8.example.test/",
     pushEnabled: true,
-    workEnabled: false
+    workEnabled: false,
+    sandboxesEnabled: false
   },
   approvalsEnabled: true,
   directory: null,
