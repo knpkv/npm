@@ -1,5 +1,5 @@
 /**
- * The host dashboard page, server-rendered for a non-canonical host and hydrated by `approval.js`.
+ * The host dashboard page: the super-app shell, or a host activity page server-rendered and hydrated by `approval.js`.
  *
  * @module
  */
@@ -10,12 +10,12 @@ import { DashboardView } from "../dashboard-view.js"
 import { dashboardDocumentTitle } from "./html.js"
 
 /**
- * The host dashboard page. A non-canonical page is server-rendered and then hydrated by
+ * The host dashboard page. A page without the super-app is server-rendered and then hydrated by
  * `approval.js`, so it must be `renderToString`: static markup merges adjacent text nodes and
  * drops the separators hydration needs (React #418).
  */
 export const dashboardPage = (snapshot: DashboardSnapshot, fontPreload: string): string => {
-  const markup = snapshot.approvalApp.canonical ? "" : renderToString(
+  const markup = snapshot.approvalApp.superapp ? "" : renderToString(
     createElement(
       "div",
       { className: "dashboard-gesture" },

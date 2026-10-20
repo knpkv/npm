@@ -167,15 +167,17 @@ class ControlCenterCliConfigurationError extends Schema.TaggedError<
   reason: Schema.Literal("pr-review-provider-unavailable")
 }) {}
 
+const USAGE =
+  "Usage: control-center [--help | --no-open | serve | recover-owner | backup <archive> | verify-backup <archive> | restore <archive>]"
+
 const program = Effect.scoped(
   Effect.gen(function*() {
     const path = yield* Path.Path
     const stdio = yield* Stdio.Stdio
     const invocation = classifyControlCenterCliArguments(yield* stdio.args)
+    if (invocation._tag === "help") return yield* writeStdoutLine(USAGE)
     if (invocation._tag === "invalid") {
-      yield* writeStderrLine(
-        "Usage: control-center [--no-open | serve | recover-owner | backup <archive> | verify-backup <archive> | restore <archive>]"
-      )
+      yield* writeStderrLine(USAGE)
       return yield* new ControlCenterCliUsageError({ command: invocation.command })
     }
 

@@ -1,5 +1,41 @@
 # @knpkv/alchemy-console
 
+## 0.6.1
+
+### Patch Changes
+
+- [#1037](https://github.com/knpkv/npm/pull/1037) [`c2fdb19`](https://github.com/knpkv/npm/commit/c2fdb1980aa21778918ef054cefbc1103c8fbcc0) Thanks [@konopkov](https://github.com/konopkov)! - `alchemy-console --help` describes the `login` and `serve` subcommands.
+
+## 0.6.0
+
+### Minor Changes
+
+- [#1024](https://github.com/knpkv/npm/pull/1024) [`56c6996`](https://github.com/knpkv/npm/commit/56c6996b14b35f508ed83d2fd780d54f8dca1232) Thanks [@konopkov](https://github.com/konopkov)! - Local discovery no longer fails the whole walk on one bad entry. Symlinks that leave the search root are skipped (never followed), and dangling ones too, since they lead nowhere. Any other entry that can't be read is counted and skipped, so the projects that were found are still read. `discoverProjects` now returns `{ projects, unreadable }`. A walk that skipped unreadable entries reports one `local: skipped` discovery issue next to its stacks; only an unreadable root still fails.
+
+  Such a partial walk is reported as a new `local: skipped` discovery issue (`DiscoveryIssue.reason` gains `"skipped"`), kept distinct from `local: io`, which now means the root or a project's state couldn't be read. S3 discovery reports at most one issue per profile and reason, so an expired profile with several buckets is one sign-in issue, not one per bucket.
+
+- [#1015](https://github.com/knpkv/npm/pull/1015) [`382cdd3`](https://github.com/knpkv/npm/commit/382cdd3c116c1b9d956c1ea55e4956eb10345178) Thanks [@konopkov](https://github.com/konopkov)! - Add `./host` and `./host/server` exports so another server, such as a Relay Hub module, can serve the stacks read model. `./host` has the tagged result contracts (`StacksOverviewResult`, `StackDetailResult`, `StackPlanResult`, `StacksUnavailable`) and the `StackQuery` selector. `./host/server` has `stacksHostLayer`, the same discovery, SSO and plan reader the standalone console runs, `stacksHostOptions` for its paths, and `makeStacksHostReads`, which returns a failed discovery as a result rather than an error.
+
+- [#1028](https://github.com/knpkv/npm/pull/1028) [`65ee3f4`](https://github.com/knpkv/npm/commit/65ee3f4f155d0516416482bd039bc30ffb124e48) Thanks [@konopkov](https://github.com/konopkov)! - Overview discovery stops the local project walk after 5 seconds or 50,000 directories and keeps the projects already found. The walk checks that clock before each directory entry, so one wide directory stops on the same budget. `discoverProjects` now returns `truncated` with those projects. A stopped walk reports one `local: truncated` issue and still reads the projects it found. A state file past its size limit stays `local: limit`. The walk and every AWS profile share one 20 second deadline. Profiles are read three at a time. A profile holds its slot for at most 8 seconds, and only while time remains in that deadline. A profile that has not finished is one `s3: provider` issue. Stacks from profiles that finished stay. Two profile names for the same account, role, start URL, session and region are read once. SSO resolution leaves the session token cache in use.
+
+- [#1016](https://github.com/knpkv/npm/pull/1016) [`2ca72de`](https://github.com/knpkv/npm/commit/2ca72dec189c75ac63cb5f6f3d62540d92249ad2) Thanks [@konopkov](https://github.com/konopkov)! - Export the stack page's parts from `./views` so a host can compose its own page around them: `StackResourcesView` (the resource table), `StackOutputsView` (the outputs list) and `StackStateTree` (resources grouped by construct parent and type). `StackResourcesView` and `StackStateTree` take `resourceHref: null` to render resource names as plain text for a host with no resource page. `StackDetailView` renders the same parts as before.
+
+  The empty-state creatures are now CSS backgrounds instead of `<img>` elements whose URL came from `import.meta.url`, so `./views` loads in bundles without `import.meta.url`. A consumer's CSS build must resolve the stylesheet's SVG `url()`s.
+
+  The plan's source line no longer prints commit hashes: it reads "PR #n · published <time>", with the head and base commits in its tooltip.
+
+  The plan digest moves into that tooltip too, and the stack page's counts and dates use commas instead of middots.
+
+- [#1027](https://github.com/knpkv/npm/pull/1027) [`6140a40`](https://github.com/knpkv/npm/commit/6140a4020fa624365382fd8716592d33425c932d) Thanks [@konopkov](https://github.com/konopkov)! - Plan head, base and digest ids are copy buttons. The plan line and Stacks Activity show the words Head, Base and Digest. The short id is the button's name and the clipboard value, not the visible text.
+
+### Patch Changes
+
+- [#1021](https://github.com/knpkv/npm/pull/1021) [`e58ea2f`](https://github.com/knpkv/npm/commit/e58ea2f90e1b30580ab9eb201033ad21cfb09f11) Thanks [@konopkov](https://github.com/konopkov)! - Read Bun's text lockfile without `jsonc-parser`. Its CommonJS entry loads its parts through `require()` calls that a bundle can't resolve, so a Node bundle of `./host/server` failed at load with "Cannot find module './impl/format'". A small parser now accepts the same input (trailing commas and comments), and a test bundles `./host/server` for Node and loads it.
+
+- [#1029](https://github.com/knpkv/npm/pull/1029) [`bf62e19`](https://github.com/knpkv/npm/commit/bf62e19a1db55acd14169dbd315e694cc9e15e8a) Thanks [@konopkov](https://github.com/konopkov)! - IconButton has an inline size: a 28px box, a 16px icon, and the shared 44px hit area. It stays 28px on a coarse pointer. CommitLabel and the plan id buttons use that size and no longer set their own box. A successful copy says Copied in a polite live region for about 2 seconds, and the button shows a check in the same box. The id stays out of that text.
+- Updated dependencies [[`7015e2c`](https://github.com/knpkv/npm/commit/7015e2cd1315f80a6198e62c0344bb41cb3d68dd), [`bf62e19`](https://github.com/knpkv/npm/commit/bf62e19a1db55acd14169dbd315e694cc9e15e8a)]:
+  - @knpkv/rly@0.24.0
+
 ## 0.5.2
 
 ### Patch Changes
