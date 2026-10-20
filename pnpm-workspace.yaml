@@ -30,8 +30,8 @@ overrides:
   "@atlaskit/react-ufo": 7.1.0
   effect: 4.0.0
   happy-dom: 20.14.5
-  # GHSA-253c-mchw-3w2r: markdown-it <14.3.1; keep prosemirror-markdown on 14.x
-  markdown-it@<14.3.1: 14.3.2
+  # GHSA-253c-mchw-3w2r and GHSA-vfgh-jcmw-g37q: markdown-it <14.3.3; keep prosemirror-markdown on 14.x
+  markdown-it@<14.3.3: ^14.3.3
   file-type@>=13.0.0 <21.3.1: 21.3.3
   uuid@<11.1.1: 11.1.1
   read-yaml-file@<2.1.0: 2.1.0
@@ -57,9 +57,10 @@ overrides:
   # GHSA-p98j-92pf-mc4p: dompurify 3.4.13–3.4.15 via packages/review > mermaid; keep 3.x
   dompurify@>=3.4.13 <3.4.16: 3.4.16
   # GHSA-698v-4r3x-3vcv: launch-editor escapeCmdArgs() omits % escaping on Windows. Patched in launch-editor 2.14.2
-  # (via @changesets/cli) and vite 8.3.3, which bundles it (via packages/docs > astro); keep vite on 8.x
-  launch-editor@<2.14.2: 2.14.2
-  vite@>=8.3.0 <8.3.3: 8.3.3
+  # and vite 8.3.3, which bundles it. The workspace's own vite ranges start at 8.3.3; these reach only transitive
+  # copies. Drop launch-editor once @changesets/cli requires >=2.14.2, and vite once astro requires >=8.3.3.
+  launch-editor@<2.14.2: ^2.14.2
+  vite@>=8.3.0 <8.3.3: ^8.3.3
   # GHSA-68fv-2mgg-jv7q: source-map-js <1.2.2 event-loop DoS (via tailwind and vitest coverage)
   source-map-js@>=1.0.0 <1.2.2: 1.2.2
   # GHSA-c8x8-7fp4-3x9w: prosemirror-view <1.42.3 XSS; @atlaskit/editor-prosemirror 9.0.0 pins 1.41.5

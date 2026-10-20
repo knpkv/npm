@@ -20,7 +20,7 @@ overrides:
   '@atlaskit/react-ufo': 7.1.0
   effect: 4.0.0
   happy-dom: 20.14.5
-  markdown-it@<14.3.1: 14.3.2
+  markdown-it@<14.3.3: ^14.3.3
   file-type@>=13.0.0 <21.3.1: 21.3.3
   uuid@<11.1.1: 11.1.1
   read-yaml-file@<2.1.0: 2.1.0
@@ -36,8 +36,8 @@ overrides:
   diff@>=6.0.0 <8.0.3: 8.0.3
   devalue@>=5.0.0 <5.9.3: 5.9.4
   dompurify@>=3.4.13 <3.4.16: 3.4.16
-  launch-editor@<2.14.2: 2.14.2
-  vite@>=8.3.0 <8.3.3: 8.3.3
+  launch-editor@<2.14.2: ^2.14.2
+  vite@>=8.3.0 <8.3.3: ^8.3.3
   source-map-js@>=1.0.0 <1.2.2: 1.2.2
   prosemirror-view@<1.42.3: 1.42.6
 
@@ -146,7 +146,7 @@ importers:
         specifier: ^8.71.0
         version: 8.71.0(@typescript/typescript6@6.0.2)(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)
       vite:
-        specifier: 8.3.3
+        specifier: ^8.3.3
         version: 8.3.3(@types/node@26.6.4)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.44.0)(tsx@4.23.15)(yaml@2.9.1)
       vitest:
         specifier: ^5.0.3
@@ -259,7 +259,7 @@ importers:
         specifier: npm:@typescript/typescript6@^6.0.2
         version: '@typescript/typescript6@6.0.2'
       vite:
-        specifier: 8.3.3
+        specifier: ^8.3.3
         version: 8.3.3(@types/node@26.6.4)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.44.0)(tsx@4.23.15)(yaml@2.9.1)
       vitest:
         specifier: ^5.0.3
@@ -404,7 +404,7 @@ importers:
         specifier: npm:@typescript/typescript6@^6.0.2
         version: '@typescript/typescript6@6.0.2'
       vite:
-        specifier: 8.3.3
+        specifier: ^8.3.3
         version: 8.3.3(@types/node@26.6.4)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.44.0)(tsx@4.23.15)(yaml@2.9.1)
       vitest:
         specifier: ^5.0.3
@@ -808,7 +808,7 @@ importers:
         specifier: npm:@typescript/typescript6@^6.0.2
         version: '@typescript/typescript6@6.0.2'
       vite:
-        specifier: 8.3.3
+        specifier: ^8.3.3
         version: 8.3.3(@types/node@26.6.4)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.44.0)(tsx@4.23.15)(yaml@2.9.1)
       vitest:
         specifier: ^5.0.3
@@ -1026,7 +1026,7 @@ importers:
         specifier: npm:@typescript/typescript6@^6.0.2
         version: '@typescript/typescript6@6.0.2'
       vite:
-        specifier: 8.3.3
+        specifier: ^8.3.3
         version: 8.3.3(@types/node@26.6.4)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.44.0)(tsx@4.23.15)(yaml@2.9.1)
       vitest:
         specifier: ^5.0.3
@@ -1553,7 +1553,7 @@ importers:
         specifier: npm:@typescript/typescript6@^6.0.2
         version: '@typescript/typescript6@6.0.2'
       vite:
-        specifier: 8.3.3
+        specifier: ^8.3.3
         version: 8.3.3(@types/node@26.6.4)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.44.0)(tsx@4.23.15)(yaml@2.9.1)
       vitest:
         specifier: ^5.0.3
@@ -1934,7 +1934,7 @@ importers:
         specifier: npm:@typescript/typescript6@^6.0.2
         version: '@typescript/typescript6@6.0.2'
       vite:
-        specifier: 8.3.3
+        specifier: ^8.3.3
         version: 8.3.3(@types/node@26.6.4)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.44.0)(tsx@4.23.15)(yaml@2.9.1)
       vitest:
         specifier: ^5.0.3
@@ -1976,7 +1976,7 @@ importers:
         specifier: 10.6.1
         version: 10.6.1(@types/react@19.3.0)(prettier@3.9.9)(react@19.3.0)
       vite:
-        specifier: 8.3.3
+        specifier: ^8.3.3
         version: 8.3.3(@types/node@26.6.4)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.44.0)(tsx@4.23.15)(yaml@2.9.1)
 
   scratchpad: {}
@@ -3241,7 +3241,7 @@ packages:
     resolution: {integrity: sha512-qvsTEwEFefhdirGOPnu9Wp6ChfIwy2dBCRuETU3uE+4cC+PFoxMSiiEhxk4lOluA34eARHA0OxqsEUYDqRMgeQ==}
     peerDependencies:
       typescript: '>= 4.3.x'
-      vite: 8.3.3
+      vite: ^8.3.3
     peerDependenciesMeta:
       typescript:
         optional: true
@@ -4865,7 +4865,7 @@ packages:
     resolution: {integrity: sha512-kUMRRRS4MpJdxOLhrlQX3cpMYi2vVB3tIIRXyqWmAjVM6xT7OZ1SCQEMFPP+S3ToRqaYWZQb8aBqrJucbbYufA==}
     peerDependencies:
       storybook: ^10.6.1
-      vite: 8.3.3
+      vite: ^8.3.3
 
   '@storybook/global@5.0.0':
     resolution: {integrity: sha512-FcOqPAXACP0I3oJ/ws6/rrPT9WGhu915Cg8D02a9YxLo0DE9zI+a9A5gRGvmQ09fiWPukqI8ZAEoQEdWUKMQdQ==}
@@ -4896,7 +4896,7 @@ packages:
       react-dom: ^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
       storybook: ^10.6.1
       typescript: '>= 4.9.x'
-      vite: 8.3.3
+      vite: ^8.3.3
     peerDependenciesMeta:
       typescript:
         optional: true
@@ -5015,7 +5015,7 @@ packages:
   '@tailwindcss/vite@4.3.3':
     resolution: {integrity: sha512-yYU8cogLeSh/ms2jh8Fj7jaba/EWa7Ja6GoUqYZaraEuCI5YS6ms6ObZgjjedm+jm6XZjdNRWBpPP6Z86oOxcw==}
     peerDependencies:
-      vite: 8.3.3
+      vite: ^8.3.3
 
   '@testing-library/dom@10.4.1':
     resolution: {integrity: sha512-o4PXJQidqJl82ckFaXUeoAW+XysPLauYI43Abki5hABd853iMhitooc6znOnczgbTYmEP6U6/y1ZyKAIsvMKGg==}
@@ -5566,7 +5566,7 @@ packages:
       '@rolldown/plugin-babel': ^0.1.7 || ^0.2.0
       babel-plugin-react-compiler: ^1.0.0
       oxc-transform-react: ^0.145.0
-      vite: 8.3.3
+      vite: ^8.3.3
     peerDependenciesMeta:
       '@rolldown/plugin-babel':
         optional: true
@@ -5610,7 +5610,7 @@ packages:
     resolution: {integrity: sha512-T8sWAIbkSyAjkwTcaEc3Iu0o9A27X1/kdXrizhZkGuSKScRQtRzclfAMpOTcGdXCsqxeWlpGy3XjqaW8CpLORg==}
     peerDependencies:
       msw: ^2.4.9
-      vite: 8.3.3
+      vite: ^8.3.3
     peerDependenciesMeta:
       msw:
         optional: true
@@ -7316,8 +7316,8 @@ packages:
   markdown-it-table@2.0.6:
     resolution: {integrity: sha512-TvVf4yCSK8YrxnOldEehkkHlDy4Tzk+QrMf1/YVo+YIwzZZyoyy80blnVVsbluNJ3WiebTkXepqbOZh0ONunbA==}
 
-  markdown-it@14.3.2:
-    resolution: {integrity: sha512-sHHjZ5fJKlgrG4qns2YwVcdNep35h5fERrfkD2YNsb9UFk0UIHarbiTaHKVMlPuWAoiilyK8Fv/jAm11slsY7Q==}
+  markdown-it@14.3.3:
+    resolution: {integrity: sha512-L//tDAkjTjJCU6pBUSBTgs3Kg4InVaZuUZog/b6V12UKhcDQ7S78877ibbCanRExwPuYP1CZD7Gd2dxSy1GXRg==}
     hasBin: true
 
   markdown-table@3.0.4:
@@ -8811,7 +8811,7 @@ packages:
   vitefu@1.1.3:
     resolution: {integrity: sha512-ub4okH7Z5KLjb6hDyjqrGXqWtWvoYdU3IGm/NorpgHncKoLTCfRIbvlhBm7r0YstIaQRYlp4yEbFqDcKSzXSSg==}
     peerDependencies:
-      vite: 8.3.3
+      vite: ^8.3.3
     peerDependenciesMeta:
       vite:
         optional: true
@@ -8832,7 +8832,7 @@ packages:
       '@vitest/ui': 5.0.3
       happy-dom: 20.14.5
       jsdom: '*'
-      vite: 8.3.3
+      vite: ^8.3.3
     peerDependenciesMeta:
       '@edge-runtime/vm':
         optional: true
@@ -9415,7 +9415,7 @@ snapshots:
       '@atlaskit/adf-schema': 57.6.21(react@18.3.1)
       '@atlaskit/editor-prosemirror': 9.0.0
       '@babel/runtime': 7.29.7
-      markdown-it: 14.3.2
+      markdown-it: 14.3.3
       markdown-it-table: 2.0.6
     transitivePeerDependencies:
       - react
@@ -14702,7 +14702,7 @@ snapshots:
 
   markdown-it-table@2.0.6: {}
 
-  markdown-it@14.3.2:
+  markdown-it@14.3.3:
     dependencies:
       argparse: 2.0.1
       entities: 4.5.0
@@ -15669,7 +15669,7 @@ snapshots:
   prosemirror-markdown@1.13.2:
     dependencies:
       '@types/markdown-it': 14.2.0
-      markdown-it: 14.3.2
+      markdown-it: 14.3.3
       prosemirror-model: 1.25.12
 
   prosemirror-model@1.25.12:
