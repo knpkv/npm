@@ -1,5 +1,6 @@
 /** Supported top-level CLI invocation after Node removes executable and script arguments. */
 export type ControlCenterCliInvocation =
+  | { readonly _tag: "help" }
   | { readonly _tag: "open"; readonly noOpen: boolean }
   | { readonly _tag: "serve" }
   | { readonly _tag: "recover-owner" }
@@ -13,6 +14,7 @@ export const classifyControlCenterCliArguments = (
   arguments_: ReadonlyArray<string>
 ): ControlCenterCliInvocation => {
   if (arguments_.length === 0) return { _tag: "open", noOpen: false }
+  if (arguments_.length === 1 && (arguments_[0] === "--help" || arguments_[0] === "-h")) return { _tag: "help" }
   if (arguments_.length === 1 && arguments_[0] === "--no-open") return { _tag: "open", noOpen: true }
   if (arguments_.length === 1 && arguments_[0] === "serve") return { _tag: "serve" }
   if (arguments_.length === 1 && arguments_[0] === "recover-owner") {
