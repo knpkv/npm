@@ -11,7 +11,11 @@ import {
   FleetOperationError,
   type HostConfiguration,
   type HostOperations,
+  isStandaloneRefusedKind,
   type LocalJobPayload,
+  notSetUpDetail,
+  type StandaloneRefusedKind,
+  standaloneRefusedKinds,
   type WorkerStarted
 } from "@knpkv/herdr-fleet"
 import { Clock, Config, Effect, Option, Path, Schema, Stream } from "effect"
@@ -180,9 +184,18 @@ const decodeLineage = Effect.fn("HostOperations.decodeLineage")(function*(
   })
 })
 
+/**
+ * `standalone: true` is a computer outside any fleet: Nix and delegation jobs are refused before any
+ * command runs, so the configuration's `checkCommand`, `applyCommand` and `coordinatorCommand` are
+ * never used there.
+ */
 export const makeHostOperations = Effect.fn("HostOperations.make")(function*(
-  config: HostConfiguration
+  config: HostConfiguration,
+  options: { readonly standalone?: boolean } = {}
 ) {
+  const notSetUp: ReadonlySet<StandaloneRefusedKind> = options.standalone === true
+    ? standaloneRefusedKinds
+    : new Set()
   const paths = yield* Path.Path
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
   const workSource = yield* makeTaskWorkSource()
@@ -468,6 +481,17 @@ export const makeHostOperations = Effect.fn("HostOperations.make")(function*(
   })
 
   const runPayload = (payload: CoreJobPayload, workerStarted: WorkerStarted, jobId: string) => {
+    // Submission already refuses these; a job recovered from an older store must not run them either.
+    if (isStandaloneRefusedKind(payload.kind) && notSetUp.has(payload.kind)) {
+      return Effect.fail(
+        new FleetOperationError({
+          cause: payload.kind,
+          detail: notSetUpDetail(payload.kind),
+          disposition: "rejected",
+          operation: payload.kind
+        })
+      )
+    }
     switch (payload.kind) {
       case "nix.check":
         return runCommand("nix.check", config.checkCommand, "tail")
@@ -567,6 +591,7 @@ export const makeHostOperations = Effect.fn("HostOperations.make")(function*(
   return {
     inspect,
     listAgents,
+    notSetUp,
     run: runPayload,
     runLocal,
     runCoordinatorChat

@@ -10,6 +10,7 @@ import {
   JobStore,
   jobTextMaxLength,
   makeFleetService,
+  standaloneRefusedKinds,
   type WorkerStarted
 } from "@knpkv/herdr-fleet"
 import { WorkPullRequestObservation, WorkStoreError } from "@knpkv/herdr-work"
@@ -18,7 +19,7 @@ import * as HttpClientRequest from "effect/http/HttpClientRequest"
 import * as HttpClientResponse from "effect/http/HttpClientResponse"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { TestClock } from "effect/testing"
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { makeHostdOperations } from "../src/hostd.js"
@@ -252,6 +253,51 @@ printf '%s\\n' "{\\"jobId\\":\\"$job_id\\",\\"protocol\\":\\"herdr.coordinator.c
           operation: payload.kind
         })
       }
+    }).pipe(
+      Effect.ensuring(Effect.sync(() => rmSync(root, { force: true, recursive: true }))),
+      provideNodeServices
+    )
+  })
+
+  // A standalone computer has no Nix setup: the router refuses before spawning the configured command.
+  it.effect("refuses nix and delegation jobs as rejected where they are not set up, without running a command", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-nix-refusal-test-"))
+    const marker = join(root, "ran")
+    return Effect.gen(function*() {
+      const operations = yield* makeHostOperations(
+        {
+          ...config(root, ["sh", "-c", "touch \"$0\"", marker]),
+          applyCommand: ["sh", "-c", "touch \"$0\"", marker],
+          coordinatorCommand: ["sh", "-c", "touch \"$0\"", marker]
+        },
+        { standalone: true }
+      )
+      expect(operations.notSetUp).toEqual(standaloneRefusedKinds)
+      for (
+        const payload of [{ kind: "nix.check" }, { kind: "nix.apply", ref: "main" }] satisfies ReadonlyArray<
+          CoreJobPayload
+        >
+      ) {
+        expect(yield* Effect.flip(operations.run(payload, () => Effect.void, "job-nix"))).toMatchObject({
+          _tag: "FleetOperationError",
+          disposition: "rejected",
+          detail: "nix jobs are not set up on this computer",
+          operation: payload.kind
+        })
+      }
+      const delegate = {
+        kind: "agent.delegate",
+        mode: "work",
+        prompt: "ship",
+        repository: root
+      } satisfies CoreJobPayload
+      expect(yield* Effect.flip(operations.run(delegate, () => Effect.void, "job-delegate"))).toMatchObject({
+        _tag: "FleetOperationError",
+        disposition: "rejected",
+        detail: "agent delegation is not set up on this computer",
+        operation: "agent.delegate"
+      })
+      expect(yield* Effect.sync(() => existsSync(marker))).toBe(false)
     }).pipe(
       Effect.ensuring(Effect.sync(() => rmSync(root, { force: true, recursive: true }))),
       provideNodeServices

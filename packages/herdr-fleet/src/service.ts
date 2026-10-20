@@ -152,6 +152,12 @@ export type HostOperations = {
    */
   readonly sandboxJobKinds?: ReadonlySet<SandboxJobKind>
   /**
+   * Job kinds this host has not set up: a standalone computer has no Nix setup and no coordinator.
+   * Submission refuses them with `FleetOperationUnavailableError` before a job or approval request
+   * exists. Absent means every kind is set up, as on every fleet host.
+   */
+  readonly notSetUp?: ReadonlySet<StandaloneRefusedKind>
+  /**
    * Reads the pool record a reset or budget-lift approval is bound to. `submit`
    * stamps that observation onto the payload before the hash, replacing any
    * client-supplied `observed`. Absent refuses those two kinds before a job exists.
@@ -252,6 +258,22 @@ const stampSandboxObservation = (
   return Effect.map(bind(payload), (observed) => ({ ...payload, observed }))
 }
 
+/** The job kinds a standalone computer refuses: Nix needs a fleet repository, delegation a coordinator. */
+export type StandaloneRefusedKind = "nix.check" | "nix.apply" | "agent.delegate"
+export const standaloneRefusedKinds: ReadonlySet<StandaloneRefusedKind> = new Set([
+  "nix.check",
+  "nix.apply",
+  "agent.delegate"
+])
+export const isStandaloneRefusedKind = (kind: string): kind is StandaloneRefusedKind =>
+  kind === "nix.check" || kind === "nix.apply" || kind === "agent.delegate"
+
+/** Why a kind is refused where it is not set up; the submission and run-time refusals share it. */
+export const notSetUpDetail = (kind: StandaloneRefusedKind): string =>
+  kind === "agent.delegate"
+    ? "agent delegation is not set up on this computer"
+    : "nix jobs are not set up on this computer"
+
 export const makeFleetService = Effect.fn("FleetService.make")(function*(options: Options) {
   const cryptoService = yield* Crypto.Crypto
   const now = options.now ?? Clock.currentTimeMillis
@@ -330,6 +352,9 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
     }
     if (request.payload.kind === "agent.delegate" && !request.payload.repository.startsWith("/")) {
       return yield* new FleetRepositoryNotAbsoluteError({ repository: request.payload.repository })
+    }
+    if (isStandaloneRefusedKind(kind) && options.operations.notSetUp?.has(kind) === true) {
+      return yield* new FleetOperationUnavailableError({ kind, detail: notSetUpDetail(kind) })
     }
     if (isSandboxJobKind(kind) && options.operations.sandboxJobKinds?.has(kind) !== true) {
       return yield* new FleetOperationUnavailableError({
