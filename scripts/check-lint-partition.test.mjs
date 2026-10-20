@@ -75,6 +75,7 @@ test("default lint retains every original check and both CI partitions", () => {
     "node --test scripts/check-test-partition.test.mjs",
     "node --test scripts/check-browser-target.test.mjs",
     "node --test scripts/check-release-workflow.test.mjs",
+    "node --test scripts/check-setup-action.test.mjs",
     "node --test scripts/test-npx-smoke.test.mjs",
     "node scripts/check-no-decision-record-mentions.mjs",
     "node --test scripts/changeset-publish.test.mjs",
