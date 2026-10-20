@@ -322,6 +322,13 @@ Dependabot. The setup action intentionally does not restore a pnpm dependency
 cache, because Socket Firewall can only block package artifacts that are fetched
 through the network.
 
+Socket Firewall can crash mid-install and still exit 0, leaving a partial
+`node_modules`. The install step therefore follows it with
+`pnpm install --frozen-lockfile --offline`, which fails unless every locked
+package is in place, and retries the firewall install up to three times before
+failing the job. A firewall refusal fails every attempt. `scripts/check-setup-action.test.mjs`
+runs the step's script against stand-in `sfw` and `pnpm` commands.
+
 Socket for GitHub is configured by `socket.yml` at the repository root. The
 Socket GitHub App still needs to be installed for the `knpkv` repository or
 organization in GitHub, and its check should be added to branch protection once
