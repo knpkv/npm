@@ -8106,6 +8106,74 @@ esac
       expect(yield* plainStatus(`${server.tailnetUrl}/v1/modules/sandboxes/overview`)).toBe(404)
     }).pipe(Effect.scoped, provideNodeServices))
 
+  /** Resolves to the refusal status, "attached" once the terminal speaks, or "error". */
+  const upgradeOutcome = (url: string, headers: Readonly<Record<string, string>>) =>
+    Effect.promise(
+      () =>
+        new Promise<number | "attached" | "error">((resolve) => {
+          const socket = new WebSocketClient(url, { headers })
+          socket.once("unexpected-response", (_request, response) => {
+            resolve(response.statusCode ?? 0)
+            socket.terminate()
+          })
+          socket.once("message", () => {
+            resolve("attached")
+            socket.terminate()
+          })
+          socket.once("error", () => resolve("error"))
+        })
+    )
+
+  it.effect("attaches only this host's terminal on the hub's loopback, and never for a proxied request", () =>
+    Effect.gen(function*() {
+      const opened: Array<string> = []
+      const root = mkdtempSync(join(tmpdir(), "herdr-hub-loopback-terminal-"))
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { force: true, recursive: true })))
+      const hostConfig: HostConfiguration = {
+        ...config(root),
+        host: "SER8",
+        crossHost: true,
+        approvalHub: { host: "SER8", nodeId: "node-ser8", url: "https://ser8.example.test:0/" },
+        approvalPort: 0,
+        approvalTls: directTls,
+        tailscaleCommand: tailscaleFixture(root, "SER8", "node-ser8")
+      }
+      const store = yield* Effect.acquireRelease(
+        JobStore.open(join(root, "jobs.sqlite")),
+        (opened) => Effect.sync(() => opened.close())
+      )
+      const fleet = yield* makeFleetService({ approvalEnabled: true, host: "SER8", operations, store })
+      const server = yield* Effect.acquireRelease(
+        Effect.promise(() =>
+          startHttpServer(hostConfig, fleet, assets, {
+            terminalConnector: {
+              open: (selection) => {
+                opened.push(selection.host)
+                return Effect.succeed({ events: Stream.never, send: () => Effect.void })
+              }
+            }
+          })
+        ),
+        (running) => Effect.promise(running.close)
+      )
+      const session = (host: string) => {
+        const url = new URL("/v1/connect/session", server.url)
+        url.protocol = "ws:"
+        for (const [key, value] of Object.entries({ host, agent: "agent-1", cols: "100", rows: "30" })) {
+          url.searchParams.set(key, value)
+        }
+        return url.href
+      }
+      const origin = new URL(server.url).origin
+      // A peer's terminal stays tailnet-only: the loopback never proxies one.
+      expect(yield* upgradeOutcome(session("ALPHA"), { origin })).toBe(403)
+      // A request a local proxy relayed may come from anywhere, so it is not local.
+      expect(yield* upgradeOutcome(session("SER8"), { origin, "x-forwarded-for": "198.51.100.7" })).toBe(403)
+      expect(opened).toEqual([])
+      expect(yield* upgradeOutcome(session("SER8"), { origin })).toBe("attached")
+      expect(opened).toEqual(["SER8"])
+    }).pipe(Effect.scoped, provideNodeServices))
+
   it.effect("keeps the hub's canonical listener and push where they were, and serves the super-app on its loopback too", () =>
     Effect.gen(function*() {
       const server = yield* started("herdr-hub-superapp-", (root) => ({

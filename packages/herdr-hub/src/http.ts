@@ -4235,8 +4235,21 @@ export const startHttpServer = async (
           return
         }
         const access = Effect.gen(function*() {
-          if (isServeTerminal) {
-            yield* mode === "local" ? actor(request, config, true) : tailnetActor(request, config, null)
+          if (isServeTerminal && mode === "local") {
+            // The loopback is this machine only: an unproxied local request may open this host's
+            // terminals, never a peer's. Remote sessions stay on the tailnet listener under WhoIs.
+            yield* actor(request, config, true)
+            yield* sameOrigin(request, expectedOrigin())
+            if (submissionProvenance(mode, request) !== "verified_local_listener") {
+              return yield* new FleetAuthorizationError({ actor: "proxied-loopback" })
+            }
+            const selection = yield* terminalSelectionFromUrl(url)
+            if (selection.host.toLowerCase() !== config.host.toLowerCase()) {
+              return yield* new FleetAuthorizationError({ actor: selection.host })
+            }
+            return selection
+          } else if (isServeTerminal) {
+            yield* tailnetActor(request, config, null)
             yield* sameOrigin(request, expectedOrigin())
           } else {
             // Only the hub's own WebSocket client dials this path, and it sends no Origin. Every
