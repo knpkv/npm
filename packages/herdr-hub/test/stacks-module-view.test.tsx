@@ -265,12 +265,12 @@ describe("Stacks module pages", { concurrent: false }, () => {
     expect(text()).toContain("local read failed (limit)")
   })
 
-  it("says why stacks aren't available on this hub, naming the setting", async () => {
+  it("says why stacks aren't available on this computer, naming the setting", async () => {
     await render(
       reads({ overview: Effect.succeed({ _tag: "Unavailable", reason: "not_configured", host: null }) }),
       "overview"
     )
-    expect(text()).toContain("Stacks aren’t available on this hub.")
+    expect(text()).toContain("Stacks aren’t available on this computer.")
     expect(text()).toContain("RELAY_STACKS_HOST")
   })
 

@@ -85,6 +85,10 @@ export const DashboardSnapshot = Schema.Struct({
     canonical: Schema.Boolean,
     canonicalUrl: Schema.String,
     pushEnabled: Schema.Boolean,
+    // Whether this listener renders the super-app shell; `canonical` alone marks the notification hub.
+    superapp: Schema.Boolean,
+    // Whether this host is in a fleet; a standalone host's super-app has no Fleet module.
+    fleet: Schema.Boolean,
     // Whether this listener serves the Work snapshot, so the page never polls an endpoint it lacks.
     workEnabled: Schema.Boolean
   }),

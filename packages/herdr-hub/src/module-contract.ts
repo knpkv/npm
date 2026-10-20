@@ -3,7 +3,7 @@ import { Result, Schema } from "effect"
 const Segment = Schema.String.check(Schema.isPattern(/^[a-z][a-z0-9-]*$/))
 const Label = Schema.String.check(Schema.isMinLength(1))
 
-export const ModuleListener = Schema.Literals(["serve", "approval", "tailnet", "lan"])
+export const ModuleListener = Schema.Literals(["serve", "local", "approval", "tailnet", "lan"])
 export type ModuleListener = typeof ModuleListener.Type
 
 /** Shared metadata. `requires` describes UI capabilities; the server mount enforces access. */
@@ -94,7 +94,7 @@ export const fleetModule = defineModule({
     { id: "work", label: "Work" },
     { id: "usage", label: "Usage" }
   ],
-  listeners: ["serve"],
+  listeners: ["serve", "local"],
   requires: ["read", "write"]
 })
 
@@ -116,7 +116,7 @@ export const connectModule = defineModule({
   label: "Connect",
   defaultPage: "overview",
   pages: [{ id: "overview", label: "Connect" }],
-  listeners: ["serve"],
+  listeners: ["serve", "local"],
   requires: ["read", "write"]
 })
 
@@ -125,7 +125,7 @@ export const todayModule = defineModule({
   label: "Today",
   defaultPage: "overview",
   pages: [{ id: "overview", label: "Today" }],
-  listeners: ["serve"],
+  listeners: ["serve", "local"],
   requires: ["read"]
 })
 
@@ -139,7 +139,7 @@ export const usageModule = defineModule({
     label: "By tool",
     showInPhoneTitle: true
   }],
-  listeners: ["serve"],
+  listeners: ["serve", "local"],
   requires: ["read"]
 })
 
@@ -152,7 +152,7 @@ export const codeModule = defineModule({
     id: "diffs",
     label: "Diffs"
   }],
-  listeners: ["serve"],
+  listeners: ["serve", "local"],
   requires: ["read"]
 })
 
@@ -165,7 +165,7 @@ export const stacksModule = defineModule({
   label: "Stacks",
   defaultPage: "overview",
   pages: [{ id: "overview", label: "Overview" }, { id: "stack", label: "Stack" }],
-  listeners: ["serve"],
+  listeners: ["serve", "local"],
   requires: ["read"]
 })
 
@@ -182,7 +182,7 @@ export const sandboxesModule = defineModule({
     { id: "account", label: "Account" },
     { id: "runs", label: "Runs" }
   ],
-  listeners: ["serve"],
+  listeners: ["serve", "local"],
   requires: ["read"]
 })
 
@@ -192,6 +192,6 @@ export const resourcesModule = defineModule({
   label: "Host resources",
   defaultPage: "overview",
   pages: [{ id: "overview", label: "Host resources" }],
-  listeners: ["serve"],
+  listeners: ["serve", "local"],
   requires: ["read"]
 })

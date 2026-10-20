@@ -15,6 +15,7 @@ import { CodeCanvasPage } from "./code-canvas-page.js"
 import { CodeCommitSummaries } from "./code-commit-summaries.js"
 import { useCodeReviewWorkspace } from "./code-review-workspace.js"
 import { ShellIcon } from "./internal/shell-icon.js"
+import { Setting, StateCard } from "./internal/state-card.js"
 import { codeModule, moduleHref, type ModulePageMount, type ModuleViews } from "./modules.js"
 
 /** The hub sends `ownerUi` only to a viewer on its own tailnet node, so the page links what it receives. */
@@ -146,6 +147,18 @@ const CodePage = ({
         offset: 0,
         file: null
       })
+    )
+  }
+  // Nothing to search, filter or reread on a computer without Code: say so and how to set it up.
+  if (queue.value?._tag === "Unavailable" && queue.value.reason === "not_configured") {
+    return (
+      <div className="stacks-page">
+        <div className="stacks-body">
+          <StateCard eyebrow="Not available" title="Code isn’t set up on this computer." tone="neutral">
+            Set <Setting>RELAY_CODE_HOST</Setting> to the host that holds the CodeCommit credentials.
+          </StateCard>
+        </div>
+      </div>
     )
   }
   if (ref !== null && page !== "diffs" && selection.view === "canvas") {

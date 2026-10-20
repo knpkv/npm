@@ -19,11 +19,12 @@ import {
   StackResourcesView,
   StackStateTree
 } from "@knpkv/alchemy-console/views"
-import { Icon, type RlyIconName } from "@knpkv/rly/foundations"
+import { Icon } from "@knpkv/rly/foundations"
 import { Notice, Skeleton, Tabs } from "@knpkv/rly/primitives"
 import { Cause, Effect, Exit, Result, Schema } from "effect"
 import { type ReactElement, type ReactNode, useEffect, useId, useMemo, useState } from "react"
 import { ShellIcon } from "./internal/shell-icon.js"
+import { Setting, StateCard } from "./internal/state-card.js"
 import { moduleHref, type ModulePageMount, type ModuleViews, stacksModule } from "./modules.js"
 import type { StacksModuleReads, StacksReadFailed } from "./stacks-client.js"
 
@@ -101,37 +102,6 @@ const usePlans = (
   return plans
 }
 
-type CardTone = "neutral" | "caution" | "critical"
-const toneGlyph = { neutral: "minus", caution: "clock", critical: "alert" } satisfies Readonly<
-  Record<CardTone, RlyIconName>
->
-
-/** A compact state card: a toned eyebrow, the fact as a title, and what to do about it. */
-const StateCard = ({
-  children,
-  eyebrow,
-  title,
-  tone
-}: {
-  readonly tone: CardTone
-  readonly eyebrow: string
-  readonly title: string
-  readonly children?: ReactNode
-}): ReactElement => (
-  <section className="stacks-state" data-tone={tone}>
-    <p className="stacks-state-eyebrow">
-      <Icon decorative name={toneGlyph[tone]} size="small" />
-      {eyebrow}
-    </p>
-    <h2>{title}</h2>
-    {children === undefined ? null : <p>{children}</p>}
-  </section>
-)
-
-const Setting = ({ children }: { readonly children: string }): ReactElement => (
-  <code className="stacks-mono">{children}</code>
-)
-
 /** Why a read didn't produce data, as the page says it. */
 type Problem =
   | { readonly _tag: "Unavailable"; readonly reason: StacksUnavailable["reason"]; readonly host: string | null }
@@ -156,7 +126,7 @@ const UnavailableCard = ({
   switch (reason) {
     case "not_configured":
       return (
-        <StateCard eyebrow="Not available" title="Stacks aren’t available on this hub." tone="neutral">
+        <StateCard eyebrow="Not available" title="Stacks aren’t available on this computer." tone="neutral">
           Set <Setting>RELAY_STACKS_HOST</Setting> to the host that holds the AWS profiles.
         </StateCard>
       )

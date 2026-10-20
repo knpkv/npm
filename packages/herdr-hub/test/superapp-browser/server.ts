@@ -128,6 +128,8 @@ const program = Effect.gen(function*() {
       canonical: true,
       canonicalUrl: `http://127.0.0.1:${String(port)}/`,
       pushEnabled: false,
+      superapp: true,
+      fleet: true,
       workEnabled: true
     },
     work,
@@ -257,7 +259,10 @@ const program = Effect.gen(function*() {
     ],
     ["/manifest.webmanifest", JSON.stringify({ name: "Relay", start_url: "/", display: "standalone" })]
   ])
-  const noncanonical = { ...snapshot, approvalApp: { ...snapshot.approvalApp, canonical: false, workEnabled: false } }
+  const noncanonical = {
+    ...snapshot,
+    approvalApp: { ...snapshot.approvalApp, canonical: false, superapp: false, workEnabled: false }
+  }
   const initialFrame = Schema.encodeSync(Schema.fromJsonString(RelayEvent))({
     _tag: "Snapshot",
     session: "session-1",

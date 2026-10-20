@@ -50,6 +50,8 @@ const snapshot = (local: ReadonlyArray<JobRecord>, approvalsEnabled = true): Das
     canonical: true,
     canonicalUrl: "https://hub.example.test/",
     pushEnabled: false,
+    superapp: true,
+    fleet: true,
     workEnabled: false
   },
   approvalsEnabled,
