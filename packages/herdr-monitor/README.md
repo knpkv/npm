@@ -8,6 +8,17 @@ Trusted session → explicit publisher → isolated monitor memory ← authentic
 
 The publisher accepts a sanitized JSON file. It does not discover agents, read repositories, associate Jira tickets or fetch Clockify time. Work/Fleet contracts currently provide no Jira/Clockify association to reuse. Unknown fields stay `null`. A `clockify` duration must come from an explicitly associated Clockify observation; `elapsedSeconds` is separate and must never be presented as logged time.
 
+## Run it on its own
+
+```sh
+npx @knpkv/herdr-monitor init                          # writes ~/.config/herdr-monitor/monitor.env
+set -a; . ~/.config/herdr-monitor/monitor.env; set +a
+npx @knpkv/herdr-monitor serve                         # http://127.0.0.1:4319
+npx @knpkv/herdr-monitor demo                          # in another shell: a synthetic board to look at
+```
+
+It runs on Node 26 with nothing else running: no Herdr, no hub. `serve` refuses to start until the keys are loaded.
+
 ## Run
 
 Requires Node 26+. Build from this workspace with `pnpm --filter @knpkv/rly build` then `pnpm --filter @knpkv/herdr-monitor build`. The npm package includes the built browser assets.

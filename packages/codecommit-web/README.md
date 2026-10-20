@@ -3,6 +3,10 @@
 The browser view of the CodeCommit review queue: pull requests that need a decision, their diffs and
 approvers, Relay reviews, and sandboxes.
 
+## Run it on its own
+
+This package has no executable. Run it with `npx @knpkv/codecommit web`; see [Start it](#start-it).
+
 ## Browser views
 
 Import presentation components and their props from `@knpkv/codecommit-web/views`, and load
@@ -18,7 +22,8 @@ never put provider credentials or server-private locators in preview fixtures.
 
 ## Start it
 
-You need [Bun](https://bun.sh) 1.3 or later and an AWS CLI profile that can read CodeCommit.
+You need Node 24 or later and an AWS CLI profile that can read CodeCommit. `codecommit web` runs on Node
+alone; only the `codecommit` terminal UI needs [Bun](https://bun.sh).
 
 1. Create a profile if you don't have one: `aws configure sso` (or `aws configure --profile NAME` for keys).
    Profiles are read from `~/.aws/config` and `~/.aws/credentials`, or from `AWS_CONFIG_FILE` and

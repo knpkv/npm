@@ -8,6 +8,16 @@ is the same engine — `@knpkv/jira-clockify`, the same services against the sam
 grid, because a gap only means something next to the time already logged around it, and a week is how
 a timesheet is actually read.
 
+## Run it on its own
+
+```sh
+npx @knpkv/jcf-web                # signs in, starting the week view on http://127.0.0.1:3111 when needed
+npx @knpkv/jcf-web serve          # prints the sign-in URL, runs in the foreground
+```
+
+It runs on Node 26 with nothing else running. The server starts without a jcf setup; the week fills from
+your jcf Jira and Clockify configuration.
+
 ## Running it
 
 ```bash
