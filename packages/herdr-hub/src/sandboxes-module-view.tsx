@@ -246,7 +246,7 @@ const usePool = (read: SandboxesModuleReads["overview"], active: boolean) => {
     const tick = Effect.gen(function* () {
       const at = yield* Clock.currentTimeMillis
       yield* Effect.sync(() => setNow(DateTime.makeUnsafe(at)))
-    }).pipe(Effect.delay(tickEvery), Effect.repeat(Schedule.spaced(tickEvery)))
+    }).pipe(Effect.repeat(Schedule.spaced(tickEvery)), Effect.delay(tickEvery))
     const polling = Effect.runFork(poll)
     const ticking = Effect.runFork(tick)
     return () => {

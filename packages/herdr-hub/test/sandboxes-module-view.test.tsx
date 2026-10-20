@@ -299,6 +299,21 @@ describe("Sandboxes overview", { concurrent: false }, () => {
     expect(document.querySelector("[data-pool-notice]")).toBeNull()
   })
 
+  it("moves time left on every 15 s tick", async () => {
+    // Ends 4 h 15 min 50 s after 13:05. Rounded: 4 h 16 min at the 15 s tick, 4 h 15 min at the 30 s tick.
+    const overview = ready([
+      leased("ephemeral-01", "999999999990", "agent-b", "2026-10-17T09:20:00.000Z", "2026-10-17T17:20:50.000Z")
+    ])
+    let reads = 0
+    // Only the first read answers, so only the clock moves the times.
+    const read = Effect.suspend(() => (reads++ === 0 ? Effect.succeed(overview) : Effect.never))
+    await render(overview, { read })
+    await act(async () => await vi.advanceTimersByTimeAsync(15_000))
+    expect(text('[data-account="ephemeral-01"]')).toContain("4 h 16 min")
+    await act(async () => await vi.advanceTimersByTimeAsync(15_000))
+    expect(text('[data-account="ephemeral-01"]')).toContain("4 h 15 min")
+  })
+
   it("keeps a retired lease Leased and says it left the pool", async () => {
     await render(
       ready([
