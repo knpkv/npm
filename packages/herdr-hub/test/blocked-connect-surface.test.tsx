@@ -121,7 +121,7 @@ const openStage = async (
   initialSettings: BlockedPushSettings = { mutedAgents: [], quietHours: null },
   state: NotificationState | null = "enabled",
   registered = true,
-  options: { readonly agentId?: string; readonly backend?: SettingsBackend } = {}
+  options: { readonly agentId?: string; readonly backend?: SettingsBackend; readonly push?: boolean } = {}
 ) => {
   const writes: Array<BlockedPushSettings> = []
   const mutations: Array<BlockedPushMutation> = []
@@ -188,7 +188,7 @@ const openStage = async (
         {state === null ? (
           <BlockedConnectSurface atoms={makeConnectAtoms()} />
         ) : (
-          <BlockedConnectSurface atoms={makeConnectAtoms()} notificationState={state} />
+          <BlockedConnectSurface atoms={makeConnectAtoms()} notificationState={state} push={options.push ?? true} />
         )}
       </RegistryProvider>
     )
@@ -477,6 +477,13 @@ describe("stage notification controls", () => {
     const link = panel?.querySelector<HTMLAnchorElement>("a")
     expect(link?.textContent).toContain("Turn on notifications in Approvals")
     expect(link?.getAttribute("href")).toBe("/?#fleet/approvals")
+  })
+  /** Off the notification hub there is nothing to turn on here, and a standalone computer has no Approvals. */
+  it("shows no notifications panel in the stage off the notification hub", async () => {
+    await openStage(undefined, "disabled", true, { push: false })
+    expect(document.querySelector(".connect-agent-stage, [role='dialog']")).not.toBeNull()
+    expect(document.querySelector("[aria-label='Agent notifications']")).toBeNull()
+    expect(document.querySelector("a[href*='fleet/approvals']")).toBeNull()
   })
   it("keeps the off-device link arrow decorative and separate from its text", async () => {
     await openStage(undefined, "disabled")

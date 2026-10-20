@@ -201,6 +201,13 @@ describe("Control Center CLI", () => {
       _tag: "restore",
       archiveRoot: "archive"
     })
+    // `npx @knpkv/control-center --help` is how a first-time user finds the commands; it succeeds.
+    assert.deepStrictEqual(classifyControlCenterCliArguments(["--help"]), { _tag: "help" })
+    assert.deepStrictEqual(classifyControlCenterCliArguments(["-h"]), { _tag: "help" })
+    assert.deepStrictEqual(classifyControlCenterCliArguments(["serve", "--help"]), {
+      _tag: "invalid",
+      command: "serve --help"
+    })
     assert.deepStrictEqual(classifyControlCenterCliArguments(["recover-owner", "unexpected"]), {
       _tag: "invalid",
       command: "recover-owner unexpected"

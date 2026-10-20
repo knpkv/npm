@@ -62,11 +62,11 @@ const withModule = <A, E, R>(
   })
 
 describe("host-local Stacks module", () => {
-  it("is a read-only serve module with an overview and a stack page", () => {
+  it("is a read-only super-app module with an overview and a stack page", () => {
     expect(stacksModule).toMatchObject({
       id: "stacks",
       defaultPage: "overview",
-      listeners: ["serve"],
+      listeners: ["serve", "local"],
       requires: ["read"]
     })
     expect(stacksModule.pages.map(({ id: page }) => page)).toEqual(["overview", "stack"])

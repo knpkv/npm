@@ -105,12 +105,12 @@ const withModule = <A, E, R>(
   })
 
 describe("host-local Sandboxes module", () => {
-  it("is a read-only serve module", () => {
+  it("is a read-only super-app module", () => {
     expect(sandboxesModule).toMatchObject({
       id: "sandboxes",
       label: "Sandboxes",
       defaultPage: "overview",
-      listeners: ["serve"],
+      listeners: ["serve", "local"],
       requires: ["read"]
     })
     expect(sandboxesModule.pages.map(({ id: page }) => page)).toEqual(["overview", "account", "runs"])
