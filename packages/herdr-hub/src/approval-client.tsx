@@ -702,7 +702,9 @@ const DashboardApp = ({
     atoms: atoms.connect,
     readApprovals: readToday,
     now: workNow,
-    notificationState
+    notificationState,
+    fleet: snapshot.approvalApp.fleet,
+    push: snapshot.approvalApp.pushEnabled
   })
   const usage = makeUsageModuleViews({
     reads: usageReads,
@@ -734,6 +736,7 @@ const DashboardApp = ({
           landing={{ module: "connect", page: "overview" }}
           host={current.host}
           hostCount={hostCount}
+          standalone={!current.approvalApp.fleet}
           session={
             refreshFailed
               ? { access: onLoopback() ? "loopback" : "tailscale", connection: "stale", observedAt: current.observedAt }

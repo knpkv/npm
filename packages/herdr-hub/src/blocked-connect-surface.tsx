@@ -19,9 +19,10 @@ import { fleetModule, moduleHref } from "./modules.js"
 import { type BlockedPushMutation, type BlockedPushSettings, PushAgentKey } from "./blocked-push-model.js"
 
 const browserRuntime = Atom.runtime(BrowserHttpClient.layerFetch)
-const makeNotificationAtoms = (state?: NotificationState) => ({
+const makeNotificationAtoms = (state: NotificationState | undefined, push: boolean) => ({
   device: browserRuntime.atom(state === undefined ? loadBlockedDevicePushState : Effect.succeed(state)),
-  settings: browserRuntime.atom(loadBlockedSettings),
+  // Off the notification hub there are no settings to read; null keeps every mute control closed.
+  settings: browserRuntime.atom(push ? loadBlockedSettings : Effect.succeed(null)),
   save: browserRuntime.fn(mutateBlockedSettings),
   heartbeat: browserRuntime.fn(reportStageHeartbeat)
 })
@@ -183,6 +184,8 @@ type BlockedConnectSurfaceProps = {
   readonly atoms: ConnectAtoms
   readonly presentation?: ComponentProps<typeof ConnectSurface>["presentation"]
   readonly notificationState?: NotificationState
+  /** Defaults true. False off the notification hub: no settings read, no stage heartbeat. */
+  readonly push?: boolean
 } & (
   | { readonly embedded: true; readonly directoryLocation: DirectoryLocation }
   | { readonly embedded?: false; readonly directoryLocation?: DirectoryLocation }
@@ -195,9 +198,10 @@ export const BlockedConnectSurface = ({
   directoryLocation,
   embedded = false,
   notificationState,
-  presentation = { _tag: "fleet" }
+  presentation = { _tag: "fleet" },
+  push = true
 }: BlockedConnectSurfaceProps) => {
-  const [notifications] = useState(() => makeNotificationAtoms(notificationState))
+  const [notifications] = useState(() => makeNotificationAtoms(notificationState, push))
   const [target, setTarget] = useState<Pick<ConnectAgent, "host" | "id"> | null>(null)
   const deviceResult = useAtomValue(notifications.device)
   const deviceState =
@@ -222,7 +226,7 @@ export const BlockedConnectSurface = ({
   const host = target?.host ?? null
   const agentId = target?.id ?? null
   useEffect(() => {
-    if (host === null || agentId === null) return
+    if (!push || host === null || agentId === null) return
     const clientId = window.crypto.randomUUID()
     const key = Schema.decodeUnknownSync(PushAgentKey)({ host, agentId })
     const publish = () => report({ clientId, target: document.visibilityState === "visible" ? key : null })
@@ -242,7 +246,7 @@ export const BlockedConnectSurface = ({
       Effect.runFork(Fiber.interrupt(fiber))
       clear()
     }
-  }, [agentId, host, report])
+  }, [agentId, host, push, report])
   const settings = AsyncResult.isSuccess(saved)
     ? saved.value
     : AsyncResult.isFailure(saved) && saved.previousSuccess._tag === "Some"

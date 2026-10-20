@@ -10,11 +10,12 @@ describe("superappLayout", () => {
     })
   })
 
-  it("leaves Fleet out everywhere on a standalone host", () => {
+  it("leaves Fleet out everywhere and draws one flat group on a standalone host", () => {
     expect(superappLayout(["connect", "fleet", "code", "usage", "resources", "stacks"], false)).toEqual({
       modules: ["connect", "code", "usage", "resources", "stacks"],
       mobileModules: ["connect", "code", "usage"],
-      primaryModules: ["connect"]
+      // One flat group: without Fleet there is nothing to divide Connect from.
+      primaryModules: ["connect", "code", "usage", "resources", "stacks"]
     })
   })
 })

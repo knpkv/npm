@@ -19,11 +19,12 @@ import {
   StackResourcesView,
   StackStateTree
 } from "@knpkv/alchemy-console/views"
-import { Icon, type RlyIconName } from "@knpkv/rly/foundations"
+import { Icon } from "@knpkv/rly/foundations"
 import { Notice, Skeleton, Tabs } from "@knpkv/rly/primitives"
 import { Cause, Effect, Exit, Result, Schema } from "effect"
 import { type ReactElement, type ReactNode, useEffect, useId, useMemo, useState } from "react"
 import { ShellIcon } from "./internal/shell-icon.js"
+import { Setting, StateCard } from "./internal/state-card.js"
 import { moduleHref, type ModulePageMount, type ModuleViews, stacksModule } from "./modules.js"
 import type { StacksModuleReads, StacksReadFailed } from "./stacks-client.js"
 
@@ -100,37 +101,6 @@ const usePlans = (
   }, [reads, stacks, active])
   return plans
 }
-
-type CardTone = "neutral" | "caution" | "critical"
-const toneGlyph = { neutral: "minus", caution: "clock", critical: "alert" } satisfies Readonly<
-  Record<CardTone, RlyIconName>
->
-
-/** A compact state card: a toned eyebrow, the fact as a title, and what to do about it. */
-const StateCard = ({
-  children,
-  eyebrow,
-  title,
-  tone
-}: {
-  readonly tone: CardTone
-  readonly eyebrow: string
-  readonly title: string
-  readonly children?: ReactNode
-}): ReactElement => (
-  <section className="stacks-state" data-tone={tone}>
-    <p className="stacks-state-eyebrow">
-      <Icon decorative name={toneGlyph[tone]} size="small" />
-      {eyebrow}
-    </p>
-    <h2>{title}</h2>
-    {children === undefined ? null : <p>{children}</p>}
-  </section>
-)
-
-const Setting = ({ children }: { readonly children: string }): ReactElement => (
-  <code className="stacks-mono">{children}</code>
-)
 
 /** Why a read didn't produce data, as the page says it. */
 type Problem =

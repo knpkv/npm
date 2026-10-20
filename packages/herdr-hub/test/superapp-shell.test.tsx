@@ -1036,3 +1036,26 @@ it.each(["same page", "reactivated module"])(
     await vi.waitFor(() => expect(document.activeElement).toBe(button("Recorded target")))
   }
 )
+
+/** A standalone computer names itself, not a fleet host count. */
+it("labels a standalone computer as this computer instead of counting hosts", async () => {
+  const host = document.createElement("div")
+  document.body.append(host)
+  const root = createRoot(host)
+  roots.push(root)
+  await act(async () =>
+    root.render(
+      <SuperappShell
+        modules={[fleet]}
+        landing={{ module: "fleet", page: "approvals" }}
+        host="atlas"
+        hostCount={1}
+        standalone
+        session={{ access: "loopback", connection: "connected" }}
+        notifications={<p>No recent activity</p>}
+      />
+    )
+  )
+  expect(host.textContent).toContain("This computer")
+  expect(host.textContent).not.toContain("host configured")
+})
