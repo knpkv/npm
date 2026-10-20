@@ -1,5 +1,11 @@
 # @knpkv/alchemy-console
 
+## 0.6.1
+
+### Patch Changes
+
+- [#1037](https://github.com/knpkv/npm/pull/1037) [`c2fdb19`](https://github.com/knpkv/npm/commit/c2fdb1980aa21778918ef054cefbc1103c8fbcc0) Thanks [@konopkov](https://github.com/konopkov)! - `alchemy-console --help` describes the `login` and `serve` subcommands.
+
 ## 0.6.0
 
 ### Minor Changes

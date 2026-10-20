@@ -1,5 +1,11 @@
 # @knpkv/control-center
 
+## 0.22.0
+
+### Minor Changes
+
+- [#1037](https://github.com/knpkv/npm/pull/1037) [`c2fdb19`](https://github.com/knpkv/npm/commit/c2fdb1980aa21778918ef054cefbc1103c8fbcc0) Thanks [@konopkov](https://github.com/konopkov)! - `control-center --help` and `-h` print the usage line on stdout and exit 0, so `npx @knpkv/control-center --help` shows the commands instead of failing.
+
 ## 0.21.0
 
 ### Minor Changes

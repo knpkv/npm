@@ -2,6 +2,18 @@
 
 Released as `@knpkv/herdr-approvals` up to 0.18.0; the headings below are that package's history.
 
+## 0.47.0
+
+### Minor Changes
+
+- [#1038](https://github.com/knpkv/npm/pull/1038) [`d9ab6d7`](https://github.com/knpkv/npm/commit/d9ab6d7deb3511dae6535557433c1d34b166c465) Thanks [@konopkov](https://github.com/konopkov)! - Serve the super-app on every host's loopback listener, not only on the notification hub. The dashboard snapshot's `approvalApp` gains `superapp` (this listener renders the super-app shell) and `fleet` (this host is in a fleet; a standalone host's shell has no Fleet module). Module descriptors list the new `local` listener. The tailnet TLS listener, push and agent reports stay on the notification hub; only the hub's loopback aggregates other hosts. Code and Stacks now say they are not set up "on this computer" rather than "on this hub"; a computer without Code shows that card instead of an empty queue form. On a standalone host the shell names "This computer", the sidebar is one group, and Connect reads neither fleet approvals nor push settings. The loopback Connect terminal opens only this host's sessions, only for a direct (unproxied) request: any local process that can reach the loopback can open a shell here, the same trust the loopback listener already carries. Other hosts' terminals stay on the tailnet listener.
+
+### Patch Changes
+
+- Updated dependencies [[`c2fdb19`](https://github.com/knpkv/npm/commit/c2fdb1980aa21778918ef054cefbc1103c8fbcc0), [`d9ab6d7`](https://github.com/knpkv/npm/commit/d9ab6d7deb3511dae6535557433c1d34b166c465)]:
+  - @knpkv/alchemy-console@0.6.1
+  - @knpkv/codecommit-web@0.39.1
+
 ## 0.46.0
 
 ### Minor Changes
