@@ -208,6 +208,30 @@ jobs:
       - run: pnpm build
       - run: pnpm test:pack
 
+  # Runs each app the way `npx <package>` does, from this commit's packed tarballs, in a clean Node image:
+  # `--help`-style load checks are not enough, so serving apps must answer HTTP 200 (scripts/test-npx-smoke.mjs).
+  npx-smoke:
+    name: npx smoke
+    runs-on: ubuntu-latest
+    container:
+      image: node:26.7.0@sha256:40fd8249a701dab7431d15074ac4cf4f1c18eecd713807599cd76a7a6caad48b
+    permissions:
+      contents: read
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Install dependencies
+        uses: ./.github/actions/setup
+      - name: Verify runtime pin
+        run: test "$(node --version)" = "v26.7.0"
+      - run: pnpm build
+      - name: Pack every workspace package
+        run: pnpm -r --filter "./packages/*" pack --pack-destination "$RUNNER_TEMP/packs"
+      - name: Run each app from its tarball
+        run: node scripts/test-npx-smoke.mjs --tarballs "$RUNNER_TEMP/packs"
+
   test:
     name: Test
     needs: [test-unit, test-pack]
