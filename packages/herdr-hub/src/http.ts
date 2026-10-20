@@ -157,7 +157,12 @@ import { readHostUsage, usageCache } from "./host-usage.js"
 import { attachTaskWorkReader } from "./internal/agent-task-work-source.js"
 import { dashboardPage } from "./internal/dashboard-page.js"
 import { moduleCallerFor } from "./internal/hub-node.js"
-import { type ListenerMode, listenerServesWork } from "./internal/listener.js"
+import {
+  listenerAggregatesFleet,
+  type ListenerMode,
+  listenerServesSuperapp,
+  listenerServesWork
+} from "./internal/listener.js"
 import { decodeRelayPostRequest } from "./internal/relay-post-validation.js"
 import { decodeRelaySelfBody } from "./internal/relay-self-validation.js"
 import { requireRemoteTerminalTakeover } from "./internal/terminal-capabilities.js"
@@ -2813,6 +2818,7 @@ export const startHttpServer = async (
         mode === "serve"
           ? new URL(config.approvalHub.url).origin
           : `http://${expectedHost}`
+      const aggregatesFleet = listenerAggregatesFleet(mode, isHub)
       const requestHandler = async (
         request: IncomingMessage,
         response: ServerResponse
@@ -2837,7 +2843,13 @@ export const startHttpServer = async (
             json(response, 503, { error: "starting" })
             return
           }
-          if ((url.pathname === "/v1/connect/posts" || url.pathname === "/v1/connect/me") && mode !== "serve") {
+          // Agents report to the notification hub only; any super-app listener may read the posts back.
+          const postsRead = request.method === "GET" && url.pathname === "/v1/connect/posts" &&
+            listenerServesSuperapp(mode)
+          if (
+            (url.pathname === "/v1/connect/posts" || url.pathname === "/v1/connect/me") && mode !== "serve" &&
+            !postsRead
+          ) {
             json(response, 403, { error: "Denied" })
             return
           }
@@ -3126,10 +3138,6 @@ export const startHttpServer = async (
 
           const moduleUrl = sandboxesModuleUrl(request.method ?? "GET", url) ?? url
           if (moduleUrl.pathname === "/v1/modules" || moduleUrl.pathname.startsWith("/v1/modules/")) {
-            if (mode === "local") {
-              json(response, 404, { error: "not_found" })
-              return
-            }
             const result = await runRequest(
               ModuleServer.dispatchModuleRoute({
                 method: request.method ?? "GET",
@@ -3139,7 +3147,11 @@ export const startHttpServer = async (
                   ? tailnetIdentity(request, config, mode === "approval" ? config.approvalNodes : null).pipe(
                     Effect.map((identity) => moduleCallerFor(config, identity))
                   )
-                  : authorized.pipe(Effect.map((login) => ({ login, sameNode: false }))),
+                  : authorized.pipe(Effect.map((login) => ({
+                    login,
+                    // A direct loopback viewer is on this machine; a proxied one may not be.
+                    sameNode: submissionProvenance(mode, request) === "verified_local_listener"
+                  }))),
                 sameOrigin: sameOrigin(request, expectedOrigin()),
                 readJson: () => readJson(request, Schema.Json)
               }).pipe(Effect.provideService(ModuleServer.ModuleRegistry, registry), Effect.result)
@@ -3156,7 +3168,7 @@ export const startHttpServer = async (
           }
 
           if (
-            mode === "serve" &&
+            listenerServesSuperapp(mode) &&
             relayMount !== null &&
             await handleRelayRoute<ApiError, HttpClient.HttpClient | Tailscale>(request, response, url, {
               host: config.host,
@@ -3263,6 +3275,8 @@ export const startHttpServer = async (
                   canonical: mode === "serve",
                   canonicalUrl: config.approvalHub.url,
                   pushEnabled: mode === "serve",
+                  superapp: listenerServesSuperapp(mode),
+                  fleet: config.crossHost,
                   workEnabled: listenerServesWork(mode, config.crossHost)
                 },
                 work: null,
@@ -3795,7 +3809,7 @@ export const startHttpServer = async (
               Effect.andThen(
                 authorized,
                 Effect.flatMap(decodeUsageQuery(url), (query) =>
-                  mode === "serve"
+                  aggregatesFleet
                     ? hubUsage(query, localUsage(query), fleetPeers(config))
                     : fleetUsage(query, localUsage(query), []))
               )
@@ -3810,14 +3824,14 @@ export const startHttpServer = async (
               response,
               Effect.andThen(
                 authorized,
-                mode === "serve" ? hubLimits(localLimits, fleetPeers(config)) : fleetLimits(localLimits, [])
+                aggregatesFleet ? hubLimits(localLimits, fleetPeers(config)) : fleetLimits(localLimits, [])
               )
             )
             return
           }
 
           if (
-            mode === "serve" &&
+            listenerServesSuperapp(mode) &&
             request.method === "GET" &&
             url.pathname === "/v1/connect/agents"
           ) {
@@ -3828,7 +3842,7 @@ export const startHttpServer = async (
                 Effect.gen(function*() {
                   const cursor = yield* decodeConnectAgentCursor(url)
                   const observedAt = now()
-                  const peers = yield* fleetPeers(config)
+                  const peers = aggregatesFleet ? yield* fleetPeers(config) : []
                   const directory = yield* fleetConnectAgents(
                     localConnectAgents(
                       config,
@@ -3849,7 +3863,10 @@ export const startHttpServer = async (
                     { store: archiveStore, observedAt, posts: postStore }
                   )
                   return yield* pageFleetConnectAgents(
-                    { ...directory, hosts: config.machines.slice(0, 256).map(({ host }) => host) },
+                    {
+                      ...directory,
+                      hosts: aggregatesFleet ? config.machines.slice(0, 256).map(({ host }) => host) : [config.host]
+                    },
                     cursor
                   )
                 })
@@ -3930,7 +3947,7 @@ export const startHttpServer = async (
           }
 
           if (url.pathname === "/v1/connect/posts") {
-            if (mode !== "serve") {
+            if (mode !== "serve" && !postsRead) {
               json(response, 403, { error: "Denied" })
               return
             }
@@ -3974,7 +3991,7 @@ export const startHttpServer = async (
             }
           }
 
-          if (mode === "serve" && request.method === "GET" && url.pathname === "/v1/connect/archive") {
+          if (listenerServesSuperapp(mode) && request.method === "GET" && url.pathname === "/v1/connect/archive") {
             await respond(
               response,
               Effect.andThen(
@@ -4153,7 +4170,7 @@ export const startHttpServer = async (
             return
           }
           if (
-            mode === "serve" &&
+            listenerServesSuperapp(mode) &&
             request.method === "GET" &&
             url.pathname === "/connect/"
           ) {
@@ -4203,7 +4220,7 @@ export const startHttpServer = async (
 
       server.on("upgrade", async (request, socket, head) => {
         const url = pathOf(request)
-        const isServeTerminal = mode === "serve" && url.pathname === "/v1/connect/session"
+        const isServeTerminal = listenerServesSuperapp(mode) && url.pathname === "/v1/connect/session"
         const isTailnetTerminal = mode === "tailnet" && url.pathname === "/v1/connect/terminal"
         if (!isServeTerminal && !isTailnetTerminal) {
           rejectUpgrade(socket, 404)
@@ -4219,7 +4236,7 @@ export const startHttpServer = async (
         }
         const access = Effect.gen(function*() {
           if (isServeTerminal) {
-            yield* tailnetActor(request, config, null)
+            yield* mode === "local" ? actor(request, config, true) : tailnetActor(request, config, null)
             yield* sameOrigin(request, expectedOrigin())
           } else {
             // Only the hub's own WebSocket client dials this path, and it sends no Origin. Every

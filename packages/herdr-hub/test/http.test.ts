@@ -1959,7 +1959,7 @@ esac
 
   it("escapes configured hosts in the dashboard document title", () => {
     const host = "SER8</title><script data-xss=\"true\">alert(1)</script>"
-    const title = dashboardDocumentTitle({ approvalApp: { canonical: false }, host })
+    const title = dashboardDocumentTitle({ approvalApp: { superapp: false }, host })
     expect(title).not.toContain("<script")
     expect(title).not.toContain(host)
     expect(title).toBe(
@@ -1967,9 +1967,9 @@ esac
     )
   })
 
-  it("titles the hub Relay and a host's own page after the host", () => {
-    expect(dashboardDocumentTitle({ approvalApp: { canonical: true }, host: "ser8" })).toBe("Relay")
-    expect(dashboardDocumentTitle({ approvalApp: { canonical: false }, host: "ser8" })).toBe("ser8 on Relay")
+  it("titles the super-app Relay and a host's own activity page after the host", () => {
+    expect(dashboardDocumentTitle({ approvalApp: { superapp: true }, host: "ser8" })).toBe("Relay")
+    expect(dashboardDocumentTitle({ approvalApp: { superapp: false }, host: "ser8" })).toBe("ser8 on Relay")
   })
 
   it.effect("refuses an oversized dashboard when no history remains to page", () =>
@@ -1980,6 +1980,8 @@ esac
           canonicalUrl: "https://ser8.example.test:4779/",
           chatEnabled: true,
           pushEnabled: true,
+          superapp: true,
+          fleet: true,
           workEnabled: false
         },
         approvalsEnabled: true,
@@ -2059,6 +2061,8 @@ esac
           canonicalUrl: "https://ser8.example.test:4779/",
           chatEnabled: true,
           pushEnabled: true,
+          superapp: true,
+          fleet: true,
           workEnabled: false
         },
         approvalsEnabled: true,
@@ -2113,6 +2117,8 @@ esac
           canonicalUrl: "https://ser8.example.test:4779/",
           chatEnabled: true,
           pushEnabled: true,
+          superapp: true,
+          fleet: true,
           workEnabled: false
         },
         approvalsEnabled: true,
@@ -3353,7 +3359,9 @@ esac
         const invalid = yield* get(`/v1/connect/archive?cursor=${encodeURIComponent(cursor)}`)
         expect(invalid.status, cursor).toBe(400)
       }
-      for (const listener of [server.url, server.tailnetUrl, server.lanWorkUrl]) {
+      // The loopback serves the super-app, so it reads the archive too; other listeners never do.
+      expect((yield* Effect.promise(() => fetch(`${server.url}/v1/connect/archive`))).status).toBe(200)
+      for (const listener of [server.tailnetUrl, server.lanWorkUrl]) {
         expect((yield* Effect.promise(() => fetch(`${listener}/v1/connect/archive`))).status).toBe(404)
       }
       writeFileSync(identityMode, "denied")
@@ -7507,12 +7515,14 @@ esac
       hub.whoisNode("node-ser8")
       expect(yield* sameNode()).toBe(true)
       hub.whoisNode("node-phone")
-      for (const url of [hub.server.url, hub.server.tailnetUrl]) {
-        if (url === null) return yield* Effect.die("Expected a listener URL")
-        const remote = yield* Effect.promise(() => fetch(`${url}/v1/modules/code/queue`))
-        expect(remote.status).toBe(404)
-        yield* Effect.promise(() => remote.text())
-      }
+      // The loopback serves the super-app; the tailnet listener never serves modules.
+      if (hub.server.tailnetUrl === null) return yield* Effect.die("Expected a tailnet listener URL")
+      const remote = yield* Effect.promise(() => fetch(`${hub.server.tailnetUrl}/v1/modules/code/queue`))
+      expect(remote.status).toBe(404)
+      yield* Effect.promise(() => remote.text())
+      const loopback = yield* Effect.promise(() => fetch(`${hub.server.url}/v1/modules/code/queue`))
+      expect(loopback.status).toBe(200)
+      yield* Effect.promise(() => loopback.text())
     }).pipe(Effect.scoped, provideNodeServices)
   })
 
@@ -7558,12 +7568,10 @@ esac
       for (const path of ["/v1/modules", "/v1/modules/today/missing", "/v1/modules/unknown/needs-you"]) {
         expect((yield* get(path)).status).toBe(404)
       }
-      for (const url of [hub.server.url, hub.server.tailnetUrl]) {
-        if (url === null) return yield* Effect.die("Expected a listener URL")
-        const wrongListener = yield* Effect.promise(() => fetch(`${url}/v1/modules/connect/needs-you`))
-        expect(wrongListener.status).toBe(404)
-        yield* Effect.promise(() => wrongListener.text())
-      }
+      if (hub.server.tailnetUrl === null) return yield* Effect.die("Expected a tailnet listener URL")
+      const wrongListener = yield* Effect.promise(() => fetch(`${hub.server.tailnetUrl}/v1/modules/connect/needs-you`))
+      expect(wrongListener.status).toBe(404)
+      yield* Effect.promise(() => wrongListener.text())
       expect(reads).toBe(1)
     }).pipe(Effect.scoped, provideNodeServices)
   })
@@ -7764,7 +7772,7 @@ esac
     }).pipe(Effect.scoped, provideNodeServices)
   })
 
-  it.effect("refuses before Relay starts, and serves only the hub's conversation on the canonical listener", () => {
+  it.effect("refuses before Relay starts, and serves the hub's conversation only on its super-app listeners", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-relay-routes-"))
     const relayDirectory = join(root, "relay")
     return Effect.gen(function*() {
@@ -7799,7 +7807,8 @@ esac
       ).toEqual(["list_agents", "list_pending_approvals", "get_job", "get_work_board"])
       expect(existsSync(join(relayDirectory, "sessions.sqlite"))).toBe(true)
 
-      for (const url of [hub.server.url, hub.server.workUrl, hub.server.tailnetUrl, hub.server.approvalUrl]) {
+      // The loopback serves the super-app and so this host's Relay; peer-facing listeners never do.
+      for (const url of [hub.server.workUrl, hub.server.tailnetUrl, hub.server.approvalUrl]) {
         if (url === null || url === hub.serveUrl) continue
         const elsewhere = yield* Effect.promise(() =>
           url.startsWith("https:")
@@ -8004,4 +8013,133 @@ describe("Relay mount", () => {
       expect(starts).toBe(1)
     }).pipe(Effect.scoped, provideNodeServices)
   })
+})
+
+describe("local super-app", () => {
+  /** A tailscale stand-in whose whois answers for `nodeId` and whose status lists only this host. */
+  const tailscaleFixture = (root: string, host: string, nodeId: string): string => {
+    const command = join(root, "tailscale-test")
+    writeFileSync(
+      command,
+      `#!/bin/sh
+case "$1" in
+  ip) printf '%s\\n' '127.0.0.1' ;;
+  whois) printf '%s\\n' '{"Node":{"StableID":"${nodeId}"},"UserProfile":{"LoginName":"owner@example.com"}}' ;;
+  status) printf '%s\\n' '{"Peer":{},"Self":{"HostName":"${host}","ID":"${nodeId}","Online":true,"TailscaleIPs":["127.0.0.1"]}}' ;;
+esac
+`,
+      { mode: 0o700 }
+    )
+    return command
+  }
+
+  const started = Effect.fn("LocalSuperappTest.started")(
+    function*(prefix: string, hostConfig: (root: string) => HostConfiguration) {
+      const root = mkdtempSync(join(tmpdir(), prefix))
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { force: true, recursive: true })))
+      const resolved = hostConfig(root)
+      const store = yield* Effect.acquireRelease(
+        JobStore.open(join(root, "jobs.sqlite")),
+        (opened) => Effect.sync(() => opened.close())
+      )
+      const fleet = yield* makeFleetService({ approvalEnabled: true, host: resolved.host, operations, store })
+      return yield* Effect.acquireRelease(
+        Effect.promise(() => startHttpServer(resolved, fleet, assets, { terminalConnector: unusedTerminal })),
+        (running) => Effect.promise(running.close)
+      )
+    }
+  )
+
+  const plainSnapshot = (base: string) =>
+    Effect.promise(() => fetch(`${base}/v1/dashboard`).then((response) => response.json())).pipe(
+      Effect.map(Schema.decodeUnknownSync(DashboardSnapshot))
+    )
+
+  const plainStatus = (url: string) => Effect.promise(() => fetch(url).then((response) => response.status))
+
+  it.effect("serves the super-app on a standalone host's loopback and opens no tailnet listener", () =>
+    Effect.gen(function*() {
+      const server = yield* started("herdr-local-superapp-", (root) => config(root))
+      expect(server.tailnetUrl).toBeNull()
+      expect(server.approvalUrl).toBeNull()
+      expect(server.serveUrl).toBeNull()
+      const snapshot = yield* plainSnapshot(server.url)
+      expect(snapshot.approvalApp).toEqual({
+        canonical: false,
+        canonicalUrl: "https://ser8.example.test:4779/",
+        pushEnabled: false,
+        superapp: true,
+        fleet: false,
+        workEnabled: true
+      })
+      // Modules answer on loopback; one that is not set up here says why instead of vanishing.
+      const sandboxes = yield* Effect.promise(() =>
+        fetch(`${server.url}/v1/modules/sandboxes/overview`).then(async (response) => ({
+          status: response.status,
+          body: Schema.decodeUnknownSync(Schema.Struct({ _tag: Schema.String, reason: Schema.String }))(
+            await response.json()
+          )
+        }))
+      )
+      expect(sandboxes).toEqual({ status: 200, body: { _tag: "Unavailable", reason: "not_configured" } })
+      // Push stays with the notification hub.
+      expect(yield* plainStatus(`${server.url}/v1/push/config`)).toBe(404)
+    }).pipe(Effect.scoped, provideNodeServices))
+
+  it.effect("serves the super-app on a fleet host's loopback and keeps it off its tailnet listeners", () =>
+    Effect.gen(function*() {
+      const server = yield* started("herdr-peer-superapp-", (root) => ({
+        ...config(root),
+        approvalPort: 0,
+        crossHost: true,
+        tailscaleCommand: tailscaleFixture(root, "ALPHA", "node-alpha")
+      }))
+      expect(server.serveUrl).toBeNull()
+      if (server.tailnetUrl === null || server.approvalUrl === null) return yield* Effect.die("peer listeners missing")
+      expect((yield* plainSnapshot(server.url)).approvalApp).toMatchObject({
+        canonical: false,
+        fleet: true,
+        superapp: true
+      })
+      expect((yield* plainSnapshot(server.tailnetUrl)).approvalApp).toMatchObject({ canonical: false, superapp: false })
+      expect(yield* plainStatus(`${server.url}/v1/modules/sandboxes/overview`)).toBe(200)
+      expect(yield* plainStatus(`${server.tailnetUrl}/v1/modules/sandboxes/overview`)).toBe(404)
+    }).pipe(Effect.scoped, provideNodeServices))
+
+  it.effect("keeps the hub's canonical listener and push where they were, and serves the super-app on its loopback too", () =>
+    Effect.gen(function*() {
+      const server = yield* started("herdr-hub-superapp-", (root) => ({
+        ...config(root),
+        host: "SER8",
+        crossHost: true,
+        approvalHub: { host: "SER8", nodeId: "node-ser8", url: "https://ser8.example.test:0/" },
+        approvalPort: 0,
+        approvalTls: directTls,
+        tailscaleCommand: tailscaleFixture(root, "SER8", "node-ser8")
+      }))
+      if (server.serveUrl === null) return yield* Effect.die("canonical listener missing")
+      expect(server.approvalUrl).toBe(server.serveUrl)
+      const canonical = yield* Effect.promise(() =>
+        secureRequestBody(`${server.serveUrl}/v1/dashboard`, { host: "ser8.example.test:0" })
+      )
+      expect(canonical.status).toBe(200)
+      expect(Schema.decodeUnknownSync(Schema.fromJsonString(DashboardSnapshot))(canonical.body).approvalApp).toEqual({
+        canonical: true,
+        canonicalUrl: "https://ser8.example.test:0/",
+        pushEnabled: true,
+        superapp: true,
+        fleet: true,
+        workEnabled: true
+      })
+      const push = yield* Effect.promise(() =>
+        secureRequestBody(`${server.serveUrl}/v1/push/config`, { host: "ser8.example.test:0" })
+      )
+      expect(push.status).toBe(200)
+      expect((yield* plainSnapshot(server.url)).approvalApp).toMatchObject({
+        canonical: false,
+        pushEnabled: false,
+        superapp: true
+      })
+      expect(yield* plainStatus(`${server.url}/v1/push/config`)).toBe(404)
+    }).pipe(Effect.scoped, provideNodeServices))
 })

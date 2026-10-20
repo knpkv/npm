@@ -156,7 +156,7 @@ const UnavailableCard = ({
   switch (reason) {
     case "not_configured":
       return (
-        <StateCard eyebrow="Not available" title="Stacks aren’t available on this hub." tone="neutral">
+        <StateCard eyebrow="Not available" title="Stacks aren’t available on this computer." tone="neutral">
           Set <Setting>RELAY_STACKS_HOST</Setting> to the host that holds the AWS profiles.
         </StateCard>
       )
