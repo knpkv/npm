@@ -22,8 +22,9 @@ never put provider credentials or server-private locators in preview fixtures.
 
 ## Start it
 
-You need Node 24 or later and an AWS CLI profile that can read CodeCommit. `codecommit web` runs on Node
-alone; only the `codecommit` terminal UI needs [Bun](https://bun.sh).
+You need Node 24 or later. `codecommit web` runs on Node alone; only the `codecommit` terminal UI needs
+[Bun](https://bun.sh). It starts without an AWS profile; to load pull requests it needs a profile that can read
+CodeCommit.
 
 1. Create a profile if you don't have one: `aws configure sso` (or `aws configure --profile NAME` for keys).
    Profiles are read from `~/.aws/config` and `~/.aws/credentials`, or from `AWS_CONFIG_FILE` and

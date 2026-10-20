@@ -11,11 +11,14 @@ The publisher accepts a sanitized JSON file. It does not discover agents, read r
 ## Run it on its own
 
 ```sh
-npx @knpkv/herdr-monitor init                          # writes ~/.config/herdr-monitor/monitor.env
-set -a; . ~/.config/herdr-monitor/monitor.env; set +a   # POSIX shells; fish needs its own export
-npx @knpkv/herdr-monitor serve                         # http://127.0.0.1:4319
-npx @knpkv/herdr-monitor demo                          # in another shell: a synthetic board to look at
+npx @knpkv/herdr-monitor init     # writes ${XDG_CONFIG_HOME:-~/.config}/herdr-monitor/monitor.env
+env_file="${XDG_CONFIG_HOME:-$HOME/.config}/herdr-monitor/monitor.env"
+set -a; . "$env_file"; set +a     # POSIX shells; fish needs its own export
+npx @knpkv/herdr-monitor serve    # http://127.0.0.1:4319
 ```
+
+To look at a synthetic board, load the same file in a second shell, then run `npx @knpkv/herdr-monitor demo`
+there: `demo` publishes with the key from that file.
 
 It runs on Node 26 with nothing else running: no Herdr, no hub. `serve` refuses to start until the keys are loaded.
 
