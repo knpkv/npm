@@ -45,7 +45,7 @@ npx @knpkv/alchemy-console              # opens a one-time login link on http://
 npx @knpkv/alchemy-console serve        # prints the link only, runs in the foreground
 ```
 
-It runs on Node 26 with nothing else running. It starts without AWS SSO profiles or Alchemy
+It is tested on Node 26 and needs nothing else running. It starts without AWS SSO profiles or Alchemy
 projects; configuration is below.
 
 ## Authenticated API

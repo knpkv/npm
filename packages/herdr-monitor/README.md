@@ -12,7 +12,7 @@ The publisher accepts a sanitized JSON file. It does not discover agents, read r
 
 ```sh
 npx @knpkv/herdr-monitor init                          # writes ~/.config/herdr-monitor/monitor.env
-set -a; . ~/.config/herdr-monitor/monitor.env; set +a
+set -a; . ~/.config/herdr-monitor/monitor.env; set +a   # POSIX shells; fish needs its own export
 npx @knpkv/herdr-monitor serve                         # http://127.0.0.1:4319
 npx @knpkv/herdr-monitor demo                          # in another shell: a synthetic board to look at
 ```

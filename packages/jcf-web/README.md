@@ -15,7 +15,7 @@ npx @knpkv/jcf-web                # signs in, starting the week view on http://1
 npx @knpkv/jcf-web serve          # prints the sign-in URL, runs in the foreground
 ```
 
-It runs on Node 26 with nothing else running. The server starts without a jcf setup; the week fills from
+It is tested on Node 26 and needs nothing else running. The server starts without a jcf setup; the week fills from
 your jcf Jira and Clockify configuration.
 
 ## Running it
