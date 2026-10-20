@@ -1,6 +1,6 @@
 {
   "name": "@knpkv/herdr-hub",
-  "version": "0.45.0",
+  "version": "0.46.0",
   "description": "Authenticated fleet approvals, PWA, coordinator, and hostd runtime",
   "license": "MIT",
   "author": "knpkv",
