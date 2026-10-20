@@ -104,6 +104,23 @@ describe("Control Center default data root", () => {
     assert.notInclude(legacyDataRootNotice({ ...paths, refused: false }), "did not start")
   })
 
+  // The commands are copied into a shell, so a path with spaces or quotes must survive that; a plain one stays bare.
+  it("quotes paths in the suggested commands only when the shell needs it", () => {
+    const notice = legacyDataRootNotice({
+      legacyRoot: "/work/it's here/.control-center",
+      dataRoot: "/home/owner/.local/share/control-center",
+      refused: true
+    })
+    assert.include(notice, `CONTROL_CENTER_DATA_ROOT='/work/it'\\''s here/.control-center' control-center.`)
+    assert.include(
+      notice,
+      `CONTROL_CENTER_DATA_ROOT='/work/it'\\''s here/.control-center' control-center backup <archive>`
+    )
+    assert.include(notice, "CONTROL_CENTER_DATA_ROOT=/home/owner/.local/share/control-center.")
+    // The prose keeps the path as it is.
+    assert.include(notice, "found data at /work/it's here/.control-center, its old location")
+  })
+
   // A plain `mv` would break the root: it is a claim bound to its basename. The notice offers the two moves
   // that keep it valid, and never moves anything itself.
   it("tells the owner where the old root is and how to keep or move it", () => {

@@ -89,6 +89,10 @@ export const legacyDataRootAction = (input: {
     : { _tag: "Refuse", legacyRoot: input.legacyRoot.value }
 }
 
+/** A path as one shell word: bare when it is only safe characters, otherwise single-quoted. */
+const shellWord = (value: string): string =>
+  /^[\w@%+=:,./-]+$/u.test(value) ? value : `'${value.replaceAll("'", `'\\''`)}'`
+
 /**
  * The stderr lines for an old root that is still on disk. A data root is a claim bound to its basename, so a
  * plain move breaks it: the notice offers keeping it with the override, or moving it with backup and restore,
@@ -102,9 +106,11 @@ export const legacyDataRootNotice = (paths: {
   [
     ...(paths.refused ? ["Control Center did not start, so it would not open an empty app beside your data."] : []),
     `Control Center found data at ${paths.legacyRoot}, its old location. It now uses ${paths.dataRoot}.`,
-    `To keep using the old data, start it with CONTROL_CENTER_DATA_ROOT=${paths.legacyRoot} control-center.`,
-    `To move it, stop Control Center, then run CONTROL_CENTER_DATA_ROOT=${paths.legacyRoot} control-center backup <archive>`,
+    `To keep using the old data, start it with CONTROL_CENTER_DATA_ROOT=${shellWord(paths.legacyRoot)} control-center.`,
+    `To move it, stop Control Center, then run CONTROL_CENTER_DATA_ROOT=${
+      shellWord(paths.legacyRoot)
+    } control-center backup <archive>`,
     `and control-center restore <archive>.`,
-    ...(paths.refused ? [`To start fresh instead, set CONTROL_CENTER_DATA_ROOT=${paths.dataRoot}.`] : []),
+    ...(paths.refused ? [`To start fresh instead, set CONTROL_CENTER_DATA_ROOT=${shellWord(paths.dataRoot)}.`] : []),
     "Nothing was moved."
   ].join("\n")
