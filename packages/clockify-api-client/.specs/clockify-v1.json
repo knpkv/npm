@@ -9238,8 +9238,8 @@
             "name": "dateRangeStart",
             "schema": {
               "type": "string",
-              "description": "Provide the start date in format YYYY-MM-DDTHH:MM:SS.ssssss. The system interprets this value based on the user's timezone (provided in the timeZone request parameter or the timezone configured in the user profile)",
-              "example": "2018-11-01T00:00:00"
+              "description": "Provide the start date following this format YYYY-MM-DDTHH:MM:SS.sssZ.",
+              "example": "2018-11-01T00:00:00.000Z"
             }
           },
           {
@@ -9247,8 +9247,8 @@
             "name": "dateRangeEnd",
             "schema": {
               "type": "string",
-              "description": "Provide the end date in format YYYY-MM-DDTHH:MM:SS.ssssss. The system interprets this value based on the user's timezone (provided in the timeZone request parameter or the timezone configured in the user profile)",
-              "example": "2018-11-30T23:59:59.999"
+              "description": "Provide the end date following this format YYYY-MM-DDTHH:MM:SS.sssZ.",
+              "example": "2018-11-30T23:59:59.999Z"
             }
           },
           {
