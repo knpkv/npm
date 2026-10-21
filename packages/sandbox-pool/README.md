@@ -15,6 +15,10 @@ const leased = Effect.gen(function* () {
 }).pipe(Effect.provide(memorySandboxStore(seedPool(contract))))
 ```
 
+## Run it on its own
+
+This package has no executable and no server of its own: `hostd` from `@knpkv/herdr-hub` mounts it.
+
 ## Pool contract
 
 The package ships no real organization. `PoolContract` is decoded from the owning host's configuration:

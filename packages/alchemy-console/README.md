@@ -38,6 +38,16 @@ sockets fail explicitly. For an abandoned socket, confirm its server has stopped
 before removing that entry and restarting. The control channel currently requires
 POSIX ownership and Unix sockets.
 
+## Run it on its own
+
+```sh
+npx @knpkv/alchemy-console              # opens a one-time login link on http://127.0.0.1:3114
+npx @knpkv/alchemy-console serve        # prints the link only, runs in the foreground
+```
+
+It is tested on Node 26 and needs nothing else running. It starts without AWS SSO profiles or Alchemy
+projects; configuration is below.
+
 ## Authenticated API
 
 The client-safe contracts are exported from `@knpkv/alchemy-console/api` and may be

@@ -437,6 +437,42 @@ describe("Sandboxes overview", { concurrent: false }, () => {
     expect(text("[data-pool-submitted]")).toBe("Submitted to Fleet. The cards update when the job runs.")
   })
 
+  it("keeps the pool's order between accounts that were never reset", async () => {
+    for (const order of [
+      ["ephemeral-01", "ephemeral-02"],
+      ["ephemeral-02", "ephemeral-01"]
+    ]) {
+      await render(
+        ready(order.map((name) => available(name, name === "ephemeral-01" ? "999999999990" : "999999999991", null)))
+      )
+      const dialog = await openDialog(button("Lease an account"))
+      expect(dialog?.querySelector(".sandboxes-sheet-account b")?.textContent).toBe(order[0])
+      await act(async () => button("Cancel", '[role="dialog"]')?.click())
+      await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')).toBeNull())
+    }
+  })
+
+  it("does not submit twice when the sheet is closed and reopened while a write is in flight", async () => {
+    const lease = vi.fn(() => Effect.never)
+    const writes: SandboxesModuleWrites = {
+      lease: Effect.suspend(lease),
+      extend: () => Effect.void,
+      release: () => Effect.void
+    }
+    await render(ready([available("ephemeral-02", "999999999991", null)]), { writes })
+    await openDialog(button("Lease an account"))
+    await act(async () => button("Lease longest idle", '[role="dialog"]')?.click())
+    await settle()
+    await act(async () => button("Cancel", '[role="dialog"]')?.click())
+    await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')).toBeNull())
+    await openDialog(button("Lease an account"))
+    const confirm = button("Lease longest idle", '[role="dialog"]')
+    expect(confirm?.hasAttribute("disabled")).toBe(true)
+    await act(async () => confirm?.click())
+    await settle()
+    expect(lease).toHaveBeenCalledTimes(1)
+  })
+
   it("keeps the sheet open and says so when the lease is refused", async () => {
     const writes: SandboxesModuleWrites = {
       lease: Effect.fail(new SandboxesWriteFailed({ reason: "rejected" })),

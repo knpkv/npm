@@ -1,6 +1,6 @@
 import { NodeServices } from "@effect/platform-node"
 import { expect, layer } from "@effect/vitest"
-import { Context, Deferred, Effect, Fiber, FileSystem, Layer, Path, Redacted, Ref } from "effect"
+import { Context, Deferred, Effect, Fiber, FileSystem, Layer, Path, Redacted, Ref, Result } from "effect"
 import { HttpClient, HttpClientResponse } from "effect/http"
 import { TestClock } from "effect/testing"
 import * as NodeFs from "node:fs"
@@ -374,33 +374,55 @@ layer(Layer.merge(NodeServices.layer, pacingProviders))("profile read pace", (it
 
 class SlowSignIn extends Context.Service<SlowSignIn, {
   readonly started: Deferred.Deferred<void>
+  /**
+   * Opens when the fourth profile signs in. Three read at once and the two slow ones never finish, so
+   * the fourth gets a slot only after the fast profile has finished everything it does.
+   */
+  readonly freed: Deferred.Deferred<void>
+  /** Whether the fast profile's last read had answered when the probe signed in. False means a wider pool. */
+  readonly probeAfterFast: Ref.Ref<boolean>
 }>()("AlchemyConsole/SlowSignIn") {}
 
-/** One profile's sign-in never returns; the other account answers immediately. */
+/**
+ * Two profiles' sign-ins never return. The fast account's provider answers after a real delay, the way a
+ * loaded runner does. The probe waits for the fast profile's slot, then stalls too.
+ */
 const stalledProfile = Layer.effectContext(Effect.gen(function*() {
   const started = yield* Deferred.make<void>()
+  const freed = yield* Deferred.make<void>()
+  const fastRead = yield* Ref.make(false)
+  const probeAfterFast = yield* Ref.make(false)
   const client = HttpClient.make((request, url) =>
-    Effect.succeed(
-      HttpClientResponse.fromWeb(
-        request,
-        new Response(
-          url.searchParams.has("versions") ? versionList : bucketList([
-            "fixture-alchemy-state"
-          ])
+    TestClock.withLive(Effect.sleep("20 millis")).pipe(
+      // Only the fast profile reaches the provider; its version listing is its last read.
+      Effect.tap(() => url.searchParams.has("versions") ? Ref.set(fastRead, true) : Effect.void),
+      Effect.as(
+        HttpClientResponse.fromWeb(
+          request,
+          new Response(
+            url.searchParams.has("versions") ? versionList : bucketList([
+              "fixture-alchemy-state"
+            ])
+          )
         )
       )
     )
   )
+  const stall = (profile: { readonly name: string; readonly region: string }) =>
+    Effect.sleep("30 seconds").pipe(Effect.as(credentialsFor(profile)))
   const credentials = SsoCredentials.of({
     resolve: (profile) =>
-      profile.name === "a-slow" ?
-        Deferred.succeed(started, undefined).pipe(
-          Effect.andThen(Effect.sleep("30 seconds")),
-          Effect.as(credentialsFor(profile))
+      profile.name === "b-fast" ?
+        Effect.succeed(credentialsFor(profile)) :
+        profile.name === "d-probe" ?
+        Ref.get(fastRead).pipe(
+          Effect.flatMap((read) => Ref.set(probeAfterFast, read)),
+          Effect.andThen(Deferred.succeed(freed, undefined)),
+          Effect.andThen(stall(profile))
         ) :
-        Effect.succeed(credentialsFor(profile))
+        Deferred.succeed(started, undefined).pipe(Effect.andThen(stall(profile)))
   })
-  return Context.make(SlowSignIn, { started }).pipe(
+  return Context.make(SlowSignIn, { started, freed, probeAfterFast }).pipe(
     Context.add(HttpClient.HttpClient, client),
     Context.add(SsoCredentials, credentials)
   )
@@ -414,15 +436,28 @@ layer(Layer.merge(NodeServices.layer, stalledProfile))("profile deadline", (it) 
         awsConfigFile,
         profileIni([
           { name: "a-slow", account: "fixture-slow" },
-          { name: "b-fast", account: "fixture-fast" }
+          { name: "b-fast", account: "fixture-fast" },
+          { name: "c-slow", account: "fixture-slow-second" },
+          { name: "d-probe", account: "fixture-probe" }
         ])
       )
       const stall = yield* SlowSignIn
       const context = yield* Layer.build(sourceLayer({ root, awsConfigFile }))
       const fiber = yield* Context.get(context, StackSource).discover.pipe(Effect.forkChild)
       yield* Deferred.await(stall.started)
-      // The fast profile finishes without the clock. Then the slow profile misses its deadline.
-      yield* Effect.repeat(Effect.yieldNow, { times: 40 })
+      // The fast profile needs no clock, but its provider reads take real time. Moving the clock before it
+      // is done would expire it too, so wait until its slot is free. Then the others miss their deadlines.
+      // The probe is only a signal while three profiles read at once. A narrower pool never frees a slot
+      // for it and a wider one signs it in at once; either way this test has to change rather than race.
+      const narrowed = "d-probe never signed in: profile read concurrency is no longer 3"
+      const freed = yield* TestClock.withLive(Deferred.await(stall.freed).pipe(Effect.timeout("10 seconds"))).pipe(
+        Effect.result
+      )
+      expect(Result.isSuccess(freed), narrowed).toBe(true)
+      expect(
+        yield* Ref.get(stall.probeAfterFast),
+        "d-probe signed in before b-fast finished: profile read concurrency is no longer 3"
+      ).toBe(true)
       yield* TestClock.adjust("9 seconds")
       expect(fiber.pollUnsafe()?._tag).toBe("Success")
       const result = yield* Fiber.join(fiber)

@@ -1,5 +1,17 @@
 # @knpkv/control-center
 
+## 0.23.0
+
+### Minor Changes
+
+- [#1040](https://github.com/knpkv/npm/pull/1040) [`902312c`](https://github.com/knpkv/npm/commit/902312c8f520e0e032ac675468918af35672724a) Thanks [@konopkov](https://github.com/konopkov)! - The default data root moved: it is now `$XDG_DATA_HOME/control-center`, or `~/.local/share/control-center`, instead of `.control-center` in the current directory, so `npx @knpkv/control-center` finds the same data from anywhere. Existing data roots are not migrated. `CONTROL_CENTER_DATA_ROOT` still overrides the default. If a `.control-center` is left in the current directory, Control Center names it and says how to keep it (`CONTROL_CENTER_DATA_ROOT=<path>`) or move it (`backup`, then `restore`). Until the new default exists it refuses to start, rather than opening an empty app; `restore` still runs.
+
+### Patch Changes
+
+- [#1041](https://github.com/knpkv/npm/pull/1041) [`6e6d029`](https://github.com/knpkv/npm/commit/6e6d029fd0979aca90815ab4a0a6d8bed5967887) Thanks [@konopkov](https://github.com/konopkov)! - READMEs open with "Run it on its own": the `npx` command, its port, and what it runs without. Packages with no executable say where they run instead. CodeCommit web no longer claims it needs Bun; only the terminal UI does.
+- Updated dependencies [[`6e6d029`](https://github.com/knpkv/npm/commit/6e6d029fd0979aca90815ab4a0a6d8bed5967887)]:
+  - @knpkv/review@0.7.1
+
 ## 0.22.0
 
 ### Minor Changes

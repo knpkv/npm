@@ -153,11 +153,9 @@ const longestIdle = (cards: ReadonlyArray<SandboxCard>) =>
   cards
     .flatMap((item) => (item.state._tag === "Available" ? [{ item, lastResetAt: item.state.lastResetAt }] : []))
     .sort((left, right) =>
-      left.lastResetAt === null
-        ? -1
-        : right.lastResetAt === null
-          ? 1
-          : millis(left.lastResetAt) - millis(right.lastResetAt)
+      left.lastResetAt === null || right.lastResetAt === null
+        ? Number(right.lastResetAt === null) - Number(left.lastResetAt === null)
+        : millis(left.lastResetAt) - millis(right.lastResetAt)
     )[0]
 
 /** Soonest leased end still ahead. An ended lease waits for the sweep, so it names no time. */
@@ -369,7 +367,8 @@ const ConfirmSheet = ({
         className="sandboxes-trigger"
         disabled={disabled}
         onClick={() => {
-          setPhase({ _tag: "Idle" })
+          // A write still in flight keeps the confirm disabled; only a refusal is cleared on reopen.
+          setPhase((current) => (current._tag === "Sending" ? current : { _tag: "Idle" }))
           setOpen(true)
         }}
         ref={opener}
