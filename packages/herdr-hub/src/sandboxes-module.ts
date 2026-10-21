@@ -14,6 +14,7 @@ import { Config, Effect, Exit, Layer, Option, Path, Schema, Scope } from "effect
 import { sandboxesModule } from "./module-contract.js"
 import { NeedsYouProviderResult } from "./module-needs-you.js"
 import {
+  type ModuleCaller,
   ModuleHandlers,
   moduleReadRoute,
   ModuleRouteFailure,
@@ -54,11 +55,19 @@ export const servesSandboxes = (configuration: {
 /** The Fleet job an order becomes. The job's actor is the caller, so Fleet checks the holder itself. */
 export type SandboxJobPayload = SandboxLease | SandboxExtend | SandboxRelease
 
-/** Submits one job as `actor` and starts it when Fleet queued it. Failures carry public copy only. */
+/**
+ * Submits one job as `actor`, recorded with the caller's own `provenance`, and starts it when Fleet queued
+ * it. Failures carry public copy only.
+ */
 export type SandboxJobSubmit = (
   payload: SandboxJobPayload,
-  actor: string
+  actor: string,
+  provenance: ModuleCaller["provenance"]
 ) => Effect.Effect<SandboxJobSubmitted, ModuleRouteFailure>
+
+/** Whether the shell lists Sandboxes on this listener: exactly the listeners the module answers on. */
+export const sandboxesListedOn = (listener: string): boolean =>
+  sandboxesModule.listeners.some((answers) => answers === listener)
 
 const payloadOf = (order: SandboxJobOrder): SandboxJobPayload => {
   switch (order._tag) {
@@ -191,12 +200,12 @@ export const makeSandboxesModule = (configuration: {
         : Effect.succeed(emptyNeedsYou)
       // Same origin is checked by the mount before the body is read. Here: the pool must be served, and
       // only the hub's own node may submit. Fleet then holds extend and release to the caller's own lease.
-      const submitJob = (order: SandboxJobOrder, caller: { readonly login: string; readonly sameNode: boolean }) =>
+      const submitJob = (order: SandboxJobOrder, caller: ModuleCaller) =>
         mounted._tag === "Unavailable"
           ? Effect.fail(new ModuleRouteFailure({ status: 503, code: "unavailable" }))
           : !caller.sameNode
           ? Effect.fail(new ModuleRouteFailure({ status: 403, code: "owner_only" }))
-          : configuration.submit(payloadOf(order), caller.login)
+          : configuration.submit(payloadOf(order), caller.login, caller.provenance)
       return {
         routes: [
           moduleReadRoute("/overview", SandboxesOverviewQuery, SandboxesOverview, () => overview),

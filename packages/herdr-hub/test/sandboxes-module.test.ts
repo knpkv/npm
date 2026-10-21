@@ -10,6 +10,7 @@ import { dispatchModuleRoute, makeModuleLayer, ModuleHandlers } from "../src/mod
 import {
   makeSandboxesModule,
   readSandboxesHost,
+  sandboxesListedOn,
   sandboxesModuleUrl,
   type SandboxJobPayload,
   type SandboxJobSubmit,
@@ -35,10 +36,11 @@ const pool = Schema.decodeUnknownSync(PoolContract)({
 
 const request = (
   path: string,
-  listener: "serve" | "approval" | "tailnet" | "lan" | "work" = "serve",
+  listener: "serve" | "local" | "approval" | "tailnet" | "lan" | "work" = "serve",
   method = "GET",
   options: {
     readonly sameNode?: boolean
+    readonly provenance?: "verified_local_listener" | "authenticated_remote"
     readonly body?: Schema.Json
     readonly sameOrigin?: Effect.Effect<void, OriginRefused>
   } = {}
@@ -47,7 +49,11 @@ const request = (
     method,
     listener,
     url: new URL(`https://hub.example/v1/modules/${path}`),
-    authorize: Effect.succeed({ login: "example-viewer", sameNode: options.sameNode ?? false }),
+    authorize: Effect.succeed({
+      login: "example-viewer",
+      sameNode: options.sameNode ?? false,
+      provenance: options.provenance ?? "authenticated_remote"
+    }),
     sameOrigin: options.sameOrigin ?? Effect.void,
     readJson: () => Effect.succeed(options.body ?? null)
   })
@@ -56,10 +62,14 @@ class OriginRefused extends Schema.TaggedError<OriginRefused>()("OriginRefused",
 
 /** Records each job the module submits, as Fleet would receive it. */
 const recordingSubmit = () => {
-  const submitted: Array<{ readonly payload: SandboxJobPayload; readonly actor: string }> = []
-  const submit: SandboxJobSubmit = (payload, actor) =>
+  const submitted: Array<{
+    readonly payload: SandboxJobPayload
+    readonly actor: string
+    readonly provenance: string
+  }> = []
+  const submit: SandboxJobSubmit = (payload, actor, provenance) =>
     Effect.sync(() => {
-      submitted.push({ payload, actor })
+      submitted.push({ payload, actor, provenance })
       return { jobId: `job-${submitted.length}`, status: "queued" }
     })
   return { submit, submitted }
@@ -301,9 +311,39 @@ describe("host-local Sandboxes module", () => {
         yield* post({ _tag: "Extend", accountId: account })
         yield* post({ _tag: "Release", accountId: account })
         expect(submitted).toEqual([
-          { payload: { kind: "sandbox.lease" }, actor: "example-viewer" },
-          { payload: { kind: "sandbox.extend", accountId: account }, actor: "example-viewer" },
-          { payload: { kind: "sandbox.release", accountId: account }, actor: "example-viewer" }
+          { payload: { kind: "sandbox.lease" }, actor: "example-viewer", provenance: "authenticated_remote" },
+          {
+            payload: { kind: "sandbox.extend", accountId: account },
+            actor: "example-viewer",
+            provenance: "authenticated_remote"
+          },
+          {
+            payload: { kind: "sandbox.release", accountId: account },
+            actor: "example-viewer",
+            provenance: "authenticated_remote"
+          }
+        ])
+      }),
+      { submit }
+    )
+  })
+
+  it("lists the row on exactly the listeners the module answers on", () => {
+    expect(["serve", "local", "approval", "tailnet", "lan"].filter(sandboxesListedOn)).toEqual(["serve", "local"])
+  })
+
+  it.effect("records a direct loopback caller's job as a local submission", () => {
+    const { submit, submitted } = recordingSubmit()
+    return withModule(
+      host,
+      Effect.gen(function*() {
+        yield* request("sandboxes/jobs", "local", "POST", {
+          sameNode: true,
+          provenance: "verified_local_listener",
+          body: { _tag: "Lease" }
+        })
+        expect(submitted).toEqual([
+          { payload: { kind: "sandbox.lease" }, actor: "example-viewer", provenance: "verified_local_listener" }
         ])
       }),
       { submit }
