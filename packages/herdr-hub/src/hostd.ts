@@ -3,7 +3,7 @@ import {
   FleetOperationError,
   FleetValidationError,
   JobStore,
-  loadConfiguration,
+  loadConfigurationOrStandalone,
   makeFleetService
 } from "@knpkv/herdr-fleet"
 import { PoolContract } from "@knpkv/sandbox-pool"
@@ -12,8 +12,9 @@ import { readCodeHost } from "./code-module.js"
 import type { HostdOperationsCompositionError } from "./errors.js"
 import { startHttpServer } from "./http.js"
 import { copyTaskWorkRegistration } from "./internal/agent-task-work-source.js"
-import { fleetConfigPath } from "./internal/config-path.js"
+import { fleetConfigSource } from "./internal/config-path.js"
 import { hasOutstandingWorkJob, noJobStore } from "./internal/outstanding-work-job.js"
+import { standaloneNotice } from "./internal/standalone-notice.js"
 import { noStartedWorkerStore, startedWorker } from "./internal/started-worker.js"
 import { loadUiAssets } from "./internal/ui-assets.js"
 import { makeHostOperations } from "./operations.js"
@@ -73,10 +74,11 @@ export interface HostdProgramOptions {
 export const makeHostdOperations = Effect.fn("Hostd.makeOperations")(function*(
   config: HostConfiguration,
   composeOperations?: HostdOperationsComposer,
-  jobs?: JobStore
+  jobs?: JobStore,
+  standalone = false
 ) {
   const scope = yield* Scope.Scope
-  const defaultOperations = yield* makeHostOperations(config)
+  const defaultOperations = yield* makeHostOperations(config, { standalone })
   if (composeOperations === undefined) return defaultOperations
   const fork: HostdLifetimeFork = (effect) => Effect.forkIn(effect, scope).pipe(Effect.asVoid)
   const composed = yield* composeOperations({
@@ -87,7 +89,9 @@ export const makeHostdOperations = Effect.fn("Hostd.makeOperations")(function*(
     startedWorker: jobs === undefined ? noStartedWorkerStore : (jobId) => startedWorker(jobs, jobId)
   })
   yield* copyTaskWorkRegistration(defaultOperations.listAgents, composed.listAgents)
-  return composed
+  // The host's refusals are not the composer's to drop: a standalone host refuses them however its
+  // operations were built.
+  return { ...composed, notSetUp: defaultOperations.notSetUp }
 })
 
 /**
@@ -99,8 +103,11 @@ export const makeHostdProgram = Effect.fn("Hostd.makeProgram")(function*(
   options: HostdProgramOptions = {}
 ) {
   const paths = yield* Path.Path
-  const configPath = yield* fleetConfigPath
-  const config = yield* loadConfiguration(configPath)
+  const source = yield* fleetConfigSource
+  // Nothing at the default path is a computer outside any fleet: run as its own local hub. An explicit
+  // path, a dangling symlink or a broken file still fails.
+  const loaded = yield* loadConfigurationOrStandalone(source.path, { standaloneWhenMissing: !source.explicit })
+  const config = loaded.config
   const codeHost = yield* readCodeHost
   const stacksHost = yield* readStacksHost
   const sandboxesHost = yield* readSandboxesHost
@@ -113,7 +120,12 @@ export const makeHostdProgram = Effect.fn("Hostd.makeProgram")(function*(
     JobStore.open(paths.join(config.stateDirectory, "jobs.sqlite")),
     (opened) => Effect.sync(() => opened.close())
   )
-  const operations = yield* makeHostdOperations(config, options.composeOperations, store)
+  const operations = yield* makeHostdOperations(
+    config,
+    options.composeOperations,
+    store,
+    loaded._tag === "Standalone"
+  )
   const service = yield* makeFleetService({
     approvalEnabled: config.crossHost,
     host: config.host,
@@ -144,6 +156,7 @@ export const makeHostdProgram = Effect.fn("Hostd.makeProgram")(function*(
       server.lanWorkUrl ?? "disabled"
     }`
   )
+  if (loaded._tag === "Standalone") yield* Console.error(standaloneNotice(loaded.path, server.url))
   if (server.lanWorkPairingCode !== null) {
     yield* Console.log(`LAN Work pairing code: ${Redacted.value(server.lanWorkPairingCode)}`)
   }

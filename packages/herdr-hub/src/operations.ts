@@ -11,7 +11,11 @@ import {
   FleetOperationError,
   type HostConfiguration,
   type HostOperations,
+  isStandaloneRefusedKind,
   type LocalJobPayload,
+  notSetUpDetail,
+  type StandaloneRefusedKind,
+  standaloneRefusedKinds,
   type WorkerStarted
 } from "@knpkv/herdr-fleet"
 import { Clock, Config, Effect, Option, Path, Schema, Stream } from "effect"
@@ -180,9 +184,18 @@ const decodeLineage = Effect.fn("HostOperations.decodeLineage")(function*(
   })
 })
 
+/**
+ * `standalone: true` is a computer outside any fleet: Nix and delegation jobs are refused before any
+ * command runs, so the configuration's `checkCommand`, `applyCommand` and `coordinatorCommand` are
+ * never used there.
+ */
 export const makeHostOperations = Effect.fn("HostOperations.make")(function*(
-  config: HostConfiguration
+  config: HostConfiguration,
+  options: { readonly standalone?: boolean } = {}
 ) {
+  const notSetUp: ReadonlySet<StandaloneRefusedKind> = options.standalone === true
+    ? standaloneRefusedKinds
+    : new Set()
   const paths = yield* Path.Path
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
   const workSource = yield* makeTaskWorkSource()
@@ -453,6 +466,10 @@ export const makeHostOperations = Effect.fn("HostOperations.make")(function*(
   )
 
   const inspect = Effect.fn("HostOperations.inspect")(function*() {
+    // A standalone computer has no fleet repository: say so instead of asking git about HOME.
+    if (options.standalone === true) {
+      return { applyConfigured: false, branch: null, dirty: false, repository: null, revision: null }
+    }
     const { branch, revision, status } = yield* Effect.all({
       branch: runCommand("git.branch", ["git", "branch", "--show-current"]),
       revision: runCommand("git.revision", ["git", "rev-parse", "HEAD"]),
@@ -467,7 +484,23 @@ export const makeHostOperations = Effect.fn("HostOperations.make")(function*(
     }
   })
 
+  // Submission already refuses these; a job recovered from an older store must not run them either, on
+  // any path that reaches a command (the job runner and coordinator chat alike).
+  const refuseNotSetUp = (kind: CoreJobPayload["kind"]) =>
+    isStandaloneRefusedKind(kind) && notSetUp.has(kind)
+      ? Effect.fail(
+        new FleetOperationError({
+          cause: kind,
+          detail: notSetUpDetail(kind),
+          disposition: "rejected",
+          operation: kind
+        })
+      )
+      : null
+
   const runPayload = (payload: CoreJobPayload, workerStarted: WorkerStarted, jobId: string) => {
+    const refused = refuseNotSetUp(payload.kind)
+    if (refused !== null) return refused
     switch (payload.kind) {
       case "nix.check":
         return runCommand("nix.check", config.checkCommand, "tail")
@@ -551,7 +584,7 @@ export const makeHostOperations = Effect.fn("HostOperations.make")(function*(
     workerStarted: WorkerStarted,
     jobId: string
   ) =>
-    runCoordinatorCommand(
+    refuseNotSetUp(payload.kind) ?? runCoordinatorCommand(
       "agent.delegate.chat",
       [
         ...config.coordinatorCommand,
@@ -567,6 +600,7 @@ export const makeHostOperations = Effect.fn("HostOperations.make")(function*(
   return {
     inspect,
     listAgents,
+    notSetUp,
     run: runPayload,
     runLocal,
     runCoordinatorChat

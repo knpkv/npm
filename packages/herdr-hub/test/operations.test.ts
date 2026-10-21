@@ -10,6 +10,7 @@ import {
   JobStore,
   jobTextMaxLength,
   makeFleetService,
+  standaloneRefusedKinds,
   type WorkerStarted
 } from "@knpkv/herdr-fleet"
 import { WorkPullRequestObservation, WorkStoreError } from "@knpkv/herdr-work"
@@ -18,7 +19,7 @@ import * as HttpClientRequest from "effect/http/HttpClientRequest"
 import * as HttpClientResponse from "effect/http/HttpClientResponse"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { TestClock } from "effect/testing"
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { makeHostdOperations } from "../src/hostd.js"
@@ -253,6 +254,105 @@ printf '%s\\n' "{\\"jobId\\":\\"$job_id\\",\\"protocol\\":\\"herdr.coordinator.c
         })
       }
     }).pipe(
+      Effect.ensuring(Effect.sync(() => rmSync(root, { force: true, recursive: true }))),
+      provideNodeServices
+    )
+  })
+
+  // A standalone computer has no Nix setup: the router refuses before spawning the configured command.
+  it.effect("refuses nix and delegation jobs as rejected where they are not set up, without running a command", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-nix-refusal-test-"))
+    const marker = join(root, "ran")
+    return Effect.gen(function*() {
+      const operations = yield* makeHostOperations(
+        {
+          ...config(root, ["sh", "-c", "touch \"$0\"", marker]),
+          applyCommand: ["sh", "-c", "touch \"$0\"", marker],
+          coordinatorCommand: ["sh", "-c", "touch \"$0\"", marker]
+        },
+        { standalone: true }
+      )
+      expect(operations.notSetUp).toEqual(standaloneRefusedKinds)
+      for (
+        const payload of [{ kind: "nix.check" }, { kind: "nix.apply", ref: "main" }] satisfies ReadonlyArray<
+          CoreJobPayload
+        >
+      ) {
+        expect(yield* Effect.flip(operations.run(payload, () => Effect.void, "job-nix"))).toMatchObject({
+          _tag: "FleetOperationError",
+          disposition: "rejected",
+          detail: "nix jobs are not set up on this computer",
+          operation: payload.kind
+        })
+      }
+      const delegate = {
+        kind: "agent.delegate",
+        mode: "work",
+        prompt: "ship",
+        repository: root
+      } satisfies CoreJobPayload
+      expect(yield* Effect.flip(operations.run(delegate, () => Effect.void, "job-delegate"))).toMatchObject({
+        _tag: "FleetOperationError",
+        disposition: "rejected",
+        detail: "agent delegation is not set up on this computer",
+        operation: "agent.delegate"
+      })
+      expect(yield* Effect.sync(() => existsSync(marker))).toBe(false)
+    }).pipe(
+      Effect.ensuring(Effect.sync(() => rmSync(root, { force: true, recursive: true }))),
+      provideNodeServices
+    )
+  })
+
+  // Coordinator chat is its own run path: a chat job already in the store from before must not reach the
+  // coordinator command on a standalone computer either.
+  it.effect("refuses a recovered coordinator-chat delegation where delegation is not set up", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-chat-refusal-test-"))
+    const marker = join(root, "ran")
+    return Effect.gen(function*() {
+      const operations = yield* makeHostOperations(
+        { ...config(root, ["true"]), coordinatorCommand: ["sh", "-c", "touch \"$0\"", marker] },
+        { standalone: true }
+      )
+      const payload = {
+        kind: "agent.delegate",
+        mode: "consult",
+        prompt: "hello",
+        repository: root,
+        channel: "coordinator_chat"
+      } satisfies CoreJobPayload
+      expect(
+        yield* Effect.flip(operations.runCoordinatorChat(payload, () => Effect.void, "job-chat"))
+      ).toMatchObject({
+        _tag: "FleetOperationError",
+        disposition: "rejected",
+        detail: "agent delegation is not set up on this computer",
+        operation: "agent.delegate"
+      })
+      // The recovered path: a queued chat job written before this computer went standalone.
+      const store = yield* Effect.acquireRelease(
+        JobStore.open(join(root, "jobs.sqlite")),
+        (opened) => Effect.sync(() => opened.close())
+      )
+      yield* store.put({
+        actor: "owner@example.com",
+        approvalNonce: null,
+        approvedBy: null,
+        createdAt: 1,
+        error: null,
+        hash: "0".repeat(64),
+        id: "job-recovered-chat",
+        payload,
+        result: null,
+        status: "queued",
+        updatedAt: 1
+      })
+      const fleet = yield* makeFleetService({ approvalEnabled: false, host: "ALPHA", operations, store })
+      yield* Effect.result(fleet.runCoordinatorChat("job-recovered-chat"))
+      expect((yield* store.get("job-recovered-chat"))?.status).toBe("failed")
+      expect(yield* Effect.sync(() => existsSync(marker))).toBe(false)
+    }).pipe(
+      Effect.scoped,
       Effect.ensuring(Effect.sync(() => rmSync(root, { force: true, recursive: true }))),
       provideNodeServices
     )

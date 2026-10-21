@@ -1,5 +1,5 @@
 import { NodeServices } from "@effect/platform-node"
-import { describe, expect, it } from "@effect/vitest"
+import { describe, expect, it, layer } from "@effect/vitest"
 import { resolveConnectWorkGoal } from "@knpkv/herdr-connect"
 import {
   Orchestrator,
@@ -17,7 +17,8 @@ import {
   type HostOperations,
   JobRecord,
   JobStore,
-  makeFleetService
+  makeFleetService,
+  standaloneRefusedKinds
 } from "@knpkv/herdr-fleet"
 import { makeWorkService, type WorkGoalCheckpoint, type WorkService, WorkStore } from "@knpkv/herdr-work"
 import { Deferred, Effect, Exit, Option, Queue, Ref, Result, Schema, Stream } from "effect"
@@ -638,4 +639,27 @@ describe("hostd runtime operations injection", () => {
         Effect.provide(NodeServices.layer)
       )
     ))
+})
+
+layer(NodeServices.layer)("hostd standalone composition", (it) => {
+  // A standalone host's refusals belong to the host, not to whichever composer built the operations.
+  it.effect("keeps a standalone host's refused kinds when a composer builds its own operations", () =>
+    Effect.gen(function*() {
+      const root = mkdtempSync(join(tmpdir(), "hostd-runtime-test-"))
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { force: true, recursive: true })))
+      const composed = yield* makeHostdOperations(
+        config(root),
+        ({ defaultOperations }) =>
+          Effect.succeed({
+            inspect: defaultOperations.inspect,
+            listAgents: defaultOperations.listAgents,
+            run: defaultOperations.run,
+            runLocal: defaultOperations.runLocal,
+            runCoordinatorChat: defaultOperations.runCoordinatorChat
+          }),
+        undefined,
+        true
+      )
+      expect(composed.notSetUp).toEqual(standaloneRefusedKinds)
+    }).pipe(Effect.scoped))
 })

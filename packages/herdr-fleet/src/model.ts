@@ -824,12 +824,13 @@ export const AgentInventory = Schema.Struct({
 })
 export type AgentInventory = typeof AgentInventory.Type
 
+/** The host's fleet repository. `null` repository, branch and revision: a standalone computer has none. */
 export const HostDetails = Schema.Struct({
   applyConfigured: Schema.Boolean,
-  branch: Schema.String,
+  branch: Schema.NullOr(Schema.String),
   dirty: Schema.Boolean,
-  repository: Schema.String,
-  revision: Schema.String
+  repository: Schema.NullOr(Schema.String),
+  revision: Schema.NullOr(Schema.String)
 })
 export type HostDetails = typeof HostDetails.Type
 

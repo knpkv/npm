@@ -8018,6 +8018,38 @@ describe("Relay mount", () => {
   })
 })
 
+describe("busy loopback port", () => {
+  // A taken port must stop startup at once and name the address, not hang or retry.
+  it.effect("fails startup naming the loopback address when its port is taken", () =>
+    Effect.gen(function*() {
+      const root = mkdtempSync(join(tmpdir(), "herdr-busy-port-"))
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { force: true, recursive: true })))
+      const holder = yield* Effect.acquireRelease(
+        Effect.promise(() =>
+          new Promise<ReturnType<typeof createServer>>((resolve) => {
+            const server = createServer()
+            server.listen(0, "127.0.0.1", () => resolve(server))
+          })
+        ),
+        (server) => Effect.promise(() => new Promise<void>((resolve) => server.close(() => resolve())))
+      )
+      const port = Schema.decodeUnknownSync(Schema.Struct({ port: Schema.Number }))(holder.address()).port
+      const store = yield* Effect.acquireRelease(
+        JobStore.open(join(root, "jobs.sqlite")),
+        (opened) => Effect.sync(() => opened.close())
+      )
+      const fleet = yield* makeFleetService({ approvalEnabled: false, host: "ALPHA", operations, store })
+      const failure = yield* Effect.tryPromise({
+        try: () =>
+          startHttpServer({ ...config(root), localPort: port }, fleet, assets, { terminalConnector: unusedTerminal }),
+        // Keep Node's own listen error: its message is what the operator sees.
+        catch: (cause) => String(cause)
+      }).pipe(Effect.flip)
+      expect(failure).toContain("EADDRINUSE")
+      expect(failure).toContain(`127.0.0.1:${String(port)}`)
+    }).pipe(Effect.scoped, provideNodeServices))
+})
+
 describe("local super-app", () => {
   /** A tailscale stand-in whose whois answers for `nodeId` and whose status lists only this host. */
   const tailscaleFixture = (root: string, host: string, nodeId: string): string => {
