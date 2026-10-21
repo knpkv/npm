@@ -25,6 +25,7 @@ import * as FileSystem from "effect/FileSystem"
 import * as Option from "effect/Option"
 import * as Path from "effect/Path"
 import * as Predicate from "effect/Predicate"
+import * as Ref from "effect/Ref"
 import * as Schedule from "effect/Schedule"
 import { FetchHttpClient, HttpClient } from "effect/http"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
@@ -220,6 +221,23 @@ const collect = (handle) =>
     }
   )
 
+/**
+ * Reads `stream` until a line matches `ready`, it ends, or `timeout` passes, and returns every line read either
+ * way: `Ready`, `Exited` or `TimedOut`. Each line is recorded as it arrives, so a timeout keeps what came before it.
+ */
+export const waitForReady = Effect.fn("NpxSmoke.waitForReady")(function* (stream, ready, timeout) {
+  const read = yield* Ref.make([])
+  const finished = yield* stream.pipe(
+    Stream.takeUntil((line) => ready.test(line)),
+    Stream.tap((line) => Ref.update(read, (lines) => [...lines, line])),
+    Stream.runDrain,
+    Effect.timeoutOption(timeout)
+  )
+  const lines = yield* Ref.get(read)
+  if (lines.some((line) => ready.test(line))) return { _tag: "Ready", lines }
+  return Option.isNone(finished) ? { _tag: "TimedOut", lines } : { _tag: "Exited", lines }
+})
+
 /** Runs one command to completion in `cwd` with only PATH and `env`; fails with its output when it exits non-zero. */
 const runToEnd = Effect.fn("NpxSmoke.runToEnd")(function* (command, args, cwd, env) {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
@@ -288,18 +306,16 @@ const runCase = Effect.fn("NpxSmoke.runCase")(function* (smokeCase, project) {
     ),
     (handle) => handle.kill().pipe(Effect.ignore)
   )
-  const seen = yield* Stream.merge(lines(child.stdout), lines(child.stderr)).pipe(
-    Stream.takeUntil((line) => smokeCase.ready.test(line)),
-    Stream.runCollect,
-    Effect.timeoutOption("90 seconds")
+  const waited = yield* waitForReady(
+    Stream.merge(lines(child.stdout), lines(child.stderr)),
+    smokeCase.ready,
+    "90 seconds"
   )
-  const output = Option.getOrElse(seen, () => [])
-  if (!output.some((line) => smokeCase.ready.test(line))) {
-    const reason = Option.isNone(seen) ? "printed no ready line within 90 seconds" : "exited before its ready line"
-    return `${reason} (port ${port}):\n${output
-      .filter((line) => !line.startsWith("npm notice"))
-      .slice(-8)
-      .join("\n")}`
+  if (waited._tag !== "Ready") {
+    const reason =
+      waited._tag === "TimedOut" ? "printed no ready line within 90 seconds" : "exited before its ready line"
+    const shown = waited.lines.filter((line) => !line.startsWith("npm notice")).slice(-8)
+    return `${reason} (port ${port}):\n${shown.join("\n")}`
   }
   if (!smokeCase.serves) return undefined
   const client = yield* HttpClient.HttpClient

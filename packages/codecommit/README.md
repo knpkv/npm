@@ -54,8 +54,12 @@ CLI and TUI for AWS CodeCommit pull requests.
 ## Quick Start
 
 ```bash
-pnpx @knpkv/codecommit
+npx @knpkv/codecommit web --no-open   # browser UI on http://127.0.0.1:3000, prints a one-time link
+npx @knpkv/codecommit                 # terminal UI; needs Bun and an interactive terminal
 ```
+
+The browser UI runs on Node alone (24 or later) with nothing else running: no hub, no Bun. Without an AWS profile it starts with an
+empty queue and says what's missing.
 
 ## Installation
 

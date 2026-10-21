@@ -85,7 +85,7 @@
     "react-dom": "^19.3.0",
     "typescript": "npm:@typescript/typescript6@^6.0.2",
     "vitest": "catalog:",
-    "vite": "^8.3.2"
+    "vite": "^8.3.3"
   },
   "dependencies": {
     "@aws-sdk/credential-provider-sso": "^3.973.16",

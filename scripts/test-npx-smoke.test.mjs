@@ -6,6 +6,7 @@ import { NodeServices } from "@effect/platform-node"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as ManagedRuntime from "effect/ManagedRuntime"
+import * as Stream from "effect/Stream"
 import { parseDocument } from "yaml"
 
 import {
@@ -15,7 +16,8 @@ import {
   packIdentity,
   parseEnvFile,
   parseSmokeArguments,
-  smokeManifest
+  smokeManifest,
+  waitForReady
 } from "./test-npx-smoke.mjs"
 
 const packs = [
@@ -153,4 +155,19 @@ test("npm view: a served version is published, a missing one is not, anything el
     assert.match(result.reason, /@knpkv\/herdr-hub@0\.47\.0/u)
   }
   assert.equal(classifyNpmView({ ...ask, exitCode: 0, stdout: "0.46.0\n", stderr: "" })._tag, "Unknown")
+})
+
+// A hung app is the case that most needs its output: the lines read before the deadline stay in the report.
+test("waiting for the ready line keeps what was read, whether it was ready, exited or timed out", async () => {
+  const ready = /^listening$/u
+  const wait = (stream) => runtime.runPromise(waitForReady(stream, ready, "50 millis"))
+  assert.deepEqual(await wait(Stream.make("boot", "listening", "after")), {
+    _tag: "Ready",
+    lines: ["boot", "listening"]
+  })
+  assert.deepEqual(await wait(Stream.make("boot", "crash")), { _tag: "Exited", lines: ["boot", "crash"] })
+  assert.deepEqual(await wait(Stream.concat(Stream.make("boot", "stuck importing"), Stream.never)), {
+    _tag: "TimedOut",
+    lines: ["boot", "stuck importing"]
+  })
 })
