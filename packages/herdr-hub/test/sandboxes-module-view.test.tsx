@@ -662,4 +662,35 @@ describe("Sandboxes overview", { concurrent: false }, () => {
     expect(text(".sandboxes-page")).toContain("Sweep late, last ran 13:51 yesterday")
     expect(buttons().some((label) => /sweep/i.test(label ?? ""))).toBe(false)
   })
+
+  it("says the runs page is not here yet and links back to the pool", async () => {
+    if (root === null) {
+      const host = document.createElement("div")
+      document.body.append(host)
+      root = createRoot(host)
+    }
+    const module = makeSandboxesModuleViews({
+      reads: { overview: Effect.never },
+      writes: null,
+      owner: true,
+      timeZone: "UTC",
+      viewer: "agent-a"
+    })
+    await act(async () =>
+      root?.render(
+        <PortalProvider>
+          {module.pages.runs(new URLSearchParams({ id: "999999999990" }), {
+            active: true,
+            navigate: () => undefined,
+            closeSelection: () => undefined
+          })}
+        </PortalProvider>
+      )
+    )
+    expect(text(".sandboxes-page h1")).toBe("Sandboxes")
+    expect(text(".sandboxes-panel")).toContain("Run details aren’t on the hub yet.")
+    expect(document.querySelector<HTMLAnchorElement>(".sandboxes-panel a")?.getAttribute("href")).toBe(
+      "?#sandboxes/overview"
+    )
+  })
 })

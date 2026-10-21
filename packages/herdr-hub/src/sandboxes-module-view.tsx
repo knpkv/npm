@@ -835,6 +835,24 @@ const OverviewPage = ({
   )
 }
 
+/** `View run` lands here until the runs page ships; a blank module would read as broken. */
+const NotYetPage = (): ReactElement => (
+  <section className="sandboxes-page">
+    <header className="sandboxes-head">
+      <div className="sandboxes-title">
+        <h1>Sandboxes</h1>
+      </div>
+    </header>
+    <section className="sandboxes-panel">
+      <h2>Run details aren’t on the hub yet.</h2>
+      <p>Each account’s cleanup runs come in a later version. The pool shows each account’s current step.</p>
+      <a className="sandboxes-link" href={moduleHref(sandboxesModule, "overview")}>
+        Back to the pool
+      </a>
+    </section>
+  </section>
+)
+
 /**
  * Overview for the shell. `owner` is the hub's own node; `viewer` is that caller's login, matched against a
  * lease holder. `writes` is null until the hub can submit sandbox jobs from the browser.
@@ -864,7 +882,7 @@ export const makeSandboxesModuleViews = ({
         </TimesContext>
       ),
       account: () => null,
-      runs: () => null
+      runs: () => <NotYetPage />
     }
   }
 }
