@@ -1,6 +1,6 @@
 import { NodeServices } from "@effect/platform-node"
 import { expect, layer } from "@effect/vitest"
-import { Context, Deferred, Effect, Fiber, FileSystem, Layer, Path, Redacted, Ref } from "effect"
+import { Context, Deferred, Effect, Fiber, FileSystem, Layer, Path, Redacted, Ref, Result } from "effect"
 import { HttpClient, HttpClientResponse } from "effect/http"
 import { TestClock } from "effect/testing"
 import * as NodeFs from "node:fs"
@@ -447,9 +447,13 @@ layer(Layer.merge(NodeServices.layer, stalledProfile))("profile deadline", (it) 
       yield* Deferred.await(stall.started)
       // The fast profile needs no clock, but its provider reads take real time. Moving the clock before it
       // is done would expire it too, so wait until its slot is free. Then the others miss their deadlines.
-      yield* Deferred.await(stall.freed)
-      // The probe is only a signal while three profiles read at once. If the pool widens, it signs in
-      // at once, so this test has to change rather than race.
+      // The probe is only a signal while three profiles read at once. A narrower pool never frees a slot
+      // for it and a wider one signs it in at once; either way this test has to change rather than race.
+      const narrowed = "d-probe never signed in: profile read concurrency is no longer 3"
+      const freed = yield* TestClock.withLive(Deferred.await(stall.freed).pipe(Effect.timeout("10 seconds"))).pipe(
+        Effect.result
+      )
+      expect(Result.isSuccess(freed), narrowed).toBe(true)
       expect(
         yield* Ref.get(stall.probeAfterFast),
         "d-probe signed in before b-fast finished: profile read concurrency is no longer 3"
