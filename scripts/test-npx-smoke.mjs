@@ -38,7 +38,8 @@ class SmokeFailed extends Data.TaggedError("SmokeFailed") {}
 /**
  * Each case: the package that owns the executable, its bin name, the arguments, a line only the loaded program
  * prints, and when it serves, the port it was told to use. `prepare` runs first in the same HOME and returns
- * environment to add (herdr-monitor's keys).
+ * environment to add (herdr-monitor's keys). `port` pins a server that has no port setting (hostd's loopback
+ * hub); cases run one at a time, so a fixed port is free. `bodyIncludes` is text the served page must contain.
  */
 export const npxSmokeCases = [
   {
@@ -89,14 +90,16 @@ export const npxSmokeCases = [
     // The server answers 403 to a Host other than MONITOR_ORIGIN's, so a non-default port moves both.
     env: ({ port }) => ({ MONITOR_PORT: String(port), MONITOR_ORIGIN: `http://127.0.0.1:${port}` })
   },
-  // hostd needs a fleet configuration to serve. Without one it stops in its configuration loader, which runs
-  // only after every module it imports has loaded: published 0.45.0 never got there, it crashed on an import.
+  // Without a fleet configuration hostd runs standalone: the super-app on its fixed loopback port. Reaching the
+  // ready line also proves every module it imports loaded, which published 0.45.0 never did.
   {
     owner: "@knpkv/herdr-hub",
     bin: "hostd",
     args: [],
-    ready: /FleetValidationError/,
-    serves: false
+    ready: /running standalone on http:\/\/127\.0\.0\.1:4778\//,
+    serves: true,
+    port: 4778,
+    bodyIncludes: "fleet-dashboard-data"
   }
 ]
 
@@ -280,7 +283,7 @@ const runCase = Effect.fn("NpxSmoke.runCase")(function* (smokeCase, project) {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
   const searchPath = yield* Config.String("PATH")
   const home = yield* fs.makeTempDirectoryScoped({ prefix: `npx-smoke-${smokeCase.bin}-` })
-  const port = yield* freePort
+  const port = smokeCase.port ?? (yield* freePort)
   const base = {
     HOME: home,
     XDG_CONFIG_HOME: path.join(home, ".config"),
@@ -319,12 +322,15 @@ const runCase = Effect.fn("NpxSmoke.runCase")(function* (smokeCase, project) {
   }
   if (!smokeCase.serves) return undefined
   const client = yield* HttpClient.HttpClient
-  const status = yield* client.get(`http://127.0.0.1:${port}/`).pipe(
-    Effect.map((response) => response.status),
+  const answer = yield* client.get(`http://127.0.0.1:${port}/`).pipe(
+    Effect.flatMap((response) => Effect.map(response.text, (body) => ({ status: response.status, body }))),
     Effect.retry({ schedule: Schedule.spaced(Duration.millis(500)), times: 20 }),
-    Effect.orElseSucceed(() => 0)
+    Effect.orElseSucceed(() => ({ status: 0, body: "" }))
   )
-  return status === 200 ? undefined : `answered HTTP ${status} on port ${port} instead of 200`
+  if (answer.status !== 200) return `answered HTTP ${answer.status} on port ${port} instead of 200`
+  return smokeCase.bodyIncludes === undefined || answer.body.includes(smokeCase.bodyIncludes)
+    ? undefined
+    : `answered 200 on port ${port}, but the page lacks ${JSON.stringify(smokeCase.bodyIncludes)}`
 })
 
 const program = Effect.gen(function* () {
