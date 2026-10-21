@@ -1,5 +1,11 @@
 # @knpkv/sandbox-pool
 
+## 0.4.0
+
+### Minor Changes
+
+- [#1036](https://github.com/knpkv/npm/pull/1036) [`f81d38a`](https://github.com/knpkv/npm/commit/f81d38a491b72e33878d454e0b33baa258bc2eb0) Thanks [@konopkov](https://github.com/konopkov)! - A leased card now carries `startedAt`, and an available card carries `lastResetAt` (null when the account was never reset), so a view can show the 24-hour cap and the longest-idle account. `leaseDuration` and `leaseCap` are exported from `@knpkv/sandbox-pool/host`.
+
 ## 0.3.1
 
 ### Patch Changes

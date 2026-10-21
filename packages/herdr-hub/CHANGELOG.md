@@ -2,6 +2,25 @@
 
 Released as `@knpkv/herdr-approvals` up to 0.18.0; the headings below are that package's history.
 
+## 0.48.0
+
+### Minor Changes
+
+- [#1048](https://github.com/knpkv/npm/pull/1048) [`4c214b7`](https://github.com/knpkv/npm/commit/4c214b749c52cf37087a5b68e8e7269192def46c) Thanks [@konopkov](https://github.com/konopkov)! - hostd starts without a fleet configuration. When no file exists at the configuration path, it runs as a standalone local hub: fleet off, the super-app on `http://127.0.0.1:4778/`, the work listener on 127.0.0.1:4777, no tailnet, TLS or push. State lives in `$XDG_STATE_HOME/fleet`, else `$HOME/.local/state/fleet`, and the host is named from `HOSTNAME`. It prints one stderr line naming the path it looked for. An existing file that is unreadable, malformed or invalid still stops startup. `@knpkv/herdr-fleet` adds `standaloneDefaults`, `loadConfigurationOrStandalone`, `standaloneRefusedKinds` and `HostOperations.notSetUp`; a standalone computer refuses `nix.check`, `nix.apply` and `agent.delegate` before a job exists ("nix jobs are not set up on this computer", "agent delegation is not set up on this computer"). Only the default path falls back: an explicit `FLEET_CONFIG_PATH` with no file, or a dangling symlink at either path, still stops startup. A `lanWork` listener, when configured by a caller, still binds its own address on a standalone host. `HostDetails` (and so `HostStatus`) has nullable `repository`, `branch` and `revision`: a standalone computer has no fleet repository, reports none without running git, and the dashboard shows "No repository".
+
+- [#1036](https://github.com/knpkv/npm/pull/1036) [`f81d38a`](https://github.com/knpkv/npm/commit/f81d38a491b72e33878d454e0b33baa258bc2eb0) Thanks [@konopkov](https://github.com/konopkov)! - Add the Sandboxes overview page at `#sandboxes/overview`, between Host resources and Stacks. It shows the pool's cards in attention order with holder, time left and the 24-hour cap, cleanup steps, quarantine blockers, the last sweep, and lease, extend and release sheets. A failed read is one panel with Read again; a later failed read keeps the cards marked last known. The row appears only on the hub that serves the pool, read from the new `approvalApp.sandboxesEnabled` snapshot field. Until the hub can submit sandbox jobs, every viewer sees the pool read-only and the sheets point to the CLI.
+
+- [#1051](https://github.com/knpkv/npm/pull/1051) [`c47f7aa`](https://github.com/knpkv/npm/commit/c47f7aa9bf961c04e6693d57cf860da7bec055e9) Thanks [@konopkov](https://github.com/konopkov)! - The Sandboxes page can lease, extend and release for the pool owner. `GET /v1/modules/sandboxes/caller` says who is reading and whether that is the hub's own node. `POST /v1/modules/sandboxes/jobs` takes `{ _tag: "Lease" }`, `{ _tag: "Extend", accountId }` or `{ _tag: "Release", accountId }` and submits the existing `sandbox.lease`, `sandbox.extend` or `sandbox.release` Fleet job as the caller. It answers 202 with the job id, 403 for any node but the hub's own, 409 when Fleet refuses the job, and 503 where the pool is not served. Like every module write, it requires the page's own origin. Every other viewer still sees the page read-only.
+
+### Patch Changes
+
+- Updated dependencies [[`4c214b7`](https://github.com/knpkv/npm/commit/4c214b749c52cf37087a5b68e8e7269192def46c), [`f81d38a`](https://github.com/knpkv/npm/commit/f81d38a491b72e33878d454e0b33baa258bc2eb0)]:
+  - @knpkv/herdr-fleet@0.17.0
+  - @knpkv/sandbox-pool@0.4.0
+  - @knpkv/herdr-connect@0.29.8
+  - @knpkv/herdr-coordinator@0.4.9
+  - @knpkv/herdr-work@0.12.10
+
 ## 0.47.0
 
 ### Minor Changes
