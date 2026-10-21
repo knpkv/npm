@@ -484,18 +484,23 @@ export const makeHostOperations = Effect.fn("HostOperations.make")(function*(
     }
   })
 
-  const runPayload = (payload: CoreJobPayload, workerStarted: WorkerStarted, jobId: string) => {
-    // Submission already refuses these; a job recovered from an older store must not run them either.
-    if (isStandaloneRefusedKind(payload.kind) && notSetUp.has(payload.kind)) {
-      return Effect.fail(
+  // Submission already refuses these; a job recovered from an older store must not run them either, on
+  // any path that reaches a command (the job runner and coordinator chat alike).
+  const refuseNotSetUp = (kind: CoreJobPayload["kind"]) =>
+    isStandaloneRefusedKind(kind) && notSetUp.has(kind)
+      ? Effect.fail(
         new FleetOperationError({
-          cause: payload.kind,
-          detail: notSetUpDetail(payload.kind),
+          cause: kind,
+          detail: notSetUpDetail(kind),
           disposition: "rejected",
-          operation: payload.kind
+          operation: kind
         })
       )
-    }
+      : null
+
+  const runPayload = (payload: CoreJobPayload, workerStarted: WorkerStarted, jobId: string) => {
+    const refused = refuseNotSetUp(payload.kind)
+    if (refused !== null) return refused
     switch (payload.kind) {
       case "nix.check":
         return runCommand("nix.check", config.checkCommand, "tail")
@@ -579,7 +584,7 @@ export const makeHostOperations = Effect.fn("HostOperations.make")(function*(
     workerStarted: WorkerStarted,
     jobId: string
   ) =>
-    runCoordinatorCommand(
+    refuseNotSetUp(payload.kind) ?? runCoordinatorCommand(
       "agent.delegate.chat",
       [
         ...config.coordinatorCommand,
