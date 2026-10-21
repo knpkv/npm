@@ -466,6 +466,10 @@ export const makeHostOperations = Effect.fn("HostOperations.make")(function*(
   )
 
   const inspect = Effect.fn("HostOperations.inspect")(function*() {
+    // A standalone computer has no fleet repository: say so instead of asking git about HOME.
+    if (options.standalone === true) {
+      return { applyConfigured: false, branch: null, dirty: false, repository: null, revision: null }
+    }
     const { branch, revision, status } = yield* Effect.all({
       branch: runCommand("git.branch", ["git", "branch", "--show-current"]),
       revision: runCommand("git.revision", ["git", "rev-parse", "HEAD"]),
