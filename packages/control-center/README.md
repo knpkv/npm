@@ -4,6 +4,18 @@ Control Center is a local, human- and agent-oriented delivery application. It co
 
 This package is under active development, and its public API remains subject to change before `1.0.0`.
 
+## Run it on its own
+
+```sh
+npx @knpkv/control-center serve   # prints a pairing code, listens on http://127.0.0.1:4173
+npx @knpkv/control-center         # the same, and opens the browser
+npx @knpkv/control-center --help
+```
+
+It runs on Node 26 with nothing else running: no hub, no AWS profile, no Atlassian connection. It starts without
+them. Pair at `/pair` with the printed code. Data lives in
+the data root described under [Run the application](#run-the-application); `CONTROL_CENTER_DATA_ROOT` picks it.
+
 ## Development
 
 Node.js 26 or newer and the repository-pinned pnpm version are required.
@@ -110,7 +122,9 @@ pnpm --filter @knpkv/control-center build
 pnpm --filter @knpkv/control-center start serve
 ```
 
-`control-center serve` starts the foreground server without opening a browser. Its first run prints a ten-minute, single-use pairing code and listens at `http://127.0.0.1:4173`. Durable data, content, and owner-only secrets live under `.control-center` by default; set `CONTROL_CENTER_DATA_ROOT` to choose another owner-controlled directory.
+`control-center serve` starts the foreground server without opening a browser. Its first run prints a ten-minute, single-use pairing code and listens at `http://127.0.0.1:4173`. Durable data, content, and owner-only secrets live under `$XDG_DATA_HOME/control-center` by default, or `~/.local/share/control-center` when `XDG_DATA_HOME` is unset or relative, so every start finds the same data whatever directory it runs from. Set `CONTROL_CENTER_DATA_ROOT` to choose another owner-controlled directory.
+
+Earlier releases kept the data root at `.control-center` in the directory the command ran from. When that directory still exists and `CONTROL_CENTER_DATA_ROOT` is unset, Control Center prints where it is and leaves it alone. While the new default does not exist yet, it also refuses to start (exit 1, nothing created), so an upgrade never opens an empty app beside your data; `restore` is allowed, since it creates the new default from a backup. To start fresh instead, set `CONTROL_CENTER_DATA_ROOT` to the new default. Without `CONTROL_CENTER_DATA_ROOT`, the CLI needs `HOME` (`USERPROFILE` on Windows). Keep using it with `CONTROL_CENTER_DATA_ROOT=<that path>`, or move it with `backup` and `restore` (below): a data root is bound to its directory name, so renaming or moving it by hand breaks it.
 
 Control Center's durable auth is an explicit boundary from CodeCommit web's
 process-scoped owner session. Its `Auth` service keeps secret values redacted

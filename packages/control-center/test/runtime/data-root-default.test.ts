@@ -1,0 +1,139 @@
+import { NodeServices } from "@effect/platform-node"
+import { assert, describe, it } from "@effect/vitest"
+import { Effect, Option, Path } from "effect"
+
+import {
+  chooseControlCenterDataRoot,
+  ControlCenterHomeUnset,
+  legacyDataRootAction,
+  legacyDataRootCandidate,
+  legacyDataRootNotice
+} from "../../src/server/dataRootDefault.js"
+
+const unset = {
+  configured: Option.none<string>(),
+  xdgDataHome: Option.none<string>(),
+  home: Option.some("/home/owner")
+}
+
+describe("Control Center default data root", () => {
+  it.layer(NodeServices.layer)((it) => {
+    it.effect("uses CONTROL_CENTER_DATA_ROOT exactly as given, whatever else is set", () =>
+      Effect.gen(function*() {
+        const choice = yield* chooseControlCenterDataRoot({
+          configured: Option.some("relative/root"),
+          xdgDataHome: Option.some("/xdg/data"),
+          home: Option.none()
+        })
+        assert.deepStrictEqual(choice, { _tag: "Configured", dataRoot: "relative/root" })
+      }))
+
+    it.effect("defaults to $XDG_DATA_HOME/control-center, then ~/.local/share/control-center", () =>
+      Effect.gen(function*() {
+        assert.deepStrictEqual(
+          yield* chooseControlCenterDataRoot({ ...unset, xdgDataHome: Option.some("/xdg/data") }),
+          { _tag: "Default", dataRoot: "/xdg/data/control-center" }
+        )
+        assert.deepStrictEqual(yield* chooseControlCenterDataRoot(unset), {
+          _tag: "Default",
+          dataRoot: "/home/owner/.local/share/control-center"
+        })
+      }))
+
+    // The XDG base directory spec says a relative or empty value is invalid and must be ignored.
+    it.effect("ignores a relative or empty XDG_DATA_HOME", () =>
+      Effect.gen(function*() {
+        for (const xdgDataHome of ["", "relative/data"]) {
+          assert.deepStrictEqual(
+            yield* chooseControlCenterDataRoot({ ...unset, xdgDataHome: Option.some(xdgDataHome) }),
+            { _tag: "Default", dataRoot: "/home/owner/.local/share/control-center" },
+            xdgDataHome
+          )
+        }
+      }))
+
+    it.effect("fails by name when no override is set and HOME is unset or relative", () =>
+      Effect.gen(function*() {
+        for (const home of [Option.none<string>(), Option.some(""), Option.some("relative")]) {
+          const error = yield* chooseControlCenterDataRoot({ ...unset, home }).pipe(Effect.flip)
+          assert.instanceOf(error, ControlCenterHomeUnset)
+        }
+      }))
+
+    // Before this default, the data root was `.control-center` in whatever directory the CLI ran from.
+    it.effect("names the old working-directory root only when the default is in use", () =>
+      Effect.gen(function*() {
+        const path = yield* Path.Path
+        const legacy = path.resolve(".control-center")
+        assert.deepStrictEqual(
+          yield* legacyDataRootCandidate({ _tag: "Default", dataRoot: "/home/owner/.local/share/control-center" }),
+          Option.some(legacy)
+        )
+        assert.deepStrictEqual(
+          yield* legacyDataRootCandidate({ _tag: "Configured", dataRoot: ".control-center" }),
+          Option.none()
+        )
+        // A default that already is the old location (HOME is the working directory's parent) is not old.
+        assert.deepStrictEqual(yield* legacyDataRootCandidate({ _tag: "Default", dataRoot: legacy }), Option.none())
+      }))
+  })
+
+  // An upgrade must not quietly start an empty app beside the owner's data: with the old root on disk and no
+  // default root yet, the CLI refuses and creates nothing. `restore` is the move itself, so it may create it.
+  it("refuses to start fresh while only the old root exists, and only notes it otherwise", () => {
+    const legacyRoot = Option.some("/work/.control-center")
+    const base = { legacyRoot, legacyExists: true, defaultExists: false, creatingDefault: false }
+    assert.deepStrictEqual(legacyDataRootAction(base), { _tag: "Refuse", legacyRoot: "/work/.control-center" })
+    assert.deepStrictEqual(legacyDataRootAction({ ...base, defaultExists: true }), {
+      _tag: "Notice",
+      legacyRoot: "/work/.control-center"
+    })
+    assert.deepStrictEqual(legacyDataRootAction({ ...base, creatingDefault: true }), {
+      _tag: "Notice",
+      legacyRoot: "/work/.control-center"
+    })
+    assert.deepStrictEqual(legacyDataRootAction({ ...base, legacyExists: false }), { _tag: "None" })
+    assert.deepStrictEqual(legacyDataRootAction({ ...base, legacyRoot: Option.none() }), { _tag: "None" })
+  })
+
+  it("says it did not start, and how to start fresh, when it refuses", () => {
+    const paths = { legacyRoot: "/work/.control-center", dataRoot: "/home/owner/.local/share/control-center" }
+    const refused = legacyDataRootNotice({ ...paths, refused: true })
+    assert.include(refused, "Control Center did not start")
+    assert.include(refused, "CONTROL_CENTER_DATA_ROOT=/home/owner/.local/share/control-center")
+    assert.notInclude(legacyDataRootNotice({ ...paths, refused: false }), "did not start")
+  })
+
+  // The commands are copied into a shell, so a path with spaces or quotes must survive that; a plain one stays bare.
+  it("quotes paths in the suggested commands only when the shell needs it", () => {
+    const notice = legacyDataRootNotice({
+      legacyRoot: "/work/it's here/.control-center",
+      dataRoot: "/home/owner/.local/share/control-center",
+      refused: true
+    })
+    assert.include(notice, `CONTROL_CENTER_DATA_ROOT='/work/it'\\''s here/.control-center' control-center.`)
+    assert.include(
+      notice,
+      `CONTROL_CENTER_DATA_ROOT='/work/it'\\''s here/.control-center' control-center backup <archive>`
+    )
+    assert.include(notice, "CONTROL_CENTER_DATA_ROOT=/home/owner/.local/share/control-center.")
+    // The prose keeps the path as it is.
+    assert.include(notice, "found data at /work/it's here/.control-center, its old location")
+  })
+
+  // A plain `mv` would break the root: it is a claim bound to its basename. The notice offers the two moves
+  // that keep it valid, and never moves anything itself.
+  it("tells the owner where the old root is and how to keep or move it", () => {
+    const notice = legacyDataRootNotice({
+      legacyRoot: "/work/.control-center",
+      dataRoot: "/home/owner/.local/share/control-center",
+      refused: false
+    })
+    assert.include(notice, "/work/.control-center")
+    assert.include(notice, "/home/owner/.local/share/control-center")
+    assert.include(notice, "CONTROL_CENTER_DATA_ROOT=/work/.control-center control-center")
+    assert.include(notice, "CONTROL_CENTER_DATA_ROOT=/work/.control-center control-center backup <archive>")
+    assert.include(notice, "control-center restore <archive>")
+    assert.notInclude(notice, "mv ")
+  })
+})

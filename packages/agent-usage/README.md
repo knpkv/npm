@@ -15,6 +15,16 @@ every model request in a private SQLite store, polls Claude's limits, and serves
 - a **booking table** with the token breakdown; clicking a row draws only that booking
 - an **ingest status** line: files read, lines skipped, paths it could not read
 
+## Run it on its own
+
+```sh
+npx @knpkv/agent-usage            # signs in, starting the server on http://127.0.0.1:3112 when needed
+npx @knpkv/agent-usage serve      # prints the sign-in URL, runs in the foreground
+```
+
+It runs on Node 26 with nothing else running. It reads Claude and Codex usage from this machine and starts
+whether or not either is installed.
+
 ## Running it
 
 Installed from npm, the binary is `agent-usage` (`agent-usage`, `agent-usage serve`, `agent-usage login`,
