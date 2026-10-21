@@ -2,7 +2,7 @@ import { NodeServices } from "@effect/platform-node"
 import { describe, expect, layer as testLayer } from "@effect/vitest"
 import { makeDeterministicLanguageModel } from "@knpkv/ai-runtime"
 import { defineContract, implement } from "@knpkv/capability"
-import { Context, Deferred, Effect, Fiber, FileSystem, Layer, Path, Predicate, Schedule, Schema, Stream } from "effect"
+import { Context, Deferred, Effect, Fiber, FileSystem, Layer, Option, Path, Predicate, Schema, Stream } from "effect"
 import { AiError } from "effect/ai"
 import type { LanguageModel } from "effect/ai"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
@@ -10,6 +10,7 @@ import { DatabaseSync } from "node:sqlite"
 import { layer, make, ObjectRef, objectRefKey, register, RelayBackendUnavailable, RelayHarness } from "../src/index.js"
 import type { RelayBackend, RelayEvent } from "../src/index.js"
 import { relayModels, relayProvider } from "../src/piProvider.js"
+import { commentWritten } from "./fixtures/crash-signal.js"
 
 const pr = ObjectRef.make({ product: "codecommit", kind: "pull-request", id: "acct/repo/42" })
 
@@ -463,10 +464,16 @@ testLayer(NodeServices.layer, { excludeTestServices: true })("relay", (it) => {
           const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
 
           const running = yield* spawner.spawn(ChildProcess.make(tsx, [child, "run", store, marker]))
-          yield* fs.exists(marker).pipe(
-            Effect.repeat({ until: (exists) => exists, schedule: Schedule.spaced("50 millis") }),
+          // The marker file exists before its bytes do, so wait for the child to say the write is whole.
+          const written = yield* running.stdout.pipe(
+            Stream.decodeText(),
+            Stream.splitLines,
+            Stream.filter((line) => line === commentWritten),
+            Stream.runHead,
             Effect.timeout("20 seconds")
           )
+          // Output that ends without the line means the child died before writing: say so, don't kill blind.
+          expect(Option.isSome(written), "crash child exited before it wrote the comment").toBe(true)
           yield* running.kill({ killSignal: "SIGKILL" })
           yield* running.exitCode.pipe(Effect.ignore)
 
