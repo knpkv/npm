@@ -1,6 +1,6 @@
 {
   "name": "@knpkv/sandbox-pool",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "Lease model and reset job for a pool of ephemeral AWS sandbox accounts",
   "license": "MIT",
   "repository": {

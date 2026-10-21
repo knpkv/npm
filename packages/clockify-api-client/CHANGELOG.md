@@ -1,5 +1,13 @@
 # @knpkv/clockify-api-client
 
+## 5.1.1
+
+### Patch Changes
+
+- [#1057](https://github.com/knpkv/npm/pull/1057) [`c85d0d2`](https://github.com/knpkv/npm/commit/c85d0d2dda31d7c2fc200ee5623f0401f47e003f) Thanks [@knpkv-automation](https://github.com/apps/knpkv-automation)! - Update the generated Clockify API client from the latest OpenAPI specification.
+
+  Release: patch (no contract change).
+
 ## 5.1.0
 
 ### Minor Changes
