@@ -74,3 +74,27 @@ test("the release token is checked before any step that needs it", () => {
     assert.equal(step.with["github-token"], "${{ secrets.TOKEN_GITHUB }}", step.name)
   }
 })
+
+// herdr-hub 0.45.0 shipped against an alchemy-console that npm served without `./host`: every workspace check
+// passed because the workspace links its own copy. Before publishing, the release runs each app from the tarballs
+// it is about to publish with npm's copies of everything already published, which is what users then install.
+test("the release runs each app against npm's published dependencies before it can publish", () => {
+  const gate = stepIndex("Run each app as npm will serve it")
+  const prepare = stepIndex("Prepare versions ready to publish")
+  assert.ok(gate > prepare, "after the step that decides what publishes")
+  for (const step of steps.filter(changesetsAction)) assert.ok(gate < steps.indexOf(step), step.name)
+
+  // Exactly when a publish follows: the publish-first path, or the usual step with nothing pending to version.
+  assert.equal(
+    steps[gate].if,
+    "steps.released.outputs.outstanding == 'true' || (steps.released.outputs.pending != 'true' && steps.released.outputs.propagating != 'true')"
+  )
+  assert.match(steps[gate].run, /pnpm build/u)
+  assert.match(steps[gate].run, /pnpm -r --filter "\.\/packages\/\*" pack --pack-destination "\$RUNNER_TEMP\/packs"/u)
+  assert.match(
+    steps[gate].run,
+    /node scripts\/test-npx-smoke\.mjs --tarballs "\$RUNNER_TEMP\/packs" --registry-for-published --install-through sfw/u
+  )
+  // It runs workspace code, so it gets no credentials.
+  assert.doesNotMatch(JSON.stringify(steps[gate]), /secrets\./u)
+})
