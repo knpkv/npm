@@ -96,6 +96,61 @@ describe("standalone fallback", () => {
       }).pipe(Effect.scoped))
   })
 
+  it.layer(NodeServices.layer)((it) => {
+    // An explicitly named file is the operator's: missing means not written yet, never "run standalone".
+    it.effect("keeps failing when an explicitly configured path has no file", () =>
+      Effect.gen(function*() {
+        const fileSystem = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "fleet-explicit-" })
+        const file = path.join(directory, "config.json")
+        const error = yield* loadConfigurationOrStandalone(file, { standaloneWhenMissing: false }).pipe(
+          withEnv({ HOME: "/home/owner" }),
+          Effect.flip
+        )
+        expect(error).toMatchObject({
+          _tag: "FleetValidationError",
+          detail: `no fleet configuration at ${file}; create it, or set FLEET_CONFIG_PATH to an existing file`
+        })
+      }).pipe(Effect.scoped))
+
+    // A managed configuration is often a symlink that a switch briefly leaves dangling: fail and retry,
+    // never come up as a hub without the fleet.
+    it.effect("fails on a dangling symlink at the default path", () =>
+      Effect.gen(function*() {
+        const fileSystem = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "fleet-dangling-" })
+        const file = path.join(directory, "config.json")
+        const target = path.join(directory, "generation", "config.json")
+        yield* fileSystem.symlink(target, file)
+        const error = yield* loadConfigurationOrStandalone(file).pipe(
+          withEnv({ HOME: "/home/owner" }),
+          Effect.flip
+        )
+        expect(error).toMatchObject({
+          _tag: "FleetValidationError",
+          detail: expect.stringContaining(`${file} exists but does not resolve`)
+        })
+      }).pipe(Effect.scoped))
+
+    // Present but unreadable is the operator's entry too. A directory stays unreadable as a file even
+    // for root, unlike a mode-000 file, so this holds on any runner.
+    it.effect("fails on an entry it cannot read instead of running standalone", () =>
+      Effect.gen(function*() {
+        const fileSystem = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "fleet-unreadable-" })
+        const file = path.join(directory, "config.json")
+        yield* fileSystem.makeDirectory(file)
+        const error = yield* loadConfigurationOrStandalone(file).pipe(
+          withEnv({ HOME: "/home/owner" }),
+          Effect.flip
+        )
+        expect(error._tag).toBe("FleetValidationError")
+      }).pipe(Effect.scoped))
+  })
+
   it.effect("derives the state directory from XDG_STATE_HOME, else HOME", () =>
     Effect.gen(function*() {
       expect(

@@ -12,7 +12,7 @@ import { readCodeHost } from "./code-module.js"
 import type { HostdOperationsCompositionError } from "./errors.js"
 import { startHttpServer } from "./http.js"
 import { copyTaskWorkRegistration } from "./internal/agent-task-work-source.js"
-import { fleetConfigPath } from "./internal/config-path.js"
+import { fleetConfigSource } from "./internal/config-path.js"
 import { hasOutstandingWorkJob, noJobStore } from "./internal/outstanding-work-job.js"
 import { standaloneNotice } from "./internal/standalone-notice.js"
 import { noStartedWorkerStore, startedWorker } from "./internal/started-worker.js"
@@ -89,7 +89,9 @@ export const makeHostdOperations = Effect.fn("Hostd.makeOperations")(function*(
     startedWorker: jobs === undefined ? noStartedWorkerStore : (jobId) => startedWorker(jobs, jobId)
   })
   yield* copyTaskWorkRegistration(defaultOperations.listAgents, composed.listAgents)
-  return composed
+  // The host's refusals are not the composer's to drop: a standalone host refuses them however its
+  // operations were built.
+  return { ...composed, notSetUp: defaultOperations.notSetUp }
 })
 
 /**
@@ -101,9 +103,10 @@ export const makeHostdProgram = Effect.fn("Hostd.makeProgram")(function*(
   options: HostdProgramOptions = {}
 ) {
   const paths = yield* Path.Path
-  const configPath = yield* fleetConfigPath
-  // No file is a computer outside any fleet: run as its own local hub. A broken file still fails.
-  const loaded = yield* loadConfigurationOrStandalone(configPath)
+  const source = yield* fleetConfigSource
+  // Nothing at the default path is a computer outside any fleet: run as its own local hub. An explicit
+  // path, a dangling symlink or a broken file still fails.
+  const loaded = yield* loadConfigurationOrStandalone(source.path, { standaloneWhenMissing: !source.explicit })
   const config = loaded.config
   const codeHost = yield* readCodeHost
   const stacksHost = yield* readStacksHost

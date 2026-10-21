@@ -1,4 +1,4 @@
-import { Config, Effect, FileSystem, Option, Schema } from "effect"
+import { Config, Effect, FileSystem, Option, Path, Schema } from "effect"
 import { FleetValidationError } from "./errors.js"
 import { HostConfiguration } from "./model.js"
 
@@ -91,17 +91,37 @@ export type LoadedConfiguration =
   | { readonly _tag: "Standalone"; readonly path: string; readonly config: HostConfiguration }
 
 /**
- * The fleet configuration at `path`, or the standalone defaults when no file exists there. Only a
- * missing file falls back: an unreadable, malformed or invalid file is the operator's and still fails.
+ * The fleet configuration at `path`, or the standalone defaults when nothing exists there. Only an
+ * absent entry falls back, and only with `standaloneWhenMissing` (hostd passes false for an explicit
+ * `FLEET_CONFIG_PATH`). An entry that does not resolve, such as a managed symlink a switch briefly left
+ * dangling, fails; an unreadable, malformed or invalid file is the operator's and still fails.
  */
 export const loadConfigurationOrStandalone = Effect.fn("FleetConfiguration.loadOrStandalone")(
-  function*(path: string) {
+  function*(path: string, options: { readonly standaloneWhenMissing?: boolean } = {}) {
     const fileSystem = yield* FileSystem.FileSystem
-    const exists = yield* fileSystem.exists(path).pipe(
-      Effect.mapError((cause) => new FleetValidationError({ detail: `cannot read ${path}: ${String(cause)}` }))
+    const paths = yield* Path.Path
+    const directory = paths.dirname(path)
+    // The parent's listing names the entry without following it, so a dangling symlink still counts.
+    const listed = yield* fileSystem.readDirectory(directory).pipe(
+      Effect.map((names) => names.includes(paths.basename(path))),
+      Effect.catch((error) =>
+        error.reason._tag === "NotFound"
+          ? Effect.succeed(false)
+          : Effect.fail(new FleetValidationError({ detail: `cannot read ${directory}: ${String(error)}` }))
+      )
     )
-    if (!exists) {
+    if (!listed && options.standaloneWhenMissing !== false) {
       return { _tag: "Standalone", path, config: yield* standaloneDefaults } satisfies LoadedConfiguration
+    }
+    if (listed) {
+      const resolves = yield* fileSystem.exists(path).pipe(
+        Effect.mapError((error) => new FleetValidationError({ detail: `cannot read ${path}: ${String(error)}` }))
+      )
+      if (!resolves) {
+        return yield* new FleetValidationError({
+          detail: `fleet configuration at ${path} exists but does not resolve; is it a symlink whose target is missing?`
+        })
+      }
     }
     return { _tag: "File", path, config: yield* loadConfiguration(path) } satisfies LoadedConfiguration
   }
