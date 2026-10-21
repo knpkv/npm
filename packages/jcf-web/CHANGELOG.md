@@ -1,5 +1,11 @@
 # @knpkv/jcf-web
 
+## 0.10.6
+
+### Patch Changes
+
+- [#1041](https://github.com/knpkv/npm/pull/1041) [`6e6d029`](https://github.com/knpkv/npm/commit/6e6d029fd0979aca90815ab4a0a6d8bed5967887) Thanks [@konopkov](https://github.com/konopkov)! - READMEs open with "Run it on its own": the `npx` command, its port, and what it runs without. Packages with no executable say where they run instead. CodeCommit web no longer claims it needs Bun; only the terminal UI does.
+
 ## 0.10.5
 
 ### Patch Changes
