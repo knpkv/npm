@@ -74,3 +74,48 @@ test("the release token is checked before any step that needs it", () => {
     assert.equal(step.with["github-token"], "${{ secrets.TOKEN_GITHUB }}", step.name)
   }
 })
+
+// herdr-hub 0.45.0 shipped against an alchemy-console that npm served without `./host`: every workspace check
+// passed because the workspace links its own copy. Before publishing, the release runs each app from the tarballs
+// it is about to publish with npm's copies of everything already published, which is what users then install.
+test("the release runs each app against npm's published dependencies before it can publish", () => {
+  const gate = stepIndex("Run each app as npm will serve it")
+  const prepare = stepIndex("Prepare versions ready to publish")
+  assert.ok(gate > prepare, "after the step that decides what publishes")
+  for (const step of steps.filter(changesetsAction)) assert.ok(gate < steps.indexOf(step), step.name)
+
+  // Exactly when a publish follows: the publish-first path, or the usual step with nothing pending to version.
+  assert.equal(
+    steps[gate].if,
+    "steps.released.outputs.outstanding == 'true' || (steps.released.outputs.pending != 'true' && steps.released.outputs.propagating != 'true')"
+  )
+  assert.match(steps[gate].run, /pnpm build/u)
+  assert.match(steps[gate].run, /pnpm -r --filter "\.\/packages\/\*" pack --pack-destination "\$RUNNER_TEMP\/packs"/u)
+  assert.match(
+    steps[gate].run,
+    /node scripts\/test-npx-smoke\.mjs --tarballs "\$RUNNER_TEMP\/packs" --registry-for-published --install-through sfw/u
+  )
+  // It runs workspace code, so it gets no credentials.
+  assert.doesNotMatch(JSON.stringify(steps[gate]), /secrets\./u)
+})
+
+// The release job holds `id-token: write`, so its steps see the OIDC request variables. The gate step's npm install
+// runs third-party lifecycle scripts and starts every app; they stay unable to mint a token only because the smoke
+// script starts each child with a stated environment of PATH and HOME and nothing inherited.
+test("the release gate's children never inherit the job environment", async () => {
+  const source = await runtime.runPromise(
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem
+      return yield* fileSystem.readFileString(fileURLToPath(new URL("./test-npx-smoke.mjs", import.meta.url)))
+    })
+  )
+  const spawns = source.split("ChildProcess.make(").slice(1)
+  assert.ok(spawns.length >= 3, "the install, the npm view lookups and each app")
+  for (const spawn of spawns) assert.match(spawn.slice(0, 400), /extendEnv: false/u)
+  assert.doesNotMatch(source, /extendEnv: true/u)
+})
+
+// Build, pack, a cold install of seven apps through the firewall, up to seven ready waits, then both publish paths.
+test("the release job has room for the gate and the publish", () => {
+  assert.ok(parseDocument(workflowText).toJS().jobs.release["timeout-minutes"] >= 45)
+})
