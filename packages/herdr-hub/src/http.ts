@@ -199,7 +199,7 @@ import {
 import { connectModule, fleetHubModule, resourcesModule, usageModule } from "./module-contract.js"
 import type { NeedsYouCandidate, NeedsYouIssue, NeedsYouProviderResult } from "./module-needs-you.js"
 import * as ModuleServer from "./module-server.js"
-import type { ModuleRouteFailure, ServerModule } from "./module-server.js"
+import { ModuleRouteFailure, type ServerModule } from "./module-server.js"
 import { generateVapidKeys, makePushSender } from "./push-sender.js"
 import { validatePushEndpoint } from "./push-subscription.js"
 import { type ApprovalNotificationBatch, makePushWorker } from "./push-worker.js"
@@ -1887,7 +1887,20 @@ export const startHttpServer = async (
             }
             return ids
           }))
-        )
+        ),
+        // The module has checked same origin, the served pool and the hub's own node. Lease, extend and
+        // release need no approval, so a queued job starts like any other submission.
+        submit: (payload, actor) =>
+          service.submit({ payload }, actor, "authenticated_remote").pipe(
+            Effect.tap((record) => record.status === "queued" ? enqueueJob(record.id) : Effect.void),
+            Effect.map((record) => ({ jobId: record.id, status: record.status })),
+            Effect.mapError((error) =>
+              new ModuleRouteFailure({
+                status: error._tag === "FleetValidationError" ? 409 : 503,
+                code: error._tag === "FleetValidationError" ? "rejected" : "unavailable"
+              })
+            )
+          )
       }),
       makeCodeModule({
         host: config.host,

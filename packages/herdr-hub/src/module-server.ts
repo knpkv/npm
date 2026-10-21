@@ -28,7 +28,7 @@ export interface ModuleResponse {
 
 /** Safe route failures carry public copy only. Provider errors stay inside the module. */
 export class ModuleRouteFailure extends Schema.TaggedError<ModuleRouteFailure>()("ModuleRouteFailure", {
-  status: Schema.Literals([400, 404, 409, 500, 503]),
+  status: Schema.Literals([400, 403, 404, 409, 500, 503]),
   code: Schema.String
 }) {}
 

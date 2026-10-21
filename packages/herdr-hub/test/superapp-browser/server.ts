@@ -586,6 +586,12 @@ const program = Effect.gen(function*() {
       response.end(Schema.encodeSync(Schema.fromJsonString(DashboardSnapshot))(withoutSandboxes))
       return
     }
+    if (url.pathname === "/v1/modules/sandboxes/caller") {
+      // A tailnet viewer that is not the hub's own node: the page stays read-only.
+      response.writeHead(200, { "content-type": "application/json" })
+      response.end(JSON.stringify({ login: "viewer@example.test", owner: false }))
+      return
+    }
     if (url.pathname === "/v1/modules/sandboxes/overview") {
       response.writeHead(200, { "content-type": "application/json" })
       response.end(Schema.encodeSync(Schema.fromJsonString(SandboxesOverview))(sandboxesOverviewFixture(now)))

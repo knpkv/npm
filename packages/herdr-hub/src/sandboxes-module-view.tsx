@@ -5,18 +5,14 @@
  */
 import { leaseCap, leaseDuration, type SandboxCard, type SandboxesOverview } from "@knpkv/sandbox-pool/host"
 import { Button, Notice, Sheet, Skeleton, StateLabel, type RlyStateTone } from "@knpkv/rly/primitives"
-import { Clock, DateTime, Effect, Exit, Fiber, Result, Schedule, Schema } from "effect"
+import { Clock, DateTime, Effect, Exit, Fiber, Result, Schedule } from "effect"
 import { createContext, type ReactElement, type ReactNode, useContext, useEffect, useRef, useState } from "react"
 import { ShellIcon } from "./internal/shell-icon.js"
 import { moduleHref, type ModulePageMount, type ModuleViews, sandboxesModule } from "./modules.js"
-import { SandboxesClientError } from "./sandboxes-client.js"
+import { SandboxesClientError, SandboxesWriteFailed } from "./sandboxes-client.js"
+import type { SandboxesCaller } from "./sandboxes-contract.js"
 
-export { SandboxesClientError }
-
-/** A lease, extend or release job was not submitted. */
-export class SandboxesWriteFailed extends Schema.TaggedError<SandboxesWriteFailed>()("SandboxesWriteFailed", {
-  reason: Schema.Literals(["rejected", "network", "unauthorized"])
-}) {}
+export { SandboxesClientError, SandboxesWriteFailed }
 
 /** Owner writes. Each submits the existing Fleet job kind as the caller. */
 export interface SandboxesModuleWrites {
@@ -28,6 +24,8 @@ export interface SandboxesModuleWrites {
 /** Overview read. It must keep its identity across renders, or the page reads again on every render. */
 export interface SandboxesModuleReads {
   readonly overview: Effect.Effect<SandboxesOverview, SandboxesClientError>
+  /** Who is reading. Until it answers, or if it fails, the page shows no owner actions. */
+  readonly caller: Effect.Effect<SandboxesCaller, SandboxesClientError>
 }
 
 type Ready = Extract<SandboxesOverview, { readonly _tag: "Ready" }>
@@ -716,20 +714,34 @@ const notSetUpCopy = (where: "hub" | "host", host: string | null) =>
 const staleWords = (readAt: DateTime.Utc, now: DateTime.Utc): string =>
   `Stale, updated ${Math.max(1, Math.floor((millis(now) - millis(readAt)) / 60_000))}m ago`
 
+/** The caller, once read. A pending or failed read is a viewer with no login, so no lease is "yours". */
+const useCaller = (read: SandboxesModuleReads["caller"], active: boolean): SandboxesCaller => {
+  const [caller, setCaller] = useState<SandboxesCaller>({ login: "", owner: false })
+  useEffect(() => {
+    if (!active) return
+    const fiber = Effect.runFork(
+      Effect.exit(read).pipe(
+        Effect.flatMap((exit) => Effect.sync(() => (Exit.isSuccess(exit) ? setCaller(exit.value) : undefined)))
+      )
+    )
+    return () => {
+      Effect.runFork(Fiber.interrupt(fiber))
+    }
+  }, [read, active])
+  return caller
+}
+
 const OverviewPage = ({
   mount,
-  owner,
   reads,
-  viewer,
   writes
 }: {
   readonly mount: ModulePageMount
-  readonly owner: boolean
   readonly reads: SandboxesModuleReads
-  readonly viewer: string
   readonly writes: SandboxesModuleWrites | null
 }): ReactElement => {
   const times = useContext(TimesContext)
+  const { login: viewer, owner } = useCaller(reads.caller, mount.active)
   const { now, readAgain, view } = usePool(reads.overview, mount.active)
   const pool = view._tag === "Pool" ? view : null
   // A job runs after it is submitted, so the next read can still show the old card; say so for a minute.
@@ -740,7 +752,9 @@ const OverviewPage = ({
     readAgain(false)
   }
   const count = pool?.overview.sandboxes.length
-  const noneFree = pool === null ? null : noneFreeWords(times, pool.overview.sandboxes, pool.stale ? pool.readAt : now)
+  // A stale pool is shown as it was read, so its times count from the read, in the header and the notice alike.
+  const poolNow = pool !== null && pool.stale ? pool.readAt : now
+  const noneFree = pool === null ? null : noneFreeWords(times, pool.overview.sandboxes, poolNow)
   return (
     <section className="sandboxes-page">
       <header className="sandboxes-head">
@@ -754,7 +768,7 @@ const OverviewPage = ({
           </div>
         </div>
         {owner && pool !== null ? (
-          <LeaseAction done={reread} now={now} overview={pool.overview} writes={pool.stale ? null : writes} />
+          <LeaseAction done={reread} now={poolNow} overview={pool.overview} writes={pool.stale ? null : writes} />
         ) : null}
       </header>
       {submitted ? (
@@ -836,22 +850,18 @@ const OverviewPage = ({
 }
 
 /**
- * Overview for the shell. `owner` is the hub's own node; `viewer` is that caller's login, matched against a
- * lease holder. `writes` is null until the hub can submit sandbox jobs from the browser.
+ * Overview for the shell. `reads.caller` says whether the reader is the hub's own node (the owner) and gives
+ * their login, matched against a lease holder. `writes` is null where the hub cannot submit sandbox jobs.
  */
 export const makeSandboxesModuleViews = ({
-  owner,
   reads,
   timeZone,
-  viewer,
   writes
 }: {
-  readonly owner: boolean
   readonly reads: SandboxesModuleReads
   /** The viewer's IANA time zone; every clock time and day on the page is in it. */
   readonly timeZone: string
   readonly writes: SandboxesModuleWrites | null
-  readonly viewer: string
 }): ModuleViews<typeof sandboxesModule> => {
   const times = timesIn(timeZone)
   return {
@@ -860,7 +870,7 @@ export const makeSandboxesModuleViews = ({
     pages: {
       overview: (_search, mount) => (
         <TimesContext value={times}>
-          <OverviewPage mount={mount} owner={owner} reads={reads} viewer={viewer} writes={writes} />
+          <OverviewPage mount={mount} reads={reads} writes={writes} />
         </TimesContext>
       ),
       account: () => null,
