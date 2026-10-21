@@ -79,14 +79,14 @@ export const makeSandboxHostReads = (input: {
           accountId: sandbox.accountId,
           name: sandbox.name,
           label,
-          state: { _tag: "Available" }
+          state: { _tag: "Available", lastResetAt: state.lastResetAt }
         } satisfies SandboxCard
       case "Leased":
         return {
           accountId: sandbox.accountId,
           name: sandbox.name,
           label,
-          state: { _tag: "Leased", holder: state.holder, endsAt: state.endsAt }
+          state: { _tag: "Leased", holder: state.holder, startedAt: state.startedAt, endsAt: state.endsAt }
         } satisfies SandboxCard
       case "Cleaning":
         return {

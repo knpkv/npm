@@ -12,7 +12,8 @@ const bundle = await build({
   bundle: true,
   entryPoints: {
     approvals: "test/browser/fixture-entry.tsx",
-    "connect-controls": "test/browser/connect-controls-entry.tsx"
+    "connect-controls": "test/browser/connect-controls-entry.tsx",
+    sandboxes: "test/browser/sandboxes-entry.tsx"
   },
   format: "iife",
   // Module stylesheets carry SVG art; the hub build inlines it the same way.
@@ -44,6 +45,18 @@ const routes = Layer.mergeAll(
 <link rel="stylesheet" href="/assets/connect-controls.css">
 </head><body data-rly-root data-rly-theme="dark" class="connect-body"><div id="fleet-connect-root"></div>
 <script src="/assets/connect-controls.js" defer></script></body></html>`)
+  ),
+  HttpRouter.add(
+    "GET",
+    "/sandboxes/",
+    HttpServerResponse.html(`<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Sandboxes fixture</title>
+<link rel="stylesheet" href="/assets/sandboxes.css">
+</head><body data-rly-root data-rly-theme="dark"><div id="root"></div>
+<script src="/assets/sandboxes.js" defer></script></body></html>`)
   ),
   ...bundle.outputFiles.map((output) =>
     HttpRouter.add(

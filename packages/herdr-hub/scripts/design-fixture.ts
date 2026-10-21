@@ -159,7 +159,8 @@ export const designDashboard = (
       pushEnabled: false,
       superapp: true,
       fleet: true,
-      workEnabled: false
+      workEnabled: false,
+      sandboxesEnabled: true
     },
     work: null,
     status: {

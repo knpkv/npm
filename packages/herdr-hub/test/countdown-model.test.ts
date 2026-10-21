@@ -41,7 +41,8 @@ const snapshot = (pending: DashboardSnapshot["pendingApprovals"]): DashboardSnap
     pushEnabled: false,
     superapp: true,
     fleet: true,
-    workEnabled: false
+    workEnabled: false,
+    sandboxesEnabled: false
   },
   approvalsEnabled: true,
   directory: null,

@@ -90,7 +90,9 @@ export const DashboardSnapshot = Schema.Struct({
     // Whether this host is in a fleet; a standalone host's super-app has no Fleet module.
     fleet: Schema.Boolean,
     // Whether this listener serves the Work snapshot, so the page never polls an endpoint it lacks.
-    workEnabled: Schema.Boolean
+    workEnabled: Schema.Boolean,
+    // Whether this listener serves the Sandboxes pool, so the shell mounts its nav row. The one place the shell reads it.
+    sandboxesEnabled: Schema.Boolean
   }),
   work: Schema.NullOr(WorkSnapshots),
   status: HostStatus,

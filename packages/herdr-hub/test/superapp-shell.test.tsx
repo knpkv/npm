@@ -777,7 +777,8 @@ it("selects and focuses an exact approval after a handoff from another module", 
       pushEnabled: false,
       superapp: true,
       fleet: true,
-      workEnabled: true
+      workEnabled: true,
+      sandboxesEnabled: false
     },
     work: null,
     directory: null,

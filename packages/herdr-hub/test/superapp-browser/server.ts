@@ -15,6 +15,7 @@ import { FleetLimits, FleetUsage } from "@knpkv/herdr-connect"
 import { FleetConnectAgentPage } from "@knpkv/herdr-connect/model"
 import { type WorkGoal, WorkSnapshots } from "@knpkv/herdr-work/model"
 import { BackendStatus, RelayEvent, SessionInfo } from "@knpkv/relay/wire"
+import { SandboxesOverview } from "@knpkv/sandbox-pool/host"
 import { Clock, Config, Effect, FileSystem, Schema } from "effect"
 import { createServer, type ServerResponse } from "node:http"
 import { BlockedPushSettings } from "../../src/blocked-push-model.js"
@@ -37,6 +38,7 @@ import {
 } from "./code-fixture.js"
 import { connectFixture } from "./connect-fixture.js"
 import { resourceFixtureNow, resourcesFixture, resourcesStates } from "./resources-fixture.js"
+import { sandboxesOverviewFixture } from "./sandboxes-fixture.js"
 import { stackDetailFixture, stackPlanFixture, stacksOverviewFixture, stacksStates } from "./stacks-fixture.js"
 import { limitsFixture, usageFixture } from "./usage-fixture.js"
 
@@ -130,7 +132,8 @@ const program = Effect.gen(function*() {
       pushEnabled: false,
       superapp: true,
       fleet: true,
-      workEnabled: true
+      workEnabled: true,
+      sandboxesEnabled: true
     },
     work,
     records: [{ ...record, id: "job-finished", actor: "Requester", status: "succeeded" }],
@@ -263,6 +266,8 @@ const program = Effect.gen(function*() {
     ...snapshot,
     approvalApp: { ...snapshot.approvalApp, canonical: false, superapp: false, workEnabled: false }
   }
+  // A hub that does not own the sandbox pool: the shell leaves the Sandboxes row out.
+  const withoutSandboxes = { ...snapshot, approvalApp: { ...snapshot.approvalApp, sandboxesEnabled: false } }
   const initialFrame = Schema.encodeSync(Schema.fromJsonString(RelayEvent))({
     _tag: "Snapshot",
     session: "session-1",
@@ -343,7 +348,16 @@ const program = Effect.gen(function*() {
     }
     if (url.pathname === "/" || url.pathname === "/fleet") {
       response.writeHead(200, { "content-type": "text/html" })
-      response.end(dashboardPage(url.searchParams.has("noncanonical") ? noncanonical : snapshot, fontPreload))
+      response.end(
+        dashboardPage(
+          url.searchParams.has("noncanonical")
+            ? noncanonical
+            : url.searchParams.has("nosandboxes")
+            ? withoutSandboxes
+            : snapshot,
+          fontPreload
+        )
+      )
       return
     }
     if (url.pathname === "/connect/") {
@@ -565,6 +579,21 @@ const program = Effect.gen(function*() {
     ) {
       response.writeHead(200, { "content-type": "application/json" })
       response.end(Schema.encodeSync(Schema.fromJsonString(DashboardSnapshot))(noncanonical))
+      return
+    }
+    if (
+      url.pathname === "/v1/dashboard" &&
+      request.headers.referer !== undefined &&
+      URL.canParse(request.headers.referer) &&
+      new URL(request.headers.referer).searchParams.has("nosandboxes")
+    ) {
+      response.writeHead(200, { "content-type": "application/json" })
+      response.end(Schema.encodeSync(Schema.fromJsonString(DashboardSnapshot))(withoutSandboxes))
+      return
+    }
+    if (url.pathname === "/v1/modules/sandboxes/overview") {
+      response.writeHead(200, { "content-type": "application/json" })
+      response.end(Schema.encodeSync(Schema.fromJsonString(SandboxesOverview))(sandboxesOverviewFixture(now)))
       return
     }
     if (url.pathname === "/v1/push/stage-heartbeat" && request.method === "POST") {

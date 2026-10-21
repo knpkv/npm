@@ -58,7 +58,8 @@ describe("approval PWA", () => {
         pushEnabled: true,
         superapp: true,
         fleet: true,
-        workEnabled: false
+        workEnabled: false,
+        sandboxesEnabled: false
       },
       approvalsEnabled: true,
       directory: null,

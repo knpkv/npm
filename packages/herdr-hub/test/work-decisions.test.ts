@@ -52,7 +52,8 @@ const snapshot = (local: ReadonlyArray<JobRecord>, approvalsEnabled = true): Das
     pushEnabled: false,
     superapp: true,
     fleet: true,
-    workEnabled: false
+    workEnabled: false,
+    sandboxesEnabled: false
   },
   approvalsEnabled,
   directory: null,

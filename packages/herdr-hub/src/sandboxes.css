@@ -1,0 +1,366 @@
+@layer fleet {
+  .sandboxes-page {
+    container: sandboxes / inline-size;
+    display: grid;
+    gap: 1.25rem;
+    align-content: start;
+    max-inline-size: 1520px;
+    padding-block: 2rem;
+    padding-inline: max(2.5rem, env(safe-area-inset-left, 0px)) max(2.5rem, env(safe-area-inset-right, 0px));
+    color: var(--rly-color-text-1);
+    line-height: 1.5;
+  }
+
+  .sandboxes-page :where(h1, h2, p, dl, dd, ol) {
+    margin: 0;
+  }
+
+  .sandboxes-page :where(code) {
+    font: 430 0.8125rem / 1.4 var(--rly-font-mono);
+    color: var(--rly-color-text-2);
+  }
+
+  .sandboxes-head {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem 1.5rem;
+    align-items: end;
+    justify-content: space-between;
+  }
+
+  .sandboxes-title {
+    display: grid;
+    gap: 0.35rem;
+    justify-items: start;
+  }
+
+  .sandboxes-title h1 {
+    font-size: 2.25rem;
+    font-weight: 620;
+    letter-spacing: -0.045em;
+    line-height: 1.08;
+  }
+
+  .sandboxes-title p,
+  .sandboxes-muted {
+    color: var(--rly-color-text-2);
+  }
+
+  .sandboxes-title p {
+    font-size: 0.9375rem;
+  }
+
+  .sandboxes-lease {
+    display: grid;
+    gap: 0.3rem;
+    justify-items: end;
+  }
+
+  .sandboxes-page small,
+  .sandboxes-meta,
+  .sandboxes-policy {
+    font-size: 0.8125rem;
+  }
+
+  .sandboxes-page small {
+    color: var(--rly-color-text-2);
+  }
+
+  .sandboxes-panel {
+    display: grid;
+    gap: 0.75rem;
+    justify-items: start;
+    max-inline-size: 40rem;
+    padding: 1.5rem;
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-group);
+    background: var(--rly-color-surface-1);
+  }
+
+  .sandboxes-panel h2 {
+    font-size: 1.4rem;
+    font-weight: 620;
+    letter-spacing: -0.02em;
+    line-height: 1.25;
+  }
+
+  .sandboxes-panel p {
+    color: var(--rly-color-text-2);
+  }
+
+  .sandboxes-pool {
+    display: grid;
+    gap: 1.25rem;
+    min-inline-size: 0;
+  }
+
+  .sandboxes-meta {
+    display: grid;
+    gap: 0.35rem;
+    justify-items: start;
+    color: var(--rly-color-text-2);
+  }
+
+  .sandboxes-meta-line {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem 1rem;
+    justify-content: space-between;
+    justify-self: stretch;
+  }
+
+  .sandboxes-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem;
+    align-items: start;
+  }
+
+  .sandboxes-skeleton {
+    block-size: 16rem;
+    border-radius: var(--rly-radius-group);
+  }
+
+  .sandboxes-hidden {
+    position: absolute;
+    inline-size: 1px;
+    block-size: 1px;
+    overflow: clip;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .sandboxes-card {
+    display: grid;
+    gap: 1rem;
+    min-inline-size: 0;
+    padding: 1.1rem 1.25rem 1.25rem;
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-group);
+    background: var(--rly-color-surface-1);
+  }
+
+  .sandboxes-card > header {
+    display: flex;
+    gap: 1rem;
+    align-items: start;
+    justify-content: space-between;
+  }
+
+  .sandboxes-card-name {
+    display: grid;
+    gap: 0.1rem;
+    min-inline-size: 0;
+  }
+
+  .sandboxes-card-name h2 {
+    font-size: 1.125rem;
+    font-weight: 620;
+    letter-spacing: -0.015em;
+    line-height: 1.3;
+  }
+
+  .sandboxes-card-id {
+    display: flex;
+    gap: 0.35rem;
+    align-items: center;
+  }
+
+  .sandboxes-card-block {
+    display: grid;
+    gap: 0.5rem;
+  }
+
+  .sandboxes-card-line {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem 1rem;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .sandboxes-link {
+    justify-self: start;
+    display: inline-flex;
+    align-items: center;
+    min-block-size: 44px;
+    color: inherit;
+    font-size: 0.875rem;
+    font-weight: 520;
+    text-decoration: underline;
+    text-underline-offset: 0.25em;
+  }
+
+  .sandboxes-facts {
+    display: grid;
+    grid-template-columns: 7rem minmax(0, 1fr);
+    gap: 0.45rem 1rem;
+    font-size: 0.875rem;
+  }
+
+  .sandboxes-facts > div {
+    display: contents;
+  }
+
+  .sandboxes-facts dt {
+    color: var(--rly-color-text-2);
+  }
+
+  .sandboxes-facts dd {
+    min-inline-size: 0;
+  }
+
+  .sandboxes-facts small {
+    display: block;
+  }
+
+  .sandboxes-card[data-old] .sandboxes-facts dd {
+    color: var(--rly-color-text-2);
+  }
+
+  .sandboxes-strong {
+    font-weight: 620;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .sandboxes-steps {
+    display: grid;
+    padding: 0;
+    list-style: none;
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-field);
+  }
+
+  .sandboxes-steps li {
+    display: grid;
+    grid-template-columns: 1.25rem minmax(0, 1fr) auto;
+    gap: 0.6rem;
+    align-items: center;
+    min-block-size: 40px;
+    padding: 0.25rem 0.75rem;
+    font-size: 0.875rem;
+  }
+
+  .sandboxes-steps li + li {
+    border-block-start: 1px solid var(--rly-color-border-1);
+  }
+
+  .sandboxes-steps li[aria-current="step"] [data-step-name] {
+    font-weight: 620;
+  }
+
+  .sandboxes-step-number {
+    font: 430 0.75rem / 1 var(--rly-font-mono);
+    color: var(--rly-color-text-3);
+  }
+
+  .sandboxes-card-actions {
+    display: grid;
+    gap: 0.5rem;
+    padding-block-start: 1rem;
+    border-block-start: 1px solid var(--rly-color-border-1);
+  }
+
+  .sandboxes-card-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .sandboxes-policy {
+    max-inline-size: 60em;
+    color: var(--rly-color-text-2);
+  }
+
+  .sandboxes-sheet-body {
+    display: grid;
+    gap: 1.25rem;
+    align-content: start;
+  }
+
+  .sandboxes-sheet-account {
+    display: grid;
+    gap: 0.1rem;
+  }
+
+  .sandboxes-sheet-account b {
+    font-size: 1.5rem;
+    font-weight: 620;
+    letter-spacing: -0.03em;
+    line-height: 1.2;
+  }
+
+  .sandboxes-sheet-account code {
+    font: 430 0.8125rem / 1.4 var(--rly-font-mono);
+    color: var(--rly-color-text-2);
+  }
+
+  .sandboxes-sheet-lead {
+    color: var(--rly-color-text-2);
+    font-size: 0.9375rem;
+  }
+
+  .sandboxes-sheet .sandboxes-facts {
+    grid-template-columns: 9rem minmax(0, 1fr);
+    font-size: 0.9375rem;
+  }
+
+  .sandboxes-sheet small,
+  .sandboxes-sheet .sandboxes-muted {
+    font-size: 0.8125rem;
+    color: var(--rly-color-text-2);
+  }
+
+  .sandboxes-wipe {
+    padding-inline-start: 1.25rem;
+  }
+
+  .sandboxes-sheet-foot {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+    justify-content: flex-end;
+  }
+
+  @container sandboxes (inline-size < 40rem) {
+    .sandboxes-title h1 {
+      font-size: 1.75rem;
+    }
+
+    .sandboxes-head,
+    .sandboxes-lease,
+    .sandboxes-lease .sandboxes-trigger {
+      inline-size: 100%;
+    }
+
+    .sandboxes-lease {
+      justify-items: stretch;
+    }
+
+    .sandboxes-grid {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .sandboxes-card {
+      padding: 1rem;
+    }
+
+    .sandboxes-trigger,
+    .sandboxes-card-buttons > button {
+      min-block-size: 44px;
+    }
+  }
+
+  @media (max-width: 40rem) {
+    .sandboxes-page {
+      padding-block: 0.9rem 6.5rem;
+      padding-inline: max(1rem, env(safe-area-inset-left, 0px)) max(1rem, env(safe-area-inset-right, 0px));
+    }
+
+    .sandboxes-sheet-foot {
+      flex-direction: column-reverse;
+      align-items: stretch;
+    }
+  }
+}

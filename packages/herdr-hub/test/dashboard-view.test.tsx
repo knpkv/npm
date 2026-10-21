@@ -30,7 +30,8 @@ const snapshot = (approvalsEnabled: boolean): DashboardSnapshot => {
       pushEnabled: false,
       superapp: false,
       fleet: true,
-      workEnabled: false
+      workEnabled: false,
+      sandboxesEnabled: false
     },
     approvalsEnabled,
     work: null,

@@ -166,6 +166,31 @@ const quarantined = (accountId: string, name: string, blocker: string) =>
   })
 
 describe("sandbox read model", () => {
+  it.effect("serves the lease start and the available reset time", () =>
+    Effect.gen(function*() {
+      const store = yield* makeMemorySandboxStore([
+        leased("111111111111", "sandbox-a", 2),
+        sandbox({
+          accountId: "222222222222",
+          name: "sandbox-b",
+          version: 1,
+          state: { _tag: "Available", lastResetAt: "2026-10-16T01:00:00.000Z" }
+        })
+      ])
+      const log = yield* makeMemoryRunLog
+      const reads = yield* makeSandboxHostReads({ contract, store, runLog: log })
+      const overview = yield* reads.overview
+      if (overview._tag !== "Ready") throw new Error("expected a ready overview")
+      const byId = new Map(overview.sandboxes.map((card) => [card.accountId, card]))
+      const held = byId.get(account("111111111111"))
+      const free = byId.get(account("222222222222"))
+      if (held?.state._tag !== "Leased") throw new Error("expected a lease")
+      if (free?.state._tag !== "Available") throw new Error("expected an available account")
+      expect(DateTime.formatIso(held.state.startedAt)).toBe("2026-10-16T08:00:00.000Z")
+      if (free.state.lastResetAt === null) throw new Error("expected a reset time")
+      expect(DateTime.formatIso(free.state.lastResetAt)).toBe("2026-10-16T01:00:00.000Z")
+    }))
+
   it.effect("serves every stored blocker as one closed tag, and drops the stored line", () =>
     Effect.gen(function*() {
       for (const sample of storedBlockers) {

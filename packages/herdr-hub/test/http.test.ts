@@ -1982,7 +1982,8 @@ esac
           pushEnabled: true,
           superapp: true,
           fleet: true,
-          workEnabled: false
+          workEnabled: false,
+          sandboxesEnabled: false
         },
         approvalsEnabled: true,
         chat: null,
@@ -2063,7 +2064,8 @@ esac
           pushEnabled: true,
           superapp: true,
           fleet: true,
-          workEnabled: false
+          workEnabled: false,
+          sandboxesEnabled: false
         },
         approvalsEnabled: true,
         chat: null,
@@ -2119,7 +2121,8 @@ esac
           pushEnabled: true,
           superapp: true,
           fleet: true,
-          workEnabled: false
+          workEnabled: false,
+          sandboxesEnabled: false
         },
         approvalsEnabled: true,
         chat: null,
@@ -8070,7 +8073,8 @@ esac
         pushEnabled: false,
         superapp: true,
         fleet: false,
-        workEnabled: true
+        workEnabled: true,
+        sandboxesEnabled: false
       })
       // Modules answer on loopback; one that is not set up here says why instead of vanishing.
       const sandboxes = yield* Effect.promise(() =>
@@ -8197,7 +8201,8 @@ esac
         pushEnabled: true,
         superapp: true,
         fleet: true,
-        workEnabled: true
+        workEnabled: true,
+        sandboxesEnabled: false
       })
       const push = yield* Effect.promise(() =>
         secureRequestBody(`${server.serveUrl}/v1/push/config`, { host: "ser8.example.test:0" })

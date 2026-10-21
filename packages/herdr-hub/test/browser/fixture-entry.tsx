@@ -126,7 +126,8 @@ const base: DashboardSnapshot = {
     pushEnabled: true,
     superapp: true,
     fleet: true,
-    workEnabled: false
+    workEnabled: false,
+    sandboxesEnabled: false
   },
   approvalsEnabled: state !== "approvals-off",
   directory: null,

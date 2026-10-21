@@ -57,7 +57,8 @@ const dashboardFor = (record: JobRecord): DashboardSnapshot => ({
     pushEnabled: true,
     superapp: true,
     fleet: true,
-    workEnabled: false
+    workEnabled: false,
+    sandboxesEnabled: false
   },
   approvalsEnabled: true,
   directory: null,

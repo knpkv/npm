@@ -27,6 +27,21 @@ export const readSandboxesHost = Config.option(Config.String("RELAY_SANDBOXES_HO
   )
 )
 
+/**
+ * True only on the named pool host's own hub, with a pool. The module answers there; everywhere else its
+ * routes are unavailable and the shell leaves the nav row out.
+ */
+export const servesSandboxes = (configuration: {
+  readonly host: string
+  readonly isHub: boolean
+  readonly sandboxesHost: FleetHostName | null
+  readonly pool: PoolContract | null
+}): boolean =>
+  configuration.sandboxesHost !== null &&
+  configuration.sandboxesHost.toLowerCase() === configuration.host.toLowerCase() &&
+  configuration.isHub &&
+  configuration.pool !== null
+
 /** The sandbox reader couldn't open its database. Routes report it as unavailable. */
 export class SandboxReaderStartError extends Schema.TaggedError<SandboxReaderStartError>()(
   "SandboxReaderStartError",
@@ -67,7 +82,7 @@ export const makeSandboxesModule = (configuration: {
     Effect.gen(function*() {
       const { host, isHub, sandboxesHost } = configuration
       const named = sandboxesHost !== null && sandboxesHost.toLowerCase() === host.toLowerCase()
-      const pool = named && isHub ? configuration.pool : null
+      const pool = servesSandboxes(configuration) ? configuration.pool : null
       const unavailable = (reason: SandboxesUnavailable["reason"]): SandboxesUnavailable => ({
         _tag: "Unavailable",
         reason,
