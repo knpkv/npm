@@ -41,6 +41,8 @@ const snapshot = (overrides: Partial<DashboardSnapshot> = {}): DashboardSnapshot
     canonical: true,
     canonicalUrl: "https://hub.example.test/",
     pushEnabled: false,
+    superapp: true,
+    fleet: true,
     workEnabled: false,
     sandboxesEnabled: false
   },

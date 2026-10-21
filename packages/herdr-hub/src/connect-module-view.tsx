@@ -25,6 +25,10 @@ interface ConnectModuleContent {
   readonly readApprovals: Effect.Effect<NeedsYouResult, TodayReadFailed>
   readonly now: number
   readonly notificationState: NotificationState
+  /** Defaults true. A standalone computer has no Fleet: no approvals summary and no Fleet links. */
+  readonly fleet?: boolean
+  /** Defaults true. Only the notification hub serves push settings and stage heartbeats. */
+  readonly push?: boolean
 }
 
 /** Both counts name their source. Incomplete or failed reads never claim that unknown work is clear. */
@@ -48,7 +52,8 @@ const ConnectModulePage = ({
   )
   const directory = useAtomValue(content.atoms.agents)
   const reading = Option.getOrNull(AsyncResult.value(directory))
-  const approvals = useNeedsYouReading(content.readApprovals, mount.active)
+  const fleet = content.fleet ?? true
+  const approvals = useNeedsYouReading(content.readApprovals, mount.active && fleet)
   const failedHosts = reading?.failures.map((failure) => failure.host.toLowerCase()) ?? []
   const needing =
     reading?.agents.filter(
@@ -98,14 +103,16 @@ const ConnectModulePage = ({
         <li>Or ask Relay to start one for a Work goal.</li>
       </ol>
       <div className="connect-home-empty-actions">
-        <Button
-          className="connect-home-tap"
-          onClick={() => mount.navigate(moduleHref(fleetHubModule, "work"), "push")}
-          size="compact"
-          variant="primary"
-        >
-          Open Fleet, Work
-        </Button>
+        {fleet ? (
+          <Button
+            className="connect-home-tap"
+            onClick={() => mount.navigate(moduleHref(fleetHubModule, "work"), "push")}
+            size="compact"
+            variant="primary"
+          >
+            Open Fleet, Work
+          </Button>
+        ) : null}
         {mount.openHostAccess === undefined ? null : (
           <Button className="connect-home-tap" onClick={mount.openHostAccess} size="compact" variant="secondary">
             Check hosts
@@ -123,80 +130,80 @@ const ConnectModulePage = ({
       )}
     </section>
   )
-  const summary =
-    empty && waiting === 0 && !partial && !approvals.failed ? undefined : (
-      <section
-        aria-label="Needs you and approvals"
-        className={empty ? "connect-home-strip connect-home-strip-compact" : "connect-home-strip"}
+  const summary = !fleet ? undefined : empty && waiting === 0 && !partial && !approvals.failed ? undefined : (
+    <section
+      aria-label="Needs you and approvals"
+      className={empty ? "connect-home-strip connect-home-strip-compact" : "connect-home-strip"}
+    >
+      {empty ? null : (
+        <div data-previous-reading={AsyncResult.isFailure(directory) && reading !== null ? "" : undefined}>
+          {AsyncResult.isFailure(directory) && reading !== null ? (
+            <span aria-hidden="true" className="connect-home-count-context">
+              Previous reading
+            </span>
+          ) : reading !== null && reading.failures.length > 0 ? (
+            <span>At least</span>
+          ) : null}
+          <strong>{needing === null ? "Unknown" : String(needing)}</strong>
+          <span>need you</span>
+          {AsyncResult.isFailure(directory) && reading !== null ? (
+            <span className="connect-home-count-announcement">, from the previous reading.</span>
+          ) : null}
+        </div>
+      )}
+      <a
+        href={moduleHref(fleetHubModule, "approvals")}
+        aria-label={approvalsUnknown ? "Approvals unknown, open Fleet Approvals" : undefined}
       >
-        {empty ? null : (
-          <div data-previous-reading={AsyncResult.isFailure(directory) && reading !== null ? "" : undefined}>
-            {AsyncResult.isFailure(directory) && reading !== null ? (
-              <span aria-hidden="true" className="connect-home-count-context">
-                Previous reading
-              </span>
-            ) : reading !== null && reading.failures.length > 0 ? (
+        {approvalsUnknown ? null : (
+          <span className="connect-home-approval-count">
+            {approvals.failed && approvals.reading !== null ? (
+              <span>Previous reading</span>
+            ) : partial ? (
               <span>At least</span>
             ) : null}
-            <strong>{needing === null ? "Unknown" : String(needing)}</strong>
-            <span>need you</span>
-            {AsyncResult.isFailure(directory) && reading !== null ? (
-              <span className="connect-home-count-announcement">, from the previous reading.</span>
-            ) : null}
-          </div>
-        )}
-        <a
-          href={moduleHref(fleetHubModule, "approvals")}
-          aria-label={approvalsUnknown ? "Approvals unknown, open Fleet Approvals" : undefined}
-        >
-          {approvalsUnknown ? null : (
-            <span className="connect-home-approval-count">
-              {approvals.failed && approvals.reading !== null ? (
-                <span>Previous reading</span>
-              ) : partial ? (
-                <span>At least</span>
-              ) : null}
-              <strong>{String(waiting)}</strong>
-            </span>
-          )}
-          <span className="connect-home-approvals-word">
-            {approvalsUnknown ? "Approvals unknown" : waiting === 1 ? "approval waiting" : "approvals waiting"}
+            <strong>{String(waiting)}</strong>
           </span>
-          <ShellIcon name="next" />
-          {!approvalsUnknown && (approvals.failed || partial) ? (
-            <small>
-              {approvals.failed
-                ? approvals.reading === null
-                  ? "Couldn't read approvals"
-                  : "Couldn't refresh approvals"
-                : partialApprovalCopy}
-            </small>
-          ) : null}
-        </a>
-        {empty ? null : (
-          <p>
-            {latest === undefined ? (
-              "No activity reading yet"
-            ) : (
-              <>
-                Last activity{" "}
-                <time dateTime={new Date(latest.lastActivityAt).toISOString()}>
-                  {new Date(latest.lastActivityAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}
-                </time>
-                , {latest.name}
-                {latest.work.length === 0 ? null : `: ${latest.work}`}
-              </>
-            )}
-          </p>
         )}
-      </section>
-    )
+        <span className="connect-home-approvals-word">
+          {approvalsUnknown ? "Approvals unknown" : waiting === 1 ? "approval waiting" : "approvals waiting"}
+        </span>
+        <ShellIcon name="next" />
+        {!approvalsUnknown && (approvals.failed || partial) ? (
+          <small>
+            {approvals.failed
+              ? approvals.reading === null
+                ? "Couldn't read approvals"
+                : "Couldn't refresh approvals"
+              : partialApprovalCopy}
+          </small>
+        ) : null}
+      </a>
+      {empty ? null : (
+        <p>
+          {latest === undefined ? (
+            "No activity reading yet"
+          ) : (
+            <>
+              Last activity{" "}
+              <time dateTime={new Date(latest.lastActivityAt).toISOString()}>
+                {new Date(latest.lastActivityAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}
+              </time>
+              , {latest.name}
+              {latest.work.length === 0 ? null : `: ${latest.work}`}
+            </>
+          )}
+        </p>
+      )}
+    </section>
+  )
   return (
     <BlockedConnectSurface
       active={mount.active}
       atoms={content.atoms}
       directoryLocation={directoryLocation}
       notificationState={content.notificationState}
+      push={content.push ?? true}
       embedded
       presentation={{
         _tag: "home",

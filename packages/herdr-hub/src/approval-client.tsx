@@ -52,6 +52,7 @@ import { useHubNow } from "./hub-clock.js"
 import { answerOutcome, decidableExpiry, workRequestDecisionsFor } from "./work-decisions.js"
 import { DashboardWorkPollOwner } from "./work-poll-owner.js"
 import { SuperappShell } from "./superapp-view.js"
+import { superappLayout } from "./internal/superapp-layout.js"
 import { makeFleetHubModuleViews } from "./fleet-module-view.js"
 import { TodayReadFailed } from "./today-module-view.js"
 import { makeResourcesModuleViews } from "./resources-module-view.js"
@@ -593,6 +594,7 @@ const DashboardApp = ({
       : "loading"
   const waiting = AsyncResult.isWaiting(result)
   const canonical = snapshot.approvalApp.canonical === true
+  const superapp = snapshot.approvalApp.superapp
   const currentSnapshot = withPendingApprovalTarget(
     {
       ...(work === undefined ? snapshot : { ...snapshot, work }),
@@ -660,7 +662,7 @@ const DashboardApp = ({
   const refreshNotice = <RefreshStatus failed={refreshFailed} observedAt={current.observedAt} onRetry={refresh} />
   const dashboardView = (
     <DashboardView
-      approvalOnly={canonical}
+      approvalOnly={superapp}
       refreshFailed={refreshFailed}
       pendingTargetCheck={pendingTargetCheck}
       busyJobId={busyJobId}
@@ -676,8 +678,8 @@ const DashboardApp = ({
       onLoadPending={() => void onLoadPending()}
       onRefresh={refreshDashboard}
       pull={pull}
-      showHeader={!canonical}
-      notice={canonical ? null : refreshNotice}
+      showHeader={!superapp}
+      notice={superapp ? null : refreshNotice}
       snapshot={current}
     />
   )
@@ -706,7 +708,9 @@ const DashboardApp = ({
     atoms: atoms.connect,
     readApprovals: readToday,
     now: workNow,
-    notificationState
+    notificationState,
+    fleet: snapshot.approvalApp.fleet,
+    push: snapshot.approvalApp.pushEnabled
   })
   const usage = makeUsageModuleViews({
     reads: usageReads,
@@ -732,17 +736,23 @@ const DashboardApp = ({
   const fleetNavigationBadge = dashboardPendingNavigationBadge(pendingState, workNow, refreshFailed)
   const fleetWithBadge =
     fleetNavigationBadge === undefined ? fleet : { ...fleet, navigationBadge: fleetNavigationBadge }
+  const installed = [connect, fleetWithBadge, code, usage, resources, ...sandboxes, stacks]
+  const layout = superappLayout(
+    installed.map((view) => view.descriptor.id),
+    current.approvalApp.fleet
+  )
   return (
     <>
       <DashboardWorkPollOwner atom={atoms.work} poll={atoms.workPoll} />
-      {canonical ? (
+      {superapp ? (
         <SuperappShell
-          modules={[connect, fleetWithBadge, code, usage, resources, ...sandboxes, stacks]}
-          mobileModules={["connect", "fleet", "code", "usage"]}
-          primaryModules={["connect", "fleet"]}
+          modules={installed.filter((view) => layout.modules.includes(view.descriptor.id))}
+          mobileModules={layout.mobileModules}
+          primaryModules={layout.primaryModules}
           landing={{ module: "connect", page: "overview" }}
           host={current.host}
           hostCount={hostCount}
+          standalone={!current.approvalApp.fleet}
           session={
             refreshFailed
               ? { access: onLoopback() ? "loopback" : "tailscale", connection: "stale", observedAt: current.observedAt }
@@ -794,7 +804,7 @@ if (Result.isFailure(initialResult)) {
 const initial = initialResult.success
 const atoms = makeDashboardAtoms(initial)
 /**
- * Relay's one fleet conversation, on the canonical hub (the only listener that serves `/v1/relay`): one
+ * Relay's one conversation, on any listener that serves the super-app (the only ones that serve `/v1/relay`): one
  * stream for the page, closed when the page goes away for good.
  */
 const applicationRuntime = ManagedRuntime.make(Layer.merge(BrowserHttpClient.layerFetch, BrowserCrypto.layer))
@@ -866,5 +876,5 @@ const application = (
     <DashboardApp atoms={atoms} readToday={readToday} usageReads={usageReads} codeReads={codeReads} />
   </RegistryProvider>
 )
-if (initial.approvalApp.canonical) createRoot(root).render(application)
+if (initial.approvalApp.superapp) createRoot(root).render(application)
 else hydrateRoot(root, application)

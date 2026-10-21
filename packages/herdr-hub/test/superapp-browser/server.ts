@@ -130,6 +130,8 @@ const program = Effect.gen(function*() {
       canonical: true,
       canonicalUrl: `http://127.0.0.1:${String(port)}/`,
       pushEnabled: false,
+      superapp: true,
+      fleet: true,
       workEnabled: true,
       sandboxesEnabled: true
     },
@@ -260,7 +262,10 @@ const program = Effect.gen(function*() {
     ],
     ["/manifest.webmanifest", JSON.stringify({ name: "Relay", start_url: "/", display: "standalone" })]
   ])
-  const noncanonical = { ...snapshot, approvalApp: { ...snapshot.approvalApp, canonical: false, workEnabled: false } }
+  const noncanonical = {
+    ...snapshot,
+    approvalApp: { ...snapshot.approvalApp, canonical: false, superapp: false, workEnabled: false }
+  }
   // A hub that does not own the sandbox pool: the shell leaves the Sandboxes row out.
   const withoutSandboxes = { ...snapshot, approvalApp: { ...snapshot.approvalApp, sandboxesEnabled: false } }
   const initialFrame = Schema.encodeSync(Schema.fromJsonString(RelayEvent))({

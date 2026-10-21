@@ -137,6 +137,7 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
   primaryModules,
   relay,
   session,
+  standalone = false,
   terminalOwnsKeys = false
 }: {
   readonly modules: Views
@@ -147,6 +148,8 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
   readonly primaryModules?: ReadonlyArray<NoInfer<Views[number]["descriptor"]["id"]>>
   readonly host: string
   readonly hostCount: number
+  /** Defaults false. A computer outside any fleet names itself instead of counting configured hosts. */
+  readonly standalone?: boolean
   /** Access and connectivity come from the composition, never inferred from the host label. */
   /** Defaults false. An active connected Connect terminal reserves summon keys and hides/inerts shell chrome until it exits. Home directory itself does neither. */
   readonly terminalOwnsKeys?: boolean
@@ -458,7 +461,11 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
   const currentModule =
     location.error === null ? descriptors.find((module) => module.id === location.destination.module) : undefined
   const currentPage = currentModule?.pages.find((page) => page.id === location.destination.page)
-  const hostLabel = hostCount === 1 ? "1 host configured" : `${String(hostCount)} hosts configured`
+  const hostLabel = standalone
+    ? "This computer"
+    : hostCount === 1
+      ? "1 host configured"
+      : `${String(hostCount)} hosts configured`
   const landingModule = descriptors.find((module) => module.id === landing.module)
   if (landingModule === undefined)
     throw new ModuleRegistrationError({ module: landing.module, reason: "missing_default" })

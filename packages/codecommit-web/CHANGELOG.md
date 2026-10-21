@@ -1,5 +1,30 @@
 # @knpkv/codecommit-web
 
+## 0.39.1
+
+### Patch Changes
+
+- [#1038](https://github.com/knpkv/npm/pull/1038) [`d9ab6d7`](https://github.com/knpkv/npm/commit/d9ab6d7deb3511dae6535557433c1d34b166c465) Thanks [@konopkov](https://github.com/konopkov)! - Serve the super-app on every host's loopback listener, not only on the notification hub. The dashboard snapshot's `approvalApp` gains `superapp` (this listener renders the super-app shell) and `fleet` (this host is in a fleet; a standalone host's shell has no Fleet module). Module descriptors list the new `local` listener. The tailnet TLS listener, push and agent reports stay on the notification hub; only the hub's loopback aggregates other hosts. Code and Stacks now say they are not set up "on this computer" rather than "on this hub"; a computer without Code shows that card instead of an empty queue form. On a standalone host the shell names "This computer", the sidebar is one group, and Connect reads neither fleet approvals nor push settings. The loopback Connect terminal opens only this host's sessions, only for a direct (unproxied) request: any local process that can reach the loopback can open a shell here, the same trust the loopback listener already carries. Other hosts' terminals stay on the tailnet listener.
+
+## 0.39.0
+
+### Minor Changes
+
+- [#1020](https://github.com/knpkv/npm/pull/1020) [`7015e2c`](https://github.com/knpkv/npm/commit/7015e2cd1315f80a6198e62c0344bb41cb3d68dd) Thanks [@konopkov](https://github.com/konopkov)! - Review pages name commits by title and time instead of their ids. A commit reads as “Restore the draft on reconnect, 14:18” (with the date when it was not made the day of the reading); the full id is in the tooltip and behind a Copy commit id button.
+
+  - `@knpkv/codecommit-core`: `CodeCommitReadClient.getCommit` reads a commit's title and commit time (`CodeCommitCommitSummary`), gated as the new `getCommit` read operation. It needs `codecommit:GetCommit`. Implementations of `CodeCommitReadClientService` must add the method.
+  - `@knpkv/codecommit-web`: the owner API serves `GET /prs/:awsAccountId/:prId/commits/:commitId`, the host contract adds `CodeCommitSummary`, `CodeCommitQuery` and `CodeCommitSummaryResult`, and `CodeHostReads.commit` reads one commit per caller. The Relay findings label no longer prints a short head id; the exact head stays in the context body.
+  - `@knpkv/review`: `CommitLabel`, `CommitSummaryProvider`, `useCommitSummaries` and `useCommitWords` from `@knpkv/review/react`, with styles at `@knpkv/review/commit-label.css`. The canvas uses them for its head and still-open lines, without the copy button inside the shrunk drawing.
+  - `@knpkv/rly`: a `copy` icon.
+  - `@knpkv/herdr-hub`: Code pages read commit titles through `/v1/modules/code/commit`.
+
+### Patch Changes
+
+- Updated dependencies [[`7015e2c`](https://github.com/knpkv/npm/commit/7015e2cd1315f80a6198e62c0344bb41cb3d68dd), [`bf62e19`](https://github.com/knpkv/npm/commit/bf62e19a1db55acd14169dbd315e694cc9e15e8a)]:
+  - @knpkv/codecommit-core@0.29.0
+  - @knpkv/review@0.7.0
+  - @knpkv/rly@0.24.0
+
 ## 0.38.0
 
 ### Minor Changes

@@ -124,6 +124,8 @@ const base: DashboardSnapshot = {
     canonical: true,
     canonicalUrl: "https://hub.example.test/",
     pushEnabled: true,
+    superapp: true,
+    fleet: true,
     workEnabled: false,
     sandboxesEnabled: false
   },
