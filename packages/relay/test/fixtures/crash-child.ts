@@ -10,6 +10,7 @@ import type { Response } from "effect/ai"
 import { layer, RelayHarness } from "../../src/harness.ts"
 import { ObjectRef } from "../../src/model.ts"
 import { register } from "../../src/registry.ts"
+import { commentWritten } from "./crash-signal.ts"
 
 const Arguments = Schema.Tuple([Schema.Literals(["run", "resume"]), Schema.String, Schema.String])
 const pr = ObjectRef.make({ product: "codecommit", kind: "pull-request", id: "acct/repo/42" })
@@ -51,8 +52,12 @@ const postCommentTo = (markerPath: string) =>
   implement(postCommentContract, (input) =>
     Effect.gen(function*() {
       const fs = yield* FileSystem.FileSystem
+      // A real write can create the file before its bytes land: model that window explicitly.
+      yield* fs.writeFileString(markerPath, "", { flag: "a" })
+      yield* Effect.sleep("200 millis")
       yield* fs.writeFileString(markerPath, `posted ${input.body}\n`, { flag: "a" })
-      // The parent kills this process here.
+      // The write is whole now. The parent waits for this line, not for the file, then kills us here.
+      yield* Console.log(commentWritten)
       yield* Effect.sleep("30 seconds")
       return { posted: true }
     }).pipe(Effect.orDie))
