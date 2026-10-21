@@ -302,3 +302,15 @@ it("says when a queue the owner hasn't refreshed for over an hour last heard fro
     render(lastRead + 8 * 24 * hour, [item(lastRead + 8 * 24 * hour - 60_000), item(lastRead, "MERGED")])
   ).not.toContain("Not refreshed since")
 })
+
+it("says Code is not set up on this computer when no credential host is configured", () => {
+  const markup = renderToStaticMarkup(
+    createElement(CodeHostView, {
+      ...props,
+      page: "pull-requests",
+      selected: null,
+      queue: { value: { _tag: "Unavailable", reason: "not_configured", host: null }, loading: false, failure: null }
+    })
+  )
+  expect(markup).toContain("Code isn’t set up on this computer.")
+})

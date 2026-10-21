@@ -2,6 +2,61 @@
 
 Released as `@knpkv/herdr-approvals` up to 0.18.0; the headings below are that package's history.
 
+## 0.47.0
+
+### Minor Changes
+
+- [#1038](https://github.com/knpkv/npm/pull/1038) [`d9ab6d7`](https://github.com/knpkv/npm/commit/d9ab6d7deb3511dae6535557433c1d34b166c465) Thanks [@konopkov](https://github.com/konopkov)! - Serve the super-app on every host's loopback listener, not only on the notification hub. The dashboard snapshot's `approvalApp` gains `superapp` (this listener renders the super-app shell) and `fleet` (this host is in a fleet; a standalone host's shell has no Fleet module). Module descriptors list the new `local` listener. The tailnet TLS listener, push and agent reports stay on the notification hub; only the hub's loopback aggregates other hosts. Code and Stacks now say they are not set up "on this computer" rather than "on this hub"; a computer without Code shows that card instead of an empty queue form. On a standalone host the shell names "This computer", the sidebar is one group, and Connect reads neither fleet approvals nor push settings. The loopback Connect terminal opens only this host's sessions, only for a direct (unproxied) request: any local process that can reach the loopback can open a shell here, the same trust the loopback listener already carries. Other hosts' terminals stay on the tailnet listener.
+
+### Patch Changes
+
+- Updated dependencies [[`c2fdb19`](https://github.com/knpkv/npm/commit/c2fdb1980aa21778918ef054cefbc1103c8fbcc0), [`d9ab6d7`](https://github.com/knpkv/npm/commit/d9ab6d7deb3511dae6535557433c1d34b166c465)]:
+  - @knpkv/alchemy-console@0.6.1
+  - @knpkv/codecommit-web@0.39.1
+
+## 0.46.0
+
+### Minor Changes
+
+- [#1020](https://github.com/knpkv/npm/pull/1020) [`7015e2c`](https://github.com/knpkv/npm/commit/7015e2cd1315f80a6198e62c0344bb41cb3d68dd) Thanks [@konopkov](https://github.com/konopkov)! - Review pages name commits by title and time instead of their ids. A commit reads as “Restore the draft on reconnect, 14:18” (with the date when it was not made the day of the reading); the full id is in the tooltip and behind a Copy commit id button.
+
+  - `@knpkv/codecommit-core`: `CodeCommitReadClient.getCommit` reads a commit's title and commit time (`CodeCommitCommitSummary`), gated as the new `getCommit` read operation. It needs `codecommit:GetCommit`. Implementations of `CodeCommitReadClientService` must add the method.
+  - `@knpkv/codecommit-web`: the owner API serves `GET /prs/:awsAccountId/:prId/commits/:commitId`, the host contract adds `CodeCommitSummary`, `CodeCommitQuery` and `CodeCommitSummaryResult`, and `CodeHostReads.commit` reads one commit per caller. The Relay findings label no longer prints a short head id; the exact head stays in the context body.
+  - `@knpkv/review`: `CommitLabel`, `CommitSummaryProvider`, `useCommitSummaries` and `useCommitWords` from `@knpkv/review/react`, with styles at `@knpkv/review/commit-label.css`. The canvas uses them for its head and still-open lines, without the copy button inside the shrunk drawing.
+  - `@knpkv/rly`: a `copy` icon.
+  - `@knpkv/herdr-hub`: Code pages read commit titles through `/v1/modules/code/commit`.
+
+- [#1013](https://github.com/knpkv/npm/pull/1013) [`81be299`](https://github.com/knpkv/npm/commit/81be299dee9eb62bce525bde6f106f5f54a58898) Thanks [@konopkov](https://github.com/konopkov)! - The host that owns the sandbox pool can run Fleet `sandbox.*` jobs. `openSandboxDatabase` keeps the pool's records and reset run log in one private SQLite database. `makeSandboxPool` runs lease, extend, release, reset and budget-lift jobs, with the job's actor as the lease holder and the reset inside the release or reset job, and a `sweepOnce` that expires leases and resumes interrupted resets. `withSandboxOperations` adds the jobs to a host's operations. Nothing is wired into hostd by default: the host supplies `PoolAccess`, `Nuke` and `BudgetControl`.
+
+- [#1015](https://github.com/knpkv/npm/pull/1015) [`382cdd3`](https://github.com/knpkv/npm/commit/382cdd3c116c1b9d956c1ea55e4956eb10345178) Thanks [@konopkov](https://github.com/konopkov)! - Add `stacksModule` and the Stacks module server side: a read-only module that serves the host's alchemy stacks, one stack's state and its latest published plan from alchemy-console, on the host named by `RELAY_STACKS_HOST` only.
+
+- [#1016](https://github.com/knpkv/npm/pull/1016) [`2ca72de`](https://github.com/knpkv/npm/commit/2ca72dec189c75ac63cb5f6f3d62540d92249ad2) Thanks [@konopkov](https://github.com/konopkov)! - Add the Stacks module to the hub: `#stacks/overview` lists the credential host's alchemy stacks grouped by app, with resource counts and each stage's latest CI-published plan, and `#stacks/stack` shows one stage's activity and its resources, state, outputs and plan. Read-only; it is served only by the hub named in `RELAY_STACKS_HOST` and says why it is unavailable anywhere else. Last apply, drift and approval gates read "Not checked yet" for now.
+
+- [#1027](https://github.com/knpkv/npm/pull/1027) [`6140a40`](https://github.com/knpkv/npm/commit/6140a4020fa624365382fd8716592d33425c932d) Thanks [@konopkov](https://github.com/konopkov)! - Plan head, base and digest ids are copy buttons. The plan line and Stacks Activity show the words Head, Base and Digest. The short id is the button's name and the clipboard value, not the visible text.
+
+- [#1026](https://github.com/knpkv/npm/pull/1026) [`3404bcf`](https://github.com/knpkv/npm/commit/3404bcfcd50821a3bf3a30f99ca4b3fb2dd11ac2) Thanks [@konopkov](https://github.com/konopkov)! - Bind `sandbox.reset` and `sandbox.budget.lift` approvals to the pool record observed at submit. The owner host stamps its version, state, and lease holder and end, and execution rejects the job when that record has moved. A leased `endsAt` has to be a parseable UTC instant.
+
+- [#1026](https://github.com/knpkv/npm/pull/1026) [`3404bcf`](https://github.com/knpkv/npm/commit/3404bcfcd50821a3bf3a30f99ca4b3fb2dd11ac2) Thanks [@konopkov](https://github.com/konopkov)! - Add the sandbox read model (`@knpkv/sandbox-pool/host` and `./host/server`) and the hub's Sandboxes module. A quarantine or run blocker is a closed tag (`ResourcesRemain`, `NukeFailed`, `BudgetHold`, `ScanIncomplete`, or `Unknown`) with fixed copy; the stored reset line is not served. `RELAY_SANDBOXES_HOST` plus an optional `sandboxPool` configuration select the hub that opens the pool database and serves overview and paged runs. Needs-you gains an `asOf` per provider, module-page destinations, and quarantined and budget-hold items. A host that does not own the pool contributes nothing. A reader that cannot start contributes a failed unavailable issue. This does not start pool jobs or the sweep, and it does not add the Sandboxes page.
+
+- [#1026](https://github.com/knpkv/npm/pull/1026) [`3404bcf`](https://github.com/knpkv/npm/commit/3404bcfcd50821a3bf3a30f99ca4b3fb2dd11ac2) Thanks [@konopkov](https://github.com/konopkov)! - Rename a stored sandbox when its contract keeps the account id and changes the name. The version and state stay, and an account that left the contract keeps its row. A rename whose stored version moved writes nothing.
+
+### Patch Changes
+
+- [#1028](https://github.com/knpkv/npm/pull/1028) [`65ee3f4`](https://github.com/knpkv/npm/commit/65ee3f4f155d0516416482bd039bc30ffb124e48) Thanks [@konopkov](https://github.com/konopkov)! - When the local project walk stops early, the Stacks overview says "The project walk stopped early, so projects already found are listed." The stacks found before the stop stay on the page. A local state file past its size limit does not use that sentence.
+
+- [#1024](https://github.com/knpkv/npm/pull/1024) [`56c6996`](https://github.com/knpkv/npm/commit/56c6996b14b35f508ed83d2fd780d54f8dca1232) Thanks [@konopkov](https://github.com/konopkov)! - The Stacks overview no longer reports S3-backed stacks as unreadable. Their listing carries no resource count, which isn't a failure. Their resources now read "Not counted", and no stacks are named as unreadable. Source problems collapse to one line per cause, with what was skipped and how to fix it, for example "Sign-in expired for 8 AWS profiles, so their state buckets weren't read. Fix: run aws sso login for them on the stacks host." When nothing could be read, a single card names the cause and the fix.
+- Updated dependencies [[`56c6996`](https://github.com/knpkv/npm/commit/56c6996b14b35f508ed83d2fd780d54f8dca1232), [`382cdd3`](https://github.com/knpkv/npm/commit/382cdd3c116c1b9d956c1ea55e4956eb10345178), [`e58ea2f`](https://github.com/knpkv/npm/commit/e58ea2f90e1b30580ab9eb201033ad21cfb09f11), [`65ee3f4`](https://github.com/knpkv/npm/commit/65ee3f4f155d0516416482bd039bc30ffb124e48), [`2ca72de`](https://github.com/knpkv/npm/commit/2ca72dec189c75ac63cb5f6f3d62540d92249ad2), [`7015e2c`](https://github.com/knpkv/npm/commit/7015e2cd1315f80a6198e62c0344bb41cb3d68dd), [`6140a40`](https://github.com/knpkv/npm/commit/6140a4020fa624365382fd8716592d33425c932d), [`bf62e19`](https://github.com/knpkv/npm/commit/bf62e19a1db55acd14169dbd315e694cc9e15e8a), [`3404bcf`](https://github.com/knpkv/npm/commit/3404bcfcd50821a3bf3a30f99ca4b3fb2dd11ac2), [`3404bcf`](https://github.com/knpkv/npm/commit/3404bcfcd50821a3bf3a30f99ca4b3fb2dd11ac2), [`3404bcf`](https://github.com/knpkv/npm/commit/3404bcfcd50821a3bf3a30f99ca4b3fb2dd11ac2)]:
+  - @knpkv/alchemy-console@0.6.0
+  - @knpkv/codecommit-web@0.39.0
+  - @knpkv/review@0.7.0
+  - @knpkv/rly@0.24.0
+  - @knpkv/herdr-fleet@0.16.0
+  - @knpkv/sandbox-pool@0.3.0
+  - @knpkv/herdr-connect@0.29.6
+  - @knpkv/herdr-work@0.12.9
+  - @knpkv/relay-product@0.6.3
+  - @knpkv/herdr-coordinator@0.4.8
+
 ## 0.45.0
 
 ### Minor Changes

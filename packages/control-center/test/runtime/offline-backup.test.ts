@@ -590,6 +590,36 @@ describe("offline backup commands", () => {
       )
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped), { timeout: 30_000 })
 
+  it.layer(NodeServices.layer)((it) => {
+    // A first `npx @knpkv/control-center --help` has no data root configured; help must not read or create one.
+    it.effect("prints built CLI help without a configured data root and creates nothing", () =>
+      Effect.gen(function*() {
+        const fileSystem = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const cliEntry = yield* path.fromFileUrl(new URL("../../dist/server/server/cli.js", import.meta.url))
+        const empty = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-built-help-" })
+        const handle = yield* ChildProcess.make("node", [cliEntry, "--help"], {
+          cwd: empty,
+          env: {
+            ...inactiveTelemetryEnvironment,
+            CONTROL_CENTER_DATA_ROOT: undefined,
+            HOME: empty,
+            XDG_DATA_HOME: undefined
+          },
+          extendEnv: true
+        })
+        const [stdout, stderr, exitCode] = yield* Effect.all([
+          handle.stdout.pipe(Stream.decodeText(), Stream.runFold(() => "", (output, chunk) => output + chunk)),
+          handle.stderr.pipe(Stream.decodeText(), Stream.runFold(() => "", (output, chunk) => output + chunk)),
+          handle.exitCode
+        ], { concurrency: "unbounded" })
+        assert.strictEqual(exitCode, ChildProcessSpawner.ExitCode(0))
+        assert.match(stdout, /^Usage: control-center \[--help \| /u)
+        assert.strictEqual(stderr, "")
+        assert.deepStrictEqual(yield* fileSystem.readDirectory(empty), [])
+      }).pipe(Effect.scoped), { timeout: 30_000 })
+  })
+
   it.effect("runs the built CLI backup, verify, and restore commands", () =>
     Effect.gen(function*() {
       const { configuredRoot, parent } = yield* makePreparedRoot("control-center-built-cli-")
@@ -608,8 +638,14 @@ describe("offline backup commands", () => {
       assert.strictEqual(unsupported.stdout, "")
       assert.strictEqual(
         unsupported.stderr,
-        "Usage: control-center [--no-open | serve | recover-owner | backup <archive> | verify-backup <archive> | restore <archive>]\n"
+        "Usage: control-center [--help | --no-open | serve | recover-owner | backup <archive> | verify-backup <archive> | restore <archive>]\n"
       )
+
+      // `--help` is the same usage on stdout and a clean exit, so `npx … --help` succeeds.
+      const help = yield* runBuiltCli(cliEntry, ["--help"], configuredRoot)
+      assert.strictEqual(help.exitCode, ChildProcessSpawner.ExitCode(0))
+      assert.strictEqual(help.stdout, unsupported.stderr)
+      assert.strictEqual(help.stderr, "")
 
       const missingArchive = yield* runBuiltCli(
         cliEntry,
@@ -929,7 +965,7 @@ describe("offline backup commands", () => {
         assert.strictEqual(unsupported.stdout, "")
         assert.strictEqual(
           unsupported.stderr,
-          "Usage: control-center [--no-open | serve | recover-owner | backup <archive> | verify-backup <archive> | restore <archive>]\n"
+          "Usage: control-center [--help | --no-open | serve | recover-owner | backup <archive> | verify-backup <archive> | restore <archive>]\n"
         )
 
         const server = yield* runBuiltCli(cliEntry, ["serve"], configuredRoot, undefined, invalidActiveTelemetry)

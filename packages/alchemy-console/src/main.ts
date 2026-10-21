@@ -36,8 +36,12 @@ const run = Effect.fn("AlchemyConsole.run")(function*(port: number, noOpen: bool
   return yield* runConsole(options, browserLaunch({ ...observations, noOpen }), printOnly)
 })
 
-const login = Command.make("login", flags, ({ noOpen, port }) => run(port, noOpen, false))
-const serve = Command.make("serve", flags, ({ noOpen, port }) => run(port, noOpen, true))
+const login = Command.make("login", flags, ({ noOpen, port }) => run(port, noOpen, false)).pipe(
+  Command.withDescription("Sign in to the running console, starting it when needed, and open the browser")
+)
+const serve = Command.make("serve", flags, ({ noOpen, port }) => run(port, noOpen, true)).pipe(
+  Command.withDescription("Start the console in the foreground and print its sign-in link")
+)
 const command = Command.make("alchemy-console", flags, ({ noOpen, port }) => run(port, noOpen, false)).pipe(
   Command.withDescription("Read-only Alchemy stack API on loopback"),
   Command.withSubcommands([login, serve])

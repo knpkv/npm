@@ -214,3 +214,60 @@ it.each<"complete" | "partial" | "failed" | "one">(["complete", "partial", "fail
     }
   }
 )
+
+/** A standalone computer has no Fleet and no notification hub: no approvals strip, and no push reads. */
+it("reads neither fleet approvals nor push settings on a standalone computer", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true)
+  const requested: Array<string> = []
+  vi.stubGlobal("fetch", (input: RequestInfo | URL) => {
+    requested.push(new Request(input).url)
+    return new Promise<Response>(() => {})
+  })
+  const atoms = makeConnectAtoms()
+  const registry = AtomRegistry.make({
+    initialValues: [
+      [atoms.agents, AsyncResult.success({ agents: [], failures: [], nextCursor: null })],
+      [atoms.work, AsyncResult.initial()]
+    ]
+  })
+  let calls = 0
+  const read = Effect.suspend(() => {
+    calls += 1
+    return Effect.succeed<NeedsYouResult>({
+      _tag: "Partial",
+      items: [],
+      sources: [{ provider: "fleet", issue: { state: "failed", reason: "offline" } }],
+      contributions: []
+    })
+  })
+  const views = makeConnectModuleViews({
+    atoms,
+    now: 2000,
+    notificationState: "unsupported",
+    readApprovals: read,
+    fleet: false,
+    push: false
+  })
+  const host = document.createElement("div")
+  document.body.append(host)
+  const root = createRoot(host)
+  try {
+    await act(async () => {
+      root.render(
+        <RegistryContext.Provider value={registry}>
+          {views.pages.overview(new URLSearchParams(), { active: true, navigate: () => {}, closeSelection: () => {} })}
+        </RegistryContext.Provider>
+      )
+      for (let i = 0; i < 20; i += 1) await Promise.resolve()
+    })
+    expect(calls).toBe(0)
+    expect(host.querySelector(".connect-home-strip")).toBeNull()
+    expect(host.querySelector('a[href*="fleet/"]')).toBeNull()
+    expect(requested.filter((url) => url.includes("/v1/push/"))).toEqual([])
+  } finally {
+    await act(async () => root.unmount())
+    registry.dispose()
+    host.remove()
+    vi.unstubAllGlobals()
+  }
+})

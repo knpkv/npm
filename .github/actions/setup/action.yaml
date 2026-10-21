@@ -50,6 +50,18 @@ runs:
       if: ${{ inputs.bun-version != '' }}
       with:
         bun-version: ${{ inputs.bun-version }}
+    # Socket Firewall can crash mid-install ("TypeError: fetch failed") and still exit 0, leaving a partial
+    # node_modules that later steps fail on (`Command "playwright" not found`). An offline install afterwards
+    # succeeds only when every package the lockfile names is in place, so it turns that into a retry here.
+    # A firewall refusal fails every attempt and so still fails the step.
     - name: Install dependencies
       shell: bash
-      run: sfw pnpm install --frozen-lockfile
+      run: |
+        for attempt in 1 2 3; do
+          if sfw pnpm install --frozen-lockfile && pnpm install --frozen-lockfile --offline; then
+            exit 0
+          fi
+          echo "::warning title=Dependency install incomplete::Attempt $attempt of 3 did not install every package."
+        done
+        echo "::error title=Dependency install failed::pnpm install through Socket Firewall did not complete in 3 attempts."
+        exit 1

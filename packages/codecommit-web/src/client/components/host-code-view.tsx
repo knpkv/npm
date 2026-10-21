@@ -62,7 +62,7 @@ const approvalWords = {
   unknown: "Approval state unknown"
 } satisfies Record<CodePullRequest["approval"], string>
 const unavailableWords = {
-  not_configured: "Code has not been configured on this hub.",
+  not_configured: "Code isn’t set up on this computer.",
   other_host: "Code is available only on its credential host’s own hub.",
   cache_unavailable:
     "The Code owner cache could not be read. Check the Code owner service and hub log on this host, then read again.",

@@ -1,6 +1,6 @@
 {
   "name": "@knpkv/jcf-web",
-  "version": "0.10.4",
+  "version": "0.10.5",
   "description": "Week view over Jira and Clockify that fills the gaps a Coding Agent's sessions evidence",
   "license": "MIT",
   "author": "knpkv",
@@ -68,7 +68,7 @@
     "@vitejs/plugin-react": "^6.1.1",
     "tsx": "^4.23.15",
     "typescript": "npm:@typescript/typescript6@^6.0.2",
-    "vite": "^8.3.2",
+    "vite": "^8.3.3",
     "vitest": "catalog:"
   }
 }

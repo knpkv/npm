@@ -224,6 +224,20 @@ describe("Code module reads", { concurrent: false }, () => {
     await vi.waitFor(() => expect(interrupted).toBe(2))
   })
 
+  it("shows a not-set-up card with the setting and no queue controls when this computer has no Code", async () => {
+    const read = vi.fn((): CodeQueue => ({ _tag: "Unavailable", reason: "not_configured", host: null }))
+    await render({ ...defaults, queue: () => Effect.sync(read) }, "filter=open&search=&offset=0")
+    await act(async () => vi.waitFor(() => expect(read).toHaveBeenCalledOnce()))
+    const card = document.querySelector('section[data-tone="neutral"]')
+    expect(card?.querySelector("h2")?.textContent).toBe("Code isn’t set up on this computer.")
+    expect(card?.textContent).toContain("Not available")
+    expect(card?.querySelector("code")?.textContent).toBe("RELAY_CODE_HOST")
+    expect(card?.textContent).toContain("to the host that holds the CodeCommit credentials.")
+    expect(document.querySelector("input, select, [role=tablist]")).toBeNull()
+    expect(document.body.textContent).not.toContain("Read again")
+    expect(document.body.textContent).not.toContain("Code owner UI")
+  })
+
   it("shows permission-required instructions without a remote loopback link or publication controls", async () => {
     const read = vi.fn(
       () =>
