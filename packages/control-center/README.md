@@ -4,6 +4,18 @@ Control Center is a local, human- and agent-oriented delivery application. It co
 
 This package is under active development, and its public API remains subject to change before `1.0.0`.
 
+## Run it on its own
+
+```sh
+npx @knpkv/control-center serve   # prints a pairing code, listens on http://127.0.0.1:4173
+npx @knpkv/control-center         # the same, and opens the browser
+npx @knpkv/control-center --help
+```
+
+It runs on Node 26 with nothing else running: no hub, no AWS profile, no Atlassian connection. It starts without
+them. Pair at `/pair` with the printed code. Data lives in
+the data root described under [Run the application](#run-the-application); `CONTROL_CENTER_DATA_ROOT` picks it.
+
 ## Development
 
 Node.js 26 or newer and the repository-pinned pnpm version are required.

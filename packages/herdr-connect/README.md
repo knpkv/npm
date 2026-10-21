@@ -58,6 +58,10 @@ An archived stage is read-only: first-seen and closure timestamps, state at clos
 
 `AgentPostStore.selfUpdate` merges partial updates into the latest state, defaults a first accessory to none, and rate-limits each host and stable agent ID to a burst of three with one token refilled per ten seconds. `selfLatestMany` reads those rows; confirmed archive clears state and the rate bucket in the shared SQLite transaction. Self-state reaches clients through directory polling. Its row and bubble presentation is pending design integration.
 
+## Run it on its own
+
+This package is a library with no executable: `hostd` from `@knpkv/herdr-hub` serves its surfaces.
+
 ## Agent voice
 
 Agents can report a short status, progress update, skill feedback, note, or blocker through the canonical hub's authenticated `POST /v1/connect/posts`. Reports contain `agentId`, `kind`, `text`, `eventId`, and optional `goalStep`. The exported `connectPostTextLimit` sets status text to 240 characters and other kinds to 1024, measured with `string.length`. Posting schemas reject empty or whitespace-only text, preserving valid text unchanged, including URLs. Stored-report and last-words schemas still accept historical whitespace-only text. These are plain-text updates, never terminal transcripts or HTML. Consumers must render text as text.
