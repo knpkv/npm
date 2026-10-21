@@ -1,6 +1,6 @@
 /** Host-local Sandboxes mount: redacted pool cards and run pages, on the configured host only. @module */
 import { FleetValidationError } from "@knpkv/herdr-fleet"
-import { FleetHostName } from "@knpkv/herdr-fleet/model"
+import { FleetHostName, type SandboxExtend, type SandboxLease, type SandboxRelease } from "@knpkv/herdr-fleet/model"
 import { type PoolContract } from "@knpkv/sandbox-pool"
 import {
   SandboxesOverview,
@@ -13,8 +13,18 @@ import { makeSandboxHostReads, type SandboxHostReads } from "@knpkv/sandbox-pool
 import { Config, Effect, Exit, Layer, Option, Path, Schema, Scope } from "effect"
 import { sandboxesModule } from "./module-contract.js"
 import { NeedsYouProviderResult } from "./module-needs-you.js"
-import { ModuleHandlers, moduleReadRoute, ModuleRouteFailure, moduleUnavailableCopy } from "./module-server.js"
+import {
+  type ModuleCaller,
+  ModuleHandlers,
+  moduleReadRoute,
+  ModuleRouteFailure,
+  moduleUnavailableCopy,
+  moduleWriteRoute
+} from "./module-server.js"
 import { openSandboxDatabase } from "./sandbox-store.js"
+import { SandboxesCaller, SandboxJobOrder, SandboxJobSubmitted } from "./sandboxes-contract.js"
+
+export { SandboxesCaller, SandboxJobOrder, SandboxJobSubmitted }
 
 /** Missing configuration is unavailable; invalid configuration fails startup without auto-detection. */
 export const readSandboxesHost = Config.option(Config.String("RELAY_SANDBOXES_HOST")).pipe(
@@ -41,6 +51,36 @@ export const servesSandboxes = (configuration: {
   configuration.sandboxesHost.toLowerCase() === configuration.host.toLowerCase() &&
   configuration.isHub &&
   configuration.pool !== null
+
+/** The Fleet job an order becomes. The job's actor is the caller, so Fleet checks the holder itself. */
+export type SandboxJobPayload = SandboxLease | SandboxExtend | SandboxRelease
+
+/**
+ * Submits one job as `actor`, recorded with the caller's own `provenance`, and starts it when Fleet queued
+ * it. Failures carry public copy only.
+ */
+export type SandboxJobSubmit = (
+  payload: SandboxJobPayload,
+  actor: string,
+  provenance: ModuleCaller["provenance"]
+) => Effect.Effect<SandboxJobSubmitted, ModuleRouteFailure>
+
+/** Whether the shell lists Sandboxes on this listener: exactly the listeners the module answers on. */
+export const sandboxesListedOn = (listener: string): boolean =>
+  sandboxesModule.listeners.some((answers) => answers === listener)
+
+const payloadOf = (order: SandboxJobOrder): SandboxJobPayload => {
+  switch (order._tag) {
+    case "Lease":
+      return { kind: "sandbox.lease" }
+    case "Extend":
+      return { kind: "sandbox.extend", accountId: order.accountId }
+    case "Release":
+      return { kind: "sandbox.release", accountId: order.accountId }
+  }
+}
+
+const NoQuery = Schema.fromURLSearchParams(Schema.Struct({}))
 
 /** The sandbox reader couldn't open its database. Routes report it as unavailable. */
 export class SandboxReaderStartError extends Schema.TaggedError<SandboxReaderStartError>()(
@@ -75,6 +115,8 @@ export const makeSandboxesModule = (configuration: {
   readonly pool: PoolContract | null
   readonly pendingLifts: Effect.Effect<ReadonlySet<string>, unknown>
   readonly reads?: Effect.Effect<SandboxHostReads, SandboxReaderStartError, Scope.Scope>
+  /** Fleet submission for the jobs route. Only reached for the hub's own node while the pool is served. */
+  readonly submit: SandboxJobSubmit
 }) => ({
   descriptor: sandboxesModule,
   handlers: Layer.effect(
@@ -156,10 +198,33 @@ export const makeSandboxesModule = (configuration: {
         : started !== null && started._tag === "Failure"
         ? Effect.succeed(readerDown)
         : Effect.succeed(emptyNeedsYou)
+      // Same origin is checked by the mount before the body is read. Here: the pool must be served, and
+      // only the hub's own node may submit. Fleet then holds extend and release to the caller's own lease.
+      const submitJob = (order: SandboxJobOrder, caller: ModuleCaller) =>
+        mounted._tag === "Unavailable"
+          ? Effect.fail(new ModuleRouteFailure({ status: 503, code: "unavailable" }))
+          : !caller.sameNode
+          ? Effect.fail(new ModuleRouteFailure({ status: 403, code: "owner_only" }))
+          : configuration.submit(payloadOf(order), caller.login, caller.provenance)
       return {
         routes: [
           moduleReadRoute("/overview", SandboxesOverviewQuery, SandboxesOverview, () => overview),
-          moduleReadRoute("/runs", SandboxRunsQuery, SandboxRuns, runs)
+          moduleReadRoute("/runs", SandboxRunsQuery, SandboxRuns, runs),
+          moduleReadRoute(
+            "/caller",
+            NoQuery,
+            SandboxesCaller,
+            (_query, caller) => Effect.succeed({ login: caller.login, owner: caller.sameNode })
+          ),
+          moduleWriteRoute(
+            "POST",
+            "/jobs",
+            NoQuery,
+            SandboxJobOrder,
+            SandboxJobSubmitted,
+            (order, _query, caller) => submitJob(order, caller),
+            202
+          )
         ],
         needsYou
       }

@@ -61,8 +61,12 @@ import { makeUsageModuleViews, type UsageModuleReads } from "./usage-module-view
 import { makeCodeModuleViews } from "./code-module-view.js"
 import { loadStack, loadStackPlan, loadStacksOverview, type StacksModuleReads } from "./stacks-client.js"
 import { makeStacksModuleViews } from "./stacks-module-view.js"
-import { loadSandboxesOverview } from "./sandboxes-client.js"
-import { makeSandboxesModuleViews, type SandboxesModuleReads } from "./sandboxes-module-view.js"
+import { loadSandboxesCaller, loadSandboxesOverview, submitSandboxJob } from "./sandboxes-client.js"
+import {
+  makeSandboxesModuleViews,
+  type SandboxesModuleReads,
+  type SandboxesModuleWrites
+} from "./sandboxes-module-view.js"
 import {
   loadCodeQueue,
   loadCodeDetail,
@@ -718,15 +722,13 @@ const DashboardApp = ({
   const resources = makeResourcesModuleViews({ host: current.host, read: resourcesRead })
   const code = makeCodeModuleViews({ reads: codeReads })
   const stacks = makeStacksModuleViews({ reads: stacksReads })
-  // Owner identity and writes arrive with the sandbox jobs route; until then every viewer reads only.
+  // The page reads its caller; only the hub's own node sees and may use lease, extend and release.
   const sandboxes = current.approvalApp.sandboxesEnabled
     ? [
         makeSandboxesModuleViews({
-          owner: false,
           reads: sandboxesReads,
           timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-          viewer: "",
-          writes: null
+          writes: sandboxesWrites
         })
       ]
     : []
@@ -850,7 +852,16 @@ const stacksReads: StacksModuleReads = {
   stack: (id) => runCodeRead(loadStack(id)),
   plan: (id) => runCodeRead(loadStackPlan(id))
 }
-const sandboxesReads: SandboxesModuleReads = { overview: runCodeRead(loadSandboxesOverview) }
+const sandboxesReads: SandboxesModuleReads = {
+  overview: runCodeRead(loadSandboxesOverview),
+  caller: runCodeRead(loadSandboxesCaller)
+}
+/** The hub refuses these unless the page runs on its own node; the page shows them only to that owner. */
+const sandboxesWrites: SandboxesModuleWrites = {
+  lease: runCodeRead(submitSandboxJob({ _tag: "Lease" })).pipe(Effect.asVoid),
+  extend: (accountId) => runCodeRead(submitSandboxJob({ _tag: "Extend", accountId })).pipe(Effect.asVoid),
+  release: (accountId) => runCodeRead(submitSandboxJob({ _tag: "Release", accountId })).pipe(Effect.asVoid)
+}
 const relayConversations = makeRelayConversations(
   makeRelayClient({ base: "/v1/relay", origin: window.location.href }),
   applicationRuntime

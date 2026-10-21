@@ -13,11 +13,15 @@ import { type NeedsYouProviderResult, NeedsYouResult } from "./module-needs-you.
 /**
  * Authenticated login from the listener authorization result, never client-supplied selectors.
  * `sameNode` is true only when the server proved the caller is the hub's own tailnet node; an
- * authorizer that does not say decodes as false.
+ * authorizer that does not say decodes as false. `provenance` is `verified_local_listener` only for a
+ * direct, unproxied loopback request; an authorizer that does not say decodes as remote.
  */
 export const ModuleCaller = Schema.Struct({
   login: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(254), Schema.isPattern(/^[^\s\p{Cc}]+$/u)),
-  sameNode: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(false)))
+  sameNode: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(false))),
+  provenance: Schema.Literals(["verified_local_listener", "authenticated_remote"]).pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed("authenticated_remote"))
+  )
 })
 export type ModuleCaller = typeof ModuleCaller.Type
 
@@ -28,7 +32,7 @@ export interface ModuleResponse {
 
 /** Safe route failures carry public copy only. Provider errors stay inside the module. */
 export class ModuleRouteFailure extends Schema.TaggedError<ModuleRouteFailure>()("ModuleRouteFailure", {
-  status: Schema.Literals([400, 404, 409, 500, 503]),
+  status: Schema.Literals([400, 403, 404, 409, 500, 503]),
   code: Schema.String
 }) {}
 

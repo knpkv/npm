@@ -204,7 +204,7 @@ import {
 import { connectModule, fleetHubModule, resourcesModule, usageModule } from "./module-contract.js"
 import type { NeedsYouCandidate, NeedsYouIssue, NeedsYouProviderResult } from "./module-needs-you.js"
 import * as ModuleServer from "./module-server.js"
-import type { ModuleRouteFailure, ServerModule } from "./module-server.js"
+import { ModuleRouteFailure, type ServerModule } from "./module-server.js"
 import { generateVapidKeys, makePushSender } from "./push-sender.js"
 import { validatePushEndpoint } from "./push-subscription.js"
 import { type ApprovalNotificationBatch, makePushWorker } from "./push-worker.js"
@@ -212,7 +212,7 @@ import { relayIconSvg } from "./relay-icon.js"
 import { hubCapabilities, HubReadFailed, type HubRelayReads, type PendingJob } from "./relay/capabilities.js"
 import { cliBackends, makeRelayHubMount, type RelayHubBackends, type RelayHubMount } from "./relay/mount.js"
 import { handleRelayRoute } from "./relay/routes.js"
-import { makeSandboxesModule, sandboxesModuleUrl, servesSandboxes } from "./sandboxes-module.js"
+import { makeSandboxesModule, sandboxesListedOn, sandboxesModuleUrl, servesSandboxes } from "./sandboxes-module.js"
 import { makeStacksModule } from "./stacks-module.js"
 import { ApprovalAppStore } from "./store.js"
 import { workCheckpointPath, workPullRequestAttachPath, workSnapshotPath } from "./work-checkpoint.js"
@@ -1892,7 +1892,20 @@ export const startHttpServer = async (
             }
             return ids
           }))
-        )
+        ),
+        // The module has checked same origin, the served pool and the hub's own node, and passes the
+        // caller's own provenance. A queued job starts like any other submission.
+        submit: (payload, actor, provenance) =>
+          service.submit({ payload }, actor, provenance).pipe(
+            Effect.tap((record) => record.status === "queued" ? enqueueJob(record.id) : Effect.void),
+            Effect.map((record) => ({ jobId: record.id, status: record.status })),
+            Effect.mapError((error) =>
+              new ModuleRouteFailure({
+                status: error._tag === "FleetValidationError" ? 409 : 503,
+                code: error._tag === "FleetValidationError" ? "rejected" : "unavailable"
+              })
+            )
+          )
       }),
       makeCodeModule({
         host: config.host,
@@ -3147,11 +3160,11 @@ export const startHttpServer = async (
                   ? tailnetIdentity(request, config, mode === "approval" ? config.approvalNodes : null).pipe(
                     Effect.map((identity) => moduleCallerFor(config, identity))
                   )
-                  : authorized.pipe(Effect.map((login) => ({
-                    login,
+                  : authorized.pipe(Effect.map((login) => {
                     // A direct loopback viewer is on this machine; a proxied one may not be.
-                    sameNode: submissionProvenance(mode, request) === "verified_local_listener"
-                  }))),
+                    const provenance = submissionProvenance(mode, request)
+                    return { login, sameNode: provenance === "verified_local_listener", provenance }
+                  })),
                 sameOrigin: sameOrigin(request, expectedOrigin()),
                 readJson: () => readJson(request, Schema.Json)
               }).pipe(Effect.provideService(ModuleServer.ModuleRegistry, registry), Effect.result)
@@ -3278,7 +3291,7 @@ export const startHttpServer = async (
                   superapp: listenerServesSuperapp(mode),
                   fleet: config.crossHost,
                   workEnabled: listenerServesWork(mode, config.crossHost),
-                  sandboxesEnabled: mode === "serve" && servesSandboxes({
+                  sandboxesEnabled: sandboxesListedOn(mode) && servesSandboxes({
                     host: config.host,
                     isHub,
                     sandboxesHost: options.sandboxesHost ?? null,

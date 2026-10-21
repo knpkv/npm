@@ -10,7 +10,10 @@ import { dispatchModuleRoute, makeModuleLayer, ModuleHandlers } from "../src/mod
 import {
   makeSandboxesModule,
   readSandboxesHost,
+  sandboxesListedOn,
   sandboxesModuleUrl,
+  type SandboxJobPayload,
+  type SandboxJobSubmit,
   SandboxReaderStartError
 } from "../src/sandboxes-module.js"
 
@@ -33,17 +36,44 @@ const pool = Schema.decodeUnknownSync(PoolContract)({
 
 const request = (
   path: string,
-  listener: "serve" | "approval" | "tailnet" | "lan" | "work" = "serve",
-  method = "GET"
+  listener: "serve" | "local" | "approval" | "tailnet" | "lan" | "work" = "serve",
+  method = "GET",
+  options: {
+    readonly sameNode?: boolean
+    readonly provenance?: "verified_local_listener" | "authenticated_remote"
+    readonly body?: Schema.Json
+    readonly sameOrigin?: Effect.Effect<void, OriginRefused>
+  } = {}
 ) =>
   dispatchModuleRoute({
     method,
     listener,
     url: new URL(`https://hub.example/v1/modules/${path}`),
-    authorize: Effect.succeed({ login: "example-viewer", sameNode: false }),
-    sameOrigin: Effect.void,
-    readJson: () => Effect.die("Sandboxes has no write routes")
+    authorize: Effect.succeed({
+      login: "example-viewer",
+      sameNode: options.sameNode ?? false,
+      provenance: options.provenance ?? "authenticated_remote"
+    }),
+    sameOrigin: options.sameOrigin ?? Effect.void,
+    readJson: () => Effect.succeed(options.body ?? null)
   })
+
+class OriginRefused extends Schema.TaggedError<OriginRefused>()("OriginRefused", {}) {}
+
+/** Records each job the module submits, as Fleet would receive it. */
+const recordingSubmit = () => {
+  const submitted: Array<{
+    readonly payload: SandboxJobPayload
+    readonly actor: string
+    readonly provenance: string
+  }> = []
+  const submit: SandboxJobSubmit = (payload, actor, provenance) =>
+    Effect.sync(() => {
+      submitted.push({ payload, actor, provenance })
+      return { jobId: `job-${submitted.length}`, status: "queued" }
+    })
+  return { submit, submitted }
+}
 
 const overview: SandboxesOverview = {
   _tag: "Ready",
@@ -81,6 +111,7 @@ const withModule = <A, E, R>(
     readonly pool?: null
     readonly isHub?: boolean
     readonly pending?: ReadonlySet<string>
+    readonly submit?: SandboxJobSubmit
   } = {}
 ) =>
   Effect.gen(function*() {
@@ -96,7 +127,8 @@ const withModule = <A, E, R>(
             stateDirectory: "/fixture",
             pool: options.pool === null ? null : pool,
             pendingLifts: Effect.succeed(options.pending ?? new Set()),
-            reads: options.reads ?? Effect.succeed(fakeReads)
+            reads: options.reads ?? Effect.succeed(fakeReads),
+            submit: options.submit ?? (() => Effect.die("no job expected"))
           })
         ]
       ).pipe(Layer.provide(Layer.merge(NodeServices.layer, NodeHttpClient.layerNodeHttp)))
@@ -255,4 +287,124 @@ describe("host-local Sandboxes module", () => {
         contributions: [{ provider: "sandboxes", asOf: null }]
       })
     }))
+
+  it.effect("tells the page who is reading and whether that is the hub's own node", () =>
+    withModule(
+      host,
+      Effect.gen(function*() {
+        expect((yield* request("sandboxes/caller"))?.body).toEqual({ login: "example-viewer", owner: false })
+        expect((yield* request("sandboxes/caller", "serve", "GET", { sameNode: true }))?.body).toEqual({
+          login: "example-viewer",
+          owner: true
+        })
+      })
+    ))
+
+  it.effect("submits lease, extend and release as the caller from the hub's own node", () => {
+    const { submit, submitted } = recordingSubmit()
+    return withModule(
+      host,
+      Effect.gen(function*() {
+        const post = (body: Schema.Json) => request("sandboxes/jobs", "serve", "POST", { sameNode: true, body })
+        const leased = yield* post({ _tag: "Lease" })
+        expect(leased).toEqual({ status: 202, body: { jobId: "job-1", status: "queued" } })
+        yield* post({ _tag: "Extend", accountId: account })
+        yield* post({ _tag: "Release", accountId: account })
+        expect(submitted).toEqual([
+          { payload: { kind: "sandbox.lease" }, actor: "example-viewer", provenance: "authenticated_remote" },
+          {
+            payload: { kind: "sandbox.extend", accountId: account },
+            actor: "example-viewer",
+            provenance: "authenticated_remote"
+          },
+          {
+            payload: { kind: "sandbox.release", accountId: account },
+            actor: "example-viewer",
+            provenance: "authenticated_remote"
+          }
+        ])
+      }),
+      { submit }
+    )
+  })
+
+  it("lists the row on exactly the listeners the module answers on", () => {
+    expect(["serve", "local", "approval", "tailnet", "lan"].filter(sandboxesListedOn)).toEqual(["serve", "local"])
+  })
+
+  it.effect("records a direct loopback caller's job as a local submission", () => {
+    const { submit, submitted } = recordingSubmit()
+    return withModule(
+      host,
+      Effect.gen(function*() {
+        yield* request("sandboxes/jobs", "local", "POST", {
+          sameNode: true,
+          provenance: "verified_local_listener",
+          body: { _tag: "Lease" }
+        })
+        expect(submitted).toEqual([
+          { payload: { kind: "sandbox.lease" }, actor: "example-viewer", provenance: "verified_local_listener" }
+        ])
+      }),
+      { submit }
+    )
+  })
+
+  it.effect("refuses a job from any other node, a bad body or another origin, and submits nothing", () => {
+    const { submit, submitted } = recordingSubmit()
+    return withModule(
+      host,
+      Effect.gen(function*() {
+        const other = yield* Effect.result(
+          request("sandboxes/jobs", "serve", "POST", { sameNode: false, body: { _tag: "Lease" } })
+        )
+        expect(Result.isFailure(other) && other.failure).toMatchObject({ _tag: "ModuleRouteFailure", status: 403 })
+        const bad = yield* Effect.result(
+          request("sandboxes/jobs", "serve", "POST", { sameNode: true, body: { _tag: "Extend", accountId: "nope" } })
+        )
+        expect(Result.isFailure(bad) && bad.failure).toMatchObject({ _tag: "ModuleRouteFailure", status: 400 })
+        const crossOrigin = yield* Effect.result(
+          request("sandboxes/jobs", "serve", "POST", {
+            sameNode: true,
+            body: { _tag: "Lease" },
+            sameOrigin: Effect.fail(new OriginRefused())
+          })
+        )
+        expect(Result.isFailure(crossOrigin) && crossOrigin.failure._tag).toBe("OriginRefused")
+        expect(submitted).toEqual([])
+      }),
+      { submit }
+    )
+  })
+
+  it.effect("submits nothing where the pool is not served", () => {
+    const { submit, submitted } = recordingSubmit()
+    return Effect.gen(function*() {
+      const places: ReadonlyArray<{
+        readonly name: string
+        readonly sandboxesHost: FleetHostName
+        readonly options: {
+          readonly pool?: null
+          readonly reads?: Effect.Effect<SandboxHostReads, SandboxReaderStartError>
+        }
+      }> = [
+        { name: "another host", sandboxesHost: other, options: {} },
+        { name: "no pool", sandboxesHost: host, options: { pool: null } },
+        {
+          name: "reader down",
+          sandboxesHost: host,
+          options: { reads: Effect.fail(new SandboxReaderStartError({ cause: "database unavailable" })) }
+        }
+      ]
+      for (const { name, options, sandboxesHost } of places) {
+        const refused = yield* withModule(
+          sandboxesHost,
+          Effect.result(request("sandboxes/jobs", "serve", "POST", { sameNode: true, body: { _tag: "Lease" } })),
+          { ...options, submit }
+        )
+        expect(Result.isFailure(refused) && refused.failure, name).toMatchObject({ status: 503 })
+      }
+      expect(submitted).toEqual([])
+    })
+  })
 })

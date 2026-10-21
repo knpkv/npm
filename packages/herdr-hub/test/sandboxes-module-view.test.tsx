@@ -71,6 +71,7 @@ describe("Sandboxes overview", { concurrent: false }, () => {
     options: {
       readonly read?: SandboxesModuleReads["overview"]
       readonly owner?: boolean
+      readonly caller?: SandboxesModuleReads["caller"]
       readonly writes?: SandboxesModuleWrites | null
       readonly timeZone?: string
     } = {}
@@ -81,13 +82,14 @@ describe("Sandboxes overview", { concurrent: false }, () => {
       root = createRoot(host)
     }
     const navigate = vi.fn<ModulePageMount["navigate"]>()
-    const reads: SandboxesModuleReads = { overview: options.read ?? Effect.succeed(overview) }
+    const reads: SandboxesModuleReads = {
+      overview: options.read ?? Effect.succeed(overview),
+      caller: options.caller ?? Effect.succeed({ login: "agent-a", owner: options.owner ?? true })
+    }
     const module = makeSandboxesModuleViews({
       reads,
       writes: options.writes === undefined ? null : options.writes,
-      owner: options.owner ?? true,
-      timeZone: options.timeZone ?? "UTC",
-      viewer: "agent-a"
+      timeZone: options.timeZone ?? "UTC"
     })
     await act(async () =>
       root?.render(
@@ -270,6 +272,22 @@ describe("Sandboxes overview", { concurrent: false }, () => {
     expect(text('[role="dialog"] [role="alert"]')).toBe(
       "The lease may not have been submitted. Check the cards before trying again."
     )
+  })
+
+  it("names one next-free time in the header and the notice while the pool is stale", async () => {
+    // Read at 13:05; the 13:06 end is still ahead then. Two minutes later the read fails and the pool is stale.
+    const overview = ready([
+      leased("ephemeral-01", "999999999990", "agent-b", "2026-10-17T05:06:00.000Z", "2026-10-17T13:06:00.000Z"),
+      leased("ephemeral-02", "999999999991", "agent-b", "2026-10-17T09:20:00.000Z", "2026-10-17T17:20:00.000Z")
+    ])
+    let reads = 0
+    const read = Effect.suspend(() =>
+      reads++ === 0 ? Effect.succeed(overview) : Effect.fail(new SandboxesClientError({ detail: "network" }))
+    )
+    await render(overview, { read })
+    await act(async () => await vi.advanceTimersByTimeAsync(120_000))
+    expect(text("[data-pool-notice]")).toBe("Both accounts are leased. The next one frees at 13:06.")
+    expect(text(".sandboxes-lease")).toContain("No account is free until 13:06.")
   })
 
   it("says above the cards when every account is leased and when the next one frees", async () => {
@@ -657,6 +675,29 @@ describe("Sandboxes overview", { concurrent: false }, () => {
     expect(text("[data-pool-read]")).toBe("Read 13:05 from hostd")
   })
 
+  it("shows no owner actions until the caller read answers, or when it fails", async () => {
+    const pool = ready([
+      available("ephemeral-02", "999999999991", null),
+      leased("ephemeral-01", "999999999990", "agent-a", "2026-10-17T09:20:00.000Z", "2026-10-17T17:20:00.000Z")
+    ])
+    for (const caller of [Effect.never, Effect.fail(new SandboxesClientError({ detail: "network" }))]) {
+      await render(pool, { caller })
+      expect(buttons()).not.toContain("Lease an account")
+      expect(buttons()).not.toContain("Extend")
+      expect(document.querySelector("button[aria-label='Copy account ID 999999999990']")).not.toBeNull()
+    }
+  })
+
+  it("takes the viewer's own lease from the caller's login", async () => {
+    await render(
+      ready([
+        leased("ephemeral-01", "999999999990", "agent-b", "2026-10-17T09:20:00.000Z", "2026-10-17T17:20:00.000Z")
+      ]),
+      { caller: Effect.succeed({ login: "agent-b", owner: true }) }
+    )
+    expect(buttons('[data-account="ephemeral-01"] button')).toEqual(["Copy", "Extend", "Release"])
+  })
+
   it("hides lease, extend and release from a viewer and still copies the account id", async () => {
     const writeText = vi.fn(() => Promise.resolve())
     const prior = Object.getOwnPropertyDescriptor(navigator, "clipboard")
@@ -706,11 +747,9 @@ describe("Sandboxes overview", { concurrent: false }, () => {
       root = createRoot(host)
     }
     const module = makeSandboxesModuleViews({
-      reads: { overview: Effect.never },
+      reads: { overview: Effect.never, caller: Effect.never },
       writes: null,
-      owner: true,
-      timeZone: "UTC",
-      viewer: "agent-a"
+      timeZone: "UTC"
     })
     await act(async () =>
       root?.render(
