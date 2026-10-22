@@ -1482,6 +1482,12 @@ describe("Sandboxes overview", { concurrent: false }, () => {
       expect(writeText).toHaveBeenCalledWith(profile)
     })
 
+    it("offers no CLI profile for an account whose name would break the profile, and keeps the console", async () => {
+      await render(ready([available("old]name", "999999999991", null)]), { signIn })
+      expect(button("Open console", '[data-account="old]name"]')?.disabled).toBe(false)
+      expect(button("Copy CLI profile", '[data-account="old]name"]')).toBeUndefined()
+    })
+
     it("offers neither to a viewer, nor to the owner of a pool without sign-in", async () => {
       await render(pool(), { owner: false })
       expect(buttons().filter((label) => label === "Open console" || label === "Copy CLI profile")).toEqual([])

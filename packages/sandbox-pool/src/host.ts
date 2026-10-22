@@ -13,7 +13,7 @@
  */
 import { Schema } from "effect"
 import { CleaningReason, Holder, leaseCap, leaseDuration, RunId } from "./lease.js"
-import { AccountId, type PoolContract, PoolSignIn, SandboxName } from "./pool.js"
+import { AccountId, AwsRegion, type PoolContract, PoolSignIn, SandboxName } from "./pool.js"
 import { isBudgetHold } from "./reset.js"
 import { RunStep } from "./run-log.js"
 
@@ -264,7 +264,7 @@ export type SandboxRunLogQuery = typeof SandboxRunLogQuery.Type
 /** The owner's sign-in for one pool: the contract's portal, session and role, and the pool's first region. */
 export const SandboxSignIn = Schema.Struct({
   ...PoolSignIn.fields,
-  region: Schema.NonEmptyString
+  region: AwsRegion
 })
 export interface SandboxSignIn extends Schema.Schema.Type<typeof SandboxSignIn> {}
 
@@ -279,9 +279,15 @@ export const consoleUrl = (signIn: SandboxSignIn, accountId: AccountId): string 
     role_name: signIn.roleName
   })}`
 
-/** One account's `~/.aws/config` profile, named after the account, signing in through the SSO session. */
-export const cliProfile = (signIn: SandboxSignIn, name: SandboxName, accountId: AccountId): string =>
-  [
+/** A profile name that is one token, so `[profile <name>]` stays one line. */
+const profileName = /^[A-Za-z0-9._-]{1,64}$/
+
+/**
+ * One account's `~/.aws/config` profile, named after the account, signing in through the SSO session. Null for
+ * a name that is not one token, such as one kept from an older contract: it would write extra config lines.
+ */
+export const cliProfile = (signIn: SandboxSignIn, name: SandboxName, accountId: AccountId): string | null =>
+  !profileName.test(name) ? null : [
     `[profile ${name}]`,
     `sso_session = ${signIn.ssoSession}`,
     `sso_account_id = ${accountId}`,

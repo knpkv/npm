@@ -30,12 +30,26 @@ describe("pool sign-in", () => {
     }
     expect(decode({ ...contractInput, access: { ...access, ssoSession: "a\nregion = x" } })._tag).toBe("Failure")
     expect(decode({ ...contractInput, access: { ...access, roleName: "Role Name" } })._tag).toBe("Failure")
+    expect(decode({ ...contractInput, regions: ["eu-central-1\ncredential_process = x"], access })._tag).toBe(
+      "Failure"
+    )
+    expect(decode({ ...contractInput, regions: ["us-gov-west-1", "eu-central-1"] })._tag).toBe("Success")
   })
 
   it("serves sign-in with the pool's first region, and none without access", () => {
     const pool = Schema.decodeUnknownSync(PoolContract)({ ...contractInput, access })
     expect(signInOf(pool)).toEqual({ ...access, region: "eu-central-1" })
     expect(signInOf(Schema.decodeUnknownSync(PoolContract)(contractInput))).toBeNull()
+  })
+
+  it("refuses a sign-in region or a profile name that would write extra lines into ~/.aws/config", () => {
+    expect(
+      Schema.decodeUnknownResult(SandboxSignIn)({ ...access, region: "eu-central-1\ncredential_process = x" })._tag
+    ).toBe("Failure")
+    const signIn = Schema.decodeUnknownSync(SandboxSignIn)({ ...access, region: "eu-central-1" })
+    for (const odd of ["sandbox-b]\n[profile other", "sandbox b", "sandbox-b\ncredential_process = x"]) {
+      expect(cliProfile(signIn, Schema.decodeUnknownSync(SandboxName)(odd), account)).toBeNull()
+    }
   })
 
   it("links the portal's console for one account and role, and writes its CLI profile", () => {

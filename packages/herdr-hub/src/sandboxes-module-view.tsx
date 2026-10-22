@@ -690,9 +690,8 @@ const OpenConsole = ({
 )
 
 /** The account's `~/.aws/config` profile, with its own Copy. */
-const CliProfile = ({ item, signIn }: { readonly item: SandboxCard; readonly signIn: SandboxSignIn }) => {
+const CliProfile = ({ item, profile }: { readonly item: SandboxCard; readonly profile: string }) => {
   const [failed, setFailed] = useState(false)
-  const profile = cliProfile(signIn, item.name, item.accountId)
   return (
     <div className="sandboxes-cli" data-cli-profile="">
       <div className="sandboxes-cli-box">
@@ -752,6 +751,7 @@ const CardActions = ({
   const [cliOpen, setCliOpen] = useState(false)
   const state = item.state
   const refusal = signIn === null ? null : consoleRefusal(state, viewer)
+  const profile = signIn === null ? null : cliProfile(signIn, item.name, item.accountId)
   const lease = mine && state._tag === "Leased" ? state : null
   const capped = lease !== null && atCap(lease.startedAt, lease.endsAt)
   return (
@@ -760,9 +760,11 @@ const CardActions = ({
         {signIn === null ? null : (
           <>
             <OpenConsole disabled={refusal !== null} item={item} signIn={signIn} />
-            <Button aria-expanded={cliOpen} onClick={() => setCliOpen((open) => !open)} variant="quiet">
-              Copy CLI profile
-            </Button>
+            {profile === null ? null : (
+              <Button aria-expanded={cliOpen} onClick={() => setCliOpen((open) => !open)} variant="quiet">
+                Copy CLI profile
+              </Button>
+            )}
           </>
         )}
         {lease === null ? null : <OwnLease done={done} item={item} now={now} state={lease} writes={writes} />}
@@ -775,7 +777,7 @@ const CardActions = ({
       {lease !== null && capped ? (
         <small className="sandboxes-muted">{`Extend: 24-hour cap reached at ${times.when(capOf(lease.startedAt), now)}.`}</small>
       ) : null}
-      {signIn !== null && cliOpen ? <CliProfile item={item} signIn={signIn} /> : null}
+      {profile !== null && cliOpen ? <CliProfile item={item} profile={profile} /> : null}
     </div>
   )
 }

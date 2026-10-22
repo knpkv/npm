@@ -13,6 +13,9 @@ export interface PoolAccount extends Schema.Schema.Type<typeof PoolAccount> {}
 
 const NonEmpty = Schema.NonEmptyString
 
+/** An AWS region code, such as `eu-central-1` or `us-gov-west-1`: one token, so it can't break a config line. */
+export const AwsRegion = Schema.String.check(Schema.isPattern(/^[a-z]{2}(?:-[a-z]+)+-\d+$/))
+
 /**
  * How a person signs in to a pool account, for the owner's Open console and Copy CLI profile.
  * `portalUrl` is the AWS access portal's start URL: https, with no query or fragment, since the console
@@ -50,7 +53,7 @@ const distinct = (values: ReadonlyArray<string>): boolean => new Set(values).siz
 export const PoolContract = Schema.Struct({
   accounts: Schema.NonEmptyArray(PoolAccount),
   nukeBlocklist: Schema.NonEmptyArray(AccountId),
-  regions: Schema.NonEmptyArray(NonEmpty),
+  regions: Schema.NonEmptyArray(AwsRegion),
   accountAccessRole: NonEmpty,
   boundaryPath: Schema.String.check(Schema.isPattern(/^\/(?:[\w+=,.@-]+\/)*$/)),
   boundaryName: NonEmpty,
