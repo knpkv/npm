@@ -1,7 +1,7 @@
 import { NodeServices } from "@effect/platform-node"
 import { expect, it } from "@effect/vitest"
 import { openPrivateSqlite } from "@knpkv/herdr-fleet/sqlite"
-import { AccountId, Holder, lease, PoolContract, RunEntry, RunId, SandboxName } from "@knpkv/sandbox-pool"
+import { AccountId, Holder, lease, PoolContract, RunEntry, RunId, SandboxName, SpendReading } from "@knpkv/sandbox-pool"
 import { DateTime, Effect, Schema } from "effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
@@ -263,6 +263,26 @@ it.layer(NodeServices.layer)("sandbox store", (it) => {
       yield* Effect.scoped(Effect.gen(function*() {
         const { store } = yield* openSandboxDatabase(path, contract)
         expect(yield* store.sweepAt).toBe(1_700_000_000_000)
+      }))
+    }))
+
+  it.effect("keeps each account's latest spend reading across reopen", () =>
+    Effect.gen(function*() {
+      const path = yield* databasePath
+      const reading = Schema.decodeUnknownSync(SpendReading)
+      yield* Effect.scoped(Effect.gen(function*() {
+        const { store } = yield* openSandboxDatabase(path, contract)
+        expect(yield* store.spend).toEqual([])
+        yield* store.recordSpend(reading({ accountId: "999999999991", usd: 3.1, asOf: 1_000 }))
+        yield* store.recordSpend(reading({ accountId: "999999999990", usd: 7.4, asOf: 1_000 }))
+        yield* store.recordSpend(reading({ accountId: "999999999990", usd: 50.2, asOf: 2_000 }))
+      }))
+      yield* Effect.scoped(Effect.gen(function*() {
+        const { store } = yield* openSandboxDatabase(path, contract)
+        expect(yield* store.spend).toEqual([
+          { accountId: "999999999990", usd: 50.2, asOf: 2_000 },
+          { accountId: "999999999991", usd: 3.1, asOf: 1_000 }
+        ])
       }))
     }))
 })

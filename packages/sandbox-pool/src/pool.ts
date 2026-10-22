@@ -31,6 +31,14 @@ export const PoolSignIn = Schema.Struct({
 })
 export interface PoolSignIn extends Schema.Schema.Type<typeof PoolSignIn> {}
 
+const Dollars = Schema.Finite.check(Schema.isGreaterThan(0))
+
+/** The pool budget's alarm and hard stop, in USD. The alarm is below the stop. */
+export const SpendLimits = Schema.Struct({ alarm: Dollars, stop: Dollars }).check(
+  Schema.makeFilter(({ alarm, stop }) => alarm < stop, { expected: "a spend alarm below the hard stop" })
+)
+export interface SpendLimits extends Schema.Schema.Type<typeof SpendLimits> {}
+
 const distinct = (values: ReadonlyArray<string>): boolean => new Set(values).size === values.length
 
 /**
@@ -49,6 +57,7 @@ const distinct = (values: ReadonlyArray<string>): boolean => new Set(values).siz
  * - `budgetActionRole`, `denyAllPolicy`: the budget action's role and the
  *   policy it attaches to stop spend. A reset must never remove either.
  * - `access`: optional sign-in for people; without it the hub offers no console or CLI profile.
+ * - `spend`: optional, the budget's alarm and hard stop in USD, for the spend bar; without it there is none.
  */
 export const PoolContract = Schema.Struct({
   accounts: Schema.NonEmptyArray(PoolAccount),
@@ -60,7 +69,8 @@ export const PoolContract = Schema.Struct({
   accountAliasPrefix: NonEmpty,
   budgetActionRole: NonEmpty,
   denyAllPolicy: NonEmpty,
-  access: Schema.optionalKey(PoolSignIn)
+  access: Schema.optionalKey(PoolSignIn),
+  spend: Schema.optionalKey(SpendLimits)
 }).check(
   Schema.makeFilter(({ accounts }) => distinct(accounts.map(({ name }) => name)), {
     expected: "distinct pool account names"

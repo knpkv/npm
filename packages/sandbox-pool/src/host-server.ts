@@ -23,6 +23,7 @@ import type { RunId, Sandbox } from "./lease.js"
 import type { AccountId, PoolContract } from "./pool.js"
 import { isBudgetHoldFor } from "./reset.js"
 import { failedLine, type RunLog, runLogLines, RunNotFound, type UnknownRunCursor } from "./run-log.js"
+import type { SpendReading } from "./spend.js"
 import type { SandboxNotFound, SandboxStore, SandboxStoreUnavailable } from "./store.js"
 
 /** A quarantined row the needs-you collector can turn into one item. A budget hold is not also "quarantined". */
@@ -78,7 +79,7 @@ export const makeSandboxHostReads = (input: {
       }),
       Effect.catchTag("UnknownRunCursor", (error) => Effect.die(error))
     )
-  const card = Effect.fnUntraced(function*(sandbox: Sandbox) {
+  const card = Effect.fnUntraced(function*(sandbox: Sandbox, spendOf: (accountId: string) => SandboxCard["spend"]) {
     const label: SandboxCard["label"] = poolIds.has(sandbox.accountId) ? null : "left the pool"
     const state = sandbox.state
     switch (state._tag) {
@@ -87,6 +88,7 @@ export const makeSandboxHostReads = (input: {
           accountId: sandbox.accountId,
           name: sandbox.name,
           label,
+          spend: spendOf(sandbox.accountId),
           state: { _tag: "Available", lastResetAt: state.lastResetAt }
         } satisfies SandboxCard
       case "Leased":
@@ -94,6 +96,7 @@ export const makeSandboxHostReads = (input: {
           accountId: sandbox.accountId,
           name: sandbox.name,
           label,
+          spend: spendOf(sandbox.accountId),
           state: { _tag: "Leased", holder: state.holder, startedAt: state.startedAt, endsAt: state.endsAt }
         } satisfies SandboxCard
       case "Cleaning":
@@ -101,6 +104,7 @@ export const makeSandboxHostReads = (input: {
           accountId: sandbox.accountId,
           name: sandbox.name,
           label,
+          spend: spendOf(sandbox.accountId),
           state: {
             _tag: "Cleaning",
             runId: state.runId,
@@ -112,6 +116,7 @@ export const makeSandboxHostReads = (input: {
           accountId: sandbox.accountId,
           name: sandbox.name,
           label,
+          spend: spendOf(sandbox.accountId),
           state: {
             _tag: "Quarantined",
             runId: state.runId,
@@ -124,8 +129,15 @@ export const makeSandboxHostReads = (input: {
   const overview = Effect.fn("SandboxHost.overview")(function*() {
     const records = yield* input.store.list
     const asOf = yield* input.store.sweepAt
+    const readings = new Map<string, SpendReading>(
+      (yield* input.store.spend).map((reading) => [reading.accountId, reading])
+    )
+    const spendOf = (accountId: string): SandboxCard["spend"] => {
+      const reading = readings.get(accountId)
+      return reading === undefined ? null : { usd: reading.usd, asOf: reading.asOf }
+    }
     const now = DateTime.toEpochMillis(yield* DateTime.now)
-    const sandboxes = (yield* Effect.forEach(records, card)).sort((left, right) =>
+    const sandboxes = (yield* Effect.forEach(records, (sandbox) => card(sandbox, spendOf))).sort((left, right) =>
       left.accountId < right.accountId ? -1 : left.accountId > right.accountId ? 1 : 0
     )
     const stale = sweepIsStale(asOf, now)
@@ -137,7 +149,8 @@ export const makeSandboxHostReads = (input: {
         stale,
         partial: stale,
         asOf
-      }
+      },
+      spendLimits: input.contract.spend ?? null
     } satisfies SandboxesOverview
   })
   const attention = Effect.fn("SandboxHost.attention")(function*() {

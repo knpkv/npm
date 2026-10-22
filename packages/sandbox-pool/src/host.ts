@@ -11,9 +11,9 @@
  *
  * @module
  */
-import { Schema } from "effect"
+import { Effect, Schema } from "effect"
 import { CleaningReason, Holder, leaseCap, leaseDuration, RunId } from "./lease.js"
-import { AccountId, AwsRegion, type PoolContract, PoolSignIn, SandboxName } from "./pool.js"
+import { AccountId, AwsRegion, type PoolContract, PoolSignIn, SandboxName, SpendLimits } from "./pool.js"
 import { isBudgetHold } from "./reset.js"
 import { RunStep } from "./run-log.js"
 
@@ -165,20 +165,31 @@ export const SandboxCardState = Schema.TaggedUnion({
 })
 export type SandboxCardState = typeof SandboxCardState.Type
 
+/** An account's last spend reading: USD this month, read at `asOf` (epoch milliseconds). */
+export const SandboxSpend = Schema.Struct({
+  usd: Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0)),
+  asOf: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
+})
+export interface SandboxSpend extends Schema.Schema.Type<typeof SandboxSpend> {}
+
+/** `spend` is the account's last reading, null before the first one or on a host without a spend reader. */
 export const SandboxCard = Schema.Struct({
   accountId: AccountId,
   name: SandboxName,
   label: Schema.NullOr(Schema.Literal("left the pool")),
-  state: SandboxCardState
+  state: SandboxCardState,
+  spend: Schema.NullOr(SandboxSpend).pipe(Schema.withDecodingDefaultKey(Effect.succeed(null)))
 })
 export interface SandboxCard extends Schema.Schema.Type<typeof SandboxCard> {}
 
 export const SandboxesOverview = Schema.Union([
   SandboxesUnavailable,
   SandboxesReadFailed,
+  /** `spendLimits` is the pool budget's alarm and hard stop; null when the contract names none, so no bar. */
   Schema.TaggedStruct("Ready", {
     sandboxes: Schema.Array(SandboxCard),
-    badge: SandboxBadge
+    badge: SandboxBadge,
+    spendLimits: Schema.NullOr(SpendLimits).pipe(Schema.withDecodingDefaultKey(Effect.succeed(null)))
   })
 ])
 export type SandboxesOverview = typeof SandboxesOverview.Type

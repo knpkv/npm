@@ -224,3 +224,14 @@ test("a viewer has no console and no CLI profile", async ({ page }) => {
   await expect(page.getByRole("button", { name: /Open console/ })).toHaveCount(0)
   await expect(page.getByRole("button", { name: "Copy CLI profile" })).toHaveCount(0)
 })
+
+test("cards show this month's spend against the alarm and the hard stop; a budget stop is past it", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await show(page, { id: "1a", state: "1a" }, "light")
+  const free = page.locator("[data-account=\"ephemeral-02\"]")
+  await expect(free.getByRole("meter")).toHaveAccessibleName(
+    "Spend this month $3.10. Alarm at $20, hard stop at $50."
+  )
+  await show(page, { id: "4a", state: "attention-4a", heading: "ephemeral-01" }, "light")
+  await expect(page.locator("[data-spend-over]")).toHaveText("$50.20 is past the $50 hard stop.")
+})

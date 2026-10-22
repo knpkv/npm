@@ -16,11 +16,21 @@ import {
   SandboxState,
   SandboxStoreUnavailable,
   seedPool,
+  SpendReader,
+  type SpendReadError,
+  SpendThrottled,
+  SpendUnavailable,
   StaleVersion
 } from "@knpkv/sandbox-pool"
 import { DateTime, Duration, Effect, Fiber, Latch, Redacted, Schema } from "effect"
 import { TestClock } from "effect/testing"
-import { BudgetControl, BudgetLiftFailed, makeSandboxPool, runSandboxSweep } from "../src/sandbox-jobs.js"
+import {
+  BudgetControl,
+  BudgetLiftFailed,
+  makeSandboxPool,
+  runSandboxSweep,
+  type SandboxPoolServices
+} from "../src/sandbox-jobs.js"
 
 /** An invented pool: no real organization's IDs or names. */
 const contract = Schema.decodeUnknownSync(PoolContract)({
@@ -76,6 +86,8 @@ interface FakeOptions {
   readonly putFails?: boolean
   /** The compare-and-set loses, as another writer landed first. */
   readonly putStale?: boolean
+  /** Each account's answer to a spend read, by account id. Without it the pool has no reader. */
+  readonly spend?: ReadonlyMap<string, Effect.Effect<number, SpendReadError>>
 }
 
 /** A pool over the memory store and run log, with fakes that record every AWS-side call. */
@@ -97,7 +109,7 @@ const fixture = (options: FakeOptions = {}, initial: ReadonlyArray<Sandbox> = se
           : memory.put(next)
     }
     const runLog = yield* makeMemoryRunLog
-    const pool = yield* makeSandboxPool({
+    const services: SandboxPoolServices = {
       contract,
       store,
       runLog,
@@ -128,7 +140,16 @@ const fixture = (options: FakeOptions = {}, initial: ReadonlyArray<Sandbox> = se
               held = false
             })
       })
+    }
+    const reader = SpendReader.of({
+      monthToDate: (account) =>
+        Effect.suspend(() => {
+          calls.push(`spend ${account.accountId}`)
+          return options.spend?.get(account.accountId) ??
+            Effect.fail(new SpendUnavailable({ accountId: account.accountId, detail: "unknown" }))
+        })
     })
+    const pool = yield* makeSandboxPool(options.spend === undefined ? services : { ...services, spend: reader })
     const job = (payload: SandboxJobPayload, actor: string, id: string, approved = false) =>
       pool.run(payload, id, actor, approved ? approval : null).pipe(Effect.map(decodeResult))
     return { pool, store, runLog, calls, job }
@@ -399,6 +420,45 @@ describe("sandbox jobs", () => {
 })
 
 describe("sandbox sweep", () => {
+  it.effect("reads each pool account's spend and keeps the last good reading when a read fails", () =>
+    Effect.gen(function*() {
+      const spend = new Map<string, Effect.Effect<number, SpendReadError>>([
+        [accountA, Effect.succeed(7.4)],
+        [accountB, Effect.succeed(3.1)]
+      ])
+      const f = yield* fixture({ spend })
+      yield* f.pool.sweepOnce
+      expect((yield* f.store.spend).map(({ accountId, usd }) => [accountId, usd])).toEqual([
+        [accountA, 7.4],
+        [accountB, 3.1]
+      ])
+      spend.set(accountA, Effect.fail(new SpendThrottled({ accountId: accountA })))
+      spend.set(accountB, Effect.succeed(4.2))
+      expect(yield* f.pool.sweepOnce).toMatchObject({ failed: 0 })
+      expect((yield* f.store.spend).map(({ accountId, usd }) => [accountId, usd])).toEqual([
+        [accountA, 7.4],
+        [accountB, 4.2]
+      ])
+      expect(yield* f.store.sweepAt).not.toBeNull()
+    }))
+
+  it.effect("records no reading a reader answered with a negative or non-finite amount", () =>
+    Effect.gen(function*() {
+      const f = yield* fixture({
+        spend: new Map([[accountA, Effect.succeed(-5)], [accountB, Effect.succeed(Number.NaN)]])
+      })
+      expect(yield* f.pool.sweepOnce).toMatchObject({ failed: 0 })
+      expect(yield* f.store.spend).toEqual([])
+    }))
+
+  it.effect("reads no spend on a host without a reader", () =>
+    Effect.gen(function*() {
+      const f = yield* fixture()
+      yield* f.pool.sweepOnce
+      expect(yield* f.store.spend).toEqual([])
+      expect(f.calls.filter((call) => call.startsWith("spend"))).toEqual([])
+    }))
+
   it.effect("records the sweep time only when every account succeeded", () =>
     Effect.gen(function*() {
       const stuck = Schema.decodeUnknownSync(Sandbox)({

@@ -35,7 +35,8 @@ const ready = (sandboxes: ReadonlyArray<SandboxCardType>): SandboxesOverview => 
     stale: false,
     partial: false,
     asOf: null
-  }
+  },
+  spendLimits: null
 })
 
 const leased = (
@@ -330,7 +331,12 @@ describe("Sandboxes overview", { concurrent: false }, () => {
   })
 
   it("says the sweep has not run when there is no sweep time", async () => {
-    await render({ _tag: "Ready", sandboxes: [], badge: { quarantined: 0, stale: true, partial: true, asOf: null } })
+    await render({
+      _tag: "Ready",
+      sandboxes: [],
+      badge: { quarantined: 0, stale: true, partial: true, asOf: null },
+      spendLimits: null
+    })
     expect(text(".sandboxes-page")).toContain("Sweep has not run yet")
   })
 
@@ -852,14 +858,24 @@ describe("Sandboxes overview", { concurrent: false }, () => {
 
   it("shows the last sweep time and no sweep button", async () => {
     const asOf = DateTime.makeUnsafe("2026-10-17T13:03:00.000Z").epochMilliseconds
-    await render({ _tag: "Ready", sandboxes: [], badge: { quarantined: 0, stale: false, partial: false, asOf } })
+    await render({
+      _tag: "Ready",
+      sandboxes: [],
+      badge: { quarantined: 0, stale: false, partial: false, asOf },
+      spendLimits: null
+    })
     expect(text(".sandboxes-page")).toContain("Sweep last 13:03")
     expect(buttons().some((label) => /sweep/i.test(label ?? ""))).toBe(false)
   })
 
   it("says the sweep is late when the badge is stale", async () => {
     const asOf = DateTime.makeUnsafe("2026-10-16T13:51:00.000Z").epochMilliseconds
-    await render({ _tag: "Ready", sandboxes: [], badge: { quarantined: 0, stale: true, partial: true, asOf } })
+    await render({
+      _tag: "Ready",
+      sandboxes: [],
+      badge: { quarantined: 0, stale: true, partial: true, asOf },
+      spendLimits: null
+    })
     expect(text(".sandboxes-page")).toContain("Sweep late, last ran 13:51 yesterday")
     expect(buttons().some((label) => /sweep/i.test(label ?? ""))).toBe(false)
   })
@@ -1530,6 +1546,57 @@ describe("Sandboxes overview", { concurrent: false }, () => {
       const dialog = await openDialog(button("Lease an account"))
       expect(dialog?.textContent).toContain("Signs in as")
       expect(dialog?.textContent).toContain("ExampleDeveloper")
+    })
+  })
+
+  describe("spend bar", () => {
+    const limited = (sandboxes: ReadonlyArray<SandboxCardType>): SandboxesOverview => ({
+      _tag: "Ready",
+      sandboxes,
+      badge: { quarantined: 0, stale: false, partial: false, asOf: null },
+      spendLimits: { alarm: 20, stop: 50 }
+    })
+    const spent = (usd: number) => ({ usd, asOf: DateTime.makeUnsafe(now).epochMilliseconds })
+
+    it("shows this month's spend against the alarm and the hard stop", async () => {
+      const item = { ...available("ephemeral-02", "999999999991", null), spend: spent(7.4) }
+      await render(limited([item]))
+      const bar = document.querySelector('[data-account="ephemeral-02"] [data-spend]')
+      expect(bar?.querySelector("[data-spend-head]")?.textContent).toBe("Spend this month$7.40")
+      const meter = bar?.querySelector('[role="meter"]')
+      expect(meter?.getAttribute("aria-label")).toBe("Spend this month $7.40. Alarm at $20, hard stop at $50.")
+      expect(meter?.getAttribute("aria-valuenow")).toBe("7.4")
+      expect(meter?.getAttribute("aria-valuemax")).toBe("50")
+      expect(bar?.querySelector<HTMLElement>("[data-spend-fill]")?.style.inlineSize).toBe("12.33%")
+      expect([...(bar?.querySelectorAll("[data-spend-mark]") ?? [])].map((node) => node.textContent)).toEqual([
+        "$0",
+        "$20 alarm",
+        "$50 hard stop"
+      ])
+    })
+
+    it("draws no bar without a reading, or without the pool's limits", async () => {
+      await render(limited([available("ephemeral-02", "999999999991", null)]))
+      expect(document.querySelector("[data-spend]")).toBeNull()
+      await act(async () => root?.unmount())
+      root = null
+      document.body.replaceChildren()
+      await render(ready([{ ...available("ephemeral-02", "999999999991", null), spend: spent(7.4) }]))
+      expect(document.querySelector("[data-spend]")).toBeNull()
+    })
+
+    it("says a budget stop is past the hard stop, on its card and its page", async () => {
+      const stopped = { ...quarantinedCard(budgetBlocker), spend: spent(50.2) }
+      await render(limited([stopped]))
+      expect(text('[data-account="ephemeral-02"] [data-spend-head]')).toBe("Spend this month$50.20")
+      expect(
+        document.querySelector<HTMLElement>('[data-account="ephemeral-02"] [data-spend-fill]')?.style.inlineSize
+      ).toBe("83.67%")
+      await act(async () => root?.unmount())
+      root = null
+      document.body.replaceChildren()
+      await render(limited([stopped]), { page: "account", search: { id: "999999999991" } })
+      expect(text("[data-spend-over]")).toBe("$50.20 is past the $50 hard stop.")
     })
   })
 })

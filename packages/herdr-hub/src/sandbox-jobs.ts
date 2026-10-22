@@ -37,7 +37,9 @@ import {
   RunLog,
   Sandbox,
   type SandboxStore,
-  SandboxStoreUnavailable
+  SandboxStoreUnavailable,
+  type SpendReader,
+  SpendReading
 } from "@knpkv/sandbox-pool"
 import { Context, DateTime, Duration, Effect, Option, Ref, Schedule, Schema, Semaphore } from "effect"
 
@@ -134,6 +136,8 @@ export interface SandboxPoolServices {
   readonly access: PoolAccess["Service"]
   readonly nuke: Nuke["Service"]
   readonly budget: BudgetControl["Service"]
+  /** Reads each pool account's spend on every sweep; without it there are no readings and no spend bar. */
+  readonly spend?: SpendReader["Service"]
 }
 
 /**
@@ -400,6 +404,22 @@ export const makeSandboxPool = Effect.fn("SandboxPool.make")(function*(services:
     return Semaphore.withPermitsIfAvailable(lock, 1, decide).pipe(Effect.map(idle))
   }
 
+  /**
+   * One reading per pool account, recorded as the latest. A failed read or write is logged by its tag and
+   * keeps the previous reading; spend never makes the sweep itself partial.
+   */
+  const readSpend = (now: DateTime.Utc): Effect.Effect<void> => {
+    const reader = services.spend
+    if (reader === undefined) return Effect.void
+    const asOf = DateTime.toEpochMillis(now)
+    return Effect.forEach(contract.accounts, (account) =>
+      reader.monthToDate(account).pipe(
+        Effect.flatMap((usd) => Schema.decodeUnknownEffect(SpendReading)({ accountId: account.accountId, usd, asOf })),
+        Effect.flatMap(store.recordSpend),
+        Effect.catch((error) => Effect.logWarning("sandbox spend was not read", account.accountId, error._tag))
+      ), { discard: true })
+  }
+
   const sweepOnce = Effect.gen(function*() {
     const now = yield* DateTime.now
     const pool = yield* store.list
@@ -417,6 +437,7 @@ export const makeSandboxPool = Effect.fn("SandboxPool.make")(function*(services:
       resumed: outcomes.filter((outcome) => outcome === "resumed").length,
       failed: outcomes.filter((outcome) => outcome === "failed").length
     }
+    yield* readSpend(now)
     yield* Ref.set(lastSweep, report)
     // A failed account is not a successful sweep. The previous time stays, so the badge stays partial.
     if (report.failed === 0) {

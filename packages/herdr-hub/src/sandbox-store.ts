@@ -13,6 +13,7 @@ import {
   SandboxStore,
   SandboxStoreUnavailable,
   seedPool,
+  SpendReading,
   StaleVersion,
   summarizeRuns
 } from "@knpkv/sandbox-pool"
@@ -29,6 +30,8 @@ const SandboxRow = Schema.Struct({ record: Schema.String })
 const EntryRow = Schema.Struct({ entry: Schema.String })
 const RunRow = Schema.Struct({ run_id: Schema.String })
 const SweepRow = Schema.Struct({ swept_at: Schema.NullOr(Schema.Int) })
+const SpendRow = Schema.Struct({ account_id: Schema.String, usd: Schema.Number, as_of: Schema.Int })
+const decodeSpend = Schema.decodeUnknownSync(SpendReading)
 const decodeRows = <A>(row: Schema.Codec<A>) => Schema.decodeUnknownSync(Schema.Array(row))
 
 /** Every driver throw and undecodable row ends in this store's typed error, never a defect. */
@@ -89,6 +92,9 @@ export const openSandboxDatabase = Effect.fn("SandboxDatabase.open")(function*(p
           CREATE TABLE IF NOT EXISTS sandbox_sweep (
             id INTEGER PRIMARY KEY CHECK (id = 1),
             swept_at INTEGER
+          );
+          CREATE TABLE IF NOT EXISTS sandbox_spend (
+            account_id TEXT PRIMARY KEY NOT NULL, usd REAL NOT NULL, as_of INTEGER NOT NULL
           );
         `)
         const insert = database.prepare(
@@ -169,6 +175,23 @@ export const openSandboxDatabase = Effect.fn("SandboxDatabase.open")(function*(p
             .run(at),
         storeFailure("sweep")
       ).pipe(Effect.andThen(secure(storeFailure("sweep"))), Effect.asVoid),
+    spend: attempt(
+      () =>
+        decodeRows(SpendRow)(
+          database.prepare("SELECT account_id, usd, as_of FROM sandbox_spend ORDER BY account_id").all()
+        ).map((row) => decodeSpend({ accountId: row.account_id, usd: row.usd, asOf: row.as_of })),
+      storeFailure("spend")
+    ),
+    recordSpend: (reading) =>
+      attempt(
+        () =>
+          database
+            .prepare(
+              "INSERT INTO sandbox_spend (account_id, usd, as_of) VALUES (?, ?, ?) ON CONFLICT(account_id) DO UPDATE SET usd = excluded.usd, as_of = excluded.as_of"
+            )
+            .run(reading.accountId, reading.usd, reading.asOf),
+        storeFailure("spend")
+      ).pipe(Effect.andThen(secure(storeFailure("spend"))), Effect.asVoid),
     rename: (accountId, name) =>
       attempt(
         () =>
