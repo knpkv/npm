@@ -14,6 +14,8 @@ import {
   SandboxesOverview,
   SandboxesOverviewQuery,
   type SandboxesUnavailable,
+  SandboxRunLog,
+  SandboxRunLogQuery,
   SandboxRuns,
   SandboxRunsQuery
 } from "@knpkv/sandbox-pool/host"
@@ -213,6 +215,19 @@ export const makeSandboxesModule = (configuration: {
               code: error._tag === "SandboxNotFound" ? "not_found" : "invalid_query"
             })
           ))
+      // A run's log names the account's resources: only the hub's own node may read it, and nothing is read
+      // for anyone else.
+      const runLog = (
+        query: SandboxRunLogQuery,
+        caller: ModuleCaller
+      ): Effect.Effect<SandboxRunLog, ModuleRouteFailure> =>
+        mounted._tag === "Unavailable"
+          ? Effect.succeed(mounted)
+          : !caller.sameNode
+          ? Effect.fail(new ModuleRouteFailure({ status: 403, code: "owner_only" }))
+          : mounted.reads.runLog(query).pipe(
+            Effect.mapError(() => new ModuleRouteFailure({ status: 404, code: "not_found" }))
+          )
       const emptyNeedsYou = NeedsYouProviderResult.make({ items: [], issues: [], asOf: null })
       const readerDown = NeedsYouProviderResult.make({
         items: [],
@@ -303,6 +318,7 @@ export const makeSandboxesModule = (configuration: {
         routes: [
           moduleReadRoute("/overview", SandboxesOverviewQuery, SandboxesOverview, () => overview),
           moduleReadRoute("/runs", SandboxRunsQuery, SandboxRuns, runs),
+          moduleReadRoute("/run-log", SandboxRunLogQuery, SandboxRunLog, runLog),
           moduleReadRoute("/requests", NoQuery, SandboxRequests, () => requests),
           moduleReadRoute(
             "/caller",

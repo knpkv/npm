@@ -4,7 +4,7 @@
  */
 import "../../src/assets.css"
 import { PortalProvider } from "@knpkv/rly/foundations"
-import { SandboxCard, type SandboxesOverview, SandboxRuns } from "@knpkv/sandbox-pool/host"
+import { SandboxCard, type SandboxesOverview, SandboxRunLog, SandboxRuns } from "@knpkv/sandbox-pool/host"
 import { Effect, Schema } from "effect"
 import { createRoot } from "react-dom/client"
 import { SandboxesClientError, SandboxesWriteFailed } from "../../src/sandboxes-client.js"
@@ -26,6 +26,7 @@ const SandboxesState = Schema.Literals([
   "8f-host",
   "8g",
   "8c",
+  "8c-viewer",
   "8d",
   "attention-1a",
   "attention-2a",
@@ -126,6 +127,7 @@ const overviews = {
   "8f-host": { _tag: "Unavailable", reason: "pool_mismatch", host: "host-a", message: "pool mismatch" },
   "8g": pool,
   "8c": ready([ephemeral01("review-runner-02", "2026-10-17T17:20:00.000Z"), ephemeral02Quarantined], "ok"),
+  "8c-viewer": ready([ephemeral01("review-runner-02", "2026-10-17T17:20:00.000Z"), ephemeral02Quarantined], "ok"),
   "8d": ready([ephemeral01("review-runner-02", "2026-10-17T17:20:00.000Z"), ephemeral02Quarantined], "ok"),
   "attention-1a": ready([ephemeral01Stopped, ephemeral02Quarantined], "ok"),
   "attention-2a": ready([ephemeral01Stopped, ephemeral02Quarantined], "ok"),
@@ -175,6 +177,46 @@ const runs = Schema.decodeUnknownSync(SandboxRuns)({
   ]
 })
 
+const runLog = Schema.decodeUnknownSync(SandboxRunLog)({
+  _tag: "Ready",
+  accountId: "999999999991",
+  runId: "release-7f3a",
+  raw: "verify: 3 resources still removable. S3Bucket scratch-uploads-k2, IAMRole ci-temp-runner, LogGroup /sandbox/tmp-build",
+  lines: [
+    { at: "2026-10-17T10:58:01.000Z", text: "run release-7f3a started, reason released, account ephemeral-02" },
+    { at: "2026-10-17T10:58:02.000Z", text: "assume role EphemeralCleanup: ok" },
+    { at: "2026-10-17T10:58:04.000Z", text: "baseline: 12 baseline resources, matches" },
+    { at: "2026-10-17T10:58:05.000Z", text: "config: 41 resource types, 12 baseline filters" },
+    { at: "2026-10-17T10:58:05.000Z", text: "input: account ephemeral-02, region eu-central-1" },
+    { at: "2026-10-17T10:58:06.000Z", text: "spawn aws-nuke --dry-run" },
+    { at: "2026-10-17T10:58:39.000Z", text: "dry run: scan complete" },
+    { at: "2026-10-17T10:58:41.000Z", text: "dry run: 41 to remove" },
+    { at: "2026-10-17T10:58:42.000Z", text: "guard: no protected resource listed" },
+    { at: "2026-10-17T10:58:43.000Z", text: "spawn aws-nuke --no-dry-run" },
+    { at: "2026-10-17T10:59:10.000Z", text: "nuke: EC2Instance build-box-1 removed" },
+    { at: "2026-10-17T10:59:12.000Z", text: "nuke: EC2Volume build-box-1-data removed" },
+    { at: "2026-10-17T10:59:40.000Z", text: "nuke: LambdaFunction thumb-resize removed" },
+    { at: "2026-10-17T11:00:05.000Z", text: "nuke: DynamoDBTable scratch-sessions removed" },
+    { at: "2026-10-17T11:00:31.000Z", text: "nuke: SQSQueue render-jobs removed" },
+    { at: "2026-10-17T11:01:02.000Z", text: "nuke: 20 of 41 removed" },
+    { at: "2026-10-17T11:02:47.000Z", text: "nuke: S3Bucket scratch-uploads-k2 waiting for objects" },
+    { at: "2026-10-17T11:03:30.000Z", text: "nuke: IAMRole ci-temp-runner in use, retrying" },
+    { at: "2026-10-17T11:04:15.000Z", text: "nuke: 31 of 41 removed" },
+    { at: "2026-10-17T11:05:20.000Z", text: "nuke: LogGroup /sandbox/tmp-build retrying" },
+    { at: "2026-10-17T11:06:02.000Z", text: "nuke: 38 of 41 removed" },
+    { at: "2026-10-17T11:06:03.000Z", text: "nuke: finished, removed 38" },
+    { at: "2026-10-17T11:06:05.000Z", text: "verify: scanning" },
+    { at: "2026-10-17T11:06:40.000Z", text: "verify: S3Bucket scratch-uploads-k2 still present" },
+    { at: "2026-10-17T11:06:40.000Z", text: "verify: IAMRole ci-temp-runner still present" },
+    { at: "2026-10-17T11:06:40.000Z", text: "verify: LogGroup /sandbox/tmp-build still present" },
+    { at: "2026-10-17T11:06:41.000Z", text: "verify: 3 resources still removable" },
+    { at: "2026-10-17T11:06:42.000Z", text: "baseline re-check: not run" },
+    { at: "2026-10-17T11:06:42.000Z", text: "budget hold: not checked" },
+    { at: "2026-10-17T11:07:00.000Z", text: "run release-7f3a ended, account quarantined" }
+  ],
+  total: 30
+})
+
 const requested = (kind: "Retry" | "BudgetLift") =>
   kind === "Retry"
     ? {
@@ -221,6 +263,7 @@ const targetOf = (screen: typeof state): Target => {
     case "8d":
       return { page: "runs", search: { id: "999999999991" } }
     case "8c":
+    case "8c-viewer":
       return { page: "runs", search: { id: "999999999991", run: "release-7f3a" } }
     default:
       return { page: "overview", search: {} }
@@ -258,12 +301,13 @@ const requestsRead = Effect.suspend(() => {
     ? Effect.fail(new SandboxesClientError({ detail: "network" }))
     : Effect.succeed(requests)
 })
-const caller = Effect.succeed({ login: viewer, owner: state !== "8a" })
+const caller = Effect.succeed({ login: viewer, owner: state !== "8a" && state !== "8c-viewer" })
 const module = makeSandboxesModuleViews({
   reads: {
     overview,
     caller,
     runs: () => Effect.succeed(runs),
+    runLog: () => Effect.succeed(runLog),
     requests: requestsRead
   },
   timeZone: "UTC",
