@@ -17,12 +17,13 @@ test("a retained Limits error has Retry only on the Limits page", async ({ page 
   await expect(module.getByRole("button", { name: "Retry", exact: true })).toBeVisible()
 })
 
-test("phone Usage has one module title and four installed destinations", async ({ page }, info) => {
+test("phone Usage shows its breadcrumb, its heading and four installed destinations", async ({ page }, info) => {
   test.skip(info.project.name !== "phone", "Phone chrome")
   await page.setViewportSize({ width: 320, height: 900 })
   await page.goto("/?range=7d&timeZone=UTC#usage/tokens")
-  await expect(page.locator(".superapp-phone-title")).toHaveText("Usage")
-  await expect(page.locator(".superapp-breadcrumb")).toBeHidden()
+  await expect(page.locator(".superapp-phone-title")).toHaveText("Relay")
+  await expect(page.locator(".superapp-breadcrumb")).toHaveText("Usage / Tokens", { useInnerText: true })
+  await expect(page.locator(".usage-details-intro h1")).toBeVisible()
   await expect(page.locator(".superapp-bottom a")).toHaveText(["Connect", "Fleet1", "Code", "Usage"])
   await expect(page.locator(".superapp-bottom a[aria-current=\"page\"]")).toHaveAccessibleName("Usage")
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320)
@@ -332,8 +333,9 @@ test("By tool matches its installed masthead and toolbar geometry", async ({ pag
   expect(geometry.rangeHeight).toBe(info.project.name === "phone" ? 46 : 42)
   expect(geometry.readingGap).toBe(info.project.name === "phone" ? 16 : 20)
   if (info.project.name === "phone") {
-    expect(geometry.tabsTop).toBe(geometry.headerBottom)
-    await expect(page.locator(".superapp-phone-title")).toHaveText("Usage By tool")
+    // Same phone chrome as Limits: breadcrumb line, then the module heading, then the tabs.
+    expect(geometry.tabsTop).toBeCloseTo(182.5, 0)
+    await expect(page.locator(".superapp-breadcrumb")).toHaveText("Usage / By tool", { useInnerText: true })
   }
   await page.emulateMedia({ forcedColors: "active" })
   const contrast = await page.getByRole("radio", { name: "7 days", exact: true }).evaluate((element) => {
@@ -359,8 +361,9 @@ test("the grouped Limits header follows the design's type, order and phone inset
   // The tab labels keep their own 15px type; only the region's inherited type follows the design.
   await expect(tabs.getByRole("link", { name: "Limits", exact: true })).toHaveCSS("font-size", "15px")
   if (info.project.name === "phone") {
-    // The phone header shows only the module title: no page heading or lead, and the tabs sit on the mast's inset.
-    await expect(header.locator(".usage-empty-titles")).toHaveCSS("display", "none")
+    // Rule 45 refs: the title and purpose show under the breadcrumb, and the tabs sit on the mast's 8px inset.
+    await expect(header.locator(".usage-empty-titles")).toHaveCSS("display", "grid")
+    expect((await header.locator(".usage-empty-title").boundingBox())?.x).toBe(16)
     await expect(tabs).toHaveCSS("background-color", "rgba(0, 0, 0, 0)")
     await expect(tabs).toHaveCSS("padding-left", "0px")
     await expect(tabs).toHaveCSS("padding-right", "0px")
@@ -403,7 +406,7 @@ for (const layout of limitsLayouts) {
   })
 }
 
-/** The grouped phone header draws the title one header gap after the chef, in both Limits layouts, as the design does. */
+/** The grouped phone header draws the product name 0.55rem after the chef (0.8px past its 44px target), in both Limits layouts. */
 test("phone Limits title sits on the design's position in both layouts", async ({ page }, info) => {
   test.skip(info.project.name !== "phone", "Phone header")
   await page.setViewportSize({ width: 390, height: 844 })
@@ -425,7 +428,7 @@ test("phone Limits title sits on the design's position in both layouts", async (
     }
     await expect(page.locator(layout === "empty" ? ".usage-limits-empty" : ".usage-limits-cards")).toBeVisible()
     const title = page.locator(".superapp-phone-title")
-    await expect(title).toHaveText("Usage Limits")
+    await expect(title).toHaveText("Relay")
     const brand = await page.locator(".superapp-header > .superapp-brand").boundingBox()
     const text = await title.boundingBox()
     ok(brand !== null && text !== null)
@@ -433,7 +436,7 @@ test("phone Limits title sits on the design's position in both layouts", async (
   }
   const readings = await titleOffset("readings")
   const empty = await titleOffset("empty")
-  expect(readings.gap).toBe(8)
+  expect(readings.gap).toBeCloseTo(0.8, 1)
   expect(readings.x).toBe(empty.x)
 })
 
@@ -462,10 +465,10 @@ test("Limits matches the shared Usage chrome geometry", async ({ page }, info) =
   expect(chrome.fontSize).toBe("15px")
   expect(chrome.padding).toBe(info.project.name === "phone" ? "12px" : "4px")
   if (info.project.name === "phone") {
-    // The design's phone tabs sit on the mast's 8px inset.
+    // The design's phone tabs sit on the mast's 8px inset, under the breadcrumb line and the module heading.
     expect(chrome.left).toBe(8)
     expect(chrome.right).toBe(chrome.viewport - 8)
-    expect(chrome.top).toBe(chrome.headerBottom)
+    expect(chrome.top).toBeCloseTo(182.5, 0)
   }
 })
 
@@ -568,11 +571,11 @@ for (const width of [600, 640, 641]) {
     expect(geometry.main).toBeDefined()
     expect(geometry.header.x).toBeCloseTo(geometry.main?.x ?? Infinity, 0)
     expect(geometry.header.width).toBeCloseTo(geometry.main?.width ?? Infinity, 0)
+    // The title and purpose show at every width (design rule 45 refs); only the navigation changes.
+    await expect(page.locator(".usage-empty-titles")).toBeVisible()
     if (width <= 640) {
-      await expect(page.locator(".usage-empty-titles")).toBeHidden()
       await expect(page.locator(".superapp-bottom")).toBeVisible()
     } else {
-      await expect(page.locator(".usage-empty-titles")).toBeVisible()
       await expect(page.locator(".superapp-bottom")).toBeHidden()
     }
     await page.unroute(/\/v1\/connect\/usage(\?|$)/)

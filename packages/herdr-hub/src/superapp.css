@@ -484,7 +484,7 @@
     .superapp-header {
       grid-column: 1;
       grid-template-columns: minmax(0, 1fr) auto auto;
-      grid-template-rows: 3rem 2rem;
+      grid-template-rows: 3rem;
       padding-inline: max(var(--rly-space-16), env(safe-area-inset-left, 0px))
         max(var(--rly-space-16), env(safe-area-inset-right, 0px));
       min-block-size: 3rem;
@@ -531,15 +531,6 @@
       line-height: 1.2;
     }
 
-    .superapp-breadcrumb {
-      grid-column: 1 / -1;
-      grid-row: 2;
-      block-size: 2rem;
-      gap: var(--rly-space-8);
-      font-size: 0.75rem;
-      line-height: 1.3;
-    }
-
     .superapp-breadcrumb a {
       align-items: center;
       block-size: 2rem;
@@ -554,18 +545,6 @@
     }
 
     .superapp-breadcrumb-root {
-      display: none;
-    }
-
-    .superapp-header:has([aria-expanded="true"][data-rly-relay-launcher]),
-    .superapp-shell:has(.connect-workspace[data-mode="terminal"]) .superapp-header,
-    .superapp-header:has(.superapp-breadcrumb[data-route-found="false"]) {
-      grid-template-rows: 3rem;
-    }
-
-    .superapp-header:has([aria-expanded="true"][data-rly-relay-launcher]) .superapp-breadcrumb,
-    .superapp-shell:has(.connect-workspace[data-mode="terminal"]) .superapp-breadcrumb,
-    .superapp-breadcrumb[data-route-found="false"] {
       display: none;
     }
 
@@ -1097,7 +1076,7 @@
       grid-column: 1;
       min-block-size: 2.75rem;
       min-inline-size: 2.75rem;
-      margin-inline: calc(-1 * var(--rly-space-8)) var(--rly-space-8);
+      margin-inline: calc(-1 * var(--rly-space-8)) 0;
     }
 
     .superapp-header > .superapp-brand .relay-chef-mark {
@@ -1113,44 +1092,92 @@
       font-weight: 520;
     }
 
-    .superapp-header .superapp-breadcrumb {
+    /* Design rule 45: one line under the header, "<Module> / <Page>"; the start truncates, the page stays whole. */
+    /* The header region is display: contents, so the line takes its own shell row between header and main. */
+    .superapp-shell:not([data-usage-header="grouped"]) {
+      grid-template-rows: auto auto 1fr;
+    }
+
+    .superapp-shell:not([data-usage-header="grouped"]) > .superapp-main {
+      grid-row: 3;
+    }
+
+    .superapp-header-region > .superapp-breadcrumb {
+      grid-column: 1;
+      grid-row: 2;
+    }
+
+    :is(.superapp-header-region, .usage-empty-header-region) > .superapp-breadcrumb[data-route-found="true"] {
+      display: flex;
+      box-sizing: border-box;
+      block-size: 2rem;
+      padding-block-start: var(--rly-space-8);
+      padding-inline: max(var(--rly-space-16), env(safe-area-inset-left, 0px))
+        max(var(--rly-space-16), env(safe-area-inset-right, 0px));
+      gap: 0;
+      font-size: 0.75rem;
+      font-weight: 430;
+      line-height: 1.3;
+    }
+
+    :is(.superapp-header-region, .usage-empty-header-region):has([aria-expanded="true"][data-rly-relay-launcher])
+      > .superapp-breadcrumb {
       display: none;
     }
 
+    /* A page that draws its own deeper breadcrumb (Review canvas: "Code / Review") owns the line. */
+    .superapp-shell:has(.superapp-main > [data-module]:not([hidden]) nav[aria-label="Breadcrumb"])
+      .superapp-breadcrumb {
+      display: none;
+    }
+
+    /* The product name beside the brand mark, as the rule 45 refs draw it. */
     .superapp-phone-title {
       display: block;
       grid-column: 2;
       grid-row: 1;
       justify-self: start;
-      font-size: 1.0625rem;
-      font-weight: 650;
-      line-height: 1.5;
+      margin-inline-start: calc(0.55rem - var(--rly-space-8));
+      font-size: 1.05rem;
+      font-weight: 700;
+      line-height: 1.2;
       min-inline-size: 0;
       overflow: clip;
       text-overflow: ellipsis;
       white-space: nowrap;
     }
 
-    .superapp-phone-title > span {
-      font-weight: 430;
-      color: var(--rly-color-text-2);
-    }
-
     .superapp-main {
       padding-inline: 0;
     }
 
-    .superapp-breadcrumb > [aria-hidden],
     .superapp-breadcrumb-root {
       display: none;
     }
 
-    .superapp-breadcrumb > a,
-    .superapp-breadcrumb > [aria-current="page"] {
-      font-size: inherit;
+    .superapp-breadcrumb > a {
+      display: block;
+      block-size: auto;
+      flex: 0 1 auto;
+      min-inline-size: 0;
+      overflow: clip;
+      text-overflow: ellipsis;
+      direction: rtl;
+      text-decoration: underline;
+      text-underline-offset: 0.2em;
+    }
+
+    .superapp-breadcrumb > a > span {
       direction: ltr;
-      font-weight: 650;
-      text-decoration: none;
+      unicode-bidi: isolate;
+    }
+
+    .superapp-breadcrumb > [aria-current="page"],
+    .superapp-breadcrumb > a + [aria-hidden] + [aria-current="page"] {
+      flex: none;
+      max-inline-size: 100%;
+      direction: ltr;
+      font-weight: 520;
     }
 
     .superapp-host {
@@ -1161,15 +1188,16 @@
       grid-column: 3;
     }
 
-    .superapp-module-heading,
+    /* Rule 45 refs: the module heading under the breadcrumb, title and purpose 4px apart. */
+    .superapp-module-heading {
+      gap: var(--rly-space-4);
+      padding-block: var(--rly-space-12) 0.9rem;
+      padding-inline: max(var(--rly-space-16), env(safe-area-inset-left, 0px))
+        max(var(--rly-space-16), env(safe-area-inset-right, 0px));
+    }
+
     [data-module="connect"] .connect-home-intro {
-      position: absolute;
-      inline-size: 1px;
-      block-size: 1px;
-      overflow: clip;
-      clip-path: inset(50%);
-      padding: 0;
-      border: 0;
+      gap: var(--rly-space-4);
     }
 
     [data-module="connect"] .connect-home-heading {

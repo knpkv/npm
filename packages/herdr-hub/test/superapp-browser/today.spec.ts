@@ -77,7 +77,8 @@ for (const theme of ["light", "dark"]) {
       })
       expect.soft(geometry.headerHeight).toBe(64)
       expect.soft(geometry.inset).toBe("0px")
-      expect.soft(geometry.shellTop).toBe(geometry.headerBottom)
+      // Phone puts the 32px breadcrumb line (design rule 45) between the header and the page.
+      expect.soft(geometry.shellTop).toBe((geometry.headerBottom ?? 0) + (info.project.name === "phone" ? 32 : 0))
       expect.soft(geometry.groupHeadingHeight).toBe(info.project.name === "phone" ? 48 : 44)
       expect.soft(geometry.titleMargin).toBe("0px")
       expect.soft(geometry.voiceClamp).toBe("2")

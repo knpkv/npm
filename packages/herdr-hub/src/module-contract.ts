@@ -14,6 +14,7 @@ export const ModuleDescriptor = Schema.Struct({
   pages: Schema.Array(Schema.Struct({
     id: Segment,
     label: Label,
+    /** @deprecated Ignored: the phone header shows the product name and the breadcrumb names the page. */
     showInPhoneTitle: Schema.optionalKey(Schema.Boolean)
   })).check(Schema.isMinLength(1)),
   listeners: Schema.Array(ModuleListener).check(Schema.isMinLength(1)),
@@ -103,11 +104,7 @@ export type FleetModuleDestination = ModuleDestination<typeof fleetModule>
 /** Canonical Fleet keeps decisions and work; standalone Fleet retains its legacy four-page descriptor. */
 export const fleetHubModule = defineModule({
   ...fleetModule,
-  pages: [{ id: "approvals", label: "Approvals", showInPhoneTitle: true }, {
-    id: "work",
-    label: "Work",
-    showInPhoneTitle: true
-  }]
+  pages: [{ id: "approvals", label: "Approvals" }, { id: "work", label: "Work" }]
 })
 
 /** Connect is the agent home; Fleet's standalone /connect/ owner retains stage and terminal authority. */
@@ -134,11 +131,7 @@ export const usageModule = defineModule({
   id: "usage",
   label: "Usage",
   defaultPage: "limits",
-  pages: [{ id: "limits", label: "Limits", showInPhoneTitle: true }, { id: "tokens", label: "Tokens" }, {
-    id: "by-tool",
-    label: "By tool",
-    showInPhoneTitle: true
-  }],
+  pages: [{ id: "limits", label: "Limits" }, { id: "tokens", label: "Tokens" }, { id: "by-tool", label: "By tool" }],
   listeners: ["serve", "local"],
   requires: ["read"]
 })

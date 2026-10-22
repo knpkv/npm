@@ -313,7 +313,7 @@ The Fleet provider reuses Relay's bounded pending reader: up to eight pages per 
 
 Provider keys are local and opaque. The collector adds the registered module namespace, validates destination ownership, deduplicates and keeps the earliest-created whole row; equal creation times keep the first row. Rows sort by expiry with no-expiry last, then creation time and key. Fleet casefolds the host only in its key and preserves configured display case in the destination. Do not recover selectors by splitting a key. Each provider is capped at 256 deduplicated rows; a bounded result reports truncation. A failed, timed-out or truncated source always makes the result `Partial`, including when it returned no items. `Complete` has no source issues.
 
-Module page metadata `showInPhoneTitle` defaults to false. It appends the page label to the phone mast when its design calls for one; primary links and page ownership are unchanged.
+Module page metadata `showInPhoneTitle` is deprecated and ignored. On phone the header shows the product name, and a breadcrumb line under it names the module and page (“Fleet / Approvals”; the module alone when it has one page). Each module keeps its own heading and one-line purpose on phone.
 
 Canonical Connect owns its saved Active/Archived location through the shell navigator. Embedded `BlockedConnectSurface` requires one `directoryLocation` containing its URL, navigation and selection-close callbacks; standalone use retains the default browser history. The module forwards the dashboard notification state to the stage footer without another device-state read.
 
@@ -412,6 +412,6 @@ base without the inventory logs
 application route. No host, provider or agent-usage process runs. Region attributes
 in the shared Connect Usage view do not change its layout; Connect onboarding is separate.
 
-`legacy.until` is `2026-10-30T00:00:00.000Z`. It was seven days after the October 16 merge date and moved one
-week so the Usage Limits redesign to its reference can land first.
+`legacy.until` is `2026-10-30T00:00:00.000Z`, fourteen days after the October 16 merge date: the original
+seven-day window (`2026-10-23`) was extended by one week so the Usage Limits redesign to its reference could land first.
 Drift stays in the report; no waivers are added.

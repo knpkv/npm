@@ -23,11 +23,6 @@ button { font: inherit; }
 .sr { position: absolute; inline-size: 1px; block-size: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
 
-.crumb { display: none; box-sizing: border-box; block-size: 32px; padding: 8px 16px 0; align-items: center; min-inline-size: 0; white-space: nowrap; font: 430 .75rem/1.3 var(--rly-font-ui); color: var(--rly-color-text-2); }
-.crumb .parents { flex: 0 1 auto; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; direction: rtl; }
-.crumb .parents > span { direction: ltr; unicode-bidi: isolate; }
-.crumb a { text-decoration: underline; text-underline-offset: .2em; }
-.crumb .cur { flex: none; max-inline-size: 100%; overflow: hidden; text-overflow: ellipsis; font-weight: 520; color: var(--rly-color-text-1); }
 
 main { padding: 2rem 40px 1rem; max-inline-size: 1520px; }
 .page { display: grid; gap: 2rem; min-inline-size: 0; }
@@ -79,7 +74,6 @@ main { padding: 2rem 40px 1rem; max-inline-size: 1520px; }
 
 @media (max-width: 599px) {
   body { padding-block-end: env(safe-area-inset-bottom); }
-  .crumb { display: flex; }
   main { padding: .9rem 16px 6rem; }
   .page { gap: 1.5rem; }
   .page-head h1 { font-size: 2.2rem; }
@@ -173,18 +167,19 @@ main { padding: 2rem 40px 1rem; max-inline-size: 1520px; }
       <button type="button" class="session" aria-label="${esc(sh.session.aria)}"><span class="avatar" aria-hidden="true"><relay-glyph name="shield" size="17"></relay-glyph></span><span>${esc(sh.session.title)}<small>${esc(sh.session.access)}</small></span><span class="online" aria-hidden="true"></span></button>
     </div></aside>`;
 
+    const crumbNav = (mod, href, page) => `<nav class="crumb" aria-label="Breadcrumb">${page && page !== mod ? `<span class="parents"><span><a href="${esc(href)}">${esc(mod)}</a><span aria-hidden="true">&nbsp;/&nbsp;</span></span></span><span class="cur" aria-current="page">${esc(page)}</span>` : `<span class="cur" aria-current="page">${esc(mod)}</span>`}</nav>`;
     const hasTabs = P.tabs.length > 1, curTab = (P.tabs.find((t) => t.current) || {}).name;
     const header = `<div data-region="header">
       <header class="mast">
-        <a href="${esc(sh.brandHref)}" class="mast-brand" aria-label="${esc(sh.brandLabel)}"><relay-chef size="28"></relay-chef></a>
-        <p class="mast-title"><b>${esc(curMod.name)}</b>${curTab ? `<span>${esc(curTab)}</span>` : ""}</p>
+        <a href="${esc(sh.brandHref)}" class="mast-brand" aria-label="${esc(sh.brandLabel)}"><relay-chef size="28"></relay-chef><b class="mast-name">${esc(sh.product)}</b></a>
         <div class="tools">
           <button type="button" class="hosts" aria-label="${esc(sh.hostsLabel)}"><relay-glyph name="shield" size="19"></relay-glyph><span>${esc(sh.hostsLabel)}</span></button>
           <button type="button" class="bell" aria-label="${esc(sh.notificationsLabel)}" aria-expanded="false"><relay-glyph name="bell" size="19"></relay-glyph></button>
           <button type="button" class="ask" aria-expanded="false"><span class="chef-desk"><relay-chef size="32"></relay-chef></span><span class="chef-phone"><relay-chef size="24"></relay-chef></span><span>${esc(sh.askRelay)}</span><kbd>${esc(sh.askShortcut)}</kbd></button>
         </div>
       </header>
-      <div class="modhead"${hasTabs ? " data-tabs" : ""}>
+      ${crumbNav(curMod.name, "#" + curMod.id, curTab)}
+      <div class="modhead"${hasTabs ? " data-tabs" : ""} data-phone-titles>
         <div class="titles"><h1>${esc(curMod.name)}</h1><p>${esc(S.lead || P.purpose)}</p></div>
         ${hasTabs ? `<nav class="tabs" aria-label="${esc(curMod.name)}" data-region="tabs">${P.tabs.map((t) => `<a href="#" class="tab" aria-current="${t.current ? "page" : "false"}">${esc(t.name)}</a>`).join("")}</nav>` : ""}
       </div>

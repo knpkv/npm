@@ -1,6 +1,6 @@
 {
   "design": "Relay super app, page 16 Review D - Canvas, conformance screen screens/review-canvas.html",
-  "source_export": "export-5",
+  "source_export": "export-6",
   "states": 35,
   "viewports": [360, 390, 1280],
   "status": "All states designed. Each flips to implemented in the phase that builds it, with its live route.",
@@ -14,5 +14,6 @@
   ],
   "stacks_nav": "Stacks row: the desktop nav's secondary list gains stacks after hostResources, as the shell registers it (Relay export-4 shared nav: Host resources, Sandboxes, Stacks). Sandboxes joins with its own module's registration. Fixture data only; exported HTML unchanged.",
   "commit_label": "Commits are named by title and time (Title, 14:18) with the full id in the tooltip and a Copy commit id button; the hash never shows as text. From the commit-label design turns (Relay export after both turns). Hand edits after export: the turns also moved Settings from the pinned sidebar foot to a nav row, which was not asked for, so the screen keeps main's pinned Settings, and nav and More-list data stay as main registers them (rows join with their own modules). A commit named inside a status pill (Fix pushed in “Title, 14:24”, waiting for re-review) is plain text without a copy button: the pill is not interactive and takes only text, as labels inside canvas drawings do.",
-  "sandboxes_nav": "Sandboxes row: the desktop nav's secondary list gains sandboxes between hostResources and stacks, as the shell registers it on the pool hub (Relay export-6 shared nav: Host resources, Sandboxes, Stacks). Current export-5 fixture data only; export-4 and exported HTML unchanged."
+  "sandboxes_nav": "Sandboxes row: the desktop nav's secondary list gains sandboxes between hostResources and stacks, as the shell registers it on the pool hub (Relay export-6 shared nav: Host resources, Sandboxes, Stacks). Current export-5 fixture data only; export-4 and exported HTML unchanged.",
+  "phone_breadcrumb": "export-6 is export-5 plus the Relay project export (Project HTML .zip, sha256 26638853a67ad25863eb30242f408a0f4be5ab2e23c09489a97c4f7d8e884d65) from the turn that moved the conformance screens to the rule-45 phone chrome: screens/chrome.css is that export's file unchanged; screens/review-canvas.html is that export's file (sha256 d45be17523d52c8934389903040189679a6488032d1f1cc831b41356956bc1b0) with one hunk kept from export-5: the Settings row stays pinned at the sidebar foot (export-5's nav and side-settings lines) instead of the export's nav row, as for the commit-label turns. Changes taken: Relay brand in the mast, crumb styles moved into chrome.css, no crumb in full-screen request and receipt states, the Settings crumb links to #settings. Fixture unchanged."
 }

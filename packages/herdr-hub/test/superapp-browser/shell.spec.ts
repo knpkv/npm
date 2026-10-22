@@ -308,14 +308,14 @@ test("keeps a document anchor on first load", async ({ page }) => {
 })
 
 test(
-  "phone module title and flat bar replace the nested breadcrumb without overlapping Relay",
+  "phone breadcrumb and flat bar sit clear of Relay, and the breadcrumb hides in full-screen Relay",
   async ({ page }, info) => {
     test.skip(info.project.name !== "phone", "Phone chrome")
     for (const width of [360, 390, 430]) {
       await page.setViewportSize({ width, height: 844 })
       await page.goto("/#fleet/work")
-      await expect(page.locator(".superapp-breadcrumb")).toBeHidden()
-      await expect(page.locator(".superapp-phone-title")).toHaveText("Fleet Work")
+      await expect(page.locator(".superapp-breadcrumb")).toHaveText("Fleet / Work", { useInnerText: true })
+      await expect(page.locator(".superapp-phone-title")).toHaveText("Relay")
       await expect(page.locator(".superapp-bottom a")).toHaveText(["Connect", "Fleet1", "Code", "Usage"])
       const barGeometry = await page.locator(".superapp-bottom").evaluate((bar) => {
         const fleet = bar.querySelector("a[href*=\"#fleet/\"]")
@@ -349,6 +349,7 @@ test(
       await page.locator("[data-rly-relay-launcher]").click()
       await expect(page.locator("[data-rly-relay-panel=\"fullscreen\"]")).toBeVisible()
       await expect(page.locator(".superapp-bottom")).toHaveAttribute("aria-hidden", "true")
+      await expect(page.locator(".superapp-breadcrumb")).toBeHidden()
       await page.getByRole("button", { name: "Close Relay", exact: true }).click()
       await expect(page.locator(".superapp-bottom")).toBeVisible()
     }
@@ -1038,28 +1039,41 @@ test("the built shell fixture includes the production font preloads", async ({ p
   expect(hrefs).toEqual(["/assets/geist-latin-wght-normal.woff2", "/assets/geist-mono-latin-wght-normal.woff2"])
 })
 
-/** Installed phone mast strings match the designed suffix policy for every page. */
-test("phone titles follow installed page metadata", async ({ page }, info) => {
-  test.skip(info.project.name !== "phone", "Phone mast")
+/** Design rule 45: the phone header names the product and one line under it names module and page. */
+test("phone breadcrumb names the module and page under a product header", async ({ page }, info) => {
+  test.skip(info.project.name !== "phone", "Phone breadcrumb")
   for (
-    const { route, title } of [
-      { route: "fleet/approvals", title: "Fleet Approvals" },
-      { route: "fleet/work", title: "Fleet Work" },
-      { route: "usage/limits", title: "Usage Limits" },
-      { route: "usage/tokens", title: "Usage" },
-      { route: "usage/by-tool", title: "Usage By tool" },
-      { route: "code/pull-requests", title: "Code" },
-      { route: "code/reviews", title: "Code" },
-      { route: "code/diffs", title: "Code" }
+    const { crumb, route } of [
+      { route: "fleet/approvals", crumb: "Fleet / Approvals" },
+      { route: "fleet/work", crumb: "Fleet / Work" },
+      { route: "usage/limits", crumb: "Usage / Limits" },
+      { route: "usage/tokens", crumb: "Usage / Tokens" },
+      { route: "usage/by-tool", crumb: "Usage / By tool" },
+      { route: "code/pull-requests", crumb: "Code / Pull requests" },
+      { route: "connect/overview", crumb: "Connect" }
     ]
   ) {
     await page.goto(`/#${route}`)
-    await expect(page.locator(".superapp-phone-title")).toHaveText(title)
+    await expect(page.locator(".superapp-phone-title")).toHaveText("Relay")
+    const line = page.locator(".superapp-breadcrumb")
+    await expect(line).toBeVisible()
+    await expect(line).toHaveText(crumb, { useInnerText: true })
+    const geometry = await line.evaluate((element) => ({
+      height: element.getBoundingClientRect().height,
+      top: element.getBoundingClientRect().top,
+      headerBottom: document.querySelector(".superapp-header")?.getBoundingClientRect().bottom,
+      position: getComputedStyle(element).position
+    }))
+    expect(geometry.height).toBeLessThanOrEqual(32)
+    expect(geometry.top).toBe(geometry.headerBottom)
+    expect(geometry.position).toBe("static")
   }
+  await page.goto("/#nowhere/at-all")
+  await expect(page.locator(".superapp-breadcrumb")).toBeHidden()
 })
 
-/** Desktop-only Fleet gutter cannot enlarge the one-pixel phone announcement heading. */
-test("Fleet heading keeps its phone hiding geometry and remains outside the tab order", async ({ page }, info) => {
+/** The Fleet heading shows at every width (design rule 45 refs) and stays outside the tab order. */
+test("Fleet heading is visible at every width and remains outside the tab order", async ({ page }) => {
   await page.goto("/#fleet/approvals")
   const heading = page.locator("[data-module=\"fleet\"] .superapp-module-heading")
   await expect(heading).toHaveCount(1)
@@ -1074,13 +1088,8 @@ test("Fleet heading keeps its phone hiding geometry and remains outside the tab 
   })
   expect(metrics.tabIndex).toBe(-1)
   expect(metrics.focusable).toBe(0)
-  if (info.project.name === "phone") {
-    expect(metrics.width).toBe(1)
-    expect(metrics.height).toBe(1)
-  } else {
-    expect(metrics.width).toBeGreaterThan(1)
-    expect(metrics.height).toBeGreaterThan(1)
-  }
+  expect(metrics.width).toBeGreaterThan(1)
+  expect(metrics.height).toBeGreaterThan(1)
 })
 
 /** Presentation locks follow visibility; the terminal worker remains owned until the active surface leaves. */

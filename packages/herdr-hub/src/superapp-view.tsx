@@ -560,6 +560,32 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
         }
       />
     )
+  // Phone only (design rule 45): an in-flow line under the header, so it scrolls away with the page.
+  const breadcrumbElement = (
+    <nav aria-label="Current page" className="superapp-breadcrumb" data-route-found={location.error === null}>
+      <span className="superapp-breadcrumb-root">Relay</span>
+      <span aria-hidden="true" className="superapp-breadcrumb-root">
+        /
+      </span>
+      {location.error === null ? (
+        <>
+          {currentModule === undefined || currentModule.pages.length === 1 ? null : (
+            <a href={moduleHref(currentModule, currentModule.defaultPage)} title={currentModule.label}>
+              <span>{currentModule.label}</span>
+            </a>
+          )}
+          {currentModule === undefined || currentModule.pages.length === 1 ? null : (
+            <span aria-hidden="true">{"\u00a0/\u00a0"}</span>
+          )}
+          <span aria-current="page" title={currentPage?.label}>
+            <bdi dir="ltr">{currentPage?.label}</bdi>
+          </span>
+        </>
+      ) : (
+        <span>Page not found</span>
+      )}
+    </nav>
+  )
   const headerElement = (
     <header
       className="superapp-header"
@@ -571,33 +597,12 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
       <a className="superapp-brand" href={moduleHref(landingModule, landing.page)} aria-label="Relay home" title="Home">
         {headerGrouped ? <UsageEmptyChef /> : <RelayChefMastMark />}
       </a>
+      {/* Phone shows the product name here; the breadcrumb line below names the module and page (design rule 45). */}
       <strong className="superapp-phone-title" aria-hidden="true">
-        {location.error === null ? currentModule?.label : "Page not found"}
-        {currentPage?.showInPhoneTitle === true ? <span> {currentPage.label}</span> : null}
+        Relay
       </strong>
       {/* The grouped header reads hosts and notifications before Ask Relay, as the design does; the grid places it. */}
       {headerGrouped ? null : relayElement}
-      <nav aria-label="Current page" className="superapp-breadcrumb" data-route-found={location.error === null}>
-        <span className="superapp-breadcrumb-root">Relay</span>
-        <span aria-hidden="true" className="superapp-breadcrumb-root">
-          /
-        </span>
-        {location.error === null ? (
-          <>
-            {currentModule === undefined || currentModule.pages.length === 1 ? null : (
-              <a href={moduleHref(currentModule, currentModule.defaultPage)} title={currentModule.label}>
-                <span>{currentModule.label}</span>
-              </a>
-            )}
-            {currentModule === undefined || currentModule.pages.length === 1 ? null : <span aria-hidden="true">/</span>}
-            <span aria-current="page" title={currentPage?.label}>
-              <bdi dir="ltr">{currentPage?.label}</bdi>
-            </span>
-          </>
-        ) : (
-          <span>Page not found</span>
-        )}
-      </nav>
       <button
         type="button"
         aria-label={`${hostLabel}: ${host}`}
@@ -704,6 +709,7 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
             inert={terminalActive}
           >
             {headerElement}
+            {breadcrumbElement}
             {headerGrouped ? (
               <div className="usage-empty-header-outlet" data-module-owner="usage" ref={setUsageHeaderOutlet} />
             ) : null}
