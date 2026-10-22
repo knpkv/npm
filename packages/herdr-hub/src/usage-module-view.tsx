@@ -247,7 +247,6 @@ const UsagePage = ({
   // Loading and a first failed read show only their own state, as the reference draws them.
   const limitsShown = Option.isSome(AsyncResult.value(limits))
   const tabProps: UsageTabProps = {
-    // Limits draws its own cards (06 Usage); the shared tab adds only the token chart there.
     presentation: { page: "tokens", labelledBy: headingId },
     onHubMachine: false,
     range,
@@ -511,9 +510,10 @@ const UsagePage = ({
             limits={limits}
             now={content.now}
             onRetry={() => setRefresh((previous) => previous + 1)}
+            overview={moduleHref(usageModule, "tokens", decoded.success.search)}
             timeZone={timeZone}
+            usage={usageReading?.fleet ?? null}
           />
-          {limitsShown ? <UsageTab {...tabProps} /> : null}
         </>
       ) : (
         <UsageTab {...tabProps} />

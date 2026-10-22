@@ -4,7 +4,7 @@ import { Schema } from "effect"
 import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
 import { designReadings, UsageDesignFixture } from "../scripts/design-fixture.js"
-import { limitsPage, windowStatus } from "../src/usage-limits-page.js"
+import { limitsPage, resetLabel, windowStatus } from "../src/usage-limits-page.js"
 
 const raw = readFileSync(new URL("../../../design-refs/super-app/fixture.json", import.meta.url), "utf8")
 const fixture = Schema.decodeUnknownSync(
@@ -247,5 +247,14 @@ describe("Usage Limits page edge cases", () => {
     const window: Pick<WindowSummary, "freshness" | "usedPercent"> = { freshness: "current", usedPercent: 50 }
     expect(windowStatus({ ...window, tone: "near" })).toBe("near")
     expect(windowStatus({ ...window, usedPercent: 85, tone: "ok" })).toBe("ok")
+  })
+})
+
+describe("Usage Limits reset words", () => {
+  it("says next only for the same weekday a week out, and dates a reset already past", () => {
+    expect(resetLabel(at(17, 7, 0), now, "UTC")).toBe("Saturday, 07:00")
+    expect(resetLabel(at(18, 7, 0), now, "UTC")).toBe("Next Sunday, 07:00")
+    expect(resetLabel(at(11, 9, 0), now, "UTC")).toBe("Sunday 11 October, 09:00")
+    expect(resetLabel(at(11, 16, 40), now, "UTC")).toBe("Today, 16:40")
   })
 })

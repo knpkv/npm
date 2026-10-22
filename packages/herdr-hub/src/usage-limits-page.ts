@@ -86,10 +86,14 @@ const status = (tool: ToolReading): Status => windowStatus(tool.primary)
 /** "weekly" or "5-hour", as a limit's name inside a sentence. */
 const windowWord = (agent: Agent): string => (primaryWindow[agent] === "Weekly" ? "weekly" : "5-hour")
 
-/** Reset times in the page time zone: today, a weekday within the week, "next" for the same weekday a week out. */
+/**
+ * Reset times in the page time zone: "today", a weekday within the next six days, "next <weekday>" a week or more
+ * out, and the date for one already past (a stale reading's window may have reset since).
+ */
 const formatter = (timeZone: string, now: number) => {
   const clock = new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", timeZone })
   const weekday = new Intl.DateTimeFormat("en-GB", { weekday: "long", timeZone })
+  const dated = new Intl.DateTimeFormat("en-GB", { weekday: "long", day: "numeric", month: "long", timeZone })
   const date = new Intl.DateTimeFormat("en-CA", { year: "numeric", month: "2-digit", day: "2-digit", timeZone })
   const dayNumber = (at: number) => {
     const [year, month, day] = date.format(at).split("-").map(Number)
@@ -97,7 +101,13 @@ const formatter = (timeZone: string, now: number) => {
   }
   const days = (at: number) => dayNumber(at) - dayNumber(now)
   const dayName = (at: number) =>
-    days(at) <= 0 ? "today" : days(at) >= 6 ? `next ${weekday.format(at)}` : weekday.format(at)
+    at < now
+      ? dated.format(at)
+      : days(at) === 0
+      ? "today"
+      : days(at) >= 7
+      ? `next ${weekday.format(at)}`
+      : weekday.format(at)
   const capital = (words: string) => `${words.charAt(0).toUpperCase()}${words.slice(1)}`
   return {
     clock: (at: number) => clock.format(at),
@@ -105,10 +115,13 @@ const formatter = (timeZone: string, now: number) => {
     reset: (at: number) => `${capital(dayName(at))}, ${clock.format(at)}`,
     /** "today at 16:40", "Tuesday at 03:29". */
     resetWords: (at: number) => `${dayName(at)} at ${clock.format(at)}`,
-    /** "16:40" today, otherwise with its day: "Tuesday at 03:29". */
-    until: (at: number) => (days(at) <= 0 ? clock.format(at) : `${dayName(at)} at ${clock.format(at)}`)
+    /** "16:40" later today, otherwise with its day: "Tuesday at 03:29". */
+    until: (at: number) => (at >= now && days(at) === 0 ? clock.format(at) : `${dayName(at)} at ${clock.format(at)}`)
   }
 }
+
+/** A reset as the cards print it, in `timeZone` relative to `now`: "Today, 16:40", "Next Sunday, 07:00". */
+export const resetLabel = (at: number, now: number, timeZone: string): string => formatter(timeZone, now).reset(at)
 type Format = ReturnType<typeof formatter>
 
 /** "72% of its 5-hour limit" for a 5-hour primary, "31% weekly" for a weekly one. */

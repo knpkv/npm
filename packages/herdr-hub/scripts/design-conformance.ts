@@ -245,7 +245,7 @@ export const start: StartProduct = Effect.fn("SuperappDesign.start")(function*(f
           await module.locator(".usage-tab-now .usage-limits-now, .usage-limits-cards").first().waitFor({
             state: "visible"
           })
-          await module.locator(".usage-tab-panel[aria-busy=\"false\"]").first().waitFor()
+          await module.locator(".usage-tab-panel[aria-busy=\"false\"], .usage-limits-chart").first().waitFor()
         }
         await page.evaluate(() => document.fonts.ready)
         await page.waitForFunction(usageChartsReady, undefined, { timeout: 5_000 })

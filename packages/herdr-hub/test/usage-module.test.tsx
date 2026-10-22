@@ -828,3 +828,50 @@ it("holds the reference skeleton while Limits loads", async () => {
   expect(loading?.getAttribute("aria-label")).toBe("Loading limits")
   expect(loading?.children).toHaveLength(4)
 })
+
+/** 06 Usage: the Limits chart is the hub's own tokens with every bar's value printed, not the shared Usage tab. */
+it("draws the hub's token chart under the Limits cards", async () => {
+  window.history.replaceState(null, "", "/?range=7d&timeZone=UTC#usage/limits")
+  const hubUsage: FleetUsage = {
+    hosts: [
+      {
+        host: "hub",
+        readAt: 1_000,
+        reading: {
+          _tag: "Read",
+          skipped: 0,
+          usage: {
+            v: 1,
+            machine: "hub",
+            observedAt: 1_000,
+            range: { preset: "7d", timeZone: "UTC", from: 0, to: 2 * 86_400_000, bucket: "day" },
+            periods: [
+              { key: "1970-01-01", start: 0 },
+              { key: "1970-01-02", start: 86_400_000 }
+            ],
+            tokens: [
+              { period: 0, agent: "claude", model: "claude-model", tokens: 2_000_000 },
+              { period: 1, agent: "claude", model: "claude-model", tokens: 4_000_000 }
+            ],
+            limits: []
+          }
+        }
+      }
+    ],
+    failures: [],
+    peersListed: true
+  }
+  await render({
+    usage: () => Effect.succeed({ fleet: hubUsage, receivedAt: 1_000 }),
+    limits: Effect.succeed({ fleet: hubLimits(40), receivedAt: 1_000 })
+  })
+  const chart = document.querySelector('figure[data-region="detail"]')
+  // Codex has no reading on the hub, so it is left out of the totals and named as excluded.
+  expect(chart?.querySelector("h2")?.textContent).toBe("Tokens on hub, last 7 days, Claude only")
+  expect([...(chart?.querySelectorAll(".usage-limits-bar-value") ?? [])].map((value) => value.textContent)).toEqual([
+    "2M",
+    "4M"
+  ])
+  expect(chart?.querySelector("figcaption")?.textContent).toBe("Claude 6MCodex Unknown, excluded6M counted")
+  expect(document.querySelector('[data-module="usage"] .usage-tab')).toBeNull()
+})

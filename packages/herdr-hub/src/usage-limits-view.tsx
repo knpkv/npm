@@ -1,8 +1,10 @@
-import type { FleetLimits, Received } from "@knpkv/herdr-connect/usage"
+import type { FleetLimits, FleetUsage, Received } from "@knpkv/herdr-connect/usage"
 import { Button, LimitTrack, Notice, Skeleton, StateLabel } from "@knpkv/rly/primitives"
 import { Option } from "effect"
 import * as AsyncResult from "effect/reactivity/AsyncResult"
 import type { ReactElement } from "react"
+import { limitsChart } from "./usage-limits-chart.js"
+import { UsageLimitsChart } from "./usage-limits-chart-view.js"
 import { type LimitsCard, limitsPage } from "./usage-limits-page.js"
 
 const Card = ({ card }: { readonly card: LimitsCard }): ReactElement => (
@@ -52,13 +54,19 @@ export const UsageLimitsReadings = ({
   limits,
   now,
   onRetry,
-  timeZone
+  overview,
+  timeZone,
+  usage
 }: {
   readonly host: string
   readonly limits: AsyncResult.AsyncResult<Received<FleetLimits>, unknown>
   readonly now: number
   readonly onRetry: () => void
+  /** The Tokens page, where the chart's "Fleet token overview" leads. */
+  readonly overview: string
   readonly timeZone: string
+  /** The last usage read, for the hub's token chart; null until one arrives. */
+  readonly usage: FleetUsage | null
 }): ReactElement => {
   const last = Option.getOrNull(AsyncResult.value(limits))
   const failed = AsyncResult.isFailure(limits)
@@ -87,6 +95,15 @@ export const UsageLimitsReadings = ({
     )
   }
   const page = limitsPage(last.fleet, host, now - last.receivedAt, timeZone)
+  // A tool whose limits cannot be read is left out of every token total: Unknown is not zero.
+  const chart =
+    page === null || usage === null
+      ? null
+      : limitsChart(
+          usage,
+          host,
+          page.cards.filter((card) => card.figure === null).map((card) => card.agent)
+        )
   const notices = [
     ...(failed
       ? [{ title: "Couldn't refresh limits.", text: "This is the previous reading. Trying again every minute." }]
@@ -121,6 +138,7 @@ export const UsageLimitsReadings = ({
               <Card key={card.agent} card={card} />
             ))}
           </div>
+          {chart === null ? null : <UsageLimitsChart chart={chart} overview={overview} />}
         </>
       )}
     </>

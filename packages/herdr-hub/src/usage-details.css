@@ -558,6 +558,7 @@
   /* Limits (06 Usage reference): the verdict, one card per tool, the token chart and the footnote. */
   .usage-details[data-usage-page="limits"] {
     gap: 2rem;
+    padding-block-end: 1rem;
     font-weight: 430;
     line-height: 1.5;
   }
@@ -739,10 +740,110 @@
     color: var(--rly-color-text-2);
   }
 
+  .usage-limits-chart {
+    display: grid;
+    gap: 0.9rem;
+    margin: 0;
+    padding-block: 1.1rem;
+    padding-inline: 1.15rem;
+    min-inline-size: 0;
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-group);
+    background: var(--rly-color-surface-1);
+  }
+
+  .usage-limits-chart-head {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem 1rem;
+    align-items: baseline;
+    justify-content: space-between;
+  }
+
+  .usage-limits-chart-head h2 {
+    margin: 0;
+    font-size: 1.1rem;
+    font-weight: 620;
+    line-height: 1.5;
+  }
+
+  .usage-limits-chart-head a {
+    display: inline-flex;
+    gap: 0.35rem;
+    align-items: center;
+    min-block-size: 44px;
+    font-size: 0.8125rem;
+    text-decoration: underline;
+    text-underline-offset: 0.2em;
+  }
+
+  .usage-limits-chart-head a svg {
+    inline-size: 14px;
+    block-size: 14px;
+  }
+
+  .usage-limits-bars {
+    display: grid;
+    gap: 0.5rem;
+    align-items: end;
+    block-size: 200px;
+  }
+
+  .usage-limits-bar {
+    display: grid;
+    gap: 0.3rem;
+    justify-items: center;
+    align-content: end;
+    block-size: 100%;
+    min-inline-size: 0;
+  }
+
+  .usage-limits-bar-value {
+    font-size: 0.75rem;
+    font-weight: 520;
+    font-variant-numeric: tabular-nums;
+    color: var(--rly-color-text-1);
+  }
+
+  .usage-limits-bar-fill {
+    display: block;
+    inline-size: 100%;
+    max-inline-size: 44px;
+    border-radius: 4px 4px 0 0;
+    background: var(--rly-color-text-3);
+  }
+
+  .usage-limits-bar-period {
+    font-size: 0.75rem;
+    text-align: center;
+    color: var(--rly-color-text-2);
+  }
+
+  .usage-limits-chart figcaption {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem 1.25rem;
+    font-size: 0.8125rem;
+    color: var(--rly-color-text-2);
+  }
+
+  .usage-limits-chart figcaption span {
+    color: var(--rly-color-text-1);
+  }
+
+  .usage-limits-chart figcaption [data-total] {
+    font-weight: 620;
+  }
+
+  .usage-limits-chart figcaption [data-unknown] {
+    color: var(--rly-color-text-2);
+  }
+
   @media (max-width: 599px) {
+    /* The reference page ends 6rem under the footnote on phone; the shell's bottom-bar inset supplies the rest. */
     .usage-details[data-usage-page="limits"] {
       gap: 1.5rem;
-      padding-block-start: 0.9rem;
+      padding-block: 0.9rem 1.25rem;
     }
 
     /* The phone page starts 0.9rem under the grouped header, without the slot's grid gap. */
