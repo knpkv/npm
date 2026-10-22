@@ -563,7 +563,9 @@ describe("hub apps", () => {
   it("keeps redirects inside the app: its root moves under its prefix, other origins are dropped", () => {
     expect(appLocation("/v1/modules/usage/limits", "/apps/usage/")).toBe("/apps/usage/v1/modules/usage/limits")
     expect(appLocation("/apps/usage/app/assets/x", "/apps/usage/")).toBe("/apps/usage/app/assets/x")
-    expect(appLocation("limits?range=7d", "/apps/usage/")).toBe("limits?range=7d")
+    expect(appLocation("limits?range=7d", "/apps/usage/")).toBe("/apps/usage/limits?range=7d")
+    // Moved under the prefix first, then resolved: the app's root can't climb out either.
+    expect(appLocation("/v1/../../connect", "/apps/usage/")).toBeNull()
     expect(appLocation("//elsewhere.test/", "/apps/usage/")).toBeNull()
     expect(appLocation("https://elsewhere.test/", "/apps/usage/")).toBeNull()
   })
@@ -597,4 +599,12 @@ describe("hub apps", () => {
       )
       expect(refused.code).toBe("rejected")
     }))
+  it("passes a redirect only if it resolves inside the app's prefix", () => {
+    expect(appLocation("/apps/raw/ok?a=1#b", "/apps/raw/")).toBe("/apps/raw/ok?a=1#b")
+    expect(appLocation("next", "/apps/raw/")).toBe("/apps/raw/next")
+    expect(appLocation("/apps/raw/../../v1/anything", "/apps/raw/")).toBeNull()
+    expect(appLocation("../connect", "/apps/raw/")).toBeNull()
+    expect(appLocation("//elsewhere.test/", "/apps/raw/")).toBeNull()
+    expect(appLocation("https://elsewhere.test/apps/raw/", "/apps/raw/")).toBeNull()
+  })
 })

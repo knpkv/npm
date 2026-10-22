@@ -3,8 +3,8 @@ import { NodeHttpClient, NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
 import { BrowserOpener } from "@knpkv/browser-pairing/launch"
 import { Effect, FileSystem, Layer, Result, Schedule, Schema, Sink, Stdio } from "effect"
-import { createServer, request as httpRequest, type Server } from "node:http"
-import { tmpdir } from "node:os"
+import { createServer, type IncomingHttpHeaders, request as httpRequest, type Server } from "node:http"
+import { tmpdir, userInfo } from "node:os"
 import { ShellServices } from "../src/hub-client.js"
 import {
   AppId,
@@ -93,6 +93,8 @@ describe("readRunMode", () => {
     expect(Result.isFailure(readRunMode(manifest, ["--socket", "/run/probe.sock"], {}))).toBe(true)
     expect(Result.isFailure(readRunMode(manifest, ["launch"], {}))).toBe(true)
     expect(Result.isFailure(readRunMode(manifest, ["--port", "seventy"], {}))).toBe(true)
+    expect(Result.isFailure(readRunMode(manifest, ["--port", "70000"], {}))).toBe(true)
+    expect(Result.isFailure(readRunMode(manifest, ["--port", "-1"], {}))).toBe(true)
   })
 })
 
@@ -146,16 +148,32 @@ describe("attached runner", () => {
           Effect.retry({ schedule: Schedule.spaced("20 millis"), times: 100 })
         )
 
+        // The hub's own reads are served to the hub.
+        expect((yield* onSocket(socket, "GET", "/app/badge", {})).status).toBe(200)
         const served = yield* onSocket(socket, "GET", "/app/manifest", {})
         expect(JSON.parse(served.body).client).toEqual({ entry: "client.js", css: [] })
 
-        expect((yield* onSocket(socket, "GET", "/v1/modules/probe/who", {})).status).toBe(403)
+        // Only the hub's owner can reach the socket, whatever the umask.
+        expect((yield* fileSystem.stat(socket)).mode & 0o777).toBe(0o600)
+
         const caller = JSON.stringify({ login: "viewer", sameNode: false, provenance: "authenticated_remote" })
-        const who = yield* onSocket(socket, "GET", "/v1/modules/probe/who", { [hubHeaders.caller]: caller })
+        const local = { [hubHeaders.listener]: "local" }
+        expect((yield* onSocket(socket, "GET", "/v1/modules/probe/who", local)).status).toBe(403)
+        // The hub names the listener that admitted the request; the descriptor's own `listeners` decide.
+        expect((yield* onSocket(socket, "GET", "/v1/modules/probe/who", { [hubHeaders.caller]: caller })).status)
+          .toBe(403)
+        expect(
+          (yield* onSocket(socket, "GET", "/v1/modules/probe/who", {
+            [hubHeaders.caller]: caller,
+            [hubHeaders.listener]: "serve"
+          })).status
+        ).toBe(404)
+        const who = yield* onSocket(socket, "GET", "/v1/modules/probe/who", { ...local, [hubHeaders.caller]: caller })
         expect(JSON.parse(who.body)).toBe("viewer")
 
         const grant = "g".repeat(43)
         const job = yield* onSocket(socket, "POST", "/v1/modules/probe/job", {
+          ...local,
           [hubHeaders.caller]: caller,
           [hubHeaders.grant]: grant,
           "content-type": "application/json"
@@ -170,6 +188,7 @@ describe("attached runner", () => {
         // The hub rotates the app's token when it restarts; the app reads the file on every call.
         yield* fileSystem.writeFileString(`${directory}/token`, "rotated-token\n")
         yield* onSocket(socket, "POST", "/v1/modules/probe/job", {
+          ...local,
           [hubHeaders.caller]: caller,
           [hubHeaders.grant]: "h".repeat(43),
           "content-type": "application/json"
@@ -177,6 +196,7 @@ describe("attached runner", () => {
         expect(seen[1]?.authorization).toBe("Bearer rotated-token")
 
         const ungranted = yield* onSocket(socket, "POST", "/v1/modules/probe/job", {
+          ...local,
           [hubHeaders.caller]: caller,
           "content-type": "application/json"
         }, "{}")
@@ -185,6 +205,24 @@ describe("attached runner", () => {
       }).pipe(Effect.scoped))
   })
 })
+
+/** One request over loopback TCP, with its response headers. */
+const overTcp = (url: string, method: string, headers: Record<string, string>) =>
+  Effect.callback<{ readonly status: number; readonly body: string; readonly headers: IncomingHttpHeaders }>(
+    (resume) => {
+      const outgoing = httpRequest(url, { method, headers }, (incoming) => {
+        const chunks: Array<Buffer> = []
+        incoming.on("data", (chunk: Buffer) => chunks.push(chunk))
+        incoming.on("end", () =>
+          resume(Effect.succeed({
+            status: incoming.statusCode ?? 0,
+            body: Buffer.concat(chunks).toString(),
+            headers: incoming.headers
+          })))
+      })
+      outgoing.end()
+    }
+  )
 
 describe("standalone runner", () => {
   // The sign-in link is the only thing a standalone run prints; it names the port it bound.
@@ -204,7 +242,7 @@ describe("standalone runner", () => {
   )
 
   it.layer(testLayer, { excludeTestServices: true })((it) => {
-    it.effect("ignores a forged x-hub-caller: only the owner's session cookie admits a request", () =>
+    it.effect("admits the owner through the sign-in link and ignores a forged x-hub-caller", () =>
       Effect.gen(function*() {
         const fileSystem = yield* FileSystem.FileSystem
         const directory = yield* fileSystem.makeTempDirectoryScoped({ directory: tmpdir(), prefix: "hub-app-" })
@@ -215,25 +253,41 @@ describe("standalone runner", () => {
           { _tag: "Skip", reason: "test" }
         ).pipe(Effect.forkScoped)
         const link = yield* Effect.sync(() => printed.join("")).pipe(
-          Effect.flatMap((text) => text.includes("http://") ? Effect.succeed(text) : Effect.fail("not yet")),
+          Effect.flatMap((text) => {
+            const line = text.split("\n").find((candidate) => candidate.startsWith("http://"))
+            return line === undefined ? Effect.fail("not yet") : Effect.succeed(line.trim())
+          }),
           Effect.retry({ schedule: Schedule.spaced("20 millis"), times: 100 })
         )
-        const origin = new URL(link.trim()).origin
-        const forged = yield* Effect.callback<{ readonly status: number; readonly body: string }>((resume) => {
-          const outgoing = httpRequest(`${origin}/v1/modules/probe/who`, {
-            headers: { [hubHeaders.caller]: JSON.stringify({ login: "forged", sameNode: true }) }
-          }, (incoming) => {
-            const chunks: Array<Buffer> = []
-            incoming.on("data", (chunk: Buffer) => chunks.push(chunk))
-            incoming.on(
-              "end",
-              () => resume(Effect.succeed({ status: incoming.statusCode ?? 0, body: Buffer.concat(chunks).toString() }))
-            )
-          })
-          outgoing.end()
+        const origin = new URL(link).origin
+        const code = new URLSearchParams(new URL(link).hash.slice(1)).get("bootstrap_token") ?? ""
+        const forgedCaller = JSON.stringify({ login: "forged", sameNode: true })
+        const sameSite = { origin, "sec-fetch-site": "same-origin" }
+
+        // The hub's reads don't exist standalone: no cookie reaches `/app/*`, so nothing there may need one.
+        expect((yield* overTcp(`${origin}/app/badge`, "GET", sameSite)).status).toBe(404)
+        expect((yield* overTcp(`${origin}/app/needs-you`, "GET", sameSite)).status).toBe(404)
+
+        const anonymous = yield* overTcp(`${origin}/api/v1/modules/probe/who`, "GET", {
+          ...sameSite,
+          [hubHeaders.caller]: forgedCaller
         })
-        expect(forged.status).toBe(403)
-        expect(JSON.parse(forged.body)).toEqual({ code: "unauthorized" })
+        expect([anonymous.status, JSON.parse(anonymous.body)]).toEqual([403, { code: "unauthorized" }])
+
+        const spent = yield* overTcp(`${origin}/auth/bootstrap`, "POST", {
+          ...sameSite,
+          authorization: `Bearer ${code}`
+        })
+        expect(spent.status).toBe(200)
+        const cookie = [spent.headers["set-cookie"] ?? []].flat()[0]?.split(";")[0] ?? ""
+
+        const owner = yield* overTcp(`${origin}/api/v1/modules/probe/who`, "GET", {
+          ...sameSite,
+          cookie,
+          [hubHeaders.caller]: forgedCaller
+        })
+        expect(owner.status).toBe(200)
+        expect(JSON.parse(owner.body)).toBe(userInfo().username)
       }).pipe(Effect.scoped))
   })
 })

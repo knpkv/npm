@@ -32,7 +32,7 @@ export interface ShellBadge {
 export interface ShellContext {
   readonly contract: 1
   readonly mode: "hub" | "standalone"
-  /** Absolute path for a module route: `/apps/<id>/v1/modules/<id>/<path>` in the hub, `/v1/modules/<id>/<path>` standalone. */
+  /** Absolute path for a module route: `/apps/<id>/v1/modules/<id>/<path>` in the hub, `/api/v1/modules/<id>/<path>` standalone. */
   readonly api: (path: `/${string}`) => string
   /** Headers the app adds to its own module-route requests: the CSRF token standalone, none in the hub. */
   readonly requestHeaders: () => Readonly<Record<string, string>>

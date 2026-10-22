@@ -95,15 +95,22 @@ const allowedResponseHeaders = new Set([
   "vary"
 ])
 
+const hubOrigin = "http://hub.invalid"
+
 /**
- * A redirect stays inside the app. The app doesn't know its prefix: `/v1/…` is its own root, so it is moved
- * under `/apps/<id>/`; a relative target resolves inside the prefix already. A target with a scheme or `//`
- * leaves the hub's origin and is dropped.
+ * A redirect stays inside the app. The app doesn't know its prefix, so `/v1/…` (its own root) is moved under
+ * `/apps/<id>/` first. Then the target is resolved against the prefix and passes only if it is still inside it:
+ * `/apps/<id>/../../v1/x`, `../x`, `//host` and other origins are dropped. The resolved path is what passes on.
  */
 export const appLocation = (target: string, prefix: string): string | null => {
-  if (target.startsWith(prefix)) return target
-  if (target.startsWith("//") || /^[a-z][a-z0-9+.-]*:/iu.test(target)) return null
-  return target.startsWith("/") ? `${prefix}${target.slice(1)}` : target
+  const rooted = target.startsWith("/") && !target.startsWith("//") && !target.startsWith(prefix)
+    ? `${prefix}${target.slice(1)}`
+    : target
+  if (!URL.canParse(rooted, `${hubOrigin}${prefix}`)) return null
+  const resolved = new URL(rooted, `${hubOrigin}${prefix}`)
+  return resolved.origin === hubOrigin && resolved.pathname.startsWith(prefix)
+    ? `${resolved.pathname}${resolved.search}${resolved.hash}`
+    : null
 }
 
 /** The value the hub passes on for one response header, or null to drop it. */

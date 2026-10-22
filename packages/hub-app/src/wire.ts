@@ -22,6 +22,7 @@ export const hubHeaders = {
   caller: "x-hub-caller",
   requestId: "x-hub-request-id",
   grant: "x-hub-grant",
+  listener: "x-hub-listener",
   app: "x-hub-app"
 }
 

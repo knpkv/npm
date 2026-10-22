@@ -32,7 +32,7 @@ import { parseArgs } from "node:util"
 import type { ShellServices } from "./hub-client.js"
 import { attachedLayer, standaloneLayer } from "./hub-client.js"
 import { AppManifest, type AppManifestInput, AppStartError } from "./manifest.js"
-import { validateModuleRegistry } from "./module.js"
+import { ModuleListener, validateModuleRegistry } from "./module.js"
 import {
   CurrentGrant,
   dispatchToModule,
@@ -57,7 +57,11 @@ export interface AppServer<E, R> {
 
 export const RunMode = Schema.Union([
   Schema.TaggedStruct("Attached", { socket: Schema.String, hubUrl: Schema.String, tokenFile: Schema.String }),
-  Schema.TaggedStruct("Standalone", { port: Schema.Int, open: Schema.Boolean })
+  Schema.TaggedStruct("Standalone", {
+    // 0 picks a free port; the sign-in link names the one bound.
+    port: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 65_535 })),
+    open: Schema.Boolean
+  })
 ])
 export type RunMode = typeof RunMode.Type
 
@@ -164,8 +168,20 @@ const hubGrant = Effect.gen(function*() {
   return header === undefined ? null : Option.getOrNull(Schema.decodeUnknownOption(Grant)(header))
 })
 
+/** The hub listener that admitted a proxied request, from `x-hub-listener`; the descriptor must declare it. */
+const hubListener = Effect.gen(function*() {
+  const request = yield* HttpServerRequest.HttpServerRequest
+  return yield* Schema.decodeUnknownEffect(ModuleListener)(request.headers[hubHeaders.listener]).pipe(
+    Effect.mapError(() => new ModuleRouteFailure({ status: 403, code: "no_listener" }))
+  )
+})
+
 interface ListenerPolicy<E, R> {
-  readonly listener: "local" | "serve"
+  /** Where module routes live on this listener: `/v1/modules/<id>/*` behind the hub, under `/api` standalone. */
+  readonly routePrefix: "" | "/api"
+  /** `/app/needs-you` and `/app/badge` are read by the hub only; standalone doesn't serve them at all. */
+  readonly serveHubReads: boolean
+  readonly listener: Effect.Effect<ModuleListener, E | ModuleRouteFailure, R>
   readonly authorize: Effect.Effect<typeof ModuleCaller.Encoded, E | ModuleRouteFailure, R>
   readonly sameOrigin: Effect.Effect<void, E | ModuleRouteFailure, R>
 }
@@ -182,33 +198,36 @@ const appRoutes = (
     Effect.gen(function*() {
       yield* router.add("GET", appPaths.manifest, HttpServerResponse.json(manifest))
       yield* router.add("GET", appPaths.health, HttpServerResponse.json({ ok: true }))
-      yield* router.add(
-        "GET",
-        appPaths.needsYou,
-        needsYou === undefined
-          ? notFound
-          : needsYou.pipe(
-            Effect.flatMap((result) => HttpServerResponse.json(result)),
-            Effect.catch(() => HttpServerResponse.json({ code: "needs_you_failed" }, { status: 503 }))
-          )
-      )
-      yield* router.add(
-        "GET",
-        appPaths.badge,
-        badge === undefined
-          ? HttpServerResponse.json(null)
-          : Effect.flatMap(badge, (value) => HttpServerResponse.json(value))
-      )
+      if (policy.serveHubReads) {
+        yield* router.add(
+          "GET",
+          appPaths.needsYou,
+          needsYou === undefined
+            ? notFound
+            : needsYou.pipe(
+              Effect.flatMap((result) => HttpServerResponse.json(result)),
+              Effect.catch(() => HttpServerResponse.json({ code: "needs_you_failed" }, { status: 503 }))
+            )
+        )
+        yield* router.add(
+          "GET",
+          appPaths.badge,
+          badge === undefined
+            ? HttpServerResponse.json(null)
+            : Effect.flatMap(badge, (value) => HttpServerResponse.json(value))
+        )
+      }
       yield* router.add(
         "*",
-        `/v1/modules/${manifest.id}/*`,
+        `${policy.routePrefix}/v1/modules/${manifest.id}/*`,
         Effect.gen(function*() {
           const request = yield* HttpServerRequest.HttpServerRequest
           const grant = yield* hubGrant
+          const listener = yield* policy.listener
           const response = yield* dispatchToModule(mounted, {
             method: request.method,
-            url: new URL(request.url, "http://app.invalid"),
-            listener: policy.listener,
+            url: new URL(request.url.slice(policy.routePrefix.length), "http://app.invalid"),
+            listener,
             authorize: policy.authorize,
             sameOrigin: policy.sameOrigin,
             readJson: () =>
@@ -239,6 +258,7 @@ export const serveAttached = Effect.fn("HubApp.serveAttached")(function*<E, R>(
   app: AppServer<E, R>,
   mode: Extract<RunMode, { readonly _tag: "Attached" }>
 ) {
+  const fileSystem = yield* FileSystem.FileSystem
   const manifest = yield* servedManifest(app)
   const services = yield* Layer.build(
     attachedLayer({ app: manifest.id, hubUrl: mode.hubUrl, tokenFile: mode.tokenFile, declared: manifest.services })
@@ -247,8 +267,11 @@ export const serveAttached = Effect.fn("HubApp.serveAttached")(function*<E, R>(
   const badge = app.badge?.pipe(Effect.provideContext(services))
   yield* clearSocket(mode.socket)
   const policy: ListenerPolicy<never, HttpServerRequest.HttpServerRequest> = {
-    // The hub forwards only requests its own listener admitted, and checked same-origin first.
-    listener: "local",
+    routePrefix: "",
+    serveHubReads: true,
+    // The hub forwards only requests its own listener admitted, and checked same-origin first; it names that
+    // listener so the descriptor's own `listeners` still decide.
+    listener: hubListener,
     authorize: hubCaller,
     sameOrigin: Effect.void
   }
@@ -262,7 +285,13 @@ export const serveAttached = Effect.fn("HubApp.serveAttached")(function*<E, R>(
     ).pipe(
       Layer.provide(NodeHttpServer.layerServer(createServer, { path: mode.socket })),
       Layer.provide(HttpPlatform.layer),
-      Layer.provide(Etag.layer)
+      Layer.provide(Etag.layer),
+      // The hub's headers are trusted on this socket, so only its owner may connect, whatever the umask.
+      Layer.tap(() =>
+        fileSystem.chmod(mode.socket, 0o600).pipe(
+          Effect.mapError((cause) => new AppStartError({ reason: "listen", cause }))
+        )
+      )
     )
   )
 })
@@ -329,7 +358,10 @@ const serveStandalone = Effect.fn("HubApp.serveStandalone")(function*<E, R>(
           return ownerCaller(login)
         })
         const policy: ListenerPolicy<never, HttpServerRequest.HttpServerRequest> = {
-          listener: "local",
+          // The owner session's cookie is scoped to `/api`, so module routes live there.
+          routePrefix: "/api",
+          serveHubReads: false,
+          listener: Effect.succeed("local"),
           authorize: authorizeOwner,
           // authorizeHttp checks Origin, Fetch Metadata and the CSRF token for unsafe methods.
           sameOrigin: Effect.void

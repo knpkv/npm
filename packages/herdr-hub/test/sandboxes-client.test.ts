@@ -1,12 +1,19 @@
 // @vitest-environment happy-dom
 import { expect, it } from "@effect/vitest"
-import { SandboxCard } from "@knpkv/sandbox-pool/host"
+import { SandboxCard, SandboxRunView } from "@knpkv/sandbox-pool/host"
 import { Effect, Schema } from "effect"
 import type { HttpBody } from "effect/http"
 import { HttpClient, HttpClientError, HttpClientResponse } from "effect/http"
-import { loadSandboxesCaller, loadSandboxRequests, loadSandboxRuns, submitSandboxJob } from "../src/sandboxes-client.js"
+import {
+  loadSandboxesCaller,
+  loadSandboxRequests,
+  loadSandboxRunLog,
+  loadSandboxRuns,
+  submitSandboxJob
+} from "../src/sandboxes-client.js"
 
 const account = Schema.decodeUnknownSync(SandboxCard.fields.accountId)("999999999990")
+const runId = Schema.decodeUnknownSync(SandboxRunView.fields.runId)("run-current")
 
 type Seen = { readonly url: string; readonly method: string; readonly body: HttpBody.HttpBody }
 
@@ -144,4 +151,29 @@ it.effect("names why Fleet refused a retry or lift from the 409 code, and any ot
       )
       expect(failure.reason, JSON.stringify(body)).toBe(reason)
     }
+  }))
+
+it.effect("reads one run's log by account and run id; a refusal or a longer log is a failure", () =>
+  Effect.gen(function*() {
+    const seen: Array<Seen> = []
+    const line = { at: "2026-10-16T08:02:00.000Z", text: "nuke: S3Bucket example-bucket waiting for objects" }
+    const body = { _tag: "Ready", accountId: "999999999990", runId: "run-current", raw: null, lines: [line], total: 1 }
+    const log = yield* loadSandboxRunLog(account, runId).pipe(
+      Effect.provideService(HttpClient.HttpClient, answering(200, body, (request) => seen.push(request)))
+    )
+    expect(seen.map(({ url }) => url)).toEqual(["/v1/modules/sandboxes/run-log?id=999999999990&run=run-current"])
+    expect(log._tag === "Ready" ? log.lines.map(({ text }) => text) : null).toEqual([line.text])
+    const viewer = yield* loadSandboxRunLog(account, runId).pipe(
+      Effect.provideService(HttpClient.HttpClient, answering(403, { error: "owner_only" })),
+      Effect.flip
+    )
+    expect(viewer.detail).toBe("status")
+    const tooLong = yield* loadSandboxRunLog(account, runId).pipe(
+      Effect.provideService(
+        HttpClient.HttpClient,
+        answering(200, { ...body, lines: Array.from({ length: 31 }, () => line), total: 31 })
+      ),
+      Effect.flip
+    )
+    expect(tooLong.detail).toBe("invalid_response")
   }))

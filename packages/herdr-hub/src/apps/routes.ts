@@ -154,6 +154,7 @@ export const handleAppsRoute = async <E, R>(
     ? {}
     : {
       [hubHeaders.requestId]: minted.value.requestId,
+      [hubHeaders.listener]: context.listener,
       [hubHeaders.caller]: encodeCaller(caller.value),
       [hubHeaders.grant]: minted.value.grant
     }
