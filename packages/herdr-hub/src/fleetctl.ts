@@ -5,7 +5,6 @@ import {
   FleetOperationError,
   FleetValidationError,
   type HostConfiguration,
-  HostStatus,
   JobHistoryPage,
   JobPayload,
   type JobPayload as JobPayloadType,
@@ -39,6 +38,7 @@ import {
   formatUsageError,
   oneLine,
   parseInvocation,
+  PeerHostStatus,
   sandboxPayload,
   unknownHostDetail,
   unknownKindDetail,
@@ -343,7 +343,7 @@ const main = Effect.gen(function*() {
     case "history": {
       const host = rest[0] ?? config.host
       const value = command === "status"
-        ? yield* request(config, tailscale, host, "/v1/status", HostStatus)
+        ? yield* request(config, tailscale, host, "/v1/status", PeerHostStatus)
         : yield* history(config, tailscale, host, rest[1] ?? "50")
       yield* Console.log(JSON.stringify(value, null, 2))
       return

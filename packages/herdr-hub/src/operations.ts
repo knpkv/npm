@@ -18,7 +18,7 @@ import {
   standaloneRefusedKinds,
   type WorkerStarted
 } from "@knpkv/herdr-fleet"
-import { Clock, Config, Effect, Option, Path, Schema, Stream } from "effect"
+import { Clock, Config, Effect, FileSystem, Option, Path, Schema, Stream } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 import { makeSessionTaskReader } from "./internal/agent-task-session.js"
 import { makeTaskWorkSource, registerTaskWorkSource } from "./internal/agent-task-work-source.js"
@@ -203,6 +203,7 @@ export const makeHostOperations = Effect.fn("HostOperations.make")(function*(
     ? standaloneRefusedKinds
     : new Set()
   const paths = yield* Path.Path
+  const fileSystem = yield* FileSystem.FileSystem
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
   const workSource = yield* makeTaskWorkSource()
   const home = yield* Config.option(Config.String("HOME"))
@@ -274,6 +275,22 @@ export const makeHostOperations = Effect.fn("HostOperations.make")(function*(
             ? new HostCommandNotFoundError({ cause: error, operation })
             : operationError(operation)(error)
         ),
+        // A missing working directory fails the spawn as not-found too: only a present one blames the command.
+        Effect.catchTag("HostCommandNotFoundError", (missing) =>
+          fileSystem.exists(config.repository).pipe(
+            Effect.mapError(operationError(operation)),
+            Effect.flatMap((present): Effect.Effect<never, HostCommandNotFoundError | FleetOperationError> =>
+              present
+                ? Effect.fail(missing)
+                : Effect.fail(
+                  new FleetOperationError({
+                    cause: config.repository,
+                    detail: `working directory ${config.repository} does not exist`,
+                    operation: `${operation}.working_directory`
+                  })
+                )
+            )
+          )),
         Effect.flatMap((handle) =>
           Effect.all({
             exitCode: handle.exitCode.pipe(

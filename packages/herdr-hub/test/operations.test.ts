@@ -702,6 +702,13 @@ printf '%s\n' '{"jobId":"job-1","protocol":"herdr.coordinator.child.v1","reply":
         error: expect.stringContaining("server not running"),
         unavailableReason: "herdr_not_running"
       })
+      // A missing working directory makes the spawn fail as not-found too; that is not a missing Herdr.
+      writeFileSync(herdrCommand, "#!/bin/sh\nprintf '{\"result\":{\"agents\":[]}}'\n", { mode: 0o700 })
+      const moved = yield* makeHostOperations({ ...config(join(root, "moved"), ["true"]), herdrCommand })
+      const movedInventory = yield* moved.listAgents()
+      expect(movedInventory).toMatchObject({ agents: [], available: false })
+      expect(movedInventory.unavailableReason).toBeUndefined()
+      expect(movedInventory.error).toContain("does not exist")
       writeFileSync(herdrCommand, "#!/bin/sh\nprintf 'not json'\n", { mode: 0o700 })
       const garbled = yield* stopped.listAgents()
       expect(garbled.available).toBe(false)
