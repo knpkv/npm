@@ -1177,6 +1177,12 @@
       padding-inline: max(var(--rly-space-16), env(safe-area-inset-left, 0px))
         max(var(--rly-space-16), env(safe-area-inset-right, 0px));
     }
+
+    /* The intro is visually hidden here: without the directory switch the heading has nothing to show. */
+    [data-module="connect"] .connect-home-heading:not(:has(.connect-home-switch)) {
+      padding: 0;
+      border: 0;
+    }
     [data-module="connect"] .connect-home-summary {
       padding-block-start: var(--connect-summary-inset, var(--rly-space-16));
       padding-inline: var(--rly-space-16);

@@ -82,6 +82,31 @@ describe("standalone fallback", () => {
         }
       }).pipe(Effect.scoped))
 
+    // On a case-insensitive volume the listing can spell the entry `Config.json` while `config.json`
+    // still opens it: that file is the operator's, never a reason to run standalone.
+    it.effect("reads a file the listing spells in another case", () =>
+      Effect.gen(function*() {
+        const fileSystem = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "fleet-case-" })
+        const file = path.join(directory, "config.json")
+        const standalone = yield* standaloneDefaults.pipe(withEnv({ HOME: "/home/owner", HOSTNAME: "atlas" }))
+        yield* fileSystem.writeFileString(file, JSON.stringify({ ...standalone, host: "atlas", repository: "/repo" }))
+        const caseInsensitive = FileSystem.FileSystem.of({
+          ...fileSystem,
+          readDirectory: (target, options) =>
+            fileSystem.readDirectory(target, options).pipe(
+              Effect.map((names) => names.map((name) => name === "config.json" ? "Config.json" : name))
+            )
+        })
+        const loaded = yield* loadConfigurationOrStandalone(file).pipe(
+          withEnv({ HOME: "/home/owner" }),
+          Effect.provideService(FileSystem.FileSystem, caseInsensitive)
+        )
+        expect(loaded._tag).toBe("File")
+        expect(loaded.config.repository).toBe("/repo")
+      }).pipe(Effect.scoped))
+
     it.effect("reads an existing file as before", () =>
       Effect.gen(function*() {
         const fileSystem = yield* FileSystem.FileSystem

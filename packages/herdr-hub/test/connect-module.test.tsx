@@ -271,3 +271,79 @@ it("reads neither fleet approvals nor push settings on a standalone computer", a
     vi.unstubAllGlobals()
   }
 })
+
+const renderStandalone = (failures: ReadonlyArray<{ readonly host: string; readonly reason: string }>): HTMLElement => {
+  const atoms = makeConnectAtoms()
+  const value = Schema.decodeUnknownSync(FleetConnectAgentPage)({
+    agents: [],
+    failures,
+    hosts: ["localhost"],
+    nextCursor: null
+  })
+  const registry = AtomRegistry.make({
+    initialValues: [
+      [atoms.agents, AsyncResult.success(value, { timestamp: 1_000 })],
+      [atoms.work, AsyncResult.initial()]
+    ]
+  })
+  const views = makeConnectModuleViews({
+    atoms,
+    fleet: false,
+    now: 2_000,
+    notificationState: "enabled",
+    readApprovals: Effect.succeed({ _tag: "Complete", items: [], contributions: [] })
+  })
+  try {
+    const element = document.createElement("div")
+    element.innerHTML = renderToStaticMarkup(
+      <RegistryContext.Provider value={registry}>
+        {views.pages.overview(new URLSearchParams(), { active: true, navigate: () => {}, closeSelection: () => {} })}
+      </RegistryContext.Provider>
+    )
+    return element
+  } finally {
+    registry.dispose()
+  }
+}
+
+/** Without Herdr there is nothing to list or filter: say what is missing, not that the computer didn't answer. */
+it("says Herdr isn’t installed on a standalone computer, with no retry, filters or archive", () => {
+  const page = renderStandalone([{ host: "localhost", reason: "herdr_not_installed" }])
+  const card = page.querySelector(".stacks-state")
+  expect(card?.getAttribute("data-tone")).toBe("neutral")
+  expect(card?.querySelector(".stacks-state-eyebrow")?.textContent).toBe("Not available")
+  expect(card?.querySelector("h2")?.textContent).toBe("Herdr isn’t installed on this computer.")
+  expect(card?.querySelector("p:not(.stacks-state-eyebrow)")?.textContent).toBe(
+    "Install Herdr, then start an agent with herdr; it appears here."
+  )
+  expect(card?.querySelector("code")?.textContent).toBe("herdr")
+  expect(page.textContent).not.toContain("didn’t answer")
+  expect(page.textContent).not.toContain("Unknown")
+  expect(page.textContent).not.toContain("Retry")
+  expect(page.textContent).not.toContain("Archived")
+  expect(page.querySelector(".connect-search")).toBeNull()
+})
+
+/** Installed but not answering is the operator's to fix: start it, then retry here. */
+it("says Herdr isn’t running on a standalone computer, with a retry", () => {
+  const page = renderStandalone([{ host: "localhost", reason: "herdr_not_running" }])
+  const card = page.querySelector(".stacks-state")
+  expect(card?.getAttribute("data-tone")).toBe("caution")
+  expect(card?.querySelector(".stacks-state-eyebrow")?.textContent).toBe("Not running")
+  expect(card?.querySelector("h2")?.textContent).toBe("Herdr isn’t running on this computer.")
+  expect(card?.textContent).toContain("Start Herdr, then reload.")
+  expect(card?.querySelector("button")?.textContent).toBe("Retry")
+  expect(page.textContent).not.toContain("didn’t answer")
+  expect(page.textContent).not.toContain("Archived")
+  expect(page.querySelector(".connect-search")).toBeNull()
+})
+
+/** Herdr answered with no agents: this computer's empty state, without fleet-wide wording. */
+it("names an empty standalone reading as this computer’s", () => {
+  const card = renderStandalone([]).querySelector(".connect-home-empty")
+  expect(card?.querySelector("h2")?.textContent).toBe("No agents on this computer yet")
+  expect(card?.textContent).toContain("Herdr answered and has no agents running.")
+  expect(card?.textContent).toContain("Start an agent with herdr. It appears here as soon as it starts.")
+  expect(card?.textContent).not.toContain("Other hosts are unknown")
+  expect(card?.textContent).not.toContain("any host")
+})

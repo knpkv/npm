@@ -6,15 +6,15 @@ import { browserCall } from "../../../design-conformance/src/browser.js"
 import { LiveProduct, type StartProduct } from "../../../design-conformance/src/live.js"
 import { RunnerFailure } from "../../../design-conformance/src/schema.js"
 import { serveFiles } from "../../../design-conformance/src/server.js"
+import { checkoutDashboard, type CheckoutPage } from "../../scripts/design-checkout-status.js"
 import type { fontPreloadLink } from "../../src/font-preload.js"
-import type { dashboardPage } from "../../src/internal/dashboard-page.js"
 import type { loadUiAssets } from "../../src/internal/ui-assets.js"
 import { CANVAS_REFERENCE, CanvasState, makeCanvasReadings } from "./canvas-fixtures.js"
 import { canvasInventory, readCanvasCapability } from "./canvas-inventory.js"
 import { designCommitResult } from "./fixtures.js"
 
 const PageModule = Schema.Struct({
-  dashboardPage: Schema.declare((value): value is typeof dashboardPage => Predicate.isFunction(value))
+  dashboardPage: Schema.declare((value): value is CheckoutPage["dashboardPage"] => Predicate.isFunction(value))
 })
 const FontModule = Schema.Struct({
   fontPreloadLink: Schema.declare((value): value is typeof fontPreloadLink => Predicate.isFunction(value))
@@ -190,6 +190,7 @@ export const start: StartProduct = Effect.fn("CanvasConformance.start")(function
   const preloads = yield* loadBuilt(path, path.join(dist, "font-preload.js"), FontModule, "preloads")
   const assets = yield* loadBuilt(path, path.join(dist, "internal/ui-assets.js"), AssetsModule, "assets")
   const uiAssets = yield* assets.loadUiAssets(dist)
+  const served = yield* checkoutDashboard(repository)
   const initial = yield* Effect.try({
     try: () => makeCanvasReadings(fixture.data),
     catch: (cause) => new RunnerFailure({ detail: `Invalid canvas reference fixture: ${String(cause)}` })
@@ -202,7 +203,7 @@ export const start: StartProduct = Effect.fn("CanvasConformance.start")(function
       files.set(`/assets/${name}`, path.relative(repository, path.join(dist, name)))
     }
   }
-  yield* fs.writeFileString(html, app.dashboardPage(initial.snapshot, preloads.fontPreloadLink(uiAssets.fonts)))
+  yield* fs.writeFileString(html, app.dashboardPage(served(initial.snapshot), preloads.fontPreloadLink(uiAssets.fonts)))
   const origin = yield* serveFiles(repository, Object.fromEntries(files))
   const sessions = new WeakMap<Page, { readonly state: CanvasState; readonly errors: Array<string> }>()
   return LiveProduct.of({
@@ -224,7 +225,7 @@ export const start: StartProduct = Effect.fn("CanvasConformance.start")(function
           if (url.pathname === "/v1/relay/events") {
             return route.fulfill({ contentType: "text/event-stream", body: `data: ${readings.relayEvent}\n\n` })
           }
-          const json = resolveCanvasRead(readings, url)
+          const json = url.pathname === "/v1/dashboard" ? served(readings.snapshot) : resolveCanvasRead(readings, url)
           if (json !== undefined) return route.fulfill({ json })
           errors.push(`Unseeded GET ${url.pathname}`)
           return route.fulfill({ status: 404, json: { error: "unseeded_fixture_request" } })

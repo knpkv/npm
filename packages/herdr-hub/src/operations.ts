@@ -73,6 +73,12 @@ const HerdrAgents = Schema.Struct({
 const operationError = (operation: string) => (cause: unknown) =>
   new FleetOperationError({ cause, detail: String(cause), operation })
 
+/** The command to spawn is not on this computer; `cause` is the spawn failure. */
+class HostCommandNotFoundError extends Schema.TaggedError<HostCommandNotFoundError>()("HostCommandNotFoundError", {
+  cause: Schema.Defect(),
+  operation: Schema.String
+}) {}
+
 /**
  * Reserves transport-envelope headroom when one-byte control output expands to
  * six JSON bytes beside the largest accepted job payload.
@@ -244,7 +250,8 @@ export const makeHostOperations = Effect.fn("HostOperations.make")(function*(
         Effect.map(framedTail)
       )
 
-  const runCommand = Effect.fn("HostOperations.runCommand")(function*(
+  // Like runCommand, but a command that is not installed fails apart, for callers that report it.
+  const runCommandOrMissing = Effect.fn("HostOperations.runCommand")(function*(
     operation: string,
     commandLine: ReadonlyArray<string>,
     policy: OutputPolicy = "whole"
@@ -262,7 +269,11 @@ export const makeHostOperations = Effect.fn("HostOperations.make")(function*(
     })
     return yield* Effect.scoped(
       spawner.spawn(child).pipe(
-        Effect.mapError(operationError(operation)),
+        Effect.mapError((error) =>
+          error.reason._tag === "NotFound"
+            ? new HostCommandNotFoundError({ cause: error, operation })
+            : operationError(operation)(error)
+        ),
         Effect.flatMap((handle) =>
           Effect.all({
             exitCode: handle.exitCode.pipe(
@@ -300,8 +311,13 @@ export const makeHostOperations = Effect.fn("HostOperations.make")(function*(
     )
   })
 
+  const runCommand = (operation: string, commandLine: ReadonlyArray<string>, policy: OutputPolicy = "whole") =>
+    runCommandOrMissing(operation, commandLine, policy).pipe(
+      Effect.catchTag("HostCommandNotFoundError", (error) => Effect.fail(operationError(operation)(error.cause)))
+    )
+
   const listAgents = Effect.fn("HostOperations.listAgents")(function*() {
-    return yield* runCommand("herdr.agent_list", [config.herdrCommand, "agent", "list"]).pipe(
+    return yield* runCommandOrMissing("herdr.agent_list", [config.herdrCommand, "agent", "list"]).pipe(
       Effect.flatMap((output) =>
         Effect.try({
           try: () => Schema.decodeUnknownSync(HerdrAgents)(JSON.parse(output)),
@@ -369,15 +385,24 @@ export const makeHostOperations = Effect.fn("HostOperations.make")(function*(
       Effect.map(
         (agents): AgentInventory => ({ agents, available: true, error: null })
       ),
-      Effect.catchTag(
-        "FleetOperationError",
-        (error) =>
+      Effect.catchTags({
+        HostCommandNotFoundError: (error): Effect.Effect<AgentInventory> =>
           Effect.succeed({
             agents: [],
             available: false,
-            error: `${error.operation}: ${error.detail}`
-          })
-      )
+            error: `${error.operation}: ${String(error.cause)}`,
+            unavailableReason: "herdr_not_installed"
+          }),
+        FleetOperationError: (error): Effect.Effect<AgentInventory> => {
+          const unavailable = { agents: [], available: false, error: `${error.operation}: ${error.detail}` }
+          // The list command itself failed: Herdr is installed but did not answer.
+          return Effect.succeed(
+            error.operation === "herdr.agent_list"
+              ? { ...unavailable, unavailableReason: "herdr_not_running" }
+              : unavailable
+          )
+        }
+      })
     )
   })
 
@@ -468,7 +493,7 @@ export const makeHostOperations = Effect.fn("HostOperations.make")(function*(
   const inspect = Effect.fn("HostOperations.inspect")(function*() {
     // A standalone computer has no fleet repository: say so instead of asking git about HOME.
     if (options.standalone === true) {
-      return { applyConfigured: false, branch: null, dirty: false, repository: null, revision: null }
+      return { applyConfigured: false, repository: null }
     }
     const { branch, revision, status } = yield* Effect.all({
       branch: runCommand("git.branch", ["git", "branch", "--show-current"]),
@@ -477,16 +502,13 @@ export const makeHostOperations = Effect.fn("HostOperations.make")(function*(
     })
     return {
       applyConfigured: config.applyCommand !== null,
-      branch,
-      dirty: status !== "",
-      repository: config.repository,
-      revision
+      repository: { branch, dirty: status !== "", path: config.repository, revision }
     }
   })
 
   // Submission already refuses these; a job recovered from an older store must not run them either, on
   // any path that reaches a command (the job runner and coordinator chat alike).
-  const refuseNotSetUp = (kind: CoreJobPayload["kind"]) =>
+  const refuseNotSetUp = (kind: CoreJobPayload["kind"]): Effect.Effect<void, FleetOperationError> =>
     isStandaloneRefusedKind(kind) && notSetUp.has(kind)
       ? Effect.fail(
         new FleetOperationError({
@@ -496,11 +518,12 @@ export const makeHostOperations = Effect.fn("HostOperations.make")(function*(
           operation: kind
         })
       )
-      : null
+      : Effect.void
 
-  const runPayload = (payload: CoreJobPayload, workerStarted: WorkerStarted, jobId: string) => {
-    const refused = refuseNotSetUp(payload.kind)
-    if (refused !== null) return refused
+  const runPayload = (payload: CoreJobPayload, workerStarted: WorkerStarted, jobId: string) =>
+    refuseNotSetUp(payload.kind).pipe(Effect.andThen(runAllowed(payload, workerStarted, jobId)))
+
+  const runAllowed = (payload: CoreJobPayload, workerStarted: WorkerStarted, jobId: string) => {
     switch (payload.kind) {
       case "nix.check":
         return runCommand("nix.check", config.checkCommand, "tail")
@@ -584,7 +607,7 @@ export const makeHostOperations = Effect.fn("HostOperations.make")(function*(
     workerStarted: WorkerStarted,
     jobId: string
   ) =>
-    refuseNotSetUp(payload.kind) ?? runCoordinatorCommand(
+    refuseNotSetUp(payload.kind).pipe(Effect.andThen(runCoordinatorCommand(
       "agent.delegate.chat",
       [
         ...config.coordinatorCommand,
@@ -594,7 +617,7 @@ export const makeHostOperations = Effect.fn("HostOperations.make")(function*(
       ],
       workerStarted,
       jobId
-    )
+    )))
 
   yield* registerTaskWorkSource(listAgents, workSource.register)
   return {

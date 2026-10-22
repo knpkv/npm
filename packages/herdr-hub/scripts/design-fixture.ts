@@ -166,10 +166,7 @@ export const designDashboard = (
     status: {
       host,
       applyConfigured: false,
-      branch: "main",
-      dirty: false,
-      repository: "fixture",
-      revision: "123456789012",
+      repository: { branch: "main", dirty: false, path: "fixture", revision: "123456789012" },
       herdr: { agents: [], available: true, error: null }
     },
     records: [],

@@ -198,11 +198,8 @@ const base: DashboardSnapshot = {
         ],
   status: {
     applyConfigured: true,
-    branch: "main",
-    dirty: false,
     host: "atlas",
-    repository: "/workspace/project",
-    revision: "4f2c1e0",
+    repository: { branch: "main", dirty: false, path: "/workspace/project", revision: "4f2c1e0" },
     herdr: {
       available: true,
       error: null,

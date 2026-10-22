@@ -147,10 +147,7 @@ const operations: HostOperations = {
   inspect: () =>
     Effect.succeed({
       applyConfigured: false,
-      branch: "main",
-      dirty: false,
-      repository: "/repo",
-      revision: "abc123"
+      repository: { branch: "main", dirty: false, path: "/repo", revision: "abc123" }
     }),
   listAgents: () => Effect.succeed({ agents: [], available: true, error: null }),
   run: (payload) => Effect.succeed(`${payload.kind}: ok`),
@@ -2016,12 +2013,9 @@ esac
         records: [],
         status: {
           applyConfigured: false,
-          branch: "main",
-          dirty: false,
           herdr: { agents: [], available: true, error: null },
           host: "SER8",
-          repository: "/repo",
-          revision: "abc123"
+          repository: { branch: "main", dirty: false, path: "/repo", revision: "abc123" }
         },
         work: null
       })
@@ -2077,12 +2071,9 @@ esac
         records: [],
         status: {
           applyConfigured: false,
-          branch: "main",
-          dirty: false,
           herdr: { agents: [], available: true, error: null },
           host: "SER8",
-          repository: "/repo",
-          revision: ""
+          repository: { branch: "main", dirty: false, path: "/repo", revision: "" }
         },
         work: null
       })
@@ -2092,9 +2083,12 @@ esac
         records: [{ ...record, approvalAvailable: false }],
         status: {
           ...base.status,
-          revision: "x".repeat(
-            fleetResponseBodyMaxBytes - rawBaseBytes - 1_000
-          )
+          repository: {
+            branch: "main",
+            dirty: false,
+            path: "/repo",
+            revision: "x".repeat(fleetResponseBodyMaxBytes - rawBaseBytes - 1_000)
+          }
         }
       })
       expect(dashboardSnapshotBytes({ ...snapshot, records: [] })).toBeLessThan(
@@ -2134,12 +2128,9 @@ esac
         records: [],
         status: {
           applyConfigured: false,
-          branch: "main",
-          dirty: false,
           herdr: { agents: [], available: true, error: null },
           host: "SER8",
-          repository: "/repo",
-          revision: ""
+          repository: { branch: "main", dirty: false, path: "/repo", revision: "" }
         },
         work: null
       })
@@ -2148,7 +2139,12 @@ esac
         ...base,
         status: {
           ...base.status,
-          revision: "x".repeat(fleetResponseBodyMaxBytes - rawBaseBytes)
+          repository: {
+            branch: "main",
+            dirty: false,
+            path: "/repo",
+            revision: "x".repeat(fleetResponseBodyMaxBytes - rawBaseBytes)
+          }
         }
       })
       expect(Buffer.byteLength(JSON.stringify(exactRawLimit))).toBe(

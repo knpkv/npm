@@ -37,7 +37,10 @@ const config = (root: string): HostConfiguration => ({
 })
 const operations: HostOperations = {
   inspect: () =>
-    Effect.succeed({ applyConfigured: false, branch: "main", dirty: false, repository: "/repo", revision: "abc123" }),
+    Effect.succeed({
+      applyConfigured: false,
+      repository: { branch: "main", dirty: false, path: "/repo", revision: "abc123" }
+    }),
   listAgents: () => Effect.succeed({ agents: [], available: true, error: null }),
   run: () => Effect.die("no job execution expected"),
   runLocal: () => Effect.die("no job execution expected"),

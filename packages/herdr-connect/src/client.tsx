@@ -735,7 +735,14 @@ type ConnectSurfaceProps = {
   readonly directoryLocation?: ConnectDirectoryLocation | undefined
   readonly embedded?: boolean
   readonly presentation?:
-    { readonly _tag: "fleet" } | { readonly _tag: "home"; readonly summary?: ReactNode; readonly empty?: ReactNode }
+    | { readonly _tag: "fleet" }
+    | {
+        readonly _tag: "home"
+        readonly summary?: ReactNode
+        readonly empty?: ReactNode
+        /** Replaces the list, its filters and the archive switch: the host has nothing Connect can list. */
+        readonly unavailable?: ReactNode
+      }
   readonly roomFooter?: ReactNode
   /** Optional host observer for the live stage; archive stages never report a live identity. */
   readonly onStageChange?: (target: Pick<ConnectAgent, "host" | "id"> | null) => void
@@ -782,6 +789,7 @@ const ActiveConnectSurface = ({
     activeRef.current = active
   }, [active])
   const fleetPresentation = presentation._tag === "fleet"
+  const homeUnavailable = presentation._tag === "home" ? presentation.unavailable : undefined
   const DirectoryView = fleetPresentation ? AgentDirectory : ConnectHomeDirectory
   const [activityFilter, setActivityFilter] = useAtom(atoms.activityFilter)
   const directory = useAtomValue(atoms.agents)
@@ -1571,7 +1579,7 @@ const ActiveConnectSurface = ({
               {connectHomePurpose}
             </Text>
           </header>
-          <ConnectDirectorySwitch home location={directoryLocation} />
+          {homeUnavailable === undefined ? <ConnectDirectorySwitch home location={directoryLocation} /> : null}
         </div>
       )}
       {fleetPresentation ||
@@ -1598,7 +1606,11 @@ const ActiveConnectSurface = ({
           </div>
         </div>
       )}
-      {fleetPresentation || current === null || offlineHosts.length === 0 || staleSince !== null ? null : (
+      {fleetPresentation ||
+      current === null ||
+      offlineHosts.length === 0 ||
+      staleSince !== null ||
+      homeUnavailable !== undefined ? null : (
         <div className="connect-home-read-notice" role="status">
           <div>
             <StateLabel
@@ -1697,6 +1709,8 @@ const ActiveConnectSurface = ({
               Loading fleet agents…
             </Text>
           )
+        ) : homeUnavailable !== undefined ? (
+          homeUnavailable
         ) : (
           <>
             {fleetPresentation ? (

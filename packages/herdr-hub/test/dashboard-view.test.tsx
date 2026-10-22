@@ -43,12 +43,9 @@ const snapshot = (approvalsEnabled: boolean): DashboardSnapshot => {
     records: [pending],
     status: {
       applyConfigured: true,
-      branch: "main",
-      dirty: false,
       herdr: { agents: [], available: true, error: null },
       host: "ALPHA",
-      repository: "/repo",
-      revision: "abc123"
+      repository: { branch: "main", dirty: false, path: "/repo", revision: "abc123" }
     }
   }
 }
@@ -477,5 +474,41 @@ describe("host dashboard page", () => {
     expect(page).toContain(
       '<meta name="viewport" content="width=device-width,initial-scale=1,interactive-widget=resizes-content">'
     )
+  })
+})
+
+describe("dashboard repository card", () => {
+  const renderRepository = (repository: DashboardSnapshot["status"]["repository"]): string => {
+    const base = snapshot(false)
+    const markup = renderToStaticMarkup(
+      <DashboardView
+        busyJobId={null}
+        notificationState="disabled"
+        onDecision={() => undefined}
+        onDisableNotifications={undefined}
+        onEnableNotifications={undefined}
+        onRefresh={undefined}
+        pull={{ distance: 0, ready: false, refreshing: false }}
+        snapshot={{ ...base, status: { ...base.status, repository } }}
+      />
+    )
+    const card = markup.slice(markup.indexOf("Repository"))
+    return card.slice(0, card.indexOf("</small>"))
+  }
+
+  // A standalone computer has no fleet repository: say that, not a blank branch.
+  it("says a standalone computer has no repository", () => {
+    const card = renderRepository(null)
+    expect(card).toContain("No repository")
+    expect(card).toContain("Not set up on this computer")
+  })
+
+  it("shows the branch and whether the checkout has local changes", () => {
+    expect(renderRepository({ branch: "main", dirty: true, path: "/repo", revision: "abc123" })).toContain(
+      "Local changes"
+    )
+    const clean = renderRepository({ branch: "release", dirty: false, path: "/repo", revision: "abc123" })
+    expect(clean).toContain("release")
+    expect(clean).toContain("Clean")
   })
 })

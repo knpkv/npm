@@ -817,20 +817,32 @@ export const AgentSummary = Schema.Struct({
 )
 export type AgentSummary = typeof AgentSummary.Type
 
+/** Why Herdr gave no inventory, when that is known: its command is missing, or it runs but cannot list. */
+export const HerdrUnavailableReason = Schema.Literals(["herdr_not_installed", "herdr_not_running"])
+export type HerdrUnavailableReason = typeof HerdrUnavailableReason.Type
+
+/** Absent `unavailableReason` on an unavailable inventory: the failure has no more specific cause. */
 export const AgentInventory = Schema.Struct({
   agents: Schema.Array(AgentSummary),
   available: Schema.Boolean,
-  error: Schema.NullOr(Schema.String)
+  error: Schema.NullOr(Schema.String),
+  unavailableReason: Schema.optionalKey(HerdrUnavailableReason)
 })
 export type AgentInventory = typeof AgentInventory.Type
 
-/** The host's fleet repository. `null` repository, branch and revision: a standalone computer has none. */
+/** The fleet repository checkout a host applies from. */
+export const HostRepository = Schema.Struct({
+  branch: Schema.String,
+  dirty: Schema.Boolean,
+  path: Schema.String,
+  revision: Schema.String
+})
+export type HostRepository = typeof HostRepository.Type
+
+/** What a host applies from. `null` repository: a standalone computer has none. */
 export const HostDetails = Schema.Struct({
   applyConfigured: Schema.Boolean,
-  branch: Schema.NullOr(Schema.String),
-  dirty: Schema.Boolean,
-  repository: Schema.NullOr(Schema.String),
-  revision: Schema.NullOr(Schema.String)
+  repository: Schema.NullOr(HostRepository)
 })
 export type HostDetails = typeof HostDetails.Type
 

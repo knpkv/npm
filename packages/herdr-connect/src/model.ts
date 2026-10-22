@@ -69,7 +69,10 @@ export const ConnectPeerFailure = Schema.Struct({
     "unavailable",
     "timeout",
     "request_failed",
-    "invalid_response"
+    "invalid_response",
+    // The host answered but has no Herdr to list: its command is missing, or it isn't running.
+    "herdr_not_installed",
+    "herdr_not_running"
   ])
 })
 export type ConnectPeerFailure = typeof ConnectPeerFailure.Type

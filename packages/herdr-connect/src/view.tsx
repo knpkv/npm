@@ -399,6 +399,10 @@ const failureReasonLabel = (reason: ConnectPeerFailure["reason"]): string => {
       return "request failed"
     case "invalid_response":
       return "unreadable answer"
+    case "herdr_not_installed":
+      return "Herdr not installed"
+    case "herdr_not_running":
+      return "Herdr not running"
   }
 }
 

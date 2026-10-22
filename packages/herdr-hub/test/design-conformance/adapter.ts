@@ -6,14 +6,14 @@ import { browserCall } from "../../../design-conformance/src/browser.js"
 import { LiveProduct, type StartProduct } from "../../../design-conformance/src/live.js"
 import { RunnerFailure } from "../../../design-conformance/src/schema.js"
 import { serveFiles } from "../../../design-conformance/src/server.js"
+import { type CheckoutDashboard, checkoutDashboard, type CheckoutPage } from "../../scripts/design-checkout-status.js"
 import type { fontPreloadLink } from "../../src/font-preload.js"
-import type { dashboardPage } from "../../src/internal/dashboard-page.js"
 import type { loadUiAssets } from "../../src/internal/ui-assets.js"
 import { CODE_REFERENCE, designCommitResult, makeCodeReadings } from "./fixtures.js"
 import { isConversationState, readReviewCapability, reviewInventory, ReviewState } from "./inventory.js"
 
 const PageModule = Schema.Struct({
-  dashboardPage: Schema.declare((value): value is typeof dashboardPage => Predicate.isFunction(value))
+  dashboardPage: Schema.declare((value): value is CheckoutPage["dashboardPage"] => Predicate.isFunction(value))
 })
 
 const FontModule = Schema.Struct({
@@ -26,9 +26,9 @@ const AssetsModule = Schema.Struct({
 
 /** Render the actual shell with the same served-font inputs as the Hub. */
 export const renderCaptureDocument = (
-  snapshot: Parameters<typeof dashboardPage>[0],
+  snapshot: CheckoutDashboard,
   fonts: ReadonlyMap<string, Uint8Array>,
-  app: typeof PageModule.Type,
+  app: CheckoutPage,
   preloads: typeof FontModule.Type
 ): string => app.dashboardPage(snapshot, preloads.fontPreloadLink(fonts))
 
@@ -206,6 +206,7 @@ export const start: StartProduct = Effect.fn("CodeReviewConformance.start")(func
     Effect.mapError((cause) => new RunnerFailure({ detail: `Invalid built Hub assets module: ${cause.message}` }))
   )
   const uiAssets = yield* assets.loadUiAssets(dist)
+  const served = yield* checkoutDashboard(repository)
   const readings = yield* Effect.try({
     try: () => makeCodeReadings(fixture.data),
     catch: (cause) => new RunnerFailure({ detail: `Invalid Code reference fixture: ${String(cause)}` })
@@ -218,7 +219,7 @@ export const start: StartProduct = Effect.fn("CodeReviewConformance.start")(func
       files.set(`/assets/${name}`, path.relative(repository, path.join(dist, name)))
     }
   }
-  yield* fs.writeFileString(html, renderCaptureDocument(readings.snapshot, uiAssets.fonts, app, preloads))
+  yield* fs.writeFileString(html, renderCaptureDocument(served(readings.snapshot), uiAssets.fonts, app, preloads))
   const origin = yield* serveFiles(repository, Object.fromEntries(files))
   const sessions = new WeakMap<Page, {
     readonly readings: ReturnType<typeof makeCodeReadings>
@@ -245,7 +246,7 @@ export const start: StartProduct = Effect.fn("CodeReviewConformance.start")(func
           if (url.pathname === "/v1/relay/events") {
             return route.fulfill({ contentType: "text/event-stream", body: `data: ${readings.relayEvent}\n\n` })
           }
-          const json = resolveFixtureRead(readings, url)
+          const json = url.pathname === "/v1/dashboard" ? served(readings.snapshot) : resolveFixtureRead(readings, url)
           if (json !== undefined) {
             if (url.pathname === "/v1/modules/code/detail" || url.pathname === "/v1/modules/code/review") {
               if (state === "read-pending") return

@@ -70,12 +70,9 @@ describe("approval PWA", () => {
       records: [],
       status: {
         applyConfigured: false,
-        branch: "main",
-        dirty: false,
         herdr: { agents: [], available: true, error: null },
         host: "SER8",
-        repository: "/repo",
-        revision: "abc123"
+        repository: { branch: "main", dirty: false, path: "/repo", revision: "abc123" }
       },
       work: null
     } satisfies DashboardSnapshot

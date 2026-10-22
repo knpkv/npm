@@ -304,6 +304,18 @@ printf '%s\\n' "{\\"jobId\\":\\"$job_id\\",\\"protocol\\":\\"herdr.coordinator.c
     )
   })
 
+  // A standalone computer has no fleet repository: inspect says so without asking git about HOME.
+  it.effect("inspects a standalone computer as having no repository", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-standalone-inspect-test-"))
+    return Effect.gen(function*() {
+      const operations = yield* makeHostOperations(config(root, ["true"]), { standalone: true })
+      expect(yield* operations.inspect()).toEqual({ applyConfigured: false, repository: null })
+    }).pipe(
+      Effect.ensuring(Effect.sync(() => rmSync(root, { force: true, recursive: true }))),
+      provideNodeServices
+    )
+  })
+
   // Coordinator chat is its own run path: a chat job already in the store from before must not reach the
   // coordinator command on a standalone computer either.
   it.effect("refuses a recovered coordinator-chat delegation where delegation is not set up", () => {
@@ -670,6 +682,36 @@ printf '%s\n' '{"jobId":"job-1","protocol":"herdr.coordinator.child.v1","reply":
     )
   })
 
+  // Connect tells "install Herdr" from "start Herdr": a missing command is not installed, a command that
+  // runs but cannot list is not running. Anything else stays a plain failure.
+  it.effect("tells a missing Herdr from one that isn't running", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-agent-list-missing-test-"))
+    const herdrCommand = join(root, "herdr-test")
+    return Effect.gen(function*() {
+      const missing = yield* makeHostOperations({ ...config(root, ["true"]), herdrCommand: join(root, "absent") })
+      expect(yield* missing.listAgents()).toMatchObject({
+        agents: [],
+        available: false,
+        unavailableReason: "herdr_not_installed"
+      })
+      writeFileSync(herdrCommand, "#!/bin/sh\necho 'server not running' >&2\nexit 1\n", { mode: 0o700 })
+      const stopped = yield* makeHostOperations({ ...config(root, ["true"]), herdrCommand })
+      expect(yield* stopped.listAgents()).toMatchObject({
+        agents: [],
+        available: false,
+        error: expect.stringContaining("server not running"),
+        unavailableReason: "herdr_not_running"
+      })
+      writeFileSync(herdrCommand, "#!/bin/sh\nprintf 'not json'\n", { mode: 0o700 })
+      const garbled = yield* stopped.listAgents()
+      expect(garbled.available).toBe(false)
+      expect(garbled.unavailableReason).toBeUndefined()
+    }).pipe(
+      Effect.ensuring(Effect.sync(() => rmSync(root, { force: true, recursive: true }))),
+      provideNodeServices
+    )
+  })
+
   it.effect("filters the typed launch-pending entry and rejects unknown variants", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-agent-list-test-"))
     const herdrCommand = join(root, "herdr-test")
@@ -719,10 +761,7 @@ printf '%s\\n' '{"result":{"agents":[{"launch_pending":false,"agent_status":"wor
       inspect: () =>
         Effect.succeed({
           applyConfigured: true,
-          branch: "main",
-          dirty: false,
-          repository: root,
-          revision: "abc123"
+          repository: { branch: "main", dirty: false, path: root, revision: "abc123" }
         }),
       listAgents: () => Effect.succeed({ agents: [], available: true, error: null }),
       run: () => Effect.succeed("\u0001".repeat(commandOutputMaxBytes)),

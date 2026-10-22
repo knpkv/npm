@@ -119,10 +119,7 @@ describe("server task-kind debounce", () => {
           inspect: () =>
             Effect.succeed({
               applyConfigured: false,
-              branch: "main",
-              dirty: false,
-              repository: "/repo",
-              revision: "abc"
+              repository: { branch: "main", dirty: false, path: "/repo", revision: "abc" }
             }),
           run: () => Effect.succeed("ok"),
           runLocal: () => Effect.succeed("ok"),

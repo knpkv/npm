@@ -160,6 +160,10 @@
     color: var(--rly-color-blocked-ink);
   }
 
+  .stacks-state-action {
+    margin-block-start: 0.5rem;
+  }
+
   .stacks-skeleton-row {
     block-size: 4rem;
     inline-size: 100%;

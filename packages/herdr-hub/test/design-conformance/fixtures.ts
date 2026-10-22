@@ -541,10 +541,7 @@ export const makeShellReadings = (options: {
     status: {
       host: shell.hubHost,
       applyConfigured: false,
-      branch: "main",
-      dirty: false,
-      repository: "fixture",
-      revision: "fixture-revision",
+      repository: { branch: "main", dirty: false, path: "fixture", revision: "fixture-revision" },
       herdr: { agents: [], available: true, error: null }
     },
     records: [],

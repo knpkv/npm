@@ -81,10 +81,7 @@ const baseOperations: HostOperations = {
   inspect: () =>
     Effect.succeed({
       applyConfigured: false,
-      branch: "main",
-      dirty: false,
-      repository: "/repo",
-      revision: "abc123"
+      repository: { branch: "main", dirty: false, path: "/repo", revision: "abc123" }
     }),
   listAgents: () => Effect.succeed({ agents: [], available: true, error: null }),
   run: (payload) => Effect.succeed(`${payload.kind}: generic`),
