@@ -4,13 +4,20 @@
  * @module
  */
 import { JobStatus } from "@knpkv/herdr-fleet/model"
-import { SandboxCard, SandboxesUnavailable } from "@knpkv/sandbox-pool/host"
+import { SandboxCard, SandboxesUnavailable, SandboxSignIn } from "@knpkv/sandbox-pool/host"
 import { Schema } from "effect"
 
 const AccountId = SandboxCard.fields.accountId
 
-/** Who is reading the page. `owner` is true only for the hub's own tailnet node, the one that may submit jobs. */
-export const SandboxesCaller = Schema.Struct({ login: Schema.String, owner: Schema.Boolean })
+/**
+ * Who is reading the page. `owner` is true only for the hub's own tailnet node, the one that may submit jobs.
+ * `signIn` is the pool's console and CLI sign-in, for the owner only; null for anyone else or a pool without it.
+ */
+export const SandboxesCaller = Schema.Struct({
+  login: Schema.String,
+  owner: Schema.Boolean,
+  signIn: Schema.NullOr(SandboxSignIn)
+})
 export type SandboxesCaller = typeof SandboxesCaller.Type
 
 /**

@@ -25,11 +25,12 @@ The package ships no real organization. `PoolContract` is decoded from the ownin
 
 - `accounts`: the pool, each with a distinct `name` and 12-digit `accountId`.
 - `nukeBlocklist`: every organization account outside the pool, the management account included, so never empty. aws-nuke refuses them whatever its config says, and a reset refuses to start on one. Decoding fails if a pool account is in it.
-- `regions`: the regions aws-nuke scans besides `global`.
+- `regions`: the regions aws-nuke scans besides `global`, each an AWS region code such as `eu-central-1`.
 - `accountAccessRole`: the role a reset assumes in a pool account, which aws-nuke keeps.
 - `boundaryPath` and `boundaryName`: the permissions boundary policy a reset re-asserts and keeps.
 - `accountAliasPrefix`: a pool account's alias is this prefix plus its name.
 - `budgetActionRole` and `denyAllPolicy`: the budget action's role and the policy it attaches to stop spend.
+- `access` (optional): how a person signs in, `{ portalUrl, ssoSession, roleName }`. `portalUrl` is the AWS access portal's start URL, https with no query or fragment; `ssoSession` names the `[sso-session]` in `~/.aws/config`; `roleName` is the permission set. Without it the hub offers no console or CLI profile. From `@knpkv/sandbox-pool/host`, `signInOf(contract)` adds the pool's first region, `consoleUrl(signIn, accountId)` is the portal's console link for one account and role, and `cliProfile(signIn, name, accountId)` is that account's `~/.aws/config` profile, or null for a name that is not one token (letters, digits, `.`, `_`, `-`), so no value can add a config line.
 
 ## States
 
