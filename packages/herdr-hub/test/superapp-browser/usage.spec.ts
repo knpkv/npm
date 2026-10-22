@@ -74,6 +74,7 @@ test("the wide Usage chart aligns with the module column", async ({ page }) => {
   expect(size.chart).toBe(size.heading)
 })
 
+/** The range control lives on Tokens and By tool; Limits has no controls row (06 Usage). */
 test("a delayed unknown-host repair keeps focus on a range control", async ({ page }) => {
   let release = () => {}
   const gate = new Promise<void>((resolve) => {
@@ -84,9 +85,9 @@ test("a delayed unknown-host repair keeps focus on a range control", async ({ pa
     await route.continue()
   })
   try {
-    await page.goto("/?range=7d&timeZone=UTC&host=NOPE#usage/limits")
+    await page.goto("/?range=7d&timeZone=UTC&host=NOPE#usage/tokens")
     const radio = page.getByRole("radio", { name: "7 days", exact: true })
-    await expect(page.locator("[data-module-page=\"limits\"]")).toBeFocused()
+    await expect(page.locator("[data-module-page=\"tokens\"]")).toBeFocused()
     await radio.focus()
     release()
     await expect.poll(() => new URL(page.url()).searchParams.get("host")).toBeNull()
@@ -396,7 +397,7 @@ for (const layout of limitsLayouts) {
       )
     }
     await page.goto("/?range=7d&timeZone=UTC#usage/limits")
-    await expect(page.locator(layout === "empty" ? ".usage-limits-empty" : ".usage-tab-now")).toBeVisible()
+    await expect(page.locator(layout === "empty" ? ".usage-limits-empty" : ".usage-limits-cards")).toBeVisible()
     await expect(page.getByRole("heading", { level: 1 })).toHaveCount(1)
     await expect(page.getByRole("heading", { level: 1 })).toHaveAccessibleName("Usage")
   })
@@ -422,7 +423,7 @@ test("phone Limits title sits on the design's position in both layouts", async (
     } else {
       await page.goto("/?range=7d&timeZone=UTC#usage/limits")
     }
-    await expect(page.locator(layout === "empty" ? ".usage-limits-empty" : ".usage-tab-now")).toBeVisible()
+    await expect(page.locator(layout === "empty" ? ".usage-limits-empty" : ".usage-limits-cards")).toBeVisible()
     const title = page.locator(".superapp-phone-title")
     await expect(title).toHaveText("Usage Limits")
     const brand = await page.locator(".superapp-header > .superapp-brand").boundingBox()

@@ -11,7 +11,7 @@
     "skills:sync": "node scripts/sync-skills.mjs write",
     "skills:check": "node scripts/sync-skills.mjs check",
     "codegen": "pnpm --recursive --parallel --filter \"./packages/**/*\" run codegen",
-    "build": "tsc -b tsconfig.build.json && pnpm --recursive --sort --config.enable-pre-post-scripts=false --filter \"./packages/**/*\" run build",
+    "build": "tsc -b tsconfig.build.json && node scripts/build-workspace-packages.mjs",
     "audit": "pnpm audit --prod && pnpm audit --dev",
     "test": "pnpm test:unit && pnpm test:pack",
     "test:unit": "vitest --configLoader native",

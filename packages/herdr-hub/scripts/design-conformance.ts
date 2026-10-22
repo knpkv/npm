@@ -236,17 +236,16 @@ export const start: StartProduct = Effect.fn("SuperappDesign.start")(function*(f
           document.documentElement.dataset.designState === state &&
           document.documentElement.dataset.designTheme === theme &&
           document.body.dataset.rlyTheme === theme, { state: identity.state, theme: identity.theme })
+        // Limits states only: the merge-base page also waits on its usage tab, the reference page draws none.
         if (identity.state === "loading") {
           await module.getByLabel("Loading limits", { exact: true }).waitFor()
-          await module.getByLabel("Loading usage", { exact: true }).waitFor()
         } else if (identity.state === "unavailable") {
           await module.getByText("Couldn't load limits. Trying again every minute.", { exact: true }).waitFor()
-          await module.getByText("Couldn't load usage. Trying again in five minutes.", { exact: true }).waitFor()
         } else if (identity.state !== "empty") {
-          await module.locator(".usage-tab-now .usage-limits-now").waitFor({
+          await module.locator(".usage-tab-now .usage-limits-now, .usage-limits-cards").first().waitFor({
             state: "visible"
           })
-          await module.locator(".usage-tab-panel[aria-busy=\"false\"]").first().waitFor()
+          await module.locator(".usage-tab-panel[aria-busy=\"false\"], .usage-limits-chart").first().waitFor()
         }
         await page.evaluate(() => document.fonts.ready)
         await page.waitForFunction(usageChartsReady, undefined, { timeout: 5_000 })

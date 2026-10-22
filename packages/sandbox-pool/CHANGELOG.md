@@ -1,5 +1,11 @@
 # @knpkv/sandbox-pool
 
+## 0.6.0
+
+### Minor Changes
+
+- [#1068](https://github.com/knpkv/npm/pull/1068) [`e084f5b`](https://github.com/knpkv/npm/commit/e084f5b9f57a35f35fb8ce2cd5383e633f063ab3) Thanks [@konopkov](https://github.com/konopkov)! - The pool owner's run detail shows the run's stored failure line and its last 30 log lines, read from a new owner-only `GET /v1/modules/sandboxes/run-log`.
+
 ## 0.5.0
 
 ### Minor Changes

@@ -449,6 +449,22 @@ const findPackagesRequiringPublishedArtifactBuild = Effect.fn(
   )
 })
 
+/**
+ * Inside the root's sorted recursive build every dependency has already run its own build, so only check that
+ * each advertised artifact exists. Rebuilding one here would race the packages still building beside Control
+ * Center: a dependency's `rimraf dist` empties files they are reading.
+ */
+export const verifyWorkspaceArtifactContracts = Effect.fn(
+  "controlCenter.verifyWorkspaceArtifactContracts"
+)(function*(contracts: ReadonlyArray<WorkspaceArtifactContract>) {
+  const missingPackages = yield* findPackagesMissingPublishedArtifacts(contracts)
+  if (missingPackages.length > 0) {
+    return yield* new WorkspaceArtifactError({
+      reason: `the sorted workspace build did not emit advertised artifacts for: ${missingPackages.join(", ")}`
+    })
+  }
+})
+
 /** Build missing package artifacts once, then verify every advertised artifact exists. */
 export const ensureWorkspaceArtifactContracts = Effect.fn(
   "controlCenter.ensureWorkspaceArtifactContracts"
