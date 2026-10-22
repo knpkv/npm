@@ -6,6 +6,8 @@
  * `label` is `"left the pool"` when that id is absent from the current contract; the state tag stays,
  * including Leased. A lease card keeps `startedAt` and `endsAt`. An available card keeps `lastResetAt`.
  * Version, cleaning reason and quarantine time stay in the store.
+ * `SandboxRunLog` is the one read that carries stored lines: a run's log tail and its stored failure line. They
+ * name the account's resources, so the hosting server serves it to the pool owner only.
  *
  * @module
  */
@@ -208,6 +210,33 @@ export const SandboxRuns = Schema.Union([
 ])
 export type SandboxRuns = typeof SandboxRuns.Type
 
+/** The log shows a run's last 30 lines. */
+export const runLogLimit = 30
+
+/** One log line: when its entry was recorded, and its plain text. */
+export const SandboxRunLogLine = Schema.Struct({
+  at: Instant,
+  text: Schema.String
+})
+export interface SandboxRunLogLine extends Schema.Schema.Type<typeof SandboxRunLogLine> {}
+
+/**
+ * One run's log, for the pool owner only. `lines` are the last of `total` lines, oldest first; `raw` is the stored
+ * line of the run's failure, null for a run with none.
+ */
+export const SandboxRunLog = Schema.Union([
+  SandboxesUnavailable,
+  SandboxesReadFailed,
+  Schema.TaggedStruct("Ready", {
+    accountId: AccountId,
+    runId: RunId,
+    raw: Schema.NullOr(Schema.String),
+    lines: Schema.Array(SandboxRunLogLine).check(Schema.isMaxLength(runLogLimit)),
+    total: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
+  })
+])
+export type SandboxRunLog = typeof SandboxRunLog.Type
+
 /** The overview takes no selectors. */
 export const SandboxesOverviewQuery = Schema.fromURLSearchParams(Schema.Struct({}))
 export type SandboxesOverviewQuery = typeof SandboxesOverviewQuery.Type
@@ -224,3 +253,10 @@ export const SandboxRunsQuery = Schema.fromURLSearchParams(Schema.Struct({
   before: Schema.optionalKey(RunId)
 }))
 export type SandboxRunsQuery = typeof SandboxRunsQuery.Type
+
+/** One run of one account. */
+export const SandboxRunLogQuery = Schema.fromURLSearchParams(Schema.Struct({
+  id: AccountId,
+  run: RunId
+}))
+export type SandboxRunLogQuery = typeof SandboxRunLogQuery.Type

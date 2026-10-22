@@ -1,10 +1,16 @@
 /**
- * Host-local Sandboxes: the redacted pool overview, one account's runs, pending Fleet requests, the caller,
- * and the owner's lease, extend and release.
+ * Host-local Sandboxes: the redacted pool overview, one account's runs, the owner's run log, pending Fleet
+ * requests, the caller, and the owner's lease, extend and release.
  * @module
  */
 import { decodeBoundedResponseJson } from "@knpkv/herdr-fleet/response"
-import { type SandboxCard, SandboxesOverview, SandboxRuns } from "@knpkv/sandbox-pool/host"
+import {
+  type SandboxCard,
+  SandboxesOverview,
+  SandboxRunLog,
+  SandboxRuns,
+  type SandboxRunView
+} from "@knpkv/sandbox-pool/host"
 import { Effect, Schema } from "effect"
 import * as HttpClient from "effect/http/HttpClient"
 import * as HttpClientRequest from "effect/http/HttpClientRequest"
@@ -65,6 +71,14 @@ export const loadSandboxRuns = (accountId: SandboxCard["accountId"]) =>
   readJson(`/v1/modules/sandboxes/runs?${new URLSearchParams({ id: accountId })}`, SandboxRuns, 1_048_576).pipe(
     Effect.withSpan("SandboxesClient.loadRuns")
   )
+
+/** One run's log tail and stored failure line. The hub serves it to its own node only; anyone else gets a 403. */
+export const loadSandboxRunLog = (accountId: SandboxCard["accountId"], runId: SandboxRunView["runId"]) =>
+  readJson(
+    `/v1/modules/sandboxes/run-log?${new URLSearchParams({ id: accountId, run: runId })}`,
+    SandboxRunLog,
+    65_536
+  ).pipe(Effect.withSpan("SandboxesClient.loadRunLog"))
 
 /** Resets and budget lifts waiting in Fleet / Approvals. */
 export const loadSandboxRequests = readJson("/v1/modules/sandboxes/requests", SandboxRequests, 262_144).pipe(

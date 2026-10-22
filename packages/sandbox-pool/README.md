@@ -82,6 +82,8 @@ Overview is `Ready` with cards sorted by account id, or `Failed` with `reason: "
 
 `forAccount(accountId, { limit, before })` pages that account's runs, newest first. A resumed run has a second `Started` entry and still counts as one row. `pageRuns` is the same cut. `before` starts strictly after that run. An unknown `before` fails with `UnknownRunCursor`. `next` is the last run id on the page when older runs remain, otherwise null. The hosted query defaults `limit` to 20 and rejects a limit outside 1–50. An unknown account is `SandboxNotFound`. Each served run carries its run id, the step in progress, the cleaning `reason`, `startedAt`, `endedAt` (null while it runs), `outcome`, `failedStep` (the step that reported failed, or null) and the closed blocker; never the stored line or output.
 
+`runLog({ id, run })` is the one read that serves stored lines, and its hosting server must serve it to the pool owner only. It answers a `SandboxRunLog`: `raw`, the run's stored failure line (its quarantine blocker, else the failed step's detail, else null), and the run's last 30 log lines, oldest first, with `total`. `runLogLines` reads the entries as lines: the start, each step with its aws-nuke output tail before its result, and the end, each with the time its entry was recorded. A run that is not that account's is `RunNotFound`; an unknown account is `SandboxNotFound`; a run log that cannot be read is the `Failed` result.
+
 `attention` lists quarantined rows for needs-you. A blocker that `isBudgetHoldFor` matches is `budget-hold` and is not also `quarantined`. A store failure stays `SandboxStoreUnavailable`.
 
 ## Run log

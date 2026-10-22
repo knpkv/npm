@@ -97,9 +97,59 @@ export const summarizeRuns = (entries: ReadonlyArray<RunEntry>): ReadonlyArray<R
   return [...runs.values()].sort((a, b) => DateTime.toEpochMillis(b.startedAt) - DateTime.toEpochMillis(a.startedAt))
 }
 
+/** One line of a run's log. Output lines carry the time their step reported. */
+export interface RunLogLine {
+  readonly at: DateTime.Utc
+  readonly text: string
+}
+
+const stepResult = (entry: Extract<RunEntry, { readonly _tag: "Step" }>): string =>
+  entry.status === "failed" && entry.detail !== null
+    ? `${entry.step}: failed: ${entry.detail}`
+    : `${entry.step}: ${entry.status}`
+
+/**
+ * A run's entries as the owner's log reads them, oldest first: the start, each step with its output before its
+ * result, the end. The lines name the account's resources, so they are as private as the account.
+ */
+export const runLogLines = (entries: ReadonlyArray<RunEntry>): ReadonlyArray<RunLogLine> =>
+  entries.flatMap((entry): ReadonlyArray<RunLogLine> => {
+    switch (entry._tag) {
+      case "Started":
+        return [{
+          at: entry.at,
+          text: `run ${entry.runId} started, reason ${entry.reason.toLowerCase()}, account ${entry.accountId}`
+        }]
+      case "Step":
+        return [...entry.output.map((text) => ({ at: entry.at, text })), { at: entry.at, text: stepResult(entry) }]
+      case "Finished":
+        return [{
+          at: entry.at,
+          text: `run ${entry.runId} ended, account ${entry.outcome.toLowerCase()}`
+        }]
+    }
+  })
+
+/** The stored line of the run's failure: its quarantine blocker, else the last failed step's detail, else null. */
+export const failedLine = (entries: ReadonlyArray<RunEntry>): string | null => {
+  const finished = entries.find((entry): entry is Extract<RunEntry, { readonly _tag: "Finished" }> =>
+    entry._tag === "Finished"
+  )
+  if (finished !== undefined && finished.blocker !== null) return finished.blocker
+  const failed = entries.filter((entry): entry is Extract<RunEntry, { readonly _tag: "Step" }> =>
+    entry._tag === "Step" && entry.status === "failed"
+  ).at(-1)
+  return failed === undefined || failed.detail === null ? null : `${failed.step}: ${failed.detail}`
+}
+
 /** The run log could not be read or written. */
 export class RunLogUnavailable extends Schema.TaggedError<RunLogUnavailable>()("RunLogUnavailable", {
   detail: Schema.String
+}) {}
+
+/** The run is not one of this account's runs. */
+export class RunNotFound extends Schema.TaggedError<RunNotFound>()("RunNotFound", {
+  runId: Schema.String
 }) {}
 
 /** `before` named a run this account does not have. The page is not empty. */
