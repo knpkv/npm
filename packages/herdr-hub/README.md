@@ -18,8 +18,8 @@ Each executable is also an import entry: `@knpkv/herdr-hub/hostd`, `@knpkv/herdr
 npx -y -p @knpkv/herdr-hub hostd   # serves the super-app on http://127.0.0.1:4778/
 ```
 
-It runs on Node 26 with no fleet configuration, no Tailscale and no other host. Without a file at
-`FLEET_CONFIG_PATH` (default `~/.config/fleet/config.json`) it starts standalone and prints one line on stderr:
+It runs on Node 26 with no fleet configuration, no Tailscale and no other host. Without a file at the default path
+`~/.config/fleet/config.json` it starts standalone and prints one line on stderr:
 
 ```text
 hostd: no fleet config at <path>; running standalone on http://127.0.0.1:4778/ (set FLEET_CONFIG_PATH to use one)
@@ -27,7 +27,8 @@ hostd: no fleet config at <path>; running standalone on http://127.0.0.1:4778/ (
 
 Both listeners are loopback-only: the dashboard on 4778 and the Work listener on 4777. A taken port stops startup.
 Nix and agent-delegation jobs are refused; state lives in `$XDG_STATE_HOME/fleet` (else `~/.local/state/fleet`).
-Point `FLEET_CONFIG_PATH` at a fleet configuration to run it as a fleet host, described below.
+Point `FLEET_CONFIG_PATH` at a fleet configuration to run it as a fleet host, described below; a
+`FLEET_CONFIG_PATH` that names a missing file is an error, not standalone.
 
 `relay post --kind status "Tests passing"` resolves the current Herdr pane's stable agent ID and posts to the configured canonical authenticated hub. Kinds are `status`, `progress`, `skill-feedback`, `note`, and `blocker`. Status text allows 240 characters, other kinds 1024. `--event-id ID` allows retries across invocations, and `--goal-step ID` links an update to a goal step. An omitted event ID is generated once; transport retries reuse it. `FLEET_CONFIG_PATH` selects the fleet configuration, and `HERDR_PANE_ID` must identify the current pane. The CLI offers no agent ID override.
 
