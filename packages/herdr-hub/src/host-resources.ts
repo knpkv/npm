@@ -1,8 +1,8 @@
 /** Local Linux sampler. Its scope owns the ten-second loop and the one-hour memory history. */
 import { collectBoundedText } from "@knpkv/bounded-io"
 import type { HostConfiguration } from "@knpkv/herdr-fleet"
+import { runCommand } from "@knpkv/herdr-usage/host"
 import { Clock, Config, Deferred, Effect, FileSystem, Option, Path, Ref, Result, Schema, SchemaGetter } from "effect"
-import { runCommand } from "./host-limits.js"
 import {
   type HostResources,
   type ResourceCpu,

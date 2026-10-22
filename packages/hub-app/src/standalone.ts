@@ -72,6 +72,7 @@ const start = async (): Promise<void> => {
   element("[data-hub-shell=label]").textContent = manifest.module.label
   const crumb = element("[data-hub-shell=crumb]")
   const slot = element("[data-hub-shell=slot]")
+  const outlet = element("[data-hub-shell=outlet]")
   const pages = element("[data-hub-shell=pages]")
   const tabs = manifest.module.pages.map((page) => {
     const link = document.createElement("a")
@@ -115,6 +116,10 @@ const start = async (): Promise<void> => {
       },
       setHeaderSlot: (value) => {
         slot.textContent = value === null ? "" : `${value.label}: ${value.text}`
+      },
+      headerOutlet: outlet,
+      setHeaderMode: (mode) => {
+        root.toggleAttribute("data-header-grouped", mode === "grouped")
       },
       setEmpty: (empty) => {
         root.toggleAttribute("data-empty", empty)

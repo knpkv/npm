@@ -287,7 +287,7 @@ export const handleAppServicesRoute = async <R>(
       await answer(
         Effect.gen(function*() {
           const submission = yield* context.readJson(JobSubmission)
-          const caller = yield* context.grants.use({ grant: submission.grant, app: app.value, once: true })
+          const caller = yield* context.grants.use({ grant: submission.grant, app: app.value, purpose: "spend" })
           return yield* context.submitJob(submission.payload, caller)
         }),
         Schema.encodeSync(JobAccepted)
@@ -299,7 +299,7 @@ export const handleAppServicesRoute = async <R>(
           const post = yield* context.readJson(RelayPost)
           const caller = post.grant === null
             ? null
-            : yield* context.grants.use({ grant: post.grant, app: app.value, once: false })
+            : yield* context.grants.use({ grant: post.grant, app: app.value, purpose: "write" })
           yield* context.relayPost({ kind: post.kind, text: post.text }, { app: app.value, caller })
           return {}
         }),

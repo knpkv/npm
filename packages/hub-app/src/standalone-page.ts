@@ -25,7 +25,7 @@ export const standaloneShellHtml = (manifest: AppManifest): string =>
     "<body>",
     "<header class=\"hub-app-standalone-header\"><span data-hub-shell=\"label\"></span>",
     "<nav aria-label=\"Pages\" data-hub-shell=\"pages\"></nav><span data-hub-shell=\"crumb\"></span>",
-    "<span data-hub-shell=\"slot\"></span></header>",
+    "<span data-hub-shell=\"slot\"></span><div data-hub-shell=\"outlet\"></div></header>",
     `<main id="hub-app-root" data-app="${escapeHtml(manifest.id)}"></main>`,
     "<div id=\"hub-app-portals\"></div>",
     "</body>",

@@ -5,9 +5,10 @@
  *
  * - A **grant** is minted for each module request the hub proxies to an app and names that request's caller.
  *   An app acting for a user hands the grant back; the hub reads the caller from its own record, never from
- *   the app. Grants live 60 s. `jobs.submit` spends one (single use) and refuses one minted for a GET or
- *   HEAD: reads skip the same-origin check, so a cross-site link could otherwise submit a job. A Relay post
- *   only reads the caller, so it accepts any live grant of its app, spent or not.
+ *   the app. Grants live 60 s. Anything that writes as the caller (`spend` for a job, `write` for a Relay
+ *   post) refuses a grant minted for a GET or HEAD: reads skip the same-origin check, so a cross-site link
+ *   could otherwise act for the user. A job also spends the grant (single use); a `read` of the caller
+ *   accepts any live grant of its app.
  * - A **token** names the app itself for app-level services (`host`, `fleet.read`). The hub writes one per
  *   app to `<directory>/<id>.token` (0600) and rotates it on every hub start.
  *
@@ -34,11 +35,14 @@ interface GrantRecord {
 /** 32 random bytes, base64url: a grant, a token or a request id. */
 const randomToken = (cryptoService: Crypto.Crypto) => Effect.map(cryptoService.randomBytes(32), Base64Url.encode)
 
-/** Spend a grant (`once`: one mutation-minted use) or only read its caller; either way it must belong to `app` and be live. */
+/**
+ * How a grant is used; every use needs a live grant of `app`. `spend`: a job, once, from a mutation. `write`:
+ * acts as the caller from a mutation, without spending it. `read`: only names the caller.
+ */
 export interface GrantUse {
   readonly grant: string
   readonly app: AppId
-  readonly once: boolean
+  readonly purpose: "spend" | "write" | "read"
 }
 
 export const makeGrants = Effect.gen(function*() {
@@ -72,15 +76,20 @@ export const makeGrants = Effect.gen(function*() {
     return { grant: Schema.decodeSync(Grant)(grant), requestId }
   })
 
-  const use = Effect.fn("AppGrants.use")(function*({ app, grant, once }: GrantUse) {
+  const use = Effect.fn("AppGrants.use")(function*({ app, grant, purpose }: GrantUse) {
     const now = yield* Clock.currentTimeMillis
     return yield* SynchronizedRef.modifyEffect(records, (table) => {
       const record = table.get(grant)
       if (record === undefined) return Effect.fail(new GrantInvalid({ reason: "unknown" }))
       if (record.expiresAt <= now) return Effect.fail(new GrantInvalid({ reason: "expired" }))
       if (record.app !== app) return Effect.fail(new GrantInvalid({ reason: "app_mismatch" }))
-      if (!once) return Effect.succeed([record.caller, table] satisfies [ModuleCaller, Map<string, GrantRecord>])
+      if (purpose === "read") {
+        return Effect.succeed([record.caller, table] satisfies [ModuleCaller, Map<string, GrantRecord>])
+      }
       if (record.readOnly) return Effect.fail(new GrantInvalid({ reason: "read_only" }))
+      if (purpose === "write") {
+        return Effect.succeed([record.caller, table] satisfies [ModuleCaller, Map<string, GrantRecord>])
+      }
       if (record.used) return Effect.fail(new GrantInvalid({ reason: "used" }))
       const next = new Map(table)
       next.set(grant, { ...record, used: true })

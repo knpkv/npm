@@ -24,8 +24,8 @@ import {
 } from "@knpkv/herdr-connect"
 import { Clock, Duration, Effect, Result, Schema, Scope, Semaphore, SynchronizedRef } from "effect"
 import type { ChildProcessSpawner } from "effect/process"
-import { reportFailure } from "./agent-usage-failure.js"
-import { runCommand, type StaleWhileRevalidate, staleWhileRevalidate } from "./host-limits.js"
+import { reportFailure } from "./failure.js"
+import { runCommand, type StaleWhileRevalidate, staleWhileRevalidate } from "./limits.js"
 
 // A 30-day read scans a month of the store; give it longer than limits' 10 seconds.
 export const hostUsageTimeout = "20 seconds"

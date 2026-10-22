@@ -79,8 +79,8 @@ const droppedRequestHeaders = new Set([
 
 /**
  * Response headers an app may set on the hub's origin. Everything else is dropped: a proxied app can't clear
- * the hub's site data, widen its service worker scope, set HSTS or CORS, or set cookies. `location` passes only
- * inside the app's own `/apps/<id>/` prefix; custom `x-*` headers pass except `x-hub-*`.
+ * the hub's site data, widen its service worker scope, set HSTS or CORS, or set cookies. Custom `x-*` headers
+ * pass except `x-hub-*`.
  */
 const allowedResponseHeaders = new Set([
   "cache-control",
@@ -95,10 +95,29 @@ const allowedResponseHeaders = new Set([
   "vary"
 ])
 
-export const allowedResponseHeader = (name: string, value: string | ReadonlyArray<string>, prefix: string): boolean => {
-  if (allowedResponseHeaders.has(name)) return true
-  if (name === "location") return [value].flat().every((target) => target.startsWith(prefix))
-  return name.startsWith("x-") && !name.startsWith("x-hub-")
+/**
+ * A redirect stays inside the app. The app doesn't know its prefix: `/v1/…` is its own root, so it is moved
+ * under `/apps/<id>/`; a relative target resolves inside the prefix already. A target with a scheme or `//`
+ * leaves the hub's origin and is dropped.
+ */
+export const appLocation = (target: string, prefix: string): string | null => {
+  if (target.startsWith(prefix)) return target
+  if (target.startsWith("//") || /^[a-z][a-z0-9+.-]*:/iu.test(target)) return null
+  return target.startsWith("/") ? `${prefix}${target.slice(1)}` : target
+}
+
+/** The value the hub passes on for one response header, or null to drop it. */
+export const responseHeader = (
+  name: string,
+  value: string | Array<string>,
+  prefix: string
+): string | Array<string> | null => {
+  if (allowedResponseHeaders.has(name)) return value
+  if (name === "location") {
+    const [first] = [value].flat()
+    return first === undefined ? null : appLocation(first, prefix)
+  }
+  return name.startsWith("x-") && !name.startsWith("x-hub-") ? value : null
 }
 
 export const forwardedRequestHeaders = (
@@ -149,7 +168,8 @@ export const proxyToSocket = (
       answered = true
       const headers: OutgoingHttpHeaders = {}
       for (const [name, value] of Object.entries(incoming.headers)) {
-        if (value !== undefined && allowedResponseHeader(name, value, prefix)) headers[name] = value
+        const passed = value === undefined ? null : responseHeader(name, value, prefix)
+        if (passed !== null) headers[name] = passed
       }
       response.writeHead(incoming.statusCode ?? 502, { ...headers, "x-content-type-options": "nosniff" })
       incoming.pipe(response)
