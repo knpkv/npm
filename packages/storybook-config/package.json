@@ -13,18 +13,18 @@
     "check": "tsc --noEmit"
   },
   "peerDependencies": {
-    "@storybook/react-vite": "10.6.1",
+    "@storybook/react-vite": "10.6.2",
     "effect": "4.0.0",
     "react": "*",
-    "storybook": "10.6.1",
+    "storybook": "10.6.2",
     "vite": "*"
   },
   "devDependencies": {
-    "@storybook/react-vite": "10.6.1",
+    "@storybook/react-vite": "10.6.2",
     "@types/react": "^19.3.0",
     "effect": "4.0.0",
     "react": "^19.2.7",
-    "storybook": "10.6.1",
+    "storybook": "10.6.2",
     "vite": "^8.3.3"
   }
 }
