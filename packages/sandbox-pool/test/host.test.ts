@@ -7,6 +7,8 @@ import {
   SandboxesOverview,
   SandboxesOverviewQuery,
   sandboxNavigationBadge,
+  SandboxRunLog,
+  SandboxRunLogQuery,
   SandboxRuns,
   SandboxRunsQuery,
   sweepIsStale,
@@ -475,4 +477,63 @@ describe("sandbox read model", () => {
       expect(yield* Effect.flip(storeDown.attention)).toBeInstanceOf(SandboxStoreUnavailable)
       expect(yield* storeDown.runs({ id: account("222222222222") })).toEqual({ _tag: "Failed", reason: "unavailable" })
     }))
+  it.effect("serves one run's last 30 log lines and its stored line, only for that account's own run", () =>
+    Effect.gen(function*() {
+      const store = yield* makeMemorySandboxStore([
+        quarantined("222222222222", "sandbox-b", "nuke: failed"),
+        leased("111111111111", "sandbox-a", 1)
+      ])
+      const log = yield* makeMemoryRunLog
+      yield* log.record(started("run-current", "222222222222", "2026-10-16T08:00:00.000Z"))
+      yield* log.record(entry({
+        _tag: "Step",
+        runId: "run-current",
+        step: "nuke",
+        status: "failed",
+        at: "2026-10-16T08:02:00.000Z",
+        detail: "S3Bucket - failed: locked",
+        output: Array.from({ length: 40 }, (_, index) => `nuke line ${index}`)
+      }))
+      yield* log.record(finished("run-current", "Quarantined", "2026-10-16T08:03:00.000Z", "nuke: S3Bucket - failed"))
+      yield* log.record(started("run-other", "111111111111", "2026-10-16T09:00:00.000Z"))
+      const reads = yield* makeSandboxHostReads({ contract, store, runLog: log })
+      const served = yield* reads.runLog({ id: account("222222222222"), run: runId("run-current") })
+      if (served._tag !== "Ready") throw new Error("expected a ready run log")
+      expect(served.raw).toBe("nuke: S3Bucket - failed")
+      expect(served.total).toBe(43)
+      expect(served.lines).toHaveLength(30)
+      expect(served.lines[0]?.text).toBe("nuke line 12")
+      expect(served.lines.at(-1)?.text).toBe("run run-current ended, account quarantined")
+      expect(Schema.decodeUnknownSync(SandboxRunLog)(Schema.encodeSync(SandboxRunLog)(served))).toEqual(served)
+
+      const foreign = yield* Effect.flip(reads.runLog({ id: account("222222222222"), run: runId("run-other") }))
+      expect(foreign._tag).toBe("RunNotFound")
+      const missing = yield* Effect.flip(reads.runLog({ id: account("222222222222"), run: runId("run-none") }))
+      expect(missing._tag).toBe("RunNotFound")
+      const notInStore = yield* Effect.flip(reads.runLog({ id: account("333333333333"), run: runId("run-current") }))
+      expect(notInStore._tag).toBe("SandboxNotFound")
+    }))
+
+  it.effect("a run-log failure on the log read is a failed read", () =>
+    Effect.gen(function*() {
+      const store = yield* makeMemorySandboxStore([quarantined("222222222222", "sandbox-b", "nuke: failed")])
+      const brokenLog = RunLog.of({
+        record: () => Effect.void,
+        entries: () => Effect.fail(new RunLogUnavailable({ detail: "disk full" })),
+        recent: () => Effect.succeed([]),
+        forAccount: () => Effect.succeed({ runs: [], next: null })
+      })
+      const reads = yield* makeSandboxHostReads({ contract, store, runLog: brokenLog })
+      expect(yield* reads.runLog({ id: account("222222222222"), run: runId("run-current") }))
+        .toEqual({ _tag: "Failed", reason: "unavailable" })
+    }))
+
+  it("decodes a run-log query: an account id and a run id, nothing else", () => {
+    const query = Schema.decodeUnknownSync(SandboxRunLogQuery)(
+      new URLSearchParams({ id: "222222222222", run: "run-current" })
+    )
+    expect(query).toEqual({ id: "222222222222", run: "run-current" })
+    expect(() => Schema.decodeUnknownSync(SandboxRunLogQuery)(new URLSearchParams({ id: "222222222222" })))
+      .toThrow()
+  })
 })
