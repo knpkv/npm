@@ -17,6 +17,7 @@ import { useContext, useEffect, useId, useMemo, useState, type ReactElement } fr
 import { createPortal } from "react-dom"
 import { UsageEmptyArt } from "./internal/usage-empty-art.js"
 import { UsageEmptyChromeContext } from "./internal/usage-empty-chrome.js"
+import { UsageLimitsReadings } from "./usage-limits-view.js"
 import { ShellIcon } from "./internal/shell-icon.js"
 import {
   canonicalUsageSelection,
@@ -33,6 +34,8 @@ export interface UsageModuleReads {
 }
 
 interface UsageModuleContent {
+  /** The hub's own host: the Limits page shows its account limits only. */
+  readonly host: string
   readonly reads: UsageModuleReads
   readonly viewerTimeZone: string
   readonly now: number
@@ -241,8 +244,11 @@ const UsagePage = ({
     counted.length === 0
       ? "No token reading is available yet."
       : `${compact.format(total)} reported tokens in the last ${shownRange?._tag === "Read" ? rangeLabels[shownRange.usage.range.preset] : rangeLabels[range]} from ${counted.length} ${counted.length === 1 ? "host" : "hosts"}.`
+  // Loading and a first failed read show only their own state, as the reference draws them.
+  const limitsShown = Option.isSome(AsyncResult.value(limits))
   const tabProps: UsageTabProps = {
-    presentation: { page: page === "limits" ? "limits" : "tokens", labelledBy: headingId },
+    // Limits draws its own cards (06 Usage); the shared tab adds only the token chart there.
+    presentation: { page: "tokens", labelledBy: headingId },
     onHubMachine: false,
     range,
     onRangeChange: (range) => changeSelection({ ...decoded.success.selection, range }),
@@ -341,60 +347,56 @@ const UsagePage = ({
           )}
         </>
       )}
-      <div className="usage-details-controls">
-        <label htmlFor={hostId}>
-          Host
-          <select
-            id={hostId}
-            name="usage-host"
-            value={page === "by-tool" ? (breakdownHost ?? "") : (selectedHost ?? "")}
-            onChange={(event) =>
-              changeSelection({ ...decoded.success.selection, host: event.currentTarget.value || null })
-            }
-          >
-            {page === "by-tool" ? (
-              breakdownHost === null ? (
-                <option value="">No reported host</option>
-              ) : null
-            ) : (
-              <option value="">All hosts</option>
-            )}
-            {knownHosts.map((host) => (
-              <option key={host} value={host}>
-                {host}
-              </option>
-            ))}
-            {selectedHost !== null && !knownHosts.includes(selectedHost) ? (
-              <option value={selectedHost}>{selectedHost}</option>
-            ) : null}
-          </select>
-          {page === "by-tool" ? <ShellIcon name="next" /> : null}
-        </label>
-        <ToggleGroup
-          aria-label="Range"
-          value={range}
-          items={Object.entries(rangeLabels).map(([value, label]) => ({ value, label }))}
-          onValueChange={(value) => {
-            const next = value === "24h" || value === "7d" || value === "30d" ? value : null
-            if (next !== null) changeSelection({ ...decoded.success.selection, range: next })
-          }}
-        />
-        <span className="usage-details-time-zone">Periods in {timeZone}</span>
-        {content.onHubMachine ? (
-          <a href={AGENT_USAGE_PAGE} target="_blank" rel="noreferrer">
-            Open agent-usage on this machine
-          </a>
-        ) : null}
-        {(AsyncResult.isFailure(usage) && (page !== "by-tool" || toolReading?._tag !== "Read")) ||
-        (page === "limits" && AsyncResult.isFailure(limits)) ? (
-          <Button
-            data-region={page === "limits" ? "action" : undefined}
-            onClick={() => setRefresh((previous) => previous + 1)}
-          >
-            Retry
-          </Button>
-        ) : null}
-      </div>
+      {page === "limits" ? null : (
+        <div className="usage-details-controls">
+          <label htmlFor={hostId}>
+            Host
+            <select
+              id={hostId}
+              name="usage-host"
+              value={page === "by-tool" ? (breakdownHost ?? "") : (selectedHost ?? "")}
+              onChange={(event) =>
+                changeSelection({ ...decoded.success.selection, host: event.currentTarget.value || null })
+              }
+            >
+              {page === "by-tool" ? (
+                breakdownHost === null ? (
+                  <option value="">No reported host</option>
+                ) : null
+              ) : (
+                <option value="">All hosts</option>
+              )}
+              {knownHosts.map((host) => (
+                <option key={host} value={host}>
+                  {host}
+                </option>
+              ))}
+              {selectedHost !== null && !knownHosts.includes(selectedHost) ? (
+                <option value={selectedHost}>{selectedHost}</option>
+              ) : null}
+            </select>
+            {page === "by-tool" ? <ShellIcon name="next" /> : null}
+          </label>
+          <ToggleGroup
+            aria-label="Range"
+            value={range}
+            items={Object.entries(rangeLabels).map(([value, label]) => ({ value, label }))}
+            onValueChange={(value) => {
+              const next = value === "24h" || value === "7d" || value === "30d" ? value : null
+              if (next !== null) changeSelection({ ...decoded.success.selection, range: next })
+            }}
+          />
+          <span className="usage-details-time-zone">Periods in {timeZone}</span>
+          {content.onHubMachine ? (
+            <a href={AGENT_USAGE_PAGE} target="_blank" rel="noreferrer">
+              Open agent-usage on this machine
+            </a>
+          ) : null}
+          {AsyncResult.isFailure(usage) && (page !== "by-tool" || toolReading?._tag !== "Read") ? (
+            <Button onClick={() => setRefresh((previous) => previous + 1)}>Retry</Button>
+          ) : null}
+        </div>
+      )}
       {page === "by-tool" &&
       toolReading?._tag === "Read" &&
       usage.waiting &&
@@ -502,6 +504,17 @@ const UsagePage = ({
             <p>Unknown hosts are left out of totals. No token reading is treated as zero.</p>
           )}
         </section>
+      ) : page === "limits" ? (
+        <>
+          <UsageLimitsReadings
+            host={content.host}
+            limits={limits}
+            now={content.now}
+            onRetry={() => setRefresh((previous) => previous + 1)}
+            timeZone={timeZone}
+          />
+          {limitsShown ? <UsageTab {...tabProps} /> : null}
+        </>
       ) : (
         <UsageTab {...tabProps} />
       )}
@@ -585,12 +598,19 @@ const UsagePage = ({
           </section>
         </>
       ) : null}
-      <footer className="usage-details-footer" data-region={page === "limits" ? "footer" : undefined}>
-        <p>
-          Only reported tokens and limit readings travel between hosts. Costs, balances, sessions and paths stay on
-          their machines. Cost isn't reported.
+      {page !== "limits" ? (
+        <footer className="usage-details-footer">
+          <p>
+            Only reported tokens and limit readings travel between hosts. Costs, balances, sessions and paths stay on
+            their machines. Cost isn't reported.
+          </p>
+        </footer>
+      ) : limitsShown ? (
+        <p className="usage-limits-foot" data-region="footer">
+          Limits and accounts stay on {content.host}. Relay reads tokens from other hosts, but doesn’t pull their
+          account limits here. Cost isn’t reported.
         </p>
-      </footer>
+      ) : null}
     </div>
   )
 }

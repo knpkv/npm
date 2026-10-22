@@ -554,4 +554,208 @@
       text-decoration: underline;
     }
   }
+
+  /* Limits (06 Usage reference): the verdict, one card per tool, the token chart and the footnote. */
+  .usage-details[data-usage-page="limits"] {
+    gap: 2rem;
+    font-weight: 430;
+    line-height: 1.5;
+  }
+
+  .usage-limits-summary {
+    display: grid;
+    gap: 0.4rem;
+    max-inline-size: 46em;
+  }
+
+  .usage-limits-summary h2 {
+    margin: 0;
+    font-size: 1.9rem;
+    font-weight: 620;
+    letter-spacing: -0.03em;
+    line-height: 1.2;
+    text-wrap: balance;
+  }
+
+  .usage-limits-summary p,
+  .usage-limits-card p,
+  .usage-limits-card dl {
+    margin: 0;
+  }
+
+  .usage-limits-summary p {
+    color: var(--rly-color-text-2);
+  }
+
+  .usage-limits-notices {
+    display: grid;
+    gap: 2rem;
+  }
+
+  .usage-limits-cards {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem;
+    min-inline-size: 0;
+  }
+
+  .usage-limits-card {
+    display: grid;
+    gap: 0.85rem;
+    align-content: start;
+    padding-block: 1.1rem;
+    padding-inline: 1.15rem;
+    min-inline-size: 0;
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-group);
+    background: var(--rly-color-surface-1);
+  }
+
+  .usage-limits-card-head {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem 1rem;
+    align-items: baseline;
+    justify-content: space-between;
+  }
+
+  .usage-limits-card-head h2 {
+    margin: 0;
+    font-size: 1.25rem;
+    font-weight: 620;
+    letter-spacing: -0.02em;
+    line-height: 1.5;
+  }
+
+  .usage-limits-card-head small {
+    font-size: 0.75rem;
+    color: var(--rly-color-text-2);
+  }
+
+  .usage-limits-figure {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem 0.75rem;
+    align-items: baseline;
+  }
+
+  .usage-limits-figure b {
+    font-size: 2.6rem;
+    font-weight: 620;
+    letter-spacing: -0.04em;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .usage-limits-figure span,
+  .usage-limits-note {
+    color: var(--rly-color-text-2);
+  }
+
+  .usage-limits-figure span {
+    font-size: 0.875rem;
+  }
+
+  .usage-limits-card dl {
+    display: grid;
+  }
+
+  .usage-limits-card dl > div {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    padding-block: 0.5rem;
+    border-block-start: 1px solid var(--rly-color-border-1);
+    font-size: 0.875rem;
+  }
+
+  .usage-limits-card dt {
+    color: var(--rly-color-text-2);
+  }
+
+  .usage-limits-card dd {
+    margin: 0;
+    font-weight: 520;
+    text-align: end;
+  }
+
+  .usage-limits-figure b[data-unknown],
+  .usage-limits-card dd[data-unknown] {
+    color: var(--rly-color-text-2);
+  }
+
+  .usage-limits-note {
+    font-size: 0.8125rem;
+  }
+
+  .usage-limits-sr {
+    position: absolute;
+    inline-size: 1px;
+    block-size: 1px;
+    overflow: clip;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .usage-limits-foot {
+    margin: 0;
+    padding-block-start: 0.8rem;
+    max-inline-size: 52em;
+    border-block-start: 1px solid var(--rly-color-border-1);
+    font-size: 0.8125rem;
+    color: var(--rly-color-text-2);
+  }
+
+  .usage-limits-loading {
+    display: grid;
+    gap: 0.75rem;
+  }
+
+  .usage-limits-unavailable {
+    display: grid;
+    gap: 1.5rem;
+    min-inline-size: 0;
+  }
+
+  .usage-limits-controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.5rem 1.5rem;
+    min-block-size: 44px;
+  }
+
+  /* The reference's Retry takes the page's type (its page stylesheet sets button { font: inherit }). */
+  .usage-limits-controls > button {
+    font: inherit;
+  }
+
+  .usage-limits-retry {
+    margin: 0;
+    font-size: 0.75rem;
+    font-weight: 520;
+    line-height: 1rem;
+    color: var(--rly-color-text-2);
+  }
+
+  @media (max-width: 599px) {
+    .usage-details[data-usage-page="limits"] {
+      gap: 1.5rem;
+      padding-block-start: 0.9rem;
+    }
+
+    /* The phone page starts 0.9rem under the grouped header, without the slot's grid gap. */
+    .usage-details[data-usage-page="limits"] > .usage-details-mast-slot {
+      display: none;
+    }
+
+    .usage-limits-summary h2 {
+      font-size: 1.5rem;
+    }
+
+    .usage-limits-cards {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
 }

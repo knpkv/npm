@@ -719,6 +719,7 @@ const DashboardApp = ({
     push: snapshot.approvalApp.pushEnabled
   })
   const usage = makeUsageModuleViews({
+    host: current.host,
     reads: usageReads,
     viewerTimeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     // Received report timestamps use the browser clock, unlike Work's hub-anchored countdown.

@@ -52,7 +52,13 @@ const render = async (reads: UsageModuleReads) => {
   const host = document.createElement("div")
   document.body.append(host)
   root = createRoot(host)
-  const module = makeUsageModuleViews({ reads, viewerTimeZone: "Europe/Amsterdam", now: 1_000, onHubMachine: false })
+  const module = makeUsageModuleViews({
+    host: "hub",
+    reads,
+    viewerTimeZone: "Europe/Amsterdam",
+    now: 1_000,
+    onHubMachine: false
+  })
   await act(async () =>
     root?.render(
       <SuperappShell
@@ -255,7 +261,9 @@ it("keeps ordinary Limits when peer discovery is incomplete", async () => {
   })
   expect(document.querySelector('.superapp-shell[data-usage-empty="true"]')).toBeNull()
   expect(document.querySelector(".usage-empty-notice")).toBeNull()
-  expect(document.querySelector('[data-region="cards"]')).not.toBeNull()
+  // No hub read yet: the ordinary page says so instead of drawing empty cards.
+  expect(document.querySelector(".usage-limits-retry")?.textContent).toBe("No limits reading from hub yet.")
+  expect(document.querySelector('[data-region="footer"]')).not.toBeNull()
   // The design's nav is the module list in every layout, never the whole sidebar with brand, Settings and session.
   const sidebar = document.querySelector(".superapp-sidebar")
   expect(sidebar?.getAttribute("data-region")).toBeNull()
@@ -481,7 +489,13 @@ it("repairs selectors only on active Usage and keeps Fleet approval deep links a
         session={{ access: "tailscale", connection: "connected" }}
         modules={[
           fleet,
-          makeUsageModuleViews({ reads, viewerTimeZone: "Europe/Amsterdam", now: 2_000, onHubMachine: false })
+          makeUsageModuleViews({
+            host: "hub",
+            reads,
+            viewerTimeZone: "Europe/Amsterdam",
+            now: 2_000,
+            onHubMachine: false
+          })
         ]}
         landing={{ module: "fleet", page: "approvals" }}
         host="hub"
@@ -743,4 +757,74 @@ it.each(["pending", "failed"])("frames retained By-tool rows while the new range
     )
     expect(document.querySelector(".usage-details")?.textContent).not.toContain("private transport detail")
   }
+})
+
+const hubLimits = (usedPercent: number): FleetLimits => ({
+  hosts: [
+    {
+      host: "hub",
+      readAt: 1_000,
+      reading: {
+        _tag: "Read",
+        skipped: 0,
+        limits: {
+          v: 1,
+          machine: "hub",
+          observedAt: 1_000,
+          latest: [
+            {
+              agent: "claude",
+              machine: "hub",
+              source: "claude-oauth-usage",
+              label: "five_hour",
+              windowMinutes: 300,
+              observedAt: 1_000,
+              reading: { _tag: "Known", usedPercent, resetsAt: 3_600_000 }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  failures: [],
+  peersListed: true
+})
+
+/** 06 Usage: Limits is the verdict and one card per tool, with no host, range or time-zone controls. */
+it("draws the hub's Limits as the verdict and per-tool cards without a controls row", async () => {
+  window.history.replaceState(null, "", "/?range=7d&timeZone=UTC#usage/limits")
+  await render({
+    usage: () => Effect.succeed({ fleet: usage, receivedAt: 1_000 }),
+    limits: Effect.succeed({ fleet: hubLimits(86), receivedAt: 1_000 })
+  })
+  expect(document.querySelector('[data-region="summary"] h2')?.textContent).toBe(
+    "hub is close to Claude’s 5-hour limit."
+  )
+  const card = document.querySelector('[data-region="cards"] [data-tool="claude"]')
+  expect(card?.querySelector("b")?.textContent).toBe("86%")
+  expect(card?.textContent).toContain("Near limit")
+  expect(card?.textContent).toContain("14% left until 01:00.")
+  expect(document.querySelector(".usage-details-controls")).toBeNull()
+  expect(document.querySelector('[data-region="footer"]')?.textContent).toContain("Limits and accounts stay on hub.")
+})
+
+it("shows only the retry line and Retry when the first Limits read fails", async () => {
+  window.history.replaceState(null, "", "/?range=7d&timeZone=UTC#usage/limits")
+  await render({
+    usage: () => Effect.succeed({ fleet: usage, receivedAt: 1_000 }),
+    limits: Effect.fail(new FleetReadLoadError({ path: "/v1/connect/limits", reason: "status", cause: 503 }))
+  })
+  expect(document.querySelector('[data-region="notice"]')?.textContent).toBe(
+    "Couldn't load limits. Trying again every minute."
+  )
+  expect(document.querySelector('[data-region="action"]')?.textContent).toBe("Retry")
+  expect(document.querySelector('[data-region="cards"], [data-region="footer"], [data-region="detail"]')).toBeNull()
+})
+
+it("holds the reference skeleton while Limits loads", async () => {
+  window.history.replaceState(null, "", "/?range=7d&timeZone=UTC#usage/limits")
+  await render({ usage: () => Effect.never, limits: Effect.never })
+  const loading = document.querySelector('[data-region="cards"]')
+  expect(loading?.getAttribute("aria-label")).toBe("Loading limits")
+  expect(loading?.children).toHaveLength(4)
 })
