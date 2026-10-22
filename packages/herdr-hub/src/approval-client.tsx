@@ -65,6 +65,7 @@ import {
   loadSandboxesCaller,
   loadSandboxesOverview,
   loadSandboxRequests,
+  loadSandboxRunLog,
   loadSandboxRuns,
   submitSandboxJob
 } from "./sandboxes-client.js"
@@ -862,6 +863,7 @@ const sandboxesReads: SandboxesModuleReads = {
   overview: runCodeRead(loadSandboxesOverview),
   caller: runCodeRead(loadSandboxesCaller),
   runs: (accountId) => runCodeRead(loadSandboxRuns(accountId)),
+  runLog: (accountId, runId) => runCodeRead(loadSandboxRunLog(accountId, runId)),
   requests: runCodeRead(loadSandboxRequests)
 }
 /** The hub refuses these unless the page runs on its own node; the page shows them only to that owner. */

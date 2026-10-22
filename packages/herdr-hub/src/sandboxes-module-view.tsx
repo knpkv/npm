@@ -9,6 +9,7 @@ import {
   leaseDuration,
   SandboxCard,
   type SandboxesOverview,
+  type SandboxRunLog,
   type SandboxRuns,
   type SandboxRunView
 } from "@knpkv/sandbox-pool/host"
@@ -49,6 +50,11 @@ export interface SandboxesModuleReads {
   readonly caller: Effect.Effect<SandboxesCaller, SandboxesClientError>
   /** The newest page of one account's runs. */
   readonly runs: (accountId: SandboxCard["accountId"]) => Effect.Effect<SandboxRuns, SandboxesClientError>
+  /** One run's log tail and stored failure line. The hub answers only its own node; read only for the owner. */
+  readonly runLog: (
+    accountId: SandboxCard["accountId"],
+    runId: SandboxRunView["runId"]
+  ) => Effect.Effect<SandboxRunLog, SandboxesClientError>
   /** Resets and budget lifts waiting in Fleet / Approvals. */
   readonly requests: Effect.Effect<SandboxRequests, SandboxesClientError>
 }
@@ -150,6 +156,8 @@ const span = (from: DateTime.Utc, to: DateTime.Utc): string => {
 /** Clock words in the viewer's time zone. */
 interface Times {
   readonly clock: (instant: DateTime.Utc) => string
+  /** Clock time with seconds, for log lines. */
+  readonly seconds: (instant: DateTime.Utc) => string
   /** Clock time today, "tomorrow" on the next day, and the date on any other day. */
   readonly when: (instant: DateTime.Utc, now: DateTime.Utc) => string
   /** Clock time today, "yesterday" on the day before, and the date before that. */
@@ -167,6 +175,15 @@ const timesIn = (timeZone: string): Times => {
     days === 0 ? clock(instant) : days === 1 ? `${clock(instant)} ${next}` : `${clock(instant)} on ${date(instant)}`
   return {
     clock,
+    seconds: (instant) =>
+      DateTime.format(instant, {
+        hour: "2-digit",
+        hourCycle: "h23",
+        locale: "en-GB",
+        minute: "2-digit",
+        second: "2-digit",
+        timeZone
+      }),
     when: (instant, now) => words(instant, dayOf(instant) - dayOf(now), "tomorrow"),
     since: (instant, now) => words(instant, dayOf(now) - dayOf(instant), "yesterday")
   }
@@ -898,27 +915,34 @@ const settleRead = <A,>(previous: Read<A>, exit: Exit.Exit<A, SandboxesClientErr
  * answers. `read` must keep its identity, or it reads on every render.
  */
 const useRead = <A,>(read: Effect.Effect<A, SandboxesClientError>, active: boolean): Polled<A> => {
-  const [result, setResult] = useState<Read<A>>({ _tag: "Loading" })
+  // The result remembers which read it answers, so a changed read is Loading on its first render.
+  const [held, setHeld] = useState<{ readonly read: typeof read; readonly result: Read<A> }>({
+    read,
+    result: { _tag: "Loading" }
+  })
   const [attempt, setAttempt] = useState(0)
-  const reading = useRef(read)
   useEffect(() => {
     if (!active) return
-    if (reading.current !== read) {
-      reading.current = read
-      setResult({ _tag: "Loading" })
-    }
     const fiber = Effect.runFork(
       Effect.gen(function* () {
         const exit = yield* Effect.exit(read)
         const at = yield* DateTime.now
-        yield* Effect.sync(() => setResult((previous) => settleRead(previous, exit, at)))
+        yield* Effect.sync(() =>
+          setHeld((previous) => ({
+            read,
+            result: settleRead(previous.read === read ? previous.result : { _tag: "Loading" }, exit, at)
+          }))
+        )
       }).pipe(Effect.repeat(Schedule.spaced(pollEvery)))
     )
     return () => {
       Effect.runFork(Fiber.interrupt(fiber))
     }
   }, [read, active, attempt])
-  return { result, readAgain: () => setAttempt((value) => value + 1) }
+  return {
+    result: held.read === read ? held.result : { _tag: "Loading" },
+    readAgain: () => setAttempt((value) => value + 1)
+  }
 }
 
 /** Pending requests by account, and whether they can be acted on: answered, and not last known. */
@@ -940,15 +964,25 @@ const pendingRequests = (read: Read<SandboxRequests>): PendingRequests | null =>
 }
 
 /** Under requests or runs that a later poll could not refresh. */
-const LastKnown = ({ at, of }: { readonly at: DateTime.Utc; readonly of: "requests" | "runs" }): ReactElement => {
+const LastKnown = ({
+  at,
+  of
+}: {
+  readonly at: DateTime.Utc
+  readonly of: "requests" | "runs" | "log"
+}): ReactElement => {
   const times = useContext(TimesContext)
   const words = `Last known at ${times.clock(at)}`
   return of === "requests" ? (
     <small className="sandboxes-muted" data-requests-stale="">
       {words}
     </small>
-  ) : (
+  ) : of === "runs" ? (
     <small className="sandboxes-muted" data-runs-stale="">
+      {words}
+    </small>
+  ) : (
+    <small className="sandboxes-muted" data-log-stale="">
       {words}
     </small>
   )
@@ -1187,6 +1221,8 @@ interface StepRow {
   readonly state: Labelled
   readonly current: boolean
   readonly blocker: string | null
+  /** The stored line of the failed step, for the owner only. */
+  readonly raw: string | null
 }
 
 /** Before the failed step done, the failed step failed, after it not run. */
@@ -1205,7 +1241,8 @@ const finishedSteps = (
           ? { label: "Failed", tone: "critical" }
           : { label: "Not run", tone: "neutral" },
     current: index === at,
-    blocker: index === at ? blocker : null
+    blocker: index === at ? blocker : null,
+    raw: null
   }))
 }
 
@@ -1221,7 +1258,8 @@ const runRows = (run: SandboxRunView): ReadonlyArray<StepRow> | null => {
       name,
       state: stepState(index, current),
       current: index === current,
-      blocker: null
+      blocker: null,
+      raw: null
     }))
   }
   // A failed step that was retried still names failedStep; an available run passed every step.
@@ -1230,7 +1268,8 @@ const runRows = (run: SandboxRunView): ReadonlyArray<StepRow> | null => {
       name,
       state: { label: "Done", tone: "positive" },
       current: false,
-      blocker: null
+      blocker: null,
+      raw: null
     }))
   }
   return run.failedStep === null ? null : finishedSteps(named, run.failedStep, run.blocker?.text ?? null)
@@ -1238,7 +1277,7 @@ const runRows = (run: SandboxRunView): ReadonlyArray<StepRow> | null => {
 
 const StepList = ({ label, rows }: { readonly label: string; readonly rows: ReadonlyArray<StepRow> }): ReactElement => (
   <ol aria-label={label} className="sandboxes-steps">
-    {rows.map(({ blocker, current, name, state }, index) => (
+    {rows.map(({ blocker, current, name, raw, state }, index) => (
       <li aria-current={current ? "step" : undefined} key={name}>
         <span aria-hidden="true" className="sandboxes-step-number">
           {index + 1}
@@ -1249,6 +1288,11 @@ const StepList = ({ label, rows }: { readonly label: string; readonly rows: Read
           <p className="sandboxes-step-blocker" data-step-blocker="">
             {blocker}
           </p>
+        )}
+        {raw === null ? null : (
+          <code className="sandboxes-step-raw" data-step-raw="">
+            {raw}
+          </code>
         )}
       </li>
     ))}
@@ -1305,6 +1349,20 @@ const useRuns = (
 ): Read<SandboxRuns> => {
   const read = useMemo(() => (id === null ? Effect.never : reads.runs(id)), [reads.runs, id])
   return useRead(read, active && id !== null).result
+}
+
+/** The owner's log of the open run. Nothing is read without an account and a run, so never for a viewer. */
+const useRunLog = (
+  reads: SandboxesModuleReads,
+  id: SandboxCard["accountId"] | null,
+  runId: SandboxRunView["runId"] | null,
+  active: boolean
+): Read<SandboxRunLog> => {
+  const read = useMemo(
+    () => (id === null || runId === null ? Effect.never : reads.runLog(id, runId)),
+    [reads.runLog, id, runId]
+  )
+  return useRead(read, active && id !== null && runId !== null).result
 }
 
 /**
@@ -1489,21 +1547,60 @@ const outcomeLabel = (outcome: SandboxRunView["outcome"]): Labelled =>
 const runHref = (accountId: string, runId: string): string =>
   moduleHref(sandboxesModule, "runs", new URLSearchParams({ id: accountId, run: runId }))
 
-/** One run, opened from its row. The failed step carries its blocker words; the stored lines and log never. */
+/** The owner's log of one run: its last lines, oldest first, each with its clock time. */
+const RunLog = ({ log }: { readonly log: Read<SandboxRunLog> }): ReactElement => {
+  const times = useContext(TimesContext)
+  if (log._tag === "Loading") {
+    return (
+      <p className="sandboxes-muted" data-run-log-state="" role="status">
+        Reading the log…
+      </p>
+    )
+  }
+  if (log._tag === "Failed" || log.value._tag !== "Ready") {
+    return (
+      <p className="sandboxes-muted" data-run-log-state="">
+        Can’t read the log.
+      </p>
+    )
+  }
+  const { lines } = log.value
+  return (
+    <details className="sandboxes-log" data-run-log="" open>
+      <summary>
+        <span aria-hidden="true" className="sandboxes-log-marker">
+          ▼
+        </span>
+        <span>Log</span>
+        <small>{lines.length === 1 ? "Last 1 line" : `Last ${lines.length} lines`}</small>
+      </summary>
+      <pre>{lines.map(({ at, text }) => `${times.seconds(at)} ${text}`).join("\n")}</pre>
+      {log.staleSince === null ? null : <LastKnown at={log.staleSince} of="log" />}
+    </details>
+  )
+}
+
+/**
+ * One run, opened from its row. The failed step carries its blocker words. `log` is the owner's read of the
+ * run's log and stored failure line; null for anyone else, who sees neither.
+ */
 const RunSheet = ({
   close,
   item,
+  log,
   now,
   run
 }: {
   readonly close: () => void
   readonly item: SandboxCard
+  readonly log: Read<SandboxRunLog> | null
   readonly now: DateTime.Utc
   readonly run: SandboxRunView
 }): ReactElement => {
   const times = useContext(TimesContext)
   const outcome = outcomeLabel(run.outcome)
-  const rows = runRows(run)
+  const raw = log !== null && log._tag === "Done" && log.value._tag === "Ready" ? log.value.raw : null
+  const rows = runRows(run)?.map((row) => (row.blocker === null ? row : { ...row, raw })) ?? null
   return (
     <Sheet.Root onOpenChange={(open) => (open ? undefined : close())} open>
       <Sheet.Content className="sandboxes-sheet" closeLabel="Close run" title="Cleanup run">
@@ -1520,10 +1617,18 @@ const RunSheet = ({
           />
           <h3>Steps</h3>
           {rows === null ? (
-            <p data-step-blocker="">{run.blocker?.text ?? ""}</p>
+            <>
+              <p data-step-blocker="">{run.blocker?.text ?? ""}</p>
+              {raw === null ? null : (
+                <code className="sandboxes-step-raw" data-step-raw="">
+                  {raw}
+                </code>
+              )}
+            </>
           ) : (
             <StepList label="Cleanup steps" rows={rows} />
           )}
+          {log === null ? null : <RunLog log={log} />}
         </Sheet.Body>
       </Sheet.Content>
     </Sheet.Root>
@@ -1544,10 +1649,12 @@ const RunsPage = ({
   const id = accountIdOf(search)
   const { now, readAgain, view } = usePool(reads.overview, mount.active)
   const runs = useRuns(reads, id, mount.active)
+  const { owner } = useCaller(reads.caller, mount.active)
   const item =
     view._tag === "Pool" ? view.overview.sandboxes.find((candidate) => candidate.accountId === id) : undefined
   const page = runs._tag === "Done" && runs.value._tag === "Ready" ? runs.value : null
   const open = page?.runs.find((run) => run.runId === search.get("run"))
+  const log = useRunLog(reads, owner && id !== null ? id : null, open?.runId ?? null, mount.active)
   return (
     <section className="sandboxes-page">
       <BackToPool />
@@ -1625,6 +1732,7 @@ const RunsPage = ({
                 )
               }
               item={item}
+              log={owner ? log : null}
               now={now}
               run={open}
             />
