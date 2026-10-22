@@ -12,6 +12,24 @@ It publishes three binaries:
 
 Each executable is also an import entry: `@knpkv/herdr-hub/hostd`, `@knpkv/herdr-hub/fleetctl` and `@knpkv/herdr-hub/relay`. Importing one runs that CLI, so a host can bundle its executables from them.
 
+## Run it on its own
+
+```sh
+npx -y -p @knpkv/herdr-hub hostd   # serves the super-app on http://127.0.0.1:4778/
+```
+
+It runs on Node 26 with no fleet configuration, no Tailscale and no other host. Without a file at the default path
+`~/.config/fleet/config.json` it starts standalone and prints one line on stderr:
+
+```text
+hostd: no fleet config at <path>; running standalone on http://127.0.0.1:4778/ (set FLEET_CONFIG_PATH to use one)
+```
+
+Both listeners are loopback-only: the dashboard on 4778 and the Work listener on 4777. A taken port stops startup.
+Nix and agent-delegation jobs are refused; state lives in `$XDG_STATE_HOME/fleet` (else `~/.local/state/fleet`).
+Point `FLEET_CONFIG_PATH` at a fleet configuration to run it as a fleet host, described below; a
+`FLEET_CONFIG_PATH` that names a missing file is an error, not standalone.
+
 `relay post --kind status "Tests passing"` resolves the current Herdr pane's stable agent ID and posts to the configured canonical authenticated hub. Kinds are `status`, `progress`, `skill-feedback`, `note`, and `blocker`. Status text allows 240 characters, other kinds 1024. `--event-id ID` allows retries across invocations, and `--goal-step ID` links an update to a goal step. An omitted event ID is generated once; transport retries reuse it. `FLEET_CONFIG_PATH` selects the fleet configuration, and `HERDR_PANE_ID` must identify the current pane. The CLI offers no agent ID override.
 
 `relay me --mood focused --say "Running the delivery tests" --accessory glasses` updates the current pane's creature through `POST /v1/connect/me`. CLI and MCP resolve the current pane with `herdr agent get`, then send its stable ID in `x-herdr-agent-id`; the request body accepts no host, agent ID or reply ID. The hub applies the same server-side authorization as `relay post`: identity is host-scoped, authenticated from the actual Tailscale peer and checked against that host's fresh, complete inventory. A same-host sibling could write another agent's self-state. A foreign host cannot claim that agent. No per-pane credential is added.
