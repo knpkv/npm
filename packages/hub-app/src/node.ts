@@ -17,7 +17,15 @@ import type { BrowserLaunch, BrowserLaunchOutputError } from "@knpkv/browser-pai
 import { openOrServe } from "@knpkv/browser-pairing/launch"
 import * as OwnerSession from "@knpkv/browser-pairing/owner-session"
 import { Context, Deferred, Effect, FileSystem, Layer, Option, Path, Result, Schema } from "effect"
-import { Etag, HttpPlatform, HttpRouter, HttpServerRequest, HttpServerResponse, HttpStaticServer } from "effect/http"
+import {
+  Etag,
+  HttpPlatform,
+  HttpRouter,
+  HttpServer,
+  HttpServerRequest,
+  HttpServerResponse,
+  HttpStaticServer
+} from "effect/http"
 import { createServer } from "node:http"
 import { hostname, userInfo } from "node:os"
 import { parseArgs } from "node:util"
@@ -231,14 +239,9 @@ export const serveAttached = Effect.fn("HubApp.serveAttached")(function*<E, R>(
   app: AppServer<E, R>,
   mode: Extract<RunMode, { readonly _tag: "Attached" }>
 ) {
-  const fileSystem = yield* FileSystem.FileSystem
-  const token = yield* fileSystem.readFileString(mode.tokenFile).pipe(
-    Effect.map((text) => text.trim()),
-    Effect.mapError((cause) => new AppStartError({ reason: "invalid_arguments", cause }))
-  )
   const manifest = yield* servedManifest(app)
   const services = yield* Layer.build(
-    attachedLayer({ app: manifest.id, hubUrl: mode.hubUrl, token, declared: manifest.services })
+    attachedLayer({ app: manifest.id, hubUrl: mode.hubUrl, tokenFile: mode.tokenFile, declared: manifest.services })
   )
   const { mounted, needsYou } = yield* mountModule(manifest, app.handlers).pipe(Effect.provideContext(services))
   const badge = app.badge?.pipe(Effect.provideContext(services))
@@ -273,57 +276,65 @@ const ownerCaller = (login: string): typeof ModuleCaller.Encoded => ({
 const serveStandalone = Effect.fn("HubApp.serveStandalone")(function*<E, R>(
   app: AppServer<E, R>,
   mode: Extract<RunMode, { readonly _tag: "Standalone" }>,
-  shellScript: string,
   launch: BrowserLaunch
 ) {
+  const fileSystem = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
+  // This package's own built browser module, read when asked for: a missing build fails that request only.
+  const shellScript = path.fromFileUrl(new URL("./standalone-shell.js", import.meta.url)).pipe(
+    Effect.flatMap((file) => fileSystem.readFileString(file)),
+    Effect.map((script) => HttpServerResponse.text(script, { contentType: "text/javascript; charset=utf-8" })),
+    Effect.catchTag("PlatformError", () => HttpServerResponse.json({ code: "shell_missing" }, { status: 500 }))
+  )
   const manifest = yield* servedManifest(app)
   const host = hostname()
   const services = yield* Layer.build(standaloneLayer({ host, isHub: false, hosts: [host] }))
   const { mounted, needsYou } = yield* mountModule(manifest, app.handlers).pipe(Effect.provideContext(services))
   const badge = app.badge?.pipe(Effect.provideContext(services))
   const login = userInfo().username
-  const origin = OwnerSession.loopbackOrigin("127.0.0.1", mode.port)
-  const session = yield* OwnerSession.make({
-    product: manifest.package,
-    cookieName: `hub_app_${manifest.id.replaceAll("-", "_")}_${mode.port}`,
-    writes: "csrf",
-    freshUrlHint: `restart ${manifest.package} for a fresh URL`,
-    authorityOrigin: origin,
-    browserOrigin: origin
-  })
-  const authorizeOwner = Effect.gen(function*() {
-    const request = yield* HttpServerRequest.HttpServerRequest
-    yield* session.authorizeHttp(request.cookies[session.cookieName] ?? "").pipe(
-      Effect.catchTags({
-        OwnerSessionUnauthorizedError: () => Effect.fail(new ModuleRouteFailure({ status: 403, code: "unauthorized" })),
-        OwnerSessionForbiddenError: () => Effect.fail(new ModuleRouteFailure({ status: 403, code: "forbidden" }))
-      })
-    )
-    return ownerCaller(login)
-  })
-  const policy: ListenerPolicy<never, HttpServerRequest.HttpServerRequest> = {
-    listener: "local",
-    authorize: authorizeOwner,
-    // authorizeHttp checks Origin, Fetch Metadata and the CSRF token for unsafe methods.
-    sameOrigin: Effect.void
-  }
   const page = standaloneShellHtml(manifest)
   const shell = HttpRouter.use((router) =>
     Effect.gen(function*() {
       yield* router.add("GET", "/", HttpServerResponse.html(page))
-      yield* router.add(
-        "GET",
-        "/app/shell.js",
-        HttpServerResponse.text(shellScript, {
-          contentType: "text/javascript; charset=utf-8"
-        })
-      )
+      yield* router.add("GET", "/app/shell.js", shellScript)
     })
   )
-  const serve = (onReady: (url: string) => Effect.Effect<void, BrowserLaunchOutputError>) =>
-    OwnerSession.serveWithBootstrapUrl(
-      (ready: Deferred.Deferred<string>) =>
-        HttpRouter.serve(
+  /** The owner session is made once the port is bound, so `--port 0` gets a real origin and cookie. */
+  const server = (ready: Deferred.Deferred<string>) =>
+    Layer.unwrap(
+      Effect.gen(function*() {
+        const bound = yield* HttpServer.HttpServer
+        if (bound.address._tag === "UnixPathAddress") {
+          return yield* new AppStartError({ reason: "listen", cause: "standalone needs a TCP listener" })
+        }
+        const origin = OwnerSession.loopbackOrigin("127.0.0.1", bound.address.port)
+        const session = yield* OwnerSession.make({
+          product: manifest.package,
+          cookieName: `hub_app_${manifest.id.replaceAll("-", "_")}_${bound.address.port}`,
+          writes: "csrf",
+          freshUrlHint: `restart ${manifest.package} for a fresh URL`,
+          authorityOrigin: origin,
+          browserOrigin: origin
+        })
+        // The owner's session cookie is the only credential here; `x-hub-*` headers are never read.
+        const authorizeOwner = Effect.gen(function*() {
+          const request = yield* HttpServerRequest.HttpServerRequest
+          yield* session.authorizeHttp(request.cookies[session.cookieName] ?? "").pipe(
+            Effect.catchTags({
+              OwnerSessionUnauthorizedError: () =>
+                Effect.fail(new ModuleRouteFailure({ status: 403, code: "unauthorized" })),
+              OwnerSessionForbiddenError: () => Effect.fail(new ModuleRouteFailure({ status: 403, code: "forbidden" }))
+            })
+          )
+          return ownerCaller(login)
+        })
+        const policy: ListenerPolicy<never, HttpServerRequest.HttpServerRequest> = {
+          listener: "local",
+          authorize: authorizeOwner,
+          // authorizeHttp checks Origin, Fetch Metadata and the CSRF token for unsafe methods.
+          sameOrigin: Effect.void
+        }
+        return HttpRouter.serve(
           Layer.mergeAll(
             appRoutes(manifest, mounted, needsYou, badge, policy),
             assetRoutes(app.clientDirectory),
@@ -333,21 +344,23 @@ const serveStandalone = Effect.fn("HubApp.serveStandalone")(function*<E, R>(
           { disableListenLog: true, disableLogger: true }
         ).pipe(
           Layer.provide(Layer.succeed(OwnerSession.OwnerSession, session)),
-          Layer.provide(NodeHttpServer.layerServer(createServer, { host: "127.0.0.1", port: mode.port })),
-          Layer.provide(HttpPlatform.layer),
-          Layer.provide(Etag.layer),
           Layer.tap(() =>
             session.mintBootstrapCode.pipe(
               Effect.flatMap((code) => Deferred.succeed(ready, OwnerSession.bootstrapUrl(origin, code)))
             )
           )
-        ),
-      onReady
+        )
+      })
+    ).pipe(
+      Layer.provide(NodeHttpServer.layerServer(createServer, { host: "127.0.0.1", port: mode.port })),
+      Layer.provide(HttpPlatform.layer),
+      Layer.provide(Etag.layer)
     )
+  const serve = (onReady: (url: string) => Effect.Effect<void, BrowserLaunchOutputError>) =>
+    OwnerSession.serveWithBootstrapUrl(server, onReady)
   return yield* openOrServe({ login: Effect.succeedNone, serve, launch })
 })
 
-/** Serve the app in the mode its arguments name; runs until interrupted. */
 /**
  * Serve the app in `mode` until interrupted. `launch` says whether standalone mode opens a browser for its
  * sign-in link; the executable decides it from its terminal and environment.
@@ -357,15 +370,7 @@ export const serveApp = Effect.fn("HubApp.serveApp")(function*<E, R>(
   mode: RunMode,
   launch: BrowserLaunch
 ) {
-  if (mode._tag === "Attached") return yield* serveAttached(app, mode)
-  // The standalone shell is this package's own built browser module.
-  const fileSystem = yield* FileSystem.FileSystem
-  const path = yield* Path.Path
-  const shellScript = yield* path.fromFileUrl(new URL("./standalone-shell.js", import.meta.url)).pipe(
-    Effect.flatMap((file) => fileSystem.readFileString(file)),
-    Effect.mapError((cause) => new AppStartError({ reason: "layer", cause }))
-  )
-  return yield* serveStandalone(app, mode, shellScript, launch)
+  return mode._tag === "Attached" ? yield* serveAttached(app, mode) : yield* serveStandalone(app, mode, launch)
 }, Effect.mapError((cause) => cause._tag === "AppStartError" ? cause : new AppStartError({ reason: "listen", cause })))
 
 export { runApp } from "./main.js"

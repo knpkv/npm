@@ -1,7 +1,8 @@
 /**
  * A one-page app for the hub's contract tests, with knobs for each way an app can fail:
  *
- * - `ok`: serves normally. `GET /echo` answers the caller; `POST /job` submits a Fleet job for it.
+ * - `ok`: serves normally. `GET /echo` answers the caller; `POST /job` submits a Fleet job for it;
+ *   `GET /job-on-read` tries the same from a read (the hub must refuse it); `GET /slow` never answers.
  * - `contract-2`: declares a contract this hub doesn't speak.
  * - `wrong-id`: answers as another app.
  * - `mount-throws`: its client's `mount` throws.
@@ -60,17 +61,20 @@ const handlers = Layer.effect(
   ModuleHandlers,
   Effect.gen(function*() {
     const shell = yield* ShellServices
+    const submit = (payload: Schema.Json) =>
+      shell.submitJob(payload).pipe(
+        Effect.mapError((error) =>
+          error._tag === "GrantInvalid"
+            ? new ModuleRouteFailure({ status: 403, code: `grant_${error.reason}` })
+            : new ModuleRouteFailure({ status: 503, code: "unavailable" })
+        )
+      )
     return {
       routes: [
         moduleReadRoute("/echo", Empty, Echo, (_query, caller) => Effect.succeed(caller)),
-        moduleWriteRoute("POST", "/job", Empty, JobRequest, JobReply, ({ payload }) =>
-          shell.submitJob(payload).pipe(
-            Effect.mapError((error) =>
-              error._tag === "GrantInvalid"
-                ? new ModuleRouteFailure({ status: 403, code: `grant_${error.reason}` })
-                : new ModuleRouteFailure({ status: 503, code: "unavailable" })
-            )
-          ))
+        moduleWriteRoute("POST", "/job", Empty, JobRequest, JobReply, ({ payload }) => submit(payload)),
+        moduleReadRoute("/job-on-read", Empty, JobReply, () => submit({ kind: "noop" })),
+        moduleReadRoute("/slow", Empty, Schema.Null, () => Effect.never)
       ],
       needsYou: Effect.succeed({ items: [], issues: [], asOf: null })
     }

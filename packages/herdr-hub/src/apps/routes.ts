@@ -35,8 +35,8 @@ import type { AppTokens, Grants } from "./grants.js"
 import type { AppRegistry } from "./registry.js"
 import { proxyToSocket } from "./socket.js"
 
-/** App requests may take this long; long enough for a slow read, short enough to free the socket. */
-const proxyTimeoutMillis = 30_000
+/** App requests may take this long by default; long enough for a slow read, short enough to free the socket. */
+const defaultProxyTimeoutMillis = 30_000
 
 const send = (response: ServerResponse, status: number, body: Schema.Json): void => {
   response.writeHead(status, { "cache-control": "no-store", "content-type": "application/json; charset=utf-8" })
@@ -56,6 +56,8 @@ export interface AppsRouteContext<E, R> {
   readonly sameOrigin: Effect.Effect<unknown, E, R>
   readonly refuse: (response: ServerResponse, error: E) => void
   readonly runtime: { readonly runPromiseExit: <A, X>(effect: Effect.Effect<A, X, R>) => Promise<Exit.Exit<A, X>> }
+  /** Defaults to 30 s. */
+  readonly proxyTimeoutMillis?: number
 }
 
 /** Run `effect`; answer its typed failure through `refuse`, a defect as 500. Null after answering. */
@@ -141,7 +143,9 @@ export const handleAppsRoute = async <E, R>(
     return true
   }
   // Assets carry no caller: only module routes act for someone.
-  const minted = moduleRoute ? await context.runtime.runPromiseExit(context.grants.mint(app.id, caller.value)) : null
+  const minted = moduleRoute
+    ? await context.runtime.runPromiseExit(context.grants.mint(app.id, caller.value, method))
+    : null
   if (minted !== null && minted._tag === "Failure") {
     send(response, 500, { error: "internal" })
     return true
@@ -155,14 +159,22 @@ export const handleAppsRoute = async <E, R>(
     }
   const path = `${target.rest}${url.search}`
   const proxied = await context.runtime.runPromiseExit(
-    proxyToSocket(app.socket, path, request, response, added, proxyTimeoutMillis)
+    proxyToSocket(
+      app.socket,
+      `/apps/${app.id}/`,
+      path,
+      request,
+      response,
+      added,
+      context.proxyTimeoutMillis ?? defaultProxyTimeoutMillis
+    )
   )
   if (proxied._tag === "Failure" && !response.headersSent) {
-    const reason = proxied.cause.reasons.some((entry) => entry._tag === "Fail" && entry.error.reason === "timeout")
-      ? "timeout"
-      : "not_running"
-    await context.runtime.runPromiseExit(context.registry.markUnavailable(app.id, reason))
-    send(response, 503, { error: "app_unavailable", reason })
+    const timedOut = proxied.cause.reasons.some((entry) => entry._tag === "Fail" && entry.error.reason === "timeout")
+    // One slow route doesn't make the app unavailable: a fresh probe decides, in the background.
+    void context.runtime.runPromiseExit(context.registry.probeOne(app.id))
+    if (timedOut) send(response, 504, { error: "app_timeout" })
+    else send(response, 503, { error: "app_unavailable", reason: "not_running" })
   }
   return true
 }
@@ -173,6 +185,8 @@ export class AppServiceRefused extends Schema.TaggedError<AppServiceRefused>()("
 }) {}
 
 export interface AppServicesContext<R> {
+  /** Served on the loopback listener only; every other listener leaves the path to the hub's 404. */
+  readonly listener: ListenerMode
   readonly registry: AppRegistry
   readonly grants: Grants
   readonly tokens: AppTokens
@@ -197,6 +211,8 @@ const grantRefusal = (error: GrantInvalid) => {
       return "grant_used"
     case "app_mismatch":
       return "grant_app_mismatch"
+    case "read_only":
+      return "grant_read_only"
   }
 }
 
@@ -210,7 +226,7 @@ export const handleAppServicesRoute = async <R>(
   url: URL,
   context: AppServicesContext<R>
 ): Promise<boolean> => {
-  if (!url.pathname.startsWith("/v1/app-services/")) return false
+  if (context.listener !== "local" || !url.pathname.startsWith("/v1/app-services/")) return false
   const method = request.method ?? "GET"
   const service: ShellService | null = method === "GET" && url.pathname === appServicePaths.host
     ? "host"

@@ -77,8 +77,29 @@ const droppedRequestHeaders = new Set([
   "upgrade"
 ])
 
-/** Response headers an app may not set on the hub's origin. */
-const droppedResponseHeaders = new Set(["connection", "keep-alive", "set-cookie", "transfer-encoding", "trailer"])
+/**
+ * Response headers an app may set on the hub's origin. Everything else is dropped: a proxied app can't clear
+ * the hub's site data, widen its service worker scope, set HSTS or CORS, or set cookies. `location` passes only
+ * inside the app's own `/apps/<id>/` prefix; custom `x-*` headers pass except `x-hub-*`.
+ */
+const allowedResponseHeaders = new Set([
+  "cache-control",
+  "content-disposition",
+  "content-encoding",
+  "content-language",
+  "content-length",
+  "content-type",
+  "etag",
+  "expires",
+  "last-modified",
+  "vary"
+])
+
+export const allowedResponseHeader = (name: string, value: string | ReadonlyArray<string>, prefix: string): boolean => {
+  if (allowedResponseHeaders.has(name)) return true
+  if (name === "location") return [value].flat().every((target) => target.startsWith(prefix))
+  return name.startsWith("x-") && !name.startsWith("x-hub-")
+}
 
 export const forwardedRequestHeaders = (
   incoming: IncomingMessage["headers"],
@@ -98,6 +119,8 @@ export const forwardedRequestHeaders = (
  */
 export const proxyToSocket = (
   socket: string,
+  /** The app's prefix on the hub, `/apps/<id>/`; a redirect may stay inside it. */
+  prefix: string,
   path: string,
   request: IncomingMessage,
   response: ServerResponse,
@@ -126,7 +149,7 @@ export const proxyToSocket = (
       answered = true
       const headers: OutgoingHttpHeaders = {}
       for (const [name, value] of Object.entries(incoming.headers)) {
-        if (value !== undefined && !droppedResponseHeaders.has(name)) headers[name] = value
+        if (value !== undefined && allowedResponseHeader(name, value, prefix)) headers[name] = value
       }
       response.writeHead(incoming.statusCode ?? 502, { ...headers, "x-content-type-options": "nosniff" })
       incoming.pipe(response)

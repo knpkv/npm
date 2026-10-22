@@ -3163,8 +3163,8 @@ export const startHttpServer = async (
           }
           // Apps reach the hub on its loopback listener only, with their own token, never a browser session.
           if (
-            mode === "local" &&
             await handleAppServicesRoute<HttpClient.HttpClient | Tailscale | Crypto.Crypto>(request, response, url, {
+              listener: mode,
               registry: appRegistry,
               grants: appGrants,
               tokens: appTokens,

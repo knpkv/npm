@@ -3,9 +3,11 @@
  *
  * **Mental model**
  *
- * - A **grant** is minted for each request the hub proxies to an app and names that request's caller. An
- *   app acting for a user hands the grant back; the hub reads the caller from its own record, never from
- *   the app. Grants live 60 s; `jobs.submit` spends one (single use), a Relay post only reads it.
+ * - A **grant** is minted for each module request the hub proxies to an app and names that request's caller.
+ *   An app acting for a user hands the grant back; the hub reads the caller from its own record, never from
+ *   the app. Grants live 60 s. `jobs.submit` spends one (single use) and refuses one minted for a GET or
+ *   HEAD: reads skip the same-origin check, so a cross-site link could otherwise submit a job. A Relay post
+ *   only reads the caller, so it accepts any live grant of its app, spent or not.
  * - A **token** names the app itself for app-level services (`host`, `fleet.read`). The hub writes one per
  *   app to `<directory>/<id>.token` (0600) and rotates it on every hub start.
  *
@@ -22,6 +24,8 @@ export const grantLifetimeMillis = 60_000
 interface GrantRecord {
   readonly app: AppId
   readonly caller: ModuleCaller
+  /** Minted for a GET or HEAD, which passed no same-origin check. */
+  readonly readOnly: boolean
   readonly requestId: string
   readonly expiresAt: number
   readonly used: boolean
@@ -30,7 +34,7 @@ interface GrantRecord {
 /** 32 random bytes, base64url: a grant, a token or a request id. */
 const randomToken = (cryptoService: Crypto.Crypto) => Effect.map(cryptoService.randomBytes(32), Base64Url.encode)
 
-/** Spend a grant (`once`) or only read it; either way it must belong to `app` and be live. */
+/** Spend a grant (`once`: one mutation-minted use) or only read its caller; either way it must belong to `app` and be live. */
 export interface GrantUse {
   readonly grant: string
   readonly app: AppId
@@ -49,14 +53,21 @@ export const makeGrants = Effect.gen(function*() {
   }
 
   /** A grant for one proxied request, and that request's id. */
-  const mint = Effect.fn("AppGrants.mint")(function*(app: AppId, caller: ModuleCaller) {
+  const mint = Effect.fn("AppGrants.mint")(function*(app: AppId, caller: ModuleCaller, method: string) {
     const now = yield* Clock.currentTimeMillis
     const grant = yield* randomToken(cryptoService)
     const requestId = yield* randomToken(cryptoService)
     yield* SynchronizedRef.update(
       records,
       (table) =>
-        prune(table, now).set(grant, { app, caller, requestId, expiresAt: now + grantLifetimeMillis, used: false })
+        prune(table, now).set(grant, {
+          app,
+          caller,
+          readOnly: method === "GET" || method === "HEAD",
+          requestId,
+          expiresAt: now + grantLifetimeMillis,
+          used: false
+        })
     )
     return { grant: Schema.decodeSync(Grant)(grant), requestId }
   })
@@ -68,9 +79,11 @@ export const makeGrants = Effect.gen(function*() {
       if (record === undefined) return Effect.fail(new GrantInvalid({ reason: "unknown" }))
       if (record.expiresAt <= now) return Effect.fail(new GrantInvalid({ reason: "expired" }))
       if (record.app !== app) return Effect.fail(new GrantInvalid({ reason: "app_mismatch" }))
+      if (!once) return Effect.succeed([record.caller, table] satisfies [ModuleCaller, Map<string, GrantRecord>])
+      if (record.readOnly) return Effect.fail(new GrantInvalid({ reason: "read_only" }))
       if (record.used) return Effect.fail(new GrantInvalid({ reason: "used" }))
       const next = new Map(table)
-      if (once) next.set(grant, { ...record, used: true })
+      next.set(grant, { ...record, used: true })
       return Effect.succeed([record.caller, prune(next, now)] satisfies [ModuleCaller, Map<string, GrantRecord>])
     })
   })

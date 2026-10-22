@@ -9,16 +9,30 @@ import { fixtureApp, type FixtureMode } from "@knpkv/hub-app-fixture"
 import { serveAttached } from "@knpkv/hub-app/node"
 import { Duration, Effect, Exit, FileSystem, Layer, Path, Schedule, Schema, Scope } from "effect"
 import { TestClock } from "effect/testing"
-import { createServer as createHttpServer, request as httpRequest, type Server } from "node:http"
+import {
+  createServer as createHttpServer,
+  type IncomingHttpHeaders,
+  type IncomingMessage,
+  request as httpRequest,
+  type Server
+} from "node:http"
 import { createServer as createNetServer, type Socket } from "node:net"
 import { tmpdir } from "node:os"
 import { makeAppTokens, makeGrants } from "../src/apps/grants.js"
-import { makeAppRegistry } from "../src/apps/registry.js"
-import { handleAppsRoute } from "../src/apps/routes.js"
-import { getJson } from "../src/apps/socket.js"
+import { logReloadFailure, makeAppRegistry } from "../src/apps/registry.js"
+import { AppServiceRefused, handleAppServicesRoute, handleAppsRoute } from "../src/apps/routes.js"
+import { getJson, proxyToSocket } from "../src/apps/socket.js"
 
 const appId = Schema.decodeSync(AppId)
 const ListeningPort = Schema.Struct({ port: Schema.Number })
+
+/** The request body, decoded with `schema`, as the hub's own `readJson` does. */
+const readBody = <A>(request: IncomingMessage, schema: Schema.Codec<A, unknown, never, never>) =>
+  Effect.callback<string>((resume) => {
+    const chunks: Array<Buffer> = []
+    request.on("data", (chunk: Buffer) => chunks.push(chunk))
+    request.on("end", () => resume(Effect.succeed(Buffer.concat(chunks).toString())))
+  }).pipe(Effect.flatMap((text) => Schema.decodeUnknownEffect(Schema.fromJsonString(schema))(text)))
 
 /** A short temp directory: unix socket paths are limited to 107 bytes. */
 const tempDirectory = Effect.gen(function*() {
@@ -26,18 +40,25 @@ const tempDirectory = Effect.gen(function*() {
   return yield* fileSystem.makeTempDirectoryScoped({ directory: tmpdir(), prefix: "hub-apps-" })
 })
 
-/** Run the fixture attached on `<directory>/<id>.sock` for the test's scope; returns once it answers. */
-const startFixture = (directory: string, mode: FixtureMode, id = "fixture") =>
+/**
+ * Run the fixture attached on `<directory>/<id>.sock` for the test's scope; returns once it answers. With `hubUrl`
+ * it calls that hub with the token the hub issued under `<directory>/tokens`.
+ */
+const startFixture = (directory: string, mode: FixtureMode, id = "fixture", hubUrl?: string) =>
   Effect.gen(function*() {
     const fileSystem = yield* FileSystem.FileSystem
     const path = yield* Path.Path
     const socket = path.join(directory, `${id}.sock`)
-    const tokenFile = path.join(directory, `${id}.app-token`)
-    yield* fileSystem.writeFileString(tokenFile, "fixture-token\n")
-    yield* serveAttached(fixtureApp(mode, id), { _tag: "Attached", socket, hubUrl: "http://127.0.0.1:9", tokenFile })
-      .pipe(
-        Effect.forkScoped
-      )
+    const tokenFile = hubUrl === undefined
+      ? path.join(directory, `${id}.app-token`)
+      : path.join(directory, "tokens", `${id}.token`)
+    if (hubUrl === undefined) yield* fileSystem.writeFileString(tokenFile, "fixture-token\n")
+    yield* serveAttached(fixtureApp(mode, id), {
+      _tag: "Attached",
+      socket,
+      hubUrl: hubUrl ?? "http://127.0.0.1:9",
+      tokenFile
+    }).pipe(Effect.forkScoped)
     yield* getJson(socket, "/app/health", 500).pipe(
       Effect.retry({ schedule: Schedule.spaced("20 millis"), times: 100 })
     )
@@ -79,7 +100,7 @@ const makeHub = (directory: string) =>
     const writeConfig = (apps: ReadonlyArray<{ readonly id: string; readonly socket: string }>) =>
       fileSystem.writeFileString(configPath, JSON.stringify({ v: 1, apps }))
     const states = Effect.map(registry.apps, (apps) => apps.map((app) => app.state))
-    return { registry, writeConfig, states, cacheDirectory }
+    return { registry, tokens, writeConfig, states, cacheDirectory }
   })
 
 describe("hub apps", () => {
@@ -189,28 +210,49 @@ describe("hub apps", () => {
   })
 
   it.layer(Layer.mergeAll(NodeServices.layer, NodeHttpClient.layerNodeHttp), { excludeTestServices: true })((it) => {
-    /** The hub's route on a loopback port, admitting every request as `viewer`. */
-    const serveHubRoutes = (directory: string, socket: string | null) =>
+    /**
+     * The hub's app routes on a loopback port: app services first, then the proxy, admitting every browser
+     * request as `viewer`. Jobs the app submits are recorded with the caller the hub resolved.
+     */
+    const serveHub = (directory: string, listener: "local" | "serve" = "local") =>
       Effect.gen(function*() {
         const hub = yield* makeHub(directory)
-        if (socket !== null) yield* hub.writeConfig([{ id: "fixture", socket }])
-        yield* hub.registry.reload()
         const grants = yield* makeGrants
+        const submitted: Array<{ readonly payload: Schema.Json; readonly caller: ModuleCaller }> = []
         const server = yield* Effect.acquireRelease(
           Effect.callback<Server>((resume) => {
             const created = createHttpServer((request, response) => {
-              void handleAppsRoute<never, never>(request, response, new URL(request.url ?? "/", "http://hub.test"), {
-                listener: "local",
+              const url = new URL(request.url ?? "/", "http://hub.test")
+              void handleAppServicesRoute<never>(request, response, url, {
+                listener,
                 registry: hub.registry,
                 grants,
-                authorize: Effect.succeed({ login: "viewer", sameNode: false, provenance: "authenticated_remote" }),
-                sameOrigin: Effect.void,
-                refuse: (target) => {
-                  target.writeHead(403)
-                  target.end()
-                },
+                tokens: hub.tokens,
+                host: { host: "hub", isHub: true, hosts: ["hub"] },
+                fleetRead: () => Effect.fail(new AppServiceRefused({ code: "unavailable" })),
+                submitJob: (payload, caller) =>
+                  Effect.sync(() => {
+                    submitted.push({ payload, caller })
+                    return { jobId: `job-${submitted.length}`, status: "queued" }
+                  }),
+                relayPost: () => Effect.void,
+                readJson: (schema) => readBody(request, schema),
                 runtime: { runPromiseExit: Effect.runPromiseExit }
-              }).then((handled) => {
+              }).then((services) =>
+                services ? true : handleAppsRoute<never, never>(request, response, url, {
+                  listener,
+                  registry: hub.registry,
+                  grants,
+                  authorize: Effect.succeed({ login: "viewer", sameNode: false, provenance: "authenticated_remote" }),
+                  sameOrigin: Effect.void,
+                  refuse: (target) => {
+                    target.writeHead(403)
+                    target.end()
+                  },
+                  runtime: { runPromiseExit: Effect.runPromiseExit },
+                  proxyTimeoutMillis: 300
+                })
+              ).then((handled) => {
                 if (!handled) {
                   response.writeHead(418)
                   response.end()
@@ -225,21 +267,51 @@ describe("hub apps", () => {
             })
         )
         const { port } = Schema.decodeUnknownSync(ListeningPort)(server.address())
-        return { hub, port }
+        return { hub, grants, port, submitted, url: `http://127.0.0.1:${port}` }
       })
 
-    const get = (port: number, path: string, headers: Record<string, string> = {}) =>
-      Effect.callback<{ readonly status: number; readonly body: string }>((resume) => {
-        const outgoing = httpRequest({ host: "127.0.0.1", port, path, headers }, (incoming) => {
-          const chunks: Array<Buffer> = []
-          incoming.on("data", (chunk: Buffer) => chunks.push(chunk))
-          incoming.on(
-            "end",
-            () => resume(Effect.succeed({ status: incoming.statusCode ?? 0, body: Buffer.concat(chunks).toString() }))
-          )
-        })
-        outgoing.end()
+    /** The hub with the fixture registered and Ready, calling back into the hub for its services. */
+    const serveHubWithFixture = (directory: string, mode: FixtureMode = "ok") =>
+      Effect.gen(function*() {
+        const served = yield* serveHub(directory)
+        const socket = yield* startFixture(directory, mode, "fixture", served.url)
+        yield* served.hub.writeConfig([{ id: "fixture", socket }])
+        yield* served.hub.registry.reload()
+        return { ...served, socket }
       })
+
+    /** Back-compat for the proxy tests: the hub with the fixture registered at `socket`, or nothing. */
+    const serveHubRoutes = (directory: string, socket: string | null) =>
+      Effect.gen(function*() {
+        const served = yield* serveHub(directory)
+        if (socket !== null) yield* served.hub.writeConfig([{ id: "fixture", socket }])
+        yield* served.hub.registry.reload()
+        return served
+      })
+
+    const call = (
+      port: number,
+      method: string,
+      path: string,
+      headers: Record<string, string> = {},
+      body?: string
+    ) =>
+      Effect.callback<{ readonly status: number; readonly body: string; readonly headers: IncomingHttpHeaders }>(
+        (resume) => {
+          const outgoing = httpRequest({ host: "127.0.0.1", port, method, path, headers }, (incoming) => {
+            const chunks: Array<Buffer> = []
+            incoming.on("data", (chunk: Buffer) => chunks.push(chunk))
+            incoming.on("end", () =>
+              resume(Effect.succeed({
+                status: incoming.statusCode ?? 0,
+                body: Buffer.concat(chunks).toString(),
+                headers: incoming.headers
+              })))
+          })
+          outgoing.end(body)
+        }
+      )
+    const get = (port: number, path: string, headers: Record<string, string> = {}) => call(port, "GET", path, headers)
 
     it.effect("proxies a module route with the hub's caller, ignoring one the browser claims", () =>
       Effect.gen(function*() {
@@ -281,6 +353,151 @@ describe("hub apps", () => {
         expect(down.status).toBe(503)
         expect(JSON.parse(down.body)).toEqual({ error: "app_unavailable", reason: "not_running" })
       }).pipe(Effect.scoped))
+
+    it.effect("a job from a read is refused: a GET's grant is read-only, a POST's submits as the hub's caller", () =>
+      Effect.gen(function*() {
+        const directory = yield* tempDirectory
+        const { port, submitted } = yield* serveHubWithFixture(directory)
+        const fromRead = yield* get(port, "/apps/fixture/v1/modules/fixture/job-on-read")
+        expect(fromRead.status).toBe(403)
+        expect(JSON.parse(fromRead.body)).toEqual({ code: "grant_read_only" })
+        expect(submitted).toEqual([])
+
+        const fromWrite = yield* call(port, "POST", "/apps/fixture/v1/modules/fixture/job", {
+          "content-type": "application/json",
+          [hubHeaders.caller]: JSON.stringify({ login: "spoofed", sameNode: true })
+        }, JSON.stringify({ payload: { kind: "noop" } }))
+        expect(JSON.parse(fromWrite.body)).toEqual({ jobId: "job-1", status: "queued" })
+        expect(submitted).toEqual([{
+          payload: { kind: "noop" },
+          caller: { login: "viewer", sameNode: false, provenance: "authenticated_remote" }
+        }])
+      }).pipe(Effect.scoped))
+
+    it.effect("one slow route answers 504 and leaves the app Ready", () =>
+      Effect.gen(function*() {
+        const directory = yield* tempDirectory
+        const { hub, port } = yield* serveHubWithFixture(directory)
+        const slow = yield* get(port, "/apps/fixture/v1/modules/fixture/slow")
+        expect(slow.status).toBe(504)
+        yield* Effect.sleep("400 millis")
+        expect((yield* hub.states).map((state) => state._tag)).toEqual(["Ready"])
+      }).pipe(Effect.scoped))
+
+    it.effect("passes only allowed response headers, keeping redirects inside the app", () =>
+      Effect.gen(function*() {
+        const directory = yield* tempDirectory
+        const socket = `${directory}/raw.sock`
+        // An app answering with headers it may not set on the hub's origin.
+        yield* Effect.acquireRelease(
+          Effect.callback<Server>((resume) => {
+            const raw = createHttpServer((_request, response) => {
+              response.writeHead(200, {
+                "content-type": "text/plain",
+                "cache-control": "no-cache",
+                "clear-site-data": "\"*\"",
+                "set-cookie": "hub=gone",
+                "strict-transport-security": "max-age=1",
+                "service-worker-allowed": "/",
+                "access-control-allow-origin": "*",
+                "location": "https://elsewhere.test/",
+                "x-app-trace": "kept",
+                "x-hub-caller": "forged"
+              })
+              response.end("ok")
+            })
+            raw.listen(socket, () => resume(Effect.succeed(raw)))
+          }),
+          (raw) =>
+            Effect.callback<void>((resume) => {
+              raw.close(() => resume(Effect.void))
+            })
+        )
+        const outer = yield* Effect.acquireRelease(
+          Effect.callback<Server>((resume) => {
+            const created = createHttpServer((request, response) => {
+              void Effect.runPromiseExit(proxyToSocket(socket, "/apps/raw/", "/x", request, response, {}, 1_000))
+            })
+            created.listen(0, "127.0.0.1", () => resume(Effect.succeed(created)))
+          }),
+          (created) =>
+            Effect.callback<void>((resume) => {
+              created.close(() => resume(Effect.void))
+            })
+        )
+        const { port } = Schema.decodeUnknownSync(ListeningPort)(outer.address())
+        const answer = yield* get(port, "/x")
+        expect(answer.body).toBe("ok")
+        expect(answer.headers["clear-site-data"]).toBeUndefined()
+        expect(answer.headers["set-cookie"]).toBeUndefined()
+        expect(answer.headers["strict-transport-security"]).toBeUndefined()
+        expect(answer.headers["service-worker-allowed"]).toBeUndefined()
+        expect(answer.headers["access-control-allow-origin"]).toBeUndefined()
+        expect(answer.headers["location"]).toBeUndefined()
+        expect(answer.headers["x-hub-caller"]).toBeUndefined()
+        expect(answer.headers["x-app-trace"]).toBe("kept")
+        expect(answer.headers["cache-control"]).toBe("no-cache")
+        expect(answer.headers["x-content-type-options"]).toBe("nosniff")
+      }).pipe(Effect.scoped))
+
+    it.effect("app services: token and app name, declared services, grant ownership and reuse", () =>
+      Effect.gen(function*() {
+        const directory = yield* tempDirectory
+        const fileSystem = yield* FileSystem.FileSystem
+        const { grants, hub, port, submitted } = yield* serveHub(directory)
+        const first = yield* startFixture(directory, "ok", "fixture")
+        const second = yield* startFixture(directory, "ok", "second")
+        yield* hub.writeConfig([{ id: "fixture", socket: first }, { id: "second", socket: second }])
+        yield* hub.registry.reload()
+        const token = (yield* fileSystem.readFileString(`${directory}/tokens/fixture.token`)).trim()
+        const asApp = (app: string, bearer: string) => ({
+          authorization: `Bearer ${bearer}`,
+          [hubHeaders.app]: app,
+          "content-type": "application/json"
+        })
+        const viewer: ModuleCaller = { login: "viewer", sameNode: false, provenance: "authenticated_remote" }
+        const job = (headers: Record<string, string>, grant: string) =>
+          call(port, "POST", "/v1/app-services/jobs", headers, JSON.stringify({ grant, payload: { kind: "noop" } }))
+        const code = (answer: { readonly body: string }) =>
+          Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Struct({ code: Schema.String })))(answer.body).code
+
+        expect((yield* get(port, "/v1/app-services/host")).status).toBe(401)
+        expect((yield* get(port, "/v1/app-services/host", asApp("fixture", "wrong"))).status).toBe(401)
+        expect((yield* get(port, "/v1/app-services/host", asApp("second", token))).status).toBe(401)
+        expect((yield* get(port, "/v1/app-services/host", asApp("fixture", token))).status).toBe(200)
+        const undeclared = yield* call(port, "POST", "/v1/app-services/fleet-read", asApp("fixture", token), "{}")
+        expect([undeclared.status, code(undeclared)]).toEqual([403, "undeclared"])
+
+        const others = yield* grants.mint(appId("second"), viewer, "POST")
+        expect(code(yield* job(asApp("fixture", token), others.grant))).toBe("grant_app_mismatch")
+        const mine = yield* grants.mint(appId("fixture"), viewer, "POST")
+        expect((yield* job(asApp("fixture", token), mine.grant)).status).toBe(200)
+        expect(code(yield* job(asApp("fixture", token), mine.grant))).toBe("grant_used")
+        expect(submitted.map((entry) => entry.caller)).toEqual([viewer])
+      }).pipe(Effect.scoped))
+
+    it.effect("app services are not served on any listener but loopback", () =>
+      Effect.gen(function*() {
+        const directory = yield* tempDirectory
+        const { port } = yield* serveHub(directory, "serve")
+        expect((yield* get(port, "/v1/app-services/host")).status).toBe(418)
+      }).pipe(Effect.scoped))
+
+    it.effect("a probe that finds the same manifest doesn't rewrite the cache", () =>
+      Effect.gen(function*() {
+        const directory = yield* tempDirectory
+        const fileSystem = yield* FileSystem.FileSystem
+        const socket = yield* startFixture(directory, "ok")
+        const hub = yield* makeHub(directory)
+        yield* hub.writeConfig([{ id: "fixture", socket }])
+        yield* hub.registry.reload()
+        const cache = `${hub.cacheDirectory}/fixture.manifest.json`
+        const before = yield* fileSystem.stat(cache)
+        yield* Effect.sleep("20 millis")
+        yield* hub.registry.refresh()
+        const after = yield* fileSystem.stat(cache)
+        expect(after.mtime).toEqual(before.mtime)
+      }).pipe(Effect.scoped))
   })
 
   // Crypto from Node; the test clock stays, so expiry is exact.
@@ -290,7 +507,7 @@ describe("hub apps", () => {
         const grants = yield* makeGrants
         const caller: ModuleCaller = { login: "viewer", sameNode: false, provenance: "authenticated_remote" }
         const fixture = appId("fixture")
-        const { grant } = yield* grants.mint(fixture, caller)
+        const { grant } = yield* grants.mint(fixture, caller, "POST")
         const reason = (use: Effect.Effect<unknown, { readonly reason: string }>) =>
           Effect.map(Effect.flip(use), (error) => error.reason)
 
@@ -299,10 +516,23 @@ describe("hub apps", () => {
         expect(yield* grants.use({ grant, app: fixture, once: false })).toEqual(caller)
         expect(yield* grants.use({ grant, app: fixture, once: true })).toEqual(caller)
         expect(yield* reason(grants.use({ grant, app: fixture, once: true }))).toBe("used")
+        // A Relay post only reads the caller: a spent grant still names it while it lives.
+        expect(yield* grants.use({ grant, app: fixture, once: false })).toEqual(caller)
 
-        const { grant: later } = yield* grants.mint(fixture, caller)
+        const read = yield* grants.mint(fixture, caller, "GET")
+        expect(yield* reason(grants.use({ grant: read.grant, app: fixture, once: true }))).toBe("read_only")
+        expect(yield* grants.use({ grant: read.grant, app: fixture, once: false })).toEqual(caller)
+
+        const { grant: later } = yield* grants.mint(fixture, caller, "POST")
         yield* TestClock.adjust(Duration.seconds(61))
         expect(yield* reason(grants.use({ grant: later, app: fixture, once: true }))).toBe("expired")
       }))
   })
+
+  it.effect("a failed reload is logged and the loop goes on; an interruption ends it", () =>
+    Effect.gen(function*() {
+      expect(Exit.isSuccess(yield* Effect.exit(logReloadFailure(Effect.die("boom"))))).toBe(true)
+      expect(Exit.isSuccess(yield* Effect.exit(logReloadFailure(Effect.fail("unreadable"))))).toBe(true)
+      expect(Exit.hasInterrupts(yield* Effect.exit(logReloadFailure(Effect.interrupt)))).toBe(true)
+    }))
 })

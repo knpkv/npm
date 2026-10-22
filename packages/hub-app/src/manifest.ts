@@ -110,9 +110,12 @@ export class AppProbeFailed extends Schema.TaggedError<AppProbeFailed>()("AppPro
 /** A proxied request reached an app that isn't answering. The proxy answers 503 `app_unavailable`. */
 export class AppUnavailable extends Schema.TaggedError<AppUnavailable>()("AppUnavailable", { id: AppId }) {}
 
-/** A grant the hub doesn't recognise, has expired, was already spent or belongs to another app. */
+/**
+ * A grant the hub doesn't recognise, has expired, was already spent, belongs to another app, or was minted for a
+ * read (`read_only`: a GET skips the same-origin check, so its grant may not submit a job).
+ */
 export class GrantInvalid extends Schema.TaggedError<GrantInvalid>()("GrantInvalid", {
-  reason: Schema.Literals(["unknown", "expired", "used", "app_mismatch"])
+  reason: Schema.Literals(["unknown", "expired", "used", "app_mismatch", "read_only"])
 }) {}
 
 /** A shell service the app can't use here: running standalone, not declared, or the hub is down. */

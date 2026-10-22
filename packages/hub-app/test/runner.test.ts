@@ -1,7 +1,8 @@
 /** The app runner: its arguments, and the attached listener's caller, grant and shell services. */
 import { NodeHttpClient, NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
-import { Effect, FileSystem, Layer, Result, Schedule, Schema } from "effect"
+import { BrowserOpener } from "@knpkv/browser-pairing/launch"
+import { Effect, FileSystem, Layer, Result, Schedule, Schema, Sink, Stdio } from "effect"
 import { createServer, request as httpRequest, type Server } from "node:http"
 import { tmpdir } from "node:os"
 import { ShellServices } from "../src/hub-client.js"
@@ -13,7 +14,7 @@ import {
   moduleReadRoute,
   ModuleRouteFailure
 } from "../src/index.js"
-import { readRunMode, serveAttached } from "../src/node.js"
+import { readRunMode, serveApp, serveAttached } from "../src/node.js"
 import { moduleWriteRoute } from "../src/route.js"
 
 const manifest: AppManifestInput = {
@@ -166,12 +167,73 @@ describe("attached runner", () => {
           body: JSON.stringify({ grant, payload: { kind: "noop" } })
         }])
 
+        // The hub rotates the app's token when it restarts; the app reads the file on every call.
+        yield* fileSystem.writeFileString(`${directory}/token`, "rotated-token\n")
+        yield* onSocket(socket, "POST", "/v1/modules/probe/job", {
+          [hubHeaders.caller]: caller,
+          [hubHeaders.grant]: "h".repeat(43),
+          "content-type": "application/json"
+        }, JSON.stringify({ kind: "noop" }))
+        expect(seen[1]?.authorization).toBe("Bearer rotated-token")
+
         const ungranted = yield* onSocket(socket, "POST", "/v1/modules/probe/job", {
           [hubHeaders.caller]: caller,
           "content-type": "application/json"
         }, "{}")
         expect(JSON.parse(ungranted.body)).toEqual({ code: "GrantInvalid" })
-        expect(seen).toHaveLength(1)
+        expect(seen).toHaveLength(2)
+      }).pipe(Effect.scoped))
+  })
+})
+
+describe("standalone runner", () => {
+  // The sign-in link is the only thing a standalone run prints; it names the port it bound.
+  const printed: Array<string> = []
+  const testLayer = Layer.mergeAll(
+    NodeServices.layer,
+    NodeHttpClient.layerNodeHttp,
+    Layer.succeed(BrowserOpener, BrowserOpener.of({ open: () => Effect.void })),
+    Stdio.layerTest({
+      stdout: () =>
+        Sink.forEach((chunk: string | Uint8Array) =>
+          Effect.sync(() => {
+            printed.push(Buffer.from(chunk).toString())
+          })
+        )
+    })
+  )
+
+  it.layer(testLayer, { excludeTestServices: true })((it) => {
+    it.effect("ignores a forged x-hub-caller: only the owner's session cookie admits a request", () =>
+      Effect.gen(function*() {
+        const fileSystem = yield* FileSystem.FileSystem
+        const directory = yield* fileSystem.makeTempDirectoryScoped({ directory: tmpdir(), prefix: "hub-app-" })
+        yield* fileSystem.writeFileString(`${directory}/client.js`, "export default {}\n")
+        yield* serveApp(
+          { manifest, handlers, clientDirectory: directory },
+          { _tag: "Standalone", port: 0, open: false },
+          { _tag: "Skip", reason: "test" }
+        ).pipe(Effect.forkScoped)
+        const link = yield* Effect.sync(() => printed.join("")).pipe(
+          Effect.flatMap((text) => text.includes("http://") ? Effect.succeed(text) : Effect.fail("not yet")),
+          Effect.retry({ schedule: Schedule.spaced("20 millis"), times: 100 })
+        )
+        const origin = new URL(link.trim()).origin
+        const forged = yield* Effect.callback<{ readonly status: number; readonly body: string }>((resume) => {
+          const outgoing = httpRequest(`${origin}/v1/modules/probe/who`, {
+            headers: { [hubHeaders.caller]: JSON.stringify({ login: "forged", sameNode: true }) }
+          }, (incoming) => {
+            const chunks: Array<Buffer> = []
+            incoming.on("data", (chunk: Buffer) => chunks.push(chunk))
+            incoming.on(
+              "end",
+              () => resume(Effect.succeed({ status: incoming.statusCode ?? 0, body: Buffer.concat(chunks).toString() }))
+            )
+          })
+          outgoing.end()
+        })
+        expect(forged.status).toBe(403)
+        expect(JSON.parse(forged.body)).toEqual({ code: "unauthorized" })
       }).pipe(Effect.scoped))
   })
 })

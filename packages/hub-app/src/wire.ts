@@ -74,6 +74,7 @@ export const AppServiceRefusal = Schema.Struct({
     "grant_expired",
     "grant_used",
     "grant_app_mismatch",
+    "grant_read_only",
     "rejected",
     "unavailable"
   ])

@@ -23,7 +23,19 @@ import {
   type AppUnavailableReason,
   validateModuleRegistry
 } from "@knpkv/hub-app"
-import { Effect, FileSystem, Option, Path, Result, Schedule, Schema, Stream, SynchronizedRef } from "effect"
+import {
+  Cause,
+  Effect,
+  Exit,
+  FileSystem,
+  Option,
+  Path,
+  Result,
+  Schedule,
+  Schema,
+  Stream,
+  SynchronizedRef
+} from "effect"
 import type { AppTokens } from "./grants.js"
 import { getJson } from "./socket.js"
 
@@ -71,6 +83,18 @@ export const unavailableDetail = (label: string, reason: AppUnavailableReason): 
   }
 }
 
+/** A failed reload (an error or a defect) is logged and its loop goes on; only an interruption ends it. */
+export const logReloadFailure = <E>(reload: Effect.Effect<void, E>): Effect.Effect<void, E> =>
+  Effect.exit(reload).pipe(
+    Effect.flatMap((exit) =>
+      Exit.isSuccess(exit)
+        ? Effect.void
+        : Cause.hasInterrupts(exit.cause)
+        ? Effect.failCause(exit.cause)
+        : Effect.logError("Apps reload failed; retrying in 30 seconds", exit.cause)
+    )
+  )
+
 export const makeAppRegistry = Effect.fn("AppRegistry.make")(function*(options: AppRegistryOptions) {
   const fileSystem = yield* FileSystem.FileSystem
   const path = yield* Path.Path
@@ -102,7 +126,11 @@ export const makeAppRegistry = Effect.fn("AppRegistry.make")(function*(options: 
     detail: unavailableDetail(manifest?.module.label ?? id, reason)
   })
 
-  /** Ask one app who it is and check the answer; the cached manifest backs every failure. */
+  /**
+   * Ask one app who it is and check the answer. The cached manifest backs every failure but one: an app on a
+   * contract this hub doesn't speak keeps the manifest it just sent, so the newer app's own label shows.
+   * The cache is rewritten only when the manifest changed.
+   */
   const probe = Effect.fn("AppRegistry.probe")(function*(id: AppId, socket: string, taken: ReadonlySet<string>) {
     const cached = yield* readCache(id)
     if (options.coreIds.includes(id) || taken.has(id)) return unavailable(id, "duplicate", cached)
@@ -118,7 +146,7 @@ export const makeAppRegistry = Effect.fn("AppRegistry.make")(function*(options: 
     if (Result.isFailure(validateModuleRegistry([decoded.module]))) {
       return unavailable(id, "invalid_manifest", cached)
     }
-    yield* writeCache(decoded)
+    if (cached === null || encodeManifest(cached) !== encodeManifest(decoded)) yield* writeCache(decoded)
     return { _tag: "Ready", manifest: decoded } satisfies AppState
   })
 
@@ -178,18 +206,23 @@ export const makeAppRegistry = Effect.fn("AppRegistry.make")(function*(options: 
     )
   })
 
-  /** Mark one app after a proxy failure, without waiting for the next refresh. */
-  const markUnavailable = (id: AppId, reason: "not_running" | "timeout") =>
-    SynchronizedRef.update(
-      apps,
-      (current) =>
-        current.map((app) => app.id === id ? { ...app, state: unavailable(id, reason, app.state.manifest) } : app)
-    )
+  /** Probe one registered app again, after a proxied request to it failed; the probe decides its state. */
+  const probeOne = Effect.fn("AppRegistry.probeOne")(function*(id: AppId) {
+    yield* SynchronizedRef.updateEffect(apps, (current) => {
+      const index = current.findIndex((app) => app.id === id)
+      const app = current[index]
+      if (app === undefined) return Effect.succeed(current)
+      const earlier = new Set(current.slice(0, index).map((other) => other.id))
+      return probe(app.id, app.socket, earlier).pipe(
+        Effect.map((state) => current.map((entry, position) => position === index ? { ...entry, state } : entry))
+      )
+    })
+  })
 
   return {
     reload,
     refresh,
-    markUnavailable,
+    probeOne,
     /** Registered apps in `apps.json` order. */
     apps: SynchronizedRef.get(apps),
     /**
@@ -205,7 +238,7 @@ export const makeAppRegistry = Effect.fn("AppRegistry.make")(function*(options: 
     ),
     /** Re-reads `apps.json` and re-probes every 30 s, so an edit lands without a signal; forks in the caller's scope. */
     reloadLoop: Effect.sleep("30 seconds").pipe(
-      Effect.andThen(reload()),
+      Effect.andThen(logReloadFailure(reload())),
       Effect.repeat(Schedule.forever),
       Effect.forkScoped
     )
