@@ -13,8 +13,8 @@ export interface PoolAccount extends Schema.Schema.Type<typeof PoolAccount> {}
 
 const NonEmpty = Schema.NonEmptyString
 
-/** An AWS region code, such as `eu-central-1` or `us-gov-west-1`: one token, so it can't break a config line. */
-export const AwsRegion = Schema.String.check(Schema.isPattern(/^[a-z]{2}(?:-[a-z]+)+-\d+$/))
+/** An AWS region code, such as `eu-central-1`, `us-gov-west-1` or `eusc-de-east-1`: one token, so it can't break a config line. */
+export const AwsRegion = Schema.String.check(Schema.isPattern(/^[a-z]{2,4}(?:-[a-z]+)+-\d+$/))
 
 /**
  * How a person signs in to a pool account, for the owner's Open console and Copy CLI profile.
