@@ -95,10 +95,32 @@ const allowedResponseHeaders = new Set([
   "vary"
 ])
 
-export const allowedResponseHeader = (name: string, value: string | ReadonlyArray<string>, prefix: string): boolean => {
-  if (allowedResponseHeaders.has(name)) return true
-  if (name === "location") return [value].flat().every((target) => target.startsWith(prefix))
-  return name.startsWith("x-") && !name.startsWith("x-hub-")
+const hubOrigin = "http://hub.invalid"
+
+/**
+ * A redirect target only if it stays inside the app's prefix once resolved, so `/apps/<id>/../../v1/x` (which
+ * the browser resolves to `/v1/x`) is dropped. The resolved path is what passes on.
+ */
+export const appLocation = (target: string, prefix: string): string | null => {
+  if (!URL.canParse(target, `${hubOrigin}${prefix}`)) return null
+  const resolved = new URL(target, `${hubOrigin}${prefix}`)
+  return resolved.origin === hubOrigin && resolved.pathname.startsWith(prefix)
+    ? `${resolved.pathname}${resolved.search}${resolved.hash}`
+    : null
+}
+
+/** The value the hub passes on for one response header, or null to drop it. */
+export const responseHeader = (
+  name: string,
+  value: string | Array<string>,
+  prefix: string
+): string | Array<string> | null => {
+  if (allowedResponseHeaders.has(name)) return value
+  if (name === "location") {
+    const [first] = [value].flat()
+    return first === undefined ? null : appLocation(first, prefix)
+  }
+  return name.startsWith("x-") && !name.startsWith("x-hub-") ? value : null
 }
 
 export const forwardedRequestHeaders = (
@@ -149,7 +171,8 @@ export const proxyToSocket = (
       answered = true
       const headers: OutgoingHttpHeaders = {}
       for (const [name, value] of Object.entries(incoming.headers)) {
-        if (value !== undefined && allowedResponseHeader(name, value, prefix)) headers[name] = value
+        const passed = value === undefined ? null : responseHeader(name, value, prefix)
+        if (passed !== null) headers[name] = passed
       }
       response.writeHead(incoming.statusCode ?? 502, { ...headers, "x-content-type-options": "nosniff" })
       incoming.pipe(response)

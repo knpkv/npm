@@ -21,7 +21,7 @@ import { tmpdir } from "node:os"
 import { makeAppTokens, makeGrants } from "../src/apps/grants.js"
 import { logReloadFailure, makeAppRegistry } from "../src/apps/registry.js"
 import { AppServiceRefused, handleAppServicesRoute, handleAppsRoute } from "../src/apps/routes.js"
-import { getJson, proxyToSocket } from "../src/apps/socket.js"
+import { appLocation, getJson, proxyToSocket } from "../src/apps/socket.js"
 
 const appId = Schema.decodeSync(AppId)
 const ListeningPort = Schema.Struct({ port: Schema.Number })
@@ -535,4 +535,13 @@ describe("hub apps", () => {
       expect(Exit.isSuccess(yield* Effect.exit(logReloadFailure(Effect.fail("unreadable"))))).toBe(true)
       expect(Exit.hasInterrupts(yield* Effect.exit(logReloadFailure(Effect.interrupt)))).toBe(true)
     }))
+
+  it("passes a redirect only if it resolves inside the app's prefix", () => {
+    expect(appLocation("/apps/raw/ok?a=1#b", "/apps/raw/")).toBe("/apps/raw/ok?a=1#b")
+    expect(appLocation("next", "/apps/raw/")).toBe("/apps/raw/next")
+    expect(appLocation("/apps/raw/../../v1/anything", "/apps/raw/")).toBeNull()
+    expect(appLocation("../connect", "/apps/raw/")).toBeNull()
+    expect(appLocation("//elsewhere.test/", "/apps/raw/")).toBeNull()
+    expect(appLocation("https://elsewhere.test/apps/raw/", "/apps/raw/")).toBeNull()
+  })
 })

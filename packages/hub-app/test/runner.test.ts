@@ -148,6 +148,8 @@ describe("attached runner", () => {
           Effect.retry({ schedule: Schedule.spaced("20 millis"), times: 100 })
         )
 
+        // The hub's own reads are served to the hub.
+        expect((yield* onSocket(socket, "GET", "/app/badge", {})).status).toBe(200)
         const served = yield* onSocket(socket, "GET", "/app/manifest", {})
         expect(JSON.parse(served.body).client).toEqual({ entry: "client.js", css: [] })
 
@@ -261,6 +263,10 @@ describe("standalone runner", () => {
         const code = new URLSearchParams(new URL(link).hash.slice(1)).get("bootstrap_token") ?? ""
         const forgedCaller = JSON.stringify({ login: "forged", sameNode: true })
         const sameSite = { origin, "sec-fetch-site": "same-origin" }
+
+        // The hub's reads don't exist standalone: no cookie reaches `/app/*`, so nothing there may need one.
+        expect((yield* overTcp(`${origin}/app/badge`, "GET", sameSite)).status).toBe(404)
+        expect((yield* overTcp(`${origin}/app/needs-you`, "GET", sameSite)).status).toBe(404)
 
         const anonymous = yield* overTcp(`${origin}/api/v1/modules/probe/who`, "GET", {
           ...sameSite,
