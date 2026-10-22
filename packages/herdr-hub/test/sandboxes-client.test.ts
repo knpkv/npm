@@ -66,9 +66,12 @@ it.effect("names the owner rule, a refused job and an unknown outcome apart", ()
 it.effect("reads the caller", () =>
   Effect.gen(function*() {
     const caller = yield* loadSandboxesCaller.pipe(
-      Effect.provideService(HttpClient.HttpClient, answering(200, { login: "viewer@example.test", owner: false }))
+      Effect.provideService(
+        HttpClient.HttpClient,
+        answering(200, { login: "viewer@example.test", owner: false, signIn: null })
+      )
     )
-    expect(caller).toEqual({ login: "viewer@example.test", owner: false })
+    expect(caller).toEqual({ login: "viewer@example.test", owner: false, signIn: null })
   }))
 
 const failedRun = {

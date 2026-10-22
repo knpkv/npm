@@ -24,6 +24,8 @@ type Screen = {
   readonly press?: string
   /** The page opens on a sheet, which leaves the page behind it out of the accessibility tree. */
   readonly sheet?: true
+  /** A disclosure button pressed in one card before the capture; it opens in place, not as a sheet. */
+  readonly expand?: { readonly button: string; readonly scope: string }
   /** Capture at the design frame's own height, so a long sheet shows whole: 1743 at 1280, 1903 at 390. */
   readonly tall?: true
   /** Capture name prefix, matching the design's frame names. */
@@ -48,6 +50,7 @@ const screens: ReadonlyArray<Screen> = [
   { id: "8g", state: "8g", after: 120_000 },
   { id: "8d", state: "8d", heading: "ephemeral-02" },
   { id: "2a-refused", state: "2a-refused", open: { button: "Lease an account" }, press: "Lease longest idle" },
+  { id: "6a", state: "1a", expand: { button: "Copy CLI profile", scope: "ephemeral-02" } },
   { id: "8c", state: "8c", sheet: true, tall: true },
   { id: "8c-viewer", state: "8c-viewer", sheet: true, tall: true }
 ]
@@ -81,6 +84,13 @@ const show = async (page: Page, screen: Screen, theme: string) => {
     const scope = screen.open.scope === undefined ? page : page.locator(`[data-account="${screen.open.scope}"]`)
     await scope.getByRole("button", { name: screen.open.button, exact: true }).click()
     await expect(page.getByRole("dialog")).toBeVisible()
+  }
+  if (screen.expand !== undefined) {
+    const toggle = page
+      .locator(`[data-account="${screen.expand.scope}"]`)
+      .getByRole("button", { name: screen.expand.button, exact: true })
+    await toggle.click()
+    await expect(toggle).toHaveAttribute("aria-expanded", "true")
   }
   if (screen.press !== undefined) {
     await page.getByRole("button", { name: screen.press, exact: true }).click()
@@ -191,4 +201,26 @@ test("no pool on this hub is one panel without Lease", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Sandboxes aren’t set up on this hub." })).toBeVisible()
   await expect(page.getByRole("button", { name: "Lease an account" })).toHaveCount(0)
   await expect(page.locator("[data-account]")).toHaveCount(0)
+})
+
+test("the owner signs in where they may, and copies a CLI profile; an agent's lease says why not", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await show(page, { id: "6a", state: "1a" }, "light")
+  const free = page.locator("[data-account=\"ephemeral-02\"]")
+  const held = page.locator("[data-account=\"ephemeral-01\"]")
+  await expect(free.getByRole("button", { name: /^Open console for ephemeral-02/ })).toBeEnabled()
+  await expect(held.getByRole("button", { name: /^Open console for ephemeral-01/ })).toBeDisabled()
+  await expect(held.locator("[data-console-reason]")).toHaveText(
+    "Open console: only the lease holder can sign in. review-runner-02 holds this lease."
+  )
+  await free.getByRole("button", { name: "Copy CLI profile", exact: true }).click()
+  await expect(free.locator("[data-cli-profile] pre")).toContainText("[profile ephemeral-02]")
+  await expect(free.locator("[data-cli-note]")).toHaveText("Nix already writes these profiles on managed machines.")
+})
+
+test("a viewer has no console and no CLI profile", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await show(page, { id: "8a", state: "8a" }, "light")
+  await expect(page.getByRole("button", { name: /Open console/ })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Copy CLI profile" })).toHaveCount(0)
 })

@@ -13,7 +13,7 @@
  */
 import { Schema } from "effect"
 import { CleaningReason, Holder, leaseCap, leaseDuration, RunId } from "./lease.js"
-import { AccountId, SandboxName } from "./pool.js"
+import { AccountId, type PoolContract, PoolSignIn, SandboxName } from "./pool.js"
 import { isBudgetHold } from "./reset.js"
 import { RunStep } from "./run-log.js"
 
@@ -260,3 +260,31 @@ export const SandboxRunLogQuery = Schema.fromURLSearchParams(Schema.Struct({
   run: RunId
 }))
 export type SandboxRunLogQuery = typeof SandboxRunLogQuery.Type
+
+/** The owner's sign-in for one pool: the contract's portal, session and role, and the pool's first region. */
+export const SandboxSignIn = Schema.Struct({
+  ...PoolSignIn.fields,
+  region: Schema.NonEmptyString
+})
+export interface SandboxSignIn extends Schema.Schema.Type<typeof SandboxSignIn> {}
+
+/** Sign-in for this pool, or null when its contract has no `access`. */
+export const signInOf = (contract: PoolContract): SandboxSignIn | null =>
+  contract.access === undefined ? null : { ...contract.access, region: contract.regions[0] }
+
+/** The access portal's console for one account, as the sign-in's role. Opens in a new tab; carries no keys. */
+export const consoleUrl = (signIn: SandboxSignIn, accountId: AccountId): string =>
+  `${signIn.portalUrl.replace(/\/+$/, "")}/#/console?${new URLSearchParams({
+    account_id: accountId,
+    role_name: signIn.roleName
+  })}`
+
+/** One account's `~/.aws/config` profile, named after the account, signing in through the SSO session. */
+export const cliProfile = (signIn: SandboxSignIn, name: SandboxName, accountId: AccountId): string =>
+  [
+    `[profile ${name}]`,
+    `sso_session = ${signIn.ssoSession}`,
+    `sso_account_id = ${accountId}`,
+    `sso_role_name = ${signIn.roleName}`,
+    `region = ${signIn.region}`
+  ].join("\n")

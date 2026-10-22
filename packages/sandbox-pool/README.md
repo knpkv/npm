@@ -30,6 +30,7 @@ The package ships no real organization. `PoolContract` is decoded from the ownin
 - `boundaryPath` and `boundaryName`: the permissions boundary policy a reset re-asserts and keeps.
 - `accountAliasPrefix`: a pool account's alias is this prefix plus its name.
 - `budgetActionRole` and `denyAllPolicy`: the budget action's role and the policy it attaches to stop spend.
+- `access` (optional): how a person signs in, `{ portalUrl, ssoSession, roleName }`. `portalUrl` is the AWS access portal's start URL, https with no query or fragment; `ssoSession` names the `[sso-session]` in `~/.aws/config`; `roleName` is the permission set. Without it the hub offers no console or CLI profile. From `@knpkv/sandbox-pool/host`, `signInOf(contract)` adds the pool's first region, `consoleUrl(signIn, accountId)` is the portal's console link for one account and role, and `cliProfile(signIn, name, accountId)` is that account's `~/.aws/config` profile.
 
 ## States
 

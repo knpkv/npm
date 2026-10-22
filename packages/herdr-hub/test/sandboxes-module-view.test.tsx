@@ -5,7 +5,8 @@ import {
   type SandboxesOverview,
   type SandboxCard as SandboxCardType,
   SandboxRunLog,
-  SandboxRuns
+  SandboxRuns,
+  SandboxSignIn
 } from "@knpkv/sandbox-pool/host"
 import { PortalProvider } from "@knpkv/rly/foundations"
 import { DateTime, Effect, Schema } from "effect"
@@ -107,6 +108,13 @@ const retryLog = Schema.decodeUnknownSync(SandboxRunLog)({
   total: 41
 })
 
+const signIn = Schema.decodeUnknownSync(SandboxSignIn)({
+  portalUrl: "https://portal.example.test/start",
+  ssoSession: "example-session",
+  roleName: "ExampleDeveloper",
+  region: "eu-central-1"
+})
+
 const noRequests = requestsRead({ _tag: "Ready", requests: [] })
 
 const retryRequest = (requestedBy: string) =>
@@ -161,6 +169,7 @@ describe("Sandboxes overview", { concurrent: false }, () => {
     options: {
       readonly read?: SandboxesModuleReads["overview"]
       readonly owner?: boolean
+      readonly signIn?: SandboxSignIn
       readonly caller?: SandboxesModuleReads["caller"]
       readonly writes?: SandboxesModuleWrites | null
       readonly timeZone?: string
@@ -179,7 +188,9 @@ describe("Sandboxes overview", { concurrent: false }, () => {
     const navigate = vi.fn<ModulePageMount["navigate"]>()
     const reads: SandboxesModuleReads = {
       overview: options.read ?? Effect.succeed(overview),
-      caller: options.caller ?? Effect.succeed({ login: "agent-a", owner: options.owner ?? true }),
+      caller:
+        options.caller ??
+        Effect.succeed({ login: "agent-a", owner: options.owner ?? true, signIn: options.signIn ?? null }),
       runs: options.runs ?? (() => Effect.succeed(quarantineRuns)),
       runLog: options.runLog ?? (() => Effect.succeed(retryLog)),
       requests: options.requests ?? Effect.succeed(noRequests)
@@ -806,7 +817,7 @@ describe("Sandboxes overview", { concurrent: false }, () => {
       ready([
         leased("ephemeral-01", "999999999990", "agent-b", "2026-10-17T09:20:00.000Z", "2026-10-17T17:20:00.000Z")
       ]),
-      { caller: Effect.succeed({ login: "agent-b", owner: true }) }
+      { caller: Effect.succeed({ login: "agent-b", owner: true, signIn: null }) }
     )
     expect(buttons('[data-account="ephemeral-01"] button')).toEqual(["Copy", "Extend", "Release"])
   })
@@ -1051,7 +1062,7 @@ describe("Sandboxes overview", { concurrent: false }, () => {
   it("never paints the last run's log or stored line on another run while its own log is read", async () => {
     const reads: SandboxesModuleReads = {
       overview: Effect.succeed(ready([quarantinedCard(nukeBlocker)])),
-      caller: Effect.succeed({ login: "agent-a", owner: true }),
+      caller: Effect.succeed({ login: "agent-a", owner: true, signIn: null }),
       runs: () => Effect.succeed(quarantineRuns),
       runLog: (_accountId, runId) => (runId === "retry-1248" ? Effect.succeed(retryLog) : Effect.never),
       requests: Effect.succeed(noRequests)
@@ -1389,5 +1400,130 @@ describe("Sandboxes overview", { concurrent: false }, () => {
     )
     expect(open?.getAttribute("href")).toBe("?id=999999999991#sandboxes/account")
     expect(button("Lease an account")?.disabled).toBe(true)
+  })
+
+  describe("console and CLI profile", () => {
+    const cleaning = () =>
+      card({
+        accountId: "999999999993",
+        name: "ephemeral-04",
+        label: null,
+        state: { _tag: "Cleaning", runId: "run-clean", step: "nuke" }
+      })
+    const pool = () =>
+      ready([
+        leased("ephemeral-01", "999999999990", "agent-b", "2026-10-17T09:20:00.000Z", "2026-10-17T17:20:00.000Z"),
+        available("ephemeral-02", "999999999991", "2026-10-17T11:42:00.000Z"),
+        leased("ephemeral-03", "999999999992", "agent-a", "2026-10-17T10:00:00.000Z", "2026-10-17T18:00:00.000Z"),
+        cleaning()
+      ])
+    const consoleOf = (name: string) => button("Open console", `[data-account="${name}"]`)
+    const reasons = (name: string) =>
+      [...document.querySelectorAll(`[data-account="${name}"] [data-console-reason]`)].map((node) => node.textContent)
+
+    it("opens the portal's console in a new tab where the owner can sign in, and says why not elsewhere", async () => {
+      const opened = vi.fn<typeof window.open>(() => null)
+      vi.stubGlobal("open", opened)
+      await render(pool(), {
+        signIn,
+        writes: { ...noRequestWrites, lease: Effect.void, extend: () => Effect.void, release: () => Effect.void }
+      })
+      expect(consoleOf("ephemeral-02")?.disabled).toBe(false)
+      expect(consoleOf("ephemeral-03")?.disabled).toBe(false)
+      expect(consoleOf("ephemeral-01")?.disabled).toBe(true)
+      expect(reasons("ephemeral-01")).toEqual([
+        "Open console: only the lease holder can sign in. agent-b holds this lease."
+      ])
+      expect(consoleOf("ephemeral-04")?.disabled).toBe(true)
+      expect(reasons("ephemeral-04")).toEqual(["Open console is unavailable while the account is wiped."])
+      expect(consoleOf("ephemeral-02")?.getAttribute("aria-label")).toBe(
+        "Open console for ephemeral-02, AWS access portal as ExampleDeveloper, opens in a new tab"
+      )
+      expect(buttons('[data-account="ephemeral-03"] .sandboxes-card-buttons button')).toEqual([
+        "Open console",
+        "Copy CLI profile",
+        "Extend",
+        "Release"
+      ])
+      await act(async () => consoleOf("ephemeral-02")?.click())
+      expect(opened).toHaveBeenCalledWith(
+        "https://portal.example.test/start/#/console?account_id=999999999991&role_name=ExampleDeveloper",
+        "_blank",
+        "noopener,noreferrer"
+      )
+    })
+
+    it("shows and copies one account's CLI profile, with the note that Nix writes it already", async () => {
+      const writeText = vi.fn((_text: string) => Promise.resolve())
+      vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } })
+      await render(pool(), { signIn })
+      const toggle = button("Copy CLI profile", '[data-account="ephemeral-02"]')
+      expect(toggle?.getAttribute("aria-expanded")).toBe("false")
+      expect(document.querySelector('[data-account="ephemeral-02"] [data-cli-profile]')).toBeNull()
+      await act(async () => toggle?.click())
+      expect(toggle?.getAttribute("aria-expanded")).toBe("true")
+      const block = document.querySelector('[data-account="ephemeral-02"] [data-cli-profile]')
+      expect(block?.querySelector("[data-cli-path]")?.textContent).toBe("~/.aws/config")
+      const profile = [
+        "[profile ephemeral-02]",
+        "sso_session = example-session",
+        "sso_account_id = 999999999991",
+        "sso_role_name = ExampleDeveloper",
+        "region = eu-central-1"
+      ].join("\n")
+      expect(block?.querySelector("pre")?.textContent).toBe(profile)
+      expect(text('[data-account="ephemeral-02"] [data-cli-note]')).toBe(
+        "Nix already writes these profiles on managed machines."
+      )
+      const copy = [...(block?.querySelectorAll("button") ?? [])].find(
+        (node) => node.getAttribute("aria-label") === "Copy CLI profile for ephemeral-02"
+      )
+      await act(async () => copy?.click())
+      expect(writeText).toHaveBeenCalledWith(profile)
+    })
+
+    it("offers neither to a viewer, nor to the owner of a pool without sign-in", async () => {
+      await render(pool(), { owner: false })
+      expect(buttons().filter((label) => label === "Open console" || label === "Copy CLI profile")).toEqual([])
+      await act(async () => root?.unmount())
+      root = null
+      document.body.replaceChildren()
+      await render(pool())
+      expect(buttons().filter((label) => label === "Open console" || label === "Copy CLI profile")).toEqual([])
+    })
+
+    it("puts Open console beside Retry reset on a quarantine, with the note to clear the blocker by hand", async () => {
+      await render(ready([quarantinedCard(nukeBlocker)]), {
+        page: "account",
+        search: { id: "999999999991" },
+        signIn,
+        writes: { ...noRequestWrites, lease: Effect.void, extend: () => Effect.void, release: () => Effect.void }
+      })
+      expect(buttons(".sandboxes-account-actions button")).toEqual(["Retry reset", "Open console"])
+      expect(button("Open console", ".sandboxes-account-actions")?.disabled).toBe(false)
+      expect(text("[data-console-note]")).toBe("Clear the blocker by hand in the console, then retry the reset.")
+    })
+
+    it("keeps Open console after a retry is requested, under the request", async () => {
+      await render(ready([quarantinedCard(nukeBlocker)]), {
+        page: "account",
+        search: { id: "999999999991" },
+        signIn,
+        requests: Effect.succeed(retryRequest("agent-a")),
+        writes: { ...noRequestWrites, lease: Effect.void, extend: () => Effect.void, release: () => Effect.void }
+      })
+      expect(buttons(".sandboxes-account-actions button")).toEqual(["Open console"])
+      expect(text("[data-console-note]")).toBe("Clear the blocker by hand in the console, then retry the reset.")
+    })
+
+    it("names the role a lease signs in as", async () => {
+      await render(pool(), {
+        signIn,
+        writes: { ...noRequestWrites, lease: Effect.void, extend: () => Effect.void, release: () => Effect.void }
+      })
+      const dialog = await openDialog(button("Lease an account"))
+      expect(dialog?.textContent).toContain("Signs in as")
+      expect(dialog?.textContent).toContain("ExampleDeveloper")
+    })
   })
 })
