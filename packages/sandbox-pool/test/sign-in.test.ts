@@ -33,7 +33,10 @@ describe("pool sign-in", () => {
     expect(decode({ ...contractInput, regions: ["eu-central-1\ncredential_process = x"], access })._tag).toBe(
       "Failure"
     )
-    expect(decode({ ...contractInput, regions: ["us-gov-west-1", "eu-central-1"] })._tag).toBe("Success")
+    expect(decode({ ...contractInput, regions: ["us-gov-west-1", "eu-central-1", "eusc-de-east-1"] })._tag).toBe(
+      "Success"
+    )
+    expect(decode({ ...contractInput, regions: ["e-central-1"] })._tag).toBe("Failure")
   })
 
   it("serves sign-in with the pool's first region, and none without access", () => {
