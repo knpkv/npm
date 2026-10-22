@@ -24,6 +24,8 @@ type Screen = {
   readonly press?: string
   /** The page opens on a sheet, which leaves the page behind it out of the accessibility tree. */
   readonly sheet?: true
+  /** Capture at the design frame's own height, so a long sheet shows whole: 1743 at 1280, 1903 at 390. */
+  readonly tall?: true
   /** Capture name prefix, matching the design's frame names. */
   readonly prefix?: "sandboxes" | "sandboxes-attention"
 }
@@ -46,7 +48,8 @@ const screens: ReadonlyArray<Screen> = [
   { id: "8g", state: "8g", after: 120_000 },
   { id: "8d", state: "8d", heading: "ephemeral-02" },
   { id: "2a-refused", state: "2a-refused", open: { button: "Lease an account" }, press: "Lease longest idle" },
-  { id: "8c", state: "8c", sheet: true }
+  { id: "8c", state: "8c", sheet: true, tall: true },
+  { id: "8c-viewer", state: "8c-viewer", sheet: true, tall: true }
 ]
 
 const attention: ReadonlyArray<Screen> = [
@@ -87,7 +90,8 @@ const show = async (page: Page, screen: Screen, theme: string) => {
 
 const capture = (screen: Screen, width: number, theme: "light" | "dark") =>
   test(`${screen.prefix ?? "sandboxes"} ${screen.id} at ${String(width)} ${theme}`, async ({ page }) => {
-    await page.setViewportSize({ width, height: width < 600 ? 844 : 800 })
+    const height = screen.tall === true ? (width < 600 ? 1903 : 1743) : width < 600 ? 844 : 800
+    await page.setViewportSize({ width, height })
     await show(page, screen, theme)
     const overflow = await page.evaluate(() =>
       document.documentElement.scrollWidth - document.documentElement.clientWidth
@@ -134,12 +138,23 @@ test("the owner can ask Fleet to retry a quarantine, with the note under a full-
   expect(Math.round(box?.width ?? 0)).toBe(Math.round((main?.width ?? 0) - 32))
 })
 
-test("a run row opens that run's detail, with the failed step's words and no log", async ({ page }) => {
+test("a run row opens that run's detail; the owner sees the stored line and the last 30 log lines", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 })
   await show(page, { id: "8c", state: "8c", sheet: true }, "light")
   const dialog = page.getByRole("dialog")
   await expect(dialog).toContainText("release-7f3a")
   await expect(dialog.locator("[data-step-blocker]")).toHaveText("3 resources still removable")
+  await expect(dialog.locator("[data-step-raw]")).toContainText("verify: 3 resources still removable.")
+  await expect(dialog.locator("details[data-run-log] summary")).toHaveText("▼LogLast 30 lines")
+  await expect(dialog.locator("details[data-run-log] pre")).toContainText("11:07:00 run release-7f3a ended")
+})
+
+test("a viewer's run detail has the failed step's words, no stored line and no log", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await show(page, { id: "8c-viewer", state: "8c-viewer", sheet: true }, "light")
+  const dialog = page.getByRole("dialog")
+  await expect(dialog.locator("[data-step-blocker]")).toHaveText("3 resources still removable")
+  await expect(dialog.locator("[data-step-raw]")).toHaveCount(0)
   await expect(dialog).not.toContainText("Log")
 })
 

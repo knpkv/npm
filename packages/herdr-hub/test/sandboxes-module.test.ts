@@ -2,8 +2,15 @@ import { NodeHttpClient, NodeServices } from "@effect/platform-node"
 import { describe, expect, it, layer } from "@effect/vitest"
 import { type HostOperations, JobStore, makeFleetService } from "@knpkv/herdr-fleet"
 import { FleetHostName, SandboxJobKind, type SandboxObservation } from "@knpkv/herdr-fleet/model"
-import { AccountId, PoolContract, SandboxName, SandboxNotFound, UnknownRunCursor } from "@knpkv/sandbox-pool"
-import { SandboxesOverview, type SandboxRuns } from "@knpkv/sandbox-pool/host"
+import {
+  AccountId,
+  PoolContract,
+  RunNotFound,
+  SandboxName,
+  SandboxNotFound,
+  UnknownRunCursor
+} from "@knpkv/sandbox-pool"
+import { SandboxesOverview, SandboxRunLog, type SandboxRuns } from "@knpkv/sandbox-pool/host"
 import type { SandboxHostReads } from "@knpkv/sandbox-pool/host/server"
 import { ConfigProvider, Effect, FileSystem, Layer, Result, Schema } from "effect"
 import { connectModule, sandboxesModule } from "../src/module-contract.js"
@@ -93,6 +100,15 @@ const overview: SandboxesOverview = {
   badge: { quarantined: 0, stale: true, partial: true, asOf: null }
 }
 
+const runLogBody = Schema.decodeUnknownSync(SandboxRunLog)({
+  _tag: "Ready",
+  accountId: account,
+  runId: "run-q",
+  raw: "nuke: S3Bucket example-bucket - failed: locked",
+  lines: [{ at: "2026-10-16T08:00:00.000Z", text: "nuke: S3Bucket example-bucket waiting for objects" }],
+  total: 1
+})
+
 const fakeReads: SandboxHostReads = {
   overview: Effect.succeed(overview),
   runs: (query) => {
@@ -100,6 +116,11 @@ const fakeReads: SandboxHostReads = {
     if (query.id !== account) return Effect.fail(new SandboxNotFound({ accountId: query.id }))
     const body: SandboxRuns = { _tag: "Ready", accountId: query.id, runs: [], next: null }
     return Effect.succeed(body)
+  },
+  runLog: (query) => {
+    if (query.id !== account) return Effect.fail(new SandboxNotFound({ accountId: query.id }))
+    if (query.run !== "run-q") return Effect.fail(new RunNotFound({ runId: query.run }))
+    return Effect.succeed(runLogBody)
   },
   attention: Effect.succeed({
     asOf: 1_700_000_000_000,
@@ -438,6 +459,63 @@ describe("host-local Sandboxes module", () => {
         })
       })
     ))
+
+  it.effect("serves a run's log and stored line to the hub's own node only, and reads nothing for anyone else", () => {
+    const reads: Array<string> = []
+    const recording: SandboxHostReads = {
+      ...fakeReads,
+      runLog: (query) =>
+        Effect.suspend(() => {
+          reads.push(query.run)
+          return fakeReads.runLog(query)
+        })
+    }
+    return withModule(
+      host,
+      Effect.gen(function*() {
+        const path = `sandboxes/run-log?id=${account}&run=run-q`
+        const viewer = yield* Effect.result(request(path))
+        expect(Result.isFailure(viewer) && viewer.failure).toMatchObject({ status: 403, code: "owner_only" })
+        const refused = yield* Effect.result(request(path, "serve", "GET", { refuse: true }))
+        expect(Result.isFailure(refused) && refused.failure._tag).toBe("CallerRefused")
+        expect(reads).toEqual([])
+
+        const owner = yield* request(path, "serve", "GET", { sameNode: true })
+        expect(owner?.body).toEqual(Schema.encodeSync(SandboxRunLog)(runLogBody))
+        const foreign = yield* Effect.result(
+          request(`sandboxes/run-log?id=${account}&run=run-other`, "serve", "GET", { sameNode: true })
+        )
+        expect(Result.isFailure(foreign) && foreign.failure).toMatchObject({ status: 404, code: "not_found" })
+        const missing = yield* Effect.result(
+          request("sandboxes/run-log?id=000000000000&run=run-q", "serve", "GET", { sameNode: true })
+        )
+        expect(Result.isFailure(missing) && missing.failure).toMatchObject({ status: 404, code: "not_found" })
+        const noRun = yield* Effect.result(
+          request(`sandboxes/run-log?id=${account}`, "serve", "GET", { sameNode: true })
+        )
+        expect(Result.isFailure(noRun) && noRun.failure).toMatchObject({ status: 400, code: "invalid_query" })
+        const deniedListeners: ReadonlyArray<"approval" | "tailnet" | "lan" | "work"> = [
+          "approval",
+          "tailnet",
+          "lan",
+          "work"
+        ]
+        for (const listener of deniedListeners) {
+          expect(yield* request(path, listener, "GET", { sameNode: true })).toBeNull()
+        }
+      }),
+      { reads: Effect.succeed(recording) }
+    )
+  })
+
+  it.effect("names an unserved pool on the run log, even to the hub's own node", () =>
+    Effect.gen(function*() {
+      const elsewhere = yield* withModule(
+        other,
+        request(`sandboxes/run-log?id=${account}&run=run-q`, "serve", "GET", { sameNode: true })
+      )
+      expect(elsewhere?.body).toMatchObject({ _tag: "Unavailable", reason: "other_host" })
+    }))
 
   it.effect("submits lease, extend and release as the caller from the hub's own node", () => {
     const { submit, submitted } = recordingSubmit()

@@ -4,11 +4,12 @@ import {
   SandboxCard,
   type SandboxesOverview,
   type SandboxCard as SandboxCardType,
+  SandboxRunLog,
   SandboxRuns
 } from "@knpkv/sandbox-pool/host"
 import { PortalProvider } from "@knpkv/rly/foundations"
 import { DateTime, Effect, Schema } from "effect"
-import { act } from "react"
+import { act, type ReactNode, useLayoutEffect } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { ModulePageMount } from "../src/modules.js"
@@ -94,6 +95,18 @@ const quarantineRuns = runsPage({
   ]
 })
 
+const retryLog = Schema.decodeUnknownSync(SandboxRunLog)({
+  _tag: "Ready",
+  accountId: "999999999991",
+  runId: "retry-1248",
+  raw: "nuke: S3Bucket example-bucket - failed: BucketNotEmpty",
+  lines: [
+    { at: "2026-10-17T12:47:10.000Z", text: "nuke: S3Bucket example-bucket waiting for objects" },
+    { at: "2026-10-17T12:48:02.000Z", text: "run retry-1248 ended, account quarantined" }
+  ],
+  total: 41
+})
+
 const noRequests = requestsRead({ _tag: "Ready", requests: [] })
 
 const retryRequest = (requestedBy: string) =>
@@ -154,6 +167,7 @@ describe("Sandboxes overview", { concurrent: false }, () => {
       readonly page?: "overview" | "account" | "runs"
       readonly search?: Record<string, string>
       readonly runs?: SandboxesModuleReads["runs"]
+      readonly runLog?: SandboxesModuleReads["runLog"]
       readonly requests?: SandboxesModuleReads["requests"]
     } = {}
   ) => {
@@ -167,6 +181,7 @@ describe("Sandboxes overview", { concurrent: false }, () => {
       overview: options.read ?? Effect.succeed(overview),
       caller: options.caller ?? Effect.succeed({ login: "agent-a", owner: options.owner ?? true }),
       runs: options.runs ?? (() => Effect.succeed(quarantineRuns)),
+      runLog: options.runLog ?? (() => Effect.succeed(retryLog)),
       requests: options.requests ?? Effect.succeed(noRequests)
     }
     const module = makeSandboxesModuleViews({
@@ -971,10 +986,17 @@ describe("Sandboxes overview", { concurrent: false }, () => {
     expect(text("[data-runs-loading]")).toBe("Reading runs…")
   })
 
-  it("opens one run's detail with the failed step's blocker words and none of the stored lines", async () => {
+  it("opens one run's detail for a viewer with the failed step's blocker words and none of the stored lines", async () => {
+    const asked: Array<string> = []
     await render(ready([quarantinedCard(nukeBlocker)]), {
       page: "runs",
-      search: { id: "999999999991", run: "retry-1248" }
+      owner: false,
+      search: { id: "999999999991", run: "retry-1248" },
+      runLog: (_accountId, runId) =>
+        Effect.sync(() => {
+          asked.push(runId)
+          return retryLog
+        })
     })
     const dialog = await vi.waitFor(() => {
       const found = document.querySelector('[role="dialog"]')
@@ -992,6 +1014,100 @@ describe("Sandboxes overview", { concurrent: false }, () => {
     expect(dialog?.querySelector("[data-step-blocker]")?.textContent).toBe("S3Bucket could not be removed")
     expect(dialog?.textContent).not.toContain("Log")
     expect(dialog?.textContent).not.toContain("arn:")
+    expect(dialog?.querySelector("[data-step-raw]")).toBeNull()
+    expect(asked).toEqual([])
+  })
+
+  it("shows the owner the run's last log lines in their time zone, and the failed step's stored line", async () => {
+    const asked: Array<[string, string]> = []
+    await render(ready([quarantinedCard(nukeBlocker)]), {
+      page: "runs",
+      timeZone: "Europe/Berlin",
+      search: { id: "999999999991", run: "retry-1248" },
+      runLog: (accountId, runId) =>
+        Effect.sync(() => {
+          asked.push([accountId, runId])
+          return retryLog
+        })
+    })
+    const dialog = await vi.waitFor(() => {
+      const found = document.querySelector('[role="dialog"]')
+      expect(found?.querySelector("[data-run-log]")).not.toBeNull()
+      return found
+    })
+    expect(asked).toEqual([["999999999991", "retry-1248"]])
+    const log = dialog?.querySelector("details[data-run-log]")
+    expect(log?.hasAttribute("open")).toBe(true)
+    expect(log?.querySelector("summary")?.textContent).toBe("▼LogLast 2 lines")
+    expect(log?.querySelector("pre")?.textContent).toBe(
+      "14:47:10 nuke: S3Bucket example-bucket waiting for objects\n14:48:02 run retry-1248 ended, account quarantined"
+    )
+    expect(dialog?.querySelector("[data-step-blocker]")?.textContent).toBe("S3Bucket could not be removed")
+    expect(dialog?.querySelector("[data-step-raw]")?.textContent).toBe(
+      "nuke: S3Bucket example-bucket - failed: BucketNotEmpty"
+    )
+  })
+
+  it("never paints the last run's log or stored line on another run while its own log is read", async () => {
+    const reads: SandboxesModuleReads = {
+      overview: Effect.succeed(ready([quarantinedCard(nukeBlocker)])),
+      caller: Effect.succeed({ login: "agent-a", owner: true }),
+      runs: () => Effect.succeed(quarantineRuns),
+      runLog: (_accountId, runId) => (runId === "retry-1248" ? Effect.succeed(retryLog) : Effect.never),
+      requests: Effect.succeed(noRequests)
+    }
+    const module = makeSandboxesModuleViews({ reads, writes: null, timeZone: "UTC" })
+    const mount: ModulePageMount = { active: true, navigate: () => undefined, closeSelection: () => undefined }
+    const host = document.createElement("div")
+    document.body.append(host)
+    root = createRoot(host)
+    // Checks every commit before effects run: the open run's sheet must not carry the other run's log.
+    const painted: Array<string> = []
+    const Probe = ({ children }: { readonly children: ReactNode }) => {
+      useLayoutEffect(() => {
+        const sheet = document.querySelector('[role="dialog"]')
+        if (sheet?.textContent?.includes("release-1036") !== true) return
+        if (sheet.querySelector("[data-step-raw]") !== null) painted.push("raw")
+        if (sheet.querySelector("[data-run-log]") !== null) painted.push("log")
+      })
+      return children
+    }
+    const show = (run: string) =>
+      act(async () =>
+        root?.render(
+          <PortalProvider>
+            <Probe>{module.pages.runs(new URLSearchParams({ id: "999999999991", run }), mount)}</Probe>
+          </PortalProvider>
+        )
+      )
+    await show("retry-1248")
+    await settle()
+    await vi.waitFor(() => expect(document.querySelector("[data-step-raw]")).not.toBeNull())
+    await show("release-1036")
+    await settle()
+    await vi.waitFor(() => expect(text("[data-run-log-state]")).toBe("Reading the log…"))
+    expect(painted).toEqual([])
+  })
+
+  it("says the owner's log is being read, or can't be read, and keeps the steps", async () => {
+    await render(ready([quarantinedCard(nukeBlocker)]), {
+      page: "runs",
+      search: { id: "999999999991", run: "retry-1248" },
+      runLog: () => Effect.never
+    })
+    await vi.waitFor(() => expect(document.querySelector("[data-run-log-state]")).not.toBeNull())
+    expect(text("[data-run-log-state]")).toBe("Reading the log…")
+    await act(async () => root?.unmount())
+    root = null
+    document.body.replaceChildren()
+    await render(ready([quarantinedCard(nukeBlocker)]), {
+      page: "runs",
+      search: { id: "999999999991", run: "retry-1248" },
+      runLog: () => Effect.fail(new SandboxesClientError({ detail: "status" }))
+    })
+    await vi.waitFor(() => expect(text("[data-run-log-state]")).toBe("Can’t read the log."))
+    expect(document.querySelector("[data-step-blocker]")?.textContent).toBe("S3Bucket could not be removed")
+    expect(document.querySelector("[data-step-raw]")).toBeNull()
   })
 
   it("shows a run that ended available as all done, even when one of its steps failed and was retried", async () => {
