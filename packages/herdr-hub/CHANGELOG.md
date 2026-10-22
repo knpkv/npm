@@ -2,6 +2,12 @@
 
 Released as `@knpkv/herdr-approvals` up to 0.18.0; the headings below are that package's history.
 
+## 0.50.0
+
+### Minor Changes
+
+- [#1064](https://github.com/knpkv/npm/pull/1064) [`d2d8b73`](https://github.com/knpkv/npm/commit/d2d8b73da7f3d60b6df0a63d1b84c6173b3b8846) Thanks [@konopkov](https://github.com/konopkov)! - The Sandboxes account page lets the owner ask Fleet to retry a quarantine's reset ("Retry reset") or lift a budget stop ("Request to lift the stop", also on the pool's budget card). `POST /v1/modules/sandboxes/jobs` takes `Retry` and `BudgetLift` orders, submitted as `sandbox.reset` (Retry) and `sandbox.budget.lift`, which always wait for an approval in Fleet / Approvals. The route refuses a request that could not run with 404 `not_found` or 409 `not_quarantined`, `not_budget_held` or `already_requested`, and `SandboxesWriteFailed` names those reasons. `SandboxesModuleWrites` gains `retry` and `liftBudget`. A later failed poll now keeps the requests and runs on screen, marked last known, instead of replacing them with a failure.
+
 ## 0.49.0
 
 ### Minor Changes
