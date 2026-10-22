@@ -1,5 +1,13 @@
 # @knpkv/sandbox-pool
 
+## 0.7.0
+
+### Minor Changes
+
+- [#1072](https://github.com/knpkv/npm/pull/1072) [`e4d6b79`](https://github.com/knpkv/npm/commit/e4d6b7959853f944345941b1e66f5bb4992dd7d5) Thanks [@konopkov](https://github.com/konopkov)! - A pool contract can name how people sign in (`access`: portal URL, SSO session, role). With it, the pool owner gets Open console and Copy CLI profile on the Sandboxes cards and account page.
+
+  `PoolContract.regions` now accepts only AWS region codes such as `eu-central-1`.
+
 ## 0.6.0
 
 ### Minor Changes
