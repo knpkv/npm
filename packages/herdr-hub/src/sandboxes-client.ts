@@ -77,7 +77,7 @@ export const loadSandboxRunLog = (accountId: SandboxCard["accountId"], runId: Sa
   readJson(
     `/v1/modules/sandboxes/run-log?${new URLSearchParams({ id: accountId, run: runId })}`,
     SandboxRunLog,
-    65_536
+    262_144
   ).pipe(Effect.withSpan("SandboxesClient.loadRunLog"))
 
 /** Resets and budget lifts waiting in Fleet / Approvals. */

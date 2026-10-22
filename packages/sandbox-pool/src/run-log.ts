@@ -103,43 +103,51 @@ export interface RunLogLine {
   readonly text: string
 }
 
+/** A log line and the stored line stop at 2,000 characters, so one long line can't crowd out the rest. */
+const lineLimit = 2_000
+
+const clamp = (text: string): string => Array.from(text).slice(0, lineLimit).join("")
+
 const stepResult = (entry: Extract<RunEntry, { readonly _tag: "Step" }>): string =>
   entry.status === "failed" && entry.detail !== null
     ? `${entry.step}: failed: ${entry.detail}`
     : `${entry.step}: ${entry.status}`
+
+/** One entry's lines, unclamped. */
+const entryLines = (entry: RunEntry): ReadonlyArray<RunLogLine> => {
+  switch (entry._tag) {
+    case "Started":
+      return [{
+        at: entry.at,
+        text: `run ${entry.runId} started, reason ${entry.reason.toLowerCase()}, account ${entry.accountId}`
+      }]
+    case "Step":
+      return [...entry.output.map((text) => ({ at: entry.at, text })), { at: entry.at, text: stepResult(entry) }]
+    case "Finished":
+      return [{
+        at: entry.at,
+        text: `run ${entry.runId} ended, account ${entry.outcome.toLowerCase()}`
+      }]
+  }
+}
 
 /**
  * A run's entries as the owner's log reads them, oldest first: the start, each step with its output before its
  * result, the end. The lines name the account's resources, so they are as private as the account.
  */
 export const runLogLines = (entries: ReadonlyArray<RunEntry>): ReadonlyArray<RunLogLine> =>
-  entries.flatMap((entry): ReadonlyArray<RunLogLine> => {
-    switch (entry._tag) {
-      case "Started":
-        return [{
-          at: entry.at,
-          text: `run ${entry.runId} started, reason ${entry.reason.toLowerCase()}, account ${entry.accountId}`
-        }]
-      case "Step":
-        return [...entry.output.map((text) => ({ at: entry.at, text })), { at: entry.at, text: stepResult(entry) }]
-      case "Finished":
-        return [{
-          at: entry.at,
-          text: `run ${entry.runId} ended, account ${entry.outcome.toLowerCase()}`
-        }]
-    }
-  })
+  entries.flatMap(entryLines).map(({ at, text }) => ({ at, text: clamp(text) }))
 
 /** The stored line of the run's failure: its quarantine blocker, else the last failed step's detail, else null. */
 export const failedLine = (entries: ReadonlyArray<RunEntry>): string | null => {
   const finished = entries.find((entry): entry is Extract<RunEntry, { readonly _tag: "Finished" }> =>
     entry._tag === "Finished"
   )
-  if (finished !== undefined && finished.blocker !== null) return finished.blocker
+  if (finished !== undefined && finished.blocker !== null) return clamp(finished.blocker)
   const failed = entries.filter((entry): entry is Extract<RunEntry, { readonly _tag: "Step" }> =>
     entry._tag === "Step" && entry.status === "failed"
   ).at(-1)
-  return failed === undefined || failed.detail === null ? null : `${failed.step}: ${failed.detail}`
+  return failed === undefined || failed.detail === null ? null : clamp(`${failed.step}: ${failed.detail}`)
 }
 
 /** The run log could not be read or written. */

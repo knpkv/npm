@@ -132,4 +132,21 @@ describe("run log lines", () => {
     expect(failedLine([started("run-a", "111111111111", "08:00:00"), finished("run-a", "Available", "08:09:00")]))
       .toBeNull()
   })
+
+  it("clamps a line and the stored line to 2,000 characters, so one long line can't push the log past its read", () => {
+    const long = "x".repeat(5_000)
+    const lines = runLogLines([
+      started("run-a", "111111111111", "08:00:00"),
+      nuke("failed", "08:01:00", [long], "locked")
+    ])
+    expect(lines.map(({ text }) => text.length)).toEqual([
+      "run run-a started, reason released, account 111111111111".length,
+      2_000,
+      "nuke: failed: locked".length
+    ])
+    expect(
+      failedLine([started("run-a", "111111111111", "08:00:00"), finished("run-a", "Quarantined", "08:01:01", long)])
+    )
+      .toHaveLength(2_000)
+  })
 })
