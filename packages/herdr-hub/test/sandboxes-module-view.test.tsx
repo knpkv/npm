@@ -1011,6 +1011,27 @@ describe("Sandboxes overview", { concurrent: false }, () => {
     expect(new Set(states)).toEqual(new Set(["Done"]))
   })
 
+  it("reads Fleet requests and the account's runs again on the pool's 30 s poll", async () => {
+    let requestReads = 0
+    let runReads = 0
+    const requests = Effect.sync(() => (requestReads++ === 0 ? noRequests : retryRequest("agent-a")))
+    const runs = () =>
+      Effect.sync(() => {
+        runReads += 1
+        return quarantineRuns
+      })
+    await render(ready([quarantinedCard(nukeBlocker)]), {
+      page: "account",
+      search: { id: "999999999991" },
+      requests,
+      runs
+    })
+    expect(document.querySelector("[data-request]")).toBeNull()
+    await act(async () => await vi.advanceTimersByTimeAsync(30_000))
+    expect(text("[data-request-state]")).toBe("Approval requested")
+    expect([requestReads, runReads]).toEqual([2, 2])
+  })
+
   it("puts quarantine first as the only red, then a budget stop in caution, with its pending request", async () => {
     await render(
       ready([

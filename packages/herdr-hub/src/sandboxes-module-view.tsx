@@ -862,8 +862,8 @@ const useCaller = (read: SandboxesModuleReads["caller"], active: boolean): Sandb
 type Read<A> = { readonly _tag: "Loading" } | { readonly _tag: "Failed" } | { readonly _tag: "Done"; readonly value: A }
 
 /**
- * Reads once while the page is active, and again from Loading when `read` changes, such as another account.
- * `read` must keep its identity, or it reads on every render.
+ * Reads now and every 30 s while the page is active, like the pool, and from Loading again when `read`
+ * changes, such as another account. `read` must keep its identity, or it reads on every render.
  */
 const useRead = <A,>(read: Effect.Effect<A, SandboxesClientError>, active: boolean): Read<A> => {
   const [result, setResult] = useState<Read<A>>({ _tag: "Loading" })
@@ -874,7 +874,8 @@ const useRead = <A,>(read: Effect.Effect<A, SandboxesClientError>, active: boole
       Effect.exit(read).pipe(
         Effect.flatMap((exit) =>
           Effect.sync(() => setResult(Exit.isSuccess(exit) ? { _tag: "Done", value: exit.value } : { _tag: "Failed" }))
-        )
+        ),
+        Effect.repeat(Schedule.spaced(pollEvery))
       )
     )
     return () => {
