@@ -11,6 +11,7 @@ import {
   packagesRequiringPublishedArtifactBuild,
   publishedArtifactPaths,
   resolveWorkspaceArtifactFingerprints,
+  verifyWorkspaceArtifactContracts,
   WorkspaceArtifactError,
   workspaceArtifactInputFingerprint
 } from "../../scripts/workspace-artifacts.js"
@@ -367,4 +368,37 @@ describe("workspace package artifacts", () => {
       )
       assert.deepStrictEqual(skippedPackages, [])
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+})
+
+describe("workspace package artifacts in a sorted workspace build", () => {
+  it.layer(NodeServices.layer)((it) => {
+    it.effect("accepts dependencies the workspace build already emitted, without a fingerprint or a rebuild", () =>
+      Effect.gen(function*() {
+        const fileSystem = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const packageRoot = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-sorted-built-" })
+        yield* fileSystem.makeDirectory(path.join(packageRoot, "dist"), { recursive: true })
+        yield* fileSystem.writeFileString(path.join(packageRoot, "dist", "index.js"), "export {}\n")
+        const built = contract(packageRoot, "@example/built")
+
+        yield* verifyWorkspaceArtifactContracts([built])
+
+        assert.strictEqual(yield* fileSystem.exists(built.fingerprintPath), false)
+      }).pipe(Effect.scoped))
+
+    it.effect("fails, naming the package, when the workspace build did not emit an advertised artifact", () =>
+      Effect.gen(function*() {
+        const fileSystem = yield* FileSystem.FileSystem
+        const packageRoot = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-sorted-missing-" })
+
+        const error = yield* verifyWorkspaceArtifactContracts([contract(packageRoot, "@example/missing")]).pipe(
+          Effect.flip
+        )
+
+        assert.strictEqual(
+          error.reason,
+          "the sorted workspace build did not emit advertised artifacts for: @example/missing"
+        )
+      }).pipe(Effect.scoped))
+  })
 })
