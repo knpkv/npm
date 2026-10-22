@@ -2,6 +2,32 @@
 
 Released as `@knpkv/herdr-approvals` up to 0.18.0; the headings below are that package's history.
 
+## 0.49.0
+
+### Minor Changes
+
+- [#1059](https://github.com/knpkv/npm/pull/1059) [`82ed117`](https://github.com/knpkv/npm/commit/82ed117458771d21b61c4c5a4b66b2a9df44a64a) Thanks [@konopkov](https://github.com/konopkov)! - Tell a computer without Herdr from one whose Herdr isn't running, and tidy the standalone hub.
+
+  - Breaking type change in `@knpkv/herdr-fleet`: `HostDetails` and `HostStatus` carry one `repository` object (`{ path, branch, revision, dirty }`, or `null` on a standalone computer) that replaces the separate `branch`, `revision` and `dirty` fields.
+  - `AgentInventory` gains an optional `unavailableReason` (`herdr_not_installed` or `herdr_not_running`), and Connect's peer failure reasons gain the same two values. hostd reports a missing Herdr command as not installed and a list command that fails as not running.
+  - Connect on a standalone computer shows "Herdr isn't installed" or "Herdr isn't running" (with Retry) instead of "localhost didn't answer", and its empty state names this computer.
+  - `FleetService` refuses jobs a host has not set up at run time too, whatever composed its operations.
+  - A configuration file that a case-insensitive volume lists under another case is read, not replaced by standalone defaults.
+
+- [#1061](https://github.com/knpkv/npm/pull/1061) [`74a7da5`](https://github.com/knpkv/npm/commit/74a7da57157079ce4b2810b3c1a8e4083c829d7b) Thanks [@konopkov](https://github.com/konopkov)! - Add the Sandboxes account page at `#sandboxes/account?id=` and the runs page at `#sandboxes/runs?id=`. The account page, where needs-you already links, shows a quarantine's blocker words, run id, since and failed step, a budget stop in caution words, and any reset or budget lift waiting in Fleet / Approvals with a link there. The runs page lists reason, outcome, duration and start, and a row opens that run with the failed step's blocker words. The overview puts quarantine first as the only red, then budget stops, and marks a pending request "Approval requested". New `GET /v1/modules/sandboxes/requests` lists pending sandbox resets and lifts with the requester's login, behind the module's authorization. `makeSandboxesModule` takes `pendingApprovals` in place of `pendingLifts`, and `SandboxesModuleReads` gains `runs` and `requests`.
+
+### Patch Changes
+
+- [#1058](https://github.com/knpkv/npm/pull/1058) [`6e333b2`](https://github.com/knpkv/npm/commit/6e333b2eb48d31f50284feb5e6813c5b801c121c) Thanks [@konopkov](https://github.com/konopkov)! - The README opens with "Run it on its own": `npx -y -p @knpkv/herdr-hub hostd` without a fleet configuration, its loopback ports 4778 and 4777, the stderr line it prints, and how `FLEET_CONFIG_PATH` switches it to a fleet host.
+
+- [#1063](https://github.com/knpkv/npm/pull/1063) [`7fe0452`](https://github.com/knpkv/npm/commit/7fe0452202a1982e867c16d134f33b529183a320) Thanks [@konopkov](https://github.com/konopkov)! - `fleetctl status HOST` reads a host on an older hostd, whose status still has flat `branch`, `revision` and `dirty` fields. A Herdr spawn that fails because hostd's working directory is missing is no longer reported as "Herdr isn't installed". The not-running card's body says "Start Herdr, then retry.", matching its Retry button.
+- Updated dependencies [[`82ed117`](https://github.com/knpkv/npm/commit/82ed117458771d21b61c4c5a4b66b2a9df44a64a), [`74a7da5`](https://github.com/knpkv/npm/commit/74a7da57157079ce4b2810b3c1a8e4083c829d7b)]:
+  - @knpkv/herdr-fleet@0.18.0
+  - @knpkv/herdr-connect@0.30.0
+  - @knpkv/sandbox-pool@0.5.0
+  - @knpkv/herdr-coordinator@0.4.10
+  - @knpkv/herdr-work@0.12.11
+
 ## 0.48.0
 
 ### Minor Changes
