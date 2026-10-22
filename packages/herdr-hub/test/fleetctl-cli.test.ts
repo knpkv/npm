@@ -8,6 +8,7 @@ import {
   jobKinds,
   oneLine,
   parseInvocation,
+  PeerHostStatus,
   unknownHostDetail,
   unknownKindDetail,
   usage,
@@ -219,4 +220,52 @@ describe("work.* payloads", () => {
       )
       expect(other.detail).toContain("work.abandon payload")
     }))
+})
+
+// A host on an older hostd answers /v1/status with flat repository fields: `fleetctl status` still reads it.
+describe("fleetctl status across versions", () => {
+  const herdr = { agents: [], available: true, error: null }
+
+  it("reads an older host's flat repository fields as the repository object", () => {
+    expect(
+      Schema.decodeUnknownSync(PeerHostStatus)({
+        applyConfigured: true,
+        branch: "main",
+        dirty: true,
+        herdr,
+        host: "mini",
+        repository: "/repo",
+        revision: "abc123"
+      })
+    ).toEqual({
+      applyConfigured: true,
+      herdr,
+      host: "mini",
+      repository: { branch: "main", dirty: true, path: "/repo", revision: "abc123" }
+    })
+  })
+
+  it("reads an older standalone host, which had no repository, as null", () => {
+    expect(
+      Schema.decodeUnknownSync(PeerHostStatus)({
+        applyConfigured: false,
+        branch: null,
+        dirty: false,
+        herdr,
+        host: "mini",
+        repository: null,
+        revision: null
+      })
+    ).toEqual({ applyConfigured: false, herdr, host: "mini", repository: null })
+  })
+
+  it("reads a current host unchanged", () => {
+    const current = {
+      applyConfigured: true,
+      herdr,
+      host: "pi",
+      repository: { branch: "main", dirty: false, path: "/repo", revision: "abc123" }
+    }
+    expect(Schema.decodeUnknownSync(PeerHostStatus)(current)).toEqual(current)
+  })
 })

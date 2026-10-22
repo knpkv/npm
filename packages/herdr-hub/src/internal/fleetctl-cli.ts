@@ -6,6 +6,7 @@
  */
 import {
   FleetValidationError,
+  HostStatus,
   JobPayload,
   type JobRecord,
   type SandboxJobKind,
@@ -16,7 +17,43 @@ import {
   WorkReconcile,
   WorkRecover
 } from "@knpkv/herdr-fleet"
-import { Data, Effect, Predicate, Schema, SchemaIssue } from "effect"
+import { Data, Effect, Predicate, Schema, SchemaGetter, SchemaIssue } from "effect"
+
+/** `/v1/status` from an older hostd: nullable flat repository fields, the repository as its path. */
+const FlatHostStatus = Schema.Struct({
+  applyConfigured: HostStatus.fields.applyConfigured,
+  herdr: HostStatus.fields.herdr,
+  host: HostStatus.fields.host,
+  branch: Schema.NullOr(Schema.String),
+  dirty: Schema.Boolean,
+  repository: Schema.NullOr(Schema.String),
+  revision: Schema.NullOr(Schema.String)
+})
+
+/**
+ * A peer's `/v1/status`, which `fleetctl status HOST` prints: hosts upgrade one at a time, so an older host's
+ * flat fields read as the repository object (`null` when it named no repository, as a standalone host).
+ */
+export const PeerHostStatus = Schema.Union([
+  HostStatus,
+  FlatHostStatus.pipe(
+    Schema.decodeTo(HostStatus, {
+      decode: SchemaGetter.transform(({ branch, dirty, repository, revision, ...status }) => ({
+        ...status,
+        repository: repository === null || branch === null || revision === null
+          ? null
+          : { branch, dirty, path: repository, revision }
+      })),
+      encode: SchemaGetter.transform(({ repository, ...status }) => ({
+        ...status,
+        branch: repository?.branch ?? null,
+        dirty: repository?.dirty ?? false,
+        repository: repository?.path ?? null,
+        revision: repository?.revision ?? null
+      }))
+    })
+  )
+])
 
 /** Makes field-supplied terminal controls visible without changing ordinary Unicode text. */
 const terminalText = (value: string): string =>

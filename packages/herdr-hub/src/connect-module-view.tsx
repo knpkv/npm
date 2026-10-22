@@ -172,7 +172,7 @@ const ConnectModulePage = ({
         title="Herdr isn’t running on this computer."
         tone="caution"
       >
-        Start Herdr, then reload.
+        Start Herdr, then retry.
       </StateCard>
     )
   const summary = !fleet ? undefined : empty && waiting === 0 && !partial && !approvals.failed ? undefined : (

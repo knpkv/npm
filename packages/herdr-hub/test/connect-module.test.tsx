@@ -331,7 +331,7 @@ it("says Herdr isn’t running on a standalone computer, with a retry", () => {
   expect(card?.getAttribute("data-tone")).toBe("caution")
   expect(card?.querySelector(".stacks-state-eyebrow")?.textContent).toBe("Not running")
   expect(card?.querySelector("h2")?.textContent).toBe("Herdr isn’t running on this computer.")
-  expect(card?.textContent).toContain("Start Herdr, then reload.")
+  expect(card?.textContent).toContain("Start Herdr, then retry.")
   expect(card?.querySelector("button")?.textContent).toBe("Retry")
   expect(page.textContent).not.toContain("didn’t answer")
   expect(page.textContent).not.toContain("Archived")
