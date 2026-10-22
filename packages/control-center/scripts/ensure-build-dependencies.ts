@@ -1,5 +1,6 @@
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime"
 import * as NodeServices from "@effect/platform-node/NodeServices"
+import * as Config from "effect/Config"
 import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
@@ -11,6 +12,7 @@ import {
   ensureWorkspaceArtifactContracts,
   publishedArtifactPaths,
   resolveWorkspaceArtifactFingerprints,
+  verifyWorkspaceArtifactContracts,
   type WorkspaceArtifactContract,
   WorkspaceArtifactError,
   workspaceArtifactInputFingerprint
@@ -164,6 +166,13 @@ const program = Effect.gen(function*() {
     }
   })
 
+  // Set by the root `build` script: its sorted recursive run has built every dependency already.
+  const sortedWorkspaceBuild = yield* Config.Boolean("KNPKV_SORTED_WORKSPACE_BUILD").pipe(Config.withDefault(false))
+  if (sortedWorkspaceBuild) {
+    yield* verifyWorkspaceArtifactContracts(contracts)
+    yield* Console.log("[control-center dependencies] workspace build emitted every dependency artifact")
+    return
+  }
   yield* ensureWorkspaceArtifactContracts(contracts, buildMissing)
   yield* Console.log("[control-center dependencies] workspace artifacts are ready")
 })
