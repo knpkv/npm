@@ -128,10 +128,7 @@ describe("hostd existing Work task producer", () => {
             inspect: () =>
               Effect.succeed({
                 applyConfigured: false,
-                branch: "feat/fixture",
-                dirty: false,
-                repository: repo,
-                revision: "a".repeat(40)
+                repository: { branch: "feat/fixture", dirty: false, path: repo, revision: "a".repeat(40) }
               })
           }))
         const jobs = yield* Effect.acquireRelease(

@@ -1,4 +1,5 @@
 import { Schema } from "effect"
+import { ConnectPeerFailure } from "./model.js"
 
 export class ConnectTargetError extends Schema.TaggedError<ConnectTargetError>()(
   "ConnectTargetError",
@@ -15,7 +16,7 @@ export class ConnectPeerError extends Schema.TaggedError<ConnectPeerError>()(
   {
     cause: Schema.Defect(),
     host: Schema.String,
-    reason: Schema.Literals(["offline", "unavailable", "timeout", "request_failed", "invalid_response"])
+    reason: ConnectPeerFailure.fields.reason
   }
 ) {}
 

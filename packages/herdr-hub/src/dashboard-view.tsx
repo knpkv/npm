@@ -345,11 +345,11 @@ const Summary = ({ snapshot }: { readonly snapshot: DashboardSnapshot }) => {
         <Text variant="meta" tone="secondary">
           Repository
         </Text>
-        <strong className="summary-branch">{snapshot.status.branch ?? "No repository"}</strong>
+        <strong className="summary-branch">{snapshot.status.repository?.branch ?? "No repository"}</strong>
         <small>
-          {snapshot.status.branch === null
+          {snapshot.status.repository === null
             ? "Not set up on this computer"
-            : snapshot.status.dirty
+            : snapshot.status.repository.dirty
               ? "Local changes"
               : "Clean"}
         </small>

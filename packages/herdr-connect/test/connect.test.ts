@@ -1,6 +1,6 @@
 import { NodeHttpClient, NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
-import type { HostConfiguration, HostOperations } from "@knpkv/herdr-fleet"
+import type { HerdrUnavailableReason, HostConfiguration, HostOperations } from "@knpkv/herdr-fleet"
 import { fleetResponseBodyMaxBytes, JobStore, makeFleetService } from "@knpkv/herdr-fleet"
 import {
   Clock,
@@ -1035,6 +1035,34 @@ describe("Connect public seams", () => {
     })
   }
 
+  // Why this computer has no inventory travels to the client as a typed reason, not "unavailable".
+  const unavailableReasons: ReadonlyArray<HerdrUnavailableReason> = ["herdr_not_installed", "herdr_not_running"]
+  for (const unavailableReason of unavailableReasons) {
+    it.effect(`reports ${unavailableReason} for the local host`, () => {
+      const root = mkdtempSync(join(tmpdir(), "herdr-directory-herdr-missing-test-"))
+      const source: AgentSource = {
+        agents: () =>
+          Effect.succeed({ agents: [], available: false, error: "herdr.agent_list: absent", unavailableReason }),
+        workers: () => Effect.succeed([])
+      }
+      return Effect.scoped(Effect.gen(function*() {
+        yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { force: true, recursive: true })))
+        const activity = yield* Effect.acquireRelease(
+          AgentActivityStore.open(join(root, "activity.sqlite")),
+          (store) => Effect.sync(() => store.close())
+        )
+        const relationships = yield* Effect.acquireRelease(
+          AgentRelationshipStore.open(join(root, "relationships.sqlite")),
+          (store) => Effect.sync(() => store.close())
+        )
+        const result = yield* Effect.result(
+          localConnectAgents(hostConfiguration(root), source, activity, relationships, 2_000)
+        )
+        expect(result).toMatchObject({ failure: { _tag: "ConnectPeerError", reason: unavailableReason } })
+      })).pipe(provideNodeServices)
+    })
+  }
+
   it.effect("projects a configured dotted hostname into live agents", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-directory-hostname-test-"))
     const dottedHost = "ser8.example.test"
@@ -2061,10 +2089,7 @@ done
       inspect: () =>
         Effect.succeed({
           applyConfigured: true,
-          branch: "main",
-          dirty: false,
-          repository: root,
-          revision: "abc123"
+          repository: { branch: "main", dirty: false, path: root, revision: "abc123" }
         }),
       listAgents: () =>
         Effect.succeed({

@@ -92,7 +92,10 @@ esac
     })
     const operations: HostOperations = {
       inspect: () =>
-        Effect.succeed({ applyConfigured: false, branch: "main", dirty: false, repository: root, revision: "fixture" }),
+        Effect.succeed({
+          applyConfigured: false,
+          repository: { branch: "main", dirty: false, path: root, revision: "fixture" }
+        }),
       listAgents: () =>
         Ref.get(state).pipe(
           Effect.flatMap(({ revision }) =>

@@ -807,10 +807,7 @@ it("selects and focuses an exact approval after a handoff from another module", 
     status: {
       host: "hub",
       applyConfigured: true,
-      branch: "main",
-      dirty: false,
-      repository: "npm",
-      revision: "abc123",
+      repository: { branch: "main", dirty: false, path: "npm", revision: "abc123" },
       herdr: { agents: [], available: true, error: null }
     }
   }

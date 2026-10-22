@@ -20,7 +20,10 @@ import {
 
 const operations: HostOperations = {
   inspect: () =>
-    Effect.succeed({ applyConfigured: true, branch: "main", dirty: false, repository: "/repo", revision: "abc123" }),
+    Effect.succeed({
+      applyConfigured: true,
+      repository: { branch: "main", dirty: false, path: "/repo", revision: "abc123" }
+    }),
   listAgents: () => Effect.succeed({ agents: [], available: true, error: null }),
   run: (payload) => Effect.succeed(`${payload.kind}: ok`),
   runLocal: (payload) => Effect.succeed(`${payload.kind}: ok`),

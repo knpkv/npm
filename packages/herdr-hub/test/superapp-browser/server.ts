@@ -143,10 +143,7 @@ const program = Effect.gen(function*() {
     status: {
       host: "hub",
       applyConfigured: true,
-      branch: "main",
-      dirty: false,
-      repository: "npm",
-      revision: "abc123",
+      repository: { branch: "main", dirty: false, path: "npm", revision: "abc123" },
       herdr: {
         agents: [{
           agentId: "agent-1",

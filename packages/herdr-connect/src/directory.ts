@@ -103,7 +103,7 @@ export const localConnectAgents = Effect.fn("HerdrConnect.localAgents")(
       return yield* new ConnectPeerError({
         cause: inventory.error,
         host: config.host,
-        reason: "unavailable"
+        reason: inventory.unavailableReason ?? "unavailable"
       })
     }
     const identified = yield* Effect.forEach(inventory.agents, (agent) =>

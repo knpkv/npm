@@ -43,7 +43,7 @@ import {
 } from "./model.js"
 import type { JobStore } from "./store.js"
 
-export type { AgentInventory, AgentSummary, HostDetails } from "./model.js"
+export type { AgentInventory, AgentSummary, HostDetails, HostRepository } from "./model.js"
 
 export type WorkerStarted = (
   identity: AgentWorkerIdentity
@@ -791,11 +791,22 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
     }))
   })
 
+  // Submission already refuses these; a job queued before, or operations composed without their own
+  // guard, must not reach a command either.
+  const refuseNotSetUp = (kind: JobPayload["kind"]): Effect.Effect<void, FleetOperationError> =>
+    isStandaloneRefusedKind(kind) && options.operations.notSetUp?.has(kind) === true
+      ? Effect.fail(
+        new FleetOperationError({ cause: kind, detail: notSetUpDetail(kind), disposition: "rejected", operation: kind })
+      )
+      : Effect.void
+
   const run = Effect.fn("FleetService.run")((jobId: string) =>
     runWith(jobId, (payload, workerStarted, actor, lifecycle, approval) =>
       payload.kind === "browser.mcp.recover"
         ? options.operations.runLocal(payload)
-        : options.operations.run(payload, workerStarted, jobId, actor, lifecycle, approval))
+        : refuseNotSetUp(payload.kind).pipe(
+          Effect.andThen(options.operations.run(payload, workerStarted, jobId, actor, lifecycle, approval))
+        ))
   )
 
   const runCoordinatorChat = Effect.fn("FleetService.runCoordinatorChat")(
@@ -813,7 +824,9 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
         jobId,
         (payload, workerStarted, actor, lifecycle) =>
           payload.kind === "agent.delegate" && payload.channel === "coordinator_chat"
-            ? options.operations.runCoordinatorChat(payload, workerStarted, jobId, actor, lifecycle)
+            ? refuseNotSetUp(payload.kind).pipe(
+              Effect.andThen(options.operations.runCoordinatorChat(payload, workerStarted, jobId, actor, lifecycle))
+            )
             : Effect.fail(
               new FleetValidationError({
                 detail: "coordinator chat payload changed before execution"

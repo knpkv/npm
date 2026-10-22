@@ -110,13 +110,14 @@ export const loadConfigurationOrStandalone = Effect.fn("FleetConfiguration.loadO
           : Effect.fail(new FleetValidationError({ detail: `cannot read ${directory}: ${String(error)}` }))
       )
     )
-    if (!listed && options.standaloneWhenMissing !== false) {
+    const resolves = yield* fileSystem.exists(path).pipe(
+      Effect.mapError((error) => new FleetValidationError({ detail: `cannot read ${path}: ${String(error)}` }))
+    )
+    // A case-insensitive volume can resolve `config.json` to a listed `Config.json`: that is present too.
+    if (!listed && !resolves && options.standaloneWhenMissing !== false) {
       return { _tag: "Standalone", path, config: yield* standaloneDefaults } satisfies LoadedConfiguration
     }
     if (listed) {
-      const resolves = yield* fileSystem.exists(path).pipe(
-        Effect.mapError((error) => new FleetValidationError({ detail: `cannot read ${path}: ${String(error)}` }))
-      )
       if (!resolves) {
         return yield* new FleetValidationError({
           detail: `fleet configuration at ${path} exists but does not resolve; is it a symlink whose target is missing?`

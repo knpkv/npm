@@ -1,6 +1,6 @@
 import { Button } from "@knpkv/rly/primitives"
 import { RelayChefMark } from "./internal/relay-chef-mark.js"
-import { useAtomValue } from "@effect/atom-react"
+import { useAtomRefresh, useAtomValue } from "@effect/atom-react"
 import type { ConnectAtoms } from "@knpkv/herdr-connect/surface"
 import { connectAgentGroup, type ConnectAgent } from "@knpkv/herdr-connect/model"
 import type { Effect } from "effect"
@@ -19,6 +19,7 @@ import {
 } from "./modules.js"
 import { useNeedsYouReading, type TodayReadFailed } from "./today-module-view.js"
 import { ShellIcon } from "./internal/shell-icon.js"
+import { Setting, StateCard } from "./internal/state-card.js"
 
 interface ConnectModuleContent {
   readonly atoms: ConnectAtoms
@@ -51,6 +52,7 @@ const ConnectModulePage = ({
     [savedSearch, mount.navigate, mount.closeSelection]
   )
   const directory = useAtomValue(content.atoms.agents)
+  const refreshDirectory = useAtomRefresh(content.atoms.agents)
   const reading = Option.getOrNull(AsyncResult.value(directory))
   const fleet = content.fleet ?? true
   const approvals = useNeedsYouReading(content.readApprovals, mount.active && fleet)
@@ -96,12 +98,29 @@ const ConnectModulePage = ({
   const emptyContent = !empty ? undefined : (
     <section className="connect-home-empty" aria-label="No agents">
       <RelayChefMark />
-      <h2>{emptyStale ? "No agents in the previous reading." : "No agents on any host yet"}</h2>
-      {emptyStale ? null : <p>No host reported any agents.</p>}
-      <ol>
-        <li>Start an agent on a host. It appears here as soon as it starts.</li>
-        <li>Or ask Relay to start one for a Work goal.</li>
-      </ol>
+      <h2>
+        {emptyStale
+          ? "No agents in the previous reading."
+          : fleet
+            ? "No agents on any host yet"
+            : "No agents on this computer yet"}
+      </h2>
+      {emptyStale ? null : (
+        <p>{fleet ? "No host reported any agents." : "Herdr answered and has no agents running."}</p>
+      )}
+      {fleet ? (
+        <ol>
+          <li>Start an agent on a host. It appears here as soon as it starts.</li>
+          <li>Or ask Relay to start one for a Work goal.</li>
+        </ol>
+      ) : (
+        <ol>
+          <li>
+            Start an agent with <Setting>herdr</Setting>. It appears here as soon as it starts.
+          </li>
+          <li>Or ask Relay to start one.</li>
+        </ol>
+      )}
       <div className="connect-home-empty-actions">
         {fleet ? (
           <Button
@@ -130,6 +149,32 @@ const ConnectModulePage = ({
       )}
     </section>
   )
+  // A standalone computer whose Herdr is missing or stopped has nothing to list: say which, and how to fix it.
+  const herdrReason =
+    fleet || reading === null || reading.agents.length > 0
+      ? undefined
+      : reading.failures.find(
+          (failure) => failure.reason === "herdr_not_installed" || failure.reason === "herdr_not_running"
+        )?.reason
+  const unavailableContent =
+    herdrReason === undefined ? undefined : herdrReason === "herdr_not_installed" ? (
+      <StateCard eyebrow="Not available" title="Herdr isn’t installed on this computer." tone="neutral">
+        Install Herdr, then start an agent with <Setting>herdr</Setting>; it appears here.
+      </StateCard>
+    ) : (
+      <StateCard
+        action={
+          <Button onClick={refreshDirectory} size="compact" variant="secondary">
+            Retry
+          </Button>
+        }
+        eyebrow="Not running"
+        title="Herdr isn’t running on this computer."
+        tone="caution"
+      >
+        Start Herdr, then reload.
+      </StateCard>
+    )
   const summary = !fleet ? undefined : empty && waiting === 0 && !partial && !approvals.failed ? undefined : (
     <section
       aria-label="Needs you and approvals"
@@ -208,7 +253,8 @@ const ConnectModulePage = ({
       presentation={{
         _tag: "home",
         summary,
-        empty: emptyContent
+        empty: emptyContent,
+        unavailable: unavailableContent
       }}
     />
   )

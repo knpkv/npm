@@ -56,12 +56,9 @@ const snapshot = (overrides: Partial<DashboardSnapshot> = {}): DashboardSnapshot
   records: [],
   status: {
     applyConfigured: true,
-    branch: "main",
-    dirty: false,
     herdr: { agents: [], available: true, error: null },
     host: "ALPHA",
-    repository: "/repo",
-    revision: "abc"
+    repository: { branch: "main", dirty: false, path: "/repo", revision: "abc" }
   },
   work: null,
   ...overrides

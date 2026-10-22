@@ -12,8 +12,9 @@ const toneGlyph = { neutral: "minus", caution: "clock", critical: "alert" } sati
   Record<StateCardTone, RlyIconName>
 >
 
-/** A compact state card: a toned eyebrow, the fact as a title, and what to do about it. */
+/** A compact state card: a toned eyebrow, the fact as a title, what to do about it, and an optional action. */
 export const StateCard = ({
+  action,
   children,
   eyebrow,
   title,
@@ -23,6 +24,7 @@ export const StateCard = ({
   readonly eyebrow: string
   readonly title: string
   readonly children?: ReactNode
+  readonly action?: ReactNode
 }): ReactElement => (
   <section className="stacks-state" data-tone={tone}>
     <p className="stacks-state-eyebrow">
@@ -31,6 +33,7 @@ export const StateCard = ({
     </p>
     <h2>{title}</h2>
     {children === undefined ? null : <p>{children}</p>}
+    {action === undefined ? null : <div className="stacks-state-action">{action}</div>}
   </section>
 )
 

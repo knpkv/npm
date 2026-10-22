@@ -38,10 +38,7 @@ const operations: HostOperations = {
   inspect: () =>
     Effect.succeed({
       applyConfigured: true,
-      branch: "main",
-      dirty: false,
-      repository: "/tmp",
-      revision: "abc123"
+      repository: { branch: "main", dirty: false, path: "/tmp", revision: "abc123" }
     }),
   listAgents: () =>
     Effect.succeed({
