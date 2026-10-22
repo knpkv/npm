@@ -301,7 +301,14 @@ const requestsRead = Effect.suspend(() => {
     ? Effect.fail(new SandboxesClientError({ detail: "network" }))
     : Effect.succeed(requests)
 })
-const caller = Effect.succeed({ login: viewer, owner: state !== "8a" && state !== "8c-viewer" })
+const owner = state !== "8a" && state !== "8c-viewer"
+const signIn = {
+  portalUrl: "https://portal.example.test/start",
+  ssoSession: "example-session",
+  roleName: "EphemeralDeveloper",
+  region: "eu-central-1"
+}
+const caller = Effect.succeed({ login: viewer, owner, signIn: owner ? signIn : null })
 const module = makeSandboxesModuleViews({
   reads: {
     overview,

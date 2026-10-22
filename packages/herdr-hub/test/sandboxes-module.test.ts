@@ -43,6 +43,15 @@ const pool = Schema.decodeUnknownSync(PoolContract)({
   denyAllPolicy: "PoolDenyAll"
 })
 
+const signInPool = Schema.decodeUnknownSync(PoolContract)({
+  ...Schema.encodeSync(PoolContract)(pool),
+  access: {
+    portalUrl: "https://portal.example.test/start",
+    ssoSession: "example-session",
+    roleName: "ExampleDeveloper"
+  }
+})
+
 const request = (
   path: string,
   listener: "serve" | "local" | "approval" | "tailnet" | "lan" | "work" = "serve",
@@ -198,7 +207,7 @@ const withModule = <A, E, R>(
   run: Effect.Effect<A, E, R>,
   options: {
     readonly reads?: Effect.Effect<SandboxHostReads, SandboxReaderStartError>
-    readonly pool?: null
+    readonly pool?: null | PoolContract
     readonly isHub?: boolean
     readonly pending?: Effect.Effect<ReadonlyArray<PendingSandboxApproval>, string>
     readonly submit?: SandboxJobSubmit
@@ -215,7 +224,7 @@ const withModule = <A, E, R>(
             isHub: options.isHub ?? true,
             sandboxesHost,
             stateDirectory: "/fixture",
-            pool: options.pool === null ? null : pool,
+            pool: options.pool === undefined ? pool : options.pool,
             pendingApprovals: options.pending ?? Effect.succeed([]),
             reads: options.reads ?? Effect.succeed(fakeReads),
             submit: options.submit ?? (() => Effect.die("no job expected"))
@@ -452,12 +461,40 @@ describe("host-local Sandboxes module", () => {
     withModule(
       host,
       Effect.gen(function*() {
-        expect((yield* request("sandboxes/caller"))?.body).toEqual({ login: "example-viewer", owner: false })
+        expect((yield* request("sandboxes/caller"))?.body).toEqual({
+          login: "example-viewer",
+          owner: false,
+          signIn: null
+        })
         expect((yield* request("sandboxes/caller", "serve", "GET", { sameNode: true }))?.body).toEqual({
           login: "example-viewer",
-          owner: true
+          owner: true,
+          signIn: null
         })
       })
+    ))
+
+  it.effect("gives the pool's sign-in to the hub's own node only", () =>
+    withModule(
+      host,
+      Effect.gen(function*() {
+        expect((yield* request("sandboxes/caller"))?.body).toEqual({
+          login: "example-viewer",
+          owner: false,
+          signIn: null
+        })
+        expect((yield* request("sandboxes/caller", "serve", "GET", { sameNode: true }))?.body).toEqual({
+          login: "example-viewer",
+          owner: true,
+          signIn: {
+            portalUrl: "https://portal.example.test/start",
+            ssoSession: "example-session",
+            roleName: "ExampleDeveloper",
+            region: "eu-central-1"
+          }
+        })
+      }),
+      { pool: signInPool }
     ))
 
   it.effect("serves a run's log and stored line to the hub's own node only, and reads nothing for anyone else", () => {
