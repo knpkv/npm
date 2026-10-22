@@ -74,7 +74,7 @@ import {
   PeerPendingUnavailableError,
   PendingApprovalCursor
 } from "@knpkv/herdr-fleet"
-import type { FleetHostName } from "@knpkv/herdr-fleet/model"
+import { type FleetHostName, JobPayload } from "@knpkv/herdr-fleet/model"
 import type { TailscaleAuthorizationError } from "@knpkv/herdr-tailscale"
 import { authorizeWhois, discoverFleetPeers, layer as tailscaleLayer, Tailscale } from "@knpkv/herdr-tailscale"
 import type {
@@ -132,6 +132,10 @@ import WebSocketClient, { WebSocketServer } from "ws"
 import type { SanitizedJobRecord } from "./approval-request.js"
 import { sanitizeJobPayload, sanitizeJobRecord } from "./approval-request.js"
 import { resolveApprovalPage } from "./approval-url.js"
+import { makeAppTokens, makeGrants } from "./apps/grants.js"
+import { appNeedsYouProviders } from "./apps/needs-you.js"
+import { makeAppRegistry } from "./apps/registry.js"
+import { AppServiceRefused, handleAppServicesRoute, handleAppsRoute } from "./apps/routes.js"
 import { authorize, authorizeLoopback, authorizeLoopbackPeer } from "./auth.js"
 import { BlockedPushMutation, StageHeartbeat } from "./blocked-push-model.js"
 import { loadBlockedPushObservations } from "./blocked-push-source.js"
@@ -390,6 +394,11 @@ export type HttpServerOptions = {
   readonly sandboxesHost?: FleetHostName
   /** Pool contract for this host. Missing while `sandboxesHost` names this hub is a pool mismatch. */
   readonly sandboxPool?: PoolContract | null
+  /**
+   * Installed apps: `configPath` is nix's `apps.json` (default `~/.config/herdr/apps.json`), `tokenDirectory`
+   * where each app's `<id>.token` is written (default `<state directory>/hub-apps/tokens`).
+   */
+  readonly apps?: { readonly configPath?: string; readonly tokenDirectory?: string }
   /** Additional product layers join the shared registry at startup; handlers close their requirements. */
   readonly modules?: ReadonlyArray<ServerModule<unknown, HttpClient.HttpClient | Tailscale | Crypto.Crypto>>
   readonly lanWork?: LanWorkListenerOptions
@@ -1923,8 +1932,33 @@ export const startHttpServer = async (
       },
       ...(options.modules ?? [])
     ]
+    // Installed apps: nix's apps.json, re-read when it changes and every 30 s. An app never fails startup.
+    const appTokens = await httpRuntime.runPromise(
+      makeAppTokens(options.apps?.tokenDirectory ?? `${config.stateDirectory}/hub-apps/tokens`)
+    )
+    const appGrants = await httpRuntime.runPromise(makeGrants)
+    const appRegistry = await httpRuntime.runPromise(makeAppRegistry({
+      configPath: options.apps?.configPath ?? `${homedir()}/.config/herdr/apps.json`,
+      cacheDirectory: `${config.stateDirectory}/hub-apps/manifests`,
+      tokens: appTokens,
+      coreIds: modules.map((module) => module.descriptor.id),
+      supportedContracts: [1],
+      probeTimeoutMillis: 2_000
+    }))
+    await httpRuntime.runPromise(appRegistry.reload())
+    await httpRuntime.runPromise(
+      Effect.all([appRegistry.watchConfig, appRegistry.reloadLoop]).pipe(
+        Effect.provideService(Scope.Scope, moduleScope)
+      )
+    )
     const moduleContext = await httpRuntime.runPromise(
-      Layer.build(ModuleServer.makeModuleLayer(modules.map((module) => module.descriptor), modules)).pipe(
+      Layer.build(
+        ModuleServer.makeModuleLayer(
+          modules.map((module) => module.descriptor),
+          modules,
+          appNeedsYouProviders(appRegistry)
+        )
+      ).pipe(
         Effect.provideService(Scope.Scope, moduleScope)
       )
     )
@@ -3127,6 +3161,42 @@ export const startHttpServer = async (
             json(response, 404, { error: "not_found" })
             return
           }
+          // Apps reach the hub on its loopback listener only, with their own token, never a browser session.
+          if (
+            mode === "local" &&
+            await handleAppServicesRoute<HttpClient.HttpClient | Tailscale | Crypto.Crypto>(request, response, url, {
+              registry: appRegistry,
+              grants: appGrants,
+              tokens: appTokens,
+              host: {
+                host: config.host,
+                isHub,
+                hosts: config.machines.map(({ host }) => host)
+              },
+              fleetRead: () => Effect.fail(new AppServiceRefused({ code: "unavailable" })),
+              submitJob: (payload, caller) =>
+                Schema.decodeUnknownEffect(JobPayload)(payload).pipe(
+                  Effect.mapError(() => new AppServiceRefused({ code: "rejected" })),
+                  Effect.flatMap((decoded) =>
+                    service.submit({ payload: decoded }, caller.login, caller.provenance).pipe(
+                      Effect.tap((record) => record.status === "queued" ? enqueueJob(record.id) : Effect.void),
+                      Effect.map((record) => ({ jobId: record.id, status: record.status })),
+                      Effect.mapError((error) =>
+                        new AppServiceRefused({
+                          code: error._tag === "FleetValidationError" ? "rejected" : "unavailable"
+                        })
+                      )
+                    )
+                  )
+                ),
+              relayPost: () => Effect.fail(new AppServiceRefused({ code: "unavailable" })),
+              readJson: (schema) => readJson(request, schema),
+              runtime: httpRuntime
+            })
+          ) {
+            return
+          }
+
           const authorized = mode === "approval"
             ? tailnetActor(request, config, config.approvalNodes)
             : mode === "tailnet" || mode === "serve"
@@ -3141,6 +3211,17 @@ export const startHttpServer = async (
             remoteAddress: request.socket.remoteAddress
           })
 
+          // Module routes and proxied app requests authorize their caller the same way.
+          const moduleAuthorize = mode === "approval" || mode === "tailnet" || mode === "serve"
+            ? tailnetIdentity(request, config, mode === "approval" ? config.approvalNodes : null).pipe(
+              Effect.map((identity) => moduleCallerFor(config, identity))
+            )
+            : authorized.pipe(Effect.map((login) => {
+              // A direct loopback viewer is on this machine; a proxied one may not be.
+              const provenance = submissionProvenance(mode, request)
+              return { login, sameNode: provenance === "verified_local_listener", provenance }
+            }))
+
           const moduleUrl = sandboxesModuleUrl(request.method ?? "GET", url) ?? url
           if (moduleUrl.pathname === "/v1/modules" || moduleUrl.pathname.startsWith("/v1/modules/")) {
             const result = await runRequest(
@@ -3148,15 +3229,7 @@ export const startHttpServer = async (
                 method: request.method ?? "GET",
                 url: moduleUrl,
                 listener: mode,
-                authorize: mode === "approval" || mode === "tailnet" || mode === "serve"
-                  ? tailnetIdentity(request, config, mode === "approval" ? config.approvalNodes : null).pipe(
-                    Effect.map((identity) => moduleCallerFor(config, identity))
-                  )
-                  : authorized.pipe(Effect.map((login) => {
-                    // A direct loopback viewer is on this machine; a proxied one may not be.
-                    const provenance = submissionProvenance(mode, request)
-                    return { login, sameNode: provenance === "verified_local_listener", provenance }
-                  })),
+                authorize: moduleAuthorize,
                 sameOrigin: sameOrigin(request, expectedOrigin()),
                 readJson: () => readJson(request, Schema.Json)
               }).pipe(Effect.provideService(ModuleServer.ModuleRegistry, registry), Effect.result)
@@ -3169,6 +3242,24 @@ export const startHttpServer = async (
             } else {
               json(response, result.success.status, result.success.body)
             }
+            return
+          }
+
+          if (
+            listenerServesSuperapp(mode) &&
+            await handleAppsRoute<ApiError, HttpClient.HttpClient | Tailscale | Crypto.Crypto>(request, response, url, {
+              listener: mode,
+              registry: appRegistry,
+              grants: appGrants,
+              authorize: moduleAuthorize,
+              sameOrigin: sameOrigin(request, expectedOrigin()),
+              refuse: (target, error) => {
+                const mapped = apiError(error)
+                json(target, mapped.status, mapped.body)
+              },
+              runtime: httpRuntime
+            })
+          ) {
             return
           }
 
