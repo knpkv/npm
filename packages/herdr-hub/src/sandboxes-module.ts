@@ -3,9 +3,11 @@ import { FleetValidationError } from "@knpkv/herdr-fleet"
 import {
   FleetHostName,
   type JobRecord,
+  type SandboxBudgetLift,
   type SandboxExtend,
   type SandboxLease,
-  type SandboxRelease
+  type SandboxRelease,
+  type SandboxReset
 } from "@knpkv/herdr-fleet/model"
 import { type PoolContract } from "@knpkv/sandbox-pool"
 import {
@@ -79,8 +81,11 @@ export const servesSandboxes = (configuration: {
   configuration.isHub &&
   configuration.pool !== null
 
-/** The Fleet job an order becomes. The job's actor is the caller, so Fleet checks the holder itself. */
-export type SandboxJobPayload = SandboxLease | SandboxExtend | SandboxRelease
+/**
+ * The Fleet job an order becomes. The job's actor is the caller, so Fleet checks the holder itself. A reset
+ * or budget lift carries no `observed`: Fleet binds it on the owner host when the job is submitted.
+ */
+export type SandboxJobPayload = SandboxLease | SandboxExtend | SandboxRelease | SandboxReset | SandboxBudgetLift
 
 /**
  * Submits one job as `actor`, recorded with the caller's own `provenance`, and starts it when Fleet queued
@@ -104,8 +109,23 @@ const payloadOf = (order: SandboxJobOrder): SandboxJobPayload => {
       return { kind: "sandbox.extend", accountId: order.accountId }
     case "Release":
       return { kind: "sandbox.release", accountId: order.accountId }
+    case "Retry":
+      return { kind: "sandbox.reset", accountId: order.accountId, reason: "Retry" }
+    case "BudgetLift":
+      return { kind: "sandbox.budget.lift", accountId: order.accountId }
   }
 }
+
+/** A Fleet request of the order's kind already waits for that account. Any pending reset counts for Retry. */
+const alreadyRequested = (
+  order: Extract<SandboxJobOrder, { readonly _tag: "Retry" | "BudgetLift" }>,
+  pending: ReadonlyArray<PendingSandboxApproval>
+): boolean =>
+  pending.some(({ payload }) =>
+    order._tag === "Retry"
+      ? payload.kind === "sandbox.reset" && payload.accountId === order.accountId
+      : payload.kind === "sandbox.budget.lift" && payload.accountId === order.accountId
+  )
 
 const NoQuery = Schema.fromURLSearchParams(Schema.Struct({}))
 
@@ -242,14 +262,43 @@ export const makeSandboxesModule = (configuration: {
             }).pipe(Effect.mapError(() => new ModuleRouteFailure({ status: 500, code: "invalid_response" })))
           )
         )
+      const refuse = (status: ModuleRouteFailure["status"], code: string) =>
+        Effect.fail(new ModuleRouteFailure({ status, code }))
+      /**
+       * Before a retry or lift reaches Fleet: the account is in the pool, in the state the job needs, and no
+       * request of that kind already waits. Fleet re-checks the bound record when the approved job runs.
+       */
+      const checkRequest = Effect.fn("SandboxesModule.checkRequest")(function*(
+        reads: SandboxHostReads,
+        order: Extract<SandboxJobOrder, { readonly _tag: "Retry" | "BudgetLift" }>
+      ) {
+        const pool = yield* reads.overview
+        if (pool._tag !== "Ready") return yield* refuse(503, "unavailable")
+        const card = pool.sandboxes.find((item) => item.accountId === order.accountId && item.label === null)
+        if (card === undefined) return yield* refuse(404, "not_found")
+        const budgetHeld = card.state._tag === "Quarantined" && card.state.blocker._tag === "BudgetHold"
+        if (order._tag === "Retry" && (card.state._tag !== "Quarantined" || budgetHeld)) {
+          return yield* refuse(409, "not_quarantined")
+        }
+        if (order._tag === "BudgetLift" && !budgetHeld) return yield* refuse(409, "not_budget_held")
+        const pending = yield* configuration.pendingApprovals.pipe(
+          Effect.mapError(() => new ModuleRouteFailure({ status: 503, code: "unavailable" }))
+        )
+        if (alreadyRequested(order, pending)) return yield* refuse(409, "already_requested")
+      })
       // Same origin is checked by the mount before the body is read. Here: the pool must be served, and
-      // only the hub's own node may submit. Fleet then holds extend and release to the caller's own lease.
+      // only the hub's own node may submit. Fleet then holds extend and release to the caller's own lease,
+      // and holds every retry and lift for an approval.
       const submitJob = (order: SandboxJobOrder, caller: ModuleCaller) =>
         mounted._tag === "Unavailable"
-          ? Effect.fail(new ModuleRouteFailure({ status: 503, code: "unavailable" }))
+          ? refuse(503, "unavailable")
           : !caller.sameNode
-          ? Effect.fail(new ModuleRouteFailure({ status: 403, code: "owner_only" }))
-          : configuration.submit(payloadOf(order), caller.login, caller.provenance)
+          ? refuse(403, "owner_only")
+          : (order._tag === "Retry" || order._tag === "BudgetLift"
+            ? checkRequest(mounted.reads, order)
+            : Effect.void).pipe(
+              Effect.andThen(configuration.submit(payloadOf(order), caller.login, caller.provenance))
+            )
       return {
         routes: [
           moduleReadRoute("/overview", SandboxesOverviewQuery, SandboxesOverview, () => overview),

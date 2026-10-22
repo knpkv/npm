@@ -36,6 +36,10 @@ export interface SandboxesModuleWrites {
   readonly lease: Effect.Effect<void, SandboxesWriteFailed>
   readonly extend: (accountId: SandboxCard["accountId"]) => Effect.Effect<void, SandboxesWriteFailed>
   readonly release: (accountId: SandboxCard["accountId"]) => Effect.Effect<void, SandboxesWriteFailed>
+  /** Asks Fleet to retry a quarantine's reset. It waits for an approval in Fleet / Approvals. */
+  readonly retry: (accountId: SandboxCard["accountId"]) => Effect.Effect<void, SandboxesWriteFailed>
+  /** Asks Fleet to lift a budget stop. It waits for an approval in Fleet / Approvals. */
+  readonly liftBudget: (accountId: SandboxCard["accountId"]) => Effect.Effect<void, SandboxesWriteFailed>
 }
 
 /** Page reads. Each must keep its identity across renders, or the page reads again on every render. */
@@ -434,7 +438,11 @@ const ConfirmSheet = ({
             </div>
             <p className="sandboxes-sheet-lead">{lead}</p>
             {children}
-            {phase._tag === "Refused" ? <p role="alert">{refusedCopy(action, phase.reason)}</p> : null}
+            {phase._tag === "Refused" ? (
+              <p className="sandboxes-refusal" role="alert">
+                {refusedCopy(action, phase.reason)}
+              </p>
+            ) : null}
           </Sheet.Body>
           <Sheet.Footer className="sandboxes-sheet-foot">
             <Button onClick={() => setOpen(false)} variant="quiet">
@@ -621,6 +629,7 @@ const PoolCard = ({
   done,
   item,
   lastKnown,
+  lift,
   now,
   owner,
   requests,
@@ -633,6 +642,8 @@ const PoolCard = ({
   readonly now: DateTime.Utc
   readonly owner: boolean
   readonly requests: ReadonlyArray<SandboxRequest>
+  /** The budget card's lift request, for the owner; null everywhere else. */
+  readonly lift: ReactElement | null
   readonly viewer: string
   readonly writes: SandboxesModuleWrites | null
 }): ReactElement => {
@@ -699,6 +710,7 @@ const PoolCard = ({
       {requests.map((request) => (
         <PendingRequest detail={false} key={request.jobId} now={now} request={request} viewer={viewer} />
       ))}
+      {lift}
       {mine && state._tag === "Leased" ? (
         <OwnLease done={done} item={item} now={now} state={state} writes={writes} />
       ) : null}
@@ -858,42 +870,187 @@ const useCaller = (read: SandboxesModuleReads["caller"], active: boolean): Sandb
   return caller
 }
 
-/** One read's result. A failed read is its own state, never an empty list. */
-type Read<A> = { readonly _tag: "Loading" } | { readonly _tag: "Failed" } | { readonly _tag: "Done"; readonly value: A }
+/**
+ * One read's result. A failed read before any value is its own state, never an empty list. A later failure
+ * keeps the last value and says since when it is last known.
+ */
+type Read<A> =
+  | { readonly _tag: "Loading" }
+  | { readonly _tag: "Failed" }
+  | { readonly _tag: "Done"; readonly value: A; readonly staleSince: DateTime.Utc | null }
+
+/** A polled read and a way to read it again now, after a write. */
+interface Polled<A> {
+  readonly result: Read<A>
+  readonly readAgain: () => void
+}
+
+const settleRead = <A,>(previous: Read<A>, exit: Exit.Exit<A, SandboxesClientError>, at: DateTime.Utc): Read<A> =>
+  Exit.isSuccess(exit)
+    ? { _tag: "Done", value: exit.value, staleSince: null }
+    : previous._tag === "Done"
+      ? { ...previous, staleSince: previous.staleSince ?? at }
+      : { _tag: "Failed" }
 
 /**
- * Reads now and every 30 s while the page is active, like the pool, and from Loading again when `read`
- * changes, such as another account. `read` must keep its identity, or it reads on every render.
+ * Reads now and every 30 s while the page is active, like the pool. A changed `read`, such as another
+ * account, starts from Loading; `readAgain`, after a write, reads now and keeps what is on screen until it
+ * answers. `read` must keep its identity, or it reads on every render.
  */
-const useRead = <A,>(read: Effect.Effect<A, SandboxesClientError>, active: boolean): Read<A> => {
+const useRead = <A,>(read: Effect.Effect<A, SandboxesClientError>, active: boolean): Polled<A> => {
   const [result, setResult] = useState<Read<A>>({ _tag: "Loading" })
+  const [attempt, setAttempt] = useState(0)
+  const reading = useRef(read)
   useEffect(() => {
     if (!active) return
-    setResult({ _tag: "Loading" })
+    if (reading.current !== read) {
+      reading.current = read
+      setResult({ _tag: "Loading" })
+    }
     const fiber = Effect.runFork(
-      Effect.exit(read).pipe(
-        Effect.flatMap((exit) =>
-          Effect.sync(() => setResult(Exit.isSuccess(exit) ? { _tag: "Done", value: exit.value } : { _tag: "Failed" }))
-        ),
-        Effect.repeat(Schedule.spaced(pollEvery))
-      )
+      Effect.gen(function* () {
+        const exit = yield* Effect.exit(read)
+        const at = yield* DateTime.now
+        yield* Effect.sync(() => setResult((previous) => settleRead(previous, exit, at)))
+      }).pipe(Effect.repeat(Schedule.spaced(pollEvery)))
     )
     return () => {
       Effect.runFork(Fiber.interrupt(fiber))
     }
-  }, [read, active])
-  return result
+  }, [read, active, attempt])
+  return { result, readAgain: () => setAttempt((value) => value + 1) }
 }
 
-/** Pending requests by account. A failed read, or a pool not served here, is null: unknown, not none. */
-const requestsByAccount = (read: Read<SandboxRequests>): ReadonlyMap<string, ReadonlyArray<SandboxRequest>> | null => {
-  if (read._tag !== "Done" || read.value._tag !== "Ready") return read._tag === "Loading" ? new Map() : null
+/** Pending requests by account, and whether they can be acted on: answered, and not last known. */
+interface PendingRequests {
+  readonly byAccount: ReadonlyMap<string, ReadonlyArray<SandboxRequest>>
+  readonly fresh: boolean
+  readonly staleSince: DateTime.Utc | null
+}
+
+/** A failed first read, or a pool not served here, is null: unknown, not none. */
+const pendingRequests = (read: Read<SandboxRequests>): PendingRequests | null => {
+  if (read._tag === "Loading") return { byAccount: new Map(), fresh: false, staleSince: null }
+  if (read._tag === "Failed" || read.value._tag !== "Ready") return null
   const byAccount = new Map<string, Array<SandboxRequest>>()
   for (const request of read.value.requests) {
     byAccount.set(request.accountId, [...(byAccount.get(request.accountId) ?? []), request])
   }
-  return byAccount
+  return { byAccount, fresh: read.staleSince === null, staleSince: read.staleSince }
 }
+
+/** Under requests or runs that a later poll could not refresh. */
+const LastKnown = ({ at, of }: { readonly at: DateTime.Utc; readonly of: "requests" | "runs" }): ReactElement => {
+  const times = useContext(TimesContext)
+  const words = `Last known at ${times.clock(at)}`
+  return of === "requests" ? (
+    <small className="sandboxes-muted" data-requests-stale="">
+      {words}
+    </small>
+  ) : (
+    <small className="sandboxes-muted" data-runs-stale="">
+      {words}
+    </small>
+  )
+}
+
+type RequestKind = "retry" | "lift"
+
+const requestCopy = {
+  retry: {
+    trigger: "Retry reset",
+    note: "Starts a fresh run. Goes to Fleet / Approvals first.",
+    again: "Retry already requested. Nothing new was sent."
+  },
+  lift: {
+    trigger: "Request to lift the stop",
+    note: "Goes to Fleet / Approvals. The stop stays until it’s approved.",
+    again: "Lift already requested. Nothing new was sent."
+  }
+} satisfies Record<RequestKind, { readonly trigger: string; readonly note: string; readonly again: string }>
+
+/** Why a retry or lift was not sent, and that nothing changed. A request that may have left says so. */
+const requestRefusal = (kind: RequestKind, reason: SandboxesWriteFailed["reason"] | "defect"): string => {
+  switch (reason) {
+    case "already_requested":
+      return requestCopy[kind].again
+    case "not_quarantined":
+      return "This account isn’t quarantined any more. Nothing was sent."
+    case "not_budget_held":
+      return "This account isn’t stopped by budget. Nothing was sent."
+    case "unauthorized":
+      return "Only the pool owner can ask for this here. Nothing was sent."
+    case "rejected":
+      return "Fleet refused the request. Nothing was sent."
+    case "network":
+    case "defect":
+      return "The request may not have reached Fleet. Check Fleet / Approvals before asking again."
+  }
+}
+
+/**
+ * One request to Fleet: a retry or a lift. The approval in Fleet is the confirm, so one press sends it.
+ * `done` reads the requests again, so the pending request replaces this button.
+ */
+const RequestAction = ({
+  disabled,
+  done,
+  kind,
+  submit,
+  variant
+}: {
+  readonly disabled: boolean
+  readonly done: () => void
+  readonly kind: RequestKind
+  readonly submit: Effect.Effect<void, SandboxesWriteFailed>
+  readonly variant: "primary" | "secondary"
+}): ReactElement => {
+  const [phase, setPhase] = useState<
+    | { readonly _tag: "Idle" }
+    | { readonly _tag: "Sending" }
+    | { readonly _tag: "Refused"; readonly reason: SandboxesWriteFailed["reason"] | "defect" }
+  >({ _tag: "Idle" })
+  const send = () => {
+    setPhase({ _tag: "Sending" })
+    void Effect.runPromiseExit(Effect.result(submit)).then((exit) => {
+      if (Exit.isFailure(exit)) {
+        setPhase({ _tag: "Refused", reason: "defect" })
+      } else if (Result.isFailure(exit.value)) {
+        setPhase({ _tag: "Refused", reason: exit.value.failure.reason })
+      } else {
+        setPhase({ _tag: "Idle" })
+        done()
+      }
+    })
+  }
+  return (
+    <div className="sandboxes-request-action">
+      <Button
+        className="sandboxes-trigger"
+        disabled={disabled || phase._tag === "Sending"}
+        onClick={send}
+        variant={variant}
+      >
+        {requestCopy[kind].trigger}
+      </Button>
+      <small className="sandboxes-muted" data-request-note="">
+        {requestCopy[kind].note}
+      </small>
+      {phase._tag === "Refused" ? (
+        <p className="sandboxes-refusal" role="alert">
+          {requestRefusal(kind, phase.reason)}
+        </p>
+      ) : null}
+    </div>
+  )
+}
+
+/** A reset of either kind already waits for this account, so a retry would only ask twice. */
+const resetPending = (requests: ReadonlyArray<SandboxRequest>): boolean =>
+  requests.some((request) => request.kind === "Retry" || request.kind === "Manual")
+
+const liftPending = (requests: ReadonlyArray<SandboxRequest>): boolean =>
+  requests.some((request) => request.kind === "BudgetLift")
 
 const OverviewPage = ({
   mount,
@@ -907,7 +1064,8 @@ const OverviewPage = ({
   const times = useContext(TimesContext)
   const { login: viewer, owner } = useCaller(reads.caller, mount.active)
   const { now, readAgain, view } = usePool(reads.overview, mount.active)
-  const requests = requestsByAccount(useRead(reads.requests, mount.active))
+  const requestsRead = useRead(reads.requests, mount.active)
+  const requests = pendingRequests(requestsRead.result)
   const pool = view._tag === "Pool" ? view : null
   // A job runs after it is submitted, so the next read can still show the old card; say so for a minute.
   const [submittedAt, setSubmittedAt] = useState<DateTime.Utc | null>(null)
@@ -973,7 +1131,11 @@ const OverviewPage = ({
               {noneFree}
             </Notice>
           )}
-          {requests === null ? <RequestsFailed /> : null}
+          {requests === null ? (
+            <RequestsFailed />
+          ) : requests.staleSince === null ? null : (
+            <LastKnown at={requests.staleSince} of="requests" />
+          )}
           <div className="sandboxes-grid">
             {[...view.overview.sandboxes].sort(byPool).map((item) => (
               <PoolCard
@@ -983,7 +1145,22 @@ const OverviewPage = ({
                 lastKnown={view.stale ? view.readAt : null}
                 now={view.stale ? view.readAt : now}
                 owner={owner}
-                requests={requests?.get(item.accountId) ?? []}
+                requests={requests?.byAccount.get(item.accountId) ?? []}
+                lift={
+                  owner &&
+                  writes !== null &&
+                  !view.stale &&
+                  budgetStopped(item.state) &&
+                  !liftPending(requests?.byAccount.get(item.accountId) ?? []) ? (
+                    <RequestAction
+                      disabled={requests === null || !requests.fresh}
+                      done={requestsRead.readAgain}
+                      kind="lift"
+                      submit={Effect.suspend(() => writes.liftBudget(item.accountId))}
+                      variant="secondary"
+                    />
+                  ) : null
+                }
                 viewer={viewer}
                 writes={view.stale ? null : writes}
               />
@@ -1127,20 +1304,61 @@ const useRuns = (
   active: boolean
 ): Read<SandboxRuns> => {
   const read = useMemo(() => (id === null ? Effect.never : reads.runs(id)), [reads.runs, id])
-  return useRead(read, active && id !== null)
+  return useRead(read, active && id !== null).result
+}
+
+/**
+ * Retry for a quarantine, lift for a budget stop, for the owner, when no request of that kind waits. It is
+ * disabled until the requests are read and current, so a last-known "none" never asks twice.
+ */
+const accountAction = (
+  item: SandboxCard,
+  requests: PendingRequests | null,
+  writes: SandboxesModuleWrites | null,
+  done: () => void
+): ReactElement | null => {
+  if (writes === null || item.state._tag !== "Quarantined") return null
+  const pending = requests?.byAccount.get(item.accountId) ?? []
+  const disabled = requests === null || !requests.fresh
+  if (budgetStopped(item.state)) {
+    return liftPending(pending) ? null : (
+      <RequestAction
+        disabled={disabled}
+        done={done}
+        kind="lift"
+        submit={Effect.suspend(() => writes.liftBudget(item.accountId))}
+        variant="primary"
+      />
+    )
+  }
+  return resetPending(pending) ? null : (
+    <RequestAction
+      disabled={disabled}
+      done={done}
+      kind="retry"
+      submit={Effect.suspend(() => writes.retry(item.accountId))}
+      variant="primary"
+    />
+  )
 }
 
 /** Why the account cannot be cleaned, and what is already asked of Fleet. Budget stops are caution, not red. */
 const AccountDetail = ({
+  action,
   item,
   now,
   requests,
+  requestsSince,
   runs,
   viewer
 }: {
+  /** The owner's retry or lift request for this account, when one can be asked for. */
+  readonly action: ReactElement | null
   readonly item: SandboxCard
   readonly now: DateTime.Utc
   readonly requests: ReadonlyArray<SandboxRequest> | null
+  /** When the requests on screen became last known; null while they are current. */
+  readonly requestsSince: DateTime.Utc | null
   readonly runs: Read<SandboxRuns>
   readonly viewer: string
 }): ReactElement => {
@@ -1174,6 +1392,7 @@ const AccountDetail = ({
         </div>
         {summary === null ? null : <p data-account-summary="">{summary}</p>}
       </header>
+      {action}
       {requests === null ? (
         <RequestsFailed />
       ) : (
@@ -1181,6 +1400,7 @@ const AccountDetail = ({
           <PendingRequest detail key={request.jobId} now={now} request={request} viewer={viewer} />
         ))
       )}
+      {requestsSince === null ? null : <LastKnown at={requestsSince} of="requests" />}
       {state._tag === "Quarantined" && !budgetStopped(state) ? (
         <div className="sandboxes-account-body">
           <div className="sandboxes-account-main">
@@ -1206,6 +1426,7 @@ const AccountDetail = ({
       ) : state._tag === "Quarantined" ? null : (
         <Facts rows={cardRows(times, item, viewer, now)} />
       )}
+      {runs._tag === "Done" && runs.staleSince !== null ? <LastKnown at={runs.staleSince} of="runs" /> : null}
       <a className="sandboxes-link" href={runsHref(item)}>
         View runs
       </a>
@@ -1213,20 +1434,26 @@ const AccountDetail = ({
   )
 }
 
-/** One account: the needs-you destination. No owner actions yet; a reset or lift is asked for in Fleet. */
+/**
+ * One account: the needs-you destination. The owner may ask Fleet to retry a quarantine's reset or to lift
+ * a budget stop; either waits for an approval in Fleet / Approvals.
+ */
 const AccountPage = ({
   mount,
   reads,
-  search
+  search,
+  writes
 }: {
   readonly mount: ModulePageMount
   readonly reads: SandboxesModuleReads
   readonly search: URLSearchParams
+  readonly writes: SandboxesModuleWrites | null
 }): ReactElement => {
-  const { login: viewer } = useCaller(reads.caller, mount.active)
+  const { login: viewer, owner } = useCaller(reads.caller, mount.active)
   const id = accountIdOf(search)
   const { now, readAgain, view } = usePool(reads.overview, mount.active)
-  const requests = requestsByAccount(useRead(reads.requests, mount.active))
+  const requestsRead = useRead(reads.requests, mount.active)
+  const requests = pendingRequests(requestsRead.result)
   const runs = useRuns(reads, id, mount.active)
   const item =
     view._tag === "Pool" ? view.overview.sandboxes.find((candidate) => candidate.accountId === id) : undefined
@@ -1239,9 +1466,11 @@ const AccountPage = ({
         <NotInPool id={search.get("id") ?? ""} />
       ) : (
         <AccountDetail
+          action={accountAction(item, requests, owner && !view.stale ? writes : null, requestsRead.readAgain)}
           item={item}
           now={view.stale ? view.readAt : now}
-          requests={requests === null ? null : (requests.get(item.accountId) ?? [])}
+          requests={requests === null ? null : (requests.byAccount.get(item.accountId) ?? [])}
+          requestsSince={requests?.staleSince ?? null}
           runs={runs}
           viewer={viewer}
         />
@@ -1384,6 +1613,7 @@ const RunsPage = ({
                   })}
                 </tbody>
               </table>
+              {runs._tag === "Done" && runs.staleSince !== null ? <LastKnown at={runs.staleSince} of="runs" /> : null}
             </section>
           )}
           {open === undefined ? null : (
@@ -1431,7 +1661,7 @@ export const makeSandboxesModuleViews = ({
       ),
       account: (search, mount) => (
         <TimesContext value={times}>
-          <AccountPage mount={mount} reads={reads} search={search} />
+          <AccountPage mount={mount} reads={reads} search={search} writes={writes} />
         </TimesContext>
       ),
       runs: (search, mount) => (

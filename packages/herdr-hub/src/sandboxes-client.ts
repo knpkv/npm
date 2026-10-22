@@ -15,10 +15,24 @@ export class SandboxesClientError extends Schema.TaggedError<SandboxesClientErro
   detail: Schema.Literals(["network", "status", "invalid_response", "timeout"])
 }) {}
 
-/** A lease, extend or release job was not submitted. */
+/**
+ * A job was not submitted. `already_requested`, `not_quarantined` and `not_budget_held` are the hub's
+ * reasons for refusing a retry or lift before it reached Fleet; any other refusal is `rejected`.
+ */
 export class SandboxesWriteFailed extends Schema.TaggedError<SandboxesWriteFailed>()("SandboxesWriteFailed", {
-  reason: Schema.Literals(["rejected", "network", "unauthorized"])
+  reason: Schema.Literals([
+    "rejected",
+    "network",
+    "unauthorized",
+    "already_requested",
+    "not_quarantined",
+    "not_budget_held"
+  ])
 }) {}
+
+const RefusedRequest = Schema.Struct({
+  error: Schema.Literals(["already_requested", "not_quarantined", "not_budget_held"])
+})
 
 /** One GET of a module read, bounded in bytes and at 30 seconds. Any non-2xx answer is a status failure. */
 const readJson = Effect.fn("SandboxesClient.readJson")(
@@ -59,7 +73,8 @@ export const loadSandboxRequests = readJson("/v1/modules/sandboxes/requests", Sa
 
 /**
  * Submits one job from this page. The browser sends its own origin; the hub accepts it only from its own node.
- * 403 is the owner rule, 409 a job Fleet refused, anything else may or may not have reached Fleet.
+ * 403 is the owner rule, 409 a job the hub or Fleet refused, with the hub's reason when it names one;
+ * anything else may or may not have reached Fleet.
  */
 export const submitSandboxJob = Effect.fn("SandboxesClient.submitJob")(function*(order: SandboxJobOrder) {
   const client = yield* HttpClient.HttpClient
@@ -71,9 +86,15 @@ export const submitSandboxJob = Effect.fn("SandboxesClient.submitJob")(function*
     Effect.mapError(() => new SandboxesWriteFailed({ reason: "network" }))
   )
   if (response.status === 403) return yield* new SandboxesWriteFailed({ reason: "unauthorized" })
-  if (response.status !== 202) {
-    return yield* new SandboxesWriteFailed({ reason: response.status === 409 ? "rejected" : "network" })
+  if (response.status === 409) {
+    const refused = yield* decodeBoundedResponseJson(response, RefusedRequest, 4_096).pipe(
+      Effect.map(({ error }) => error),
+      // An unnamed or unreadable 409 is still a refusal: nothing was submitted.
+      Effect.orElseSucceed((): SandboxesWriteFailed["reason"] => "rejected")
+    )
+    return yield* new SandboxesWriteFailed({ reason: refused })
   }
+  if (response.status !== 202) return yield* new SandboxesWriteFailed({ reason: "network" })
   return yield* decodeBoundedResponseJson(response, SandboxJobSubmitted, 4_096).pipe(
     Effect.mapError(() => new SandboxesWriteFailed({ reason: "network" }))
   )

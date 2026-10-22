@@ -313,6 +313,60 @@ describe("sandbox jobs", () => {
       expect(f.calls.some((call) => call.startsWith("lift"))).toBe(false)
     }))
 
+  it.effect("two approved retries bound to one quarantine reset it once; the second is refused as moved", () =>
+    Effect.gen(function*() {
+      const f = yield* fixture({ runs: [{ exitCode: 1, output: "boom" }] })
+      const quarantined = yield* f.job(
+        { kind: "sandbox.reset", accountId: accountA, reason: "Manual", observed: availableObserved },
+        "owner",
+        "job-1",
+        true
+      )
+      expect(quarantined.state._tag).toBe("Quarantined")
+      const bound = observe(quarantined)
+      const first = yield* f.job(
+        { kind: "sandbox.reset", accountId: accountA, reason: "Retry", observed: bound },
+        "owner",
+        "job-2",
+        true
+      )
+      expect(first.state._tag).toBe("Available")
+      const nukesAfterFirst = f.calls.length
+      const error = yield* Effect.flip(
+        f.job({ kind: "sandbox.reset", accountId: accountA, reason: "Retry", observed: bound }, "owner", "job-3", true)
+      )
+      expect(error).toMatchObject({ disposition: "rejected" })
+      expect(error.detail).toContain("RecordMoved")
+      expect(f.calls.length).toBe(nukesAfterFirst)
+      expect(yield* f.store.get(accountA)).toEqual(first)
+    }))
+
+  it.effect("two approved lifts bound to one budget hold lift it once; the second is refused as moved", () =>
+    Effect.gen(function*() {
+      const f = yield* fixture({ hold: true })
+      const held = yield* f.job(
+        { kind: "sandbox.reset", accountId: accountA, reason: "Manual", observed: availableObserved },
+        "owner",
+        "job-1",
+        true
+      )
+      const bound = observe(held)
+      const first = yield* f.job(
+        { kind: "sandbox.budget.lift", accountId: accountA, observed: bound },
+        "owner",
+        "job-2",
+        true
+      )
+      expect(first.state._tag).toBe("Available")
+      const callsAfterFirst = f.calls.length
+      const error = yield* Effect.flip(
+        f.job({ kind: "sandbox.budget.lift", accountId: accountA, observed: bound }, "owner", "job-3", true)
+      )
+      expect(error).toMatchObject({ disposition: "rejected" })
+      expect(error.detail).toContain("RecordMoved")
+      expect(f.calls.length).toBe(callsAfterFirst)
+    }))
+
   it.effect("a lift that errors after it was called is not reported as rejected", () =>
     Effect.gen(function*() {
       const f = yield* fixture({ hold: true, liftFails: true })

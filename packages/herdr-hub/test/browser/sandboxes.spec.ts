@@ -20,6 +20,8 @@ type Screen = {
   readonly after?: number
   /** The page's level-one heading; the pool pages say Sandboxes, an account page names the account. */
   readonly heading?: string
+  /** A button pressed before the capture, whose answer is part of the screen. */
+  readonly press?: string
   /** The page opens on a sheet, which leaves the page behind it out of the accessibility tree. */
   readonly sheet?: true
   /** Capture name prefix, matching the design's frame names. */
@@ -43,6 +45,7 @@ const screens: ReadonlyArray<Screen> = [
   { id: "8f-host", state: "8f-host" },
   { id: "8g", state: "8g", after: 120_000 },
   { id: "8d", state: "8d", heading: "ephemeral-02" },
+  { id: "2a-refused", state: "2a-refused", open: { button: "Lease an account" }, press: "Lease longest idle" },
   { id: "8c", state: "8c", sheet: true }
 ]
 
@@ -50,7 +53,16 @@ const attention: ReadonlyArray<Screen> = [
   { id: "1a", state: "attention-1a", prefix: "sandboxes-attention" },
   { id: "2a", state: "attention-2a", prefix: "sandboxes-attention", heading: "ephemeral-02" },
   { id: "3a", state: "attention-3a", prefix: "sandboxes-attention", heading: "ephemeral-02" },
-  { id: "4a", state: "attention-4a", prefix: "sandboxes-attention", heading: "ephemeral-01" }
+  { id: "4a", state: "attention-4a", prefix: "sandboxes-attention", heading: "ephemeral-01" },
+  { id: "4a-lift", state: "attention-4a-lift", prefix: "sandboxes-attention", heading: "ephemeral-01" },
+  {
+    id: "2a-refused",
+    state: "attention-refused",
+    prefix: "sandboxes-attention",
+    heading: "ephemeral-02",
+    press: "Retry reset"
+  },
+  { id: "3a-stale", state: "attention-stale", prefix: "sandboxes-attention", heading: "ephemeral-02", after: 30_000 }
 ]
 
 const show = async (page: Page, screen: Screen, theme: string) => {
@@ -66,6 +78,10 @@ const show = async (page: Page, screen: Screen, theme: string) => {
     const scope = screen.open.scope === undefined ? page : page.locator(`[data-account="${screen.open.scope}"]`)
     await scope.getByRole("button", { name: screen.open.button, exact: true }).click()
     await expect(page.getByRole("dialog")).toBeVisible()
+  }
+  if (screen.press !== undefined) {
+    await page.getByRole("button", { name: screen.press, exact: true }).click()
+    await expect(page.getByRole("alert")).toBeVisible()
   }
 }
 
@@ -104,6 +120,18 @@ test("phone stretches the request link on the account page to a full-width 44px 
   const main = await page.locator(".sandboxes-page").boundingBox()
   expect(link?.height ?? 0).toBeGreaterThanOrEqual(44)
   expect(Math.round(link?.width ?? 0)).toBeGreaterThan(Math.round((main?.width ?? 0) - 32 - 40))
+})
+
+test("the owner can ask Fleet to retry a quarantine, with the note under a full-width 44px button on phone", async ({ page }) => {
+  await page.setViewportSize({ width: 360, height: 844 })
+  await show(page, { id: "2a", state: "attention-2a", heading: "ephemeral-02" }, "light")
+  const retry = page.getByRole("button", { name: "Retry reset" })
+  await expect(retry).toBeEnabled()
+  await expect(page.getByText("Starts a fresh run. Goes to Fleet / Approvals first.")).toBeVisible()
+  const box = await retry.boundingBox()
+  const main = await page.locator(".sandboxes-page").boundingBox()
+  expect(box?.height ?? 0).toBeGreaterThanOrEqual(44)
+  expect(Math.round(box?.width ?? 0)).toBe(Math.round((main?.width ?? 0) - 32))
 })
 
 test("a run row opens that run's detail, with the failed step's words and no log", async ({ page }) => {

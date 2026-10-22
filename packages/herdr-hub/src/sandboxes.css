@@ -346,6 +346,22 @@
     overflow-wrap: break-word;
   }
 
+  /* A write the hub or Fleet refused: note-sized words in the caution ink, not an error banner. */
+  .sandboxes-refusal {
+    color: var(--rly-color-held-ink);
+    font-size: 0.8125rem;
+  }
+
+  .sandboxes-request-action {
+    display: grid;
+    gap: 0.35rem;
+    justify-items: start;
+  }
+
+  .sandboxes-account > .sandboxes-request-action {
+    max-inline-size: 34rem;
+  }
+
   .sandboxes-account > .sandboxes-request {
     max-inline-size: 34rem;
   }
@@ -496,6 +512,8 @@
       max-inline-size: none;
     }
 
+    .sandboxes-request-action,
+    .sandboxes-request-action .sandboxes-trigger,
     .sandboxes-request,
     .sandboxes-request .sandboxes-link {
       justify-items: stretch;

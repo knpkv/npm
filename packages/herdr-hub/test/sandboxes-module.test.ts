@@ -1,12 +1,13 @@
 import { NodeHttpClient, NodeServices } from "@effect/platform-node"
-import { describe, expect, it } from "@effect/vitest"
-import { FleetHostName } from "@knpkv/herdr-fleet/model"
+import { describe, expect, it, layer } from "@effect/vitest"
+import { type HostOperations, JobStore, makeFleetService } from "@knpkv/herdr-fleet"
+import { FleetHostName, SandboxJobKind, type SandboxObservation } from "@knpkv/herdr-fleet/model"
 import { AccountId, PoolContract, SandboxName, SandboxNotFound, UnknownRunCursor } from "@knpkv/sandbox-pool"
-import type { SandboxesOverview, SandboxRuns } from "@knpkv/sandbox-pool/host"
+import { SandboxesOverview, type SandboxRuns } from "@knpkv/sandbox-pool/host"
 import type { SandboxHostReads } from "@knpkv/sandbox-pool/host/server"
-import { ConfigProvider, Effect, Layer, Result, Schema } from "effect"
+import { ConfigProvider, Effect, FileSystem, Layer, Result, Schema } from "effect"
 import { connectModule, sandboxesModule } from "../src/module-contract.js"
-import { dispatchModuleRoute, makeModuleLayer, ModuleHandlers } from "../src/module-server.js"
+import { dispatchModuleRoute, makeModuleLayer, ModuleHandlers, ModuleRouteFailure } from "../src/module-server.js"
 import {
   makeSandboxesModule,
   type PendingSandboxApproval,
@@ -107,6 +108,44 @@ const fakeReads: SandboxHostReads = {
       { accountId: held, since: 11, kind: "budget-hold" }
     ]
   })
+}
+
+const free = Schema.decodeUnknownSync(AccountId)("999999999992")
+
+/** Page 15's pool: one quarantine, one budget hold, one free account. */
+const attentionReads: SandboxHostReads = {
+  ...fakeReads,
+  overview: Effect.succeed(
+    Schema.decodeUnknownSync(SandboxesOverview)({
+      _tag: "Ready",
+      sandboxes: [
+        {
+          accountId: account,
+          name: sandboxName,
+          label: null,
+          state: { _tag: "Quarantined", runId: "run-q", step: null, blocker: { _tag: "Unknown", text: "Reset failed" } }
+        },
+        {
+          accountId: held,
+          name: "sandbox-b",
+          label: null,
+          state: {
+            _tag: "Quarantined",
+            runId: "run-h",
+            step: null,
+            blocker: { _tag: "BudgetHold", text: "Budget hold. Lift it with sandbox.budget.lift" }
+          }
+        },
+        {
+          accountId: free,
+          name: "sandbox-c",
+          label: null,
+          state: { _tag: "Available", lastResetAt: null }
+        }
+      ],
+      badge: { quarantined: 2, stale: false, partial: false, asOf: 1_700_000_000_000 }
+    })
+  )
 }
 
 const retryRequested: PendingSandboxApproval = {
@@ -477,6 +516,105 @@ describe("host-local Sandboxes module", () => {
     )
   })
 
+  it.effect("submits Retry and BudgetLift as the caller, for Fleet to hold for approval", () => {
+    const { submit, submitted } = recordingSubmit()
+    return withModule(
+      host,
+      Effect.gen(function*() {
+        const post = (body: Schema.Json) => request("sandboxes/jobs", "serve", "POST", { sameNode: true, body })
+        expect(yield* post({ _tag: "Retry", accountId: account })).toEqual({
+          status: 202,
+          body: { jobId: "job-1", status: "queued" }
+        })
+        yield* post({ _tag: "BudgetLift", accountId: held })
+        yield* post({ _tag: "Retry", accountId: account, observed: { state: "Available", version: 0 } })
+        expect(submitted).toEqual([
+          {
+            payload: { kind: "sandbox.reset", accountId: account, reason: "Retry" },
+            actor: "example-viewer",
+            provenance: "authenticated_remote"
+          },
+          {
+            payload: { kind: "sandbox.budget.lift", accountId: held },
+            actor: "example-viewer",
+            provenance: "authenticated_remote"
+          },
+          {
+            payload: { kind: "sandbox.reset", accountId: account, reason: "Retry" },
+            actor: "example-viewer",
+            provenance: "authenticated_remote"
+          }
+        ])
+      }),
+      { reads: Effect.succeed(attentionReads), submit }
+    )
+  })
+
+  it.effect("refuses a retry or lift that could not run, or is already asked for, and submits nothing", () => {
+    const { submit, submitted } = recordingSubmit()
+    const refused = (body: Schema.Json, pending: ReadonlyArray<PendingSandboxApproval> = [], sameNode = true) =>
+      withModule(
+        host,
+        Effect.result(request("sandboxes/jobs", "serve", "POST", { sameNode, body })),
+        { reads: Effect.succeed(attentionReads), submit, pending: Effect.succeed(pending) }
+      ).pipe(Effect.map((result) => (Result.isFailure(result) ? result.failure : null)))
+    return Effect.gen(function*() {
+      expect(yield* refused({ _tag: "Retry", accountId: held })).toMatchObject({ status: 409, code: "not_quarantined" })
+      expect(yield* refused({ _tag: "Retry", accountId: free })).toMatchObject({ status: 409, code: "not_quarantined" })
+      expect(yield* refused({ _tag: "BudgetLift", accountId: account })).toMatchObject({
+        status: 409,
+        code: "not_budget_held"
+      })
+      expect(yield* refused({ _tag: "Retry", accountId: "999999999999" })).toMatchObject({
+        status: 404,
+        code: "not_found"
+      })
+      expect(yield* refused({ _tag: "Retry", accountId: account }, [retryRequested])).toMatchObject({
+        status: 409,
+        code: "already_requested"
+      })
+      expect(yield* refused({ _tag: "BudgetLift", accountId: held }, [liftRequested])).toMatchObject({
+        status: 409,
+        code: "already_requested"
+      })
+      expect(yield* refused({ _tag: "Retry", accountId: account }, [], false)).toMatchObject({
+        status: 403,
+        code: "owner_only"
+      })
+      expect(yield* refused({ _tag: "Reset", accountId: account, reason: "Manual" })).toMatchObject({ status: 400 })
+      expect(submitted).toEqual([])
+    })
+  })
+
+  it.effect("a retry or lift is unavailable, not sent, when Fleet's pending list or the pool can't be read", () => {
+    const { submit, submitted } = recordingSubmit()
+    return Effect.gen(function*() {
+      const fleetDown = yield* withModule(
+        host,
+        Effect.result(
+          request("sandboxes/jobs", "serve", "POST", { sameNode: true, body: { _tag: "Retry", accountId: account } })
+        ),
+        { reads: Effect.succeed(attentionReads), submit, pending: Effect.fail("store down") }
+      )
+      expect(Result.isFailure(fleetDown) && fleetDown.failure).toMatchObject({ status: 503, code: "unavailable" })
+      const poolDown = yield* withModule(
+        host,
+        Effect.result(
+          request("sandboxes/jobs", "serve", "POST", { sameNode: true, body: { _tag: "Retry", accountId: account } })
+        ),
+        {
+          reads: Effect.succeed({
+            ...attentionReads,
+            overview: Effect.succeed({ _tag: "Failed", reason: "unavailable" })
+          }),
+          submit
+        }
+      )
+      expect(Result.isFailure(poolDown) && poolDown.failure).toMatchObject({ status: 503, code: "unavailable" })
+      expect(submitted).toEqual([])
+    })
+  })
+
   it.effect("submits nothing where the pool is not served", () => {
     const { submit, submitted } = recordingSubmit()
     return Effect.gen(function*() {
@@ -507,4 +645,64 @@ describe("host-local Sandboxes module", () => {
       expect(submitted).toEqual([])
     })
   })
+})
+
+layer(NodeServices.layer)("host-local Sandboxes module through a real Fleet", (it) => {
+  it.effect("a retry from the hub's own loopback still waits for approval, bound to the owner's record", () =>
+    Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      const directory = yield* fs.makeTempDirectoryScoped()
+      const store = yield* Effect.acquireRelease(
+        JobStore.open(`${directory}/jobs.sqlite`),
+        (opened) => Effect.sync(() => opened.close())
+      )
+      const bound: SandboxObservation = { endsAt: null, holder: null, state: "Quarantined", version: 7 }
+      const operations: HostOperations = {
+        inspect: () =>
+          Effect.succeed({
+            applyConfigured: true,
+            repository: { branch: "main", dirty: false, path: "/repo", revision: "abc123" }
+          }),
+        listAgents: () => Effect.succeed({ agents: [], available: true, error: null }),
+        run: (payload) => Effect.succeed(`${payload.kind}: ok`),
+        runLocal: (payload) => Effect.succeed(`${payload.kind}: ok`),
+        runCoordinatorChat: () => Effect.succeed("coordinator: ok"),
+        sandboxJobKinds: new Set(SandboxJobKind.literals),
+        bindSandboxApproval: () => Effect.succeed(bound)
+      }
+      const fleet = yield* makeFleetService({
+        approvalEnabled: true,
+        host: "host-a",
+        id: Effect.succeed("job-retry"),
+        nonce: Effect.succeed("nonce-retry"),
+        now: Effect.succeed(1_000),
+        operations,
+        store
+      })
+      const submit: SandboxJobSubmit = (payload, actor, provenance) =>
+        fleet.submit({ payload }, actor, provenance).pipe(
+          Effect.map((record) => ({ jobId: record.id, status: record.status })),
+          Effect.mapError(() => new ModuleRouteFailure({ status: 503, code: "unavailable" }))
+        )
+      const answer = yield* withModule(
+        host,
+        request("sandboxes/jobs", "local", "POST", {
+          sameNode: true,
+          provenance: "verified_local_listener",
+          body: {
+            _tag: "Retry",
+            accountId: account,
+            observed: { endsAt: null, holder: null, state: "Available", version: 0 }
+          }
+        }),
+        { reads: Effect.succeed(attentionReads), submit }
+      )
+      expect(answer).toEqual({ status: 202, body: { jobId: "job-retry", status: "pending_approval" } })
+      const record = yield* store.get("job-retry")
+      expect(record).toMatchObject({
+        status: "pending_approval",
+        approvalNonce: "nonce-retry",
+        payload: { kind: "sandbox.reset", accountId: account, reason: "Retry", observed: bound }
+      })
+    }).pipe(Effect.scoped))
 })
