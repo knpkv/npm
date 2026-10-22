@@ -1,0 +1,32 @@
+{
+  "name": "@knpkv/hub-app-fixture",
+  "version": "0.0.0",
+  "private": true,
+  "description": "A one-page app with failure knobs, for the hub's app contract tests",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "hub-app-fixture": "./dist/bin.js"
+  },
+  "scripts": {
+    "build": "tsc -b tsconfig.build.json --force",
+    "check": "tsc -b tsconfig.json"
+  },
+  "dependencies": {
+    "@knpkv/hub-app": "workspace:^",
+    "effect": "4.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.4",
+    "typescript": "npm:@typescript/typescript6@^6.0.2"
+  },
+  "files": [
+    "dist",
+    "client"
+  ]
+}
