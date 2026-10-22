@@ -915,27 +915,34 @@ const settleRead = <A,>(previous: Read<A>, exit: Exit.Exit<A, SandboxesClientErr
  * answers. `read` must keep its identity, or it reads on every render.
  */
 const useRead = <A,>(read: Effect.Effect<A, SandboxesClientError>, active: boolean): Polled<A> => {
-  const [result, setResult] = useState<Read<A>>({ _tag: "Loading" })
+  // The result remembers which read it answers, so a changed read is Loading on its first render.
+  const [held, setHeld] = useState<{ readonly read: typeof read; readonly result: Read<A> }>({
+    read,
+    result: { _tag: "Loading" }
+  })
   const [attempt, setAttempt] = useState(0)
-  const reading = useRef(read)
   useEffect(() => {
     if (!active) return
-    if (reading.current !== read) {
-      reading.current = read
-      setResult({ _tag: "Loading" })
-    }
     const fiber = Effect.runFork(
       Effect.gen(function* () {
         const exit = yield* Effect.exit(read)
         const at = yield* DateTime.now
-        yield* Effect.sync(() => setResult((previous) => settleRead(previous, exit, at)))
+        yield* Effect.sync(() =>
+          setHeld((previous) => ({
+            read,
+            result: settleRead(previous.read === read ? previous.result : { _tag: "Loading" }, exit, at)
+          }))
+        )
       }).pipe(Effect.repeat(Schedule.spaced(pollEvery)))
     )
     return () => {
       Effect.runFork(Fiber.interrupt(fiber))
     }
   }, [read, active, attempt])
-  return { result, readAgain: () => setAttempt((value) => value + 1) }
+  return {
+    result: held.read === read ? held.result : { _tag: "Loading" },
+    readAgain: () => setAttempt((value) => value + 1)
+  }
 }
 
 /** Pending requests by account, and whether they can be acted on: answered, and not last known. */

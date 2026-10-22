@@ -9,7 +9,7 @@ import {
 } from "@knpkv/sandbox-pool/host"
 import { PortalProvider } from "@knpkv/rly/foundations"
 import { DateTime, Effect, Schema } from "effect"
-import { act } from "react"
+import { act, type ReactNode, useLayoutEffect } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { ModulePageMount } from "../src/modules.js"
@@ -1046,6 +1046,47 @@ describe("Sandboxes overview", { concurrent: false }, () => {
     expect(dialog?.querySelector("[data-step-raw]")?.textContent).toBe(
       "nuke: S3Bucket example-bucket - failed: BucketNotEmpty"
     )
+  })
+
+  it("never paints the last run's log or stored line on another run while its own log is read", async () => {
+    const reads: SandboxesModuleReads = {
+      overview: Effect.succeed(ready([quarantinedCard(nukeBlocker)])),
+      caller: Effect.succeed({ login: "agent-a", owner: true }),
+      runs: () => Effect.succeed(quarantineRuns),
+      runLog: (_accountId, runId) => (runId === "retry-1248" ? Effect.succeed(retryLog) : Effect.never),
+      requests: Effect.succeed(noRequests)
+    }
+    const module = makeSandboxesModuleViews({ reads, writes: null, timeZone: "UTC" })
+    const mount: ModulePageMount = { active: true, navigate: () => undefined, closeSelection: () => undefined }
+    const host = document.createElement("div")
+    document.body.append(host)
+    root = createRoot(host)
+    // Checks every commit before effects run: the open run's sheet must not carry the other run's log.
+    const painted: Array<string> = []
+    const Probe = ({ children }: { readonly children: ReactNode }) => {
+      useLayoutEffect(() => {
+        const sheet = document.querySelector('[role="dialog"]')
+        if (sheet?.textContent?.includes("release-1036") !== true) return
+        if (sheet.querySelector("[data-step-raw]") !== null) painted.push("raw")
+        if (sheet.querySelector("[data-run-log]") !== null) painted.push("log")
+      })
+      return children
+    }
+    const show = (run: string) =>
+      act(async () =>
+        root?.render(
+          <PortalProvider>
+            <Probe>{module.pages.runs(new URLSearchParams({ id: "999999999991", run }), mount)}</Probe>
+          </PortalProvider>
+        )
+      )
+    await show("retry-1248")
+    await settle()
+    await vi.waitFor(() => expect(document.querySelector("[data-step-raw]")).not.toBeNull())
+    await show("release-1036")
+    await settle()
+    await vi.waitFor(() => expect(text("[data-run-log-state]")).toBe("Reading the log…"))
+    expect(painted).toEqual([])
   })
 
   it("says the owner's log is being read, or can't be read, and keeps the steps", async () => {
