@@ -9,7 +9,7 @@ import {
 } from "@knpkv/design-conformance"
 import type { Page } from "@playwright/test"
 import { Console, Effect, FileSystem, Path, Predicate, Result, Schema } from "effect"
-import type { DashboardSnapshot } from "../src/dashboard-model.js"
+import { checkoutDashboard, type CheckoutPage } from "./design-checkout-status.js"
 import { designDashboard, designReadings, UsageDesignFixture } from "./design-fixture.js"
 import { assertUsageFonts, usageChartsReady } from "./design-fonts.js"
 import { serveUsageDesignFiles } from "./design-server.js"
@@ -20,9 +20,7 @@ interface BuiltAssetMap {
 
 const BuiltInventory = Schema.Struct({ usageLimitsInventory: Inventory })
 const BuiltPage = Schema.Struct({
-  dashboardPage: Schema.declare((value): value is (snapshot: DashboardSnapshot, fonts: string) => string =>
-    Predicate.isFunction(value)
-  )
+  dashboardPage: Schema.declare((value): value is CheckoutPage["dashboardPage"] => Predicate.isFunction(value))
 })
 const BuiltFontPreload = Schema.Struct({
   PRELOADED_FONTS: Schema.Array(Schema.String),
@@ -149,10 +147,11 @@ export const start: StartProduct = Effect.fn("SuperappDesign.start")(function*(f
   const inventorySource = yield* usageInventoryFile(repository)
   const inventory = yield* builtModule(inventorySource, BuiltInventory)
   const pageModule = yield* builtModule(path.join(dist, "internal/dashboard-page.js"), BuiltPage)
+  const served = yield* checkoutDashboard(repository)
   const fontPreload = yield* usageFontPreload(dist)
   const temporary = yield* fs.makeTempDirectoryScoped({ prefix: "superapp-design-" })
   const files: BuiltAssetMap = { "/": "index.html" }
-  yield* fs.writeFileString(path.join(temporary, "index.html"), pageModule.dashboardPage(snapshot, fontPreload))
+  yield* fs.writeFileString(path.join(temporary, "index.html"), pageModule.dashboardPage(served(snapshot), fontPreload))
   for (const name of yield* fs.readDirectory(dist)) {
     if (!/\.(css|js|woff2|png|svg)$/u.test(name)) continue
     yield* fs.copy(path.join(dist, name), path.join(temporary, name))
@@ -172,7 +171,7 @@ export const start: StartProduct = Effect.fn("SuperappDesign.start")(function*(f
       }
       const readings = designReadings(seeded, state)
       const bootstrap = designDashboard(seeded, state)
-      const dashboard = { ...bootstrap, approvalApp: { ...bootstrap.approvalApp, canonicalUrl: `${origin}/` } }
+      const dashboard = served({ ...bootstrap, approvalApp: { ...bootstrap.approvalApp, canonicalUrl: `${origin}/` } })
       const html = yield* Effect.fromResult(
         seedDashboardHtml(pageModule.dashboardPage(dashboard, fontPreload), identity)
       )
