@@ -159,7 +159,11 @@ export const makeSandboxHostReads = (input: {
             runId: summary.runId,
             step: summary.current,
             blocker: summary.blocker === null ? null : yield* servedBlocker(summary.blocker),
-            outcome: summary.outcome
+            outcome: summary.outcome,
+            reason: summary.reason,
+            startedAt: summary.startedAt,
+            endedAt: summary.endedAt,
+            failedStep: summary.failedStep
           }
         })),
       next: page.next

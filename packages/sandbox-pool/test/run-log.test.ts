@@ -26,14 +26,34 @@ describe("run log", () => {
       step("run-b", "nuke", "started", "09:02:00")
     ])
     expect(runs.map(({ runId }) => runId)).toEqual([runB, runA])
-    expect(runs[0]).toMatchObject({ accountId: "222222222222", outcome: null, current: "nuke", endedAt: null })
+    expect(runs[0]).toMatchObject({
+      accountId: "222222222222",
+      outcome: null,
+      current: "nuke",
+      endedAt: null,
+      failedStep: null
+    })
     expect(runs[1]).toMatchObject({
       outcome: "Quarantined",
+      failedStep: "verify",
       blocker: "verify: 3 resources still removable.",
       current: null,
       startedAt: at("08:00:00"),
       endedAt: at("08:05:01")
     })
+  })
+
+  it("keeps the failed step only for a run whose step failed", () => {
+    const runs = summarizeRuns([
+      started("run-a", "111111111111", "08:00:00"),
+      step("run-a", "nuke", "failed", "08:02:00", "S3Bucket could not be removed."),
+      step("run-a", "verify", "started", "08:03:00"),
+      finished("run-a", "Quarantined", "08:04:00", "nuke: failed"),
+      started("run-b", "111111111111", "09:00:00"),
+      step("run-b", "nuke", "ok", "09:02:00"),
+      finished("run-b", "Available", "09:05:00")
+    ])
+    expect(runs.map(({ failedStep, runId }) => [runId, failedStep])).toEqual([[runB, null], [runA, "nuke"]])
   })
 
   it("ignores entries of a run whose start it never saw", () => {

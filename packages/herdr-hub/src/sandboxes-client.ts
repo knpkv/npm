@@ -1,10 +1,14 @@
-/** Host-local Sandboxes: the redacted pool overview, the caller, and the owner's lease, extend and release. @module */
+/**
+ * Host-local Sandboxes: the redacted pool overview, one account's runs, pending Fleet requests, the caller,
+ * and the owner's lease, extend and release.
+ * @module
+ */
 import { decodeBoundedResponseJson } from "@knpkv/herdr-fleet/response"
-import { SandboxesOverview } from "@knpkv/sandbox-pool/host"
+import { type SandboxCard, SandboxesOverview, SandboxRuns } from "@knpkv/sandbox-pool/host"
 import { Effect, Schema } from "effect"
 import * as HttpClient from "effect/http/HttpClient"
 import * as HttpClientRequest from "effect/http/HttpClientRequest"
-import { SandboxesCaller, SandboxJobOrder, SandboxJobSubmitted } from "./sandboxes-contract.js"
+import { SandboxesCaller, SandboxJobOrder, SandboxJobSubmitted, SandboxRequests } from "./sandboxes-contract.js"
 
 /** The overview read failed before a pool payload arrived. */
 export class SandboxesClientError extends Schema.TaggedError<SandboxesClientError>()("SandboxesClientError", {
@@ -16,36 +20,41 @@ export class SandboxesWriteFailed extends Schema.TaggedError<SandboxesWriteFaile
   reason: Schema.Literals(["rejected", "network", "unauthorized"])
 }) {}
 
-/** One overview read, bounded at 1 MiB and 30 seconds. */
-export const loadSandboxesOverview = Effect.gen(function*() {
-  const client = yield* HttpClient.HttpClient
-  const response = yield* client.get("/v1/modules/sandboxes/overview").pipe(
-    Effect.mapError(() => new SandboxesClientError({ detail: "network" }))
-  )
-  if (response.status < 200 || response.status >= 300) return yield* new SandboxesClientError({ detail: "status" })
-  return yield* decodeBoundedResponseJson(response, SandboxesOverview, 1_048_576).pipe(
-    Effect.mapError(() => new SandboxesClientError({ detail: "invalid_response" }))
-  )
-}).pipe(
+/** One GET of a module read, bounded in bytes and at 30 seconds. Any non-2xx answer is a status failure. */
+const readJson = Effect.fn("SandboxesClient.readJson")(
+  function*<A>(url: string, schema: Schema.Codec<A, unknown>, maxBytes: number) {
+    const client = yield* HttpClient.HttpClient
+    const response = yield* client.get(url).pipe(
+      Effect.mapError(() => new SandboxesClientError({ detail: "network" }))
+    )
+    if (response.status < 200 || response.status >= 300) return yield* new SandboxesClientError({ detail: "status" })
+    return yield* decodeBoundedResponseJson(response, schema, maxBytes).pipe(
+      Effect.mapError(() => new SandboxesClientError({ detail: "invalid_response" }))
+    )
+  },
   Effect.timeout("30 seconds"),
-  Effect.catchTag("TimeoutError", () => Effect.fail(new SandboxesClientError({ detail: "timeout" }))),
+  Effect.catchTag("TimeoutError", () => Effect.fail(new SandboxesClientError({ detail: "timeout" })))
+)
+
+/** One overview read, bounded at 1 MiB and 30 seconds. */
+export const loadSandboxesOverview = readJson("/v1/modules/sandboxes/overview", SandboxesOverview, 1_048_576).pipe(
   Effect.withSpan("SandboxesClient.loadOverview")
 )
 
 /** Who is reading the page, from the same authorization the module routes use. */
-export const loadSandboxesCaller = Effect.gen(function*() {
-  const client = yield* HttpClient.HttpClient
-  const response = yield* client.get("/v1/modules/sandboxes/caller").pipe(
-    Effect.mapError(() => new SandboxesClientError({ detail: "network" }))
-  )
-  if (response.status < 200 || response.status >= 300) return yield* new SandboxesClientError({ detail: "status" })
-  return yield* decodeBoundedResponseJson(response, SandboxesCaller, 4_096).pipe(
-    Effect.mapError(() => new SandboxesClientError({ detail: "invalid_response" }))
-  )
-}).pipe(
-  Effect.timeout("30 seconds"),
-  Effect.catchTag("TimeoutError", () => Effect.fail(new SandboxesClientError({ detail: "timeout" }))),
+export const loadSandboxesCaller = readJson("/v1/modules/sandboxes/caller", SandboxesCaller, 4_096).pipe(
   Effect.withSpan("SandboxesClient.loadCaller")
+)
+
+/** The newest page of one account's runs. An account not in the pool is a status failure. */
+export const loadSandboxRuns = (accountId: SandboxCard["accountId"]) =>
+  readJson(`/v1/modules/sandboxes/runs?${new URLSearchParams({ id: accountId })}`, SandboxRuns, 1_048_576).pipe(
+    Effect.withSpan("SandboxesClient.loadRuns")
+  )
+
+/** Resets and budget lifts waiting in Fleet / Approvals. */
+export const loadSandboxRequests = readJson("/v1/modules/sandboxes/requests", SandboxRequests, 262_144).pipe(
+  Effect.withSpan("SandboxesClient.loadRequests")
 )
 
 /**

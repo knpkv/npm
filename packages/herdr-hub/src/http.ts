@@ -1884,15 +1884,7 @@ export const startHttpServer = async (
         stateDirectory: config.stateDirectory,
         pool: options.sandboxPool ?? null,
         // Build the effect on read. Calling pendingApprovals here would list the store at startup.
-        pendingLifts: Effect.suspend(() =>
-          service.pendingApprovals().pipe(Effect.map((records) => {
-            const ids = new Set<string>()
-            for (const record of records) {
-              if (record.payload.kind === "sandbox.budget.lift") ids.add(record.payload.accountId)
-            }
-            return ids
-          }))
-        ),
+        pendingApprovals: Effect.suspend(() => service.pendingApprovals()),
         // The module has checked same origin, the served pool and the hub's own node, and passes the
         // caller's own provenance. A queued job starts like any other submission.
         submit: (payload, actor, provenance) =>

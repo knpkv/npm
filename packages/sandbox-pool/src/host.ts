@@ -10,7 +10,7 @@
  * @module
  */
 import { Schema } from "effect"
-import { Holder, leaseCap, leaseDuration, RunId } from "./lease.js"
+import { CleaningReason, Holder, leaseCap, leaseDuration, RunId } from "./lease.js"
 import { AccountId, SandboxName } from "./pool.js"
 import { isBudgetHold } from "./reset.js"
 import { RunStep } from "./run-log.js"
@@ -181,12 +181,19 @@ export const SandboxesOverview = Schema.Union([
 ])
 export type SandboxesOverview = typeof SandboxesOverview.Type
 
-/** One run on the public page. `step` is the step in progress; `outcome` is null until the run finishes. */
+/**
+ * One run on the public page. `step` is the step in progress; `outcome` and `endedAt` are null until the
+ * run finishes. `failedStep` names the step that failed, null for a run with none; its words are `blocker`.
+ */
 export const SandboxRunView = Schema.Struct({
   runId: RunId,
   step: Schema.NullOr(RunStep),
   blocker: Schema.NullOr(SandboxBlocker),
-  outcome: Schema.NullOr(Schema.Literals(["Available", "Quarantined"]))
+  outcome: Schema.NullOr(Schema.Literals(["Available", "Quarantined"])),
+  reason: CleaningReason,
+  startedAt: Instant,
+  endedAt: Schema.NullOr(Instant),
+  failedStep: Schema.NullOr(RunStep)
 })
 export interface SandboxRunView extends Schema.Schema.Type<typeof SandboxRunView> {}
 

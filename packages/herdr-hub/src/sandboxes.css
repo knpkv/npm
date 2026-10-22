@@ -323,9 +323,206 @@
     justify-content: flex-end;
   }
 
+  .sandboxes-back {
+    justify-self: start;
+    display: inline-flex;
+    gap: 0.4rem;
+    align-items: center;
+    min-block-size: 44px;
+    color: var(--rly-color-text-2);
+    font-size: 0.875rem;
+    text-decoration: none;
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .sandboxes-back:hover {
+      color: var(--rly-color-text-1);
+    }
+  }
+
+  .sandboxes-step-blocker {
+    grid-column: 2 / -1;
+    padding-block-end: 0.35rem;
+    overflow-wrap: break-word;
+  }
+
+  .sandboxes-account > .sandboxes-request {
+    max-inline-size: 34rem;
+  }
+
+  .sandboxes-request {
+    display: grid;
+    gap: 0.35rem;
+    justify-items: start;
+    padding: 0.75rem 1rem;
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-field);
+    background: var(--rly-color-surface-2);
+    font-size: 0.875rem;
+  }
+
+  .sandboxes-account {
+    display: grid;
+    gap: 1.25rem;
+    min-inline-size: 0;
+  }
+
+  .sandboxes-account-head {
+    display: grid;
+    gap: 0.5rem;
+    justify-items: start;
+  }
+
+  .sandboxes-account-head p {
+    max-inline-size: 60em;
+    font-size: 0.9375rem;
+  }
+
+  .sandboxes-account-title {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1rem;
+    align-items: center;
+  }
+
+  .sandboxes-account-title h1 {
+    font-size: 2.25rem;
+    font-weight: 620;
+    letter-spacing: -0.045em;
+    line-height: 1.08;
+  }
+
+  .sandboxes-account-body {
+    display: grid;
+    grid-template-columns: minmax(0, 1.6fr) minmax(17.5rem, 1fr);
+    gap: 1.25rem;
+    align-items: start;
+  }
+
+  .sandboxes-account-main {
+    display: grid;
+    gap: 1.25rem;
+    min-inline-size: 0;
+  }
+
+  .sandboxes-account-body > .sandboxes-facts {
+    gap: 0;
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-group);
+    background: var(--rly-color-surface-1);
+  }
+
+  .sandboxes-account-body > .sandboxes-facts :where(dt, dd) {
+    display: flex;
+    align-items: center;
+    min-block-size: 2.6rem;
+    padding-inline: 1rem;
+  }
+
+  .sandboxes-account-body > .sandboxes-facts > div + div :where(dt, dd) {
+    border-block-start: 1px solid var(--rly-color-border-1);
+  }
+
+  .sandboxes-account-section {
+    display: grid;
+    gap: 0.5rem;
+    min-inline-size: 0;
+  }
+
+  .sandboxes-account-section h2,
+  .sandboxes-runs h2 {
+    font-size: 1.125rem;
+    font-weight: 620;
+    letter-spacing: -0.015em;
+  }
+
+  .sandboxes-page [data-account-blocker] {
+    background: var(--rly-color-surface-2);
+    padding: 0.75rem 1rem;
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-field);
+    font: 430 0.8125rem / 1.5 var(--rly-font-mono);
+    overflow-wrap: break-word;
+  }
+
+  .sandboxes-runs {
+    display: grid;
+    gap: 0.75rem;
+    min-inline-size: 0;
+  }
+
+  .sandboxes-runs-head {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem 1rem;
+    align-items: baseline;
+  }
+
+  .sandboxes-runs table {
+    inline-size: 100%;
+    border-collapse: collapse;
+    font-size: 0.875rem;
+  }
+
+  .sandboxes-runs th {
+    padding: 0.5rem 1rem;
+    color: var(--rly-color-text-2);
+    font-weight: 520;
+    text-align: start;
+  }
+
+  .sandboxes-runs td {
+    padding: 0 1rem;
+    border-block-start: 1px solid var(--rly-color-border-1);
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .sandboxes-runs tbody tr:hover {
+      background: var(--rly-color-surface-2);
+    }
+  }
+
   @container sandboxes (inline-size < 40rem) {
-    .sandboxes-title h1 {
+    .sandboxes-title h1,
+    .sandboxes-account-title h1 {
       font-size: 1.75rem;
+    }
+
+    .sandboxes-account-body {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .sandboxes-account > .sandboxes-request {
+      max-inline-size: none;
+    }
+
+    .sandboxes-request,
+    .sandboxes-request .sandboxes-link {
+      justify-items: stretch;
+      inline-size: 100%;
+    }
+
+    .sandboxes-runs thead {
+      display: none;
+    }
+
+    .sandboxes-runs tr {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 0 0.75rem;
+      padding-block: 0.5rem;
+      border-block-start: 1px solid var(--rly-color-border-1);
+    }
+
+    .sandboxes-runs td {
+      padding: 0;
+      border: 0;
+      color: var(--rly-color-text-2);
+    }
+
+    .sandboxes-runs td:first-child {
+      color: var(--rly-color-text-1);
+      font-weight: 620;
     }
 
     .sandboxes-head,
