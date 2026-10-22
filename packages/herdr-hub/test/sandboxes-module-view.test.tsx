@@ -977,6 +977,40 @@ describe("Sandboxes overview", { concurrent: false }, () => {
     expect(dialog?.textContent).not.toContain("arn:")
   })
 
+  it("shows a run that ended available as all done, even when one of its steps failed and was retried", async () => {
+    await render(ready([quarantinedCard(nukeBlocker)]), {
+      page: "runs",
+      search: { id: "999999999991", run: "resumed-1300" },
+      runs: () =>
+        Effect.succeed(
+          runsPage({
+            _tag: "Ready",
+            accountId: "999999999991",
+            next: null,
+            runs: [
+              {
+                runId: "resumed-1300",
+                step: null,
+                blocker: null,
+                outcome: "Available",
+                reason: "Retry",
+                startedAt: "2026-10-17T12:50:00.000Z",
+                endedAt: "2026-10-17T13:00:00.000Z",
+                failedStep: "nuke"
+              }
+            ]
+          })
+        )
+    })
+    const dialog = await vi.waitFor(() => {
+      const found = document.querySelector('[role="dialog"]')
+      expect(found).not.toBeNull()
+      return found
+    })
+    const states = [...(dialog?.querySelectorAll("[data-step-state]") ?? [])].map((node) => node.textContent)
+    expect(new Set(states)).toEqual(new Set(["Done"]))
+  })
+
   it("puts quarantine first as the only red, then a budget stop in caution, with its pending request", async () => {
     await render(
       ready([

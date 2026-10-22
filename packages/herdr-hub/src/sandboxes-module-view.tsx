@@ -1032,8 +1032,8 @@ const finishedSteps = (
 }
 
 /**
- * A run's steps in the run-detail words. A running run counts from its current step; a finished one from the
- * step that failed. A clean run is all done. A quarantine with no failed step names no steps.
+ * A run's steps in the run-detail words. A running run counts from its current step; a quarantined one from the
+ * step that failed. An available run is all done. A quarantine with no failed step names no steps.
  */
 const runRows = (run: SandboxRunView): ReadonlyArray<StepRow> | null => {
   const named = (_step: RunStep, index: number) => runSteps[index]?.name ?? ""
@@ -1046,7 +1046,7 @@ const runRows = (run: SandboxRunView): ReadonlyArray<StepRow> | null => {
       blocker: null
     }))
   }
-  if (run.failedStep !== null) return finishedSteps(named, run.failedStep, run.blocker?.text ?? null)
+  // A failed step that was retried still names failedStep; an available run passed every step.
   if (run.outcome === "Available") {
     return runSteps.map(({ name }) => ({
       name,
@@ -1055,7 +1055,7 @@ const runRows = (run: SandboxRunView): ReadonlyArray<StepRow> | null => {
       blocker: null
     }))
   }
-  return null
+  return run.failedStep === null ? null : finishedSteps(named, run.failedStep, run.blocker?.text ?? null)
 }
 
 const StepList = ({ label, rows }: { readonly label: string; readonly rows: ReadonlyArray<StepRow> }): ReactElement => (
