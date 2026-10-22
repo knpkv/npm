@@ -868,7 +868,9 @@ const sandboxesReads: SandboxesModuleReads = {
 const sandboxesWrites: SandboxesModuleWrites = {
   lease: runCodeRead(submitSandboxJob({ _tag: "Lease" })).pipe(Effect.asVoid),
   extend: (accountId) => runCodeRead(submitSandboxJob({ _tag: "Extend", accountId })).pipe(Effect.asVoid),
-  release: (accountId) => runCodeRead(submitSandboxJob({ _tag: "Release", accountId })).pipe(Effect.asVoid)
+  release: (accountId) => runCodeRead(submitSandboxJob({ _tag: "Release", accountId })).pipe(Effect.asVoid),
+  retry: (accountId) => runCodeRead(submitSandboxJob({ _tag: "Retry", accountId })).pipe(Effect.asVoid),
+  liftBudget: (accountId) => runCodeRead(submitSandboxJob({ _tag: "BudgetLift", accountId })).pipe(Effect.asVoid)
 }
 const relayConversations = makeRelayConversations(
   makeRelayClient({ base: "/v1/relay", origin: window.location.href }),

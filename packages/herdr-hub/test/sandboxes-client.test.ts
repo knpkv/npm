@@ -126,3 +126,22 @@ it.effect("reads the pending sandbox requests", () =>
       ["job-retry", "Retry"]
     ])
   }))
+
+it.effect("names why Fleet refused a retry or lift from the 409 code, and any other 409 is a refusal", () =>
+  Effect.gen(function*() {
+    const cases: ReadonlyArray<readonly [Schema.Json, string]> = [
+      [{ error: "already_requested" }, "already_requested"],
+      [{ error: "not_quarantined" }, "not_quarantined"],
+      [{ error: "not_budget_held" }, "not_budget_held"],
+      [{ error: "rejected" }, "rejected"],
+      [{ error: "something new" }, "rejected"],
+      [["not", "an", "object"], "rejected"]
+    ]
+    for (const [body, reason] of cases) {
+      const failure = yield* submitSandboxJob({ _tag: "Retry", accountId: account }).pipe(
+        Effect.provideService(HttpClient.HttpClient, answering(409, body)),
+        Effect.flip
+      )
+      expect(failure.reason, JSON.stringify(body)).toBe(reason)
+    }
+  }))

@@ -13,11 +13,17 @@ const AccountId = SandboxCard.fields.accountId
 export const SandboxesCaller = Schema.Struct({ login: Schema.String, owner: Schema.Boolean })
 export type SandboxesCaller = typeof SandboxesCaller.Type
 
-/** A job the page may ask for: lease the longest idle account, or extend or release the caller's own lease. */
+/**
+ * A job the page may ask for: lease the longest idle account, extend or release the caller's own lease, or
+ * ask Fleet to retry a quarantine's reset or lift a budget stop. Retry and BudgetLift always wait for an
+ * approval in Fleet; the record they are approved against is bound by the owner host, never sent here.
+ */
 export const SandboxJobOrder = Schema.TaggedUnion({
   Lease: {},
   Extend: { accountId: AccountId },
-  Release: { accountId: AccountId }
+  Release: { accountId: AccountId },
+  Retry: { accountId: AccountId },
+  BudgetLift: { accountId: AccountId }
 })
 export type SandboxJobOrder = typeof SandboxJobOrder.Type
 

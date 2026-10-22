@@ -346,6 +346,16 @@
     overflow-wrap: break-word;
   }
 
+  .sandboxes-request-action {
+    display: grid;
+    gap: 0.35rem;
+    justify-items: start;
+  }
+
+  .sandboxes-account > .sandboxes-request-action {
+    max-inline-size: 34rem;
+  }
+
   .sandboxes-account > .sandboxes-request {
     max-inline-size: 34rem;
   }
@@ -496,6 +506,8 @@
       max-inline-size: none;
     }
 
+    .sandboxes-request-action,
+    .sandboxes-request-action .sandboxes-trigger,
     .sandboxes-request,
     .sandboxes-request .sandboxes-link {
       justify-items: stretch;

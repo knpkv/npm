@@ -7,7 +7,7 @@ import { PortalProvider } from "@knpkv/rly/foundations"
 import { SandboxCard, type SandboxesOverview, SandboxRuns } from "@knpkv/sandbox-pool/host"
 import { Effect, Schema } from "effect"
 import { createRoot } from "react-dom/client"
-import { SandboxesClientError } from "../../src/sandboxes-client.js"
+import { SandboxesClientError, SandboxesWriteFailed } from "../../src/sandboxes-client.js"
 import { SandboxRequests } from "../../src/sandboxes-contract.js"
 import { makeSandboxesModuleViews, type SandboxesModuleWrites } from "../../src/sandboxes-module-view.js"
 
@@ -30,7 +30,10 @@ const SandboxesState = Schema.Literals([
   "attention-1a",
   "attention-2a",
   "attention-3a",
-  "attention-4a"
+  "attention-4a",
+  "attention-4a-lift",
+  "attention-refused",
+  "attention-stale"
 ])
 const parameters = new URLSearchParams(location.search)
 const state = Schema.decodeUnknownSync(SandboxesState)(parameters.get("state") ?? "1a")
@@ -126,7 +129,10 @@ const overviews = {
   "attention-1a": ready([ephemeral01Stopped, ephemeral02Quarantined], "ok"),
   "attention-2a": ready([ephemeral01Stopped, ephemeral02Quarantined], "ok"),
   "attention-3a": ready([ephemeral01Stopped, ephemeral02Quarantined], "ok"),
-  "attention-4a": ready([ephemeral01Stopped, ephemeral02Quarantined], "ok")
+  "attention-4a": ready([ephemeral01Stopped, ephemeral02Quarantined], "ok"),
+  "attention-4a-lift": ready([ephemeral01Stopped, ephemeral02Quarantined], "ok"),
+  "attention-refused": ready([ephemeral01Stopped, ephemeral02Quarantined], "ok"),
+  "attention-stale": ready([ephemeral01Stopped, ephemeral02Quarantined], "ok")
 } satisfies Record<typeof state, SandboxesOverview>
 
 const runs = Schema.decodeUnknownSync(SandboxRuns)({
@@ -190,11 +196,13 @@ const requested = (kind: "Retry" | "BudgetLift") =>
 const requests = Schema.decodeUnknownSync(SandboxRequests)({
   _tag: "Ready",
   requests:
-    state === "attention-3a"
+    state === "attention-3a" || state === "attention-stale"
       ? [requested("Retry"), requested("BudgetLift")]
-      : state.startsWith("attention-")
-        ? [requested("BudgetLift")]
-        : []
+      : state === "attention-4a-lift" || state === "attention-refused"
+        ? []
+        : state.startsWith("attention-")
+          ? [requested("BudgetLift")]
+          : []
 })
 
 type Target = { readonly page: "overview" | "account" | "runs"; readonly search: Readonly<Record<string, string>> }
@@ -202,8 +210,11 @@ const targetOf = (screen: typeof state): Target => {
   switch (screen) {
     case "attention-2a":
     case "attention-3a":
+    case "attention-refused":
+    case "attention-stale":
       return { page: "account", search: { id: "999999999991" } }
     case "attention-4a":
+    case "attention-4a-lift":
       return { page: "account", search: { id: "999999999990" } }
     case "8d":
       return { page: "runs", search: { id: "999999999991" } }
@@ -224,15 +235,34 @@ const overview = Effect.suspend(() => {
   return Effect.succeed(overviews[state])
 })
 
-// The sheets confirm into a write that never settles, so a capture keeps the sheet open.
-const writes: SandboxesModuleWrites = { lease: Effect.never, extend: () => Effect.never, release: () => Effect.never }
+// The sheets confirm into a write that never settles, so a capture keeps the sheet open. The refused
+// state's retry answers that a retry is already pending, for the refusal shot.
+const writes: SandboxesModuleWrites = {
+  lease: Effect.never,
+  extend: () => Effect.never,
+  release: () => Effect.never,
+  retry: () =>
+    state === "attention-refused"
+      ? Effect.fail(new SandboxesWriteFailed({ reason: "already_requested" }))
+      : Effect.never,
+  liftBudget: () => Effect.never
+}
+
+// The stale state answers the first requests read, then fails every poll after it.
+let requestReads = 0
+const requestsRead = Effect.suspend(() => {
+  requestReads += 1
+  return state === "attention-stale" && requestReads > 1
+    ? Effect.fail(new SandboxesClientError({ detail: "network" }))
+    : Effect.succeed(requests)
+})
 const caller = Effect.succeed({ login: viewer, owner: state !== "8a" })
 const module = makeSandboxesModuleViews({
   reads: {
     overview,
     caller,
     runs: () => Effect.succeed(runs),
-    requests: Effect.succeed(requests)
+    requests: requestsRead
   },
   timeZone: "UTC",
   writes

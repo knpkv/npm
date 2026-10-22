@@ -120,6 +120,12 @@ const buttons = (selector = "button"): Array<string | null> =>
 const button = (label: string, scope = "") =>
   [...document.querySelectorAll<HTMLButtonElement>(`${scope} button`)].find((node) => node.textContent === label)
 
+/** Retry and lift writes for tests that only lease, extend or release. */
+const noRequestWrites: Pick<SandboxesModuleWrites, "retry" | "liftBudget"> = {
+  retry: () => Effect.void,
+  liftBudget: () => Effect.void
+}
+
 const settle = () => act(async () => await vi.advanceTimersByTimeAsync(0))
 
 describe("Sandboxes overview", { concurrent: false }, () => {
@@ -344,7 +350,8 @@ describe("Sandboxes overview", { concurrent: false }, () => {
     const writes: SandboxesModuleWrites = {
       lease: Effect.die("connection reset"),
       extend: () => Effect.void,
-      release: () => Effect.void
+      release: () => Effect.void,
+      ...noRequestWrites
     }
     await render(ready([available("ephemeral-02", "999999999991", null)]), { writes })
     await openDialog(button("Lease an account"))
@@ -492,7 +499,8 @@ describe("Sandboxes overview", { concurrent: false }, () => {
     const writes: SandboxesModuleWrites = {
       lease: Effect.suspend(lease),
       extend: () => Effect.void,
-      release: () => Effect.void
+      release: () => Effect.void,
+      ...noRequestWrites
     }
     await render(
       ready([
@@ -538,7 +546,8 @@ describe("Sandboxes overview", { concurrent: false }, () => {
     const writes: SandboxesModuleWrites = {
       lease: Effect.suspend(lease),
       extend: () => Effect.void,
-      release: () => Effect.void
+      release: () => Effect.void,
+      ...noRequestWrites
     }
     await render(ready([available("ephemeral-02", "999999999991", null)]), { writes })
     await openDialog(button("Lease an account"))
@@ -558,7 +567,8 @@ describe("Sandboxes overview", { concurrent: false }, () => {
     const writes: SandboxesModuleWrites = {
       lease: Effect.fail(new SandboxesWriteFailed({ reason: "rejected" })),
       extend: () => Effect.void,
-      release: () => Effect.void
+      release: () => Effect.void,
+      ...noRequestWrites
     }
     await render(ready([available("ephemeral-02", "999999999991", null)]), { writes })
     await openDialog(button("Lease an account"))
@@ -571,7 +581,8 @@ describe("Sandboxes overview", { concurrent: false }, () => {
     const writes: SandboxesModuleWrites = {
       lease: Effect.fail(new SandboxesWriteFailed({ reason: "unauthorized" })),
       extend: () => Effect.void,
-      release: () => Effect.void
+      release: () => Effect.void,
+      ...noRequestWrites
     }
     await render(ready([available("ephemeral-02", "999999999991", null)]), { writes })
     await openDialog(button("Lease an account"))
@@ -587,7 +598,12 @@ describe("Sandboxes overview", { concurrent: false }, () => {
       calls += 1
       return calls === 1 ? Effect.succeed(overview) : Effect.fail(new SandboxesClientError({ detail: "network" }))
     })
-    const writes: SandboxesModuleWrites = { lease: Effect.void, extend: () => Effect.void, release: () => Effect.void }
+    const writes: SandboxesModuleWrites = {
+      lease: Effect.void,
+      extend: () => Effect.void,
+      release: () => Effect.void,
+      ...noRequestWrites
+    }
     await render(overview, { read, writes })
     await act(async () => await vi.advanceTimersByTimeAsync(30_000))
     const lease = await openDialog(button("Lease an account"))
@@ -638,7 +654,7 @@ describe("Sandboxes overview", { concurrent: false }, () => {
         leased("ephemeral-02", "999999999991", "agent-b", "2026-10-16T21:05:00.000Z", "2026-10-17T21:05:00.000Z"),
         leased("ephemeral-01", "999999999990", "agent-a", "2026-10-17T09:20:00.000Z", "2026-10-17T17:20:00.000Z")
       ]),
-      { writes: { lease: Effect.void, extend, release: () => Effect.void } }
+      { writes: { lease: Effect.void, extend, release: () => Effect.void, ...noRequestWrites } }
     )
     expect(buttons('[data-account="ephemeral-01"] button')).toEqual(["Copy", "Extend", "Release"])
     expect(buttons('[data-account="ephemeral-02"] button')).toEqual(["Copy"])
@@ -667,7 +683,7 @@ describe("Sandboxes overview", { concurrent: false }, () => {
       ready([
         leased("ephemeral-01", "999999999990", "agent-a", "2026-10-17T09:20:00.000Z", "2026-10-17T17:20:00.000Z")
       ]),
-      { writes: { lease: Effect.void, extend: () => Effect.void, release } }
+      { writes: { lease: Effect.void, extend: () => Effect.void, release, ...noRequestWrites } }
     )
     const dialog = await openDialog(button("Release"))
     expect(dialog?.textContent).toContain("Releasing ends your lease now and wipes the account.")
@@ -1030,6 +1046,175 @@ describe("Sandboxes overview", { concurrent: false }, () => {
     await act(async () => await vi.advanceTimersByTimeAsync(30_000))
     expect(text("[data-request-state]")).toBe("Approval requested")
     expect([requestReads, runReads]).toEqual([2, 2])
+  })
+
+  it("asks Fleet to retry a quarantine's reset from its account page, then reads the requests again", async () => {
+    const retry = vi.fn((_accountId: string) => Effect.void)
+    let requestReads = 0
+    const requests = Effect.sync(() => (requestReads++ === 0 ? noRequests : retryRequest("agent-a")))
+    await render(ready([quarantinedCard(nukeBlocker)]), {
+      page: "account",
+      search: { id: "999999999991" },
+      requests,
+      writes: {
+        lease: Effect.void,
+        extend: () => Effect.void,
+        release: () => Effect.void,
+        retry,
+        liftBudget: () => Effect.void
+      }
+    })
+    expect(text("[data-request-note]")).toBe("Starts a fresh run. Goes to Fleet / Approvals first.")
+    await act(async () => button("Retry reset")?.click())
+    await settle()
+    expect(retry).toHaveBeenCalledWith("999999999991")
+    expect(requestReads).toBe(2)
+    expect(button("Retry reset")).toBeUndefined()
+    expect(text("[data-request-state]")).toBe("Approval requested")
+  })
+
+  it("keeps Retry reset disabled while the request is on its way", async () => {
+    await render(ready([quarantinedCard(nukeBlocker)]), {
+      page: "account",
+      search: { id: "999999999991" },
+      writes: {
+        ...noRequestWrites,
+        lease: Effect.void,
+        extend: () => Effect.void,
+        release: () => Effect.void,
+        retry: () => Effect.never
+      }
+    })
+    await act(async () => button("Retry reset")?.click())
+    expect(button("Retry reset")?.disabled).toBe(true)
+  })
+
+  it("offers no Retry reset while a reset waits in Fleet, to a viewer, or where the hub can't submit", async () => {
+    const writes: SandboxesModuleWrites = {
+      lease: Effect.void,
+      extend: () => Effect.void,
+      release: () => Effect.void,
+      ...noRequestWrites
+    }
+    await render(ready([quarantinedCard(nukeBlocker)]), {
+      page: "account",
+      search: { id: "999999999991" },
+      requests: Effect.succeed(retryRequest("review-runner-02")),
+      writes
+    })
+    expect(button("Retry reset")).toBeUndefined()
+    await render(ready([quarantinedCard(nukeBlocker)]), {
+      page: "account",
+      search: { id: "999999999991" },
+      owner: false,
+      writes
+    })
+    expect(button("Retry reset")).toBeUndefined()
+    await render(ready([quarantinedCard(nukeBlocker)]), { page: "account", search: { id: "999999999991" } })
+    expect(button("Retry reset")).toBeUndefined()
+  })
+
+  it("asks Fleet to lift a budget stop from its account page and from its pool card, never to retry it", async () => {
+    const liftBudget = vi.fn((_accountId: string) => Effect.void)
+    const writes: SandboxesModuleWrites = {
+      lease: Effect.void,
+      extend: () => Effect.void,
+      release: () => Effect.void,
+      retry: () => Effect.void,
+      liftBudget
+    }
+    await render(ready([quarantinedCard(budgetBlocker)]), { page: "account", search: { id: "999999999991" }, writes })
+    expect(button("Retry reset")).toBeUndefined()
+    expect(text("[data-request-note]")).toBe("Goes to Fleet / Approvals. The stop stays until it’s approved.")
+    await act(async () => button("Request to lift the stop")?.click())
+    await settle()
+    expect(liftBudget).toHaveBeenCalledWith("999999999991")
+    await render(ready([quarantinedCard(budgetBlocker), quarantinedCard(nukeBlocker, "run-2")]), { writes })
+    expect(button("Request to lift the stop", '[data-account="ephemeral-02"]')).toBeDefined()
+    expect(button("Retry reset")).toBeUndefined()
+  })
+
+  it("says why a retry or lift was not sent, and what did not change", async () => {
+    const refusals: ReadonlyArray<readonly [SandboxesWriteFailed["reason"], string]> = [
+      ["already_requested", "Retry already requested. Nothing new was sent."],
+      ["not_quarantined", "This account isn’t quarantined any more. Nothing was sent."],
+      ["unauthorized", "Only the pool owner can ask for this here. Nothing was sent."],
+      ["network", "The request may not have reached Fleet. Check Fleet / Approvals before asking again."]
+    ]
+    for (const [reason, copy] of refusals) {
+      await render(ready([quarantinedCard(nukeBlocker)]), {
+        page: "account",
+        search: { id: "999999999991" },
+        writes: {
+          ...noRequestWrites,
+          lease: Effect.void,
+          extend: () => Effect.void,
+          release: () => Effect.void,
+          retry: () => Effect.fail(new SandboxesWriteFailed({ reason }))
+        }
+      })
+      await act(async () => button("Retry reset")?.click())
+      await settle()
+      expect(text('[role="alert"]'), reason).toBe(copy)
+    }
+    await render(ready([quarantinedCard(budgetBlocker)]), {
+      page: "account",
+      search: { id: "999999999991" },
+      writes: {
+        ...noRequestWrites,
+        lease: Effect.void,
+        extend: () => Effect.void,
+        release: () => Effect.void,
+        liftBudget: () => Effect.fail(new SandboxesWriteFailed({ reason: "not_budget_held" }))
+      }
+    })
+    await act(async () => button("Request to lift the stop")?.click())
+    await settle()
+    expect(text('[role="alert"]')).toBe("This account isn’t stopped by budget. Nothing was sent.")
+  })
+
+  it("keeps the last good requests and runs, marked last known, when a later poll fails", async () => {
+    let requestReads = 0
+    let runReads = 0
+    const requests = Effect.suspend(() =>
+      requestReads++ === 1
+        ? Effect.fail(new SandboxesClientError({ detail: "network" }))
+        : Effect.succeed(retryRequest("agent-a"))
+    )
+    const runs = () =>
+      Effect.suspend(() =>
+        runReads++ === 1 ? Effect.fail(new SandboxesClientError({ detail: "network" })) : Effect.succeed(quarantineRuns)
+      )
+    await render(ready([quarantinedCard(nukeBlocker)]), {
+      page: "account",
+      search: { id: "999999999991" },
+      requests,
+      runs,
+      writes: { lease: Effect.void, extend: () => Effect.void, release: () => Effect.void, ...noRequestWrites }
+    })
+    await act(async () => await vi.advanceTimersByTimeAsync(30_000))
+    expect(text("[data-request-state]")).toBe("Approval requested")
+    expect(text("[data-requests-stale]")).toBe("Last known at 13:05")
+    expect(document.querySelector("[data-requests-failed]")).toBeNull()
+    expect(text("[data-account-summary]")).toContain("Quarantined since 12:48")
+    await act(async () => await vi.advanceTimersByTimeAsync(30_000))
+    expect(document.querySelector("[data-requests-stale]")).toBeNull()
+  })
+
+  it("keeps a lift off while the requests on screen are last known", async () => {
+    let requestReads = 0
+    const requests = Effect.suspend(() =>
+      requestReads++ === 0 ? Effect.succeed(noRequests) : Effect.fail(new SandboxesClientError({ detail: "network" }))
+    )
+    await render(ready([quarantinedCard(budgetBlocker)]), {
+      page: "account",
+      search: { id: "999999999991" },
+      requests,
+      writes: { lease: Effect.void, extend: () => Effect.void, release: () => Effect.void, ...noRequestWrites }
+    })
+    expect(button("Request to lift the stop")?.disabled).toBe(false)
+    await act(async () => await vi.advanceTimersByTimeAsync(30_000))
+    expect(button("Request to lift the stop")?.disabled).toBe(true)
   })
 
   it("puts quarantine first as the only red, then a budget stop in caution, with its pending request", async () => {
