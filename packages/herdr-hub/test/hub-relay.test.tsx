@@ -126,6 +126,7 @@ describe("Relay in the hub's masthead", () => {
     root = createRoot(host)
     window.history.replaceState(null, "", "/?range=7d&timeZone=UTC#usage/limits")
     const usage = makeUsageModuleViews({
+      host: "hub",
       reads: {
         usage: () =>
           Effect.succeed({

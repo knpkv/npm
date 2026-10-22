@@ -1280,6 +1280,9 @@ importers:
       '@effect/platform-node-shared':
         specifier: 4.0.0
         version: 4.0.0(effect@4.0.0)
+      '@knpkv/agent-usage':
+        specifier: workspace:^
+        version: link:../agent-usage
       '@knpkv/alchemy-console':
         specifier: workspace:^
         version: link:../alchemy-console

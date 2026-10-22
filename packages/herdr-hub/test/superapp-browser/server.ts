@@ -462,7 +462,7 @@ const program = Effect.gen(function*() {
           timeZone: url.searchParams.get("timeZone") ?? "UTC"
         } satisfies Parameters<typeof usageFixture>[0]
         response.end(Schema.encodeSync(Schema.fromJsonString(FleetUsage))(usageFixture(query, now, state)))
-      } else response.end(Schema.encodeSync(Schema.fromJsonString(FleetLimits))(limitsFixture(now, state)))
+      } else response.end(Schema.encodeSync(Schema.fromJsonString(FleetLimits))(limitsFixture(now, state, "hub")))
       return
     }
     if (url.pathname.startsWith("/v1/modules/stacks/")) {
