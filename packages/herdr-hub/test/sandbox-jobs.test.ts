@@ -451,6 +451,29 @@ describe("sandbox sweep", () => {
       expect(yield* f.store.spend).toEqual([])
     }))
 
+  it.effect("records the sweep first; a reader that hangs or fails keeps the last reading and ends the sweep", () =>
+    Effect.gen(function*() {
+      const spend = new Map<string, Effect.Effect<number, SpendReadError>>([
+        [accountA, Effect.succeed(7.4)],
+        [accountB, Effect.succeed(3.1)]
+      ])
+      const f = yield* fixture({ spend })
+      yield* f.pool.sweepOnce
+      spend.set(accountA, Effect.never)
+      spend.set(accountB, Effect.fail(new SpendUnavailable({ accountId: accountB, detail: "broke" })))
+      yield* TestClock.adjust("1 minute")
+      const later = DateTime.toEpochMillis(yield* DateTime.now)
+      const sweeping = yield* Effect.forkChild(f.pool.sweepOnce)
+      yield* TestClock.adjust("1 second")
+      expect(yield* f.store.sweepAt).toBe(later)
+      yield* TestClock.adjust("10 seconds")
+      expect(yield* Fiber.join(sweeping)).toMatchObject({ failed: 0 })
+      expect((yield* f.store.spend).map(({ accountId, usd }) => [accountId, usd])).toEqual([
+        [accountA, 7.4],
+        [accountB, 3.1]
+      ])
+    }))
+
   it.effect("reads no spend on a host without a reader", () =>
     Effect.gen(function*() {
       const f = yield* fixture()
@@ -560,6 +583,18 @@ describe("sandbox sweep", () => {
       yield* Fiber.interrupt(fiber)
       yield* TestClock.adjust(Duration.minutes(5))
       expect(yield* f.pool.lastSweep).toEqual(second)
+    }))
+
+  it.effect("keeps sweeping every five minutes after one sweep dies", () =>
+    Effect.gen(function*() {
+      const f = yield* fixture({ spend: new Map([[accountA, Effect.die("reader broke")]]) })
+      const fiber = yield* Effect.forkChild(runSandboxSweep(f.pool))
+      yield* Effect.yieldNow
+      const first = yield* f.pool.lastSweep
+      expect(first).not.toBeNull()
+      yield* TestClock.adjust(Duration.minutes(5))
+      expect((yield* f.pool.lastSweep)?.at).not.toEqual(first?.at)
+      yield* Fiber.interrupt(fiber)
     }))
 
   it.effect("an account that left the contract is never leased and cannot be extended", () =>

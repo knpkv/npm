@@ -129,8 +129,14 @@ export const makeSandboxHostReads = (input: {
   const overview = Effect.fn("SandboxHost.overview")(function*() {
     const records = yield* input.store.list
     const asOf = yield* input.store.sweepAt
+    // Spend is extra: a reading that cannot be read leaves every card without one, never the pool unread.
     const readings = new Map<string, SpendReading>(
-      (yield* input.store.spend).map((reading) => [reading.accountId, reading])
+      (yield* input.store.spend.pipe(
+        Effect.catchTag(
+          "SandboxStoreUnavailable",
+          (error) => Effect.logWarning("sandbox spend could not be read", error.detail).pipe(Effect.as([]))
+        )
+      )).map((reading) => [reading.accountId, reading])
     )
     const spendOf = (accountId: string): SandboxCard["spend"] => {
       const reading = readings.get(accountId)

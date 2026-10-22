@@ -1,7 +1,14 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Schema } from "effect"
 import { makeSandboxHostReads } from "../src/host-server.js"
-import { makeMemoryRunLog, makeMemorySandboxStore, PoolContract, seedPool, SpendReading } from "../src/index.js"
+import {
+  makeMemoryRunLog,
+  makeMemorySandboxStore,
+  PoolContract,
+  SandboxStoreUnavailable,
+  seedPool,
+  SpendReading
+} from "../src/index.js"
 import { contract, contractInput } from "./fixtures.js"
 
 const reading = Schema.decodeUnknownSync(SpendReading)
@@ -53,5 +60,20 @@ describe("spend", () => {
       })
       const unlimited = yield* plain.overview
       expect(unlimited._tag === "Ready" ? unlimited.spendLimits : "not ready").toBeNull()
+    }))
+
+  it.effect("a spend read that fails leaves the pool on screen, with no spend on any card", () =>
+    Effect.gen(function*() {
+      const limited = Schema.decodeUnknownSync(PoolContract)({ ...contractInput, spend: { alarm: 20, stop: 50 } })
+      const memory = yield* makeMemorySandboxStore(seedPool(limited))
+      const store = {
+        ...memory,
+        spend: Effect.fail(new SandboxStoreUnavailable({ operation: "spend", detail: "undecodable row" }))
+      }
+      const reads = yield* makeSandboxHostReads({ contract: limited, store, runLog: yield* makeMemoryRunLog })
+      const overview = yield* reads.overview
+      if (overview._tag !== "Ready") throw new Error("expected the pool, not a failed read")
+      expect(overview.sandboxes.map(({ spend }) => spend)).toEqual([null, null])
+      expect(overview.spendLimits).toEqual({ alarm: 20, stop: 50 })
     }))
 })

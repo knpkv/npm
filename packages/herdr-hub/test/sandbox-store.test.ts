@@ -285,4 +285,17 @@ it.layer(NodeServices.layer)("sandbox store", (it) => {
         ])
       }))
     }))
+
+  it.effect("an undecodable spend row is a typed store failure, never a defect", () =>
+    Effect.gen(function*() {
+      const path = yield* databasePath
+      const { store } = yield* openSandboxDatabase(path, contract)
+      yield* store.recordSpend(Schema.decodeUnknownSync(SpendReading)({ accountId: "999999999990", usd: 1, asOf: 1 }))
+      const raw = yield* Effect.acquireRelease(
+        openPrivateSqlite(path, { initialize: () => undefined }),
+        (opened) => Effect.sync(() => opened.database.close())
+      )
+      raw.database.prepare("UPDATE sandbox_spend SET usd = -5").run()
+      expect(yield* Effect.flip(store.spend)).toMatchObject({ _tag: "SandboxStoreUnavailable", operation: "spend" })
+    }).pipe(Effect.scoped))
 })
