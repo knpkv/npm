@@ -2,6 +2,33 @@
 
 Released as `@knpkv/herdr-approvals` up to 0.18.0; the headings below are that package's history.
 
+## 0.52.0
+
+### Minor Changes
+
+- [#1073](https://github.com/knpkv/npm/pull/1073) [`b207797`](https://github.com/knpkv/npm/commit/b207797126eeebea22ca2b8bec4b34bbfeae5ce7) Thanks [@konopkov](https://github.com/konopkov)! - Add `@knpkv/hub-app`: the contract and runner for apps that run standalone on their own port and mount in the
+  hub. An app is its own process: `runApp` serves it on loopback with an owner login, or on a unix socket the hub
+  proxies to. The hub reads installed apps from `~/.config/herdr/apps.json` (re-read when it changes and every 30
+  seconds), probes each app's manifest, keeps the last good one, and lists every app's state at `GET /v1/apps`. It
+  proxies `/apps/<id>/*` with the caller and a single-use grant, and serves app-to-hub services under
+  `/v1/app-services/*` with a per-app token. An app that is down, incompatible or misdeclared is marked
+  unavailable and never stops the hub. The module contract and route helpers moved to `@knpkv/hub-app`;
+  `@knpkv/herdr-hub/modules` and `/modules/server` re-export them for one release.
+
+- [#1070](https://github.com/knpkv/npm/pull/1070) [`a7359bb`](https://github.com/knpkv/npm/commit/a7359bba8ca51f1ec21c2726d8b54004ad4789f6) Thanks [@konopkov](https://github.com/konopkov)! - Usage Limits shows the hub's own tokens as its design draws them: one bar per period with its value printed, and a legend with each tool's total in text. A tool whose limits can't be read is left out of every total and named as excluded, and the title says which tools are counted. Reset times say "next" only a full week out and give the date for a reset already past.
+
+- [#1070](https://github.com/knpkv/npm/pull/1070) [`a7359bb`](https://github.com/knpkv/npm/commit/a7359bba8ca51f1ec21c2726d8b54004ad4789f6) Thanks [@konopkov](https://github.com/konopkov)! - Usage Limits now reads like its design: one sentence on whether the hub has room for more work, notices for old or unreadable limits, and one card per tool with its level, state (near limit, limit reached, stale, sign-in required), limit track, resets and a note. A limit is "Sign-in required" only when the account needs a sign-in; any other unreadable limit reads Unknown with its cause, and a tool with no reading still gets an Unknown card. Resets on another day name the day. Loading and a failed first read keep their own simple states. The Limits page drops the host, range and time-zone controls; they stay on Tokens and By tool.
+
+- [#1072](https://github.com/knpkv/npm/pull/1072) [`e4d6b79`](https://github.com/knpkv/npm/commit/e4d6b7959853f944345941b1e66f5bb4992dd7d5) Thanks [@konopkov](https://github.com/konopkov)! - A pool contract can name how people sign in (`access`: portal URL, SSO session, role). With it, the pool owner gets Open console and Copy CLI profile on the Sandboxes cards and account page.
+
+  `PoolContract.regions` now accepts only AWS region codes such as `eu-central-1`.
+
+### Patch Changes
+
+- Updated dependencies [[`b207797`](https://github.com/knpkv/npm/commit/b207797126eeebea22ca2b8bec4b34bbfeae5ce7), [`e4d6b79`](https://github.com/knpkv/npm/commit/e4d6b7959853f944345941b1e66f5bb4992dd7d5)]:
+  - @knpkv/hub-app@0.1.0
+  - @knpkv/sandbox-pool@0.7.0
+
 ## 0.51.0
 
 ### Minor Changes
