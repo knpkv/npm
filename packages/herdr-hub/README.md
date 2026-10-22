@@ -412,6 +412,6 @@ base without the inventory logs
 application route. No host, provider or agent-usage process runs. Region attributes
 in the shared Connect Usage view do not change its layout; Connect onboarding is separate.
 
-`legacy.until` is `2026-10-23T00:00:00.000Z`, seven days after the planned October 16 merge date.
-If the merge date changes, update it to that date plus seven days before merge.
+`legacy.until` is `2026-10-30T00:00:00.000Z`. It was seven days after the October 16 merge date and moved one
+week so the Usage Limits redesign to its reference can land first.
 Drift stays in the report; no waivers are added.
