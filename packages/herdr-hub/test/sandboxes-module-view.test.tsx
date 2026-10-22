@@ -575,6 +575,7 @@ describe("Sandboxes overview", { concurrent: false }, () => {
     await act(async () => button("Lease longest idle", '[role="dialog"]')?.click())
     await settle()
     expect(text('[role="dialog"] [role="alert"]')).toBe("The lease wasn’t submitted. Nothing was leased.")
+    expect(document.querySelector('[role="dialog"] [role="alert"]')?.className).toBe("sandboxes-refusal")
   })
 
   it("says when only the owner may submit", async () => {
@@ -1156,6 +1157,7 @@ describe("Sandboxes overview", { concurrent: false }, () => {
       await act(async () => button("Retry reset")?.click())
       await settle()
       expect(text('[role="alert"]'), reason).toBe(copy)
+      expect(document.querySelector('[role="alert"]')?.className, reason).toBe("sandboxes-refusal")
     }
     await render(ready([quarantinedCard(budgetBlocker)]), {
       page: "account",

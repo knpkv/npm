@@ -438,7 +438,11 @@ const ConfirmSheet = ({
             </div>
             <p className="sandboxes-sheet-lead">{lead}</p>
             {children}
-            {phase._tag === "Refused" ? <p role="alert">{refusedCopy(action, phase.reason)}</p> : null}
+            {phase._tag === "Refused" ? (
+              <p className="sandboxes-refusal" role="alert">
+                {refusedCopy(action, phase.reason)}
+              </p>
+            ) : null}
           </Sheet.Body>
           <Sheet.Footer className="sandboxes-sheet-foot">
             <Button onClick={() => setOpen(false)} variant="quiet">
@@ -1032,7 +1036,11 @@ const RequestAction = ({
       <small className="sandboxes-muted" data-request-note="">
         {requestCopy[kind].note}
       </small>
-      {phase._tag === "Refused" ? <p role="alert">{requestRefusal(kind, phase.reason)}</p> : null}
+      {phase._tag === "Refused" ? (
+        <p className="sandboxes-refusal" role="alert">
+          {requestRefusal(kind, phase.reason)}
+        </p>
+      ) : null}
     </div>
   )
 }

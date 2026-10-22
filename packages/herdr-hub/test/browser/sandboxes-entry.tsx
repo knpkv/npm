@@ -33,7 +33,8 @@ const SandboxesState = Schema.Literals([
   "attention-4a",
   "attention-4a-lift",
   "attention-refused",
-  "attention-stale"
+  "attention-stale",
+  "2a-refused"
 ])
 const parameters = new URLSearchParams(location.search)
 const state = Schema.decodeUnknownSync(SandboxesState)(parameters.get("state") ?? "1a")
@@ -132,7 +133,8 @@ const overviews = {
   "attention-4a": ready([ephemeral01Stopped, ephemeral02Quarantined], "ok"),
   "attention-4a-lift": ready([ephemeral01Stopped, ephemeral02Quarantined], "ok"),
   "attention-refused": ready([ephemeral01Stopped, ephemeral02Quarantined], "ok"),
-  "attention-stale": ready([ephemeral01Stopped, ephemeral02Quarantined], "ok")
+  "attention-stale": ready([ephemeral01Stopped, ephemeral02Quarantined], "ok"),
+  "2a-refused": pool
 } satisfies Record<typeof state, SandboxesOverview>
 
 const runs = Schema.decodeUnknownSync(SandboxRuns)({
@@ -236,9 +238,9 @@ const overview = Effect.suspend(() => {
 })
 
 // The sheets confirm into a write that never settles, so a capture keeps the sheet open. The refused
-// state's retry answers that a retry is already pending, for the refusal shot.
+// states answer with a refusal instead: a lease Fleet refused, and a retry that is already pending.
 const writes: SandboxesModuleWrites = {
-  lease: Effect.never,
+  lease: state === "2a-refused" ? Effect.fail(new SandboxesWriteFailed({ reason: "rejected" })) : Effect.never,
   extend: () => Effect.never,
   release: () => Effect.never,
   retry: () =>

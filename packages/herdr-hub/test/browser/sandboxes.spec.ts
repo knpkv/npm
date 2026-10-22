@@ -45,6 +45,7 @@ const screens: ReadonlyArray<Screen> = [
   { id: "8f-host", state: "8f-host" },
   { id: "8g", state: "8g", after: 120_000 },
   { id: "8d", state: "8d", heading: "ephemeral-02" },
+  { id: "2a-refused", state: "2a-refused", open: { button: "Lease an account" }, press: "Lease longest idle" },
   { id: "8c", state: "8c", sheet: true }
 ]
 
@@ -73,14 +74,14 @@ const show = async (page: Page, screen: Screen, theme: string) => {
       : page.getByRole("heading", { level: 1, name: screen.heading ?? "Sandboxes" })
   ).toBeVisible()
   if (screen.after !== undefined) await page.clock.runFor(screen.after)
-  if (screen.press !== undefined) {
-    await page.getByRole("button", { name: screen.press, exact: true }).click()
-    await expect(page.getByRole("alert")).toBeVisible()
-  }
   if (screen.open !== undefined) {
     const scope = screen.open.scope === undefined ? page : page.locator(`[data-account="${screen.open.scope}"]`)
     await scope.getByRole("button", { name: screen.open.button, exact: true }).click()
     await expect(page.getByRole("dialog")).toBeVisible()
+  }
+  if (screen.press !== undefined) {
+    await page.getByRole("button", { name: screen.press, exact: true }).click()
+    await expect(page.getByRole("alert")).toBeVisible()
   }
 }
 
