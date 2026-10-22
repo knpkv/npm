@@ -47,7 +47,10 @@ export const RunEntry = Schema.TaggedUnion({
 })
 export type RunEntry = typeof RunEntry.Type
 
-/** One run as the hub lists it. `outcome` is null while it runs; `current` is the step in progress. */
+/**
+ * One run as the hub lists it. `outcome` is null while it runs; `current` is the step in progress;
+ * `failedStep` is the last step that reported failed, null for a run with no failed step.
+ */
 export interface RunSummary {
   readonly runId: RunId
   readonly accountId: AccountId
@@ -57,6 +60,7 @@ export interface RunSummary {
   readonly outcome: "Available" | "Quarantined" | null
   readonly blocker: string | null
   readonly current: RunStep | null
+  readonly failedStep: RunStep | null
 }
 
 /** One summary per started run, newest start first. Entries of a run whose start is missing are ignored. */
@@ -72,7 +76,8 @@ export const summarizeRuns = (entries: ReadonlyArray<RunEntry>): ReadonlyArray<R
         endedAt: null,
         outcome: null,
         blocker: null,
-        current: null
+        current: null,
+        failedStep: null
       })
       continue
     }
@@ -81,7 +86,11 @@ export const summarizeRuns = (entries: ReadonlyArray<RunEntry>): ReadonlyArray<R
     runs.set(
       entry.runId,
       entry._tag === "Step"
-        ? { ...run, current: entry.status === "started" ? entry.step : null }
+        ? {
+          ...run,
+          current: entry.status === "started" ? entry.step : null,
+          failedStep: entry.status === "failed" ? entry.step : run.failedStep
+        }
         : { ...run, endedAt: entry.at, outcome: entry.outcome, blocker: entry.blocker, current: null }
     )
   }

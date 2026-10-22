@@ -9,6 +9,7 @@ import { connectModule, sandboxesModule } from "../src/module-contract.js"
 import { dispatchModuleRoute, makeModuleLayer, ModuleHandlers } from "../src/module-server.js"
 import {
   makeSandboxesModule,
+  type PendingSandboxApproval,
   readSandboxesHost,
   sandboxesListedOn,
   sandboxesModuleUrl,
@@ -43,20 +44,25 @@ const request = (
     readonly provenance?: "verified_local_listener" | "authenticated_remote"
     readonly body?: Schema.Json
     readonly sameOrigin?: Effect.Effect<void, OriginRefused>
+    readonly refuse?: boolean
   } = {}
 ) =>
   dispatchModuleRoute({
     method,
     listener,
     url: new URL(`https://hub.example/v1/modules/${path}`),
-    authorize: Effect.succeed({
-      login: "example-viewer",
-      sameNode: options.sameNode ?? false,
-      provenance: options.provenance ?? "authenticated_remote"
-    }),
+    authorize: options.refuse === true ?
+      Effect.fail(new CallerRefused()) :
+      Effect.succeed({
+        login: "example-viewer",
+        sameNode: options.sameNode ?? false,
+        provenance: options.provenance ?? "authenticated_remote"
+      }),
     sameOrigin: options.sameOrigin ?? Effect.void,
     readJson: () => Effect.succeed(options.body ?? null)
   })
+
+class CallerRefused extends Schema.TaggedError<CallerRefused>()("CallerRefused", {}) {}
 
 class OriginRefused extends Schema.TaggedError<OriginRefused>()("OriginRefused", {}) {}
 
@@ -103,6 +109,30 @@ const fakeReads: SandboxHostReads = {
   })
 }
 
+const retryRequested: PendingSandboxApproval = {
+  id: "job-retry",
+  actor: "example-requester",
+  createdAt: 1_700_000_000_000,
+  approvalExpiresAt: 1_700_003_600_000,
+  payload: { kind: "sandbox.reset", accountId: account, reason: "Retry" }
+}
+
+const liftRequested: PendingSandboxApproval = {
+  id: "job-lift",
+  actor: "example-viewer",
+  createdAt: 1_700_000_100_000,
+  approvalExpiresAt: null,
+  payload: { kind: "sandbox.budget.lift", accountId: held }
+}
+
+const otherApproval: PendingSandboxApproval = {
+  id: "job-nix",
+  actor: "example-requester",
+  createdAt: 1_700_000_200_000,
+  approvalExpiresAt: null,
+  payload: { kind: "nix.apply", ref: "main" }
+}
+
 const withModule = <A, E, R>(
   sandboxesHost: FleetHostName | null,
   run: Effect.Effect<A, E, R>,
@@ -110,7 +140,7 @@ const withModule = <A, E, R>(
     readonly reads?: Effect.Effect<SandboxHostReads, SandboxReaderStartError>
     readonly pool?: null
     readonly isHub?: boolean
-    readonly pending?: ReadonlySet<string>
+    readonly pending?: Effect.Effect<ReadonlyArray<PendingSandboxApproval>, string>
     readonly submit?: SandboxJobSubmit
   } = {}
 ) =>
@@ -126,7 +156,7 @@ const withModule = <A, E, R>(
             sandboxesHost,
             stateDirectory: "/fixture",
             pool: options.pool === null ? null : pool,
-            pendingLifts: Effect.succeed(options.pending ?? new Set()),
+            pendingApprovals: options.pending ?? Effect.succeed([]),
             reads: options.reads ?? Effect.succeed(fakeReads),
             submit: options.submit ?? (() => Effect.die("no job expected"))
           })
@@ -275,7 +305,7 @@ describe("host-local Sandboxes module", () => {
           { kind: "sandbox-budget-hold", destination: { query: { id: held } } }
         ]
       })
-      const pending = yield* withModule(host, read, { pending: new Set([held]) })
+      const pending = yield* withModule(host, read, { pending: Effect.succeed([liftRequested]) })
       expect(pending?.body).toMatchObject({
         items: [{ kind: "sandbox-quarantined" }]
       })
@@ -286,6 +316,76 @@ describe("host-local Sandboxes module", () => {
         items: [],
         contributions: [{ provider: "sandboxes", asOf: null }]
       })
+    }))
+
+  it.effect("lists pending reset and budget-lift approvals per account, with who asked and Fleet's title", () =>
+    withModule(
+      host,
+      Effect.gen(function*() {
+        expect((yield* request("sandboxes/requests"))?.body).toEqual({
+          _tag: "Ready",
+          requests: [
+            {
+              jobId: "job-retry",
+              accountId: account,
+              kind: "Retry",
+              title: "Retry one quarantined sandbox account",
+              requestedBy: "example-requester",
+              requestedAt: "2023-11-14T22:13:20.000Z",
+              expiresAt: "2023-11-14T23:13:20.000Z"
+            },
+            {
+              jobId: "job-lift",
+              accountId: held,
+              kind: "BudgetLift",
+              title: "Lift one sandbox account's budget stop",
+              requestedBy: "example-viewer",
+              requestedAt: "2023-11-14T22:15:00.000Z",
+              expiresAt: null
+            }
+          ]
+        })
+      }),
+      { pending: Effect.succeed([retryRequested, otherApproval, liftRequested]) }
+    ))
+
+  it.effect("refuses the requests read to a caller without access, before reading Fleet", () => {
+    const reads: Array<string> = []
+    const pending = Effect.sync(() => {
+      reads.push("fleet")
+      return [retryRequested]
+    })
+    return withModule(
+      host,
+      Effect.gen(function*() {
+        const refused = yield* Effect.result(request("sandboxes/requests", "serve", "GET", { refuse: true }))
+        expect(Result.isFailure(refused) && refused.failure._tag).toBe("CallerRefused")
+        const deniedListeners: ReadonlyArray<"approval" | "tailnet" | "lan" | "work"> = [
+          "approval",
+          "tailnet",
+          "lan",
+          "work"
+        ]
+        for (const listener of deniedListeners) {
+          expect(yield* request("sandboxes/requests", listener)).toBeNull()
+        }
+        expect(yield* request("sandboxes/requests", "serve", "POST")).toBeNull()
+        expect(reads).toEqual([])
+      }),
+      { pending }
+    )
+  })
+
+  it.effect("names an unserved pool on the requests read, and a Fleet failure is unavailable, not empty", () =>
+    Effect.gen(function*() {
+      const elsewhere = yield* withModule(other, request("sandboxes/requests"))
+      expect(elsewhere?.body).toMatchObject({ _tag: "Unavailable", reason: "other_host" })
+      const down = yield* withModule(
+        host,
+        Effect.result(request("sandboxes/requests")),
+        { pending: Effect.fail("store down") }
+      )
+      expect(Result.isFailure(down) && down.failure).toMatchObject({ status: 503, code: "unavailable" })
     }))
 
   it.effect("tells the page who is reading and whether that is the hub's own node", () =>

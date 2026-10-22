@@ -1,11 +1,18 @@
 // @vitest-environment happy-dom
-import { SandboxCard, type SandboxesOverview, type SandboxCard as SandboxCardType } from "@knpkv/sandbox-pool/host"
+import {
+  type SandboxBlocker,
+  SandboxCard,
+  type SandboxesOverview,
+  type SandboxCard as SandboxCardType,
+  SandboxRuns
+} from "@knpkv/sandbox-pool/host"
 import { PortalProvider } from "@knpkv/rly/foundations"
 import { DateTime, Effect, Schema } from "effect"
 import { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { ModulePageMount } from "../src/modules.js"
+import { SandboxRequests } from "../src/sandboxes-contract.js"
 import {
   makeSandboxesModuleViews,
   SandboxesClientError,
@@ -41,6 +48,70 @@ const leased = (
 const available = (name: string, accountId: string, lastResetAt: string | null) =>
   card({ accountId, name, label: null, state: { _tag: "Available", lastResetAt } })
 
+const runsPage = Schema.decodeUnknownSync(SandboxRuns)
+const requestsRead = Schema.decodeUnknownSync(SandboxRequests)
+
+const quarantinedCard = (blocker: SandboxBlocker, runId = "retry-1248") =>
+  card({
+    accountId: "999999999991",
+    name: "ephemeral-02",
+    label: null,
+    state: { _tag: "Quarantined", runId, step: null, blocker }
+  })
+
+const nukeBlocker: SandboxBlocker = {
+  _tag: "NukeFailed",
+  resourceType: "S3Bucket",
+  text: "S3Bucket could not be removed"
+}
+const budgetBlocker: SandboxBlocker = { _tag: "BudgetHold", text: "Budget hold. Lift it with sandbox.budget.lift" }
+
+const quarantineRuns = runsPage({
+  _tag: "Ready",
+  accountId: "999999999991",
+  next: null,
+  runs: [
+    {
+      runId: "retry-1248",
+      step: null,
+      blocker: nukeBlocker,
+      outcome: "Quarantined",
+      reason: "Retry",
+      startedAt: "2026-10-17T12:41:00.000Z",
+      endedAt: "2026-10-17T12:48:00.000Z",
+      failedStep: "nuke"
+    },
+    {
+      runId: "release-1036",
+      step: null,
+      blocker: null,
+      outcome: "Available",
+      reason: "Released",
+      startedAt: "2026-10-17T10:36:00.000Z",
+      endedAt: "2026-10-17T10:42:00.000Z",
+      failedStep: null
+    }
+  ]
+})
+
+const noRequests = requestsRead({ _tag: "Ready", requests: [] })
+
+const retryRequest = (requestedBy: string) =>
+  requestsRead({
+    _tag: "Ready",
+    requests: [
+      {
+        jobId: "job-retry",
+        accountId: "999999999991",
+        kind: "Retry",
+        title: "Retry one quarantined sandbox account",
+        requestedBy,
+        requestedAt: "2026-10-17T13:05:00.000Z",
+        expiresAt: "2026-10-17T14:05:00.000Z"
+      }
+    ]
+  })
+
 const text = (selector: string): string => document.querySelector(selector)?.textContent ?? ""
 
 const buttons = (selector = "button"): Array<string | null> =>
@@ -74,6 +145,10 @@ describe("Sandboxes overview", { concurrent: false }, () => {
       readonly caller?: SandboxesModuleReads["caller"]
       readonly writes?: SandboxesModuleWrites | null
       readonly timeZone?: string
+      readonly page?: "overview" | "account" | "runs"
+      readonly search?: Record<string, string>
+      readonly runs?: SandboxesModuleReads["runs"]
+      readonly requests?: SandboxesModuleReads["requests"]
     } = {}
   ) => {
     if (root === null) {
@@ -84,7 +159,9 @@ describe("Sandboxes overview", { concurrent: false }, () => {
     const navigate = vi.fn<ModulePageMount["navigate"]>()
     const reads: SandboxesModuleReads = {
       overview: options.read ?? Effect.succeed(overview),
-      caller: options.caller ?? Effect.succeed({ login: "agent-a", owner: options.owner ?? true })
+      caller: options.caller ?? Effect.succeed({ login: "agent-a", owner: options.owner ?? true }),
+      runs: options.runs ?? (() => Effect.succeed(quarantineRuns)),
+      requests: options.requests ?? Effect.succeed(noRequests)
     }
     const module = makeSandboxesModuleViews({
       reads,
@@ -94,7 +171,11 @@ describe("Sandboxes overview", { concurrent: false }, () => {
     await act(async () =>
       root?.render(
         <PortalProvider>
-          {module.pages.overview(new URLSearchParams(), { active: true, navigate, closeSelection: () => undefined })}
+          {module.pages[options.page ?? "overview"](new URLSearchParams(options.search), {
+            active: true,
+            navigate,
+            closeSelection: () => undefined
+          })}
         </PortalProvider>
       )
     )
@@ -740,32 +821,270 @@ describe("Sandboxes overview", { concurrent: false }, () => {
     expect(buttons().some((label) => /sweep/i.test(label ?? ""))).toBe(false)
   })
 
-  it("says the runs page is not here yet and links back to the pool", async () => {
-    if (root === null) {
-      const host = document.createElement("div")
-      document.body.append(host)
-      root = createRoot(host)
-    }
-    const module = makeSandboxesModuleViews({
-      reads: { overview: Effect.never, caller: Effect.never },
-      writes: null,
-      timeZone: "UTC"
+  it("shows a quarantine on its account page: blocker words, run id, since and the failed step", async () => {
+    await render(ready([quarantinedCard(nukeBlocker)]), { page: "account", search: { id: "999999999991" } })
+    expect(text(".sandboxes-page h1")).toBe("ephemeral-02")
+    expect(text(".sandboxes-page [data-account-state]")).toBe("Quarantined")
+    expect(text("[data-account-summary]")).toBe(
+      "The reset failed at Nuke. Quarantined since 12:48; no one can lease it until a reset passes."
+    )
+    expect(text("[data-account-blocker]")).toBe("S3Bucket could not be removed")
+    const facts = [...document.querySelectorAll(".sandboxes-account dl > div")].map((row) => [
+      row.querySelector("dt")?.textContent,
+      row.querySelector("dd")?.textContent
+    ])
+    expect(facts).toEqual([
+      ["Run ID", "retry-1248"],
+      ["Since", "12:48"],
+      ["Failed step", "Nuke"]
+    ])
+    const steps = [...document.querySelectorAll('ol[aria-label="Reset steps"] li')].map((node) => [
+      node.querySelector("[data-step-name]")?.textContent,
+      node.querySelector("[data-step-state]")?.textContent
+    ])
+    expect(steps.slice(2, 5)).toEqual([
+      ["Dry run", "Done"],
+      ["Nuke", "Failed"],
+      ["Verify", "Not run"]
+    ])
+    expect(
+      document.querySelector('ol[aria-label="Reset steps"] li[aria-current="step"] [data-step-name]')?.textContent
+    ).toBe("Nuke")
+    expect(document.querySelector<HTMLAnchorElement>("a[data-back]")?.getAttribute("href")).toBe("?#sandboxes/overview")
+    expect(text(".sandboxes-page")).not.toContain("nuke:")
+  })
+
+  it("shows a pending retry as Approval requested, who asked, that it waits on an approver, and links Fleet", async () => {
+    await render(ready([quarantinedCard(nukeBlocker)]), {
+      page: "account",
+      search: { id: "999999999991" },
+      requests: Effect.succeed(retryRequest("agent-a"))
     })
-    await act(async () =>
-      root?.render(
-        <PortalProvider>
-          {module.pages.runs(new URLSearchParams({ id: "999999999990" }), {
-            active: true,
-            navigate: () => undefined,
-            closeSelection: () => undefined
-          })}
-        </PortalProvider>
-      )
+    const request = document.querySelector("[data-request]")
+    expect(request?.getAttribute("role")).toBe("status")
+    expect(request?.querySelector("[data-request-state]")?.textContent).toBe("Approval requested")
+    expect(request?.querySelector("[data-request-line]")?.textContent).toBe(
+      "Retry reset, requested by you at 13:05. Waits on an approver."
     )
-    expect(text(".sandboxes-page h1")).toBe("Sandboxes")
-    expect(text(".sandboxes-panel")).toContain("Run details aren’t on the hub yet.")
-    expect(document.querySelector<HTMLAnchorElement>(".sandboxes-panel a")?.getAttribute("href")).toBe(
-      "?#sandboxes/overview"
+    expect(request?.querySelector("[data-request-waits]")?.textContent).toBe(
+      "Nothing runs until it’s approved. 1 h left, expires 14:05."
     )
+    const link = request?.querySelector<HTMLAnchorElement>("a")
+    expect(link?.textContent).toBe("Open “Retry one quarantined sandbox account” in Fleet / Approvals")
+    expect(link?.getAttribute("href")).toBe("?#fleet/approvals")
+    expect(document.querySelector("[aria-busy='true'], [role='progressbar']")).toBeNull()
+  })
+
+  it("names another requester by login", async () => {
+    await render(ready([quarantinedCard(nukeBlocker)]), {
+      page: "account",
+      search: { id: "999999999991" },
+      requests: Effect.succeed(retryRequest("review-runner-02"))
+    })
+    expect(text("[data-request-line]")).toBe(
+      "Retry reset, requested by review-runner-02 at 13:05. Waits on an approver."
+    )
+  })
+
+  it("shows a budget stop in caution words, not red, with no stored hold line", async () => {
+    await render(ready([quarantinedCard(budgetBlocker)]), { page: "account", search: { id: "999999999991" } })
+    const label = document.querySelector(".sandboxes-page [data-account-state]")
+    expect(label?.textContent).toBe("Stopped by budget")
+    expect(label?.getAttribute("data-tone")).toBe("caution")
+    expect(text("[data-account-summary]")).toBe(
+      "Budget hold: this account passed its monthly spend cap, so it’s locked until an approver lifts the hold. Cleanup still ran."
+    )
+    expect(text(".sandboxes-page")).not.toContain("sandbox.budget.lift")
+    expect(text(".sandboxes-page")).not.toContain("DenyAll")
+  })
+
+  it("has no owner actions on the account page for a viewer, and keeps copy account id", async () => {
+    await render(ready([quarantinedCard(nukeBlocker)]), {
+      page: "account",
+      search: { id: "999999999991" },
+      owner: false
+    })
+    expect(buttons(".sandboxes-page button")).toEqual(["Copy"])
+  })
+
+  it("says when the account is not in this pool, and when the id is not an account id", async () => {
+    await render(ready([quarantinedCard(nukeBlocker)]), { page: "account", search: { id: "999999999999" } })
+    expect(text(".sandboxes-panel h2")).toBe("No account 999999999999 in this pool.")
+    await render(ready([quarantinedCard(nukeBlocker)]), { page: "account", search: { id: "nope" } })
+    expect(text(".sandboxes-panel h2")).toBe("No account nope in this pool.")
+  })
+
+  it("says Fleet requests couldn’t be read instead of showing none", async () => {
+    await render(ready([quarantinedCard(nukeBlocker)]), {
+      page: "account",
+      search: { id: "999999999991" },
+      requests: Effect.fail(new SandboxesClientError({ detail: "status" }))
+    })
+    expect(text("[data-requests-failed]")).toBe("Fleet requests couldn’t be read.")
+  })
+
+  it("lists an account's runs with reason, outcome, duration and start, newest first", async () => {
+    await render(ready([quarantinedCard(nukeBlocker)]), { page: "runs", search: { id: "999999999991" } })
+    expect(text(".sandboxes-page h1")).toBe("ephemeral-02")
+    expect(text(".sandboxes-runs h2")).toBe("Recent runs")
+    const rows = [...document.querySelectorAll(".sandboxes-runs tbody tr")].map((row) =>
+      [...row.querySelectorAll("td")].slice(0, 5).map((cell) => cell.textContent)
+    )
+    expect(rows).toEqual([
+      ["ephemeral-02", "Retry", "Quarantined", "7 min", "12:41"],
+      ["ephemeral-02", "Released", "Available", "6 min", "10:36"]
+    ])
+    expect(document.querySelector<HTMLAnchorElement>(".sandboxes-runs tbody a")?.getAttribute("href")).toBe(
+      "?id=999999999991&run=retry-1248#sandboxes/runs"
+    )
+  })
+
+  it("says the runs can't be read, and reading, without naming the host service", async () => {
+    await render(ready([quarantinedCard(nukeBlocker)]), {
+      page: "runs",
+      search: { id: "999999999991" },
+      runs: () => Effect.fail(new SandboxesClientError({ detail: "network" }))
+    })
+    expect(text(".sandboxes-panel")).toBe("Can’t readCan’t read runs.")
+    await render(ready([quarantinedCard(nukeBlocker)]), {
+      page: "runs",
+      search: { id: "999999999991" },
+      runs: () => Effect.never
+    })
+    expect(text("[data-runs-loading]")).toBe("Reading runs…")
+  })
+
+  it("opens one run's detail with the failed step's blocker words and none of the stored lines", async () => {
+    await render(ready([quarantinedCard(nukeBlocker)]), {
+      page: "runs",
+      search: { id: "999999999991", run: "retry-1248" }
+    })
+    const dialog = await vi.waitFor(() => {
+      const found = document.querySelector('[role="dialog"]')
+      expect(found).not.toBeNull()
+      return found
+    })
+    expect(dialog?.textContent).toContain("Cleanup run")
+    expect(dialog?.textContent).toContain("retry-1248")
+    const steps = [...(dialog?.querySelectorAll('ol[aria-label="Cleanup steps"] li') ?? [])].map((node) => [
+      node.querySelector("[data-step-name]")?.textContent,
+      node.querySelector("[data-step-state]")?.textContent
+    ])
+    expect(steps[3]).toEqual(["Removing", "Failed"])
+    expect(steps[4]).toEqual(["Verifying empty", "Not run"])
+    expect(dialog?.querySelector("[data-step-blocker]")?.textContent).toBe("S3Bucket could not be removed")
+    expect(dialog?.textContent).not.toContain("Log")
+    expect(dialog?.textContent).not.toContain("arn:")
+  })
+
+  it("shows a run that ended available as all done, even when one of its steps failed and was retried", async () => {
+    await render(ready([quarantinedCard(nukeBlocker)]), {
+      page: "runs",
+      search: { id: "999999999991", run: "resumed-1300" },
+      runs: () =>
+        Effect.succeed(
+          runsPage({
+            _tag: "Ready",
+            accountId: "999999999991",
+            next: null,
+            runs: [
+              {
+                runId: "resumed-1300",
+                step: null,
+                blocker: null,
+                outcome: "Available",
+                reason: "Retry",
+                startedAt: "2026-10-17T12:50:00.000Z",
+                endedAt: "2026-10-17T13:00:00.000Z",
+                failedStep: "nuke"
+              }
+            ]
+          })
+        )
+    })
+    const dialog = await vi.waitFor(() => {
+      const found = document.querySelector('[role="dialog"]')
+      expect(found).not.toBeNull()
+      return found
+    })
+    const states = [...(dialog?.querySelectorAll("[data-step-state]") ?? [])].map((node) => node.textContent)
+    expect(new Set(states)).toEqual(new Set(["Done"]))
+  })
+
+  it("reads Fleet requests and the account's runs again on the pool's 30 s poll", async () => {
+    let requestReads = 0
+    let runReads = 0
+    const requests = Effect.sync(() => (requestReads++ === 0 ? noRequests : retryRequest("agent-a")))
+    const runs = () =>
+      Effect.sync(() => {
+        runReads += 1
+        return quarantineRuns
+      })
+    await render(ready([quarantinedCard(nukeBlocker)]), {
+      page: "account",
+      search: { id: "999999999991" },
+      requests,
+      runs
+    })
+    expect(document.querySelector("[data-request]")).toBeNull()
+    await act(async () => await vi.advanceTimersByTimeAsync(30_000))
+    expect(text("[data-request-state]")).toBe("Approval requested")
+    expect([requestReads, runReads]).toEqual([2, 2])
+  })
+
+  it("puts quarantine first as the only red, then a budget stop in caution, with its pending request", async () => {
+    await render(
+      ready([
+        leased("ephemeral-01", "999999999990", "agent-b", "2026-10-17T09:20:00.000Z", "2026-10-17T17:20:00.000Z"),
+        quarantinedCard(nukeBlocker),
+        card({
+          accountId: "999999999992",
+          name: "ephemeral-03",
+          label: null,
+          state: { _tag: "Quarantined", runId: "run-hold", step: null, blocker: budgetBlocker }
+        })
+      ]),
+      {
+        requests: Effect.succeed(
+          requestsRead({
+            _tag: "Ready",
+            requests: [
+              {
+                jobId: "job-lift",
+                accountId: "999999999992",
+                kind: "BudgetLift",
+                title: "Lift one sandbox account's budget stop",
+                requestedBy: "review-runner-02",
+                requestedAt: "2026-10-17T12:58:00.000Z",
+                expiresAt: null
+              }
+            ]
+          })
+        )
+      }
+    )
+    const names = [...document.querySelectorAll("[data-account]")].map((node) => node.getAttribute("data-account"))
+    expect(names).toEqual(["ephemeral-02", "ephemeral-03", "ephemeral-01"])
+    const tones = [...document.querySelectorAll("[data-account] [data-pool-state]")].map((node) => [
+      node.textContent,
+      node.getAttribute("data-tone")
+    ])
+    expect(tones).toEqual([
+      ["Quarantined", "critical"],
+      ["Stopped by budget", "caution"],
+      ["Leased", "progress"]
+    ])
+    expect(text("[data-pool-summary]")).toBe("1 quarantined, 1 stopped by budget, 1 leased.")
+    const held = document.querySelector('[data-account="ephemeral-03"]')
+    expect(held?.querySelector("[data-request-state]")?.textContent).toBe("Approval requested")
+    expect(held?.querySelector("[data-request-line]")?.textContent).toBe(
+      "Budget lift requested by review-runner-02 at 12:58. Waits on an approver."
+    )
+    expect(held?.querySelector("a[href='?#fleet/approvals']")).not.toBeNull()
+    const open = [...document.querySelectorAll<HTMLAnchorElement>('[data-account="ephemeral-02"] a')].find(
+      (node) => node.textContent === "Open quarantine"
+    )
+    expect(open?.getAttribute("href")).toBe("?id=999999999991#sandboxes/account")
+    expect(button("Lease an account")?.disabled).toBe(true)
   })
 })

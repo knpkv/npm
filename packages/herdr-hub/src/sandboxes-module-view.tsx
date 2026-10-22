@@ -1,16 +1,33 @@
 /**
- * Sandboxes overview. Lease, extend and release go through `SandboxesModuleWrites`, which submits the
- * existing Fleet job kinds; without it the sheets point to the CLI. Account and runs pages are the next PR.
+ * Sandboxes overview, one account's page and its runs. Lease, extend and release go through
+ * `SandboxesModuleWrites`, which submits the existing Fleet job kinds; without it the sheets point to the CLI.
+ * Resets and budget lifts are Fleet approvals: these pages show a pending one and link Fleet / Approvals.
  * @module
  */
-import { leaseCap, leaseDuration, type SandboxCard, type SandboxesOverview } from "@knpkv/sandbox-pool/host"
+import {
+  leaseCap,
+  leaseDuration,
+  SandboxCard,
+  type SandboxesOverview,
+  type SandboxRuns,
+  type SandboxRunView
+} from "@knpkv/sandbox-pool/host"
 import { Button, Notice, Sheet, Skeleton, StateLabel, type RlyStateTone } from "@knpkv/rly/primitives"
-import { Clock, DateTime, Effect, Exit, Fiber, Result, Schedule } from "effect"
-import { createContext, type ReactElement, type ReactNode, useContext, useEffect, useRef, useState } from "react"
+import { Clock, DateTime, Effect, Exit, Fiber, Result, Schedule, Schema } from "effect"
+import {
+  createContext,
+  type ReactElement,
+  type ReactNode,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState
+} from "react"
 import { ShellIcon } from "./internal/shell-icon.js"
-import { moduleHref, type ModulePageMount, type ModuleViews, sandboxesModule } from "./modules.js"
+import { fleetHubModule, moduleHref, type ModulePageMount, type ModuleViews, sandboxesModule } from "./modules.js"
 import { SandboxesClientError, SandboxesWriteFailed } from "./sandboxes-client.js"
-import type { SandboxesCaller } from "./sandboxes-contract.js"
+import type { SandboxesCaller, SandboxRequest, SandboxRequests } from "./sandboxes-contract.js"
 
 export { SandboxesClientError, SandboxesWriteFailed }
 
@@ -21,11 +38,15 @@ export interface SandboxesModuleWrites {
   readonly release: (accountId: SandboxCard["accountId"]) => Effect.Effect<void, SandboxesWriteFailed>
 }
 
-/** Overview read. It must keep its identity across renders, or the page reads again on every render. */
+/** Page reads. Each must keep its identity across renders, or the page reads again on every render. */
 export interface SandboxesModuleReads {
   readonly overview: Effect.Effect<SandboxesOverview, SandboxesClientError>
   /** Who is reading. Until it answers, or if it fails, the page shows no owner actions. */
   readonly caller: Effect.Effect<SandboxesCaller, SandboxesClientError>
+  /** The newest page of one account's runs. */
+  readonly runs: (accountId: SandboxCard["accountId"]) => Effect.Effect<SandboxRuns, SandboxesClientError>
+  /** Resets and budget lifts waiting in Fleet / Approvals. */
+  readonly requests: Effect.Effect<SandboxRequests, SandboxesClientError>
 }
 
 type Ready = Extract<SandboxesOverview, { readonly _tag: "Ready" }>
@@ -42,7 +63,20 @@ type PoolView =
 const pollEvery = "30 seconds"
 const tickEvery = "15 seconds"
 
-const stateRank = { Quarantined: 0, Leased: 1, Cleaning: 2, Available: 3 } satisfies Record<CardState["_tag"], number>
+/** A quarantine whose blocker is a budget hold: stopped by budget, in caution, after every other quarantine. */
+const budgetStopped = (state: CardState): boolean => state._tag === "Quarantined" && state.blocker._tag === "BudgetHold"
+
+type PoolRank = CardState["_tag"] | "BudgetStopped"
+
+const rankOf = (state: CardState): PoolRank => (budgetStopped(state) ? "BudgetStopped" : state._tag)
+
+const stateRank = {
+  Quarantined: 0,
+  BudgetStopped: 1,
+  Leased: 2,
+  Cleaning: 3,
+  Available: 4
+} satisfies Record<PoolRank, number>
 
 /** A state word and the tone it is drawn in. */
 interface Labelled {
@@ -50,8 +84,10 @@ interface Labelled {
   readonly tone: RlyStateTone
 }
 
-const stateLabel = (tag: CardState["_tag"]): Labelled => {
+const stateLabel = (tag: PoolRank): Labelled => {
   switch (tag) {
+    case "BudgetStopped":
+      return { label: "Stopped by budget", tone: "caution" }
     case "Available":
       return { label: "Available", tone: "neutral" }
     case "Leased":
@@ -74,7 +110,20 @@ const runSteps: ReadonlyArray<{ readonly id: RunStep; readonly name: string }> =
   { id: "budget hold", name: "Checking budget hold" }
 ]
 
-const summaryOrder: ReadonlyArray<CardState["_tag"]> = ["Quarantined", "Leased", "Cleaning", "Available"]
+const summaryOrder: ReadonlyArray<readonly [PoolRank, string]> = [
+  ["Quarantined", "quarantined"],
+  ["BudgetStopped", "stopped by budget"],
+  ["Leased", "leased"],
+  ["Cleaning", "cleaning"],
+  ["Available", "available"]
+]
+
+/** The budget-hold words the design gives a stopped account. The stored hold line is never shown. */
+const budgetHoldWords =
+  "Budget hold: this account passed its monthly spend cap, so it’s locked until an approver lifts the hold. Cleanup still ran."
+
+/** Who a Fleet request waits on. No route names the approver, so this stays generic until one does. */
+const waitsOn = "an approver"
 
 const wipeSteps: ReadonlyArray<string> = ["Dry run", "Nuke", "Verify"]
 
@@ -194,16 +243,16 @@ const leaseLead = (times: Times, lastResetAt: DateTime.Utc | null, now: DateTime
     ? "Longest idle now: never reset."
     : `Longest idle now: free since ${times.clock(lastResetAt)} (${span(lastResetAt, now)}).`
 
-/** Quarantined, then leased by soonest end, then cleaning, then available. The payload stays in account-id order. */
+/** Quarantined, then stopped by budget, then leased by soonest end, then cleaning, then available. The payload stays in account-id order. */
 const byPool = (left: SandboxCard, right: SandboxCard): number => {
-  const byState = stateRank[left.state._tag] - stateRank[right.state._tag]
+  const byState = stateRank[rankOf(left.state)] - stateRank[rankOf(right.state)]
   if (byState !== 0 || left.state._tag !== "Leased" || right.state._tag !== "Leased") return byState
   return millis(left.state.endsAt) - millis(right.state.endsAt)
 }
 
 const summary = (cards: ReadonlyArray<SandboxCard>): string =>
   summaryOrder
-    .map((tag) => ({ count: cards.filter((item) => item.state._tag === tag).length, word: tag.toLowerCase() }))
+    .map(([rank, word]) => ({ count: cards.filter((item) => rankOf(item.state) === rank).length, word }))
     .filter(({ count }) => count > 0)
     .map(({ count, word }) => `${count} ${word}`)
     .join(", ") + "."
@@ -489,6 +538,65 @@ const stepState = (index: number, current: number): Labelled =>
 const runsHref = (item: SandboxCard): string =>
   moduleHref(sandboxesModule, "runs", new URLSearchParams({ id: item.accountId }))
 
+const accountHref = (accountId: string): string =>
+  moduleHref(sandboxesModule, "account", new URLSearchParams({ id: accountId }))
+
+/**
+ * "Retry reset, requested by you at 13:05. Waits on an approver." A budget lift reads
+ * "Budget lift requested by …" in the same shape.
+ */
+const requestLine = (times: Times, request: SandboxRequest, viewer: string): string => {
+  const by = request.requestedBy === viewer ? "by you" : `by ${request.requestedBy}`
+  const lead = request.kind === "BudgetLift" ? "Budget lift requested" : `${request.kind} reset, requested`
+  return `${lead} ${by} at ${times.clock(request.requestedAt)}. Waits on ${waitsOn}.`
+}
+
+/** "Nothing runs until it’s approved. 1 h left, expires 14:05." The deadline part only when Fleet set one. */
+const requestWaits = (times: Times, request: SandboxRequest, now: DateTime.Utc): string =>
+  request.expiresAt === null
+    ? "Nothing runs until it’s approved."
+    : `Nothing runs until it’s approved. ${span(now, request.expiresAt)} left, expires ${times.clock(request.expiresAt)}.`
+
+/**
+ * A reset or lift waiting in Fleet / Approvals: the state in words, never a spinner, and a link to Fleet,
+ * where it is decided. The account page adds who it waits on and when it expires.
+ */
+const PendingRequest = ({
+  detail,
+  now,
+  request,
+  viewer
+}: {
+  readonly detail: boolean
+  readonly now: DateTime.Utc
+  readonly request: SandboxRequest
+  readonly viewer: string
+}): ReactElement => {
+  const times = useContext(TimesContext)
+  return (
+    <div className="sandboxes-request" data-request="" role={detail ? "status" : undefined}>
+      <StateLabel
+        data-request-state=""
+        icon="clock"
+        label="Approval requested"
+        size={detail ? "default" : "compact"}
+        tone="caution"
+      />
+      <span data-request-line="">{requestLine(times, request, viewer)}</span>
+      {detail ? <span data-request-waits="">{requestWaits(times, request, now)}</span> : null}
+      <a className="sandboxes-link" href={moduleHref(fleetHubModule, "approvals")}>
+        {`Open “${request.title}” in Fleet / Approvals`}
+      </a>
+    </div>
+  )
+}
+
+const RequestsFailed = (): ReactElement => (
+  <p className="sandboxes-muted" data-requests-failed="">
+    Fleet requests couldn’t be read.
+  </p>
+)
+
 const CleanupSteps = ({ step }: { readonly step: RunStep | null }): ReactElement => {
   const current = runSteps.findIndex(({ id }) => id === step)
   return (
@@ -515,6 +623,7 @@ const PoolCard = ({
   lastKnown,
   now,
   owner,
+  requests,
   viewer,
   writes
 }: {
@@ -523,11 +632,12 @@ const PoolCard = ({
   readonly lastKnown: DateTime.Utc | null
   readonly now: DateTime.Utc
   readonly owner: boolean
+  readonly requests: ReadonlyArray<SandboxRequest>
   readonly viewer: string
   readonly writes: SandboxesModuleWrites | null
 }): ReactElement => {
   const times = useContext(TimesContext)
-  const { label, tone } = stateLabel(item.state._tag)
+  const { label, tone } = stateLabel(rankOf(item.state))
   const state = item.state
   const mine = owner && state._tag === "Leased" && state.holder === viewer
   const old = lastKnown === null ? "" : `, last known at ${times.clock(lastKnown)}`
@@ -549,14 +659,29 @@ const PoolCard = ({
           {item.label === null ? null : <small>Left the pool</small>}
           {lastKnown === null ? null : <small>{`Last known at ${times.clock(lastKnown)}`}</small>}
         </div>
-        <StateLabel data-pool-state="" {...(tone === "neutral" ? { icon: "minus" } : {})} label={label} tone={tone} />
+        <StateLabel
+          data-pool-state=""
+          data-tone={tone}
+          {...(tone === "neutral" ? { icon: "minus" } : {})}
+          label={label}
+          tone={tone}
+        />
       </header>
-      {state._tag === "Quarantined" ? (
+      {state._tag === "Quarantined" && budgetStopped(state) ? (
+        <div className="sandboxes-card-block">
+          <p>{budgetHoldWords}</p>
+        </div>
+      ) : state._tag === "Quarantined" ? (
         <div className="sandboxes-card-block">
           <p>{state.blocker.text}</p>
-          <a className="sandboxes-link" href={runsHref(item)}>
-            View run
-          </a>
+          <div className="sandboxes-card-line">
+            <a className="sandboxes-link" href={accountHref(item.accountId)}>
+              Open quarantine
+            </a>
+            <a className="sandboxes-link" href={runsHref(item)}>
+              View run
+            </a>
+          </div>
         </div>
       ) : null}
       <Facts rows={cardRows(times, item, viewer, now)} />
@@ -571,6 +696,9 @@ const PoolCard = ({
           </div>
         </div>
       ) : null}
+      {requests.map((request) => (
+        <PendingRequest detail={false} key={request.jobId} now={now} request={request} viewer={viewer} />
+      ))}
       {mine && state._tag === "Leased" ? (
         <OwnLease done={done} item={item} now={now} state={state} writes={writes} />
       ) : null}
@@ -730,6 +858,43 @@ const useCaller = (read: SandboxesModuleReads["caller"], active: boolean): Sandb
   return caller
 }
 
+/** One read's result. A failed read is its own state, never an empty list. */
+type Read<A> = { readonly _tag: "Loading" } | { readonly _tag: "Failed" } | { readonly _tag: "Done"; readonly value: A }
+
+/**
+ * Reads now and every 30 s while the page is active, like the pool, and from Loading again when `read`
+ * changes, such as another account. `read` must keep its identity, or it reads on every render.
+ */
+const useRead = <A,>(read: Effect.Effect<A, SandboxesClientError>, active: boolean): Read<A> => {
+  const [result, setResult] = useState<Read<A>>({ _tag: "Loading" })
+  useEffect(() => {
+    if (!active) return
+    setResult({ _tag: "Loading" })
+    const fiber = Effect.runFork(
+      Effect.exit(read).pipe(
+        Effect.flatMap((exit) =>
+          Effect.sync(() => setResult(Exit.isSuccess(exit) ? { _tag: "Done", value: exit.value } : { _tag: "Failed" }))
+        ),
+        Effect.repeat(Schedule.spaced(pollEvery))
+      )
+    )
+    return () => {
+      Effect.runFork(Fiber.interrupt(fiber))
+    }
+  }, [read, active])
+  return result
+}
+
+/** Pending requests by account. A failed read, or a pool not served here, is null: unknown, not none. */
+const requestsByAccount = (read: Read<SandboxRequests>): ReadonlyMap<string, ReadonlyArray<SandboxRequest>> | null => {
+  if (read._tag !== "Done" || read.value._tag !== "Ready") return read._tag === "Loading" ? new Map() : null
+  const byAccount = new Map<string, Array<SandboxRequest>>()
+  for (const request of read.value.requests) {
+    byAccount.set(request.accountId, [...(byAccount.get(request.accountId) ?? []), request])
+  }
+  return byAccount
+}
+
 const OverviewPage = ({
   mount,
   reads,
@@ -742,6 +907,7 @@ const OverviewPage = ({
   const times = useContext(TimesContext)
   const { login: viewer, owner } = useCaller(reads.caller, mount.active)
   const { now, readAgain, view } = usePool(reads.overview, mount.active)
+  const requests = requestsByAccount(useRead(reads.requests, mount.active))
   const pool = view._tag === "Pool" ? view : null
   // A job runs after it is submitted, so the next read can still show the old card; say so for a minute.
   const [submittedAt, setSubmittedAt] = useState<DateTime.Utc | null>(null)
@@ -780,28 +946,8 @@ const OverviewPage = ({
           Only the owner can lease or reset sandboxes here. Agents lease through Fleet jobs.
         </p>
       ) : null}
-      {view._tag === "Loading" ? (
-        <div className="sandboxes-grid">
-          <p className="sandboxes-hidden" role="status">
-            Reading the pool
-          </p>
-          <Skeleton className="sandboxes-skeleton" data-skeleton="" />
-          <Skeleton className="sandboxes-skeleton" data-skeleton="" />
-        </div>
-      ) : view._tag === "Failed" ? (
-        <section className="sandboxes-panel">
-          <StateLabel label="Can’t read" tone="critical" />
-          <h2>Can’t read the pool from hostd</h2>
-          <p>Accounts and leases aren’t shown until the lease store answers. Nothing was changed.</p>
-          <Button onClick={() => readAgain(true)} variant="primary">
-            Read again
-          </Button>
-        </section>
-      ) : view._tag === "NotSetUp" ? (
-        <section className="sandboxes-panel">
-          <StateLabel icon="minus" label={notSetUpCopy(view.where, view.host).label} tone="neutral" />
-          <h2>{notSetUpCopy(view.where, view.host).title}</h2>
-        </section>
+      {view._tag !== "Pool" ? (
+        <PoolPanel readAgain={() => readAgain(true)} view={view} />
       ) : (
         <div className="sandboxes-pool">
           <div className="sandboxes-meta">
@@ -827,6 +973,7 @@ const OverviewPage = ({
               {noneFree}
             </Notice>
           )}
+          {requests === null ? <RequestsFailed /> : null}
           <div className="sandboxes-grid">
             {[...view.overview.sandboxes].sort(byPool).map((item) => (
               <PoolCard
@@ -836,6 +983,7 @@ const OverviewPage = ({
                 lastKnown={view.stale ? view.readAt : null}
                 now={view.stale ? view.readAt : now}
                 owner={owner}
+                requests={requests?.get(item.accountId) ?? []}
                 viewer={viewer}
                 writes={view.stale ? null : writes}
               />
@@ -848,23 +996,414 @@ const OverviewPage = ({
   )
 }
 
-/** `View run` lands here until the runs page ships; a blank module would read as broken. */
-const NotYetPage = (): ReactElement => (
-  <section className="sandboxes-page">
-    <header className="sandboxes-head">
-      <div className="sandboxes-title">
-        <h1>Sandboxes</h1>
-      </div>
-    </header>
+/** The page's account id. Anything that is not a 12-digit id is null and reads nothing. */
+const accountIdOf = (search: URLSearchParams): SandboxCard["accountId"] | null =>
+  Schema.decodeUnknownOption(SandboxCard.fields.accountId)(search.get("id")).pipe((decoded) =>
+    decoded._tag === "Some" ? decoded.value : null
+  )
+
+const stepWord = (step: RunStep): string => `${step.charAt(0).toUpperCase()}${step.slice(1)}`
+
+/** One step as a list shows it: its words, its state, and the blocker words when it is the step that failed. */
+interface StepRow {
+  readonly name: string
+  readonly state: Labelled
+  readonly current: boolean
+  readonly blocker: string | null
+}
+
+/** Before the failed step done, the failed step failed, after it not run. */
+const finishedSteps = (
+  names: (step: RunStep, index: number) => string,
+  failed: RunStep,
+  blocker: string | null
+): ReadonlyArray<StepRow> => {
+  const at = runSteps.findIndex(({ id }) => id === failed)
+  return runSteps.map(({ id }, index) => ({
+    name: names(id, index),
+    state:
+      index < at
+        ? { label: "Done", tone: "positive" }
+        : index === at
+          ? { label: "Failed", tone: "critical" }
+          : { label: "Not run", tone: "neutral" },
+    current: index === at,
+    blocker: index === at ? blocker : null
+  }))
+}
+
+/**
+ * A run's steps in the run-detail words. A running run counts from its current step; a quarantined one from the
+ * step that failed. An available run is all done. A quarantine with no failed step names no steps.
+ */
+const runRows = (run: SandboxRunView): ReadonlyArray<StepRow> | null => {
+  const named = (_step: RunStep, index: number) => runSteps[index]?.name ?? ""
+  if (run.outcome === null) {
+    const current = runSteps.findIndex(({ id }) => id === run.step)
+    return runSteps.map(({ name }, index) => ({
+      name,
+      state: stepState(index, current),
+      current: index === current,
+      blocker: null
+    }))
+  }
+  // A failed step that was retried still names failedStep; an available run passed every step.
+  if (run.outcome === "Available") {
+    return runSteps.map(({ name }) => ({
+      name,
+      state: { label: "Done", tone: "positive" },
+      current: false,
+      blocker: null
+    }))
+  }
+  return run.failedStep === null ? null : finishedSteps(named, run.failedStep, run.blocker?.text ?? null)
+}
+
+const StepList = ({ label, rows }: { readonly label: string; readonly rows: ReadonlyArray<StepRow> }): ReactElement => (
+  <ol aria-label={label} className="sandboxes-steps">
+    {rows.map(({ blocker, current, name, state }, index) => (
+      <li aria-current={current ? "step" : undefined} key={name}>
+        <span aria-hidden="true" className="sandboxes-step-number">
+          {index + 1}
+        </span>
+        <span data-step-name="">{name}</span>
+        <StateLabel data-step-state="" label={state.label} size="compact" tone={state.tone} />
+        {blocker === null ? null : (
+          <p className="sandboxes-step-blocker" data-step-blocker="">
+            {blocker}
+          </p>
+        )}
+      </li>
+    ))}
+  </ol>
+)
+
+/** Loading, failed and not-set-up, the same on every page. Null once the pool has been read. */
+const PoolPanel = ({ readAgain, view }: { readonly readAgain: () => void; readonly view: PoolView }) =>
+  view._tag === "Loading" ? (
+    <div className="sandboxes-grid">
+      <p className="sandboxes-hidden" role="status">
+        Reading the pool
+      </p>
+      <Skeleton className="sandboxes-skeleton" data-skeleton="" />
+      <Skeleton className="sandboxes-skeleton" data-skeleton="" />
+    </div>
+  ) : view._tag === "Failed" ? (
     <section className="sandboxes-panel">
-      <h2>Run details aren’t on the hub yet.</h2>
-      <p>Each account’s cleanup runs come in a later version. The pool shows each account’s current step.</p>
-      <a className="sandboxes-link" href={moduleHref(sandboxesModule, "overview")}>
-        Back to the pool
-      </a>
+      <StateLabel label="Can’t read" tone="critical" />
+      <h2>Can’t read the pool from hostd</h2>
+      <p>Accounts and leases aren’t shown until the lease store answers. Nothing was changed.</p>
+      <Button onClick={readAgain} variant="primary">
+        Read again
+      </Button>
     </section>
+  ) : view._tag === "NotSetUp" ? (
+    <section className="sandboxes-panel">
+      <StateLabel icon="minus" label={notSetUpCopy(view.where, view.host).label} tone="neutral" />
+      <h2>{notSetUpCopy(view.where, view.host).title}</h2>
+    </section>
+  ) : null
+
+const BackToPool = (): ReactElement => (
+  <a className="sandboxes-back" data-back="" href={moduleHref(sandboxesModule, "overview")}>
+    <span aria-hidden="true">←</span>
+    <span>Sandboxes</span>
+  </a>
+)
+
+const NotInPool = ({ id }: { readonly id: string }): ReactElement => (
+  <section className="sandboxes-panel">
+    <h2>{`No account ${id} in this pool.`}</h2>
+    <a className="sandboxes-link" href={moduleHref(sandboxesModule, "overview")}>
+      Back to the pool
+    </a>
   </section>
 )
+
+/** The account's runs, read once while the page is active. Nothing is read for an id that is not one. */
+const useRuns = (
+  reads: SandboxesModuleReads,
+  id: SandboxCard["accountId"] | null,
+  active: boolean
+): Read<SandboxRuns> => {
+  const read = useMemo(() => (id === null ? Effect.never : reads.runs(id)), [reads.runs, id])
+  return useRead(read, active && id !== null)
+}
+
+/** Why the account cannot be cleaned, and what is already asked of Fleet. Budget stops are caution, not red. */
+const AccountDetail = ({
+  item,
+  now,
+  requests,
+  runs,
+  viewer
+}: {
+  readonly item: SandboxCard
+  readonly now: DateTime.Utc
+  readonly requests: ReadonlyArray<SandboxRequest> | null
+  readonly runs: Read<SandboxRuns>
+  readonly viewer: string
+}): ReactElement => {
+  const times = useContext(TimesContext)
+  const state = item.state
+  const { label, tone } = stateLabel(rankOf(state))
+  const run =
+    state._tag === "Quarantined" && runs._tag === "Done" && runs.value._tag === "Ready"
+      ? runs.value.runs.find((candidate) => candidate.runId === state.runId)
+      : undefined
+  const since = run?.endedAt === undefined || run.endedAt === null ? null : times.since(run.endedAt, now)
+  const failed = run?.failedStep ?? null
+  const summary =
+    state._tag !== "Quarantined"
+      ? null
+      : budgetStopped(state)
+        ? budgetHoldWords
+        : `The reset failed${failed === null ? "" : ` at ${stepWord(failed)}`}.${
+            since === null ? " Quarantined;" : ` Quarantined since ${since};`
+          } no one can lease it until a reset passes.`
+  return (
+    <div className="sandboxes-account">
+      <header className="sandboxes-account-head">
+        <div className="sandboxes-account-title">
+          <h1>{item.name}</h1>
+          <StateLabel data-account-state="" data-tone={tone} label={label} tone={tone} />
+        </div>
+        <div className="sandboxes-card-id">
+          <code>{item.accountId}</code>
+          <CopyAccountId accountId={item.accountId} />
+        </div>
+        {summary === null ? null : <p data-account-summary="">{summary}</p>}
+      </header>
+      {requests === null ? (
+        <RequestsFailed />
+      ) : (
+        requests.map((request) => (
+          <PendingRequest detail key={request.jobId} now={now} request={request} viewer={viewer} />
+        ))
+      )}
+      {state._tag === "Quarantined" && !budgetStopped(state) ? (
+        <div className="sandboxes-account-body">
+          <div className="sandboxes-account-main">
+            <section className="sandboxes-account-section">
+              <h2>Blocker</h2>
+              <p data-account-blocker="">{state.blocker.text}</p>
+            </section>
+            {failed === null ? null : (
+              <section className="sandboxes-account-section">
+                <h2>Reset run</h2>
+                <StepList label="Reset steps" rows={finishedSteps(stepWord, failed, null)} />
+              </section>
+            )}
+          </div>
+          <Facts
+            rows={[
+              ["Run ID", <code>{state.runId}</code>],
+              ...(since === null ? [] : [["Since", since] satisfies readonly [string, ReactNode]]),
+              ...(failed === null ? [] : [["Failed step", stepWord(failed)] satisfies readonly [string, ReactNode]])
+            ]}
+          />
+        </div>
+      ) : state._tag === "Quarantined" ? null : (
+        <Facts rows={cardRows(times, item, viewer, now)} />
+      )}
+      <a className="sandboxes-link" href={runsHref(item)}>
+        View runs
+      </a>
+    </div>
+  )
+}
+
+/** One account: the needs-you destination. No owner actions yet; a reset or lift is asked for in Fleet. */
+const AccountPage = ({
+  mount,
+  reads,
+  search
+}: {
+  readonly mount: ModulePageMount
+  readonly reads: SandboxesModuleReads
+  readonly search: URLSearchParams
+}): ReactElement => {
+  const { login: viewer } = useCaller(reads.caller, mount.active)
+  const id = accountIdOf(search)
+  const { now, readAgain, view } = usePool(reads.overview, mount.active)
+  const requests = requestsByAccount(useRead(reads.requests, mount.active))
+  const runs = useRuns(reads, id, mount.active)
+  const item =
+    view._tag === "Pool" ? view.overview.sandboxes.find((candidate) => candidate.accountId === id) : undefined
+  return (
+    <section className="sandboxes-page">
+      <BackToPool />
+      {view._tag !== "Pool" ? (
+        <PoolPanel readAgain={() => readAgain(true)} view={view} />
+      ) : item === undefined ? (
+        <NotInPool id={search.get("id") ?? ""} />
+      ) : (
+        <AccountDetail
+          item={item}
+          now={view.stale ? view.readAt : now}
+          requests={requests === null ? null : (requests.get(item.accountId) ?? [])}
+          runs={runs}
+          viewer={viewer}
+        />
+      )}
+    </section>
+  )
+}
+
+const outcomeLabel = (outcome: SandboxRunView["outcome"]): Labelled =>
+  outcome === null
+    ? { label: "In progress", tone: "progress" }
+    : outcome === "Quarantined"
+      ? { label: "Quarantined", tone: "critical" }
+      : { label: "Available", tone: "neutral" }
+
+const runHref = (accountId: string, runId: string): string =>
+  moduleHref(sandboxesModule, "runs", new URLSearchParams({ id: accountId, run: runId }))
+
+/** One run, opened from its row. The failed step carries its blocker words; the stored lines and log never. */
+const RunSheet = ({
+  close,
+  item,
+  now,
+  run
+}: {
+  readonly close: () => void
+  readonly item: SandboxCard
+  readonly now: DateTime.Utc
+  readonly run: SandboxRunView
+}): ReactElement => {
+  const times = useContext(TimesContext)
+  const outcome = outcomeLabel(run.outcome)
+  const rows = runRows(run)
+  return (
+    <Sheet.Root onOpenChange={(open) => (open ? undefined : close())} open>
+      <Sheet.Content className="sandboxes-sheet" closeLabel="Close run" title="Cleanup run">
+        <Sheet.Body className="sandboxes-sheet-body">
+          <code>{run.runId}</code>
+          <StateLabel label={outcome.label} tone={outcome.tone} />
+          <Facts
+            rows={[
+              ["Account", <Value main={item.name} sub={item.accountId} />],
+              ["Reason", run.reason],
+              ["Started", times.since(run.startedAt, now)],
+              ["Ended", run.endedAt === null ? "Still running" : times.since(run.endedAt, now)]
+            ]}
+          />
+          <h3>Steps</h3>
+          {rows === null ? (
+            <p data-step-blocker="">{run.blocker?.text ?? ""}</p>
+          ) : (
+            <StepList label="Cleanup steps" rows={rows} />
+          )}
+        </Sheet.Body>
+      </Sheet.Content>
+    </Sheet.Root>
+  )
+}
+
+/** One account's recent runs: reason, outcome, duration, started. A row opens that run. */
+const RunsPage = ({
+  mount,
+  reads,
+  search
+}: {
+  readonly mount: ModulePageMount
+  readonly reads: SandboxesModuleReads
+  readonly search: URLSearchParams
+}): ReactElement => {
+  const times = useContext(TimesContext)
+  const id = accountIdOf(search)
+  const { now, readAgain, view } = usePool(reads.overview, mount.active)
+  const runs = useRuns(reads, id, mount.active)
+  const item =
+    view._tag === "Pool" ? view.overview.sandboxes.find((candidate) => candidate.accountId === id) : undefined
+  const page = runs._tag === "Done" && runs.value._tag === "Ready" ? runs.value : null
+  const open = page?.runs.find((run) => run.runId === search.get("run"))
+  return (
+    <section className="sandboxes-page">
+      <BackToPool />
+      {view._tag !== "Pool" ? (
+        <PoolPanel readAgain={() => readAgain(true)} view={view} />
+      ) : item === undefined ? (
+        <NotInPool id={search.get("id") ?? ""} />
+      ) : (
+        <>
+          <header className="sandboxes-head">
+            <div className="sandboxes-title">
+              <h1>{item.name}</h1>
+            </div>
+          </header>
+          {runs._tag === "Loading" ? (
+            <p className="sandboxes-muted" data-runs-loading="" role="status">
+              Reading runs…
+            </p>
+          ) : page === null ? (
+            <section className="sandboxes-panel">
+              <StateLabel label="Can’t read" tone="critical" />
+              <h2>Can’t read runs.</h2>
+            </section>
+          ) : (
+            <section aria-label="Recent runs" className="sandboxes-runs">
+              <div className="sandboxes-runs-head">
+                <h2>Recent runs</h2>
+                <small>{page.runs.length === 1 ? "Last cleanup run" : `Last ${page.runs.length} cleanup runs`}</small>
+              </div>
+              <table>
+                <thead>
+                  <tr>
+                    <th scope="col">Account</th>
+                    <th scope="col">Reason</th>
+                    <th scope="col">Outcome</th>
+                    <th scope="col">Duration</th>
+                    <th scope="col">Started</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {page.runs.map((run) => {
+                    const outcome = outcomeLabel(run.outcome)
+                    const started = times.since(run.startedAt, now)
+                    return (
+                      <tr key={run.runId}>
+                        <td>
+                          <a
+                            aria-label={`${item.name}, ${run.reason}, ${outcome.label}, started ${started}. Open run ${run.runId}`}
+                            className="sandboxes-link"
+                            href={runHref(item.accountId, run.runId)}
+                          >
+                            {item.name}
+                          </a>
+                        </td>
+                        <td>{run.reason}</td>
+                        <td>
+                          <StateLabel label={outcome.label} size="compact" tone={outcome.tone} />
+                        </td>
+                        <td>{span(run.startedAt, run.endedAt ?? now)}</td>
+                        <td>{started}</td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </section>
+          )}
+          {open === undefined ? null : (
+            <RunSheet
+              close={() =>
+                mount.navigate(
+                  moduleHref(sandboxesModule, "runs", new URLSearchParams({ id: item.accountId })),
+                  "replace"
+                )
+              }
+              item={item}
+              now={now}
+              run={open}
+            />
+          )}
+        </>
+      )}
+    </section>
+  )
+}
 
 /**
  * Overview for the shell. `reads.caller` says whether the reader is the hub's own node (the owner) and gives
@@ -890,8 +1429,16 @@ export const makeSandboxesModuleViews = ({
           <OverviewPage mount={mount} reads={reads} writes={writes} />
         </TimesContext>
       ),
-      account: () => null,
-      runs: () => <NotYetPage />
+      account: (search, mount) => (
+        <TimesContext value={times}>
+          <AccountPage mount={mount} reads={reads} search={search} />
+        </TimesContext>
+      ),
+      runs: (search, mount) => (
+        <TimesContext value={times}>
+          <RunsPage mount={mount} reads={reads} search={search} />
+        </TimesContext>
+      )
     }
   }
 }

@@ -61,7 +61,13 @@ import { makeUsageModuleViews, type UsageModuleReads } from "./usage-module-view
 import { makeCodeModuleViews } from "./code-module-view.js"
 import { loadStack, loadStackPlan, loadStacksOverview, type StacksModuleReads } from "./stacks-client.js"
 import { makeStacksModuleViews } from "./stacks-module-view.js"
-import { loadSandboxesCaller, loadSandboxesOverview, submitSandboxJob } from "./sandboxes-client.js"
+import {
+  loadSandboxesCaller,
+  loadSandboxesOverview,
+  loadSandboxRequests,
+  loadSandboxRuns,
+  submitSandboxJob
+} from "./sandboxes-client.js"
 import {
   makeSandboxesModuleViews,
   type SandboxesModuleReads,
@@ -854,7 +860,9 @@ const stacksReads: StacksModuleReads = {
 }
 const sandboxesReads: SandboxesModuleReads = {
   overview: runCodeRead(loadSandboxesOverview),
-  caller: runCodeRead(loadSandboxesCaller)
+  caller: runCodeRead(loadSandboxesCaller),
+  runs: (accountId) => runCodeRead(loadSandboxRuns(accountId)),
+  requests: runCodeRead(loadSandboxRequests)
 }
 /** The hub refuses these unless the page runs on its own node; the page shows them only to that owner. */
 const sandboxesWrites: SandboxesModuleWrites = {

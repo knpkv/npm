@@ -4,7 +4,7 @@
  * @module
  */
 import { JobStatus } from "@knpkv/herdr-fleet/model"
-import { SandboxCard } from "@knpkv/sandbox-pool/host"
+import { SandboxCard, SandboxesUnavailable } from "@knpkv/sandbox-pool/host"
 import { Schema } from "effect"
 
 const AccountId = SandboxCard.fields.accountId
@@ -23,3 +23,27 @@ export type SandboxJobOrder = typeof SandboxJobOrder.Type
 
 export const SandboxJobSubmitted = Schema.Struct({ jobId: Schema.String, status: JobStatus })
 export type SandboxJobSubmitted = typeof SandboxJobSubmitted.Type
+
+const Instant = Schema.DateTimeUtcFromString
+
+/**
+ * A reset or budget lift waiting in Fleet / Approvals. `title` is Fleet's own title for the request, so the
+ * link names what Fleet shows. `requestedBy` is the requester's login; `expiresAt` is null without a deadline.
+ */
+export const SandboxRequest = Schema.Struct({
+  jobId: Schema.String,
+  accountId: AccountId,
+  kind: Schema.Literals(["Retry", "Manual", "BudgetLift"]),
+  title: Schema.String,
+  requestedBy: Schema.String,
+  requestedAt: Instant,
+  expiresAt: Schema.NullOr(Instant)
+})
+export interface SandboxRequest extends Schema.Schema.Type<typeof SandboxRequest> {}
+
+/** Pending sandbox requests, oldest first, or why the pool is not served here. */
+export const SandboxRequests = Schema.Union([
+  SandboxesUnavailable,
+  Schema.TaggedStruct("Ready", { requests: Schema.Array(SandboxRequest) })
+])
+export type SandboxRequests = typeof SandboxRequests.Type

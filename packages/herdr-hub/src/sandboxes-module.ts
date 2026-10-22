@@ -1,6 +1,12 @@
 /** Host-local Sandboxes mount: redacted pool cards and run pages, on the configured host only. @module */
 import { FleetValidationError } from "@knpkv/herdr-fleet"
-import { FleetHostName, type SandboxExtend, type SandboxLease, type SandboxRelease } from "@knpkv/herdr-fleet/model"
+import {
+  FleetHostName,
+  type JobRecord,
+  type SandboxExtend,
+  type SandboxLease,
+  type SandboxRelease
+} from "@knpkv/herdr-fleet/model"
 import { type PoolContract } from "@knpkv/sandbox-pool"
 import {
   SandboxesOverview,
@@ -10,7 +16,8 @@ import {
   SandboxRunsQuery
 } from "@knpkv/sandbox-pool/host"
 import { makeSandboxHostReads, type SandboxHostReads } from "@knpkv/sandbox-pool/host/server"
-import { Config, Effect, Exit, Layer, Option, Path, Schema, Scope } from "effect"
+import { Config, DateTime, Effect, Exit, Layer, Option, Path, Schema, Scope } from "effect"
+import { approvalRequestFor } from "./approval-request.js"
 import { sandboxesModule } from "./module-contract.js"
 import { NeedsYouProviderResult } from "./module-needs-you.js"
 import {
@@ -22,9 +29,29 @@ import {
   moduleWriteRoute
 } from "./module-server.js"
 import { openSandboxDatabase } from "./sandbox-store.js"
-import { SandboxesCaller, SandboxJobOrder, SandboxJobSubmitted } from "./sandboxes-contract.js"
+import type { SandboxRequest } from "./sandboxes-contract.js"
+import { SandboxesCaller, SandboxJobOrder, SandboxJobSubmitted, SandboxRequests } from "./sandboxes-contract.js"
 
-export { SandboxesCaller, SandboxJobOrder, SandboxJobSubmitted }
+export { SandboxesCaller, SandboxJobOrder, SandboxJobSubmitted, SandboxRequests }
+
+/** The parts of a Fleet record awaiting approval that the requests read and needs-you use. */
+export type PendingSandboxApproval = Pick<JobRecord, "id" | "actor" | "createdAt" | "approvalExpiresAt" | "payload">
+
+/** A pending reset or budget lift as the page shows it, before the schema checks it; other kinds are dropped. */
+const sandboxRequestOf = (record: PendingSandboxApproval): ReadonlyArray<typeof SandboxRequest.Encoded> => {
+  const payload = record.payload
+  if (payload.kind !== "sandbox.reset" && payload.kind !== "sandbox.budget.lift") return []
+  const expiresAt = record.approvalExpiresAt ?? null
+  return [{
+    jobId: record.id,
+    accountId: payload.accountId,
+    kind: payload.kind === "sandbox.budget.lift" ? "BudgetLift" : payload.reason,
+    title: approvalRequestFor(payload).title,
+    requestedBy: record.actor,
+    requestedAt: DateTime.formatIso(DateTime.makeUnsafe(record.createdAt)),
+    expiresAt: expiresAt === null ? null : DateTime.formatIso(DateTime.makeUnsafe(expiresAt))
+  }]
+}
 
 /** Missing configuration is unavailable; invalid configuration fails startup without auto-detection. */
 export const readSandboxesHost = Config.option(Config.String("RELAY_SANDBOXES_HOST")).pipe(
@@ -113,7 +140,8 @@ export const makeSandboxesModule = (configuration: {
   readonly sandboxesHost: FleetHostName | null
   readonly stateDirectory: string
   readonly pool: PoolContract | null
-  readonly pendingLifts: Effect.Effect<ReadonlySet<string>, unknown>
+  /** Fleet records awaiting approval. Read per request; a failure is unavailable, never an empty list. */
+  readonly pendingApprovals: Effect.Effect<ReadonlyArray<PendingSandboxApproval>, unknown>
   readonly reads?: Effect.Effect<SandboxHostReads, SandboxReaderStartError, Scope.Scope>
   /** Fleet submission for the jobs route. Only reached for the hub's own node while the pool is served. */
   readonly submit: SandboxJobSubmit
@@ -174,7 +202,11 @@ export const makeSandboxesModule = (configuration: {
       const needsYou = mounted._tag === "Ready"
         ? Effect.gen(function*() {
           const attention = yield* mounted.reads.attention
-          const pending = yield* configuration.pendingLifts
+          const pending = new Set(
+            (yield* configuration.pendingApprovals).flatMap((record) =>
+              record.payload.kind === "sandbox.budget.lift" ? [record.payload.accountId] : []
+            )
+          )
           return NeedsYouProviderResult.make({
             items: attention.rows.flatMap((row) =>
               row.kind === "budget-hold" && pending.has(row.accountId) ? [] : [{
@@ -198,6 +230,18 @@ export const makeSandboxesModule = (configuration: {
         : started !== null && started._tag === "Failure"
         ? Effect.succeed(readerDown)
         : Effect.succeed(emptyNeedsYou)
+      // Fleet's pending list names requesters, so it is read only after the mount has authorized the caller.
+      const requests: Effect.Effect<SandboxRequests, ModuleRouteFailure> = mounted._tag === "Unavailable"
+        ? Effect.succeed(mounted)
+        : configuration.pendingApprovals.pipe(
+          Effect.mapError(() => new ModuleRouteFailure({ status: 503, code: "unavailable" })),
+          Effect.flatMap((records) =>
+            Schema.decodeUnknownEffect(SandboxRequests)({
+              _tag: "Ready",
+              requests: [...records].sort((left, right) => left.createdAt - right.createdAt).flatMap(sandboxRequestOf)
+            }).pipe(Effect.mapError(() => new ModuleRouteFailure({ status: 500, code: "invalid_response" })))
+          )
+        )
       // Same origin is checked by the mount before the body is read. Here: the pool must be served, and
       // only the hub's own node may submit. Fleet then holds extend and release to the caller's own lease.
       const submitJob = (order: SandboxJobOrder, caller: ModuleCaller) =>
@@ -210,6 +254,7 @@ export const makeSandboxesModule = (configuration: {
         routes: [
           moduleReadRoute("/overview", SandboxesOverviewQuery, SandboxesOverview, () => overview),
           moduleReadRoute("/runs", SandboxRunsQuery, SandboxRuns, runs),
+          moduleReadRoute("/requests", NoQuery, SandboxRequests, () => requests),
           moduleReadRoute(
             "/caller",
             NoQuery,
