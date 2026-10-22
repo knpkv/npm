@@ -80,7 +80,8 @@ const start = async (): Promise<void> => {
     pages.append(link)
     return { id: page.id, link }
   })
-  const api = (path: `/${string}`) => `/v1/modules/${manifest.id}${path}`
+  // The owner session's cookie is scoped to `/api`.
+  const api = (path: `/${string}`) => `/api/v1/modules/${manifest.id}${path}`
   let mounted: MountedApp | null = null
   const context = (): ShellContext => {
     const page = currentPage(manifest)
