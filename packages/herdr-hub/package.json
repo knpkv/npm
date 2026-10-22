@@ -1,6 +1,6 @@
 {
   "name": "@knpkv/herdr-hub",
-  "version": "0.50.0",
+  "version": "0.51.0",
   "description": "Authenticated fleet approvals, PWA, coordinator, and hostd runtime",
   "license": "MIT",
   "author": "knpkv",
@@ -85,6 +85,7 @@
     "@effect/platform-browser": "4.0.0",
     "@effect/platform-node": "4.0.0",
     "@effect/platform-node-shared": "4.0.0",
+    "@knpkv/agent-usage": "workspace:^",
     "@knpkv/alchemy-console": "workspace:^",
     "@knpkv/bounded-io": "workspace:^",
     "@knpkv/browser-pairing": "workspace:^",

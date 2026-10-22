@@ -53,21 +53,22 @@ export const usageFixture = (query: UsageQuery, now: number, state: string): Fle
   }
 }
 
-export const limitsFixture = (now: number, state: string): FleetLimits => ({
+/** `host` reads its own limits; the shell fixture serves them as the hub's own read. */
+export const limitsFixture = (now: number, state: string, host = "atlas"): FleetLimits => ({
   hosts: state === "empty" ? [] : [{
-    host: "atlas",
+    host,
     readAt: now,
     reading: {
       _tag: "Read",
       skipped: 0,
       limits: {
         v: 1,
-        machine: "atlas",
+        machine: host,
         observedAt: now,
         latest: state === "empty-readings" ? [] : [
           {
             agent: "claude",
-            machine: "atlas",
+            machine: host,
             source: "claude-oauth-usage",
             label: "five_hour",
             windowMinutes: 300,
@@ -76,7 +77,7 @@ export const limitsFixture = (now: number, state: string): FleetLimits => ({
           },
           {
             agent: "claude",
-            machine: "atlas",
+            machine: host,
             source: "claude-oauth-usage",
             label: "seven_day",
             windowMinutes: 10_080,
@@ -85,7 +86,7 @@ export const limitsFixture = (now: number, state: string): FleetLimits => ({
           },
           {
             agent: "codex",
-            machine: "atlas",
+            machine: host,
             source: "codex-rollout",
             label: "seven_day",
             windowMinutes: 10_080,
