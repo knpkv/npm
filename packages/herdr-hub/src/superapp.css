@@ -1102,10 +1102,13 @@
       grid-row: 3;
     }
 
-    /* Drawn above main, as the header is: main's page-arrival focus ring stays hidden under it on both. */
     .superapp-header-region > .superapp-breadcrumb {
       grid-column: 1;
       grid-row: 2;
+    }
+
+    /* Drawn above main, as the header is: main's page-arrival focus ring stays hidden under it on both. */
+    :is(.superapp-header-region, .usage-empty-header-region) > .superapp-breadcrumb {
       position: relative;
       z-index: 1;
       background: var(--rly-color-canvas);

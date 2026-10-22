@@ -1062,11 +1062,16 @@ test("phone breadcrumb names the module and page under a product header", async 
       height: element.getBoundingClientRect().height,
       top: element.getBoundingClientRect().top,
       headerBottom: document.querySelector(".superapp-header")?.getBoundingClientRect().bottom,
-      position: getComputedStyle(element).position
+      position: getComputedStyle(element).position,
+      background: getComputedStyle(element).backgroundColor,
+      canvas: getComputedStyle(document.querySelector(".superapp-shell") ?? element).backgroundColor
     }))
     expect(geometry.height).toBeLessThanOrEqual(32)
     expect(geometry.top).toBe(geometry.headerBottom)
-    expect(geometry.position).toBe("static")
+    // In flow, so it scrolls away with the page; never pinned.
+    expect(["sticky", "fixed"]).not.toContain(geometry.position)
+    // Opaque canvas over main's top edge, as the header is on desktop: the page-arrival focus ring stays covered.
+    expect(geometry.background).toBe(geometry.canvas)
   }
   await page.goto("/#nowhere/at-all")
   await expect(page.locator(".superapp-breadcrumb")).toBeHidden()
