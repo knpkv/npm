@@ -2,6 +2,17 @@
 
 Released as `@knpkv/herdr-approvals` up to 0.18.0; the headings below are that package's history.
 
+## 0.51.0
+
+### Minor Changes
+
+- [#1068](https://github.com/knpkv/npm/pull/1068) [`e084f5b`](https://github.com/knpkv/npm/commit/e084f5b9f57a35f35fb8ce2cd5383e633f063ab3) Thanks [@konopkov](https://github.com/konopkov)! - The pool owner's run detail shows the run's stored failure line and its last 30 log lines, read from a new owner-only `GET /v1/modules/sandboxes/run-log`.
+
+### Patch Changes
+
+- Updated dependencies [[`e084f5b`](https://github.com/knpkv/npm/commit/e084f5b9f57a35f35fb8ce2cd5383e633f063ab3)]:
+  - @knpkv/sandbox-pool@0.6.0
+
 ## 0.50.0
 
 ### Minor Changes
