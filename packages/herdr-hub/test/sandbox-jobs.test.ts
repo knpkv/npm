@@ -22,7 +22,7 @@ import {
   SpendUnavailable,
   StaleVersion
 } from "@knpkv/sandbox-pool"
-import { DateTime, Duration, Effect, Fiber, Latch, Redacted, Schema } from "effect"
+import { Cause, DateTime, Duration, Effect, Exit, Fiber, Latch, Logger, Redacted, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import {
   BudgetControl,
@@ -474,6 +474,17 @@ describe("sandbox sweep", () => {
       ])
     }))
 
+  it.effect("logs why a spend read failed, not only that it did", () =>
+    Effect.gen(function*() {
+      const messages: Array<unknown> = []
+      const logger = Logger.make<unknown, void>((entry) => messages.push(entry.message))
+      const f = yield* fixture({
+        spend: new Map([[accountA, Effect.fail(new SpendUnavailable({ accountId: accountA, detail: "timeout" }))]])
+      })
+      yield* f.pool.sweepOnce.pipe(Effect.withLogger(logger))
+      expect(JSON.stringify(messages)).toContain("timeout")
+    }))
+
   it.effect("reads no spend on a host without a reader", () =>
     Effect.gen(function*() {
       const f = yield* fixture()
@@ -595,6 +606,16 @@ describe("sandbox sweep", () => {
       yield* TestClock.adjust(Duration.minutes(5))
       expect((yield* f.pool.lastSweep)?.at).not.toEqual(first?.at)
       yield* Fiber.interrupt(fiber)
+    }))
+
+  it.effect("stops sweeping when one sweep is interrupted from inside", () =>
+    Effect.gen(function*() {
+      const f = yield* fixture({ spend: new Map([[accountA, Effect.interrupt]]) })
+      const exit = yield* Effect.exit(runSandboxSweep(f.pool))
+      expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true)
+      const last = yield* f.pool.lastSweep
+      yield* TestClock.adjust(Duration.minutes(5))
+      expect(yield* f.pool.lastSweep).toEqual(last)
     }))
 
   it.effect("an account that left the contract is never leased and cannot be extended", () =>

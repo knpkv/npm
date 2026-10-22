@@ -410,7 +410,7 @@ export const makeSandboxPool = Effect.fn("SandboxPool.make")(function*(services:
 
   /**
    * One reading per pool account, recorded as the latest, after the sweep is recorded. Each read gives up after
-   * ten seconds. A failed read or write, or a reader that hangs, is logged by its tag and keeps the previous
+   * ten seconds. A failed read or write, or a reader that hangs, is logged with its fields and keeps the previous
    * reading: spend never delays the sweep record. A reader defect propagates, as every sweep defect does.
    */
   const readSpend = (now: DateTime.Utc): Effect.Effect<void> => {
@@ -425,7 +425,7 @@ export const makeSandboxPool = Effect.fn("SandboxPool.make")(function*(services:
         }),
         Effect.flatMap((usd) => Schema.decodeUnknownEffect(SpendReading)({ accountId: account.accountId, usd, asOf })),
         Effect.flatMap(store.recordSpend),
-        Effect.catch((error) => Effect.logWarning("sandbox spend was not read", account.accountId, error._tag))
+        Effect.catch((error) => Effect.logWarning("sandbox spend was not read", account.accountId, describe(error)))
       ), { discard: true })
   }
 
