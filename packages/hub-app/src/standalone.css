@@ -1,0 +1,5 @@
+/* The standalone shell's styles: rly's tokens, reset and base, which the hub page carries itself when an app is
+   attached. An app's own client.css holds only its scoped styles. */
+@layer theme, base, rly.fonts, rly.tokens, rly.reset, rly.base, rly.components, rly.state, fleet, components, utilities;
+
+@import "@knpkv/rly/styles.css";

@@ -308,14 +308,14 @@ test("keeps a document anchor on first load", async ({ page }) => {
 })
 
 test(
-  "phone module title and flat bar replace the nested breadcrumb without overlapping Relay",
+  "phone breadcrumb and flat bar sit clear of Relay, and the breadcrumb hides in full-screen Relay",
   async ({ page }, info) => {
     test.skip(info.project.name !== "phone", "Phone chrome")
     for (const width of [360, 390, 430]) {
       await page.setViewportSize({ width, height: 844 })
       await page.goto("/#fleet/work")
-      await expect(page.locator(".superapp-breadcrumb")).toBeHidden()
-      await expect(page.locator(".superapp-phone-title")).toHaveText("Fleet Work")
+      await expect(page.locator(".superapp-breadcrumb")).toHaveText("Fleet / Work", { useInnerText: true })
+      await expect(page.locator(".superapp-phone-title")).toHaveText("Relay")
       await expect(page.locator(".superapp-bottom a")).toHaveText(["Connect", "Fleet1", "Code", "Usage"])
       const barGeometry = await page.locator(".superapp-bottom").evaluate((bar) => {
         const fleet = bar.querySelector("a[href*=\"#fleet/\"]")
@@ -349,6 +349,7 @@ test(
       await page.locator("[data-rly-relay-launcher]").click()
       await expect(page.locator("[data-rly-relay-panel=\"fullscreen\"]")).toBeVisible()
       await expect(page.locator(".superapp-bottom")).toHaveAttribute("aria-hidden", "true")
+      await expect(page.locator(".superapp-breadcrumb")).toBeHidden()
       await page.getByRole("button", { name: "Close Relay", exact: true }).click()
       await expect(page.locator(".superapp-bottom")).toBeVisible()
     }
@@ -1038,28 +1039,89 @@ test("the built shell fixture includes the production font preloads", async ({ p
   expect(hrefs).toEqual(["/assets/geist-latin-wght-normal.woff2", "/assets/geist-mono-latin-wght-normal.woff2"])
 })
 
-/** Installed phone mast strings match the designed suffix policy for every page. */
-test("phone titles follow installed page metadata", async ({ page }, info) => {
-  test.skip(info.project.name !== "phone", "Phone mast")
+/** Design rule 45: the phone header names the product and one line under it names module and page. */
+test("phone breadcrumb names the module and page under a product header", async ({ page }, info) => {
+  test.skip(info.project.name !== "phone", "Phone breadcrumb")
   for (
-    const { route, title } of [
-      { route: "fleet/approvals", title: "Fleet Approvals" },
-      { route: "fleet/work", title: "Fleet Work" },
-      { route: "usage/limits", title: "Usage Limits" },
-      { route: "usage/tokens", title: "Usage" },
-      { route: "usage/by-tool", title: "Usage By tool" },
-      { route: "code/pull-requests", title: "Code" },
-      { route: "code/reviews", title: "Code" },
-      { route: "code/diffs", title: "Code" }
+    const { crumb, route } of [
+      { route: "fleet/approvals", crumb: "Fleet / Approvals" },
+      { route: "fleet/work", crumb: "Fleet / Work" },
+      { route: "usage/limits", crumb: "Usage / Limits" },
+      { route: "usage/tokens", crumb: "Usage / Tokens" },
+      { route: "usage/by-tool", crumb: "Usage / By tool" },
+      { route: "code/pull-requests", crumb: "Code / Pull requests" },
+      { route: "connect/overview", crumb: "Connect" }
     ]
   ) {
     await page.goto(`/#${route}`)
-    await expect(page.locator(".superapp-phone-title")).toHaveText(title)
+    await expect(page.locator(".superapp-phone-title")).toHaveText("Relay")
+    const line = page.locator(".superapp-breadcrumb")
+    await expect(line).toBeVisible()
+    await expect(line).toHaveText(crumb, { useInnerText: true })
+    const geometry = await line.evaluate((element) => ({
+      height: element.getBoundingClientRect().height,
+      top: element.getBoundingClientRect().top,
+      headerBottom: document.querySelector(".superapp-header")?.getBoundingClientRect().bottom,
+      position: getComputedStyle(element).position,
+      background: getComputedStyle(element).backgroundColor,
+      canvas: (() => {
+        const shell = document.querySelector(".superapp-shell")
+        return shell === null ? null : getComputedStyle(shell).backgroundColor
+      })()
+    }))
+    expect(geometry.height).toBeLessThanOrEqual(32)
+    expect(geometry.top).toBe(geometry.headerBottom)
+    // In flow, so it scrolls away with the page; never pinned.
+    expect(["sticky", "fixed"]).not.toContain(geometry.position)
+    // Opaque canvas over main's top edge, as the header is on desktop: the page-arrival focus ring stays covered.
+    expect(geometry.canvas).not.toBeNull()
+    expect(geometry.background).not.toBe("rgba(0, 0, 0, 0)")
+    expect(geometry.background).toBe(geometry.canvas)
   }
+  await page.goto("/#nowhere/at-all")
+  await expect(page.locator(".superapp-breadcrumb")).toBeHidden()
 })
 
-/** Desktop-only Fleet gutter cannot enlarge the one-pixel phone announcement heading. */
-test("Fleet heading keeps its phone hiding geometry and remains outside the tab order", async ({ page }, info) => {
+/** A page that draws its own breadcrumb (the review canvas does) owns that line: the shell's stays hidden. */
+test("phone breadcrumb yields to a page's own breadcrumb", async ({ page }, info) => {
+  test.skip(info.project.name !== "phone", "Phone breadcrumb")
+  await page.goto("/#code/pull-requests")
+  const line = page.locator(".superapp-breadcrumb")
+  await expect(line).toBeVisible()
+  // The fixture serves no canvas: stand in for its header with the same landmark inside the shown module.
+  await page.locator("[data-module=\"code\"]:not([hidden])").evaluate((module) => {
+    const nav = document.createElement("nav")
+    nav.setAttribute("aria-label", "Breadcrumb")
+    nav.dataset.testOwnCrumb = ""
+    nav.textContent = "Code / Review"
+    module.prepend(nav)
+  })
+  await expect(line).toBeHidden()
+  await page.locator("[data-test-own-crumb]").evaluate((nav) => nav.remove())
+  await expect(line).toBeVisible()
+})
+
+/** Arrival focus on a cold load lands on the page without a ring nobody asked for; the next Tab shows one. */
+test("cold-load arrival focus paints no focus ring until the keyboard is used", async ({ page }) => {
+  await page.goto("/#fleet/approvals")
+  const tab = page.getByRole("tab", { name: "Approvals", exact: true })
+  await expect(tab).toBeFocused()
+  expect(await tab.evaluate((element) => element.matches(":focus-visible"))).toBe(false)
+  await page.keyboard.press("Tab")
+  expect(await page.evaluate(() => document.activeElement?.matches(":focus-visible") ?? false)).toBe(true)
+})
+
+/** A cold load the shell rewrites to a default page is still the page's own load: no ring there either. */
+for (const url of ["/", "/#fleet"]) {
+  test(`cold load of ${url} focuses its default page without a focus ring`, async ({ page }) => {
+    await page.goto(url)
+    await expect.poll(() => page.evaluate(() => document.activeElement !== document.body)).toBe(true)
+    expect(await page.evaluate(() => document.activeElement?.matches(":focus-visible") ?? true)).toBe(false)
+  })
+}
+
+/** The Fleet heading shows at every width (design rule 45 refs) and stays outside the tab order. */
+test("Fleet heading is visible at every width and remains outside the tab order", async ({ page }) => {
   await page.goto("/#fleet/approvals")
   const heading = page.locator("[data-module=\"fleet\"] .superapp-module-heading")
   await expect(heading).toHaveCount(1)
@@ -1074,13 +1136,8 @@ test("Fleet heading keeps its phone hiding geometry and remains outside the tab 
   })
   expect(metrics.tabIndex).toBe(-1)
   expect(metrics.focusable).toBe(0)
-  if (info.project.name === "phone") {
-    expect(metrics.width).toBe(1)
-    expect(metrics.height).toBe(1)
-  } else {
-    expect(metrics.width).toBeGreaterThan(1)
-    expect(metrics.height).toBeGreaterThan(1)
-  }
+  expect(metrics.width).toBeGreaterThan(1)
+  expect(metrics.height).toBeGreaterThan(1)
 })
 
 /** Presentation locks follow visibility; the terminal worker remains owned until the active surface leaves. */

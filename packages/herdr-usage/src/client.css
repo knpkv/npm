@@ -1,0 +1,3 @@
+/* The Usage app's own styles, scoped to its root. rly's tokens and base come from the shell: the hub page when
+   attached, hub-app's standalone shell otherwise. The hub imports the same views.css for its built-in Usage. */
+@import "./views/views.css";

@@ -274,15 +274,9 @@
 
   /* Phone: each stack becomes a card of label and value lines. */
   @container (max-width: 40rem) {
-    /* The shell's top bar names the page on phones. */
     .stacks-heading {
-      position: absolute;
-      inline-size: 1px;
-      block-size: 1px;
-      overflow: clip;
-      min-inline-size: 0;
-      clip-path: inset(50%);
-      white-space: nowrap;
+      padding-block: 0.75rem 1rem;
+      padding-inline: max(1rem, env(safe-area-inset-left)) max(1rem, env(safe-area-inset-right));
     }
 
     .stacks-body {

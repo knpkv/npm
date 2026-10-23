@@ -572,6 +572,7 @@
       padding-inline: max(1rem, env(safe-area-inset-left)) max(1rem, env(safe-area-inset-right));
     }
     .hr-heading {
+      gap: 0.25rem;
       padding-block: 0.75rem;
       padding-inline: max(1rem, env(safe-area-inset-left)) max(1rem, env(safe-area-inset-right));
       background: var(--rly-color-surface-1);
@@ -623,15 +624,6 @@
     }
     .hr-procs li span:last-child {
       grid-column: 2;
-    }
-  }
-  @media (max-width: 599px) {
-    .hr-heading h1 {
-      position: absolute;
-      inline-size: 1px;
-      block-size: 1px;
-      overflow: clip;
-      clip-path: inset(50%);
     }
   }
   @media (forced-colors: active) {

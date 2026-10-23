@@ -162,23 +162,18 @@
     grid-template-columns:
       [full-start] 0.5rem [tabs-start] 0.5rem [content-start] minmax(0, 1fr)
       [content-end] 0.5rem [tabs-end] 0.5rem [full-end];
-    padding-block-start: 0;
+    padding-block-start: 0.75rem;
     padding-block-end: var(--rly-space-20);
   }
 
+  /* Phone shows the module heading under the shell's breadcrumb line (design rule 45). */
   .heading {
-    position: absolute;
-    inline-size: 1px;
-    block-size: 1px;
-    min-inline-size: 0;
-    overflow: clip;
-    clip-path: inset(50%);
+    gap: 0.25rem;
   }
 
   .pages {
     grid-column: tabs;
     gap: 0;
-    margin-block-start: 0;
   }
 
   .pages a {

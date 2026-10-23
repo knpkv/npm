@@ -333,7 +333,8 @@ const acquireStoreLock = (path: string) =>
 const openStore = (path: string) =>
   Effect.acquireRelease(
     Effect.gen(function*() {
-      // Sessions hold conversation content: the directory and the database are owner-only.
+      // Sessions hold conversation content: the directory and the database are owner-only. On Windows the
+      // modes do nothing; the user profile's ACL over the state directory is what keeps them owner-only.
       const fs = yield* FileSystem.FileSystem
       const paths = yield* Path.Path
       const ownerOnly = (operation: string) =>

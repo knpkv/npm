@@ -24,6 +24,7 @@ import { ChildProcessSpawner } from "effect/process"
 import * as Stdio from "effect/Stdio"
 import * as TestClock from "effect/testing/TestClock"
 import { RelayProbe, relayRootCommand } from "../src/internal/relay-open.js"
+import { ownerPaths } from "./fixtures/hub-paths.js"
 
 const hub = "https://hub.example.test/"
 const local = "http://127.0.0.1:4778/"
@@ -74,6 +75,7 @@ const testLayer = (
       // The command runner needs Path and Terminal; neither touches the fake filesystem or spawner.
       Path.layer,
       NodeTerminal.layer,
+      ownerPaths(),
       ConfigProvider.layer(ConfigProvider.fromUnknown({ FLEET_CONFIG_PATH: "/fixture/fleet.json", ...environment })),
       Layer.succeed(
         FileSystem.FileSystem,

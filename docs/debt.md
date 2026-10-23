@@ -526,14 +526,13 @@ Counts ratchet per package and kind: `pnpm debt:check` fails when one rises, and
 
 ## herdr-hub
 
-13 directives (ast-grep 1, effect-diagnostics 12), 3 without a reason.
+12 directives (ast-grep 1, effect-diagnostics 11), 3 without a reason.
 
 | File | Kind | Directive | Reason |
 | --- | --- | --- | --- |
 | [packages/herdr-hub/test/http.test.ts](../packages/herdr-hub/test/http.test.ts) | ast-grep | `ast-grep-ignore: no-released-ephemeral-test-port -- one test must probe a port before hostd binds it (see its use).` | yes |
 | [packages/herdr-hub/scripts/test-packed-packages.ts](../packages/herdr-hub/scripts/test-packed-packages.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
 | [packages/herdr-hub/src/fleetctl.ts](../packages/herdr-hub/src/fleetctl.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
-| [packages/herdr-hub/test/config-path.test.ts](../packages/herdr-hub/test/config-path.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
 | [packages/herdr-hub/test/hostd-runtime.test.ts](../packages/herdr-hub/test/hostd-runtime.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
 | [packages/herdr-hub/test/hostd-runtime.test.ts](../packages/herdr-hub/test/hostd-runtime.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
 | [packages/herdr-hub/test/hostd-runtime.test.ts](../packages/herdr-hub/test/hostd-runtime.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |

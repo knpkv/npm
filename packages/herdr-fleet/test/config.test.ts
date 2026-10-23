@@ -1,8 +1,9 @@
 import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
-import { ConfigProvider, Effect, FileSystem, Path, Schema } from "effect"
+import { Effect, FileSystem, Path, Schema } from "effect"
 import { loadConfiguration, loadConfigurationOrStandalone, standaloneDefaults } from "../src/config.js"
 import { HostConfiguration } from "../src/model.js"
+import { HubPaths, type HubPathsInput, hubPathTable } from "../src/paths.js"
 
 describe("fleet configuration", () => {
   it.layer(NodeServices.layer)((it) => {
@@ -35,9 +36,12 @@ it("keeps heavy gate configuration absent by default and requires an explicit ab
 })
 
 describe("standalone fallback", () => {
-  // Each case owns its isolated environment.
-  const withEnv = (values: Readonly<Record<string, string>>) =>
-    Effect.provideService(ConfigProvider.ConfigProvider, ConfigProvider.fromUnknown(values))
+  // Each case owns its computer: a path table from fixtures, never the runner's HOME.
+  const withPaths = (input: Partial<HubPathsInput> = {}) =>
+    Effect.provideService(
+      HubPaths,
+      hubPathTable({ windows: false, home: "/home/owner", hostname: "atlas", env: {}, ...input })
+    )
 
   it.layer(NodeServices.layer)((it) => {
     // No file is a first run on a computer outside any fleet: run as its own local hub.
@@ -48,7 +52,7 @@ describe("standalone fallback", () => {
         const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "fleet-standalone-" })
         const file = path.join(directory, "config.json")
         const loaded = yield* loadConfigurationOrStandalone(file).pipe(
-          withEnv({ HOME: "/home/owner", HOSTNAME: "atlas" })
+          withPaths()
         )
         expect(loaded._tag).toBe("Standalone")
         expect(loaded.path).toBe(file)
@@ -75,7 +79,7 @@ describe("standalone fallback", () => {
         for (const text of ["{not json", "{}"]) {
           yield* fileSystem.writeFileString(file, text)
           const error = yield* loadConfigurationOrStandalone(file).pipe(
-            withEnv({ HOME: "/home/owner" }),
+            withPaths(),
             Effect.flip
           )
           expect(error._tag).toBe("FleetValidationError")
@@ -90,7 +94,7 @@ describe("standalone fallback", () => {
         const path = yield* Path.Path
         const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "fleet-case-" })
         const file = path.join(directory, "config.json")
-        const standalone = yield* standaloneDefaults.pipe(withEnv({ HOME: "/home/owner", HOSTNAME: "atlas" }))
+        const standalone = yield* standaloneDefaults.pipe(withPaths())
         yield* fileSystem.writeFileString(file, JSON.stringify({ ...standalone, host: "atlas", repository: "/repo" }))
         const caseInsensitive = FileSystem.FileSystem.of({
           ...fileSystem,
@@ -100,7 +104,7 @@ describe("standalone fallback", () => {
             )
         })
         const loaded = yield* loadConfigurationOrStandalone(file).pipe(
-          withEnv({ HOME: "/home/owner" }),
+          withPaths(),
           Effect.provideService(FileSystem.FileSystem, caseInsensitive)
         )
         expect(loaded._tag).toBe("File")
@@ -113,9 +117,9 @@ describe("standalone fallback", () => {
         const path = yield* Path.Path
         const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "fleet-standalone-" })
         const file = path.join(directory, "config.json")
-        const standalone = yield* standaloneDefaults.pipe(withEnv({ HOME: "/home/owner", HOSTNAME: "atlas" }))
+        const standalone = yield* standaloneDefaults.pipe(withPaths())
         yield* fileSystem.writeFileString(file, JSON.stringify({ ...standalone, host: "atlas", repository: "/repo" }))
-        const loaded = yield* loadConfigurationOrStandalone(file).pipe(withEnv({ HOME: "/home/owner" }))
+        const loaded = yield* loadConfigurationOrStandalone(file).pipe(withPaths())
         expect(loaded._tag).toBe("File")
         expect(loaded.config.repository).toBe("/repo")
       }).pipe(Effect.scoped))
@@ -130,7 +134,7 @@ describe("standalone fallback", () => {
         const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "fleet-explicit-" })
         const file = path.join(directory, "config.json")
         const error = yield* loadConfigurationOrStandalone(file, { standaloneWhenMissing: false }).pipe(
-          withEnv({ HOME: "/home/owner" }),
+          withPaths(),
           Effect.flip
         )
         expect(error).toMatchObject({
@@ -150,7 +154,7 @@ describe("standalone fallback", () => {
         const target = path.join(directory, "generation", "config.json")
         yield* fileSystem.symlink(target, file)
         const error = yield* loadConfigurationOrStandalone(file).pipe(
-          withEnv({ HOME: "/home/owner" }),
+          withPaths(),
           Effect.flip
         )
         expect(error).toMatchObject({
@@ -169,30 +173,44 @@ describe("standalone fallback", () => {
         const file = path.join(directory, "config.json")
         yield* fileSystem.makeDirectory(file)
         const error = yield* loadConfigurationOrStandalone(file).pipe(
-          withEnv({ HOME: "/home/owner" }),
+          withPaths(),
           Effect.flip
         )
         expect(error._tag).toBe("FleetValidationError")
       }).pipe(Effect.scoped))
   })
 
-  it.effect("derives the state directory from XDG_STATE_HOME, else HOME", () =>
+  it.effect("derives the state directory from XDG_STATE_HOME, else the home directory", () =>
     Effect.gen(function*() {
-      expect(
-        (yield* standaloneDefaults.pipe(withEnv({ HOME: "/home/owner", XDG_STATE_HOME: "/state" })))
-          .stateDirectory
-      ).toBe("/state/fleet")
-      expect((yield* standaloneDefaults.pipe(withEnv({ HOME: "/home/owner" }))).stateDirectory)
-        .toBe("/home/owner/.local/state/fleet")
+      expect((yield* standaloneDefaults.pipe(withPaths({ env: { XDG_STATE_HOME: "/state" } }))).stateDirectory)
+        .toBe("/state/fleet")
+      expect((yield* standaloneDefaults.pipe(withPaths())).stateDirectory).toBe("/home/owner/.local/state/fleet")
+      expect((yield* standaloneDefaults.pipe(withPaths())).repository).toBe("/home/owner")
     }))
 
   // A container's hostname may hold characters a fleet host name refuses; an empty one falls back.
-  it.effect("names the host from HOSTNAME as a valid fleet host name", () =>
+  it.effect("names the host from the computer's host name as a valid fleet host name", () =>
     Effect.gen(function*() {
-      const host = (values: Readonly<Record<string, string>>) =>
-        standaloneDefaults.pipe(withEnv({ HOME: "/home/owner", ...values }), Effect.map((config) => config.host))
-      expect(yield* host({ HOSTNAME: "build_box.local" })).toBe("build-box.local")
-      expect(yield* host({ HOSTNAME: "-_-" })).toBe("localhost")
-      expect(yield* host({})).toBe("localhost")
+      const host = (hostname: string) =>
+        standaloneDefaults.pipe(withPaths({ hostname }), Effect.map((config) => config.host))
+      expect(yield* host("build_box.local")).toBe("build-box.local")
+      expect(yield* host("-_-")).toBe("localhost")
+      expect(yield* host("")).toBe("localhost")
+    }))
+
+  // Windows has no HOME and no XDG layout: a standalone hub keeps its state under %LOCALAPPDATA%.
+  it.effect("keeps a Windows standalone host's state under LOCALAPPDATA", () =>
+    Effect.gen(function*() {
+      const config = yield* standaloneDefaults.pipe(withPaths({
+        windows: true,
+        home: "C:\\Users\\owner",
+        hostname: "DESKTOP-1",
+        env: { LOCALAPPDATA: "C:\\Users\\owner\\AppData\\Local" }
+      }))
+      expect(config).toMatchObject({
+        host: "DESKTOP-1",
+        repository: "C:\\Users\\owner",
+        stateDirectory: "C:\\Users\\owner\\AppData\\Local\\fleet"
+      })
     }))
 })

@@ -1,9 +1,10 @@
 import { NodeServices } from "@effect/platform-node"
 import { expect, layer } from "@effect/vitest"
-import { JobStore, makeFleetService, standaloneDefaults } from "@knpkv/herdr-fleet"
-import { ConfigProvider, Effect, FileSystem, Path } from "effect"
+import { HubPaths, JobStore, makeFleetService, standaloneDefaults } from "@knpkv/herdr-fleet"
+import { Effect, FileSystem, Path } from "effect"
 import { makeHostdOperations } from "../src/hostd.js"
 import { startHttpServer } from "../src/http.js"
+import { ownerTable } from "./fixtures/hub-paths.js"
 
 const assets = {
   connectScript: "",
@@ -21,9 +22,7 @@ layer(NodeServices.layer)("standalone hostd serving", (it) => {
       const fileSystem = yield* FileSystem.FileSystem
       const path = yield* Path.Path
       const home = yield* fileSystem.makeTempDirectoryScoped({ prefix: "hostd-standalone-serve-" })
-      const defaults = yield* standaloneDefaults.pipe(
-        Effect.provideService(ConfigProvider.ConfigProvider, ConfigProvider.fromUnknown({ HOME: home }))
-      )
+      const defaults = yield* standaloneDefaults.pipe(Effect.provideService(HubPaths, ownerTable(home)))
       const config = {
         ...defaults,
         // Bind ephemeral ports: a developer machine may run its own hub on 4778.

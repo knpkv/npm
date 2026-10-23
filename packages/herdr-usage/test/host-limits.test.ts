@@ -3,7 +3,7 @@ import { describe, expect, it } from "@effect/vitest"
 import type { HostLimits, LimitsNow } from "@knpkv/herdr-connect"
 import { Duration, Effect, Ref } from "effect"
 import { TestClock } from "effect/testing"
-import { readHostLimits, staleWhileRevalidate } from "../src/host-limits.js"
+import { readHostLimits, staleWhileRevalidate } from "../src/host.js"
 
 /** `agent-usage limits` as it prints on a host: one window read, one that could not be. */
 const answer: LimitsNow = {

@@ -7,10 +7,10 @@ import {
   validateModuleRegistry
 } from "./module-contract.js"
 
+export * from "@knpkv/herdr-usage/selection"
 export * from "./module-contract.js"
 export * from "./module-navigation.js"
 export * from "./module-needs-you.js"
-export * from "./usage-selection.js"
 
 /**
  * The shell owns history. Build exact links with moduleHref; focus defaults to the destination

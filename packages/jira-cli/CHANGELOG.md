@@ -1,5 +1,16 @@
 # @knpkv/jira-cli
 
+## 1.6.12
+
+### Patch Changes
+
+- [#1087](https://github.com/knpkv/npm/pull/1087) [`7045340`](https://github.com/knpkv/npm/commit/70453409aa703c512ed029cea629d510e4229be1) Thanks [@knpkv-automation](https://github.com/apps/knpkv-automation)! - Update the generated Schema-backed Jira API client.
+
+  Release: patch (no contract change).
+
+- Updated dependencies [[`7045340`](https://github.com/knpkv/npm/commit/70453409aa703c512ed029cea629d510e4229be1)]:
+  - @knpkv/jira-api-client@3.3.3
+
 ## 1.6.11
 
 ### Patch Changes

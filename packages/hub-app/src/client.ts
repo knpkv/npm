@@ -8,7 +8,8 @@
  *   the app's React, rly and effect versions are its own business.
  * - The shell owns history, header, crumb, badge and portals. The app asks for them through the context.
  * - Styling: rly tokens arrive as CSS custom properties from the shell; app CSS is scoped under
- *   `[data-app="<id>"]`, which the shell sets on the mount root.
+ *   `[data-app="<id>"]`, which the shell sets on the mount root and on every element it lends the app (header
+ *   outlet, slot, portal root), so portaled content is styled too.
  *
  * @module
  */
@@ -46,6 +47,14 @@ export interface ShellContext {
   /** Items after `Relay › App › Page`; an empty list clears them. */
   readonly setCrumb: (items: ReadonlyArray<ShellCrumb>) => void
   readonly setHeaderSlot: (slot: ShellHeaderSlot | null) => void
+  /**
+   * An element in the shell's header the app may portal its own header content into, or null while the shell
+   * has none (standalone, or a phone layout without one). Pair it with `setHeaderMode("grouped")`. Added after
+   * contract 1 shipped, so a shell may leave both out: an app treats a missing pair as no outlet.
+   */
+  readonly headerOutlet?: HTMLElement | null
+  /** `grouped`: the shell yields its header row to the app's outlet content; `shell` restores its own. */
+  readonly setHeaderMode?: (mode: "shell" | "grouped") => void
   /** The app has nothing to show; the shell switches to its empty-state chrome. */
   readonly setEmpty: (empty: boolean) => void
   readonly setBadge: (badge: ShellBadge | null) => void

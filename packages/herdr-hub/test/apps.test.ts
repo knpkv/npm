@@ -4,6 +4,7 @@
  */
 import { NodeHttpClient, NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
+import type { FleetLimits, UsageQuery } from "@knpkv/herdr-connect"
 import { AppId, AppStates, hubHeaders, type ModuleCaller } from "@knpkv/hub-app"
 import { fixtureApp, type FixtureMode } from "@knpkv/hub-app-fixture"
 import { serveAttached } from "@knpkv/hub-app/node"
@@ -18,6 +19,7 @@ import {
 } from "node:http"
 import { createServer as createNetServer, type Socket } from "node:net"
 import { tmpdir } from "node:os"
+import { answerFleetRead } from "../src/apps/fleet-read.js"
 import { makeAppTokens, makeGrants } from "../src/apps/grants.js"
 import { logReloadFailure, makeAppRegistry } from "../src/apps/registry.js"
 import { AppServiceRefused, handleAppServicesRoute, handleAppsRoute } from "../src/apps/routes.js"
@@ -193,6 +195,25 @@ describe("hub apps", () => {
         yield* hub.registry.reload()
         const reasons = (yield* hub.states).map((state) => state._tag === "Ready" ? "ready" : state.reason)
         expect(reasons).toEqual(["ready", "incompatible", "id_mismatch", "timeout", "duplicate", "duplicate"])
+      }).pipe(Effect.scoped))
+
+    it.effect("a burst of failed requests runs one re-probe, not a queue", () =>
+      Effect.gen(function*() {
+        const directory = yield* tempDirectory
+        const hanging = `${directory}/hang.sock`
+        const { held } = yield* hangingSocket(hanging)
+        const hub = yield* makeHub(directory)
+        yield* hub.writeConfig([{ id: "hang", socket: hanging }])
+        yield* hub.registry.reload()
+        expect(held.size).toBe(1)
+        yield* Effect.all([
+          hub.registry.probeOne(appId("hang")),
+          hub.registry.probeOne(appId("hang")),
+          hub.registry.probeOne(appId("hang"))
+        ], {
+          concurrency: "unbounded"
+        })
+        expect(held.size).toBe(2)
       }).pipe(Effect.scoped))
 
     it.effect("an invalid apps.json keeps the previous list", () =>
@@ -511,21 +532,24 @@ describe("hub apps", () => {
         const reason = (use: Effect.Effect<unknown, { readonly reason: string }>) =>
           Effect.map(Effect.flip(use), (error) => error.reason)
 
-        expect(yield* reason(grants.use({ grant: "b".repeat(40), app: fixture, once: true }))).toBe("unknown")
-        expect(yield* reason(grants.use({ grant, app: appId("other"), once: true }))).toBe("app_mismatch")
-        expect(yield* grants.use({ grant, app: fixture, once: false })).toEqual(caller)
-        expect(yield* grants.use({ grant, app: fixture, once: true })).toEqual(caller)
-        expect(yield* reason(grants.use({ grant, app: fixture, once: true }))).toBe("used")
-        // A Relay post only reads the caller: a spent grant still names it while it lives.
-        expect(yield* grants.use({ grant, app: fixture, once: false })).toEqual(caller)
+        expect(yield* reason(grants.use({ grant: "b".repeat(40), app: fixture, purpose: "spend" }))).toBe("unknown")
+        expect(yield* reason(grants.use({ grant, app: appId("other"), purpose: "spend" }))).toBe("app_mismatch")
+        expect(yield* grants.use({ grant, app: fixture, purpose: "read" })).toEqual(caller)
+        expect(yield* grants.use({ grant, app: fixture, purpose: "spend" })).toEqual(caller)
+        expect(yield* reason(grants.use({ grant, app: fixture, purpose: "spend" }))).toBe("used")
+        // Reading the caller, or a Relay post as the caller, still works with a spent grant while it lives.
+        expect(yield* grants.use({ grant, app: fixture, purpose: "read" })).toEqual(caller)
+        expect(yield* grants.use({ grant, app: fixture, purpose: "write" })).toEqual(caller)
 
         const read = yield* grants.mint(fixture, caller, "GET")
-        expect(yield* reason(grants.use({ grant: read.grant, app: fixture, once: true }))).toBe("read_only")
-        expect(yield* grants.use({ grant: read.grant, app: fixture, once: false })).toEqual(caller)
+        expect(yield* reason(grants.use({ grant: read.grant, app: fixture, purpose: "spend" }))).toBe("read_only")
+        // A cross-site GET can't post to Relay as the user either.
+        expect(yield* reason(grants.use({ grant: read.grant, app: fixture, purpose: "write" }))).toBe("read_only")
+        expect(yield* grants.use({ grant: read.grant, app: fixture, purpose: "read" })).toEqual(caller)
 
         const { grant: later } = yield* grants.mint(fixture, caller, "POST")
         yield* TestClock.adjust(Duration.seconds(61))
-        expect(yield* reason(grants.use({ grant: later, app: fixture, once: true }))).toBe("expired")
+        expect(yield* reason(grants.use({ grant: later, app: fixture, purpose: "spend" }))).toBe("expired")
       }))
   })
 
@@ -536,6 +560,45 @@ describe("hub apps", () => {
       expect(Exit.hasInterrupts(yield* Effect.exit(logReloadFailure(Effect.interrupt)))).toBe(true)
     }))
 
+  it("keeps redirects inside the app: its root moves under its prefix, other origins are dropped", () => {
+    expect(appLocation("/v1/modules/usage/limits", "/apps/usage/")).toBe("/apps/usage/v1/modules/usage/limits")
+    expect(appLocation("/apps/usage/app/assets/x", "/apps/usage/")).toBe("/apps/usage/app/assets/x")
+    expect(appLocation("limits?range=7d", "/apps/usage/")).toBe("/apps/usage/limits?range=7d")
+    // Moved under the prefix first, then resolved: the app's root can't climb out either.
+    expect(appLocation("/v1/../../connect", "/apps/usage/")).toBeNull()
+    expect(appLocation("//elsewhere.test/", "/apps/usage/")).toBeNull()
+    expect(appLocation("https://elsewhere.test/", "/apps/usage/")).toBeNull()
+  })
+
+  it.effect("fleet.read answers the hub's fleet reads, decoding usage selectors and refusing bad ones", () =>
+    Effect.gen(function*() {
+      const asked: Array<string> = []
+      const offline: FleetLimits = { hosts: [], failures: [{ host: "cedar", reason: "offline" }], peersListed: true }
+      const sources = {
+        limits: Effect.succeed(offline),
+        usage: (query: UsageQuery) =>
+          Effect.sync(() => {
+            asked.push(`${query.range} ${query.timeZone}`)
+            return { hosts: [], failures: [], peersListed: false }
+          })
+      }
+      expect(yield* answerFleetRead(sources, { read: "limits", query: {} })).toEqual({
+        hosts: [],
+        failures: [{ host: "cedar", reason: "offline" }],
+        peersListed: true
+      })
+      expect(yield* answerFleetRead(sources, { read: "usage", query: { timeZone: "Europe/Amsterdam" } })).toEqual({
+        hosts: [],
+        failures: [],
+        peersListed: false
+      })
+      yield* answerFleetRead(sources, { read: "usage", query: { range: "30d", timeZone: "UTC" } })
+      expect(asked).toEqual(["7d Europe/Amsterdam", "30d UTC"])
+      const refused = yield* Effect.flip(
+        answerFleetRead(sources, { read: "usage", query: { range: "1y", timeZone: "UTC" } })
+      )
+      expect(refused.code).toBe("rejected")
+    }))
   it("passes a redirect only if it resolves inside the app's prefix", () => {
     expect(appLocation("/apps/raw/ok?a=1#b", "/apps/raw/")).toBe("/apps/raw/ok?a=1#b")
     expect(appLocation("next", "/apps/raw/")).toBe("/apps/raw/next")

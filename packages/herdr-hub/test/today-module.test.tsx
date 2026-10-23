@@ -61,7 +61,7 @@ it("lands on Today, keeps document anchors, and sends legacy approval selectors 
   await click("?tab=approvals&approvalHost=ALPHA&approvalJob=job-1")
   expect(window.location.hash).toBe("#fleet/approvals")
   expect(window.location.search).toBe("?approvalHost=ALPHA&approvalJob=job-1")
-  expect(document.querySelector('[aria-label="Current page"]')?.textContent).toBe("Relay/Fleet/Approvals")
+  expect(document.querySelector('[aria-label="Current page"]')?.textContent).toBe("Relay/Fleet\u00a0/\u00a0Approvals")
 })
 
 it("canonicalizes a bare hub URL to Today", async () => {

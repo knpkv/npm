@@ -9,6 +9,14 @@ describe("module registration", () => {
     expect(Schema.decodeUnknownResult(ModuleDescriptor)({ ...fleetModule, listeners: ["serve"] })._tag).toBe("Success")
   })
 
+  // An app built against an older contract may still send the removed phone-title flag: it decodes, without it.
+  it("drops the removed showInPhoneTitle page flag from an older descriptor", () => {
+    const older = { ...fleetModule, pages: [{ id: "approvals", label: "Approvals", showInPhoneTitle: true }] }
+    const decoded = Schema.decodeUnknownResult(ModuleDescriptor)({ ...older, defaultPage: "approvals" })
+    expect(decoded).toMatchObject({ _tag: "Success", success: { pages: [{ id: "approvals", label: "Approvals" }] } })
+    expect(Result.isSuccess(decoded) && Object.hasOwn(decoded.success.pages[0] ?? {}, "showInPhoneTitle")).toBe(false)
+  })
+
   it("refuses two modules claiming the same route namespace", () => {
     const result = validateModuleRegistry([fleetModule, { ...fleetModule, label: "Other Fleet" }])
     expect(Result.isFailure(result)).toBe(true)

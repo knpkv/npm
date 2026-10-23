@@ -1,6 +1,6 @@
 import { expect, it } from "@effect/vitest"
 import { Result } from "effect"
-import { canonicalUsageSelection } from "../src/usage-selection.js"
+import { canonicalUsageSelection } from "../src/selection.js"
 
 it("keeps a Usage link's range, named zone and host, with explicit defaults for a bare page", () => {
   const selected = canonicalUsageSelection(

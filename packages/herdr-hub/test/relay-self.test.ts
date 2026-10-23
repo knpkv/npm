@@ -10,9 +10,11 @@ import { TestClock } from "effect/testing"
 import { makeRelaySelfCommand } from "../src/internal/relay-cli.js"
 import { RelayProbe, relayRootCommand } from "../src/internal/relay-open.js"
 import { submitRelaySelf } from "../src/internal/relay-self.js"
+import { ownerPaths } from "./fixtures/hub-paths.js"
 
 const layer = Layer.mergeAll(
   NodeServices.layer,
+  ownerPaths(),
   Layer.succeed(BrowserOpener, BrowserOpener.of({ open: () => Effect.die("self/help must not open a browser") })),
   Layer.succeed(
     RelayProbe,

@@ -5,6 +5,7 @@ import {
   FleetOperationError,
   FleetValidationError,
   type HostConfiguration,
+  HubPaths,
   JobHistoryPage,
   JobPayload,
   type JobPayload as JobPayloadType,
@@ -535,7 +536,7 @@ const main = Effect.gen(function*() {
 main.pipe(
   // The fleetctl process owns one composed Node runtime layer.
   // @effect-diagnostics-next-line strictEffectProvide:off
-  Effect.provide(Layer.merge(NodeServices.layer, NodeHttpClient.layerNodeHttp)),
+  Effect.provide(Layer.merge(Layer.provideMerge(HubPaths.layer, NodeServices.layer), NodeHttpClient.layerNodeHttp)),
   Effect.catch((error) =>
     Console.error(
       error._tag === "FleetctlUsageError"

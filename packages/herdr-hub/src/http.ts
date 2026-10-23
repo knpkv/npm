@@ -77,6 +77,7 @@ import {
 import { type FleetHostName, JobPayload } from "@knpkv/herdr-fleet/model"
 import type { TailscaleAuthorizationError } from "@knpkv/herdr-tailscale"
 import { authorizeWhois, discoverFleetPeers, layer as tailscaleLayer, Tailscale } from "@knpkv/herdr-tailscale"
+import { readHostLimits, readHostUsage, staleWhileRevalidate, usageCache } from "@knpkv/herdr-usage/host"
 import type {
   WorkCheckpointConflictError,
   WorkProjectionError,
@@ -132,6 +133,7 @@ import WebSocketClient, { WebSocketServer } from "ws"
 import type { SanitizedJobRecord } from "./approval-request.js"
 import { sanitizeJobPayload, sanitizeJobRecord } from "./approval-request.js"
 import { resolveApprovalPage } from "./approval-url.js"
+import { answerFleetRead } from "./apps/fleet-read.js"
 import { makeAppTokens, makeGrants } from "./apps/grants.js"
 import { appNeedsYouProviders } from "./apps/needs-you.js"
 import { makeAppRegistry } from "./apps/registry.js"
@@ -155,9 +157,7 @@ import {
 import { DashboardResponseBudgetError } from "./errors.js"
 import type { ApprovalAppStoreError, PushEndpointNotAllowedError } from "./errors.js"
 import { fontPreloadLink } from "./font-preload.js"
-import { readHostLimits, staleWhileRevalidate } from "./host-limits.js"
 import { makeHostResources } from "./host-resources.js"
-import { readHostUsage, usageCache } from "./host-usage.js"
 import { attachTaskWorkReader } from "./internal/agent-task-work-source.js"
 import { dashboardPage } from "./internal/dashboard-page.js"
 import { moduleCallerFor } from "./internal/hub-node.js"
@@ -3173,7 +3173,15 @@ export const startHttpServer = async (
                 isHub,
                 hosts: config.machines.map(({ host }) => host)
               },
-              fleetRead: () => Effect.fail(new AppServiceRefused({ code: "unavailable" })),
+              // The same fleet reads the Connect page makes: every peer's on the hub, this host's elsewhere.
+              fleetRead: (fleetRead) =>
+                answerFleetRead({
+                  limits: isHub ? hubLimits(localLimits, fleetPeers(config)) : fleetLimits(localLimits, []),
+                  usage: (query) =>
+                    isHub
+                      ? hubUsage(query, localUsage(query), fleetPeers(config))
+                      : fleetUsage(query, localUsage(query), [])
+                }, fleetRead),
               submitJob: (payload, caller) =>
                 Schema.decodeUnknownEffect(JobPayload)(payload).pipe(
                   Effect.mapError(() => new AppServiceRefused({ code: "rejected" })),

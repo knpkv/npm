@@ -1,0 +1,1034 @@
+@layer fleet {
+  :where([data-app="usage"]) .usage-details {
+    --usage-gutter-start: max(var(--rly-space-40), env(safe-area-inset-left, 0px));
+    --usage-gutter-end: max(var(--rly-space-40), env(safe-area-inset-right, 0px));
+    container-type: inline-size;
+    display: grid;
+    align-content: start;
+    gap: var(--rly-space-24);
+    min-inline-size: 0;
+    padding-block: 0 var(--rly-space-40);
+    padding-inline: var(--usage-gutter-start) var(--usage-gutter-end);
+    color: var(--rly-color-text-1);
+  }
+
+  :where([data-app="usage"]) .usage-details[data-usage-page="by-tool"] {
+    gap: var(--rly-space-20);
+  }
+
+  :where([data-app="usage"]) .usage-details h1,
+  :where([data-app="usage"]) .usage-details h2,
+  :where([data-app="usage"]) .usage-details p,
+  :where([data-app="usage"]) .usage-details ul {
+    margin: 0;
+  }
+
+  :where([data-app="usage"]) .usage-by-tool-updating {
+    gap: var(--rly-space-8);
+    line-height: 1.5;
+    margin-block-start: -0.25rem;
+    font-size: 0.8125rem;
+    font-weight: 430;
+  }
+
+  :where([data-app="usage"]) .usage-by-tool-notice {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.6rem var(--rly-space-16);
+    padding: var(--rly-space-12) var(--rly-space-16);
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-group);
+    background: var(--rly-color-surface-1);
+    font-weight: 430;
+  }
+
+  :where([data-app="usage"]) .usage-by-tool-notice > div {
+    display: grid;
+    gap: 0.2rem;
+    min-inline-size: 0;
+  }
+
+  :where([data-app="usage"]) .usage-by-tool-notice > div > span:last-child {
+    font-size: 0.875rem;
+    line-height: 1.5;
+  }
+
+  :where([data-app="usage"]) .usage-details .usage-by-tool-notice time {
+    color: inherit;
+  }
+
+  :where([data-app="usage"]) .usage-by-tool-notice button {
+    min-block-size: 2.25rem;
+    font-size: 1rem;
+    font-weight: 430;
+    line-height: 1.5;
+  }
+
+  :where([data-app="usage"]) .usage-by-tool-updating svg {
+    inline-size: 0.75rem;
+    block-size: 0.75rem;
+  }
+
+  :where([data-app="usage"]) .usage-details-intro,
+  :where([data-app="usage"]) .usage-details-section,
+  :where([data-app="usage"]) .usage-details-footer {
+    display: grid;
+    gap: var(--rly-space-12);
+    min-inline-size: 0;
+  }
+
+  :where([data-app="usage"]) .usage-details h1 {
+    font-size: 1.75rem;
+    line-height: 1.2;
+    font-weight: 620;
+    letter-spacing: -0.035em;
+  }
+
+  :where([data-app="usage"]) .usage-details h2 {
+    font-size: 1.125rem;
+    line-height: 1.4;
+    font-weight: 600;
+  }
+
+  :where([data-app="usage"]) .usage-details p,
+  :where([data-app="usage"]) .usage-details small,
+  :where([data-app="usage"]) .usage-details time,
+  :where([data-app="usage"]) .usage-details-controls > span {
+    color: var(--rly-color-text-2);
+  }
+
+  :where([data-app="usage"]) .usage-details-mast {
+    display: contents;
+  }
+
+  :where([data-app="usage"])
+    .usage-details:is([data-usage-page="by-tool"], [data-usage-page="limits"])
+    .usage-details-mast {
+    display: grid;
+    gap: 0.9rem;
+    margin-inline: calc(-1 * var(--usage-gutter-start)) calc(-1 * var(--usage-gutter-end));
+    padding-inline: var(--usage-gutter-start) var(--usage-gutter-end);
+    border-block-end: 1px solid var(--rly-color-border-1);
+  }
+
+  :where([data-app="usage"])
+    .usage-details:is([data-usage-page="by-tool"], [data-usage-page="limits"])
+    .usage-details-intro {
+    gap: 0;
+    line-height: 1.5;
+  }
+
+  :where([data-app="usage"])
+    .usage-details:is([data-usage-page="by-tool"], [data-usage-page="limits"])
+    .usage-details-tabs {
+    gap: var(--rly-space-8);
+    margin-block-end: -1px;
+    border: 0;
+    font: 430 0.9375rem / 1.5 var(--rly-font-ui);
+  }
+
+  :where([data-app="usage"])
+    .usage-details:is([data-usage-page="by-tool"], [data-usage-page="limits"])
+    .usage-details-tabs
+    a {
+    padding-inline: var(--rly-space-4);
+  }
+
+  :where([data-app="usage"])
+    .usage-details:is([data-usage-page="by-tool"], [data-usage-page="limits"])
+    .usage-details-tabs
+    a[aria-current="page"] {
+    font-weight: 620;
+  }
+
+  :where([data-app="usage"]) .usage-details-intro {
+    gap: var(--rly-space-4);
+    padding-block: var(--rly-space-24) 0;
+  }
+
+  :where([data-app="usage"]) .usage-details-intro > p {
+    font-size: 0.9375rem;
+  }
+
+  :where([data-app="usage"]) .usage-details-tabs {
+    display: flex;
+    gap: var(--rly-space-24);
+    border-block-end: 1px solid var(--rly-color-border-1);
+  }
+
+  :where([data-app="usage"]) .usage-details-tabs a {
+    display: inline-flex;
+    align-items: center;
+    min-block-size: 2.75rem;
+    color: var(--rly-color-text-2);
+    text-decoration: none;
+    padding-block: var(--rly-space-8);
+  }
+
+  :where([data-app="usage"]) .usage-details-tabs a[aria-current="page"] {
+    color: var(--rly-color-text-1);
+    font-weight: 600;
+    background: linear-gradient(var(--rly-color-text-1), var(--rly-color-text-1)) center bottom / 100% 2px no-repeat;
+  }
+
+  :where([data-app="usage"]) .usage-by-tool {
+    gap: var(--rly-space-20);
+    font-weight: 430;
+    line-height: 1.5;
+  }
+
+  :where([data-app="usage"]) .usage-by-tool-reading {
+    display: grid;
+    gap: 0.1rem;
+  }
+
+  :where([data-app="usage"]) .usage-by-tool p {
+    font-size: 0.8125rem;
+  }
+
+  :where([data-app="usage"]) .usage-by-tool-total {
+    font-size: 1.75rem;
+    font-weight: 650;
+    letter-spacing: -0.03em;
+  }
+
+  :where([data-app="usage"]) .usage-by-tool table {
+    display: block;
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-group);
+    background: var(--rly-color-surface-1);
+  }
+
+  :where([data-app="usage"]) .usage-by-tool tbody {
+    display: block;
+  }
+
+  :where([data-app="usage"]) .usage-by-tool tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    gap: 0.4rem var(--rly-space-16);
+    align-items: center;
+    padding-block: 0.75rem;
+    padding-inline: 0.9rem;
+  }
+
+  :where([data-app="usage"]) .usage-by-tool tr + tr {
+    border-block-start: 1px solid var(--rly-color-border-1);
+  }
+
+  :where([data-app="usage"]) .usage-by-tool th,
+  :where([data-app="usage"]) .usage-by-tool td {
+    min-inline-size: 0;
+    padding: 0;
+    text-align: start;
+    overflow-wrap: break-word;
+  }
+
+  :where([data-app="usage"]) .usage-by-tool th {
+    font-size: 0.9375rem;
+    font-weight: 430;
+  }
+
+  :where([data-app="usage"]) .usage-by-tool td {
+    font-variant-numeric: tabular-nums;
+    font-weight: 620;
+  }
+
+  :where([data-app="usage"]) .usage-by-tool td:nth-child(3) {
+    font-size: 0.8125rem;
+    font-weight: 400;
+    color: var(--rly-color-text-2);
+    text-align: end;
+  }
+
+  :where([data-app="usage"]) .usage-by-tool .usage-by-tool-track {
+    grid-column: 1 / -1;
+    line-height: 0;
+  }
+
+  :where([data-app="usage"]) .usage-by-tool progress {
+    display: block;
+    inline-size: 100%;
+    block-size: 0.375rem;
+    border: 0;
+    border-radius: 0.1875rem;
+    appearance: none;
+    background: var(--rly-color-surface-3);
+    color: var(--rly-color-text-2);
+  }
+
+  :where([data-app="usage"]) .usage-by-tool progress::-webkit-progress-bar {
+    border-radius: 0.1875rem;
+    background: var(--rly-color-surface-3);
+  }
+
+  :where([data-app="usage"]) .usage-by-tool progress::-webkit-progress-value {
+    border-radius: 0.1875rem;
+    background: var(--rly-color-text-2);
+  }
+
+  :where([data-app="usage"]) .usage-by-tool progress::-moz-progress-bar {
+    border-radius: 0.1875rem;
+    background: var(--rly-color-text-2);
+  }
+
+  :where([data-app="usage"]) .usage-by-tool-heading,
+  :where([data-app="usage"]) .usage-by-tool thead {
+    position: absolute;
+    inline-size: 1px;
+    block-size: 1px;
+    padding: 0;
+    overflow: clip;
+    clip-path: inset(50%);
+  }
+
+  :where([data-app="usage"]) .usage-details[data-usage-page="by-tool"] .usage-details-footer {
+    display: none;
+  }
+
+  :where([data-app="usage"]) .usage-details-controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--rly-space-12) var(--rly-space-24);
+  }
+
+  :where([data-app="usage"]) .usage-details-controls label {
+    min-inline-size: 0;
+    max-inline-size: 100%;
+    display: flex;
+    align-items: center;
+    gap: var(--rly-space-8);
+  }
+
+  :where([data-app="usage"]) .usage-details-controls [role="radiogroup"] {
+    gap: var(--rly-space-8);
+  }
+
+  :where([data-app="usage"]) .usage-details-controls [role="radio"] {
+    min-block-size: 2.75rem;
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-field);
+    padding-inline: var(--rly-space-12);
+    background: var(--rly-color-surface-1);
+    font-size: 0.8125rem;
+    font-weight: 600;
+  }
+
+  :where([data-app="usage"]) .usage-details-controls [role="radio"][aria-checked="true"] {
+    background: var(--rly-color-text-1);
+    color: var(--rly-color-surface-1);
+  }
+
+  :where([data-app="usage"]) .usage-details-controls select {
+    min-inline-size: 0;
+    min-block-size: 2.75rem;
+    max-inline-size: 100%;
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-field);
+    padding-inline: var(--rly-space-12);
+    background: var(--rly-color-surface-1);
+    color: var(--rly-color-text-1);
+    font: inherit;
+    font-size: max(16px, 1rem);
+  }
+
+  :where([data-app="usage"]) .usage-details[data-usage-page="by-tool"] .usage-details-controls {
+    gap: var(--rly-space-8) var(--rly-space-16);
+    padding-block-start: var(--rly-space-4);
+    justify-content: space-between;
+  }
+
+  :where([data-app="usage"]) .usage-details[data-usage-page="by-tool"] .usage-details-controls label {
+    position: relative;
+    gap: 0.4rem;
+    font-size: 0.875rem;
+    font-weight: 430;
+  }
+
+  :where([data-app="usage"]) .usage-details[data-usage-page="by-tool"] .usage-details-controls select {
+    appearance: none;
+    field-sizing: content;
+    min-block-size: 2.5rem;
+    padding-inline: 0.7rem 1.775rem;
+    border-radius: var(--rly-radius-control);
+    font: 620 0.875rem / 1.5 var(--rly-font-ui);
+  }
+
+  :where([data-app="usage"]) .usage-details[data-usage-page="by-tool"] .usage-details-controls label .superapp-icon {
+    position: absolute;
+    inset-inline-end: 0.55rem;
+    inline-size: 0.875rem;
+    block-size: 0.875rem;
+    pointer-events: none;
+  }
+
+  :where([data-app="usage"]) .usage-details[data-usage-page="by-tool"] .usage-details-controls [role="radiogroup"] {
+    gap: 0;
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-control);
+    overflow: clip;
+    min-inline-size: 0;
+  }
+
+  :where([data-app="usage"]) .usage-details[data-usage-page="by-tool"] .usage-details-controls [role="radio"] {
+    min-block-size: 2.5rem;
+    min-inline-size: 0;
+    border: 0;
+    border-radius: 0;
+    padding-inline: 0.75rem;
+    background: transparent;
+    font: 430 0.8125rem / 1.5 var(--rly-font-ui);
+    white-space: normal;
+  }
+
+  :where([data-app="usage"])
+    .usage-details[data-usage-page="by-tool"]
+    .usage-details-controls
+    [role="radio"]
+    + [role="radio"] {
+    border-inline-start: 1px solid var(--rly-color-border-1);
+  }
+
+  :where([data-app="usage"])
+    .usage-details[data-usage-page="by-tool"]
+    .usage-details-controls
+    [role="radio"][aria-checked="true"] {
+    color: var(--rly-color-text-1);
+    background: var(--rly-color-surface-2);
+    font-weight: 620;
+  }
+
+  :where([data-app="usage"]) .usage-details[data-usage-page="by-tool"] .usage-details-time-zone {
+    position: absolute;
+    inline-size: 1px;
+    block-size: 1px;
+    overflow: clip;
+    clip-path: inset(50%);
+  }
+
+  :where([data-app="usage"]) .usage-details .usage-tab {
+    padding: 0;
+    max-inline-size: none;
+    inline-size: 100%;
+    margin-inline: 0;
+  }
+
+  :where([data-app="usage"]) .usage-details .usage-tab-panel,
+  :where([data-app="usage"]) .usage-details .usage-tab-host,
+  :where([data-app="usage"]) .usage-details-section li {
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-control);
+    padding: var(--rly-space-16);
+    background: var(--rly-color-surface-1);
+  }
+
+  :where([data-app="usage"]) .usage-details-section ul {
+    display: grid;
+    gap: var(--rly-space-12);
+    list-style: none;
+    padding: 0;
+  }
+
+  :where([data-app="usage"]) .usage-details-section li {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--rly-space-16);
+  }
+
+  :where([data-app="usage"]) .usage-details-section li > span {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--rly-space-4);
+    min-inline-size: 0;
+    overflow-wrap: break-word;
+  }
+
+  :where([data-app="usage"]) .usage-details-section li > strong {
+    flex: none;
+    font-variant-numeric: tabular-nums;
+  }
+
+  :where([data-app="usage"]) .usage-details-footer {
+    border-block-start: 1px solid var(--rly-color-border-1);
+    padding-block-start: var(--rly-space-16);
+    font-size: 0.875rem;
+  }
+
+  :where([data-app="usage"]) .usage-details a {
+    color: var(--rly-color-text-1);
+  }
+
+  :where([data-app="usage"])
+    .usage-details:is([data-usage-page="by-tool"], [data-usage-page="limits"])
+    .usage-details-tabs
+    a:not([aria-current="page"]) {
+    color: var(--rly-color-text-2);
+  }
+
+  :where([data-app="usage"]) .usage-details-footer > a,
+  :where([data-app="usage"]) .usage-details-controls > a {
+    display: inline-flex;
+    align-items: center;
+    min-block-size: 2.75rem;
+    inline-size: fit-content;
+  }
+
+  :where([data-app="usage"]) .usage-details a:focus-visible,
+  :where([data-app="usage"]) .usage-details select:focus-visible {
+    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+    outline-offset: var(--rly-focus-ring-offset);
+  }
+
+  :where([data-app="usage"]) .usage-details a:active {
+    opacity: 0.75;
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    :where([data-app="usage"]) .usage-details a:hover {
+      text-decoration: underline;
+    }
+  }
+
+  @media (max-width: 40rem) {
+    :where([data-app="usage"]) .usage-details {
+      --usage-gutter-start: max(var(--rly-space-16), env(safe-area-inset-left, 0px));
+      --usage-gutter-end: max(var(--rly-space-16), env(safe-area-inset-right, 0px));
+      gap: var(--rly-space-20);
+    }
+
+    :where([data-app="usage"]) .usage-details[data-usage-page="by-tool"] {
+      gap: var(--rly-space-16);
+    }
+
+    :where([data-app="usage"]) .usage-by-tool-notice,
+    :where([data-app="usage"]) .usage-by-tool-updating {
+      margin-block-end: var(--rly-space-4);
+    }
+
+    :where([data-app="usage"]) .usage-by-tool-notice button {
+      min-block-size: 2.75rem;
+    }
+
+    /* Rule 45 refs: the title and purpose under the breadcrumb, tabs 0.9rem below, on the canvas. */
+    :where([data-app="usage"])
+      .usage-details:is([data-usage-page="by-tool"], [data-usage-page="limits"])
+      .usage-details-mast {
+      gap: 0.9rem;
+    }
+
+    :where([data-app="usage"]) .usage-details-intro,
+    :where([data-app="usage"])
+      .usage-details:is([data-usage-page="by-tool"], [data-usage-page="limits"])
+      .usage-details-intro {
+      gap: var(--rly-space-4);
+      padding-block-start: var(--rly-space-12);
+    }
+
+    :where([data-app="usage"])
+      .usage-details:is([data-usage-page="by-tool"], [data-usage-page="limits"])
+      .usage-details-tabs {
+      gap: 0;
+      margin-inline: calc(-1 * var(--usage-gutter-start)) calc(-1 * var(--usage-gutter-end));
+      padding-inline: max(var(--rly-space-8), env(safe-area-inset-left, 0px))
+        max(var(--rly-space-8), env(safe-area-inset-right, 0px));
+    }
+
+    :where([data-app="usage"])
+      .usage-details:is([data-usage-page="by-tool"], [data-usage-page="limits"])
+      .usage-details-tabs
+      a {
+      padding-inline: var(--rly-space-12);
+    }
+
+    :where([data-app="usage"]) .usage-details[data-usage-page="by-tool"] .usage-details-controls {
+      padding-block-start: 0;
+      padding-block-end: var(--rly-space-4);
+    }
+
+    :where([data-app="usage"]) .usage-details[data-usage-page="by-tool"] .usage-details-controls [role="radiogroup"] {
+      flex: 1 1 13rem;
+      min-inline-size: min(100%, 13rem);
+    }
+
+    :where([data-app="usage"]) .usage-details[data-usage-page="by-tool"] .usage-details-controls select,
+    :where([data-app="usage"]) .usage-details[data-usage-page="by-tool"] .usage-details-controls [role="radio"] {
+      min-block-size: 2.75rem;
+    }
+
+    :where([data-app="usage"]) .usage-details[data-usage-page="by-tool"] .usage-details-controls [role="radio"] {
+      flex: 1;
+    }
+  }
+
+  @media (forced-colors: active) {
+    :where([data-app="usage"]) .usage-details-controls [role="radio"][aria-checked="true"],
+    :where([data-app="usage"])
+      .usage-details[data-usage-page="by-tool"]
+      .usage-details-controls
+      [role="radio"][aria-checked="true"] {
+      forced-color-adjust: none;
+      background: Highlight;
+      color: HighlightText;
+      border-color: Highlight;
+    }
+
+    :where([data-app="usage"]) .usage-details-tabs a[aria-current="page"] {
+      background: none;
+      text-decoration: underline;
+    }
+  }
+
+  /* Limits (06 Usage reference): the verdict, one card per tool, the token chart and the footnote. */
+  :where([data-app="usage"]) .usage-details[data-usage-page="limits"] {
+    gap: 2rem;
+    padding-block-end: 1rem;
+    font-weight: 430;
+    line-height: 1.5;
+  }
+
+  :where([data-app="usage"]) .usage-limits-summary {
+    display: grid;
+    gap: 0.4rem;
+    max-inline-size: 46em;
+  }
+
+  :where([data-app="usage"]) .usage-limits-summary h2 {
+    margin: 0;
+    font-size: 1.9rem;
+    font-weight: 620;
+    letter-spacing: -0.03em;
+    line-height: 1.2;
+    text-wrap: balance;
+  }
+
+  :where([data-app="usage"]) .usage-limits-summary p,
+  :where([data-app="usage"]) .usage-limits-card p,
+  :where([data-app="usage"]) .usage-limits-card dl {
+    margin: 0;
+  }
+
+  :where([data-app="usage"]) .usage-limits-summary p {
+    color: var(--rly-color-text-2);
+  }
+
+  :where([data-app="usage"]) .usage-limits-notices {
+    display: grid;
+    gap: 2rem;
+  }
+
+  :where([data-app="usage"]) .usage-limits-cards {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem;
+    min-inline-size: 0;
+  }
+
+  :where([data-app="usage"]) .usage-limits-card {
+    display: grid;
+    gap: 0.85rem;
+    align-content: start;
+    padding-block: 1.1rem;
+    padding-inline: 1.15rem;
+    min-inline-size: 0;
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-group);
+    background: var(--rly-color-surface-1);
+  }
+
+  :where([data-app="usage"]) .usage-limits-card-head {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem 1rem;
+    align-items: baseline;
+    justify-content: space-between;
+  }
+
+  :where([data-app="usage"]) .usage-limits-card-head h2 {
+    margin: 0;
+    font-size: 1.25rem;
+    font-weight: 620;
+    letter-spacing: -0.02em;
+    line-height: 1.5;
+  }
+
+  :where([data-app="usage"]) .usage-limits-card-head small {
+    font-size: 0.75rem;
+    color: var(--rly-color-text-2);
+  }
+
+  :where([data-app="usage"]) .usage-limits-figure {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem 0.75rem;
+    align-items: baseline;
+  }
+
+  :where([data-app="usage"]) .usage-limits-figure b {
+    font-size: 2.6rem;
+    font-weight: 620;
+    letter-spacing: -0.04em;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+  }
+
+  :where([data-app="usage"]) .usage-limits-figure span,
+  :where([data-app="usage"]) .usage-limits-note {
+    color: var(--rly-color-text-2);
+  }
+
+  :where([data-app="usage"]) .usage-limits-figure span {
+    font-size: 0.875rem;
+  }
+
+  :where([data-app="usage"]) .usage-limits-card dl {
+    display: grid;
+  }
+
+  :where([data-app="usage"]) .usage-limits-card dl > div {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    padding-block: 0.5rem;
+    border-block-start: 1px solid var(--rly-color-border-1);
+    font-size: 0.875rem;
+  }
+
+  :where([data-app="usage"]) .usage-limits-card dt {
+    color: var(--rly-color-text-2);
+  }
+
+  :where([data-app="usage"]) .usage-limits-card dd {
+    margin: 0;
+    font-weight: 520;
+    text-align: end;
+  }
+
+  :where([data-app="usage"]) .usage-limits-figure b[data-unknown],
+  :where([data-app="usage"]) .usage-limits-card dd[data-unknown] {
+    color: var(--rly-color-text-2);
+  }
+
+  :where([data-app="usage"]) .usage-limits-note {
+    font-size: 0.8125rem;
+  }
+
+  :where([data-app="usage"]) .usage-limits-sr {
+    position: absolute;
+    inline-size: 1px;
+    block-size: 1px;
+    overflow: clip;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  :where([data-app="usage"]) .usage-limits-foot {
+    margin: 0;
+    padding-block-start: 0.8rem;
+    max-inline-size: 52em;
+    border-block-start: 1px solid var(--rly-color-border-1);
+    font-size: 0.8125rem;
+    color: var(--rly-color-text-2);
+  }
+
+  :where([data-app="usage"]) .usage-limits-loading {
+    display: grid;
+    gap: 0.75rem;
+  }
+
+  :where([data-app="usage"]) .usage-limits-unavailable {
+    display: grid;
+    gap: 1.5rem;
+    min-inline-size: 0;
+  }
+
+  :where([data-app="usage"]) .usage-limits-controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.5rem 1.5rem;
+    min-block-size: 44px;
+  }
+
+  /* The reference's Retry takes the page's type (its page stylesheet sets button { font: inherit }). */
+  :where([data-app="usage"]) .usage-limits-controls > button {
+    font: inherit;
+  }
+
+  :where([data-app="usage"]) .usage-limits-retry {
+    margin: 0;
+    font-size: 0.75rem;
+    font-weight: 520;
+    line-height: 1rem;
+    color: var(--rly-color-text-2);
+  }
+
+  :where([data-app="usage"]) .usage-limits-chart {
+    display: grid;
+    gap: 0.9rem;
+    margin: 0;
+    padding-block: 1.1rem;
+    padding-inline: 1.15rem;
+    min-inline-size: 0;
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-group);
+    background: var(--rly-color-surface-1);
+  }
+
+  :where([data-app="usage"]) .usage-limits-chart-head {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem 1rem;
+    align-items: baseline;
+    justify-content: space-between;
+  }
+
+  :where([data-app="usage"]) .usage-limits-chart-head h2 {
+    margin: 0;
+    font-size: 1.1rem;
+    font-weight: 620;
+    line-height: 1.5;
+  }
+
+  :where([data-app="usage"]) .usage-limits-chart-head a {
+    display: inline-flex;
+    gap: 0.35rem;
+    align-items: center;
+    min-block-size: 44px;
+    font-size: 0.8125rem;
+    text-decoration: underline;
+    text-underline-offset: 0.2em;
+  }
+
+  :where([data-app="usage"]) .usage-limits-chart-head a svg {
+    inline-size: 14px;
+    block-size: 14px;
+  }
+
+  :where([data-app="usage"]) .usage-limits-bars {
+    display: grid;
+    gap: 0.5rem;
+    align-items: end;
+    block-size: 200px;
+  }
+
+  :where([data-app="usage"]) .usage-limits-bar {
+    display: grid;
+    gap: 0.3rem;
+    justify-items: center;
+    align-content: end;
+    block-size: 100%;
+    min-inline-size: 0;
+  }
+
+  :where([data-app="usage"]) .usage-limits-bar-value {
+    font-size: 0.75rem;
+    font-weight: 520;
+    font-variant-numeric: tabular-nums;
+    color: var(--rly-color-text-1);
+  }
+
+  :where([data-app="usage"]) .usage-limits-bar-fill {
+    display: block;
+    inline-size: 100%;
+    max-inline-size: 44px;
+    border-radius: 4px 4px 0 0;
+    background: var(--rly-color-text-3);
+  }
+
+  :where([data-app="usage"]) .usage-limits-bar-period {
+    font-size: 0.75rem;
+    text-align: center;
+    color: var(--rly-color-text-2);
+  }
+
+  :where([data-app="usage"]) .usage-limits-chart figcaption {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem 1.25rem;
+    font-size: 0.8125rem;
+    color: var(--rly-color-text-2);
+  }
+
+  :where([data-app="usage"]) .usage-limits-chart figcaption span {
+    color: var(--rly-color-text-1);
+  }
+
+  :where([data-app="usage"]) .usage-limits-chart figcaption [data-total] {
+    font-weight: 620;
+  }
+
+  :where([data-app="usage"]) .usage-limits-chart figcaption [data-unknown] {
+    color: var(--rly-color-text-2);
+  }
+
+  @media (max-width: 599px) {
+    /* The reference page ends 6rem under the footnote on phone; the shell's bottom-bar inset supplies the rest. */
+    :where([data-app="usage"]) .usage-details[data-usage-page="limits"] {
+      gap: 1.5rem;
+      padding-block: 0.9rem 1.25rem;
+    }
+
+    /* The phone page starts 0.9rem under the grouped header, without the slot's grid gap. */
+    :where([data-app="usage"]) .usage-details[data-usage-page="limits"] > .usage-details-mast-slot {
+      display: none;
+    }
+
+    :where([data-app="usage"]) .usage-limits-summary h2 {
+      font-size: 1.5rem;
+    }
+
+    :where([data-app="usage"]) .usage-limits-cards {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+
+  /* Usage's empty-reading page, moved from the hub with its details. */
+
+  /* Read by screen readers at every width; the header shows the same title as text the design draws. */
+  :where([data-app="usage"]) .usage-page-heading {
+    position: absolute;
+    inline-size: 1px;
+    block-size: 1px;
+    margin: 0;
+    overflow: clip;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  :where([data-app="usage"]) .usage-limits-empty {
+    min-inline-size: 0;
+    color: var(--rly-color-text-1);
+    padding-block: 2rem 1rem;
+    padding-inline: 40px;
+  }
+
+  :where([data-app="usage"]) .usage-empty-mast {
+    display: grid;
+    gap: 0.9rem;
+    padding-block: 1.5rem 0;
+    padding-inline: 40px;
+    border-block-end: 1px solid var(--rly-color-border-1);
+  }
+
+  :where([data-app="usage"]) .usage-empty-title,
+  :where([data-app="usage"]) .usage-empty-titles p,
+  :where([data-app="usage"]) .usage-empty-notice h2,
+  :where([data-app="usage"]) .usage-empty-notice p {
+    margin: 0;
+  }
+
+  :where([data-app="usage"]) .usage-empty-title {
+    font-size: 1.75rem;
+    font-weight: 620;
+    letter-spacing: -0.035em;
+    line-height: 1.2;
+  }
+
+  :where([data-app="usage"]) .usage-empty-titles p {
+    color: var(--rly-color-text-2);
+    font-size: 0.9375rem;
+  }
+
+  :where([data-app="usage"]) .usage-empty-tabs {
+    display: flex;
+    gap: 0.5rem;
+    overflow: auto;
+    scrollbar-width: none;
+    margin-block-end: -1px;
+  }
+
+  :where([data-app="usage"]) .usage-empty-tabs a {
+    display: flex;
+    flex: none;
+    align-items: center;
+    min-block-size: 44px;
+    padding-inline: 0.25rem;
+    white-space: nowrap;
+    text-decoration: none;
+    font-size: 0.9375rem;
+    color: var(--rly-color-text-2);
+    border-block-end: 2px solid transparent;
+  }
+
+  :where([data-app="usage"]) .usage-empty-tabs a[aria-current="page"] {
+    font-weight: 620;
+    color: var(--rly-color-text-1);
+    border-block-end-color: var(--rly-color-text-1);
+  }
+
+  :where([data-app="usage"]) .usage-empty-notice {
+    display: grid;
+    justify-items: start;
+    gap: 1rem;
+    padding-block: 1.5rem;
+    max-inline-size: 34em;
+  }
+
+  :where([data-app="usage"]) .usage-empty-art {
+    display: block;
+    flex: none;
+    inline-size: 88px;
+    block-size: 88px;
+    line-height: 0;
+  }
+
+  :where([data-app="usage"]) .usage-empty-notice h2 {
+    font-size: 1.6rem;
+    font-weight: 620;
+    letter-spacing: -0.025em;
+    line-height: 1.25;
+    text-wrap: balance;
+  }
+
+  :where([data-app="usage"]) .usage-empty-notice p {
+    color: var(--rly-color-text-2);
+  }
+
+  :where([data-app="usage"]) .usage-empty-action {
+    justify-self: start;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    min-block-size: 44px;
+    padding-inline: 1rem;
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-control);
+    background: var(--rly-color-surface-1);
+    font-size: 0.875rem;
+    font-weight: 520;
+    color: var(--rly-color-text-1);
+    text-decoration: none;
+  }
+
+  @media (max-width: 40rem) {
+    :where([data-app="usage"]) .usage-limits-empty {
+      padding-block: 0.9rem 6rem;
+      padding-inline: 16px;
+    }
+
+    /* Phone module heading (design rule 45 refs): title and purpose over the tabs, under the breadcrumb. */
+    :where([data-app="usage"]) .usage-empty-mast {
+      padding-block: 0.75rem 0;
+      padding-inline: 16px;
+    }
+
+    :where([data-app="usage"]) .usage-empty-titles {
+      display: grid;
+      gap: 0.25rem;
+    }
+
+    :where([data-app="usage"]) .usage-empty-tabs {
+      gap: 0;
+      margin-inline: -8px;
+    }
+
+    :where([data-app="usage"]) .usage-empty-tabs a {
+      padding-inline: 0.75rem;
+    }
+  }
+}

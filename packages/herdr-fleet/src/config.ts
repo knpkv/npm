@@ -1,6 +1,7 @@
-import { Config, Effect, FileSystem, Option, Path, Schema } from "effect"
+import { Effect, FileSystem, Path, Schema } from "effect"
 import { FleetValidationError } from "./errors.js"
 import { HostConfiguration } from "./model.js"
+import { HubPaths } from "./paths.js"
 
 export const loadConfiguration = Effect.fn("FleetConfiguration.load")(
   function*(path: string) {
@@ -43,23 +44,18 @@ const fleetHostName = (raw: string): string => {
 
 /**
  * A computer outside any fleet: its own local hub on 127.0.0.1:4778, no tailnet, no peers, no push.
- * The state directory follows XDG (`$XDG_STATE_HOME/fleet`, else `$HOME/.local/state/fleet`). Nix jobs
- * are refused on such a computer (see `nixJobs`), so `repository` and `checkCommand` are never run.
+ * Its name, home and state directory come from {@link HubPaths} (`$XDG_STATE_HOME/fleet`, else
+ * `~/.local/state/fleet`; `%LOCALAPPDATA%\fleet` on Windows). Nix jobs are refused on such a computer
+ * (see `nixJobs`), so `repository` and `checkCommand` are never run.
  * Built through `HostConfiguration` itself, so a default that broke its rules fails here, loudly.
  */
 export const standaloneDefaults = Effect.gen(function*() {
-  const home = yield* Config.String("HOME")
-  const stateHome = yield* Config.option(Config.String("XDG_STATE_HOME"))
-  const hostname = yield* Config.option(Config.String("HOSTNAME"))
-  const host = fleetHostName(Option.getOrElse(hostname, () => ""))
-  const stateDirectory = Option.match(Option.filter(stateHome, (value) => value.length > 0), {
-    onNone: () => `${home}/.local/state/fleet`,
-    onSome: (value) => `${value}/fleet`
-  })
+  const paths = yield* HubPaths
+  const host = fleetHostName(paths.hostname)
   return yield* Schema.decodeUnknownEffect(HostConfiguration)({
     host,
-    repository: home,
-    stateDirectory,
+    repository: paths.home,
+    stateDirectory: paths.fleetState,
     crossHost: false,
     port: 4777,
     localPort: 4778,
