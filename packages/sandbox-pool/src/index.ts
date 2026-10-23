@@ -17,6 +17,7 @@
  *
  * @module
  */
+export * from "./budget.js"
 export * from "./guard.js"
 export * from "./lease.js"
 export * from "./pool.js"
