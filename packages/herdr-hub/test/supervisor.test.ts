@@ -8,10 +8,11 @@ import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
 import { AppId, appPaths, hubHeaders, type InstalledApp } from "@knpkv/hub-app"
 import { Effect, FileSystem, Path, Redacted, Schedule, Schema } from "effect"
+import { spawn } from "node:child_process"
 import { Agent, request as httpRequest } from "node:http"
 import { tmpdir, userInfo } from "node:os"
 import process from "node:process"
-import { fileURLToPath } from "node:url"
+import { fileURLToPath, pathToFileURL } from "node:url"
 import { type AppTokens, makeAppTokens } from "../src/apps/grants.js"
 import {
   defaultTiming,
@@ -24,6 +25,7 @@ import {
 } from "../src/apps/supervisor.js"
 
 const appId = Schema.decodeSync(AppId)
+const windows = process.platform === "win32"
 const fixtureBin = fileURLToPath(import.meta.resolve("@knpkv/hub-app-fixture").replace("/index.js", "/bin.js"))
 const fixtureIndex = fileURLToPath(import.meta.resolve("@knpkv/hub-app-fixture"))
 
@@ -44,7 +46,7 @@ const fast: SupervisorTiming = {
 const scripts = {
   ok: `import { writeFileSync } from "node:fs"
 writeFileSync(new URL("./pid", import.meta.url), String(process.pid))
-await import(${JSON.stringify(fixtureBin)})
+await import(${JSON.stringify(pathToFileURL(fixtureBin).href)})
 `,
   throws: `throw new Error("the fixture throws at start")
 `,
@@ -56,7 +58,7 @@ setInterval(() => {}, 1000)
 `,
   // Listens and answers as the app twice, then never answers again; stops when stdin ends.
   deaf: `import { createServer } from "node:http"
-import { fixtureManifest } from ${JSON.stringify(fixtureIndex)}
+import { fixtureManifest } from ${JSON.stringify(pathToFileURL(fixtureIndex).href)}
 let line = ""
 let answered = 0
 process.stdin.setEncoding("utf8")
@@ -98,7 +100,14 @@ const installed = (root: string, id: string, script: keyof typeof scripts, overr
     return entry
   })
 
-const supervisorIn = (root: string, timing: SupervisorTiming = fast) =>
+const supervisorIn = (
+  root: string,
+  timing: SupervisorTiming = fast,
+  runtime: { readonly runtimeDirectory: string | null; readonly shortRuntimeDirectory: string } = {
+    runtimeDirectory: windows ? null : `${root}/run`,
+    shortRuntimeDirectory: `${root}/short`
+  }
+) =>
   Effect.gen(function*() {
     const tokens = yield* makeAppTokens
     // Every token the supervisor issues, in order.
@@ -110,8 +119,7 @@ const supervisorIn = (root: string, timing: SupervisorTiming = fast) =>
     const user = userInfo()
     const supervisor = yield* makeSupervisor({
       node: process.execPath,
-      runtimeDirectory: `${root}/run`,
-      shortRuntimeDirectory: `${root}/short`,
+      ...runtime,
       logsDirectory: `${root}/logs`,
       hubUrl: Effect.succeed("http://127.0.0.1:9"),
       tokens: recording,
@@ -122,7 +130,7 @@ const supervisorIn = (root: string, timing: SupervisorTiming = fast) =>
   })
 
 /** Wait until `id`'s run matches, polling every 20 ms for up to 10 s. */
-const until = <A>(read: Effect.Effect<A>, done: (value: A) => boolean) =>
+const until = <A, R>(read: Effect.Effect<A, never, R>, done: (value: A) => boolean) =>
   read.pipe(
     Effect.filterOrFail(done, () => "not yet"),
     Effect.retry({ schedule: Schedule.spaced("20 millis"), times: 500 }),
@@ -194,13 +202,14 @@ describe("supervisor rules", () => {
     expect(entryScript(entry("C:\\Users\\owner\\usage", "D:\\bin.js"), true)).toBeNull()
   })
 
-  it("names a Windows pipe with the spawn's nonce, and a socket with its first 8 characters", () => {
+  it("names a Windows pipe with the spawn's nonce, and a socket with the nonce alone", () => {
     const nonce = "0123456789abcdef0123456789abcdef"
     expect(endpointFor({ _tag: "Windows", user: "owner" }, appId("usage"), nonce)).toBe(
       "\\\\.\\pipe\\herdr-hub-owner-usage-0123456789abcdef"
     )
+    // The id stays out of a socket's name, so the usual runtime directory fits `sun_path` (51 bytes here).
     expect(endpointFor({ _tag: "Posix", directory: "/run/user/1000/herdr-hub/apps" }, appId("usage"), nonce)).toBe(
-      "/run/user/1000/herdr-hub/apps/usage-01234567.sock"
+      "/run/user/1000/herdr-hub/apps/0123456789abcdef.sock"
     )
   })
 })
@@ -216,9 +225,15 @@ describe("supervisor", () => {
         yield* supervisor.sync([entry])
         const run = yield* until(supervisor.run(entry.id), (value) => value?._tag === "Running")
         if (run?._tag !== "Running") return expect.unreachable()
-        expect(run.endpoint.startsWith(`${root}/run/apps/fixture-`)).toBe(true)
-        // The hub's runtime directory is owner-only.
-        expect((yield* fileSystem.stat(`${root}/run/apps`)).mode & 0o777).toBe(0o700)
+        if (windows) {
+          expect(run.endpoint.startsWith("\\\\.\\pipe\\herdr-hub-")).toBe(true)
+        } else {
+          expect(run.endpoint).toMatch(new RegExp(`^${root}/run/apps/[0-9a-f]{16}\\.sock$`, "u"))
+          // The hub's runtime directories are owner-only.
+          for (const directory of [`${root}/run`, `${root}/run/apps`]) {
+            expect((yield* fileSystem.stat(directory)).mode & 0o777).toBe(0o700)
+          }
+        }
 
         const pid = yield* pidOf(entry)
         // A keep-alive connection from the hub's proxy stays open across the stop.
@@ -324,17 +339,128 @@ describe("supervisor", () => {
         ])
       }).pipe(Effect.scoped))
 
-    it.effect("refuses a runtime directory others can enter: apps stay down, the supervisor still answers", () =>
+    // Another local user may own or prepare any path the hub would use; each must be the hub's own.
+    it.effect.skipIf(windows)(
+      "keeps apps down when a runtime directory is open to others, a link, or inside one that is",
+      () =>
+        Effect.gen(function*() {
+          const root = yield* tempRoot
+          const fileSystem = yield* FileSystem.FileSystem
+          const elsewhere = `${root}/elsewhere`
+          yield* fileSystem.makeDirectory(elsewhere, { mode: 0o700 })
+          const setups: ReadonlyArray<
+            { readonly name: string; readonly prepare: (base: string) => Effect.Effect<unknown, unknown> }
+          > = [
+            {
+              name: "mode",
+              prepare: (base) =>
+                fileSystem.makeDirectory(`${base}/apps`, { recursive: true }).pipe(
+                  Effect.andThen(fileSystem.chmod(`${base}/apps`, 0o755))
+                )
+            },
+            {
+              name: "mode",
+              prepare: (base) => fileSystem.makeDirectory(base).pipe(Effect.andThen(fileSystem.chmod(base, 0o777)))
+            },
+            { name: "link", prepare: (base) => fileSystem.symlink(elsewhere, base) },
+            // An open, non-sticky parent: someone else could swap `base` itself.
+            {
+              name: "mode",
+              prepare: (base) =>
+                fileSystem.makeDirectory(base, { recursive: true, mode: 0o700 }).pipe(
+                  Effect.andThen(fileSystem.chmod(`${base}/..`, 0o777))
+                )
+            }
+          ]
+          for (const [index, setup] of setups.entries()) {
+            const base = `${root}/p-${index}/run`
+            yield* fileSystem.makeDirectory(`${root}/p-${index}`, { mode: 0o700 })
+            yield* setup.prepare(base)
+            const { supervisor } = yield* supervisorIn(root, fast, {
+              runtimeDirectory: base,
+              shortRuntimeDirectory: base
+            })
+            const entry = yield* installed(root, `fixture-${index}`, "ok")
+            yield* supervisor.sync([entry])
+            yield* until(supervisor.run(entry.id), (value) => value?._tag === "Down" && value.reason === "not_running")
+            expect((yield* supervisor.recentLines(entry.id)).join("\n")).toContain(`unusable (${setup.name})`)
+          }
+          // Nothing was created inside the open parent or through the link.
+          expect(yield* fileSystem.exists(`${root}/p-1/run/apps`)).toBe(false)
+          expect(yield* fileSystem.exists(`${root}/p-3/run/apps`)).toBe(false)
+          expect(yield* fileSystem.exists(`${elsewhere}/apps`)).toBe(false)
+        }).pipe(Effect.scoped)
+    )
+
+    // A runtime path too long for socket names uses the short directory, checked the same way.
+    it.effect.skipIf(windows)(
+      "falls back to the short directory when the runtime path is too long",
+      () =>
+        Effect.gen(function*() {
+          const root = yield* tempRoot
+          const { supervisor } = yield* supervisorIn(root, fast, {
+            runtimeDirectory: `${root}/${"r".repeat(90)}`,
+            shortRuntimeDirectory: `${root}/short`
+          })
+          const entry = yield* installed(root, "fixture", "ok")
+          yield* supervisor.sync([entry])
+          const run = yield* until(supervisor.run(entry.id), (value) => value?._tag === "Running")
+          expect(run?._tag === "Running" ? run.endpoint.startsWith(`${root}/short/apps/`) : false).toBe(true)
+        }).pipe(Effect.scoped)
+    )
+
+    // The hub dying (not stopping) closes the child's stdin too: on Windows this is the one pipe assumption.
+    it.effect("a child exits when its hub process dies", () =>
       Effect.gen(function*() {
         const root = yield* tempRoot
         const fileSystem = yield* FileSystem.FileSystem
-        yield* fileSystem.makeDirectory(`${root}/run/apps`, { recursive: true })
-        yield* fileSystem.chmod(`${root}/run/apps`, 0o755)
-        const { supervisor } = yield* supervisorIn(root)
         const entry = yield* installed(root, "fixture", "ok")
-        yield* supervisor.sync([entry])
-        yield* until(supervisor.run(entry.id), (value) => value?._tag === "Down" && value.reason === "not_running")
-        expect((yield* supervisor.recentLines(entry.id)).join("\n")).toContain("unusable (mode)")
+        const endpoint = windows
+          ? `\\\\.\\pipe\\hub-test-orphan-${Math.random().toString(16).slice(2)}`
+          : `${root}/orphan.sock`
+        const secret = "0123456789abcdef0123456789abcdef"
+        const handshake = JSON.stringify({
+          v: 1,
+          endpoint,
+          hubUrl: "http://127.0.0.1:9",
+          hubToken: "t",
+          appSecret: secret
+        })
+        // A stand-in hub: starts the app with the handshake, holds its stdin, and is then killed outright.
+        yield* fileSystem.writeFileString(
+          `${root}/hub.mjs`,
+          `import { spawn } from "node:child_process"
+const child = spawn(process.execPath, [${
+            JSON.stringify(`${entry.dir}/bin.mjs`)
+          }, "--attach"], { stdio: ["pipe", "ignore", "ignore"] })
+child.stdin.write(${
+            JSON.stringify(`${handshake}
+`)
+          })
+setInterval(() => {}, 1000)
+`
+        )
+        const hub = spawn(process.execPath, [`${root}/hub.mjs`], { stdio: "ignore" })
+        yield* Effect.addFinalizer(() => Effect.sync(() => hub.kill("SIGKILL")))
+        const child = yield* until(pidOf(entry).pipe(Effect.orElseSucceed(() => 0)), (pid) => pid > 0)
+        yield* until(
+          Effect.callback<number>((resume) => {
+            const outgoing = httpRequest(
+              { socketPath: endpoint, path: appPaths.health, headers: { [hubHeaders.appSecret]: secret } },
+              (incoming) => {
+                incoming.resume()
+                resume(Effect.succeed(incoming.statusCode ?? 0))
+              }
+            )
+            outgoing.on("error", () => resume(Effect.succeed(0)))
+            outgoing.end()
+          }),
+          (status) => status === 200
+        )
+        const killedAt = Date.now()
+        hub.kill("SIGKILL")
+        yield* until(Effect.sync(() => alive(child)), (running) => !running)
+        expect(Date.now() - killedAt).toBeLessThan(2_000)
       }).pipe(Effect.scoped))
   })
 })

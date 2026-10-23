@@ -81,5 +81,13 @@
   },
   "bin": {
     "herdr-usage": "./dist/bin.js"
+  },
+  "hubApp": {
+    "bin": "dist/bin.js",
+    "contract": 1,
+    "services": [
+      "fleet.read",
+      "host"
+    ]
   }
 }

@@ -34,6 +34,7 @@ import {
 } from "node:http"
 import { createServer as createNetServer, type Socket } from "node:net"
 import { tmpdir } from "node:os"
+import process from "node:process"
 import { answerFleetRead } from "../src/apps/fleet-read.js"
 import { type AppTokens, makeAppTokens, makeGrants } from "../src/apps/grants.js"
 import { type AppReach, logReloadFailure, makeAppRegistry } from "../src/apps/registry.js"
@@ -58,6 +59,12 @@ const tempDirectory = Effect.gen(function*() {
   return yield* fileSystem.makeTempDirectoryScoped({ directory: tmpdir(), prefix: "hub-apps-" })
 })
 
+/** Where a test app listens: a unix socket in `directory`, or a uniquely named pipe on Windows. */
+const endpointIn = (directory: string, name: string): string =>
+  process.platform === "win32"
+    ? `\\\\.\\pipe\\hub-test-${name}-${Math.random().toString(16).slice(2)}`
+    : `${directory}/${name}.sock`
+
 /** A running fixture: where it listens, its spawn's secret, and the token the hub issued that spawn. */
 interface Fixture extends AppReach {
   readonly token: Redacted.Redacted<string>
@@ -77,8 +84,7 @@ const startFixture = (
   hub?: { readonly url: string; readonly tokens: AppTokens }
 ) =>
   Effect.gen(function*() {
-    const path = yield* Path.Path
-    const endpoint = path.join(directory, `${id}.sock`)
+    const endpoint = endpointIn(directory, id)
     const secret = Redacted.make(`secret-of-${id}`.padEnd(32, "-"))
     const token = hub === undefined ? Redacted.make("fixture-token") : yield* hub.tokens.issue(appId(id), "spawn-1")
     const handshake = JSON.stringify({
@@ -228,7 +234,7 @@ describe("hub apps", () => {
       Effect.gen(function*() {
         const directory = yield* tempDirectory
         const hub = yield* makeHub(directory)
-        yield* hub.writeConfig([{ id: "fixture", reach: atEndpoint(`${directory}/absent.sock`) }])
+        yield* hub.writeConfig([{ id: "fixture", reach: atEndpoint(endpointIn(directory, "absent")) }])
         yield* hub.registry.reload()
         expect(yield* hub.states).toEqual([{
           _tag: "Unavailable",
@@ -245,7 +251,7 @@ describe("hub apps", () => {
         const ok = yield* startFixture(directory, "ok", "good")
         const newer = yield* startFixture(directory, "contract-2", "newer")
         const imposter = yield* startFixture(directory, "wrong-id", "imposter")
-        const hanging = `${directory}/hang.sock`
+        const hanging = endpointIn(directory, "hang")
         yield* hangingSocket(hanging)
         const hub = yield* makeHub(directory)
         yield* hub.writeConfig([
@@ -264,7 +270,7 @@ describe("hub apps", () => {
     it.effect("a burst of failed requests runs one re-probe, not a queue", () =>
       Effect.gen(function*() {
         const directory = yield* tempDirectory
-        const hanging = `${directory}/hang.sock`
+        const hanging = endpointIn(directory, "hang")
         const { held } = yield* hangingSocket(hanging)
         const hub = yield* makeHub(directory)
         yield* hub.writeConfig([{ id: "hang", reach: atEndpoint(hanging) }])
@@ -431,7 +437,7 @@ describe("hub apps", () => {
     it.effect("answers 404 for unknown apps and paths, and 503 for an app that is down", () =>
       Effect.gen(function*() {
         const directory = yield* tempDirectory
-        const { port } = yield* serveHubRoutes(directory, atEndpoint(`${directory}/absent.sock`))
+        const { port } = yield* serveHubRoutes(directory, atEndpoint(endpointIn(directory, "absent")))
         expect((yield* get(port, "/apps/removed/v1/modules/removed/echo")).status).toBe(404)
         expect((yield* get(port, "/apps/fixture/app/manifest")).status).toBe(404)
         const down = yield* get(port, "/apps/fixture/v1/modules/fixture/echo")

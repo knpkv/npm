@@ -9,6 +9,7 @@ import { Effect, Fiber, FileSystem, Layer, Queue, Result, Schedule, Schema, Stdi
 import { TestClock } from "effect/testing"
 import { createServer, request as httpRequest, type Server } from "node:http"
 import { tmpdir } from "node:os"
+import process from "node:process"
 import { readHandshake } from "../src/handshake.js"
 import { ShellServices } from "../src/hub-client.js"
 import { AppId, type AppManifestInput, AppStartError } from "../src/manifest.js"
@@ -50,6 +51,12 @@ const handlers = Layer.effect(
     }
   })
 )
+
+/** Where a test app listens: a unix socket in `directory`, or a uniquely named pipe on Windows. */
+const endpointIn = (directory: string, name: string): string =>
+  process.platform === "win32"
+    ? `\\\\.\\pipe\\hub-test-${name}-${Math.random().toString(16).slice(2)}`
+    : `${directory}/${name}.sock`
 
 const encoder = new TextEncoder()
 const handshakeFor = (endpoint: string, hubUrl: string) => ({
@@ -156,7 +163,7 @@ describe("attached app", () => {
         )
         const { port } = Schema.decodeUnknownSync(Schema.Struct({ port: Schema.Number }))(hub.address())
 
-        const endpoint = `${directory}/probe.sock`
+        const endpoint = endpointIn(directory, "probe")
         const handshake = handshakeFor(endpoint, `http://127.0.0.1:${port}`)
         const stdin = yield* Queue.unbounded<Uint8Array, Cause.Done>()
         yield* Queue.offer(stdin, line(handshake))

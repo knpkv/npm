@@ -5,6 +5,7 @@ import { BrowserOpener } from "@knpkv/browser-pairing/launch"
 import { Effect, FileSystem, Layer, Result, Schedule, Schema, Sink, Stdio, Stream } from "effect"
 import { createServer, type IncomingHttpHeaders, request as httpRequest, type Server } from "node:http"
 import { tmpdir, userInfo } from "node:os"
+import process from "node:process"
 import { ShellServices } from "../src/hub-client.js"
 import {
   AppId,
@@ -34,6 +35,12 @@ const manifest: AppManifestInput = {
   nav: { order: 1, primary: true, mobile: false },
   standalone: { defaultPort: 3199 }
 }
+
+/** Where a test app listens: a unix socket in `directory`, or a uniquely named pipe on Windows. */
+const endpointIn = (directory: string, name: string): string =>
+  process.platform === "win32"
+    ? `\\\\.\\pipe\\hub-test-${name}-${Math.random().toString(16).slice(2)}`
+    : `${directory}/${name}.sock`
 
 const Empty = Schema.fromURLSearchParams(Schema.Struct({}))
 const handlers = Layer.effect(
@@ -123,7 +130,7 @@ describe("attached runner", () => {
         )
         const { port } = Schema.decodeUnknownSync(Schema.Struct({ port: Schema.Number }))(hub.address())
 
-        const endpoint = `${directory}/probe.sock`
+        const endpoint = endpointIn(directory, "probe")
         const secret = "s".repeat(43)
         const handshake = JSON.stringify({
           v: 1,

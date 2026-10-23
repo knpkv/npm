@@ -14,14 +14,19 @@
  *   timeout) must answer as this app; 3 misses in a row stop it with reason `health`.
  * - **Backoff** 1 s, 2 s, 4 s … capped at 60 s, reset after 10 min running. 5 exits in 10 min is `crashloop`:
  *   it stays down until {@link restart} or its entry changes.
- * - **Logs:** stdout and stderr go line by line to `<logs>/<id>.log` (5 MB, one previous file kept); the last
- *   100 lines stay in memory.
- * - **Paths:** the hub owns `<runtime>/apps` (wiped at start, refused when another user owns it or it is wider
- *   than 0700). `dir` must be absolute and `bin` must stay inside it, by the OS's own path rules; an entry that
+ * - **Logs:** stdout and stderr go to `<logs>/<id>.log`, one append per output chunk (5 MB, one previous file kept);
+ *   the last 100 lines stay in memory until the app is removed.
+ * - **Environment:** a child inherits the hub's environment. Apps run as the same user and are trusted like any
+ *   program that user runs; nothing the hub keeps secret per app is in the environment (token and secret arrive on
+ *   stdin).
+ * - **Paths:** the hub owns `<runtime>` and `<runtime>/apps` (wiped at start). Each must be a real directory owned by
+ *   this user with no group or other bits, checked before anything is created inside it; a runtime path too long
+ *   for socket names falls back to `$TMPDIR/herdr-hub-<uid>`, checked the same way. Otherwise every app stays down. `dir` must be absolute and `bin` must stay inside it, by the OS's own path rules; an entry that
  *   breaks either, or whose script is missing, is `install_missing`.
  *
  * @module
  */
+import { verifyPrivatePathIdentity } from "@knpkv/herdr-fleet/sqlite"
 import { type AppId, AppManifest, appPaths, type AppUnavailableReason, hubHeaders, InstalledApp } from "@knpkv/hub-app"
 import {
   Clock,
@@ -48,9 +53,12 @@ import { posix, win32 } from "node:path"
 import type { AppTokens } from "./grants.js"
 import { getJson } from "./socket.js"
 
-/** The hub's runtime directory is unsafe for app endpoints: another user owns it, or others may enter it. */
+/**
+ * A directory the hub's app endpoints rely on is unsafe: another user owns it, others may enter it, or it is a
+ * link (or not a directory), which someone else could repoint.
+ */
 export class RuntimeDirUnsafe extends Schema.TaggedError<RuntimeDirUnsafe>()("RuntimeDirUnsafe", {
-  reason: Schema.Literals(["owner", "mode"])
+  reason: Schema.Literals(["owner", "mode", "link"])
 }) {}
 
 export interface SupervisorTiming {
@@ -100,8 +108,9 @@ export const entryScript = (entry: InstalledApp, windows: boolean): string | nul
 const socketPathBytes = 103
 
 /**
- * Where one spawn listens. POSIX: `<apps>/<id>-<nonce8>.sock`. Windows: a named pipe with a 16-hex nonce, so a
- * name someone else created first makes our bind fail instead of being taken over.
+ * Where one spawn listens. POSIX: `<apps>/<nonce16>.sock` (no id: the probe checks who answers, and short names keep
+ * the usual runtime directory within `sun_path`). Windows: a named pipe with a 16-hex nonce, so a name someone
+ * else created first makes our bind fail instead of being taken over.
  */
 export type EndpointPlace =
   | { readonly _tag: "Posix"; readonly directory: string }
@@ -114,7 +123,7 @@ export const endpointFor = (
 ): string =>
   place._tag === "Windows"
     ? `\\\\.\\pipe\\herdr-hub-${place.user}-${id}-${nonce.slice(0, 16)}`
-    : posix.join(place.directory, `${id}-${nonce.slice(0, 8)}.sock`)
+    : posix.join(place.directory, `${nonce.slice(0, 16)}.sock`)
 
 /** Why one spawn ended: it never listened, it exited, it stopped answering, or it exited after a healthy run. */
 type RunEnd = "timeout" | "exited" | "health" | "healthy-exit"
@@ -168,30 +177,54 @@ export const makeSupervisor = Effect.fn("AppSupervisor.make")(function*(options:
   const windows = options.runtimeDirectory === null
 
   // The apps' endpoint directory: owner-only, ours, and wiped (a previous hub's children exited on EOF).
-  const prepareDirectory = Effect.fn("AppSupervisor.prepareDirectory")(function*(directory: string) {
-    if (yield* fileSystem.exists(directory)) {
-      const info = yield* fileSystem.stat(directory)
-      if (Option.isSome(info.uid) && info.uid.value !== options.user.uid) {
-        return yield* new RuntimeDirUnsafe({ reason: "owner" })
-      }
-      if ((info.mode & 0o077) !== 0) return yield* new RuntimeDirUnsafe({ reason: "mode" })
-      for (const entry of yield* fileSystem.readDirectory(directory)) {
-        yield* fileSystem.remove(path.join(directory, entry), { recursive: true, force: true })
-      }
-      return directory
+  /**
+   * One directory the hub relies on: a real directory (not a link), owned by this user, with no group or other
+   * bits. Created owner-only when absent, and only after its parent passed the same check.
+   */
+  const ownDirectory = Effect.fn("AppSupervisor.ownDirectory")(function*(directory: string, createParents: boolean) {
+    if (!(yield* fileSystem.exists(directory))) {
+      yield* fileSystem.makeDirectory(directory, { recursive: createParents, mode: 0o700 })
     }
-    yield* fileSystem.makeDirectory(directory, { recursive: true, mode: 0o700 })
-    return directory
+    // A link (even a dangling one), or a path whose real location isn't under its parent, could be repointed.
+    yield* verifyPrivatePathIdentity(directory, "apps.runtime").pipe(
+      Effect.catchTag("PrivateDatabaseError", () => Effect.fail(new RuntimeDirUnsafe({ reason: "link" })))
+    )
+    const info = yield* fileSystem.stat(directory)
+    if (info.type !== "Directory") return yield* new RuntimeDirUnsafe({ reason: "link" })
+    if (Option.isSome(info.uid) && info.uid.value !== options.user.uid) {
+      return yield* new RuntimeDirUnsafe({ reason: "owner" })
+    }
+    if ((info.mode & 0o077) !== 0) return yield* new RuntimeDirUnsafe({ reason: "mode" })
+  })
+
+  /** `<base>` and `<base>/apps`, each checked in turn; `apps` is wiped (a previous hub's children exited on EOF). */
+  const prepareRuntime = Effect.fn("AppSupervisor.prepareRuntime")(function*(base: string) {
+    const apps = path.join(base, "apps")
+    // Whoever can write `base`'s parent could rename `base` away and put their own there, unless the parent is
+    // sticky (like /tmp). A missing parent is created owner-only below.
+    const parent = path.dirname(base)
+    if (yield* fileSystem.exists(parent)) {
+      const info = yield* fileSystem.stat(parent)
+      if ((info.mode & 0o022) !== 0 && (info.mode & 0o1000) === 0) {
+        return yield* new RuntimeDirUnsafe({ reason: "mode" })
+      }
+    }
+    yield* ownDirectory(base, true)
+    yield* ownDirectory(apps, false)
+    for (const entry of yield* fileSystem.readDirectory(apps)) {
+      yield* fileSystem.remove(path.join(apps, entry), { recursive: true, force: true })
+    }
+    return apps
   })
   // An unsafe runtime directory keeps every app down; the hub itself still starts.
   const place: Result.Result<EndpointPlace, PlatformError.PlatformError | RuntimeDirUnsafe> = windows
     ? Result.succeed(windowsPlace(options.user.name))
-    : yield* prepareDirectory(
-      // The longest endpoint is a 64-character id: if it doesn't fit, use the short directory.
-      Buffer.byteLength(path.join(options.runtimeDirectory ?? "", "apps", `${"a".repeat(64)}-00000000.sock`)) >
+    : yield* prepareRuntime(
+      // Endpoints are `<apps>/<nonce16>.sock`; only a runtime directory too long for that uses the short one.
+      Buffer.byteLength(path.join(options.runtimeDirectory ?? "", "apps", `${"0".repeat(16)}.sock`)) >
           socketPathBytes
-        ? path.join(options.shortRuntimeDirectory, "apps")
-        : path.join(options.runtimeDirectory ?? "", "apps")
+        ? options.shortRuntimeDirectory
+        : options.runtimeDirectory ?? ""
     ).pipe(
       Effect.map((directory): EndpointPlace => ({ _tag: "Posix", directory })),
       Effect.result
@@ -210,8 +243,12 @@ export const makeSupervisor = Effect.fn("AppSupervisor.make")(function*(options:
   const encodeEntry = Schema.encodeSync(entryJson)
 
   /** Append one line of the app's output to its log, rotating at 5 MB; logging never stops an app. */
-  const writeLog = Effect.fn("AppSupervisor.writeLog")(function*(id: AppId, line: string) {
-    yield* Ref.update(recent, (table) => new Map(table).set(id, [...(table.get(id) ?? []), line].slice(-memoryLines)))
+  /** Lines of one output chunk (or one hub note) go to the log in one append. */
+  const writeLog = Effect.fn("AppSupervisor.writeLog")(function*(id: AppId, ...lines: ReadonlyArray<string>) {
+    yield* Ref.update(
+      recent,
+      (table) => new Map(table).set(id, [...(table.get(id) ?? []), ...lines].slice(-memoryLines))
+    )
     const file = path.join(options.logsDirectory, `${id}.log`)
     const append = Effect.gen(function*() {
       yield* fileSystem.makeDirectory(options.logsDirectory, { recursive: true, mode: 0o700 })
@@ -221,7 +258,7 @@ export const makeSupervisor = Effect.fn("AppSupervisor.make")(function*(options:
         Effect.catchTag("PlatformError", () => Effect.succeed(0))
       )
       if (size > logLimitBytes) yield* fileSystem.rename(file, `${file}.1`)
-      yield* fileSystem.writeFileString(file, `${line}\n`, { flag: "a", mode: 0o600 })
+      yield* fileSystem.writeFileString(file, lines.map((line) => `${line}\n`).join(""), { flag: "a", mode: 0o600 })
     })
     // best-effort: a full disk or a lost log directory must not stop the app; the last lines stay in memory.
     yield* Effect.ignore(append)
@@ -273,7 +310,7 @@ export const makeSupervisor = Effect.fn("AppSupervisor.make")(function*(options:
     const output = yield* Stream.merge(child.stdout, child.stderr).pipe(
       Stream.decodeText,
       Stream.splitLines,
-      Stream.runForEach((line) => writeLog(entry.id, line)),
+      Stream.runForEachArray((lines) => writeLog(entry.id, ...lines)),
       Effect.ignore,
       Effect.forkScoped
     )
@@ -382,6 +419,11 @@ export const makeSupervisor = Effect.fn("AppSupervisor.make")(function*(options:
     for (const [id] of known) {
       if (!apps.some((entry) => entry.id === id)) {
         yield* FiberMap.remove(fibers, id)
+        yield* Ref.update(recent, (table) => {
+          const next = new Map(table)
+          next.delete(id)
+          return next
+        })
         yield* SynchronizedRef.update(runs, (table) => {
           const next = new Map(table)
           next.delete(id)
