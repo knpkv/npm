@@ -17,8 +17,8 @@ import {
   type AppId,
   AppManifest,
   appPaths,
-  AppsConfig,
   AppsConfigInvalid,
+  AppsConfigV1,
   type AppState,
   type AppUnavailableReason,
   validateModuleRegistry
@@ -58,16 +58,26 @@ export interface RegisteredApp {
   readonly state: AppState
 }
 
-const emptyConfig: AppsConfig = { v: 1, apps: [] }
-const decodeConfig = Schema.decodeUnknownEffect(Schema.fromJsonString(AppsConfig), { onExcessProperty: "error" })
+const emptyConfig: AppsConfigV1 = { v: 1, apps: [] }
+const decodeConfig = Schema.decodeUnknownEffect(Schema.fromJsonString(AppsConfigV1), { onExcessProperty: "error" })
 const decodeCached = Schema.decodeUnknownOption(Schema.fromJsonString(AppManifest))
 const encodeManifest = Schema.encodeSync(Schema.fromJsonString(AppManifest))
 
 /** Public copy for each reason; never a path or a provider error. */
 export const unavailableDetail = (label: string, reason: AppUnavailableReason): string => {
   switch (reason) {
+    case "starting":
+      return `${label} is starting.`
     case "not_running":
       return `${label} isn't running.`
+    case "crashloop":
+      return `${label} kept stopping, so it was left off. Restart it once it's fixed.`
+    case "disabled":
+      return `${label} is turned off.`
+    case "install_missing":
+      return `${label}'s files are missing. Update it to install them again.`
+    case "health":
+      return `${label} stopped answering and is being restarted.`
     case "timeout":
       return `${label} didn't answer in time.`
     case "invalid_manifest":

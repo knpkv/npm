@@ -13,6 +13,9 @@
  * - **Windows follows its own conventions.** Configuration under `%APPDATA%`, state under
  *   `%LOCALAPPDATA%`, or the XDG directories when they are set. File modes do nothing there: owner-only
  *   comes from the user profile's ACL, which covers both.
+ * - **The hub's apps** keep their prefixes under `hubData`, their logs under `hubState` and their sockets
+ *   under `hubRuntime` (`$XDG_RUNTIME_DIR/herdr-hub`, else `hubState/run`). Windows apps listen on named
+ *   pipes, so it has no runtime directory.
  * - **Overrides win on every OS.** `HERDR_HUB_HOME` puts everything under one directory (`config/`,
  *   `state/`); `HERDR_HUB_CONFIG` names the directory holding `apps.json`. `FLEET_CONFIG_PATH` still
  *   names the fleet configuration file itself (see herdr-hub's config path).
@@ -29,6 +32,8 @@ export interface HubPathsEnvironment {
   readonly HERDR_HUB_CONFIG?: string | undefined
   readonly XDG_CONFIG_HOME?: string | undefined
   readonly XDG_STATE_HOME?: string | undefined
+  readonly XDG_DATA_HOME?: string | undefined
+  readonly XDG_RUNTIME_DIR?: string | undefined
   readonly APPDATA?: string | undefined
   readonly LOCALAPPDATA?: string | undefined
 }
@@ -52,6 +57,12 @@ export interface HubPathTable {
   readonly fleetState: string
   /** The installed-apps file, `apps.json`. */
   readonly appsConfig: string
+  /** The hub's data: one install prefix per app and version. */
+  readonly hubData: string
+  /** The hub's own state: app logs, manifest cache. */
+  readonly hubState: string
+  /** Where the hub's apps listen (owner-only, wiped at hub start); `null` on Windows, which uses named pipes. */
+  readonly hubRuntime: string | null
 }
 
 const set = (value: string | undefined): string | undefined => value === undefined || value === "" ? undefined : value
@@ -63,6 +74,8 @@ export const hubPathTable = (input: HubPathsInput): HubPathTable => {
   const hubHome = set(env.HERDR_HUB_HOME)
   const configHome = set(env.XDG_CONFIG_HOME)
   const stateHome = set(env.XDG_STATE_HOME)
+  const dataHome = set(env.XDG_DATA_HOME)
+  const runtimeHome = set(env.XDG_RUNTIME_DIR)
   const roaming = set(env.APPDATA) ?? join(input.home, "AppData", "Roaming")
   const local = set(env.LOCALAPPDATA) ?? join(input.home, "AppData", "Local")
   const fleetConfig = hubHome !== undefined
@@ -78,12 +91,28 @@ export const hubPathTable = (input: HubPathsInput): HubPathTable => {
     : input.windows
     ? configHome === undefined ? join(roaming, "herdr-hub") : join(configHome, "herdr")
     : join(input.home, ".config", "herdr"))
+  const hubData = hubHome !== undefined
+    ? join(hubHome, "data")
+    : join(dataHome ?? (input.windows ? local : join(input.home, ".local", "share")), "herdr-hub")
+  const hubState = hubHome !== undefined
+    ? join(hubHome, "state", "herdr-hub")
+    : join(stateHome ?? (input.windows ? local : join(input.home, ".local", "state")), "herdr-hub")
+  const hubRuntime = input.windows
+    ? null
+    : hubHome !== undefined
+    ? join(hubHome, "run")
+    : runtimeHome !== undefined
+    ? join(runtimeHome, "herdr-hub")
+    : join(hubState, "run")
   return {
     home: input.home,
     hostname: input.hostname,
     fleetConfig,
     fleetState,
-    appsConfig: join(appsDirectory, "apps.json")
+    appsConfig: join(appsDirectory, "apps.json"),
+    hubData,
+    hubState,
+    hubRuntime
   }
 }
 
@@ -95,6 +124,8 @@ const environment = Config.all({
   HERDR_HUB_CONFIG: variable("HERDR_HUB_CONFIG"),
   XDG_CONFIG_HOME: variable("XDG_CONFIG_HOME"),
   XDG_STATE_HOME: variable("XDG_STATE_HOME"),
+  XDG_DATA_HOME: variable("XDG_DATA_HOME"),
+  XDG_RUNTIME_DIR: variable("XDG_RUNTIME_DIR"),
   APPDATA: variable("APPDATA"),
   LOCALAPPDATA: variable("LOCALAPPDATA")
 })
