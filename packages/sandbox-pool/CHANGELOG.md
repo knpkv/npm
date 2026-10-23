@@ -1,5 +1,13 @@
 # @knpkv/sandbox-pool
 
+## 0.8.0
+
+### Minor Changes
+
+- [#1081](https://github.com/knpkv/npm/pull/1081) [`0a4778e`](https://github.com/knpkv/npm/commit/0a4778e54f8a93bbbbe4b3c982459ff3a7bcec4d) Thanks [@konopkov](https://github.com/konopkov)! - `@knpkv/sandbox-pool/aws` adds `makeBudgetsSpendReader`, a read-only `SpendReader` over AWS Budgets `DescribeBudget`. It runs in the management account, for the budget named after each pool account.
+
+- [#1074](https://github.com/knpkv/npm/pull/1074) [`dae568e`](https://github.com/knpkv/npm/commit/dae568ebc64e075fdca77fa0cfb886078ad34038) Thanks [@konopkov](https://github.com/konopkov)! - Sandboxes cards show this month's spend against the pool budget's alarm and hard stop. The sweep reads it through a new host-supplied `SpendReader` and keeps each account's latest reading. There is no bar without a reader or without `spend` limits in the pool contract.
+
 ## 0.7.0
 
 ### Minor Changes

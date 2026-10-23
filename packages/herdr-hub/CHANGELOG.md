@@ -2,6 +2,18 @@
 
 Released as `@knpkv/herdr-approvals` up to 0.18.0; the headings below are that package's history.
 
+## 0.53.0
+
+### Minor Changes
+
+- [#1074](https://github.com/knpkv/npm/pull/1074) [`dae568e`](https://github.com/knpkv/npm/commit/dae568ebc64e075fdca77fa0cfb886078ad34038) Thanks [@konopkov](https://github.com/konopkov)! - Sandboxes cards show this month's spend against the pool budget's alarm and hard stop. The sweep reads it through a new host-supplied `SpendReader` and keeps each account's latest reading. There is no bar without a reader or without `spend` limits in the pool contract.
+
+### Patch Changes
+
+- Updated dependencies [[`c639c6e`](https://github.com/knpkv/npm/commit/c639c6e59a75ae32a7d6ce5bfc8a5af52ce912d4), [`0a4778e`](https://github.com/knpkv/npm/commit/0a4778e54f8a93bbbbe4b3c982459ff3a7bcec4d), [`dae568e`](https://github.com/knpkv/npm/commit/dae568ebc64e075fdca77fa0cfb886078ad34038)]:
+  - @knpkv/codecommit-web@0.39.3
+  - @knpkv/sandbox-pool@0.8.0
+
 ## 0.52.0
 
 ### Minor Changes
