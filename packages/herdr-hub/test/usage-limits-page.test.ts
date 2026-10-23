@@ -1,10 +1,10 @@
 import type { WindowSummary } from "@knpkv/agent-usage/limits"
 import type { FleetLimits } from "@knpkv/herdr-connect/usage"
+import { limitsPage, resetLabel, windowStatus } from "@knpkv/herdr-usage/views"
 import { Schema } from "effect"
 import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
 import { designReadings, UsageDesignFixture } from "../scripts/design-fixture.js"
-import { limitsPage, resetLabel, windowStatus } from "../src/usage-limits-page.js"
 
 const raw = readFileSync(new URL("../../../design-refs/super-app/fixture.json", import.meta.url), "utf8")
 const fixture = Schema.decodeUnknownSync(

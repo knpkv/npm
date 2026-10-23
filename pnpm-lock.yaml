@@ -1463,31 +1463,55 @@ importers:
 
   packages/herdr-usage:
     dependencies:
-      '@knpkv/bounded-io':
-        specifier: workspace:^
-        version: link:../bounded-io
-      '@knpkv/herdr-connect':
-        specifier: workspace:^
-        version: link:../herdr-connect
-      '@knpkv/hub-app':
-        specifier: workspace:^
-        version: link:../hub-app
-    devDependencies:
       '@effect/platform-node':
         specifier: 4.0.0
         version: 4.0.0(effect@4.0.0)(redis@6.2.1(@opentelemetry/api@1.9.1))
       '@effect/platform-node-shared':
         specifier: 4.0.0
         version: 4.0.0(effect@4.0.0)
+      '@knpkv/agent-usage':
+        specifier: workspace:^
+        version: link:../agent-usage
+      '@knpkv/bounded-io':
+        specifier: workspace:^
+        version: link:../bounded-io
+      '@knpkv/herdr-connect':
+        specifier: workspace:^
+        version: link:../herdr-connect
+      '@knpkv/herdr-fleet':
+        specifier: workspace:^
+        version: link:../herdr-fleet
+      '@knpkv/hub-app':
+        specifier: workspace:^
+        version: link:../hub-app
+    devDependencies:
       '@effect/vitest':
         specifier: 4.0.0
         version: 4.0.0(effect@4.0.0)(vitest@5.0.5)
+      '@knpkv/rly':
+        specifier: workspace:^
+        version: link:../rly
       '@types/node':
         specifier: ^26.6.4
         version: 26.6.4
+      '@types/react':
+        specifier: ^19.3.0
+        version: 19.3.0
+      '@types/react-dom':
+        specifier: ^19.3.0
+        version: 19.3.0(@types/react@19.3.0)
       effect:
         specifier: 4.0.0
         version: 4.0.0
+      esbuild:
+        specifier: 0.28.2
+        version: 0.28.2
+      react:
+        specifier: ^19.3.0
+        version: 19.3.0
+      react-dom:
+        specifier: ^19.3.0
+        version: 19.3.0(react@19.3.0)
       rimraf:
         specifier: ^6.1.3
         version: 6.1.3
