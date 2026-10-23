@@ -961,7 +961,7 @@ it("keeps the product name in the phone header and puts the breadcrumb under the
   const descriptor = defineModule({
     ...fleetModule,
     pages: [
-      { id: "approvals", label: "Approvals", showInPhoneTitle: true },
+      { id: "approvals", label: "Approvals" },
       { id: "work", label: "Work" }
     ]
   })

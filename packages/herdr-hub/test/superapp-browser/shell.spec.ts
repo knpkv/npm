@@ -1064,17 +1064,51 @@ test("phone breadcrumb names the module and page under a product header", async 
       headerBottom: document.querySelector(".superapp-header")?.getBoundingClientRect().bottom,
       position: getComputedStyle(element).position,
       background: getComputedStyle(element).backgroundColor,
-      canvas: getComputedStyle(document.querySelector(".superapp-shell") ?? element).backgroundColor
+      canvas: (() => {
+        const shell = document.querySelector(".superapp-shell")
+        return shell === null ? null : getComputedStyle(shell).backgroundColor
+      })()
     }))
     expect(geometry.height).toBeLessThanOrEqual(32)
     expect(geometry.top).toBe(geometry.headerBottom)
     // In flow, so it scrolls away with the page; never pinned.
     expect(["sticky", "fixed"]).not.toContain(geometry.position)
     // Opaque canvas over main's top edge, as the header is on desktop: the page-arrival focus ring stays covered.
+    expect(geometry.canvas).not.toBeNull()
+    expect(geometry.background).not.toBe("rgba(0, 0, 0, 0)")
     expect(geometry.background).toBe(geometry.canvas)
   }
   await page.goto("/#nowhere/at-all")
   await expect(page.locator(".superapp-breadcrumb")).toBeHidden()
+})
+
+/** A page that draws its own breadcrumb (the review canvas does) owns that line: the shell's stays hidden. */
+test("phone breadcrumb yields to a page's own breadcrumb", async ({ page }, info) => {
+  test.skip(info.project.name !== "phone", "Phone breadcrumb")
+  await page.goto("/#code/pull-requests")
+  const line = page.locator(".superapp-breadcrumb")
+  await expect(line).toBeVisible()
+  // The fixture serves no canvas: stand in for its header with the same landmark inside the shown module.
+  await page.locator("[data-module=\"code\"]:not([hidden])").evaluate((module) => {
+    const nav = document.createElement("nav")
+    nav.setAttribute("aria-label", "Breadcrumb")
+    nav.dataset.testOwnCrumb = ""
+    nav.textContent = "Code / Review"
+    module.prepend(nav)
+  })
+  await expect(line).toBeHidden()
+  await page.locator("[data-test-own-crumb]").evaluate((nav) => nav.remove())
+  await expect(line).toBeVisible()
+})
+
+/** Arrival focus on a cold load lands on the page without a ring nobody asked for; the next Tab shows one. */
+test("cold-load arrival focus paints no focus ring until the keyboard is used", async ({ page }) => {
+  await page.goto("/#fleet/approvals")
+  const tab = page.getByRole("tab", { name: "Approvals", exact: true })
+  await expect(tab).toBeFocused()
+  expect(await tab.evaluate((element) => element.matches(":focus-visible"))).toBe(false)
+  await page.keyboard.press("Tab")
+  expect(await page.evaluate(() => document.activeElement?.matches(":focus-visible") ?? false)).toBe(true)
 })
 
 /** The Fleet heading shows at every width (design rule 45 refs) and stays outside the tab order. */
