@@ -35,9 +35,10 @@ describe("AppsConfig", () => {
     }
   })
 
-  it("still reads v1 until the hub supervises its apps", () => {
+  // No v1 file was ever written outside tests, so there is nothing to migrate: v1 is refused.
+  it("refuses v1, P0's socket list", () => {
     const config = { v: 1, apps: [{ id: "usage", socket: "/run/user/1000/hub-apps/usage.sock" }] }
-    expect(decodeConfig(config)).toEqual(Result.succeed(config))
+    expect(Result.isFailure(decodeConfig(config))).toBe(true)
   })
 })
 

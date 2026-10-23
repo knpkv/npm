@@ -78,6 +78,8 @@ export interface HostdProgramOptions {
   readonly composeOperations?: HostdOperationsComposer
   /** This computer's paths; read from the OS and environment (`HubPaths.fromSystem`) when absent. */
   readonly paths?: HubPathTable
+  /** The Node running hostd (`process.execPath`, from the executable); installed apps run on it. */
+  readonly node?: string
 }
 
 export const makeHostdOperations = Effect.fn("Hostd.makeOperations")(function*(
@@ -138,9 +140,16 @@ const hostdProgram = Effect.fn("Hostd.program")(function*(options: HostdProgramO
   const directory = paths.dirname(yield* paths.fromFileUrl(new URL(import.meta.url)))
   const assets = yield* loadUiAssets(directory)
   const relay = { directory: paths.join(config.stateDirectory, "relay") }
-  // Installed apps are read from this computer's apps.json (HERDR_HUB_CONFIG, else the OS default).
+  // Installed apps are read from this computer's apps.json (HERDR_HUB_CONFIG, else the OS default) and run as
+  // children of this process: sockets under the runtime directory, logs and manifest cache under the hub's state.
   const hubPaths = yield* HubPaths
-  const apps = { configPath: hubPaths.appsConfig }
+  const appPlaces = {
+    configPath: hubPaths.appsConfig,
+    runtimeDirectory: hubPaths.hubRuntime,
+    stateDirectory: hubPaths.hubState
+  }
+  // Without the executable's Node path no app starts, and the hub says so per app.
+  const apps = options.node === undefined ? appPlaces : { ...appPlaces, node: options.node }
   const relayOptions = config.lanWork === undefined ? { relay, apps } : { relay, apps, lanWork: config.lanWork }
   // Absent hosts stay absent: the server reads a missing key as "not configured".
   const withCode = codeHost === null ? relayOptions : { ...relayOptions, codeHost }

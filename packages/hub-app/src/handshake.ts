@@ -47,7 +47,14 @@ export const readHandshake = Effect.fn("HubApp.readHandshake")(function*(
           : [Effect.void, joined]
       }
       const line = new TextDecoder().decode(joined.subarray(0, newline))
-      return [Deferred.complete(first, decodeHandshake(line).pipe(Effect.mapError(handshakeError))), null]
+      // A fixed cause: the decoder's message would quote the line, token and secret included, into the app's log.
+      return [
+        Deferred.complete(
+          first,
+          decodeHandshake(line).pipe(Effect.mapError(() => handshakeError("the handshake line does not decode")))
+        ),
+        null
+      ]
     }).pipe(Effect.flatten)
   const reader = yield* stdin.pipe(
     Stream.runForEach(take),

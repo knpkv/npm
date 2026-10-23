@@ -5,8 +5,6 @@
  *   endpoint to listen on (a unix socket or a Windows named pipe), the hub's URL, this spawn's token and its
  *   secret. Every request must carry the secret before any `x-hub-*` header is read; the caller and grant then
  *   come from those headers. The end of stdin stops the app.
- * - **attached over a socket** (`--socket <path>`, until the hub supervises its apps): an owner-only unix socket
- *   the hub proxies to, with the token in `HUB_APP_TOKEN_FILE`.
  * - **standalone** (`[serve] [--port <n>] [--no-open]`): loopback TCP with its own owner session and the
  *   minimal shell at `/`. The caller is this machine's owner; shell services that need the hub are absent.
  *
@@ -62,7 +60,6 @@ export interface AppServer<E, R> {
 export const RunMode = Schema.Union([
   // Everything else arrives in the handshake on stdin.
   Schema.TaggedStruct("Attached", {}),
-  Schema.TaggedStruct("AttachedSocket", { socket: Schema.String, hubUrl: Schema.String, tokenFile: Schema.String }),
   Schema.TaggedStruct("Standalone", {
     // 0 picks a free port; the sign-in link names the one bound.
     port: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 65_535 })),
@@ -71,11 +68,10 @@ export const RunMode = Schema.Union([
 ])
 export type RunMode = typeof RunMode.Type
 
-/** Read the mode from argv and environment. `--attach` or `--socket` means attached; anything else is standalone. */
+/** Read the mode from argv. `--attach` means attached; anything else is standalone. */
 export const readRunMode = (
   manifest: AppManifestInput,
-  argv: ReadonlyArray<string>,
-  env: Readonly<Record<string, string | undefined>>
+  argv: ReadonlyArray<string>
 ): Result.Result<RunMode, AppStartError> => {
   const parsed = Result.try({
     try: () =>
@@ -84,7 +80,6 @@ export const readRunMode = (
         allowPositionals: true,
         options: {
           attach: { type: "boolean", default: false },
-          socket: { type: "string" },
           port: { type: "string" },
           "no-open": { type: "boolean", default: false }
         }
@@ -96,19 +91,9 @@ export const readRunMode = (
   if (positionals.some((positional) => positional !== "serve")) {
     return Result.fail(new AppStartError({ reason: "invalid_arguments", cause: positionals }))
   }
-  if (values.attach === true && values.socket !== undefined) {
-    return Result.fail(new AppStartError({ reason: "invalid_arguments", cause: "--attach and --socket" }))
-  }
   const decode = Schema.decodeUnknownResult(RunMode)
   const decoded = values.attach === true
     ? decode({ _tag: "Attached" })
-    : values.socket !== undefined
-    ? decode({
-      _tag: "AttachedSocket",
-      socket: values.socket,
-      hubUrl: env.HUB_URL,
-      tokenFile: env.HUB_APP_TOKEN_FILE
-    })
     : decode({
       _tag: "Standalone",
       port: values.port === undefined ? manifest.standalone.defaultPort : Number(values.port),
@@ -164,7 +149,7 @@ const failureResponse = (failure: ModuleRouteFailure) =>
 
 const notFound = HttpServerResponse.json({ code: "not_found" }, { status: 404 })
 
-/** The caller the hub authenticated, from the socket listener's `x-hub-caller` header. */
+/** The caller the hub authenticated, from its `x-hub-caller` header. */
 const hubCaller = Effect.gen(function*() {
   const request = yield* HttpServerRequest.HttpServerRequest
   const header = request.headers[hubHeaders.caller]
@@ -267,15 +252,6 @@ const hubPolicy: ListenerPolicy<never, HttpServerRequest.HttpServerRequest> = {
   sameOrigin: Effect.void
 }
 
-/** Remove a stale socket from a previous run; refuse to touch anything that isn't one. */
-const clearSocket = Effect.fn("HubApp.clearSocket")(function*(socket: string) {
-  const fileSystem = yield* FileSystem.FileSystem
-  if (!(yield* fileSystem.exists(socket))) return
-  const info = yield* fileSystem.stat(socket)
-  if (info.type !== "Socket") return yield* new AppStartError({ reason: "listen", cause: "not a socket" })
-  yield* fileSystem.remove(socket)
-}, Effect.mapError((cause) => cause._tag === "AppStartError" ? cause : new AppStartError({ reason: "listen", cause })))
-
 /**
  * Attached mode: read the hub's handshake from stdin, listen on its endpoint, and stop when stdin ends. Needs no
  * browser opener.
@@ -285,12 +261,11 @@ export const serveAttached = Effect.fn("HubApp.serveAttached")(function*<E, R>(a
   const stdin = yield* readHandshake(stdio.stdin)
   const handshake = yield* stdin.handshake
   const manifest = yield* servedManifest(app)
-  const token = Redacted.value(handshake.hubToken)
   const services = yield* Layer.build(
     attachedLayer({
       app: manifest.id,
       hubUrl: handshake.hubUrl,
-      token: Effect.succeed(token),
+      token: handshake.hubToken,
       declared: manifest.services
     })
   )
@@ -319,45 +294,6 @@ export const serveAttached = Effect.fn("HubApp.serveAttached")(function*<E, R>(a
   )
   // The end of stdin is the hub's stop: the listener closes and the process exits.
   return yield* Layer.launch(server).pipe(Effect.raceFirst(stdin.closed))
-})
-
-/** P0's nix-started shape: listen on `--socket` with the token in a file. */
-export const serveAttachedSocket = Effect.fn("HubApp.serveAttachedSocket")(function*<E, R>(
-  app: AppServer<E, R>,
-  mode: Extract<RunMode, { readonly _tag: "AttachedSocket" }>
-) {
-  const fileSystem = yield* FileSystem.FileSystem
-  const manifest = yield* servedManifest(app)
-  const services = yield* Layer.build(
-    attachedLayer({
-      app: manifest.id,
-      hubUrl: mode.hubUrl,
-      token: fileSystem.readFileString(mode.tokenFile).pipe(Effect.map((text) => text.trim())),
-      declared: manifest.services
-    })
-  )
-  const { mounted, needsYou } = yield* mountModule(manifest, app.handlers).pipe(Effect.provideContext(services))
-  const badge = app.badge?.pipe(Effect.provideContext(services))
-  yield* clearSocket(mode.socket)
-  return yield* Layer.launch(
-    HttpRouter.serve(
-      Layer.mergeAll(appRoutes(manifest, mounted, needsYou, badge, hubPolicy), assetRoutes(app.clientDirectory)),
-      {
-        disableListenLog: true,
-        disableLogger: true
-      }
-    ).pipe(
-      Layer.provide(NodeHttpServer.layerServer(createServer, { path: mode.socket })),
-      Layer.provide(HttpPlatform.layer),
-      Layer.provide(Etag.layer),
-      // The hub's headers are trusted on this socket, so only its owner may connect, whatever the umask.
-      Layer.tap(() =>
-        fileSystem.chmod(mode.socket, 0o600).pipe(
-          Effect.mapError((cause) => new AppStartError({ reason: "listen", cause }))
-        )
-      )
-    )
-  )
 })
 
 const ownerCaller = (login: string): typeof ModuleCaller.Encoded => ({
@@ -502,8 +438,6 @@ export const serveApp = Effect.fn("HubApp.serveApp")(function*<E, R>(
   switch (mode._tag) {
     case "Attached":
       return yield* serveAttached(app)
-    case "AttachedSocket":
-      return yield* serveAttachedSocket(app, mode)
     case "Standalone":
       return yield* serveStandalone(app, mode, launch)
   }

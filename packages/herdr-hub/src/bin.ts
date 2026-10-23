@@ -4,7 +4,7 @@ import { Effect, Layer } from "effect"
 import { makeHostdProgram } from "./hostd.js"
 import * as NodeBin from "./internal/node-bin.js"
 
-makeHostdProgram().pipe(
+makeHostdProgram({ node: process.execPath }).pipe(
   Effect.scoped,
   // The hostd process owns the Node service layer for its full lifetime. On Windows its spawner runs
   // npm `.cmd` shims as this Node with their script, never through a shell.

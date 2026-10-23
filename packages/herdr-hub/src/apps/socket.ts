@@ -1,6 +1,6 @@
 /**
- * HTTP to an app over its unix socket: one bounded JSON read for probes and app endpoints, and a
- * streaming proxy for browser requests.
+ * HTTP to an app over its endpoint (a unix socket, or a named pipe on Windows): one bounded JSON read for probes
+ * and app endpoints, and a streaming proxy for browser requests. Every request carries the spawn's secret.
  *
  * @module
  */
@@ -16,16 +16,17 @@ export class AppSocketError extends Schema.TaggedError<AppSocketError>()("AppSoc
 /** App answers are small JSON documents; anything near this is not one. */
 const maxJsonBytes = 1_048_576
 
-/** `GET path` on the socket, decoded as JSON; non-2xx is a failure with its status. */
+/** `GET path` on the endpoint, decoded as JSON; non-2xx is a failure with its status. */
 const decodeJson = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Json))
 
 export const getJson = (
   socket: string,
   path: string,
-  timeoutMillis: number
+  timeoutMillis: number,
+  headers: Readonly<Record<string, string>>
 ): Effect.Effect<Schema.Json, AppSocketError> =>
   Effect.callback<Schema.Json, AppSocketError>((resume, signal) => {
-    const outgoing = httpRequest({ socketPath: socket, path, method: "GET", signal, timeout: timeoutMillis })
+    const outgoing = httpRequest({ socketPath: socket, path, method: "GET", headers, signal, timeout: timeoutMillis })
     outgoing.on("timeout", () => {
       outgoing.destroy()
       resume(Effect.fail(new AppSocketError({ reason: "timeout", status: null })))

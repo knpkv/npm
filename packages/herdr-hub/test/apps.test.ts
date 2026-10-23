@@ -1,14 +1,29 @@
 /**
  * The hub's app contract, against the fixture app on real unix sockets: registration, removal, every
- * unavailable reason, the manifest cache, the proxy and the grants. Each scenario is one the design names.
+ * unavailable reason, the manifest cache, the proxy and the grants. Each scenario is one the design names. The
+ * fixture runs in this process, attached through a handshake on a test stdin; a stub supervisor reports where it
+ * listens. The supervisor itself, with real child processes, is `supervisor.test.ts`.
  */
 import { NodeHttpClient, NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
 import type { FleetLimits, UsageQuery } from "@knpkv/herdr-connect"
-import { AppId, AppStates, hubHeaders, type ModuleCaller } from "@knpkv/hub-app"
+import { AppId, type AppId as AppIdType, AppStates, hubHeaders, type ModuleCaller } from "@knpkv/hub-app"
 import { fixtureApp, type FixtureMode } from "@knpkv/hub-app-fixture"
-import { serveAttachedSocket } from "@knpkv/hub-app/node"
-import { Duration, Effect, Exit, FileSystem, Layer, Path, Schedule, Schema, Scope } from "effect"
+import { serveAttached } from "@knpkv/hub-app/node"
+import {
+  Duration,
+  Effect,
+  Exit,
+  FileSystem,
+  Layer,
+  Path,
+  Redacted,
+  Schedule,
+  Schema,
+  Scope,
+  Stdio,
+  Stream
+} from "effect"
 import { TestClock } from "effect/testing"
 import {
   createServer as createHttpServer,
@@ -20,10 +35,11 @@ import {
 import { createServer as createNetServer, type Socket } from "node:net"
 import { tmpdir } from "node:os"
 import { answerFleetRead } from "../src/apps/fleet-read.js"
-import { makeAppTokens, makeGrants } from "../src/apps/grants.js"
-import { logReloadFailure, makeAppRegistry } from "../src/apps/registry.js"
+import { type AppTokens, makeAppTokens, makeGrants } from "../src/apps/grants.js"
+import { type AppReach, logReloadFailure, makeAppRegistry } from "../src/apps/registry.js"
 import { AppServiceRefused, handleAppServicesRoute, handleAppsRoute } from "../src/apps/routes.js"
 import { appLocation, getJson, proxyToSocket } from "../src/apps/socket.js"
+import type { AppRun, AppSupervisor } from "../src/apps/supervisor.js"
 
 const appId = Schema.decodeSync(AppId)
 const ListeningPort = Schema.Struct({ port: Schema.Number })
@@ -42,29 +58,46 @@ const tempDirectory = Effect.gen(function*() {
   return yield* fileSystem.makeTempDirectoryScoped({ directory: tmpdir(), prefix: "hub-apps-" })
 })
 
+/** A running fixture: where it listens, its spawn's secret, and the token the hub issued that spawn. */
+interface Fixture extends AppReach {
+  readonly token: Redacted.Redacted<string>
+}
+
+/** An endpoint the hub reaches with a secret nobody checks: an absent or a hanging socket. */
+const atEndpoint = (endpoint: string): AppReach => ({ endpoint, secret: Redacted.make("unused-secret") })
+
 /**
- * Run the fixture attached on `<directory>/<id>.sock` for the test's scope; returns once it answers. With `hubUrl`
- * it calls that hub with the token the hub issued under `<directory>/tokens`.
+ * Run the fixture attached on `<directory>/<id>.sock` for the test's scope, as the supervisor would: a handshake
+ * on its stdin with a fresh secret and, with `hub`, a token that hub issued. Returns once it answers.
  */
-const startFixture = (directory: string, mode: FixtureMode, id = "fixture", hubUrl?: string) =>
+const startFixture = (
+  directory: string,
+  mode: FixtureMode,
+  id = "fixture",
+  hub?: { readonly url: string; readonly tokens: AppTokens }
+) =>
   Effect.gen(function*() {
-    const fileSystem = yield* FileSystem.FileSystem
     const path = yield* Path.Path
-    const socket = path.join(directory, `${id}.sock`)
-    const tokenFile = hubUrl === undefined
-      ? path.join(directory, `${id}.app-token`)
-      : path.join(directory, "tokens", `${id}.token`)
-    if (hubUrl === undefined) yield* fileSystem.writeFileString(tokenFile, "fixture-token\n")
-    yield* serveAttachedSocket(fixtureApp(mode, id), {
-      _tag: "AttachedSocket",
-      socket,
-      hubUrl: hubUrl ?? "http://127.0.0.1:9",
-      tokenFile
-    }).pipe(Effect.forkScoped)
-    yield* getJson(socket, "/app/health", 500).pipe(
+    const endpoint = path.join(directory, `${id}.sock`)
+    const secret = Redacted.make(`secret-of-${id}`.padEnd(32, "-"))
+    const token = hub === undefined ? Redacted.make("fixture-token") : yield* hub.tokens.issue(appId(id), "spawn-1")
+    const handshake = JSON.stringify({
+      v: 1,
+      endpoint,
+      hubUrl: hub?.url ?? "http://127.0.0.1:9",
+      hubToken: Redacted.value(token),
+      appSecret: Redacted.value(secret)
+    })
+    const stdin = yield* Layer.build(
+      Stdio.layerTest({
+        stdin: Stream.make(new TextEncoder().encode(`${handshake}\n`)).pipe(Stream.concat(Stream.never))
+      })
+    )
+    yield* serveAttached(fixtureApp(mode, id)).pipe(Effect.provideContext(stdin), Effect.forkScoped)
+    yield* getJson(endpoint, "/app/health", 500, { [hubHeaders.appSecret]: Redacted.value(secret) }).pipe(
       Effect.retry({ schedule: Schedule.spaced("20 millis"), times: 100 })
     )
-    return socket
+    return { endpoint, secret, token } satisfies Fixture
   })
 
 /** A socket that accepts and never answers; its connections are destroyed when the scope closes. */
@@ -84,23 +117,54 @@ const hangingSocket = (socket: string) =>
       })
   )
 
+/** The registry over a stub supervisor: `writeConfig` writes apps.json v2 and says each app runs at its reach. */
 const makeHub = (directory: string) =>
   Effect.gen(function*() {
     const path = yield* Path.Path
     const fileSystem = yield* FileSystem.FileSystem
     const configPath = path.join(directory, "apps.json")
     const cacheDirectory = path.join(directory, "cache")
-    const tokens = yield* makeAppTokens(path.join(directory, "tokens"))
+    const tokens = yield* makeAppTokens
+    const runs = new Map<AppIdType, AppRun>()
+    const supervisor: AppSupervisor = {
+      sync: () => Effect.void,
+      restart: () => Effect.succeed(false),
+      run: (id) => Effect.sync(() => runs.get(id)),
+      changes: Stream.never,
+      recentLines: () => Effect.succeed([])
+    }
     const registry = yield* makeAppRegistry({
       configPath,
       cacheDirectory,
-      tokens,
+      supervisor,
       coreIds: ["connect", "fleet"],
       supportedContracts: [1],
       probeTimeoutMillis: 300
     })
-    const writeConfig = (apps: ReadonlyArray<{ readonly id: string; readonly socket: string }>) =>
-      fileSystem.writeFileString(configPath, JSON.stringify({ v: 1, apps }))
+    const writeConfig = (apps: ReadonlyArray<{ readonly id: string; readonly reach: AppReach }>) =>
+      Effect.gen(function*() {
+        for (const app of apps) {
+          runs.set(appId(app.id), { _tag: "Running", endpoint: app.reach.endpoint, secret: app.reach.secret })
+        }
+        yield* fileSystem.writeFileString(
+          configPath,
+          JSON.stringify({
+            v: 2,
+            managedBy: "cli",
+            trust: { scopes: ["@knpkv"] },
+            apps: apps.map((app) => ({
+              id: app.id,
+              package: "@knpkv/hub-app-fixture",
+              version: "0.0.0",
+              dir: directory,
+              bin: "bin.mjs",
+              enabled: true,
+              memoryMb: 128,
+              allowScripts: false
+            }))
+          })
+        )
+      })
     const states = Effect.map(registry.apps, (apps) => apps.map((app) => app.state))
     return { registry, tokens, writeConfig, states, cacheDirectory }
   })
@@ -121,7 +185,7 @@ describe("hub apps", () => {
         const fileSystem = yield* FileSystem.FileSystem
         const socket = yield* startFixture(directory, "ok")
         const hub = yield* makeHub(directory)
-        yield* hub.writeConfig([{ id: "fixture", socket }])
+        yield* hub.writeConfig([{ id: "fixture", reach: socket }])
         yield* hub.registry.reload()
         const [state] = yield* hub.states
         expect(state?._tag).toBe("Ready")
@@ -136,7 +200,7 @@ describe("hub apps", () => {
         const fileSystem = yield* FileSystem.FileSystem
         const socket = yield* startFixture(directory, "ok")
         const hub = yield* makeHub(directory)
-        yield* hub.writeConfig([{ id: "fixture", socket }])
+        yield* hub.writeConfig([{ id: "fixture", reach: socket }])
         yield* hub.registry.reload()
         yield* hub.writeConfig([])
         yield* hub.registry.reload()
@@ -150,7 +214,7 @@ describe("hub apps", () => {
         const hub = yield* makeHub(directory)
         const appScope = yield* Scope.make()
         const socket = yield* startFixture(directory, "ok").pipe(Scope.provide(appScope))
-        yield* hub.writeConfig([{ id: "fixture", socket }])
+        yield* hub.writeConfig([{ id: "fixture", reach: socket }])
         yield* hub.registry.reload()
         yield* Scope.close(appScope, Exit.void)
         yield* hub.registry.refresh()
@@ -164,7 +228,7 @@ describe("hub apps", () => {
       Effect.gen(function*() {
         const directory = yield* tempDirectory
         const hub = yield* makeHub(directory)
-        yield* hub.writeConfig([{ id: "fixture", socket: `${directory}/absent.sock` }])
+        yield* hub.writeConfig([{ id: "fixture", reach: atEndpoint(`${directory}/absent.sock`) }])
         yield* hub.registry.reload()
         expect(yield* hub.states).toEqual([{
           _tag: "Unavailable",
@@ -185,12 +249,12 @@ describe("hub apps", () => {
         yield* hangingSocket(hanging)
         const hub = yield* makeHub(directory)
         yield* hub.writeConfig([
-          { id: "good", socket: ok },
-          { id: "newer", socket: newer },
-          { id: "imposter", socket: imposter },
-          { id: "hang", socket: hanging },
-          { id: "connect", socket: ok },
-          { id: "good", socket: ok }
+          { id: "good", reach: ok },
+          { id: "newer", reach: newer },
+          { id: "imposter", reach: imposter },
+          { id: "hang", reach: atEndpoint(hanging) },
+          { id: "connect", reach: ok },
+          { id: "good", reach: ok }
         ])
         yield* hub.registry.reload()
         const reasons = (yield* hub.states).map((state) => state._tag === "Ready" ? "ready" : state.reason)
@@ -203,7 +267,7 @@ describe("hub apps", () => {
         const hanging = `${directory}/hang.sock`
         const { held } = yield* hangingSocket(hanging)
         const hub = yield* makeHub(directory)
-        yield* hub.writeConfig([{ id: "hang", socket: hanging }])
+        yield* hub.writeConfig([{ id: "hang", reach: atEndpoint(hanging) }])
         yield* hub.registry.reload()
         expect(held.size).toBe(1)
         yield* Effect.all([
@@ -222,7 +286,7 @@ describe("hub apps", () => {
         const fileSystem = yield* FileSystem.FileSystem
         const socket = yield* startFixture(directory, "ok")
         const hub = yield* makeHub(directory)
-        yield* hub.writeConfig([{ id: "fixture", socket }])
+        yield* hub.writeConfig([{ id: "fixture", reach: socket }])
         yield* hub.registry.reload()
         yield* fileSystem.writeFileString(`${directory}/apps.json`, "{\"v\":1,\"apps\":[],\"extra\":true}")
         yield* hub.registry.reload()
@@ -295,17 +359,17 @@ describe("hub apps", () => {
     const serveHubWithFixture = (directory: string, mode: FixtureMode = "ok") =>
       Effect.gen(function*() {
         const served = yield* serveHub(directory)
-        const socket = yield* startFixture(directory, mode, "fixture", served.url)
-        yield* served.hub.writeConfig([{ id: "fixture", socket }])
+        const socket = yield* startFixture(directory, mode, "fixture", { url: served.url, tokens: served.hub.tokens })
+        yield* served.hub.writeConfig([{ id: "fixture", reach: socket }])
         yield* served.hub.registry.reload()
         return { ...served, socket }
       })
 
     /** Back-compat for the proxy tests: the hub with the fixture registered at `socket`, or nothing. */
-    const serveHubRoutes = (directory: string, socket: string | null) =>
+    const serveHubRoutes = (directory: string, socket: AppReach | null) =>
       Effect.gen(function*() {
         const served = yield* serveHub(directory)
-        if (socket !== null) yield* served.hub.writeConfig([{ id: "fixture", socket }])
+        if (socket !== null) yield* served.hub.writeConfig([{ id: "fixture", reach: socket }])
         yield* served.hub.registry.reload()
         return served
       })
@@ -367,7 +431,7 @@ describe("hub apps", () => {
     it.effect("answers 404 for unknown apps and paths, and 503 for an app that is down", () =>
       Effect.gen(function*() {
         const directory = yield* tempDirectory
-        const { port } = yield* serveHubRoutes(directory, `${directory}/absent.sock`)
+        const { port } = yield* serveHubRoutes(directory, atEndpoint(`${directory}/absent.sock`))
         expect((yield* get(port, "/apps/removed/v1/modules/removed/echo")).status).toBe(404)
         expect((yield* get(port, "/apps/fixture/app/manifest")).status).toBe(404)
         const down = yield* get(port, "/apps/fixture/v1/modules/fixture/echo")
@@ -464,13 +528,13 @@ describe("hub apps", () => {
     it.effect("app services: token and app name, declared services, grant ownership and reuse", () =>
       Effect.gen(function*() {
         const directory = yield* tempDirectory
-        const fileSystem = yield* FileSystem.FileSystem
         const { grants, hub, port, submitted } = yield* serveHub(directory)
-        const first = yield* startFixture(directory, "ok", "fixture")
-        const second = yield* startFixture(directory, "ok", "second")
-        yield* hub.writeConfig([{ id: "fixture", socket: first }, { id: "second", socket: second }])
+        const hubSide = { url: `http://127.0.0.1:${port}`, tokens: hub.tokens }
+        const first = yield* startFixture(directory, "ok", "fixture", hubSide)
+        const second = yield* startFixture(directory, "ok", "second", hubSide)
+        yield* hub.writeConfig([{ id: "fixture", reach: first }, { id: "second", reach: second }])
         yield* hub.registry.reload()
-        const token = (yield* fileSystem.readFileString(`${directory}/tokens/fixture.token`)).trim()
+        const token = Redacted.value(first.token)
         const asApp = (app: string, bearer: string) => ({
           authorization: `Bearer ${bearer}`,
           [hubHeaders.app]: app,
@@ -510,7 +574,7 @@ describe("hub apps", () => {
         const fileSystem = yield* FileSystem.FileSystem
         const socket = yield* startFixture(directory, "ok")
         const hub = yield* makeHub(directory)
-        yield* hub.writeConfig([{ id: "fixture", socket }])
+        yield* hub.writeConfig([{ id: "fixture", reach: socket }])
         yield* hub.registry.reload()
         const cache = `${hub.cacheDirectory}/fixture.manifest.json`
         const before = yield* fileSystem.stat(cache)

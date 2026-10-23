@@ -81,11 +81,11 @@ const isHandshakeError = (result: Result.Result<unknown, AppStartError>) =>
 
 describe("readRunMode --attach", () => {
   it("is attached with --attach alone; the rest arrives on stdin", () => {
-    expect(readRunMode(manifest, ["--attach"], {})).toEqual(Result.succeed({ _tag: "Attached" }))
+    expect(readRunMode(manifest, ["--attach"])).toEqual(Result.succeed({ _tag: "Attached" }))
   })
 
-  it("refuses --attach together with --socket", () => {
-    const mode = readRunMode(manifest, ["--attach", "--socket", "/run/probe.sock"], {})
+  it("refuses --attach together with P0's --socket", () => {
+    const mode = readRunMode(manifest, ["--attach", "--socket", "/run/probe.sock"])
     expect(Result.isFailure(mode) && mode.failure).toBeInstanceOf(AppStartError)
   })
 })

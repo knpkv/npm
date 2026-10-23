@@ -6,9 +6,14 @@ An app is always its own process:
 
 - **standalone**: `my-app [serve] [--port <n>] [--no-open]` listens on loopback, prints a one-time sign-in link and
   serves a minimal shell at `/`.
-- **attached**: `my-app --socket <path>` listens on an owner-only unix socket. The hub authenticates each browser
-  request, proxies it there with the caller in `x-hub-caller` and a grant in `x-hub-grant`, and mounts the app's
-  client in its own shell. `HUB_URL` and `HUB_APP_TOKEN_FILE` point the app at the hub's services.
+- **attached**: the hub starts `my-app --attach` itself and writes one handshake line on its stdin: the endpoint to
+  listen on (a unix socket, or a named pipe on Windows), the hub's URL, a token and a secret, all fresh per start.
+  The app answers only requests that carry the secret. The hub authenticates each browser request, proxies it
+  there with the caller in `x-hub-caller` and a grant in `x-hub-grant`, and mounts the app's client in its own
+  shell. When the hub closes stdin, the app stops.
+
+An app's package.json names its script for the hub: `"hubApp": { "bin": "dist/bin.js", "contract": 1, "services":
+[...] }`.
 
 ## Write an app
 

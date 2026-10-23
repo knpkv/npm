@@ -103,6 +103,7 @@ import {
   Clock,
   Context,
   Crypto,
+  Deferred,
   Duration,
   Effect,
   Equal,
@@ -125,7 +126,7 @@ import { ChildProcessSpawner } from "effect/process"
 import type * as SemaphoreModule from "effect/Semaphore"
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http"
 import { createServer as createSecureServer } from "node:https"
-import { homedir } from "node:os"
+import { homedir, tmpdir, userInfo } from "node:os"
 import type { Duplex } from "node:stream"
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
@@ -138,6 +139,7 @@ import { makeAppTokens, makeGrants } from "./apps/grants.js"
 import { appNeedsYouProviders } from "./apps/needs-you.js"
 import { makeAppRegistry } from "./apps/registry.js"
 import { AppServiceRefused, handleAppServicesRoute, handleAppsRoute } from "./apps/routes.js"
+import { defaultTiming, makeSupervisor, type SupervisorTiming } from "./apps/supervisor.js"
 import { authorize, authorizeLoopback, authorizeLoopbackPeer } from "./auth.js"
 import { BlockedPushMutation, StageHeartbeat } from "./blocked-push-model.js"
 import { loadBlockedPushObservations } from "./blocked-push-source.js"
@@ -395,10 +397,20 @@ export type HttpServerOptions = {
   /** Pool contract for this host. Missing while `sandboxesHost` names this hub is a pool mismatch. */
   readonly sandboxPool?: PoolContract | null
   /**
-   * Installed apps: `configPath` is nix's `apps.json` (default `~/.config/herdr/apps.json`), `tokenDirectory`
-   * where each app's `<id>.token` is written (default `<state directory>/hub-apps/tokens`).
+   * Installed apps, which the hub runs as child processes. `configPath` is `apps.json` (default
+   * `~/.config/herdr/apps.json`); `node` is the Node that runs the hub, and its apps (without it no app starts);
+   * `runtimeDirectory` holds their sockets (null on Windows: named pipes); `stateDirectory` their logs and manifest
+   * cache (default `<state directory>/hub-apps`).
    */
-  readonly apps?: { readonly configPath?: string; readonly tokenDirectory?: string }
+  readonly apps?: {
+    readonly configPath?: string
+    readonly node?: string
+    readonly runtimeDirectory?: string | null
+    readonly stateDirectory?: string
+    readonly timing?: SupervisorTiming
+    /** Extra Node arguments before an app's script; tests only. */
+    readonly nodeArgs?: ReadonlyArray<string>
+  }
   /** Additional product layers join the shared registry at startup; handlers close their requirements. */
   readonly modules?: ReadonlyArray<ServerModule<unknown, HttpClient.HttpClient | Tailscale | Crypto.Crypto>>
   readonly lanWork?: LanWorkListenerOptions
@@ -1933,18 +1945,37 @@ export const startHttpServer = async (
       ...(options.modules ?? [])
     ]
     // Installed apps: nix's apps.json, re-read when it changes and every 30 s. An app never fails startup.
-    const appTokens = await httpRuntime.runPromise(
-      makeAppTokens(options.apps?.tokenDirectory ?? `${config.stateDirectory}/hub-apps/tokens`)
-    )
+    const appTokens = await httpRuntime.runPromise(makeAppTokens)
     const appGrants = await httpRuntime.runPromise(makeGrants)
+    // Apps call the hub on its loopback listener, whose port is known once it listens.
+    const appHubUrl = Deferred.makeUnsafe<string>()
+    const appState = options.apps?.stateDirectory ?? `${config.stateDirectory}/hub-apps`
+    const appUser = userInfo()
+    const appSupervisor = await httpRuntime.runPromise(
+      makeSupervisor({
+        node: options.apps?.node ?? null,
+        nodeArgs: options.apps?.nodeArgs ?? [],
+        runtimeDirectory: options.apps?.runtimeDirectory === undefined
+          ? `${appState}/run`
+          : options.apps.runtimeDirectory,
+        shortRuntimeDirectory: `${tmpdir()}/herdr-hub-${appUser.uid}`,
+        logsDirectory: `${appState}/logs`,
+        hubUrl: Deferred.await(appHubUrl),
+        tokens: appTokens,
+        user: { name: appUser.username, uid: appUser.uid },
+        timing: options.apps?.timing ?? defaultTiming
+      }).pipe(Effect.provideService(Scope.Scope, moduleScope))
+    )
     const appRegistry = await httpRuntime.runPromise(makeAppRegistry({
       configPath: options.apps?.configPath ?? `${homedir()}/.config/herdr/apps.json`,
-      cacheDirectory: `${config.stateDirectory}/hub-apps/manifests`,
-      tokens: appTokens,
+      cacheDirectory: `${appState}/manifests`,
+      supervisor: appSupervisor,
       coreIds: modules.map((module) => module.descriptor.id),
       supportedContracts: [1],
       probeTimeoutMillis: 2_000
     }))
+    // Watch the supervisor before the first reload, so no app's first start is missed.
+    await httpRuntime.runPromise(appRegistry.watchRuns.pipe(Effect.provideService(Scope.Scope, moduleScope)))
     await httpRuntime.runPromise(appRegistry.reload())
     await httpRuntime.runPromise(
       Effect.all([appRegistry.watchConfig, appRegistry.reloadLoop]).pipe(
@@ -4447,6 +4478,7 @@ export const startHttpServer = async (
 
     const recoveredJobIds = await Effect.runPromise(service.recover())
     const local = await listen("127.0.0.1", config.localPort, "local")
+    Deferred.doneUnsafe(appHubUrl, Effect.succeed(local.url))
     const lan = options.lanWork === undefined
       ? null
       : await listen(options.lanWork.address, options.lanWork.port, "lan")
