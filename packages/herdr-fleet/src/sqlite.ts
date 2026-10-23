@@ -45,6 +45,16 @@ const groupOrOtherWritable = (paths: Path.Path, mode: number): boolean => paths.
 
 const databaseFiles = (path: string): ReadonlyArray<string> => [path, `${path}-wal`, `${path}-shm`]
 
+/**
+ * Whether two real paths name the same entry. POSIX compares them exactly. Windows paths are resolved
+ * first and compared case-insensitively, because `realpath` there may differ from a joined path in
+ * drive-letter case or separator (`C:\` against `c:/`) while naming the same file.
+ */
+export const sameRealPath = (paths: Pick<Path.Path, "resolve" | "sep">, left: string, right: string): boolean =>
+  paths.sep === "\\"
+    ? paths.resolve(left).toLowerCase() === paths.resolve(right).toLowerCase()
+    : left === right
+
 // Refuses `path` when it is itself a symlink — including a dangling one — or when
 // its real path is not its real parent joined with its name. A component that does
 // not exist yet is checked through its parent.
@@ -73,7 +83,7 @@ const verifyPathIdentity = (
         realParentPath: fileSystem.realPath(parent).pipe(Effect.mapError(failWith(`${operation}.parent-realpath`)))
       }).pipe(Effect.flatMap(({ realParentPath, realPath }) => {
         const expectedPath = paths.join(realParentPath, paths.basename(path))
-        return realPath === expectedPath
+        return sameRealPath(paths, realPath, expectedPath)
           ? Effect.void
           : Effect.fail(new PrivateDatabaseError({ cause: { expectedPath, path, realPath }, operation }))
       }))
@@ -100,6 +110,10 @@ export const verifyPrivatePathIdentity = Effect.fn("PrivateDatabase.verifyPathId
  * Refuses a directory or file that is a symlink, the wrong type, or group/other
  * writable, without changing it. Otherwise restricts the directory (created if
  * missing) to `0700` and existing db/-wal/-shm files to `0600`.
+ *
+ * On Windows the modes do nothing and the writability check is skipped: owner-only
+ * there comes from the user profile's ACL, which covers the state directory under
+ * `%LOCALAPPDATA%` (see `HubPaths`).
  */
 export const preparePrivateDatabasePath = Effect.fn("PrivateDatabase.prepare")(function*(path: string) {
   const fileSystem = yield* FileSystem.FileSystem
