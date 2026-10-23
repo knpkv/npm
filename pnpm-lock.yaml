@@ -1268,6 +1268,9 @@ importers:
 
   packages/herdr-hub:
     dependencies:
+      '@distilled.cloud/aws':
+        specifier: 1.0.0-rc.13
+        version: 1.0.0-rc.13(effect@4.0.0)
       '@effect/atom-react':
         specifier: 4.0.0
         version: 4.0.0(effect@4.0.0)(react@19.3.0)(scheduler@0.27.0)

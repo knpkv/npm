@@ -81,6 +81,7 @@
     "test:browser": "pnpm --filter \"@knpkv/herdr-hub^...\" --sort run build && playwright test --config playwright.config.ts && pnpm run build && pnpm run test:browser:superapp"
   },
   "dependencies": {
+    "@distilled.cloud/aws": "1.0.0-rc.13",
     "@effect/atom-react": "4.0.0",
     "@effect/platform-browser": "4.0.0",
     "@effect/platform-node": "4.0.0",
