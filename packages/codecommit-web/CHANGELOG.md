@@ -1,5 +1,11 @@
 # @knpkv/codecommit-web
 
+## 0.39.3
+
+### Patch Changes
+
+- [#1079](https://github.com/knpkv/npm/pull/1079) [`c639c6e`](https://github.com/knpkv/npm/commit/c639c6e59a75ae32a7d6ce5bfc8a5af52ce912d4) Thanks [@konopkov](https://github.com/konopkov)! - The review summary's head commit label truncates its title on narrow screens instead of widening the card when the commit was made on an earlier day.
+
 ## 0.39.2
 
 ### Patch Changes

@@ -91,6 +91,11 @@
   min-inline-size: 0;
 }
 
+/* Each line may be narrower than its words, so a commit label truncates its title instead of widening the card. */
+.provenance > * {
+  min-inline-size: 0;
+}
+
 .verdict small,
 .provenance small {
   font-size: 0.8125rem;

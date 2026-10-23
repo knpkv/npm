@@ -11,9 +11,9 @@
  *
  * @module
  */
-import { Schema } from "effect"
+import { Effect, Schema } from "effect"
 import { CleaningReason, Holder, leaseCap, leaseDuration, RunId } from "./lease.js"
-import { AccountId, AwsRegion, type PoolContract, PoolSignIn, SandboxName } from "./pool.js"
+import { AccountId, AwsRegion, type PoolContract, PoolSignIn, SandboxName, SpendLimits } from "./pool.js"
 import { isBudgetHold } from "./reset.js"
 import { RunStep } from "./run-log.js"
 
@@ -165,27 +165,48 @@ export const SandboxCardState = Schema.TaggedUnion({
 })
 export type SandboxCardState = typeof SandboxCardState.Type
 
+/** An account's last spend reading: USD this month, read at `asOf` (epoch milliseconds). */
+export const SandboxSpend = Schema.Struct({
+  usd: Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0)),
+  asOf: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
+})
+export interface SandboxSpend extends Schema.Schema.Type<typeof SandboxSpend> {}
+
+/** `spend` is the account's last reading, null before the first one or on a host without a spend reader. */
 export const SandboxCard = Schema.Struct({
   accountId: AccountId,
   name: SandboxName,
   label: Schema.NullOr(Schema.Literal("left the pool")),
-  state: SandboxCardState
+  state: SandboxCardState,
+  spend: Schema.NullOr(SandboxSpend).pipe(Schema.withDecodingDefaultKey(Effect.succeed(null)))
 })
 export interface SandboxCard extends Schema.Schema.Type<typeof SandboxCard> {}
 
 export const SandboxesOverview = Schema.Union([
   SandboxesUnavailable,
   SandboxesReadFailed,
+  /** `spendLimits` is the pool budget's alarm and hard stop; null when the contract names none, so no bar. */
   Schema.TaggedStruct("Ready", {
     sandboxes: Schema.Array(SandboxCard),
-    badge: SandboxBadge
+    badge: SandboxBadge,
+    spendLimits: Schema.NullOr(SpendLimits).pipe(Schema.withDecodingDefaultKey(Effect.succeed(null)))
   })
 ])
 export type SandboxesOverview = typeof SandboxesOverview.Type
 
+/** One step of a run: its status, the time of its latest entry, and a scan's removable count (a number only). */
+export const SandboxRunStep = Schema.Struct({
+  step: RunStep,
+  status: Schema.Literals(["done", "failed", "running", "notRun"]),
+  at: Schema.NullOr(Instant),
+  count: Schema.NullOr(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)))
+})
+export interface SandboxRunStep extends Schema.Schema.Type<typeof SandboxRunStep> {}
+
 /**
  * One run on the public page. `step` is the step in progress; `outcome` and `endedAt` are null until the
  * run finishes. `failedStep` names the step that failed, null for a run with none; its words are `blocker`.
+ * `steps` lists every step in run order; it is empty for a page from a hub that predates steps.
  */
 export const SandboxRunView = Schema.Struct({
   runId: RunId,
@@ -195,7 +216,8 @@ export const SandboxRunView = Schema.Struct({
   reason: CleaningReason,
   startedAt: Instant,
   endedAt: Schema.NullOr(Instant),
-  failedStep: Schema.NullOr(RunStep)
+  failedStep: Schema.NullOr(RunStep),
+  steps: Schema.Array(SandboxRunStep).pipe(Schema.withDecodingDefaultKey(Effect.succeed([])))
 })
 export interface SandboxRunView extends Schema.Schema.Type<typeof SandboxRunView> {}
 

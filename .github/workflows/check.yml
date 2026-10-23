@@ -311,8 +311,42 @@ jobs:
         uses: ./.github/actions/setup
         with:
           node-version: 26.7.0
+      # The apt mirror sometimes serves Chromium's system packages at ~45 kB/s (9.5 minutes for 26 MB), which
+      # cancelled legs at the job timeout. The browsers and those .deb files are cached per runner image and
+      # Playwright version, so only a miss downloads them. Saved right after the install, so a slow miss that
+      # later times out still fills the cache for the next run.
+      - name: Name the Chromium runtime cache
+        id: chromium-runtime
+        run: |
+          version="$(pnpm --filter @knpkv/rly exec playwright --version | awk '{ print $2 }')"
+          test -n "${ImageOS}" && test -n "${version}"
+          echo "key=playwright-chromium-${ImageOS}-${version}" >> "${GITHUB_OUTPUT}"
+      - name: Restore the Chromium runtime cache
+        id: chromium-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/ms-playwright
+            ~/.cache/playwright-apt
+          key: ${{ steps.chromium-runtime.outputs.key }}
       - name: Install bounded Chromium runtime
-        run: pnpm --filter @knpkv/rly exec playwright install --with-deps chromium
+        run: |
+          if compgen -G "${HOME}/.cache/playwright-apt/*.deb" > /dev/null; then
+            sudo cp "${HOME}"/.cache/playwright-apt/*.deb /var/cache/apt/archives/
+          fi
+          pnpm --filter @knpkv/rly exec playwright install --with-deps chromium
+          mkdir -p "${HOME}/.cache/playwright-apt"
+          if compgen -G "/var/cache/apt/archives/*.deb" > /dev/null; then
+            cp /var/cache/apt/archives/*.deb "${HOME}/.cache/playwright-apt/"
+          fi
+      - name: Save the Chromium runtime cache
+        if: ${{ steps.chromium-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/ms-playwright
+            ~/.cache/playwright-apt
+          key: ${{ steps.chromium-runtime.outputs.key }}
       - name: Build the package's workspace dependencies
         run: pnpm --filter "@knpkv/${{ matrix.package }}^..." --sort --if-present run build
       - name: Test the package's browser suite

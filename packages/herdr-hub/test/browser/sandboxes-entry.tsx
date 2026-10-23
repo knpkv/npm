@@ -44,19 +44,23 @@ document.body.dataset["rlyTheme"] = Schema.decodeUnknownSync(Schema.Literals(["l
 )
 
 const card = Schema.decodeUnknownSync(SandboxCard)
+const readAt = Date.parse("2026-10-17T13:03:00.000Z")
+const spent = (usd: number) => ({ usd, asOf: readAt })
 const viewer = "agent-a"
 const ephemeral01 = (holder: string, endsAt: string) =>
   card({
     accountId: "999999999990",
     name: "ephemeral-01",
     label: null,
-    state: { _tag: "Leased", holder, startedAt: "2026-10-17T09:20:00.000Z", endsAt }
+    state: { _tag: "Leased", holder, startedAt: "2026-10-17T09:20:00.000Z", endsAt },
+    spend: spent(7.4)
   })
 const ephemeral02Free = card({
   accountId: "999999999991",
   name: "ephemeral-02",
   label: null,
-  state: { _tag: "Available", lastResetAt: "2026-10-17T11:42:00.000Z" }
+  state: { _tag: "Available", lastResetAt: "2026-10-17T11:42:00.000Z" },
+  spend: spent(3.1)
 })
 const ephemeral02Leased = card({
   accountId: "999999999991",
@@ -67,13 +71,15 @@ const ephemeral02Leased = card({
     holder: "agent-b",
     startedAt: "2026-10-17T13:05:00.000Z",
     endsAt: "2026-10-17T21:05:00.000Z"
-  }
+  },
+  spend: spent(3.1)
 })
 const ephemeral01Cleaning = card({
   accountId: "999999999990",
   name: "ephemeral-01",
   label: null,
-  state: { _tag: "Cleaning", runId: "wipe-7f3a21", step: "nuke" }
+  state: { _tag: "Cleaning", runId: "wipe-7f3a21", step: "nuke" },
+  spend: spent(7.4)
 })
 
 const ephemeral02Quarantined = card({
@@ -85,7 +91,8 @@ const ephemeral02Quarantined = card({
     runId: "retry-1248",
     step: null,
     blocker: { _tag: "NukeFailed", resourceType: "S3Bucket", text: "S3Bucket could not be removed" }
-  }
+  },
+  spend: spent(3.1)
 })
 const ephemeral01Stopped = card({
   accountId: "999999999990",
@@ -96,7 +103,8 @@ const ephemeral01Stopped = card({
     runId: "release-1210",
     step: null,
     blocker: { _tag: "BudgetHold", text: "Budget hold. Lift it with sandbox.budget.lift" }
-  }
+  },
+  spend: spent(50.2)
 })
 
 const sweptAt = Date.parse("2026-10-17T13:03:00.000Z")
@@ -108,7 +116,8 @@ const ready = (sandboxes: ReadonlyArray<SandboxCard>, sweep: "ok" | "late" | "no
     stale: sweep === "late",
     partial: sweep === "late",
     asOf: sweep === "ok" ? sweptAt : sweep === "late" ? Date.parse("2026-10-16T13:51:00.000Z") : null
-  }
+  },
+  spendLimits: { alarm: 20, stop: 50 }
 })
 
 const pool = ready([ephemeral01("review-runner-02", "2026-10-17T17:20:00.000Z"), ephemeral02Free])
@@ -152,7 +161,16 @@ const runs = Schema.decodeUnknownSync(SandboxRuns)({
       reason: "Retry",
       startedAt: "2026-10-17T12:41:00.000Z",
       endedAt: "2026-10-17T12:48:00.000Z",
-      failedStep: "nuke"
+      failedStep: "nuke",
+      steps: [
+        { step: "sign in", status: "done", at: "2026-10-17T12:41:02.000Z", count: null },
+        { step: "baseline", status: "done", at: "2026-10-17T12:41:04.000Z", count: null },
+        { step: "dry run", status: "done", at: "2026-10-17T12:47:00.000Z", count: 12 },
+        { step: "nuke", status: "failed", at: "2026-10-17T12:48:00.000Z", count: null },
+        { step: "verify", status: "notRun", at: null, count: null },
+        { step: "baseline re-check", status: "notRun", at: null, count: null },
+        { step: "budget hold", status: "notRun", at: null, count: null }
+      ]
     },
     {
       runId: "retry-8a10",
@@ -172,7 +190,16 @@ const runs = Schema.decodeUnknownSync(SandboxRuns)({
       reason: "Released",
       startedAt: "2026-10-17T10:58:00.000Z",
       endedAt: "2026-10-17T11:07:00.000Z",
-      failedStep: "verify"
+      failedStep: "verify",
+      steps: [
+        { step: "sign in", status: "done", at: "2026-10-17T10:58:02.000Z", count: null },
+        { step: "baseline", status: "done", at: "2026-10-17T10:58:04.000Z", count: null },
+        { step: "dry run", status: "done", at: "2026-10-17T10:58:41.000Z", count: 41 },
+        { step: "nuke", status: "done", at: "2026-10-17T11:06:03.000Z", count: null },
+        { step: "verify", status: "failed", at: "2026-10-17T11:06:41.000Z", count: 3 },
+        { step: "baseline re-check", status: "notRun", at: null, count: null },
+        { step: "budget hold", status: "notRun", at: null, count: null }
+      ]
     }
   ]
 })

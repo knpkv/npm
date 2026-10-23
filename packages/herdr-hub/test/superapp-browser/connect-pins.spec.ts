@@ -36,7 +36,8 @@ for (const theme of ["light", "dark"]) {
     // The Home grid has three desktop columns; prove real travel without assuming the old single-column height.
     expect.soft(firstOwner.scrollRange).toBeGreaterThan(0)
     expect.soft(firstOwner.scrollTop).toBeGreaterThan(0)
-    expect.soft(firstOwner.scrollTop).toBeCloseTo(firstOwner.scrollRange * 0.35, 0)
+    // Scroll positions snap to whole pixels, so a half-pixel target lands up to 0.5px away.
+    expect.soft(Math.abs(firstOwner.scrollTop - firstOwner.scrollRange * 0.35)).toBeLessThanOrEqual(0.5)
     expect.soft(first.y, firstOwner.owner).toBeGreaterThanOrEqual(0)
     expect.soft(first.bottom + first.inset, firstOwner.owner).toBeCloseTo(firstOwner.bottom, 0)
     const mobileNavigation = await page.locator(".superapp-bottom").isVisible()

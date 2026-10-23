@@ -37,9 +37,12 @@ import {
   RunLog,
   Sandbox,
   type SandboxStore,
-  SandboxStoreUnavailable
+  SandboxStoreUnavailable,
+  type SpendReader,
+  SpendReading,
+  SpendUnavailable
 } from "@knpkv/sandbox-pool"
-import { Context, DateTime, Duration, Effect, Option, Ref, Schedule, Schema, Semaphore } from "effect"
+import { Cause, Context, DateTime, Duration, Effect, Exit, Option, Ref, Schedule, Schema, Semaphore } from "effect"
 
 /** The budget action's deny-all SCP could not be detached. */
 export class BudgetLiftFailed extends Schema.TaggedError<BudgetLiftFailed>()("BudgetLiftFailed", {
@@ -92,6 +95,9 @@ export const sandboxJobKinds: ReadonlySet<SandboxJobKind> = new Set([
   "sandbox.budget.lift"
 ])
 
+/** How long one spend read may take before the sweep logs it as unavailable and moves on. */
+const spendReadTimeout = Duration.seconds(10)
+
 /** What one sweep did. `failed` counts accounts whose step errored; each is logged. */
 export interface SweepReport {
   readonly at: DateTime.Utc
@@ -134,6 +140,8 @@ export interface SandboxPoolServices {
   readonly access: PoolAccess["Service"]
   readonly nuke: Nuke["Service"]
   readonly budget: BudgetControl["Service"]
+  /** Reads each pool account's spend on every sweep; without it there are no readings and no spend bar. */
+  readonly spend?: SpendReader["Service"]
 }
 
 /**
@@ -400,6 +408,27 @@ export const makeSandboxPool = Effect.fn("SandboxPool.make")(function*(services:
     return Semaphore.withPermitsIfAvailable(lock, 1, decide).pipe(Effect.map(idle))
   }
 
+  /**
+   * One reading per pool account, recorded as the latest, after the sweep is recorded. Each read gives up after
+   * ten seconds. A failed read or write, or a reader that hangs, is logged with its fields and keeps the previous
+   * reading: spend never delays the sweep record. A reader defect propagates, as every sweep defect does.
+   */
+  const readSpend = (now: DateTime.Utc): Effect.Effect<void> => {
+    const reader = services.spend
+    if (reader === undefined) return Effect.void
+    const asOf = DateTime.toEpochMillis(now)
+    return Effect.forEach(contract.accounts, (account) =>
+      reader.monthToDate(account).pipe(
+        Effect.timeoutOrElse({
+          duration: spendReadTimeout,
+          orElse: () => Effect.fail(new SpendUnavailable({ accountId: account.accountId, detail: "timeout" }))
+        }),
+        Effect.flatMap((usd) => Schema.decodeUnknownEffect(SpendReading)({ accountId: account.accountId, usd, asOf })),
+        Effect.flatMap(store.recordSpend),
+        Effect.catch((error) => Effect.logWarning("sandbox spend was not read", account.accountId, describe(error)))
+      ), { discard: true })
+  }
+
   const sweepOnce = Effect.gen(function*() {
     const now = yield* DateTime.now
     const pool = yield* store.list
@@ -427,6 +456,7 @@ export const makeSandboxPool = Effect.fn("SandboxPool.make")(function*(services:
         )
       )
     }
+    yield* readSpend(now)
     return report
   })
 
@@ -447,16 +477,27 @@ export type SandboxPool = Effect.Success<ReturnType<typeof makeSandboxPool>>
 
 export const sandboxSweepInterval = Duration.minutes(5)
 
-/**
- * Sweeps now and then every five minutes, for hostd to fork in its lifetime scope. A sweep that
- * cannot read the store is logged and the next one still runs; interrupting the fiber stops it.
- */
-export const runSandboxSweep = (pool: SandboxPool): Effect.Effect<void> =>
+/** One sweep that cannot end the loop: a typed failure is a warning, a defect an error; an interrupt still stops it. */
+const sweepSupervised = (pool: SandboxPool): Effect.Effect<void> =>
   pool.sweepOnce.pipe(
     Effect.catch((error) => Effect.logWarning("sandbox sweep could not read the pool", describe(error))),
-    Effect.repeat(Schedule.spaced(sandboxSweepInterval)),
-    Effect.asVoid
+    Effect.exit,
+    Effect.flatMap((exit) =>
+      Exit.isSuccess(exit)
+        ? Effect.void
+        : Cause.hasInterruptsOnly(exit.cause)
+        ? Effect.interrupt
+        : Effect.logError("sandbox sweep died; the next one still runs", Cause.pretty(exit.cause))
+    )
   )
+
+/**
+ * Sweeps now and then every five minutes, for hostd to fork in its lifetime scope. A sweep that
+ * cannot read the store, or that dies, is logged and the next one still runs; interrupting the fiber
+ * stops it.
+ */
+export const runSandboxSweep = (pool: SandboxPool): Effect.Effect<void> =>
+  sweepSupervised(pool).pipe(Effect.repeat(Schedule.spaced(sandboxSweepInterval)), Effect.asVoid)
 
 const isSandboxJob = Schema.is(SandboxJobPayload)
 

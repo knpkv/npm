@@ -1,5 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import {
+  CodeCommitSummaryResult,
   CodeDiffContentQuery,
   CodeDiffContentResult,
   type CodeQueue,
@@ -367,23 +368,51 @@ test("switching files interrupts the old read and cannot display its late answer
   }
 })
 
-test("maximum-length cached text and file paths fit the narrowest viewport", async ({ context, page }) => {
-  await page.setViewportSize({ width: 320, height: 844 })
-  await page.goto("/")
-  await context.addCookies([{ name: "code-fixture", value: "long", url: new URL(page.url()).origin }])
-  for (const destination of ["pull-requests", "diffs"]) {
-    await page.goto(route(destination, CODE_REF))
-    if (destination === "pull-requests") {
-      await expect(reviewPage(page).locator("[data-code-review-header]")).toContainText("r".repeat(256))
-    } else {await expect(page.getByRole("navigation", { name: "Changed files" }).getByRole("link").first())
-        .toContainText("p".repeat(4092))}
-    await page.evaluate(() => document.fonts.ready)
-    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
-    if (destination === "pull-requests") {
-      expect(await reviewPage(page).evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(
-        true
-      )
-    }
+/**
+ * A commit label is "Title, 14:18" on the queue reading's day and "Title, 22 Oct 14:18" before it. The
+ * fixture commits an hour before the reading, so the day depends on when the suite runs; each case moves
+ * the commit relative to the reading, in UTC, so both labels are covered at any hour.
+ */
+const commitDays = [
+  { day: "same day", shift: 3_600_000, words: /, \d{2}:\d{2}”/u },
+  { day: "previous day", shift: -23 * 3_600_000, words: /, \d{1,2} [A-Z][a-z]{2} \d{2}:\d{2}”/u }
+]
+
+test.describe("maximum-length cached text and file paths fit the narrowest viewport", () => {
+  test.use({ timezoneId: "UTC" })
+  for (const { day, shift, words } of commitDays) {
+    test(`with a ${day} commit`, async ({ context, page }) => {
+      await page.route(/\/v1\/modules\/code\/commit\?/, async (request) => {
+        const response = await request.fetch()
+        const reading = Schema.decodeUnknownSync(Schema.fromJsonString(CodeCommitSummaryResult))(await response.text())
+        await request.fulfill({
+          response,
+          body: Schema.encodeSync(Schema.fromJsonString(CodeCommitSummaryResult))(
+            reading._tag === "Ready"
+              ? { ...reading, commit: { ...reading.commit, committedAt: reading.commit.committedAt + shift } }
+              : reading
+          )
+        })
+      })
+      await page.setViewportSize({ width: 320, height: 844 })
+      await page.goto("/")
+      await context.addCookies([{ name: "code-fixture", value: "long", url: new URL(page.url()).origin }])
+      for (const destination of ["pull-requests", "diffs"]) {
+        await page.goto(route(destination, CODE_REF))
+        if (destination === "pull-requests") {
+          await expect(reviewPage(page).locator("[data-code-review-header]")).toContainText("r".repeat(256))
+          await expect(reviewPage(page).locator("[data-commit-label]").first()).toHaveText(words)
+        } else {await expect(page.getByRole("navigation", { name: "Changed files" }).getByRole("link").first())
+            .toContainText("p".repeat(4092))}
+        await page.evaluate(() => document.fonts.ready)
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+        if (destination === "pull-requests") {
+          expect(await reviewPage(page).evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(
+            true
+          )
+        }
+      }
+    })
   }
 })
 
@@ -535,8 +564,8 @@ test("full-bundle preflight stays below Rly and Connect controls without removin
   expect(connect.lineHeight).toBe("24px")
 })
 
-/** Phone uses the existing mast title, full-width tabs and body gutters; desktop keeps its title block. */
-test("Code review phone chrome follows the mast without a second visible title block", async ({ page }) => {
+/** Phone (rule 45 refs): product name in the mast, breadcrumb line, then the title block, full-width tabs and body gutters. */
+test("Code review phone chrome shows the title block under the breadcrumb", async ({ page }) => {
   await page.goto(selected("review"))
   await expect(owner(page)).toHaveAttribute("data-code-review-read-state", "Ready")
   await expect(reviewPage(page)).toHaveAttribute("data-code-detail-state", "Ready")
@@ -575,21 +604,24 @@ test("Code review phone chrome follows the mast without a second visible title b
   expect(geometry.headingCount).toBe(1)
   expect(geometry.overflow).toBe(false)
   if (geometry.width < 600) {
-    expect(geometry.mast).toEqual({ text: "Code", visible: true })
-    expect(geometry.heading.width).toBe(1)
-    expect(geometry.heading.height).toBe(1)
-    expect(geometry.heading.clip).toBe("inset(50%)")
-    expect(geometry.tabs).toEqual({ x: 8, y: 64, width: geometry.width - 16, height: 44 })
+    expect(geometry.mast).toEqual({ text: "Relay", visible: true })
+    expect(geometry.heading.clip).toBe("none")
+    expect(geometry.heading.x).toBe(16)
+    expect(geometry.heading.y).toBe(108)
+    expect(geometry.heading.width).toBe(geometry.width - 32)
+    expect(geometry.tabs.x).toBe(8)
+    expect(geometry.tabs.y).toBeCloseTo(182.5, 0)
+    expect(geometry.tabs.width).toBe(geometry.width - 16)
+    expect(geometry.tabs.height).toBe(44)
     expect(geometry.tabPadding).toEqual(["12px", "12px", "12px"])
     expect(geometry.pageBottomPadding).toBe("20px")
     expect(geometry.detail.x).toBe(16)
-    expect(geometry.detail.y).toBe(124)
+    expect(geometry.detail.y).toBeCloseTo(242.5, 0)
     expect(geometry.detail.width).toBe(geometry.width - 32)
     expect(geometry.mobileWeight).toBe("430")
-    expect(geometry.mastBox.x).toBe(60)
+    expect(geometry.mastBox.x).toBeCloseTo(52.8, 0)
     expect(geometry.mastBox.width).toBeLessThan(80)
-    expect(geometry.mastBox.height).toBe(25.5)
-    expect(geometry.mastLineHeight).toBe("25.5px")
+    expect(geometry.mastLineHeight).toBe("20.16px")
     expect(geometry.brandBox.x).toBe(8)
     expect(geometry.brandBox.width).toBeGreaterThanOrEqual(44)
     expect(geometry.brandBox.height).toBeGreaterThanOrEqual(44)

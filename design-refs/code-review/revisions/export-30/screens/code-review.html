@@ -1,0 +1,1004 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Code, PR review</title>
+<link rel="stylesheet" href="rly.css">
+<link rel="stylesheet" href="chrome.css">
+<script src="relay-chef-modern.js"></script>
+<script src="relay-creature-states.js"></script>
+<script src="relay-screen-art.js"></script>
+<style>
+@font-face { font-display: block; font-family: "Geist Variable"; font-style: normal; font-weight: 100 900; src: url("fonts/geist-variable.woff2") format("woff2-variations"), url("fonts/geist-variable.woff2") format("woff2"); }
+@font-face { font-display: block; font-family: "Geist"; font-style: normal; font-weight: 100 900; src: url("fonts/geist-variable.woff2") format("woff2-variations"), url("fonts/geist-variable.woff2") format("woff2"); }
+@font-face { font-display: block; font-family: "Geist Mono Variable"; font-style: normal; font-weight: 100 900; src: url("fonts/geist-mono-variable.woff2") format("woff2-variations"), url("fonts/geist-mono-variable.woff2") format("woff2"); }
+@font-face { font-display: block; font-family: "Geist Mono"; font-style: normal; font-weight: 100 900; src: url("fonts/geist-mono-variable.woff2") format("woff2-variations"), url("fonts/geist-mono-variable.woff2") format("woff2"); }
+html, body { margin: 0; }
+body { font: 430 1rem/1.5 var(--rly-font-ui); color: var(--rly-color-text-1); background: var(--rly-color-canvas); }
+a { color: inherit; text-decoration: none; }
+a:hover { color: var(--rly-color-text-1); }
+button, input { font: inherit; }
+.sr { position: absolute; inline-size: 1px; block-size: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+
+
+main { display: grid; align-content: start; gap: 1.25rem; padding: 1.5rem 40px 2rem; }
+.panel { border: 1px solid var(--rly-color-border-1); border-radius: var(--rly-radius-group); background: var(--rly-color-surface-1); }
+.strip { display: grid; grid-template-columns: auto auto minmax(0, 1fr); gap: .5rem 1.5rem; align-items: center; padding: .8rem 1rem; }
+.strip .need { display: flex; gap: .5rem; align-items: baseline; }
+.strip b.n { font-size: 1.5rem; font-weight: 650; font-variant-numeric: tabular-nums; }
+.strip .word { font-size: .875rem; }
+.strip .ap { display: flex; flex-wrap: wrap; gap: .1rem .5rem; align-items: center; min-block-size: 44px; }
+.strip .ap .num { display: flex; gap: .4rem; align-items: baseline; }
+.strip .ap .link { font-size: .875rem; text-decoration: underline; text-underline-offset: .2em; }
+.strip .ap small { flex-basis: 100%; font-size: .75rem; color: var(--rly-color-text-2); }
+.strip p { margin: 0; font-size: .8125rem; color: var(--rly-color-text-2); min-inline-size: 0; }
+.group { display: grid; gap: .6rem; }
+.group-head { display: flex; gap: .5rem; align-items: center; min-block-size: 44px; }
+.group-head h2 { margin: 0; font-size: 1.05rem; font-weight: 620; }
+.group-head small { font-size: .8125rem; color: var(--rly-color-text-2); }
+.group-head .rly_Button-module__root { margin-inline-start: auto; }
+.grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .6rem; }
+.agent { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: .25rem .8rem; align-items: start; padding: .8rem .9rem; }
+.agent[aria-current="true"] { background: var(--rly-color-surface-2); border-color: var(--rly-color-border-2); }
+.agent .top { display: flex; flex-wrap: wrap; gap: .2rem .6rem; align-items: center; }
+.agent .top b { font-weight: 620; }
+.agent .top > span { flex: none; white-space: nowrap; }
+.agent small { font-size: .75rem; color: var(--rly-color-text-2); }
+.agent .voice { font-size: .875rem; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.agent .body { display: grid; gap: .2rem; min-inline-size: 0; }
+.empty { display: grid; justify-items: start; gap: .8rem; padding: 1.5rem; max-inline-size: 40em; }
+.empty h2 { margin: 0; font-size: 1.4rem; font-weight: 620; letter-spacing: -0.02em; line-height: 1.25; text-wrap: balance; }
+.empty p { margin: 0; color: var(--rly-color-text-2); }
+.empty ol { margin: 0; padding-inline-start: 1.2em; display: grid; gap: .3rem; font-size: .9375rem; }
+.empty small { font-size: .8125rem; color: var(--rly-color-text-2); }
+.actions { display: flex; flex-wrap: wrap; gap: .5rem; }
+.list { display: grid; }
+.row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .2rem 1rem; align-items: center; min-block-size: 56px; padding: .8rem 1rem; border-block-start: 1px solid var(--rly-color-border-1); }
+.row:first-child { border-block-start: 0; }
+.row > span { display: grid; gap: .1rem; min-inline-size: 0; }
+.row small.o { font: 430 .75rem/1.3 var(--rly-font-mono); color: var(--rly-color-text-2); }
+.row b { font-weight: 620; }
+.row small.m { font-size: .8125rem; color: var(--rly-color-text-2); }
+.btn-tap { min-block-size: var(--rly-control-height-compact); }
+
+.stage { position: fixed; z-index: 10; inset: 16px 16px 16px auto; inline-size: 460px; display: flex; flex-direction: column; background: var(--rly-color-surface-1); border: 1px solid var(--rly-color-border-1); border-radius: var(--rly-radius-overlay); overflow: hidden; }
+.stage-head { flex: none; display: flex; gap: .5rem; align-items: center; block-size: 64px; box-sizing: border-box; padding-inline: .75rem 1rem; border-block-end: 1px solid var(--rly-color-border-1); }
+.stage-head p { margin: 0; font-size: 1.0625rem; min-inline-size: 0; display: flex; gap: .45rem; }
+.stage-head p b { font-weight: 650; }
+.stage-head p span { color: var(--rly-color-text-2); }
+.stage-back { display: none; place-items: center; min-inline-size: 44px; min-block-size: 44px; }
+.stage-close { margin-inline-start: auto; display: grid; place-items: center; min-inline-size: 44px; min-block-size: 44px; color: inherit; background: transparent; border: 0; }
+.stage-body { flex: 1; min-block-size: 0; overflow: auto; display: grid; align-content: start; gap: 1.1rem; padding: 1.25rem 1rem; }
+.stage-who { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 1rem; align-items: center; }
+.stage-who > div { display: grid; gap: .3rem; }
+.stage-who h2 { justify-self: start; margin: 0; font-size: 1.5rem; font-weight: 620; letter-spacing: -0.03em; outline: 2px solid var(--rly-color-focus); outline-offset: 3px; border-radius: 4px; }
+.stage-who small { font-size: .8125rem; color: var(--rly-color-text-2); }
+.posts { margin: 0; padding: 0; list-style: none; display: grid; border: 1px solid var(--rly-color-border-1); border-radius: var(--rly-radius-group); }
+.posts li { display: grid; grid-template-columns: 3rem minmax(0, 1fr); gap: .75rem; padding: .7rem .9rem; border-block-start: 1px solid var(--rly-color-border-1); font-size: .875rem; }
+.posts li:first-child { border-block-start: 0; }
+.posts li span:first-child { font-variant-numeric: tabular-nums; color: var(--rly-color-text-2); }
+.composer { flex: none; display: flex; gap: .5rem; align-items: center; padding: .75rem 1rem 1rem; border-block-start: 1px solid var(--rly-color-border-1); }
+.composer label { flex: 1; min-inline-size: 0; }
+.composer input { box-sizing: border-box; inline-size: 100%; min-block-size: 44px; padding-inline: .8rem; font-size: .9375rem; color: inherit; background: var(--rly-color-canvas); border: 1px solid var(--rly-color-border-2); border-radius: var(--rly-radius-field); }
+
+.fail { padding: 2rem; display: grid; gap: .75rem; max-inline-size: 40em; }
+.fail h1 { margin: 0; font-size: 2rem; font-weight: 620; letter-spacing: -0.03em; }
+.fail p { margin: 0; color: var(--rly-color-text-2); }
+.fail code { font: 430 .875rem/1.4 var(--rly-font-mono); color: var(--rly-color-text-1); }
+
+@media (max-width: 599px) {
+  body { padding-block-end: env(safe-area-inset-bottom); }
+  main { padding: 1rem 16px 96px; }
+  .strip { grid-template-columns: auto auto; }
+  .strip p { grid-column: 1 / -1; }
+  .grid { grid-template-columns: minmax(0, 1fr); }
+  .btn-tap { min-block-size: var(--rly-control-height-default); }
+  .stage { inset: 0; inline-size: auto; border: 0; border-radius: 0; z-index: 10; }
+  .stage-back { display: grid; }
+  .stage-close { display: none; }
+}
+
+.review { display: grid; grid-template-columns: minmax(300px, 380px) minmax(0, 1fr); gap: 1.5rem; align-items: start; }
+.pr { grid-column: 1 / -1; display: grid; gap: .6rem; padding: 1rem 1.25rem; }
+.pr-top { display: flex; flex-wrap: wrap; gap: .25rem .75rem; align-items: baseline; font-size: .875rem; color: var(--rly-color-text-2); }
+.pr-top b { font: 520 .875rem/1.4 var(--rly-font-mono); color: var(--rly-color-text-2); }
+.pr h2 { margin: 0; font-size: 1.5rem; font-weight: 620; letter-spacing: -0.025em; line-height: 1.25; text-wrap: balance; }
+.pr-meta { display: flex; flex-wrap: wrap; gap: .25rem 1.25rem; font-size: .875rem; color: var(--rly-color-text-2); }
+.pr-meta code { font: 430 .8125rem/1.4 var(--rly-font-mono); color: var(--rly-color-text-1); }
+.pr-rows { display: flex; flex-wrap: wrap; gap: .75rem 2rem; align-items: center; padding-block-start: .6rem; border-block-start: 1px solid var(--rly-color-border-1); }
+.pr-row { display: flex; flex-wrap: wrap; gap: .4rem .75rem; align-items: center; font-size: .875rem; }
+.pr-row small { font-size: .8125rem; color: var(--rly-color-text-2); }
+.col { display: grid; gap: 1rem; min-inline-size: 0; }
+.sum { display: grid; gap: .9rem; padding: 1rem 1.1rem 1.1rem; }
+.verdict { display: grid; gap: .2rem; }
+.verdict .rly_StateLabel-module__root { font-size: 1.125rem; font-weight: 620; }
+.verdict small { font-size: .8125rem; color: var(--rly-color-text-2); }
+.sum p { margin: 0; font-size: .9375rem; text-wrap: pretty; }
+.sum h3 { margin: 0 0 .3rem; font-size: .8125rem; font-weight: 560; color: var(--rly-color-text-2); }
+.sum ul { margin: 0; padding-inline-start: 1.1em; display: grid; gap: .25rem; font-size: .875rem; }
+.counts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; }
+.counts dl { margin: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .2rem .75rem; font-size: .875rem; }
+.counts dt { color: var(--rly-color-text-2); }
+.counts dd { margin: 0; font-weight: 620; font-variant-numeric: tabular-nums; text-align: end; }
+.chip { justify-self: start; display: inline-flex; align-items: center; gap: .35rem; padding: .2rem .6rem; font-size: .8125rem; border: 1px solid var(--rly-color-border-2); border-radius: var(--rly-radius-round); }
+.rules summary { display: flex; align-items: center; gap: .4rem; min-block-size: 44px; font-size: .875rem; font-weight: 520; cursor: pointer; list-style: none; }
+.rules summary::-webkit-details-marker { display: none; }
+.rules summary relay-glyph { transition: transform .15s; }
+.rules[open] summary relay-glyph { transform: rotate(90deg); }
+.rules ul { list-style: none; padding: 0; }
+.rules code { font: 430 .8125rem/1.4 var(--rly-font-mono); }
+.reviewer { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: .1rem .6rem; align-items: center; padding-block-start: .8rem; border-block-start: 1px solid var(--rly-color-border-1); font-size: .875rem; }
+.reviewer relay-agent { grid-row: span 2; }
+.reviewer small { font-size: .8125rem; color: var(--rly-color-text-2); }
+.findings { display: grid; }
+.fhead { display: flex; justify-content: space-between; align-items: center; gap: .5rem; padding: .75rem 1rem; border-block-end: 1px solid var(--rly-color-border-1); }
+.fhead h2 { margin: 0; font-size: 1rem; font-weight: 620; }
+.fhead small { font-size: .8125rem; color: var(--rly-color-text-2); }
+.frow { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: .2rem .7rem; align-items: start; min-block-size: 56px; box-sizing: border-box; padding: .7rem 1rem; color: inherit; border-block-end: 1px solid var(--rly-color-border-1); }
+.frow:hover { background: var(--rly-color-surface-2); }
+.frow > span { display: grid; gap: .2rem; min-inline-size: 0; }
+.frow .claim { font-size: .9375rem; text-wrap: pretty; }
+.frow small { display: flex; flex-wrap: wrap; gap: .1rem .75rem; font-size: .8125rem; color: var(--rly-color-text-2); }
+.frow small code { font: 430 .75rem/1.5 var(--rly-font-mono); color: var(--rly-color-text-1); }
+.fnone { margin: 0; padding: .9rem 1rem; font-size: .875rem; color: var(--rly-color-text-2); border-block-end: 1px solid var(--rly-color-border-1); }
+.fgroup { display: flex; align-items: center; gap: .5rem; inline-size: 100%; min-block-size: 48px; padding: 0 1rem; font-size: .875rem; font-weight: 560; color: inherit; text-align: start; background: transparent; border: 0; cursor: pointer; }
+.fgroup relay-glyph { transition: transform .15s; }
+.fgroup[aria-expanded="true"] relay-glyph { transform: rotate(90deg); }
+.fgroup[aria-expanded="true"] { border-block-end: 1px solid var(--rly-color-border-1); }
+.p2 .frow:last-child { border-block-end: 0; }
+.sev { display: inline-grid; place-items: center; min-inline-size: 2.1rem; padding: .15rem .35rem; box-sizing: border-box; font: 620 .75rem/1.3 var(--rly-font-mono); color: var(--rly-color-text-2); background: var(--rly-color-surface-2); border: 1px solid var(--rly-color-border-1); border-radius: var(--rly-radius-tag); }
+.sev[data-s="P0"] { color: var(--rly-color-blocked-ink); background: var(--rly-color-blocked-tint); border-color: transparent; }
+.sev[data-s="P1"] { color: var(--rly-color-held-ink); background: var(--rly-color-held-tint); border-color: transparent; }
+.axis { display: inline-flex; padding: 0 .4rem; font-size: .75rem; line-height: 1.5; color: var(--rly-color-text-2); border: 1px solid var(--rly-color-border-1); border-radius: var(--rly-radius-tag); }
+.tags { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; }
+.diff { display: grid; gap: 1rem; min-inline-size: 0; }
+.dfile { overflow: hidden; }
+.dfile-head { display: flex; justify-content: space-between; gap: 1rem; align-items: center; padding: .6rem .9rem; font: 430 .8125rem/1.4 var(--rly-font-mono); background: var(--rly-color-surface-2); border-block-end: 1px solid var(--rly-color-border-1); }
+.dfile-head span { color: var(--rly-color-text-2); white-space: nowrap; }
+.hunk { padding: .3rem .9rem; font: 430 .75rem/1.5 var(--rly-font-mono); color: var(--rly-color-text-2); background: var(--rly-color-surface-2); border-block-start: 1px solid var(--rly-color-border-1); }
+.dfile-head + .hunk { border-block-start: 0; }
+.dtab { inline-size: 100%; border-collapse: collapse; table-layout: auto; font: 430 .8125rem/1.6 var(--rly-font-mono); }
+.dtab col.n { inline-size: 3.25rem; }
+.dtab col.m { inline-size: 1.2rem; }
+.dtab th { padding: 0; font: 700 0.78rem/1.55 var(--rly-font-mono); white-space: normal; word-break: normal; overflow-wrap: break-word; color: var(--rly-color-text-2); text-align: start; background: var(--rly-color-surface-2); border-block-end: 1px solid var(--rly-color-border-1); }
+.dtab th:nth-child(-n+2) { text-align: end; }
+.dtab td { padding: 0; vertical-align: top; }
+.dtab .num { padding-inline: 8px 6px; text-align: end; color: var(--rly-color-text-3); font-size: .75rem; line-height: 1.75; user-select: none; }
+.dtab .mk { text-align: center; color: var(--rly-color-text-2); user-select: none; }
+.dtab .code { white-space: pre-wrap; overflow-wrap: anywhere; padding-inline-end: .75rem; }
+.dtab tr[data-t="+"] td { background: var(--rly-color-success-tint); }
+.dtab tr[data-t="-"] td { background: var(--rly-color-blocked-tint); }
+.dtab .hk td { padding: .3rem .9rem; font-size: .75rem; line-height: 1.5; color: var(--rly-color-text-2); background: var(--rly-color-surface-2); border-block-start: 1px solid var(--rly-color-border-1); white-space: pre; }
+.dtab .ann > td > .fcard, .dtab .ann > td > .othread { margin: .5rem .75rem .75rem; }
+.othread { display: grid; gap: .6rem; padding: .9rem 1rem 1rem; font-family: var(--rly-font-ui); }
+.othread code { font-family: var(--rly-font-mono); }
+.othread .tags { display: flex; flex-wrap: wrap; gap: .35rem .6rem; align-items: center; }
+.othread ol { margin: 0; padding: 0; list-style: none; display: grid; gap: .5rem; }
+.othread li { display: grid; gap: .15rem; }
+.othread li > div { display: flex; flex-wrap: wrap; gap: .1rem .5rem; align-items: baseline; font-size: .8125rem; }
+.othread li b { font-weight: 620; }
+.othread time { color: var(--rly-color-text-2); }
+.othread p { margin: 0; font-size: .9375rem; text-wrap: pretty; }
+.ln { display: grid; grid-template-columns: 2.6rem 2.6rem 1.2rem minmax(0, 1fr); font: 430 .8125rem/1.6 var(--rly-font-mono); }
+.ln > span:nth-child(-n+2) { padding-inline-end: .5rem; text-align: end; color: var(--rly-color-text-3); font-size: .75rem; line-height: 1.75; user-select: none; }
+.ln > span:nth-child(3) { text-align: center; color: var(--rly-color-text-2); }
+.ln code { font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; padding-inline-end: .75rem; }
+.ln[data-t="+"] { background: var(--rly-color-success-tint); }
+.ln[data-t="-"] { background: var(--rly-color-blocked-tint); }
+.ln[data-hit] > span:nth-child(2) { color: var(--rly-color-text-1); font-weight: 620; }
+.fcard { display: grid; gap: .6rem; margin: .5rem .75rem .75rem; padding: .9rem 1rem 1rem; font-family: var(--rly-font-ui); background: var(--rly-color-surface-1); border: 1px solid var(--rly-color-border-2); border-radius: var(--rly-radius-group); scroll-margin-block-start: 1rem; }
+.fcard:focus { outline: 2px solid var(--rly-color-focus); outline-offset: 2px; }
+.fcard .claim { margin: 0; font-size: .9375rem; font-weight: 620; text-wrap: pretty; }
+.fcard .why { margin: 0; font-size: .875rem; color: var(--rly-color-text-2); text-wrap: pretty; }
+.fcard small { font-size: .8125rem; color: var(--rly-color-text-2); }
+.fcard small code { font: 430 .75rem/1.5 var(--rly-font-mono); color: var(--rly-color-text-1); }
+.patch { margin: 0; padding: .4rem 0; font: 430 .75rem/1.6 var(--rly-font-mono); background: var(--rly-color-canvas); border: 1px solid var(--rly-color-border-1); border-radius: var(--rly-radius-field); overflow: hidden; }
+.patch span { display: block; padding-inline: .6rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+.patch span[data-t="+"] { background: var(--rly-color-success-tint); }
+.patch span[data-t="-"] { background: var(--rly-color-blocked-tint); }
+.patch-label { font-size: .75rem; font-weight: 560; color: var(--rly-color-text-2); }
+.unanch { display: grid; }
+.unanch .fhead { border-block-end: 0; }
+.unanch .fcard { margin-block-start: 0; }
+main { container-type: inline-size; }
+
+@media (max-width: 599px) {
+  .review { grid-template-columns: minmax(0, 1fr); gap: 1rem; }
+  .pr { padding: .9rem 1rem; }
+  .pr h2 { font-size: 1.25rem; }
+  .pr-rows { flex-direction: column; align-items: stretch; gap: .6rem; }
+  .ln { grid-template-columns: 2.2rem 1rem minmax(0, 1fr); }
+  .ln > span:first-child { display: none; }
+  .fcard { margin-inline: .4rem; }
+  .actions .rly_Button-module__root, .pr .rly_Button-module__root { min-block-size: 44px; }
+  .actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+.pr-meta .nowrap { white-space: nowrap; }
+.spin { flex: none; display: inline-block; inline-size: 12px; block-size: 12px; border-radius: 50%; border: 2px solid var(--rly-color-border-2); border-block-start-color: var(--rly-color-text-2); animation: spin .9s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
+.prog-head { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: .8rem; align-items: center; }
+.prog-head > div { display: grid; gap: .1rem; }
+.prog-head b { font-size: 1.125rem; font-weight: 620; }
+.prog-head small, .nap { font-size: .8125rem; color: var(--rly-color-text-2); }
+.steps { margin: 0; padding: 0; list-style: none; display: grid; gap: .45rem; font-size: .875rem; }
+.steps li { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: .6rem; align-items: center; }
+.steps li .spin { margin-inline-start: 2px; }
+.steps li[data-s="waiting"] { color: var(--rly-color-text-2); }
+.steps li[data-s="current"] { font-weight: 560; }
+.sum-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
+.tag-new, .tag-old { display: inline-flex; padding: 0 .4rem; font-size: .75rem; line-height: 1.5; border-radius: var(--rly-radius-tag); }
+.tag-new { font-weight: 560; color: var(--rly-color-text-1); background: var(--rly-color-surface-3); }
+.tag-old { color: var(--rly-color-text-2); background: var(--rly-color-surface-2); border: 1px solid var(--rly-color-border-1); }
+.cstat { display: flex; flex-wrap: wrap; gap: .6rem 1rem; align-items: center; justify-content: space-between; padding: .6rem .75rem; background: var(--rly-color-surface-2); border-radius: var(--rly-radius-field); }
+.cstat p, .fixrun p { margin: 0; display: flex; gap: .5rem; align-items: center; font-size: .875rem; }
+.cpush { display: grid; gap: .5rem; padding: .7rem .75rem; background: var(--rly-color-surface-2); border-radius: var(--rly-radius-field); }
+.cpush p { margin: 0; font-size: .875rem; font-weight: 560; }
+.cpush dl { margin: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: .25rem .9rem; font-size: .8125rem; align-items: center; }
+.cpush dt { color: var(--rly-color-text-2); }
+.cpush dd { margin: 0; }
+.cpush code { font: 430 .75rem/1.5 var(--rly-font-mono); }
+.clink { justify-self: start; display: inline-flex; gap: .3rem; align-items: center; min-block-size: 44px; font-size: .875rem; text-decoration: underline; text-underline-offset: .2em; }
+.cfail { padding: .6rem .75rem; }
+.fixrun { display: grid; gap: .6rem; justify-items: start; padding: .75rem; background: var(--rly-color-surface-2); border-radius: var(--rly-radius-field); }
+.fixrun ul { margin: 0; padding: 0; list-style: none; display: grid; gap: .4rem; font-size: .875rem; }
+.fixrun li { display: grid; grid-template-columns: 6.5rem minmax(0, 1fr); gap: .6rem; align-items: start; }
+.cmp { display: grid; gap: .6rem; }
+.cmp h3 { margin: 0; font-size: .9375rem; font-weight: 620; color: var(--rly-color-text-1); }
+.cmp h4 { margin: 0 0 .2rem; font-size: .8125rem; font-weight: 560; color: var(--rly-color-text-2); }
+.cmp ul { list-style: none; padding: 0; }
+.cmp li { display: block; }
+.cmp li small { display: block; font-size: .75rem; color: var(--rly-color-text-2); }
+.cmp s { color: var(--rly-color-text-2); }
+
+@media (max-width: 599px) { .sum-actions .rly_Button-module__root, .fixrun .rly_Button-module__root, .cstat .rly_Button-module__root, .sum .notice .rly_Button-module__root { min-block-size: 44px; } .sum-actions .rly_Button-module__root { inline-size: 100%; } .fixrun li { grid-template-columns: minmax(0, 1fr); gap: .1rem; } }
+.rtabs { grid-column: 1 / -1; display: flex; gap: .25rem; overflow-x: auto; scrollbar-width: none; border-block-end: 1px solid var(--rly-color-border-1); }
+.rtab { flex: none; display: grid; place-items: center; min-block-size: 44px; padding-inline: .75rem; font-size: .9375rem; color: var(--rly-color-text-2); white-space: nowrap; border-block-end: 2px solid transparent; margin-block-end: -1px; }
+.rtab[aria-current="page"] { color: var(--rly-color-text-1); font-weight: 560; border-block-end-color: var(--rly-color-text-1); }
+.ava { flex: none; display: grid; place-items: center; inline-size: 24px; block-size: 24px; border-radius: 50%; font: 600 .6875rem/1 var(--rly-font-ui); color: var(--rly-color-text-1); background: var(--rly-color-surface-3); }
+.tlist { list-style: none; margin: 0; padding: 0; display: grid; gap: .75rem; }
+.tpost { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: .6rem; align-items: start; }
+.tpost > div { display: grid; gap: .15rem; min-inline-size: 0; }
+.tpost p { margin: 0; font-size: .875rem; text-wrap: pretty; }
+.tpost .ph { display: flex; gap: .5rem; align-items: baseline; }
+.tpost .ph b { font-weight: 600; }
+.tpost .ph small { font-size: .75rem; color: var(--rly-color-text-2); }
+.tposts { display: grid; gap: .75rem; padding-block-start: .75rem; border-block-start: 1px solid var(--rly-color-border-1); }
+.thread { gap: .75rem; }
+.reply { display: grid; gap: .5rem; }
+.reply textarea, .note textarea { inline-size: 100%; box-sizing: border-box; min-block-size: 44px; padding: .55rem .7rem; font: 430 .875rem/1.4 var(--rly-font-ui); color: var(--rly-color-text-1); background: var(--rly-color-canvas); border: 1px solid var(--rly-color-border-2); border-radius: var(--rly-radius-field); resize: vertical; }
+.reply textarea:focus, .reply[data-focus] textarea, .note textarea:focus { outline: 2px solid var(--rly-color-focus); outline-offset: 1px; }
+.reply-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
+.rhint { font-size: .75rem; color: var(--rly-color-text-2); }
+.caret { display: inline-block; inline-size: 2px; block-size: 1em; margin-inline-start: 2px; vertical-align: -.15em; background: var(--rly-color-text-1); animation: blink 1s steps(2) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .caret { animation: none; } }
+.ans { display: flex; gap: .4rem; align-items: center; font-size: .75rem; color: var(--rly-color-text-2); }
+.fline { grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: .4rem .75rem; padding: .6rem .75rem .6rem 1rem; }
+.fl-text { display: grid; gap: .1rem; min-inline-size: 0; font-size: .875rem; }
+.fl-claim { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--rly-color-text-2); }
+details.old > summary { list-style: none; display: flex; flex-wrap: wrap; gap: .4rem .6rem; align-items: center; min-block-size: 44px; cursor: pointer; font-size: .875rem; }
+details.old > summary::-webkit-details-marker { display: none; }
+details.old > summary small { font-size: .8125rem; color: var(--rly-color-text-2); }
+details.old[open] > summary relay-glyph { transform: rotate(90deg); }
+.dform { display: grid; gap: .75rem; padding: .75rem .85rem .85rem; background: var(--rly-color-surface-2); border-radius: var(--rly-radius-field); }
+.dform fieldset { margin: 0; padding: 0; border: 0; display: grid; gap: .1rem; }
+.dform legend { padding: 0; margin-block-end: .35rem; font-size: .875rem; font-weight: 560; }
+.radio { display: flex; gap: .6rem; align-items: center; min-block-size: 36px; font-size: .875rem; cursor: pointer; }
+.radio input { inline-size: 16px; block-size: 16px; margin: 0; accent-color: var(--rly-color-text-1); }
+.note { display: grid; gap: .3rem; font-size: .8125rem; color: var(--rly-color-text-2); }
+.chips { display: flex; flex-wrap: wrap; gap: .4rem; padding: .65rem 1rem; border-block-end: 1px solid var(--rly-color-border-1); }
+.fchip { display: inline-flex; gap: .4rem; align-items: center; min-block-size: 32px; padding-inline: .7rem; font-size: .8125rem; color: var(--rly-color-text-2); border: 1px solid var(--rly-color-border-2); border-radius: var(--rly-radius-round); }
+.fchip span { font-variant-numeric: tabular-nums; }
+.findings > .rfilt { margin: .1rem 1rem .6rem; }
+.crow[data-plain] { grid-template-columns: minmax(0, 1fr); }
+.cprov { display: block; margin-block: -.15rem .1rem; font-size: .75rem; color: var(--rly-color-text-2); overflow-wrap: anywhere; }
+.fchip[aria-pressed="true"] { color: var(--rly-color-text-1); font-weight: 560; background: var(--rly-color-surface-3); border-color: transparent; }
+.crow > .ava, .crow > relay-agent { margin-block-start: 2px; }
+.scrim[data-modal] { position: fixed; inset: 0; z-index: 20; background: color-mix(in oklab, var(--rly-color-text-1) 32%, transparent); }
+.csheet { position: fixed; z-index: 21; inset-block-start: 50%; inset-inline-start: 50%; transform: translate(-50%, -50%); inline-size: min(480px, calc(100vw - 48px)); display: grid; gap: 1rem; padding: 1.25rem; box-sizing: border-box; background: var(--rly-color-surface-1); border: 1px solid var(--rly-color-border-1); border-radius: var(--rly-radius-overlay); }
+.csheet h2 { margin: 0; font-size: 1.25rem; font-weight: 620; letter-spacing: -0.02em; }
+.csheet > p { margin: 0; font-size: .9375rem; color: var(--rly-color-text-2); text-wrap: pretty; }
+.csheet ul { list-style: none; margin: 0; padding: 0; display: grid; border: 1px solid var(--rly-color-border-1); border-radius: var(--rly-radius-group); }
+.csheet li { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: .2rem .7rem; align-items: start; padding: .65rem .8rem; }
+.csheet li + li { border-block-start: 1px solid var(--rly-color-border-1); }
+.csheet li > span { display: grid; gap: .15rem; font-size: .875rem; }
+.csheet li small code { font: 430 .75rem/1.5 var(--rly-font-mono); color: var(--rly-color-text-2); }
+.csheet .actions { display: flex; gap: .5rem; flex-wrap: wrap; }
+.conv { grid-column: 1 / -1; display: grid; }
+.clist { list-style: none; margin: 0; padding: 0; }
+.citem { display: grid; gap: .7rem; padding: 1rem 1.1rem; border-block-end: 1px solid var(--rly-color-border-1); }
+.citem:last-child { border-block-end: 0; }
+.citem[data-resolved] .tpost p { color: var(--rly-color-text-2); }
+.csrc { display: flex; flex-wrap: wrap; gap: .4rem .6rem; align-items: center; font-size: .8125rem; color: var(--rly-color-text-2); }
+.csrc .rly_StateLabel-module__root { margin-inline-start: auto; }
+.smark { display: inline-grid; place-items: center; inline-size: 20px; block-size: 20px; border-radius: 5px; font: 700 .625rem/1 var(--rly-font-mono); color: var(--rly-color-canvas); background: var(--rly-color-text-2); }
+.smark[data-s="codecommit"] { background: var(--rly-color-service-codecommit); }
+.citem .reply { max-inline-size: 40rem; }
+@media (max-width: 599px) {
+  .radio, .fchip, details.old > summary { min-block-size: 44px; }
+  .reply-actions .rly_Button-module__root, .csheet .rly_Button-module__root, .fline .rly_Button-module__root, .dform .rly_Button-module__root, .sum .notice .rly_Button-module__root { min-block-size: 44px; }
+  .csheet { inset: auto 0 0 0; transform: none; inline-size: auto; max-block-size: 85vh; overflow: auto; padding-block-end: 1.5rem; border-radius: var(--rly-radius-overlay) var(--rly-radius-overlay) 0 0; }
+  .csheet .actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .csheet .dform { background: transparent; padding: 0; }
+  .fline { grid-template-columns: auto minmax(0, 1fr); }
+  .fline > .rly_Button-module__root { grid-column: 1 / -1; }
+  .citem { padding: .9rem 1rem; }
+}
+.vwait { margin: 0 0 .2rem; display: flex; gap: .5rem; align-items: center; font-size: .875rem; font-weight: 560; }
+.ck-toggle { display: inline-flex; gap: .35rem; align-items: center; min-block-size: 32px; padding-inline: .5rem; font: 520 .8125rem/1 var(--rly-font-ui); color: var(--rly-color-text-1); background: transparent; border: 0; border-radius: var(--rly-radius-field); cursor: pointer; }
+.ck-toggle relay-glyph { transform: rotate(-90deg); }
+.cklist { list-style: none; margin: 0; padding: 0; display: grid; border: 1px solid var(--rly-color-border-1); border-radius: var(--rly-radius-group); }
+.ck { display: grid; grid-template-columns: 7rem minmax(0, 1fr) auto; gap: .3rem 1rem; align-items: center; padding: .6rem .9rem; }
+.ck + .ck { border-block-start: 1px solid var(--rly-color-border-1); }
+.ck-body { display: grid; gap: .1rem; min-inline-size: 0; font-size: .875rem; }
+.ck-body b { font: 520 .875rem/1.4 var(--rly-font-mono); }
+.ck-body small { font-size: .75rem; color: var(--rly-color-text-2); }
+.ck-actions { display: flex; flex-wrap: wrap; gap: .5rem .75rem; align-items: center; justify-content: end; }
+.ck-actions .clink { min-block-size: 32px; }
+.fcard[data-kfocus] { outline: 2px solid var(--rly-color-focus); outline-offset: 2px; }
+.kbhint { display: inline-flex; gap: .25rem; align-items: center; margin-inline-start: auto; font-size: .75rem; color: var(--rly-color-text-2); }
+.kbhint kbd, .keys kbd { display: inline-grid; place-items: center; min-inline-size: 1.4em; padding: .1rem .35rem; font: 430 .75rem/1.2 var(--rly-font-mono); color: var(--rly-color-text-1); background: var(--rly-color-surface-2); border: 1px solid var(--rly-color-border-1); border-radius: 4px; }
+.kbhint > span { margin-inline-start: .25rem; }
+.csheet.keys { inset: auto 24px 24px auto; transform: none; inline-size: 360px; gap: .75rem; z-index: 21; }
+.keys-head { display: flex; justify-content: space-between; align-items: center; gap: 1rem; }
+.keys-head h2 { font-size: 1.0625rem; }
+.keys dl { margin: 0; display: grid; }
+.keys dl > div { display: grid; grid-template-columns: 7.5rem minmax(0, 1fr); gap: .75rem; align-items: center; min-block-size: 36px; }
+.keys dl > div + div { border-block-start: 1px solid var(--rly-color-border-1); }
+.keys dt { display: flex; gap: .3rem; align-items: center; font-size: .75rem; color: var(--rly-color-text-2); }
+.keys dd { margin: 0; font-size: .875rem; }
+.guide-mode .grail { grid-column: 1; position: sticky; inset-block-start: 1rem; display: grid; gap: .75rem; padding: .9rem; }
+.grail h2, .gout h3 { margin: 0; font-size: .8125rem; font-weight: 560; color: var(--rly-color-text-2); }
+.grail ol, .gout ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.gch { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; gap: .6rem; align-items: center; min-block-size: 44px; padding-inline: .5rem; font-size: .875rem; border-radius: var(--rly-radius-field); }
+.gch[aria-current="step"] { font-weight: 600; background: var(--rly-color-surface-2); }
+.gnum { display: grid; place-items: center; inline-size: 22px; block-size: 22px; font: 600 .75rem/1 var(--rly-font-ui); border: 1px solid var(--rly-color-border-2); border-radius: 50%; color: var(--rly-color-text-2); }
+.gch[data-read] .gnum { color: var(--rly-color-positive-ink, var(--rly-color-text-1)); border-color: transparent; }
+.gch[data-read] .gnum svg { inline-size: 16px; block-size: 16px; }
+.gout { display: grid; gap: .4rem; padding-block-start: .75rem; border-block-start: 1px solid var(--rly-color-border-1); }
+.gout a { display: flex; justify-content: space-between; gap: .75rem; align-items: center; min-block-size: 40px; padding-inline: .5rem; font-size: .8125rem; border-radius: var(--rly-radius-field); }
+.gout code { font: 430 .75rem/1.4 var(--rly-font-mono); overflow-wrap: anywhere; }
+.gout span { color: var(--rly-color-text-2); white-space: nowrap; font: 430 .75rem/1.4 var(--rly-font-mono); }
+.gbody { grid-column: 2; display: grid; gap: 1.25rem; padding: 1.25rem; min-inline-size: 0; }
+.gswitch { display: none; }
+.ghead { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: end; gap: .75rem 1rem; }
+.ghead small { font-size: .8125rem; color: var(--rly-color-text-2); }
+.ghead h2 { margin: .1rem 0 0; font-size: 1.375rem; font-weight: 620; letter-spacing: -0.02em; }
+.gseg { display: inline-flex; gap: 2px; padding: 2px; border: 1px solid var(--rly-color-border-1); border-radius: var(--rly-radius-control); background: var(--rly-color-surface-2); }
+.gseg-item { display: grid; place-items: center; min-block-size: 36px; padding-inline: .9rem; font-size: .875rem; color: var(--rly-color-text-2); border-radius: calc(var(--rly-radius-control) - 2px); }
+.gseg-item[aria-pressed="true"] { color: var(--rly-color-text-1); font-weight: 560; background: var(--rly-color-surface-1); box-shadow: 0 0 0 1px var(--rly-color-border-1); }
+.gprose { display: grid; gap: .5rem; max-inline-size: 44rem; }
+.gprose h3, .gcheck h3 { margin: .5rem 0 0; font-size: .875rem; font-weight: 600; }
+.gprose p, .gprose li { margin: 0; font-size: .9375rem; line-height: 1.55; text-wrap: pretty; }
+.gprose ul { margin: 0; padding-inline-start: 1.1rem; display: grid; gap: .3rem; }
+.gba { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; }
+.gba > div { padding: .7rem .85rem; border: 1px solid var(--rly-color-border-1); border-radius: var(--rly-radius-field); }
+.gba h3 { margin: 0 0 .2rem; font-size: .8125rem; color: var(--rly-color-text-2); font-weight: 560; }
+.ghunks { display: grid; gap: .75rem; }
+.gcheck { display: grid; gap: .5rem; }
+.gcheck ul { list-style: none; margin: 0; padding: 0; display: grid; border: 1px solid var(--rly-color-border-1); border-radius: var(--rly-radius-group); }
+.gcheck li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .2rem 1rem; padding: .65rem .85rem; font-size: .875rem; }
+.gcheck li + li { border-block-start: 1px solid var(--rly-color-border-1); }
+.gcheck small { grid-column: 1 / -1; font-size: .8125rem; color: var(--rly-color-text-2); }
+.gnext { display: flex; justify-content: end; }
+.gnav { display: grid; place-items: center; inline-size: 44px; block-size: 44px; color: inherit; background: transparent; border: 1px solid var(--rly-color-border-1); border-radius: var(--rly-radius-field); cursor: pointer; }
+.gnav[data-dir="prev"] relay-glyph { transform: rotate(180deg); }
+.gnav-gap { inline-size: 44px; }
+.focus-wrap { display: grid; justify-items: center; }
+.ffocus { inline-size: 100%; max-inline-size: 760px; box-sizing: border-box; display: grid; gap: .75rem; padding: 1rem 1.25rem 1.25rem; }
+.ffocus h2 { margin: 0; font-size: 1.25rem; font-weight: 620; letter-spacing: -0.015em; text-wrap: pretty; }
+.ffocus h3 { margin: .25rem 0 0; font-size: .875rem; font-weight: 600; }
+.ffocus > p { margin: 0; font-size: .9375rem; line-height: 1.55; text-wrap: pretty; }
+.ff-top { display: flex; justify-content: space-between; align-items: center; gap: 1rem; }
+.ff-back { display: inline-flex; gap: .4rem; align-items: center; min-block-size: 44px; font-size: .875rem; }
+.ff-back relay-glyph { transform: rotate(180deg); }
+.ff-pager { display: flex; gap: .5rem; align-items: center; font-size: .875rem; font-variant-numeric: tabular-nums; }
+.ffbar { inline-size: 100%; max-inline-size: 760px; box-sizing: border-box; display: flex; flex-wrap: wrap; gap: .5rem; padding: .75rem 0; }
+@media (max-width: 599px) {
+  .csheet { top: auto; right: 0; bottom: 0; left: 0; inset-block-start: auto; inset-block-end: 0; inset-inline: 0; }
+  .csheet.keys { inline-size: auto; }
+  .scrim[data-modal] { top: 0; right: 0; bottom: 0; left: 0; }
+  .ck { grid-template-columns: minmax(0, 1fr); }
+  .ck-actions { justify-content: start; }
+  .ck-actions .rly_Button-module__root, .ck-actions .clink, .ck-toggle { min-block-size: 44px; }
+  .kbhint { display: none; }
+  .guide-mode .grail { grid-column: 1; position: static; order: 3; }
+  .gbody { grid-column: 1; order: 2; padding: 1rem; }
+  .gswitch { display: grid; grid-template-columns: 44px minmax(0, 1fr) 44px; gap: .75rem; align-items: center; text-align: center; padding-block-end: .75rem; border-block-end: 1px solid var(--rly-color-border-1); }
+  .gswitch small { display: block; font-size: .75rem; color: var(--rly-color-text-2); }
+  .gswitch b { font-size: .9375rem; font-weight: 600; }
+  .ghead > div:first-child { display: none; }
+  .gseg { display: flex; inline-size: 100%; }
+  .gseg-item { flex: 1; min-block-size: 44px; }
+  .gba { grid-template-columns: minmax(0, 1fr); }
+  .gnext .rly_Button-module__root { inline-size: 100%; min-block-size: 44px; }
+  .ffocus { border-radius: 0; border-inline: 0; padding: .75rem 1rem 1rem; }
+  .ffbar { position: fixed; z-index: 6; bottom: 0; inset-inline: 0; max-inline-size: none; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); padding: .5rem .5rem 1rem; background: var(--rly-color-surface-1); border-block-start: 1px solid var(--rly-color-border-1); }
+  .ffbar .rly_Button-module__root { min-block-size: 48px; padding-inline: .25rem; }
+}
+@container (max-width: 879px) {
+  .review { grid-template-columns: minmax(0, 1fr); }
+  .guide-mode .grail { grid-column: 1; position: static; order: 3; }
+  .gbody { grid-column: 1; order: 2; }
+}
+@container (max-width: 719px) {
+  .gba { grid-template-columns: minmax(0, 1fr); }
+  .ck { grid-template-columns: minmax(0, 1fr); }
+  .ck-actions { justify-content: start; }
+}
+.sum-none { gap: .5rem; }
+.sum-none .none-title { margin: 0; font-size: 1.125rem; font-weight: 620; letter-spacing: -0.01em; }
+.sum-none p { margin: 0; font-size: .9375rem; color: var(--rly-color-text-2); }
+.sum .notice > [data-region="action"], .sum .notice > [data-act] { display: flex; }
+@media (max-width: 599px) { .sum .notice > [data-region="action"] .rly_Button-module__root, .sum .notice > [data-act] .rly_Button-module__root, .conv .notice > [data-region="action"] .rly_Button-module__root, .conv > .cact .rly_Button-module__root { min-block-size: 44px; } }
+.gnone { grid-column: 1 / -1; justify-items: start; gap: .5rem; padding: 2rem 1.25rem; }
+.gnone h2 { margin: 0; font-size: 1.125rem; font-weight: 620; letter-spacing: -0.01em; }
+.gnone p { margin: 0; font-size: .9375rem; color: var(--rly-color-text-2); }
+.gnone .gnext { justify-content: start; margin-block-start: .5rem; }
+.vquote { margin: 0; }
+.vquote p { margin: 0; font-size: .9375rem; line-height: 1.55; color: var(--rly-color-text-1); text-wrap: pretty; }
+.vquote p::before { content: "“"; }
+.vquote p::after { content: "”"; }
+.reviewer[data-plain] { grid-template-columns: minmax(0, 1fr); }
+.explain { display: grid; gap: .6rem; }
+.explain h2 { margin: 0; font-size: 1.125rem; font-weight: 620; letter-spacing: -0.01em; }
+.explain p { margin: 0; font-size: .9375rem; line-height: 1.55; text-wrap: pretty; }
+.rmeta { display: flex; flex-wrap: wrap; gap: .25rem 1.25rem; margin: 0; font-size: .8125rem; }
+.rmeta div { display: flex; gap: .35rem; }
+.rmeta dt { color: var(--rly-color-text-2); }
+.rmeta dd { margin: 0; }
+.recorded { display: grid; }
+.panel.notice { padding: .75rem 1rem; }
+.rstatus { margin: 0; display: flex; flex-wrap: wrap; gap: .25rem 0; align-items: center; font-size: .875rem; }
+.rstatus span.note { font-size: .875rem; font-weight: 430; color: var(--rly-color-text-2); white-space: pre-wrap; }
+.tpost[data-plain] { grid-template-columns: minmax(0, 1fr); }
+.tpost .cdel { color: var(--rly-color-text-2); }
+.cfind { display: flex; gap: .5rem; align-items: center; min-block-size: 44px; min-inline-size: 0; color: var(--rly-color-text-1); text-decoration: none; font-size: .9375rem; font-weight: 600; }
+.cfind .cclaim { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-decoration: underline; text-underline-offset: .2em; text-decoration-color: var(--rly-color-border-2); }
+.cagent > p { margin: 0; font-size: .9375rem; line-height: 1.55; text-wrap: pretty; }
+.conv > .notice { margin: .75rem 1.1rem 0; }
+.conv > .cact { display: flex; margin: .6rem 1.1rem 0; }
+.cact.wact { display: flex; }
+@media (max-width: 599px) { button[data-read-again] { min-block-size: 44px !important; block-size: 44px; } }
+.notice .text { white-space: pre-line; }
+.frow .rstatus { display: flex; margin-block-start: .25rem; }
+.conv > .notice + .notice { margin-block-start: .6rem; }
+.findings > .notice { margin: .75rem 1rem; }
+.dpend { margin: 0; padding: 1.5rem 1rem; font-size: .9375rem; color: var(--rly-color-text-2); }
+.dfile > .notice, .diff > .notice { margin: .75rem 1rem; }
+.diff > .notice { margin: 0; }
+.dfile > h3 { margin: .5rem 1rem 0; font-size: .8125rem; font-weight: 560; color: var(--rly-color-text-2); }
+.dfile > pre { margin: .5rem 1rem 1rem; margin: 0; padding: .6rem .75rem; font: 430 .75rem/1.6 var(--rly-font-mono); white-space: pre-wrap; overflow-wrap: anywhere; background: var(--rly-color-canvas); border: 1px solid var(--rly-color-border-1); border-radius: var(--rly-radius-field); }
+@media (max-width: 599px) { .dfile .notice > [data-region="action"] .rly_Button-module__root, .dfile .notice > [data-act] .rly_Button-module__root { min-block-size: 44px; } }
+.pnotice, .rstat, .rpend { grid-column: 1 / -1; }
+.pnotice .text + .text { color: var(--rly-color-text-2); }
+.rpend { padding: 2rem 1.25rem; }
+.rpend p { margin: 0; font-size: .9375rem; color: var(--rly-color-text-2); }
+@media (max-width: 599px) { .findings > .notice > [data-region="action"] .rly_Button-module__root, .review > .notice > [data-region="action"] .rly_Button-module__root, .findings > .notice > [data-act] .rly_Button-module__root, .review > .notice > [data-act] .rly_Button-module__root { min-block-size: 44px; } }
+.recorded .fhead { border-block-end: 0; }
+.titles { gap: 0; }
+.recorded .fcard { margin-block-start: 0; }
+.clabel { display: inline-flex; align-items: center; gap: .25rem; max-inline-size: 100%; vertical-align: middle; font-family: var(--rly-font-ui); }
+.ctext { display: inline-flex; min-inline-size: 0; white-space: nowrap; }
+.ctitle { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; }
+.cl-host { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; border-block-end: 1px solid var(--rly-color-border-1); }
+.cl-host > .frow { border-block-end: 0; }
+.cl-host > .ccopy { margin: 0 1rem .75rem .25rem; }
+.ccopy { position: relative; flex: none; inline-size: 28px; block-size: 28px; color: var(--rly-color-text-1); }
+.ccopy::after { content: ""; position: absolute; inset: -8px; }
+.ccopy:focus-visible { outline: 2px solid var(--rly-color-focus); outline-offset: 2px; }
+</style>
+</head>
+<body data-rly-root data-theme="light">
+<div id="app"></div>
+<script>
+(() => {
+  const params = new URLSearchParams(location.search);
+  const theme = params.get("theme") === "dark" ? "dark" : "light";
+  const root = document.documentElement, app = document.getElementById("app");
+  document.body.dataset.theme = theme;
+  root.dataset.theme = theme;
+  root.style.colorScheme = theme;
+
+  const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const svg = (inner) => `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" focusable="false" aria-hidden="true">${inner}</svg>`;
+  const TONE_ICON = {
+    caution: svg('<circle cx="12" cy="12" r="10"></circle><path d="M12 6v6l4 2"></path>'),
+    critical: svg('<circle cx="12" cy="12" r="10"></circle><line x1="12" x2="12" y1="8" y2="12"></line><line x1="12" x2="12.01" y1="16" y2="16"></line>'),
+    progress: svg('<path d="M21 12a9 9 0 1 1-6.22-8.56"></path>'),
+    positive: svg('<circle cx="12" cy="12" r="10"></circle><path d="m9 12 2 2 4-4"></path>'),
+    neutral: svg('<path d="M5 12h14"></path>'),
+  };
+  const CLOSE = svg('<path d="M18 6 6 18"></path><path d="m6 6 12 12"></path>');
+  const CHECK_ICON = svg('<path d="M20 6 9 17l-5-5"></path>');
+  const stateLabel = (label, tone, compact) => `<span class="rly_StateLabel-module__root rly_StateLabel-module__${esc(tone)} rly_StateLabel-module__${compact ? "compact" : "defaultSize"}">${label === "Done" ? CHECK_ICON : TONE_ICON[tone] || ""}<span>${esc(label)}</span></span>`;
+
+  const loadFonts = async () => {
+    const specs = ['430 16px "Geist"', '620 16px "Geist"', '430 16px "Geist Variable"', '620 16px "Geist Variable"', '430 16px "Geist Mono"', '430 16px "Geist Mono Variable"'];
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const res = await Promise.allSettled(specs.map((f) => document.fonts.load(f)));
+      res.forEach((r, i) => { if (r.status === "rejected") console.warn("font load failed", specs[i], r.reason); });
+      const faces = [...document.fonts].filter((f) => f.family.replace(/"/g, "") === "Geist");
+      const faceRes = await Promise.allSettled(faces.map((f) => f.load()));
+      faceRes.forEach((r) => { if (r.status === "rejected") console.warn("Geist face failed", r.reason); });
+      try { await document.fonts.ready; } catch (e) { console.warn("fonts.ready failed", e); }
+      if (document.fonts.check("16px Geist")) return true;
+      await new Promise((r) => setTimeout(r, 150));
+    }
+    return document.fonts.check("16px Geist");
+  };
+
+  const settle = async () => {
+    try { await Promise.all([customElements.whenDefined("relay-glyph"), customElements.whenDefined("relay-agent"), customElements.whenDefined("relay-chef")]); } catch (e) { console.warn("custom elements not defined", e); }
+    const ok = await loadFonts();
+    if (!ok) { app.innerHTML = `<main class="fail" role="alert"><h1>Fonts didn’t load</h1><p>Geist isn’t available from screens/fonts, so the screen can’t be captured.</p></main>`; return; }
+    requestAnimationFrame(() => requestAnimationFrame(() => { root.dataset.designReady = "true"; }));
+  };
+
+  const COPY_ICON = svg('<rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path>');
+  const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const commitTime = (at, today) => { const [d, t] = String(at || "").split("T"); if (!t) return ""; if (d === today) return t; const [, mo, dd] = d.split("-"); return `${+dd} ${MONTHS[+mo - 1]} ${t}`; };
+  const commitLabels = (C) => {
+    const CM = C.commits || {}, K = C.commitCopy, TOK = /\{commit:([0-9a-f]{7,40})\}/g;
+    const info = (h) => { const c = CM[h] || {}, title = c.title ? c.title.split("\n")[0] : K.unknownTitle; return { id: c.id || h, title, time: commitTime(c.at, C.meta.today), known: !!c.title }; };
+    const plain = (h) => { const c = info(h); return `“${c.title}${c.time ? ", " + c.time : ""}”`; };
+    for (const el of app.querySelectorAll("*")) for (const a of [...el.attributes]) if (a.value.includes("{commit:")) el.setAttribute(a.name, a.value.replace(TOK, (m, h) => plain(h)));
+    const walker = document.createTreeWalker(app, NodeFilter.SHOW_TEXT), nodes = [];
+    while (walker.nextNode()) if (walker.currentNode.nodeValue.includes("{commit:")) nodes.push(walker.currentNode);
+    for (const node of nodes) {
+      if (node.parentElement && node.parentElement.closest('[class*="rly_StateLabel-module__root"]')) { node.nodeValue = node.nodeValue.replace(TOK, (m, h) => plain(h)); continue; }
+      const frag = document.createDocumentFragment(), v = node.nodeValue; let last = 0;
+      v.replace(TOK, (m, h, i) => {
+        frag.append(v.slice(last, i)); last = i + m.length;
+        const c = info(h), lab = document.createElement("span");
+        lab.className = "clabel";
+        const copyBtn = `<button type="button" class="rly_IconButton-module__root rly_IconButton-module__quiet ccopy" aria-label="${esc(K.button)}" title="${esc(K.button)}" data-commit="${esc(c.id)}">${COPY_ICON}</button>`;
+        const host = node.parentElement && node.parentElement.closest("a, button, label, summary");
+        lab.innerHTML = `<span class="ctext" title="${esc((c.known ? c.title + "\n" : "") + K.tooltip + " " + c.id)}">“<span class="ctitle">${esc(c.title)}</span>${c.time ? ", " + esc(c.time) : ""}”</span>${host ? "" : copyBtn}`;
+        if (host) {
+          let wrap = host.parentElement.classList.contains("cl-host") ? host.parentElement : null;
+          if (!wrap) { wrap = document.createElement("div"); wrap.className = "cl-host"; host.replaceWith(wrap); wrap.append(host); }
+          wrap.insertAdjacentHTML("beforeend", copyBtn);
+        }
+        frag.append(lab); return m;
+      });
+      frag.append(v.slice(last));
+      node.replaceWith(frag);
+    }
+  };
+  document.addEventListener("click", (e) => {
+    const b = e.target.closest && e.target.closest(".ccopy");
+    if (!b) return;
+    e.preventDefault(); e.stopPropagation();
+    if (navigator.clipboard) navigator.clipboard.writeText(b.dataset.commit).catch((err) => console.warn("copy failed", err));
+  });
+
+  const render = (C) => {
+    const req = params.get("state") || C.meta.defaultState;
+    const S = Object.prototype.hasOwnProperty.call(C.states, req) ? C.states[req] : null;
+    const stateId = S && S.kind !== "unknown" ? req : "unknown";
+    root.dataset.state = stateId;
+    if (!S || S.kind === "unknown") {
+      const U = C.unknownState, known = Object.keys(C.states).filter((k) => C.states[k].kind !== "unknown");
+      app.innerHTML = `<main class="fail" role="alert" data-region="notice"><h1>${esc(U.title)}</h1><p>${esc(U.text)} <code>${esc(req)}</code></p><p>${esc(U.known)}: ${known.map((k) => `<code>${esc(k)}</code>`).join(", ")}</p></main>`;
+      return;
+    }
+    const phone = matchMedia("(max-width: 599px)").matches;
+    const sh = C.shell, M = C.modules, N = C.navs[S.nav], mod = M[S.module], ap = C.approvals;
+    const sheetOpen = !!S.sheet && phone, offBar = phone && !N.bar.includes(S.module);
+    const cur = (k) => (k === S.module && !(sheetOpen && !N.bar.includes(k)) ? "page" : "false");
+    const badge = (k) => k === "fleet" ? `<span class="count" aria-label="${esc(ap.badgeAria)}">${esc(ap.badge)}</span>` : "";
+    const navItem = (k, secondary) => {
+      const m = M[k], aria = k === "fleet" ? ap.navAria : m.name;
+      return `<a href="${esc(m.href)}" class="nav-item"${secondary ? " data-secondary" : ""} data-bar="${N.bar.includes(k)}" aria-label="${esc(aria)}" aria-current="${cur(k)}"><span class="g19"><relay-glyph name="${esc(m.icon)}" size="${secondary ? 17 : 19}"></relay-glyph></span><span class="g24"><relay-glyph name="${esc(m.icon)}" size="24"></relay-glyph></span><span class="side-name">${esc(m.name)}</span><span class="bar-name">${esc(m.name)}</span>${badge(k)}</a>`;
+    };
+    const order = [...N.primary, ...N.secondary];
+    const nav = `<aside class="side" aria-label="${esc(sh.navLabel)}"><div class="side-in">
+      <a href="${esc(M.connect.href)}" class="brand" aria-label="${esc(sh.brandLabel)}"><relay-chef size="32"></relay-chef><span>${esc(sh.product)}</span></a>
+      <nav class="nav" aria-label="${esc(sh.modulesLabel)}" data-region="nav">
+        ${N.primary.map((k) => navItem(k, false)).join("")}
+        <div class="nav-sep" role="separator"></div>
+        ${N.secondary.map((k) => navItem(k, true)).join("")}
+        <button type="button" class="nav-more" aria-label="${esc(sh.more.name)}" aria-haspopup="dialog" aria-expanded="false" aria-current="${offBar ? "page" : "false"}" data-current="${offBar}"><relay-glyph name="${esc(sh.more.icon)}" size="24"></relay-glyph><span>${esc(sh.more.name)}</span></button>
+      </nav>
+      ${sh.settings ? `<a href="${esc(sh.settings.href)}" class="nav-item side-settings" data-secondary aria-label="${esc(sh.settings.aria)}" aria-current="false"><span class="g19"><relay-glyph name="shield" size="17"></relay-glyph></span><span class="side-name">${esc(sh.settings.label)}</span></a>` : ""}
+      <button type="button" class="session" aria-label="${esc(sh.session.aria)}"><span class="avatar" aria-hidden="true"><relay-glyph name="shield" size="17"></relay-glyph></span><span>${esc(sh.session.title)}<small>${esc(sh.session.access)}</small></span><span class="online" aria-hidden="true"></span></button>
+    </div></aside>`;
+
+    const crumbNav = (mod, href, page) => `<nav class="crumb" aria-label="Breadcrumb">${page && page !== mod ? `<span class="parents"><span><a href="${esc(href)}">${esc(mod)}</a><span aria-hidden="true">&nbsp;/&nbsp;</span></span></span><span class="cur" aria-current="page">${esc(page)}</span>` : `<span class="cur" aria-current="page">${esc(mod)}</span>`}</nav>`;
+    const hasTabs = mod.tabs.length > 1;
+    const header = `<div>
+      <header class="mast">
+        <a href="${esc(M.connect.href)}" class="mast-brand" aria-label="${esc(sh.brandLabel)}"><relay-chef size="28"></relay-chef><b class="mast-name">${esc(sh.product)}</b></a>
+        <div class="tools">
+          <button type="button" class="hosts" aria-label="${esc(sh.hosts.aria)}"><relay-glyph name="shield" size="19"></relay-glyph><span>${esc(sh.hosts.label)}</span></button>
+          <button type="button" class="bell" aria-label="${esc(sh.notifications.aria)}" aria-expanded="false"><relay-glyph name="bell" size="19"></relay-glyph></button>
+          <button type="button" class="ask" aria-expanded="false"><span class="chef-desk"><relay-chef size="32"></relay-chef></span><span class="chef-phone"><relay-chef size="24"></relay-chef></span><span>${esc(sh.askRelay)}</span><kbd>${esc(sh.askShortcut)}</kbd></button>
+        </div>
+      </header>
+      ${crumbNav(mod.name, mod.href, hasTabs ? S.tab : null)}
+      <div class="modhead"${hasTabs ? " data-tabs" : ""} data-phone-titles>
+        <div class="titles" data-region="header"><h1>${esc(mod.name)}</h1><p>${esc(mod.purpose)}</p></div>
+        ${hasTabs ? `<nav class="tabs" aria-label="${esc(mod.name)}" data-region="tabs">${mod.tabs.map((t) => `<a href="#" class="tab" aria-current="${t === S.tab ? "page" : "false"}">${esc(t)}</a>`).join("")}</nav>` : ""}
+      </div>
+    </div>`;
+
+    const LV = C.live && Object.prototype.hasOwnProperty.call(C.live, stateId) ? C.live[stateId] : null;
+    const RA = "Read again";
+    const parseN = (s) => { let owner = null, body = s; const nl = s.indexOf("\n"), dbl = s.indexOf("\n\n"); if (nl >= 0 && nl !== dbl) { owner = s.slice(0, nl); body = s.slice(nl + 1); } const ps = body.split("\n\n"); const inBtn = ps[ps.length - 1] === RA; if (inBtn) ps.pop(); return { owner, title: ps[0], lines: ps.slice(1), text: ps.slice(1).join("\n"), inBtn }; };
+    const LNS = LV ? LV.notices.map(parseN) : [];
+    const LACT = LV ? LV.actions.filter((a) => a.text === RA).map((a) => a.owner) : [];
+    const liveV = (v0) => {
+      if (!LV) return v0;
+      const v = { ...v0, summary: { ...(v0.summary || {}) } };
+      delete v.checkList;
+      for (const n of LNS) {
+        const box = { title: n.title, text: n.text, action: n.inBtn ? RA : undefined };
+        if (n.owner) { if (v.threadsNotice) v.threadsNotice = box; else v.listNotice = box; continue; }
+        if (v.noRun && v.noRun.notice && v.noRun.notice.title === n.title) v.noRun = { ...v.noRun, notice: box };
+        else if (v.mismatch && v.mismatch.title === n.title) v.mismatch = { title: n.title, text: n.text };
+        else if (v.conv && v.conv.notice && v.conv.notice.title === n.title) v.conv = { ...v.conv, notice: { ...box, action: LACT.includes("conversation") ? RA : undefined } };
+        else if (v.pageNotice && !v.pending) v.pageNotice = n.lines.length || v.pageNotice.title ? { title: n.title, lines: n.lines } : { lines: [n.title] };
+        else if (v.filePane && v.filePane.kind !== "reading" && v.filePane.title === n.title) v.filePane = { ...v.filePane, text: n.text, action: undefined };
+        else if (v.diffNotice && v.diffNotice.title === n.title) v.diffNotice = { title: n.title };
+      }
+      if (v.noRun && v.noRun.notice && !LNS.some((n) => !n.owner && n.title === v.noRun.notice.title && n.inBtn)) v.noRun = { ...v.noRun, notice: { ...v.noRun.notice, action: undefined } };
+      if (v.retained) v.retained = { ...v.retained, action: LACT.includes("Retained") ? RA : undefined };
+      v.pageAction = LACT.includes("Failed") || (LACT.includes("Ready") && !!v.pageNotice) ? RA : undefined;
+      v.readyAction = LACT.includes("Ready") && !v.pageNotice ? RA : undefined;
+      return v;
+    };
+    const TWO_N = ["review-run-unavailable-no-comments", "review-run-unavailable-comments-over-limit", "review-run-unavailable-comments-corrupt", "review-conversation-comments-unavailable"].includes(stateId);
+    const R = C.review, V = liveV(R.variants[S.variant]), P = { ...R.pr, ...(V.pr || {}), ...(LV ? { cachedApproval: "Cached approval waiting", checks: "Checks unknown", checksTone: "neutral", checksDetail: "" } : {}) };
+    const FAM = window.RelayScreenArt.assignFamilies([{ host: R.reviewer.host, id: R.reviewer.agent }]);
+    const btn = (label, variant, extra = "") => label === "Read again" ? `<button type="button" class="rly_Button-module__root rly_Button-module__primary rly_Button-module__compact" style="font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height) var(--rly-type-label-font); letter-spacing: var(--rly-type-label-tracking); padding-block: 0; padding-inline: var(--rly-space-16); min-block-size: var(--rly-control-height-compact)" data-read-again${extra}><span class="rly_Button-module__content"><span class="rly_Button-module__label">${esc(label)}</span></span></button>` : `<button type="button" class="rly_Button-module__root rly_Button-module__${variant} rly_Button-module__dense"${extra}><span class="rly_Button-module__content"><span class="rly_Button-module__label">${esc(label)}</span></span></button>`;
+    const RXS = C.rich && Object.prototype.hasOwnProperty.call(C.rich.states, stateId) ? C.rich.states[stateId] : null;
+    const RXF = RXS ? (V.legacy ? C.rich.legacyFindings : C.rich.findings) : null;
+    const rf = (id) => { const b = R.findings[id] || { id }; const x = RXF && RXF[id]; return x ? { ...b, id, sev: x.severity, axis: x.axis, claim: x.claim, anchor: x.anchor, confidence: x.confidence } : b; };
+    const RXP2 = RXS && RXS.p2 ? RXS.p2.open === "true" : false;
+    const GROUPS = LV ? LV.groups : RXS ? RXS.groups : [];
+    const GRP = new Set(GROUPS.flatMap((g) => g.cards));
+    const LDIS = LV && LV.index && LV.index.disclosure[0] ? LV.index.disclosure[0] : null;
+    const hideMinor = (id) => LDIS && !LDIS.open && /^F/.test(id) && !["P0", "P1"].includes((((V.legacy ? C.rich.legacyFindings : C.rich.findings) || {})[id] || R.findings[id] || {}).severity || (R.findings[id] || {}).sev);
+    const F = V.findings.map((id) => RXS ? rf(id) : R.findings[id]);
+    const blocking = F.filter((f) => f.sev === "P0" || f.sev === "P1"), minor = F.filter((f) => f.sev !== "P0" && f.sev !== "P1");
+    const shown = new Set([...blocking, ...((RXS ? RXP2 : S.p2Open) ? minor : [])].map((f) => f.id));
+    const sev = (f) => `<span class="sev" data-s="${esc(f.sev)}" aria-label="${esc(R.sevNames[f.sev])}">${esc(f.sev)}</span>`;
+    const LEG = V.legacy || null, RO = !!V.readonly, REC = !!V.recorded, SEP = !!V.separate, KIND = V.kind || "";
+    const where = (f) => f.file ? `${f.file}:${f.line}` : LEG ? LEG.whole : R.copy.unanchored;
+    const CS = V.cardStatus || {}, NEW = new Set(V.newIds || []), TM = !!V.threads, RES = V.resolvedIds || {}, DIS = V.dismissed || {};
+    const THS = V.threads || [], comments = THS.filter((t) => !t.finding);
+    const nReplies = (n) => n === 1 ? R.copy.oneReply : R.copy.nReplies.replace("{n}", n);
+    const repliesOf = (id) => { if (!TM) return ""; const t = THS.find((x) => x.finding === id || x.id === id); return t && t.replies.length ? `<span>${esc(nReplies(t.replies.length))}</span>` : ""; };
+    const rowTag = (f) => `${NEW.has(f.id) ? `<span class="tag-new">${esc(R.copy.newTag)}</span>` : ""}${V.stale ? `<span class="tag-old">${esc(R.copy.earlier)}</span>` : ""}${CS[f.id] && CS[f.id].rowWord ? stateLabel(CS[f.id].rowWord, CS[f.id].rowTone, true) : ""}${RES[f.id] ? stateLabel(R.copy.resolvedWord, "positive", true) : ""}`;
+    const rowAria = (f) => [R.sevNames[f.sev], LEG ? "" : f.axis, NEW.has(f.id) ? R.copy.newTag : "", V.stale ? R.copy.earlier : "", CS[f.id] && CS[f.id].rowWord, RES[f.id] ? R.copy.resolvedWord : "", f.claim, where(f), LEG ? "" : f.confidence].filter(Boolean).join(", ");
+    const frow = (f) => `<a href="#f-${esc(f.id)}" class="frow" aria-label="${esc(rowAria(f))}">${sev(f)}<span>${LEG ? "" : `<span class="tags"><span class="axis">${esc(f.axis)}</span>${rowTag(f)}</span>`}<span class="claim">${esc(f.claim)}</span><small><code>${esc(where(f))}</code>${LEG ? "" : `<span>${esc(f.confidence)}</span>`}${repliesOf(f.id)}</small></span></a>`;
+    const spin = '<span class="spin" aria-hidden="true"></span>';
+    const cardFoot = (f) => {
+      const st = CS[f.id];
+      if (st && st.kind === "applying") return `<div class="cstat"><p role="status">${spin}${esc(st.text)}</p>${btn(st.action, "secondary")}</div>`;
+      if (st && st.kind === "pushed") return `<div class="cpush" role="status"><p>${esc(st.text)}</p><dl><dt>${esc(st.commitLabel)}</dt><dd>${esc("{commit:" + st.commit + "}")}</dd><dt>${esc(st.testLabel)}</dt><dd>${esc(st.test)}</dd><dt>${esc(st.checksLabel)}</dt><dd>${stateLabel(st.checks, "progress", true)}</dd></dl><a href="#" class="clink">${esc(st.link)}<relay-glyph name="arrow" size="14"></relay-glyph></a></div><div class="actions">${btn(R.copy.ask, "secondary")}${btn(R.copy.dismiss, "secondary")}${btn(R.copy.resolve, "quiet")}</div>`;
+      if (st && st.kind === "failed") return `<div class="panel notice cfail" role="status"><div>${stateLabel(st.title, "caution", true).replace(TONE_ICON.caution, TONE_ICON.critical)}<span class="text">${esc(st.text)}</span></div></div><div class="actions">${btn(st.retry, "primary")}${btn(R.copy.ask, "secondary")}</div>`;
+      const first = V.stale ? btn(R.copy.reviewAgain, "secondary") : f.patch ? btn(R.copy.apply, "primary") : "";
+      return `<div class="actions">${first}${btn(R.copy.ask, "secondary")}${btn(R.copy.dismiss, "secondary")}${btn(R.copy.resolve, "quiet")}</div>`;
+    };
+    const cardLegacy = (f) => { const L = LEG.text[f.id] || {}; return `<article class="fcard" id="f-${esc(f.id)}" tabindex="-1" aria-label="${esc(R.sevNames[f.sev] + ", " + f.claim)}">
+        <div class="tags">${sev(f)}<small><code>${esc(where(f))}</code></small></div>
+        <p class="claim">${esc(f.claim)}</p>
+        <span class="patch-label">${esc(LEG.why)}</span><p class="why">${esc(f.why)}</p>
+        ${L.rec ? `<span class="patch-label">${esc(LEG.rec)}</span><p class="why">${esc(L.rec)}</p>` : ""}
+        ${L.verify ? `<span class="patch-label">${esc(LEG.verify)}</span><p class="why">${esc(L.verify)}</p>` : ""}
+        ${fthread(f)}
+      </article>`; };
+    const cardFull = (f) => LEG ? cardLegacy(f) : `<article class="fcard"${V.focusId === f.id ? " data-kfocus" : ""} id="f-${esc(f.id)}" tabindex="-1" aria-label="${esc(R.sevNames[f.sev] + ", " + f.claim)}">
+        <div class="tags">${sev(f)}<span class="axis">${esc(f.axis)}</span>${rowTag(f)}<small>${f.file ? `<code>${esc(where(f))}</code>, ` : ""}${esc(f.confidence)}</small></div>
+        <p class="claim">${esc(f.claim)}</p>
+        <p class="why">${esc(f.why)}</p>
+        ${f.patch ? `<span class="patch-label">${esc(R.copy.suggested)}</span><pre class="patch" aria-label="${esc(R.copy.suggested)}">${f.patch.map((l) => `<span data-t="${esc(l[0])}">${esc(l)}</span>`).join("")}</pre>` : ""}
+        ${formHere(f) ? dform() : cardFoot(f)}
+        ${fthread(f)}
+      </article>`;
+    const RL = R.copy.recordedLabels;
+    const rfield = (k, v) => v ? `<span class="patch-label">${esc(RL[k])}</span><p class="why">${esc(v)}</p>` : "";
+    const cardRec = (f) => { const X = f.extra || null; return `<article class="fcard" id="f-${esc(f.id)}" tabindex="-1" aria-label="${esc(R.sevNames[f.sev] + ", " + f.claim)}">
+        <div class="tags">${sev(f)}${X ? "" : `<span class="axis">${esc(f.axis)}</span>`}<small>${f.file ? `<code>${esc(where(f))}</code>` : esc(where(f))}${X ? "" : `, ${esc(f.confidence)}`}</small></div>
+        <p class="claim">${esc(f.claim)}</p>
+        <p class="why">${esc(f.why)}</p>
+        ${V.recStatus && V.recStatus[f.id] ? `<p class="rstatus" role="status">${stateLabel(V.recStatus[f.id].note ? `${V.recStatus[f.id].word},` : V.recStatus[f.id].word, V.recStatus[f.id].tone, true)}${V.recStatus[f.id].note ? `<span class="note"> ‘${esc(V.recStatus[f.id].note)}’</span>` : ""}</p>` : ""}
+        ${X ? rfield("requirement", X.requirement) + rfield("evidence", X.evidence) + rfield("rec", X.rec) + rfield("verify", X.verify) : ""}
+        ${f.patch ? `<span class="patch-label">${esc(X ? RL.patch : R.copy.suggested)}</span><pre class="patch" aria-label="${esc(X ? RL.patch : R.copy.suggested)}">${f.patch.map((l) => `<span data-t="${esc(l[0])}">${esc(l)}</span>`).join("")}</pre>` : ""}
+        ${X ? `<dl class="rmeta">${f.axis ? `<div><dt>${esc(RL.axis)}</dt><dd>${esc(f.axis)}</dd></div>` : ""}${f.confidence ? `<div><dt>${esc(RL.confidence)}</dt><dd>${esc(f.confidence)}</dd></div>` : ""}</dl>` : ""}
+      </article>`; };
+    const WHOLE = "Whole pull request";
+    const anc = (f) => f.anchor == null ? "" : f.anchor === WHOLE ? `<span>${esc(f.anchor)}</span>` : `<code>${esc(f.anchor)}</code>`;
+    const rAria = (f) => [R.sevNames[f.sev], f.axis, f.claim, f.anchor, f.confidence].filter(Boolean).join(", ");
+    const cardRich = (f) => { const X = f.extra || null, RS = V.recStatus && V.recStatus[f.id]; return `<article class="fcard" id="f-${esc(f.id)}" tabindex="-1" aria-label="${esc(R.sevNames[f.sev] + ", " + f.claim)}">
+        <div class="tags">${sev(f)}${f.axis ? `<span class="axis">${esc(f.axis)}</span>` : ""}<small>${[anc(f), f.confidence ? esc(f.confidence) : ""].filter(Boolean).join(", ")}</small></div>
+        ${RS ? `<p class="rstatus" role="status">${stateLabel(RS.note ? `${RS.word},` : RS.word, RS.tone, true)}${RS.note ? `<span class="note"> ‘${esc(RS.note)}’</span>` : ""}</p>` : ""}
+        <p class="claim">${esc(f.claim)}</p>
+        ${cbody(f.id)}
+      </article>`; };
+    const CK = C.cards && C.cards.states[stateId] || {};
+    const cbody = (fid) => { const key = CK[fid], ent = key && C.cards.catalog[key]; if (!ent) return "";
+      return ent.blocks.map((b) => `<span class="patch-label">${esc(b.label)}</span>${(b.paragraphs || []).map((p) => `<p class="why">${esc(p)}</p>`).join("")}${b.patch != null ? `${b.provenance ? `<small class="cprov">${esc(b.provenance)}</small>` : ""}<pre class="patch" aria-label="${esc(b.label)}">${b.patch.split("\n").map((l) => `<span data-t="${l[0] === "-" ? "-" : l[0] === "+" ? "+" : " "}">${esc(l)}</span>`).join("")}</pre>` : ""}`).join(""); };
+    const card = (f) => RXS ? cardRich(rf(f.id)) : collapsed(f) || (REC ? cardRec(f) : cardFull(f));
+    const ppl = R.people || {};
+    const ava = (a, size) => a.agent ? reviewerAgent(a.talking ? "working" : "ready", !!a.talking, size || 24) : `<span class="ava" aria-hidden="true">${esc((ppl[a.name] || {}).initials || a.name[0])}</span>`;
+    const post = (p) => `<li class="tpost">${ava(p)}<div><p class="ph"><b>${esc(p.name)}</b><small>${esc(p.at)}</small></p>${p.streaming ? `<p class="streaming" role="status" aria-live="polite">${esc(p.body)}<span class="caret" aria-hidden="true"></span></p><small class="ans">${spin}${esc(R.copy.answering)}</small>` : `<p>${esc(p.body)}</p>`}</div></li>`;
+    const composer = (id, o = {}) => `<form class="reply"${o.focus ? " data-focus" : ""} onsubmit="return false"><label class="sr" for="r-${esc(id)}">${esc(o.label || R.copy.replyLabel)}</label><textarea id="r-${esc(id)}" rows="${o.focus ? 2 : 1}" placeholder="${esc(o.placeholder || R.copy.replyPh)}"></textarea>${o.hint ? `<small class="rhint">${esc(o.hint)}</small>` : ""}<div class="reply-actions">${btn(o.send || R.copy.reply, "secondary")}${o.resolve ? btn(R.copy.resolveThread, "quiet") : ""}</div></form>`;
+    const fthread = (f) => { if (!TM) return ""; const t = THS.find((x) => x.finding === f.id) || { replies: [] }; return `<div class="tposts">${t.replies.length ? `<ol class="tlist" aria-label="${esc(R.copy.repliesLabel)}">${t.replies.map(post).join("")}</ol>` : ""}${RO ? "" : composer(f.id, t.ask ? { focus: true, placeholder: t.ask.placeholder, send: t.ask.send, label: t.ask.placeholder } : {})}</div>`; };
+    const collapsed = (f) => { const txt = DIS[f.id] || RES[f.id]; if (!TM || !txt) return ""; return `<div class="fcard fline" id="f-${esc(f.id)}" tabindex="-1" aria-label="${esc(f.claim + ", " + txt)}">${sev(f)}<span class="fl-text"><span class="fl-claim">${esc(f.claim)}</span><span>${esc(txt)}</span></span>${btn(R.copy.reopen, "secondary")}</div>`; };
+    const DF = R.copy.dismissForm;
+    const formHere = (f) => TM && V.dismissForm && V.dismissForm.finding === f.id && !phone;
+    const dform = () => `<form class="dform" data-region="form" aria-label="${esc(DF.title)}" onsubmit="return false"><fieldset><legend>${esc(DF.legend)}</legend>${DF.reasons.map((r, i) => `<label class="radio"><input type="radio" name="dismiss-reason" value="${i}"${r === V.dismissForm.reason ? " checked" : ""}><span>${esc(r)}</span></label>`).join("")}</fieldset><label class="note"><span>${esc(DF.note)}</span><textarea rows="2">${esc(V.dismissForm.note)}</textarea></label><div class="actions">${btn(DF.submit, "primary")}${btn(DF.cancel, "secondary")}</div></form>`;
+    const tcard = (t) => {
+      const loc = `<div class="tags"><span class="axis">${esc(R.copy.comment)}</span><small><code>${esc(t.file + ":" + t.line)}</code></small></div>`;
+      if (RES[t.id]) return `<div class="fcard fline" id="t-${esc(t.id)}" tabindex="-1" aria-label="${esc(R.copy.comment + ", " + t.root.body + ", " + RES[t.id])}">${ava(t.root)}<span class="fl-text"><span class="fl-claim">${esc(t.root.body)}</span><span>${esc(RES[t.id])}</span></span>${btn(R.copy.reopen, "secondary")}</div>`;
+      const inner = `<ol class="tlist">${[t.root, ...t.replies].map(post).join("")}</ol>${RO ? "" : composer(t.id, { resolve: true })}`;
+      if (t.outdated) return "";
+      return `<article class="fcard thread" id="t-${esc(t.id)}" tabindex="-1" aria-label="${esc(R.copy.commentBy.replace("{name}", t.root.name) + ", " + t.root.body)}">${loc}${inner}</article>`;
+    };
+    const crow = (t) => `<a href="#t-${esc(t.id)}" class="frow crow" aria-label="${esc([R.copy.comment, t.outdated ? R.copy.outdatedTag : "", RES[t.id] ? R.copy.resolvedWord : "", t.root.name, t.root.body, t.file + ":" + t.line, t.replies.length ? nReplies(t.replies.length) : ""].filter(Boolean).join(", "))}">${ava(t.root)}<span><span class="tags"><span class="axis">${esc(R.copy.comment)}</span>${t.outdated ? `<span class="tag-old">${esc(R.copy.outdatedTag)}</span>` : ""}${RES[t.id] ? stateLabel(R.copy.resolvedWord, "positive", true) : ""}</span><span class="claim">${esc(t.root.body)}</span><small><code>${esc(t.file + ":" + t.line)}</code><span>${esc(t.root.name)}</span>${t.replies.length ? `<span>${esc(nReplies(t.replies.length))}</span>` : ""}</small></span></a>`;
+    const ST = R.copy.subtabs;
+    const subtabs = LV ? `<nav class="rtabs" aria-label="${esc(ST.label)}" data-region="subtabs">${ST.items.filter((t) => t.id !== "guide").map((t) => `<a href="#" class="rtab" aria-current="${t.id === (S.subtab || "review") ? "page" : "false"}">${esc(t.label)}</a>`).join("")}</nav>` : RXS ? `<nav class="rtabs" aria-label="${esc(ST.label)}" data-region="subtabs">${ST.items.filter((t) => t.id !== "guide").map((t) => `<a href="#" class="rtab" aria-current="${t.id === "review" ? "page" : "false"}">${esc(t.label)}</a>`).join("")}</nav>` : TM ? `<nav class="rtabs" aria-label="${esc(ST.label)}" data-region="subtabs">${ST.items.map((t) => `<a href="#" class="rtab" aria-current="${t.id === (S.subtab || "review") ? "page" : "false"}">${esc(t.label)}</a>`).filter((x, i) => !(V.conv && V.conv.noCount && ST.items[i].id === "guide")).join("")}</nav>` : "";
+    const ckTone = P.checksTone;
+    const SPN = '<span class="spin" aria-hidden="true"></span>';
+    const ckItem = (c) => `<li class="ck"><span class="ck-state">${c.state === "running" ? stateLabel(c.word, "progress", true).replace(/<svg[\s\S]*?<\/svg>/, SPN) : stateLabel(c.word, c.tone, true)}</span><span class="ck-body"><b>${esc(c.name)}</b>${c.detail ? `<span>${esc(c.detail)}</span>` : ""}<small>${esc(c.time)}</small></span><span class="ck-actions">${c.fix ? btn(c.fix, "primary") : ""}${c.rerun ? btn(c.rerun, "secondary") : ""}<a href="#" class="clink">${esc(R.copy.viewLog)}</a></span></li>`;
+    const prHead = `<section class="panel pr" aria-label="${esc(P.aria)}" data-region="detail">
+        <div class="pr-top"><span>${esc(P.repo)}</span><b>#${esc(P.number)}</b></div>
+        <h2>${esc(P.title)}</h2>
+        <div class="pr-meta"><span class="nowrap"><code>${esc(P.branch)}</code> → <code>${esc(P.base)}</code></span><span>${esc(P.author)}</span><span>${esc(P.updated)}</span>${P.cachedApproval ? `<span>${esc(P.cachedApproval)}</span>` : ""}</div>
+        <div class="pr-rows">
+          ${P.cachedApproval ? "" : `<div class="pr-row">${stateLabel(P.approval.state, P.approval.tone, true)}${btn(P.approval.action, "secondary")}<small>${esc(P.approval.note)}</small></div>`}
+          <div class="pr-row">${stateLabel(P.checks, ckTone, true)}${P.checksDetail ? `<small>${esc(P.checksDetail)}</small>` : ""}${V.checkList ? `<button type="button" class="ck-toggle" aria-expanded="true" aria-controls="ck-list">${esc(R.copy.hideChecks)}<relay-glyph name="arrow" size="14"></relay-glyph></button>` : ""}</div>
+        </div>
+        ${V.checkList ? `<ul class="cklist" id="ck-list" aria-label="${esc(R.copy.checksLabel)}" data-region="checks">${V.checkList.map(ckItem).join("")}</ul>` : ""}
+      </section>`;
+    const Q = V.summary;
+    const reviewerAgent = (state, talking, size) => `<relay-agent agent="${esc(R.reviewer.agent)}" host="${esc(R.reviewer.host)}" family="${esc(FAM[R.reviewer.host + ":" + R.reviewer.agent])}" state="${state}" stale="false"${talking ? ' talking="true"' : ""} size="${size}"></relay-agent>`;
+    const STEP_ICON = { done: CHECK_ICON, current: spin, waiting: svg('<circle cx="12" cy="12" r="4"></circle>') };
+    const G = Q.progress;
+    const NR = V.noRun;
+    const HIDE = !!V.hideCounts || !!LEG;
+    const summary = NR ? `<section class="panel sum${NR.notice ? "" : " sum-none"}" aria-label="${esc(R.copy.summaryLabel)}" data-region="summary">${NR.notice ? `<div class="panel notice" role="status" data-region="${TWO_N && NR.notice.title === "Review history unavailable" ? "history-notice" : "notice"}"><div>${stateLabel(NR.notice.title, "caution", true).replace(TONE_ICON.caution, TONE_ICON.critical)}<span class="text">${esc(NR.notice.text)}</span></div>${NR.notice.action ? `<div data-act>${btn(NR.notice.action, "primary", ' data-region="action"')}</div>` : ""}</div>` : `<h2 class="none-title">${esc(NR.title)}</h2>${NR.text ? `<p>${esc(NR.text)}</p>` : ""}${NR.action ? `<div class="sum-actions" data-region="action">${btn(NR.action, "primary")}</div>` : ""}`}</section>` : G ? `<section class="panel sum" aria-label="${esc(R.copy.summaryLabel)}" aria-busy="true" data-region="summary">
+        <div class="prog-head">${reviewerAgent("working", true, 44)}<div><b>${esc(G.title)}</b><small>${esc(G.started)}</small></div></div>
+        <ol class="steps" role="status">${G.steps.map((s) => `<li data-s="${esc(s.state)}">${STEP_ICON[s.state]}<span>${esc(s.label)}</span><span class="sr">, ${esc(R.copy.stepWords[s.state])}</span></li>`).join("")}</ol>
+        <div class="sum-actions" data-region="action">${btn(G.stop, "secondary")}</div>
+        <small class="nap">${esc(R.copy.notApproval)}</small>
+      </section>` : `<section class="panel sum" aria-label="${esc(R.copy.summaryLabel)}" data-region="summary">
+        ${Q.notice ? `<div class="panel notice" role="status" data-region="notice"><div>${stateLabel(Q.notice.title, "neutral", true)}<span class="text">${esc(Q.notice.text)}</span></div>${btn(Q.notice.action, "primary")}</div>` : ""}
+        ${Q.topNotice ? `<div class="panel notice" role="status" data-region="notice"><div>${stateLabel(Q.topNotice.title, "caution", true).replace(TONE_ICON.caution, TONE_ICON.critical)}<span class="text">${esc(Q.topNotice.text)}</span></div></div>` : ""}
+        ${V.mismatch ? `<div class="panel notice" role="status" data-region="notice"><div>${stateLabel(V.mismatch.title, "caution", true)}<span class="text">${esc(V.mismatch.text)}</span></div></div>` : ""}
+        ${Q.failNotice ? `<div class="panel notice" role="status" data-region="notice"><div>${stateLabel(Q.failNotice.title, "caution", true).replace(TONE_ICON.caution, TONE_ICON.critical)}<span class="text">${esc(Q.failNotice.text)}</span></div>${btn(Q.failNotice.action, "primary")}</div>` : ""}
+        ${Q.prose ? `<div class="explain"><h2>${esc(KIND)}</h2>${Q.prose.map((p) => `<p>${esc(p)}</p>`).join("")}</div>` : ""}
+        ${Q.prose ? "" : `<div class="verdict">${Q.wait ? `<p class="vwait" role="status">${SPN}<span>${esc(Q.wait)}</span></p>` : ""}${Q.verdictQuote ? `<blockquote class="vquote"><p>${esc(Q.verdictQuote)}</p></blockquote>` : stateLabel(Q.verdict, Q.tone, false)}<small>${esc(R.copy.notApproval)}</small></div>`}
+        ${Q.changed ? `<p>${esc(Q.changed)}</p>` : ""}
+        ${Q.compare ? `<div class="cmp"><h3>${esc(Q.compare.line)}</h3>
+          <div><h4>${esc(R.copy.resolvedHead)}</h4><ul>${Q.compare.resolved.map((r) => `<li><s>${esc(R.findings[r.id].claim)}</s><small>${esc(r.note)}</small></li>`).join("")}</ul></div>
+          <div><h4>${esc(R.copy.openHead)}</h4><ul>${Q.compare.open.map((id) => `<li>${esc(R.findings[id].claim)}</li>`).join("")}</ul></div>
+          <div><h4>${esc(R.copy.newHead)}</h4><ul>${Q.compare.added.map((id) => `<li><span class="tag-new">${esc(R.copy.newTag)}</span> ${esc(R.findings[id].claim)}</li>`).join("")}</ul></div>
+        </div>` : ""}
+        ${LEG || !(Q.risks || []).length ? "" : `<div><h3>${esc(R.copy.risks)}</h3><ul>${(Q.risks || []).map((r) => `<li>${esc(r)}</li>`).join("")}</ul></div>`}
+        ${V.hideCounts ? "" : `<div class="counts">
+          <div><h3>${esc(R.copy.bySeverity)}</h3><dl>${(Q.bySeverity || []).map(([k, n]) => `<dt>${esc(k)}</dt><dd>${esc(n)}</dd>`).join("")}</dl></div>
+          ${LEG || RO || !(Q.byAxis || []).length ? "" : `<div><h3>${esc(R.copy.byAxis)}</h3><dl>${(Q.byAxis || []).map(([k, n]) => `<dt>${esc(k)}</dt><dd>${esc(n)}</dd>`).join("")}</dl></div>`}
+        </div>`}
+        ${!HIDE && !RO && (Q.fixAll || Q.post) ? `<div class="sum-actions" data-region="action">${Q.fixAll ? btn(Q.fixAll, "primary") : ""}${Q.post ? btn(Q.post, "secondary") : ""}</div>` : ""}
+        ${Q.fixRun ? `<div class="fixrun" data-region="action"><p role="status">${spin}${esc(Q.fixRun.title)}</p><ul>${Q.fixRun.items.map((it) => `<li>${stateLabel(R.copy.runWords[it.state], it.state === "done" ? "positive" : it.state === "applying" ? "progress" : "neutral", true)}<span>${esc(R.findings[it.id].claim)}</span></li>`).join("")}</ul>${btn(Q.fixRun.stop, "secondary")}</div>` : ""}
+        ${R.focus && !HIDE && !REC ? `<span class="chip">${esc(R.focus)}</span>` : ""}
+        ${HIDE || REC ? "" : `<details class="rules"><summary><relay-glyph name="arrow" size="14"></relay-glyph>${esc(R.copy.rules)} (${R.rules.length})</summary><ul>${R.rules.map((r) => `<li><code>${esc(r)}</code></li>`).join("")}</ul></details>`}
+        ${REC ? `<div class="reviewer" data-plain><span>${esc(R.reviewer.line + ", " + KIND)}</span><small>${esc(Q.reviewed)}</small></div>` : `<div class="reviewer">${reviewerAgent("ready", false, 32)}<span>${esc(LEG ? LEG.reviewerLine : R.reviewer.line)}</span><small>${esc(Q.reviewed)}</small></div>`}
+      </section>`;
+    const LN = V.listNotice;
+    let summaryX = summary, listX = null;
+    if (RXS) {
+      const nts = [
+        Q.notice ? `<div class="panel notice" role="status" data-region="notice"><div>${stateLabel(Q.notice.title, "neutral", true)}<span class="text">${esc(Q.notice.text)}</span></div>${btn(Q.notice.action, "primary")}</div>` : "",
+        Q.topNotice ? `<div class="panel notice" role="status" data-region="notice"><div>${stateLabel(Q.topNotice.title, "caution", true).replace(TONE_ICON.caution, TONE_ICON.critical)}<span class="text">${esc(Q.topNotice.text)}</span></div></div>` : "",
+        V.mismatch ? `<div class="panel notice" role="status" data-region="notice"><div>${stateLabel(V.mismatch.title, "caution", true)}<span class="text">${esc(V.mismatch.text)}</span></div></div>` : "",
+        Q.failNotice ? `<div class="panel notice" role="status" data-region="notice"><div>${stateLabel(Q.failNotice.title, "caution", true).replace(TONE_ICON.caution, TONE_ICON.critical)}<span class="text">${esc(Q.failNotice.text)}</span></div>${btn(Q.failNotice.action, "primary")}</div>` : "",
+      ].join("");
+      const BL = {
+        summary: () => RXS.summary ? `<div class="verdict"><blockquote class="vquote"><p>${esc(RXS.summary)}</p></blockquote><small>${esc(R.copy.notApproval)}</small></div>` : "",
+        Risks: () => (Q.risks || []).length ? `<div><h3>${esc(R.copy.risks)}</h3><ul>${Q.risks.map((r) => `<li>${esc(r)}</li>`).join("")}</ul></div>` : "",
+        "By severity": () => (RXS.severity || []).length ? `<div class="counts"><div><h3>${esc(R.copy.bySeverity)}</h3><dl>${RXS.severity.map(([k, n]) => `<dt>${esc(k)}</dt><dd>${esc(n)}</dd>`).join("")}</dl></div></div>` : "",
+        "Change explanation": () => Q.prose ? `<div class="explain"><small>${esc(R.copy.notApproval)}</small><h2>${esc(KIND)}</h2>${Q.prose.map((p) => `<p>${esc(p)}</p>`).join("")}</div>` : "",
+        "sec-cc": () => `<div class="reviewer" data-plain><span>${esc(R.reviewer.line + ", " + (KIND || "Code review"))}</span>${Q.reviewed ? `<small>${esc(Q.reviewed)}</small>` : ""}</div>`,
+      };
+      const blk = RXS.blocks.map((b) => BL[b] ? BL[b]() : "").join("");
+      if (!NR) summaryX = nts || blk ? (V.mismatch ? `${nts}<section class="panel sum" aria-label="${esc(R.copy.summaryLabel)}" data-region="summary">${blk}</section>` : `<section class="panel sum" aria-label="${esc(R.copy.summaryLabel)}" data-region="summary">${nts}${blk}</section>`) : "";
+      const allT = THS.concat(Object.values(R.variants).flatMap((v) => v.threads || []));
+      const trow = (id) => { const t = allT.find((x) => x.id === id); if (!t) return ""; return `<a href="#t-${esc(t.id)}" class="frow crow" data-plain aria-label="${esc([R.copy.comment, t.root.name, t.root.body, t.file + ":" + t.line].join(", "))}"><span><span class="tags"><span class="axis">${esc(R.copy.comment)}</span></span><span class="claim">${esc(t.root.body)}</span><small><code>${esc(t.file + ":" + t.line)}</code><span>${esc(t.root.name)}</span></small></span></a>`; };
+      const xrow = (f) => `<a href="#f-${esc(f.id)}" class="frow" aria-label="${esc(rAria(f))}">${sev(f)}<span>${f.axis ? `<span class="tags"><span class="axis">${esc(f.axis)}</span></span>` : ""}<span class="claim">${esc(f.claim)}</span><small>${anc(f)}${f.confidence ? `<span>${esc(f.confidence)}</span>` : ""}</small></span></a>`;
+      const isMinor = (id) => /^F/.test(id) && !["P0", "P1"].includes(rf(id).sev);
+      const rowOf = (id) => /^T/.test(id) ? trow(id) : xrow(rf(id));
+      const mainIds = RXS.p2 ? RXS.index.filter((id) => !isMinor(id)) : RXS.index, minIds = RXS.p2 ? RXS.index.filter(isMinor) : [];
+      const filt = RXS.filters.length ? `<div class="rly_ToggleGroup-module__root rly_ToggleGroup-module__compact rfilt" role="group" aria-label="${esc(R.copy.filterLabel)}">${RXS.filters.map((t, i) => `<button type="button" class="rly_ToggleGroup-module__item" aria-pressed="${i === 0}" data-state="${i === 0 ? "checked" : "unchecked"}">${esc(t)}</button>`).join("")}</div>` : "";
+      listX = V.noList || (V.mismatch && !RXS.index.length && !LN && !V.threadsNotice) ? "" : `<section class="panel findings" aria-label="${esc(R.copy.threads)}" data-region="list">
+        <div class="fhead"><h2>${esc(R.copy.threads)}</h2>${RXS.total ? `<small>${esc(RXS.total)}</small>` : ""}</div>${filt}
+        ${LN ? noticeBoxX(LN) : ""}
+        ${V.threadsNotice ? `<div class="panel notice" role="status" data-region="notice"><div>${stateLabel(V.threadsNotice.title, "caution", true)}<span class="text">${esc(V.threadsNotice.text)}</span></div><div data-act>${btn(V.threadsNotice.action, "primary", ' data-region="action"')}</div></div>` : ""}
+        ${mainIds.map(rowOf).join("")}
+        ${RXS.p2 ? `<button type="button" class="fgroup" aria-expanded="${RXP2}" aria-controls="p2-list"><relay-glyph name="arrow" size="14"></relay-glyph>${esc(RXS.p2.text)}</button>${RXP2 ? `<div class="p2" id="p2-list">${minIds.map(rowOf).join("")}</div>` : ""}` : ""}
+        ${!RXS.index.length && !LN && V.noneText ? `<p class="fnone">${esc(V.noneText)}</p>` : ""}
+      </section>`;
+    }
+    if (RXS && LV && LV.index) {
+      const IX = LV.index, MAJ = ["P0", "P1"];
+      const stTone = (s) => /^Resolved/.test(s) ? "positive" : /^Fix pushed/.test(s) ? "caution" : "neutral";
+      const ancL = (a) => a === WHOLE ? `<span>${esc(a)}</span>` : `<code>${esc(a)}</code>`;
+      const lrow = (r) => {
+        const L = r.lines;
+        if (r.source === "comment") { const k = 1 + r.status.length, body = L[k], path = L[k + 1], who = L[k + 2];
+          return `<a href="#t-${esc(r.id)}" class="frow crow" aria-label="${esc([...r.status, body, path, who, r.replies].filter(Boolean).join(", "))}"><span class="ava" aria-hidden="true">${esc(r.initial)}</span><span><span class="tags">${r.status.map((t, i) => i === 0 ? `<span class="axis">${esc(t)}</span>` : `<span class="tag-old">${esc(t)}</span>`).join("")}</span><span class="claim">${esc(body)}</span><small><code>${esc(path)}</code><span>${esc(who)}</span>${r.replies ? `<span>${esc(r.replies)}</span>` : ""}</small></span></a>`; }
+        const full = L.length >= 5, f = { id: r.id, sev: L[0], axis: full ? L[1] : null, claim: full ? L[2] : L[1], anchor: full ? L[3] : L[2], confidence: full ? L[4] : null }, stl = full ? L[5] : null;
+        return `<a href="#f-${esc(f.id)}" class="frow" aria-label="${esc([R.sevNames[f.sev], f.axis, f.claim, f.anchor, f.confidence, stl].filter(Boolean).join(", "))}">${sev(f)}<span>${f.axis ? `<span class="tags"><span class="axis">${esc(f.axis)}</span></span>` : ""}<span class="claim">${esc(f.claim)}</span><small>${ancL(f.anchor)}${f.confidence ? `<span>${esc(f.confidence)}</span>` : ""}</small>${stl ? `<span class="rstatus">${stateLabel(stl.replace(/^(Dismissed: [^‘,]+?)\s+‘/, "$1, ‘"), stTone(stl), true)}</span>` : ""}</span></a>`;
+      };
+      const isMin = (r) => r.source === "agent" && !MAJ.includes(r.lines[0]);
+      const D = IX.disclosure[0] || null;
+      const mainR = D ? IX.rows.filter((r) => !isMin(r)) : IX.rows, minR = D ? IX.rows.filter(isMin) : [];
+      const filt = IX.filters.length ? `<div class="rly_ToggleGroup-module__root rly_ToggleGroup-module__compact rfilt" role="group" aria-label="${esc(R.copy.filterLabel)}">${IX.filters.map(([t, on]) => `<button type="button" class="rly_ToggleGroup-module__item" aria-pressed="${!!on}" data-state="${on ? "checked" : "unchecked"}">${esc(t)}</button>`).join("")}</div>` : "";
+      listX = `<section class="panel findings" aria-label="${esc(IX.title)}" data-region="list">
+        <div class="fhead"><h2>${esc(IX.title)}</h2>${IX.total ? `<small>${esc(IX.total)}</small>` : ""}</div>${filt}
+        ${LN ? noticeBoxX(LN) : ""}
+        ${V.threadsNotice ? `<div class="panel notice" role="status" data-region="notice"><div>${stateLabel(V.threadsNotice.title, "caution", true)}<span class="text">${esc(V.threadsNotice.text)}</span></div>${V.threadsNotice.action ? `<div data-act>${btn(V.threadsNotice.action, "primary", ' data-region="action"')}</div>` : ""}</div>` : ""}
+        ${mainR.map(lrow).join("")}
+        ${D ? `<button type="button" class="fgroup" aria-expanded="${!!D.open}" aria-controls="p2-list"><relay-glyph name="arrow" size="14"></relay-glyph>${esc(D.text)}</button>${D.open ? `<div class="p2" id="p2-list">${minR.map(lrow).join("")}</div>` : ""}` : ""}
+      </section>`;
+    }
+    function noticeBoxX(N) { return `<div class="panel notice" role="status" data-region="notice"><div>${stateLabel(N.title, "caution", true).replace(TONE_ICON.caution, TONE_ICON.critical)}<span class="text">${esc(N.text)}</span></div>${N.action ? btn(N.action, "primary", ' data-region="action"') : ""}</div>`; }
+    const noticeBox = (N) => `<div class="panel notice" role="status" data-region="notice"><div>${stateLabel(N.title, "caution", true).replace(TONE_ICON.caution, TONE_ICON.critical)}<span class="text">${esc(N.text)}</span></div>${N.action ? btn(N.action, "primary", ' data-region="action"') : ""}</div>`;
+    const list = V.noList ? "" : LN ? `<section class="panel findings" aria-label="${esc(R.copy.threads)}" data-region="list"><div class="fhead"><h2>${esc(R.copy.threads)}</h2></div>${noticeBox(LN)}</section>` : `<section class="panel findings" aria-label="${esc(TM ? R.copy.threads : R.copy.findings)}" data-region="list">
+        <div class="fhead"><h2>${esc(TM ? R.copy.threads : R.copy.findings)}</h2>${V.kbHint ? `<span class="kbhint" aria-hidden="true"><kbd>j</kbd><kbd>k</kbd><span>${esc(V.kbHint)}</span></span>` : ""}<small>${esc(TM ? V.threadCount : Q.findingsCount)}</small></div>${TM ? `<div class="chips" role="group" aria-label="${esc(R.copy.filterLabel)}">${(V.chips || []).map((c) => `<a href="#" class="fchip" aria-pressed="${c.current ? "true" : "false"}" aria-label="${esc(c.label + ", " + c.count)}">${esc(c.label)}<span>${esc(c.count)}</span></a>`).join("")}</div>` : ""}
+        ${V.threadsNotice ? `<div class="panel notice" role="status" data-region="notice"><div>${stateLabel(V.threadsNotice.title, "caution", true)}<span class="text">${esc(V.threadsNotice.text)}</span></div><div data-act>${btn(V.threadsNotice.action, "primary", ' data-region="action"')}</div></div>` : ""}
+        ${G ? `<p class="fnone" role="status">${esc(R.copy.appearLive)}</p>` : ""}${blocking.length ? blocking.filter((f) => !DIS[f.id]).map(frow).join("") : G || NR ? "" : `<p class="fnone">${esc(V.noneText || R.copy.noneBlocking)}</p>`}${comments.map(crow).join("")}
+        ${minor.length ? `<button type="button" class="fgroup" aria-expanded="${!!S.p2Open}" aria-controls="p2-list"><relay-glyph name="arrow" size="14"></relay-glyph>${esc(R.copy.p2Group)} (${minor.length})</button>${S.p2Open ? `<div class="p2" id="p2-list">${minor.map(frow).join("")}</div>` : ""}` : ""}
+      </section>`;
+    const lines = (file) => file.hunks.map((hk) => `<div class="hunk">${esc(hk.head)}</div>` + hk.lines.map((l) => {
+      const text = (V.lineText && V.lineText[file.path + ":" + l.n]) || l.s;
+      const hits = SEP ? [] : F.filter((f) => shown.has(f.id) && !GRP.has(f.id) && f.file === file.path && f.line === l.n && l.t !== "-");
+      const ths = comments.filter((t) => !t.outdated && t.file === file.path && t.line === l.n && l.t !== "-");
+      return `<div class="ln" data-t="${esc(l.t)}"${hits.length || ths.length ? " data-hit" : ""}><span>${esc(l.o || "")}</span><span>${esc(l.t === "-" ? "" : l.n)}</span><span aria-hidden="true">${esc(l.t === " " ? "" : l.t)}</span><code>${esc(text)}</code></div>${hits.map(card).join("")}${ths.map(tcard).join("")}`;
+    }).join("")).join("");
+    const unanch = SEP || RXS ? [] : F.filter((f) => shown.has(f.id) && !f.file);
+    const recd = SEP && !RXS ? F.filter((f) => shown.has(f.id)) : [];
+    const FP = V.filePane, DN = V.diffNotice, RH = V.mismatch ? R.copy.recordedHead : R.copy.unanchoredHead;
+    const cNotice = (title, text, action, region) => `<div class="panel notice" role="status" data-region="${region || "notice"}"><div>${stateLabel(title, "caution", true)}${text ? `<span class="text">${esc(text)}</span>` : ""}</div>${action ? `<div data-act>${btn(action, "primary", ' data-region="action"')}</div>` : ""}</div>`;
+    const IP = C.invalidPatch;
+    const rawPre = (t) => (t.startsWith("\n") ? "\n" : "") + esc(t);
+    const paneBody = !FP ? "" : FP.kind === "reading" ? `<p class="dpend" role="status" aria-live="polite" data-region="status">${esc(FP.text)}</p>`
+      : FP.kind === "unavailable" ? cNotice(FP.title, FP.text, FP.action || V.readyAction)
+      : `${cNotice(FP.title)}<h3>${esc(R.copy.rawBefore)}</h3><pre>${rawPre(IP.before == null ? R.copy.fileAbsent : IP.before)}</pre><h3>${esc(R.copy.rawAfter)}</h3><pre>${rawPre(IP.after == null ? R.copy.fileAbsent : IP.after)}</pre>`;
+    const SR = (C.stateRows && C.stateRows[stateId]) || (C.stateRowsAdd && C.stateRowsAdd[stateId]) || null;
+    const statOf = (p) => (R.files.find((x) => x.path === p) || {}).stat || "";
+    const annot = (id) => { if (hideMinor(id)) return ""; if (/^F/.test(id)) { const f = F.find((x) => x.id === id) || R.findings[id]; return f ? card(f) : ""; } const T = TXT_THREADS[id]; return T ? txtThread(T) : ""; };
+    const TXT_THREADS = { T1: { source: "CodeCommit", anchor: "web/src/stage/useStageSocket.ts:86", messages: [
+      { author: "Mira", dateTime: "2026-10-11T14:06:00.000Z", title: "11 Oct 2026, 14:06", time: "14:06", body: "Should this back off on 4xx too?" },
+      { author: "Ellis", dateTime: "2026-10-11T14:12:00.000Z", title: "11 Oct 2026, 14:12", time: "14:12", body: "Agreed. Stop on 401 and 403, keep the backoff for 5xx." } ] } };
+    const txtThread = (T) => `<article class="panel othread" aria-label="${esc(T.source + ", " + T.anchor)}"><div class="tags"><span class="axis">${esc(T.source)}</span><small><code>${esc(T.anchor)}</code></small></div><ol>${T.messages.map((m) => `<li><div><b>${esc(m.author)}</b><time datetime="${esc(m.dateTime)}" title="${esc(m.title)}">${esc(m.time)}</time></div><p>${esc(m.body)}</p></li>`).join("")}</ol></article>`;
+    const srow = (r) => typeof r === "string" ? `<tr class="hk"><td colspan="4">${esc(r)}</td></tr>`
+      : Array.isArray(r) ? `<tr data-t="${r[2] === "+" ? "+" : r[2] === "−" ? "-" : " "}"><td class="num">${esc(r[0])}</td><td class="num">${esc(r[1])}</td><td class="mk">${esc(r[2] === " " ? "" : r[2])}</td><td class="code">${r[3] === " " ? "" : esc(r[3])}</td></tr>`
+      : r && r.annotation ? `<tr class="ann"><td colspan="4">${annot(r.annotation)}</td></tr>` : "";
+    const secs = SR ? (SR.sections.length ? SR.sections : [["web/src/stage/useDraft.ts", []]]) : [];
+    const srBlocks = secs.map(([p, rows]) => `<div class="panel dfile">${FP && FP.kind === "reading" && p === FP.selected && !rows.length ? "" : `<div class="dfile-head"><b>${esc(p)}</b>${RXS ? "" : `<span>${esc(statOf(p))}</span>`}</div>`}${FP && p === FP.selected && !rows.length ? paneBody : `<table class="dtab"><colgroup><col class="n"><col class="n"><col class="m"><col></colgroup><thead><tr><th scope="col">${esc(R.copy.rawBefore)}</th><th scope="col">${esc(R.copy.rawAfter)}</th><th scope="colgroup" colspan="2">Change</th></tr></thead><tbody>${rows.map(srow).join("")}</tbody></table>`}</div>`).join("");
+    const OT = C.outdatedThread;
+    const oth = OT && (comments.some((t) => t.outdated) || stateId === "read-retained") ? `<article class="panel othread" aria-label="${esc(OT.label + ", " + OT.source + ", " + OT.anchor)}"><div class="tags"><span class="axis">${esc(OT.source)}</span><small><code>${esc(OT.anchor)}</code></small><span class="tag-old">${esc(OT.label)}</span></div><ol>${OT.messages.map((m) => `<li><div><b>${esc(m.author)}</b><time datetime="${esc(m.dateTime)}" title="${esc(m.title)}">${esc(m.time)}</time></div><p>${esc(m.body)}</p></li>`).join("")}</ol></article>` : "";
+    function grpSec(g) { const rec = g.heading === R.copy.recordedHead; return `<section class="panel ${rec ? "recorded" : "unanch"}" aria-label="${esc(g.heading)}" data-region="${rec ? "recorded" : "unanchored"}"><div class="fhead"><h2>${esc(g.heading)}</h2>${g.count != null ? `<small>${esc(g.count)}</small>` : ""}</div>${g.cards.map((id) => card(rf(id))).join("")}</section>`; }
+    const diff = `<div class="diff">
+        ${recd.length ? `<section class="panel ${V.mismatch ? "recorded" : "unanch"}" aria-label="${esc(RH)}" data-region="${V.mismatch ? "recorded" : "unanchored"}"><div class="fhead"><h2>${esc(RH)}</h2><small>${recd.length}</small></div>${recd.map(card).join("")}</section>` : ""}
+        ${GROUPS.filter((g) => g.heading === R.copy.recordedHead).map(grpSec).join("")}
+        <section aria-label="${esc(R.copy.diffLabel)}" class="diff" data-region="diff">${DN ? cNotice(DN.title) : ""}${SR ? srBlocks : R.files.map((file) => `<div class="panel dfile"><div class="dfile-head"><b>${esc(file.path)}</b>${RXS ? "" : `<span>${esc(file.stat)}</span>`}</div>${FP && file.path === FP.selected ? paneBody : lines(file)}</div>`).join("")}</section>
+        ${GROUPS.filter((g) => g.heading !== R.copy.recordedHead).map(grpSec).join("")}
+        ${oth}
+        ${unanch.length ? `<section class="panel unanch" aria-label="${esc(R.copy.unanchoredHead)}" data-region="unanchored"><div class="fhead"><h2>${esc(R.copy.unanchoredHead)}</h2><small>${unanch.length}</small></div>${unanch.map(card).join("")}</section>` : ""}
+      </div>`;
+    const CV = R.conversation, mark = (s) => `<span class="smark" data-s="${esc(s)}" aria-hidden="true">${esc(CV.sources[s].glyph)}</span>`;
+    const citem = (it) => `<li class="citem"${it.resolved ? " data-resolved" : ""}>
+        <div class="csrc">${it.source === "agent" ? "" : mark(it.source)}<span>${esc(CV.sources[it.source].name)}</span>${it.channel ? `<span>${esc(it.channel)}</span>` : ""}${it.resolved ? stateLabel(it.resolved, "positive", true) : stateLabel(CV.unresolvedWord, "neutral", true)}</div>
+        <ol class="tlist">${it.posts.map(post).join("")}</ol>
+        ${it.source === "slack" ? `<a href="#" class="clink" target="_blank" rel="noopener">${esc(CV.openSlack)}<span aria-hidden="true">↗</span></a>${composer("slack", { placeholder: CV.slackPh, label: CV.slackPh, hint: CV.slackHint })}` : `<div class="reply-actions">${btn(R.copy.reply, "secondary")}</div>`}
+      </li>`;
+    const VC = V.conv || null, DATE = C.meta.date, WHOLE_PR = "Whole pull request";
+    const tm = (at) => `<time title="${esc(DATE + ", " + at)}">${esc(at)}</time>`;
+    const rpost = (p) => `<li class="tpost" data-plain><div><p class="ph"><b>${esc(p.name)}</b><small>${tm(p.at)}</small></p><p${p.deleted ? ' class="cdel"' : ""}>${esc(p.deleted ? R.copy.commentDeleted : p.body)}</p></div></li>`;
+    const rItems = VC ? VC.items.filter((it) => it.kind === "agent" || it.posts.length) : [];
+    const rUnres = rItems.filter((it) => it.kind !== "agent" && !it.resolved).length;
+    const ritem = (it) => it.kind === "agent" ? `<li class="citem cagent"><div class="csrc"><span>${esc(CV.sources.agent.name)}</span></div><p>${esc(it.body)}</p><div class="reviewer" data-plain><span>${esc(R.reviewer.line + ", " + it.kind_label)}</span><small>${esc(it.reviewedWord)} ${tm(it.at)}, ${esc(DATE)}</small></div></li>`
+      : `<li class="citem">
+        <div class="csrc">${it.finding ? `<a href="#f-${esc(it.finding)}" class="cfind" title="${esc(R.findings[it.finding].claim)}">${sev(R.findings[it.finding])}<span class="cclaim">${esc(R.findings[it.finding].claim)}</span></a>` : `${mark(it.source)}<span>${esc(CV.sources[it.source].name)}</span>${VC.noCount ? `<small>${esc(WHOLE_PR)}</small>` : ""}`}${VC.noCount ? "" : stateLabel(CV.unresolvedWord, "neutral", true)}</div>
+        <ol class="tlist">${it.posts.map(rpost).join("")}</ol>
+      </li>`;
+    const rconv = VC ? `<section class="panel conv" aria-label="${esc(CV.title)}" data-region="list"><div class="fhead"><h2>${esc(CV.title)}</h2>${VC.noCount ? "" : `<small>${esc(CV.unresolvedWord + " " + rUnres)}</small>`}</div>${VC.notice ? `<div class="panel notice" role="status" data-region="notice"><div>${stateLabel(VC.notice.title, "caution", true)}<span class="text">${esc(VC.notice.text)}</span></div></div>${VC.notice.action ? `<div class="cact">${btn(VC.notice.action, "primary", ' data-region="action"')}</div>` : ""}` : ""}<ol class="clist">${rItems.map(ritem).join("")}</ol></section>` : "";
+    const lmark = () => "";
+    const ltime = (m) => `<time datetime="${esc(m.dateTime)}" title="${esc(m.title)}">${esc(m.time)}</time>`;
+    const lnotice = (n) => `<div class="panel notice" role="status" data-region="${TWO_N && n.title === "Review history unavailable" ? "history-notice" : "notice"}"><div>${stateLabel(n.title, "caution", true)}${n.lines.map((l) => `<span class="text">${esc(l)}</span>`).join("")}</div>${n.inBtn ? `<div data-act>${btn(RA, "primary", ' data-region="action"')}</div>` : ""}</div>`;
+    const lci = (it) => {
+      if (it.kind === "summary") { const ps = it.text.split("\n\n"), pv = (ps[2] || "").split("\n"); return `<li class="citem cagent"><div class="csrc"><span>${esc(ps[0])}</span></div>${ps[1] ? `<p>${esc(ps[1])}</p>` : ""}${pv[0] ? `<div class="reviewer" data-plain><span>${esc(pv[0])}</span>${pv[1] ? `<small>${tm(pv[1])}</small>` : ""}</div>` : ""}</li>`; }
+      const [src, anchor] = it.header;
+      return `<li class="citem">
+        <div class="csrc">${lmark(it.source)}<span>${esc(src)}</span>${anchor ? (anchor === WHOLE_PR ? `<small>${esc(anchor)}</small>` : `<small><code>${esc(anchor)}</code></small>`) : ""}</div>
+        ${it.lead ? `<a href="#f-${esc(it.id)}" class="cfind" title="${esc(it.lead[1])}">${sev({ sev: it.lead[0] })}<span class="cclaim">${esc(it.lead[1])}</span></a>` : ""}
+        <ol class="tlist">${it.messages.map((m) => `<li class="tpost" data-plain><div><p class="ph"><b>${esc(m.author)}</b><small>${ltime(m)}</small></p><p${m.body === R.copy.commentDeleted ? ' class="cdel"' : ""}>${esc(m.body)}</p></div></li>`).join("")}</ol>
+      </li>`;
+    };
+    const LH = LV && LV.conversationHead;
+    const LNOHEAD = LH && LH[0] !== CV.title;
+    const lconv = LV && LV.conversation && S.subtab === "conversation" ? `<section class="panel conv" aria-label="${esc(CV.title)}" data-region="list">${LNOHEAD ? `${LNS.slice(0, 1).map(lnotice).join("")}<div class="fhead"><h2>${esc(CV.title)}</h2></div>${LNS.slice(1).map(lnotice).join("")}` : `<div class="fhead"><h2>${esc(CV.title)}</h2>${LH && /^Unresolved/.test(LH[1] || "") ? `<small>${esc(LH[1])}</small>` : ""}</div>${LNS.map(lnotice).join("")}`}${LACT.includes("conversation") ? `<div class="cact">${btn(RA, "primary", ' data-region="action"')}</div>` : ""}${LV.conversation.length ? `<ol class="clist">${LV.conversation.map(lci).join("")}</ol>` : ""}</section>` : "";
+    const conv = lconv ? lconv : TM && S.subtab === "conversation" && VC ? rconv : TM && S.subtab === "conversation" && LN ? `<section class="panel conv" aria-label="${esc(CV.title)}" data-region="list"><div class="fhead"><h2>${esc(CV.title)}</h2></div>${noticeBox(LN)}</section>` : TM && S.subtab === "conversation" ? `<section class="panel conv" aria-label="${esc(CV.title)}" data-region="list"><div class="fhead"><h2>${esc(CV.title)}</h2><small>${esc(CV.count)}</small></div><ol class="clist">${CV.items.map(citem).join("")}</ol></section>` : "";
+    const GD = TM && S.subtab === "guide" ? R.guide : null;
+    let guide = "";
+    if (GD && V.guideNone) {
+      const GN = V.guideNone;
+      guide = `<section class="panel gbody gnone" aria-labelledby="g-title" data-region="guide"><h2 id="g-title">${esc(GN.title)}</h2>${GN.text ? `<p>${esc(GN.text)}</p>` : ""}${GN.action ? `<div class="gnext" data-region="action">${btn(GN.action, "primary")}</div>` : ""}</section>`;
+    } else if (GD) {
+      const ch = GD.chapters, oi = S.chapter - 1, O = ch[oi], prev = ch[oi - 1], next = ch[oi + 1], read = new Set(S.read || []);
+      const of = GD.chapterOf.replace("{n}", oi + 1).replace("{t}", ch.length);
+      const arrow = (dir, c) => `<button type="button" class="gnav" data-dir="${dir}" aria-label="${esc((dir === "prev" ? GD.prevLabel : GD.nextLabel) + ": " + c.title)}"><relay-glyph name="arrow" size="18"></relay-glyph></button>`;
+      const rail = `<nav class="panel grail" aria-label="${esc(GD.railLabel)}" data-region="chapters"><h2>${esc(GD.railLabel)}</h2><ol>${ch.map((c, i) => `<li><a href="#" class="gch" aria-current="${i === oi ? "step" : "false"}"${read.has(i + 1) ? " data-read" : ""}><span class="gnum" aria-hidden="true">${read.has(i + 1) ? CHECK_ICON : i + 1}</span><span>${esc(c.title)}</span>${read.has(i + 1) ? `<span class="sr">, ${esc(GD.readWord)}</span>` : ""}</a></li>`).join("")}</ol>
+        <div class="gout"><h3>${esc(GD.outside.title)}</h3><ul>${GD.outside.files.map((p) => { const f = R.files.find((x) => x.path === p); return `<li><a href="#"><code>${esc(p)}</code><span>${esc(f.stat)}</span></a></li>`; }).join("")}</ul></div></nav>`;
+      const CL = O.checklist ? `<section class="gcheck" aria-labelledby="ck-title" data-region="checklist"><h3 id="ck-title">${esc(GD.checklistTitle)}</h3><ul>${O.checklist.map((it) => `<li><span class="gq">${esc(it.q)}</span>${stateLabel(it.a, it.a === "Yes" ? "positive" : it.a === "No" ? "caution" : "neutral", true)}<small>${esc(it.note)}</small></li>`).join("")}</ul></section>` : "";
+      guide = `${rail}<section class="panel gbody" aria-labelledby="g-title" data-region="guide">
+        <div class="gswitch">${prev ? arrow("prev", prev) : '<span class="gnav-gap"></span>'}<div><small>${esc(of)}</small><b>${esc(O.title)}</b></div>${next ? arrow("next", next) : '<span class="gnav-gap"></span>'}</div>
+        <div class="ghead"><div><small>${esc(of)}</small><h2 id="g-title">${esc(O.title)}</h2></div>${V.noRun ? "" : `<div class="gseg" role="group" aria-label="${esc(GD.viewLabel)}">${GD.views.map((v, i) => `<a href="#" class="gseg-item" aria-pressed="${i === 0}">${esc(v)}</a>`).join("")}</div>`}</div>
+        <div class="gprose"><h3>${esc(GD.problem)}</h3><p>${esc(O.problem)}</p>
+          <div class="gba"><div><h3>${esc(GD.before)}</h3><p>${esc(O.before)}</p></div><div><h3>${esc(GD.after)}</h3><p>${esc(O.after)}</p></div></div>
+          <h3>${esc(GD.decisions)}</h3><ul>${O.decisions.map((d) => `<li>${esc(d)}</li>`).join("")}</ul></div>
+        <div class="ghunks" data-region="diff">${O.hunks.map(([p, i]) => { const f = R.files.find((x) => x.path === p); return `<div class="panel dfile"><div class="dfile-head"><b>${esc(p)}</b><span>${esc(f.stat)}</span></div>${lines({ ...f, hunks: [f.hunks[i]] })}</div>`; }).join("")}</div>
+        ${CL}
+        ${next ? `<div class="gnext" data-region="action">${btn(GD.next.replace("{t}", next.title), "primary")}</div>` : ""}
+      </section>`;
+    }
+    const FM = V.focusMode, FXC = R.copy.focus;
+    let focus = "";
+    if (FM) {
+      const FF = R.findings[FM.id], ff = R.files.find((x) => x.path === FF.file), hk = ff.hunks[FM.hunk];
+      const plain = `<div class="hunk">${esc(hk.head)}</div>` + hk.lines.map((l) => `<div class="ln" data-t="${esc(l.t)}"${l.n === FF.line && l.t !== "-" ? " data-hit" : ""}><span>${esc(l.o || "")}</span><span>${esc(l.t === "-" ? "" : l.n)}</span><span aria-hidden="true">${esc(l.t === " " ? "" : l.t)}</span><code>${esc(l.s)}</code></div>`).join("");
+      focus = `<section class="panel ffocus" aria-labelledby="ff-title" data-region="detail">
+        <div class="ff-top"><a href="#" class="ff-back"><relay-glyph name="arrow" size="16"></relay-glyph>${esc(FXC.back)}</a><div class="ff-pager"><button type="button" class="gnav" data-dir="prev" aria-label="${esc(FXC.prev)}"><relay-glyph name="arrow" size="18"></relay-glyph></button><span aria-live="polite">${esc(FXC.pos)}</span><button type="button" class="gnav" data-dir="next" aria-label="${esc(FXC.next)}"><relay-glyph name="arrow" size="18"></relay-glyph></button></div></div>
+        <div class="tags">${sev(FF)}<span class="axis">${esc(FF.axis)}</span><small><code>${esc(where(FF))}</code><span>${esc(FF.confidence)}</span></small></div>
+        <h2 id="ff-title">${esc(FF.claim)}</h2>
+        <div class="panel dfile" data-region="diff"><div class="dfile-head"><b>${esc(ff.path)}</b><span>${esc(ff.stat)}</span></div>${plain}</div>
+        <h3>${esc(FXC.why)}</h3><p>${esc(FF.why)}</p>
+        <h3>${esc(FXC.patch)}</h3><div class="panel dfile ffpatch">${FF.patch.map((l) => `<div class="ln" data-t="${esc(l[0])}"><span></span><span></span><span aria-hidden="true">${esc(l[0])}</span><code>${esc(l.slice(1))}</code></div>`).join("")}</div>
+      </section>
+      <div class="ffbar" data-region="action">${btn(R.copy.apply, "primary")}${btn(R.copy.ask, "secondary")}${btn(R.copy.dismiss, "secondary")}${btn(FXC.more, "secondary", ' aria-haspopup="menu" aria-expanded="false"')}</div>`;
+    }
+    const PN = V.pageNotice, RT = V.retained;
+    const pre = RT ? `<div class="panel notice rstat" role="status" aria-live="polite" data-region="status"><div>${stateLabel(C.reasonWords["review-transport-failed"].reasons.network, "caution", true)}<span class="text">${esc(RT.title)}</span></div>${RT.action ? `<div data-act>${btn(RT.action, "primary", ' data-region="action"')}</div>` : ""}</div>` : "";
+    const pageBody = V.pending ? `<div class="review"><section class="panel rpend" role="status" aria-live="polite" data-region="status"><p>${esc(V.pending)}</p></section></div>`
+      : PN ? `<div class="review"><section class="panel notice pnotice" role="status" data-region="notice"><div>${stateLabel(PN.title || PN.lines[0], "caution", true)}${(PN.title ? PN.lines : PN.lines.slice(1)).map((l) => `<span class="text">${esc(l)}</span>`).join("")}</div>${PN.action && !LV ? `<div data-act>${btn(PN.action, "primary", ' data-region="action"')}</div>` : ""}</section>${V.pageAction ? `<div class="cact wact">${btn(V.pageAction, "primary", ' data-region="action"')}</div>` : ""}</div>` : "";
+    const body = pageBody ? pageBody : focus ? `<div class="focus-wrap">${focus}</div>` : conv ? `<div class="review">${pre}${prHead}${subtabs}${conv}</div>` : guide ? `<div class="review guide-mode">${pre}${prHead}${subtabs}${guide}</div>` : `<div class="review">${pre}${prHead}${subtabs}<div class="col">${summaryX}${listX === null ? list : listX}</div>${diff}</div>`;
+    const PS = V.postSheet ? R.copy.postSheet : null, DS = TM && V.dismissForm && phone, KS = V.keys ? R.copy.keys : null;
+    const sheet = PS ? `<div class="scrim" data-modal aria-hidden="true"></div><section class="csheet" role="dialog" aria-modal="true" aria-labelledby="post-title" data-region="sheet"><h2 id="post-title">${esc(PS.title)}</h2><p>${esc(PS.lead)}</p><ul>${V.postSheet.map((id) => R.findings[id]).map((f) => `<li>${sev(f)}<span><span class="claim">${esc(f.claim)}</span><small><code>${esc(where(f))}</code></small></span></li>`).join("")}</ul><div class="actions">${btn(PS.post, "primary")}${btn(PS.cancel, "secondary")}</div></section>`
+      : DS ? `<div class="scrim" data-modal aria-hidden="true"></div><section class="csheet" role="dialog" aria-modal="true" aria-labelledby="dis-title" data-region="sheet"><h2 id="dis-title">${esc(DF.title)}</h2><p>${esc(R.findings[V.dismissForm.finding].claim)}</p>${dform()}</section>`
+      : KS ? `${phone ? '<div class="scrim" data-modal aria-hidden="true"></div>' : ""}<section class="csheet keys" role="dialog" aria-modal="${phone}" aria-labelledby="keys-title" data-region="sheet"><div class="keys-head"><h2 id="keys-title">${esc(KS.title)}</h2>${btn(KS.close, "secondary")}</div><dl>${KS.items.map((it) => `<div><dt>${it.keys.map((k) => k === "then" ? `<span>${esc(KS.then)}</span>` : `<kbd>${esc(k)}</kbd>`).join("")}</dt><dd>${esc(it.label)}</dd></div>`).join("")}</dl></section>` : "";
+    const modal = !!sheet && !(KS && !phone);
+
+    app.innerHTML = `<div class="shell"${modal ? ' inert aria-hidden="true"' : ""}>${nav}<div class="work">${header}<main>${body}</main></div></div>${sheet}`;
+    commitLabels(C);
+
+    // Phone: the bottom bar lives directly under <body> (position: fixed; bottom: 0), so the document scrolls and a full-page capture ends with the bar.
+    const navEl = app.querySelector(".nav"), navHome = navEl.parentNode, navNext = navEl.nextSibling, mq = matchMedia("(max-width: 599px)");
+    const place = () => { if (mq.matches) document.body.appendChild(navEl); else navHome.insertBefore(navEl, navNext); };
+    place(); if (FM && mq.matches) navEl.remove(); if (modal) { navEl.inert = true; navEl.setAttribute("aria-hidden", "true"); } const mq0 = mq.matches; mq.addEventListener("change", (e) => { if (e.matches !== mq0) location.reload(); });
+    app.addEventListener("click", (e) => { const a = e.target.closest(".frow"); if (!a) return; const el = document.getElementById(a.getAttribute("href").slice(1)); if (el) { e.preventDefault(); el.focus({ preventScroll: true }); window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - 16, behavior: "smooth" }); } });
+    root.dataset.regions = [...new Set([...document.querySelectorAll("[data-region]")].map((e) => e.dataset.region))].join(",");
+  };
+
+  fetch("../fixture.json", { cache: "no-store" })
+    .then((r) => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+    .then((fx) => {
+      if (fx.version !== 1 || !fx.data || !fx.data.codeReview) throw new Error("fixture.json has no data.codeReview (version 1)");
+      render(fx.data.codeReview);
+      settle();
+    })
+    .catch((e) => {
+      app.innerHTML = `<main class="fail" role="alert"><h1>Couldn’t load fixture.json</h1><p>${esc(e.message)}. Serve the project folder over HTTP and open this page from it.</p></main>`;
+    });
+})();
+</script>
+</body>
+</html>

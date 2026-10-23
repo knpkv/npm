@@ -1,4 +1,4 @@
-/* Shared Relay super-app chrome: desktop sidebar (brand, modules, divider, Settings, session footer), header/mast (phone title, hosts, bell, Ask Relay), module tabs, phone bottom bar, shared notice. Linked by every screen before its own styles. */
+/* Shared Relay super-app chrome: desktop sidebar (brand, modules, divider, Settings, session footer), header/mast (phone brand, hosts, bell, Ask Relay), phone breadcrumb, module heading and tabs, phone bottom bar, shared notice. Linked by every screen before its own styles. */
 .shell { display: grid; grid-template-columns: 224px minmax(0, 1fr); }
 @media (min-width: 600px) { #app, .shell { min-block-size: 100vh; } }
 .side { border-inline-end: 1px solid var(--rly-color-border-1); background: var(--rly-color-surface-1); }
@@ -80,4 +80,20 @@
   .modhead .seg { display: inline-flex; margin: .75rem 8px; }
   .modhead:has(.seg) { display: grid; }
   .seg-item { min-block-size: 44px; }
+}
+/* Phone breadcrumb and phone module heading (DESIGN-RULES "Phone breadcrumb"; 00 Shell 8a/8b). Opt-in: .mast-name inside .mast-brand, a .crumb nav after the mast, data-phone-titles on .modhead. */
+.crumb { display: none; box-sizing: border-box; block-size: 32px; padding: 8px 16px 0; align-items: center; min-inline-size: 0; white-space: nowrap; font: 430 .75rem/1.3 var(--rly-font-ui); color: var(--rly-color-text-2); }
+.crumb .parents { flex: 0 1 auto; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; direction: rtl; }
+.crumb .parents > span { direction: ltr; unicode-bidi: isolate; }
+.crumb a { text-decoration: underline; text-underline-offset: .2em; }
+.crumb .cur { flex: none; max-inline-size: 100%; overflow: hidden; text-overflow: ellipsis; font-weight: 520; color: var(--rly-color-text-1); }
+.mast-name { display: none; }
+@media (max-width: 599px) {
+  .mast-brand:has(.mast-name) { display: flex; align-items: center; gap: .55rem; padding-inline: 8px; font: 700 1.05rem/1.2 var(--rly-font-ui); color: inherit; text-decoration: none; }
+  .mast-name { display: block; font-weight: 700; }
+  .crumb { display: flex; }
+  .modhead[data-phone-titles] { display: grid; gap: .9rem; padding: .75rem 16px 1rem; background: transparent; }
+  .modhead[data-phone-titles][data-tabs] { padding-block-end: 0; }
+  .modhead[data-phone-titles] .titles { display: grid; gap: .25rem; }
+  .modhead[data-phone-titles] .tabs { margin-inline: -8px; }
 }

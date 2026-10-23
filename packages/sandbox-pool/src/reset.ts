@@ -256,12 +256,15 @@ export const resetAccount = Effect.fn("SandboxPool.resetAccount")(function*(
   const step = <A>(name: RunStep, effect: Effect.Effect<A, ResetBlocked>) =>
     Effect.gen(function*() {
       const at = yield* DateTime.now
-      yield* record({ _tag: "Step", runId, step: name, status: "started", at, detail: null, output: [] })
+      yield* record({ _tag: "Step", runId, step: name, status: "started", at, detail: null, output: [], count: null })
       const result = yield* Effect.result(effect)
-      const output = outputTail(yield* Ref.getAndSet(lastOutput, ""))
+      const raw = yield* Ref.getAndSet(lastOutput, "")
+      const output = outputTail(raw)
+      // The scans' counts: what the dry run will remove, what verify still finds. A live run's count is not kept.
+      const count = name === "dry run" || name === "verify" ? removable(raw) ?? null : null
       const detail = result._tag === "Failure" ? `${result.failure.step}: ${result.failure.detail}`.slice(0, 500) : null
       const status = result._tag === "Failure" ? "failed" : "ok"
-      yield* record({ _tag: "Step", runId, step: name, status, at: yield* DateTime.now, detail, output })
+      yield* record({ _tag: "Step", runId, step: name, status, at: yield* DateTime.now, detail, output, count })
       return yield* Effect.fromResult(result)
     })
   yield* record({ _tag: "Started", runId, accountId: sandbox.accountId, reason, at: yield* DateTime.now })

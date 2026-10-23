@@ -150,3 +150,70 @@ describe("run log lines", () => {
       .toHaveLength(2_000)
   })
 })
+
+describe("run steps", () => {
+  const counted = (name: string, status: string, time: string, count: number | null) =>
+    entry({
+      _tag: "Step",
+      runId: "run-a",
+      step: name,
+      status,
+      at: `2026-10-16T${time}Z`,
+      detail: null,
+      output: [],
+      count
+    })
+
+  it("folds each step's latest status, time and count, in run order, and names the steps that never ran", () => {
+    const [running] = summarizeRuns([
+      started("run-a", "111111111111", "08:00:00"),
+      counted("sign in", "ok", "08:00:01", null),
+      counted("dry run", "started", "08:00:02", null),
+      counted("dry run", "ok", "08:01:00", 41),
+      counted("nuke", "started", "08:01:02", null)
+    ])
+    expect(
+      running?.steps.map(({ at: time, count, status, step: name }) => [
+        name,
+        status,
+        time === null ? null : DateTime.formatIso(time),
+        count
+      ])
+    ).toEqual([
+      ["sign in", "done", "2026-10-16T08:00:01.000Z", null],
+      ["baseline", "notRun", null, null],
+      ["dry run", "done", "2026-10-16T08:01:00.000Z", 41],
+      ["nuke", "running", "2026-10-16T08:01:02.000Z", null],
+      ["verify", "notRun", null, null],
+      ["baseline re-check", "notRun", null, null],
+      ["budget hold", "notRun", null, null]
+    ])
+  })
+
+  it("marks the failed step with its count, and reads an entry recorded before counts as no count", () => {
+    const [quarantined] = summarizeRuns([
+      started("run-a", "111111111111", "08:00:00"),
+      counted("verify", "failed", "08:05:00", 3),
+      entry({
+        _tag: "Step",
+        runId: "run-a",
+        step: "sign in",
+        status: "ok",
+        at: "2026-10-16T08:00:01Z",
+        detail: null,
+        output: []
+      }),
+      finished("run-a", "Quarantined", "08:05:01", "verify: 3 resources still removable.")
+    ])
+    expect(
+      quarantined?.steps.filter(({ status }) => status !== "notRun").map(({ count, status, step: name }) => [
+        name,
+        status,
+        count
+      ])
+    ).toEqual([
+      ["sign in", "done", null],
+      ["verify", "failed", 3]
+    ])
+  })
+})

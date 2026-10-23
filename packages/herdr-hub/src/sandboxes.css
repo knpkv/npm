@@ -241,6 +241,24 @@
     font-size: 0.875rem;
   }
 
+  .sandboxes-step-text {
+    display: grid;
+    min-inline-size: 0;
+  }
+
+  .sandboxes-step-text small,
+  .sandboxes-step-end small {
+    font-size: 0.8125rem;
+    color: var(--rly-color-text-2);
+  }
+
+  .sandboxes-step-end {
+    display: flex;
+    gap: 0.6rem;
+    align-items: center;
+    font-variant-numeric: tabular-nums;
+  }
+
   .sandboxes-steps li + li {
     border-block-start: 1px solid var(--rly-color-border-1);
   }
@@ -424,6 +442,89 @@
     gap: 0.35rem;
     justify-items: start;
     max-inline-size: 34rem;
+  }
+
+  .sandboxes-spend {
+    display: grid;
+    gap: 0.4rem;
+  }
+
+  .sandboxes-spend-head {
+    display: flex;
+    gap: 1rem;
+    justify-content: space-between;
+    font-size: 0.875rem;
+  }
+
+  .sandboxes-spend-head span {
+    color: var(--rly-color-text-2);
+  }
+
+  .sandboxes-spend-head b {
+    font-weight: 620;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .sandboxes-spend-track {
+    position: relative;
+    block-size: 6px;
+    border-radius: 3px;
+    background: var(--rly-color-surface-3);
+  }
+
+  .sandboxes-spend-fill {
+    position: absolute;
+    inset-block: 0;
+    inset-inline-start: 0;
+    border-radius: 3px;
+    background: var(--rly-color-text-2);
+  }
+
+  .sandboxes-spend-tick {
+    position: absolute;
+    inset-block: -4px;
+    inline-size: 1px; /* stripe-ok: drawn alarm and stop ticks on the spend track */
+    background: var(--rly-color-text-1);
+  }
+
+  .sandboxes-spend-stop {
+    inline-size: 2px;
+  }
+
+  .sandboxes-spend-marks {
+    position: relative;
+    block-size: 1.1rem;
+    font-size: 0.75rem;
+    color: var(--rly-color-text-2);
+  }
+
+  .sandboxes-spend-marks span {
+    position: absolute;
+    white-space: nowrap;
+  }
+
+  .sandboxes-spend-marks span + span {
+    transform: translateX(-50%);
+  }
+
+  /* A budget stop's spend, boxed as page 15 4a draws it, with the month's figure large. */
+  .sandboxes-account-spend {
+    display: grid;
+    gap: 0.5rem;
+    max-inline-size: 34rem;
+    padding: 1rem 1.25rem;
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-group);
+    background: var(--rly-color-surface-1);
+  }
+
+  .sandboxes-account-spend .sandboxes-spend-head {
+    align-items: baseline;
+  }
+
+  .sandboxes-account-spend .sandboxes-spend-head b {
+    font-size: 1.5rem;
+    letter-spacing: -0.02em;
   }
 
   .sandboxes-cli {

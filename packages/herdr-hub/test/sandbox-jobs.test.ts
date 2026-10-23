@@ -16,11 +16,21 @@ import {
   SandboxState,
   SandboxStoreUnavailable,
   seedPool,
+  SpendReader,
+  type SpendReadError,
+  SpendThrottled,
+  SpendUnavailable,
   StaleVersion
 } from "@knpkv/sandbox-pool"
-import { DateTime, Duration, Effect, Fiber, Latch, Redacted, Schema } from "effect"
+import { Cause, DateTime, Duration, Effect, Exit, Fiber, Latch, Logger, Redacted, Schema } from "effect"
 import { TestClock } from "effect/testing"
-import { BudgetControl, BudgetLiftFailed, makeSandboxPool, runSandboxSweep } from "../src/sandbox-jobs.js"
+import {
+  BudgetControl,
+  BudgetLiftFailed,
+  makeSandboxPool,
+  runSandboxSweep,
+  type SandboxPoolServices
+} from "../src/sandbox-jobs.js"
 
 /** An invented pool: no real organization's IDs or names. */
 const contract = Schema.decodeUnknownSync(PoolContract)({
@@ -76,6 +86,8 @@ interface FakeOptions {
   readonly putFails?: boolean
   /** The compare-and-set loses, as another writer landed first. */
   readonly putStale?: boolean
+  /** Each account's answer to a spend read, by account id. Without it the pool has no reader. */
+  readonly spend?: ReadonlyMap<string, Effect.Effect<number, SpendReadError>>
 }
 
 /** A pool over the memory store and run log, with fakes that record every AWS-side call. */
@@ -97,7 +109,7 @@ const fixture = (options: FakeOptions = {}, initial: ReadonlyArray<Sandbox> = se
           : memory.put(next)
     }
     const runLog = yield* makeMemoryRunLog
-    const pool = yield* makeSandboxPool({
+    const services: SandboxPoolServices = {
       contract,
       store,
       runLog,
@@ -128,7 +140,16 @@ const fixture = (options: FakeOptions = {}, initial: ReadonlyArray<Sandbox> = se
               held = false
             })
       })
+    }
+    const reader = SpendReader.of({
+      monthToDate: (account) =>
+        Effect.suspend(() => {
+          calls.push(`spend ${account.accountId}`)
+          return options.spend?.get(account.accountId) ??
+            Effect.fail(new SpendUnavailable({ accountId: account.accountId, detail: "unknown" }))
+        })
     })
+    const pool = yield* makeSandboxPool(options.spend === undefined ? services : { ...services, spend: reader })
     const job = (payload: SandboxJobPayload, actor: string, id: string, approved = false) =>
       pool.run(payload, id, actor, approved ? approval : null).pipe(Effect.map(decodeResult))
     return { pool, store, runLog, calls, job }
@@ -399,6 +420,79 @@ describe("sandbox jobs", () => {
 })
 
 describe("sandbox sweep", () => {
+  it.effect("reads each pool account's spend and keeps the last good reading when a read fails", () =>
+    Effect.gen(function*() {
+      const spend = new Map<string, Effect.Effect<number, SpendReadError>>([
+        [accountA, Effect.succeed(7.4)],
+        [accountB, Effect.succeed(3.1)]
+      ])
+      const f = yield* fixture({ spend })
+      yield* f.pool.sweepOnce
+      expect((yield* f.store.spend).map(({ accountId, usd }) => [accountId, usd])).toEqual([
+        [accountA, 7.4],
+        [accountB, 3.1]
+      ])
+      spend.set(accountA, Effect.fail(new SpendThrottled({ accountId: accountA })))
+      spend.set(accountB, Effect.succeed(4.2))
+      expect(yield* f.pool.sweepOnce).toMatchObject({ failed: 0 })
+      expect((yield* f.store.spend).map(({ accountId, usd }) => [accountId, usd])).toEqual([
+        [accountA, 7.4],
+        [accountB, 4.2]
+      ])
+      expect(yield* f.store.sweepAt).not.toBeNull()
+    }))
+
+  it.effect("records no reading a reader answered with a negative or non-finite amount", () =>
+    Effect.gen(function*() {
+      const f = yield* fixture({
+        spend: new Map([[accountA, Effect.succeed(-5)], [accountB, Effect.succeed(Number.NaN)]])
+      })
+      expect(yield* f.pool.sweepOnce).toMatchObject({ failed: 0 })
+      expect(yield* f.store.spend).toEqual([])
+    }))
+
+  it.effect("records the sweep first; a reader that hangs or fails keeps the last reading and ends the sweep", () =>
+    Effect.gen(function*() {
+      const spend = new Map<string, Effect.Effect<number, SpendReadError>>([
+        [accountA, Effect.succeed(7.4)],
+        [accountB, Effect.succeed(3.1)]
+      ])
+      const f = yield* fixture({ spend })
+      yield* f.pool.sweepOnce
+      spend.set(accountA, Effect.never)
+      spend.set(accountB, Effect.fail(new SpendUnavailable({ accountId: accountB, detail: "broke" })))
+      yield* TestClock.adjust("1 minute")
+      const later = DateTime.toEpochMillis(yield* DateTime.now)
+      const sweeping = yield* Effect.forkChild(f.pool.sweepOnce)
+      yield* TestClock.adjust("1 second")
+      expect(yield* f.store.sweepAt).toBe(later)
+      yield* TestClock.adjust("10 seconds")
+      expect(yield* Fiber.join(sweeping)).toMatchObject({ failed: 0 })
+      expect((yield* f.store.spend).map(({ accountId, usd }) => [accountId, usd])).toEqual([
+        [accountA, 7.4],
+        [accountB, 3.1]
+      ])
+    }))
+
+  it.effect("logs why a spend read failed, not only that it did", () =>
+    Effect.gen(function*() {
+      const messages: Array<unknown> = []
+      const logger = Logger.make<unknown, void>((entry) => messages.push(entry.message))
+      const f = yield* fixture({
+        spend: new Map([[accountA, Effect.fail(new SpendUnavailable({ accountId: accountA, detail: "timeout" }))]])
+      })
+      yield* f.pool.sweepOnce.pipe(Effect.withLogger(logger))
+      expect(JSON.stringify(messages)).toContain("timeout")
+    }))
+
+  it.effect("reads no spend on a host without a reader", () =>
+    Effect.gen(function*() {
+      const f = yield* fixture()
+      yield* f.pool.sweepOnce
+      expect(yield* f.store.spend).toEqual([])
+      expect(f.calls.filter((call) => call.startsWith("spend"))).toEqual([])
+    }))
+
   it.effect("records the sweep time only when every account succeeded", () =>
     Effect.gen(function*() {
       const stuck = Schema.decodeUnknownSync(Sandbox)({
@@ -500,6 +594,28 @@ describe("sandbox sweep", () => {
       yield* Fiber.interrupt(fiber)
       yield* TestClock.adjust(Duration.minutes(5))
       expect(yield* f.pool.lastSweep).toEqual(second)
+    }))
+
+  it.effect("keeps sweeping every five minutes after one sweep dies", () =>
+    Effect.gen(function*() {
+      const f = yield* fixture({ spend: new Map([[accountA, Effect.die("reader broke")]]) })
+      const fiber = yield* Effect.forkChild(runSandboxSweep(f.pool))
+      yield* Effect.yieldNow
+      const first = yield* f.pool.lastSweep
+      expect(first).not.toBeNull()
+      yield* TestClock.adjust(Duration.minutes(5))
+      expect((yield* f.pool.lastSweep)?.at).not.toEqual(first?.at)
+      yield* Fiber.interrupt(fiber)
+    }))
+
+  it.effect("stops sweeping when one sweep is interrupted from inside", () =>
+    Effect.gen(function*() {
+      const f = yield* fixture({ spend: new Map([[accountA, Effect.interrupt]]) })
+      const exit = yield* Effect.exit(runSandboxSweep(f.pool))
+      expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true)
+      const last = yield* f.pool.lastSweep
+      yield* TestClock.adjust(Duration.minutes(5))
+      expect(yield* f.pool.lastSweep).toEqual(last)
     }))
 
   it.effect("an account that left the contract is never leased and cannot be extended", () =>
