@@ -7,7 +7,7 @@ import { describe, expect, it } from "@effect/vitest"
 import type { FleetLimits, UsageQuery } from "@knpkv/herdr-connect"
 import { AppId, AppStates, hubHeaders, type ModuleCaller } from "@knpkv/hub-app"
 import { fixtureApp, type FixtureMode } from "@knpkv/hub-app-fixture"
-import { serveAttached } from "@knpkv/hub-app/node"
+import { serveAttachedSocket } from "@knpkv/hub-app/node"
 import { Duration, Effect, Exit, FileSystem, Layer, Path, Schedule, Schema, Scope } from "effect"
 import { TestClock } from "effect/testing"
 import {
@@ -55,8 +55,8 @@ const startFixture = (directory: string, mode: FixtureMode, id = "fixture", hubU
       ? path.join(directory, `${id}.app-token`)
       : path.join(directory, "tokens", `${id}.token`)
     if (hubUrl === undefined) yield* fileSystem.writeFileString(tokenFile, "fixture-token\n")
-    yield* serveAttached(fixtureApp(mode, id), {
-      _tag: "Attached",
+    yield* serveAttachedSocket(fixtureApp(mode, id), {
+      _tag: "AttachedSocket",
       socket,
       hubUrl: hubUrl ?? "http://127.0.0.1:9",
       tokenFile

@@ -14,7 +14,7 @@ import {
   moduleReadRoute,
   ModuleRouteFailure
 } from "../src/index.js"
-import { readRunMode, serveApp, serveAttached } from "../src/node.js"
+import { readRunMode, serveApp, serveAttachedSocket } from "../src/node.js"
 import { moduleWriteRoute } from "../src/route.js"
 
 const manifest: AppManifestInput = {
@@ -75,7 +75,7 @@ describe("readRunMode", () => {
       HUB_APP_TOKEN_FILE: "/run/probe.token"
     })
     expect(mode).toEqual(Result.succeed({
-      _tag: "Attached",
+      _tag: "AttachedSocket",
       socket: "/run/probe.sock",
       hubUrl: "http://127.0.0.1:3101",
       tokenFile: "/run/probe.token"
@@ -138,8 +138,8 @@ describe("attached runner", () => {
         const { port } = Schema.decodeUnknownSync(Schema.Struct({ port: Schema.Number }))(hub.address())
 
         const socket = `${directory}/probe.sock`
-        yield* serveAttached({ manifest, handlers, clientDirectory }, {
-          _tag: "Attached",
+        yield* serveAttachedSocket({ manifest, handlers, clientDirectory }, {
+          _tag: "AttachedSocket",
           socket,
           hubUrl: `http://127.0.0.1:${port}`,
           tokenFile: `${directory}/token`

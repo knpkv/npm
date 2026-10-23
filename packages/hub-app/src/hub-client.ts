@@ -12,7 +12,7 @@
  *
  * @module
  */
-import { Context, Effect, FileSystem, Layer, Schema } from "effect"
+import { Context, Effect, Layer, Schema } from "effect"
 import { HttpClient, HttpClientRequest, type HttpClientResponse } from "effect/http"
 import { type AppId, GrantInvalid, type ShellService, ShellServiceUnavailable } from "./manifest.js"
 import { CurrentGrant } from "./route.js"
@@ -60,18 +60,17 @@ export const standaloneShellServices = (host: HostInfo): ShellServiceCalls => {
 export interface AttachedOptions {
   readonly app: AppId
   readonly hubUrl: string
-  /** Read on every call: the hub issues a fresh token each time it starts, and the app outlives that. */
-  readonly tokenFile: string
+  /** This app's hub token, read on every call: from the handshake, or from P0's token file. */
+  readonly token: Effect.Effect<string, unknown>
   readonly declared: ReadonlyArray<ShellService>
 }
 
 /** Attached: every call goes to the hub's loopback listener with this app's current token. */
 export const attachedShellServices = Effect.fn("HubApp.attachedShellServices")(function*(options: AttachedOptions) {
   const client = yield* HttpClient.HttpClient
-  const fileSystem = yield* FileSystem.FileSystem
   const url = (path: string) => new URL(path, options.hubUrl).href
   const authorized = (request: HttpClientRequest.HttpClientRequest) =>
-    fileSystem.readFileString(options.tokenFile).pipe(
+    options.token.pipe(
       Effect.map((token) =>
         request.pipe(
           HttpClientRequest.bearerToken(token.trim()),

@@ -13,9 +13,11 @@
  * - **Windows follows its own conventions.** Configuration under `%APPDATA%`, state under
  *   `%LOCALAPPDATA%`, or the XDG directories when they are set. File modes do nothing there: owner-only
  *   comes from the user profile's ACL, which covers both.
- * - **The hub's apps** keep their prefixes under `hubData`, their logs under `hubState` and their sockets
- *   under `hubRuntime` (`$XDG_RUNTIME_DIR/herdr-hub`, else `hubState/run`). Windows apps listen on named
- *   pipes, so it has no runtime directory.
+ * - **The hub's apps** keep their prefixes under `hubData/hub-apps`, their logs and manifest cache under
+ *   `hubState/logs` and `hubState/manifests`, and their sockets under `hubRuntime` (`$XDG_RUNTIME_DIR/herdr-hub`,
+ *   else `hubState/run`). Each subdirectory has one writer; only `hubRuntime` is ever wiped. On Windows `hubData`
+ *   and `hubState` are the same directory, so the subdirectories keep them apart; its apps listen on named pipes,
+ *   so it has no runtime directory.
  * - **Overrides win on every OS.** `HERDR_HUB_HOME` puts everything under one directory (`config/`,
  *   `state/`); `HERDR_HUB_CONFIG` names the directory holding `apps.json`. `FLEET_CONFIG_PATH` still
  *   names the fleet configuration file itself (see herdr-hub's config path).

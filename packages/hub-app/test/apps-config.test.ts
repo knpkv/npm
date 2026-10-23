@@ -62,7 +62,7 @@ describe("HubHandshake", () => {
 
 describe("HubAppPackageField", () => {
   it("names the script, the contract and the services an app may call", () => {
-    const field = { bin: "herdr-usage", contract: 1, services: ["fleet.read", "host"] }
+    const field = { bin: "dist/bin.js", contract: 1, services: ["fleet.read", "host"] }
     expect(Schema.decodeUnknownSync(HubAppPackageField)(field)).toEqual(field)
     expect(Result.isFailure(Schema.decodeUnknownResult(HubAppPackageField)({ ...field, contract: 2 }))).toBe(true)
   })

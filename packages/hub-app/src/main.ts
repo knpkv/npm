@@ -17,7 +17,7 @@ export const runApp = <E, R>(app: AppServer<E, R>, platform: Layer.Layer<R>): vo
     const mode = readRunMode(app.manifest, process.argv.slice(2), process.env)
     if (Result.isFailure(mode)) return yield* mode.failure
     const launch = browserLaunch({
-      noOpen: mode.success._tag === "Attached" || !mode.success.open,
+      noOpen: mode.success._tag !== "Standalone" || !mode.success.open,
       browser: process.env.BROWSER,
       ci: process.env.CI,
       interactive: process.stdout.isTTY === true

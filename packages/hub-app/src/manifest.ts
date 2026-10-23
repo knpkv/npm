@@ -77,7 +77,7 @@ export const InstalledApp = Schema.Struct({
   version: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(64)),
   /** The prefix holding `node_modules`. */
   dir: Schema.String.check(Schema.isNonEmpty()),
-  /** The app's script, relative to `dir`, from its package's `hubApp.bin`. */
+  /** The app's script relative to `dir`: `node_modules/<package>/<hubApp.bin>`. Run with the hub's own node. */
   bin: Schema.String.check(Schema.isNonEmpty()),
   enabled: Schema.Boolean,
   /** V8 heap cap (`--max-old-space-size`); native and RSS growth are not capped. */
@@ -119,6 +119,10 @@ export interface HubHandshake extends Schema.Schema.Type<typeof HubHandshake> {}
 
 /** The `hubApp` field of an app's package.json: what the installer checks before and after install. */
 export const HubAppPackageField = Schema.Struct({
+  /**
+   * The script the hub runs, as a file path inside the package (`dist/bin.js`). Not a `bin` key: the hub runs it
+   * with its own node, so it never depends on npm's bin links or `.cmd` shims.
+   */
   bin: Schema.String.check(Schema.isNonEmpty()),
   contract: AppContract,
   services: Schema.Array(ShellService)
