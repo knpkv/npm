@@ -30,7 +30,8 @@
     "./views": {
       "types": "./dist/views.d.ts",
       "import": "./dist/views.js"
-    }
+    },
+    "./views.css": "./dist/views/views.css"
   },
   "files": [
     "dist",

@@ -1,5 +1,6 @@
 // Bundles the Usage app's client (with its own React, rly and effect) to dist/client, where the runner serves it.
 import { build } from "esbuild"
+import { copyFile, mkdir } from "node:fs/promises"
 import { BROWSER_TARGET } from "../../../browser-target.ts"
 
 const common = { bundle: true, logLevel: "info", minify: true, sourcemap: true, target: BROWSER_TARGET }
@@ -19,3 +20,6 @@ await Promise.all([
     loader: { ".svg": "dataurl", ".woff2": "dataurl" }
   })
 ])
+// The views' scoped CSS, unbundled, for a host that renders the views itself (`./views.css`).
+await mkdir("dist/views", { recursive: true })
+await copyFile("src/views/views.css", "dist/views/views.css")

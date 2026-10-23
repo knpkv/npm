@@ -11,7 +11,7 @@
 @import "./styles.css";
 @import "./superapp.css";
 @import "./today.css";
-@import "./usage-details.css";
+@import "@knpkv/herdr-usage/views.css";
 @import "./usage-empty.css";
 @import "./blocked-connect.css";
 @import "./host-resources.css";

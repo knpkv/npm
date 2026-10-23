@@ -8,7 +8,8 @@
  *   the app's React, rly and effect versions are its own business.
  * - The shell owns history, header, crumb, badge and portals. The app asks for them through the context.
  * - Styling: rly tokens arrive as CSS custom properties from the shell; app CSS is scoped under
- *   `[data-app="<id>"]`, which the shell sets on the mount root.
+ *   `[data-app="<id>"]`, which the shell sets on the mount root and on every element it lends the app (header
+ *   outlet, slot, portal root), so portaled content is styled too.
  *
  * @module
  */

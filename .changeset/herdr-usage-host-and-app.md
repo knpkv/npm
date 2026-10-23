@@ -11,8 +11,11 @@ them from here), `./selection` the page's selectors, and the package root holds 
 app's server, whose limits and usage reads come from the
 hub's fleet reads when attached and from this machine when standalone. The hub now answers `fleet.read` for apps.
 `ShellContext` gains optional `headerOutlet` and `setHeaderMode` for apps that group their own header content
-with the shell's. The standalone shell now serves rly's tokens and base itself (`/app/shell.css`), so an app's
-`client.css` carries only its own scoped styles. Grants minted for a GET can no longer post to Relay as the caller, a redirect to the app's own root
+with the shell's. The standalone shell now serves rly's tokens and base itself (`/app/shell.css`, linked by a hash
+of its text and cached for good), so an app's `client.css` carries only its own scoped styles, and it sets
+`data-app` on every element it lends the app (header slot and outlet, portal root) as well as the mount root. The
+Usage page's CSS moved with its views to `@knpkv/herdr-usage/views.css`, scoped under `[data-app="usage"]`; the hub
+imports it and marks its Usage module and header outlet with `data-app`. Grants minted for a GET can no longer post to Relay as the caller, a redirect to the app's own root
 stays under its `/apps/<id>/` prefix, and a burst of failed requests to one app runs a single re-probe.
 `@knpkv/herdr-connect/usage` now exports the `FleetLimits` and `FleetUsage` schemas as values, so a browser client
 decodes them without the package root. The Usage page (`UsagePage`) moved to `@knpkv/herdr-usage/views` behind a

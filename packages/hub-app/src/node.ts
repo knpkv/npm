@@ -43,7 +43,7 @@ import {
   ModuleRouteFailure,
   type MountedModule
 } from "./route.js"
-import { standaloneShellHtml } from "./standalone-page.js"
+import { shellCssVersion, standaloneShellHtml } from "./standalone-page.js"
 import { appPaths, hubHeaders } from "./wire.js"
 
 /** What an app hands the runner. Handlers may use {@link ShellServices}; the runner provides it. */
@@ -309,12 +309,17 @@ const serveStandalone = Effect.fn("HubApp.serveStandalone")(function*<E, R>(
 ) {
   const fileSystem = yield* FileSystem.FileSystem
   const path = yield* Path.Path
-  // This package's own built browser files, read when asked for: a missing build fails that request only.
+  // This package's own built browser files, read when asked for: a missing build fails that request only. `../dist/`
+  // names the same directory from the built module and from its source, which workspace tests run.
+  const readShell = (file: string) =>
+    path.fromFileUrl(new URL(`../dist/${file}`, import.meta.url)).pipe(
+      Effect.flatMap((built) => fileSystem.readFileString(built))
+    )
+  const shellMissing = () => HttpServerResponse.json({ code: "shell_missing" }, { status: 500 })
   const shellAsset = (file: string, contentType: string) =>
-    path.fromFileUrl(new URL(file, import.meta.url)).pipe(
-      Effect.flatMap((built) => fileSystem.readFileString(built)),
+    readShell(file).pipe(
       Effect.map((text) => HttpServerResponse.text(text, { contentType })),
-      Effect.catchTag("PlatformError", () => HttpServerResponse.json({ code: "shell_missing" }, { status: 500 }))
+      Effect.catchTag("PlatformError", shellMissing)
     )
   const manifest = yield* servedManifest(app)
   const host = hostname()
@@ -322,12 +327,38 @@ const serveStandalone = Effect.fn("HubApp.serveStandalone")(function*<E, R>(
   const { mounted, needsYou } = yield* mountModule(manifest, app.handlers).pipe(Effect.provideContext(services))
   const badge = app.badge?.pipe(Effect.provideContext(services))
   const login = userInfo().username
-  const page = standaloneShellHtml(manifest)
+  // The shell stylesheet is read once; the page links it by a hash of its text, so browsers may keep it for good.
+  const shellCss = yield* Effect.cached(
+    readShell("standalone-shell.css").pipe(
+      Effect.flatMap((css) =>
+        shellCssVersion(css).pipe(Effect.map((version) => ({ css, page: standaloneShellHtml(manifest, version) })))
+      )
+    )
+  )
   const shell = HttpRouter.use((router) =>
     Effect.gen(function*() {
-      yield* router.add("GET", "/", HttpServerResponse.html(page))
-      yield* router.add("GET", "/app/shell.js", shellAsset("./standalone-shell.js", "text/javascript; charset=utf-8"))
-      yield* router.add("GET", "/app/shell.css", shellAsset("./standalone-shell.css", "text/css; charset=utf-8"))
+      yield* router.add(
+        "GET",
+        "/",
+        shellCss.pipe(
+          Effect.map(({ page }) => HttpServerResponse.html(page)),
+          Effect.catchTag("PlatformError", shellMissing)
+        )
+      )
+      yield* router.add("GET", "/app/shell.js", shellAsset("standalone-shell.js", "text/javascript; charset=utf-8"))
+      yield* router.add(
+        "GET",
+        "/app/shell.css",
+        shellCss.pipe(
+          Effect.map(({ css }) =>
+            HttpServerResponse.text(css, {
+              contentType: "text/css; charset=utf-8",
+              headers: { "cache-control": "public, max-age=31536000, immutable" }
+            })
+          ),
+          Effect.catchTag("PlatformError", shellMissing)
+        )
+      )
     })
   )
   /** The owner session is made once the port is bound, so `--port 0` gets a real origin and cookie. */

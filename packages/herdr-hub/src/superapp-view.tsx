@@ -114,7 +114,8 @@ const ModuleSlot = ({
   if (renderPage === undefined)
     throw new ModuleRegistrationError({ module: view.descriptor.id, reason: "browser_mismatch" })
   return (
-    <section data-module={view.descriptor.id} hidden={!active}>
+    // `data-app` scopes a module's own CSS, as the standalone shell does for an app's mount root.
+    <section data-module={view.descriptor.id} data-app={view.descriptor.id} hidden={!active}>
       {renderPage(new URLSearchParams(selected.search), { active, navigate, closeSelection, openHostAccess })}
     </section>
   )
@@ -711,7 +712,12 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
             {headerElement}
             {breadcrumbElement}
             {headerGrouped ? (
-              <div className="usage-empty-header-outlet" data-module-owner="usage" ref={setUsageHeaderOutlet} />
+              <div
+                className="usage-empty-header-outlet"
+                data-module-owner="usage"
+                data-app="usage"
+                ref={setUsageHeaderOutlet}
+              />
             ) : null}
           </div>
           {headerGrouped ? null : sidebarElement}

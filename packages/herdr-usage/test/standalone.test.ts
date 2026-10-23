@@ -69,8 +69,12 @@ describe("herdr-usage standalone", () => {
 
         const page = yield* overTcp(`${origin}/`, "GET", sameSite)
         expect(page.status).toBe(200)
-        expect(page.body).toContain("<link rel=\"stylesheet\" href=\"/app/shell.css\">")
-        expect(page.body).toContain("data-app=\"usage\"")
+        expect(page.body).toContain("<main id=\"hub-app-root\" data-app=\"usage\">")
+        // The shell stylesheet's URL carries a hash of its text, so it is served to be kept for good.
+        const shellCss = page.body.match(/<link rel="stylesheet" href="(\/app\/shell\.css\?v=[0-9a-f]{16})">/u)?.[1]
+        expect(shellCss).toBeDefined()
+        const css = yield* overTcp(`${origin}${shellCss ?? ""}`, "GET", sameSite)
+        expect([css.status, css.headers["cache-control"]]).toEqual([200, "public, max-age=31536000, immutable"])
 
         const manifest = yield* overTcp(`${origin}/app/manifest`, "GET", sameSite)
         const decoded = Schema.decodeUnknownSync(Schema.fromJsonString(AppManifest))(manifest.body)
