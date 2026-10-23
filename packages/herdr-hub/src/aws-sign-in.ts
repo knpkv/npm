@@ -69,6 +69,8 @@ export interface AwsSignIn {
   readonly accessToken: Effect.Effect<Redacted.Redacted<string>, AwsSignInRequired | AwsSignInUnavailable>
   /** Start a device code sign-in, or join the pending one. */
   readonly begin: Effect.Effect<PendingSignIn, AwsSignInUnavailable>
+  /** Drop `accessToken` if it is still the held one: AWS no longer accepts it. */
+  readonly revoked: (accessToken: Redacted.Redacted<string>) => Effect.Effect<void, AwsSignInUnavailable>
   /** The Identity Center region, for the portal. */
   readonly region: string
 }
@@ -110,15 +112,28 @@ const PortalCredentials = Schema.Struct({
   })
 })
 
-/** Identity Center answered with an OAuth error code, such as `authorization_pending` or `invalid_grant`. */
-class Refused extends Schema.TaggedError<Refused>()("Refused", { operation: Schema.String, code: Schema.String }) {}
+/**
+ * Identity Center answered with an error below 500: an OAuth code such as `authorization_pending` or
+ * `invalid_grant`, or the portal's error type, such as `UnauthorizedException`.
+ */
+class Refused extends Schema.TaggedError<Refused>()("Refused", {
+  operation: Schema.String,
+  code: Schema.String,
+  status: Schema.Number
+}) {}
+
+/** OAuth codes on a refresh that mean the Identity Center session itself ended. */
+const sessionEnded = new Set(["invalid_grant", "expired_token", "access_denied"])
 
 const refreshMargin = Duration.toMillis(Duration.minutes(5))
 const clientMargin = Duration.toMillis(Duration.days(1))
 const deviceGrant = "urn:ietf:params:oauth:grant-type:device_code"
 const bearerHeader = "x-amz-sso_bearer_token"
 
-/** POST `body` as JSON and decode the answer; an OAuth error body is `Refused` with its code. */
+/**
+ * Send `request` and decode the answer. A status below 500 is `Refused` with its OAuth `error` code or, for the
+ * restJson1 portal, its `x-amzn-ErrorType` header; anything else is `AwsSignInUnavailable`.
+ */
 const exchange = Effect.fn("AwsSignIn.exchange")(function*<A>(
   http: HttpClient.HttpClient,
   operation: string,
@@ -134,8 +149,10 @@ const exchange = Effect.fn("AwsSignIn.exchange")(function*<A>(
     )
   }
   const refusal = Schema.decodeUnknownOption(Refusal)(body)
-  return yield* Option.isSome(refusal) && response.status < 500
-    ? Effect.fail(new Refused({ operation, code: refusal.value.error }))
+  const errorType = response.headers["x-amzn-errortype"]?.split(":")[0]
+  const code = Option.isSome(refusal) ? refusal.value.error : errorType
+  return yield* code !== undefined && code !== "" && response.status < 500
+    ? Effect.fail(new Refused({ operation, code, status: response.status }))
     : Effect.fail(unavailable(`HTTP ${response.status}`))
 })
 
@@ -159,8 +176,10 @@ export const makeAwsSignIn = Effect.fn("AwsSignIn.make")(function*(options: AwsS
     (resource) => Effect.sync(() => resource.database.close())
   )
   const session = `${options.region} ${options.startUrl}`
+  // SQLite and file errors name paths; a decode error would quote the stored tokens, so it gets a fixed detail.
   const storeFailure = (operation: string) => (cause: unknown) =>
     new AwsSignInUnavailable({ operation, detail: String(cause) })
+  const fixedFailure = (operation: string, detail: string) => () => new AwsSignInUnavailable({ operation, detail })
   const read = Effect.try({
     try: () => opened.database.prepare("SELECT value FROM aws_sign_in WHERE session = ?").get(session),
     catch: storeFailure("read")
@@ -170,12 +189,13 @@ export const makeAwsSignIn = Effect.fn("AwsSignIn.make")(function*(options: AwsS
         ? Effect.succeed<Stored>({ client: null, token: null })
         : Schema.decodeUnknownEffect(Schema.Struct({ value: StoredJson }))(row).pipe(
           Effect.map(({ value }) => value),
-          Effect.mapError(storeFailure("read"))
+          Effect.mapError(fixedFailure("read", "unreadable"))
         )
     )
   )
   const write = (next: Stored) =>
     Schema.encodeEffect(StoredJson)(next).pipe(
+      Effect.mapError(fixedFailure("write", "unwritable")),
       Effect.flatMap((value) =>
         Effect.try({
           try: () =>
@@ -185,8 +205,7 @@ export const makeAwsSignIn = Effect.fn("AwsSignIn.make")(function*(options: AwsS
           catch: storeFailure("write")
         })
       ),
-      Effect.andThen(opened.secureFiles),
-      Effect.mapError(storeFailure("write")),
+      Effect.andThen(opened.secureFiles.pipe(Effect.mapError(storeFailure("write")))),
       Effect.asVoid
     )
   // The pending sign-in's end, or null when none is pending.
@@ -235,16 +254,19 @@ export const makeAwsSignIn = Effect.fn("AwsSignIn.make")(function*(options: AwsS
     expiresAt: now + granted.expiresIn * 1_000
   })
 
-  const removePending = fs.remove(options.pendingFile).pipe(Effect.ignore({ log: true }))
+  const removePending = fs.remove(options.pendingFile, { force: true }).pipe(Effect.ignore({ log: true }))
+  // A file left by a hub that was killed names a code nobody polls.
+  yield* removePending
 
   /** Poll the device code until it is approved, denied or expired, waiting `interval` seconds between tries. */
-  const poll: (
+  const poll = Effect.fn("AwsSignIn.poll")(function*(
     registered: typeof Client.Type,
     deviceCode: string,
-    interval: number,
+    firstInterval: number,
     deadline: number
-  ) => Effect.Effect<void, AwsSignInUnavailable> = Effect.fn("AwsSignIn.poll")(
-    function*(registered, deviceCode, interval, deadline) {
+  ) {
+    let interval = firstInterval
+    while (true) {
       yield* Effect.sleep(Duration.seconds(interval))
       if ((yield* Clock.currentTimeMillis) >= deadline) return
       const answer = yield* exchange(
@@ -265,62 +287,61 @@ export const makeAwsSignIn = Effect.fn("AwsSignIn.make")(function*(options: AwsS
         return
       }
       const failure = answer.failure
-      if (failure._tag === "Refused" && failure.code === "authorization_pending") {
-        return yield* poll(registered, deviceCode, interval, deadline)
-      }
-      if (failure._tag === "Refused" && failure.code === "slow_down") {
-        return yield* poll(registered, deviceCode, interval + 5, deadline)
-      }
-      // Any other refusal (expired, denied) ends this sign-in; a transport failure tries again.
-      if (failure._tag === "AwsSignInUnavailable") return yield* poll(registered, deviceCode, interval, deadline)
+      if (failure._tag === "Refused" && failure.code === "slow_down") interval += 5
+      // Any other refusal (expired, denied) ends this sign-in; pending and a transport failure try again.
+      else if (failure._tag === "Refused" && failure.code !== "authorization_pending") return
     }
-  )
+  })
 
-  const begin = Effect.gen(function*() {
-    const done = yield* Deferred.make<void>()
-    const held = yield* Ref.modify(current, (existing) => existing === null ? [null, done] : [existing, existing])
-    if (held !== null) return { ended: Deferred.await(held) } satisfies PendingSignIn
-    const run = Effect.gen(function*() {
-      const registered = yield* client
-      const device = yield* exchange(
-        http,
-        "device authorization",
-        post(`${oidc}/device_authorization`, {
-          clientId: registered.clientId,
-          clientSecret: registered.clientSecret,
-          startUrl: options.startUrl
-        }),
-        DeviceAuthorization
-      ).pipe(
-        Effect.catchTag(
-          "Refused",
-          (refused) => Effect.fail(new AwsSignInUnavailable({ operation: refused.operation, detail: refused.code }))
+  // Uninterruptible but for the start itself, so a claimed sign-in always ends in a poll or a cleanup.
+  const begin = Effect.uninterruptibleMask((restore) =>
+    Effect.gen(function*() {
+      const done = yield* Deferred.make<void>()
+      const held = yield* Ref.modify(current, (existing) => existing === null ? [null, done] : [existing, existing])
+      if (held !== null) return { ended: Deferred.await(held) } satisfies PendingSignIn
+      const run = Effect.gen(function*() {
+        const registered = yield* client
+        const device = yield* exchange(
+          http,
+          "device authorization",
+          post(`${oidc}/device_authorization`, {
+            clientId: registered.clientId,
+            clientSecret: registered.clientSecret,
+            startUrl: options.startUrl
+          }),
+          DeviceAuthorization
+        ).pipe(
+          Effect.catchTag(
+            "Refused",
+            (refused) => Effect.fail(new AwsSignInUnavailable({ operation: refused.operation, detail: refused.code }))
+          )
         )
+        const deadline = (yield* Clock.currentTimeMillis) + device.expiresIn * 1_000
+        // Created fresh and exclusively, so the mode applies and nothing planted at the path is written through.
+        yield* fs.remove(options.pendingFile, { force: true }).pipe(
+          Effect.andThen(fs.writeFileString(
+            options.pendingFile,
+            JSON.stringify({
+              verificationUri: device.verificationUriComplete ?? device.verificationUri,
+              expiresAt: deadline
+            }),
+            { mode: 0o600, flag: "wx" }
+          )),
+          Effect.mapError(storeFailure("pending file"))
+        )
+        yield* options.onPending(options.pendingFile)
+        return { registered, device, deadline }
+      })
+      // Whatever ends the start (a failed write, a broken hook, interruption) leaves no file and no pending sign-in.
+      const result = yield* restore(run).pipe(Effect.onError(() => removePending.pipe(Effect.andThen(finish))))
+      yield* poll(result.registered, result.device.deviceCode, result.device.interval ?? 5, result.deadline).pipe(
+        Effect.ensuring(removePending.pipe(Effect.andThen(finish))),
+        Effect.ignore({ log: true }),
+        Effect.forkIn(scope)
       )
-      const deadline = (yield* Clock.currentTimeMillis) + device.expiresIn * 1_000
-      yield* fs.writeFileString(
-        options.pendingFile,
-        JSON.stringify({
-          verificationUri: device.verificationUriComplete ?? device.verificationUri,
-          expiresAt: deadline
-        }),
-        { mode: 0o600 }
-      ).pipe(
-        Effect.andThen(fs.chmod(options.pendingFile, 0o600)),
-        Effect.mapError(storeFailure("pending file"))
-      )
-      yield* options.onPending(options.pendingFile)
-      return { registered, device, deadline }
+      return { ended: Deferred.await(done) } satisfies PendingSignIn
     })
-    // Whatever ends the start (a failed write, a broken hook, interruption) leaves no file and no pending sign-in.
-    const result = yield* run.pipe(Effect.onError(() => removePending.pipe(Effect.andThen(finish))))
-    yield* poll(result.registered, result.device.deviceCode, result.device.interval ?? 5, result.deadline).pipe(
-      Effect.ensuring(removePending.pipe(Effect.andThen(finish))),
-      Effect.ignore({ log: true }),
-      Effect.forkIn(scope)
-    )
-    return { ended: Deferred.await(done) } satisfies PendingSignIn
-  }).pipe(Effect.withSpan("AwsSignIn.begin"))
+  ).pipe(Effect.withSpan("AwsSignIn.begin"))
 
   const required = pending.pipe(Effect.flatMap((waiting) => new AwsSignInRequired({ pending: waiting })))
 
@@ -345,7 +366,14 @@ export const makeAwsSignIn = Effect.fn("AwsSignIn.make")(function*(options: AwsS
       }),
       Granted
     ).pipe(
-      Effect.catchTag("Refused", () => write({ ...stored, token: null }).pipe(Effect.andThen(required)))
+      Effect.catchTag("Refused", (refused) =>
+        // A gone registration takes its tokens with it; begin registers again.
+        refused.code === "invalid_client"
+          ? write({ client: null, token: null }).pipe(Effect.andThen(required))
+          : sessionEnded.has(refused.code)
+          ? write({ ...stored, token: null }).pipe(Effect.andThen(required))
+          // Throttled or malformed: the session may still be good, so keep it.
+          : Effect.fail(new AwsSignInUnavailable({ operation: refused.operation, detail: refused.code })))
     )
     const next = grant(now, refreshed, token.refreshToken)
     yield* write({ ...stored, token: next })
@@ -361,7 +389,13 @@ export const makeAwsSignIn = Effect.fn("AwsSignIn.make")(function*(options: AwsS
     return { _tag: "SignInRequired", pending: yield* pending } satisfies AwsSignInState
   })
 
-  return { state, accessToken, begin, region: options.region } satisfies AwsSignIn
+  const revoked = (accessToken: Redacted.Redacted<string>) =>
+    refreshing.withPermits(1)(Effect.gen(function*() {
+      const stored = yield* read
+      if (stored.token?.accessToken === Redacted.value(accessToken)) yield* write({ ...stored, token: null })
+    }))
+
+  return { state, accessToken, begin, revoked, region: options.region } satisfies AwsSignIn
 })
 
 export interface AwsRoleOptions {
@@ -385,15 +419,13 @@ export const awsRoleCredentials = (
 ): Credentials["Service"] => {
   const cached = Ref.makeUnsafe<ResolvedCredentials | null>(null)
   const signInRequired = () => new ExpiredSSOToken({ message: "sign in to AWS", profile: "hub" })
+  const startSignIn = signIn.begin.pipe(Effect.ignore({ log: true }), Effect.andThen(Effect.fail(signInRequired())))
   return Effect.gen(function*() {
     const now = yield* Clock.currentTimeMillis
     const held = yield* Ref.get(cached)
     if (held !== null && (held.expiration ?? 0) - now > refreshMargin) return held
     const token = yield* signIn.accessToken.pipe(
-      Effect.catchTag(
-        "AwsSignInRequired",
-        () => signIn.begin.pipe(Effect.ignore({ log: true }), Effect.andThen(Effect.fail(signInRequired())))
-      )
+      Effect.catchTag("AwsSignInRequired", () => startSignIn)
     )
     // The client span records request headers; the bearer token must read as redacted there.
     const redacted = yield* Headers.CurrentRedactedNames
@@ -405,7 +437,18 @@ export const awsRoleCredentials = (
         HttpClientRequest.setHeader(bearerHeader, Redacted.value(token))
       ),
       PortalCredentials
-    ).pipe(Effect.provideService(Headers.CurrentRedactedNames, [...redacted, bearerHeader]))
+    ).pipe(
+      Effect.provideService(Headers.CurrentRedactedNames, [...redacted, bearerHeader]),
+      // 401: the Identity Center session ended. Any other refusal is about this role, and the sign-in stays.
+      Effect.catchTag("Refused", (
+        refused
+      ): Effect.Effect<never, AwsSignInUnavailable | ExpiredSSOToken | AwsCredentialProviderError> =>
+        refused.status === 401
+          ? signIn.revoked(token).pipe(Effect.andThen(startSignIn))
+          : Effect.fail(
+            new AwsCredentialProviderError({ message: `${refused.operation}: ${refused.code}`, provider: "herdr-hub" })
+          ))
+    )
     const resolved: ResolvedCredentials = {
       accessKeyId: Redacted.make(answer.roleCredentials.accessKeyId),
       secretAccessKey: Redacted.make(answer.roleCredentials.secretAccessKey),
@@ -416,14 +459,10 @@ export const awsRoleCredentials = (
     yield* Ref.set(cached, resolved)
     return resolved
   }).pipe(
-    Effect.catchTags({
-      AwsSignInUnavailable: (error) =>
-        Effect.fail(
-          new AwsCredentialProviderError({ message: `${error.operation}: ${error.detail}`, provider: "herdr-hub" })
-        ),
-      // The portal refused the token: the Identity Center session ended.
-      Refused: () => Effect.fail(signInRequired())
-    }),
+    Effect.catchTag("AwsSignInUnavailable", (error) =>
+      Effect.fail(
+        new AwsCredentialProviderError({ message: `${error.operation}: ${error.detail}`, provider: "herdr-hub" })
+      )),
     Effect.withSpan("AwsSignIn.roleCredentials")
   )
 }

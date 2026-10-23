@@ -1,5 +1,6 @@
 import { NodeServices } from "@effect/platform-node"
 import { expect, it } from "@effect/vitest"
+import { openPrivateSqlite } from "@knpkv/herdr-fleet/sqlite"
 import { Clock, Effect, Option, Redacted, Schema } from "effect"
 import * as FileSystem from "effect/FileSystem"
 import { HttpClient, HttpClientResponse } from "effect/http"
@@ -22,16 +23,24 @@ interface Call {
 interface Reply {
   readonly status?: number
   readonly body: Schema.Json
+  readonly headers?: Readonly<Record<string, string>>
 }
 
 const ok = (body: Schema.Json): Reply => ({ body })
 const refused = (error: string, status = 400): Reply => ({ status, body: { error, error_description: "no" } })
 
+/** The portal's restJson1 error: a message, with the type in a header rather than an OAuth `error` field. */
+const portalError = (type: string, status: number): Reply => ({
+  status,
+  body: { message: "Session token not found or invalid" },
+  headers: { "x-amzn-ErrorType": `${type}:http://internal.amazon.com/coral/com.amazonaws.switchboard.portal/` }
+})
+
 /**
  * Identity Center: registration and device authorization always succeed; `/token` answers from `tokens`
- * in order (the last repeats); the portal answers role credentials expiring at `roleExpiresAt`.
+ * in order (the last repeats); the portal answers role credentials lasting `roleLifetime`, or `portal`.
  */
-const identityCenter = (tokens: Array<Reply>, calls: Array<Call>, roleLifetime = 3_600_000) =>
+const identityCenter = (tokens: Array<Reply>, calls: Array<Call>, roleLifetime = 3_600_000, portal?: Reply) =>
   HttpClient.make((request) =>
     Effect.gen(function*() {
       const now = yield* Clock.currentTimeMillis
@@ -63,7 +72,7 @@ const identityCenter = (tokens: Array<Reply>, calls: Array<Call>, roleLifetime =
         : url.pathname === "/token"
         ? (tokens.length > 1 ? tokens.shift() : tokens[0]) ?? refused("server_error", 500)
         : url.pathname === "/federation/credentials"
-        ? ok({
+        ? portal ?? ok({
           roleCredentials: {
             accessKeyId: "ASIAROLE",
             secretAccessKey: "role-secret",
@@ -76,7 +85,7 @@ const identityCenter = (tokens: Array<Reply>, calls: Array<Call>, roleLifetime =
         request,
         new Response(JSON.stringify(reply.body), {
           status: reply.status ?? 200,
-          headers: { "content-type": "application/json" }
+          headers: { "content-type": "application/json", ...reply.headers }
         })
       )
     })
@@ -135,6 +144,38 @@ it.layer(NodeServices.layer)("AWS sign-in", (it) => {
         clientSecret: "client-secret",
         startUrl: "https://example.awsapps.com/start"
       })
+    }).pipe(Effect.scoped))
+
+  it.effect("replaces a stale or planted pending file, never writing through it", () =>
+    Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const directory = yield* fs.makeTempDirectoryScoped({ prefix: "aws-sign-in-" })
+      const pendingFile = path.join(directory, "aws-sign-in-pending.json")
+      const elsewhere = path.join(directory, "elsewhere.json")
+      yield* fs.writeFileString(elsewhere, "untouched", { mode: 0o644 })
+      yield* fs.symlink(elsewhere, pendingFile)
+      const options = {
+        startUrl: "https://example.awsapps.com/start",
+        region: "eu-central-1",
+        databasePath: path.join(directory, "aws-sign-in.sqlite"),
+        pendingFile,
+        onPending: () => Effect.void
+      }
+      const client = identityCenter([refused("authorization_pending")], [])
+      // A file left by a killed hub names a dead code: opening the sign-in removes it.
+      yield* makeAwsSignIn(options).pipe(Effect.provideService(HttpClient.HttpClient, client))
+      expect(yield* fs.exists(pendingFile)).toBe(false)
+      const signIn = yield* makeAwsSignIn({ ...options, databasePath: path.join(directory, "second.sqlite") }).pipe(
+        Effect.provideService(HttpClient.HttpClient, client)
+      )
+      // Planted after opening: the sign-in still replaces the link rather than writing to its target.
+      yield* fs.symlink(elsewhere, pendingFile)
+      yield* Effect.asVoid(signIn.begin)
+      expect(yield* fs.readFileString(elsewhere)).toBe("untouched")
+      expect((yield* fs.stat(elsewhere)).mode & 0o777).toBe(0o644)
+      const written = yield* fs.stat(pendingFile)
+      expect([written.type, written.mode & 0o777]).toEqual(["File", 0o600])
     }).pipe(Effect.scoped))
 
   it.effect("starts one sign-in at a time", () =>
@@ -218,6 +259,63 @@ it.layer(NodeServices.layer)("AWS sign-in", (it) => {
       expect(yield* signIn.state).toEqual({ _tag: "SignInRequired", pending: false })
     }).pipe(Effect.scoped))
 
+  it.effect("a throttled or malformed refresh keeps the sign-in; a gone client clears it and registers again", () =>
+    Effect.gen(function*() {
+      const calls: Array<Call> = []
+      const { signIn } = yield* signInWith(
+        identityCenter(
+          [granted("access-1", 600), refused("slow_down"), refused("invalid_request"), refused("invalid_client")],
+          calls
+        ),
+        []
+      )
+      const { ended } = yield* signIn.begin
+      yield* TestClock.adjust("5 seconds")
+      yield* ended
+      yield* TestClock.adjust("6 minutes")
+      for (const code of ["slow_down", "invalid_request"]) {
+        const failure = yield* Effect.flip(signIn.accessToken)
+        expect([failure._tag, code]).toEqual(["AwsSignInUnavailable", code])
+        expect((yield* signIn.state)._tag).toBe("SignedIn")
+      }
+      expect((yield* Effect.flip(signIn.accessToken))._tag).toBe("AwsSignInRequired")
+      expect(yield* signIn.state).toEqual({ _tag: "SignInRequired", pending: false })
+      yield* Effect.asVoid(signIn.begin)
+      expect(paths(calls).filter((path) => path === "/client/register").length).toBe(2)
+    }).pipe(Effect.scoped))
+
+  it.effect("an unreadable stored sign-in fails without quoting what it holds", () =>
+    Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const directory = yield* fs.makeTempDirectoryScoped({ prefix: "aws-sign-in-" })
+      const databasePath = path.join(directory, "aws-sign-in.sqlite")
+      const signIn = yield* makeAwsSignIn({
+        startUrl: "https://example.awsapps.com/start",
+        region: "eu-central-1",
+        databasePath,
+        pendingFile: path.join(directory, "aws-sign-in-pending.json"),
+        onPending: () => Effect.void
+      }).pipe(Effect.provideService(HttpClient.HttpClient, identityCenter([], [])))
+      const seeded = yield* openPrivateSqlite(databasePath, { initialize: () => undefined })
+      // Each row replaces the one row, then is read once.
+      const unreadable = (value: string) =>
+        Effect.sync(() =>
+          seeded.database.prepare("INSERT OR REPLACE INTO aws_sign_in (session, value) VALUES (?, ?)").run(
+            "eu-central-1 https://example.awsapps.com/start",
+            value
+          )
+        ).pipe(Effect.andThen(Effect.flip(signIn.state)))
+      const badToken = yield* unreadable(
+        "{\"client\":null,\"token\":{\"accessToken\":\"leaky-token\",\"refreshToken\":5,\"expiresAt\":1}}"
+      )
+      const notJson = yield* unreadable("{\"client\":{\"clientSecret\":\"leaky-secret\"\"},\"token\":null}")
+      for (const failure of [badToken, notJson]) {
+        expect(failure).toMatchObject({ _tag: "AwsSignInUnavailable", operation: "read", detail: "unreadable" })
+      }
+      seeded.database.close()
+    }).pipe(Effect.scoped))
+
   it.effect("keeps the sign-in across a restart, in the database only", () =>
     Effect.gen(function*() {
       const fs = yield* FileSystem.FileSystem
@@ -288,5 +386,37 @@ it.layer(NodeServices.layer)("AWS sign-in", (it) => {
       yield* Effect.flip(credentials)
       expect(first._tag).toBe("Alchemy::AWS::ExpiredSSOToken")
       expect(pending.length).toBe(1)
+    }).pipe(Effect.scoped))
+
+  it.effect("a portal that no longer accepts the token clears the sign-in and starts one; a refused role is typed", () =>
+    Effect.gen(function*() {
+      const role = { accountId: "999999999900", roleName: "PoolOperator", region: "eu-central-1" }
+      const pending: Array<string> = []
+      const revoked = identityCenter(
+        [granted(), refused("authorization_pending")],
+        [],
+        3_600_000,
+        portalError("UnauthorizedException", 401)
+      )
+      const { signIn } = yield* signInWith(revoked, pending)
+      const { ended } = yield* signIn.begin
+      yield* TestClock.adjust("5 seconds")
+      yield* ended
+      const failure = yield* Effect.flip(awsRoleCredentials(signIn, role, revoked))
+      expect(failure._tag).toBe("Alchemy::AWS::ExpiredSSOToken")
+      expect(yield* signIn.state).toEqual({ _tag: "SignInRequired", pending: true })
+      expect(pending.length).toBe(2)
+
+      const forbidden = identityCenter([granted()], [], 3_600_000, portalError("ForbiddenException", 403))
+      const second = yield* signInWith(forbidden, [])
+      const started = yield* second.signIn.begin
+      yield* TestClock.adjust("5 seconds")
+      yield* started.ended
+      const refusedRole = yield* Effect.flip(awsRoleCredentials(second.signIn, role, forbidden))
+      expect(refusedRole).toMatchObject({
+        _tag: "AWS::CredentialProviderError",
+        message: "role credentials: ForbiddenException"
+      })
+      expect((yield* second.signIn.state)._tag).toBe("SignedIn")
     }).pipe(Effect.scoped))
 })
