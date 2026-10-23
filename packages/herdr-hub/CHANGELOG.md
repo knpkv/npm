@@ -2,6 +2,30 @@
 
 Released as `@knpkv/herdr-approvals` up to 0.18.0; the headings below are that package's history.
 
+## 0.54.0
+
+### Minor Changes
+
+- [#1078](https://github.com/knpkv/npm/pull/1078) [`0d60032`](https://github.com/knpkv/npm/commit/0d60032bdda09409bf752f56184626a85ced7d7f) Thanks [@konopkov](https://github.com/konopkov)! - On phones the Hub header shows the product name, a breadcrumb line under it names the module and page ("Fleet / Approvals"; the module alone when it has one page), and every module shows its heading and one-line purpose again. Page metadata `showInPhoneTitle` is deprecated and ignored.
+
+- [#1086](https://github.com/knpkv/npm/pull/1086) [`9182b48`](https://github.com/knpkv/npm/commit/9182b480640c95dae7d97faa4b1b8b62583dc938) Thanks [@konopkov](https://github.com/konopkov)! - hostd starts on Windows. Paths come from one `HubPaths` table shared by herdr-fleet and herdr-hub: the home directory is `os.homedir()` instead of `HOME`, the host name is `os.hostname()` instead of `HOSTNAME` (so a standalone host started without `HOSTNAME` now reports its real name instead of `localhost`), and Windows keeps fleet configuration under `%APPDATA%` and state under `%LOCALAPPDATA%`. Linux and macOS paths are unchanged. `HERDR_HUB_HOME` and `HERDR_HUB_CONFIG` override them on any OS. The job store's path-identity check now accepts a Windows real path that differs only in drive-letter case or separators. On Windows, hostd runs npm `.cmd` shims as Node with their script, never through a shell. `makeHostdProgram` takes an optional `paths` table.
+
+  The Relay store notes that on Windows owner-only comes from the user profile's ACL.
+
+- [#1083](https://github.com/knpkv/npm/pull/1083) [`7cdf497`](https://github.com/knpkv/npm/commit/7cdf497c1c9efd089f1451f62c82b48e87238071) Thanks [@konopkov](https://github.com/konopkov)! - Sandboxes run details show each step's own status with its second line ("signed in", "41 to remove, scan complete", "3 still removable", "not run"), the failure in plain words, and the step times on the account page. Runs now record the dry run and verify counts, and `SandboxRunView` carries `steps`.
+
+### Patch Changes
+
+- Updated dependencies [[`0d60032`](https://github.com/knpkv/npm/commit/0d60032bdda09409bf752f56184626a85ced7d7f), [`9182b48`](https://github.com/knpkv/npm/commit/9182b480640c95dae7d97faa4b1b8b62583dc938), [`7cdf497`](https://github.com/knpkv/npm/commit/7cdf497c1c9efd089f1451f62c82b48e87238071)]:
+  - @knpkv/codecommit-web@0.40.0
+  - @knpkv/hub-app@0.2.0
+  - @knpkv/herdr-fleet@0.19.0
+  - @knpkv/relay@0.2.3
+  - @knpkv/sandbox-pool@0.9.0
+  - @knpkv/herdr-connect@0.30.1
+  - @knpkv/herdr-coordinator@0.4.11
+  - @knpkv/herdr-work@0.12.12
+
 ## 0.53.0
 
 ### Minor Changes

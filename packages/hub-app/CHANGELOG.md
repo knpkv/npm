@@ -1,5 +1,11 @@
 # @knpkv/hub-app
 
+## 0.2.0
+
+### Minor Changes
+
+- [#1078](https://github.com/knpkv/npm/pull/1078) [`0d60032`](https://github.com/knpkv/npm/commit/0d60032bdda09409bf752f56184626a85ced7d7f) Thanks [@konopkov](https://github.com/konopkov)! - On phones the Hub header shows the product name, a breadcrumb line under it names the module and page ("Fleet / Approvals"; the module alone when it has one page), and every module shows its heading and one-line purpose again. Page metadata `showInPhoneTitle` is deprecated and ignored.
+
 ## 0.1.0
 
 ### Minor Changes
