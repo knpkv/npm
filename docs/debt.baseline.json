@@ -2790,13 +2790,6 @@
     {
       "package": "herdr-hub",
       "kind": "effect-diagnostics",
-      "file": "packages/herdr-hub/test/config-path.test.ts",
-      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
-      "reasoned": true
-    },
-    {
-      "package": "herdr-hub",
-      "kind": "effect-diagnostics",
       "file": "packages/herdr-hub/test/hostd-runtime.test.ts",
       "text": "@effect-diagnostics-next-line strictEffectProvide:off",
       "reasoned": true

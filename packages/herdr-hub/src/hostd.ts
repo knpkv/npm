@@ -1,7 +1,14 @@
-import type { AgentWorkerIdentity, FleetStoreError, HostConfiguration, HostOperations } from "@knpkv/herdr-fleet"
+import type {
+  AgentWorkerIdentity,
+  FleetStoreError,
+  HostConfiguration,
+  HostOperations,
+  HubPathTable
+} from "@knpkv/herdr-fleet"
 import {
   FleetOperationError,
   FleetValidationError,
+  HubPaths,
   JobStore,
   loadConfigurationOrStandalone,
   makeFleetService
@@ -69,6 +76,8 @@ export type HostdOperationsComposer = (
 
 export interface HostdProgramOptions {
   readonly composeOperations?: HostdOperationsComposer
+  /** This computer's paths; read from the OS and environment (`HubPaths.fromSystem`) when absent. */
+  readonly paths?: HubPathTable
 }
 
 export const makeHostdOperations = Effect.fn("Hostd.makeOperations")(function*(
@@ -94,14 +103,7 @@ export const makeHostdOperations = Effect.fn("Hostd.makeOperations")(function*(
   return { ...composed, notSetUp: defaultOperations.notSetUp }
 })
 
-/**
- * Builds the hostd process as one Effect program. Consumers may decorate the
- * package-owned typed operations without replacing startup, approval, or HTTP
- * authorization behavior. The caller owns the single runtime and Node layer.
- */
-export const makeHostdProgram = Effect.fn("Hostd.makeProgram")(function*(
-  options: HostdProgramOptions = {}
-) {
+const hostdProgram = Effect.fn("Hostd.program")(function*(options: HostdProgramOptions) {
   const paths = yield* Path.Path
   const source = yield* fleetConfigSource
   // Nothing at the default path is a computer outside any fleet: run as its own local hub. An explicit
@@ -136,7 +138,10 @@ export const makeHostdProgram = Effect.fn("Hostd.makeProgram")(function*(
   const directory = paths.dirname(yield* paths.fromFileUrl(new URL(import.meta.url)))
   const assets = yield* loadUiAssets(directory)
   const relay = { directory: paths.join(config.stateDirectory, "relay") }
-  const relayOptions = config.lanWork === undefined ? { relay } : { relay, lanWork: config.lanWork }
+  // Installed apps are read from this computer's apps.json (HERDR_HUB_CONFIG, else the OS default).
+  const hubPaths = yield* HubPaths
+  const apps = { configPath: hubPaths.appsConfig }
+  const relayOptions = config.lanWork === undefined ? { relay, apps } : { relay, apps, lanWork: config.lanWork }
   // Absent hosts stay absent: the server reads a missing key as "not configured".
   const withCode = codeHost === null ? relayOptions : { ...relayOptions, codeHost }
   const withStacks = stacksHost === null ? withCode : { ...withCode, stacksHost }
@@ -162,3 +167,17 @@ export const makeHostdProgram = Effect.fn("Hostd.makeProgram")(function*(
   }
   return yield* Effect.never
 })
+
+/**
+ * Builds the hostd process as one Effect program. Consumers may decorate the
+ * package-owned typed operations without replacing startup, approval, or HTTP
+ * authorization behavior. The caller owns the single runtime and Node layer;
+ * the program resolves this computer's paths itself unless `options.paths` names them.
+ */
+export const makeHostdProgram = (options: HostdProgramOptions = {}) =>
+  hostdProgram(options).pipe(
+    Effect.provideServiceEffect(
+      HubPaths,
+      options.paths === undefined ? HubPaths.fromSystem : Effect.succeed(options.paths)
+    )
+  )

@@ -9,6 +9,7 @@ import { HttpClient, HttpClientResponse } from "effect/http"
 import { TestClock } from "effect/testing"
 import { makeRelayPostCommand, resolveReportingAgent, submitRelayPost } from "../src/internal/relay-cli.js"
 import { RelayProbe, relayRootCommand } from "../src/internal/relay-open.js"
+import { ownerPaths } from "./fixtures/hub-paths.js"
 
 const makeRelayCommand = <A, E, R>(report: (body: ConnectPostBody) => Effect.Effect<A, E, R>) =>
   relayRootCommand.pipe(Command.withSubcommands([makeRelayPostCommand(report)]))
@@ -26,6 +27,7 @@ const invalidTextCases = [
 
 const postLayer = Layer.mergeAll(
   NodeServices.layer,
+  ownerPaths(),
   Layer.succeed(BrowserOpener, BrowserOpener.of({ open: () => Effect.die("Post/help must not open a browser") })),
   Layer.succeed(
     RelayProbe,
