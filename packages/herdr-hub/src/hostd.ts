@@ -21,6 +21,17 @@ import { makeHostOperations } from "./operations.js"
 import { readSandboxesHost } from "./sandboxes-module.js"
 import { readStacksHost } from "./stacks-module.js"
 
+export {
+  awsRoleCredentials,
+  type AwsRoleOptions,
+  type AwsSignIn,
+  type AwsSignInOptions,
+  AwsSignInRequired,
+  type AwsSignInState,
+  AwsSignInUnavailable,
+  makeAwsSignIn,
+  type PendingSignIn
+} from "./aws-sign-in.js"
 export { HostdOperationsCompositionError } from "./errors.js"
 export {
   ApprovalRequired,
