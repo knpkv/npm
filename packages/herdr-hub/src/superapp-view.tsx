@@ -307,11 +307,15 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
   }
   const cancelLocationFocus = useRef<(() => void) | null>(null)
   const previousFocusDestination = useRef(location.destination)
+  // The page's own load is no keyboard navigation: its arrival focus paints no ring.
+  const coldLoad = useRef(true)
   // Compare with the navigation origin, before child activation effects can claim their target.
   useLayoutEffect(() => {
     const previous = previousFocusDestination.current
     previousFocusDestination.current = location.destination
     const arrival = previous.module !== location.destination.module || previous.page !== location.destination.page
+    const ring = !coldLoad.current
+    coldLoad.current = false
     // Query repairs retain the pending arrival focus, but never start another focus request.
     if (location.focus === null) return
     cancelLocationFocus.current?.()
@@ -324,7 +328,8 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
         location.destination.module,
         location.destination.page,
         arrival || location.focus === "history",
-        focusBeforeNavigation.current
+        focusBeforeNavigation.current,
+        ring
       )
   }, [location])
   useLayoutEffect(() => () => cancelLocationFocus.current?.(), [])

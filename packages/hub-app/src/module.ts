@@ -14,9 +14,7 @@ export const ModuleDescriptor = Schema.Struct({
   defaultPage: Segment,
   pages: Schema.Array(Schema.Struct({
     id: Segment,
-    label: Label,
-    /** @deprecated Ignored: the phone header shows the product name and the breadcrumb names the page. */
-    showInPhoneTitle: Schema.optionalKey(Schema.Boolean)
+    label: Label
   })).check(Schema.isMinLength(1)),
   listeners: Schema.Array(ModuleListener).check(Schema.isMinLength(1)),
   requires: Schema.Array(Schema.Literals(["read", "write"]))

@@ -92,12 +92,15 @@ export const isEditableTarget = (target: EventTarget | null): boolean => {
 /**
  * Exact approvals win over their tab; modal portals own focus while their module slot is hidden.
  * Pass the navigation-time focus origin to preserve targets claimed by earlier child layout effects.
+ * `ring: false` focuses without painting a focus ring: a cold load lands on the page before anyone
+ * pressed a key, so the ring would show on a tab nobody reached by keyboard. The next Tab shows it.
  */
 export const focusModulePage = (
   module: string,
   page: string,
   preserveOwnerFocus = false,
-  focusBeforeNavigation: Element | null = document.activeElement
+  focusBeforeNavigation: Element | null = document.activeElement,
+  ring = true
 ): (() => void) => {
   let cancelSearch: (() => void) | undefined
   const previousFocus = focusBeforeNavigation
@@ -132,7 +135,7 @@ export const focusModulePage = (
     const approval = page === "approvals" ? slot?.querySelector<HTMLElement>('[data-approval-target="true"]') : null
     const target = approval ?? tab ?? pageLink ?? document.getElementById("main")
     if (target !== null && target !== undefined && target.closest('[aria-hidden="true"], [inert], [hidden]') === null)
-      target.focus({ preventScroll: true })
+      target.focus(ring ? { preventScroll: true } : { preventScroll: true, focusVisible: false })
   })
   return () => {
     window.cancelAnimationFrame(frame)

@@ -320,7 +320,7 @@ The Fleet provider reuses Relay's bounded pending reader: up to eight pages per 
 
 Provider keys are local and opaque. The collector adds the registered module namespace, validates destination ownership, deduplicates and keeps the earliest-created whole row; equal creation times keep the first row. Rows sort by expiry with no-expiry last, then creation time and key. Fleet casefolds the host only in its key and preserves configured display case in the destination. Do not recover selectors by splitting a key. Each provider is capped at 256 deduplicated rows; a bounded result reports truncation. A failed, timed-out or truncated source always makes the result `Partial`, including when it returned no items. `Complete` has no source issues.
 
-Module page metadata `showInPhoneTitle` is deprecated and ignored. On phone the header shows the product name, and a breadcrumb line under it names the module and page (“Fleet / Approvals”; the module alone when it has one page). Each module keeps its own heading and one-line purpose on phone.
+On phone the header shows the product name, and a breadcrumb line under it names the module and page (“Fleet / Approvals”; the module alone when it has one page). Each module keeps its own heading and one-line purpose on phone.
 
 Canonical Connect owns its saved Active/Archived location through the shell navigator. Embedded `BlockedConnectSurface` requires one `directoryLocation` containing its URL, navigation and selection-close callbacks; standalone use retains the default browser history. The module forwards the dashboard notification state to the stage footer without another device-state read.
 
