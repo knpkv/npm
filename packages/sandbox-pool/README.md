@@ -30,6 +30,7 @@ The package ships no real organization. `PoolContract` is decoded from the ownin
 - `boundaryPath` and `boundaryName`: the permissions boundary policy a reset re-asserts and keeps.
 - `accountAliasPrefix`: a pool account's alias is this prefix plus its name.
 - `budgetActionRole` and `denyAllPolicy`: the budget action's role and the policy it attaches to stop spend.
+- `spend` (optional): the pool budget's `alarm` and hard `stop` in USD, the alarm below the stop. The overview serves them as `spendLimits` for the spend bar.
 - `access` (optional): how a person signs in, `{ portalUrl, ssoSession, roleName }`. `portalUrl` is the AWS access portal's start URL, https with no query or fragment; `ssoSession` names the `[sso-session]` in `~/.aws/config`; `roleName` is the permission set. Without it the hub offers no console or CLI profile. From `@knpkv/sandbox-pool/host`, `signInOf(contract)` adds the pool's first region, `consoleUrl(signIn, accountId)` is the portal's console link for one account and role, and `cliProfile(signIn, name, accountId)` is that account's `~/.aws/config` profile, or null for a name that is not one token (letters, digits, `.`, `_`, `-`), so no value can add a config line.
 
 ## States
@@ -54,7 +55,9 @@ Transitions are pure and bump `version` by one. A `Holder` is an agent, pane or 
 
 ## Store
 
-`SandboxStore` holds one record per pool account. `put(next)` writes only when the stored record is still at `next.version - 1`, the version the transition was computed from. Otherwise it fails with `StaleVersion`: re-read and apply the transition again. A record whose name differs from the stored one fails with `RecordMismatch`. `rename(accountId, name)` is the name change that `put` refuses: the version and state stay, and a name that already matches writes nothing. `makeMemorySandboxStore` builds a fresh in-memory store for tests and fixtures (`memorySandboxStore` is the same as a layer); `seedPool(contract)` gives every pool account as Available at version 0. A durable store fails with `SandboxStoreUnavailable` when it cannot be reached, and writes nothing. `sweepAt` is the last successful sweep's epoch milliseconds, or null until `markSweep` records one.
+`SandboxStore` holds one record per pool account. `put(next)` writes only when the stored record is still at `next.version - 1`, the version the transition was computed from. Otherwise it fails with `StaleVersion`: re-read and apply the transition again. A record whose name differs from the stored one fails with `RecordMismatch`. `rename(accountId, name)` is the name change that `put` refuses: the version and state stay, and a name that already matches writes nothing. `makeMemorySandboxStore` builds a fresh in-memory store for tests and fixtures (`memorySandboxStore` is the same as a layer); `seedPool(contract)` gives every pool account as Available at version 0. A durable store fails with `SandboxStoreUnavailable` when it cannot be reached, and writes nothing. `sweepAt` is the last successful sweep's epoch milliseconds, or null until `markSweep` records one. `spend` is each account's latest `SpendReading` (`{ accountId, usd, asOf }`), in account-id order, and `recordSpend` replaces it.
+
+`SpendReader` is the host's read-only port for one pool account's actual spend this month, in USD; it fails with `NoBudget`, `SpendAccessDenied`, `SpendThrottled` or `SpendUnavailable`. The package ships no implementation, like `Nuke`.
 
 ## Reset
 

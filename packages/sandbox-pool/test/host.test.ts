@@ -365,7 +365,8 @@ describe("sandbox read model", () => {
           runId: "run-current",
           step: null,
           blocker: unknown
-        }
+        },
+        spend: null
       })
       expect(byId.get(account("999999999991"))).toMatchObject({
         label: "left the pool",
@@ -466,7 +467,9 @@ describe("sandbox read model", () => {
         put: () => Effect.die("unread"),
         rename: () => Effect.die("unread"),
         sweepAt: Effect.succeed(null),
-        markSweep: () => Effect.die("unread")
+        markSweep: () => Effect.die("unread"),
+        spend: Effect.succeed([]),
+        recordSpend: () => Effect.die("unread")
       })
       const storeDown = yield* makeSandboxHostReads({
         contract,

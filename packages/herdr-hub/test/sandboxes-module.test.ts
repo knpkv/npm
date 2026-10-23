@@ -104,9 +104,11 @@ const overview: SandboxesOverview = {
     accountId: account,
     name: sandboxName,
     label: null,
-    state: { _tag: "Available", lastResetAt: null }
+    state: { _tag: "Available", lastResetAt: null },
+    spend: null
   }],
-  badge: { quarantined: 0, stale: true, partial: true, asOf: null }
+  badge: { quarantined: 0, stale: true, partial: true, asOf: null },
+  spendLimits: null
 }
 
 const runLogBody = Schema.decodeUnknownSync(SandboxRunLog)({

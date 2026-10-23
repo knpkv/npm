@@ -28,5 +28,6 @@ export const sandboxesOverviewFixture = (now: number): SandboxesOverview => ({
       state: { _tag: "Available", lastResetAt: at(now - 83 * minute) }
     })
   ],
-  badge: { quarantined: 0, stale: false, partial: false, asOf: null }
+  badge: { quarantined: 0, stale: false, partial: false, asOf: null },
+  spendLimits: null
 })

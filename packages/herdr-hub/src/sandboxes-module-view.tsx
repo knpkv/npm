@@ -14,7 +14,8 @@ import {
   type SandboxRunLog,
   type SandboxRuns,
   type SandboxRunView,
-  type SandboxSignIn
+  type SandboxSignIn,
+  type SandboxSpend
 } from "@knpkv/sandbox-pool/host"
 import { Button, Notice, Sheet, Skeleton, StateLabel, type RlyStateTone } from "@knpkv/rly/primitives"
 import { Clock, DateTime, Effect, Exit, Fiber, Result, Schedule, Schema } from "effect"
@@ -647,6 +648,55 @@ const CleanupSteps = ({ step }: { readonly step: RunStep | null }): ReactElement
 
 const consoleNote = "Clear the blocker by hand in the console, then retry the reset."
 
+type SpendLimits = NonNullable<Ready["spendLimits"]>
+
+/** Dollars as the cards write them: cents for spend, whole dollars for a whole-dollar limit. */
+const money = (usd: number): string => `$${usd.toFixed(2)}`
+const limitMoney = (usd: number): string => (Number.isInteger(usd) ? `$${usd}` : money(usd))
+
+/** Percent of the bar's width, which runs to 1.2 times the hard stop so a stop that fired still shows past it. */
+const along = (usd: number, limits: SpendLimits): string =>
+  `${Math.min(100, (usd / (limits.stop * 1.2)) * 100).toFixed(2)}%`
+
+/** This month's spend against the alarm and the hard stop. */
+const SpendBar = ({ limits, spend }: { readonly limits: SpendLimits; readonly spend: SandboxSpend }): ReactElement => (
+  <div className="sandboxes-spend" data-spend="">
+    <div className="sandboxes-spend-head" data-spend-head="">
+      <span>Spend this month</span>
+      <b>{money(spend.usd)}</b>
+    </div>
+    <div
+      aria-label={`Spend this month ${money(spend.usd)}. Alarm at ${limitMoney(limits.alarm)}, hard stop at ${limitMoney(limits.stop)}.`}
+      aria-valuemax={limits.stop}
+      aria-valuemin={0}
+      aria-valuenow={spend.usd}
+      className="sandboxes-spend-track"
+      role="meter"
+    >
+      <span className="sandboxes-spend-fill" data-spend-fill="" style={{ inlineSize: along(spend.usd, limits) }} />
+      <span
+        aria-hidden="true"
+        className="sandboxes-spend-tick"
+        style={{ insetInlineStart: along(limits.alarm, limits) }}
+      />
+      <span
+        aria-hidden="true"
+        className="sandboxes-spend-tick sandboxes-spend-stop"
+        style={{ insetInlineStart: along(limits.stop, limits) }}
+      />
+    </div>
+    <div aria-hidden="true" className="sandboxes-spend-marks">
+      <span data-spend-mark="">$0</span>
+      <span data-spend-mark="" style={{ insetInlineStart: along(limits.alarm, limits) }}>
+        {`${limitMoney(limits.alarm)} alarm`}
+      </span>
+      <span data-spend-mark="" style={{ insetInlineStart: along(limits.stop, limits) }}>
+        {`${limitMoney(limits.stop)} hard stop`}
+      </span>
+    </div>
+  </div>
+)
+
 /** Why the owner can't open this account's console now, or null when they can: their lease, free, or quarantined. */
 const consoleRefusal = (state: CardState, viewer: string): string | null => {
   switch (state._tag) {
@@ -791,11 +841,14 @@ const PoolCard = ({
   owner,
   requests,
   signIn,
+  spendLimits,
   viewer,
   writes
 }: {
   readonly done: () => void
   readonly item: SandboxCard
+  /** The pool's alarm and hard stop; with the card's reading, the spend bar. */
+  readonly spendLimits: Ready["spendLimits"]
   readonly lastKnown: DateTime.Utc | null
   readonly now: DateTime.Utc
   readonly owner: boolean
@@ -867,6 +920,7 @@ const PoolCard = ({
           </div>
         </div>
       ) : null}
+      {spendLimits === null || item.spend === null ? null : <SpendBar limits={spendLimits} spend={item.spend} />}
       {requests.map((request) => (
         <PendingRequest detail={false} key={request.jobId} now={now} request={request} viewer={viewer} />
       ))}
@@ -1349,6 +1403,7 @@ const OverviewPage = ({
                 owner={owner}
                 requests={requests?.byAccount.get(item.accountId) ?? []}
                 signIn={owner ? signIn : null}
+                spendLimits={view.overview.spendLimits}
                 lift={
                   owner &&
                   writes !== null &&
@@ -1597,6 +1652,7 @@ const AccountDetail = ({
   requests,
   requestsSince,
   runs,
+  spendLimits,
   viewer
 }: {
   /** The owner's retry or lift request for this account, when one can be asked for. */
@@ -1609,6 +1665,7 @@ const AccountDetail = ({
   /** When the requests on screen became last known; null while they are current. */
   readonly requestsSince: DateTime.Utc | null
   readonly runs: Read<SandboxRuns>
+  readonly spendLimits: Ready["spendLimits"]
   readonly viewer: string
 }): ReactElement => {
   const times = useContext(TimesContext)
@@ -1678,11 +1735,25 @@ const AccountDetail = ({
             rows={[
               ["Run ID", <code>{state.runId}</code>],
               ...(since === null ? [] : [["Since", since] satisfies readonly [string, ReactNode]]),
-              ...(failed === null ? [] : [["Failed step", stepWord(failed)] satisfies readonly [string, ReactNode]])
+              ...(failed === null ? [] : [["Failed step", stepWord(failed)] satisfies readonly [string, ReactNode]]),
+              ...(item.spend === null
+                ? []
+                : [["Spend this month", money(item.spend.usd)] satisfies readonly [string, ReactNode]])
             ]}
           />
         </div>
-      ) : state._tag === "Quarantined" ? null : (
+      ) : state._tag === "Quarantined" ? (
+        spendLimits === null || item.spend === null ? null : (
+          <div className="sandboxes-account-spend">
+            <SpendBar limits={spendLimits} spend={item.spend} />
+            {item.spend.usd < spendLimits.stop ? null : (
+              <small className="sandboxes-muted" data-spend-over="">
+                {`${money(item.spend.usd)} is past the ${limitMoney(spendLimits.stop)} hard stop.`}
+              </small>
+            )}
+          </div>
+        )
+      ) : (
         <Facts rows={cardRows(times, item, viewer, now)} />
       )}
       {runs._tag === "Done" && runs.staleSince !== null ? <LastKnown at={runs.staleSince} of="runs" /> : null}
@@ -1738,6 +1809,7 @@ const AccountPage = ({
           requests={requests === null ? null : (requests.byAccount.get(item.accountId) ?? [])}
           requestsSince={requests?.staleSince ?? null}
           runs={runs}
+          spendLimits={view.overview.spendLimits}
           viewer={viewer}
         />
       )}
