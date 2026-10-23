@@ -139,6 +139,7 @@ import { appNeedsYouProviders } from "./apps/needs-you.js"
 import { makeAppRegistry } from "./apps/registry.js"
 import { AppServiceRefused, handleAppServicesRoute, handleAppsRoute } from "./apps/routes.js"
 import { authorize, authorizeLoopback, authorizeLoopbackPeer } from "./auth.js"
+import type { AwsSignIn } from "./aws-sign-in.js"
 import { BlockedPushMutation, StageHeartbeat } from "./blocked-push-model.js"
 import { loadBlockedPushObservations } from "./blocked-push-source.js"
 import { BlockedPushStore } from "./blocked-push-store.js"
@@ -394,6 +395,8 @@ export type HttpServerOptions = {
   readonly sandboxesHost?: FleetHostName
   /** Pool contract for this host. Missing while `sandboxesHost` names this hub is a pool mismatch. */
   readonly sandboxPool?: PoolContract | null
+  /** The hub's own AWS sign-in for that pool, served to the owner by the Sandboxes module; absent when off. */
+  readonly awsSignIn?: AwsSignIn
   /**
    * Installed apps: `configPath` is nix's `apps.json` (default `~/.config/herdr/apps.json`), `tokenDirectory`
    * where each app's `<id>.token` is written (default `<state directory>/hub-apps/tokens`).
@@ -1892,6 +1895,7 @@ export const startHttpServer = async (
         sandboxesHost: options.sandboxesHost ?? null,
         stateDirectory: config.stateDirectory,
         pool: options.sandboxPool ?? null,
+        awsSignIn: options.awsSignIn ?? null,
         // Build the effect on read. Calling pendingApprovals here would list the store at startup.
         pendingApprovals: Effect.suspend(() => service.pendingApprovals()),
         // The module has checked same origin, the served pool and the hub's own node, and passes the

@@ -60,3 +60,21 @@ export const SandboxRequests = Schema.Union([
   Schema.TaggedStruct("Ready", { requests: Schema.Array(SandboxRequest) })
 ])
 export type SandboxRequests = typeof SandboxRequests.Type
+
+/**
+ * The hub's own AWS sign-in, for the owner only: `NotConfigured` when this pool has no AWS sign-in,
+ * `SignInPending` with what to approve (its URL and code let whoever holds them finish the sign-in), or
+ * `SignInRequired`. Or why the pool is not served here.
+ */
+export const SandboxAwsSession = Schema.Union([
+  SandboxesUnavailable,
+  Schema.TaggedStruct("NotConfigured", {}),
+  Schema.TaggedStruct("SignedIn", { expiresAt: Instant }),
+  Schema.TaggedStruct("SignInPending", {
+    verificationUri: Schema.String,
+    userCode: Schema.String,
+    expiresAt: Instant
+  }),
+  Schema.TaggedStruct("SignInRequired", {})
+])
+export type SandboxAwsSession = typeof SandboxAwsSession.Type

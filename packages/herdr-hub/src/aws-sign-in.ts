@@ -12,7 +12,7 @@
  *   A transport failure keeps the token and fails as `AwsSignInUnavailable`.
  * - **Credentials:** `awsRoleCredentials` builds a `Credentials` service for one account and permission set.
  *   Without a sign-in it fails as an expired SSO token, so every AWS adapter keeps its typed error
- *   channel, and starts one sign-in.
+ *   channel. It never starts a sign-in: only a person does, through `begin`.
  *
  * @module
  */
@@ -38,10 +38,20 @@ export class AwsSignInUnavailable extends Schema.TaggedError<AwsSignInUnavailabl
   detail: Schema.String
 }) {}
 
-/** Whether AWS calls can be made. `expiresAt` is the access token's end, in epoch milliseconds. */
+/**
+ * Whether AWS calls can be made. `SignedIn.expiresAt` is the access token's end; `SignInPending` is a started
+ * sign-in waiting for a person to approve `userCode` at `verificationUri` before `expiresAt`. Epoch
+ * milliseconds. The pending fields are for the owner only: they let anyone holding them finish the sign-in.
+ */
 export type AwsSignInState =
   | { readonly _tag: "SignedIn"; readonly expiresAt: number }
-  | { readonly _tag: "SignInRequired"; readonly pending: boolean }
+  | {
+    readonly _tag: "SignInPending"
+    readonly verificationUri: string
+    readonly userCode: string
+    readonly expiresAt: number
+  }
+  | { readonly _tag: "SignInRequired" }
 
 export interface AwsSignInOptions {
   /** The AWS access portal's start URL. */
@@ -92,6 +102,7 @@ const Registration = Schema.Struct({
 })
 const DeviceAuthorization = Schema.Struct({
   deviceCode: Schema.String,
+  userCode: Schema.String,
   verificationUri: Schema.String,
   verificationUriComplete: Schema.optionalKey(Schema.String),
   expiresIn: Schema.Number,
@@ -208,11 +219,14 @@ export const makeAwsSignIn = Effect.fn("AwsSignIn.make")(function*(options: AwsS
       Effect.andThen(opened.secureFiles.pipe(Effect.mapError(storeFailure("write")))),
       Effect.asVoid
     )
-  // The pending sign-in's end, or null when none is pending.
-  const current = yield* Ref.make<Deferred.Deferred<void> | null>(null)
+  // The pending sign-in: its end, and what a person approves once Identity Center has answered. Null when none.
+  type Verification = Omit<Extract<AwsSignInState, { readonly _tag: "SignInPending" }>, "_tag">
+  const current = yield* Ref.make<
+    { readonly done: Deferred.Deferred<void>; readonly verification: Verification | null } | null
+  >(null)
   const pending = Effect.map(Ref.get(current), (held) => held !== null)
   const finish = Ref.getAndSet(current, null).pipe(
-    Effect.flatMap((held) => held === null ? Effect.void : Deferred.succeed(held, undefined)),
+    Effect.flatMap((held) => held === null ? Effect.void : Deferred.succeed(held.done, undefined)),
     Effect.asVoid
   )
   const refreshing = yield* Semaphore.make(1)
@@ -297,8 +311,11 @@ export const makeAwsSignIn = Effect.fn("AwsSignIn.make")(function*(options: AwsS
   const begin = Effect.uninterruptibleMask((restore) =>
     Effect.gen(function*() {
       const done = yield* Deferred.make<void>()
-      const held = yield* Ref.modify(current, (existing) => existing === null ? [null, done] : [existing, existing])
-      if (held !== null) return { ended: Deferred.await(held) } satisfies PendingSignIn
+      const held = yield* Ref.modify(
+        current,
+        (existing) => existing === null ? [null, { done, verification: null }] : [existing, existing]
+      )
+      if (held !== null) return { ended: Deferred.await(held.done) } satisfies PendingSignIn
       const run = Effect.gen(function*() {
         const registered = yield* client
         const device = yield* exchange(
@@ -317,17 +334,22 @@ export const makeAwsSignIn = Effect.fn("AwsSignIn.make")(function*(options: AwsS
           )
         )
         const deadline = (yield* Clock.currentTimeMillis) + device.expiresIn * 1_000
+        const verificationUri = device.verificationUriComplete ?? device.verificationUri
         // Created fresh and exclusively, so the mode applies and nothing planted at the path is written through.
         yield* fs.remove(options.pendingFile, { force: true }).pipe(
           Effect.andThen(fs.writeFileString(
             options.pendingFile,
-            JSON.stringify({
-              verificationUri: device.verificationUriComplete ?? device.verificationUri,
-              expiresAt: deadline
-            }),
+            JSON.stringify({ verificationUri, expiresAt: deadline }),
             { mode: 0o600, flag: "wx" }
           )),
           Effect.mapError(storeFailure("pending file"))
+        )
+        yield* Ref.update(
+          current,
+          (held) =>
+            held?.done === done
+              ? { done, verification: { verificationUri, userCode: device.userCode, expiresAt: deadline } }
+              : held
         )
         yield* options.onPending(options.pendingFile)
         return { registered, device, deadline }
@@ -386,7 +408,10 @@ export const makeAwsSignIn = Effect.fn("AwsSignIn.make")(function*(options: AwsS
     if (token !== null && (token.expiresAt > now || token.refreshToken !== null)) {
       return { _tag: "SignedIn", expiresAt: token.expiresAt } satisfies AwsSignInState
     }
-    return { _tag: "SignInRequired", pending: yield* pending } satisfies AwsSignInState
+    const held = yield* Ref.get(current)
+    return held === null || held.verification === null
+      ? { _tag: "SignInRequired" } satisfies AwsSignInState
+      : { _tag: "SignInPending", ...held.verification } satisfies AwsSignInState
   })
 
   const revoked = (accessToken: Redacted.Redacted<string>) =>
@@ -409,7 +434,7 @@ export interface AwsRoleOptions {
 /**
  * The `Credentials` service value for one account and permission set, from the hub's sign-in: provide it as
  * `Credentials`. Role credentials are fetched from the access portal through `http` and kept until five minutes
- * before their end. Without a sign-in a read fails as `ExpiredSSOToken` and starts one sign-in; an unreachable
+ * before their end. Without a sign-in a read fails as `ExpiredSSOToken` and starts nothing; an unreachable
  * portal fails as a credential provider error.
  */
 export const awsRoleCredentials = (
@@ -419,13 +444,13 @@ export const awsRoleCredentials = (
 ): Credentials["Service"] => {
   const cached = Ref.makeUnsafe<ResolvedCredentials | null>(null)
   const signInRequired = () => new ExpiredSSOToken({ message: "sign in to AWS", profile: "hub" })
-  const startSignIn = signIn.begin.pipe(Effect.ignore({ log: true }), Effect.andThen(Effect.fail(signInRequired())))
+  const required = Effect.fail(signInRequired())
   return Effect.gen(function*() {
     const now = yield* Clock.currentTimeMillis
     const held = yield* Ref.get(cached)
     if (held !== null && (held.expiration ?? 0) - now > refreshMargin) return held
     const token = yield* signIn.accessToken.pipe(
-      Effect.catchTag("AwsSignInRequired", () => startSignIn)
+      Effect.catchTag("AwsSignInRequired", () => required)
     )
     // The client span records request headers; the bearer token must read as redacted there.
     const redacted = yield* Headers.CurrentRedactedNames
@@ -444,7 +469,7 @@ export const awsRoleCredentials = (
         refused
       ): Effect.Effect<never, AwsSignInUnavailable | ExpiredSSOToken | AwsCredentialProviderError> =>
         refused.status === 401
-          ? signIn.revoked(token).pipe(Effect.andThen(startSignIn))
+          ? signIn.revoked(token).pipe(Effect.andThen(required))
           : Effect.fail(
             new AwsCredentialProviderError({ message: `${refused.operation}: ${refused.code}`, provider: "herdr-hub" })
           ))

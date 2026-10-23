@@ -23,6 +23,7 @@ import {
 import { makeSandboxHostReads, type SandboxHostReads } from "@knpkv/sandbox-pool/host/server"
 import { Config, DateTime, Effect, Exit, Layer, Option, Path, Schema, Scope } from "effect"
 import { approvalRequestFor } from "./approval-request.js"
+import type { AwsSignIn, AwsSignInState } from "./aws-sign-in.js"
 import { sandboxesModule } from "./module-contract.js"
 import { NeedsYouProviderResult } from "./module-needs-you.js"
 import {
@@ -35,9 +36,15 @@ import {
 } from "./module-server.js"
 import { openSandboxDatabase } from "./sandbox-store.js"
 import type { SandboxRequest } from "./sandboxes-contract.js"
-import { SandboxesCaller, SandboxJobOrder, SandboxJobSubmitted, SandboxRequests } from "./sandboxes-contract.js"
+import {
+  SandboxAwsSession,
+  SandboxesCaller,
+  SandboxJobOrder,
+  SandboxJobSubmitted,
+  SandboxRequests
+} from "./sandboxes-contract.js"
 
-export { SandboxesCaller, SandboxJobOrder, SandboxJobSubmitted, SandboxRequests }
+export { SandboxAwsSession, SandboxesCaller, SandboxJobOrder, SandboxJobSubmitted, SandboxRequests }
 
 /** The parts of a Fleet record awaiting approval that the requests read and needs-you use. */
 export type PendingSandboxApproval = Pick<JobRecord, "id" | "actor" | "createdAt" | "approvalExpiresAt" | "payload">
@@ -131,6 +138,18 @@ const alreadyRequested = (
   )
 
 const NoQuery = Schema.fromURLSearchParams(Schema.Struct({}))
+const NoBody = Schema.Struct({})
+
+const sessionOf = (state: AwsSignInState): SandboxAwsSession => {
+  switch (state._tag) {
+    case "SignedIn":
+      return { _tag: "SignedIn", expiresAt: DateTime.makeUnsafe(state.expiresAt) }
+    case "SignInPending":
+      return { ...state, expiresAt: DateTime.makeUnsafe(state.expiresAt) }
+    case "SignInRequired":
+      return state
+  }
+}
 
 /** The sandbox reader couldn't open its database. Routes report it as unavailable. */
 export class SandboxReaderStartError extends Schema.TaggedError<SandboxReaderStartError>()(
@@ -168,6 +187,8 @@ export const makeSandboxesModule = (configuration: {
   readonly reads?: Effect.Effect<SandboxHostReads, SandboxReaderStartError, Scope.Scope>
   /** Fleet submission for the jobs route. Only reached for the hub's own node while the pool is served. */
   readonly submit: SandboxJobSubmit
+  /** The hub's own AWS sign-in, when this host runs the pool; null when it doesn't. */
+  readonly awsSignIn?: AwsSignIn | null
 }) => ({
   descriptor: sandboxesModule,
   handlers: Layer.effect(
@@ -280,6 +301,21 @@ export const makeSandboxesModule = (configuration: {
         )
       const refuse = (status: ModuleRouteFailure["status"], code: string) =>
         Effect.fail(new ModuleRouteFailure({ status, code }))
+      // The AWS sign-in is the owner's: its pending URL and code finish a sign-in, so nothing is read or
+      // started for anyone else. Only the owner's press starts one; no read ever does.
+      const awsSignIn = configuration.awsSignIn ?? null
+      const awsSession = (caller: ModuleCaller, start: boolean): Effect.Effect<SandboxAwsSession, ModuleRouteFailure> =>
+        mounted._tag === "Unavailable"
+          ? Effect.succeed(mounted)
+          : !caller.sameNode
+          ? refuse(403, "owner_only")
+          : awsSignIn === null
+          ? Effect.succeed({ _tag: "NotConfigured" })
+          : (start ? Effect.asVoid(awsSignIn.begin) : Effect.void).pipe(
+            Effect.andThen(awsSignIn.state),
+            Effect.map(sessionOf),
+            Effect.mapError(() => new ModuleRouteFailure({ status: 503, code: "unavailable" }))
+          )
       /**
        * Before a retry or lift reaches Fleet: the account is in the pool, in the state the job needs, and no
        * request of that kind already waits. Fleet re-checks the bound record when the approved job runs.
@@ -321,6 +357,15 @@ export const makeSandboxesModule = (configuration: {
           moduleReadRoute("/runs", SandboxRunsQuery, SandboxRuns, runs),
           moduleReadRoute("/run-log", SandboxRunLogQuery, SandboxRunLog, runLog),
           moduleReadRoute("/requests", NoQuery, SandboxRequests, () => requests),
+          moduleReadRoute("/aws-session", NoQuery, SandboxAwsSession, (_query, caller) => awsSession(caller, false)),
+          moduleWriteRoute(
+            "POST",
+            "/aws-sign-in",
+            NoQuery,
+            NoBody,
+            SandboxAwsSession,
+            (_body, _query, caller) => awsSession(caller, true)
+          ),
           moduleReadRoute(
             "/caller",
             NoQuery,
