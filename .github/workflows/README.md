@@ -91,6 +91,9 @@ This directory contains automated CI/CD workflows for the @knpkv npm monorepo.
   runs its superapp suite) and `fail-fast: false`, so a slow suite cannot cancel the rest
 - Each leg installs the Playwright-managed Chromium runtime and its system dependencies,
   builds the package's workspace dependencies, then runs that package's browser suite
+- The Chromium runtime and its system packages' `.deb` files are cached per runner image and
+  Playwright version (`playwright-chromium-<ImageOS>-<version>`): a slow apt mirror once took 9.5
+  minutes for them and cancelled legs at the timeout. A miss saves right after the install
 - The required `Browser` check is an aggregate job: it waits for every leg and passes only
   when the whole matrix succeeded (no skipped or cancelled leg counts as success).
   `scripts/check-browser-partition.test.mjs` keeps the matrix equal to the set of packages
