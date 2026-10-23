@@ -1,5 +1,13 @@
 # @knpkv/herdr-fleet
 
+## 0.19.0
+
+### Minor Changes
+
+- [#1086](https://github.com/knpkv/npm/pull/1086) [`9182b48`](https://github.com/knpkv/npm/commit/9182b480640c95dae7d97faa4b1b8b62583dc938) Thanks [@konopkov](https://github.com/konopkov)! - hostd starts on Windows. Paths come from one `HubPaths` table shared by herdr-fleet and herdr-hub: the home directory is `os.homedir()` instead of `HOME`, the host name is `os.hostname()` instead of `HOSTNAME` (so a standalone host started without `HOSTNAME` now reports its real name instead of `localhost`), and Windows keeps fleet configuration under `%APPDATA%` and state under `%LOCALAPPDATA%`. Linux and macOS paths are unchanged. `HERDR_HUB_HOME` and `HERDR_HUB_CONFIG` override them on any OS. The job store's path-identity check now accepts a Windows real path that differs only in drive-letter case or separators. On Windows, hostd runs npm `.cmd` shims as Node with their script, never through a shell. `makeHostdProgram` takes an optional `paths` table.
+
+  The Relay store notes that on Windows owner-only comes from the user profile's ACL.
+
 ## 0.18.0
 
 ### Minor Changes
