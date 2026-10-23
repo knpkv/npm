@@ -1,6 +1,6 @@
 import { Credentials } from "@distilled.cloud/aws"
 import { expect, layer } from "@effect/vitest"
-import { Effect, Schema } from "effect"
+import { Effect, Option, Schema } from "effect"
 import { HttpClient, HttpClientResponse } from "effect/http"
 import { makeBudgetsSpendReader } from "../src/aws.js"
 import { AccountId, PoolAccount } from "../src/index.js"
@@ -80,11 +80,13 @@ layer(Credentials.mock)("Budgets spend reader", (it) => {
           ["InternalErrorException", "SpendUnavailable"]
         ] satisfies ReadonlyArray<readonly [string, string]>
       ) {
+        const seen: Array<Seen> = []
         const failure = yield* read.pipe(
           Effect.flip,
-          against(budgets(400, { __type: type, Message: "no" }, [], type))
+          against(budgets(400, { __type: type, Message: "no" }, seen, type))
         )
-        expect([type, failure._tag, failure.accountId]).toEqual([type, tag, "222222222222"])
+        // One request each: the reader never retries, the sweep reads again in five minutes.
+        expect([type, failure._tag, failure.accountId, seen.length]).toEqual([type, tag, "222222222222", 1])
       }
     }))
 
@@ -95,4 +97,31 @@ layer(Credentials.mock)("Budgets spend reader", (it) => {
         expect(failure._tag).toBe("SpendUnavailable")
       }
     }))
+
+  it.effect("traces a read under the caller's span, not under the span that built the reader", () => {
+    const ancestry: Array<ReadonlyArray<string>> = []
+    const client = HttpClient.make((request) =>
+      Effect.gen(function*() {
+        const names: Array<string> = []
+        let span = yield* Effect.currentParentSpan
+        while (span._tag === "Span") {
+          names.push(span.name)
+          if (Option.isNone(span.parent)) break
+          span = span.parent.value
+        }
+        ancestry.push(names)
+        return HttpClientResponse.fromWeb(request, new Response(JSON.stringify(spent("1")), { status: 200 }))
+      }).pipe(Effect.orDie)
+    )
+    return makeBudgetsSpendReader({ managementAccountId: management }).pipe(
+      Effect.withSpan("builds the reader"),
+      Effect.flatMap((reader) => reader.monthToDate(account).pipe(Effect.withSpan("sweep reads spend"))),
+      Effect.map(() => {
+        const [names] = ancestry
+        expect(names).toContain("sweep reads spend")
+        expect(names).not.toContain("builds the reader")
+      }),
+      against(client)
+    )
+  })
 })

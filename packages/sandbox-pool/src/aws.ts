@@ -5,10 +5,10 @@
  *
  * @module
  */
-import { type Credentials, Retry } from "@distilled.cloud/aws"
+import { Credentials, Retry } from "@distilled.cloud/aws"
 import * as budgets from "@distilled.cloud/aws/budgets"
 import { Effect, Schema } from "effect"
-import type { HttpClient } from "effect/http"
+import { HttpClient } from "effect/http"
 import type { AccountId, PoolAccount } from "./pool.js"
 import {
   NoBudget,
@@ -44,7 +44,8 @@ const failureOf = (accountId: string, error: { readonly _tag: string }): SpendRe
 }
 
 /**
- * Builds the reader with this context's AWS credentials and HTTP client, so each read needs nothing more.
+ * Builds the reader with this context's AWS credentials and HTTP client, so each read needs nothing more. Each
+ * read keeps its caller's span.
  * A read does not retry: the sweep reads again in five minutes, so a throttle fails fast as `SpendThrottled`.
  * A budget with no actual spend, in a currency other than USD, or with an amount that is not a number fails
  * as `SpendUnavailable`; it never reads as zero.
@@ -52,22 +53,28 @@ const failureOf = (accountId: string, error: { readonly _tag: string }): SpendRe
 export const makeBudgetsSpendReader = Effect.fn("BudgetsSpendReader.make")(function*(
   options: BudgetsSpendReaderOptions
 ) {
-  const context = yield* Effect.context<Credentials.Credentials | HttpClient.HttpClient>()
+  // Only the two services: the whole context would carry this build's span onto every later read.
+  const credentials = yield* Credentials.Credentials
+  const http = yield* HttpClient.HttpClient
   const nameOf = options.budgetName ?? ((account: PoolAccount) => account.name)
   return SpendReader.of({
-    monthToDate: Effect.fn("BudgetsSpendReader.monthToDate")(function*(account: PoolAccount) {
-      const accountId = account.accountId
-      const unavailable = (detail: string) => new SpendUnavailable({ accountId, detail })
-      const response = yield* budgets
-        .describeBudget({ AccountId: options.managementAccountId, BudgetName: nameOf(account) })
-        .pipe(Retry.none, Effect.mapError((error) => failureOf(accountId, error)))
-      const actual = response.Budget?.CalculatedSpend?.ActualSpend
-      if (actual === undefined) return yield* unavailable("the budget has no actual spend")
-      if (actual.Unit !== "USD") return yield* unavailable(`the budget is in ${actual.Unit}, not USD`)
-      const amount = yield* decodeAmount(actual.Amount).pipe(
-        Effect.mapError(() => unavailable("the actual spend is not an amount"))
-      )
-      return Number(amount)
-    }, Effect.provideContext(context))
+    monthToDate: Effect.fn("BudgetsSpendReader.monthToDate")(
+      function*(account: PoolAccount) {
+        const accountId = account.accountId
+        const unavailable = (detail: string) => new SpendUnavailable({ accountId, detail })
+        const response = yield* budgets
+          .describeBudget({ AccountId: options.managementAccountId, BudgetName: nameOf(account) })
+          .pipe(Retry.none, Effect.mapError((error) => failureOf(accountId, error)))
+        const actual = response.Budget?.CalculatedSpend?.ActualSpend
+        if (actual === undefined) return yield* unavailable("the budget has no actual spend")
+        if (actual.Unit !== "USD") return yield* unavailable(`the budget is in ${actual.Unit}, not USD`)
+        const amount = yield* decodeAmount(actual.Amount).pipe(
+          Effect.mapError(() => unavailable("the actual spend is not an amount"))
+        )
+        return Number(amount)
+      },
+      Effect.provideService(Credentials.Credentials, credentials),
+      Effect.provideService(HttpClient.HttpClient, http)
+    )
   })
 })
