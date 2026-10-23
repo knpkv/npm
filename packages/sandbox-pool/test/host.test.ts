@@ -365,7 +365,8 @@ describe("sandbox read model", () => {
           runId: "run-current",
           step: null,
           blocker: unknown
-        }
+        },
+        spend: null
       })
       expect(byId.get(account("999999999991"))).toMatchObject({
         label: "left the pool",
@@ -381,7 +382,8 @@ describe("sandbox read model", () => {
       expect(JSON.stringify(overview)).not.toContain("would remove")
 
       const first = yield* reads.runs({ id: account("222222222222"), limit: 1 })
-      expect(first).toEqual({
+      // Steps are covered on their own below.
+      expect(first).toMatchObject({
         _tag: "Ready",
         accountId: "222222222222",
         next: "run-current",
@@ -447,6 +449,62 @@ describe("sandbox read model", () => {
       expect(Schema.decodeUnknownSync(SandboxRuns)(Schema.encodeSync(SandboxRuns)(page))).toEqual(page)
     }))
 
+  it.effect("serves each run's steps in order with their status, time and scan count, and decodes older pages", () =>
+    Effect.gen(function*() {
+      const store = yield* makeMemorySandboxStore([quarantined("222222222222", "sandbox-b", "verify: blocked")])
+      const log = yield* makeMemoryRunLog
+      yield* log.record(started("run-current", "222222222222", "2026-10-16T08:00:00.000Z"))
+      yield* log.record(entry({
+        _tag: "Step",
+        runId: "run-current",
+        step: "dry run",
+        status: "ok",
+        at: "2026-10-16T08:01:00.000Z",
+        detail: null,
+        output: [],
+        count: 41
+      }))
+      yield* log.record(entry({
+        _tag: "Step",
+        runId: "run-current",
+        step: "verify",
+        status: "failed",
+        at: "2026-10-16T08:05:00.000Z",
+        detail: "3 resources still removable.",
+        output: [],
+        count: 3
+      }))
+      const reads = yield* makeSandboxHostReads({ contract, store, runLog: log })
+      const page = yield* reads.runs({ id: account("222222222222") })
+      if (page._tag !== "Ready") throw new Error("expected a ready runs page")
+      const encoded = Schema.encodeSync(SandboxRuns)(page)
+      expect(encoded._tag === "Ready" ? encoded.runs[0]?.steps : null).toEqual([
+        { step: "sign in", status: "notRun", at: null, count: null },
+        { step: "baseline", status: "notRun", at: null, count: null },
+        { step: "dry run", status: "done", at: "2026-10-16T08:01:00.000Z", count: 41 },
+        { step: "nuke", status: "notRun", at: null, count: null },
+        { step: "verify", status: "failed", at: "2026-10-16T08:05:00.000Z", count: 3 },
+        { step: "baseline re-check", status: "notRun", at: null, count: null },
+        { step: "budget hold", status: "notRun", at: null, count: null }
+      ])
+      const older = Schema.decodeUnknownSync(SandboxRuns)({
+        _tag: "Ready",
+        accountId: "222222222222",
+        next: null,
+        runs: [{
+          runId: "run-old",
+          step: null,
+          blocker: null,
+          outcome: "Available",
+          reason: "Released",
+          startedAt: "2026-10-16T07:00:00.000Z",
+          endedAt: "2026-10-16T07:05:00.000Z",
+          failedStep: null
+        }]
+      })
+      expect(older._tag === "Ready" ? older.runs[0]?.steps : null).toEqual([])
+    }))
+
   it.effect("a store or run-log failure is a failed read, never an empty list", () =>
     Effect.gen(function*() {
       const store = yield* makeMemorySandboxStore([quarantined("222222222222", "sandbox-b", "verify: blocked")])
@@ -466,7 +524,9 @@ describe("sandbox read model", () => {
         put: () => Effect.die("unread"),
         rename: () => Effect.die("unread"),
         sweepAt: Effect.succeed(null),
-        markSweep: () => Effect.die("unread")
+        markSweep: () => Effect.die("unread"),
+        spend: Effect.succeed([]),
+        recordSpend: () => Effect.die("unread")
       })
       const storeDown = yield* makeSandboxHostReads({
         contract,

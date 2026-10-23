@@ -11,9 +11,9 @@
  *
  * @module
  */
-import { Schema } from "effect"
+import { Effect, Schema } from "effect"
 import { CleaningReason, Holder, leaseCap, leaseDuration, RunId } from "./lease.js"
-import { AccountId, SandboxName } from "./pool.js"
+import { AccountId, AwsRegion, type PoolContract, PoolSignIn, SandboxName, SpendLimits } from "./pool.js"
 import { isBudgetHold } from "./reset.js"
 import { RunStep } from "./run-log.js"
 
@@ -165,27 +165,48 @@ export const SandboxCardState = Schema.TaggedUnion({
 })
 export type SandboxCardState = typeof SandboxCardState.Type
 
+/** An account's last spend reading: USD this month, read at `asOf` (epoch milliseconds). */
+export const SandboxSpend = Schema.Struct({
+  usd: Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0)),
+  asOf: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
+})
+export interface SandboxSpend extends Schema.Schema.Type<typeof SandboxSpend> {}
+
+/** `spend` is the account's last reading, null before the first one or on a host without a spend reader. */
 export const SandboxCard = Schema.Struct({
   accountId: AccountId,
   name: SandboxName,
   label: Schema.NullOr(Schema.Literal("left the pool")),
-  state: SandboxCardState
+  state: SandboxCardState,
+  spend: Schema.NullOr(SandboxSpend).pipe(Schema.withDecodingDefaultKey(Effect.succeed(null)))
 })
 export interface SandboxCard extends Schema.Schema.Type<typeof SandboxCard> {}
 
 export const SandboxesOverview = Schema.Union([
   SandboxesUnavailable,
   SandboxesReadFailed,
+  /** `spendLimits` is the pool budget's alarm and hard stop; null when the contract names none, so no bar. */
   Schema.TaggedStruct("Ready", {
     sandboxes: Schema.Array(SandboxCard),
-    badge: SandboxBadge
+    badge: SandboxBadge,
+    spendLimits: Schema.NullOr(SpendLimits).pipe(Schema.withDecodingDefaultKey(Effect.succeed(null)))
   })
 ])
 export type SandboxesOverview = typeof SandboxesOverview.Type
 
+/** One step of a run: its status, the time of its latest entry, and a scan's removable count (a number only). */
+export const SandboxRunStep = Schema.Struct({
+  step: RunStep,
+  status: Schema.Literals(["done", "failed", "running", "notRun"]),
+  at: Schema.NullOr(Instant),
+  count: Schema.NullOr(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)))
+})
+export interface SandboxRunStep extends Schema.Schema.Type<typeof SandboxRunStep> {}
+
 /**
  * One run on the public page. `step` is the step in progress; `outcome` and `endedAt` are null until the
  * run finishes. `failedStep` names the step that failed, null for a run with none; its words are `blocker`.
+ * `steps` lists every step in run order; it is empty for a page from a hub that predates steps.
  */
 export const SandboxRunView = Schema.Struct({
   runId: RunId,
@@ -195,7 +216,8 @@ export const SandboxRunView = Schema.Struct({
   reason: CleaningReason,
   startedAt: Instant,
   endedAt: Schema.NullOr(Instant),
-  failedStep: Schema.NullOr(RunStep)
+  failedStep: Schema.NullOr(RunStep),
+  steps: Schema.Array(SandboxRunStep).pipe(Schema.withDecodingDefaultKey(Effect.succeed([])))
 })
 export interface SandboxRunView extends Schema.Schema.Type<typeof SandboxRunView> {}
 
@@ -260,3 +282,37 @@ export const SandboxRunLogQuery = Schema.fromURLSearchParams(Schema.Struct({
   run: RunId
 }))
 export type SandboxRunLogQuery = typeof SandboxRunLogQuery.Type
+
+/** The owner's sign-in for one pool: the contract's portal, session and role, and the pool's first region. */
+export const SandboxSignIn = Schema.Struct({
+  ...PoolSignIn.fields,
+  region: AwsRegion
+})
+export interface SandboxSignIn extends Schema.Schema.Type<typeof SandboxSignIn> {}
+
+/** Sign-in for this pool, or null when its contract has no `access`. */
+export const signInOf = (contract: PoolContract): SandboxSignIn | null =>
+  contract.access === undefined ? null : { ...contract.access, region: contract.regions[0] }
+
+/** The access portal's console for one account, as the sign-in's role. Opens in a new tab; carries no keys. */
+export const consoleUrl = (signIn: SandboxSignIn, accountId: AccountId): string =>
+  `${signIn.portalUrl.replace(/\/+$/, "")}/#/console?${new URLSearchParams({
+    account_id: accountId,
+    role_name: signIn.roleName
+  })}`
+
+/** A profile name that is one token, so `[profile <name>]` stays one line. */
+const profileName = /^[A-Za-z0-9._-]{1,64}$/
+
+/**
+ * One account's `~/.aws/config` profile, named after the account, signing in through the SSO session. Null for
+ * a name that is not one token, such as one kept from an older contract: it would write extra config lines.
+ */
+export const cliProfile = (signIn: SandboxSignIn, name: SandboxName, accountId: AccountId): string | null =>
+  !profileName.test(name) ? null : [
+    `[profile ${name}]`,
+    `sso_session = ${signIn.ssoSession}`,
+    `sso_account_id = ${accountId}`,
+    `sso_role_name = ${signIn.roleName}`,
+    `region = ${signIn.region}`
+  ].join("\n")

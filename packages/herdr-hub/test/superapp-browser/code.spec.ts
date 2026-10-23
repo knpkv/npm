@@ -1,5 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import {
+  CodeCommitSummaryResult,
   CodeDiffContentQuery,
   CodeDiffContentResult,
   type CodeQueue,
@@ -367,23 +368,51 @@ test("switching files interrupts the old read and cannot display its late answer
   }
 })
 
-test("maximum-length cached text and file paths fit the narrowest viewport", async ({ context, page }) => {
-  await page.setViewportSize({ width: 320, height: 844 })
-  await page.goto("/")
-  await context.addCookies([{ name: "code-fixture", value: "long", url: new URL(page.url()).origin }])
-  for (const destination of ["pull-requests", "diffs"]) {
-    await page.goto(route(destination, CODE_REF))
-    if (destination === "pull-requests") {
-      await expect(reviewPage(page).locator("[data-code-review-header]")).toContainText("r".repeat(256))
-    } else {await expect(page.getByRole("navigation", { name: "Changed files" }).getByRole("link").first())
-        .toContainText("p".repeat(4092))}
-    await page.evaluate(() => document.fonts.ready)
-    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
-    if (destination === "pull-requests") {
-      expect(await reviewPage(page).evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(
-        true
-      )
-    }
+/**
+ * A commit label is "Title, 14:18" on the queue reading's day and "Title, 22 Oct 14:18" before it. The
+ * fixture commits an hour before the reading, so the day depends on when the suite runs; each case moves
+ * the commit relative to the reading, in UTC, so both labels are covered at any hour.
+ */
+const commitDays = [
+  { day: "same day", shift: 3_600_000, words: /, \d{2}:\d{2}”/u },
+  { day: "previous day", shift: -23 * 3_600_000, words: /, \d{1,2} [A-Z][a-z]{2} \d{2}:\d{2}”/u }
+]
+
+test.describe("maximum-length cached text and file paths fit the narrowest viewport", () => {
+  test.use({ timezoneId: "UTC" })
+  for (const { day, shift, words } of commitDays) {
+    test(`with a ${day} commit`, async ({ context, page }) => {
+      await page.route(/\/v1\/modules\/code\/commit\?/, async (request) => {
+        const response = await request.fetch()
+        const reading = Schema.decodeUnknownSync(Schema.fromJsonString(CodeCommitSummaryResult))(await response.text())
+        await request.fulfill({
+          response,
+          body: Schema.encodeSync(Schema.fromJsonString(CodeCommitSummaryResult))(
+            reading._tag === "Ready"
+              ? { ...reading, commit: { ...reading.commit, committedAt: reading.commit.committedAt + shift } }
+              : reading
+          )
+        })
+      })
+      await page.setViewportSize({ width: 320, height: 844 })
+      await page.goto("/")
+      await context.addCookies([{ name: "code-fixture", value: "long", url: new URL(page.url()).origin }])
+      for (const destination of ["pull-requests", "diffs"]) {
+        await page.goto(route(destination, CODE_REF))
+        if (destination === "pull-requests") {
+          await expect(reviewPage(page).locator("[data-code-review-header]")).toContainText("r".repeat(256))
+          await expect(reviewPage(page).locator("[data-commit-label]").first()).toHaveText(words)
+        } else {await expect(page.getByRole("navigation", { name: "Changed files" }).getByRole("link").first())
+            .toContainText("p".repeat(4092))}
+        await page.evaluate(() => document.fonts.ready)
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+        if (destination === "pull-requests") {
+          expect(await reviewPage(page).evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(
+            true
+          )
+        }
+      }
+    })
   }
 })
 

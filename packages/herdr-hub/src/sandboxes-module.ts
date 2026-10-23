@@ -17,7 +17,8 @@ import {
   SandboxRunLog,
   SandboxRunLogQuery,
   SandboxRuns,
-  SandboxRunsQuery
+  SandboxRunsQuery,
+  signInOf
 } from "@knpkv/sandbox-pool/host"
 import { makeSandboxHostReads, type SandboxHostReads } from "@knpkv/sandbox-pool/host/server"
 import { Config, DateTime, Effect, Exit, Layer, Option, Path, Schema, Scope } from "effect"
@@ -324,7 +325,12 @@ export const makeSandboxesModule = (configuration: {
             "/caller",
             NoQuery,
             SandboxesCaller,
-            (_query, caller) => Effect.succeed({ login: caller.login, owner: caller.sameNode })
+            (_query, caller) =>
+              Effect.succeed({
+                login: caller.login,
+                owner: caller.sameNode,
+                signIn: caller.sameNode && pool !== null ? signInOf(pool) : null
+              })
           ),
           moduleWriteRoute(
             "POST",

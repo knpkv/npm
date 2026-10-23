@@ -13,6 +13,32 @@ export interface PoolAccount extends Schema.Schema.Type<typeof PoolAccount> {}
 
 const NonEmpty = Schema.NonEmptyString
 
+/** An AWS region code, such as `eu-central-1`, `us-gov-west-1` or `eusc-de-east-1`: one token, so it can't break a config line. */
+export const AwsRegion = Schema.String.check(Schema.isPattern(/^[a-z]{2,4}(?:-[a-z]+)+-\d+$/))
+
+/**
+ * How a person signs in to a pool account, for the owner's Open console and Copy CLI profile.
+ * `portalUrl` is the AWS access portal's start URL: https, with no query or fragment, since the console
+ * link appends its own. `ssoSession` names the `[sso-session]` in `~/.aws/config`; `roleName` is the
+ * permission set a person signs in as. Both are single tokens, so they can't break a profile line.
+ */
+export const PoolSignIn = Schema.Struct({
+  portalUrl: Schema.String.check(
+    Schema.isPattern(/^https:\/\/[A-Za-z0-9.-]+(?::\d{1,5})?(?:\/[A-Za-z0-9._~%!$&'()*+,;=:@/-]*)?$/)
+  ),
+  ssoSession: Schema.String.check(Schema.isPattern(/^[\w.-]{1,128}$/)),
+  roleName: Schema.String.check(Schema.isPattern(/^[\w+=,.@-]{1,64}$/))
+})
+export interface PoolSignIn extends Schema.Schema.Type<typeof PoolSignIn> {}
+
+const Dollars = Schema.Finite.check(Schema.isGreaterThan(0))
+
+/** The pool budget's alarm and hard stop, in USD. The alarm is below the stop. */
+export const SpendLimits = Schema.Struct({ alarm: Dollars, stop: Dollars }).check(
+  Schema.makeFilter(({ alarm, stop }) => alarm < stop, { expected: "a spend alarm below the hard stop" })
+)
+export interface SpendLimits extends Schema.Schema.Type<typeof SpendLimits> {}
+
 const distinct = (values: ReadonlyArray<string>): boolean => new Set(values).size === values.length
 
 /**
@@ -30,17 +56,21 @@ const distinct = (values: ReadonlyArray<string>): boolean => new Set(values).siz
  * - `accountAliasPrefix`: a pool account's alias is this prefix plus its name.
  * - `budgetActionRole`, `denyAllPolicy`: the budget action's role and the
  *   policy it attaches to stop spend. A reset must never remove either.
+ * - `access`: optional sign-in for people; without it the hub offers no console or CLI profile.
+ * - `spend`: optional, the budget's alarm and hard stop in USD, for the spend bar; without it there is none.
  */
 export const PoolContract = Schema.Struct({
   accounts: Schema.NonEmptyArray(PoolAccount),
   nukeBlocklist: Schema.NonEmptyArray(AccountId),
-  regions: Schema.NonEmptyArray(NonEmpty),
+  regions: Schema.NonEmptyArray(AwsRegion),
   accountAccessRole: NonEmpty,
   boundaryPath: Schema.String.check(Schema.isPattern(/^\/(?:[\w+=,.@-]+\/)*$/)),
   boundaryName: NonEmpty,
   accountAliasPrefix: NonEmpty,
   budgetActionRole: NonEmpty,
-  denyAllPolicy: NonEmpty
+  denyAllPolicy: NonEmpty,
+  access: Schema.optionalKey(PoolSignIn),
+  spend: Schema.optionalKey(SpendLimits)
 }).check(
   Schema.makeFilter(({ accounts }) => distinct(accounts.map(({ name }) => name)), {
     expected: "distinct pool account names"

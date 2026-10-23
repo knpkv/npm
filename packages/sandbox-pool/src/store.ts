@@ -1,6 +1,7 @@
 import { Context, Effect, Layer, Ref, Schema } from "effect"
 import { type Sandbox, SandboxState } from "./lease.js"
 import type { PoolContract } from "./pool.js"
+import type { SpendReading } from "./spend.js"
 
 /**
  * A write was made from a version that is no longer current: someone else
@@ -22,7 +23,7 @@ export class RecordMismatch extends Schema.TaggedError<RecordMismatch>()("Record
 
 /** The store itself could not be read or written, e.g. its database is unavailable. Nothing was written. */
 export class SandboxStoreUnavailable extends Schema.TaggedError<SandboxStoreUnavailable>()("SandboxStoreUnavailable", {
-  operation: Schema.Literals(["list", "get", "put", "sweep", "rename"]),
+  operation: Schema.Literals(["list", "get", "put", "sweep", "rename", "spend"]),
   detail: Schema.String
 }) {}
 
@@ -39,7 +40,8 @@ export class SandboxNotFound extends Schema.TaggedError<SandboxNotFound>()("Sand
  * name change: it keeps the version and state, and a name that already matches
  * changes nothing. A durable store fails with `SandboxStoreUnavailable` when it
  * cannot be reached; the memory store never does. `sweepAt` is the last successful
- * sweep's epoch milliseconds, or null until one is recorded.
+ * sweep's epoch milliseconds, or null until one is recorded. `spend` is the latest reading per
+ * account, in account-id order; `recordSpend` replaces that account's reading.
  */
 export interface SandboxStoreService {
   readonly list: Effect.Effect<ReadonlyArray<Sandbox>, SandboxStoreUnavailable>
@@ -53,6 +55,8 @@ export interface SandboxStoreService {
   ) => Effect.Effect<Sandbox, SandboxNotFound | SandboxStoreUnavailable>
   readonly sweepAt: Effect.Effect<number | null, SandboxStoreUnavailable>
   readonly markSweep: (at: number) => Effect.Effect<void, SandboxStoreUnavailable>
+  readonly spend: Effect.Effect<ReadonlyArray<SpendReading>, SandboxStoreUnavailable>
+  readonly recordSpend: (reading: SpendReading) => Effect.Effect<void, SandboxStoreUnavailable>
 }
 
 export class SandboxStore extends Context.Service<SandboxStore, SandboxStoreService>()("SandboxPool/SandboxStore") {}
@@ -73,6 +77,7 @@ export const makeMemorySandboxStore = (initial: ReadonlyArray<Sandbox>): Effect.
       new Map<string, Sandbox>(initial.map((sandbox): [string, Sandbox] => [sandbox.accountId, sandbox]))
     )
     const sweptAt = yield* Ref.make<number | null>(null)
+    const readings = yield* Ref.make(new Map<string, SpendReading>())
     const get = (accountId: string) =>
       Ref.get(records).pipe(
         Effect.flatMap((map) => {
@@ -120,7 +125,11 @@ export const makeMemorySandboxStore = (initial: ReadonlyArray<Sandbox>): Effect.
           }
         ).pipe(Effect.flatten),
       sweepAt: Ref.get(sweptAt),
-      markSweep: (at) => Ref.set(sweptAt, at)
+      markSweep: (at) => Ref.set(sweptAt, at),
+      spend: Ref.get(readings).pipe(
+        Effect.map((map) => [...map.values()].sort((a, b) => (a.accountId < b.accountId ? -1 : 1)))
+      ),
+      recordSpend: (reading) => Ref.update(readings, (map) => new Map(map).set(reading.accountId, reading))
     })
   })
 

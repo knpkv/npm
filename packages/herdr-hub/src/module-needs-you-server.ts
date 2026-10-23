@@ -17,7 +17,8 @@ interface Reading {
 export interface NeedsYouProvider {
   readonly id: string
   readonly pages: ReadonlyArray<string>
-  readonly read: Effect.Effect<NeedsYouProviderResult, unknown>
+  /** Decoded here: an app's reading arrives as JSON from its own process. */
+  readonly read: Effect.Effect<unknown, unknown>
 }
 
 /**

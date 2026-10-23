@@ -5,13 +5,17 @@
  * @module
  */
 import {
+  cliProfile,
+  consoleUrl,
   leaseCap,
   leaseDuration,
   SandboxCard,
   type SandboxesOverview,
   type SandboxRunLog,
   type SandboxRuns,
-  type SandboxRunView
+  type SandboxRunView,
+  type SandboxSignIn,
+  type SandboxSpend
 } from "@knpkv/sandbox-pool/host"
 import { Button, Notice, Sheet, Skeleton, StateLabel, type RlyStateTone } from "@knpkv/rly/primitives"
 import { Clock, DateTime, Effect, Exit, Fiber, Result, Schedule, Schema } from "effect"
@@ -642,6 +646,192 @@ const CleanupSteps = ({ step }: { readonly step: RunStep | null }): ReactElement
   )
 }
 
+const consoleNote = "Clear the blocker by hand in the console, then retry the reset."
+
+type SpendLimits = NonNullable<Ready["spendLimits"]>
+
+/** Dollars as the cards write them: cents for spend, whole dollars for a whole-dollar limit. */
+const money = (usd: number): string => `$${usd.toFixed(2)}`
+const limitMoney = (usd: number): string => (Number.isInteger(usd) ? `$${usd}` : money(usd))
+
+/** Percent of the bar's width, which runs to 1.2 times the hard stop so a stop that fired still shows past it. */
+const along = (usd: number, limits: SpendLimits): string =>
+  `${Math.min(100, (usd / (limits.stop * 1.2)) * 100).toFixed(2)}%`
+
+/** This month's spend against the alarm and the hard stop. */
+const SpendBar = ({ limits, spend }: { readonly limits: SpendLimits; readonly spend: SandboxSpend }): ReactElement => (
+  <div className="sandboxes-spend" data-spend="">
+    <div className="sandboxes-spend-head" data-spend-head="">
+      <span>Spend this month</span>
+      <b>{money(spend.usd)}</b>
+    </div>
+    <div
+      aria-label={`Spend this month ${money(spend.usd)}. Alarm at ${limitMoney(limits.alarm)}, hard stop at ${limitMoney(limits.stop)}.`}
+      aria-valuemax={limits.stop}
+      aria-valuemin={0}
+      aria-valuenow={spend.usd}
+      className="sandboxes-spend-track"
+      role="meter"
+    >
+      <span className="sandboxes-spend-fill" data-spend-fill="" style={{ inlineSize: along(spend.usd, limits) }} />
+      <span
+        aria-hidden="true"
+        className="sandboxes-spend-tick"
+        style={{ insetInlineStart: along(limits.alarm, limits) }}
+      />
+      <span
+        aria-hidden="true"
+        className="sandboxes-spend-tick sandboxes-spend-stop"
+        style={{ insetInlineStart: along(limits.stop, limits) }}
+      />
+    </div>
+    <div aria-hidden="true" className="sandboxes-spend-marks">
+      <span data-spend-mark="">$0</span>
+      <span data-spend-mark="" style={{ insetInlineStart: along(limits.alarm, limits) }}>
+        {`${limitMoney(limits.alarm)} alarm`}
+      </span>
+      <span data-spend-mark="" style={{ insetInlineStart: along(limits.stop, limits) }}>
+        {`${limitMoney(limits.stop)} hard stop`}
+      </span>
+    </div>
+  </div>
+)
+
+/** Why the owner can't open this account's console now, or null when they can: their lease, free, or quarantined. */
+const consoleRefusal = (state: CardState, viewer: string): string | null => {
+  switch (state._tag) {
+    case "Available":
+    case "Quarantined":
+      return null
+    case "Leased":
+      return state.holder === viewer
+        ? null
+        : `Open console: only the lease holder can sign in. ${state.holder} holds this lease.`
+    case "Cleaning":
+      return "Open console is unavailable while the account is wiped."
+  }
+}
+
+/** Opens the access portal's console for the account, as the pool's role, in a new tab. Never handles keys. */
+const OpenConsole = ({
+  disabled,
+  item,
+  signIn,
+  stretch = false
+}: {
+  readonly disabled: boolean
+  readonly item: SandboxCard
+  readonly signIn: SandboxSignIn
+  readonly stretch?: boolean
+}): ReactElement => (
+  <Button
+    aria-label={`Open console for ${item.name}, AWS access portal as ${signIn.roleName}, opens in a new tab`}
+    className="sandboxes-trigger"
+    disabled={disabled}
+    onClick={() => {
+      window.open(consoleUrl(signIn, item.accountId), "_blank", "noopener,noreferrer")
+    }}
+    stretch={stretch}
+    trailingIcon="external-link"
+    variant="secondary"
+  >
+    Open console
+  </Button>
+)
+
+/** The account's `~/.aws/config` profile, with its own Copy. */
+const CliProfile = ({ item, profile }: { readonly item: SandboxCard; readonly profile: string }) => {
+  const [failed, setFailed] = useState(false)
+  return (
+    <div className="sandboxes-cli" data-cli-profile="">
+      <div className="sandboxes-cli-box">
+        <div className="sandboxes-cli-head">
+          <span data-cli-path="">~/.aws/config</span>
+          <Button
+            aria-label={`Copy CLI profile for ${item.name}`}
+            onClick={() => {
+              const clipboard = navigator.clipboard
+              if (clipboard === undefined) {
+                setFailed(true)
+                return
+              }
+              void clipboard.writeText(profile).then(
+                () => setFailed(false),
+                () => setFailed(true)
+              )
+            }}
+            size="compact"
+            variant="secondary"
+          >
+            Copy
+          </Button>
+        </div>
+        <pre>{profile}</pre>
+      </div>
+      <small className="sandboxes-muted" data-cli-note="">
+        Nix already writes these profiles on managed machines.
+      </small>
+      {failed ? <p role="alert">Couldn’t copy the CLI profile</p> : null}
+    </div>
+  )
+}
+
+/**
+ * The card's owner actions in one row: Open console and Copy CLI profile when the pool has sign-in, Extend
+ * and Release on the owner's own lease. The reasons for what is disabled follow in words.
+ */
+const CardActions = ({
+  done,
+  item,
+  mine,
+  now,
+  signIn,
+  viewer,
+  writes
+}: {
+  readonly done: () => void
+  readonly item: SandboxCard
+  readonly mine: boolean
+  readonly now: DateTime.Utc
+  readonly signIn: SandboxSignIn | null
+  readonly viewer: string
+  readonly writes: SandboxesModuleWrites | null
+}): ReactElement => {
+  const times = useContext(TimesContext)
+  const [cliOpen, setCliOpen] = useState(false)
+  const state = item.state
+  const refusal = signIn === null ? null : consoleRefusal(state, viewer)
+  const profile = signIn === null ? null : cliProfile(signIn, item.name, item.accountId)
+  const lease = mine && state._tag === "Leased" ? state : null
+  const capped = lease !== null && atCap(lease.startedAt, lease.endsAt)
+  return (
+    <div className="sandboxes-card-actions">
+      <div className="sandboxes-card-buttons">
+        {signIn === null ? null : (
+          <>
+            <OpenConsole disabled={refusal !== null} item={item} signIn={signIn} />
+            {profile === null ? null : (
+              <Button aria-expanded={cliOpen} onClick={() => setCliOpen((open) => !open)} variant="quiet">
+                Copy CLI profile
+              </Button>
+            )}
+          </>
+        )}
+        {lease === null ? null : <OwnLease done={done} item={item} now={now} state={lease} writes={writes} />}
+      </div>
+      {refusal === null ? null : (
+        <small className="sandboxes-muted" data-console-reason="">
+          {refusal}
+        </small>
+      )}
+      {lease !== null && capped ? (
+        <small className="sandboxes-muted">{`Extend: 24-hour cap reached at ${times.when(capOf(lease.startedAt), now)}.`}</small>
+      ) : null}
+      {profile !== null && cliOpen ? <CliProfile item={item} profile={profile} /> : null}
+    </div>
+  )
+}
+
 const PoolCard = ({
   done,
   item,
@@ -650,14 +840,20 @@ const PoolCard = ({
   now,
   owner,
   requests,
+  signIn,
+  spendLimits,
   viewer,
   writes
 }: {
   readonly done: () => void
   readonly item: SandboxCard
+  /** The pool's alarm and hard stop; with the card's reading, the spend bar. */
+  readonly spendLimits: Ready["spendLimits"]
   readonly lastKnown: DateTime.Utc | null
   readonly now: DateTime.Utc
   readonly owner: boolean
+  /** The pool's sign-in, for the owner; null for a viewer or a pool without it. */
+  readonly signIn: SandboxSignIn | null
   readonly requests: ReadonlyArray<SandboxRequest>
   /** The budget card's lift request, for the owner; null everywhere else. */
   readonly lift: ReactElement | null
@@ -724,18 +920,27 @@ const PoolCard = ({
           </div>
         </div>
       ) : null}
+      {spendLimits === null || item.spend === null ? null : <SpendBar limits={spendLimits} spend={item.spend} />}
       {requests.map((request) => (
         <PendingRequest detail={false} key={request.jobId} now={now} request={request} viewer={viewer} />
       ))}
       {lift}
-      {mine && state._tag === "Leased" ? (
-        <OwnLease done={done} item={item} now={now} state={state} writes={writes} />
+      {mine || (owner && signIn !== null) ? (
+        <CardActions
+          done={done}
+          item={item}
+          mine={mine}
+          now={now}
+          signIn={owner ? signIn : null}
+          viewer={viewer}
+          writes={writes}
+        />
       ) : null}
     </article>
   )
 }
 
-/** Extend and Release for the lease this viewer holds. Extend stays visible at the cap, disabled, with the reason. */
+/** Extend and Release for the lease this viewer holds. Extend stays visible at the cap, disabled; the card says why. */
 const OwnLease = ({
   done,
   item,
@@ -754,52 +959,47 @@ const OwnLease = ({
   const cap = capOf(state.startedAt)
   const capped = atCap(state.startedAt, state.endsAt)
   return (
-    <div className="sandboxes-card-actions">
-      <div className="sandboxes-card-buttons">
-        <ConfirmSheet
-          action="extend"
-          confirm={`Extend to ${times.clock(next)}`}
-          account={item}
-          lead="Adds 8 h to your lease."
-          disabled={capped}
-          done={done}
-          submit={writes === null ? null : Effect.suspend(() => writes.extend(item.accountId))}
-          title="Extend lease"
-          trigger="Extend"
-          triggerVariant="secondary"
-        >
-          <Facts
-            rows={[
-              ["Ends now", times.when(state.endsAt, now)],
-              ["New end", <span className="sandboxes-strong">{times.when(next, now)}</span>],
-              ["Cap left after", `${span(next, cap)}, cap at ${times.when(cap, now)}`]
-            ]}
-          />
-          <small className="sandboxes-muted">A lease can run up to 24 h after it started.</small>
-        </ConfirmSheet>
-        <ConfirmSheet
-          action="release"
-          confirm="Release and wipe"
-          account={item}
-          lead="Releasing ends your lease now and wipes the account."
-          done={done}
-          submit={writes === null ? null : Effect.suspend(() => writes.release(item.accountId))}
-          title="Release lease"
-          trigger="Release"
-          triggerVariant="secondary"
-        >
-          <ol className="sandboxes-wipe">
-            {wipeSteps.map((step) => (
-              <li key={step}>{step}</li>
-            ))}
-          </ol>
-          <Notice tone="caution">{`Everything in ${item.name} is deleted. This can’t be undone.`}</Notice>
-        </ConfirmSheet>
-      </div>
-      {capped ? (
-        <small className="sandboxes-muted">{`Extend: 24-hour cap reached at ${times.when(cap, now)}.`}</small>
-      ) : null}
-    </div>
+    <>
+      <ConfirmSheet
+        action="extend"
+        confirm={`Extend to ${times.clock(next)}`}
+        account={item}
+        lead="Adds 8 h to your lease."
+        disabled={capped}
+        done={done}
+        submit={writes === null ? null : Effect.suspend(() => writes.extend(item.accountId))}
+        title="Extend lease"
+        trigger="Extend"
+        triggerVariant="secondary"
+      >
+        <Facts
+          rows={[
+            ["Ends now", times.when(state.endsAt, now)],
+            ["New end", <span className="sandboxes-strong">{times.when(next, now)}</span>],
+            ["Cap left after", `${span(next, cap)}, cap at ${times.when(cap, now)}`]
+          ]}
+        />
+        <small className="sandboxes-muted">A lease can run up to 24 h after it started.</small>
+      </ConfirmSheet>
+      <ConfirmSheet
+        action="release"
+        confirm="Release and wipe"
+        account={item}
+        lead="Releasing ends your lease now and wipes the account."
+        done={done}
+        submit={writes === null ? null : Effect.suspend(() => writes.release(item.accountId))}
+        title="Release lease"
+        trigger="Release"
+        triggerVariant="secondary"
+      >
+        <ol className="sandboxes-wipe">
+          {wipeSteps.map((step) => (
+            <li key={step}>{step}</li>
+          ))}
+        </ol>
+        <Notice tone="caution">{`Everything in ${item.name} is deleted. This can’t be undone.`}</Notice>
+      </ConfirmSheet>
+    </>
   )
 }
 
@@ -807,11 +1007,13 @@ const LeaseAction = ({
   done,
   now,
   overview,
+  signIn,
   writes
 }: {
   readonly done: () => void
   readonly now: DateTime.Utc
   readonly overview: Ready
+  readonly signIn: SandboxSignIn | null
   readonly writes: SandboxesModuleWrites | null
 }): ReactElement => {
   const times = useContext(TimesContext)
@@ -847,7 +1049,8 @@ const LeaseAction = ({
           rows={[
             ["Starts", `Now, ${times.clock(now)}`],
             ["Ends", <span className="sandboxes-strong">{times.clock(ends)}</span>],
-            ["Extend up to", times.when(capOf(now), now)]
+            ["Extend up to", times.when(capOf(now), now)],
+            ...(signIn === null ? [] : [["Signs in as", signIn.roleName] satisfies readonly [string, ReactNode]])
           ]}
         />
         <small className="sandboxes-muted">
@@ -872,7 +1075,7 @@ const staleWords = (readAt: DateTime.Utc, now: DateTime.Utc): string =>
 
 /** The caller, once read. A pending or failed read is a viewer with no login, so no lease is "yours". */
 const useCaller = (read: SandboxesModuleReads["caller"], active: boolean): SandboxesCaller => {
-  const [caller, setCaller] = useState<SandboxesCaller>({ login: "", owner: false })
+  const [caller, setCaller] = useState<SandboxesCaller>({ login: "", owner: false, signIn: null })
   useEffect(() => {
     if (!active) return
     const fiber = Effect.runFork(
@@ -1024,15 +1227,20 @@ const requestRefusal = (kind: RequestKind, reason: SandboxesWriteFailed["reason"
 
 /**
  * One request to Fleet: a retry or a lift. The approval in Fleet is the confirm, so one press sends it.
- * `done` reads the requests again, so the pending request replaces this button.
+ * `done` reads the requests again, so the pending request replaces this button. `beside` sits in the same
+ * row, such as Open console, and `besideNote` under the request's own note.
  */
 const RequestAction = ({
+  beside = null,
+  besideNote = null,
   disabled,
   done,
   kind,
   submit,
   variant
 }: {
+  readonly beside?: ReactElement | null
+  readonly besideNote?: string | null
   readonly disabled: boolean
   readonly done: () => void
   readonly kind: RequestKind
@@ -1059,17 +1267,25 @@ const RequestAction = ({
   }
   return (
     <div className="sandboxes-request-action">
-      <Button
-        className="sandboxes-trigger"
-        disabled={disabled || phase._tag === "Sending"}
-        onClick={send}
-        variant={variant}
-      >
-        {requestCopy[kind].trigger}
-      </Button>
+      <div className="sandboxes-request-buttons">
+        <Button
+          className="sandboxes-trigger"
+          disabled={disabled || phase._tag === "Sending"}
+          onClick={send}
+          variant={variant}
+        >
+          {requestCopy[kind].trigger}
+        </Button>
+        {beside}
+      </div>
       <small className="sandboxes-muted" data-request-note="">
         {requestCopy[kind].note}
       </small>
+      {besideNote === null ? null : (
+        <small className="sandboxes-muted" data-console-note="">
+          {besideNote}
+        </small>
+      )}
       {phase._tag === "Refused" ? (
         <p className="sandboxes-refusal" role="alert">
           {requestRefusal(kind, phase.reason)}
@@ -1096,7 +1312,7 @@ const OverviewPage = ({
   readonly writes: SandboxesModuleWrites | null
 }): ReactElement => {
   const times = useContext(TimesContext)
-  const { login: viewer, owner } = useCaller(reads.caller, mount.active)
+  const { login: viewer, owner, signIn } = useCaller(reads.caller, mount.active)
   const { now, readAgain, view } = usePool(reads.overview, mount.active)
   const requestsRead = useRead(reads.requests, mount.active)
   const requests = pendingRequests(requestsRead.result)
@@ -1125,7 +1341,13 @@ const OverviewPage = ({
           </div>
         </div>
         {owner && pool !== null ? (
-          <LeaseAction done={reread} now={poolNow} overview={pool.overview} writes={pool.stale ? null : writes} />
+          <LeaseAction
+            done={reread}
+            now={poolNow}
+            overview={pool.overview}
+            signIn={signIn}
+            writes={pool.stale ? null : writes}
+          />
         ) : null}
       </header>
       {submitted ? (
@@ -1180,6 +1402,8 @@ const OverviewPage = ({
                 now={view.stale ? view.readAt : now}
                 owner={owner}
                 requests={requests?.byAccount.get(item.accountId) ?? []}
+                signIn={owner ? signIn : null}
+                spendLimits={view.overview.spendLimits}
                 lift={
                   owner &&
                   writes !== null &&
@@ -1223,7 +1447,15 @@ interface StepRow {
   readonly blocker: string | null
   /** The stored line of the failed step, for the owner only. */
   readonly raw: string | null
+  /** The step's second line, such as "signed in" or "41 to remove, scan complete". */
+  readonly outcome: string | null
+  /** The clock time of the step's latest report. */
+  readonly at: string | null
+  /** The failure in plain words, on the failed step. */
+  readonly words: string | null
 }
+
+const noDetail = { outcome: null, at: null, words: null }
 
 /** Before the failed step done, the failed step failed, after it not run. */
 const finishedSteps = (
@@ -1242,16 +1474,119 @@ const finishedSteps = (
           : { label: "Not run", tone: "neutral" },
     current: index === at,
     blocker: index === at ? blocker : null,
-    raw: null
+    raw: null,
+    ...noDetail
   }))
 }
 
+/** A step's second line, as page 14 8c writes it; none where the run has no safe words or count for it. */
+const stepOutcome = (
+  { count, status, step }: SandboxRunView["steps"][number],
+  blocker: SandboxRunView["blocker"]
+): string | null => {
+  if (status === "notRun") return step === "budget hold" ? "not checked" : "not run"
+  if (status === "done") {
+    switch (step) {
+      case "sign in":
+        return "signed in"
+      case "baseline":
+      case "baseline re-check":
+        return "matches"
+      case "dry run":
+        return count === null ? "scan complete" : `${count} to remove, scan complete`
+      default:
+        return null
+    }
+  }
+  // A failed verify counts what remains only when the blocker says resources remain; an unfinished scan counts nothing.
+  return status === "failed" && step === "verify" && count !== null && blocker?._tag === "ResourcesRemain"
+    ? `${count} still removable`
+    : null
+}
+
 /**
- * A run's steps in the run-detail words. A running run counts from its current step; a quarantined one from the
+ * The failure in the design's plain words, only where the blocker establishes it. A dry run can stop for an
+ * incomplete scan or for its guard, a verify for remaining resources or an unfinished scan, and a budget hold for
+ * the hold or a failed read, so each gets words only for the blocker that matches them.
+ */
+const failureWords = (step: RunStep, blocker: SandboxRunView["blocker"]): string | null => {
+  switch (step) {
+    case "sign in":
+      return "Assume role: Relay couldn’t sign in to the account to clean it."
+    case "baseline":
+      return "Baseline: the account doesn’t match its baseline, so cleanup didn’t start."
+    case "dry run":
+      return blocker?._tag === "ScanIncomplete" ? "Dry run: the scan didn’t finish, so nothing was removed." : null
+    case "nuke":
+      return "Nuke: cleanup stopped before everything was removed."
+    case "verify":
+      return blocker?._tag === "ResourcesRemain" ? "Verify: some resources are still there after cleanup." : null
+    case "budget hold":
+      return blocker?._tag === "BudgetHold"
+        ? "Budget hold: this account passed its monthly spend cap, so it’s locked until an approver lifts the hold. Cleanup still ran."
+        : null
+    case "baseline re-check":
+      return null
+  }
+}
+
+const statusLabel = (status: SandboxRunView["steps"][number]["status"]): Labelled => {
+  switch (status) {
+    case "done":
+      return { label: "Done", tone: "positive" }
+    case "failed":
+      return { label: "Failed", tone: "critical" }
+    case "running":
+      return { label: "In progress", tone: "progress" }
+    case "notRun":
+      return { label: "Not run", tone: "neutral" }
+  }
+}
+
+/**
+ * What a recorded step adds under its name. The run sheet gives its second line, and on the failed step the plain
+ * words, or the blocker's own words where the step has none. The account page gives the time only: its blocker has
+ * its own section.
+ */
+const recordedDetail = (
+  run: SandboxRunView,
+  step: SandboxRunView["steps"][number],
+  show: "outcome" | { readonly times: Times }
+): Pick<StepRow, "outcome" | "at" | "words" | "blocker"> => {
+  if (show !== "outcome") {
+    return { outcome: null, at: step.at === null ? null : show.times.clock(step.at), words: null, blocker: null }
+  }
+  const words = step.status === "failed" ? failureWords(step.step, run.blocker) : null
+  return {
+    outcome: stepOutcome(step, run.blocker),
+    at: null,
+    words,
+    blocker: step.status === "failed" && words === null ? (run.blocker?.text ?? null) : null
+  }
+}
+
+/** Rows from a run's recorded steps: their own status, and either their second line or their time. */
+const recordedRows = (
+  run: SandboxRunView,
+  name: (step: RunStep, index: number) => string,
+  show: "outcome" | { readonly times: Times }
+): ReadonlyArray<StepRow> =>
+  run.steps.map((step, index) => ({
+    name: name(step.step, index),
+    state: statusLabel(step.status),
+    current: step.status === "failed" || step.status === "running",
+    raw: null,
+    ...recordedDetail(run, step, show)
+  }))
+
+/**
+ * A run's steps in the run-detail words. A run with recorded steps shows them; an older one is read from its
+ * outcome. A running run counts from its current step; a quarantined one from the
  * step that failed. An available run is all done. A quarantine with no failed step names no steps.
  */
 const runRows = (run: SandboxRunView): ReadonlyArray<StepRow> | null => {
   const named = (_step: RunStep, index: number) => runSteps[index]?.name ?? ""
+  if (run.steps.length > 0) return recordedRows(run, named, "outcome")
   if (run.outcome === null) {
     const current = runSteps.findIndex(({ id }) => id === run.step)
     return runSteps.map(({ name }, index) => ({
@@ -1259,7 +1594,8 @@ const runRows = (run: SandboxRunView): ReadonlyArray<StepRow> | null => {
       state: stepState(index, current),
       current: index === current,
       blocker: null,
-      raw: null
+      raw: null,
+      ...noDetail
     }))
   }
   // A failed step that was retried still names failedStep; an available run passed every step.
@@ -1269,7 +1605,8 @@ const runRows = (run: SandboxRunView): ReadonlyArray<StepRow> | null => {
       state: { label: "Done", tone: "positive" },
       current: false,
       blocker: null,
-      raw: null
+      raw: null,
+      ...noDetail
     }))
   }
   return run.failedStep === null ? null : finishedSteps(named, run.failedStep, run.blocker?.text ?? null)
@@ -1277,13 +1614,30 @@ const runRows = (run: SandboxRunView): ReadonlyArray<StepRow> | null => {
 
 const StepList = ({ label, rows }: { readonly label: string; readonly rows: ReadonlyArray<StepRow> }): ReactElement => (
   <ol aria-label={label} className="sandboxes-steps">
-    {rows.map(({ blocker, current, name, raw, state }, index) => (
+    {rows.map(({ at, blocker, current, name, outcome, raw, state, words }, index) => (
       <li aria-current={current ? "step" : undefined} key={name}>
         <span aria-hidden="true" className="sandboxes-step-number">
           {index + 1}
         </span>
-        <span data-step-name="">{name}</span>
-        <StateLabel data-step-state="" label={state.label} size="compact" tone={state.tone} />
+        <span className="sandboxes-step-text">
+          <span data-step-name="">{name}</span>
+          {outcome === null ? null : <small data-step-outcome="">{outcome}</small>}
+        </span>
+        <span className="sandboxes-step-end">
+          {at === null ? null : <small data-step-at="">{at}</small>}
+          <StateLabel
+            data-step-state=""
+            {...(state.tone === "neutral" ? { icon: "minus" } : {})}
+            label={state.label}
+            size="compact"
+            tone={state.tone}
+          />
+        </span>
+        {words === null ? null : (
+          <p className="sandboxes-step-blocker" data-step-words="">
+            {words}
+          </p>
+        )}
         {blocker === null ? null : (
           <p className="sandboxes-step-blocker" data-step-blocker="">
             {blocker}
@@ -1365,6 +1719,20 @@ const useRunLog = (
   return useRead(read, active && id !== null && runId !== null).result
 }
 
+/** The owner's Open console on a quarantined account, and the note under it: none for a budget stop. */
+interface AccountConsole {
+  readonly button: ReactElement
+  readonly note: string | null
+}
+
+const accountConsole = (item: SandboxCard, signIn: SandboxSignIn | null): AccountConsole | null =>
+  signIn === null || item.state._tag !== "Quarantined"
+    ? null
+    : {
+        button: <OpenConsole disabled={false} item={item} signIn={signIn} />,
+        note: budgetStopped(item.state) ? null : consoleNote
+      }
+
 /**
  * Retry for a quarantine, lift for a budget stop, for the owner, when no request of that kind waits. It is
  * disabled until the requests are read and current, so a last-known "none" never asks twice.
@@ -1373,7 +1741,8 @@ const accountAction = (
   item: SandboxCard,
   requests: PendingRequests | null,
   writes: SandboxesModuleWrites | null,
-  done: () => void
+  done: () => void,
+  openConsole: AccountConsole | null
 ): ReactElement | null => {
   if (writes === null || item.state._tag !== "Quarantined") return null
   const pending = requests?.byAccount.get(item.accountId) ?? []
@@ -1381,6 +1750,8 @@ const accountAction = (
   if (budgetStopped(item.state)) {
     return liftPending(pending) ? null : (
       <RequestAction
+        beside={openConsole?.button ?? null}
+        besideNote={openConsole?.note ?? null}
         disabled={disabled}
         done={done}
         kind="lift"
@@ -1391,6 +1762,8 @@ const accountAction = (
   }
   return resetPending(pending) ? null : (
     <RequestAction
+      beside={openConsole?.button ?? null}
+      besideNote={openConsole?.note ?? null}
       disabled={disabled}
       done={done}
       kind="retry"
@@ -1405,19 +1778,24 @@ const AccountDetail = ({
   action,
   item,
   now,
+  openConsole,
   requests,
   requestsSince,
   runs,
+  spendLimits,
   viewer
 }: {
   /** The owner's retry or lift request for this account, when one can be asked for. */
   readonly action: ReactElement | null
+  /** The owner's Open console; beside the action when there is one, else under the requests. */
+  readonly openConsole: AccountConsole | null
   readonly item: SandboxCard
   readonly now: DateTime.Utc
   readonly requests: ReadonlyArray<SandboxRequest> | null
   /** When the requests on screen became last known; null while they are current. */
   readonly requestsSince: DateTime.Utc | null
   readonly runs: Read<SandboxRuns>
+  readonly spendLimits: Ready["spendLimits"]
   readonly viewer: string
 }): ReactElement => {
   const times = useContext(TimesContext)
@@ -1450,13 +1828,23 @@ const AccountDetail = ({
         </div>
         {summary === null ? null : <p data-account-summary="">{summary}</p>}
       </header>
-      {action}
+      {action === null ? null : <div className="sandboxes-account-actions">{action}</div>}
       {requests === null ? (
         <RequestsFailed />
       ) : (
         requests.map((request) => (
           <PendingRequest detail key={request.jobId} now={now} request={request} viewer={viewer} />
         ))
+      )}
+      {action !== null || openConsole === null ? null : (
+        <div className="sandboxes-account-actions">
+          {openConsole.button}
+          {openConsole.note === null ? null : (
+            <small className="sandboxes-muted" data-console-note="">
+              {openConsole.note}
+            </small>
+          )}
+        </div>
       )}
       {requestsSince === null ? null : <LastKnown at={requestsSince} of="requests" />}
       {state._tag === "Quarantined" && !budgetStopped(state) ? (
@@ -1469,7 +1857,14 @@ const AccountDetail = ({
             {failed === null ? null : (
               <section className="sandboxes-account-section">
                 <h2>Reset run</h2>
-                <StepList label="Reset steps" rows={finishedSteps(stepWord, failed, null)} />
+                <StepList
+                  label="Reset steps"
+                  rows={
+                    run !== undefined && run.steps.length > 0
+                      ? recordedRows(run, stepWord, { times })
+                      : finishedSteps(stepWord, failed, null)
+                  }
+                />
               </section>
             )}
           </div>
@@ -1477,11 +1872,25 @@ const AccountDetail = ({
             rows={[
               ["Run ID", <code>{state.runId}</code>],
               ...(since === null ? [] : [["Since", since] satisfies readonly [string, ReactNode]]),
-              ...(failed === null ? [] : [["Failed step", stepWord(failed)] satisfies readonly [string, ReactNode]])
+              ...(failed === null ? [] : [["Failed step", stepWord(failed)] satisfies readonly [string, ReactNode]]),
+              ...(item.spend === null
+                ? []
+                : [["Spend this month", money(item.spend.usd)] satisfies readonly [string, ReactNode]])
             ]}
           />
         </div>
-      ) : state._tag === "Quarantined" ? null : (
+      ) : state._tag === "Quarantined" ? (
+        spendLimits === null || item.spend === null ? null : (
+          <div className="sandboxes-account-spend">
+            <SpendBar limits={spendLimits} spend={item.spend} />
+            {item.spend.usd < spendLimits.stop ? null : (
+              <small className="sandboxes-muted" data-spend-over="">
+                {`${money(item.spend.usd)} is past the ${limitMoney(spendLimits.stop)} hard stop.`}
+              </small>
+            )}
+          </div>
+        )
+      ) : (
         <Facts rows={cardRows(times, item, viewer, now)} />
       )}
       {runs._tag === "Done" && runs.staleSince !== null ? <LastKnown at={runs.staleSince} of="runs" /> : null}
@@ -1507,7 +1916,7 @@ const AccountPage = ({
   readonly search: URLSearchParams
   readonly writes: SandboxesModuleWrites | null
 }): ReactElement => {
-  const { login: viewer, owner } = useCaller(reads.caller, mount.active)
+  const { login: viewer, owner, signIn } = useCaller(reads.caller, mount.active)
   const id = accountIdOf(search)
   const { now, readAgain, view } = usePool(reads.overview, mount.active)
   const requestsRead = useRead(reads.requests, mount.active)
@@ -1524,12 +1933,20 @@ const AccountPage = ({
         <NotInPool id={search.get("id") ?? ""} />
       ) : (
         <AccountDetail
-          action={accountAction(item, requests, owner && !view.stale ? writes : null, requestsRead.readAgain)}
+          action={accountAction(
+            item,
+            requests,
+            owner && !view.stale ? writes : null,
+            requestsRead.readAgain,
+            accountConsole(item, owner ? signIn : null)
+          )}
+          openConsole={accountConsole(item, owner ? signIn : null)}
           item={item}
           now={view.stale ? view.readAt : now}
           requests={requests === null ? null : (requests.byAccount.get(item.accountId) ?? [])}
           requestsSince={requests?.staleSince ?? null}
           runs={runs}
+          spendLimits={view.overview.spendLimits}
           viewer={viewer}
         />
       )}
@@ -1600,7 +2017,8 @@ const RunSheet = ({
   const times = useContext(TimesContext)
   const outcome = outcomeLabel(run.outcome)
   const raw = log !== null && log._tag === "Done" && log.value._tag === "Ready" ? log.value.raw : null
-  const rows = runRows(run)?.map((row) => (row.blocker === null ? row : { ...row, raw })) ?? null
+  // The stored line goes on the step that failed.
+  const rows = runRows(run)?.map((row) => (row.state.tone === "critical" ? { ...row, raw } : row)) ?? null
   return (
     <Sheet.Root onOpenChange={(open) => (open ? undefined : close())} open>
       <Sheet.Content className="sandboxes-sheet" closeLabel="Close run" title="Cleanup run">
