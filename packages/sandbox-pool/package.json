@@ -24,6 +24,10 @@
     "./host/server": {
       "types": "./dist/host-server.d.ts",
       "import": "./dist/host-server.js"
+    },
+    "./aws": {
+      "types": "./dist/aws.d.ts",
+      "import": "./dist/aws.js"
     }
   },
   "files": [
@@ -38,6 +42,9 @@
     "check": "tsc -b tsconfig.json && tsc -p test/tsconfig.json --noEmit",
     "lint": "eslint src test",
     "test": "vitest run"
+  },
+  "dependencies": {
+    "@distilled.cloud/aws": "1.0.0-rc.13"
   },
   "peerDependencies": {
     "effect": "4.0.0"
