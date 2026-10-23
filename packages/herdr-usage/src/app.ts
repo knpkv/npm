@@ -38,9 +38,9 @@ export const usageManifest = (version: string): AppManifestInput => ({
     label: "Usage",
     defaultPage: "limits",
     pages: [
-      { id: "limits", label: "Limits", showInPhoneTitle: true },
+      { id: "limits", label: "Limits" },
       { id: "tokens", label: "Tokens" },
-      { id: "by-tool", label: "By tool", showInPhoneTitle: true }
+      { id: "by-tool", label: "By tool" }
     ],
     listeners: ["serve", "local"],
     requires: ["read"]
