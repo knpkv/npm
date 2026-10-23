@@ -18,7 +18,7 @@ import {
 } from "@knpkv/herdr-connect"
 import { Clock, Duration, Effect, Ref, Result, Schema, type Scope } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
-import { CommandFailed, reportFailure } from "./agent-usage-failure.js"
+import { CommandFailed, reportFailure } from "./failure.js"
 
 /** agent-usage's answer is a few KiB; anything near this is not it. */
 export const hostLimitsOutputMaxBytes = 256 * 1024

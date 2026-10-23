@@ -51,17 +51,6 @@
     display: contents;
   }
 
-  /* Read by screen readers at every width; the header shows the same title as text the design draws. */
-  .usage-page-heading {
-    position: absolute;
-    inline-size: 1px;
-    block-size: 1px;
-    margin: 0;
-    overflow: clip;
-    clip-path: inset(50%);
-    white-space: nowrap;
-  }
-
   .superapp-shell[data-usage-header="grouped"] .superapp-header {
     display: flex;
     position: relative;
@@ -110,111 +99,6 @@
 
   .superapp-shell[data-usage-empty="true"] .superapp-main {
     padding-inline: 0;
-  }
-
-  .usage-limits-empty {
-    min-inline-size: 0;
-    color: var(--rly-color-text-1);
-    padding-block: 2rem 1rem;
-    padding-inline: 40px;
-  }
-
-  .usage-empty-mast {
-    display: grid;
-    gap: 0.9rem;
-    padding-block: 1.5rem 0;
-    padding-inline: 40px;
-    border-block-end: 1px solid var(--rly-color-border-1);
-  }
-
-  .usage-empty-title,
-  .usage-empty-titles p,
-  .usage-empty-notice h2,
-  .usage-empty-notice p {
-    margin: 0;
-  }
-
-  .usage-empty-title {
-    font-size: 1.75rem;
-    font-weight: 620;
-    letter-spacing: -0.035em;
-    line-height: 1.2;
-  }
-
-  .usage-empty-titles p {
-    color: var(--rly-color-text-2);
-    font-size: 0.9375rem;
-  }
-
-  .usage-empty-tabs {
-    display: flex;
-    gap: 0.5rem;
-    overflow: auto;
-    scrollbar-width: none;
-    margin-block-end: -1px;
-  }
-
-  .usage-empty-tabs a {
-    display: flex;
-    flex: none;
-    align-items: center;
-    min-block-size: 44px;
-    padding-inline: 0.25rem;
-    white-space: nowrap;
-    text-decoration: none;
-    font-size: 0.9375rem;
-    color: var(--rly-color-text-2);
-    border-block-end: 2px solid transparent;
-  }
-
-  .usage-empty-tabs a[aria-current="page"] {
-    font-weight: 620;
-    color: var(--rly-color-text-1);
-    border-block-end-color: var(--rly-color-text-1);
-  }
-
-  .usage-empty-notice {
-    display: grid;
-    justify-items: start;
-    gap: 1rem;
-    padding-block: 1.5rem;
-    max-inline-size: 34em;
-  }
-
-  .usage-empty-art {
-    display: block;
-    flex: none;
-    inline-size: 88px;
-    block-size: 88px;
-    line-height: 0;
-  }
-
-  .usage-empty-notice h2 {
-    font-size: 1.6rem;
-    font-weight: 620;
-    letter-spacing: -0.025em;
-    line-height: 1.25;
-    text-wrap: balance;
-  }
-
-  .usage-empty-notice p {
-    color: var(--rly-color-text-2);
-  }
-
-  .usage-empty-action {
-    justify-self: start;
-    display: inline-flex;
-    align-items: center;
-    gap: 0.4rem;
-    min-block-size: 44px;
-    padding-inline: 1rem;
-    border: 1px solid var(--rly-color-border-1);
-    border-radius: var(--rly-radius-control);
-    background: var(--rly-color-surface-1);
-    font-size: 0.875rem;
-    font-weight: 520;
-    color: var(--rly-color-text-1);
-    text-decoration: none;
   }
 
   @media (max-width: 40rem) {
@@ -282,31 +166,6 @@
     .superapp-shell[data-usage-header="grouped"] .superapp-notifications {
       margin-inline-start: auto;
       margin-inline-end: -8px;
-    }
-
-    .usage-limits-empty {
-      padding-block: 0.9rem 6rem;
-      padding-inline: 16px;
-    }
-
-    /* Phone module heading (design rule 45 refs): title and purpose over the tabs, under the breadcrumb. */
-    .usage-empty-mast {
-      padding-block: 0.75rem 0;
-      padding-inline: 16px;
-    }
-
-    .usage-empty-titles {
-      display: grid;
-      gap: 0.25rem;
-    }
-
-    .usage-empty-tabs {
-      gap: 0;
-      margin-inline: -8px;
-    }
-
-    .usage-empty-tabs a {
-      padding-inline: 0.75rem;
     }
   }
 }

@@ -206,8 +206,17 @@ export const makeAppRegistry = Effect.fn("AppRegistry.make")(function*(options: 
     )
   })
 
+  /** Ids with a probe running from {@link probeOne}; a burst of failed requests runs one probe, not a queue. */
+  const probing = yield* SynchronizedRef.make<ReadonlySet<AppId>>(new Set())
+
   /** Probe one registered app again, after a proxied request to it failed; the probe decides its state. */
   const probeOne = Effect.fn("AppRegistry.probeOne")(function*(id: AppId) {
+    const started = yield* SynchronizedRef.modify(
+      probing,
+      (current): readonly [boolean, ReadonlySet<AppId>] =>
+        current.has(id) ? [false, current] : [true, new Set([...current, id])]
+    )
+    if (!started) return
     yield* SynchronizedRef.updateEffect(apps, (current) => {
       const index = current.findIndex((app) => app.id === id)
       const app = current[index]
@@ -216,7 +225,11 @@ export const makeAppRegistry = Effect.fn("AppRegistry.make")(function*(options: 
       return probe(app.id, app.socket, earlier).pipe(
         Effect.map((state) => current.map((entry, position) => position === index ? { ...entry, state } : entry))
       )
-    })
+    }).pipe(
+      Effect.ensuring(
+        SynchronizedRef.update(probing, (current) => new Set([...current].filter((other) => other !== id)))
+      )
+    )
   })
 
   return {

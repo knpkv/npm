@@ -2,7 +2,7 @@ import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
 import type { HostUsage, UsageNow, UsageQuery } from "@knpkv/herdr-connect"
 import { Deferred, Effect, Fiber, Ref } from "effect"
-import { readHostUsage, usageCache, usageCommandFor } from "../src/host-usage.js"
+import { readHostUsage, usageCache, usageCommandFor } from "../src/host.js"
 
 const query: UsageQuery = { range: "30d", timeZone: "Europe/Amsterdam" }
 

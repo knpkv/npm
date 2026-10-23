@@ -463,6 +463,58 @@ const program = Effect.scoped(
       return yield* new HerdrPackContractError({ reason: `Approval runtime subpaths do not resolve: ${resolution}` })
     }
 
+    // The Usage app's default limits command runs the agent-usage it depends on, found from its own installed
+    // files; the hub imports its scoped views.css.
+    for (const name of ["herdr-usage", "agent-usage"]) {
+      const sourceRoot = path.join(workspaceRoot, "packages", name)
+      const sourceManifest = yield* fileSystem.readFileString(path.join(sourceRoot, "package.json")).pipe(
+        Effect.flatMap(Schema.decodeUnknownEffect(PackageManifest)),
+        Effect.mapError((cause) => new HerdrPackContractError({ cause, reason: `Could not decode ${name}` }))
+      )
+      yield* run(
+        spawner,
+        `pack ${sourceManifest.name}`,
+        "node",
+        [path.join(workspaceRoot, "scripts", "pack-herdr.mjs"), ".", first],
+        sourceRoot
+      )
+      const target = path.join(consumer, "node_modules", "@knpkv", name)
+      yield* fileSystem.makeDirectory(target, { recursive: true })
+      yield* run(
+        spawner,
+        `extract packed ${sourceManifest.name}`,
+        "tar",
+        [
+          "-xzf",
+          path.join(first, archiveNameFor(sourceManifest.name, sourceManifest.version)),
+          "--strip-components=1",
+          "-C",
+          target
+        ],
+        workspaceRoot
+      )
+    }
+    const usageResolution = (yield* run(
+      spawner,
+      "resolve packed usage defaults",
+      "node",
+      [
+        "--input-type=module",
+        "--eval",
+        "import { createRequire } from 'node:module'; const bin = new URL('./bin.js', import.meta.resolve('@knpkv/herdr-usage')); console.log(createRequire(bin).resolve('@knpkv/agent-usage/main.js')); console.log(import.meta.resolve('@knpkv/herdr-usage/views.css'))"
+      ],
+      consumer
+    )).trim().split("\n")
+    if (
+      usageResolution.length !== 2 ||
+      usageResolution[0] !== path.join(consumer, "node_modules", "@knpkv", "agent-usage", "dist", "main.js") ||
+      usageResolution[1]?.endsWith("/node_modules/@knpkv/herdr-usage/dist/views/views.css") !== true
+    ) {
+      return yield* new HerdrPackContractError({
+        reason: `Usage's default agent-usage or views.css does not resolve: ${usageResolution.join(", ")}`
+      })
+    }
+
     yield* Console.log(
       "six Herdr pnpm packs are reproducible, exact, dependency-clean, and export transition summaries plus both executables and hostd composition"
     )

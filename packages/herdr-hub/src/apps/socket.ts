@@ -79,8 +79,8 @@ const droppedRequestHeaders = new Set([
 
 /**
  * Response headers an app may set on the hub's origin. Everything else is dropped: a proxied app can't clear
- * the hub's site data, widen its service worker scope, set HSTS or CORS, or set cookies. `location` passes only
- * inside the app's own `/apps/<id>/` prefix; custom `x-*` headers pass except `x-hub-*`.
+ * the hub's site data, widen its service worker scope, set HSTS or CORS, or set cookies. Custom `x-*` headers
+ * pass except `x-hub-*`.
  */
 const allowedResponseHeaders = new Set([
   "cache-control",
@@ -98,12 +98,16 @@ const allowedResponseHeaders = new Set([
 const hubOrigin = "http://hub.invalid"
 
 /**
- * A redirect target only if it stays inside the app's prefix once resolved, so `/apps/<id>/../../v1/x` (which
- * the browser resolves to `/v1/x`) is dropped. The resolved path is what passes on.
+ * A redirect stays inside the app. The app doesn't know its prefix, so `/v1/…` (its own root) is moved under
+ * `/apps/<id>/` first. Then the target is resolved against the prefix and passes only if it is still inside it:
+ * `/apps/<id>/../../v1/x`, `../x`, `//host` and other origins are dropped. The resolved path is what passes on.
  */
 export const appLocation = (target: string, prefix: string): string | null => {
-  if (!URL.canParse(target, `${hubOrigin}${prefix}`)) return null
-  const resolved = new URL(target, `${hubOrigin}${prefix}`)
+  const rooted = target.startsWith("/") && !target.startsWith("//") && !target.startsWith(prefix)
+    ? `${prefix}${target.slice(1)}`
+    : target
+  if (!URL.canParse(rooted, `${hubOrigin}${prefix}`)) return null
+  const resolved = new URL(rooted, `${hubOrigin}${prefix}`)
   return resolved.origin === hubOrigin && resolved.pathname.startsWith(prefix)
     ? `${resolved.pathname}${resolved.search}${resolved.hash}`
     : null
