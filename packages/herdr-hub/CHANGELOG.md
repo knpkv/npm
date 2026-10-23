@@ -2,6 +2,17 @@
 
 Released as `@knpkv/herdr-approvals` up to 0.18.0; the headings below are that package's history.
 
+## 0.56.0
+
+### Minor Changes
+
+- [#1090](https://github.com/knpkv/npm/pull/1090) [`f944a82`](https://github.com/knpkv/npm/commit/f944a82348e827bcfbde71f548cdfb0e3e673c47) Thanks [@konopkov](https://github.com/konopkov)! - The hub signs in to AWS itself: `makeAwsSignIn` runs the IAM Identity Center device code sign-in, keeps its tokens in a private database instead of `~/.aws`, and refreshes them; `awsRoleCredentials` turns that sign-in into `Credentials` for one account and permission set. Both are exported from `@knpkv/herdr-hub/hostd-runtime`.
+
+### Patch Changes
+
+- Updated dependencies [[`3486fa2`](https://github.com/knpkv/npm/commit/3486fa2b9c9a65ae0782d24d6115ee94fc78071d)]:
+  - @knpkv/hub-app@0.3.1
+
 ## 0.55.0
 
 ### Minor Changes
