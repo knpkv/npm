@@ -1,7 +1,10 @@
 /**
- * A `SpendReader` over AWS Budgets: one `DescribeBudget` per read, in the account that owns the pool's
- * budgets, returning the budget's actual spend this month. Read-only: it never changes a budget. The
- * package names no organization; the caller passes the management account and how a budget is named.
+ * The live AWS adapters for a pool: the `SpendReader` over Budgets, `PoolAccess` over STS, IAM and
+ * Organizations, the aws-nuke `Nuke` runner and the `BudgetControl` lift over Organizations. Each is built
+ * from the caller's credentials, which are the management account's, except the aws-nuke runner, which uses
+ * none of its own. Each names no organization: the contract and the options carry every id and name. In AWS,
+ * only `ensureBaseline`, a live aws-nuke run and `lift` write; everything else reads. On the host, `writeConfig`
+ * writes an account's config file before every run, dry ones included.
  *
  * @module
  */
@@ -78,3 +81,14 @@ export const makeBudgetsSpendReader = Effect.fn("BudgetsSpendReader.make")(funct
     )
   })
 })
+
+export {
+  type BaselineStep,
+  makeStsPoolAccess,
+  observeBaseline,
+  type ObservedBaseline,
+  planBaseline,
+  type StsPoolAccessOptions
+} from "./aws-access.js"
+export { AwsNukeEnvironmentRefused, type AwsNukeOptions, makeAwsNuke } from "./aws-nuke.js"
+export { attachedPolicies, makeOrganizationsBudgetLift } from "./aws-organizations.js"
