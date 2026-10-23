@@ -1111,6 +1111,15 @@ test("cold-load arrival focus paints no focus ring until the keyboard is used", 
   expect(await page.evaluate(() => document.activeElement?.matches(":focus-visible") ?? false)).toBe(true)
 })
 
+/** A cold load the shell rewrites to a default page is still the page's own load: no ring there either. */
+for (const url of ["/", "/#fleet"]) {
+  test(`cold load of ${url} focuses its default page without a focus ring`, async ({ page }) => {
+    await page.goto(url)
+    await expect.poll(() => page.evaluate(() => document.activeElement !== document.body)).toBe(true)
+    expect(await page.evaluate(() => document.activeElement?.matches(":focus-visible") ?? true)).toBe(false)
+  })
+}
+
 /** The Fleet heading shows at every width (design rule 45 refs) and stays outside the tab order. */
 test("Fleet heading is visible at every width and remains outside the tab order", async ({ page }) => {
   await page.goto("/#fleet/approvals")
