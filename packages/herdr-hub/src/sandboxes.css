@@ -241,6 +241,24 @@
     font-size: 0.875rem;
   }
 
+  .sandboxes-step-text {
+    display: grid;
+    min-inline-size: 0;
+  }
+
+  .sandboxes-step-text small,
+  .sandboxes-step-end small {
+    font-size: 0.8125rem;
+    color: var(--rly-color-text-2);
+  }
+
+  .sandboxes-step-end {
+    display: flex;
+    gap: 0.6rem;
+    align-items: center;
+    font-variant-numeric: tabular-nums;
+  }
+
   .sandboxes-steps li + li {
     border-block-start: 1px solid var(--rly-color-border-1);
   }
