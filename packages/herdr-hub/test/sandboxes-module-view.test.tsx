@@ -1668,6 +1668,60 @@ describe("Sandboxes overview", { concurrent: false }, () => {
       expect(notRun.map((node) => node.querySelector("[data-step-state] svg") !== null)).toEqual([true, true])
     })
 
+    it("says only what the blocker establishes: a scan that didn't finish, or a hold that couldn't be read", async () => {
+      const failedAt = (step: "verify" | "budget hold", blocker: SandboxBlocker) =>
+        runsPage({
+          _tag: "Ready",
+          accountId: "999999999991",
+          next: null,
+          runs: [
+            {
+              runId: "run-x",
+              step: null,
+              blocker,
+              outcome: "Quarantined",
+              reason: "Released",
+              startedAt: "2026-10-17T10:58:00.000Z",
+              endedAt: "2026-10-17T11:07:00.000Z",
+              failedStep: step,
+              steps: [{ step, status: "failed", at: "2026-10-17T11:06:41.000Z", count: 0 }]
+            }
+          ]
+        })
+      const shown = async (runs: ReturnType<typeof failedAt>) => {
+        await render(ready([quarantinedCard(nukeBlocker, "run-x")]), {
+          page: "runs",
+          owner: false,
+          runs: () => Effect.succeed(runs),
+          search: { id: "999999999991", run: "run-x" }
+        })
+        const row = await vi.waitFor(() => {
+          const found = document.querySelector('[role="dialog"] ol[aria-label="Cleanup steps"] li')
+          expect(found).not.toBeNull()
+          return found
+        })
+        const seen = [
+          row?.querySelector("[data-step-outcome]")?.textContent ?? "",
+          row?.querySelector("[data-step-words]")?.textContent ?? "",
+          row?.querySelector("[data-step-blocker]")?.textContent ?? ""
+        ]
+        await act(async () => root?.unmount())
+        root = null
+        document.body.replaceChildren()
+        return seen
+      }
+      expect(await shown(failedAt("verify", { _tag: "ScanIncomplete", text: "The scan did not finish" }))).toEqual([
+        "",
+        "",
+        "The scan did not finish"
+      ])
+      expect(await shown(failedAt("budget hold", { _tag: "Unknown", text: "Reset failed" }))).toEqual([
+        "",
+        "",
+        "Reset failed"
+      ])
+    })
+
     it("times the reset's steps on the account page, in the viewer's time zone", async () => {
       await render(ready([quarantinedCard(nukeBlocker, "release-7f3a")]), {
         page: "account",

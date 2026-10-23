@@ -1480,7 +1480,10 @@ const finishedSteps = (
 }
 
 /** A step's second line, as page 14 8c writes it; none where the run has no safe words or count for it. */
-const stepOutcome = ({ count, status, step }: SandboxRunView["steps"][number]): string | null => {
+const stepOutcome = (
+  { count, status, step }: SandboxRunView["steps"][number],
+  blocker: SandboxRunView["blocker"]
+): string | null => {
   if (status === "notRun") return step === "budget hold" ? "not checked" : "not run"
   if (status === "done") {
     switch (step) {
@@ -1495,12 +1498,16 @@ const stepOutcome = ({ count, status, step }: SandboxRunView["steps"][number]): 
         return null
     }
   }
-  return status === "failed" && step === "verify" && count !== null ? `${count} still removable` : null
+  // A failed verify counts what remains only when the blocker says resources remain; an unfinished scan counts nothing.
+  return status === "failed" && step === "verify" && count !== null && blocker?._tag === "ResourcesRemain"
+    ? `${count} still removable`
+    : null
 }
 
 /**
- * The failure in the design's plain words, for the steps whose failure has one meaning. A dry run can stop for an
- * incomplete scan or for its guard, so it gets words only when the blocker says the scan did not finish.
+ * The failure in the design's plain words, only where the blocker establishes it. A dry run can stop for an
+ * incomplete scan or for its guard, a verify for remaining resources or an unfinished scan, and a budget hold for
+ * the hold or a failed read, so each gets words only for the blocker that matches them.
  */
 const failureWords = (step: RunStep, blocker: SandboxRunView["blocker"]): string | null => {
   switch (step) {
@@ -1513,9 +1520,11 @@ const failureWords = (step: RunStep, blocker: SandboxRunView["blocker"]): string
     case "nuke":
       return "Nuke: cleanup stopped before everything was removed."
     case "verify":
-      return "Verify: some resources are still there after cleanup."
+      return blocker?._tag === "ResourcesRemain" ? "Verify: some resources are still there after cleanup." : null
     case "budget hold":
-      return "Budget hold: this account passed its monthly spend cap, so it’s locked until an approver lifts the hold. Cleanup still ran."
+      return blocker?._tag === "BudgetHold"
+        ? "Budget hold: this account passed its monthly spend cap, so it’s locked until an approver lifts the hold. Cleanup still ran."
+        : null
     case "baseline re-check":
       return null
   }
@@ -1549,7 +1558,7 @@ const recordedDetail = (
   }
   const words = step.status === "failed" ? failureWords(step.step, run.blocker) : null
   return {
-    outcome: stepOutcome(step),
+    outcome: stepOutcome(step, run.blocker),
     at: null,
     words,
     blocker: step.status === "failed" && words === null ? (run.blocker?.text ?? null) : null
@@ -2009,7 +2018,7 @@ const RunSheet = ({
   const outcome = outcomeLabel(run.outcome)
   const raw = log !== null && log._tag === "Done" && log.value._tag === "Ready" ? log.value.raw : null
   // The stored line goes on the step that failed.
-  const rows = runRows(run)?.map((row) => (row.state.label === "Failed" ? { ...row, raw } : row)) ?? null
+  const rows = runRows(run)?.map((row) => (row.state.tone === "critical" ? { ...row, raw } : row)) ?? null
   return (
     <Sheet.Root onOpenChange={(open) => (open ? undefined : close())} open>
       <Sheet.Content className="sandboxes-sheet" closeLabel="Close run" title="Cleanup run">
