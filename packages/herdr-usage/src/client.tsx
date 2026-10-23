@@ -13,7 +13,7 @@ import { Clock, Effect, Exit, ManagedRuntime, Option, Schema } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/http"
 import { type ReactElement, useMemo } from "react"
 import { createRoot } from "react-dom/client"
-import { type UsageModuleReads, UsagePage, UsagePageId, type UsageShell } from "./views.js"
+import { type UsageChrome, type UsageModuleReads, UsagePage, UsagePageId, type UsageShell } from "./views.js"
 
 const runtime = ManagedRuntime.make(FetchHttpClient.layer)
 
@@ -51,6 +51,19 @@ const onRuntime = <A, E>(effect: Effect.Effect<A, E, HttpClient.HttpClient>): Ef
     })
   })
 
+/** The header chrome the shell lends, when it lends an outlet and the means to group around it. */
+const chromeOf = (context: ShellContext): UsageChrome | null => {
+  const { headerOutlet, setHeaderMode } = context
+  return headerOutlet === undefined || headerOutlet === null || setHeaderMode === undefined
+    ? null
+    : {
+        host: context.caller.login,
+        headerOutlet,
+        setEmpty: context.setEmpty,
+        setGrouped: (grouped) => setHeaderMode(grouped ? "grouped" : "shell")
+      }
+}
+
 const UsageApp = ({ context }: { readonly context: ShellContext }): ReactElement => {
   const reads = useMemo(
     (): UsageModuleReads => ({
@@ -76,18 +89,10 @@ const UsageApp = ({ context }: { readonly context: ShellContext }): ReactElement
         return `?${query.toString()}#usage/${page}`
       },
       // The shell's header outlet, when it lends one; standalone it has no grouped header, so no chrome.
-      chrome:
-        context.headerOutlet === null
-          ? null
-          : {
-              host: context.caller.login,
-              headerOutlet: context.headerOutlet,
-              setEmpty: context.setEmpty,
-              setGrouped: (grouped) => context.setHeaderMode(grouped ? "grouped" : "shell")
-            },
+      chrome: chromeOf(context),
       nextIcon: <Icon name="chevron-right" decorative />
     }),
-    [context.active, context.navigate, context.headerOutlet, context.setEmpty, context.setHeaderMode, context.caller]
+    [context]
   )
   const page = Option.getOrElse(Schema.decodeUnknownOption(UsagePageId)(context.page), (): UsagePageId => "limits")
   return (

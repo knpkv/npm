@@ -48,11 +48,12 @@ export interface ShellContext {
   readonly setHeaderSlot: (slot: ShellHeaderSlot | null) => void
   /**
    * An element in the shell's header the app may portal its own header content into, or null while the shell
-   * has none (standalone, or a phone layout without one). Pair it with `setHeaderMode("grouped")`.
+   * has none (standalone, or a phone layout without one). Pair it with `setHeaderMode("grouped")`. Added after
+   * contract 1 shipped, so a shell may leave both out: an app treats a missing pair as no outlet.
    */
-  readonly headerOutlet: HTMLElement | null
+  readonly headerOutlet?: HTMLElement | null
   /** `grouped`: the shell yields its header row to the app's outlet content; `shell` restores its own. */
-  readonly setHeaderMode: (mode: "shell" | "grouped") => void
+  readonly setHeaderMode?: (mode: "shell" | "grouped") => void
   /** The app has nothing to show; the shell switches to its empty-state chrome. */
   readonly setEmpty: (empty: boolean) => void
   readonly setBadge: (badge: ShellBadge | null) => void

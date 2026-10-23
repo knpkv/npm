@@ -1,4 +1,9 @@
-/** The standalone shell's HTML: the manifest inline, the app's stylesheets, and the shell module. @module */
+/**
+ * The standalone shell's HTML: the manifest inline, the shell's stylesheet (rly's tokens and base, which the hub
+ * page carries itself when attached), the app's own scoped stylesheets, and the shell module.
+ *
+ * @module
+ */
 import { Schema } from "effect"
 import { AppManifest } from "./manifest.js"
 
@@ -18,6 +23,7 @@ export const standaloneShellHtml = (manifest: AppManifest): string =>
     "<meta charset=\"utf-8\">",
     "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">",
     `<title>${escapeHtml(manifest.module.label)}</title>`,
+    "<link rel=\"stylesheet\" href=\"/app/shell.css\">",
     ...manifest.client.css.map((file) => `<link rel="stylesheet" href="/app/assets/${escapeHtml(file)}">`),
     `<script type="application/json" id="hub-app-manifest">${inlineManifest(manifest)}</script>`,
     "<script type=\"module\" src=\"/app/shell.js\"></script>",

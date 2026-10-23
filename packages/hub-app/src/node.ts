@@ -309,12 +309,13 @@ const serveStandalone = Effect.fn("HubApp.serveStandalone")(function*<E, R>(
 ) {
   const fileSystem = yield* FileSystem.FileSystem
   const path = yield* Path.Path
-  // This package's own built browser module, read when asked for: a missing build fails that request only.
-  const shellScript = path.fromFileUrl(new URL("./standalone-shell.js", import.meta.url)).pipe(
-    Effect.flatMap((file) => fileSystem.readFileString(file)),
-    Effect.map((script) => HttpServerResponse.text(script, { contentType: "text/javascript; charset=utf-8" })),
-    Effect.catchTag("PlatformError", () => HttpServerResponse.json({ code: "shell_missing" }, { status: 500 }))
-  )
+  // This package's own built browser files, read when asked for: a missing build fails that request only.
+  const shellAsset = (file: string, contentType: string) =>
+    path.fromFileUrl(new URL(file, import.meta.url)).pipe(
+      Effect.flatMap((built) => fileSystem.readFileString(built)),
+      Effect.map((text) => HttpServerResponse.text(text, { contentType })),
+      Effect.catchTag("PlatformError", () => HttpServerResponse.json({ code: "shell_missing" }, { status: 500 }))
+    )
   const manifest = yield* servedManifest(app)
   const host = hostname()
   const services = yield* Layer.build(standaloneLayer({ host, isHub: false, hosts: [host] }))
@@ -325,7 +326,8 @@ const serveStandalone = Effect.fn("HubApp.serveStandalone")(function*<E, R>(
   const shell = HttpRouter.use((router) =>
     Effect.gen(function*() {
       yield* router.add("GET", "/", HttpServerResponse.html(page))
-      yield* router.add("GET", "/app/shell.js", shellScript)
+      yield* router.add("GET", "/app/shell.js", shellAsset("./standalone-shell.js", "text/javascript; charset=utf-8"))
+      yield* router.add("GET", "/app/shell.css", shellAsset("./standalone-shell.css", "text/css; charset=utf-8"))
     })
   )
   /** The owner session is made once the port is bound, so `--port 0` gets a real origin and cookie. */

@@ -1488,6 +1488,9 @@ importers:
       '@effect/vitest':
         specifier: 4.0.0
         version: 4.0.0(effect@4.0.0)(vitest@5.0.5)
+      '@knpkv/browser-pairing':
+        specifier: workspace:^
+        version: link:../browser-pairing
       '@knpkv/rly':
         specifier: workspace:^
         version: link:../rly
@@ -1589,6 +1592,9 @@ importers:
       '@effect/vitest':
         specifier: 4.0.0
         version: 4.0.0(effect@4.0.0)(vitest@5.0.5)
+      '@knpkv/rly':
+        specifier: workspace:^
+        version: link:../rly
       '@types/node':
         specifier: ^26.6.4
         version: 26.6.4

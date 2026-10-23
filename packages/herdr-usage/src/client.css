@@ -1,4 +1,2 @@
-/* The standalone Usage page's styles: rly's tokens and components. The hub supplies these itself. */
-@layer theme, base, rly.fonts, rly.tokens, rly.reset, rly.base, rly.components, rly.state, fleet, components, utilities;
-
-@import "@knpkv/rly/styles.css";
+/* The Usage app's own styles, scoped to its root. rly's tokens and base come from the shell: the hub page when
+   attached, hub-app's standalone shell otherwise. */
