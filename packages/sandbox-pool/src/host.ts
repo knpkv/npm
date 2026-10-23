@@ -194,9 +194,19 @@ export const SandboxesOverview = Schema.Union([
 ])
 export type SandboxesOverview = typeof SandboxesOverview.Type
 
+/** One step of a run: its status, the time of its latest entry, and a scan's removable count (a number only). */
+export const SandboxRunStep = Schema.Struct({
+  step: RunStep,
+  status: Schema.Literals(["done", "failed", "running", "notRun"]),
+  at: Schema.NullOr(Instant),
+  count: Schema.NullOr(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)))
+})
+export interface SandboxRunStep extends Schema.Schema.Type<typeof SandboxRunStep> {}
+
 /**
  * One run on the public page. `step` is the step in progress; `outcome` and `endedAt` are null until the
  * run finishes. `failedStep` names the step that failed, null for a run with none; its words are `blocker`.
+ * `steps` lists every step in run order; it is empty for a page from a hub that predates steps.
  */
 export const SandboxRunView = Schema.Struct({
   runId: RunId,
@@ -206,7 +216,8 @@ export const SandboxRunView = Schema.Struct({
   reason: CleaningReason,
   startedAt: Instant,
   endedAt: Schema.NullOr(Instant),
-  failedStep: Schema.NullOr(RunStep)
+  failedStep: Schema.NullOr(RunStep),
+  steps: Schema.Array(SandboxRunStep).pipe(Schema.withDecodingDefaultKey(Effect.succeed([])))
 })
 export interface SandboxRunView extends Schema.Schema.Type<typeof SandboxRunView> {}
 

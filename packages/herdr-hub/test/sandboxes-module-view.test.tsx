@@ -116,6 +116,34 @@ const signIn = Schema.decodeUnknownSync(SandboxSignIn)({
   region: "eu-central-1"
 })
 
+/** Page 14 8c: the release run that stopped at verify, with each step's time and the scans' counts. */
+const steppedRuns = runsPage({
+  _tag: "Ready",
+  accountId: "999999999991",
+  next: null,
+  runs: [
+    {
+      runId: "release-7f3a",
+      step: null,
+      blocker: { _tag: "ResourcesRemain", count: 3, text: "3 resources still removable" },
+      outcome: "Quarantined",
+      reason: "Released",
+      startedAt: "2026-10-17T10:58:00.000Z",
+      endedAt: "2026-10-17T11:07:00.000Z",
+      failedStep: "verify",
+      steps: [
+        { step: "sign in", status: "done", at: "2026-10-17T10:58:02.000Z", count: null },
+        { step: "baseline", status: "done", at: "2026-10-17T10:58:04.000Z", count: null },
+        { step: "dry run", status: "done", at: "2026-10-17T10:58:41.000Z", count: 41 },
+        { step: "nuke", status: "done", at: "2026-10-17T11:06:03.000Z", count: null },
+        { step: "verify", status: "failed", at: "2026-10-17T11:06:41.000Z", count: 3 },
+        { step: "baseline re-check", status: "notRun", at: null, count: null },
+        { step: "budget hold", status: "notRun", at: null, count: null }
+      ]
+    }
+  ]
+})
+
 const noRequests = requestsRead({ _tag: "Ready", requests: [] })
 
 const retryRequest = (requestedBy: string) =>
@@ -1597,6 +1625,132 @@ describe("Sandboxes overview", { concurrent: false }, () => {
       document.body.replaceChildren()
       await render(limited([stopped]), { page: "account", search: { id: "999999999991" } })
       expect(text("[data-spend-over]")).toBe("$50.20 is past the $50 hard stop.")
+    })
+  })
+
+  describe("run steps", () => {
+    const rowsOf = (scope: Element | null) =>
+      [...(scope?.querySelectorAll("li") ?? [])].map((node) => [
+        node.querySelector("[data-step-name]")?.textContent ?? "",
+        node.querySelector("[data-step-outcome]")?.textContent ?? "",
+        node.querySelector("[data-step-state]")?.textContent ?? ""
+      ])
+
+    it("gives each step its second line, the failure in plain words, and a dash before Not run", async () => {
+      await render(ready([quarantinedCard(nukeBlocker, "release-7f3a")]), {
+        page: "runs",
+        owner: false,
+        runs: () => Effect.succeed(steppedRuns),
+        search: { id: "999999999991", run: "release-7f3a" }
+      })
+      const steps = await vi.waitFor(() => {
+        const found = document.querySelector('[role="dialog"] ol[aria-label="Cleanup steps"]')
+        expect(found).not.toBeNull()
+        return found
+      })
+      expect(rowsOf(steps)).toEqual([
+        ["Signing in", "signed in", "Done"],
+        ["Checking baseline", "matches", "Done"],
+        ["Dry run", "41 to remove, scan complete", "Done"],
+        ["Removing", "", "Done"],
+        ["Verifying empty", "3 still removable", "Failed"],
+        ["Re-checking baseline", "not run", "Not run"],
+        ["Checking budget hold", "not checked", "Not run"]
+      ])
+      expect(steps?.querySelector("[data-step-words]")?.textContent).toBe(
+        "Verify: some resources are still there after cleanup."
+      )
+      // The plain words replace the blocker's own words there: the count line already says how many remain.
+      expect(steps?.querySelector("[data-step-blocker]")).toBeNull()
+      const notRun = [...(steps?.querySelectorAll("li") ?? [])].filter(
+        (node) => node.querySelector("[data-step-state]")?.textContent === "Not run"
+      )
+      expect(notRun.map((node) => node.querySelector("[data-step-state] svg") !== null)).toEqual([true, true])
+    })
+
+    it("says only what the blocker establishes: a scan that didn't finish, or a hold that couldn't be read", async () => {
+      const failedAt = (step: "verify" | "budget hold", blocker: SandboxBlocker) =>
+        runsPage({
+          _tag: "Ready",
+          accountId: "999999999991",
+          next: null,
+          runs: [
+            {
+              runId: "run-x",
+              step: null,
+              blocker,
+              outcome: "Quarantined",
+              reason: "Released",
+              startedAt: "2026-10-17T10:58:00.000Z",
+              endedAt: "2026-10-17T11:07:00.000Z",
+              failedStep: step,
+              steps: [{ step, status: "failed", at: "2026-10-17T11:06:41.000Z", count: 0 }]
+            }
+          ]
+        })
+      const shown = async (runs: ReturnType<typeof failedAt>) => {
+        await render(ready([quarantinedCard(nukeBlocker, "run-x")]), {
+          page: "runs",
+          owner: false,
+          runs: () => Effect.succeed(runs),
+          search: { id: "999999999991", run: "run-x" }
+        })
+        const row = await vi.waitFor(() => {
+          const found = document.querySelector('[role="dialog"] ol[aria-label="Cleanup steps"] li')
+          expect(found).not.toBeNull()
+          return found
+        })
+        const seen = [
+          row?.querySelector("[data-step-outcome]")?.textContent ?? "",
+          row?.querySelector("[data-step-words]")?.textContent ?? "",
+          row?.querySelector("[data-step-blocker]")?.textContent ?? ""
+        ]
+        await act(async () => root?.unmount())
+        root = null
+        document.body.replaceChildren()
+        return seen
+      }
+      expect(await shown(failedAt("verify", { _tag: "ScanIncomplete", text: "The scan did not finish" }))).toEqual([
+        "",
+        "",
+        "The scan did not finish"
+      ])
+      expect(await shown(failedAt("budget hold", { _tag: "Unknown", text: "Reset failed" }))).toEqual([
+        "",
+        "",
+        "Reset failed"
+      ])
+    })
+
+    it("times the reset's steps on the account page, in the viewer's time zone", async () => {
+      await render(ready([quarantinedCard(nukeBlocker, "release-7f3a")]), {
+        page: "account",
+        timeZone: "Europe/Berlin",
+        runs: () => Effect.succeed(steppedRuns),
+        search: { id: "999999999991" }
+      })
+      const steps = await vi.waitFor(() => {
+        const found = document.querySelector('ol[aria-label="Reset steps"]')
+        expect(found).not.toBeNull()
+        return found
+      })
+      expect(
+        [...(steps?.querySelectorAll("li") ?? [])].map((node) => [
+          node.querySelector("[data-step-name]")?.textContent,
+          node.querySelector("[data-step-at]")?.textContent ?? "",
+          node.querySelector("[data-step-state]")?.textContent
+        ])
+      ).toEqual([
+        ["Sign in", "12:58", "Done"],
+        ["Baseline", "12:58", "Done"],
+        ["Dry run", "12:58", "Done"],
+        ["Nuke", "13:06", "Done"],
+        ["Verify", "13:06", "Failed"],
+        ["Baseline re-check", "", "Not run"],
+        ["Budget hold", "", "Not run"]
+      ])
+      // The blocker has its own section on this page; the failed step does not repeat it.
+      expect(steps?.querySelector("[data-step-blocker]")).toBeNull()
     })
   })
 })

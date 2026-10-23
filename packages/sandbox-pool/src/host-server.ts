@@ -192,7 +192,8 @@ export const makeSandboxHostReads = (input: {
             reason: summary.reason,
             startedAt: summary.startedAt,
             endedAt: summary.endedAt,
-            failedStep: summary.failedStep
+            failedStep: summary.failedStep,
+            steps: summary.steps
           }
         })),
       next: page.next

@@ -223,6 +223,19 @@ describe("sandbox reset", () => {
       ])
       const verify = entries.find((entry) => entry._tag === "Step" && entry.step === "verify" && entry.status === "ok")
       expect(verify?._tag === "Step" && verify.output).toEqual([summary(0)])
+      // The dry run's count is what it will remove; verify's is what is still there. No other step counts.
+      expect(
+        entries.flatMap((entry) => entry._tag === "Step" && entry.status === "ok" ? [[entry.step, entry.count]] : [])
+      )
+        .toEqual([
+          ["sign in", null],
+          ["baseline", null],
+          ["dry run", 2],
+          ["nuke", null],
+          ["verify", 0],
+          ["baseline re-check", null],
+          ["budget hold", null]
+        ])
       expect(yield* log.recent(5)).toMatchObject([{ runId: run1, reason: "Released", outcome: "Available" }])
     }))
 
@@ -238,6 +251,7 @@ describe("sandbox reset", () => {
       const failed = entries.filter((entry) => entry._tag === "Step" && entry.status === "failed")
       expect(failed).toMatchObject([{
         step: "verify",
+        count: 1,
         detail: expect.stringContaining("verify: 1 resources still removable.")
       }])
       expect(failed[0]?._tag === "Step" && failed[0].output.at(-1)).toBe(summary(1))

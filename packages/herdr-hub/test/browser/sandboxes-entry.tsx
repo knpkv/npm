@@ -161,7 +161,16 @@ const runs = Schema.decodeUnknownSync(SandboxRuns)({
       reason: "Retry",
       startedAt: "2026-10-17T12:41:00.000Z",
       endedAt: "2026-10-17T12:48:00.000Z",
-      failedStep: "nuke"
+      failedStep: "nuke",
+      steps: [
+        { step: "sign in", status: "done", at: "2026-10-17T12:41:02.000Z", count: null },
+        { step: "baseline", status: "done", at: "2026-10-17T12:41:04.000Z", count: null },
+        { step: "dry run", status: "done", at: "2026-10-17T12:47:00.000Z", count: 12 },
+        { step: "nuke", status: "failed", at: "2026-10-17T12:48:00.000Z", count: null },
+        { step: "verify", status: "notRun", at: null, count: null },
+        { step: "baseline re-check", status: "notRun", at: null, count: null },
+        { step: "budget hold", status: "notRun", at: null, count: null }
+      ]
     },
     {
       runId: "retry-8a10",
@@ -181,7 +190,16 @@ const runs = Schema.decodeUnknownSync(SandboxRuns)({
       reason: "Released",
       startedAt: "2026-10-17T10:58:00.000Z",
       endedAt: "2026-10-17T11:07:00.000Z",
-      failedStep: "verify"
+      failedStep: "verify",
+      steps: [
+        { step: "sign in", status: "done", at: "2026-10-17T10:58:02.000Z", count: null },
+        { step: "baseline", status: "done", at: "2026-10-17T10:58:04.000Z", count: null },
+        { step: "dry run", status: "done", at: "2026-10-17T10:58:41.000Z", count: 41 },
+        { step: "nuke", status: "done", at: "2026-10-17T11:06:03.000Z", count: null },
+        { step: "verify", status: "failed", at: "2026-10-17T11:06:41.000Z", count: 3 },
+        { step: "baseline re-check", status: "notRun", at: null, count: null },
+        { step: "budget hold", status: "notRun", at: null, count: null }
+      ]
     }
   ]
 })

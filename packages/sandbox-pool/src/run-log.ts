@@ -29,14 +29,21 @@ export type RunStep = typeof RunStep.Type
 
 export const RunEntry = Schema.TaggedUnion({
   Started: { runId: RunId, accountId: AccountId, reason: CleaningReason, at: Instant },
-  /** `detail` is the failure, at most 500 characters; `output` the aws-nuke tail for nuke steps. */
+  /**
+   * `detail` is the failure, at most 500 characters; `output` the aws-nuke tail for nuke steps. `count` is the
+   * scan's removable count for dry run (what it will remove) and verify (what is still there), null otherwise
+   * and for entries recorded before counts.
+   */
   Step: {
     runId: RunId,
     step: RunStep,
     status: Schema.Literals(["started", "ok", "failed"]),
     at: Instant,
     detail: Schema.NullOr(Schema.String.check(Schema.isMaxLength(500))),
-    output: Schema.Array(Schema.String)
+    output: Schema.Array(Schema.String),
+    count: Schema.NullOr(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))).pipe(
+      Schema.withDecodingDefaultKey(Effect.succeed(null))
+    )
   },
   Finished: {
     runId: RunId,
@@ -46,6 +53,17 @@ export const RunEntry = Schema.TaggedUnion({
   }
 })
 export type RunEntry = typeof RunEntry.Type
+
+/**
+ * One step of a run: `running` while its latest entry is its start, `notRun` without any entry. `at` is the time of
+ * that latest entry; `count` its scan count.
+ */
+export interface RunStepSummary {
+  readonly step: RunStep
+  readonly status: "done" | "failed" | "running" | "notRun"
+  readonly at: DateTime.Utc | null
+  readonly count: number | null
+}
 
 /**
  * One run as the hub lists it. `outcome` is null while it runs; `current` is the step in progress;
@@ -61,7 +79,15 @@ export interface RunSummary {
   readonly blocker: string | null
   readonly current: RunStep | null
   readonly failedStep: RunStep | null
+  /** Every step in run order. */
+  readonly steps: ReadonlyArray<RunStepSummary>
 }
+
+/** A step's status from its latest entry. */
+const stepStatus = (status: "started" | "ok" | "failed"): RunStepSummary["status"] =>
+  status === "started" ? "running" : status === "ok" ? "done" : "failed"
+
+const notRun = (step: RunStep): RunStepSummary => ({ step, status: "notRun", at: null, count: null })
 
 /** One summary per started run, newest start first. Entries of a run whose start is missing are ignored. */
 export const summarizeRuns = (entries: ReadonlyArray<RunEntry>): ReadonlyArray<RunSummary> => {
@@ -77,7 +103,8 @@ export const summarizeRuns = (entries: ReadonlyArray<RunEntry>): ReadonlyArray<R
         outcome: null,
         blocker: null,
         current: null,
-        failedStep: null
+        failedStep: null,
+        steps: RunStep.literals.map(notRun)
       })
       continue
     }
@@ -89,7 +116,12 @@ export const summarizeRuns = (entries: ReadonlyArray<RunEntry>): ReadonlyArray<R
         ? {
           ...run,
           current: entry.status === "started" ? entry.step : null,
-          failedStep: entry.status === "failed" ? entry.step : run.failedStep
+          failedStep: entry.status === "failed" ? entry.step : run.failedStep,
+          steps: run.steps.map((step) =>
+            step.step === entry.step
+              ? { step: entry.step, status: stepStatus(entry.status), at: entry.at, count: entry.count }
+              : step
+          )
         }
         : { ...run, endedAt: entry.at, outcome: entry.outcome, blocker: entry.blocker, current: null }
     )

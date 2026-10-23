@@ -1447,7 +1447,15 @@ interface StepRow {
   readonly blocker: string | null
   /** The stored line of the failed step, for the owner only. */
   readonly raw: string | null
+  /** The step's second line, such as "signed in" or "41 to remove, scan complete". */
+  readonly outcome: string | null
+  /** The clock time of the step's latest report. */
+  readonly at: string | null
+  /** The failure in plain words, on the failed step. */
+  readonly words: string | null
 }
+
+const noDetail = { outcome: null, at: null, words: null }
 
 /** Before the failed step done, the failed step failed, after it not run. */
 const finishedSteps = (
@@ -1466,16 +1474,119 @@ const finishedSteps = (
           : { label: "Not run", tone: "neutral" },
     current: index === at,
     blocker: index === at ? blocker : null,
-    raw: null
+    raw: null,
+    ...noDetail
   }))
 }
 
+/** A step's second line, as page 14 8c writes it; none where the run has no safe words or count for it. */
+const stepOutcome = (
+  { count, status, step }: SandboxRunView["steps"][number],
+  blocker: SandboxRunView["blocker"]
+): string | null => {
+  if (status === "notRun") return step === "budget hold" ? "not checked" : "not run"
+  if (status === "done") {
+    switch (step) {
+      case "sign in":
+        return "signed in"
+      case "baseline":
+      case "baseline re-check":
+        return "matches"
+      case "dry run":
+        return count === null ? "scan complete" : `${count} to remove, scan complete`
+      default:
+        return null
+    }
+  }
+  // A failed verify counts what remains only when the blocker says resources remain; an unfinished scan counts nothing.
+  return status === "failed" && step === "verify" && count !== null && blocker?._tag === "ResourcesRemain"
+    ? `${count} still removable`
+    : null
+}
+
 /**
- * A run's steps in the run-detail words. A running run counts from its current step; a quarantined one from the
+ * The failure in the design's plain words, only where the blocker establishes it. A dry run can stop for an
+ * incomplete scan or for its guard, a verify for remaining resources or an unfinished scan, and a budget hold for
+ * the hold or a failed read, so each gets words only for the blocker that matches them.
+ */
+const failureWords = (step: RunStep, blocker: SandboxRunView["blocker"]): string | null => {
+  switch (step) {
+    case "sign in":
+      return "Assume role: Relay couldn’t sign in to the account to clean it."
+    case "baseline":
+      return "Baseline: the account doesn’t match its baseline, so cleanup didn’t start."
+    case "dry run":
+      return blocker?._tag === "ScanIncomplete" ? "Dry run: the scan didn’t finish, so nothing was removed." : null
+    case "nuke":
+      return "Nuke: cleanup stopped before everything was removed."
+    case "verify":
+      return blocker?._tag === "ResourcesRemain" ? "Verify: some resources are still there after cleanup." : null
+    case "budget hold":
+      return blocker?._tag === "BudgetHold"
+        ? "Budget hold: this account passed its monthly spend cap, so it’s locked until an approver lifts the hold. Cleanup still ran."
+        : null
+    case "baseline re-check":
+      return null
+  }
+}
+
+const statusLabel = (status: SandboxRunView["steps"][number]["status"]): Labelled => {
+  switch (status) {
+    case "done":
+      return { label: "Done", tone: "positive" }
+    case "failed":
+      return { label: "Failed", tone: "critical" }
+    case "running":
+      return { label: "In progress", tone: "progress" }
+    case "notRun":
+      return { label: "Not run", tone: "neutral" }
+  }
+}
+
+/**
+ * What a recorded step adds under its name. The run sheet gives its second line, and on the failed step the plain
+ * words, or the blocker's own words where the step has none. The account page gives the time only: its blocker has
+ * its own section.
+ */
+const recordedDetail = (
+  run: SandboxRunView,
+  step: SandboxRunView["steps"][number],
+  show: "outcome" | { readonly times: Times }
+): Pick<StepRow, "outcome" | "at" | "words" | "blocker"> => {
+  if (show !== "outcome") {
+    return { outcome: null, at: step.at === null ? null : show.times.clock(step.at), words: null, blocker: null }
+  }
+  const words = step.status === "failed" ? failureWords(step.step, run.blocker) : null
+  return {
+    outcome: stepOutcome(step, run.blocker),
+    at: null,
+    words,
+    blocker: step.status === "failed" && words === null ? (run.blocker?.text ?? null) : null
+  }
+}
+
+/** Rows from a run's recorded steps: their own status, and either their second line or their time. */
+const recordedRows = (
+  run: SandboxRunView,
+  name: (step: RunStep, index: number) => string,
+  show: "outcome" | { readonly times: Times }
+): ReadonlyArray<StepRow> =>
+  run.steps.map((step, index) => ({
+    name: name(step.step, index),
+    state: statusLabel(step.status),
+    current: step.status === "failed" || step.status === "running",
+    raw: null,
+    ...recordedDetail(run, step, show)
+  }))
+
+/**
+ * A run's steps in the run-detail words. A run with recorded steps shows them; an older one is read from its
+ * outcome. A running run counts from its current step; a quarantined one from the
  * step that failed. An available run is all done. A quarantine with no failed step names no steps.
  */
 const runRows = (run: SandboxRunView): ReadonlyArray<StepRow> | null => {
   const named = (_step: RunStep, index: number) => runSteps[index]?.name ?? ""
+  if (run.steps.length > 0) return recordedRows(run, named, "outcome")
   if (run.outcome === null) {
     const current = runSteps.findIndex(({ id }) => id === run.step)
     return runSteps.map(({ name }, index) => ({
@@ -1483,7 +1594,8 @@ const runRows = (run: SandboxRunView): ReadonlyArray<StepRow> | null => {
       state: stepState(index, current),
       current: index === current,
       blocker: null,
-      raw: null
+      raw: null,
+      ...noDetail
     }))
   }
   // A failed step that was retried still names failedStep; an available run passed every step.
@@ -1493,7 +1605,8 @@ const runRows = (run: SandboxRunView): ReadonlyArray<StepRow> | null => {
       state: { label: "Done", tone: "positive" },
       current: false,
       blocker: null,
-      raw: null
+      raw: null,
+      ...noDetail
     }))
   }
   return run.failedStep === null ? null : finishedSteps(named, run.failedStep, run.blocker?.text ?? null)
@@ -1501,13 +1614,30 @@ const runRows = (run: SandboxRunView): ReadonlyArray<StepRow> | null => {
 
 const StepList = ({ label, rows }: { readonly label: string; readonly rows: ReadonlyArray<StepRow> }): ReactElement => (
   <ol aria-label={label} className="sandboxes-steps">
-    {rows.map(({ blocker, current, name, raw, state }, index) => (
+    {rows.map(({ at, blocker, current, name, outcome, raw, state, words }, index) => (
       <li aria-current={current ? "step" : undefined} key={name}>
         <span aria-hidden="true" className="sandboxes-step-number">
           {index + 1}
         </span>
-        <span data-step-name="">{name}</span>
-        <StateLabel data-step-state="" label={state.label} size="compact" tone={state.tone} />
+        <span className="sandboxes-step-text">
+          <span data-step-name="">{name}</span>
+          {outcome === null ? null : <small data-step-outcome="">{outcome}</small>}
+        </span>
+        <span className="sandboxes-step-end">
+          {at === null ? null : <small data-step-at="">{at}</small>}
+          <StateLabel
+            data-step-state=""
+            {...(state.tone === "neutral" ? { icon: "minus" } : {})}
+            label={state.label}
+            size="compact"
+            tone={state.tone}
+          />
+        </span>
+        {words === null ? null : (
+          <p className="sandboxes-step-blocker" data-step-words="">
+            {words}
+          </p>
+        )}
         {blocker === null ? null : (
           <p className="sandboxes-step-blocker" data-step-blocker="">
             {blocker}
@@ -1727,7 +1857,14 @@ const AccountDetail = ({
             {failed === null ? null : (
               <section className="sandboxes-account-section">
                 <h2>Reset run</h2>
-                <StepList label="Reset steps" rows={finishedSteps(stepWord, failed, null)} />
+                <StepList
+                  label="Reset steps"
+                  rows={
+                    run !== undefined && run.steps.length > 0
+                      ? recordedRows(run, stepWord, { times })
+                      : finishedSteps(stepWord, failed, null)
+                  }
+                />
               </section>
             )}
           </div>
@@ -1880,7 +2017,8 @@ const RunSheet = ({
   const times = useContext(TimesContext)
   const outcome = outcomeLabel(run.outcome)
   const raw = log !== null && log._tag === "Done" && log.value._tag === "Ready" ? log.value.raw : null
-  const rows = runRows(run)?.map((row) => (row.blocker === null ? row : { ...row, raw })) ?? null
+  // The stored line goes on the step that failed.
+  const rows = runRows(run)?.map((row) => (row.state.tone === "critical" ? { ...row, raw } : row)) ?? null
   return (
     <Sheet.Root onOpenChange={(open) => (open ? undefined : close())} open>
       <Sheet.Content className="sandboxes-sheet" closeLabel="Close run" title="Cleanup run">

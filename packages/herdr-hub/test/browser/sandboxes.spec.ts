@@ -153,17 +153,25 @@ test("a run row opens that run's detail; the owner sees the stored line and the 
   await show(page, { id: "8c", state: "8c", sheet: true }, "light")
   const dialog = page.getByRole("dialog")
   await expect(dialog).toContainText("release-7f3a")
-  await expect(dialog.locator("[data-step-blocker]")).toHaveText("3 resources still removable")
+  await expect(dialog.locator("[data-step-words]")).toHaveText("Verify: some resources are still there after cleanup.")
   await expect(dialog.locator("[data-step-raw]")).toContainText("verify: 3 resources still removable.")
   await expect(dialog.locator("details[data-run-log] summary")).toHaveText("▼LogLast 30 lines")
   await expect(dialog.locator("details[data-run-log] pre")).toContainText("11:07:00 run release-7f3a ended")
+  await expect(dialog.locator("[data-step-outcome]")).toHaveText([
+    "signed in",
+    "matches",
+    "41 to remove, scan complete",
+    "3 still removable",
+    "not run",
+    "not checked"
+  ])
 })
 
 test("a viewer's run detail has the failed step's words, no stored line and no log", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 })
   await show(page, { id: "8c-viewer", state: "8c-viewer", sheet: true }, "light")
   const dialog = page.getByRole("dialog")
-  await expect(dialog.locator("[data-step-blocker]")).toHaveText("3 resources still removable")
+  await expect(dialog.locator("[data-step-words]")).toHaveText("Verify: some resources are still there after cleanup.")
   await expect(dialog.locator("[data-step-raw]")).toHaveCount(0)
   await expect(dialog).not.toContainText("Log")
 })
