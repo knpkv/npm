@@ -1,5 +1,5 @@
 import { expect, layer } from "@effect/vitest"
-import { Effect, FileSystem, Path, Redacted, Sink, Stream } from "effect"
+import { Effect, FileSystem, Path, PlatformError, Redacted, Sink, Stream } from "effect"
 import { ChildProcessSpawner } from "effect/process/ChildProcessSpawner"
 import * as Spawner from "effect/process/ChildProcessSpawner"
 import { makeAwsNuke } from "../src/aws.js"
@@ -66,7 +66,9 @@ const files = (written: Array<Written>) =>
         Effect.sync(() => void written.push({ op: `write ${options?.flag}`, path, mode: options?.mode, data })),
       remove: (path) => Effect.sync(() => void written.push({ op: "remove", path, mode: undefined })),
       rename: (from, to) =>
-        Effect.sync(() => void written.push({ op: `rename to ${to}`, path: from, mode: undefined })),
+        to.endsWith("/333333333333.json")
+          ? Effect.fail(PlatformError.systemError({ _tag: "PermissionDenied", module: "FileSystem", method: "rename" }))
+          : Effect.sync(() => void written.push({ op: `rename to ${to}`, path: from, mode: undefined })),
       chmod: (path, mode) => Effect.sync(() => void written.push({ op: "chmod", path, mode }))
     })
   )
@@ -78,19 +80,40 @@ const nuke = makeAwsNuke({
 }).pipe(Effect.orDie)
 
 layer(Path.layer)("aws-nuke runner", (it) => {
-  it.effect("writes each account's config owner-only through a fresh file renamed into place", () => {
+  it.effect("writes each account's config owner-only through its own fresh file renamed into place", () => {
+    const written: Array<Written> = []
+    return Effect.gen(function*() {
+      const runner = yield* nuke
+      expect(yield* runner.writeConfig("222222222222", "{\"regions\":[]}")).toBe("/state/nuke/222222222222.json")
+      yield* runner.writeConfig("222222222222", "{}")
+      const [mkdir, chmod, first, renamed] = written
+      expect([mkdir, chmod]).toEqual([
+        { op: "mkdir", path: "/state/nuke", mode: 0o700 },
+        { op: "chmod", path: "/state/nuke", mode: 0o700 }
+      ])
+      expect(first).toMatchObject({ op: "write wx", mode: 0o600, data: "{\"regions\":[]}" })
+      expect(first?.path).toMatch(/^\/state\/nuke\/222222222222\.json\.[0-9a-z]+\.tmp$/)
+      expect(renamed).toEqual({ op: "rename to /state/nuke/222222222222.json", path: first?.path, mode: undefined })
+      // Two writes of one account never share a temporary file, so neither can remove or rename the other's.
+      const temporaries = written.filter(({ op }) => op === "write wx").map(({ path }) => path)
+      expect(new Set(temporaries).size).toBe(2)
+      expect(written.filter(({ op }) => op === "remove")).toEqual([])
+    }).pipe(files(written), spawner("", 0, []))
+  })
+
+  it.effect("a write that cannot be renamed into place removes only its own temporary file", () => {
     const written: Array<Written> = []
     return nuke.pipe(
-      Effect.flatMap((runner) => runner.writeConfig("222222222222", "{\"regions\":[]}")),
-      Effect.map((path) => {
-        expect(path).toBe("/state/nuke/222222222222.json")
-        expect(written).toEqual([
-          { op: "mkdir", path: "/state/nuke", mode: 0o700 },
-          { op: "chmod", path: "/state/nuke", mode: 0o700 },
-          { op: "remove", path: "/state/nuke/222222222222.json.tmp", mode: undefined },
-          { op: "write wx", path: "/state/nuke/222222222222.json.tmp", mode: 0o600, data: "{\"regions\":[]}" },
-          { op: "rename to /state/nuke/222222222222.json", path: "/state/nuke/222222222222.json.tmp", mode: undefined }
-        ])
+      Effect.flatMap((runner) => runner.writeConfig("333333333333", "{}")),
+      Effect.flip,
+      Effect.map((failure) => {
+        expect(failure.step).toBe("write nuke config")
+        const temporary = written.find(({ op }) => op === "write wx")?.path
+        expect(written.filter(({ op }) => op === "remove")).toEqual([{
+          op: "remove",
+          path: temporary,
+          mode: undefined
+        }])
       }),
       files(written),
       spawner("", 0, [])

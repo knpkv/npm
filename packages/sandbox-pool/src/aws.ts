@@ -1,9 +1,10 @@
 /**
  * The live AWS adapters for a pool: the `SpendReader` over Budgets, `PoolAccess` over STS, IAM and
  * Organizations, the aws-nuke `Nuke` runner and the `BudgetControl` lift over Organizations. Each is built
- * from the caller's credentials, which are the management account's, and names no organization: the
- * contract and the options carry every id and name. Only `ensureBaseline`, a live aws-nuke run and `lift`
- * write; everything else reads.
+ * from the caller's credentials, which are the management account's, except the aws-nuke runner, which uses
+ * none of its own. Each names no organization: the contract and the options carry every id and name. In AWS,
+ * only `ensureBaseline`, a live aws-nuke run and `lift` write; everything else reads. On the host, `writeConfig`
+ * writes an account's config file before every run, dry ones included.
  *
  * @module
  */

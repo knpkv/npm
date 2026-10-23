@@ -1,4 +1,4 @@
-import { Effect, FileSystem, Path, Redacted, Schema, Stream } from "effect"
+import { Effect, FileSystem, Path, Random, Redacted, Schema, Stream } from "effect"
 import { ChildProcess } from "effect/process"
 import { ChildProcessSpawner } from "effect/process/ChildProcessSpawner"
 import { Nuke, nukeArgs, type PoolSession, ResetBlocked } from "./reset.js"
@@ -48,11 +48,13 @@ export const makeAwsNuke = Effect.fn("AwsNuke.make")(function*(options: AwsNukeO
         yield* fs.makeDirectory(options.configDirectory, { recursive: true, mode: 0o700 })
         // An existing directory keeps its mode through makeDirectory; narrow it.
         yield* fs.chmod(options.configDirectory, 0o700)
-        // A fresh file gets its mode on create, and rename replaces whatever sits at `file`, a link included.
-        const fresh = `${file}.tmp`
-        yield* fs.remove(fresh, { force: true })
+        // Each write has its own fresh file, created with its mode, and rename replaces whatever sits at `file`, a
+        // link included. Concurrent writes of one account never touch each other's file.
+        const fresh = `${file}.${(yield* Random.nextIntBetween(0, 2 ** 31)).toString(36)}.tmp`
         yield* fs.writeFileString(fresh, config, { mode: 0o600, flag: "wx" })
-        yield* fs.rename(fresh, file)
+        yield* fs.rename(fresh, file).pipe(
+          Effect.onError(() => fs.remove(fresh, { force: true }).pipe(Effect.ignore({ log: true })))
+        )
         return file
       }).pipe(Effect.mapError(blocked("write nuke config")), Effect.withSpan("AwsNuke.writeConfig"))
     },

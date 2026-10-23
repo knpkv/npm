@@ -225,6 +225,45 @@ layer(Credentials.mock)("STS pool access", (it) => {
         ])
     }))
 
+  it.effect("reads every page of policy versions before deciding whether one must go", () => {
+    const seen: Array<SeenCall> = []
+    const arn = "arn:aws:iam::222222222222:policy/pool/PoolBoundary"
+    const page = (ids: ReadonlyArray<number>, marker: string | undefined) =>
+      result(
+        "ListPolicyVersions",
+        `<Versions>${
+          ids.map((id) =>
+            `<member><VersionId>v${id}</VersionId><IsDefaultVersion>${
+              id === 5
+            }</IsDefaultVersion><CreateDate>2026-0${id}-01T00:00:00Z</CreateDate></member>`
+          ).join("")
+        }</Versions><IsTruncated>${marker !== undefined}</IsTruncated>${
+          marker === undefined ? "" : `<Marker>${marker}</Marker>`
+        }`
+      )
+    const paged = account({ aliases: ["example-pool-sandbox-b"], boundary: "{}", versions: 5 })
+    return access.pipe(
+      Effect.flatMap((pool) => pool.ensureBaseline("222222222222", session)),
+      Effect.map(() => {
+        expect(seen.filter(({ operation }) => operation === "ListPolicyVersions").map(({ body }) => body["Marker"]))
+          .toEqual([undefined, "page-2"])
+        expect(writes(seen)).toEqual([
+          ["DeletePolicyVersion", { PolicyArn: arn, VersionId: "v1" }],
+          ["CreatePolicyVersion", { PolicyArn: arn, PolicyDocument: boundary, SetAsDefault: "true" }]
+        ])
+      }),
+      against(fakeAws(
+        (call) =>
+          call.operation !== "ListPolicyVersions"
+            ? paged(call)
+            : call.body["Marker"] === undefined
+            ? page([5, 4, 3], "page-2")
+            : page([2, 1], undefined),
+        seen
+      ))
+    )
+  })
+
   it.effect("replaces a drifted boundary as the new default, dropping the oldest version at five", () => {
     const seen: Array<SeenCall> = []
     const arn = "arn:aws:iam::222222222222:policy/pool/PoolBoundary"

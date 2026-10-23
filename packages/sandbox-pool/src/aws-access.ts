@@ -97,6 +97,21 @@ export const planBaseline = (
 const boundaryArn = (contract: PoolContract, accountId: string) =>
   `arn:aws:iam::${accountId}:policy${contract.boundaryPath}${contract.boundaryName}`
 
+/** Every version of the policy: IAM may page even five, and a short page would hide the one to drop. */
+const policyVersions = Effect.fn("PoolAccess.policyVersions")(function*(arn: string) {
+  const first: iam.ListPolicyVersionsRequest = { PolicyArn: arn }
+  let marker: string | undefined
+  let versions: ReadonlyArray<iam.PolicyVersion> = []
+  do {
+    const page = yield* iam.listPolicyVersions(marker === undefined ? first : { ...first, Marker: marker }).pipe(
+      Retry.none
+    )
+    versions = [...versions, ...(page.Versions ?? [])]
+    marker = page.IsTruncated === true ? page.Marker : undefined
+  } while (marker !== undefined)
+  return versions
+})
+
 /** Read the account's alias and boundary policy with its own session. No writes. */
 export const observeBaseline = Effect.fn("PoolAccess.observeBaseline")(function*(
   contract: PoolContract,
@@ -115,9 +130,8 @@ export const observeBaseline = Effect.fn("PoolAccess.observeBaseline")(function*
     return yield* new ResetBlocked({ step: "baseline", detail: "boundary policy without a default version" })
   }
   const version = yield* iam.getPolicyVersion({ PolicyArn: arn, VersionId: defaultVersion }).pipe(Retry.none)
-  const listedVersions = yield* iam.listPolicyVersions({ PolicyArn: arn }).pipe(Retry.none)
   const versions = yield* Effect.forEach(
-    listedVersions.Versions ?? [],
+    yield* policyVersions(arn),
     (candidate) =>
       candidate.VersionId === undefined || candidate.CreateDate === undefined
         ? Effect.fail(new ResetBlocked({ step: "baseline", detail: "policy version without id or date" }))
