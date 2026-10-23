@@ -26,11 +26,10 @@ export type UsagePageId = typeof UsagePageId.Type
 export const usagePages: ReadonlyArray<{
   readonly id: UsagePageId
   readonly label: string
-  readonly showInPhoneTitle?: boolean
 }> = [
-  { id: "limits", label: "Limits", showInPhoneTitle: true },
+  { id: "limits", label: "Limits" },
   { id: "tokens", label: "Tokens" },
-  { id: "by-tool", label: "By tool", showInPhoneTitle: true }
+  { id: "by-tool", label: "By tool" }
 ]
 
 /**
