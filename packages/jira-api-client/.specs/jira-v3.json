@@ -20563,7 +20563,7 @@
     "license": { "name": "Apache 2.0", "url": "http://www.apache.org/licenses/LICENSE-2.0.html" },
     "termsOfService": "https://developer.atlassian.com/platform/marketplace/atlassian-developer-terms/",
     "title": "The Jira Cloud platform REST API",
-    "version": "1001.0.0-SNAPSHOT-e73e298945c7d2f7b579779a90edd5ffcceff065"
+    "version": "1001.0.0-SNAPSHOT-12ca6ec572dce8558d78a98d942a1c3f7f182787"
   },
   "openapi": "3.0.1",
   "paths": {
@@ -36671,7 +36671,9 @@
           },
           "401": { "description": "Returned if the authentication credentials are incorrect or missing." },
           "403": { "description": "Returned if the user does not have the necessary permission." },
-          "409": { "description": "Returned if the issue type name is in use." }
+          "409": {
+            "description": "Returned if the issue type name is in use or creation conflicts with another request."
+          }
         },
         "security": [{ "basicAuth": [] }, { "OAuth2": ["manage:jira-configuration"] }, {}],
         "summary": "Create issue type",
