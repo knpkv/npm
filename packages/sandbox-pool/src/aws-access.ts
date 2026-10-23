@@ -1,7 +1,8 @@
 import { Credentials, Retry } from "@distilled.cloud/aws"
 import * as iam from "@distilled.cloud/aws/iam"
 import * as sts from "@distilled.cloud/aws/sts"
-import { Effect, Option, Redacted } from "effect"
+import type { Schema } from "effect"
+import { Effect, Option, Predicate, Redacted } from "effect"
 import { HttpClient } from "effect/http"
 import { attachedPolicies } from "./aws-organizations.js"
 import { accountAlias, type PoolContract } from "./pool.js"
@@ -45,9 +46,24 @@ const blocked = (step: string) => (error: { readonly _tag: string; readonly mess
     detail: error.message === undefined || error.message === "" ? error._tag : `${error._tag}: ${error.message}`
   })
 
-const canonical = (document: string, step: string) =>
+const isJsonObject = (value: Schema.Json): value is Schema.JsonObject => Predicate.isObject(value)
+
+/** Objects with sorted keys, arrays in order: two documents IAM treats as one serialize the same. */
+const sortKeys = (value: Schema.Json): Schema.Json =>
+  Array.isArray(value)
+    ? value.map(sortKeys)
+    : isJsonObject(value)
+    ? Object.fromEntries(
+      Object.entries(value).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map((
+        [key, inner]
+      ) => [key, sortKeys(inner)])
+    )
+    : value
+
+/** The document as compared: `decode` for IAM's URL-encoded responses. Malformed text blocks, never dies. */
+const canonical = (document: string, step: string, decode: boolean) =>
   Effect.try({
-    try: () => JSON.stringify(JSON.parse(document)),
+    try: () => JSON.stringify(sortKeys(JSON.parse(decode ? decodeURIComponent(document) : document))),
     catch: () => new ResetBlocked({ step, detail: "boundary policy is not JSON" })
   })
 
@@ -68,7 +84,7 @@ export const planBaseline = (
         detail: `unexpected account alias ${observed.aliases.join(",")}`
       })
     }
-    const desired = yield* canonical(boundaryDocument, "baseline")
+    const desired = yield* canonical(boundaryDocument, "baseline", false)
     const boundary = observed.boundary
     const aliasSteps: ReadonlyArray<BaselineStep> = only === undefined ? [{ _tag: "CreateAlias", alias }] : []
     if (boundary === undefined) return [...aliasSteps, { _tag: "CreateBoundary" }]
@@ -94,19 +110,29 @@ export const observeBaseline = Effect.fn("PoolAccess.observeBaseline")(function*
     Effect.catchTag("NoSuchEntityException", () => Effect.succeedNone)
   )
   if (Option.isNone(found)) return { aliases: listed.AccountAliases, boundary: undefined } satisfies ObservedBaseline
-  const version = yield* iam.getPolicyVersion({ PolicyArn: arn, VersionId: found.value.DefaultVersionId ?? "v1" }).pipe(
-    Retry.none
+  const defaultVersion = found.value.DefaultVersionId
+  if (defaultVersion === undefined) {
+    return yield* new ResetBlocked({ step: "baseline", detail: "boundary policy without a default version" })
+  }
+  const version = yield* iam.getPolicyVersion({ PolicyArn: arn, VersionId: defaultVersion }).pipe(Retry.none)
+  const listedVersions = yield* iam.listPolicyVersions({ PolicyArn: arn }).pipe(Retry.none)
+  const versions = yield* Effect.forEach(
+    listedVersions.Versions ?? [],
+    (candidate) =>
+      candidate.VersionId === undefined || candidate.CreateDate === undefined
+        ? Effect.fail(new ResetBlocked({ step: "baseline", detail: "policy version without id or date" }))
+        : Effect.succeed({
+          versionId: candidate.VersionId,
+          isDefault: candidate.IsDefaultVersion === true,
+          createdAt: candidate.CreateDate.getTime()
+        })
   )
-  const versions = yield* iam.listPolicyVersions({ PolicyArn: arn }).pipe(Retry.none)
   return {
     aliases: listed.AccountAliases,
     boundary: {
-      document: yield* canonical(decodeURIComponent(version.PolicyVersion?.Document ?? ""), "baseline"),
-      versions: (versions.Versions ?? []).map((candidate) => ({
-        versionId: candidate.VersionId ?? "",
-        isDefault: candidate.IsDefaultVersion === true,
-        createdAt: candidate.CreateDate?.getTime() ?? 0
-      }))
+      // IAM returns documents URL-encoded (RFC 3986); the SDK leaves them so.
+      document: yield* canonical(version.PolicyVersion?.Document ?? "", "baseline", true),
+      versions
     }
   } satisfies ObservedBaseline
 })
@@ -217,10 +243,11 @@ export const makeStsPoolAccess = Effect.fn("StsPoolAccess.make")(function*(optio
       )
     },
     budgetHold: (accountId) =>
-      attachedPolicies(accountId).pipe(
-        asManagement,
+      member(accountId, "budget hold check").pipe(
+        Effect.andThen(
+          attachedPolicies(accountId).pipe(asManagement, Effect.mapError(blocked("budget hold check")))
+        ),
         Effect.map((policies) => policies.some((policy) => policy.Name === contract.denyAllPolicy)),
-        Effect.mapError(blocked("budget hold check")),
         Effect.withSpan("StsPoolAccess.budgetHold")
       )
   })

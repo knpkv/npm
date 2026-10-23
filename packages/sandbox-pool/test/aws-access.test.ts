@@ -102,15 +102,25 @@ layer(Credentials.mock)("STS pool access", (it) => {
     )
   })
 
-  it.effect("refuses an account outside the pool before calling AWS, and names a refused assume-role", () =>
+  it.effect("every method refuses an account outside the pool without calling AWS", () =>
     Effect.gen(function*() {
       const seen: Array<SeenCall> = []
-      const outside = yield* access.pipe(
-        Effect.flatMap((pool) => pool.session("333333333333")),
-        Effect.flip,
-        against(fakeAws(() => result("AssumeRole", ""), seen))
-      )
-      expect([outside.step, outside.detail, seen.length]).toEqual(["sign in", "not a pool account", 0])
+      const pool = yield* access.pipe(against(fakeAws(() => result("AssumeRole", ""), seen)))
+      const refusals = yield* Effect.forEach([
+        pool.session("999999999999"),
+        pool.ensureBaseline("999999999999", session),
+        pool.budgetHold("999999999999", session)
+      ], (call) => call.pipe(Effect.flip, against(fakeAws(() => result("AssumeRole", ""), seen))))
+      expect(refusals.map(({ detail, step }) => [step, detail])).toEqual([
+        ["sign in", "not a pool account"],
+        ["baseline", "not a pool account"],
+        ["budget hold check", "not a pool account"]
+      ])
+      expect(seen).toEqual([])
+    }))
+
+  it.effect("names a refused assume-role", () =>
+    Effect.gen(function*() {
       const refused = yield* access.pipe(
         Effect.flatMap((pool) => pool.session("222222222222")),
         Effect.flip,
@@ -149,6 +159,71 @@ layer(Credentials.mock)("STS pool access", (it) => {
       against(fakeAws(account({ aliases: ["example-pool-sandbox-b"], boundary: spaced }), seen))
     )
   })
+
+  it.effect("reads a stored document with a literal % and reordered keys as in place", () => {
+    const seen: Array<SeenCall> = []
+    const withPercent = JSON.stringify({
+      Version: "2012-10-17",
+      Statement: [{
+        Effect: "Deny",
+        Action: "x:*",
+        Resource: "*",
+        Condition: { StringLike: { "aws:userid": "100%*" } }
+      }]
+    })
+    const reordered = JSON.stringify({
+      Statement: [{
+        Resource: "*",
+        Condition: { StringLike: { "aws:userid": "100%*" } },
+        Action: "x:*",
+        Effect: "Deny"
+      }],
+      Version: "2012-10-17"
+    })
+    return makeStsPoolAccess({ contract, boundaryDocument: withPercent }).pipe(
+      Effect.flatMap((pool) => pool.ensureBaseline("222222222222", session)),
+      Effect.map(() => expect(writes(seen)).toEqual([])),
+      against(fakeAws(account({ aliases: ["example-pool-sandbox-b"], boundary: reordered }), seen))
+    )
+  })
+
+  it.effect("blocks, writing nothing, on a document that is not URL-encoded JSON or a version without id or date", () =>
+    Effect.gen(function*() {
+      const failure = (answer: (call: SeenCall) => FakeAnswer) => {
+        const seen: Array<SeenCall> = []
+        return access.pipe(
+          Effect.flatMap((pool) => pool.ensureBaseline("222222222222", session)),
+          Effect.flip,
+          Effect.map((blocked) => ({ blocked, writes: writes(seen) })),
+          against(fakeAws(answer, seen))
+        )
+      }
+      const base = account({ aliases: ["example-pool-sandbox-b"], boundary: "{}", versions: 2 })
+      const undecodable = yield* failure((call) =>
+        call.operation === "GetPolicyVersion"
+          ? result("GetPolicyVersion", "<PolicyVersion><Document>%E0%A4%A</Document></PolicyVersion>")
+          : base(call)
+      )
+      const noDefault = yield* failure((call) =>
+        call.operation === "GetPolicy"
+          ? result("GetPolicy", "<Policy><PolicyName>PoolBoundary</PolicyName></Policy>")
+          : base(call)
+      )
+      const undated = yield* failure((call) =>
+        call.operation === "ListPolicyVersions"
+          ? result(
+            "ListPolicyVersions",
+            "<Versions><member><VersionId>v1</VersionId><IsDefaultVersion>true</IsDefaultVersion></member></Versions>"
+          )
+          : base(call)
+      )
+      expect([undecodable, noDefault, undated].map(({ blocked, writes }) => [blocked.step, blocked.detail, writes]))
+        .toEqual([
+          ["baseline", "boundary policy is not JSON", []],
+          ["baseline", "boundary policy without a default version", []],
+          ["baseline", "policy version without id or date", []]
+        ])
+    }))
 
   it.effect("replaces a drifted boundary as the new default, dropping the oldest version at five", () => {
     const seen: Array<SeenCall> = []

@@ -63,7 +63,10 @@ const files = (written: Array<Written>) =>
       makeDirectory: (path, options) =>
         Effect.sync(() => void written.push({ op: "mkdir", path, mode: options?.mode })),
       writeFileString: (path, data, options) =>
-        Effect.sync(() => void written.push({ op: "write", path, mode: options?.mode, data })),
+        Effect.sync(() => void written.push({ op: `write ${options?.flag}`, path, mode: options?.mode, data })),
+      remove: (path) => Effect.sync(() => void written.push({ op: "remove", path, mode: undefined })),
+      rename: (from, to) =>
+        Effect.sync(() => void written.push({ op: `rename to ${to}`, path: from, mode: undefined })),
       chmod: (path, mode) => Effect.sync(() => void written.push({ op: "chmod", path, mode }))
     })
   )
@@ -72,10 +75,10 @@ const nuke = makeAwsNuke({
   binary: "/opt/aws-nuke",
   configDirectory: "/state/nuke",
   environment: { PATH: "/bin", HOME: "/home/pool" }
-})
+}).pipe(Effect.orDie)
 
 layer(Path.layer)("aws-nuke runner", (it) => {
-  it.effect("writes each account's config owner-only under the config directory", () => {
+  it.effect("writes each account's config owner-only through a fresh file renamed into place", () => {
     const written: Array<Written> = []
     return nuke.pipe(
       Effect.flatMap((runner) => runner.writeConfig("222222222222", "{\"regions\":[]}")),
@@ -84,8 +87,9 @@ layer(Path.layer)("aws-nuke runner", (it) => {
         expect(written).toEqual([
           { op: "mkdir", path: "/state/nuke", mode: 0o700 },
           { op: "chmod", path: "/state/nuke", mode: 0o700 },
-          { op: "write", path: "/state/nuke/222222222222.json", mode: 0o600, data: "{\"regions\":[]}" },
-          { op: "chmod", path: "/state/nuke/222222222222.json", mode: 0o600 }
+          { op: "remove", path: "/state/nuke/222222222222.json.tmp", mode: undefined },
+          { op: "write wx", path: "/state/nuke/222222222222.json.tmp", mode: 0o600, data: "{\"regions\":[]}" },
+          { op: "rename to /state/nuke/222222222222.json", path: "/state/nuke/222222222222.json.tmp", mode: undefined }
         ])
       }),
       files(written),
@@ -131,4 +135,19 @@ layer(Path.layer)("aws-nuke runner", (it) => {
       spawner("Scan complete: 1 total, 0 nukeable, 1 filtered", 3, spawned)
     )
   })
+
+  it.effect("refuses an environment carrying any AWS variable, in any case, at make", () =>
+    makeAwsNuke({
+      binary: "/opt/aws-nuke",
+      configDirectory: "/state/nuke",
+      environment: { PATH: "/bin", AWS_PROFILE: "management", aws_config_file: "/x", AWS_ROLE_ARN: "arn" }
+    }).pipe(
+      Effect.flip,
+      Effect.map((refused) => {
+        expect(refused._tag).toBe("AwsNukeEnvironmentRefused")
+        expect(refused.names).toEqual(["AWS_PROFILE", "aws_config_file", "AWS_ROLE_ARN"])
+      }),
+      files([]),
+      spawner("", 0, [])
+    ))
 })

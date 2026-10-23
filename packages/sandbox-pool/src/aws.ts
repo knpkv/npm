@@ -89,5 +89,5 @@ export {
   planBaseline,
   type StsPoolAccessOptions
 } from "./aws-access.js"
-export { type AwsNukeOptions, makeAwsNuke } from "./aws-nuke.js"
+export { AwsNukeEnvironmentRefused, type AwsNukeOptions, makeAwsNuke } from "./aws-nuke.js"
 export { attachedPolicies, makeOrganizationsBudgetLift } from "./aws-organizations.js"
