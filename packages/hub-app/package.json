@@ -1,6 +1,6 @@
 {
   "name": "@knpkv/hub-app",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Contract and runner for apps that run standalone on their own port and mount in the Relay hub",
   "license": "MIT",
   "repository": {

@@ -1,5 +1,11 @@
 # @knpkv/sandbox-pool
 
+## 0.10.0
+
+### Minor Changes
+
+- [#1089](https://github.com/knpkv/npm/pull/1089) [`8077a87`](https://github.com/knpkv/npm/commit/8077a87bffe9ac852f622ff6db5662970900ee66) Thanks [@konopkov](https://github.com/konopkov)! - Live AWS adapters for the sandbox pool: `makeStsPoolAccess`, `makeAwsNuke` and `makeOrganizationsBudgetLift` in `@knpkv/sandbox-pool/aws`, with `observeBaseline` and `planBaseline` for a read-only check. The `BudgetControl` port and `BudgetLiftFailed` move to `@knpkv/sandbox-pool`; `@knpkv/herdr-hub/hostd-runtime` still exports both.
+
 ## 0.9.0
 
 ### Minor Changes

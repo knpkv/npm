@@ -2,6 +2,39 @@
 
 Released as `@knpkv/herdr-approvals` up to 0.18.0; the headings below are that package's history.
 
+## 0.55.0
+
+### Minor Changes
+
+- [#1084](https://github.com/knpkv/npm/pull/1084) [`b323fee`](https://github.com/knpkv/npm/commit/b323fee9abea9aaf6fd4913465ef23f6830fca5e) Thanks [@konopkov](https://github.com/konopkov)! - Add `@knpkv/herdr-usage`: `./host` holds this machine's agent-usage readings (moved from herdr-hub, which now
+  imports them), `./views` holds the Usage Limits views (also moved from herdr-hub, whose Usage page now renders
+  them from here), `./selection` the page's selectors, and the package root holds the Usage
+  app's server, whose limits and usage reads come from the
+  hub's fleet reads when attached and from this machine when standalone. The hub now answers `fleet.read` for apps.
+  `ShellContext` gains optional `headerOutlet` and `setHeaderMode` for apps that group their own header content
+  with the shell's. The standalone shell now serves rly's tokens and base itself (`/app/shell.css`, linked by a hash
+  of its text and cached for good), so an app's `client.css` carries only its own scoped styles, and it sets
+  `data-app` on every element it lends the app (header slot and outlet, portal root) as well as the mount root. The
+  Usage page's CSS moved with its views to `@knpkv/herdr-usage/views.css`, scoped under `[data-app="usage"]`; the hub
+  imports it and marks its Usage module and header outlet with `data-app`. Grants minted for a GET can no longer post to Relay as the caller, a redirect to the app's own root
+  stays under its `/apps/<id>/` prefix, and a burst of failed requests to one app runs a single re-probe.
+  `@knpkv/herdr-connect/usage` now exports the `FleetLimits` and `FleetUsage` schemas as values, so a browser client
+  decodes them without the package root. The Usage page (`UsagePage`) moved to `@knpkv/herdr-usage/views` behind a
+  small `UsageShell`; the hub's Usage module renders it unchanged, and the app's own client and `herdr-usage`
+  executable render the same page standalone or attached. `herdr-usage` runs the installed agent-usage with its own
+  node by default, and refuses a malformed `HERDR_USAGE_LIMITS_COMMAND` instead of ignoring it.
+
+- [#1089](https://github.com/knpkv/npm/pull/1089) [`8077a87`](https://github.com/knpkv/npm/commit/8077a87bffe9ac852f622ff6db5662970900ee66) Thanks [@konopkov](https://github.com/konopkov)! - Live AWS adapters for the sandbox pool: `makeStsPoolAccess`, `makeAwsNuke` and `makeOrganizationsBudgetLift` in `@knpkv/sandbox-pool/aws`, with `observeBaseline` and `planBaseline` for a read-only check. The `BudgetControl` port and `BudgetLiftFailed` move to `@knpkv/sandbox-pool`; `@knpkv/herdr-hub/hostd-runtime` still exports both.
+
+### Patch Changes
+
+- [#1091](https://github.com/knpkv/npm/pull/1091) [`df8ac0d`](https://github.com/knpkv/npm/commit/df8ac0dfdb5787065153cbe864272938f96c8c3d) Thanks [@konopkov](https://github.com/konopkov)! - Page metadata no longer has `showInPhoneTitle`: it was deprecated and ignored. A descriptor from an older app that still sends it decodes with the flag dropped; a descriptor literal typed as `ModuleDescriptor` that still writes it fails to compile with an excess-property error, so remove the flag from your descriptors. On a cold load the Hub's arrival focus lands on the page without painting a focus ring on a tab nobody reached by keyboard; the next Tab shows it as before.
+- Updated dependencies [[`b323fee`](https://github.com/knpkv/npm/commit/b323fee9abea9aaf6fd4913465ef23f6830fca5e), [`e416078`](https://github.com/knpkv/npm/commit/e416078e075534f4681be5962e40c502492bfd71), [`df8ac0d`](https://github.com/knpkv/npm/commit/df8ac0dfdb5787065153cbe864272938f96c8c3d), [`8077a87`](https://github.com/knpkv/npm/commit/8077a87bffe9ac852f622ff6db5662970900ee66)]:
+  - @knpkv/herdr-usage@0.1.0
+  - @knpkv/hub-app@0.3.0
+  - @knpkv/herdr-connect@0.31.0
+  - @knpkv/sandbox-pool@0.10.0
+
 ## 0.54.0
 
 ### Minor Changes
