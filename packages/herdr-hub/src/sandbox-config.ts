@@ -213,7 +213,8 @@ export const makeSandboxPoolFromConfig = Effect.fn("SandboxPool.fromConfig")(fun
     access: adapters.access,
     nuke: adapters.nuke,
     budget: adapters.budget,
-    spend: adapters.spend
+    spend: adapters.spend,
+    sweep: adapters.registersJobs ? "full" : "spend-only"
   })
   return {
     mode,
@@ -258,7 +259,9 @@ export const sandboxResetCheck = Effect.fn("SandboxPool.resetCheck")(function*(o
     databasePath: files.signIn,
     // Its own file: opening a sign-in clears its pending file, and the hub's may be in use.
     pendingFile: path.join(options.stateDirectory, "aws-sign-in-check-pending.json"),
-    onPending: () => Effect.void
+    onPending: () => Effect.void,
+    // hostd owns refreshing; a check that refreshed too could have its refusal sign hostd out.
+    readOnly: true
   })
   // Fails as AwsSignInRequired without a sign-in, before any role credentials would start one.
   yield* signIn.accessToken

@@ -66,6 +66,12 @@ export interface AwsSignInOptions {
   readonly onPending: (pendingFile: string) => Effect.Effect<void>
   /** The client name Identity Center shows. Defaults to `herdr-hub`. */
   readonly clientName?: string
+  /**
+   * A second process reading the hub's sign-in (a CLI beside hostd): no refresh, no registration, no sign-in. A
+   * token under the refresh margin reads as a sign-in required, so its owner refreshes it. A token the portal
+   * refuses (401) is still cleared, as AWS has already ended it.
+   */
+  readonly readOnly?: boolean
 }
 
 /** A started sign-in. `ended` waits until it is approved, denied or expires. */
@@ -308,7 +314,7 @@ export const makeAwsSignIn = Effect.fn("AwsSignIn.make")(function*(options: AwsS
   })
 
   // Uninterruptible but for the start itself, so a claimed sign-in always ends in a poll or a cleanup.
-  const begin = Effect.uninterruptibleMask((restore) =>
+  const startable = Effect.uninterruptibleMask((restore) =>
     Effect.gen(function*() {
       const done = yield* Deferred.make<void>()
       const held = yield* Ref.modify(
@@ -363,7 +369,10 @@ export const makeAwsSignIn = Effect.fn("AwsSignIn.make")(function*(options: AwsS
       )
       return { ended: Deferred.await(done) } satisfies PendingSignIn
     })
-  ).pipe(Effect.withSpan("AwsSignIn.begin"))
+  )
+  const begin = (options.readOnly === true
+    ? Effect.fail(new AwsSignInUnavailable({ operation: "begin", detail: "read-only sign-in" }))
+    : startable).pipe(Effect.withSpan("AwsSignIn.begin"))
 
   const required = pending.pipe(Effect.flatMap((waiting) => new AwsSignInRequired({ pending: waiting })))
 
@@ -373,6 +382,7 @@ export const makeAwsSignIn = Effect.fn("AwsSignIn.make")(function*(options: AwsS
     const token = stored.token
     if (token === null) return yield* required
     if (token.expiresAt - now > refreshMargin) return Redacted.make(token.accessToken)
+    if (options.readOnly === true) return yield* required
     if (token.refreshToken === null || stored.client === null) {
       yield* write({ ...stored, token: null })
       return yield* required

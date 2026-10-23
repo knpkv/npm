@@ -88,6 +88,8 @@ interface FakeOptions {
   readonly putStale?: boolean
   /** Each account's answer to a spend read, by account id. Without it the pool has no reader. */
   readonly spend?: ReadonlyMap<string, Effect.Effect<number, SpendReadError>>
+  /** The sweep only reads spend, as in observe mode. */
+  readonly spendOnly?: boolean
 }
 
 /** A pool over the memory store and run log, with fakes that record every AWS-side call. */
@@ -149,7 +151,8 @@ const fixture = (options: FakeOptions = {}, initial: ReadonlyArray<Sandbox> = se
             Effect.fail(new SpendUnavailable({ accountId: account.accountId, detail: "unknown" }))
         })
     })
-    const pool = yield* makeSandboxPool(options.spend === undefined ? services : { ...services, spend: reader })
+    const withSpend = options.spend === undefined ? services : { ...services, spend: reader }
+    const pool = yield* makeSandboxPool(options.spendOnly === true ? { ...withSpend, sweep: "spend-only" } : withSpend)
     const job = (payload: SandboxJobPayload, actor: string, id: string, approved = false) =>
       pool.run(payload, id, actor, approved ? approval : null).pipe(Effect.map(decodeResult))
     return { pool, store, runLog, calls, job }
@@ -525,6 +528,26 @@ describe("sandbox sweep", () => {
       expect(yield* f.pool.sweepOnce).toMatchObject({ expired: 1, resumed: 0 })
       expect((yield* f.store.get(leased.accountId)).state._tag).toBe("Available")
       expect((yield* f.runLog.recent(5))[0]).toMatchObject({ reason: "Expired", outcome: "Available" })
+    }))
+
+  it.effect("a spend-only sweep reads spend and leaves an ended lease and a stuck reset as they are", () =>
+    Effect.gen(function*() {
+      const leasing = yield* fixture()
+      const leased = yield* leasing.job({ kind: "sandbox.lease" }, "agent-a", "job-1")
+      const ended = yield* leasing.store.get(leased.accountId)
+      const otherId = leased.accountId === accountA ? accountB : accountA
+      const stuck = Schema.decodeUnknownSync(Sandbox)({
+        accountId: otherId,
+        name: otherId === accountA ? "sandbox-a" : "sandbox-b",
+        state: { _tag: "Cleaning", since: "1970-01-01T00:00:00Z", runId: "job-crashed", reason: "Released" },
+        version: 3
+      })
+      const f = yield* fixture({ spendOnly: true, spend: new Map([[accountA, Effect.succeed(1.5)]]) }, [ended, stuck])
+      yield* TestClock.adjust(Duration.hours(9))
+      expect(yield* f.pool.sweepOnce).toMatchObject({ expired: 0, resumed: 0, failed: 0 })
+      expect(yield* f.store.get(leased.accountId)).toEqual(ended)
+      expect(yield* f.store.get(otherId)).toEqual(stuck)
+      expect(f.calls).toEqual([`spend ${accountA}`, `spend ${accountB}`])
     }))
 
   it.effect("resumes a reset left in Cleaning with its own run id, once", () =>

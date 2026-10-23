@@ -321,6 +321,43 @@ it.layer(NodeServices.layer)("AWS sign-in", (it) => {
       seeded.database.close()
     }).pipe(Effect.scoped))
 
+  it.effect("a read-only reader of the hub's sign-in never refreshes or writes, so it cannot sign the hub out", () =>
+    Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const directory = yield* fs.makeTempDirectoryScoped({ prefix: "aws-sign-in-" })
+      const options = {
+        startUrl: "https://example.awsapps.com/start",
+        region: "eu-central-1",
+        databasePath: path.join(directory, "aws-sign-in.sqlite"),
+        pendingFile: path.join(directory, "aws-sign-in-pending.json"),
+        onPending: () => Effect.void
+      }
+      const hubCalls: Array<Call> = []
+      const hub = yield* makeAwsSignIn(options).pipe(
+        Effect.provideService(
+          HttpClient.HttpClient,
+          identityCenter([granted("access-1", 600), granted("access-2")], hubCalls)
+        )
+      )
+      const { ended } = yield* hub.begin
+      yield* TestClock.adjust("5 seconds")
+      yield* ended
+      const readerCalls: Array<Call> = []
+      const reader = yield* makeAwsSignIn({
+        ...options,
+        pendingFile: path.join(directory, "check-pending.json"),
+        readOnly: true
+      }).pipe(Effect.provideService(HttpClient.HttpClient, identityCenter([refused("invalid_grant")], readerCalls)))
+      expect(Redacted.value(yield* reader.accessToken)).toBe("access-1")
+      // Under five minutes left: the reader would have refreshed. It reports a sign-in required instead.
+      yield* TestClock.adjust("6 minutes")
+      expect((yield* Effect.flip(reader.accessToken))._tag).toBe("AwsSignInRequired")
+      expect((yield* Effect.flip(reader.begin))._tag).toBe("AwsSignInUnavailable")
+      expect(readerCalls).toEqual([])
+      expect(Redacted.value(yield* hub.accessToken)).toBe("access-2")
+    }).pipe(Effect.scoped))
+
   it.effect("keeps the sign-in across a restart, in the database only", () =>
     Effect.gen(function*() {
       const fs = yield* FileSystem.FileSystem

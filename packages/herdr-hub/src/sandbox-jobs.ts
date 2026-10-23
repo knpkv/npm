@@ -130,6 +130,11 @@ export interface SandboxPoolServices {
   readonly budget: BudgetControl["Service"]
   /** Reads each pool account's spend on every sweep; without it there are no readings and no spend bar. */
   readonly spend?: SpendReader["Service"]
+  /**
+   * `spend-only` (observe mode): the sweep reads spend and changes no record, so an ended lease or a reset left
+   * in Cleaning waits for a sweep that may act. Defaults to `full`.
+   */
+  readonly sweep?: "full" | "spend-only"
 }
 
 /**
@@ -419,7 +424,7 @@ export const makeSandboxPool = Effect.fn("SandboxPool.make")(function*(services:
 
   const sweepOnce = Effect.gen(function*() {
     const now = yield* DateTime.now
-    const pool = yield* store.list
+    const pool = services.sweep === "spend-only" ? [] : yield* store.list
     const outcomes = yield* Effect.forEach(pool, (sandbox) =>
       sweepAccount(sandbox, now).pipe(
         Effect.catch((error) =>
