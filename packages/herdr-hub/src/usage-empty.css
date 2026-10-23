@@ -260,8 +260,8 @@
     .superapp-shell[data-usage-header="grouped"] .superapp-header > .superapp-brand {
       display: grid;
       place-items: center;
-      /* Both sides: the shell's phone brand also sets an end margin, which would push the title off the design. */
-      margin-inline: -8px 0;
+      /* The product name sits beside the mark, as the rule 45 refs draw it: the end margin cancels the header gap. */
+      margin-inline: -8px -0.5rem;
     }
 
     .usage-empty-chef {
@@ -273,10 +273,6 @@
     .superapp-shell[data-usage-header="grouped"] .superapp-phone-title {
       display: flex;
       gap: 0.45rem;
-    }
-
-    .superapp-shell[data-usage-header="grouped"] .superapp-phone-title span {
-      margin-inline-start: 0;
     }
 
     .superapp-shell[data-usage-header="grouped"] .superapp-host {
@@ -293,19 +289,20 @@
       padding-inline: 16px;
     }
 
+    /* Phone module heading (design rule 45 refs): title and purpose over the tabs, under the breadcrumb. */
     .usage-empty-mast {
-      padding-block: 0;
-      padding-inline: 8px;
-      gap: 0;
-      background: var(--rly-color-surface-1);
+      padding-block: 0.75rem 0;
+      padding-inline: 16px;
     }
 
     .usage-empty-titles {
-      display: none;
+      display: grid;
+      gap: 0.25rem;
     }
 
     .usage-empty-tabs {
       gap: 0;
+      margin-inline: -8px;
     }
 
     .usage-empty-tabs a {

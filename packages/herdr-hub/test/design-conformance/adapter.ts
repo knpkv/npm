@@ -84,13 +84,12 @@ const markActualRegions = (page: Page, state: ReviewState) =>
       : state === "read-retained"
       ? codePage.locator("[data-code-review-retained]")
       : owner.locator("[data-code-review-diff] [data-code-read-notice=loading] > p")
-    const phone = await page.evaluate(() => matchMedia("(max-width: 599px)").matches)
     const regions = new Map([
       [
         "nav",
         page.locator(".superapp-module-nav").or(page.getByRole("navigation", { name: "Mobile modules", exact: true }))
       ],
-      ["header", page.locator(phone ? ".superapp-phone-title" : "[data-code-review-page] > header")],
+      ["header", page.locator("[data-code-review-page] > header")],
       ["tabs", page.getByRole("navigation", { name: "Code pages", exact: true })],
       ["detail", page.locator("[data-code-review-header]")],
       ["subtabs", owner.getByRole("navigation", { name: "Review views", exact: true })],

@@ -956,8 +956,8 @@ it("Settings reports dialog expansion without claiming the current page", async 
   expect(current()[0]?.tagName).toBe("A")
 })
 
-/** Page suffixes are descriptor-owned; only the designed phone mast opts in. */
-it("uses page metadata for the phone title without changing other module titles", async () => {
+/** Design rule 45: the phone header names the product; the breadcrumb line under it names the module and page. */
+it("keeps the product name in the phone header and puts the breadcrumb under the header", async () => {
   const descriptor = defineModule({
     ...fleetModule,
     pages: [
@@ -966,12 +966,30 @@ it("uses page metadata for the phone title without changing other module titles"
     ]
   })
   await render([{ descriptor, pages: { approvals: fleetPage("approvals"), work: fleetPage("work") } }])
-  expect(document.querySelector(".superapp-phone-title")?.textContent).toBe("Fleet Approvals")
+  expect(document.querySelector(".superapp-phone-title")?.textContent).toBe("Relay")
+  const breadcrumb = document.querySelector('nav[aria-label="Current page"]')
+  expect(breadcrumb?.closest("header")).toBeNull()
+  expect(breadcrumb?.previousElementSibling?.matches(".superapp-header")).toBe(true)
   await act(async () => {
     window.history.pushState(null, "", "#fleet/work")
     window.dispatchEvent(new PopStateEvent("popstate"))
   })
-  expect(document.querySelector(".superapp-phone-title")?.textContent).toBe("Fleet")
+  expect(document.querySelector(".superapp-phone-title")?.textContent).toBe("Relay")
+  expect(breadcrumb?.querySelector('[aria-current="page"]')?.textContent).toBe("Work")
+})
+
+it("names a single-page module once in the breadcrumb and marks an unknown route", async () => {
+  const descriptor = defineModule({ ...fleetModule, pages: [{ id: "approvals", label: "Approvals" }] })
+  window.history.replaceState(null, "", "/#fleet/approvals")
+  await render([{ descriptor, pages: { approvals: fleetPage("approvals") } }])
+  const breadcrumb = () => document.querySelector('nav[aria-label="Current page"]')
+  expect(breadcrumb()?.querySelector("a")).toBeNull()
+  expect(breadcrumb()?.querySelector('[aria-current="page"]')?.textContent).toBe("Approvals")
+  await act(async () => {
+    window.history.pushState(null, "", "#nowhere/at-all")
+    window.dispatchEvent(new PopStateEvent("popstate"))
+  })
+  expect(breadcrumb()?.getAttribute("data-route-found")).toBe("false")
 })
 
 /** Back can activate a child before the shell layout effect schedules its arrival callback. */

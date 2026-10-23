@@ -482,15 +482,6 @@
       gap: var(--rly-space-20);
     }
 
-    .usage-details-intro {
-      position: absolute;
-      inline-size: 1px;
-      block-size: 1px;
-      overflow: clip;
-      clip-path: inset(50%);
-      padding: 0;
-    }
-
     .usage-details[data-usage-page="by-tool"] {
       gap: var(--rly-space-16);
     }
@@ -504,8 +495,15 @@
       min-block-size: 2.75rem;
     }
 
+    /* Rule 45 refs: the title and purpose under the breadcrumb, tabs 0.9rem below, on the canvas. */
     .usage-details:is([data-usage-page="by-tool"], [data-usage-page="limits"]) .usage-details-mast {
-      gap: 0;
+      gap: 0.9rem;
+    }
+
+    .usage-details-intro,
+    .usage-details:is([data-usage-page="by-tool"], [data-usage-page="limits"]) .usage-details-intro {
+      gap: var(--rly-space-4);
+      padding-block-start: var(--rly-space-12);
     }
 
     .usage-details:is([data-usage-page="by-tool"], [data-usage-page="limits"]) .usage-details-tabs {
@@ -513,7 +511,6 @@
       margin-inline: calc(-1 * var(--usage-gutter-start)) calc(-1 * var(--usage-gutter-end));
       padding-inline: max(var(--rly-space-8), env(safe-area-inset-left, 0px))
         max(var(--rly-space-8), env(safe-area-inset-right, 0px));
-      background: var(--rly-color-surface-1);
     }
 
     .usage-details:is([data-usage-page="by-tool"], [data-usage-page="limits"]) .usage-details-tabs a {
