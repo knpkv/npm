@@ -13,6 +13,7 @@ import {
 import { SandboxesOverview, SandboxRunLog, type SandboxRuns } from "@knpkv/sandbox-pool/host"
 import type { SandboxHostReads } from "@knpkv/sandbox-pool/host/server"
 import { ConfigProvider, Effect, FileSystem, Layer, Result, Schema } from "effect"
+import type { AwsSignIn, AwsSignInState } from "../src/aws-sign-in.js"
 import { connectModule, sandboxesModule } from "../src/module-contract.js"
 import { dispatchModuleRoute, makeModuleLayer, ModuleHandlers, ModuleRouteFailure } from "../src/module-server.js"
 import {
@@ -82,6 +83,32 @@ const request = (
 class CallerRefused extends Schema.TaggedError<CallerRefused>()("CallerRefused", {}) {}
 
 class OriginRefused extends Schema.TaggedError<OriginRefused>()("OriginRefused", {}) {}
+
+/** An AWS sign-in whose state the test sets; `begin` moves it to pending and is counted, as are state reads. */
+const fakeSignIn = (initial: AwsSignInState) => {
+  const calls: Array<"state" | "begin"> = []
+  let current = initial
+  const signIn: AwsSignIn = {
+    state: Effect.sync(() => {
+      calls.push("state")
+      return current
+    }),
+    accessToken: Effect.die("no token expected"),
+    begin: Effect.sync(() => {
+      calls.push("begin")
+      current = {
+        _tag: "SignInPending",
+        verificationUri: "https://portal.example.test/start/#/device?user_code=ABCD-EFGH",
+        userCode: "ABCD-EFGH",
+        expiresAt: Date.UTC(2026, 9, 23, 12, 32)
+      }
+      return { ended: Effect.void }
+    }),
+    revoked: () => Effect.void,
+    region: "eu-central-1"
+  }
+  return { signIn, calls }
+}
 
 /** Records each job the module submits, as Fleet would receive it. */
 const recordingSubmit = () => {
@@ -213,6 +240,7 @@ const withModule = <A, E, R>(
     readonly isHub?: boolean
     readonly pending?: Effect.Effect<ReadonlyArray<PendingSandboxApproval>, string>
     readonly submit?: SandboxJobSubmit
+    readonly awsSignIn?: AwsSignIn | null
   } = {}
 ) =>
   Effect.gen(function*() {
@@ -229,7 +257,8 @@ const withModule = <A, E, R>(
             pool: options.pool === undefined ? pool : options.pool,
             pendingApprovals: options.pending ?? Effect.succeed([]),
             reads: options.reads ?? Effect.succeed(fakeReads),
-            submit: options.submit ?? (() => Effect.die("no job expected"))
+            submit: options.submit ?? (() => Effect.die("no job expected")),
+            awsSignIn: options.awsSignIn ?? null
           })
         ]
       ).pipe(Layer.provide(Layer.merge(NodeServices.layer, NodeHttpClient.layerNodeHttp)))
@@ -544,6 +573,50 @@ describe("host-local Sandboxes module", () => {
         }
       }),
       { reads: Effect.succeed(recording) }
+    )
+  })
+
+  it.effect("serves the hub's AWS sign-in state to the hub's own node only, reading nothing for anyone else", () => {
+    const { calls, signIn } = fakeSignIn({ _tag: "SignedIn", expiresAt: Date.UTC(2026, 9, 23, 18, 5) })
+    return withModule(
+      host,
+      Effect.gen(function*() {
+        const viewer = yield* Effect.result(request("sandboxes/aws-session"))
+        expect(Result.isFailure(viewer) && viewer.failure).toMatchObject({ status: 403, code: "owner_only" })
+        expect(calls).toEqual([])
+        const owner = yield* request("sandboxes/aws-session", "serve", "GET", { sameNode: true })
+        expect(owner?.body).toEqual({ _tag: "SignedIn", expiresAt: "2026-10-23T18:05:00.000Z" })
+        const unconfigured = yield* withModule(
+          host,
+          request("sandboxes/aws-session", "serve", "GET", { sameNode: true }),
+          { awsSignIn: null }
+        )
+        expect(unconfigured?.body).toEqual({ _tag: "NotConfigured" })
+      }),
+      { awsSignIn: signIn }
+    )
+  })
+
+  it.effect("starts an AWS sign-in for the hub's own node only and answers what to approve", () => {
+    const { calls, signIn } = fakeSignIn({ _tag: "SignInRequired" })
+    return withModule(
+      host,
+      Effect.gen(function*() {
+        const viewer = yield* Effect.result(
+          request("sandboxes/aws-sign-in", "serve", "POST", { sameNode: false, body: {} })
+        )
+        expect(Result.isFailure(viewer) && viewer.failure).toMatchObject({ status: 403, code: "owner_only" })
+        expect(calls).toEqual([])
+        const started = yield* request("sandboxes/aws-sign-in", "serve", "POST", { sameNode: true, body: {} })
+        expect(started?.body).toEqual({
+          _tag: "SignInPending",
+          verificationUri: "https://portal.example.test/start/#/device?user_code=ABCD-EFGH",
+          userCode: "ABCD-EFGH",
+          expiresAt: "2026-10-23T12:32:00.000Z"
+        })
+        expect(calls).toEqual(["begin", "state"])
+      }),
+      { awsSignIn: signIn }
     )
   })
 

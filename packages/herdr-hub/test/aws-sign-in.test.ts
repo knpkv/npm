@@ -122,7 +122,7 @@ it.layer(NodeServices.layer)("AWS sign-in", (it) => {
         pending
       )
       const start = yield* Clock.currentTimeMillis
-      expect(yield* signIn.state).toEqual({ _tag: "SignInRequired", pending: false })
+      expect(yield* signIn.state).toEqual({ _tag: "SignInRequired" })
       const { ended } = yield* signIn.begin
       expect(pending).toEqual([pendingFile])
       expect((yield* fs.stat(pendingFile)).mode & 0o777).toBe(0o600)
@@ -130,7 +130,12 @@ it.layer(NodeServices.layer)("AWS sign-in", (it) => {
         verificationUri: "https://example.awsapps.com/start/#/device?user_code=ABCD-EFGH",
         expiresAt: start + 600_000
       })
-      expect(yield* signIn.state).toEqual({ _tag: "SignInRequired", pending: true })
+      expect(yield* signIn.state).toEqual({
+        _tag: "SignInPending",
+        verificationUri: "https://example.awsapps.com/start/#/device?user_code=ABCD-EFGH",
+        userCode: "ABCD-EFGH",
+        expiresAt: start + 600_000
+      })
       yield* TestClock.adjust("5 seconds")
       yield* TestClock.adjust("5 seconds")
       yield* ended
@@ -198,7 +203,7 @@ it.layer(NodeServices.layer)("AWS sign-in", (it) => {
         yield* TestClock.adjust("5 seconds")
         yield* ended
         expect(yield* fs.exists(pendingFile)).toBe(false)
-        expect(yield* signIn.state).toEqual({ _tag: "SignInRequired", pending: false })
+        expect(yield* signIn.state).toEqual({ _tag: "SignInRequired" })
       }
     }).pipe(Effect.scoped))
 
@@ -217,7 +222,7 @@ it.layer(NodeServices.layer)("AWS sign-in", (it) => {
       }).pipe(Effect.provideService(HttpClient.HttpClient, identityCenter([refused("authorization_pending")], [])))
       yield* Effect.exit(signIn.begin)
       expect(yield* fs.exists(pendingFile)).toBe(false)
-      expect(yield* signIn.state).toEqual({ _tag: "SignInRequired", pending: false })
+      expect(yield* signIn.state).toEqual({ _tag: "SignInRequired" })
     }).pipe(Effect.scoped))
 
   it.effect("slows its polling when asked to", () =>
@@ -256,7 +261,7 @@ it.layer(NodeServices.layer)("AWS sign-in", (it) => {
       yield* TestClock.adjust("2 hours")
       const failure = yield* Effect.flip(signIn.accessToken)
       expect(failure._tag).toBe("AwsSignInRequired")
-      expect(yield* signIn.state).toEqual({ _tag: "SignInRequired", pending: false })
+      expect(yield* signIn.state).toEqual({ _tag: "SignInRequired" })
     }).pipe(Effect.scoped))
 
   it.effect("a throttled or malformed refresh keeps the sign-in; a gone client clears it and registers again", () =>
@@ -279,7 +284,7 @@ it.layer(NodeServices.layer)("AWS sign-in", (it) => {
         expect((yield* signIn.state)._tag).toBe("SignedIn")
       }
       expect((yield* Effect.flip(signIn.accessToken))._tag).toBe("AwsSignInRequired")
-      expect(yield* signIn.state).toEqual({ _tag: "SignInRequired", pending: false })
+      expect(yield* signIn.state).toEqual({ _tag: "SignInRequired" })
       yield* Effect.asVoid(signIn.begin)
       expect(paths(calls).filter((path) => path === "/client/register").length).toBe(2)
     }).pipe(Effect.scoped))
@@ -314,6 +319,43 @@ it.layer(NodeServices.layer)("AWS sign-in", (it) => {
         expect(failure).toMatchObject({ _tag: "AwsSignInUnavailable", operation: "read", detail: "unreadable" })
       }
       seeded.database.close()
+    }).pipe(Effect.scoped))
+
+  it.effect("a read-only reader of the hub's sign-in never refreshes or writes, so it cannot sign the hub out", () =>
+    Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const directory = yield* fs.makeTempDirectoryScoped({ prefix: "aws-sign-in-" })
+      const options = {
+        startUrl: "https://example.awsapps.com/start",
+        region: "eu-central-1",
+        databasePath: path.join(directory, "aws-sign-in.sqlite"),
+        pendingFile: path.join(directory, "aws-sign-in-pending.json"),
+        onPending: () => Effect.void
+      }
+      const hubCalls: Array<Call> = []
+      const hub = yield* makeAwsSignIn(options).pipe(
+        Effect.provideService(
+          HttpClient.HttpClient,
+          identityCenter([granted("access-1", 600), granted("access-2")], hubCalls)
+        )
+      )
+      const { ended } = yield* hub.begin
+      yield* TestClock.adjust("5 seconds")
+      yield* ended
+      const readerCalls: Array<Call> = []
+      const reader = yield* makeAwsSignIn({
+        ...options,
+        pendingFile: path.join(directory, "check-pending.json"),
+        readOnly: true
+      }).pipe(Effect.provideService(HttpClient.HttpClient, identityCenter([refused("invalid_grant")], readerCalls)))
+      expect(Redacted.value(yield* reader.accessToken)).toBe("access-1")
+      // Under five minutes left: the reader would have refreshed. It reports a sign-in required instead.
+      yield* TestClock.adjust("6 minutes")
+      expect((yield* Effect.flip(reader.accessToken))._tag).toBe("AwsSignInRequired")
+      expect((yield* Effect.flip(reader.begin))._tag).toBe("AwsSignInUnavailable")
+      expect(readerCalls).toEqual([])
+      expect(Redacted.value(yield* hub.accessToken)).toBe("access-2")
     }).pipe(Effect.scoped))
 
   it.effect("keeps the sign-in across a restart, in the database only", () =>
@@ -372,10 +414,11 @@ it.layer(NodeServices.layer)("AWS sign-in", (it) => {
       expect(calls.filter(({ path }) => path === "/federation/credentials").length).toBe(2)
     }).pipe(Effect.scoped))
 
-  it.effect("without a sign-in, role credentials fail as an expired SSO token and start one sign-in", () =>
+  it.effect("without a sign-in, role credentials fail as an expired SSO token and start nothing", () =>
     Effect.gen(function*() {
       const pending: Array<string> = []
-      const client = identityCenter([refused("authorization_pending")], [])
+      const calls: Array<Call> = []
+      const client = identityCenter([refused("authorization_pending")], calls)
       const { signIn } = yield* signInWith(client, pending)
       const credentials = awsRoleCredentials(
         signIn,
@@ -385,10 +428,12 @@ it.layer(NodeServices.layer)("AWS sign-in", (it) => {
       const first = yield* Effect.flip(credentials)
       yield* Effect.flip(credentials)
       expect(first._tag).toBe("Alchemy::AWS::ExpiredSSOToken")
-      expect(pending.length).toBe(1)
+      // Only a person starts a sign-in (the hub's Sign in to AWS); a read never does.
+      expect([pending, calls]).toEqual([[], []])
+      expect(yield* signIn.state).toEqual({ _tag: "SignInRequired" })
     }).pipe(Effect.scoped))
 
-  it.effect("a portal that no longer accepts the token clears the sign-in and starts one; a refused role is typed", () =>
+  it.effect("a portal that no longer accepts the token clears the sign-in without starting one; a refused role is typed", () =>
     Effect.gen(function*() {
       const role = { accountId: "999999999900", roleName: "PoolOperator", region: "eu-central-1" }
       const pending: Array<string> = []
@@ -404,8 +449,8 @@ it.layer(NodeServices.layer)("AWS sign-in", (it) => {
       yield* ended
       const failure = yield* Effect.flip(awsRoleCredentials(signIn, role, revoked))
       expect(failure._tag).toBe("Alchemy::AWS::ExpiredSSOToken")
-      expect(yield* signIn.state).toEqual({ _tag: "SignInRequired", pending: true })
-      expect(pending.length).toBe(2)
+      expect(yield* signIn.state).toEqual({ _tag: "SignInRequired" })
+      expect(pending.length).toBe(1)
 
       const forbidden = identityCenter([granted()], [], 3_600_000, portalError("ForbiddenException", 403))
       const second = yield* signInWith(forbidden, [])

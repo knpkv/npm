@@ -5,8 +5,9 @@ import type { Schema } from "effect"
 import { Effect, Option, Predicate, Redacted } from "effect"
 import { HttpClient } from "effect/http"
 import { attachedPolicies } from "./aws-organizations.js"
+import { discoveryFailures, type ProtectedHit, protectedListed, wouldRemove } from "./guard.js"
 import { accountAlias, type PoolContract } from "./pool.js"
-import { PoolAccess, type PoolSession, ResetBlocked } from "./reset.js"
+import { Nuke, PoolAccess, type PoolSession, removable, renderNukeConfig, ResetBlocked } from "./reset.js"
 
 export interface StsPoolAccessOptions {
   readonly contract: PoolContract
@@ -265,4 +266,63 @@ export const makeStsPoolAccess = Effect.fn("StsPoolAccess.make")(function*(optio
         Effect.withSpan("StsPoolAccess.budgetHold")
       )
   })
+})
+
+/** What a reset of one account would do, read without changing it. */
+export interface ResetInspection {
+  readonly accountId: string
+  /** The writes `ensureBaseline` would make; empty when the baseline is in place. */
+  readonly baseline: ReadonlyArray<BaselineStep>
+  readonly dryRun: {
+    readonly exitCode: number
+    /** The scan's nukeable count; undefined when the summary line is missing. */
+    readonly removable: number | undefined
+    readonly wouldRemove: ReadonlyArray<string>
+    /** Protected resources in the removal list: any one stops a real reset before its live run. */
+    readonly protectedListed: ReadonlyArray<ProtectedHit>
+    /** Lines reporting incomplete discovery: any one quarantines a real reset. */
+    readonly discoveryFailures: ReadonlyArray<string>
+  }
+  /** Whether the budget action's deny-all policy is attached. */
+  readonly budgetHeld: boolean
+}
+
+/**
+ * A reset's reads, for a person to check before resets run: sign in to the account (one STS session),
+ * observe and plan the baseline without applying it, write the account's aws-nuke config and run aws-nuke
+ * dry, and read the budget hold. Nothing in AWS changes. Needs the management account's `Credentials`, an
+ * `HttpClient` and a `Nuke`; an account outside the pool is refused before any call.
+ */
+export const inspectReset = Effect.fn("StsPoolAccess.inspectReset")(function*(
+  options: StsPoolAccessOptions,
+  accountId: string
+) {
+  const { contract } = options
+  const account = contract.accounts.find((candidate) => candidate.accountId === accountId)
+  if (account === undefined) return yield* new ResetBlocked({ step: "sign in", detail: "not a pool account" })
+  const access = yield* makeStsPoolAccess(options)
+  const http = yield* HttpClient.HttpClient
+  const nuke = yield* Nuke
+  const session = yield* access.session(accountId)
+  const observed = yield* observeBaseline(contract, accountId).pipe(
+    Effect.mapError((error) => error._tag === "ResetBlocked" ? error : blocked("baseline")(error)),
+    inAccount(contract, session),
+    Effect.provideService(HttpClient.HttpClient, http)
+  )
+  const baseline = yield* planBaseline(observed, accountAlias(contract, account.name), options.boundaryDocument)
+  const configPath = yield* nuke.writeConfig(accountId, renderNukeConfig(contract, accountId))
+  const dry = yield* nuke.run({ configPath, session, live: false })
+  const budgetHeld = yield* access.budgetHold(accountId, session)
+  return {
+    accountId,
+    baseline,
+    dryRun: {
+      exitCode: dry.exitCode,
+      removable: removable(dry.output),
+      wouldRemove: wouldRemove(dry.output),
+      protectedListed: protectedListed(contract, dry.output),
+      discoveryFailures: discoveryFailures(dry.output)
+    },
+    budgetHeld
+  } satisfies ResetInspection
 })

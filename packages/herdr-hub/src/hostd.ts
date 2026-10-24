@@ -14,7 +14,8 @@ import {
   makeFleetService
 } from "@knpkv/herdr-fleet"
 import { PoolContract } from "@knpkv/sandbox-pool"
-import { Console, Effect, Path, Redacted, Schema, Scope } from "effect"
+import { Config, Console, Effect, Layer, Option, Path, Redacted, Schema, Scope } from "effect"
+import { FetchHttpClient } from "effect/http"
 import { readCodeHost } from "./code-module.js"
 import type { HostdOperationsCompositionError } from "./errors.js"
 import { startHttpServer } from "./http.js"
@@ -25,6 +26,7 @@ import { standaloneNotice } from "./internal/standalone-notice.js"
 import { noStartedWorkerStore, startedWorker } from "./internal/started-worker.js"
 import { loadUiAssets } from "./internal/ui-assets.js"
 import { makeHostOperations } from "./operations.js"
+import { makeSandboxPoolFromConfig } from "./sandbox-config.js"
 import { readSandboxesHost } from "./sandboxes-module.js"
 import { readStacksHost } from "./stacks-module.js"
 
@@ -40,6 +42,20 @@ export {
   type PendingSignIn
 } from "./aws-sign-in.js"
 export { HostdOperationsCompositionError } from "./errors.js"
+export {
+  formatResetInspection,
+  makeSandboxPoolFromConfig,
+  type SandboxPoolAdapters,
+  sandboxPoolAdapters,
+  SandboxPoolConfigInvalid,
+  type SandboxPoolDependencies,
+  type SandboxPoolFromConfigOptions,
+  SandboxPoolMode,
+  SandboxPoolOperator,
+  SandboxPoolSettings,
+  sandboxResetCheck,
+  type SandboxResetCheckOptions
+} from "./sandbox-config.js"
 export {
   ApprovalRequired,
   BudgetControl,
@@ -89,6 +105,11 @@ export interface HostdProgramOptions {
   readonly composeOperations?: HostdOperationsComposer
   /** This computer's paths; read from the OS and environment (`HubPaths.fromSystem`) when absent. */
   readonly paths?: HubPathTable
+  /**
+   * Told the file holding a pending AWS sign-in's URL when the owner starts one (see `makeAwsSignIn`'s
+   * `onPending`). Logs the path when absent.
+   */
+  readonly onAwsSignInPending?: (pendingFile: string) => Effect.Effect<void>
   /** The Node running hostd (`process.execPath`, from the executable); installed apps run on it. */
   readonly node?: string
 }
@@ -131,16 +152,30 @@ const hostdProgram = Effect.fn("Hostd.program")(function*(options: HostdProgramO
     : yield* Schema.decodeUnknownEffect(PoolContract)(config.sandboxPool).pipe(
       Effect.mapError(() => new FleetValidationError({ detail: "sandboxPool must decode as a pool contract" }))
     )
+  // The pool itself, as config.sandboxPool.mode says: null when absent or off. Its sweep runs for hostd's life.
+  const sandboxes = yield* makeSandboxPoolFromConfig({
+    sandboxPool: config.sandboxPool,
+    stateDirectory: config.stateDirectory,
+    nukeBinary: Option.getOrUndefined(yield* Config.option(Config.String("AWS_NUKE"))),
+    onPending: options.onAwsSignInPending ??
+      ((pendingFile) => Console.log(`hostd: an AWS sign-in is waiting; its URL is in ${pendingFile}`))
+  }).pipe(Effect.provideContext(yield* Layer.build(FetchHttpClient.layer)))
+  if (sandboxes !== null) {
+    yield* Console.log(`hostd: sandbox pool ${sandboxes.mode}`)
+    yield* Effect.forkScoped(sandboxes.sweep)
+  }
   const store = yield* Effect.acquireRelease(
     JobStore.open(paths.join(config.stateDirectory, "jobs.sqlite")),
     (opened) => Effect.sync(() => opened.close())
   )
-  const operations = yield* makeHostdOperations(
+  const composed = yield* makeHostdOperations(
     config,
     options.composeOperations,
     store,
     loaded._tag === "Standalone"
   )
+  // Live mode adds the sandbox.* jobs; observe and off serve none.
+  const operations = sandboxes === null ? composed : sandboxes.withOperations(composed)
   const service = yield* makeFleetService({
     approvalEnabled: config.crossHost,
     host: config.host,
@@ -166,7 +201,8 @@ const hostdProgram = Effect.fn("Hostd.program")(function*(options: HostdProgramO
   const withCode = codeHost === null ? relayOptions : { ...relayOptions, codeHost }
   const withStacks = stacksHost === null ? withCode : { ...withCode, stacksHost }
   const withSandboxesHost = sandboxesHost === null ? withStacks : { ...withStacks, sandboxesHost }
-  const serverOptions = sandboxPool === null ? withSandboxesHost : { ...withSandboxesHost, sandboxPool }
+  const withPool = sandboxPool === null ? withSandboxesHost : { ...withSandboxesHost, sandboxPool }
+  const serverOptions = sandboxes === null ? withPool : { ...withPool, awsSignIn: sandboxes.signIn }
   const server = yield* Effect.acquireRelease(
     Effect.tryPromise({
       try: () => startHttpServer(config, service, assets, serverOptions),

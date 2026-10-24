@@ -84,10 +84,12 @@ export const makeBudgetsSpendReader = Effect.fn("BudgetsSpendReader.make")(funct
 
 export {
   type BaselineStep,
+  inspectReset,
   makeStsPoolAccess,
   observeBaseline,
   type ObservedBaseline,
   planBaseline,
+  type ResetInspection,
   type StsPoolAccessOptions
 } from "./aws-access.js"
 export { AwsNukeEnvironmentRefused, type AwsNukeOptions, makeAwsNuke } from "./aws-nuke.js"
