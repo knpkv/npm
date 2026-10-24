@@ -14,6 +14,11 @@ const failureMessage = <Input>(error: Input): string => {
 }
 
 /** The selected client's credential, site, and account must already have been verified by its caller. */
+const refused = <Input>(error: Input) =>
+  Effect.logDebug(`Jira refused the worklog: ${failureMessage(error)}`).pipe(
+    Effect.as<JiraWorklogOutcome>({ _tag: "Failed", message: failureMessage(error), refused: true })
+  )
+
 export const postJiraWorklog = (jira: Pick<JiraApiClientContract, "addWorklog">, params: WorklogParams) =>
   Effect.gen(function*() {
     const timeSpent = Math.max(60, Math.floor(params.durationSeconds))
@@ -34,6 +39,12 @@ export const postJiraWorklog = (jira: Pick<JiraApiClientContract, "addWorklog">,
     }).pipe(
       Effect.map((worklog): JiraWorklogOutcome => ({ _tag: "Posted", entryId: worklog.id })),
       Effect.catchTag("AddWorklog401", () => Effect.succeed<JiraWorklogOutcome>({ _tag: "NotLoggedIn" })),
+      // Jira read the request and said no. Unlike a timeout or a 5xx, these cannot have landed.
+      Effect.catchTags({
+        AddWorklog400: (error) => refused(error),
+        AddWorklog404: (error) => refused(error),
+        AddWorklog413: (error) => refused(error)
+      }),
       Effect.catch((error) =>
         Effect.logDebug(`Jira worklog failed: ${failureMessage(error)}`).pipe(
           Effect.as<JiraWorklogOutcome>({ _tag: "Failed", message: failureMessage(error) })

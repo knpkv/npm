@@ -256,9 +256,15 @@ export const readSources = async (signal: AbortSignal): Promise<Sources> => {
 }
 
 /** Read only the cached view; absent evidence is explicit and never launches an agent. */
-export const readSavedWeek = async (monday: string | undefined, scope: WeekScopeName, signal: AbortSignal) => {
+export const readSavedWeek = async (
+  monday: string | undefined,
+  scope: WeekScopeName,
+  signal: AbortSignal,
+  day?: string | undefined
+) => {
   const query = new URLSearchParams({ only: scope })
   if (monday !== undefined) query.set("monday", monday)
+  if (day !== undefined) query.set("day", day)
   const { request } = await import("./transport.js")
   return request(`/api/week/saved?${query}`, { method: "GET", signal }, async (response) => {
     if (!response.ok) throw await failureFrom(response)
@@ -270,10 +276,12 @@ export const readWeek = async (
   monday: string | undefined,
   scope: WeekScopeName,
   signal: AbortSignal,
-  onProgress: (progress: ReadProgress) => void
+  onProgress: (progress: ReadProgress) => void,
+  day?: string | undefined
 ): Promise<WeekPlanResponse> => {
   const query = new URLSearchParams()
   if (monday !== undefined) query.set("monday", monday)
+  if (day !== undefined) query.set("day", day)
   if (scope !== "both") query.set("only", scope)
   const { request } = await import("./transport.js")
   return request(
@@ -288,10 +296,12 @@ export const readRecordedWeek = async (
   monday: string | undefined,
   scope: WeekScopeName,
   signal: AbortSignal,
-  onProgress: (progress: ReadProgress) => void
+  onProgress: (progress: ReadProgress) => void,
+  day?: string | undefined
 ): Promise<WeekPlanResponse> => {
   const query = new URLSearchParams({ only: scope })
   if (monday !== undefined) query.set("monday", monday)
+  if (day !== undefined) query.set("day", day)
   const { request } = await import("./transport.js")
   return request(
     `/api/week/recorded-only?${query}`,

@@ -7,6 +7,7 @@ import type {
   SavedEntry,
   UpdateSavedEntryResponse,
   WeekPlanResponse,
+  WeekScopeName,
   WriteResultResponse
 } from "../src/shared/contracts.js"
 import { fixtureWeek } from "./fixture.js"
@@ -802,7 +803,12 @@ it("reinitializes the current week and scope without reviving cancelled approval
   await fixture.review.initialize()
   expect(fixture.state()).toMatchObject({ monday: "2026-09-14", scope: "jira", fresh: true, unavailable: false })
   expect(fixture.transport.readSavedWeek).toHaveBeenCalledTimes(3)
-  expect(fixture.transport.readSavedWeek).toHaveBeenLastCalledWith("2026-09-14", "jira", expect.any(AbortSignal))
+  expect(fixture.transport.readSavedWeek).toHaveBeenLastCalledWith(
+    "2026-09-14",
+    "jira",
+    expect.any(AbortSignal),
+    undefined
+  )
   expect(fixture.transport.refreshRecordedTime).toHaveBeenCalledTimes(3)
   expect(fixture.state().queued).toEqual([])
   expect(fixture.state().optimisticEntries).toEqual([])
@@ -843,4 +849,43 @@ it("remounts during a dispatched approval without replacing it or sending cancel
   expect(fixture.transport.confirmRow).toHaveBeenCalledTimes(1)
   expect(fixture.transport.refreshRecordedTime).toHaveBeenCalledTimes(2)
   expect(fixture.state().queued).toEqual([])
+})
+
+// A day run stays a day run: its reads, rescans and the week it returns to all name the same day.
+it("keeps a day run through restore and rescan, and drops it going back to the week", async () => {
+  const planFor = (week: string | undefined, scope: WeekScopeName, day: string | undefined): WeekPlanResponse => ({
+    ...fixtureWeek(week, scope),
+    ...(day !== undefined && { day, days: [day] })
+  })
+  let held = planFor(undefined, "both", undefined)
+  const fixture = setup({
+    readSavedWeek: async (week, scope, _signal, day) => {
+      held = planFor(week, scope, day)
+      return { monday: held.monday, ...(day !== undefined && { day }), scope, plan: held }
+    },
+    readWeek: async (week, scope, _signal, _onProgress, day) => (held = planFor(week, scope, day)),
+    refreshRecordedTime: async () => held
+  })
+  await fixture.review.initialize()
+  await fixture.review.navigate("2026-09-07", "both", "2026-09-09")
+  expect(fixture.transport.readSavedWeek).toHaveBeenLastCalledWith(
+    "2026-09-07",
+    "both",
+    expect.anything(),
+    "2026-09-09"
+  )
+  expect(fixture.state()).toMatchObject({ day: "2026-09-09", queueUnavailable: false })
+
+  await fixture.review.rescan()
+  expect(fixture.transport.readWeek).toHaveBeenLastCalledWith(
+    "2026-09-07",
+    "both",
+    expect.anything(),
+    expect.any(Function),
+    "2026-09-09"
+  )
+
+  await fixture.review.navigate("2026-09-07", "both")
+  expect(fixture.transport.readSavedWeek).toHaveBeenLastCalledWith("2026-09-07", "both", expect.anything(), undefined)
+  expect(fixture.state().day).toBeUndefined()
 })

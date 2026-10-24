@@ -78,7 +78,12 @@ export interface WorklogParams {
 export type JiraWorklogOutcome =
   | { readonly _tag: "Posted"; readonly entryId?: string | undefined }
   | { readonly _tag: "NotLoggedIn" }
-  | { readonly _tag: "Failed"; readonly message: string }
+  | {
+    readonly _tag: "Failed"
+    readonly message: string
+    /** Jira answered with a definite refusal (400, 404, 413), so nothing was written. */
+    readonly refused?: true | undefined
+  }
 
 export interface StopResult {
   readonly duration: Duration.Duration

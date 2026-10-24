@@ -42,6 +42,8 @@ export const weekLabel = (days: ReadonlyArray<string>): string => {
   const from = new Date(`${first}T00:00:00`)
   const to = new Date(`${last}T00:00:00`)
   const month = (at: Date) => at.toLocaleDateString(undefined, { month: "long" })
+  // A day run has one column; "23–23 October" would read as a typo.
+  if (first === last) return `${from.getDate()} ${month(from)} ${from.getFullYear()}`
   const sameMonth = from.getMonth() === to.getMonth() && from.getFullYear() === to.getFullYear()
   return sameMonth
     ? `${from.getDate()}–${to.getDate()} ${month(to)} ${to.getFullYear()}`
