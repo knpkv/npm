@@ -1,7 +1,7 @@
 import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
 import { AppId, type AppsConfig } from "@knpkv/hub-app"
-import { Duration, Effect, Fiber, FileSystem } from "effect"
+import { Duration, Effect, Fiber, FileSystem, PlatformError, Schedule } from "effect"
 import { tmpdir } from "node:os"
 import { AppsLockBusy, type AppsStoreOptions, emptyAppsConfig, makeAppsStore } from "../src/apps/store.js"
 
@@ -76,11 +76,26 @@ describe("AppsStore", () => {
       Effect.gen(function*() {
         const root = yield* tempRoot
         const fileSystem = yield* FileSystem.FileSystem
-        // apps.json is a directory: the rename over it fails.
-        yield* fileSystem.makeDirectory(`${root}/config/apps.json`, { recursive: true })
-        const store = yield* storeIn(root)
-        yield* store.withLock((locked) => locked.write(withApp)).pipe(Effect.flip)
+        yield* fileSystem.makeDirectory(`${root}/config`)
+        const before = JSON.stringify(emptyAppsConfig)
+        yield* fileSystem.writeFileString(`${root}/config/apps.json`, before)
+        const failingRename: FileSystem.FileSystem = {
+          ...fileSystem,
+          rename: (from) =>
+            Effect.fail(
+              PlatformError.systemError({
+                _tag: "Busy",
+                module: "FileSystem",
+                method: "rename",
+                pathOrDescriptor: from
+              })
+            )
+        }
+        const store = yield* storeIn(root).pipe(Effect.provideService(FileSystem.FileSystem, failingRename))
+        const error = yield* store.withLock((locked) => locked.write(withApp)).pipe(Effect.flip)
+        expect(error._tag).toBe("PlatformError")
         expect(yield* fileSystem.readDirectory(`${root}/config`)).toEqual(["apps.json"])
+        expect(yield* fileSystem.readFileString(`${root}/config/apps.json`)).toBe(before)
       }).pipe(Effect.scoped))
 
     it.effect("refuses a live lock and releases its own when the command ends", () =>
@@ -139,12 +154,20 @@ describe("AppsStore", () => {
         const store = yield* storeIn(root, { refreshEvery: Duration.millis(20) })
         const lockPath = `${root}/data/hub-apps/.lock`
         const held = yield* Effect.forkScoped(store.withLock(() => Effect.never))
-        yield* Effect.sleep(Duration.millis(50))
+        const ageMillis = fileSystem.stat(lockPath).pipe(
+          Effect.map((info) => info.mtime._tag === "Some" ? Date.now() - info.mtime.value.getTime() : Infinity),
+          Effect.orElseSucceed(() => Infinity)
+        )
+        // Poll (bounded) rather than sleep a fixed time: a loaded runner may take a while per step.
+        const until = (done: (age: number) => boolean) =>
+          ageMillis.pipe(
+            Effect.repeat({ until: done, schedule: Schedule.spaced(Duration.millis(20)), times: 500 }),
+            Effect.map(done)
+          )
+        expect(yield* until((age) => age < 60_000)).toBe(true)
         const past = new Date(Date.now() - 11 * 60_000)
         yield* fileSystem.utimes(lockPath, past, past)
-        yield* Effect.sleep(Duration.millis(60))
-        const mtime = (yield* fileSystem.stat(lockPath)).mtime
-        expect(mtime._tag === "Some" && Date.now() - mtime.value.getTime() < 60_000).toBe(true)
+        expect(yield* until((age) => age < 60_000)).toBe(true)
         yield* Fiber.interrupt(held)
       }).pipe(Effect.scoped))
   })

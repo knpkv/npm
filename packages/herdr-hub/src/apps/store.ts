@@ -117,13 +117,34 @@ export const makeAppsStore = Effect.fn("AppsStore.make")(function*(options: Apps
     return false
   })
 
-  /** Creates the lock file exclusively and keeps it open in the current scope. */
+  /** `AppsLockBusy` for whoever's lock text is on disk now (`pid` null when it can't be read). */
+  const busyNow = inspect.pipe(
+    Effect.flatMap((seen) =>
+      Effect.fail(
+        new AppsLockBusy({
+          pid: Option.match(Option.flatMap(seen, (lock) => decodeLock(lock.text)), {
+            onNone: () => null,
+            onSome: (lock) => lock.pid
+          })
+        })
+      )
+    )
+  )
+
+  /**
+   * Creates the lock file exclusively and keeps it open in the current scope. A lock that was created but not
+   * written is removed again, so it never reads as someone else's for ten minutes. Another CLI's lock appearing
+   * first is `AppsLockBusy`.
+   */
   const create = Effect.fn("AppsStore.createLock")(function*() {
     const record: LockRecord = { ...options.self, startedAt: yield* Clock.currentTimeMillis }
     const file = yield* fileSystem.open(options.lockPath, { flag: "wx", mode: 0o600 })
-    yield* file.writeAll(new TextEncoder().encode(encodeLock(record)))
+    // best-effort: the write's own failure is the one reported; a leftover empty lock goes stale by mtime.
+    const drop = Effect.ignore(fileSystem.remove(options.lockPath, { force: true }))
+    yield* file.writeAll(new TextEncoder().encode(encodeLock(record))).pipe(Effect.tapError(() => drop))
     return record
   })
+  const createOrBusy = create().pipe(Effect.catchIf(isAlreadyExists, () => busyNow))
 
   /**
    * Takes the lock, taking over a stale one once. Right before removing a stale lock its text is read again and must
@@ -138,32 +159,12 @@ export const makeAppsStore = Effect.fn("AppsStore.make")(function*(options: Apps
     )
     if (Option.isSome(first)) return first.value
     const seen = yield* inspect
-    if (Option.isNone(seen)) return yield* create()
-    const record = decodeLock(seen.value.text)
-    const busy = new AppsLockBusy({ pid: Option.match(record, { onNone: () => null, onSome: (lock) => lock.pid }) })
-    if (!(yield* isStale(record, seen.value.mtime))) return yield* busy
+    if (Option.isNone(seen)) return yield* createOrBusy
+    if (!(yield* isStale(decodeLock(seen.value.text), seen.value.mtime))) return yield* busyNow
     const again = yield* inspect
-    if (Option.isSome(again) && again.value.text !== seen.value.text) {
-      return yield* new AppsLockBusy({
-        pid: Option.match(decodeLock(again.value.text), { onNone: () => null, onSome: (lock) => lock.pid })
-      })
-    }
+    if (Option.isSome(again) && again.value.text !== seen.value.text) return yield* busyNow
     yield* fileSystem.remove(options.lockPath, { force: true })
-    return yield* create().pipe(
-      Effect.catchIf(isAlreadyExists, () =>
-        inspect.pipe(
-          Effect.flatMap((now) =>
-            Effect.fail(
-              new AppsLockBusy({
-                pid: Option.match(Option.flatMap(now, (lock) => decodeLock(lock.text)), {
-                  onNone: () => null,
-                  onSome: (lock) => lock.pid
-                })
-              })
-            )
-          )
-        ))
-    )
+    return yield* createOrBusy
   })
 
   /** Removes the lock file if it still holds `record` (a takeover after 10 min of silence may have replaced it). */
