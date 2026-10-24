@@ -13,14 +13,11 @@ import { type FakeApp, packFakeApp, type Registry, startRegistry, type TestNpm }
 const windows = process.platform === "win32"
 const name = "@knpkv/fake-app"
 
-/** npm, found by the CLI's own rule. */
-const testNpm: Promise<TestNpm> = Effect.runPromise(
-  findNpmCli({ execPath: process.execPath, windows, path: process.env.PATH ?? "" }).pipe(
-    Effect.map((npmCli) => ({ node: process.execPath, npmCli })),
-    Effect.provide(NodeServices.layer)
-  )
+/** npm, found by the CLI's own rule (a few stats; run inside each test's layer). */
+const testNpm = findNpmCli({ execPath: process.execPath, windows, path: process.env.PATH ?? "" }).pipe(
+  Effect.map((npmCli): TestNpm => ({ node: process.execPath, npmCli }))
 )
-const pack = (app: FakeApp) => Effect.flatMap(Effect.promise(() => testNpm), (npm) => packFakeApp(npm, app))
+const pack = (app: FakeApp) => Effect.flatMap(testNpm, (npm) => packFakeApp(npm, app))
 
 const tempRoot = Effect.gen(function*() {
   const fileSystem = yield* FileSystem.FileSystem
@@ -59,7 +56,7 @@ const installerIn = (root: string, registry: Registry, overrides: Overrides = {}
     yield* fileSystem.writeFileString(`${root}/user.npmrc`, `registry=${registry.url}\nfetch-retries=0\n`)
     const npm = yield* makeNpm({
       node: process.execPath,
-      npmCli: (yield* Effect.promise(() => testNpm)).npmCli,
+      npmCli: (yield* testNpm).npmCli,
       cwd: `${root}/npm`,
       env: { npm_config_userconfig: `${root}/user.npmrc`, npm_config_cache: `${root}/npm-cache` },
       auditTimeout: overrides.auditTimeout ?? Duration.seconds(60)

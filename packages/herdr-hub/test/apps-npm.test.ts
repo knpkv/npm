@@ -9,12 +9,8 @@ import { isTrusted, trustLines } from "../src/apps/trust.js"
 
 const windows = process.platform === "win32"
 
-/** The npm this test run uses, found by the CLI's own rule. */
-const npmCli = Effect.runPromise(
-  findNpmCli({ execPath: process.execPath, windows, path: process.env.PATH ?? "" }).pipe(
-    Effect.provide(NodeServices.layer)
-  )
-)
+/** The npm this test run uses, found by the CLI's own rule (a few stats; run inside each test's layer). */
+const npmCli = findNpmCli({ execPath: process.execPath, windows, path: process.env.PATH ?? "" })
 
 const fixtureVersion = (version: string, extra: Partial<NpmViewVersion> = {}): NpmViewVersion => ({
   name: "@knpkv/hub-app-fixture",
@@ -66,7 +62,7 @@ const npmWith = (npmrc: string) =>
     yield* fileSystem.writeFileString(`${root}/user.npmrc`, npmrc)
     return yield* makeNpm({
       node: process.execPath,
-      npmCli: yield* Effect.promise(() => npmCli),
+      npmCli: yield* npmCli,
       cwd: `${root}/work`,
       env: { npm_config_userconfig: `${root}/user.npmrc`, npm_config_cache: `${root}/cache` }
     })
@@ -210,7 +206,7 @@ describe("npm resolve", () => {
         yield* fileSystem.writeFileString(`${root}/user.npmrc`, `registry=${stalled.url}\nfetch-retries=0\n`)
         const npm = yield* makeNpm({
           node: process.execPath,
-          npmCli: yield* Effect.promise(() => npmCli),
+          npmCli: yield* npmCli,
           cwd: `${root}/work`,
           env: { npm_config_userconfig: `${root}/user.npmrc`, npm_config_cache: `${root}/cache` },
           viewTimeout: Duration.seconds(2)
