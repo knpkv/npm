@@ -121,6 +121,13 @@ const sameObservation = (sandbox: Sandbox, observed: SandboxObservation): boolea
 /** A tagged error's tag and fields, for the job's failure detail. */
 const describe = (error: { readonly _tag: string }) => JSON.stringify(error)
 
+/**
+ * A reset was not started because the hub holds no AWS sign-in: it would fail at its first step and quarantine
+ * the account. A job fails with it as rejected, with the account unchanged; the sweep leaves the account for a
+ * later sweep.
+ */
+export class ResetNeedsSignIn extends Schema.TaggedError<ResetNeedsSignIn>()("ResetNeedsSignIn", {}) {}
+
 export interface SandboxPoolServices {
   readonly contract: PoolContract
   readonly store: SandboxStore["Service"]
@@ -136,11 +143,12 @@ export interface SandboxPoolServices {
    */
   readonly sweep?: "full" | "spend-only"
   /**
-   * Runs one write that moves an account into Cleaning. The hub passes its AWS sign-in's `hold`, which sign-out
-   * also takes around its no-reset-running check, so a reset can't start between that check and the sign-out.
-   * Defaults to running the write as is.
+   * Runs one write that moves an account into Cleaning, and the sweep's check before it resumes a reset. The hub
+   * holds its AWS sign-in's `hold` (which sign-out also takes around its no-reset-running check) and fails with
+   * `ResetNeedsSignIn` unless the hub is signed in, so a reset neither starts between that check and a sign-out
+   * nor starts without a sign-in. Defaults to running the write as is.
    */
-  readonly cleaning?: <A, E, R>(write: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>
+  readonly cleaning?: <A, E, R>(write: Effect.Effect<A, E, R>) => Effect.Effect<A, E | ResetNeedsSignIn, R>
 }
 
 /**
@@ -150,7 +158,8 @@ export interface SandboxPoolServices {
  */
 export const makeSandboxPool = Effect.fn("SandboxPool.make")(function*(services: SandboxPoolServices) {
   const { contract, store } = services
-  const cleaning = services.cleaning ?? (<A, E, R>(write: Effect.Effect<A, E, R>) => write)
+  const cleaning = services.cleaning ??
+    (<A, E, R>(write: Effect.Effect<A, E, R>): Effect.Effect<A, E | ResetNeedsSignIn, R> => write)
   const locks = new Map<string, Semaphore.Semaphore>()
   for (const { accountId } of contract.accounts) locks.set(accountId, yield* Semaphore.make(1))
   const lastSweep = yield* Ref.make<SweepReport | null>(null)
@@ -396,12 +405,19 @@ export const makeSandboxPool = Effect.fn("SandboxPool.make")(function*(services:
       if (!inPool(current)) return "idle" satisfies SweepOutcome
       if (leaseEnded(current, now)) {
         const runId = Schema.decodeUnknownSync(RunId)(`sweep-${DateTime.toEpochMillis(now)}-${current.accountId}`)
-        yield* cleaning(store.put(expire(current, runId, now))).pipe(Effect.flatMap((moved) => reset(moved, runId)))
-        return "expired" satisfies SweepOutcome
+        // Signed out, the lease stays as it is until a sweep finds the hub signed in again.
+        return yield* cleaning(store.put(expire(current, runId, now))).pipe(
+          Effect.flatMap((moved) => reset(moved, runId)),
+          Effect.as<SweepOutcome>("expired"),
+          Effect.catchTag("ResetNeedsSignIn", () => Effect.succeed<SweepOutcome>("idle"))
+        )
       }
       if (state._tag === "Cleaning" && pending._tag === "Cleaning" && state.runId === pending.runId) {
-        yield* reset(current, state.runId)
-        return "resumed" satisfies SweepOutcome
+        return yield* cleaning(Effect.void).pipe(
+          Effect.andThen(reset(current, state.runId)),
+          Effect.as<SweepOutcome>("resumed"),
+          Effect.catchTag("ResetNeedsSignIn", () => Effect.succeed<SweepOutcome>("idle"))
+        )
       }
       return "idle" satisfies SweepOutcome
     })
