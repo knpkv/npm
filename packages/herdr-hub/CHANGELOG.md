@@ -2,6 +2,14 @@
 
 Released as `@knpkv/herdr-approvals` up to 0.18.0; the headings below are that package's history.
 
+## 0.61.0
+
+### Minor Changes
+
+- [#1122](https://github.com/knpkv/npm/pull/1122) [`55c27d0`](https://github.com/knpkv/npm/commit/55c27d0d5b02affffaf91752849fd6c3aa929cff) Thanks [@konopkov](https://github.com/konopkov)! - The owner can sign the hub out of AWS from the Sandboxes page. Signing out ends the Identity Center session on AWS's side, forgets the stored token, and stops using role credentials fetched with it, so the hub can sign in again as another AWS user.
+
+- [#1124](https://github.com/knpkv/npm/pull/1124) [`8c64044`](https://github.com/knpkv/npm/commit/8c64044a18579be035a2c21b685e7f7b90e07002) Thanks [@konopkov](https://github.com/konopkov)! - Signing the hub out of AWS and a reset starting can no longer interleave: the sign-out's check and the sign-out, and every move of an account into Cleaning, hold the sign-in's new `hold`.
+
 ## 0.60.2
 
 ### Patch Changes
