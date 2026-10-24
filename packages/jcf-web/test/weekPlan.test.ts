@@ -405,6 +405,19 @@ describe("buildWeekPlan", () => {
     expect(held.plan.rows.map((row) => row.day)).toEqual(["2025-06-18"])
   })
 
+  it("keeps a day run a day run when a saved entry is removed", () => {
+    const held = buildWeekPlan({
+      createdAtMillis: 0,
+      day: "2025-06-18",
+      monday,
+      planId: "p",
+      report: report({ recorded: [recorded({ clockifySeconds: 600, day: "2025-06-18", ticketKey: "PROJ-5" })] }),
+      scope: "both"
+    })
+    const rebuilt = removeSavedEntry(held, { source: "clockify", id: "absent" })
+    expect(rebuilt.plan).toMatchObject({ day: "2025-06-18", days: ["2025-06-18"] })
+  })
+
   it("covers a day run's own day and a week plan's whole week", () => {
     expect(planPeriod({ monday: "2025-06-16", day: "2025-06-18" })).toEqual({
       from: new Date(2025, 5, 18),
