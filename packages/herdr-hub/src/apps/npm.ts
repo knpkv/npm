@@ -136,6 +136,8 @@ export interface ResolvedApp {
 }
 
 const installHooks = ["preinstall", "install", "postinstall", "prepare"]
+/** The hooks `npm rebuild` runs for an installed package (`prepare` is not one of them). */
+const rebuildHooks = ["preinstall", "install", "postinstall"]
 
 const versionParts = (version: string) => {
   const [core = "", prerelease] = version.split("+", 1)[0]?.split(/-(.*)/su) ?? []
@@ -236,26 +238,41 @@ export interface Npm {
     spec: string
   ) => Effect.Effect<ResolvedApp, NotAHubApp | AppInstallFailed>
   /**
-   * Installs exactly `app` into `prefix` (one exact dependency, no dev dependencies, install scripts only with
-   * `allowScripts`), then requires the lockfile's integrity for it to be the one `npm view` reported: a registry that
-   * served another tarball meanwhile fails with `fetch`.
+   * Installs exactly `app` into `prefix` (one exact dependency, no dev dependencies, never running install scripts),
+   * then requires the lockfile's integrity for it to be the one `npm view` reported: a registry that served another
+   * tarball meanwhile fails with `fetch`.
    */
-  readonly install: (
-    prefix: string,
-    app: ResolvedApp,
-    allowScripts: boolean
-  ) => Effect.Effect<void, AppInstallFailed>
+  readonly install: (prefix: string, app: ResolvedApp) => Effect.Effect<void, AppInstallFailed>
   /**
    * `npm audit signatures` in `prefix`. A registry without signing keys (mirrors, private registries) is reported, not
    * failed; any other failure blocks the install.
    */
   readonly auditSignatures: (prefix: string, pkg: string) => Effect.Effect<SignatureCheck, AppInstallFailed>
+  /**
+   * Every package in `app`'s tree that declares install scripts, from a lockfile-only resolve in `prefix` (no tarball
+   * runs, no script runs). `npm view` shows only the top package's scripts; with `--allow-scripts` all of these run.
+   */
+  readonly installScripts: (prefix: string, app: ResolvedApp) => Effect.Effect<ReadonlyArray<string>, AppInstallFailed>
+  /**
+   * The installed packages in `prefix` that have install scripts, read from each unpacked `package.json` (an install
+   * hook, or a `binding.gyp`, which npm builds with node-gyp): what `npm rebuild` would run, whatever the registry's
+   * metadata said.
+   */
+  readonly unpackedScripts: (prefix: string, pkg: string) => Effect.Effect<ReadonlyArray<string>, AppInstallFailed>
+  /** Runs the install scripts in `prefix` (`npm rebuild`), under the install timeout. */
+  readonly runScripts: (prefix: string, pkg: string) => Effect.Effect<void, AppInstallFailed>
 }
 
 const PackageLock = Schema.Struct({
-  packages: Schema.Record(Schema.String, Schema.Struct({ integrity: Schema.optional(Schema.String) }))
+  packages: Schema.Record(
+    Schema.String,
+    Schema.Struct({ integrity: Schema.optional(Schema.String), hasInstallScript: Schema.optional(Schema.Boolean) })
+  )
 })
 const decodeLock = Schema.decodeUnknownOption(Schema.fromJsonString(PackageLock))
+const decodeScriptsManifest = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(Schema.Struct({ scripts: Schema.optional(Schema.Record(Schema.String, Schema.String)) }))
+)
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
 /** What npm says when no installed package came from a registry that publishes signing keys. */
 const noSignaturesSummary = "found no dependencies to audit that were installed from a supported registry"
@@ -318,22 +335,105 @@ export const makeNpm = Effect.fn("Npm.make")(function*(options: NpmOptions) {
       )
     )
 
-  const install = Effect.fn("Npm.install")(function*(prefix: string, app: ResolvedApp, allowScripts: boolean) {
-    const failed = (stage: "fetch" | "commit", detail: string) =>
-      new AppInstallFailed({ package: app.package, stage, detail })
-    yield* fileSystem.makeDirectory(prefix, { recursive: true }).pipe(
+  /** The prefix's `package.json`: one exact dependency. */
+  const writeManifest = (prefix: string, app: ResolvedApp) =>
+    fileSystem.makeDirectory(prefix, { recursive: true }).pipe(
       Effect.andThen(fileSystem.writeFileString(
         `${prefix}/package.json`,
         `${encodeJson({ name: "herdr-hub-app", private: true, dependencies: { [app.package]: app.version } })}\n`
       )),
-      Effect.mapError((error) => failed("commit", error.message))
+      Effect.mapError((error) => new AppInstallFailed({ package: app.package, stage: "commit", detail: error.message }))
     )
+
+  const installScripts = Effect.fn("Npm.installScripts")(function*(prefix: string, app: ResolvedApp) {
+    const failed = (detail: string) => new AppInstallFailed({ package: app.package, stage: "fetch", detail })
+    yield* writeManifest(prefix, app)
+    const result = yield* run([
+      "install",
+      "--package-lock-only",
+      "--ignore-scripts",
+      "--prefix",
+      prefix,
+      "--omit=dev",
+      "--no-fund",
+      "--no-audit"
+    ]).pipe(
+      Effect.mapError((error) => failed(error.message)),
+      Effect.timeoutOrElse({
+        duration: options.viewTimeout ?? Duration.seconds(60),
+        orElse: () => Effect.fail(failed("npm install --package-lock-only timed out"))
+      })
+    )
+    if (result.exitCode !== ChildProcessSpawner.ExitCode(0)) {
+      return yield* failed(result.lastErrorLine ?? `npm install --package-lock-only exited ${result.exitCode}`)
+    }
+    return yield* lockedScripts(prefix, app.package)
+  })
+
+  const unpackedScripts = Effect.fn("Npm.unpackedScripts")(function*(prefix: string, pkg: string) {
+    const failed = (detail: string) => new AppInstallFailed({ package: pkg, stage: "fetch", detail })
+    const lock = yield* fileSystem.readFileString(`${prefix}/package-lock.json`).pipe(
+      Effect.map(decodeLock),
+      Effect.mapError((error) => failed(error.message))
+    )
+    const keys = Option.match(lock, {
+      onNone: () => [],
+      onSome: ({ packages }) => Object.keys(packages).filter((key) => key.startsWith("node_modules/"))
+    })
+    const found: Array<string> = []
+    for (const key of keys) {
+      const dir = `${prefix}/${key}`
+      const manifest = yield* fileSystem.readFileString(`${dir}/package.json`).pipe(
+        Effect.flatMap(decodeScriptsManifest),
+        Effect.mapError(() => failed(`${key}/package.json is unreadable`))
+      )
+      const gyp = yield* fileSystem.exists(`${dir}/binding.gyp`).pipe(Effect.mapError((error) => failed(error.message)))
+      if (gyp || rebuildHooks.some((hook) => manifest.scripts?.[hook] !== undefined)) {
+        found.push(key.slice(key.lastIndexOf("node_modules/") + "node_modules/".length))
+      }
+    }
+    return found.sort()
+  })
+
+  const lockedScripts = Effect.fn("Npm.lockedScripts")(function*(prefix: string, pkg: string) {
+    const lock = yield* fileSystem.readFileString(`${prefix}/package-lock.json`).pipe(
+      Effect.map(decodeLock),
+      Effect.mapError((error) => new AppInstallFailed({ package: pkg, stage: "fetch", detail: error.message }))
+    )
+    return Option.match(lock, {
+      onNone: () => [],
+      onSome: ({ packages }) =>
+        Object.entries(packages)
+          .filter(([, entry]) => entry.hasInstallScript === true)
+          .map(([key]) => key.slice(key.lastIndexOf("node_modules/") + "node_modules/".length))
+          .sort()
+    })
+  })
+
+  const runScripts = Effect.fn("Npm.runScripts")(function*(prefix: string, pkg: string) {
+    const failed = (detail: string) => new AppInstallFailed({ package: pkg, stage: "fetch", detail })
+    const result = yield* run(["rebuild", "--prefix", prefix, "--ignore-scripts=false"]).pipe(
+      Effect.mapError((error) => failed(error.message)),
+      Effect.timeoutOrElse({
+        duration: options.installTimeout ?? Duration.minutes(5),
+        orElse: () => Effect.fail(failed("install scripts timed out"))
+      })
+    )
+    if (result.exitCode !== ChildProcessSpawner.ExitCode(0)) {
+      return yield* failed(`install scripts failed: ${result.lastErrorLine ?? `npm rebuild exited ${result.exitCode}`}`)
+    }
+  })
+
+  const install = Effect.fn("Npm.install")(function*(prefix: string, app: ResolvedApp) {
+    const failed = (stage: "fetch" | "commit", detail: string) =>
+      new AppInstallFailed({ package: app.package, stage, detail })
+    yield* writeManifest(prefix, app)
     const result = yield* run([
       "install",
       "--prefix",
       prefix,
       "--omit=dev",
-      ...(allowScripts ? [] : ["--ignore-scripts"]),
+      "--ignore-scripts",
       "--no-fund",
       "--no-audit"
     ]).pipe(
@@ -386,5 +486,5 @@ export const makeNpm = Effect.fn("Npm.make")(function*(options: NpmOptions) {
       })
     )
 
-  return { resolve, install, auditSignatures } satisfies Npm
+  return { resolve, install, auditSignatures, installScripts, unpackedScripts, runScripts } satisfies Npm
 })

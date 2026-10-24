@@ -13,11 +13,11 @@ export interface TestNpm {
   readonly npmCli: string
 }
 
-/** What a published version's packument says in `hubApp`. */
-export interface PublishedHubApp {
-  readonly bin: string
-  readonly contract: number
-  readonly services: ReadonlyArray<string>
+/** What a published version's packument says beside `dist`. */
+export interface PublishedMeta {
+  readonly hubApp: { readonly bin: string; readonly contract: number; readonly services: ReadonlyArray<string> }
+  readonly dependencies: Readonly<Record<string, string>>
+  readonly scripts: Readonly<Record<string, string>>
 }
 
 export interface FakeApp {
@@ -34,7 +34,27 @@ export interface FakeApp {
   readonly bin?: string
   /** Exit at once instead of serving. */
   readonly crash?: boolean
+  /** Exact dependencies (other fake packages on the same registry). */
+  readonly dependencies?: Readonly<Record<string, string>>
+  /** A `postinstall` that writes `postinstall-ran` into the package directory, or to this absolute path. */
+  readonly postinstall?: boolean | string
+  /** Leave the scripts out of the packument (no `scripts`, no `hasInstallScript`), as some registries do. */
+  readonly hideScripts?: boolean
 }
+
+/** A fake package's lifecycle scripts. */
+export const fakeScripts = (app: FakeApp): Readonly<Record<string, string>> =>
+  app.postinstall === undefined || app.postinstall === false
+    ? {}
+    : {
+      postinstall: `node -e "require('fs').writeFileSync(${
+        JSON.stringify(app.postinstall === true ? "postinstall-ran" : app.postinstall).replaceAll("\"", "'")
+      },'')"`
+    }
+
+/** The scripts the packument shows for `app`. */
+export const publishedScripts = (app: FakeApp): Readonly<Record<string, string>> =>
+  app.hideScripts === true ? {} : fakeScripts(app)
 
 /** A dependency-free app: reads the hub's handshake, serves its manifest to the right secret on the endpoint. */
 const binSource = (app: FakeApp) => {
@@ -102,7 +122,9 @@ export const packFakeApp = Effect.fn("test.packFakeApp")(function*(npm: TestNpm,
       name: app.name,
       version: app.version,
       type: "module",
-      hubApp: { bin, contract: app.contract ?? 1, services: app.declared ?? app.services ?? [] }
+      hubApp: { bin, contract: app.contract ?? 1, services: app.declared ?? app.services ?? [] },
+      dependencies: app.dependencies ?? {},
+      scripts: fakeScripts(app)
     })
   )
   yield* fileSystem.writeFileString(`${dir}/bin.js`, binSource(app))
@@ -124,11 +146,13 @@ export interface Registry {
   /** Every request path, in order. */
   readonly requests: Array<string>
   /** Serves `packed` for `name@version` from now on (the packument and the tarball). */
-  readonly publish: (name: string, version: string, packed: Packed, hubApp: PublishedHubApp) => void
+  readonly publish: (name: string, version: string, packed: Packed, meta: PublishedMeta) => void
   /** Serves these bytes as the tarball while the packument keeps the old integrity. */
   readonly corrupt: (name: string, version: string) => void
   /** Accepts requests under `prefix` from now on and never answers them. */
   readonly stall: (prefix: string) => void
+  /** Drops `name@version` from the packument. */
+  readonly unpublish: (name: string, version: string) => void
 }
 
 /** A registry on a loopback port for the test's scope. */
@@ -136,7 +160,7 @@ export const startRegistry = Effect.acquireRelease(
   Effect.callback<{ server: Server; registry: Registry }>((resume) => {
     const requests: Array<string> = []
     const stalled: Array<string> = []
-    const published = new Map<string, Map<string, { packed: Packed; hubApp: PublishedHubApp; corrupt: boolean }>>()
+    const published = new Map<string, Map<string, { packed: Packed; meta: PublishedMeta; corrupt: boolean }>>()
     let base = ""
     const server = createServer((request, response) => {
       const url = decodeURIComponent(request.url ?? "")
@@ -163,7 +187,10 @@ export const startRegistry = Effect.acquireRelease(
           return [version, {
             name: url.slice(1),
             version,
-            hubApp: entry?.hubApp,
+            hubApp: entry?.meta.hubApp,
+            dependencies: entry?.meta.dependencies,
+            scripts: entry?.meta.scripts,
+            hasInstallScript: Object.keys(entry?.meta.scripts ?? {}).length > 0,
             dist: { integrity: entry?.packed.integrity, tarball: `${base}-/tarballs/${url.slice(1)}/${version}.tgz` }
           }]
         })),
@@ -180,13 +207,16 @@ export const startRegistry = Effect.acquireRelease(
         registry: {
           url: base,
           requests,
-          publish: (name, version, packed, hubApp) => {
+          publish: (name, version, packed, meta) => {
             const versions = published.get(name) ?? new Map()
-            versions.set(version, { packed, hubApp, corrupt: false })
+            versions.set(version, { packed, meta, corrupt: false })
             published.set(name, versions)
           },
           stall: (prefix) => {
             stalled.push(prefix)
+          },
+          unpublish: (name, version) => {
+            published.get(name)?.delete(version)
           },
           corrupt: (name, version) => {
             const entry = published.get(name)?.get(version)

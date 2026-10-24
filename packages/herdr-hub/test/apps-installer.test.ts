@@ -4,11 +4,18 @@ import { AppId } from "@knpkv/hub-app"
 import { Duration, Effect, FileSystem, PlatformError, Ref } from "effect"
 import { tmpdir, userInfo } from "node:os"
 import process from "node:process"
-import { makeInstaller } from "../src/apps/installer.js"
+import { makeInstaller, sameMajor } from "../src/apps/installer.js"
 import { findNpmCli, makeNpm } from "../src/apps/npm.js"
 import { emptyAppsConfig, makeAppsStore } from "../src/apps/store.js"
 import { prepareEndpointPlace } from "../src/apps/supervisor.js"
-import { type FakeApp, packFakeApp, type Registry, startRegistry, type TestNpm } from "./fixtures/npm-registry.js"
+import {
+  type FakeApp,
+  packFakeApp,
+  publishedScripts,
+  type Registry,
+  startRegistry,
+  type TestNpm
+} from "./fixtures/npm-registry.js"
 
 const windows = process.platform === "win32"
 const name = "@knpkv/fake-app"
@@ -30,9 +37,9 @@ const publish = (registry: Registry, app: FakeApp) =>
   Effect.gen(function*() {
     const packed = yield* pack(app)
     registry.publish(app.name, app.version, packed, {
-      bin: app.bin ?? "bin.js",
-      contract: app.contract ?? 1,
-      services: app.declared ?? app.services ?? []
+      hubApp: { bin: app.bin ?? "bin.js", contract: app.contract ?? 1, services: app.declared ?? app.services ?? [] },
+      dependencies: app.dependencies ?? {},
+      scripts: publishedScripts(app)
     })
     return packed
   })
@@ -44,6 +51,8 @@ interface Overrides {
   readonly auditTimeout?: Duration.Duration
   /** The installer's filesystem (to make one step fail). */
   readonly fileSystem?: (real: FileSystem.FileSystem) => FileSystem.FileSystem
+  /** Runs while the hub would be stopping a removed app. */
+  readonly whileStopping?: Effect.Effect<void>
 }
 
 /** An installer over `root`, with npm pointed at `registry`; `said` collects notices, `events` the remove steps. */
@@ -69,6 +78,7 @@ const installerIn = (root: string, registry: Registry, overrides: Overrides = {}
     })
     const said = yield* Ref.make<ReadonlyArray<string>>([])
     const events = yield* Ref.make<ReadonlyArray<string>>([])
+    const prompts = yield* Ref.make<ReadonlyArray<ReadonlyArray<string>>>([])
     const user = userInfo()
     const installer = yield* makeInstaller({
       store,
@@ -82,19 +92,21 @@ const installerIn = (root: string, registry: Registry, overrides: Overrides = {}
         shortRuntimeDirectory: `${root}/short`,
         user: { name: user.username, uid: user.uid }
       }),
-      confirm: () => overrides.confirm ?? Effect.succeed(true),
+      confirm: (lines) =>
+        Ref.update(prompts, (all) => [...all, lines]).pipe(Effect.andThen(overrides.confirm ?? Effect.succeed(true))),
       waitStopped: (id) =>
         fileSystem.exists(`${root}/data/hub-apps/${id}`).pipe(
           Effect.orDie,
           Effect.flatMap((present) =>
             Ref.update(events, (all) => [...all, `stopped ${id}, files ${present ? "present" : "gone"}`])
-          )
+          ),
+          Effect.andThen(overrides.whileStopping ?? Effect.void)
         ),
       say: (line) => Ref.update(said, (lines) => [...lines, line])
     }).pipe(
       Effect.provideService(FileSystem.FileSystem, overrides.fileSystem?.(fileSystem) ?? fileSystem)
     )
-    return { installer, store, said, events }
+    return { installer, store, said, events, prompts }
   })
 
 const appsJson = (root: string) =>
@@ -110,6 +122,13 @@ const prefixes = (root: string) =>
       Effect.map((entries) => entries.filter((entry) => entry !== ".lock").sort()),
       Effect.catchTag("PlatformError", () => Effect.succeed([]))
     ))
+
+describe("update range", () => {
+  // npm's caret: below 1.0 the minor (and below 0.1 the patch) is the breaking boundary.
+  it("keeps an update inside the same major as npm's caret defines it", () => {
+    expect(["2.3.4", "0.3.1", "0.0.5", "1.0.0-rc.1"].map(sameMajor)).toEqual(["^2", "^0.3", "~0.0.5", "^1"])
+  })
+})
 
 describe("installer", () => {
   it.layer(NodeServices.layer, { excludeTestServices: true })((it) => {
@@ -149,7 +168,11 @@ describe("installer", () => {
           const swapped = yield* pack({ name, version: "1.0.0", id: "fake", services: ["host"] })
           const { installer } = yield* installerIn(root, registry, {
             confirm: Effect.sync(() => {
-              registry.publish(name, "1.0.0", swapped, { bin: "bin.js", contract: 1, services: ["host"] })
+              registry.publish(name, "1.0.0", swapped, {
+                hubApp: { bin: "bin.js", contract: 1, services: ["host"] },
+                dependencies: {},
+                scripts: {}
+              })
               return true
             })
           })
@@ -323,6 +346,207 @@ describe("installer", () => {
         }).pipe(Effect.scoped),
       60_000
     )
+
+    it.effect(
+      "updates within the same major by default, an explicit spec across it, keeping one previous version",
+      () =>
+        Effect.gen(function*() {
+          const root = yield* tempRoot
+          const registry = yield* startRegistry
+          for (const version of ["1.0.0", "1.2.0", "2.0.0"]) yield* publish(registry, { name, version, id: "fake" })
+          const { installer, store } = yield* installerIn(root, registry)
+          const id = AppId.make("fake")
+          yield* installer.add(name, "1.0.0", { allowScripts: false })
+          expect(yield* installer.update(id, null, { allowScripts: false })).toEqual({ from: "1.0.0", to: "1.2.0" })
+          expect(yield* installer.update(id, null, { allowScripts: false })).toBe(null)
+          expect(yield* installer.update(id, "2.0.0", { allowScripts: false })).toEqual({ from: "1.2.0", to: "2.0.0" })
+          expect((yield* store.read).apps.map((app) => [app.version, app.dir])).toEqual([
+            ["2.0.0", `${root}/data/hub-apps/fake/2.0.0`]
+          ])
+          const fileSystem = yield* FileSystem.FileSystem
+          expect([...(yield* fileSystem.readDirectory(`${root}/data/hub-apps/fake`))].sort()).toEqual([
+            "1.2.0",
+            "2.0.0"
+          ])
+        }).pipe(Effect.scoped),
+      90_000
+    )
+
+    // An update that answers as another app would silently replace one app with a different one.
+    it.effect("refuses an update whose new version answers as a different app", () =>
+      Effect.gen(function*() {
+        const root = yield* tempRoot
+        const registry = yield* startRegistry
+        yield* publish(registry, { name, version: "1.0.0", id: "fake" })
+        yield* publish(registry, { name, version: "1.1.0", id: "imposter" })
+        const { installer, store } = yield* installerIn(root, registry)
+        yield* installer.add(name, "1.0.0", { allowScripts: false })
+        const error = yield* installer.update(AppId.make("fake"), null, { allowScripts: false }).pipe(Effect.flip)
+        expect(error).toMatchObject({
+          _tag: "AppInstallFailed",
+          stage: "probe",
+          detail: "this version answers as imposter, not fake"
+        })
+        expect((yield* store.read).apps.map((app) => app.version)).toEqual(["1.0.0"])
+        expect(yield* prefixes(root)).toEqual(["fake"])
+      }).pipe(Effect.scoped), 90_000)
+
+    it.effect(
+      "rolls back to the kept version, rebuilt from its own package.json, and refuses a tampered one",
+      () =>
+        Effect.gen(function*() {
+          const root = yield* tempRoot
+          const fileSystem = yield* FileSystem.FileSystem
+          const registry = yield* startRegistry
+          for (const version of ["1.0.0", "1.1.0"]) yield* publish(registry, { name, version, id: "fake" })
+          const { installer, store } = yield* installerIn(root, registry)
+          const id = AppId.make("fake")
+          const none = yield* installer.rollback(id).pipe(Effect.flip)
+          yield* installer.add(name, "1.0.0", { allowScripts: false })
+          const alone = yield* installer.rollback(id).pipe(Effect.flip)
+          yield* installer.update(id, null, { allowScripts: false })
+          expect(yield* installer.rollback(id)).toEqual({ from: "1.1.0", to: "1.0.0" })
+          expect((yield* store.read).apps.map((app) => [app.version, app.dir])).toEqual([
+            ["1.0.0", `${root}/data/hub-apps/fake/1.0.0`]
+          ])
+          // The kept 1.1.0 now claims a script outside its directory.
+          const kept = `${root}/data/hub-apps/fake/1.1.0/node_modules/${name}/package.json`
+          yield* fileSystem.writeFileString(
+            kept,
+            JSON.stringify({ version: "1.1.0", hubApp: { bin: "../../../../../escape.js", contract: 1, services: [] } })
+          )
+          const tampered = yield* installer.rollback(id).pipe(Effect.flip)
+          yield* fileSystem.writeFileString(
+            kept,
+            JSON.stringify({ version: "9.9.9", hubApp: { bin: "bin.js", contract: 1, services: [] } })
+          )
+          const renamed = yield* installer.rollback(id).pipe(Effect.flip)
+          expect(renamed).toMatchObject({ _tag: "AppInstallFailed", stage: "commit" })
+          expect(renamed._tag === "AppInstallFailed" && renamed.detail).toContain("says it is 9.9.9")
+          expect([none._tag, alone._tag, tampered]).toMatchObject([
+            "AppNotInstalled",
+            "AppNoPreviousVersion",
+            { _tag: "AppInstallFailed", stage: "commit", detail: "the kept version's hubApp.bin points outside it" }
+          ])
+          expect((yield* store.read).apps.map((app) => app.version)).toEqual(["1.0.0"])
+        }).pipe(Effect.scoped),
+      90_000
+    )
+
+    // Dependencies' install scripts run too, so the prompt lists every one before they are allowed.
+    it.effect(
+      "runs install scripts only when allowed, listing every package that has one, and asks again on update",
+      () =>
+        Effect.gen(function*() {
+          const root = yield* tempRoot
+          const fileSystem = yield* FileSystem.FileSystem
+          const registry = yield* startRegistry
+          yield* publish(registry, { name: "@knpkv/dep", version: "1.0.0", id: "dep", postinstall: true })
+          for (const version of ["1.0.0", "1.1.0"]) {
+            yield* publish(registry, { name, version, id: "fake", dependencies: { "@knpkv/dep": "1.0.0" } })
+          }
+          const ran = (version: string) =>
+            fileSystem.exists(`${root}/data/hub-apps/fake/${version}/node_modules/@knpkv/dep/postinstall-ran`)
+          const { installer, prompts, said, store } = yield* installerIn(root, registry)
+          yield* installer.add(name, "1.0.0", { allowScripts: true })
+          expect((yield* Ref.get(prompts)).at(-1)?.at(-1)).toBe("Install scripts that will run: @knpkv/dep")
+          expect(yield* ran("1.0.0")).toBe(true)
+          expect((yield* store.read).apps.map((app) => app.allowScripts)).toEqual([true])
+          yield* installer.update(AppId.make("fake"), null, { allowScripts: false })
+          expect(yield* ran("1.1.0")).toBe(false)
+          expect((yield* store.read).apps.map((app) => app.allowScripts)).toEqual([false])
+          expect(yield* Ref.get(said)).toContain(
+            "Install scripts were allowed for the previous version; pass --allow-scripts to allow them again."
+          )
+        }).pipe(Effect.scoped),
+      90_000
+    )
+
+    // The registry's own "has install scripts" flag can be missing; what is unpacked decides, before anything runs.
+    it.effect(
+      "refuses, running nothing, when the unpacked tree has install scripts the prompt did not show",
+      () =>
+        Effect.gen(function*() {
+          const root = yield* tempRoot
+          const fileSystem = yield* FileSystem.FileSystem
+          const registry = yield* startRegistry
+          const marker = `${root}/hidden-postinstall-ran`
+          yield* publish(registry, {
+            name: "@knpkv/dep",
+            version: "1.0.0",
+            id: "dep",
+            postinstall: marker,
+            hideScripts: true
+          })
+          yield* publish(registry, { name, version: "1.0.0", id: "fake", dependencies: { "@knpkv/dep": "1.0.0" } })
+          const { installer, prompts } = yield* installerIn(root, registry)
+          const error = yield* installer.add(name, "1.0.0", { allowScripts: true }).pipe(Effect.flip)
+          expect((yield* Ref.get(prompts)).at(-1)?.at(-1)).toBe("Install scripts that will run: none")
+          expect(error).toMatchObject({
+            _tag: "AppInstallFailed",
+            stage: "fetch",
+            detail: "install scripts differ from what was shown"
+          })
+          expect(yield* fileSystem.exists(marker)).toBe(false)
+          expect(yield* prefixes(root)).toEqual([])
+        }).pipe(Effect.scoped),
+      90_000
+    )
+
+    // Without a spec an update never goes down, even when the running version left the registry.
+    it.effect(
+      "stays on the running version when its line's newest release is older, unless a version is given",
+      () =>
+        Effect.gen(function*() {
+          const root = yield* tempRoot
+          const fileSystem = yield* FileSystem.FileSystem
+          const registry = yield* startRegistry
+          for (const version of ["1.0.0", "1.4.0"]) yield* publish(registry, { name, version, id: "fake" })
+          const { installer, said, store } = yield* installerIn(root, registry)
+          const id = AppId.make("fake")
+          yield* installer.add(name, "1.4.0", { allowScripts: false })
+          // A heap cap set by hand must survive an update, and the probe runs under it.
+          const config = yield* store.read
+          yield* fileSystem.writeFileString(
+            `${root}/config/apps.json`,
+            JSON.stringify({ ...config, apps: config.apps.map((app) => ({ ...app, memoryMb: 512 })) })
+          )
+          registry.unpublish(name, "1.4.0")
+          expect(yield* installer.update(id, null, { allowScripts: false })).toBe(null)
+          expect((yield* Ref.get(said)).at(-1)).toBe(
+            "fake stays at 1.4.0: the newest release in its line is 1.0.0. Pass a version to change it."
+          )
+          expect(yield* installer.update(id, "1.0.0", { allowScripts: false })).toEqual({ from: "1.4.0", to: "1.0.0" })
+          expect((yield* store.read).apps.map((app) => [app.version, app.memoryMb])).toEqual([["1.0.0", 512]])
+        }).pipe(Effect.scoped),
+      90_000
+    )
+
+    // Another CLI holding the lock when the delete comes doesn't undo a remove that already happened.
+    it.effect("reports a remove whose cleanup meets a busy lock as done, with a notice", () =>
+      Effect.gen(function*() {
+        const root = yield* tempRoot
+        const fileSystem = yield* FileSystem.FileSystem
+        const registry = yield* startRegistry
+        yield* publish(registry, { name, version: "1.0.0", id: "fake" })
+        const { installer, store } = yield* installerIn(root, registry)
+        yield* installer.add(name, "1.0.0", { allowScripts: false })
+        const lock = `${root}/data/hub-apps/.lock`
+        // Another live CLI (this process: alive) takes the lock while the hub is stopping the app.
+        const removing = yield* installerIn(root, registry, {
+          whileStopping: fileSystem.writeFileString(
+            lock,
+            JSON.stringify({ pid: process.pid, startedAt: 1, host: "test" })
+          )
+            .pipe(Effect.orDie)
+        })
+        yield* removing.installer.remove(AppId.make("fake"), { keepFiles: false })
+        expect((yield* store.read).apps).toEqual([])
+        expect(yield* prefixes(root)).toEqual(["fake"])
+        expect((yield* Ref.get(removing.said)).at(-1)).toBe(
+          `Removed fake; another apps command is running, so delete ${root}/data/hub-apps/fake later.`
+        )
+      }).pipe(Effect.scoped), 90_000)
 
     it.effect("refuses to remove an app that is not installed", () =>
       Effect.gen(function*() {
