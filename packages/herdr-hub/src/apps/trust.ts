@@ -14,6 +14,17 @@ import type { ShellService } from "@knpkv/hub-app"
 import { Schema } from "effect"
 import type { ResolvedApp } from "./npm.js"
 
+/** A question that needs a person (a y/N, or `trust add`) came without a terminal. */
+export class AppsNeedTerminal extends Schema.TaggedError<AppsNeedTerminal>()("AppsNeedTerminal", {
+  action: Schema.String
+}) {
+  override get message() {
+    return `${this.action} needs a terminal to ask you; run it in one${
+      this.action === "trust add" ? "" : " or pass --yes"
+    }.`
+  }
+}
+
 /** The package is outside `trust.scopes`. */
 export class AppNotTrusted extends Schema.TaggedError<AppNotTrusted>()("AppNotTrusted", { package: Schema.String }) {}
 

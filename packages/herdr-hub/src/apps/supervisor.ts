@@ -170,6 +170,32 @@ const windowsPlace = (user: string): EndpointPlace => ({
 const randomHex = (cryptoService: Crypto.Crypto, bytes: number) =>
   Effect.map(cryptoService.randomBytes(bytes), Hex.encode)
 
+/**
+ * One directory the hub relies on: a real directory (not a link), owned by `uid`, with no group or other bits.
+ * Created owner-only when absent; `createParents` only for a directory whose parents were checked by the caller.
+ * On Windows (`uid` -1) file modes and owners don't apply (stat reports uid 0 for everyone): only the link and type
+ * checks do.
+ */
+export const ownPrivateDirectory = Effect.fn("AppSupervisor.ownPrivateDirectory")(function*(
+  directory: string,
+  uid: number,
+  createParents: boolean
+) {
+  const fileSystem = yield* FileSystem.FileSystem
+  if (!(yield* fileSystem.exists(directory))) {
+    yield* fileSystem.makeDirectory(directory, { recursive: createParents, mode: 0o700 })
+  }
+  // A link (even a dangling one), or a path whose real location isn't under its parent, could be repointed.
+  yield* verifyPrivatePathIdentity(directory, "apps.runtime").pipe(
+    Effect.catchTag("PrivateDatabaseError", () => Effect.fail(new RuntimeDirUnsafe({ reason: "link" })))
+  )
+  const info = yield* fileSystem.stat(directory)
+  if (info.type !== "Directory") return yield* new RuntimeDirUnsafe({ reason: "link" })
+  if (uid === -1) return
+  if (Option.isSome(info.uid) && info.uid.value !== uid) return yield* new RuntimeDirUnsafe({ reason: "owner" })
+  if ((info.mode & 0o077) !== 0) return yield* new RuntimeDirUnsafe({ reason: "mode" })
+})
+
 /** Where endpoints go: the runtime directory (or its short fallback), or Windows pipes. */
 export interface EndpointPlaceOptions {
   /** `<hubRuntime>`, or null on Windows (named pipes). */
@@ -191,22 +217,8 @@ export const prepareEndpointPlace = Effect.fn("AppSupervisor.prepareEndpointPlac
   const path = yield* Path.Path
   if (options.runtimeDirectory === null) return windowsPlace(options.user.name)
 
-  /** One directory: created owner-only when absent, and only after its parent passed the same check. */
-  const ownDirectory = Effect.fn("AppSupervisor.ownDirectory")(function*(directory: string, createParents: boolean) {
-    if (!(yield* fileSystem.exists(directory))) {
-      yield* fileSystem.makeDirectory(directory, { recursive: createParents, mode: 0o700 })
-    }
-    // A link (even a dangling one), or a path whose real location isn't under its parent, could be repointed.
-    yield* verifyPrivatePathIdentity(directory, "apps.runtime").pipe(
-      Effect.catchTag("PrivateDatabaseError", () => Effect.fail(new RuntimeDirUnsafe({ reason: "link" })))
-    )
-    const info = yield* fileSystem.stat(directory)
-    if (info.type !== "Directory") return yield* new RuntimeDirUnsafe({ reason: "link" })
-    if (Option.isSome(info.uid) && info.uid.value !== options.user.uid) {
-      return yield* new RuntimeDirUnsafe({ reason: "owner" })
-    }
-    if ((info.mode & 0o077) !== 0) return yield* new RuntimeDirUnsafe({ reason: "mode" })
-  })
+  const ownDirectory = (directory: string, createParents: boolean) =>
+    ownPrivateDirectory(directory, options.user.uid, createParents)
 
   // Endpoints are `<apps>/<nonce16>.sock`; only a runtime directory too long for that uses the short one.
   const base = Buffer.byteLength(path.join(options.runtimeDirectory, "apps", `${"0".repeat(16)}.sock`)) >

@@ -26,7 +26,7 @@ import { AppInstallFailed, type Npm, type ResolvedApp, versionOrder } from "./np
 import { probeApp } from "./probe.js"
 import { AppsConfigManaged, type AppsStore } from "./store.js"
 import { type EndpointPlace, entryScript, type RuntimeDirUnsafe } from "./supervisor.js"
-import { AppNotTrusted, isTrusted, type SignatureCheck, trustLines } from "./trust.js"
+import { AppNotTrusted, type AppsNeedTerminal, isTrusted, type SignatureCheck, trustLines } from "./trust.js"
 
 /** The app's id is already a core module's or another installed app's. */
 export class AppIdConflict extends Schema.TaggedError<AppIdConflict>()("AppIdConflict", {
@@ -64,7 +64,7 @@ export interface InstallerOptions {
     FileSystem.FileSystem | Path.Path
   >
   /** Asks y/N with the trust lines; `--yes` answers yes without asking. */
-  readonly confirm: (lines: ReadonlyArray<string>) => Effect.Effect<boolean>
+  readonly confirm: (lines: ReadonlyArray<string>) => Effect.Effect<boolean, AppsNeedTerminal>
   /** Waits (bounded) until the hub reports `id` stopped; returns at once when no hub answers. */
   readonly waitStopped: (id: AppId) => Effect.Effect<void>
   /** A line for the user (notices that don't fail the command). */
