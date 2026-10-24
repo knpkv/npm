@@ -20,9 +20,11 @@
  *   program that user runs; nothing the hub keeps secret per app is in the environment (token and secret arrive on
  *   stdin).
  * - **Paths:** the hub owns `<runtime>` and `<runtime>/apps` (wiped at start). Each must be a real directory owned by
- *   this user with no group or other bits, checked before anything is created inside it; a runtime path too long
- *   for socket names falls back to `$TMPDIR/herdr-hub-<uid>`, checked the same way. Otherwise every app stays down. `dir` must be absolute and `bin` must stay inside it, by the OS's own path rules; an entry that
- *   breaks either, or whose script is missing, is `install_missing`.
+ *   this user with no group or other bits, checked before anything is created inside it. `<runtime>`'s parent must
+ *   be owned by this user or root, and not writable by others unless sticky. A runtime path too long for socket
+ *   names falls back to `$TMPDIR/herdr-hub-<uid>`, checked the same way. Otherwise every app stays down. `dir` must
+ *   be absolute and `bin` must stay inside it, by the OS's own path rules; an entry that breaks either, or whose
+ *   script is missing, is `install_missing`.
  *
  * @module
  */
@@ -201,10 +203,14 @@ export const makeSupervisor = Effect.fn("AppSupervisor.make")(function*(options:
   const prepareRuntime = Effect.fn("AppSupervisor.prepareRuntime")(function*(base: string) {
     const apps = path.join(base, "apps")
     // Whoever can write `base`'s parent could rename `base` away and put their own there, unless the parent is
-    // sticky (like /tmp). A missing parent is created owner-only below.
+    // sticky (like /tmp). Its owner can always do that, whatever the mode, so it must be us or root. A missing
+    // parent is created owner-only below.
     const parent = path.dirname(base)
     if (yield* fileSystem.exists(parent)) {
       const info = yield* fileSystem.stat(parent)
+      if (Option.isSome(info.uid) && info.uid.value !== options.user.uid && info.uid.value !== 0) {
+        return yield* new RuntimeDirUnsafe({ reason: "owner" })
+      }
       if ((info.mode & 0o022) !== 0 && (info.mode & 0o1000) === 0) {
         return yield* new RuntimeDirUnsafe({ reason: "mode" })
       }

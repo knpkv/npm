@@ -106,7 +106,8 @@ const supervisorIn = (
   runtime: { readonly runtimeDirectory: string | null; readonly shortRuntimeDirectory: string } = {
     runtimeDirectory: windows ? null : `${root}/run`,
     shortRuntimeDirectory: `${root}/short`
-  }
+  },
+  uid: number = userInfo().uid
 ) =>
   Effect.gen(function*() {
     const tokens = yield* makeAppTokens
@@ -123,7 +124,7 @@ const supervisorIn = (
       logsDirectory: `${root}/logs`,
       hubUrl: Effect.succeed("http://127.0.0.1:9"),
       tokens: recording,
-      user: { name: user.username, uid: user.uid },
+      user: { name: user.username, uid },
       timing
     })
     return { supervisor, tokens, issued }
@@ -389,6 +390,29 @@ describe("supervisor", () => {
           expect(yield* fileSystem.exists(`${root}/p-1/run/apps`)).toBe(false)
           expect(yield* fileSystem.exists(`${root}/p-3/run/apps`)).toBe(false)
           expect(yield* fileSystem.exists(`${elsewhere}/apps`)).toBe(false)
+        }).pipe(Effect.scoped)
+    )
+
+    // The owner of `base`'s parent can rename `base` away whatever the mode bits, so the parent must be ours or
+    // root's. Tests can't chown, so the hub runs as a uid that owns neither the temp root nor anything in it.
+    it.effect.skipIf(windows)(
+      "keeps apps down, creating nothing, when another user owns the runtime directory's parent",
+      () =>
+        Effect.gen(function*() {
+          const root = yield* tempRoot
+          const fileSystem = yield* FileSystem.FileSystem
+          const base = `${root}/theirs/run`
+          yield* fileSystem.makeDirectory(`${root}/theirs`, { mode: 0o755 })
+          const stranger = userInfo().uid + 4242
+          const { supervisor } = yield* supervisorIn(root, fast, {
+            runtimeDirectory: base,
+            shortRuntimeDirectory: base
+          }, stranger)
+          const entry = yield* installed(root, "fixture-theirs", "ok")
+          yield* supervisor.sync([entry])
+          yield* until(supervisor.run(entry.id), (value) => value?._tag === "Down" && value.reason === "not_running")
+          expect((yield* supervisor.recentLines(entry.id)).join("\n")).toContain("unusable (owner)")
+          expect(yield* fileSystem.exists(base)).toBe(false)
         }).pipe(Effect.scoped)
     )
 
