@@ -3283,7 +3283,8 @@ export const startHttpServer = async (
             : authorized.pipe(Effect.map((login) => {
               // A direct loopback viewer is on this machine; a proxied one may not be.
               const provenance = submissionProvenance(mode, request)
-              return { login, sameNode: provenance === "verified_local_listener", provenance }
+              const sameNode = provenance === "verified_local_listener"
+              return { login, sameNode, owner: sameNode, provenance }
             }))
 
           const moduleUrl = sandboxesModuleUrl(request.method ?? "GET", url) ?? url

@@ -58,14 +58,14 @@ export interface SandboxesModuleReads {
   readonly caller: Effect.Effect<SandboxesCaller, SandboxesClientError>
   /** The newest page of one account's runs. */
   readonly runs: (accountId: SandboxCard["accountId"]) => Effect.Effect<SandboxRuns, SandboxesClientError>
-  /** One run's log tail and stored failure line. The hub answers only its own node; read only for the owner. */
+  /** One run's log tail and stored failure line. The hub answers only the owner; read only for the owner. */
   readonly runLog: (
     accountId: SandboxCard["accountId"],
     runId: SandboxRunView["runId"]
   ) => Effect.Effect<SandboxRunLog, SandboxesClientError>
   /** Resets and budget lifts waiting in Fleet / Approvals. */
   readonly requests: Effect.Effect<SandboxRequests, SandboxesClientError>
-  /** The hub's AWS sign-in. The hub answers its own node only; read only for the owner. */
+  /** The hub's AWS sign-in. The hub answers the owner only; read only for the owner. */
   readonly awsSession: Effect.Effect<SandboxAwsSession, SandboxesClientError>
 }
 
@@ -2439,8 +2439,8 @@ const RunsPage = ({
 }
 
 /**
- * Overview for the shell. `reads.caller` says whether the reader is the hub's own node (the owner) and gives
- * their login, matched against a lease holder. `writes` is null where the hub cannot submit sandbox jobs.
+ * Overview for the shell. `reads.caller` says whether the reader is the owner (the hub's own node, or an
+ * allowed login on the owner's own device) and gives their login, matched against a lease holder. `writes` is null where the hub cannot submit sandbox jobs.
  */
 export const makeSandboxesModuleViews = ({
   reads,

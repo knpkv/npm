@@ -194,7 +194,7 @@ export const makeSandboxesModule = (
     /** Fleet records awaiting approval. Read per request; a failure is unavailable, never an empty list. */
     readonly pendingApprovals: Effect.Effect<ReadonlyArray<PendingSandboxApproval>, unknown>
     readonly reads?: Effect.Effect<SandboxHostReads, SandboxReaderStartError, Scope.Scope>
-    /** Fleet submission for the jobs route. Only reached for the hub's own node while the pool is served. */
+    /** Fleet submission for the jobs route. Only reached for the owner while the pool is served. */
     readonly submit: SandboxJobSubmit
     /** The hub's own AWS sign-in, when this host runs the pool; null when it doesn't. */
     readonly awsSignIn?: AwsSignIn | null
@@ -247,15 +247,15 @@ export const makeSandboxesModule = (
               code: error._tag === "SandboxNotFound" ? "not_found" : "invalid_query"
             })
           ))
-      // A run's log names the account's resources: only the hub's own node may read it, and nothing is read
-      // for anyone else.
+      // A run's log names the account's resources: only the owner may read it, and nothing is read for anyone
+      // else.
       const runLog = (
         query: SandboxRunLogQuery,
         caller: ModuleCaller
       ): Effect.Effect<SandboxRunLog, ModuleRouteFailure> =>
         mounted._tag === "Unavailable"
           ? Effect.succeed(mounted)
-          : !caller.sameNode
+          : !caller.owner
           ? Effect.fail(new ModuleRouteFailure({ status: 403, code: "owner_only" }))
           : mounted.reads.runLog(query).pipe(
             Effect.mapError(() => new ModuleRouteFailure({ status: 404, code: "not_found" }))
@@ -317,7 +317,7 @@ export const makeSandboxesModule = (
       const awsSession = (caller: ModuleCaller, start: boolean): Effect.Effect<SandboxAwsSession, ModuleRouteFailure> =>
         mounted._tag === "Unavailable"
           ? Effect.succeed(mounted)
-          : !caller.sameNode
+          : !caller.owner
           ? refuse(403, "owner_only")
           : awsSignIn === null
           ? Effect.succeed({ _tag: "NotConfigured" })
@@ -328,7 +328,7 @@ export const makeSandboxesModule = (
           )
       // Anyone but the owner learns only whether the hub is signed in; an unreadable state is not known.
       const awsSignedIn = (caller: ModuleCaller): Effect.Effect<boolean | null> =>
-        caller.sameNode || mounted._tag === "Unavailable" || awsSignIn === null
+        caller.owner || mounted._tag === "Unavailable" || awsSignIn === null
           ? Effect.succeed(null)
           : awsSignIn.state.pipe(
             Effect.map((state): boolean | null => state._tag === "SignedIn"),
@@ -357,12 +357,12 @@ export const makeSandboxesModule = (
         if (alreadyRequested(order, pending)) return yield* refuse(409, "already_requested")
       })
       // Same origin is checked by the mount before the body is read. Here: the pool must be served, only the
-      // hub's own node may submit, and an observe-mode pool runs no jobs. Fleet then holds extend and release
+      // owner may submit, and an observe-mode pool runs no jobs. Fleet then holds extend and release
       // to the caller's own lease, and holds every retry and lift for an approval.
       const submitJob = (order: SandboxJobOrder, caller: ModuleCaller) =>
         mounted._tag === "Unavailable"
           ? refuse(503, "unavailable")
-          : !caller.sameNode
+          : !caller.owner
           ? refuse(403, "owner_only")
           : configuration.poolMode === "observe"
           ? refuse(409, "observe_mode")
@@ -395,8 +395,8 @@ export const makeSandboxesModule = (
             (_query, caller) =>
               awsSignedIn(caller).pipe(Effect.map((signedIn) => ({
                 login: caller.login,
-                owner: caller.sameNode,
-                signIn: caller.sameNode && pool !== null ? signInOf(pool) : null,
+                owner: caller.owner,
+                signIn: caller.owner && pool !== null ? signInOf(pool) : null,
                 poolMode: pool === null ? null : configuration.poolMode ?? null,
                 awsSignedIn: signedIn
               })))

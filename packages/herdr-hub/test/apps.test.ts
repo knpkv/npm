@@ -504,7 +504,7 @@ describe("hub apps", () => {
         expect(JSON.parse(fromWrite.body)).toEqual({ jobId: "job-1", status: "queued" })
         expect(submitted).toEqual([{
           payload: { kind: "noop" },
-          caller: { login: "viewer", sameNode: false, provenance: "authenticated_remote" }
+          caller: { login: "viewer", sameNode: false, owner: false, provenance: "authenticated_remote" }
         }])
       }).pipe(Effect.scoped))
 
@@ -591,7 +591,12 @@ describe("hub apps", () => {
           [hubHeaders.app]: app,
           "content-type": "application/json"
         })
-        const viewer: ModuleCaller = { login: "viewer", sameNode: false, provenance: "authenticated_remote" }
+        const viewer: ModuleCaller = {
+          login: "viewer",
+          sameNode: false,
+          owner: false,
+          provenance: "authenticated_remote"
+        }
         const job = (headers: Record<string, string>, grant: string) =>
           call(port, "POST", "/v1/app-services/jobs", headers, JSON.stringify({ grant, payload: { kind: "noop" } }))
         const code = (answer: { readonly body: string }) =>
@@ -641,7 +646,12 @@ describe("hub apps", () => {
     it.effect("grants: one use for jobs, bound to their app, gone after 60 s", () =>
       Effect.gen(function*() {
         const grants = yield* makeGrants
-        const caller: ModuleCaller = { login: "viewer", sameNode: false, provenance: "authenticated_remote" }
+        const caller: ModuleCaller = {
+          login: "viewer",
+          sameNode: false,
+          owner: false,
+          provenance: "authenticated_remote"
+        }
         const fixture = appId("fixture")
         const { grant } = yield* grants.mint(fixture, caller, "POST")
         const reason = (use: Effect.Effect<unknown, { readonly reason: string }>) =>

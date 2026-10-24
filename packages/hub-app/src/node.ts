@@ -300,6 +300,7 @@ export const serveAttached = Effect.fn("HubApp.serveAttached")(function*<E, R>(a
 const ownerCaller = (login: string): typeof ModuleCaller.Encoded => ({
   login,
   sameNode: true,
+  owner: true,
   provenance: "verified_local_listener"
 })
 
