@@ -15,7 +15,10 @@ describe("hub path table", () => {
       hostname: "atlas",
       fleetConfig: "/home/owner/.config/fleet/config.json",
       fleetState: "/home/owner/.local/state/fleet",
-      appsConfig: "/home/owner/.config/herdr/apps.json"
+      appsConfig: "/home/owner/.config/herdr/apps.json",
+      hubData: "/home/owner/.local/share/herdr-hub",
+      hubState: "/home/owner/.local/state/herdr-hub",
+      hubRuntime: "/home/owner/.local/state/herdr-hub/run"
     })
     // XDG_STATE_HOME already moved the fleet state; XDG_CONFIG_HOME never moved anything on POSIX.
     expect(hubPathTable({ ...linux, env: { XDG_STATE_HOME: "/state", XDG_CONFIG_HOME: "/config" } })).toMatchObject({
@@ -32,7 +35,11 @@ describe("hub path table", () => {
       hostname: "DESKTOP-1",
       fleetConfig: "C:\\Users\\owner\\AppData\\Roaming\\fleet\\config.json",
       fleetState: "D:\\Local\\fleet",
-      appsConfig: "C:\\Users\\owner\\AppData\\Roaming\\herdr-hub\\apps.json"
+      appsConfig: "C:\\Users\\owner\\AppData\\Roaming\\herdr-hub\\apps.json",
+      hubData: "D:\\Local\\herdr-hub",
+      hubState: "D:\\Local\\herdr-hub",
+      // Apps listen on named pipes there: no runtime directory.
+      hubRuntime: null
     })
   })
 
@@ -56,16 +63,37 @@ describe("hub path table", () => {
       })
   })
 
+  // The hub's own apps: prefixes under data, logs under state, sockets under the runtime directory.
+  it("puts the hub's app files under the XDG data, state and runtime directories", () => {
+    expect(
+      hubPathTable({
+        ...linux,
+        env: { XDG_DATA_HOME: "/data", XDG_STATE_HOME: "/state", XDG_RUNTIME_DIR: "/run/user/1000" }
+      })
+    ).toMatchObject({
+      hubData: "/data/herdr-hub",
+      hubState: "/state/herdr-hub",
+      hubRuntime: "/run/user/1000/herdr-hub"
+    })
+    expect(hubPathTable({ ...windows, env: { XDG_DATA_HOME: "E:\\data", XDG_RUNTIME_DIR: "E:\\run" } }))
+      .toMatchObject({ hubData: "E:\\data\\herdr-hub", hubRuntime: null })
+  })
+
   it("puts everything under HERDR_HUB_HOME, on any OS", () => {
     expect(hubPathTable({ ...linux, env: { HERDR_HUB_HOME: "/srv/hub", XDG_STATE_HOME: "/state" } })).toMatchObject({
       fleetConfig: "/srv/hub/config/fleet/config.json",
       fleetState: "/srv/hub/state/fleet",
-      appsConfig: "/srv/hub/config/apps.json"
+      appsConfig: "/srv/hub/config/apps.json",
+      hubData: "/srv/hub/data",
+      hubState: "/srv/hub/state/herdr-hub",
+      hubRuntime: "/srv/hub/run"
     })
     expect(hubPathTable({ ...windows, env: { HERDR_HUB_HOME: "E:\\hub" } })).toMatchObject({
       fleetConfig: "E:\\hub\\config\\fleet\\config.json",
       fleetState: "E:\\hub\\state\\fleet",
-      appsConfig: "E:\\hub\\config\\apps.json"
+      appsConfig: "E:\\hub\\config\\apps.json",
+      hubData: "E:\\hub\\data",
+      hubRuntime: null
     })
   })
 

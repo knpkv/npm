@@ -12,7 +12,7 @@
  *
  * @module
  */
-import { Context, Effect, FileSystem, Layer, Schema } from "effect"
+import { Context, Effect, Layer, Redacted, Schema } from "effect"
 import { HttpClient, HttpClientRequest, type HttpClientResponse } from "effect/http"
 import { type AppId, GrantInvalid, type ShellService, ShellServiceUnavailable } from "./manifest.js"
 import { CurrentGrant } from "./route.js"
@@ -60,24 +60,19 @@ export const standaloneShellServices = (host: HostInfo): ShellServiceCalls => {
 export interface AttachedOptions {
   readonly app: AppId
   readonly hubUrl: string
-  /** Read on every call: the hub issues a fresh token each time it starts, and the app outlives that. */
-  readonly tokenFile: string
+  /** This spawn's hub token, from the handshake. */
+  readonly token: Redacted.Redacted<string>
   readonly declared: ReadonlyArray<ShellService>
 }
 
 /** Attached: every call goes to the hub's loopback listener with this app's current token. */
 export const attachedShellServices = Effect.fn("HubApp.attachedShellServices")(function*(options: AttachedOptions) {
   const client = yield* HttpClient.HttpClient
-  const fileSystem = yield* FileSystem.FileSystem
   const url = (path: string) => new URL(path, options.hubUrl).href
   const authorized = (request: HttpClientRequest.HttpClientRequest) =>
-    fileSystem.readFileString(options.tokenFile).pipe(
-      Effect.map((token) =>
-        request.pipe(
-          HttpClientRequest.bearerToken(token.trim()),
-          HttpClientRequest.setHeader(hubHeaders.app, options.app)
-        )
-      )
+    request.pipe(
+      HttpClientRequest.bearerToken(Redacted.value(options.token)),
+      HttpClientRequest.setHeader(hubHeaders.app, options.app)
     )
   const declare = (service: ShellService) =>
     options.declared.includes(service)
@@ -94,7 +89,7 @@ export const attachedShellServices = Effect.fn("HubApp.attachedShellServices")(f
     Effect.gen(function*() {
       yield* declare(service)
       const response: HttpClientResponse.HttpClientResponse = yield* request.pipe(
-        Effect.flatMap(authorized),
+        Effect.map(authorized),
         Effect.flatMap((built) => client.execute(built)),
         Effect.mapError(hubDown(service))
       )

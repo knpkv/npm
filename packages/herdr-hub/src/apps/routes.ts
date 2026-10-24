@@ -3,7 +3,7 @@
  *
  * - `GET /v1/apps`: every registered app's state, for the shell's navigation.
  * - `/apps/<id>/v1/modules/<id>/*` and `/apps/<id>/app/assets/*`: authenticated on the hub's listener,
- *   then proxied to the app's socket with the caller, a request id and a grant.
+ *   then proxied to the app's endpoint with its spawn's secret, the caller, a request id and a grant.
  * - `/v1/app-services/*` (loopback listener only): what an app server asks of the hub, authenticated by
  *   the app's token.
  *
@@ -28,7 +28,7 @@ import {
   RelayPost,
   type ShellService
 } from "@knpkv/hub-app"
-import { Effect, type Exit, Option, Schema } from "effect"
+import { Effect, type Exit, Option, Redacted, Schema } from "effect"
 import type { IncomingMessage, ServerResponse } from "node:http"
 import type { ListenerMode } from "../internal/listener.js"
 import type { AppTokens, Grants } from "./grants.js"
@@ -122,8 +122,11 @@ export const handleAppsRoute = async <E, R>(
     send(response, 404, { error: "not_found" })
     return true
   }
-  if (app.state._tag !== "Ready") {
-    send(response, 503, { error: "app_unavailable", reason: app.state.reason })
+  if (app.state._tag !== "Ready" || app.reach === null) {
+    send(response, 503, {
+      error: "app_unavailable",
+      reason: app.state._tag === "Unavailable" ? app.state.reason : "not_running"
+    })
     return true
   }
   if (moduleRoute && !app.state.manifest.module.listeners.some((listener) => listener === context.listener)) {
@@ -150,9 +153,12 @@ export const handleAppsRoute = async <E, R>(
     send(response, 500, { error: "internal" })
     return true
   }
+  // The spawn's secret goes with every request, assets included: the app answers nothing without it.
+  const secret = { [hubHeaders.appSecret]: Redacted.value(app.reach.secret) }
   const added = minted === null
-    ? {}
+    ? secret
     : {
+      ...secret,
       [hubHeaders.requestId]: minted.value.requestId,
       [hubHeaders.listener]: context.listener,
       [hubHeaders.caller]: encodeCaller(caller.value),
@@ -161,7 +167,7 @@ export const handleAppsRoute = async <E, R>(
   const path = `${target.rest}${url.search}`
   const proxied = await context.runtime.runPromiseExit(
     proxyToSocket(
-      app.socket,
+      app.reach.endpoint,
       `/apps/${app.id}/`,
       path,
       request,

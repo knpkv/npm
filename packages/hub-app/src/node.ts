@@ -1,9 +1,10 @@
 /**
  * The one runner every app uses. The same entry serves either way:
  *
- * - **attached** (`--socket <path>`): an owner-only unix socket the hub proxies to. The caller and grant
- *   come from the hub's `x-hub-*` headers, which only the socket listener trusts. Shell services go to
- *   `HUB_URL` with the token in `HUB_APP_TOKEN_FILE`.
+ * - **attached** (`--attach`): the hub started this process and wrote a {@link HubHandshake} on stdin: the
+ *   endpoint to listen on (a unix socket or a Windows named pipe), the hub's URL, this spawn's token and its
+ *   secret. Every request must carry the secret before any `x-hub-*` header is read; the caller and grant then
+ *   come from those headers. The end of stdin stops the app.
  * - **standalone** (`[serve] [--port <n>] [--no-open]`): loopback TCP with its own owner session and the
  *   minimal shell at `/`. The caller is this machine's owner; shell services that need the hub are absent.
  *
@@ -16,7 +17,7 @@ import { NodeHttpServer } from "@effect/platform-node"
 import type { BrowserLaunch, BrowserLaunchOutputError } from "@knpkv/browser-pairing/launch"
 import { openOrServe } from "@knpkv/browser-pairing/launch"
 import * as OwnerSession from "@knpkv/browser-pairing/owner-session"
-import { Context, Deferred, Effect, FileSystem, Layer, Option, Path, Result, Schema } from "effect"
+import { Context, Deferred, Effect, FileSystem, Layer, Option, Path, Redacted, Result, Schema, Stdio } from "effect"
 import {
   Etag,
   HttpPlatform,
@@ -29,6 +30,7 @@ import {
 import { createServer } from "node:http"
 import { hostname, userInfo } from "node:os"
 import { parseArgs } from "node:util"
+import { readHandshake } from "./handshake.js"
 import type { ShellServices } from "./hub-client.js"
 import { attachedLayer, standaloneLayer } from "./hub-client.js"
 import { AppManifest, type AppManifestInput, AppStartError } from "./manifest.js"
@@ -45,7 +47,7 @@ import {
 } from "./route.js"
 import { cacheSuccess, shellCssCacheControl } from "./shell-cache.js"
 import { shellCssVersion, standaloneShellHtml } from "./standalone-page.js"
-import { appPaths, hubHeaders } from "./wire.js"
+import { appPaths, hubHeaders, sameSecret } from "./wire.js"
 
 /** What an app hands the runner. Handlers may use {@link ShellServices}; the runner provides it. */
 export interface AppServer<E, R> {
@@ -57,7 +59,8 @@ export interface AppServer<E, R> {
 }
 
 export const RunMode = Schema.Union([
-  Schema.TaggedStruct("Attached", { socket: Schema.String, hubUrl: Schema.String, tokenFile: Schema.String }),
+  // Everything else arrives in the handshake on stdin.
+  Schema.TaggedStruct("Attached", {}),
   Schema.TaggedStruct("Standalone", {
     // 0 picks a free port; the sign-in link names the one bound.
     port: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 65_535 })),
@@ -66,11 +69,10 @@ export const RunMode = Schema.Union([
 ])
 export type RunMode = typeof RunMode.Type
 
-/** Read the mode from argv and environment. `--socket` means attached; anything else is standalone. */
+/** Read the mode from argv. `--attach` means attached; anything else is standalone. */
 export const readRunMode = (
   manifest: AppManifestInput,
-  argv: ReadonlyArray<string>,
-  env: Readonly<Record<string, string | undefined>>
+  argv: ReadonlyArray<string>
 ): Result.Result<RunMode, AppStartError> => {
   const parsed = Result.try({
     try: () =>
@@ -78,7 +80,7 @@ export const readRunMode = (
         args: [...argv],
         allowPositionals: true,
         options: {
-          socket: { type: "string" },
+          attach: { type: "boolean", default: false },
           port: { type: "string" },
           "no-open": { type: "boolean", default: false }
         }
@@ -91,13 +93,8 @@ export const readRunMode = (
     return Result.fail(new AppStartError({ reason: "invalid_arguments", cause: positionals }))
   }
   const decode = Schema.decodeUnknownResult(RunMode)
-  const decoded = values.socket !== undefined
-    ? decode({
-      _tag: "Attached",
-      socket: values.socket,
-      hubUrl: env.HUB_URL,
-      tokenFile: env.HUB_APP_TOKEN_FILE
-    })
+  const decoded = values.attach === true
+    ? decode({ _tag: "Attached" })
     : decode({
       _tag: "Standalone",
       port: values.port === undefined ? manifest.standalone.defaultPort : Number(values.port),
@@ -153,7 +150,7 @@ const failureResponse = (failure: ModuleRouteFailure) =>
 
 const notFound = HttpServerResponse.json({ code: "not_found" }, { status: 404 })
 
-/** The caller the hub authenticated, from the socket listener's `x-hub-caller` header. */
+/** The caller the hub authenticated, from its `x-hub-caller` header. */
 const hubCaller = Effect.gen(function*() {
   const request = yield* HttpServerRequest.HttpServerRequest
   const header = request.headers[hubHeaders.caller]
@@ -245,56 +242,59 @@ const appRoutes = (
 const assetRoutes = (clientDirectory: string) =>
   HttpStaticServer.layer({ root: clientDirectory, prefix: appPaths.assets, cacheControl: "no-cache" })
 
-/** Remove a stale socket from a previous run; refuse to touch anything that isn't one. */
-const clearSocket = Effect.fn("HubApp.clearSocket")(function*(socket: string) {
-  const fileSystem = yield* FileSystem.FileSystem
-  if (!(yield* fileSystem.exists(socket))) return
-  const info = yield* fileSystem.stat(socket)
-  if (info.type !== "Socket") return yield* new AppStartError({ reason: "listen", cause: "not a socket" })
-  yield* fileSystem.remove(socket)
-}, Effect.mapError((cause) => cause._tag === "AppStartError" ? cause : new AppStartError({ reason: "listen", cause })))
+/** Behind the hub: module routes at their own paths, the caller and grant from its headers. */
+const hubPolicy: ListenerPolicy<never, HttpServerRequest.HttpServerRequest> = {
+  routePrefix: "",
+  serveHubReads: true,
+  // The hub forwards only requests its own listener admitted, and checked same-origin first; it names that
+  // listener so the descriptor's own `listeners` still decide.
+  listener: hubListener,
+  authorize: hubCaller,
+  sameOrigin: Effect.void
+}
 
-/** Attached mode alone: what the hub and its tests run. Needs no browser opener. */
-export const serveAttached = Effect.fn("HubApp.serveAttached")(function*<E, R>(
-  app: AppServer<E, R>,
-  mode: Extract<RunMode, { readonly _tag: "Attached" }>
-) {
-  const fileSystem = yield* FileSystem.FileSystem
+/**
+ * Attached mode: read the hub's handshake from stdin, listen on its endpoint, and stop when stdin ends. Needs no
+ * browser opener.
+ */
+export const serveAttached = Effect.fn("HubApp.serveAttached")(function*<E, R>(app: AppServer<E, R>) {
+  const stdio = yield* Stdio.Stdio
+  const stdin = yield* readHandshake(stdio.stdin)
+  const handshake = yield* stdin.handshake
   const manifest = yield* servedManifest(app)
   const services = yield* Layer.build(
-    attachedLayer({ app: manifest.id, hubUrl: mode.hubUrl, tokenFile: mode.tokenFile, declared: manifest.services })
+    attachedLayer({
+      app: manifest.id,
+      hubUrl: handshake.hubUrl,
+      token: handshake.hubToken,
+      declared: manifest.services
+    })
   )
   const { mounted, needsYou } = yield* mountModule(manifest, app.handlers).pipe(Effect.provideContext(services))
   const badge = app.badge?.pipe(Effect.provideContext(services))
-  yield* clearSocket(mode.socket)
-  const policy: ListenerPolicy<never, HttpServerRequest.HttpServerRequest> = {
-    routePrefix: "",
-    serveHubReads: true,
-    // The hub forwards only requests its own listener admitted, and checked same-origin first; it names that
-    // listener so the descriptor's own `listeners` still decide.
-    listener: hubListener,
-    authorize: hubCaller,
-    sameOrigin: Effect.void
-  }
-  return yield* Layer.launch(
-    HttpRouter.serve(
-      Layer.mergeAll(appRoutes(manifest, mounted, needsYou, badge, policy), assetRoutes(app.clientDirectory)),
-      {
-        disableListenLog: true,
-        disableLogger: true
-      }
-    ).pipe(
-      Layer.provide(NodeHttpServer.layerServer(createServer, { path: mode.socket })),
-      Layer.provide(HttpPlatform.layer),
-      Layer.provide(Etag.layer),
-      // The hub's headers are trusted on this socket, so only its owner may connect, whatever the umask.
-      Layer.tap(() =>
-        fileSystem.chmod(mode.socket, 0o600).pipe(
-          Effect.mapError((cause) => new AppStartError({ reason: "listen", cause }))
-        )
-      )
-    )
+  const secret = Redacted.value(handshake.appSecret)
+  // First on every request, `/app/manifest` included: no `x-hub-*` header is read without the spawn's secret.
+  const hubOnly = HttpRouter.middleware((httpEffect) =>
+    Effect.gen(function*() {
+      const request = yield* HttpServerRequest.HttpServerRequest
+      return sameSecret(request.headers[hubHeaders.appSecret], secret)
+        ? yield* httpEffect
+        : yield* HttpServerResponse.json({ code: "not_hub" }, { status: 403 })
+    }), { global: true })
+  const server = HttpRouter.serve(
+    Layer.mergeAll(
+      appRoutes(manifest, mounted, needsYou, badge, hubPolicy),
+      assetRoutes(app.clientDirectory),
+      hubOnly
+    ),
+    { disableListenLog: true, disableLogger: true }
+  ).pipe(
+    Layer.provide(NodeHttpServer.layerServer(createServer, { path: handshake.endpoint })),
+    Layer.provide(HttpPlatform.layer),
+    Layer.provide(Etag.layer)
   )
+  // The end of stdin is the hub's stop: the listener closes and the process exits.
+  return yield* Layer.launch(server).pipe(Effect.raceFirst(stdin.closed))
 })
 
 const ownerCaller = (login: string): typeof ModuleCaller.Encoded => ({
@@ -443,7 +443,12 @@ export const serveApp = Effect.fn("HubApp.serveApp")(function*<E, R>(
   mode: RunMode,
   launch: BrowserLaunch
 ) {
-  return mode._tag === "Attached" ? yield* serveAttached(app, mode) : yield* serveStandalone(app, mode, launch)
+  switch (mode._tag) {
+    case "Attached":
+      return yield* serveAttached(app)
+    case "Standalone":
+      return yield* serveStandalone(app, mode, launch)
+  }
 }, Effect.mapError((cause) => cause._tag === "AppStartError" ? cause : new AppStartError({ reason: "listen", cause })))
 
 export { runApp } from "./main.js"

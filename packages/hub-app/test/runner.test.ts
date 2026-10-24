@@ -2,9 +2,10 @@
 import { NodeHttpClient, NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
 import { BrowserOpener } from "@knpkv/browser-pairing/launch"
-import { Effect, FileSystem, Layer, Result, Schedule, Schema, Sink, Stdio } from "effect"
+import { Effect, FileSystem, Layer, Result, Schedule, Schema, Sink, Stdio, Stream } from "effect"
 import { createServer, type IncomingHttpHeaders, request as httpRequest, type Server } from "node:http"
 import { tmpdir, userInfo } from "node:os"
+import process from "node:process"
 import { ShellServices } from "../src/hub-client.js"
 import {
   AppId,
@@ -35,6 +36,12 @@ const manifest: AppManifestInput = {
   standalone: { defaultPort: 3199 }
 }
 
+/** Where a test app listens: a unix socket in `directory`, or a uniquely named pipe on Windows. */
+const endpointIn = (directory: string, name: string): string =>
+  process.platform === "win32"
+    ? `\\\\.\\pipe\\hub-test-${name}-${Math.random().toString(16).slice(2)}`
+    : `${directory}/${name}.sock`
+
 const Empty = Schema.fromURLSearchParams(Schema.Struct({}))
 const handlers = Layer.effect(
   ModuleHandlers,
@@ -53,8 +60,8 @@ const handlers = Layer.effect(
   })
 )
 
-/** One request over a unix socket. */
-const onSocket = (socket: string, method: string, path: string, headers: Record<string, string>, body?: string) =>
+/** One request over the app's endpoint. */
+const onEndpoint = (socket: string, method: string, path: string, headers: Record<string, string>, body?: string) =>
   Effect.callback<{ readonly status: number; readonly body: string }, Error>((resume) => {
     const outgoing = httpRequest({ socketPath: socket, method, path, headers }, (incoming) => {
       const chunks: Array<Buffer> = []
@@ -69,32 +76,19 @@ const onSocket = (socket: string, method: string, path: string, headers: Record<
   })
 
 describe("readRunMode", () => {
-  it("is attached with --socket, reading the hub from the environment", () => {
-    const mode = readRunMode(manifest, ["--socket", "/run/probe.sock"], {
-      HUB_URL: "http://127.0.0.1:3101",
-      HUB_APP_TOKEN_FILE: "/run/probe.token"
-    })
-    expect(mode).toEqual(Result.succeed({
-      _tag: "Attached",
-      socket: "/run/probe.sock",
-      hubUrl: "http://127.0.0.1:3101",
-      tokenFile: "/run/probe.token"
-    }))
-  })
-
   it("is standalone otherwise, on the manifest's port unless --port says", () => {
-    expect(readRunMode(manifest, [], {})).toEqual(Result.succeed({ _tag: "Standalone", port: 3199, open: true }))
-    expect(readRunMode(manifest, ["serve", "--port", "4000", "--no-open"], {})).toEqual(
+    expect(readRunMode(manifest, [])).toEqual(Result.succeed({ _tag: "Standalone", port: 3199, open: true }))
+    expect(readRunMode(manifest, ["serve", "--port", "4000", "--no-open"])).toEqual(
       Result.succeed({ _tag: "Standalone", port: 4000, open: false })
     )
   })
 
-  it("refuses attached without the hub's environment, and unknown arguments", () => {
-    expect(Result.isFailure(readRunMode(manifest, ["--socket", "/run/probe.sock"], {}))).toBe(true)
-    expect(Result.isFailure(readRunMode(manifest, ["launch"], {}))).toBe(true)
-    expect(Result.isFailure(readRunMode(manifest, ["--port", "seventy"], {}))).toBe(true)
-    expect(Result.isFailure(readRunMode(manifest, ["--port", "70000"], {}))).toBe(true)
-    expect(Result.isFailure(readRunMode(manifest, ["--port", "-1"], {}))).toBe(true)
+  it("refuses unknown arguments, P0's --socket among them", () => {
+    expect(Result.isFailure(readRunMode(manifest, ["--socket", "/run/probe.sock"]))).toBe(true)
+    expect(Result.isFailure(readRunMode(manifest, ["launch"]))).toBe(true)
+    expect(Result.isFailure(readRunMode(manifest, ["--port", "seventy"]))).toBe(true)
+    expect(Result.isFailure(readRunMode(manifest, ["--port", "70000"]))).toBe(true)
+    expect(Result.isFailure(readRunMode(manifest, ["--port", "-1"]))).toBe(true)
   })
 })
 
@@ -107,7 +101,6 @@ describe("attached runner", () => {
         const clientDirectory = `${directory}/client`
         yield* fileSystem.makeDirectory(clientDirectory)
         yield* fileSystem.writeFileString(`${clientDirectory}/client.js`, "export default {}\n")
-        yield* fileSystem.writeFileString(`${directory}/token`, "app-token\n")
 
         // A stand-in hub: records what the app sent to the jobs service.
         const seen: Array<
@@ -137,42 +130,53 @@ describe("attached runner", () => {
         )
         const { port } = Schema.decodeUnknownSync(Schema.Struct({ port: Schema.Number }))(hub.address())
 
-        const socket = `${directory}/probe.sock`
-        yield* serveAttached({ manifest, handlers, clientDirectory }, {
-          _tag: "Attached",
-          socket,
+        const endpoint = endpointIn(directory, "probe")
+        const secret = "s".repeat(43)
+        const handshake = JSON.stringify({
+          v: 1,
+          endpoint,
           hubUrl: `http://127.0.0.1:${port}`,
-          tokenFile: `${directory}/token`
-        }).pipe(Effect.forkScoped)
-        yield* onSocket(socket, "GET", "/app/health", {}).pipe(
+          hubToken: "app-token",
+          appSecret: secret
+        })
+        const hubStdin = yield* Layer.build(
+          Stdio.layerTest({
+            stdin: Stream.make(new TextEncoder().encode(`${handshake}\n`)).pipe(Stream.concat(Stream.never))
+          })
+        )
+        yield* serveAttached({ manifest, handlers, clientDirectory }).pipe(
+          Effect.provideContext(hubStdin),
+          Effect.forkScoped
+        )
+        // Every request below comes from the hub, so it carries the spawn's secret.
+        const onSocket = (method: string, path: string, headers: Record<string, string>, body?: string) =>
+          onEndpoint(endpoint, method, path, { ...headers, [hubHeaders.appSecret]: secret }, body)
+        yield* onSocket("GET", "/app/health", {}).pipe(
           Effect.retry({ schedule: Schedule.spaced("20 millis"), times: 100 })
         )
 
         // The hub's own reads are served to the hub.
-        expect((yield* onSocket(socket, "GET", "/app/badge", {})).status).toBe(200)
-        const served = yield* onSocket(socket, "GET", "/app/manifest", {})
+        expect((yield* onSocket("GET", "/app/badge", {})).status).toBe(200)
+        const served = yield* onSocket("GET", "/app/manifest", {})
         expect(JSON.parse(served.body).client).toEqual({ entry: "client.js", css: [] })
-
-        // Only the hub's owner can reach the socket, whatever the umask.
-        expect((yield* fileSystem.stat(socket)).mode & 0o777).toBe(0o600)
 
         const caller = JSON.stringify({ login: "viewer", sameNode: false, provenance: "authenticated_remote" })
         const local = { [hubHeaders.listener]: "local" }
-        expect((yield* onSocket(socket, "GET", "/v1/modules/probe/who", local)).status).toBe(403)
+        expect((yield* onSocket("GET", "/v1/modules/probe/who", local)).status).toBe(403)
         // The hub names the listener that admitted the request; the descriptor's own `listeners` decide.
-        expect((yield* onSocket(socket, "GET", "/v1/modules/probe/who", { [hubHeaders.caller]: caller })).status)
+        expect((yield* onSocket("GET", "/v1/modules/probe/who", { [hubHeaders.caller]: caller })).status)
           .toBe(403)
         expect(
-          (yield* onSocket(socket, "GET", "/v1/modules/probe/who", {
+          (yield* onSocket("GET", "/v1/modules/probe/who", {
             [hubHeaders.caller]: caller,
             [hubHeaders.listener]: "serve"
           })).status
         ).toBe(404)
-        const who = yield* onSocket(socket, "GET", "/v1/modules/probe/who", { ...local, [hubHeaders.caller]: caller })
+        const who = yield* onSocket("GET", "/v1/modules/probe/who", { ...local, [hubHeaders.caller]: caller })
         expect(JSON.parse(who.body)).toBe("viewer")
 
         const grant = "g".repeat(43)
-        const job = yield* onSocket(socket, "POST", "/v1/modules/probe/job", {
+        const job = yield* onSocket("POST", "/v1/modules/probe/job", {
           ...local,
           [hubHeaders.caller]: caller,
           [hubHeaders.grant]: grant,
@@ -185,23 +189,13 @@ describe("attached runner", () => {
           body: JSON.stringify({ grant, payload: { kind: "noop" } })
         }])
 
-        // The hub rotates the app's token when it restarts; the app reads the file on every call.
-        yield* fileSystem.writeFileString(`${directory}/token`, "rotated-token\n")
-        yield* onSocket(socket, "POST", "/v1/modules/probe/job", {
-          ...local,
-          [hubHeaders.caller]: caller,
-          [hubHeaders.grant]: "h".repeat(43),
-          "content-type": "application/json"
-        }, JSON.stringify({ kind: "noop" }))
-        expect(seen[1]?.authorization).toBe("Bearer rotated-token")
-
-        const ungranted = yield* onSocket(socket, "POST", "/v1/modules/probe/job", {
+        const ungranted = yield* onSocket("POST", "/v1/modules/probe/job", {
           ...local,
           [hubHeaders.caller]: caller,
           "content-type": "application/json"
         }, "{}")
         expect(JSON.parse(ungranted.body)).toEqual({ code: "GrantInvalid" })
-        expect(seen).toHaveLength(2)
+        expect(seen).toHaveLength(1)
       }).pipe(Effect.scoped))
   })
 })

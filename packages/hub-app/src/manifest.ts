@@ -3,8 +3,9 @@
  *
  * **Mental model**
  *
- * - `apps.json` (written by nix) holds only ids and sockets. Everything else comes from the app's own
- *   `GET /app/manifest`, so the file can't disagree with the code.
+ * - `apps.json` (written by the `herdr-hub apps` CLI or by nix) says which packages are installed, where, and how
+ *   the hub runs them. What an app *is* comes from its own `GET /app/manifest`, so the file can't disagree with
+ *   the code.
  * - `contract` is one integer for the whole shell ↔ app surface: manifest shape, wire paths, shell
  *   services and `ShellContext`. Additive changes keep it; the hub supports the current and previous one.
  * - Every per-app problem becomes an {@link AppState} `Unavailable`, never a hub failure.
@@ -57,17 +58,72 @@ export interface AppManifest extends Schema.Schema.Type<typeof AppManifest> {}
 /** What an app declares in code; the runner adds `client` from its build output. */
 export type AppManifestInput = Omit<AppManifest, "client">
 
-const SocketPath = Schema.String.check(Schema.isPattern(/^\//), Schema.isMaxLength(107))
+/**
+ * One installed app in `apps.json` v2: the prefix holding its `node_modules`, the script the hub runs with its
+ * own node, and how it runs.
+ */
+export const InstalledApp = Schema.Struct({
+  id: AppId,
+  package: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(214)),
+  /** Exact, resolved. */
+  version: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(64)),
+  /** The prefix holding `node_modules`. */
+  dir: Schema.String.check(Schema.isNonEmpty()),
+  /** The app's script relative to `dir`: `node_modules/<package>/<hubApp.bin>`. Run with the hub's own node. */
+  bin: Schema.String.check(Schema.isNonEmpty()),
+  enabled: Schema.Boolean,
+  /** V8 heap cap (`--max-old-space-size`); native and RSS growth are not capped. */
+  memoryMb: Schema.Int.check(Schema.isBetween({ minimum: 64, maximum: 16_384 })),
+  allowScripts: Schema.Boolean
+})
+export interface InstalledApp extends Schema.Schema.Type<typeof InstalledApp> {}
 
-/** `~/.config/herdr/apps.json`, written by nix. Unknown keys are refused. */
+/**
+ * `apps.json` (v2; there is no v1 reader): the hub starts and supervises each app itself. One writer, named in the file: the `herdr-hub
+ * apps` CLI (`cli`) or nix (`nix`, which the CLI then refuses to edit). `trust.scopes` holds npm scopes
+ * (`@knpkv`) or exact package names the CLI installs from without `apps trust add`.
+ */
 export const AppsConfig = Schema.Struct({
-  v: Schema.Literal(1),
-  apps: Schema.Array(Schema.Struct({ id: AppId, socket: SocketPath }))
+  v: Schema.Literal(2),
+  managedBy: Schema.Literals(["cli", "nix"]),
+  trust: Schema.Struct({ scopes: Schema.Array(Schema.String) }),
+  apps: Schema.Array(InstalledApp)
 })
 export interface AppsConfig extends Schema.Schema.Type<typeof AppsConfig> {}
 
+/**
+ * Line 1 of an attached app's stdin, written by the hub at spawn; the pipe then stays open until stop. The
+ * endpoint is a socket path or a `\\.\pipe\` name picked per spawn. The token and secret are fresh per spawn
+ * and never touch disk, env or argv.
+ */
+export const HubHandshake = Schema.Struct({
+  v: Schema.Literal(1),
+  endpoint: Schema.String.check(Schema.isNonEmpty()),
+  hubUrl: Schema.String.check(Schema.isNonEmpty()),
+  hubToken: Schema.RedactedFromValue(Schema.String),
+  appSecret: Schema.RedactedFromValue(Schema.String)
+})
+export interface HubHandshake extends Schema.Schema.Type<typeof HubHandshake> {}
+
+/** The `hubApp` field of an app's package.json: what the installer checks before and after install. */
+export const HubAppPackageField = Schema.Struct({
+  /**
+   * The script the hub runs, as a file path inside the package (`dist/bin.js`). Not a `bin` key: the hub runs it
+   * with its own node, so it never depends on npm's bin links or `.cmd` shims.
+   */
+  bin: Schema.String.check(Schema.isNonEmpty()),
+  contract: AppContract,
+  services: Schema.Array(ShellService)
+})
+export interface HubAppPackageField extends Schema.Schema.Type<typeof HubAppPackageField> {}
+
 export const AppUnavailableReason = Schema.Literals([
+  "starting",
   "not_running",
+  "crashloop",
+  "disabled",
+  "install_missing",
+  "health",
   "timeout",
   "invalid_manifest",
   "id_mismatch",
@@ -129,6 +185,6 @@ export class ShellServiceUnavailable extends Schema.TaggedError<ShellServiceUnav
 
 /** The app couldn't start: its manifest, its listener, or its handler layer. */
 export class AppStartError extends Schema.TaggedError<AppStartError>()("AppStartError", {
-  reason: Schema.Literals(["invalid_manifest", "invalid_arguments", "listen", "layer"]),
+  reason: Schema.Literals(["invalid_manifest", "invalid_arguments", "listen", "layer", "handshake"]),
   cause: Schema.Defect()
 }) {}

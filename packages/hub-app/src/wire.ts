@@ -23,7 +23,22 @@ export const hubHeaders = {
   requestId: "x-hub-request-id",
   grant: "x-hub-grant",
   listener: "x-hub-listener",
-  app: "x-hub-app"
+  app: "x-hub-app",
+  /** The per-spawn secret from the handshake; an attached app answers nothing without it. */
+  appSecret: "x-hub-app-secret"
+}
+
+/**
+ * Whether `presented` is `expected`, comparing every character whatever the first mismatch, so timing doesn't
+ * reveal a prefix. A different length fails first; the length of a secret isn't the secret.
+ */
+export const sameSecret = (presented: string | undefined, expected: string): boolean => {
+  if (presented === undefined || presented.length !== expected.length) return false
+  let difference = 0
+  for (let index = 0; index < expected.length; index++) {
+    difference |= presented.charCodeAt(index) ^ expected.charCodeAt(index)
+  }
+  return difference === 0
 }
 
 /** Paths the hub serves to apps on its loopback listener. */
