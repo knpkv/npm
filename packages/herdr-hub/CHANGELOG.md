@@ -2,6 +2,16 @@
 
 Released as `@knpkv/herdr-approvals` up to 0.18.0; the headings below are that package's history.
 
+## 0.60.1
+
+### Patch Changes
+
+- [#1117](https://github.com/knpkv/npm/pull/1117) [`c16402a`](https://github.com/knpkv/npm/commit/c16402a8da0ed0b7ef3acf9861c5ce6532d7fcc1) Thanks [@konopkov](https://github.com/konopkov)! - The hub takes an approve or reject only from an approval node, as each peer's approval listener already does. Before this, any allowed login on any tailnet node could decide a hub job, including a script on a fleet host holding a dashboard proof.
+
+- [#1116](https://github.com/knpkv/npm/pull/1116) [`d26eb55`](https://github.com/knpkv/npm/commit/d26eb55cf1af32d8011cb36cecb0d01641b2a1ea) Thanks [@konopkov](https://github.com/konopkov)! - The Sandboxes owner is an allowed login on any tailnet node that is not a fleet host, not only the hub machine, so the owner signs the hub in to AWS and runs sandbox jobs from their own devices. Fleet approvals stay limited to approval nodes. `ModuleCaller` gains `owner`.
+- Updated dependencies [[`d26eb55`](https://github.com/knpkv/npm/commit/d26eb55cf1af32d8011cb36cecb0d01641b2a1ea)]:
+  - @knpkv/hub-app@0.4.1
+
 ## 0.60.0
 
 ### Minor Changes
