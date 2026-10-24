@@ -26,7 +26,7 @@ import { standaloneNotice } from "./internal/standalone-notice.js"
 import { noStartedWorkerStore, startedWorker } from "./internal/started-worker.js"
 import { loadUiAssets } from "./internal/ui-assets.js"
 import { makeHostOperations } from "./operations.js"
-import { makeSandboxPoolFromConfig } from "./sandbox-config.js"
+import { makeSandboxPoolFromConfig, sandboxesHostWarning } from "./sandbox-config.js"
 import { readSandboxesHost } from "./sandboxes-module.js"
 import { readStacksHost } from "./stacks-module.js"
 
@@ -45,6 +45,7 @@ export { HostdOperationsCompositionError } from "./errors.js"
 export {
   formatResetInspection,
   makeSandboxPoolFromConfig,
+  sandboxesHostWarning,
   type SandboxPoolAdapters,
   sandboxPoolAdapters,
   SandboxPoolConfigInvalid,
@@ -162,6 +163,8 @@ const hostdProgram = Effect.fn("Hostd.program")(function*(options: HostdProgramO
   }).pipe(Effect.provideContext(yield* Layer.build(FetchHttpClient.layer)))
   if (sandboxes !== null) {
     yield* Console.log(`hostd: sandbox pool ${sandboxes.mode}`)
+    const unserved = sandboxesHostWarning(config.host, sandboxesHost)
+    if (unserved !== null) yield* Console.error(unserved)
     yield* Effect.forkScoped(sandboxes.sweep)
   }
   const store = yield* Effect.acquireRelease(

@@ -9,6 +9,7 @@ import * as Path from "effect/Path"
 import {
   formatResetInspection,
   makeSandboxPoolFromConfig,
+  sandboxesHostWarning,
   sandboxPoolAdapters,
   SandboxPoolSettings,
   sandboxResetCheck
@@ -206,5 +207,16 @@ it("prints a reset inspection as the plan, the dry run and the budget hold", () 
       "  organization access role: global - IAMRole - PoolAccessRole - would remove",
       "incomplete discovery: none"
     ].join("\n")
+  )
+})
+
+it("warns when this host runs a pool but RELAY_SANDBOXES_HOST names no host or another one", () => {
+  expect(sandboxesHostWarning("hub-a", "hub-a")).toBeNull()
+  expect(sandboxesHostWarning("hub-a", "HUB-A")).toBeNull()
+  expect(sandboxesHostWarning("hub-a", null)).toBe(
+    "hostd: this host runs the sandbox pool, but RELAY_SANDBOXES_HOST is unset, so the hub serves no Sandboxes pages"
+  )
+  expect(sandboxesHostWarning("hub-a", "host-b")).toBe(
+    "hostd: this host runs the sandbox pool, but RELAY_SANDBOXES_HOST names host-b, so the hub serves no Sandboxes pages"
   )
 })

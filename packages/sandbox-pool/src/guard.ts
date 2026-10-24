@@ -110,21 +110,37 @@ const expectedFailures: ReadonlyArray<ExpectedFailure> = [
 /** logfmt `key=value` pairs; a quoted value is consumed whole, so text inside it never reads as another key. */
 const logfmtPair = /(?:^|\s)(\w+)=("(?:[^"\\]|\\.)*"|\S*)/g
 
-/** The line's top-level logfmt fields, quoted values unquoted. Resource listings without these have none. */
-const logfmtFields = (line: string): ReadonlyMap<string, string> =>
-  new Map(
-    Array.from(line.matchAll(logfmtPair), ([, key, value]) => [
-      key ?? "",
-      value !== undefined && value.startsWith("\"") ? value.slice(1, -1) : value ?? ""
-    ])
-  )
+/** A quoted value, kept whole, or an unquoted bracketed segment, which holds no fields of the line. */
+const quotedOrBracketed = /("(?:[^"\\]|\\.)*")|\[[^\]]*\]/g
 
-/** Whether a log line is one of `expectedFailures`, judged by its own owner=, resource_type= and error= fields. */
+/**
+ * The line's top-level logfmt fields, quoted values unquoted, each key with every value it was given. Text in
+ * unquoted brackets is not read. Resource listings without these have none.
+ */
+const logfmtFields = (line: string): ReadonlyMap<string, ReadonlyArray<string>> => {
+  const top = line.replace(quotedOrBracketed, (match, quoted: string | undefined) => quoted ?? " ")
+  const fields = new Map<string, Array<string>>()
+  for (const [, key = "", value = ""] of top.matchAll(logfmtPair)) {
+    fields.set(key, [...(fields.get(key) ?? []), value.startsWith("\"") ? value.slice(1, -1) : value])
+  }
+  return fields
+}
+
+/** The one value of `key`; a key the line names twice is ambiguous, so it has none. */
+const only = (fields: ReadonlyMap<string, ReadonlyArray<string>>, key: string): string | undefined => {
+  const values = fields.get(key)
+  return values?.length === 1 ? values[0] : undefined
+}
+
+/**
+ * Whether a log line is one of `expectedFailures`, judged by its own owner=, resource_type= and error= fields, each
+ * named exactly once.
+ */
 const isExpectedFailure = (line: string): boolean => {
   const fields = logfmtFields(line)
-  const region = fields.get("owner")
-  const resourceType = fields.get("resource_type")
-  const error = fields.get("error")
+  const region = only(fields, "owner")
+  const resourceType = only(fields, "resource_type")
+  const error = only(fields, "error")
   if (region === undefined || resourceType === undefined || error === undefined) return false
   return expectedFailures.some((expected) =>
     (expected.region === null || expected.region === region) && expected.types.has(resourceType) &&
