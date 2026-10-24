@@ -21,7 +21,7 @@ import { Clock, Effect, Predicate } from "effect"
 import { MINIMUM_WRITE_SECONDS, prepareProposal } from "../shared/writePlanning.js"
 import { ProposalRejectedError, type WriteResultResponse } from "./Api.js"
 import { evidenceBlockKey, evidenceMarker, type HeldPlan, reconcileConsumption } from "./WeekPlan.js"
-import { planSides } from "./WeekPlan.js"
+import { planPeriod, planSides } from "./WeekPlan.js"
 
 /** The engine operations these functions need. Narrow, so a test provides only what it must. */
 export type WriteCapableService = Pick<
@@ -117,7 +117,7 @@ const freshRead = (
 ): Effect.Effect<FreshRead, ReconcileService.ReconcileError> =>
   Effect.gen(function*() {
     const refreshed = yield* service.refreshRecordedTime(
-      Time.isoWeekPeriod(new Date(`${plan.plan.monday}T12:00:00`)),
+      planPeriod(plan.plan),
       { ...plan.report, sides },
       { jiraIssueKeys: [...plan.jiraReceiptIssueKeys, ...ticketKeys] }
     )

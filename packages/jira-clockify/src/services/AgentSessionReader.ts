@@ -303,22 +303,28 @@ export const decodeTranscript = (content: string, options: DecodeOptions): Reado
 /** Skip malformed external lines before the common segmenter sees them. */
 function* claudeTranscriptLines(content: string): Generator<SessionLine> {
   for (const rawLine of content.split("\n")) {
-    const json = decodeJson(rawLine)
-    if (Option.isNone(json)) continue
-    const decoded = decodeLine(json.value)
-    if (Option.isNone(decoded)) continue
-    const line = decoded.value
-    if (line.sessionId === undefined || line.timestamp === undefined || line.cwd === undefined) continue
-    const classified = claudePresence(line)
-    if (classified === undefined) continue
-    yield {
-      sessionId: line.sessionId,
-      cwd: line.cwd,
-      gitBranch: line.gitBranch ?? null,
-      atMs: Date.parse(line.timestamp),
-      ...classified
-    }
+    const line = claudeSessionLine(rawLine)
+    if (Option.isSome(line)) yield line.value
   }
+}
+
+/** One raw Claude transcript line as session evidence, or none when it is malformed or carries none. */
+const claudeSessionLine = (rawLine: string): Option.Option<SessionLine> => {
+  const json = decodeJson(rawLine)
+  if (Option.isNone(json)) return Option.none()
+  const decoded = decodeLine(json.value)
+  if (Option.isNone(decoded)) return Option.none()
+  const line = decoded.value
+  if (line.sessionId === undefined || line.timestamp === undefined || line.cwd === undefined) return Option.none()
+  const classified = claudePresence(line)
+  if (classified === undefined) return Option.none()
+  return Option.some({
+    sessionId: line.sessionId,
+    cwd: line.cwd,
+    gitBranch: line.gitBranch ?? null,
+    atMs: Date.parse(line.timestamp),
+    ...classified
+  })
 }
 
 /**
@@ -557,7 +563,15 @@ export const layer = Layer.effect(
           // it takes that ticket out of the overlap sharing — so the interval it should have halved
           // is credited whole to whichever session happened to be readable, and `watch` writes it.
           // An out-of-scope path never reaches here; `transcriptPaths` has already excluded it.
-          const content = yield* fs.readFileString(filePath).pipe(
+          // Streamed by line: long sessions outgrow Node's maximum string length (~512 MiB), and a
+          // whole-file read then fails as "invalid encoding" on valid UTF-8.
+          const lines = yield* fs.stream(filePath).pipe(
+            Stream.decodeText(),
+            Stream.splitLines,
+            Stream.map(claudeSessionLine),
+            Stream.filter(Option.isSome),
+            Stream.map((decoded) => decoded.value),
+            Stream.runCollect,
             Effect.mapError(
               (error) =>
                 new AgentSessionError({
@@ -567,7 +581,7 @@ export const layer = Layer.effect(
             )
           )
 
-          addSegments(decodeTranscript(content, { fromMs, toMs, idleCapMs }))
+          addSegments(decodeSessionLines(lines, { fromMs, toMs, idleCapMs }))
         }
 
         const hasCodex = yield* fs

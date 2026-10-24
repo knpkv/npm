@@ -85,6 +85,13 @@ export type { RecordedEntry } from "./SavedEntries.js"
 /** Concurrent Jira worklog reads per tally. Bounded so a large week does not trip rate limits. */
 const JIRA_WORKLOG_READ_CONCURRENCY = 8
 
+/**
+ * A Jira client failure as text. The generated status errors carry no message, so `String()` of one
+ * reads "Error"; the tag (`GetIssueWorklog404`) is what names the status.
+ */
+const jiraFailureText = (error: { readonly _tag: string; readonly message?: string | undefined }): string =>
+  error.message === undefined || error.message === "" ? error._tag : `${error._tag}: ${error.message}`
+
 /** Server-private source evidence supplied only by the confirmed agent planner. */
 export interface SourceSegment {
   readonly rowId: string
@@ -386,6 +393,11 @@ export interface SessionProposalReport {
   readonly sides: ReconcileSides
   /** Attributed below the confidence floor — reported, never offered. */
   readonly withheld: ReadonlyArray<TicketDayCredit>
+  /**
+   * Session time on tickets Jira answered 404 for — deleted, or in a project this account cannot
+   * read. Reported, never offered: a write there would be refused. Absent from older reports.
+   */
+  readonly jiraUnseen?: ReadonlyArray<{ readonly ticketKey: string; readonly day: string; readonly seconds: number }>
   /** Hours no Attribution Signal could place. */
   readonly unattributed: ReadonlyArray<UnattributedDayCredit>
   /** Raw active windows unioned per ignored ticket/day before sharing. These hours are explanatory, not additive. */
@@ -881,25 +893,46 @@ export const layer = Layer.effect(
         return { tally, unlinked }
       })
 
-    /** Read every Jira page before treating an absent provider ID as deletion evidence. */
+    /**
+     * Read every Jira page before treating an absent provider ID as deletion evidence.
+     *
+     * `missingIsEmpty` lets an issue Jira answers 404 for read as `None`: an issue Jira cannot see.
+     * Pass it only when this
+     * run has already proven the site and credential good: a logged-out client also gets 404s, and
+     * reading those as empty would under-count Jira and invite a duplicate write.
+     */
     const readJiraWorklogs = Effect.fn("ReconcileService.readJiraWorklogs")(function*(
       client: ReturnType<typeof makeJiraApi>,
       issueKey: string,
       startedAfter: number,
-      startedBefore: number
+      startedBefore: number,
+      missingIsEmpty: boolean
     ) {
       const worklogs: Array<ReadableWorklog> = []
       const seenIds = new Set<string>()
       let nextStartAt = 0
       let expectedTotal: number | undefined
       for (;;) {
-        const page = yield* retryTransport(client.getIssueWorklog(issueKey, {
+        const read = yield* retryTransport(client.getIssueWorklog(issueKey, {
           params: { startAt: nextStartAt, startedAfter, startedBefore }
         })).pipe(
+          Effect.map(Option.some),
+          Effect.catchTag("GetIssueWorklog404", (cause) =>
+            missingIsEmpty && nextStartAt === 0
+              ? Effect.logWarning(
+                `Jira cannot see ${issueKey} (deleted, or a project this account cannot read); `
+                  + "not offering it"
+              ).pipe(Effect.as(Option.none()))
+              : Effect.fail(cause)),
           Effect.mapError((cause) =>
-            new ReconcileError({ message: `Jira worklog fetch failed for ${issueKey}: ${String(cause)}`, cause })
+            new ReconcileError({
+              message: `Jira worklog fetch failed for ${issueKey}: ${jiraFailureText(cause)}`,
+              cause
+            })
           )
         )
+        if (Option.isNone(read)) return Option.none<ReadonlyArray<ReadableWorklog>>()
+        const page = read.value
         const { maxResults, startAt, total, worklogs: entries } = page
         if (
           startAt !== nextStartAt ||
@@ -931,7 +964,7 @@ export const layer = Layer.effect(
           worklogs.push(parsed)
         }
         nextStartAt += entries.length
-        if (nextStartAt === total) return worklogs
+        if (nextStartAt === total) return Option.some<ReadonlyArray<ReadableWorklog>>(worklogs)
       }
     })
 
@@ -998,7 +1031,9 @@ export const layer = Layer.effect(
               ...((pageToken !== undefined) && { nextPageToken: pageToken })
             }
           })).pipe(
-            Effect.mapError((e) => new ReconcileError({ message: `Jira search failed: ${String(e)}`, cause: e }))
+            Effect.mapError((e) =>
+              new ReconcileError({ message: `Jira search failed: ${jiraFailureText(e)}`, cause: e })
+            )
           )
 
         const searched: Array<unknown> = []
@@ -1044,9 +1079,14 @@ export const layer = Layer.effect(
           }
           issueKeys.push(key)
         }
+        const searchedKeys = new Set(issueKeys)
         for (const key of requiredIssueKeys) {
           if (!issueKeys.includes(key)) issueKeys.push(key)
         }
+        // A successful window search, or a verified snapshot, proves the site and credential, so a
+        // 404 on a key that only session evidence named means the issue is gone or out of sight —
+        // not that Jira is unreachable. A searched key that 404s is still a contradiction and fails.
+        const siteProven = scope === "window" || (snapshot !== null && snapshot !== undefined)
 
         const toMs = period.to.getTime()
         const tally: Array<{
@@ -1063,11 +1103,19 @@ export const layer = Layer.effect(
         // stays in issue order, so the result is the same as a sequential read.
         const worklogsByIssue = yield* Effect.forEach(
           issueKeys,
-          (issueKey) => readJiraWorklogs(client, issueKey, lookupFromMs - 1, toMs),
+          (issueKey) =>
+            readJiraWorklogs(client, issueKey, lookupFromMs - 1, toMs, siteProven && !searchedKeys.has(issueKey)),
           { concurrency: JIRA_WORKLOG_READ_CONCURRENCY }
         )
+        // Keys Jira answered 404 for. Their time is reported, never offered: a write would be refused.
+        const unseen: Array<string> = []
         for (const [issueIndex, issueKey] of issueKeys.entries()) {
-          const worklogs = worklogsByIssue[issueIndex] ?? []
+          const read = worklogsByIssue[issueIndex] ?? Option.some([])
+          if (Option.isNone(read)) {
+            unseen.push(issueKey)
+            continue
+          }
+          const worklogs = read.value
 
           for (const wl of worklogs) {
             // Only this user's worklogs (the JQL narrows issues, not individual worklog authors).
@@ -1106,9 +1154,10 @@ export const layer = Layer.effect(
             }
           }
         }
-        return tally
+        return { rows: tally, unseen }
       })
     type JiraTallyRows = Effect.Success<ReturnType<typeof jiraTally>>
+    const emptyJiraTally: JiraTallyRows = { rows: [], unseen: [] }
 
     const readRecorded = (
       period: ReconcilePeriod,
@@ -1129,7 +1178,7 @@ export const layer = Layer.effect(
         // tracks in one system: no Clockify workspace to configure, no Jira login to keep alive, and
         // no request whose failure could stop a run that never needed it.
         const jiraSideRead = !sides.jira
-          ? Effect.succeed([])
+          ? Effect.succeed(emptyJiraTally)
           : options?.jiraPreRead !== undefined
           ? Effect.succeed(options.jiraPreRead)
           : jiraTally(period, options?.jiraIssueKeys, options?.jiraSnapshot)
@@ -1141,14 +1190,20 @@ export const layer = Layer.effect(
             options?.tolerateUnavailableJira === true
               ? jiraSideRead.pipe(
                 Effect.catch((error) =>
-                  Effect.logWarning("Jira could not be read; reconciling Clockify alone", error).pipe(Effect.as([]))
+                  Effect.logWarning("Jira could not be read; reconciling Clockify alone", error).pipe(
+                    Effect.as(emptyJiraTally)
+                  )
                 )
               )
               : jiraSideRead
           ],
           { concurrency: 2 }
         )
-        return { recorded: buildReconcileRows(clockifySide.tally, jiraSide), unlinkedClockify: clockifySide.unlinked }
+        return {
+          recorded: buildReconcileRows(clockifySide.tally, jiraSide.rows),
+          unlinkedClockify: clockifySide.unlinked,
+          jiraUnseen: jiraSide.unseen
+        }
       })
 
     const compare = (period: ReconcilePeriod, options?: { readonly sides?: ReconcileSides | undefined }) =>
@@ -1568,6 +1623,13 @@ export const layer = Layer.effect(
           const released = yield* Effect.result(sourceLedger.release(identity))
           return released._tag === "Failure"
             ? { _tag: "Failed", message: "Jira was not called but the private write intent could not be released" }
+            : posted
+        }
+        if (posted._tag === "Failed" && posted.refused === true) {
+          // A refused POST wrote nothing, so its intent is released rather than held for review.
+          const released = yield* Effect.result(sourceLedger.release(identity))
+          return released._tag === "Failure"
+            ? { _tag: "Failed", message: "Jira refused the worklog but the private write intent could not be released" }
             : posted
         }
         if (posted._tag !== "Posted") return posted
@@ -2046,7 +2108,8 @@ export const layer = Layer.effect(
       // is an optimization the result never depends on.
       const covered = new Set([
         ...(preReadJira?.requiredKeys ?? []),
-        ...(preReadJira?.tally ?? []).map((row) => row.ticketKey)
+        ...(preReadJira?.tally.rows ?? []).map((row) => row.ticketKey),
+        ...(preReadJira?.tally.unseen ?? [])
       ])
       // Keys the pre-read did not cover — usually tickets the agent or a split chose — are read on
       // their own and merged. They held none of my time in the pre-read's search, so their rows
@@ -2060,9 +2123,12 @@ export const layer = Layer.effect(
         : missingKeys.length === 0
         ? preReadJira.tally
         : topUp?._tag === "Success"
-        ? [...preReadJira.tally, ...topUp.success]
+        ? {
+          rows: [...preReadJira.tally.rows, ...topUp.success.rows],
+          unseen: [...preReadJira.tally.unseen, ...topUp.success.unseen]
+        }
         : undefined
-      const [{ recorded, unlinkedClockify }, excludedDays] = yield* Effect.all([
+      const [{ jiraUnseen, recorded, unlinkedClockify }, excludedDays] = yield* Effect.all([
         readRecorded(period, {
           sides,
           jiraIssueKeys,
@@ -2198,19 +2264,28 @@ export const layer = Layer.effect(
         }]
       })
       const executableRecorded = recordedForExecution(recorded, jiraState?.availability)
+      const unseenKeys = new Set(jiraUnseen)
+      const built = buildSessionProposals(previous.attributed, executableRecorded, {
+        minimumSeconds: MINIMUM_PROPOSAL_SECONDS,
+        excludedDays: excludedDays.map((excluded) => excluded.day),
+        sides,
+        sourceEntries,
+        consumptionRows: unlinkedClockify.map((slice) => ({
+          day: slice.day,
+          intervals: slice.entry === undefined ? [] : [{ entry: slice.entry }]
+        }))
+      })
+      const offered = built.filter((proposal) => !unseenKeys.has(proposal.ticketKey))
+      const unseen = built.filter((proposal) => unseenKeys.has(proposal.ticketKey))
       return {
         ...previous,
         writeBlocked,
-        proposals: buildSessionProposals(previous.attributed, executableRecorded, {
-          minimumSeconds: MINIMUM_PROPOSAL_SECONDS,
-          excludedDays: excludedDays.map((excluded) => excluded.day),
-          sides,
-          sourceEntries,
-          consumptionRows: unlinkedClockify.map((slice) => ({
-            day: slice.day,
-            intervals: slice.entry === undefined ? [] : [{ entry: slice.entry }]
-          }))
-        }).map((proposal) => ({ ...proposal, writeBlocked })),
+        proposals: offered.map((proposal) => ({ ...proposal, writeBlocked })),
+        jiraUnseen: unseen.map((proposal) => ({
+          ticketKey: proposal.ticketKey,
+          day: proposal.day,
+          seconds: proposal.sessionSeconds
+        })),
         recorded,
         unlinkedClockify,
         sourceEntries,
@@ -2278,7 +2353,7 @@ export const layer = Layer.effect(
                   ...((nextPageToken !== undefined) && { nextPageToken })
                 }
               })),
-            preReadJira?.tally
+            preReadJira?.tally.rows
           )
           : {
             _tag: "Unknown",

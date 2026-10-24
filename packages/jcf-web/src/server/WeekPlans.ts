@@ -45,7 +45,12 @@ export interface WeekPlansContract {
     replacement: HeldPlan,
     generation: number
   ) => Effect.Effect<HeldPlan, PlanExpiredError>
-  readonly forWeek: (monday: string, scope: WeekScopeName) => Effect.Effect<HeldPlan | undefined>
+  /** The retained plan for a week, or for one day of it when `day` is given. */
+  readonly forWeek: (
+    monday: string,
+    scope: WeekScopeName,
+    day?: string | undefined
+  ) => Effect.Effect<HeldPlan | undefined>
   readonly find: (planId: string) => Effect.Effect<HeldPlan | undefined>
   readonly describe: (request: DescribeRowRequest) => Effect.Effect<DescribeRowResponse, ApiError | PlanExpiredError>
   readonly describeSaved: (
@@ -128,9 +133,12 @@ export const layer = Layer.effect(
     return WeekPlans.of({
       withConfirmationPermit: withProviderPermit,
       readGeneration: Ref.get(readGeneration),
-      forWeek: (monday, scope) =>
+      forWeek: (monday, scope, day) =>
         Ref.get(plans).pipe(
-          Effect.map((held) => held.find(({ plan }) => plan.plan.monday === monday && plan.plan.scope === scope)?.plan)
+          Effect.map((held) =>
+            held.find(({ plan }) => plan.plan.monday === monday && plan.plan.scope === scope && plan.plan.day === day)
+              ?.plan
+          )
         ),
       find,
       replace: Effect.fn("WeekPlans.replace")(function*(expected, replacement, generation) {
@@ -366,7 +374,7 @@ export const layer = Layer.effect(
         return yield* Ref.modify(plans, (held) => {
           const scanned = held.find(({ plan: existing }) =>
             existing.plan.monday === plan.plan.monday && existing.plan.scope === plan.plan.scope &&
-            existing.plan.sessionScanAvailable !== false
+            existing.plan.day === plan.plan.day && existing.plan.sessionScanAvailable !== false
           )
           const consumptionOwner = held.find(({ plan: existing }) =>
             existing.plan.monday === plan.plan.monday && existing.plan.sessionScanAvailable !== false
@@ -389,10 +397,12 @@ export const layer = Layer.effect(
             retainedPlan,
             [
               { plan: retainedPlan, descriptions: previous?.descriptions ?? descriptions },
-              // Re-reading the same week replaces its plan rather than filling the window with copies.
+              // Re-reading the same week (or the same day run) replaces its plan rather than filling the
+              // window with copies. A day run and its week are held side by side.
               ...held.filter(({ plan: existing }) =>
                 existing.planId !== plan.planId &&
-                (existing.plan.monday !== plan.plan.monday || existing.plan.scope !== plan.plan.scope)
+                (existing.plan.monday !== plan.plan.monday || existing.plan.scope !== plan.plan.scope ||
+                  existing.plan.day !== plan.plan.day)
               )
             ].slice(0, RETAINED_PLANS)
           ]

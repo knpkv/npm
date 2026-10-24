@@ -48,12 +48,17 @@ const makeApplication = async (
     ...options
   })
   const calls = { sessions: 0, ownership: 0, recorded: 0 }
+  const sessionPeriods: Array<{ readonly from: Date; readonly to: Date }> = []
   const reader = Layer.effect(
     AgentSessionReader.AgentSessionReader,
     Effect.gen(function*() {
       const original = yield* AgentSessionReader.AgentSessionReader
       return AgentSessionReader.AgentSessionReader.of({
-        read: (period) => Effect.sync(() => calls.sessions++).pipe(Effect.andThen(original.read(period)))
+        read: (period) =>
+          Effect.sync(() => {
+            calls.sessions++
+            sessionPeriods.push(period)
+          }).pipe(Effect.andThen(original.read(period)))
       })
     })
   ).pipe(Layer.provide(fake.layer))
@@ -100,7 +105,7 @@ const makeApplication = async (
     )
   const read = async (path: string, progress: Array<ReadProgress> = []) =>
     readWeekStream(await get(path), (event) => progress.push(event))
-  return { web, secrets, fake, calls, get, read }
+  return { web, secrets, fake, calls, sessionPeriods, get, read }
 }
 
 it.each<WeekScopeName>(["both", "jira", "clockify"])(
@@ -258,6 +263,30 @@ it("retains an explicit scan that finishes during a recorded-only read and reuse
     expect(app.fake.world.transcriptReads).toHaveLength(1)
   } finally {
     await Effect.runPromise(Deferred.succeed(resume, undefined))
+    await app.web.dispose()
+  }
+})
+
+// A day run reads that one day's sessions, draws one column, and is held beside its week rather than
+// replacing it, so going back to the week costs no rescan.
+it("scans one day as its own plan, held beside the week", async () => {
+  const app = await makeApplication()
+  try {
+    const week = await app.read(`/api/week/stream?monday=${monday}&only=both`)
+    const day = await app.read(`/api/week/stream?day=${monday}&only=both`)
+
+    expect(app.sessionPeriods.at(-1)).toEqual({ from: new Date(2026, 8, 7), to: new Date(2026, 8, 8) })
+    expect(day).toMatchObject({ day: monday, days: [monday], monday })
+    expect(day.rows.every((row) => row.day === monday)).toBe(true)
+    expect(day.rows.some((row) => row.proposal !== undefined)).toBe(true)
+    expect(day.planId).not.toBe(week.planId)
+
+    const savedWeek = await decodeSavedWeek(await (await app.get(`/api/week/saved?monday=${monday}&only=both`)).json())
+    const savedDay = await decodeSavedWeek(await (await app.get(`/api/week/saved?day=${monday}&only=both`)).json())
+    expect(savedWeek.plan?.planId).toBe(week.planId)
+    expect(savedDay).toMatchObject({ day: monday, monday })
+    expect(savedDay.plan?.planId).toBe(day.planId)
+  } finally {
     await app.web.dispose()
   }
 })

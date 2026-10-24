@@ -243,6 +243,8 @@ export const WeekGrid = (props: {
   readonly onOpenSaved: (entry: SavedEntry) => void
   readonly onOpenRow: (rowId: string, blockIndex: number) => void
   readonly onOpenSlot: (day: string, clock: string) => void
+  /** Open a day run of one day. Absent in a day run, which has nothing narrower to open. */
+  readonly onRunDay?: ((day: string) => void) | undefined
 }) => {
   const layers = useMemo(() => connectedLayers(props.layers, props.connected), [props.layers, props.connected])
   const [view, setView] = useState<"auto" | "calendar" | "agenda">("auto")
@@ -383,6 +385,18 @@ export const WeekGrid = (props: {
               <span className="jcf-column-head" data-today={day === today} key={day}>
                 <span>{weekdayNames[(at.getDay() + 6) % 7]}</span>
                 <span className="jcf-date">{at.getDate()}</span>
+                {props.onRunDay === undefined ? null : (
+                  <Button
+                    aria-label={`Run ${day} only`}
+                    className="jcf-run-day"
+                    disabled={props.manualDisabled}
+                    onClick={() => props.onRunDay?.(day)}
+                    size="compact"
+                    variant="quiet"
+                  >
+                    Run day
+                  </Button>
+                )}
               </span>
             )
           })}
@@ -455,6 +469,17 @@ export const WeekGrid = (props: {
               >
                 Log time
               </Button>
+              {props.onRunDay === undefined ? null : (
+                <Button
+                  aria-label={`Run ${day} only`}
+                  disabled={props.manualDisabled}
+                  onClick={() => props.onRunDay?.(day)}
+                  size="compact"
+                  variant="quiet"
+                >
+                  Run day
+                </Button>
+              )}
             </header>
             {(placements.get(day) ?? []).length === 0 ? (
               <p className="jcf-muted">No entries in the visible layers.</p>

@@ -30,6 +30,16 @@ import type {
 export const rowId = (ticketKey: string, day: string): string => `${day}:${ticketKey}`
 
 /** The seven local days of the ISO week beginning at `monday`. */
+/**
+ * The period a plan covers: its whole ISO week, or just `day` when the plan is a day run.
+ * Every read, refresh and confirmation of one plan must use the same period.
+ */
+export const planPeriod = (plan: { readonly monday: string; readonly day?: string | undefined }) => {
+  if (plan.day === undefined) return Time.isoWeekPeriod(new Date(`${plan.monday}T00:00:00`))
+  const from = new Date(`${plan.day}T00:00:00`)
+  return { from, to: new Date(Time.nextLocalMidnight(from.getTime())) }
+}
+
 export const weekDays = (monday: Date): ReadonlyArray<string> => {
   const days: Array<string> = []
   let atMs = monday.getTime()
@@ -267,10 +277,12 @@ export const buildWeekPlan = (options: {
   readonly entryRevision?: (entry: ReconcileService.RecordedEntry) => string
   /** Defaults to true for explicit scans; recorded-only reads must pass false. */
   readonly sessionScanAvailable?: boolean | undefined
+  /** Build a day run: one column, and rows only for that day. */
+  readonly day?: string | undefined
   readonly consumption?: HeldPlan["consumption"] | undefined
   readonly jiraReceiptIssueKeys?: HeldPlan["jiraReceiptIssueKeys"] | undefined
 }): HeldPlan => {
-  const days = weekDays(options.monday)
+  const days = options.day === undefined ? weekDays(options.monday) : [options.day]
   // The report was read for exactly this week, so this only guards the two disagreeing. A row for
   // another week would have no column to sit in, and dropping it silently is worse than not sending
   // it at all.
@@ -353,11 +365,16 @@ export const buildWeekPlan = (options: {
       excludedDays: options.report.excludedDays
         .filter((excluded) => inWeek.has(excluded.day))
         .map((excluded) => ({ day: excluded.day, reason: excluded.reason })),
-      monday: days[0]!,
+      monday: Time.localDay(options.monday),
+      ...(options.day !== undefined && { day: options.day }),
       notMine: notMine.sort((
         a,
         b
       ) => (a.day === b.day ? a.ticketKey.localeCompare(b.ticketKey) : a.day.localeCompare(b.day))),
+      jiraUnseen: (options.report.jiraUnseen ?? [])
+        .filter((row) => inWeek.has(row.day))
+        .map((row) => ({ day: row.day, seconds: row.seconds, ticketKey: row.ticketKey }))
+        .sort((a, b) => (a.day === b.day ? a.ticketKey.localeCompare(b.ticketKey) : a.day.localeCompare(b.day))),
       ignoredTickets: [...(options.report.ignoredTickets ?? [])].sort(),
       ignored: (options.report.ignored ?? [])
         .filter((row) => inWeek.has(row.day))

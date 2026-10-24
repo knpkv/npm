@@ -11,7 +11,7 @@ import {
   type WeekScopeName
 } from "../shared/contracts.js"
 import { retainedEntryRevision } from "./SavedEntryOperations.js"
-import { buildWeekPlan, sidesOfScope } from "./WeekPlan.js"
+import { buildWeekPlan, planPeriod, sidesOfScope } from "./WeekPlan.js"
 import type { WeekPlansContract } from "./WeekPlans.js"
 
 /** Translate events for the authenticated owner; request text contains supplied session evidence. */
@@ -68,23 +68,35 @@ export const sessionProgress = (event: ReconcileService.SessionProposalProgress)
   }
 }
 
+/** Which week to read, and optionally the one day of it a day run covers. */
+export interface WeekQuery {
+  readonly monday?: string | undefined
+  readonly day?: string | undefined
+  readonly only?: WeekScopeName | undefined
+}
+
+/** Resolve a query to its week and period. A day names its own week; no day and no week means today's. */
+const resolveTarget = Effect.fnUntraced(function*(query: WeekQuery) {
+  const anchor = query.day ?? query.monday
+  const at = anchor === undefined ? new Date(yield* Clock.currentTimeMillis) : new Date(`${anchor}T00:00:00`)
+  const monday = Time.localDay(Time.isoWeekPeriod(at).from)
+  return { monday, day: query.day, period: planPeriod({ monday, day: query.day }) }
+})
+
 /** Return retained evidence without touching sessions or providers. A miss never starts attribution. */
 export const savedWeekPlan = Effect.fn("WeekRead.saved")(function*(options: {
-  readonly query: { readonly monday?: string | undefined; readonly only?: WeekScopeName | undefined }
+  readonly query: WeekQuery
   readonly plans: WeekPlansContract
 }) {
-  const anchor = options.query.monday === undefined
-    ? new Date(yield* Clock.currentTimeMillis)
-    : new Date(`${options.query.monday}T00:00:00`)
-  const monday = Time.localDay(Time.isoWeekPeriod(anchor).from)
+  const { day, monday } = yield* resolveTarget(options.query)
   const scope = options.query.only ?? "both"
-  const held = yield* options.plans.forWeek(monday, scope)
-  return { monday, scope, plan: held?.plan ?? null }
+  const held = yield* options.plans.forWeek(monday, scope, day)
+  return { monday, ...(day !== undefined && { day }), scope, plan: held?.plan ?? null }
 })
 
 /** Shared by the JSON and streaming routes so both retain identical held evidence. */
 export const readWeekPlan = Effect.fn("WeekRead.read")(function*(options: {
-  readonly query: { readonly monday?: string | undefined; readonly only?: WeekScopeName | undefined }
+  readonly query: WeekQuery
   readonly report: (progress: ReadProgress) => Effect.Effect<void>
   readonly reconcile: ReconcileService.ReconcileServiceContract
   readonly issues: IssueFacts.IssueFacts["Service"]
@@ -93,10 +105,7 @@ export const readWeekPlan = Effect.fn("WeekRead.read")(function*(options: {
 }) {
   const { config, issues, plans, query, reconcile, report } = options
   const generation = yield* plans.readGeneration
-  const anchor = query.monday === undefined
-    ? new Date(yield* Clock.currentTimeMillis)
-    : new Date(`${query.monday}T00:00:00`)
-  const period = Time.isoWeekPeriod(anchor)
+  const { day, monday, period } = yield* resolveTarget(query)
   const scope = query.only ?? "both"
   const sides = sidesOfScope(scope)
   yield* report({ stage: "sessions", message: "Reading coding sessions from your configured directories." })
@@ -118,7 +127,7 @@ export const readWeekPlan = Effect.fn("WeekRead.read")(function*(options: {
   yield* report({ stage: "calendar", message: "Placing logged time and proposed blocks on the calendar." })
   const held = buildWeekPlan({
     createdAtMillis: yield* Clock.currentTimeMillis,
-    monday: period.from,
+    monday: new Date(`${monday}T00:00:00`),
     ownership: {
       checked: looked.checked,
       facts: looked.facts,
@@ -129,14 +138,15 @@ export const readWeekPlan = Effect.fn("WeekRead.read")(function*(options: {
       Effect.mapError(() => new ApiError({ message: "Could not create a week plan. Retry the read." }))
     ),
     report: result,
-    scope
+    scope,
+    day
   })
   return (yield* plans.keep(held, generation)).plan
 })
 
 /** Read logged time without session discovery, attribution, or ownership lookups. */
 export const readRecordedWeekPlan = Effect.fn("WeekRead.recordedOnly")(function*(options: {
-  readonly query: { readonly monday?: string | undefined; readonly only?: WeekScopeName | undefined }
+  readonly query: WeekQuery
   readonly report: (progress: ReadProgress) => Effect.Effect<void>
   readonly reconcile: ReconcileService.ReconcileServiceContract
   readonly config: ConfigService.ConfigService["Service"]
@@ -144,12 +154,9 @@ export const readRecordedWeekPlan = Effect.fn("WeekRead.recordedOnly")(function*
 }) {
   const { config, plans, query, reconcile, report } = options
   const generation = yield* plans.readGeneration
-  const anchor = query.monday === undefined
-    ? new Date(yield* Clock.currentTimeMillis)
-    : new Date(`${query.monday}T00:00:00`)
-  const period = Time.isoWeekPeriod(anchor)
+  const { day, monday, period } = yield* resolveTarget(query)
   const scope = query.only ?? "both"
-  const previous = yield* plans.forWeek(Time.localDay(period.from), scope)
+  const previous = yield* plans.forWeek(monday, scope, day)
   if (previous !== undefined) {
     return yield* refreshWeekPlan({ planId: previous.planId, report, reconcile, plans })
   }
@@ -176,12 +183,13 @@ export const readRecordedWeekPlan = Effect.fn("WeekRead.recordedOnly")(function*
   yield* report({ stage: "calendar", message: "Placing logged time on the calendar. Sessions have not been scanned." })
   const held = buildWeekPlan({
     createdAtMillis: yield* Clock.currentTimeMillis,
-    monday: period.from,
+    monday: new Date(`${monday}T00:00:00`),
     planId: yield* plans.nextPlanId.pipe(
       Effect.mapError(() => new ApiError({ message: "Could not create a week plan. Retry the read." }))
     ),
     report: result,
     scope,
+    day,
     sessionScanAvailable: false
   })
   return (yield* plans.keep(held, generation)).plan
@@ -202,7 +210,7 @@ export const refreshWeekPlan = Effect.fn("WeekRead.refreshRecorded")(function*(o
       message: "This week is no longer held. Use Rescan sessions to read its sessions again."
     })
   }
-  const period = Time.isoWeekPeriod(new Date(`${previous.plan.monday}T00:00:00`))
+  const period = planPeriod(previous.plan)
   const status = sessionProgress({ _tag: "ReadingRecordedTime", sides: previous.report.sides })
   const scanned = previous.plan.sessionScanAvailable !== false
   yield* report({ ...status, message: scanned ? `${status.message} Keeping your session matches.` : status.message })
@@ -224,7 +232,8 @@ export const refreshWeekPlan = Effect.fn("WeekRead.refreshRecorded")(function*(o
     planId: previous.planId,
     entryRevision: (entry) => retainedEntryRevision(previous, entry, snapshotRevision),
     createdAtMillis: previous.createdAtMillis,
-    monday: period.from,
+    monday: new Date(`${previous.plan.monday}T00:00:00`),
+    day: previous.plan.day,
     report: refreshed,
     consumption: previous.consumption,
     jiraReceiptIssueKeys: previous.jiraReceiptIssueKeys,
