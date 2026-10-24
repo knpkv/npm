@@ -12,15 +12,35 @@
  *
  * @since 0.1.0
  */
-import { AppId, type AppState, AppStates } from "@knpkv/hub-app"
-import { Clock, Console, Context, Duration, Effect, FileSystem, Option, Path, Redacted, Schema, Terminal } from "effect"
+import { AppId, type AppsConfigInvalid, type AppState, AppStates } from "@knpkv/hub-app"
+import {
+  Clock,
+  Console,
+  Context,
+  Duration,
+  Effect,
+  FileSystem,
+  Option,
+  Path,
+  Redacted,
+  Runtime,
+  Schema,
+  Terminal
+} from "effect"
 import { Argument, Command, Flag } from "effect/cli"
 import { HttpClient, HttpClientRequest } from "effect/http"
 import { cliTokenHeader, readCliToken } from "./cli-token.js"
-import { type AppInstaller, AppNotInstalled, type InstallerOptions } from "./installer.js"
-import type { NpmUnavailable } from "./npm.js"
-import type { AppsStore } from "./store.js"
-import { AppsNeedTerminal } from "./trust.js"
+import {
+  type AppIdConflict,
+  type AppInstallDeclined,
+  type AppInstaller,
+  type AppNoPreviousVersion,
+  AppNotInstalled,
+  type InstallerOptions
+} from "./installer.js"
+import type { AppInstallFailed, NotAHubApp, NpmUnavailable } from "./npm.js"
+import type { AppsConfigManaged, AppsLockBusy, AppsStore } from "./store.js"
+import { type AppNotTrusted, AppsNeedTerminal } from "./trust.js"
 
 /** The hub didn't answer a request that needs it. */
 export class HubNotRunning extends Schema.TaggedError<HubNotRunning>()("HubNotRunning", {}) {
@@ -351,6 +371,95 @@ const trustChange = (name: "add" | "remove") =>
 const trust = Command.make("trust").pipe(
   Command.withSubcommands([trustList, trustChange("add"), trustChange("remove")])
 )
+
+/** A failure already explained on stderr: the runtime exits 1 without printing it again. */
+export class AppsCommandFailed extends Schema.TaggedError<AppsCommandFailed>()("AppsCommandFailed", {}) {
+  override readonly [Runtime.errorReported] = false
+}
+
+/** The failures a user can act on; each has one sentence. */
+type Explained =
+  | AppsNeedTerminal
+  | HubNotRunning
+  | AppUpdateCrashloop
+  | AppNotInstalled
+  | AppIdConflict
+  | AppInstallDeclined
+  | AppNoPreviousVersion
+  | AppNotTrusted
+  | AppInstallFailed
+  | NotAHubApp
+  | NpmUnavailable
+  | AppsConfigManaged
+  | AppsLockBusy
+  | AppsConfigInvalid
+
+/** Every explained tag, once: a tag added to `Explained` and missing here is a type error. */
+const explained = {
+  AppsNeedTerminal: true,
+  HubNotRunning: true,
+  AppUpdateCrashloop: true,
+  AppNotInstalled: true,
+  AppIdConflict: true,
+  AppInstallDeclined: true,
+  AppNoPreviousVersion: true,
+  AppNotTrusted: true,
+  AppInstallFailed: true,
+  NotAHubApp: true,
+  NpmUnavailable: true,
+  AppsConfigManaged: true,
+  AppsLockBusy: true,
+  AppsConfigInvalid: true
+} satisfies Record<Explained["_tag"], true>
+const explainedTags: ReadonlySet<string> = new Set(Object.keys(explained))
+
+/** What to tell the user for `error`. */
+export const failureLine = (error: Explained): string => {
+  switch (error._tag) {
+    case "AppsNeedTerminal":
+    case "AppUpdateCrashloop":
+    case "NpmUnavailable":
+      return error.message
+    case "HubNotRunning":
+      return `${error.message} Start it and try again.`
+    case "AppNotInstalled":
+      return `No app called ${error.id} is installed.`
+    case "AppIdConflict":
+      return error.with === "core"
+        ? `${error.id} is the name of one of the hub's own modules.`
+        : `An app called ${error.id} is already installed.`
+    case "AppInstallDeclined":
+      return "Nothing was installed."
+    case "AppNoPreviousVersion":
+      return `${error.id} has no previous version to go back to.`
+    case "AppNotTrusted":
+      return `${error.package} is outside the trusted scopes; run \`herdr-hub apps trust add <scope>\` first.`
+    case "AppInstallFailed":
+      return `Could not install ${error.package} (${error.stage}): ${error.detail}`
+    case "NotAHubApp":
+      return `${error.package} is not a hub app: its package.json has no valid hubApp field.`
+    case "AppsConfigManaged":
+      return "apps.json is managed by nix; edit hub.apps in your nix configuration instead."
+    case "AppsLockBusy":
+      return `Another apps command is running${
+        error.pid === null ? "" : ` (pid ${error.pid})`
+      }; try again when it is done.`
+    case "AppsConfigInvalid":
+      return `${error.path} can't be read as apps.json; fix or remove it.`
+  }
+}
+
+/**
+ * Turns the failures a user can act on into one sentence on stderr and exit 1; anything else (a bug) keeps the
+ * runtime's full report.
+ */
+export const explainFailures = <A, E extends { readonly _tag: string }, R>(command: Effect.Effect<A, E, R>) =>
+  command.pipe(
+    Effect.catchIf(
+      (error): error is Extract<E, Explained> => explainedTags.has(error._tag),
+      (error) => Console.error(failureLine(error)).pipe(Effect.andThen(Effect.fail(new AppsCommandFailed())))
+    )
+  )
 
 /** `herdr-hub apps …`. */
 export const appsCommand = Command.make("apps").pipe(

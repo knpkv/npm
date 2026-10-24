@@ -71,6 +71,12 @@ export interface AppsRouteContext<E, R> {
 
 const restartPath = /^\/v1\/apps\/([^/]+)\/restart$/u
 const decodeAppId = Schema.decodeUnknownOption(AppIdSchema)
+/** The app id in a restart path; none for a malformed `%` escape or anything that isn't an id. */
+const restartId = (segment: string) =>
+  Option.flatMap(
+    Option.liftThrowable(decodeURIComponent)(segment),
+    decodeAppId
+  )
 
 /** Run `effect`; answer its typed failure through `refuse`, a defect as 500. Null after answering. */
 const runChecked = async <A, E, R>(
@@ -133,7 +139,7 @@ export const handleAppsRoute = async <E, R>(
       send(response, 403, { error: "forbidden" })
       return true
     }
-    const id = decodeAppId(decodeURIComponent(restart[1] ?? ""))
+    const id = restartId(restart[1] ?? "")
     if (Option.isNone(id)) {
       send(response, 404, { error: "not_found" })
       return true

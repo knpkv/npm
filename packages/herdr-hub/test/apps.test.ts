@@ -396,9 +396,11 @@ describe("hub apps", () => {
           yield* post(local.url, "/v1/apps/fixture/restart", "wrong"),
           yield* post(served.url, "/v1/apps/fixture/restart", "this-start-token"),
           yield* post(local.url, "/v1/apps/absent/restart", "this-start-token"),
+          // A malformed escape is no app, not a crash.
+          yield* post(local.url, "/v1/apps/%E0%A4%A/restart", "this-start-token"),
           yield* post(local.url, "/v1/apps/broken/restart", "this-start-token"),
           yield* post(local.url, "/v1/apps/fixture/restart", "this-start-token")
-        ]).toEqual([403, 403, 403, 404, 500, 202])
+        ]).toEqual([403, 403, 403, 404, 404, 500, 202])
         expect(restarted).toEqual(["absent", "fixture"])
       }).pipe(Effect.scoped))
 
