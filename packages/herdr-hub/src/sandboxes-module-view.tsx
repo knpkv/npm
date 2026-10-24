@@ -2440,7 +2440,7 @@ const RunsPage = ({
 
 /**
  * Overview for the shell. `reads.caller` says whether the reader is the owner (the hub's own node, or an
- * allowed login from any node) and gives their login, matched against a lease holder. `writes` is null where the hub cannot submit sandbox jobs.
+ * allowed login on the owner's own device) and gives their login, matched against a lease holder. `writes` is null where the hub cannot submit sandbox jobs.
  */
 export const makeSandboxesModuleViews = ({
   reads,

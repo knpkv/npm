@@ -20,8 +20,8 @@ import type { ModuleDescriptor, ModuleListener } from "./module.js"
  * Authenticated login from the listener authorization result, never client-supplied selectors.
  * `sameNode` is true only when the server proved the caller is the hub's own tailnet node; an
  * authorizer that does not say decodes as false. `owner` is true only when the server proved the
- * caller is the hub's owner (the hub's own node, or an allowed login from any node); an authorizer that
- * does not say decodes as false. `provenance` is `verified_local_listener` only for a
+ * caller is the hub's owner (the hub's own node, or an allowed login on the owner's own device); an
+ * authorizer that does not say decodes as false. `provenance` is `verified_local_listener` only for a
  * direct, unproxied loopback request; an authorizer that does not say decodes as remote.
  */
 export const ModuleCaller = Schema.Struct({
