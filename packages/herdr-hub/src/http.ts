@@ -3335,8 +3335,11 @@ export const startHttpServer = async (
               host: config.host,
               mount: relayMount,
               authorize: authorized,
-              // Same rule as a job's approve or reject: an approval node on tailnet listeners, loopback locally.
-              authorizeDecision: mode === "local" ? authorized : tailnetActor(request, config, config.approvalNodes),
+              // A decision is an approval: only an approval node decides. Loopback is the hub's own agents, so
+              // the local listener refuses every decision.
+              authorizeDecision: mode === "local"
+                ? Effect.fail(new FleetAuthorizationError({ actor: "local" }))
+                : tailnetActor(request, config, config.approvalNodes),
               sameOrigin: sameOrigin(request, expectedOrigin()),
               readJson: (schema) => readJson(request, schema),
               refuse: (target, error) => {

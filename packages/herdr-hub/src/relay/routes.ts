@@ -237,7 +237,7 @@ export const handleRelayRoute = async <E, R>(
         })
       )
       return true
-    default: {
+    case "decisions": {
       const decider = await context.runtime.runPromiseExit(context.authorizeDecision)
       if (decider._tag === "Failure") {
         const failure = decider.cause.reasons.find((reason) => reason._tag === "Fail")
@@ -260,6 +260,9 @@ export const handleRelayRoute = async <E, R>(
       )
       return true
     }
+    default:
+      send(response, 404, JSON.stringify({ error: "not_found" }))
+      return true
   }
 }
 

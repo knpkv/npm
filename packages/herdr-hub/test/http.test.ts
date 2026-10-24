@@ -7799,6 +7799,16 @@ esac
       // The phone is past the check; nothing waits for that call, so Relay answers it is not pending.
       const fromPhone = yield* decide("node-phone")
       expect(fromPhone.status, fromPhone.body).toBe(409)
+      // Loopback is the hub's own agents: the local listener decides nothing.
+      const local = new URL(hub.server.url).origin
+      const fromLoopback = yield* Effect.promise(() =>
+        fetch(`${local}/v1/relay/decisions`, {
+          method: "POST",
+          headers: { "content-type": "application/json", origin: local },
+          body: JSON.stringify({ ref: hubRef, callId: "call-1", allow: true })
+        }).then(async (response) => ({ status: response.status, body: await response.text() }))
+      )
+      expect(fromLoopback.status, fromLoopback.body).toBe(403)
     }).pipe(Effect.scoped, provideNodeServices)
   })
 
