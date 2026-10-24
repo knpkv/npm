@@ -134,6 +134,7 @@ import WebSocketClient, { WebSocketServer } from "ws"
 import type { SanitizedJobRecord } from "./approval-request.js"
 import { sanitizeJobPayload, sanitizeJobRecord } from "./approval-request.js"
 import { resolveApprovalPage } from "./approval-url.js"
+import { writeCliToken } from "./apps/cli-token.js"
 import { answerFleetRead } from "./apps/fleet-read.js"
 import { makeAppTokens, makeGrants } from "./apps/grants.js"
 import { appNeedsYouProviders } from "./apps/needs-you.js"
@@ -1979,6 +1980,17 @@ export const startHttpServer = async (
         timing: options.apps?.timing ?? defaultTiming
       }).pipe(Effect.provideService(Scope.Scope, moduleScope))
     )
+    // `herdr-hub apps restart` presents this start's token; without one the restart route refuses every request.
+    const cliToken = await httpRuntime.runPromise(
+      writeCliToken(`${appState}/cli`, appUser.uid).pipe(
+        Effect.map((token): Redacted.Redacted<string> | null => token),
+        Effect.catch((error) =>
+          Effect.logWarning("hub apps: no CLI token, so `herdr-hub apps restart` is refused", error).pipe(
+            Effect.as(null)
+          )
+        )
+      )
+    )
     const appRegistry = await httpRuntime.runPromise(makeAppRegistry({
       configPath: options.apps?.configPath ?? `${homedir()}/.config/herdr/apps.json`,
       cacheDirectory: `${appState}/manifests`,
@@ -3305,6 +3317,7 @@ export const startHttpServer = async (
               grants: appGrants,
               authorize: moduleAuthorize,
               sameOrigin: sameOrigin(request, expectedOrigin()),
+              cliRestart: { token: cliToken, restart: (id) => appSupervisor.restart(id) },
               refuse: (target, error) => {
                 const mapped = apiError(error)
                 json(target, mapped.status, mapped.body)

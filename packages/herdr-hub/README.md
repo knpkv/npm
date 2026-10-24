@@ -69,6 +69,25 @@ Fleet-wide submission preserves partial results. One unreachable host does not e
 
 Approval mutations require the exact active listener origin, including HTML form submissions. Originless fleet submission remains a separate authenticated CLI path. Only hostd sets submission provenance, never the request body, which rejects unknown fields. A `POST /v1/jobs` on the local listener that passed loopback authorization and carries no proxy header (`Forwarded`, `X-Forwarded-*`, `X-Real-IP`, `Via`) is a verified local submission: its `nix.*` and `agent.*` jobs queue without approval. Every other listener or proxied request is remote, and Work authority jobs always wait for approval. Existing browser push subscriptions are reconciled with the server on page load, so server-side expiry or revocation cannot leave a false enabled state.
 
+## Hub apps
+
+Apps are separate npm packages that the hub runs as child processes and shows in its navigation (`@knpkv/herdr-usage` is one). `herdr-hub apps` manages them on this machine with the npm that ships with Node:
+
+```sh
+herdr-hub apps add @knpkv/herdr-usage        # asks y/N after showing what it is and what it may do
+herdr-hub apps list                          # id, package@version, state
+herdr-hub apps update [<id>[@<version>]]     # same major unless a version is given; --no-wait to skip watching it start
+herdr-hub apps rollback <id>                 # back to the version kept by the last update
+herdr-hub apps logs <id> --follow
+herdr-hub apps disable|enable|restart|remove <id>
+herdr-hub apps trust add @your-scope         # needs a terminal
+```
+
+- **Where it writes.** `apps.json` lives in the hub's config directory. It names one writer, `managedBy: "cli"` or `"nix"`. When nix manages it, every write is refused; edit `hub.apps` in your nix configuration instead. Apps install under `<data>/hub-apps/<id>/<version>`, and their logs go to `<state>/logs/<id>.log`.
+- **What it checks.** A package needs a `hubApp` field (`{ "bin": "dist/bin.js", "contract": 1, "services": [...] }`) and must be inside `trust.scopes`. The installed tarball must be the one `npm view` described. Registry signatures are checked where the registry has signing keys. The app runs once before it is listed, and must answer as the app it declared. Install scripts never run unless `--allow-scripts` is passed for that install, after listing every package that has one.
+- **What it doesn't promise.** An app runs as you, with access to your files. Its `services` limit what the hub lets it do, not what the operating system lets it do.
+- **npm.** The `npm-cli.js` next to `node`, or else the `npm` on PATH when it resolves to npm's own `npm-cli.js`. Install a Node that ships npm (nodejs.org, mise) or put npm on PATH.
+
 ## Connect directory
 
 Terminal control permits one controller per host and stable agent ID, and four controllers in total. A socket is pinged every 25 seconds and terminated if the previous ping is unanswered at the next check. Disconnect, error, failed setup and server teardown share idempotent cleanup. The controller lock and connection slot are held for cleanup for at most ten seconds. A late finalizer receives an interruption request and remains owned by the hub; shutdown waits for an uninterruptible finalizer to finish. The `TerminalReleaseTimeout` warning contains only its tag, host, stable agent ID and elapsed milliseconds. An ordinary second attachment to a live controller is refused with code `4423` and `agent already controlled`. An ordinary reconnect to a closing controller waits for that same bounded cleanup, showing Connecting. Closing the waiting socket cancels its attachment; an explicit takeover during the wait supersedes it without bypassing cleanup.
