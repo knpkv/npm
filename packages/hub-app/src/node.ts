@@ -45,6 +45,7 @@ import {
   ModuleRouteFailure,
   type MountedModule
 } from "./route.js"
+import { cacheSuccess, shellCssCacheControl } from "./shell-cache.js"
 import { shellCssVersion, standaloneShellHtml } from "./standalone-page.js"
 import { appPaths, hubHeaders, sameSecret } from "./wire.js"
 
@@ -327,11 +328,13 @@ const serveStandalone = Effect.fn("HubApp.serveStandalone")(function*<E, R>(
   const { mounted, needsYou } = yield* mountModule(manifest, app.handlers).pipe(Effect.provideContext(services))
   const badge = app.badge?.pipe(Effect.provideContext(services))
   const login = userInfo().username
-  // The shell stylesheet is read once; the page links it by a hash of its text, so browsers may keep it for good.
-  const shellCss = yield* Effect.cached(
+  // The shell stylesheet is kept after its first successful read; the page links it by a hash of its text.
+  const shellCss = yield* cacheSuccess(
     readShell("standalone-shell.css").pipe(
       Effect.flatMap((css) =>
-        shellCssVersion(css).pipe(Effect.map((version) => ({ css, page: standaloneShellHtml(manifest, version) })))
+        shellCssVersion(css).pipe(
+          Effect.map((version) => ({ css, version, page: standaloneShellHtml(manifest, version) }))
+        )
       )
     )
   )
@@ -349,11 +352,16 @@ const serveStandalone = Effect.fn("HubApp.serveStandalone")(function*<E, R>(
       yield* router.add(
         "GET",
         "/app/shell.css",
-        shellCss.pipe(
-          Effect.map(({ css }) =>
+        Effect.all([shellCss, HttpServerRequest.HttpServerRequest]).pipe(
+          Effect.map(([{ css, version }, request]) =>
             HttpServerResponse.text(css, {
               contentType: "text/css; charset=utf-8",
-              headers: { "cache-control": "public, max-age=31536000, immutable" }
+              headers: {
+                "cache-control": shellCssCacheControl(
+                  new URL(request.url, "http://app.invalid").searchParams.get("v") ?? undefined,
+                  version
+                )
+              }
             })
           ),
           Effect.catchTag("PlatformError", shellMissing)

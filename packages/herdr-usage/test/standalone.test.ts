@@ -75,6 +75,9 @@ describe("herdr-usage standalone", () => {
         expect(shellCss).toBeDefined()
         const css = yield* overTcp(`${origin}${shellCss ?? ""}`, "GET", sameSite)
         expect([css.status, css.headers["cache-control"]]).toEqual([200, "public, max-age=31536000, immutable"])
+        // An older page's hash gets today's text, which must not be kept under that URL.
+        const stale = yield* overTcp(`${origin}/app/shell.css?v=0000000000000000`, "GET", sameSite)
+        expect([stale.status, stale.headers["cache-control"], stale.body]).toEqual([200, "no-cache", css.body])
 
         const manifest = yield* overTcp(`${origin}/app/manifest`, "GET", sameSite)
         const decoded = Schema.decodeUnknownSync(Schema.fromJsonString(AppManifest))(manifest.body)

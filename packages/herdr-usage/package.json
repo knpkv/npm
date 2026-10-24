@@ -1,6 +1,6 @@
 {
   "name": "@knpkv/herdr-usage",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Claude and Codex usage and limits across the fleet, as a Relay hub app that also runs on its own",
   "license": "MIT",
   "repository": {
