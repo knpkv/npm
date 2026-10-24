@@ -135,6 +135,9 @@ jcf sync reconcile --agent claude --day --calendar
   plus the issue `summary`. Sum `seconds`, not wall-clock bounds, for shared work.
 - In `--json`, `ownershipWithheld` keeps rows assigned to someone else or unassigned, with a
   `reason`; `withheld` remains the separate confidence-floor list. Neither list is offered to write.
+- In `--json`, `jiraUnseen` lists `{ ticketKey, day, seconds }` of session time on tickets Jira
+  answers 404 for (deleted, or in a project this account cannot read). Never offered: Jira would
+  refuse the worklog. Report them so the key can be checked or access requested.
 - `--only clockify` or `--only jira` reads and writes one system, for when the other is not
   connected. `--json` names what was read in `sides` (`{ "clockify": true, "jira": false }`); a side
   that was not read reports zero deltas, which does not mean it holds the time. Without `--only`, a
