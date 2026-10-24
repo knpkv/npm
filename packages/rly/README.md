@@ -121,7 +121,9 @@ their own storage. `ThemeSelect` builds on `Select`; settings pages show its
 `LinkProvider` accepts an application-owned anchor bridge without importing a
 router. `PortalProvider` owns an in-tree target unless a custom target is
 supplied; explicit `null` never falls back to the global document body. `Icon`
-publishes an owned name and size vocabulary rather than vendor types.
+publishes an owned name and size vocabulary rather than vendor types. `info` marks a quiet explanatory
+line, such as why something is held back, in secondary ink beside words that carry the whole meaning; a
+problem or warning uses `alert` in its tone instead.
 
 ## Primitives
 
