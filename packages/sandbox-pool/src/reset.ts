@@ -92,6 +92,58 @@ export class Nuke extends Context.Service<
  * and the org-owned CloudTrail/GuardDuty/Config/Security Hub. aws-nuke 3.68.3
  * has no account-alias or Organizations policy type, so neither needs a filter.
  */
+/**
+ * Types a pool account cannot hold in any region, so aws-nuke skips them: listing them only fails and would leave
+ * every scan incomplete. Each group says why nothing can exist. Never add a type that is merely unreachable or
+ * denied to the reset role today; a type missing from only some regions, or absent only until someone subscribes,
+ * belongs in guard.ts's `expectedFailures` instead.
+ */
+const unavailableResourceTypes = [
+  // Timestream for LiveAnalytics takes no new customers.
+  "AWS::Timestream::Database",
+  "AWS::Timestream::ScheduledQuery",
+  "AWS::Timestream::Table",
+  // Cloud9, Cloud Directory and CloudSearch take no new accounts.
+  "Cloud9Environment",
+  "CloudDirectoryDirectory",
+  "CloudDirectorySchema",
+  "CloudSearchDomain",
+  // Retired services: CodeStar, Elastic Transcoder, Inspector Classic, Lex V1, Amazon Machine Learning, OpsWorks
+  // Stacks and OpsWorks for Chef Automate / Puppet Enterprise. Glue development endpoints are disabled.
+  "CodeStarProject",
+  "ElasticTranscoderPipeline",
+  "ElasticTranscoderPreset",
+  "GlueDevEndpoint",
+  "InspectorAssessmentRun",
+  "InspectorAssessmentTarget",
+  "InspectorAssessmentTemplate",
+  "LexBot",
+  "LexIntent",
+  "LexModelBuildingServiceBotAlias",
+  "LexSlotType",
+  "MachineLearningBranchPrediction",
+  "MachineLearningDataSource",
+  "MachineLearningEvaluation",
+  "MachineLearningMLModel",
+  "OpsWorksApp",
+  "OpsWorksCMBackup",
+  "OpsWorksCMServer",
+  "OpsWorksCMServerState",
+  "OpsWorksInstance",
+  "OpsWorksLayer",
+  "OpsWorksUserProfile",
+  // Firewall Manager policies live only in the organization's Firewall Manager admin account, never a pool account.
+  "FMSNotificationChannel",
+  "FMSPolicy",
+  // Network Manager's API lives in us-west-2, outside the region allow-list SCP's allowed regions, and networkmanager
+  // is not among that SCP's global actions, so every principal in a pool account is denied. Changing either list
+  // in infra removes this guarantee.
+  "NetworkManagerConnectPeer",
+  "NetworkManagerCoreNetwork",
+  "NetworkManagerGlobalNetwork",
+  "NetworkManagerNetworkAttachment"
+]
+
 export const renderNukeConfig = (contract: PoolContract, accountId: string): string =>
   JSON.stringify(
     {
@@ -104,7 +156,8 @@ export const renderNukeConfig = (contract: PoolContract, accountId: string): str
           "ConfigServiceConfigurationRecorder",
           "ConfigServiceDeliveryChannel",
           "SecurityHub",
-          "IAMAccountSettingPasswordPolicy"
+          "IAMAccountSettingPasswordPolicy",
+          ...unavailableResourceTypes
         ]
       },
       accounts: {
