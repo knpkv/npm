@@ -652,6 +652,22 @@ describe("Sandboxes overview", { concurrent: false }, () => {
     expect(text('[role="dialog"] [role="alert"]')).toBe("Only the pool owner can lease here. Nothing was leased.")
   })
 
+  it("says when the pool is in observe mode and runs no jobs", async () => {
+    const writes: SandboxesModuleWrites = {
+      lease: Effect.fail(new SandboxesWriteFailed({ reason: "observe_mode" })),
+      extend: () => Effect.void,
+      release: () => Effect.void,
+      ...noRequestWrites
+    }
+    await render(ready([available("ephemeral-02", "999999999991", null)]), { writes })
+    await openDialog(button("Lease an account"))
+    await act(async () => button("Lease longest idle", '[role="dialog"]')?.click())
+    await settle()
+    expect(text('[role="dialog"] [role="alert"]')).toBe(
+      "The pool is in observe mode: it reads spend and runs no jobs. Nothing was leased."
+    )
+  })
+
   it("leases only from the CLI while the pool on screen is stale", async () => {
     let calls = 0
     const overview = ready([available("ephemeral-02", "999999999991", null)])
@@ -1311,6 +1327,7 @@ describe("Sandboxes overview", { concurrent: false }, () => {
       ["already_requested", "Retry already requested. Nothing new was sent."],
       ["not_quarantined", "This account isn’t quarantined any more. Nothing was sent."],
       ["unauthorized", "Only the pool owner can ask for this here. Nothing was sent."],
+      ["observe_mode", "The pool is in observe mode: it reads spend and runs no jobs. Nothing was sent."],
       ["network", "The request may not have reached Fleet. Check Fleet / Approvals before asking again."]
     ]
     for (const [reason, copy] of refusals) {
@@ -1462,39 +1479,42 @@ describe("Sandboxes overview", { concurrent: false }, () => {
         cleaning()
       ])
     const consoleOf = (name: string) => button("Open console", `[data-account="${name}"]`)
+    const consoleLink = (scope: string) =>
+      [...document.querySelectorAll<HTMLAnchorElement>(`${scope} a`)].find(
+        (node) => node.textContent === "Open console"
+      )
     const reasons = (name: string) =>
       [...document.querySelectorAll(`[data-account="${name}"] [data-console-reason]`)].map((node) => node.textContent)
 
-    it("opens the portal's console in a new tab where the owner can sign in, and says why not elsewhere", async () => {
-      const opened = vi.fn<typeof window.open>(() => null)
-      vi.stubGlobal("open", opened)
+    it("links to the portal's console in a new tab where the owner can sign in, and says why not elsewhere", async () => {
       await render(pool(), {
         signIn,
         writes: { ...noRequestWrites, lease: Effect.void, extend: () => Effect.void, release: () => Effect.void }
       })
-      expect(consoleOf("ephemeral-02")?.disabled).toBe(false)
-      expect(consoleOf("ephemeral-03")?.disabled).toBe(false)
+      const open = consoleLink('[data-account="ephemeral-02"]')
+      expect(open?.getAttribute("href")).toBe(
+        "https://portal.example.test/start/#/console?account_id=999999999991&role_name=ExampleDeveloper"
+      )
+      expect(open?.getAttribute("target")).toBe("_blank")
+      expect(open?.getAttribute("rel")).toBe("noopener noreferrer")
+      expect(consoleOf("ephemeral-02")).toBeUndefined()
+      expect(consoleLink('[data-account="ephemeral-03"]')).toBeDefined()
+      expect(consoleLink('[data-account="ephemeral-01"]')).toBeUndefined()
       expect(consoleOf("ephemeral-01")?.disabled).toBe(true)
       expect(reasons("ephemeral-01")).toEqual([
         "Open console: only the lease holder can sign in. agent-b holds this lease."
       ])
       expect(consoleOf("ephemeral-04")?.disabled).toBe(true)
       expect(reasons("ephemeral-04")).toEqual(["Open console is unavailable while the account is wiped."])
-      expect(consoleOf("ephemeral-02")?.getAttribute("aria-label")).toBe(
+      expect(open?.getAttribute("aria-label")).toBe(
         "Open console for ephemeral-02, AWS access portal as ExampleDeveloper, opens in a new tab"
       )
-      expect(buttons('[data-account="ephemeral-03"] .sandboxes-card-buttons button')).toEqual([
+      expect(buttons('[data-account="ephemeral-03"] .sandboxes-card-buttons :is(a, button)')).toEqual([
         "Open console",
         "Copy CLI profile",
         "Extend",
         "Release"
       ])
-      await act(async () => consoleOf("ephemeral-02")?.click())
-      expect(opened).toHaveBeenCalledWith(
-        "https://portal.example.test/start/#/console?account_id=999999999991&role_name=ExampleDeveloper",
-        "_blank",
-        "noopener,noreferrer"
-      )
     })
 
     it("shows and copies one account's CLI profile, with the note that Nix writes it already", async () => {
@@ -1528,18 +1548,22 @@ describe("Sandboxes overview", { concurrent: false }, () => {
 
     it("offers no CLI profile for an account whose name would break the profile, and keeps the console", async () => {
       await render(ready([available("old]name", "999999999991", null)]), { signIn })
-      expect(button("Open console", '[data-account="old]name"]')?.disabled).toBe(false)
+      expect(consoleLink('[data-account="old]name"]')).toBeDefined()
       expect(button("Copy CLI profile", '[data-account="old]name"]')).toBeUndefined()
     })
 
     it("offers neither to a viewer, nor to the owner of a pool without sign-in", async () => {
       await render(pool(), { owner: false })
-      expect(buttons().filter((label) => label === "Open console" || label === "Copy CLI profile")).toEqual([])
+      expect(buttons("a, button").filter((label) => label === "Open console" || label === "Copy CLI profile")).toEqual(
+        []
+      )
       await act(async () => root?.unmount())
       root = null
       document.body.replaceChildren()
       await render(pool())
-      expect(buttons().filter((label) => label === "Open console" || label === "Copy CLI profile")).toEqual([])
+      expect(buttons("a, button").filter((label) => label === "Open console" || label === "Copy CLI profile")).toEqual(
+        []
+      )
     })
 
     it("puts Open console beside Retry reset on a quarantine, with the note to clear the blocker by hand", async () => {
@@ -1549,8 +1573,8 @@ describe("Sandboxes overview", { concurrent: false }, () => {
         signIn,
         writes: { ...noRequestWrites, lease: Effect.void, extend: () => Effect.void, release: () => Effect.void }
       })
-      expect(buttons(".sandboxes-account-actions button")).toEqual(["Retry reset", "Open console"])
-      expect(button("Open console", ".sandboxes-account-actions")?.disabled).toBe(false)
+      expect(buttons(".sandboxes-account-actions :is(a, button)")).toEqual(["Retry reset", "Open console"])
+      expect(consoleLink(".sandboxes-account-actions")?.getAttribute("target")).toBe("_blank")
       expect(text("[data-console-note]")).toBe("Clear the blocker by hand in the console, then retry the reset.")
     })
 
@@ -1562,7 +1586,7 @@ describe("Sandboxes overview", { concurrent: false }, () => {
         requests: Effect.succeed(retryRequest("agent-a")),
         writes: { ...noRequestWrites, lease: Effect.void, extend: () => Effect.void, release: () => Effect.void }
       })
-      expect(buttons(".sandboxes-account-actions button")).toEqual(["Open console"])
+      expect(buttons(".sandboxes-account-actions :is(a, button)")).toEqual(["Open console"])
       expect(text("[data-console-note]")).toBe("Clear the blocker by hand in the console, then retry the reset.")
     })
 
