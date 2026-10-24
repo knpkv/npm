@@ -17,6 +17,7 @@ import {
   type SandboxSignIn,
   type SandboxSpend
 } from "@knpkv/sandbox-pool/host"
+import { Icon } from "@knpkv/rly/foundations"
 import { Button, Notice, Sheet, Skeleton, StateLabel, type RlyStateTone } from "@knpkv/rly/primitives"
 import { Clock, DateTime, Effect, Exit, Fiber, Result, Schedule, Schema } from "effect"
 import {
@@ -371,13 +372,17 @@ const unchangedCopy = {
   release: "The lease is unchanged."
 } satisfies Record<Action, string>
 
-/** Why a write was refused, then what did not change. A refusal for the owner rule says so. */
+const observeModeCopy = "The pool is in observe mode: it reads spend and runs no jobs."
+
+/** Why a write was refused, then what did not change. A refusal for the owner rule or observe mode says so. */
 const refusedCopy = (action: Action, reason: SandboxesWriteFailed["reason"] | "defect"): string =>
   reason === "unauthorized"
     ? `Only the pool owner can ${action} here. ${unchangedCopy[action]}`
-    : reason === "defect"
-      ? `The ${action} may not have been submitted. Check the cards before trying again.`
-      : `The ${action} wasn’t submitted. ${unchangedCopy[action]}`
+    : reason === "observe_mode"
+      ? `${observeModeCopy} ${unchangedCopy[action]}`
+      : reason === "defect"
+        ? `The ${action} may not have been submitted. Check the cards before trying again.`
+        : `The ${action} wasn’t submitted. ${unchangedCopy[action]}`
 
 const cliCopy = {
   lease: "Lease from the CLI for now.",
@@ -712,32 +717,37 @@ const consoleRefusal = (state: CardState, viewer: string): string | null => {
   }
 }
 
-/** Opens the access portal's console for the account, as the pool's role, in a new tab. Never handles keys. */
+/**
+ * Links to the access portal's console for the account, as the pool's role, in a new tab. Never handles keys.
+ * A link, so the browser opens it as one; a refused console is a disabled button, since a link can't be disabled.
+ */
 const OpenConsole = ({
   disabled,
   item,
-  signIn,
-  stretch = false
+  signIn
 }: {
   readonly disabled: boolean
   readonly item: SandboxCard
   readonly signIn: SandboxSignIn
-  readonly stretch?: boolean
-}): ReactElement => (
-  <Button
-    aria-label={`Open console for ${item.name}, AWS access portal as ${signIn.roleName}, opens in a new tab`}
-    className="sandboxes-trigger"
-    disabled={disabled}
-    onClick={() => {
-      window.open(consoleUrl(signIn, item.accountId), "_blank", "noopener,noreferrer")
-    }}
-    stretch={stretch}
-    trailingIcon="external-link"
-    variant="secondary"
-  >
-    Open console
-  </Button>
-)
+}): ReactElement => {
+  const label = `Open console for ${item.name}, AWS access portal as ${signIn.roleName}, opens in a new tab`
+  return disabled ? (
+    <Button aria-label={label} className="sandboxes-trigger" disabled trailingIcon="external-link" variant="secondary">
+      Open console
+    </Button>
+  ) : (
+    <a
+      aria-label={label}
+      className="sandboxes-trigger sandboxes-console-link"
+      href={consoleUrl(signIn, item.accountId)}
+      rel="noopener noreferrer"
+      target="_blank"
+    >
+      Open console
+      <Icon decorative name="external-link" />
+    </a>
+  )
+}
 
 /** The account's `~/.aws/config` profile, with its own Copy. */
 const CliProfile = ({ item, profile }: { readonly item: SandboxCard; readonly profile: string }) => {
@@ -1217,6 +1227,8 @@ const requestRefusal = (kind: RequestKind, reason: SandboxesWriteFailed["reason"
       return "This account isn’t stopped by budget. Nothing was sent."
     case "unauthorized":
       return "Only the pool owner can ask for this here. Nothing was sent."
+    case "observe_mode":
+      return `${observeModeCopy} Nothing was sent.`
     case "rejected":
       return "Fleet refused the request. Nothing was sent."
     case "network":

@@ -1,8 +1,8 @@
 import { Credentials } from "@distilled.cloud/aws"
 import { describe, expect, it, layer } from "@effect/vitest"
 import { Effect, Redacted, Result } from "effect"
-import { makeStsPoolAccess, type ObservedBaseline, planBaseline } from "../src/aws.js"
-import type { PoolSession } from "../src/index.js"
+import { inspectReset, makeStsPoolAccess, type ObservedBaseline, planBaseline } from "../src/aws.js"
+import { Nuke, type PoolSession } from "../src/index.js"
 import { against, type FakeAnswer, fakeAws, json, type SeenCall, xml } from "./fake-aws.js"
 import { contract } from "./fixtures.js"
 
@@ -325,6 +325,96 @@ layer(Credentials.mock)("STS pool access", (it) => {
         .toEqual([["ListPoliciesForTarget", "222222222222", true]])
       expect((yield* hold("FullAWSAccess")).held).toBe(false)
     }))
+})
+
+layer(Credentials.mock)("reset inspection", (it) => {
+  const dryOutput = [
+    "eu-central-1 - EC2Instance - i-0abc - [Name: \"left-over\"] - would remove",
+    "global - IAMRole - PoolAccessRole - [Path: \"/\"] - would remove",
+    "Scan complete: 5 total, 2 nukeable, 3 filtered"
+  ].join("\n")
+  const runs: Array<{ readonly configPath: string; readonly live: boolean; readonly accessKeyId: string }> = []
+  const configs: Array<{ readonly accountId: string; readonly config: string }> = []
+  const nuke = Nuke.of({
+    writeConfig: (accountId, config) =>
+      Effect.sync(() => {
+        configs.push({ accountId, config })
+        return `/state/nuke/${accountId}.json`
+      }),
+    run: ({ configPath, live, session: used }) =>
+      Effect.sync(() => {
+        runs.push({ configPath, live, accessKeyId: used.accessKeyId })
+        return { exitCode: 0, output: dryOutput }
+      })
+  })
+  const assumed = result(
+    "AssumeRole",
+    "<Credentials><AccessKeyId>ASIANEW</AccessKeyId><SecretAccessKey>s</SecretAccessKey><SessionToken>t</SessionToken><Expiration>2026-10-23T12:00:00Z</Expiration></Credentials>"
+  )
+
+  it.effect("reads what a reset would do and writes nothing in AWS, running aws-nuke dry only", () => {
+    const seen: Array<SeenCall> = []
+    const pool = account({ aliases: [], boundary: "{}", versions: 5 })
+    return inspectReset(options, "222222222222").pipe(
+      Effect.map((report) => {
+        expect(report).toEqual({
+          accountId: "222222222222",
+          baseline: [
+            { _tag: "CreateAlias", alias: "example-pool-sandbox-b" },
+            { _tag: "UpdateBoundary", deleteVersion: "v1" }
+          ],
+          dryRun: {
+            exitCode: 0,
+            removable: 2,
+            wouldRemove: [
+              "eu-central-1 - EC2Instance - i-0abc - [Name: \"left-over\"] - would remove",
+              "global - IAMRole - PoolAccessRole - [Path: \"/\"] - would remove"
+            ],
+            protectedListed: [{
+              protectedClass: "organization access role",
+              line: "global - IAMRole - PoolAccessRole - [Path: \"/\"] - would remove"
+            }],
+            discoveryFailures: []
+          },
+          budgetHeld: true
+        })
+        expect(seen.map(({ operation }) => operation)).toEqual([
+          "AssumeRole",
+          "ListAccountAliases",
+          "GetPolicy",
+          "GetPolicyVersion",
+          "ListPolicyVersions",
+          "ListPoliciesForTarget"
+        ])
+        expect(runs).toEqual([{ configPath: "/state/nuke/222222222222.json", live: false, accessKeyId: "ASIANEW" }])
+        expect(configs.map(({ accountId }) => accountId)).toEqual(["222222222222"])
+        expect(configs[0]?.config).toContain("333333333333")
+      }),
+      Effect.provideService(Nuke, nuke),
+      against(fakeAws(
+        (call) =>
+          call.operation === "AssumeRole"
+            ? assumed
+            : call.operation === "ListPoliciesForTarget"
+            ? json({ Policies: [{ Id: "p-1", Name: "PoolDenyAll" }] })
+            : pool(call),
+        seen
+      ))
+    )
+  })
+
+  it.effect("refuses an account outside the pool before any call or aws-nuke run", () => {
+    const seen: Array<SeenCall> = []
+    runs.length = 0
+    return inspectReset(options, "333333333333").pipe(
+      Effect.flip,
+      Effect.map((refused) => {
+        expect([refused.step, refused.detail, seen, runs]).toEqual(["sign in", "not a pool account", [], []])
+      }),
+      Effect.provideService(Nuke, nuke),
+      against(fakeAws(() => assumed, seen))
+    )
+  })
 })
 
 describe("planBaseline", () => {

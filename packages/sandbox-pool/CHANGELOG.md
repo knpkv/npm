@@ -1,5 +1,17 @@
 # @knpkv/sandbox-pool
 
+## 0.11.0
+
+### Minor Changes
+
+- [#1097](https://github.com/knpkv/npm/pull/1097) [`3a38e16`](https://github.com/knpkv/npm/commit/3a38e16cc5d8d9792aeacb01d5161fd582b79e0f) Thanks [@konopkov](https://github.com/konopkov)! - A host's sandbox pool now runs from its fleet configuration: `makeSandboxPoolFromConfig` reads `sandboxPool.mode` (off when absent; observe reads spend and refuses every write with no job kinds; live wires every AWS adapter) and signs in through the hub's own AWS sign-in as `sandboxPool.operator`. `sandbox-reset-check <account-id>` and `inspectReset` read what a reset would do, changing nothing in AWS.
+
+## 0.10.1
+
+### Patch Changes
+
+- [#1102](https://github.com/knpkv/npm/pull/1102) [`4914da5`](https://github.com/knpkv/npm/commit/4914da56c3e97101a3cbf9ad1cc649cfa5a526e6) Thanks [@konopkov](https://github.com/konopkov)! - A reset's scan no longer quarantines on resource types a pool account cannot hold: aws-nuke now skips retired, subscription-only, admin-only and SCP-denied types, and a type whose service has no endpoint in one region is not an incomplete scan there.
+
 ## 0.10.0
 
 ### Minor Changes

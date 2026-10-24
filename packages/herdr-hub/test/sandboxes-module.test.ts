@@ -13,8 +13,10 @@ import {
 import { SandboxesOverview, SandboxRunLog, type SandboxRuns } from "@knpkv/sandbox-pool/host"
 import type { SandboxHostReads } from "@knpkv/sandbox-pool/host/server"
 import { ConfigProvider, Effect, FileSystem, Layer, Result, Schema } from "effect"
+import type { AwsSignIn, AwsSignInState } from "../src/aws-sign-in.js"
 import { connectModule, sandboxesModule } from "../src/module-contract.js"
 import { dispatchModuleRoute, makeModuleLayer, ModuleHandlers, ModuleRouteFailure } from "../src/module-server.js"
+import type { SandboxPoolMode } from "../src/sandbox-config.js"
 import {
   makeSandboxesModule,
   type PendingSandboxApproval,
@@ -82,6 +84,32 @@ const request = (
 class CallerRefused extends Schema.TaggedError<CallerRefused>()("CallerRefused", {}) {}
 
 class OriginRefused extends Schema.TaggedError<OriginRefused>()("OriginRefused", {}) {}
+
+/** An AWS sign-in whose state the test sets; `begin` moves it to pending and is counted, as are state reads. */
+const fakeSignIn = (initial: AwsSignInState) => {
+  const calls: Array<"state" | "begin"> = []
+  let current = initial
+  const signIn: AwsSignIn = {
+    state: Effect.sync(() => {
+      calls.push("state")
+      return current
+    }),
+    accessToken: Effect.die("no token expected"),
+    begin: Effect.sync(() => {
+      calls.push("begin")
+      current = {
+        _tag: "SignInPending",
+        verificationUri: "https://portal.example.test/start/#/device?user_code=ABCD-EFGH",
+        userCode: "ABCD-EFGH",
+        expiresAt: Date.UTC(2026, 9, 23, 12, 32)
+      }
+      return { ended: Effect.void }
+    }),
+    revoked: () => Effect.void,
+    region: "eu-central-1"
+  }
+  return { signIn, calls }
+}
 
 /** Records each job the module submits, as Fleet would receive it. */
 const recordingSubmit = () => {
@@ -204,6 +232,10 @@ const otherApproval: PendingSandboxApproval = {
   payload: { kind: "nix.apply", ref: "main" }
 }
 
+// A served pool always names its mode; tests default to live.
+const served = (contract: PoolContract | null, poolMode: SandboxPoolMode) =>
+  contract === null ? { pool: null } : { pool: contract, poolMode }
+
 const withModule = <A, E, R>(
   sandboxesHost: FleetHostName | null,
   run: Effect.Effect<A, E, R>,
@@ -213,6 +245,8 @@ const withModule = <A, E, R>(
     readonly isHub?: boolean
     readonly pending?: Effect.Effect<ReadonlyArray<PendingSandboxApproval>, string>
     readonly submit?: SandboxJobSubmit
+    readonly awsSignIn?: AwsSignIn | null
+    readonly poolMode?: SandboxPoolMode
   } = {}
 ) =>
   Effect.gen(function*() {
@@ -226,10 +260,11 @@ const withModule = <A, E, R>(
             isHub: options.isHub ?? true,
             sandboxesHost,
             stateDirectory: "/fixture",
-            pool: options.pool === undefined ? pool : options.pool,
             pendingApprovals: options.pending ?? Effect.succeed([]),
             reads: options.reads ?? Effect.succeed(fakeReads),
-            submit: options.submit ?? (() => Effect.die("no job expected"))
+            submit: options.submit ?? (() => Effect.die("no job expected")),
+            awsSignIn: options.awsSignIn ?? null,
+            ...served(options.pool === undefined ? pool : options.pool, options.poolMode ?? "live")
           })
         ]
       ).pipe(Layer.provide(Layer.merge(NodeServices.layer, NodeHttpClient.layerNodeHttp)))
@@ -547,6 +582,50 @@ describe("host-local Sandboxes module", () => {
     )
   })
 
+  it.effect("serves the hub's AWS sign-in state to the hub's own node only, reading nothing for anyone else", () => {
+    const { calls, signIn } = fakeSignIn({ _tag: "SignedIn", expiresAt: Date.UTC(2026, 9, 23, 18, 5) })
+    return withModule(
+      host,
+      Effect.gen(function*() {
+        const viewer = yield* Effect.result(request("sandboxes/aws-session"))
+        expect(Result.isFailure(viewer) && viewer.failure).toMatchObject({ status: 403, code: "owner_only" })
+        expect(calls).toEqual([])
+        const owner = yield* request("sandboxes/aws-session", "serve", "GET", { sameNode: true })
+        expect(owner?.body).toEqual({ _tag: "SignedIn", expiresAt: "2026-10-23T18:05:00.000Z" })
+        const unconfigured = yield* withModule(
+          host,
+          request("sandboxes/aws-session", "serve", "GET", { sameNode: true }),
+          { awsSignIn: null }
+        )
+        expect(unconfigured?.body).toEqual({ _tag: "NotConfigured" })
+      }),
+      { awsSignIn: signIn }
+    )
+  })
+
+  it.effect("starts an AWS sign-in for the hub's own node only and answers what to approve", () => {
+    const { calls, signIn } = fakeSignIn({ _tag: "SignInRequired" })
+    return withModule(
+      host,
+      Effect.gen(function*() {
+        const viewer = yield* Effect.result(
+          request("sandboxes/aws-sign-in", "serve", "POST", { sameNode: false, body: {} })
+        )
+        expect(Result.isFailure(viewer) && viewer.failure).toMatchObject({ status: 403, code: "owner_only" })
+        expect(calls).toEqual([])
+        const started = yield* request("sandboxes/aws-sign-in", "serve", "POST", { sameNode: true, body: {} })
+        expect(started?.body).toEqual({
+          _tag: "SignInPending",
+          verificationUri: "https://portal.example.test/start/#/device?user_code=ABCD-EFGH",
+          userCode: "ABCD-EFGH",
+          expiresAt: "2026-10-23T12:32:00.000Z"
+        })
+        expect(calls).toEqual(["begin", "state"])
+      }),
+      { awsSignIn: signIn }
+    )
+  })
+
   it.effect("names an unserved pool on the run log, even to the hub's own node", () =>
     Effect.gen(function*() {
       const elsewhere = yield* withModule(
@@ -699,6 +778,48 @@ describe("host-local Sandboxes module", () => {
         code: "owner_only"
       })
       expect(yield* refused({ _tag: "Reset", accountId: account, reason: "Manual" })).toMatchObject({ status: 400 })
+      expect(submitted).toEqual([])
+    })
+  })
+
+  it.effect("refuses every job as observe_mode, before Fleet, while the pool is in observe mode", () => {
+    const { submit, submitted } = recordingSubmit()
+    const refused = (body: Schema.Json) =>
+      withModule(
+        host,
+        Effect.result(request("sandboxes/jobs", "serve", "POST", { sameNode: true, body })),
+        { reads: Effect.succeed(attentionReads), submit, poolMode: "observe" }
+      ).pipe(Effect.map((result) => (Result.isFailure(result) ? result.failure : null)))
+    return Effect.gen(function*() {
+      for (
+        const body of [
+          { _tag: "Lease" },
+          { _tag: "Extend", accountId: account },
+          { _tag: "Release", accountId: account },
+          { _tag: "Retry", accountId: account },
+          { _tag: "BudgetLift", accountId: held }
+        ]
+      ) {
+        expect(yield* refused(body), body._tag).toMatchObject({ status: 409, code: "observe_mode" })
+      }
+      expect(submitted).toEqual([])
+    })
+  })
+
+  it.effect("refuses every job as unavailable while the pool is off, and submits nothing", () => {
+    const { submit, submitted } = recordingSubmit()
+    return Effect.gen(function*() {
+      for (const body of [{ _tag: "Lease" }, { _tag: "Retry", accountId: account }]) {
+        const result = yield* withModule(
+          host,
+          Effect.result(request("sandboxes/jobs", "serve", "POST", { sameNode: true, body })),
+          { reads: Effect.succeed(attentionReads), submit, poolMode: "off" }
+        )
+        expect(Result.isFailure(result) && result.failure, body._tag).toMatchObject({
+          status: 503,
+          code: "unavailable"
+        })
+      }
       expect(submitted).toEqual([])
     })
   })

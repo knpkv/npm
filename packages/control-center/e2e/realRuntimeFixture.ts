@@ -104,12 +104,10 @@ export const acquireEphemeralPort = Effect.tryPromise({
 
 interface AllocatedFixture {
   readonly dataRoot: string
-  readonly origin: string
   readonly persistenceConfig: PersistenceConfig
   readonly port: number
   readonly secretRoot: SecretRoot
   readonly staticRoot: string
-  readonly trustedHttpsProxyPort: number | null
   readonly upstreamOrigin: string
 }
 
@@ -117,7 +115,7 @@ export interface StartRealRuntimeFixtureOptions {
   readonly trustedHttpsProxy?: boolean
 }
 
-const allocateFixture = (options: StartRealRuntimeFixtureOptions) =>
+const allocateFixture = () =>
   Effect.gen(function*() {
     const fileSystem = yield* FileSystem.FileSystem
     const path = yield* Path.Path
@@ -126,11 +124,8 @@ const allocateFixture = (options: StartRealRuntimeFixtureOptions) =>
       Effect.gen(function*() {
         yield* fileSystem.chmod(dataRoot, 0o700)
         const port = yield* acquireEphemeralPort
-        const trustedHttpsProxyPort = options.trustedHttpsProxy === true ? yield* acquireEphemeralPort : null
-        const upstreamOrigin = `http://127.0.0.1:${port}`
         return {
           dataRoot,
-          origin: trustedHttpsProxyPort === null ? upstreamOrigin : `https://127.0.0.1:${trustedHttpsProxyPort}`,
           persistenceConfig: {
             blobRoot: BlobRoot.make(path.join(dataRoot, "blobs")),
             busyTimeoutMilliseconds: 5_000,
@@ -140,8 +135,7 @@ const allocateFixture = (options: StartRealRuntimeFixtureOptions) =>
           port,
           secretRoot: SecretRoot.make(path.join(dataRoot, "secrets")),
           staticRoot: yield* path.fromFileUrl(new URL("../dist/client/", import.meta.url)),
-          trustedHttpsProxyPort,
-          upstreamOrigin
+          upstreamOrigin: `http://127.0.0.1:${port}`
         } satisfies AllocatedFixture
       }),
       fileSystem.remove(dataRoot, { force: true, recursive: true })
@@ -156,6 +150,8 @@ class TrustedHttpsProxyFixtureError extends Schema.TaggedError<TrustedHttpsProxy
 interface TrustedHttpsProxy {
   readonly agent: HttpAgent
   readonly failure: () => TrustedHttpsProxyFixtureError | null
+  /** `https://127.0.0.1:<port>`, the port the proxy bound. */
+  readonly origin: string
   readonly server: HttpsServer
 }
 
@@ -175,13 +171,13 @@ const closeHttpsProxy = async (proxy: TrustedHttpsProxy): Promise<void> => {
   if (failure !== null) throw failure
 }
 
+/**
+ * Starts the trusted HTTPS proxy in front of `allocated.upstreamOrigin`. It listens on port 0 and its origin comes
+ * from the bound address, so no other process can take the port between choosing and binding it.
+ */
 const startTrustedHttpsProxy = Effect.fn("controlCenter.startTrustedHttpsProxy")(function*(
   allocated: AllocatedFixture
 ) {
-  if (allocated.trustedHttpsProxyPort === null) {
-    return yield* new TrustedHttpsProxyFixtureError({ reason: "trusted HTTPS proxy port was not allocated" })
-  }
-  const trustedHttpsProxyPort = allocated.trustedHttpsProxyPort
   const fileSystem = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
@@ -227,7 +223,6 @@ const startTrustedHttpsProxy = Effect.fn("controlCenter.startTrustedHttpsProxy")
     .pipe(
       Effect.mapError(() => new TrustedHttpsProxyFixtureError({ reason: "could not read the test TLS private key" }))
     )
-  const publicOrigin = new URL(allocated.origin)
   const upstreamOrigin = new URL(allocated.upstreamOrigin)
 
   return yield* Effect.tryPromise({
@@ -235,6 +230,8 @@ const startTrustedHttpsProxy = Effect.fn("controlCenter.startTrustedHttpsProxy")
       new Promise<TrustedHttpsProxy>((resolve, reject) => {
         let runtimeFailure: TrustedHttpsProxyFixtureError | null = null
         let started = false
+        // Set once listening; requests only arrive after that.
+        let publicHost = ""
         const agent = new HttpAgent({ keepAlive: true, maxSockets: 32 })
         const server = createHttpsServer(
           {
@@ -250,11 +247,11 @@ const startTrustedHttpsProxy = Effect.fn("controlCenter.startTrustedHttpsProxy")
                 agent,
                 headers: {
                   ...upstreamHeaders,
-                  host: publicOrigin.host,
+                  host: publicHost,
                   "x-forwarded-for": trustedProxyForwardedClient(
                     request.headers[TRUSTED_PROXY_TEST_CLIENT_HEADER]
                   ),
-                  "x-forwarded-host": publicOrigin.host,
+                  "x-forwarded-host": publicHost,
                   "x-forwarded-proto": "https"
                 },
                 hostname: upstreamOrigin.hostname,
@@ -302,9 +299,17 @@ const startTrustedHttpsProxy = Effect.fn("controlCenter.startTrustedHttpsProxy")
           }
           runtimeFailure = failure
         })
-        server.listen(trustedHttpsProxyPort, "127.0.0.1", () => {
+        server.listen(0, "127.0.0.1", () => {
+          const address = server.address()
+          if (address === null || Predicate.isString(address)) {
+            agent.destroy()
+            server.close()
+            reject(new TrustedHttpsProxyFixtureError({ reason: "test HTTPS proxy did not expose an internet port" }))
+            return
+          }
           started = true
-          resolve({ agent, failure: () => runtimeFailure, server })
+          publicHost = `127.0.0.1:${address.port}`
+          resolve({ agent, failure: () => runtimeFailure, origin: `https://${publicHost}`, server })
         })
       }),
     catch: (cause) =>
@@ -423,11 +428,18 @@ export const validateBenchmarkReleaseCardinality = Effect.fn(
 export const startRealRuntimeFixture = async (
   options: StartRealRuntimeFixtureOptions = {}
 ): Promise<RealRuntimeFixture> => {
-  const allocated = await Effect.runPromise(allocateFixture(options))
+  const allocated = await Effect.runPromise(allocateFixture())
   let serverRuntime: { readonly dispose: () => Promise<void> } | undefined
   let trustedHttpsProxy: TrustedHttpsProxy | undefined
   try {
     await Effect.runPromise(seedFixture(allocated))
+    // Before the server: its bind config names the proxy's origin, known once the proxy is listening.
+    if (options.trustedHttpsProxy === true) {
+      trustedHttpsProxy = await Effect.runPromise(
+        startTrustedHttpsProxy(allocated).pipe(Effect.provide(NodeServices.layer))
+      )
+    }
+    const origin = trustedHttpsProxy?.origin ?? allocated.upstreamOrigin
     const applicationLogEntries: Array<string> = []
     const applicationLogCapture = Logger.make<unknown, void>((options) => {
       applicationLogEntries.push(Logger.formatJson.log(options))
@@ -442,13 +454,13 @@ export const startRealRuntimeFixture = async (
     }
     const bindConfig = await Effect.runPromise(
       decodeBindConfig(
-        allocated.trustedHttpsProxyPort === null
+        trustedHttpsProxy === undefined
           ? { port: allocated.port }
           : {
-            allowedHosts: [new URL(allocated.origin).host],
-            allowedOrigins: [allocated.origin],
+            allowedHosts: [new URL(origin).host],
+            allowedOrigins: [origin],
             port: allocated.port,
-            publicOrigin: allocated.origin,
+            publicOrigin: origin,
             trustedProxyAddresses: ["127.0.0.1"]
           }
       )
@@ -489,11 +501,6 @@ export const startRealRuntimeFixture = async (
       { label: "bootstrap pairing code", value: Redacted.value(bootstrap.pairingCode) },
       { label: "bootstrap owner session token", value: Redacted.value(ownerSessionToken) }
     ]
-    if (allocated.trustedHttpsProxyPort !== null) {
-      trustedHttpsProxy = await Effect.runPromise(
-        startTrustedHttpsProxy(allocated).pipe(Effect.provide(NodeServices.layer))
-      )
-    }
 
     let disposed = false
     const lifecycleEvidence = { activeManagedServers: 1, disposedManagedServers: 0 }
@@ -624,7 +631,7 @@ export const startRealRuntimeFixture = async (
         lifecycleEvidence.disposedManagedServers += 1
       },
       lifecycleEvidence: () => ({ ...lifecycleEvidence }),
-      origin: allocated.origin,
+      origin,
       pairThroughUi: async (page) => {
         const pairing = await typedServerRuntime.runPromise(
           auth.issuePairingCode(ownerSessionToken, {
@@ -633,7 +640,7 @@ export const startRealRuntimeFixture = async (
           })
         )
         const consumedPairingCode = Redacted.value(pairing.pairingCode)
-        await page.goto(`${allocated.origin}/pair`)
+        await page.goto(`${origin}/pair`)
         await page.getByLabel("Pairing code").fill(consumedPairingCode)
         await page.getByRole("button", { name: "Pair browser" }).click()
         return { consumedPairingCode }

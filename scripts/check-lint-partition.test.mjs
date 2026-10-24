@@ -86,7 +86,9 @@ test("default lint retains every original check and both CI partitions", () => {
     "node --test scripts/precheck.test.mjs",
     "node --test scripts/openapi-spec-diff.test.ts",
     "tsc -p scripts/tsconfig.local-tools.json",
-    "node --test scripts/build-typescript.test.mjs scripts/run-eslint.test.mjs"
+    "node --test scripts/build-typescript.test.mjs scripts/run-eslint.test.mjs",
+    "node scripts/check-tsconfig-references.mjs",
+    "node --test scripts/check-tsconfig-references.test.mjs"
   ])
   assert.deepEqual(expandedScript("lint"), [...staticCommands, ...coverageCommands])
   assert.deepEqual(expandedScript("lint:config"), [...expandedScript("lint:config:static"), ...coverageCommands])

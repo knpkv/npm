@@ -1,6 +1,6 @@
 {
   "name": "@knpkv/herdr-hub",
-  "version": "0.56.0",
+  "version": "0.58.0",
   "description": "Authenticated fleet approvals, PWA, coordinator, and hostd runtime",
   "license": "MIT",
   "author": "knpkv",
@@ -15,12 +15,14 @@
     "**/*.css",
     "./dist/bin.js",
     "./dist/fleetctl.js",
-    "./dist/relay.js"
+    "./dist/relay.js",
+    "./dist/sandbox-reset-check.js"
   ],
   "bin": {
     "hostd": "./dist/bin.js",
     "fleetctl": "./dist/fleetctl.js",
-    "relay": "./dist/relay.js"
+    "relay": "./dist/relay.js",
+    "sandbox-reset-check": "./dist/sandbox-reset-check.js"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -48,6 +50,10 @@
     "./hostd-runtime": {
       "types": "./dist/hostd.d.ts",
       "import": "./dist/hostd.js"
+    },
+    "./sandbox-reset-check": {
+      "types": "./dist/sandbox-reset-check.d.ts",
+      "import": "./dist/sandbox-reset-check.js"
     },
     "./modules": {
       "types": "./dist/modules.d.ts",

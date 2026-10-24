@@ -143,6 +143,7 @@ it.effect("names why Fleet refused a retry or lift from the 409 code, and any ot
       [{ error: "already_requested" }, "already_requested"],
       [{ error: "not_quarantined" }, "not_quarantined"],
       [{ error: "not_budget_held" }, "not_budget_held"],
+      [{ error: "observe_mode" }, "observe_mode"],
       [{ error: "rejected" }, "rejected"],
       [{ error: "something new" }, "rejected"],
       [["not", "an", "object"], "rejected"]

@@ -191,6 +191,39 @@
     text-underline-offset: 0.25em;
   }
 
+  /* Open console is a link drawn as rly's dense secondary Button, so the browser opens it as a link. */
+  .sandboxes-console-link {
+    box-sizing: border-box;
+    display: inline-flex;
+    gap: var(--rly-space-8);
+    align-items: center;
+    justify-content: center;
+    min-block-size: var(--rly-control-height-dense);
+    min-inline-size: var(--rly-control-height-dense);
+    max-inline-size: 100%;
+    padding: var(--rly-space-4) var(--rly-space-12);
+    border: 1px solid var(--rly-color-border-2);
+    border-radius: var(--rly-radius-tag);
+    background: var(--rly-color-surface-1);
+    color: var(--rly-color-text-1);
+    font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
+      var(--rly-type-label-font);
+    letter-spacing: var(--rly-type-label-tracking);
+    text-align: center;
+    text-decoration: none;
+  }
+
+  .sandboxes-console-link:focus-visible {
+    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+    outline-offset: var(--rly-focus-ring-offset);
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .sandboxes-console-link:hover {
+      border-color: var(--rly-color-text-2);
+    }
+  }
+
   .sandboxes-facts {
     display: grid;
     grid-template-columns: 7rem minmax(0, 1fr);
@@ -763,7 +796,7 @@
     }
 
     .sandboxes-trigger,
-    .sandboxes-card-buttons > button {
+    .sandboxes-card-buttons > :is(a, button) {
       min-block-size: 44px;
     }
   }

@@ -26,6 +26,9 @@ const actionText = await runtime.runPromise(
 const install = parseDocument(actionText)
   .toJS()
   .runs.steps.find((step) => step.name === "Install dependencies")
+const firewall = parseDocument(actionText)
+  .toJS()
+  .runs.steps.find((step) => step.name === "Install Socket Firewall")
 
 // Stand-ins for Socket Firewall and pnpm. `sfw` logs its call and runs its arguments; a scenario's `sfw-results`
 // lines decide whether that call fails (the firewall refusing). `pnpm install --offline` is the completeness check:
@@ -113,4 +116,104 @@ test("a firewall refusal fails the step without a completeness check passing it"
   const result = await runInstall({ sfw: [1, 1, 1], offline: [] })
   assert.equal(result.exitCode, ChildProcessSpawner.ExitCode(1))
   assert.deepEqual(result.calls, ["sfw", "sfw", "sfw"])
+})
+
+/**
+ * Runs the firewall step for one `runner.os`-`runner.arch`. The `curl` stand-in logs the URL, then fails (exit 22) or,
+ * with `download`, writes the file. `sha256sum` and `shasum` stand-ins log their call and pass.
+ */
+const runFirewall = (platform, { download = false } = {}) =>
+  runtime.runPromise(
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const dir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "setup-firewall-" })
+      const log = path.join(dir, "log")
+      yield* fileSystem.writeFileString(log, "")
+      const stubs = {
+        curl: download
+          ? `#!/usr/bin/env bash\necho "\${@: -1}" >> "$FAKE_LOG"\nwhile [ "$1" != --output ]; do shift; done\necho sfw > "$2"\n`
+          : `#!/usr/bin/env bash\necho "\${@: -1}" >> "$FAKE_LOG"\nexit 22\n`,
+        sha256sum: `#!/usr/bin/env bash\necho "verify sha256sum $*" >> "$FAKE_LOG"\ncat > /dev/null\n`,
+        shasum: `#!/usr/bin/env bash\necho "verify shasum $*" >> "$FAKE_LOG"\ncat > /dev/null\n`
+      }
+      for (const [name, body] of Object.entries(stubs)) {
+        yield* fileSystem.writeFileString(path.join(dir, name), body)
+        yield* fileSystem.chmod(path.join(dir, name), 0o755)
+      }
+      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+      const inheritedPath = yield* Config.String("PATH")
+      const handle = yield* spawner.spawn(
+        ChildProcess.make("bash", ["--noprofile", "--norc", "-eo", "pipefail", "-c", firewall.run], {
+          cwd: dir,
+          env: {
+            ...firewall.env,
+            RUNNER_PLATFORM: platform,
+            RUNNER_TEMP: dir,
+            GITHUB_PATH: path.join(dir, "github-path"),
+            PATH: `${dir}:${inheritedPath}`,
+            FAKE_LOG: log
+          },
+          extendEnv: true
+        })
+      )
+      const [stdout, exitCode] = yield* Effect.all(
+        [Stream.mkString(Stream.decodeText(handle.stdout)), handle.exitCode],
+        { concurrency: "unbounded" }
+      )
+      const lines = (yield* fileSystem.readFileString(log)).split("\n").filter((line) => line.length > 0)
+      return {
+        exitCode,
+        stdout,
+        urls: lines.filter((line) => !line.startsWith("verify ")),
+        verifiers: lines.filter((line) => line.startsWith("verify "))
+      }
+    }).pipe(Effect.scoped)
+  )
+
+// Each runner OS and architecture downloads its own release asset; the macOS and Windows hub-app legs need them.
+test("the firewall step downloads the binary for the runner's OS and architecture", async () => {
+  const expected = [
+    ["Linux-X64", "sfw-free-linux-x86_64"],
+    ["Linux-ARM64", "sfw-free-linux-arm64"],
+    ["macOS-ARM64", "sfw-free-macos-arm64"],
+    ["macOS-X64", "sfw-free-macos-x86_64"],
+    ["Windows-X64", "sfw-free-windows-x86_64.exe"]
+  ]
+  for (const [platform, asset] of expected) {
+    const result = await runFirewall(platform)
+    assert.notEqual(result.exitCode, ChildProcessSpawner.ExitCode(0))
+    assert.equal(result.urls.length, 1, platform)
+    assert.match(result.urls[0], new RegExp(`/v1\\.15\\.0/${asset.replaceAll(".", "\\.")}$`, "u"), platform)
+  }
+})
+
+// No pinned binary means no install: the step fails rather than running pnpm unfirewalled or unpinned.
+test("a runner without a pinned firewall binary fails the step before downloading anything", async () => {
+  const result = await runFirewall("Windows-ARM64")
+  assert.equal(result.exitCode, ChildProcessSpawner.ExitCode(1))
+  assert.deepEqual(result.urls, [])
+  assert.match(result.stdout, /::error title=No pinned Socket Firewall::/u)
+})
+
+test("every pinned firewall binary is checked against a sha256 before it is put on PATH", () => {
+  const pins = [...firewall.run.matchAll(/sha256=([0-9a-f]+)/gu)].map((match) => match[1])
+  assert.equal(pins.length, 5)
+  for (const pin of pins) assert.match(pin, /^[0-9a-f]{64}$/u)
+  assert.ok(firewall.run.indexOf("--check --strict") < firewall.run.indexOf("GITHUB_PATH"))
+})
+
+// macos-latest ships a BSD sha256sum without --strict, so the verifier is chosen by OS, never by what is on PATH.
+test("the firewall step verifies with shasum on macOS and sha256sum elsewhere, in strict mode", async () => {
+  const expected = [
+    ["macOS-ARM64", "verify shasum -a 256 --check --strict"],
+    ["macOS-X64", "verify shasum -a 256 --check --strict"],
+    ["Linux-X64", "verify sha256sum --check --strict"],
+    ["Windows-X64", "verify sha256sum --check --strict"]
+  ]
+  for (const [platform, verifier] of expected) {
+    const result = await runFirewall(platform, { download: true })
+    assert.equal(result.exitCode, ChildProcessSpawner.ExitCode(0), platform)
+    assert.deepEqual(result.verifiers, [verifier], platform)
+  }
 })

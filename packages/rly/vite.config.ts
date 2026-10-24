@@ -1,6 +1,7 @@
 import react from "@vitejs/plugin-react"
 import { basename } from "node:path"
-import { defineConfig, type Plugin } from "vite"
+import { fileURLToPath } from "node:url"
+import { defineConfig, normalizePath, type Plugin } from "vite"
 import { BROWSER_TARGET } from "../../browser-target.ts"
 import { componentManifest } from "./component-manifest.js"
 import { moduleEntrySources } from "./generated/vite-entries.js"
@@ -11,12 +12,13 @@ const entries = Object.fromEntries(
     .filter(([id]) => id !== "diff/bounded")
     .map(([id, source]) => [
       id === "root" ? "index" : `${id}/index`,
-      new URL(`./${source}`, import.meta.url).pathname
+      fileURLToPath(new URL(`./${source}`, import.meta.url))
     ])
 )
 
 const componentStyles = (): Plugin => {
-  const rootEntry = new URL(`./${moduleEntrySources.root}`, import.meta.url).pathname
+  // Vite's module ids use "/" on every OS (`D:/a/...` on Windows), so the root entry is compared in that form.
+  const rootEntry = normalizePath(fileURLToPath(new URL(`./${moduleEntrySources.root}`, import.meta.url)))
   const imports = componentStyleSources(componentManifest)
     .map((source) => `import ${JSON.stringify(`./${source.slice("src/".length)}`)}`)
     .join("\n")
