@@ -1,5 +1,11 @@
 # @knpkv/hub-app
 
+## 0.3.1
+
+### Patch Changes
+
+- [#1093](https://github.com/knpkv/npm/pull/1093) [`3486fa2`](https://github.com/knpkv/npm/commit/3486fa2b9c9a65ae0782d24d6115ee94fc78071d) Thanks [@konopkov](https://github.com/konopkov)! - The standalone shell keeps `/app/shell.css` for good only when it is asked for under its current hash; an older page's link gets `no-cache`. A shell stylesheet missing at start is read again on the next request instead of failing until restart.
+
 ## 0.3.0
 
 ### Minor Changes
