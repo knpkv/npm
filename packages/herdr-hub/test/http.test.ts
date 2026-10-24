@@ -7841,6 +7841,47 @@ esac
     }).pipe(Effect.scoped, provideNodeServices)
   })
 
+  // A Relay decision lets a waiting tool call run, so it is an approval: a script on a fleet host holds the
+  // owner's login and can set any Origin, and only an approval node may decide.
+  it.effect("takes a Relay decision only from an approval node, even with the allowed login and its own Origin", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-relay-decide-"))
+    return Effect.gen(function*() {
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { force: true, recursive: true })))
+      const hub = yield* startHub(
+        root,
+        join(root, "relay"),
+        scriptedBackends("Nothing waits."),
+        () => Effect.void,
+        [],
+        { approvalNodes: ["node-phone"] }
+      )
+      const decide = (node: string) =>
+        Effect.promise(() => {
+          hub.whoisNode(node)
+          return hubRequest(`${hub.serveUrl}/v1/relay/decisions`, {
+            method: "POST",
+            headers: { ...hub.headers, "content-type": "application/json", origin: hub.origin },
+            body: JSON.stringify({ ref: hubRef, callId: "call-1", allow: true })
+          })
+        })
+      const fromFleetHost = yield* decide("node-alpha")
+      expect(fromFleetHost.status, fromFleetHost.body).toBe(403)
+      // The phone is past the check; nothing waits for that call, so Relay answers it is not pending.
+      const fromPhone = yield* decide("node-phone")
+      expect(fromPhone.status, fromPhone.body).toBe(409)
+      // Loopback is the hub's own agents: the local listener decides nothing.
+      const local = new URL(hub.server.url).origin
+      const fromLoopback = yield* Effect.promise(() =>
+        fetch(`${local}/v1/relay/decisions`, {
+          method: "POST",
+          headers: { "content-type": "application/json", origin: local },
+          body: JSON.stringify({ ref: hubRef, callId: "call-1", allow: true })
+        }).then(async (response) => ({ status: response.status, body: await response.text() }))
+      )
+      expect(fromLoopback.status, fromLoopback.body).toBe(403)
+    }).pipe(Effect.scoped, provideNodeServices)
+  })
+
   it.effect("refuses before Relay starts, and serves the hub's conversation only on its super-app listeners", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-relay-routes-"))
     const relayDirectory = join(root, "relay")
