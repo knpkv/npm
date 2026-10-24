@@ -321,6 +321,21 @@ export const makeSandboxesModule = (
       // The AWS sign-in is the owner's: its pending URL and code finish a sign-in, so nothing is read, started or
       // ended for anyone else. Only the owner's press starts one or signs the hub out; no read ever does.
       const awsSignIn = configuration.awsSignIn ?? null
+      const signInUnavailable = () => new ModuleRouteFailure({ status: 503, code: "unavailable" })
+      const answer = (signIn: AwsSignIn) => signIn.state.pipe(Effect.map(sessionOf), Effect.mapError(signInUnavailable))
+      // Held with the sign-in's hold: a reset can't start between the no-reset check and the sign-out.
+      const signedOut = (signIn: AwsSignIn, reads: SandboxHostReads) =>
+        signIn.hold(
+          noResetRunning(reads).pipe(
+            Effect.andThen(signIn.signOut.pipe(Effect.mapError(signInUnavailable))),
+            Effect.tap(({ endedOnAws }) =>
+              endedOnAws
+                ? Effect.void
+                : Effect.logWarning("AWS sign-out: AWS could not be told; the hub forgot its token")
+            ),
+            Effect.andThen(answer(signIn))
+          )
+        )
       const awsSession = (
         caller: ModuleCaller,
         action: "read" | "start" | "signOut"
@@ -331,22 +346,10 @@ export const makeSandboxesModule = (
           ? refuse(403, "owner_only")
           : awsSignIn === null
           ? Effect.succeed({ _tag: "NotConfigured" })
-          : (action === "signOut" ? noResetRunning(mounted.reads) : Effect.void).pipe(Effect.andThen((action === "start"
-            ? Effect.asVoid(awsSignIn.begin)
-            : action === "signOut"
-            ? awsSignIn.signOut.pipe(
-              Effect.tap(({ endedOnAws }) =>
-                endedOnAws
-                  ? Effect.void
-                  : Effect.logWarning("AWS sign-out: AWS could not be told; the hub forgot its token")
-              ),
-              Effect.asVoid
-            )
-            : Effect.void).pipe(
-              Effect.andThen(awsSignIn.state),
-              Effect.map(sessionOf),
-              Effect.mapError(() => new ModuleRouteFailure({ status: 503, code: "unavailable" }))
-            )))
+          : action === "signOut"
+          ? signedOut(awsSignIn, mounted.reads)
+          : (action === "start" ? Effect.asVoid(awsSignIn.begin).pipe(Effect.mapError(signInUnavailable)) : Effect.void)
+            .pipe(Effect.andThen(answer(awsSignIn)))
       // Anyone but the owner learns only whether the hub is signed in; an unreadable state is not known.
       const awsSignedIn = (caller: ModuleCaller): Effect.Effect<boolean | null> =>
         caller.owner || mounted._tag === "Unavailable" || awsSignIn === null

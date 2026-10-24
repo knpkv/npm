@@ -22,7 +22,7 @@ import {
   SpendUnavailable,
   StaleVersion
 } from "@knpkv/sandbox-pool"
-import { Cause, DateTime, Duration, Effect, Exit, Fiber, Latch, Logger, Redacted, Schema } from "effect"
+import { Cause, DateTime, Duration, Effect, Exit, Fiber, Latch, Logger, Redacted, Schema, Semaphore } from "effect"
 import { TestClock } from "effect/testing"
 import {
   BudgetControl,
@@ -90,6 +90,8 @@ interface FakeOptions {
   readonly spend?: ReadonlyMap<string, Effect.Effect<number, SpendReadError>>
   /** The sweep only reads spend, as in observe mode. */
   readonly spendOnly?: boolean
+  /** The hub's sign-in hold, taken around every move into Cleaning. */
+  readonly cleaning?: SandboxPoolServices["cleaning"]
 }
 
 /** A pool over the memory store and run log, with fakes that record every AWS-side call. */
@@ -151,7 +153,8 @@ const fixture = (options: FakeOptions = {}, initial: ReadonlyArray<Sandbox> = se
             Effect.fail(new SpendUnavailable({ accountId: account.accountId, detail: "unknown" }))
         })
     })
-    const withSpend = options.spend === undefined ? services : { ...services, spend: reader }
+    const withCleaning = options.cleaning === undefined ? services : { ...services, cleaning: options.cleaning }
+    const withSpend = options.spend === undefined ? withCleaning : { ...withCleaning, spend: reader }
     const pool = yield* makeSandboxPool(options.spendOnly === true ? { ...withSpend, sweep: "spend-only" } : withSpend)
     const job = (payload: SandboxJobPayload, actor: string, id: string, approved = false) =>
       pool.run(payload, id, actor, approved ? approval : null).pipe(Effect.map(decodeResult))
@@ -170,6 +173,34 @@ describe("sandbox jobs", () => {
       expect(released.state._tag).toBe("Available")
       expect(f.calls).toEqual(["nuke dry", "nuke live", "nuke dry"])
       expect(yield* f.runLog.recent(5)).toMatchObject([{ runId: "job-3", reason: "Released", outcome: "Available" }])
+    }))
+
+  // Sign-out checks that no account is in Cleaning and then signs out, holding the sign-in's hold. Every move
+  // into Cleaning takes the same hold, so a reset can't start between that check and the sign-out.
+  it.effect("a release and a sweep expiry wait for the sign-in hold before moving an account into Cleaning", () =>
+    Effect.gen(function*() {
+      const hold = yield* Semaphore.make(1)
+      const f = yield* fixture({ cleaning: Semaphore.withPermit(hold) })
+      const leased = yield* f.job({ kind: "sandbox.lease" }, "agent-a", "job-1")
+      yield* Semaphore.take(hold, 1)
+      const release = yield* Effect.forkChild(
+        f.job({ kind: "sandbox.release", accountId: leased.accountId }, "agent-a", "job-2")
+      )
+      yield* Effect.yieldNow
+      expect((yield* f.store.get(leased.accountId)).state._tag).toBe("Leased")
+      expect(f.calls).toEqual([])
+      yield* Semaphore.release(hold, 1)
+      expect((yield* Fiber.join(release)).state._tag).toBe("Available")
+
+      const again = yield* f.job({ kind: "sandbox.lease" }, "agent-a", "job-3")
+      yield* TestClock.adjust(Duration.hours(8))
+      yield* Semaphore.take(hold, 1)
+      const sweep = yield* Effect.forkChild(f.pool.sweepOnce)
+      yield* Effect.yieldNow
+      expect((yield* f.store.get(again.accountId)).state._tag).toBe("Leased")
+      yield* Semaphore.release(hold, 1)
+      expect(yield* Fiber.join(sweep)).toMatchObject({ expired: 1 })
+      expect((yield* f.store.get(again.accountId)).state._tag).toBe("Available")
     }))
 
   it.effect("another actor can neither extend nor release a lease, and nothing is written", () =>

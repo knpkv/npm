@@ -12,7 +12,7 @@ import {
 } from "@knpkv/sandbox-pool"
 import { SandboxesOverview, SandboxRunLog, type SandboxRuns } from "@knpkv/sandbox-pool/host"
 import type { SandboxHostReads } from "@knpkv/sandbox-pool/host/server"
-import { ConfigProvider, Effect, FileSystem, Layer, Result, Schema } from "effect"
+import { ConfigProvider, Effect, Fiber, FileSystem, Layer, Result, Schema, Semaphore } from "effect"
 import type { AwsSignIn, AwsSignInState } from "../src/aws-sign-in.js"
 import { connectModule, sandboxesModule } from "../src/module-contract.js"
 import { dispatchModuleRoute, makeModuleLayer, ModuleHandlers, ModuleRouteFailure } from "../src/module-server.js"
@@ -88,10 +88,11 @@ class CallerRefused extends Schema.TaggedError<CallerRefused>()("CallerRefused",
 class OriginRefused extends Schema.TaggedError<OriginRefused>()("OriginRefused", {}) {}
 
 /** An AWS sign-in whose state the test sets; `begin` moves it to pending and is counted, as are state reads. */
-const fakeSignIn = (initial: AwsSignInState) => {
+const fakeSignIn = (initial: AwsSignInState, hold: AwsSignIn["hold"] = (effect) => effect) => {
   const calls: Array<"state" | "begin" | "signOut"> = []
   let current = initial
   const signIn: AwsSignIn = {
+    hold,
     state: Effect.sync(() => {
       calls.push("state")
       return current
@@ -749,6 +750,30 @@ describe("host-local Sandboxes module", () => {
       expect((yield* signIn.state)._tag).toBe("SignedIn")
     })
   })
+
+  // A reset moving into Cleaning takes the sign-in's hold; sign-out takes it around its check and the sign-out,
+  // so the two can't interleave.
+  it.effect("signs out only once the sign-in's hold is free, checking for a running reset inside it", () =>
+    Effect.gen(function*() {
+      const lock = yield* Semaphore.make(1)
+      const { calls, signIn } = fakeSignIn(
+        { _tag: "SignedIn", expiresAt: Date.UTC(2026, 9, 23, 18, 5) },
+        Semaphore.withPermit(lock)
+      )
+      yield* Semaphore.take(lock, 1)
+      const signingOut = yield* Effect.forkChild(
+        withModule(
+          host,
+          request("sandboxes/aws-sign-out", "serve", "POST", { owner: true, body: {} }),
+          { awsSignIn: signIn }
+        )
+      )
+      yield* Effect.yieldNow
+      expect(calls).toEqual([])
+      yield* Semaphore.release(lock, 1)
+      expect((yield* Fiber.join(signingOut))?.body).toEqual({ _tag: "SignInRequired", reason: "ended" })
+      expect(calls).toEqual(["signOut", "state"])
+    }))
 
   // The owner is an identity, not the hub's node: from a laptop on the tailnet they are still the owner.
   it.effect("lets the owner sign the hub in from another node, and refuses anyone who is not the owner", () => {
