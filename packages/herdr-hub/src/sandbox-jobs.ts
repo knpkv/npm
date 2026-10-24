@@ -131,8 +131,8 @@ export interface SandboxPoolServices {
   /** Reads each pool account's spend on every sweep; without it there are no readings and no spend bar. */
   readonly spend?: SpendReader["Service"]
   /**
-   * `spend-only` (observe mode): the sweep reads spend and changes no record, so an ended lease or a reset left
-   * in Cleaning waits for a sweep that may act. Defaults to `full`.
+   * `spend-only` (observe mode): the sweep reads spend and changes no pool or AWS account record, so an ended
+   * lease or a reset left in Cleaning waits for a sweep that may act. Defaults to `full`.
    */
   readonly sweep?: "full" | "spend-only"
 }

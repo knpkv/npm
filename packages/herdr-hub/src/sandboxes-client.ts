@@ -23,7 +23,8 @@ export class SandboxesClientError extends Schema.TaggedError<SandboxesClientErro
 
 /**
  * A job was not submitted. `already_requested`, `not_quarantined` and `not_budget_held` are the hub's
- * reasons for refusing a retry or lift before it reached Fleet; any other refusal is `rejected`.
+ * reasons for refusing a retry or lift before it reached Fleet, and `observe_mode` for refusing any job
+ * while the pool is in observe mode; any other refusal is `rejected`.
  */
 export class SandboxesWriteFailed extends Schema.TaggedError<SandboxesWriteFailed>()("SandboxesWriteFailed", {
   reason: Schema.Literals([
@@ -32,12 +33,13 @@ export class SandboxesWriteFailed extends Schema.TaggedError<SandboxesWriteFaile
     "unauthorized",
     "already_requested",
     "not_quarantined",
-    "not_budget_held"
+    "not_budget_held",
+    "observe_mode"
   ])
 }) {}
 
 const RefusedRequest = Schema.Struct({
-  error: Schema.Literals(["already_requested", "not_quarantined", "not_budget_held"])
+  error: Schema.Literals(["already_requested", "not_quarantined", "not_budget_held", "observe_mode"])
 })
 
 /** One GET of a module read, bounded in bytes and at 30 seconds. Any non-2xx answer is a status failure. */

@@ -216,7 +216,10 @@ test("the owner signs in where they may, and copies a CLI profile; an agent's le
   await show(page, { id: "6a", state: "1a" }, "light")
   const free = page.locator("[data-account=\"ephemeral-02\"]")
   const held = page.locator("[data-account=\"ephemeral-01\"]")
-  await expect(free.getByRole("button", { name: /^Open console for ephemeral-02/ })).toBeEnabled()
+  const open = free.getByRole("link", { name: /^Open console for ephemeral-02/ })
+  await expect(open).toHaveAttribute("target", "_blank")
+  await expect(open).toHaveAttribute("rel", "noopener noreferrer")
+  await expect(open).toHaveAttribute("href", /#\/console\?account_id=/)
   await expect(held.getByRole("button", { name: /^Open console for ephemeral-01/ })).toBeDisabled()
   await expect(held.locator("[data-console-reason]")).toHaveText(
     "Open console: only the lease holder can sign in. review-runner-02 holds this lease."
@@ -230,6 +233,7 @@ test("a viewer has no console and no CLI profile", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 })
   await show(page, { id: "8a", state: "8a" }, "light")
   await expect(page.getByRole("button", { name: /Open console/ })).toHaveCount(0)
+  await expect(page.getByRole("link", { name: /Open console/ })).toHaveCount(0)
   await expect(page.getByRole("button", { name: "Copy CLI profile" })).toHaveCount(0)
 })
 

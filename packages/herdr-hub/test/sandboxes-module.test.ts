@@ -241,6 +241,7 @@ const withModule = <A, E, R>(
     readonly pending?: Effect.Effect<ReadonlyArray<PendingSandboxApproval>, string>
     readonly submit?: SandboxJobSubmit
     readonly awsSignIn?: AwsSignIn | null
+    readonly poolMode?: "observe" | "live" | null
   } = {}
 ) =>
   Effect.gen(function*() {
@@ -258,7 +259,8 @@ const withModule = <A, E, R>(
             pendingApprovals: options.pending ?? Effect.succeed([]),
             reads: options.reads ?? Effect.succeed(fakeReads),
             submit: options.submit ?? (() => Effect.die("no job expected")),
-            awsSignIn: options.awsSignIn ?? null
+            awsSignIn: options.awsSignIn ?? null,
+            poolMode: options.poolMode ?? null
           })
         ]
       ).pipe(Layer.provide(Layer.merge(NodeServices.layer, NodeHttpClient.layerNodeHttp)))
@@ -772,6 +774,30 @@ describe("host-local Sandboxes module", () => {
         code: "owner_only"
       })
       expect(yield* refused({ _tag: "Reset", accountId: account, reason: "Manual" })).toMatchObject({ status: 400 })
+      expect(submitted).toEqual([])
+    })
+  })
+
+  it.effect("refuses every job as observe_mode, before Fleet, while the pool is in observe mode", () => {
+    const { submit, submitted } = recordingSubmit()
+    const refused = (body: Schema.Json) =>
+      withModule(
+        host,
+        Effect.result(request("sandboxes/jobs", "serve", "POST", { sameNode: true, body })),
+        { reads: Effect.succeed(attentionReads), submit, poolMode: "observe" }
+      ).pipe(Effect.map((result) => (Result.isFailure(result) ? result.failure : null)))
+    return Effect.gen(function*() {
+      for (
+        const body of [
+          { _tag: "Lease" },
+          { _tag: "Extend", accountId: account },
+          { _tag: "Release", accountId: account },
+          { _tag: "Retry", accountId: account },
+          { _tag: "BudgetLift", accountId: held }
+        ]
+      ) {
+        expect(yield* refused(body), body._tag).toMatchObject({ status: 409, code: "observe_mode" })
+      }
       expect(submitted).toEqual([])
     })
   })

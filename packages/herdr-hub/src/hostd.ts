@@ -202,7 +202,9 @@ const hostdProgram = Effect.fn("Hostd.program")(function*(options: HostdProgramO
   const withStacks = stacksHost === null ? withCode : { ...withCode, stacksHost }
   const withSandboxesHost = sandboxesHost === null ? withStacks : { ...withStacks, sandboxesHost }
   const withPool = sandboxPool === null ? withSandboxesHost : { ...withSandboxesHost, sandboxPool }
-  const serverOptions = sandboxes === null ? withPool : { ...withPool, awsSignIn: sandboxes.signIn }
+  const serverOptions = sandboxes === null
+    ? withPool
+    : { ...withPool, awsSignIn: sandboxes.signIn, sandboxPoolMode: sandboxes.mode }
   const server = yield* Effect.acquireRelease(
     Effect.tryPromise({
       try: () => startHttpServer(config, service, assets, serverOptions),

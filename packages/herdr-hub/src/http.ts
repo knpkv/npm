@@ -399,6 +399,8 @@ export type HttpServerOptions = {
   readonly sandboxPool?: PoolContract | null
   /** The hub's own AWS sign-in for that pool, served to the owner by the Sandboxes module; absent when off. */
   readonly awsSignIn?: AwsSignIn
+  /** The mode this host runs that pool in; in observe the Sandboxes module refuses every job. Absent when off. */
+  readonly sandboxPoolMode?: "observe" | "live"
   /**
    * Installed apps, which the hub runs as child processes. `configPath` is `apps.json` (default
    * `~/.config/herdr/apps.json`); `node` is the Node that runs the hub, and its apps (without it no app starts);
@@ -1908,6 +1910,7 @@ export const startHttpServer = async (
         stateDirectory: config.stateDirectory,
         pool: options.sandboxPool ?? null,
         awsSignIn: options.awsSignIn ?? null,
+        poolMode: options.sandboxPoolMode ?? null,
         // Build the effect on read. Calling pendingApprovals here would list the store at startup.
         pendingApprovals: Effect.suspend(() => service.pendingApprovals()),
         // The module has checked same origin, the served pool and the hub's own node, and passes the

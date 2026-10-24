@@ -189,6 +189,8 @@ export const makeSandboxesModule = (configuration: {
   readonly submit: SandboxJobSubmit
   /** The hub's own AWS sign-in, when this host runs the pool; null when it doesn't. */
   readonly awsSignIn?: AwsSignIn | null
+  /** The mode this host runs the pool in; observe refuses every job as `observe_mode`. Null when not known. */
+  readonly poolMode?: "observe" | "live" | null
 }) => ({
   descriptor: sandboxesModule,
   handlers: Layer.effect(
@@ -338,14 +340,16 @@ export const makeSandboxesModule = (configuration: {
         )
         if (alreadyRequested(order, pending)) return yield* refuse(409, "already_requested")
       })
-      // Same origin is checked by the mount before the body is read. Here: the pool must be served, and
-      // only the hub's own node may submit. Fleet then holds extend and release to the caller's own lease,
-      // and holds every retry and lift for an approval.
+      // Same origin is checked by the mount before the body is read. Here: the pool must be served, only the
+      // hub's own node may submit, and an observe-mode pool runs no jobs. Fleet then holds extend and release
+      // to the caller's own lease, and holds every retry and lift for an approval.
       const submitJob = (order: SandboxJobOrder, caller: ModuleCaller) =>
         mounted._tag === "Unavailable"
           ? refuse(503, "unavailable")
           : !caller.sameNode
           ? refuse(403, "owner_only")
+          : configuration.poolMode === "observe"
+          ? refuse(409, "observe_mode")
           : (order._tag === "Retry" || order._tag === "BudgetLift"
             ? checkRequest(mounted.reads, order)
             : Effect.void).pipe(
