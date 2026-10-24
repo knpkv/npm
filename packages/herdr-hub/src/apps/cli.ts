@@ -394,22 +394,24 @@ type Explained =
   | AppsLockBusy
   | AppsConfigInvalid
 
-const explainedTags: ReadonlySet<string> = new Set<Explained["_tag"]>([
-  "AppsNeedTerminal",
-  "HubNotRunning",
-  "AppUpdateCrashloop",
-  "AppNotInstalled",
-  "AppIdConflict",
-  "AppInstallDeclined",
-  "AppNoPreviousVersion",
-  "AppNotTrusted",
-  "AppInstallFailed",
-  "NotAHubApp",
-  "NpmUnavailable",
-  "AppsConfigManaged",
-  "AppsLockBusy",
-  "AppsConfigInvalid"
-])
+/** Every explained tag, once: a tag added to `Explained` and missing here is a type error. */
+const explained = {
+  AppsNeedTerminal: true,
+  HubNotRunning: true,
+  AppUpdateCrashloop: true,
+  AppNotInstalled: true,
+  AppIdConflict: true,
+  AppInstallDeclined: true,
+  AppNoPreviousVersion: true,
+  AppNotTrusted: true,
+  AppInstallFailed: true,
+  NotAHubApp: true,
+  NpmUnavailable: true,
+  AppsConfigManaged: true,
+  AppsLockBusy: true,
+  AppsConfigInvalid: true
+} satisfies Record<Explained["_tag"], true>
+const explainedTags: ReadonlySet<string> = new Set(Object.keys(explained))
 
 /** What to tell the user for `error`. */
 export const failureLine = (error: Explained): string => {
