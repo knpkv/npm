@@ -15,6 +15,7 @@ import {
   Copy,
   ExternalLink,
   File,
+  Info,
   Link,
   LoaderCircle,
   Menu,
@@ -52,7 +53,8 @@ export const RLY_ICON_NAMES = defineNames([
   "user",
   "close",
   "pin",
-  "copy"
+  "copy",
+  "info"
 ])
 
 /** A stable glyph name owned by rly rather than its icon implementation. */
@@ -113,7 +115,8 @@ const glyphs = {
   search: Search,
   user: User,
   close: X,
-  pin: Pin
+  pin: Pin,
+  info: Info
 } satisfies Readonly<Record<RlyIconName, Glyph>>
 
 interface IconSharedProps {
