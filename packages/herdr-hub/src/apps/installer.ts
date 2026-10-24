@@ -145,17 +145,24 @@ export const makeInstaller = Effect.fn("AppInstaller.make")(function*(options: I
       if (!(yield* options.confirm(lines))) return yield* new AppInstallDeclined({ package: resolved.package })
       const failed = (stage: AppInstallFailed["stage"], detail: string) =>
         Effect.fail(new AppInstallFailed({ package: resolved.package, stage, detail }))
-      // Never run while installing: the registry's own "has install scripts" flag can be missing, so the unpacked
-      // tree is checked against what was shown first, and only then are its scripts run.
+      // Never run while installing: signatures are checked on the unpacked tree first, then (the registry's own "has
+      // install scripts" flag can be missing) the tree is checked against what was shown, and only then do its
+      // scripts run.
       yield* options.npm.install(staging, resolved)
+      yield* options.say(signatureLine(yield* options.npm.auditSignatures(staging, resolved.package)))
       if (scripts !== null) {
-        const found = yield* options.npm.unpackedScripts(staging, resolved.package)
-        if (found.some((name) => !scripts.includes(name))) {
-          return yield* failed("fetch", "install scripts differ from what was shown")
+        const unshown = (yield* options.npm.unpackedScripts(staging, resolved.package))
+          .filter((name) => !scripts.includes(name))
+        if (unshown.length > 0) {
+          return yield* failed(
+            "fetch",
+            `install scripts differ from what was shown: shown ${
+              scripts.length === 0 ? "none" : scripts.join(", ")
+            }, found ${unshown.join(", ")}`
+          )
         }
         yield* options.npm.runScripts(staging, resolved.package)
       }
-      yield* options.say(signatureLine(yield* options.npm.auditSignatures(staging, resolved.package)))
       const bin = path.join("node_modules", resolved.package, resolved.hubApp.bin)
       const script = entryScript({ ...placeholder, dir: staging, bin }, options.windows)
       if (script === null) return yield* failed("probe", "its hubApp.bin points outside the package")
@@ -297,7 +304,8 @@ export const makeInstaller = Effect.fn("AppInstaller.make")(function*(options: I
 
   /**
    * Points `id` back at the version kept by the last update. The entry is rebuilt from that directory's own
-   * `package.json` and checked again (its script must stay inside it); nothing remembered is trusted.
+   * `package.json` and checked again (its script must stay inside it); nothing remembered is trusted. Two versions are
+   * kept, so a second rollback goes back to where the first started: it is a toggle.
    */
   const rollback = Effect.fn("AppInstaller.rollback")(function*(id: AppId) {
     return yield* options.store.withLock((locked) =>

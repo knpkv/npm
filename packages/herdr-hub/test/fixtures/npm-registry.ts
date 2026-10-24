@@ -17,7 +17,19 @@ export interface TestNpm {
 export interface PublishedMeta {
   readonly hubApp: { readonly bin: string; readonly contract: number; readonly services: ReadonlyArray<string> }
   readonly dependencies: Readonly<Record<string, string>>
+  readonly optionalDependencies: Readonly<Record<string, string>>
+  readonly os: ReadonlyArray<string> | null
   readonly scripts: Readonly<Record<string, string>>
+}
+
+/** npm's public registry signing key: any signature this registry serves fails against it. */
+const signingKey = {
+  expires: null,
+  keyid: "SHA256:jl3bwswu80PjjokCgh0o2w5c2U4LhQAE57gj9cz1kzA",
+  keytype: "ecdsa-sha2-nistp256",
+  scheme: "ecdsa-sha2-nistp256",
+  key:
+    "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE1Olb3zMAFFxXKHiIkQO5cJ3Yhl5i6UPp+IhuteBJbuHcA5UogKo0EWtlWwW6KSaKoTNEYL7JlCQiVnkhBktUgg=="
 }
 
 export interface FakeApp {
@@ -40,6 +52,10 @@ export interface FakeApp {
   readonly postinstall?: boolean | string
   /** Leave the scripts out of the packument (no `scripts`, no `hasInstallScript`), as some registries do. */
   readonly hideScripts?: boolean
+  /** Optional dependencies (other fake packages on the same registry). */
+  readonly optionalDependencies?: Readonly<Record<string, string>>
+  /** Platforms the package installs on (`package.json` `os`). */
+  readonly os?: ReadonlyArray<string>
 }
 
 /** A fake package's lifecycle scripts. */
@@ -124,6 +140,9 @@ export const packFakeApp = Effect.fn("test.packFakeApp")(function*(npm: TestNpm,
       type: "module",
       hubApp: { bin, contract: app.contract ?? 1, services: app.declared ?? app.services ?? [] },
       dependencies: app.dependencies ?? {},
+      optionalDependencies: app.optionalDependencies ?? {},
+      // JSON leaves an undefined field out.
+      os: app.os,
       scripts: fakeScripts(app)
     })
   )
@@ -153,6 +172,8 @@ export interface Registry {
   readonly stall: (prefix: string) => void
   /** Drops `name@version` from the packument. */
   readonly unpublish: (name: string, version: string) => void
+  /** Serves signing keys and a signature per version that does not verify against them. */
+  readonly failSignatures: () => void
 }
 
 /** A registry on a loopback port for the test's scope. */
@@ -160,12 +181,18 @@ export const startRegistry = Effect.acquireRelease(
   Effect.callback<{ server: Server; registry: Registry }>((resume) => {
     const requests: Array<string> = []
     const stalled: Array<string> = []
+    let badSignatures = false
     const published = new Map<string, Map<string, { packed: Packed; meta: PublishedMeta; corrupt: boolean }>>()
     let base = ""
     const server = createServer((request, response) => {
       const url = decodeURIComponent(request.url ?? "")
       requests.push(url)
       if (stalled.some((prefix) => url.startsWith(prefix))) return
+      if (badSignatures && url === "/-/npm/v1/keys") {
+        return response.writeHead(200, { "content-type": "application/json" }).end(
+          JSON.stringify({ keys: [signingKey] })
+        )
+      }
       const tarball = /^\/-\/tarballs\/(.+)\/(\d[^/]*)\.tgz$/u.exec(url)
       if (tarball !== null) {
         const entry = published.get(tarball[1] ?? "")?.get(tarball[2] ?? "")
@@ -189,9 +216,22 @@ export const startRegistry = Effect.acquireRelease(
             version,
             hubApp: entry?.meta.hubApp,
             dependencies: entry?.meta.dependencies,
+            optionalDependencies: entry?.meta.optionalDependencies,
+            // JSON leaves an undefined field out.
+            os: entry?.meta.os ?? undefined,
             scripts: entry?.meta.scripts,
             hasInstallScript: Object.keys(entry?.meta.scripts ?? {}).length > 0,
-            dist: { integrity: entry?.packed.integrity, tarball: `${base}-/tarballs/${url.slice(1)}/${version}.tgz` }
+            dist: {
+              integrity: entry?.packed.integrity,
+              tarball: `${base}-/tarballs/${url.slice(1)}/${version}.tgz`,
+              signatures: badSignatures
+                ? [{
+                  keyid: signingKey.keyid,
+                  sig:
+                    "MEUCIQDvGe9x2H5bF8x3kq8bL1cXqv0m8eS4v0sxH2Wcq7N6xQIgVbN2cFtq2R3Yv6dQk0b3Ywq7LxH1h0wZr3Q2s8dYx0o="
+                }]
+                : undefined
+            }
           }]
         })),
         time: Object.fromEntries(names.map((version) => [version, "2026-10-20T10:00:00.000Z"]))
@@ -214,6 +254,9 @@ export const startRegistry = Effect.acquireRelease(
           },
           stall: (prefix) => {
             stalled.push(prefix)
+          },
+          failSignatures: () => {
+            badSignatures = true
           },
           unpublish: (name, version) => {
             published.get(name)?.delete(version)

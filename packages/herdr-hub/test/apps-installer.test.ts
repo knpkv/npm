@@ -39,6 +39,8 @@ const publish = (registry: Registry, app: FakeApp) =>
     registry.publish(app.name, app.version, packed, {
       hubApp: { bin: app.bin ?? "bin.js", contract: app.contract ?? 1, services: app.declared ?? app.services ?? [] },
       dependencies: app.dependencies ?? {},
+      optionalDependencies: app.optionalDependencies ?? {},
+      os: app.os ?? null,
       scripts: publishedScripts(app)
     })
     return packed
@@ -171,6 +173,8 @@ describe("installer", () => {
               registry.publish(name, "1.0.0", swapped, {
                 hubApp: { bin: "bin.js", contract: 1, services: ["host"] },
                 dependencies: {},
+                optionalDependencies: {},
+                os: null,
                 scripts: {}
               })
               return true
@@ -485,7 +489,7 @@ describe("installer", () => {
           expect(error).toMatchObject({
             _tag: "AppInstallFailed",
             stage: "fetch",
-            detail: "install scripts differ from what was shown"
+            detail: "install scripts differ from what was shown: shown none, found @knpkv/dep"
           })
           expect(yield* fileSystem.exists(marker)).toBe(false)
           expect(yield* prefixes(root)).toEqual([])
@@ -547,6 +551,48 @@ describe("installer", () => {
           `Removed fake; another apps command is running, so delete ${root}/data/hub-apps/fake later.`
         )
       }).pipe(Effect.scoped), 90_000)
+
+    // Signatures are checked on the unpacked tree before any script runs; a refusal must leave no script having run.
+    it.effect("checks signatures before running any install script", () =>
+      Effect.gen(function*() {
+        const root = yield* tempRoot
+        const fileSystem = yield* FileSystem.FileSystem
+        const registry = yield* startRegistry
+        const marker = `${root}/signed-postinstall-ran`
+        yield* publish(registry, { name: "@knpkv/dep", version: "1.0.0", id: "dep", postinstall: marker })
+        yield* publish(registry, { name, version: "1.0.0", id: "fake", dependencies: { "@knpkv/dep": "1.0.0" } })
+        registry.failSignatures()
+        const { installer } = yield* installerIn(root, registry)
+        const error = yield* installer.add(name, "1.0.0", { allowScripts: true }).pipe(Effect.flip)
+        expect(error).toMatchObject({ _tag: "AppInstallFailed", stage: "signatures" })
+        expect(yield* fileSystem.exists(marker)).toBe(false)
+        expect(yield* prefixes(root)).toEqual([])
+      }).pipe(Effect.scoped), 90_000)
+
+    // esbuild, sharp and rollup list a binary package per platform; only this platform's is installed.
+    it.effect(
+      "ignores optional dependencies for other platforms when checking install scripts",
+      () =>
+        Effect.gen(function*() {
+          const root = yield* tempRoot
+          const registry = yield* startRegistry
+          const elsewhere = process.platform === "win32" ? "linux" : "win32"
+          yield* publish(registry, { name: "@knpkv/native-other", version: "1.0.0", id: "native", os: [elsewhere] })
+          yield* publish(registry, {
+            name: "@knpkv/dep",
+            version: "1.0.0",
+            id: "dep",
+            postinstall: true,
+            optionalDependencies: { "@knpkv/native-other": "1.0.0" }
+          })
+          yield* publish(registry, { name, version: "1.0.0", id: "fake", dependencies: { "@knpkv/dep": "1.0.0" } })
+          const { installer, prompts } = yield* installerIn(root, registry)
+          const entry = yield* installer.add(name, "1.0.0", { allowScripts: true })
+          expect((yield* Ref.get(prompts)).at(-1)?.at(-1)).toBe("Install scripts that will run: @knpkv/dep")
+          expect(entry.allowScripts).toBe(true)
+        }).pipe(Effect.scoped),
+      90_000
+    )
 
     it.effect("refuses to remove an app that is not installed", () =>
       Effect.gen(function*() {

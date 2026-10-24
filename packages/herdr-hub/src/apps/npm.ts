@@ -383,6 +383,8 @@ export const makeNpm = Effect.fn("Npm.make")(function*(options: NpmOptions) {
     const found: Array<string> = []
     for (const key of keys) {
       const dir = `${prefix}/${key}`
+      // In the lockfile but not installed here (an optional dependency for another platform): nothing of it can run.
+      if (!(yield* fileSystem.exists(dir).pipe(Effect.mapError((error) => failed(error.message))))) continue
       const manifest = yield* fileSystem.readFileString(`${dir}/package.json`).pipe(
         Effect.flatMap(decodeScriptsManifest),
         Effect.mapError(() => failed(`${key}/package.json is unreadable`))
