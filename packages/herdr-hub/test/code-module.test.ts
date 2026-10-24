@@ -24,8 +24,12 @@ const request = (
     readJson: () => Effect.die("Code has no write routes")
   })
 
-/** The hub's own config, and another server's: only `host` and `approvalHub` decide the caller. */
-const hubConfig = { host, approvalHub: { host, nodeId: "node-hub", url: "https://atlas.example/" } }
+/** The hub's own config, and another server's: `host`, `approvalHub` and `allowedUsers` decide the caller. */
+const hubConfig = {
+  host,
+  approvalHub: { host, nodeId: "node-hub", url: "https://atlas.example/" },
+  allowedUsers: ["owner@example.test"]
+}
 const peerConfig = { ...hubConfig, host: other }
 const queueAs = (caller: { readonly login: string; readonly sameNode: boolean }) =>
   dispatchModuleRoute({
@@ -69,7 +73,23 @@ describe("hub-node caller", () => {
     expect(onHubNode(peerConfig, "node-hub")).toBe(false)
     expect(moduleCallerFor(peerConfig, { login: "example-viewer", nodeId: "node-hub" })).toEqual({
       login: "example-viewer",
-      sameNode: false
+      sameNode: false,
+      owner: false
+    })
+  })
+
+  // The owner is an allowed login from any node, or the hub's own node; approval nodes play no part.
+  it("is the owner for an allowed login on any node or for the hub's own node, and no one else", () => {
+    const owner = (login: string, nodeId: string) => moduleCallerFor(hubConfig, { login, nodeId }).owner
+    expect([
+      owner("owner@example.test", "node-laptop"),
+      owner("example-viewer", "node-hub"),
+      owner("example-viewer", "node-laptop")
+    ]).toEqual([true, true, false])
+    expect(moduleCallerFor(hubConfig, { login: "owner@example.test", nodeId: "node-laptop" })).toEqual({
+      login: "owner@example.test",
+      sameNode: false,
+      owner: true
     })
   })
 })

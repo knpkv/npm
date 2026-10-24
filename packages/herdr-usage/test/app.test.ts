@@ -7,7 +7,7 @@ import { ShellServices, standaloneShellServices } from "@knpkv/hub-app/hub-clien
 import { Context, Effect, Layer, Schema } from "effect"
 import { usageHandlers } from "../src/app.js"
 
-const viewer: ModuleCaller = { login: "viewer", sameNode: false, provenance: "authenticated_remote" }
+const viewer: ModuleCaller = { login: "viewer", sameNode: false, owner: false, provenance: "authenticated_remote" }
 
 const fleetLimits: FleetLimits = { hosts: [], failures: [{ host: "cedar", reason: "offline" }], peersListed: true }
 const fleetUsage = Schema.decodeSync(FleetUsage)({ hosts: [], failures: [], peersListed: false })
