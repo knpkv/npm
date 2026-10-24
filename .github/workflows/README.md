@@ -98,6 +98,8 @@ This directory contains automated CI/CD workflows for the @knpkv npm monorepo.
   when the whole matrix succeeded (no skipped or cancelled leg counts as success).
   `scripts/check-browser-partition.test.mjs` keeps the matrix equal to the set of packages
   with a `test:browser` script, so a new suite cannot be left out
+- A failed leg uploads its package's `test-results` (Playwright traces and screenshots) as
+  `browser-test-results-<package>`, kept 5 days, so a flake can be read instead of rerun
 - Serializes browser work to one worker through each package's configuration
 - Audits Control Center routes for keyboard focus, serious/critical WCAG violations,
   320-pixel reflow, forced colors, and reduced motion
