@@ -48,6 +48,10 @@ jobs:
       matrix:
         os: [macos-latest, windows-latest]
     steps:
+      # Windows runners check out with CRLF; rly's build compares its generated files byte for byte and would drift.
+      - name: Check out with LF line endings
+        if: runner.os == 'Windows'
+        run: git config --global core.autocrlf false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false

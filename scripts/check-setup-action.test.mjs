@@ -118,8 +118,11 @@ test("a firewall refusal fails the step without a completeness check passing it"
   assert.deepEqual(result.calls, ["sfw", "sfw", "sfw"])
 })
 
-/** Runs the firewall step for one `runner.os`-`runner.arch` with a `curl` stand-in that logs the URL and fails. */
-const runFirewall = (platform) =>
+/**
+ * Runs the firewall step for one `runner.os`-`runner.arch`. The `curl` stand-in logs the URL, then fails (exit 22) or,
+ * with `download`, writes the file. `sha256sum` and `shasum` stand-ins log their call and pass.
+ */
+const runFirewall = (platform, { download = false } = {}) =>
   runtime.runPromise(
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem
@@ -127,11 +130,17 @@ const runFirewall = (platform) =>
       const dir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "setup-firewall-" })
       const log = path.join(dir, "log")
       yield* fileSystem.writeFileString(log, "")
-      yield* fileSystem.writeFileString(
-        path.join(dir, "curl"),
-        `#!/usr/bin/env bash\necho "\${@: -1}" >> "$FAKE_LOG"\nexit 22\n`
-      )
-      yield* fileSystem.chmod(path.join(dir, "curl"), 0o755)
+      const stubs = {
+        curl: download
+          ? `#!/usr/bin/env bash\necho "\${@: -1}" >> "$FAKE_LOG"\nwhile [ "$1" != --output ]; do shift; done\necho sfw > "$2"\n`
+          : `#!/usr/bin/env bash\necho "\${@: -1}" >> "$FAKE_LOG"\nexit 22\n`,
+        sha256sum: `#!/usr/bin/env bash\necho "verify sha256sum $*" >> "$FAKE_LOG"\ncat > /dev/null\n`,
+        shasum: `#!/usr/bin/env bash\necho "verify shasum $*" >> "$FAKE_LOG"\ncat > /dev/null\n`
+      }
+      for (const [name, body] of Object.entries(stubs)) {
+        yield* fileSystem.writeFileString(path.join(dir, name), body)
+        yield* fileSystem.chmod(path.join(dir, name), 0o755)
+      }
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
       const inheritedPath = yield* Config.String("PATH")
       const handle = yield* spawner.spawn(
@@ -152,8 +161,13 @@ const runFirewall = (platform) =>
         [Stream.mkString(Stream.decodeText(handle.stdout)), handle.exitCode],
         { concurrency: "unbounded" }
       )
-      const urls = (yield* fileSystem.readFileString(log)).split("\n").filter((line) => line.length > 0)
-      return { exitCode, stdout, urls }
+      const lines = (yield* fileSystem.readFileString(log)).split("\n").filter((line) => line.length > 0)
+      return {
+        exitCode,
+        stdout,
+        urls: lines.filter((line) => !line.startsWith("verify ")),
+        verifiers: lines.filter((line) => line.startsWith("verify "))
+      }
     }).pipe(Effect.scoped)
   )
 
@@ -187,4 +201,19 @@ test("every pinned firewall binary is checked against a sha256 before it is put 
   assert.equal(pins.length, 5)
   for (const pin of pins) assert.match(pin, /^[0-9a-f]{64}$/u)
   assert.ok(firewall.run.indexOf("--check --strict") < firewall.run.indexOf("GITHUB_PATH"))
+})
+
+// macos-latest ships a BSD sha256sum without --strict, so the verifier is chosen by OS, never by what is on PATH.
+test("the firewall step verifies with shasum on macOS and sha256sum elsewhere, in strict mode", async () => {
+  const expected = [
+    ["macOS-ARM64", "verify shasum -a 256 --check --strict"],
+    ["macOS-X64", "verify shasum -a 256 --check --strict"],
+    ["Linux-X64", "verify sha256sum --check --strict"],
+    ["Windows-X64", "verify sha256sum --check --strict"]
+  ]
+  for (const [platform, verifier] of expected) {
+    const result = await runFirewall(platform, { download: true })
+    assert.equal(result.exitCode, ChildProcessSpawner.ExitCode(0), platform)
+    assert.deepEqual(result.verifiers, [verifier], platform)
+  }
 })

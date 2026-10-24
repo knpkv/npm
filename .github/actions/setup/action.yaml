@@ -41,11 +41,12 @@ runs:
         mkdir -p "${install_directory}"
         curl --fail --location --retry 4 --retry-all-errors \
           --output "${binary_path}" "${SOCKET_FIREWALL_RELEASE}/${asset}"
-        if command -v sha256sum >/dev/null; then
-          printf '%s  %s\n' "${sha256}" "${binary_path}" | sha256sum --check --strict
-        else
-          printf '%s  %s\n' "${sha256}" "${binary_path}" | shasum -a 256 --check --strict
-        fi
+        # macOS ships a BSD sha256sum without --strict; its Perl shasum has it.
+        case "${RUNNER_PLATFORM}" in
+          macOS-*) verify=(shasum -a 256 --check --strict) ;;
+          *) verify=(sha256sum --check --strict) ;;
+        esac
+        printf '%s  %s\n' "${sha256}" "${binary_path}" | "${verify[@]}"
         chmod +x "${binary_path}"
         echo "${install_directory}" >> "${GITHUB_PATH}"
     - name: Install pnpm
