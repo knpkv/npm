@@ -2,6 +2,36 @@
 
 Released as `@knpkv/herdr-approvals` up to 0.18.0; the headings below are that package's history.
 
+## 0.60.0
+
+### Minor Changes
+
+- [#1105](https://github.com/knpkv/npm/pull/1105) [`dd01d56`](https://github.com/knpkv/npm/commit/dd01d5653b546eceda141c44c56073cd07e490e7) Thanks [@konopkov](https://github.com/konopkov)! - New `herdr-hub apps` command installs, updates, rolls back and removes hub apps with the npm that ships with Node. It writes the `apps.json` the hub supervises, under one lock, and refuses when nix manages the file.
+
+  - `add` checks the package's `hubApp` field and the trust allowlist (`@knpkv` by default) before downloading. It shows maintainers, provenance, install scripts and hub access, and asks y/N (`--yes` skips the question). It installs into a staging directory, requires the tarball npm described, checks registry signatures where the registry signs, and runs the app once before it is listed.
+  - `update` stays within the same major unless given a version and never goes down by itself. It keeps one previous version for `rollback`. With `--wait`, the default, it reports an update that keeps crashing.
+  - `--allow-scripts` lists every package with install scripts before asking, runs nothing it didn't show, and is asked again on every update.
+  - `remove`, `enable`, `disable`, `list`, `logs [--follow]` and `trust list|add|remove` (`add` needs a terminal).
+  - `restart` asks the running hub over its loopback listener with a token the hub writes, owner-only, at every start.
+
+- [#1110](https://github.com/knpkv/npm/pull/1110) [`0d3cfba`](https://github.com/knpkv/npm/commit/0d3cfba6386a8dd5fce8ba33424d622098c99aac) Thanks [@konopkov](https://github.com/konopkov)! - The Sandboxes page signs the hub in to AWS: the owner presses Sign in to AWS, sees the code with a link to the sign-in page while it waits, and the page says until when it is signed in. A sign-in that ended says so, and spend readings show when they were last read. `AwsSignInState` and the aws-session answer's `SignInRequired` now carry `reason` (`never` or `ended`, remembered across a restart). The caller read gains `poolMode` and `awsSignedIn`, which tells anyone but the owner only whether the hub is signed in. Observe mode, and a live pool without a sign-in, now disable the jobs they would refuse up front, with one line under the heading saying why.
+
+### Patch Changes
+
+- [#1114](https://github.com/knpkv/npm/pull/1114) [`3f3047a`](https://github.com/knpkv/npm/commit/3f3047a023d8dfdfe925bb88234dadca86431a81) Thanks [@konopkov](https://github.com/konopkov)! - `herdr-hub apps` prints a failure you can act on as one sentence and exits 1, with no stack trace. Examples are a hub that isn't running, an app that isn't installed, a busy lock, or nix owning `apps.json`. The restart route answers 404 to a malformed `%` escape in the app id instead of failing the request.
+
+- [#1105](https://github.com/knpkv/npm/pull/1105) [`dd01d56`](https://github.com/knpkv/npm/commit/dd01d5653b546eceda141c44c56073cd07e490e7) Thanks [@konopkov](https://github.com/konopkov)! - The hub keeps its apps down when the parent of its runtime directory belongs to another user (not this user, not root): that user could rename the directory away whatever its mode bits say.
+- Updated dependencies [[`7ecb2d6`](https://github.com/knpkv/npm/commit/7ecb2d6f3a19d582d286768973a57dbab5786738)]:
+  - @knpkv/rly@0.25.0
+  - @knpkv/agent-usage@0.11.4
+  - @knpkv/alchemy-console@0.6.3
+  - @knpkv/codecommit-web@0.40.1
+  - @knpkv/herdr-connect@0.31.2
+  - @knpkv/herdr-usage@0.1.2
+  - @knpkv/herdr-work@0.12.14
+  - @knpkv/relay-product@0.6.4
+  - @knpkv/review@0.7.2
+
 ## 0.59.0
 
 ### Minor Changes

@@ -1,5 +1,11 @@
 # @knpkv/rly
 
+## 0.25.0
+
+### Minor Changes
+
+- [#1113](https://github.com/knpkv/npm/pull/1113) [`7ecb2d6`](https://github.com/knpkv/npm/commit/7ecb2d6f3a19d582d286768973a57dbab5786738) Thanks [@konopkov](https://github.com/konopkov)! - `Icon` adds the `info` glyph (a circle with a lowercase i, in the catalog's stroke) for a quiet explanatory line, such as why something on a page is held back; a problem or warning still uses `alert`.
+
 ## 0.24.0
 
 ### Minor Changes
