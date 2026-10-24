@@ -11,16 +11,5 @@
     "types": ["node"]
   },
   "include": ["src/index.ts", "src/api", "src/domain", "src/server", "src/server/persistence/schema.json"],
-  "exclude": ["dist", "node_modules", "src/client"],
-  "references": [
-    { "path": "../ai-claude/tsconfig.build.json" },
-    { "path": "../ai-codex/tsconfig.build.json" },
-    { "path": "../ai-runtime/tsconfig.json" },
-    { "path": "../atlassian-common/tsconfig.build.json" },
-    { "path": "../clockify-api-client/tsconfig.json" },
-    { "path": "../control-center-sql/tsconfig.build.json" },
-    { "path": "../confluence-api-client/tsconfig.build.json" },
-    { "path": "../confluence-to-markdown/tsconfig.build.json" },
-    { "path": "../jira-api-client/tsconfig.json" }
-  ]
+  "exclude": ["dist", "node_modules", "src/client"]
 }
