@@ -374,6 +374,16 @@ test.describe("touch", () => {
     await jump.tap()
     await expect(olderOutput(page)).toHaveCount(0)
     await expect.poll(async () => (await screen(page)).rows.some((row) => row.startsWith("300 "))).toBe(true)
+    // Without a reading the jump pages until a page changes nothing, and how many pages that takes depends
+    // on how the frames arrive (two or three here), so a page can still follow the screen reaching the bottom.
+    // Wait until the commands hold still before counting.
+    await expect
+      .poll(async () => {
+        const before = (await commands(page)).length
+        await page.waitForTimeout(300)
+        return (await commands(page)).length === before
+      }, { timeout: 5_000 })
+      .toBe(true)
     // Once a page down changes nothing, the jump stops sending.
     const settled = (await commands(page)).length
     await page.waitForTimeout(600)
