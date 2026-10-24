@@ -504,3 +504,76 @@ describe("sandbox reset", () => {
       expect(h.steps.filter((step) => step.startsWith("nuke"))).toEqual(["nuke dry"])
     }))
 })
+
+/** An aws-nuke 3.68.3 listing failure for one resource type in one region, as a live dry run logged it. */
+const listingFailedIn = (region: string, resourceType: string, cause: string) =>
+  `time="2026-10-24T10:17:56+02:00" level=error msg="listing failed:\\n    ${cause}" error="${cause}" owner=${region} resource_type=${resourceType}`
+
+describe("aws-nuke scan coverage", () => {
+  // Types no pool account can hold in any region: the service is retired or closed to new accounts, needs a
+  // subscription or an admin account the pool never has, or the organization denies it.
+  const unavailableEverywhere = [
+    "AWS::Timestream::Database",
+    "AWS::Timestream::ScheduledQuery",
+    "AWS::Timestream::Table",
+    "Cloud9Environment",
+    "CloudDirectoryDirectory",
+    "CloudDirectorySchema",
+    "CloudSearchDomain",
+    "CodeStarProject",
+    "ElasticTranscoderPipeline",
+    "ElasticTranscoderPreset",
+    "FMSNotificationChannel",
+    "FMSPolicy",
+    "GlueDevEndpoint",
+    "InspectorAssessmentRun",
+    "InspectorAssessmentTarget",
+    "InspectorAssessmentTemplate",
+    "LexBot",
+    "LexIntent",
+    "LexModelBuildingServiceBotAlias",
+    "LexSlotType",
+    "MachineLearningBranchPrediction",
+    "MachineLearningDataSource",
+    "MachineLearningEvaluation",
+    "MachineLearningMLModel",
+    "NetworkManagerConnectPeer",
+    "NetworkManagerCoreNetwork",
+    "NetworkManagerGlobalNetwork",
+    "NetworkManagerNetworkAttachment",
+    "OpsWorksApp",
+    "OpsWorksCMBackup",
+    "OpsWorksCMServer",
+    "OpsWorksCMServerState",
+    "OpsWorksInstance",
+    "OpsWorksLayer",
+    "OpsWorksUserProfile",
+    "ShieldProtection",
+    "ShieldProtectionGroup"
+  ]
+
+  it("excludes every type no pool account can hold, and nothing a region-only gap could hide", () => {
+    const excludes: ReadonlyArray<string> = JSON.parse(renderNukeConfig(contract, "111111111111"))["resource-types"]
+      .excludes
+    for (const type of unavailableEverywhere) expect(excludes).toContain(type)
+    // These exist in us-east-1; only eu-central-1 lacks them, so a global exclude would skip real resources.
+    for (const type of ["BedrockModelCustomizationJob", "QBusinessApplication", "QBusinessIndex"]) {
+      expect(excludes).not.toContain(type)
+    }
+  })
+
+  it("a type whose service has no endpoint in that region is not an incomplete scan there", () => {
+    const noHost = "dial tcp: lookup qbusiness.eu-central-1.api.aws: no such host"
+    expect(discoveryFailures(listingFailedIn("eu-central-1", "QBusinessApplication", noHost))).toEqual([])
+    expect(
+      discoveryFailures(listingFailedIn("eu-central-1", "BedrockModelCustomizationJob", "UnknownOperationException"))
+    ).toEqual([])
+  })
+
+  it("the same type failing where its service exists still stops the reset", () => {
+    const denied = listingFailedIn("us-east-1", "QBusinessApplication", "AccessDeniedException")
+    expect(discoveryFailures(denied)).toEqual([denied])
+    const otherType = listingFailedIn("eu-central-1", "S3Bucket", "dial tcp: lookup s3: no such host")
+    expect(discoveryFailures(otherType)).toEqual([otherType])
+  })
+})

@@ -71,10 +71,41 @@ const queueFull = "not all resources will be enqueued"
 /** The line without quoted values or bracketed properties, which resources and messages control. */
 const logFields = (line: string): string => line.replace(/\[[^\]]*\]/g, " ").replace(/"(?:[^"\\]|\\.)*"/g, "\"\"")
 
-/** Every line of a run that reports failed discovery, colour codes removed. */
+/**
+ * Resource types whose service has no endpoint in a region, by region: listing them there fails with no such host
+ * or an unknown operation, and nothing can exist. The same type is still scanned, and its failures still count, in
+ * every other region.
+ */
+const regionGaps = new Map<string, ReadonlySet<string>>([
+  [
+    "eu-central-1",
+    new Set([
+      "BedrockModelCustomizationJob",
+      "QBusinessApplication",
+      "QBusinessDataSource",
+      "QBusinessIndex",
+      "QBusinessPlugin",
+      "QBusinessRetriever",
+      "QBusinessWebExperience"
+    ])
+  ]
+])
+
+const ownerField = /(?:^|\s)owner=(\S+)/
+const resourceTypeField = /(?:^|\s)resource_type=(\S+)/
+
+/** Whether a log line is a listing of a type in a region where its service does not exist. */
+const inRegionGap = (fields: string): boolean => {
+  const region = ownerField.exec(fields)?.[1]
+  const resourceType = resourceTypeField.exec(fields)?.[1]
+  return region !== undefined && resourceType !== undefined && (regionGaps.get(region)?.has(resourceType) ?? false)
+}
+
+/** Every line of a run that reports failed discovery, colour codes removed. Region gaps are not failures. */
 export const discoveryFailures = (output: string): ReadonlyArray<string> =>
   output.split("\n").map(plainLine).filter((line) => {
     const fields = line.startsWith("{") ? line : logFields(line)
+    if (!line.startsWith("{") && inRegionGap(fields)) return false
     return logLevel.test(fields) || (anyLevel.test(fields) && line.includes(queueFull))
   })
 
