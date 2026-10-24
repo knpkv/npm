@@ -1,19 +1,21 @@
 import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
 import { AppId, type AppManifest, type AppState, type InstalledApp } from "@knpkv/hub-app"
-import { Console, Duration, Effect, type Exit, FileSystem, Option } from "effect"
+import { Console, Duration, Effect, type Exit, FileSystem, Option, Schema } from "effect"
 import { Command } from "effect/cli"
 import { tmpdir } from "node:os"
 import {
   AppsCli,
   type AppsCliEnvironment,
   appsCommand,
+  explainFailures,
+  failureLine,
   type HubClient,
   HubNotRunning,
   splitSpec
 } from "../src/apps/cli.js"
-import type { AppInstaller, InstallerOptions } from "../src/apps/installer.js"
-import { emptyAppsConfig, makeAppsStore } from "../src/apps/store.js"
+import { AppIdConflict, type AppInstaller, AppNotInstalled, type InstallerOptions } from "../src/apps/installer.js"
+import { AppsLockBusy, emptyAppsConfig, makeAppsStore } from "../src/apps/store.js"
 
 const usage: InstalledApp = {
   id: AppId.make("usage"),
@@ -100,6 +102,9 @@ const tempRoot = Effect.flatMap(
 
 const failure = <A, E>(exit: Exit.Exit<A, E>) => exit._tag === "Failure" ? JSON.stringify(exit.cause) : "success"
 
+/** A failure the CLI has no sentence for: a bug, which keeps the runtime's report. */
+class Unexpected extends Schema.TaggedError<Unexpected>()("Unexpected", {}) {}
+
 describe("apps CLI", () => {
   it("splits a package from its spec, keeping a scope's leading @", () => {
     expect(["@knpkv/herdr-usage@^1", "@knpkv/herdr-usage", "left-pad@1.3.0", "left-pad"].map(splitSpec)).toEqual([
@@ -107,6 +112,23 @@ describe("apps CLI", () => {
       { name: "@knpkv/herdr-usage", spec: null },
       { name: "left-pad", spec: "1.3.0" },
       { name: "left-pad", spec: null }
+    ])
+  })
+
+  // What a user can act on is one sentence, never a stack trace.
+  it("says each failure a user can act on in one sentence", () => {
+    expect([
+      failureLine(new AppNotInstalled({ id: "usage" })),
+      failureLine(new AppIdConflict({ id: "fleet", with: "core" })),
+      failureLine(new AppsLockBusy({ pid: 42 })),
+      failureLine(new AppsLockBusy({ pid: null })),
+      failureLine(new HubNotRunning())
+    ]).toEqual([
+      "No app called usage is installed.",
+      "fleet is the name of one of the hub's own modules.",
+      "Another apps command is running (pid 42); try again when it is done.",
+      "Another apps command is running; try again when it is done.",
+      "The hub is not running. Start it and try again."
     ])
   })
 
@@ -195,6 +217,28 @@ describe("apps CLI", () => {
         expect(healthy.exit._tag).toBe("Success")
         expect(healthy.output).toContain("Updated usage from 1.0.0 to 1.1.0.")
       }).pipe(Effect.scoped))
+
+    it.effect("prints an explained failure on stderr and exits without the error, leaving others as they are", () =>
+      Effect.gen(function*() {
+        const lines: Array<string> = []
+        const original = yield* Console.Console
+        const capture = {
+          ...original,
+          error: (...parts: ReadonlyArray<unknown>) => {
+            lines.push(parts.join(" "))
+          }
+        }
+        const explained = yield* explainFailures(Effect.fail(new AppNotInstalled({ id: "usage" }))).pipe(
+          Effect.provideService(Console.Console, capture),
+          Effect.flip
+        )
+        const bug = yield* explainFailures(Effect.fail(new Unexpected())).pipe(
+          Effect.provideService(Console.Console, capture),
+          Effect.flip
+        )
+        expect(lines).toEqual(["No app called usage is installed."])
+        expect([explained._tag, bug._tag]).toEqual(["AppsCommandFailed", "Unexpected"])
+      }))
 
     it.effect("disables and enables an installed app, refusing an unknown one", () =>
       Effect.gen(function*() {

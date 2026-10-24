@@ -11,7 +11,7 @@ import { hostname } from "node:os"
 import process from "node:process"
 import manifest from "../../package.json" with { type: "json" }
 import { builtInModuleIds } from "../module-contract.js"
-import { AppsCli, appsCommand, makeHubClient, waitStopped } from "./cli.js"
+import { AppsCli, appsCommand, explainFailures, makeHubClient, waitStopped } from "./cli.js"
 import { makeInstaller } from "./installer.js"
 import { findNpmCli, makeNpm } from "./npm.js"
 import { makeAppsStore } from "./store.js"
@@ -99,6 +99,7 @@ const platform = Layer.mergeAll(Layer.provideMerge(HubPaths.layer, NodeServices.
 Command.make("herdr-hub").pipe(
   Command.withSubcommands([appsCommand]),
   Command.run({ version: manifest.version }),
+  explainFailures,
   Effect.provide(Layer.provideMerge(environment, platform)),
   NodeRuntime.runMain
 )
