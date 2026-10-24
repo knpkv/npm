@@ -311,7 +311,8 @@ const overview = Effect.suspend(() => {
   return Effect.succeed(overviews[state])
 })
 
-// signin-flow starts signed out; once started, the hub reads as waiting once and then as signed in.
+// signin-flow starts signed out; once started, the hub reads as waiting once and then as signed in. Signing out
+// returns it to signed out (ended).
 const pendingSession: SandboxAwsSession = {
   _tag: "SignInPending",
   verificationUri: "https://portal.example.test/start/#/device?user_code=ABCD-EFGH",
@@ -350,6 +351,10 @@ const writes: SandboxesModuleWrites = {
     awsSession = pendingSession
     sessionReadsSinceStart = 0
     return pendingSession
+  }),
+  signOutAws: Effect.sync((): SandboxAwsSession => {
+    awsSession = { _tag: "SignInRequired", reason: "ended" }
+    return awsSession
   })
 }
 

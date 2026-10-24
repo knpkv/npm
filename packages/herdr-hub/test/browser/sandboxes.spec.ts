@@ -269,6 +269,15 @@ test("the owner signs the hub in to AWS: code and sign-in page while it waits, t
   await expect(page.locator("[data-aws-signed-in]")).toHaveText("Signed in to AWS until 18:05")
   await expect(page.getByRole("status", { name: "AWS sign-in" })).toHaveCount(0)
   await expect(page.getByRole("button", { name: "Release", exact: true })).toBeEnabled()
+  // Page 21, states 8 and 9: sign out from beside the signed-in line, after one confirm.
+  await page.getByRole("button", { name: "Sign out of AWS" }).click()
+  const sheet = page.getByRole("dialog", { name: "Sign the hub out of AWS?" })
+  await expect(sheet).toBeVisible()
+  await sheet.getByRole("button", { name: "Sign out", exact: true }).click()
+  await expect(sheet).toHaveCount(0)
+  await expect(card.getByRole("heading", { name: "The AWS sign-in ended." })).toBeVisible()
+  await expect(page.locator("[data-aws-signed-in]")).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Release", exact: true })).toBeDisabled()
 })
 
 test("observe mode says so once and disables every job up front", async ({ page }) => {
